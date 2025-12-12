@@ -1,0 +1,54 @@
+name: Fuzzing
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, candidate ]
+  pull_request:
+    branches: [ main ]
+  
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+
+jobs:
+  fuzzing:
+    name: Run Fuzzing
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm
+
+      - name: Compile Fuzzer
+        run: |
+          mkdir -p build_fuzz
+          
+          clang -g -O1 -fsanitize=fuzzer,address,undefined \
+            -I include \
+            src/lib/zxc_common.c \
+            src/lib/zxc_compress.c \
+            src/lib/zxc_decompress.c \
+            tests/fuzz.c \
+            -o build_fuzz/zxc_fuzzer \
+            -lm -pthread
+
+      - name: Run Fuzzer
+        working-directory: build_fuzz
+        run: |
+          ./zxc_fuzzer -max_total_time=180 -print_final_stats=1
+
+      - name: Upload Crash Artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-reports
+          path: build_fuzz/crash-*
+          retention-days: 5

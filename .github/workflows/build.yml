@@ -1,0 +1,110 @@
+name: Build & Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, candidate ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+
+jobs:
+  build-and-test:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: zxc
+            asset_name: zxc-linux-x86_64
+          - os: macos-latest
+            artifact_name: zxc
+            asset_name: zxc-macos-arm64
+          - os: windows-latest
+            artifact_name: zxc.exe
+            asset_name: zxc-windows-x64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build 
+        run: cmake --build build --config Release
+
+      - name: Run Unit Tests
+        working-directory: build
+        run: ctest -C Release --output-on-failure
+
+      - name: Package Release (Archive)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          mkdir -p release_staging
+          BUILD_DIR="build"
+          
+          # Find and copy binary (handle both Ninja and Visual Studio generators)
+          if [ -f "$BUILD_DIR/Release/${{ matrix.artifact_name }}" ]; then
+            cp "$BUILD_DIR/Release/${{ matrix.artifact_name }}" release_staging/
+          elif [ -f "$BUILD_DIR/${{ matrix.artifact_name }}" ]; then
+            cp "$BUILD_DIR/${{ matrix.artifact_name }}" release_staging/
+          else
+            echo "Binary not found!"
+            exit 1
+          fi
+          
+          # Strip binary on Unix-like systems only
+          if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
+            strip release_staging/${{ matrix.artifact_name }}
+          fi
+          
+          # Copy documentation
+          cp LICENSE release_staging/LICENSE.txt
+          cp README.md release_staging/README.md
+          
+          # Create archive (platform-specific format)
+          cd release_staging
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            # Windows: use 7z (available by default on windows-latest)
+            7z a ../${{ matrix.asset_name }}.zip *
+          else
+            # Unix-like: use tar
+            tar -czvf ../${{ matrix.asset_name }}.tar.gz *
+          fi
+
+      - name: Upload Artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: |
+            ${{ matrix.asset_name }}.tar.gz
+            ${{ matrix.asset_name }}.zip
+
+  release:
+    name: Create GitHub Release
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            **/*.tar.gz
+            **/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

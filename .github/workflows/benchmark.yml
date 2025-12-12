@@ -1,0 +1,91 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, candidate ]
+    paths:
+      - 'src/**'
+      - '.github/workflows/benchmark.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+
+jobs:
+  lzbench-benchmark: 
+    name: Run Benchmark
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15-xlarge] # macos-15-xlarge macos-latest
+
+    env:
+        LZBENCH_BRANCH: add-zxc-codec
+        LZBENCH_DIR: lzbench
+        SILESIA_DIR: silesia
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Clone LZbench
+        run: |
+          git clone -b ${LZBENCH_BRANCH} https://github.com/hellobertrand/lzbench "${LZBENCH_DIR}"
+
+      - name: Copy Lib ZXC
+        run: |
+          mkdir -p ${LZBENCH_DIR}/lz/zxc/include/
+          mkdir -p ${LZBENCH_DIR}/lz/zxc/src/lib/
+
+          cp include/* ${LZBENCH_DIR}/lz/zxc/include/
+          cp src/lib/* ${LZBENCH_DIR}/lz/zxc/src/lib/
+  
+      - name: Build Lzbench
+        working-directory: ${{ env.LZBENCH_DIR }}
+        run: |
+          make -j"$(nproc)" MOREFLAGS="-march=native"
+
+      - name: Cache Silesia Corpus
+        id: cache-silesia
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SILESIA_DIR }}
+          key: silesia-corpus-${{ runner.os }}-v1
+
+      - name: Download Silesia Corpus (${{ runner.os }})
+        if: steps.cache-silesia.outputs.cache-hit != 'true'
+        run: |
+          wget --no-check-certificate -q https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip -O silesia.zip
+          mkdir -p "${SILESIA_DIR}"
+          unzip -q silesia.zip -d "${SILESIA_DIR}"
+          ls -lh "${SILESIA_DIR}"
+
+      - name: Run Lzbench on Silesia Corpus
+        working-directory: ${{ env.LZBENCH_DIR }}
+        run: |
+          ./lzbench \
+            -e"memcpy/zxc,2,3,4,5/lz4/lz4fast,17/lz4hc,12/zstd,1/snappy" \
+            -j -i3,5 -o1 "../${SILESIA_DIR}"/* \
+            > ../benchmark.md
+
+          echo "Benchmark finished. First lines:"
+          head -n 40 ../benchmark.md
+
+      - name: Add Benchmark to Job Summary
+        if: always()
+        run: |
+          echo "### Résultats Benchmark (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
+          cat benchmark.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Benchmark Result as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ matrix.os }}-${{ github.sha }}
+          path: benchmark.md
+          if-no-files-found: error
+          retention-days: 10

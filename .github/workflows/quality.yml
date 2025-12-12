@@ -1,0 +1,73 @@
+name: Code Quality
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, candidate ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+
+jobs:
+  quality-checks:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Analysis Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck clang-tools valgrind cmake
+
+      - name: Cppcheck Static Analysis
+        run: |
+          cppcheck --enable=all \
+            --library=gnu \
+            --suppress=missingIncludeSystem --suppress=*:include/xxhash.h \
+            --inline-suppr \
+            --error-exitcode=1 \
+            --language=c \
+            --std=c11 \
+            --force \
+            -I include \
+            src/
+
+      - name: Clang Static Analyzer (Scan-Build)
+        run: |
+          mkdir -p build_clang
+
+          scan-build cmake -S . -B build_clang -DCMAKE_BUILD_TYPE=Debug
+          scan-build --status-bugs cmake --build build_clang
+
+      - name: Build for Valgrind (Debug)
+        run: |
+          cmake -S . -B build_valgrind -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build_valgrind
+
+      - name: Valgrind Memory Check
+        working-directory: build_valgrind
+        run: |
+          valgrind --leak-check=full \
+                   --show-leak-kinds=all \
+                   --track-origins=yes \
+                   --error-exitcode=1 \
+                   ./zxc_test
+
+      - name: Unicode Linting
+        shell: bash
+        run: |
+          echo "Scanning for non-ASCII characters in source files..."
+          if grep -rP --include="*.c" --include="*.h" "[^\x00-\x7F]" .; then
+            echo "::error::Non-ASCII characters found in source files."
+            exit 1
+          else
+            echo "No non-ASCII characters found."
+          fi
