@@ -1,0 +1,15 @@
+---
+Language: Cpp
+BasedOnStyle: Google
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+ColumnLimit: 100
+
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+
+BreakBeforeBraces: Attach
+---
