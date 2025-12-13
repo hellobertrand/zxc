@@ -10,7 +10,7 @@ if(MSVC)
     add_compile_options(/O2 /W3 /arch:AVX2)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
-    add_compile_options(-O3 -march=native -flto -fomit-frame-pointer -fstrict-aliasing -ffast-math -pthread -Wall -Wextra -D_GNU_SOURCE)
+    add_compile_options(-O3 -march=native -flto -fomit-frame-pointer -fstrict-aliasing -ffast-math -flax-vector-conversions -pthread -Wall -Wextra -D_GNU_SOURCE)
 endif()
 
 # Headers paths
