@@ -138,10 +138,12 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr) {
 static ZXC_ALWAYS_INLINE uint32x4_t zxc_neon_prefix_sum_u32(uint32x4_t v) {
     uint32x4_t zero = vdupq_n_u32(0);
 
-    uint32x4_t s1 = vextq_u8(zero, v, 12);
+    uint32x4_t s1 =
+        vreinterpretq_u32_u8(vextq_u8(vreinterpretq_u8_u32(zero), vreinterpretq_u8_u32(v), 12));
     v = vaddq_u32(v, s1);
 
-    uint32x4_t s2 = vextq_u8(zero, v, 8);
+    uint32x4_t s2 =
+        vreinterpretq_u32_u8(vextq_u8(vreinterpretq_u8_u32(zero), vreinterpretq_u8_u32(v), 8));
     v = vaddq_u32(v, s2);
 
     return v;
