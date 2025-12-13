@@ -24,9 +24,9 @@ jobs:
           - os: ubuntu-latest
             artifact_name: zxc
             asset_name: zxc-linux-x86_64
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-22.04-arm
             artifact_name: zxc
-            asset_name: zxc-linux-arm64
+            asset_name: zxc-linux-aarch64
           - os: macos-latest
             artifact_name: zxc
             asset_name: zxc-macos-arm64
