@@ -123,7 +123,7 @@ extern "C" {
 #define ZXC_TOKEN_ML_MASK 0x0F
 
 // LZ77 Constants
-#define ZXC_LZ_HASH_BITS 13                       // 64K entries (fits in L1 cache) 13 on x86
+#define ZXC_LZ_HASH_BITS 13                       // 64K entries (fits in L1 cache)
 #define ZXC_LZ_HASH_SIZE (1 << ZXC_LZ_HASH_BITS)  // Hash table size
 #define ZXC_LZ_WINDOW_SIZE (1 << 16)              // 64KB sliding window
 #define ZXC_LZ_MIN_MATCH 5                        // Minimum match length

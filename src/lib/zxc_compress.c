@@ -599,7 +599,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
             k += run;
         }
 
-        // Threshold: 10% savings
+        // Threshold: 3% savings
         if (rle_size < lit_c * 0.97) use_rle = 1;
     }
 

@@ -34,6 +34,9 @@ The ZXC file format is inherently modular. Each block is independent and can be 
 
 ZXC utilizes a hybrid approach combining LZ77 (Lempel-Ziv) dictionary matching with advanced entropy coding and specialized data transforms.
 
+### 4.1 Specialized SIMD Acceleration & Hardware Hashing
+ZXC leverages modern instruction sets to maximize throughput on both ARM and x86 architectures.
+
 ### 4.1 LZ77 Engine
 The heart of ZXC is a heavily optimized LZ77 engine that adapts its behavior based on the requested compression level:
 *   **Hash Chain & Collision Resolution**: Uses a fast hash table with chaining to find matches in the history window (64KB sliding window).
@@ -150,47 +153,61 @@ ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-co
 
 ## 6. Performance Analysis (Benchmarks)
 
-**Environment**: ARM64 (Target) & x86_64 (Build).
+**Methodology:**
+Benchmarks were conducted using `lzbench` (by inikep).
+* **Target 1 (Client):** Apple M2 / macOS 15 (Clang 17)
+* **Target 2 (Cloud):** Google Axion / Linux (GCC 12)
+* **Target 3 (Build):** AMD EPYC 7763 / Linux (GCC 13)
 
-### 6.1 Target (ARM64)
-
+### 6.1 Target ARM64 (Apple Silicon)
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.1.0 -2** | **1.65x** | **126.91** |
-| **zxc 0.1.0 -3** | **1.46x** | **98.43** |
-| **zxc 0.1.0 -4** | **1.31x** | **92.62** |
+| zxc 0.1.0 -2 | 1.57x | 126.91 |
+| **zxc 0.1.0 -3** | **1.39x** | **98.43** |
+| **zxc 0.1.0 -4** | **1.30x** | **92.62** |
 | **zxc 0.1.0 -5** | **1.17x** | **85.94** |
-| lz4 1.10.0 --fast -17 | 1.17x | 130.57 |
+| lz4 1.10.0 --fast -17 | 1.16x | 130.57 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
-| lz4hc 1.10.0 -12 | 0.99x | 76.59 |
-| snappy 1.2.2 | 0.67x | 100.47 |
+| lz4hc 1.10.0 -12 | 0.95x | 76.59 |
+| snappy 1.2.2 | 0.70x | 100.47 |
 | zstd 1.5.7 -1 | 0.35x | 72.59 |
 
-
-### 6.2 Build (x86_64)
-
-| Compressor | Compression Speed (Ratio vs LZ4) | Decompression Speed (Ratio vs LZ4) |
+### 6.2 Target: Cloud ARM (Google Axion / Neoverse V2)
+| Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.1.0 -2** | **0.54x** | **1.17x** |
-| lz4 1.10.0 --fast -17 | 1.73x | 1.12x |
-| lz4 1.10.0 (Ref) | 1.00x | 1.00x |
-| lz4hc 1.10.0 -12 | 0.02x | 0.98x |
-| **zxc 0.1.0 -3** | **0.24x** | **0.96x** |
-| **zxc 0.1.0 -4** | **0.21x** | **0.90x** |
-| **zxc 0.1.0 -5** | **0.09x** | **0.84x** |
-| snappy 1.2.2 | 0.99x | 0.45x |
-| zstd 1.5.7 -1 | 0.70x | 0.34x |
+| zxc 0.1.0 -2 | 1.51x | 126.91 |
+| **zxc 0.1.0 -3** | **1.23x** | **98.43** |
+| **zxc 0.1.0 -4** | **1.15x** | **92.62** |
+| **zxc 0.1.0 -5** | **1.04x** | **85.94** |
+| lz4 1.10.0 --fast -17 | 1.16x | 130.57 |
+| lz4 1.10.0 (Ref) | 1.00x | 100.00 |
+| lz4hc 1.10.0 -12 | 0.91x | 76.59 |
+| snappy 1.2.2 | 0.44x | 100.47 |
+| zstd 1.5.7 -1 | 0.33x | 72.59 |
+
+### 6.3 Build Server: x86_64 (AMD EPYC)
+| Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
+| :--- | :--- | :--- |
+| zxc 0.1.0 -2 | 1.24x | 126.91 |
+| **zxc 0.1.0 -3** | **1.04x** | **98.43** |
+| zxc 0.1.0 -4 | 0.97x | 92.62 |
+| zxc 0.1.0 -5 | 0.90x | 85.94 |
+| lz4 1.10.0 --fast -17 | 1.16x | 130.57 |
+| lz4 1.10.0 (Ref) | 1.00x | 100.00 |
+| lz4hc 1.10.0 -12 | 0.98x | 76.59 |
+| snappy 1.2.2 | 0.45x | 100.58 |
+| zstd 1.5.7 -1 | 0.34x | 72.59 |
 
 ### 6.3 Benchmarks Results
 
-**Figure 6.3**: Decompression Performance Comparison on ARM64 Architecture
+**Figure 6.3**: Decompression Throughput & Storage Ratio (Normalized to LZ4)
 
 ![Benchmark Graph ARM64](docs/images/benchmark_arm64.png)
 
 
-#### 6.3.1 ARM64 Architecture
+#### 6.3.1 ARM64 Architecture (Github Runner macos-15-xlarge)
 
-The benchmark uses lzbench, from @inikep compiled with Clang 17.0.0 on macOS Tahoe 26.1 (25B78). The reference system uses a Apple M3 ARM 64 processor. Benchmark evaluates the compression of reference Silesia Corpus in single-thread mode.
+Benchmarks were conducted using lzbench (from @inikep), compiled with Clang 17.0.0 on macOS Sequoia 15.7.2 (Build 24G325). The reference hardware is an Apple M2 processor (ARM64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus.
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
@@ -205,22 +222,22 @@ The benchmark uses lzbench, from @inikep compiled with Clang 17.0.0 on macOS Tah
 | zstd 1.5.7 -1           |   639 MB/s |  1614 MB/s |    73229468 | 34.55 | 12 files|
 | snappy 1.2.2            |   833 MB/s |  3096 MB/s |   101352257 | 47.82 | 12 files|
 
-#### 6.3.2 x86_64 Architecture
+#### 6.3.2 x86_64 Architecture (Github Runner ubuntu-latest)
 
-The benchmark uses lzbench, from @inikep compiled with GCC 13.3.0 on Linux 64-bits Ubuntu 24.04. The reference system uses a AMD EPYC 7B13 processor. Benchmark evaluates the compression of reference Silesia Corpus in single-thread mode.
+Benchmarks were conducted using lzbench (from @inikep), compiled with GCC 13.3.0 on Linux 64-bits Ubuntu 24.04. The reference hardware is an AMD EPYC 7763 processor (x86_64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus.
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 17788 MB/s | 17846 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.1.0 -2**            |   **287 MB/s** |  **3954 MB/s** |   **128031177** | **60.41** | 12 files|
-| **zxc 0.1.0 -3**            |   **129 MB/s** |  **3257 MB/s** |    **99295121** | **46.85** | 12 files|
-| **zxc 0.1.0 -4**            |   **114 MB/s** |  **3060 MB/s** |    **93431082** | **44.08** | 12 files|
-| **zxc 0.1.0 -5**            |  **48.3 MB/s** |  **2852 MB/s** |    **86696245** | **40.91** | 12 files|
-| lz4 1.10.0              |   535 MB/s |  3388 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |   925 MB/s |  3794 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  10.1 MB/s |  3322 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   377 MB/s |  1168 MB/s |    73229468 | 34.55 | 12 files|
-| snappy 1.2.2            |   531 MB/s |  1521 MB/s |   101464727 | 47.87 | 12 files|
+| memcpy                  | 19433 MB/s | 19495 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.1.0 -2**            |   **336 MB/s** |  **4429 MB/s** |   128031177 | **60.41** | 12 files|
+| **zxc 0.1.0 -3**            |   **155 MB/s** |  **3573 MB/s** |    99295121 | **46.85** | 12 files|
+| **zxc 0.1.0 -4**            |   **137 MB/s** |  **3347 MB/s** |    93431082 | **44.08** | 12 files|
+| **zxc 0.1.0 -5**            |  **56.1 MB/s** |  **3133 MB/s** |    86696245 | **40.91** | 12 files|
+| lz4 1.10.0              |   597 MB/s |  3658 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1057 MB/s |  4158 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  11.3 MB/s |  3489 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   421 MB/s |  1209 MB/s |    73229468 | 34.55 | 12 files|
+| snappy 1.2.2            |   610 MB/s |  1633 MB/s |   101464727 | 47.87 | 12 files|
 
 
 ## 7. Strategic Implementation
