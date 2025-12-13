@@ -45,10 +45,11 @@ extern "C" {
 #if defined(__SSE4_1__) || defined(__AVX__)
 #define ZXC_USE_SSE41
 #endif
-#elif defined(__aarch64__) || defined(_M_ARM64)
-#include <arm_acle.h>
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
 #define ZXC_USE_NEON
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#include <arm_acle.h>
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
