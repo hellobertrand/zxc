@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 
 
-**ZXC** is a asymmetric high-performance lossless compression library optimized for **Content Delivery** and **Embedded Systems** (Game Assets, Firmware, App Bundles). 
+**ZXC** is an asymmetric high-performance lossless compression library optimized for **Content Delivery** and **Embedded Systems** (Game Assets, Firmware, App Bundles). 
 It is designed to be *"Write Once, Read Many."*. Unlike symmetric codecs (LZ4), ZXC trades compression speed (build-time) for **maximum decompression throughput** (run-time).
 
 > **Key Result:** ZXC outperforms LZ4 decompression by **+40% on Apple Silicon** and **+22% on Cloud ARM (Google Axion)**.  
@@ -43,7 +43,7 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M1/M2
 | Codec | Decoding Speed | Ratio vs LZ4 | Verdict |
 | :--- | :--- | :--- | :--- |
 | **ZXC -3 (Standard)** | **6,365 MB/s** | **Smaller (-1.6%)** | **1.39x Faster than LZ4** |
-| **ZXC -5 (Compact)** | **5,344 MB/s** | **Dense (-14.1%)** | **3.3x Faster than Zstd-1** |
+| **ZXC -5 (Compact)** | **5,363 MB/s** | **Dense (-14.1%)** | **3.3x Faster than Zstd-1** |
 | LZ4 1.10 | 4,571 MB/s | Reference | |
 
 ### 2. Cloud Server: Google Axion (ARM Neoverse V2)
@@ -74,21 +74,21 @@ Benchmarks were conducted using lzbench (from @inikep), compiled with Clang 17.0
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 50955 MB/s | 52187 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.1.0 -2**            |   **429 MB/s** |  **7568 MB/s** |   128031177 | **60.41** | 12 files|
-| **zxc 0.1.0 -3**            |   **197 MB/s** |  **6692 MB/s** |    99295121 | **46.85** | 12 files|
-| **zxc 0.1.0 -4**            |   **165 MB/s** |  **5995 MB/s** |    93431082 | **44.08** | 12 files|
-| **zxc 0.1.0 -5**            |  **70.2 MB/s** |  **5363 MB/s** |    86696245 | **40.91** | 12 files|
-| lz4 1.10.0              |   771 MB/s |  4591 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1268 MB/s |  5354 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  13.9 MB/s |  4533 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   639 MB/s |  1614 MB/s |    73229468 | 34.55 | 12 files|
-| snappy 1.2.2            |   833 MB/s |  3096 MB/s |   101352257 | 47.82 | 12 files|
+| memcpy                  | 51970 MB/s | 49784 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.1.0 -2**            |   **422 MB/s** |  **7174 MB/s** |   128031177 | **60.41** | 12 files|
+| **zxc 0.1.0 -3**            |   **182 MB/s** |  **6365 MB/s** |    99295121 | **46.85** | 12 files|
+| **zxc 0.1.0 -4**            |   **168 MB/s** |  **5954 MB/s** |    93431082 | **44.08** | 12 files|
+| **zxc 0.1.0 -5**            |  **68.2 MB/s** |  **5344 MB/s** |    86696245 | **40.91** | 12 files|
+| lz4 1.10.0              |   770 MB/s |  4571 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1270 MB/s |  5298 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  13.3 MB/s |  4335 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   607 MB/s |  1609 MB/s |    73229468 | 34.55 | 12 files|
+| snappy 1.2.2            |   818 MB/s |  3217 MB/s |   101352257 | 47.82 | 12 files|
 
 
 ### Benchmark ARM64 (Google Axion)
 
-Benchmarks were conducted using lzbench (from @inikep), compiled with GCC 12.2.0 on Linux 64-bits Debian GNU/Linux 12 (bookworm) . The reference hardware is an Google Neoverse-V2 processor (ARM64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus.
+Benchmarks were conducted using lzbench (from @inikep), compiled with GCC 12.2.0 on Linux 64-bits Debian GNU/Linux 12 (bookworm). The reference hardware is a Google Neoverse-V2 processor (ARM64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus.
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
@@ -130,6 +130,7 @@ Benchmarks were conducted using lzbench (from @inikep), compiled with GCC 13.3.0
 1.  Go to the [Releases page](https://github.com/hellobertrand/zxc/releases).
 2.  Download the binary matching your architecture:
     *   `zxc-macos-arm64` for Apple Silicon (M1/M2/M3).
+    *   `zxc-linux-aarch64` for ARM-based Linux servers.
     *   `zxc-linux-x86_64` for standard Linux servers.
     *   `zxc-windows-x86_64.exe` for Windows servers.
 3.  Make the binary executable:
@@ -238,11 +239,8 @@ void decompress_file_parallel(const char* input_path, const char* output_path) {
 
 ## Safety & Quality
 * **Continuous Fuzzing**: Integrated with Google OSS-Fuzz (PR ready) and local libFuzzer suites.
-
 * **Static Analysis**: Checked with CPPChecker & Clang Static Analyzer.
-
 * **Dynamic Analysis**: Validated with Valgrind and ASan/UBSan in CI pipelines.
-
 * **Safe API: Explicit** buffer capacity is required for all operations.
 
 
