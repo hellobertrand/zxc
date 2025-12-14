@@ -165,7 +165,7 @@ make
 
 ## Usage
 
-### 1. Command Line Interface (CLI)
+### 1. CLI
 
 The CLI is perfect for benchmarking or manually compressing assets.
 
@@ -182,6 +182,7 @@ zxc -d compressed_file output_file
 # Benchmark Mode (Testing speed on your machine)
 zxc -b input_file
 ```
+### 2. API
 
 ZXC provides a fully **thread-safe (stateless)** and **binding-friendly API**, utilizing caller-allocated buffers with explicit bounds. Integration is straightforward: simply include `zxc.h` and link against `lzxc_lib`.
 
