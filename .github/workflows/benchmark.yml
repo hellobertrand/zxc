@@ -7,6 +7,8 @@ on:
     paths:
       - 'src/**'
       - '.github/workflows/benchmark.yml'
+  pull_request:
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -22,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15-xlarge]
+        os: [ubuntu-latest, macos-15-xlarge]
 
     env:
         LZBENCH_BRANCH: feat/add-zxc-codec
