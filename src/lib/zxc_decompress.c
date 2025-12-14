@@ -12,20 +12,20 @@
 #define ZXC_DEC_BATCH 32  // Number of sequences to decode in a batch
 
 /**
- * @brief Consumes a specified number of bits from the bit reader buffer without performing safety
- * checks.
+ * @brief Consumes a specified number of bits from the bit reader buffer without
+ * performing safety checks.
  *
  * This function advances the bit reader's state by `n` bits. It is marked as
  * always inline for performance critical paths.
  *
  * @warning This is a "fast" variant, meaning it assumes the buffer has enough
  * bits available. The caller is responsible for ensuring that at least `n` bits
- * are present in the accumulator or buffer before calling this function to avoid
- * undefined behavior or reading past valid memory.
+ * are present in the accumulator or buffer before calling this function to
+ * avoid undefined behavior or reading past valid memory.
  *
  * @param br Pointer to the bit reader instance.
- * @param n The number of bits to consume (must be <= 32, typically <= 24 depending on
- * implementation).
+ * @param n The number of bits to consume (must be <= 32, typically <= 24
+ * depending on implementation).
  * @return The value of the consumed bits as a 32-bit unsigned integer.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* br, uint8_t n) {
@@ -43,7 +43,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* br, uint
 }
 
 /**
- * @brief Ensures that the bit reader buffer contains at least the specified number of bits.
+ * @brief Ensures that the bit reader buffer contains at least the specified
+ * number of bits.
  *
  * This function checks if the internal buffer of the bit reader has enough bits
  * available to satisfy a subsequent read operation of `needed` bits. If not, it
@@ -124,27 +125,30 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr) {
 
 #if defined(ZXC_USE_NEON)
 /**
- * @brief Computes the prefix sum of a 128-bit vector of 32-bit unsigned integers using NEON
- * intrinsics.
+ * @brief Computes the prefix sum of a 128-bit vector of 32-bit unsigned
+ * integers using NEON intrinsics.
  *
- * This function calculates the running total of the elements in the input vector `v`.
- * If the input vector is `[a, b, c, d]`, the result will be `[a, a+b, a+b+c, a+b+c+d]`.
- * This operation is typically used for calculating cumulative distributions or offsets
- * in parallel.
+ * This function calculates the running total of the elements in the input
+ * vector `v`. If the input vector is `[a, b, c, d]`, the result will be `[a,
+ * a+b, a+b+c, a+b+c+d]`. This operation is typically used for calculating
+ * cumulative distributions or offsets in parallel.
  *
  * @param v The input vector containing four 32-bit unsigned integers.
  * @return A uint32x4_t vector containing the prefix sums.
  */
 static ZXC_ALWAYS_INLINE uint32x4_t zxc_neon_prefix_sum_u32(uint32x4_t v) {
-    uint32x4_t zero = vdupq_n_u32(0);
+    uint32x4_t zero = vdupq_n_u32(0);  // Create a vector of zeros
 
+    // Rotate right by 1 element (shift 4 bytes)
     uint32x4_t s1 =
         vreinterpretq_u32_u8(vextq_u8(vreinterpretq_u8_u32(zero), vreinterpretq_u8_u32(v), 12));
-    v = vaddq_u32(v, s1);
+    v = vaddq_u32(v, s1);  // Add shifted version: [a, b, c, d] + [0, a, b, c] ->
+                           // [a, a+b, b+c, c+d]
 
+    // Rotate right by 2 elements (shift 8 bytes)
     uint32x4_t s2 =
         vreinterpretq_u32_u8(vextq_u8(vreinterpretq_u8_u32(zero), vreinterpretq_u8_u32(v), 8));
-    v = vaddq_u32(v, s2);
+    v = vaddq_u32(v, s2);  // Add shifted version to complete prefix sum
 
     return v;
 }
@@ -167,14 +171,17 @@ static ZXC_ALWAYS_INLINE uint32x4_t zxc_neon_prefix_sum_u32(uint32x4_t v) {
  * @return A 256-bit vector containing the prefix sums of the input elements.
  */
 static ZXC_ALWAYS_INLINE __m256i zxc_mm256_prefix_sum_epi32(__m256i v) {
-    v = _mm256_add_epi32(v, _mm256_slli_si256(v, 4));
-    v = _mm256_add_epi32(v, _mm256_slli_si256(v, 8));
+    v = _mm256_add_epi32(v, _mm256_slli_si256(v, 4));  // Add value shifted by 1 element
+    v = _mm256_add_epi32(v, _mm256_slli_si256(v, 8));  // Add value shifted by 2 elements
 
-    __m256i v_bridge = _mm256_permute2x128_si256(v, v, 0x00);
-    v_bridge = _mm256_shuffle_epi32(v_bridge, 0xFF);
-    v_bridge = _mm256_blend_epi32(_mm256_setzero_si256(), v_bridge, 0xF0);
+    // Use permute/shuffle to bridge the 128-bit lane gap
+    __m256i v_bridge = _mm256_permute2x128_si256(v, v, 0x00);  // Duplicate lower 128 to upper
+    v_bridge = _mm256_shuffle_epi32(v_bridge,
+                                    0xFF);  // Broadcast last element of lower 128
+    v_bridge = _mm256_blend_epi32(_mm256_setzero_si256(), v_bridge,
+                                  0xF0);  // Only apply to upper lane
 
-    return _mm256_add_epi32(v, v_bridge);
+    return _mm256_add_epi32(v, v_bridge);  // Add bridge value to upper lane
 }
 #endif
 
@@ -194,22 +201,23 @@ static ZXC_ALWAYS_INLINE __m256i zxc_mm256_prefix_sum_epi32(__m256i v) {
  * @return A 512-bit vector containing the prefix sums of the input elements.
  */
 static ZXC_ALWAYS_INLINE __m512i zxc_mm512_prefix_sum_epi32(__m512i v) {
-    __m512i t = _mm512_bslli_epi128(v, 4);
-    v = _mm512_add_epi32(v, t);
-    t = _mm512_bslli_epi128(v, 8);
-    v = _mm512_add_epi32(v, t);
+    __m512i t = _mm512_bslli_epi128(v, 4);  // Shift left by 4 bytes (1 int)
+    v = _mm512_add_epi32(v, t);             // Add shifted value
+    t = _mm512_bslli_epi128(v, 8);          // Shift left by 8 bytes (2 ints)
+    v = _mm512_add_epi32(v, t);             // Add shifted value
 
-    __m512i v_l0 = _mm512_shuffle_i32x4(v, v, 0x00);
-    v_l0 = _mm512_shuffle_epi32(v_l0, 0xFF);
-    v = _mm512_mask_add_epi32(v, 0xFFF0, v, v_l0);
+    // Propagate sums across 128-bit lanes
+    __m512i v_l0 = _mm512_shuffle_i32x4(v, v, 0x00);  // Broadcast lane 0
+    v_l0 = _mm512_shuffle_epi32(v_l0, 0xFF);          // Broadcast last element of lane 0
+    v = _mm512_mask_add_epi32(v, 0xFFF0, v, v_l0);    // Add to lanes 1, 2, 3
 
-    __m512i v_l1 = _mm512_shuffle_i32x4(v, v, 0x55);
-    v_l1 = _mm512_shuffle_epi32(v_l1, 0xFF);
-    v = _mm512_mask_add_epi32(v, 0xFF00, v, v_l1);
+    __m512i v_l1 = _mm512_shuffle_i32x4(v, v, 0x55);  // Broadcast lane 1
+    v_l1 = _mm512_shuffle_epi32(v_l1, 0xFF);          // Broadcast last element of lane 1
+    v = _mm512_mask_add_epi32(v, 0xFF00, v, v_l1);    // Add to lanes 2, 3
 
-    __m512i v_l2 = _mm512_shuffle_i32x4(v, v, 0xAA);
-    v_l2 = _mm512_shuffle_epi32(v_l2, 0xFF);
-    v = _mm512_mask_add_epi32(v, 0xF000, v, v_l2);
+    __m512i v_l2 = _mm512_shuffle_i32x4(v, v, 0xAA);  // Broadcast lane 2
+    v_l2 = _mm512_shuffle_epi32(v_l2, 0xFF);          // Broadcast last element of lane 2
+    v = _mm512_mask_add_epi32(v, 0xF000, v, v_l2);    // Add to lane 3
 
     return v;
 }
@@ -289,42 +297,46 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
 
 #if defined(ZXC_USE_AVX512)
             for (int k = 0; k < ZXC_DEC_BATCH; k += 16) {
-                __m512i v_deltas = _mm512_load_si512((void*)&deltas[k]);
-                __m512i v_run = _mm512_set1_epi32(running_val);
+                __m512i v_deltas = _mm512_load_si512((void*)&deltas[k]);  // Load 16 deltas
+                __m512i v_run = _mm512_set1_epi32(running_val);  // Broadcast current running total
 
-                __m512i v_sum = zxc_mm512_prefix_sum_epi32(v_deltas);
-                v_sum = _mm512_add_epi32(v_sum, v_run);
+                __m512i v_sum = zxc_mm512_prefix_sum_epi32(v_deltas);  // Compute local prefix sums
+                v_sum = _mm512_add_epi32(v_sum, v_run);                // Add base running total
 
-                _mm512_storeu_si512((void*)&batch_dst[k], v_sum);
+                _mm512_storeu_si512((void*)&batch_dst[k],
+                                    v_sum);  // Store decoded values
 
+                // Extract the last value (15th element) to update running_val for next
+                // batch
                 __m128i v_last128 = _mm512_extracti32x4_epi32(v_sum, 3);
                 running_val = (uint32_t)_mm_cvtsi128_si32(_mm_shuffle_epi32(v_last128, 0xFF));
             }
 
 #elif defined(ZXC_USE_AVX2)
             for (int k = 0; k < ZXC_DEC_BATCH; k += 8) {
-                __m256i v_deltas = _mm256_load_si256((const __m256i*)&deltas[k]);
-                __m256i v_run = _mm256_set1_epi32(running_val);
+                __m256i v_deltas = _mm256_load_si256((const __m256i*)&deltas[k]);  // Load 8 deltas
+                __m256i v_run = _mm256_set1_epi32(running_val);  // Broadcast running total
 
-                __m256i v_sum = zxc_mm256_prefix_sum_epi32(v_deltas);
-                v_sum = _mm256_add_epi32(v_sum, v_run);
+                __m256i v_sum = zxc_mm256_prefix_sum_epi32(v_deltas);  // Compute local prefix sums
+                v_sum = _mm256_add_epi32(v_sum, v_run);                // Add base
 
-                _mm256_storeu_si256((__m256i*)&batch_dst[k], v_sum);
-                running_val = ((uint32_t*)&batch_dst[k])[7];
+                _mm256_storeu_si256((__m256i*)&batch_dst[k],
+                                    v_sum);                   // Store decoded values
+                running_val = ((uint32_t*)&batch_dst[k])[7];  // Update running_val
             }
 
 #elif defined(ZXC_USE_NEON)
-            uint32x4_t v_run = vdupq_n_u32(running_val);
+            uint32x4_t v_run = vdupq_n_u32(running_val);  // Broadcast running total
             for (int k = 0; k < ZXC_DEC_BATCH; k += 4) {
-                uint32x4_t v_deltas = vld1q_u32(&deltas[k]);
+                uint32x4_t v_deltas = vld1q_u32(&deltas[k]);  // Load 4 deltas
 
-                uint32x4_t v_sum = zxc_neon_prefix_sum_u32(v_deltas);
-                v_sum = vaddq_u32(v_sum, v_run);
+                uint32x4_t v_sum = zxc_neon_prefix_sum_u32(v_deltas);  // Compute local prefix sums
+                v_sum = vaddq_u32(v_sum, v_run);                       // Add base
 
-                vst1q_u32(&batch_dst[k], v_sum);
+                vst1q_u32(&batch_dst[k], v_sum);  // Store decoded values
 
-                running_val = vgetq_lane_u32(v_sum, 3);
-                v_run = vdupq_n_u32(running_val);
+                running_val = vgetq_lane_u32(v_sum, 3);  // Extract last element
+                v_run = vdupq_n_u32(running_val);        // Update vector for next iter
             }
 
 #else
@@ -1107,8 +1119,8 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
  * will be written.
  * @param n_threads The number of worker threads to use for parallel
  * decompression.
- * @param checksum_enabled  Flag indicating whether to verify the checksum of the data
- * (1 to enable, 0 to disable).
+ * @param checksum_enabled  Flag indicating whether to verify the checksum of
+ * the data (1 to enable, 0 to disable).
  * @return          Returns 0 on success, or a non-zero error code if the
  * decompression fails.
  */
@@ -1127,7 +1139,8 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checks
  * @param src_size      Size of the compressed data in bytes.
  * @param dst          Pointer to the destination buffer.
  * @param dst_capacity  Capacity of the destination buffer.
- * @param checksum_enabled Flag indicating whether to verify checksums (1 to enable, 0 to disable).
+ * @param checksum_enabled Flag indicating whether to verify checksums (1 to
+ * enable, 0 to disable).
  *
  * @return The number of bytes written to dst, or 0 if decompression fails
  * (invalid header, corruption, or destination too small).

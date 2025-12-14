@@ -32,14 +32,15 @@
  * @return The maximum unsigned 32-bit integer found in the vector.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
-    __m128i vlow = _mm256_castsi256_si128(v);
-    __m128i vhigh = _mm256_extracti128_si256(v, 1);
-    vlow = _mm_max_epu32(vlow, vhigh);
-    __m128i vshuf = _mm_shuffle_epi32(vlow, _MM_SHUFFLE(1, 0, 3, 2));
-    vlow = _mm_max_epu32(vlow, vshuf);
-    vshuf = _mm_shuffle_epi32(vlow, _MM_SHUFFLE(2, 3, 0, 1));
-    vlow = _mm_max_epu32(vlow, vshuf);
-    return (uint32_t)_mm_cvtsi128_si32(vlow);
+    __m128i vlow = _mm256_castsi256_si128(v);        // Extract the lower 128 bits
+    __m128i vhigh = _mm256_extracti128_si256(v, 1);  // Extract the upper 128 bits
+    vlow = _mm_max_epu32(vlow, vhigh);               // Element-wise max of lower and upper halves
+    __m128i vshuf = _mm_shuffle_epi32(vlow, _MM_SHUFFLE(1, 0, 3, 2));  // Shuffle to swap pairs
+    vlow = _mm_max_epu32(vlow, vshuf);  // Max of original and swapped
+    vshuf =
+        _mm_shuffle_epi32(vlow, _MM_SHUFFLE(2, 3, 0, 1));  // Shuffle to bring remaining candidates
+    vlow = _mm_max_epu32(vlow, vshuf);                     // Final max comparison
+    return (uint32_t)_mm_cvtsi128_si32(vlow);              // Extract the scalar result
 }
 #endif
 
@@ -108,45 +109,52 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* src, size_
 
 #if defined(ZXC_USE_AVX512)
         if (frames >= 16) {
-            __m512i v_max_accum = _mm512_setzero_si512();
+            __m512i v_max_accum = _mm512_setzero_si512();  // Initialize max accumulator to 0
 
             for (; j < (frames & ~15); j += 16) {
                 if (UNLIKELY(i == 0 && j == 0)) goto _scalar;
 
+                // Load 16 consecutive integers
                 __m512i vc = _mm512_loadu_si512((const void*)(in_ptr + j * 4));
+                // Load 16 integers offset by -1 to get previous values
                 __m512i vp = _mm512_loadu_si512((const void*)(in_ptr + j * 4 - 4));
 
-                __m512i diff = _mm512_sub_epi32(vc, vp);
+                __m512i diff = _mm512_sub_epi32(vc, vp);  // Compute deltas: curr - prev
 
+                // ZigZag encode: (diff << 1) ^ (diff >> 31)
                 __m512i zigzag =
                     _mm512_xor_si512(_mm512_slli_epi32(diff, 1), _mm512_srai_epi32(diff, 31));
 
-                _mm512_storeu_si512((void*)&deltas[j], zigzag);
-                v_max_accum = _mm512_max_epu32(v_max_accum, zigzag);
+                _mm512_storeu_si512((void*)&deltas[j], zigzag);  // Store results
+                v_max_accum =
+                    _mm512_max_epu32(v_max_accum, zigzag);  // Update max value seen so far
             }
-            max_d = _mm512_reduce_max_epu32(v_max_accum);
+            max_d = _mm512_reduce_max_epu32(v_max_accum);  // Horizontal max reduction
 
             if (j > 0) prev = zxc_le32(in_ptr + (j - 1) * 4);
         }
 #elif defined(ZXC_USE_AVX2)
         if (frames >= 8) {
-            __m256i v_max_accum = _mm256_setzero_si256();
+            __m256i v_max_accum = _mm256_setzero_si256();  // Initialize max accumulator to 0
 
             for (; j < (frames & ~7); j += 8) {
                 if (UNLIKELY(i == 0 && j == 0)) goto _scalar;
 
+                // Load 8 consecutive integers
                 __m256i vc = _mm256_loadu_si256((const __m256i*)(in_ptr + j * 4));
+                // Load 8 integers offset by -1
                 __m256i vp = _mm256_loadu_si256((const __m256i*)(in_ptr + j * 4 - 4));
 
-                __m256i diff = _mm256_sub_epi32(vc, vp);
+                __m256i diff = _mm256_sub_epi32(vc, vp);  // Compute deltas
 
+                // ZigZag encode: (diff << 1) ^ (diff >> 31)
                 __m256i zigzag =
                     _mm256_xor_si256(_mm256_slli_epi32(diff, 1), _mm256_srai_epi32(diff, 31));
-                _mm256_storeu_si256((__m256i*)&deltas[j], zigzag);
-                v_max_accum = _mm256_max_epu32(v_max_accum, zigzag);
+                _mm256_storeu_si256((__m256i*)&deltas[j], zigzag);    // Store results
+                v_max_accum = _mm256_max_epu32(v_max_accum, zigzag);  // Update max accumulator
             }
 
-            max_d = zxc_mm256_reduce_max_epu32(v_max_accum);
+            max_d = zxc_mm256_reduce_max_epu32(v_max_accum);  // Horizontal max reduction
 
             if (j > 0) {
                 prev = zxc_le32(in_ptr + (j - 1) * 4);
@@ -155,25 +163,28 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* src, size_
 #elif defined(ZXC_USE_NEON)
         // NEON processes 128-bit vectors (4 uint32 integers)
         if (frames >= 4) {
-            uint32x4_t v_max_accum = vdupq_n_u32(0);
+            uint32x4_t v_max_accum = vdupq_n_u32(0);  // Initialize vector with zeros
 
             for (; j < (frames & ~3); j += 4) {
                 if (UNLIKELY(i == 0 && j == 0)) goto _scalar;
 
+                // Load 4 32-bit integers
                 uint32x4_t vc = vld1q_u32((const uint32_t*)(in_ptr + j * 4));
                 uint32x4_t vp = vld1q_u32((const uint32_t*)(in_ptr + j * 4 - 4));
 
-                uint32x4_t diff = vsubq_u32(vc, vp);
+                uint32x4_t diff = vsubq_u32(vc, vp);  // Calc deltas
 
+                // ZigZag encode: (diff << 1) ^ (diff >> 31)
                 uint32x4_t z1 = vshlq_n_u32(diff, 1);
+                // Arithmetic shift right to duplicate sign bit
                 uint32x4_t z2 = vreinterpretq_u32_s32(vshrq_n_s32(vreinterpretq_s32_u32(diff), 31));
                 uint32x4_t zigzag = veorq_u32(z1, z2);
 
-                vst1q_u32(&deltas[j], zigzag);
-                v_max_accum = vmaxq_u32(v_max_accum, zigzag);
+                vst1q_u32(&deltas[j], zigzag);                 // Store results
+                v_max_accum = vmaxq_u32(v_max_accum, zigzag);  // Update max accumulator
             }
 
-            max_d = vmaxvq_u32(v_max_accum);
+            max_d = vmaxvq_u32(v_max_accum);  // Reduce vector to single max value
 
             if (j > 0) prev = zxc_le32(in_ptr + (j - 1) * 4);
         }
@@ -432,6 +443,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
                     if (zxc_le64(ip + mlen) == zxc_le64(ref + mlen))
                         mlen += 8;
                     else {
+                        // XOR to find differing bits, trailing zeros / 8 = byte index
                         mlen += (zxc_ctz64(zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen)) >> 3);
                         goto _match_len_done;
                     }
