@@ -187,10 +187,14 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* src, size_
 #if defined(ZXC_USE_NEON64)
             max_d = vmaxvq_u32(v_max_accum);  // Reduce vector to single max value (AArch64)
 #else
-            // NEON 32-bit (ARMv7) fallback for horizontal max
-            uint32x4_t p1 = vpmaxq_u32(v_max_accum, v_max_accum);
-            uint32x4_t p2 = vpmaxq_u32(p1, p1);
-            max_d = vgetq_lane_u32(p2, 0);
+            // NEON 32-bit (ARMv7) fallback for horizontal max using standard shifts
+            // Reduce 4 elements -> 2
+            uint32x4_t v_swap = vextq_u32(v_max_accum, v_max_accum, 2); // Swap low/high 64-bit halves
+            uint32x4_t v_max2 = vmaxq_u32(v_max_accum, v_swap);
+            // Reduce 2 -> 1
+            v_swap = vextq_u32(v_max2, v_max2, 1); // Shift by 32 bits
+            uint32x4_t v_max1 = vmaxq_u32(v_max2, v_swap);
+            max_d = vgetq_lane_u32(v_max1, 0);
 #endif
 
             if (j > 0) prev = zxc_le32(in_ptr + (j - 1) * 4);
