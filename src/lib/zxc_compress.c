@@ -160,7 +160,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* src, size_
                 prev = zxc_le32(in_ptr + (j - 1) * 4);
             }
         }
-#elif defined(ZXC_USE_NEON)
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
         // NEON processes 128-bit vectors (4 uint32 integers)
         if (frames >= 4) {
             uint32x4_t v_max_accum = vdupq_n_u32(0);  // Initialize vector with zeros
@@ -184,12 +184,19 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* src, size_
                 v_max_accum = vmaxq_u32(v_max_accum, zigzag);  // Update max accumulator
             }
 
-            max_d = vmaxvq_u32(v_max_accum);  // Reduce vector to single max value
+#if defined(ZXC_USE_NEON64)
+            max_d = vmaxvq_u32(v_max_accum);  // Reduce vector to single max value (AArch64)
+#else
+            // NEON 32-bit (ARMv7) fallback for horizontal max
+            uint32x4_t p1 = vpmaxq_u32(v_max_accum, v_max_accum);
+            uint32x4_t p2 = vpmaxq_u32(p1, p1);
+            max_d = vgetq_lane_u32(p2, 0);
+#endif
 
             if (j > 0) prev = zxc_le32(in_ptr + (j - 1) * 4);
         }
 #endif
-#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512) || defined(ZXC_USE_NEON)
+#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     _scalar:
 #ifndef _MSC_VER
         __attribute__((unused));
@@ -409,7 +416,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
                         goto _match_len_done;
                     }
                 }
-#elif defined(ZXC_USE_NEON)
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
                 const uint8_t* limit_16 = iend - 16;
                 while (ip + mlen < limit_16) {
                     // NEON Optimization: Compare 16 bytes at once
@@ -420,6 +427,8 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
                     uint8x16_t v_cmp = vceqq_u8(v_src, v_ref);
 
                     // Check if all bytes are equal (min value of comparison result is 0xFF)
+#if defined(ZXC_USE_NEON64)
+                    // AArch64 unified min
                     if (vminvq_u8(v_cmp) == 0xFF)
                         mlen += 16;
                     else {
@@ -436,6 +445,34 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
                         }
                         goto _match_len_done;
                     }
+#else
+                    // NEON 32-bit (ARMv7) fallback for min scan
+                    uint8x16_t p1 = vpminq_u8(v_cmp, v_cmp);
+                    uint8x16_t p2 = vpminq_u8(p1, p1);
+                    uint8x16_t p3 = vpminq_u8(p2, p2);
+                    // Now reduced to 2 bytes, convert to scalar
+                    uint8_t min_val = vgetq_lane_u8(p3, 0);
+                    min_val = min_val < vgetq_lane_u8(p3, 8) ? min_val : vgetq_lane_u8(p3, 8);
+
+                    if (min_val == 0xFF)
+                        mlen += 16;
+                    else {
+                        uint8x16_t v_diff = vmvnq_u8(v_cmp);
+                        // Access as 32-bit lanes to reconstruct 64-bit values or check directly
+                        // Reconstructing 64-bit for compatibility with zxc_ctz64 usage
+                        uint64_t lo = (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 0) |
+                                      ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 1) << 32);
+
+                        if (lo != 0)
+                            mlen += (zxc_ctz64(lo) >> 3);
+                        else {
+                            uint64_t hi = (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 2) |
+                                          ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 3) << 32);
+                            mlen += 8 + (zxc_ctz64(hi) >> 3);
+                        }
+                        goto _match_len_done;
+                    }
+#endif
                 }
 #endif
                 const uint8_t* limit_8 = iend - 8;

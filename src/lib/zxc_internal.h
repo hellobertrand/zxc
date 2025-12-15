@@ -45,10 +45,14 @@ extern "C" {
 #if defined(__SSE4_1__) || defined(__AVX__)
 #define ZXC_USE_SSE41
 #endif
-#elif (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__aarch64__)
+#elif (defined(__ARM_NEON) || defined(__ARM_NEON__))
 #include <arm_acle.h>
 #include <arm_neon.h>
-#define ZXC_USE_NEON
+#if defined(__aarch64__) || defined(_M_ARM64)
+#define ZXC_USE_NEON64
+#else
+#define ZXC_USE_NEON32
+#endif
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -515,7 +519,7 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(uint64_t x) {
 static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint32_t val) {
 #if defined(ZXC_USE_SSE41) || defined(__SSE4_2__)
     return _mm_crc32_u32(0, val);
-#elif defined(__aarch64__) || defined(_M_ARM64)
+#elif defined(__ARM_FEATURE_CRC32)
     return __crc32cw(0, val);
 #else
     uint32_t h = (val * 2654435761U);

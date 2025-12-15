@@ -123,7 +123,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr) {
     return val;
 }
 
-#if defined(ZXC_USE_NEON)
+#if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
 /**
  * @brief Computes the prefix sum of a 128-bit vector of 32-bit unsigned
  * integers using NEON intrinsics.
@@ -325,7 +325,7 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
                 running_val = ((uint32_t*)&batch_dst[k])[7];  // Update running_val
             }
 
-#elif defined(ZXC_USE_NEON)
+#elif defined(ZXC_USE_NEON64)
             uint32x4_t v_run = vdupq_n_u32(running_val);  // Broadcast running total
             for (int k = 0; k < ZXC_DEC_BATCH; k += 4) {
                 uint32x4_t v_deltas = vld1q_u32(&deltas[k]);  // Load 4 deltas
@@ -337,6 +337,20 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
 
                 running_val = vgetq_lane_u32(v_sum, 3);  // Extract last element
                 v_run = vdupq_n_u32(running_val);        // Update vector for next iter
+            }
+
+#elif defined(ZXC_USE_NEON32)
+            uint32x4_t v_run = vdupq_n_u32(running_val);
+            for (int k = 0; k < ZXC_DEC_BATCH; k += 4) {
+                uint32x4_t v_deltas = vld1q_u32(&deltas[k]);
+
+                uint32x4_t v_sum = zxc_neon_prefix_sum_u32(v_deltas);
+                v_sum = vaddq_u32(v_sum, v_run);
+
+                vst1q_u32(&batch_dst[k], v_sum);
+
+                running_val = vgetq_lane_u32(v_sum, 3);
+                v_run = vdupq_n_u32(running_val);
             }
 
 #else
