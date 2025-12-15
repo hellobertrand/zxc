@@ -17,10 +17,11 @@
  * ConditionVariable, Threads). Allows the same threading logic to compile on
  * Linux/macOS and Windows.
  */
-#ifdef _WIN32
+#if defined(_WIN32)
 #include <process.h>
 #include <sys/types.h>
 #include <windows.h>
+#include <malloc.h>
 
 // Simple sysconf emulation to get core count
 static int zxc_get_num_procs(void) {
@@ -97,7 +98,7 @@ static int pthread_join(pthread_t thread, void** retval) {
  * @brief Allocates aligned memory in a cross-platform manner.
  *
  * This function provides a unified interface for allocating memory with a specific
- * alignment requirement. It wraps `_aligned_malloc` for Microsoft Visual C++
+ * alignment requirement. It wraps `_aligned_malloc` for Windows
  * environments and `posix_memalign` for POSIX-compliant systems.
  *
  * @param size The size of the memory block to allocate, in bytes.
@@ -107,7 +108,7 @@ static int pthread_join(pthread_t thread, void** retval) {
  *         The returned pointer must be freed using the corresponding aligned free function.
  */
 static void* zxc_aligned_malloc(size_t size, size_t alignment) {
-#if defined(_MSC_VER)
+#if defined(_WIN32)
     return _aligned_malloc(size, alignment);
 #else
     void* ptr = NULL;
@@ -120,13 +121,13 @@ static void* zxc_aligned_malloc(size_t size, size_t alignment) {
  * @brief Frees memory previously allocated with an aligned allocation function.
  *
  * This function provides a cross-platform wrapper for freeing aligned memory.
- * On Microsoft Visual C++ (_MSC_VER), it calls `_aligned_free`.
+ * On Windows, it calls `_aligned_free`.
  * On other platforms, it falls back to the standard `free` function.
  *
  * @param ptr A pointer to the memory block to be freed. If ptr is NULL, no operation is performed.
  */
 static void zxc_aligned_free(void* ptr) {
-#if defined(_MSC_VER)
+#if defined(_WIN32)
     _aligned_free(ptr);
 #else
     free(ptr);

@@ -45,7 +45,7 @@ extern "C" {
 #if defined(__SSE4_1__) || defined(__AVX__)
 #define ZXC_USE_SSE41
 #endif
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+#elif (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__aarch64__)
 #include <arm_acle.h>
 #include <arm_neon.h>
 #define ZXC_USE_NEON
