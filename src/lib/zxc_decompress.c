@@ -296,9 +296,11 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
             uint32_t* batch_dst = (uint32_t*)d_ptr;
 
 #if defined(ZXC_USE_AVX512)
+            __m512i v_run = _mm512_set1_epi32(running_val);  // Broadcast running total
+            __m512i perm_idx = _mm512_set1_epi32(15);        // Mask to broadcast idx 15
+
             for (int k = 0; k < ZXC_DEC_BATCH; k += 16) {
                 __m512i v_deltas = _mm512_load_si512((void*)&deltas[k]);  // Load 16 deltas
-                __m512i v_run = _mm512_set1_epi32(running_val);  // Broadcast current running total
 
                 __m512i v_sum = zxc_mm512_prefix_sum_epi32(v_deltas);  // Compute local prefix sums
                 v_sum = _mm512_add_epi32(v_sum, v_run);                // Add base running total
@@ -306,11 +308,12 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
                 _mm512_storeu_si512((void*)&batch_dst[k],
                                     v_sum);  // Store decoded values
 
-                // Extract the last value (15th element) to update running_val for next
-                // batch
-                __m128i v_last128 = _mm512_extracti32x4_epi32(v_sum, 3);
-                running_val = (uint32_t)_mm_cvtsi128_si32(_mm_shuffle_epi32(v_last128, 0xFF));
+                // Update v_run for next iteration: broadcast the last element (idx 15) to all lanes
+                // entirely within ZMM registers using permutexvar.
+                v_run = _mm512_permutexvar_epi32(perm_idx, v_sum);
             }
+            // Extract final running_val for scalar loop
+            running_val = (uint32_t)_mm_cvtsi128_si32(_mm512_castsi512_si128(v_run));
 
 #elif defined(ZXC_USE_AVX2)
             for (int k = 0; k < ZXC_DEC_BATCH; k += 8) {
@@ -322,10 +325,10 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
 
                 _mm256_storeu_si256((__m256i*)&batch_dst[k],
                                     v_sum);                   // Store decoded values
-                running_val = ((uint32_t*)&batch_dst[k])[7];  // Update running_val
+                running_val = (uint32_t)_mm256_extract_epi32(v_sum, 7);  // Update running_val
             }
 
-#elif defined(ZXC_USE_NEON64)
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
             uint32x4_t v_run = vdupq_n_u32(running_val);  // Broadcast running total
             for (int k = 0; k < ZXC_DEC_BATCH; k += 4) {
                 uint32x4_t v_deltas = vld1q_u32(&deltas[k]);  // Load 4 deltas
@@ -335,23 +338,13 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
 
                 vst1q_u32(&batch_dst[k], v_sum);  // Store decoded values
 
-                running_val = vgetq_lane_u32(v_sum, 3);  // Extract last element
-                v_run = vdupq_n_u32(running_val);        // Update vector for next iter
+                // Optimized update for next iteration (efficient on both ARMv7 and AArch64)
+                // Avoids vdupq_laneq (AArch64-only) and keeps data in NEON registers
+                uint32x2_t high_half = vget_high_u32(v_sum);
+                v_run = vdupq_lane_u32(high_half, 1);
             }
-
-#elif defined(ZXC_USE_NEON32)
-            uint32x4_t v_run = vdupq_n_u32(running_val);
-            for (int k = 0; k < ZXC_DEC_BATCH; k += 4) {
-                uint32x4_t v_deltas = vld1q_u32(&deltas[k]);
-
-                uint32x4_t v_sum = zxc_neon_prefix_sum_u32(v_deltas);
-                v_sum = vaddq_u32(v_sum, v_run);
-
-                vst1q_u32(&batch_dst[k], v_sum);
-
-                running_val = vgetq_lane_u32(v_sum, 3);
-                v_run = vdupq_n_u32(running_val);
-            }
+            
+            running_val = vgetq_lane_u32(v_run, 0); // Update scalar accumulator for subsequent scalar loop
 
 #else
             for (int k = 0; k < ZXC_DEC_BATCH; k++) {
