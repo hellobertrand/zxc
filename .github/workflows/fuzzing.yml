@@ -13,7 +13,7 @@ jobs:
   fuzzing:
     runs-on: ubuntu-latest
     concurrency:
-      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      group: ${{ github.workflow }}-${{ matrix.sanitizer }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
     strategy:
       fail-fast: false
