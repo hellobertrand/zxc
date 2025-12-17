@@ -2,12 +2,27 @@ name: Fuzzing
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Fuzzing mode'
+        required: true
+        default: 'batch'
+        type: choice
+        options:
+        - code-change
+        - batch
+      fuzz_seconds:
+        description: 'Duration (seconds)'
+        required: true
+        default: '3600'
   pull_request:
     branches: [ main ]
   schedule:
     - cron: 0 0 * * *
 
-permissions: read-all
+permissions: 
+  contents: read
+  security-events: write
 
 jobs:
   fuzzing:
@@ -34,7 +49,7 @@ jobs:
       uses: google/clusterfuzzlite/actions/run_fuzzers@v1
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        mode: ${{ github.event_name == 'pull_request' && 'code-change' || 'batch' }}
-        fuzz-seconds: ${{ github.event_name == 'pull_request' && 600 || 3600 }}
+        mode: ${{ github.event_name == 'pull_request' && 'code-change' || inputs.mode || 'batch' }}
+        fuzz-seconds: ${{ github.event_name == 'pull_request' && 600 || inputs.fuzz_seconds || 3600 }}
         sanitizer: ${{ matrix.sanitizer }}
         output-sarif: true
