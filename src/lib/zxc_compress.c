@@ -64,15 +64,15 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  * 4. **Bit Packing:** Packs the ZigZag-encoded deltas into a compact bitstream
  *    using `b` bits per value.
  *
- * @param src Pointer to the source buffer containing raw 32-bit integer data.
- * @param src_size Size of the source buffer in bytes. Must be a multiple of 4
+ * @param[in] src Pointer to the source buffer containing raw 32-bit integer data.
+ * @param[in] src_size Size of the source buffer in bytes. Must be a multiple of 4
  * and non-zero.
- * @param dst Pointer to the destination buffer where compressed data will be
+ * @param[out] dst Pointer to the destination buffer where compressed data will be
  * written.
- * @param dst_cap Capacity of the destination buffer in bytes.
- * @param out_sz Pointer to a variable where the total size of the compressed
+ * @param[in] dst_cap Capacity of the destination buffer in bytes.
+ * @param[out] out_sz Pointer to a variable where the total size of the compressed
  * output will be stored.
- * @param crc_val The pre-calculated XXH3 value (if checksum is enabled).
+ * @param[in] crc_val The pre-calculated XXH3 value (if checksum is enabled).
  *
  * @return 0 on success, or -1 on failure (e.g., invalid input size, destination
  * buffer too small).
@@ -283,16 +283,16 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* src, size_
  * literals (using Raw or RLE encoding), and bit-packs the sequence streams into
  * the destination buffer.
  *
- * @param ctx       Pointer to the compression context containing hash tables
+ * @param[in,out] ctx       Pointer to the compression context containing hash tables
  * and configuration.
- * @param src       Pointer to the input source data.
- * @param src_size  Size of the input data in bytes.
- * @param dst       Pointer to the destination buffer where compressed data will
+ * @param[in] src       Pointer to the input source data.
+ * @param[in] src_size  Size of the input data in bytes.
+ * @param[out] dst       Pointer to the destination buffer where compressed data will
  * be written.
- * @param dst_cap   Maximum capacity of the destination buffer.
- * @param out_sz    [Out] Pointer to a variable that will receive the total size
+ * @param[in] dst_cap   Maximum capacity of the destination buffer.
+ * @param[out] out_sz    [Out] Pointer to a variable that will receive the total size
  * of the compressed output.
- * @param crc_val   The pre-calculated XXH3 value (if checksum is enabled).
+ * @param[in] crc_val   The pre-calculated XXH3 value (if checksum is enabled).
  *
  * @return 0 on success, or -1 if an error occurs (e.g., buffer overflow).
  */
@@ -789,15 +789,15 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
  * buffer. It handles the block header, copying of source data, and optionally
  * the calculation and storage of a checksum.
  *
- * @param src Pointer to the source data to encode.
- * @param sz Size of the source data in bytes.
- * @param dst Pointer to the destination buffer.
- * @param cap Maximum capacity of the destination buffer.
- * @param out_sz Pointer to a variable receiving the total written size
+ * @param[in] src Pointer to the source data to encode.
+ * @param[in] src_sz Size of the source data in bytes.
+ * @param[out] dst Pointer to the destination buffer.
+ * @param[in] dst_cap Maximum capacity of the destination buffer.
+ * @param[out] out_sz Pointer to a variable receiving the total written size
  * (header
  * + data + checksum).
- * @param chk Boolean flag: if non-zero, a checksum is calculated and added.
- * @param crc_val The pre-calculated XXH3 value (if checksum is enabled).
+ * @param[in] chk Boolean flag: if non-zero, a checksum is calculated and added.
+ * @param[in] crc_val The pre-calculated XXH3 value (if checksum is enabled).
  *
  * @return 0 on success, -1 if the destination buffer capacity is
  * insufficient.
@@ -883,13 +883,13 @@ static int zxc_probe_is_numeric(const uint8_t* src, size_t size) {
  *    - If compression fails to save space, we fall back to **RAW** storage
  * (uncompressed) to avoid expansion.
  *
- * @param ctx Pointer to the ZXC compression context containing configuration
+ * @param[in,out] ctx Pointer to the ZXC compression context containing configuration
  * (e.g., checksum flags).
- * @param chunk Pointer to the source data buffer to be compressed.
- * @param src_sz Size of the source data chunk in bytes.
- * @param dst Pointer to the destination buffer where compressed data will be
+ * @param[in] chunk Pointer to the source data buffer to be compressed.
+ * @param[in] src_sz Size of the source data chunk in bytes.
+ * @param[out] dst Pointer to the destination buffer where compressed data will be
  * written.
- * @param dst_cap Capacity of the destination buffer.
+ * @param[in] dst_cap Capacity of the destination buffer.
  *
  * @return The size of the written data in bytes on success, or -1 if an error
  * occurred (e.g., buffer overflow or encoding failure).
@@ -940,13 +940,13 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
  * as a wrapper around the generic stream engine, specifically configuring it
  * for compression operations.
  *
- * @param f_in      Pointer to the input file stream to be compressed.
- * @param f_out     Pointer to the output file stream where compressed data
+ * @param[in] f_in      Pointer to the input file stream to be compressed.
+ * @param[out] f_out     Pointer to the output file stream where compressed data
  * will be written.
- * @param n_threads The number of threads to use for parallel compression.
- * @param level     The compression level (determines the trade-off between
+ * @param[in] n_threads The number of threads to use for parallel compression.
+ * @param[in] level     The compression level (determines the trade-off between
  * speed and ratio).
- * @param checksum_enabled  Flag indicating whether to calculate and store a checksum
+ * @param[in] checksum_enabled  Flag indicating whether to calculate and store a checksum
  * for data integrity.
  *
  * @return          Returns 0 on success, or a non-zero error code on failure.
@@ -965,12 +965,12 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
  * This version uses standard size_t types and void pointers. It writes the
  * ZXC file header followed by compressed blocks, single threaded
  *
- * @param src          Pointer to the source buffer.
- * @param src_size     Size of the source data in bytes.
- * @param dst          Pointer to the destination buffer.
- * @param dst_capacity Maximum capacity of the destination buffer.
- * @param level        Compression level (e.g., ZXC_LEVEL_BALANCED).
- * @param checksum_enabled Flag indicating whether to verify the checksum of
+ * @param[in] src          Pointer to the source buffer.
+ * @param[in] src_size     Size of the source data in bytes.
+ * @param[out] dst          Pointer to the destination buffer.
+ * @param[in] dst_capacity Maximum capacity of the destination buffer.
+ * @param[in] level        Compression level (e.g., ZXC_LEVEL_BALANCED).
+ * @param[in] checksum_enabled Flag indicating whether to verify the checksum of
  * the data (1 to enable, 0 to disable).
  *
  * @return The number of bytes written to dst, or 0 if the destination buffer

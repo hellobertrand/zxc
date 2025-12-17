@@ -63,12 +63,12 @@ extern "C" {
  * 2. Worker Threads: Compress chunks in parallel (LZ77 + Bitpacking).
  * 3. Writer Thread: Orders the processed chunks and writes them to f_out.
  *
- * @param f_in      Input file stream (must be opened in "rb" mode).
- * @param f_out     Output file stream (must be opened in "wb" mode).
- * @param n_threads Number of worker threads to spawn (0 = auto-detect number of
+ * @param[in] f_in      Input file stream (must be opened in "rb" mode).
+ * @param[out] f_out     Output file stream (must be opened in "wb" mode).
+ * @param[in] n_threads Number of worker threads to spawn (0 = auto-detect number of
  * CPU cores).
- * @param level     Compression level (1-9).
- * @param checksum_enabled  If non-zero, enables checksum verification for data
+ * @param[in] level     Compression level (1-9).
+ * @param[in] checksum_enabled  If non-zero, enables checksum verification for data
  * integrity.
  *
  * @return          Total compressed bytes written, or -1 if an error occurred.
@@ -81,11 +81,11 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
  *
  * Uses the same pipeline architecture as compression to maximize throughput.
  *
- * @param f_in      Input file stream (must be opened in "rb" mode).
- * @param f_out     Output file stream (must be opened in "wb" mode).
- * @param n_threads Number of worker threads to spawn (0 = auto-detect number of
+ * @param[in] f_in      Input file stream (must be opened in "rb" mode).
+ * @param[out] f_out     Output file stream (must be opened in "wb" mode).
+ * @param[in] n_threads Number of worker threads to spawn (0 = auto-detect number of
  * CPU cores).
- * @param checksum_enabled  If non-zero, enables checksum verification for data
+ * @param[in] checksum_enabled  If non-zero, enables checksum verification for data
  * integrity.
  *
  * @return          Total decompressed bytes written, or -1 if an error
@@ -105,7 +105,7 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checks
  * Accounts for file headers, block headers, and potential expansion
  * of incompressible data.
  *
- * @param input_size Size of the input data in bytes.
+ * @param[in] input_size Size of the input data in bytes.
  *
  * @return           Maximum required buffer size in bytes.
  */
@@ -118,12 +118,12 @@ size_t zxc_compress_bound(size_t input_size);
  * It executes in a single thread (blocking operation).
  * It writes the ZXC file header followed by compressed blocks
  *
- * @param src          Pointer to the source buffer.
- * @param src_size     Size of the source data in bytes.
- * @param dst          Pointer to the destination buffer.
- * @param dst_capacity Maximum capacity of the destination buffer.
- * @param level        Compression level (e.g., ZXC_LEVEL_BALANCED).
- * @param checksum_enabled Flag indicating whether to verify the checksum of the
+ * @param[in] src          Pointer to the source buffer.
+ * @param[in] src_size     Size of the source data in bytes.
+ * @param[out] dst          Pointer to the destination buffer.
+ * @param[in] dst_capacity Maximum capacity of the destination buffer.
+ * @param[in] level        Compression level (e.g., ZXC_LEVEL_BALANCED).
+ * @param[in] checksum_enabled Flag indicating whether to verify the checksum of the
  * data (1 to enable, 0 to disable).
  *
  * @return The number of bytes written to dst, or 0 if the destination buffer
@@ -139,11 +139,11 @@ size_t zxc_compress(const void* src, size_t src_size, void* dst, size_t dst_capa
  * It executes in a single thread (blocking operation).
  * It expects a valid ZXC file header followed by compressed blocks.
  *
- * @param src          Pointer to the source buffer containing compressed data.
- * @param src_size      Size of the compressed data in bytes.
- * @param dst          Pointer to the destination buffer.
- * @param dst_capacity  Capacity of the destination buffer.
- * @param checksum_enabled Flag indicating whether to verify the checksum of the
+ * @param[in] src          Pointer to the source buffer containing compressed data.
+ * @param[in] src_size      Size of the compressed data in bytes.
+ * @param[out] dst          Pointer to the destination buffer.
+ * @param[in] dst_capacity  Capacity of the destination buffer.
+ * @param[in] checksum_enabled Flag indicating whether to verify the checksum of the
  * data (1 to enable, 0 to disable).
  *
  * @return The number of bytes written to dst, or 0 if decompression fails
