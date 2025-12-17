@@ -583,6 +583,8 @@ int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_
  * @return The maximum potential size of the compressed data in bytes.
  */
 size_t zxc_compress_bound(size_t input_size) {
+    if (input_size > SIZE_MAX - (SIZE_MAX >> 10)) return 0;
+
     size_t n = (input_size + ZXC_CHUNK_SIZE - 1) / ZXC_CHUNK_SIZE;
     if (n == 0) n = 1;
     return ZXC_FILE_HEADER_SIZE + (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + 64)) +

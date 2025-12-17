@@ -171,6 +171,37 @@ int test_invalid_arguments() {
         return 0;
     }
 
+    // 4. zxc_compress NULL checks
+    if (zxc_compress(NULL, 100, (void*)1, 100, 3, 0) != 0) {
+        printf("Failed: zxc_compress should return 0 when src is NULL\n");
+        fclose(f);
+        return 0;
+    }
+    if (zxc_compress((void*)1, 100, NULL, 100, 3, 0) != 0) {
+        printf("Failed: zxc_compress should return 0 when dst is NULL\n");
+        fclose(f);
+        return 0;
+    }
+
+    // 5. zxc_decompress NULL checks
+    if (zxc_decompress(NULL, 100, (void*)1, 100, 0) != 0) {
+        printf("Failed: zxc_decompress should return 0 when src is NULL\n");
+        fclose(f);
+        return 0;
+    }
+    if (zxc_decompress((void*)1, 100, NULL, 100, 0) != 0) {
+        printf("Failed: zxc_decompress should return 0 when dst is NULL\n");
+        fclose(f);
+        return 0;
+    }
+
+    // 6. zxc_compress_bound overflow check
+    if (zxc_compress_bound(SIZE_MAX) != 0) {
+        printf("Failed: zxc_compress_bound should return 0 on overflow\n");
+        fclose(f);
+        return 0;
+    }
+
     printf("PASS\n\n");
     fclose(f);
     return 1;
