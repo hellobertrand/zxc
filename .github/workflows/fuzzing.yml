@@ -26,6 +26,7 @@ permissions:
 
 jobs:
   fuzzing:
+    name: Run Fuzzing (${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.sanitizer }}-${{ github.event.pull_request.number || github.ref }}
