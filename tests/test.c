@@ -171,6 +171,13 @@ int test_invalid_arguments() {
         return 0;
     }
 
+    // 3b. Decompression Output NULL -> Must fail
+    if (zxc_stream_decompress(f, NULL, 1, 0) != -1) {
+        printf("Failed: Decompress should return -1 when Output is NULL\n");
+        fclose(f);
+        return 0;
+    }
+
     // 4. zxc_compress NULL checks
     if (zxc_compress(NULL, 100, (void*)1, 100, 3, 0) != 0) {
         printf("Failed: zxc_compress should return 0 when src is NULL\n");
