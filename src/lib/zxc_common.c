@@ -924,8 +924,6 @@ static void* zxc_async_writer(void* arg) {
  */
 int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int mode, int level,
                               int checksum_enabled, zxc_chunk_processor_t func) {
-    if (!f_in) return -1;
-
     zxc_stream_ctx_t ctx;
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
 

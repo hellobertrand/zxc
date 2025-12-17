@@ -953,7 +953,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
  */
 int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
                             int checksum_enabled) {
-    if (!f_in || !f_out) return -1;
+    if (!f_in) return -1;
 
     return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, checksum_enabled,
                                  zxc_compress_chunk_wrapper);
