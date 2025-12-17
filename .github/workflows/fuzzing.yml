@@ -2,53 +2,39 @@ name: Fuzzing
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main, candidate ]
   pull_request:
     branches: [ main ]
-  
-permissions:
-  contents: read
+  schedule:
+    - cron: 0 0 * * *
 
-concurrency:
-  cancel-in-progress: true
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+permissions: read-all
 
 jobs:
   fuzzing:
-    name: Run Fuzzing
     runs-on: ubuntu-latest
-    
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address, undefined, memory]
+
     steps:
-      - uses: actions/checkout@v4
+    - name: Build Fuzzers (${{ matrix.sanitizer }})
+      id: build
+      uses: google/clusterfuzzlite/actions/build_fuzzers@v1
+      with:
+        language: c
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        sanitizer: ${{ matrix.sanitizer }}
 
-      - name: Install Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang llvm
-
-      - name: Compile Fuzzer
-        run: |
-          mkdir -p build_fuzz
-          
-          clang -g -O1 -fsanitize=fuzzer,address,undefined \
-            -I include \
-            src/lib/zxc_common.c \
-            src/lib/zxc_compress.c \
-            src/lib/zxc_decompress.c \
-            tests/fuzz.c \
-            -o build_fuzz/zxc_fuzzer \
-            -lm -pthread
-
-      - name: Run Fuzzer
-        working-directory: build_fuzz
-        run: |
-          ./zxc_fuzzer -max_total_time=180 -print_final_stats=1
-
-      - name: Upload Crash Artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: crash-reports
-          path: build_fuzz/crash-*
-          retention-days: 5
+    - name: Run Fuzzers (${{ matrix.sanitizer }})
+      id: run
+      uses: google/clusterfuzzlite/actions/run_fuzzers@v1
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        mode: ${{ github.event_name == 'pull_request' && 'code-change' || 'batch' }}
+        fuzz-seconds: ${{ github.event_name == 'pull_request' && 600 || 3600 }}
+        sanitizer: ${{ matrix.sanitizer }}
+        output-sarif: true
