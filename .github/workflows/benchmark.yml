@@ -71,7 +71,7 @@ jobs:
         working-directory: ${{ env.LZBENCH_DIR }}
         run: |
           ./lzbench \
-            -e"memcpy/zxc,2,3,4,5/lz4/lz4fast,17/lz4hc,12/zstd,1/snappy" \
+            -e"memcpy/zxc,2,3,4,5/lz4/lz4fast,17/lz4hc,12/zstd,1/zstd_fast,-1/snappy" \
             -j -t8,8 -o1 "../${SILESIA_DIR}"/* \
             > ../benchmark.md
 
