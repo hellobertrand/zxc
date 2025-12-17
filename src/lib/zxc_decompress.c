@@ -23,8 +23,8 @@
  * are present in the accumulator or buffer before calling this function to
  * avoid undefined behavior or reading past valid memory.
  *
- * @param br Pointer to the bit reader instance.
- * @param n The number of bits to consume (must be <= 32, typically <= 24
+ * @param[in,out] br Pointer to the bit reader instance.
+ * @param[in] n The number of bits to consume (must be <= 32, typically <= 24
  * depending on implementation).
  * @return The value of the consumed bits as a 32-bit unsigned integer.
  */
@@ -50,8 +50,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* br, uint
  * available to satisfy a subsequent read operation of `needed` bits. If not, it
  * refills the buffer from the source.
  *
- * @param br Pointer to the bit reader context.
- * @param needed The number of bits required to be available in the buffer.
+ * @param[in,out] br Pointer to the bit reader context.
+ * @param[in] needed The number of bits required to be available in the buffer.
  */
 static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* br, int needed) {
     if (UNLIKELY(br->bits < needed)) {
@@ -98,7 +98,7 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* br, int needed) {
  * token field. VByte encoding uses the high bit of each byte as a continuation
  * flag (1 = more bytes, 0 = last byte).
  *
- * @param ptr Address of the pointer to the current read position. The pointer
+ * @param[in,out] ptr Address of the pointer to the current read position. The pointer
  * is advanced.
  * @return The decoded 32-bit integer.
  */
@@ -133,7 +133,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr) {
  * a+b, a+b+c, a+b+c+d]`. This operation is typically used for calculating
  * cumulative distributions or offsets in parallel.
  *
- * @param v The input vector containing four 32-bit unsigned integers.
+ * @param[in] v The input vector containing four 32-bit unsigned integers.
  * @return A uint32x4_t vector containing the prefix sums.
  */
 static ZXC_ALWAYS_INLINE uint32x4_t zxc_neon_prefix_sum_u32(uint32x4_t v) {
@@ -167,7 +167,7 @@ static ZXC_ALWAYS_INLINE uint32x4_t zxc_neon_prefix_sum_u32(uint32x4_t v) {
  *   ...
  *   out[7] = v[0] + v[1] + ... + v[7]
  *
- * @param v The input 256-bit vector containing eight 32-bit integers.
+ * @param[in] v The input 256-bit vector containing eight 32-bit integers.
  * @return A 256-bit vector containing the prefix sums of the input elements.
  */
 static ZXC_ALWAYS_INLINE __m256i zxc_mm256_prefix_sum_epi32(__m256i v) {
@@ -197,7 +197,7 @@ static ZXC_ALWAYS_INLINE __m256i zxc_mm256_prefix_sum_epi32(__m256i v) {
  *
  * @note This function is forced inline for performance reasons.
  *
- * @param v The input 512-bit vector containing sixteen 32-bit integers.
+ * @param[in] v The input 512-bit vector containing sixteen 32-bit integers.
  * @return A 512-bit vector containing the prefix sums of the input elements.
  */
 static ZXC_ALWAYS_INLINE __m512i zxc_mm512_prefix_sum_epi32(__m512i v) {
@@ -241,12 +241,12 @@ static ZXC_ALWAYS_INLINE __m512i zxc_mm512_prefix_sum_epi32(__m512i v) {
  * 4. **Delta Reconstruction:** Adds the signed delta to a `running_val`
  * accumulator to recover the original integer sequence.
  *
- * @param src Pointer to the source buffer containing compressed data.
- * @param src_size Size of the source buffer in bytes.
- * @param dst Pointer to the destination buffer where decompressed data will be
+ * @param[in] src Pointer to the source buffer containing compressed data.
+ * @param[in] src_size Size of the source buffer in bytes.
+ * @param[out] dst Pointer to the destination buffer where decompressed data will be
  * written.
- * @param dst_capacity Maximum capacity of the destination buffer in bytes.
- * @param expected_raw_size Expected size of the uncompressed data (unused in
+ * @param[in] dst_capacity Maximum capacity of the destination buffer in bytes.
+ * @param[in] expected_raw_size Expected size of the uncompressed data (unused in
  * current implementation).
  *
  * @return The number of bytes written to the destination buffer on success,
@@ -398,12 +398,12 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
  * - Reconstructs the data by copying literals from the literal stream and
  *   matches from the previously decoded output (history).
  *
- * @param ctx Pointer to the compression context (`zxc_cctx_t`) containing
- * @param src Pointer to the source buffer containing compressed data.
- * @param src_size Size of the source buffer in bytes.
- * @param dst Pointer to the destination buffer for decompressed data.
- * @param dst_capacity Maximum capacity of the destination buffer.
- * @param expected_raw_size The expected size of the decompressed data (used for
+ * @param[in,out] ctx Pointer to the compression context (`zxc_cctx_t`) containing
+ * @param[in] src Pointer to the source buffer containing compressed data.
+ * @param[in] src_size Size of the source buffer in bytes.
+ * @param[out] dst Pointer to the destination buffer for decompressed data.
+ * @param[in] dst_capacity Maximum capacity of the destination buffer.
+ * @param[in] expected_raw_size The expected size of the decompressed data (used for
  * validation and trailing literals).
  *
  * @return The number of bytes written to the destination buffer on success, or
@@ -1128,13 +1128,12 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
  * using the specified number of threads and optionally verifies the data
  * integrity using a checksum.
  *
- * @param f_in      Pointer to the input file stream containing compressed data.
- * @param f_out     Pointer to the output file stream where decompressed data
+ * @param[in] f_in      Pointer to the input file stream containing ZXC compressed data.
+ * @param[out] f_out     Pointer to the output file stream where decompressed data
  * will be written.
- * @param n_threads The number of worker threads to use for parallel
+ * @param[in] n_threads The number of threads to use for parallel decompression.
+ * @param[in] checksum_enabled  Flag indicating whether to verify checksums during
  * decompression.
- * @param checksum_enabled  Flag indicating whether to verify the checksum of
- * the data (1 to enable, 0 to disable).
  * @return          Returns 0 on success, or a non-zero error code if the
  * decompression fails.
  */
@@ -1151,10 +1150,10 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checks
  * This version uses standard size_t types and void pointers.
  * It expects a valid ZXC file header followed by compressed blocks.
  *
- * @param src          Pointer to the source buffer containing compressed data.
- * @param src_size      Size of the compressed data in bytes.
- * @param dst          Pointer to the destination buffer.
- * @param dst_capacity  Capacity of the destination buffer.
+ * @param[in] src Pointer to the source buffer containing compressed data.
+ * @param[in] src_size Size of the compressed data in bytes.
+ * @param[out] dst Pointer to the destination buffer.
+ * @param[in] dst_capacity Capacity of the destination buffer.
  * @param checksum_enabled Flag indicating whether to verify checksums (1 to
  * enable, 0 to disable).
  *
