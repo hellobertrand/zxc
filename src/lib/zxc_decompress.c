@@ -1139,6 +1139,8 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
  * decompression fails.
  */
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checksum_enabled) {
+    if (!f_in || !f_out) return -1;
+
     return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, checksum_enabled,
                                  (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper);
 }
@@ -1162,6 +1164,8 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checks
 // cppcheck-suppress unusedFunction
 size_t zxc_decompress(const void* src, size_t src_size, void* dst, size_t dst_capacity,
                       int checksum_enabled) {
+    if (!src || !dst || src_size < ZXC_FILE_HEADER_SIZE) return 0;
+
     const uint8_t* ip = (const uint8_t*)src;
     const uint8_t* ip_end = ip + src_size;
     uint8_t* op = (uint8_t*)dst;
@@ -1169,9 +1173,7 @@ size_t zxc_decompress(const void* src, size_t src_size, void* dst, size_t dst_ca
     const uint8_t* op_end = op + dst_capacity;
 
     zxc_cctx_t ctx;
-    if (zxc_cctx_init(&ctx, ZXC_CHUNK_SIZE, 0, 0, checksum_enabled) != 0) {
-        return 0;
-    }
+    if (zxc_cctx_init(&ctx, ZXC_CHUNK_SIZE, 0, 0, checksum_enabled) != 0) return 0;
 
     // File header verification
     if (zxc_read_file_header(ip, src_size) != 0) {
