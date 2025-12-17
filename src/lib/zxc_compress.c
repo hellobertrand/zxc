@@ -189,10 +189,11 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* src, size_
 #else
             // NEON 32-bit (ARMv7) fallback for horizontal max using standard shifts
             // Reduce 4 elements -> 2
-            uint32x4_t v_swap = vextq_u32(v_max_accum, v_max_accum, 2); // Swap low/high 64-bit halves
+            uint32x4_t v_swap =
+                vextq_u32(v_max_accum, v_max_accum, 2);  // Swap low/high 64-bit halves
             uint32x4_t v_max2 = vmaxq_u32(v_max_accum, v_swap);
             // Reduce 2 -> 1
-            v_swap = vextq_u32(v_max2, v_max2, 1); // Shift by 32 bits
+            v_swap = vextq_u32(v_max2, v_max2, 1);  // Shift by 32 bits
             uint32x4_t v_max1 = vmaxq_u32(v_max2, v_swap);
             max_d = vgetq_lane_u32(v_max1, 0);
 #endif
@@ -200,7 +201,8 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* src, size_
             if (j > 0) prev = zxc_le32(in_ptr + (j - 1) * 4);
         }
 #endif
-#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512) || defined(ZXC_USE_NEON64) || \
+    defined(ZXC_USE_NEON32)
     _scalar:
 #ifndef _MSC_VER
         __attribute__((unused));
@@ -464,14 +466,16 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
                         uint8x16_t v_diff = vmvnq_u8(v_cmp);
                         // Access as 32-bit lanes to reconstruct 64-bit values or check directly
                         // Reconstructing 64-bit for compatibility with zxc_ctz64 usage
-                        uint64_t lo = (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 0) |
-                                      ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 1) << 32);
+                        uint64_t lo =
+                            (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 0) |
+                            ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 1) << 32);
 
                         if (lo != 0)
                             mlen += (zxc_ctz64(lo) >> 3);
                         else {
-                            uint64_t hi = (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 2) |
-                                          ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 3) << 32);
+                            uint64_t hi =
+                                (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 2) |
+                                ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 3) << 32);
                             mlen += 8 + (zxc_ctz64(hi) >> 3);
                         }
                         goto _match_len_done;
@@ -495,9 +499,9 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
                 if (mlen > best_len) {
                     best_len = mlen;
                     best_ref = ref;
-                    if (best_len >= (uint32_t)sufficient_len) break; // Sufficient match found
+                    if (best_len >= (uint32_t)sufficient_len) break;  // Sufficient match found
 
-                    if (ip + best_len >= iend) break; // Prevent overruns
+                    if (ip + best_len >= iend) break;  // Prevent overruns
                 }
             }
             match_idx = chain_table[match_idx];

@@ -18,10 +18,10 @@
  * Linux/macOS and Windows.
  */
 #if defined(_WIN32)
+#include <malloc.h>
 #include <process.h>
 #include <sys/types.h>
 #include <windows.h>
-#include <malloc.h>
 
 // Simple sysconf emulation to get core count
 static int zxc_get_num_procs(void) {
@@ -971,6 +971,10 @@ int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int mode, 
     pthread_cond_init(&ctx.cond_writer, NULL);
 
     pthread_t* workers = malloc(num_threads * sizeof(pthread_t));
+    if (!workers) {
+        zxc_aligned_free(mem_block);
+        return -1;
+    }
     for (int i = 0; i < num_threads; i++)
         pthread_create(&workers[i], NULL, zxc_stream_worker, &ctx);
 
