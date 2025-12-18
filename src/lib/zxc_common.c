@@ -28,7 +28,7 @@
  * @return A pointer to the allocated memory block, or NULL if the allocation fails.
  *         The returned pointer must be freed using the corresponding aligned free function.
  */
-static void* zxc_aligned_malloc(size_t size, size_t alignment) {
+void* zxc_aligned_malloc(size_t size, size_t alignment) {
 #if defined(_WIN32)
     return _aligned_malloc(size, alignment);
 #else
@@ -47,7 +47,7 @@ static void* zxc_aligned_malloc(size_t size, size_t alignment) {
  *
  * @param ptr A pointer to the memory block to be freed. If ptr is NULL, no operation is performed.
  */
-static void zxc_aligned_free(void* ptr) {
+void zxc_aligned_free(void* ptr) {
 #if defined(_WIN32)
     _aligned_free(ptr);
 #else

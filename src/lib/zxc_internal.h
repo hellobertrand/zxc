@@ -583,6 +583,32 @@ static ZXC_ALWAYS_INLINE int32_t zxc_zigzag_decode(uint32_t n) {
     return (int32_t)(n >> 1) ^ -(int32_t)(n & 1);
 }
 
+/**
+ * @brief Allocates aligned memory in a cross-platform manner.
+ *
+ * This function provides a unified interface for allocating memory with a specific
+ * alignment requirement. It wraps `_aligned_malloc` for Windows
+ * environments and `posix_memalign` for POSIX-compliant systems.
+ *
+ * @param size The size of the memory block to allocate, in bytes.
+ * @param alignment The alignment value, which must be a power of two and a multiple
+ *                  of `sizeof(void *)`.
+ * @return A pointer to the allocated memory block, or NULL if the allocation fails.
+ *         The returned pointer must be freed using the corresponding aligned free function.
+ */
+void* zxc_aligned_malloc(size_t size, size_t alignment);
+
+/**
+ * @brief Frees memory previously allocated with an aligned allocation function.
+ *
+ * This function provides a cross-platform wrapper for freeing aligned memory.
+ * On Windows, it calls `_aligned_free`.
+ * On other platforms, it falls back to the standard `free` function.
+ *
+ * @param ptr A pointer to the memory block to be freed. If ptr is NULL, no operation is performed.
+ */
+void zxc_aligned_free(void* ptr);
+
 /*
  * ============================================================================
  * COMPRESSION CONTEXT & STRUCTS
