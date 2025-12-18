@@ -394,6 +394,7 @@ static void* zxc_async_writer(void* arg) {
         if (ctx->io_error) {
             pthread_mutex_lock(&ctx->lock);
             job->status = JOB_STATUS_FREE;
+            pthread_cond_signal(&ctx->cond_reader);
             pthread_mutex_unlock(&ctx->lock);
             break;
         }
