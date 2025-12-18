@@ -75,47 +75,56 @@ typedef struct {
  * Sets up the internal state required for compression operations, allocating
  * necessary buffers based on the chunk size and compression level.
  *
- * @param ctx Pointer to the compression context structure to initialize.
- * @param chunk_size The size of the data chunks to process.
- * @param mode The compression mode (e.g., fast, high compression).
- * @param level The specific compression level (1-9).
- * @param checksum_enabled
- * @return 0 on success, or a negative error code on failure.
+ * @param[out] ctx Pointer to the ZXC compression context structure to initialize.
+ * @param[in] chunk_size The size of the data chunk to be compressed. This
+ * determines the allocation size for various internal buffers.
+ * @param[in] mode The operation mode (1 for compression, 0 for decompression).
+ * @param[in] level The desired compression level to be stored in the context.
+ * @param[in] checksum_enabled
+ * @return 0 on success, or -1 if memory allocation fails for any of the
+ * internal buffers.
  */
 int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int checksum_enabled);
 
 /**
  * @brief Frees resources associated with a ZXC compression context.
  *
- * Releases memory allocated during initialization and resets the context state.
+ * This function releases all internal buffers and tables associated with the
+ * given ZXC compression context structure. It does not free the context pointer
+ * itself, only its members.
  *
- * @param ctx Pointer to the compression context to free.
+ * @param[in,out] ctx Pointer to the compression context to clean up.
  */
 void zxc_cctx_free(zxc_cctx_t* ctx);
-
-
-/**
- * @brief Validates and reads the ZXC file header from a source buffer.
- *
- * Checks for the correct magic bytes and version number.
- *
- * @param src Pointer to the start of the file data.
- * @param src_size Size of the available source data (must be at least header
- * size).
- * @return The size of the header in bytes on success, or a negative error code.
- */
-int zxc_read_file_header(const uint8_t* src, size_t src_size);
 
 /**
  * @brief Writes the standard ZXC file header to a destination buffer.
  *
- * Writes the magic bytes and version information.
+ * This function stores the magic word (little-endian) and the version number
+ * into the provided buffer. It ensures the buffer has sufficient capacity
+ * before writing.
  *
- * @param dst Pointer to the destination buffer.
- * @param dst_capacity Maximum capacity of the destination buffer.
- * @return The number of bytes written on success, or a negative error code.
+ * @param[out] dst The destination buffer where the header will be written.
+ * @param[in] dst_capacity The total capacity of the destination buffer in bytes.
+ * @return The number of bytes written (ZXC_FILE_HEADER_SIZE) on success,
+ *         or -1 if the destination capacity is insufficient.
  */
 int zxc_write_file_header(uint8_t* dst, size_t dst_capacity);
+
+/**
+ * @brief Validates and reads the ZXC file header from a source buffer.
+ *
+ * This function checks if the provided source buffer is large enough to contain
+ * a ZXC file header and verifies that the magic word and version number match
+ * the expected ZXC format specifications.
+ *
+ * @param[in] src Pointer to the source buffer containing the file data.
+ * @param[in] src_size Size of the source buffer in bytes.
+ * @return 0 if the header is valid, -1 otherwise (e.g., buffer too small,
+ * invalid magic word, or incorrect version).
+ */
+int zxc_read_file_header(const uint8_t* src, size_t src_size);
+
 
 /**
  * @struct zxc_block_header_t
@@ -142,33 +151,42 @@ typedef struct {
     uint32_t raw_size;    // Decompressed size
 } zxc_block_header_t;
 
-
-/**
- * @brief Parses a block header from the source stream.
- *
- * Decodes the block size, compression type, and checksum flags into the
- * provided block header structure.
- *
- * @param src Pointer to the current position in the source stream.
- * @param src_size Available bytes remaining in the source stream.
- * @param bh Pointer to a block header structure to populate.
- * @return The number of bytes read (header size) on success, or a negative
- * error code.
- */
-int zxc_read_block_header(const uint8_t* src, size_t src_size, zxc_block_header_t* bh);
-
 /**
  * @brief Encodes a block header into the destination buffer.
  *
- * Serializes the information contained in the block header structure (size,
- * flags, etc.) into the binary format expected by the decoder.
+ * This function serializes the contents of a `zxc_block_header_t` structure
+ * into a byte array in little-endian format. It ensures the destination buffer
+ * has sufficient capacity before writing.
  *
- * @param dst Pointer to the destination buffer.
- * @param dst_capacity Maximum capacity of the destination buffer.
- * @param bh Pointer to the block header structure containing the metadata.
- * @return The number of bytes written on success, or a negative error code.
+ * @param[out] dst Pointer to the destination buffer where the header will be
+ * written.
+ * @param[in] dst_capacity The total size of the destination buffer in bytes.
+ * @param[in] bh Pointer to the source block header structure containing the data to
+ * write.
+ *
+ * @return The number of bytes written (ZXC_BLOCK_HEADER_SIZE) on success,
+ *         or -1 if the destination buffer capacity is insufficient.
  */
 int zxc_write_block_header(uint8_t* dst, size_t dst_capacity, const zxc_block_header_t* bh);
+
+/**
+ * @brief Read and parses a ZXC block header from a source buffer.
+ *
+ * This function extracts the block type, flags, reserved fields, compressed
+ * size, and raw size from the first `ZXC_BLOCK_HEADER_SIZE` bytes of the source
+ * buffer. It handles endianness conversion for multi-byte fields (Little
+ * Endian).
+ *
+ * @param[in] src       Pointer to the source buffer containing the block data.
+ * @param[in] src_size  The size of the source buffer in bytes.
+ * @param[out] bh        Pointer to a `zxc_block_header_t` structure where the parsed
+ *                  header information will be stored.
+ *
+ * @return 0 on success, or -1 if the source buffer is smaller than the
+ *         required block header size.
+ */
+int zxc_read_block_header(const uint8_t* src, size_t src_size, zxc_block_header_t* bh);
+
 
 #ifdef __cplusplus
 }
