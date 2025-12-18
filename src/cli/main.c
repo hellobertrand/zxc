@@ -514,8 +514,6 @@ int main(int argc, char** argv) {
 
     if (!use_stdin) fclose(f_in);
     if (!use_stdout) fclose(f_out);
-    free(b1);
-    free(b2);
 
     if (bytes >= 0) {
         zxc_log_v("Processed %d bytes in %.3fs\n", bytes, dt);
