@@ -276,7 +276,7 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
         uint16_t bits = zxc_le16(p + 2);
         uint32_t psize = zxc_le32(p + 12);
         p += 16;
-        if (UNLIKELY(p + psize > p_end || d_ptr + nvals * 4 > d_end)) return -1;
+        if (UNLIKELY(p + psize > p_end || d_ptr + nvals * 4 > d_end || bits > 32)) return -1;
 
         zxc_bit_reader_t br;
         zxc_br_init(&br, p, psize);
