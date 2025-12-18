@@ -6,8 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#ifndef ZXC_DRIVER_H
-#define ZXC_DRIVER_H
+#ifndef ZXC_STREAM_H
+#define ZXC_STREAM_H
 
 #include <stdint.h>
 #include <stdio.h>
@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 /*
- * STREAMING API
+ * ZXC Compression Library - Streaming Driver API
  * ----------------------------------------------------------------------------
  * The library uses an asynchronous pipeline architecture (Producer-Consumer)
  * via a Ring Buffer to separate I/O operations from CPU-intensive compression
@@ -66,4 +66,4 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checks
 }
 #endif
 
-#endif  // ZXC_DRIVER_H
+#endif  // ZXC_STREAM_H

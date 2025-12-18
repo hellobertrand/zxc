@@ -7,7 +7,13 @@
  */
 
 #include "../../include/zxc.h"
+#include "../../include/zxc_stream.h"
+#include "../../include/zxc_sans_io.h"
 #include "zxc_internal.h"
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdio.h>
 
 /*
  * ============================================================================
@@ -151,6 +157,28 @@ typedef struct {
     job_status_t status;
     char pad[64];  // Prevent False Sharing
 } zxc_stream_job_t;
+
+/**
+ * @typedef zxc_chunk_processor_t
+ * @brief Function pointer type for processing a chunk of data.
+ *
+ * This type defines the signature for internal functions responsible for
+ * processing (compressing or transforming) a specific chunk of input data.
+ *
+ * @param ctx     Pointer to the compression context containing state and
+ * configuration.
+ * @param in      Pointer to the input data buffer.
+ * @param in_sz   Size of the input data in bytes.
+ * @param out     Pointer to the output buffer where processed data will be
+ * written.
+ * @param out_cap Capacity of the output buffer in bytes.
+ *
+ * @return The number of bytes written to the output buffer on success, or a
+ * negative error code on failure.
+ */
+typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* ctx, const uint8_t* in, size_t in_sz, uint8_t* out,
+                                     size_t out_cap);
+
 
 /**
  * @struct zxc_stream_ctx_t
@@ -418,7 +446,7 @@ static void* zxc_async_writer(void* arg) {
  * @return The total number of bytes written to the output stream on success, or
  * -1 if an initialization or I/O error occurred.
  */
-int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int mode, int level,
+static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int mode, int level,
                               int checksum_enabled, zxc_chunk_processor_t func) {
     if (!f_in) return -1;
 
@@ -568,4 +596,52 @@ int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int mode, 
     if (ctx.io_error) return -1;
 
     return w_args.total_bytes;
+}
+
+/**
+ * @brief Compresses a data stream from an input file to an output file.
+ *
+ * This function initializes the compression engine to process the input
+ * stream using the specified number of threads and compression level. It acts
+ * as a wrapper around the generic stream engine, specifically configuring it
+ * for compression operations.
+ *
+ * @param f_in      Pointer to the input file stream to be compressed.
+ * @param f_out     Pointer to the output file stream where compressed data
+ * will be written.
+ * @param n_threads The number of threads to use for parallel compression.
+ * @param level     The compression level (determines the trade-off between
+ * speed and ratio).
+ * @param checksum_enabled  Flag indicating whether to calculate and store a checksum
+ * for data integrity.
+ *
+ * @return          Returns 0 on success, or a non-zero error code on failure.
+ */
+int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
+                            int checksum_enabled) {
+    return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, checksum_enabled,
+                                 zxc_compress_chunk_wrapper);
+}
+
+/**
+ * @brief Decompresses a data stream from an input file to an output file.
+ *
+ * This function acts as a high-level wrapper for the ZXC stream engine,
+ * configured specifically for decompression. It processes the input stream
+ * using the specified number of threads and optionally verifies the data
+ * integrity using a checksum.
+ *
+ * @param f_in      Pointer to the input file stream containing compressed data.
+ * @param f_out     Pointer to the output file stream where decompressed data
+ * will be written.
+ * @param n_threads The number of worker threads to use for parallel
+ * decompression.
+ * @param checksum_enabled  Flag indicating whether to verify the checksum of
+ * the data (1 to enable, 0 to disable).
+ * @return          Returns 0 on success, or a non-zero error code if the
+ * decompression fails.
+ */
+int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checksum_enabled) {
+    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, checksum_enabled,
+                                 (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper);
 }

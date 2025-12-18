@@ -1121,29 +1121,6 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
 }
 
 /**
- * @brief Decompresses a data stream from an input file to an output file.
- *
- * This function acts as a high-level wrapper for the ZXC stream engine,
- * configured specifically for decompression. It processes the input stream
- * using the specified number of threads and optionally verifies the data
- * integrity using a checksum.
- *
- * @param f_in      Pointer to the input file stream containing compressed data.
- * @param f_out     Pointer to the output file stream where decompressed data
- * will be written.
- * @param n_threads The number of worker threads to use for parallel
- * decompression.
- * @param checksum_enabled  Flag indicating whether to verify the checksum of
- * the data (1 to enable, 0 to disable).
- * @return          Returns 0 on success, or a non-zero error code if the
- * decompression fails.
- */
-int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checksum_enabled) {
-    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, checksum_enabled,
-                                 (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper);
-}
-
-/**
  * @brief Decompresses a ZXC compressed buffer.
  *
  * This version uses standard size_t types and void pointers.
