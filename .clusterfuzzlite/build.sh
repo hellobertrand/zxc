@@ -1,11 +1,27 @@
 #!/bin/bash -eu
 
+#  Copyright (c) 2025, Bertrand Lebonnois
+#  All rights reserved.
+#
+#  This source code is licensed under the BSD-style license found in the
+#  LICENSE file in the root directory of this source tree.
+
 $CC $CFLAGS -I include \
     src/lib/zxc_common.c \
     src/lib/zxc_compress.c \
     src/lib/zxc_decompress.c \
     src/lib/zxc_driver.c \
-    tests/fuzz.c \
+    tests/fuzz_decompress.c \
+    -o $OUT/zxc_fuzzer \
+    $LIB_FUZZING_ENGINE \
+    -lm -pthread
+
+$CC $CFLAGS -I include \
+    src/lib/zxc_common.c \
+    src/lib/zxc_compress.c \
+    src/lib/zxc_decompress.c \
+    src/lib/zxc_driver.c \
+    tests/fuzz_roundtrip.c \
     -o $OUT/zxc_fuzzer \
     $LIB_FUZZING_ENGINE \
     -lm -pthread
