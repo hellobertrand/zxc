@@ -6,7 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include "../../include/zxc.h"
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_sans_io.h"
 #include "zxc_internal.h"
 
 #define ZXC_NUM_FRAME_SIZE \

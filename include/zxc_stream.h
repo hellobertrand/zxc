@@ -17,9 +17,10 @@ extern "C" {
 #endif
 
 /*
- * ZXC Compression Library - Streaming Driver API
- * ----------------------------------------------------------------------------
- * The library uses an asynchronous pipeline architecture (Producer-Consumer)
+ * ============================================================================
+ * ZXC Compression Library - Public Streaming Driver API
+ * ============================================================================
+ * This driver uses an asynchronous pipeline architecture (Producer-Consumer)
  * via a Ring Buffer to separate I/O operations from CPU-intensive compression
  * tasks.
  */

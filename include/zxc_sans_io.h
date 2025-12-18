@@ -18,7 +18,7 @@ extern "C" {
 
 /*
  * ============================================================================
- * ZXC Compression Library - Sans-IO API - For you to build your own driver
+ * ZXC Compression Library - Public Sans-IO API - To build your own driver
  * ============================================================================
  */
 
