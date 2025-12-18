@@ -218,7 +218,7 @@ typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* ctx, const uint8_t* in, size_t 
  * @var zxc_stream_ctx_t::compression_mode
  *      Indicates the operation mode (e.g., compression or decompression).
  * @var zxc_stream_ctx_t::io_error
- *      Volatile flag to signal if an I/O error occurred during processing.
+ *      Atomic flag to signal if an I/O error occurred during processing.
  * @var zxc_stream_ctx_t::processor
  *      Function pointer or object responsible for the actual chunk processing
  * logic.
@@ -238,7 +238,7 @@ typedef struct {
     pthread_cond_t cond_reader, cond_worker, cond_writer;
     int shutdown_workers;
     int compression_mode;
-    volatile int io_error;
+    _Atomic int io_error;
     zxc_chunk_processor_t processor;
     int write_idx;
     int checksum_enabled;
