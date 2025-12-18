@@ -367,6 +367,14 @@ This example demonstrates:
 * Error handling for file operations
 * Progress tracking via return values
 
+## Writing Your Own Streaming Driver / Binding to Other Languages
+The streaming multi-threaded API in the previous example is just the default provided driver.
+However, ZXC is written in a "sans-IO" style that separates compute from I/O and multitasking.
+This allows you to write your own driver in any language of your choice, and use the native I/O
+and multitasking capabilities of your language.
+You will need only to include the extra public header `zxc_sans_io.h`, and implement
+your own behavior based on `zxc_driver.c`.
+
 
 ## Safety & Quality
 * **Continuous Fuzzing**: Integrated with Google OSS-Fuzz (PR ready) and local libFuzzer suites.

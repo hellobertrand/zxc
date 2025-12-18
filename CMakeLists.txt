@@ -21,6 +21,7 @@ add_library(zxc_lib STATIC
     src/lib/zxc_common.c
     src/lib/zxc_compress.c
     src/lib/zxc_decompress.c
+    src/lib/zxc_driver.c
 )
 
 # Thread Management (Portable Abstraction)

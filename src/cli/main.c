@@ -21,7 +21,7 @@
 #include <string.h>
 
 #include "../../include/zxc.h"
-#include "../lib/zxc_internal.h"
+#include "../../include/zxc_stream.h"
 
 #if defined(_WIN32)
 #define ZXC_OS "windows"

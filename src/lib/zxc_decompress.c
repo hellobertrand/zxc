@@ -6,7 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include "../../include/zxc.h"
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_sans_io.h"
 #include "zxc_internal.h"
 
 #define ZXC_DEC_BATCH 32  // Number of sequences to decode in a batch
@@ -409,7 +410,6 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
  * @return The number of bytes written to the destination buffer on success, or
  * -1 on failure (e.g., invalid header, buffer overflow, or corrupted data).
  */
-
 static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, size_t src_size,
                                 uint8_t* restrict dst, size_t dst_capacity,
                                 uint32_t expected_raw_size) {
@@ -1120,29 +1120,6 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
     return decoded_sz;
 }
 
-/**
- * @brief Decompresses a data stream from an input file to an output file.
- *
- * This function acts as a high-level wrapper for the ZXC stream engine,
- * configured specifically for decompression. It processes the input stream
- * using the specified number of threads and optionally verifies the data
- * integrity using a checksum.
- *
- * @param[in] f_in      Pointer to the input file stream containing ZXC compressed data.
- * @param[out] f_out     Pointer to the output file stream where decompressed data
- * will be written.
- * @param[in] n_threads The number of threads to use for parallel decompression.
- * @param[in] checksum_enabled  Flag indicating whether to verify checksums during
- * decompression.
- * @return          Returns 0 on success, or a non-zero error code if the
- * decompression fails.
- */
-int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checksum_enabled) {
-    if (!f_in || !f_out) return -1;
-
-    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, checksum_enabled,
-                                 (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper);
-}
 
 /**
  * @brief Decompresses a ZXC compressed buffer.

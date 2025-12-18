@@ -11,7 +11,8 @@
 #include <string.h>
 #include <time.h>
 
-#include "../include/zxc.h"
+#include "../include/zxc_buffer.h"
+#include "../include/zxc_stream.h"
 
 // --- Helpers ---
 

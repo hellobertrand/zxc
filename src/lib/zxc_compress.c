@@ -6,7 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include "../../include/zxc.h"
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_sans_io.h"
 #include "zxc_internal.h"
 
 #define ZXC_NUM_FRAME_SIZE \
@@ -930,33 +931,6 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
     }
 
     return (int)w;
-}
-
-/**
- * @brief Compresses a data stream from an input file to an output file.
- *
- * This function initializes the compression engine to process the input
- * stream using the specified number of threads and compression level. It acts
- * as a wrapper around the generic stream engine, specifically configuring it
- * for compression operations.
- *
- * @param[in] f_in      Pointer to the input file stream to be compressed.
- * @param[out] f_out     Pointer to the output file stream where compressed data
- * will be written.
- * @param[in] n_threads The number of threads to use for parallel compression.
- * @param[in] level     The compression level (determines the trade-off between
- * speed and ratio).
- * @param[in] checksum_enabled  Flag indicating whether to calculate and store a checksum
- * for data integrity.
- *
- * @return          Returns 0 on success, or a non-zero error code on failure.
- */
-int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
-                            int checksum_enabled) {
-    if (!f_in) return -1;
-
-    return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, checksum_enabled,
-                                 zxc_compress_chunk_wrapper);
 }
 
 /**
