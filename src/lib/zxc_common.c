@@ -23,8 +23,8 @@
  * alignment requirement. It wraps `_aligned_malloc` for Windows
  * environments and `posix_memalign` for POSIX-compliant systems.
  *
- * @param size The size of the memory block to allocate, in bytes.
- * @param alignment The alignment value, which must be a power of two and a multiple
+ * @param[in] size The size of the memory block to allocate, in bytes.
+ * @param[in] alignment The alignment value, which must be a power of two and a multiple
  *                  of `sizeof(void *)`.
  * @return A pointer to the allocated memory block, or NULL if the allocation fails.
  *         The returned pointer must be freed using the corresponding aligned free function.
@@ -46,7 +46,8 @@ void* zxc_aligned_malloc(size_t size, size_t alignment) {
  * On Windows, it calls `_aligned_free`.
  * On other platforms, it falls back to the standard `free` function.
  *
- * @param ptr A pointer to the memory block to be freed. If ptr is NULL, no operation is performed.
+ * @param[in] ptr A pointer to the memory block to be freed. If ptr is NULL, no operation is
+ * performed.
  */
 void zxc_aligned_free(void* ptr) {
 #if defined(_WIN32)
@@ -71,12 +72,12 @@ void zxc_aligned_free(void* ptr) {
  * - **Sequences & Buffers:** Allocated based on `chunk_size / 4 + 256` to
  * handle the worst-case scenario where we have many small matches.
  *
- * @param ctx Pointer to the ZXC compression context structure to initialize.
- * @param chunk_size The size of the data chunk to be compressed. This
+ * @param[out] ctx Pointer to the ZXC compression context structure to initialize.
+ * @param[in] chunk_size The size of the data chunk to be compressed. This
  * determines the allocation size for various internal buffers.
- * @param mode The operation mode (1 for compression, 0 for decompression).
- * @param level The desired compression level to be stored in the context.
- * @param checksum_enabled
+ * @param[in] mode The operation mode (1 for compression, 0 for decompression).
+ * @param[in] level The desired compression level to be stored in the context.
+ * @param[in] checksum_enabled
  * @return 0 on success, or -1 if memory allocation fails for any of the
  * internal buffers.
  */
@@ -134,7 +135,7 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
  * given ZXC compression context structure. It does not free the context pointer
  * itself, only its members.
  *
- * @param ctx Pointer to the compression context to clean up.
+ * @param[in,out] ctx Pointer to the compression context to clean up.
  */
 void zxc_cctx_free(zxc_cctx_t* ctx) {
     if (ctx->memory_block) {
@@ -183,8 +184,8 @@ uint64_t zxc_checksum(const void* data, size_t len) { return XXH3_64bits(data, l
  * into the provided buffer. It ensures the buffer has sufficient capacity
  * before writing.
  *
- * @param dst The destination buffer where the header will be written.
- * @param dst_capacity The total capacity of the destination buffer in bytes.
+ * @param[out] dst The destination buffer where the header will be written.
+ * @param[in] dst_capacity The total capacity of the destination buffer in bytes.
  * @return The number of bytes written (ZXC_FILE_HEADER_SIZE) on success,
  *         or -1 if the destination capacity is insufficient.
  */
@@ -206,8 +207,8 @@ int zxc_write_file_header(uint8_t* dst, size_t dst_capacity) {
  * a ZXC file header and verifies that the magic word and version number match
  * the expected ZXC format specifications.
  *
- * @param src Pointer to the source buffer containing the file data.
- * @param src_size Size of the source buffer in bytes.
+ * @param[in] src Pointer to the source buffer containing the file data.
+ * @param[in] src_size Size of the source buffer in bytes.
  * @return 0 if the header is valid, -1 otherwise (e.g., buffer too small,
  * invalid magic word, or incorrect version).
  */
@@ -224,10 +225,10 @@ int zxc_read_file_header(const uint8_t* src, size_t src_size) {
  * into a byte array in little-endian format. It ensures the destination buffer
  * has sufficient capacity before writing.
  *
- * @param dst Pointer to the destination buffer where the header will be
+ * @param[out] dst Pointer to the destination buffer where the header will be
  * written.
- * @param dst_capacity The total size of the destination buffer in bytes.
- * @param bh Pointer to the source block header structure containing the data to
+ * @param[in] dst_capacity The total size of the destination buffer in bytes.
+ * @param[in] bh Pointer to the source block header structure containing the data to
  * write.
  *
  * @return The number of bytes written (ZXC_BLOCK_HEADER_SIZE) on success,
@@ -252,9 +253,9 @@ int zxc_write_block_header(uint8_t* dst, size_t dst_capacity, const zxc_block_he
  * buffer. It handles endianness conversion for multi-byte fields (Little
  * Endian).
  *
- * @param src       Pointer to the source buffer containing the block data.
- * @param src_size  The size of the source buffer in bytes.
- * @param bh        Pointer to a `zxc_block_header_t` structure where the parsed
+ * @param[in] src       Pointer to the source buffer containing the block data.
+ * @param[in] src_size  The size of the source buffer in bytes.
+ * @param[out] bh        Pointer to a `zxc_block_header_t` structure where the parsed
  *                  header information will be stored.
  *
  * @return 0 on success, or -1 if the source buffer is smaller than the
@@ -286,9 +287,9 @@ int zxc_read_block_header(const uint8_t* src, size_t src_size, zxc_block_header_
  * preloads a full 64-bit word using little-endian ordering. Otherwise, it loads
  * the available bytes one by one.
  *
- * @param br Pointer to the bit reader structure to initialize.
- * @param src Pointer to the source buffer containing the data to read.
- * @param size The size of the source buffer in bytes.
+ * @param[out] br Pointer to the bit reader structure to initialize.
+ * @param[in] src Pointer to the source buffer containing the data to read.
+ * @param[in] size The size of the source buffer in bytes.
  */
 void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* src, size_t size) {
     br->ptr = src;
@@ -308,12 +309,12 @@ void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* src, size_t size) {
  * specified number of least significant bits for each integer. The resulting
  * bits are concatenated contiguously into the destination buffer.
  *
- * @param src      Pointer to the source array of 32-bit integers.
- * @param count    The number of integers to pack.
- * @param dst      Pointer to the destination byte buffer where packed data will
+ * @param[in] src      Pointer to the source array of 32-bit integers.
+ * @param[in] count    The number of integers to pack.
+ * @param[out] dst      Pointer to the destination byte buffer where packed data will
  * be written. The buffer is zero-initialized before writing.
- * @param dst_cap  The capacity of the destination buffer in bytes.
- * @param bits     The number of bits to use for each integer (bit width).
+ * @param[in] dst_cap  The capacity of the destination buffer in bytes.
+ * @param[in] bits     The number of bits to use for each integer (bit width).
  *                 Must be between 1 and 32.
  *
  * @return The number of bytes written to the destination buffer on success,
@@ -354,10 +355,10 @@ int zxc_bitpack_stream_32(const uint32_t* restrict src, size_t count, uint8_t* r
  * - Offset 10: Reserved/Padding (16-bit, set to 0)
  * - Offset 12: Reserved/Padding (32-bit, set to 0)
  *
- * @param dst Pointer to the destination buffer where the header will be
+ * @param[out] dst Pointer to the destination buffer where the header will be
  * written.
- * @param rem The remaining size available in the destination buffer.
- * @param nh Pointer to the source numeric header structure containing the
+ * @param[in] rem The remaining size available in the destination buffer.
+ * @param[in] nh Pointer to the source numeric header structure containing the
  * values to write.
  *
  * @return The number of bytes written (ZXC_NUM_HEADER_BINARY_SIZE) on success,
@@ -384,9 +385,9 @@ int zxc_write_num_header(uint8_t* dst, size_t rem, const zxc_num_header_t* nh) {
  * - 8 bytes: Number of values (Little Endian 64-bit integer)
  * - 2 bytes: Frame size (Little Endian 16-bit integer)
  *
- * @param src Pointer to the source buffer containing the binary header data.
- * @param src_size The size of the source buffer in bytes.
- * @param nh Pointer to the `zxc_num_header_t` structure to be populated.
+ * @param[in] src Pointer to the source buffer containing the binary header data.
+ * @param[in] src_size The size of the source buffer in bytes.
+ * @param[out] nh Pointer to the `zxc_num_header_t` structure to be populated.
  *
  * @return 0 on success, or -1 if the source buffer is smaller than the required
  * header size.
@@ -422,10 +423,10 @@ int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* n
  *   - 4 bytes: Raw size (Little Endian)
  *   - 4 bytes: Reserved/Padding (set to 0)
  *
- * @param dst   Pointer to the destination buffer where data will be written.
- * @param rem   Remaining size in bytes available in the destination buffer.
- * @param gh    Pointer to the source general header structure.
- * @param desc  Array of 4 section descriptors to be written.
+ * @param[out] dst   Pointer to the destination buffer where data will be written.
+ * @param[in] rem   Remaining size in bytes available in the destination buffer.
+ * @param[in] gh    Pointer to the source general header structure.
+ * @param[in] desc  Array of 4 section descriptors to be written.
  *
  * @return The total number of bytes written on success, or -1 if the remaining
  *         buffer space (`rem`) is insufficient.
@@ -463,10 +464,10 @@ int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
  * verifies that the source buffer is large enough to contain the required
  * binary data before reading.
  *
- * @param src   Pointer to the source buffer containing the binary data.
- * @param len   Length of the source buffer in bytes.
- * @param gh    Pointer to the `zxc_gnr_header_t` structure to be populated.
- * @param desc  Array of 4 `zxc_section_desc_t` structures to be populated with
+ * @param[in] src   Pointer to the source buffer containing the binary data.
+ * @param[in] len   Length of the source buffer in bytes.
+ * @param[out] gh    Pointer to the `zxc_gnr_header_t` structure to be populated.
+ * @param[out] desc  Array of 4 `zxc_section_desc_t` structures to be populated with
  * section details.
  *
  * @return 0 on success, or -1 if the source buffer length is insufficient.
@@ -501,10 +502,12 @@ int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_
  * potential overhead for each chunk, ensuring the destination buffer is large
  * enough to hold the result even if the data is incompressible.
  *
- * @param input_size The size of the uncompressed input data in bytes.
+ * @param[in] input_size The size of the uncompressed input data in bytes.
  * @return The maximum potential size of the compressed data in bytes.
  */
 size_t zxc_compress_bound(size_t input_size) {
+    if (input_size > SIZE_MAX - (SIZE_MAX >> 10)) return 0;
+
     size_t n = (input_size + ZXC_CHUNK_SIZE - 1) / ZXC_CHUNK_SIZE;
     if (n == 0) n = 1;
     return ZXC_FILE_HEADER_SIZE + (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + 64)) +

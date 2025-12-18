@@ -9,10 +9,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <time.h>
 
-#include "../include/zxc.h"
+#include "../include/zxc_buffer.h"
 #include "../include/zxc_stream.h"
 
 // --- Helpers ---
@@ -169,6 +168,44 @@ int test_invalid_arguments() {
     // 3. Decompression Input NULL -> Must fail
     if (zxc_stream_decompress(NULL, f, 1, 0) != -1) {
         printf("Failed: Decompress should return -1 when Input is NULL\n");
+        fclose(f);
+        return 0;
+    }
+
+    // 3b. Decompression Output NULL -> Must fail
+    if (zxc_stream_decompress(f, NULL, 1, 0) != -1) {
+        printf("Failed: Decompress should return -1 when Output is NULL\n");
+        fclose(f);
+        return 0;
+    }
+
+    // 4. zxc_compress NULL checks
+    if (zxc_compress(NULL, 100, (void*)1, 100, 3, 0) != 0) {
+        printf("Failed: zxc_compress should return 0 when src is NULL\n");
+        fclose(f);
+        return 0;
+    }
+    if (zxc_compress((void*)1, 100, NULL, 100, 3, 0) != 0) {
+        printf("Failed: zxc_compress should return 0 when dst is NULL\n");
+        fclose(f);
+        return 0;
+    }
+
+    // 5. zxc_decompress NULL checks
+    if (zxc_decompress(NULL, 100, (void*)1, 100, 0) != 0) {
+        printf("Failed: zxc_decompress should return 0 when src is NULL\n");
+        fclose(f);
+        return 0;
+    }
+    if (zxc_decompress((void*)1, 100, NULL, 100, 0) != 0) {
+        printf("Failed: zxc_decompress should return 0 when dst is NULL\n");
+        fclose(f);
+        return 0;
+    }
+
+    // 6. zxc_compress_bound overflow check
+    if (zxc_compress_bound(SIZE_MAX) != 0) {
+        printf("Failed: zxc_compress_bound should return 0 on overflow\n");
         fclose(f);
         return 0;
     }

@@ -24,10 +24,10 @@
  * Linux/macOS and Windows.
  */
 #if defined(_WIN32)
+#include <malloc.h>
 #include <process.h>
 #include <sys/types.h>
 #include <windows.h>
-#include <malloc.h>
 
 // Simple sysconf emulation to get core count
 static int zxc_get_num_procs(void) {
@@ -295,7 +295,7 @@ typedef struct {
  * prevents unnecessary wake-ups of the writer thread for out-of-order
  * completions.
  *
- * @param arg A pointer to the shared stream context (`zxc_stream_ctx_t`).
+ * @param[in] arg A pointer to the shared stream context (`zxc_stream_ctx_t`).
  * @return Always returns NULL.
  */
 static void* zxc_stream_worker(void* arg) {
@@ -368,7 +368,7 @@ static void* zxc_stream_worker(void* arg) {
  * 4. **Advance:** Increments `ctx->write_idx` to wait for the next sequential
  * block.
  *
- * @param arg Pointer to a `writer_args_t` structure containing the stream
+ * @param[in] arg Pointer to a `writer_args_t` structure containing the stream
  * context, the output file handle, and a counter for total bytes written.
  * @return Always returns NULL.
  */
@@ -431,16 +431,16 @@ static void* zxc_async_writer(void* arg) {
  * directly into `in_buf`, and the writer writes directly from `out_buf`,
  * minimizing memory copies.
  *
- * @param f_in      Pointer to the input file stream (source).
- * @param f_out     Pointer to the output file stream (destination).
- * @param n_threads Number of worker threads to spawn. If set to 0 or less, the
+ * @param[in] f_in      Pointer to the input file stream (source).
+ * @param[out] f_out     Pointer to the output file stream (destination).
+ * @param[in] n_threads Number of worker threads to spawn. If set to 0 or less, the
  * function automatically detects the number of online processors.
- * @param mode      Operation mode: 1 for compression, 0 for decompression.
- * @param level     Compression level to be applied (relevant for compression
+ * @param[in] mode      Operation mode: 1 for compression, 0 for decompression.
+ * @param[in] level     Compression level to be applied (relevant for compression
  * mode).
- * @param checksum_enabled  Flag indicating whether to enable checksum
+ * @param[in] checksum_enabled  Flag indicating whether to enable checksum
  * generation/verification.
- * @param func      Function pointer to the chunk processor (compression or
+ * @param[in] func      Function pointer to the chunk processor (compression or
  * decompression logic).
  *
  * @return The total number of bytes written to the output stream on success, or
@@ -448,8 +448,6 @@ static void* zxc_async_writer(void* arg) {
  */
 static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int mode, int level,
                               int checksum_enabled, zxc_chunk_processor_t func) {
-    if (!f_in) return -1;
-
     zxc_stream_ctx_t ctx;
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
 
@@ -498,6 +496,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
     pthread_cond_init(&ctx.cond_writer, NULL);
 
     pthread_t* workers = malloc(num_threads * sizeof(pthread_t));
+    if (!workers) {
+        zxc_aligned_free(mem_block);
+        return -1;
+    }
     for (int i = 0; i < num_threads; i++)
         pthread_create(&workers[i], NULL, zxc_stream_worker, &ctx);
 
@@ -606,19 +608,21 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
  * as a wrapper around the generic stream engine, specifically configuring it
  * for compression operations.
  *
- * @param f_in      Pointer to the input file stream to be compressed.
- * @param f_out     Pointer to the output file stream where compressed data
+ * @param[in] f_in      Pointer to the input file stream to be compressed.
+ * @param[out] f_out     Pointer to the output file stream where compressed data
  * will be written.
- * @param n_threads The number of threads to use for parallel compression.
- * @param level     The compression level (determines the trade-off between
+ * @param[in] n_threads The number of threads to use for parallel compression.
+ * @param[in] level     The compression level (determines the trade-off between
  * speed and ratio).
- * @param checksum_enabled  Flag indicating whether to calculate and store a checksum
+ * @param[in] checksum_enabled  Flag indicating whether to calculate and store a checksum
  * for data integrity.
  *
  * @return          Returns 0 on success, or a non-zero error code on failure.
  */
 int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
                             int checksum_enabled) {
+    if (!f_in) return -1;
+
     return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, checksum_enabled,
                                  zxc_compress_chunk_wrapper);
 }
@@ -631,17 +635,18 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
  * using the specified number of threads and optionally verifies the data
  * integrity using a checksum.
  *
- * @param f_in      Pointer to the input file stream containing compressed data.
- * @param f_out     Pointer to the output file stream where decompressed data
+ * @param[in] f_in      Pointer to the input file stream containing ZXC compressed data.
+ * @param[out] f_out     Pointer to the output file stream where decompressed data
  * will be written.
- * @param n_threads The number of worker threads to use for parallel
+ * @param[in] n_threads The number of threads to use for parallel decompression.
+ * @param[in] checksum_enabled  Flag indicating whether to verify checksums during
  * decompression.
- * @param checksum_enabled  Flag indicating whether to verify the checksum of
- * the data (1 to enable, 0 to disable).
  * @return          Returns 0 on success, or a non-zero error code if the
  * decompression fails.
  */
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checksum_enabled) {
+    if (!f_in || !f_out) return -1;
+
     return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, checksum_enabled,
                                  (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper);
 }

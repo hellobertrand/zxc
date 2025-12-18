@@ -33,12 +33,12 @@ extern "C" {
  * 2. Worker Threads: Compress chunks in parallel (LZ77 + Bitpacking).
  * 3. Writer Thread: Orders the processed chunks and writes them to f_out.
  *
- * @param f_in      Input file stream (must be opened in "rb" mode).
- * @param f_out     Output file stream (must be opened in "wb" mode).
- * @param n_threads Number of worker threads to spawn (0 = auto-detect number of
+ * @param[in] f_in      Input file stream (must be opened in "rb" mode).
+ * @param[out] f_out     Output file stream (must be opened in "wb" mode).
+ * @param[in] n_threads Number of worker threads to spawn (0 = auto-detect number of
  * CPU cores).
- * @param level     Compression level (1-9).
- * @param checksum_enabled  If non-zero, enables checksum verification for data
+ * @param[in] level     Compression level (1-9).
+ * @param[in] checksum_enabled  If non-zero, enables checksum verification for data
  * integrity.
  *
  * @return          Total compressed bytes written, or -1 if an error occurred.
@@ -51,11 +51,11 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
  *
  * Uses the same pipeline architecture as compression to maximize throughput.
  *
- * @param f_in      Input file stream (must be opened in "rb" mode).
- * @param f_out     Output file stream (must be opened in "wb" mode).
- * @param n_threads Number of worker threads to spawn (0 = auto-detect number of
+ * @param[in] f_in      Input file stream (must be opened in "rb" mode).
+ * @param[out] f_out     Output file stream (must be opened in "wb" mode).
+ * @param[in] n_threads Number of worker threads to spawn (0 = auto-detect number of
  * CPU cores).
- * @param checksum_enabled  If non-zero, enables checksum verification for data
+ * @param[in] checksum_enabled  If non-zero, enables checksum verification for data
  * integrity.
  *
  * @return          Total decompressed bytes written, or -1 if an error
