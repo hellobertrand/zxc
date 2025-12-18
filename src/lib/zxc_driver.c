@@ -544,6 +544,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
             } else {
                 zxc_block_header_t bh;
                 zxc_read_block_header(bh_buf, ZXC_BLOCK_HEADER_SIZE, &bh);
+
                 int has_crc = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
                 if (has_crc) {
                     if (fread(bh_buf + ZXC_BLOCK_HEADER_SIZE, 1, ZXC_BLOCK_CHECKSUM_SIZE, f_in) !=
@@ -552,13 +553,16 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
                     }
                 }
 
-                ZXC_MEMCPY(job->in_buf, bh_buf,
-                           ZXC_BLOCK_HEADER_SIZE + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0));
-                size_t body_read = fread(
-                    job->in_buf + ZXC_BLOCK_HEADER_SIZE + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0),
-                    1, bh.comp_size, f_in);
-                read_sz =
-                    ZXC_BLOCK_HEADER_SIZE + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0) + body_read;
+                size_t header_len = ZXC_BLOCK_HEADER_SIZE + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+
+                if (UNLIKELY(bh.comp_size > job->in_cap - header_len)) {
+                    ctx.io_error = 1;
+                    break;
+                }
+
+                ZXC_MEMCPY(job->in_buf, bh_buf, header_len);
+                size_t body_read = fread(job->in_buf + header_len, 1, bh.comp_size, f_in);
+                read_sz = header_len + body_read;
                 if (body_read != bh.comp_size) read_eof = 1;
             }
         }
