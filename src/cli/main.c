@@ -20,7 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../include/zxc.h"
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_constants.h"
 #include "../../include/zxc_stream.h"
 
 #if defined(_WIN32)
