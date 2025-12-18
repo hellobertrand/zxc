@@ -428,6 +428,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
         size_t required_size = (size_t)(desc[0].sizes >> 32);
 
         if (required_size > 0) {
+            if (UNLIKELY(required_size > dst_capacity)) return -1;
             if (ctx->lit_buffer_cap < required_size) {
                 uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, required_size);
                 if (UNLIKELY(!new_buf)) {
