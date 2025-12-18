@@ -12,7 +12,7 @@ $CC $CFLAGS -I include \
     src/lib/zxc_decompress.c \
     src/lib/zxc_driver.c \
     tests/fuzz_decompress.c \
-    -o $OUT/zxc_fuzzer \
+    -o $OUT/zxc_fuzzer_decompress \
     $LIB_FUZZING_ENGINE \
     -lm -pthread
 
@@ -22,6 +22,6 @@ $CC $CFLAGS -I include \
     src/lib/zxc_decompress.c \
     src/lib/zxc_driver.c \
     tests/fuzz_roundtrip.c \
-    -o $OUT/zxc_fuzzer \
+    -o $OUT/zxc_fuzzer_roundtrip \
     $LIB_FUZZING_ENGINE \
     -lm -pthread
