@@ -458,7 +458,11 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
     ctx.compression_level = level;
 
     int num_threads = (n_threads > 0) ? n_threads : (int)sysconf(_SC_NPROCESSORS_ONLN);
-    ctx.ring_size = num_threads * 4;
+    
+    // Reserve 1 thread for Writer/Reader overhead if possible
+    int num_workers = (num_threads > 1) ? num_threads - 1 : 1;
+
+    ctx.ring_size = num_workers * 4;
 
     size_t max_out = zxc_compress_bound(ZXC_CHUNK_SIZE);
     size_t raw_alloc_in = ((mode) ? ZXC_CHUNK_SIZE : max_out) + ZXC_PAD_SIZE;
@@ -495,12 +499,12 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
     pthread_cond_init(&ctx.cond_worker, NULL);
     pthread_cond_init(&ctx.cond_writer, NULL);
 
-    pthread_t* workers = malloc(num_threads * sizeof(pthread_t));
+    pthread_t* workers = malloc(num_workers * sizeof(pthread_t));
     if (UNLIKELY(!workers)) {
         zxc_aligned_free(mem_block);
         return -1;
     }
-    for (int i = 0; i < num_threads; i++)
+    for (int i = 0; i < num_workers; i++)
         pthread_create(&workers[i], NULL, zxc_stream_worker, &ctx);
 
     writer_args_t w_args = {&ctx, f_out, 0};
@@ -594,7 +598,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
     ctx.shutdown_workers = 1;
     pthread_cond_broadcast(&ctx.cond_worker);
     pthread_mutex_unlock(&ctx.lock);
-    for (int i = 0; i < num_threads; i++) pthread_join(workers[i], NULL);
+    for (int i = 0; i < num_workers; i++) pthread_join(workers[i], NULL);
 
     free(workers);
     zxc_aligned_free(mem_block);
