@@ -142,6 +142,8 @@ extern "C" {
 #define ZXC_LZ_HASH_BITS 13                       // (2*(2^13) * 4 bytes = 64KB)
 #define ZXC_LZ_HASH_SIZE (1 << ZXC_LZ_HASH_BITS)  // Hash table size
 #define ZXC_LZ_WINDOW_SIZE (1 << 16)              // 64KB sliding window
+// Note: sliding window of 64KB allows chain_table to use uint16_t for valid offsets (since any
+// match > 64KB is invalid).
 #define ZXC_LZ_MIN_MATCH 5                        // Minimum match length
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)  // Maximum offset distance
 

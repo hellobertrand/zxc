@@ -56,7 +56,7 @@ extern "C" {
  */
 typedef struct {
     uint32_t* hash_table;   // Hash table for LZ77
-    uint32_t* chain_table;  // Chain table for collision resolution
+    uint16_t* chain_table;  // Chain table for collision resolution
     uint32_t* buf_ll;       // Buffer for literal lengths
     uint32_t* buf_ml;       // Buffer for match lengths
     uint32_t* buf_off;      // Buffer for offsets
@@ -69,7 +69,7 @@ typedef struct {
     void* memory_block;     // Single allocation block
 } zxc_cctx_t;
 
- /**
+/**
  * @brief Initializes a ZXC compression context.
  *
  * Sets up the internal state required for compression operations, allocating
@@ -124,7 +124,6 @@ int zxc_write_file_header(uint8_t* dst, size_t dst_capacity);
  * invalid magic word, or incorrect version).
  */
 int zxc_read_file_header(const uint8_t* src, size_t src_size);
-
 
 /**
  * @struct zxc_block_header_t
@@ -186,7 +185,6 @@ int zxc_write_block_header(uint8_t* dst, size_t dst_capacity, const zxc_block_he
  *         required block header size.
  */
 int zxc_read_block_header(const uint8_t* src, size_t src_size, zxc_block_header_t* bh);
-
 
 #ifdef __cplusplus
 }

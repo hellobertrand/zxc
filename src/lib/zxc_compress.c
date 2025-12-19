@@ -341,7 +341,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
     const uint8_t *ip = src, *iend = src + src_size, *anchor = ip, *mflimit = iend - 12;
 
     uint32_t* hash_table = ctx->hash_table;
-    uint32_t* chain_table = ctx->chain_table;
+    uint16_t* chain_table = ctx->chain_table;
     uint8_t* literals = ctx->literals;
 
     uint32_t seq_c = 0;
@@ -371,7 +371,10 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
             (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
 
         hash_table[2 * h] = epoch_mark | cur_pos;
-        chain_table[cur_pos] = match_idx;
+        if (match_idx > 0 && (cur_pos - match_idx) < 0x10000)
+            chain_table[cur_pos] = (uint16_t)(cur_pos - match_idx);
+        else
+            chain_table[cur_pos] = 0;
 
         const uint8_t* best_ref = NULL;
         uint32_t best_len = ZXC_LZ_MIN_MATCH - 1;
@@ -505,7 +508,9 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
                     if (ip + best_len >= iend) break;  // Prevent overruns
                 }
             }
-            match_idx = chain_table[match_idx];
+            uint16_t delta = chain_table[match_idx];
+            if (delta == 0) break;
+            match_idx -= delta;
         }
 
         if (use_lazy && best_ref && best_len < 128 && ip + 1 < mflimit) {
@@ -526,7 +531,9 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
                     while (ip + 1 + l2 < iend && ref2[l2] == ip[1 + l2]) l2++;
                     if (l2 > max_lazy) max_lazy = l2;
                 }
-                next_idx = chain_table[next_idx];
+                uint16_t delta = chain_table[next_idx];
+                if (delta == 0) break;
+                next_idx -= delta;
             }
             if (max_lazy > best_len + 1) best_ref = NULL;
         }
@@ -600,7 +607,10 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
 
                     // Update the hash table and chain table
                     hash_table[2 * h_u] = epoch_mark | pos_u;
-                    chain_table[pos_u] = prev_idx;
+                    if (prev_idx > 0 && (pos_u - prev_idx) < 0x10000)
+                        chain_table[pos_u] = (uint16_t)(pos_u - prev_idx);
+                    else
+                        chain_table[pos_u] = 0;
                 }
             }
 
@@ -867,7 +877,6 @@ static int zxc_probe_is_numeric(const uint8_t* src, size_t size) {
     return (small_deltas > (count * 90) / 100);
 }
 
-
 int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src_sz, uint8_t* dst,
                                size_t dst_cap) {
     int chk = ctx->checksum_enabled;
@@ -905,7 +914,6 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
 
     return (int)w;
 }
-
 
 // cppcheck-suppress unusedFunction
 size_t zxc_compress(const void* src, size_t src_size, void* dst, size_t dst_capacity, int level,

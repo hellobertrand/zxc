@@ -458,7 +458,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
     ctx.compression_level = level;
 
     int num_threads = (n_threads > 0) ? n_threads : (int)sysconf(_SC_NPROCESSORS_ONLN);
-    
+
     // Reserve 1 thread for Writer/Reader overhead if possible
     int num_workers = (num_threads > 1) ? num_threads - 1 : 1;
 
