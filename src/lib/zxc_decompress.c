@@ -276,7 +276,9 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
         uint16_t bits = zxc_le16(p + 2);
         uint32_t psize = zxc_le32(p + 12);
         p += 16;
-        if (UNLIKELY(p + psize > p_end || d_ptr + nvals * 4 > d_end || bits > (sizeof(uint32_t) * 8))) return -1;
+        if (UNLIKELY(p + psize > p_end || d_ptr + nvals * 4 > d_end ||
+                     bits > (sizeof(uint32_t) * 8)))
+            return -1;
 
         zxc_bit_reader_t br;
         zxc_br_init(&br, p, psize);
@@ -427,9 +429,11 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
     if (gh.enc_lit == 1) {
         // RLE Encoded Literals
         size_t required_size = (size_t)(desc[0].sizes >> 32);
+        size_t rle_stream_size = (size_t)(desc[0].sizes & 0xFFFFFFFF);
 
         if (required_size > 0) {
             if (UNLIKELY(required_size > dst_capacity)) return -1;
+
             if (ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE) {
                 uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, required_size + ZXC_PAD_SIZE);
                 if (UNLIKELY(!new_buf)) {
@@ -444,19 +448,21 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
             }
 
             rle_buf = ctx->lit_buffer;
-            if (!rle_buf) return -1;
+
+            if (UNLIKELY(!rle_buf || rle_stream_size > (size_t)(src + src_size - p_curr)))
+                return -1;
 
             const uint8_t* r_ptr = p_curr;
-            const uint8_t* r_end = r_ptr + (size_t)(desc[0].sizes & 0xFFFFFFFF);
-            uint8_t* w_ptr = rle_buf;
+            const uint8_t* r_end = r_ptr + rle_stream_size;
             const uint8_t* const w_end = rle_buf + required_size;
+            uint8_t* w_ptr = rle_buf;
 
             while (r_ptr < r_end && w_ptr < w_end) {
                 uint8_t token = *r_ptr++;
                 if (token & 0x80) {
                     // Repeat Run
                     size_t len = (token & 0x7F) + 4;
-                    if (w_ptr + len > w_end || r_ptr >= r_end) return -1;
+                    if (UNLIKELY(w_ptr + len > w_end || r_ptr >= r_end)) return -1;
 
                     uint8_t val = *r_ptr++;
                     ZXC_MEMSET(w_ptr, val, len);
@@ -464,13 +470,13 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
                 } else {
                     // Literal Run
                     size_t len = token + 1;
-                    if (w_ptr + len > w_end || r_ptr + len > r_end) return -1;
+                    if (UNLIKELY(w_ptr + len > w_end || r_ptr + len > r_end)) return -1;
                     ZXC_MEMCPY(w_ptr, r_ptr, len);
                     w_ptr += len;
                     r_ptr += len;
                 }
             }
-            if (w_ptr != w_end) return -1;
+            if (UNLIKELY(w_ptr != w_end)) return -1;
             // RLE stream ended prematurely or overran
             l_ptr = rle_buf;
             l_end = rle_buf + required_size;
@@ -494,8 +500,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
     const uint8_t* ptr_offsets = ptr_tokens + sz_tokens;
     const uint8_t* ptr_extras = ptr_offsets + sz_offsets;
 
-    if (UNLIKELY(sz_tokens < gh.n_sequences ||
-                 sz_offsets < (size_t)gh.n_sequences * 2 ||
+    if (UNLIKELY(sz_tokens < gh.n_sequences || sz_offsets < (size_t)gh.n_sequences * 2 ||
                  ptr_extras + sz_extras > src + src_size)) {
         return -1;
     }
@@ -1069,7 +1074,6 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
     return (int)(d_ptr - dst);
 }
 
-
 int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz, uint8_t* dst,
                                  size_t dst_cap) {
     if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return -1;
@@ -1108,7 +1112,6 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
 
     return decoded_sz;
 }
-
 
 // cppcheck-suppress unusedFunction
 size_t zxc_decompress(const void* src, size_t src_size, void* dst, size_t dst_capacity,
