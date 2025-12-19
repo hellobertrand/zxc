@@ -68,11 +68,11 @@ static unsigned __stdcall zxc_win_thread_entry(void* p) {
 static int pthread_create(pthread_t* thread, const void* attr, void* (*start_routine)(void*),
                           void* arg) {
     zxc_win_thread_arg_t* wrapper = malloc(sizeof(zxc_win_thread_arg_t));
-    if (!wrapper) return -1;
+    if (UNLIKELY(!wrapper)) return -1;
     wrapper->func = start_routine;
     wrapper->arg = arg;
     uintptr_t handle = _beginthreadex(NULL, 0, zxc_win_thread_entry, wrapper, 0, NULL);
-    if (handle == 0) {
+    if (UNLIKELY(handle == 0)) {
         free(wrapper);
         return -1;
     }
@@ -469,7 +469,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
 
     uint8_t* mem_block = zxc_aligned_malloc(
         ctx.ring_size * (sizeof(zxc_stream_job_t) + sizeof(int) + alloc_in + alloc_out), 64);
-    if (!mem_block) return -1;
+    if (UNLIKELY(!mem_block)) return -1;
 
     uint8_t* ptr = mem_block;
     ctx.jobs = (zxc_stream_job_t*)ptr;
@@ -496,7 +496,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
     pthread_cond_init(&ctx.cond_writer, NULL);
 
     pthread_t* workers = malloc(num_threads * sizeof(pthread_t));
-    if (!workers) {
+    if (UNLIKELY(!workers)) {
         zxc_aligned_free(mem_block);
         return -1;
     }
@@ -599,23 +599,21 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
     free(workers);
     zxc_aligned_free(mem_block);
 
-    if (ctx.io_error) return -1;
+    if (UNLIKELY(ctx.io_error)) return -1;
 
     return w_args.total_bytes;
 }
 
-
 int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
                             int checksum_enabled) {
-    if (!f_in) return -1;
+    if (UNLIKELY(!f_in)) return -1;
 
     return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, checksum_enabled,
                                  zxc_compress_chunk_wrapper);
 }
 
-
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checksum_enabled) {
-    if (!f_in) return -1;
+    if (UNLIKELY(!f_in)) return -1;
 
     return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, checksum_enabled,
                                  (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper);
