@@ -1057,31 +1057,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
     return (int)(d_ptr - dst);
 }
 
-/**
- * @brief Decompresses a single chunk of data based on its block header.
- *
- * This internal wrapper function reads the block header from the source buffer
- * to determine the compression type (RAW, NUM, or GNR) and flags (such as
- * checksum presence). It then dispatches the decompression to the appropriate
- * specific decoder.
- *
- * If a checksum flag is present in the header and checksum verification is
- * enabled in the context, the function verifies the integrity of the
- * decompressed data against the stored CRC.
- *
- * @param ctx Pointer to the decompression context (zxc_cctx_t), used for
- * configuration like checksums.
- * @param src Pointer to the source buffer containing the compressed block
- * (including header).
- * @param src_sz Size of the source buffer in bytes.
- * @param dst Pointer to the destination buffer where decompressed data will be
- * written.
- * @param dst_cap Capacity of the destination buffer in bytes.
- *
- * @return The size of the decompressed data in bytes on success, or -1 if an
- * error occurs (e.g., invalid header, buffer overflow, unknown block type, or
- * checksum mismatch).
- */
+
 int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz, uint8_t* dst,
                                  size_t dst_cap) {
     if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return -1;
@@ -1121,22 +1097,7 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
     return decoded_sz;
 }
 
-/**
- * @brief Decompresses a ZXC compressed buffer.
- *
- * This version uses standard size_t types and void pointers.
- * It expects a valid ZXC file header followed by compressed blocks.
- *
- * @param[in] src Pointer to the source buffer containing compressed data.
- * @param[in] src_size Size of the compressed data in bytes.
- * @param[out] dst Pointer to the destination buffer.
- * @param[in] dst_capacity Capacity of the destination buffer.
- * @param checksum_enabled Flag indicating whether to verify checksums (1 to
- * enable, 0 to disable).
- *
- * @return The number of bytes written to dst, or 0 if decompression fails
- * (invalid header, corruption, or destination too small).
- */
+
 // cppcheck-suppress unusedFunction
 size_t zxc_decompress(const void* src, size_t src_size, void* dst, size_t dst_capacity,
                       int checksum_enabled) {
