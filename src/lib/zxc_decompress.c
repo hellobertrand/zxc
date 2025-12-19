@@ -421,6 +421,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
     const uint8_t* p_curr = p_data;
 
     const uint8_t* l_ptr;
+    const uint8_t* l_end;
     uint8_t* rle_buf = NULL;
 
     if (gh.enc_lit == 1) {
@@ -472,12 +473,15 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
             if (w_ptr != w_end) return -1;
             // RLE stream ended prematurely or overran
             l_ptr = rle_buf;
+            l_end = rle_buf + required_size;
         } else {
             l_ptr = p_curr;
+            l_end = p_curr;
         }
     } else {
         // RAW Literals
         l_ptr = p_curr;
+        l_end = p_curr + (size_t)(desc[0].sizes & 0xFFFFFFFF);
     }
 
     p_curr += (size_t)(desc[0].sizes & 0xFFFFFFFF);
@@ -1056,7 +1060,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
     if (generated < expected_raw_size) {
         size_t rem = expected_raw_size - generated;
 
-        if (UNLIKELY(d_ptr + rem > d_end)) return -1;
+        if (UNLIKELY(d_ptr + rem > d_end || l_ptr + rem > l_end)) return -1;
 
         ZXC_MEMCPY(d_ptr, l_ptr, rem);
         d_ptr += rem;
