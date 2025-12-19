@@ -22,11 +22,9 @@
 extern "C" {
 #endif
 
-#if defined(__GNUC__) || defined(__clang__)
+#if !defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
 #include <stdatomic.h>
 #define ZXC_ATOMIC _Atomic
-#elif defined(_MSC_VER)
-#define ZXC_ATOMIC volatile
 #else
 #define ZXC_ATOMIC volatile
 #endif
