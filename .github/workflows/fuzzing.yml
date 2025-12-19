@@ -26,18 +26,26 @@ permissions:
 
 jobs:
   fuzzing:
-    name: Run Fuzzing (${{ matrix.sanitizer }})
+    name: Run Fuzzing (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
     concurrency:
-      group: ${{ github.workflow }}-${{ matrix.sanitizer }}-${{ github.event.pull_request.number || github.ref }}
+      group: ${{ github.workflow }}-${{ matrix.fuzzer }}-${{ matrix.sanitizer }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
-        sanitizer: [address, undefined, memory]
+        sanitizer: [address, undefined]
+        fuzzer: [decompress, roundtrip]
 
     steps:
-    - name: Build Fuzzers (${{ matrix.sanitizer }})
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure Fuzzer Target
+      run: |
+        sed -i '2i export FUZZER_TARGET="${{ matrix.fuzzer }}"' .clusterfuzzlite/build.sh
+
+    - name: Build Fuzzers (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
       id: build
       uses: google/clusterfuzzlite/actions/build_fuzzers@v1
       with:
