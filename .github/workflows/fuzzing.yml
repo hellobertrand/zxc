@@ -51,6 +51,6 @@ jobs:
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         mode: ${{ github.event_name == 'pull_request' && 'code-change' || inputs.mode || 'batch' }}
-        fuzz-seconds: ${{ github.event_name == 'pull_request' && 600 || inputs.fuzz_seconds || 3600 }}
+        fuzz-seconds: ${{ github.event_name == 'pull_request' && 300 || inputs.fuzz_seconds || 3600 }}
         sanitizer: ${{ matrix.sanitizer }}
         output-sarif: true

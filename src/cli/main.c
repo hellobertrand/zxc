@@ -501,8 +501,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-
-
     zxc_log_v("Starting... (Compression Level %d)\n", level);
     if (g_verbose) {
         zxc_log("Checksum: %s\n", checksum ? "enabled" : "disabled");
@@ -514,8 +512,18 @@ int main(int argc, char** argv) {
                     : zxc_stream_decompress(f_in, f_out, num_threads, checksum);
     double dt = zxc_now() - t0;
 
-    if (!use_stdin) fclose(f_in);
-    if (!use_stdout) fclose(f_out);
+    if (!use_stdin) {
+        fclose(f_in);
+    } else {
+        setvbuf(f_in, NULL, _IONBF, 0);
+    }
+    if (!use_stdout) {
+        fclose(f_out);
+    } else {
+        setvbuf(f_out, NULL, _IONBF, 0);
+    }
+    free(b1);
+    free(b2);
 
     if (bytes >= 0) {
         zxc_log_v("Processed %d bytes in %.3fs\n", bytes, dt);

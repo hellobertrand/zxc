@@ -615,7 +615,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
 
 
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checksum_enabled) {
-    if (!f_in || !f_out) return -1;
+    if (!f_in) return -1;
 
     return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, checksum_enabled,
                                  (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper);
