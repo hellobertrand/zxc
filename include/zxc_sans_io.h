@@ -57,9 +57,9 @@ extern "C" {
 typedef struct {
     uint32_t* hash_table;   // Hash table for LZ77
     uint16_t* chain_table;  // Chain table for collision resolution
-    uint32_t* buf_ll;       // Buffer for literal lengths
-    uint32_t* buf_ml;       // Buffer for match lengths
-    uint32_t* buf_off;      // Buffer for offsets
+    uint32_t* buf_extras;   // Buffer for extra lengths (LL >= 15 or ML >= 15)
+    uint16_t* buf_offsets;  // Buffer for offsets
+    uint8_t* buf_tokens;    // Buffer for token sequences
     uint8_t* literals;      // Buffer for literal bytes
     uint32_t epoch;         // Current epoch for hash table
     int checksum_enabled;   // Checksum enabled flag

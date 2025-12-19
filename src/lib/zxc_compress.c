@@ -348,9 +348,9 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
     size_t lit_c = 0;
 
     // --- TOKEN ENCODING PRE-INIT ---
-    uint8_t* buf_tokens = (uint8_t*)ctx->buf_off;    // Reuse buf_off for tokens
-    uint16_t* buf_offsets = (uint16_t*)ctx->buf_ml;  // Reuse buf_ml for offsets
-    uint32_t* buf_extras = ctx->buf_ll;  // Reuse buf_ll for extras (32-bit temp storage)
+    uint8_t* buf_tokens = ctx->buf_tokens;
+    uint16_t* buf_offsets = ctx->buf_offsets;
+    uint32_t* buf_extras = ctx->buf_extras;
     size_t n_extras = 0;
     size_t vbyte_size = 0;
 
