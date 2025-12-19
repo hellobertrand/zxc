@@ -238,7 +238,7 @@ typedef struct {
     pthread_cond_t cond_reader, cond_worker, cond_writer;
     int shutdown_workers;
     int compression_mode;
-    _Atomic int io_error;
+    ZXC_ATOMIC int io_error;
     zxc_chunk_processor_t processor;
     int write_idx;
     int checksum_enabled;

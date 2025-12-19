@@ -23,6 +23,15 @@ extern "C" {
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
+#include <stdatomic.h>
+#define ZXC_ATOMIC _Atomic
+#elif defined(_MSC_VER)
+#define ZXC_ATOMIC volatile
+#else
+#define ZXC_ATOMIC volatile
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
 #define RESTRICT __restrict__
 #elif defined(_MSC_VER)
 #define RESTRICT __restrict
