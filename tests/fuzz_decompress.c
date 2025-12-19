@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../include/zxc.h"
+#include "../include/zxc_stream.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     FILE* f_in = fmemopen((void*)data, size, "rb");
