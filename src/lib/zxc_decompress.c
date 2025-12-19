@@ -276,7 +276,7 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
         uint16_t bits = zxc_le16(p + 2);
         uint32_t psize = zxc_le32(p + 12);
         p += 16;
-        if (UNLIKELY(p + psize > p_end || d_ptr + nvals * 4 > d_end || bits > 32)) return -1;
+        if (UNLIKELY(p + psize > p_end || d_ptr + nvals * 4 > d_end || bits > (sizeof(uint32_t) * 8))) return -1;
 
         zxc_bit_reader_t br;
         zxc_br_init(&br, p, psize);
@@ -429,8 +429,8 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
 
         if (required_size > 0) {
             if (UNLIKELY(required_size > dst_capacity)) return -1;
-            if (ctx->lit_buffer_cap < required_size) {
-                uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, required_size);
+            if (ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE) {
+                uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, required_size + ZXC_PAD_SIZE);
                 if (UNLIKELY(!new_buf)) {
                     free(ctx->lit_buffer);
                     ctx->lit_buffer = NULL;
@@ -439,7 +439,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
                 }
 
                 ctx->lit_buffer = new_buf;
-                ctx->lit_buffer_cap = required_size;
+                ctx->lit_buffer_cap = required_size + ZXC_PAD_SIZE;
             }
 
             rle_buf = ctx->lit_buffer;
@@ -482,11 +482,19 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
 
     p_curr += (size_t)(desc[0].sizes & 0xFFFFFFFF);
 
-    const uint8_t* ptr_tokens = p_curr;
-    const uint8_t* ptr_offsets = ptr_tokens + (size_t)(desc[1].sizes & 0xFFFFFFFF);
-    const uint8_t* ptr_extras = ptr_offsets + (size_t)(desc[2].sizes & 0xFFFFFFFF);
+    size_t sz_tokens = (size_t)(desc[1].sizes & 0xFFFFFFFF);
+    size_t sz_offsets = (size_t)(desc[2].sizes & 0xFFFFFFFF);
+    size_t sz_extras = (size_t)(desc[3].sizes & 0xFFFFFFFF);
 
-    if (UNLIKELY(ptr_extras + (size_t)(desc[3].sizes & 0xFFFFFFFF) > src + src_size)) return -1;
+    const uint8_t* ptr_tokens = p_curr;
+    const uint8_t* ptr_offsets = ptr_tokens + sz_tokens;
+    const uint8_t* ptr_extras = ptr_offsets + sz_offsets;
+
+    if (UNLIKELY(sz_tokens < gh.n_sequences ||
+                 sz_offsets < (size_t)gh.n_sequences * 2 ||
+                 ptr_extras + sz_extras > src + src_size)) {
+        return -1;
+    }
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
