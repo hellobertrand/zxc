@@ -604,25 +604,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
     return w_args.total_bytes;
 }
 
-/**
- * @brief Compresses a data stream from an input file to an output file.
- *
- * This function initializes the compression engine to process the input
- * stream using the specified number of threads and compression level. It acts
- * as a wrapper around the generic stream engine, specifically configuring it
- * for compression operations.
- *
- * @param[in] f_in      Pointer to the input file stream to be compressed.
- * @param[out] f_out     Pointer to the output file stream where compressed data
- * will be written.
- * @param[in] n_threads The number of threads to use for parallel compression.
- * @param[in] level     The compression level (determines the trade-off between
- * speed and ratio).
- * @param[in] checksum_enabled  Flag indicating whether to calculate and store a checksum
- * for data integrity.
- *
- * @return          Returns 0 on success, or a non-zero error code on failure.
- */
+
 int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
                             int checksum_enabled) {
     if (!f_in) return -1;
@@ -631,23 +613,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
                                  zxc_compress_chunk_wrapper);
 }
 
-/**
- * @brief Decompresses a data stream from an input file to an output file.
- *
- * This function acts as a high-level wrapper for the ZXC stream engine,
- * configured specifically for decompression. It processes the input stream
- * using the specified number of threads and optionally verifies the data
- * integrity using a checksum.
- *
- * @param[in] f_in      Pointer to the input file stream containing ZXC compressed data.
- * @param[out] f_out     Pointer to the output file stream where decompressed data
- * will be written.
- * @param[in] n_threads The number of threads to use for parallel decompression.
- * @param[in] checksum_enabled  Flag indicating whether to verify checksums during
- * decompression.
- * @return          Returns 0 on success, or a non-zero error code if the
- * decompression fails.
- */
+
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checksum_enabled) {
     if (!f_in || !f_out) return -1;
 

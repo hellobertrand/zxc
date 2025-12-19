@@ -867,34 +867,7 @@ static int zxc_probe_is_numeric(const uint8_t* src, size_t size) {
     return (small_deltas > (count * 90) / 100);
 }
 
-/**
- * @brief Wraps the compression logic for a single chunk of data, selecting
- * the best encoding strategy.
- *
- * This function attempts to compress a given data chunk using different
- * strategies based on the data size and compressibility.
- *
- * **Decision Logic:**
- * 1. **GNR First:** We always attempt General (LZ77) compression first as it
- * handles most data types well.
- * 2. **Fallbacks:**
- *    - If GNR compression ratio is poor (> 90% of original size) AND the data
- * looks like an array of integers (size multiple of 4), we *might* try NUM
- * compression (currently commented out/disabled in code, but logic is there).
- *    - If compression fails to save space, we fall back to **RAW** storage
- * (uncompressed) to avoid expansion.
- *
- * @param[in,out] ctx Pointer to the ZXC compression context containing configuration
- * (e.g., checksum flags).
- * @param[in] chunk Pointer to the source data buffer to be compressed.
- * @param[in] src_sz Size of the source data chunk in bytes.
- * @param[out] dst Pointer to the destination buffer where compressed data will be
- * written.
- * @param[in] dst_cap Capacity of the destination buffer.
- *
- * @return The size of the written data in bytes on success, or -1 if an error
- * occurred (e.g., buffer overflow or encoding failure).
- */
+
 int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src_sz, uint8_t* dst,
                                size_t dst_cap) {
     int chk = ctx->checksum_enabled;
@@ -933,23 +906,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
     return (int)w;
 }
 
-/**
- * @brief Compresses a data buffer using the ZXC algorithm.
- *
- * This version uses standard size_t types and void pointers. It writes the
- * ZXC file header followed by compressed blocks, single threaded
- *
- * @param[in] src          Pointer to the source buffer.
- * @param[in] src_size     Size of the source data in bytes.
- * @param[out] dst          Pointer to the destination buffer.
- * @param[in] dst_capacity Maximum capacity of the destination buffer.
- * @param[in] level        Compression level (e.g., ZXC_LEVEL_BALANCED).
- * @param[in] checksum_enabled Flag indicating whether to verify the checksum of
- * the data (1 to enable, 0 to disable).
- *
- * @return The number of bytes written to dst, or 0 if the destination buffer
- * is too small or an error occurred.
- */
+
 // cppcheck-suppress unusedFunction
 size_t zxc_compress(const void* src, size_t src_size, void* dst, size_t dst_capacity, int level,
                     int checksum_enabled) {
