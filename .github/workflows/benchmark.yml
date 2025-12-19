@@ -3,7 +3,7 @@ name: Benchmark
 on:
   workflow_dispatch:
   push:
-    branches: [ main, candidate ]
+    branches: [ main ]
     paths:
       - 'src/**'
       - '.github/workflows/benchmark.yml'
