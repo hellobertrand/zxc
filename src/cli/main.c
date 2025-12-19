@@ -489,17 +489,17 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Set large buffers for I/O performance
-    char *b1 = malloc(1024 * 1024), *b2 = malloc(1024 * 1024);
-    setvbuf(f_in, b1, _IOFBF, 1024 * 1024);
-    setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
-
     // Prevent writing binary data to the terminal unless forced
     if (use_stdout && isatty(fileno(stdout)) && mode == MODE_COMPRESS && !force) {
         zxc_log("Refusing to write binary to terminal.\n");
         fclose(f_in);
         return 1;
     }
+
+    // Set large buffers for I/O performance
+    char *b1 = malloc(1024 * 1024), *b2 = malloc(1024 * 1024);
+    setvbuf(f_in, b1, _IOFBF, 1024 * 1024);
+    setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
 
     zxc_log_v("Starting... (Compression Level %d)\n", level);
     if (g_verbose) {
@@ -512,16 +512,8 @@ int main(int argc, char** argv) {
                     : zxc_stream_decompress(f_in, f_out, num_threads, checksum);
     double dt = zxc_now() - t0;
 
-    if (!use_stdin) {
-        fclose(f_in);
-    } else {
-        setvbuf(f_in, NULL, _IONBF, 0);
-    }
-    if (!use_stdout) {
-        fclose(f_out);
-    } else {
-        setvbuf(f_out, NULL, _IONBF, 0);
-    }
+    if (!use_stdin) fclose(f_in);
+    if (!use_stdout) fclose(f_out);
     free(b1);
     free(b2);
 

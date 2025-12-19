@@ -172,9 +172,9 @@ int test_invalid_arguments() {
         return 0;
     }
 
-    // 3b. Decompression Output NULL -> Must fail
-    if (zxc_stream_decompress(f, NULL, 1, 0) != -1) {
-        printf("Failed: Decompress should return -1 when Output is NULL\n");
+    // 3b. Decompression Output NULL -> Must SUCCEED (Benchmark mode)
+    if (zxc_stream_decompress(f, NULL, 1, 0) == -1) {
+        printf("Failed: Decompress should allow NULL Output (Benchmark mode support)\n");
         fclose(f);
         return 0;
     }
