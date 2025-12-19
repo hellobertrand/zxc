@@ -371,6 +371,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
             (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
 
         hash_table[2 * h] = epoch_mark | cur_pos;
+        // cppcheck-suppress knownConditionTrueFalse ; false positive
         if (match_idx > 0 && (cur_pos - match_idx) < 0x10000)
             chain_table[cur_pos] = (uint16_t)(cur_pos - match_idx);
         else
