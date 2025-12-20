@@ -22,7 +22,8 @@
 extern "C" {
 #endif
 
-#if !defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
+#if !defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && \
+    !defined(__STDC_NO_ATOMICS__)
 #include <stdatomic.h>
 #define ZXC_ATOMIC _Atomic
 #else
@@ -379,6 +380,24 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, uint64_t v) { ZXC_MEMCPY(p
  * @param src Pointer to the source memory block.
  */
 static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) { ZXC_MEMCPY(dst, src, 16); }
+
+/**
+ * @brief Copies 32 bytes from source to destination using SIMD when available.
+ *
+ * Uses NEON or two 16-byte copies for optimal performance on ARM64.
+ *
+ * @param dst Pointer to the destination memory block.
+ * @param src Pointer to the source memory block.
+ */
+static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
+#if defined(ZXC_USE_NEON64)
+    vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));
+    vst1q_u8((uint8_t*)dst + 16, vld1q_u8((const uint8_t*)src + 16));
+#else
+    ZXC_MEMCPY(dst, src, 16);
+    ZXC_MEMCPY((uint8_t*)dst + 16, (const uint8_t*)src + 16, 16);
+#endif
+}
 
 /**
  * @brief Counts trailing zeros in a 32-bit unsigned integer.
