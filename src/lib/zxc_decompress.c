@@ -124,13 +124,23 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr) {
     return val;
 }
 
-#if defined(ZXC_USE_NEON64)
 /**
  * @brief Shuffle masks for overlapping copies with small offsets (0-15).
  *
- * Each row defines how to replicate source bytes to fill 16 bytes when offset < 16.
- * For offset 'off', reading match_src[-off] through match_src[-1] gives us 'off' bytes.
- * The mask tells vqtbl1q_u8 which source byte index to place at each destination index.
+ * Shared between ARM NEON and x86 SSSE3. Each row defines how to replicate
+ * source bytes to fill 16 bytes when offset < 16.
+ */
+#if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(__SSSE3__) || \
+    defined(ZXC_USE_AVX2)
+/**
+ * @brief Precomputed masks for handling overlapping data during decompression.
+ *
+ * This 16x16 lookup table contains 128-bit aligned masks used to efficiently
+ * mask off or combine bytes when processing overlapping copy operations or
+ * boundary conditions in the ZXC decompression algorithm.
+ *
+ * The alignment to 16 bytes ensures compatibility with SIMD instructions
+ * (like SSE/AVX) for optimized memory operations.
  */
 static const ZXC_ALIGN(16) uint8_t zxc_overlap_masks[16][16] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},      // off=0 (unused)
@@ -150,24 +160,56 @@ static const ZXC_ALIGN(16) uint8_t zxc_overlap_masks[16][16] = {
     {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0, 1},  // off=14
     {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 0}  // off=15
 };
+#endif
 
 /**
- * @brief Copy 16 bytes using NEON shuffle for small overlapping offsets (2-15).
+ * @brief Copies 16 bytes from an overlapping source to the destination.
  *
- * Uses vqtbl1q_u8 to replicate source pattern to fill destination.
+ * This function is designed to handle memory copies where the source and
+ * destination regions might overlap, specifically copying 16 bytes from
+ * `dst - off` to `dst`. It is typically used in decompression routines
+ * (like LZ77) where repeating a previous sequence is required.
+ *
+ * @param[out] dst Pointer to the destination buffer where bytes will be written.
+ * @param[in]  off The offset backwards from the destination pointer to read from.
+ *                 (i.e., source address is `dst - off`).
  */
-static ZXC_ALWAYS_INLINE void zxc_neon_copy_overlap16(uint8_t* dst, uint32_t off) {
+#if defined(ZXC_USE_NEON64)
+/**
+ * @brief NEON64 SIMD version for small offset overlap copy (uses vqtbl1q_u8).
+ */
+static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
     uint8x16_t mask = vld1q_u8(zxc_overlap_masks[off]);
     uint8x16_t src_data = vld1q_u8(dst - off);
     vst1q_u8(dst, vqtbl1q_u8(src_data, mask));
 }
+#elif defined(ZXC_USE_NEON32)
+/**
+ * @brief NEON32 SIMD version for small offset overlap copy (uses vtbl2_u8).
+ */
+static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
+    uint8x8x2_t src_tbl;
+    src_tbl.val[0] = vld1_u8(dst - off);
+    src_tbl.val[1] = vld1_u8(dst - off + 8);
+    uint8x8_t mask_lo = vld1_u8(zxc_overlap_masks[off]);
+    uint8x8_t mask_hi = vld1_u8(zxc_overlap_masks[off] + 8);
+    vst1_u8(dst, vtbl2_u8(src_tbl, mask_lo));
+    vst1_u8(dst + 8, vtbl2_u8(src_tbl, mask_hi));
+}
+#elif defined(__SSSE3__) || defined(ZXC_USE_AVX2)
+/**
+ * @brief x86 SSSE3 SIMD version for small offset overlap copy (uses pshufb).
+ */
+static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
+    __m128i mask = _mm_load_si128((const __m128i*)zxc_overlap_masks[off]);
+    __m128i src_data = _mm_loadu_si128((const __m128i*)(dst - off));
+    _mm_storeu_si128((__m128i*)dst, _mm_shuffle_epi8(src_data, mask));
+}
 #else
 /**
- * @brief Scalar fallback for small offset overlap copy (x86 and other platforms).
- *
- * Copies 16 bytes handling overlapping source/destination for offsets 2-15.
+ * @brief Scalar fallback for small offset overlap copy.
  */
-static ZXC_ALWAYS_INLINE void zxc_neon_copy_overlap16(uint8_t* dst, uint32_t off) {
+static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
     const uint8_t* src = dst - off;
     for (size_t i = 0; i < 16; i++) {
         dst[i] = src[i % off];
@@ -1294,7 +1336,7 @@ static int zxc_decode_block_gnr_v2(zxc_cctx_t* ctx, const uint8_t* restrict src,
                 /* Small offset 2-15: use NEON shuffle or byte loop */ \
                 size_t copied = 0;                                     \
                 while (copied < ml) {                                  \
-                    zxc_neon_copy_overlap16(d_ptr + copied, off);      \
+                    zxc_copy_overlap16(d_ptr + copied, off);           \
                     copied += 16;                                      \
                 }                                                      \
                 d_ptr += ml;                                           \
