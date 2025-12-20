@@ -111,14 +111,17 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr) {
         *ptr = p;
         return val;
     }
-    // Slow path: Multi-byte value
+    // Slow path: Multi-byte value (max 5 bytes for 32-bit)
     val &= 0x7F;
     uint32_t shift = 7;
     uint32_t b;
+    int count = 0;
     do {
         b = *p++;
         val |= (b & 0x7F) << shift;
         shift += 7;
+        // Security: limit to 5 bytes (35 bits max, prevents infinite loop)
+        if (UNLIKELY(++count >= 4)) break;
     } while (b & 0x80);
     *ptr = p;
     return val;
@@ -1628,6 +1631,9 @@ static int zxc_decode_block_gnr_v2(zxc_cctx_t* ctx, const uint8_t* restrict src,
         ZXC_MEMCPY(d_ptr, l_ptr, rem);
         d_ptr += rem;
     }
+
+    // Final validation: decoded size must match expected
+    if (UNLIKELY((size_t)(d_ptr - dst) != expected_raw_size)) return -1;
 
     return (int)(d_ptr - dst);
 }
