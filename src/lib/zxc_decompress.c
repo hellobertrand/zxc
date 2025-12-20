@@ -1530,6 +1530,11 @@ static int zxc_decode_block_gnr_v2(zxc_cctx_t* ctx, const uint8_t* restrict src,
 
     // --- Remaining 1 sequence (Fast Path) ---
     while (n_seq > 0 && d_ptr < d_end_safe) {
+        // Save pointers before reading (in case we need to fall back to Safe Path)
+        const uint8_t* t_save = t_ptr;
+        const uint8_t* o_save = o_ptr;
+        const uint8_t* e_save = e_ptr;
+
         uint8_t token = *t_ptr++;
         uint32_t ll = token >> 4;
         uint32_t ml = token & 0x0F;
@@ -1539,6 +1544,15 @@ static int zxc_decode_block_gnr_v2(zxc_cctx_t* ctx, const uint8_t* restrict src,
         if (UNLIKELY(ll == 15)) ll = zxc_read_vbyte(&e_ptr);
         if (UNLIKELY(ml == 15)) ml = zxc_read_vbyte(&e_ptr);
         ml += ZXC_LZ_MIN_MATCH;
+
+        // Check bounds before wild copies - if too close to end, fall back to Safe Path
+        if (UNLIKELY(d_ptr + ll + ml + 32 > d_end)) {
+            // Restore pointers and let Safe Path handle this sequence
+            t_ptr = t_save;
+            o_ptr = o_save;
+            e_ptr = e_save;
+            break;
+        }
 
         {
             const uint8_t* src_lit = l_ptr;
