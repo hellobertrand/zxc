@@ -506,6 +506,7 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
  * @return The number of bytes written to the destination buffer on success, or
  * -1 on failure (e.g., invalid header, buffer overflow, or corrupted data).
  */
+// cppcheck-suppress unusedFunction
 static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, size_t src_size,
                                 uint8_t* restrict dst, size_t dst_capacity,
                                 uint32_t expected_raw_size) {
@@ -1235,16 +1236,16 @@ static int zxc_decode_block_gnr_v2(zxc_cctx_t* ctx, const uint8_t* restrict src,
                     if (len <= 32) {
                         zxc_copy32(w_ptr, r_ptr);
                     } else {
-                        uint8_t* dst = w_ptr;
-                        const uint8_t* src = r_ptr;
+                        uint8_t* rle_dst = w_ptr;
+                        const uint8_t* rle_src = r_ptr;
                         size_t rem = len;
                         while (rem > 32) {
-                            zxc_copy32(dst, src);
-                            dst += 32;
-                            src += 32;
+                            zxc_copy32(rle_dst, rle_src);
+                            rle_dst += 32;
+                            rle_src += 32;
                             rem -= 32;
                         }
-                        zxc_copy32(dst, src);
+                        zxc_copy32(rle_dst, rle_src);
                     }
                     w_ptr += len;
                     r_ptr += len;
@@ -1333,7 +1334,7 @@ static int zxc_decode_block_gnr_v2(zxc_cctx_t* ctx, const uint8_t* restrict src,
                 ZXC_MEMSET(d_ptr, match_src[0], ml);                   \
                 d_ptr += ml;                                           \
             } else {                                                   \
-                /* Small offset 2-15: use NEON shuffle or byte loop */ \
+                /* Small offset 2-15: use SIMD shuffle or byte loop */ \
                 size_t copied = 0;                                     \
                 while (copied < ml) {                                  \
                     zxc_copy_overlap16(d_ptr + copied, off);           \
