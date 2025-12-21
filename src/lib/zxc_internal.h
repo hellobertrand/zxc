@@ -372,25 +372,37 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, uint64_t v) { ZXC_MEMCPY(p
 /**
  * @brief Copies 16 bytes from the source memory location to the destination memory location.
  *
- * This function is forced to be inlined and utilizes the internal ZXC_MEMCPY macro
- * to perform a fixed-size copy of 16 bytes. It is typically used for optimizing
- * small, fixed-size memory operations within the compression library.
+ * This function is forced to be inlined and uses SIMD intrinsics when available.
+ * SSE2 on x86/x64, NEON on ARM, or memcpy as fallback.
  *
  * @param dst Pointer to the destination memory block.
  * @param src Pointer to the source memory block.
  */
-static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) { ZXC_MEMCPY(dst, src, 16); }
+static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
+#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
+    // SSE2 (always available with AVX): Single 128-bit unaligned load/store
+    _mm_storeu_si128((__m128i*)dst, _mm_loadu_si128((const __m128i*)src));
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+    vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));
+#else
+    ZXC_MEMCPY(dst, src, 16);
+#endif
+}
 
 /**
  * @brief Copies 32 bytes from source to destination using SIMD when available.
  *
- * Uses NEON or two 16-byte copies for optimal performance on ARM64.
+ * Uses AVX2 on x86, NEON on ARM64/ARM32, or two 16-byte copies as fallback.
  *
  * @param dst Pointer to the destination memory block.
  * @param src Pointer to the source memory block.
  */
 static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
-#if defined(ZXC_USE_NEON64)
+#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
+    // AVX2/AVX512: Single 256-bit (32 byte) unaligned load/store
+    _mm256_storeu_si256((__m256i*)dst, _mm256_loadu_si256((const __m256i*)src));
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+    // NEON: Two 128-bit (16 byte) unaligned load/stores
     vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));
     vst1q_u8((uint8_t*)dst + 16, vld1q_u8((const uint8_t*)src + 16));
 #else
