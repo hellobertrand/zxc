@@ -841,11 +841,12 @@ static int zxc_encode_block_raw(const uint8_t* src, size_t src_sz, uint8_t* dst,
 /**
  * @brief Probes data to see if it looks like a sequence of correlated
  * integers.
- * * Heuristic:
+ *
+ * Improved heuristic:
  * 1. Must be aligned to 4 bytes.
- * 2. Samples the first 64 integers.
- * 3. Calculates the delta between consecutive values.
- * 4. If the deltas are small (fit in few bits), it's a candidate for NUM.
+ * 2. Samples the first 128 integers (more accurate).
+ * 3. Calculates bit width of deltas (fewer bits = better for NUM).
+ * 4. Estimates compression ratio: if NUM would save >20% vs raw, use it.
  *
  * @return 1 if NUM encoding is recommended, 0 otherwise.
  */
@@ -853,29 +854,50 @@ static int zxc_probe_is_numeric(const uint8_t* src, size_t size) {
     if (UNLIKELY(size % 4 != 0 || size < 16)) return 0;
 
     size_t count = size / 4;
-    if (count > 64) count = 64;
+    if (count > 128) count = 128;  // Sample more values for accuracy
 
     uint32_t prev = zxc_le32(src);
     const uint8_t* p = src + 4;
-    uint32_t small_deltas = 0;
+
+    uint32_t max_zigzag = 0;
+    uint32_t small_count = 0;   // Deltas < 256 (8 bits)
+    uint32_t medium_count = 0;  // Deltas < 65536 (16 bits)
 
     for (size_t i = 1; i < count; i++) {
         uint32_t curr = zxc_le32(p);
-
         int32_t diff = (int32_t)(curr - prev);
         uint32_t zigzag = zxc_zigzag_encode(diff);
 
+        if (zigzag > max_zigzag) max_zigzag = zigzag;
+
         if (zigzag < 256) {
-            small_deltas++;
+            small_count++;
         } else if (zigzag < 65536) {
-            small_deltas++;
+            medium_count++;
         }
 
         prev = curr;
         p += 4;
     }
 
-    return (small_deltas > (count * 90) / 100);
+    // Calculate bit width needed for max delta
+    uint32_t bits_needed = 0;
+    uint32_t tmp = max_zigzag;
+    while (tmp > 0) {
+        bits_needed++;
+        tmp >>= 1;
+    }
+
+    // Estimate compression ratio:
+    // NUM uses ~bits_needed per value, Raw uses 32 bits per value
+    // Worth it if bits_needed <= 20 (saves >37.5%)
+    if (bits_needed <= 16) return 1;
+    if (bits_needed <= 20 && (small_count + medium_count) >= (count * 85) / 100) return 1;
+
+    // Fallback: if 90% of deltas are small, still use NUM
+    if ((small_count + medium_count) >= (count * 90) / 100) return 1;
+
+    return 0;
 }
 
 int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src_sz, uint8_t* dst,
@@ -897,7 +919,9 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
 
     if (try_num) {
         res = zxc_encode_block_num(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
-        if (res != 0 || w > ((src_sz >> 1) + (src_sz >> 3))) {  // Ratio > 0.625
+        // Test: NUM must achieve at least 20% compression (ratio < 80%)
+        if (res != 0 || w > (src_sz - (src_sz >> 2))) {  // w > 75% of src_sz
+            // NUM didn't compress well, try GNR instead
             try_num = 0;
         }
     }
