@@ -1180,6 +1180,23 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
  * - Branchless wild copies for common paths
  * - Simplified loop structure for better branch prediction
  */
+/**
+ * @brief Decodes a generic block using the v2 algorithm.
+ *
+ * This function handles the decoding of a compressed block formatted with the
+ * internal GNR structure.
+ *
+ * @param[in,out] ctx Pointer to the compression context (`zxc_cctx_t`) containing
+ * @param[in] src Pointer to the source buffer containing compressed data.
+ * @param[in] src_size Size of the source buffer in bytes.
+ * @param[out] dst Pointer to the destination buffer for decompressed data.
+ * @param[in] dst_capacity Maximum capacity of the destination buffer.
+ * @param[in] expected_raw_size The expected size of the decompressed data (used for
+ * validation and trailing literals).
+ *
+ * @return The number of bytes written to the destination buffer on success, or
+ * -1 on failure (e.g., invalid header, buffer overflow, or corrupted data).
+ */
 static int zxc_decode_block_gnr_v2(zxc_cctx_t* ctx, const uint8_t* restrict src, size_t src_size,
                                    uint8_t* restrict dst, size_t dst_capacity,
                                    uint32_t expected_raw_size) {
