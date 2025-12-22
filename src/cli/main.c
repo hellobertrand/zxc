@@ -183,28 +183,30 @@ static void zxc_log_v(const char* fmt, ...) {
     va_end(args);
 }
 
-static void print_help(const char* app) {
+void print_help(const char* app) {
     printf("Usage: %s [<options>] [<argument>]...\n\n", app);
-    printf("Standard Modes:\n");
-    printf("  -z, --compress    Compress FILE (default)\n");
-    printf("  -d, --decompress  Decompress FILE (or stdin -> stdout)\n");
-    printf("  -b, --bench       Benchmark in-memory\n\n");
-    printf("Special Options:\n");
-    printf("  --version         Show version information\n");
-    printf("  --help            Show this help message\n\n");
-    printf("Options:\n");
-    printf("  -l, --level N     Compression level (1-9)\n");
-    printf("  -t, --threads N   Number of threads (0=auto)\n");
-    printf("  -C, --checksum    Enable checksum\n");
-    printf("  -N, --no-checksum Disable checksum\n");
-    printf("  -k, --keep        Keep input file\n");
-    printf("  -f, --force       Force overwrite\n");
-    printf("  -c, --stdout      Write to stdout\n");
-    printf("  -v, --verbose     Verbose mode\n");
-    printf("  -q, --quiet       Quiet mode\n");
+    printf(
+        "Standard Modes:\n"
+        "  -z, --compress    Compress FILE (default)\n"
+        "  -d, --decompress  Decompress FILE (or stdin -> stdout)\n"
+        "  -b, --bench       Benchmark in-memory\n\n"
+        "Special Options:\n"
+        "  -V, --version     Show version information\n"
+        "  -h, --help        Show this help message\n\n"
+        "Options:\n"
+        "  -l, --level N     Compression level (1-9)\n"
+        "  -t, --threads N   Number of threads (0=auto)\n"
+        "  -C, --checksum    Enable checksum\n"
+        "  -N, --no-checksum Disable checksum\n"
+        "  -k, --keep        Keep input file\n"
+        "  -f, --force       Force overwrite\n"
+        "  -c, --stdout      Write to stdout\n"
+        "  -v, --verbose     Verbose mode\n"
+        "  -q, --quiet       Quiet mode\n"
+        );
 }
 
-static void print_version(void) {
+void print_version(void) {
     char sys_info[256];
 #ifdef _WIN32
     snprintf(sys_info, sizeof(sys_info), "%s-%s", ZXC_ARCH, ZXC_OS);
@@ -216,7 +218,8 @@ static void print_version(void) {
         snprintf(sys_info, sizeof(sys_info), "%s-%s", ZXC_ARCH, ZXC_OS);
     }
 #endif
-    printf("zxc %s (%s)\n", ZXC_LIB_VERSION_STR, sys_info);
+    printf("zxc %s\n", ZXC_LIB_VERSION_STR);
+    printf("(%s)\n", sys_info);
 }
 
 typedef enum { MODE_COMPRESS, MODE_DECOMPRESS, MODE_BENCHMARK } zxc_mode_t;
@@ -250,12 +253,12 @@ int main(int argc, char** argv) {
                                                  {"quiet", no_argument, 0, 'q'},
                                                  {"checksum", no_argument, 0, 'C'},
                                                  {"no-checksum", no_argument, 0, 'N'},
-                                                 {"version", no_argument, 0, OPT_VERSION},
-                                                 {"help", no_argument, 0, OPT_HELP},
+                                                 {"version", no_argument, 0, 'V'},
+                                                 {"help", no_argument, 0, 'h'},
                                                  {0, 0, 0, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "zdb::l:t:kfcvqCN", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "b::cCdfhkl:Nqt:vVz", long_options, NULL)) != -1) {
         switch (opt) {
             case 'z':
                 mode = MODE_COMPRESS;
@@ -295,10 +298,10 @@ int main(int argc, char** argv) {
                 checksum = 0;
                 break;
             case '?':
-            case OPT_VERSION:
+            case 'V':
                 print_version();
                 return 0;
-            case OPT_HELP:
+            case 'h':
                 print_help(argv[0]);
                 return 0;
             default:
@@ -491,7 +494,8 @@ int main(int argc, char** argv) {
 
     // Prevent writing binary data to the terminal unless forced
     if (use_stdout && isatty(fileno(stdout)) && mode == MODE_COMPRESS && !force) {
-        zxc_log("Refusing to write binary to terminal.\n");
+        zxc_log("Refusing to write compressed data to terminal.\n"
+                "For help, type: zxc -h\n");
         fclose(f_in);
         return 1;
     }
