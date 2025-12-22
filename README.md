@@ -11,7 +11,7 @@
 **ZXC** is an asymmetric high-performance lossless compression library optimized for **Content Delivery** and **Embedded Systems** (Game Assets, Firmware, App Bundles).
 It is designed to be *"Write Once, Read Many."*. Unlike symmetric codecs (LZ4), ZXC trades compression speed (build-time) for **maximum decompression throughput** (run-time).
 
-> **Key Result:** ZXC outperforms LZ4 decompression by **+40% on Apple Silicon** and **+22% on Cloud ARM (Google Axion)**.
+> **Key Result:** ZXC outperforms LZ4 decompression by **+42% on Apple Silicon** and **+26% on Cloud ARM (Google Axion)**.
 
 > **Verified:** ZXC has been officially merged into the **[lzbench master branch](https://github.com/inikep/lzbench)**. You can now verify these results independently using the industry-standard benchmark suite.
 
@@ -385,7 +385,7 @@ your own behavior based on `zxc_driver.c`.
 
 
 ## Safety & Quality
-* **Continuous Fuzzing**: Integrated with Google OSS-Fuzz (PR ready) and local libFuzzer suites.
+* **Continuous Fuzzing**: Integrated with local ClusterFuzzLite suites.
 * **Static Analysis**: Checked with CPPChecker & Clang Static Analyzer.
 * **Dynamic Analysis**: Validated with Valgrind and ASan/UBSan in CI pipelines.
 * **Safe API: Explicit** buffer capacity is required for all operations.
