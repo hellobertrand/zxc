@@ -769,27 +769,32 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
         if (UNLIKELY(ll1 == 15)) ll1 = zxc_read_vbyte(&e_ptr);
         if (UNLIKELY(ml1 == 15)) ml1 = zxc_read_vbyte(&e_ptr);
         ml1 += ZXC_LZ_MIN_MATCH;
-        V2_DECODE_SEQ_SAFE(ll1, ml1, off1);
 
         uint32_t ll2 = ((tokens >> 8) & 0xFF) >> 4;
         uint32_t ml2 = ((tokens >> 8) & 0xFF) & 0x0F;
         if (UNLIKELY(ll2 == 15)) ll2 = zxc_read_vbyte(&e_ptr);
         if (UNLIKELY(ml2 == 15)) ml2 = zxc_read_vbyte(&e_ptr);
         ml2 += ZXC_LZ_MIN_MATCH;
-        V2_DECODE_SEQ_SAFE(ll2, ml2, off2);
 
         uint32_t ll3 = ((tokens >> 16) & 0xFF) >> 4;
         uint32_t ml3 = ((tokens >> 16) & 0xFF) & 0x0F;
         if (UNLIKELY(ll3 == 15)) ll3 = zxc_read_vbyte(&e_ptr);
         if (UNLIKELY(ml3 == 15)) ml3 = zxc_read_vbyte(&e_ptr);
         ml3 += ZXC_LZ_MIN_MATCH;
-        V2_DECODE_SEQ_SAFE(ll3, ml3, off3);
 
         uint32_t ll4 = ((tokens >> 24) & 0xFF) >> 4;
         uint32_t ml4 = ((tokens >> 24) & 0xFF) & 0x0F;
         if (UNLIKELY(ll4 == 15)) ll4 = zxc_read_vbyte(&e_ptr);
         if (UNLIKELY(ml4 == 15)) ml4 = zxc_read_vbyte(&e_ptr);
         ml4 += ZXC_LZ_MIN_MATCH;
+
+        // Bounds check: ensure all 4 sequences fit in remaining output buffer
+        size_t total_out = (size_t)ll1 + ml1 + ll2 + ml2 + ll3 + ml3 + ll4 + ml4;
+        if (UNLIKELY(d_ptr + total_out > d_end)) return -1;
+
+        V2_DECODE_SEQ_SAFE(ll1, ml1, off1);
+        V2_DECODE_SEQ_SAFE(ll2, ml2, off2);
+        V2_DECODE_SEQ_SAFE(ll3, ml3, off3);
         V2_DECODE_SEQ_SAFE(ll4, ml4, off4);
 
         n_seq -= 4;
@@ -812,27 +817,32 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
         if (UNLIKELY(ll1 == 15)) ll1 = zxc_read_vbyte(&e_ptr);
         if (UNLIKELY(ml1 == 15)) ml1 = zxc_read_vbyte(&e_ptr);
         ml1 += ZXC_LZ_MIN_MATCH;
-        V2_DECODE_SEQ_FAST(ll1, ml1, off1);
 
         uint32_t ll2 = ((tokens >> 8) & 0xFF) >> 4;
         uint32_t ml2 = ((tokens >> 8) & 0xFF) & 0x0F;
         if (UNLIKELY(ll2 == 15)) ll2 = zxc_read_vbyte(&e_ptr);
         if (UNLIKELY(ml2 == 15)) ml2 = zxc_read_vbyte(&e_ptr);
         ml2 += ZXC_LZ_MIN_MATCH;
-        V2_DECODE_SEQ_FAST(ll2, ml2, off2);
 
         uint32_t ll3 = ((tokens >> 16) & 0xFF) >> 4;
         uint32_t ml3 = ((tokens >> 16) & 0xFF) & 0x0F;
         if (UNLIKELY(ll3 == 15)) ll3 = zxc_read_vbyte(&e_ptr);
         if (UNLIKELY(ml3 == 15)) ml3 = zxc_read_vbyte(&e_ptr);
         ml3 += ZXC_LZ_MIN_MATCH;
-        V2_DECODE_SEQ_FAST(ll3, ml3, off3);
 
         uint32_t ll4 = ((tokens >> 24) & 0xFF) >> 4;
         uint32_t ml4 = ((tokens >> 24) & 0xFF) & 0x0F;
         if (UNLIKELY(ll4 == 15)) ll4 = zxc_read_vbyte(&e_ptr);
         if (UNLIKELY(ml4 == 15)) ml4 = zxc_read_vbyte(&e_ptr);
         ml4 += ZXC_LZ_MIN_MATCH;
+
+        // Bounds check: ensure all 4 sequences fit in remaining output buffer
+        size_t total_out = (size_t)ll1 + ml1 + ll2 + ml2 + ll3 + ml3 + ll4 + ml4;
+        if (UNLIKELY(d_ptr + total_out > d_end)) return -1;
+
+        V2_DECODE_SEQ_FAST(ll1, ml1, off1);
+        V2_DECODE_SEQ_FAST(ll2, ml2, off2);
+        V2_DECODE_SEQ_FAST(ll3, ml3, off3);
         V2_DECODE_SEQ_FAST(ll4, ml4, off4);
 
         n_seq -= 4;
