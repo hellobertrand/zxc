@@ -32,6 +32,7 @@ jobs:
           cppcheck --enable=all \
             --library=gnu \
             --suppress=missingIncludeSystem --suppress=*:include/xxhash.h \
+            --check-level=exhaustive \
             --inline-suppr \
             --error-exitcode=1 \
             --language=c \
