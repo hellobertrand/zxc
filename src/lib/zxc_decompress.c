@@ -303,18 +303,18 @@ static ZXC_ALWAYS_INLINE __m512i zxc_mm512_prefix_sum_epi32(__m512i v) {
     t = _mm512_bslli_epi128(v, 8);          // Shift left by 8 bytes (2 ints)
     v = _mm512_add_epi32(v, t);             // Add shifted value
 
-    // Propagate sums across 128-bit lanes
+    // Propagate sums across 128-bit lanes (sequential dependency)
     __m512i v_l0 = _mm512_shuffle_i32x4(v, v, 0x00);  // Broadcast lane 0
     v_l0 = _mm512_shuffle_epi32(v_l0, 0xFF);          // Broadcast last element of lane 0
-    v = _mm512_mask_add_epi32(v, 0xFFF0, v, v_l0);    // Add to lanes 1, 2, 3
+    v = _mm512_mask_add_epi32(v, 0x00F0, v, v_l0);    // Add to lane 1 only
 
     __m512i v_l1 = _mm512_shuffle_i32x4(v, v, 0x55);  // Broadcast lane 1
     v_l1 = _mm512_shuffle_epi32(v_l1, 0xFF);          // Broadcast last element of lane 1
-    v = _mm512_mask_add_epi32(v, 0xFF00, v, v_l1);    // Add to lanes 2, 3
+    v = _mm512_mask_add_epi32(v, 0x0F00, v, v_l1);    // Add to lane 2 only
 
     __m512i v_l2 = _mm512_shuffle_i32x4(v, v, 0xAA);  // Broadcast lane 2
     v_l2 = _mm512_shuffle_epi32(v_l2, 0xFF);          // Broadcast last element of lane 2
-    v = _mm512_mask_add_epi32(v, 0xF000, v, v_l2);    // Add to lane 3
+    v = _mm512_mask_add_epi32(v, 0xF000, v, v_l2);    // Add to lane 3 only
 
     return v;
 }
