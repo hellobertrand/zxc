@@ -194,7 +194,7 @@ void print_help(const char* app) {
         "  -V, --version     Show version information\n"
         "  -h, --help        Show this help message\n\n"
         "Options:\n"
-        "  -1..9             Compression level (1-9) {3}\n"
+        "  -1..-5            Compression level {3}\n"
         "  -T, --threads N   Number of threads (0=auto)\n"
         "  -C, --checksum    Enable checksum\n"
         "  -N, --no-checksum Disable checksum\n"
@@ -257,7 +257,7 @@ int main(int argc, char** argv) {
                                                  {0, 0, 0, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "123456789b::cCdfhkl:Nqt:vVz", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "12345b::cCdfhkl:Nqt:vVz", long_options, NULL)) != -1) {
         switch (opt) {
             case 'z':
                 mode = MODE_COMPRESS;
@@ -269,9 +269,10 @@ int main(int argc, char** argv) {
                 mode = MODE_BENCHMARK;
                 if (optarg) iterations = atoi(optarg);
                 break;
-            case '1':  case '2':  case '3':  case '4':
-            case '5':  case '6':  case '7':  case '8':  case '9':
+            case '1':  case '2':  case '3':  case '4': case '5':
                 level = opt - '0';
+                if(level < 2)
+                    level = 2;
                 break;
             case 'T':
                 num_threads = atoi(optarg);
