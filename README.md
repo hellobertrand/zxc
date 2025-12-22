@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 
 
-**ZXC** is an asymmetric high-performance lossless compression library optimized for **Content Delivery** and **Embedded Systems** (Game Assets, Firmware, App Bundles). 
+**ZXC** is an asymmetric high-performance lossless compression library optimized for **Content Delivery** and **Embedded Systems** (Game Assets, Firmware, App Bundles).
 It is designed to be *"Write Once, Read Many."*. Unlike symmetric codecs (LZ4), ZXC trades compression speed (build-time) for **maximum decompression throughput** (run-time).
 
 > **Key Result:** ZXC outperforms LZ4 decompression by **+40% on Apple Silicon** and **+22% on Cloud ARM (Google Axion)**.
@@ -176,7 +176,13 @@ The CLI is perfect for benchmarking or manually compressing assets.
 zxc -z input_file output_file
 
 # High Compression (Level 5)
-zxc -z input_file output_file -l 5
+zxc -z -5 input_file output_file
+
+# -z for compression can be omitted
+zxc input_file output_file
+
+# as well as output file; it will be automatically assigned to input_file.xc
+zxc input_file
 
 # Decompression
 zxc -d compressed_file output_file
@@ -204,11 +210,11 @@ int main(void) {
 
     // Step 1: Calculate maximum compressed size
     size_t max_compressed_size = zxc_compress_bound(original_size);
-    
+
     // Step 2: Allocate buffers
     void* compressed = malloc(max_compressed_size);
     void* decompressed = malloc(original_size);
-    
+
     if (!compressed || !decompressed) {
         fprintf(stderr, "Memory allocation failed\n");
         free(compressed);
@@ -234,7 +240,7 @@ int main(void) {
     }
 
     printf("Original size: %zu bytes\n", original_size);
-    printf("Compressed size: %zu bytes (%.1f%% ratio)\n", 
+    printf("Compressed size: %zu bytes (%.1f%% ratio)\n",
            compressed_size, 100.0 * compressed_size / original_size);
 
     // Step 4: Decompress data (checksum verification enabled)
@@ -254,7 +260,7 @@ int main(void) {
     }
 
     // Step 5: Verify integrity
-    if (decompressed_size == original_size && 
+    if (decompressed_size == original_size &&
         memcmp(original, decompressed, original_size) == 0) {
         printf("Success! Data integrity verified.\n");
         printf("Decompressed: %s\n", (char*)decompressed);
@@ -290,7 +296,7 @@ int main(int argc, char* argv[]) {
 
     // Step 1: Compress the input file using multi-threaded streaming
     printf("Compressing '%s' to '%s'...\n", input_path, compressed_path);
-    
+
     FILE* f_in = fopen(input_path, "rb");
     if (!f_in) {
         fprintf(stderr, "Error: Cannot open input file '%s'\n", input_path);
@@ -306,7 +312,7 @@ int main(int argc, char* argv[]) {
 
     // Compress with auto-detected threads (0), level 3, checksum enabled
     int64_t compressed_bytes = zxc_stream_compress(f_in, f_out, 0, ZXC_LEVEL_DEFAULT, 1);
-    
+
     fclose(f_in);
     fclose(f_out);
 
@@ -319,7 +325,7 @@ int main(int argc, char* argv[]) {
 
     // Step 2: Decompress the file back using multi-threaded streaming
     printf("\nDecompressing '%s' to '%s'...\n", compressed_path, output_path);
-    
+
     FILE* f_compressed = fopen(compressed_path, "rb");
     if (!f_compressed) {
         fprintf(stderr, "Error: Cannot open compressed file '%s'\n", compressed_path);
@@ -335,7 +341,7 @@ int main(int argc, char* argv[]) {
 
     // Decompress with auto-detected threads (0), checksum verification enabled
     int64_t decompressed_bytes = zxc_stream_decompress(f_compressed, f_decompressed, 0, 1);
-    
+
     fclose(f_compressed);
     fclose(f_decompressed);
 

@@ -187,14 +187,14 @@ void print_help(const char* app) {
     printf("Usage: %s [<options>] [<argument>]...\n\n", app);
     printf(
         "Standard Modes:\n"
-        "  -z, --compress    Compress FILE (default)\n"
+        "  -z, --compress    Compress FILE {default}\n"
         "  -d, --decompress  Decompress FILE (or stdin -> stdout)\n"
         "  -b, --bench       Benchmark in-memory\n\n"
         "Special Options:\n"
         "  -V, --version     Show version information\n"
         "  -h, --help        Show this help message\n\n"
         "Options:\n"
-        "  -l, --level N     Compression level (1-9)\n"
+        "  -1..9             Compression level (1-9) {3}\n"
         "  -t, --threads N   Number of threads (0=auto)\n"
         "  -C, --checksum    Enable checksum\n"
         "  -N, --no-checksum Disable checksum\n"
@@ -244,7 +244,6 @@ int main(int argc, char** argv) {
     static const struct option long_options[] = {{"compress", no_argument, 0, 'z'},
                                                  {"decompress", no_argument, 0, 'd'},
                                                  {"bench", optional_argument, 0, 'b'},
-                                                 {"level", required_argument, 0, 'l'},
                                                  {"threads", required_argument, 0, 't'},
                                                  {"keep", no_argument, 0, 'k'},
                                                  {"force", no_argument, 0, 'f'},
@@ -258,7 +257,7 @@ int main(int argc, char** argv) {
                                                  {0, 0, 0, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "b::cCdfhkl:Nqt:vVz", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "123456789b::cCdfhkl:Nqt:vVz", long_options, NULL)) != -1) {
         switch (opt) {
             case 'z':
                 mode = MODE_COMPRESS;
@@ -270,8 +269,9 @@ int main(int argc, char** argv) {
                 mode = MODE_BENCHMARK;
                 if (optarg) iterations = atoi(optarg);
                 break;
-            case 'l':
-                level = atoi(optarg);
+            case '1':  case '2':  case '3':  case '4':
+            case '5':  case '6':  case '7':  case '8':  case '9':
+                level = opt - '0';
                 break;
             case 't':
                 num_threads = atoi(optarg);
