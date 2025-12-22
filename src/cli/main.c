@@ -195,7 +195,7 @@ void print_help(const char* app) {
         "  -h, --help        Show this help message\n\n"
         "Options:\n"
         "  -1..9             Compression level (1-9) {3}\n"
-        "  -t, --threads N   Number of threads (0=auto)\n"
+        "  -T, --threads N   Number of threads (0=auto)\n"
         "  -C, --checksum    Enable checksum\n"
         "  -N, --no-checksum Disable checksum\n"
         "  -k, --keep        Keep input file\n"
@@ -244,7 +244,7 @@ int main(int argc, char** argv) {
     static const struct option long_options[] = {{"compress", no_argument, 0, 'z'},
                                                  {"decompress", no_argument, 0, 'd'},
                                                  {"bench", optional_argument, 0, 'b'},
-                                                 {"threads", required_argument, 0, 't'},
+                                                 {"threads", required_argument, 0, 'T'},
                                                  {"keep", no_argument, 0, 'k'},
                                                  {"force", no_argument, 0, 'f'},
                                                  {"stdout", no_argument, 0, 'c'},
@@ -273,7 +273,7 @@ int main(int argc, char** argv) {
             case '5':  case '6':  case '7':  case '8':  case '9':
                 level = opt - '0';
                 break;
-            case 't':
+            case 'T':
                 num_threads = atoi(optarg);
                 break;
             case 'k':
