@@ -983,7 +983,7 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
     int decoded_sz = -1;
 
     if (LIKELY(type == ZXC_BLOCK_GNR)) {
-        decoded_sz = zxc_decode_block_gnr_v2(ctx, data, comp_sz, dst, dst_cap, raw_sz);
+        decoded_sz = zxc_decode_block_gnr(ctx, data, comp_sz, dst, dst_cap, raw_sz);
     } else if (type == ZXC_BLOCK_RAW) {
         if (UNLIKELY(raw_sz > dst_cap || raw_sz > comp_sz)) return -1;
         ZXC_MEMCPY(dst, data, raw_sz);
