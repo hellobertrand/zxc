@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.10)
-project(zxc_project VERSION 1.0 LANGUAGES C)
+
+# Versioning
+file(READ "include/zxc_constants.h" version_header)
+string(REGEX MATCH "#define ZXC_VERSION_MAJOR ([0-9]+)" _ "${version_header}")
+set(MAJOR_VER ${CMAKE_MATCH_1})
+string(REGEX MATCH "#define ZXC_VERSION_MINOR ([0-9]+)" _ "${version_header}")
+set(MINOR_VER ${CMAKE_MATCH_1})
+string(REGEX MATCH "#define ZXC_VERSION_PATCH ([0-9]+)" _ "${version_header}")
+set(PATCH_VER ${CMAKE_MATCH_1})
+project(zxc_project VERSION ${MAJOR_VER}.${MINOR_VER}.${PATCH_VER} LANGUAGES C)
 
 # Standards
 set(CMAKE_C_STANDARD 17)
