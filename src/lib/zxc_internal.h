@@ -473,23 +473,29 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(uint64_t x) {
 }
 
 /**
- * @brief Computes a hash value for a given 32-bit integer.
+ * @brief Computes a hash value optimized for LZ77 pattern matching speed.
  *
- * This internal function is marked as always inline to minimize function call overhead
- * during critical hashing operations. It takes a 32-bit integer input and transforms
- * it into a 32-bit hash value, typically used for hash table lookups or data distribution
- * within the compression algorithm.
+ * This function selects the algorithm with the lowest latency for the target architecture,
+ * balancing hash quality against the strict cycle budget of a compression inner loop:
  *
- * @param val The 32-bit integer value to be hashed.
- * @return uint32_t The computed 32-bit hash value.
+ * - **64-bit systems (x64, ARM64):** Uses a Wyhash-style multiplicative hash.
+ * On modern superscalar CPUs, this incurs negligible overhead compared to simpler hashes
+ * but provides superior avalanche properties. This significantly reduces hash collisions
+ * (false positives) in the match table, improving compressor throughput.
+ *
+ * - **32-bit systems (ARM32, x86):** Uses Knuth's Multiplicative Hash (Fibonacci Hashing).
+ * Selected for its minimal instruction count (single multiplication + shift/rotate) on
+ * architectures where 64-bit arithmetic is emulated or slow.
+ *
+ * @param[in] val The 32-bit integer sequence (e.g., 4 bytes from the input stream).
+ * @return uint32_t A hash value suitable for indexing the match table.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint32_t val) {
-#if defined(__SSE4_2__)
-    return _mm_crc32_u32(0, val);
-#elif defined(__ARM_FEATURE_CRC32)
-    return __crc32cw(0, val);
+#if defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__)
+    uint64_t h = (uint64_t)val * 0x9E3779B97F4A7C15ULL;
+    return (uint32_t)(h ^ (h >> 32));
 #else
-    uint32_t h = (val * 2654435761U);
+    uint32_t h = val * 2654435761U;
     return (h >> 16) | (h << 16);
 #endif
 }
