@@ -37,7 +37,8 @@ jobs:
 
       - name: Clone LZbench
         run: |
-          git clone -b ${LZBENCH_BRANCH} https://github.com/inikep/lzbench "${LZBENCH_DIR}"
+          # git clone -b ${LZBENCH_BRANCH} https://github.com/inikep/lzbench "${LZBENCH_DIR}"
+          git clone -b zxc-0.3.0 https://github.com/hellobertrand/lzbench "${LZBENCH_DIR}"
 
       - name: Copy Lib ZXC
         run: |
@@ -71,7 +72,7 @@ jobs:
         working-directory: ${{ env.LZBENCH_DIR }}
         run: |
           ./lzbench \
-            -e"memcpy/zxc,2,3,4,5/lz4/lz4fast,17/lz4hc,12/zstd,1/zstd_fast,-1/snappy" \
+            -e"memcpy/zxc/lz4/lz4fast,17/lz4hc,12/zstd,1/zstd_fast,-1/snappy" \
             -j -t8,8 -o1 "../${SILESIA_DIR}"/* \
             > ../benchmark.md
 
