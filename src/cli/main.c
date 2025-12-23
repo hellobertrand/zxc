@@ -202,8 +202,7 @@ void print_help(const char* app) {
         "  -f, --force       Force overwrite\n"
         "  -c, --stdout      Write to stdout\n"
         "  -v, --verbose     Verbose mode\n"
-        "  -q, --quiet       Quiet mode\n"
-        );
+        "  -q, --quiet       Quiet mode\n");
 }
 
 void print_version(void) {
@@ -241,20 +240,14 @@ int main(int argc, char** argv) {
     int checksum = 0;
     int level = 3;
 
-    static const struct option long_options[] = {{"compress", no_argument, 0, 'z'},
-                                                 {"decompress", no_argument, 0, 'd'},
-                                                 {"bench", optional_argument, 0, 'b'},
-                                                 {"threads", required_argument, 0, 'T'},
-                                                 {"keep", no_argument, 0, 'k'},
-                                                 {"force", no_argument, 0, 'f'},
-                                                 {"stdout", no_argument, 0, 'c'},
-                                                 {"verbose", no_argument, 0, 'v'},
-                                                 {"quiet", no_argument, 0, 'q'},
-                                                 {"checksum", no_argument, 0, 'C'},
-                                                 {"no-checksum", no_argument, 0, 'N'},
-                                                 {"version", no_argument, 0, 'V'},
-                                                 {"help", no_argument, 0, 'h'},
-                                                 {0, 0, 0, 0}};
+    static const struct option long_options[] = {
+        {"compress", no_argument, 0, 'z'},    {"decompress", no_argument, 0, 'd'},
+        {"bench", optional_argument, 0, 'b'}, {"threads", required_argument, 0, 'T'},
+        {"keep", no_argument, 0, 'k'},        {"force", no_argument, 0, 'f'},
+        {"stdout", no_argument, 0, 'c'},      {"verbose", no_argument, 0, 'v'},
+        {"quiet", no_argument, 0, 'q'},       {"checksum", no_argument, 0, 'C'},
+        {"no-checksum", no_argument, 0, 'N'}, {"version", no_argument, 0, 'V'},
+        {"help", no_argument, 0, 'h'},        {0, 0, 0, 0}};
 
     int opt;
     while ((opt = getopt_long(argc, argv, "12345b::cCdfhkl:Nqt:vVz", long_options, NULL)) != -1) {
@@ -269,10 +262,12 @@ int main(int argc, char** argv) {
                 mode = MODE_BENCHMARK;
                 if (optarg) iterations = atoi(optarg);
                 break;
-            case '1':  case '2':  case '3':  case '4': case '5':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
                 level = opt - '0';
-                if(level < 2)
-                    level = 2;
                 break;
             case 'T':
                 num_threads = atoi(optarg);
@@ -495,8 +490,9 @@ int main(int argc, char** argv) {
 
     // Prevent writing binary data to the terminal unless forced
     if (use_stdout && isatty(fileno(stdout)) && mode == MODE_COMPRESS && !force) {
-        zxc_log("Refusing to write compressed data to terminal.\n"
-                "For help, type: zxc -h\n");
+        zxc_log(
+            "Refusing to write compressed data to terminal.\n"
+            "For help, type: zxc -h\n");
         fclose(f_in);
         return 1;
     }

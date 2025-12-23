@@ -302,35 +302,33 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
     int level = ctx->compression_level;
     int chk = ctx->checksum_enabled;
 
-    int search_depth;
-    int use_lazy;
+    int use_lazy = 0;
+    int search_depth = 4;
     int sufficient_len = 256;
-
     uint32_t step_base = 1;
     uint32_t step_shift = 31;
 
-    if (level <= 2) {
-        search_depth = 4;
-        use_lazy = 0;
+    if (level <= 1) {
         sufficient_len = 16;
         step_base = 3;
         step_shift = 3;
+    } else if (level <= 2) {
+        sufficient_len = 16;
+        step_base = 2;
+        step_shift = 3;
     } else if (level <= 3) {
-        search_depth = 4;
         use_lazy = 1;
         sufficient_len = 32;
-        step_base = 1;
         step_shift = 4;
     } else if (level <= 4) {
-        search_depth = 4;
         use_lazy = 1;
         sufficient_len = 32;
-        step_base = 1;
         step_shift = 5;
     } else {
         search_depth = 64;
         use_lazy = 1;
     }
+
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
