@@ -89,22 +89,21 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* br, int needed) {
  * is clear (0), the byte is the last one in the sequence.
  *
  * The function updates the source pointer to the position immediately following
- * the read integer.
+ * @brief Decodes a variable-length integer (VByte) from a byte stream with bounds checking.
  *
- * @note This function is marked as ALWAYS_INLINE for performance reasons, as it
- *       is likely called frequently in a tight decompression loop.
- * @brief Reads a Variable Byte (VByte) encoded integer from the stream.
- *
- * This function handles values that were too large to fit in the standard 4-bit
- * token field. VByte encoding uses the high bit of each byte as a continuation
+ * Similar to LEB128, each byte uses 7 bits for data and the MSB as a continuation
  * flag (1 = more bytes, 0 = last byte).
  *
  * @param[in,out] ptr Address of the pointer to the current read position. The pointer
  * is advanced.
- * @return The decoded 32-bit integer.
+ * @param[in] end Pointer to one past the last valid byte in the extras stream.
+ * @return The decoded 32-bit integer, or 0 if reading would overflow bounds (safe default).
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr) {
+static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint8_t* end) {
     const uint8_t* p = *ptr;
+    // Bounds check: need at least 1 byte
+    if (UNLIKELY(p >= end)) return 0;  // Safe default: prevents crash, detected later
+
     uint32_t val = *p++;
     // Fast path: Single byte value (< 128)
     if (LIKELY(val < 128)) {
@@ -117,6 +116,11 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr) {
     uint32_t b;
     int count = 0;
     do {
+        // Bounds check for each continuation byte
+        if (UNLIKELY(p >= end)) {
+            *ptr = p;
+            return 0;  // Safe default: prevents crash, detected later
+        }
         b = *p++;
         val |= (b & 0x7F) << shift;
         shift += 7;
@@ -494,8 +498,8 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
  * -1 on failure (e.g., invalid header, buffer overflow, or corrupted data).
  */
 static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, size_t src_size,
-                                   uint8_t* restrict dst, size_t dst_capacity,
-                                   uint32_t expected_raw_size) {
+                                uint8_t* restrict dst, size_t dst_capacity,
+                                uint32_t expected_raw_size) {
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[4];
     if (UNLIKELY(zxc_read_gnr_header_and_desc(src, src_size, &gh, desc) != 0)) return -1;
@@ -767,29 +771,29 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
 
         uint32_t ll1 = (tokens & 0xFF) >> 4;
         uint32_t ml1 = (tokens & 0xFF) & 0x0F;
-        if (UNLIKELY(ll1 == 15)) ll1 = zxc_read_vbyte(&e_ptr);
-        if (UNLIKELY(ml1 == 15)) ml1 = zxc_read_vbyte(&e_ptr);
+        if (UNLIKELY(ll1 == 15)) ll1 = zxc_read_vbyte(&e_ptr, e_end);
+        if (UNLIKELY(ml1 == 15)) ml1 = zxc_read_vbyte(&e_ptr, e_end);
         ml1 += ZXC_LZ_MIN_MATCH;
         V2_DECODE_SEQ_SAFE(ll1, ml1, off1);
 
         uint32_t ll2 = ((tokens >> 8) & 0xFF) >> 4;
         uint32_t ml2 = ((tokens >> 8) & 0xFF) & 0x0F;
-        if (UNLIKELY(ll2 == 15)) ll2 = zxc_read_vbyte(&e_ptr);
-        if (UNLIKELY(ml2 == 15)) ml2 = zxc_read_vbyte(&e_ptr);
+        if (UNLIKELY(ll2 == 15)) ll2 = zxc_read_vbyte(&e_ptr, e_end);
+        if (UNLIKELY(ml2 == 15)) ml2 = zxc_read_vbyte(&e_ptr, e_end);
         ml2 += ZXC_LZ_MIN_MATCH;
         V2_DECODE_SEQ_SAFE(ll2, ml2, off2);
 
         uint32_t ll3 = ((tokens >> 16) & 0xFF) >> 4;
         uint32_t ml3 = ((tokens >> 16) & 0xFF) & 0x0F;
-        if (UNLIKELY(ll3 == 15)) ll3 = zxc_read_vbyte(&e_ptr);
-        if (UNLIKELY(ml3 == 15)) ml3 = zxc_read_vbyte(&e_ptr);
+        if (UNLIKELY(ll3 == 15)) ll3 = zxc_read_vbyte(&e_ptr, e_end);
+        if (UNLIKELY(ml3 == 15)) ml3 = zxc_read_vbyte(&e_ptr, e_end);
         ml3 += ZXC_LZ_MIN_MATCH;
         V2_DECODE_SEQ_SAFE(ll3, ml3, off3);
 
         uint32_t ll4 = ((tokens >> 24) & 0xFF) >> 4;
         uint32_t ml4 = ((tokens >> 24) & 0xFF) & 0x0F;
-        if (UNLIKELY(ll4 == 15)) ll4 = zxc_read_vbyte(&e_ptr);
-        if (UNLIKELY(ml4 == 15)) ml4 = zxc_read_vbyte(&e_ptr);
+        if (UNLIKELY(ll4 == 15)) ll4 = zxc_read_vbyte(&e_ptr, e_end);
+        if (UNLIKELY(ml4 == 15)) ml4 = zxc_read_vbyte(&e_ptr, e_end);
         ml4 += ZXC_LZ_MIN_MATCH;
         V2_DECODE_SEQ_SAFE(ll4, ml4, off4);
 
@@ -810,29 +814,29 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
 
         uint32_t ll1 = (tokens & 0xFF) >> 4;
         uint32_t ml1 = (tokens & 0xFF) & 0x0F;
-        if (UNLIKELY(ll1 == 15)) ll1 = zxc_read_vbyte(&e_ptr);
-        if (UNLIKELY(ml1 == 15)) ml1 = zxc_read_vbyte(&e_ptr);
+        if (UNLIKELY(ll1 == 15)) ll1 = zxc_read_vbyte(&e_ptr, e_end);
+        if (UNLIKELY(ml1 == 15)) ml1 = zxc_read_vbyte(&e_ptr, e_end);
         ml1 += ZXC_LZ_MIN_MATCH;
         V2_DECODE_SEQ_FAST(ll1, ml1, off1);
 
         uint32_t ll2 = ((tokens >> 8) & 0xFF) >> 4;
         uint32_t ml2 = ((tokens >> 8) & 0xFF) & 0x0F;
-        if (UNLIKELY(ll2 == 15)) ll2 = zxc_read_vbyte(&e_ptr);
-        if (UNLIKELY(ml2 == 15)) ml2 = zxc_read_vbyte(&e_ptr);
+        if (UNLIKELY(ll2 == 15)) ll2 = zxc_read_vbyte(&e_ptr, e_end);
+        if (UNLIKELY(ml2 == 15)) ml2 = zxc_read_vbyte(&e_ptr, e_end);
         ml2 += ZXC_LZ_MIN_MATCH;
         V2_DECODE_SEQ_FAST(ll2, ml2, off2);
 
         uint32_t ll3 = ((tokens >> 16) & 0xFF) >> 4;
         uint32_t ml3 = ((tokens >> 16) & 0xFF) & 0x0F;
-        if (UNLIKELY(ll3 == 15)) ll3 = zxc_read_vbyte(&e_ptr);
-        if (UNLIKELY(ml3 == 15)) ml3 = zxc_read_vbyte(&e_ptr);
+        if (UNLIKELY(ll3 == 15)) ll3 = zxc_read_vbyte(&e_ptr, e_end);
+        if (UNLIKELY(ml3 == 15)) ml3 = zxc_read_vbyte(&e_ptr, e_end);
         ml3 += ZXC_LZ_MIN_MATCH;
         V2_DECODE_SEQ_FAST(ll3, ml3, off3);
 
         uint32_t ll4 = ((tokens >> 24) & 0xFF) >> 4;
         uint32_t ml4 = ((tokens >> 24) & 0xFF) & 0x0F;
-        if (UNLIKELY(ll4 == 15)) ll4 = zxc_read_vbyte(&e_ptr);
-        if (UNLIKELY(ml4 == 15)) ml4 = zxc_read_vbyte(&e_ptr);
+        if (UNLIKELY(ll4 == 15)) ll4 = zxc_read_vbyte(&e_ptr, e_end);
+        if (UNLIKELY(ml4 == 15)) ml4 = zxc_read_vbyte(&e_ptr, e_end);
         ml4 += ZXC_LZ_MIN_MATCH;
         V2_DECODE_SEQ_FAST(ll4, ml4, off4);
 
@@ -858,8 +862,8 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
         uint32_t offset = (uint32_t)o_ptr[0] | ((uint32_t)o_ptr[1] << 8);
         o_ptr += 2;
 
-        if (UNLIKELY(ll == 15)) ll = zxc_read_vbyte(&e_ptr);
-        if (UNLIKELY(ml == 15)) ml = zxc_read_vbyte(&e_ptr);
+        if (UNLIKELY(ll == 15)) ll = zxc_read_vbyte(&e_ptr, e_end);
+        if (UNLIKELY(ml == 15)) ml = zxc_read_vbyte(&e_ptr, e_end);
         ml += ZXC_LZ_MIN_MATCH;
 
         // Check bounds before wild copies - if too close to end, fall back to Safe Path
@@ -933,8 +937,8 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
         uint32_t offset = (uint32_t)o_ptr[0] | ((uint32_t)o_ptr[1] << 8);
         o_ptr += 2;
 
-        if (UNLIKELY(ll == 15)) ll = zxc_read_vbyte(&e_ptr);
-        if (UNLIKELY(ml == 15)) ml = zxc_read_vbyte(&e_ptr);
+        if (UNLIKELY(ll == 15)) ll = zxc_read_vbyte(&e_ptr, e_end);
+        if (UNLIKELY(ml == 15)) ml = zxc_read_vbyte(&e_ptr, e_end);
         ml += ZXC_LZ_MIN_MATCH;
 
         if (UNLIKELY(d_ptr + ll > d_end)) return -1;
