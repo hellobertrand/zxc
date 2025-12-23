@@ -329,7 +329,6 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
         use_lazy = 1;
     }
 
-
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
         ZXC_MEMSET(ctx->hash_table, 0, 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
@@ -917,7 +916,6 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
 
     if (try_num) {
         res = zxc_encode_block_num(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
-        // Test: NUM must achieve at least 20% compression (ratio < 80%)
         if (res != 0 || w > (src_sz - (src_sz >> 2))) {  // w > 75% of src_sz
             // NUM didn't compress well, try GNR instead
             try_num = 0;

@@ -281,7 +281,7 @@ typedef struct {
  * little-endian 16-bit integer, regardless of the host system's endianness.
  * It is marked as always inline for performance critical paths.
  *
- * @param p Pointer to the memory location to read from.
+ * @param[in] p Pointer to the memory location to read from.
  * @return The 16-bit unsigned integer value read from memory.
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_le16(const void* p) {
@@ -297,7 +297,7 @@ static ZXC_ALWAYS_INLINE uint16_t zxc_le16(const void* p) {
  * little-endian 32-bit integer, regardless of the host system's endianness.
  * It is marked as always inline for performance critical paths.
  *
- * @param p Pointer to the memory location to read from.
+ * @param[in] p Pointer to the memory location to read from.
  * @return The 32-bit unsigned integer value read from memory.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_le32(const void* p) {
@@ -313,7 +313,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_le32(const void* p) {
  * little-endian 64-bit integer, regardless of the host system's endianness.
  * It is marked as always inline for performance critical paths.
  *
- * @param p Pointer to the memory location to read from.
+ * @param[in] p Pointer to the memory location to read from.
  * @return The 64-bit unsigned integer value read from memory.
  */
 static ZXC_ALWAYS_INLINE uint64_t zxc_le64(const void* p) {
@@ -333,9 +333,9 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_le64(const void* p) {
  * optimizes the memcpy to a store instruction that handles endianness if necessary
  * (though the implementation shown is a direct copy).
  *
- * @param p Pointer to the destination memory where the value will be stored.
+ * @param[out] p Pointer to the destination memory where the value will be stored.
  *          Must point to a valid memory region of at least 2 bytes.
- * @param v The 16-bit unsigned integer value to store.
+ * @param[in] v The 16-bit unsigned integer value to store.
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le16(void* p, uint16_t v) { ZXC_MEMCPY(p, &v, sizeof(v)); }
 
@@ -348,8 +348,8 @@ static ZXC_ALWAYS_INLINE void zxc_store_le16(void* p, uint16_t v) { ZXC_MEMCPY(p
  *
  * @note This function is marked as `ZXC_ALWAYS_INLINE` to minimize function call overhead.
  *
- * @param p Pointer to the destination memory where the value will be stored.
- * @param v The 32-bit unsigned integer value to store.
+ * @param[out] p Pointer to the destination memory where the value will be stored.
+ * @param[in] v The 32-bit unsigned integer value to store.
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le32(void* p, uint32_t v) { ZXC_MEMCPY(p, &v, sizeof(v)); }
 
@@ -364,8 +364,8 @@ static ZXC_ALWAYS_INLINE void zxc_store_le32(void* p, uint32_t v) { ZXC_MEMCPY(p
  * the memcpy to a store instruction that handles endianness correctly if `ZXC_MEMCPY`
  * is defined appropriately.
  *
- * @param p Pointer to the destination memory where the value will be stored.
- * @param v The 64-bit unsigned integer value to store.
+ * @param[out] p Pointer to the destination memory where the value will be stored.
+ * @param[in] v The 64-bit unsigned integer value to store.
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, uint64_t v) { ZXC_MEMCPY(p, &v, sizeof(v)); }
 
@@ -375,8 +375,8 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, uint64_t v) { ZXC_MEMCPY(p
  * This function is forced to be inlined and uses SIMD intrinsics when available.
  * SSE2 on x86/x64, NEON on ARM, or memcpy as fallback.
  *
- * @param dst Pointer to the destination memory block.
- * @param src Pointer to the source memory block.
+ * @param[out] dst Pointer to the destination memory block.
+ * @param[in] src Pointer to the source memory block.
  */
 static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
@@ -394,8 +394,8 @@ static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
  *
  * Uses AVX2 on x86, NEON on ARM64/ARM32, or two 16-byte copies as fallback.
  *
- * @param dst Pointer to the destination memory block.
- * @param src Pointer to the source memory block.
+ * @param[out] dst Pointer to the destination memory block.
+ * @param[in] src Pointer to the source memory block.
  */
 static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
@@ -421,7 +421,7 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
  * MSVC (`_BitScanForward`) for optimal performance. If no supported compiler
  * is detected, it falls back to a portable De Bruijn sequence implementation.
  *
- * @param x The 32-bit unsigned integer to scan.
+ * @param[in] x The 32-bit unsigned integer to scan.
  * @return The number of trailing zeros (0-32).
  */
 static ZXC_ALWAYS_INLINE int zxc_ctz32(uint32_t x) {
@@ -447,7 +447,7 @@ static ZXC_ALWAYS_INLINE int zxc_ctz32(uint32_t x) {
  * This function determines the number of zero bits following the least significant
  * one bit in the binary representation of `x`.
  *
- * @param x The 64-bit unsigned integer to scan.
+ * @param[in] x The 64-bit unsigned integer to scan.
  * @return The number of trailing zeros. Returns 64 if `x` is 0.
  *
  * @note This implementation uses compiler built-ins for GCC/Clang (`__builtin_ctzll`)
@@ -505,7 +505,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint32_t val) {
  *
  * This function determines the position of the most significant bit that is set to 1.
  *
- * @param n The 32-bit unsigned integer to analyze.
+ * @param[in] n The 32-bit unsigned integer to analyze.
  * @return The 0-based index of the highest set bit. If n is 0, the behavior is undefined.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_highbit32(uint32_t n) {
@@ -534,7 +534,7 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_highbit32(uint32_t n) {
  * as standard varint encoding is inefficient for negative numbers (which are interpreted
  * as very large unsigned integers).
  *
- * @param n The signed 32-bit integer to encode.
+ * @param[in] n The signed 32-bit integer to encode.
  * @return The ZigZag encoded unsigned 32-bit integer.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_zigzag_encode(int32_t n) {
@@ -552,7 +552,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_zigzag_encode(int32_t n) {
  * This function reverses that process, converting the unsigned representation back into
  * the original signed 32-bit integer.
  *
- * @param n The unsigned 32-bit integer to decode.
+ * @param[in] n The unsigned 32-bit integer to decode.
  * @return The decoded signed 32-bit integer.
  */
 static ZXC_ALWAYS_INLINE int32_t zxc_zigzag_decode(uint32_t n) {
