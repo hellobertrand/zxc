@@ -592,6 +592,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
     const uint8_t* t_ptr = p_curr;
     const uint8_t* o_ptr = t_ptr + sz_tokens;
     const uint8_t* e_ptr = o_ptr + sz_offsets;
+    const uint8_t* const e_end = e_ptr + sz_extras;  // For vbyte overflow detection
 
     // Validate streams don't overflow source buffer
     if (UNLIKELY(e_ptr + sz_extras > src + src_size)) return -1;
@@ -840,6 +841,9 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, si
 
 #undef V2_DECODE_SEQ_SAFE
 #undef V2_DECODE_SEQ_FAST
+
+    // Validate vbyte reads didn't overflow
+    if (UNLIKELY(e_ptr > e_end)) return -1;
 
     // --- Remaining 1 sequence (Fast Path) ---
     while (n_seq > 0 && d_ptr < d_end_safe) {
