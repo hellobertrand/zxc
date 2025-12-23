@@ -250,7 +250,7 @@ int main(int argc, char** argv) {
         {"help", no_argument, 0, 'h'},        {0, 0, 0, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "12345b::cCdfhkl:Nqt:vVz", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "12345b::cCdfhkl:NqT:vVz", long_options, NULL)) != -1) {
         switch (opt) {
             case 'z':
                 mode = MODE_COMPRESS;
