@@ -403,9 +403,13 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
             const uint8_t* ref = src + match_idx;
             ZXC_PREFETCH_READ(ref);  // Prefetch reference data
 
-            // Skip HEAD memory access if hash-tag mismatched (refined mode only)
-            if ((!is_first || !skip_head) && zxc_le32(ref) == cur_val &&
-                ref[best_len] == ip[best_len]) {
+            // Branchless match check: compute conditions as masks
+            uint32_t ref_val = zxc_le32(ref);
+            int should_skip = is_first & skip_head;  // 1 if should skip, 0 otherwise
+            // Combine: match if not skipping AND values match AND best_len byte matches
+            int match_ok = (!should_skip) & (ref_val == cur_val) & (ref[best_len] == ip[best_len]);
+
+            if (LIKELY(match_ok)) {
                 uint32_t mlen = 4;
 #if defined(ZXC_USE_AVX512)
                 const uint8_t* limit_64 = iend - 64;
