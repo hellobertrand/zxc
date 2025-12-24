@@ -360,11 +360,11 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
         ZXC_PREFETCH_READ(ip + step * 4 + 64);
 
         uint32_t cur_val = zxc_le32(ip);
-        uint32_t h = zxc_hash_func(cur_val) & (ZXC_LZ_HASH_SIZE - 1);
+        uint32_t h = zxc_hash_func(cur_val);
         int32_t cur_pos = (uint32_t)(ip - src);
 
         // Prefetch next iteration's hash slot (speculative)
-        uint32_t next_h = zxc_hash_func(zxc_le32(ip + step)) & (ZXC_LZ_HASH_SIZE - 1);
+        uint32_t next_h = zxc_hash_func(zxc_le32(ip + step));
         ZXC_PREFETCH_READ(&hash_table[2 * next_h]);
 
         uint32_t raw_head = hash_table[2 * h];
@@ -541,7 +541,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
 
         if (use_lazy && best_ref && best_len < 128 && ip + 1 < mflimit) {
             uint32_t next_val = zxc_le32(ip + 1);
-            uint32_t h2 = zxc_hash_func(next_val) & (ZXC_LZ_HASH_SIZE - 1);
+            uint32_t h2 = zxc_hash_func(next_val);
             uint32_t next_head = hash_table[2 * h2];
             uint32_t next_stored_tag = hash_table[2 * h2 + 1];  // Hash-tag for lazy match
             uint32_t next_idx =
@@ -630,7 +630,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
                 if (match_end < iend - 3) {
                     uint32_t pos_u = (uint32_t)((match_end - 2) - src);
                     uint32_t val_u = zxc_le32(match_end - 2);
-                    uint32_t h_u = zxc_hash_func(val_u) & (ZXC_LZ_HASH_SIZE - 1);
+                    uint32_t h_u = zxc_hash_func(val_u);
 
                     // Retrieve the old head to maintain the chain
                     uint32_t prev_head = hash_table[2 * h_u];

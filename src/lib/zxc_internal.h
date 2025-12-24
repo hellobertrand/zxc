@@ -491,13 +491,11 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(uint64_t x) {
  * @return uint32_t A hash value suitable for indexing the match table.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint32_t val) {
-#if defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__)
-    uint64_t h = (uint64_t)val * 0x9E3779B97F4A7C15ULL;
-    return (uint32_t)(h ^ (h >> 32));
-#else
-    uint32_t h = val * 2654435761U;
-    return (h >> 16) | (h << 16);
-#endif
+    // LZ4-style Fibonacci hash: single 32-bit multiplication
+    // Knuth's multiplicative hash constant: 2654435761 (golden ratio * 2^32)
+    // Returns upper bits which have the best avalanche properties
+    // The caller applies the mask (& (ZXC_LZ_HASH_SIZE - 1))
+    return (val * 2654435761U) >> (32 - ZXC_LZ_HASH_BITS);
 }
 
 /**
