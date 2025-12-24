@@ -363,6 +363,10 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
         uint32_t h = zxc_hash_func(cur_val) & (ZXC_LZ_HASH_SIZE - 1);
         int32_t cur_pos = (uint32_t)(ip - src);
 
+        // Prefetch next iteration's hash slot (speculative)
+        uint32_t next_h = zxc_hash_func(zxc_le32(ip + step)) & (ZXC_LZ_HASH_SIZE - 1);
+        ZXC_PREFETCH_READ(&hash_table[2 * next_h]);
+
         uint32_t raw_head = hash_table[2 * h];
         uint32_t stored_tag = hash_table[2 * h + 1];  // Hash-tag for early filtering
         uint32_t match_idx =
@@ -397,6 +401,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
             if (cur_pos - match_idx >= ZXC_LZ_MAX_DIST) break;
 
             const uint8_t* ref = src + match_idx;
+            ZXC_PREFETCH_READ(ref);  // Prefetch reference data
 
             // Skip HEAD memory access if hash-tag mismatched (refined mode only)
             if ((!is_first || !skip_head) && zxc_le32(ref) == cur_val &&
@@ -526,6 +531,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
             uint16_t delta = chain_table[match_idx];
             if (delta == 0) break;
             match_idx -= delta;
+            ZXC_PREFETCH_READ(src + match_idx);  // Prefetch next chain entry's data
             is_first = 0;  // No longer checking HEAD, now checking chain entries
         }
 
