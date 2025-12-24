@@ -364,10 +364,24 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
         int32_t cur_pos = (uint32_t)(ip - src);
 
         uint32_t raw_head = hash_table[2 * h];
+        uint32_t stored_tag = hash_table[2 * h + 1];  // Hash-tag for early filtering
         uint32_t match_idx =
             (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
 
+        // Hybrid hash-tag strategy based on compression level
+        int skip_head = 0;
+        if (match_idx > 0 && stored_tag != cur_val) {
+            if (level <= 2) {
+                // Aggressive mode: skip entire chain for speed
+                match_idx = 0;
+            } else {
+                // Refined mode: skip only HEAD, preserve chain for ratio
+                skip_head = 1;
+            }
+        }
+
         hash_table[2 * h] = epoch_mark | cur_pos;
+        hash_table[2 * h + 1] = cur_val;  // Store hash-tag for future lookups
         // cppcheck-suppress knownConditionTrueFalse ; false positive
         if (match_idx > 0 && (cur_pos - match_idx) < 0x10000)
             chain_table[cur_pos] = (uint16_t)(cur_pos - match_idx);
@@ -378,12 +392,15 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
         uint32_t best_len = ZXC_LZ_MIN_MATCH - 1;
 
         int attempts = search_depth;
+        int is_first = 1;  // Track if we're checking the HEAD
         while (match_idx > 0 && attempts-- >= 0) {
             if (cur_pos - match_idx >= ZXC_LZ_MAX_DIST) break;
 
             const uint8_t* ref = src + match_idx;
 
-            if (zxc_le32(ref) == cur_val && ref[best_len] == ip[best_len]) {
+            // Skip HEAD memory access if hash-tag mismatched (refined mode only)
+            if ((!is_first || !skip_head) && zxc_le32(ref) == cur_val &&
+                ref[best_len] == ip[best_len]) {
                 uint32_t mlen = 4;
 #if defined(ZXC_USE_AVX512)
                 const uint8_t* limit_64 = iend - 64;
@@ -509,22 +526,29 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
             uint16_t delta = chain_table[match_idx];
             if (delta == 0) break;
             match_idx -= delta;
+            is_first = 0;  // No longer checking HEAD, now checking chain entries
         }
 
         if (use_lazy && best_ref && best_len < 128 && ip + 1 < mflimit) {
             uint32_t next_val = zxc_le32(ip + 1);
             uint32_t h2 = zxc_hash_func(next_val) & (ZXC_LZ_HASH_SIZE - 1);
             uint32_t next_head = hash_table[2 * h2];
+            uint32_t next_stored_tag = hash_table[2 * h2 + 1];  // Hash-tag for lazy match
             uint32_t next_idx =
                 (next_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (next_head & ZXC_OFFSET_MASK) : 0;
 
+            // Early filter flag for lazy matching
+            int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_val);
+
             uint32_t max_lazy = 0;
             int lazy_att = (level == 3 || level == 4) ? 1 : 8;
+            int is_lazy_first = 1;
 
             while (next_idx > 0 && lazy_att-- > 0) {
                 if ((uint32_t)(ip + 1 - src) - next_idx >= ZXC_LZ_MAX_DIST) break;
                 const uint8_t* ref2 = src + next_idx;
-                if (zxc_le32(ref2) == next_val) {
+                // Skip HEAD if tag mismatched, check chain entries normally
+                if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
                     uint32_t l2 = 4;
                     while (ip + 1 + l2 < iend && ref2[l2] == ip[1 + l2]) l2++;
                     if (l2 > max_lazy) max_lazy = l2;
@@ -532,6 +556,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
                 uint16_t delta = chain_table[next_idx];
                 if (delta == 0) break;
                 next_idx -= delta;
+                is_lazy_first = 0;
             }
             if (max_lazy > best_len + 1) best_ref = NULL;
         }
@@ -603,8 +628,9 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
                                             ? (prev_head & ZXC_OFFSET_MASK)
                                             : 0;
 
-                    // Update the hash table and chain table
+                    // Update the hash table and chain table with hash-tag
                     hash_table[2 * h_u] = epoch_mark | pos_u;
+                    hash_table[2 * h_u + 1] = val_u;  // Store hash-tag
                     if (prev_idx > 0 && (pos_u - prev_idx) < 0x10000)
                         chain_table[pos_u] = (uint16_t)(pos_u - prev_idx);
                     else
