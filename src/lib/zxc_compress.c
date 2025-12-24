@@ -363,7 +363,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_
         uint32_t h = zxc_hash_func(cur_val);
         int32_t cur_pos = (uint32_t)(ip - src);
 
-        // Prefetch next iteration's hash slot
+        // cppcheck-suppress unreadVariable ; used for prefetch side-effect
         uint32_t next_h = zxc_hash_func(zxc_le32(ip + step));
         ZXC_PREFETCH_READ(&hash_table[2 * next_h]);
 
