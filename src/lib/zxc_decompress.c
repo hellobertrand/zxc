@@ -354,7 +354,7 @@ static ZXC_ALWAYS_INLINE __m512i zxc_mm512_prefix_sum_epi32(__m512i v) {
  *         or -1 if an error occurs (e.g., buffer overflow, invalid header,
  *         or malformed compressed stream).
  */
-static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, uint8_t* restrict dst,
+static int zxc_decode_block_num(const uint8_t* RESTRICT src, size_t src_size, uint8_t* RESTRICT dst,
                                 size_t dst_capacity, uint32_t expected_raw_size) {
     (void)expected_raw_size;
 
@@ -497,8 +497,8 @@ static int zxc_decode_block_num(const uint8_t* restrict src, size_t src_size, ui
  * @return The number of bytes written to the destination buffer on success, or
  * -1 on failure (e.g., invalid header, buffer overflow, or corrupted data).
  */
-static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* restrict src, size_t src_size,
-                                uint8_t* restrict dst, size_t dst_capacity,
+static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
+                                uint8_t* RESTRICT dst, size_t dst_capacity,
                                 uint32_t expected_raw_size) {
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[4];

@@ -78,8 +78,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  * @return 0 on success, or -1 on failure (e.g., invalid input size, destination
  * buffer too small).
  */
-static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* src, size_t src_size,
-                                uint8_t* dst, size_t dst_cap, size_t* out_sz, uint64_t crc_val) {
+static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
+                                uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz,
+                                uint64_t crc_val) {
     if (UNLIKELY(src_size % 4 != 0 || src_size == 0)) return -1;
     int chk = ctx->checksum_enabled;
 
@@ -297,8 +298,9 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* src, size_
  *
  * @return 0 on success, or -1 if an error occurs (e.g., buffer overflow).
  */
-static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* src, size_t src_size, uint8_t* dst,
-                                size_t dst_cap, size_t* out_sz, uint64_t crc_val) {
+static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
+                                uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz,
+                                uint64_t crc_val) {
     int level = ctx->compression_level;
     int chk = ctx->checksum_enabled;
 
