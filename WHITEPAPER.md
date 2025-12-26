@@ -192,6 +192,11 @@ Benchmarks were conducted using `lzbench` (by inikep).
 * **Target 2 (Cloud):** Google Axion / Linux (GCC 12)
 * **Target 3 (Build):** AMD EPYC 7763 / Linux (GCC 13)
 
+**Figure A**: Decompression Throughput & Storage Ratio (Normalized to LZ4)
+
+![Benchmark Graph ARM64](docs/images/benchmark_arm64_030.png)
+
+
 
 ### 7.1 Client ARM64 Summary (Apple Silicon)
 
@@ -303,9 +308,9 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 ### 7.4 Benchmarks Results
 
-**Figure 6.3**: Decompression Throughput & Storage Ratio (Normalized to LZ4)
+**Figure B**: Decompression Efficiency : Cycles Per Byte Comparaison
 
-![Benchmark Graph ARM64](docs/images/benchmark_arm64_030.png)
+![Benchmark Cycles Per Byte](docs/images/decompression_cycles_benchmark.png)
 
 
 #### 7.4.1 ARM64 Architecture (Apple Silicon)
