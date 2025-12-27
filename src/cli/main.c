@@ -514,7 +514,10 @@ int main(int argc, char** argv) {
     double dt = zxc_now() - t0;
 
     if (!use_stdin) fclose(f_in);
-    if (!use_stdout) fclose(f_out);
+    if (!use_stdout)
+        fclose(f_out);
+    else
+        fflush(f_out);
     free(b1);
     free(b2);
 
