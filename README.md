@@ -389,6 +389,11 @@ and multitasking capabilities of your language.
 You will need only to include the extra public header `zxc_sans_io.h`, and implement
 your own behavior based on `zxc_driver.c`.
 
+### Community Bindings
+
+| Language | Repository                           |
+| -------- | ------------------------------------ |
+| Go       | <https://github.com/meysam81/go-zxc> |
 
 ## Safety & Quality
 * **Continuous Fuzzing**: Integrated with local ClusterFuzzLite suites.
