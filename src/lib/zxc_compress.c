@@ -374,7 +374,6 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t match_idx =
             (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
 
-        // Hybrid hash-tag strategy based on compression level
         int skip_head = 0;
         if (match_idx > 0 && stored_tag != cur_val) {
             if (level <= 2)
@@ -384,7 +383,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         }
 
         hash_table[2 * h] = epoch_mark | cur_pos;
-        hash_table[2 * h + 1] = cur_val;  // Store hash-tag for future lookups
+        hash_table[2 * h + 1] = cur_val;
         // cppcheck-suppress knownConditionTrueFalse ; false positive
         if (match_idx > 0 && (cur_pos - match_idx) < 0x10000)
             chain_table[cur_pos] = (uint16_t)(cur_pos - match_idx);
@@ -394,17 +393,16 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         const uint8_t* best_ref = NULL;
         uint32_t best_len = ZXC_LZ_MIN_MATCH - 1;
 
+        int is_first = 1;
         int attempts = search_depth;
-        int is_first = 1;  // Track if we're checking the HEAD
         while (match_idx > 0 && attempts-- >= 0) {
             if (cur_pos - match_idx >= ZXC_LZ_MAX_DIST) break;
 
             const uint8_t* ref = src + match_idx;
             ZXC_PREFETCH_READ(ref);
 
-            // Branchless match check: compute conditions as masks
             uint32_t ref_val = zxc_le32(ref);
-            int should_skip = is_first & skip_head;  // 1 if should skip, 0 otherwise
+            int should_skip = is_first & skip_head;
             // Combine: match if not skipping AND values match AND best_len byte matches
             int match_ok = (!should_skip) & (ref_val == cur_val) & (ref[best_len] == ip[best_len]);
 

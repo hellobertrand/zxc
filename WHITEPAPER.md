@@ -48,8 +48,45 @@ ZXC leverages modern instruction sets to maximize throughput on both ARM and x86
 
 ### 4.3 Entropy Coding & Bitpacking
 *   **RLE (Run-Length Encoding)**: Automatically detects runs of identical bytes.
-*   **VByte Encoding**: Variable-length integer encoding used for length values >= 15.
+*   **VByte Encoding**: Variable-length integer encoding (similar to LEB128) for overflow values.
 *   **Bit-Packing**: Compressed sequences are packed into dedicated streams using minimal bit widths.
+
+#### VByte Format
+
+VByte (Variable Byte) encoding stores integers using 7 bits per byte, with the MSB as a continuation flag:
+
+```
+Single byte (values 0-127):
++---+---+---+---+---+---+---+---+
+| 0 |  7-bit value (0-127)      |
++---+---+---+---+---+---+---+---+
+  ^
+  └── MSB = 0: Last byte
+
+Multi-byte (values >= 128):
++---+---+---+---+---+---+---+---+   +---+---+---+---+---+---+---+---+
+| 1 |   7 bits (low)            |   | 0 |   7 bits (high)           |
++---+---+---+---+---+---+---+---+   +---+---+---+---+---+---+---+---+
+  ^                                   ^
+  └── MSB = 1: More bytes             └── MSB = 0: Last byte
+```
+
+**Byte count by value range:**
+
+| Value Range       | Bytes | Max Bits |
+|-------------------|-------|----------|
+| 0 - 127           | 1     | 7        |
+| 128 - 16,383      | 2     | 14       |
+| 16,384 - 2,097,151| 3     | 21       |
+| ≥ 2,097,152       | 5     | 35       |
+
+**Example**: Encoding value `300` (binary: `100101100`):
+```
+300 = 0b100101100 → Split into 7-bit groups: [0101100] [0000010]
+Byte 1: 1|0101100 = 0xAC  (MSB=1: more bytes, low 7 bits = 44)
+Byte 2: 0|0000010 = 0x02  (MSB=0: last byte, high 7 bits = 2)
+Decode: 44 + (2 << 7) = 44 + 256 = 300 ✓
+```
 
 ## 5. File Format Specification
 
@@ -63,54 +100,123 @@ The ZXC file format is block-based, robust, and designed for parallel processing
 ### 5.2 Block Header Structure
 Each data block consists of a **12-byte** generic header that precedes the specific payload. This header allows the decoder to navigate the stream and identify the processing method required for the next chunk of data.
 
-**Header Format:**
+**BLOCK Header (12 bytes):**
 
-| Offset | Field | Size | Description |
-| :--- | :--- | :--- | :--- |
-| 0 | `Block Type` | 1 byte | 0=RAW, 1=GNR, 2=NUM |
-| 1 | `Flags` | 1 byte | Bit 7 (0x80) = Checksum Present |
-| 2 | `Reserved` | 2 bytes | Padding |
-| 4 | `Comp Size` | 4 bytes | Compressed payload size |
-| 8 | `Raw Size` | 4 bytes | Decompressed size |
+```
+  Offset:  0       1       2               4                       8                       12
+          +-------+-------+---------------+-----------------------+-----------------------+
+          | Type  | Flags | Reserved      | Comp Size             | Raw Size              |
+          | (1B)  | (1B)  | (2 bytes)     | (4 bytes)             | (4 bytes)             |
+          +-------+-------+---------------+-----------------------+-----------------------+
 
-* **Type**: 0=RAW, 1=GNR (LZ77), 2=NUM (Integers).
-* **Flags**: A bitfield.
-Bit 7 (0x80): HAS_CHECKSUM. If this bit is set to 1, an **8-byte XXH3-64** checksum field is present immediately after the Raw Size field, shifting the start of the data payload accordingly.
-* **Comp Size**: Size of the data that follows (excluding this 12 or 20-byte header).
+  If HAS_CHECKSUM flag is set (Flags & 0x80):
+  Offset:  12                                                                              20
+          +-----------------------------------------------------------------------------+
+          | Checksum (XXH3-64)                                                          |
+          | (8 bytes)                                                                   |
+          +-----------------------------------------------------------------------------+
+```
+
+* **Type**: Block encoding type (0=RAW, 1=GNR, 2=NUM).
+* **Flags**: Bit 7 (0x80) = HAS_CHECKSUM. If set, an **8-byte XXH3-64** checksum follows immediately after Raw Size.
+* **Comp Size**: Compressed payload size (excluding header and optional checksum).
+* **Raw Size**: Original decompressed size.
 
 > **Note**: While the format is designed for threaded execution, a single-threaded API is also available for constrained environments or simple integration cases.
 
 ### 5.3 Specific Header: NUM (Numeric)
 (Present immediately after the Block Header and any optional Checksum)
 
-  0               8       10              16
-+---------------+-------+---------------+
-| Num Values    | Frame | Reserved      |
-| (8B)          | (2B)  | (6B)          |
-+---------------+-------+---------------+
-* **Num Values**: Count of integers encoded.
+**NUM Header (16 bytes):**
+
+```
+  Offset:  0                               8       10                      16
+          +-------------------------------+-------+-------------------------+
+          | N Values                      | Frame | Reserved                |
+          | (8 bytes)                     | (2B)  | (6 bytes)               |
+          +-------------------------------+-------+-------------------------+
+```
+
+* **N Values**: Total count of integers encoded in the block.
 * **Frame**: Processing window size (currently always 128).
+* **Reserved**: Padding for alignment.
 
 ### 5.4 Specific Header: GNR (Generic)
 (Present immediately after the Block Header and any optional Checksum)
 
-GNR Header (16 bytes):
-+---------------+---------------+-------+-------+-------+-------+
-| N Sequences   | N Literals    | Lit   | LitLen| Match | Off   |
-| (4B)          | (4B)          | Enc   | Enc   | Enc   | Enc   |
-+---------------+---------------+-------+-------+-------+-------+
+**GNR Header (16 bytes):**
 
-Followed by 4 "Section Descriptors" (8 bytes each):
-+-------------------------------+-------------------------------+
-| Compressed Size (4B)          | Raw Size (4B)                 |
-+-------------------------------+-------------------------------+
+```
+  Offset:  0               4               8   9  10  11  12              16
+          +---------------+---------------+---+---+---+---+---------------+
+          | N Sequences   | N Literals    |Lit|LL |ML |Off| Reserved      |
+          | (4 bytes)     | (4 bytes)     |Enc|Enc|Enc|Enc| (4 bytes)     |
+          +---------------+---------------+---+---+---+---+---------------+
+```
 
-The 4 sections described are, in order:
-* **Sequences**: The pairs (Literal Length, Match Length).
-* **Literals**: The raw bytes.
-* **Tokens**: The pairs (Literal Length, Match Length).
-* **Offsets**: The match offset distances.
-* **Extras**: The additional lengths (VByte) for very large matches.
+* **N Sequences**: Total count of LZ sequences in the block.
+* **N Literals**: Total count of literal bytes.
+* **Encoding Types**
+  - `Lit Enc`: Literal stream encoding (0=RAW, 1=RLE). **Currently used.**
+  - `LL Enc`: Literal lengths encoding. **Reserved for future use** (lengths are packed in tokens).
+  - `ML Enc`: Match lengths encoding. **Reserved for future use** (lengths are packed in tokens).
+  - `Off Enc`: Offset encoding. **Reserved for future use** (offsets are always 16-bit fixed).
+* **Reserved**: Padding for alignment.
+
+**Section Descriptors (4 × 8 bytes = 32 bytes total):**
+
+Each descriptor stores sizes as a packed 64-bit value:
+
+```
+  Single Descriptor (8 bytes):
+  +-----------------------------------+-----------------------------------+
+  | Compressed Size (4 bytes)         | Raw Size (4 bytes)                |
+  | (low 32 bits)                     | (high 32 bits)                    |
+  +-----------------------------------+-----------------------------------+
+
+  Full Layout (32 bytes):
+  Offset:  0               8               16              24              32
+          +---------------+---------------+---------------+---------------+
+          | Literals Desc | Tokens Desc   | Offsets Desc  | Extras Desc   |
+          | (8 bytes)     | (8 bytes)     | (8 bytes)     | (8 bytes)     |
+          +---------------+---------------+---------------+---------------+
+```
+
+**Section Contents:**
+
+| # | Section     | Description                                           |
+|---|-------------|-------------------------------------------------------|
+| 0 | **Literals**| Raw bytes to copy, or RLE-compressed if `enc_lit=1`  |
+| 1 | **Tokens**  | Packed bytes: `(LiteralLen << 4) \| MatchLen`        |
+| 2 | **Offsets** | 16-bit little-endian match distances (2 bytes each)  |
+| 3 | **Extras**  | VByte overflow values when LitLen or MatchLen ≥ 15   |
+
+**Data Flow Example:**
+
+```
+GNR Block Data Layout:
++------------------------------------------------------------------------+
+| Literals Stream | Tokens Stream | Offsets Stream | Extras Stream      |
+| (desc[0] bytes) | (desc[1] bytes)| (desc[2] bytes)| (desc[3] bytes)   |
++------------------------------------------------------------------------+
+       ↓                 ↓                 ↓                 ↓
+   Raw bytes      Token parsing      Match lookup      Length overflow
+```
+
+**Why Comp Size and Raw Size?**
+
+Each descriptor stores both a compressed and raw size to support secondary encoding of streams:
+
+| Section     | Comp Size            | Raw Size            | Different?           |
+|-------------|----------------------|---------------------|----------------------|
+| **Literals**| RLE size (if used)   | Original byte count | ✅ Yes, if RLE enabled |
+| **Tokens**  | Stream size          | Stream size         | ❌ Same               |
+| **Offsets** | Stream size          | Stream size         | ❌ Same               |
+| **Extras**  | VByte stream size    | VByte stream size   | ❌ Same               |
+
+Currently, only the **Literals** section uses different sizes (when RLE compression is applied, `enc_lit=1`). For other sections, both sizes are identical.
+
+> **Design Note**: This format is designed for future extensibility. The dual-size architecture allows adding entropy coding (FSE/ANS) or bitpacking to any stream without breaking backward compatibility.
 
 
 ### 5.5 Block Encoding & Processing Algorithms
