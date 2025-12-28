@@ -21,8 +21,8 @@
  */
 
 #define ZXC_VERSION_MAJOR 0
-#define ZXC_VERSION_MINOR 3
-#define ZXC_VERSION_PATCH 3
+#define ZXC_VERSION_MINOR 4
+#define ZXC_VERSION_PATCH 0
 
 #define ZXC_STR_HELPER(x) #x
 #define ZXC_STR(x) ZXC_STR_HELPER(x)
