@@ -742,7 +742,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint8_t* p_curr = p + ghs;
     rem -= ghs;
 
-    if (rem < (desc[0].sizes & 0xFFFFFFFF)) return -1;
+    if (UNLIKELY(rem < (desc[0].sizes & 0xFFFFFFFF))) return -1;
 
     if (use_rle) {
         // Write RLE
@@ -797,12 +797,12 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     }
     rem -= (desc[0].sizes & 0xFFFFFFFF);
 
-    if (rem < (desc[1].sizes & 0xFFFFFFFF)) return -1;
+    if (UNLIKELY(rem < (desc[1].sizes & 0xFFFFFFFF))) return -1;
     ZXC_MEMCPY(p_curr, buf_tokens, seq_c);
     p_curr += seq_c;
     rem -= seq_c;
 
-    if (rem < (desc[2].sizes & 0xFFFFFFFF)) return -1;
+    if (UNLIKELY(rem < (desc[2].sizes & 0xFFFFFFFF))) return -1;
     if (UNLIKELY(use_8bit_off)) {
         // Write 1-byte offsets (downcast from uint16_t)
         for (uint32_t i = 0; i < seq_c; i++) {
@@ -815,7 +815,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     }
     rem -= off_stream_size;
 
-    if (rem < (desc[3].sizes & 0xFFFFFFFF)) return -1;
+    if (UNLIKELY(rem < (desc[3].sizes & 0xFFFFFFFF))) return -1;
     // Write VByte stream
     for (size_t j = 0; j < n_extras; j++) {
         uint32_t val = buf_extras[j];
