@@ -1,7 +1,7 @@
 # ZXC: High-Performance Asymmetric Compression for Cross-Platform Deployment
 
 **Subtitle**: Optimizing Storage and Latency in WORM (Write-Once, Read-Many) Architectures
-**Version**: 0.3.0
+**Version**: 0.4.0
 **Date**: December 2025
 **Author**: Bertrand Lebonnois
 
@@ -160,7 +160,9 @@ Each data block consists of a **12-byte** generic header that precedes the speci
   - `Lit Enc`: Literal stream encoding (0=RAW, 1=RLE). **Currently used.**
   - `LL Enc`: Literal lengths encoding. **Reserved for future use** (lengths are packed in tokens).
   - `ML Enc`: Match lengths encoding. **Reserved for future use** (lengths are packed in tokens).
-  - `Off Enc`: Offset encoding. **Reserved for future use** (offsets are always 16-bit fixed).
+  - `Off Enc`: Offset encoding mode. **Currently used (v0.4.0):**
+    - `0` = 16-bit offsets (2 bytes each, max distance 65535)
+    - `1` = 8-bit offsets (1 byte each, max distance 255)
 * **Reserved**: Padding for alignment.
 
 **Section Descriptors (4 × 8 bytes = 32 bytes total):**
@@ -188,7 +190,7 @@ Each descriptor stores sizes as a packed 64-bit value:
 |---|-------------|-------------------------------------------------------|
 | 0 | **Literals**| Raw bytes to copy, or RLE-compressed if `enc_lit=1`  |
 | 1 | **Tokens**  | Packed bytes: `(LiteralLen << 4) \| MatchLen`        |
-| 2 | **Offsets** | 16-bit little-endian match distances (2 bytes each)  |
+| 2 | **Offsets** | Match distances: 8-bit if `enc_off=1`, else 16-bit LE |
 | 3 | **Extras**  | VByte overflow values when LitLen or MatchLen ≥ 15   |
 
 **Data Flow Example:**
@@ -209,12 +211,12 @@ Each descriptor stores both a compressed and raw size to support secondary encod
 
 | Section     | Comp Size            | Raw Size            | Different?           |
 |-------------|----------------------|---------------------|----------------------|
-| **Literals**| RLE size (if used)   | Original byte count | ✅ Yes, if RLE enabled |
-| **Tokens**  | Stream size          | Stream size         | ❌ Same               |
-| **Offsets** | Stream size          | Stream size         | ❌ Same               |
-| **Extras**  | VByte stream size    | VByte stream size   | ❌ Same               |
+| **Literals**| RLE size (if used)   | Original byte count | Yes, if RLE enabled |
+| **Tokens**  | Stream size          | Stream size         | No                   |
+| **Offsets** | N×1 or N×2 bytes     | N×1 or N×2 bytes    | No (size depends on `enc_off`) |
+| **Extras**  | VByte stream size    | VByte stream size   | No                   |
 
-Currently, only the **Literals** section uses different sizes (when RLE compression is applied, `enc_lit=1`). For other sections, both sizes are identical.
+Currently, the **Literals** section uses different sizes when RLE compression is applied (`enc_lit=1`). The **Offsets** section size depends on `enc_off`: N sequences × 1 byte (if `enc_off=1`) or N sequences × 2 bytes (if `enc_off=0`).
 
 > **Design Note**: This format is designed for future extensibility. The dual-size architecture allows adding entropy coding (FSE/ANS) or bitpacking to any stream without breaking backward compatibility.
 
@@ -237,8 +239,9 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
 3.  **Stream Separation**: These components are routed to separate buffers:
     *   *Literals Buffer*: Raw bytes.
     *   *Tokens Buffer*: Packed `(LitLen << 4) | MatchLen`.
-    *   *Offsets Buffer*: 16-bit distances.
+    *   *Offsets Buffer*: Variable-width distances (8-bit or 16-bit, see below).
     *   *Extras Buffer*: Overflow values for lengths >= 15 (VByte encoded).
+    *   *Offset Mode Selection (v0.4.0)*: The encoder tracks the maximum offset across all sequences. If all offsets are ≤ 255, the 8-bit mode (`enc_off=1`) is selected, saving 1 byte per sequence compared to 16-bit mode.
 4.  **RLE Pass**: The literals buffer is scanned for run-length encoding opportunities (runs of identical bytes). If beneficial (>10% gain), it is compressed in place.
 5.  **Final Serialization**: All buffers are concatenated into the payload, preceded by section descriptors.
 
@@ -308,17 +311,17 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.3.0 -1** | **1.82x** | **129.87** |
-| **zxc 0.3.0 -2** | **1.70x** | **123.78** |
-| **zxc 0.3.0 -3** | **1.39x** | **98.43** |
-| **zxc 0.3.0 -4** | **1.31x** | **92.60** |
-| **zxc 0.3.0 -5** | **1.22x** | **85.94** |
+| **zxc 0.3.0 -1** | **1.88x** | **129.87** |
+| **zxc 0.3.0 -2** | **1.76x** | **123.78** |
+| **zxc 0.3.0 -3** | **1.43x** | **98.43** |
+| **zxc 0.3.0 -4** | **1.34x** | **92.60** |
+| **zxc 0.3.0 -5** | **1.25x** | **85.94** |
 | lz4 1.10.0 --fast -17 | 1.18x | 130.57 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
-| lz4hc 1.10.0 -12 | 0.95x | 76.59 |
-| snappy 1.2.2 | 0.68x | 100.47 |
-| zstd 1.5.7 --fast --1 | 0.45x | 86.17 |
-| zstd 1.5.7 -1 | 0.34x | 72.59 |
+| lz4hc 1.10.0 -12 | 0.94x | 76.59 |
+| snappy 1.2.2 | 0.67x | 100.47 |
+| zstd 1.5.7 --fast --1 | 0.44x | 86.17 |
+| zstd 1.5.7 -1 | 0.33x | 72.59 |
 
 **Decompression Efficiency (Cycles per Byte @ 3.5 GHz)**
 
@@ -381,33 +384,33 @@ Benchmarks were conducted using `lzbench` (by inikep).
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
 | **zxc 0.3.0 -1** | **1.39x** | **129.87** |
-| **zxc 0.3.0 -2** | **1.30x** | **123.78** |
-| **zxc 0.3.0 -3** | **1.03x** | **98.43** |
+| **zxc 0.3.0 -2** | **1.29x** | **123.78** |
+| **zxc 0.3.0 -3** | **1.04x** | **98.43** |
 | **zxc 0.3.0 -4** | **0.98x** | **92.60** |
-| **zxc 0.3.0 -5** | **0.93x** | **85.94** |
+| **zxc 0.3.0 -5** | **0.94x** | **85.94** |
 | lz4 1.10.0 --fast -17 | 1.16x | 130.57 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -12 | 0.98x | 76.59 |
 | snappy 1.2.2 | 0.45x | 100.58 |
-| zstd 1.5.7 --fast --1 | 0.45x | 86.17 |
+| zstd 1.5.7 --fast --1 | 0.44x | 86.17 |
 | zstd 1.5.7 -1 | 0.34x | 72.59 |
 
 **Decompression Efficiency (Cycles per Byte @ 2.45 GHz)**
 
 | Compressor.             | Cycles/Byte | Performance vs memcpy |
 | ----------------------- | ----------- | --------------------- |
-| memcpy                  | 0.128       | 1.00x (baseline)      |
-| **zxc 0.3.0 -1**        | **0.500**   | **3.9x**              |
-| **zxc 0.3.0 -2**        | **0.535**   | **4.2x**              |
-| **zxc 0.3.0 -3**        | **0.672**   | **5.2x**              |
-| **zxc 0.3.0 -4**        | **0.713**   | **5.6x**              |
-| **zxc 0.3.0 -5**        | **0.745**   | **5.8x**              |
-| lz4 1.10.0              | 0.695       | 5.4x                  |
-| lz4 1.10.0 --fast -17   | 0.598       | 4.7x                  |
-| lz4hc 1.10.0 -12        | 0.710       | 5.5x                  |
-| zstd 1.5.7 -1           | 2.045       | 16.0x                 |
-| zstd 1.5.7 --fast --1   | 1.556       | 12.2x                 |
-| snappy 1.2.2            | 1.542       | 12.0x                 |
+| memcpy                  | 0.124       | 1.00x (baseline)      |
+| **zxc 0.3.0 -1**        | **0.497**   | **4.0x**              |
+| **zxc 0.3.0 -2**        | **0.533**   | **4.3x**              |
+| **zxc 0.3.0 -3**        | **0.665**   | **5.4x**              |
+| **zxc 0.3.0 -4**        | **0.703**   | **5.7x**              |
+| **zxc 0.3.0 -5**        | **0.735**   | **5.9x**              |
+| lz4 1.10.0              | 0.689       | 5.6x                  |
+| lz4 1.10.0 --fast -17   | 0.595       | 4.8x                  |
+| lz4hc 1.10.0 -12        | 0.704       | 5.7x                  |
+| zstd 1.5.7 -1           | 2.050       | 16.5x                 |
+| zstd 1.5.7 --fast --1   | 1.561       | 12.6x                 |
+| snappy 1.2.2            | 1.544       | 12.5x                 |
 
 *Lower is better. Calculated using AMD EPYC 7763 base frequency (2.45 GHz).*
 
@@ -425,18 +428,18 @@ Benchmarks were conducted using lzbench (from @inikep), compiled with Clang 17.0
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 52773 MB/s | 52216 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.3.0 -1**            |   721 MB/s |  **8724 MB/s** |   131013961 | **61.82** | 12 files|
-| **zxc 0.3.0 -2**            |   479 MB/s |  **8165 MB/s** |   124873774 | **58.92** | 12 files|
-| **zxc 0.3.0 -3**            |   211 MB/s |  **6687 MB/s** |    99293477 | **46.85** | 12 files|
-| **zxc 0.3.0 -4**            |   190 MB/s |  **6302 MB/s** |    93417296 | **44.08** | 12 files|
-| **zxc 0.3.0 -5**            |  79.6 MB/s |  **5844 MB/s** |    86695943 | **40.91** | 12 files|
-| lz4 1.10.0              |   816 MB/s |  4801 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1342 MB/s |  5650 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  14.1 MB/s |  4541 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   645 MB/s |  1623 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   721 MB/s |  2164 MB/s |    86932028 | 41.02 | 12 files|
-| snappy 1.2.2            |   883 MB/s |  3264 MB/s |   101352257 | 47.82 | 12 files|
+| memcpy                  | 49825 MB/s | 50681 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.3.1 -1**            |   690 MB/s |  **8704 MB/s** |   131013960 | **61.82** | 12 files|
+| **zxc 0.3.1 -2**            |   459 MB/s |  **8158 MB/s** |   124873773 | **58.92** | 12 files|
+| **zxc 0.3.1 -3**            |   203 MB/s |  **6616 MB/s** |    99293471 | **46.85** | 12 files|
+| **zxc 0.3.1 -4**            |   180 MB/s |  **6199 MB/s** |    93417296 | **44.08** | 12 files|
+| **zxc 0.3.1 -5**            |  75.1 MB/s |  **5768 MB/s** |    86695943 | **40.91** | 12 files|
+| lz4 1.10.0              |   771 MB/s |  4630 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1269 MB/s |  5452 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  13.5 MB/s |  4373 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   608 MB/s |  1534 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   683 MB/s |  2055 MB/s |    86932028 | 41.02 | 12 files|
+| snappy 1.2.2            |   839 MB/s |  3119 MB/s |   101352257 | 47.82 | 12 files|
 
 
 ### 7.4.2 ARM64 Architecture (Google Axion)
@@ -465,18 +468,18 @@ Benchmarks were conducted using lzbench (from @inikep), compiled with GCC 13.3.0
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 19181 MB/s | 19182 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.3.0 -1**            |   536 MB/s |  **4900 MB/s** |   131013961 | **61.82** | 12 files|
-| **zxc 0.3.0 -2**            |   340 MB/s |  **4582 MB/s** |   124873774 | **58.92** | 12 files|
-| **zxc 0.3.0 -3**            |   146 MB/s |  **3643 MB/s** |    99293477 | **46.85** | 12 files|
-| **zxc 0.3.0 -4**            |   129 MB/s |  **3436 MB/s** |    93417296 | **44.08** | 12 files|
-| **zxc 0.3.0 -5**            |  54.4 MB/s |  **3290 MB/s** |    86695943 | **40.91** | 12 files|
-| lz4 1.10.0              |   594 MB/s |  3522 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1034 MB/s |  4097 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  11.2 MB/s |  3450 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   410 MB/s |  1198 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   451 MB/s |  1574 MB/s |    86932028 | 41.02 | 12 files|
-| snappy 1.2.2            |   609 MB/s |  1589 MB/s |   101464727 | 47.87 | 12 files|
+| memcpy                  | 20098 MB/s | 19805 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.3.1 -1**            |   537 MB/s |  **4932 MB/s** |   131013960 | **61.82** | 12 files|
+| **zxc 0.3.1 -2**            |   360 MB/s |  **4598 MB/s** |   124873773 | **58.92** | 12 files|
+| **zxc 0.3.1 -3**            |   149 MB/s |  **3686 MB/s** |    99293471 | **46.85** | 12 files|
+| **zxc 0.3.1 -4**            |   131 MB/s |  **3488 MB/s** |    93417296 | **44.08** | 12 files|
+| **zxc 0.3.1 -5**            |  54.9 MB/s |  **3334 MB/s** |    86695943 | **40.91** | 12 files|
+| lz4 1.10.0              |   594 MB/s |  3555 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1035 MB/s |  4120 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  11.3 MB/s |  3479 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   411 MB/s |  1195 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   449 MB/s |  1570 MB/s |    86932028 | 41.02 | 12 files|
+| snappy 1.2.2            |   609 MB/s |  1587 MB/s |   101464727 | 47.87 | 12 files|
 
 
 ## 8. Strategic Implementation

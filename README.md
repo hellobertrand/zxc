@@ -44,9 +44,9 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M1/M2
 
 | Codec | Decoding Speed | Ratio vs LZ4 | Verdict |
 | :--- | :--- | :--- | :--- |
-| **ZXC -3 (Standard)** | **6,687 MB/s** | **Smaller (-1.6%)** | **1.40x Faster than LZ4** |
-| **ZXC -5 (Compact)** | **5,844 MB/s** | **Dense (-14.1%)** | **2.70x Faster than Zstd fast -1** |
-| LZ4 1.10 | 4,801 MB/s | Reference | Industry Standard |
+| **ZXC -3 (Standard)** | **6,616 MB/s** | **Smaller (-1.6%)** | **1.43x Faster than LZ4** |
+| **ZXC -5 (Compact)** | **5,768 MB/s** | **Dense (-14.1%)** | **2.81x Faster than Zstd fast -1** |
+| LZ4 1.10 | 4,630 MB/s | Reference | Industry Standard |
 
 ### 2. Cloud Server: Google Axion (ARM Neoverse V2)
 *Scenario: High-throughput Microservices, ARM Cloud Instances.*
@@ -62,9 +62,9 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M1/M2
 
 | Codec | Decoding Speed | Ratio vs LZ4 | Verdict |
 | :--- | :--- | :--- | :--- |
-| **ZXC -3 (Standard)** | **3,643 MB/s** | **Smaller (-1.6%)** | **1.03x Faster than LZ4** |
-| **ZXC -5 (Compact)** | **3,290 MB/s** | **Dense (-14.1%)** | **2.09x Faster than Zstd fast -1** |
-| LZ4 1.10 | 3,522 MB/s | Reference | Industry Standard |
+| **ZXC -3 (Standard)** | **3,686 MB/s** | **Smaller (-1.6%)** | **1.04x Faster than LZ4** |
+| **ZXC -5 (Compact)** | **3,334 MB/s** | **Dense (-14.1%)** | **2.12x Faster than Zstd fast -1** |
+| LZ4 1.10 | 3,555 MB/s | Reference | Industry Standard |
 
 
 *(Benchmark Graph ARM64 : Decompression Throughput & Storage Ratio (Normalized to LZ4))*
@@ -77,18 +77,18 @@ Benchmarks were conducted using lzbench (from @inikep), compiled with Clang 17.0
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 52773 MB/s | 52216 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.3.0 -1**            |   721 MB/s |  **8724 MB/s** |   131013961 | **61.82** | 12 files|
-| **zxc 0.3.0 -2**            |   479 MB/s |  **8165 MB/s** |   124873774 | **58.92** | 12 files|
-| **zxc 0.3.0 -3**            |   211 MB/s |  **6687 MB/s** |    99293477 | **46.85** | 12 files|
-| **zxc 0.3.0 -4**            |   190 MB/s |  **6302 MB/s** |    93417296 | **44.08** | 12 files|
-| **zxc 0.3.0 -5**            |  79.6 MB/s |  **5844 MB/s** |    86695943 | **40.91** | 12 files|
-| lz4 1.10.0              |   816 MB/s |  4801 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1342 MB/s |  5650 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  14.1 MB/s |  4541 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   645 MB/s |  1623 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   721 MB/s |  2164 MB/s |    86932028 | 41.02 | 12 files|
-| snappy 1.2.2            |   883 MB/s |  3264 MB/s |   101352257 | 47.82 | 12 files|
+| memcpy                  | 49825 MB/s | 50681 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.3.1 -1**            |   690 MB/s |  **8704 MB/s** |   131013960 | **61.82** | 12 files|
+| **zxc 0.3.1 -2**            |   459 MB/s |  **8158 MB/s** |   124873773 | **58.92** | 12 files|
+| **zxc 0.3.1 -3**            |   203 MB/s |  **6616 MB/s** |    99293471 | **46.85** | 12 files|
+| **zxc 0.3.1 -4**            |   180 MB/s |  **6199 MB/s** |    93417296 | **44.08** | 12 files|
+| **zxc 0.3.1 -5**            |  75.1 MB/s |  **5768 MB/s** |    86695943 | **40.91** | 12 files|
+| lz4 1.10.0              |   771 MB/s |  4630 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1269 MB/s |  5452 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  13.5 MB/s |  4373 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   608 MB/s |  1534 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   683 MB/s |  2055 MB/s |    86932028 | 41.02 | 12 files|
+| snappy 1.2.2            |   839 MB/s |  3119 MB/s |   101352257 | 47.82 | 12 files|
 
 
 ### Benchmark ARM64 (Google Axion)
@@ -117,18 +117,18 @@ Benchmarks were conducted using lzbench (from @inikep), compiled with GCC 13.3.0
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 19181 MB/s | 19182 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.3.0 -1**            |   536 MB/s |  **4900 MB/s** |   131013961 | **61.82** | 12 files|
-| **zxc 0.3.0 -2**            |   340 MB/s |  **4582 MB/s** |   124873774 | **58.92** | 12 files|
-| **zxc 0.3.0 -3**            |   146 MB/s |  **3643 MB/s** |    99293477 | **46.85** | 12 files|
-| **zxc 0.3.0 -4**            |   129 MB/s |  **3436 MB/s** |    93417296 | **44.08** | 12 files|
-| **zxc 0.3.0 -5**            |  54.4 MB/s |  **3290 MB/s** |    86695943 | **40.91** | 12 files|
-| lz4 1.10.0              |   594 MB/s |  3522 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1034 MB/s |  4097 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  11.2 MB/s |  3450 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   410 MB/s |  1198 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   451 MB/s |  1574 MB/s |    86932028 | 41.02 | 12 files|
-| snappy 1.2.2            |   609 MB/s |  1589 MB/s |   101464727 | 47.87 | 12 files|
+| memcpy                  | 20098 MB/s | 19805 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.3.1 -1**            |   537 MB/s |  **4932 MB/s** |   131013960 | **61.82** | 12 files|
+| **zxc 0.3.1 -2**            |   360 MB/s |  **4598 MB/s** |   124873773 | **58.92** | 12 files|
+| **zxc 0.3.1 -3**            |   149 MB/s |  **3686 MB/s** |    99293471 | **46.85** | 12 files|
+| **zxc 0.3.1 -4**            |   131 MB/s |  **3488 MB/s** |    93417296 | **44.08** | 12 files|
+| **zxc 0.3.1 -5**            |  54.9 MB/s |  **3334 MB/s** |    86695943 | **40.91** | 12 files|
+| lz4 1.10.0              |   594 MB/s |  3555 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1035 MB/s |  4120 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  11.3 MB/s |  3479 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   411 MB/s |  1195 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   449 MB/s |  1570 MB/s |    86932028 | 41.02 | 12 files|
+| snappy 1.2.2            |   609 MB/s |  1587 MB/s |   101464727 | 47.87 | 12 files|
 
 
 ---
