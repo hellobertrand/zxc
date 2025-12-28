@@ -65,6 +65,30 @@ void gen_binary_data(uint8_t* buf, size_t size) {
     }
 }
 
+// Generates data with small offsets (<=255 bytes) to force 1-byte offset encoding
+// This creates short repeating patterns with matches very close to each other
+void gen_small_offset_data(uint8_t* buf, size_t size) {
+    // Create short repeating patterns with very short distances
+    // Pattern: ABCDABCDABCD... where each match is only 4 bytes away
+    const uint8_t pattern[] = "ABCD";
+    for (size_t i = 0; i < size; i++) {
+        buf[i] = pattern[i % 4];
+    }
+}
+
+// Generates data with large offsets (>255 bytes) to force 2-byte offset encoding
+// This creates patterns where matches are far apart
+void gen_large_offset_data(uint8_t* buf, size_t size) {
+    // First 300 bytes: unique random data (no matches possible)
+    for (size_t i = 0; i < 300 && i < size; i++) {
+        buf[i] = (uint8_t)((i * 7 + 13) % 256);
+    }
+    // Then: repeat patterns from the beginning (offset > 255)
+    for (size_t i = 300; i < size; i++) {
+        buf[i] = buf[i - 300];  // Offset of 300 bytes (requires 2-byte encoding)
+    }
+}
+
 // Generic Round-Trip test function (Compress -> Decompress -> Compare)
 int test_round_trip(const char* test_name, const uint8_t* input, size_t size, int level,
                     int checksum) {
@@ -482,6 +506,24 @@ int main() {
     // Test with small binary data to ensure even small payloads are preserved
     gen_binary_data(buffer, 128);
     if (!test_round_trip("Small Binary Data (128 bytes)", buffer, 128, 3, 0)) total_failures++;
+
+    printf("\n--- Test Coverage: Variable Offset Encoding (v0.4.0) ---\n");
+
+    // Test 8-bit offset mode (enc_off=1): patterns with all offsets <= 255
+    gen_small_offset_data(buffer, BUF_SIZE);
+    if (!test_round_trip("8-bit Offsets (Small Pattern)", buffer, BUF_SIZE, 3, 1)) total_failures++;
+    if (!test_round_trip("8-bit Offsets (Level 5)", buffer, BUF_SIZE, 5, 1)) total_failures++;
+
+    // Test 16-bit offset mode (enc_off=0): patterns with offsets > 255
+    gen_large_offset_data(buffer, BUF_SIZE);
+    if (!test_round_trip("16-bit Offsets (Large Distance)", buffer, BUF_SIZE, 3, 1)) total_failures++;
+    if (!test_round_trip("16-bit Offsets (Level 5)", buffer, BUF_SIZE, 5, 1)) total_failures++;
+
+    // Edge case: Mixed buffer that should trigger 16-bit mode
+    // (even one large offset forces 16-bit mode)
+    gen_small_offset_data(buffer, BUF_SIZE / 2);
+    gen_large_offset_data(buffer + BUF_SIZE / 2, BUF_SIZE / 2);
+    if (!test_round_trip("Mixed Offsets (Hybrid)", buffer, BUF_SIZE, 3, 1)) total_failures++;
 
     free(buffer);
 
