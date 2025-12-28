@@ -592,7 +592,9 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     size_t sz_extras = (size_t)(desc[3].sizes & 0xFFFFFFFF);
 
     // Validate stream sizes match sequence count (early rejection of malformed data)
-    if (UNLIKELY(sz_tokens < gh.n_sequences || sz_offsets < (size_t)gh.n_sequences * 2)) return -1;
+    size_t expected_off_size =
+        (gh.enc_off == 1) ? (size_t)gh.n_sequences : (size_t)gh.n_sequences * 2;
+    if (UNLIKELY(sz_tokens < gh.n_sequences || sz_offsets < expected_off_size)) return -1;
 
     const uint8_t* t_ptr = p_curr;
     const uint8_t* o_ptr = t_ptr + sz_tokens;
@@ -755,17 +757,33 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         }                                                    \
     } while (0)
 
-    // --- SAFE Loop: First 64KB with offset validation (4x unroll) ---
-    while (n_seq >= 4 && d_ptr < d_end_safe && written < 65536) {
+    // --- SAFE Loop: offset validation until threshold (4x unroll) ---
+    // For 1-byte offsets: bounds check until 256 bytes written
+    // For 2-byte offsets: bounds check until 65536 bytes written
+    size_t bounds_threshold = (gh.enc_off == 1) ? 256 : 65536;
+
+    while (n_seq >= 4 && d_ptr < d_end_safe && written < bounds_threshold) {
         uint32_t tokens = zxc_le32(t_ptr);
         t_ptr += 4;
-        uint64_t offsets = zxc_le64(o_ptr);
-        o_ptr += 8;
 
-        uint32_t off1 = (uint32_t)(offsets & 0xFFFF);
-        uint32_t off2 = (uint32_t)((offsets >> 16) & 0xFFFF);
-        uint32_t off3 = (uint32_t)((offsets >> 32) & 0xFFFF);
-        uint32_t off4 = (uint32_t)((offsets >> 48) & 0xFFFF);
+        uint32_t off1, off2, off3, off4;
+        if (UNLIKELY(gh.enc_off == 1)) {
+            // Read 4 x 1-byte offsets
+            uint32_t offsets_packed = zxc_le32(o_ptr);
+            o_ptr += 4;
+            off1 = offsets_packed & 0xFF;
+            off2 = (offsets_packed >> 8) & 0xFF;
+            off3 = (offsets_packed >> 16) & 0xFF;
+            off4 = (offsets_packed >> 24) & 0xFF;
+        } else {
+            // Read 4 x 2-byte offsets
+            uint64_t offsets = zxc_le64(o_ptr);
+            o_ptr += 8;
+            off1 = (uint32_t)(offsets & 0xFFFF);
+            off2 = (uint32_t)((offsets >> 16) & 0xFFFF);
+            off3 = (uint32_t)((offsets >> 32) & 0xFFFF);
+            off4 = (uint32_t)((offsets >> 48) & 0xFFFF);
+        }
 
         // Reject zero offsets
         if (UNLIKELY((off1 == 0) | (off2 == 0) | (off3 == 0) | (off4 == 0))) return -1;
@@ -805,17 +823,29 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         n_seq -= 4;
     }
 
-    // --- FAST Loop: After 64KB, no offset validation needed (4x unroll) ---
+    // --- FAST Loop: After threshold, no offset validation needed (4x unroll) ---
     while (n_seq >= 4 && d_ptr < d_end_safe) {
         uint32_t tokens = zxc_le32(t_ptr);
         t_ptr += 4;
-        uint64_t offsets = zxc_le64(o_ptr);
-        o_ptr += 8;
 
-        uint32_t off1 = (uint32_t)(offsets & 0xFFFF);
-        uint32_t off2 = (uint32_t)((offsets >> 16) & 0xFFFF);
-        uint32_t off3 = (uint32_t)((offsets >> 32) & 0xFFFF);
-        uint32_t off4 = (uint32_t)((offsets >> 48) & 0xFFFF);
+        uint32_t off1, off2, off3, off4;
+        if (UNLIKELY(gh.enc_off == 1)) {
+            // Read 4 x 1-byte offsets
+            uint32_t offsets_packed = zxc_le32(o_ptr);
+            o_ptr += 4;
+            off1 = offsets_packed & 0xFF;
+            off2 = (offsets_packed >> 8) & 0xFF;
+            off3 = (offsets_packed >> 16) & 0xFF;
+            off4 = (offsets_packed >> 24) & 0xFF;
+        } else {
+            // Read 4 x 2-byte offsets
+            uint64_t offsets = zxc_le64(o_ptr);
+            o_ptr += 8;
+            off1 = (uint32_t)(offsets & 0xFFFF);
+            off2 = (uint32_t)((offsets >> 16) & 0xFFFF);
+            off3 = (uint32_t)((offsets >> 32) & 0xFFFF);
+            off4 = (uint32_t)((offsets >> 48) & 0xFFFF);
+        }
 
         uint32_t ll1 = (tokens & 0xFF) >> 4;
         uint32_t ml1 = (tokens & 0xFF) & 0x0F;
@@ -868,8 +898,13 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint8_t token = *t_ptr++;
         uint32_t ll = token >> 4;
         uint32_t ml = token & 0x0F;
-        uint32_t offset = (uint32_t)o_ptr[0] | ((uint32_t)o_ptr[1] << 8);
-        o_ptr += 2;
+        uint32_t offset;
+        if (UNLIKELY(gh.enc_off == 1)) {
+            offset = *o_ptr++;  // 1-byte offset
+        } else {
+            offset = (uint32_t)o_ptr[0] | ((uint32_t)o_ptr[1] << 8);
+            o_ptr += 2;
+        }
 
         if (UNLIKELY(ll == 15)) ll = zxc_read_vbyte(&e_ptr, e_end);
         if (UNLIKELY(ml == 15)) ml = zxc_read_vbyte(&e_ptr, e_end);
@@ -943,8 +978,13 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint8_t token = *t_ptr++;
         uint32_t ll = token >> 4;
         uint32_t ml = token & 0x0F;
-        uint32_t offset = (uint32_t)o_ptr[0] | ((uint32_t)o_ptr[1] << 8);
-        o_ptr += 2;
+        uint32_t offset;
+        if (UNLIKELY(gh.enc_off == 1)) {
+            offset = *o_ptr++;  // 1-byte offset
+        } else {
+            offset = (uint32_t)o_ptr[0] | ((uint32_t)o_ptr[1] << 8);  // 2-byte offset
+            o_ptr += 2;
+        }
 
         if (UNLIKELY(ll == 15)) ll = zxc_read_vbyte(&e_ptr, e_end);
         if (UNLIKELY(ml == 15)) ml = zxc_read_vbyte(&e_ptr, e_end);

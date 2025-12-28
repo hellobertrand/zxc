@@ -347,12 +347,12 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint32_t seq_c = 0;
     size_t lit_c = 0;
 
-    // --- TOKEN ENCODING PRE-INIT ---
     uint8_t* buf_tokens = ctx->buf_tokens;
     uint16_t* buf_offsets = ctx->buf_offsets;
     uint32_t* buf_extras = ctx->buf_extras;
     size_t n_extras = 0;
     size_t vbyte_size = 0;
+    uint16_t max_offset = 0;  // Track max offset for 1-byte/2-byte mode decision
 
     while (LIKELY(ip < mflimit)) {
         size_t dist = (size_t)(ip - anchor);
@@ -592,6 +592,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             uint8_t ml_code = (ml >= 15) ? 15 : (uint8_t)ml;
             buf_tokens[seq_c] = (ll_code << 4) | ml_code;
             buf_offsets[seq_c] = (uint16_t)off;
+            if (off > max_offset) max_offset = (uint16_t)off;
 
             // Extras & VByte size
             // cppcheck-suppress knownConditionTrueFalse ; false positive
@@ -717,18 +718,22 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint8_t* p = dst + h_gap;
     size_t rem = dst_cap - h_gap;
 
+    // Decide offset encoding mode: 1-byte if all offsets <= 255
+    int use_8bit_off = (max_offset <= 255) ? 1 : 0;
+    size_t off_stream_size = use_8bit_off ? seq_c : (seq_c * 2);
+
     zxc_gnr_header_t gh = {.n_sequences = seq_c,
                            .n_literals = (uint32_t)lit_c,
                            .enc_lit = (uint8_t)use_rle,
                            .enc_litlen = 0,
                            .enc_mlen = 0,
-                           .enc_off = 0};
+                           .enc_off = (uint8_t)use_8bit_off};
 
     zxc_section_desc_t desc[4] = {0};
     desc[0].sizes = (uint64_t)(use_rle ? (uint32_t)rle_size : (uint32_t)lit_c) |
                     ((uint64_t)(uint32_t)lit_c << 32);
     desc[1].sizes = (uint64_t)seq_c | ((uint64_t)seq_c << 32);
-    desc[2].sizes = (uint64_t)(seq_c * 2) | ((uint64_t)(seq_c * 2) << 32);
+    desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
     desc[3].sizes = (uint64_t)(uint32_t)vbyte_size | ((uint64_t)(uint32_t)vbyte_size << 32);
 
     int ghs = zxc_write_gnr_header_and_desc(p, rem, &gh, desc);
@@ -798,9 +803,17 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     rem -= seq_c;
 
     if (rem < (desc[2].sizes & 0xFFFFFFFF)) return -1;
-    ZXC_MEMCPY(p_curr, buf_offsets, seq_c * 2);
-    p_curr += seq_c * 2;
-    rem -= seq_c * 2;
+    if (UNLIKELY(use_8bit_off)) {
+        // Write 1-byte offsets (downcast from uint16_t)
+        for (uint32_t i = 0; i < seq_c; i++) {
+            *p_curr++ = (uint8_t)buf_offsets[i];
+        }
+    } else {
+        // Write 2-byte offsets (original)
+        ZXC_MEMCPY(p_curr, buf_offsets, seq_c * 2);
+        p_curr += seq_c * 2;
+    }
+    rem -= off_stream_size;
 
     if (rem < (desc[3].sizes & 0xFFFFFFFF)) return -1;
     // Write VByte stream
