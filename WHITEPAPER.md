@@ -444,24 +444,6 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clan
 | snappy 1.2.2            |   857 MB/s |  3261 MB/s |   101352257 | 47.82 | 12 files|
 
 
-**All performance metrics reflect single-threaded execution on the standard Calgary Corpus.** 
-
-| Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
-| ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 64278 MB/s | 76859 MB/s |     3141622 |100.00 | 14 files|
-| **zxc 0.3.1 -1**            |  2083 MB/s | **22738 MB/s** |     2562809 | **81.58** | 14 files|
-| **zxc 0.3.1 -2**            |   679 MB/s | **17858 MB/s** |     2457228 | **78.22** | 14 files|
-| **zxc 0.3.1 -3**            |   151 MB/s |  **6971 MB/s** |     1514518 | **48.21** | 14 files|
-| **zxc 0.3.1 -4**            |   141 MB/s |  **6667 MB/s** |     1435455 | **45.69** | 14 files|
-| **zxc 0.3.1 -5**            |  70.4 MB/s |  **5841 MB/s** |     1347351 | **42.89** | 14 files|
-| lz4 1.10.0              |   667 MB/s |  4290 MB/s |     1625009 | 51.73 | 14 files|
-| lz4 1.10.0 --fast -17   |  1615 MB/s |  5940 MB/s |     2323158 | 73.95 | 14 files|
-| lz4hc 1.10.0 -12        |  16.8 MB/s |  4076 MB/s |     1194034 | 38.01 | 14 files|
-| zstd 1.5.7 -1           |   528 MB/s |  1522 MB/s |     1118334 | 35.60 | 14 files|
-| zstd 1.5.7 --fast --1   |   563 MB/s |  1884 MB/s |     1453651 | 46.27 | 14 files|
-| snappy 1.2.2            |   679 MB/s |  2582 MB/s |     1602388 | 51.01 | 14 files|
-
-
 ### 7.4.2 ARM64 Architecture (Google Axion)
 
 Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 12.2.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Debian GNU/Linux 12 (bookworm). The reference hardware is a Google Neoverse-V2 processor (ARM64).
@@ -484,22 +466,7 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 | snappy 1.2.2            |   731 MB/s |  1812 MB/s |   101352257 | 47.82 | 12 files|
 
 
-**All performance metrics reflect single-threaded execution on the standard Calgary Corpus.**
-
-| Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
-| ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 48916 MB/s | 51816 MB/s |     3141622 |100.00 | 14 files|
-| **zxc 0.3.0 -1**        |  1924 MB/s | **19110 MB/s** |     2562809 | **81.58** | 14 files|
-| **zxc 0.3.0 -2**        |   568 MB/s | **14914 MB/s** |     2457228 | **78.22** | 14 files|
-| **zxc 0.3.0 -3**        |   151 MB/s | **5398 MB/s** |     1514518 | **48.21** | 14 files|
-| **zxc 0.3.0 -4**        |   141 MB/s | **5116 MB/s** |     1435455 | **45.69** | 14 files|
-| **zxc 0.3.0 -5**        |  67.9 MB/s | **4697 MB/s** |     1347351 | **42.89** | 14 files|
-| lz4 1.10.0              |   627 MB/s |  3972 MB/s |     1625009 | 51.73 | 14 files|
-| lz4 1.10.0 --fast -17   |  1532 MB/s |  5650 MB/s |     2323158 | 73.95 | 14 files|
-| lz4hc 1.10.0 -12        |  16.2 MB/s |  3612 MB/s |     1194034 | 38.01 | 14 files|
-| zstd 1.5.7 -1           |   425 MB/s |  1266 MB/s |     1118334 | 35.60 | 14 files|
-| zstd 1.5.7 --fast --1   |   483 MB/s |  1521 MB/s |     1453651 | 46.27 | 14 files|
-| snappy 1.2.2            |   581 MB/s |  1406 MB/s |     1602388 | 51.01 | 14 files|
+**All performance metrics reflect single-threaded execution on the standard Enwik9 Corpus.**
 
 
 #### 7.4.3 x86_64 Architecture (AMD EPYC)
@@ -523,23 +490,6 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 | zstd 1.5.7 --fast --1   |   447 MB/s |  1570 MB/s |    86932028 | 41.02 | 12 files|
 | snappy 1.2.2            |   609 MB/s |  1588 MB/s |   101464727 | 47.87 | 12 files|
 
-
-**All performance metrics reflect single-threaded execution on the standard Calgary Corpus.**
-
-| Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
-| ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 40441 MB/s | 30458 MB/s |     3141622 |100.00 | 14 files|
-| **zxc 0.3.1 -1**            |  1515 MB/s | **13157 MB/s** |     2562809 | **81.58** | 14 files|
-| **zxc 0.3.1 -2**            |   498 MB/s |  **9637 MB/s** |     2457228 | **78.22** | 14 files|
-| **zxc 0.3.1 -3**            |   104 MB/s |  **3418 MB/s** |     1514518 | **48.21** | 14 files|
-| **zxc 0.3.1 -4**            |  97.9 MB/s |  **3239 MB/s** |     1435455 | **45.69** | 14 files|
-| **zxc 0.3.1 -5**            |  48.8 MB/s |  **3016 MB/s** |     1347351 | **42.89** | 14 files|
-| lz4 1.10.0              |   491 MB/s |  3359 MB/s |     1625009 | 51.73 | 14 files|
-| lz4 1.10.0 --fast -17   |  1178 MB/s |  4413 MB/s |     2323158 | 73.95 | 14 files|
-| lz4hc 1.10.0 -12        |  13.3 MB/s |  3100 MB/s |     1194034 | 38.01 | 14 files|
-| zstd 1.5.7 -1           |   336 MB/s |  1158 MB/s |     1118334 | 35.60 | 14 files|
-| zstd 1.5.7 --fast --1   |   356 MB/s |  1423 MB/s |     1453651 | 46.27 | 14 files|
-| snappy 1.2.2            |   460 MB/s |  1208 MB/s |     1605513 | 51.10 | 14 files|
 
 
 ## 8. Strategic Implementation
