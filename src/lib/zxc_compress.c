@@ -710,7 +710,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             }
         }
 
-        // Threshold: ~3% savings using integer math (97% ≈ 1 - 1/32)
+        // Threshold: ~3% savings using integer math (97% ~= 1 - 1/32)
         if (rle_size < lit_c - (lit_c >> 5)) use_rle = 1;
     }
 
