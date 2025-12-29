@@ -1,6 +1,8 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.14)
 
-# Versioning
+# =============================================================================
+# Version extraction from header
+# =============================================================================
 file(READ "include/zxc_constants.h" version_header)
 string(REGEX MATCH "#define ZXC_VERSION_MAJOR ([0-9]+)" _ "${version_header}")
 set(MAJOR_VER ${CMAKE_MATCH_1})
@@ -8,24 +10,30 @@ string(REGEX MATCH "#define ZXC_VERSION_MINOR ([0-9]+)" _ "${version_header}")
 set(MINOR_VER ${CMAKE_MATCH_1})
 string(REGEX MATCH "#define ZXC_VERSION_PATCH ([0-9]+)" _ "${version_header}")
 set(PATCH_VER ${CMAKE_MATCH_1})
-project(zxc_project VERSION ${MAJOR_VER}.${MINOR_VER}.${PATCH_VER} LANGUAGES C)
 
-# Standards
+project(zxc
+    VERSION ${MAJOR_VER}.${MINOR_VER}.${PATCH_VER}
+    LANGUAGES C
+    DESCRIPTION "High-performance asymmetric lossless compression library"
+)
+
+# =============================================================================
+# Build Options
+# =============================================================================
+option(ZXC_NATIVE_ARCH "Enable -march=native for maximum performance" ON)
+option(ZXC_BUILD_CLI "Build the command-line interface" ON)
+option(ZXC_BUILD_TESTS "Build unit tests" ON)
+
+# =============================================================================
+# C Standard
+# =============================================================================
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
 
-# Compilation options configuration
-if(MSVC)
-    add_compile_options(/O2 /W3 /arch:AVX2)
-    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
-else()
-    add_compile_options(-O3 -march=native -flto -fomit-frame-pointer -fstrict-aliasing -ffast-math -pthread -Wall -Wextra -D_GNU_SOURCE)
-endif()
-
-# Headers paths
-include_directories(include src/lib)
-
-# Core
+# =============================================================================
+# Core Library
+# =============================================================================
 add_library(zxc_lib STATIC
     src/lib/zxc_common.c
     src/lib/zxc_compress.c
@@ -33,29 +41,109 @@ add_library(zxc_lib STATIC
     src/lib/zxc_driver.c
 )
 
-# Thread Management (Portable Abstraction)
+# Target-based include directories
+target_include_directories(zxc_lib
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
+)
+
+# =============================================================================
+# Compiler-specific options (using generator expressions)
+# =============================================================================
+target_compile_options(zxc_lib PRIVATE
+    # MSVC
+    $<$<C_COMPILER_ID:MSVC>:/O2 /W3>
+    # GCC/Clang common
+    $<$<NOT:$<C_COMPILER_ID:MSVC>>:-O3 -Wall -Wextra -fomit-frame-pointer -fstrict-aliasing -ffast-math -flto>
+    # Native architecture (optional)
+    $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>
+)
+
+target_compile_definitions(zxc_lib PRIVATE
+    $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
+    $<$<NOT:$<C_COMPILER_ID:MSVC>>:_GNU_SOURCE>
+)
+
+# Threading support
 find_package(Threads REQUIRED)
 target_link_libraries(zxc_lib PRIVATE Threads::Threads)
 
-# Executable (CLI)
-add_executable(zxc src/cli/main.c)
-if(WIN32)
-    target_link_libraries(zxc zxc_lib)
-else()
-    target_link_libraries(zxc zxc_lib m)
+# Link-time optimization
+if(NOT MSVC)
+    target_link_options(zxc_lib PRIVATE -flto)
 endif()
 
-# Installation (Required for CPack/CI packaging)
-install(TARGETS zxc RUNTIME DESTINATION bin)
+# =============================================================================
+# CLI Executable
+# =============================================================================
+if(ZXC_BUILD_CLI)
+    add_executable(zxc src/cli/main.c)
+    target_link_libraries(zxc PRIVATE zxc_lib)
+    
+    # Math library on Unix
+    if(UNIX)
+        target_link_libraries(zxc PRIVATE m)
+    endif()
+    
+    # Propagate compile options and definitions
+    target_compile_options(zxc PRIVATE
+        $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>
+    )
+    target_compile_definitions(zxc PRIVATE
+        $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
+        $<$<NOT:$<C_COMPILER_ID:MSVC>>:_GNU_SOURCE>
+    )
+endif()
 
+# =============================================================================
 # Tests
-enable_testing()
+# =============================================================================
+if(ZXC_BUILD_TESTS)
+    enable_testing()
+    
+    add_executable(zxc_test tests/test.c)
+    target_link_libraries(zxc_test PRIVATE zxc_lib)
+    
+    # Propagate compile options
+    target_compile_options(zxc_test PRIVATE
+        $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>
+    )
+    
+    add_test(NAME UnitTests COMMAND zxc_test)
+endif()
 
-# Test executable
-add_executable(zxc_test tests/test.c)
+# =============================================================================
+# Installation
+# =============================================================================
+include(GNUInstallDirs)
 
-# Link with the static library
-target_link_libraries(zxc_test zxc_lib)
+install(TARGETS zxc_lib
+    EXPORT zxc-targets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 
-# Register the test for CTest
-add_test(NAME UnitTests COMMAND zxc_test)
+install(DIRECTORY include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.h"
+)
+
+if(ZXC_BUILD_CLI)
+    install(TARGETS zxc
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
+
+# =============================================================================
+# Summary
+# =============================================================================
+message(STATUS "")
+message(STATUS "ZXC Configuration Summary:")
+message(STATUS "  Version:        ${PROJECT_VERSION}")
+message(STATUS "  Native Arch:    ${ZXC_NATIVE_ARCH}")
+message(STATUS "  Build CLI:      ${ZXC_BUILD_CLI}")
+message(STATUS "  Build Tests:    ${ZXC_BUILD_TESTS}")
+message(STATUS "")

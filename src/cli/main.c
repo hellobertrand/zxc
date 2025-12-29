@@ -390,7 +390,7 @@ int main(int argc, char** argv) {
         FILE* fm_out = fmemopen(c_dat, max_c, "wb");
 #endif
 
-        int c_sz = zxc_stream_compress(fm_in, fm_out, num_threads, level, checksum);
+        int64_t c_sz = zxc_stream_compress(fm_in, fm_out, num_threads, level, checksum);
 
 #ifdef _WIN32
         rewind(fm_out);
@@ -418,7 +418,7 @@ int main(int argc, char** argv) {
         double dt_d = zxc_now() - t0;
         fclose(fc);
 
-        printf("Compressed: %d bytes (ratio %.3f)\n", c_sz, ((double)in_size / c_sz));
+        printf("Compressed: %lld bytes (ratio %.3f)\n", c_sz, ((double)in_size / c_sz));
         printf("Avg Compress  : %.3f MiB/s\n",
                ((double)in_size * iterations / (1024.0 * 1024.0)) / dt_c);
         printf("Avg Decompress: %.3f MiB/s\n",
@@ -508,9 +508,9 @@ int main(int argc, char** argv) {
     }
 
     double t0 = zxc_now();
-    int bytes = (mode == MODE_COMPRESS)
-                    ? zxc_stream_compress(f_in, f_out, num_threads, level, checksum)
-                    : zxc_stream_decompress(f_in, f_out, num_threads, checksum);
+    int64_t bytes = (mode == MODE_COMPRESS)
+                        ? zxc_stream_compress(f_in, f_out, num_threads, level, checksum)
+                        : zxc_stream_decompress(f_in, f_out, num_threads, checksum);
     double dt = zxc_now() - t0;
 
     if (!use_stdin) fclose(f_in);
