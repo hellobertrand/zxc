@@ -588,15 +588,15 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
             // Token & Offset
             // cppcheck-suppress knownConditionTrueFalse ; false positive
-            uint8_t ll_code = (ll >= 15) ? 15 : (uint8_t)ll;
-            uint8_t ml_code = (ml >= 15) ? 15 : (uint8_t)ml;
-            buf_tokens[seq_c] = (ll_code << 4) | ml_code;
+            uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
+            uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
+            buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
             buf_offsets[seq_c] = (uint16_t)off;
             if (off > max_offset) max_offset = (uint16_t)off;
 
             // Extras & VByte size
             // cppcheck-suppress knownConditionTrueFalse ; false positive
-            if (ll >= 15) {
+            if (ll >= ZXC_TOKEN_LL_MASK) {
                 buf_extras[n_extras++] = ll;
                 if (LIKELY(ll < 128)) {
                     vbyte_size += 1;
@@ -609,7 +609,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                         vbyte_size += 5;
                 }
             }
-            if (ml >= 15) {
+            if (ml >= ZXC_TOKEN_ML_MASK) {
                 buf_extras[n_extras++] = ml;
                 if (LIKELY(ml < 128)) {
                     vbyte_size += 1;
