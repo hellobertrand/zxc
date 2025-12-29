@@ -587,7 +587,6 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             }
 
             // Token & Offset
-            // cppcheck-suppress knownConditionTrueFalse ; false positive
             uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
             uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
             buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
@@ -595,7 +594,6 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             if (off > max_offset) max_offset = (uint16_t)off;
 
             // Extras & VByte size
-            // cppcheck-suppress knownConditionTrueFalse ; false positive
             if (ll >= ZXC_TOKEN_LL_MASK) {
                 buf_extras[n_extras++] = ll;
                 if (LIKELY(ll < 128)) {
@@ -666,51 +664,54 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     int use_rle = 0;
 
     if (lit_c > 0 && level >= 2) {
-        size_t k = 0;
-        while (k < lit_c) {
-            uint8_t b = literals[k];
-            size_t run = 1;
-            while (k + run < lit_c && literals[k + run] == b) run++;
+        const uint8_t* p = literals;
+        const uint8_t* const p_end = literals + lit_c;
+        const uint8_t* const p_end_4 = p_end - 3;  // Safe limit for 4-byte lookahead
+
+        while (LIKELY(p < p_end)) {
+            uint8_t b = *p;
+            const uint8_t* run_start = p++;
+
+            // Fast run counting with early exit
+            while (p < p_end && *p == b) p++;
+            size_t run = (size_t)(p - run_start);
+
             if (run >= 4) {
-                // Repeat Run: Header (1 byte) + Value (1 byte) = 2 bytes
-                // Header: 1xxxxxxx (Length = (val & 0x7F) + 4)
-                // We can encode runs up to 127 + 4 = 131
-                size_t rem_run = run;
-                while (rem_run >= 4) {
-                    size_t chunk = rem_run > 131 ? 131 : rem_run;
+                // RLE run: 2 bytes per 131 values, then remainder
+                // Branchless: full_chunks * 2 + remainder handling
+                size_t full_chunks = run / 131;
+                size_t rem = run - full_chunks * 131;  // Avoid modulo
+                rle_size += full_chunks * 2;
+                // Remainder: if >= 4 -> 2 bytes (RLE), else 1 + rem (literal)
+                if (rem >= 4)
                     rle_size += 2;
-                    rem_run -= chunk;
-                }
-                if (rem_run > 0) rle_size += 1 + rem_run;
+                else if (rem > 0)
+                    rle_size += 1 + rem;
             } else {
-                // Literal Run: Header (1 byte) + Length bytes
-                // Header: 0xxxxxxx (Length = val + 1)
-                // We can encode runs up to 128
-                size_t lit_run = run;
-                // Check ahead for more literals
-                size_t j = k + run;
-                while (j < lit_c) {
-                    uint8_t nb = literals[j];
-                    size_t nrun = 1;
-                    while (j + nrun < lit_c && literals[j + nrun] == nb) nrun++;
-                    if (nrun >= 4) break;
-                    lit_run += nrun;
-                    j += nrun;
+                // Literal run: scan ahead with 4-byte lookahead
+                const uint8_t* lit_start = run_start;
+
+                while (LIKELY(p < p_end_4)) {
+                    // Check for RLE opportunity (4 identical bytes)
+                    if (UNLIKELY(p[0] == p[1] && p[1] == p[2] && p[2] == p[3])) break;
+                    p++;
+                }
+                // Handle remaining bytes near end
+                while (p < p_end) {
+                    if (UNLIKELY(p + 3 < p_end && p[0] == p[1] && p[1] == p[2] && p[2] == p[3]))
+                        break;
+                    p++;
                 }
 
-                size_t rem_lit = lit_run;
-                while (rem_lit > 0) {
-                    size_t chunk = rem_lit > 128 ? 128 : rem_lit;
-                    rle_size += 1 + chunk;
-                    rem_lit -= chunk;
-                }
-                run = lit_run;
+                size_t lit_run = (size_t)(p - lit_start);
+                // 1 header per 128 bytes + all data bytes
+                // = lit_run + ceil(lit_run / 128)
+                rle_size += lit_run + ((lit_run + 127) >> 7);
             }
-            k += run;
         }
 
-        // Threshold: 3% savings
-        if (rle_size < lit_c * 0.97) use_rle = 1;
+        // Threshold: ~3% savings using integer math (97% ≈ 1 - 1/32)
+        if (rle_size < lit_c - (lit_c >> 5)) use_rle = 1;
     }
 
     size_t h_gap = ZXC_BLOCK_HEADER_SIZE + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
@@ -742,70 +743,91 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint8_t* p_curr = p + ghs;
     rem -= ghs;
 
-    if (UNLIKELY(rem < (desc[0].sizes & 0xFFFFFFFF))) return -1;
+    // Extract stream sizes once
+    size_t sz_lit = (size_t)(desc[0].sizes & 0xFFFFFFFF);
+    size_t sz_tok = (size_t)(desc[1].sizes & 0xFFFFFFFF);
+    size_t sz_off = (size_t)(desc[2].sizes & 0xFFFFFFFF);
+    size_t sz_ext = (size_t)(desc[3].sizes & 0xFFFFFFFF);
+
+    if (UNLIKELY(rem < sz_lit)) return -1;
 
     if (use_rle) {
-        // Write RLE
-        size_t rle_pos = 0;
-        while (rle_pos < lit_c) {
-            uint8_t b = literals[rle_pos];
-            size_t run = 1;
-            while (rle_pos + run < lit_c && literals[rle_pos + run] == b) run++;
+        // Write RLE - optimized single-pass encoding
+        const uint8_t* lit_ptr = literals;
+        const uint8_t* const lit_end = literals + lit_c;
+
+        while (lit_ptr < lit_end) {
+            uint8_t b = *lit_ptr;
+            const uint8_t* run_start = lit_ptr++;
+
+            // Count run length
+            while (lit_ptr < lit_end && *lit_ptr == b) lit_ptr++;
+            size_t run = (size_t)(lit_ptr - run_start);
 
             if (run >= 4) {
-                size_t rem_run = run;
-                while (rem_run >= 4) {
-                    size_t chunk = rem_run > 131 ? 131 : rem_run;
+                // RLE runs: emit 2-byte tokens (header + value)
+                while (run >= 4) {
+                    size_t chunk = (run > 131) ? 131 : run;
                     *p_curr++ = (uint8_t)(0x80 | (chunk - 4));
                     *p_curr++ = b;
-                    rem_run -= chunk;
+                    run -= chunk;
                 }
-                if (rem_run > 0) {
-                    *p_curr++ = (uint8_t)(rem_run - 1);
-                    ZXC_MEMCPY(p_curr, literals + rle_pos + run - rem_run, rem_run);
-                    p_curr += rem_run;
+                // Leftover < 4 bytes: emit as literal
+                if (run > 0) {
+                    *p_curr++ = (uint8_t)(run - 1);
+                    ZXC_MEMCPY(p_curr, lit_ptr - run, run);
+                    p_curr += run;
                 }
             } else {
-                size_t lit_run = run;
-                size_t j = rle_pos + run;
-                while (j < lit_c) {
-                    uint8_t nb = literals[j];
-                    size_t nrun = 1;
-                    while (j + nrun < lit_c && literals[j + nrun] == nb) nrun++;
-                    if (nrun >= 4) break;
-                    lit_run += nrun;
-                    j += nrun;
+                // Literal run: scan ahead to find next RLE opportunity
+                const uint8_t* lit_run_start = run_start;
+
+                while (lit_ptr < lit_end) {
+                    // Quick check: need 4 identical bytes to break
+                    if (lit_ptr + 3 < lit_end && lit_ptr[0] == lit_ptr[1] &&
+                        lit_ptr[1] == lit_ptr[2] && lit_ptr[2] == lit_ptr[3]) {
+                        break;
+                    }
+                    lit_ptr++;
                 }
 
-                size_t rem_lit = lit_run;
-                size_t offset = 0;
-                while (rem_lit > 0) {
-                    size_t chunk = rem_lit > 128 ? 128 : rem_lit;
+                size_t lit_run = (size_t)(lit_ptr - lit_run_start);
+                const uint8_t* src_ptr = lit_run_start;
+
+                // Emit literal chunks (max 128 bytes each)
+                while (lit_run > 0) {
+                    size_t chunk = (lit_run > 128) ? 128 : lit_run;
                     *p_curr++ = (uint8_t)(chunk - 1);
-                    ZXC_MEMCPY(p_curr, literals + rle_pos + offset, chunk);
+                    ZXC_MEMCPY(p_curr, src_ptr, chunk);
                     p_curr += chunk;
-                    offset += chunk;
-                    rem_lit -= chunk;
+                    src_ptr += chunk;
+                    lit_run -= chunk;
                 }
-                run = lit_run;
             }
-            rle_pos += run;
         }
     } else {
         ZXC_MEMCPY(p_curr, literals, lit_c);
         p_curr += lit_c;
     }
-    rem -= (desc[0].sizes & 0xFFFFFFFF);
+    rem -= sz_lit;
 
-    if (UNLIKELY(rem < (desc[1].sizes & 0xFFFFFFFF))) return -1;
+    if (UNLIKELY(rem < sz_tok)) return -1;
     ZXC_MEMCPY(p_curr, buf_tokens, seq_c);
     p_curr += seq_c;
-    rem -= seq_c;
+    rem -= sz_tok;
 
-    if (UNLIKELY(rem < (desc[2].sizes & 0xFFFFFFFF))) return -1;
-    if (UNLIKELY(use_8bit_off)) {
-        // Write 1-byte offsets (downcast from uint16_t)
-        for (uint32_t i = 0; i < seq_c; i++) {
+    if (UNLIKELY(rem < sz_off)) return -1;
+    if (use_8bit_off) {
+        // Write 1-byte offsets - unroll for better throughput
+        uint32_t i = 0;
+        for (; i + 4 <= seq_c; i += 4) {
+            p_curr[0] = (uint8_t)buf_offsets[i + 0];
+            p_curr[1] = (uint8_t)buf_offsets[i + 1];
+            p_curr[2] = (uint8_t)buf_offsets[i + 2];
+            p_curr[3] = (uint8_t)buf_offsets[i + 3];
+            p_curr += 4;
+        }
+        for (; i < seq_c; i++) {
             *p_curr++ = (uint8_t)buf_offsets[i];
         }
     } else {
@@ -813,9 +835,9 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         ZXC_MEMCPY(p_curr, buf_offsets, seq_c * 2);
         p_curr += seq_c * 2;
     }
-    rem -= off_stream_size;
+    rem -= sz_off;
 
-    if (UNLIKELY(rem < (desc[3].sizes & 0xFFFFFFFF))) return -1;
+    if (UNLIKELY(rem < sz_ext)) return -1;
     // Write VByte stream
     for (size_t j = 0; j < n_extras; j++) {
         uint32_t val = buf_extras[j];

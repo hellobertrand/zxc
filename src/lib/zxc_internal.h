@@ -62,88 +62,52 @@ extern "C" {
 #endif
 #endif
 
-
-// #if defined(__GNUC__) || defined(__clang__)
-// #define LIKELY(x) (__builtin_expect((!!(x)), 1))
-// #define UNLIKELY(x) (__builtin_expect(!!(x), 0))
-// #define ZXC_PREFETCH_READ(ptr) __builtin_prefetch((const void*)(ptr), 0, 3)
-// #define ZXC_PREFETCH_WRITE(ptr) __builtin_prefetch((const void*)(ptr), 1, 3)
-// #define ZXC_MEMCPY(dst, src, size) __builtin_memcpy(dst, src, size)
-// #define ZXC_MEMSET(dst, val, size) __builtin_memset(dst, val, size)
-// #else
-// #define LIKELY(x) (x)
-// #define UNLIKELY(x) (x)
-// #define ZXC_PREFETCH_READ(ptr)
-// #define ZXC_PREFETCH_WRITE(ptr)
-// #define ZXC_MEMCPY(dst, src, size) memcpy(dst, src, size)
-// #define ZXC_MEMSET(dst, val, size) memset(dst, val, size)
-// #endif
-
-// #if defined(__GNUC__) || defined(__clang__)
-// #define ZXC_ALIGN(x) __attribute__((aligned(x)))
-// #elif defined(_MSC_VER)
-// #define ZXC_ALIGN(x) __declspec(align(x))
-// #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-// #include <stdalign.h>
-// #define ZXC_ALIGN(x) _Alignas(x)
-// #else
-// #define ZXC_ALIGN(x) /* No alignment */
-// #endif
-
-// // Force inlining for critical paths
-// #if defined(__GNUC__) || defined(__clang__)
-// #define ZXC_ALWAYS_INLINE inline __attribute__((always_inline))
-// #elif defined(_MSC_VER)
-// #define ZXC_ALWAYS_INLINE __forceinline
-// #else
-// #define ZXC_ALWAYS_INLINE inline
-// #endif
-
-// #ifdef _MSC_VER
-// #include <intrin.h>
-// #pragma intrinsic(_BitScanReverse)
-// #endif
+/*
+ * ============================================================================
+ * LIKELY/UNLIKELY, PREFETCH, MEMCPY/MEMSET, ALIGN, ALWAYS_INLINE
+ * ============================================================================
+ */
 
 #if defined(__GNUC__) || defined(__clang__)
-    #define LIKELY(x)               (__builtin_expect(!!(x), 1))
-    #define UNLIKELY(x)             (__builtin_expect(!!(x), 0))
-    #define RESTRICT                __restrict__
-    #define ZXC_PREFETCH_READ(ptr)  __builtin_prefetch((const void*)(ptr), 0, 3)
-    #define ZXC_PREFETCH_WRITE(ptr) __builtin_prefetch((const void*)(ptr), 1, 3)
-    #define ZXC_MEMCPY(dst, src, n) __builtin_memcpy(dst, src, n)
-    #define ZXC_MEMSET(dst, val, n) __builtin_memset(dst, val, n)
-    #define ZXC_ALIGN(x)            __attribute__((aligned(x)))
-    #define ZXC_ALWAYS_INLINE       inline __attribute__((always_inline))
-    
+#define LIKELY(x) (__builtin_expect(!!(x), 1))
+#define UNLIKELY(x) (__builtin_expect(!!(x), 0))
+#define RESTRICT __restrict__
+#define ZXC_PREFETCH_READ(ptr) __builtin_prefetch((const void*)(ptr), 0, 3)
+#define ZXC_PREFETCH_WRITE(ptr) __builtin_prefetch((const void*)(ptr), 1, 3)
+#define ZXC_MEMCPY(dst, src, n) __builtin_memcpy(dst, src, n)
+#define ZXC_MEMSET(dst, val, n) __builtin_memset(dst, val, n)
+#define ZXC_ALIGN(x) __attribute__((aligned(x)))
+#define ZXC_ALWAYS_INLINE inline __attribute__((always_inline))
+
 #elif defined(_MSC_VER)
-    #include <intrin.h>
-    #include <xmmintrin.h>
-    #define LIKELY(x)               (x)
-    #define UNLIKELY(x)             (x)
-    #define RESTRICT                __restrict
-    #define ZXC_PREFETCH_READ(ptr)  _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
-    #define ZXC_PREFETCH_WRITE(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
-    #pragma intrinsic(memcpy, memset)
-    #define ZXC_MEMCPY(dst, src, n) memcpy(dst, src, n)
-    #define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
-    #define ZXC_ALIGN(x)            __declspec(align(x))
-    #define ZXC_ALWAYS_INLINE       __forceinline
-    #pragma intrinsic(_BitScanReverse)
+#include <intrin.h>
+#include <xmmintrin.h>
+#define LIKELY(x) (x)
+#define UNLIKELY(x) (x)
+#define RESTRICT __restrict
+#define ZXC_PREFETCH_READ(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
+#define ZXC_PREFETCH_WRITE(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
+#pragma intrinsic(memcpy, memset)
+#define ZXC_MEMCPY(dst, src, n) memcpy(dst, src, n)
+#define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
+#define ZXC_ALIGN(x) __declspec(align(x))
+#define ZXC_ALWAYS_INLINE __forceinline
+#pragma intrinsic(_BitScanReverse)
 #else
-    #define LIKELY(x)               (x)
-    #define UNLIKELY(x)             (x)
-    #define RESTRICT
-    #define ZXC_PREFETCH_READ(ptr)
-    #define ZXC_PREFETCH_WRITE(ptr)
-    #define ZXC_MEMCPY(dst, src, n) memcpy(dst, src, n)
-    #define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
-    #define ZXC_ALWAYS_INLINE       inline
-    #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-        #include <stdalign.h>
-        #define ZXC_ALIGN(x)        _Alignas(x)
-    #else
-        #define ZXC_ALIGN(x)        /* No alignment */
-    #endif
+#define LIKELY(x) (x)
+#define UNLIKELY(x) (x)
+#define RESTRICT
+#define ZXC_PREFETCH_READ(ptr)
+#define ZXC_PREFETCH_WRITE(ptr)
+#define ZXC_MEMCPY(dst, src, n) memcpy(dst, src, n)
+#define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
+#define ZXC_ALWAYS_INLINE inline
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#include <stdalign.h>
+#define ZXC_ALIGN(x) _Alignas(x)
+#else
+#define ZXC_ALIGN(x)
+#endif
 #endif
 
 /*
@@ -450,8 +414,7 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
     vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));
     vst1q_u8((uint8_t*)dst + 16, vld1q_u8((const uint8_t*)src + 16));
 #else
-    ZXC_MEMCPY(dst, src, 16);
-    ZXC_MEMCPY((uint8_t*)dst + 16, (const uint8_t*)src + 16, 16);
+    ZXC_MEMCPY(dst, src, 32);
 #endif
 }
 
