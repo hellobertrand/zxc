@@ -418,7 +418,7 @@ int main(int argc, char** argv) {
         double dt_d = zxc_now() - t0;
         fclose(fc);
 
-        printf("Compressed: %lld bytes (ratio %.3f)\n", c_sz, ((double)in_size / c_sz));
+        printf("Compressed: %lld bytes (ratio %.3f)\n", (long long)c_sz, ((double)in_size / c_sz));
         printf("Avg Compress  : %.3f MiB/s\n",
                ((double)in_size * iterations / (1024.0 * 1024.0)) / dt_c);
         printf("Avg Decompress: %.3f MiB/s\n",
