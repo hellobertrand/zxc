@@ -151,16 +151,34 @@ Benchmarks were conducted using lzbench (from @inikep), compiled with GCC 13.3.0
 
 ### Option 2: Building from Source
 
-**Requirements:** CMake (3.10+), C Compiler (Clang/GCC C11), Make/Ninja.
+**Requirements:** CMake (3.14+), C17 Compiler (Clang/GCC/MSVC).
 
 ```bash
 git clone https://github.com/hellobertrand/zxc.git
 cd zxc
 mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make
+cmake ..
+make -j$(nproc)
 # Binary usage:
 ./zxc --help
+```
+
+#### CMake Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `ZXC_NATIVE_ARCH` | ON | Enable `-march=native` for maximum performance |
+| `ZXC_BUILD_CLI` | ON | Build command-line interface |
+| `ZXC_BUILD_TESTS` | ON | Build unit tests |
+
+**Note:** LTO (Link-Time Optimization) is always enabled for optimal performance.
+
+```bash
+# Portable build (without -march=native)
+cmake -DZXC_NATIVE_ARCH=OFF ..
+
+# Library only (no CLI, no tests)
+cmake -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF ..
 ```
 
 ---
