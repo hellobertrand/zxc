@@ -37,7 +37,8 @@ jobs:
 
       - name: Clone LZbench
         run: |
-          git clone -b ${LZBENCH_BRANCH} https://github.com/inikep/lzbench "${LZBENCH_DIR}"
+          # git clone -b ${LZBENCH_BRANCH} https://github.com/inikep/lzbench "${LZBENCH_DIR}"
+          git clone -b zxc-0.4.0 https://github.com/hellobertrand/lzbench "${LZBENCH_DIR}"
 
       - name: Copy Lib ZXC
         run: |
@@ -65,7 +66,6 @@ jobs:
           wget --no-check-certificate -q https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip -O silesia.zip
           mkdir -p "${SILESIA_DIR}"
           unzip -q silesia.zip -d "${SILESIA_DIR}"
-          ls -lh "${SILESIA_DIR}"
 
       - name: Run Lzbench on Silesia Corpus
         working-directory: ${{ env.LZBENCH_DIR }}

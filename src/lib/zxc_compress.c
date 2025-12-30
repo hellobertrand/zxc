@@ -570,6 +570,15 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             if (max_lazy > best_len + 1) best_ref = NULL;
         }
 
+        // if (best_ref && level == 3) {
+        //     uint32_t off = (uint32_t)(ip - best_ref);
+
+        //     if (best_len == ZXC_LZ_MIN_MATCH && off > (ZXC_BLOCK_UNIT * 6))
+        //         best_ref = NULL;
+        //     // else if (best_len == 6 && off > 49152)
+        //     //     best_ref = NULL;
+        // }
+
         if (best_ref) {
             while (ip > anchor && best_ref > src && ip[-1] == best_ref[-1]) {
                 ip--;
@@ -596,29 +605,29 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             // Extras & VByte size
             if (ll >= ZXC_TOKEN_LL_MASK) {
                 buf_extras[n_extras++] = ll;
-                if (LIKELY(ll < 128)) {
+                if (LIKELY(ll < 128))
                     vbyte_size += 1;
-                } else {
-                    if (ll < 16384)
-                        vbyte_size += 2;
-                    else if (ll < 2097152)
-                        vbyte_size += 3;
-                    else
-                        vbyte_size += 5;
-                }
+                else if (ll < 16384)
+                    vbyte_size += 2;
+                else if (ll < 2097152)
+                    vbyte_size += 3;
+                else if (ll < 268435456)
+                    vbyte_size += 4;
+                else
+                    vbyte_size += 5;
             }
             if (ml >= ZXC_TOKEN_ML_MASK) {
                 buf_extras[n_extras++] = ml;
-                if (LIKELY(ml < 128)) {
+                if (LIKELY(ml < 128))
                     vbyte_size += 1;
-                } else {
-                    if (ml < 16384)
-                        vbyte_size += 2;
-                    else if (ml < 2097152)
-                        vbyte_size += 3;
-                    else
-                        vbyte_size += 5;
-                }
+                else if (ml < 16384)
+                    vbyte_size += 2;
+                else if (ml < 2097152)
+                    vbyte_size += 3;
+                else if (ml < 268435456)
+                    vbyte_size += 4;
+                else
+                    vbyte_size += 5;
             }
             seq_c++;
 
@@ -639,7 +648,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                     // Update the hash table and chain table
                     hash_table[2 * h_u] = epoch_mark | pos_u;
                     hash_table[2 * h_u + 1] = val_u;
-                    if (prev_idx > 0 && (pos_u - prev_idx) < 0x10000)
+                    if (prev_idx > 0 && (pos_u - prev_idx) < (ZXC_LZ_MAX_DIST + 1))
                         chain_table[pos_u] = (uint16_t)(pos_u - prev_idx);
                     else
                         chain_table[pos_u] = 0;

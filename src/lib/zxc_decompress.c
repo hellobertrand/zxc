@@ -97,83 +97,51 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
     // Bounds check: need at least 1 byte
     if (UNLIKELY(p >= end)) return 0;  // Safe default: prevents crash, detected later
 
-#if defined(__BMI2__) && defined(__x86_64__)
-    // PEXT branchless VByte decoding (BMI2 required)
-    // This is ~3x faster than the loop-based approach
-
-    // Fast path: single byte value (< 128) - most common case
-    uint32_t first = *p;
-    if (LIKELY(first < 128)) {
+    uint32_t b0 = p[0];
+    if (LIKELY(b0 < 128)) {
         *ptr = p + 1;
-        return first;
+        return b0;
     }
 
-    // Load up to 8 bytes (we need max 5 for 32-bit VByte)
-    // Safe: we already checked p < end, and we handle short buffers
-    size_t avail = (size_t)(end - p);
-    uint64_t data;
-    if (LIKELY(avail >= 8)) {
-        ZXC_MEMCPY(&data, p, 8);
-    } else {
-        // Near buffer end: load safely
-        data = 0;
-        for (size_t i = 0; i < avail && i < 5; i++) {
-            data |= (uint64_t)p[i] << (i * 8);
-        }
+    // 2-byte path (second most common)
+    if (UNLIKELY(p + 1 >= end)) {
+        *ptr = p + 1;
+        return 0;
     }
-    // Find first byte with MSB=0 (final byte) starting from byte 1
-    // Use TZCNT on inverted pattern
-    uint64_t final_mask = ~data & 0x8080808080808080ULL;
-    // First 1-bit in final_mask indicates first final byte
-    int tz = final_mask ? (int)(__builtin_ctzll(final_mask) >> 3) + 1 : 5;
-    int len = (tz > 5) ? 5 : tz;  // Clamp to max 5 bytes
-
-    // Build mask to extract data bits (7 bits per byte)
-    // mask = 0x7F for 1 byte, 0x7F7F for 2 bytes, etc.
-    static const uint64_t masks[6] = {
-        0x0000000000000000ULL,  // 0 bytes (unused)
-        0x000000000000007FULL,  // 1 byte
-        0x0000000000007F7FULL,  // 2 bytes
-        0x00000000007F7F7FULL,  // 3 bytes
-        0x000000007F7F7F7FULL,  // 4 bytes
-        0x0000007F7F7F7F7FULL   // 5 bytes
-    };
-    uint64_t mask = masks[len];
-
-    // PEXT: extract data bits (7 bits per byte) in parallel
-    uint64_t extracted = _pext_u64(data, mask);
-
-    *ptr = p + len;
-    return (uint32_t)extracted;
-
-#else
-    // Fallback: standard loop-based VByte decoding
-    uint32_t val = *p++;
-    // Fast path: Single byte value (< 128)
-    if (LIKELY(val < 128)) {
-        *ptr = p;
-        return val;
+    uint32_t b1 = p[1];
+    if (LIKELY(b1 < 128)) {
+        *ptr = p + 2;
+        return (b0 & 0x7F) | (b1 << 7);
     }
-    // Slow path: Multi-byte value (max 5 bytes for 32-bit)
-    val &= 0x7F;
-    uint32_t shift = 7;
-    uint32_t b;
-    int count = 0;
-    do {
-        // Bounds check for each continuation byte
-        if (UNLIKELY(p >= end)) {
-            *ptr = p;
-            return 0;  // Safe default: prevents crash, detected later
-        }
-        b = *p++;
-        val |= (b & 0x7F) << shift;
-        shift += 7;
-        // Security: limit to 5 bytes (35 bits max, prevents infinite loop)
-        if (UNLIKELY(++count >= 4)) break;
-    } while (b & 0x80);
-    *ptr = p;
-    return val;
-#endif
+
+    if (UNLIKELY(p + 2 >= end)) {
+        *ptr = p + 2;
+        return 0;
+    }
+    uint32_t b2 = p[2];
+    uint32_t val = (b0 & 0x7F) | ((b1 & 0x7F) << 7);
+    if (b2 < 128) {
+        *ptr = p + 3;
+        return val | (b2 << 14);
+    }
+
+    if (UNLIKELY(p + 3 >= end)) {
+        *ptr = p + 3;
+        return 0;
+    }
+    val |= (b2 & 0x7F) << 14;
+    uint32_t b3 = p[3];
+    if (b3 < 128) {
+        *ptr = p + 4;
+        return val | (b3 << 21);
+    }
+
+    if (UNLIKELY(p + 4 >= end)) {
+        *ptr = p + 4;
+        return 0;
+    }
+    *ptr = p + 5;
+    return val | ((b3 & 0x7F) << 21) | ((uint32_t)p[4] << 28);
 }
 
 /**
@@ -1117,15 +1085,14 @@ size_t zxc_decompress(const void* src, size_t src_size, void* dst, size_t dst_ca
     uint8_t* op = (uint8_t*)dst;
     const uint8_t* op_start = op;
     const uint8_t* op_end = op + dst_capacity;
-
-    zxc_cctx_t ctx;
-    if (zxc_cctx_init(&ctx, ZXC_CHUNK_SIZE, 0, 0, checksum_enabled) != 0) return 0;
+    size_t runtime_chunk_size = 0;
 
     // File header verification
-    if (zxc_read_file_header(ip, src_size) != 0) {
-        zxc_cctx_free(&ctx);
-        return 0;
-    }
+    if (zxc_read_file_header(ip, src_size, &runtime_chunk_size) != 0) return 0;
+
+    zxc_cctx_t ctx;
+    if (zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0, checksum_enabled) != 0) return 0;
+
     ip += ZXC_FILE_HEADER_SIZE;
 
     // Block decompression loop

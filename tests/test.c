@@ -191,6 +191,12 @@ int test_invalid_arguments() {
     FILE* f = tmpfile();
     if (!f) return 0;
 
+    FILE* f_valid = tmpfile();
+    if (!f_valid) return 0;
+    // Prepare a valid compressed stream for decompression tests
+    zxc_stream_compress(f, f_valid, 1, 1, 0);
+    rewind(f_valid);
+
     // 1. Input NULL -> Must fail
     if (zxc_stream_compress(NULL, f, 1, 5, 0) != -1) {
         printf("Failed: Should return -1 when Input is NULL\n");
@@ -213,9 +219,9 @@ int test_invalid_arguments() {
     }
 
     // 3b. Decompression Output NULL -> Must SUCCEED (Benchmark mode)
-    if (zxc_stream_decompress(f, NULL, 1, 0) == -1) {
+    if (zxc_stream_decompress(f_valid, NULL, 1, 0) == -1) {
         printf("Failed: Decompress should allow NULL Output (Benchmark mode support)\n");
-        fclose(f);
+        fclose(f_valid);
         return 0;
     }
 
