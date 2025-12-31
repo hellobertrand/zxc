@@ -30,14 +30,6 @@ extern "C" {
 #define ZXC_ATOMIC volatile
 #endif
 
-// #if defined(__GNUC__) || defined(__clang__)
-// #define RESTRICT __restrict__
-// #elif defined(_MSC_VER)
-// #define RESTRICT __restrict
-// #else
-// #define RESTRICT
-// #endif
-
 /*
  * ============================================================================
  * SIMD INTRINSICS & COMPILER MACROS
@@ -119,7 +111,7 @@ extern "C" {
 #define ZXC_MAGIC_WORD 0x0043585AU          // Magic signature "ZXC0" (Little Endian)
 #define ZXC_FILE_FORMAT_VERSION 1           // Current file format version
 #define ZXC_BLOCK_UNIT (4096)               // Block size unit (4KB)
-#define ZXC_CHUNK_SIZE (248 * 1024)         // Size of data blocks processed by threads
+#define ZXC_CHUNK_SIZE (256 * 1024)         // Size of data blocks processed by threads
 #define ZXC_LEGACY_CHUNK_SIZE (256 * 1024)  // Legacy chunk size (v0.3.x and earlier)
 #define ZXC_IO_BUFFER_SIZE (1024 * 1024)    // Size of stdio buffers
 #define ZXC_PAD_SIZE 32                     // Padding size for buffer overruns

@@ -570,14 +570,11 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             if (max_lazy > best_len + 1) best_ref = NULL;
         }
 
-        // if (best_ref && level == 3) {
-        //     uint32_t off = (uint32_t)(ip - best_ref);
-
-        //     if (best_len == ZXC_LZ_MIN_MATCH && off > (ZXC_BLOCK_UNIT * 6))
-        //         best_ref = NULL;
-        //     // else if (best_len == 6 && off > 49152)
-        //     //     best_ref = NULL;
-        // }
+        if (best_ref && level == 3) {
+            uint32_t off = (uint32_t)(ip - best_ref);
+            if (best_len == ZXC_LZ_MIN_MATCH && off > (ZXC_BLOCK_UNIT * 8))
+                best_ref = NULL;
+        }
 
         if (best_ref) {
             while (ip > anchor && best_ref > src && ip[-1] == best_ref[-1]) {
