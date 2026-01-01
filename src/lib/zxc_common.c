@@ -138,7 +138,7 @@ int zxc_read_file_header(const uint8_t* src, size_t src_size, size_t* out_block_
         return -1;
 
     if (out_block_size) {
-        size_t units = src[5] ? src[5] : 64; // Default to 64 block units (256KB)
+        size_t units = src[5] ? src[5] : 64;  // Default to 64 block units (256KB)
         *out_block_size = units * ZXC_BLOCK_UNIT;
     }
     return 0;

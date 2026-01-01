@@ -572,8 +572,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
         if (best_ref && level == 3) {
             uint32_t off = (uint32_t)(ip - best_ref);
-            if (best_len == ZXC_LZ_MIN_MATCH && off > (ZXC_BLOCK_UNIT * 8))
-                best_ref = NULL;
+            if (best_len == ZXC_LZ_MIN_MATCH && off > (ZXC_BLOCK_UNIT * 8)) best_ref = NULL;
         }
 
         if (best_ref) {
@@ -826,18 +825,22 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     if (use_8bit_off) {
         // Write 1-byte offsets - unroll for better throughput
         uint32_t i = 0;
-        for (; i + 4 <= seq_c; i += 4) {
+        for (; i + 8 <= seq_c; i += 8) {
             p_curr[0] = (uint8_t)buf_offsets[i + 0];
             p_curr[1] = (uint8_t)buf_offsets[i + 1];
             p_curr[2] = (uint8_t)buf_offsets[i + 2];
             p_curr[3] = (uint8_t)buf_offsets[i + 3];
-            p_curr += 4;
+            p_curr[4] = (uint8_t)buf_offsets[i + 4];
+            p_curr[5] = (uint8_t)buf_offsets[i + 5];
+            p_curr[6] = (uint8_t)buf_offsets[i + 6];
+            p_curr[7] = (uint8_t)buf_offsets[i + 7];
+            p_curr += 8;
         }
         for (; i < seq_c; i++) {
             *p_curr++ = (uint8_t)buf_offsets[i];
         }
     } else {
-        // Write 2-byte offsets (original)
+        // Write 2-byte offsets
         ZXC_MEMCPY(p_curr, buf_offsets, seq_c * 2);
         p_curr += seq_c * 2;
     }

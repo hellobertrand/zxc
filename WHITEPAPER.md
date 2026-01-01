@@ -109,7 +109,7 @@ The file begins with an **8-byte** header that identifies the format and specifi
 * **Magic Word (4 bytes)**: `0x5A 0x58 0x43 0x30` ("ZXC0" in Little Endian).
 * **Version (1 byte)**: Current version is `1`.
 * **Chunk Size Code (1 byte)**: Defines the processing block size:
-  - `0` = Legacy mode (256 KB, for v0.3.x compatibility)
+  - `0` = Default mode (256 KB, for backward compatibility)
   - `N` = Chunk size is `N × 4096` bytes (e.g., `62` = 248 KB)
 * **Reserved (2 bytes)**: Future use.
 
