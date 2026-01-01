@@ -956,7 +956,8 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
         {
             // Skip check if written >= bounds_threshold (256 for 8-bit, 65536 for 16-bit)
-            if (UNLIKELY(written < bounds_threshold && (offset == 0 || offset > written))) return -1;
+            if (UNLIKELY(written < bounds_threshold && (offset == 0 || offset > written)))
+                return -1;
 
             const uint8_t* match_src = d_ptr - offset;
             if (LIKELY(offset >= ZXC_PAD_SIZE / 2)) {

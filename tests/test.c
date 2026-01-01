@@ -522,7 +522,8 @@ int main() {
 
     // Test 16-bit offset mode (enc_off=0): patterns with offsets > 255
     gen_large_offset_data(buffer, BUF_SIZE);
-    if (!test_round_trip("16-bit Offsets (Large Distance)", buffer, BUF_SIZE, 3, 1)) total_failures++;
+    if (!test_round_trip("16-bit Offsets (Large Distance)", buffer, BUF_SIZE, 3, 1))
+        total_failures++;
     if (!test_round_trip("16-bit Offsets (Level 5)", buffer, BUF_SIZE, 5, 1)) total_failures++;
 
     // Edge case: Mixed buffer that should trigger 16-bit mode

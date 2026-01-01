@@ -539,6 +539,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         }
 
         if (use_lazy && best_ref && best_len < 128 && ip + 1 < mflimit) {
+            // Lazy 1: Check matches at ip + 1
             uint32_t next_val = zxc_le32(ip + 1);
             uint32_t h2 = zxc_hash_func(next_val);
             uint32_t next_head = hash_table[2 * h2];
@@ -546,17 +547,15 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             uint32_t next_idx =
                 (next_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (next_head & ZXC_OFFSET_MASK) : 0;
 
-            // Early filter flag for lazy matching
             int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_val);
-
             uint32_t max_lazy = 0;
-            int lazy_att = (level == 3 || level == 4) ? 1 : 8;
+            // Increase search depth for lazy at higher levels
+            int lazy_att = (level >= 3) ? (level >= 5 ? 16 : 8) : 2;
             int is_lazy_first = 1;
 
             while (next_idx > 0 && lazy_att-- > 0) {
                 if ((uint32_t)(ip + 1 - src) - next_idx >= ZXC_LZ_MAX_DIST) break;
                 const uint8_t* ref2 = src + next_idx;
-                // Skip HEAD if tag mismatched, check chain entries normally
                 if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
                     uint32_t l2 = 4;
                     while (ip + 1 + l2 < iend && ref2[l2] == ip[1 + l2]) l2++;
@@ -567,7 +566,41 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                 next_idx -= delta;
                 is_lazy_first = 0;
             }
-            if (max_lazy > best_len + 1) best_ref = NULL;
+
+            if (max_lazy > best_len + 1) {
+                best_ref = NULL;  // Prefer ip+1
+            } else if (level >= 4 && ip + 2 < mflimit) {
+                // Double Lazy: Check matches at ip + 2
+                // Only if ip+1 wasn't good enough
+                uint32_t val3 = zxc_le32(ip + 2);
+                uint32_t h3 = zxc_hash_func(val3);
+                uint32_t head3 = hash_table[2 * h3];
+                uint32_t tag3 = hash_table[2 * h3 + 1];
+                uint32_t idx3 =
+                    (head3 & ~ZXC_OFFSET_MASK) == epoch_mark ? (head3 & ZXC_OFFSET_MASK) : 0;
+
+                int skip_head3 = (idx3 > 0 && tag3 != val3);
+                uint32_t max_lazy3 = 0;
+                lazy_att = (level >= 5) ? 16 : 8;
+                int is_first3 = 1;
+
+                while (idx3 > 0 && lazy_att-- > 0) {
+                    if ((uint32_t)(ip + 2 - src) - idx3 >= ZXC_LZ_MAX_DIST) break;
+                    const uint8_t* ref3 = src + idx3;
+                    if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
+                        uint32_t l3 = 4;
+                        while (ip + 2 + l3 < iend && ref3[l3] == ip[2 + l3]) l3++;
+                        if (l3 > max_lazy3) max_lazy3 = l3;
+                    }
+                    uint16_t delta = chain_table[idx3];
+                    if (delta == 0) break;
+                    idx3 -= delta;
+                    is_first3 = 0;
+                }
+
+                if (max_lazy3 > best_len + 2)
+                    best_ref = NULL;  // Prefer ip+2 (will be handled by next iteration)
+            }
         }
 
         if (best_ref && level == 3) {
