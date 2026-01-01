@@ -77,6 +77,46 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clan
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
+| memcpy                  | 52864 MB/s | 52847 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.4.0 -1**        | **720 MB/s** | **8912 MB/s** | 131013960 | **61.82** | 12 files|
+| **zxc 0.4.0 -2**        | **488 MB/s** | **8312 MB/s** | 124881470 | **58.92** | 12 files|
+| **zxc 0.4.0 -3**        | **206 MB/s** | **6864 MB/s** | 99914884 | **47.14** | 12 files|
+| **zxc 0.4.0 -4**        | **185 MB/s** | **6403 MB/s** | 93417747 | **44.08** | 12 files|
+| **zxc 0.4.0 -5**        | **77.9 MB/s** | **5954 MB/s** | 86695943 | **40.91** | 12 files|
+| lz4 1.10.0              |   805 MB/s |  4804 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1335 MB/s |  5617 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  13.5 MB/s |  4420 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   608 MB/s |  1552 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   692 MB/s |  2082 MB/s |    86932028 | 41.02 | 12 files|
+| snappy 1.2.2            |   826 MB/s |  3256 MB/s |   101352257 | 47.82 | 12 files|
+
+
+### Benchmark ARM64 (Google Axion)
+
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 12.2.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Debian GNU/Linux 12 (bookworm). The reference hardware is a Google Neoverse-V2 processor (ARM64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus.
+
+| Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
+| ---------------         | -----------| -----------| ----------- | ----- | -------- |
+| memcpy                  | 23790 MB/s | 23643 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.4.0 -1**        |   667 MB/s | **6694 MB/s** |   131013960 | **61.82** | 12 files|
+| **zxc 0.4.0 -2**        |   489 MB/s | **6329 MB/s** |   124881470 | **58.92** | 12 files|
+| **zxc 0.4.0 -3**        |   201 MB/s | **5159 MB/s** |    99914884 | **47.14** | 12 files|
+| **zxc 0.4.0 -4**        |   179 MB/s | **4790 MB/s** |    93417747 | **44.08** | 12 files|
+| **zxc 0.4.0 -5**        |  70.5 MB/s | **4372 MB/s** |    86695943 | **40.91** | 12 files|
+| lz4 1.10.0              |   740 MB/s |  4168 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1277 MB/s |  4866 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  12.4 MB/s |  3783 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   522 MB/s |  1364 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   606 MB/s |  1758 MB/s |    86932028 | 41.02 | 12 files|
+| snappy 1.2.2            |   748 MB/s |  1839 MB/s |   101352257 | 47.82 | 12 files|
+
+
+### Benchmark x86_64
+
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 13.3.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Ubuntu 24.04. The reference hardware is an AMD EPYC 7763 processor (x86_64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus.
+
+| Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
+| ---------------         | -----------| -----------| ----------- | ----- | -------- |
 | memcpy                  | 20397 MB/s | 20604 MB/s |   211938580 |100.00 | 12 files|
 | **zxc 0.4.0 -1**        |   531 MB/s |  **5049 MB/s** |   131013960 | **61.82** | 12 files|
 | **zxc 0.4.0 -2**        |   391 MB/s |  **4744 MB/s** |   124881470 | **58.92** | 12 files|
@@ -89,46 +129,6 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clan
 | zstd 1.5.7 -1           |   410 MB/s |  1198 MB/s |    73229468 | 34.55 | 12 files|
 | zstd 1.5.7 --fast --1   |   450 MB/s |  1578 MB/s |    86932028 | 41.02 | 12 files|
 | snappy 1.2.2            |   609 MB/s |  1590 MB/s |   101464727 | 47.87 | 12 files|
-
-
-### Benchmark ARM64 (Google Axion)
-
-Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 12.2.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Debian GNU/Linux 12 (bookworm). The reference hardware is a Google Neoverse-V2 processor (ARM64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus.
-
-| Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
-| ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 22793 MB/s | 22780 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.3.1 -1**            |   672 MB/s |  **6628 MB/s** |   131013960 | **61.82** | 12 files|
-| **zxc 0.3.1 -2**            |   426 MB/s |  **6284 MB/s** |   124873773 | **58.92** | 12 files|
-| **zxc 0.3.1 -3**            |   198 MB/s |  **5014 MB/s** |    99293471 | **46.85** | 12 files|
-| **zxc 0.3.1 -4**            |   176 MB/s |  **4738 MB/s** |    93417296 | **44.08** | 12 files|
-| **zxc 0.3.1 -5**            |  70.8 MB/s |  **4341 MB/s** |    86695943 | **40.91** | 12 files|
-| lz4 1.10.0              |   739 MB/s |  4144 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1274 MB/s |  4849 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  12.1 MB/s |  3771 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   520 MB/s |  1347 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   605 MB/s |  1747 MB/s |    86932028 | 41.02 | 12 files|
-| snappy 1.2.2            |   731 MB/s |  1812 MB/s |   101352257 | 47.82 | 12 files|
-
-
-### Benchmark x86_64
-
-Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 13.3.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Ubuntu 24.04. The reference hardware is an AMD EPYC 7763 processor (x86_64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus.
-
-| Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
-| ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 20793 MB/s | 20528 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.3.1 -1**            |   535 MB/s |  **4995 MB/s** |   131013960 | **61.82** | 12 files|
-| **zxc 0.3.1 -2**            |   356 MB/s |  **4688 MB/s** |   124873773 | **58.92** | 12 files|
-| **zxc 0.3.1 -3**            |   147 MB/s |  **3729 MB/s** |    99293471 | **46.85** | 12 files|
-| **zxc 0.3.1 -4**            |   129 MB/s |  **3532 MB/s** |    93417296 | **44.08** | 12 files|
-| **zxc 0.3.1 -5**            |  54.3 MB/s |  **3374 MB/s** |    86695943 | **40.91** | 12 files|
-| lz4 1.10.0              |   594 MB/s |  3554 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1035 MB/s |  4114 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  11.2 MB/s |  3479 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   408 MB/s |  1197 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   452 MB/s |  1573 MB/s |    86932028 | 41.02 | 12 files|
-| snappy 1.2.2            |   609 MB/s |  1586 MB/s |   101464727 | 47.87 | 12 files|
 
 
 ---

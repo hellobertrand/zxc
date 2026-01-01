@@ -108,13 +108,12 @@ extern "C" {
  * ============================================================================
  */
 
-#define ZXC_MAGIC_WORD 0x0043585AU          // Magic signature "ZXC0" (Little Endian)
-#define ZXC_FILE_FORMAT_VERSION 1           // Current file format version
-#define ZXC_BLOCK_UNIT (4096)               // Block size unit (4KB)
-#define ZXC_CHUNK_SIZE (256 * 1024)         // Size of data blocks processed by threads
-#define ZXC_LEGACY_CHUNK_SIZE (256 * 1024)  // Legacy chunk size (v0.3.x and earlier)
-#define ZXC_IO_BUFFER_SIZE (1024 * 1024)    // Size of stdio buffers
-#define ZXC_PAD_SIZE 32                     // Padding size for buffer overruns
+#define ZXC_MAGIC_WORD 0x0043585AU            // Magic signature "ZXC0" (Little Endian)
+#define ZXC_FILE_FORMAT_VERSION 1             // Current file format version
+#define ZXC_BLOCK_UNIT (4096)                 // Block size unit (4KB)
+#define ZXC_CHUNK_SIZE (64 * ZXC_BLOCK_UNIT)  // Size of data blocks processed by threads (256KB)
+#define ZXC_IO_BUFFER_SIZE (1024 * 1024)      // Size of stdio buffers
+#define ZXC_PAD_SIZE 32                       // Padding size for buffer overruns
 
 // Binary Header Sizes
 #define ZXC_FILE_HEADER_SIZE 8  // Magic (4 bytes) + Version (1 byte) + Reserved (3 bytes)

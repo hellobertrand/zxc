@@ -133,11 +133,13 @@ int zxc_write_file_header(uint8_t* dst, size_t dst_capacity) {
 }
 
 int zxc_read_file_header(const uint8_t* src, size_t src_size, size_t* out_block_size) {
-    if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE)) return -1;
-    if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD || src[4] != ZXC_FILE_FORMAT_VERSION)) return -1;
+    if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE || zxc_le32(src) != ZXC_MAGIC_WORD ||
+                 src[4] != ZXC_FILE_FORMAT_VERSION))
+        return -1;
+
     if (out_block_size) {
-        uint8_t code = src[5];
-        *out_block_size = code == 0 ? ZXC_LEGACY_CHUNK_SIZE : (size_t)code * ZXC_BLOCK_UNIT;
+        size_t units = src[5] ? src[5] : 64; // Default to 64 block units (256KB)
+        *out_block_size = units * ZXC_BLOCK_UNIT;
     }
     return 0;
 }
