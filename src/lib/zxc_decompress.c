@@ -197,6 +197,11 @@ static const ZXC_ALIGN(16) uint8_t zxc_overlap_masks[16][16] = {
  *                 (i.e., source address is `dst - off`).
  */
 static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
+    // If off==0 (invalid), we force off=1 to mimic a safe RLE of the previous byte.
+    // This prevents the division-by-zero crash in the scalar fallback (i % off)
+    // and prevents reading uninitialized memory (dst[0] = dst[-0]), maintaining
+    // memory safety even with corrupt data.
+    off = off ? off : 1;
 #if defined(ZXC_USE_NEON64)
     uint8x16_t mask = vld1q_u8(zxc_overlap_masks[off]);
     uint8x16_t src_data = vld1q_u8(dst - off);
