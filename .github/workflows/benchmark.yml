@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15-xlarge]
+        os: [ubuntu-latest, macos-latest-xlarge]
 
     env:
         LZBENCH_BRANCH: master
@@ -37,8 +37,7 @@ jobs:
 
       - name: Clone LZbench
         run: |
-          # git clone -b ${LZBENCH_BRANCH} https://github.com/inikep/lzbench "${LZBENCH_DIR}"
-          git clone -b zxc-0.3.0 https://github.com/hellobertrand/lzbench "${LZBENCH_DIR}"
+          git clone -b ${LZBENCH_BRANCH} https://github.com/inikep/lzbench "${LZBENCH_DIR}"
 
       - name: Copy Lib ZXC
         run: |

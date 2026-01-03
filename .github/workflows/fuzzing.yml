@@ -62,3 +62,10 @@ jobs:
         fuzz-seconds: ${{ github.event_name == 'pull_request' && 120 || inputs.fuzz_seconds || 3600 }}
         sanitizer: ${{ matrix.sanitizer }}
         output-sarif: true
+
+    - name: Upload SARIF to GitHub Security
+      if: success() || failure()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: .
+        category: clusterfuzzlite-${{ matrix.fuzzer }}-${{ matrix.sanitizer }}
