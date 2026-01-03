@@ -334,13 +334,30 @@ int main(int argc, char** argv) {
         if (optind + 1 < argc) {
             iterations = atoi(argv[optind + 1]);
         }
-        struct stat st;
-        if (stat(in_path, &st) != 0) return 1;
-        size_t in_size = st.st_size;
 
         FILE* f_in = fopen(in_path, "rb");
         if (!f_in) return 1;
+
+        if (fseeko(f_in, 0, SEEK_END) != 0) {
+            fclose(f_in);
+            return 1;
+        }
+        long long fsize = ftello(f_in);
+        if (fsize < 0) {
+            fclose(f_in);
+            return 1;
+        }
+        size_t in_size = (size_t)fsize;
+        if (fseeko(f_in, 0, SEEK_SET) != 0) {
+            fclose(f_in);
+            return 1;
+        }
+
         uint8_t* ram = malloc(in_size);
+        if (!ram) {
+            fclose(f_in);
+            return 1;
+        }
         if (fread(ram, 1, in_size, f_in) != in_size) {
             fclose(f_in);
             free(ram);
