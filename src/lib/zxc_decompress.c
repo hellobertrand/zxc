@@ -271,6 +271,7 @@ static ZXC_ALWAYS_INLINE uint32x4_t zxc_neon_prefix_sum_u32(uint32x4_t v) {
  * @param[in] v The input 256-bit vector containing eight 32-bit integers.
  * @return A 256-bit vector containing the prefix sums of the input elements.
  */
+// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_AVX2 is defined
 static ZXC_ALWAYS_INLINE __m256i zxc_mm256_prefix_sum_epi32(__m256i v) {
     v = _mm256_add_epi32(v, _mm256_slli_si256(v, 4));  // Add value shifted by 1 element
     v = _mm256_add_epi32(v, _mm256_slli_si256(v, 8));  // Add value shifted by 2 elements

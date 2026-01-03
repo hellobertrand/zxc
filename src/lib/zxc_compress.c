@@ -32,6 +32,7 @@
  * @param v The 256-bit vector containing 8 unsigned 32-bit integers.
  * @return The maximum unsigned 32-bit integer found in the vector.
  */
+// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_AVX2 is defined
 static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
     __m128i vlow = _mm256_castsi256_si128(v);        // Extract the lower 128 bits
     __m128i vhigh = _mm256_extracti128_si256(v, 1);  // Extract the upper 128 bits
