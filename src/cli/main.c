@@ -539,7 +539,7 @@ int main(int argc, char** argv) {
     free(b2);
 
     if (bytes >= 0) {
-        zxc_log_v("Processed %d bytes in %.3fs\n", bytes, dt);
+        zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
         if (!use_stdin && !use_stdout && !keep_input) unlink(in_path);
     } else {
         zxc_log("Operation failed.\n");
