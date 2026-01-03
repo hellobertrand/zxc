@@ -44,7 +44,6 @@
 
 #ifdef _WIN32
 #include <io.h>
-#include <sys/stat.h>
 #include <windows.h>
 
 // Map POSIX macros to MSVC equivalents
@@ -53,7 +52,8 @@
 #define isatty _isatty
 #define fileno _fileno
 #define unlink _unlink
-#define stat _stat
+#define fseeko _fseeki64
+#define ftello _ftelli64
 
 /**
  * @brief Returns the current monotonic time in seconds using Windows
@@ -140,7 +140,6 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
 #else
 // POSIX / Linux / macOS Implementation
 #include <getopt.h>
-#include <sys/stat.h>
 #include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
