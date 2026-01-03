@@ -163,6 +163,15 @@ if(ZXC_BUILD_CLI)
             target_link_options(zxc PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo)
         endif()
     endif()
+
+    # Linker options for Dead Code Stripping
+    if(NOT MSVC)
+        if(APPLE)
+            target_link_options(zxc PRIVATE -Wl,-dead_strip)
+        else()
+            target_link_options(zxc PRIVATE -Wl,--gc-sections)
+        endif()
+    endif()
     
     # Strip symbols in Release mode for smaller binary
     if(NOT MSVC AND CMAKE_BUILD_TYPE STREQUAL "Release")
