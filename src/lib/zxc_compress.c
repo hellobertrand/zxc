@@ -404,8 +404,10 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
             uint32_t ref_val = zxc_le32(ref);
             int should_skip = is_first & skip_head;
-            // Combine: match if not skipping AND values match AND best_len byte matches
-            int match_ok = (!should_skip) & (ref_val == cur_val) & (ref[best_len] == ip[best_len]);
+            // Short-circuit: match only if not skipping AND values match AND best_len byte matches
+            int match_ok = (!should_skip) &&
+                           (ref_val == cur_val) &&
+                           (ref[best_len] == ip[best_len]);
 
             if (LIKELY(match_ok)) {
                 uint32_t mlen = 4;
