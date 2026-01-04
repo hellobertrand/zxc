@@ -262,15 +262,14 @@ int test_thread_params() {
 
     FILE* f_in = tmpfile();
     FILE* f_out = tmpfile();
-
-    if (!f_in || !f_out) return 0;
-
-    // Test with 0 (Auto)
-    if (zxc_stream_compress(f_in, f_out, 0, 5, 0) == -1) {
-        // Ok, might fail if empty, but must not crash
+    if (!f_in || !f_out) {
+        if (f_in) fclose(f_in);
+        if (f_out) fclose(f_out);
+        return 0;
     }
 
-    // Test with negative value
+    // Test with 0 (Auto) and negative value - must not crash
+    zxc_stream_compress(f_in, f_out, 0, 5, 0);
     fseek(f_in, 0, SEEK_SET);
     fseek(f_out, 0, SEEK_SET);
     zxc_stream_compress(f_in, f_out, -5, 5, 0);
@@ -279,6 +278,80 @@ int test_thread_params() {
     fclose(f_in);
     fclose(f_out);
     return 1;
+}
+
+// Multi-threaded round-trip test for TSan coverage
+int test_multithread_roundtrip() {
+    printf("=== TEST: Multi-Thread Round-Trip (TSan Coverage) ===\n");
+
+    const size_t SIZE = 4 * 1024 * 1024;  // 4MB to ensure multiple chunks
+    const int ITERATIONS = 3;             // Multiple runs increase race detection
+    int result = 0;
+    uint8_t* input = malloc(SIZE);
+    uint8_t* output = malloc(SIZE);
+
+    if (!input || !output) goto cleanup;
+    gen_lz_data(input, SIZE);
+
+    for (int iter = 0; iter < ITERATIONS; iter++) {
+        FILE* f_in = tmpfile();
+        FILE* f_comp = tmpfile();
+        FILE* f_decomp = tmpfile();
+        if (!f_in || !f_comp || !f_decomp) {
+            if (f_in) fclose(f_in);
+            if (f_comp) fclose(f_comp);
+            if (f_decomp) fclose(f_decomp);
+            goto cleanup;
+        }
+
+        fwrite(input, 1, SIZE, f_in);
+        fseek(f_in, 0, SEEK_SET);
+
+        // Vary thread count: 2, 4, 8
+        int num_threads = 2 << iter;
+        if (zxc_stream_compress(f_in, f_comp, num_threads, 3, 1) < 0) {
+            printf("Compression failed (threads=%d)!\n", num_threads);
+            fclose(f_in);
+            fclose(f_comp);
+            fclose(f_decomp);
+            goto cleanup;
+        }
+
+        fseek(f_comp, 0, SEEK_SET);
+
+        if (zxc_stream_decompress(f_comp, f_decomp, num_threads, 1) < 0) {
+            printf("Decompression failed (threads=%d)!\n", num_threads);
+            fclose(f_in);
+            fclose(f_comp);
+            fclose(f_decomp);
+            goto cleanup;
+        }
+
+        long decomp_size = ftell(f_decomp);
+        fseek(f_decomp, 0, SEEK_SET);
+
+        if (decomp_size != (long)SIZE || fread(output, 1, SIZE, f_decomp) != SIZE ||
+            memcmp(input, output, SIZE) != 0) {
+            printf("Verification failed (threads=%d)!\n", num_threads);
+            fclose(f_in);
+            fclose(f_comp);
+            fclose(f_decomp);
+            goto cleanup;
+        }
+
+        fclose(f_in);
+        fclose(f_comp);
+        fclose(f_decomp);
+        printf("  Iteration %d: PASS (%d threads)\n", iter + 1, num_threads);
+    }
+
+    printf("PASS (3 iterations, 2/4/8 threads)\n\n");
+    result = 1;
+
+cleanup:
+    free(input);
+    free(output);
+    return result;
 }
 
 // Checks the buffer-based API (zxc_compress / zxc_decompress)
@@ -389,6 +462,8 @@ int main() {
     // --- UNIT TESTS (ROBUSTNESS/API) ---
 
     if (!test_buffer_api()) total_failures++;
+
+    if (!test_multithread_roundtrip()) total_failures++;
 
     if (!test_max_compressed_size_logic()) total_failures++;
     if (!test_invalid_arguments()) total_failures++;
