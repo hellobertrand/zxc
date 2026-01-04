@@ -32,6 +32,7 @@
  * @param v The 256-bit vector containing 8 unsigned 32-bit integers.
  * @return The maximum unsigned 32-bit integer found in the vector.
  */
+// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_AVX2 is defined
 static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
     __m128i vlow = _mm256_castsi256_si128(v);        // Extract the lower 128 bits
     __m128i vhigh = _mm256_extracti128_si256(v, 1);  // Extract the upper 128 bits
@@ -403,7 +404,8 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
             uint32_t ref_val = zxc_le32(ref);
             int should_skip = is_first & skip_head;
-            // Combine: match if not skipping AND values match AND best_len byte matches
+            // Branchless: evaluate all conditions (ref is prefetched, memory access is cheap)
+            // codeql[cpp/logical-not-and] : Intentional bitwise AND for branchless evaluation
             int match_ok = (!should_skip) & (ref_val == cur_val) & (ref[best_len] == ip[best_len]);
 
             if (LIKELY(match_ok)) {

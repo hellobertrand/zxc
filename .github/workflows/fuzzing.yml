@@ -69,3 +69,15 @@ jobs:
       with:
         sarif_file: .
         category: clusterfuzzlite-${{ matrix.fuzzer }}-${{ matrix.sanitizer }}
+
+  tsan:
+    name: Thread Sanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with TSan
+        run: |
+          cmake -B build -DCMAKE_C_FLAGS="-fsanitize=thread -g -fno-omit-frame-pointer" -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build
+      - name: Run Tests
+        run: ctest --test-dir build --output-on-failure

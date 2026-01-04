@@ -44,7 +44,6 @@
 
 #ifdef _WIN32
 #include <io.h>
-#include <sys/stat.h>
 #include <windows.h>
 
 // Map POSIX macros to MSVC equivalents
@@ -53,7 +52,8 @@
 #define isatty _isatty
 #define fileno _fileno
 #define unlink _unlink
-#define stat _stat
+#define fseeko _fseeki64
+#define ftello _ftelli64
 
 /**
  * @brief Returns the current monotonic time in seconds using Windows
@@ -140,7 +140,6 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
 #else
 // POSIX / Linux / macOS Implementation
 #include <getopt.h>
-#include <sys/stat.h>
 #include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
@@ -330,44 +329,40 @@ int main(int argc, char** argv) {
             return 1;
         }
         const char* in_path = argv[optind];
-        // Check for optional iterations argument
-        if (optind + 1 < argc) {
-            iterations = atoi(argv[optind + 1]);
-        }
-        struct stat st;
-        if (stat(in_path, &st) != 0) return 1;
-        size_t in_size = st.st_size;
+        if (optind + 1 < argc) iterations = atoi(argv[optind + 1]);
 
+        int ret = 1;
+        uint8_t* ram = NULL;
+        uint8_t* c_dat = NULL;
         FILE* f_in = fopen(in_path, "rb");
-        if (!f_in) return 1;
-        uint8_t* ram = malloc(in_size);
-        if (fread(ram, 1, in_size, f_in) != in_size) {
-            fclose(f_in);
-            free(ram);
-            return 1;
-        }
+        if (!f_in) goto bench_cleanup;
+
+        if (fseeko(f_in, 0, SEEK_END) != 0) goto bench_cleanup;
+        long long fsize = ftello(f_in);
+        if (fsize <= 0) goto bench_cleanup;
+        size_t in_size = (size_t)fsize;
+        if (fseeko(f_in, 0, SEEK_SET) != 0) goto bench_cleanup;
+
+        ram = malloc(in_size);
+        if (!ram) goto bench_cleanup;
+        if (fread(ram, 1, in_size, f_in) != in_size) goto bench_cleanup;
         fclose(f_in);
+        f_in = NULL;
 
         printf("Input: %s (%zu bytes)\n", in_path, in_size);
         printf("Running %d iterations (Threads: %d)...\n", iterations, num_threads);
 
-// Windows lacks fmemopen; fallback to temporary files for stream simulation
 #ifdef _WIN32
-        printf(
-            "Note: fmemopen not available on Windows. Using tmpfile instead "
-            "(slower).\n");
+        printf("Note: Using tmpfile on Windows (slower than fmemopen).\n");
         FILE* fm = tmpfile();
         if (fm) {
             fwrite(ram, 1, in_size, fm);
+            rewind(fm);
         }
 #else
         FILE* fm = fmemopen(ram, in_size, "rb");
 #endif
-
-        if (!fm) {
-            free(ram);
-            return 1;
-        }
+        if (!fm) goto bench_cleanup;
 
         double t0 = zxc_now();
         for (int i = 0; i < iterations; i++) {
@@ -378,36 +373,51 @@ int main(int argc, char** argv) {
         fclose(fm);
 
         size_t max_c = zxc_compress_bound(in_size);
-        uint8_t* c_dat = malloc(max_c);
+        c_dat = malloc(max_c);
+        if (!c_dat) goto bench_cleanup;
 
 #ifdef _WIN32
         FILE* fm_in = tmpfile();
+        FILE* fm_out = tmpfile();
+        if (!fm_in || !fm_out) {
+            if (fm_in) fclose(fm_in);
+            if (fm_out) fclose(fm_out);
+            goto bench_cleanup;
+        }
         fwrite(ram, 1, in_size, fm_in);
         rewind(fm_in);
-        FILE* fm_out = tmpfile();
 #else
         FILE* fm_in = fmemopen(ram, in_size, "rb");
         FILE* fm_out = fmemopen(c_dat, max_c, "wb");
+        if (!fm_in || !fm_out) {
+            if (fm_in) fclose(fm_in);
+            if (fm_out) fclose(fm_out);
+            goto bench_cleanup;
+        }
 #endif
 
         int64_t c_sz = zxc_stream_compress(fm_in, fm_out, num_threads, level, checksum);
+        if (c_sz < 0) {
+            fclose(fm_in);
+            fclose(fm_out);
+            goto bench_cleanup;
+        }
 
 #ifdef _WIN32
         rewind(fm_out);
-        // Read back from tmpfile to memory buffer for decompression bench
-        fseek(fm_out, 0, SEEK_END);
-        rewind(fm_out);
-        fread(c_dat, 1, c_sz, fm_out);
+        fread(c_dat, 1, (size_t)c_sz, fm_out);
 #endif
-
         fclose(fm_in);
         fclose(fm_out);
 
 #ifdef _WIN32
         FILE* fc = tmpfile();
-        fwrite(c_dat, 1, c_sz, fc);
+        if (!fc) goto bench_cleanup;
+        fwrite(c_dat, 1, (size_t)c_sz, fc);
+        rewind(fc);
 #else
-        FILE* fc = fmemopen(c_dat, c_sz, "rb");
+        FILE* fc = fmemopen(c_dat, (size_t)c_sz, "rb");
+        if (!fc) goto bench_cleanup;
 #endif
 
         t0 = zxc_now();
@@ -418,14 +428,18 @@ int main(int argc, char** argv) {
         double dt_d = zxc_now() - t0;
         fclose(fc);
 
-        printf("Compressed: %lld bytes (ratio %.3f)\n", (long long)c_sz, ((double)in_size / c_sz));
+        printf("Compressed: %lld bytes (ratio %.3f)\n", (long long)c_sz, (double)in_size / c_sz);
         printf("Avg Compress  : %.3f MiB/s\n",
-               ((double)in_size * iterations / (1024.0 * 1024.0)) / dt_c);
+               (double)in_size * iterations / (1024.0 * 1024.0) / dt_c);
         printf("Avg Decompress: %.3f MiB/s\n",
-               ((double)in_size * iterations / (1024.0 * 1024.0)) / dt_d);
+               (double)in_size * iterations / (1024.0 * 1024.0) / dt_d);
+        ret = 0;
+
+    bench_cleanup:
+        if (f_in) fclose(f_in);
         free(ram);
         free(c_dat);
-        return 0;
+        return ret;
     }
 
     /*
@@ -522,7 +536,7 @@ int main(int argc, char** argv) {
     free(b2);
 
     if (bytes >= 0) {
-        zxc_log_v("Processed %d bytes in %.3fs\n", bytes, dt);
+        zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
         if (!use_stdin && !use_stdout && !keep_input) unlink(in_path);
     } else {
         zxc_log("Operation failed.\n");
