@@ -405,8 +405,8 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             uint32_t ref_val = zxc_le32(ref);
             int should_skip = is_first & skip_head;
             // Branchless: evaluate all conditions (ref is prefetched, memory access is cheap)
-            // codeql[cpp/logical-not-and] : Intentional bitwise AND for branchless evaluation
-            int match_ok = (!should_skip) & (ref_val == cur_val) & (ref[best_len] == ip[best_len]);
+            int match_ok =
+                ((should_skip ^ 1) & (ref_val == cur_val)) & (ref[best_len] == ip[best_len]);
 
             if (LIKELY(match_ok)) {
                 uint32_t mlen = 4;
