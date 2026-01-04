@@ -621,7 +621,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     const uint8_t* const e_end = e_ptr + sz_extras;  // For vbyte overflow detection
 
     // Validate streams don't overflow source buffer
-    if (UNLIKELY(e_ptr + sz_extras > src + src_size)) return -1;
+    if (UNLIKELY(e_end != src + src_size)) return -1;
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
@@ -630,7 +630,9 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint32_t n_seq = gh.n_sequences;
 
     // Track bytes written for offset validation
-    // Once written >= 65536, all 16-bit offsets are valid (no check needed)
+    // For 1-byte offsets (enc_off==1): validate until 256 bytes written (max 8-bit offset)
+    // For 2-byte offsets (enc_off==0): validate until 65536 bytes written (max 16-bit offset)
+    // After threshold, all offsets are guaranteed valid (can't exceed written bytes)
     size_t written = 0;
 
 // Macro for copy literal + match (uses 32-byte wild copies)
