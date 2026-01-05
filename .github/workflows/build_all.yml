@@ -66,7 +66,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-      - uses: actions/checkout@v4
+        uses: actions/checkout@v4
 
       # Case: Linux x86 (32-bit)
       - name: Install x86 32-bit libs
