@@ -1,0 +1,114 @@
+name: Multi-Architecture Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-latest
+            os: linux
+            arch_flags: ""
+          - name: Linux x86 (32-bit)
+            runner: ubuntu-latest
+            os: linux
+            install_32bit_x86: true
+            arch_flags: "-m32"
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+            os: linux
+            arch_flags: ""
+          - name: Linux ARM (32-bit)
+            runner: ubuntu-latest
+            os: linux
+            install_32bit_arm: true
+            cross_compiler_c: arm-linux-gnueabihf-gcc
+            cross_compiler_cxx: arm-linux-gnueabihf-g++
+          - name: Windows x64
+            runner: windows-latest
+            os: windows
+            cmake_arch: "x64"
+          - name: Windows x86 (32-bit)
+            runner: windows-latest
+            os: windows
+            cmake_arch: "Win32"
+          - name: Windows ARM64
+            runner: windows-11-arm
+            os: windows
+            cmake_arch: "ARM64"
+          - name: Windows ARM (32-bit)
+            runner: windows-11-arm
+            os: windows
+            cmake_arch: "ARM"
+          - name: macOS Intel x64
+            runner: macos-15-intel
+            os: macos
+          - name: macOS ARM64
+            runner: macos-latest
+            os: macos
+
+    steps:
+      - name: Checkout Repository
+      - uses: actions/checkout@v4
+
+      # Case: Linux x86 (32-bit)
+      - name: Install x86 32-bit libs
+        if: matrix.install_32bit_x86
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib
+
+      # Case: Linux ARM (32-bit)
+      - name: Install ARM 32-bit toolchain
+        if: matrix.install_32bit_arm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+
+      - name: Configure CMake
+        run: |
+          # Initialize variables
+          EXTRA_ARGS="-DZXC_NATIVE_ARCH=OFF" # Disable native arch detection
+          
+          # WINDOWS CONFIGURATION
+          if [ "${{ matrix.os }}" = "windows" ]; then
+             # Visual Studio specific syntax for architecture (-A)
+             cmake -S . -B build -A ${{ matrix.cmake_arch }} $EXTRA_ARGS
+          
+          # LINUX / MAC CONFIGURATION
+          else
+             # Handle C flags (e.g., -m32)
+             if [ ! -z "${{ matrix.arch_flags }}" ]; then
+                export CFLAGS="${{ matrix.arch_flags }}"
+                export CXXFLAGS="${{ matrix.arch_flags }}"
+             fi
+             
+             # Handle cross-compiler (e.g., ARM 32-bit on Linux)
+             if [ ! -z "${{ matrix.cross_compiler_c }}" ]; then
+                EXTRA_ARGS="$EXTRA_ARGS -DCMAKE_C_COMPILER=${{ matrix.cross_compiler_c }} -DCMAKE_CXX_COMPILER=${{ matrix.cross_compiler_cxx }}"
+             fi
+
+             # Standard CMake command
+             cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $EXTRA_ARGS
+          fi
+        shell: bash
+
+      - name: Build
+        run: cmake --build build --config Release
