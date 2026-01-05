@@ -38,7 +38,7 @@ jobs:
         fuzzer: [decompress, roundtrip]
 
     steps:
-    - name: Checkout
+    - name: Checkout Repository
       uses: actions/checkout@v4
 
     - name: Configure Fuzzer Target
