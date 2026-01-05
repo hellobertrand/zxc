@@ -73,12 +73,17 @@ extern "C" {
 
 #elif defined(_MSC_VER)
 #include <intrin.h>
+#if defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64)
 #include <xmmintrin.h>
+#define ZXC_PREFETCH_READ(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
+#define ZXC_PREFETCH_WRITE(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
+#else
+#define ZXC_PREFETCH_READ(ptr) __prefetch((const void*)(ptr))
+#define ZXC_PREFETCH_WRITE(ptr) __prefetch((const void*)(ptr))
+#endif
 #define LIKELY(x) (x)
 #define UNLIKELY(x) (x)
 #define RESTRICT __restrict
-#define ZXC_PREFETCH_READ(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
-#define ZXC_PREFETCH_WRITE(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
 #pragma intrinsic(memcpy, memset)
 #define ZXC_MEMCPY(dst, src, n) memcpy(dst, src, n)
 #define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
@@ -108,9 +113,9 @@ extern "C" {
  * ============================================================================
  */
 
-#define ZXC_MAGIC_WORD 0x0043585AU            // Magic signature "ZXC0" (Little Endian)
-#define ZXC_FILE_FORMAT_VERSION 2             // Current file format version (v2: variable offset encoding)
-#define ZXC_BLOCK_UNIT (4096)                 // Block size unit (4KB)
+#define ZXC_MAGIC_WORD 0x0043585AU  // Magic signature "ZXC0" (Little Endian)
+#define ZXC_FILE_FORMAT_VERSION 2   // Current file format version (v2: variable offset encoding)
+#define ZXC_BLOCK_UNIT (4096)       // Block size unit (4KB)
 #define ZXC_CHUNK_SIZE (64 * ZXC_BLOCK_UNIT)  // Size of data blocks processed by threads (252KB)
 #define ZXC_IO_BUFFER_SIZE (1024 * 1024)      // Size of stdio buffers
 #define ZXC_PAD_SIZE 32                       // Padding size for buffer overruns
