@@ -41,6 +41,7 @@ jobs:
             install_32bit_arm: true
             cross_compiler_c: arm-linux-gnueabihf-gcc
             cross_compiler_cxx: arm-linux-gnueabihf-g++
+            cross_strip: arm-linux-gnueabihf-strip
           - name: Windows x64
             runner: windows-latest
             os: windows
@@ -103,6 +104,11 @@ jobs:
              # Handle cross-compiler (e.g., ARM 32-bit on Linux)
              if [ ! -z "${{ matrix.cross_compiler_c }}" ]; then
                 EXTRA_ARGS="$EXTRA_ARGS -DCMAKE_C_COMPILER=${{ matrix.cross_compiler_c }} -DCMAKE_CXX_COMPILER=${{ matrix.cross_compiler_cxx }}"
+             fi
+             
+             # Handle cross-strip tool (e.g., ARM 32-bit on Linux)
+             if [ ! -z "${{ matrix.cross_strip }}" ]; then
+                EXTRA_ARGS="$EXTRA_ARGS -DCMAKE_STRIP=/usr/bin/${{ matrix.cross_strip }}"
              fi
 
              # Standard CMake command
