@@ -54,7 +54,7 @@ jobs:
 
       - name: Cache Silesia Corpus
         id: cache-silesia
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.SILESIA_DIR }}
           key: silesia-corpus-${{ runner.os }}-v1
