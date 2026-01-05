@@ -49,7 +49,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }}
 
       - name: Build 
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
 
       - name: Run Unit Tests
         working-directory: build

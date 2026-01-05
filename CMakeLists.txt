@@ -175,8 +175,13 @@ if(ZXC_BUILD_CLI)
     
     # Strip symbols in Release mode for smaller binary
     if(NOT MSVC AND CMAKE_BUILD_TYPE STREQUAL "Release")
+        # Set default strip command if not already set (e.g., for cross-compilation)
+        if(NOT CMAKE_STRIP)
+            set(CMAKE_STRIP strip)
+        endif()
+        
         add_custom_command(TARGET zxc POST_BUILD
-            COMMAND strip $<TARGET_FILE:zxc>
+            COMMAND ${CMAKE_STRIP} $<TARGET_FILE:zxc>
             COMMENT "Stripping symbols from zxc"
         )
     endif()

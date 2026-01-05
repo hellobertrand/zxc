@@ -114,4 +114,4 @@ jobs:
         shell: bash
 
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
