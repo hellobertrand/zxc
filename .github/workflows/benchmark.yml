@@ -85,7 +85,7 @@ jobs:
           cat benchmark.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Benchmark Result as Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: benchmark-${{ matrix.os }}-${{ github.sha }}
           path: benchmark.md
