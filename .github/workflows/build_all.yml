@@ -54,10 +54,7 @@ jobs:
             runner: windows-11-arm
             os: windows
             cmake_arch: "ARM64"
-          - name: Windows ARM (32-bit)
-            runner: windows-11-arm
-            os: windows
-            cmake_arch: "ARM"
+          # Note: Windows ARM 32-bit removed - deprecated and unsupported by Windows SDK 10.0.26100+
           - name: macOS Intel x64
             runner: macos-15-intel
             os: macos
