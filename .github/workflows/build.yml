@@ -27,26 +27,29 @@ jobs:
           - os: ubuntu-latest
             artifact_name: zxc
             asset_name: zxc-linux-x86_64
+            cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
           - os: ubuntu-24.04-arm
             artifact_name: zxc
             asset_name: zxc-linux-aarch64
+            cmake_flags: "-DZXC_NATIVE_ARCH=ON"
           - os: macos-latest
             artifact_name: zxc
             asset_name: zxc-macos-arm64
+            cmake_flags: "-DZXC_NATIVE_ARCH=ON"
           - os: windows-latest
             artifact_name: zxc.exe
             asset_name: zxc-windows-x64.exe
+            cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
 
     steps:
+      - name: Checkout Repository
       - uses: actions/checkout@v4
 
       - name: Configure CMake
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }}
 
       - name: Build 
-        run: |
-          uname -m
-          cmake --build build --config Release
+        run: cmake --build build --config Release
 
       - name: Run Unit Tests
         working-directory: build
