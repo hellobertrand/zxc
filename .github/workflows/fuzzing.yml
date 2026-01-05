@@ -39,7 +39,7 @@ jobs:
 
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Configure Fuzzer Target
       run: |
@@ -74,7 +74,7 @@ jobs:
     name: Thread Sanitizer
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build with TSan
         run: |
           cmake -B build -DCMAKE_C_FLAGS="-fsanitize=thread -g -fno-omit-frame-pointer" -DCMAKE_BUILD_TYPE=Debug
