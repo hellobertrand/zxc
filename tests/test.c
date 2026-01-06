@@ -49,6 +49,22 @@ void gen_num_data(uint8_t* buf, size_t size) {
     }
 }
 
+void gen_binary_data(uint8_t* buf, size_t size) {
+    // Pattern with problematic bytes that could be corrupted in text mode:
+    // 0x0A (LF), 0x0D (CR), 0x00 (NULL), 0x1A (EOF/CTRL-Z), 0xFF
+    const uint8_t pattern[] = {
+        0x5A, 0x58, 0x43, 0x00,  // "ZXC" + NULL
+        0x0A, 0x0D, 0x0A, 0x00,  // LF, CR, LF, NULL
+        0xFF, 0xFE, 0x0A, 0x0D,  // High bytes + LF/CR
+        0x1A, 0x00, 0x0A, 0x0D,  // EOF marker + NULL + LF/CR
+        0x00, 0x00, 0x0A, 0x0A,  // Multiple NULLs and LFs
+    };
+    size_t pat_len = sizeof(pattern);
+    for (size_t i = 0; i < size; i++) {
+        buf[i] = pattern[i % pat_len];
+    }
+}
+
 // Generic Round-Trip test function (Compress -> Decompress -> Compare)
 int test_round_trip(const char* test_name, const uint8_t* input, size_t size, int level,
                     int checksum) {
@@ -456,6 +472,16 @@ int main() {
     if (!test_round_trip("Level 3", buffer, BUF_SIZE, 3, 1)) total_failures++;
     if (!test_round_trip("Level 4", buffer, BUF_SIZE, 4, 1)) total_failures++;
     if (!test_round_trip("Level 5", buffer, BUF_SIZE, 5, 1)) total_failures++;
+
+    printf("\n--- Test Coverage: Binary Data Preservation ---\n");
+    gen_binary_data(buffer, BUF_SIZE);
+    if (!test_round_trip("Binary Data (0x00, 0x0A, 0x0D, 0xFF)", buffer, BUF_SIZE, 3, 0))
+        total_failures++;
+    if (!test_round_trip("Binary Data with Checksum", buffer, BUF_SIZE, 3, 1)) total_failures++;
+
+    // Test with small binary data to ensure even small payloads are preserved
+    gen_binary_data(buffer, 128);
+    if (!test_round_trip("Small Binary Data (128 bytes)", buffer, 128, 3, 0)) total_failures++;
 
     free(buffer);
 

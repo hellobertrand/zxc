@@ -43,6 +43,7 @@
 #endif
 
 #ifdef _WIN32
+#include <fcntl.h>
 #include <io.h>
 #include <windows.h>
 
@@ -210,11 +211,11 @@ void print_version(void) {
     snprintf(sys_info, sizeof(sys_info), "%s-%s", ZXC_ARCH, ZXC_OS);
 #else
     struct utsname buffer;
-    if (uname(&buffer) == 0) {
+    if (uname(&buffer) == 0)
         snprintf(sys_info, sizeof(sys_info), "%s-%s-%s", ZXC_ARCH, ZXC_OS, buffer.release);
-    } else {
+    else
         snprintf(sys_info, sizeof(sys_info), "%s-%s", ZXC_ARCH, ZXC_OS);
-    }
+
 #endif
     printf("zxc %s\n", ZXC_LIB_VERSION_STR);
     printf("(%s)\n", sys_info);
@@ -317,15 +318,6 @@ int main(int argc, char** argv) {
             optind++;
         }
     }
-
-    // set binary mode for standard streams
-    #ifdef _WIN32
-        #ifndef O_BINARY
-            #define O_BINARY 0
-        #endif
-        setmode(fileno(stdin), O_BINARY);
-        setmode(fileno(stdout), O_BINARY);
-    #endif
 
     /*
      * Benchmark Mode
@@ -520,15 +512,25 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Set stdin/stdout to binary mode if using them
+#ifdef _WIN32
+    if (use_stdin) _setmode(_fileno(stdin), _O_BINARY);
+    if (use_stdout) _setmode(_fileno(stdout), _O_BINARY);
+
+#else
+    // On POSIX systems, there's no text/binary distinction, but we ensure
+    // no buffering issues occur by using freopen if needed
+    if (use_stdin) freopen(NULL, "rb", stdin);
+    if (use_stdout) freopen(NULL, "wb", stdout);
+#endif
+
     // Set large buffers for I/O performance
     char *b1 = malloc(1024 * 1024), *b2 = malloc(1024 * 1024);
     setvbuf(f_in, b1, _IOFBF, 1024 * 1024);
     setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
 
     zxc_log_v("Starting... (Compression Level %d)\n", level);
-    if (g_verbose) {
-        zxc_log("Checksum: %s\n", checksum ? "enabled" : "disabled");
-    }
+    if (g_verbose) zxc_log("Checksum: %s\n", checksum ? "enabled" : "disabled");
 
     double t0 = zxc_now();
     int64_t bytes = (mode == MODE_COMPRESS)
@@ -536,11 +538,10 @@ int main(int argc, char** argv) {
                         : zxc_stream_decompress(f_in, f_out, num_threads, checksum);
     double dt = zxc_now() - t0;
 
-    if (!use_stdin) {
+    if (!use_stdin)
         fclose(f_in);
-    } else {
+    else
         setvbuf(stdin, NULL, _IONBF, 0);
-    }
 
     if (!use_stdout) {
         fclose(f_out);
