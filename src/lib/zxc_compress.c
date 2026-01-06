@@ -633,30 +633,16 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
             // Extras & VByte size
             if (ll >= ZXC_TOKEN_LL_MASK) {
-                buf_extras[n_extras++] = ll;
-                if (LIKELY(ll < 128))
-                    vbyte_size += 1;
-                else if (ll < 16384)
-                    vbyte_size += 2;
-                else if (ll < 2097152)
-                    vbyte_size += 3;
-                else if (ll < 268435456)
-                    vbyte_size += 4;
-                else
-                    vbyte_size += 5;
+                uint32_t val = ll - ZXC_TOKEN_LL_MASK;
+                buf_extras[n_extras++] = val;
+                vbyte_size +=
+                    1 + (val >= 128) + (val >= 16384) + (val >= 2097152) + (val >= 268435456);
             }
             if (ml >= ZXC_TOKEN_ML_MASK) {
-                buf_extras[n_extras++] = ml;
-                if (LIKELY(ml < 128))
-                    vbyte_size += 1;
-                else if (ml < 16384)
-                    vbyte_size += 2;
-                else if (ml < 2097152)
-                    vbyte_size += 3;
-                else if (ml < 268435456)
-                    vbyte_size += 4;
-                else
-                    vbyte_size += 5;
+                uint32_t val = ml - ZXC_TOKEN_ML_MASK;
+                buf_extras[n_extras++] = val;
+                vbyte_size +=
+                    1 + (val >= 128) + (val >= 16384) + (val >= 2097152) + (val >= 268435456);
             }
             seq_c++;
 
