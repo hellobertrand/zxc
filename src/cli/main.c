@@ -318,6 +318,15 @@ int main(int argc, char** argv) {
         }
     }
 
+    // set binary mode for standard streams
+    #ifdef _WIN32
+        #ifndef O_BINARY
+            #define O_BINARY 0
+        #endif
+        setmode(fileno(stdin), O_BINARY);
+        setmode(fileno(stdout), O_BINARY);
+    #endif
+
     /*
      * Benchmark Mode
      * Loads the entire input file into RAM to measure raw algorithm throughput
