@@ -397,7 +397,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         int is_first = 1;
         int attempts = search_depth;
         while (match_idx > 0 && attempts-- >= 0) {
-            if (cur_pos - match_idx >= ZXC_LZ_MAX_DIST) break;
+            if (UNLIKELY(cur_pos - match_idx >= ZXC_LZ_MAX_DIST)) break;
 
             const uint8_t* ref = src + match_idx;
             ZXC_PREFETCH_READ(ref);
@@ -526,16 +526,16 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                 if (mlen > best_len) {
                     best_len = mlen;
                     best_ref = ref;
-                    if (best_len >= (uint32_t)sufficient_len) break;  // Sufficient match found
-
-                    if (ip + best_len >= iend) break;  // Prevent overruns
+                    // Sufficient match found or end of buffer reached
+                    if (UNLIKELY(best_len >= (uint32_t)sufficient_len || ip + best_len >= iend))
+                        break;
                 }
             }
             uint16_t delta = chain_table[match_idx];
-            if (delta == 0) break;
+            if (UNLIKELY(delta == 0)) break;
             match_idx -= delta;
-            ZXC_PREFETCH_READ(src + match_idx);
             is_first = 0;  // No longer checking HEAD, now checking chain entries
+            ZXC_PREFETCH_READ(src + match_idx);
         }
 
         if (use_lazy && best_ref && best_len < 128 && ip + 1 < mflimit) {
@@ -554,7 +554,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             int is_lazy_first = 1;
 
             while (next_idx > 0 && lazy_att-- > 0) {
-                if ((uint32_t)(ip + 1 - src) - next_idx >= ZXC_LZ_MAX_DIST) break;
+                if (UNLIKELY((uint32_t)(ip + 1 - src) - next_idx >= ZXC_LZ_MAX_DIST)) break;
                 const uint8_t* ref2 = src + next_idx;
                 if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
                     uint32_t l2 = 4;
@@ -562,7 +562,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                     if (l2 > max_lazy) max_lazy = l2;
                 }
                 uint16_t delta = chain_table[next_idx];
-                if (delta == 0) break;
+                if (UNLIKELY(delta == 0)) break;
                 next_idx -= delta;
                 is_lazy_first = 0;
             }
@@ -585,7 +585,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                 int is_first3 = 1;
 
                 while (idx3 > 0 && lazy_att-- > 0) {
-                    if ((uint32_t)(ip + 2 - src) - idx3 >= ZXC_LZ_MAX_DIST) break;
+                    if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 >= ZXC_LZ_MAX_DIST)) break;
                     const uint8_t* ref3 = src + idx3;
                     if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
                         uint32_t l3 = 4;
@@ -593,7 +593,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                         if (l3 > max_lazy3) max_lazy3 = l3;
                     }
                     uint16_t delta = chain_table[idx3];
-                    if (delta == 0) break;
+                    if (UNLIKELY(delta == 0)) break;
                     idx3 -= delta;
                     is_first3 = 0;
                 }
@@ -620,7 +620,14 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
             // cppcheck-suppress knownConditionTrueFalse ; false positive
             if (ll > 0) {
-                ZXC_MEMCPY(literals + lit_c, anchor, ll);
+                // Specialized literal copy
+                if (ll <= 16) {
+                    zxc_copy16(literals + lit_c, anchor);
+                } else if (ll <= 32) {
+                    zxc_copy32(literals + lit_c, anchor);
+                } else {
+                    ZXC_MEMCPY(literals + lit_c, anchor, ll);
+                }
                 lit_c += ll;
             }
 
@@ -679,7 +686,13 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     size_t last_lits = iend - anchor;
     if (last_lits > 0) {
-        ZXC_MEMCPY(literals + lit_c, anchor, last_lits);
+        if (last_lits <= 16) {
+            zxc_copy16(literals + lit_c, anchor);
+        } else if (last_lits <= 32) {
+            zxc_copy32(literals + lit_c, anchor);
+        } else {
+            ZXC_MEMCPY(literals + lit_c, anchor, last_lits);
+        }
         lit_c += last_lits;
     }
 
@@ -696,8 +709,40 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             uint8_t b = *p;
             const uint8_t* run_start = p++;
 
-            // Fast run counting with early exit
+            // Fast run counting with early SIMD exit
+#if defined(ZXC_USE_AVX2)
+            __m256i vb = _mm256_set1_epi8((char)b);
+            while (p <= p_end - 32) {
+                __m256i v = _mm256_loadu_si256((const __m256i*)p);
+                uint32_t mask = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, vb));
+                if (mask != 0xFFFFFFFF) {
+                    p += zxc_ctz32(~mask);
+                    goto _run_done;
+                }
+                p += 32;
+            }
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+            uint8x16_t vb = vdupq_n_u8(b);
+            while (p <= p_end - 16) {
+                uint8x16_t v = vld1q_u8(p);
+                uint8x16_t eq = vceqq_u8(v, vb);
+                uint8x16_t not_eq = vmvnq_u8(eq);
+                uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 0);
+                if (lo != 0) {
+                    p += (zxc_ctz64(lo) >> 3);
+                    goto _run_done;
+                }
+                uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 1);
+                if (hi != 0) {
+                    p += 8 + (zxc_ctz64(hi) >> 3);
+                    goto _run_done;
+                }
+                p += 16;
+            }
+#endif
             while (p < p_end && *p == b) p++;
+
+        _run_done:;
             size_t run = (size_t)(p - run_start);
 
             if (run >= 4) {
@@ -712,10 +757,47 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                 else if (rem > 0)
                     rle_size += 1 + rem;
             } else {
-                // Literal run: scan ahead with 4-byte lookahead
+                // Literal run: scan ahead with fast SIMD lookahead
                 const uint8_t* lit_start = run_start;
 
-                while (LIKELY(p < p_end_4)) {
+#if defined(ZXC_USE_AVX2)
+                while (p <= p_end_4 - 32) {
+                    __m256i v0 = _mm256_loadu_si256((const __m256i*)p);
+                    __m256i v1 = _mm256_loadu_si256((const __m256i*)(p + 1));
+                    __m256i v2 = _mm256_loadu_si256((const __m256i*)(p + 2));
+                    __m256i v3 = _mm256_loadu_si256((const __m256i*)(p + 3));
+                    __m256i vend = _mm256_and_si256(
+                        _mm256_cmpeq_epi8(v0, v1),
+                        _mm256_and_si256(_mm256_cmpeq_epi8(v1, v2), _mm256_cmpeq_epi8(v2, v3)));
+                    uint32_t mask = (uint32_t)_mm256_movemask_epi8(vend);
+                    if (mask != 0) {
+                        p += zxc_ctz32(mask);
+                        goto _lit_done;
+                    }
+                    p += 32;
+                }
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+                while (p <= p_end_4 - 16) {
+                    uint8x16_t v0 = vld1q_u8(p);
+                    uint8x16_t v1 = vld1q_u8(p + 1);
+                    uint8x16_t v2 = vld1q_u8(p + 2);
+                    uint8x16_t v3 = vld1q_u8(p + 3);
+                    uint8x16_t eq =
+                        vandq_u8(vceqq_u8(v0, v1), vandq_u8(vceqq_u8(v1, v2), vceqq_u8(v2, v3)));
+                    uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 0);
+                    if (lo != 0) {
+                        p += (zxc_ctz64(lo) >> 3);
+                        goto _lit_done;
+                    }
+                    uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 1);
+                    if (hi != 0) {
+                        p += 8 + (zxc_ctz64(hi) >> 3);
+                        goto _lit_done;
+                    }
+                    p += 16;
+                }
+#endif
+                while (p < p_end_4) {
                     // Check for RLE opportunity (4 identical bytes)
                     if (UNLIKELY(p[0] == p[1] && p[1] == p[2] && p[2] == p[3])) break;
                     p++;
@@ -727,6 +809,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                     p++;
                 }
 
+            _lit_done:;
                 size_t lit_run = (size_t)(p - lit_start);
                 // 1 header per 128 bytes + all data bytes
                 // = lit_run + ceil(lit_run / 128)
@@ -808,8 +891,8 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
                 while (lit_ptr < lit_end) {
                     // Quick check: need 4 identical bytes to break
-                    if (lit_ptr + 3 < lit_end && lit_ptr[0] == lit_ptr[1] &&
-                        lit_ptr[1] == lit_ptr[2] && lit_ptr[2] == lit_ptr[3]) {
+                    if (UNLIKELY(lit_ptr + 3 < lit_end && lit_ptr[0] == lit_ptr[1] &&
+                                 lit_ptr[1] == lit_ptr[2] && lit_ptr[2] == lit_ptr[3])) {
                         break;
                     }
                     lit_ptr++;
