@@ -520,8 +520,16 @@ int main(int argc, char** argv) {
 #else
     // On POSIX systems, there's no text/binary distinction, but we ensure
     // no buffering issues occur by using freopen if needed
-    if (use_stdin) freopen(NULL, "rb", stdin);
-    if (use_stdout) freopen(NULL, "wb", stdout);
+    if (use_stdin) {
+        if (!freopen(NULL, "rb", stdin)) {
+            zxc_log("Warning: Failed to reopen stdin in binary mode\n");
+        }
+    }
+    if (use_stdout) {
+        if (!freopen(NULL, "wb", stdout)) {
+            zxc_log("Warning: Failed to reopen stdout in binary mode\n");
+        }
+    }
 #endif
 
     // Set large buffers for I/O performance
