@@ -642,14 +642,12 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             if (ll >= ZXC_TOKEN_LL_MASK) {
                 uint32_t val = ll - ZXC_TOKEN_LL_MASK;
                 buf_extras[n_extras++] = val;
-                vbyte_size +=
-                    1 + (val >= 128) + (val >= 16384) + (val >= 2097152) + (val >= 268435456);
+                vbyte_size += (zxc_highbit32(val | 1) + 6) / 7;
             }
             if (ml >= ZXC_TOKEN_ML_MASK) {
                 uint32_t val = ml - ZXC_TOKEN_ML_MASK;
                 buf_extras[n_extras++] = val;
-                vbyte_size +=
-                    1 + (val >= 128) + (val >= 16384) + (val >= 2097152) + (val >= 268435456);
+                vbyte_size += (zxc_highbit32(val | 1) + 6) / 7;
             }
             seq_c++;
 
