@@ -527,11 +527,19 @@ int main(int argc, char** argv) {
                         : zxc_stream_decompress(f_in, f_out, num_threads, checksum);
     double dt = zxc_now() - t0;
 
-    if (!use_stdin) fclose(f_in);
-    if (!use_stdout)
+    if (!use_stdin) {
+        fclose(f_in);
+    } else {
+        setvbuf(stdin, NULL, _IONBF, 0);
+    }
+
+    if (!use_stdout) {
         fclose(f_out);
-    else
+    } else {
         fflush(f_out);
+        setvbuf(stdout, NULL, _IONBF, 0);
+    }
+
     free(b1);
     free(b2);
 
