@@ -740,6 +740,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 #endif
             while (p < p_end && *p == b) p++;
 
+        // cppcheck-suppress unusedLabelConfiguration
         _run_done:;
             size_t run = (size_t)(p - run_start);
 
@@ -807,6 +808,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                     p++;
                 }
 
+            // cppcheck-suppress unusedLabelConfiguration
             _lit_done:;
                 size_t lit_run = (size_t)(p - lit_start);
                 // 1 header per 128 bytes + all data bytes
