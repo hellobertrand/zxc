@@ -1087,7 +1087,7 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
 // cppcheck-suppress unusedFunction
 size_t zxc_decompress(const void* src, size_t src_size, void* dst, size_t dst_capacity,
                       int checksum_enabled) {
-    if (!src || !dst || src_size < ZXC_FILE_HEADER_SIZE) return 0;
+    if (UNLIKELY(!src || !dst || src_size < ZXC_FILE_HEADER_SIZE)) return 0;
 
     const uint8_t* ip = (const uint8_t*)src;
     const uint8_t* ip_end = ip + src_size;
@@ -1115,15 +1115,13 @@ size_t zxc_decompress(const void* src, size_t src_size, void* dst, size_t dst_ca
 
         size_t rem_cap = (size_t)(op_end - op);
         int res = zxc_decompress_chunk_wrapper(&ctx, ip, (size_t)(ip_end - ip), op, rem_cap);
-        if (res < 0) {
+        if (UNLIKELY(res < 0)) {
             zxc_cctx_free(&ctx);
             return 0;
         }
 
-        int has_crc = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
-        size_t header_overhead = ZXC_BLOCK_HEADER_SIZE + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-
-        ip += header_overhead + bh.comp_size;
+        ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
+        ip += (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM) ? ZXC_BLOCK_CHECKSUM_SIZE : 0;
         op += res;
     }
 

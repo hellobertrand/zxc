@@ -29,7 +29,7 @@
  * This function performs a horizontal reduction across the 8 packed 32-bit unsigned integers
  * in the source vector to determine the maximum value.
  *
- * @param v The 256-bit vector containing 8 unsigned 32-bit integers.
+ * @param[in] v The 256-bit vector containing 8 unsigned 32-bit integers.
  * @return The maximum unsigned 32-bit integer found in the vector.
  */
 // codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_AVX2 is defined
@@ -580,18 +580,20 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                     (head3 & ~ZXC_OFFSET_MASK) == epoch_mark ? (head3 & ZXC_OFFSET_MASK) : 0;
 
                 int skip_head3 = (idx3 > 0 && tag3 != val3);
+                int is_first3 = 1;
                 uint32_t max_lazy3 = 0;
                 lazy_att = (level >= 5) ? 16 : 8;
-                int is_first3 = 1;
 
                 while (idx3 > 0 && lazy_att-- > 0) {
                     if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 >= ZXC_LZ_MAX_DIST)) break;
+
                     const uint8_t* ref3 = src + idx3;
                     if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
                         uint32_t l3 = 4;
                         while (ip + 2 + l3 < iend && ref3[l3] == ip[2 + l3]) l3++;
                         if (l3 > max_lazy3) max_lazy3 = l3;
                     }
+
                     uint16_t delta = chain_table[idx3];
                     if (UNLIKELY(delta == 0)) break;
                     idx3 -= delta;
@@ -1017,8 +1019,10 @@ static int zxc_encode_block_raw(const uint8_t* src, size_t src_sz, uint8_t* dst,
 }
 
 /**
- * @brief Probes data to see if it looks like a sequence of correlated
- * integers.
+ * @brief Checks if the given byte array represents a numeric value.
+ *
+ * This function examines the provided buffer to determine if it contains
+ * only numeric characters (e.g., ASCII digits '0'-'9').
  *
  * Improved heuristic:
  * 1. Must be aligned to 4 bytes.
@@ -1026,7 +1030,9 @@ static int zxc_encode_block_raw(const uint8_t* src, size_t src_sz, uint8_t* dst,
  * 3. Calculates bit width of deltas (fewer bits = better for NUM).
  * 4. Estimates compression ratio: if NUM would save >20% vs raw, use it.
  *
- * @return 1 if NUM encoding is recommended, 0 otherwise.
+ * @param[in] src Pointer to the input byte array to be checked.
+ * @param[in] size The number of bytes in the input array.
+ * @return int Returns 1 if the array is numeric, 0 otherwise.
  */
 static int zxc_probe_is_numeric(const uint8_t* src, size_t size) {
     if (UNLIKELY(size % 4 != 0 || size < 16)) return 0;
@@ -1120,7 +1126,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
 // cppcheck-suppress unusedFunction
 size_t zxc_compress(const void* src, size_t src_size, void* dst, size_t dst_capacity, int level,
                     int checksum_enabled) {
-    if (!src || !dst || src_size == 0 || dst_capacity == 0) return 0;
+    if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return 0;
 
     const uint8_t* ip = (const uint8_t*)src;
     uint8_t* op = (uint8_t*)dst;
@@ -1131,7 +1137,7 @@ size_t zxc_compress(const void* src, size_t src_size, void* dst, size_t dst_capa
     if (zxc_cctx_init(&ctx, ZXC_CHUNK_SIZE, 1, level, checksum_enabled) != 0) return 0;
 
     int h_size = zxc_write_file_header(op, (size_t)(op_end - op));
-    if (h_size < 0) {
+    if (UNLIKELY(h_size < 0)) {
         zxc_cctx_free(&ctx);
         return 0;
     }
@@ -1143,7 +1149,7 @@ size_t zxc_compress(const void* src, size_t src_size, void* dst, size_t dst_capa
         size_t rem_cap = (size_t)(op_end - op);
 
         int res = zxc_compress_chunk_wrapper(&ctx, ip + pos, chunk_len, op, rem_cap);
-        if (res < 0) {
+        if (UNLIKELY(res < 0)) {
             zxc_cctx_free(&ctx);
             return 0;
         }
