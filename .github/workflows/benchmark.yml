@@ -27,7 +27,6 @@ jobs:
         os: [ubuntu-latest, macos-latest-xlarge]
 
     env:
-        LZBENCH_BRANCH: master
         LZBENCH_DIR: lzbench
         SILESIA_DIR: silesia
 
@@ -37,8 +36,7 @@ jobs:
 
       - name: Clone LZbench
         run: |
-          # git clone -b ${LZBENCH_BRANCH} https://github.com/inikep/lzbench "${LZBENCH_DIR}"
-          git clone -b zxc-0.4.0 https://github.com/hellobertrand/lzbench "${LZBENCH_DIR}"
+          git clone https://github.com/inikep/lzbench "${LZBENCH_DIR}"  
 
       - name: Copy Lib ZXC
         run: |
