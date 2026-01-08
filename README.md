@@ -437,4 +437,4 @@ your own behavior based on `zxc_driver.c`.
 Licensed under the **BSD 3-Clause License**. See LICENSE for details.
 
 **Third-Party Components:**
-- **xxHash** by Yann Collet (BSD 2-Clause) - Used for high-speed checksums.
+- **rapidhash** by Nicolas De Carli (MIT) - Used for high-speed, platform-independent checksums.
