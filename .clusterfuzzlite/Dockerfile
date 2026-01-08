@@ -1,4 +1,4 @@
-#  Copyright (c) 2025, Bertrand Lebonnois
+#  Copyright (c) 2025-2026, Bertrand Lebonnois
 #  All rights reserved.
 #
 #  This source code is licensed under the BSD-style license found in the

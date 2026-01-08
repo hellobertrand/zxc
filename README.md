@@ -433,7 +433,7 @@ your own behavior based on `zxc_driver.c`.
 
 ## License & Credits
 
-**ZXC Codec** Copyright © 2025, Bertrand Lebonnois.
+**ZXC Codec** Copyright © 2025-2026, Bertrand Lebonnois.
 Licensed under the **BSD 3-Clause License**. See LICENSE for details.
 
 **Third-Party Components:**
