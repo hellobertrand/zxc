@@ -493,9 +493,6 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT s
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512) || defined(ZXC_USE_NEON64) || \
     defined(ZXC_USE_NEON32)
     _scalar:
-#ifndef _MSC_VER
-        __attribute__((unused));
-#endif
 #endif
         for (; j < frames; j++) {
             uint32_t v = zxc_le32(in_ptr + j * 4);
@@ -706,7 +703,18 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             const uint8_t* run_start = p++;
 
             // Fast run counting with early SIMD exit
-#if defined(ZXC_USE_AVX2)
+#if defined(ZXC_USE_AVX512)
+            __m512i vb = _mm512_set1_epi8((char)b);
+            while (p <= p_end - 64) {
+                __m512i v = _mm512_loadu_si512((const void*)p);
+                __mmask64 mask = _mm512_cmpeq_epi8_mask(v, vb);
+                if (mask != 0xFFFFFFFFFFFFFFFFULL) {
+                    p += (size_t)zxc_ctz64(~mask);
+                    goto _run_done;
+                }
+                p += 64;
+            }
+#elif defined(ZXC_USE_AVX2)
             __m256i vb = _mm256_set1_epi8((char)b);
             while (p <= p_end - 32) {
                 __m256i v = _mm256_loadu_si256((const __m256i*)p);
@@ -738,7 +746,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 #endif
             while (p < p_end && *p == b) p++;
 
-#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+#if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || \
+    defined(ZXC_USE_NEON32)
         _run_done:;
 #endif
             size_t run = (size_t)(p - run_start);
@@ -758,7 +767,22 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                 // Literal run: scan ahead with fast SIMD lookahead
                 const uint8_t* lit_start = run_start;
 
-#if defined(ZXC_USE_AVX2)
+#if defined(ZXC_USE_AVX512)
+                while (p <= p_end_4 - 64) {
+                    __m512i v0 = _mm512_loadu_si512((const void*)p);
+                    __m512i v1 = _mm512_loadu_si512((const void*)(p + 1));
+                    __m512i v2 = _mm512_loadu_si512((const void*)(p + 2));
+                    __m512i v3 = _mm512_loadu_si512((const void*)(p + 3));
+                    __mmask64 mask = _mm512_cmpeq_epi8_mask(v0, v1) &
+                                     _mm512_cmpeq_epi8_mask(v1, v2) &
+                                     _mm512_cmpeq_epi8_mask(v2, v3);
+                    if (mask != 0) {
+                        p += (size_t)zxc_ctz64(mask);
+                        goto _lit_done;
+                    }
+                    p += 64;
+                }
+#elif defined(ZXC_USE_AVX2)
                 while (p <= p_end_4 - 32) {
                     __m256i v0 = _mm256_loadu_si256((const __m256i*)p);
                     __m256i v1 = _mm256_loadu_si256((const __m256i*)(p + 1));
@@ -807,7 +831,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                     p++;
                 }
 
-#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+#if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || \
+    defined(ZXC_USE_NEON32)
             _lit_done:;
 #endif
                 size_t lit_run = (size_t)(p - lit_start);
