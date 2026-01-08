@@ -1,8 +1,7 @@
 # ZXC: High-Performance Asymmetric Lossless Compression
 
-**Subtitle**: Optimizing Storage and Latency in WORM (Write-Once, Read-Many) Architectures
-**Version**: 0.4.0
-**Date**: December 2025
+**Version**: 0.5.0
+**Date**: January 2026
 **Author**: Bertrand Lebonnois
 
 ---
