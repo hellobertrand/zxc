@@ -465,7 +465,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
     int num_workers = (num_threads > 1) ? num_threads - 1 : 1;
     ctx.ring_size = num_workers * 4;
 
-    size_t runtime_chunk_sz = ZXC_CHUNK_SIZE;
+    size_t runtime_chunk_sz = ZXC_BLOCK_SIZE;
     if (mode == 0) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
         if (fread(h, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE ||
@@ -545,7 +545,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
 
         size_t read_sz = 0;
         if (mode == 1) {
-            read_sz = fread(job->in_buf, 1, ZXC_CHUNK_SIZE, f_in);
+            read_sz = fread(job->in_buf, 1, ZXC_BLOCK_SIZE, f_in);
             if (read_sz == 0) read_eof = 1;
         } else {
             uint8_t bh_buf[ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE];
@@ -589,7 +589,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
         pthread_cond_signal(&ctx.cond_worker);
         pthread_mutex_unlock(&ctx.lock);
 
-        if (read_sz < ZXC_CHUNK_SIZE && mode == 1) read_eof = 1;
+        if (read_sz < ZXC_BLOCK_SIZE && mode == 1) read_eof = 1;
     }
 
     zxc_stream_job_t* end_job = &ctx.jobs[read_idx];
