@@ -1,8 +1,7 @@
 # ZXC: High-Performance Asymmetric Lossless Compression
 
-**Subtitle**: Optimizing Storage and Latency in WORM (Write-Once, Read-Many) Architectures
-**Version**: 0.4.0
-**Date**: December 2025
+**Version**: 0.5.0
+**Date**: January 2026
 **Author**: Bertrand Lebonnois
 
 ---
@@ -44,7 +43,7 @@ ZXC leverages modern instruction sets to maximize throughput on both ARM and x86
 * **ARM NEON Optimization**: Extensive usage of vld1q_u8 (vector load) and vceqq_u8 (parallel comparison) allows scanning data at wire speed, while vminvq_u8 provides fast rejection of non-matches.
 * **x86 Vectorization**: Maintains high performance on Intel/AMD platforms via dedicated AVX2 and AVX512 paths (falling back to SSE4.1 on older hardware), ensuring parity with ARM throughput.
 * **Hardware-Accelerated Indexing**: The encoder's hash table mechanism utilizes hardware CRC32c instructions (__crc32cw on ARM, _mm_crc32_u64 on x86) when available, reducing CPU cycle cost for match finding.
-* **High-Speed Integrity**: Block validation relies on XXH3 (64-bit), a modern non-cryptographic hash algorithm that fully exploits vector instructions to verify data integrity without bottlenecking the decompression pipeline.
+* **High-Speed Integrity**: Block validation relies on **rapidhash**, a modern non-cryptographic hash algorithm that fully exploits hardware acceleration to verify data integrity without bottlenecking the decompression pipeline.
 
 ### 4.3 Entropy Coding & Bitpacking
 *   **RLE (Run-Length Encoding)**: Automatically detects runs of identical bytes.
@@ -128,13 +127,17 @@ Each data block consists of a **12-byte** generic header that precedes the speci
   If HAS_CHECKSUM flag is set (Flags & 0x80):
   Offset:  12                                                                              20
           +-----------------------------------------------------------------------------+
-          | Checksum (XXH3-64)                                                          |
+          | Checksum (rapidhash)                                                        |
           | (8 bytes)                                                                   |
           +-----------------------------------------------------------------------------+
 ```
 
 * **Type**: Block encoding type (0=RAW, 1=GNR, 2=NUM).
-* **Flags**: Bit 7 (0x80) = HAS_CHECKSUM. If set, an **8-byte XXH3-64** checksum follows immediately after Raw Size.
+* **Flags**:
+  - **Bit 7 (0x80)**: `HAS_CHECKSUM`. If set, an **8-byte checksum** follows immediately after Raw Size.
+  - **Bits 0-3 (0x0F)**: `CHECKSUM_TYPE`. Defines the algorithm used for integrity verification.
+* **Checksum Algorithms**:
+  - `0x00`: **rapidhash** (Standard, high performance, platform independent)
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
 * **Raw Size**: Original decompressed size.
 
@@ -284,9 +287,16 @@ Triggered when data is detected as a dense array of 32-bit integers.
 3.  **Integration**: Computes the prefix sum (cumulative addition) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
 
 ### 5.6 Data Integrity
-Every block can optionally be protected by a **64-bit XXH3** checksum. 
-*   **Algorithm**: XXH3 (XXHash3) is an extremely fast, non-cryptographic hash algorithm.
-*   **Credit**: Developed by Yann Collet, XXH3 runs at RAM speed equivalents, ensuring that enabling checksums introduces **zero measurable latency** to the pipeline.
+Every block can optionally be protected by a **64-bit checksum** to ensure data reliability.
+
+#### Multi-Algorithm Support
+ZXC supports multiple integrity verification algorithms, allowing the format to adapt to different security and performance requirements. The specific algorithm used is identified in the block header's flags byte.
+
+*   **Identified Algorithm (0x00: rapidhash)**: The default and recommended algorithm. It is a very fast, high-quality, and platform-independent hashing algorithm fully optimized for instruction pipelines.
+*   **Performance First**: By using a modern non-cryptographic hash, ZXC ensures that integrity checks do not bottleneck decompression throughput, even at high GB/s speeds.
+
+#### Credit
+The default `rapidhash` algorithm is based on wyhash and was developed by Nicolas De Carli. It is designed to fully exploit hardware performance while maintaining top-tier mathematical distribution qualities.
 
 ## 6. System Architecture (Threading)
 

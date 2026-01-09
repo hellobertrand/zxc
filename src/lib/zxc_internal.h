@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "../../include/zxc_sans_io.h"
+#include "../../include/rapidhash.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -114,7 +115,7 @@ extern "C" {
  */
 
 #define ZXC_MAGIC_WORD 0x0043585AU  // Magic signature "ZXC0" (Little Endian)
-#define ZXC_FILE_FORMAT_VERSION 2   // Current file format version (v2: variable offset encoding)
+#define ZXC_FILE_FORMAT_VERSION 3   // Current file format version (v3: rapidhash checksum)
 #define ZXC_BLOCK_UNIT (4096)       // Block size unit (4KB)
 #define ZXC_CHUNK_SIZE (64 * ZXC_BLOCK_UNIT)  // Size of data blocks processed by threads (252KB)
 #define ZXC_IO_BUFFER_SIZE (1024 * 1024)      // Size of stdio buffers
@@ -133,6 +134,10 @@ extern "C" {
 // Block Flags
 #define ZXC_BLOCK_FLAG_NONE 0U         // No flags
 #define ZXC_BLOCK_FLAG_CHECKSUM 0x80U  // Block has a checksum (8 bytes after header)
+#define ZXC_CHECKSUM_TYPE_MASK 0x0FU   // Lower 4 bits for algorithm ID
+
+// Checksum Algorithms
+#define ZXC_CHECKSUM_RAPIDHASH 0x00U  // Default: rapidhash algorithm
 
 // Token Format Constants
 #define ZXC_TOKEN_LIT_BITS 4    // Number of bits for Literal Length in token
@@ -592,12 +597,16 @@ void zxc_aligned_free(void* ptr);
 
 /**
  * @brief Calculates a 64-bit XXH3checksum for a given input buffer.
- *
  * @param[in] input Pointer to the data buffer.
  * @param[in] len Length of the data in bytes.
+ * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_RAPIDHASH).
  * @return The calculated 64-bit hash value.
  */
-uint64_t zxc_checksum(const void* RESTRICT input, size_t len);
+static ZXC_ALWAYS_INLINE uint64_t zxc_checksum(const void* RESTRICT input, size_t len,
+                                              uint8_t hash_method) {
+    if (LIKELY(hash_method == ZXC_CHECKSUM_RAPIDHASH)) return rapidhash(input, len);
+    return rapidhash(input, len);
+}
 
 /**
  * @brief Initializes a bit reader structure.

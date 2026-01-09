@@ -104,18 +104,6 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
 
 /*
  * ============================================================================
- * CHECKSUM IMPLEMENTATION (XXH3)
- * ============================================================================
- * Uses XXH3 (64-bit) for extreme performance (> 30GB/s).
- */
-
-#define XXH_INLINE_ALL
-#include "../../include/xxhash.h"
-
-uint64_t zxc_checksum(const void* data, size_t len) { return XXH3_64bits(data, len); }
-
-/*
- * ============================================================================
  * HEADER I/O
  * ============================================================================
  * Serialization and deserialization of file and block headers.
