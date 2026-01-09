@@ -330,9 +330,9 @@ static void* zxc_stream_worker(void* arg) {
         pthread_mutex_unlock(&ctx->lock);
 
         int res = ctx->processor(&cctx, job->in_buf, job->in_sz, job->out_buf, job->out_cap);
-
         pthread_mutex_lock(&ctx->lock);
-        if (res < 0) {
+
+        if (UNLIKELY(res < 0)) {
             ctx->io_error = 1;
             job->result_sz = 0;
             job->status = JOB_STATUS_PROCESSED;
@@ -394,7 +394,7 @@ static void* zxc_async_writer(void* arg) {
                 ctx->io_error = 1;
             }
         }
-        if (ctx->io_error) {
+        if (UNLIKELY(ctx->io_error)) {
             pthread_mutex_lock(&ctx->lock);
             job->status = JOB_STATUS_FREE;
             pthread_cond_signal(&ctx->cond_reader);
@@ -541,7 +541,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
         while (job->status != JOB_STATUS_FREE) pthread_cond_wait(&ctx.cond_reader, &ctx.lock);
         pthread_mutex_unlock(&ctx.lock);
 
-        if (ctx.io_error) break;
+        if (UNLIKELY(ctx.io_error)) break;
 
         size_t read_sz = 0;
         if (mode == 1) {
@@ -550,7 +550,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
         } else {
             uint8_t bh_buf[ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE];
             size_t h_read = fread(bh_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in);
-            if (h_read < ZXC_BLOCK_HEADER_SIZE) {
+            if (UNLIKELY(h_read < ZXC_BLOCK_HEADER_SIZE)) {
                 read_eof = 1;
             } else {
                 zxc_block_header_t bh;
@@ -574,7 +574,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
                 ZXC_MEMCPY(job->in_buf, bh_buf, header_len);
                 size_t body_read = fread(job->in_buf + header_len, 1, bh.comp_size, f_in);
                 read_sz = header_len + body_read;
-                if (body_read != bh.comp_size) read_eof = 1;
+                if (UNLIKELY(body_read != bh.comp_size)) read_eof = 1;
             }
         }
         if (read_eof && read_sz == 0) break;
