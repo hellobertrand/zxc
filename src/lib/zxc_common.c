@@ -119,7 +119,7 @@ int zxc_write_file_header(uint8_t* dst, size_t dst_capacity) {
 
     zxc_store_le32(dst, ZXC_MAGIC_WORD);
     dst[4] = ZXC_FILE_FORMAT_VERSION;
-    dst[5] = (uint8_t)(ZXC_CHUNK_SIZE / ZXC_BLOCK_UNIT);
+    dst[5] = (uint8_t)(ZXC_BLOCK_SIZE / ZXC_BLOCK_UNIT);
     dst[6] = 0;
     dst[7] = 0;
     return ZXC_FILE_HEADER_SIZE;
@@ -317,7 +317,7 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* R
 size_t zxc_compress_bound(size_t input_size) {
     if (UNLIKELY(input_size > SIZE_MAX - (SIZE_MAX >> 10))) return 0;
 
-    size_t n = (input_size + ZXC_CHUNK_SIZE - 1) / ZXC_CHUNK_SIZE;
+    size_t n = (input_size + ZXC_BLOCK_SIZE - 1) / ZXC_BLOCK_SIZE;
     if (n == 0) n = 1;
     return ZXC_FILE_HEADER_SIZE + (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + 64)) +
            input_size;

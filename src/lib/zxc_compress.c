@@ -14,7 +14,7 @@
     128  // Maximum number of frames that can be processed in a single compression operation.
 #define ZXC_EPOCH_BITS \
     14  // Number of bits reserved for epoch tracking in compressed pointers.
-        // Derived from chunk size: 2^18 = ZXC_CHUNK_SIZE => 32 - 18 = 14 bits.
+        // Derived from chunk size: 2^18 = ZXC_BLOCK_SIZE => 32 - 18 = 14 bits.
 #define ZXC_OFFSET_MASK              \
     ((1U << (32 - ZXC_EPOCH_BITS)) - \
      1)  // Mask to extract the offset bits from a compressed pointer.
@@ -1306,7 +1306,7 @@ size_t zxc_compress(const void* src, size_t src_size, void* dst, size_t dst_capa
     const uint8_t* op_end = op + dst_capacity;
 
     zxc_cctx_t ctx;
-    if (zxc_cctx_init(&ctx, ZXC_CHUNK_SIZE, 1, level, checksum_enabled) != 0) return 0;
+    if (zxc_cctx_init(&ctx, ZXC_BLOCK_SIZE, 1, level, checksum_enabled) != 0) return 0;
 
     int h_size = zxc_write_file_header(op, (size_t)(op_end - op));
     if (UNLIKELY(h_size < 0)) {
@@ -1317,7 +1317,7 @@ size_t zxc_compress(const void* src, size_t src_size, void* dst, size_t dst_capa
 
     size_t pos = 0;
     while (pos < src_size) {
-        size_t chunk_len = (src_size - pos > ZXC_CHUNK_SIZE) ? ZXC_CHUNK_SIZE : (src_size - pos);
+        size_t chunk_len = (src_size - pos > ZXC_BLOCK_SIZE) ? ZXC_BLOCK_SIZE : (src_size - pos);
         size_t rem_cap = (size_t)(op_end - op);
 
         int res = zxc_compress_chunk_wrapper(&ctx, ip + pos, chunk_len, op, rem_cap);
