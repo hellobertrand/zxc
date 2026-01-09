@@ -1595,8 +1595,9 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
     }
 
     if (decoded_sz >= 0 && has_crc && ctx->checksum_enabled) {
+        uint8_t algo = flags & ZXC_CHECKSUM_TYPE_MASK;
         uint64_t stored = zxc_le64(src + ZXC_BLOCK_HEADER_SIZE);
-        uint64_t calc = zxc_checksum(dst, (size_t)decoded_sz);
+        uint64_t calc = zxc_checksum(dst, (size_t)decoded_sz, algo);
 
         if (UNLIKELY(stored != calc)) return -1;
     }

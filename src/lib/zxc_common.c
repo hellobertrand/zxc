@@ -109,17 +109,6 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
 
 /*
  * ============================================================================
- * CHECKSUM IMPLEMENTATION (RAPIDHASH)
- * ============================================================================
- * Uses RAPIDHASH for extreme performance through a platform-independent algorithm.
- */
-
-#include "../../include/rapidhash.h"
-
-uint64_t zxc_checksum(const void* data, size_t len) { return rapidhash(data, len); }
-
-/*
- * ============================================================================
  * HEADER I/O
  * ============================================================================
  * Serialization and deserialization of file and block headers.
