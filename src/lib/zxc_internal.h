@@ -70,6 +70,12 @@ extern "C" {
 #define ZXC_MEMSET(dst, val, n) __builtin_memset(dst, val, n)
 #define ZXC_ALIGN(x) __attribute__((aligned(x)))
 #define ZXC_ALWAYS_INLINE inline __attribute__((always_inline))
+#define ZXC_HOT __attribute__((hot))
+#define ZXC_COLD __attribute__((cold))
+#define ZXC_PURE __attribute__((pure))
+#define ZXC_CONST __attribute__((const))
+#define ZXC_MALLOC __attribute__((malloc))
+#define ZXC_ASSUME_ALIGNED(ptr, align) __builtin_assume_aligned(ptr, align)
 
 #elif defined(_MSC_VER)
 #include <intrin.h>
@@ -89,6 +95,12 @@ extern "C" {
 #define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
 #define ZXC_ALIGN(x) __declspec(align(x))
 #define ZXC_ALWAYS_INLINE __forceinline
+#define ZXC_HOT
+#define ZXC_COLD
+#define ZXC_PURE
+#define ZXC_CONST
+#define ZXC_MALLOC
+#define ZXC_ASSUME_ALIGNED(ptr, align) (ptr)
 #pragma intrinsic(_BitScanReverse)
 #else
 #define LIKELY(x) (x)
@@ -99,6 +111,12 @@ extern "C" {
 #define ZXC_MEMCPY(dst, src, n) memcpy(dst, src, n)
 #define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
 #define ZXC_ALWAYS_INLINE inline
+#define ZXC_HOT
+#define ZXC_COLD
+#define ZXC_PURE
+#define ZXC_CONST
+#define ZXC_MALLOC
+#define ZXC_ASSUME_ALIGNED(ptr, align) (ptr)
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #include <stdalign.h>
 #define ZXC_ALIGN(x) _Alignas(x)
@@ -290,7 +308,7 @@ typedef struct {
  * @param[in] p Pointer to the memory location to read from.
  * @return The 16-bit unsigned integer value read from memory.
  */
-static ZXC_ALWAYS_INLINE uint16_t zxc_le16(const void* p) {
+static ZXC_ALWAYS_INLINE ZXC_PURE uint16_t zxc_le16(const void* p) {
     uint16_t v;
     ZXC_MEMCPY(&v, p, sizeof(v));
     return v;
@@ -306,7 +324,7 @@ static ZXC_ALWAYS_INLINE uint16_t zxc_le16(const void* p) {
  * @param[in] p Pointer to the memory location to read from.
  * @return The 32-bit unsigned integer value read from memory.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_le32(const void* p) {
+static ZXC_ALWAYS_INLINE ZXC_PURE uint32_t zxc_le32(const void* p) {
     uint32_t v;
     ZXC_MEMCPY(&v, p, sizeof(v));
     return v;
@@ -322,7 +340,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_le32(const void* p) {
  * @param[in] p Pointer to the memory location to read from.
  * @return The 64-bit unsigned integer value read from memory.
  */
-static ZXC_ALWAYS_INLINE uint64_t zxc_le64(const void* p) {
+static ZXC_ALWAYS_INLINE ZXC_PURE uint64_t zxc_le64(const void* p) {
     uint64_t v;
     ZXC_MEMCPY(&v, p, sizeof(v));
     return v;
@@ -429,7 +447,7 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
  * @param[in] x The 32-bit unsigned integer to scan.
  * @return The number of trailing zeros (0-32).
  */
-static ZXC_ALWAYS_INLINE int zxc_ctz32(uint32_t x) {
+static ZXC_ALWAYS_INLINE ZXC_CONST int zxc_ctz32(uint32_t x) {
     if (x == 0) return 32;
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_ctz(x);
@@ -459,7 +477,7 @@ static ZXC_ALWAYS_INLINE int zxc_ctz32(uint32_t x) {
  *       and MSVC (`_BitScanForward64`) when available for optimal performance.
  *       It falls back to a De Bruijn sequence multiplication method for other compilers.
  */
-static ZXC_ALWAYS_INLINE int zxc_ctz64(uint64_t x) {
+static ZXC_ALWAYS_INLINE ZXC_CONST int zxc_ctz64(uint64_t x) {
     if (x == 0) return 64;
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_ctzll(x);
@@ -487,7 +505,7 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(uint64_t x) {
  * @param[in] val The 32-bit integer sequence (e.g., 4 bytes from the input stream).
  * @return uint32_t A hash value suitable for indexing the match table.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint32_t val) {
+static ZXC_ALWAYS_INLINE ZXC_CONST uint32_t zxc_hash_func(uint32_t val) {
     return (val * 2654435761U) >> (32 - ZXC_LZ_HASH_BITS);
 }
 
@@ -499,7 +517,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint32_t val) {
  * @param[in] n The 32-bit unsigned integer to analyze.
  * @return The 0-based index of the highest set bit. If n is 0, the behavior is undefined.
  */
-static ZXC_ALWAYS_INLINE uint8_t zxc_highbit32(uint32_t n) {
+static ZXC_ALWAYS_INLINE ZXC_CONST uint8_t zxc_highbit32(uint32_t n) {
 #ifdef _MSC_VER
     unsigned long index;
     return (n == 0) ? 0 : (_BitScanReverse(&index, n) ? (uint8_t)(index + 1) : 0);
@@ -528,7 +546,7 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_highbit32(uint32_t n) {
  * @param[in] n The signed 32-bit integer to encode.
  * @return The ZigZag encoded unsigned 32-bit integer.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_zigzag_encode(int32_t n) {
+static ZXC_ALWAYS_INLINE ZXC_CONST uint32_t zxc_zigzag_encode(int32_t n) {
     return ((uint32_t)n << 1) ^ (uint32_t)(-(int32_t)((uint32_t)n >> 31));
 }
 
@@ -546,7 +564,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_zigzag_encode(int32_t n) {
  * @param[in] n The unsigned 32-bit integer to decode.
  * @return The decoded signed 32-bit integer.
  */
-static ZXC_ALWAYS_INLINE int32_t zxc_zigzag_decode(uint32_t n) {
+static ZXC_ALWAYS_INLINE ZXC_CONST int32_t zxc_zigzag_decode(uint32_t n) {
     return (int32_t)(n >> 1) ^ -(int32_t)(n & 1);
 }
 

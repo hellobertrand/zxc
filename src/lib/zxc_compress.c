@@ -79,9 +79,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  * @return 0 on success, or -1 on failure (e.g., invalid input size, destination
  * buffer too small).
  */
-static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
-                                uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz,
-                                uint64_t crc_val) {
+static ZXC_HOT int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
+                                        size_t src_size, uint8_t* RESTRICT dst, size_t dst_cap,
+                                        size_t* out_sz, uint64_t crc_val) {
     if (UNLIKELY(src_size % 4 != 0 || src_size == 0)) return -1;
     int chk = ctx->checksum_enabled;
 
@@ -299,9 +299,9 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT s
  *
  * @return 0 on success, or -1 if an error occurs (e.g., buffer overflow).
  */
-static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
-                                uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz,
-                                uint64_t crc_val) {
+static ZXC_HOT int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
+                                        size_t src_size, uint8_t* RESTRICT dst, size_t dst_cap,
+                                        size_t* out_sz, uint64_t crc_val) {
     int level = ctx->compression_level;
     int chk = ctx->checksum_enabled;
 
@@ -340,9 +340,9 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     const uint32_t epoch_mark = ctx->epoch << (32 - ZXC_EPOCH_BITS);
     const uint8_t *ip = src, *iend = src + src_size, *anchor = ip, *mflimit = iend - 12;
 
-    uint32_t* hash_table = ctx->hash_table;
-    uint16_t* chain_table = ctx->chain_table;
-    uint8_t* literals = ctx->literals;
+    uint32_t* hash_table = (uint32_t*)ZXC_ASSUME_ALIGNED(ctx->hash_table, 64);
+    uint16_t* chain_table = (uint16_t*)ZXC_ASSUME_ALIGNED(ctx->chain_table, 64);
+    uint8_t* literals = (uint8_t*)ZXC_ASSUME_ALIGNED(ctx->literals, 64);
 
     uint32_t seq_c = 0;
     size_t lit_c = 0;
