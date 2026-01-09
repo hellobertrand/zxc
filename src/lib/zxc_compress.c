@@ -504,10 +504,12 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT s
     }
 
     uint32_t p_sz = (uint32_t)(p_curr - (dst + h_gap));
-    if (chk)
+    if (chk) {
         bh.block_flags |= ZXC_BLOCK_FLAG_CHECKSUM;
-    else
+        bh.block_flags |= (ZXC_CHECKSUM_RAPIDHASH & ZXC_CHECKSUM_TYPE_MASK);
+    } else {
         bh.block_flags &= ~ZXC_BLOCK_FLAG_CHECKSUM;
+    }
 
     bh.comp_size = p_sz;
     int hw = zxc_write_block_header(dst, dst_cap, &bh);
@@ -1310,10 +1312,12 @@ static int zxc_encode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
     rem -= sz_seq;
 
     uint32_t p_sz = (uint32_t)(p_curr - (dst + h_gap));
-    if (chk)
+    if (chk) {
         bh.block_flags |= ZXC_BLOCK_FLAG_CHECKSUM;
-    else
+        bh.block_flags |= (ZXC_CHECKSUM_RAPIDHASH & ZXC_CHECKSUM_TYPE_MASK);
+    } else {
         bh.block_flags &= ~ZXC_BLOCK_FLAG_CHECKSUM;
+    }
     bh.comp_size = p_sz;
     int hw = zxc_write_block_header(dst, dst_cap, &bh);
 
@@ -1353,7 +1357,8 @@ static int zxc_encode_block_raw(const uint8_t* src, size_t src_sz, uint8_t* dst,
     // Compute block RAW
     zxc_block_header_t bh;
     bh.block_type = ZXC_BLOCK_RAW;
-    bh.block_flags = chk_sz;
+    bh.block_flags =
+        chk ? (ZXC_BLOCK_FLAG_CHECKSUM | (ZXC_CHECKSUM_RAPIDHASH & ZXC_CHECKSUM_TYPE_MASK)) : 0;
     bh.reserved = 0;
     bh.comp_size = (uint32_t)src_sz;
     bh.raw_size = (uint32_t)src_sz;
@@ -1444,13 +1449,9 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
     int res = -1;
     int try_num = 0;
 
-    if (chk) {
-        crc = zxc_checksum(chunk, src_sz);
-    }
+    if (chk) crc = zxc_checksum(chunk, src_sz, ZXC_CHECKSUM_RAPIDHASH);
 
-    if (zxc_probe_is_numeric(chunk, src_sz)) {
-        try_num = 1;
-    }
+    if (zxc_probe_is_numeric(chunk, src_sz)) try_num = 1;
 
     if (try_num) {
         res = zxc_encode_block_num(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
