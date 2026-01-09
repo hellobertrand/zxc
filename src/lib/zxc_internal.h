@@ -117,6 +117,7 @@ extern "C" {
 #define ZXC_FILE_FORMAT_VERSION 2   // Current file format version (v2: variable offset encoding)
 #define ZXC_BLOCK_UNIT (4 * 1024)   // Block size unit (4KB)
 #define ZXC_BLOCK_SIZE (64 * ZXC_BLOCK_UNIT)  // Size of data blocks processed by threads (256KB)
+#define ZXC_CHUNK_SIZE (64 * ZXC_BLOCK_UNIT)  // TODO: to remove (compatibility with lzbench)
 #define ZXC_IO_BUFFER_SIZE (1024 * 1024)      // Size of stdio buffers
 #define ZXC_PAD_SIZE 32                       // Padding size for buffer overruns
 
