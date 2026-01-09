@@ -133,7 +133,11 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 ```
 
 * **Type**: Block encoding type (0=RAW, 1=GNR, 2=NUM).
-* **Flags**: Bit 7 (0x80) = HAS_CHECKSUM. If set, an **8-byte rapidhash** checksum follows immediately after Raw Size.
+* **Flags**:
+  - **Bit 7 (0x80)**: `HAS_CHECKSUM`. If set, an **8-byte checksum** follows immediately after Raw Size.
+  - **Bits 0-3 (0x0F)**: `CHECKSUM_TYPE`. Defines the algorithm used for integrity verification.
+* **Checksum Algorithms**:
+  - `0x00`: **rapidhash** (Standard, high performance, platform independent)
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
 * **Raw Size**: Original decompressed size.
 
@@ -283,9 +287,16 @@ Triggered when data is detected as a dense array of 32-bit integers.
 3.  **Integration**: Computes the prefix sum (cumulative addition) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
 
 ### 5.6 Data Integrity
-Every block can optionally be protected by a **64-bit rapidhash** checksum. 
-*   **Algorithm**: rapidhash is a very fast, high-quality, and platform-independent hashing algorithm.
-*   **Credit**: Based on wyhash and developed by Nicolas De Carli, rapidhash runs at extreme speeds while maintaining excellent hash quality.
+Every block can optionally be protected by a **64-bit checksum** to ensure data reliability.
+
+#### Multi-Algorithm Support
+ZXC supports multiple integrity verification algorithms, allowing the format to adapt to different security and performance requirements. The specific algorithm used is identified in the block header's flags byte.
+
+*   **Identified Algorithm (0x00: rapidhash)**: The default and recommended algorithm. It is a very fast, high-quality, and platform-independent hashing algorithm fully optimized for instruction pipelines.
+*   **Performance First**: By using a modern non-cryptographic hash, ZXC ensures that integrity checks do not bottleneck decompression throughput, even at high GB/s speeds.
+
+#### Credit
+The default `rapidhash` algorithm is based on wyhash and was developed by Nicolas De Carli. It is designed to fully exploit hardware performance while maintaining top-tier mathematical distribution qualities.
 
 ## 6. System Architecture (Threading)
 
