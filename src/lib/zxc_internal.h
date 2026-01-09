@@ -552,20 +552,6 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(uint64_t x) {
 }
 
 /**
- * @brief Computes a hash value optimized for LZ77 pattern matching speed.
- *
- * Knuth's multiplicative hash constant: 2654435761 (golden ratio * 2^32)
- * Returns upper bits which have the best avalanche properties
- * The caller applies the mask (& (ZXC_LZ_HASH_SIZE - 1))
- *
- * @param[in] val The 32-bit integer sequence (e.g., 4 bytes from the input stream).
- * @return uint32_t A hash value suitable for indexing the match table.
- */
-static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint32_t val) {
-    return (val * 2654435761U) >> (32 - ZXC_LZ_HASH_BITS);
-}
-
-/**
  * @brief Calculates the index of the highest set bit (most significant bit) in a 32-bit integer.
  *
  * This function determines the position of the most significant bit that is set to 1.
