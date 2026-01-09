@@ -347,9 +347,9 @@ static ZXC_HOT int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT
     uint32_t seq_c = 0;
     size_t lit_c = 0;
 
-    uint8_t* buf_tokens = ctx->buf_tokens;
-    uint16_t* buf_offsets = ctx->buf_offsets;
-    uint32_t* buf_extras = ctx->buf_extras;
+    uint8_t* buf_tokens = (uint8_t*)ZXC_ASSUME_ALIGNED(ctx->buf_tokens, 64);
+    uint16_t* buf_offsets = (uint16_t*)ZXC_ASSUME_ALIGNED(ctx->buf_offsets, 64);
+    uint32_t* buf_extras = (uint32_t*)ZXC_ASSUME_ALIGNED(ctx->buf_extras, 64);
     size_t n_extras = 0;
     size_t vbyte_size = 0;
     uint16_t max_offset = 0;  // Track max offset for 1-byte/2-byte mode decision

@@ -528,9 +528,9 @@ static ZXC_HOT int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT
             if (UNLIKELY(required_size > dst_capacity)) return -1;
 
             if (ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE) {
-                uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, required_size + ZXC_PAD_SIZE);
+                uint8_t* new_buf = (uint8_t*)zxc_aligned_malloc(required_size + ZXC_PAD_SIZE, 64);
+                zxc_aligned_free(ctx->lit_buffer);
                 if (UNLIKELY(!new_buf)) {
-                    free(ctx->lit_buffer);
                     ctx->lit_buffer = NULL;
                     ctx->lit_buffer_cap = 0;
                     return -1;
@@ -539,7 +539,7 @@ static ZXC_HOT int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT
                 ctx->lit_buffer_cap = required_size + ZXC_PAD_SIZE;
             }
 
-            rle_buf = ctx->lit_buffer;
+            rle_buf = (uint8_t*)ZXC_ASSUME_ALIGNED(ctx->lit_buffer, 64);
             if (UNLIKELY(!rle_buf || lit_stream_size > (size_t)(src + src_size - p_curr)))
                 return -1;
 
