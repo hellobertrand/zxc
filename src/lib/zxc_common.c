@@ -34,6 +34,30 @@ void zxc_aligned_free(void* ptr) {
 #endif
 }
 
+size_t zxc_write_vbyte(uint8_t* dst, uint32_t val) {
+    size_t count = 0;
+    while (val >= 0x80) {
+        dst[count++] = (uint8_t)(val | 0x80);
+        val >>= 7;
+    }
+    dst[count++] = (uint8_t)val;
+    return count;
+}
+
+uint32_t zxc_read_vbyte(const uint8_t** src) {
+    uint32_t val = 0;
+    uint32_t shift = 0;
+    uint8_t byte;
+    const uint8_t* p = *src;
+    do {
+        byte = *p++;
+        val |= (uint32_t)(byte & 0x7F) << shift;
+        shift += 7;
+    } while (byte & 0x80);
+    *src = p;
+    return val;
+}
+
 int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int checksum_enabled) {
     ZXC_MEMSET(ctx, 0, sizeof(zxc_cctx_t));
 
@@ -43,6 +67,7 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
     size_t sz_hash = 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
     size_t sz_chain = chunk_size * sizeof(uint16_t);
     size_t sz_sequences = max_seq * sizeof(zxc_seq_record_t);
+    size_t sz_extras = chunk_size;
     size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
     // Calculate sizes with alignment padding (64 bytes for cache line alignment)
@@ -53,6 +78,8 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
     total_size += (sz_chain + 63) & ~63;
     size_t off_sequences = total_size;
     total_size += (sz_sequences + 63) & ~63;
+    size_t off_extras = total_size;
+    total_size += (sz_extras + 63) & ~63;
     size_t off_lit = total_size;
     total_size += (sz_lit + 63) & ~63;
 
@@ -63,6 +90,7 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
     ctx->hash_table = (uint32_t*)(mem + off_hash);
     ctx->chain_table = (uint16_t*)(mem + off_chain);
     ctx->buf_sequences = (zxc_seq_record_t*)(mem + off_sequences);
+    ctx->buf_extras = (uint8_t*)(mem + off_extras);
     ctx->literals = (uint8_t*)(mem + off_lit);
 
     ctx->epoch = 1;
@@ -87,6 +115,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->hash_table = NULL;
     ctx->chain_table = NULL;
     ctx->buf_sequences = NULL;
+    ctx->buf_extras = NULL;
     ctx->literals = NULL;
 
     ctx->lit_buffer_cap = 0;

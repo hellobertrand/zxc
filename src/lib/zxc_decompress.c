@@ -543,12 +543,15 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     // --- Stream Pointers & Validation ---
     size_t sz_seqs = (size_t)(desc[1].sizes & 0xFFFFFFFF);
+    size_t sz_exts = (size_t)(desc[2].sizes & 0xFFFFFFFF);
 
     const uint8_t* seq_ptr = p_curr;
-    const uint8_t* const seq_end = seq_ptr + sz_seqs;
+    p_curr += sz_seqs;
+    const uint8_t* extras_ptr = p_curr;
+    const uint8_t* const extras_end = extras_ptr + sz_exts;
 
     // Validate streams don't overflow source buffer
-    if (UNLIKELY(seq_end != src + src_size)) return -1;
+    if (UNLIKELY(extras_end != src + src_size)) return -1;
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
@@ -710,12 +713,17 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     size_t bounds_threshold = 65536;
 
     while (n_seq > 0 && d_ptr < d_end_safe && written < bounds_threshold) {
-        uint64_t seq = zxc_le64(seq_ptr);
-        seq_ptr += 8;
+        uint32_t seq = zxc_le32(seq_ptr);
+        seq_ptr += 4;
 
-        uint32_t offset = (uint32_t)(seq & ZXC_SEQ_OFF_MASK);
-        uint32_t ml = (uint32_t)((seq >> ZXC_SEQ_OFF_BITS) & ZXC_SEQ_ML_MASK) + ZXC_LZ_MIN_MATCH;
-        uint32_t ll = (uint32_t)(seq >> (ZXC_SEQ_OFF_BITS + ZXC_SEQ_ML_BITS));
+        uint32_t ll = (uint32_t)(seq >> 24);
+        if (UNLIKELY(ll == 255)) ll += zxc_read_vbyte(&extras_ptr);
+
+        uint32_t m_bits = (uint32_t)((seq >> 16) & 0xFF);
+        uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH;
+        if (UNLIKELY(m_bits == 255)) ml += zxc_read_vbyte(&extras_ptr);
+
+        uint32_t offset = (uint32_t)(seq & 0xFFFF);
 
         if (UNLIKELY(offset == 0 || d_ptr + ll + ml > d_end)) return -1;
         V2_DECODE_SEQ_SAFE(ll, ml, offset);
@@ -724,30 +732,42 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     // --- FAST Loop: After threshold, no offset validation needed (4x unroll) ---
     while (n_seq >= 4 && d_ptr < d_end_safe) {
-        uint64_t s1 = zxc_le64(seq_ptr + 0);
-        uint64_t s2 = zxc_le64(seq_ptr + 8);
-        uint64_t s3 = zxc_le64(seq_ptr + 16);
-        uint64_t s4 = zxc_le64(seq_ptr + 24);
-        seq_ptr += 32;
+        uint32_t s1 = zxc_le32(seq_ptr);
+        uint32_t s2 = zxc_le32(seq_ptr + 4);
+        uint32_t s3 = zxc_le32(seq_ptr + 8);
+        uint32_t s4 = zxc_le32(seq_ptr + 12);
+        seq_ptr += 16;
 
-        uint32_t ll1 = (uint32_t)(s1 >> (ZXC_SEQ_OFF_BITS + ZXC_SEQ_ML_BITS));
-        uint32_t ml1 = (uint32_t)((s1 >> ZXC_SEQ_OFF_BITS) & ZXC_SEQ_ML_MASK) + ZXC_LZ_MIN_MATCH;
-        uint32_t of1 = (uint32_t)(s1 & ZXC_SEQ_OFF_MASK);
+        uint32_t ll1 = (uint32_t)(s1 >> 24);
+        if (UNLIKELY(ll1 == 255)) ll1 += zxc_read_vbyte(&extras_ptr);
+        uint32_t m1b = (uint32_t)((s1 >> 16) & 0xFF);
+        uint32_t ml1 = m1b + ZXC_LZ_MIN_MATCH;
+        if (UNLIKELY(m1b == 255)) ml1 += zxc_read_vbyte(&extras_ptr);
+        uint32_t of1 = (uint32_t)(s1 & 0xFFFF);
         V2_DECODE_SEQ_FAST(ll1, ml1, of1);
 
-        uint32_t ll2 = (uint32_t)(s2 >> (ZXC_SEQ_OFF_BITS + ZXC_SEQ_ML_BITS));
-        uint32_t ml2 = (uint32_t)((s2 >> ZXC_SEQ_OFF_BITS) & ZXC_SEQ_ML_MASK) + ZXC_LZ_MIN_MATCH;
-        uint32_t of2 = (uint32_t)(s2 & ZXC_SEQ_OFF_MASK);
+        uint32_t ll2 = (uint32_t)(s2 >> 24);
+        if (UNLIKELY(ll2 == 255)) ll2 += zxc_read_vbyte(&extras_ptr);
+        uint32_t m2b = (uint32_t)((s2 >> 16) & 0xFF);
+        uint32_t ml2 = m2b + ZXC_LZ_MIN_MATCH;
+        if (UNLIKELY(m2b == 255)) ml2 += zxc_read_vbyte(&extras_ptr);
+        uint32_t of2 = (uint32_t)(s2 & 0xFFFF);
         V2_DECODE_SEQ_FAST(ll2, ml2, of2);
 
-        uint32_t ll3 = (uint32_t)(s3 >> (ZXC_SEQ_OFF_BITS + ZXC_SEQ_ML_BITS));
-        uint32_t ml3 = (uint32_t)((s3 >> ZXC_SEQ_OFF_BITS) & ZXC_SEQ_ML_MASK) + ZXC_LZ_MIN_MATCH;
-        uint32_t of3 = (uint32_t)(s3 & ZXC_SEQ_OFF_MASK);
+        uint32_t ll3 = (uint32_t)(s3 >> 24);
+        if (UNLIKELY(ll3 == 255)) ll3 += zxc_read_vbyte(&extras_ptr);
+        uint32_t m3b = (uint32_t)((s3 >> 16) & 0xFF);
+        uint32_t ml3 = m3b + ZXC_LZ_MIN_MATCH;
+        if (UNLIKELY(m3b == 255)) ml3 += zxc_read_vbyte(&extras_ptr);
+        uint32_t of3 = (uint32_t)(s3 & 0xFFFF);
         V2_DECODE_SEQ_FAST(ll3, ml3, of3);
 
-        uint32_t ll4 = (uint32_t)(s4 >> (ZXC_SEQ_OFF_BITS + ZXC_SEQ_ML_BITS));
-        uint32_t ml4 = (uint32_t)((s4 >> ZXC_SEQ_OFF_BITS) & ZXC_SEQ_ML_MASK) + ZXC_LZ_MIN_MATCH;
-        uint32_t of4 = (uint32_t)(s4 & ZXC_SEQ_OFF_MASK);
+        uint32_t ll4 = (uint32_t)(s4 >> 24);
+        if (UNLIKELY(ll4 == 255)) ll4 += zxc_read_vbyte(&extras_ptr);
+        uint32_t m4b = (uint32_t)((s4 >> 16) & 0xFF);
+        uint32_t ml4 = m4b + ZXC_LZ_MIN_MATCH;
+        if (UNLIKELY(m4b == 255)) ml4 += zxc_read_vbyte(&extras_ptr);
+        uint32_t of4 = (uint32_t)(s4 & 0xFFFF);
         V2_DECODE_SEQ_FAST(ll4, ml4, of4);
 
         n_seq -= 4;
@@ -759,12 +779,17 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     // --- Remaining 1 sequence (Fast Path) ---
     while (n_seq > 0 && d_ptr < d_end_safe) {
-        uint64_t seq = zxc_le64(seq_ptr);
-        seq_ptr += 8;
+        uint32_t seq = zxc_le32(seq_ptr);
+        seq_ptr += 4;
 
-        uint32_t offset = (uint32_t)(seq & ZXC_SEQ_OFF_MASK);
-        uint32_t ml = (uint32_t)((seq >> ZXC_SEQ_OFF_BITS) & ZXC_SEQ_ML_MASK) + ZXC_LZ_MIN_MATCH;
-        uint32_t ll = (uint32_t)(seq >> (ZXC_SEQ_OFF_BITS + ZXC_SEQ_ML_BITS));
+        uint32_t ll = (uint32_t)(seq >> 24);
+        if (UNLIKELY(ll == 255)) ll += zxc_read_vbyte(&extras_ptr);
+
+        uint32_t m_bits = (uint32_t)((seq >> 16) & 0xFF);
+        uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH;
+        if (UNLIKELY(m_bits == 255)) ml += zxc_read_vbyte(&extras_ptr);
+
+        uint32_t offset = (uint32_t)(seq & 0xFFFF);
 
         {
             const uint8_t* src_lit = l_ptr;
@@ -824,12 +849,17 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     // --- Safe Path for Remaining Sequences ---
     while (n_seq > 0) {
-        uint64_t seq = zxc_le64(seq_ptr);
-        seq_ptr += 8;
+        uint32_t seq = zxc_le32(seq_ptr);
+        seq_ptr += 4;
 
-        uint32_t offset = (uint32_t)(seq & ZXC_SEQ_OFF_MASK);
-        uint32_t ml = (uint32_t)((seq >> ZXC_SEQ_OFF_BITS) & ZXC_SEQ_ML_MASK) + ZXC_LZ_MIN_MATCH;
-        uint32_t ll = (uint32_t)(seq >> (ZXC_SEQ_OFF_BITS + ZXC_SEQ_ML_BITS));
+        uint32_t ll = (uint32_t)(seq >> 24);
+        if (UNLIKELY(ll == 255)) ll += zxc_read_vbyte(&extras_ptr);
+
+        uint32_t m_bits = (uint32_t)((seq >> 16) & 0xFF);
+        uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH;
+        if (UNLIKELY(m_bits == 255)) ml += zxc_read_vbyte(&extras_ptr);
+
+        uint32_t offset = (uint32_t)(seq & 0xFFFF);
 
         if (UNLIKELY(d_ptr + ll > d_end)) return -1;
         ZXC_MEMCPY(d_ptr, l_ptr, ll);

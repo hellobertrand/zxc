@@ -311,22 +311,22 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint32_t step_base = 1;
     uint32_t step_shift = 31;
 
-    if (level <= 1) {
+    if (level == 1) {
         sufficient_len = 16;
         step_base = 3;
         step_shift = 3;
-    } else if (level <= 2) {
+    } else if (level == 2) {
         sufficient_len = 16;
         step_base = 2;
         step_shift = 3;
-    } else if (level <= 3) {
+    } else if (level == 3) {
+        // use_lazy = 1;
+        sufficient_len = 16;
+        step_shift = 3;
+    } else if (level == 4) {
         use_lazy = 1;
         sufficient_len = 32;
-        step_shift = 4;
-    } else if (level <= 4) {
-        use_lazy = 1;
-        sufficient_len = 32;
-        step_shift = 5;
+        step_shift = 8;
     } else {
         search_depth = 64;
         use_lazy = 1;
@@ -343,9 +343,11 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint32_t* hash_table = ctx->hash_table;
     uint16_t* chain_table = ctx->chain_table;
     uint8_t* literals = ctx->literals;
+    uint8_t* buf_extras = ctx->buf_extras;
 
     uint32_t seq_c = 0;
     size_t lit_c = 0;
+    size_t extras_c = 0;
 
     zxc_seq_record_t* buf_sequences = ctx->buf_sequences;
 
@@ -628,13 +630,23 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                 lit_c += ll;
             }
 
-            // 64-bit Sequence Record
-            // Layout: LL (24) | ML (24) | Offset (16)
-            uint64_t seq_val = ((uint64_t)(ll & ZXC_SEQ_LL_MASK) << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
-                               ((uint64_t)(ml & ZXC_SEQ_ML_MASK) << ZXC_SEQ_OFF_BITS) |
-                               (uint64_t)(off & ZXC_SEQ_OFF_MASK);
+            // Hybrid 32-bit Sequence Record
+            // Layout: LL (8) | ML (8) | Offset (16)
+            uint32_t ll_write = (ll >= 255) ? 255U : ll;
+            uint32_t ml_write = (ml >= 255) ? 255U : ml;
+
+            uint32_t seq_val = (ll_write << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
+                               (ml_write << ZXC_SEQ_OFF_BITS) |
+                               (off & ZXC_SEQ_OFF_MASK);
             buf_sequences[seq_c].data = seq_val;
             seq_c++;
+
+            if (ll >= 255) {
+                extras_c += zxc_write_vbyte(buf_extras + extras_c, ll - 255);
+            }
+            if (ml >= 255) {
+                extras_c += zxc_write_vbyte(buf_extras + extras_c, ml - 255);
+            }
 
             if (best_len > 2 && level > 4) {
                 const uint8_t* match_end = ip + best_len;
@@ -824,6 +836,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                     ((uint64_t)(uint32_t)lit_c << 32);
     size_t sz_seqs = seq_c * sizeof(zxc_seq_record_t);
     desc[1].sizes = (uint64_t)sz_seqs | ((uint64_t)sz_seqs << 32);
+    desc[2].sizes = (uint64_t)extras_c | ((uint64_t)extras_c << 32);
 
     int ghs = zxc_write_gnr_header_and_desc(p, rem, &gh, desc);
     if (UNLIKELY(ghs < 0)) return -1;
@@ -834,8 +847,9 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     // Extract stream sizes once
     size_t sz_lit = (size_t)(desc[0].sizes & 0xFFFFFFFF);
     size_t sz_seq = (size_t)(desc[1].sizes & 0xFFFFFFFF);
+    size_t sz_ext = (size_t)(desc[2].sizes & 0xFFFFFFFF);
 
-    if (UNLIKELY(rem < sz_lit)) return -1;
+    if (UNLIKELY(rem < sz_lit + sz_seq + sz_ext)) return -1;
 
     if (use_rle) {
         // Write RLE - optimized single-pass encoding
@@ -901,6 +915,10 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     // Sequential write of 64-bit records
     ZXC_MEMCPY(p_curr, buf_sequences, sz_seq);
     p_curr += sz_seq;
+
+    // --- WRITE EXTRAS ---
+    ZXC_MEMCPY(p_curr, buf_extras, sz_ext);
+    p_curr += sz_ext;
     rem -= sz_seq;
 
     uint32_t p_sz = (uint32_t)(p_curr - (dst + h_gap));

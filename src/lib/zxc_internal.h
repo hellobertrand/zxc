@@ -128,7 +128,7 @@ extern "C" {
 #define ZXC_NUM_HEADER_BINARY_SIZE 16  // Num Header: N Values (8) + Frame Size (2) + Reserved (6)
 #define ZXC_GNR_HEADER_BINARY_SIZE \
     16  // GNR Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
-#define ZXC_GNR_SECTIONS 2              // Number of sections in GNR block (Literals, Sequences)
+#define ZXC_GNR_SECTIONS 3              // Number of sections in GNR block (Literals, Sequences, Extras)
 #define ZXC_SECTION_DESC_BINARY_SIZE 8  // Section Desc: Comp Size (4) + Raw Size (4)
 
 // Block Flags
@@ -136,9 +136,9 @@ extern "C" {
 #define ZXC_BLOCK_FLAG_CHECKSUM 0x80U  // Block has a checksum (8 bytes after header)
 
 // Token Format Constants
-// Sequence Format Constants (Fixed 64-bit: 24-bit LL, 24-bit ML, 16-bit Offset)
-#define ZXC_SEQ_LL_BITS 24
-#define ZXC_SEQ_ML_BITS 24
+// Sequence Format Constants (Fixed 32-bit: 8-bit LL, 8-bit ML, 16-bit Offset)
+#define ZXC_SEQ_LL_BITS 8
+#define ZXC_SEQ_ML_BITS 8
 #define ZXC_SEQ_OFF_BITS 16
 
 #define ZXC_SEQ_LL_MASK ((1U << ZXC_SEQ_LL_BITS) - 1)
@@ -615,6 +615,8 @@ uint64_t zxc_checksum(const void* RESTRICT input, size_t len);
  * @param[in] size The size of the source buffer in bytes.
  */
 void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* src, size_t size);
+size_t zxc_write_vbyte(uint8_t* dst, uint32_t val);
+uint32_t zxc_read_vbyte(const uint8_t** src);
 
 /**
  * @brief Bit-packs a stream of 32-bit integers into a destination buffer.

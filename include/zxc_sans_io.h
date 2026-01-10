@@ -45,7 +45,8 @@ extern "C" {
  * @field chain_table Pointer to the chain table for collision resolution.
  * @field memory_block Pointer to the single allocation block containing all buffers.
  * @field epoch Current epoch counter for lazy hash table invalidation.
- * @field buf_sequences Pointer to the buffer for 64-bit sequence records (LL:24, ML:24, Off:16).
+ * @field buf_sequences Pointer to the buffer for 32-bit sequence records (LL:8, ML:8, Off:16).
+ * @field buf_extras Pointer to the buffer for overflow lengths (VByte).
  * @field literals Pointer to the buffer for raw literal bytes.
  * @field lit_buffer Pointer to a scratch buffer for literal processing (e.g.,
  * RLE decoding).
@@ -54,7 +55,7 @@ extern "C" {
  * @field compression_level The configured compression level.
  */
 typedef struct {
-    uint64_t data;  // Packed: LL (24) | ML (24) | Offset (16)
+    uint32_t data;  // Packed: LL (8) | ML (8) | Offset (16)
 } zxc_seq_record_t;
 
 typedef struct {
@@ -66,7 +67,8 @@ typedef struct {
     uint32_t epoch;         // Current epoch for hash table (checked per match)
 
     // Warm zone: sequential access per sequence
-    zxc_seq_record_t* buf_sequences;  // Buffer for 64-bit sequence records
+    zxc_seq_record_t* buf_sequences;  // Buffer for 32-bit sequence records
+    uint8_t* buf_extras;              // Buffer for overflow lengths (VByte)
     uint8_t* literals;                // Buffer for literal bytes
 
     // Cold zone: configuration / scratch / resizeable
