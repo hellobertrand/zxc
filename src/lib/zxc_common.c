@@ -42,9 +42,7 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
     size_t max_seq = chunk_size / 4 + 256;
     size_t sz_hash = 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
     size_t sz_chain = chunk_size * sizeof(uint16_t);
-    size_t sz_extras = max_seq * sizeof(uint32_t);
-    size_t sz_offsets = max_seq * sizeof(uint16_t);
-    size_t sz_tokens = max_seq * sizeof(uint8_t);
+    size_t sz_sequences = max_seq * sizeof(zxc_seq_record_t);
     size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
     // Calculate sizes with alignment padding (64 bytes for cache line alignment)
@@ -53,12 +51,8 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
     total_size += (sz_hash + 63) & ~63;
     size_t off_chain = total_size;
     total_size += (sz_chain + 63) & ~63;
-    size_t off_extras = total_size;
-    total_size += (sz_extras + 63) & ~63;
-    size_t off_offsets = total_size;
-    total_size += (sz_offsets + 63) & ~63;
-    size_t off_tokens = total_size;
-    total_size += (sz_tokens + 63) & ~63;
+    size_t off_sequences = total_size;
+    total_size += (sz_sequences + 63) & ~63;
     size_t off_lit = total_size;
     total_size += (sz_lit + 63) & ~63;
 
@@ -68,9 +62,7 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
     ctx->memory_block = mem;
     ctx->hash_table = (uint32_t*)(mem + off_hash);
     ctx->chain_table = (uint16_t*)(mem + off_chain);
-    ctx->buf_extras = (uint32_t*)(mem + off_extras);
-    ctx->buf_offsets = (uint16_t*)(mem + off_offsets);
-    ctx->buf_tokens = (uint8_t*)(mem + off_tokens);
+    ctx->buf_sequences = (zxc_seq_record_t*)(mem + off_sequences);
     ctx->literals = (uint8_t*)(mem + off_lit);
 
     ctx->epoch = 1;
@@ -94,9 +86,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
 
     ctx->hash_table = NULL;
     ctx->chain_table = NULL;
-    ctx->buf_extras = NULL;
-    ctx->buf_offsets = NULL;
-    ctx->buf_tokens = NULL;
+    ctx->buf_sequences = NULL;
     ctx->literals = NULL;
 
     ctx->lit_buffer_cap = 0;
@@ -224,8 +214,8 @@ int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* n
 }
 
 int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
-                                  const zxc_section_desc_t desc[4]) {
-    size_t needed = ZXC_GNR_HEADER_BINARY_SIZE + 4 * ZXC_SECTION_DESC_BINARY_SIZE;
+                                  const zxc_section_desc_t desc[ZXC_GNR_SECTIONS]) {
+    size_t needed = ZXC_GNR_HEADER_BINARY_SIZE + ZXC_GNR_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
     if (UNLIKELY(rem < needed)) return -1;
 
@@ -240,7 +230,7 @@ int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
     zxc_store_le32(dst + 12, 0);
     uint8_t* p = dst + ZXC_GNR_HEADER_BINARY_SIZE;
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < ZXC_GNR_SECTIONS; i++) {
         zxc_store_le64(p, desc[i].sizes);
         p += ZXC_SECTION_DESC_BINARY_SIZE;
     }
@@ -249,8 +239,8 @@ int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
 }
 
 int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
-                                 zxc_section_desc_t desc[4]) {
-    size_t needed = ZXC_GNR_HEADER_BINARY_SIZE + 4 * ZXC_SECTION_DESC_BINARY_SIZE;
+                                 zxc_section_desc_t desc[ZXC_GNR_SECTIONS]) {
+    size_t needed = ZXC_GNR_HEADER_BINARY_SIZE + ZXC_GNR_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
     if (UNLIKELY(len < needed)) return -1;
 
@@ -263,7 +253,7 @@ int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_
 
     const uint8_t* p = src + ZXC_GNR_HEADER_BINARY_SIZE;
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < ZXC_GNR_SECTIONS; i++) {
         desc[i].sizes = zxc_le64(p);
         p += ZXC_SECTION_DESC_BINARY_SIZE;
     }

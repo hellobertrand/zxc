@@ -114,7 +114,7 @@ extern "C" {
  */
 
 #define ZXC_MAGIC_WORD 0x0043585AU  // Magic signature "ZXC0" (Little Endian)
-#define ZXC_FILE_FORMAT_VERSION 2   // Current file format version (v2: variable offset encoding)
+#define ZXC_FILE_FORMAT_VERSION 3   // Current file format version (v3: 64-bit fixed-width sequences)
 #define ZXC_BLOCK_UNIT (4096)       // Block size unit (4KB)
 #define ZXC_CHUNK_SIZE (64 * ZXC_BLOCK_UNIT)  // Size of data blocks processed by threads (252KB)
 #define ZXC_IO_BUFFER_SIZE (1024 * 1024)      // Size of stdio buffers
@@ -128,6 +128,7 @@ extern "C" {
 #define ZXC_NUM_HEADER_BINARY_SIZE 16  // Num Header: N Values (8) + Frame Size (2) + Reserved (6)
 #define ZXC_GNR_HEADER_BINARY_SIZE \
     16  // GNR Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
+#define ZXC_GNR_SECTIONS 2              // Number of sections in GNR block (Literals, Sequences)
 #define ZXC_SECTION_DESC_BINARY_SIZE 8  // Section Desc: Comp Size (4) + Raw Size (4)
 
 // Block Flags
@@ -135,9 +136,14 @@ extern "C" {
 #define ZXC_BLOCK_FLAG_CHECKSUM 0x80U  // Block has a checksum (8 bytes after header)
 
 // Token Format Constants
-#define ZXC_TOKEN_LIT_BITS 4    // Number of bits for Literal Length in token
-#define ZXC_TOKEN_LL_MASK 0x0F  // Mask to extract Literal Length from token
-#define ZXC_TOKEN_ML_MASK 0x0F  // Mask to extract Match Length from token
+// Sequence Format Constants (Fixed 64-bit: 24-bit LL, 24-bit ML, 16-bit Offset)
+#define ZXC_SEQ_LL_BITS 24
+#define ZXC_SEQ_ML_BITS 24
+#define ZXC_SEQ_OFF_BITS 16
+
+#define ZXC_SEQ_LL_MASK ((1U << ZXC_SEQ_LL_BITS) - 1)
+#define ZXC_SEQ_ML_MASK ((1U << ZXC_SEQ_ML_BITS) - 1)
+#define ZXC_SEQ_OFF_MASK ((1U << ZXC_SEQ_OFF_BITS) - 1)
 
 // LZ77 Constants
 // The hash table uses 13 bits for addressing, resulting in 8192 (2^13) entries.
@@ -212,9 +218,9 @@ typedef struct {
     uint32_t n_sequences;  // Number of sequences
     uint32_t n_literals;   // Number of literals
     uint8_t enc_lit;       // Literal encoding
-    uint8_t enc_litlen;    // Literal lengths encoding
-    uint8_t enc_mlen;      // Match lengths encoding
-    uint8_t enc_off;       // Offset encoding (Unused in Token format, kept for alignment)
+    uint8_t enc_litlen;    // Reserved
+    uint8_t enc_mlen;      // Reserved
+    uint8_t enc_off;       // Reserved
 } zxc_gnr_header_t;
 
 /**
@@ -583,7 +589,6 @@ void zxc_aligned_free(void* ptr);
  * ============================================================================
  */
 
-// Represents a found LZ77 sequence (Literal Length, Match Length, Offset)
 
 /*
  * INTERNAL API
@@ -669,7 +674,7 @@ int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* n
  * is too small.
  */
 int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
-                                  const zxc_section_desc_t desc[4]);
+                                  const zxc_section_desc_t desc[ZXC_GNR_SECTIONS]);
 
 /**
  * @brief Reads a generic header and section descriptors from a source buffer.
@@ -685,7 +690,7 @@ int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
  * failure.
  */
 int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
-                                 zxc_section_desc_t desc[4]);
+                                 zxc_section_desc_t desc[ZXC_GNR_SECTIONS]);
 
 /**
  * @brief Internal wrapper function to decompress a single chunk of data.

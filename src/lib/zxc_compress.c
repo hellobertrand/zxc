@@ -347,12 +347,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint32_t seq_c = 0;
     size_t lit_c = 0;
 
-    uint8_t* buf_tokens = ctx->buf_tokens;
-    uint16_t* buf_offsets = ctx->buf_offsets;
-    uint32_t* buf_extras = ctx->buf_extras;
-    size_t n_extras = 0;
-    size_t vbyte_size = 0;
-    uint16_t max_offset = 0;  // Track max offset for 1-byte/2-byte mode decision
+    zxc_seq_record_t* buf_sequences = ctx->buf_sequences;
 
     while (LIKELY(ip < mflimit)) {
         size_t dist = (size_t)(ip - anchor);
@@ -633,24 +628,12 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                 lit_c += ll;
             }
 
-            // Token & Offset
-            uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
-            uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
-            buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
-            buf_offsets[seq_c] = (uint16_t)off;
-            if (off > max_offset) max_offset = (uint16_t)off;
-
-            // Extras & VByte size
-            if (ll >= ZXC_TOKEN_LL_MASK) {
-                uint32_t val = ll - ZXC_TOKEN_LL_MASK;
-                buf_extras[n_extras++] = val;
-                vbyte_size += (zxc_highbit32(val | 1) + 6) / 7;
-            }
-            if (ml >= ZXC_TOKEN_ML_MASK) {
-                uint32_t val = ml - ZXC_TOKEN_ML_MASK;
-                buf_extras[n_extras++] = val;
-                vbyte_size += (zxc_highbit32(val | 1) + 6) / 7;
-            }
+            // 64-bit Sequence Record
+            // Layout: LL (24) | ML (24) | Offset (16)
+            uint64_t seq_val = ((uint64_t)(ll & ZXC_SEQ_LL_MASK) << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
+                               ((uint64_t)(ml & ZXC_SEQ_ML_MASK) << ZXC_SEQ_OFF_BITS) |
+                               (uint64_t)(off & ZXC_SEQ_OFF_MASK);
+            buf_sequences[seq_c].data = seq_val;
             seq_c++;
 
             if (best_len > 2 && level > 4) {
@@ -828,23 +811,19 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint8_t* p = dst + h_gap;
     size_t rem = dst_cap - h_gap;
 
-    // Decide offset encoding mode: 1-byte if all offsets <= 255
-    int use_8bit_off = (max_offset <= 255) ? 1 : 0;
-    size_t off_stream_size = use_8bit_off ? seq_c : (seq_c * 2);
-
+    // Decide offset encoding mode (Reserved for future, currently fixed)
     zxc_gnr_header_t gh = {.n_sequences = seq_c,
                            .n_literals = (uint32_t)lit_c,
                            .enc_lit = (uint8_t)use_rle,
                            .enc_litlen = 0,
                            .enc_mlen = 0,
-                           .enc_off = (uint8_t)use_8bit_off};
+                           .enc_off = 0};
 
-    zxc_section_desc_t desc[4] = {0};
+    zxc_section_desc_t desc[ZXC_GNR_SECTIONS] = {0};
     desc[0].sizes = (uint64_t)(use_rle ? (uint32_t)rle_size : (uint32_t)lit_c) |
                     ((uint64_t)(uint32_t)lit_c << 32);
-    desc[1].sizes = (uint64_t)seq_c | ((uint64_t)seq_c << 32);
-    desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
-    desc[3].sizes = (uint64_t)(uint32_t)vbyte_size | ((uint64_t)(uint32_t)vbyte_size << 32);
+    size_t sz_seqs = seq_c * sizeof(zxc_seq_record_t);
+    desc[1].sizes = (uint64_t)sz_seqs | ((uint64_t)sz_seqs << 32);
 
     int ghs = zxc_write_gnr_header_and_desc(p, rem, &gh, desc);
     if (UNLIKELY(ghs < 0)) return -1;
@@ -854,9 +833,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     // Extract stream sizes once
     size_t sz_lit = (size_t)(desc[0].sizes & 0xFFFFFFFF);
-    size_t sz_tok = (size_t)(desc[1].sizes & 0xFFFFFFFF);
-    size_t sz_off = (size_t)(desc[2].sizes & 0xFFFFFFFF);
-    size_t sz_ext = (size_t)(desc[3].sizes & 0xFFFFFFFF);
+    size_t sz_seq = (size_t)(desc[1].sizes & 0xFFFFFFFF);
 
     if (UNLIKELY(rem < sz_lit)) return -1;
 
@@ -920,46 +897,11 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     }
     rem -= sz_lit;
 
-    if (UNLIKELY(rem < sz_tok)) return -1;
-    ZXC_MEMCPY(p_curr, buf_tokens, seq_c);
-    p_curr += seq_c;
-    rem -= sz_tok;
-
-    if (UNLIKELY(rem < sz_off)) return -1;
-    if (use_8bit_off) {
-        // Write 1-byte offsets - unroll for better throughput
-        uint32_t i = 0;
-        for (; i + 8 <= seq_c; i += 8) {
-            p_curr[0] = (uint8_t)buf_offsets[i + 0];
-            p_curr[1] = (uint8_t)buf_offsets[i + 1];
-            p_curr[2] = (uint8_t)buf_offsets[i + 2];
-            p_curr[3] = (uint8_t)buf_offsets[i + 3];
-            p_curr[4] = (uint8_t)buf_offsets[i + 4];
-            p_curr[5] = (uint8_t)buf_offsets[i + 5];
-            p_curr[6] = (uint8_t)buf_offsets[i + 6];
-            p_curr[7] = (uint8_t)buf_offsets[i + 7];
-            p_curr += 8;
-        }
-        for (; i < seq_c; i++) {
-            *p_curr++ = (uint8_t)buf_offsets[i];
-        }
-    } else {
-        // Write 2-byte offsets
-        ZXC_MEMCPY(p_curr, buf_offsets, seq_c * 2);
-        p_curr += seq_c * 2;
-    }
-    rem -= sz_off;
-
-    if (UNLIKELY(rem < sz_ext)) return -1;
-    // Write VByte stream
-    for (size_t j = 0; j < n_extras; j++) {
-        uint32_t val = buf_extras[j];
-        while (val >= 128) {
-            *p_curr++ = (uint8_t)(val | 0x80);
-            val >>= 7;
-        }
-        *p_curr++ = (uint8_t)val;
-    }
+    if (UNLIKELY(rem < sz_seq)) return -1;
+    // Sequential write of 64-bit records
+    ZXC_MEMCPY(p_curr, buf_sequences, sz_seq);
+    p_curr += sz_seq;
+    rem -= sz_seq;
 
     uint32_t p_sz = (uint32_t)(p_curr - (dst + h_gap));
     if (chk)
