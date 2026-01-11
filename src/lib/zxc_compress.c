@@ -1095,6 +1095,7 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint32_t seq_c = 0;
     size_t extras_c = 0;
     size_t lit_c = 0;
+    uint16_t max_offset = 0;
 
     uint32_t* buf_sequences = ctx->buf_sequences;
 
@@ -1384,6 +1385,7 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
             uint32_t seq_val = (ll_write << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
                                (ml_write << ZXC_SEQ_OFF_BITS) | (off & ZXC_SEQ_OFF_MASK);
+            if (off > max_offset) max_offset = (uint16_t)off;
             buf_sequences[seq_c] = seq_val;
             seq_c++;
 
@@ -1581,7 +1583,7 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                            .enc_lit = (uint8_t)use_rle,
                            .enc_litlen = 0,
                            .enc_mlen = 0,
-                           .enc_off = 0};
+                           .enc_off = (uint8_t)(max_offset <= 255) ? 1 : 0};
 
     zxc_section_desc_t desc[ZXC_REC_SECTIONS] = {0};
     desc[0].sizes = (uint64_t)(use_rle ? (uint32_t)rle_size : (uint32_t)lit_c) |
