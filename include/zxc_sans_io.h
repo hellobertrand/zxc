@@ -64,10 +64,11 @@ typedef struct {
     uint32_t epoch;         // Current epoch for hash table (checked per match)
 
     // Warm zone: sequential access per sequence
-    uint32_t* buf_extras;   // Buffer for extra lengths
-    uint16_t* buf_offsets;  // Buffer for offsets
-    uint8_t* buf_tokens;    // Buffer for token sequences
-    uint8_t* literals;      // Buffer for literal bytes
+    uint32_t* buf_sequences;  // Buffer for sequence records (packed: LL (8) | ML (8) | Offset (16))
+    uint8_t* buf_tokens;      // Buffer for token sequences
+    uint16_t* buf_offsets;    // Buffer for offsets
+    uint32_t* buf_extras;     // Buffer for extra lengths (variable bytes for LL/ML)
+    uint8_t* literals;        // Buffer for literal bytes
 
     // Cold zone: configuration / scratch / resizeable
     uint8_t* lit_buffer;    // Buffer scratch for literals (RLE)
