@@ -140,9 +140,20 @@ extern "C" {
 #define ZXC_BLOCK_FLAG_CHECKSUM 0x80U  // Block has a checksum (8 bytes after header)
 
 // Token Format Constants
-#define ZXC_TOKEN_LIT_BITS 4    // Number of bits for Literal Length in token
-#define ZXC_TOKEN_LL_MASK 0x0F  // Mask to extract Literal Length from token
-#define ZXC_TOKEN_ML_MASK 0x0F  // Mask to extract Match Length from token
+// Sequence Format Constants (GNR Token - 4-bit LL, 4-bit ML, 16-bit Offset)
+#define ZXC_TOKEN_LIT_BITS 4  // Number of bits for Literal Length in token
+#define ZXC_TOKEN_ML_BITS 4   // Number of bits for Match Length in token
+#define ZXC_TOKEN_LL_MASK \
+    ((1U << ZXC_TOKEN_LIT_BITS) - 1)  // Mask to extract Literal Length from token
+#define ZXC_TOKEN_ML_MASK \
+    ((1U << ZXC_TOKEN_ML_BITS) - 1)  // Mask to extract Match Length from token
+// Sequence Format Constants (REC Token - 8-bit LL, 8-bit ML, 16-bit Offset)
+#define ZXC_SEQ_LL_BITS 8
+#define ZXC_SEQ_ML_BITS 8
+#define ZXC_SEQ_OFF_BITS 16
+#define ZXC_SEQ_LL_MASK ((1U << ZXC_SEQ_LL_BITS) - 1)
+#define ZXC_SEQ_ML_MASK ((1U << ZXC_SEQ_ML_BITS) - 1)
+#define ZXC_SEQ_OFF_MASK ((1U << ZXC_SEQ_OFF_BITS) - 1)
 
 // LZ77 Constants
 // The hash table uses 13 bits for addressing, resulting in 8192 (2^13) entries.

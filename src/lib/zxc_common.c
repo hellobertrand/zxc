@@ -42,9 +42,10 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
     size_t max_seq = chunk_size / 4 + 256;
     size_t sz_hash = 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
     size_t sz_chain = chunk_size * sizeof(uint16_t);
-    size_t sz_extras = max_seq * sizeof(uint32_t);
-    size_t sz_offsets = max_seq * sizeof(uint16_t);
+    size_t sz_sequences = max_seq * sizeof(uint32_t);
     size_t sz_tokens = max_seq * sizeof(uint8_t);
+    size_t sz_offsets = max_seq * sizeof(uint16_t);
+    size_t sz_extras = max_seq * sizeof(uint32_t);
     size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
     // Calculate sizes with alignment padding (64 bytes for cache line alignment)
@@ -53,12 +54,14 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
     total_size += (sz_hash + 63) & ~63;
     size_t off_chain = total_size;
     total_size += (sz_chain + 63) & ~63;
-    size_t off_extras = total_size;
-    total_size += (sz_extras + 63) & ~63;
-    size_t off_offsets = total_size;
-    total_size += (sz_offsets + 63) & ~63;
+    size_t off_sequences = total_size;
+    total_size += (sz_sequences + 63) & ~63;
     size_t off_tokens = total_size;
     total_size += (sz_tokens + 63) & ~63;
+    size_t off_offsets = total_size;
+    total_size += (sz_offsets + 63) & ~63;
+    size_t off_extras = total_size;
+    total_size += (sz_extras + 63) & ~63;
     size_t off_lit = total_size;
     total_size += (sz_lit + 63) & ~63;
 
@@ -68,9 +71,10 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
     ctx->memory_block = mem;
     ctx->hash_table = (uint32_t*)(mem + off_hash);
     ctx->chain_table = (uint16_t*)(mem + off_chain);
-    ctx->buf_extras = (uint32_t*)(mem + off_extras);
-    ctx->buf_offsets = (uint16_t*)(mem + off_offsets);
+    ctx->buf_sequences = (uint32_t*)(mem + off_sequences);
     ctx->buf_tokens = (uint8_t*)(mem + off_tokens);
+    ctx->buf_offsets = (uint16_t*)(mem + off_offsets);
+    ctx->buf_extras = (uint32_t*)(mem + off_extras);
     ctx->literals = (uint8_t*)(mem + off_lit);
 
     ctx->epoch = 1;
@@ -94,9 +98,10 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
 
     ctx->hash_table = NULL;
     ctx->chain_table = NULL;
-    ctx->buf_extras = NULL;
-    ctx->buf_offsets = NULL;
+    ctx->buf_sequences = NULL;
     ctx->buf_tokens = NULL;
+    ctx->buf_offsets = NULL;
+    ctx->buf_extras = NULL;
     ctx->literals = NULL;
 
     ctx->lit_buffer_cap = 0;
