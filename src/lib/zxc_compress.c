@@ -47,6 +47,28 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
 #endif
 
 /**
+ * @brief Writes a variable-length byte encoded value to a buffer.
+ *
+ * This function encodes a 32-bit unsigned integer using variable-byte
+ * encoding and writes it to the destination buffer. Variable-byte encoding
+ * uses fewer bytes for smaller values, making it efficient for compressing
+ * integers with varying magnitudes.
+ *
+ * @param dst Pointer to the destination buffer where the encoded value will be written.
+ * @param val The 32-bit unsigned integer value to encode.
+ * @return The number of bytes written to the destination buffer.
+ */
+size_t zxc_write_vbyte(uint8_t* dst, uint32_t val) {
+    size_t count = 0;
+    while (val >= 0x80) {
+        dst[count++] = (uint8_t)(val | 0x80);
+        val >>= 7;
+    }
+    dst[count++] = (uint8_t)val;
+    return count;
+}
+
+/**
  * @brief Encodes a block of numerical data using delta encoding and
  * bit-packing.
  *
@@ -311,19 +333,20 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint32_t step_base = 1;
     uint32_t step_shift = 31;
 
-    if (level <= 1) {
-        sufficient_len = 16;
-        step_base = 3;
-        step_shift = 3;
-    } else if (level <= 2) {
-        sufficient_len = 16;
-        step_base = 2;
-        step_shift = 3;
-    } else if (level <= 3) {
-        use_lazy = 1;
-        sufficient_len = 32;
-        step_shift = 4;
-    } else if (level <= 4) {
+    // if (level <= 1) {
+    //     sufficient_len = 16;
+    //     step_base = 3;
+    //     step_shift = 3;
+    // } else if (level == 2) {
+    //     sufficient_len = 16;
+    //     step_base = 2;
+    //     step_shift = 3;
+    // } else if (level == 3) {
+    //     use_lazy = 1;
+    //     sufficient_len = 32;
+    //     step_shift = 4;
+    // } else
+    if (level <= 4) {
         use_lazy = 1;
         sufficient_len = 32;
         step_shift = 5;
@@ -973,16 +996,6 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     return 0;
 }
 
-size_t zxc_write_vbyte(uint8_t* dst, uint32_t val) {
-    size_t count = 0;
-    while (val >= 0x80) {
-        dst[count++] = (uint8_t)(val | 0x80);
-        val >>= 7;
-    }
-    dst[count++] = (uint8_t)val;
-    return count;
-}
-
 /**
  * @brief Encodes a data block using the General (REC) compression format.
  *
@@ -1042,22 +1055,24 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint32_t step_base = 1;
     uint32_t step_shift = 31;
 
+    // if (level <= 1) {
+    //     // search_depth = 0;
+    //     sufficient_len = 16;
+    //     step_base = 3;
+    //     step_shift = 3;
     if (level <= 1) {
-        // search_depth = 0;
-        sufficient_len = 16;
-        step_base = 3;
-        step_shift = 3;
-    } else if (level == 2) {
+        search_depth = 6;
         sufficient_len = 16;
         step_base = 2;
         step_shift = 3;
-    } else if (level == 3) {
+    } else if (level == 2) {
         // use_lazy = 1;
+        search_depth = 10;
         sufficient_len = 16;
         step_shift = 3;
-    } else if (level == 4) {
+    } else if (level == 3) {
         use_lazy = 1;
-        sufficient_len = 32;
+        sufficient_len = 48;
         step_shift = 8;
     } else {
         search_depth = 64;
@@ -1073,13 +1088,13 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     const uint8_t *ip = src, *iend = src + src_size, *anchor = ip, *mflimit = iend - 12;
 
     uint32_t* hash_table = ctx->hash_table;
+    uint32_t* buf_extras = ctx->buf_extras;
     uint16_t* chain_table = ctx->chain_table;
     uint8_t* literals = ctx->literals;
-    uint32_t* buf_extras = ctx->buf_extras;
 
     uint32_t seq_c = 0;
-    size_t lit_c = 0;
     size_t extras_c = 0;
+    size_t lit_c = 0;
 
     uint32_t* buf_sequences = ctx->buf_sequences;
 
