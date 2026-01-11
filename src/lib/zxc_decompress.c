@@ -614,6 +614,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     // Validate stream sizes match sequence count (early rejection of malformed data)
     size_t expected_off_size =
         (gh.enc_off == 1) ? (size_t)gh.n_sequences : (size_t)gh.n_sequences * 2;
+
     if (UNLIKELY(sz_tokens < gh.n_sequences || sz_offsets < expected_off_size)) return -1;
 
     const uint8_t* t_ptr = p_curr;

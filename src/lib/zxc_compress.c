@@ -46,6 +46,12 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
 }
 #endif
 
+typedef struct {
+    const uint8_t* ref;
+    uint32_t len;
+    uint32_t backtrack;
+} zxc_match_t;
+
 /**
  * @brief Writes a variable-length byte encoded value to a buffer.
  *
@@ -66,6 +72,209 @@ size_t zxc_write_vbyte(uint8_t* dst, uint32_t val) {
     }
     dst[count++] = (uint8_t)val;
     return count;
+}
+
+static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
+    const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* mflimit,
+    const uint8_t* anchor, uint32_t* hash_table, uint16_t* chain_table, uint32_t epoch_mark,
+    int level, int search_depth, int sufficient_len, int use_lazy) {
+    zxc_match_t best = {NULL, ZXC_LZ_MIN_MATCH - 1, 0};
+    uint32_t cur_val = zxc_le32(ip);
+    uint32_t h = zxc_hash_func(cur_val);
+    uint32_t cur_pos = (uint32_t)(ip - src);
+
+    uint32_t raw_head = hash_table[2 * h];
+    uint32_t stored_tag = hash_table[2 * h + 1];
+    uint32_t match_idx =
+        (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
+
+    int skip_head = (match_idx > 0 && stored_tag != cur_val);
+    if (skip_head && level <= 2) match_idx = 0;
+
+    hash_table[2 * h] = epoch_mark | cur_pos;
+    hash_table[2 * h + 1] = cur_val;
+    chain_table[cur_pos] =
+        (match_idx > 0 && (cur_pos - match_idx) < 0x10000) ? (uint16_t)(cur_pos - match_idx) : 0;
+
+    if (match_idx == 0) return best;
+
+    int attempts = search_depth;
+    int is_first = 1;
+
+    while (match_idx > 0 && attempts-- >= 0) {
+        if (UNLIKELY(cur_pos - match_idx >= ZXC_LZ_MAX_DIST)) break;
+        const uint8_t* ref = src + match_idx;
+        ZXC_PREFETCH_READ(ref);
+
+        uint32_t ref_val = zxc_le32(ref);
+        if ((!is_first || !skip_head) && ref_val == cur_val && ref[best.len] == ip[best.len]) {
+            uint32_t mlen = 4;
+            // SIMD match length calculation (Factorized from existing code)
+#if defined(ZXC_USE_AVX512)
+            const uint8_t* limit_64 = iend - 64;
+            while (ip + mlen < limit_64) {
+                __m512i v_src = _mm512_loadu_si512((const void*)(ip + mlen));
+                __m512i v_ref = _mm512_loadu_si512((const void*)(ref + mlen));
+                __mmask64 mask = _mm512_cmpeq_epi8_mask(v_src, v_ref);
+                if (mask == 0xFFFFFFFFFFFFFFFF)
+                    mlen += 64;
+                else {
+                    mlen += (uint32_t)zxc_ctz64(~mask);
+                    goto _match_len_done;
+                }
+            }
+#elif defined(ZXC_USE_AVX2)
+            const uint8_t* limit_32 = iend - 32;
+            while (ip + mlen < limit_32) {
+                __m256i v_src = _mm256_loadu_si256((const __m256i*)(ip + mlen));
+                __m256i v_ref = _mm256_loadu_si256((const __m256i*)(ref + mlen));
+                __m256i v_cmp = _mm256_cmpeq_epi8(v_src, v_ref);
+                uint32_t mask = (uint32_t)_mm256_movemask_epi8(v_cmp);
+                if (mask == 0xFFFFFFFF)
+                    mlen += 32;
+                else {
+                    mlen += zxc_ctz32(~mask);
+                    goto _match_len_done;
+                }
+            }
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+            const uint8_t* limit_16 = iend - 16;
+            while (ip + mlen < limit_16) {
+                uint8x16_t v_src = vld1q_u8(ip + mlen), v_ref = vld1q_u8(ref + mlen);
+                uint8x16_t v_cmp = vceqq_u8(v_src, v_ref);
+#if defined(ZXC_USE_NEON64)
+                if (vminvq_u8(v_cmp) == 0xFF)
+                    mlen += 16;
+                else {
+                    uint8x16_t v_diff = vmvnq_u8(v_cmp);
+                    uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(v_diff), 0);
+                    if (lo != 0)
+                        mlen += (zxc_ctz64(lo) >> 3);
+                    else
+                        mlen +=
+                            8 + (zxc_ctz64(vgetq_lane_u64(vreinterpretq_u64_u8(v_diff), 1)) >> 3);
+                    goto _match_len_done;
+                }
+#else
+                uint8x16_t p1 = vpminq_u8(v_cmp, v_cmp), p2 = vpminq_u8(p1, p1),
+                           p3 = vpminq_u8(p2, p2);
+                uint8_t min_val = vgetq_lane_u8(p3, 0);
+                min_val = min_val < vgetq_lane_u8(p3, 8) ? min_val : vgetq_lane_u8(p3, 8);
+                if (min_val == 0xFF)
+                    mlen += 16;
+                else {
+                    uint8x16_t v_diff = vmvnq_u8(v_cmp);
+                    uint64_t lo = (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 0) |
+                                  ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 1) << 32);
+                    if (lo != 0)
+                        mlen += (zxc_ctz64(lo) >> 3);
+                    else
+                        mlen +=
+                            8 +
+                            (zxc_ctz64((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 2) |
+                                       ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 3)
+                                        << 32)) >>
+                             3);
+                    goto _match_len_done;
+                }
+#endif
+            }
+#endif
+            const uint8_t* limit_8 = iend - 8;
+            while (ip + mlen < limit_8) {
+                if (zxc_le64(ip + mlen) == zxc_le64(ref + mlen))
+                    mlen += 8;
+                else {
+                    mlen += (zxc_ctz64(zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen)) >> 3);
+                    goto _match_len_done;
+                }
+            }
+            while (ip + mlen < iend && ref[mlen] == ip[mlen]) mlen++;
+
+        _match_len_done:
+            if (mlen > best.len) {
+                best.len = mlen;
+                best.ref = ref;
+                if (UNLIKELY(best.len >= (uint32_t)sufficient_len || ip + best.len >= iend)) break;
+            }
+        }
+        uint16_t delta = chain_table[match_idx];
+        if (UNLIKELY(delta == 0)) break;
+        match_idx -= delta;
+        is_first = 0;
+        ZXC_PREFETCH_READ(src + match_idx);
+    }
+
+    if (best.ref) {
+        // Backtrack to extend match backwards
+        const uint8_t* b_ip = ip;
+        const uint8_t* b_ref = best.ref;
+        while (b_ip > anchor && b_ref > src && b_ip[-1] == b_ref[-1]) {
+            b_ip--;
+            b_ref--;
+            best.len++;
+            best.backtrack++;
+        }
+        best.ref = b_ref;
+    }
+
+    if (use_lazy && best.ref && best.len < 128 && ip + 1 < mflimit) {
+        uint32_t next_val = zxc_le32(ip + 1);
+        uint32_t h2 = zxc_hash_func(next_val);
+        uint32_t next_head = hash_table[2 * h2];
+        uint32_t next_stored_tag = hash_table[2 * h2 + 1];
+        uint32_t next_idx =
+            (next_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (next_head & ZXC_OFFSET_MASK) : 0;
+        int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_val);
+        uint32_t max_lazy = 0;
+        int lazy_att = (level >= 3) ? (level >= 5 ? 16 : 8) : 2;
+        int is_lazy_first = 1;
+
+        while (next_idx > 0 && lazy_att-- > 0) {
+            if (UNLIKELY((uint32_t)(ip + 1 - src) - next_idx >= ZXC_LZ_MAX_DIST)) break;
+            const uint8_t* ref2 = src + next_idx;
+            if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
+                uint32_t l2 = 4;
+                while (ip + 1 + l2 < iend && ref2[l2] == ip[1 + l2]) l2++;
+                if (l2 > max_lazy) max_lazy = l2;
+            }
+            uint16_t delta = chain_table[next_idx];
+            if (UNLIKELY(delta == 0)) break;
+            next_idx -= delta;
+            is_lazy_first = 0;
+        }
+
+        if (max_lazy > best.len + 1) {
+            best.ref = NULL;
+        } else if (level >= 4 && ip + 2 < mflimit) {
+            uint32_t val3 = zxc_le32(ip + 2);
+            uint32_t h3 = zxc_hash_func(val3);
+            uint32_t head3 = hash_table[2 * h3];
+            uint32_t tag3 = hash_table[2 * h3 + 1];
+            uint32_t idx3 =
+                (head3 & ~ZXC_OFFSET_MASK) == epoch_mark ? (head3 & ZXC_OFFSET_MASK) : 0;
+            int skip_head3 = (idx3 > 0 && tag3 != val3);
+            int is_first3 = 1;
+            uint32_t max_lazy3 = 0;
+            lazy_att = (level >= 5) ? 16 : 8;
+            while (idx3 > 0 && lazy_att-- > 0) {
+                if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 >= ZXC_LZ_MAX_DIST)) break;
+                const uint8_t* ref3 = src + idx3;
+                if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
+                    uint32_t l3 = 4;
+                    while (ip + 2 + l3 < iend && ref3[l3] == ip[2 + l3]) l3++;
+                    if (l3 > max_lazy3) max_lazy3 = l3;
+                }
+                uint16_t delta = chain_table[idx3];
+                if (UNLIKELY(delta == 0)) break;
+                idx3 -= delta;
+                is_first3 = 0;
+            }
+            if (max_lazy3 > best.len + 2) best.ref = NULL;
+        }
+    }
+
+    return best;
 }
 
 /**
@@ -379,290 +588,36 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     while (LIKELY(ip < mflimit)) {
         size_t dist = (size_t)(ip - anchor);
         size_t step = step_base + (dist >> step_shift);
-
         if (UNLIKELY(ip + step >= mflimit)) step = 1;
 
         ZXC_PREFETCH_READ(ip + step * 4 + 64);
 
-        uint32_t cur_val = zxc_le32(ip);
-        uint32_t h = zxc_hash_func(cur_val);
-        int32_t cur_pos = (uint32_t)(ip - src);
+        zxc_match_t m =
+            zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, chain_table,
+                                     epoch_mark, level, search_depth, sufficient_len, use_lazy);
 
-        // cppcheck-suppress unreadVariable ; used for prefetch side-effect
-        uint32_t next_h = zxc_hash_func(zxc_le32(ip + step));
-        ZXC_PREFETCH_READ(&hash_table[2 * next_h]);
-
-        uint32_t raw_head = hash_table[2 * h];
-        uint32_t stored_tag = hash_table[2 * h + 1];
-        uint32_t match_idx =
-            (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
-
-        int skip_head = 0;
-        if (match_idx > 0 && stored_tag != cur_val) {
-            if (level <= 2)
-                match_idx = 0;  // Aggressive mode: skip entire chain for speed
-            else
-                skip_head = 1;  // Refined mode: skip only HEAD, preserve chain for ratio
-        }
-
-        hash_table[2 * h] = epoch_mark | cur_pos;
-        hash_table[2 * h + 1] = cur_val;
-        // cppcheck-suppress knownConditionTrueFalse ; false positive
-        if (match_idx > 0 && (cur_pos - match_idx) < 0x10000)
-            chain_table[cur_pos] = (uint16_t)(cur_pos - match_idx);
-        else
-            chain_table[cur_pos] = 0;
-
-        const uint8_t* best_ref = NULL;
-        uint32_t best_len = ZXC_LZ_MIN_MATCH - 1;
-
-        int is_first = 1;
-        int attempts = search_depth;
-        while (match_idx > 0 && attempts-- >= 0) {
-            if (UNLIKELY(cur_pos - match_idx >= ZXC_LZ_MAX_DIST)) break;
-
-            const uint8_t* ref = src + match_idx;
-            ZXC_PREFETCH_READ(ref);
-
-            uint32_t ref_val = zxc_le32(ref);
-            int should_skip = is_first & skip_head;
-            // Branchless: evaluate all conditions (ref is prefetched, memory access is cheap)
-            int match_ok =
-                ((should_skip ^ 1) & (ref_val == cur_val)) & (ref[best_len] == ip[best_len]);
-
-            if (LIKELY(match_ok)) {
-                uint32_t mlen = 4;
-#if defined(ZXC_USE_AVX512)
-                const uint8_t* limit_64 = iend - 64;
-                while (ip + mlen < limit_64) {
-                    // AVX-512 Optimization: Compare 64 bytes at once
-                    __m512i v_src = _mm512_loadu_si512((const void*)(ip + mlen));
-                    __m512i v_ref = _mm512_loadu_si512((const void*)(ref + mlen));
-
-                    // _mm512_cmpeq_epi8_mask returns a 64-bit mask where each bit represents a byte
-                    // match
-                    __mmask64 mask = _mm512_cmpeq_epi8_mask(v_src, v_ref);
-
-                    // If mask is all 1s (UINT64_MAX), all 64 bytes match
-                    if (mask == 0xFFFFFFFFFFFFFFFF)
-                        mlen += 64;
-                    else {
-                        // Count trailing zeros of negated mask to find first mismatch
-                        mlen += (uint32_t)zxc_ctz64(~mask);
-                        goto _match_len_done;
-                    }
-                }
-#elif defined(ZXC_USE_AVX2)
-                const uint8_t* limit_32 = iend - 32;
-                while (ip + mlen < limit_32) {
-                    // AVX2 Optimization: Compare 32 bytes at once
-                    __m256i v_src = _mm256_loadu_si256((const __m256i*)(ip + mlen));
-                    __m256i v_ref = _mm256_loadu_si256((const __m256i*)(ref + mlen));
-                    __m256i v_cmp = _mm256_cmpeq_epi8(v_src, v_ref);
-                    // _mm256_movemask_epi8 creates a 32-bit mask from the most significant bit of
-                    // each byte
-                    uint32_t mask = (uint32_t)_mm256_movemask_epi8(v_cmp);
-                    // If mask is all 1s (0xFFFFFFFF), all 32 bytes match
-                    if (mask == 0xFFFFFFFF)
-                        mlen += 32;
-                    else {
-                        // Count trailing zeros of negated mask to find first mismatch
-                        mlen += zxc_ctz32(~mask);
-                        goto _match_len_done;
-                    }
-                }
-#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
-                const uint8_t* limit_16 = iend - 16;
-                while (ip + mlen < limit_16) {
-                    // NEON Optimization: Compare 16 bytes at once
-                    uint8x16_t v_src = vld1q_u8(ip + mlen);
-                    uint8x16_t v_ref = vld1q_u8(ref + mlen);
-                    // vceqq_u8 performs byte-wise equality comparison, result is 0xFF for equal,
-                    // 0x00 for not equal
-                    uint8x16_t v_cmp = vceqq_u8(v_src, v_ref);
-
-                    // Check if all bytes are equal (min value of comparison result is 0xFF)
-#if defined(ZXC_USE_NEON64)
-                    // AArch64 unified min
-                    if (vminvq_u8(v_cmp) == 0xFF)
-                        mlen += 16;
-                    else {
-                        // NEON lacks a direct movemask instruction like x86.
-                        // We invert the comparison result (0xFF -> 0x00, 0x00 -> 0xFF)
-                        // Then we can use ctz on the 64-bit lanes to find the first non-zero byte.
-                        uint8x16_t v_diff = vmvnq_u8(v_cmp);
-                        uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(v_diff), 0);
-                        if (lo != 0)
-                            mlen += (zxc_ctz64(lo) >> 3);  // Divide by 8 to get byte index
-                        else {
-                            uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(v_diff), 1);
-                            mlen += 8 + (zxc_ctz64(hi) >> 3);
-                        }
-                        goto _match_len_done;
-                    }
-#else
-                    // NEON 32-bit (ARMv7) fallback for min scan
-                    uint8x16_t p1 = vpminq_u8(v_cmp, v_cmp);
-                    uint8x16_t p2 = vpminq_u8(p1, p1);
-                    uint8x16_t p3 = vpminq_u8(p2, p2);
-                    // Now reduced to 2 bytes, convert to scalar
-                    uint8_t min_val = vgetq_lane_u8(p3, 0);
-                    min_val = min_val < vgetq_lane_u8(p3, 8) ? min_val : vgetq_lane_u8(p3, 8);
-
-                    if (min_val == 0xFF)
-                        mlen += 16;
-                    else {
-                        uint8x16_t v_diff = vmvnq_u8(v_cmp);
-                        // Access as 32-bit lanes to reconstruct 64-bit values or check directly
-                        // Reconstructing 64-bit for compatibility with zxc_ctz64 usage
-                        uint64_t lo =
-                            (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 0) |
-                            ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 1) << 32);
-
-                        if (lo != 0)
-                            mlen += (zxc_ctz64(lo) >> 3);
-                        else {
-                            uint64_t hi =
-                                (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 2) |
-                                ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 3) << 32);
-                            mlen += 8 + (zxc_ctz64(hi) >> 3);
-                        }
-                        goto _match_len_done;
-                    }
-#endif
-                }
-#endif
-                const uint8_t* limit_8 = iend - 8;
-                while (ip + mlen < limit_8) {
-                    if (zxc_le64(ip + mlen) == zxc_le64(ref + mlen))
-                        mlen += 8;
-                    else {
-                        // XOR to find differing bits, trailing zeros / 8 = byte index
-                        mlen += (zxc_ctz64(zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen)) >> 3);
-                        goto _match_len_done;
-                    }
-                }
-                while (ip + mlen < iend && ref[mlen] == ip[mlen]) mlen++;
-
-            _match_len_done:
-                if (mlen > best_len) {
-                    best_len = mlen;
-                    best_ref = ref;
-                    // Sufficient match found or end of buffer reached
-                    if (UNLIKELY(best_len >= (uint32_t)sufficient_len || ip + best_len >= iend))
-                        break;
-                }
-            }
-            uint16_t delta = chain_table[match_idx];
-            if (UNLIKELY(delta == 0)) break;
-            match_idx -= delta;
-            is_first = 0;  // No longer checking HEAD, now checking chain entries
-            ZXC_PREFETCH_READ(src + match_idx);
-        }
-
-        if (use_lazy && best_ref && best_len < 128 && ip + 1 < mflimit) {
-            // Lazy 1: Check matches at ip + 1
-            uint32_t next_val = zxc_le32(ip + 1);
-            uint32_t h2 = zxc_hash_func(next_val);
-            uint32_t next_head = hash_table[2 * h2];
-            uint32_t next_stored_tag = hash_table[2 * h2 + 1];
-            uint32_t next_idx =
-                (next_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (next_head & ZXC_OFFSET_MASK) : 0;
-
-            int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_val);
-            uint32_t max_lazy = 0;
-            // Increase search depth for lazy at higher levels
-            int lazy_att = (level >= 3) ? (level >= 5 ? 16 : 8) : 2;
-            int is_lazy_first = 1;
-
-            while (next_idx > 0 && lazy_att-- > 0) {
-                if (UNLIKELY((uint32_t)(ip + 1 - src) - next_idx >= ZXC_LZ_MAX_DIST)) break;
-                const uint8_t* ref2 = src + next_idx;
-                if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
-                    uint32_t l2 = 4;
-                    while (ip + 1 + l2 < iend && ref2[l2] == ip[1 + l2]) l2++;
-                    if (l2 > max_lazy) max_lazy = l2;
-                }
-                uint16_t delta = chain_table[next_idx];
-                if (UNLIKELY(delta == 0)) break;
-                next_idx -= delta;
-                is_lazy_first = 0;
-            }
-
-            if (max_lazy > best_len + 1) {
-                best_ref = NULL;  // Prefer ip+1
-            } else if (level >= 4 && ip + 2 < mflimit) {
-                // Double Lazy: Check matches at ip + 2
-                // Only if ip+1 wasn't good enough
-                uint32_t val3 = zxc_le32(ip + 2);
-                uint32_t h3 = zxc_hash_func(val3);
-                uint32_t head3 = hash_table[2 * h3];
-                uint32_t tag3 = hash_table[2 * h3 + 1];
-                uint32_t idx3 =
-                    (head3 & ~ZXC_OFFSET_MASK) == epoch_mark ? (head3 & ZXC_OFFSET_MASK) : 0;
-
-                int skip_head3 = (idx3 > 0 && tag3 != val3);
-                int is_first3 = 1;
-                uint32_t max_lazy3 = 0;
-                lazy_att = (level >= 5) ? 16 : 8;
-
-                while (idx3 > 0 && lazy_att-- > 0) {
-                    if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 >= ZXC_LZ_MAX_DIST)) break;
-
-                    const uint8_t* ref3 = src + idx3;
-                    if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
-                        uint32_t l3 = 4;
-                        while (ip + 2 + l3 < iend && ref3[l3] == ip[2 + l3]) l3++;
-                        if (l3 > max_lazy3) max_lazy3 = l3;
-                    }
-
-                    uint16_t delta = chain_table[idx3];
-                    if (UNLIKELY(delta == 0)) break;
-                    idx3 -= delta;
-                    is_first3 = 0;
-                }
-
-                if (max_lazy3 > best_len + 2)
-                    best_ref = NULL;  // Prefer ip+2 (will be handled by next iteration)
-            }
-        }
-
-        if (best_ref && level == 3) {
-            uint32_t off = (uint32_t)(ip - best_ref);
-            if (best_len == ZXC_LZ_MIN_MATCH && off > (ZXC_BLOCK_UNIT * 8)) best_ref = NULL;
-        }
-
-        if (best_ref) {
-            while (ip > anchor && best_ref > src && ip[-1] == best_ref[-1]) {
-                ip--;
-                best_ref--;
-                best_len++;
-            }
+        if (m.ref) {
+            ip -= m.backtrack;
             uint32_t ll = (uint32_t)(ip - anchor);
-            uint32_t ml = (uint32_t)(best_len - ZXC_LZ_MIN_MATCH);
-            uint32_t off = (uint32_t)(ip - best_ref);
+            uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH);
+            uint32_t off = (uint32_t)(ip - m.ref);
 
-            // cppcheck-suppress knownConditionTrueFalse ; false positive
             if (ll > 0) {
-                // Specialized literal copy
-                if (ll <= 16) {
+                if (ll <= 16)
                     zxc_copy16(literals + lit_c, anchor);
-                } else if (ll <= 32) {
+                else if (ll <= 32)
                     zxc_copy32(literals + lit_c, anchor);
-                } else {
+                else
                     ZXC_MEMCPY(literals + lit_c, anchor, ll);
-                }
                 lit_c += ll;
             }
 
-            // Token & Offset
             uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
             uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
             buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
             buf_offsets[seq_c] = (uint16_t)off;
             if (off > max_offset) max_offset = (uint16_t)off;
 
-            // Extras & VByte size
             if (ll >= ZXC_TOKEN_LL_MASK) {
                 uint32_t val = ll - ZXC_TOKEN_LL_MASK;
                 buf_extras[n_extras++] = val;
@@ -675,31 +630,25 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             }
             seq_c++;
 
-            if (best_len > 2 && level > 4) {
-                const uint8_t* match_end = ip + best_len;
-                // Check that we can read 4 bytes for the hash at (end-2)
+            if (m.len > 2 && level > 4) {
+                const uint8_t* match_end = ip + m.len;
                 if (match_end < iend - 3) {
                     uint32_t pos_u = (uint32_t)((match_end - 2) - src);
                     uint32_t val_u = zxc_le32(match_end - 2);
                     uint32_t h_u = zxc_hash_func(val_u);
-
-                    // Retrieve the old head to maintain the chain
                     uint32_t prev_head = hash_table[2 * h_u];
                     uint32_t prev_idx = (prev_head & ~ZXC_OFFSET_MASK) == epoch_mark
                                             ? (prev_head & ZXC_OFFSET_MASK)
                                             : 0;
-
-                    // Update the hash table and chain table
                     hash_table[2 * h_u] = epoch_mark | pos_u;
                     hash_table[2 * h_u + 1] = val_u;
-                    if (prev_idx > 0 && (pos_u - prev_idx) < (ZXC_LZ_MAX_DIST + 1))
-                        chain_table[pos_u] = (uint16_t)(pos_u - prev_idx);
-                    else
-                        chain_table[pos_u] = 0;
+                    chain_table[pos_u] =
+                        (prev_idx > 0 && (pos_u - prev_idx) < (ZXC_LZ_MAX_DIST + 1))
+                            ? (uint16_t)(pos_u - prev_idx)
+                            : 0;
                 }
             }
-
-            ip += best_len;
+            ip += m.len;
             anchor = ip;
         } else {
             ip += step;
@@ -862,11 +811,10 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                            .enc_off = (uint8_t)use_8bit_off};
 
     zxc_section_desc_t desc[4] = {0};
-    desc[0].sizes = (uint64_t)(use_rle ? (uint32_t)rle_size : (uint32_t)lit_c) |
-                    ((uint64_t)(uint32_t)lit_c << 32);
+    desc[0].sizes = (uint64_t)(use_rle ? rle_size : lit_c) | ((uint64_t)lit_c << 32);
     desc[1].sizes = (uint64_t)seq_c | ((uint64_t)seq_c << 32);
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
-    desc[3].sizes = (uint64_t)(uint32_t)vbyte_size | ((uint64_t)(uint32_t)vbyte_size << 32);
+    desc[3].sizes = (uint64_t)vbyte_size | ((uint64_t)vbyte_size << 32);
 
     int ghs = zxc_write_gnr_header_and_desc(p, rem, &gh, desc);
     if (UNLIKELY(ghs < 0)) return -1;
@@ -948,6 +896,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     rem -= sz_tok;
 
     if (UNLIKELY(rem < sz_off)) return -1;
+
     if (use_8bit_off) {
         // Write 1-byte offsets - unroll for better throughput
         uint32_t i = 0;
@@ -973,6 +922,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     rem -= sz_off;
 
     if (UNLIKELY(rem < sz_ext)) return -1;
+
     // Write VByte stream
     for (size_t j = 0; j < n_extras; j++) {
         uint32_t val = buf_extras[j];
@@ -1102,287 +1052,32 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     while (LIKELY(ip < mflimit)) {
         size_t dist = (size_t)(ip - anchor);
         size_t step = step_base + (dist >> step_shift);
-
         if (UNLIKELY(ip + step >= mflimit)) step = 1;
 
         ZXC_PREFETCH_READ(ip + step * 4 + 64);
 
-        uint32_t cur_val = zxc_le32(ip);
-        uint32_t h = zxc_hash_func(cur_val);
-        int32_t cur_pos = (uint32_t)(ip - src);
+        zxc_match_t m =
+            zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, chain_table,
+                                     epoch_mark, level, search_depth, sufficient_len, use_lazy);
 
-        // cppcheck-suppress unreadVariable ; used for prefetch side-effect
-        uint32_t next_h = zxc_hash_func(zxc_le32(ip + step));
-        ZXC_PREFETCH_READ(&hash_table[2 * next_h]);
-
-        uint32_t raw_head = hash_table[2 * h];
-        uint32_t stored_tag = hash_table[2 * h + 1];
-        uint32_t match_idx =
-            (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
-
-        int skip_head = 0;
-        if (match_idx > 0 && stored_tag != cur_val) {
-            if (level <= 2)
-                match_idx = 0;  // Aggressive mode: skip entire chain for speed
-            else
-                skip_head = 1;  // Refined mode: skip only HEAD, preserve chain for ratio
-        }
-
-        hash_table[2 * h] = epoch_mark | cur_pos;
-        hash_table[2 * h + 1] = cur_val;
-        // cppcheck-suppress knownConditionTrueFalse ; false positive
-        if (match_idx > 0 && (cur_pos - match_idx) < 0x10000)
-            chain_table[cur_pos] = (uint16_t)(cur_pos - match_idx);
-        else
-            chain_table[cur_pos] = 0;
-
-        const uint8_t* best_ref = NULL;
-        uint32_t best_len = ZXC_LZ_MIN_MATCH - 1;
-
-        int is_first = 1;
-        int attempts = search_depth;
-        while (match_idx > 0 && attempts-- >= 0) {
-            if (UNLIKELY(cur_pos - match_idx >= ZXC_LZ_MAX_DIST)) break;
-
-            const uint8_t* ref = src + match_idx;
-            ZXC_PREFETCH_READ(ref);
-
-            uint32_t ref_val = zxc_le32(ref);
-            int should_skip = is_first & skip_head;
-            // Branchless: evaluate all conditions (ref is prefetched, memory access is cheap)
-            int match_ok =
-                ((should_skip ^ 1) & (ref_val == cur_val)) & (ref[best_len] == ip[best_len]);
-
-            if (LIKELY(match_ok)) {
-                uint32_t mlen = 4;
-#if defined(ZXC_USE_AVX512)
-                const uint8_t* limit_64 = iend - 64;
-                while (ip + mlen < limit_64) {
-                    // AVX-512 Optimization: Compare 64 bytes at once
-                    __m512i v_src = _mm512_loadu_si512((const void*)(ip + mlen));
-                    __m512i v_ref = _mm512_loadu_si512((const void*)(ref + mlen));
-
-                    // _mm512_cmpeq_epi8_mask returns a 64-bit mask where each bit represents a byte
-                    // match
-                    __mmask64 mask = _mm512_cmpeq_epi8_mask(v_src, v_ref);
-
-                    // If mask is all 1s (UINT64_MAX), all 64 bytes match
-                    if (mask == 0xFFFFFFFFFFFFFFFF)
-                        mlen += 64;
-                    else {
-                        // Count trailing zeros of negated mask to find first mismatch
-                        mlen += (uint32_t)zxc_ctz64(~mask);
-                        goto _match_len_done;
-                    }
-                }
-#elif defined(ZXC_USE_AVX2)
-                const uint8_t* limit_32 = iend - 32;
-                while (ip + mlen < limit_32) {
-                    // AVX2 Optimization: Compare 32 bytes at once
-                    __m256i v_src = _mm256_loadu_si256((const __m256i*)(ip + mlen));
-                    __m256i v_ref = _mm256_loadu_si256((const __m256i*)(ref + mlen));
-                    __m256i v_cmp = _mm256_cmpeq_epi8(v_src, v_ref);
-                    // _mm256_movemask_epi8 creates a 32-bit mask from the most significant bit of
-                    // each byte
-                    uint32_t mask = (uint32_t)_mm256_movemask_epi8(v_cmp);
-                    // If mask is all 1s (0xFFFFFFFF), all 32 bytes match
-                    if (mask == 0xFFFFFFFF)
-                        mlen += 32;
-                    else {
-                        // Count trailing zeros of negated mask to find first mismatch
-                        mlen += zxc_ctz32(~mask);
-                        goto _match_len_done;
-                    }
-                }
-#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
-                const uint8_t* limit_16 = iend - 16;
-                while (ip + mlen < limit_16) {
-                    // NEON Optimization: Compare 16 bytes at once
-                    uint8x16_t v_src = vld1q_u8(ip + mlen);
-                    uint8x16_t v_ref = vld1q_u8(ref + mlen);
-                    // vceqq_u8 performs byte-wise equality comparison, result is 0xFF for equal,
-                    // 0x00 for not equal
-                    uint8x16_t v_cmp = vceqq_u8(v_src, v_ref);
-
-                    // Check if all bytes are equal (min value of comparison result is 0xFF)
-#if defined(ZXC_USE_NEON64)
-                    // AArch64 unified min
-                    if (vminvq_u8(v_cmp) == 0xFF)
-                        mlen += 16;
-                    else {
-                        // NEON lacks a direct movemask instruction like x86.
-                        // We invert the comparison result (0xFF -> 0x00, 0x00 -> 0xFF)
-                        // Then we can use ctz on the 64-bit lanes to find the first non-zero byte.
-                        uint8x16_t v_diff = vmvnq_u8(v_cmp);
-                        uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(v_diff), 0);
-                        if (lo != 0)
-                            mlen += (zxc_ctz64(lo) >> 3);  // Divide by 8 to get byte index
-                        else {
-                            uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(v_diff), 1);
-                            mlen += 8 + (zxc_ctz64(hi) >> 3);
-                        }
-                        goto _match_len_done;
-                    }
-#else
-                    // NEON 32-bit (ARMv7) fallback for min scan
-                    uint8x16_t p1 = vpminq_u8(v_cmp, v_cmp);
-                    uint8x16_t p2 = vpminq_u8(p1, p1);
-                    uint8x16_t p3 = vpminq_u8(p2, p2);
-                    // Now reduced to 2 bytes, convert to scalar
-                    uint8_t min_val = vgetq_lane_u8(p3, 0);
-                    min_val = min_val < vgetq_lane_u8(p3, 8) ? min_val : vgetq_lane_u8(p3, 8);
-
-                    if (min_val == 0xFF)
-                        mlen += 16;
-                    else {
-                        uint8x16_t v_diff = vmvnq_u8(v_cmp);
-                        // Access as 32-bit lanes to reconstruct 64-bit values or check directly
-                        // Reconstructing 64-bit for compatibility with zxc_ctz64 usage
-                        uint64_t lo =
-                            (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 0) |
-                            ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 1) << 32);
-
-                        if (lo != 0)
-                            mlen += (zxc_ctz64(lo) >> 3);
-                        else {
-                            uint64_t hi =
-                                (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 2) |
-                                ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 3) << 32);
-                            mlen += 8 + (zxc_ctz64(hi) >> 3);
-                        }
-                        goto _match_len_done;
-                    }
-#endif
-                }
-#endif
-                const uint8_t* limit_8 = iend - 8;
-                while (ip + mlen < limit_8) {
-                    if (zxc_le64(ip + mlen) == zxc_le64(ref + mlen))
-                        mlen += 8;
-                    else {
-                        // XOR to find differing bits, trailing zeros / 8 = byte index
-                        mlen += (zxc_ctz64(zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen)) >> 3);
-                        goto _match_len_done;
-                    }
-                }
-                while (ip + mlen < iend && ref[mlen] == ip[mlen]) mlen++;
-
-            _match_len_done:
-                if (mlen > best_len) {
-                    best_len = mlen;
-                    best_ref = ref;
-                    // Sufficient match found or end of buffer reached
-                    if (UNLIKELY(best_len >= (uint32_t)sufficient_len || ip + best_len >= iend))
-                        break;
-                }
-            }
-            uint16_t delta = chain_table[match_idx];
-            if (UNLIKELY(delta == 0)) break;
-            match_idx -= delta;
-            is_first = 0;  // No longer checking HEAD, now checking chain entries
-            ZXC_PREFETCH_READ(src + match_idx);
-        }
-
-        if (use_lazy && best_ref && best_len < 128 && ip + 1 < mflimit) {
-            // Lazy 1: Check matches at ip + 1
-            uint32_t next_val = zxc_le32(ip + 1);
-            uint32_t h2 = zxc_hash_func(next_val);
-            uint32_t next_head = hash_table[2 * h2];
-            uint32_t next_stored_tag = hash_table[2 * h2 + 1];
-            uint32_t next_idx =
-                (next_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (next_head & ZXC_OFFSET_MASK) : 0;
-
-            int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_val);
-            uint32_t max_lazy = 0;
-            // Increase search depth for lazy at higher levels
-            int lazy_att = (level >= 3) ? (level >= 5 ? 16 : 8) : 2;
-            int is_lazy_first = 1;
-
-            while (next_idx > 0 && lazy_att-- > 0) {
-                if (UNLIKELY((uint32_t)(ip + 1 - src) - next_idx >= ZXC_LZ_MAX_DIST)) break;
-                const uint8_t* ref2 = src + next_idx;
-                if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
-                    uint32_t l2 = 4;
-                    while (ip + 1 + l2 < iend && ref2[l2] == ip[1 + l2]) l2++;
-                    if (l2 > max_lazy) max_lazy = l2;
-                }
-                uint16_t delta = chain_table[next_idx];
-                if (UNLIKELY(delta == 0)) break;
-                next_idx -= delta;
-                is_lazy_first = 0;
-            }
-
-            if (max_lazy > best_len + 1) {
-                best_ref = NULL;  // Prefer ip+1
-            } else if (level >= 4 && ip + 2 < mflimit) {
-                // Double Lazy: Check matches at ip + 2
-                // Only if ip+1 wasn't good enough
-                uint32_t val3 = zxc_le32(ip + 2);
-                uint32_t h3 = zxc_hash_func(val3);
-                uint32_t head3 = hash_table[2 * h3];
-                uint32_t tag3 = hash_table[2 * h3 + 1];
-                uint32_t idx3 =
-                    (head3 & ~ZXC_OFFSET_MASK) == epoch_mark ? (head3 & ZXC_OFFSET_MASK) : 0;
-
-                int skip_head3 = (idx3 > 0 && tag3 != val3);
-                int is_first3 = 1;
-                uint32_t max_lazy3 = 0;
-                lazy_att = (level >= 5) ? 16 : 8;
-
-                while (idx3 > 0 && lazy_att-- > 0) {
-                    if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 >= ZXC_LZ_MAX_DIST)) break;
-
-                    const uint8_t* ref3 = src + idx3;
-                    if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
-                        uint32_t l3 = 4;
-                        while (ip + 2 + l3 < iend && ref3[l3] == ip[2 + l3]) l3++;
-                        if (l3 > max_lazy3) max_lazy3 = l3;
-                    }
-
-                    uint16_t delta = chain_table[idx3];
-                    if (UNLIKELY(delta == 0)) break;
-                    idx3 -= delta;
-                    is_first3 = 0;
-                }
-
-                if (max_lazy3 > best_len + 2)
-                    best_ref = NULL;  // Prefer ip+2 (will be handled by next iteration)
-            }
-        }
-
-        if (best_ref && level == 3) {
-            uint32_t off = (uint32_t)(ip - best_ref);
-            if (best_len == ZXC_LZ_MIN_MATCH && off > (ZXC_BLOCK_UNIT * 8)) best_ref = NULL;
-        }
-
-        if (best_ref) {
-            while (ip > anchor && best_ref > src && ip[-1] == best_ref[-1]) {
-                ip--;
-                best_ref--;
-                best_len++;
-            }
+        if (m.ref) {
+            ip -= m.backtrack;
             uint32_t ll = (uint32_t)(ip - anchor);
-            uint32_t ml = (uint32_t)(best_len - ZXC_LZ_MIN_MATCH);
-            uint32_t off = (uint32_t)(ip - best_ref);
+            uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH);
+            uint32_t off = (uint32_t)(ip - m.ref);
 
-            // cppcheck-suppress knownConditionTrueFalse ; false positive
             if (ll > 0) {
-                // Specialized literal copy
-                if (ll <= 16) {
+                if (ll <= 16)
                     zxc_copy16(literals + lit_c, anchor);
-                } else if (ll <= 32) {
+                else if (ll <= 32)
                     zxc_copy32(literals + lit_c, anchor);
-                } else {
+                else
                     ZXC_MEMCPY(literals + lit_c, anchor, ll);
-                }
                 lit_c += ll;
             }
 
-            // Hybrid 32-bit Sequence Record
-            // Layout: LL (8) | ML (8) | Offset (16)
             uint32_t ll_write = (ll >= ZXC_SEQ_LL_MASK) ? 255U : ll;
             uint32_t ml_write = (ml >= ZXC_SEQ_ML_MASK) ? 255U : ml;
-
             uint32_t seq_val = (ll_write << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
                                (ml_write << ZXC_SEQ_OFF_BITS) | (off & ZXC_SEQ_OFF_MASK);
             if (off > max_offset) max_offset = (uint16_t)off;
@@ -1390,43 +1085,31 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             seq_c++;
 
             if (ll >= ZXC_SEQ_LL_MASK) {
-                // uint32_t val = ll - ZXC_SEQ_LL_MASK;
-                // buf_extras[n_extras++] = val;
-                // extras_c += (zxc_highbit32(val | 1) + 6) / 7;
                 extras_c += zxc_write_vbyte((uint8_t*)buf_extras + extras_c, ll - ZXC_SEQ_LL_MASK);
             }
             if (ml >= ZXC_SEQ_ML_MASK) {
-                // uint32_t val = ml - ZXC_SEQ_ML_MASK;
-                // buf_extras[n_extras++] = val;
-                // extras_c += (zxc_highbit32(val | 1) + 6) / 7;
                 extras_c += zxc_write_vbyte((uint8_t*)buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
             }
 
-            if (best_len > 2 && level > 4) {
-                const uint8_t* match_end = ip + best_len;
-                // Check that we can read 4 bytes for the hash at (end-2)
+            if (m.len > 2 && level > 4) {
+                const uint8_t* match_end = ip + m.len;
                 if (match_end < iend - 3) {
                     uint32_t pos_u = (uint32_t)((match_end - 2) - src);
                     uint32_t val_u = zxc_le32(match_end - 2);
                     uint32_t h_u = zxc_hash_func(val_u);
-
-                    // Retrieve the old head to maintain the chain
                     uint32_t prev_head = hash_table[2 * h_u];
                     uint32_t prev_idx = (prev_head & ~ZXC_OFFSET_MASK) == epoch_mark
                                             ? (prev_head & ZXC_OFFSET_MASK)
                                             : 0;
-
-                    // Update the hash table and chain table
                     hash_table[2 * h_u] = epoch_mark | pos_u;
                     hash_table[2 * h_u + 1] = val_u;
-                    if (prev_idx > 0 && (pos_u - prev_idx) < (ZXC_LZ_MAX_DIST + 1))
-                        chain_table[pos_u] = (uint16_t)(pos_u - prev_idx);
-                    else
-                        chain_table[pos_u] = 0;
+                    chain_table[pos_u] =
+                        (prev_idx > 0 && (pos_u - prev_idx) < (ZXC_LZ_MAX_DIST + 1))
+                            ? (uint16_t)(pos_u - prev_idx)
+                            : 0;
                 }
             }
-
-            ip += best_len;
+            ip += m.len;
             anchor = ip;
         } else {
             ip += step;
@@ -1710,13 +1393,16 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
  */
 static int zxc_encode_block_raw(const uint8_t* src, size_t src_sz, uint8_t* dst, size_t dst_cap,
                                 size_t* out_sz, int chk, uint64_t crc_val) {
-    size_t h_gap = ZXC_BLOCK_HEADER_SIZE + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-    if (UNLIKELY(dst_cap < h_gap + src_sz)) return -1;
+    size_t chk_sz = chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0;
+    size_t h_gap = ZXC_BLOCK_HEADER_SIZE + chk_sz;
+    size_t total = h_gap + src_sz;
+
+    if (UNLIKELY(dst_cap < total)) return -1;
 
     // Compute block RAW
     zxc_block_header_t bh;
     bh.block_type = ZXC_BLOCK_RAW;
-    bh.block_flags = chk ? ZXC_BLOCK_FLAG_CHECKSUM : 0;
+    bh.block_flags = chk_sz;
     bh.reserved = 0;
     bh.comp_size = (uint32_t)src_sz;
     bh.raw_size = (uint32_t)src_sz;
@@ -1728,7 +1414,7 @@ static int zxc_encode_block_raw(const uint8_t* src, size_t src_sz, uint8_t* dst,
     }
 
     ZXC_MEMCPY(dst + h_gap, src, src_sz);
-    *out_sz = h_gap + src_sz;
+    *out_sz = total;
     return 0;
 }
 
