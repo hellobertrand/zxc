@@ -1317,7 +1317,9 @@ static int zxc_decode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     // --- SAFE Loop: offset validation until threshold ---
     // Since offset is 16-bit, threshold is 65536.
-    size_t bounds_threshold = 65536;
+    // For 1-byte offsets (enc_off==1): validate until 256 bytes written
+    // For 2-byte offsets (enc_off==0): validate until 65536 bytes written
+    size_t bounds_threshold = (gh.enc_off == 1) ? 256 : 65536;
 
     while (n_seq > 0 && d_ptr < d_end_safe && written < bounds_threshold) {
         uint32_t seq = zxc_le32(seq_ptr);
