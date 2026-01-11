@@ -45,7 +45,7 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
     size_t sz_sequences = max_seq * sizeof(uint32_t);
     size_t sz_tokens = max_seq * sizeof(uint8_t);
     size_t sz_offsets = max_seq * sizeof(uint16_t);
-    size_t sz_extras = max_seq * sizeof(uint32_t);
+    size_t sz_extras = chunk_size;
     size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
     // Calculate sizes with alignment padding (64 bytes for cache line alignment)

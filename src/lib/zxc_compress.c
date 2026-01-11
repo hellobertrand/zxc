@@ -953,7 +953,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     // Write VByte stream
     for (size_t j = 0; j < n_extras; j++) {
         uint32_t val = buf_extras[j];
-        while (val >= 128) {
+        while (val >= 0x80) {
             *p_curr++ = (uint8_t)(val | 0x80);
             val >>= 7;
         }
@@ -971,6 +971,16 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     if (chk) zxc_store_le64(dst + hw, crc_val);
     *out_sz = hw + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0) + p_sz;
     return 0;
+}
+
+size_t zxc_write_vbyte(uint8_t* dst, uint32_t val) {
+    size_t count = 0;
+    while (val >= 0x80) {
+        dst[count++] = (uint8_t)(val | 0x80);
+        val >>= 7;
+    }
+    dst[count++] = (uint8_t)val;
+    return count;
 }
 
 /**
@@ -1071,7 +1081,7 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     size_t lit_c = 0;
     size_t extras_c = 0;
 
-    u_int32_t* buf_sequences = ctx->buf_sequences;
+    uint32_t* buf_sequences = ctx->buf_sequences;
 
     while (LIKELY(ip < mflimit)) {
         size_t dist = (size_t)(ip - anchor);
@@ -1363,12 +1373,16 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             seq_c++;
 
             if (ll >= ZXC_SEQ_LL_MASK) {
-                uint32_t val = ll - ZXC_SEQ_LL_MASK;
-                extras_c += (zxc_highbit32(val | 1) + 6) / 7;
+                // uint32_t val = ll - ZXC_SEQ_LL_MASK;
+                // buf_extras[n_extras++] = val;
+                // extras_c += (zxc_highbit32(val | 1) + 6) / 7;
+                extras_c += zxc_write_vbyte((uint8_t*)buf_extras + extras_c, ll - ZXC_SEQ_LL_MASK);
             }
             if (ml >= ZXC_SEQ_ML_MASK) {
-                uint32_t val = ml - ZXC_SEQ_ML_MASK;
-                extras_c += (zxc_highbit32(val | 1) + 6) / 7;
+                // uint32_t val = ml - ZXC_SEQ_ML_MASK;
+                // buf_extras[n_extras++] = val;
+                // extras_c += (zxc_highbit32(val | 1) + 6) / 7;
+                extras_c += zxc_write_vbyte((uint8_t*)buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
             }
 
             if (best_len > 2 && level > 4) {
@@ -1793,7 +1807,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
     }
 
     if (!try_num) {
-        if (ctx->compression_level <= 0) {
+        if (ctx->compression_level <= 3) {
             res = zxc_encode_block_rec(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
         } else {
             res = zxc_encode_block_gnr(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
