@@ -1110,7 +1110,11 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
     }
 
     if (!try_num) {
-        res = zxc_encode_block_gnr(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
+        if (ctx->compression_level <= 0) {
+            res = zxc_encode_block_gnr(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
+        } else {
+            res = zxc_encode_block_gnr(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
+        }
     }
 
     if (UNLIKELY(res != 0 || w >= src_sz)) {
