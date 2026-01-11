@@ -129,6 +129,11 @@ extern "C" {
 #define ZXC_GNR_HEADER_BINARY_SIZE \
     16  // GNR Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
 #define ZXC_SECTION_DESC_BINARY_SIZE 8  // Section Desc: Comp Size (4) + Raw Size (4)
+#define ZXC_GNR_SECTIONS 4              // Number of sections in GNR blocks
+
+#define ZXC_REC_HEADER_BINARY_SIZE \
+    16  // REC Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
+#define ZXC_REC_SECTIONS 3  // Number of sections in REC blocks
 
 // Block Flags
 #define ZXC_BLOCK_FLAG_NONE 0U         // No flags
@@ -166,7 +171,12 @@ extern "C" {
  * - `ZXC_BLOCK_NUM` (2): Specialized compression for arrays of 32-bit integers.
  *   Uses Delta Encoding + ZigZag + Bitpacking.
  */
-typedef enum { ZXC_BLOCK_RAW = 0, ZXC_BLOCK_GNR = 1, ZXC_BLOCK_NUM = 2 } zxc_block_type_t;
+typedef enum {
+    ZXC_BLOCK_RAW = 0,
+    ZXC_BLOCK_GNR = 1,
+    ZXC_BLOCK_NUM = 2,
+    ZXC_BLOCK_REC = 3
+} zxc_block_type_t;
 
 /**
  * @enum zxc_section_encoding_t
@@ -669,7 +679,7 @@ int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* n
  * is too small.
  */
 int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
-                                  const zxc_section_desc_t desc[4]);
+                                  const zxc_section_desc_t desc[ZXC_GNR_SECTIONS]);
 
 /**
  * @brief Reads a generic header and section descriptors from a source buffer.
@@ -685,7 +695,37 @@ int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
  * failure.
  */
 int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
-                                 zxc_section_desc_t desc[4]);
+                                 zxc_section_desc_t desc[ZXC_GNR_SECTIONS]);
+
+/**
+ * @brief Writes a record header and description to the destination buffer.
+ *
+ * @param dst Pointer to the destination buffer where the header and description will be written.
+ * @param rem Remaining size available in the destination buffer.
+ * @param gh Pointer to the GNR header structure containing header information.
+ * @param desc Array of 3 section descriptors to be written along with the header.
+ *
+ * @return int Returns the number of bytes written on success, or a negative error code on failure.
+ */
+int zxc_write_rec_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
+                                  const zxc_section_desc_t desc[ZXC_REC_SECTIONS]);
+
+/**
+ * @brief Reads a record header and section descriptors from a buffer.
+ *
+ * This function parses the source buffer to extract a general header and
+ * up to three section descriptors from a ZXC record.
+ *
+ * @param[in] src Pointer to the source buffer containing the record data.
+ * @param[in] len Length of the source buffer in bytes.
+ * @param[out] gh Pointer to a zxc_gnr_header_t structure to store the parsed header.
+ * @param[out] desc Array of 3 zxc_section_desc_t structures to store the parsed section
+ * descriptors.
+ *
+ * @return Returns 0 on success, or a negative error code on failure.
+ */
+int zxc_read_rec_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
+                                 zxc_section_desc_t desc[ZXC_REC_SECTIONS]);
 
 /**
  * @brief Internal wrapper function to decompress a single chunk of data.

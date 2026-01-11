@@ -224,8 +224,8 @@ int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* n
 }
 
 int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
-                                  const zxc_section_desc_t desc[4]) {
-    size_t needed = ZXC_GNR_HEADER_BINARY_SIZE + 4 * ZXC_SECTION_DESC_BINARY_SIZE;
+                                  const zxc_section_desc_t desc[ZXC_GNR_SECTIONS]) {
+    size_t needed = ZXC_GNR_HEADER_BINARY_SIZE + ZXC_GNR_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
     if (UNLIKELY(rem < needed)) return -1;
 
@@ -240,7 +240,7 @@ int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
     zxc_store_le32(dst + 12, 0);
     uint8_t* p = dst + ZXC_GNR_HEADER_BINARY_SIZE;
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < ZXC_GNR_SECTIONS; i++) {
         zxc_store_le64(p, desc[i].sizes);
         p += ZXC_SECTION_DESC_BINARY_SIZE;
     }
@@ -249,8 +249,8 @@ int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
 }
 
 int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
-                                 zxc_section_desc_t desc[4]) {
-    size_t needed = ZXC_GNR_HEADER_BINARY_SIZE + 4 * ZXC_SECTION_DESC_BINARY_SIZE;
+                                 zxc_section_desc_t desc[ZXC_GNR_SECTIONS]) {
+    size_t needed = ZXC_GNR_HEADER_BINARY_SIZE + ZXC_GNR_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
     if (UNLIKELY(len < needed)) return -1;
 
@@ -263,7 +263,54 @@ int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_
 
     const uint8_t* p = src + ZXC_GNR_HEADER_BINARY_SIZE;
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < ZXC_GNR_SECTIONS; i++) {
+        desc[i].sizes = zxc_le64(p);
+        p += ZXC_SECTION_DESC_BINARY_SIZE;
+    }
+    return 0;
+}
+
+int zxc_write_rec_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
+                                  const zxc_section_desc_t desc[ZXC_REC_SECTIONS]) {
+    size_t needed = ZXC_REC_HEADER_BINARY_SIZE + ZXC_REC_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+
+    if (UNLIKELY(rem < needed)) return -1;
+
+    zxc_store_le32(dst, gh->n_sequences);
+    zxc_store_le32(dst + 4, gh->n_literals);
+
+    dst[8] = gh->enc_lit;
+    dst[9] = gh->enc_litlen;
+    dst[10] = gh->enc_mlen;
+    dst[11] = gh->enc_off;
+
+    zxc_store_le32(dst + 12, 0);
+    uint8_t* p = dst + ZXC_REC_HEADER_BINARY_SIZE;
+
+    for (int i = 0; i < ZXC_REC_SECTIONS; i++) {
+        zxc_store_le64(p, desc[i].sizes);
+        p += ZXC_SECTION_DESC_BINARY_SIZE;
+    }
+
+    return (int)needed;
+}
+
+int zxc_read_rec_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
+                                 zxc_section_desc_t desc[ZXC_REC_SECTIONS]) {
+    size_t needed = ZXC_REC_HEADER_BINARY_SIZE + ZXC_REC_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+
+    if (UNLIKELY(len < needed)) return -1;
+
+    gh->n_sequences = zxc_le32(src);
+    gh->n_literals = zxc_le32(src + 4);
+    gh->enc_lit = src[8];
+    gh->enc_litlen = src[9];
+    gh->enc_mlen = src[10];
+    gh->enc_off = src[11];
+
+    const uint8_t* p = src + ZXC_REC_HEADER_BINARY_SIZE;
+
+    for (int i = 0; i < ZXC_REC_SECTIONS; i++) {
         desc[i].sizes = zxc_le64(p);
         p += ZXC_SECTION_DESC_BINARY_SIZE;
     }
