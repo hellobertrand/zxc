@@ -1516,7 +1516,7 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
     const uint8_t* data = src + header_len;
     int decoded_sz = -1;
 
-    if (LIKELY(type == ZXC_BLOCK_GNR)) {
+    if (type == ZXC_BLOCK_GNR) {
         decoded_sz = zxc_decode_block_gnr(ctx, data, comp_sz, dst, dst_cap, raw_sz);
     } else if (type == ZXC_BLOCK_REC) {
         decoded_sz = zxc_decode_block_rec(ctx, data, comp_sz, dst, dst_cap, raw_sz);

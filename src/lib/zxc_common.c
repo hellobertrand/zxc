@@ -39,13 +39,13 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
 
     if (mode == 0) return 0;
 
-    size_t max_seq = chunk_size / 4 + 256;
+    size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
     size_t sz_hash = 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
     size_t sz_chain = chunk_size * sizeof(uint16_t);
     size_t sz_sequences = max_seq * sizeof(uint32_t);
     size_t sz_tokens = max_seq * sizeof(uint8_t);
     size_t sz_offsets = max_seq * sizeof(uint16_t);
-    size_t sz_extras = chunk_size;
+    size_t sz_extras = max_seq * 2 * 5;  // Max 5 bytes per LL/ML VByte
     size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
     // Calculate sizes with alignment padding (64 bytes for cache line alignment)
@@ -74,7 +74,7 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
     ctx->buf_sequences = (uint32_t*)(mem + off_sequences);
     ctx->buf_tokens = (uint8_t*)(mem + off_tokens);
     ctx->buf_offsets = (uint16_t*)(mem + off_offsets);
-    ctx->buf_extras = (uint32_t*)(mem + off_extras);
+    ctx->buf_extras = (uint8_t*)(mem + off_extras);
     ctx->literals = (uint8_t*)(mem + off_lit);
 
     ctx->epoch = 1;

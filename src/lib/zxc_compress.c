@@ -46,12 +46,6 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
 }
 #endif
 
-typedef struct {
-    const uint8_t* ref;
-    uint32_t len;
-    uint32_t backtrack;
-} zxc_match_t;
-
 /**
  * @brief Writes a variable-length byte encoded value to a buffer.
  *
@@ -60,11 +54,11 @@ typedef struct {
  * uses fewer bytes for smaller values, making it efficient for compressing
  * integers with varying magnitudes.
  *
- * @param dst Pointer to the destination buffer where the encoded value will be written.
- * @param val The 32-bit unsigned integer value to encode.
+ * @param[out] dst Pointer to the destination buffer where the encoded value will be written.
+ * @param[in] val The 32-bit unsigned integer value to encode.
  * @return The number of bytes written to the destination buffer.
  */
-size_t zxc_write_vbyte(uint8_t* dst, uint32_t val) {
+size_t ZXC_ALWAYS_INLINE zxc_write_vbyte(uint8_t* dst, uint32_t val) {
     size_t count = 0;
     while (val >= 0x80) {
         dst[count++] = (uint8_t)(val | 0x80);
@@ -74,6 +68,46 @@ size_t zxc_write_vbyte(uint8_t* dst, uint32_t val) {
     return count;
 }
 
+/**
+ * @brief Structure representing a match found during compression.
+ *
+ * This structure holds information about a matching sequence found
+ * in the input data during the compression process.
+ *
+ * @param ref       Pointer to the reference data where the match was found.
+ * @param len       Length of the matching sequence in bytes.
+ * @param backtrack Distance to backtrack from the current position to find the match.
+ */
+typedef struct {
+    const uint8_t* ref;
+    uint32_t len;
+    uint32_t backtrack;
+} zxc_match_t;
+
+
+/**
+ * @brief Finds the best matching sequence for LZ77 compression
+ *
+ * This function searches for the longest matching sequence in the
+ * sliding window dictionary for LZ77 compression algorithm.
+ * It is marked as always inline for performance optimization.
+ *
+ * @param[in] src Pointer to the start of the source buffer.
+ * @param[in] ip Current input position pointer.
+ * @param[in] iend Pointer to the end of the input buffer.
+ * @param[in] mflimit Pointer to the match finding limit.
+ * @param[in] anchor Pointer to the current anchor position.
+ * @param[in,out] hash_table Pointer to the hash table for match finding.
+ * @param[in,out] chain_table Pointer to the chain table for collision handling.
+ * @param[in] epoch_mark Current epoch marker for hash table invalidation.
+ * @param[in] level Compression level (affects search depth and lazy matching).
+ * @param[in] search_depth Maximum number of hash chain entries to search.
+ * @param[in] sufficient_len Match length threshold to stop searching.
+ * @param[in] use_lazy Flag indicating whether to use lazy matching.
+ *
+ * @return zxc_match_t Structure containing the best match information
+ *         (reference pointer, length of the match, and backtrack distance).
+ */
 static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* mflimit,
     const uint8_t* anchor, uint32_t* hash_table, uint16_t* chain_table, uint32_t epoch_mark,
@@ -577,12 +611,11 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint8_t* literals = ctx->literals;
     uint8_t* buf_tokens = ctx->buf_tokens;
     uint16_t* buf_offsets = ctx->buf_offsets;
-    uint32_t* buf_extras = ctx->buf_extras;
+    uint8_t* buf_extras = ctx->buf_extras;
 
     uint32_t seq_c = 0;
     size_t lit_c = 0;
-    size_t n_extras = 0;
-    size_t vbyte_size = 0;
+    size_t extras_sz = 0;
     uint16_t max_offset = 0;  // Track max offset for 1-byte/2-byte mode decision
 
     while (LIKELY(ip < mflimit)) {
@@ -619,14 +652,10 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             if (off > max_offset) max_offset = (uint16_t)off;
 
             if (ll >= ZXC_TOKEN_LL_MASK) {
-                uint32_t val = ll - ZXC_TOKEN_LL_MASK;
-                buf_extras[n_extras++] = val;
-                vbyte_size += (zxc_highbit32(val | 1) + 6) / 7;
+                extras_sz += zxc_write_vbyte(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
             }
             if (ml >= ZXC_TOKEN_ML_MASK) {
-                uint32_t val = ml - ZXC_TOKEN_ML_MASK;
-                buf_extras[n_extras++] = val;
-                vbyte_size += (zxc_highbit32(val | 1) + 6) / 7;
+                extras_sz += zxc_write_vbyte(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
             }
             seq_c++;
 
@@ -814,7 +843,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     desc[0].sizes = (uint64_t)(use_rle ? rle_size : lit_c) | ((uint64_t)lit_c << 32);
     desc[1].sizes = (uint64_t)seq_c | ((uint64_t)seq_c << 32);
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
-    desc[3].sizes = (uint64_t)vbyte_size | ((uint64_t)vbyte_size << 32);
+    desc[3].sizes = (uint64_t)extras_sz | ((uint64_t)extras_sz << 32);
 
     int ghs = zxc_write_gnr_header_and_desc(p, rem, &gh, desc);
     if (UNLIKELY(ghs < 0)) return -1;
@@ -923,15 +952,8 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     if (UNLIKELY(rem < sz_ext)) return -1;
 
-    // Write VByte stream
-    for (size_t j = 0; j < n_extras; j++) {
-        uint32_t val = buf_extras[j];
-        while (val >= 0x80) {
-            *p_curr++ = (uint8_t)(val | 0x80);
-            val >>= 7;
-        }
-        *p_curr++ = (uint8_t)val;
-    }
+    ZXC_MEMCPY(p_curr, buf_extras, extras_sz);
+    p_curr += extras_sz;
 
     uint32_t p_sz = (uint32_t)(p_curr - (dst + h_gap));
     if (chk)
@@ -1038,7 +1060,7 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     const uint8_t *ip = src, *iend = src + src_size, *anchor = ip, *mflimit = iend - 12;
 
     uint32_t* hash_table = ctx->hash_table;
-    uint32_t* buf_extras = ctx->buf_extras;
+    uint8_t* buf_extras = ctx->buf_extras;
     uint16_t* chain_table = ctx->chain_table;
     uint8_t* literals = ctx->literals;
 
@@ -1085,10 +1107,10 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             seq_c++;
 
             if (ll >= ZXC_SEQ_LL_MASK) {
-                extras_c += zxc_write_vbyte((uint8_t*)buf_extras + extras_c, ll - ZXC_SEQ_LL_MASK);
+                extras_c += zxc_write_vbyte(buf_extras + extras_c, ll - ZXC_SEQ_LL_MASK);
             }
             if (ml >= ZXC_SEQ_ML_MASK) {
-                extras_c += zxc_write_vbyte((uint8_t*)buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
+                extras_c += zxc_write_vbyte(buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
             }
 
             if (m.len > 2 && level > 4) {
@@ -1260,7 +1282,7 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint8_t* p = dst + h_gap;
     size_t rem = dst_cap - h_gap;
 
-    // Decide offset encoding mode (Reserved for future, currently fixed)
+    // Decide offset encoding mode
     zxc_gnr_header_t gh = {.n_sequences = seq_c,
                            .n_literals = (uint32_t)lit_c,
                            .enc_lit = (uint8_t)use_rle,
