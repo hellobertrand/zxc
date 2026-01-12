@@ -988,9 +988,9 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
  *
  * @return 0 on success, or -1 if an error occurs (e.g., buffer overflow).
  */
-static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
-                                uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz,
-                                uint64_t crc_val) {
+static int zxc_encode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
+                                   uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz,
+                                   uint64_t crc_val) {
     int level = ctx->compression_level;
     int chk = ctx->checksum_enabled;
 
@@ -1225,7 +1225,7 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     //     }
 
     size_t h_gap = ZXC_BLOCK_HEADER_SIZE + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_REC, .raw_size = (uint32_t)src_size};
+    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GNR_HV, .raw_size = (uint32_t)src_size};
     uint8_t* p = dst + h_gap;
     size_t rem = dst_cap - h_gap;
 
@@ -1237,13 +1237,13 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                            .enc_mlen = 0,
                            .enc_off = (uint8_t)(max_offset <= 255) ? 1 : 0};
 
-    zxc_section_desc_t desc[ZXC_REC_SECTIONS] = {0};
+    zxc_section_desc_t desc[ZXC_GNR_HV_SECTIONS] = {0};
     desc[0].sizes = (uint64_t)lit_c | ((uint64_t)lit_c << 32);
     size_t sz_seqs = seq_c * sizeof(uint32_t);
     desc[1].sizes = (uint64_t)sz_seqs | ((uint64_t)sz_seqs << 32);
     desc[2].sizes = (uint64_t)extras_c | ((uint64_t)extras_c << 32);
 
-    int ghs = zxc_write_rec_header_and_desc(p, rem, &gh, desc);
+    int ghs = zxc_write_gnr_hv_header_and_desc(p, rem, &gh, desc);
     if (UNLIKELY(ghs < 0)) return -1;
 
     uint8_t* p_curr = p + ghs;
@@ -1479,7 +1479,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
 
     if (!try_num) {
         if (ctx->compression_level <= 3) {
-            res = zxc_encode_block_rec(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
+            res = zxc_encode_block_gnr_hv(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
         } else {
             res = zxc_encode_block_gnr(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
         }

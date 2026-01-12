@@ -128,12 +128,13 @@ extern "C" {
 #define ZXC_NUM_HEADER_BINARY_SIZE 16  // Num Header: N Values (8) + Frame Size (2) + Reserved (6)
 #define ZXC_GNR_HEADER_BINARY_SIZE \
     16  // GNR Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
+#define ZXC_GNR_HV_HEADER_BINARY_SIZE \
+    16  // GNR_HV Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
+
+// Section Descriptor Sizes
 #define ZXC_SECTION_DESC_BINARY_SIZE 8  // Section Desc: Comp Size (4) + Raw Size (4)
 #define ZXC_GNR_SECTIONS 4              // Number of sections in GNR blocks
-
-#define ZXC_REC_HEADER_BINARY_SIZE \
-    16  // REC Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
-#define ZXC_REC_SECTIONS 3  // Number of sections in REC blocks
+#define ZXC_GNR_HV_SECTIONS 3           // Number of sections in GNR_HV blocks
 
 // Block Flags
 #define ZXC_BLOCK_FLAG_NONE 0U         // No flags
@@ -148,7 +149,7 @@ extern "C" {
 #define ZXC_TOKEN_ML_MASK \
     ((1U << ZXC_TOKEN_ML_BITS) - 1)  // Mask to extract Match Length from token
 
-// Sequence Format Constants (REC Token - 8-bit LL, 8-bit ML, 16-bit Offset)
+// Sequence Format Constants (GNR_HV Token - 8-bit LL, 8-bit ML, 16-bit Offset)
 #define ZXC_SEQ_LL_BITS 8
 #define ZXC_SEQ_ML_BITS 8
 #define ZXC_SEQ_OFF_BITS 16
@@ -217,14 +218,14 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(int level) {
  * is the default for most data (text, binaries, JSON, etc.).
  * - `ZXC_BLOCK_NUM` (2): Specialized compression for arrays of 32-bit integers.
  *   Uses Delta Encoding + ZigZag + Bitpacking.
- * - `ZXC_BLOCK_REC` (3): High-compression mode using LZ77 with advanced
+ * - `ZXC_BLOCK_GNR_HV` (3): General-purpose high-velocity mode using LZ77 with advanced
  * techniques (lazy matching, step skipping) for maximum ratio.
  */
 typedef enum {
     ZXC_BLOCK_RAW = 0,
     ZXC_BLOCK_GNR = 1,
     ZXC_BLOCK_NUM = 2,
-    ZXC_BLOCK_REC = 3
+    ZXC_BLOCK_GNR_HV = 3
 } zxc_block_type_t;
 
 /**
@@ -682,7 +683,7 @@ void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* src, size_t size);
  * written.
  * @param[in] dst_cap The capacity of the destination buffer in bytes.
  * @param[in] bits The number of bits to use for each integer during packing.
- * @return The number of bytes written to the destination buffer, or a negative
+ * @return int The number of bytes written to the destination buffer, or a negative
  * error code on failure.
  */
 int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* RESTRICT dst,
@@ -696,7 +697,7 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* R
  * @param[out] dst Pointer to the destination buffer.
  * @param[in] rem The remaining space in the destination buffer.
  * @param[in] nh Pointer to the numeric header structure to write.
- * @return The number of bytes written, or a negative error code if the buffer
+ * @return int The number of bytes written, or a negative error code if the buffer
  * is too small.
  */
 int zxc_write_num_header(uint8_t* dst, size_t rem, const zxc_num_header_t* nh);
@@ -709,7 +710,7 @@ int zxc_write_num_header(uint8_t* dst, size_t rem, const zxc_num_header_t* nh);
  * @param[in] src Pointer to the source buffer.
  * @param[in] src_size The size of the source buffer available for reading.
  * @param[out] nh Pointer to the numeric header structure to populate.
- * @return The number of bytes read from the source, or a negative error code on
+ * @return int The number of bytes read from the source, or a negative error code on
  * failure.
  */
 int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* nh);
@@ -724,7 +725,7 @@ int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* n
  * @param[in] rem The remaining space in the destination buffer.
  * @param[in] gh Pointer to the generic header structure to write.
  * @param[in] desc Array of 4 section descriptors to write.
- * @return The number of bytes written, or a negative error code if the buffer
+ * @return int The number of bytes written, or a negative error code if the buffer
  * is too small.
  */
 int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
@@ -740,8 +741,8 @@ int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
  * @param[in] len The length of the source buffer available for reading.
  * @param[out] gh Pointer to the generic header structure to populate.
  * @param[out] desc Array of 4 section descriptors to populate.
- * @return The number of bytes read from the source, or a negative error code on
- * failure.
+ *
+ * @return int Returns 0 on success, or a negative error code on failure.
  */
 int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
                                  zxc_section_desc_t desc[ZXC_GNR_SECTIONS]);
@@ -756,8 +757,8 @@ int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_
  *
  * @return int Returns the number of bytes written on success, or a negative error code on failure.
  */
-int zxc_write_rec_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
-                                  const zxc_section_desc_t desc[ZXC_REC_SECTIONS]);
+int zxc_write_gnr_hv_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
+                                     const zxc_section_desc_t desc[ZXC_GNR_HV_SECTIONS]);
 
 /**
  * @brief Reads a record header and section descriptors from a buffer.
@@ -771,10 +772,10 @@ int zxc_write_rec_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
  * @param[out] desc Array of 3 zxc_section_desc_t structures to store the parsed section
  * descriptors.
  *
- * @return Returns 0 on success, or a negative error code on failure.
+ * @return int Returns 0 on success, or a negative error code on failure.
  */
-int zxc_read_rec_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
-                                 zxc_section_desc_t desc[ZXC_REC_SECTIONS]);
+int zxc_read_gnr_hv_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
+                                    zxc_section_desc_t desc[ZXC_GNR_HV_SECTIONS]);
 
 /**
  * @brief Internal wrapper function to decompress a single chunk of data.
