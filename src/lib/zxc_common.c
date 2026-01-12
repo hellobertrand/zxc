@@ -171,45 +171,6 @@ int zxc_read_block_header(const uint8_t* src, size_t src_size, zxc_block_header_
     return 0;
 }
 
-/*
- * ============================================================================
- * BITPACKING UTILITIES
- * ============================================================================
- */
-
-void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* src, size_t size) {
-    br->ptr = src;
-    br->end = src + size;
-    br->accum = zxc_le64(br->ptr);
-    br->ptr += 8;
-    br->bits = 64;
-}
-
-// Packs an array of 32-bit integers into a bitstream using 'bits' bits per
-// integer.
-
-int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* RESTRICT dst,
-                          size_t dst_cap, uint8_t bits) {
-    size_t out_bytes = ((count * bits) + 7) / 8;
-
-    if (UNLIKELY(dst_cap < out_bytes)) return -1;
-
-    size_t bit_pos = 0;
-    ZXC_MEMSET(dst, 0, out_bytes);
-
-    for (size_t i = 0; i < count; i++) {
-        uint64_t v = (uint64_t)src[i] << (bit_pos % 8);
-        size_t byte_idx = bit_pos / 8;
-        dst[byte_idx] |= (uint8_t)v;
-        if (bits + (bit_pos % 8) > 8) dst[byte_idx + 1] |= (uint8_t)(v >> 8);
-        if (bits + (bit_pos % 8) > 16) dst[byte_idx + 2] |= (uint8_t)(v >> 16);
-        if (bits + (bit_pos % 8) > 24) dst[byte_idx + 3] |= (uint8_t)(v >> 24);
-        if (bits + (bit_pos % 8) > 32) dst[byte_idx + 4] |= (uint8_t)(v >> 32);
-        bit_pos += bits;
-    }
-    return (int)out_bytes;
-}
-
 int zxc_write_num_header(uint8_t* dst, size_t rem, const zxc_num_header_t* nh) {
     if (UNLIKELY(rem < ZXC_NUM_HEADER_BINARY_SIZE)) return -1;
 
@@ -324,8 +285,49 @@ int zxc_read_gnr_hv_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_head
     return 0;
 }
 
+/*
+ * ============================================================================
+ * BITPACKING UTILITIES
+ * ============================================================================
+ */
+
+void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* src, size_t size) {
+    br->ptr = src;
+    br->end = src + size;
+    br->accum = zxc_le64(br->ptr);
+    br->ptr += 8;
+    br->bits = 64;
+}
+
+int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* RESTRICT dst,
+                          size_t dst_cap, uint8_t bits) {
+    size_t out_bytes = ((count * bits) + 7) / 8;
+
+    if (UNLIKELY(dst_cap < out_bytes)) return -1;
+
+    size_t bit_pos = 0;
+    ZXC_MEMSET(dst, 0, out_bytes);
+
+    for (size_t i = 0; i < count; i++) {
+        uint64_t v = (uint64_t)src[i] << (bit_pos % 8);
+        size_t byte_idx = bit_pos / 8;
+        dst[byte_idx] |= (uint8_t)v;
+        if (bits + (bit_pos % 8) > 8) dst[byte_idx + 1] |= (uint8_t)(v >> 8);
+        if (bits + (bit_pos % 8) > 16) dst[byte_idx + 2] |= (uint8_t)(v >> 16);
+        if (bits + (bit_pos % 8) > 24) dst[byte_idx + 3] |= (uint8_t)(v >> 24);
+        if (bits + (bit_pos % 8) > 32) dst[byte_idx + 4] |= (uint8_t)(v >> 32);
+        bit_pos += bits;
+    }
+    return (int)out_bytes;
+}
+
+/*
+ * ============================================================================
+ * COMPRESS BOUND CALCULATION
+ * ============================================================================
+ */
 size_t zxc_compress_bound(size_t input_size) {
-    if (input_size > SIZE_MAX - (SIZE_MAX >> 10)) return 0;
+    if (UNLIKELY(input_size > SIZE_MAX - (SIZE_MAX >> 10))) return 0;
 
     size_t n = (input_size + ZXC_CHUNK_SIZE - 1) / ZXC_CHUNK_SIZE;
     if (n == 0) n = 1;

@@ -1171,10 +1171,10 @@ static int zxc_decode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
-    const uint8_t* const d_end_safe = d_end - (ZXC_PAD_SIZE * 4);
+    const uint8_t* const d_end_safe = d_end - (ZXC_PAD_SIZE * 4);  // 128
     // Safety margin for 4x unrolled loop: 4 * (ZXC_SEQ_LL_MASK LL +
     // ZXC_SEQ_ML_MASK+ZXC_LZ_MIN_MATCH ML) + ZXC_PAD_SIZE Pad = 4 x (255 + 255 + 5) + 32 = 2092
-    const uint8_t* const d_end_fast = d_end - 2112;
+    const uint8_t* const d_end_fast = d_end - (ZXC_PAD_SIZE * 66);  // 2112
 
     uint32_t n_seq = gh.n_sequences;
 
@@ -1575,18 +1575,23 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
     const uint8_t* data = src + header_len;
     int decoded_sz = -1;
 
-    if (type == ZXC_BLOCK_GNR) {
-        decoded_sz = zxc_decode_block_gnr(ctx, data, comp_sz, dst, dst_cap, raw_sz);
-    } else if (type == ZXC_BLOCK_GNR_HV) {
-        decoded_sz = zxc_decode_block_gnr_hv(ctx, data, comp_sz, dst, dst_cap, raw_sz);
-    } else if (type == ZXC_BLOCK_RAW) {
-        if (UNLIKELY(raw_sz > dst_cap || raw_sz > comp_sz)) return -1;
-        ZXC_MEMCPY(dst, data, raw_sz);
-        decoded_sz = (int)raw_sz;
-    } else if (type == ZXC_BLOCK_NUM) {
-        decoded_sz = zxc_decode_block_num(data, comp_sz, dst, dst_cap, raw_sz);
-    } else {
-        return -1;
+    switch (type) {
+        case ZXC_BLOCK_GNR:
+            decoded_sz = zxc_decode_block_gnr(ctx, data, comp_sz, dst, dst_cap, raw_sz);
+            break;
+        case ZXC_BLOCK_GNR_HV:
+            decoded_sz = zxc_decode_block_gnr_hv(ctx, data, comp_sz, dst, dst_cap, raw_sz);
+            break;
+        case ZXC_BLOCK_RAW:
+            if (UNLIKELY(raw_sz > dst_cap || raw_sz > comp_sz)) return -1;
+            ZXC_MEMCPY(dst, data, raw_sz);
+            decoded_sz = (int)raw_sz;
+            break;
+        case ZXC_BLOCK_NUM:
+            decoded_sz = zxc_decode_block_num(data, comp_sz, dst, dst_cap, raw_sz);
+            break;
+        default:
+            return -1;
     }
 
     if (decoded_sz >= 0 && has_crc && ctx->checksum_enabled) {

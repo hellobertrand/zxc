@@ -643,8 +643,6 @@ void zxc_aligned_free(void* ptr);
  * ============================================================================
  */
 
-// Represents a found LZ77 sequence (Literal Length, Match Length, Offset)
-
 /*
  * INTERNAL API
  * ------------
@@ -816,8 +814,8 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
  * written.
  * @param[in] dst_cap   The capacity of the destination buffer (maximum bytes to write).
  *
- * @return The number of bytes written to the destination buffer on success,
- *         or a negative error code on failure.
+ * @return int      The number of bytes written to the destination buffer on success,
+ *                  or a negative error code on failure.
  */
 int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src_sz, uint8_t* dst,
                                size_t dst_cap);
