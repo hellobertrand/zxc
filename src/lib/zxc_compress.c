@@ -942,38 +942,22 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 }
 
 /**
- * @brief Encodes a data block using the General (REC) compression format.
+ * @brief Encodes a data block using the General High Velocity (GNR_HV) compression format.
  *
- * This function implements the core LZ77 compression logic. It dynamically
- * adjusts compression parameters (search depth, lazy matching strategy, and
- * step skipping) based on the compression level configured in the context.
+ * 1. Compression Strategy
+ * It uses an LZ77-based algorithm with a sliding window (64KB) and a hash table/chain table
+ * mechanism. It is designed for higher compression levels (usually when parameters retrieved via
+ * zxc_get_lz77_params favor deeper searches or lazy matching).
  *
- * **LZ77 Implementation Details:**
- * 1. **Hash Chain:** Uses a hash table (`ctx->hash_table`) to find potential
- * match positions. Collisions are handled via a `chain_table`, allowing us to
- * search deeper into the history for a better match.
- * 2. **Lazy Matching:** If a match is found, we check the *next* byte to see if
- *    it produces a longer match. If so, we output a literal and take the better
- * match. This is enabled for levels >= 3.
- * 3. **Step Skipping:** For lower levels (1-3), we skip bytes when updating the
- *    hash table to increase speed (`step > 1`). For levels 4+, we process every
- * byte to maximize compression ratio.
- * 4. **SIMD Match Finding:** Uses AVX2/AVX512/NEON to compare 32/64 bytes at a
- * time during match length calculation, significantly speeding up long match
- * verification.
- * 5. **RLE Detection:** Analyzes literals to see if Run-Length Encoding would
- * be beneficial (saving > 10% space).
+ * 2. Token Format (Fixed-Width)
+ * Unlike the standard GNR block which uses 1-byte tokens (4-bit literal length / 4-bit match
+ * length), GNR_HV uses 4-byte (32-bit) sequence records for better performance on long runs:
  *
- * The encoding process consists of:
- * 1. **LZ77 Parsing**: The function iterates through the source data,
- * maintaining a hash chain to find repeated patterns (matches). It supports
- * "Lazy Matching" for higher compression levels to optimize match selection.
- * 2. **Sequence Storage**: Matches are converted into sequences consisting of
- *    literal lengths, match lengths, and offsets.
- * 3. **Bitpacking & Serialization**: The sequences are analyzed to determine
- * optimal bit-widths. The function then writes the block header, encodes
- * literals (using Raw or RLE encoding), and bit-packs the sequence streams into
- * the destination buffer.
+ * Literal Length (LL): 8 bits (stores 0-254; 255 indicates overflow).
+ * Match Length (ML): 8 bits (stores 0-254; 255 indicates overflow).
+ * Offset: 16 bits (supports the full 64KB window).
+ * This format minimizes the number of expensive VByte reads during decompression for common
+ * sequences where lengths are between 16 and 255.
  *
  * @param[in,out] ctx       Pointer to the compression context containing hash tables
  * and configuration.
