@@ -147,6 +147,63 @@ extern "C" {
     ((1U << ZXC_TOKEN_LIT_BITS) - 1)  // Mask to extract Literal Length from token
 #define ZXC_TOKEN_ML_MASK \
     ((1U << ZXC_TOKEN_ML_BITS) - 1)  // Mask to extract Match Length from token
+
+/**
+ * @struct zxc_lz77_params_t
+ * @brief Search parameters for LZ77 compression levels.
+ */
+typedef struct {
+    int search_depth;     // Max matches to check in hash chain
+    int sufficient_len;   // Stop searching if match >= this length
+    int use_lazy;         // Use lazy matching (check next position)
+    int lazy_attempts;    // Max matches to check for lazy matching
+    uint32_t step_base;   // Base step for literal advancement
+    uint32_t step_shift;  // Shift for distance-based stepping
+} zxc_lz77_params_t;
+
+/**
+ * @brief Returns LZ77 parameters for a given compression level.
+ */
+static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(int level) {
+    zxc_lz77_params_t p;
+    if (level <= 1) {
+        p.search_depth = 6;
+        p.sufficient_len = 16;
+        p.use_lazy = 0;
+        p.lazy_attempts = 2;
+        p.step_base = 2;
+        p.step_shift = 3;
+    } else if (level == 2) {
+        p.search_depth = 10;
+        p.sufficient_len = 16;
+        p.use_lazy = 0;
+        p.lazy_attempts = 2;
+        p.step_base = 1;
+        p.step_shift = 3;
+    } else if (level == 3) {
+        p.search_depth = 4;
+        p.sufficient_len = 48;
+        p.use_lazy = 1;
+        p.lazy_attempts = 8;
+        p.step_base = 1;
+        p.step_shift = 8;
+    } else if (level == 4) {
+        p.search_depth = 4;
+        p.sufficient_len = 32;
+        p.use_lazy = 1;
+        p.lazy_attempts = 8;
+        p.step_base = 1;
+        p.step_shift = 5;
+    } else {
+        p.search_depth = 64;
+        p.sufficient_len = 256;
+        p.use_lazy = 1;
+        p.lazy_attempts = 16;
+        p.step_base = 1;
+        p.step_shift = 31;
+    }
+    return p;
+}
 // Sequence Format Constants (REC Token - 8-bit LL, 8-bit ML, 16-bit Offset)
 #define ZXC_SEQ_LL_BITS 8
 #define ZXC_SEQ_ML_BITS 8
