@@ -84,7 +84,6 @@ typedef struct {
     uint32_t backtrack;
 } zxc_match_t;
 
-
 /**
  * @brief Finds the best matching sequence for LZ77 compression
  *
@@ -111,7 +110,7 @@ typedef struct {
 static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* mflimit,
     const uint8_t* anchor, uint32_t* hash_table, uint16_t* chain_table, uint32_t epoch_mark,
-    int level, int search_depth, int sufficient_len, int use_lazy) {
+    int level, zxc_lz77_params_t p) {
     zxc_match_t best = {NULL, ZXC_LZ_MIN_MATCH - 1, 0};
     uint32_t cur_val = zxc_le32(ip);
     uint32_t h = zxc_hash_func(cur_val);
@@ -132,7 +131,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
     if (match_idx == 0) return best;
 
-    int attempts = search_depth;
+    int attempts = p.search_depth;
     int is_first = 1;
 
     while (match_idx > 0 && attempts-- >= 0) {
@@ -229,7 +228,8 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             if (mlen > best.len) {
                 best.len = mlen;
                 best.ref = ref;
-                if (UNLIKELY(best.len >= (uint32_t)sufficient_len || ip + best.len >= iend)) break;
+                if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend))
+                    break;
             }
         }
         uint16_t delta = chain_table[match_idx];
@@ -252,7 +252,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         best.ref = b_ref;
     }
 
-    if (use_lazy && best.ref && best.len < 128 && ip + 1 < mflimit) {
+    if (p.use_lazy && best.ref && best.len < 128 && ip + 1 < mflimit) {
         uint32_t next_val = zxc_le32(ip + 1);
         uint32_t h2 = zxc_hash_func(next_val);
         uint32_t next_head = hash_table[2 * h2];
@@ -261,7 +261,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             (next_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (next_head & ZXC_OFFSET_MASK) : 0;
         int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_val);
         uint32_t max_lazy = 0;
-        int lazy_att = (level >= 3) ? (level >= 5 ? 16 : 8) : 2;
+        int lazy_att = p.lazy_attempts;
         int is_lazy_first = 1;
 
         while (next_idx > 0 && lazy_att-- > 0) {
@@ -290,7 +290,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             int skip_head3 = (idx3 > 0 && tag3 != val3);
             int is_first3 = 1;
             uint32_t max_lazy3 = 0;
-            lazy_att = (level >= 5) ? 16 : 8;
+            lazy_att = p.lazy_attempts;
             while (idx3 > 0 && lazy_att-- > 0) {
                 if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 >= ZXC_LZ_MAX_DIST)) break;
                 const uint8_t* ref3 = src + idx3;
@@ -570,33 +570,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     int level = ctx->compression_level;
     int chk = ctx->checksum_enabled;
 
-    int use_lazy = 0;
-    int search_depth = 4;
-    int sufficient_len = 256;
-    uint32_t step_base = 1;
-    uint32_t step_shift = 31;
-
-    // if (level <= 1) {
-    //     sufficient_len = 16;
-    //     step_base = 3;
-    //     step_shift = 3;
-    // } else if (level == 2) {
-    //     sufficient_len = 16;
-    //     step_base = 2;
-    //     step_shift = 3;
-    // } else if (level == 3) {
-    //     use_lazy = 1;
-    //     sufficient_len = 32;
-    //     step_shift = 4;
-    // } else
-    if (level <= 4) {
-        use_lazy = 1;
-        sufficient_len = 32;
-        step_shift = 5;
-    } else {
-        search_depth = 64;
-        use_lazy = 1;
-    }
+    zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
@@ -620,14 +594,13 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     while (LIKELY(ip < mflimit)) {
         size_t dist = (size_t)(ip - anchor);
-        size_t step = step_base + (dist >> step_shift);
+        size_t step = lzp.step_base + (dist >> lzp.step_shift);
         if (UNLIKELY(ip + step >= mflimit)) step = 1;
 
         ZXC_PREFETCH_READ(ip + step * 4 + 64);
 
-        zxc_match_t m =
-            zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, chain_table,
-                                     epoch_mark, level, search_depth, sufficient_len, use_lazy);
+        zxc_match_t m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table,
+                                                 chain_table, epoch_mark, level, lzp);
 
         if (m.ref) {
             ip -= m.backtrack;
@@ -1021,35 +994,7 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     int level = ctx->compression_level;
     int chk = ctx->checksum_enabled;
 
-    int use_lazy = 0;
-    int search_depth = 4;
-    int sufficient_len = 256;
-    uint32_t step_base = 1;
-    uint32_t step_shift = 31;
-
-    // if (level <= 1) {
-    //     // search_depth = 0;
-    //     sufficient_len = 16;
-    //     step_base = 3;
-    //     step_shift = 3;
-    if (level <= 1) {
-        search_depth = 6;
-        sufficient_len = 16;
-        step_base = 2;
-        step_shift = 3;
-    } else if (level == 2) {
-        // use_lazy = 1;
-        search_depth = 10;
-        sufficient_len = 16;
-        step_shift = 3;
-    } else if (level == 3) {
-        use_lazy = 1;
-        sufficient_len = 48;
-        step_shift = 8;
-    } else {
-        search_depth = 64;
-        use_lazy = 1;
-    }
+    zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
@@ -1073,14 +1018,13 @@ static int zxc_encode_block_rec(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     while (LIKELY(ip < mflimit)) {
         size_t dist = (size_t)(ip - anchor);
-        size_t step = step_base + (dist >> step_shift);
+        size_t step = lzp.step_base + (dist >> lzp.step_shift);
         if (UNLIKELY(ip + step >= mflimit)) step = 1;
 
         ZXC_PREFETCH_READ(ip + step * 4 + 64);
 
-        zxc_match_t m =
-            zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, chain_table,
-                                     epoch_mark, level, search_depth, sufficient_len, use_lazy);
+        zxc_match_t m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table,
+                                                 chain_table, epoch_mark, level, lzp);
 
         if (m.ref) {
             ip -= m.backtrack;
