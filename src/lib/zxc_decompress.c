@@ -1062,108 +1062,16 @@ static int zxc_decode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
     const uint8_t* p_curr =
         src + ZXC_GNR_HV_HEADER_BINARY_SIZE + ZXC_GNR_HV_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
-    // --- Literal Stream Setup ---
-    const uint8_t* l_ptr;
-    const uint8_t* l_end;
-    // uint8_t* rle_buf = NULL;
-
-    size_t lit_stream_size = (size_t)(desc[0].sizes & 0xFFFFFFFF);
-
-    // if (gh.enc_lit == 1) {
-    //     size_t required_size = (size_t)(desc[0].sizes >> 32);
-
-    //     if (required_size > 0) {
-    //         if (UNLIKELY(required_size > dst_capacity)) return -1;
-
-    //         if (ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE) {
-    //             uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, required_size +
-    //             ZXC_PAD_SIZE); if (UNLIKELY(!new_buf)) {
-    //                 free(ctx->lit_buffer);
-    //                 ctx->lit_buffer = NULL;
-    //                 ctx->lit_buffer_cap = 0;
-    //                 return -1;
-    //             }
-    //             ctx->lit_buffer = new_buf;
-    //             ctx->lit_buffer_cap = required_size + ZXC_PAD_SIZE;
-    //         }
-
-    //         rle_buf = ctx->lit_buffer;
-    //         if (UNLIKELY(!rle_buf || lit_stream_size > (size_t)(src + src_size - p_curr)))
-    //             return -1;
-
-    //         const uint8_t* r_ptr = p_curr;
-    //         const uint8_t* r_end = r_ptr + lit_stream_size;
-    //         uint8_t* w_ptr = rle_buf;
-    //         const uint8_t* const w_end = rle_buf + required_size;
-
-    //         while (r_ptr < r_end && w_ptr < w_end) {
-    //             uint8_t token = *r_ptr++;
-    //             if (LIKELY(!(token & 0x80))) {
-    //                 // Raw copy (most common path): use ZXC_PAD_SIZE-byte wild copies
-    //                 // token is 7-bit (0-127), so len is 1-128 bytes
-    //                 uint32_t len = (uint32_t)token + 1;
-    //                 if (UNLIKELY(w_ptr + len > w_end || r_ptr + len > r_end)) return -1;
-
-    //                 // Destination has ZXC_PAD_SIZE bytes of safe overrun space.
-    //                 // Source may not - check before wild copy.
-    //                 // Fast path: source has ZXC_PAD_SIZE-byte read headroom (most common)
-    //                 if (LIKELY(r_ptr + ZXC_PAD_SIZE <= r_end)) {
-    //                     // Single 32-byte copy covers len <= ZXC_PAD_SIZE (most tokens)
-    //                     zxc_copy32(w_ptr, r_ptr);
-
-    //                     if (UNLIKELY(len > ZXC_PAD_SIZE)) {
-    //                         // Unroll: max len=128, so max 4 copies total
-    //                         // Use unconditional stores with overlap - faster than branches
-    //                         if (len <= 2 * ZXC_PAD_SIZE) {
-    //                             zxc_copy32(w_ptr + len - ZXC_PAD_SIZE, r_ptr + len -
-    //                             ZXC_PAD_SIZE);
-    //                         } else if (len <= 3 * ZXC_PAD_SIZE) {
-    //                             zxc_copy32(w_ptr + ZXC_PAD_SIZE, r_ptr + ZXC_PAD_SIZE);
-    //                             zxc_copy32(w_ptr + len - ZXC_PAD_SIZE, r_ptr + len -
-    //                             ZXC_PAD_SIZE);
-    //                         } else {
-    //                             zxc_copy32(w_ptr + ZXC_PAD_SIZE, r_ptr + ZXC_PAD_SIZE);
-    //                             zxc_copy32(w_ptr + 2 * ZXC_PAD_SIZE, r_ptr + 2 * ZXC_PAD_SIZE);
-    //                             zxc_copy32(w_ptr + len - ZXC_PAD_SIZE, r_ptr + len -
-    //                             ZXC_PAD_SIZE);
-    //                         }
-    //                     }
-    //                 } else {
-    //                     // Near end of source: safe copy (rare cold path)
-    //                     ZXC_MEMCPY(w_ptr, r_ptr, len);
-    //                 }
-
-    //                 w_ptr += len;
-    //                 r_ptr += len;
-    //             } else {
-    //                 // RLE run: fill with single byte
-    //                 uint32_t len = (token & 0x7F) + 4;
-    //                 if (UNLIKELY(w_ptr + len > w_end || r_ptr >= r_end)) return -1;
-    //                 ZXC_MEMSET(w_ptr, *r_ptr++, len);
-    //                 w_ptr += len;
-    //             }
-    //         }
-    //         if (UNLIKELY(w_ptr != w_end)) return -1;
-    //         l_ptr = rle_buf;
-    //         l_end = rle_buf + required_size;
-    //     } else {
-    //         l_ptr = p_curr;
-    //         l_end = p_curr;
-    //     }
-    // } else {
-    l_ptr = p_curr;
-    l_end = p_curr + lit_stream_size;
-    // }
-
-    p_curr += lit_stream_size;
-
     // --- Stream Pointers & Validation ---
-    size_t sz_seqs = (size_t)(desc[1].sizes & 0xFFFFFFFF);
-    size_t sz_exts = (size_t)(desc[2].sizes & 0xFFFFFFFF);
+    size_t sz_lit = (uint32_t)desc[0].sizes;
+    size_t sz_seqs = (uint32_t)desc[1].sizes;
+    size_t sz_exts = (uint32_t)desc[2].sizes;
+    const uint8_t* l_ptr = p_curr;
+    const uint8_t* l_end = l_ptr + sz_lit;
+    p_curr += sz_lit;
 
     const uint8_t* seq_ptr = p_curr;
-    p_curr += sz_seqs;
-    const uint8_t* extras_ptr = p_curr;
+    const uint8_t* extras_ptr = p_curr + sz_seqs;
     const uint8_t* const extras_end = extras_ptr + sz_exts;
 
     // Validate streams don't overflow source buffer
