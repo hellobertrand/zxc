@@ -111,7 +111,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* mflimit,
     const uint8_t* anchor, uint32_t* hash_table, uint16_t* chain_table, uint32_t epoch_mark,
     int level, zxc_lz77_params_t p) {
-    zxc_match_t best = {NULL, ZXC_LZ_MIN_MATCH - 1, 0};
+    zxc_match_t best = {NULL, ZXC_LZ_MIN_MATCH_LEN - 1, 0};
     uint32_t cur_val = zxc_le32(ip);
     uint32_t h = zxc_hash_func(cur_val);
     uint32_t cur_pos = (uint32_t)(ip - src);
@@ -605,7 +605,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         if (m.ref) {
             ip -= m.backtrack;
             uint32_t ll = (uint32_t)(ip - anchor);
-            uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH);
+            uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
             uint32_t off = (uint32_t)(ip - m.ref);
 
             if (ll > 0) {
@@ -946,13 +946,11 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
  *
  * 1. Compression Strategy
  * It uses an LZ77-based algorithm with a sliding window (64KB) and a hash table/chain table
- * mechanism. It is designed for higher compression levels (usually when parameters retrieved via
- * zxc_get_lz77_params favor deeper searches or lazy matching).
+ * mechanism.
  *
  * 2. Token Format (Fixed-Width)
  * Unlike the standard GNR block which uses 1-byte tokens (4-bit literal length / 4-bit match
  * length), GNR_HV uses 4-byte (32-bit) sequence records for better performance on long runs:
- *
  * Literal Length (LL): 8 bits (stores 0-254; 255 indicates overflow).
  * Match Length (ML): 8 bits (stores 0-254; 255 indicates overflow).
  * Offset: 16 bits (supports the full 64KB window).
@@ -1013,7 +1011,7 @@ static int zxc_encode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
         if (m.ref) {
             ip -= m.backtrack;
             uint32_t ll = (uint32_t)(ip - anchor);
-            uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH);
+            uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
             uint32_t off = (uint32_t)(ip - m.ref);
 
             if (ll > 0) {

@@ -817,7 +817,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ml1 = (tokens & 0x00F);
         if (UNLIKELY(ll1 == ZXC_TOKEN_LL_MASK)) ll1 += zxc_read_vbyte(&e_ptr, e_end);
         if (UNLIKELY(ml1 == ZXC_TOKEN_ML_MASK)) ml1 += zxc_read_vbyte(&e_ptr, e_end);
-        ml1 += ZXC_LZ_MIN_MATCH;
+        ml1 += ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(d_ptr + ll1 + ml1 > d_end)) return -1;
         DECODE_SEQ_SAFE(ll1, ml1, off1);
 
@@ -825,7 +825,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ml2 = (tokens & 0x00F00) >> 8;
         if (UNLIKELY(ll2 == ZXC_TOKEN_LL_MASK)) ll2 += zxc_read_vbyte(&e_ptr, e_end);
         if (UNLIKELY(ml2 == ZXC_TOKEN_ML_MASK)) ml2 += zxc_read_vbyte(&e_ptr, e_end);
-        ml2 += ZXC_LZ_MIN_MATCH;
+        ml2 += ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(d_ptr + ll2 + ml2 > d_end)) return -1;
         DECODE_SEQ_SAFE(ll2, ml2, off2);
 
@@ -833,7 +833,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ml3 = (tokens & 0x00F0000) >> 16;
         if (UNLIKELY(ll3 == ZXC_TOKEN_LL_MASK)) ll3 += zxc_read_vbyte(&e_ptr, e_end);
         if (UNLIKELY(ml3 == ZXC_TOKEN_ML_MASK)) ml3 += zxc_read_vbyte(&e_ptr, e_end);
-        ml3 += ZXC_LZ_MIN_MATCH;
+        ml3 += ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(d_ptr + ll3 + ml3 > d_end)) return -1;
         DECODE_SEQ_SAFE(ll3, ml3, off3);
 
@@ -841,7 +841,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ml4 = (tokens >> 24) & 0x0F;
         if (UNLIKELY(ll4 == ZXC_TOKEN_LL_MASK)) ll4 += zxc_read_vbyte(&e_ptr, e_end);
         if (UNLIKELY(ml4 == ZXC_TOKEN_ML_MASK)) ml4 += zxc_read_vbyte(&e_ptr, e_end);
-        ml4 += ZXC_LZ_MIN_MATCH;
+        ml4 += ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(d_ptr + ll4 + ml4 > d_end)) return -1;
         DECODE_SEQ_SAFE(ll4, ml4, off4);
 
@@ -876,7 +876,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ml1 = (tokens & 0x00F);
         if (UNLIKELY(ll1 == ZXC_TOKEN_LL_MASK)) ll1 += zxc_read_vbyte(&e_ptr, e_end);
         if (UNLIKELY(ml1 == ZXC_TOKEN_ML_MASK)) ml1 += zxc_read_vbyte(&e_ptr, e_end);
-        ml1 += ZXC_LZ_MIN_MATCH;
+        ml1 += ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(d_ptr + ll1 + ml1 > d_end)) return -1;
         DECODE_SEQ_FAST(ll1, ml1, off1);
 
@@ -884,7 +884,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ml2 = (tokens & 0x00F00) >> 8;
         if (UNLIKELY(ll2 == ZXC_TOKEN_LL_MASK)) ll2 += zxc_read_vbyte(&e_ptr, e_end);
         if (UNLIKELY(ml2 == ZXC_TOKEN_ML_MASK)) ml2 += zxc_read_vbyte(&e_ptr, e_end);
-        ml2 += ZXC_LZ_MIN_MATCH;
+        ml2 += ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(d_ptr + ll2 + ml2 > d_end)) return -1;
         DECODE_SEQ_FAST(ll2, ml2, off2);
 
@@ -892,7 +892,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ml3 = (tokens & 0x00F0000) >> 16;
         if (UNLIKELY(ll3 == ZXC_TOKEN_LL_MASK)) ll3 += zxc_read_vbyte(&e_ptr, e_end);
         if (UNLIKELY(ml3 == ZXC_TOKEN_ML_MASK)) ml3 += zxc_read_vbyte(&e_ptr, e_end);
-        ml3 += ZXC_LZ_MIN_MATCH;
+        ml3 += ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(d_ptr + ll3 + ml3 > d_end)) return -1;
         DECODE_SEQ_FAST(ll3, ml3, off3);
 
@@ -900,7 +900,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ml4 = (tokens >> 24) & 0x0F;
         if (UNLIKELY(ll4 == ZXC_TOKEN_LL_MASK)) ll4 += zxc_read_vbyte(&e_ptr, e_end);
         if (UNLIKELY(ml4 == ZXC_TOKEN_ML_MASK)) ml4 += zxc_read_vbyte(&e_ptr, e_end);
-        ml4 += ZXC_LZ_MIN_MATCH;
+        ml4 += ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(d_ptr + ll4 + ml4 > d_end)) return -1;
         DECODE_SEQ_FAST(ll4, ml4, off4);
 
@@ -933,7 +933,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) ll += zxc_read_vbyte(&e_ptr, e_end);
         if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) ml += zxc_read_vbyte(&e_ptr, e_end);
-        ml += ZXC_LZ_MIN_MATCH;
+        ml += ZXC_LZ_MIN_MATCH_LEN;
 
         // Check bounds before wild copies - if too close to end, fall back to Safe Path
         if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end)) {
@@ -1015,7 +1015,7 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) ll += zxc_read_vbyte(&e_ptr, e_end);
         if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) ml += zxc_read_vbyte(&e_ptr, e_end);
-        ml += ZXC_LZ_MIN_MATCH;
+        ml += ZXC_LZ_MIN_MATCH_LEN;
 
         if (UNLIKELY(d_ptr + ll > d_end)) return -1;
         ZXC_MEMCPY(d_ptr, l_ptr, ll);
@@ -1173,7 +1173,7 @@ static int zxc_decode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
     const uint8_t* const d_end = dst + dst_capacity;
     const uint8_t* const d_end_safe = d_end - (ZXC_PAD_SIZE * 4);  // 128
     // Safety margin for 4x unrolled loop: 4 * (ZXC_SEQ_LL_MASK LL +
-    // ZXC_SEQ_ML_MASK+ZXC_LZ_MIN_MATCH ML) + ZXC_PAD_SIZE Pad = 4 x (255 + 255 + 5) + 32 = 2092
+    // ZXC_SEQ_ML_MASK+ZXC_LZ_MIN_MATCH_LEN ML) + ZXC_PAD_SIZE Pad = 4 x (255 + 255 + 5) + 32 = 2092
     const uint8_t* const d_end_fast = d_end - (ZXC_PAD_SIZE * 66);  // 2112
 
     uint32_t n_seq = gh.n_sequences;
@@ -1341,7 +1341,7 @@ static int zxc_decode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) ll += zxc_read_vbyte(&extras_ptr, extras_end);
 
         uint32_t m_bits = (uint32_t)((seq >> 16) & 0xFF);
-        uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH;
+        uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_vbyte(&extras_ptr, extras_end);
 
         uint32_t offset = (uint32_t)(seq & 0xFFFF);
@@ -1388,7 +1388,7 @@ static int zxc_decode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
             if (UNLIKELY(d_ptr + ll1 > d_end)) return -1;
         }
         uint32_t m1b = (uint32_t)((s1 >> 16) & 0xFF);
-        uint32_t ml1 = m1b + ZXC_LZ_MIN_MATCH;
+        uint32_t ml1 = m1b + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m1b == ZXC_SEQ_ML_MASK)) {
             ml1 += zxc_read_vbyte(&extras_ptr, extras_end);
             if (UNLIKELY(d_ptr + ll1 + ml1 > d_end)) return -1;
@@ -1402,7 +1402,7 @@ static int zxc_decode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
             if (UNLIKELY(d_ptr + ll2 > d_end)) return -1;
         }
         uint32_t m2b = (uint32_t)((s2 >> 16) & 0xFF);
-        uint32_t ml2 = m2b + ZXC_LZ_MIN_MATCH;
+        uint32_t ml2 = m2b + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m2b == ZXC_SEQ_ML_MASK)) {
             ml2 += zxc_read_vbyte(&extras_ptr, extras_end);
             if (UNLIKELY(d_ptr + ll2 + ml2 > d_end)) return -1;
@@ -1416,7 +1416,7 @@ static int zxc_decode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
             if (UNLIKELY(d_ptr + ll3 > d_end)) return -1;
         }
         uint32_t m3b = (uint32_t)((s3 >> 16) & 0xFF);
-        uint32_t ml3 = m3b + ZXC_LZ_MIN_MATCH;
+        uint32_t ml3 = m3b + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m3b == ZXC_SEQ_ML_MASK)) {
             ml3 += zxc_read_vbyte(&extras_ptr, extras_end);
             if (UNLIKELY(d_ptr + ll3 + ml3 > d_end)) return -1;
@@ -1430,7 +1430,7 @@ static int zxc_decode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
             if (UNLIKELY(d_ptr + ll4 > d_end)) return -1;
         }
         uint32_t m4b = (uint32_t)((s4 >> 16) & 0xFF);
-        uint32_t ml4 = m4b + ZXC_LZ_MIN_MATCH;
+        uint32_t ml4 = m4b + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m4b == ZXC_SEQ_ML_MASK)) {
             ml4 += zxc_read_vbyte(&extras_ptr, extras_end);
             if (UNLIKELY(d_ptr + ll4 + ml4 > d_end)) return -1;
@@ -1453,7 +1453,7 @@ static int zxc_decode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) ll += zxc_read_vbyte(&extras_ptr, extras_end);
 
         uint32_t m_bits = (uint32_t)((seq >> 16) & 0xFF);
-        uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH;
+        uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_vbyte(&extras_ptr, extras_end);
         uint32_t offset = (uint32_t)(seq & 0xFFFF);
 
@@ -1522,7 +1522,7 @@ static int zxc_decode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) ll += zxc_read_vbyte(&extras_ptr, extras_end);
 
         uint32_t m_bits = (uint32_t)((seq >> 16) & 0xFF);
-        uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH;
+        uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_vbyte(&extras_ptr, extras_end);
         uint32_t offset = (uint32_t)(seq & 0xFFFF);
 
