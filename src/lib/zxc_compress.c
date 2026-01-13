@@ -794,6 +794,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
         // Threshold: ~3% savings using integer math (97% ~= 1 - 1/32)
         if (rle_size < lit_c - (lit_c >> 5)) use_rle = 1;
+        // if (rle_size < lit_c) use_rle = 1;
     }
 
     size_t h_gap = ZXC_BLOCK_HEADER_SIZE + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
@@ -1460,7 +1461,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
     }
 
     if (!try_num) {
-        if (ctx->compression_level <= 3) {
+        if (ctx->compression_level <= 2) {
             res = zxc_encode_block_gnr_hv(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
         } else {
             res = zxc_encode_block_gnr(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
