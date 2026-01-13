@@ -16,8 +16,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../include/zxc_sans_io.h"
 #include "../../include/rapidhash.h"
+#include "../../include/zxc_sans_io.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -657,7 +657,7 @@ void zxc_aligned_free(void* ptr);
  * @return The calculated 64-bit hash value.
  */
 static ZXC_ALWAYS_INLINE uint64_t zxc_checksum(const void* RESTRICT input, size_t len,
-                                              uint8_t hash_method) {
+                                               uint8_t hash_method) {
     if (LIKELY(hash_method == ZXC_CHECKSUM_RAPIDHASH)) return rapidhash(input, len);
     return rapidhash(input, len);
 }
