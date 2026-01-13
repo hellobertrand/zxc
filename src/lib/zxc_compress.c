@@ -47,6 +47,271 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
 #endif
 
 /**
+ * @brief Writes a variable-length byte encoded value to a buffer.
+ *
+ * This function encodes a 32-bit unsigned integer using variable-byte
+ * encoding and writes it to the destination buffer. Variable-byte encoding
+ * uses fewer bytes for smaller values, making it efficient for compressing
+ * integers with varying magnitudes.
+ *
+ * @param[out] dst Pointer to the destination buffer where the encoded value will be written.
+ * @param[in] val The 32-bit unsigned integer value to encode.
+ * @return The number of bytes written to the destination buffer.
+ */
+size_t ZXC_ALWAYS_INLINE zxc_write_vbyte(uint8_t* dst, uint32_t val) {
+    size_t count = 0;
+    while (val >= 0x80) {
+        dst[count++] = (uint8_t)(val | 0x80);
+        val >>= 7;
+    }
+    dst[count++] = (uint8_t)val;
+    return count;
+}
+
+/**
+ * @brief Structure representing a match found during compression.
+ *
+ * This structure holds information about a matching sequence found
+ * in the input data during the compression process.
+ *
+ * @param ref       Pointer to the reference data where the match was found.
+ * @param len       Length of the matching sequence in bytes.
+ * @param backtrack Distance to backtrack from the current position to find the match.
+ */
+typedef struct {
+    const uint8_t* ref;
+    uint32_t len;
+    uint32_t backtrack;
+} zxc_match_t;
+
+/**
+ * @brief Finds the best matching sequence for LZ77 compression
+ *
+ * This function searches for the longest matching sequence in the
+ * sliding window dictionary for LZ77 compression algorithm.
+ * It is marked as always inline for performance optimization.
+ *
+ * @param[in] src Pointer to the start of the source buffer.
+ * @param[in] ip Current input position pointer.
+ * @param[in] iend Pointer to the end of the input buffer.
+ * @param[in] mflimit Pointer to the match finding limit.
+ * @param[in] anchor Pointer to the current anchor position.
+ * @param[in,out] hash_table Pointer to the hash table for match finding.
+ * @param[in,out] chain_table Pointer to the chain table for collision handling.
+ * @param[in] epoch_mark Current epoch marker for hash table invalidation.
+ * @param[in] level Compression level (affects search depth and lazy matching).
+ * @param[in] search_depth Maximum number of hash chain entries to search.
+ * @param[in] sufficient_len Match length threshold to stop searching.
+ * @param[in] use_lazy Flag indicating whether to use lazy matching.
+ *
+ * @return zxc_match_t Structure containing the best match information
+ *         (reference pointer, length of the match, and backtrack distance).
+ */
+static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
+    const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* mflimit,
+    const uint8_t* anchor, uint32_t* hash_table, uint16_t* chain_table, uint32_t epoch_mark,
+    int level, zxc_lz77_params_t p) {
+    zxc_match_t best = {NULL, ZXC_LZ_MIN_MATCH_LEN - 1, 0};
+    uint32_t cur_val = zxc_le32(ip);
+    uint32_t h = zxc_hash_func(cur_val);
+    uint32_t cur_pos = (uint32_t)(ip - src);
+
+    uint32_t raw_head = hash_table[2 * h];
+    uint32_t stored_tag = hash_table[2 * h + 1];
+    uint32_t match_idx =
+        (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
+
+    int skip_head = (match_idx > 0 && stored_tag != cur_val);
+    if (skip_head && level <= 2) match_idx = 0;
+
+    hash_table[2 * h] = epoch_mark | cur_pos;
+    hash_table[2 * h + 1] = cur_val;
+    chain_table[cur_pos] =
+        (match_idx > 0 && (cur_pos - match_idx) < 0x10000) ? (uint16_t)(cur_pos - match_idx) : 0;
+
+    if (match_idx == 0) return best;
+
+    int attempts = p.search_depth;
+    int is_first = 1;
+
+    while (match_idx > 0 && attempts-- >= 0) {
+        if (UNLIKELY(cur_pos - match_idx >= ZXC_LZ_MAX_DIST)) break;
+        const uint8_t* ref = src + match_idx;
+        ZXC_PREFETCH_READ(ref);
+
+        uint32_t ref_val = zxc_le32(ref);
+        if ((!is_first || !skip_head) && ref_val == cur_val && ref[best.len] == ip[best.len]) {
+            uint32_t mlen = 4;
+            // SIMD match length calculation (Factorized from existing code)
+#if defined(ZXC_USE_AVX512)
+            const uint8_t* limit_64 = iend - 64;
+            while (ip + mlen < limit_64) {
+                __m512i v_src = _mm512_loadu_si512((const void*)(ip + mlen));
+                __m512i v_ref = _mm512_loadu_si512((const void*)(ref + mlen));
+                __mmask64 mask = _mm512_cmpeq_epi8_mask(v_src, v_ref);
+                if (mask == 0xFFFFFFFFFFFFFFFF)
+                    mlen += 64;
+                else {
+                    mlen += (uint32_t)zxc_ctz64(~mask);
+                    goto _match_len_done;
+                }
+            }
+#elif defined(ZXC_USE_AVX2)
+            const uint8_t* limit_32 = iend - 32;
+            while (ip + mlen < limit_32) {
+                __m256i v_src = _mm256_loadu_si256((const __m256i*)(ip + mlen));
+                __m256i v_ref = _mm256_loadu_si256((const __m256i*)(ref + mlen));
+                __m256i v_cmp = _mm256_cmpeq_epi8(v_src, v_ref);
+                uint32_t mask = (uint32_t)_mm256_movemask_epi8(v_cmp);
+                if (mask == 0xFFFFFFFF)
+                    mlen += 32;
+                else {
+                    mlen += zxc_ctz32(~mask);
+                    goto _match_len_done;
+                }
+            }
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+            const uint8_t* limit_16 = iend - 16;
+            while (ip + mlen < limit_16) {
+                uint8x16_t v_src = vld1q_u8(ip + mlen), v_ref = vld1q_u8(ref + mlen);
+                uint8x16_t v_cmp = vceqq_u8(v_src, v_ref);
+#if defined(ZXC_USE_NEON64)
+                if (vminvq_u8(v_cmp) == 0xFF)
+                    mlen += 16;
+                else {
+                    uint8x16_t v_diff = vmvnq_u8(v_cmp);
+                    uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(v_diff), 0);
+                    if (lo != 0)
+                        mlen += (zxc_ctz64(lo) >> 3);
+                    else
+                        mlen +=
+                            8 + (zxc_ctz64(vgetq_lane_u64(vreinterpretq_u64_u8(v_diff), 1)) >> 3);
+                    goto _match_len_done;
+                }
+#else
+                uint8x16_t p1 = vpminq_u8(v_cmp, v_cmp), p2 = vpminq_u8(p1, p1),
+                           p3 = vpminq_u8(p2, p2);
+                uint8_t min_val = vgetq_lane_u8(p3, 0);
+                min_val = min_val < vgetq_lane_u8(p3, 8) ? min_val : vgetq_lane_u8(p3, 8);
+                if (min_val == 0xFF)
+                    mlen += 16;
+                else {
+                    uint8x16_t v_diff = vmvnq_u8(v_cmp);
+                    uint64_t lo = (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 0) |
+                                  ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 1) << 32);
+                    if (lo != 0)
+                        mlen += (zxc_ctz64(lo) >> 3);
+                    else
+                        mlen +=
+                            8 +
+                            (zxc_ctz64((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 2) |
+                                       ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 3)
+                                        << 32)) >>
+                             3);
+                    goto _match_len_done;
+                }
+#endif
+            }
+#endif
+            const uint8_t* limit_8 = iend - 8;
+            while (ip + mlen < limit_8) {
+                if (zxc_le64(ip + mlen) == zxc_le64(ref + mlen))
+                    mlen += 8;
+                else {
+                    mlen += (zxc_ctz64(zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen)) >> 3);
+                    goto _match_len_done;
+                }
+            }
+            while (ip + mlen < iend && ref[mlen] == ip[mlen]) mlen++;
+
+        _match_len_done:
+            if (mlen > best.len) {
+                best.len = mlen;
+                best.ref = ref;
+                if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend))
+                    break;
+            }
+        }
+        uint16_t delta = chain_table[match_idx];
+        if (UNLIKELY(delta == 0)) break;
+        match_idx -= delta;
+        is_first = 0;
+        ZXC_PREFETCH_READ(src + match_idx);
+    }
+
+    if (best.ref) {
+        // Backtrack to extend match backwards
+        const uint8_t* b_ip = ip;
+        const uint8_t* b_ref = best.ref;
+        while (b_ip > anchor && b_ref > src && b_ip[-1] == b_ref[-1]) {
+            b_ip--;
+            b_ref--;
+            best.len++;
+            best.backtrack++;
+        }
+        best.ref = b_ref;
+    }
+
+    if (p.use_lazy && best.ref && best.len < 128 && ip + 1 < mflimit) {
+        uint32_t next_val = zxc_le32(ip + 1);
+        uint32_t h2 = zxc_hash_func(next_val);
+        uint32_t next_head = hash_table[2 * h2];
+        uint32_t next_stored_tag = hash_table[2 * h2 + 1];
+        uint32_t next_idx =
+            (next_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (next_head & ZXC_OFFSET_MASK) : 0;
+        int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_val);
+        uint32_t max_lazy = 0;
+        int lazy_att = p.lazy_attempts;
+        int is_lazy_first = 1;
+
+        while (next_idx > 0 && lazy_att-- > 0) {
+            if (UNLIKELY((uint32_t)(ip + 1 - src) - next_idx >= ZXC_LZ_MAX_DIST)) break;
+            const uint8_t* ref2 = src + next_idx;
+            if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
+                uint32_t l2 = 4;
+                while (ip + 1 + l2 < iend && ref2[l2] == ip[1 + l2]) l2++;
+                if (l2 > max_lazy) max_lazy = l2;
+            }
+            uint16_t delta = chain_table[next_idx];
+            if (UNLIKELY(delta == 0)) break;
+            next_idx -= delta;
+            is_lazy_first = 0;
+        }
+
+        if (max_lazy > best.len + 1) {
+            best.ref = NULL;
+        } else if (level >= 4 && ip + 2 < mflimit) {
+            uint32_t val3 = zxc_le32(ip + 2);
+            uint32_t h3 = zxc_hash_func(val3);
+            uint32_t head3 = hash_table[2 * h3];
+            uint32_t tag3 = hash_table[2 * h3 + 1];
+            uint32_t idx3 =
+                (head3 & ~ZXC_OFFSET_MASK) == epoch_mark ? (head3 & ZXC_OFFSET_MASK) : 0;
+            int skip_head3 = (idx3 > 0 && tag3 != val3);
+            int is_first3 = 1;
+            uint32_t max_lazy3 = 0;
+            lazy_att = p.lazy_attempts;
+            while (idx3 > 0 && lazy_att-- > 0) {
+                if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 >= ZXC_LZ_MAX_DIST)) break;
+                const uint8_t* ref3 = src + idx3;
+                if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
+                    uint32_t l3 = 4;
+                    while (ip + 2 + l3 < iend && ref3[l3] == ip[2 + l3]) l3++;
+                    if (l3 > max_lazy3) max_lazy3 = l3;
+                }
+                uint16_t delta = chain_table[idx3];
+                if (UNLIKELY(delta == 0)) break;
+                idx3 -= delta;
+                is_first3 = 0;
+            }
+            if (max_lazy3 > best.len + 2) best.ref = NULL;
+        }
+    }
+
+    return best;
+}
+
+/**
  * @brief Encodes a block of numerical data using delta encoding and
  * bit-packing.
  *
@@ -305,32 +570,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     int level = ctx->compression_level;
     int chk = ctx->checksum_enabled;
 
-    int use_lazy = 0;
-    int search_depth = 4;
-    int sufficient_len = 256;
-    uint32_t step_base = 1;
-    uint32_t step_shift = 31;
-
-    if (level <= 1) {
-        sufficient_len = 16;
-        step_base = 3;
-        step_shift = 3;
-    } else if (level <= 2) {
-        sufficient_len = 16;
-        step_base = 2;
-        step_shift = 3;
-    } else if (level <= 3) {
-        use_lazy = 1;
-        sufficient_len = 32;
-        step_shift = 4;
-    } else if (level <= 4) {
-        use_lazy = 1;
-        sufficient_len = 32;
-        step_shift = 5;
-    } else {
-        search_depth = 64;
-        use_lazy = 1;
-    }
+    zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
@@ -343,341 +583,74 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     uint32_t* hash_table = ctx->hash_table;
     uint16_t* chain_table = ctx->chain_table;
     uint8_t* literals = ctx->literals;
+    uint8_t* buf_tokens = ctx->buf_tokens;
+    uint16_t* buf_offsets = ctx->buf_offsets;
+    uint8_t* buf_extras = ctx->buf_extras;
 
     uint32_t seq_c = 0;
     size_t lit_c = 0;
-
-    uint8_t* buf_tokens = ctx->buf_tokens;
-    uint16_t* buf_offsets = ctx->buf_offsets;
-    uint32_t* buf_extras = ctx->buf_extras;
-    size_t n_extras = 0;
-    size_t vbyte_size = 0;
+    size_t extras_sz = 0;
     uint16_t max_offset = 0;  // Track max offset for 1-byte/2-byte mode decision
 
     while (LIKELY(ip < mflimit)) {
         size_t dist = (size_t)(ip - anchor);
-        size_t step = step_base + (dist >> step_shift);
-
+        size_t step = lzp.step_base + (dist >> lzp.step_shift);
         if (UNLIKELY(ip + step >= mflimit)) step = 1;
 
         ZXC_PREFETCH_READ(ip + step * 4 + 64);
 
-        uint32_t cur_val = zxc_le32(ip);
-        uint32_t h = zxc_hash_func(cur_val);
-        int32_t cur_pos = (uint32_t)(ip - src);
+        zxc_match_t m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table,
+                                                 chain_table, epoch_mark, level, lzp);
 
-        // cppcheck-suppress unreadVariable ; used for prefetch side-effect
-        uint32_t next_h = zxc_hash_func(zxc_le32(ip + step));
-        ZXC_PREFETCH_READ(&hash_table[2 * next_h]);
-
-        uint32_t raw_head = hash_table[2 * h];
-        uint32_t stored_tag = hash_table[2 * h + 1];
-        uint32_t match_idx =
-            (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
-
-        int skip_head = 0;
-        if (match_idx > 0 && stored_tag != cur_val) {
-            if (level <= 2)
-                match_idx = 0;  // Aggressive mode: skip entire chain for speed
-            else
-                skip_head = 1;  // Refined mode: skip only HEAD, preserve chain for ratio
-        }
-
-        hash_table[2 * h] = epoch_mark | cur_pos;
-        hash_table[2 * h + 1] = cur_val;
-        // cppcheck-suppress knownConditionTrueFalse ; false positive
-        if (match_idx > 0 && (cur_pos - match_idx) < 0x10000)
-            chain_table[cur_pos] = (uint16_t)(cur_pos - match_idx);
-        else
-            chain_table[cur_pos] = 0;
-
-        const uint8_t* best_ref = NULL;
-        uint32_t best_len = ZXC_LZ_MIN_MATCH - 1;
-
-        int is_first = 1;
-        int attempts = search_depth;
-        while (match_idx > 0 && attempts-- >= 0) {
-            if (UNLIKELY(cur_pos - match_idx >= ZXC_LZ_MAX_DIST)) break;
-
-            const uint8_t* ref = src + match_idx;
-            ZXC_PREFETCH_READ(ref);
-
-            uint32_t ref_val = zxc_le32(ref);
-            int should_skip = is_first & skip_head;
-            // Branchless: evaluate all conditions (ref is prefetched, memory access is cheap)
-            int match_ok =
-                ((should_skip ^ 1) & (ref_val == cur_val)) & (ref[best_len] == ip[best_len]);
-
-            if (LIKELY(match_ok)) {
-                uint32_t mlen = 4;
-#if defined(ZXC_USE_AVX512)
-                const uint8_t* limit_64 = iend - 64;
-                while (ip + mlen < limit_64) {
-                    // AVX-512 Optimization: Compare 64 bytes at once
-                    __m512i v_src = _mm512_loadu_si512((const void*)(ip + mlen));
-                    __m512i v_ref = _mm512_loadu_si512((const void*)(ref + mlen));
-
-                    // _mm512_cmpeq_epi8_mask returns a 64-bit mask where each bit represents a byte
-                    // match
-                    __mmask64 mask = _mm512_cmpeq_epi8_mask(v_src, v_ref);
-
-                    // If mask is all 1s (UINT64_MAX), all 64 bytes match
-                    if (mask == 0xFFFFFFFFFFFFFFFF)
-                        mlen += 64;
-                    else {
-                        // Count trailing zeros of negated mask to find first mismatch
-                        mlen += (uint32_t)zxc_ctz64(~mask);
-                        goto _match_len_done;
-                    }
-                }
-#elif defined(ZXC_USE_AVX2)
-                const uint8_t* limit_32 = iend - 32;
-                while (ip + mlen < limit_32) {
-                    // AVX2 Optimization: Compare 32 bytes at once
-                    __m256i v_src = _mm256_loadu_si256((const __m256i*)(ip + mlen));
-                    __m256i v_ref = _mm256_loadu_si256((const __m256i*)(ref + mlen));
-                    __m256i v_cmp = _mm256_cmpeq_epi8(v_src, v_ref);
-                    // _mm256_movemask_epi8 creates a 32-bit mask from the most significant bit of
-                    // each byte
-                    uint32_t mask = (uint32_t)_mm256_movemask_epi8(v_cmp);
-                    // If mask is all 1s (0xFFFFFFFF), all 32 bytes match
-                    if (mask == 0xFFFFFFFF)
-                        mlen += 32;
-                    else {
-                        // Count trailing zeros of negated mask to find first mismatch
-                        mlen += zxc_ctz32(~mask);
-                        goto _match_len_done;
-                    }
-                }
-#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
-                const uint8_t* limit_16 = iend - 16;
-                while (ip + mlen < limit_16) {
-                    // NEON Optimization: Compare 16 bytes at once
-                    uint8x16_t v_src = vld1q_u8(ip + mlen);
-                    uint8x16_t v_ref = vld1q_u8(ref + mlen);
-                    // vceqq_u8 performs byte-wise equality comparison, result is 0xFF for equal,
-                    // 0x00 for not equal
-                    uint8x16_t v_cmp = vceqq_u8(v_src, v_ref);
-
-                    // Check if all bytes are equal (min value of comparison result is 0xFF)
-#if defined(ZXC_USE_NEON64)
-                    // AArch64 unified min
-                    if (vminvq_u8(v_cmp) == 0xFF)
-                        mlen += 16;
-                    else {
-                        // NEON lacks a direct movemask instruction like x86.
-                        // We invert the comparison result (0xFF -> 0x00, 0x00 -> 0xFF)
-                        // Then we can use ctz on the 64-bit lanes to find the first non-zero byte.
-                        uint8x16_t v_diff = vmvnq_u8(v_cmp);
-                        uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(v_diff), 0);
-                        if (lo != 0)
-                            mlen += (zxc_ctz64(lo) >> 3);  // Divide by 8 to get byte index
-                        else {
-                            uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(v_diff), 1);
-                            mlen += 8 + (zxc_ctz64(hi) >> 3);
-                        }
-                        goto _match_len_done;
-                    }
-#else
-                    // NEON 32-bit (ARMv7) fallback for min scan
-                    uint8x16_t p1 = vpminq_u8(v_cmp, v_cmp);
-                    uint8x16_t p2 = vpminq_u8(p1, p1);
-                    uint8x16_t p3 = vpminq_u8(p2, p2);
-                    // Now reduced to 2 bytes, convert to scalar
-                    uint8_t min_val = vgetq_lane_u8(p3, 0);
-                    min_val = min_val < vgetq_lane_u8(p3, 8) ? min_val : vgetq_lane_u8(p3, 8);
-
-                    if (min_val == 0xFF)
-                        mlen += 16;
-                    else {
-                        uint8x16_t v_diff = vmvnq_u8(v_cmp);
-                        // Access as 32-bit lanes to reconstruct 64-bit values or check directly
-                        // Reconstructing 64-bit for compatibility with zxc_ctz64 usage
-                        uint64_t lo =
-                            (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 0) |
-                            ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 1) << 32);
-
-                        if (lo != 0)
-                            mlen += (zxc_ctz64(lo) >> 3);
-                        else {
-                            uint64_t hi =
-                                (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 2) |
-                                ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 3) << 32);
-                            mlen += 8 + (zxc_ctz64(hi) >> 3);
-                        }
-                        goto _match_len_done;
-                    }
-#endif
-                }
-#endif
-                const uint8_t* limit_8 = iend - 8;
-                while (ip + mlen < limit_8) {
-                    if (zxc_le64(ip + mlen) == zxc_le64(ref + mlen))
-                        mlen += 8;
-                    else {
-                        // XOR to find differing bits, trailing zeros / 8 = byte index
-                        mlen += (zxc_ctz64(zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen)) >> 3);
-                        goto _match_len_done;
-                    }
-                }
-                while (ip + mlen < iend && ref[mlen] == ip[mlen]) mlen++;
-
-            _match_len_done:
-                if (mlen > best_len) {
-                    best_len = mlen;
-                    best_ref = ref;
-                    // Sufficient match found or end of buffer reached
-                    if (UNLIKELY(best_len >= (uint32_t)sufficient_len || ip + best_len >= iend))
-                        break;
-                }
-            }
-            uint16_t delta = chain_table[match_idx];
-            if (UNLIKELY(delta == 0)) break;
-            match_idx -= delta;
-            is_first = 0;  // No longer checking HEAD, now checking chain entries
-            ZXC_PREFETCH_READ(src + match_idx);
-        }
-
-        if (use_lazy && best_ref && best_len < 128 && ip + 1 < mflimit) {
-            // Lazy 1: Check matches at ip + 1
-            uint32_t next_val = zxc_le32(ip + 1);
-            uint32_t h2 = zxc_hash_func(next_val);
-            uint32_t next_head = hash_table[2 * h2];
-            uint32_t next_stored_tag = hash_table[2 * h2 + 1];
-            uint32_t next_idx =
-                (next_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (next_head & ZXC_OFFSET_MASK) : 0;
-
-            int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_val);
-            uint32_t max_lazy = 0;
-            // Increase search depth for lazy at higher levels
-            int lazy_att = (level >= 3) ? (level >= 5 ? 16 : 8) : 2;
-            int is_lazy_first = 1;
-
-            while (next_idx > 0 && lazy_att-- > 0) {
-                if (UNLIKELY((uint32_t)(ip + 1 - src) - next_idx >= ZXC_LZ_MAX_DIST)) break;
-                const uint8_t* ref2 = src + next_idx;
-                if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
-                    uint32_t l2 = 4;
-                    while (ip + 1 + l2 < iend && ref2[l2] == ip[1 + l2]) l2++;
-                    if (l2 > max_lazy) max_lazy = l2;
-                }
-                uint16_t delta = chain_table[next_idx];
-                if (UNLIKELY(delta == 0)) break;
-                next_idx -= delta;
-                is_lazy_first = 0;
-            }
-
-            if (max_lazy > best_len + 1) {
-                best_ref = NULL;  // Prefer ip+1
-            } else if (level >= 4 && ip + 2 < mflimit) {
-                // Double Lazy: Check matches at ip + 2
-                // Only if ip+1 wasn't good enough
-                uint32_t val3 = zxc_le32(ip + 2);
-                uint32_t h3 = zxc_hash_func(val3);
-                uint32_t head3 = hash_table[2 * h3];
-                uint32_t tag3 = hash_table[2 * h3 + 1];
-                uint32_t idx3 =
-                    (head3 & ~ZXC_OFFSET_MASK) == epoch_mark ? (head3 & ZXC_OFFSET_MASK) : 0;
-
-                int skip_head3 = (idx3 > 0 && tag3 != val3);
-                int is_first3 = 1;
-                uint32_t max_lazy3 = 0;
-                lazy_att = (level >= 5) ? 16 : 8;
-
-                while (idx3 > 0 && lazy_att-- > 0) {
-                    if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 >= ZXC_LZ_MAX_DIST)) break;
-
-                    const uint8_t* ref3 = src + idx3;
-                    if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
-                        uint32_t l3 = 4;
-                        while (ip + 2 + l3 < iend && ref3[l3] == ip[2 + l3]) l3++;
-                        if (l3 > max_lazy3) max_lazy3 = l3;
-                    }
-
-                    uint16_t delta = chain_table[idx3];
-                    if (UNLIKELY(delta == 0)) break;
-                    idx3 -= delta;
-                    is_first3 = 0;
-                }
-
-                if (max_lazy3 > best_len + 2)
-                    best_ref = NULL;  // Prefer ip+2 (will be handled by next iteration)
-            }
-        }
-
-        if (best_ref && level == 3) {
-            uint32_t off = (uint32_t)(ip - best_ref);
-            if (best_len == ZXC_LZ_MIN_MATCH && off > (ZXC_BLOCK_UNIT * 8)) best_ref = NULL;
-        }
-
-        if (best_ref) {
-            while (ip > anchor && best_ref > src && ip[-1] == best_ref[-1]) {
-                ip--;
-                best_ref--;
-                best_len++;
-            }
+        if (m.ref) {
+            ip -= m.backtrack;
             uint32_t ll = (uint32_t)(ip - anchor);
-            uint32_t ml = (uint32_t)(best_len - ZXC_LZ_MIN_MATCH);
-            uint32_t off = (uint32_t)(ip - best_ref);
+            uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
+            uint32_t off = (uint32_t)(ip - m.ref);
 
-            // cppcheck-suppress knownConditionTrueFalse ; false positive
             if (ll > 0) {
-                // Specialized literal copy
-                if (ll <= 16) {
+                if (ll <= 16)
                     zxc_copy16(literals + lit_c, anchor);
-                } else if (ll <= 32) {
+                else if (ll <= 32)
                     zxc_copy32(literals + lit_c, anchor);
-                } else {
+                else
                     ZXC_MEMCPY(literals + lit_c, anchor, ll);
-                }
                 lit_c += ll;
             }
 
-            // Token & Offset
             uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
             uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
             buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
             buf_offsets[seq_c] = (uint16_t)off;
             if (off > max_offset) max_offset = (uint16_t)off;
 
-            // Extras & VByte size
             if (ll >= ZXC_TOKEN_LL_MASK) {
-                uint32_t val = ll - ZXC_TOKEN_LL_MASK;
-                buf_extras[n_extras++] = val;
-                vbyte_size += (zxc_highbit32(val | 1) + 6) / 7;
+                extras_sz += zxc_write_vbyte(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
             }
             if (ml >= ZXC_TOKEN_ML_MASK) {
-                uint32_t val = ml - ZXC_TOKEN_ML_MASK;
-                buf_extras[n_extras++] = val;
-                vbyte_size += (zxc_highbit32(val | 1) + 6) / 7;
+                extras_sz += zxc_write_vbyte(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
             }
             seq_c++;
 
-            if (best_len > 2 && level > 4) {
-                const uint8_t* match_end = ip + best_len;
-                // Check that we can read 4 bytes for the hash at (end-2)
+            if (m.len > 2 && level > 4) {
+                const uint8_t* match_end = ip + m.len;
                 if (match_end < iend - 3) {
                     uint32_t pos_u = (uint32_t)((match_end - 2) - src);
                     uint32_t val_u = zxc_le32(match_end - 2);
                     uint32_t h_u = zxc_hash_func(val_u);
-
-                    // Retrieve the old head to maintain the chain
                     uint32_t prev_head = hash_table[2 * h_u];
                     uint32_t prev_idx = (prev_head & ~ZXC_OFFSET_MASK) == epoch_mark
                                             ? (prev_head & ZXC_OFFSET_MASK)
                                             : 0;
-
-                    // Update the hash table and chain table
                     hash_table[2 * h_u] = epoch_mark | pos_u;
                     hash_table[2 * h_u + 1] = val_u;
-                    if (prev_idx > 0 && (pos_u - prev_idx) < (ZXC_LZ_MAX_DIST + 1))
-                        chain_table[pos_u] = (uint16_t)(pos_u - prev_idx);
-                    else
-                        chain_table[pos_u] = 0;
+                    chain_table[pos_u] =
+                        (prev_idx > 0 && (pos_u - prev_idx) < (ZXC_LZ_MAX_DIST + 1))
+                            ? (uint16_t)(pos_u - prev_idx)
+                            : 0;
                 }
             }
-
-            ip += best_len;
+            ip += m.len;
             anchor = ip;
         } else {
             ip += step;
@@ -821,6 +794,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
         // Threshold: ~3% savings using integer math (97% ~= 1 - 1/32)
         if (rle_size < lit_c - (lit_c >> 5)) use_rle = 1;
+        // if (rle_size < lit_c) use_rle = 1;
     }
 
     size_t h_gap = ZXC_BLOCK_HEADER_SIZE + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
@@ -840,11 +814,10 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                            .enc_off = (uint8_t)use_8bit_off};
 
     zxc_section_desc_t desc[4] = {0};
-    desc[0].sizes = (uint64_t)(use_rle ? (uint32_t)rle_size : (uint32_t)lit_c) |
-                    ((uint64_t)(uint32_t)lit_c << 32);
+    desc[0].sizes = (uint64_t)(use_rle ? rle_size : lit_c) | ((uint64_t)lit_c << 32);
     desc[1].sizes = (uint64_t)seq_c | ((uint64_t)seq_c << 32);
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
-    desc[3].sizes = (uint64_t)(uint32_t)vbyte_size | ((uint64_t)(uint32_t)vbyte_size << 32);
+    desc[3].sizes = (uint64_t)extras_sz | ((uint64_t)extras_sz << 32);
 
     int ghs = zxc_write_gnr_header_and_desc(p, rem, &gh, desc);
     if (UNLIKELY(ghs < 0)) return -1;
@@ -926,6 +899,7 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     rem -= sz_tok;
 
     if (UNLIKELY(rem < sz_off)) return -1;
+
     if (use_8bit_off) {
         // Write 1-byte offsets - unroll for better throughput
         uint32_t i = 0;
@@ -951,15 +925,389 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     rem -= sz_off;
 
     if (UNLIKELY(rem < sz_ext)) return -1;
-    // Write VByte stream
-    for (size_t j = 0; j < n_extras; j++) {
-        uint32_t val = buf_extras[j];
-        while (val >= 128) {
-            *p_curr++ = (uint8_t)(val | 0x80);
-            val >>= 7;
-        }
-        *p_curr++ = (uint8_t)val;
+
+    ZXC_MEMCPY(p_curr, buf_extras, extras_sz);
+    p_curr += extras_sz;
+
+    uint32_t p_sz = (uint32_t)(p_curr - (dst + h_gap));
+    if (chk)
+        bh.block_flags |= ZXC_BLOCK_FLAG_CHECKSUM;
+    else
+        bh.block_flags &= ~ZXC_BLOCK_FLAG_CHECKSUM;
+    bh.comp_size = p_sz;
+    int hw = zxc_write_block_header(dst, dst_cap, &bh);
+
+    if (chk) zxc_store_le64(dst + hw, crc_val);
+    *out_sz = hw + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0) + p_sz;
+    return 0;
+}
+
+/**
+ * @brief Encodes a data block using the General High Velocity (GNR_HV) compression format.
+ *
+ * 1. Compression Strategy
+ * It uses an LZ77-based algorithm with a sliding window (64KB) and a hash table/chain table
+ * mechanism.
+ *
+ * 2. Token Format (Fixed-Width)
+ * Unlike the standard GNR block which uses 1-byte tokens (4-bit literal length / 4-bit match
+ * length), GNR_HV uses 4-byte (32-bit) sequence records for better performance on long runs:
+ * Literal Length (LL): 8 bits (stores 0-254; 255 indicates overflow).
+ * Match Length (ML): 8 bits (stores 0-254; 255 indicates overflow).
+ * Offset: 16 bits (supports the full 64KB window).
+ * This format minimizes the number of expensive VByte reads during decompression for common
+ * sequences where lengths are between 16 and 255.
+ *
+ * @param[in,out] ctx       Pointer to the compression context containing hash tables
+ * and configuration.
+ * @param[in] src       Pointer to the input source data.
+ * @param[in] src_size  Size of the input data in bytes.
+ * @param[out] dst       Pointer to the destination buffer where compressed data will
+ * be written.
+ * @param[in] dst_cap   Maximum capacity of the destination buffer.
+ * @param[out] out_sz    [Out] Pointer to a variable that will receive the total size
+ * of the compressed output.
+ * @param[in] crc_val   The pre-calculated XXH3 value (if checksum is enabled).
+ *
+ * @return 0 on success, or -1 if an error occurs (e.g., buffer overflow).
+ */
+static int zxc_encode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
+                                   uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz,
+                                   uint64_t crc_val) {
+    int level = ctx->compression_level;
+    int chk = ctx->checksum_enabled;
+
+    zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
+
+    ctx->epoch++;
+    if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
+        ZXC_MEMSET(ctx->hash_table, 0, 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
+        ctx->epoch = 1;
     }
+    const uint32_t epoch_mark = ctx->epoch << (32 - ZXC_EPOCH_BITS);
+    const uint8_t *ip = src, *iend = src + src_size, *anchor = ip, *mflimit = iend - 12;
+
+    uint32_t* hash_table = ctx->hash_table;
+    uint8_t* buf_extras = ctx->buf_extras;
+    uint16_t* chain_table = ctx->chain_table;
+    uint8_t* literals = ctx->literals;
+
+    uint32_t seq_c = 0;
+    size_t extras_c = 0;
+    size_t lit_c = 0;
+    uint16_t max_offset = 0;
+
+    uint32_t* buf_sequences = ctx->buf_sequences;
+
+    while (LIKELY(ip < mflimit)) {
+        size_t dist = (size_t)(ip - anchor);
+        size_t step = lzp.step_base + (dist >> lzp.step_shift);
+        if (UNLIKELY(ip + step >= mflimit)) step = 1;
+
+        ZXC_PREFETCH_READ(ip + step * 4 + 64);
+
+        zxc_match_t m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table,
+                                                 chain_table, epoch_mark, level, lzp);
+
+        if (m.ref) {
+            ip -= m.backtrack;
+            uint32_t ll = (uint32_t)(ip - anchor);
+            uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
+            uint32_t off = (uint32_t)(ip - m.ref);
+
+            if (ll > 0) {
+                if (ll <= 16)
+                    zxc_copy16(literals + lit_c, anchor);
+                else if (ll <= 32)
+                    zxc_copy32(literals + lit_c, anchor);
+                else
+                    ZXC_MEMCPY(literals + lit_c, anchor, ll);
+                lit_c += ll;
+            }
+
+            uint32_t ll_write = (ll >= ZXC_SEQ_LL_MASK) ? 255U : ll;
+            uint32_t ml_write = (ml >= ZXC_SEQ_ML_MASK) ? 255U : ml;
+            uint32_t seq_val = (ll_write << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
+                               (ml_write << ZXC_SEQ_OFF_BITS) | (off & ZXC_SEQ_OFF_MASK);
+            if (off > max_offset) max_offset = (uint16_t)off;
+            buf_sequences[seq_c] = seq_val;
+            seq_c++;
+
+            if (ll >= ZXC_SEQ_LL_MASK) {
+                extras_c += zxc_write_vbyte(buf_extras + extras_c, ll - ZXC_SEQ_LL_MASK);
+            }
+            if (ml >= ZXC_SEQ_ML_MASK) {
+                extras_c += zxc_write_vbyte(buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
+            }
+
+            if (m.len > 2 && level > 4) {
+                const uint8_t* match_end = ip + m.len;
+                if (match_end < iend - 3) {
+                    uint32_t pos_u = (uint32_t)((match_end - 2) - src);
+                    uint32_t val_u = zxc_le32(match_end - 2);
+                    uint32_t h_u = zxc_hash_func(val_u);
+                    uint32_t prev_head = hash_table[2 * h_u];
+                    uint32_t prev_idx = (prev_head & ~ZXC_OFFSET_MASK) == epoch_mark
+                                            ? (prev_head & ZXC_OFFSET_MASK)
+                                            : 0;
+                    hash_table[2 * h_u] = epoch_mark | pos_u;
+                    hash_table[2 * h_u + 1] = val_u;
+                    chain_table[pos_u] =
+                        (prev_idx > 0 && (pos_u - prev_idx) < (ZXC_LZ_MAX_DIST + 1))
+                            ? (uint16_t)(pos_u - prev_idx)
+                            : 0;
+                }
+            }
+            ip += m.len;
+            anchor = ip;
+        } else {
+            ip += step;
+        }
+    }
+
+    size_t last_lits = iend - anchor;
+    if (last_lits > 0) {
+        if (last_lits <= 16) {
+            zxc_copy16(literals + lit_c, anchor);
+        } else if (last_lits <= 32) {
+            zxc_copy32(literals + lit_c, anchor);
+        } else {
+            ZXC_MEMCPY(literals + lit_c, anchor, last_lits);
+        }
+        lit_c += last_lits;
+    }
+
+    // --- RLE ANALYSIS ---
+    // size_t rle_size = 0;
+    // int use_rle = 0;
+
+    //     if (lit_c > 0 && level >= 2) {
+    //         const uint8_t* p = literals;
+    //         const uint8_t* const p_end = literals + lit_c;
+    //         const uint8_t* const p_end_4 = p_end - 3;  // Safe limit for 4-byte lookahead
+
+    //         while (LIKELY(p < p_end)) {
+    //             uint8_t b = *p;
+    //             const uint8_t* run_start = p++;
+
+    //             // Fast run counting with early SIMD exit
+    // #if defined(ZXC_USE_AVX2)
+    //             __m256i vb = _mm256_set1_epi8((char)b);
+    //             while (p <= p_end - 32) {
+    //                 __m256i v = _mm256_loadu_si256((const __m256i*)p);
+    //                 uint32_t mask = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, vb));
+    //                 if (mask != 0xFFFFFFFF) {
+    //                     p += zxc_ctz32(~mask);
+    //                     goto _run_done;
+    //                 }
+    //                 p += 32;
+    //             }
+    // #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+    //             uint8x16_t vb = vdupq_n_u8(b);
+    //             while (p <= p_end - 16) {
+    //                 uint8x16_t v = vld1q_u8(p);
+    //                 uint8x16_t eq = vceqq_u8(v, vb);
+    //                 uint8x16_t not_eq = vmvnq_u8(eq);
+    //                 uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 0);
+    //                 if (lo != 0) {
+    //                     p += (zxc_ctz64(lo) >> 3);
+    //                     goto _run_done;
+    //                 }
+    //                 uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 1);
+    //                 if (hi != 0) {
+    //                     p += 8 + (zxc_ctz64(hi) >> 3);
+    //                     goto _run_done;
+    //                 }
+    //                 p += 16;
+    //             }
+    // #endif
+    //             while (p < p_end && *p == b) p++;
+
+    //         // cppcheck-suppress unusedLabelConfiguration
+    //         _run_done:;
+    //             size_t run = (size_t)(p - run_start);
+
+    //             if (run >= 4) {
+    //                 // RLE run: 2 bytes per 131 values, then remainder
+    //                 // Branchless: full_chunks * 2 + remainder handling
+    //                 size_t full_chunks = run / 131;
+    //                 size_t rem = run - full_chunks * 131;  // Avoid modulo
+    //                 rle_size += full_chunks * 2;
+    //                 // Remainder: if >= 4 -> 2 bytes (RLE), else 1 + rem (literal)
+    //                 if (rem >= 4)
+    //                     rle_size += 2;
+    //                 else if (rem > 0)
+    //                     rle_size += 1 + rem;
+    //             } else {
+    //                 // Literal run: scan ahead with fast SIMD lookahead
+    //                 const uint8_t* lit_start = run_start;
+
+    // #if defined(ZXC_USE_AVX2)
+    //                 while (p <= p_end_4 - 32) {
+    //                     __m256i v0 = _mm256_loadu_si256((const __m256i*)p);
+    //                     __m256i v1 = _mm256_loadu_si256((const __m256i*)(p + 1));
+    //                     __m256i v2 = _mm256_loadu_si256((const __m256i*)(p + 2));
+    //                     __m256i v3 = _mm256_loadu_si256((const __m256i*)(p + 3));
+    //                     __m256i vend = _mm256_and_si256(
+    //                         _mm256_cmpeq_epi8(v0, v1),
+    //                         _mm256_and_si256(_mm256_cmpeq_epi8(v1, v2), _mm256_cmpeq_epi8(v2,
+    //                         v3)));
+    //                     uint32_t mask = (uint32_t)_mm256_movemask_epi8(vend);
+    //                     if (mask != 0) {
+    //                         p += zxc_ctz32(mask);
+    //                         goto _lit_done;
+    //                     }
+    //                     p += 32;
+    //                 }
+    // #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+    //                 while (p <= p_end_4 - 16) {
+    //                     uint8x16_t v0 = vld1q_u8(p);
+    //                     uint8x16_t v1 = vld1q_u8(p + 1);
+    //                     uint8x16_t v2 = vld1q_u8(p + 2);
+    //                     uint8x16_t v3 = vld1q_u8(p + 3);
+    //                     uint8x16_t eq =
+    //                         vandq_u8(vceqq_u8(v0, v1), vandq_u8(vceqq_u8(v1, v2), vceqq_u8(v2,
+    //                         v3)));
+    //                     uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 0);
+    //                     if (lo != 0) {
+    //                         p += (zxc_ctz64(lo) >> 3);
+    //                         goto _lit_done;
+    //                     }
+    //                     uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 1);
+    //                     if (hi != 0) {
+    //                         p += 8 + (zxc_ctz64(hi) >> 3);
+    //                         goto _lit_done;
+    //                     }
+    //                     p += 16;
+    //                 }
+    // #endif
+    //                 while (p < p_end_4) {
+    //                     // Check for RLE opportunity (4 identical bytes)
+    //                     if (UNLIKELY(p[0] == p[1] && p[1] == p[2] && p[2] == p[3])) break;
+    //                     p++;
+    //                 }
+    //                 // Handle remaining bytes near end
+    //                 while (p < p_end) {
+    //                     if (UNLIKELY(p + 3 < p_end && p[0] == p[1] && p[1] == p[2] && p[2] ==
+    //                     p[3]))
+    //                         break;
+    //                     p++;
+    //                 }
+
+    //             // cppcheck-suppress unusedLabelConfiguration
+    //             _lit_done:;
+    //                 size_t lit_run = (size_t)(p - lit_start);
+    //                 // 1 header per 128 bytes + all data bytes
+    //                 // = lit_run + ceil(lit_run / 128)
+    //                 rle_size += lit_run + ((lit_run + 127) >> 7);
+    //             }
+    //         }
+
+    //         // Threshold: ~3% savings using integer math (97% ~= 1 - 1/32)
+    //         if (rle_size < lit_c - (lit_c >> 5)) use_rle = 1;
+    //     }
+
+    size_t h_gap = ZXC_BLOCK_HEADER_SIZE + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GNR_HV, .raw_size = (uint32_t)src_size};
+    uint8_t* p = dst + h_gap;
+    size_t rem = dst_cap - h_gap;
+
+    // Decide offset encoding mode
+    zxc_gnr_header_t gh = {.n_sequences = seq_c,
+                           .n_literals = (uint32_t)lit_c,
+                           .enc_lit = 0,
+                           .enc_litlen = 0,
+                           .enc_mlen = 0,
+                           .enc_off = (uint8_t)(max_offset <= 255) ? 1 : 0};
+
+    zxc_section_desc_t desc[ZXC_GNR_HV_SECTIONS] = {0};
+    desc[0].sizes = (uint64_t)lit_c | ((uint64_t)lit_c << 32);
+    size_t sz_seqs = seq_c * sizeof(uint32_t);
+    desc[1].sizes = (uint64_t)sz_seqs | ((uint64_t)sz_seqs << 32);
+    desc[2].sizes = (uint64_t)extras_c | ((uint64_t)extras_c << 32);
+
+    int ghs = zxc_write_gnr_hv_header_and_desc(p, rem, &gh, desc);
+    if (UNLIKELY(ghs < 0)) return -1;
+
+    uint8_t* p_curr = p + ghs;
+    rem -= ghs;
+
+    // Extract stream sizes once
+    size_t sz_lit = (size_t)(desc[0].sizes & 0xFFFFFFFF);
+    size_t sz_seq = (size_t)(desc[1].sizes & 0xFFFFFFFF);
+    size_t sz_ext = (size_t)(desc[2].sizes & 0xFFFFFFFF);
+
+    if (UNLIKELY(rem < sz_lit + sz_seq + sz_ext)) return -1;
+
+    // if (use_rle) {
+    //     // Write RLE - optimized single-pass encoding
+    //     const uint8_t* lit_ptr = literals;
+    //     const uint8_t* const lit_end = literals + lit_c;
+
+    //     while (lit_ptr < lit_end) {
+    //         uint8_t b = *lit_ptr;
+    //         const uint8_t* run_start = lit_ptr++;
+
+    //         // Count run length
+    //         while (lit_ptr < lit_end && *lit_ptr == b) lit_ptr++;
+    //         size_t run = (size_t)(lit_ptr - run_start);
+
+    //         if (run >= 4) {
+    //             // RLE runs: emit 2-byte tokens (header + value)
+    //             while (run >= 4) {
+    //                 size_t chunk = (run > 131) ? 131 : run;
+    //                 *p_curr++ = (uint8_t)(0x80 | (chunk - 4));
+    //                 *p_curr++ = b;
+    //                 run -= chunk;
+    //             }
+    //             // Leftover < 4 bytes: emit as literal
+    //             if (run > 0) {
+    //                 *p_curr++ = (uint8_t)(run - 1);
+    //                 ZXC_MEMCPY(p_curr, lit_ptr - run, run);
+    //                 p_curr += run;
+    //             }
+    //         } else {
+    //             // Literal run: scan ahead to find next RLE opportunity
+    //             const uint8_t* lit_run_start = run_start;
+
+    //             while (lit_ptr < lit_end) {
+    //                 // Quick check: need 4 identical bytes to break
+    //                 if (UNLIKELY(lit_ptr + 3 < lit_end && lit_ptr[0] == lit_ptr[1] &&
+    //                              lit_ptr[1] == lit_ptr[2] && lit_ptr[2] == lit_ptr[3])) {
+    //                     break;
+    //                 }
+    //                 lit_ptr++;
+    //             }
+
+    //             size_t lit_run = (size_t)(lit_ptr - lit_run_start);
+    //             const uint8_t* src_ptr = lit_run_start;
+
+    //             // Emit literal chunks (max 128 bytes each)
+    //             while (lit_run > 0) {
+    //                 size_t chunk = (lit_run > 128) ? 128 : lit_run;
+    //                 *p_curr++ = (uint8_t)(chunk - 1);
+    //                 ZXC_MEMCPY(p_curr, src_ptr, chunk);
+    //                 p_curr += chunk;
+    //                 src_ptr += chunk;
+    //                 lit_run -= chunk;
+    //             }
+    //         }
+    //     }
+    // } else {
+    ZXC_MEMCPY(p_curr, literals, lit_c);
+    p_curr += lit_c;
+    // }
+    rem -= sz_lit;
+
+    if (UNLIKELY(rem < sz_seq)) return -1;
+    // Sequential write of 64-bit records
+    ZXC_MEMCPY(p_curr, buf_sequences, sz_seq);
+    p_curr += sz_seq;
+
+    // --- WRITE EXTRAS ---
+    ZXC_MEMCPY(p_curr, buf_extras, sz_ext);
+    p_curr += sz_ext;
+    rem -= sz_seq;
 
     uint32_t p_sz = (uint32_t)(p_curr - (dst + h_gap));
     if (chk)
@@ -996,13 +1344,16 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
  */
 static int zxc_encode_block_raw(const uint8_t* src, size_t src_sz, uint8_t* dst, size_t dst_cap,
                                 size_t* out_sz, int chk, uint64_t crc_val) {
-    size_t h_gap = ZXC_BLOCK_HEADER_SIZE + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-    if (UNLIKELY(dst_cap < h_gap + src_sz)) return -1;
+    size_t chk_sz = chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0;
+    size_t h_gap = ZXC_BLOCK_HEADER_SIZE + chk_sz;
+    size_t total = h_gap + src_sz;
+
+    if (UNLIKELY(dst_cap < total)) return -1;
 
     // Compute block RAW
     zxc_block_header_t bh;
     bh.block_type = ZXC_BLOCK_RAW;
-    bh.block_flags = chk ? ZXC_BLOCK_FLAG_CHECKSUM : 0;
+    bh.block_flags = chk_sz;
     bh.reserved = 0;
     bh.comp_size = (uint32_t)src_sz;
     bh.raw_size = (uint32_t)src_sz;
@@ -1014,7 +1365,7 @@ static int zxc_encode_block_raw(const uint8_t* src, size_t src_sz, uint8_t* dst,
     }
 
     ZXC_MEMCPY(dst + h_gap, src, src_sz);
-    *out_sz = h_gap + src_sz;
+    *out_sz = total;
     return 0;
 }
 
@@ -1110,7 +1461,11 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
     }
 
     if (!try_num) {
-        res = zxc_encode_block_gnr(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
+        if (ctx->compression_level <= 2) {
+            res = zxc_encode_block_gnr_hv(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
+        } else {
+            res = zxc_encode_block_gnr(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
+        }
     }
 
     if (UNLIKELY(res != 0 || w >= src_sz)) {
