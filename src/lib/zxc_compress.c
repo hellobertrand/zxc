@@ -932,10 +932,12 @@ static int zxc_encode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     p_curr += extras_sz;
 
     uint32_t p_sz = (uint32_t)(p_curr - (dst + h_gap));
-    if (chk)
+    if (chk) {
         bh.block_flags |= ZXC_BLOCK_FLAG_CHECKSUM;
-    else
+        bh.block_flags |= (ZXC_CHECKSUM_RAPIDHASH & ZXC_CHECKSUM_TYPE_MASK);
+    } else {
         bh.block_flags &= ~ZXC_BLOCK_FLAG_CHECKSUM;
+    }
     bh.comp_size = p_sz;
     int hw = zxc_write_block_header(dst, dst_cap, &bh);
 
@@ -1079,136 +1081,6 @@ static int zxc_encode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
         lit_c += last_lits;
     }
 
-    // --- RLE ANALYSIS ---
-    // size_t rle_size = 0;
-    // int use_rle = 0;
-
-    //     if (lit_c > 0 && level >= 2) {
-    //         const uint8_t* p = literals;
-    //         const uint8_t* const p_end = literals + lit_c;
-    //         const uint8_t* const p_end_4 = p_end - 3;  // Safe limit for 4-byte lookahead
-
-    //         while (LIKELY(p < p_end)) {
-    //             uint8_t b = *p;
-    //             const uint8_t* run_start = p++;
-
-    //             // Fast run counting with early SIMD exit
-    // #if defined(ZXC_USE_AVX2)
-    //             __m256i vb = _mm256_set1_epi8((char)b);
-    //             while (p <= p_end - 32) {
-    //                 __m256i v = _mm256_loadu_si256((const __m256i*)p);
-    //                 uint32_t mask = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, vb));
-    //                 if (mask != 0xFFFFFFFF) {
-    //                     p += zxc_ctz32(~mask);
-    //                     goto _run_done;
-    //                 }
-    //                 p += 32;
-    //             }
-    // #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
-    //             uint8x16_t vb = vdupq_n_u8(b);
-    //             while (p <= p_end - 16) {
-    //                 uint8x16_t v = vld1q_u8(p);
-    //                 uint8x16_t eq = vceqq_u8(v, vb);
-    //                 uint8x16_t not_eq = vmvnq_u8(eq);
-    //                 uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 0);
-    //                 if (lo != 0) {
-    //                     p += (zxc_ctz64(lo) >> 3);
-    //                     goto _run_done;
-    //                 }
-    //                 uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 1);
-    //                 if (hi != 0) {
-    //                     p += 8 + (zxc_ctz64(hi) >> 3);
-    //                     goto _run_done;
-    //                 }
-    //                 p += 16;
-    //             }
-    // #endif
-    //             while (p < p_end && *p == b) p++;
-
-    //         // cppcheck-suppress unusedLabelConfiguration
-    //         _run_done:;
-    //             size_t run = (size_t)(p - run_start);
-
-    //             if (run >= 4) {
-    //                 // RLE run: 2 bytes per 131 values, then remainder
-    //                 // Branchless: full_chunks * 2 + remainder handling
-    //                 size_t full_chunks = run / 131;
-    //                 size_t rem = run - full_chunks * 131;  // Avoid modulo
-    //                 rle_size += full_chunks * 2;
-    //                 // Remainder: if >= 4 -> 2 bytes (RLE), else 1 + rem (literal)
-    //                 if (rem >= 4)
-    //                     rle_size += 2;
-    //                 else if (rem > 0)
-    //                     rle_size += 1 + rem;
-    //             } else {
-    //                 // Literal run: scan ahead with fast SIMD lookahead
-    //                 const uint8_t* lit_start = run_start;
-
-    // #if defined(ZXC_USE_AVX2)
-    //                 while (p <= p_end_4 - 32) {
-    //                     __m256i v0 = _mm256_loadu_si256((const __m256i*)p);
-    //                     __m256i v1 = _mm256_loadu_si256((const __m256i*)(p + 1));
-    //                     __m256i v2 = _mm256_loadu_si256((const __m256i*)(p + 2));
-    //                     __m256i v3 = _mm256_loadu_si256((const __m256i*)(p + 3));
-    //                     __m256i vend = _mm256_and_si256(
-    //                         _mm256_cmpeq_epi8(v0, v1),
-    //                         _mm256_and_si256(_mm256_cmpeq_epi8(v1, v2), _mm256_cmpeq_epi8(v2,
-    //                         v3)));
-    //                     uint32_t mask = (uint32_t)_mm256_movemask_epi8(vend);
-    //                     if (mask != 0) {
-    //                         p += zxc_ctz32(mask);
-    //                         goto _lit_done;
-    //                     }
-    //                     p += 32;
-    //                 }
-    // #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
-    //                 while (p <= p_end_4 - 16) {
-    //                     uint8x16_t v0 = vld1q_u8(p);
-    //                     uint8x16_t v1 = vld1q_u8(p + 1);
-    //                     uint8x16_t v2 = vld1q_u8(p + 2);
-    //                     uint8x16_t v3 = vld1q_u8(p + 3);
-    //                     uint8x16_t eq =
-    //                         vandq_u8(vceqq_u8(v0, v1), vandq_u8(vceqq_u8(v1, v2), vceqq_u8(v2,
-    //                         v3)));
-    //                     uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 0);
-    //                     if (lo != 0) {
-    //                         p += (zxc_ctz64(lo) >> 3);
-    //                         goto _lit_done;
-    //                     }
-    //                     uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 1);
-    //                     if (hi != 0) {
-    //                         p += 8 + (zxc_ctz64(hi) >> 3);
-    //                         goto _lit_done;
-    //                     }
-    //                     p += 16;
-    //                 }
-    // #endif
-    //                 while (p < p_end_4) {
-    //                     // Check for RLE opportunity (4 identical bytes)
-    //                     if (UNLIKELY(p[0] == p[1] && p[1] == p[2] && p[2] == p[3])) break;
-    //                     p++;
-    //                 }
-    //                 // Handle remaining bytes near end
-    //                 while (p < p_end) {
-    //                     if (UNLIKELY(p + 3 < p_end && p[0] == p[1] && p[1] == p[2] && p[2] ==
-    //                     p[3]))
-    //                         break;
-    //                     p++;
-    //                 }
-
-    //             // cppcheck-suppress unusedLabelConfiguration
-    //             _lit_done:;
-    //                 size_t lit_run = (size_t)(p - lit_start);
-    //                 // 1 header per 128 bytes + all data bytes
-    //                 // = lit_run + ceil(lit_run / 128)
-    //                 rle_size += lit_run + ((lit_run + 127) >> 7);
-    //             }
-    //         }
-
-    //         // Threshold: ~3% savings using integer math (97% ~= 1 - 1/32)
-    //         if (rle_size < lit_c - (lit_c >> 5)) use_rle = 1;
-    //     }
-
     size_t h_gap = ZXC_BLOCK_HEADER_SIZE + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GNR_HV, .raw_size = (uint32_t)src_size};
     uint8_t* p = dst + h_gap;
@@ -1241,64 +1113,8 @@ static int zxc_encode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src,
 
     if (UNLIKELY(rem < sz_lit + sz_seq + sz_ext)) return -1;
 
-    // if (use_rle) {
-    //     // Write RLE - optimized single-pass encoding
-    //     const uint8_t* lit_ptr = literals;
-    //     const uint8_t* const lit_end = literals + lit_c;
-
-    //     while (lit_ptr < lit_end) {
-    //         uint8_t b = *lit_ptr;
-    //         const uint8_t* run_start = lit_ptr++;
-
-    //         // Count run length
-    //         while (lit_ptr < lit_end && *lit_ptr == b) lit_ptr++;
-    //         size_t run = (size_t)(lit_ptr - run_start);
-
-    //         if (run >= 4) {
-    //             // RLE runs: emit 2-byte tokens (header + value)
-    //             while (run >= 4) {
-    //                 size_t chunk = (run > 131) ? 131 : run;
-    //                 *p_curr++ = (uint8_t)(0x80 | (chunk - 4));
-    //                 *p_curr++ = b;
-    //                 run -= chunk;
-    //             }
-    //             // Leftover < 4 bytes: emit as literal
-    //             if (run > 0) {
-    //                 *p_curr++ = (uint8_t)(run - 1);
-    //                 ZXC_MEMCPY(p_curr, lit_ptr - run, run);
-    //                 p_curr += run;
-    //             }
-    //         } else {
-    //             // Literal run: scan ahead to find next RLE opportunity
-    //             const uint8_t* lit_run_start = run_start;
-
-    //             while (lit_ptr < lit_end) {
-    //                 // Quick check: need 4 identical bytes to break
-    //                 if (UNLIKELY(lit_ptr + 3 < lit_end && lit_ptr[0] == lit_ptr[1] &&
-    //                              lit_ptr[1] == lit_ptr[2] && lit_ptr[2] == lit_ptr[3])) {
-    //                     break;
-    //                 }
-    //                 lit_ptr++;
-    //             }
-
-    //             size_t lit_run = (size_t)(lit_ptr - lit_run_start);
-    //             const uint8_t* src_ptr = lit_run_start;
-
-    //             // Emit literal chunks (max 128 bytes each)
-    //             while (lit_run > 0) {
-    //                 size_t chunk = (lit_run > 128) ? 128 : lit_run;
-    //                 *p_curr++ = (uint8_t)(chunk - 1);
-    //                 ZXC_MEMCPY(p_curr, src_ptr, chunk);
-    //                 p_curr += chunk;
-    //                 src_ptr += chunk;
-    //                 lit_run -= chunk;
-    //             }
-    //         }
-    //     }
-    // } else {
     ZXC_MEMCPY(p_curr, literals, lit_c);
     p_curr += lit_c;
-    // }
     rem -= sz_lit;
 
     if (UNLIKELY(rem < sz_seq)) return -1;
