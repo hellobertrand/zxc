@@ -150,12 +150,13 @@ extern "C" {
     ((1U << ZXC_TOKEN_ML_BITS) - 1)  // Mask to extract Match Length from token
 
 // Sequence Format Constants (GNR_HV Token - 8-bit LL, 8-bit ML, 16-bit Offset)
-#define ZXC_SEQ_LL_BITS 8
-#define ZXC_SEQ_ML_BITS 8
-#define ZXC_SEQ_OFF_BITS 16
-#define ZXC_SEQ_LL_MASK ((1U << ZXC_SEQ_LL_BITS) - 1)
-#define ZXC_SEQ_ML_MASK ((1U << ZXC_SEQ_ML_BITS) - 1)
-#define ZXC_SEQ_OFF_MASK ((1U << ZXC_SEQ_OFF_BITS) - 1)
+#define ZXC_SEQ_LL_BITS 8    // Number of bits for Literal Length in sequence
+#define ZXC_SEQ_ML_BITS 8    // Number of bits for Match Length in sequence
+#define ZXC_SEQ_OFF_BITS 16  // Number of bits for Offset in sequence
+#define ZXC_SEQ_LL_MASK \
+    ((1U << ZXC_SEQ_LL_BITS) - 1)  // Mask to extract Literal Length from sequence
+#define ZXC_SEQ_ML_MASK ((1U << ZXC_SEQ_ML_BITS) - 1)  // Mask to extract Match Length from sequence
+#define ZXC_SEQ_OFF_MASK ((1U << ZXC_SEQ_OFF_BITS) - 1)  // Mask to extract Offset from sequence
 
 // LZ77 Constants
 // The hash table uses 13 bits for addressing, resulting in 8192 (2^13) entries.
@@ -198,9 +199,17 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(int level) {
     static const zxc_lz77_params_t table[5] = {
         {6, 16, 0, 0, 2, 3},  // fallback
         {6, 16, 0, 0, 2, 3},  // level 1
-        {6, 16, 0, 0, 2, 4},  // level 2
-        {6, 28, 1, 8, 1, 7},  // level 3
+        {8, 32, 0, 0, 2, 4},  // level 2
+        // {6, 28, 1, 8, 1, 7},  // level 3 GNR_HV
+        {4, 32, 1, 8, 1, 4},  // level 3 {3, 21, 1, 4, 1, 4}
         {4, 32, 1, 8, 1, 5}   // level 4
+
+        //// MML-4
+        // {1, 6, 0, 0, 2, 3},  // fallback
+        // {1, 6, 0, 0, 2, 3},   // level 1
+        // {4, 16, 0, 0, 2, 4},  // level 2
+        // {2, 16, 0, 0, 1, 4},   // level 3
+        // {2, 32, 1, 8, 1, 5}   // level 4
     };
     return table[level < 1 ? 1 : level];
 }
