@@ -152,7 +152,7 @@ int zxc_read_file_header(const uint8_t* src, size_t src_size, size_t* out_block_
  * The size of the data after decompression.
  */
 typedef struct {
-    uint8_t block_type;   // Block type (e.g., RAW, GNR, NUM)
+    uint8_t block_type;   // Block type (e.g., RAW, GLO, GHI, NUM)
     uint8_t block_flags;  // Flags (e.g., checksum presence)
     uint16_t reserved;    // Reserved for future use
     uint32_t comp_size;   // Compressed size excluding header

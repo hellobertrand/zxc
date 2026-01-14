@@ -487,10 +487,10 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, size_t src_size, ui
 }
 
 /**
- * @brief Decompresses a "GNR" (General) encoded block of data.
+ * @brief Decompresses a "GLO" (General) encoded block of data.
  *
  * This function handles the decoding of a compressed block formatted with the
- * internal GNR structure.
+ * internal GLO structure.
  *
  * @param[in,out] ctx Pointer to the compression context (`zxc_cctx_t`) containing
  * @param[in] src Pointer to the source buffer containing compressed data.
@@ -503,17 +503,17 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, size_t src_size, ui
  * @return The number of bytes written to the destination buffer on success, or
  * -1 on failure (e.g., invalid header, buffer overflow, or corrupted data).
  */
-static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
+static int zxc_decode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
                                 uint8_t* RESTRICT dst, size_t dst_capacity,
                                 uint32_t expected_raw_size) {
     zxc_gnr_header_t gh;
-    zxc_section_desc_t desc[ZXC_GNR_SECTIONS];
+    zxc_section_desc_t desc[ZXC_GLO_SECTIONS];
 
-    int res = zxc_read_gnr_header_and_desc(src, src_size, &gh, desc);
+    int res = zxc_read_glo_header_and_desc(src, src_size, &gh, desc);
     if (UNLIKELY(res != 0)) return -1;
 
     const uint8_t* p_data =
-        src + ZXC_GNR_HEADER_BINARY_SIZE + ZXC_GNR_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+        src + ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
     const uint8_t* p_curr = p_data;
 
     // --- Literal Stream Setup ---
@@ -1049,18 +1049,32 @@ static int zxc_decode_block_gnr(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     return (int)(d_ptr - dst);
 }
 
-static int zxc_decode_block_gnr_hv(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
-                                   uint8_t* RESTRICT dst, size_t dst_capacity,
-                                   uint32_t expected_raw_size) {
+/**
+ * @brief Decodes a GHI format compressed block.
+ *
+ * This function handles the decoding of a compressed block formatted with the
+ * internal GHI structure.
+ *
+ * @param[in] ctx Pointer to the decompression context (unused in current implementation).
+ * @param[in] src Pointer to the source buffer containing compressed data.
+ * @param[in] src_size Size of the source buffer in bytes.
+ * @param[out] dst Pointer to the destination buffer for decompressed data.
+ * @param[in] dst_capacity Capacity of the destination buffer in bytes.
+ * @param[in] expected_raw_size Expected size of the decompressed data in bytes.
+ * @return int Returns 0 on success, or a negative error code on failure.
+ */
+static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
+                                uint8_t* RESTRICT dst, size_t dst_capacity,
+                                uint32_t expected_raw_size) {
     (void)ctx;
     zxc_gnr_header_t gh;
-    zxc_section_desc_t desc[ZXC_GNR_HV_SECTIONS];
+    zxc_section_desc_t desc[ZXC_GHI_SECTIONS];
 
-    int res = zxc_read_gnr_hv_header_and_desc(src, src_size, &gh, desc);
+    int res = zxc_read_ghi_header_and_desc(src, src_size, &gh, desc);
     if (UNLIKELY(res != 0)) return -1;
 
     const uint8_t* p_curr =
-        src + ZXC_GNR_HV_HEADER_BINARY_SIZE + ZXC_GNR_HV_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+        src + ZXC_GHI_HEADER_BINARY_SIZE + ZXC_GHI_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
     // --- Stream Pointers & Validation ---
     size_t sz_lit = (uint32_t)desc[0].sizes;
@@ -1484,11 +1498,11 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
     int decoded_sz = -1;
 
     switch (type) {
-        case ZXC_BLOCK_GNR:
-            decoded_sz = zxc_decode_block_gnr(ctx, data, comp_sz, dst, dst_cap, raw_sz);
+        case ZXC_BLOCK_GLO:
+            decoded_sz = zxc_decode_block_glo(ctx, data, comp_sz, dst, dst_cap, raw_sz);
             break;
-        case ZXC_BLOCK_GNR_HV:
-            decoded_sz = zxc_decode_block_gnr_hv(ctx, data, comp_sz, dst, dst_cap, raw_sz);
+        case ZXC_BLOCK_GHI:
+            decoded_sz = zxc_decode_block_ghi(ctx, data, comp_sz, dst, dst_cap, raw_sz);
             break;
         case ZXC_BLOCK_RAW:
             if (UNLIKELY(raw_sz > dst_cap || raw_sz > comp_sz)) return -1;

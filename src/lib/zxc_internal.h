@@ -128,15 +128,15 @@ extern "C" {
     12  // Type (1) + Flags (1) + Reserved (2) + Comp Size (4) + Raw Size (4)
 #define ZXC_BLOCK_CHECKSUM_SIZE 8      // Size of checksum field in bytes
 #define ZXC_NUM_HEADER_BINARY_SIZE 16  // Num Header: N Values (8) + Frame Size (2) + Reserved (6)
-#define ZXC_GNR_HEADER_BINARY_SIZE \
-    16  // GNR Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
-#define ZXC_GNR_HV_HEADER_BINARY_SIZE \
-    16  // GNR_HV Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
+#define ZXC_GLO_HEADER_BINARY_SIZE \
+    16  // GLO Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
+#define ZXC_GHI_HEADER_BINARY_SIZE \
+    16  // GHI Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
 
 // Section Descriptor Sizes
 #define ZXC_SECTION_DESC_BINARY_SIZE 8  // Section Desc: Comp Size (4) + Raw Size (4)
-#define ZXC_GNR_SECTIONS 4              // Number of sections in GNR blocks
-#define ZXC_GNR_HV_SECTIONS 3           // Number of sections in GNR_HV blocks
+#define ZXC_GLO_SECTIONS 4              // Number of sections in GLO blocks
+#define ZXC_GHI_SECTIONS 3              // Number of sections in GHI blocks
 
 // Block Flags
 #define ZXC_BLOCK_FLAG_NONE 0U         // No flags
@@ -147,7 +147,7 @@ extern "C" {
 #define ZXC_CHECKSUM_RAPIDHASH 0x00U  // Default: rapidhash algorithm
 
 // Token Format Constants
-// Sequence Format Constants (GNR Token - 4-bit LL, 4-bit ML, 16-bit Offset)
+// Sequence Format Constants (GLO Token - 4-bit LL, 4-bit ML, 16-bit Offset)
 #define ZXC_TOKEN_LIT_BITS 4  // Number of bits for Literal Length in token
 #define ZXC_TOKEN_ML_BITS 4   // Number of bits for Match Length in token
 #define ZXC_TOKEN_LL_MASK \
@@ -155,7 +155,7 @@ extern "C" {
 #define ZXC_TOKEN_ML_MASK \
     ((1U << ZXC_TOKEN_ML_BITS) - 1)  // Mask to extract Match Length from token
 
-// Sequence Format Constants (GNR_HV Token - 8-bit LL, 8-bit ML, 16-bit Offset)
+// Sequence Format Constants (GHI Token - 8-bit LL, 8-bit ML, 16-bit Offset)
 #define ZXC_SEQ_LL_BITS 8    // Number of bits for Literal Length in sequence
 #define ZXC_SEQ_ML_BITS 8    // Number of bits for Match Length in sequence
 #define ZXC_SEQ_OFF_BITS 16  // Number of bits for Offset in sequence
@@ -206,16 +206,16 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(int level) {
         {6, 16, 0, 0, 2, 3},  // fallback
         {6, 16, 0, 0, 2, 3},  // level 1
         {8, 32, 0, 0, 2, 4},  // level 2
-        // {6, 28, 1, 8, 1, 7},  // level 3 GNR_HV
+        // {6, 28, 1, 8, 1, 7},  // level 3 GHI
         {4, 32, 1, 8, 1, 4},  // level 3 {3, 21, 1, 4, 1, 4}
         {4, 32, 1, 8, 1, 5}   // level 4
 
         //// MML-4
         // {1, 6, 0, 0, 2, 3},  // fallback
-        // {1, 6, 0, 0, 2, 3},   // level 1
-        // {4, 16, 0, 0, 2, 4},  // level 2
-        // {2, 16, 0, 0, 1, 4},   // level 3
-        // {2, 32, 1, 8, 1, 5}   // level 4
+        // {1, 6, 0, 0, 2, 3},  // level 1
+        // {4, 16, 0, 0, 2, 4}, // level 2
+        // {2, 16, 0, 0, 1, 4}, // level 3
+        // {2, 32, 1, 8, 1, 5}  // level 4
     };
     return table[level < 1 ? 1 : level];
 }
@@ -229,18 +229,18 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(int level) {
  * applied:
  * - `ZXC_BLOCK_RAW` (0): No compression. Used when data is incompressible (high
  * entropy) or when compression would expand the data size.
- * - `ZXC_BLOCK_GNR` (1): General-purpose compression (LZ77 + Bitpacking). This
- * is the default for most data (text, binaries, JSON, etc.).
+ * - `ZXC_BLOCK_GLO` (1): General-purpose compression (LZ77 + Bitpacking). This
+ * is the default for most data (text, binaries, JSON, etc.). Includes 4 sections descriptors.
  * - `ZXC_BLOCK_NUM` (2): Specialized compression for arrays of 32-bit integers.
  *   Uses Delta Encoding + ZigZag + Bitpacking.
- * - `ZXC_BLOCK_GNR_HV` (3): General-purpose high-velocity mode using LZ77 with advanced
- * techniques (lazy matching, step skipping) for maximum ratio.
+ * - `ZXC_BLOCK_GHI` (3): General-purpose high-velocity mode using LZ77 with advanced
+ * techniques (lazy matching, step skipping) for maximum ratio. Includes 3 sections descriptors.
  */
 typedef enum {
     ZXC_BLOCK_RAW = 0,
-    ZXC_BLOCK_GNR = 1,
+    ZXC_BLOCK_GLO = 1,
     ZXC_BLOCK_NUM = 2,
-    ZXC_BLOCK_GNR_HV = 3
+    ZXC_BLOCK_GHI = 3
 } zxc_block_type_t;
 
 /**
@@ -267,7 +267,7 @@ typedef enum {
  * @struct zxc_gnr_header_t
  * @brief Header specific to General (LZ-based) compression blocks.
  *
- * This header follows the main block header when the block type is GNR. It
+ * This header follows the main block header when the block type is GLO/GHI. It
  * describes the layout of sequences and literals.
  *
  * @var zxc_gnr_header_t::n_sequences
@@ -731,8 +731,8 @@ int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* n
  * @return int The number of bytes written, or a negative error code if the buffer
  * is too small.
  */
-int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
-                                  const zxc_section_desc_t desc[ZXC_GNR_SECTIONS]);
+int zxc_write_glo_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
+                                  const zxc_section_desc_t desc[ZXC_GLO_SECTIONS]);
 
 /**
  * @brief Reads a generic header and section descriptors from a source buffer.
@@ -747,8 +747,8 @@ int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
  *
  * @return int Returns 0 on success, or a negative error code on failure.
  */
-int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
-                                 zxc_section_desc_t desc[ZXC_GNR_SECTIONS]);
+int zxc_read_glo_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
+                                 zxc_section_desc_t desc[ZXC_GLO_SECTIONS]);
 
 /**
  * @brief Writes a record header and description to the destination buffer.
@@ -760,8 +760,8 @@ int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_
  *
  * @return int Returns the number of bytes written on success, or a negative error code on failure.
  */
-int zxc_write_gnr_hv_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
-                                     const zxc_section_desc_t desc[ZXC_GNR_HV_SECTIONS]);
+int zxc_write_ghi_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
+                                  const zxc_section_desc_t desc[ZXC_GHI_SECTIONS]);
 
 /**
  * @brief Reads a record header and section descriptors from a buffer.
@@ -777,8 +777,8 @@ int zxc_write_gnr_hv_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_hea
  *
  * @return int Returns 0 on success, or a negative error code on failure.
  */
-int zxc_read_gnr_hv_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
-                                    zxc_section_desc_t desc[ZXC_GNR_HV_SECTIONS]);
+int zxc_read_ghi_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
+                                 zxc_section_desc_t desc[ZXC_GHI_SECTIONS]);
 
 /**
  * @brief Internal wrapper function to decompress a single chunk of data.
