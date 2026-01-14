@@ -72,7 +72,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  * @param[in] val The 32-bit unsigned integer value to encode.
  * @return The number of bytes written to the destination buffer.
  */
-size_t ZXC_ALWAYS_INLINE zxc_write_vbyte(uint8_t* dst, uint32_t val) {
+static ZXC_ALWAYS_INLINE size_t zxc_write_vbyte(uint8_t* dst, uint32_t val) {
     size_t count = 0;
     while (val >= 0x80) {
         dst[count++] = (uint8_t)(val | 0x80);
