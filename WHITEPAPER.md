@@ -160,10 +160,10 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 * **Frame**: Processing window size (currently always 128).
 * **Reserved**: Padding for alignment.
 
-### 5.4 Specific Header: GNR (Generic)
+### 5.4 Specific Header: GLO (Global)
 (Present immediately after the Block Header and any optional Checksum)
 
-**GNR Header (16 bytes):**
+**GLO Header (16 bytes):**
 
 ```
   Offset:  0               4               8   9  10  11  12              16
@@ -215,7 +215,7 @@ Each descriptor stores sizes as a packed 64-bit value:
 **Data Flow Example:**
 
 ```
-GNR Block Data Layout:
+GLO Block Data Layout:
 +------------------------------------------------------------------------+
 | Literals Stream | Tokens Stream | Offsets Stream | Extras Stream      |
 | (desc[0] bytes) | (desc[1] bytes)| (desc[2] bytes)| (desc[3] bytes)   |
@@ -240,11 +240,106 @@ Currently, the **Literals** section uses different sizes when RLE compression is
 > **Design Note**: This format is designed for future extensibility. The dual-size architecture allows adding entropy coding (FSE/ANS) or bitpacking to any stream without breaking backward compatibility.
 
 
-### 5.5 Block Encoding & Processing Algorithms
+### 5.5 Specific Header: GHI (High-Velocity)
+(Present immediately after the Block Header and any optional Checksum)
+
+The **GHI** (General High-Velocity) block format is optimized for maximum decompression speed. It uses a **packed 32-bit sequence** format that allows 4-byte aligned reads, reducing memory access latency and enabling efficient SIMD processing.
+
+**GHI Header (16 bytes):**
+
+```
+  Offset:  0               4               8   9  10  11  12              16
+          +---------------+---------------+---+---+---+---+---------------+
+          | N Sequences   | N Literals    |Lit|LL |ML |Off| Reserved      |
+          | (4 bytes)     | (4 bytes)     |Enc|Enc|Enc|Enc| (4 bytes)     |
+          +---------------+---------------+---+---+---+---+---------------+
+```
+
+* **N Sequences**: Total count of LZ sequences in the block.
+* **N Literals**: Total count of literal bytes.
+* **Encoding Types**
+  - `Lit Enc`: Literal stream encoding (0=RAW).
+  - `LL Enc`: Reserved for future use.
+  - `ML Enc`: Reserved for future use.
+  - `Off Enc`: Offset encoding mode:
+    - `0` = 16-bit offsets (max distance 65535)
+    - `1` = 8-bit offsets (max distance 255, enables smaller sequence packing)
+* **Reserved**: Padding for alignment.
+
+**Section Descriptors (3 × 8 bytes = 24 bytes total):**
+
+```
+  Full Layout (24 bytes):
+  Offset:  0               8               16              24
+          +---------------+---------------+---------------+
+          | Literals Desc | Sequences Desc| Extras Desc   |
+          | (8 bytes)     | (8 bytes)     | (8 bytes)     |
+          +---------------+---------------+---------------+
+```
+
+**Section Contents:**
+
+| # | Section       | Description                                           |
+|---|---------------|-------------------------------------------------------|
+| 0 | **Literals**  | Raw bytes to copy                                    |
+| 1 | **Sequences** | Packed 32-bit sequences (see format below)           |
+| 2 | **Extras**    | VByte overflow values when LitLen or MatchLen ≥ 255  |
+
+**Packed Sequence Format (32 bits):**
+
+Unlike GLO which uses separate token and offset streams, GHI packs all sequence data into a single 32-bit word for cache-friendly sequential access:
+
+```
+  32-bit Sequence Word (Little Endian):
+  +--------+--------+------------------+
+  |   LL   |   ML   |     Offset       |
+  | 8 bits | 8 bits |     16 bits      |
+  +--------+--------+------------------+
+   [31:24]  [23:16]      [15:0]
+
+  Byte Layout in Memory:
+  Offset: 0        1        2        3
+         +--------+--------+--------+--------+
+         | Off Lo | Off Hi |   ML   |   LL   |
+         +--------+--------+--------+--------+
+```
+
+* **LL (Literal Length)**: 8 bits (0-254, value 255 triggers VByte overflow)
+* **ML (Match Length - 5)**: 8 bits (actual length = ML + 5, range 5-259, value 255 triggers VByte overflow)
+* **Offset**: 16 bits (match distance, 1-65535)
+
+**Data Flow Example:**
+
+```
+GHI Block Data Layout:
++------------------------------------------------------------+
+| Literals Stream | Sequences Stream       | Extras Stream   |
+| (desc[0] bytes) | (desc[1] bytes = N×4)  | (desc[2] bytes) |
++------------------------------------------------------------+
+       ↓                    ↓                      ↓
+   Raw bytes        32-bit seq read         Length overflow
+```
+
+**Key Differences: GLO vs GHI**
+
+| Feature            | GLO (Global)                    | GHI (High-Velocity)              |
+|--------------------|---------------------------------|----------------------------------|
+| **Sections**       | 4 (Lit, Tokens, Offsets, Extras)| 3 (Lit, Sequences, Extras)       |
+| **Sequence Format**| 1-byte token + separate offset  | Packed 32-bit word               |
+| **LL/ML Bits**     | 4 bits each (overflow at 15)    | 8 bits each (overflow at 255)    |
+| **Memory Access**  | Multiple stream pointers        | Single aligned 4-byte reads      |
+| **Decoder Speed**  | Fast                            | Fastest (optimized for ARM/x86)  |
+| **RLE Support**    | Yes (literals)                  | No                               |
+| **Best For**       | General data, good compression  | Maximum decode throughput        |
+
+> **Design Rationale**: The 32-bit packed format eliminates pointer chasing between token and offset streams. By reading a single aligned word per sequence, the decoder achieves better cache utilization and enables aggressive loop unrolling (4x) for maximum throughput on modern CPUs.
+
+
+### 5.6 Block Encoding & Processing Algorithms
 
 The efficiency of ZXC relies on specialized algorithmic pipelines for each block type.
 
-#### Type 1: GNR (General) - The Workhorse
+#### Type 1: GLO (Global)
 This format is used for standard data. It employs a **multi-stage encoding pipeline**:
 
 **Encoding Process**:
@@ -272,7 +367,31 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Matches*: Copied using 16-byte stores. Overlapping matches (e.g., repeating pattern "ABC" for 100 bytes) are handled naturally by the CPU's store forwarding or by specific overlapped-copy primitives.
     *   **Safety**: A "Safe Zone" at the end of the buffer forces a switch to a cautious byte-by-byte loop, allowing the main loop to run without bounds checks.
 
-#### Type 2: NUM (Numeric) - The Specialist
+#### Type 3: GHI (High-Velocity)
+This format prioritizes decompression throughput over compression ratio. It uses a **unified sequence stream**:
+
+**Encoding Process**:
+1.  **LZ77 Parsing**: Same as GLO, with aggressive lazy matching and step skipping for optimal matches.
+2.  **Sequence Packing**: Each match is packed into a 32-bit word:
+    *   Bits [31:24]: Literal Length (8 bits)
+    *   Bits [23:16]: Match Length - 5 (8 bits)
+    *   Bits [15:0]: Offset (16 bits)
+3.  **Stream Assembly**: Only three streams are generated:
+    *   *Literals Buffer*: Raw bytes (no RLE).
+    *   *Sequences Buffer*: Packed 32-bit words (4 bytes each).
+    *   *Extras Buffer*: VByte overflow values for lengths >= 255.
+4.  **Final Serialization**: Streams are concatenated with 3 section descriptors.
+
+**Decoding Process**:
+1.  **Single-Read Loop**: The decoder reads one 32-bit word per sequence, extracting LL, ML, and offset in a single operation.
+2.  **4x Unrolled Fast Path**: When sufficient buffer margin exists, the decoder processes 4 sequences per iteration:
+    *   Pre-reads 4 sequences into registers
+    *   Copies literals and matches with 32-byte SIMD operations
+    *   Minimal branching for maximum instruction-level parallelism
+3.  **Offset Validation Threshold**: For the first 256 (8-bit mode) or 65536 (16-bit mode) bytes, offsets are validated against written bytes. After this threshold, all offsets are guaranteed valid.
+4.  **Wild Copy**: Same 32-byte SIMD copies as GLO, with special handling for overlapping matches (offset < 32).
+
+#### Type 2: NUM (Numeric)
 Triggered when data is detected as a dense array of 32-bit integers.
 
 **Encoding Process**:
@@ -286,7 +405,7 @@ Triggered when data is detected as a dense array of 32-bit integers.
 2.  **ZigZag Decode**: Reverses the mapping.
 3.  **Integration**: Computes the prefix sum (cumulative addition) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
 
-### 5.6 Data Integrity
+### 5.7 Data Integrity
 Every block can optionally be protected by a **64-bit checksum** to ensure data reliability.
 
 #### Multi-Algorithm Support
@@ -303,7 +422,7 @@ The default `rapidhash` algorithm is based on wyhash and was developed by Nicola
 ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-core CPUs.
 
 ### 6.1 Asynchronous Compression Pipeline
-1.  **Block Splitting (Main Thread)**: The input file is read and sliced into fixed-size chunks (default 248KB).
+1.  **Block Splitting (Main Thread)**: The input file is read and sliced into fixed-size chunks (default 256KB).
 2.  **Ring Buffer Submission**: Chunks are placed into a lock-free ring buffer.
 3.  **Parallel Compression (Worker Threads)**:
     *   Workers pull chunks from the queue.
