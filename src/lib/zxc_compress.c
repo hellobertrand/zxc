@@ -245,32 +245,21 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             }
             while (ip + mlen < iend && ref[mlen] == ip[mlen]) mlen++;
 
-        _match_len_done:
+        _match_len_done: {
             int better = (mlen > best.len);
             best.len = better ? mlen : best.len;
             best.ref = better ? ref : best.ref;
-            // if (mlen > best.len) {
-            //     best.len = mlen;
-            //     best.ref = ref;
-
-            //     if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend))
-            //         break;
-            // }
+        }
 
             if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend)) break;
         }
-        uint16_t delta = chain_table[match_idx];
 
+        uint16_t delta = chain_table[match_idx];
         uint32_t next_idx = match_idx - delta;
         ZXC_PREFETCH_READ(src + next_idx);
 
         match_idx = (delta != 0) ? next_idx : 0;
         is_first = 0;
-
-        // if (UNLIKELY(delta == 0)) break;
-        // match_idx -= delta;
-        // is_first = 0;
-        // ZXC_PREFETCH_READ(src + match_idx);
     }
 
     if (best.ref) {
@@ -1159,7 +1148,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     // --- WRITE EXTRAS ---
     ZXC_MEMCPY(p_curr, buf_extras, sz_ext);
     p_curr += sz_ext;
-    rem -= sz_seq;
+    // rem -= sz_ext;
 
     uint32_t p_sz = (uint32_t)(p_curr - (dst + h_gap));
     if (chk) {
