@@ -154,7 +154,14 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         ZXC_PREFETCH_READ(ref);
 
         uint32_t ref_val = zxc_le32(ref);
-        if ((!is_first || !skip_head) && ref_val == cur_val && ref[best.len] == ip[best.len]) {
+        int tag_match = (ref_val == cur_val);
+        // skip_head only matters on first iteration
+        int skip_check = is_first & skip_head;
+        int should_compare = tag_match & (!skip_check);
+
+        should_compare &= (ref[best.len] == ip[best.len]);
+
+        if (should_compare) {
             uint32_t mlen = 4;
             // SIMD match length calculation (Factorized from existing code)
 #if defined(ZXC_USE_AVX512)
@@ -239,18 +246,31 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             while (ip + mlen < iend && ref[mlen] == ip[mlen]) mlen++;
 
         _match_len_done:
-            if (mlen > best.len) {
-                best.len = mlen;
-                best.ref = ref;
-                if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend))
-                    break;
-            }
+            int better = (mlen > best.len);
+            best.len = better ? mlen : best.len;
+            best.ref = better ? ref : best.ref;
+            // if (mlen > best.len) {
+            //     best.len = mlen;
+            //     best.ref = ref;
+
+            //     if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend))
+            //         break;
+            // }
+
+            if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend)) break;
         }
         uint16_t delta = chain_table[match_idx];
-        if (UNLIKELY(delta == 0)) break;
-        match_idx -= delta;
+
+        uint32_t next_idx = match_idx - delta;
+        ZXC_PREFETCH_READ(src + next_idx);
+
+        match_idx = (delta != 0) ? next_idx : 0;
         is_first = 0;
-        ZXC_PREFETCH_READ(src + match_idx);
+
+        // if (UNLIKELY(delta == 0)) break;
+        // match_idx -= delta;
+        // is_first = 0;
+        // ZXC_PREFETCH_READ(src + match_idx);
     }
 
     if (best.ref) {
