@@ -163,7 +163,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
         if (should_compare) {
             uint32_t mlen = 4;
-            // SIMD match length calculation (Factorized from existing code)
+            // SIMD match length calculation
 #if defined(ZXC_USE_AVX512)
             const uint8_t* limit_64 = iend - 64;
             while (ip + mlen < limit_64) {
@@ -245,11 +245,10 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             }
             while (ip + mlen < iend && ref[mlen] == ip[mlen]) mlen++;
 
-        _match_len_done: {
+        _match_len_done:;
             int better = (mlen > best.len);
             best.len = better ? mlen : best.len;
             best.ref = better ? ref : best.ref;
-        }
 
             if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend)) break;
         }
@@ -740,8 +739,9 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 #endif
             while (p < p_end && *p == b) p++;
 
-        // cppcheck-suppress unusedLabelConfiguration
+#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
         _run_done:;
+#endif
             size_t run = (size_t)(p - run_start);
 
             if (run >= 4) {
@@ -808,8 +808,9 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                     p++;
                 }
 
-            // cppcheck-suppress unusedLabelConfiguration
+#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
             _lit_done:;
+#endif
                 size_t lit_run = (size_t)(p - lit_start);
                 // 1 header per 128 bytes + all data bytes
                 // = lit_run + ceil(lit_run / 128)
