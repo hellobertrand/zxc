@@ -785,7 +785,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     // --- SAFE Loop: offset validation until threshold (4x unroll) ---
     // For 1-byte offsets: bounds check until 256 bytes written
     // For 2-byte offsets: bounds check until 65536 bytes written
-    size_t bounds_threshold = (gh.enc_off == 1) ? 256 : 65536;
+    size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
 
     while (n_seq >= 4 && d_ptr < d_end_safe && written < bounds_threshold) {
         uint32_t tokens = zxc_le32(t_ptr);
@@ -1253,7 +1253,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     // Since offset is 16-bit, threshold is 65536.
     // For 1-byte offsets (enc_off==1): validate until 256 bytes written
     // For 2-byte offsets (enc_off==0): validate until 65536 bytes written
-    size_t bounds_threshold = (gh.enc_off == 1) ? 256 : 65536;
+    size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
 
     while (n_seq > 0 && d_ptr < d_end_safe && written < bounds_threshold) {
         uint32_t seq = zxc_le32(seq_ptr);
