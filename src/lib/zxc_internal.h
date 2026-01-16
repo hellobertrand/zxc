@@ -206,16 +206,8 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(int level) {
         {6, 16, 0, 0, 2, 3},  // fallback
         {6, 16, 0, 0, 2, 3},  // level 1
         {8, 32, 0, 0, 2, 4},  // level 2
-        // {6, 28, 1, 8, 1, 7},  // level 3 GHI
-        {4, 32, 1, 8, 1, 4},  // level 3 {3, 21, 1, 4, 1, 4}
+        {4, 32, 1, 8, 1, 4},  // level 3
         {4, 32, 1, 8, 1, 5}   // level 4
-
-        //// MML-4
-        // {1, 6, 0, 0, 2, 3},  // fallback
-        // {1, 6, 0, 0, 2, 3},  // level 1
-        // {4, 16, 0, 0, 2, 4}, // level 2
-        // {2, 16, 0, 0, 1, 4}, // level 3
-        // {2, 32, 1, 8, 1, 5}  // level 4
     };
     return table[level < 1 ? 1 : level];
 }

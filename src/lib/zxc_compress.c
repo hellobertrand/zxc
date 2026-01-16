@@ -157,8 +157,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         int tag_match = (ref_val == cur_val);
         // skip_head only matters on first iteration
         int skip_check = is_first & skip_head;
-        int should_compare = tag_match & (!skip_check);
-
+        int should_compare = tag_match && !skip_check;
         should_compare &= (ref[best.len] == ip[best.len]);
 
         if (should_compare) {
@@ -1149,7 +1148,6 @@ static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     // --- WRITE EXTRAS ---
     ZXC_MEMCPY(p_curr, buf_extras, sz_ext);
     p_curr += sz_ext;
-    // rem -= sz_ext;
 
     uint32_t p_sz = (uint32_t)(p_curr - (dst + h_gap));
     if (chk) {
