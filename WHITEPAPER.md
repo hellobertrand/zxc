@@ -132,7 +132,7 @@ Each data block consists of a **12-byte** generic header that precedes the speci
           +-----------------------------------------------------------------------------+
 ```
 
-* **Type**: Block encoding type (0=RAW, 1=GNR, 2=NUM).
+* **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI).
 * **Flags**:
   - **Bit 7 (0x80)**: `HAS_CHECKSUM`. If set, an **8-byte checksum** follows immediately after Raw Size.
   - **Bits 0-3 (0x0F)**: `CHECKSUM_TYPE`. Defines the algorithm used for integrity verification.
@@ -160,7 +160,7 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 * **Frame**: Processing window size (currently always 128).
 * **Reserved**: Padding for alignment.
 
-### 5.4 Specific Header: GLO (Global)
+### 5.4 Specific Header: GLO (Generic Low)
 (Present immediately after the Block Header and any optional Checksum)
 
 **GLO Header (16 bytes):**
@@ -240,10 +240,10 @@ Currently, the **Literals** section uses different sizes when RLE compression is
 > **Design Note**: This format is designed for future extensibility. The dual-size architecture allows adding entropy coding (FSE/ANS) or bitpacking to any stream without breaking backward compatibility.
 
 
-### 5.5 Specific Header: GHI (High-Velocity)
+### 5.5 Specific Header: GHI (Generic High)
 (Present immediately after the Block Header and any optional Checksum)
 
-The **GHI** (General High-Velocity) block format is optimized for maximum decompression speed. It uses a **packed 32-bit sequence** format that allows 4-byte aligned reads, reducing memory access latency and enabling efficient SIMD processing.
+The **GHI** (Generic High-Velocity) block format is optimized for maximum decompression speed. It uses a **packed 32-bit sequence** format that allows 4-byte aligned reads, reducing memory access latency and enabling efficient SIMD processing.
 
 **GHI Header (16 bytes):**
 
@@ -639,7 +639,7 @@ ZXC is designed to adapt to various deployment scenarios by selecting the approp
 *   **Interactive Media & Gaming (Levels 1-2-3)**:
     Optimized for hard real-time constraints. Ideal for texture streaming and asset loading, offering **~40% faster** load times to minimize latency and frame drops.
 
-*   **Embedded Systems & Firmware (Levels 4-5)**:
+*   **Embedded Systems & Firmware (Levels 3-4-5)**:
     The sweet spot for maximizing storage density on limited flash memory (e.g., Kernel, Initramfs) while ensuring rapid "instant-on" (XIP-like) boot performance.
 
 *   **Data Archival (Levels 4-5)**:
