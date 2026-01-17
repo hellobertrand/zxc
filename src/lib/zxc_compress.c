@@ -126,13 +126,13 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     const uint8_t* anchor, uint32_t* hash_table, uint16_t* chain_table, uint32_t epoch_mark,
     int level, zxc_lz77_params_t p) {
     // Track the best match found so far.
-    //  `ref` is the pointer to the start of the match in the history buffer,
-    //  `len` is the match length, and `backtrack` is the distance from `ip` to `ref`.
+    //  ref is the pointer to the start of the match in the history buffer,
+    //  len is the match length, and backtrack is the distance from ip to ref.
     //  Start with a sentinel length just below the minimum so any valid match will replace it.
     zxc_match_t best = (zxc_match_t){NULL, ZXC_LZ_MIN_MATCH_LEN - 1, 0};
 
     // Load the 4‑byte sequence at the current position and hash it.
-    // The hash value `h` is used to index into the LZ77 hash table.
+    // The hash value h is used to index into the LZ77 hash table.
     uint32_t cur_val = zxc_le32(ip);
     uint32_t h = zxc_hash_func(cur_val);
 
@@ -141,19 +141,19 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     uint32_t cur_pos = (uint32_t)(ip - src);
 
     // Each hash bucket stores:
-    // - `raw_head`: compressed pointer (epoch in high bits, position in low bits)
-    //  - `stored_tag`: 4‑byte tag of the sequence used to quickly reject mismatches.
+    // - raw_head: compressed pointer (epoch in high bits, position in low bits)
+    // - stored_tag: 4‑byte tag of the sequence used to quickly reject mismatches.
     // Epoch bits allow the tables to be lazily invalidated without clearing all entries.
     uint32_t raw_head = hash_table[2 * h];
     uint32_t stored_tag = hash_table[2 * h + 1];
 
-    // If the epoch in `raw_head` matches the current `epoch_mark`, extract the
+    // If the epoch in raw_head matches the current epoch_mark, extract the
     // stored position; otherwise treat this bucket as empty (index 0).
     uint32_t match_idx =
         (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
 
     // Decide whether to skip the head entry of the hash chain.
-    // If the stored 4‑byte tag does not match `cur_val`, the head is likely a
+    // If the stored 4‑byte tag does not match cur_val, the head is likely a
     // false candidate, so we can optionally skip it entirely, especially at
     // lower compression levels where we prefer speed over thoroughness.
     int skip_head = (match_idx > 0 && stored_tag != cur_val);
@@ -161,8 +161,9 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
     hash_table[2 * h] = epoch_mark | cur_pos;
     hash_table[2 * h + 1] = cur_val;
-    chain_table[cur_pos] =
-        (match_idx > 0 && (cur_pos - match_idx) < ZXC_LZ_WINDOW_SIZE) ? (uint16_t)(cur_pos - match_idx) : 0;
+    chain_table[cur_pos] = (match_idx > 0 && (cur_pos - match_idx) < ZXC_LZ_WINDOW_SIZE)
+                               ? (uint16_t)(cur_pos - match_idx)
+                               : 0;
 
     if (match_idx == 0) return best;
 
@@ -685,10 +686,9 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                                             : 0;
                     hash_table[2 * h_u] = epoch_mark | pos_u;
                     hash_table[2 * h_u + 1] = val_u;
-                    chain_table[pos_u] =
-                        (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
-                            ? (uint16_t)(pos_u - prev_idx)
-                            : 0;
+                    chain_table[pos_u] = (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
+                                             ? (uint16_t)(pos_u - prev_idx)
+                                             : 0;
                 }
             }
             ip += m.len;
@@ -1124,10 +1124,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                                             : 0;
                     hash_table[2 * h_u] = epoch_mark | pos_u;
                     hash_table[2 * h_u + 1] = val_u;
-                    chain_table[pos_u] =
-                        (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
-                            ? (uint16_t)(pos_u - prev_idx)
-                            : 0;
+                    chain_table[pos_u] = (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
+                                             ? (uint16_t)(pos_u - prev_idx)
+                                             : 0;
                 }
             }
             ip += m.len;
