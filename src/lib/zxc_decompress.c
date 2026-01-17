@@ -114,6 +114,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
         return (b0 & ZXC_VBYTE_MASK) | (b1 << 7);
     }
 
+    // 3-byte path (last possible for ZXC_BLOCK_SIZE = 256KB)
     if (UNLIKELY(p + 2 >= end)) {
         *ptr = p + 2;
         return 0;
@@ -141,7 +142,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
         return 0;
     }
     *ptr = p + 5;
-    return val | ((b3 & ZXC_VBYTE_MASK) << 21) | ((uint32_t)p[4] << 28);
+    // 5th byte: only 4 bits used (32 - 28 = 4). Mask 0x0F for robustness against corrupted data.
+    return val | ((b3 & ZXC_VBYTE_MASK) << 21) | (((uint32_t)p[4] & 0x0F) << 28);
 }
 
 /**
