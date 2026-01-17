@@ -74,8 +74,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  */
 static ZXC_ALWAYS_INLINE size_t zxc_write_vbyte(uint8_t* dst, uint32_t val) {
     size_t count = 0;
-    while (val >= 0x80) {
-        dst[count++] = (uint8_t)(val | 0x80);
+    while (val >= ZXC_VBYTE_MSB) {
+        dst[count++] = (uint8_t)(val | ZXC_VBYTE_MSB);
         val >>= 7;
     }
     dst[count++] = (uint8_t)val;
