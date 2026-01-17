@@ -164,12 +164,15 @@ extern "C" {
 #define ZXC_SEQ_ML_MASK ((1U << ZXC_SEQ_ML_BITS) - 1)  // Mask to extract Match Length from sequence
 #define ZXC_SEQ_OFF_MASK ((1U << ZXC_SEQ_OFF_BITS) - 1)  // Mask to extract Offset from sequence
 
+#define ZXC_VBYTE_MSB (1U << (8 * sizeof(uint8_t) - 1))  // Most significant bit of a vbyte (128)
+#define ZXC_VBYTE_MASK (ZXC_VBYTE_MSB - 1)               // Mask to extract vbyte value (127)
+
 // LZ77 Constants
 // The hash table uses 13 bits for addressing, resulting in 8192 (2^13) entries.
 // The hash table uses 2x entries (load factor < 0.5) to reduce collisions.
 // Each hash table entry stores: (epoch << 18) | offset.
 // Total memory footprint: 64KB (8192 entries * 2 * 4 bytes each).
-#define ZXC_LZ_HASH_BITS 13                       // (2*(2^13) * 4 bytes = 64KB)
+#define ZXC_LZ_HASH_BITS 13                        // (2*(2^13) * 4 bytes = 64KB)
 #define ZXC_LZ_HASH_SIZE (1U << ZXC_LZ_HASH_BITS)  // Hash table size
 #define ZXC_LZ_WINDOW_SIZE (1U << 16)              // 64KB sliding window
 // Note: sliding window of 64KB allows chain_table to use uint16_t for valid offsets (since any

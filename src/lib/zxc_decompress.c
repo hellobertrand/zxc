@@ -98,7 +98,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
     if (UNLIKELY(p >= end)) return 0;  // Safe default: prevents crash, detected later
 
     uint32_t b0 = p[0];
-    if (LIKELY(b0 < 128)) {
+    if (LIKELY(b0 < ZXC_VBYTE_MSB)) {
         *ptr = p + 1;
         return b0;
     }
@@ -109,9 +109,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
         return 0;
     }
     uint32_t b1 = p[1];
-    if (LIKELY(b1 < 128)) {
+    if (LIKELY(b1 < ZXC_VBYTE_MSB)) {
         *ptr = p + 2;
-        return (b0 & 0x7F) | (b1 << 7);
+        return (b0 & ZXC_VBYTE_MASK) | (b1 << 7);
     }
 
     if (UNLIKELY(p + 2 >= end)) {
@@ -119,8 +119,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
         return 0;
     }
     uint32_t b2 = p[2];
-    uint32_t val = (b0 & 0x7F) | ((b1 & 0x7F) << 7);
-    if (b2 < 128) {
+    uint32_t val = (b0 & ZXC_VBYTE_MASK) | ((b1 & ZXC_VBYTE_MASK) << 7);
+    if (b2 < ZXC_VBYTE_MSB) {
         *ptr = p + 3;
         return val | (b2 << 14);
     }
@@ -129,9 +129,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
         *ptr = p + 3;
         return 0;
     }
-    val |= (b2 & 0x7F) << 14;
+    val |= (b2 & ZXC_VBYTE_MASK) << 14;
     uint32_t b3 = p[3];
-    if (b3 < 128) {
+    if (b3 < ZXC_VBYTE_MSB) {
         *ptr = p + 4;
         return val | (b3 << 21);
     }
@@ -141,7 +141,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
         return 0;
     }
     *ptr = p + 5;
-    return val | ((b3 & 0x7F) << 21) | ((uint32_t)p[4] << 28);
+    return val | ((b3 & ZXC_VBYTE_MASK) << 21) | ((uint32_t)p[4] << 28);
 }
 
 /**
