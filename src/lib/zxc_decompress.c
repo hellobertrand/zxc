@@ -98,7 +98,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
     if (UNLIKELY(p >= end)) return 0;  // Safe default: prevents crash, detected later
 
     uint32_t b0 = p[0];
-    if (LIKELY(b0 < 128)) {
+    if (LIKELY(b0 < ZXC_VBYTE_MSB)) {
         *ptr = p + 1;
         return b0;
     }
@@ -109,18 +109,19 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
         return 0;
     }
     uint32_t b1 = p[1];
-    if (LIKELY(b1 < 128)) {
+    if (LIKELY(b1 < ZXC_VBYTE_MSB)) {
         *ptr = p + 2;
-        return (b0 & 0x7F) | (b1 << 7);
+        return (b0 & ZXC_VBYTE_MASK) | (b1 << 7);
     }
 
+    // 3-byte path (last possible for ZXC_BLOCK_SIZE = 256KB)
     if (UNLIKELY(p + 2 >= end)) {
         *ptr = p + 2;
         return 0;
     }
     uint32_t b2 = p[2];
-    uint32_t val = (b0 & 0x7F) | ((b1 & 0x7F) << 7);
-    if (b2 < 128) {
+    uint32_t val = (b0 & ZXC_VBYTE_MASK) | ((b1 & ZXC_VBYTE_MASK) << 7);
+    if (b2 < ZXC_VBYTE_MSB) {
         *ptr = p + 3;
         return val | (b2 << 14);
     }
@@ -129,9 +130,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
         *ptr = p + 3;
         return 0;
     }
-    val |= (b2 & 0x7F) << 14;
+    val |= (b2 & ZXC_VBYTE_MASK) << 14;
     uint32_t b3 = p[3];
-    if (b3 < 128) {
+    if (b3 < ZXC_VBYTE_MSB) {
         *ptr = p + 4;
         return val | (b3 << 21);
     }
@@ -141,7 +142,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
         return 0;
     }
     *ptr = p + 5;
-    return val | ((b3 & 0x7F) << 21) | ((uint32_t)p[4] << 28);
+    // 5th byte: only 4 bits used (32 - 28 = 4). Mask 0x0F for robustness against corrupted data.
+    return val | ((b3 & ZXC_VBYTE_MASK) << 21) | (((uint32_t)p[4] & 0x0F) << 28);
 }
 
 /**
@@ -785,7 +787,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     // --- SAFE Loop: offset validation until threshold (4x unroll) ---
     // For 1-byte offsets: bounds check until 256 bytes written
     // For 2-byte offsets: bounds check until 65536 bytes written
-    size_t bounds_threshold = (gh.enc_off == 1) ? 256 : 65536;
+    size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
 
     while (n_seq >= 4 && d_ptr < d_end_safe && written < bounds_threshold) {
         uint32_t tokens = zxc_le32(t_ptr);
@@ -1253,7 +1255,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     // Since offset is 16-bit, threshold is 65536.
     // For 1-byte offsets (enc_off==1): validate until 256 bytes written
     // For 2-byte offsets (enc_off==0): validate until 65536 bytes written
-    size_t bounds_threshold = (gh.enc_off == 1) ? 256 : 65536;
+    size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
 
     while (n_seq > 0 && d_ptr < d_end_safe && written < bounds_threshold) {
         uint32_t seq = zxc_le32(seq_ptr);
