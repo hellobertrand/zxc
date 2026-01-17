@@ -1,8 +1,7 @@
 # ZXC: High-Performance Asymmetric Lossless Compression
 
-**Subtitle**: Optimizing Storage and Latency in WORM (Write-Once, Read-Many) Architectures
-**Version**: 0.4.0
-**Date**: December 2025
+**Version**: 0.5.0
+**Date**: January 2026
 **Author**: Bertrand Lebonnois
 
 ---
@@ -11,7 +10,7 @@
 
 In modern software delivery pipelines—specifically **Mobile Gaming**, **Embedded Systems**, and **FOTA (Firmware Over-The-Air)**—data is typically generated on high-performance x86 workstations but consumed on energy-constrained ARM devices.
 
-Standard industry codecs like LZ4 offer excellent performance but fail to exploit the "Write-Once, Read-Many" (WORM) nature of these pipelines. **ZXC** is a lossless codec designed to bridge this gap. By utilizing an **asymmetric compression model**, ZXC achieves a **45% increase in decompression speed on ARM** compared to LZ4, while simultaneously reducing storage footprints. On x86 development architecture, ZXC maintains competitive throughput, ensuring no disruption to build pipelines.
+Standard industry codecs like LZ4 offer excellent performance but fail to exploit the "Write-Once, Read-Many" (WORM) nature of these pipelines. **ZXC** is a lossless codec designed to bridge this gap. By utilizing an **asymmetric compression model**, ZXC achieves a **>40% increase in decompression speed on ARM** compared to LZ4, while simultaneously reducing storage footprints. On x86 development architecture, ZXC maintains competitive throughput, ensuring no disruption to build pipelines.
 
 ## 2. The Efficiency Gap
 
@@ -44,7 +43,7 @@ ZXC leverages modern instruction sets to maximize throughput on both ARM and x86
 * **ARM NEON Optimization**: Extensive usage of vld1q_u8 (vector load) and vceqq_u8 (parallel comparison) allows scanning data at wire speed, while vminvq_u8 provides fast rejection of non-matches.
 * **x86 Vectorization**: Maintains high performance on Intel/AMD platforms via dedicated AVX2 and AVX512 paths (falling back to SSE4.1 on older hardware), ensuring parity with ARM throughput.
 * **Hardware-Accelerated Indexing**: The encoder's hash table mechanism utilizes hardware CRC32c instructions (__crc32cw on ARM, _mm_crc32_u64 on x86) when available, reducing CPU cycle cost for match finding.
-* **High-Speed Integrity**: Block validation relies on XXH3 (64-bit), a modern non-cryptographic hash algorithm that fully exploits vector instructions to verify data integrity without bottlenecking the decompression pipeline.
+* **High-Speed Integrity**: Block validation relies on **rapidhash**, a modern non-cryptographic hash algorithm that fully exploits hardware acceleration to verify data integrity without bottlenecking the decompression pipeline.
 
 ### 4.3 Entropy Coding & Bitpacking
 *   **RLE (Run-Length Encoding)**: Automatically detects runs of identical bytes.
@@ -128,13 +127,17 @@ Each data block consists of a **12-byte** generic header that precedes the speci
   If HAS_CHECKSUM flag is set (Flags & 0x80):
   Offset:  12                                                                              20
           +-----------------------------------------------------------------------------+
-          | Checksum (XXH3-64)                                                          |
+          | Checksum (rapidhash)                                                        |
           | (8 bytes)                                                                   |
           +-----------------------------------------------------------------------------+
 ```
 
-* **Type**: Block encoding type (0=RAW, 1=GNR, 2=NUM).
-* **Flags**: Bit 7 (0x80) = HAS_CHECKSUM. If set, an **8-byte XXH3-64** checksum follows immediately after Raw Size.
+* **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI).
+* **Flags**:
+  - **Bit 7 (0x80)**: `HAS_CHECKSUM`. If set, an **8-byte checksum** follows immediately after Raw Size.
+  - **Bits 0-3 (0x0F)**: `CHECKSUM_TYPE`. Defines the algorithm used for integrity verification.
+* **Checksum Algorithms**:
+  - `0x00`: **rapidhash** (Standard, high performance, platform independent)
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
 * **Raw Size**: Original decompressed size.
 
@@ -157,10 +160,10 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 * **Frame**: Processing window size (currently always 128).
 * **Reserved**: Padding for alignment.
 
-### 5.4 Specific Header: GNR (Generic)
+### 5.4 Specific Header: GLO (Generic Low)
 (Present immediately after the Block Header and any optional Checksum)
 
-**GNR Header (16 bytes):**
+**GLO Header (16 bytes):**
 
 ```
   Offset:  0               4               8   9  10  11  12              16
@@ -212,7 +215,7 @@ Each descriptor stores sizes as a packed 64-bit value:
 **Data Flow Example:**
 
 ```
-GNR Block Data Layout:
+GLO Block Data Layout:
 +------------------------------------------------------------------------+
 | Literals Stream | Tokens Stream | Offsets Stream | Extras Stream      |
 | (desc[0] bytes) | (desc[1] bytes)| (desc[2] bytes)| (desc[3] bytes)   |
@@ -237,11 +240,106 @@ Currently, the **Literals** section uses different sizes when RLE compression is
 > **Design Note**: This format is designed for future extensibility. The dual-size architecture allows adding entropy coding (FSE/ANS) or bitpacking to any stream without breaking backward compatibility.
 
 
-### 5.5 Block Encoding & Processing Algorithms
+### 5.5 Specific Header: GHI (Generic High)
+(Present immediately after the Block Header and any optional Checksum)
+
+The **GHI** (Generic High-Velocity) block format is optimized for maximum decompression speed. It uses a **packed 32-bit sequence** format that allows 4-byte aligned reads, reducing memory access latency and enabling efficient SIMD processing.
+
+**GHI Header (16 bytes):**
+
+```
+  Offset:  0               4               8   9  10  11  12              16
+          +---------------+---------------+---+---+---+---+---------------+
+          | N Sequences   | N Literals    |Lit|LL |ML |Off| Reserved      |
+          | (4 bytes)     | (4 bytes)     |Enc|Enc|Enc|Enc| (4 bytes)     |
+          +---------------+---------------+---+---+---+---+---------------+
+```
+
+* **N Sequences**: Total count of LZ sequences in the block.
+* **N Literals**: Total count of literal bytes.
+* **Encoding Types**
+  - `Lit Enc`: Literal stream encoding (0=RAW).
+  - `LL Enc`: Reserved for future use.
+  - `ML Enc`: Reserved for future use.
+  - `Off Enc`: Offset encoding mode:
+    - `0` = 16-bit offsets (max distance 65535)
+    - `1` = 8-bit offsets (max distance 255, enables smaller sequence packing)
+* **Reserved**: Padding for alignment.
+
+**Section Descriptors (3 × 8 bytes = 24 bytes total):**
+
+```
+  Full Layout (24 bytes):
+  Offset:  0               8               16              24
+          +---------------+---------------+---------------+
+          | Literals Desc | Sequences Desc| Extras Desc   |
+          | (8 bytes)     | (8 bytes)     | (8 bytes)     |
+          +---------------+---------------+---------------+
+```
+
+**Section Contents:**
+
+| # | Section       | Description                                           |
+|---|---------------|-------------------------------------------------------|
+| 0 | **Literals**  | Raw bytes to copy                                    |
+| 1 | **Sequences** | Packed 32-bit sequences (see format below)           |
+| 2 | **Extras**    | VByte overflow values when LitLen or MatchLen ≥ 255  |
+
+**Packed Sequence Format (32 bits):**
+
+Unlike GLO which uses separate token and offset streams, GHI packs all sequence data into a single 32-bit word for cache-friendly sequential access:
+
+```
+  32-bit Sequence Word (Little Endian):
+  +--------+--------+------------------+
+  |   LL   |   ML   |     Offset       |
+  | 8 bits | 8 bits |     16 bits      |
+  +--------+--------+------------------+
+   [31:24]  [23:16]      [15:0]
+
+  Byte Layout in Memory:
+  Offset: 0        1        2        3
+         +--------+--------+--------+--------+
+         | Off Lo | Off Hi |   ML   |   LL   |
+         +--------+--------+--------+--------+
+```
+
+* **LL (Literal Length)**: 8 bits (0-254, value 255 triggers VByte overflow)
+* **ML (Match Length - 5)**: 8 bits (actual length = ML + 5, range 5-259, value 255 triggers VByte overflow)
+* **Offset**: 16 bits (match distance, 1-65535)
+
+**Data Flow Example:**
+
+```
+GHI Block Data Layout:
++------------------------------------------------------------+
+| Literals Stream | Sequences Stream       | Extras Stream   |
+| (desc[0] bytes) | (desc[1] bytes = N×4)  | (desc[2] bytes) |
++------------------------------------------------------------+
+       ↓                    ↓                      ↓
+   Raw bytes        32-bit seq read         Length overflow
+```
+
+**Key Differences: GLO vs GHI**
+
+| Feature            | GLO (Global)                    | GHI (High-Velocity)              |
+|--------------------|---------------------------------|----------------------------------|
+| **Sections**       | 4 (Lit, Tokens, Offsets, Extras)| 3 (Lit, Sequences, Extras)       |
+| **Sequence Format**| 1-byte token + separate offset  | Packed 32-bit word               |
+| **LL/ML Bits**     | 4 bits each (overflow at 15)    | 8 bits each (overflow at 255)    |
+| **Memory Access**  | Multiple stream pointers        | Single aligned 4-byte reads      |
+| **Decoder Speed**  | Fast                            | Fastest (optimized for ARM/x86)  |
+| **RLE Support**    | Yes (literals)                  | No                               |
+| **Best For**       | General data, good compression  | Maximum decode throughput        |
+
+> **Design Rationale**: The 32-bit packed format eliminates pointer chasing between token and offset streams. By reading a single aligned word per sequence, the decoder achieves better cache utilization and enables aggressive loop unrolling (4x) for maximum throughput on modern CPUs.
+
+
+### 5.6 Block Encoding & Processing Algorithms
 
 The efficiency of ZXC relies on specialized algorithmic pipelines for each block type.
 
-#### Type 1: GNR (General) - The Workhorse
+#### Type 1: GLO (Global)
 This format is used for standard data. It employs a **multi-stage encoding pipeline**:
 
 **Encoding Process**:
@@ -269,7 +367,31 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Matches*: Copied using 16-byte stores. Overlapping matches (e.g., repeating pattern "ABC" for 100 bytes) are handled naturally by the CPU's store forwarding or by specific overlapped-copy primitives.
     *   **Safety**: A "Safe Zone" at the end of the buffer forces a switch to a cautious byte-by-byte loop, allowing the main loop to run without bounds checks.
 
-#### Type 2: NUM (Numeric) - The Specialist
+#### Type 3: GHI (High-Velocity)
+This format prioritizes decompression throughput over compression ratio. It uses a **unified sequence stream**:
+
+**Encoding Process**:
+1.  **LZ77 Parsing**: Same as GLO, with aggressive lazy matching and step skipping for optimal matches.
+2.  **Sequence Packing**: Each match is packed into a 32-bit word:
+    *   Bits [31:24]: Literal Length (8 bits)
+    *   Bits [23:16]: Match Length - 5 (8 bits)
+    *   Bits [15:0]: Offset (16 bits)
+3.  **Stream Assembly**: Only three streams are generated:
+    *   *Literals Buffer*: Raw bytes (no RLE).
+    *   *Sequences Buffer*: Packed 32-bit words (4 bytes each).
+    *   *Extras Buffer*: VByte overflow values for lengths >= 255.
+4.  **Final Serialization**: Streams are concatenated with 3 section descriptors.
+
+**Decoding Process**:
+1.  **Single-Read Loop**: The decoder reads one 32-bit word per sequence, extracting LL, ML, and offset in a single operation.
+2.  **4x Unrolled Fast Path**: When sufficient buffer margin exists, the decoder processes 4 sequences per iteration:
+    *   Pre-reads 4 sequences into registers
+    *   Copies literals and matches with 32-byte SIMD operations
+    *   Minimal branching for maximum instruction-level parallelism
+3.  **Offset Validation Threshold**: For the first 256 (8-bit mode) or 65536 (16-bit mode) bytes, offsets are validated against written bytes. After this threshold, all offsets are guaranteed valid.
+4.  **Wild Copy**: Same 32-byte SIMD copies as GLO, with special handling for overlapping matches (offset < 32).
+
+#### Type 2: NUM (Numeric)
 Triggered when data is detected as a dense array of 32-bit integers.
 
 **Encoding Process**:
@@ -283,17 +405,24 @@ Triggered when data is detected as a dense array of 32-bit integers.
 2.  **ZigZag Decode**: Reverses the mapping.
 3.  **Integration**: Computes the prefix sum (cumulative addition) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
 
-### 5.6 Data Integrity
-Every block can optionally be protected by a **64-bit XXH3** checksum. 
-*   **Algorithm**: XXH3 (XXHash3) is an extremely fast, non-cryptographic hash algorithm.
-*   **Credit**: Developed by Yann Collet, XXH3 runs at RAM speed equivalents, ensuring that enabling checksums introduces **zero measurable latency** to the pipeline.
+### 5.7 Data Integrity
+Every block can optionally be protected by a **64-bit checksum** to ensure data reliability.
+
+#### Multi-Algorithm Support
+ZXC supports multiple integrity verification algorithms, allowing the format to adapt to different security and performance requirements. The specific algorithm used is identified in the block header's flags byte.
+
+*   **Identified Algorithm (0x00: rapidhash)**: The default and recommended algorithm. It is a very fast, high-quality, and platform-independent hashing algorithm fully optimized for instruction pipelines.
+*   **Performance First**: By using a modern non-cryptographic hash, ZXC ensures that integrity checks do not bottleneck decompression throughput, even at high GB/s speeds.
+
+#### Credit
+The default `rapidhash` algorithm is based on wyhash and was developed by Nicolas De Carli. It is designed to fully exploit hardware performance while maintaining top-tier mathematical distribution qualities.
 
 ## 6. System Architecture (Threading)
 
 ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-core CPUs.
 
 ### 6.1 Asynchronous Compression Pipeline
-1.  **Block Splitting (Main Thread)**: The input file is read and sliced into fixed-size chunks (default 248KB).
+1.  **Block Splitting (Main Thread)**: The input file is read and sliced into fixed-size chunks (default 256KB).
 2.  **Ring Buffer Submission**: Chunks are placed into a lock-free ring buffer.
 3.  **Parallel Compression (Worker Threads)**:
     *   Workers pull chunks from the queue.
@@ -326,11 +455,11 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.4.0 -1** | **1.85x** | **129.88** |
-| **zxc 0.4.0 -2** | **1.72x** | **123.79** |
-| **zxc 0.4.0 -3** | **1.44x** | **98.31** |
-| **zxc 0.4.0 -4** | **1.36x** | **91.25** |
-| **zxc 0.4.0 -5** | **1.25x** | **85.44** |
+| **zxc 0.5.0 -1** | **2.33x** | **129.88** |
+| **zxc 0.5.0 -2** | **1.97x** | **115.05** |
+| **zxc 0.5.0 -3** | **1.43x** | **97.62** |
+| **zxc 0.5.0 -4** | **1.36x** | **91.23** |
+| **zxc 0.5.0 -5** | **1.25x** | **85.43** |
 | lz4 1.10.0 --fast -17 | 1.18x | 130.59 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -12 | 0.95x | 76.59 |
@@ -343,11 +472,11 @@ Benchmarks were conducted using `lzbench` (by inikep).
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
 | memcpy                  | 0.066       | 1.00x (baseline)      |
-| **zxc 0.4.0 -1**        | **0.395**   | **6.0x**              |
-| **zxc 0.4.0 -2**        | **0.423**   | **6.4x**              |
-| **zxc 0.4.0 -3**        | **0.505**   | **7.6x**              |
-| **zxc 0.4.0 -4**        | **0.538**   | **8.1x**              |
-| **zxc 0.4.0 -5**        | **0.585**   | **8.8x**              |
+| **zxc 0.5.0 -1**        | **0.313**   | **4.7x**              |
+| **zxc 0.5.0 -2**        | **0.370**   | **5.6x**              |
+| **zxc 0.5.0 -3**        | **0.511**   | **7.7x**              |
+| **zxc 0.5.0 -4**        | **0.538**   | **8.1x**              |
+| **zxc 0.5.0 -5**        | **0.585**   | **8.8x**              |
 | lz4 1.10.0              | 0.729       | 11.0x                 |
 | lz4 1.10.0 --fast -17   | 0.620       | 9.4x                  |
 | lz4hc 1.10.0 -12        | 0.770       | 11.6x                 |
@@ -362,34 +491,34 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.4.0 -1** | **1.61x** | **129.88** |
-| **zxc 0.4.0 -2** | **1.52x** | **123.79** |
-| **zxc 0.4.0 -3** | **1.25x** | **98.31** |
-| **zxc 0.4.0 -4** | **1.17x** | **91.25** |
-| **zxc 0.4.0 -5** | **1.06x** | **85.44** |
-| lz4 1.10.0 --fast -17 | 1.17x | 130.59 |
+| **zxc 0.5.0 -1** | **1.96x** | **129.88** |
+| **zxc 0.5.0 -2** | **1.68x** | **115.05** |
+| **zxc 0.5.0 -3** | **1.23x** | **97.62** |
+| **zxc 0.5.0 -4** | **1.17x** | **91.23** |
+| **zxc 0.5.0 -5** | **1.06x** | **85.43** |
+| lz4 1.10.0 --fast -17 | 1.16x | 130.59 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -12 | 0.91x | 76.59 |
 | snappy 1.2.2 | 0.44x | 100.47 |
 | zstd 1.5.7 --fast --1 | 0.42x | 86.17 |
-| zstd 1.5.7 -1 | 0.32x | 72.60 |
+| zstd 1.5.7 -1 | 0.33x | 72.60 |
 
 **Decompression Efficiency (Cycles per Byte @ 2.6 GHz)**
 
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
-| memcpy                  | 0.109       | 1.00x (baseline)      |
-| **zxc 0.4.0 -1**        | **0.387**   | **3.6x**              |
-| **zxc 0.4.0 -2**        | **0.409**   | **3.8x**              |
-| **zxc 0.4.0 -3**        | **0.498**   | **4.6x**              |
-| **zxc 0.4.0 -4**        | **0.532**   | **4.9x**              |
-| **zxc 0.4.0 -5**        | **0.587**   | **5.4x**              |
-| lz4 1.10.0              | 0.622       | 5.7x                  |
-| lz4 1.10.0 --fast -17   | 0.534       | 4.9x                  |
-| lz4hc 1.10.0 -12        | 0.684       | 6.3x                  |
-| zstd 1.5.7 -1           | 1.926       | 17.7x                 |
-| zstd 1.5.7 --fast --1   | 1.493       | 13.7x                 |
-| snappy 1.2.2            | 1.415       | 13.0x                 |
+| memcpy                  | 0.113       | 1.00x (baseline)      |
+| **zxc 0.5.0 -1**        | **0.321**   | **2.8x**              |
+| **zxc 0.5.0 -2**        | **0.373**   | **3.3x**              |
+| **zxc 0.5.0 -3**        | **0.509**   | **4.5x**              |
+| **zxc 0.5.0 -4**        | **0.535**   | **4.7x**              |
+| **zxc 0.5.0 -5**        | **0.591**   | **5.2x**              |
+| lz4 1.10.0              | 0.628       | 5.5x                  |
+| lz4 1.10.0 --fast -17   | 0.539       | 4.8x                  |
+| lz4hc 1.10.0 -12        | 0.691       | 6.1x                  |
+| zstd 1.5.7 -1           | 1.916       | 17.0x                 |
+| zstd 1.5.7 --fast --1   | 1.490       | 13.2x                 |
+| snappy 1.2.2            | 1.428       | 12.6x                 |
 
 *Lower is better. Calculated using Neoverse-V2 base frequency (2.6 GHz).*
 
@@ -398,34 +527,34 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.4.0 -1** | **1.43x** | **129.88** |
-| **zxc 0.4.0 -2** | **1.34x** | **123.79** |
-| **zxc 0.4.0 -3** | **1.11x** | **98.31** |
-| **zxc 0.4.0 -4** | **1.05x** | **91.25** |
-| **zxc 0.4.0 -5** | **0.99x** | **85.44** |
-| lz4 1.10.0 --fast -17 | 1.16x | 130.59 |
+| **zxc 0.5.0 -1** | **1.67x** | **129.88** |
+| **zxc 0.5.0 -2** | **1.43x** | **115.05** |
+| **zxc 0.5.0 -3** | **1.07x** | **97.62** |
+| **zxc 0.5.0 -4** | **1.02x** | **91.23** |
+| **zxc 0.5.0 -5** | **0.99x** | **85.43** |
+| lz4 1.10.0 --fast -17 | 1.14x | 130.59 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
-| lz4hc 1.10.0 -12 | 0.98x | 76.59 |
-| snappy 1.2.2 | 0.45x | 100.58 |
+| lz4hc 1.10.0 -12 | 0.97x | 76.59 |
+| snappy 1.2.2 | 0.44x | 100.58 |
 | zstd 1.5.7 --fast --1 | 0.44x | 86.17 |
-| zstd 1.5.7 -1 | 0.34x | 72.60 |
+| zstd 1.5.7 -1 | 0.33x | 72.60 |
 
 **Decompression Efficiency (Cycles per Byte @ 2.45 GHz)**
 
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
 | memcpy                  | 0.120       | 1.00x (baseline)      |
-| **zxc 0.4.0 -1**        | **0.484**   | **4.0x**              |
-| **zxc 0.4.0 -2**        | **0.516**   | **4.3x**              |
-| **zxc 0.4.0 -3**        | **0.621**   | **5.2x**              |
-| **zxc 0.4.0 -4**        | **0.657**   | **5.5x**              |
-| **zxc 0.4.0 -5**        | **0.698**   | **5.8x**              |
-| lz4 1.10.0              | 0.690       | 5.8x                  |
-| lz4 1.10.0 --fast -17   | 0.597       | 5.0x                  |
-| lz4hc 1.10.0 -12        | 0.705       | 5.9x                  |
-| zstd 1.5.7 -1           | 2.048       | 17.1x                 |
-| zstd 1.5.7 --fast --1   | 1.560       | 13.0x                 |
-| snappy 1.2.2            | 1.541       | 12.8x                 |
+| **zxc 0.5.0 -1**        | **0.400**   | **3.3x**              |
+| **zxc 0.5.0 -2**        | **0.466**   | **3.9x**              |
+| **zxc 0.5.0 -3**        | **0.623**   | **5.2x**              |
+| **zxc 0.5.0 -4**        | **0.656**   | **5.5x**              |
+| **zxc 0.5.0 -5**        | **0.675**   | **5.6x**              |
+| lz4 1.10.0              | 0.667       | 5.6x                  |
+| lz4 1.10.0 --fast -17   | 0.588       | 4.9x                  |
+| lz4hc 1.10.0 -12        | 0.688       | 5.7x                  |
+| zstd 1.5.7 -1           | 2.011       | 16.8x                 |
+| zstd 1.5.7 --fast --1   | 1.503       | 12.5x                 |
+| snappy 1.2.2            | 1.518       | 12.6x                 |
 
 *Lower is better. Calculated using AMD EPYC 7763 base frequency (2.45 GHz).*
 
@@ -434,7 +563,7 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 **Figure B**: Decompression Efficiency : Cycles Per Byte Comparaison
 
-![Benchmark Cycles Per Byte](docs/images/benchmark_decompression_cycles_0.4.0.png)
+![Benchmark Cycles Per Byte](docs/images/benchmark_decompression_cycles_0.5.0.png)
 
 
 #### 7.4.1 ARM64 Architecture (Apple Silicon)
@@ -445,18 +574,18 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clan
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 52889 MB/s | 52862 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.4.0 -1**        |   753 MB/s |  **8873 MB/s** |   131006241 | **61.81** | 12 files|
-| **zxc 0.4.0 -2**        |   611 MB/s |  **8278 MB/s** |   124876023 | **58.92** | 12 files|
-| **zxc 0.4.0 -3**        |   153 MB/s |  **6930 MB/s** |    99179268 | **46.80** | 12 files|
-| **zxc 0.4.0 -4**        |   101 MB/s |  **6510 MB/s** |    92051238 | **43.43** | 12 files|
-| **zxc 0.4.0 -5**        |  59.6 MB/s |  **5982 MB/s** |    86187901 | **40.67** | 12 files|
-| lz4 1.10.0              |   816 MB/s |  4802 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1343 MB/s |  5648 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  13.9 MB/s |  4545 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   645 MB/s |  1623 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   725 MB/s |  2162 MB/s |    86932028 | 41.02 | 12 files|
-| snappy 1.2.2            |   884 MB/s |  3264 MB/s |   101352257 | 47.82 | 12 files|
+| memcpy                  | 52231 MB/s | 52820 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.5.0 -1**        |   580 MB/s | **11179 MB/s** |   131005109 | **61.81** | 12 files|
+| **zxc 0.5.0 -2**        |   396 MB/s | **9446 MB/s** |   116029050 | **54.75** | 12 files|
+| **zxc 0.5.0 -3**        |   143 MB/s | **6852 MB/s** |    98475231 | **46.46** | 12 files|
+| **zxc 0.5.0 -4**        |  99.4 MB/s | **6509 MB/s** |    92030470 | **43.42** | 12 files|
+| **zxc 0.5.0 -5**        |  58.2 MB/s | **5984 MB/s** |    86180735 | **40.66** | 12 files|
+| lz4 1.10.0              |   814 MB/s |  4799 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1343 MB/s |  5651 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  14.0 MB/s |  4545 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   644 MB/s |  1623 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   714 MB/s |  2161 MB/s |    86932028 | 41.02 | 12 files|
+| snappy 1.2.2            |   869 MB/s |  3265 MB/s |   101352257 | 47.82 | 12 files|
 
 
 ### 7.4.2 ARM64 Architecture (Google Axion)
@@ -467,18 +596,18 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 23374 MB/s | 23861 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.4.0 -1**            |   688 MB/s |  **6712 MB/s** |   131006241 | **61.81** | 12 files|
-| **zxc 0.4.0 -2**            |   561 MB/s |  **6351 MB/s** |   124876023 | **58.92** | 12 files|
-| **zxc 0.4.0 -3**            |   145 MB/s |  **5224 MB/s** |    99179268 | **46.80** | 12 files|
-| **zxc 0.4.0 -4**            |  97.2 MB/s |  **4889 MB/s** |    92051238 | **43.43** | 12 files|
-| **zxc 0.4.0 -5**            |  50.0 MB/s |  **4429 MB/s** |    86187901 | **40.67** | 12 files|
-| lz4 1.10.0              |   740 MB/s |  4178 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1277 MB/s |  4870 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  12.4 MB/s |  3800 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   520 MB/s |  1350 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   604 MB/s |  1742 MB/s |    86932028 | 41.02 | 12 files|
-| snappy 1.2.2            |   749 MB/s |  1838 MB/s |   101352257 | 47.82 | 12 files|
+| memcpy                  | 24769 MB/s | 22931 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.5.0 -1**            |   557 MB/s |  **8103 MB/s** |   131005571 | **61.81** | 12 files|
+| **zxc 0.5.0 -2**            |   375 MB/s |  **6978 MB/s** |   116028742 | **54.75** | 12 files|
+| **zxc 0.5.0 -3**            |   141 MB/s |  **5102 MB/s** |    98475289 | **46.46** | 12 files|
+| **zxc 0.5.0 -4**            |  96.6 MB/s |  **4857 MB/s** |    92030563 | **43.42** | 12 files|
+| **zxc 0.5.0 -5**            |  52.6 MB/s |  **4399 MB/s** |    86180766 | **40.66** | 12 files|
+| lz4 1.10.0              |   707 MB/s |  4143 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1282 MB/s |  4823 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  12.3 MB/s |  3761 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   518 MB/s |  1357 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   581 MB/s |  1745 MB/s |    86932028 | 41.02 | 12 files|
+| snappy 1.2.2            |   747 MB/s |  1821 MB/s |   101352257 | 47.82 | 12 files|
 
 
 #### 7.4.3 x86_64 Architecture (AMD EPYC)
@@ -489,18 +618,18 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 19613 MB/s | 19399 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.4.0 -1**            |   542 MB/s |  **5060 MB/s** |   131006241 | **61.81** | 12 files|
-| **zxc 0.4.0 -2**            |   445 MB/s |  **4750 MB/s** |   124876023 | **58.92** | 12 files|
-| **zxc 0.4.0 -3**            |   111 MB/s |  **3943 MB/s** |    99179268 | **46.80** | 12 files|
-| **zxc 0.4.0 -4**            |  74.6 MB/s |  **3730 MB/s** |    92051238 | **43.43** | 12 files|
-| **zxc 0.4.0 -5**            |  42.2 MB/s |  **3507 MB/s** |    86187901 | **40.67** | 12 files|
-| lz4 1.10.0              |   593 MB/s |  3549 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1034 MB/s |  4105 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  11.2 MB/s |  3476 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   410 MB/s |  1196 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   448 MB/s |  1571 MB/s |    86932028 | 41.02 | 12 files|
-| snappy 1.2.2            |   609 MB/s |  1590 MB/s |   101464727 | 47.87 | 12 files|
+| memcpy                  | 19254 MB/s | 19366 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.5.0 -1**        |   470 MB/s |  **6129 MB/s** |   131005109 | **61.81** | 12 files|
+| **zxc 0.5.0 -2**        |   316 MB/s |  **5261 MB/s** |   116029050 | **54.75** | 12 files|
+| **zxc 0.5.0 -3**        |   108 MB/s |  **3931 MB/s** |    98475231 | **46.46** | 12 files|
+| **zxc 0.5.0 -4**        |  72.0 MB/s |  **3735 MB/s** |    92030470 | **43.42** | 12 files|
+| **zxc 0.5.0 -5**        |  40.9 MB/s |  **3630 MB/s** |    86180735 | **40.66** | 12 files|
+| lz4 1.10.0              |   594 MB/s |  3672 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1044 MB/s |  4169 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  11.3 MB/s |  3563 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   405 MB/s |  1218 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   452 MB/s |  1630 MB/s |    86932028 | 41.02 | 12 files|
+| snappy 1.2.2            |   615 MB/s |  1614 MB/s |   101464727 | 47.87 | 12 files|
 
 
 ## 8. Strategic Implementation
@@ -510,7 +639,7 @@ ZXC is designed to adapt to various deployment scenarios by selecting the approp
 *   **Interactive Media & Gaming (Levels 1-2-3)**:
     Optimized for hard real-time constraints. Ideal for texture streaming and asset loading, offering **~40% faster** load times to minimize latency and frame drops.
 
-*   **Embedded Systems & Firmware (Levels 4-5)**:
+*   **Embedded Systems & Firmware (Levels 3-4-5)**:
     The sweet spot for maximizing storage density on limited flash memory (e.g., Kernel, Initramfs) while ensuring rapid "instant-on" (XIP-like) boot performance.
 
 *   **Data Archival (Levels 4-5)**:

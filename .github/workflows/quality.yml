@@ -32,7 +32,7 @@ jobs:
         run: |
           cppcheck --enable=all \
             --library=gnu \
-            --suppress=missingIncludeSystem --suppress=*:include/xxhash.h \
+            --suppress=missingIncludeSystem --suppress=*:include/rapidhash.h \
             --check-level=exhaustive \
             --inline-suppr \
             --error-exitcode=1 \

@@ -21,7 +21,7 @@ void gen_random_data(uint8_t* buf, size_t size) {
     for (size_t i = 0; i < size; i++) buf[i] = rand() & 0xFF;
 }
 
-// Generates repetitive data (To force GNR/LZ)
+// Generates repetitive data (To force GLO/GHI/LZ)
 void gen_lz_data(uint8_t* buf, size_t size) {
     const char* pattern =
         "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod "
@@ -480,7 +480,10 @@ int main() {
     if (!test_round_trip("RAW Block (Random Data)", buffer, BUF_SIZE, 3, 0)) total_failures++;
 
     gen_lz_data(buffer, BUF_SIZE);
-    if (!test_round_trip("GNR Block (Text Pattern)", buffer, BUF_SIZE, 3, 0)) total_failures++;
+    if (!test_round_trip("GHI Block (Text Pattern)", buffer, BUF_SIZE, 2, 0)) total_failures++;
+
+    gen_lz_data(buffer, BUF_SIZE);
+    if (!test_round_trip("GLO Block (Text Pattern)", buffer, BUF_SIZE, 4, 0)) total_failures++;
 
     gen_num_data(buffer, BUF_SIZE);
     if (!test_round_trip("NUM Block (Integer Sequence)", buffer, BUF_SIZE, 3, 0)) total_failures++;
@@ -498,6 +501,7 @@ int main() {
     printf("\n--- Test Coverage: Compression Levels ---\n");
     gen_lz_data(buffer, BUF_SIZE);
 
+    if (!test_round_trip("Level 1", buffer, BUF_SIZE, 1, 1)) total_failures++;
     if (!test_round_trip("Level 2", buffer, BUF_SIZE, 2, 1)) total_failures++;
     if (!test_round_trip("Level 3", buffer, BUF_SIZE, 3, 1)) total_failures++;
     if (!test_round_trip("Level 4", buffer, BUF_SIZE, 4, 1)) total_failures++;

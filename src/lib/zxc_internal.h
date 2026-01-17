@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../../include/rapidhash.h"
 #include "../../include/zxc_sans_io.h"
 
 #ifdef __cplusplus
@@ -113,10 +114,11 @@ extern "C" {
  * ============================================================================
  */
 
-#define ZXC_MAGIC_WORD 0x0043585AU  // Magic signature "ZXC0" (Little Endian)
-#define ZXC_FILE_FORMAT_VERSION 2   // Current file format version (v2: variable offset encoding)
-#define ZXC_BLOCK_UNIT (4096)       // Block size unit (4KB)
-#define ZXC_CHUNK_SIZE (64 * ZXC_BLOCK_UNIT)  // Size of data blocks processed by threads (252KB)
+#define ZXC_MAGIC_WORD 0x0043585AU            // Magic signature "ZXC0" (Little Endian)
+#define ZXC_FILE_FORMAT_VERSION 3             // Current file format version
+#define ZXC_BLOCK_UNIT (4 * 1024)             // Block size unit (4KB)
+#define ZXC_BLOCK_SIZE (64 * ZXC_BLOCK_UNIT)  // Size of data blocks processed by threads (256KB)
+#define ZXC_CHUNK_SIZE (64 * ZXC_BLOCK_UNIT)  // TODO: to remove (compatibility with lzbench)
 #define ZXC_IO_BUFFER_SIZE (1024 * 1024)      // Size of stdio buffers
 #define ZXC_PAD_SIZE 32                       // Padding size for buffer overruns
 
@@ -126,18 +128,41 @@ extern "C" {
     12  // Type (1) + Flags (1) + Reserved (2) + Comp Size (4) + Raw Size (4)
 #define ZXC_BLOCK_CHECKSUM_SIZE 8      // Size of checksum field in bytes
 #define ZXC_NUM_HEADER_BINARY_SIZE 16  // Num Header: N Values (8) + Frame Size (2) + Reserved (6)
-#define ZXC_GNR_HEADER_BINARY_SIZE \
-    16  // GNR Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
+#define ZXC_GLO_HEADER_BINARY_SIZE \
+    16  // GLO Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
+#define ZXC_GHI_HEADER_BINARY_SIZE \
+    16  // GHI Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
+
+// Section Descriptor Sizes
 #define ZXC_SECTION_DESC_BINARY_SIZE 8  // Section Desc: Comp Size (4) + Raw Size (4)
+#define ZXC_GLO_SECTIONS 4              // Number of sections in GLO blocks
+#define ZXC_GHI_SECTIONS 3              // Number of sections in GHI blocks
 
 // Block Flags
 #define ZXC_BLOCK_FLAG_NONE 0U         // No flags
 #define ZXC_BLOCK_FLAG_CHECKSUM 0x80U  // Block has a checksum (8 bytes after header)
+#define ZXC_CHECKSUM_TYPE_MASK 0x0FU   // Lower 4 bits for algorithm ID
+
+// Checksum Algorithms
+#define ZXC_CHECKSUM_RAPIDHASH 0x00U  // Default: rapidhash algorithm
 
 // Token Format Constants
-#define ZXC_TOKEN_LIT_BITS 4    // Number of bits for Literal Length in token
-#define ZXC_TOKEN_LL_MASK 0x0F  // Mask to extract Literal Length from token
-#define ZXC_TOKEN_ML_MASK 0x0F  // Mask to extract Match Length from token
+// Sequence Format Constants (GLO Token - 4-bit LL, 4-bit ML, 16-bit Offset)
+#define ZXC_TOKEN_LIT_BITS 4  // Number of bits for Literal Length in token
+#define ZXC_TOKEN_ML_BITS 4   // Number of bits for Match Length in token
+#define ZXC_TOKEN_LL_MASK \
+    ((1U << ZXC_TOKEN_LIT_BITS) - 1)  // Mask to extract Literal Length from token
+#define ZXC_TOKEN_ML_MASK \
+    ((1U << ZXC_TOKEN_ML_BITS) - 1)  // Mask to extract Match Length from token
+
+// Sequence Format Constants (GHI Token - 8-bit LL, 8-bit ML, 16-bit Offset)
+#define ZXC_SEQ_LL_BITS 8    // Number of bits for Literal Length in sequence
+#define ZXC_SEQ_ML_BITS 8    // Number of bits for Match Length in sequence
+#define ZXC_SEQ_OFF_BITS 16  // Number of bits for Offset in sequence
+#define ZXC_SEQ_LL_MASK \
+    ((1U << ZXC_SEQ_LL_BITS) - 1)  // Mask to extract Literal Length from sequence
+#define ZXC_SEQ_ML_MASK ((1U << ZXC_SEQ_ML_BITS) - 1)  // Mask to extract Match Length from sequence
+#define ZXC_SEQ_OFF_MASK ((1U << ZXC_SEQ_OFF_BITS) - 1)  // Mask to extract Offset from sequence
 
 // LZ77 Constants
 // The hash table uses 13 bits for addressing, resulting in 8192 (2^13) entries.
@@ -149,8 +174,43 @@ extern "C" {
 #define ZXC_LZ_WINDOW_SIZE (1 << 16)              // 64KB sliding window
 // Note: sliding window of 64KB allows chain_table to use uint16_t for valid offsets (since any
 // match > 64KB is invalid).
-#define ZXC_LZ_MIN_MATCH 5                        // Minimum match length
+#define ZXC_LZ_MIN_MATCH_LEN 5                    // Minimum match length
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)  // Maximum offset distance
+
+/**
+ * @struct zxc_lz77_params_t
+ * @brief Search parameters for LZ77 compression levels.
+ */
+typedef struct {
+    int search_depth;     // Max matches to check in hash chain
+    int sufficient_len;   // Stop searching if match >= this length
+    int use_lazy;         // Use lazy matching (check next position)
+    int lazy_attempts;    // Max matches to check for lazy matching
+    uint32_t step_base;   // Base step for literal advancement
+    uint32_t step_shift;  // Shift for distance-based stepping
+} zxc_lz77_params_t;
+
+/**
+ * @brief Retrieves LZ77 compression parameters based on the specified compression level.
+ *
+ * This inline function returns the appropriate LZ77 parameters configuration
+ * for the given compression level.
+ *
+ * @param[in] level The compression level to use for determining LZ77 parameters.
+ * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
+ */
+static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(int level) {
+    if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 1, 31};
+    // search_depth, sufficient_len, use_lazy, lazy_attempts, step_base, step_shift
+    static const zxc_lz77_params_t table[5] = {
+        {6, 16, 0, 0, 2, 3},  // fallback
+        {6, 16, 0, 0, 2, 3},  // level 1
+        {8, 32, 0, 0, 2, 4},  // level 2
+        {4, 32, 1, 8, 1, 4},  // level 3
+        {4, 32, 1, 8, 1, 5}   // level 4
+    };
+    return table[level < 1 ? 1 : level];
+}
 
 /**
  * @enum zxc_block_type_t
@@ -161,12 +221,19 @@ extern "C" {
  * applied:
  * - `ZXC_BLOCK_RAW` (0): No compression. Used when data is incompressible (high
  * entropy) or when compression would expand the data size.
- * - `ZXC_BLOCK_GNR` (1): General-purpose compression (LZ77 + Bitpacking). This
- * is the default for most data (text, binaries, JSON, etc.).
+ * - `ZXC_BLOCK_GLO` (1): General-purpose compression (LZ77 + Bitpacking). This
+ * is the default for most data (text, binaries, JSON, etc.). Includes 4 sections descriptors.
  * - `ZXC_BLOCK_NUM` (2): Specialized compression for arrays of 32-bit integers.
  *   Uses Delta Encoding + ZigZag + Bitpacking.
+ * - `ZXC_BLOCK_GHI` (3): General-purpose high-velocity mode using LZ77 with advanced
+ * techniques (lazy matching, step skipping) for maximum ratio. Includes 3 sections descriptors.
  */
-typedef enum { ZXC_BLOCK_RAW = 0, ZXC_BLOCK_GNR = 1, ZXC_BLOCK_NUM = 2 } zxc_block_type_t;
+typedef enum {
+    ZXC_BLOCK_RAW = 0,
+    ZXC_BLOCK_GLO = 1,
+    ZXC_BLOCK_NUM = 2,
+    ZXC_BLOCK_GHI = 3
+} zxc_block_type_t;
 
 /**
  * @enum zxc_section_encoding_t
@@ -192,7 +259,7 @@ typedef enum {
  * @struct zxc_gnr_header_t
  * @brief Header specific to General (LZ-based) compression blocks.
  *
- * This header follows the main block header when the block type is GNR. It
+ * This header follows the main block header when the block type is GLO/GHI. It
  * describes the layout of sequences and literals.
  *
  * @var zxc_gnr_header_t::n_sequences
@@ -478,20 +545,6 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(uint64_t x) {
 }
 
 /**
- * @brief Computes a hash value optimized for LZ77 pattern matching speed.
- *
- * Knuth's multiplicative hash constant: 2654435761 (golden ratio * 2^32)
- * Returns upper bits which have the best avalanche properties
- * The caller applies the mask (& (ZXC_LZ_HASH_SIZE - 1))
- *
- * @param[in] val The 32-bit integer sequence (e.g., 4 bytes from the input stream).
- * @return uint32_t A hash value suitable for indexing the match table.
- */
-static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint32_t val) {
-    return (val * 2654435761U) >> (32 - ZXC_LZ_HASH_BITS);
-}
-
-/**
  * @brief Calculates the index of the highest set bit (most significant bit) in a 32-bit integer.
  *
  * This function determines the position of the most significant bit that is set to 1.
@@ -583,8 +636,6 @@ void zxc_aligned_free(void* ptr);
  * ============================================================================
  */
 
-// Represents a found LZ77 sequence (Literal Length, Match Length, Offset)
-
 /*
  * INTERNAL API
  * ------------
@@ -592,12 +643,16 @@ void zxc_aligned_free(void* ptr);
 
 /**
  * @brief Calculates a 64-bit XXH3checksum for a given input buffer.
- *
  * @param[in] input Pointer to the data buffer.
  * @param[in] len Length of the data in bytes.
+ * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_RAPIDHASH).
  * @return The calculated 64-bit hash value.
  */
-uint64_t zxc_checksum(const void* RESTRICT input, size_t len);
+static ZXC_ALWAYS_INLINE uint64_t zxc_checksum(const void* RESTRICT input, size_t len,
+                                               uint8_t hash_method) {
+    if (LIKELY(hash_method == ZXC_CHECKSUM_RAPIDHASH)) return rapidhash(input, len);
+    return rapidhash(input, len);
+}
 
 /**
  * @brief Initializes a bit reader structure.
@@ -623,7 +678,7 @@ void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* src, size_t size);
  * written.
  * @param[in] dst_cap The capacity of the destination buffer in bytes.
  * @param[in] bits The number of bits to use for each integer during packing.
- * @return The number of bytes written to the destination buffer, or a negative
+ * @return int The number of bytes written to the destination buffer, or a negative
  * error code on failure.
  */
 int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* RESTRICT dst,
@@ -637,7 +692,7 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* R
  * @param[out] dst Pointer to the destination buffer.
  * @param[in] rem The remaining space in the destination buffer.
  * @param[in] nh Pointer to the numeric header structure to write.
- * @return The number of bytes written, or a negative error code if the buffer
+ * @return int The number of bytes written, or a negative error code if the buffer
  * is too small.
  */
 int zxc_write_num_header(uint8_t* dst, size_t rem, const zxc_num_header_t* nh);
@@ -650,7 +705,7 @@ int zxc_write_num_header(uint8_t* dst, size_t rem, const zxc_num_header_t* nh);
  * @param[in] src Pointer to the source buffer.
  * @param[in] src_size The size of the source buffer available for reading.
  * @param[out] nh Pointer to the numeric header structure to populate.
- * @return The number of bytes read from the source, or a negative error code on
+ * @return int The number of bytes read from the source, or a negative error code on
  * failure.
  */
 int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* nh);
@@ -665,11 +720,11 @@ int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* n
  * @param[in] rem The remaining space in the destination buffer.
  * @param[in] gh Pointer to the generic header structure to write.
  * @param[in] desc Array of 4 section descriptors to write.
- * @return The number of bytes written, or a negative error code if the buffer
+ * @return int The number of bytes written, or a negative error code if the buffer
  * is too small.
  */
-int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
-                                  const zxc_section_desc_t desc[4]);
+int zxc_write_glo_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
+                                  const zxc_section_desc_t desc[ZXC_GLO_SECTIONS]);
 
 /**
  * @brief Reads a generic header and section descriptors from a source buffer.
@@ -681,11 +736,41 @@ int zxc_write_gnr_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
  * @param[in] len The length of the source buffer available for reading.
  * @param[out] gh Pointer to the generic header structure to populate.
  * @param[out] desc Array of 4 section descriptors to populate.
- * @return The number of bytes read from the source, or a negative error code on
- * failure.
+ *
+ * @return int Returns 0 on success, or a negative error code on failure.
  */
-int zxc_read_gnr_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
-                                 zxc_section_desc_t desc[4]);
+int zxc_read_glo_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
+                                 zxc_section_desc_t desc[ZXC_GLO_SECTIONS]);
+
+/**
+ * @brief Writes a record header and description to the destination buffer.
+ *
+ * @param dst Pointer to the destination buffer where the header and description will be written.
+ * @param rem Remaining size available in the destination buffer.
+ * @param gh Pointer to the GNR header structure containing header information.
+ * @param desc Array of 3 section descriptors to be written along with the header.
+ *
+ * @return int Returns the number of bytes written on success, or a negative error code on failure.
+ */
+int zxc_write_ghi_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
+                                  const zxc_section_desc_t desc[ZXC_GHI_SECTIONS]);
+
+/**
+ * @brief Reads a record header and section descriptors from a buffer.
+ *
+ * This function parses the source buffer to extract a general header and
+ * up to three section descriptors from a ZXC record.
+ *
+ * @param[in] src Pointer to the source buffer containing the record data.
+ * @param[in] len Length of the source buffer in bytes.
+ * @param[out] gh Pointer to a zxc_gnr_header_t structure to store the parsed header.
+ * @param[out] desc Array of 3 zxc_section_desc_t structures to store the parsed section
+ * descriptors.
+ *
+ * @return int Returns 0 on success, or a negative error code on failure.
+ */
+int zxc_read_ghi_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
+                                 zxc_section_desc_t desc[ZXC_GHI_SECTIONS]);
 
 /**
  * @brief Internal wrapper function to decompress a single chunk of data.
@@ -726,8 +811,8 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
  * written.
  * @param[in] dst_cap   The capacity of the destination buffer (maximum bytes to write).
  *
- * @return The number of bytes written to the destination buffer on success,
- *         or a negative error code on failure.
+ * @return int      The number of bytes written to the destination buffer on success,
+ *                  or a negative error code on failure.
  */
 int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src_sz, uint8_t* dst,
                                size_t dst_cap);

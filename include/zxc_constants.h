@@ -21,7 +21,7 @@
  */
 
 #define ZXC_VERSION_MAJOR 0
-#define ZXC_VERSION_MINOR 4
+#define ZXC_VERSION_MINOR 5
 #define ZXC_VERSION_PATCH 0
 
 #define ZXC_STR_HELPER(x) #x
@@ -36,10 +36,12 @@
  * =============================================================
  */
 
-#define ZXC_LEVEL_FASTEST (1)   // Fastest compression, best for real-time applications
-#define ZXC_LEVEL_FAST (2)      // Fast compression, good for real-time applications
-#define ZXC_LEVEL_DEFAULT (3)   // Recommended: ratio > LZ4, decode speed > LZ4
-#define ZXC_LEVEL_BALANCED (4)  // Good ratio, good decode speed
-#define ZXC_LEVEL_COMPACT (5)   // High density. Best for storage/firmware/assets.
+typedef enum {
+    ZXC_LEVEL_FASTEST = 1,   // Fastest compression, best for real-time applications
+    ZXC_LEVEL_FAST = 2,      // Fast compression, good for real-time applications
+    ZXC_LEVEL_DEFAULT = 3,   // Recommended: ratio > LZ4, decode speed > LZ4
+    ZXC_LEVEL_BALANCED = 4,  // Good ratio, good decode speed
+    ZXC_LEVEL_COMPACT = 5    // High density. Best for storage/firmware/assets.
+} zxc_compression_level_t;
 
 #endif  // ZXC_CONSTANTS_H
