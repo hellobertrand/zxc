@@ -151,11 +151,13 @@ static int zxc_decompress_dispatch_init(zxc_cctx_t* ctx, const uint8_t* src, siz
     else
         zxc_decompress_ptr = zxc_decompress_chunk_wrapper_default;
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
+    // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON)
         zxc_decompress_ptr = zxc_decompress_chunk_wrapper_neon;
     else
         zxc_decompress_ptr = zxc_decompress_chunk_wrapper_default;
 #else
+    (void)cpu;
     zxc_decompress_ptr = zxc_decompress_chunk_wrapper_default;
 #endif
 #else
@@ -180,11 +182,13 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* ctx, const uint8_t* src, size_
     else
         zxc_compress_ptr = zxc_compress_chunk_wrapper_default;
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
+    // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON)
         zxc_compress_ptr = zxc_compress_chunk_wrapper_neon;
     else
         zxc_compress_ptr = zxc_compress_chunk_wrapper_default;
 #else
+    (void)cpu;
     zxc_compress_ptr = zxc_compress_chunk_wrapper_default;
 #endif
 #else
