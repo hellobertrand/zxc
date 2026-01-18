@@ -488,6 +488,13 @@ int main(int argc, char** argv) {
         use_stdout = 0;
     }
 
+    // Safety check: prevent overwriting input file
+    if (!use_stdin && !use_stdout && strcmp(in_path, out_path) == 0) {
+        zxc_log("Error: Input and output filenames are identical.\n");
+        if (f_in) fclose(f_in);
+        return 1;
+    }
+
     // Open output file if not writing to stdout
     if (!use_stdout) {
         if (!force && access(out_path, F_OK) == 0) {
