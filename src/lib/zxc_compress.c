@@ -240,10 +240,10 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                     goto _match_len_done;
                 }
 #else
-                uint8x16_t p1 = vpminq_u8(v_cmp, v_cmp), p2 = vpminq_u8(p1, p1),
-                           p3 = vpminq_u8(p2, p2);
-                uint8_t min_val = vgetq_lane_u8(p3, 0);
-                min_val = min_val < vgetq_lane_u8(p3, 8) ? min_val : vgetq_lane_u8(p3, 8);
+                uint8x8_t p1 = vpmin_u8(vget_low_u8(v_cmp), vget_high_u8(v_cmp));
+                uint8x8_t p2 = vpmin_u8(p1, p1);
+                uint8x8_t p3 = vpmin_u8(p2, p2);
+                uint8_t min_val = vget_lane_u8(p3, 0);
                 if (min_val == 0xFF)
                     mlen += 16;
                 else {
