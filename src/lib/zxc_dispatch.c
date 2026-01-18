@@ -10,6 +10,12 @@
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
+#include <stdatomic.h>
+
+#if defined(__linux__) && (defined(__arm__) || defined(_M_ARM))
+#include <asm/hwcap.h>
+#include <sys/auxv.h>
+#endif
 
 /*
  * ============================================================================
@@ -107,17 +113,20 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
     features = ZXC_CPU_NEON;
 
 #elif defined(__arm__) || defined(_M_ARM)
-    // For ARM32, we would typically check HWCAP.
-    // Simplifying assumption for this implementation: if compiled with NEON capability, use it.
-    // Ideally use explicit runtime check via getauxval(AT_HWCAP) on Linux.
+    // ARM32 Runtime detection for Linux
 #if defined(__linux__)
-    // Simple placeholder for full getauxval check
-    // if (getauxval(AT_HWCAP) & HWCAP_NEON) features = ZXC_CPU_NEON;
-    features = ZXC_CPU_NEON;  // Assume modern ARMv7
+    unsigned long hwcaps = getauxval(AT_HWCAP);
+    if (hwcaps & HWCAP_NEON) {
+        features = ZXC_CPU_NEON;
+    }
 #else
+// Fallback for non-Linux: rely on compiler flags.
+// If compiled with -mfpu=neon, we assume target supports it.
+// Otherwise, safe default is GENERIC.
+#if defined(__ARM_NEON)
     features = ZXC_CPU_NEON;
 #endif
-
+#endif
 #endif
 
     return features;
@@ -134,85 +143,89 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 typedef int (*zxc_decompress_func_t)(zxc_cctx_t*, const uint8_t*, size_t, uint8_t*, size_t);
 typedef int (*zxc_compress_func_t)(zxc_cctx_t*, const uint8_t*, size_t, uint8_t*, size_t);
 
-static zxc_decompress_func_t zxc_decompress_ptr = NULL;
-static zxc_compress_func_t zxc_compress_ptr = NULL;
+static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_ptr = NULL;
+static ZXC_ATOMIC zxc_compress_func_t zxc_compress_ptr = NULL;
 
 // Initializer for Decompression
 static int zxc_decompress_dispatch_init(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz,
                                         uint8_t* dst, size_t dst_cap) {
     zxc_cpu_feature_t cpu = zxc_detect_cpu_features();
+    zxc_decompress_func_t zxc_decompress_ptr_local = NULL;
 
 #ifndef ZXC_ONLY_DEFAULT
 #if defined(__x86_64__) || defined(_M_X64)
     if (cpu == ZXC_CPU_AVX512)
-        zxc_decompress_ptr = zxc_decompress_chunk_wrapper_avx512;
+        zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_avx512;
     else if (cpu == ZXC_CPU_AVX2)
-        zxc_decompress_ptr = zxc_decompress_chunk_wrapper_avx2;
+        zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_avx2;
     else
-        zxc_decompress_ptr = zxc_decompress_chunk_wrapper_default;
+        zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
     // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON)
-        zxc_decompress_ptr = zxc_decompress_chunk_wrapper_neon;
+        zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_neon;
     else
-        zxc_decompress_ptr = zxc_decompress_chunk_wrapper_default;
+        zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
 #else
     (void)cpu;
-    zxc_decompress_ptr = zxc_decompress_chunk_wrapper_default;
+    zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
 #endif
 #else
     (void)cpu;
-    zxc_decompress_ptr = zxc_decompress_chunk_wrapper_default;
+    zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
 #endif
 
-    return zxc_decompress_ptr(ctx, src, src_sz, dst, dst_cap);
+    atomic_store_explicit(&zxc_decompress_ptr, zxc_decompress_ptr_local, memory_order_release);
+    return zxc_decompress_ptr_local(ctx, src, src_sz, dst, dst_cap);
 }
 
 // Initializer for Compression
 static int zxc_compress_dispatch_init(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz,
                                       uint8_t* dst, size_t dst_cap) {
     zxc_cpu_feature_t cpu = zxc_detect_cpu_features();
+    zxc_compress_func_t zxc_compress_ptr_local = NULL;
 
 #ifndef ZXC_ONLY_DEFAULT
 #if defined(__x86_64__) || defined(_M_X64)
     if (cpu == ZXC_CPU_AVX512)
-        zxc_compress_ptr = zxc_compress_chunk_wrapper_avx512;
+        zxc_compress_ptr_local = zxc_compress_chunk_wrapper_avx512;
     else if (cpu == ZXC_CPU_AVX2)
-        zxc_compress_ptr = zxc_compress_chunk_wrapper_avx2;
+        zxc_compress_ptr_local = zxc_compress_chunk_wrapper_avx2;
     else
-        zxc_compress_ptr = zxc_compress_chunk_wrapper_default;
+        zxc_compress_ptr_local = zxc_compress_chunk_wrapper_default;
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
     // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON)
-        zxc_compress_ptr = zxc_compress_chunk_wrapper_neon;
+        zxc_compress_ptr_local = zxc_compress_chunk_wrapper_neon;
     else
-        zxc_compress_ptr = zxc_compress_chunk_wrapper_default;
+        zxc_compress_ptr_local = zxc_compress_chunk_wrapper_default;
 #else
     (void)cpu;
-    zxc_compress_ptr = zxc_compress_chunk_wrapper_default;
+    zxc_compress_ptr_local = zxc_compress_chunk_wrapper_default;
 #endif
 #else
     (void)cpu;
-    zxc_compress_ptr = zxc_compress_chunk_wrapper_default;
+    zxc_compress_ptr_local = zxc_compress_chunk_wrapper_default;
 #endif
 
-    return zxc_compress_ptr(ctx, src, src_sz, dst, dst_cap);
+    atomic_store_explicit(&zxc_compress_ptr, zxc_compress_ptr_local, memory_order_release);
+    return zxc_compress_ptr_local(ctx, src, src_sz, dst, dst_cap);
 }
 
 // Public Wrappers (Dispatcher and Main API)
 
 int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz, uint8_t* dst,
                                  size_t dst_cap) {
-    if (UNLIKELY(!zxc_decompress_ptr))
-        return zxc_decompress_dispatch_init(ctx, src, src_sz, dst, dst_cap);
-    return zxc_decompress_ptr(ctx, src, src_sz, dst, dst_cap);
+    zxc_decompress_func_t func = atomic_load_explicit(&zxc_decompress_ptr, memory_order_acquire);
+    if (UNLIKELY(!func)) return zxc_decompress_dispatch_init(ctx, src, src_sz, dst, dst_cap);
+    return func(ctx, src, src_sz, dst, dst_cap);
 }
 
 int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz, uint8_t* dst,
                                size_t dst_cap) {
-    if (UNLIKELY(!zxc_compress_ptr))
-        return zxc_compress_dispatch_init(ctx, src, src_sz, dst, dst_cap);
-    return zxc_compress_ptr(ctx, src, src_sz, dst, dst_cap);
+    zxc_compress_func_t func = atomic_load_explicit(&zxc_compress_ptr, memory_order_acquire);
+    if (UNLIKELY(!func)) return zxc_compress_dispatch_init(ctx, src, src_sz, dst, dst_cap);
+    return func(ctx, src, src_sz, dst, dst_cap);
 }
 
 /*
