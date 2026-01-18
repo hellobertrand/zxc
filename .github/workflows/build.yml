@@ -29,43 +29,22 @@ jobs:
             artifact_name: zxc
             asset_name: zxc-linux-x86_64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
-          - name: Linux x86_64 AVX2
-            os: ubuntu-latest
-            artifact_name: zxc
-            asset_name: zxc-linux-x86_64-avx2
-            cmake_flags: "-DZXC_NATIVE_ARCH=OFF -DCMAKE_C_FLAGS=\"-mavx2 -mbmi2\""
-          - name: Linux x86_64 AVX512
-            os: ubuntu-latest
-            artifact_name: zxc
-            asset_name: zxc-linux-x86_64-avx512
-            cmake_flags: "-DZXC_NATIVE_ARCH=OFF -DCMAKE_C_FLAGS=\"-mavx512f -mavx512bw -mbmi2\""
-            use_sde: true
           - name: Linux ARM64
             os: ubuntu-24.04-arm
             artifact_name: zxc
             asset_name: zxc-linux-aarch64
-            cmake_flags: "-DZXC_NATIVE_ARCH=ON"
+            cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
           - name: macOS ARM64
             os: macos-latest
             artifact_name: zxc
             asset_name: zxc-macos-arm64
-            cmake_flags: "-DZXC_NATIVE_ARCH=ON"
+            cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
           - name: Windows x64
             os: windows-latest
             artifact_name: zxc.exe
             asset_name: zxc-windows-x64.exe
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
-          - name: Windows x64 AVX2
-            os: windows-latest
-            artifact_name: zxc.exe
-            asset_name: zxc-windows-x64-avx2.exe
-            cmake_flags: "-DZXC_NATIVE_ARCH=OFF -DCMAKE_C_FLAGS=/arch:AVX2"
-          - name: Windows x64 AVX512
-            os: windows-latest
-            artifact_name: zxc.exe
-            asset_name: zxc-windows-x64-avx512.exe
-            cmake_flags: "-DZXC_NATIVE_ARCH=OFF -DCMAKE_C_FLAGS=/arch:AVX512"
-            use_sde: true
+
 
     steps:
       - name: Checkout Repository
