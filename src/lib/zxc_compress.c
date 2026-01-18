@@ -131,18 +131,18 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     //  Start with a sentinel length just below the minimum so any valid match will replace it.
     zxc_match_t best = (zxc_match_t){NULL, ZXC_LZ_MIN_MATCH_LEN - 1, 0};
 
-    // Load the 4‑byte sequence at the current position and hash it.
+    // Load the 4-byte sequence at the current position and hash it.
     // The hash value h is used to index into the LZ77 hash table.
     uint32_t cur_val = zxc_le32(ip);
     uint32_t h = zxc_hash_func(cur_val);
 
-    // Current position in the input buffer expressed as a 32‑bit index.
+    // Current position in the input buffer expressed as a 32-bit index.
     // This index is what we store in / retrieve from the hash/chain tables.
     uint32_t cur_pos = (uint32_t)(ip - src);
 
     // Each hash bucket stores:
     // - raw_head: compressed pointer (epoch in high bits, position in low bits)
-    // - stored_tag: 4‑byte tag of the sequence used to quickly reject mismatches.
+    // - stored_tag: 4-byte tag of the sequence used to quickly reject mismatches.
     // Epoch bits allow the tables to be lazily invalidated without clearing all entries.
     uint32_t raw_head = hash_table[2 * h];
     uint32_t stored_tag = hash_table[2 * h + 1];
@@ -153,7 +153,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
 
     // Decide whether to skip the head entry of the hash chain.
-    // If the stored 4‑byte tag does not match cur_val, the head is likely a
+    // If the stored 4-byte tag does not match cur_val, the head is likely a
     // false candidate, so we can optionally skip it entirely, especially at
     // lower compression levels where we prefer speed over thoroughness.
     int skip_head = (match_idx > 0 && stored_tag != cur_val);
