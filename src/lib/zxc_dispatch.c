@@ -297,15 +297,26 @@ size_t zxc_decompress(const void* src, size_t src_size, void* dst, size_t dst_ca
 
     // Block decompression loop
     while (ip < ip_end) {
+        size_t rem_src = (size_t)(ip_end - ip);
         zxc_block_header_t bh;
         // Read the block header to determine the compressed size
-        if (zxc_read_block_header(ip, (size_t)(ip_end - ip), &bh) != 0) {
+        if (zxc_read_block_header(ip, rem_src, &bh) != 0) {
+            zxc_cctx_free(&ctx);
+            return 0;
+        }
+
+        // Safety check: ensure the block (header + data + checksum) fits in the input buffer
+        size_t checksum_sz =
+            (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM) ? ZXC_BLOCK_CHECKSUM_SIZE : 0;
+        size_t total_block_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size + checksum_sz;
+
+        if (UNLIKELY(total_block_sz > rem_src)) {
             zxc_cctx_free(&ctx);
             return 0;
         }
 
         size_t rem_cap = (size_t)(op_end - op);
-        int res = zxc_decompress_chunk_wrapper(&ctx, ip, (size_t)(ip_end - ip), op, rem_cap);
+        int res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op, rem_cap);
         if (UNLIKELY(res < 0)) {
             zxc_cctx_free(&ctx);
             return 0;
