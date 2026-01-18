@@ -7,6 +7,9 @@
  */
 
 #include "zxc_internal.h"
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 /*
  * ============================================================================
@@ -19,6 +22,7 @@
 int zxc_decompress_chunk_wrapper_default(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz,
                                          uint8_t* dst, size_t dst_cap);
 
+#ifndef ZXC_ONLY_DEFAULT
 #if defined(__x86_64__) || defined(_M_X64)
 int zxc_decompress_chunk_wrapper_avx2(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz,
                                       uint8_t* dst, size_t dst_cap);
@@ -27,6 +31,7 @@ int zxc_decompress_chunk_wrapper_avx512(zxc_cctx_t* ctx, const uint8_t* src, siz
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
 int zxc_decompress_chunk_wrapper_neon(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz,
                                       uint8_t* dst, size_t dst_cap);
+#endif
 #endif
 
 // Compression Prototypes
@@ -57,9 +62,36 @@ typedef enum {
 } zxc_cpu_feature_t;
 
 static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
+#ifdef ZXC_ONLY_DEFAULT
+    return ZXC_CPU_GENERIC;
+#else
     zxc_cpu_feature_t features = ZXC_CPU_GENERIC;
 
 #if defined(__x86_64__) || defined(_M_X64)
+#if defined(_MSC_VER)
+    // MSVC detection using __cpuid
+    // Function ID 1: EAX=1. ECX: Bit 28=AVX.
+    // Function ID 7: EAX=7, ECX=0. EBX: Bit 5=AVX2, Bit 16=AVX512F, Bit 30=AVX512BW.
+    int regs[4];
+    int avx = 0;
+    int avx2 = 0;
+    int avx512 = 0;
+
+    __cpuid(regs, 1);
+    if (regs[2] & (1 << 28)) avx = 1;
+
+    if (avx) {
+        __cpuidex(regs, 7, 0);
+        if (regs[1] & (1 << 5)) avx2 = 1;
+        if ((regs[1] & (1 << 16)) && (regs[1] & (1 << 30))) avx512 = 1;
+    }
+
+    if (avx512) {
+        features = ZXC_CPU_AVX512;
+    } else if (avx2) {
+        features = ZXC_CPU_AVX2;
+    }
+#else
     // GCC/Clang built-in detection
     __builtin_cpu_init();
 
@@ -68,6 +100,7 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
     } else if (__builtin_cpu_supports("avx2")) {
         features = ZXC_CPU_AVX2;
     }
+#endif
 
 #elif defined(__aarch64__) || defined(_M_ARM64)
     // ARM64 usually guarantees NEON
@@ -88,6 +121,7 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 #endif
 
     return features;
+#endif
 }
 
 /*
@@ -108,6 +142,7 @@ static int zxc_decompress_dispatch_init(zxc_cctx_t* ctx, const uint8_t* src, siz
                                         uint8_t* dst, size_t dst_cap) {
     zxc_cpu_feature_t cpu = zxc_detect_cpu_features();
 
+#ifndef ZXC_ONLY_DEFAULT
 #if defined(__x86_64__) || defined(_M_X64)
     if (cpu == ZXC_CPU_AVX512)
         zxc_decompress_ptr = zxc_decompress_chunk_wrapper_avx512;
@@ -123,6 +158,10 @@ static int zxc_decompress_dispatch_init(zxc_cctx_t* ctx, const uint8_t* src, siz
 #else
     zxc_decompress_ptr = zxc_decompress_chunk_wrapper_default;
 #endif
+#else
+    (void)cpu;
+    zxc_decompress_ptr = zxc_decompress_chunk_wrapper_default;
+#endif
 
     return zxc_decompress_ptr(ctx, src, src_sz, dst, dst_cap);
 }
@@ -132,6 +171,7 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* ctx, const uint8_t* src, size_
                                       uint8_t* dst, size_t dst_cap) {
     zxc_cpu_feature_t cpu = zxc_detect_cpu_features();
 
+#ifndef ZXC_ONLY_DEFAULT
 #if defined(__x86_64__) || defined(_M_X64)
     if (cpu == ZXC_CPU_AVX512)
         zxc_compress_ptr = zxc_compress_chunk_wrapper_avx512;
@@ -145,6 +185,10 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* ctx, const uint8_t* src, size_
     else
         zxc_compress_ptr = zxc_compress_chunk_wrapper_default;
 #else
+    zxc_compress_ptr = zxc_compress_chunk_wrapper_default;
+#endif
+#else
+    (void)cpu;
     zxc_compress_ptr = zxc_compress_chunk_wrapper_default;
 #endif
 

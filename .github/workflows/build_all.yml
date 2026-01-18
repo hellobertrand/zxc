@@ -42,6 +42,8 @@ jobs:
             cross_compiler_c: arm-linux-gnueabihf-gcc
             cross_compiler_cxx: arm-linux-gnueabihf-g++
             cross_strip: arm-linux-gnueabihf-strip
+            cmake_system_name: "Linux"
+            cmake_system_processor: "arm"
           - name: Windows x64
             runner: windows-latest
             os: windows
@@ -83,7 +85,7 @@ jobs:
       - name: Configure CMake
         run: |
           # Initialize variables
-          EXTRA_ARGS="-DZXC_NATIVE_ARCH=OFF" # Disable native arch detection
+          EXTRA_ARGS="-DZXC_NATIVE_ARCH=OFF" # Disable native arch detection (Runtime Dispatch enabled)
           
           # WINDOWS CONFIGURATION
           if [ "${{ matrix.os }}" = "windows" ]; then
@@ -101,6 +103,14 @@ jobs:
              # Handle cross-compiler (e.g., ARM 32-bit on Linux)
              if [ ! -z "${{ matrix.cross_compiler_c }}" ]; then
                 EXTRA_ARGS="$EXTRA_ARGS -DCMAKE_C_COMPILER=${{ matrix.cross_compiler_c }} -DCMAKE_CXX_COMPILER=${{ matrix.cross_compiler_cxx }}"
+             fi
+
+             # Handle explicit System Name/Processor (crucial for cross-compilation)
+             if [ ! -z "${{ matrix.cmake_system_name }}" ]; then
+                EXTRA_ARGS="$EXTRA_ARGS -DCMAKE_SYSTEM_NAME=${{ matrix.cmake_system_name }}"
+             fi
+             if [ ! -z "${{ matrix.cmake_system_processor }}" ]; then
+                EXTRA_ARGS="$EXTRA_ARGS -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_system_processor }}"
              fi
              
              # Handle cross-strip tool (e.g., ARM 32-bit on Linux)
