@@ -10,7 +10,6 @@
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
-#include <stdatomic.h>
 
 #if defined(__linux__) && (defined(__arm__) || defined(_M_ARM))
 #include <asm/hwcap.h>
@@ -175,7 +174,11 @@ static int zxc_decompress_dispatch_init(zxc_cctx_t* ctx, const uint8_t* src, siz
     zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
 #endif
 
+#if ZXC_USE_C11_ATOMICS
     atomic_store_explicit(&zxc_decompress_ptr, zxc_decompress_ptr_local, memory_order_release);
+#else
+    zxc_decompress_ptr = zxc_decompress_ptr_local;
+#endif
     return zxc_decompress_ptr_local(ctx, src, src_sz, dst, dst_cap);
 }
 
@@ -208,7 +211,11 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* ctx, const uint8_t* src, size_
     zxc_compress_ptr_local = zxc_compress_chunk_wrapper_default;
 #endif
 
+#if ZXC_USE_C11_ATOMICS
     atomic_store_explicit(&zxc_compress_ptr, zxc_compress_ptr_local, memory_order_release);
+#else
+    zxc_compress_ptr = zxc_compress_ptr_local;
+#endif
     return zxc_compress_ptr_local(ctx, src, src_sz, dst, dst_cap);
 }
 
@@ -216,14 +223,22 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* ctx, const uint8_t* src, size_
 
 int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz, uint8_t* dst,
                                  size_t dst_cap) {
+#if ZXC_USE_C11_ATOMICS
     zxc_decompress_func_t func = atomic_load_explicit(&zxc_decompress_ptr, memory_order_acquire);
+#else
+    zxc_decompress_func_t func = zxc_decompress_ptr;
+#endif
     if (UNLIKELY(!func)) return zxc_decompress_dispatch_init(ctx, src, src_sz, dst, dst_cap);
     return func(ctx, src, src_sz, dst, dst_cap);
 }
 
 int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz, uint8_t* dst,
                                size_t dst_cap) {
+#if ZXC_USE_C11_ATOMICS
     zxc_compress_func_t func = atomic_load_explicit(&zxc_compress_ptr, memory_order_acquire);
+#else
+    zxc_compress_func_t func = zxc_compress_ptr;
+#endif
     if (UNLIKELY(!func)) return zxc_compress_dispatch_init(ctx, src, src_sz, dst, dst_cap);
     return func(ctx, src, src_sz, dst, dst_cap);
 }

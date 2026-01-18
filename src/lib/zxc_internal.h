@@ -27,8 +27,10 @@ extern "C" {
     !defined(__STDC_NO_ATOMICS__)
 #include <stdatomic.h>
 #define ZXC_ATOMIC _Atomic
+#define ZXC_USE_C11_ATOMICS 1
 #else
 #define ZXC_ATOMIC volatile
+#define ZXC_USE_C11_ATOMICS 0
 #endif
 
 /*
