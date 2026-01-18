@@ -10,6 +10,16 @@
 #include "../../include/zxc_sans_io.h"
 #include "zxc_internal.h"
 
+/*
+ * Function Multi-Versioning Support
+ * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2), rename the public entry point.
+ */
+#ifdef ZXC_FUNCTION_SUFFIX
+#define ZXC_CAT_IMPL(x, y) x##y
+#define ZXC_CAT(x, y) ZXC_CAT_IMPL(x, y)
+#define zxc_decompress_chunk_wrapper ZXC_CAT(zxc_decompress_chunk_wrapper, ZXC_FUNCTION_SUFFIX)
+#endif
+
 #define ZXC_DEC_BATCH 32  // Number of sequences to decode in a batch
 
 /**
@@ -1543,49 +1553,4 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
     }
 
     return decoded_sz;
-}
-
-// cppcheck-suppress unusedFunction
-size_t zxc_decompress(const void* src, size_t src_size, void* dst, size_t dst_capacity,
-                      int checksum_enabled) {
-    if (UNLIKELY(!src || !dst || src_size < ZXC_FILE_HEADER_SIZE)) return 0;
-
-    const uint8_t* ip = (const uint8_t*)src;
-    const uint8_t* ip_end = ip + src_size;
-    uint8_t* op = (uint8_t*)dst;
-    const uint8_t* op_start = op;
-    const uint8_t* op_end = op + dst_capacity;
-    size_t runtime_chunk_size = 0;
-
-    // File header verification
-    if (zxc_read_file_header(ip, src_size, &runtime_chunk_size) != 0) return 0;
-
-    zxc_cctx_t ctx;
-    if (zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0, checksum_enabled) != 0) return 0;
-
-    ip += ZXC_FILE_HEADER_SIZE;
-
-    // Block decompression loop
-    while (ip < ip_end) {
-        zxc_block_header_t bh;
-        // Read the block header to determine the compressed size
-        if (zxc_read_block_header(ip, (size_t)(ip_end - ip), &bh) != 0) {
-            zxc_cctx_free(&ctx);
-            return 0;
-        }
-
-        size_t rem_cap = (size_t)(op_end - op);
-        int res = zxc_decompress_chunk_wrapper(&ctx, ip, (size_t)(ip_end - ip), op, rem_cap);
-        if (UNLIKELY(res < 0)) {
-            zxc_cctx_free(&ctx);
-            return 0;
-        }
-
-        ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
-        ip += (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM) ? ZXC_BLOCK_CHECKSUM_SIZE : 0;
-        op += res;
-    }
-
-    zxc_cctx_free(&ctx);
-    return (size_t)(op - op_start);
 }

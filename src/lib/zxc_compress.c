@@ -10,6 +10,16 @@
 #include "../../include/zxc_sans_io.h"
 #include "zxc_internal.h"
 
+/*
+ * Function Multi-Versioning Support
+ * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2), rename the public entry point.
+ */
+#ifdef ZXC_FUNCTION_SUFFIX
+#define ZXC_CAT_IMPL(x, y) x##y
+#define ZXC_CAT(x, y) ZXC_CAT_IMPL(x, y)
+#define zxc_compress_chunk_wrapper ZXC_CAT(zxc_compress_chunk_wrapper, ZXC_FUNCTION_SUFFIX)
+#endif
+
 #define ZXC_NUM_FRAME_SIZE \
     128  // Maximum number of frames that can be processed in a single compression operation.
 #define ZXC_EPOCH_BITS \
@@ -1359,43 +1369,4 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
     }
 
     return (int)w;
-}
-
-// cppcheck-suppress unusedFunction
-size_t zxc_compress(const void* src, size_t src_size, void* dst, size_t dst_capacity, int level,
-                    int checksum_enabled) {
-    if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return 0;
-
-    const uint8_t* ip = (const uint8_t*)src;
-    uint8_t* op = (uint8_t*)dst;
-    const uint8_t* op_start = op;
-    const uint8_t* op_end = op + dst_capacity;
-
-    zxc_cctx_t ctx;
-    if (zxc_cctx_init(&ctx, ZXC_BLOCK_SIZE, 1, level, checksum_enabled) != 0) return 0;
-
-    int h_size = zxc_write_file_header(op, (size_t)(op_end - op));
-    if (UNLIKELY(h_size < 0)) {
-        zxc_cctx_free(&ctx);
-        return 0;
-    }
-    op += h_size;
-
-    size_t pos = 0;
-    while (pos < src_size) {
-        size_t chunk_len = (src_size - pos > ZXC_BLOCK_SIZE) ? ZXC_BLOCK_SIZE : (src_size - pos);
-        size_t rem_cap = (size_t)(op_end - op);
-
-        int res = zxc_compress_chunk_wrapper(&ctx, ip + pos, chunk_len, op, rem_cap);
-        if (UNLIKELY(res < 0)) {
-            zxc_cctx_free(&ctx);
-            return 0;
-        }
-
-        op += res;
-        pos += chunk_len;
-    }
-
-    zxc_cctx_free(&ctx);
-    return (size_t)(op - op_start);
 }
