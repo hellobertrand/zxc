@@ -164,14 +164,17 @@ extern "C" {
 #define ZXC_SEQ_ML_MASK ((1U << ZXC_SEQ_ML_BITS) - 1)  // Mask to extract Match Length from sequence
 #define ZXC_SEQ_OFF_MASK ((1U << ZXC_SEQ_OFF_BITS) - 1)  // Mask to extract Offset from sequence
 
+#define ZXC_VBYTE_MSB (1U << (8 * sizeof(uint8_t) - 1))  // Most significant bit of a vbyte (128)
+#define ZXC_VBYTE_MASK (ZXC_VBYTE_MSB - 1)               // Mask to extract vbyte value (127)
+
 // LZ77 Constants
 // The hash table uses 13 bits for addressing, resulting in 8192 (2^13) entries.
 // The hash table uses 2x entries (load factor < 0.5) to reduce collisions.
 // Each hash table entry stores: (epoch << 18) | offset.
 // Total memory footprint: 64KB (8192 entries * 2 * 4 bytes each).
-#define ZXC_LZ_HASH_BITS 13                       // (2*(2^13) * 4 bytes = 64KB)
-#define ZXC_LZ_HASH_SIZE (1 << ZXC_LZ_HASH_BITS)  // Hash table size
-#define ZXC_LZ_WINDOW_SIZE (1 << 16)              // 64KB sliding window
+#define ZXC_LZ_HASH_BITS 13                        // (2*(2^13) * 4 bytes = 64KB)
+#define ZXC_LZ_HASH_SIZE (1U << ZXC_LZ_HASH_BITS)  // Hash table size
+#define ZXC_LZ_WINDOW_SIZE (1U << 16)              // 64KB sliding window
 // Note: sliding window of 64KB allows chain_table to use uint16_t for valid offsets (since any
 // match > 64KB is invalid).
 #define ZXC_LZ_MIN_MATCH_LEN 5                    // Minimum match length
@@ -509,7 +512,7 @@ static ZXC_ALWAYS_INLINE int zxc_ctz32(uint32_t x) {
     static const int DeBruijn32[32] = {0,  1,  28, 2,  29, 14, 24, 3,  30, 22, 20,
                                        15, 25, 17, 4,  8,  31, 27, 13, 23, 21, 19,
                                        16, 7,  26, 12, 18, 6,  11, 5,  10, 9};
-    return DeBruijn32[((uint32_t)((x & -((int)x)) * 0x077CB531U)) >> 27];
+    return DeBruijn32[((uint32_t)((x & (0U - x)) * 0x077CB531U)) >> 27];
 #endif
 }
 
@@ -540,7 +543,7 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(uint64_t x) {
         0,  1,  48, 2,  57, 49, 28, 3,  61, 58, 50, 42, 38, 29, 17, 4,  62, 55, 59, 36, 53, 51,
         43, 22, 45, 39, 33, 30, 24, 18, 12, 5,  63, 47, 56, 27, 60, 41, 37, 16, 54, 35, 52, 21,
         44, 32, 23, 11, 46, 26, 40, 15, 34, 20, 31, 10, 25, 14, 19, 9,  13, 8,  7,  6};
-    return Debruijn64[((x & -x) * 0x03F79D71B4CA8B09ULL) >> 58];
+    return Debruijn64[((x & (0ULL - x)) * 0x03F79D71B4CA8B09ULL) >> 58];
 #endif
 }
 

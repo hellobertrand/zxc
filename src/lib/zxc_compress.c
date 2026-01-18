@@ -74,8 +74,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  */
 static ZXC_ALWAYS_INLINE size_t zxc_write_vbyte(uint8_t* dst, uint32_t val) {
     size_t count = 0;
-    while (val >= 0x80) {
-        dst[count++] = (uint8_t)(val | 0x80);
+    while (val >= ZXC_VBYTE_MSB) {
+        dst[count++] = (uint8_t)(val | ZXC_VBYTE_MSB);
         val >>= 7;
     }
     dst[count++] = (uint8_t)val;
@@ -125,23 +125,45 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* mflimit,
     const uint8_t* anchor, uint32_t* hash_table, uint16_t* chain_table, uint32_t epoch_mark,
     int level, zxc_lz77_params_t p) {
-    zxc_match_t best = {NULL, ZXC_LZ_MIN_MATCH_LEN - 1, 0};
+    // Track the best match found so far.
+    //  ref is the pointer to the start of the match in the history buffer,
+    //  len is the match length, and backtrack is the distance from ip to ref.
+    //  Start with a sentinel length just below the minimum so any valid match will replace it.
+    zxc_match_t best = (zxc_match_t){NULL, ZXC_LZ_MIN_MATCH_LEN - 1, 0};
+
+    // Load the 4-byte sequence at the current position and hash it.
+    // The hash value h is used to index into the LZ77 hash table.
     uint32_t cur_val = zxc_le32(ip);
     uint32_t h = zxc_hash_func(cur_val);
+
+    // Current position in the input buffer expressed as a 32-bit index.
+    // This index is what we store in / retrieve from the hash/chain tables.
     uint32_t cur_pos = (uint32_t)(ip - src);
 
+    // Each hash bucket stores:
+    // - raw_head: compressed pointer (epoch in high bits, position in low bits)
+    // - stored_tag: 4-byte tag of the sequence used to quickly reject mismatches.
+    // Epoch bits allow the tables to be lazily invalidated without clearing all entries.
     uint32_t raw_head = hash_table[2 * h];
     uint32_t stored_tag = hash_table[2 * h + 1];
+
+    // If the epoch in raw_head matches the current epoch_mark, extract the
+    // stored position; otherwise treat this bucket as empty (index 0).
     uint32_t match_idx =
         (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
 
+    // Decide whether to skip the head entry of the hash chain.
+    // If the stored 4-byte tag does not match cur_val, the head is likely a
+    // false candidate, so we can optionally skip it entirely, especially at
+    // lower compression levels where we prefer speed over thoroughness.
     int skip_head = (match_idx > 0 && stored_tag != cur_val);
     if (skip_head && level <= 2) match_idx = 0;
 
     hash_table[2 * h] = epoch_mark | cur_pos;
     hash_table[2 * h + 1] = cur_val;
-    chain_table[cur_pos] =
-        (match_idx > 0 && (cur_pos - match_idx) < 0x10000) ? (uint16_t)(cur_pos - match_idx) : 0;
+    chain_table[cur_pos] = (match_idx > 0 && (cur_pos - match_idx) < ZXC_LZ_WINDOW_SIZE)
+                               ? (uint16_t)(cur_pos - match_idx)
+                               : 0;
 
     if (match_idx == 0) return best;
 
@@ -149,7 +171,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     int is_first = 1;
 
     while (match_idx > 0 && attempts-- >= 0) {
-        if (UNLIKELY(cur_pos - match_idx >= ZXC_LZ_MAX_DIST)) break;
+        if (UNLIKELY(cur_pos - match_idx > ZXC_LZ_MAX_DIST)) break;
         const uint8_t* ref = src + match_idx;
         ZXC_PREFETCH_READ(ref);
 
@@ -286,7 +308,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         int is_lazy_first = 1;
 
         while (next_idx > 0 && lazy_att-- > 0) {
-            if (UNLIKELY((uint32_t)(ip + 1 - src) - next_idx >= ZXC_LZ_MAX_DIST)) break;
+            if (UNLIKELY((uint32_t)(ip + 1 - src) - next_idx > ZXC_LZ_MAX_DIST)) break;
             const uint8_t* ref2 = src + next_idx;
             if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
                 uint32_t l2 = 4;
@@ -313,7 +335,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             uint32_t max_lazy3 = 0;
             lazy_att = p.lazy_attempts;
             while (idx3 > 0 && lazy_att-- > 0) {
-                if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 >= ZXC_LZ_MAX_DIST)) break;
+                if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 > ZXC_LZ_MAX_DIST)) break;
                 const uint8_t* ref3 = src + idx3;
                 if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
                     uint32_t l3 = 4;
@@ -493,9 +515,6 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT s
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512) || defined(ZXC_USE_NEON64) || \
     defined(ZXC_USE_NEON32)
     _scalar:
-#ifndef _MSC_VER
-        __attribute__((unused));
-#endif
 #endif
         for (; j < frames; j++) {
             uint32_t v = zxc_le32(in_ptr + j * 4);
@@ -667,10 +686,9 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                                             : 0;
                     hash_table[2 * h_u] = epoch_mark | pos_u;
                     hash_table[2 * h_u + 1] = val_u;
-                    chain_table[pos_u] =
-                        (prev_idx > 0 && (pos_u - prev_idx) < (ZXC_LZ_MAX_DIST + 1))
-                            ? (uint16_t)(pos_u - prev_idx)
-                            : 0;
+                    chain_table[pos_u] = (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
+                                             ? (uint16_t)(pos_u - prev_idx)
+                                             : 0;
                 }
             }
             ip += m.len;
@@ -706,7 +724,18 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             const uint8_t* run_start = p++;
 
             // Fast run counting with early SIMD exit
-#if defined(ZXC_USE_AVX2)
+#if defined(ZXC_USE_AVX512)
+            __m512i vb = _mm512_set1_epi8((char)b);
+            while (p <= p_end - 64) {
+                __m512i v = _mm512_loadu_si512((const void*)p);
+                __mmask64 mask = _mm512_cmpeq_epi8_mask(v, vb);
+                if (mask != 0xFFFFFFFFFFFFFFFFULL) {
+                    p += (size_t)zxc_ctz64(~mask);
+                    goto _run_done;
+                }
+                p += 64;
+            }
+#elif defined(ZXC_USE_AVX2)
             __m256i vb = _mm256_set1_epi8((char)b);
             while (p <= p_end - 32) {
                 __m256i v = _mm256_loadu_si256((const __m256i*)p);
@@ -738,7 +767,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 #endif
             while (p < p_end && *p == b) p++;
 
-#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+#if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || \
+    defined(ZXC_USE_NEON32)
         _run_done:;
 #endif
             size_t run = (size_t)(p - run_start);
@@ -758,7 +788,22 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                 // Literal run: scan ahead with fast SIMD lookahead
                 const uint8_t* lit_start = run_start;
 
-#if defined(ZXC_USE_AVX2)
+#if defined(ZXC_USE_AVX512)
+                while (p <= p_end_4 - 64) {
+                    __m512i v0 = _mm512_loadu_si512((const void*)p);
+                    __m512i v1 = _mm512_loadu_si512((const void*)(p + 1));
+                    __m512i v2 = _mm512_loadu_si512((const void*)(p + 2));
+                    __m512i v3 = _mm512_loadu_si512((const void*)(p + 3));
+                    __mmask64 mask = _mm512_cmpeq_epi8_mask(v0, v1) &
+                                     _mm512_cmpeq_epi8_mask(v1, v2) &
+                                     _mm512_cmpeq_epi8_mask(v2, v3);
+                    if (mask != 0) {
+                        p += (size_t)zxc_ctz64(mask);
+                        goto _lit_done;
+                    }
+                    p += 64;
+                }
+#elif defined(ZXC_USE_AVX2)
                 while (p <= p_end_4 - 32) {
                     __m256i v0 = _mm256_loadu_si256((const __m256i*)p);
                     __m256i v1 = _mm256_loadu_si256((const __m256i*)(p + 1));
@@ -807,7 +852,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                     p++;
                 }
 
-#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+#if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || \
+    defined(ZXC_USE_NEON32)
             _lit_done:;
 #endif
                 size_t lit_run = (size_t)(p - lit_start);
@@ -1078,10 +1124,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                                             : 0;
                     hash_table[2 * h_u] = epoch_mark | pos_u;
                     hash_table[2 * h_u + 1] = val_u;
-                    chain_table[pos_u] =
-                        (prev_idx > 0 && (pos_u - prev_idx) < (ZXC_LZ_MAX_DIST + 1))
-                            ? (uint16_t)(pos_u - prev_idx)
-                            : 0;
+                    chain_table[pos_u] = (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
+                                             ? (uint16_t)(pos_u - prev_idx)
+                                             : 0;
                 }
             }
             ip += m.len;
