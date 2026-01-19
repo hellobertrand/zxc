@@ -1384,6 +1384,9 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_vbyte(&extras_ptr, extras_end);
         uint32_t offset = (uint32_t)(seq & 0xFFFF);
 
+        // Validate literal length against available literals
+        if (UNLIKELY(l_ptr + ll > l_end)) return -1;
+
         // Check bounds before wild copies - if too close to end, fall back to Safe Path
         if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end)) {
             seq_ptr = seq_save;
