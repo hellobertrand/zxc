@@ -265,6 +265,7 @@ if(ZXC_BUILD_TESTS)
         endif()
     endif()
     
+    target_include_directories(zxc_test PRIVATE src/lib)
     add_test(NAME UnitTests COMMAND zxc_test)
 endif()
 

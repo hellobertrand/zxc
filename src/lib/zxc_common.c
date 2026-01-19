@@ -286,14 +286,23 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* R
     size_t bit_pos = 0;
     ZXC_MEMSET(dst, 0, out_bytes);
 
+    // Create a mask for the input bits to prevent overflow
+    // If bits is 32, the shift (1ULL << 32) is undefined behavior on 32-bit types,
+    // but here we use uint64_t. (1ULL << 32) is fine on 64-bit.
+    // However, if bits=64 (unlikely for a 32-bit packer), it would be an issue.
+    // For 0 < bits <= 32:
+    uint64_t val_mask = (bits == sizeof(uint32_t) * 8) ? 0xFFFFFFFFULL : ((1ULL << bits) - 1);
+
     for (size_t i = 0; i < count; i++) {
-        uint64_t v = (uint64_t)src[i] << (bit_pos % 8);
+        // Mask the input value to ensure we don't write garbage
+        uint64_t v = ((uint64_t)src[i] & val_mask) << (bit_pos % 8);
+
         size_t byte_idx = bit_pos / 8;
         dst[byte_idx] |= (uint8_t)v;
         if (bits + (bit_pos % 8) > 8) dst[byte_idx + 1] |= (uint8_t)(v >> 8);
         if (bits + (bit_pos % 8) > 16) dst[byte_idx + 2] |= (uint8_t)(v >> 16);
         if (bits + (bit_pos % 8) > 24) dst[byte_idx + 3] |= (uint8_t)(v >> 24);
-        if (bits + (bit_pos % 8) > 32) dst[byte_idx + 4] |= (uint8_t)(v >> 32);
+        if (bits + (bit_pos % 8) > sizeof(uint32_t) * 8) dst[byte_idx + 4] |= (uint8_t)(v >> 32);
         bit_pos += bits;
     }
     return (int)out_bytes;

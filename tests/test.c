@@ -6,6 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +14,7 @@
 
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_stream.h"
+#include "zxc_internal.h"
 
 // --- Helpers ---
 
@@ -482,6 +484,88 @@ int test_buffer_api() {
     return 1;
 }
 
+/*
+ * Test for zxc_br_init and zxc_br_ensure
+ */
+int test_bit_reader() {
+    printf("=== TEST: Unit - Bit Reader (zxc_br_init / zxc_br_ensure) ===\n");
+
+    // Case 1: Normal initialization
+    uint8_t buffer[16];
+    for (int i = 0; i < 16; i++) buffer[i] = (uint8_t)i;
+    zxc_bit_reader_t br;
+    zxc_br_init(&br, buffer, 16);
+
+    assert(br.bits == 64);
+    assert(br.ptr == buffer + 8);
+    assert(br.accum == zxc_le64(buffer));
+    printf("  [PASS] Normal init\n");
+
+    // Case 2: Small buffer initialization (should not crash)
+    uint8_t small_buffer[4] = {0xAA, 0xBB, 0xCC, 0xDD};
+    zxc_br_init(&br, small_buffer, 4);
+    // Should have read 4 bytes safely
+    uint64_t expected_accum = 0;
+    memcpy(&expected_accum, small_buffer, 4);
+    assert(br.accum == expected_accum);
+    assert(br.ptr == small_buffer + 4);
+    printf("  [PASS] Small buffer init\n");
+
+    // Case 3: zxc_br_ensure (Normal refill)
+    zxc_br_init(&br, buffer, 16);
+    br.bits = 10;     // Simulate consumption
+    br.accum >>= 54;  // Simulate shift
+
+    zxc_br_ensure(&br, 32);
+    // Should have refilled
+    assert(br.bits >= 32);
+    printf("  [PASS] Ensure normal refill\n");
+
+    // Case 4: zxc_br_ensure (End of stream)
+    // Init with full buffer but advanced pointer near end
+    zxc_br_init(&br, buffer, 16);
+    br.ptr = buffer + 16;  // At end
+    br.bits = 0;
+
+    // Try to ensure bits, should not read past end
+    zxc_br_ensure(&br, 10);
+    // The key is it didn't crash.
+    printf("  [PASS] Ensure EOF safety\n");
+
+    printf("PASS\n\n");
+    return 1;
+}
+
+/*
+ * Test for zxc_bitpack_stream_32
+ */
+int test_bitpack() {
+    printf("=== TEST: Unit - Bit Packing (zxc_bitpack_stream_32) ===\n");
+
+    uint32_t src[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
+    uint8_t dst[16];
+
+    // Pack 4 values with 4 bits each.
+    // Input is 0xFFFFFFFF, but should be masked to 0xF (1111).
+    // Result should be 2 bytes: 0xFF, 0xFF
+    int len = zxc_bitpack_stream_32(src, 4, dst, 16, 4);
+
+    assert(len == 2);
+    assert(dst[0] == 0xFF);
+    assert(dst[1] == 0xFF);
+    printf("  [PASS] Bitpack overflow masking\n");
+
+    // Edge case: bits = 32
+    uint32_t src32[1] = {0x12345678};
+    len = zxc_bitpack_stream_32(src32, 1, dst, 16, 32);
+    assert(len == 4);
+    assert(zxc_le32(dst) == 0x12345678);
+    printf("  [PASS] Bitpack 32 bits\n");
+
+    printf("PASS\n\n");
+    return 1;
+}
+
 int main() {
     srand(42);  // Fixed seed for reproducibility
     int total_failures = 0;
@@ -566,6 +650,8 @@ int main() {
     if (!test_invalid_arguments()) total_failures++;
     if (!test_io_failures()) total_failures++;
     if (!test_thread_params()) total_failures++;
+    if (!test_bit_reader()) total_failures++;
+    if (!test_bitpack()) total_failures++;
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);
