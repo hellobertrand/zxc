@@ -896,10 +896,10 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     rem -= ghs;
 
     // Extract stream sizes once
-    size_t sz_lit = (size_t)(desc[0].sizes & 0xFFFFFFFF);
-    size_t sz_tok = (size_t)(desc[1].sizes & 0xFFFFFFFF);
-    size_t sz_off = (size_t)(desc[2].sizes & 0xFFFFFFFF);
-    size_t sz_ext = (size_t)(desc[3].sizes & 0xFFFFFFFF);
+    size_t sz_lit = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
+    size_t sz_tok = (size_t)(desc[1].sizes & ZXC_SECTION_SIZE_MASK);
+    size_t sz_off = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
+    size_t sz_ext = (size_t)(desc[3].sizes & ZXC_SECTION_SIZE_MASK);
 
     if (UNLIKELY(rem < sz_lit)) return -1;
 
@@ -1174,9 +1174,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     rem -= ghs;
 
     // Extract stream sizes once
-    size_t sz_lit = (size_t)(desc[0].sizes & 0xFFFFFFFF);
-    size_t sz_seq = (size_t)(desc[1].sizes & 0xFFFFFFFF);
-    size_t sz_ext = (size_t)(desc[2].sizes & 0xFFFFFFFF);
+    size_t sz_lit = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
+    size_t sz_seq = (size_t)(desc[1].sizes & ZXC_SECTION_SIZE_MASK);
+    size_t sz_ext = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
 
     if (UNLIKELY(rem < sz_lit + sz_seq + sz_ext)) return -1;
 

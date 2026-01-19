@@ -134,9 +134,10 @@ extern "C" {
     16  // GHI Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
 
 // Section Descriptor Sizes
-#define ZXC_SECTION_DESC_BINARY_SIZE 8  // Section Desc: Comp Size (4) + Raw Size (4)
-#define ZXC_GLO_SECTIONS 4              // Number of sections in GLO blocks
-#define ZXC_GHI_SECTIONS 3              // Number of sections in GHI blocks
+#define ZXC_SECTION_DESC_BINARY_SIZE 8     // Section Desc: Comp Size (4) + Raw Size (4)
+#define ZXC_SECTION_SIZE_MASK 0xFFFFFFFFU  // Mask to extract 32-bit size from descriptor
+#define ZXC_GLO_SECTIONS 4                 // Number of sections in GLO blocks
+#define ZXC_GHI_SECTIONS 3                 // Number of sections in GHI blocks
 
 // Block Flags
 #define ZXC_BLOCK_FLAG_NONE 0U         // No flags

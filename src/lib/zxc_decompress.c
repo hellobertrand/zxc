@@ -523,7 +523,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     const uint8_t* l_end;
     uint8_t* rle_buf = NULL;
 
-    size_t lit_stream_size = (size_t)(desc[0].sizes & 0xFFFFFFFF);
+    size_t lit_stream_size = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
 
     if (gh.enc_lit == 1) {
         size_t required_size = (size_t)(desc[0].sizes >> 32);
@@ -611,9 +611,9 @@ static int zxc_decode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     p_curr += lit_stream_size;
 
     // --- Stream Pointers & Validation ---
-    size_t sz_tokens = (size_t)(desc[1].sizes & 0xFFFFFFFF);
-    size_t sz_offsets = (size_t)(desc[2].sizes & 0xFFFFFFFF);
-    size_t sz_extras = (size_t)(desc[3].sizes & 0xFFFFFFFF);
+    size_t sz_tokens = (size_t)(desc[1].sizes & ZXC_SECTION_SIZE_MASK);
+    size_t sz_offsets = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
+    size_t sz_extras = (size_t)(desc[3].sizes & ZXC_SECTION_SIZE_MASK);
 
     // Validate stream sizes match sequence count (early rejection of malformed data)
     size_t expected_off_size =
