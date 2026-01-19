@@ -1370,7 +1370,6 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     // --- Remaining 1 sequence (Fast Path) ---
     while (n_seq > 0 && d_ptr < d_end_safe) {
-        // Save pointers before reading (in case we need to fall back to Safe Path)
         const uint8_t* seq_save = seq_ptr;
         const uint8_t* extras_save = extras_ptr;
 
