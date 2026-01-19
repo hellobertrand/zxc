@@ -1318,6 +1318,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             if (UNLIKELY(d_ptr + ll1 + ml1 > d_end)) return -1;
         }
         uint32_t of1 = (uint32_t)(s1 & 0xFFFF);
+        if (UNLIKELY(l_ptr + ll1 > l_end || d_ptr + ll1 + ml1 > d_end)) return -1;
         DECODE_SEQ_FAST(ll1, ml1, of1);
 
         uint32_t ll2 = (uint32_t)(s2 >> 24);
@@ -1332,6 +1333,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             if (UNLIKELY(d_ptr + ll2 + ml2 > d_end)) return -1;
         }
         uint32_t of2 = (uint32_t)(s2 & 0xFFFF);
+        if (UNLIKELY(l_ptr + ll2 > l_end || d_ptr + ll2 + ml2 > d_end)) return -1;
         DECODE_SEQ_FAST(ll2, ml2, of2);
 
         uint32_t ll3 = (uint32_t)(s3 >> 24);
@@ -1346,6 +1348,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             if (UNLIKELY(d_ptr + ll3 + ml3 > d_end)) return -1;
         }
         uint32_t of3 = (uint32_t)(s3 & 0xFFFF);
+        if (UNLIKELY(l_ptr + ll3 > l_end || d_ptr + ll3 + ml3 > d_end)) return -1;
         DECODE_SEQ_FAST(ll3, ml3, of3);
 
         uint32_t ll4 = (uint32_t)(s4 >> 24);
@@ -1360,6 +1363,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             if (UNLIKELY(d_ptr + ll4 + ml4 > d_end)) return -1;
         }
         uint32_t of4 = (uint32_t)(s4 & 0xFFFF);
+        if (UNLIKELY(l_ptr + ll4 > l_end || d_ptr + ll4 + ml4 > d_end)) return -1;
         DECODE_SEQ_FAST(ll4, ml4, of4);
 
         n_seq -= 4;
@@ -1370,6 +1374,10 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     // --- Remaining 1 sequence (Fast Path) ---
     while (n_seq > 0 && d_ptr < d_end_safe) {
+        // Save state for fallback
+        const uint8_t* seq_save = seq_ptr;
+        const uint8_t* ext_save = extras_ptr;
+
         uint32_t seq = zxc_le32(seq_ptr);
         seq_ptr += 4;
 
@@ -1379,6 +1387,14 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t m_bits = (uint32_t)((seq >> 16) & 0xFF);
         uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_vbyte(&extras_ptr, extras_end);
+
+        // Strict bounds checks (including wild copy overrun safety)
+        if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end || l_ptr + ll > l_end)) {
+            // Restore state and break to Safe Path
+            seq_ptr = seq_save;
+            extras_ptr = ext_save;
+            break;
+        }
         uint32_t offset = (uint32_t)(seq & 0xFFFF);
 
         {
