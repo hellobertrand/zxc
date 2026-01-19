@@ -1099,6 +1099,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     // Safety margin for 4x unrolled loop: 4 * (ZXC_SEQ_LL_MASK LL +
     // ZXC_SEQ_ML_MASK+ZXC_LZ_MIN_MATCH_LEN ML) + ZXC_PAD_SIZE Pad = 4 x (255 + 255 + 5) + 32 = 2092
     const uint8_t* const d_end_fast = d_end - (ZXC_PAD_SIZE * 66);  // 2112
+    const uint8_t* const l_end_fast = l_end - (ZXC_PAD_SIZE * 5);
 
     uint32_t n_seq = gh.n_sequences;
 
@@ -1299,7 +1300,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     }
 
     // --- FAST Loop: After threshold, check large margin to avoid individual bounds checks ---
-    while (n_seq >= 4 && d_ptr < d_end_fast) {
+    while (n_seq >= 4 && d_ptr < d_end_fast && l_ptr < l_end_fast) {
         uint32_t s1 = zxc_le32(seq_ptr);
         uint32_t s2 = zxc_le32(seq_ptr + 4);
         uint32_t s3 = zxc_le32(seq_ptr + 8);
@@ -1309,13 +1310,15 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ll1 = (uint32_t)(s1 >> 24);
         if (UNLIKELY(ll1 == ZXC_SEQ_LL_MASK)) {
             ll1 += zxc_read_vbyte(&extras_ptr, extras_end);
-            if (UNLIKELY(d_ptr + ll1 + ZXC_PAD_SIZE > d_end)) return -1;
         }
         uint32_t m1b = (uint32_t)((s1 >> 16) & 0xFF);
         uint32_t ml1 = m1b + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m1b == ZXC_SEQ_ML_MASK)) {
             ml1 += zxc_read_vbyte(&extras_ptr, extras_end);
-            if (UNLIKELY(d_ptr + ll1 + ml1 + ZXC_PAD_SIZE > d_end)) return -1;
+        }
+        if (UNLIKELY(d_ptr + ll1 + ml1 + ZXC_PAD_SIZE > d_end) || UNLIKELY(l_ptr + ll1 + ZXC_PAD_SIZE > l_end)) {
+            seq_ptr -= 16;
+            break;
         }
         uint32_t of1 = (uint32_t)(s1 & 0xFFFF);
         DECODE_SEQ_FAST(ll1, ml1, of1);
@@ -1323,13 +1326,16 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ll2 = (uint32_t)(s2 >> 24);
         if (UNLIKELY(ll2 == ZXC_SEQ_LL_MASK)) {
             ll2 += zxc_read_vbyte(&extras_ptr, extras_end);
-            if (UNLIKELY(d_ptr + ll2 + ZXC_PAD_SIZE > d_end)) return -1;
         }
         uint32_t m2b = (uint32_t)((s2 >> 16) & 0xFF);
         uint32_t ml2 = m2b + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m2b == ZXC_SEQ_ML_MASK)) {
             ml2 += zxc_read_vbyte(&extras_ptr, extras_end);
-            if (UNLIKELY(d_ptr + ll2 + ml2 + ZXC_PAD_SIZE > d_end)) return -1;
+        }
+        if (UNLIKELY(d_ptr + ll2 + ml2 + ZXC_PAD_SIZE > d_end) || UNLIKELY(l_ptr + ll2 + ZXC_PAD_SIZE > l_end)) {
+            n_seq -= 1;
+            seq_ptr -= 12;
+            break;
         }
         uint32_t of2 = (uint32_t)(s2 & 0xFFFF);
         DECODE_SEQ_FAST(ll2, ml2, of2);
@@ -1337,13 +1343,16 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ll3 = (uint32_t)(s3 >> 24);
         if (UNLIKELY(ll3 == ZXC_SEQ_LL_MASK)) {
             ll3 += zxc_read_vbyte(&extras_ptr, extras_end);
-            if (UNLIKELY(d_ptr + ll3 + ZXC_PAD_SIZE > d_end)) return -1;
         }
         uint32_t m3b = (uint32_t)((s3 >> 16) & 0xFF);
         uint32_t ml3 = m3b + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m3b == ZXC_SEQ_ML_MASK)) {
             ml3 += zxc_read_vbyte(&extras_ptr, extras_end);
-            if (UNLIKELY(d_ptr + ll3 + ml3 + ZXC_PAD_SIZE > d_end)) return -1;
+        }
+        if (UNLIKELY(d_ptr + ll3 + ml3 + ZXC_PAD_SIZE > d_end) || UNLIKELY(l_ptr + ll3 + ZXC_PAD_SIZE > l_end)) {
+            n_seq -= 2;
+            seq_ptr -= 8;
+            break;
         }
         uint32_t of3 = (uint32_t)(s3 & 0xFFFF);
         DECODE_SEQ_FAST(ll3, ml3, of3);
@@ -1351,13 +1360,16 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ll4 = (uint32_t)(s4 >> 24);
         if (UNLIKELY(ll4 == ZXC_SEQ_LL_MASK)) {
             ll4 += zxc_read_vbyte(&extras_ptr, extras_end);
-            if (UNLIKELY(d_ptr + ll4 + ZXC_PAD_SIZE > d_end)) return -1;
         }
         uint32_t m4b = (uint32_t)((s4 >> 16) & 0xFF);
         uint32_t ml4 = m4b + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m4b == ZXC_SEQ_ML_MASK)) {
             ml4 += zxc_read_vbyte(&extras_ptr, extras_end);
-            if (UNLIKELY(d_ptr + ll4 + ml4 + ZXC_PAD_SIZE > d_end)) return -1;
+        }
+        if (UNLIKELY(d_ptr + ll4 + ml4 + ZXC_PAD_SIZE > d_end) || UNLIKELY(l_ptr + ll4 + ZXC_PAD_SIZE > l_end)) {
+            n_seq -= 3;
+            seq_ptr -= 4;
+            break;
         }
         uint32_t of4 = (uint32_t)(s4 & 0xFFFF);
         DECODE_SEQ_FAST(ll4, ml4, of4);
