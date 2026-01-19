@@ -1370,6 +1370,9 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     // --- Remaining 1 sequence (Fast Path) ---
     while (n_seq > 0 && d_ptr < d_end_safe) {
+        const uint8_t* seq_save = seq_ptr;
+        const uint8_t* extras_save = extras_ptr;
+
         uint32_t seq = zxc_le32(seq_ptr);
         seq_ptr += 4;
 
@@ -1380,6 +1383,13 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_vbyte(&extras_ptr, extras_end);
         uint32_t offset = (uint32_t)(seq & 0xFFFF);
+
+        // Check bounds before wild copies - if too close to end, fall back to Safe Path
+        if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end)) {
+            seq_ptr = seq_save;
+            extras_ptr = extras_save;
+            break;
+        }
 
         {
             const uint8_t* src_lit = l_ptr;
