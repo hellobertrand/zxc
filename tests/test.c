@@ -6,7 +6,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +13,7 @@
 
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_stream.h"
-#include "zxc_internal.h"
+#include "../src/lib/zxc_internal.h"
 
 // --- Helpers ---
 
@@ -496,9 +495,9 @@ int test_bit_reader() {
     zxc_bit_reader_t br;
     zxc_br_init(&br, buffer, 16);
 
-    assert(br.bits == 64);
-    assert(br.ptr == buffer + 8);
-    assert(br.accum == zxc_le64(buffer));
+    if (br.bits != 64) return 0;
+    if (br.ptr != buffer + 8) return 0;
+    if (br.accum != zxc_le64(buffer)) return 0;
     printf("  [PASS] Normal init\n");
 
     // Case 2: Small buffer initialization (should not crash)
@@ -507,8 +506,8 @@ int test_bit_reader() {
     // Should have read 4 bytes safely
     uint64_t expected_accum = 0;
     memcpy(&expected_accum, small_buffer, 4);
-    assert(br.accum == expected_accum);
-    assert(br.ptr == small_buffer + 4);
+    if (br.accum != expected_accum) return 0;
+    if (br.ptr != small_buffer + 4) return 0;
     printf("  [PASS] Small buffer init\n");
 
     // Case 3: zxc_br_ensure (Normal refill)
@@ -518,7 +517,7 @@ int test_bit_reader() {
 
     zxc_br_ensure(&br, 32);
     // Should have refilled
-    assert(br.bits >= 32);
+    if (br.bits < 32) return 0;
     printf("  [PASS] Ensure normal refill\n");
 
     // Case 4: zxc_br_ensure (End of stream)
@@ -542,7 +541,7 @@ int test_bit_reader() {
 int test_bitpack() {
     printf("=== TEST: Unit - Bit Packing (zxc_bitpack_stream_32) ===\n");
 
-    uint32_t src[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
+    const uint32_t src[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
     uint8_t dst[16];
 
     // Pack 4 values with 4 bits each.
@@ -550,16 +549,15 @@ int test_bitpack() {
     // Result should be 2 bytes: 0xFF, 0xFF
     int len = zxc_bitpack_stream_32(src, 4, dst, 16, 4);
 
-    assert(len == 2);
-    assert(dst[0] == 0xFF);
-    assert(dst[1] == 0xFF);
+    if (len != 2) return 0;
+    if (dst[0] != 0xFF || dst[1] != 0xFF) return 0;
     printf("  [PASS] Bitpack overflow masking\n");
 
     // Edge case: bits = 32
-    uint32_t src32[1] = {0x12345678};
+    const uint32_t src32[1] = {0x12345678};
     len = zxc_bitpack_stream_32(src32, 1, dst, 16, 32);
-    assert(len == 4);
-    assert(zxc_le32(dst) == 0x12345678);
+    if (len != 4) return 0;
+    if (zxc_le32(dst) != 0x12345678) return 0;
     printf("  [PASS] Bitpack 32 bits\n");
 
     printf("PASS\n\n");
