@@ -11,12 +11,34 @@
 set -e
 
 # Default binary path
-ZXC_BIN=${1:-"../build/zxc"}
-TEST_FILE="test_file.md"
+ARG_BIN=${1:-"../build/zxc"}
+cp "$ARG_BIN" ./zxc_tool.exe
+ZXC_BIN="./zxc_tool.exe"
+
+echo "Copied binary to $ZXC_BIN for testing."
+
+# 0. Sanity Check
+echo "Running sanity check ($ZXC_BIN -V)..."
+if ! "$ZXC_BIN" -V; then
+    echo -e "${RED}[FAIL]${NC} Binary failed to execute. Check architecture/permissions."
+    exit 1
+fi
+echo "Sanity check passed."
+
+# Test Files
+TEST_FILE="testdata"
 TEST_FILE_XC="${TEST_FILE}.xc"
 TEST_FILE_DEC="${TEST_FILE}.dec"
-PIPE_XC="test_pipe.xc"
-PIPE_DEC="test_pipe.dec"
+PIPE_XC="./test_pipe.xc"
+PIPE_DEC="./test_pipe.dec"
+
+# Variables for checking file existence (Bash sees them relative to CWD)
+TEST_FILE_XC_BASH="./$TEST_FILE_XC"
+TEST_FILE_DEC_BASH="./${TEST_FILE}.dec"
+
+# Arguments passed to ZXC (Clean filenames, relying on CWD)
+TEST_FILE_ARG="${TEST_FILE}"
+TEST_FILE_XC_ARG="${TEST_FILE}.xc" 
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -34,7 +56,7 @@ log_fail() {
 # cleanup on exit
 cleanup() {
     echo "Cleaning up..."
-    rm -f "$TEST_FILE" "$TEST_FILE_XC" "$TEST_FILE_DEC" "$PIPE_XC" "$PIPE_DEC" "out.xc"
+    rm -f "$TEST_FILE" "$TEST_FILE_XC" "$TEST_FILE_DEC_BASH" "$PIPE_XC" "$PIPE_DEC" "out.xc" "$ZXC_BIN"
 }
 trap cleanup EXIT
 
@@ -59,28 +81,67 @@ mv "${TEST_FILE}.tmp" "$TEST_FILE"
 FILE_SIZE=$(wc -c < "$TEST_FILE" | tr -d ' ')
 echo "Test file generated: $TEST_FILE ($FILE_SIZE bytes)"
 
+# Helper: Wait for file to be ready and readable
+wait_for_file() {
+    local file="$1"
+    local retries=10
+    local count=0
+    # On Windows, file locking can cause race conditions immediately after creation.
+    while [ $count -lt $retries ]; do
+        if [ -f "$file" ]; then
+             # Try to read a byte to ensure it's not exclusively locked
+             if head -c 1 "$file" >/dev/null 2>&1; then
+                 return 0
+             fi
+        fi
+        sleep 1
+        count=$((count + 1))
+    done
+    echo "Timeout waiting for file '$file' to be readable."
+    ls -l "$file" 2>/dev/null || echo "File not found in ls."
+    return 1
+}
+
 # 2. Basic Round-Trip
 echo "Testing Basic Round-Trip..."
-"$ZXC_BIN" -z -k "$TEST_FILE"
-if [ ! -f "$TEST_FILE_XC" ]; then
-    log_fail "Compression failed to create output file."
+
+if ! "$ZXC_BIN" -z -k "$TEST_FILE_ARG"; then
+    log_fail "Compression command failed (exit code $?)"
 fi
 
-# Allow filesystem to settle (Windows CI workaround)
-sleep 1
+# Wait for output
+if ! wait_for_file "$TEST_FILE_XC_BASH"; then
+    log_fail "Compression succeeded but output file '$TEST_FILE_XC_BASH' is not accessible."
+fi
 
+# Decompress to stdout
+# Placing flags BEFORE positional arguments (best practice)
+echo "Attempting decompression of: $TEST_FILE_XC_ARG"
 
-"$ZXC_BIN" -d "$TEST_FILE_XC" -c > "$TEST_FILE_DEC"
+if ! "$ZXC_BIN" -d -c "$TEST_FILE_XC_ARG" > "$TEST_FILE_DEC_BASH"; then
+     echo "Decompress to stdout failed. Retrying once..."
+     sleep 1
+     if ! "$ZXC_BIN" -d -c "$TEST_FILE_XC_ARG" > "$TEST_FILE_DEC_BASH"; then
+        log_fail "Decompression to stdout failed."
+     fi
+fi
 
-# Decompress to file (delete input first to avoid overwrite)
+# Decompress to file
 rm -f "$TEST_FILE"
-"$ZXC_BIN" -d "$TEST_FILE_XC"
+sleep 1
+if ! "$ZXC_BIN" -d -k "$TEST_FILE_XC_ARG"; then
+     echo "Decompress to file failed. Retrying once..."
+     sleep 1
+     if ! "$ZXC_BIN" -d -k "$TEST_FILE_XC_ARG"; then
+        log_fail "Decompression to file failed."
+     fi
+fi
 
-if [ ! -f "$TEST_FILE" ]; then
+if ! wait_for_file "$TEST_FILE"; then
    log_fail "Decompression failed to recreate original file."
 fi
 
-mv "$TEST_FILE" "$TEST_FILE_DEC"
+mv "$TEST_FILE" "$TEST_FILE_DEC_BASH"
 
 # Re-generate source for valid comparison
 cat > "$TEST_FILE" <<EOF
@@ -92,7 +153,7 @@ for i in {1..1000}; do
 done
 mv "${TEST_FILE}.tmp" "$TEST_FILE"
 
-if cmp -s "$TEST_FILE" "$TEST_FILE_DEC"; then
+if cmp -s "$TEST_FILE" "$TEST_FILE_DEC_BASH"; then
     log_pass "Basic Round-Trip"
 else
     log_fail "Basic Round-Trip content mismatch"
@@ -120,16 +181,15 @@ fi
 # 4. Flags
 echo "Testing Flags..."
 # Level
-"$ZXC_BIN" -1 -k -f "$TEST_FILE" # Should work
-if [ ! -f "$TEST_FILE_XC" ]; then log_fail "Level 1 flag failed"; fi
+"$ZXC_BIN" -1 -k -f "$TEST_FILE_ARG"
+if [ ! -f "$TEST_FILE_XC_BASH" ]; then log_fail "Level 1 flag failed"; fi
 log_pass "Flag -1"
 
 # Force Overwrite (-f)
 touch "out.xc"
-# Attempt to overwrite existing file without -f (should fail)
-touch "${TEST_FILE}.xc"
+touch "${TEST_FILE_XC_BASH}"
 set +e
-"$ZXC_BIN" -z -k "$TEST_FILE" > /dev/null 2>&1
+"$ZXC_BIN" -z -k "$TEST_FILE_ARG" > /dev/null 2>&1
 RET=$?
 set -e
 if [ $RET -eq 0 ]; then
@@ -138,7 +198,7 @@ else
      log_pass "Overwrite protection verified"
 fi
 
-"$ZXC_BIN" -z -k -f "$TEST_FILE"
+"$ZXC_BIN" -z -k -f "$TEST_FILE_ARG"
 if [ $? -eq 0 ]; then
    log_pass "Force overwrite (-f)"
 else
@@ -147,7 +207,7 @@ fi
 
 # 5. Benchmark
 echo "Testing Benchmark..."
-"$ZXC_BIN" -b "$TEST_FILE" > /dev/null
+"$ZXC_BIN" -b "$TEST_FILE_ARG" > /dev/null
 if [ $? -eq 0 ]; then
     log_pass "Benchmark mode"
 else
@@ -177,18 +237,17 @@ fi
 
 # 8. Checksum
 echo "Testing Checksum..."
-"$ZXC_BIN" -C -k -f "$TEST_FILE"
-if [ ! -f "$TEST_FILE_XC" ]; then log_fail "Checksum compression failed"; fi
-# Decompress it
+"$ZXC_BIN" -C -k -f "$TEST_FILE_ARG"
+if [ ! -f "$TEST_FILE_XC_BASH" ]; then log_fail "Checksum compression failed"; fi
 rm -f "$TEST_FILE"
-"$ZXC_BIN" -d "$TEST_FILE_XC"
+"$ZXC_BIN" -d "$TEST_FILE_XC_ARG"
 if [ ! -f "$TEST_FILE" ]; then log_fail "Checksum decompression failed"; fi
 log_pass "Checksum enabled (-C)"
 
-"$ZXC_BIN" -N -k -f "$TEST_FILE"
-if [ ! -f "$TEST_FILE_XC" ]; then log_fail "No-Checksum compression failed"; fi
+"$ZXC_BIN" -N -k -f "$TEST_FILE_ARG"
+if [ ! -f "$TEST_FILE_XC_BASH" ]; then log_fail "No-Checksum compression failed"; fi
 rm -f "$TEST_FILE"
-"$ZXC_BIN" -d "$TEST_FILE_XC"
+"$ZXC_BIN" -d "$TEST_FILE_XC_ARG"
 if [ ! -f "$TEST_FILE" ]; then log_fail "No-Checksum decompression failed"; fi
 log_pass "Checksum disabled (-N)"
 

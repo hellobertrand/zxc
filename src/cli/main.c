@@ -15,6 +15,7 @@
  * compression, decompression, or benchmarking modes.
  */
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -126,13 +127,23 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
         optind++;
         const char* os = strchr(optstring, c);
         if (!os) return '?';
+
         if (os[1] == ':') {
-            if (curr[2] != '\0')
-                optarg = curr + 2;
-            else if (optind < argc)
-                optarg = argv[optind++];
-            else
-                return '?';
+            if (os[2] == ':') {
+                // Optional argument (::)
+                if (curr[2] != '\0')
+                    optarg = curr + 2;
+                else
+                    optarg = NULL;
+            } else {
+                // Required argument (:)
+                if (curr[2] != '\0')
+                    optarg = curr + 2;
+                else if (optind < argc)
+                    optarg = argv[optind++];
+                else
+                    return '?';
+            }
         }
         return c;
     }
@@ -458,7 +469,7 @@ int main(int argc, char** argv) {
         in_path = argv[optind];
         f_in = fopen(in_path, "rb");
         if (!f_in) {
-            zxc_log("Error open input %s\n", in_path);
+            zxc_log("Error open input %s: %s\n", in_path, strerror(errno));
             return 1;
         }
         use_stdin = 0;
@@ -504,7 +515,7 @@ int main(int argc, char** argv) {
         }
         f_out = fopen(out_path, "wb");
         if (!f_out) {
-            zxc_log("Error open output %s\n", out_path);
+            zxc_log("Error open output %s: %s\n", out_path, strerror(errno));
             fclose(f_in);
             return 1;
         }
