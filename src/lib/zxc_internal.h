@@ -464,7 +464,7 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, uint64_t v) { ZXC_MEMCPY(p
  */
 static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
-    // SSE2 (always available with AVX): Single 128-bit unaligned load/store
+    // AVX2/AVX512: Single 128-bit unaligned load/store
     _mm_storeu_si128((__m128i*)dst, _mm_loadu_si128((const __m128i*)src));
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));

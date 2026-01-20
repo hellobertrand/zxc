@@ -161,8 +161,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
  * Shared between ARM NEON and x86 SSSE3. Each row defines how to replicate
  * source bytes to fill 16 bytes when offset < 16.
  */
-#if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(__SSSE3__) || \
-    defined(ZXC_USE_AVX2)
+#if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(ZXC_USE_AVX2) || \
+    defined(ZXC_USE_AVX512)
 /**
  * @brief Precomputed masks for handling overlapping data during decompression.
  *
@@ -227,7 +227,7 @@ static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
     vst1_u8(dst, vtbl2_u8(src_tbl, mask_lo));
     vst1_u8(dst + 8, vtbl2_u8(src_tbl, mask_hi));
 
-#elif defined(__SSSE3__) || defined(ZXC_USE_AVX2)
+#elif defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
     __m128i mask = _mm_load_si128((const __m128i*)zxc_overlap_masks[off]);
     __m128i src_data = _mm_loadu_si128((const __m128i*)(dst - off));
     _mm_storeu_si128((__m128i*)dst, _mm_shuffle_epi8(src_data, mask));
