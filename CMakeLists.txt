@@ -75,16 +75,27 @@ zxc_add_variant(_default "")
 # --- 2. Architecture Specific Variants ---
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
     message(STATUS "Building x86_64 AVX2 and AVX512 variants...")
-    # AVX2
-    zxc_add_variant(_avx2 "-mavx2;-mfma;-mbmi2")
-    # AVX512
-    zxc_add_variant(_avx512 "-mavx512f;-mavx512bw;-mbmi2")
+    if(MSVC)
+        # AVX2 for MSVC (Enables AVX2/BMI2 sets)
+        zxc_add_variant(_avx2 "/arch:AVX2;/D__BMI2__")
+        # AVX512 for MSVC (VS2019 16.10+ supports /arch:AVX512)
+        zxc_add_variant(_avx512 "/arch:AVX512;/D__BMI2__")
+    else()
+        # AVX2 for GCC/Clang
+        zxc_add_variant(_avx2 "-mavx2;-mfma;-mbmi2")
+        # AVX512 for GCC/Clang
+        zxc_add_variant(_avx512 "-mavx512f;-mavx512bw;-mbmi2")
+    endif()
 
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
     message(STATUS "Building AArch64 NEON variant...")
-    # NEON is usually default on AArch64, but we add a specific variant for structure
-    # or if we want to force specific flags.
-    zxc_add_variant(_neon "-march=armv8-a+simd")
+    if(MSVC)
+        # MSVC for ARM64 implies NEON support by default.
+        zxc_add_variant(_neon "")
+    else()
+        # NEON is usually default on AArch64, but we add a specific variant for structure
+        zxc_add_variant(_neon "-march=armv8-a+simd")
+    endif()
 
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
     message(STATUS "Building ARM NEON variant...")

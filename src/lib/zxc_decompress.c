@@ -53,42 +53,6 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* br, uint
 }
 
 /**
- * @brief Ensures that the bit reader buffer contains at least the specified
- * number of bits.
- *
- * This function checks if the internal buffer of the bit reader has enough bits
- * available to satisfy a subsequent read operation of `needed` bits. If not, it
- * refills the buffer from the source.
- *
- * @param[in,out] br Pointer to the bit reader context.
- * @param[in] needed The number of bits required to be available in the buffer.
- */
-static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* br, int needed) {
-    if (UNLIKELY(br->bits < needed)) {
-        int safe_bits = (br->bits < 0) ? 0 : br->bits;
-        br->bits = safe_bits;
-
-// Mask out garbage bits
-#if defined(__BMI2__) && defined(__x86_64__)
-        // BMI2 Optimization: _bzhi_u64 isolates the valid bits we want to keep.
-        br->accum = _bzhi_u64(br->accum, safe_bits);
-#else
-        br->accum &= ((1ULL << safe_bits) - 1);
-#endif
-
-        const uint8_t* p_loc = br->ptr;
-
-        uint64_t raw = zxc_le64(p_loc);
-        int consumed = (64 - safe_bits) >> 3;
-        br->accum |= (raw << safe_bits);
-        p_loc += consumed;
-        br->bits = safe_bits + consumed * 8;
-
-        br->ptr = p_loc;
-    }
-}
-
-/**
  * @brief Reads a variable-length byte (VByte) encoded integer from a stream.
  *
  * This function decodes a 32-bit unsigned integer encoded in VByte format from

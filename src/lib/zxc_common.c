@@ -277,14 +277,6 @@ int zxc_read_ghi_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_
  * ============================================================================
  */
 
-void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* src, size_t size) {
-    br->ptr = src;
-    br->end = src + size;
-    br->accum = zxc_le64(br->ptr);
-    br->ptr += 8;
-    br->bits = 64;
-}
-
 int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* RESTRICT dst,
                           size_t dst_cap, uint8_t bits) {
     size_t out_bytes = ((count * bits) + 7) / 8;

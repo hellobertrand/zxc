@@ -675,7 +675,67 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_checksum(const void* RESTRICT input, size_
  * @param[in] src Pointer to the source buffer containing the data to read.
  * @param[in] size The size of the source buffer in bytes.
  */
-void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* src, size_t size);
+static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* src, size_t size) {
+    br->ptr = src;
+    br->end = src + size;
+    // Safety check: ensure we have at least 8 bytes to fill the accumulator
+    if (UNLIKELY(size < sizeof(uint64_t))) {
+        br->accum = 0;
+        ZXC_MEMCPY(&br->accum, src, size);  // Safe partial copy
+        br->ptr += size;                    // Advance only valid bytes
+    } else {
+        br->accum = zxc_le64(br->ptr);
+        br->ptr += sizeof(uint64_t);
+    }
+    br->bits = 64;
+}
+
+/**
+ * @brief Ensures that the bit reader buffer contains at least the specified
+ * number of bits.
+ *
+ * This function checks if the internal buffer of the bit reader has enough bits
+ * available to satisfy a subsequent read operation of `needed` bits. If not, it
+ * refills the buffer from the source.
+ *
+ * @param[in,out] br Pointer to the bit reader context.
+ * @param[in] needed The number of bits required to be available in the buffer.
+ */
+static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* br, int needed) {
+    if (UNLIKELY(br->bits < needed)) {
+        int safe_bits = (br->bits < 0) ? 0 : br->bits;
+        br->bits = safe_bits;
+
+        // Mask out garbage bits (retain only valid existing bits)
+#if defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
+        br->accum = _bzhi_u64(br->accum, safe_bits);
+#else
+        br->accum &= ((1ULL << safe_bits) - 1);
+#endif
+
+        // Calculate how many bytes we can read
+        // We want to fill up to the accumulation capability (64 bits for uint64_t)
+        // Bytes needed = (capacity_bits - safe_bits) / 8
+        int bytes_needed = ((int)(sizeof(uint64_t) * 8) - safe_bits) >> 3;
+
+        // Bounds check: don't read past end
+        size_t bytes_left = (size_t)(br->end - br->ptr);
+        if (UNLIKELY(bytes_left < (size_t)bytes_needed)) {
+            // Partial read (slow path / end of stream)
+            uint64_t raw = 0;
+            ZXC_MEMCPY(&raw, br->ptr, bytes_left);
+            br->accum |= (raw << safe_bits);
+            br->ptr += bytes_left;
+            br->bits = safe_bits + (int)bytes_left * 8;
+        } else {
+            // Fast path: standard read
+            uint64_t raw = zxc_le64(br->ptr);
+            br->accum |= (raw << safe_bits);
+            br->ptr += bytes_needed;
+            br->bits = safe_bits + bytes_needed * 8;
+        }
+    }
+}
 
 /**
  * @brief Bit-packs a stream of 32-bit integers into a destination buffer.
