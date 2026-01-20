@@ -76,9 +76,9 @@ zxc_add_variant(_default "")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
     message(STATUS "Building x86_64 AVX2 and AVX512 variants...")
     # AVX2
-    zxc_add_variant(_avx2 "-mavx2;-mfma")
+    zxc_add_variant(_avx2 "-mavx2;-mfma;-mbmi2")
     # AVX512
-    zxc_add_variant(_avx512 "-mavx512f;-mavx512bw")
+    zxc_add_variant(_avx512 "-mavx512f;-mavx512bw;-mbmi2")
 
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
     message(STATUS "Building AArch64 NEON variant...")
