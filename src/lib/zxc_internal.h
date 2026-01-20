@@ -687,7 +687,7 @@ static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* s
         br->accum = zxc_le64(br->ptr);
         br->ptr += sizeof(uint64_t);
     }
-    br->bits = 64;
+    br->bits = sizeof(uint64_t) * 8;
 }
 
 /**
