@@ -1347,10 +1347,8 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
 
     if (try_num) {
         res = zxc_encode_block_num(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
-        if (res != 0 || w > (src_sz - (src_sz >> 2))) {  // w > 75% of src_sz
-            // NUM didn't compress well, try GLO/GHI instead
-            try_num = 0;
-        }
+        if (res != 0 || w > (src_sz - (src_sz >> 2)))  // w > 75% of src_sz
+            try_num = 0;  // NUM didn't compress well, try GLO/GHI instead
     }
 
     if (!try_num) {
@@ -1363,9 +1361,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
 
     if (UNLIKELY(res != 0 || w >= src_sz)) {
         res = zxc_encode_block_raw(chunk, src_sz, dst, dst_cap, &w, chk, crc);
-        if (UNLIKELY(res != 0)) {
-            return res;
-        }
+        if (UNLIKELY(res != 0)) return res;
     }
 
     return (int)w;
