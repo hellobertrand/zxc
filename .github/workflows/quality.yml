@@ -23,24 +23,41 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Install Cppcheck
+      - name: Install Cppcheck and Cross-Compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y cppcheck
+          sudo apt-get install -y cppcheck gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
-      - name: Run Cppcheck
+      - name: Configure CMake (x86 Compile Database)
+        run: mkdir build_x86 && cd build_x86 && cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
+
+      - name: Configure CMake (ARM64 Compile Database)
         run: |
-          cppcheck --enable=all \
-            --library=gnu \
+          mkdir build_arm && cd build_arm
+          cmake -DCMAKE_SYSTEM_NAME=Linux \
+                -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+                -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+                -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
+
+      - name: Run Cppcheck (x86 Variants)
+        run: |
+          cppcheck --project=build_x86/compile_commands.json \
+            --enable=all \
             --suppress=missingIncludeSystem --suppress=*:include/rapidhash.h \
             --check-level=exhaustive \
             --inline-suppr \
             --error-exitcode=1 \
-            --language=c \
-            --std=c11 \
-            --force \
-            -I include \
-            src/
+            -j4
+
+      - name: Run Cppcheck (ARM64 Variants)
+        run: |
+          cppcheck --project=build_arm/compile_commands.json \
+            --enable=all \
+            --suppress=missingIncludeSystem --suppress=*:include/rapidhash.h \
+            --check-level=exhaustive \
+            --inline-suppr \
+            --error-exitcode=1 \
+            -j4
 
   quality-checks:
     name: Code Quality - Advanced Checks
