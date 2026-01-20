@@ -123,6 +123,11 @@ extern "C" {
 #define ZXC_CHUNK_SIZE (64 * ZXC_BLOCK_UNIT)  // TODO: to remove (compatibility with lzbench)
 #define ZXC_IO_BUFFER_SIZE (1024 * 1024)      // Size of stdio buffers
 #define ZXC_PAD_SIZE 32                       // Padding size for buffer overruns
+#define ZXC_BITS_PER_BYTE 8                   // Number of bits per byte
+#define ZXC_CACHE_LINE_SIZE 64                // Cache line size
+#define ZXC_ALIGNMENT_MASK (ZXC_CACHE_LINE_SIZE - 1)  // Alignment mask
+#define ZXC_VBYTE_MAX_LEN 5                           // Maximum length of variable byte encoding
+#define ZXC_VBYTE_ALLOC_LEN 3  // Max length for allocation (sufficient for < 2MB blocks)
 
 // Binary Header Sizes
 #define ZXC_FILE_HEADER_SIZE 8  // Magic (4 bytes) + Version (1 byte) + Reserved (3 bytes)

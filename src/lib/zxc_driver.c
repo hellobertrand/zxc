@@ -155,7 +155,7 @@ typedef struct {
     size_t out_cap, result_sz;
     int job_id;
     job_status_t status;
-    char pad[64];  // Prevent False Sharing
+    char pad[ZXC_CACHE_LINE_SIZE];  // Prevent False Sharing
 } zxc_stream_job_t;
 
 /**
@@ -476,14 +476,14 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
 
     size_t max_out = zxc_compress_bound(runtime_chunk_sz);
     size_t raw_alloc_in = ((mode) ? runtime_chunk_sz : max_out) + ZXC_PAD_SIZE;
-    size_t alloc_in = (raw_alloc_in + 63) & ~63;
+    size_t alloc_in = (raw_alloc_in + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
 
     size_t raw_alloc_out = ((mode) ? max_out : runtime_chunk_sz) + ZXC_PAD_SIZE;
-    size_t alloc_out = (raw_alloc_out + 63) & ~63;
+    size_t alloc_out = (raw_alloc_out + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
 
     size_t alloc_size =
         ctx.ring_size * (sizeof(zxc_stream_job_t) + sizeof(int) + alloc_in + alloc_out);
-    uint8_t* mem_block = zxc_aligned_malloc(alloc_size, 64);
+    uint8_t* mem_block = zxc_aligned_malloc(alloc_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem_block)) return -1;
     ZXC_MEMSET(mem_block, 0, alloc_size);
 

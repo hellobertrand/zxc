@@ -535,7 +535,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT s
         in_ptr += frames * 4;
 
         uint8_t bits = zxc_highbit32(max_d);
-        size_t packed = ((frames * bits) + 7) / 8;
+        size_t packed = ((frames * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
         if (UNLIKELY(rem < 16 + packed)) return -1;
 
         zxc_store_le16(p_curr, (uint16_t)frames);
@@ -648,7 +648,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         size_t step = lzp.step_base + (dist >> lzp.step_shift);
         if (UNLIKELY(ip + step >= mflimit)) step = 1;
 
-        ZXC_PREFETCH_READ(ip + step * 4 + 64);
+        ZXC_PREFETCH_READ(ip + step * 4 + ZXC_CACHE_LINE_SIZE);
 
         zxc_match_t m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table,
                                                  chain_table, epoch_mark, level, lzp);

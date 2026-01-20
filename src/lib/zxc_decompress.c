@@ -349,7 +349,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, size_t src_size, ui
     uint64_t vals_remaining = nh.n_values;
     uint32_t running_val = 0;
 
-    ZXC_ALIGN(64)
+    ZXC_ALIGN(ZXC_CACHE_LINE_SIZE)
     uint32_t deltas[ZXC_DEC_BATCH];
 
     while (vals_remaining > 0) {
@@ -359,7 +359,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, size_t src_size, ui
         uint32_t psize = zxc_le32(p + 12);
         p += 16;
         if (UNLIKELY(p + psize > p_end || d_ptr + nvals * 4 > d_end ||
-                     bits > (sizeof(uint32_t) * 8)))
+                     bits > (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)))
             return -1;
 
         zxc_bit_reader_t br;

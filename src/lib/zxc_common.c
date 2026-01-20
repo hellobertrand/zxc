@@ -45,27 +45,29 @@ int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int c
     size_t sz_sequences = max_seq * sizeof(uint32_t);
     size_t sz_tokens = max_seq * sizeof(uint8_t);
     size_t sz_offsets = max_seq * sizeof(uint16_t);
-    size_t sz_extras = max_seq * 2 * 5;  // Max 5 bytes per LL/ML VByte
+    size_t sz_extras =
+        max_seq * 2 *
+        ZXC_VBYTE_ALLOC_LEN;  // Max 3 bytes per LL/ML VByte (sufficient for 256KB block)
     size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
     // Calculate sizes with alignment padding (64 bytes for cache line alignment)
     size_t total_size = 0;
     size_t off_hash = total_size;
-    total_size += (sz_hash + 63) & ~63;
+    total_size += (sz_hash + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
     size_t off_chain = total_size;
-    total_size += (sz_chain + 63) & ~63;
+    total_size += (sz_chain + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
     size_t off_sequences = total_size;
-    total_size += (sz_sequences + 63) & ~63;
+    total_size += (sz_sequences + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
     size_t off_tokens = total_size;
-    total_size += (sz_tokens + 63) & ~63;
+    total_size += (sz_tokens + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
     size_t off_offsets = total_size;
-    total_size += (sz_offsets + 63) & ~63;
+    total_size += (sz_offsets + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
     size_t off_extras = total_size;
-    total_size += (sz_extras + 63) & ~63;
+    total_size += (sz_extras + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
     size_t off_lit = total_size;
-    total_size += (sz_lit + 63) & ~63;
+    total_size += (sz_lit + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
 
-    uint8_t* mem = (uint8_t*)zxc_aligned_malloc(total_size, 64);
+    uint8_t* mem = (uint8_t*)zxc_aligned_malloc(total_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem)) return -1;
 
     ctx->memory_block = mem;
@@ -279,7 +281,7 @@ int zxc_read_ghi_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_
 
 int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* RESTRICT dst,
                           size_t dst_cap, uint8_t bits) {
-    size_t out_bytes = ((count * bits) + 7) / 8;
+    size_t out_bytes = ((count * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
 
     if (UNLIKELY(dst_cap < out_bytes)) return -1;
 
@@ -291,18 +293,23 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* R
     // but here we use uint64_t. (1ULL << 32) is fine on 64-bit.
     // However, if bits=64 (unlikely for a 32-bit packer), it would be an issue.
     // For 0 < bits <= 32:
-    uint64_t val_mask = (bits == sizeof(uint32_t) * 8) ? 0xFFFFFFFFULL : ((1ULL << bits) - 1);
+    uint64_t val_mask =
+        (bits == sizeof(uint32_t) * ZXC_BITS_PER_BYTE) ? UINT32_MAX : ((1ULL << bits) - 1);
 
     for (size_t i = 0; i < count; i++) {
         // Mask the input value to ensure we don't write garbage
-        uint64_t v = ((uint64_t)src[i] & val_mask) << (bit_pos % 8);
+        uint64_t v = ((uint64_t)src[i] & val_mask) << (bit_pos % ZXC_BITS_PER_BYTE);
 
-        size_t byte_idx = bit_pos / 8;
+        size_t byte_idx = bit_pos / ZXC_BITS_PER_BYTE;
         dst[byte_idx] |= (uint8_t)v;
-        if (bits + (bit_pos % 8) > 8) dst[byte_idx + 1] |= (uint8_t)(v >> 8);
-        if (bits + (bit_pos % 8) > 16) dst[byte_idx + 2] |= (uint8_t)(v >> 16);
-        if (bits + (bit_pos % 8) > 24) dst[byte_idx + 3] |= (uint8_t)(v >> 24);
-        if (bits + (bit_pos % 8) > sizeof(uint32_t) * 8) dst[byte_idx + 4] |= (uint8_t)(v >> 32);
+        if (bits + (bit_pos % ZXC_BITS_PER_BYTE) > 1 * ZXC_BITS_PER_BYTE)
+            dst[byte_idx + 1] |= (uint8_t)(v >> (1 * ZXC_BITS_PER_BYTE));
+        if (bits + (bit_pos % ZXC_BITS_PER_BYTE) > 2 * ZXC_BITS_PER_BYTE)
+            dst[byte_idx + 2] |= (uint8_t)(v >> (2 * ZXC_BITS_PER_BYTE));
+        if (bits + (bit_pos % ZXC_BITS_PER_BYTE) > 3 * ZXC_BITS_PER_BYTE)
+            dst[byte_idx + 3] |= (uint8_t)(v >> (3 * ZXC_BITS_PER_BYTE));
+        if (bits + (bit_pos % ZXC_BITS_PER_BYTE) > 4 * ZXC_BITS_PER_BYTE)
+            dst[byte_idx + 4] |= (uint8_t)(v >> (4 * ZXC_BITS_PER_BYTE));
         bit_pos += bits;
     }
     return (int)out_bytes;
