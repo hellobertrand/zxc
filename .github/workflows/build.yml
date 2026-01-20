@@ -68,6 +68,26 @@ jobs:
         working-directory: build
         run: ctest -C Release --output-on-failure
 
+      - name: Test CLI
+        if: "!matrix.use_sde"
+        shell: bash
+        run: |
+          BUILD_DIR="build"
+          # Find binary (handle both Ninja and Visual Studio generators)
+          if [ -f "$BUILD_DIR/Release/${{ matrix.artifact_name }}" ]; then
+            ZXC_BIN="$BUILD_DIR/Release/${{ matrix.artifact_name }}"
+          elif [ -f "$BUILD_DIR/${{ matrix.artifact_name }}" ]; then
+            ZXC_BIN="$BUILD_DIR/${{ matrix.artifact_name }}"
+          else
+            echo "Binary not found for CLI test!"
+            find "$BUILD_DIR" -name "${{ matrix.artifact_name }}"
+            exit 1
+          fi
+          
+          echo "Testing with binary: $ZXC_BIN"
+          chmod +x tests/test_cli.sh
+          ./tests/test_cli.sh "$ZXC_BIN"
+
       - name: Test (Intel SDE for AVX512 - Linux)
         if: matrix.use_sde && runner.os == 'Linux'
         working-directory: build
