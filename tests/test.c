@@ -112,6 +112,9 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
 
     if (zxc_stream_compress(f_in, f_comp, 1, level, checksum) < 0) {
         printf("Compression Failed!\n");
+        fclose(f_in);
+        fclose(f_comp);
+        fclose(f_decomp);
         return 0;
     }
 
@@ -122,12 +125,18 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
 
     if (zxc_stream_decompress(f_comp, f_decomp, 1, checksum) < 0) {
         printf("Decompression Failed!\n");
+        fclose(f_in);
+        fclose(f_comp);
+        fclose(f_decomp);
         return 0;
     }
 
     long decomp_size = ftell(f_decomp);
     if (decomp_size != (long)size) {
         printf("Size Mismatch! Expected %zu, got %ld\n", size, decomp_size);
+        fclose(f_in);
+        fclose(f_comp);
+        fclose(f_decomp);
         return 0;
     }
 
@@ -137,12 +146,18 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
     if (fread(out_buf, 1, size, f_decomp) != size) {
         printf("Read validation failed (incomplete read)!\n");
         free(out_buf);
+        fclose(f_in);
+        fclose(f_comp);
+        fclose(f_decomp);
         return 0;
     }
 
     if (size > 0 && memcmp(input, out_buf, size) != 0) {
         printf("Data Mismatch (Content Corruption)!\n");
         free(out_buf);
+        fclose(f_in);
+        fclose(f_comp);
+        fclose(f_decomp);
         return 0;
     }
 
@@ -192,7 +207,10 @@ int test_invalid_arguments() {
     if (!f) return 0;
 
     FILE* f_valid = tmpfile();
-    if (!f_valid) return 0;
+    if (!f_valid) {
+        fclose(f);
+        return 0;
+    }
     // Prepare a valid compressed stream for decompression tests
     zxc_stream_compress(f, f_valid, 1, 1, 0);
     rewind(f_valid);

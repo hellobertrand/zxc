@@ -47,16 +47,69 @@ if(ZXC_ENABLE_LTO)
 endif()
 
 # =============================================================================
-# Core Library
+# Core Library & Runtime Dispatch
 # =============================================================================
+
+# Function Multi-Versioning Helper
+# Compiles src/lib/zxc_compress.c and src/lib/zxc_decompress.c with specific flags and suffix.
+macro(zxc_add_variant suffix flags)
+    add_library(zxc_compress${suffix} OBJECT src/lib/zxc_compress.c)
+    target_compile_options(zxc_compress${suffix} PRIVATE ${flags})
+    target_compile_definitions(zxc_compress${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix})
+    # Inherit include directories
+    target_include_directories(zxc_compress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+
+    add_library(zxc_decompress${suffix} OBJECT src/lib/zxc_decompress.c)
+    target_compile_options(zxc_decompress${suffix} PRIVATE ${flags})
+    target_compile_definitions(zxc_decompress${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix})
+    target_include_directories(zxc_decompress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    
+    list(APPEND ZXC_VARIANT_OBJECTS $<TARGET_OBJECTS:zxc_compress${suffix}> $<TARGET_OBJECTS:zxc_decompress${suffix}>)
+endmacro()
+
+set(ZXC_VARIANT_OBJECTS "")
+
+# --- 1. Default Variant (Scalar/Baseline) ---
+zxc_add_variant(_default "")
+
+# --- 2. Architecture Specific Variants ---
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
+    message(STATUS "Building x86_64 AVX2 and AVX512 variants...")
+    if(MSVC)
+        # AVX2 for MSVC (Enables AVX2/BMI2 sets)
+        zxc_add_variant(_avx2 "/arch:AVX2;/D__BMI2__")
+        # AVX512 for MSVC (VS2019 16.10+ supports /arch:AVX512)
+        zxc_add_variant(_avx512 "/arch:AVX512;/D__BMI2__")
+    else()
+        # AVX2 for GCC/Clang
+        zxc_add_variant(_avx2 "-mavx2;-mfma;-mbmi2")
+        # AVX512 for GCC/Clang
+        zxc_add_variant(_avx512 "-mavx512f;-mavx512bw;-mbmi2")
+    endif()
+
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+    message(STATUS "Building AArch64 NEON variant...")
+    if(MSVC)
+        # MSVC for ARM64 implies NEON support by default.
+        zxc_add_variant(_neon "")
+    else()
+        # NEON is usually default on AArch64, but we add a specific variant for structure
+        zxc_add_variant(_neon "-march=armv8-a+simd")
+    endif()
+
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
+    message(STATUS "Building ARM NEON variant...")
+    zxc_add_variant(_neon "-mfpu=neon")
+endif()
+
 add_library(zxc_lib STATIC
     src/lib/zxc_common.c
-    src/lib/zxc_compress.c
-    src/lib/zxc_decompress.c
     src/lib/zxc_driver.c
+    src/lib/zxc_dispatch.c
+    ${ZXC_VARIANT_OBJECTS}
 )
 
-# Target-based include directories
+# Target-based include directories for the main lib
 target_include_directories(zxc_lib
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

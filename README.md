@@ -140,18 +140,17 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 2.  Download the binary matching your architecture:
     
     **macOS:**
-    *   `zxc-macos-arm64` for Apple Silicon (M1/M2/M3/M4).
+    *   `zxc-macos-arm64` (Universal: NEON32/64 optimizations included).
     
     **Linux:**
-    *   `zxc-linux-aarch64` for ARM64 servers (AWS Graviton, Google Axion).
-    *   `zxc-linux-x86_64` for standard x86_64 servers (baseline).
-    *   `zxc-linux-x86_64-avx2` for modern x86_64 CPUs with AVX2 support.
-    *   `zxc-linux-x86_64-avx512` for high-end x86_64 CPUs with AVX512 support.
+    *   `zxc-linux-aarch64` (Universal: NEON32/64 optimizations included).
+    *   `zxc-linux-x86_64` (Universal: Includes runtime dispatch for AVX2/AVX512).
     
     **Windows:**
-    *   `zxc-windows-x64.exe` for standard x86_64 systems (baseline).
-    *   `zxc-windows-x64-avx2.exe` for modern CPUs with AVX2 support.
-    *   `zxc-windows-x64-avx512.exe` for high-end CPUs with AVX512 support.
+    *   `zxc-windows-x64.exe` (Universal: Includes runtime dispatch for AVX2/AVX512).
+    
+    **Windows:**
+
 
 3.  Make the binary executable (Unix-like systems):
     ```bash

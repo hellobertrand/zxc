@@ -6,9 +6,18 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include "../../include/zxc_buffer.h"
 #include "../../include/zxc_sans_io.h"
 #include "zxc_internal.h"
+
+/*
+ * Function Multi-Versioning Support
+ * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2), rename the public entry point.
+ */
+#ifdef ZXC_FUNCTION_SUFFIX
+#define ZXC_CAT_IMPL(x, y) x##y
+#define ZXC_CAT(x, y) ZXC_CAT_IMPL(x, y)
+#define zxc_decompress_chunk_wrapper ZXC_CAT(zxc_decompress_chunk_wrapper, ZXC_FUNCTION_SUFFIX)
+#endif
 
 #define ZXC_DEC_BATCH 32  // Number of sequences to decode in a batch
 
@@ -41,42 +50,6 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* br, uint
     br->accum >>= n;
     br->bits -= n;
     return val;
-}
-
-/**
- * @brief Ensures that the bit reader buffer contains at least the specified
- * number of bits.
- *
- * This function checks if the internal buffer of the bit reader has enough bits
- * available to satisfy a subsequent read operation of `needed` bits. If not, it
- * refills the buffer from the source.
- *
- * @param[in,out] br Pointer to the bit reader context.
- * @param[in] needed The number of bits required to be available in the buffer.
- */
-static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* br, int needed) {
-    if (UNLIKELY(br->bits < needed)) {
-        int safe_bits = (br->bits < 0) ? 0 : br->bits;
-        br->bits = safe_bits;
-
-// Mask out garbage bits
-#if defined(__BMI2__) && defined(__x86_64__)
-        // BMI2 Optimization: _bzhi_u64 isolates the valid bits we want to keep.
-        br->accum = _bzhi_u64(br->accum, safe_bits);
-#else
-        br->accum &= ((1ULL << safe_bits) - 1);
-#endif
-
-        const uint8_t* p_loc = br->ptr;
-
-        uint64_t raw = zxc_le64(p_loc);
-        int consumed = (64 - safe_bits) >> 3;
-        br->accum |= (raw << safe_bits);
-        p_loc += consumed;
-        br->bits = safe_bits + consumed * 8;
-
-        br->ptr = p_loc;
-    }
 }
 
 /**
@@ -152,8 +125,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_vbyte(const uint8_t** ptr, const uint
  * Shared between ARM NEON and x86 SSSE3. Each row defines how to replicate
  * source bytes to fill 16 bytes when offset < 16.
  */
-#if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(__SSSE3__) || \
-    defined(ZXC_USE_AVX2)
+#if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(ZXC_USE_AVX2) || \
+    defined(ZXC_USE_AVX512)
 /**
  * @brief Precomputed masks for handling overlapping data during decompression.
  *
@@ -218,7 +191,7 @@ static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
     vst1_u8(dst, vtbl2_u8(src_tbl, mask_lo));
     vst1_u8(dst + 8, vtbl2_u8(src_tbl, mask_hi));
 
-#elif defined(__SSSE3__) || defined(ZXC_USE_AVX2)
+#elif defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
     __m128i mask = _mm_load_si128((const __m128i*)zxc_overlap_masks[off]);
     __m128i src_data = _mm_loadu_si128((const __m128i*)(dst - off));
     _mm_storeu_si128((__m128i*)dst, _mm_shuffle_epi8(src_data, mask));
@@ -1498,6 +1471,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     return (int)(d_ptr - dst);
 }
 
+// cppcheck-suppress unusedFunction
 int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz, uint8_t* dst,
                                  size_t dst_cap) {
     if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return -1;
@@ -1543,49 +1517,4 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
     }
 
     return decoded_sz;
-}
-
-// cppcheck-suppress unusedFunction
-size_t zxc_decompress(const void* src, size_t src_size, void* dst, size_t dst_capacity,
-                      int checksum_enabled) {
-    if (UNLIKELY(!src || !dst || src_size < ZXC_FILE_HEADER_SIZE)) return 0;
-
-    const uint8_t* ip = (const uint8_t*)src;
-    const uint8_t* ip_end = ip + src_size;
-    uint8_t* op = (uint8_t*)dst;
-    const uint8_t* op_start = op;
-    const uint8_t* op_end = op + dst_capacity;
-    size_t runtime_chunk_size = 0;
-
-    // File header verification
-    if (zxc_read_file_header(ip, src_size, &runtime_chunk_size) != 0) return 0;
-
-    zxc_cctx_t ctx;
-    if (zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0, checksum_enabled) != 0) return 0;
-
-    ip += ZXC_FILE_HEADER_SIZE;
-
-    // Block decompression loop
-    while (ip < ip_end) {
-        zxc_block_header_t bh;
-        // Read the block header to determine the compressed size
-        if (zxc_read_block_header(ip, (size_t)(ip_end - ip), &bh) != 0) {
-            zxc_cctx_free(&ctx);
-            return 0;
-        }
-
-        size_t rem_cap = (size_t)(op_end - op);
-        int res = zxc_decompress_chunk_wrapper(&ctx, ip, (size_t)(ip_end - ip), op, rem_cap);
-        if (UNLIKELY(res < 0)) {
-            zxc_cctx_free(&ctx);
-            return 0;
-        }
-
-        ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
-        ip += (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM) ? ZXC_BLOCK_CHECKSUM_SIZE : 0;
-        op += res;
-    }
-
-    zxc_cctx_free(&ctx);
-    return (size_t)(op - op_start);
 }
