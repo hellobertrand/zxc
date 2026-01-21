@@ -755,7 +755,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                 }
                 p += 32;
             }
-#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+#elif defined(ZXC_USE_NEON64)
             uint8x16_t vb = vdupq_n_u8(b);
             while (p <= p_end - 16) {
                 uint8x16_t v = vld1q_u8(p);
@@ -767,6 +767,35 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                     goto _run_done;
                 }
                 uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 1);
+                if (hi != 0) {
+                    p += 8 + (zxc_ctz64(hi) >> 3);
+                    goto _run_done;
+                }
+                p += 16;
+            }
+#elif defined(ZXC_USE_NEON32)
+            uint8x16_t vb = vdupq_n_u8(b);
+            while (p <= p_end - 16) {
+                uint8x16_t v = vld1q_u8(p);
+                uint8x16_t eq = vceqq_u8(v, vb);
+                uint8x16_t not_eq = vmvnq_u8(eq);
+
+                // 32-bit ARM NEON doesn't always support vgetq_lane_u64 / vreinterpretq_u64_u8 so
+                // we treat the 128-bit vector as 4 x 32-bit lanes */
+                uint32x4_t neq32 = vreinterpretq_u32_u8(not_eq);
+                uint32_t l0 = vgetq_lane_u32(neq32, 0);
+                uint32_t l1 = vgetq_lane_u32(neq32, 1);
+
+                uint64_t lo = ((uint64_t)l1 << 32) | l0;
+                if (lo != 0) {
+                    p += (zxc_ctz64(lo) >> 3);
+                    goto _run_done;
+                }
+
+                uint32_t h0 = vgetq_lane_u32(neq32, 2);
+                uint32_t h1 = vgetq_lane_u32(neq32, 3);
+                uint64_t hi = ((uint64_t)h1 << 32) | h0;
+
                 if (hi != 0) {
                     p += 8 + (zxc_ctz64(hi) >> 3);
                     goto _run_done;
@@ -828,7 +857,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                     }
                     p += 32;
                 }
-#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+#elif defined(ZXC_USE_NEON64)
                 while (p <= p_end_4 - 16) {
                     uint8x16_t v0 = vld1q_u8(p);
                     uint8x16_t v1 = vld1q_u8(p + 1);
@@ -842,6 +871,35 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                         goto _lit_done;
                     }
                     uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 1);
+                    if (hi != 0) {
+                        p += 8 + (zxc_ctz64(hi) >> 3);
+                        goto _lit_done;
+                    }
+                    p += 16;
+                }
+#elif defined(ZXC_USE_NEON32)
+                while (p <= p_end_4 - 16) {
+                    uint8x16_t v0 = vld1q_u8(p);
+                    uint8x16_t v1 = vld1q_u8(p + 1);
+                    uint8x16_t v2 = vld1q_u8(p + 2);
+                    uint8x16_t v3 = vld1q_u8(p + 3);
+                    uint8x16_t eq =
+                        vandq_u8(vceqq_u8(v0, v1), vandq_u8(vceqq_u8(v1, v2), vceqq_u8(v2, v3)));
+
+                    uint32x4_t eq32 = vreinterpretq_u32_u8(eq);
+                    uint32_t l0 = vgetq_lane_u32(eq32, 0);
+                    uint32_t l1 = vgetq_lane_u32(eq32, 1);
+                    uint64_t lo = ((uint64_t)l1 << 32) | l0;
+
+                    if (lo != 0) {
+                        p += (zxc_ctz64(lo) >> 3);
+                        goto _lit_done;
+                    }
+
+                    uint32_t h0 = vgetq_lane_u32(eq32, 2);
+                    uint32_t h1 = vgetq_lane_u32(eq32, 3);
+                    uint64_t hi = ((uint64_t)h1 << 32) | h0;
+
                     if (hi != 0) {
                         p += 8 + (zxc_ctz64(hi) >> 3);
                         goto _lit_done;
