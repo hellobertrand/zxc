@@ -170,6 +170,81 @@ static double zxc_now(void) {
 }
 #endif
 
+/**
+ * @brief Validates and resolves the input file path to prevent directory traversal
+ * and ensure it is a regular file.
+ *
+ * @param[in] path The raw input path from command line.
+ * @param[out] resolved_buffer Buffer to store resolved path (needs sufficient size).
+ * @param[in] buffer_size Size of the resolved_buffer.
+ * @return 0 on success, -1 on error.
+ */
+static int zxc_validate_input_path(const char* path, char* resolved_buffer, size_t buffer_size) {
+#ifdef _WIN32
+    if (!_fullpath(resolved_buffer, path, buffer_size)) {
+        return -1;
+    }
+    DWORD attr = GetFileAttributesA(resolved_buffer);
+    if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        // Not a valid file or is a directory
+        errno = (attr == INVALID_FILE_ATTRIBUTES) ? ENOENT : EISDIR;
+        return -1;
+    }
+    return 0;
+#else
+    char* res = realpath(path, resolved_buffer);
+    if (!res) {
+        // realpath failed (e.g. file does not exist)
+        return -1;
+    }
+    struct stat st;
+    if (stat(resolved_buffer, &st) != 0) {
+        return -1;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        errno = EISDIR;  // Generic error for non-regular file
+        return -1;
+    }
+    return 0;
+#endif
+}
+
+/**
+ * @brief Validates and resolves the output file path.
+ *
+ * @param[in] path The raw output path.
+ * @param[out] resolved_buffer Buffer to store resolved path.
+ * @param[in] buffer_size Size of the resolved_buffer.
+ * @return 0 on success, -1 on error.
+ */
+static int zxc_validate_output_path(const char* path, char* resolved_buffer, size_t buffer_size) {
+#ifdef _WIN32
+    if (!_fullpath(resolved_buffer, path, buffer_size)) {
+        return -1;
+    }
+    DWORD attr = GetFileAttributesA(resolved_buffer);
+    if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        errno = EISDIR;
+        return -1;
+    }
+    return 0;
+#else
+    // POSIX output path validation
+    // realpath(3) usually requires the file to exist.
+    // For output, we check the parent directory or just pass through for now
+    // as strict canonicalization of non-existent files is complex portably.
+    // However, we can check if it IS a directory if it exists.
+    struct stat st;
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        errno = EISDIR;
+        return -1;
+    }
+    strncpy(resolved_buffer, path, buffer_size - 1);
+    resolved_buffer[buffer_size - 1] = '\0';
+    return 0;
+#endif
+}
+
 // CLI Logging Helpers
 static int g_quiet = 0;
 static int g_verbose = 0;
@@ -349,7 +424,13 @@ int main(int argc, char** argv) {
         int ret = 1;
         uint8_t* ram = NULL;
         uint8_t* c_dat = NULL;
-        FILE* f_in = fopen(in_path, "rb");
+        char resolved_path[4096];
+        if (zxc_validate_input_path(in_path, resolved_path, sizeof(resolved_path)) != 0) {
+            zxc_log("Error: Invalid input file '%s': %s\n", in_path, strerror(errno));
+            return 1;
+        }
+
+        FILE* f_in = fopen(resolved_path, "rb");
         if (!f_in) goto bench_cleanup;
 
         if (fseeko(f_in, 0, SEEK_END) != 0) goto bench_cleanup;
@@ -470,9 +551,16 @@ int main(int argc, char** argv) {
 
     if (optind < argc && strcmp(argv[optind], "-") != 0) {
         in_path = argv[optind];
-        f_in = fopen(in_path, "rb");
+
+        char resolved_path[4096];  // Sufficiently large buffer
+        if (zxc_validate_input_path(in_path, resolved_path, sizeof(resolved_path)) != 0) {
+            zxc_log("Error: Invalid input file '%s': %s\n", in_path, strerror(errno));
+            return 1;
+        }
+
+        f_in = fopen(resolved_path, "rb");
         if (!f_in) {
-            zxc_log("Error open input %s: %s\n", in_path, strerror(errno));
+            zxc_log("Error open input %s: %s\n", resolved_path, strerror(errno));
             return 1;
         }
         use_stdin = 0;
@@ -511,20 +599,27 @@ int main(int argc, char** argv) {
 
     // Open output file if not writing to stdout
     if (!use_stdout) {
-        if (!force && access(out_path, F_OK) == 0) {
+        char resolved_out[4096];
+        if (zxc_validate_output_path(out_path, resolved_out, sizeof(resolved_out)) != 0) {
+            zxc_log("Error: Invalid output path '%s': %s\n", out_path, strerror(errno));
+            if (f_in) fclose(f_in);
+            return 1;
+        }
+
+        if (!force && access(resolved_out, F_OK) == 0) {
             zxc_log("Output exists. Use -f.\n");
             fclose(f_in);
             return 1;
         }
 
 #ifdef _WIN32
-        f_out = fopen(out_path, "wb");
+        f_out = fopen(resolved_out, "wb");
 #else
-        // Restrict permissions to 0644 (RW-R--R--) instead of default 0666
+        // Restrict permissions to 0644
         int fd =
-            open(out_path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+            open(resolved_out, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         if (fd == -1) {
-            zxc_log("Error creating output %s: %s\n", out_path, strerror(errno));
+            zxc_log("Error creating output %s: %s\n", resolved_out, strerror(errno));
             fclose(f_in);
             return 1;
         }
@@ -532,7 +627,7 @@ int main(int argc, char** argv) {
 #endif
 
         if (!f_out) {
-            zxc_log("Error open output %s: %s\n", out_path, strerror(errno));
+            zxc_log("Error open output %s: %s\n", resolved_out, strerror(errno));
             if (f_in) fclose(f_in);
 #ifndef _WIN32
             if (fd != -1) close(fd);
