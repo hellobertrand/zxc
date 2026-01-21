@@ -171,6 +171,7 @@ static const ZXC_ALIGN(16) uint8_t zxc_overlap_masks[16][16] = {
  * @param[in]  off The offset backwards from the destination pointer to read from.
  *                 (i.e., source address is `dst - off`).
  */
+// codeql[cpp/unused-static-function] : False positive, used in DECODE_SEQ_SAFE/FAST macros
 static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
     // If off==0 (invalid), we force off=1 to mimic a safe RLE of the previous byte.
     // This prevents the division-by-zero crash in the scalar fallback (i % off)
@@ -203,6 +204,8 @@ static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
     }
 #endif
 }
+
+
 
 #if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
 /**
