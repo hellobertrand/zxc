@@ -244,7 +244,7 @@ static int zxc_validate_output_path(const char* path, char* resolved_buffer, siz
     char temp_path2[4096];
     strncpy(temp_path2, path, sizeof(temp_path2) - 1);
     temp_path2[sizeof(temp_path2) - 1] = '\0';
-    char* base = basename(temp_path2);
+    const char* base = basename(temp_path2);
 
     char resolved_dir[PATH_MAX];
     if (!realpath(dir, resolved_dir)) {
