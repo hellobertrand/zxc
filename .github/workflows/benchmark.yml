@@ -36,8 +36,7 @@ jobs:
 
       - name: Clone LZbench
         run: |
-          # git clone https://github.com/inikep/lzbench "${LZBENCH_DIR}"
-          git clone -b zxc-0.5.x https://github.com/hellobertrand/lzbench "${LZBENCH_DIR}"
+          git clone https://github.com/inikep/lzbench "${LZBENCH_DIR}"
 
       - name: Copy Lib ZXC
         run: |
