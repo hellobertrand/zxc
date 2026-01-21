@@ -151,7 +151,10 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
 }
 #else
 // POSIX / Linux / macOS Implementation
+#include <fcntl.h>
 #include <getopt.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
@@ -513,10 +516,27 @@ int main(int argc, char** argv) {
             fclose(f_in);
             return 1;
         }
+
+#ifdef _WIN32
         f_out = fopen(out_path, "wb");
+#else
+        // Restrict permissions to 0644 (RW-R--R--) instead of default 0666
+        int fd =
+            open(out_path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        if (fd == -1) {
+            zxc_log("Error creating output %s: %s\n", out_path, strerror(errno));
+            fclose(f_in);
+            return 1;
+        }
+        f_out = fdopen(fd, "wb");
+#endif
+
         if (!f_out) {
             zxc_log("Error open output %s: %s\n", out_path, strerror(errno));
-            fclose(f_in);
+            if (f_in) fclose(f_in);
+#ifndef _WIN32
+            if (fd != -1) close(fd);
+#endif
             return 1;
         }
     }
