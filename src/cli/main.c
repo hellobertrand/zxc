@@ -153,6 +153,10 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
 // POSIX / Linux / macOS Implementation
 #include <fcntl.h>
 #include <getopt.h>
+#include <libgen.h>
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
@@ -230,13 +234,37 @@ static int zxc_validate_output_path(const char* path, char* resolved_buffer, siz
     return 0;
 #else
     // POSIX output path validation
+    char temp_path[4096];
+    strncpy(temp_path, path, sizeof(temp_path) - 1);
+    temp_path[sizeof(temp_path) - 1] = '\0';
+
+    // Split into dir and base
+    char* dir = dirname(temp_path);  // Note: dirname may modify string or return static
+    // We need another copy for basename as dirname might modify
+    char temp_path2[4096];
+    strncpy(temp_path2, path, sizeof(temp_path2) - 1);
+    temp_path2[sizeof(temp_path2) - 1] = '\0';
+    char* base = basename(temp_path2);
+
+    char resolved_dir[PATH_MAX];
+    if (!realpath(dir, resolved_dir)) {
+        // Parent directory must exist
+        return -1;
+    }
+
     struct stat st;
-    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+    if (stat(resolved_dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
         errno = EISDIR;
         return -1;
     }
-    strncpy(resolved_buffer, path, buffer_size - 1);
-    resolved_buffer[buffer_size - 1] = '\0';
+
+    // Reconstruct valid path: resolved_dir / base
+    // Ensure we don't overflow buffer
+    int written = snprintf(resolved_buffer, buffer_size, "%s/%s", resolved_dir, base);
+    if (written < 0 || (size_t)written >= buffer_size) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
     return 0;
 #endif
 }
