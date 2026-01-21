@@ -47,7 +47,8 @@ extern "C" {
 #if defined(__AVX2__)
 #define ZXC_USE_AVX2
 #endif
-#elif (defined(__ARM_NEON) || defined(__ARM_NEON__))
+#elif (defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(ZXC_USE_NEON32) || \
+       defined(ZXC_USE_NEON64))
 #include <arm_acle.h>
 #include <arm_neon.h>
 #if defined(__aarch64__) || defined(_M_ARM64)
