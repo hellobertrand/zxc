@@ -192,7 +192,7 @@ static int zxc_validate_input_path(const char* path, char* resolved_buffer, size
     }
     return 0;
 #else
-    char* res = realpath(path, resolved_buffer);
+    const char* res = realpath(path, resolved_buffer);
     if (!res) {
         // realpath failed (e.g. file does not exist)
         return -1;
@@ -230,10 +230,6 @@ static int zxc_validate_output_path(const char* path, char* resolved_buffer, siz
     return 0;
 #else
     // POSIX output path validation
-    // realpath(3) usually requires the file to exist.
-    // For output, we check the parent directory or just pass through for now
-    // as strict canonicalization of non-existent files is complex portably.
-    // However, we can check if it IS a directory if it exists.
     struct stat st;
     if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
         errno = EISDIR;
