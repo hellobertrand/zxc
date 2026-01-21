@@ -11,19 +11,7 @@
 set -e
 
 # Default binary path
-ARG_BIN=${1:-"../build/zxc"}
-cp "$ARG_BIN" ./zxc_tool.exe
-ZXC_BIN="./zxc_tool.exe"
-
-echo "Copied binary to $ZXC_BIN for testing."
-
-# 0. Sanity Check
-echo "Running sanity check ($ZXC_BIN -V)..."
-if ! "$ZXC_BIN" -V; then
-    echo -e "${RED}[FAIL]${NC} Binary failed to execute. Check architecture/permissions."
-    exit 1
-fi
-echo "Sanity check passed."
+ZXC_BIN=${1:-"../build/zxc"}
 
 # Test Files
 TEST_FILE="testdata"
@@ -32,11 +20,11 @@ TEST_FILE_DEC="${TEST_FILE}.dec"
 PIPE_XC="./test_pipe.xc"
 PIPE_DEC="./test_pipe.dec"
 
-# Variables for checking file existence (Bash sees them relative to CWD)
+# Variables for checking file existence
 TEST_FILE_XC_BASH="./$TEST_FILE_XC"
 TEST_FILE_DEC_BASH="./${TEST_FILE}.dec"
 
-# Arguments passed to ZXC (Clean filenames, relying on CWD)
+# Arguments passed to ZXC
 TEST_FILE_ARG="${TEST_FILE}"
 TEST_FILE_XC_ARG="${TEST_FILE}.xc" 
 
@@ -56,8 +44,9 @@ log_fail() {
 # cleanup on exit
 cleanup() {
     echo "Cleaning up..."
-    rm -f "$TEST_FILE" "$TEST_FILE_XC" "$TEST_FILE_DEC_BASH" "$PIPE_XC" "$PIPE_DEC" "out.xc" "$ZXC_BIN"
+    rm -f "$TEST_FILE" "$TEST_FILE_XC" "$TEST_FILE_DEC_BASH" "$PIPE_XC" "$PIPE_DEC" "out.xc"
 }
+
 trap cleanup EXIT
 
 # 0. Check binary
@@ -115,7 +104,6 @@ if ! wait_for_file "$TEST_FILE_XC_BASH"; then
 fi
 
 # Decompress to stdout
-# Placing flags BEFORE positional arguments (best practice)
 echo "Attempting decompression of: $TEST_FILE_XC_ARG"
 
 if ! "$ZXC_BIN" -d -c "$TEST_FILE_XC_ARG" > "$TEST_FILE_DEC_BASH"; then
