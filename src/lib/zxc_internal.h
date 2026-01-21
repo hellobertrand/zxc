@@ -51,9 +51,13 @@ extern "C" {
 #include <arm_acle.h>
 #include <arm_neon.h>
 #if defined(__aarch64__) || defined(_M_ARM64)
+#ifndef ZXC_USE_NEON64
 #define ZXC_USE_NEON64
+#endif
 #else
+#ifndef ZXC_USE_NEON32
 #define ZXC_USE_NEON32
+#endif
 #endif
 #endif
 
