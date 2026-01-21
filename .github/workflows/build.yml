@@ -156,7 +156,7 @@ jobs:
         uses: actions/download-artifact@v7
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             **/*.tar.gz
