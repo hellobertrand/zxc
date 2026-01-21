@@ -17,8 +17,8 @@ on:
         default: '3600'
   pull_request:
     branches: [ main ]
-  schedule:
-     - cron: '0 0 */3 * *'
+      schedule:
+         - cron: '0 1 * * 1'
 
 permissions: 
   contents: read
