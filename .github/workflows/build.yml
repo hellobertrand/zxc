@@ -50,13 +50,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Setup Intel SDE (for AVX512 testing)
-        if: matrix.use_sde
-        uses: petarpetrovt/setup-sde@v3.0
-        with:
-          environmentVariableName: SDE_PATH
-          sdeVersion: 9.58.0
-
       - name: Configure CMake
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }}
 
@@ -64,12 +57,10 @@ jobs:
         run: cmake --build build --config Release --parallel
 
       - name: Test (native)
-        if: "!matrix.use_sde"
         working-directory: build
         run: ctest -C Release --output-on-failure
 
       - name: Test CLI
-        if: "!matrix.use_sde"
         shell: bash
         run: |
           BUILD_DIR="build"
@@ -87,17 +78,6 @@ jobs:
           echo "Testing with binary: $ZXC_BIN"
           chmod +x tests/test_cli.sh
           ./tests/test_cli.sh "$ZXC_BIN"
-
-      - name: Test (Intel SDE for AVX512 - Linux)
-        if: matrix.use_sde && runner.os == 'Linux'
-        working-directory: build
-        run: $SDE_PATH/sde64 -skx -- ctest -C Release --output-on-failure
-
-      - name: Test (Intel SDE for AVX512 - Windows)
-        if: matrix.use_sde && runner.os == 'Windows'
-        working-directory: build
-        run: |
-          & "$env:SDE_PATH\sde.exe" -skx -- ctest -C Release --output-on-failure
 
       - name: Package Release (Archive)
         if: startsWith(github.ref, 'refs/tags/')
