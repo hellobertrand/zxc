@@ -82,6 +82,25 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  * @return The number of bytes written to the destination buffer.
  */
 static ZXC_ALWAYS_INLINE size_t zxc_write_vbyte(uint8_t* dst, uint32_t val) {
+    // Fast path: 1 byte (val < 128) - most common case
+    if (LIKELY(val < ZXC_VBYTE_MSB)) {
+        dst[0] = (uint8_t)val;
+        return 1;
+    }
+    // Fast path: 2 bytes (val < 16384)
+    if (LIKELY(val < (1U << 14))) {
+        dst[0] = (uint8_t)(val | ZXC_VBYTE_MSB);
+        dst[1] = (uint8_t)(val >> 7);
+        return 2;
+    }
+    // Fast path: 3 bytes (val < 2097152)
+    if (LIKELY(val < (1U << 21))) {
+        dst[0] = (uint8_t)(val | ZXC_VBYTE_MSB);
+        dst[1] = (uint8_t)((val >> 7) | ZXC_VBYTE_MSB);
+        dst[2] = (uint8_t)(val >> 14);
+        return 3;
+    }
+    // Fallback: 4-5 bytes (rare for ZXC block sizes)
     size_t count = 0;
     while (val >= ZXC_VBYTE_MSB) {
         dst[count++] = (uint8_t)(val | ZXC_VBYTE_MSB);
@@ -328,7 +347,6 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         uint16_t delta = chain_table[match_idx];
         uint32_t next_idx = match_idx - delta;
         ZXC_PREFETCH_READ(src + next_idx);
-        ZXC_PREFETCH_READ(&chain_table[next_idx]);  // Prefetch next chain entry
 
         match_idx = (delta != 0) ? next_idx : 0;
         is_first = 0;
@@ -1209,11 +1227,6 @@ static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             }
             if (ml >= ZXC_SEQ_ML_MASK) {
                 extras_c += zxc_write_vbyte(buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
-            }
-
-            // Batch-update hash table for positions in the matched region
-            if (m.len > 4 && level >= 5) {
-                zxc_batch_hash_update(src, ip, m.len, hash_table, chain_table, epoch_mark, iend);
             }
 
             ip += m.len;
