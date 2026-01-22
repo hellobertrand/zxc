@@ -99,7 +99,7 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
 
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
     message(STATUS "Building ARM NEON variant...")
-    zxc_add_variant(_neon "-mfpu=neon")
+    zxc_add_variant(_neon "-march=armv7-a;-mfpu=neon")
 endif()
 
 add_library(zxc_lib STATIC
