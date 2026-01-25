@@ -1,4 +1,4 @@
-name: Check dependencies (rapidhash)
+name: Update vendors
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     - cron: '0 4 * * 1'
 
 jobs:
-  update-header:
+  update-rapidhash-header:
     runs-on: ubuntu-latest
 
     permissions:
