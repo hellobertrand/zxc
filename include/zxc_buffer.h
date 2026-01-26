@@ -28,7 +28,7 @@
  *
  * @return           Maximum required buffer size in bytes.
  */
-size_t zxc_compress_bound(size_t input_size);
+size_t zxc_compress_bound(const size_t input_size);
 
 /**
  * @brief Compresses a data buffer using the ZXC algorithm.
@@ -48,8 +48,8 @@ size_t zxc_compress_bound(size_t input_size);
  * @return The number of bytes written to dst, or 0 if the destination buffer
  * is too small or an error occurred.
  */
-size_t zxc_compress(const void* src, size_t src_size, void* dst, size_t dst_capacity, int level,
-                    int checksum_enabled);
+size_t zxc_compress(const void* src, const size_t src_size, void* dst, const size_t dst_capacity, const int level,
+                    const int checksum_enabled);
 
 /**
  * @brief Decompresses a ZXC compressed buffer.
@@ -68,7 +68,7 @@ size_t zxc_compress(const void* src, size_t src_size, void* dst, size_t dst_capa
  * @return The number of bytes written to dst, or 0 if decompression fails
  * (invalid header, corruption, or destination too small).
  */
-size_t zxc_decompress(const void* src, size_t src_size, void* dst, size_t dst_capacity,
-                      int checksum_enabled);
+size_t zxc_decompress(const void* src, const size_t src_size, void* dst, const size_t dst_capacity,
+                      const int checksum_enabled);
 
 #endif  // ZXC_BUFFER_H

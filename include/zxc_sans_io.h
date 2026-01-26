@@ -92,7 +92,7 @@ typedef struct {
  * @return 0 on success, or -1 if memory allocation fails for any of the
  * internal buffers.
  */
-int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int checksum_enabled);
+int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, const int level, const int checksum_enabled);
 
 /**
  * @brief Frees resources associated with a ZXC compression context.
