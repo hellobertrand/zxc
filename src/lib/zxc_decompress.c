@@ -1473,10 +1473,9 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 }
 
 // cppcheck-suppress unusedFunction
-int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, const size_t src_sz, uint8_t* dst,
-                                 const size_t dst_cap) {
+int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, const size_t src_sz,
+                                 uint8_t* RESTRICT dst, const size_t dst_cap) {
     if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return -1;
-
 
     uint8_t type = src[0];
     uint8_t flags = src[1];

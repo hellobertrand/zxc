@@ -48,8 +48,8 @@ size_t zxc_compress_bound(const size_t input_size);
  * @return The number of bytes written to dst, or 0 if the destination buffer
  * is too small or an error occurred.
  */
-size_t zxc_compress(const void* src, const size_t src_size, void* dst, const size_t dst_capacity, const int level,
-                    const int checksum_enabled);
+size_t zxc_compress(const void* src, const size_t src_size, void* dst, const size_t dst_capacity,
+                    const int level, const int checksum_enabled);
 
 /**
  * @brief Decompresses a ZXC compressed buffer.
