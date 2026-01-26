@@ -116,20 +116,32 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  * Serialization and deserialization of file and block headers.
  */
 
+/**
+ * @brief Calculates the 1-byte checksum for the file header.
+ *
+ * @param[in] header Pointer to the file header buffer (at least 7 bytes).
+ * @return The 1-byte checksum value.
+ */
+static ZXC_ALWAYS_INLINE uint8_t zxc_file_header_checksum(const uint8_t* header) {
+    const uint64_t hash = zxc_checksum(header, ZXC_FILE_HEADER_SIZE - 1, ZXC_CHECKSUM_RAPIDHASH);
+    return (uint8_t)((hash ^ (hash >> ZXC_BITS_PER_BYTE)) & 0xFF);
+}
+
 int zxc_write_file_header(uint8_t* dst, size_t dst_capacity) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_HEADER_SIZE)) return -1;
 
     zxc_store_le32(dst, ZXC_MAGIC_WORD);
     dst[4] = ZXC_FILE_FORMAT_VERSION;
     dst[5] = (uint8_t)(ZXC_BLOCK_SIZE / ZXC_BLOCK_UNIT);
-    dst[6] = 0;
-    dst[7] = 0;
+    dst[6] = 0;  // Reserved (1 byte)
+    dst[7] = zxc_file_header_checksum(dst);
+    
     return ZXC_FILE_HEADER_SIZE;
 }
 
 int zxc_read_file_header(const uint8_t* src, size_t src_size, size_t* out_block_size) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE || zxc_le32(src) != ZXC_MAGIC_WORD ||
-                 src[4] != ZXC_FILE_FORMAT_VERSION))
+                 src[4] != ZXC_FILE_FORMAT_VERSION || src[7] != zxc_file_header_checksum(src)))
         return -1;
 
     if (out_block_size) {
