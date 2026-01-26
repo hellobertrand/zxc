@@ -125,27 +125,25 @@ Each data block consists of a **12-byte** generic header that precedes the speci
           | (1B)  | (1B)  | (2 bytes)     | (4 bytes)             | (4 bytes)             |
           +-------+-------+---------------+-----------------------+-----------------------+
 
-  If HAS_CHECKSUM flag is set (Flags & 0x80):
-  Offset:  12                                                                              20
-          +-----------------------------------------------------------------------------+
-          | Checksum (rapidhash)                                                        |
-          | (8 bytes)                                                                   |
-          +-----------------------------------------------------------------------------+
-```
+  Block Layout:
+  [ Header (12B) ] + [ Compressed Payload (Comp Size bytes) ] + [ Optional Checksum (4B) ]
 
-* **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI).
+```
+**Note**: The Checksum is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the compressed payload**.
+
+* **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI, 255=EOF).
 * **Flags**:
-  - **Bit 7 (0x80)**: `HAS_CHECKSUM`. If set, an **8-byte checksum** follows immediately after Raw Size.
+  - **Bit 7 (0x80)**: `HAS_CHECKSUM`. If set, a **32-bit (4-byte) checksum** is appended to the end of the block (after the compressed payload).
   - **Bits 0-3 (0x0F)**: `CHECKSUM_TYPE`. Defines the algorithm used for integrity verification.
 * **Checksum Algorithms**:
-  - `0x00`: **rapidhash** (Standard, high performance, platform independent)
+  - `0x00`: **rapidhash** (Standard, 32-bit folded)
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
 * **Raw Size**: Original decompressed size.
 
 > **Note**: While the format is designed for threaded execution, a single-threaded API is also available for constrained environments or simple integration cases.
 
 ### 5.3 Specific Header: NUM (Numeric)
-(Present immediately after the Block Header and any optional Checksum)
+(Present immediately after the Block Header)
 
 **NUM Header (16 bytes):**
 
@@ -161,8 +159,17 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 * **Frame**: Processing window size (currently always 128).
 * **Reserved**: Padding for alignment.
 
-### 5.4 Specific Header: GLO (Generic Low)
-(Present immediately after the Block Header and any optional Checksum)
+### 5.4 Specific Header: EOF (End of File)
+(Block Type 255)
+
+The **EOF** block marks the end of the ZXC stream. It ensures that the decompressor knows exactly when to stop processing, allowing for robust stream termination even when file size metadata is unavailable or when concatenating streams.
+
+*   **Structure**: Standard 12-byte Block Header.
+*   **Flags**: Always 0.
+*   **Comp Size / Raw Size**: Unlike other blocks, these are set to 0. (The EOF block carries no payload).
+
+### 5.5 Specific Header: GLO (Generic Low)
+(Present immediately after the Block Header)
 
 **GLO Header (16 bytes):**
 
@@ -241,8 +248,8 @@ Currently, the **Literals** section uses different sizes when RLE compression is
 > **Design Note**: This format is designed for future extensibility. The dual-size architecture allows adding entropy coding (FSE/ANS) or bitpacking to any stream without breaking backward compatibility.
 
 
-### 5.5 Specific Header: GHI (Generic High)
-(Present immediately after the Block Header and any optional Checksum)
+### 5.6 Specific Header: GHI (Generic High)
+(Present immediately after the Block Header)
 
 The **GHI** (Generic High-Velocity) block format is optimized for maximum decompression speed. It uses a **packed 32-bit sequence** format that allows 4-byte aligned reads, reducing memory access latency and enabling efficient SIMD processing.
 
@@ -336,7 +343,7 @@ GHI Block Data Layout:
 > **Design Rationale**: The 32-bit packed format eliminates pointer chasing between token and offset streams. By reading a single aligned word per sequence, the decoder achieves better cache utilization and enables aggressive loop unrolling (4x) for maximum throughput on modern CPUs.
 
 
-### 5.6 Block Encoding & Processing Algorithms
+### 5.7 Block Encoding & Processing Algorithms
 
 The efficiency of ZXC relies on specialized algorithmic pipelines for each block type.
 
