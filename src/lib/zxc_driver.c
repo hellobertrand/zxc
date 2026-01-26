@@ -548,7 +548,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
             read_sz = fread(job->in_buf, 1, ZXC_BLOCK_SIZE, f_in);
             if (read_sz == 0) read_eof = 1;
         } else {
-            uint8_t bh_buf[ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE];
+            uint8_t bh_buf[ZXC_BLOCK_HEADER_SIZE];
             size_t h_read = fread(bh_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in);
             if (UNLIKELY(h_read < ZXC_BLOCK_HEADER_SIZE)) {
                 read_eof = 1;
@@ -557,24 +557,25 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, int n_threads, int
                 zxc_read_block_header(bh_buf, ZXC_BLOCK_HEADER_SIZE, &bh);
 
                 int has_crc = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
-                if (has_crc) {
-                    if (fread(bh_buf + ZXC_BLOCK_HEADER_SIZE, 1, ZXC_BLOCK_CHECKSUM_SIZE, f_in) !=
-                        ZXC_BLOCK_CHECKSUM_SIZE) {
-                        read_eof = 1;
-                    }
-                }
+                size_t total_len = ZXC_BLOCK_HEADER_SIZE + bh.comp_size + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
 
-                size_t header_len = ZXC_BLOCK_HEADER_SIZE + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-
-                if (UNLIKELY(bh.comp_size > job->in_cap - header_len)) {
+                if (UNLIKELY(total_len > job->in_cap)) {
                     ctx.io_error = 1;
                     break;
                 }
 
-                ZXC_MEMCPY(job->in_buf, bh_buf, header_len);
-                size_t body_read = fread(job->in_buf + header_len, 1, bh.comp_size, f_in);
-                read_sz = header_len + body_read;
-                if (UNLIKELY(body_read != bh.comp_size)) read_eof = 1;
+                ZXC_MEMCPY(job->in_buf, bh_buf, ZXC_BLOCK_HEADER_SIZE);
+                size_t body_read = fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE, 1, bh.comp_size, f_in);
+
+                if (UNLIKELY(body_read != bh.comp_size)) {
+                    read_eof = 1;
+                } else if (has_crc) {
+                    if (fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size, 1, ZXC_BLOCK_CHECKSUM_SIZE,
+                              f_in) != ZXC_BLOCK_CHECKSUM_SIZE) {
+                        read_eof = 1;
+                    }
+                }
+                read_sz = ZXC_BLOCK_HEADER_SIZE + body_read + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
             }
         }
         if (read_eof && read_sz == 0) break;
