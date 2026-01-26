@@ -302,6 +302,7 @@ void print_help(const char* app) {
         "Standard Modes:\n"
         "  -z, --compress    Compress FILE {default}\n"
         "  -d, --decompress  Decompress FILE (or stdin -> stdout)\n"
+        "  -t, --test        Test compressed FILE integrity\n"
         "  -b, --bench       Benchmark in-memory\n\n"
         "Special Options:\n"
         "  -V, --version     Show version information\n"
@@ -334,7 +335,7 @@ void print_version(void) {
     printf("(%s)\n", sys_info);
 }
 
-typedef enum { MODE_COMPRESS, MODE_DECOMPRESS, MODE_BENCHMARK } zxc_mode_t;
+typedef enum { MODE_COMPRESS, MODE_DECOMPRESS, MODE_BENCHMARK, MODE_TEST } zxc_mode_t;
 
 enum { OPT_VERSION = 1000, OPT_HELP };
 
@@ -350,12 +351,13 @@ int main(int argc, char** argv) {
     int force = 0;
     int to_stdout = 0;
     int iterations = 5;
-    int checksum = 0;
+    int checksum = -1;
     int level = 3;
 
     static const struct option long_options[] = {
         {"compress", no_argument, 0, 'z'},    {"decompress", no_argument, 0, 'd'},
-        {"bench", optional_argument, 0, 'b'}, {"threads", required_argument, 0, 'T'},
+        {"test", no_argument, 0, 't'},        {"bench", optional_argument, 0, 'b'},
+        {"threads", required_argument, 0, 'T'},
         {"keep", no_argument, 0, 'k'},        {"force", no_argument, 0, 'f'},
         {"stdout", no_argument, 0, 'c'},      {"verbose", no_argument, 0, 'v'},
         {"quiet", no_argument, 0, 'q'},       {"checksum", no_argument, 0, 'C'},
@@ -363,13 +365,16 @@ int main(int argc, char** argv) {
         {"help", no_argument, 0, 'h'},        {0, 0, 0, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "12345b::cCdfhkl:NqT:vVz", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "12345b::cCdfhkl:NqT:tcvVz", long_options, NULL)) != -1) {
         switch (opt) {
             case 'z':
                 mode = MODE_COMPRESS;
                 break;
             case 'd':
                 mode = MODE_DECOMPRESS;
+                break;
+            case 't':
+                mode = MODE_TEST;
                 break;
             case 'b':
                 mode = MODE_BENCHMARK;
@@ -426,10 +431,17 @@ int main(int argc, char** argv) {
         } else if (strcmp(argv[optind], "d") == 0) {
             mode = MODE_DECOMPRESS;
             optind++;
+        } else if (strcmp(argv[optind], "t") == 0) {
+            mode = MODE_TEST;
+            optind++;
         } else if (strcmp(argv[optind], "b") == 0) {
             mode = MODE_BENCHMARK;
             optind++;
         }
+    }
+
+    if (checksum == -1) {
+        checksum = (mode == MODE_TEST) ? 1 : 0;
     }
 
     /*
@@ -594,8 +606,10 @@ int main(int argc, char** argv) {
         use_stdout = 1;  // Default to stdout if reading from stdin
     }
 
-    // Check for optional output file argument
-    if (!use_stdin && optind < argc) {
+    if (mode == MODE_TEST) {
+        use_stdout = 0;
+        f_out = NULL;
+    } else if (!use_stdin && optind < argc) {
         strncpy(out_path, argv[optind], 1023);
         use_stdout = 0;
     } else if (to_stdout) {
@@ -615,14 +629,14 @@ int main(int argc, char** argv) {
     }
 
     // Safety check: prevent overwriting input file
-    if (!use_stdin && !use_stdout && strcmp(in_path, out_path) == 0) {
+    if (mode != MODE_TEST && !use_stdin && !use_stdout && strcmp(in_path, out_path) == 0) {
         zxc_log("Error: Input and output filenames are identical.\n");
         if (f_in) fclose(f_in);
         return 1;
     }
 
     // Open output file if not writing to stdout
-    if (!use_stdout) {
+    if (!use_stdout && mode != MODE_TEST) {
         char resolved_out[4096];
         if (zxc_validate_output_path(out_path, resolved_out, sizeof(resolved_out)) != 0) {
             zxc_log("Error: Invalid output path '%s': %s\n", out_path, strerror(errno));
@@ -692,7 +706,7 @@ int main(int argc, char** argv) {
     // Set large buffers for I/O performance
     char *b1 = malloc(1024 * 1024), *b2 = malloc(1024 * 1024);
     setvbuf(f_in, b1, _IOFBF, 1024 * 1024);
-    setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
+    if (f_out) setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
 
     zxc_log_v("Starting... (Compression Level %d)\n", level);
     if (g_verbose) zxc_log("Checksum: %s\n", checksum ? "enabled" : "disabled");
@@ -709,7 +723,7 @@ int main(int argc, char** argv) {
         setvbuf(stdin, NULL, _IONBF, 0);
 
     if (!use_stdout) {
-        fclose(f_out);
+        if (f_out) fclose(f_out);
     } else {
         fflush(f_out);
         setvbuf(stdout, NULL, _IONBF, 0);
