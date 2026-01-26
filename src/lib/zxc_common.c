@@ -123,7 +123,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  * @return The 1-byte checksum value.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_file_header_checksum(const uint8_t* header) {
-    const uint64_t hash = zxc_checksum(header, ZXC_FILE_HEADER_SIZE - 1, ZXC_CHECKSUM_RAPIDHASH);
+    const uint32_t hash = zxc_checksum(header, ZXC_FILE_HEADER_SIZE - 1, ZXC_CHECKSUM_RAPIDHASH);
     return (uint8_t)((hash ^ (hash >> ZXC_BITS_PER_BYTE)) & 0xFF);
 }
 

@@ -137,7 +137,7 @@ extern "C" {
 #define ZXC_FILE_HEADER_SIZE 8  // Magic (4 bytes) + Version (1 byte) + Chunk (1 byte) + Reserved (1 byte) + Checksum (1 byte)
 #define ZXC_BLOCK_HEADER_SIZE \
     12  // Type (1) + Flags (1) + Reserved (2) + Comp Size (4) + Raw Size (4)
-#define ZXC_BLOCK_CHECKSUM_SIZE 8      // Size of checksum field in bytes
+#define ZXC_BLOCK_CHECKSUM_SIZE 4      // Size of checksum field in bytes
 #define ZXC_NUM_HEADER_BINARY_SIZE 16  // Num Header: N Values (8) + Frame Size (2) + Reserved (6)
 #define ZXC_GLO_HEADER_BINARY_SIZE \
     16  // GLO Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
@@ -152,7 +152,7 @@ extern "C" {
 
 // Block Flags
 #define ZXC_BLOCK_FLAG_NONE 0U         // No flags
-#define ZXC_BLOCK_FLAG_CHECKSUM 0x80U  // Block has a checksum (8 bytes after header)
+#define ZXC_BLOCK_FLAG_CHECKSUM 0x80U  // Block has a checksum (4 bytes after compressed body)
 #define ZXC_CHECKSUM_TYPE_MASK 0x0FU   // Lower 4 bits for algorithm ID
 
 // Checksum Algorithms
@@ -662,16 +662,16 @@ void zxc_aligned_free(void* ptr);
  */
 
 /**
- * @brief Calculates a 64-bit XXH3checksum for a given input buffer.
+ * @brief Calculates a 32-bit hash for a given input buffer.
  * @param[in] input Pointer to the data buffer.
  * @param[in] len Length of the data in bytes.
  * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_RAPIDHASH).
- * @return The calculated 64-bit hash value.
+ * @return The calculated 32-bit hash value.
  */
-static ZXC_ALWAYS_INLINE uint64_t zxc_checksum(const void* RESTRICT input, size_t len,
+static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, size_t len,
                                                uint8_t hash_method) {
-    if (LIKELY(hash_method == ZXC_CHECKSUM_RAPIDHASH)) return rapidhash(input, len);
-    return rapidhash(input, len);
+    uint64_t hash = rapidhash(input, len);
+    return (uint32_t)(hash ^ (hash >> (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)));
 }
 
 /**

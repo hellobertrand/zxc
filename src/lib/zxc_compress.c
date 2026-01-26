@@ -391,19 +391,17 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
  * @param[in] dst_cap Capacity of the destination buffer in bytes.
  * @param[out] out_sz Pointer to a variable where the total size of the compressed
  * output will be stored.
- * @param[in] crc_val The pre-calculated XXH3 value (if checksum is enabled).
  *
  * @return 0 on success, or -1 on failure (e.g., invalid input size, destination
  * buffer too small).
  */
 static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
-                                uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz,
-                                uint64_t crc_val) {
+                                uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz) {
     if (UNLIKELY(src_size % 4 != 0 || src_size == 0)) return -1;
     int chk = ctx->checksum_enabled;
 
     size_t count = src_size / 4;
-    size_t h_gap = ZXC_BLOCK_HEADER_SIZE + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    size_t h_gap = ZXC_BLOCK_HEADER_SIZE;
 
     if (UNLIKELY(dst_cap < h_gap + ZXC_NUM_HEADER_BINARY_SIZE)) return -1;
 
@@ -554,6 +552,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT s
 
     uint32_t p_sz = (uint32_t)(p_curr - (dst + h_gap));
     if (chk) {
+        if (UNLIKELY(rem < ZXC_BLOCK_CHECKSUM_SIZE)) return -1;
         bh.block_flags |= ZXC_BLOCK_FLAG_CHECKSUM;
         bh.block_flags |= (ZXC_CHECKSUM_RAPIDHASH & ZXC_CHECKSUM_TYPE_MASK);
     } else {
@@ -563,8 +562,8 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT s
     bh.comp_size = p_sz;
     int hw = zxc_write_block_header(dst, dst_cap, &bh);
 
-    if (chk) zxc_store_le64(dst + hw, crc_val);
-    *out_sz = hw + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0) + p_sz;
+    // Checksum will be appended by the wrapper 
+    *out_sz = hw + p_sz;
     return 0;
 }
 
@@ -611,13 +610,11 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT s
  * @param[in] dst_cap   Maximum capacity of the destination buffer.
  * @param[out] out_sz    [Out] Pointer to a variable that will receive the total size
  * of the compressed output.
- * @param[in] crc_val   The pre-calculated XXH3 value (if checksum is enabled).
  *
  * @return 0 on success, or -1 if an error occurs (e.g., buffer overflow).
  */
 static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
-                                uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz,
-                                uint64_t crc_val) {
+                                uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz) {
     int level = ctx->compression_level;
     int chk = ctx->checksum_enabled;
 
@@ -934,7 +931,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         if (rle_size < lit_c - (lit_c >> 5)) use_rle = 1;
     }
 
-    size_t h_gap = ZXC_BLOCK_HEADER_SIZE + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    size_t h_gap = ZXC_BLOCK_HEADER_SIZE;
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GLO, .raw_size = (uint32_t)src_size};
     uint8_t* p = dst + h_gap;
     size_t rem = dst_cap - h_gap;
@@ -1076,8 +1073,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     bh.comp_size = p_sz;
     int hw = zxc_write_block_header(dst, dst_cap, &bh);
 
-    if (chk) zxc_store_le64(dst + hw, crc_val);
-    *out_sz = hw + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0) + p_sz;
+    // Checksum will be appended by the wrapper 
+    *out_sz = hw + p_sz;
     return 0;
 }
 
@@ -1106,13 +1103,11 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
  * @param[in] dst_cap   Maximum capacity of the destination buffer.
  * @param[out] out_sz    [Out] Pointer to a variable that will receive the total size
  * of the compressed output.
- * @param[in] crc_val   The pre-calculated XXH3 value (if checksum is enabled).
  *
  * @return 0 on success, or -1 if an error occurs (e.g., buffer overflow).
  */
 static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
-                                uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz,
-                                uint64_t crc_val) {
+                                uint8_t* RESTRICT dst, size_t dst_cap, size_t* out_sz) {
     int level = ctx->compression_level;
     int chk = ctx->checksum_enabled;
 
@@ -1215,7 +1210,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
         lit_c += last_lits;
     }
 
-    size_t h_gap = ZXC_BLOCK_HEADER_SIZE + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    size_t h_gap = ZXC_BLOCK_HEADER_SIZE;
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GHI, .raw_size = (uint32_t)src_size};
     uint8_t* p = dst + h_gap;
     size_t rem = dst_cap - h_gap;
@@ -1262,6 +1257,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 
     uint32_t p_sz = (uint32_t)(p_curr - (dst + h_gap));
     if (chk) {
+        if (UNLIKELY(rem < ZXC_BLOCK_CHECKSUM_SIZE)) return -1;
         bh.block_flags |= ZXC_BLOCK_FLAG_CHECKSUM;
         bh.block_flags |= (ZXC_CHECKSUM_RAPIDHASH & ZXC_CHECKSUM_TYPE_MASK);
     } else {
@@ -1270,8 +1266,8 @@ static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     bh.comp_size = p_sz;
     int hw = zxc_write_block_header(dst, dst_cap, &bh);
 
-    if (chk) zxc_store_le64(dst + hw, crc_val);
-    *out_sz = hw + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0) + p_sz;
+    // Checksum will be appended by the wrapper 
+    *out_sz = hw + p_sz;
     return 0;
 }
 
@@ -1290,16 +1286,15 @@ static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
  * (header
  * + data + checksum).
  * @param[in] chk Boolean flag: if non-zero, a checksum is calculated and added.
- * @param[in] crc_val The pre-calculated XXH3 value (if checksum is enabled).
  *
  * @return 0 on success, -1 if the destination buffer capacity is
  * insufficient.
  */
 static int zxc_encode_block_raw(const uint8_t* src, size_t src_sz, uint8_t* dst, size_t dst_cap,
-                                size_t* out_sz, int chk, uint64_t crc_val) {
+                                size_t* out_sz, int chk) {
+    size_t h_gap = ZXC_BLOCK_HEADER_SIZE;
     size_t chk_sz = chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0;
-    size_t h_gap = ZXC_BLOCK_HEADER_SIZE + chk_sz;
-    size_t total = h_gap + src_sz;
+    size_t total = h_gap + src_sz + chk_sz;
 
     if (UNLIKELY(dst_cap < total)) return -1;
 
@@ -1314,12 +1309,10 @@ static int zxc_encode_block_raw(const uint8_t* src, size_t src_sz, uint8_t* dst,
 
     zxc_write_block_header(dst, dst_cap, &bh);
 
-    if (chk) {
-        zxc_store_le64(dst + ZXC_BLOCK_HEADER_SIZE, crc_val);
-    }
-
     ZXC_MEMCPY(dst + h_gap, src, src_sz);
-    *out_sz = total;
+
+    // Checksum will be appended by the wrapper 
+    *out_sz = h_gap + src_sz;
     return 0;
 }
 
@@ -1395,31 +1388,45 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
     int chk = ctx->checksum_enabled;
 
     size_t w = 0;
-    uint64_t crc = 0;
     int res = -1;
     int try_num = 0;
-
-    if (chk) crc = zxc_checksum(chunk, src_sz, ZXC_CHECKSUM_RAPIDHASH);
 
     if (zxc_probe_is_numeric(chunk, src_sz)) try_num = 1;
 
     if (try_num) {
-        res = zxc_encode_block_num(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
+        res = zxc_encode_block_num(ctx, chunk, src_sz, dst, dst_cap, &w);
         if (res != 0 || w > (src_sz - (src_sz >> 2)))  // w > 75% of src_sz
             try_num = 0;  // NUM didn't compress well, try GLO/GHI instead
     }
 
     if (!try_num) {
         if (ctx->compression_level <= 2) {
-            res = zxc_encode_block_ghi(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
+            res = zxc_encode_block_ghi(ctx, chunk, src_sz, dst, dst_cap, &w);
         } else {
-            res = zxc_encode_block_glo(ctx, chunk, src_sz, dst, dst_cap, &w, crc);
+            res = zxc_encode_block_glo(ctx, chunk, src_sz, dst, dst_cap, &w);
         }
     }
 
-    if (UNLIKELY(res != 0 || w >= src_sz)) {
-        res = zxc_encode_block_raw(chunk, src_sz, dst, dst_cap, &w, chk, crc);
+    // Check expansion. W contains Header + Payload.
+    // If we add checksum, will it exceed raw size?
+    size_t final_est = w + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    if (UNLIKELY(res != 0 || final_est >= src_sz + ZXC_BLOCK_HEADER_SIZE)) {
+        res = zxc_encode_block_raw(chunk, src_sz, dst, dst_cap, &w, chk);
         if (UNLIKELY(res != 0)) return res;
+    }
+
+    if (chk) {
+        // Calculate checksum on the compressed payload (w currently excludes checksum)
+        // Header is at dst, data starts at dst + ZXC_BLOCK_HEADER_SIZE
+        if (UNLIKELY(w < ZXC_BLOCK_HEADER_SIZE)) return -1;
+        uint32_t payload_sz = (uint32_t)(w - ZXC_BLOCK_HEADER_SIZE);
+        
+        // Ensure space (encoders check space including checksum, so this is safe, but verify)
+        if (UNLIKELY(w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap)) return -1;
+
+        uint32_t c = zxc_checksum(dst + ZXC_BLOCK_HEADER_SIZE, payload_sz, ZXC_CHECKSUM_RAPIDHASH);
+        zxc_store_le32(dst + w, c);
+        w += ZXC_BLOCK_CHECKSUM_SIZE;
     }
 
     return (int)w;
