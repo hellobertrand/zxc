@@ -206,7 +206,7 @@ int test_null_output_decompression() {
     // Decompress with NULL output
     // This should return the decompressed size but write nothing
     int64_t d_sz = zxc_stream_decompress(f_comp, NULL, 1, 1);
-    
+
     if (d_sz != (int64_t)size) {
         printf("Failed: Expected size %zu, got %lld\n", size, (long long)d_sz);
         fclose(f_in);
@@ -613,7 +613,6 @@ int test_bitpack() {
 
     printf("PASS\n\n");
     return 1;
-    return 1;
 }
 
 // Checks that the EOF block is correctly appended
@@ -646,8 +645,9 @@ int test_eof_block_structure() {
     const uint8_t expected[12] = {0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
     if (memcmp(eof_ptr, expected, 12) != 0) {
-        printf("Failed: EOF block mismatch.\nExpected: FF 00 ...\nGot:      %02X %02X %02X %02X ...\n",
-               eof_ptr[0], eof_ptr[1], eof_ptr[2], eof_ptr[3]);
+        printf(
+            "Failed: EOF block mismatch.\nExpected: FF 00 ...\nGot:      %02X %02X %02X %02X ...\n",
+            eof_ptr[0], eof_ptr[1], eof_ptr[2], eof_ptr[3]);
         free(compressed);
         return 0;
     }
@@ -687,8 +687,9 @@ int test_eof_block_structure() {
     const uint8_t expected[12] = {0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
     if (memcmp(eof_ptr, expected, 12) != 0) {
-        printf("Failed: EOF block mismatch.\nExpected: FF 00 ...\nGot:      %02X %02X %02X %02X ...\n",
-               eof_ptr[0], eof_ptr[1], eof_ptr[2], eof_ptr[3]);
+        printf(
+            "Failed: EOF block mismatch.\nExpected: FF 00 ...\nGot:      %02X %02X %02X %02X ...\n",
+            eof_ptr[0], eof_ptr[1], eof_ptr[2], eof_ptr[3]);
         free(compressed);
         return 0;
     }
@@ -777,7 +778,7 @@ int main() {
     if (!test_buffer_api()) total_failures++;
 
     if (!test_multithread_roundtrip()) total_failures++;
-    
+
     if (!test_null_output_decompression()) total_failures++;
 
     if (!test_max_compressed_size_logic()) total_failures++;

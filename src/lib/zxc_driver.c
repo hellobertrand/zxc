@@ -176,7 +176,8 @@ typedef struct {
  * @return The number of bytes written to the output buffer on success, or a
  * negative error code on failure.
  */
-typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* ctx, const uint8_t* in, const size_t in_sz, uint8_t* out,
+typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* ctx, const uint8_t* RESTRICT in,
+                                     const size_t in_sz, uint8_t* RESTRICT out,
                                      const size_t out_cap);
 
 /**
@@ -449,8 +450,9 @@ static void* zxc_async_writer(void* arg) {
  * @return The total number of bytes written to the output stream on success, or
  * -1 if an initialization or I/O error occurred.
  */
-static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_threads, const int mode, const int level,
-                                     const int checksum_enabled, zxc_chunk_processor_t func) {
+static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_threads, const int mode,
+                                     const int level, const int checksum_enabled,
+                                     zxc_chunk_processor_t func) {
     zxc_stream_ctx_t ctx;
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
 
@@ -627,7 +629,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                                      .comp_size = 0,
                                      .raw_size = 0};
         zxc_write_block_header(eof_buf, ZXC_BLOCK_HEADER_SIZE, &eof_bh);
-        if (UNLIKELY(f_out && fwrite(eof_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_out) != ZXC_BLOCK_HEADER_SIZE)) {
+        if (UNLIKELY(f_out &&
+                     fwrite(eof_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_out) != ZXC_BLOCK_HEADER_SIZE)) {
             return -1;
         }
         w_args.total_bytes += ZXC_BLOCK_HEADER_SIZE;
@@ -649,7 +652,8 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads, const 
                                  zxc_compress_chunk_wrapper);
 }
 
-int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads, const int checksum_enabled) {
+int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads,
+                              const int checksum_enabled) {
     if (UNLIKELY(!f_in)) return -1;
 
     return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, checksum_enabled,
