@@ -613,6 +613,48 @@ int test_bitpack() {
 
     printf("PASS\n\n");
     return 1;
+    return 1;
+}
+
+// Checks that the EOF block is correctly appended
+int test_eof_block_structure() {
+    printf("=== TEST: Unit - EOF Block Structure ===\n");
+
+    const char* input = "test";
+    size_t src_size = 4;
+    size_t max_dst_size = zxc_compress_bound(src_size);
+    uint8_t* compressed = malloc(max_dst_size);
+    if (!compressed) return 0;
+
+    size_t comp_size = zxc_compress(input, src_size, compressed, max_dst_size, 1, 0);
+    if (comp_size == 0) {
+        printf("Failed: Compression returned 0\n");
+        free(compressed);
+        return 0;
+    }
+
+    // EOF block should be at the very end (last 12 bytes)
+    if (comp_size < 12) {
+        printf("Failed: Compressed size too small for EOF block (%zu)\n", comp_size);
+        free(compressed);
+        return 0;
+    }
+
+    uint8_t* eof_ptr = compressed + comp_size - 12;
+    // Expected: Type=255 (0xFF), Flags=0, Reserved=0, CompSz=0, RawSz=0
+    // Pattern: FF 00 00 00 00 00 00 00 00 00 00 00
+    const uint8_t expected[12] = {0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+    if (memcmp(eof_ptr, expected, 12) != 0) {
+        printf("Failed: EOF block mismatch.\nExpected: FF 00 ...\nGot:      %02X %02X %02X %02X ...\n",
+               eof_ptr[0], eof_ptr[1], eof_ptr[2], eof_ptr[3]);
+        free(compressed);
+        return 0;
+    }
+
+    printf("PASS\n\n");
+    free(compressed);
+    return 1;
 }
 
 // Checks that the EOF block is correctly appended
