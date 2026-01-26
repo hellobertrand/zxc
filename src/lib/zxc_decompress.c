@@ -205,8 +205,6 @@ static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
 #endif
 }
 
-
-
 #if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
 /**
  * @brief Computes the prefix sum of a 128-bit vector of 32-bit unsigned
@@ -1488,7 +1486,8 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
     size_t header_len = ZXC_BLOCK_HEADER_SIZE;
 
     // Check bounds: Header + Body + Checksum(if any)
-    if (UNLIKELY(src_sz < header_len + comp_sz + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0))) return -1;
+    if (UNLIKELY(src_sz < header_len + comp_sz + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0)))
+        return -1;
 
     const uint8_t* data = src + header_len;
 

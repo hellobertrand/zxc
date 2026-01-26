@@ -135,7 +135,7 @@ int zxc_write_file_header(uint8_t* dst, size_t dst_capacity) {
     dst[5] = (uint8_t)(ZXC_BLOCK_SIZE / ZXC_BLOCK_UNIT);
     dst[6] = 0;  // Reserved (1 byte)
     dst[7] = zxc_file_header_checksum(dst);
-    
+
     return ZXC_FILE_HEADER_SIZE;
 }
 
@@ -338,5 +338,5 @@ size_t zxc_compress_bound(size_t input_size) {
     size_t n = (input_size + ZXC_BLOCK_SIZE - 1) / ZXC_BLOCK_SIZE;
     if (n == 0) n = 1;
     return ZXC_FILE_HEADER_SIZE + (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + 64)) +
-           input_size;
+           input_size + ZXC_BLOCK_HEADER_SIZE;
 }
