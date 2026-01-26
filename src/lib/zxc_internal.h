@@ -134,7 +134,9 @@ extern "C" {
 #define ZXC_VBYTE_ALLOC_LEN 3  // Max length for allocation (sufficient for < 2MB blocks)
 
 // Binary Header Sizes
-#define ZXC_FILE_HEADER_SIZE 8  // Magic (4 bytes) + Version (1 byte) + Chunk (1 byte) + Reserved (1 byte) + Checksum (1 byte)
+#define ZXC_FILE_HEADER_SIZE \
+    8  // Magic (4 bytes) + Version (1 byte) + Chunk (1 byte) + Reserved (1 byte) + Checksum (1
+       // byte)
 #define ZXC_BLOCK_HEADER_SIZE \
     12  // Type (1) + Flags (1) + Reserved (2) + Comp Size (4) + Raw Size (4)
 #define ZXC_BLOCK_CHECKSUM_SIZE 4      // Size of checksum field in bytes
@@ -247,12 +249,14 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(int level) {
  *   Uses Delta Encoding + ZigZag + Bitpacking.
  * - `ZXC_BLOCK_GHI` (3): General-purpose high-velocity mode using LZ77 with advanced
  * techniques (lazy matching, step skipping) for maximum ratio. Includes 3 sections descriptors.
+ * - `ZXC_BLOCK_EOF` (255): End of file marker.
  */
 typedef enum {
     ZXC_BLOCK_RAW = 0,
     ZXC_BLOCK_GLO = 1,
     ZXC_BLOCK_NUM = 2,
-    ZXC_BLOCK_GHI = 3
+    ZXC_BLOCK_GHI = 3,
+    ZXC_BLOCK_EOF = 255
 } zxc_block_type_t;
 
 /**
@@ -676,7 +680,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, size_
     else
         // Default fallthrough to rapidhash for unknown types (safe default)
         hash = rapidhash(input, len);
-    
+
     return (uint32_t)(hash ^ (hash >> (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)));
 }
 

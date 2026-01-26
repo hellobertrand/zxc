@@ -287,6 +287,18 @@ size_t zxc_compress(const void* src, size_t src_size, void* dst, size_t dst_capa
     }
 
     zxc_cctx_free(&ctx);
+
+    // Write EOF Block
+    size_t rem_cap = (size_t)(op_end - op);
+    zxc_block_header_t eof_bh = {.block_type = ZXC_BLOCK_EOF,
+                                 .block_flags = 0,
+                                 .reserved = 0,
+                                 .comp_size = 0,
+                                 .raw_size = 0};
+    int eof_size = zxc_write_block_header(op, rem_cap, &eof_bh);
+    if (UNLIKELY(eof_size < 0)) return 0;
+    op += eof_size;
+
     return (size_t)(op - op_start);
 }
 
@@ -318,6 +330,11 @@ size_t zxc_decompress(const void* src, size_t src_size, void* dst, size_t dst_ca
         if (zxc_read_block_header(ip, rem_src, &bh) != 0) {
             zxc_cctx_free(&ctx);
             return 0;
+        }
+
+        if (bh.block_type == ZXC_BLOCK_EOF) {
+            // End of stream marker
+            break;
         }
 
         // Safety check: ensure the block (header + data + checksum) fits in the input buffer

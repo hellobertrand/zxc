@@ -562,7 +562,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* ctx, const uint8_t* RESTRICT s
     bh.comp_size = p_sz;
     int hw = zxc_write_block_header(dst, dst_cap, &bh);
 
-    // Checksum will be appended by the wrapper 
+    // Checksum will be appended by the wrapper
     *out_sz = hw + p_sz;
     return 0;
 }
@@ -1073,7 +1073,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     bh.comp_size = p_sz;
     int hw = zxc_write_block_header(dst, dst_cap, &bh);
 
-    // Checksum will be appended by the wrapper 
+    // Checksum will be appended by the wrapper
     *out_sz = hw + p_sz;
     return 0;
 }
@@ -1266,7 +1266,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
     bh.comp_size = p_sz;
     int hw = zxc_write_block_header(dst, dst_cap, &bh);
 
-    // Checksum will be appended by the wrapper 
+    // Checksum will be appended by the wrapper
     *out_sz = hw + p_sz;
     return 0;
 }
@@ -1311,7 +1311,7 @@ static int zxc_encode_block_raw(const uint8_t* src, size_t src_sz, uint8_t* dst,
 
     ZXC_MEMCPY(dst + h_gap, src, src_sz);
 
-    // Checksum will be appended by the wrapper 
+    // Checksum will be appended by the wrapper
     *out_sz = h_gap + src_sz;
     return 0;
 }
@@ -1409,8 +1409,9 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
 
     // Check expansion. W contains Header + Payload.
     // If we add checksum, will it exceed raw size?
-    size_t final_est = w + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-    if (UNLIKELY(res != 0 || final_est >= src_sz + ZXC_BLOCK_HEADER_SIZE)) {
+    // size_t final_w = w + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    // if (UNLIKELY(res != 0 || w >= src_sz + ZXC_BLOCK_HEADER_SIZE)) {
+    if (UNLIKELY(res != 0 || w >= src_sz)) {
         res = zxc_encode_block_raw(chunk, src_sz, dst, dst_cap, &w, chk);
         if (UNLIKELY(res != 0)) return res;
     }
@@ -1420,12 +1421,13 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src
         // Header is at dst, data starts at dst + ZXC_BLOCK_HEADER_SIZE
         if (UNLIKELY(w < ZXC_BLOCK_HEADER_SIZE)) return -1;
         uint32_t payload_sz = (uint32_t)(w - ZXC_BLOCK_HEADER_SIZE);
-        
+
         // Ensure space (encoders check space including checksum, so this is safe, but verify)
         if (UNLIKELY(w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap)) return -1;
 
-        uint32_t c = zxc_checksum(dst + ZXC_BLOCK_HEADER_SIZE, payload_sz, ZXC_CHECKSUM_RAPIDHASH);
-        zxc_store_le32(dst + w, c);
+        uint32_t crc =
+            zxc_checksum(dst + ZXC_BLOCK_HEADER_SIZE, payload_sz, ZXC_CHECKSUM_RAPIDHASH);
+        zxc_store_le32(dst + w, crc);
         w += ZXC_BLOCK_CHECKSUM_SIZE;
     }
 
