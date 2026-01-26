@@ -171,6 +171,57 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
     return 1;
 }
 
+// Checks that the stream decompression can accept NULL output (Integrity Check Mode)
+int test_null_output_decompression() {
+    printf("=== TEST: Unit - NULL Output Decompression (Integrity Check) ===\n");
+
+    size_t size = 64 * 1024;
+    uint8_t* input = malloc(size);
+    if (!input) return 0;
+    gen_lz_data(input, size);
+
+    FILE* f_in = tmpfile();
+    FILE* f_comp = tmpfile();
+
+    if (!f_in || !f_comp) {
+        if (f_in) fclose(f_in);
+        if (f_comp) fclose(f_comp);
+        free(input);
+        return 0;
+    }
+
+    fwrite(input, 1, size, f_in);
+    fseek(f_in, 0, SEEK_SET);
+
+    // Compress with checksum
+    if (zxc_stream_compress(f_in, f_comp, 1, 3, 1) < 0) {
+        printf("Compression Failed!\n");
+        fclose(f_in);
+        fclose(f_comp);
+        free(input);
+        return 0;
+    }
+    fseek(f_comp, 0, SEEK_SET);
+
+    // Decompress with NULL output
+    // This should return the decompressed size but write nothing
+    int64_t d_sz = zxc_stream_decompress(f_comp, NULL, 1, 1);
+    
+    if (d_sz != (int64_t)size) {
+        printf("Failed: Expected size %zu, got %lld\n", size, (long long)d_sz);
+        fclose(f_in);
+        fclose(f_comp);
+        free(input);
+        return 0;
+    }
+
+    printf("PASS\n\n");
+    fclose(f_in);
+    fclose(f_comp);
+    free(input);
+    return 1;
+}
+
 // Checks that the utility function calculates a sufficient size
 int test_max_compressed_size_logic() {
     printf("=== TEST: Unit - zxc_compress_bound ===\n");
@@ -643,6 +694,8 @@ int main() {
     if (!test_buffer_api()) total_failures++;
 
     if (!test_multithread_roundtrip()) total_failures++;
+    
+    if (!test_null_output_decompression()) total_failures++;
 
     if (!test_max_compressed_size_logic()) total_failures++;
     if (!test_invalid_arguments()) total_failures++;

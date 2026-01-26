@@ -407,13 +407,20 @@ Triggered when data is detected as a dense array of 32-bit integers.
 3.  **Integration**: Computes the prefix sum (cumulative addition) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
 
 ### 5.7 Data Integrity
-Every block can optionally be protected by a **64-bit checksum** to ensure data reliability.
+Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.
+
+#### Post-Compression Verification
+Unlike traditional codecs that verify the integrity of the original uncompressed data, ZXC calculates checksums on the **compressed** payload.
+
+*   **Zero-Overhead Decompression**: Verifying uncompressed data requires computing a hash over the output *after* decompression, contending for cache and CPU resources with the decompression logic itself. By checksumming the compressed stream, verification happens *during* the read phase, before the data even enters the decoder.
+*   **Early Failure Detection**: Corruption is detected before attempting to decompress, preventing potential crashes or buffer overruns in the decoder caused by malformed data.
+*   **Reduced Memory Bandwidth**: The checksum is computed over a much smaller dataset (the compressed block), saving significant memory bandwidth.
 
 #### Multi-Algorithm Support
-ZXC supports multiple integrity verification algorithms, allowing the format to adapt to different security and performance requirements. The specific algorithm used is identified in the block header's flags byte.
+ZXC supports multiple integrity verification algorithms (though currently standardized on rapidhash).
 
-*   **Identified Algorithm (0x00: rapidhash)**: The default and recommended algorithm. It is a very fast, high-quality, and platform-independent hashing algorithm fully optimized for instruction pipelines.
-*   **Performance First**: By using a modern non-cryptographic hash, ZXC ensures that integrity checks do not bottleneck decompression throughput, even at high GB/s speeds.
+*   **Identified Algorithm (0x00: rapidhash)**: The default algorithm. The 64-bit rapidhash result is folded (XORed) into a 32-bit value to minimize storage overhead while maintaining strong collision resistance for block-level integrity.
+*   **Performance First**: By using a modern non-cryptographic hash, ZXC ensures that integrity checks do not bottleneck decompression throughput.
 
 #### Credit
 The default `rapidhash` algorithm is based on wyhash and was developed by Nicolas De Carli. It is designed to fully exploit hardware performance while maintaining top-tier mathematical distribution qualities.
