@@ -98,19 +98,20 @@ The file begins with an **8-byte** header that identifies the format and specifi
 **FILE Header (8 bytes):**
 
 ```
-  Offset:  0               4       5       6               8
-           +---------------+-------+-------+---------------+
-           | Magic Word    | Ver   | Chunk | Reserved      |
-           | (4 bytes)     | (1B)  | (1B)  | (2 bytes)     |
-           +---------------+-------+-------+---------------+
+  Offset:  0               4       5       6       7       8
+           +---------------+-------+-------+-------+-------+
+           | Magic Word    | Ver   | Chunk | Res   | Chk   |
+           | (4 bytes)     | (1B)  | (1B)  | (1B)  | (1B)  |
+           +---------------+-------+-------+-------+-------+
 ```
 
 * **Magic Word (4 bytes)**: `0x5A 0x58 0x43 0x30` ("ZXC0" in Little Endian).
-* **Version (1 byte)**: Current version is `1`.
+* **Version (1 byte)**: Current version is `3`.
 * **Chunk Size Code (1 byte)**: Defines the processing block size:
   - `0` = Default mode (256 KB, for backward compatibility)
   - `N` = Chunk size is `N × 4096` bytes (e.g., `62` = 248 KB)
-* **Reserved (2 bytes)**: Future use.
+* **Reserved (1 byte)**: Future use.
+* **Checksum (1 byte)**: Rapidhash checksum (low byte) of the first 7 bytes (Magic Word through Reserved). Always calculated and verified.
 
 ### 5.2 Block Header Structure
 Each data block consists of a **12-byte** generic header that precedes the specific payload. This header allows the decoder to navigate the stream and identify the processing method required for the next chunk of data.

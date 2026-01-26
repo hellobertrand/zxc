@@ -134,7 +134,7 @@ extern "C" {
 #define ZXC_VBYTE_ALLOC_LEN 3  // Max length for allocation (sufficient for < 2MB blocks)
 
 // Binary Header Sizes
-#define ZXC_FILE_HEADER_SIZE 8  // Magic (4 bytes) + Version (1 byte) + Reserved (3 bytes)
+#define ZXC_FILE_HEADER_SIZE 8  // Magic (4 bytes) + Version (1 byte) + Chunk (1 byte) + Reserved (1 byte) + Checksum (1 byte)
 #define ZXC_BLOCK_HEADER_SIZE \
     12  // Type (1) + Flags (1) + Reserved (2) + Comp Size (4) + Raw Size (4)
 #define ZXC_BLOCK_CHECKSUM_SIZE 8      // Size of checksum field in bytes
