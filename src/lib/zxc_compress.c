@@ -1383,8 +1383,8 @@ static int zxc_probe_is_numeric(const uint8_t* src, size_t size) {
 }
 
 // cppcheck-suppress unusedFunction
-int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src_sz, uint8_t* dst,
-                               size_t dst_cap) {
+int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, const size_t src_sz, uint8_t* dst,
+                               const size_t dst_cap) {
     int chk = ctx->checksum_enabled;
 
     size_t w = 0;

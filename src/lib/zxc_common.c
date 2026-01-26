@@ -16,7 +16,7 @@
  * ============================================================================
  */
 
-void* zxc_aligned_malloc(size_t size, size_t alignment) {
+void* zxc_aligned_malloc(const size_t size, const size_t alignment) {
 #if defined(_WIN32)
     return _aligned_malloc(size, alignment);
 #else
@@ -34,7 +34,7 @@ void zxc_aligned_free(void* ptr) {
 #endif
 }
 
-int zxc_cctx_init(zxc_cctx_t* ctx, size_t chunk_size, int mode, int level, int checksum_enabled) {
+int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, const int level, const int checksum_enabled) {
     ZXC_MEMSET(ctx, 0, sizeof(zxc_cctx_t));
 
     if (mode == 0) return 0;
@@ -173,7 +173,7 @@ int zxc_read_block_header(const uint8_t* src, size_t src_size, zxc_block_header_
     return 0;
 }
 
-int zxc_write_num_header(uint8_t* dst, size_t rem, const zxc_num_header_t* nh) {
+int zxc_write_num_header(uint8_t* dst, const size_t rem, const zxc_num_header_t* nh) {
     if (UNLIKELY(rem < ZXC_NUM_HEADER_BINARY_SIZE)) return -1;
 
     zxc_store_le64(dst, nh->n_values);
@@ -183,7 +183,7 @@ int zxc_write_num_header(uint8_t* dst, size_t rem, const zxc_num_header_t* nh) {
     return ZXC_NUM_HEADER_BINARY_SIZE;
 }
 
-int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* nh) {
+int zxc_read_num_header(const uint8_t* src, const size_t src_size, zxc_num_header_t* nh) {
     if (UNLIKELY(src_size < ZXC_NUM_HEADER_BINARY_SIZE)) return -1;
 
     nh->n_values = zxc_le64(src);
@@ -191,7 +191,7 @@ int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* n
     return 0;
 }
 
-int zxc_write_glo_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
+int zxc_write_glo_header_and_desc(uint8_t* dst, const size_t rem, const zxc_gnr_header_t* gh,
                                   const zxc_section_desc_t desc[ZXC_GLO_SECTIONS]) {
     size_t needed = ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
@@ -216,7 +216,7 @@ int zxc_write_glo_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
     return (int)needed;
 }
 
-int zxc_read_glo_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
+int zxc_read_glo_header_and_desc(const uint8_t* src, const size_t len, zxc_gnr_header_t* gh,
                                  zxc_section_desc_t desc[ZXC_GLO_SECTIONS]) {
     size_t needed = ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
@@ -238,7 +238,7 @@ int zxc_read_glo_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_
     return 0;
 }
 
-int zxc_write_ghi_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
+int zxc_write_ghi_header_and_desc(uint8_t* dst, const size_t rem, const zxc_gnr_header_t* gh,
                                   const zxc_section_desc_t desc[ZXC_GHI_SECTIONS]) {
     size_t needed = ZXC_GHI_HEADER_BINARY_SIZE + ZXC_GHI_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
@@ -263,7 +263,7 @@ int zxc_write_ghi_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
     return (int)needed;
 }
 
-int zxc_read_ghi_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
+int zxc_read_ghi_header_and_desc(const uint8_t* src, const size_t len, zxc_gnr_header_t* gh,
                                  zxc_section_desc_t desc[ZXC_GHI_SECTIONS]) {
     size_t needed = ZXC_GHI_HEADER_BINARY_SIZE + ZXC_GHI_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
@@ -291,8 +291,8 @@ int zxc_read_ghi_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_
  * ============================================================================
  */
 
-int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* RESTRICT dst,
-                          size_t dst_cap, uint8_t bits) {
+int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
+                          const size_t dst_cap, const uint8_t bits) {
     size_t out_bytes = ((count * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
 
     if (UNLIKELY(dst_cap < out_bytes)) return -1;
@@ -332,7 +332,7 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* R
  * COMPRESS BOUND CALCULATION
  * ============================================================================
  */
-size_t zxc_compress_bound(size_t input_size) {
+size_t zxc_compress_bound(const size_t input_size) {
     if (UNLIKELY(input_size > SIZE_MAX - (SIZE_MAX >> 10))) return 0;
 
     size_t n = (input_size + ZXC_BLOCK_SIZE - 1) / ZXC_BLOCK_SIZE;

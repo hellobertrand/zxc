@@ -43,8 +43,8 @@ extern "C" {
  *
  * @return          Total compressed bytes written, or -1 if an error occurred.
  */
-int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
-                            int checksum_enabled);
+int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads, const int level,
+                            const int checksum_enabled);
 
 /**
  * @brief Decompresses data from an input stream to an output stream.
@@ -61,7 +61,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, int n_threads, int level,
  * @return          Total decompressed bytes written, or -1 if an error
  * occurred.
  */
-int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, int n_threads, int checksum_enabled);
+int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads, const int checksum_enabled);
 
 #ifdef __cplusplus
 }

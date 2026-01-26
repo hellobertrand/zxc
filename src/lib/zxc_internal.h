@@ -221,7 +221,7 @@ typedef struct {
  * @param[in] level The compression level to use for determining LZ77 parameters.
  * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
  */
-static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(int level) {
+static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
     if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 1, 31};
     // search_depth, sufficient_len, use_lazy, lazy_attempts, step_base, step_shift
     static const zxc_lz77_params_t table[5] = {
@@ -434,7 +434,7 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_le64(const void* p) {
  *          Must point to a valid memory region of at least 2 bytes.
  * @param[in] v The 16-bit unsigned integer value to store.
  */
-static ZXC_ALWAYS_INLINE void zxc_store_le16(void* p, uint16_t v) { ZXC_MEMCPY(p, &v, sizeof(v)); }
+static ZXC_ALWAYS_INLINE void zxc_store_le16(void* p, const uint16_t v) { ZXC_MEMCPY(p, &v, sizeof(v)); }
 
 /**
  * @brief Stores a 32-bit unsigned integer in little-endian format at the specified memory location.
@@ -448,7 +448,7 @@ static ZXC_ALWAYS_INLINE void zxc_store_le16(void* p, uint16_t v) { ZXC_MEMCPY(p
  * @param[out] p Pointer to the destination memory where the value will be stored.
  * @param[in] v The 32-bit unsigned integer value to store.
  */
-static ZXC_ALWAYS_INLINE void zxc_store_le32(void* p, uint32_t v) { ZXC_MEMCPY(p, &v, sizeof(v)); }
+static ZXC_ALWAYS_INLINE void zxc_store_le32(void* p, const uint32_t v) { ZXC_MEMCPY(p, &v, sizeof(v)); }
 
 /**
  * @brief Stores a 64-bit unsigned integer in little-endian format at the specified memory location.
@@ -464,7 +464,7 @@ static ZXC_ALWAYS_INLINE void zxc_store_le32(void* p, uint32_t v) { ZXC_MEMCPY(p
  * @param[out] p Pointer to the destination memory where the value will be stored.
  * @param[in] v The 64-bit unsigned integer value to store.
  */
-static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, uint64_t v) { ZXC_MEMCPY(p, &v, sizeof(v)); }
+static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) { ZXC_MEMCPY(p, &v, sizeof(v)); }
 
 /**
  * @brief Copies 16 bytes from the source memory location to the destination memory location.
@@ -520,7 +520,7 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
  * @param[in] x The 32-bit unsigned integer to scan.
  * @return The number of trailing zeros (0-32).
  */
-static ZXC_ALWAYS_INLINE int zxc_ctz32(uint32_t x) {
+static ZXC_ALWAYS_INLINE int zxc_ctz32(const uint32_t x) {
     if (x == 0) return 32;
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_ctz(x);
@@ -550,7 +550,7 @@ static ZXC_ALWAYS_INLINE int zxc_ctz32(uint32_t x) {
  *       and MSVC (`_BitScanForward64`) when available for optimal performance.
  *       It falls back to a De Bruijn sequence multiplication method for other compilers.
  */
-static ZXC_ALWAYS_INLINE int zxc_ctz64(uint64_t x) {
+static ZXC_ALWAYS_INLINE int zxc_ctz64(const uint64_t x) {
     if (x == 0) return 64;
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_ctzll(x);
@@ -576,7 +576,7 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(uint64_t x) {
  * @param[in] n The 32-bit unsigned integer to analyze.
  * @return The 0-based index of the highest set bit. If n is 0, the behavior is undefined.
  */
-static ZXC_ALWAYS_INLINE uint8_t zxc_highbit32(uint32_t n) {
+static ZXC_ALWAYS_INLINE uint8_t zxc_highbit32(const uint32_t n) {
 #ifdef _MSC_VER
     unsigned long index;
     return (n == 0) ? 0 : (_BitScanReverse(&index, n) ? (uint8_t)(index + 1) : 0);
@@ -605,7 +605,7 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_highbit32(uint32_t n) {
  * @param[in] n The signed 32-bit integer to encode.
  * @return The ZigZag encoded unsigned 32-bit integer.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_zigzag_encode(int32_t n) {
+static ZXC_ALWAYS_INLINE uint32_t zxc_zigzag_encode(const int32_t n) {
     return ((uint32_t)n << 1) ^ (uint32_t)(-(int32_t)((uint32_t)n >> 31));
 }
 
@@ -623,7 +623,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_zigzag_encode(int32_t n) {
  * @param[in] n The unsigned 32-bit integer to decode.
  * @return The decoded signed 32-bit integer.
  */
-static ZXC_ALWAYS_INLINE int32_t zxc_zigzag_decode(uint32_t n) {
+static ZXC_ALWAYS_INLINE int32_t zxc_zigzag_decode(const uint32_t n) {
     return (int32_t)(n >> 1) ^ -(int32_t)(n & 1);
 }
 
@@ -640,7 +640,7 @@ static ZXC_ALWAYS_INLINE int32_t zxc_zigzag_decode(uint32_t n) {
  * @return A pointer to the allocated memory block, or NULL if the allocation fails.
  *         The returned pointer must be freed using the corresponding aligned free function.
  */
-void* zxc_aligned_malloc(size_t size, size_t alignment);
+void* zxc_aligned_malloc(const size_t size, const size_t alignment);
 
 /**
  * @brief Frees memory previously allocated with an aligned allocation function.
@@ -672,8 +672,8 @@ void zxc_aligned_free(void* ptr);
  * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_RAPIDHASH).
  * @return The calculated 32-bit hash value.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, size_t len,
-                                               uint8_t hash_method) {
+static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const size_t len,
+                                               const uint8_t hash_method) {
     uint64_t hash;
     if (LIKELY(hash_method == ZXC_CHECKSUM_RAPIDHASH))
         hash = rapidhash(input, len);
@@ -694,7 +694,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, size_
  * @param[in] src Pointer to the source buffer containing the data to read.
  * @param[in] size The size of the source buffer in bytes.
  */
-static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* src, size_t size) {
+static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* src, const size_t size) {
     br->ptr = src;
     br->end = src + size;
     // Safety check: ensure we have at least 8 bytes to fill the accumulator
@@ -720,7 +720,7 @@ static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* br, const uint8_t* s
  * @param[in,out] br Pointer to the bit reader context.
  * @param[in] needed The number of bits required to be available in the buffer.
  */
-static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* br, int needed) {
+static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* br, const int needed) {
     if (UNLIKELY(br->bits < needed)) {
         int safe_bits = (br->bits < 0) ? 0 : br->bits;
         br->bits = safe_bits;
@@ -771,8 +771,8 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* br, int needed) {
  * @return int The number of bytes written to the destination buffer, or a negative
  * error code on failure.
  */
-int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* RESTRICT dst,
-                          size_t dst_cap, uint8_t bits);
+int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
+                          const size_t dst_cap, const uint8_t bits);
 
 /**
  * @brief Writes a numeric header structure to a destination buffer.
@@ -785,7 +785,7 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, size_t count, uint8_t* R
  * @return int The number of bytes written, or a negative error code if the buffer
  * is too small.
  */
-int zxc_write_num_header(uint8_t* dst, size_t rem, const zxc_num_header_t* nh);
+int zxc_write_num_header(uint8_t* dst, const size_t rem, const zxc_num_header_t* nh);
 
 /**
  * @brief Reads a numeric header structure from a source buffer.
@@ -798,7 +798,7 @@ int zxc_write_num_header(uint8_t* dst, size_t rem, const zxc_num_header_t* nh);
  * @return int The number of bytes read from the source, or a negative error code on
  * failure.
  */
-int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* nh);
+int zxc_read_num_header(const uint8_t* src, const size_t src_size, zxc_num_header_t* nh);
 
 /**
  * @brief Writes a generic header and section descriptors to a destination
@@ -813,7 +813,7 @@ int zxc_read_num_header(const uint8_t* src, size_t src_size, zxc_num_header_t* n
  * @return int The number of bytes written, or a negative error code if the buffer
  * is too small.
  */
-int zxc_write_glo_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
+int zxc_write_glo_header_and_desc(uint8_t* dst, const size_t rem, const zxc_gnr_header_t* gh,
                                   const zxc_section_desc_t desc[ZXC_GLO_SECTIONS]);
 
 /**
@@ -829,7 +829,7 @@ int zxc_write_glo_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
  *
  * @return int Returns 0 on success, or a negative error code on failure.
  */
-int zxc_read_glo_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
+int zxc_read_glo_header_and_desc(const uint8_t* src, const size_t len, zxc_gnr_header_t* gh,
                                  zxc_section_desc_t desc[ZXC_GLO_SECTIONS]);
 
 /**
@@ -842,7 +842,7 @@ int zxc_read_glo_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_
  *
  * @return int Returns the number of bytes written on success, or a negative error code on failure.
  */
-int zxc_write_ghi_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header_t* gh,
+int zxc_write_ghi_header_and_desc(uint8_t* dst, const size_t rem, const zxc_gnr_header_t* gh,
                                   const zxc_section_desc_t desc[ZXC_GHI_SECTIONS]);
 
 /**
@@ -859,7 +859,7 @@ int zxc_write_ghi_header_and_desc(uint8_t* dst, size_t rem, const zxc_gnr_header
  *
  * @return int Returns 0 on success, or a negative error code on failure.
  */
-int zxc_read_ghi_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_t* gh,
+int zxc_read_ghi_header_and_desc(const uint8_t* src, const size_t len, zxc_gnr_header_t* gh,
                                  zxc_section_desc_t desc[ZXC_GHI_SECTIONS]);
 
 /**
@@ -882,8 +882,8 @@ int zxc_read_ghi_header_and_desc(const uint8_t* src, size_t len, zxc_gnr_header_
  *                Specific error codes depend on the underlying ZXC
  * implementation.
  */
-int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz, uint8_t* dst,
-                                 size_t dst_cap);
+int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, const size_t src_sz, uint8_t* dst,
+                                 const size_t dst_cap);
 
 /**
  * @brief Wraps the internal chunk compression logic.
@@ -904,8 +904,8 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
  * @return int      The number of bytes written to the destination buffer on success,
  *                  or a negative error code on failure.
  */
-int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, size_t src_sz, uint8_t* dst,
-                               size_t dst_cap);
+int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* chunk, const size_t src_sz, uint8_t* dst,
+                               const size_t dst_cap);
 
 #ifdef __cplusplus
 }
