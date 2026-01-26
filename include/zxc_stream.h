@@ -61,7 +61,8 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads, const 
  * @return          Total decompressed bytes written, or -1 if an error
  * occurred.
  */
-int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads, const int checksum_enabled);
+int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads,
+                              const int checksum_enabled);
 
 #ifdef __cplusplus
 }
