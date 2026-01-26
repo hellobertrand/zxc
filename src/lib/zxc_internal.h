@@ -670,7 +670,13 @@ void zxc_aligned_free(void* ptr);
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, size_t len,
                                                uint8_t hash_method) {
-    uint64_t hash = rapidhash(input, len);
+    uint64_t hash;
+    if (LIKELY(hash_method == ZXC_CHECKSUM_RAPIDHASH))
+        hash = rapidhash(input, len);
+    else
+        // Default fallthrough to rapidhash for unknown types (safe default)
+        hash = rapidhash(input, len);
+    
     return (uint32_t)(hash ^ (hash >> (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)));
 }
 
