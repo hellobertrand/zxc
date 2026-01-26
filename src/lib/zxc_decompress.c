@@ -1485,11 +1485,21 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
     uint32_t raw_sz = zxc_le32(src + 8);
 
     int has_crc = (flags & ZXC_BLOCK_FLAG_CHECKSUM);
-    size_t header_len = ZXC_BLOCK_HEADER_SIZE + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    size_t header_len = ZXC_BLOCK_HEADER_SIZE;
 
-    if (UNLIKELY(src_sz < header_len + comp_sz)) return -1;
+    // Check bounds: Header + Body + Checksum(if any)
+    if (UNLIKELY(src_sz < header_len + comp_sz + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0))) return -1;
 
     const uint8_t* data = src + header_len;
+
+    if (has_crc && ctx->checksum_enabled) {
+        uint8_t algo = flags & ZXC_CHECKSUM_TYPE_MASK;
+        uint32_t stored = zxc_le32(data + comp_sz);
+        uint32_t calc = zxc_checksum(data, comp_sz, algo);
+
+        if (UNLIKELY(stored != calc)) return -1;
+    }
+
     int decoded_sz = -1;
 
     switch (type) {
@@ -1509,14 +1519,6 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
             break;
         default:
             return -1;
-    }
-
-    if (decoded_sz >= 0 && has_crc && ctx->checksum_enabled) {
-        uint8_t algo = flags & ZXC_CHECKSUM_TYPE_MASK;
-        uint64_t stored = zxc_le64(src + ZXC_BLOCK_HEADER_SIZE);
-        uint64_t calc = zxc_checksum(dst, (size_t)decoded_sz, algo);
-
-        if (UNLIKELY(stored != calc)) return -1;
     }
 
     return decoded_sz;
