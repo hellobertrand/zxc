@@ -117,16 +117,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  * Serialization and deserialization of file and block headers.
  */
 
-/**
- * @brief Calculates the 1-byte checksum for the file header.
- *
- * @param[in] header Pointer to the file header buffer (at least 7 bytes).
- * @return The 1-byte checksum value.
- */
-static ZXC_ALWAYS_INLINE uint8_t zxc_file_header_checksum(const uint8_t* header) {
-    const uint32_t hash = zxc_checksum(header, ZXC_FILE_HEADER_SIZE - 1, ZXC_CHECKSUM_RAPIDHASH);
-    return (uint8_t)((hash ^ (hash >> ZXC_BITS_PER_BYTE)) & 0xFF);
-}
+
 
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_HEADER_SIZE)) return -1;
@@ -135,7 +126,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity) {
     dst[4] = ZXC_FILE_FORMAT_VERSION;
     dst[5] = (uint8_t)(ZXC_BLOCK_SIZE / ZXC_BLOCK_UNIT);
     dst[6] = 0;  // Reserved (1 byte)
-    dst[7] = zxc_file_header_checksum(dst);
+    dst[7] = zxc_hash8_masked(dst);
 
     return ZXC_FILE_HEADER_SIZE;
 }
@@ -143,7 +134,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity) {
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
                          size_t* RESTRICT out_block_size) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE || zxc_le32(src) != ZXC_MAGIC_WORD ||
-                 src[4] != ZXC_FILE_FORMAT_VERSION || src[7] != zxc_file_header_checksum(src)))
+                 src[4] != ZXC_FILE_FORMAT_VERSION || src[7] != zxc_hash8_masked(src)))
         return -1;
 
     if (out_block_size) {
@@ -159,19 +150,23 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
 
     dst[0] = bh->block_type;
     dst[1] = bh->block_flags;
-    zxc_store_le16(dst + 2, bh->reserved);
+    dst[2] = 0;  // Reserved
+    dst[3] = 0;  // Future checksum
     zxc_store_le32(dst + 4, bh->comp_size);
     zxc_store_le32(dst + 8, bh->raw_size);
+    dst[3] = zxc_hash12_masked(dst);
+
     return ZXC_BLOCK_HEADER_SIZE;
 }
 
 int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
                           zxc_block_header_t* RESTRICT bh) {
-    if (UNLIKELY(src_size < ZXC_BLOCK_HEADER_SIZE)) return -1;
+    if (UNLIKELY(src_size < ZXC_BLOCK_HEADER_SIZE) || src[3] != zxc_hash12_masked(src)) return -1;
 
     bh->block_type = src[0];
     bh->block_flags = src[1];
-    bh->reserved = zxc_le16(src + 2);
+    bh->reserved = src[2];
+    bh->header_crc = src[3];
     bh->comp_size = zxc_le32(src + 4);
     bh->raw_size = zxc_le32(src + 8);
     return 0;

@@ -199,6 +199,63 @@ extern "C" {
 #define ZXC_LZ_MIN_MATCH_LEN 5                    // Minimum match length
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)  // Maximum offset distance
 
+// Hash prime constants
+#define ZXC_HASH_PRIME1 0x243F6A88
+#define ZXC_HASH_PRIME2 0x85BA2D97
+#define ZXC_HASH_PRIME3 0xB0F57EE3
+
+/**
+ * @brief Computes the 1-byte checksum for the file header.
+ *
+ * @param[in] p Pointer to the file header buffer (at least 7 bytes).
+ * @return The 1-byte checksum value.
+ */
+static ZXC_ALWAYS_INLINE uint8_t zxc_hash8_masked(const uint8_t* p) {
+    uint64_t v;
+    ZXC_MEMCPY(&v, p, sizeof(v));
+
+    // #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    v &= ~(0xFFULL << (ZXC_BITS_PER_BYTE * (ZXC_FILE_HEADER_SIZE - 1)));
+    // #else
+    //     v &= ~(0xFFULL);
+    // #endif
+
+    uint64_t h = v * ZXC_HASH_PRIME1;
+    h ^= (h >> 32);
+    h *= ZXC_HASH_PRIME2;
+    h ^= (h >> 32);
+    return (uint8_t)h;
+}
+
+/**
+ * @brief Computes the 1-byte checksum for block headers.
+ *
+ * This function generates a hash value by reading data from the given pointer.
+ * The result is masked to fit within 12 bits (0-4095 range).
+ *
+ * @param p Pointer to the input data to be hashed
+ * @return uint8_t The computed hash value.
+ */
+static ZXC_ALWAYS_INLINE uint8_t zxc_hash12_masked(const uint8_t* p) {
+    uint32_t v0, v1, v2;
+    ZXC_MEMCPY(&v0, p, sizeof(v0));
+    ZXC_MEMCPY(&v1, p + sizeof(v0), sizeof(v1));
+    ZXC_MEMCPY(&v2, p + sizeof(v0) + sizeof(v1), sizeof(v2));
+
+    // #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    v0 &= ~(0xFFU << (ZXC_BITS_PER_BYTE * (ZXC_BLOCK_HEADER_SIZE - 9)));
+    // #else
+    //     v0 &= ~(0xFFU);
+    // #endif
+
+    uint32_t h = (v0 * ZXC_HASH_PRIME1);
+    h ^= (v1 * ZXC_HASH_PRIME2);
+    h ^= (v2 * ZXC_HASH_PRIME3);
+    h = (h << 13) | (h >> 19);
+    h *= ZXC_HASH_PRIME1;
+    return (uint8_t)((h ^ (h >> 8) ^ (h >> 16) ^ (h >> 24)) & 0xFF);
+}
+
 /**
  * @struct zxc_lz77_params_t
  * @brief Search parameters for LZ77 compression levels.
