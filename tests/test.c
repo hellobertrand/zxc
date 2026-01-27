@@ -640,13 +640,16 @@ int test_eof_block_structure() {
     }
 
     uint8_t* eof_ptr = compressed + comp_size - 12;
-    // Expected: Type=255 (0xFF), Flags=0, Reserved=0, CompSz=0, RawSz=0
-    // Pattern: FF 00 00 00 00 00 00 00 00 00 00 00
-    const uint8_t expected[12] = {0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    // Expected: Type=255 (0xFF), Flags=0, Received=0, Checksum=?, CompSz=0, RawSz=0
+    // We construct the header and calculate checksum to verify
+    uint8_t expected[12] = {0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    // Calculate expected checksum using internal function (since we include zxc_internal.h)
+    expected[3] = zxc_hash12_masked(expected);
 
     if (memcmp(eof_ptr, expected, 12) != 0) {
         printf(
-            "Failed: EOF block mismatch.\nExpected: FF 00 ...\nGot:      %02X %02X %02X %02X ...\n",
+            "Failed: EOF block mismatch.\nExpected: %02X %02X %02X %02X ...\nGot:      %02X %02X %02X %02X ...\n",
+            expected[0], expected[1], expected[2], expected[3],
             eof_ptr[0], eof_ptr[1], eof_ptr[2], eof_ptr[3]);
         free(compressed);
         return 0;
@@ -654,6 +657,65 @@ int test_eof_block_structure() {
 
     printf("PASS\n\n");
     free(compressed);
+    return 1;
+}
+
+int test_header_checksum() {
+    printf("Running test_header_checksum...\n");
+
+    uint8_t header_buf[ZXC_BLOCK_HEADER_SIZE];
+    zxc_block_header_t bh_in = {
+        .block_type = ZXC_BLOCK_GLO,
+        .block_flags = ZXC_BLOCK_FLAG_CHECKSUM,
+        .reserved = 0,
+        .header_crc = 0,
+        .comp_size = 1024,
+        .raw_size = 2048
+    };
+
+    // 1. Write Header
+    if (zxc_write_block_header(header_buf, ZXC_BLOCK_HEADER_SIZE, &bh_in) != ZXC_BLOCK_HEADER_SIZE) {
+        printf("  [FAIL] zxc_write_block_header failed\n");
+        return 0;
+    }
+
+    // Verify manually that checksum byte is non-zero (highly likely)
+    if (header_buf[3] == 0) {
+        // It's technically possible but very unlikely with a good hash
+        printf("  [WARN] Checksum is 0 (unlikely but possible)\n");
+    }
+
+    // 2. Read Header (Valid)
+    zxc_block_header_t bh_out;
+    if (zxc_read_block_header(header_buf, ZXC_BLOCK_HEADER_SIZE, &bh_out) != 0) {
+        printf("  [FAIL] zxc_read_block_header failed on valid input\n");
+        return 0;
+    }
+
+    if (bh_out.block_type != bh_in.block_type || 
+        bh_out.comp_size != bh_in.comp_size || 
+        bh_out.header_crc != header_buf[3]) {
+        printf("  [FAIL] Read data mismatch\n");
+        return 0;
+    }
+
+    // 3. Corrupt Header Checksum
+    uint8_t original_crc = header_buf[3];
+    header_buf[3] = ~original_crc; // Flip bits
+    if (zxc_read_block_header(header_buf, ZXC_BLOCK_HEADER_SIZE, &bh_out) == 0) {
+        printf("  [FAIL] zxc_read_block_header should have failed on corrupted CRC\n");
+        return 0;
+    }
+    header_buf[3] = original_crc; // Restore
+
+    // 4. Corrupt Header Content
+    header_buf[0] = ZXC_BLOCK_RAW; // Change type
+    if (zxc_read_block_header(header_buf, ZXC_BLOCK_HEADER_SIZE, &bh_out) == 0) {
+        printf("  [FAIL] zxc_read_block_header should have failed on corrupted content\n");
+        return 0;
+    }
+
+    printf("PASS\n\n");
     return 1;
 }
 
@@ -746,6 +808,7 @@ int main() {
     if (!test_bit_reader()) total_failures++;
     if (!test_bitpack()) total_failures++;
     if (!test_eof_block_structure()) total_failures++;
+    if (!test_header_checksum()) total_failures++;
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);

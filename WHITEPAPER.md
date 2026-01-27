@@ -119,22 +119,24 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 **BLOCK Header (12 bytes):**
 
 ```
-  Offset:  0       1       2               4                       8                       12
-          +-------+-------+---------------+-----------------------+-----------------------+
-          | Type  | Flags | Reserved      | Comp Size             | Raw Size              |
-          | (1B)  | (1B)  | (2 bytes)     | (4 bytes)             | (4 bytes)             |
-          +-------+-------+---------------+-----------------------+-----------------------+
+  Offset:  0       1       2       3       4                       8                       12
+          +-------+-------+-------+-------+-----------------------+-----------------------+
+          | Type  | Flags | Rsrvd | H.crc | Comp Size             | Raw Size              |
+          | (1B)  | (1B)  | (1B)  | (1B)  | (4 bytes)             | (4 bytes)             |
+          +-------+-------+-------+-------+-----------------------+-----------------------+
 
   Block Layout:
   [ Header (12B) ] + [ Compressed Payload (Comp Size bytes) ] + [ Optional Checksum (4B) ]
 
 ```
-**Note**: The Checksum is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the compressed payload**.
+**Note**: The Checksum (if flag set) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the compressed payload**.
 
 * **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI, 255=EOF).
 * **Flags**:
   - **Bit 7 (0x80)**: `HAS_CHECKSUM`. If set, a **32-bit (4-byte) checksum** is appended to the end of the block (after the compressed payload).
   - **Bits 0-3 (0x0F)**: `CHECKSUM_TYPE`. Defines the algorithm used for integrity verification.
+* **Rsrvd**: Reserved for future use (must be 0).
+* **H.crc**: **Header Checksum** (1 byte). Calculated on the 12-byte header (with H.crc byte set to 0) using `zxc_hash12_masked`.
 * **Checksum Algorithms**:
   - `0x00`: **rapidhash** (Standard, 32-bit folded)
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
