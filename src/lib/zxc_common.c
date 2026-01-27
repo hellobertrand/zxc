@@ -34,8 +34,8 @@ void zxc_aligned_free(void* ptr) {
 #endif
 }
 
-int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, const int level,
-                  const int checksum_enabled) {
+int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int mode,
+                  const int level, const int checksum_enabled) {
     ZXC_MEMSET(ctx, 0, sizeof(zxc_cctx_t));
 
     if (mode == 0) return 0;
@@ -128,7 +128,7 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_file_header_checksum(const uint8_t* header)
     return (uint8_t)((hash ^ (hash >> ZXC_BITS_PER_BYTE)) & 0xFF);
 }
 
-int zxc_write_file_header(uint8_t* dst, size_t dst_capacity) {
+int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_HEADER_SIZE)) return -1;
 
     zxc_store_le32(dst, ZXC_MAGIC_WORD);
@@ -140,7 +140,8 @@ int zxc_write_file_header(uint8_t* dst, size_t dst_capacity) {
     return ZXC_FILE_HEADER_SIZE;
 }
 
-int zxc_read_file_header(const uint8_t* src, size_t src_size, size_t* out_block_size) {
+int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
+                         size_t* RESTRICT out_block_size) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE || zxc_le32(src) != ZXC_MAGIC_WORD ||
                  src[4] != ZXC_FILE_FORMAT_VERSION || src[7] != zxc_file_header_checksum(src)))
         return -1;
@@ -152,7 +153,8 @@ int zxc_read_file_header(const uint8_t* src, size_t src_size, size_t* out_block_
     return 0;
 }
 
-int zxc_write_block_header(uint8_t* dst, size_t dst_capacity, const zxc_block_header_t* bh) {
+int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
+                           const zxc_block_header_t* RESTRICT bh) {
     if (UNLIKELY(dst_capacity < ZXC_BLOCK_HEADER_SIZE)) return -1;
 
     dst[0] = bh->block_type;
@@ -163,7 +165,8 @@ int zxc_write_block_header(uint8_t* dst, size_t dst_capacity, const zxc_block_he
     return ZXC_BLOCK_HEADER_SIZE;
 }
 
-int zxc_read_block_header(const uint8_t* src, size_t src_size, zxc_block_header_t* bh) {
+int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
+                          zxc_block_header_t* RESTRICT bh) {
     if (UNLIKELY(src_size < ZXC_BLOCK_HEADER_SIZE)) return -1;
 
     bh->block_type = src[0];

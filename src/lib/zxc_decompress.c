@@ -336,8 +336,9 @@ static ZXC_ALWAYS_INLINE __m512i zxc_mm512_prefix_sum_epi32(__m512i v) {
  *         or -1 if an error occurs (e.g., buffer overflow, invalid header,
  *         or malformed compressed stream).
  */
-static int zxc_decode_block_num(const uint8_t* RESTRICT src, size_t src_size, uint8_t* RESTRICT dst,
-                                size_t dst_capacity, uint32_t expected_raw_size) {
+static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_size,
+                                uint8_t* RESTRICT dst, const size_t dst_capacity,
+                                const uint32_t expected_raw_size) {
     (void)expected_raw_size;
 
     zxc_num_header_t nh;
@@ -479,9 +480,9 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, size_t src_size, ui
  * @return The number of bytes written to the destination buffer on success, or
  * -1 on failure (e.g., invalid header, buffer overflow, or corrupted data).
  */
-static int zxc_decode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
-                                uint8_t* RESTRICT dst, size_t dst_capacity,
-                                uint32_t expected_raw_size) {
+static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                const size_t src_size, uint8_t* RESTRICT dst,
+                                const size_t dst_capacity, const uint32_t expected_raw_size) {
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS];
 
@@ -1039,9 +1040,9 @@ static int zxc_decode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
  * @param[in] expected_raw_size Expected size of the decompressed data in bytes.
  * @return int Returns 0 on success, or a negative error code on failure.
  */
-static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
-                                uint8_t* RESTRICT dst, size_t dst_capacity,
-                                uint32_t expected_raw_size) {
+static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                const size_t src_size, uint8_t* RESTRICT dst,
+                                const size_t dst_capacity, const uint32_t expected_raw_size) {
     (void)ctx;
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[ZXC_GHI_SECTIONS];
@@ -1473,29 +1474,28 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 }
 
 // cppcheck-suppress unusedFunction
-int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, const size_t src_sz,
-                                 uint8_t* RESTRICT dst, const size_t dst_cap) {
+int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
     if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return -1;
 
-    uint8_t type = src[0];
-    uint8_t flags = src[1];
-    uint32_t comp_sz = zxc_le32(src + 4);
-    uint32_t raw_sz = zxc_le32(src + 8);
+    const uint8_t type = src[0];
+    const uint8_t flags = src[1];
+    const uint32_t comp_sz = zxc_le32(src + 4);
+    const uint32_t raw_sz = zxc_le32(src + 8);
 
-    int has_crc = (flags & ZXC_BLOCK_FLAG_CHECKSUM);
-    size_t header_len = ZXC_BLOCK_HEADER_SIZE;
+    const int has_crc = (flags & ZXC_BLOCK_FLAG_CHECKSUM);
 
     // Check bounds: Header + Body + Checksum(if any)
-    if (UNLIKELY(src_sz < header_len + comp_sz + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0)))
+    if (UNLIKELY(src_sz <
+                 ZXC_BLOCK_HEADER_SIZE + comp_sz + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0)))
         return -1;
 
-    const uint8_t* data = src + header_len;
+    const uint8_t* data = src + ZXC_BLOCK_HEADER_SIZE;
 
     if (has_crc && ctx->checksum_enabled) {
-        uint8_t algo = flags & ZXC_CHECKSUM_TYPE_MASK;
-        uint32_t stored = zxc_le32(data + comp_sz);
-        uint32_t calc = zxc_checksum(data, comp_sz, algo);
-
+        const uint8_t algo = flags & ZXC_CHECKSUM_TYPE_MASK;
+        const uint32_t stored = zxc_le32(data + comp_sz);
+        const uint32_t calc = zxc_checksum(data, comp_sz, algo);
         if (UNLIKELY(stored != calc)) return -1;
     }
 

@@ -727,7 +727,7 @@ static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* RESTRICT br,
  * @param[in,out] br Pointer to the bit reader context.
  * @param[in] needed The number of bits required to be available in the buffer.
  */
-static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* br, const int needed) {
+static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const int needed) {
     if (UNLIKELY(br->bits < needed)) {
         int safe_bits = (br->bits < 0) ? 0 : br->bits;
         br->bits = safe_bits;
@@ -895,8 +895,8 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  *                Specific error codes depend on the underlying ZXC
  * implementation.
  */
-int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, const size_t src_sz,
-                                 uint8_t* RESTRICT dst, const size_t dst_cap);
+int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
 
 /**
  * @brief Wraps the internal chunk compression logic.
@@ -917,8 +917,8 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, c
  * @return int      The number of bytes written to the destination buffer on success,
  *                  or a negative error code on failure.
  */
-int zxc_compress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* RESTRICT chunk, const size_t src_sz,
-                               uint8_t* RESTRICT dst, const size_t dst_cap);
+int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
+                               const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
 
 #ifdef __cplusplus
 }
