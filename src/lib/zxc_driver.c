@@ -547,6 +547,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     int read_idx = 0;
     int read_eof = 0;
+    int eof_has_checksum = 0;
 
     // Reader Loop: Reads from file, prepares jobs, pushes to worker queue.
     while (!read_eof && !ctx.io_error) {
@@ -573,6 +574,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                 if (bh.block_type == ZXC_BLOCK_EOF) {
                     read_eof = 1;
                     read_sz = 0;
+                    eof_has_checksum = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
                     goto _job_prepared;
                 }
 
@@ -642,7 +644,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 1 && !ctx.io_error && w_args.total_bytes >= 0) {
         uint8_t eof_buf[ZXC_BLOCK_HEADER_SIZE];
         zxc_block_header_t eof_bh = {.block_type = ZXC_BLOCK_EOF,
-                                     .block_flags = 0,
+                                     .block_flags = checksum_enabled ? ZXC_BLOCK_FLAG_CHECKSUM : 0,
                                      .reserved = 0,
                                      .comp_size = 0,
                                      .raw_size = 0};
@@ -654,18 +656,19 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         w_args.total_bytes += ZXC_BLOCK_HEADER_SIZE;
 
         if (checksum_enabled) {
-            const uint8_t gh_buf[ZXC_GLOBAL_CHECKSUM_SIZE];
+            uint8_t gh_buf[ZXC_GLOBAL_CHECKSUM_SIZE];
             zxc_store_le32(gh_buf, w_args.global_hash);
             fwrite(gh_buf, 1, ZXC_GLOBAL_CHECKSUM_SIZE, f_out);
             w_args.total_bytes += ZXC_GLOBAL_CHECKSUM_SIZE;
         }
-    } else if (mode == 0 && !ctx.io_error && checksum_enabled) {
+    } else if (mode == 0 && !ctx.io_error && eof_has_checksum) {
         // Verify Global Stream Checksum
-        const uint8_t gh_buf[ZXC_GLOBAL_CHECKSUM_SIZE];
+        uint8_t gh_buf[ZXC_GLOBAL_CHECKSUM_SIZE];
         if (UNLIKELY(fread(gh_buf, 1, ZXC_GLOBAL_CHECKSUM_SIZE, f_in) !=
                      ZXC_GLOBAL_CHECKSUM_SIZE)) {
+            // Checksum flag set but immediate EOF -> Error
             ctx.io_error = 1;
-        } else {
+        } else if (checksum_enabled) {
             const uint32_t expected = zxc_le32(gh_buf);
             if (expected != d_global_hash) {
                 ctx.io_error = 1;
