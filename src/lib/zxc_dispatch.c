@@ -276,7 +276,9 @@ size_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTR
     zxc_cctx_t ctx;
     if (zxc_cctx_init(&ctx, ZXC_BLOCK_SIZE, 1, level, checksum_enabled) != 0) return 0;
 
-    int h_size = zxc_write_file_header(op, (size_t)(op_end - op));
+    uint32_t global_hash = 0;
+
+    const int h_size = zxc_write_file_header(op, (size_t)(op_end - op));
     if (UNLIKELY(h_size < 0)) {
         zxc_cctx_free(&ctx);
         return 0;
@@ -294,6 +296,16 @@ size_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTR
             return 0;
         }
 
+        if (checksum_enabled) {
+            // Update Global Hash (Rotation + XOR)
+            // Block checksum is at the end of the written block data
+            if (LIKELY(res >= ZXC_GLOBAL_CHECKSUM_SIZE)) {
+                uint32_t block_hash = zxc_le32(op + res - ZXC_GLOBAL_CHECKSUM_SIZE);
+                global_hash = (global_hash << 1) | (global_hash >> 31);
+                global_hash ^= block_hash;
+            }
+        }
+
         op += res;
         pos += chunk_len;
     }
@@ -303,13 +315,21 @@ size_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTR
     // Write EOF Block
     const size_t rem_cap = (size_t)(op_end - op);
     zxc_block_header_t eof_bh = {.block_type = ZXC_BLOCK_EOF,
-                                 .block_flags = 0,
+                                 .block_flags = checksum_enabled ? ZXC_BLOCK_FLAG_CHECKSUM : 0,
                                  .reserved = 0,
                                  .comp_size = 0,
                                  .raw_size = 0};
-    int eof_size = zxc_write_block_header(op, rem_cap, &eof_bh);
+    const int eof_size = zxc_write_block_header(op, rem_cap, &eof_bh);
     if (UNLIKELY(eof_size < 0)) return 0;
     op += eof_size;
+
+    if (checksum_enabled) {
+        if (UNLIKELY(rem_cap < (size_t)eof_size + ZXC_GLOBAL_CHECKSUM_SIZE)) return 0;
+        uint8_t gh_buf[ZXC_GLOBAL_CHECKSUM_SIZE];
+        zxc_store_le32(gh_buf, global_hash);
+        ZXC_MEMCPY(op, gh_buf, ZXC_GLOBAL_CHECKSUM_SIZE);
+        op += ZXC_GLOBAL_CHECKSUM_SIZE;
+    }
 
     return (size_t)(op - op_start);
 }
@@ -332,6 +352,8 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
     zxc_cctx_t ctx;
     if (zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0, checksum_enabled) != 0) return 0;
 
+    uint32_t d_global_hash = 0;
+
     ip += ZXC_FILE_HEADER_SIZE;
 
     // Block decompression loop
@@ -346,6 +368,22 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
 
         if (bh.block_type == ZXC_BLOCK_EOF) {
             // End of stream marker
+            ip += ZXC_BLOCK_HEADER_SIZE;
+            if (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM) {
+                if (UNLIKELY(ip + ZXC_GLOBAL_CHECKSUM_SIZE > ip_end)) {
+                    zxc_cctx_free(&ctx);
+                    return 0;
+                }
+                if (checksum_enabled) {
+                    const uint32_t expected = zxc_le32(ip);
+                    if (expected != d_global_hash) {
+                        zxc_cctx_free(&ctx);
+                        return 0;
+                    }
+                }
+                // Consume checksum
+                ip += ZXC_GLOBAL_CHECKSUM_SIZE;
+            }
             break;
         }
 
@@ -364,6 +402,13 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
         if (UNLIKELY(res < 0)) {
             zxc_cctx_free(&ctx);
             return 0;
+        }
+
+        if (checksum_enabled && (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM)) {
+            const uint8_t* crc_ptr = ip + ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
+            uint32_t b_crc = zxc_le32(crc_ptr);
+            d_global_hash = (d_global_hash << 1) | (d_global_hash >> 31);
+            d_global_hash ^= b_crc;
         }
 
         ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
