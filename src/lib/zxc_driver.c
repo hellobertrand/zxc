@@ -271,6 +271,7 @@ typedef struct {
     zxc_stream_ctx_t* ctx;
     FILE* f;
     int64_t total_bytes;
+    uint32_t global_hash;
 } writer_args_t;
 
 /**
@@ -393,6 +394,15 @@ static void* zxc_async_writer(void* arg) {
         if (args->f && job->result_sz > 0) {
             if (fwrite(job->out_buf, 1, job->result_sz, args->f) != job->result_sz) {
                 ctx->io_error = 1;
+            } else if (ctx->checksum_enabled && ctx->compression_mode == 1) {
+                // Update Global Hash (Rotation + XOR)
+                // Extract block checksum from the end of the written block
+                if (LIKELY(job->result_sz >= ZXC_GLOBAL_CHECKSUM_SIZE)) {
+                    uint32_t block_hash =
+                        zxc_le32(job->out_buf + job->result_sz - ZXC_GLOBAL_CHECKSUM_SIZE);
+                    args->global_hash = (args->global_hash << 1) | (args->global_hash >> 31);
+                    args->global_hash ^= block_hash;
+                }
             }
         }
         if (UNLIKELY(ctx->io_error)) {
@@ -462,6 +472,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ctx.checksum_enabled = checksum_enabled;
     ctx.compression_level = level;
 
+    uint32_t d_global_hash = 0;
+
     int num_threads = (n_threads > 0) ? n_threads : (int)sysconf(_SC_NPROCESSORS_ONLN);
     // Reserve 1 thread for Writer/Reader overhead if possible
     int num_workers = (num_threads > 1) ? num_threads - 1 : 1;
@@ -521,7 +533,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     for (int i = 0; i < num_workers; i++)
         pthread_create(&workers[i], NULL, zxc_stream_worker, &ctx);
 
-    writer_args_t w_args = {&ctx, f_out, 0};
+    writer_args_t w_args = {&ctx, f_out, 0, 0};
     if (mode == 1 && f_out) {
         uint8_t h[8];
         zxc_write_file_header(h, 8);
@@ -583,6 +595,12 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                     if (fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size, 1,
                               ZXC_BLOCK_CHECKSUM_SIZE, f_in) != ZXC_BLOCK_CHECKSUM_SIZE) {
                         read_eof = 1;
+                    } else {
+                        // Update Global Hash for Decompression
+                        uint32_t b_crc =
+                            zxc_le32(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
+                        d_global_hash = (d_global_hash << 1) | (d_global_hash >> 31);
+                        d_global_hash ^= b_crc;
                     }
                 }
                 read_sz =
@@ -634,6 +652,25 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
             return -1;
         }
         w_args.total_bytes += ZXC_BLOCK_HEADER_SIZE;
+
+        if (checksum_enabled) {
+            const uint8_t gh_buf[ZXC_GLOBAL_CHECKSUM_SIZE];
+            zxc_store_le32(gh_buf, w_args.global_hash);
+            fwrite(gh_buf, 1, ZXC_GLOBAL_CHECKSUM_SIZE, f_out);
+            w_args.total_bytes += ZXC_GLOBAL_CHECKSUM_SIZE;
+        }
+    } else if (mode == 0 && !ctx.io_error && checksum_enabled) {
+        // Verify Global Stream Checksum
+        const uint8_t gh_buf[ZXC_GLOBAL_CHECKSUM_SIZE];
+        if (UNLIKELY(fread(gh_buf, 1, ZXC_GLOBAL_CHECKSUM_SIZE, f_in) !=
+                     ZXC_GLOBAL_CHECKSUM_SIZE)) {
+            ctx.io_error = 1;
+        } else {
+            const uint32_t expected = zxc_le32(gh_buf);
+            if (expected != d_global_hash) {
+                ctx.io_error = 1;
+            }
+        }
     }
 
     free(workers);

@@ -648,9 +648,10 @@ int test_eof_block_structure() {
 
     if (memcmp(eof_ptr, expected, 12) != 0) {
         printf(
-            "Failed: EOF block mismatch.\nExpected: %02X %02X %02X %02X ...\nGot:      %02X %02X %02X %02X ...\n",
-            expected[0], expected[1], expected[2], expected[3],
-            eof_ptr[0], eof_ptr[1], eof_ptr[2], eof_ptr[3]);
+            "Failed: EOF block mismatch.\nExpected: %02X %02X %02X %02X ...\nGot:      %02X %02X "
+            "%02X %02X ...\n",
+            expected[0], expected[1], expected[2], expected[3], eof_ptr[0], eof_ptr[1], eof_ptr[2],
+            eof_ptr[3]);
         free(compressed);
         return 0;
     }
@@ -664,17 +665,16 @@ int test_header_checksum() {
     printf("Running test_header_checksum...\n");
 
     uint8_t header_buf[ZXC_BLOCK_HEADER_SIZE];
-    zxc_block_header_t bh_in = {
-        .block_type = ZXC_BLOCK_GLO,
-        .block_flags = ZXC_BLOCK_FLAG_CHECKSUM,
-        .reserved = 0,
-        .header_crc = 0,
-        .comp_size = 1024,
-        .raw_size = 2048
-    };
+    zxc_block_header_t bh_in = {.block_type = ZXC_BLOCK_GLO,
+                                .block_flags = ZXC_BLOCK_FLAG_CHECKSUM,
+                                .reserved = 0,
+                                .header_crc = 0,
+                                .comp_size = 1024,
+                                .raw_size = 2048};
 
     // 1. Write Header
-    if (zxc_write_block_header(header_buf, ZXC_BLOCK_HEADER_SIZE, &bh_in) != ZXC_BLOCK_HEADER_SIZE) {
+    if (zxc_write_block_header(header_buf, ZXC_BLOCK_HEADER_SIZE, &bh_in) !=
+        ZXC_BLOCK_HEADER_SIZE) {
         printf("  [FAIL] zxc_write_block_header failed\n");
         return 0;
     }
@@ -692,8 +692,7 @@ int test_header_checksum() {
         return 0;
     }
 
-    if (bh_out.block_type != bh_in.block_type || 
-        bh_out.comp_size != bh_in.comp_size || 
+    if (bh_out.block_type != bh_in.block_type || bh_out.comp_size != bh_in.comp_size ||
         bh_out.header_crc != header_buf[3]) {
         printf("  [FAIL] Read data mismatch\n");
         return 0;
@@ -701,17 +700,116 @@ int test_header_checksum() {
 
     // 3. Corrupt Header Checksum
     uint8_t original_crc = header_buf[3];
-    header_buf[3] = ~original_crc; // Flip bits
+    header_buf[3] = ~original_crc;  // Flip bits
     if (zxc_read_block_header(header_buf, ZXC_BLOCK_HEADER_SIZE, &bh_out) == 0) {
         printf("  [FAIL] zxc_read_block_header should have failed on corrupted CRC\n");
         return 0;
     }
-    header_buf[3] = original_crc; // Restore
+    header_buf[3] = original_crc;  // Restore
 
     // 4. Corrupt Header Content
-    header_buf[0] = ZXC_BLOCK_RAW; // Change type
+    header_buf[0] = ZXC_BLOCK_RAW;  // Change type
     if (zxc_read_block_header(header_buf, ZXC_BLOCK_HEADER_SIZE, &bh_out) == 0) {
         printf("  [FAIL] zxc_read_block_header should have failed on corrupted content\n");
+        return 0;
+    }
+
+    printf("PASS\n\n");
+    return 1;
+}
+
+// 5. Test Global Checksum Order Sensitivity
+// Ensures that swapping two blocks (even if valid individually) triggers a global checksum failure.
+int test_global_checksum_order() {
+    printf("TEST: Global Checksum Order Sensitivity... ");
+
+    // 1. Create input data withDISTINCT patterns for 2 blocks (so blocks are different)
+    // ZXC_BLOCK_SIZE is 256KB. We need > 256KB. Let's use 600KB.
+    size_t input_sz = 600 * 1024;
+    uint8_t* val_buf = malloc(input_sz);
+    if (!val_buf) return 0;
+
+    // Fill Block 1 with 0xAA, Block 2 with 0xBB, Block 3 with 0xCC...
+    memset(val_buf, 0xAA, 256 * 1024);
+    memset(val_buf + 256 * 1024, 0xBB, 256 * 1024);
+    memset(val_buf + 512 * 1024, 0xCC, input_sz - 512 * 1024);
+
+    FILE* f_in = tmpfile();
+    FILE* f_comp = tmpfile();
+    fwrite(val_buf, 1, input_sz, f_in);
+    rewind(f_in);
+
+    // 2. Compress with Checksum Enabled
+    zxc_stream_compress(f_in, f_comp, 1, 1, 1);
+
+    // 3. Read compressed data to memory
+    long comp_sz = ftell(f_comp);
+    rewind(f_comp);
+    uint8_t* comp_buf = malloc(comp_sz);
+    fread(comp_buf, 1, comp_sz, f_comp);
+
+    // 4. Parse Blocks to identify Block 1 and Block 2
+    // File Header: 8 bytes
+    size_t off1 = 8;
+    // Parse Block 1 Header
+    zxc_block_header_t bh1;
+    zxc_read_block_header(comp_buf + off1, ZXC_BLOCK_HEADER_SIZE, &bh1);
+    size_t len1 = ZXC_BLOCK_HEADER_SIZE + bh1.comp_size + ZXC_BLOCK_CHECKSUM_SIZE;
+
+    size_t off2 = off1 + len1;
+    // Parse Block 2 Header
+    zxc_block_header_t bh2;
+    zxc_read_block_header(comp_buf + off2, ZXC_BLOCK_HEADER_SIZE, &bh2);
+    size_t len2 = ZXC_BLOCK_HEADER_SIZE + bh2.comp_size + ZXC_BLOCK_CHECKSUM_SIZE;
+
+    // Ensure we have at least 2 full blocks + EOF + Global Checksum
+    if (off2 + len2 > comp_sz) {
+        printf("[FAIL] Compressed size too small for test\n");
+        free(val_buf);
+        free(comp_buf);
+        return 0;
+    }
+
+    // 5. Swap Block 1 and Block 2
+    // To safely swap, we need a new buffer
+    uint8_t* swapped_buf = malloc(comp_sz);
+
+    // Copy File Header
+    memcpy(swapped_buf, comp_buf, 8);
+    size_t w_off = 8;
+
+    // Write Block 2 first
+    memcpy(swapped_buf + w_off, comp_buf + off2, len2);
+    w_off += len2;
+
+    // Write Block 1 second
+    memcpy(swapped_buf + w_off, comp_buf + off1, len1);
+    w_off += len1;
+
+    // Write remaining data (EOF block + Global Checksum)
+    size_t remaining_off = off2 + len2;
+    size_t remaining_len = comp_sz - remaining_off;
+    memcpy(swapped_buf + w_off, comp_buf + remaining_off, remaining_len);
+
+    // 6. Write to File for Decompression
+    FILE* f_bad = tmpfile();
+    fwrite(swapped_buf, 1, comp_sz, f_bad);
+    rewind(f_bad);
+
+    // 7. Attempt Decompression
+    FILE* f_out = tmpfile();
+    int64_t res = zxc_stream_decompress(f_bad, f_out, 1, 1);
+
+    fclose(f_in);
+    fclose(f_comp);
+    fclose(f_bad);
+    fclose(f_out);
+    free(val_buf);
+    free(comp_buf);
+    free(swapped_buf);
+
+    if (res != -1) {
+        printf("  [FAIL] zxc_stream_decompress unexpectedly succeeded on swapped blocks\n");
         return 0;
     }
 
@@ -809,6 +907,7 @@ int main() {
     if (!test_bitpack()) total_failures++;
     if (!test_eof_block_structure()) total_failures++;
     if (!test_header_checksum()) total_failures++;
+    if (!test_global_checksum_order()) total_failures++;
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);
