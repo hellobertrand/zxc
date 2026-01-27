@@ -118,7 +118,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx);
  * @return The number of bytes written (ZXC_FILE_HEADER_SIZE) on success,
  *         or -1 if the destination capacity is insufficient.
  */
-int zxc_write_file_header(uint8_t* dst, size_t dst_capacity);
+int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity);
 
 /**
  * @brief Validates and reads the ZXC file header from a source buffer.
@@ -133,7 +133,7 @@ int zxc_write_file_header(uint8_t* dst, size_t dst_capacity);
  * @return 0 if the header is valid, -1 otherwise (e.g., buffer too small,
  * invalid magic word, or incorrect version).
  */
-int zxc_read_file_header(const uint8_t* src, size_t src_size, size_t* out_block_size);
+int zxc_read_file_header(const uint8_t* src, const size_t src_size, size_t* out_block_size);
 
 /**
  * @struct zxc_block_header_t
@@ -176,7 +176,7 @@ typedef struct {
  * @return The number of bytes written (ZXC_BLOCK_HEADER_SIZE) on success,
  *         or -1 if the destination buffer capacity is insufficient.
  */
-int zxc_write_block_header(uint8_t* dst, size_t dst_capacity, const zxc_block_header_t* bh);
+int zxc_write_block_header(uint8_t* dst, const size_t dst_capacity, const zxc_block_header_t* bh);
 
 /**
  * @brief Read and parses a ZXC block header from a source buffer.
@@ -194,7 +194,7 @@ int zxc_write_block_header(uint8_t* dst, size_t dst_capacity, const zxc_block_he
  * @return 0 on success, or -1 if the source buffer is smaller than the
  *         required block header size.
  */
-int zxc_read_block_header(const uint8_t* src, size_t src_size, zxc_block_header_t* bh);
+int zxc_read_block_header(const uint8_t* src, const size_t src_size, zxc_block_header_t* bh);
 
 #ifdef __cplusplus
 }
