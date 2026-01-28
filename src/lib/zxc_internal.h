@@ -161,6 +161,7 @@ extern "C" {
 #define ZXC_CHECKSUM_RAPIDHASH 0x00U  // Default: rapidhash algorithm
 
 #define ZXC_GLOBAL_CHECKSUM_SIZE 4  // Size of the global checksum (appended after EOF)
+#define ZXC_FILE_FOOTER_SIZE 12     // Footer Size (8 bytes src size + 4 bytes global checksum)
 
 // Token Format Constants
 // Sequence Format Constants (GLO Token - 4-bit LL, 4-bit ML, 16-bit Offset)
