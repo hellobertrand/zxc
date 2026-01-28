@@ -70,44 +70,62 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
 #endif
 
 /**
- * @brief Writes a variable-length byte encoded value to a buffer.
+ * @brief Writes a Prefix Varint encoded value to a buffer.
  *
- * This function encodes a 32-bit unsigned integer using variable-byte
- * encoding and writes it to the destination buffer. Variable-byte encoding
- * uses fewer bytes for smaller values, making it efficient for compressing
- * integers with varying magnitudes.
+ * This function encodes a 32-bit unsigned integer using Prefix Varint encoding
+ * and writes it to the destination buffer. Unary prefix bits in the first
+ * byte determine the total length (1-5 bytes), allowing for branchless or
+ * predictable decoding.
+ *
+ * Format:
+ * - 0xxxxxxx (1 byte)
+ * - 10xxxxxx ... (2 bytes)
+ * - 110xxxxx ... (3 bytes)
+ * ...
  *
  * @param[out] dst Pointer to the destination buffer where the encoded value will be written.
  * @param[in] val The 32-bit unsigned integer value to encode.
  * @return The number of bytes written to the destination buffer.
  */
-static ZXC_ALWAYS_INLINE size_t zxc_write_vbyte(uint8_t* RESTRICT dst, uint32_t val) {
-    // Fast path: 1 byte (val < 128) - most common case
-    if (LIKELY(val < ZXC_VBYTE_MSB)) {
+static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, uint32_t val) {
+    // Prefix Varint Encoding
+    // 1 byte: 0xxxxxxx (7 bits) -> val < 128
+    if (LIKELY(val < 128)) {
         dst[0] = (uint8_t)val;
         return 1;
     }
-    // Fast path: 2 bytes (val < 16384)
-    if (LIKELY(val < (1U << 14))) {
-        dst[0] = (uint8_t)(val | ZXC_VBYTE_MSB);
-        dst[1] = (uint8_t)(val >> 7);
+
+    // 2 bytes: 10xxxxxx xxxxxxxx (14 bits) -> val < 16384 (2^14)
+    if (LIKELY(val < 16384)) {
+        dst[0] = (uint8_t)(0x80 | (val & 0x3F));
+        dst[1] = (uint8_t)(val >> 6);
         return 2;
     }
-    // Fast path: 3 bytes (val < 2097152)
-    if (LIKELY(val < (1U << 21))) {
-        dst[0] = (uint8_t)(val | ZXC_VBYTE_MSB);
-        dst[1] = (uint8_t)((val >> 7) | ZXC_VBYTE_MSB);
-        dst[2] = (uint8_t)(val >> 14);
+
+    // 3 bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2097152 (2^21)
+    if (LIKELY(val < 2097152)) {
+        dst[0] = (uint8_t)(0xC0 | (val & 0x1F));
+        dst[1] = (uint8_t)(val >> 5);
+        dst[2] = (uint8_t)(val >> 13);
         return 3;
     }
-    // Fallback: 4-5 bytes (rare for ZXC block sizes)
-    size_t count = 0;
-    while (val >= ZXC_VBYTE_MSB) {
-        dst[count++] = (uint8_t)(val | ZXC_VBYTE_MSB);
-        val >>= 7;
+
+    // 4 bytes: 1110xxxx xxxxxxxx xxxxxxxx xxxxxxxx (28 bits) -> val < 268435456 (2^28)
+    if (LIKELY(val < 268435456)) {
+        dst[0] = (uint8_t)(0xE0 | (val & 0x0F));
+        dst[1] = (uint8_t)(val >> 4);
+        dst[2] = (uint8_t)(val >> 12);
+        dst[3] = (uint8_t)(val >> 20);
+        return 4;
     }
-    dst[count++] = (uint8_t)val;
-    return count;
+
+    // 5 bytes: 11110xxx ... (35 bits) -> Full 32-bit range
+    dst[0] = (uint8_t)(0xF0 | (val & 0x07));
+    dst[1] = (uint8_t)(val >> 3);
+    dst[2] = (uint8_t)(val >> 11);
+    dst[3] = (uint8_t)(val >> 19);
+    dst[4] = (uint8_t)(val >> 27);
+    return 5;
 }
 
 /**
@@ -693,10 +711,10 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             if (off > max_offset) max_offset = (uint16_t)off;
 
             if (ll >= ZXC_TOKEN_LL_MASK) {
-                extras_sz += zxc_write_vbyte(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
+                extras_sz += zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
             }
             if (ml >= ZXC_TOKEN_ML_MASK) {
-                extras_sz += zxc_write_vbyte(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
+                extras_sz += zxc_write_varint(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
             }
             seq_c++;
 
@@ -1183,10 +1201,10 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             seq_c++;
 
             if (ll >= ZXC_SEQ_LL_MASK) {
-                extras_c += zxc_write_vbyte(buf_extras + extras_c, ll - ZXC_SEQ_LL_MASK);
+                extras_c += zxc_write_varint(buf_extras + extras_c, ll - ZXC_SEQ_LL_MASK);
             }
             if (ml >= ZXC_SEQ_ML_MASK) {
-                extras_c += zxc_write_vbyte(buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
+                extras_c += zxc_write_varint(buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
             }
 
             if (m.len > 2 && level > 4) {
