@@ -369,34 +369,32 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
             return 0;
         }
 
-        if (bh.block_type == ZXC_BLOCK_EOF) {
-            if (UNLIKELY(bh.comp_size != 0)) {
+        if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
+            // Validate EOF structure (Size=0) and bounds (Footer must be present)
+            if (UNLIKELY(bh.comp_size != 0 ||
+                         ip + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE > ip_end)) {
                 zxc_cctx_free(&ctx);
                 return 0;
             }
-            // End of stream marker
+
             ip += ZXC_BLOCK_HEADER_SIZE;
 
-            // Footer (12 bytes) must be present
-            if (UNLIKELY(ip + ZXC_FILE_FOOTER_SIZE > ip_end)) {
+            // Verify Footer Content: Source Size and Global Checksum
+            uint64_t expected_src_sz = zxc_le64(ip);
+            size_t actual_src_sz = (size_t)(op - op_start);
+            int valid_footer = (expected_src_sz == actual_src_sz);
+
+            if (valid_footer && (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM) && checksum_enabled) {
+                if (zxc_le32(ip + 8) != d_global_hash) valid_footer = 0;
+            }
+
+            if (UNLIKELY(!valid_footer)) {
                 zxc_cctx_free(&ctx);
                 return 0;
             }
 
-            // Verify Source Size (Informational only)
-            // uint64_t src_size = zxc_le64(ip); (Unused)
-
-            // Verify Global Checksum if Flagged or Enabled
-            if ((bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM) && checksum_enabled) {
-                const uint32_t expected = zxc_le32(ip + 8);
-                if (expected != d_global_hash) {
-                    zxc_cctx_free(&ctx);
-                    return 0;
-                }
-            }
             // Consume footer
             ip += ZXC_FILE_FOOTER_SIZE;
-
             break;
         }
 
