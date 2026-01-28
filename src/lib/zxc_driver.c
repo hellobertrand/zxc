@@ -571,7 +571,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                 read_eof = 1;
             } else {
                 zxc_block_header_t bh;
-                zxc_read_block_header(bh_buf, ZXC_BLOCK_HEADER_SIZE, &bh);
+                if (UNLIKELY(zxc_read_block_header(bh_buf, ZXC_BLOCK_HEADER_SIZE, &bh) != 0)) {
+                    read_eof = 1;
+                    goto _job_prepared;
+                }
 
                 if (bh.block_type == ZXC_BLOCK_EOF) {
                     if (UNLIKELY(bh.comp_size != 0)) {
