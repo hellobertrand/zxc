@@ -678,11 +678,15 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         if (UNLIKELY(fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE)) {
             // Missing footer -> Error
             ctx.io_error = 1;
-        } else if (checksum_enabled && eof_has_checksum) {
-            const uint32_t expected = zxc_le32(footer + 8);
-            if (expected != d_global_hash) {
-                ctx.io_error = 1;
-            }
+        } else {
+            // Verify Footer Content: Source Size and Global Checksum
+            const uint64_t expected_src_sz = zxc_le64(footer);
+            int valid = (expected_src_sz == (uint64_t)w_args.total_bytes);
+
+            if (valid && checksum_enabled && eof_has_checksum)
+                valid = (zxc_le32(footer + 8) == d_global_hash);
+
+            if (UNLIKELY(!valid)) ctx.io_error = 1;
         }
     }
 
