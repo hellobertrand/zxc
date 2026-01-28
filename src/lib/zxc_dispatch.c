@@ -367,6 +367,10 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
         }
 
         if (bh.block_type == ZXC_BLOCK_EOF) {
+            if (UNLIKELY(bh.comp_size != 0)) {
+                zxc_cctx_free(&ctx);
+                return 0;
+            }
             // End of stream marker
             ip += ZXC_BLOCK_HEADER_SIZE;
             if (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM) {

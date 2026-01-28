@@ -572,6 +572,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                 zxc_read_block_header(bh_buf, ZXC_BLOCK_HEADER_SIZE, &bh);
 
                 if (bh.block_type == ZXC_BLOCK_EOF) {
+                    if (UNLIKELY(bh.comp_size != 0)) {
+                        ctx.io_error = 1;
+                        goto _job_prepared;
+                    }
                     read_eof = 1;
                     read_sz = 0;
                     eof_has_checksum = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
