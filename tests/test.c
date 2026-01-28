@@ -632,18 +632,31 @@ int test_eof_block_structure() {
         return 0;
     }
 
-    // EOF block should be at the very end (last 12 bytes)
-    if (comp_size < 12) {
-        printf("Failed: Compressed size too small for EOF block (%zu)\n", comp_size);
+    // Validating Footer and EOF Block
+    // Total Overhead: 12 bytes (Footer) + 12 bytes (EOF Header) = 24 bytes
+    if (comp_size < 24) {
+        printf("Failed: Compressed size too small for Footer + EOF (%zu)\n", comp_size);
         free(compressed);
         return 0;
     }
 
-    uint8_t* eof_ptr = compressed + comp_size - 12;
-    // Expected: Type=255 (0xFF), Flags=0, Received=0, Checksum=?, CompSz=0, RawSz=0
-    // We construct the header and calculate checksum to verify
+    // 1. Verify 12-byte Footer
+    // Structure: [SrcSize (8)] + [Hash (4)]
+    uint8_t* footer_ptr = compressed + comp_size - 12;
+    uint32_t f_src_low = zxc_le32(footer_ptr);       // Should be 4
+    uint32_t f_src_high = zxc_le32(footer_ptr + 4);  // Should be 0
+    uint32_t f_hash = zxc_le32(footer_ptr + 8);      // Should be 0 (checksum disabled)
+
+    if (f_src_low != 4 || f_src_high != 0 || f_hash != 0) {
+        printf("Failed: Footer mismatch. Src: %u, Hash: %u\n", f_src_low, f_hash);
+        free(compressed);
+        return 0;
+    }
+
+    // 2. Verify EOF Block Header
+    // Should be immediately before the footer
+    uint8_t* eof_ptr = compressed + comp_size - 24;
     uint8_t expected[12] = {0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-    // Calculate expected checksum using internal function (since we include zxc_internal.h)
     expected[3] = zxc_hash12_masked(expected);
 
     if (memcmp(eof_ptr, expected, 12) != 0) {

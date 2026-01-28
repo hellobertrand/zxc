@@ -323,13 +323,16 @@ size_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTR
     if (UNLIKELY(eof_size < 0)) return 0;
     op += eof_size;
 
-    if (checksum_enabled) {
-        if (UNLIKELY(rem_cap < (size_t)eof_size + ZXC_GLOBAL_CHECKSUM_SIZE)) return 0;
-        uint8_t gh_buf[ZXC_GLOBAL_CHECKSUM_SIZE];
-        zxc_store_le32(gh_buf, global_hash);
-        ZXC_MEMCPY(op, gh_buf, ZXC_GLOBAL_CHECKSUM_SIZE);
-        op += ZXC_GLOBAL_CHECKSUM_SIZE;
-    }
+    if (UNLIKELY(rem_cap < (size_t)eof_size + ZXC_FILE_FOOTER_SIZE)) return 0;
+
+    // Write 12-byte Footer: [Source Size (8)] + [Global Hash (4)]
+    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
+    zxc_store_le64(footer, (uint64_t)src_size);
+
+    checksum_enabled ? zxc_store_le32(footer + 8, global_hash) : ZXC_MEMSET(footer + 8, 0, 4);
+
+    ZXC_MEMCPY(op, footer, ZXC_FILE_FOOTER_SIZE);
+    op += ZXC_FILE_FOOTER_SIZE;
 
     return (size_t)(op - op_start);
 }
@@ -373,21 +376,27 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
             }
             // End of stream marker
             ip += ZXC_BLOCK_HEADER_SIZE;
-            if (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM) {
-                if (UNLIKELY(ip + ZXC_GLOBAL_CHECKSUM_SIZE > ip_end)) {
+
+            // Footer (12 bytes) must be present
+            if (UNLIKELY(ip + ZXC_FILE_FOOTER_SIZE > ip_end)) {
+                zxc_cctx_free(&ctx);
+                return 0;
+            }
+
+            // Verify Source Size (Informational only)
+            // uint64_t src_size = zxc_le64(ip); (Unused)
+
+            // Verify Global Checksum if Flagged or Enabled
+            if ((bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM) && checksum_enabled) {
+                const uint32_t expected = zxc_le32(ip + 8);
+                if (expected != d_global_hash) {
                     zxc_cctx_free(&ctx);
                     return 0;
                 }
-                if (checksum_enabled) {
-                    const uint32_t expected = zxc_le32(ip);
-                    if (expected != d_global_hash) {
-                        zxc_cctx_free(&ctx);
-                        return 0;
-                    }
-                }
-                // Consume checksum
-                ip += ZXC_GLOBAL_CHECKSUM_SIZE;
             }
+            // Consume footer
+            ip += ZXC_FILE_FOOTER_SIZE;
+
             break;
         }
 
