@@ -133,8 +133,8 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 
 * **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI, 255=EOF).
 * **Flags**:
-  - **Bit 7 (0x80)**: `HAS_CHECKSUM`. If set, a **32-bit (4-byte) checksum** is appended to the end of the block (after the compressed payload).
-  - **Bits 0-3 (0x0F)**: `CHECKSUM_TYPE`. Defines the algorithm used for integrity verification.
+  - **Bit 7 (0x80)**: `has_checksum`. If set, a **32-bit (4-byte) checksum** is appended to the end of the block (after the compressed payload). This checksum also contributes to the **Global Stream Checksum**.
+  - **Bits 0-3 (0x0F)**: `checksum_type`. Defines the algorithm used for integrity verification.
 * **Rsrvd**: Reserved for future use (must be 0).
 * **H.crc**: **Header Checksum** (1 byte). Calculated on the 12-byte header (with H.crc byte set to 0) using `zxc_hash12_masked`.
 * **Checksum Algorithms**:
@@ -161,16 +161,7 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 * **Frame**: Processing window size (currently always 128).
 * **Reserved**: Padding for alignment.
 
-### 5.4 Specific Header: EOF (End of File)
-(Block Type 255)
-
-The **EOF** block marks the end of the ZXC stream. It ensures that the decompressor knows exactly when to stop processing, allowing for robust stream termination even when file size metadata is unavailable or when concatenating streams.
-
-*   **Structure**: Standard 12-byte Block Header.
-*   **Flags**: Always 0.
-*   **Comp Size / Raw Size**: Unlike other blocks, these are set to 0. (The EOF block carries no payload).
-
-### 5.5 Specific Header: GLO (Generic Low)
+### 5.4 Specific Header: GLO (Generic Low)
 (Present immediately after the Block Header)
 
 **GLO Header (16 bytes):**
@@ -250,7 +241,7 @@ Currently, the **Literals** section uses different sizes when RLE compression is
 > **Design Note**: This format is designed for future extensibility. The dual-size architecture allows adding entropy coding (FSE/ANS) or bitpacking to any stream without breaking backward compatibility.
 
 
-### 5.6 Specific Header: GHI (Generic High)
+### 5.5 Specific Header: GHI (Generic High)
 (Present immediately after the Block Header)
 
 The **GHI** (Generic High-Velocity) block format is optimized for maximum decompression speed. It uses a **packed 32-bit sequence** format that allows 4-byte aligned reads, reducing memory access latency and enabling efficient SIMD processing.
@@ -345,7 +336,37 @@ GHI Block Data Layout:
 > **Design Rationale**: The 32-bit packed format eliminates pointer chasing between token and offset streams. By reading a single aligned word per sequence, the decoder achieves better cache utilization and enables aggressive loop unrolling (4x) for maximum throughput on modern CPUs.
 
 
-### 5.7 Block Encoding & Processing Algorithms
+### 5.6 Specific Header: EOF (End of File)
+(Block Type 255)
+
+The **EOF** block marks the end of the ZXC stream. It ensures that the decompressor knows exactly when to stop processing, allowing for robust stream termination even when file size metadata is unavailable or when concatenating streams.
+
+*   **Structure**: Standard 12-byte Block Header.
+*   **Flags**:
+    *   **Bit 7 (0x80)**: `has_checksum`. If set, implies the **Global Stream Checksum** in the footer is valid and should be verified.
+*   **Comp Size / Raw Size**: Unlike other blocks, these **MUST be set to 0**. The decoder enforces strict validation (`Type == EOF` AND `Comp Size == 0`) to prevent processing of malformed termination blocks.
+
+### 5.7 File Footer
+(Present immediately after the EOF Block)
+
+A mandatory **12-byte footer** closes the stream, providing total source size information and the global checksum.
+
+**Footer Structure (12 bytes):**
+
+```
+  Offset:  0                               8               12
+          +-------------------------------+---------------+
+          | Original Source Size          | Global Hash   |
+          | (8 bytes)                     | (4 bytes)     |
+          +-------------------------------+---------------+
+```
+
+*   **Original Source Size** (8 bytes): Total size of the uncompressed data.
+*   **Global Hash** (4 bytes): The **Global Stream Checksum**. Valid only if the EOF block has the `has_checksum` flag set (or the decoder context requires it).
+    *   **Algorithm**: `Rotation + XOR`.
+    *   For each block with a checksum: `global_hash = (global_hash << 1) | (global_hash >> 31); global_hash ^= block_hash;`
+
+### 5.8 Block Encoding & Processing Algorithms
 
 The efficiency of ZXC relies on specialized algorithmic pipelines for each block type.
 
@@ -415,7 +436,7 @@ Triggered when data is detected as a dense array of 32-bit integers.
 2.  **ZigZag Decode**: Reverses the mapping.
 3.  **Integration**: Computes the prefix sum (cumulative addition) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
 
-### 5.7 Data Integrity
+### 5.9 Data Integrity
 Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.
 
 #### Post-Compression Verification
