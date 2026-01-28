@@ -482,8 +482,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     size_t runtime_chunk_sz = ZXC_BLOCK_SIZE;
     if (mode == 0) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
-        if (fread(h, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE ||
-            zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz) != 0)
+        if (UNLIKELY(fread(h, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE ||
+                     zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz) != 0))
             return -1;
     }
     ctx.chunk_size = runtime_chunk_sz;
@@ -537,9 +537,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 1 && f_out) {
         uint8_t h[8];
         zxc_write_file_header(h, 8);
-        if (fwrite(h, 1, 8, f_out) != 8) {
-            ctx.io_error = 1;
-        }
+        if (UNLIKELY(fwrite(h, 1, 8, f_out) != 8)) ctx.io_error = 1;
+
         w_args.total_bytes = 8;
     }
     pthread_t writer_th;
@@ -563,7 +562,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         if (mode == 1) {
             read_sz = fread(job->in_buf, 1, ZXC_BLOCK_SIZE, f_in);
             total_src_bytes += read_sz;
-            if (read_sz == 0) read_eof = 1;
+            if (UNLIKELY(read_sz == 0)) read_eof = 1;
         } else {
             uint8_t bh_buf[ZXC_BLOCK_HEADER_SIZE];
             size_t h_read = fread(bh_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in);
@@ -603,8 +602,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                 if (UNLIKELY(body_read != bh.comp_size)) {
                     read_eof = 1;
                 } else if (has_crc) {
-                    if (fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size, 1,
-                              ZXC_BLOCK_CHECKSUM_SIZE, f_in) != ZXC_BLOCK_CHECKSUM_SIZE) {
+                    if (UNLIKELY(fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size, 1,
+                                       ZXC_BLOCK_CHECKSUM_SIZE, f_in) != ZXC_BLOCK_CHECKSUM_SIZE)) {
                         read_eof = 1;
                     } else {
                         // Update Global Hash for Decompression
@@ -619,7 +618,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
             }
         }
     _job_prepared:
-        if (read_eof && read_sz == 0) break;
+        if (UNLIKELY(read_eof && read_sz == 0)) break;
 
         job->in_sz = read_sz;
         pthread_mutex_lock(&ctx.lock);
@@ -631,7 +630,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         pthread_cond_signal(&ctx.cond_worker);
         pthread_mutex_unlock(&ctx.lock);
 
-        if (read_sz < ZXC_BLOCK_SIZE && mode == 1) read_eof = 1;
+        if (UNLIKELY(read_sz < ZXC_BLOCK_SIZE && mode == 1)) read_eof = 1;
     }
 
     zxc_stream_job_t* end_job = &ctx.jobs[read_idx];
@@ -685,9 +684,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
             ctx.io_error = 1;
         } else {
             // Verify Footer Content: Source Size and Global Checksum
-            const uint64_t expected_src_sz = zxc_le64(footer);
-            int valid = (expected_src_sz == (uint64_t)w_args.total_bytes);
-
+            int valid = (zxc_le64(footer) == (uint64_t)w_args.total_bytes);
             if (valid && checksum_enabled && eof_has_checksum)
                 valid = (zxc_le32(footer + 8) == d_global_hash);
 

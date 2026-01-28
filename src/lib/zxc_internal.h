@@ -484,7 +484,7 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
  * @brief Computes the 1-byte checksum for the file header.
  *
  * @param[in] p Pointer to the file header buffer (at least 7 bytes).
- * @return The 1-byte checksum value.
+ * @return uint8_t The 1-byte checksum value.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
     uint64_t v = zxc_le64(p);
@@ -501,7 +501,7 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
  * This function generates a hash value by reading data from the given pointer.
  * The result is masked to fit within 12 bits (0-4095 range).
  *
- * @param p Pointer to the input data to be hashed
+ * @param[in] p Pointer to the input data to be hashed
  * @return uint8_t The computed hash value.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_hash12(const uint8_t* p) {
