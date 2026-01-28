@@ -124,7 +124,8 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity) {
     dst[4] = ZXC_FILE_FORMAT_VERSION;
     dst[5] = (uint8_t)(ZXC_BLOCK_SIZE / ZXC_BLOCK_UNIT);
     dst[6] = 0;  // Reserved (1 byte)
-    dst[7] = zxc_hash8_masked(dst);
+    dst[7] = 0;  // Zero out before hashing
+    dst[7] = zxc_hash8(dst);
 
     return ZXC_FILE_HEADER_SIZE;
 }
@@ -132,8 +133,15 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity) {
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
                          size_t* RESTRICT out_block_size) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE || zxc_le32(src) != ZXC_MAGIC_WORD ||
-                 src[4] != ZXC_FILE_FORMAT_VERSION || src[7] != zxc_hash8_masked(src)))
+                 src[4] != ZXC_FILE_FORMAT_VERSION))
         return -1;
+
+    // Zero out checksum byte for verification
+    uint8_t temp[ZXC_FILE_HEADER_SIZE];
+    ZXC_MEMCPY(temp, src, ZXC_FILE_HEADER_SIZE);
+    temp[7] = 0;
+
+    if (UNLIKELY(src[7] != zxc_hash8(temp))) return -1;
 
     if (out_block_size) {
         size_t units = src[5] ? src[5] : 64;  // Default to 64 block units (256KB)
@@ -152,14 +160,21 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     dst[3] = 0;  // Future checksum
     zxc_store_le32(dst + 4, bh->comp_size);
     zxc_store_le32(dst + 8, bh->raw_size);
-    dst[3] = zxc_hash12_masked(dst);
+    dst[3] = zxc_hash12(dst);
 
     return ZXC_BLOCK_HEADER_SIZE;
 }
 
 int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
                           zxc_block_header_t* RESTRICT bh) {
-    if (UNLIKELY(src_size < ZXC_BLOCK_HEADER_SIZE) || src[3] != zxc_hash12_masked(src)) return -1;
+    if (UNLIKELY(src_size < ZXC_BLOCK_HEADER_SIZE)) return -1;
+
+    // Zero out checksum byte for verification
+    uint8_t temp[ZXC_BLOCK_HEADER_SIZE];
+    ZXC_MEMCPY(temp, src, ZXC_BLOCK_HEADER_SIZE);
+    temp[3] = 0;
+
+    if (UNLIKELY(src[3] != zxc_hash12(temp))) return -1;
 
     bh->block_type = src[0];
     bh->block_flags = src[1];
