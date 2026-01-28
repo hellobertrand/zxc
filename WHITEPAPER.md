@@ -47,44 +47,41 @@ ZXC leverages modern instruction sets to maximize throughput on both ARM and x86
 
 ### 4.3 Entropy Coding & Bitpacking
 *   **RLE (Run-Length Encoding)**: Automatically detects runs of identical bytes.
-*   **VByte Encoding**: Variable-length integer encoding (similar to LEB128) for overflow values.
+*   **Prefix Varint Encoding**: Variable-length integer encoding (similar to LEB128 but prefix-based) for overflow values.
 *   **Bit-Packing**: Compressed sequences are packed into dedicated streams using minimal bit widths.
 
-#### VByte Format
+#### Prefix Varint Format
 
-VByte (Variable Byte) encoding stores integers using 7 bits per byte, with the MSB as a continuation flag:
+ZXC uses a **Prefix Varint** encoding for overflow values. Unlike standard VByte (which uses a continuation bit in every byte), Prefix Varint encodes the total length of the integer in the **unary prefix of the first byte**. This allows the decoder to determine the sequence length immediately, enabling branchless or highly predictable decoding without serial dependencies.
 
-```
-Single byte (values 0-127):
-+---+---+---+---+---+---+---+---+
-| 0 |  7-bit value (0-127)      |
-+---+---+---+---+---+---+---+---+
-  ^
-  └── MSB = 0: Last byte
+**Encoding Scheme:**
 
-Multi-byte (values >= 128):
-+---+---+---+---+---+---+---+---+   +---+---+---+---+---+---+---+---+
-| 1 |   7 bits (low)            |   | 0 |   7 bits (high)           |
-+---+---+---+---+---+---+---+---+   +---+---+---+---+---+---+---+---+
-  ^                                   ^
-  └── MSB = 1: More bytes             └── MSB = 0: Last byte
-```
-
-**Byte count by value range:**
-
-| Value Range       | Bytes | Max Bits |
-|-------------------|-------|----------|
-| 0 - 127           | 1     | 7        |
-| 128 - 16,383      | 2     | 14       |
-| 16,384 - 2,097,151| 3     | 21       |
-| ≥ 2,097,152       | 5     | 35       |
+| Prefix (Binary) | Total Bytes | Data Bits (1st Byte) | Total Data Bits | Range (Value < X) |
+|-----------------|-------------|----------------------|-----------------|-------------------|
+| `0xxxxxxx`      | 1           | 7                    | 7               | 128               |
+| `10xxxxxx`      | 2           | 6                    | 14 (6+8)        | 16,384            |
+| `110xxxxx`      | 3           | 5                    | 21 (5+8+8)      | 2,097,152         |
+| `1110xxxx`      | 4           | 4                    | 28 (4+8+8+8)    | 268,435,456       |
+| `11110xxx`      | 5           | 3                    | 35 (3+8+8+8+8)  | 34,359,738,368    |
 
 **Example**: Encoding value `300` (binary: `100101100`):
-```
-300 = 0b100101100 → Split into 7-bit groups: [0101100] [0000010]
-Byte 1: 1|0101100 = 0xAC  (MSB=1: more bytes, low 7 bits = 44)
-Byte 2: 0|0000010 = 0x02  (MSB=0: last byte, high 7 bits = 2)
-Decode: 44 + (2 << 7) = 44 + 256 = 300 ✓
+```text
+Value 300 > 127 and < 16383 -> Uses 2-byte format (Prefix '10').
+
+Step 1: Low 6 bits
+300 & 0x3F = 44 (0x2C, binary 101100)
+Byte 1 = Prefix '10' | 101100 = 10101100 (0xAC)
+
+Step 2: Remaining high bits
+300 >> 6 = 4 (0x04, binary 00000100)
+Byte 2 = 0x04
+
+Result: 0xAC 0x04
+
+Decoding Verification:
+Byte 1 (0xAC) & 0x3F = 44
+Byte 2 (0x04) << 6   = 256
+Total = 256 + 44 = 300
 ```
 
 ## 5. File Format Specification
@@ -211,7 +208,7 @@ Each descriptor stores sizes as a packed 64-bit value:
 | 0 | **Literals**| Raw bytes to copy, or RLE-compressed if `enc_lit=1`  |
 | 1 | **Tokens**  | Packed bytes: `(LiteralLen << 4) \| MatchLen`        |
 | 2 | **Offsets** | Match distances: 8-bit if `enc_off=1`, else 16-bit LE |
-| 3 | **Extras**  | VByte overflow values when LitLen or MatchLen ≥ 15   |
+| 3 | **Extras**  | Prefix Varint overflow values when LitLen or MatchLen ≥ 15   |
 
 **Data Flow Example:**
 
@@ -234,7 +231,7 @@ Each descriptor stores both a compressed and raw size to support secondary encod
 | **Literals**| RLE size (if used)   | Original byte count | Yes, if RLE enabled |
 | **Tokens**  | Stream size          | Stream size         | No                   |
 | **Offsets** | N×1 or N×2 bytes     | N×1 or N×2 bytes    | No (size depends on `enc_off`) |
-| **Extras**  | VByte stream size    | VByte stream size   | No                   |
+| **Extras**  | Prefix Varint stream size | Prefix Varint stream size | No                   |
 
 Currently, the **Literals** section uses different sizes when RLE compression is applied (`enc_lit=1`). The **Offsets** section size depends on `enc_off`: N sequences × 1 byte (if `enc_off=1`) or N sequences × 2 bytes (if `enc_off=0`).
 
@@ -284,7 +281,7 @@ The **GHI** (Generic High-Velocity) block format is optimized for maximum decomp
 |---|---------------|-------------------------------------------------------|
 | 0 | **Literals**  | Raw bytes to copy                                    |
 | 1 | **Sequences** | Packed 32-bit sequences (see format below)           |
-| 2 | **Extras**    | VByte overflow values when LitLen or MatchLen ≥ 255  |
+| 2 | **Extras**    | Prefix Varint overflow values when LitLen or MatchLen ≥ 255  |
 
 **Packed Sequence Format (32 bits):**
 
@@ -305,8 +302,8 @@ Unlike GLO which uses separate token and offset streams, GHI packs all sequence 
          +--------+--------+--------+--------+
 ```
 
-* **LL (Literal Length)**: 8 bits (0-254, value 255 triggers VByte overflow)
-* **ML (Match Length - 5)**: 8 bits (actual length = ML + 5, range 5-259, value 255 triggers VByte overflow)
+* **LL (Literal Length)**: 8 bits (0-254, value 255 triggers Prefix Varint overflow)
+* **ML (Match Length - 5)**: 8 bits (actual length = ML + 5, range 5-259, value 255 triggers Prefix Varint overflow)
 * **Offset**: 16 bits (match distance, 1-65535)
 
 **Data Flow Example:**
@@ -385,7 +382,7 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Literals Buffer*: Raw bytes.
     *   *Tokens Buffer*: Packed `(LitLen << 4) | MatchLen`.
     *   *Offsets Buffer*: Variable-width distances (8-bit or 16-bit, see below).
-    *   *Extras Buffer*: Overflow values for lengths >= 15 (VByte encoded).
+    *   *Extras Buffer*: Overflow values for lengths >= 15 (Prefix Varint encoded).
     *   *Offset Mode Selection (v0.4.0)*: The encoder tracks the maximum offset across all sequences. If all offsets are ≤ 255, the 8-bit mode (`enc_off=1`) is selected, saving 1 byte per sequence compared to 16-bit mode.
 4.  **RLE Pass**: The literals buffer is scanned for run-length encoding opportunities (runs of identical bytes). If beneficial (>10% gain), it is compressed in place.
 5.  **Final Serialization**: All buffers are concatenated into the payload, preceded by section descriptors.
@@ -410,7 +407,7 @@ This format prioritizes decompression throughput over compression ratio. It uses
 3.  **Stream Assembly**: Only three streams are generated:
     *   *Literals Buffer*: Raw bytes (no RLE).
     *   *Sequences Buffer*: Packed 32-bit words (4 bytes each).
-    *   *Extras Buffer*: VByte overflow values for lengths >= 255.
+    *   *Extras Buffer*: Prefix Varint overflow values for lengths >= 255.
 4.  **Final Serialization**: Streams are concatenated with 3 section descriptors.
 
 **Decoding Process**:

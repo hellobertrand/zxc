@@ -356,5 +356,5 @@ size_t zxc_compress_bound(const size_t input_size) {
     size_t n = (input_size + ZXC_BLOCK_SIZE - 1) / ZXC_BLOCK_SIZE;
     if (n == 0) n = 1;
     return ZXC_FILE_HEADER_SIZE + (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + 64)) +
-           input_size + ZXC_BLOCK_HEADER_SIZE;
+           input_size + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
 }
