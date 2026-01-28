@@ -642,7 +642,7 @@ int test_eof_block_structure() {
 
     // 1. Verify 12-byte Footer
     // Structure: [SrcSize (8)] + [Hash (4)]
-    uint8_t* footer_ptr = compressed + comp_size - 12;
+    const uint8_t* footer_ptr = compressed + comp_size - 12;
     uint32_t f_src_low = zxc_le32(footer_ptr);       // Should be 4
     uint32_t f_src_high = zxc_le32(footer_ptr + 4);  // Should be 0
     uint32_t f_hash = zxc_le32(footer_ptr + 8);      // Should be 0 (checksum disabled)
@@ -655,7 +655,7 @@ int test_eof_block_structure() {
 
     // 2. Verify EOF Block Header
     // Should be immediately before the footer
-    uint8_t* eof_ptr = compressed + comp_size - 24;
+    const uint8_t* eof_ptr = compressed + comp_size - 24;
     uint8_t expected[12] = {0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     expected[3] = zxc_hash12_masked(expected);
 
