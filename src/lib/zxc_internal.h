@@ -122,7 +122,7 @@ extern "C" {
  */
 
 #define ZXC_MAGIC_WORD 0x0043585AU            // Magic signature "ZXC0" (Little Endian)
-#define ZXC_FILE_FORMAT_VERSION 3             // Current file format version
+#define ZXC_FILE_FORMAT_VERSION 4             // Current file format version
 #define ZXC_BLOCK_UNIT (4 * 1024)             // Block size unit (4KB)
 #define ZXC_BLOCK_SIZE (64 * ZXC_BLOCK_UNIT)  // Size of data blocks processed by threads (256KB)
 #define ZXC_IO_BUFFER_SIZE (1024 * 1024)      // Size of stdio buffers
