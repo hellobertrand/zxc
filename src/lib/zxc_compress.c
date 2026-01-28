@@ -82,6 +82,25 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  * @return The number of bytes written to the destination buffer.
  */
 static ZXC_ALWAYS_INLINE size_t zxc_write_vbyte(uint8_t* dst, uint32_t val) {
+    // Fast path: 1 byte (val < 128) - most common case
+    if (LIKELY(val < ZXC_VBYTE_MSB)) {
+        dst[0] = (uint8_t)val;
+        return 1;
+    }
+    // Fast path: 2 bytes (val < 16384)
+    if (LIKELY(val < (1U << 14))) {
+        dst[0] = (uint8_t)(val | ZXC_VBYTE_MSB);
+        dst[1] = (uint8_t)(val >> 7);
+        return 2;
+    }
+    // Fast path: 3 bytes (val < 2097152)
+    if (LIKELY(val < (1U << 21))) {
+        dst[0] = (uint8_t)(val | ZXC_VBYTE_MSB);
+        dst[1] = (uint8_t)((val >> 7) | ZXC_VBYTE_MSB);
+        dst[2] = (uint8_t)(val >> 14);
+        return 3;
+    }
+    // Fallback: 4-5 bytes (rare for ZXC block sizes)
     size_t count = 0;
     while (val >= ZXC_VBYTE_MSB) {
         dst[count++] = (uint8_t)(val | ZXC_VBYTE_MSB);
@@ -106,6 +125,48 @@ typedef struct {
     uint32_t len;
     uint32_t backtrack;
 } zxc_match_t;
+
+/**
+ * @brief Batch-updates hash and chain tables for positions within a matched region.
+ *
+ * After emitting a match, updating the hash table for positions inside the matched
+ * region improves future match quality. This function defers those updates outside
+ * the critical match-finding loop to reduce memory dependencies.
+ *
+ * @param[in] src Pointer to the start of the source buffer.
+ * @param[in] match_start Start position of the match in the source buffer.
+ * @param[in] match_len Length of the match in bytes.
+ * @param[in,out] hash_table Hash table for LZ77 matching.
+ * @param[in,out] chain_table Chain table for collision handling.
+ * @param[in] epoch_mark Current epoch marker for hash table invalidation.
+ * @param[in] iend Pointer to the end of the input buffer.
+ */
+static ZXC_ALWAYS_INLINE void zxc_batch_hash_update(const uint8_t* src, const uint8_t* match_start,
+                                                    uint32_t match_len, uint32_t* hash_table,
+                                                    uint16_t* chain_table, uint32_t epoch_mark,
+                                                    const uint8_t* iend) {
+    // Update every 2nd position in the match (skip first byte, already updated by find_best_match)
+    // This balances hash table quality vs update overhead
+    const uint8_t* p = match_start + 1;
+    const uint8_t* p_end = match_start + match_len;
+    if (p_end > iend - 4) p_end = iend - 4;  // Need 4 bytes for hash
+
+    for (; p < p_end; p += 2) {
+        uint32_t pos = (uint32_t)(p - src);
+        uint32_t val = zxc_le32(p);
+        uint32_t h = zxc_hash_func(val);
+
+        uint32_t prev_head = hash_table[2 * h];
+        uint32_t prev_idx =
+            (prev_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (prev_head & ZXC_OFFSET_MASK) : 0;
+
+        hash_table[2 * h] = epoch_mark | pos;
+        hash_table[2 * h + 1] = val;
+        chain_table[pos] = (prev_idx > 0 && (pos - prev_idx) < ZXC_LZ_WINDOW_SIZE)
+                               ? (uint16_t)(pos - prev_idx)
+                               : 0;
+    }
+}
 
 /**
  * @brief Finds the best matching sequence for LZ77 compression
@@ -683,23 +744,12 @@ static int zxc_encode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
             }
             seq_c++;
 
-            if (m.len > 2 && level > 4) {
-                const uint8_t* match_end = ip + m.len;
-                if (match_end < iend - 3) {
-                    uint32_t pos_u = (uint32_t)((match_end - 2) - src);
-                    uint32_t val_u = zxc_le32(match_end - 2);
-                    uint32_t h_u = zxc_hash_func(val_u);
-                    uint32_t prev_head = hash_table[2 * h_u];
-                    uint32_t prev_idx = (prev_head & ~ZXC_OFFSET_MASK) == epoch_mark
-                                            ? (prev_head & ZXC_OFFSET_MASK)
-                                            : 0;
-                    hash_table[2 * h_u] = epoch_mark | pos_u;
-                    hash_table[2 * h_u + 1] = val_u;
-                    chain_table[pos_u] = (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
-                                             ? (uint16_t)(pos_u - prev_idx)
-                                             : 0;
-                }
+            // Batch-update hash table for positions in the matched region
+            // This improves future match quality while deferring updates outside critical path
+            if (m.len > 4 && level >= 5) {
+                zxc_batch_hash_update(src, ip, m.len, hash_table, chain_table, epoch_mark, iend);
             }
+
             ip += m.len;
             anchor = ip;
         } else {
@@ -1179,23 +1229,6 @@ static int zxc_encode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
                 extras_c += zxc_write_vbyte(buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
             }
 
-            if (m.len > 2 && level > 4) {
-                const uint8_t* match_end = ip + m.len;
-                if (match_end < iend - 3) {
-                    uint32_t pos_u = (uint32_t)((match_end - 2) - src);
-                    uint32_t val_u = zxc_le32(match_end - 2);
-                    uint32_t h_u = zxc_hash_func(val_u);
-                    uint32_t prev_head = hash_table[2 * h_u];
-                    uint32_t prev_idx = (prev_head & ~ZXC_OFFSET_MASK) == epoch_mark
-                                            ? (prev_head & ZXC_OFFSET_MASK)
-                                            : 0;
-                    hash_table[2 * h_u] = epoch_mark | pos_u;
-                    hash_table[2 * h_u + 1] = val_u;
-                    chain_table[pos_u] = (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
-                                             ? (uint16_t)(pos_u - prev_idx)
-                                             : 0;
-                }
-            }
             ip += m.len;
             anchor = ip;
         } else {
