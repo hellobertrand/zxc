@@ -205,8 +205,6 @@ static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
 #endif
 }
 
-
-
 #if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
 /**
  * @brief Computes the prefix sum of a 128-bit vector of 32-bit unsigned
@@ -338,15 +336,15 @@ static ZXC_ALWAYS_INLINE __m512i zxc_mm512_prefix_sum_epi32(__m512i v) {
  *         or -1 if an error occurs (e.g., buffer overflow, invalid header,
  *         or malformed compressed stream).
  */
-static int zxc_decode_block_num(const uint8_t* RESTRICT src, size_t src_size, uint8_t* RESTRICT dst,
-                                size_t dst_capacity, uint32_t expected_raw_size) {
+static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_size,
+                                uint8_t* RESTRICT dst, const size_t dst_capacity,
+                                const uint32_t expected_raw_size) {
     (void)expected_raw_size;
 
     zxc_num_header_t nh;
     if (UNLIKELY(zxc_read_num_header(src, src_size, &nh) != 0)) return -1;
 
-    const uint8_t* p = src + ZXC_NUM_HEADER_BINARY_SIZE;
-    const uint8_t* p_end = src + src_size;
+    size_t offset = ZXC_NUM_HEADER_BINARY_SIZE;
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
     uint64_t vals_remaining = nh.n_values;
@@ -356,17 +354,18 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, size_t src_size, ui
     uint32_t deltas[ZXC_DEC_BATCH];
 
     while (vals_remaining > 0) {
-        if (UNLIKELY(p + 16 > p_end)) return -1;
-        uint16_t nvals = zxc_le16(p + 0);
-        uint16_t bits = zxc_le16(p + 2);
-        uint32_t psize = zxc_le32(p + 12);
-        p += 16;
-        if (UNLIKELY(p + psize > p_end || d_ptr + nvals * 4 > d_end ||
+        if (UNLIKELY(offset + 16 > src_size)) return -1;
+        uint16_t nvals = zxc_le16(src + offset + 0);
+        uint16_t bits = zxc_le16(src + offset + 2);
+        uint32_t psize = zxc_le32(src + offset + 12);
+        offset += 16;
+
+        if (UNLIKELY(src_size < offset + psize || (size_t)(d_end - d_ptr) < (size_t)nvals * 4 ||
                      bits > (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)))
             return -1;
 
         zxc_bit_reader_t br;
-        zxc_br_init(&br, p, psize);
+        zxc_br_init(&br, src + offset, psize);
         size_t i = 0;
 
         for (; i + ZXC_DEC_BATCH <= nvals; i += ZXC_DEC_BATCH) {
@@ -458,7 +457,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, size_t src_size, ui
             d_ptr += 4;
         }
 
-        p += psize;
+        offset += psize;
         vals_remaining -= nvals;
     }
     return (int)(d_ptr - dst);
@@ -481,9 +480,9 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, size_t src_size, ui
  * @return The number of bytes written to the destination buffer on success, or
  * -1 on failure (e.g., invalid header, buffer overflow, or corrupted data).
  */
-static int zxc_decode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
-                                uint8_t* RESTRICT dst, size_t dst_capacity,
-                                uint32_t expected_raw_size) {
+static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                const size_t src_size, uint8_t* RESTRICT dst,
+                                const size_t dst_capacity, const uint32_t expected_raw_size) {
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS];
 
@@ -1041,9 +1040,9 @@ static int zxc_decode_block_glo(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
  * @param[in] expected_raw_size Expected size of the decompressed data in bytes.
  * @return int Returns 0 on success, or a negative error code on failure.
  */
-static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, size_t src_size,
-                                uint8_t* RESTRICT dst, size_t dst_capacity,
-                                uint32_t expected_raw_size) {
+static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                const size_t src_size, uint8_t* RESTRICT dst,
+                                const size_t dst_capacity, const uint32_t expected_raw_size) {
     (void)ctx;
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[ZXC_GHI_SECTIONS];
@@ -1475,21 +1474,31 @@ static int zxc_decode_block_ghi(zxc_cctx_t* ctx, const uint8_t* RESTRICT src, si
 }
 
 // cppcheck-suppress unusedFunction
-int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src_sz, uint8_t* dst,
-                                 size_t dst_cap) {
+int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
     if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return -1;
 
-    uint8_t type = src[0];
-    uint8_t flags = src[1];
-    uint32_t comp_sz = zxc_le32(src + 4);
-    uint32_t raw_sz = zxc_le32(src + 8);
+    const uint8_t type = src[0];
+    const uint8_t flags = src[1];
+    const uint32_t comp_sz = zxc_le32(src + 4);
+    const uint32_t raw_sz = zxc_le32(src + 8);
 
-    int has_crc = (flags & ZXC_BLOCK_FLAG_CHECKSUM);
-    size_t header_len = ZXC_BLOCK_HEADER_SIZE + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    const int has_crc = (flags & ZXC_BLOCK_FLAG_CHECKSUM);
 
-    if (UNLIKELY(src_sz < header_len + comp_sz)) return -1;
+    // Check bounds: Header + Body + Checksum(if any)
+    const size_t expected_sz =
+        (size_t)ZXC_BLOCK_HEADER_SIZE + comp_sz + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    if (UNLIKELY(src_sz < expected_sz)) return -1;
 
-    const uint8_t* data = src + header_len;
+    const uint8_t* data = src + ZXC_BLOCK_HEADER_SIZE;
+
+    if (has_crc && ctx->checksum_enabled) {
+        const uint8_t algo = flags & ZXC_CHECKSUM_TYPE_MASK;
+        const uint32_t stored = zxc_le32(data + comp_sz);
+        const uint32_t calc = zxc_checksum(data, comp_sz, algo);
+        if (UNLIKELY(stored != calc)) return -1;
+    }
+
     int decoded_sz = -1;
 
     switch (type) {
@@ -1509,14 +1518,6 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* ctx, const uint8_t* src, size_t src
             break;
         default:
             return -1;
-    }
-
-    if (decoded_sz >= 0 && has_crc && ctx->checksum_enabled) {
-        uint8_t algo = flags & ZXC_CHECKSUM_TYPE_MASK;
-        uint64_t stored = zxc_le64(src + ZXC_BLOCK_HEADER_SIZE);
-        uint64_t calc = zxc_checksum(dst, (size_t)decoded_sz, algo);
-
-        if (UNLIKELY(stored != calc)) return -1;
     }
 
     return decoded_sz;

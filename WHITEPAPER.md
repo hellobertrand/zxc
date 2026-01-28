@@ -1,6 +1,6 @@
 # ZXC: High-Performance Asymmetric Lossless Compression
 
-**Version**: 0.5.1
+**Version**: 0.6.0
 **Date**: January 2026
 **Author**: Bertrand Lebonnois
 
@@ -98,19 +98,20 @@ The file begins with an **8-byte** header that identifies the format and specifi
 **FILE Header (8 bytes):**
 
 ```
-  Offset:  0               4       5       6               8
-           +---------------+-------+-------+---------------+
-           | Magic Word    | Ver   | Chunk | Reserved      |
-           | (4 bytes)     | (1B)  | (1B)  | (2 bytes)     |
-           +---------------+-------+-------+---------------+
+  Offset:  0               4       5       6       7       8
+           +---------------+-------+-------+-------+-------+
+           | Magic Word    | Ver   | Chunk | Res   | Chk   |
+           | (4 bytes)     | (1B)  | (1B)  | (1B)  | (1B)  |
+           +---------------+-------+-------+-------+-------+
 ```
 
 * **Magic Word (4 bytes)**: `0x5A 0x58 0x43 0x30` ("ZXC0" in Little Endian).
-* **Version (1 byte)**: Current version is `1`.
+* **Version (1 byte)**: Current version is `3`.
 * **Chunk Size Code (1 byte)**: Defines the processing block size:
   - `0` = Default mode (256 KB, for backward compatibility)
   - `N` = Chunk size is `N × 4096` bytes (e.g., `62` = 248 KB)
-* **Reserved (2 bytes)**: Future use.
+* **Reserved (1 byte)**: Future use.
+* **Checksum (1 byte)**: Rapidhash checksum (low byte) of the first 7 bytes (Magic Word through Reserved). Always calculated and verified.
 
 ### 5.2 Block Header Structure
 Each data block consists of a **12-byte** generic header that precedes the specific payload. This header allows the decoder to navigate the stream and identify the processing method required for the next chunk of data.
@@ -118,33 +119,33 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 **BLOCK Header (12 bytes):**
 
 ```
-  Offset:  0       1       2               4                       8                       12
-          +-------+-------+---------------+-----------------------+-----------------------+
-          | Type  | Flags | Reserved      | Comp Size             | Raw Size              |
-          | (1B)  | (1B)  | (2 bytes)     | (4 bytes)             | (4 bytes)             |
-          +-------+-------+---------------+-----------------------+-----------------------+
+  Offset:  0       1       2       3       4                       8                       12
+          +-------+-------+-------+-------+-----------------------+-----------------------+
+          | Type  | Flags | Rsrvd | H.crc | Comp Size             | Raw Size              |
+          | (1B)  | (1B)  | (1B)  | (1B)  | (4 bytes)             | (4 bytes)             |
+          +-------+-------+-------+-------+-----------------------+-----------------------+
 
-  If HAS_CHECKSUM flag is set (Flags & 0x80):
-  Offset:  12                                                                              20
-          +-----------------------------------------------------------------------------+
-          | Checksum (rapidhash)                                                        |
-          | (8 bytes)                                                                   |
-          +-----------------------------------------------------------------------------+
+  Block Layout:
+  [ Header (12B) ] + [ Compressed Payload (Comp Size bytes) ] + [ Optional Checksum (4B) ]
+
 ```
+**Note**: The Checksum (if flag set) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the compressed payload**.
 
-* **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI).
+* **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI, 255=EOF).
 * **Flags**:
-  - **Bit 7 (0x80)**: `HAS_CHECKSUM`. If set, an **8-byte checksum** follows immediately after Raw Size.
-  - **Bits 0-3 (0x0F)**: `CHECKSUM_TYPE`. Defines the algorithm used for integrity verification.
+  - **Bit 7 (0x80)**: `has_checksum`. If set, a **32-bit (4-byte) checksum** is appended to the end of the block (after the compressed payload). This checksum also contributes to the **Global Stream Checksum**.
+  - **Bits 0-3 (0x0F)**: `checksum_type`. Defines the algorithm used for integrity verification.
+* **Rsrvd**: Reserved for future use (must be 0).
+* **H.crc**: **Header Checksum** (1 byte). Calculated on the 12-byte header (with H.crc byte set to 0) using `zxc_hash12`.
 * **Checksum Algorithms**:
-  - `0x00`: **rapidhash** (Standard, high performance, platform independent)
+  - `0x00`: **rapidhash** (Standard, 32-bit folded)
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
 * **Raw Size**: Original decompressed size.
 
 > **Note**: While the format is designed for threaded execution, a single-threaded API is also available for constrained environments or simple integration cases.
 
 ### 5.3 Specific Header: NUM (Numeric)
-(Present immediately after the Block Header and any optional Checksum)
+(Present immediately after the Block Header)
 
 **NUM Header (16 bytes):**
 
@@ -161,7 +162,7 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 * **Reserved**: Padding for alignment.
 
 ### 5.4 Specific Header: GLO (Generic Low)
-(Present immediately after the Block Header and any optional Checksum)
+(Present immediately after the Block Header)
 
 **GLO Header (16 bytes):**
 
@@ -241,7 +242,7 @@ Currently, the **Literals** section uses different sizes when RLE compression is
 
 
 ### 5.5 Specific Header: GHI (Generic High)
-(Present immediately after the Block Header and any optional Checksum)
+(Present immediately after the Block Header)
 
 The **GHI** (Generic High-Velocity) block format is optimized for maximum decompression speed. It uses a **packed 32-bit sequence** format that allows 4-byte aligned reads, reducing memory access latency and enabling efficient SIMD processing.
 
@@ -335,7 +336,37 @@ GHI Block Data Layout:
 > **Design Rationale**: The 32-bit packed format eliminates pointer chasing between token and offset streams. By reading a single aligned word per sequence, the decoder achieves better cache utilization and enables aggressive loop unrolling (4x) for maximum throughput on modern CPUs.
 
 
-### 5.6 Block Encoding & Processing Algorithms
+### 5.6 Specific Header: EOF (End of File)
+(Block Type 255)
+
+The **EOF** block marks the end of the ZXC stream. It ensures that the decompressor knows exactly when to stop processing, allowing for robust stream termination even when file size metadata is unavailable or when concatenating streams.
+
+*   **Structure**: Standard 12-byte Block Header.
+*   **Flags**:
+    *   **Bit 7 (0x80)**: `has_checksum`. If set, implies the **Global Stream Checksum** in the footer is valid and should be verified.
+*   **Comp Size / Raw Size**: Unlike other blocks, these **MUST be set to 0**. The decoder enforces strict validation (`Type == EOF` AND `Comp Size == 0`) to prevent processing of malformed termination blocks.
+
+### 5.7 File Footer
+(Present immediately after the EOF Block)
+
+A mandatory **12-byte footer** closes the stream, providing total source size information and the global checksum.
+
+**Footer Structure (12 bytes):**
+
+```
+  Offset:  0                               8               12
+          +-------------------------------+---------------+
+          | Original Source Size          | Global Hash   |
+          | (8 bytes)                     | (4 bytes)     |
+          +-------------------------------+---------------+
+```
+
+*   **Original Source Size** (8 bytes): Total size of the uncompressed data.
+*   **Global Hash** (4 bytes): The **Global Stream Checksum**. Valid only if the EOF block has the `has_checksum` flag set (or the decoder context requires it).
+    *   **Algorithm**: `Rotation + XOR`.
+    *   For each block with a checksum: `global_hash = (global_hash << 1) | (global_hash >> 31); global_hash ^= block_hash;`
+
+### 5.8 Block Encoding & Processing Algorithms
 
 The efficiency of ZXC relies on specialized algorithmic pipelines for each block type.
 
@@ -405,14 +436,21 @@ Triggered when data is detected as a dense array of 32-bit integers.
 2.  **ZigZag Decode**: Reverses the mapping.
 3.  **Integration**: Computes the prefix sum (cumulative addition) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
 
-### 5.7 Data Integrity
-Every block can optionally be protected by a **64-bit checksum** to ensure data reliability.
+### 5.9 Data Integrity
+Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.
+
+#### Post-Compression Verification
+Unlike traditional codecs that verify the integrity of the original uncompressed data, ZXC calculates checksums on the **compressed** payload.
+
+*   **Zero-Overhead Decompression**: Verifying uncompressed data requires computing a hash over the output *after* decompression, contending for cache and CPU resources with the decompression logic itself. By checksumming the compressed stream, verification happens *during* the read phase, before the data even enters the decoder.
+*   **Early Failure Detection**: Corruption is detected before attempting to decompress, preventing potential crashes or buffer overruns in the decoder caused by malformed data.
+*   **Reduced Memory Bandwidth**: The checksum is computed over a much smaller dataset (the compressed block), saving significant memory bandwidth.
 
 #### Multi-Algorithm Support
-ZXC supports multiple integrity verification algorithms, allowing the format to adapt to different security and performance requirements. The specific algorithm used is identified in the block header's flags byte.
+ZXC supports multiple integrity verification algorithms (though currently standardized on rapidhash).
 
-*   **Identified Algorithm (0x00: rapidhash)**: The default and recommended algorithm. It is a very fast, high-quality, and platform-independent hashing algorithm fully optimized for instruction pipelines.
-*   **Performance First**: By using a modern non-cryptographic hash, ZXC ensures that integrity checks do not bottleneck decompression throughput, even at high GB/s speeds.
+*   **Identified Algorithm (0x00: rapidhash)**: The default algorithm. The 64-bit rapidhash result is folded (XORed) into a 32-bit value to minimize storage overhead while maintaining strong collision resistance for block-level integrity.
+*   **Performance First**: By using a modern non-cryptographic hash, ZXC ensures that integrity checks do not bottleneck decompression throughput.
 
 #### Credit
 The default `rapidhash` algorithm is based on wyhash and was developed by Nicolas De Carli. It is designed to fully exploit hardware performance while maintaining top-tier mathematical distribution qualities.
