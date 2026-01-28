@@ -79,6 +79,21 @@ extern "C" {
 #define ZXC_ALIGN(x) __attribute__((aligned(x)))
 #define ZXC_ALWAYS_INLINE inline __attribute__((always_inline))
 
+// Endianness detection
+#if (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__) || \
+    defined(__LITTLE_ENDIAN__)
+#define ZXC_LITTLE_ENDIAN 1
+#elif (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || \
+    defined(__BIG_ENDIAN__) || defined(__ARMEB__) || defined(__THUMBEB__) || \
+    defined(__AARCH64EB__) || defined(_M_PPC) || defined(__PPC__) || defined(__ppc__)
+#define ZXC_LITTLE_ENDIAN 0
+#elif defined(_MSC_VER) || defined(__i386__) || defined(__x86_64__) || defined(__aarch64__) || \
+    defined(__arm64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
+#define ZXC_LITTLE_ENDIAN 1
+#else
+#error "Unable to detect endianness"
+#endif
+
 #elif defined(_MSC_VER)
 #include <intrin.h>
 #if defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64)
@@ -203,7 +218,7 @@ extern "C" {
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)  // Maximum offset distance
 
 // Hash prime constants
-#define ZXC_HASH_PRIME1 0x243F6A88
+#define ZXC_HASH_PRIME1 0x9E3779B1
 #define ZXC_HASH_PRIME2 0x85BA2D97
 #define ZXC_HASH_PRIME3 0xB0F57EE3
 
@@ -217,11 +232,13 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8_masked(const uint8_t* p) {
     uint64_t v;
     ZXC_MEMCPY(&v, p, sizeof(v));
 
-    // #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#if ZXC_LITTLE_ENDIAN
+    // Mask out the 8th byte (MSB in LE)
     v &= ~(0xFFULL << (ZXC_BITS_PER_BYTE * (ZXC_FILE_HEADER_SIZE - 1)));
-    // #else
-    //     v &= ~(0xFFULL);
-    // #endif
+#else
+    // Mask out the 8th byte (LSB in BE)
+    v &= ~(0xFFULL);
+#endif
 
     uint64_t h = v * ZXC_HASH_PRIME1;
     h ^= (h >> 32);
@@ -245,11 +262,13 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash12_masked(const uint8_t* p) {
     ZXC_MEMCPY(&v1, p + sizeof(v0), sizeof(v1));
     ZXC_MEMCPY(&v2, p + sizeof(v0) + sizeof(v1), sizeof(v2));
 
-    // #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#if ZXC_LITTLE_ENDIAN
+    // Mask out the 4th byte of v0
     v0 &= ~(0xFFU << (ZXC_BITS_PER_BYTE * (ZXC_BLOCK_HEADER_SIZE - 9)));
-    // #else
-    //     v0 &= ~(0xFFU);
-    // #endif
+#else
+    // Mask out the 4th byte of v0 (LSB of v0 in BE)
+    v0 &= ~(0xFFU);
+#endif
 
     uint32_t h = (v0 * ZXC_HASH_PRIME1);
     h ^= (v1 * ZXC_HASH_PRIME2);
