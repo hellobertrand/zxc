@@ -657,7 +657,7 @@ int test_eof_block_structure() {
     // Should be immediately before the footer
     const uint8_t* eof_ptr = compressed + comp_size - 24;
     uint8_t expected[12] = {0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-    expected[3] = zxc_hash12_masked(expected);
+    expected[3] = zxc_hash12(expected);
 
     if (memcmp(eof_ptr, expected, 12) != 0) {
         printf(
