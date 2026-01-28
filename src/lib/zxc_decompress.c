@@ -344,8 +344,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
     zxc_num_header_t nh;
     if (UNLIKELY(zxc_read_num_header(src, src_size, &nh) != 0)) return -1;
 
-    const uint8_t* p = src + ZXC_NUM_HEADER_BINARY_SIZE;
-    const uint8_t* p_end = src + src_size;
+    size_t offset = ZXC_NUM_HEADER_BINARY_SIZE;
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
     uint64_t vals_remaining = nh.n_values;
@@ -355,17 +354,18 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
     uint32_t deltas[ZXC_DEC_BATCH];
 
     while (vals_remaining > 0) {
-        if (UNLIKELY(p + 16 > p_end)) return -1;
-        uint16_t nvals = zxc_le16(p + 0);
-        uint16_t bits = zxc_le16(p + 2);
-        uint32_t psize = zxc_le32(p + 12);
-        p += 16;
-        if (UNLIKELY((size_t)(p_end - p) < psize || (size_t)(d_end - d_ptr) < (size_t)nvals * 4 ||
+        if (UNLIKELY(offset + 16 > src_size)) return -1;
+        uint16_t nvals = zxc_le16(src + offset + 0);
+        uint16_t bits = zxc_le16(src + offset + 2);
+        uint32_t psize = zxc_le32(src + offset + 12);
+        offset += 16;
+
+        if (UNLIKELY(src_size < offset + psize || (size_t)(d_end - d_ptr) < (size_t)nvals * 4 ||
                      bits > (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)))
             return -1;
 
         zxc_bit_reader_t br;
-        zxc_br_init(&br, p, psize);
+        zxc_br_init(&br, src + offset, psize);
         size_t i = 0;
 
         for (; i + ZXC_DEC_BATCH <= nvals; i += ZXC_DEC_BATCH) {
@@ -457,7 +457,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
             d_ptr += 4;
         }
 
-        p += psize;
+        offset += psize;
         vals_remaining -= nvals;
     }
     return (int)(d_ptr - dst);

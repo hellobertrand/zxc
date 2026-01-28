@@ -707,13 +707,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     const size_t last_lits = iend - anchor;
     if (last_lits > 0) {
-        if (last_lits <= 16) {
-            zxc_copy16(literals + lit_c, anchor);
-        } else if (last_lits <= 32) {
-            zxc_copy32(literals + lit_c, anchor);
-        } else {
-            ZXC_MEMCPY(literals + lit_c, anchor, last_lits);
-        }
+        ZXC_MEMCPY(literals + lit_c, anchor, last_lits);
         lit_c += last_lits;
     }
 
@@ -1202,13 +1196,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     const size_t last_lits = iend - anchor;
     if (last_lits > 0) {
-        if (last_lits <= 16) {
-            zxc_copy16(literals + lit_c, anchor);
-        } else if (last_lits <= 32) {
-            zxc_copy32(literals + lit_c, anchor);
-        } else {
-            ZXC_MEMCPY(literals + lit_c, anchor, last_lits);
-        }
+        ZXC_MEMCPY(literals + lit_c, anchor, last_lits);
         lit_c += last_lits;
     }
 
@@ -1385,8 +1373,8 @@ static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
 }
 
 // cppcheck-suppress unusedFunction
-int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk, const size_t src_sz,
-                               uint8_t* RESTRICT dst, const size_t dst_cap) {
+int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
+                               const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
     const int chk = ctx->checksum_enabled;
 
     size_t w = 0;
