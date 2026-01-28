@@ -360,7 +360,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
         uint16_t bits = zxc_le16(p + 2);
         uint32_t psize = zxc_le32(p + 12);
         p += 16;
-        if (UNLIKELY(p + psize > p_end || d_ptr + nvals * 4 > d_end ||
+        if (UNLIKELY((size_t)(p_end - p) < psize || (size_t)(d_end - d_ptr) < (size_t)nvals * 4 ||
                      bits > (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)))
             return -1;
 
