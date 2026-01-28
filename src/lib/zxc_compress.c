@@ -82,6 +82,25 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  * @return The number of bytes written to the destination buffer.
  */
 static ZXC_ALWAYS_INLINE size_t zxc_write_vbyte(uint8_t* RESTRICT dst, uint32_t val) {
+    // Fast path: 1 byte (val < 128) - most common case
+    if (LIKELY(val < ZXC_VBYTE_MSB)) {
+        dst[0] = (uint8_t)val;
+        return 1;
+    }
+    // Fast path: 2 bytes (val < 16384)
+    if (LIKELY(val < (1U << 14))) {
+        dst[0] = (uint8_t)(val | ZXC_VBYTE_MSB);
+        dst[1] = (uint8_t)(val >> 7);
+        return 2;
+    }
+    // Fast path: 3 bytes (val < 2097152)
+    if (LIKELY(val < (1U << 21))) {
+        dst[0] = (uint8_t)(val | ZXC_VBYTE_MSB);
+        dst[1] = (uint8_t)((val >> 7) | ZXC_VBYTE_MSB);
+        dst[2] = (uint8_t)(val >> 14);
+        return 3;
+    }
+    // Fallback: 4-5 bytes (rare for ZXC block sizes)
     size_t count = 0;
     while (val >= ZXC_VBYTE_MSB) {
         dst[count++] = (uint8_t)(val | ZXC_VBYTE_MSB);
