@@ -335,7 +335,7 @@ void print_version(void) {
     printf("(%s)\n", sys_info);
 }
 
-typedef enum { MODE_COMPRESS, MODE_DECOMPRESS, MODE_BENCHMARK, MODE_TEST } zxc_mode_t;
+typedef enum { MODE_COMPRESS, MODE_DECOMPRESS, MODE_BENCHMARK, MODE_INTEGRITY } zxc_mode_t;
 
 enum { OPT_VERSION = 1000, OPT_HELP };
 
@@ -371,7 +371,7 @@ int main(int argc, char** argv) {
                                                  {0, 0, 0, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "12345b::cCdfhkl:NqT:tcvVz", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "12345b::cCdfhkNqT:tvVz", long_options, NULL)) != -1) {
         switch (opt) {
             case 'z':
                 mode = MODE_COMPRESS;
@@ -380,7 +380,7 @@ int main(int argc, char** argv) {
                 mode = MODE_DECOMPRESS;
                 break;
             case 't':
-                mode = MODE_TEST;
+                mode = MODE_INTEGRITY;
                 break;
             case 'b':
                 mode = MODE_BENCHMARK;
@@ -437,8 +437,8 @@ int main(int argc, char** argv) {
         } else if (strcmp(argv[optind], "d") == 0) {
             mode = MODE_DECOMPRESS;
             optind++;
-        } else if (strcmp(argv[optind], "t") == 0) {
-            mode = MODE_TEST;
+        } else if (strcmp(argv[optind], "t") == 0 || strcmp(argv[optind], "test") == 0) {
+            mode = MODE_INTEGRITY;
             optind++;
         } else if (strcmp(argv[optind], "b") == 0) {
             mode = MODE_BENCHMARK;
@@ -447,7 +447,7 @@ int main(int argc, char** argv) {
     }
 
     if (checksum == -1) {
-        checksum = (mode == MODE_TEST) ? 1 : 0;
+        checksum = (mode == MODE_INTEGRITY) ? 1 : 0;
     }
 
     /*
@@ -612,7 +612,7 @@ int main(int argc, char** argv) {
         use_stdout = 1;  // Default to stdout if reading from stdin
     }
 
-    if (mode == MODE_TEST) {
+    if (mode == MODE_INTEGRITY) {
         use_stdout = 0;
         f_out = NULL;
     } else if (!use_stdin && optind < argc) {
@@ -635,14 +635,14 @@ int main(int argc, char** argv) {
     }
 
     // Safety check: prevent overwriting input file
-    if (mode != MODE_TEST && !use_stdin && !use_stdout && strcmp(in_path, out_path) == 0) {
+    if (mode != MODE_INTEGRITY && !use_stdin && !use_stdout && strcmp(in_path, out_path) == 0) {
         zxc_log("Error: Input and output filenames are identical.\n");
         if (f_in) fclose(f_in);
         return 1;
     }
 
     // Open output file if not writing to stdout
-    if (!use_stdout && mode != MODE_TEST) {
+    if (!use_stdout && mode != MODE_INTEGRITY) {
         char resolved_out[4096];
         if (zxc_validate_output_path(out_path, resolved_out, sizeof(resolved_out)) != 0) {
             zxc_log("Error: Invalid output path '%s': %s\n", out_path, strerror(errno));
@@ -740,7 +740,7 @@ int main(int argc, char** argv) {
 
     if (bytes >= 0) {
         zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
-        if (!use_stdin && !use_stdout && !keep_input && mode != MODE_TEST) unlink(in_path);
+        if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY) unlink(in_path);
     } else {
         zxc_log("Operation failed.\n");
         return 1;
