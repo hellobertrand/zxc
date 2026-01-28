@@ -81,7 +81,7 @@ jobs:
 
       - name: Build for Valgrind (Debug)
         run: |
-          cmake -S . -B build_valgrind -DCMAKE_BUILD_TYPE=Debug
+          cmake -S . -B build_valgrind -DCMAKE_BUILD_TYPE=Debug -DZXC_NATIVE_ARCH=OFF
           cmake --build build_valgrind
 
       - name: Valgrind Memory Check
