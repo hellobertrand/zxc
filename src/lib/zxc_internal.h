@@ -79,21 +79,6 @@ extern "C" {
 #define ZXC_ALIGN(x) __attribute__((aligned(x)))
 #define ZXC_ALWAYS_INLINE inline __attribute__((always_inline))
 
-// Endianness detection
-#if (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__) || \
-    defined(__LITTLE_ENDIAN__)
-#define ZXC_LITTLE_ENDIAN 1
-#elif (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || \
-    defined(__BIG_ENDIAN__) || defined(__ARMEB__) || defined(__THUMBEB__) || \
-    defined(__AARCH64EB__) || defined(_M_PPC) || defined(__PPC__) || defined(__ppc__)
-#define ZXC_LITTLE_ENDIAN 0
-#elif defined(_MSC_VER) || defined(__i386__) || defined(__x86_64__) || defined(__aarch64__) || \
-    defined(__arm64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
-#define ZXC_LITTLE_ENDIAN 1
-#else
-#error "Unable to detect endianness"
-#endif
-
 #elif defined(_MSC_VER)
 #include <intrin.h>
 #if defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64)
@@ -221,62 +206,6 @@ extern "C" {
 #define ZXC_HASH_PRIME1 0x9E3779B1
 #define ZXC_HASH_PRIME2 0x85BA2D97
 #define ZXC_HASH_PRIME3 0xB0F57EE3
-
-/**
- * @brief Computes the 1-byte checksum for the file header.
- *
- * @param[in] p Pointer to the file header buffer (at least 7 bytes).
- * @return The 1-byte checksum value.
- */
-static ZXC_ALWAYS_INLINE uint8_t zxc_hash8_masked(const uint8_t* p) {
-    uint64_t v;
-    ZXC_MEMCPY(&v, p, sizeof(v));
-
-#if ZXC_LITTLE_ENDIAN
-    // Mask out the 8th byte (MSB in LE)
-    v &= ~(0xFFULL << (ZXC_BITS_PER_BYTE * (ZXC_FILE_HEADER_SIZE - 1)));
-#else
-    // Mask out the 8th byte (LSB in BE)
-    v &= ~(0xFFULL);
-#endif
-
-    uint64_t h = v * ZXC_HASH_PRIME1;
-    h ^= (h >> 32);
-    h *= ZXC_HASH_PRIME2;
-    h ^= (h >> 32);
-    return (uint8_t)h;
-}
-
-/**
- * @brief Computes the 1-byte checksum for block headers.
- *
- * This function generates a hash value by reading data from the given pointer.
- * The result is masked to fit within 12 bits (0-4095 range).
- *
- * @param p Pointer to the input data to be hashed
- * @return uint8_t The computed hash value.
- */
-static ZXC_ALWAYS_INLINE uint8_t zxc_hash12_masked(const uint8_t* p) {
-    uint32_t v0, v1, v2;
-    ZXC_MEMCPY(&v0, p, sizeof(v0));
-    ZXC_MEMCPY(&v1, p + sizeof(v0), sizeof(v1));
-    ZXC_MEMCPY(&v2, p + sizeof(v0) + sizeof(v1), sizeof(v2));
-
-#if ZXC_LITTLE_ENDIAN
-    // Mask out the 4th byte of v0
-    v0 &= ~(0xFFU << (ZXC_BITS_PER_BYTE * (ZXC_BLOCK_HEADER_SIZE - 9)));
-#else
-    // Mask out the 4th byte of v0 (LSB of v0 in BE)
-    v0 &= ~(0xFFU);
-#endif
-
-    uint32_t h = (v0 * ZXC_HASH_PRIME1);
-    h ^= (v1 * ZXC_HASH_PRIME2);
-    h ^= (v2 * ZXC_HASH_PRIME3);
-    h = (h << 13) | (h >> 19);
-    h *= ZXC_HASH_PRIME1;
-    return (uint8_t)((h ^ (h >> 8) ^ (h >> 16) ^ (h >> 24)) & 0xFF);
-}
 
 /**
  * @struct zxc_lz77_params_t
@@ -443,7 +372,7 @@ typedef struct {
     int bits;
 } zxc_bit_reader_t;
 
-/*
+/**
  * ============================================================================
  * MEMORY & ENDIANNESS HELPERS
  * ============================================================================
@@ -549,6 +478,43 @@ static ZXC_ALWAYS_INLINE void zxc_store_le32(void* p, const uint32_t v) {
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
     ZXC_MEMCPY(p, &v, sizeof(v));
+}
+
+/**
+ * @brief Computes the 1-byte checksum for the file header.
+ *
+ * @param[in] p Pointer to the file header buffer (at least 7 bytes).
+ * @return The 1-byte checksum value.
+ */
+static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
+    uint64_t v = zxc_le64(p);
+    uint64_t h = v * ZXC_HASH_PRIME1;
+    h ^= (h >> 32);
+    h *= ZXC_HASH_PRIME2;
+    h ^= (h >> 32);
+    return (uint8_t)h;
+}
+
+/**
+ * @brief Computes the 1-byte checksum for block headers.
+ *
+ * This function generates a hash value by reading data from the given pointer.
+ * The result is masked to fit within 12 bits (0-4095 range).
+ *
+ * @param p Pointer to the input data to be hashed
+ * @return uint8_t The computed hash value.
+ */
+static ZXC_ALWAYS_INLINE uint8_t zxc_hash12(const uint8_t* p) {
+    uint32_t v0 = zxc_le32(p);
+    uint32_t v1 = zxc_le32(p + 4);
+    uint32_t v2 = zxc_le32(p + 8);
+
+    uint32_t h = (v0 * ZXC_HASH_PRIME1);
+    h ^= (v1 * ZXC_HASH_PRIME2);
+    h ^= (v2 * ZXC_HASH_PRIME3);
+    h = (h << 13) | (h >> 19);
+    h *= ZXC_HASH_PRIME1;
+    return (uint8_t)((h ^ (h >> 8) ^ (h >> 16) ^ (h >> 24)) & 0xFF);
 }
 
 /**

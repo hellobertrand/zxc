@@ -136,7 +136,7 @@ Each data block consists of a **12-byte** generic header that precedes the speci
   - **Bit 7 (0x80)**: `has_checksum`. If set, a **32-bit (4-byte) checksum** is appended to the end of the block (after the compressed payload). This checksum also contributes to the **Global Stream Checksum**.
   - **Bits 0-3 (0x0F)**: `checksum_type`. Defines the algorithm used for integrity verification.
 * **Rsrvd**: Reserved for future use (must be 0).
-* **H.crc**: **Header Checksum** (1 byte). Calculated on the 12-byte header (with H.crc byte set to 0) using `zxc_hash12_masked`.
+* **H.crc**: **Header Checksum** (1 byte). Calculated on the 12-byte header (with H.crc byte set to 0) using `zxc_hash12`.
 * **Checksum Algorithms**:
   - `0x00`: **rapidhash** (Standard, 32-bit folded)
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
