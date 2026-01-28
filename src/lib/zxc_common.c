@@ -117,8 +117,6 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  * Serialization and deserialization of file and block headers.
  */
 
-
-
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_HEADER_SIZE)) return -1;
 
