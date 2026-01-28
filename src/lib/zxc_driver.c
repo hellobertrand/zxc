@@ -176,7 +176,7 @@ typedef struct {
  * @return The number of bytes written to the output buffer on success, or a
  * negative error code on failure.
  */
-typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* ctx, const uint8_t* RESTRICT in,
+typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT in,
                                      const size_t in_sz, uint8_t* RESTRICT out,
                                      const size_t out_cap);
 
@@ -664,8 +664,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         uint8_t footer[ZXC_FILE_FOOTER_SIZE];
         zxc_store_le64(footer, total_src_bytes);
 
-        checksum_enabled ? zxc_store_le32(footer + 8, w_args.global_hash)
-                         : ZXC_MEMSET(footer + 8, 0, 4);
+        if (checksum_enabled)
+            zxc_store_le32(footer + 8, w_args.global_hash);
+        else
+            ZXC_MEMSET(footer + 8, 0, 4);
 
         if (UNLIKELY(f_out &&
                      fwrite(footer, 1, ZXC_FILE_FOOTER_SIZE, f_out) != ZXC_FILE_FOOTER_SIZE)) {
