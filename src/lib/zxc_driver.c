@@ -548,6 +548,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     int read_idx = 0;
     int read_eof = 0;
     int eof_has_checksum = 0;
+    uint64_t total_src_bytes = 0;
 
     // Reader Loop: Reads from file, prepares jobs, pushes to worker queue.
     while (!read_eof && !ctx.io_error) {
@@ -561,6 +562,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         size_t read_sz = 0;
         if (mode == 1) {
             read_sz = fread(job->in_buf, 1, ZXC_BLOCK_SIZE, f_in);
+            total_src_bytes += read_sz;
             if (read_sz == 0) read_eof = 1;
         } else {
             uint8_t bh_buf[ZXC_BLOCK_HEADER_SIZE];
@@ -659,21 +661,25 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         }
         w_args.total_bytes += ZXC_BLOCK_HEADER_SIZE;
 
-        if (checksum_enabled) {
-            uint8_t gh_buf[ZXC_GLOBAL_CHECKSUM_SIZE];
-            zxc_store_le32(gh_buf, w_args.global_hash);
-            fwrite(gh_buf, 1, ZXC_GLOBAL_CHECKSUM_SIZE, f_out);
-            w_args.total_bytes += ZXC_GLOBAL_CHECKSUM_SIZE;
+        uint8_t footer[ZXC_FILE_FOOTER_SIZE];
+        zxc_store_le64(footer, total_src_bytes);
+
+        checksum_enabled ? zxc_store_le32(footer + 8, w_args.global_hash)
+                         : ZXC_MEMSET(footer + 8, 0, 4);
+
+        if (UNLIKELY(f_out &&
+                     fwrite(footer, 1, ZXC_FILE_FOOTER_SIZE, f_out) != ZXC_FILE_FOOTER_SIZE)) {
+            return -1;
         }
-    } else if (mode == 0 && !ctx.io_error && eof_has_checksum) {
-        // Verify Global Stream Checksum
-        uint8_t gh_buf[ZXC_GLOBAL_CHECKSUM_SIZE];
-        if (UNLIKELY(fread(gh_buf, 1, ZXC_GLOBAL_CHECKSUM_SIZE, f_in) !=
-                     ZXC_GLOBAL_CHECKSUM_SIZE)) {
-            // Checksum flag set but immediate EOF -> Error
+        w_args.total_bytes += ZXC_FILE_FOOTER_SIZE;
+    } else if (mode == 0 && !ctx.io_error) {
+        // Verification: Expect 12-byte footer
+        uint8_t footer[ZXC_FILE_FOOTER_SIZE];
+        if (UNLIKELY(fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE)) {
+            // Missing footer -> Error
             ctx.io_error = 1;
-        } else if (checksum_enabled) {
-            const uint32_t expected = zxc_le32(gh_buf);
+        } else if (checksum_enabled && eof_has_checksum) {
+            const uint32_t expected = zxc_le32(footer + 8);
             if (expected != d_global_hash) {
                 ctx.io_error = 1;
             }
