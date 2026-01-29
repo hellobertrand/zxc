@@ -330,9 +330,9 @@ size_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTR
     zxc_store_le64(footer, (uint64_t)src_size);
 
     if (checksum_enabled)
-        zxc_store_le32(footer + 8, global_hash);
+        zxc_store_le32(footer + sizeof(uint64_t), global_hash);
     else
-        ZXC_MEMSET(footer + 8, 0, 4);
+        ZXC_MEMSET(footer + sizeof(uint64_t), 0, sizeof(uint32_t));
 
     ZXC_MEMCPY(op, footer, ZXC_FILE_FOOTER_SIZE);
     op += ZXC_FILE_FOOTER_SIZE;
@@ -387,7 +387,7 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
             // Verify Footer Content: Source Size and Global Checksum
             int valid_footer = (zxc_le64(ip) == (size_t)(op - op_start));
             if (checksum_enabled && valid_footer && block_has_checksum &&
-                zxc_le32(ip + 8) != d_global_hash) {
+                zxc_le32(ip + sizeof(uint64_t)) != d_global_hash) {
                 valid_footer = 0;
             }
 
