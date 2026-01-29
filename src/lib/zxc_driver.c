@@ -538,7 +538,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 1 && f_out) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
         zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE);
-        if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE)) ctx.io_error = 1;
+        if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
+            ctx.io_error = 1;
 
         w_args.total_bytes = ZXC_FILE_HEADER_SIZE;
     }
@@ -589,8 +590,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
                 const int has_crc = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
                 const size_t checksum_sz = (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-                const size_t total_len =
-                    ZXC_BLOCK_HEADER_SIZE + bh.comp_size + checksum_sz;
+                const size_t total_len = ZXC_BLOCK_HEADER_SIZE + bh.comp_size + checksum_sz;
 
                 if (UNLIKELY(total_len > job->in_cap)) {
                     ctx.io_error = 1;
@@ -615,8 +615,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                         d_global_hash ^= b_crc;
                     }
                 }
-                read_sz =
-                    ZXC_BLOCK_HEADER_SIZE + body_read + checksum_sz;
+                read_sz = ZXC_BLOCK_HEADER_SIZE + body_read + checksum_sz;
             }
         }
     _job_prepared:
