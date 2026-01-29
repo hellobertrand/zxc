@@ -686,7 +686,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
             // Verify Footer Content: Source Size and Global Checksum
             int valid = (zxc_le64(footer) == (uint64_t)w_args.total_bytes);
             if (valid && checksum_enabled && eof_has_checksum)
-                valid = (zxc_le32(footer + 8) == d_global_hash);
+                valid = (zxc_le32(footer + sizeof(uint64_t)) == d_global_hash);
 
             if (UNLIKELY(!valid)) ctx.io_error = 1;
         }
