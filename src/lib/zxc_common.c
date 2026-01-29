@@ -83,6 +83,8 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->epoch = 1;
     ctx->compression_level = level;
     ctx->checksum_enabled = checksum_enabled;
+    ctx->global_hash = 0;
+    ctx->total_out = 0;
 
     ZXC_MEMSET(ctx->hash_table, 0, sz_hash);
     return 0;
@@ -108,6 +110,8 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->literals = NULL;
 
     ctx->lit_buffer_cap = 0;
+    ctx->global_hash = 0;
+    ctx->total_out = 0;
 }
 
 /*

@@ -351,7 +351,6 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
     const uint8_t* op_start = op;
     const uint8_t* op_end = op + dst_capacity;
     size_t runtime_chunk_size = 0;
-    uint32_t d_global_hash = 0;
     zxc_cctx_t ctx;
 
     // File header verification and context initialization
@@ -372,58 +371,19 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
             return 0;
         }
 
-        const int block_has_checksum = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
-
-        if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
-            // Validate EOF structure (Size=0) and bounds (Footer must be present)
-            if (UNLIKELY(bh.comp_size != 0 ||
-                         ip + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE > ip_end)) {
-                zxc_cctx_free(&ctx);
-                return 0;
-            }
-
-            ip += ZXC_BLOCK_HEADER_SIZE;
-
-            // Verify Footer Content: Source Size and Global Checksum
-            int valid_footer = (zxc_le64(ip) == (size_t)(op - op_start));
-            if (checksum_enabled && valid_footer && block_has_checksum &&
-                zxc_le32(ip + sizeof(uint64_t)) != d_global_hash) {
-                valid_footer = 0;
-            }
-
-            if (UNLIKELY(!valid_footer)) {
-                zxc_cctx_free(&ctx);
-                return 0;
-            }
-
-            break;
-        }
-
-        // Ensure the block (header + data + checksum) fits in the input buffer
-        const size_t checksum_sz = block_has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0;
-        const size_t total_block_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size + checksum_sz;
-
-        if (UNLIKELY(total_block_sz > rem_src)) {
-            zxc_cctx_free(&ctx);
-            return 0;
-        }
-
         const size_t rem_cap = (size_t)(op_end - op);
-        int res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op, rem_cap);
+        const int res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op, rem_cap);
         if (UNLIKELY(res < 0)) {
             zxc_cctx_free(&ctx);
             return 0;
         }
-
-        // Update global hash
-        if (checksum_enabled && block_has_checksum) {
-            const uint8_t* crc_ptr = ip + ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
-            const uint32_t b_crc = zxc_le32(crc_ptr);
-            d_global_hash = (d_global_hash << 1) | (d_global_hash >> 31);
-            d_global_hash ^= b_crc;
+        
+        if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
+            break;
         }
 
-        ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size + checksum_sz;
+        const int block_has_checksum = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
+        ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size + (block_has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
         op += res;
     }
 
