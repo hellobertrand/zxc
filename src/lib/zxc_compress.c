@@ -205,15 +205,16 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     // false candidate.
     // Branchless skip logic:
     int skip_head = (match_idx != 0) & (stored_tag != cur_val);
-    
-    // If we should skip the head and level is low (<= 2), we drop the match entirely (match_idx = 0).
-    // drop_mask is 0 if we drop (skip_head && level <= 2 is true becomes 1, 1-1=0), -1 otherwise.
+
+    // If we should skip the head and level is low (<= 2), we drop the match entirely (match_idx =
+    // 0). drop_mask is 0 if we drop (skip_head && level <= 2 is true becomes 1, 1-1=0), -1
+    // otherwise.
     uint32_t drop_mask = (uint32_t)((skip_head & (level <= 2)) - 1);
     match_idx &= drop_mask;
 
     hash_table[2 * h] = epoch_mark | cur_pos;
     hash_table[2 * h + 1] = cur_val;
-    
+
     // Branchless chain table update
     uint32_t dist = cur_pos - match_idx;
     uint32_t valid_mask = -((int32_t)((match_idx != 0) & (dist < ZXC_LZ_WINDOW_SIZE)));
@@ -226,16 +227,16 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     // Optimization: If head tag doesn't match, advance immediately without
     // loading the first mismatch.
     if (skip_head) {
-         uint16_t delta = chain_table[match_idx];
-         uint32_t next_idx = match_idx - delta;
-         match_idx = (delta != 0) ? next_idx : 0;
-         attempts--;
+        uint16_t delta = chain_table[match_idx];
+        uint32_t next_idx = match_idx - delta;
+        match_idx = (delta != 0) ? next_idx : 0;
+        attempts--;
     }
 
     while (match_idx > 0 && attempts-- >= 0) {
         if (UNLIKELY(cur_pos - match_idx > ZXC_LZ_MAX_DIST)) break;
         const uint8_t* ref = src + match_idx;
-        
+
         uint32_t ref_val = zxc_le32(ref);
         int tag_match = (ref_val == cur_val);
         // Simplified check: only tag match and next-byte match required
@@ -668,7 +669,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const int level = ctx->compression_level;
     const int chk = ctx->checksum_enabled;
 
-    zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
+    const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
@@ -678,12 +679,12 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const uint32_t epoch_mark = ctx->epoch << (32 - ZXC_EPOCH_BITS);
     const uint8_t *ip = src, *iend = src + src_sz, *anchor = ip, *mflimit = iend - 12;
 
-    uint32_t* hash_table = ctx->hash_table;
-    uint16_t* chain_table = ctx->chain_table;
-    uint8_t* literals = ctx->literals;
-    uint8_t* buf_tokens = ctx->buf_tokens;
-    uint16_t* buf_offsets = ctx->buf_offsets;
-    uint8_t* buf_extras = ctx->buf_extras;
+    uint32_t* const hash_table = ctx->hash_table;
+    uint16_t* const chain_table = ctx->chain_table;
+    uint8_t* const literals = ctx->literals;
+    uint8_t* const buf_tokens = ctx->buf_tokens;
+    uint16_t* const buf_offsets = ctx->buf_offsets;
+    uint8_t* const buf_extras = ctx->buf_extras;
 
     uint32_t seq_c = 0;
     size_t lit_c = 0;
@@ -697,8 +698,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         ZXC_PREFETCH_READ(ip + step * 4 + ZXC_CACHE_LINE_SIZE);
 
-        zxc_match_t m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table,
-                                                 chain_table, epoch_mark, level, lzp);
+        const zxc_match_t m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table,
+                                                       chain_table, epoch_mark, level, lzp);
 
         if (m.ref) {
             ip -= m.backtrack;
@@ -976,19 +977,19 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     }
 
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GLO, .raw_size = (uint32_t)src_sz};
-    uint8_t* p = dst + ZXC_BLOCK_HEADER_SIZE;
+    uint8_t* const p = dst + ZXC_BLOCK_HEADER_SIZE;
     size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
 
     // Decide offset encoding mode: 1-byte if all offsets <= 255
     int use_8bit_off = (max_offset <= 255) ? 1 : 0;
     size_t off_stream_size = use_8bit_off ? seq_c : (seq_c * 2);
 
-    zxc_gnr_header_t gh = {.n_sequences = seq_c,
-                           .n_literals = (uint32_t)lit_c,
-                           .enc_lit = (uint8_t)use_rle,
-                           .enc_litlen = 0,
-                           .enc_mlen = 0,
-                           .enc_off = (uint8_t)use_8bit_off};
+    const zxc_gnr_header_t gh = {.n_sequences = seq_c,
+                                 .n_literals = (uint32_t)lit_c,
+                                 .enc_lit = (uint8_t)use_rle,
+                                 .enc_litlen = 0,
+                                 .enc_mlen = 0,
+                                 .enc_off = (uint8_t)use_8bit_off};
 
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS] = {0};
     desc[0].sizes = (uint64_t)(use_rle ? rle_size : lit_c) | ((uint64_t)lit_c << 32);
@@ -1156,7 +1157,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const int level = ctx->compression_level;
     const int chk = ctx->checksum_enabled;
 
-    zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
+    const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
@@ -1166,17 +1167,17 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const uint32_t epoch_mark = ctx->epoch << (32 - ZXC_EPOCH_BITS);
     const uint8_t *ip = src, *iend = src + src_sz, *anchor = ip, *mflimit = iend - 12;
 
-    uint32_t* hash_table = ctx->hash_table;
-    uint8_t* buf_extras = ctx->buf_extras;
-    uint16_t* chain_table = ctx->chain_table;
-    uint8_t* literals = ctx->literals;
+    uint32_t* const hash_table = ctx->hash_table;
+    uint8_t* const buf_extras = ctx->buf_extras;
+    uint16_t* const chain_table = ctx->chain_table;
+    uint8_t* const literals = ctx->literals;
 
     uint32_t seq_c = 0;
     size_t extras_c = 0;
     size_t lit_c = 0;
     uint16_t max_offset = 0;
 
-    uint32_t* buf_sequences = ctx->buf_sequences;
+    uint32_t* const buf_sequences = ctx->buf_sequences;
 
     while (LIKELY(ip < mflimit)) {
         size_t dist = (size_t)(ip - anchor);
@@ -1185,8 +1186,8 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         ZXC_PREFETCH_READ(ip + step * 4 + 64);
 
-        zxc_match_t m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table,
-                                                 chain_table, epoch_mark, level, lzp);
+        const zxc_match_t m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table,
+                                                       chain_table, epoch_mark, level, lzp);
 
         if (m.ref) {
             ip -= m.backtrack;
@@ -1250,16 +1251,16 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     }
 
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GHI, .raw_size = (uint32_t)src_sz};
-    uint8_t* p = dst + ZXC_BLOCK_HEADER_SIZE;
+    uint8_t* const p = dst + ZXC_BLOCK_HEADER_SIZE;
     size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
 
     // Decide offset encoding mode
-    zxc_gnr_header_t gh = {.n_sequences = seq_c,
-                           .n_literals = (uint32_t)lit_c,
-                           .enc_lit = 0,
-                           .enc_litlen = 0,
-                           .enc_mlen = 0,
-                           .enc_off = (uint8_t)(max_offset <= 255) ? 1 : 0};
+    const zxc_gnr_header_t gh = {.n_sequences = seq_c,
+                                 .n_literals = (uint32_t)lit_c,
+                                 .enc_lit = 0,
+                                 .enc_litlen = 0,
+                                 .enc_mlen = 0,
+                                 .enc_off = (uint8_t)(max_offset <= 255) ? 1 : 0};
 
     zxc_section_desc_t desc[ZXC_GHI_SECTIONS] = {0};
     desc[0].sizes = (uint64_t)lit_c | ((uint64_t)lit_c << 32);
