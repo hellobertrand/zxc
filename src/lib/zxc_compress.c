@@ -195,38 +195,51 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
     // If the epoch in raw_head matches the current epoch_mark, extract the
     // stored position; otherwise treat this bucket as empty (index 0).
-    uint32_t match_idx =
-        (raw_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (raw_head & ZXC_OFFSET_MASK) : 0;
+    // Branchless optimization:
+    // Create a mask that is 0xFFFFFFFF if epochs match, 0 otherwise.
+    uint32_t epoch_mask = -((int32_t)((raw_head & ~ZXC_OFFSET_MASK) == epoch_mark));
+    uint32_t match_idx = (raw_head & ZXC_OFFSET_MASK) & epoch_mask;
 
     // Decide whether to skip the head entry of the hash chain.
     // If the stored 4-byte tag does not match cur_val, the head is likely a
-    // false candidate, so we can optionally skip it entirely, especially at
-    // lower compression levels where we prefer speed over thoroughness.
-    int skip_head = (match_idx > 0 && stored_tag != cur_val);
-    if (skip_head && level <= 2) match_idx = 0;
+    // false candidate.
+    // Branchless skip logic:
+    int skip_head = (match_idx != 0) & (stored_tag != cur_val);
+    
+    // If we should skip the head and level is low (<= 2), we drop the match entirely (match_idx = 0).
+    // drop_mask is 0 if we drop (skip_head && level <= 2 is true becomes 1, 1-1=0), -1 otherwise.
+    uint32_t drop_mask = (uint32_t)((skip_head & (level <= 2)) - 1);
+    match_idx &= drop_mask;
 
     hash_table[2 * h] = epoch_mark | cur_pos;
     hash_table[2 * h + 1] = cur_val;
-    chain_table[cur_pos] = (match_idx > 0 && (cur_pos - match_idx) < ZXC_LZ_WINDOW_SIZE)
-                               ? (uint16_t)(cur_pos - match_idx)
-                               : 0;
+    
+    // Branchless chain table update
+    uint32_t dist = cur_pos - match_idx;
+    uint32_t valid_mask = -((int32_t)((match_idx != 0) & (dist < ZXC_LZ_WINDOW_SIZE)));
+    chain_table[cur_pos] = (uint16_t)(dist & valid_mask);
 
     if (match_idx == 0) return best;
 
     int attempts = p.search_depth;
-    int is_first = 1;
+
+    // Optimization: If head tag doesn't match, advance immediately without
+    // loading the first mismatch.
+    if (skip_head) {
+         uint16_t delta = chain_table[match_idx];
+         uint32_t next_idx = match_idx - delta;
+         match_idx = (delta != 0) ? next_idx : 0;
+         attempts--;
+    }
 
     while (match_idx > 0 && attempts-- >= 0) {
         if (UNLIKELY(cur_pos - match_idx > ZXC_LZ_MAX_DIST)) break;
         const uint8_t* ref = src + match_idx;
-        ZXC_PREFETCH_READ(ref);
-
+        
         uint32_t ref_val = zxc_le32(ref);
         int tag_match = (ref_val == cur_val);
-        // skip_head only matters on first iteration
-        int skip_check = is_first & skip_head;
-        int should_compare = tag_match && !skip_check;
-        should_compare &= (ref[best.len] == ip[best.len]);
+        // Simplified check: only tag match and next-byte match required
+        int should_compare = tag_match && (ref[best.len] == ip[best.len]);
 
         if (should_compare) {
             uint32_t mlen = 4;
@@ -325,7 +338,6 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         ZXC_PREFETCH_READ(src + next_idx);
 
         match_idx = (delta != 0) ? next_idx : 0;
-        is_first = 0;
     }
 
     if (best.ref) {
