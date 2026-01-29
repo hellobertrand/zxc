@@ -39,7 +39,7 @@
  * @return The value of the consumed bits as a 32-bit unsigned integer.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* br, uint8_t n) {
-#if defined(__BMI2__) && defined(__x86_64__)
+#if defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
     // BMI2 Optimization: _bzhi_u64(x, n) copies the lower n bits of x to dst and
     // clears the rest. It is equivalent to x & ((1ULL << n) - 1) but executes in
     // a single cycle without dependency chains.
@@ -51,6 +51,30 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* br, uint
     br->bits -= n;
     return val;
 }
+
+/**
+ * @brief Lookup table for Branchless Prefix Varint Decoding.
+ *
+ * This table maps the first byte of a variable-length integer (varint) to the
+ * number of valid data bits it contains. This allows calculating the shift
+ * amount and total length without branching.
+ *
+ * Mapping:
+ * - 0xxxxxxx (0-127)   -> 7 bits (Length 1)
+ * - 10xxxxxx (128-191) -> 6 bits (Length 2)
+ * - 110xxxxx (192-223) -> 5 bits (Length 3)
+ * - 1110xxxx (224-239) -> 4 bits (Length 4)
+ * - 11110xxx (240-255) -> 3 bits (Length 5)
+ */
+// static const uint8_t zxc_varint_bits[256] = {
+//     7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+//     7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+//     7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+//     7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+//     6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+//     6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+//     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+//     4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3};
 
 /**
  * @brief Reads a Prefix Varint encoded integer from a stream.
@@ -83,6 +107,50 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
         return b0;
     }
 
+
+//     // Fast Path using LUT (requires 8 bytes safe access)
+//     // Map first byte to number of value bits:
+//     // 0xxxxxxx -> 7 bits (len 1)
+//     // 10xxxxxx -> 6 bits (len 2)
+//     // 110xxxxx -> 5 bits (len 3)
+//     // 1110xxxx -> 4 bits (len 4)
+//     // 11110xxx -> 3 bits (len 5)
+//     if (LIKELY(p + ZXC_BITS_PER_BYTE <= end)) {
+//         uint64_t raw;
+//         ZXC_MEMCPY(&raw, p, ZXC_BITS_PER_BYTE);
+
+// #if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+//         /*
+//          * ARM/AArch64 Optimization:
+//          * 1. Use CLZ (Count Leading Zeros) instead of LUT.
+//          *    ~p[0] << 24 places the prefix at MSB and inverts it.
+//          *    Leading zeros count roughly equals the byte length - 1.
+//          *    Note: Low 24 bits of inverted value are 1s, so input to clz never 0.
+//          */
+//         uint32_t len = __builtin_clz(~((uint32_t)(uint8_t)raw << 24)) + 1;
+//         *ptr = p + len;
+
+//         uint32_t bits = 8 - len;
+//         uint32_t val = ((uint32_t)raw & ((1u << bits) - 1)) | ((uint32_t)(raw >> 8) << bits);
+
+//         // Zero-extend using double-shift (ARM64 variable mask idiom)
+//         // Using 64-bit shift to handle len=5 safely (s=64-35=29)
+//         uint32_t s = 64 - len * 7;
+//         return (uint32_t)(((uint64_t)val << s) >> s);
+// #else
+//         uint8_t bits = zxc_varint_bits[(uint8_t)raw];
+//         uint32_t len = ZXC_BITS_PER_BYTE - bits;
+//         *ptr = p + len;
+
+//         uint32_t val = ((uint32_t)raw & ((1u << bits) - 1)) | ((uint32_t)(raw >> 8) << bits);
+// #if defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
+//         return _bzhi_u32(val, len * 7);
+// #else
+//         return val & (uint32_t)((1ULL << (len * 7)) - 1);
+// #endif
+// #endif
+//     }
+
     // 2 Bytes: 10xxxxxx xxxxxxxx (14 bits)
     if (LIKELY(b0 < 0xC0)) {
         if (UNLIKELY(p + 1 >= end)) {
@@ -104,7 +172,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
     }
 
     // 4 Bytes: 1110xxxx ... (28 bits)
-    if (LIKELY(b0 < 0xF0)) {
+    if (UNLIKELY(b0 < 0xF0)) {
         if (UNLIKELY(p + 3 >= end)) {
             *ptr = p + 3;
             return 0;
@@ -118,6 +186,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
         *ptr = p + 4;
         return 0;
     }
+
     *ptr = p + 5;
     return (b0 & 0x07) | ((uint32_t)p[1] << 3) | ((uint32_t)p[2] << 11) | ((uint32_t)p[3] << 19) |
            ((uint32_t)p[4] << 27);
