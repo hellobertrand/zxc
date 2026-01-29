@@ -110,7 +110,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
             return 0;
         }
         *ptr = p + 4;
-        return (b0 & 0x0F) | ((uint32_t)p[1] << 4) | ((uint32_t)p[2] << 12) | ((uint32_t)p[3] << 20);
+        return (b0 & 0x0F) | ((uint32_t)p[1] << 4) | ((uint32_t)p[2] << 12) |
+               ((uint32_t)p[3] << 20);
     }
 
     // 5 Bytes: 11110xxx ... (32 bits)
@@ -767,7 +768,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     // --- SAFE Loop: offset validation until threshold (4x unroll) ---
     // For 1-byte offsets: bounds check until 256 bytes written
     // For 2-byte offsets: bounds check until 65536 bytes written
-    size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
+    const size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
 
     while (n_seq >= 4 && d_ptr < d_end_safe && written < bounds_threshold) {
         uint32_t tokens = zxc_le32(t_ptr);
@@ -1019,16 +1020,16 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     // --- Trailing Literals ---
     size_t generated = d_ptr - dst;
     if (generated < expected_raw_size) {
-        size_t rem = expected_raw_size - generated;
+        const size_t rem = expected_raw_size - generated;
         if (UNLIKELY(d_ptr + rem > d_end || l_ptr + rem > l_end)) return -1;
         ZXC_MEMCPY(d_ptr, l_ptr, rem);
         d_ptr += rem;
     }
-
+    generated = d_ptr - dst;
     // Final validation: decoded size must match expected
-    if (UNLIKELY((size_t)(d_ptr - dst) != expected_raw_size)) return -1;
+    if (UNLIKELY(generated != expected_raw_size)) return -1;
 
-    return (int)(d_ptr - dst);
+    return (int)generated;
 }
 
 /**
@@ -1235,7 +1236,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     // Since offset is 16-bit, threshold is 65536.
     // For 1-byte offsets (enc_off==1): validate until 256 bytes written
     // For 2-byte offsets (enc_off==0): validate until 65536 bytes written
-    size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
+    const size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
 
     while (n_seq > 0 && d_ptr < d_end_safe && written < bounds_threshold) {
         uint32_t seq = zxc_le32(seq_ptr);
@@ -1466,16 +1467,16 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     // --- Trailing Literals ---
     size_t generated = d_ptr - dst;
     if (generated < expected_raw_size) {
-        size_t rem = expected_raw_size - generated;
+        const size_t rem = expected_raw_size - generated;
         if (UNLIKELY(d_ptr + rem > d_end || l_ptr + rem > l_end)) return -1;
         ZXC_MEMCPY(d_ptr, l_ptr, rem);
         d_ptr += rem;
     }
-
+    generated = d_ptr - dst;
     // Final validation: decoded size must match expected
-    if (UNLIKELY((size_t)(d_ptr - dst) != expected_raw_size)) return -1;
+    if (UNLIKELY(generated != expected_raw_size)) return -1;
 
-    return (int)(d_ptr - dst);
+    return (int)generated;
 }
 
 // cppcheck-suppress unusedFunction
@@ -1528,14 +1529,14 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
             // Verify Footer Content: Source Size and Global Checksum
             const uint8_t* footer = src + ZXC_BLOCK_HEADER_SIZE;
             int valid_footer = (zxc_le64(footer) == ctx->total_out);
-            
+
             // Checksum validation
             if (ctx->checksum_enabled && valid_footer && (flags & ZXC_BLOCK_FLAG_CHECKSUM) &&
                 zxc_le32(footer + sizeof(uint64_t)) != ctx->global_hash)
                 valid_footer = 0;
 
             if (UNLIKELY(!valid_footer)) return -1;
-            return 0; // Success for EOF
+            return 0;  // Success for EOF
         default:
             return -1;
     }
