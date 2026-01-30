@@ -154,7 +154,7 @@ typedef struct {
     uint8_t* out_buf;
     size_t out_cap, result_sz;
     int job_id;
-    job_status_t status;
+    ZXC_ATOMIC job_status_t status;  // Atomic for lock-free status updates
     char pad[ZXC_CACHE_LINE_SIZE];  // Prevent False Sharing
 } zxc_stream_job_t;
 
@@ -325,25 +325,23 @@ static void* zxc_stream_worker(void* arg) {
             pthread_mutex_unlock(&ctx->lock);
             break;
         }
-        int jid = ctx->worker_queue[ctx->wq_tail];
+        const int jid = ctx->worker_queue[ctx->wq_tail];
         ctx->wq_tail = (ctx->wq_tail + 1) % ctx->ring_size;
         ctx->wq_count--;
         job = &ctx->jobs[jid];
         pthread_mutex_unlock(&ctx->lock);
 
-        int res = ctx->processor(&cctx, job->in_buf, job->in_sz, job->out_buf, job->out_cap);
-        pthread_mutex_lock(&ctx->lock);
+        const int res = ctx->processor(&cctx, job->in_buf, job->in_sz, job->out_buf, job->out_cap);
+        job->result_sz = UNLIKELY(res < 0) ? 0 : (size_t)res;
+        job->status = JOB_STATUS_PROCESSED;
 
+        pthread_mutex_lock(&ctx->lock);
         if (UNLIKELY(res < 0)) {
             ctx->io_error = 1;
-            job->result_sz = 0;
-            job->status = JOB_STATUS_PROCESSED;
             pthread_cond_broadcast(&ctx->cond_writer);
             pthread_cond_broadcast(&ctx->cond_reader);
-        } else {
-            job->result_sz = (size_t)res;
-            job->status = JOB_STATUS_PROCESSED;
-            if (jid == ctx->write_idx) pthread_cond_broadcast(&ctx->cond_writer);
+        } else if (jid == ctx->write_idx) {
+            pthread_cond_signal(&ctx->cond_writer);
         }
         pthread_mutex_unlock(&ctx->lock);
     }
@@ -499,7 +497,6 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         ctx.ring_size * (sizeof(zxc_stream_job_t) + sizeof(int) + alloc_in + alloc_out);
     uint8_t* mem_block = zxc_aligned_malloc(alloc_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem_block)) return -1;
-    ZXC_MEMSET(mem_block, 0, alloc_size);
 
     uint8_t* ptr = mem_block;
     ctx.jobs = (zxc_stream_job_t*)ptr;
@@ -510,11 +507,14 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ptr += ctx.ring_size * alloc_in;
     uint8_t* buf_out = ptr;
 
+    ZXC_MEMSET(buf_in, 0, ctx.ring_size * alloc_in);
+
     for (int i = 0; i < ctx.ring_size; i++) {
         ctx.jobs[i].job_id = i;
         ctx.jobs[i].status = JOB_STATUS_FREE;
         ctx.jobs[i].in_buf = buf_in + (i * alloc_in);
         ctx.jobs[i].in_cap = alloc_in - ZXC_PAD_SIZE;
+        ctx.jobs[i].in_sz = 0;
         ctx.jobs[i].out_buf = buf_out + (i * alloc_out);
         ctx.jobs[i].out_cap = alloc_out - ZXC_PAD_SIZE;
         ctx.jobs[i].result_sz = 0;
@@ -590,7 +590,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
                 const int has_crc = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
                 const size_t checksum_sz = (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-                const size_t total_len = ZXC_BLOCK_HEADER_SIZE + bh.comp_size + checksum_sz;
+                const size_t body_total = bh.comp_size + checksum_sz;
+                const size_t total_len = ZXC_BLOCK_HEADER_SIZE + body_total;
 
                 if (UNLIKELY(total_len > job->in_cap)) {
                     ctx.io_error = 1;
@@ -598,24 +599,21 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                 }
 
                 ZXC_MEMCPY(job->in_buf, bh_buf, ZXC_BLOCK_HEADER_SIZE);
-                const size_t body_read =
-                    fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE, 1, bh.comp_size, f_in);
 
-                if (UNLIKELY(body_read != bh.comp_size)) {
+                // Single fread for body + checksum (reduces syscalls)
+                const size_t body_read =
+                    fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE, 1, body_total, f_in);
+
+                if (UNLIKELY(body_read != body_total)) {
                     read_eof = 1;
                 } else if (has_crc) {
-                    if (UNLIKELY(fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size, 1,
-                                       ZXC_BLOCK_CHECKSUM_SIZE, f_in) != ZXC_BLOCK_CHECKSUM_SIZE)) {
-                        read_eof = 1;
-                    } else {
-                        // Update Global Hash for Decompression
-                        const uint32_t b_crc =
-                            zxc_le32(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
-                        d_global_hash = (d_global_hash << 1) | (d_global_hash >> 31);
-                        d_global_hash ^= b_crc;
-                    }
+                    // Update Global Hash for Decompression
+                    const uint32_t b_crc =
+                        zxc_le32(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
+                    d_global_hash = (d_global_hash << 1) | (d_global_hash >> 31);
+                    d_global_hash ^= b_crc;
                 }
-                read_sz = ZXC_BLOCK_HEADER_SIZE + body_read + checksum_sz;
+                read_sz = ZXC_BLOCK_HEADER_SIZE + body_read;
             }
         }
     _job_prepared:
