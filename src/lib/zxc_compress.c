@@ -371,7 +371,18 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             const uint8_t* ref2 = src + next_idx;
             if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
                 uint32_t l2 = 4;
+                const uint8_t* limit8 = iend - 8;
+                while (ip + 1 + l2 < limit8) {
+                    uint64_t v1 = zxc_le64(ip + 1 + l2);
+                    uint64_t v2 = zxc_le64(ref2 + l2);
+                    if (v1 != v2) {
+                        l2 += zxc_ctz64(v1 ^ v2) >> 3;
+                        goto lazy1_done;
+                    }
+                    l2 += 8;
+                }
                 while (ip + 1 + l2 < iend && ref2[l2] == ip[1 + l2]) l2++;
+            lazy1_done:
                 if (l2 > max_lazy) max_lazy = l2;
             }
             uint16_t delta = chain_table[next_idx];
@@ -398,7 +409,18 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 const uint8_t* ref3 = src + idx3;
                 if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
                     uint32_t l3 = 4;
+                    const uint8_t* limit8_3 = iend - 8;
+                    while (ip + 2 + l3 < limit8_3) {
+                        uint64_t v1 = zxc_le64(ip + 2 + l3);
+                        uint64_t v2 = zxc_le64(ref3 + l3);
+                        if (v1 != v2) {
+                            l3 += zxc_ctz64(v1 ^ v2) >> 3;
+                            goto lazy2_done;
+                        }
+                        l3 += 8;
+                    }
                     while (ip + 2 + l3 < iend && ref3[l3] == ip[2 + l3]) l3++;
+                lazy2_done:
                     if (l3 > max_lazy3) max_lazy3 = l3;
                 }
                 uint16_t delta = chain_table[idx3];
