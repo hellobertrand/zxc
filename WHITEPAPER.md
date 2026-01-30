@@ -1,6 +1,6 @@
 # ZXC: High-Performance Asymmetric Lossless Compression
 
-**Version**: 0.5.1
+**Version**: 0.6.0
 **Date**: January 2026
 **Author**: Bertrand Lebonnois
 
@@ -47,44 +47,41 @@ ZXC leverages modern instruction sets to maximize throughput on both ARM and x86
 
 ### 4.3 Entropy Coding & Bitpacking
 *   **RLE (Run-Length Encoding)**: Automatically detects runs of identical bytes.
-*   **VByte Encoding**: Variable-length integer encoding (similar to LEB128) for overflow values.
+*   **Prefix Varint Encoding**: Variable-length integer encoding (similar to LEB128 but prefix-based) for overflow values.
 *   **Bit-Packing**: Compressed sequences are packed into dedicated streams using minimal bit widths.
 
-#### VByte Format
+#### Prefix Varint Format
 
-VByte (Variable Byte) encoding stores integers using 7 bits per byte, with the MSB as a continuation flag:
+ZXC uses a **Prefix Varint** encoding for overflow values. Unlike standard VByte (which uses a continuation bit in every byte), Prefix Varint encodes the total length of the integer in the **unary prefix of the first byte**. This allows the decoder to determine the sequence length immediately, enabling branchless or highly predictable decoding without serial dependencies.
 
-```
-Single byte (values 0-127):
-+---+---+---+---+---+---+---+---+
-| 0 |  7-bit value (0-127)      |
-+---+---+---+---+---+---+---+---+
-  ^
-  └── MSB = 0: Last byte
+**Encoding Scheme:**
 
-Multi-byte (values >= 128):
-+---+---+---+---+---+---+---+---+   +---+---+---+---+---+---+---+---+
-| 1 |   7 bits (low)            |   | 0 |   7 bits (high)           |
-+---+---+---+---+---+---+---+---+   +---+---+---+---+---+---+---+---+
-  ^                                   ^
-  └── MSB = 1: More bytes             └── MSB = 0: Last byte
-```
-
-**Byte count by value range:**
-
-| Value Range       | Bytes | Max Bits |
-|-------------------|-------|----------|
-| 0 - 127           | 1     | 7        |
-| 128 - 16,383      | 2     | 14       |
-| 16,384 - 2,097,151| 3     | 21       |
-| ≥ 2,097,152       | 5     | 35       |
+| Prefix (Binary) | Total Bytes | Data Bits (1st Byte) | Total Data Bits | Range (Value < X) |
+|-----------------|-------------|----------------------|-----------------|-------------------|
+| `0xxxxxxx`      | 1           | 7                    | 7               | 128               |
+| `10xxxxxx`      | 2           | 6                    | 14 (6+8)        | 16,384            |
+| `110xxxxx`      | 3           | 5                    | 21 (5+8+8)      | 2,097,152         |
+| `1110xxxx`      | 4           | 4                    | 28 (4+8+8+8)    | 268,435,456       |
+| `11110xxx`      | 5           | 3                    | 35 (3+8+8+8+8)  | 34,359,738,368    |
 
 **Example**: Encoding value `300` (binary: `100101100`):
-```
-300 = 0b100101100 → Split into 7-bit groups: [0101100] [0000010]
-Byte 1: 1|0101100 = 0xAC  (MSB=1: more bytes, low 7 bits = 44)
-Byte 2: 0|0000010 = 0x02  (MSB=0: last byte, high 7 bits = 2)
-Decode: 44 + (2 << 7) = 44 + 256 = 300 ✓
+```text
+Value 300 > 127 and < 16383 -> Uses 2-byte format (Prefix '10').
+
+Step 1: Low 6 bits
+300 & 0x3F = 44 (0x2C, binary 101100)
+Byte 1 = Prefix '10' | 101100 = 10101100 (0xAC)
+
+Step 2: Remaining high bits
+300 >> 6 = 4 (0x04, binary 00000100)
+Byte 2 = 0x04
+
+Result: 0xAC 0x04
+
+Decoding Verification:
+Byte 1 (0xAC) & 0x3F = 44
+Byte 2 (0x04) << 6   = 256
+Total = 256 + 44 = 300
 ```
 
 ## 5. File Format Specification
@@ -98,19 +95,20 @@ The file begins with an **8-byte** header that identifies the format and specifi
 **FILE Header (8 bytes):**
 
 ```
-  Offset:  0               4       5       6               8
-           +---------------+-------+-------+---------------+
-           | Magic Word    | Ver   | Chunk | Reserved      |
-           | (4 bytes)     | (1B)  | (1B)  | (2 bytes)     |
-           +---------------+-------+-------+---------------+
+  Offset:  0               4       5       6       7       8
+           +---------------+-------+-------+-------+-------+
+           | Magic Word    | Ver   | Chunk | Res   | Chk   |
+           | (4 bytes)     | (1B)  | (1B)  | (1B)  | (1B)  |
+           +---------------+-------+-------+-------+-------+
 ```
 
 * **Magic Word (4 bytes)**: `0x5A 0x58 0x43 0x30` ("ZXC0" in Little Endian).
-* **Version (1 byte)**: Current version is `1`.
+* **Version (1 byte)**: Current version is `3`.
 * **Chunk Size Code (1 byte)**: Defines the processing block size:
   - `0` = Default mode (256 KB, for backward compatibility)
   - `N` = Chunk size is `N × 4096` bytes (e.g., `62` = 248 KB)
-* **Reserved (2 bytes)**: Future use.
+* **Reserved (1 byte)**: Future use.
+* **Checksum (1 byte)**: Rapidhash checksum (low byte) of the first 7 bytes (Magic Word through Reserved). Always calculated and verified.
 
 ### 5.2 Block Header Structure
 Each data block consists of a **12-byte** generic header that precedes the specific payload. This header allows the decoder to navigate the stream and identify the processing method required for the next chunk of data.
@@ -118,33 +116,33 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 **BLOCK Header (12 bytes):**
 
 ```
-  Offset:  0       1       2               4                       8                       12
-          +-------+-------+---------------+-----------------------+-----------------------+
-          | Type  | Flags | Reserved      | Comp Size             | Raw Size              |
-          | (1B)  | (1B)  | (2 bytes)     | (4 bytes)             | (4 bytes)             |
-          +-------+-------+---------------+-----------------------+-----------------------+
+  Offset:  0       1       2       3       4                       8                       12
+          +-------+-------+-------+-------+-----------------------+-----------------------+
+          | Type  | Flags | Rsrvd | H.crc | Comp Size             | Raw Size              |
+          | (1B)  | (1B)  | (1B)  | (1B)  | (4 bytes)             | (4 bytes)             |
+          +-------+-------+-------+-------+-----------------------+-----------------------+
 
-  If HAS_CHECKSUM flag is set (Flags & 0x80):
-  Offset:  12                                                                              20
-          +-----------------------------------------------------------------------------+
-          | Checksum (rapidhash)                                                        |
-          | (8 bytes)                                                                   |
-          +-----------------------------------------------------------------------------+
+  Block Layout:
+  [ Header (12B) ] + [ Compressed Payload (Comp Size bytes) ] + [ Optional Checksum (4B) ]
+
 ```
+**Note**: The Checksum (if flag set) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the compressed payload**.
 
-* **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI).
+* **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI, 255=EOF).
 * **Flags**:
-  - **Bit 7 (0x80)**: `HAS_CHECKSUM`. If set, an **8-byte checksum** follows immediately after Raw Size.
-  - **Bits 0-3 (0x0F)**: `CHECKSUM_TYPE`. Defines the algorithm used for integrity verification.
+  - **Bit 7 (0x80)**: `has_checksum`. If set, a **32-bit (4-byte) checksum** is appended to the end of the block (after the compressed payload). This checksum also contributes to the **Global Stream Checksum**.
+  - **Bits 0-3 (0x0F)**: `checksum_type`. Defines the algorithm used for integrity verification.
+* **Rsrvd**: Reserved for future use (must be 0).
+* **H.crc**: **Header Checksum** (1 byte). Calculated on the 12-byte header (with H.crc byte set to 0) using `zxc_hash12`.
 * **Checksum Algorithms**:
-  - `0x00`: **rapidhash** (Standard, high performance, platform independent)
+  - `0x00`: **rapidhash** (Standard, 32-bit folded)
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
 * **Raw Size**: Original decompressed size.
 
 > **Note**: While the format is designed for threaded execution, a single-threaded API is also available for constrained environments or simple integration cases.
 
 ### 5.3 Specific Header: NUM (Numeric)
-(Present immediately after the Block Header and any optional Checksum)
+(Present immediately after the Block Header)
 
 **NUM Header (16 bytes):**
 
@@ -161,7 +159,7 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 * **Reserved**: Padding for alignment.
 
 ### 5.4 Specific Header: GLO (Generic Low)
-(Present immediately after the Block Header and any optional Checksum)
+(Present immediately after the Block Header)
 
 **GLO Header (16 bytes):**
 
@@ -210,7 +208,7 @@ Each descriptor stores sizes as a packed 64-bit value:
 | 0 | **Literals**| Raw bytes to copy, or RLE-compressed if `enc_lit=1`  |
 | 1 | **Tokens**  | Packed bytes: `(LiteralLen << 4) \| MatchLen`        |
 | 2 | **Offsets** | Match distances: 8-bit if `enc_off=1`, else 16-bit LE |
-| 3 | **Extras**  | VByte overflow values when LitLen or MatchLen ≥ 15   |
+| 3 | **Extras**  | Prefix Varint overflow values when LitLen or MatchLen ≥ 15   |
 
 **Data Flow Example:**
 
@@ -233,7 +231,7 @@ Each descriptor stores both a compressed and raw size to support secondary encod
 | **Literals**| RLE size (if used)   | Original byte count | Yes, if RLE enabled |
 | **Tokens**  | Stream size          | Stream size         | No                   |
 | **Offsets** | N×1 or N×2 bytes     | N×1 or N×2 bytes    | No (size depends on `enc_off`) |
-| **Extras**  | VByte stream size    | VByte stream size   | No                   |
+| **Extras**  | Prefix Varint stream size | Prefix Varint stream size | No                   |
 
 Currently, the **Literals** section uses different sizes when RLE compression is applied (`enc_lit=1`). The **Offsets** section size depends on `enc_off`: N sequences × 1 byte (if `enc_off=1`) or N sequences × 2 bytes (if `enc_off=0`).
 
@@ -241,7 +239,7 @@ Currently, the **Literals** section uses different sizes when RLE compression is
 
 
 ### 5.5 Specific Header: GHI (Generic High)
-(Present immediately after the Block Header and any optional Checksum)
+(Present immediately after the Block Header)
 
 The **GHI** (Generic High-Velocity) block format is optimized for maximum decompression speed. It uses a **packed 32-bit sequence** format that allows 4-byte aligned reads, reducing memory access latency and enabling efficient SIMD processing.
 
@@ -283,7 +281,7 @@ The **GHI** (Generic High-Velocity) block format is optimized for maximum decomp
 |---|---------------|-------------------------------------------------------|
 | 0 | **Literals**  | Raw bytes to copy                                    |
 | 1 | **Sequences** | Packed 32-bit sequences (see format below)           |
-| 2 | **Extras**    | VByte overflow values when LitLen or MatchLen ≥ 255  |
+| 2 | **Extras**    | Prefix Varint overflow values when LitLen or MatchLen ≥ 255  |
 
 **Packed Sequence Format (32 bits):**
 
@@ -304,8 +302,8 @@ Unlike GLO which uses separate token and offset streams, GHI packs all sequence 
          +--------+--------+--------+--------+
 ```
 
-* **LL (Literal Length)**: 8 bits (0-254, value 255 triggers VByte overflow)
-* **ML (Match Length - 5)**: 8 bits (actual length = ML + 5, range 5-259, value 255 triggers VByte overflow)
+* **LL (Literal Length)**: 8 bits (0-254, value 255 triggers Prefix Varint overflow)
+* **ML (Match Length - 5)**: 8 bits (actual length = ML + 5, range 5-259, value 255 triggers Prefix Varint overflow)
 * **Offset**: 16 bits (match distance, 1-65535)
 
 **Data Flow Example:**
@@ -335,7 +333,37 @@ GHI Block Data Layout:
 > **Design Rationale**: The 32-bit packed format eliminates pointer chasing between token and offset streams. By reading a single aligned word per sequence, the decoder achieves better cache utilization and enables aggressive loop unrolling (4x) for maximum throughput on modern CPUs.
 
 
-### 5.6 Block Encoding & Processing Algorithms
+### 5.6 Specific Header: EOF (End of File)
+(Block Type 255)
+
+The **EOF** block marks the end of the ZXC stream. It ensures that the decompressor knows exactly when to stop processing, allowing for robust stream termination even when file size metadata is unavailable or when concatenating streams.
+
+*   **Structure**: Standard 12-byte Block Header.
+*   **Flags**:
+    *   **Bit 7 (0x80)**: `has_checksum`. If set, implies the **Global Stream Checksum** in the footer is valid and should be verified.
+*   **Comp Size / Raw Size**: Unlike other blocks, these **MUST be set to 0**. The decoder enforces strict validation (`Type == EOF` AND `Comp Size == 0`) to prevent processing of malformed termination blocks.
+
+### 5.7 File Footer
+(Present immediately after the EOF Block)
+
+A mandatory **12-byte footer** closes the stream, providing total source size information and the global checksum.
+
+**Footer Structure (12 bytes):**
+
+```
+  Offset:  0                               8               12
+          +-------------------------------+---------------+
+          | Original Source Size          | Global Hash   |
+          | (8 bytes)                     | (4 bytes)     |
+          +-------------------------------+---------------+
+```
+
+*   **Original Source Size** (8 bytes): Total size of the uncompressed data.
+*   **Global Hash** (4 bytes): The **Global Stream Checksum**. Valid only if the EOF block has the `has_checksum` flag set (or the decoder context requires it).
+    *   **Algorithm**: `Rotation + XOR`.
+    *   For each block with a checksum: `global_hash = (global_hash << 1) | (global_hash >> 31); global_hash ^= block_hash;`
+
+### 5.8 Block Encoding & Processing Algorithms
 
 The efficiency of ZXC relies on specialized algorithmic pipelines for each block type.
 
@@ -354,7 +382,7 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Literals Buffer*: Raw bytes.
     *   *Tokens Buffer*: Packed `(LitLen << 4) | MatchLen`.
     *   *Offsets Buffer*: Variable-width distances (8-bit or 16-bit, see below).
-    *   *Extras Buffer*: Overflow values for lengths >= 15 (VByte encoded).
+    *   *Extras Buffer*: Overflow values for lengths >= 15 (Prefix Varint encoded).
     *   *Offset Mode Selection (v0.4.0)*: The encoder tracks the maximum offset across all sequences. If all offsets are ≤ 255, the 8-bit mode (`enc_off=1`) is selected, saving 1 byte per sequence compared to 16-bit mode.
 4.  **RLE Pass**: The literals buffer is scanned for run-length encoding opportunities (runs of identical bytes). If beneficial (>10% gain), it is compressed in place.
 5.  **Final Serialization**: All buffers are concatenated into the payload, preceded by section descriptors.
@@ -379,7 +407,7 @@ This format prioritizes decompression throughput over compression ratio. It uses
 3.  **Stream Assembly**: Only three streams are generated:
     *   *Literals Buffer*: Raw bytes (no RLE).
     *   *Sequences Buffer*: Packed 32-bit words (4 bytes each).
-    *   *Extras Buffer*: VByte overflow values for lengths >= 255.
+    *   *Extras Buffer*: Prefix Varint overflow values for lengths >= 255.
 4.  **Final Serialization**: Streams are concatenated with 3 section descriptors.
 
 **Decoding Process**:
@@ -405,14 +433,21 @@ Triggered when data is detected as a dense array of 32-bit integers.
 2.  **ZigZag Decode**: Reverses the mapping.
 3.  **Integration**: Computes the prefix sum (cumulative addition) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
 
-### 5.7 Data Integrity
-Every block can optionally be protected by a **64-bit checksum** to ensure data reliability.
+### 5.9 Data Integrity
+Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.
+
+#### Post-Compression Verification
+Unlike traditional codecs that verify the integrity of the original uncompressed data, ZXC calculates checksums on the **compressed** payload.
+
+*   **Zero-Overhead Decompression**: Verifying uncompressed data requires computing a hash over the output *after* decompression, contending for cache and CPU resources with the decompression logic itself. By checksumming the compressed stream, verification happens *during* the read phase, before the data even enters the decoder.
+*   **Early Failure Detection**: Corruption is detected before attempting to decompress, preventing potential crashes or buffer overruns in the decoder caused by malformed data.
+*   **Reduced Memory Bandwidth**: The checksum is computed over a much smaller dataset (the compressed block), saving significant memory bandwidth.
 
 #### Multi-Algorithm Support
-ZXC supports multiple integrity verification algorithms, allowing the format to adapt to different security and performance requirements. The specific algorithm used is identified in the block header's flags byte.
+ZXC supports multiple integrity verification algorithms (though currently standardized on rapidhash).
 
-*   **Identified Algorithm (0x00: rapidhash)**: The default and recommended algorithm. It is a very fast, high-quality, and platform-independent hashing algorithm fully optimized for instruction pipelines.
-*   **Performance First**: By using a modern non-cryptographic hash, ZXC ensures that integrity checks do not bottleneck decompression throughput, even at high GB/s speeds.
+*   **Identified Algorithm (0x00: rapidhash)**: The default algorithm. The 64-bit rapidhash result is folded (XORed) into a 32-bit value to minimize storage overhead while maintaining strong collision resistance for block-level integrity.
+*   **Performance First**: By using a modern non-cryptographic hash, ZXC ensures that integrity checks do not bottleneck decompression throughput.
 
 #### Credit
 The default `rapidhash` algorithm is based on wyhash and was developed by Nicolas De Carli. It is designed to fully exploit hardware performance while maintaining top-tier mathematical distribution qualities.
