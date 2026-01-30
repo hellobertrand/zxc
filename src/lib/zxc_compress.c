@@ -1004,10 +1004,10 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     rem -= ghs;
 
     // Extract stream sizes once
-    size_t sz_lit = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
-    size_t sz_tok = (size_t)(desc[1].sizes & ZXC_SECTION_SIZE_MASK);
-    size_t sz_off = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
-    size_t sz_ext = (size_t)(desc[3].sizes & ZXC_SECTION_SIZE_MASK);
+    const size_t sz_lit = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
+    const size_t sz_tok = (size_t)(desc[1].sizes & ZXC_SECTION_SIZE_MASK);
+    const size_t sz_off = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
+    const size_t sz_ext = (size_t)(desc[3].sizes & ZXC_SECTION_SIZE_MASK);
 
     if (UNLIKELY(rem < sz_lit)) return -1;
 
@@ -1333,9 +1333,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz,
                                 uint8_t* RESTRICT const dst, const size_t dst_cap,
                                 size_t* RESTRICT const out_sz, const int chk) {
-    const size_t chk_sz = chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0;
-    const size_t total = ZXC_BLOCK_HEADER_SIZE + src_sz + chk_sz;
-    if (UNLIKELY(dst_cap < total)) return -1;
+    if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE + src_sz)) return -1;
 
     // Compute block RAW
     zxc_block_header_t bh;
@@ -1431,26 +1429,21 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     int res = -1;
     int try_num = 0;
 
-    if (zxc_probe_is_numeric(chunk, src_sz)) try_num = 1;
-
-    if (try_num) {
+    if (UNLIKELY(zxc_probe_is_numeric(chunk, src_sz))) try_num = 1;
+    if (UNLIKELY(try_num)) {
         res = zxc_encode_block_num(ctx, chunk, src_sz, dst, dst_cap, &w);
         if (res != 0 || w > (src_sz - (src_sz >> 2)))  // w > 75% of src_sz
             try_num = 0;  // NUM didn't compress well, try GLO/GHI instead
     }
 
-    if (!try_num) {
-        if (ctx->compression_level <= 2) {
+    if (LIKELY(!try_num)) {
+        if (ctx->compression_level <= 2)
             res = zxc_encode_block_ghi(ctx, chunk, src_sz, dst, dst_cap, &w);
-        } else {
+        else
             res = zxc_encode_block_glo(ctx, chunk, src_sz, dst, dst_cap, &w);
-        }
     }
 
     // Check expansion. W contains Header + Payload.
-    // If we add checksum, will it exceed raw size?
-    // size_t final_w = w + (chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-    // if (UNLIKELY(res != 0 || w >= src_sz + ZXC_BLOCK_HEADER_SIZE)) {
     if (UNLIKELY(res != 0 || w >= src_sz)) {
         res = zxc_encode_block_raw(chunk, src_sz, dst, dst_cap, &w, chk);
         if (UNLIKELY(res != 0)) return res;
@@ -1459,12 +1452,9 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     if (chk) {
         // Calculate checksum on the compressed payload (w currently excludes checksum)
         // Header is at dst, data starts at dst + ZXC_BLOCK_HEADER_SIZE
-        if (UNLIKELY(w < ZXC_BLOCK_HEADER_SIZE)) return -1;
+        if (UNLIKELY(w < ZXC_BLOCK_HEADER_SIZE || w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap)) return -1;
+        
         uint32_t payload_sz = (uint32_t)(w - ZXC_BLOCK_HEADER_SIZE);
-
-        // Ensure space (encoders check space including checksum, so this is safe, but verify)
-        if (UNLIKELY(w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap)) return -1;
-
         uint32_t crc =
             zxc_checksum(dst + ZXC_BLOCK_HEADER_SIZE, payload_sz, ZXC_CHECKSUM_RAPIDHASH);
         zxc_store_le32(dst + w, crc);
