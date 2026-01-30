@@ -725,9 +725,9 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         if (m.ref) {
             ip -= m.backtrack;
-            uint32_t ll = (uint32_t)(ip - anchor);
-            uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
-            uint32_t off = (uint32_t)(ip - m.ref);
+            const uint32_t ll = (uint32_t)(ip - anchor);
+            const uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
+            const uint32_t off = (uint32_t)(ip - m.ref);
 
             if (ll > 0) {
                 if (ll <= 16)
@@ -739,8 +739,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                 lit_c += ll;
             }
 
-            uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
-            uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
+            const uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
+            const uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
             buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
             buf_offsets[seq_c] = (uint16_t)off;
             if (off > max_offset) max_offset = (uint16_t)off;
@@ -770,6 +770,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                              : 0;
                 }
             }
+
             ip += m.len;
             anchor = ip;
         } else {
@@ -787,7 +788,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     size_t rle_size = 0;
     int use_rle = 0;
 
-    if (lit_c > 0 && level >= 2) {
+    if (lit_c > 0) {
         const uint8_t* p = literals;
         const uint8_t* const p_end = literals + lit_c;
         const uint8_t* const p_end_4 = p_end - 3;  // Safe limit for 4-byte lookahead
@@ -1193,13 +1194,12 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     uint8_t* const buf_extras = ctx->buf_extras;
     uint16_t* const chain_table = ctx->chain_table;
     uint8_t* const literals = ctx->literals;
+    uint32_t* const buf_sequences = ctx->buf_sequences;
 
     uint32_t seq_c = 0;
     size_t extras_c = 0;
     size_t lit_c = 0;
     uint16_t max_offset = 0;
-
-    uint32_t* const buf_sequences = ctx->buf_sequences;
 
     while (LIKELY(ip < mflimit)) {
         size_t dist = (size_t)(ip - anchor);
@@ -1213,9 +1213,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         if (m.ref) {
             ip -= m.backtrack;
-            uint32_t ll = (uint32_t)(ip - anchor);
-            uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
-            uint32_t off = (uint32_t)(ip - m.ref);
+            const uint32_t ll = (uint32_t)(ip - anchor);
+            const uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
+            const uint32_t off = (uint32_t)(ip - m.ref);
 
             if (ll > 0) {
                 if (ll <= 16)
@@ -1227,9 +1227,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                 lit_c += ll;
             }
 
-            uint32_t ll_write = (ll >= ZXC_SEQ_LL_MASK) ? 255U : ll;
-            uint32_t ml_write = (ml >= ZXC_SEQ_ML_MASK) ? 255U : ml;
-            uint32_t seq_val = (ll_write << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
+            const uint32_t ll_write = (ll >= ZXC_SEQ_LL_MASK) ? 255U : ll;
+            const uint32_t ml_write = (ml >= ZXC_SEQ_ML_MASK) ? 255U : ml;
+            const uint32_t seq_val = (ll_write << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
                                (ml_write << ZXC_SEQ_OFF_BITS) | (off & ZXC_SEQ_OFF_MASK);
             if (off > max_offset) max_offset = (uint16_t)off;
             buf_sequences[seq_c] = seq_val;
@@ -1242,23 +1242,6 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                 extras_c += zxc_write_varint(buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
             }
 
-            if (m.len > 2 && level > 4) {
-                const uint8_t* match_end = ip + m.len;
-                if (match_end < iend - 3) {
-                    uint32_t pos_u = (uint32_t)((match_end - 2) - src);
-                    uint32_t val_u = zxc_le32(match_end - 2);
-                    uint32_t h_u = zxc_hash_func(val_u);
-                    uint32_t prev_head = hash_table[2 * h_u];
-                    uint32_t prev_idx = (prev_head & ~ZXC_OFFSET_MASK) == epoch_mark
-                                            ? (prev_head & ZXC_OFFSET_MASK)
-                                            : 0;
-                    hash_table[2 * h_u] = epoch_mark | pos_u;
-                    hash_table[2 * h_u + 1] = val_u;
-                    chain_table[pos_u] = (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
-                                             ? (uint16_t)(pos_u - prev_idx)
-                                             : 0;
-                }
-            }
             ip += m.len;
             anchor = ip;
         } else {
