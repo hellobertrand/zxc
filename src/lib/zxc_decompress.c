@@ -1355,6 +1355,60 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     // --- Remaining 1 sequence (Fast Path) ---
     while (n_seq > 0 && d_ptr < d_end_safe) {
+        // Unrolled 4x loop
+        if (n_seq >= 4 && d_end_safe - d_ptr > (ZXC_SEQ_LL_MASK + ZXC_SEQ_ML_MASK) * 4) {
+             int unsafe = 0;
+             const uint8_t* seq_p_tmp = seq_ptr;
+             const uint8_t* ext_p_tmp = extras_ptr;
+             const uint8_t* l_p_tmp = l_ptr;
+             uint8_t* d_p_tmp = d_ptr;
+             size_t w_tmp = written;
+
+             // speculative decode 4
+             for (int k=0; k<4; k++) {
+                 uint32_t seq = zxc_le32(seq_p_tmp);
+                 seq_p_tmp += 4;
+                 uint32_t ll = seq >> 24;
+                 if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) ll += zxc_read_varint(&ext_p_tmp, extras_end);
+                 
+                 uint32_t mb = (seq >> 16) & 0xFF;
+                 uint32_t ml = mb + ZXC_LZ_MIN_MATCH_LEN;
+                 if (UNLIKELY(mb == ZXC_SEQ_ML_MASK)) ml += zxc_read_varint(&ext_p_tmp, extras_end);
+
+                 uint32_t off = seq & 0xFFFF;
+                 
+                 // Verify bounds for this sequence
+                 if (UNLIKELY(d_end_safe < d_p_tmp + ll + ml)) { unsafe=1; break; }
+
+                 // Copy Lits
+                 ZXC_MEMCPY(d_p_tmp, l_p_tmp, ll);
+                 l_p_tmp += ll;
+                 d_p_tmp += ll;
+                 w_tmp += ll;
+
+                 // Copy Match
+                 if (UNLIKELY(off == 0 || off > w_tmp)) { unsafe=1; break; }
+                 const uint8_t* m_src = d_p_tmp - off;
+                 if (LIKELY(off >= 16)) {
+                     ZXC_MEMCPY(d_p_tmp, m_src, ml);
+                 } else {
+                     for(size_t i=0; i<ml; i++) d_p_tmp[i] = m_src[i];
+                 }
+                 d_p_tmp += ml;
+                 w_tmp += ml;
+             }
+
+             if (!unsafe) {
+                 seq_ptr = seq_p_tmp;
+                 extras_ptr = ext_p_tmp;
+                 l_ptr = l_p_tmp;
+                 d_ptr = d_p_tmp;
+                 written = w_tmp;
+                 n_seq -= 4;
+                 continue;
+             }
+        }
+
         // Save state for fallback
         const uint8_t* seq_save = seq_ptr;
         const uint8_t* ext_save = extras_ptr;
