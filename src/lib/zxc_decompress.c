@@ -492,7 +492,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS];
 
-    int res = zxc_read_glo_header_and_desc(src, src_size, &gh, desc);
+    const int res = zxc_read_glo_header_and_desc(src, src_size, &gh, desc);
     if (UNLIKELY(res != 0)) return -1;
 
     const uint8_t* p_data =
@@ -592,12 +592,12 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     p_curr += lit_stream_size;
 
     // --- Stream Pointers & Validation ---
-    size_t sz_tokens = (size_t)(desc[1].sizes & ZXC_SECTION_SIZE_MASK);
-    size_t sz_offsets = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
-    size_t sz_extras = (size_t)(desc[3].sizes & ZXC_SECTION_SIZE_MASK);
+    const size_t sz_tokens = (size_t)(desc[1].sizes & ZXC_SECTION_SIZE_MASK);
+    const size_t sz_offsets = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
+    const size_t sz_extras = (size_t)(desc[3].sizes & ZXC_SECTION_SIZE_MASK);
 
     // Validate stream sizes match sequence count (early rejection of malformed data)
-    size_t expected_off_size =
+    const size_t expected_off_size =
         (gh.enc_off == 1) ? (size_t)gh.n_sequences : (size_t)gh.n_sequences * 2;
 
     if (UNLIKELY(sz_tokens < gh.n_sequences || sz_offsets < expected_off_size)) return -1;
@@ -1053,16 +1053,16 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[ZXC_GHI_SECTIONS];
 
-    int res = zxc_read_ghi_header_and_desc(src, src_size, &gh, desc);
+    const int res = zxc_read_ghi_header_and_desc(src, src_size, &gh, desc);
     if (UNLIKELY(res != 0)) return -1;
 
     const uint8_t* p_curr =
         src + ZXC_GHI_HEADER_BINARY_SIZE + ZXC_GHI_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
     // --- Stream Pointers & Validation ---
-    size_t sz_lit = (uint32_t)desc[0].sizes;
-    size_t sz_seqs = (uint32_t)desc[1].sizes;
-    size_t sz_exts = (uint32_t)desc[2].sizes;
+    const size_t sz_lit = (uint32_t)desc[0].sizes;
+    const size_t sz_seqs = (uint32_t)desc[1].sizes;
+    const size_t sz_exts = (uint32_t)desc[2].sizes;
     const uint8_t* l_ptr = p_curr;
     const uint8_t* l_end = l_ptr + sz_lit;
     p_curr += sz_lit;
@@ -1489,6 +1489,7 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
     const uint32_t comp_sz = zxc_le32(src + 4);
     const uint32_t raw_sz = zxc_le32(src + 8);
     const int has_crc = (flags & ZXC_BLOCK_FLAG_CHECKSUM);
+    const int chk = ctx->checksum_enabled;
 
     // Check bounds: Header + Body + Checksum(if any)
     const size_t expected_sz =
@@ -1497,7 +1498,7 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
 
     const uint8_t* data = src + ZXC_BLOCK_HEADER_SIZE;
 
-    if (has_crc && ctx->checksum_enabled) {
+    if (has_crc && chk) {
         const uint8_t algo = flags & ZXC_CHECKSUM_TYPE_MASK;
         const uint32_t stored = zxc_le32(data + comp_sz);
         const uint32_t calc = zxc_checksum(data, comp_sz, algo);
@@ -1531,7 +1532,7 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
             int valid_footer = (zxc_le64(footer) == ctx->total_out);
 
             // Checksum validation
-            if (ctx->checksum_enabled && valid_footer && (flags & ZXC_BLOCK_FLAG_CHECKSUM) &&
+            if (chk && valid_footer && (flags & ZXC_BLOCK_FLAG_CHECKSUM) &&
                 zxc_le32(footer + sizeof(uint64_t)) != ctx->global_hash)
                 valid_footer = 0;
 
@@ -1543,10 +1544,12 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
 
     if (LIKELY(decoded_sz >= 0)) {
         ctx->total_out += decoded_sz;
-        if (has_crc && ctx->checksum_enabled) {
+        if (has_crc && chk) {
             const uint8_t* crc_ptr = data + comp_sz;
-            ctx->global_hash = (ctx->global_hash << 1) | (ctx->global_hash >> 31);
-            ctx->global_hash ^= zxc_le32(crc_ptr);
+            uint32_t gh = ctx->global_hash;
+            gh = (gh << 1) | (gh >> 31);
+            gh ^= zxc_le32(crc_ptr);
+            ctx->global_hash = gh;
         }
     }
 
