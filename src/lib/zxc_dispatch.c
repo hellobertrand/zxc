@@ -362,6 +362,8 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
     ip += ZXC_FILE_HEADER_SIZE;
 
     // Block decompression loop
+    uint32_t global_hash = 0;
+
     while (ip < ip_end) {
         const size_t rem_src = (size_t)(ip_end - ip);
         zxc_block_header_t bh;
@@ -371,18 +373,49 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
             return 0;
         }
 
+        // Handle EOF block separately (not a real chunk to decompress)
+        if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
+            // Validate we have the footer after the header
+            if (UNLIKELY(rem_src < ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE)) {
+                zxc_cctx_free(&ctx);
+                return 0;
+            }
+            const uint8_t* footer = ip + ZXC_BLOCK_HEADER_SIZE;
+
+            // Validate source size matches what we decompressed
+            const uint64_t stored_size = zxc_le64(footer);
+            if (UNLIKELY(stored_size != (uint64_t)(op - op_start))) {
+                zxc_cctx_free(&ctx);
+                return 0;
+            }
+
+            // Validate global checksum if enabled
+            if (checksum_enabled && (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM)) {
+                const uint32_t stored_hash = zxc_le32(footer + sizeof(uint64_t));
+                if (UNLIKELY(stored_hash != global_hash)) {
+                    zxc_cctx_free(&ctx);
+                    return 0;
+                }
+            }
+            break;  // EOF reached, exit loop
+        }
+
         const size_t rem_cap = (size_t)(op_end - op);
         const int res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op, rem_cap);
         if (UNLIKELY(res < 0)) {
             zxc_cctx_free(&ctx);
             return 0;
         }
-        
-        if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
-            break;
-        }
 
         const int block_has_checksum = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
+
+        // Update global hash from block checksum
+        if (checksum_enabled && block_has_checksum) {
+            const uint32_t block_hash = zxc_le32(ip + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
+            global_hash = (global_hash << 1) | (global_hash >> 31);
+            global_hash ^= block_hash;
+        }
+
         ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size + (block_has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
         op += res;
     }

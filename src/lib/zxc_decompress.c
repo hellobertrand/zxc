@@ -1523,34 +1523,10 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
             decoded_sz = zxc_decode_block_num(data, comp_sz, dst, dst_cap, raw_sz);
             break;
         case ZXC_BLOCK_EOF:
-            if (UNLIKELY(comp_sz != 0 ||
-                         src + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE > src + src_sz))
-                return -1;
-
-            // Verify Footer Content: Source Size and Global Checksum
-            const uint8_t* footer = src + ZXC_BLOCK_HEADER_SIZE;
-            int valid_footer = (zxc_le64(footer) == ctx->total_out);
-
-            // Checksum validation
-            if (chk && valid_footer && (flags & ZXC_BLOCK_FLAG_CHECKSUM) &&
-                zxc_le32(footer + sizeof(uint64_t)) != ctx->global_hash)
-                valid_footer = 0;
-
-            if (UNLIKELY(!valid_footer)) return -1;
-            return 0;  // Success for EOF
+            // EOF should be handled by the dispatcher, not here
+            return -1;
         default:
             return -1;
-    }
-
-    if (LIKELY(decoded_sz >= 0)) {
-        ctx->total_out += decoded_sz;
-        if (has_crc && chk) {
-            const uint8_t* crc_ptr = data + comp_sz;
-            uint32_t gh = ctx->global_hash;
-            gh = (gh << 1) | (gh >> 31);
-            gh ^= zxc_le32(crc_ptr);
-            ctx->global_hash = gh;
-        }
     }
 
     return decoded_sz;
