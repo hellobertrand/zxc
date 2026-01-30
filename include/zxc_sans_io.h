@@ -75,8 +75,6 @@ typedef struct {
     size_t lit_buffer_cap;  // Current capacity of this buffer
     int checksum_enabled;   // Checksum enabled flag
     int compression_level;  // Compression level
-    uint32_t global_hash;   // Global hash accumulator
-    size_t total_out;       // Total size of decompressed data so far
 } zxc_cctx_t;
 
 /**
