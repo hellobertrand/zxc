@@ -239,5 +239,48 @@ rm -f "$TEST_FILE"
 if [ ! -f "$TEST_FILE" ]; then log_fail "No-Checksum decompression failed"; fi
 log_pass "Checksum disabled (-N)"
 
+# 9. Integrity Test (-t)
+echo "Testing Integrity Check (-t)..."
+"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+
+# Valid file should pass
+if "$ZXC_BIN" -t "$TEST_FILE_XC_ARG"; then
+    log_pass "Integrity check passed on valid file"
+else
+    log_fail "Integrity check failed on valid file"
+fi
+
+# Corrupt file should fail
+# Corrupt a byte in the middle of the file (after header)
+# We assume the header is small, so offset 100 is likely data or block header
+# Use dd to patch a byte without truncating
+printf '\xff' | dd of="$TEST_FILE_XC_ARG" bs=1 seek=100 count=1 conv=notrunc 2>/dev/null
+
+if "$ZXC_BIN" -t "$TEST_FILE_XC_ARG" > /dev/null 2>&1; then
+    log_fail "Integrity check PASSED on corrupt file (False Negative)"
+else
+    log_pass "Integrity check correctly failed on corrupt file"
+fi
+
+# 10. Global Checksum Integrity
+echo "Testing Global Checksum Integrity..."
+"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+
+# Corrupt the last byte (part of Global Checksum)
+FILE_SZ=$(wc -c < "$TEST_FILE_XC_ARG" | tr -d ' ')
+LAST_BYTE_OFFSET=$((FILE_SZ - 1))
+printf '\x00' | dd of="$TEST_FILE_XC_ARG" bs=1 seek=$LAST_BYTE_OFFSET count=1 conv=notrunc 2>/dev/null
+
+if "$ZXC_BIN" -t "$TEST_FILE_XC_ARG" > /dev/null 2>&1; then
+    log_fail "Integrity check PASSED on corrupt Global Checksum (False Negative)"
+else
+    log_pass "Integrity check correctly failed on corrupt Global Checksum"
+fi
+
+# Ensure no output file is created
+if [ -f "${TEST_FILE}.xc.xc" ] || [ -f "${TEST_FILE}.xc.dec" ]; then
+    log_fail "Integrity check created output file unexpectedly"
+fi
+
 echo "All tests passed!"
 exit 0
