@@ -394,12 +394,10 @@ static void* zxc_async_writer(void* arg) {
                 ctx->io_error = 1;
             } else if (ctx->checksum_enabled && ctx->compression_mode == 1) {
                 // Update Global Hash (Rotation + XOR)
-                // Extract block checksum from the end of the written block
                 if (LIKELY(job->result_sz >= ZXC_GLOBAL_CHECKSUM_SIZE)) {
                     uint32_t block_hash =
                         zxc_le32(job->out_buf + job->result_sz - ZXC_GLOBAL_CHECKSUM_SIZE);
-                    args->global_hash = (args->global_hash << 1) | (args->global_hash >> 31);
-                    args->global_hash ^= block_hash;
+                    args->global_hash = zxc_hash_combine_rotate(args->global_hash, block_hash);
                 }
             }
         }
@@ -610,8 +608,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                     // Update Global Hash for Decompression
                     const uint32_t b_crc =
                         zxc_le32(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
-                    d_global_hash = (d_global_hash << 1) | (d_global_hash >> 31);
-                    d_global_hash ^= b_crc;
+                    d_global_hash = zxc_hash_combine_rotate(d_global_hash, b_crc);
                 }
                 read_sz = ZXC_BLOCK_HEADER_SIZE + body_read;
             }

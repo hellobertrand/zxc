@@ -736,6 +736,24 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const
 }
 
 /**
+ * @brief Combines a running hash with a new block hash using rotate-left and XOR.
+ *
+ * This function updates a global checksum by rotating the current hash left by 1 bit
+ * (with wraparound) and XORing with the new block hash. This provides a simple but
+ * effective rolling hash that depends on the order of blocks.
+ *
+ * Formula: result = ((hash << 1) | (hash >> 31)) ^ block_hash
+ *
+ * @param[in] hash The current running hash value.
+ * @param[in] block_hash The hash of the new block to combine.
+ * @return The updated combined hash value.
+ */
+static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
+                                                          const uint32_t block_hash) {
+    return ((hash << 1) | (hash >> 31)) ^ block_hash;
+}
+
+/**
  * @brief Initializes a bit reader structure.
  *
  * Sets up the internal state of the bit reader to read from the specified
