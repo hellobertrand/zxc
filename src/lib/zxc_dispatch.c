@@ -301,8 +301,7 @@ size_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTR
             // Block checksum is at the end of the written block data
             if (LIKELY(res >= ZXC_GLOBAL_CHECKSUM_SIZE)) {
                 const uint32_t block_hash = zxc_le32(op + res - ZXC_GLOBAL_CHECKSUM_SIZE);
-                global_hash = (global_hash << 1) | (global_hash >> 31);
-                global_hash ^= block_hash;
+                global_hash = zxc_hash_combine_rotate(global_hash, block_hash);
             }
         }
 
@@ -412,8 +411,7 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
         // Update global hash from block checksum
         if (checksum_enabled && block_has_checksum) {
             const uint32_t block_hash = zxc_le32(ip + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
-            global_hash = (global_hash << 1) | (global_hash >> 31);
-            global_hash ^= block_hash;
+            global_hash = zxc_hash_combine_rotate(global_hash, block_hash);
         }
 
         ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size + (block_has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
