@@ -244,7 +244,24 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
         if (should_compare) {
             uint32_t mlen = 4;
-            // SIMD match length calculation
+
+            // Fast path: Scalar 64-bit comparison for short matches (≤64 bytes)
+            // Most matches are short, so this avoids SIMD overhead for common cases
+            const uint8_t* limit_8 = iend - 8;
+            const uint8_t* scalar_limit = ip + mlen + 64;
+            if (scalar_limit > limit_8) scalar_limit = limit_8;
+
+            while (ip + mlen < scalar_limit) {
+                uint64_t diff = zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen);
+                if (diff == 0)
+                    mlen += 8;
+                else {
+                    mlen += (zxc_ctz64(diff) >> 3);
+                    goto _match_len_done;
+                }
+            }
+
+            // Long match path: Use SIMD for matches exceeding 64 bytes
 #if defined(ZXC_USE_AVX512)
             const uint8_t* limit_64 = iend - 64;
             while (ip + mlen < limit_64) {
@@ -315,12 +332,13 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 #endif
             }
 #endif
-            const uint8_t* limit_8 = iend - 8;
+            // Tail: remaining bytes after SIMD (or if no SIMD path taken)
             while (ip + mlen < limit_8) {
-                if (zxc_le64(ip + mlen) == zxc_le64(ref + mlen))
+                uint64_t diff = zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen);
+                if (diff == 0)
                     mlen += 8;
                 else {
-                    mlen += (zxc_ctz64(zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen)) >> 3);
+                    mlen += (zxc_ctz64(diff) >> 3);
                     goto _match_len_done;
                 }
             }
