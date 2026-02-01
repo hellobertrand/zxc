@@ -155,7 +155,7 @@ typedef struct {
     size_t out_cap, result_sz;
     int job_id;
     ZXC_ATOMIC job_status_t status;  // Atomic for lock-free status updates
-    char pad[ZXC_CACHE_LINE_SIZE];  // Prevent False Sharing
+    char pad[ZXC_CACHE_LINE_SIZE];   // Prevent False Sharing
 } zxc_stream_job_t;
 
 /**

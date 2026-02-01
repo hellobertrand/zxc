@@ -182,13 +182,17 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     uint32_t cur_val = zxc_le32(ip);
     uint32_t h = zxc_hash_func(cur_val);
 
+    // For levels 1-2, enhance tag with byte5 info via XOR (preserves byte4 info)
+    // High byte becomes (byte4 ^ byte5), keeping discrimination from both bytes
+    uint32_t cur_tag = (level <= 2) ? (cur_val ^ ((uint32_t)ip[4] << 24)) : cur_val;
+
     // Current position in the input buffer expressed as a 32-bit index.
     // This index is what we store in / retrieve from the hash/chain tables.
     uint32_t cur_pos = (uint32_t)(ip - src);
 
     // Each hash bucket stores:
     // - raw_head: compressed pointer (epoch in high bits, position in low bits)
-    // - stored_tag: 4-byte tag of the sequence used to quickly reject mismatches.
+    // - stored_tag: 4-byte tag (or XOR-enhanced for levels 1-2) to quickly reject mismatches.
     // Epoch bits allow the tables to be lazily invalidated without clearing all entries.
     uint32_t raw_head = hash_table[2 * h];
     uint32_t stored_tag = hash_table[2 * h + 1];
@@ -201,10 +205,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     uint32_t match_idx = (raw_head & ZXC_OFFSET_MASK) & epoch_mask;
 
     // Decide whether to skip the head entry of the hash chain.
-    // If the stored 4-byte tag does not match cur_val, the head is likely a
-    // false candidate.
-    // Branchless skip logic:
-    int skip_head = (match_idx != 0) & (stored_tag != cur_val);
+    int skip_head = (match_idx != 0) & (stored_tag != cur_tag);
 
     // If we should skip the head and level is low (<= 2), we drop the match entirely (match_idx =
     // 0). drop_mask is 0 if we drop (skip_head && level <= 2 is true becomes 1, 1-1=0), -1
@@ -213,7 +214,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     match_idx &= drop_mask;
 
     hash_table[2 * h] = epoch_mark | cur_pos;
-    hash_table[2 * h + 1] = cur_val;
+    hash_table[2 * h + 1] = cur_tag;
 
     // Branchless chain table update
     uint32_t dist = cur_pos - match_idx;
@@ -224,8 +225,8 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
     int attempts = p.search_depth;
 
-    // Optimization: If head tag doesn't match, advance immediately without
-    // loading the first mismatch.
+    // Optimization: If head tag doesn't match, advance immediately without loading the first
+    // mismatch.
     if (skip_head) {
         uint16_t delta = chain_table[match_idx];
         uint32_t next_idx = match_idx - delta;
@@ -245,7 +246,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         if (should_compare) {
             uint32_t mlen = 4;
 
-            // Fast path: Scalar 64-bit comparison for short matches (≤64 bytes)
+            // Fast path: Scalar 64-bit comparison for short matches (=< 64 bytes)
             // Most matches are short, so this avoids SIMD overhead for common cases
             const uint8_t* limit_8 = iend - 8;
             const uint8_t* scalar_limit = ip + mlen + 64;
@@ -1248,7 +1249,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             const uint32_t ll_write = (ll >= ZXC_SEQ_LL_MASK) ? 255U : ll;
             const uint32_t ml_write = (ml >= ZXC_SEQ_ML_MASK) ? 255U : ml;
             const uint32_t seq_val = (ll_write << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
-                               (ml_write << ZXC_SEQ_OFF_BITS) | (off & ZXC_SEQ_OFF_MASK);
+                                     (ml_write << ZXC_SEQ_OFF_BITS) | (off & ZXC_SEQ_OFF_MASK);
             if (off > max_offset) max_offset = (uint16_t)off;
             buf_sequences[seq_c] = seq_val;
             seq_c++;
@@ -1476,7 +1477,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
         // Calculate checksum on the compressed payload (w currently excludes checksum)
         // Header is at dst, data starts at dst + ZXC_BLOCK_HEADER_SIZE
         if (UNLIKELY(w < ZXC_BLOCK_HEADER_SIZE || w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap)) return -1;
-        
+
         uint32_t payload_sz = (uint32_t)(w - ZXC_BLOCK_HEADER_SIZE);
         uint32_t crc =
             zxc_checksum(dst + ZXC_BLOCK_HEADER_SIZE, payload_sz, ZXC_CHECKSUM_RAPIDHASH);

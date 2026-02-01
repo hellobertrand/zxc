@@ -233,9 +233,9 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
     if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 1, 31};
     // search_depth, sufficient_len, use_lazy, lazy_attempts, step_base, step_shift
     static const zxc_lz77_params_t table[5] = {
-        {6, 16, 0, 0, 2, 3},  // fallback
-        {6, 16, 0, 0, 2, 3},  // level 1
-        {8, 32, 0, 0, 2, 4},  // level 2
+        {4, 16, 0, 0, 4, 4},  // fallback
+        {4, 16, 0, 0, 4, 4},  // level 1
+        {6, 24, 0, 0, 3, 6},  // level 2
         {4, 32, 1, 8, 1, 4},  // level 3
         {4, 32, 1, 8, 1, 5}   // level 4
     };

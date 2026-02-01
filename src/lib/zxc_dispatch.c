@@ -414,7 +414,8 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
             global_hash = zxc_hash_combine_rotate(global_hash, block_hash);
         }
 
-        ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size + (block_has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+        ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size +
+              (block_has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
         op += res;
     }
 
