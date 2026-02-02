@@ -42,7 +42,6 @@ The heart of ZXC is a heavily optimized LZ77 engine that adapts its behavior bas
 ZXC leverages modern instruction sets to maximize throughput on both ARM and x86 architectures.
 * **ARM NEON Optimization**: Extensive usage of vld1q_u8 (vector load) and vceqq_u8 (parallel comparison) allows scanning data at wire speed, while vminvq_u8 provides fast rejection of non-matches.
 * **x86 Vectorization**: Maintains high performance on Intel/AMD platforms via dedicated AVX2 and AVX512 paths (falling back to SSE4.1 on older hardware), ensuring parity with ARM throughput.
-* **Hardware-Accelerated Indexing**: The encoder's hash table mechanism utilizes hardware CRC32c instructions (__crc32cw on ARM, _mm_crc32_u64 on x86) when available, reducing CPU cycle cost for match finding.
 * **High-Speed Integrity**: Block validation relies on **rapidhash**, a modern non-cryptographic hash algorithm that fully exploits hardware acceleration to verify data integrity without bottlenecking the decompression pipeline.
 
 ### 4.3 Entropy Coding & Bitpacking
@@ -102,7 +101,7 @@ The file begins with an **8-byte** header that identifies the format and specifi
            +---------------+-------+-------+-------+-------+
 ```
 
-* **Magic Word (4 bytes)**: `0x5A 0x58 0x43 0x30` ("ZXC0" in Little Endian).
+* **Magic Word (4 bytes)**: `0x5F 0x5A 0x58 0x43` ("_ZXC" in Little Endian).
 * **Version (1 byte)**: Current version is `3`.
 * **Chunk Size Code (1 byte)**: Defines the processing block size:
   - `0` = Default mode (256 KB, for backward compatibility)
@@ -118,7 +117,7 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 ```
   Offset:  0       1       2       3       4                       8                       12
           +-------+-------+-------+-------+-----------------------+-----------------------+
-          | Type  | Flags | Rsrvd | H.crc | Comp Size             | Raw Size              |
+          | Type  | Flags | Rsrvd | H.Crc | Comp Size             | Raw Size              |
           | (1B)  | (1B)  | (1B)  | (1B)  | (4 bytes)             | (4 bytes)             |
           +-------+-------+-------+-------+-----------------------+-----------------------+
 
@@ -133,7 +132,7 @@ Each data block consists of a **12-byte** generic header that precedes the speci
   - **Bit 7 (0x80)**: `has_checksum`. If set, a **32-bit (4-byte) checksum** is appended to the end of the block (after the compressed payload). This checksum also contributes to the **Global Stream Checksum**.
   - **Bits 0-3 (0x0F)**: `checksum_type`. Defines the algorithm used for integrity verification.
 * **Rsrvd**: Reserved for future use (must be 0).
-* **H.crc**: **Header Checksum** (1 byte). Calculated on the 12-byte header (with H.crc byte set to 0) using `zxc_hash12`.
+* **H.Crc**: **Header Checksum** (1 byte). Calculated on the 12-byte header (with H.Crc byte set to 0) using `zxc_hash12`.
 * **Checksum Algorithms**:
   - `0x00`: **rapidhash** (Standard, 32-bit folded)
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
