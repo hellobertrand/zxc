@@ -453,15 +453,18 @@ static int zxc_list_archive(const char* path) {
 
     if (g_verbose) {
         // Verbose mode: detailed vertical layout
-        printf("\nFile: %s\n", path);
-        printf("-----------------------\n");
-        printf("Format:       v%u\n", format_version);
-        printf("Block Size:   %s\n", block_str);
-        printf("Checksum:     %s\n", (stored_checksum != 0) ? "Yes (RapidHash)" : "No");
-        printf("-----------------------\n");
-        printf("Comp. Size:   %s\n", comp_str);
-        printf("Uncomp. Size: %s\n", uncomp_str);
-        printf("Ratio:        %.2f\n", ratio);
+        printf(
+            "\nFile: %s\n"
+            "-----------------------\n"
+            "Format:       v%u\n"
+            "Block Size:   %s\n"
+            "Checksum:     %s\n"
+            "-----------------------\n"
+            "Comp. Size:   %s\n"
+            "Uncomp. Size: %s\n"
+            "Ratio:        %.2f\n",
+            path, format_version, block_str, (stored_checksum != 0) ? "Yes (RapidHash)" : "No",
+            comp_str, uncomp_str, ratio);
     } else {
         // Normal mode: table format
         printf("\n  %12s   %12s   %5s   %-10s   %s\n", "Compressed", "Uncompressed", "Ratio",
@@ -889,10 +892,32 @@ int main(int argc, char** argv) {
     free(b2);
 
     if (bytes >= 0) {
-        zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
+        if (mode == MODE_INTEGRITY) {
+            // Test mode: show result
+            if (g_verbose) {
+                printf(
+                    "%s: OK\n"
+                    "  Checksum:     %s\n"
+                    "  Time:         %.3fs\n",
+                    in_path ? in_path : "<stdin>",
+                    checksum ? "verified (RapidHash)" : "not verified", dt);
+            } else {
+                printf("%s: OK\n", in_path ? in_path : "<stdin>");
+            }
+        } else {
+            zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
+        }
         if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY) unlink(in_path);
     } else {
-        zxc_log("Operation failed.\n");
+        if (mode == MODE_INTEGRITY) {
+            fprintf(stderr, "%s: FAILED\n", in_path ? in_path : "<stdin>");
+            if (g_verbose) {
+                fprintf(stderr,
+                        "  Reason: Integrity check failed (corrupted data or invalid checksum)\n");
+            }
+        } else {
+            zxc_log("Operation failed.\n");
+        }
         return 1;
     }
     return 0;
