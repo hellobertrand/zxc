@@ -153,11 +153,6 @@ extern "C" {
 #define ZXC_GLO_SECTIONS 4                 // Number of sections in GLO blocks
 #define ZXC_GHI_SECTIONS 3                 // Number of sections in GHI blocks
 
-// Block Flags
-#define ZXC_BLOCK_FLAG_NONE 0U  // No flags
-// ZXC_BLOCK_FLAG_CHECKSUM moved to File Header
-// #define ZXC_CHECKSUM_TYPE_MASK moved to File Header
-
 // Checksum Algorithms
 #define ZXC_CHECKSUM_RAPIDHASH 0x00U  // Default: rapidhash algorithm
 

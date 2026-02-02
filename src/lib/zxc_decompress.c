@@ -1485,11 +1485,9 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
     if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return -1;
 
     const uint8_t type = src[0];
-    const uint8_t flags = 0;
     const uint32_t comp_sz = zxc_le32(src + 4);
     const uint32_t raw_sz = zxc_le32(src + 8);
-    const int has_crc = ctx->file_has_checksums;
-    const int verify_checksum = ctx->verify_checksums;
+    const int has_crc = ctx->checksum_enabled;
 
     // Check bounds: Header + Body + Checksum(if any)
     const size_t expected_sz =
@@ -1498,7 +1496,7 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
 
     const uint8_t* data = src + ZXC_BLOCK_HEADER_SIZE;
 
-    if (has_crc && verify_checksum) {
+    if (has_crc) {
         const uint32_t stored = zxc_le32(data + comp_sz);
         const uint32_t calc = zxc_checksum(data, comp_sz, ZXC_CHECKSUM_RAPIDHASH);
         if (UNLIKELY(stored != calc)) return -1;

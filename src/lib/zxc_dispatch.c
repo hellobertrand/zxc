@@ -275,7 +275,7 @@ size_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTR
     uint32_t global_hash = 0;
     zxc_cctx_t ctx;
 
-    if (UNLIKELY(zxc_cctx_init(&ctx, ZXC_BLOCK_SIZE, 1, level, checksum_enabled, 0) != 0)) return 0;
+    if (UNLIKELY(zxc_cctx_init(&ctx, ZXC_BLOCK_SIZE, 1, level, checksum_enabled) != 0)) return 0;
 
     const int h_size = zxc_write_file_header(op, (size_t)(op_end - op), checksum_enabled);
     if (UNLIKELY(h_size < 0)) {
@@ -325,16 +325,10 @@ size_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTR
     if (UNLIKELY(rem_cap < (size_t)eof_size + ZXC_FILE_FOOTER_SIZE)) return 0;
 
     // Write 12-byte Footer: [Source Size (8)] + [Global Hash (4)]
-    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-    zxc_store_le64(footer, (uint64_t)src_size);
-
-    if (checksum_enabled)
-        zxc_store_le32(footer + sizeof(uint64_t), global_hash);
-    else
-        ZXC_MEMSET(footer + sizeof(uint64_t), 0, sizeof(uint32_t));
-
-    ZXC_MEMCPY(op, footer, ZXC_FILE_FOOTER_SIZE);
-    op += ZXC_FILE_FOOTER_SIZE;
+    const int footer_size =
+        zxc_write_file_footer(op, (size_t)(op_end - op), src_size, global_hash, checksum_enabled);
+    if (UNLIKELY(footer_size < 0)) return 0;
+    op += footer_size;
 
     return (size_t)(op - op_start);
 }
@@ -356,7 +350,7 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
     // File header verification and context initialization
     if (UNLIKELY(
             zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums) != 0 ||
-            zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0, file_has_checksums, checksum_enabled) !=
+            zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0, file_has_checksums && checksum_enabled) !=
                 0)) {
         return 0;
     }

@@ -1445,7 +1445,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
         if (UNLIKELY(res != 0)) return res;
     }
 
-    if (ctx->file_has_checksums) {
+    if (ctx->checksum_enabled) {
         // Calculate checksum on the compressed payload (w currently excludes checksum)
         // Header is at dst, data starts at dst + ZXC_BLOCK_HEADER_SIZE
         if (UNLIKELY(w < ZXC_BLOCK_HEADER_SIZE || w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap)) return -1;

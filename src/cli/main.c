@@ -456,7 +456,7 @@ static int zxc_list_archive(const char* path) {
         printf(
             "\nFile: %s\n"
             "-----------------------\n"
-            "Format:       v%u\n"
+            "Format:       %u\n"
             "Block Size:   %s\n"
             "Checksum:     %s\n"
             "-----------------------\n"

@@ -71,11 +71,10 @@ typedef struct {
     uint8_t* literals;        // Buffer for literal bytes
 
     // Cold zone: configuration / scratch / resizeable
-    uint8_t* lit_buffer;     // Buffer scratch for literals (RLE)
-    size_t lit_buffer_cap;   // Current capacity of this buffer
-    int file_has_checksums;  // 1 if file header says checksums are present
-    int verify_checksums;    // 1 if caller explicitly requested verification
-    int compression_level;   // Compression level
+    uint8_t* lit_buffer;    // Buffer scratch for literals (RLE)
+    size_t lit_buffer_cap;  // Current capacity of this buffer
+    int checksum_enabled;   // 1 if checksum calculation/verification is enabled
+    int compression_level;  // Compression level
 } zxc_cctx_t;
 
 /**
@@ -94,7 +93,7 @@ typedef struct {
  * internal buffers.
  */
 int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, const int level,
-                  const int file_has_checksums, const int verify_checksums);
+                  const int checksum_enabled);
 
 /**
  * @brief Frees resources associated with a ZXC compression context.
@@ -198,6 +197,19 @@ int zxc_write_block_header(uint8_t* dst, const size_t dst_capacity, const zxc_bl
  *         required block header size.
  */
 int zxc_read_block_header(const uint8_t* src, const size_t src_size, zxc_block_header_t* bh);
+
+/**
+ * @brief Writes the ZXC file footer.
+ *
+ * @param[out] dst             Destination buffer.
+ * @param[in] dst_capacity     Capacity of destination buffer.
+ * @param[in] src_size         Original uncompressed size of the data.
+ * @param[in] global_hash      Global checksum hash (if enabled).
+ * @param[in] checksum_enabled Flag indicating if checksum is enabled.
+ * @return Number of bytes written (12) on success, or -1 on failure.
+ */
+int zxc_write_file_footer(uint8_t* dst, const size_t dst_capacity, const uint64_t src_size,
+                          const uint32_t global_hash, const int checksum_enabled);
 
 #ifdef __cplusplus
 }

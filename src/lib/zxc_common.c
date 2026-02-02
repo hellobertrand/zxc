@@ -35,12 +35,11 @@ void zxc_aligned_free(void* ptr) {
 }
 
 int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int mode,
-                  const int level, const int file_has_checksums, const int verify_checksums) {
+                  const int level, const int checksum_enabled) {
     ZXC_MEMSET(ctx, 0, sizeof(zxc_cctx_t));
 
     ctx->compression_level = level;
-    ctx->file_has_checksums = file_has_checksums;
-    ctx->verify_checksums = verify_checksums;
+    ctx->checksum_enabled = checksum_enabled;
 
     if (mode == 0) return 0;
 
@@ -97,26 +96,15 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     }
 
     if (ctx->lit_buffer) {
-        free(ctx->lit_buffer);
+        zxc_aligned_free(ctx->lit_buffer);
         ctx->lit_buffer = NULL;
     }
-
-    ctx->hash_table = NULL;
-    ctx->chain_table = NULL;
-    ctx->buf_sequences = NULL;
-    ctx->buf_tokens = NULL;
-    ctx->buf_offsets = NULL;
-    ctx->buf_extras = NULL;
-    ctx->literals = NULL;
-
-    ctx->lit_buffer_cap = 0;
 }
 
 /*
  * ============================================================================
  * HEADER I/O
  * ============================================================================
- * Serialization and deserialization of file and block headers.
  */
 
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
@@ -159,7 +147,7 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     if (UNLIKELY(dst_capacity < ZXC_BLOCK_HEADER_SIZE)) return -1;
 
     dst[0] = bh->block_type;
-    dst[0] = bh->block_type;
+
     dst[1] = 0;  // Flags not used currently
     dst[2] = 0;  // Reserved
     dst[3] = 0;  // Future checksum
@@ -181,13 +169,28 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
     if (UNLIKELY(src[3] != zxc_hash12(temp))) return -1;
 
     bh->block_type = src[0];
-    bh->block_type = src[0];
+
     bh->block_flags = 0;  // Flags not used currently
     bh->reserved = src[2];
     bh->header_crc = src[3];
     bh->comp_size = zxc_le32(src + 4);
     bh->raw_size = zxc_le32(src + 8);
     return 0;
+}
+
+int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
+                          const uint32_t global_hash, const int checksum_enabled) {
+    if (UNLIKELY(dst_capacity < ZXC_FILE_FOOTER_SIZE)) return -1;
+
+    zxc_store_le64(dst, src_size);
+
+    if (checksum_enabled) {
+        zxc_store_le32(dst + sizeof(uint64_t), global_hash);
+    } else {
+        ZXC_MEMSET(dst + sizeof(uint64_t), 0, sizeof(uint32_t));
+    }
+
+    return ZXC_FILE_FOOTER_SIZE;
 }
 
 int zxc_write_num_header(uint8_t* RESTRICT dst, const size_t rem,
