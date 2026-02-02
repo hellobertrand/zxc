@@ -29,6 +29,10 @@
 #include <sys/types.h>
 #include <windows.h>
 
+// Map POSIX file positioning functions to Windows equivalents
+#define fseeko _fseeki64
+#define ftello _ftelli64
+
 // Simple sysconf emulation to get core count
 static int zxc_get_num_procs(void) {
     SYSTEM_INFO sysinfo;
