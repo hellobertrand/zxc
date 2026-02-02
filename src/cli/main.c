@@ -24,6 +24,7 @@
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
 #include "../../include/zxc_stream.h"
+#include "../lib/zxc_internal.h"
 
 #if defined(_WIN32)
 #define ZXC_OS "windows"
@@ -302,6 +303,7 @@ void print_help(const char* app) {
         "Standard Modes:\n"
         "  -z, --compress    Compress FILE {default}\n"
         "  -d, --decompress  Decompress FILE (or stdin -> stdout)\n"
+        "  -l, --list        List archive information\n"
         "  -t, --test        Test compressed FILE integrity\n"
         "  -b, --bench       Benchmark in-memory\n\n"
         "Special Options:\n"
@@ -335,9 +337,141 @@ void print_version(void) {
     printf("(%s)\n", sys_info);
 }
 
-typedef enum { MODE_COMPRESS, MODE_DECOMPRESS, MODE_BENCHMARK, MODE_INTEGRITY } zxc_mode_t;
+typedef enum {
+    MODE_COMPRESS,
+    MODE_DECOMPRESS,
+    MODE_BENCHMARK,
+    MODE_INTEGRITY,
+    MODE_LIST
+} zxc_mode_t;
 
 enum { OPT_VERSION = 1000, OPT_HELP };
+
+/**
+ * @brief Formats a byte size into human-readable TiB/GiB/MiB/KiB/B format.
+ */
+static void format_size(uint64_t bytes, char* buf, size_t buf_size) {
+    const double TiB = 1024.0 * 1024.0 * 1024.0 * 1024.0;
+    const double GiB = 1024.0 * 1024.0 * 1024.0;
+    const double MiB = 1024.0 * 1024.0;
+    const double KiB = 1024.0;
+
+    if ((double)bytes >= TiB) {
+        snprintf(buf, buf_size, "%.1f TiB", (double)bytes / TiB);
+    } else if ((double)bytes >= GiB) {
+        snprintf(buf, buf_size, "%.1f GiB", (double)bytes / GiB);
+    } else if ((double)bytes >= MiB) {
+        snprintf(buf, buf_size, "%.1f MiB", (double)bytes / MiB);
+    } else if ((double)bytes >= KiB) {
+        snprintf(buf, buf_size, "%.1f KiB", (double)bytes / KiB);
+    } else {
+        snprintf(buf, buf_size, "%llu B", (unsigned long long)bytes);
+    }
+}
+
+/**
+ * @brief Lists the contents of a ZXC archive.
+ *
+ * Reads the file header and footer to display:
+ * - Compressed size
+ * - Uncompressed size
+ * - Compression ratio
+ * - Checksum method
+ * - Filename
+ *
+ * In verbose mode, displays additional header information.
+ *
+ * @param[in] path Path to the ZXC archive file.
+ * @return 0 on success, 1 on error.
+ */
+static int zxc_list_archive(const char* path) {
+    char resolved_path[4096];
+    if (zxc_validate_input_path(path, resolved_path, sizeof(resolved_path)) != 0) {
+        fprintf(stderr, "Error: Invalid input file '%s': %s\n", path, strerror(errno));
+        return 1;
+    }
+
+    FILE* f = fopen(resolved_path, "rb");
+    if (!f) {
+        fprintf(stderr, "Error: Cannot open '%s': %s\n", path, strerror(errno));
+        return 1;
+    }
+
+    // Get file size
+    if (fseeko(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        fprintf(stderr, "Error: Cannot seek in file\n");
+        return 1;
+    }
+    long long file_size = ftello(f);
+
+    // Use public API to get decompressed size
+    int64_t uncompressed_size = zxc_stream_get_decompressed_size(f);
+    if (uncompressed_size < 0) {
+        fclose(f);
+        fprintf(stderr, "Error: Not a valid ZXC archive\n");
+        return 1;
+    }
+
+    // Read header for format info (rewind after API call)
+    uint8_t header[ZXC_FILE_HEADER_SIZE];
+    if (fseeko(f, 0, SEEK_SET) != 0 ||
+        fread(header, 1, ZXC_FILE_HEADER_SIZE, f) != ZXC_FILE_HEADER_SIZE) {
+        fclose(f);
+        fprintf(stderr, "Error: Cannot read file header\n");
+        return 1;
+    }
+
+    // Extract header fields
+    uint8_t format_version = header[4];
+    size_t block_units = header[5] ? header[5] : 64;  // Default 64 units = 256KB
+    size_t block_size = block_units * ZXC_BLOCK_UNIT;
+
+    // Read footer for checksum info
+    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
+    if (fseeko(f, file_size - ZXC_FILE_FOOTER_SIZE, SEEK_SET) != 0 ||
+        fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f) != ZXC_FILE_FOOTER_SIZE) {
+        fclose(f);
+        fprintf(stderr, "Error: Cannot read file footer\n");
+        return 1;
+    }
+    fclose(f);
+
+    // Parse checksum (if non-zero, checksum was enabled)
+    uint32_t stored_checksum = footer[8] | ((uint32_t)footer[9] << 8) |
+                               ((uint32_t)footer[10] << 16) | ((uint32_t)footer[11] << 24);
+    const char* checksum_method = (stored_checksum != 0) ? "RapidHash" : "-";
+
+    // Calculate ratio (uncompressed / compressed, e.g., 2.5 means 2.5x compression)
+    double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;
+
+    // Format sizes
+    char comp_str[32], uncomp_str[32], block_str[32];
+    format_size((uint64_t)file_size, comp_str, sizeof(comp_str));
+    format_size((uint64_t)uncompressed_size, uncomp_str, sizeof(uncomp_str));
+    format_size(block_size, block_str, sizeof(block_str));
+
+    if (g_verbose) {
+        // Verbose mode: detailed vertical layout
+        printf("\nFile: %s\n", path);
+        printf("-----------------------\n");
+        printf("Format:       v%u\n", format_version);
+        printf("Block Size:   %s\n", block_str);
+        printf("Checksum:     %s\n", (stored_checksum != 0) ? "Yes (RapidHash)" : "No");
+        printf("-----------------------\n");
+        printf("Comp. Size:   %s\n", comp_str);
+        printf("Uncomp. Size: %s\n", uncomp_str);
+        printf("Ratio:        %.2f\n", ratio);
+    } else {
+        // Normal mode: table format
+        printf("\n  %12s   %12s   %5s   %-10s   %s\n", "Compressed", "Uncompressed", "Ratio",
+               "Check", "Filename");
+        printf("  %12s   %12s   %5.1f   %-10s   %s\n", comp_str, uncomp_str, ratio, checksum_method,
+               path);
+    }
+
+    return 0;
+}
 
 /**
  * @brief Main entry point.
@@ -354,30 +488,27 @@ int main(int argc, char** argv) {
     int checksum = -1;
     int level = 3;
 
-    static const struct option long_options[] = {{"compress", no_argument, 0, 'z'},
-                                                 {"decompress", no_argument, 0, 'd'},
-                                                 {"test", no_argument, 0, 't'},
-                                                 {"bench", optional_argument, 0, 'b'},
-                                                 {"threads", required_argument, 0, 'T'},
-                                                 {"keep", no_argument, 0, 'k'},
-                                                 {"force", no_argument, 0, 'f'},
-                                                 {"stdout", no_argument, 0, 'c'},
-                                                 {"verbose", no_argument, 0, 'v'},
-                                                 {"quiet", no_argument, 0, 'q'},
-                                                 {"checksum", no_argument, 0, 'C'},
-                                                 {"no-checksum", no_argument, 0, 'N'},
-                                                 {"version", no_argument, 0, 'V'},
-                                                 {"help", no_argument, 0, 'h'},
-                                                 {0, 0, 0, 0}};
+    static const struct option long_options[] = {
+        {"compress", no_argument, 0, 'z'},    {"decompress", no_argument, 0, 'd'},
+        {"list", no_argument, 0, 'l'},        {"test", no_argument, 0, 't'},
+        {"bench", optional_argument, 0, 'b'}, {"threads", required_argument, 0, 'T'},
+        {"keep", no_argument, 0, 'k'},        {"force", no_argument, 0, 'f'},
+        {"stdout", no_argument, 0, 'c'},      {"verbose", no_argument, 0, 'v'},
+        {"quiet", no_argument, 0, 'q'},       {"checksum", no_argument, 0, 'C'},
+        {"no-checksum", no_argument, 0, 'N'}, {"version", no_argument, 0, 'V'},
+        {"help", no_argument, 0, 'h'},        {0, 0, 0, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "12345b::cCdfhkNqT:tvVz", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "12345b::cCdfhklNqT:tvVz", long_options, NULL)) != -1) {
         switch (opt) {
             case 'z':
                 mode = MODE_COMPRESS;
                 break;
             case 'd':
                 mode = MODE_DECOMPRESS;
+                break;
+            case 'l':
+                mode = MODE_LIST;
                 break;
             case 't':
                 mode = MODE_INTEGRITY;
@@ -436,6 +567,9 @@ int main(int argc, char** argv) {
             optind++;
         } else if (strcmp(argv[optind], "d") == 0) {
             mode = MODE_DECOMPRESS;
+            optind++;
+        } else if (strcmp(argv[optind], "l") == 0 || strcmp(argv[optind], "list") == 0) {
+            mode = MODE_LIST;
             optind++;
         } else if (strcmp(argv[optind], "t") == 0 || strcmp(argv[optind], "test") == 0) {
             mode = MODE_INTEGRITY;
@@ -577,6 +711,22 @@ int main(int argc, char** argv) {
         if (f_in) fclose(f_in);
         free(ram);
         free(c_dat);
+        return ret;
+    }
+
+    /*
+     * List Mode
+     * Displays archive information (compressed size, uncompressed size, ratio).
+     */
+    if (mode == MODE_LIST) {
+        if (optind >= argc) {
+            zxc_log("List mode requires input file.\n");
+            return 1;
+        }
+        int ret = 0;
+        for (int i = optind; i < argc; i++) {
+            ret |= zxc_list_archive(argv[i]);
+        }
         return ret;
     }
 

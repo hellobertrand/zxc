@@ -71,4 +71,18 @@ size_t zxc_compress(const void* src, const size_t src_size, void* dst, const siz
 size_t zxc_decompress(const void* src, const size_t src_size, void* dst, const size_t dst_capacity,
                       const int checksum_enabled);
 
+/**
+ * @brief Returns the decompressed size stored in a ZXC compressed buffer.
+ *
+ * This function reads the file footer to extract the original uncompressed size
+ * without performing any decompression. Useful for allocating output buffers.
+ *
+ * @param[in] src       Pointer to the compressed data buffer.
+ * @param[in] src_size  Size of the compressed data in bytes.
+ *
+ * @return The original uncompressed size in bytes, or 0 if the buffer is invalid
+ *         or too small to contain a valid ZXC archive.
+ */
+size_t zxc_get_decompressed_size(const void* src, const size_t src_size);
+
 #endif  // ZXC_BUFFER_H

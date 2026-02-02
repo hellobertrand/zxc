@@ -64,6 +64,19 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads, const 
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads,
                               const int checksum_enabled);
 
+/**
+ * @brief Returns the decompressed size stored in a ZXC compressed file.
+ *
+ * This function reads the file footer to extract the original uncompressed size
+ * without performing any decompression. The file position is restored after reading.
+ *
+ * @param[in] f_in  Input file stream (must be opened in "rb" mode).
+ *
+ * @return The original uncompressed size in bytes, or -1 if the file is invalid
+ *         or an I/O error occurred.
+ */
+int64_t zxc_stream_get_decompressed_size(FILE* f_in);
+
 #ifdef __cplusplus
 }
 #endif

@@ -129,7 +129,7 @@ int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity);
  *
  * @param[in] src Pointer to the source buffer containing the file data.
  * @param[in] src_size Size of the source buffer in bytes.
- * @param[out] out_block_size Optional pointer to receive the recommended block size
+ * @param[out] out_block_size Optional pointer to receive the recommended block size.
  * @return 0 if the header is valid, -1 otherwise (e.g., buffer too small,
  * invalid magic word, or incorrect version).
  */

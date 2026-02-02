@@ -711,3 +711,41 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads,
     return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, checksum_enabled,
                                  (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper);
 }
+
+int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
+    if (UNLIKELY(!f_in)) return -1;
+
+    long long saved_pos = ftello(f_in);
+    if (UNLIKELY(saved_pos < 0)) return -1;
+
+    // Get file size
+    if (fseeko(f_in, 0, SEEK_END) != 0) return -1;
+    long long file_size = ftello(f_in);
+    if (UNLIKELY(file_size < (long long)(ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))) {
+        fseeko(f_in, saved_pos, SEEK_SET);
+        return -1;
+    }
+
+    uint8_t header[ZXC_FILE_HEADER_SIZE];
+    if (UNLIKELY(fseeko(f_in, 0, SEEK_SET) != 0 ||
+                 fread(header, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE)) {
+        fseeko(f_in, saved_pos, SEEK_SET);
+        return -1;
+    }
+
+    if (UNLIKELY(zxc_le32(header) != ZXC_MAGIC_WORD)) {
+        fseeko(f_in, saved_pos, SEEK_SET);
+        return -1;
+    }
+
+    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
+    if (UNLIKELY(fseeko(f_in, file_size - ZXC_FILE_FOOTER_SIZE, SEEK_SET) != 0 ||
+                 fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE)) {
+        fseeko(f_in, saved_pos, SEEK_SET);
+        return -1;
+    }
+
+    fseeko(f_in, saved_pos, SEEK_SET);
+
+    return (int64_t)zxc_le64(footer);
+}
