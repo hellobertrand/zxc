@@ -243,23 +243,34 @@ log_pass "Checksum disabled (-N)"
 echo "Testing Integrity Check (-t)..."
 "$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
 
-# Valid file should pass
-if "$ZXC_BIN" -t "$TEST_FILE_XC_ARG"; then
+# Valid file should pass and show "OK"
+OUT=$("$ZXC_BIN" -t "$TEST_FILE_XC_ARG")
+if [[ "$OUT" == *": OK"* ]]; then
     log_pass "Integrity check passed on valid file"
 else
-    log_fail "Integrity check failed on valid file"
+    log_fail "Integrity check failed on valid file (expected OK output)"
 fi
 
-# Corrupt file should fail
+# Verbose test mode
+OUT=$("$ZXC_BIN" -t -v "$TEST_FILE_XC_ARG")
+if [[ "$OUT" == *": OK"* ]] && [[ "$OUT" == *"Checksum:"* ]]; then
+    log_pass "Integrity check verbose mode"
+else
+    log_fail "Integrity check verbose mode failed"
+fi
+
+# Corrupt file should fail and show "FAILED"
 # Corrupt a byte in the middle of the file (after header)
-# We assume the header is small, so offset 100 is likely data or block header
-# Use dd to patch a byte without truncating
 printf '\xff' | dd of="$TEST_FILE_XC_ARG" bs=1 seek=100 count=1 conv=notrunc 2>/dev/null
 
-if "$ZXC_BIN" -t "$TEST_FILE_XC_ARG" > /dev/null 2>&1; then
-    log_fail "Integrity check PASSED on corrupt file (False Negative)"
-else
+set +e
+OUT=$("$ZXC_BIN" -t "$TEST_FILE_XC_ARG" 2>&1)
+RET=$?
+set -e
+if [ $RET -ne 0 ] && [[ "$OUT" == *": FAILED"* ]]; then
     log_pass "Integrity check correctly failed on corrupt file"
+else
+    log_fail "Integrity check PASSED on corrupt file (False Negative)"
 fi
 
 # 10. Global Checksum Integrity
@@ -271,10 +282,14 @@ FILE_SZ=$(wc -c < "$TEST_FILE_XC_ARG" | tr -d ' ')
 LAST_BYTE_OFFSET=$((FILE_SZ - 1))
 printf '\x00' | dd of="$TEST_FILE_XC_ARG" bs=1 seek=$LAST_BYTE_OFFSET count=1 conv=notrunc 2>/dev/null
 
-if "$ZXC_BIN" -t "$TEST_FILE_XC_ARG" > /dev/null 2>&1; then
-    log_fail "Integrity check PASSED on corrupt Global Checksum (False Negative)"
-else
+set +e
+OUT=$("$ZXC_BIN" -t "$TEST_FILE_XC_ARG" 2>&1)
+RET=$?
+set -e
+if [ $RET -ne 0 ] && [[ "$OUT" == *": FAILED"* ]]; then
     log_pass "Integrity check correctly failed on corrupt Global Checksum"
+else
+    log_fail "Integrity check PASSED on corrupt Global Checksum (False Negative)"
 fi
 
 # Ensure no output file is created
@@ -282,5 +297,37 @@ if [ -f "${TEST_FILE}.xc.xc" ] || [ -f "${TEST_FILE}.xc.dec" ]; then
     log_fail "Integrity check created output file unexpectedly"
 fi
 
+# 11. List Command (-l)
+echo "Testing List Command (-l)..."
+"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+
+# Normal list mode
+OUT=$("$ZXC_BIN" -l "$TEST_FILE_XC_ARG")
+if [[ "$OUT" == *"Compressed"* ]] && [[ "$OUT" == *"Uncompressed"* ]] && [[ "$OUT" == *"Ratio"* ]]; then
+    log_pass "List command basic output"
+else
+    log_fail "List command basic output failed"
+fi
+
+# Verbose list mode
+OUT=$("$ZXC_BIN" -l -v "$TEST_FILE_XC_ARG")
+if [[ "$OUT" == *"Format:"* ]] && [[ "$OUT" == *"Block Size:"* ]] && [[ "$OUT" == *"Checksum:"* ]]; then
+    log_pass "List command verbose output"
+else
+    log_fail "List command verbose output failed"
+fi
+
+# List with invalid file should fail
+set +e
+"$ZXC_BIN" -l "nonexistent_file" > /dev/null 2>&1
+RET=$?
+set -e
+if [ $RET -ne 0 ]; then
+    log_pass "List command error handling"
+else
+    log_fail "List command should fail on nonexistent file"
+fi
+
 echo "All tests passed!"
 exit 0
+
