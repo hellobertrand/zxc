@@ -489,12 +489,11 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
                                 size_t* RESTRICT out_sz) {
-    if (UNLIKELY(src_sz % 4 != 0 || src_sz == 0)) return -1;
+    if (UNLIKELY(src_sz % 4 != 0 || src_sz == 0 ||
+                 dst_cap < ZXC_BLOCK_HEADER_SIZE + ZXC_NUM_HEADER_BINARY_SIZE))
+        return -1;
 
-    const int chk = ctx->checksum_enabled;
     size_t count = src_sz / 4;
-
-    if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE + ZXC_NUM_HEADER_BINARY_SIZE)) return -1;
 
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_NUM, .raw_size = (uint32_t)src_sz};
     uint8_t* p_curr = dst + ZXC_BLOCK_HEADER_SIZE;
@@ -641,14 +640,6 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         rem -= pb;
     }
 
-    if (chk) {
-        if (UNLIKELY(rem < ZXC_BLOCK_CHECKSUM_SIZE)) return -1;
-        bh.block_flags |= ZXC_BLOCK_FLAG_CHECKSUM;
-        bh.block_flags |= (ZXC_CHECKSUM_RAPIDHASH & ZXC_CHECKSUM_TYPE_MASK);
-    } else {
-        bh.block_flags &= ~ZXC_BLOCK_FLAG_CHECKSUM;
-    }
-
     bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
     if (UNLIKELY(hw < 0)) return -1;
@@ -708,7 +699,6 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
                                 size_t* RESTRICT out_sz) {
     const int level = ctx->compression_level;
-    const int chk = ctx->checksum_enabled;
 
     const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
 
@@ -1150,12 +1140,6 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     ZXC_MEMCPY(p_curr, buf_extras, extras_sz);
     p_curr += extras_sz;
 
-    if (chk) {
-        bh.block_flags |= ZXC_BLOCK_FLAG_CHECKSUM;
-        bh.block_flags |= (ZXC_CHECKSUM_RAPIDHASH & ZXC_CHECKSUM_TYPE_MASK);
-    } else {
-        bh.block_flags &= ~ZXC_BLOCK_FLAG_CHECKSUM;
-    }
     bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
     if (UNLIKELY(hw < 0)) return -1;
@@ -1197,7 +1181,6 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
                                 size_t* RESTRICT const out_sz) {
     const int level = ctx->compression_level;
-    const int chk = ctx->checksum_enabled;
 
     const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
 
@@ -1318,14 +1301,6 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     ZXC_MEMCPY(p_curr, buf_extras, sz_ext);
     p_curr += sz_ext;
 
-    if (chk) {
-        if (UNLIKELY(rem < ZXC_BLOCK_CHECKSUM_SIZE)) return -1;
-        bh.block_flags |= ZXC_BLOCK_FLAG_CHECKSUM;
-        bh.block_flags |= (ZXC_CHECKSUM_RAPIDHASH & ZXC_CHECKSUM_TYPE_MASK);
-    } else {
-        bh.block_flags &= ~ZXC_BLOCK_FLAG_CHECKSUM;
-    }
-
     bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
     if (UNLIKELY(hw < 0)) return -1;
@@ -1356,14 +1331,13 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
  */
 static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz,
                                 uint8_t* RESTRICT const dst, const size_t dst_cap,
-                                size_t* RESTRICT const out_sz, const int chk) {
+                                size_t* RESTRICT const out_sz) {
     if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE + src_sz)) return -1;
 
     // Compute block RAW
     zxc_block_header_t bh;
     bh.block_type = ZXC_BLOCK_RAW;
-    bh.block_flags =
-        chk ? (ZXC_BLOCK_FLAG_CHECKSUM | (ZXC_CHECKSUM_RAPIDHASH & ZXC_CHECKSUM_TYPE_MASK)) : 0;
+    bh.block_flags = 0;  // Checksum flag moved to file header
     bh.reserved = 0;
     bh.comp_size = (uint32_t)src_sz;
     bh.raw_size = (uint32_t)src_sz;
@@ -1447,8 +1421,6 @@ static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
 // cppcheck-suppress unusedFunction
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
-    const int chk = ctx->checksum_enabled;
-
     size_t w = 0;
     int res = -1;
     int try_num = 0;
@@ -1469,11 +1441,11 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 
     // Check expansion. W contains Header + Payload.
     if (UNLIKELY(res != 0 || w >= src_sz)) {
-        res = zxc_encode_block_raw(chunk, src_sz, dst, dst_cap, &w, chk);
+        res = zxc_encode_block_raw(chunk, src_sz, dst, dst_cap, &w);
         if (UNLIKELY(res != 0)) return res;
     }
 
-    if (chk) {
+    if (ctx->file_has_checksums) {
         // Calculate checksum on the compressed payload (w currently excludes checksum)
         // Header is at dst, data starts at dst + ZXC_BLOCK_HEADER_SIZE
         if (UNLIKELY(w < ZXC_BLOCK_HEADER_SIZE || w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap)) return -1;

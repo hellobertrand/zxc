@@ -35,8 +35,12 @@ void zxc_aligned_free(void* ptr) {
 }
 
 int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int mode,
-                  const int level, const int checksum_enabled) {
+                  const int level, const int file_has_checksums, const int verify_checksums) {
     ZXC_MEMSET(ctx, 0, sizeof(zxc_cctx_t));
+
+    ctx->compression_level = level;
+    ctx->file_has_checksums = file_has_checksums;
+    ctx->verify_checksums = verify_checksums;
 
     if (mode == 0) return 0;
 
@@ -81,8 +85,6 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->literals = (uint8_t*)(mem + off_lit);
 
     ctx->epoch = 1;
-    ctx->compression_level = level;
-    ctx->checksum_enabled = checksum_enabled;
 
     ZXC_MEMSET(ctx->hash_table, 0, sz_hash);
     return 0;
@@ -117,13 +119,14 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  * Serialization and deserialization of file and block headers.
  */
 
-int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity) {
+int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
+                          const int has_checksum) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_HEADER_SIZE)) return -1;
 
     zxc_store_le32(dst, ZXC_MAGIC_WORD);
     dst[4] = ZXC_FILE_FORMAT_VERSION;
     dst[5] = (uint8_t)(ZXC_BLOCK_SIZE / ZXC_BLOCK_UNIT);
-    dst[6] = 0;  // Reserved (1 byte)
+    dst[6] = has_checksum ? (ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_CHECKSUM_RAPIDHASH) : 0;
     dst[7] = 0;  // Zero out before hashing
     dst[7] = zxc_hash8(dst);
 
@@ -131,15 +134,14 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity) {
 }
 
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
-                         size_t* RESTRICT out_block_size) {
+                         size_t* RESTRICT out_block_size, int* RESTRICT out_has_checksum) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE || zxc_le32(src) != ZXC_MAGIC_WORD ||
                  src[4] != ZXC_FILE_FORMAT_VERSION))
         return -1;
 
-    // Zero out checksum byte for verification
     uint8_t temp[ZXC_FILE_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, ZXC_FILE_HEADER_SIZE);
-    temp[7] = 0;
+    temp[7] = 0;  // Zero out before check hash
 
     if (UNLIKELY(src[7] != zxc_hash8(temp))) return -1;
 
@@ -147,6 +149,8 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
         size_t units = src[5] ? src[5] : 64;  // Default to 64 block units (256KB)
         *out_block_size = units * ZXC_BLOCK_UNIT;
     }
+    if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
+
     return 0;
 }
 
@@ -155,7 +159,8 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     if (UNLIKELY(dst_capacity < ZXC_BLOCK_HEADER_SIZE)) return -1;
 
     dst[0] = bh->block_type;
-    dst[1] = bh->block_flags;
+    dst[0] = bh->block_type;
+    dst[1] = 0;  // Flags not used currently
     dst[2] = 0;  // Reserved
     dst[3] = 0;  // Future checksum
     zxc_store_le32(dst + 4, bh->comp_size);
@@ -169,15 +174,15 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
                           zxc_block_header_t* RESTRICT bh) {
     if (UNLIKELY(src_size < ZXC_BLOCK_HEADER_SIZE)) return -1;
 
-    // Zero out checksum byte for verification
     uint8_t temp[ZXC_BLOCK_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, ZXC_BLOCK_HEADER_SIZE);
-    temp[3] = 0;
+    temp[3] = 0;  // Zero out before check hash
 
     if (UNLIKELY(src[3] != zxc_hash12(temp))) return -1;
 
     bh->block_type = src[0];
-    bh->block_flags = src[1];
+    bh->block_type = src[0];
+    bh->block_flags = 0;  // Flags not used currently
     bh->reserved = src[2];
     bh->header_crc = src[3];
     bh->comp_size = zxc_le32(src + 4);

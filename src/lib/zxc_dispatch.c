@@ -275,9 +275,9 @@ size_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTR
     uint32_t global_hash = 0;
     zxc_cctx_t ctx;
 
-    if (UNLIKELY(zxc_cctx_init(&ctx, ZXC_BLOCK_SIZE, 1, level, checksum_enabled) != 0)) return 0;
+    if (UNLIKELY(zxc_cctx_init(&ctx, ZXC_BLOCK_SIZE, 1, level, checksum_enabled, 0) != 0)) return 0;
 
-    const int h_size = zxc_write_file_header(op, (size_t)(op_end - op));
+    const int h_size = zxc_write_file_header(op, (size_t)(op_end - op), checksum_enabled);
     if (UNLIKELY(h_size < 0)) {
         zxc_cctx_free(&ctx);
         return 0;
@@ -311,10 +311,10 @@ size_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTR
 
     zxc_cctx_free(&ctx);
 
-    // Write EOF Block
+    // Write EOF Block (Checksum flag handled by Block Header, but we zero it out now)
     const size_t rem_cap = (size_t)(op_end - op);
     zxc_block_header_t eof_bh = {.block_type = ZXC_BLOCK_EOF,
-                                 .block_flags = checksum_enabled ? ZXC_BLOCK_FLAG_CHECKSUM : 0,
+                                 .block_flags = 0,
                                  .reserved = 0,
                                  .comp_size = 0,
                                  .raw_size = 0};
@@ -352,9 +352,12 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
     size_t runtime_chunk_size = 0;
     zxc_cctx_t ctx;
 
+    int file_has_checksums = 0;
     // File header verification and context initialization
-    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size) != 0 ||
-                 zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0, checksum_enabled) != 0)) {
+    if (UNLIKELY(
+            zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums) != 0 ||
+            zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0, file_has_checksums, checksum_enabled) !=
+                0)) {
         return 0;
     }
 
@@ -388,8 +391,8 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
                 return 0;
             }
 
-            // Validate global checksum if enabled
-            if (checksum_enabled && (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM)) {
+            // Validate global checksum if enabled and file has checksums
+            if (checksum_enabled && file_has_checksums) {
                 const uint32_t stored_hash = zxc_le32(footer + sizeof(uint64_t));
                 if (UNLIKELY(stored_hash != global_hash)) {
                     zxc_cctx_free(&ctx);
@@ -406,16 +409,14 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
             return 0;
         }
 
-        const int block_has_checksum = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
-
         // Update global hash from block checksum
-        if (checksum_enabled && block_has_checksum) {
+        if (checksum_enabled && file_has_checksums) {
             const uint32_t block_hash = zxc_le32(ip + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
             global_hash = zxc_hash_combine_rotate(global_hash, block_hash);
         }
 
         ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size +
-              (block_has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+              (file_has_checksums ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
         op += res;
     }
 

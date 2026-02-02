@@ -133,10 +133,11 @@ extern "C" {
 #define ZXC_VBYTE_MAX_LEN 5                           // Maximum length of variable byte encoding
 #define ZXC_VBYTE_ALLOC_LEN 3  // Max length for allocation (sufficient for < 2MB blocks)
 
-// Binary Header Sizes
-#define ZXC_FILE_HEADER_SIZE \
-    8  // Magic (4 bytes) + Version (1 byte) + Chunk (1 byte) + Reserved (1 byte) + Checksum (1
-       // byte)
+// File Header Parsing
+#define ZXC_FILE_HEADER_SIZE 8  // Magic(4) + Version(1) + Chunk(1) + Flags(1) + Checksum(1)
+#define ZXC_FILE_FLAG_HAS_CHECKSUM 0x80U   // Flag in Reserved/Flags byte (Bit 7)
+#define ZXC_FILE_CHECKSUM_ALGO_MASK 0x70U  // Algorithm ID (Bits 4-6)
+
 #define ZXC_BLOCK_HEADER_SIZE \
     12  // Type (1) + Flags (1) + Reserved (2) + Comp Size (4) + Raw Size (4)
 #define ZXC_BLOCK_CHECKSUM_SIZE 4      // Size of checksum field in bytes
@@ -153,9 +154,9 @@ extern "C" {
 #define ZXC_GHI_SECTIONS 3                 // Number of sections in GHI blocks
 
 // Block Flags
-#define ZXC_BLOCK_FLAG_NONE 0U         // No flags
-#define ZXC_BLOCK_FLAG_CHECKSUM 0x80U  // Block has a checksum (4 bytes after compressed body)
-#define ZXC_CHECKSUM_TYPE_MASK 0x0FU   // Lower 4 bits for algorithm ID
+#define ZXC_BLOCK_FLAG_NONE 0U  // No flags
+// ZXC_BLOCK_FLAG_CHECKSUM moved to File Header
+// #define ZXC_CHECKSUM_TYPE_MASK moved to File Header
 
 // Checksum Algorithms
 #define ZXC_CHECKSUM_RAPIDHASH 0x00U  // Default: rapidhash algorithm

@@ -679,7 +679,7 @@ int test_header_checksum() {
 
     uint8_t header_buf[ZXC_BLOCK_HEADER_SIZE];
     zxc_block_header_t bh_in = {.block_type = ZXC_BLOCK_GLO,
-                                .block_flags = ZXC_BLOCK_FLAG_CHECKSUM,
+                                .block_flags = 0,
                                 .reserved = 0,
                                 .header_crc = 0,
                                 .comp_size = 1024,

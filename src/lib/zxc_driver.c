@@ -251,6 +251,7 @@ typedef struct {
     int checksum_enabled;
     int compression_level;
     size_t chunk_size;
+    int file_has_checksums;
 } zxc_stream_ctx_t;
 
 /**
@@ -310,13 +311,15 @@ static void* zxc_stream_worker(void* arg) {
     zxc_stream_ctx_t* ctx = (zxc_stream_ctx_t*)arg;
     zxc_cctx_t cctx;
 
+    int file_has = (ctx->compression_mode == 1) ? ctx->checksum_enabled : ctx->file_has_checksums;
+    int verify = (ctx->compression_mode == 0) ? ctx->checksum_enabled : 0;
+
     if (zxc_cctx_init(&cctx, ctx->chunk_size, ctx->compression_mode, ctx->compression_level,
-                      ctx->checksum_enabled) != 0) {
+                      file_has, verify) != 0) {
         zxc_cctx_free(&cctx);
         return NULL;
     }
 
-    cctx.checksum_enabled = ctx->checksum_enabled;
     cctx.compression_level = ctx->compression_level;
 
     while (1) {
@@ -467,11 +470,15 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
 
     size_t runtime_chunk_sz = ZXC_BLOCK_SIZE;
+    int file_has_chk = 0;
     if (mode == 0) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
         if (UNLIKELY(fread(h, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE ||
-                     zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz) != 0))
+                     zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz,
+                                          &file_has_chk) != 0))
             return -1;
+    } else {
+        file_has_chk = checksum_enabled;
     }
 
     const int num_threads = (n_threads > 0) ? n_threads : (int)sysconf(_SC_NPROCESSORS_ONLN);
@@ -485,6 +492,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ctx.compression_level = level;
     ctx.ring_size = num_workers * 4;
     ctx.chunk_size = runtime_chunk_sz;
+    ctx.file_has_checksums = file_has_chk;
 
     uint32_t d_global_hash = 0;
 
@@ -539,7 +547,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     if (mode == 1 && f_out) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
-        zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE);
+        zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE, checksum_enabled);
         if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
             ctx.io_error = 1;
 
@@ -550,7 +558,6 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     int read_idx = 0;
     int read_eof = 0;
-    int eof_has_checksum = 0;
     uint64_t total_src_bytes = 0;
 
     // Reader Loop: Reads from file, prepares jobs, pushes to worker queue.
@@ -586,11 +593,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                     }
                     read_eof = 1;
                     read_sz = 0;
-                    eof_has_checksum = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
                     goto _job_prepared;
                 }
 
-                const int has_crc = (bh.block_flags & ZXC_BLOCK_FLAG_CHECKSUM);
+                const int has_crc = ctx.file_has_checksums;
                 const size_t checksum_sz = (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
                 const size_t body_total = bh.comp_size + checksum_sz;
                 const size_t total_len = ZXC_BLOCK_HEADER_SIZE + body_total;
@@ -652,7 +658,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 1 && !ctx.io_error && w_args.total_bytes >= 0) {
         uint8_t eof_buf[ZXC_BLOCK_HEADER_SIZE];
         zxc_block_header_t eof_bh = {.block_type = ZXC_BLOCK_EOF,
-                                     .block_flags = checksum_enabled ? ZXC_BLOCK_FLAG_CHECKSUM : 0,
+                                     .block_flags = 0,
                                      .reserved = 0,
                                      .comp_size = 0,
                                      .raw_size = 0};
@@ -685,7 +691,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         } else {
             // Verify Footer Content: Source Size and Global Checksum
             int valid = (zxc_le64(footer) == (uint64_t)w_args.total_bytes);
-            if (valid && checksum_enabled && eof_has_checksum)
+            if (valid && checksum_enabled && ctx.file_has_checksums)
                 valid = (zxc_le32(footer + sizeof(uint64_t)) == d_global_hash);
 
             if (UNLIKELY(!valid)) ctx.io_error = 1;

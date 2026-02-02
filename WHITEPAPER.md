@@ -96,7 +96,7 @@ The file begins with an **8-byte** header that identifies the format and specifi
 ```
   Offset:  0               4       5       6       7       8
            +---------------+-------+-------+-------+-------+
-           | Magic Word    | Ver   | Chunk | Res   | Chk   |
+           | Magic Word    | Ver   | Chunk | Flags | Chk   |
            | (4 bytes)     | (1B)  | (1B)  | (1B)  | (1B)  |
            +---------------+-------+-------+-------+-------+
 ```
@@ -106,8 +106,11 @@ The file begins with an **8-byte** header that identifies the format and specifi
 * **Chunk Size Code (1 byte)**: Defines the processing block size:
   - `0` = Default mode (256 KB, for backward compatibility)
   - `N` = Chunk size is `N × 4096` bytes (e.g., `62` = 248 KB)
-* **Reserved (1 byte)**: Future use.
-* **Checksum (1 byte)**: Rapidhash checksum (low byte) of the first 7 bytes (Magic Word through Reserved). Always calculated and verified.
+* **Flags (1 byte)**: Global configuration flags.
+  - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream. Every block will carry a trailing 4-byte checksum, and the footer will contain a global checksum. If `0`, no checksums are present.
+  - **Bits 4-6**: Checksum Algorithm ID (e.g., `0` = RapidHash).
+  - **Bits 0-3**: Reserved.
+* **Checksum (1 byte)**: Rapidhash checksum (low byte) of the first 7 bytes (Magic Word through Flags). Always calculated and verified.
 
 ### 5.2 Block Header Structure
 Each data block consists of a **12-byte** generic header that precedes the specific payload. This header allows the decoder to navigate the stream and identify the processing method required for the next chunk of data.
@@ -125,12 +128,11 @@ Each data block consists of a **12-byte** generic header that precedes the speci
   [ Header (12B) ] + [ Compressed Payload (Comp Size bytes) ] + [ Optional Checksum (4B) ]
 
 ```
-**Note**: The Checksum (if flag set) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the compressed payload**.
+
+**Note**: The Checksum (if enabled in File Header) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the compressed payload**.
 
 * **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI, 255=EOF).
-* **Flags**:
-  - **Bit 7 (0x80)**: `has_checksum`. If set, a **32-bit (4-byte) checksum** is appended to the end of the block (after the compressed payload). This checksum also contributes to the **Global Stream Checksum**.
-  - **Bits 0-3 (0x0F)**: `checksum_type`. Defines the algorithm used for integrity verification.
+* **Flags**: Not used for now.
 * **Rsrvd**: Reserved for future use (must be 0).
 * **H.Crc**: **Header Checksum** (1 byte). Calculated on the 12-byte header (with H.Crc byte set to 0) using `zxc_hash12`.
 * **Checksum Algorithms**:

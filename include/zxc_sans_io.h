@@ -71,10 +71,11 @@ typedef struct {
     uint8_t* literals;        // Buffer for literal bytes
 
     // Cold zone: configuration / scratch / resizeable
-    uint8_t* lit_buffer;    // Buffer scratch for literals (RLE)
-    size_t lit_buffer_cap;  // Current capacity of this buffer
-    int checksum_enabled;   // Checksum enabled flag
-    int compression_level;  // Compression level
+    uint8_t* lit_buffer;     // Buffer scratch for literals (RLE)
+    size_t lit_buffer_cap;   // Current capacity of this buffer
+    int file_has_checksums;  // 1 if file header says checksums are present
+    int verify_checksums;    // 1 if caller explicitly requested verification
+    int compression_level;   // Compression level
 } zxc_cctx_t;
 
 /**
@@ -93,7 +94,7 @@ typedef struct {
  * internal buffers.
  */
 int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, const int level,
-                  const int checksum_enabled);
+                  const int file_has_checksums, const int verify_checksums);
 
 /**
  * @brief Frees resources associated with a ZXC compression context.
@@ -118,7 +119,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx);
  * @return The number of bytes written (ZXC_FILE_HEADER_SIZE) on success,
  *         or -1 if the destination capacity is insufficient.
  */
-int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity);
+int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity, const int has_checksum);
 
 /**
  * @brief Validates and reads the ZXC file header from a source buffer.
@@ -133,7 +134,8 @@ int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity);
  * @return 0 if the header is valid, -1 otherwise (e.g., buffer too small,
  * invalid magic word, or incorrect version).
  */
-int zxc_read_file_header(const uint8_t* src, const size_t src_size, size_t* out_block_size);
+int zxc_read_file_header(const uint8_t* src, const size_t src_size, size_t* out_block_size,
+                         int* out_has_checksum);
 
 /**
  * @struct zxc_block_header_t
