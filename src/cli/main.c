@@ -370,6 +370,76 @@ static void format_size(uint64_t bytes, char* buf, size_t buf_size) {
 }
 
 /**
+ * @brief Progress context for CLI progress bar display.
+ */
+typedef struct {
+    double start_time;
+    const char* operation;  // "Compressing" or "Decompressing"
+    uint64_t total_size;    // Pre-determined total size (0 if unknown)
+} progress_ctx_t;
+
+/**
+ * @brief Progress callback for CLI progress bar.
+ *
+ * Displays a real-time progress bar during compression/decompression.
+ * Shows percentage, processed/total size, and throughput speed.
+ *
+ * Format: [==========>     ] 45% | 4.5 GB / 10.0 GB | 156 MB/s
+ */
+static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total, void* user_data) {
+    const progress_ctx_t* pctx = (const progress_ctx_t*)user_data;
+
+    if (!pctx) return;
+
+    // Use pre-determined total size from context (not the parameter)
+    uint64_t total = pctx->total_size;
+
+    double now = zxc_now();
+    double elapsed = now - pctx->start_time;
+
+    // Calculate throughput speed
+    double speed_mbps = 0.0;
+    if (elapsed > 0.1) {  // Avoid division by zero for very fast operations
+        speed_mbps = (double)bytes_processed / (1024.0 * 1024.0) / elapsed;
+    }
+
+    // Clear line and move cursor to beginning
+    fprintf(stderr, "\r\033[K");
+
+    if (total > 0) {
+        // Known size: show percentage bar
+        int percent = (bytes_processed * 100) / total;
+        if (percent > 100) percent = 100;  // Safety cap
+
+        const int bar_width = 20;
+        int filled = (percent * bar_width) / 100;
+
+        fprintf(stderr, "%s [", pctx->operation);
+        for (int i = 0; i < bar_width; i++) {
+            if (i < filled)
+                fprintf(stderr, "=");
+            else if (i == filled)
+                fprintf(stderr, ">");
+            else
+                fprintf(stderr, " ");
+        }
+        fprintf(stderr, "] %d%% | ", percent);
+
+        char proc_str[32], total_str[32];
+        format_size(bytes_processed, proc_str, sizeof(proc_str));
+        format_size(total, total_str, sizeof(total_str));
+        fprintf(stderr, "%s / %s | %.1f MB/s", proc_str, total_str, speed_mbps);
+    } else {
+        // Unknown size (stdin): just show bytes processed
+        char proc_str[32];
+        format_size(bytes_processed, proc_str, sizeof(proc_str));
+        fprintf(stderr, "%s [Processing...] %s | %.1f MB/s", pctx->operation, proc_str, speed_mbps);
+    }
+
+    fflush(stderr);
+}
+
+/**
  * @brief Lists the contents of a ZXC archive.
  *
  * Reads the file header and footer to display:
@@ -862,7 +932,39 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    // Set large buffers for I/O performance
+    // Determine if we should show progress bar and get file size
+    // IMPORTANT: This must be done BEFORE setting large buffers with setvbuf
+    // to avoid buffer inconsistency issues when reading the footer
+    int show_progress = 0;
+    uint64_t total_size = 0;
+
+    if (!g_quiet && !use_stdout && !use_stdin && isatty(fileno(stderr))) {
+        // Get file size based on mode
+        if (mode == MODE_COMPRESS) {
+            // Compression: get input file size
+            long long saved_pos = ftello(f_in);
+            if (saved_pos >= 0) {
+                if (fseeko(f_in, 0, SEEK_END) == 0) {
+                    long long size = ftello(f_in);
+                    if (size > 0) total_size = (uint64_t)size;
+                    fseeko(f_in, saved_pos, SEEK_SET);
+                }
+            }
+        } else {
+            // Decompression: get decompressed size from footer (BEFORE starting decompression)
+            int64_t decomp_size = zxc_stream_get_decompressed_size(f_in);
+            if (decomp_size > 0) {
+                total_size = (uint64_t)decomp_size;
+            }
+        }
+
+        // Only show progress for files > 1MB
+        if (total_size > 1024 * 1024) {
+            show_progress = 1;
+        }
+    }
+
+    // Set large buffers for I/O performance (AFTER file size detection)
     char *b1 = malloc(1024 * 1024), *b2 = malloc(1024 * 1024);
     setvbuf(f_in, b1, _IOFBF, 1024 * 1024);
     if (f_out) setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
@@ -870,11 +972,27 @@ int main(int argc, char** argv) {
     zxc_log_v("Starting... (Compression Level %d)\n", level);
     if (g_verbose) zxc_log("Checksum: %s\n", checksum ? "enabled" : "disabled");
 
+    // Prepare progress context
+    progress_ctx_t pctx = {.start_time = zxc_now(),
+                           .operation = (mode == MODE_COMPRESS) ? "Compressing" : "Decompressing",
+                           .total_size = total_size};
+
     double t0 = zxc_now();
-    int64_t bytes = (mode == MODE_COMPRESS)
-                        ? zxc_stream_compress(f_in, f_out, num_threads, level, checksum)
-                        : zxc_stream_decompress(f_in, f_out, num_threads, checksum);
+    int64_t bytes;
+    if (mode == MODE_COMPRESS) {
+        bytes = zxc_stream_compress_ex(f_in, f_out, num_threads, level, checksum,
+                                       show_progress ? cli_progress_callback : NULL, &pctx);
+    } else {
+        bytes = zxc_stream_decompress_ex(f_in, f_out, num_threads, checksum,
+                                         show_progress ? cli_progress_callback : NULL, &pctx);
+    }
     double dt = zxc_now() - t0;
+
+    // Clear progress line on completion
+    if (show_progress) {
+        fprintf(stderr, "\r\033[K");
+        fflush(stderr);
+    }
 
     if (!use_stdin)
         fclose(f_in);

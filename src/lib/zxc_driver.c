@@ -254,6 +254,9 @@ typedef struct {
     size_t chunk_size;
     int checksum_enabled;
     int file_has_checksum;
+    zxc_progress_callback_t progress_cb;
+    void* progress_user_data;
+    uint64_t total_input_bytes;
 } zxc_stream_ctx_t;
 
 /**
@@ -273,12 +276,19 @@ typedef struct {
  *
  * @var writer_args_t::total_bytes
  * Accumulator for the total number of bytes written to the file so far.
+ *
+ * @var writer_args_t::global_hash
+ * The global hash accumulated during processing.
+ *
+ * @var writer_args_t::bytes_processed
+ * The number of bytes processed so far, used for progress reporting.
  */
 typedef struct {
     zxc_stream_ctx_t* ctx;
     FILE* f;
     int64_t total_bytes;
     uint32_t global_hash;
+    uint64_t bytes_processed;  // For progress callback
 } writer_args_t;
 
 /**
@@ -420,6 +430,13 @@ static void* zxc_async_writer(void* arg) {
         }
         args->total_bytes += (int64_t)job->result_sz;
 
+        // Update progress callback
+        if (ctx->progress_cb) {
+            args->bytes_processed += ctx->compression_mode == 1 ? job->in_sz : job->result_sz;
+            ctx->progress_cb(args->bytes_processed, ctx->total_input_bytes,
+                             ctx->progress_user_data);
+        }
+
         pthread_mutex_lock(&ctx->lock);
         job->status = JOB_STATUS_FREE;
         ctx->write_idx = (ctx->write_idx + 1) % ctx->ring_size;
@@ -468,12 +485,28 @@ static void* zxc_async_writer(void* arg) {
  */
 static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_threads, const int mode,
                                      const int level, const int checksum_enabled,
-                                     zxc_chunk_processor_t func) {
+                                     zxc_chunk_processor_t func,
+                                     zxc_progress_callback_t progress_cb, void* user_data) {
     zxc_stream_ctx_t ctx;
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
 
     size_t runtime_chunk_sz = ZXC_BLOCK_SIZE;
     int file_has_chk = 0;
+
+    // Try to get input file size for progress tracking (compression mode only)
+    // For decompression, the CLI precomputes the size and passes it via user_data
+    uint64_t total_file_size = 0;
+    if (mode == 1 && progress_cb) {
+        long long saved_pos = ftello(f_in);
+        if (saved_pos >= 0) {
+            if (fseeko(f_in, 0, SEEK_END) == 0) {
+                long long size = ftello(f_in);
+                if (size > 0) total_file_size = (uint64_t)size;
+                fseeko(f_in, saved_pos, SEEK_SET);
+            }
+        }
+    }
+
     if (mode == 0) {
         // Decompression Mode: Read and validate file header
         uint8_t h[ZXC_FILE_HEADER_SIZE];
@@ -495,6 +528,9 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ctx.chunk_size = runtime_chunk_sz;
     ctx.checksum_enabled = checksum_enabled;
     ctx.file_has_checksum = mode == 1 ? checksum_enabled : file_has_chk;
+    ctx.progress_cb = progress_cb;
+    ctx.progress_user_data = user_data;
+    ctx.total_input_bytes = total_file_size;
 
     uint32_t d_global_hash = 0;
 
@@ -695,20 +731,33 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     return w_args.total_bytes;
 }
 
-int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads, const int level,
-                            const int checksum_enabled) {
+int64_t zxc_stream_compress_ex(FILE* f_in, FILE* f_out, const int n_threads, const int level,
+                               const int checksum_enabled, zxc_progress_callback_t progress_cb,
+                               void* user_data) {
     if (UNLIKELY(!f_in)) return -1;
 
     return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, checksum_enabled,
-                                 zxc_compress_chunk_wrapper);
+                                 zxc_compress_chunk_wrapper, progress_cb, user_data);
+}
+
+int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads, const int level,
+                            const int checksum_enabled) {
+    return zxc_stream_compress_ex(f_in, f_out, n_threads, level, checksum_enabled, NULL, NULL);
+}
+
+int64_t zxc_stream_decompress_ex(FILE* f_in, FILE* f_out, const int n_threads,
+                                 const int checksum_enabled, zxc_progress_callback_t progress_cb,
+                                 void* user_data) {
+    if (UNLIKELY(!f_in)) return -1;
+
+    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, checksum_enabled,
+                                 (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, progress_cb,
+                                 user_data);
 }
 
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads,
                               const int checksum_enabled) {
-    if (UNLIKELY(!f_in)) return -1;
-
-    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, checksum_enabled,
-                                 (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper);
+    return zxc_stream_decompress_ex(f_in, f_out, n_threads, checksum_enabled, NULL, NULL);
 }
 
 int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
