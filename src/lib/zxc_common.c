@@ -115,8 +115,14 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     dst[4] = ZXC_FILE_FORMAT_VERSION;
     dst[5] = (uint8_t)(ZXC_BLOCK_SIZE / ZXC_BLOCK_UNIT);
     dst[6] = has_checksum ? (ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_CHECKSUM_RAPIDHASH) : 0;
-    dst[7] = 0;  // Zero out before hashing
-    dst[7] = zxc_hash8(dst);
+
+    // Bytes 7-13: Reserved (must be 0)
+    ZXC_MEMSET(dst + 7, 0, 7);
+
+    // Bytes 14-15: CRC (16-bit)
+    zxc_store_le16(dst + 14, 0);  // Zero out before hashing
+    uint16_t crc = zxc_hash16(dst);
+    zxc_store_le16(dst + 14, crc);
 
     return ZXC_FILE_HEADER_SIZE;
 }
@@ -129,12 +135,13 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
 
     uint8_t temp[ZXC_FILE_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, ZXC_FILE_HEADER_SIZE);
-    temp[7] = 0;  // Zero out before check hash
-
-    if (UNLIKELY(src[7] != zxc_hash8(temp))) return -1;
+    // Zero out CRC bytes (14-15) before hash check
+    temp[14] = 0;
+    temp[15] = 0;
+    if (UNLIKELY(zxc_le16(src + 14) != zxc_hash16(temp))) return -1;
 
     if (out_block_size) {
-        size_t units = src[5] ? src[5] : 64;  // Default to 64 block units (256KB)
+        const size_t units = src[5] ? src[5] : 64;  // Default to 64 block units (256KB)
         *out_block_size = units * ZXC_BLOCK_UNIT;
     }
     if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;

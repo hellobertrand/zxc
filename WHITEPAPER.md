@@ -89,16 +89,16 @@ The ZXC file format is block-based, robust, and designed for parallel processing
 
 ### 5.1 Global Structure (File Header)
 
-The file begins with an **8-byte** header that identifies the format and specifies decompression parameters.
+The file begins with a **16-byte** header that identifies the format and specifies decompression parameters.
 
-**FILE Header (8 bytes):**
+**FILE Header (16 bytes):**
 
 ```
-  Offset:  0               4       5       6       7       8
-           +---------------+-------+-------+-------+-------+
-           | Magic Word    | Ver   | Chunk | Flags | Chk   |
-           | (4 bytes)     | (1B)  | (1B)  | (1B)  | (1B)  |
-           +---------------+-------+-------+-------+-------+
+  Offset:  0               4       5       6       7                       14      16
+           +---------------+-------+-------+-------+-----------------------+-------+
+           | Magic Word    | Ver   | Chunk | Flags | Reserved              | CRC   |
+           | (4 bytes)     | (1B)  | (1B)  | (1B)  | (7 bytes, must be 0)  | (2B)  |
+           +---------------+-------+-------+-------+-----------------------+-------+
 ```
 
 * **Magic Word (4 bytes)**: `0x9 0xCB 0x02E 0xF5`.
@@ -110,7 +110,8 @@ The file begins with an **8-byte** header that identifies the format and specifi
   - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream. Every block will carry a trailing 4-byte checksum, and the footer will contain a global checksum. If `0`, no checksums are present.
   - **Bits 4-6**: Checksum Algorithm ID (e.g., `0` = RapidHash).
   - **Bits 0-3**: Reserved.
-* **Checksum (1 byte)**: Rapidhash checksum (low byte) of the first 7 bytes (Magic Word through Flags). Always calculated and verified.
+* **Reserved (7 bytes)**: Reserved for future use (must be 0).
+* **CRC (2 bytes)**: 16-bit Header Checksum. Calculated on the 16-byte header (with CRC bytes set to 0) using `zxc_hash16`.
 
 ### 5.2 Block Header Structure
 Each data block consists of an **8-byte** generic header that precedes the specific payload. This header allows the decoder to navigate the stream and identify the processing method required for the next chunk of data.
@@ -120,7 +121,7 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 ```
   Offset:  0       1       2       3       4                       8
           +-------+-------+-------+-------+-----------------------+
-          | Type  | Flags | Rsrvd | H.Crc | Comp Size             |
+          | Type  | Flags | Rsrvd | CRC   | Comp Size             |
           | (1B)  | (1B)  | (1B)  | (1B)  | (4 bytes)             |
           +-------+-------+-------+-------+-----------------------+
 
@@ -134,9 +135,7 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 * **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI, 255=EOF).
 * **Flags**: Not used for now.
 * **Rsrvd**: Reserved for future use (must be 0).
-* **H.Crc**: **Header Checksum** (1 byte). Calculated on the 8-byte header (with H.Crc byte set to 0) using `zxc_hash8`.
-* **Checksum Algorithms**:
-  - `0x00`: **rapidhash** (Standard, 32-bit folded)
+* **CRC**: 1 byte Header Checksum. Calculated on the 8-byte header (with CRC byte set to 0) using `zxc_hash8`.
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
 
 > **Note**: The decompressed size is not stored in the block header. It is derived from internal Section Descriptors within the compressed payload (for GLO/GHI blocks), from the NUM header (for NUM blocks), or equals `Comp Size` (for RAW blocks).

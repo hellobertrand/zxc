@@ -134,12 +134,13 @@ extern "C" {
 #define ZXC_VBYTE_ALLOC_LEN 3  // Max length for allocation (sufficient for < 2MB blocks)
 
 // File Header Parsing
-#define ZXC_FILE_HEADER_SIZE 8  // Magic(4) + Version(1) + Chunk(1) + Flags(1) + Checksum(1)
+#define ZXC_FILE_HEADER_SIZE \
+    16  // Magic (4) + Version (1) + Chunk (1) + Flags (1) + Reserved (7) + CRC (2)
 #define ZXC_FILE_FLAG_HAS_CHECKSUM 0x80U   // Flag in Reserved/Flags byte (Bit 7)
 #define ZXC_FILE_CHECKSUM_ALGO_MASK 0x70U  // Algorithm ID (Bits 4-6)
 
-#define ZXC_BLOCK_HEADER_SIZE 8  // Type (1) + Flags (1) + Reserved (1) + H.Crc (1) + Comp Size (4)
-#define ZXC_BLOCK_CHECKSUM_SIZE 4      // Size of checksum field in bytes
+#define ZXC_BLOCK_HEADER_SIZE 8    // Type (1) + Flags (1) + Reserved (1) + CRC (1) + Comp Size (4)
+#define ZXC_BLOCK_CHECKSUM_SIZE 4  // Size of checksum field in bytes
 #define ZXC_NUM_HEADER_BINARY_SIZE 16  // Num Header: N Values (8) + Frame Size (2) + Reserved (6)
 #define ZXC_GLO_HEADER_BINARY_SIZE \
     16  // GLO Header: N Sequences (4) + N Literals (4) + 4 x 1-byte Encoding Types
@@ -198,9 +199,10 @@ extern "C" {
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)  // Maximum offset distance
 
 // Hash prime constants
-#define ZXC_HASH_PRIME1 0x9E3779B1
-#define ZXC_HASH_PRIME2 0x85BA2D97
-#define ZXC_HASH_PRIME3 0xB0F57EE3
+#define ZXC_HASH_PRIME1 0x9E3779B1U
+#define ZXC_HASH_PRIME2 0x85BA2D97U
+#define ZXC_HASH_PRIME3 0xB0F57EE3U
+#define ZXC_HASH_PRIME4 0x27D4EB2FU
 
 /**
  * @struct zxc_lz77_params_t
@@ -476,10 +478,10 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
 }
 
 /**
- * @brief Computes the 1-byte checksum for the file header.
+ * @brief Computes the 1-byte checksum for block headers.
  *
- * @param[in] p Pointer to the file header buffer (at least 7 bytes).
- * @return uint8_t The 1-byte checksum value.
+ * @param[in] p Pointer to the input data to be hashed (8 bytes)
+ * @return uint8_t The computed hash value.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
     uint64_t v = zxc_le64(p);
@@ -491,25 +493,28 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
 }
 
 /**
- * @brief Computes the 1-byte checksum for block headers.
+ * @brief Computes the 2-byte checksum for file headers.
  *
  * This function generates a hash value by reading data from the given pointer.
- * The result is masked to fit within 12 bits (0-4095 range).
+ * The result is a 16-bit hash.
  *
- * @param[in] p Pointer to the input data to be hashed
- * @return uint8_t The computed hash value.
+ * @param[in] p Pointer to the input data to be hashed (16 bytes)
+ * @return uint16_t The computed hash value.
  */
-static ZXC_ALWAYS_INLINE uint8_t zxc_hash12(const uint8_t* p) {
+static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
     uint32_t v0 = zxc_le32(p);
     uint32_t v1 = zxc_le32(p + 4);
     uint32_t v2 = zxc_le32(p + 8);
+    uint32_t v3 = zxc_le32(p + 12);
 
     uint32_t h = (v0 * ZXC_HASH_PRIME1);
     h ^= (v1 * ZXC_HASH_PRIME2);
     h ^= (v2 * ZXC_HASH_PRIME3);
+    h ^= (v3 * ZXC_HASH_PRIME4);
+
     h = (h << 13) | (h >> 19);
     h *= ZXC_HASH_PRIME1;
-    return (uint8_t)((h ^ (h >> 8) ^ (h >> 16) ^ (h >> 24)) & 0xFF);
+    return (uint16_t)((h ^ (h >> 16)) & 0xFFFF);
 }
 
 /**
