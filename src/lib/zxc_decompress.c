@@ -86,7 +86,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
     // 2 Bytes: 10xxxxxx xxxxxxxx (14 bits)
     if (LIKELY(b0 < 0xC0)) {
         if (UNLIKELY(p + 1 >= end)) {
-            *ptr = p + 1;
+            *ptr = end + 1;
             return 0;
         }
         *ptr = p + 2;
@@ -96,7 +96,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
     // 3 Bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits)
     if (LIKELY(b0 < 0xE0)) {
         if (UNLIKELY(p + 2 >= end)) {
-            *ptr = p + 2;
+            *ptr = end + 1;
             return 0;
         }
         *ptr = p + 3;
@@ -106,7 +106,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
     // 4 Bytes: 1110xxxx ... (28 bits)
     if (UNLIKELY(b0 < 0xF0)) {
         if (UNLIKELY(p + 3 >= end)) {
-            *ptr = p + 3;
+            *ptr = end + 1;
             return 0;
         }
         *ptr = p + 4;
@@ -116,7 +116,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
 
     // 5 Bytes: 11110xxx ... (32 bits)
     if (UNLIKELY(p + 4 >= end)) {
-        *ptr = p + 4;
+        *ptr = end + 1;
         return 0;
     }
 
