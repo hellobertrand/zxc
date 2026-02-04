@@ -484,7 +484,7 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
  * @return uint8_t The computed hash value.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
-    uint64_t v = zxc_le64(p);
+    const uint64_t v = zxc_le64(p);
     uint64_t h = v * ZXC_HASH_PRIME1;
     h ^= (h >> 32);
     h *= ZXC_HASH_PRIME2;
@@ -502,10 +502,10 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
  * @return uint16_t The computed hash value.
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
-    uint32_t v0 = zxc_le32(p);
-    uint32_t v1 = zxc_le32(p + 4);
-    uint32_t v2 = zxc_le32(p + 8);
-    uint32_t v3 = zxc_le32(p + 12);
+    const uint32_t v0 = zxc_le32(p);
+    const uint32_t v1 = zxc_le32(p + 4);
+    const uint32_t v2 = zxc_le32(p + 8);
+    const uint32_t v3 = zxc_le32(p + 12);
 
     uint32_t h = (v0 * ZXC_HASH_PRIME1);
     h ^= (v1 * ZXC_HASH_PRIME2);

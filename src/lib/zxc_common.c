@@ -167,9 +167,9 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     dst[0] = bh->block_type;
     dst[1] = 0;  // Flags not used currently
     dst[2] = 0;  // Reserved
-    dst[3] = 0;  // Placeholder for checksum
-    zxc_store_le32(dst + 4, bh->comp_size);
-    dst[3] = zxc_hash8(dst);
+    zxc_store_le32(dst + 3, bh->comp_size);
+    dst[7] = 0;               // Zero before hashing
+    dst[7] = zxc_hash8(dst);  // Checksum at the end
 
     return ZXC_BLOCK_HEADER_SIZE;
 }
@@ -180,15 +180,14 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 
     uint8_t temp[ZXC_BLOCK_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, ZXC_BLOCK_HEADER_SIZE);
-    temp[3] = 0;  // Zero out before check hash
-
-    if (UNLIKELY(src[3] != zxc_hash8(temp))) return -1;
+    temp[7] = 0;  // Zero out checksum byte before hashing
+    if (UNLIKELY(src[7] != zxc_hash8(temp))) return -1;
 
     bh->block_type = src[0];
     bh->block_flags = 0;  // Flags not used currently
     bh->reserved = src[2];
-    bh->header_crc = src[3];
-    bh->comp_size = zxc_le32(src + 4);
+    bh->comp_size = zxc_le32(src + 3);
+    bh->header_crc = src[7];
     return 0;
 }
 

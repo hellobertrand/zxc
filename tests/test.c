@@ -657,14 +657,14 @@ int test_eof_block_structure() {
     // Should be immediately before the footer
     const uint8_t* eof_ptr = compressed + comp_size - 20;
     uint8_t expected[8] = {0xFF, 0, 0, 0, 0, 0, 0, 0};
-    expected[3] = zxc_hash8(expected);
+    expected[7] = zxc_hash8(expected);
 
     if (memcmp(eof_ptr, expected, 8) != 0) {
         printf(
-            "Failed: EOF block mismatch.\nExpected: %02X %02X %02X %02X ...\nGot:      %02X %02X "
-            "%02X %02X ...\n",
-            expected[0], expected[1], expected[2], expected[3], eof_ptr[0], eof_ptr[1], eof_ptr[2],
-            eof_ptr[3]);
+            "Failed: EOF block mismatch.\nExpected: %02X %02X %02X ... %02X\nGot:      %02X %02X "
+            "%02X ... %02X\n",
+            expected[0], expected[1], expected[2], expected[7], eof_ptr[0], eof_ptr[1], eof_ptr[2],
+            eof_ptr[7]);
         free(compressed);
         return 0;
     }
@@ -705,19 +705,19 @@ int test_header_checksum() {
     }
 
     if (bh_out.block_type != bh_in.block_type || bh_out.comp_size != bh_in.comp_size ||
-        bh_out.header_crc != header_buf[3]) {
+        bh_out.header_crc != header_buf[7]) {
         printf("  [FAIL] Read data mismatch\n");
         return 0;
     }
 
     // 3. Corrupt Header Checksum
-    uint8_t original_crc = header_buf[3];
-    header_buf[3] = ~original_crc;  // Flip bits
+    uint8_t original_crc = header_buf[7];
+    header_buf[7] = ~original_crc;  // Flip bits
     if (zxc_read_block_header(header_buf, ZXC_BLOCK_HEADER_SIZE, &bh_out) == 0) {
         printf("  [FAIL] zxc_read_block_header should have failed on corrupted CRC\n");
         return 0;
     }
-    header_buf[3] = original_crc;  // Restore
+    header_buf[7] = original_crc;  // Restore
 
     // 4. Corrupt Header Content
     header_buf[0] = ZXC_BLOCK_RAW;  // Change type

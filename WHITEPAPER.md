@@ -119,11 +119,11 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 **BLOCK Header (8 bytes):**
 
 ```
-  Offset:  0       1       2       3       4                       8
-          +-------+-------+-------+-------+-----------------------+
-          | Type  | Flags | Rsrvd | CRC   | Comp Size             |
-          | (1B)  | (1B)  | (1B)  | (1B)  | (4 bytes)             |
-          +-------+-------+-------+-------+-----------------------+
+  Offset:  0       1       2       3                       7       8
+          +-------+-------+-------+-----------------------+-------+
+          | Type  | Flags | Rsrvd | Comp Size             | CRC   |
+          | (1B)  | (1B)  | (1B)  | (4 bytes)             | (1B)  |
+          +-------+-------+-------+-----------------------+-------+
 
   Block Layout:
   [ Header (8B) ] + [ Compressed Payload (Comp Size bytes) ] + [ Optional Checksum (4B) ]
@@ -135,8 +135,8 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 * **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI, 255=EOF).
 * **Flags**: Not used for now.
 * **Rsrvd**: Reserved for future use (must be 0).
-* **CRC**: 1 byte Header Checksum. Calculated on the 8-byte header (with CRC byte set to 0) using `zxc_hash8`.
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
+* **CRC**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with CRC byte set to 0) using `zxc_hash8`.
 
 > **Note**: The decompressed size is not stored in the block header. It is derived from internal Section Descriptors within the compressed payload (for GLO/GHI blocks), from the NUM header (for NUM blocks), or equals `Comp Size` (for RAW blocks).
 
@@ -339,7 +339,7 @@ GHI Block Data Layout:
 
 The **EOF** block marks the end of the ZXC stream. It ensures that the decompressor knows exactly when to stop processing, allowing for robust stream termination even when file size metadata is unavailable or when concatenating streams.
 
-*   **Structure**: Standard 12-byte Block Header.
+*   **Structure**: Standard 8-byte Block Header.
 *   **Flags**:
     *   **Bit 7 (0x80)**: `has_checksum`. If set, implies the **Global Stream Checksum** in the footer is valid and should be verified.
 *   **Comp Size / Raw Size**: Unlike other blocks, these **MUST be set to 0**. The decoder enforces strict validation (`Type == EOF` AND `Comp Size == 0`) to prevent processing of malformed termination blocks.

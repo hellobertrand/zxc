@@ -1474,7 +1474,7 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
     if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return -1;
 
     const uint8_t type = src[0];
-    const uint32_t comp_sz = zxc_le32(src + 4);
+    const uint32_t comp_sz = zxc_le32(src + 3);
     const int has_crc = ctx->checksum_enabled;
 
     // Check bounds: Header + Body + Checksum(if any)
