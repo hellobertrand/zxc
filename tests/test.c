@@ -761,8 +761,8 @@ int test_global_checksum_order() {
     fread(comp_buf, 1, comp_sz, f_comp);
 
     // 4. Parse Blocks to identify Block 1 and Block 2
-    // File Header: 8 bytes
-    size_t off1 = 8;
+    // File Header: ZXC_FILE_HEADER_SIZE bytes
+    size_t off1 = ZXC_FILE_HEADER_SIZE;
     // Parse Block 1 Header
     zxc_block_header_t bh1;
     zxc_read_block_header(comp_buf + off1, ZXC_BLOCK_HEADER_SIZE, &bh1);
@@ -787,8 +787,9 @@ int test_global_checksum_order() {
     uint8_t* swapped_buf = malloc(comp_sz);
 
     // Copy File Header
-    memcpy(swapped_buf, comp_buf, 8);
-    size_t w_off = 8;
+    // Copy File Header
+    memcpy(swapped_buf, comp_buf, ZXC_FILE_HEADER_SIZE);
+    size_t w_off = ZXC_FILE_HEADER_SIZE;
 
     // Write Block 2 first
     memcpy(swapped_buf + w_off, comp_buf + off2, len2);
