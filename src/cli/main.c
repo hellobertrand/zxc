@@ -333,8 +333,7 @@ void print_version(void) {
         snprintf(sys_info, sizeof(sys_info), "%s-%s", ZXC_ARCH, ZXC_OS);
 
 #endif
-    printf("zxc %s\n", ZXC_LIB_VERSION_STR);
-    printf("(%s)\n", sys_info);
+    printf("zxc v%s (%s) by Bertrand Lebonnois & al.\nBSD 3-Clause License\n", ZXC_LIB_VERSION_STR, sys_info);
 }
 
 typedef enum {
