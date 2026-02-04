@@ -662,11 +662,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         uint8_t* eof_buf = final_buf;
         uint8_t* footer = final_buf + ZXC_BLOCK_HEADER_SIZE;
 
-        zxc_block_header_t eof_bh = {.block_type = ZXC_BLOCK_EOF,
-                                     .block_flags = 0,
-                                     .reserved = 0,
-                                     .comp_size = 0,
-                                     .raw_size = 0};
+        zxc_block_header_t eof_bh = {
+            .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
         zxc_write_block_header(eof_buf, ZXC_BLOCK_HEADER_SIZE, &eof_bh);
         zxc_write_file_footer(footer, ZXC_FILE_FOOTER_SIZE, total_src_bytes, w_args.global_hash,
                               checksum_enabled);

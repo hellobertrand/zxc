@@ -633,8 +633,8 @@ int test_eof_block_structure() {
     }
 
     // Validating Footer and EOF Block
-    // Total Overhead: 12 bytes (Footer) + 12 bytes (EOF Header) = 24 bytes
-    if (comp_size < 24) {
+    // Total Overhead: 12 bytes (Footer) + 8 bytes (EOF Header) = 20 bytes
+    if (comp_size < 20) {
         printf("Failed: Compressed size too small for Footer + EOF (%zu)\n", comp_size);
         free(compressed);
         return 0;
@@ -653,13 +653,13 @@ int test_eof_block_structure() {
         return 0;
     }
 
-    // 2. Verify EOF Block Header
+    // 2. Verify EOF Block Header (8 bytes)
     // Should be immediately before the footer
-    const uint8_t* eof_ptr = compressed + comp_size - 24;
-    uint8_t expected[12] = {0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-    expected[3] = zxc_hash12(expected);
+    const uint8_t* eof_ptr = compressed + comp_size - 20;
+    uint8_t expected[8] = {0xFF, 0, 0, 0, 0, 0, 0, 0};
+    expected[3] = zxc_hash8(expected);
 
-    if (memcmp(eof_ptr, expected, 12) != 0) {
+    if (memcmp(eof_ptr, expected, 8) != 0) {
         printf(
             "Failed: EOF block mismatch.\nExpected: %02X %02X %02X %02X ...\nGot:      %02X %02X "
             "%02X %02X ...\n",
@@ -682,8 +682,7 @@ int test_header_checksum() {
                                 .block_flags = 0,
                                 .reserved = 0,
                                 .header_crc = 0,
-                                .comp_size = 1024,
-                                .raw_size = 2048};
+                                .comp_size = 1024};
 
     // 1. Write Header
     if (zxc_write_block_header(header_buf, ZXC_BLOCK_HEADER_SIZE, &bh_in) !=

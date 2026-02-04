@@ -138,20 +138,22 @@ int zxc_read_file_header(const uint8_t* src, const size_t src_size, size_t* out_
 
 /**
  * @struct zxc_block_header_t
- * @brief Represents the on-disk header structure for a ZXC block.
+ * @brief Represents the on-disk header structure for a ZXC block (8 bytes).
  *
  * This structure contains metadata required to parse and decompress a block.
+ * Note: raw_size is not stored in the header; decoders derive it from Section
+ * Descriptors within the compressed payload.
  *
  * @var zxc_block_header_t::block_type
  * The type of the block (see zxc_block_type_t).
  * @var zxc_block_header_t::block_flags
  * Bit flags indicating properties like checksum presence.
  * @var zxc_block_header_t::reserved
- * Reserved bytes for future protocol extensions.
+ * Reserved byte for future protocol extensions.
+ * @var zxc_block_header_t::header_crc
+ * Header checksum (1 byte).
  * @var zxc_block_header_t::comp_size
  * The size of the compressed data payload in bytes (excluding this header).
- * @var zxc_block_header_t::raw_size
- * The size of the data after decompression.
  */
 typedef struct {
     uint8_t block_type;   // Block type (e.g., RAW, GLO, GHI, NUM)
@@ -159,7 +161,6 @@ typedef struct {
     uint8_t reserved;     // Reserved for future use
     uint8_t header_crc;   // Header checksum (1 byte)
     uint32_t comp_size;   // Compressed size excluding header
-    uint32_t raw_size;    // Decompressed size
 } zxc_block_header_t;
 
 /**

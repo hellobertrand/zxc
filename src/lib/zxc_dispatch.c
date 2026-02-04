@@ -313,11 +313,8 @@ size_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTR
 
     // Write EOF Block (Checksum flag handled by Block Header, but we zero it out now)
     const size_t rem_cap = (size_t)(op_end - op);
-    zxc_block_header_t eof_bh = {.block_type = ZXC_BLOCK_EOF,
-                                 .block_flags = 0,
-                                 .reserved = 0,
-                                 .comp_size = 0,
-                                 .raw_size = 0};
+    zxc_block_header_t eof_bh = {
+        .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
     const int eof_size = zxc_write_block_header(op, rem_cap, &eof_bh);
     if (UNLIKELY(eof_size < 0)) return 0;
     op += eof_size;

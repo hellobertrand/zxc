@@ -138,8 +138,7 @@ extern "C" {
 #define ZXC_FILE_FLAG_HAS_CHECKSUM 0x80U   // Flag in Reserved/Flags byte (Bit 7)
 #define ZXC_FILE_CHECKSUM_ALGO_MASK 0x70U  // Algorithm ID (Bits 4-6)
 
-#define ZXC_BLOCK_HEADER_SIZE \
-    12  // Type (1) + Flags (1) + Reserved (2) + Comp Size (4) + Raw Size (4)
+#define ZXC_BLOCK_HEADER_SIZE 8  // Type (1) + Flags (1) + Reserved (1) + H.Crc (1) + Comp Size (4)
 #define ZXC_BLOCK_CHECKSUM_SIZE 4      // Size of checksum field in bytes
 #define ZXC_NUM_HEADER_BINARY_SIZE 16  // Num Header: N Values (8) + Frame Size (2) + Reserved (6)
 #define ZXC_GLO_HEADER_BINARY_SIZE \

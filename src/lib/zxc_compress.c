@@ -495,7 +495,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
     size_t count = src_sz / 4;
 
-    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_NUM, .raw_size = (uint32_t)src_sz};
+    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_NUM};
     uint8_t* p_curr = dst + ZXC_BLOCK_HEADER_SIZE;
     size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
     zxc_num_header_t nh = {.n_values = count, .frame_size = ZXC_NUM_FRAME_SIZE};
@@ -1008,7 +1008,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         if (rle_size < lit_c - (lit_c >> 5)) use_rle = 1;
     }
 
-    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GLO, .raw_size = (uint32_t)src_sz};
+    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GLO};
     uint8_t* const p = dst + ZXC_BLOCK_HEADER_SIZE;
     size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
 
@@ -1257,7 +1257,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         lit_c += last_lits;
     }
 
-    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GHI, .raw_size = (uint32_t)src_sz};
+    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GHI};
     uint8_t* const p = dst + ZXC_BLOCK_HEADER_SIZE;
     size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
 
@@ -1340,7 +1340,6 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
     bh.block_flags = 0;  // Checksum flag moved to file header
     bh.reserved = 0;
     bh.comp_size = (uint32_t)src_sz;
-    bh.raw_size = (uint32_t)src_sz;
 
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
     if (UNLIKELY(hw < 0)) return -1;

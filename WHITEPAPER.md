@@ -113,19 +113,19 @@ The file begins with an **8-byte** header that identifies the format and specifi
 * **Checksum (1 byte)**: Rapidhash checksum (low byte) of the first 7 bytes (Magic Word through Flags). Always calculated and verified.
 
 ### 5.2 Block Header Structure
-Each data block consists of a **12-byte** generic header that precedes the specific payload. This header allows the decoder to navigate the stream and identify the processing method required for the next chunk of data.
+Each data block consists of an **8-byte** generic header that precedes the specific payload. This header allows the decoder to navigate the stream and identify the processing method required for the next chunk of data.
 
-**BLOCK Header (12 bytes):**
+**BLOCK Header (8 bytes):**
 
 ```
-  Offset:  0       1       2       3       4                       8                       12
-          +-------+-------+-------+-------+-----------------------+-----------------------+
-          | Type  | Flags | Rsrvd | H.Crc | Comp Size             | Raw Size              |
-          | (1B)  | (1B)  | (1B)  | (1B)  | (4 bytes)             | (4 bytes)             |
-          +-------+-------+-------+-------+-----------------------+-----------------------+
+  Offset:  0       1       2       3       4                       8
+          +-------+-------+-------+-------+-----------------------+
+          | Type  | Flags | Rsrvd | H.Crc | Comp Size             |
+          | (1B)  | (1B)  | (1B)  | (1B)  | (4 bytes)             |
+          +-------+-------+-------+-------+-----------------------+
 
   Block Layout:
-  [ Header (12B) ] + [ Compressed Payload (Comp Size bytes) ] + [ Optional Checksum (4B) ]
+  [ Header (8B) ] + [ Compressed Payload (Comp Size bytes) ] + [ Optional Checksum (4B) ]
 
 ```
 
@@ -134,11 +134,12 @@ Each data block consists of a **12-byte** generic header that precedes the speci
 * **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI, 255=EOF).
 * **Flags**: Not used for now.
 * **Rsrvd**: Reserved for future use (must be 0).
-* **H.Crc**: **Header Checksum** (1 byte). Calculated on the 12-byte header (with H.Crc byte set to 0) using `zxc_hash12`.
+* **H.Crc**: **Header Checksum** (1 byte). Calculated on the 8-byte header (with H.Crc byte set to 0) using `zxc_hash8`.
 * **Checksum Algorithms**:
   - `0x00`: **rapidhash** (Standard, 32-bit folded)
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
-* **Raw Size**: Original decompressed size.
+
+> **Note**: The decompressed size is not stored in the block header. It is derived from internal Section Descriptors within the compressed payload (for GLO/GHI blocks), from the NUM header (for NUM blocks), or equals `Comp Size` (for RAW blocks).
 
 > **Note**: While the format is designed for threaded execution, a single-threaded API is also available for constrained environments or simple integration cases.
 

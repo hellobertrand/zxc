@@ -335,18 +335,13 @@ static ZXC_ALWAYS_INLINE __m512i zxc_mm512_prefix_sum_epi32(__m512i v) {
  * @param[out] dst Pointer to the destination buffer where decompressed data will be
  * written.
  * @param[in] dst_capacity Maximum capacity of the destination buffer in bytes.
- * @param[in] expected_raw_size Expected size of the uncompressed data (unused in
- * current implementation).
  *
  * @return The number of bytes written to the destination buffer on success,
  *         or -1 if an error occurs (e.g., buffer overflow, invalid header,
  *         or malformed compressed stream).
  */
 static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_size,
-                                uint8_t* RESTRICT dst, const size_t dst_capacity,
-                                const uint32_t expected_raw_size) {
-    (void)expected_raw_size;
-
+                                uint8_t* RESTRICT dst, const size_t dst_capacity) {
     zxc_num_header_t nh;
     if (UNLIKELY(zxc_read_num_header(src, src_size, &nh) != 0)) return -1;
 
@@ -470,25 +465,24 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 }
 
 /**
- * @brief Decompresses a "GLO" (General) encoded block of data.
+ * @brief Decodes a General Low (GLO) format compressed block.
  *
  * This function handles the decoding of a compressed block formatted with the
- * internal GLO structure.
+ * internal GLO structure. The decompressed size is derived from Section
+ * Descriptors within the compressed payload.
  *
  * @param[in,out] ctx Pointer to the compression context (`zxc_cctx_t`) containing
  * @param[in] src Pointer to the source buffer containing compressed data.
  * @param[in] src_size Size of the source buffer in bytes.
  * @param[out] dst Pointer to the destination buffer for decompressed data.
  * @param[in] dst_capacity Maximum capacity of the destination buffer.
- * @param[in] expected_raw_size The expected size of the decompressed data (used for
- * validation and trailing literals).
  *
  * @return The number of bytes written to the destination buffer on success, or
  * -1 on failure (e.g., invalid header, buffer overflow, or corrupted data).
  */
 static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_size, uint8_t* RESTRICT dst,
-                                const size_t dst_capacity, const uint32_t expected_raw_size) {
+                                const size_t dst_capacity) {
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS];
 
@@ -1018,37 +1012,34 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     }
 
     // --- Trailing Literals ---
-    size_t generated = d_ptr - dst;
-    if (generated < expected_raw_size) {
-        const size_t rem = expected_raw_size - generated;
-        if (UNLIKELY(d_ptr + rem > d_end || l_ptr + rem > l_end)) return -1;
-        ZXC_MEMCPY(d_ptr, l_ptr, rem);
-        d_ptr += rem;
+    // Copy remaining literals from source stream (literal exhaustion)
+    const size_t remaining_literals = (size_t)(l_end - l_ptr);
+    if (remaining_literals > 0) {
+        if (UNLIKELY(d_ptr + remaining_literals > d_end)) return -1;
+        ZXC_MEMCPY(d_ptr, l_ptr, remaining_literals);
+        d_ptr += remaining_literals;
     }
-    generated = d_ptr - dst;
-    // Final validation: decoded size must match expected
-    if (UNLIKELY(generated != expected_raw_size)) return -1;
 
-    return (int)generated;
+    return (int)(d_ptr - dst);
 }
 
 /**
- * @brief Decodes a GHI format compressed block.
+ * @brief Decodes a GHI (General High) format compressed block.
  *
  * This function handles the decoding of a compressed block formatted with the
- * internal GHI structure.
+ * internal GHI structure. The decompressed size is derived from Section
+ * Descriptors within the compressed payload.
  *
  * @param[in] ctx Pointer to the decompression context (unused in current implementation).
  * @param[in] src Pointer to the source buffer containing compressed data.
  * @param[in] src_size Size of the source buffer in bytes.
  * @param[out] dst Pointer to the destination buffer for decompressed data.
  * @param[in] dst_capacity Capacity of the destination buffer in bytes.
- * @param[in] expected_raw_size Expected size of the decompressed data in bytes.
- * @return int Returns 0 on success, or a negative error code on failure.
+ * @return int Returns the number of bytes written on success, or -1 on failure.
  */
 static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_size, uint8_t* RESTRICT dst,
-                                const size_t dst_capacity, const uint32_t expected_raw_size) {
+                                const size_t dst_capacity) {
     (void)ctx;
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[ZXC_GHI_SECTIONS];
@@ -1465,18 +1456,15 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     }
 
     // --- Trailing Literals ---
-    size_t generated = d_ptr - dst;
-    if (generated < expected_raw_size) {
-        const size_t rem = expected_raw_size - generated;
-        if (UNLIKELY(d_ptr + rem > d_end || l_ptr + rem > l_end)) return -1;
-        ZXC_MEMCPY(d_ptr, l_ptr, rem);
-        d_ptr += rem;
+    // Copy remaining literals from source stream (literal exhaustion)
+    const size_t remaining_literals = (size_t)(l_end - l_ptr);
+    if (remaining_literals > 0) {
+        if (UNLIKELY(d_ptr + remaining_literals > d_end)) return -1;
+        ZXC_MEMCPY(d_ptr, l_ptr, remaining_literals);
+        d_ptr += remaining_literals;
     }
-    generated = d_ptr - dst;
-    // Final validation: decoded size must match expected
-    if (UNLIKELY(generated != expected_raw_size)) return -1;
 
-    return (int)generated;
+    return (int)(d_ptr - dst);
 }
 
 // cppcheck-suppress unusedFunction
@@ -1486,7 +1474,6 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
 
     const uint8_t type = src[0];
     const uint32_t comp_sz = zxc_le32(src + 4);
-    const uint32_t raw_sz = zxc_le32(src + 8);
     const int has_crc = ctx->checksum_enabled;
 
     // Check bounds: Header + Body + Checksum(if any)
@@ -1506,18 +1493,19 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
 
     switch (type) {
         case ZXC_BLOCK_GLO:
-            decoded_sz = zxc_decode_block_glo(ctx, data, comp_sz, dst, dst_cap, raw_sz);
+            decoded_sz = zxc_decode_block_glo(ctx, data, comp_sz, dst, dst_cap);
             break;
         case ZXC_BLOCK_GHI:
-            decoded_sz = zxc_decode_block_ghi(ctx, data, comp_sz, dst, dst_cap, raw_sz);
+            decoded_sz = zxc_decode_block_ghi(ctx, data, comp_sz, dst, dst_cap);
             break;
         case ZXC_BLOCK_RAW:
-            if (UNLIKELY(raw_sz > dst_cap || raw_sz > comp_sz)) return -1;
-            ZXC_MEMCPY(dst, data, raw_sz);
-            decoded_sz = (int)raw_sz;
+            // For RAW blocks, comp_sz == raw_sz (uncompressed data stored as-is)
+            if (UNLIKELY(comp_sz > dst_cap)) return -1;
+            ZXC_MEMCPY(dst, data, comp_sz);
+            decoded_sz = (int)comp_sz;
             break;
         case ZXC_BLOCK_NUM:
-            decoded_sz = zxc_decode_block_num(data, comp_sz, dst, dst_cap, raw_sz);
+            decoded_sz = zxc_decode_block_num(data, comp_sz, dst, dst_cap);
             break;
         case ZXC_BLOCK_EOF:
             // EOF should be handled by the dispatcher, not here
