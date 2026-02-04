@@ -96,7 +96,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     }
 
     if (ctx->lit_buffer) {
-        zxc_aligned_free(ctx->lit_buffer);
+        free(ctx->lit_buffer);  // Use standard free (allocated with realloc)
         ctx->lit_buffer = NULL;
     }
 
