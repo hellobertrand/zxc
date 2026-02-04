@@ -121,7 +121,7 @@ extern "C" {
  * ============================================================================
  */
 
-#define ZXC_MAGIC_WORD 0x43585A5FU            // Magic signature "_ZXC" (Little Endian)
+#define ZXC_MAGIC_WORD 0x9CB02EF5U            // Magic word identifying ZXC files
 #define ZXC_FILE_FORMAT_VERSION 4             // Current file format version
 #define ZXC_BLOCK_UNIT (4 * 1024)             // Block size unit (4KB)
 #define ZXC_BLOCK_SIZE (64 * ZXC_BLOCK_UNIT)  // Size of data blocks processed by threads (256KB)
