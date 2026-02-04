@@ -99,6 +99,17 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
         zxc_aligned_free(ctx->lit_buffer);
         ctx->lit_buffer = NULL;
     }
+
+    ctx->hash_table = NULL;
+    ctx->chain_table = NULL;
+    ctx->buf_sequences = NULL;
+    ctx->buf_tokens = NULL;
+    ctx->buf_offsets = NULL;
+    ctx->buf_extras = NULL;
+    ctx->literals = NULL;
+
+    ctx->epoch = 0;
+    ctx->lit_buffer_cap = 0;
 }
 
 /*
