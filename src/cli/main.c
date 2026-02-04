@@ -348,25 +348,24 @@ typedef enum {
 enum { OPT_VERSION = 1000, OPT_HELP };
 
 /**
- * @brief Formats a byte size into human-readable TiB/GiB/MiB/KiB/B format.
+ * @brief Formats a byte size into human-readable TB/GB/MB/KB/B format (Base 1000).
  */
-static void format_size(uint64_t bytes, char* buf, size_t buf_size) {
-    const double TiB = 1024.0 * 1024.0 * 1024.0 * 1024.0;
-    const double GiB = 1024.0 * 1024.0 * 1024.0;
-    const double MiB = 1024.0 * 1024.0;
-    const double KiB = 1024.0;
+static void format_size_decimal(uint64_t bytes, char* buf, size_t buf_size) {
+    const double TB = 1000.0 * 1000.0 * 1000.0 * 1000.0;
+    const double GB = 1000.0 * 1000.0 * 1000.0;
+    const double MB = 1000.0 * 1000.0;
+    const double KB = 1000.0;
 
-    if ((double)bytes >= TiB) {
-        snprintf(buf, buf_size, "%.1f TiB", (double)bytes / TiB);
-    } else if ((double)bytes >= GiB) {
-        snprintf(buf, buf_size, "%.1f GiB", (double)bytes / GiB);
-    } else if ((double)bytes >= MiB) {
-        snprintf(buf, buf_size, "%.1f MiB", (double)bytes / MiB);
-    } else if ((double)bytes >= KiB) {
-        snprintf(buf, buf_size, "%.1f KiB", (double)bytes / KiB);
-    } else {
+    if ((double)bytes >= TB)
+        snprintf(buf, buf_size, "%.1f TB", (double)bytes / TB);
+    else if ((double)bytes >= GB)
+        snprintf(buf, buf_size, "%.1f GB", (double)bytes / GB);
+    else if ((double)bytes >= MB)
+        snprintf(buf, buf_size, "%.1f MB", (double)bytes / MB);
+    else if ((double)bytes >= KB)
+        snprintf(buf, buf_size, "%.1f KB", (double)bytes / KB);
+    else
         snprintf(buf, buf_size, "%llu B", (unsigned long long)bytes);
-    }
 }
 
 /**
@@ -384,7 +383,7 @@ typedef struct {
  * Displays a real-time progress bar during compression/decompression.
  * Shows percentage, processed/total size, and throughput speed.
  *
- * Format: [==========>     ] 45% | 4.5 GB / 10.0 GB | 156 MB/s
+ * Format: [==========>     ] 45% | 4.5 GB/10.0 GB | 156 MB/s
  */
 static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total,
                                   const void* user_data) {
@@ -400,9 +399,8 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
 
     // Calculate throughput speed
     double speed_mbps = 0.0;
-    if (elapsed > 0.1) {  // Avoid division by zero for very fast operations
-        speed_mbps = (double)bytes_processed / (1024.0 * 1024.0) / elapsed;
-    }
+    if (elapsed > 0.1)  // Avoid division by zero for very fast operations
+        speed_mbps = (double)bytes_processed / (1000.0 * 1000.0) / elapsed;
 
     // Clear line and move cursor to beginning
     fprintf(stderr, "\r\033[K");
@@ -410,7 +408,7 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
     if (total > 0) {
         // Known size: show percentage bar
         int percent = (bytes_processed * 100) / total;
-        if (percent > 100) percent = 100;  // Safety cap
+        if (percent > 100) percent = 100;
 
         const int bar_width = 20;
         int filled = (percent * bar_width) / 100;
@@ -427,13 +425,13 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
         fprintf(stderr, "] %d%% | ", percent);
 
         char proc_str[32], total_str[32];
-        format_size(bytes_processed, proc_str, sizeof(proc_str));
-        format_size(total, total_str, sizeof(total_str));
-        fprintf(stderr, "%s / %s | %.1f MB/s", proc_str, total_str, speed_mbps);
+        format_size_decimal(bytes_processed, proc_str, sizeof(proc_str));
+        format_size_decimal(total, total_str, sizeof(total_str));
+        fprintf(stderr, "%s/%s | %.1f MB/s", proc_str, total_str, speed_mbps);
     } else {
         // Unknown size (stdin): just show bytes processed
         char proc_str[32];
-        format_size(bytes_processed, proc_str, sizeof(proc_str));
+        format_size_decimal(bytes_processed, proc_str, sizeof(proc_str));
         fprintf(stderr, "%s [Processing...] %s | %.1f MB/s", pctx->operation, proc_str, speed_mbps);
     }
 
@@ -494,9 +492,8 @@ static int zxc_list_archive(const char* path) {
     }
 
     // Extract header fields
-    uint8_t format_version = header[4];
-    size_t block_units = header[5] ? header[5] : 64;  // Default 64 units = 256KB
-    size_t block_size = block_units * ZXC_BLOCK_UNIT;
+    const uint8_t format_version = header[4];
+    const size_t block_units = header[5] ? header[5] : 64;  // Default 64 units = 256KB
 
     // Read footer for checksum info
     uint8_t footer[ZXC_FILE_FOOTER_SIZE];
@@ -517,30 +514,33 @@ static int zxc_list_archive(const char* path) {
     double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;
 
     // Format sizes
-    char comp_str[32], uncomp_str[32], block_str[32];
-    format_size((uint64_t)file_size, comp_str, sizeof(comp_str));
-    format_size((uint64_t)uncompressed_size, uncomp_str, sizeof(uncomp_str));
-    format_size(block_size, block_str, sizeof(block_str));
+    char comp_str[32], uncomp_str[32];
+    format_size_decimal((uint64_t)file_size, comp_str, sizeof(comp_str));
+    format_size_decimal((uint64_t)uncompressed_size, uncomp_str, sizeof(uncomp_str));
 
     if (g_verbose) {
         // Verbose mode: detailed vertical layout
         printf(
             "\nFile: %s\n"
             "-----------------------\n"
-            "Format:       %u\n"
-            "Block Size:   %s\n"
-            "Checksum:     %s\n"
+            "Block Format: %u\n"
+            "Block Units:  %zu (x 4KB)\n"
+            "Checksum Method: %s\n",
+            path, format_version, block_units, (stored_checksum != 0) ? "RapidHash" : "None");
+
+        if (stored_checksum != 0) printf("Checksum Value:  0x%08X\n", stored_checksum);
+
+        printf(
             "-----------------------\n"
             "Comp. Size:   %s\n"
             "Uncomp. Size: %s\n"
             "Ratio:        %.2f\n",
-            path, format_version, block_str, (stored_checksum != 0) ? "Yes (RapidHash)" : "No",
             comp_str, uncomp_str, ratio);
     } else {
         // Normal mode: table format
         printf("\n  %12s   %12s   %5s   %-10s   %s\n", "Compressed", "Uncompressed", "Ratio",
-               "Check", "Filename");
-        printf("  %12s   %12s   %5.1f   %-10s   %s\n", comp_str, uncomp_str, ratio, checksum_method,
+               "Checksum", "Filename");
+        printf("  %12s   %12s   %5.2f   %-10s   %s\n", comp_str, uncomp_str, ratio, checksum_method,
                path);
     }
 

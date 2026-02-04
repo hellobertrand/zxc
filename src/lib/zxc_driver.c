@@ -581,7 +581,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     for (int i = 0; i < num_workers; i++)
         pthread_create(&workers[i], NULL, zxc_stream_worker, &ctx);
 
-    writer_args_t w_args = {&ctx, f_out, 0, 0};
+    writer_args_t w_args = {&ctx, f_out, 0, 0, 0};
 
     if (mode == 1 && f_out) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
