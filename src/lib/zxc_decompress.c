@@ -361,7 +361,8 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
         uint32_t psize = zxc_le32(src + offset + 12);
         offset += 16;
 
-        if (UNLIKELY(src_size < offset + psize || (size_t)(d_end - d_ptr) < (size_t)nvals * 4 ||
+        if (UNLIKELY(src_size < offset + psize ||
+                     (size_t)(d_end - d_ptr) < (size_t)nvals * sizeof(uint32_t) ||
                      bits > (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)))
             return -1;
 
@@ -447,7 +448,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
                 batch_dst[k] = running_val;
             }
 #endif
-            d_ptr += ZXC_DEC_BATCH * 4;
+            d_ptr += ZXC_DEC_BATCH * sizeof(uint32_t);
         }
 
         for (; i < nvals; i++) {
@@ -455,7 +456,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
             uint32_t delta = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
             running_val += delta;
             zxc_store_le32(d_ptr, running_val);
-            d_ptr += 4;
+            d_ptr += sizeof(uint32_t);
         }
 
         offset += psize;

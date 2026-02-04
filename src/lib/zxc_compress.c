@@ -489,11 +489,11 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
                                 size_t* RESTRICT out_sz) {
-    if (UNLIKELY(src_sz % 4 != 0 || src_sz == 0 ||
+    if (UNLIKELY(src_sz % sizeof(uint32_t) != 0 || src_sz == 0 ||
                  dst_cap < ZXC_BLOCK_HEADER_SIZE + ZXC_NUM_HEADER_BINARY_SIZE))
         return -1;
 
-    size_t count = src_sz / 4;
+    const size_t count = src_sz / sizeof(uint32_t);
 
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_NUM};
     uint8_t* p_curr = dst + ZXC_BLOCK_HEADER_SIZE;
@@ -606,7 +606,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
             max_d = vgetq_lane_u32(v_max1, 0);
 #endif
 
-            if (j > 0) prev = zxc_le32(in_ptr + (j - 1) * 4);
+            if (j > 0) prev = zxc_le32(in_ptr + (j - 1) * sizeof(uint32_t));
         }
 #endif
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512) || defined(ZXC_USE_NEON64) || \
@@ -614,13 +614,13 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     _scalar:
 #endif
         for (; j < frames; j++) {
-            uint32_t v = zxc_le32(in_ptr + j * 4);
+            uint32_t v = zxc_le32(in_ptr + j * sizeof(uint32_t));
             uint32_t diff = zxc_zigzag_encode((int32_t)(v - prev));
             deltas[j] = diff;
             if (diff > max_d) max_d = diff;
             prev = v;
         }
-        in_ptr += frames * 4;
+        in_ptr += frames * sizeof(uint32_t);
 
         uint8_t bits = zxc_highbit32(max_d);
         size_t packed = ((frames * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
