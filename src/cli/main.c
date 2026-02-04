@@ -386,7 +386,8 @@ typedef struct {
  *
  * Format: [==========>     ] 45% | 4.5 GB / 10.0 GB | 156 MB/s
  */
-static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total, void* user_data) {
+static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total,
+                                  const void* user_data) {
     const progress_ctx_t* pctx = (const progress_ctx_t*)user_data;
 
     if (!pctx) return;

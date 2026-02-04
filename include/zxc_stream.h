@@ -90,7 +90,7 @@ int64_t zxc_stream_get_decompressed_size(FILE* f_in);
  * @note The callback should be fast and non-blocking. Avoid heavy I/O or mutex locks.
  */
 typedef void (*zxc_progress_callback_t)(uint64_t bytes_processed, uint64_t bytes_total,
-                                        void* user_data);
+                                        const void* user_data);
 
 /**
  * @brief Compresses data from an input stream to an output stream (with progress callback).
