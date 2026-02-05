@@ -237,6 +237,12 @@ typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
  *      Flag indicating whether checksum verification/generation is active.
  * @var zxc_stream_ctx_t::file_has_checksum
  *     Flag indicating whether the input file includes checksums.
+ * @var zxc_stream_ctx_t::progress_cb
+ *     Optional callback function for reporting progress during processing.
+ * @var zxc_stream_ctx_t::progress_user_data
+ *    User data pointer to be passed to the progress callback function.
+ * @var zxc_stream_ctx_t::total_input_bytes
+ *     Total size of the input data in bytes, used for progress tracking.
  */
 typedef struct {
     zxc_stream_job_t* jobs;

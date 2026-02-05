@@ -159,11 +159,7 @@ typedef struct {
  * @param[in,out] hash_table Pointer to the hash table for match finding.
  * @param[in,out] chain_table Pointer to the chain table for collision handling.
  * @param[in] epoch_mark Current epoch marker for hash table invalidation.
- * @param[in] level Compression level (affects search depth and lazy matching).
- * @param[in] search_depth Maximum number of hash chain entries to search.
- * @param[in] sufficient_len Match length threshold to stop searching.
- * @param[in] use_lazy Flag indicating whether to use lazy matching.
- *
+ * @param[in] p LZ77 parameters controlling search depth, lazy matching, and stepping.
  * @return zxc_match_t Structure containing the best match information
  *         (reference pointer, length of the match, and backtrack distance).
  */
@@ -244,18 +240,18 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         int should_compare = tag_match && (ref[best.len] == ip[best.len]);
 
         if (should_compare) {
-            uint32_t mlen = 4;
+            uint32_t mlen = sizeof(uint32_t);  // We already know the first 4 bytes match
 
             // Fast path: Scalar 64-bit comparison for short matches (=< 64 bytes)
             // Most matches are short, so this avoids SIMD overhead for common cases
-            const uint8_t* limit_8 = iend - 8;
+            const uint8_t* limit_8 = iend - sizeof(uint64_t);
             const uint8_t* scalar_limit = ip + mlen + 64;
             if (scalar_limit > limit_8) scalar_limit = limit_8;
 
             while (ip + mlen < scalar_limit) {
                 uint64_t diff = zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen);
                 if (diff == 0)
-                    mlen += 8;
+                    mlen += sizeof(uint64_t);
                 else {
                     mlen += (zxc_ctz64(diff) >> 3);
                     goto _match_len_done;
@@ -333,11 +329,10 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 #endif
             }
 #endif
-            // Tail: remaining bytes after SIMD (or if no SIMD path taken)
             while (ip + mlen < limit_8) {
                 uint64_t diff = zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen);
                 if (diff == 0)
-                    mlen += 8;
+                    mlen += sizeof(uint64_t);
                 else {
                     mlen += (zxc_ctz64(diff) >> 3);
                     goto _match_len_done;
@@ -389,8 +384,8 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             if (UNLIKELY((uint32_t)(ip + 1 - src) - next_idx > ZXC_LZ_MAX_DIST)) break;
             const uint8_t* ref2 = src + next_idx;
             if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
-                uint32_t l2 = 4;
-                const uint8_t* limit8 = iend - 8;
+                uint32_t l2 = sizeof(uint32_t);
+                const uint8_t* limit8 = iend - sizeof(uint64_t);
                 while (ip + 1 + l2 < limit8) {
                     uint64_t v1 = zxc_le64(ip + 1 + l2);
                     uint64_t v2 = zxc_le64(ref2 + l2);
@@ -398,7 +393,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                         l2 += zxc_ctz64(v1 ^ v2) >> 3;
                         goto lazy1_done;
                     }
-                    l2 += 8;
+                    l2 += sizeof(uint64_t);
                 }
                 while (ip + 1 + l2 < iend && ref2[l2] == ip[1 + l2]) l2++;
             lazy1_done:
@@ -427,8 +422,8 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 > ZXC_LZ_MAX_DIST)) break;
                 const uint8_t* ref3 = src + idx3;
                 if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
-                    uint32_t l3 = 4;
-                    const uint8_t* limit8_3 = iend - 8;
+                    uint32_t l3 = sizeof(uint32_t);
+                    const uint8_t* limit8_3 = iend - sizeof(uint64_t);
                     while (ip + 2 + l3 < limit8_3) {
                         uint64_t v1 = zxc_le64(ip + 2 + l3);
                         uint64_t v2 = zxc_le64(ref3 + l3);
@@ -436,7 +431,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                             l3 += zxc_ctz64(v1 ^ v2) >> 3;
                             goto lazy2_done;
                         }
-                        l3 += 8;
+                        l3 += sizeof(uint64_t);
                     }
                     while (ip + 2 + l3 < iend && ref3[l3] == ip[2 + l3]) l3++;
                 lazy2_done:

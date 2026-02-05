@@ -342,7 +342,9 @@ The **EOF** block marks the end of the ZXC stream. It ensures that the decompres
 *   **Structure**: Standard 8-byte Block Header.
 *   **Flags**:
     *   **Bit 7 (0x80)**: `has_checksum`. If set, implies the **Global Stream Checksum** in the footer is valid and should be verified.
-*   **Comp Size / Raw Size**: Unlike other blocks, these **MUST be set to 0**. The decoder enforces strict validation (`Type == EOF` AND `Comp Size == 0`) to prevent processing of malformed termination blocks.
+*   **Comp Size**: Unlike other blocks, these **MUST be set to 0**. The decoder enforces strict validation (`Type == EOF` AND `Comp Size == 0`) to prevent processing of malformed termination blocks.
+*   **CRC**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with CRC byte set to 0) using `zxc_hash8`.
+
 
 ### 5.7 File Footer
 (Present immediately after the EOF Block)

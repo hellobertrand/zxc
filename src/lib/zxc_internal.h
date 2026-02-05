@@ -177,9 +177,6 @@ extern "C" {
 #define ZXC_SEQ_ML_MASK ((1U << ZXC_SEQ_ML_BITS) - 1)  // Mask to extract Match Length from sequence
 #define ZXC_SEQ_OFF_MASK ((1U << ZXC_SEQ_OFF_BITS) - 1)  // Mask to extract Offset from sequence
 
-// Prefix Varint Constants
-// No specific MSB/MASK needed as logic is unary prefix based
-
 // Literal Stream Encoding Constants
 #define ZXC_LIT_RLE_FLAG 0x80U  // Flag bit for RLE run in literal stream (128)
 #define ZXC_LIT_LEN_MASK \
