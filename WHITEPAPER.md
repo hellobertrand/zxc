@@ -108,8 +108,8 @@ The file begins with a **16-byte** header that identifies the format and specifi
   - `N` = Chunk size is `N × 4096` bytes (e.g., `62` = 248 KB)
 * **Flags (1 byte)**: Global configuration flags.
   - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream. Every block will carry a trailing 4-byte checksum, and the footer will contain a global checksum. If `0`, no checksums are present.
-  - **Bits 4-6**: Checksum Algorithm ID (e.g., `0` = RapidHash).
-  - **Bits 0-3**: Reserved.
+  - **Bits 4-6**: Reserved.
+  - **Bits 0-3**: Checksum Algorithm ID (e.g., `0` = RapidHash).
 * **Reserved (7 bytes)**: Reserved for future use (must be 0).
 * **CRC (2 bytes)**: 16-bit Header Checksum. Calculated on the 16-byte header (with CRC bytes set to 0) using `zxc_hash16`.
 
