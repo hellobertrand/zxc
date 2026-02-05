@@ -18,8 +18,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
-  lzbench-benchmark: 
+  lzbench-benchmark:
     name: Run Benchmark
+    if: github.event.pull_request.draft == false
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -36,7 +37,8 @@ jobs:
 
       - name: Clone LZbench
         run: |
-          git clone https://github.com/inikep/lzbench "${LZBENCH_DIR}"
+          # git clone https://github.com/inikep/lzbench "${LZBENCH_DIR}"
+          git clone -b add-zxc-0.6.x https://github.com/hellobertrand/lzbench "${LZBENCH_DIR}"
 
       - name: Copy Lib ZXC
         run: |

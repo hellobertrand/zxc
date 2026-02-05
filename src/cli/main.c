@@ -24,6 +24,7 @@
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
 #include "../../include/zxc_stream.h"
+#include "../lib/zxc_internal.h"
 
 #if defined(_WIN32)
 #define ZXC_OS "windows"
@@ -302,6 +303,8 @@ void print_help(const char* app) {
         "Standard Modes:\n"
         "  -z, --compress    Compress FILE {default}\n"
         "  -d, --decompress  Decompress FILE (or stdin -> stdout)\n"
+        "  -l, --list        List archive information\n"
+        "  -t, --test        Test compressed FILE integrity\n"
         "  -b, --bench       Benchmark in-memory\n\n"
         "Special Options:\n"
         "  -V, --version     Show version information\n"
@@ -330,13 +333,218 @@ void print_version(void) {
         snprintf(sys_info, sizeof(sys_info), "%s-%s", ZXC_ARCH, ZXC_OS);
 
 #endif
-    printf("zxc %s\n", ZXC_LIB_VERSION_STR);
-    printf("(%s)\n", sys_info);
+    printf("zxc v%s (%s) by Bertrand Lebonnois & al.\nBSD 3-Clause License\n", ZXC_LIB_VERSION_STR, sys_info);
 }
 
-typedef enum { MODE_COMPRESS, MODE_DECOMPRESS, MODE_BENCHMARK } zxc_mode_t;
+typedef enum {
+    MODE_COMPRESS,
+    MODE_DECOMPRESS,
+    MODE_BENCHMARK,
+    MODE_INTEGRITY,
+    MODE_LIST
+} zxc_mode_t;
 
 enum { OPT_VERSION = 1000, OPT_HELP };
+
+/**
+ * @brief Formats a byte size into human-readable TB/GB/MB/KB/B format (Base 1000).
+ */
+static void format_size_decimal(uint64_t bytes, char* buf, size_t buf_size) {
+    const double TB = 1000.0 * 1000.0 * 1000.0 * 1000.0;
+    const double GB = 1000.0 * 1000.0 * 1000.0;
+    const double MB = 1000.0 * 1000.0;
+    const double KB = 1000.0;
+
+    if ((double)bytes >= TB)
+        snprintf(buf, buf_size, "%.1f TB", (double)bytes / TB);
+    else if ((double)bytes >= GB)
+        snprintf(buf, buf_size, "%.1f GB", (double)bytes / GB);
+    else if ((double)bytes >= MB)
+        snprintf(buf, buf_size, "%.1f MB", (double)bytes / MB);
+    else if ((double)bytes >= KB)
+        snprintf(buf, buf_size, "%.1f KB", (double)bytes / KB);
+    else
+        snprintf(buf, buf_size, "%llu B", (unsigned long long)bytes);
+}
+
+/**
+ * @brief Progress context for CLI progress bar display.
+ */
+typedef struct {
+    double start_time;
+    const char* operation;  // "Compressing" or "Decompressing"
+    uint64_t total_size;    // Pre-determined total size (0 if unknown)
+} progress_ctx_t;
+
+/**
+ * @brief Progress callback for CLI progress bar.
+ *
+ * Displays a real-time progress bar during compression/decompression.
+ * Shows percentage, processed/total size, and throughput speed.
+ *
+ * Format: [==========>     ] 45% | 4.5 GB/10.0 GB | 156 MB/s
+ */
+static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total,
+                                  const void* user_data) {
+    const progress_ctx_t* pctx = (const progress_ctx_t*)user_data;
+
+    if (!pctx) return;
+
+    // Use pre-determined total size from context (not the parameter)
+    uint64_t total = pctx->total_size;
+
+    double now = zxc_now();
+    double elapsed = now - pctx->start_time;
+
+    // Calculate throughput speed
+    double speed_mbps = 0.0;
+    if (elapsed > 0.1)  // Avoid division by zero for very fast operations
+        speed_mbps = (double)bytes_processed / (1000.0 * 1000.0) / elapsed;
+
+    // Clear line and move cursor to beginning
+    fprintf(stderr, "\r\033[K");
+
+    if (total > 0) {
+        // Known size: show percentage bar
+        int percent = (bytes_processed * 100) / total;
+        if (percent > 100) percent = 100;
+
+        const int bar_width = 20;
+        int filled = (percent * bar_width) / 100;
+
+        fprintf(stderr, "%s [", pctx->operation);
+        for (int i = 0; i < bar_width; i++) {
+            if (i < filled)
+                fprintf(stderr, "=");
+            else if (i == filled)
+                fprintf(stderr, ">");
+            else
+                fprintf(stderr, " ");
+        }
+        fprintf(stderr, "] %d%% | ", percent);
+
+        char proc_str[32], total_str[32];
+        format_size_decimal(bytes_processed, proc_str, sizeof(proc_str));
+        format_size_decimal(total, total_str, sizeof(total_str));
+        fprintf(stderr, "%s/%s | %.1f MB/s", proc_str, total_str, speed_mbps);
+    } else {
+        // Unknown size (stdin): just show bytes processed
+        char proc_str[32];
+        format_size_decimal(bytes_processed, proc_str, sizeof(proc_str));
+        fprintf(stderr, "%s [Processing...] %s | %.1f MB/s", pctx->operation, proc_str, speed_mbps);
+    }
+
+    fflush(stderr);
+}
+
+/**
+ * @brief Lists the contents of a ZXC archive.
+ *
+ * Reads the file header and footer to display:
+ * - Compressed size
+ * - Uncompressed size
+ * - Compression ratio
+ * - Checksum method
+ * - Filename
+ *
+ * In verbose mode, displays additional header information.
+ *
+ * @param[in] path Path to the ZXC archive file.
+ * @return 0 on success, 1 on error.
+ */
+static int zxc_list_archive(const char* path) {
+    char resolved_path[4096];
+    if (zxc_validate_input_path(path, resolved_path, sizeof(resolved_path)) != 0) {
+        fprintf(stderr, "Error: Invalid input file '%s': %s\n", path, strerror(errno));
+        return 1;
+    }
+
+    FILE* f = fopen(resolved_path, "rb");
+    if (!f) {
+        fprintf(stderr, "Error: Cannot open '%s': %s\n", path, strerror(errno));
+        return 1;
+    }
+
+    // Get file size
+    if (fseeko(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        fprintf(stderr, "Error: Cannot seek in file\n");
+        return 1;
+    }
+    long long file_size = ftello(f);
+
+    // Use public API to get decompressed size
+    int64_t uncompressed_size = zxc_stream_get_decompressed_size(f);
+    if (uncompressed_size < 0) {
+        fclose(f);
+        fprintf(stderr, "Error: Not a valid ZXC archive\n");
+        return 1;
+    }
+
+    // Read header for format info (rewind after API call)
+    uint8_t header[ZXC_FILE_HEADER_SIZE];
+    if (fseeko(f, 0, SEEK_SET) != 0 ||
+        fread(header, 1, ZXC_FILE_HEADER_SIZE, f) != ZXC_FILE_HEADER_SIZE) {
+        fclose(f);
+        fprintf(stderr, "Error: Cannot read file header\n");
+        return 1;
+    }
+
+    // Extract header fields
+    const uint8_t format_version = header[4];
+    const size_t block_units = header[5] ? header[5] : 64;  // Default 64 units = 256KB
+
+    // Read footer for checksum info
+    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
+    if (fseeko(f, file_size - ZXC_FILE_FOOTER_SIZE, SEEK_SET) != 0 ||
+        fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f) != ZXC_FILE_FOOTER_SIZE) {
+        fclose(f);
+        fprintf(stderr, "Error: Cannot read file footer\n");
+        return 1;
+    }
+    fclose(f);
+
+    // Parse checksum (if non-zero, checksum was enabled)
+    uint32_t stored_checksum = footer[8] | ((uint32_t)footer[9] << 8) |
+                               ((uint32_t)footer[10] << 16) | ((uint32_t)footer[11] << 24);
+    const char* checksum_method = (stored_checksum != 0) ? "RapidHash" : "-";
+
+    // Calculate ratio (uncompressed / compressed, e.g., 2.5 means 2.5x compression)
+    double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;
+
+    // Format sizes
+    char comp_str[32], uncomp_str[32];
+    format_size_decimal((uint64_t)file_size, comp_str, sizeof(comp_str));
+    format_size_decimal((uint64_t)uncompressed_size, uncomp_str, sizeof(uncomp_str));
+
+    if (g_verbose) {
+        // Verbose mode: detailed vertical layout
+        printf(
+            "\nFile: %s\n"
+            "-----------------------\n"
+            "Block Format: %u\n"
+            "Block Units:  %zu (x 4KB)\n"
+            "Checksum Method: %s\n",
+            path, format_version, block_units, (stored_checksum != 0) ? "RapidHash" : "None");
+
+        if (stored_checksum != 0) printf("Checksum Value:  0x%08X\n", stored_checksum);
+
+        printf(
+            "-----------------------\n"
+            "Comp. Size:   %s\n"
+            "Uncomp. Size: %s\n"
+            "Ratio:        %.2f\n",
+            comp_str, uncomp_str, ratio);
+    } else {
+        // Normal mode: table format
+        printf("\n  %12s   %12s   %5s   %-10s   %s\n", "Compressed", "Uncompressed", "Ratio",
+               "Checksum", "Filename");
+        printf("  %12s   %12s   %5.2f   %-10s   %s\n", comp_str, uncomp_str, ratio, checksum_method,
+               path);
+    }
+
+    return 0;
+}
 
 /**
  * @brief Main entry point.
@@ -350,11 +558,12 @@ int main(int argc, char** argv) {
     int force = 0;
     int to_stdout = 0;
     int iterations = 5;
-    int checksum = 0;
+    int checksum = -1;
     int level = 3;
 
     static const struct option long_options[] = {
         {"compress", no_argument, 0, 'z'},    {"decompress", no_argument, 0, 'd'},
+        {"list", no_argument, 0, 'l'},        {"test", no_argument, 0, 't'},
         {"bench", optional_argument, 0, 'b'}, {"threads", required_argument, 0, 'T'},
         {"keep", no_argument, 0, 'k'},        {"force", no_argument, 0, 'f'},
         {"stdout", no_argument, 0, 'c'},      {"verbose", no_argument, 0, 'v'},
@@ -363,13 +572,19 @@ int main(int argc, char** argv) {
         {"help", no_argument, 0, 'h'},        {0, 0, 0, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "12345b::cCdfhkl:NqT:vVz", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "12345b::cCdfhklNqT:tvVz", long_options, NULL)) != -1) {
         switch (opt) {
             case 'z':
                 mode = MODE_COMPRESS;
                 break;
             case 'd':
                 mode = MODE_DECOMPRESS;
+                break;
+            case 'l':
+                mode = MODE_LIST;
+                break;
+            case 't':
+                mode = MODE_INTEGRITY;
                 break;
             case 'b':
                 mode = MODE_BENCHMARK;
@@ -426,10 +641,20 @@ int main(int argc, char** argv) {
         } else if (strcmp(argv[optind], "d") == 0) {
             mode = MODE_DECOMPRESS;
             optind++;
+        } else if (strcmp(argv[optind], "l") == 0 || strcmp(argv[optind], "list") == 0) {
+            mode = MODE_LIST;
+            optind++;
+        } else if (strcmp(argv[optind], "t") == 0 || strcmp(argv[optind], "test") == 0) {
+            mode = MODE_INTEGRITY;
+            optind++;
         } else if (strcmp(argv[optind], "b") == 0) {
             mode = MODE_BENCHMARK;
             optind++;
         }
+    }
+
+    if (checksum == -1) {
+        checksum = (mode == MODE_INTEGRITY) ? 1 : 0;
     }
 
     /*
@@ -563,6 +788,22 @@ int main(int argc, char** argv) {
     }
 
     /*
+     * List Mode
+     * Displays archive information (compressed size, uncompressed size, ratio).
+     */
+    if (mode == MODE_LIST) {
+        if (optind >= argc) {
+            zxc_log("List mode requires input file.\n");
+            return 1;
+        }
+        int ret = 0;
+        for (int i = optind; i < argc; i++) {
+            ret |= zxc_list_archive(argv[i]);
+        }
+        return ret;
+    }
+
+    /*
      * File Processing Mode
      * Determines input/output paths. Defaults to stdin/stdout if not specified.
      * Handles output filename generation (.xc extension).
@@ -594,8 +835,10 @@ int main(int argc, char** argv) {
         use_stdout = 1;  // Default to stdout if reading from stdin
     }
 
-    // Check for optional output file argument
-    if (!use_stdin && optind < argc) {
+    if (mode == MODE_INTEGRITY) {
+        use_stdout = 0;
+        f_out = NULL;
+    } else if (!use_stdin && optind < argc) {
         strncpy(out_path, argv[optind], 1023);
         use_stdout = 0;
     } else if (to_stdout) {
@@ -615,14 +858,14 @@ int main(int argc, char** argv) {
     }
 
     // Safety check: prevent overwriting input file
-    if (!use_stdin && !use_stdout && strcmp(in_path, out_path) == 0) {
+    if (mode != MODE_INTEGRITY && !use_stdin && !use_stdout && strcmp(in_path, out_path) == 0) {
         zxc_log("Error: Input and output filenames are identical.\n");
         if (f_in) fclose(f_in);
         return 1;
     }
 
     // Open output file if not writing to stdout
-    if (!use_stdout) {
+    if (!use_stdout && mode != MODE_INTEGRITY) {
         char resolved_out[4096];
         if (zxc_validate_output_path(out_path, resolved_out, sizeof(resolved_out)) != 0) {
             zxc_log("Error: Invalid output path '%s': %s\n", out_path, strerror(errno));
@@ -689,19 +932,67 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    // Set large buffers for I/O performance
+    // Determine if we should show progress bar and get file size
+    // IMPORTANT: This must be done BEFORE setting large buffers with setvbuf
+    // to avoid buffer inconsistency issues when reading the footer
+    int show_progress = 0;
+    uint64_t total_size = 0;
+
+    if (!g_quiet && !use_stdout && !use_stdin && isatty(fileno(stderr))) {
+        // Get file size based on mode
+        if (mode == MODE_COMPRESS) {
+            // Compression: get input file size
+            long long saved_pos = ftello(f_in);
+            if (saved_pos >= 0) {
+                if (fseeko(f_in, 0, SEEK_END) == 0) {
+                    long long size = ftello(f_in);
+                    if (size > 0) total_size = (uint64_t)size;
+                    fseeko(f_in, saved_pos, SEEK_SET);
+                }
+            }
+        } else {
+            // Decompression: get decompressed size from footer (BEFORE starting decompression)
+            int64_t decomp_size = zxc_stream_get_decompressed_size(f_in);
+            if (decomp_size > 0) {
+                total_size = (uint64_t)decomp_size;
+            }
+        }
+
+        // Only show progress for files > 1MB
+        if (total_size > 1024 * 1024) {
+            show_progress = 1;
+        }
+    }
+
+    // Set large buffers for I/O performance (AFTER file size detection)
     char *b1 = malloc(1024 * 1024), *b2 = malloc(1024 * 1024);
     setvbuf(f_in, b1, _IOFBF, 1024 * 1024);
-    setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
+    if (f_out) setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
 
     zxc_log_v("Starting... (Compression Level %d)\n", level);
     if (g_verbose) zxc_log("Checksum: %s\n", checksum ? "enabled" : "disabled");
 
+    // Prepare progress context
+    progress_ctx_t pctx = {.start_time = zxc_now(),
+                           .operation = (mode == MODE_COMPRESS) ? "Compressing" : "Decompressing",
+                           .total_size = total_size};
+
     double t0 = zxc_now();
-    int64_t bytes = (mode == MODE_COMPRESS)
-                        ? zxc_stream_compress(f_in, f_out, num_threads, level, checksum)
-                        : zxc_stream_decompress(f_in, f_out, num_threads, checksum);
+    int64_t bytes;
+    if (mode == MODE_COMPRESS) {
+        bytes = zxc_stream_compress_ex(f_in, f_out, num_threads, level, checksum,
+                                       show_progress ? cli_progress_callback : NULL, &pctx);
+    } else {
+        bytes = zxc_stream_decompress_ex(f_in, f_out, num_threads, checksum,
+                                         show_progress ? cli_progress_callback : NULL, &pctx);
+    }
     double dt = zxc_now() - t0;
+
+    // Clear progress line on completion
+    if (show_progress) {
+        fprintf(stderr, "\r\033[K");
+        fflush(stderr);
+    }
 
     if (!use_stdin)
         fclose(f_in);
@@ -709,7 +1000,7 @@ int main(int argc, char** argv) {
         setvbuf(stdin, NULL, _IONBF, 0);
 
     if (!use_stdout) {
-        fclose(f_out);
+        if (f_out) fclose(f_out);
     } else {
         fflush(f_out);
         setvbuf(stdout, NULL, _IONBF, 0);
@@ -719,10 +1010,32 @@ int main(int argc, char** argv) {
     free(b2);
 
     if (bytes >= 0) {
-        zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
-        if (!use_stdin && !use_stdout && !keep_input) unlink(in_path);
+        if (mode == MODE_INTEGRITY) {
+            // Test mode: show result
+            if (g_verbose) {
+                printf(
+                    "%s: OK\n"
+                    "  Checksum:     %s\n"
+                    "  Time:         %.3fs\n",
+                    in_path ? in_path : "<stdin>",
+                    checksum ? "verified (RapidHash)" : "not verified", dt);
+            } else {
+                printf("%s: OK\n", in_path ? in_path : "<stdin>");
+            }
+        } else {
+            zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
+        }
+        if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY) unlink(in_path);
     } else {
-        zxc_log("Operation failed.\n");
+        if (mode == MODE_INTEGRITY) {
+            fprintf(stderr, "%s: FAILED\n", in_path ? in_path : "<stdin>");
+            if (g_verbose) {
+                fprintf(stderr,
+                        "  Reason: Integrity check failed (corrupted data or invalid checksum)\n");
+            }
+        } else {
+            zxc_log("Operation failed.\n");
+        }
         return 1;
     }
     return 0;
