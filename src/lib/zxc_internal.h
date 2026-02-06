@@ -769,11 +769,12 @@ static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* RESTRICT br,
         br->accum = 0;
         ZXC_MEMCPY(&br->accum, src, size);  // Safe partial copy
         br->ptr += size;                    // Advance only valid bytes
+        br->bits = (int)(size * 8);         // Only size*8 bits are valid
     } else {
         br->accum = zxc_le64(br->ptr);
         br->ptr += sizeof(uint64_t);
+        br->bits = sizeof(uint64_t) * 8;
     }
-    br->bits = sizeof(uint64_t) * 8;
 }
 
 /**
