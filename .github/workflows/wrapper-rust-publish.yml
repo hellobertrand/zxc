@@ -1,9 +1,9 @@
 name: Publish Rust Crates
 
 on:
+  workflow_dispatch:
   release:
-    types: [published]
-  workflow_dispatch:  # Allow manual trigger for testing
+    types: [ published ]
 
 permissions:
   contents: read

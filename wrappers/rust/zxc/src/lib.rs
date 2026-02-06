@@ -247,10 +247,15 @@ pub fn compress(data: &[u8], level: Level, checksum: Option<bool>) -> Result<Vec
 /// ```
 pub fn compress_with_options(data: &[u8], options: &CompressOptions) -> Result<Vec<u8>> {
     let bound = compress_bound(data.len());
-    let mut output = vec![0u8; bound];
+    let mut output = Vec::with_capacity(bound);
 
-    let written = compress_to(data, &mut output, options)?;
-    output.truncate(written);
+    // compress_to writes exactly `written` initialized bytes to the buffer.
+    let written = unsafe {
+        let slice = std::slice::from_raw_parts_mut(output.as_mut_ptr(), bound);
+        compress_to(data, slice, options)?
+    };
+
+    unsafe { output.set_len(written); }
     Ok(output)
 }
 
@@ -344,13 +349,19 @@ pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>> {
 pub fn decompress_with_options(compressed: &[u8], options: &DecompressOptions) -> Result<Vec<u8>> {
     let size = decompressed_size(compressed).ok_or(Error::InvalidData)?;
 
-    let mut output = vec![0u8; size];
-    let written = decompress_to(compressed, &mut output, options)?;
+    let mut output = Vec::with_capacity(size);
+
+    // decompress_to writes exactly `written` initialized bytes to the buffer.
+    let written = unsafe {
+        let slice = std::slice::from_raw_parts_mut(output.as_mut_ptr(), size);
+        decompress_to(compressed, slice, options)?
+    };
 
     if written != size {
         return Err(Error::DecompressionFailed("size mismatch"));
     }
 
+    unsafe { output.set_len(written); }
     Ok(output)
 }
 
@@ -512,7 +523,13 @@ unsafe fn file_to_c_file_read(file: &File) -> *mut libc::FILE {
     if dup_fd < 0 {
         return std::ptr::null_mut();
     }
-    unsafe { libc::fdopen(dup_fd, b"rb\0".as_ptr() as *const libc::c_char) }
+    
+    let file_ptr = unsafe { libc::fdopen(dup_fd, b"rb\0".as_ptr() as *const libc::c_char) };
+    if file_ptr.is_null() {
+        // fdopen failed, close the duplicated fd to avoid leak
+        unsafe { libc::close(dup_fd); }
+    }
+    file_ptr
 }
 
 /// Convert a Rust File to a C FILE* for write operations.
@@ -527,13 +544,17 @@ unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
     if dup_fd < 0 {
         return std::ptr::null_mut();
     }
-    unsafe { libc::fdopen(dup_fd, b"wb\0".as_ptr() as *const libc::c_char) }
+    
+    let file_ptr = unsafe { libc::fdopen(dup_fd, b"wb\0".as_ptr() as *const libc::c_char) };
+    if file_ptr.is_null() {
+        // fdopen failed, close the duplicated fd to avoid leak
+        unsafe { libc::close(dup_fd); }
+    }
+    file_ptr
 }
 
 /// Convert a Rust File to a C FILE* for read operations (Windows).
 ///
-/// # Safety
-/// 
 /// This function duplicates the file handle before passing it to the C runtime,
 /// so the returned FILE* owns its own handle and must be closed with fclose().
 #[cfg(windows)]
@@ -562,16 +583,21 @@ unsafe fn file_to_c_file_read(file: &File) -> *mut libc::FILE {
     
     let fd = libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_RDONLY);
     if fd < 0 {
+        // open_osfhandle failed, close the duplicated handle to avoid leak
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(dup_handle as isize); }
         return std::ptr::null_mut();
     }
     
-    libc::fdopen(fd, b"rb\0".as_ptr() as *const libc::c_char)
+    let file_ptr = libc::fdopen(fd, b"rb\0".as_ptr() as *const libc::c_char);
+    if file_ptr.is_null() {
+        // fdopen failed, close the fd (which will close the handle)
+        unsafe { libc::close(fd); }
+    }
+    file_ptr
 }
 
 /// Convert a Rust File to a C FILE* for write operations (Windows).
 ///
-/// # Safety
-/// 
 /// This function duplicates the file handle before passing it to the C runtime,
 /// so the returned FILE* owns its own handle and must be closed with fclose().
 #[cfg(windows)]
@@ -600,10 +626,17 @@ unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
     
     let fd = libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_WRONLY);
     if fd < 0 {
+        // open_osfhandle failed, close the duplicated handle to avoid leak
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(dup_handle as isize); }
         return std::ptr::null_mut();
     }
     
-    libc::fdopen(fd, b"wb\0".as_ptr() as *const libc::c_char)
+    let file_ptr = libc::fdopen(fd, b"wb\0".as_ptr() as *const libc::c_char);
+    if file_ptr.is_null() {
+        // fdopen failed, close the fd (which will close the handle)
+        unsafe { libc::close(fd); }
+    }
+    file_ptr
 }
 
 /// Compresses a file using multi-threaded streaming.
