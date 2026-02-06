@@ -104,14 +104,24 @@ fn main() {
         return;
     }
 
-    // Path to ZXC source files (relative to wrappers/rust/zxc-sys/)
-    let zxc_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
-        .join("../../..")
-        .canonicalize()
-        .expect("Failed to find ZXC root directory");
+    // Path to ZXC source files
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    
+    // We use mirrored symlinks under zxc/ to preserve relative include paths
+    // expected by the C source code (../../include/...).
+    // During `cargo publish`, these symlinks are followed and real files are packaged.
+    let src_lib = manifest_dir.join("zxc/src/lib");
+    let include_dir = manifest_dir.join("zxc/include");
 
-    let src_lib = zxc_root.join("src/lib");
-    let include_dir = zxc_root.join("include");
+    // Fallback for local development if symlinks are broken or missing
+    let (src_lib, include_dir) = if src_lib.exists() && include_dir.exists() {
+        (src_lib, include_dir)
+    } else {
+        // Try direct path from workspace root
+        let zxc_root = manifest_dir.join("../../..").canonicalize()
+            .expect("Failed to find ZXC root directory");
+        (zxc_root.join("src/lib"), zxc_root.join("include"))
+    };
 
     // Verify paths exist
     assert!(
