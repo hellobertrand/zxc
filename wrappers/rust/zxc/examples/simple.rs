@@ -25,7 +25,7 @@ fn main() -> Result<(), zxc::Error> {
 
     // Test all compression levels
     for level in Level::all() {
-        let compressed = compress(original, *level)?;
+        let compressed = compress(original, *level, None)?;
         let ratio = (compressed.len() as f64 / original.len() as f64) * 100.0;
 
         println!(
@@ -38,7 +38,7 @@ fn main() -> Result<(), zxc::Error> {
 
     // Full roundtrip demonstration
     println!("\nRoundtrip test:");
-    let compressed = compress(original, Level::Default)?;
+    let compressed = compress(original, Level::Default, None)?;
 
     // Query size before decompression
     let size = decompressed_size(&compressed).expect("valid compressed data");

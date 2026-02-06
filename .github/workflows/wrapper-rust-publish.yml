@@ -29,17 +29,17 @@ jobs:
         if: github.event_name == 'release'
         run: |
           RELEASE_VERSION="${{ github.event.release.tag_name }}"
-          # Remove 'v' prefix if present (e.g., v0.6.0 -> 0.6.0)
+          # Remove 'v' prefix if present
           RELEASE_VERSION="${RELEASE_VERSION#v}"
           
           CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
           
           if [ "$RELEASE_VERSION" != "$CARGO_VERSION" ]; then
-            echo "❌ Version mismatch: Release tag is $RELEASE_VERSION but Cargo.toml has $CARGO_VERSION"
+            echo "Version mismatch: Release tag is $RELEASE_VERSION but Cargo.toml has $CARGO_VERSION"
             exit 1
           fi
           
-          echo "✅ Version matches: $RELEASE_VERSION"
+          echo "Version matches: $RELEASE_VERSION"
 
       - name: Run Tests
         run: cargo test --workspace
@@ -63,8 +63,8 @@ jobs:
       - name: Summary
         if: success()
         run: |
-          echo "✅ Successfully published:"
-          echo "  - zxc-sys (FFI bindings)"
-          echo "  - zxc (safe wrapper)"
+          echo "Successfully published:"
+          echo "- zxc-sys (FFI bindings)"
+          echo "- zxc (safe wrapper)"
           echo ""
-          echo "🦀 Crates are now available on crates.io!"
+          echo "Crates are now available on crates.io!"

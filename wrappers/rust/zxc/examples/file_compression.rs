@@ -42,6 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         compressed_path,
         zxc::Level::Default,
         None, // Auto-detect CPU cores
+        None, // Maximum performance (no checksum)
     )?;
     println!("  Compressed bytes written: {}", compressed_bytes);
 

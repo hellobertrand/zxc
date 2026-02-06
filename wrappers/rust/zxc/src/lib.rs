@@ -18,7 +18,7 @@
 //!
 //! // Compress some data
 //! let data = b"Hello, ZXC! This is some data to compress.";
-//! let compressed = compress(data, Level::Default).expect("compression failed");
+//! let compressed = compress(data, Level::Default, None).expect("compression failed");
 //!
 //! // Decompress it back
 //! let decompressed = decompress(&compressed).expect("decompression failed");
@@ -205,17 +205,32 @@ pub fn compress_bound(input_size: usize) -> usize {
 /// This is a convenience function that allocates the output buffer automatically.
 /// For zero-allocation usage, see [`compress_to`].
 ///
+/// # Arguments
+///
+/// * `data` - The data to compress
+/// * `level` - Compression level
+/// * `checksum` - Optional checksum for data integrity (`None` = disabled for maximum performance)
+///
 /// # Example
 ///
 /// ```rust
 /// use zxc::{compress, Level};
 ///
 /// let data = b"Hello, world!";
-/// let compressed = compress(data, Level::Default)?;
+///
+/// // Maximum performance (no checksum)
+/// let compressed = compress(data, Level::Default, None)?;
+///
+/// // With data integrity verification
+/// let compressed = compress(data, Level::Default, Some(true))?;
 /// # Ok::<(), zxc::Error>(())
 /// ```
-pub fn compress(data: &[u8], level: Level) -> Result<Vec<u8>> {
-    compress_with_options(data, &CompressOptions::with_level(level))
+pub fn compress(data: &[u8], level: Level, checksum: Option<bool>) -> Result<Vec<u8>> {
+    let opts = CompressOptions {
+        level,
+        checksum: checksum.unwrap_or(false),
+    };
+    compress_with_options(data, &opts)
 }
 
 /// Compresses data with full options control.
@@ -289,7 +304,7 @@ pub fn compress_to(data: &[u8], output: &mut [u8], options: &CompressOptions) ->
 /// use zxc::{compress, decompressed_size, Level};
 ///
 /// let data = b"Hello, world!";
-/// let compressed = compress(data, Level::Default)?;
+/// let compressed = compress(data, Level::Default, None)?;
 /// let size = decompressed_size(&compressed);
 /// assert_eq!(size, Some(data.len()));
 /// # Ok::<(), zxc::Error>(())
@@ -316,7 +331,7 @@ pub fn decompressed_size(compressed: &[u8]) -> Option<usize> {
 /// use zxc::{compress, decompress, Level};
 ///
 /// let data = b"Hello, world!";
-/// let compressed = compress(data, Level::Default)?;
+/// let compressed = compress(data, Level::Default, None)?;
 /// let decompressed = decompress(&compressed)?;
 /// assert_eq!(&decompressed[..], &data[..]);
 /// # Ok::<(), zxc::Error>(())
@@ -522,18 +537,27 @@ unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
 /// - Uses multiple CPU cores for parallel compression
 /// - Provides better throughput for files larger than a few MB
 ///
+/// # Arguments
+///
+/// * `input` - Path to the input file
+/// * `output` - Path to the output file
+/// * `level` - Compression level
+/// * `threads` - Number of threads (`None` = auto-detect CPU cores)
+/// * `checksum` - Optional checksum for data integrity (`None` = disabled for maximum performance)
+///
 /// # Example
 ///
 /// ```rust,no_run
-/// use zxc::{compress_file, Level, StreamCompressOptions};
+/// use zxc::{compress_file, Level};
 ///
-/// // Compress with default settings (auto-detect threads, level 3)
-/// let bytes = compress_file("input.bin", "output.zxc", Level::Default, None)?;
-/// println!("Compressed {} bytes", bytes);
+/// // Maximum performance (no checksum, auto threads)
+/// let bytes = compress_file("input.bin", "output.zxc", Level::Default, None, None)?;
 ///
-/// // Compress with specific settings
-/// let opts = StreamCompressOptions::with_level(Level::Compact).threads(4);
-/// let bytes = compress_file("input.bin", "output.zxc", opts.level, opts.threads)?;
+/// // With data integrity verification
+/// let bytes = compress_file("input.bin", "output.zxc", Level::Default, None, Some(true))?;
+///
+/// // Custom configuration
+/// let bytes = compress_file("input.bin", "output.zxc", Level::Compact, Some(4), Some(true))?;
 /// # Ok::<(), zxc::StreamError>(())
 /// ```
 pub fn compress_file<P: AsRef<Path>>(
@@ -541,12 +565,13 @@ pub fn compress_file<P: AsRef<Path>>(
     output: P,
     level: Level,
     threads: Option<usize>,
+    checksum: Option<bool>,
 ) -> StreamResult<u64> {
     let f_in = File::open(input)?;
     let f_out = File::create(output)?;
 
     let n_threads = threads.unwrap_or(0) as i32;
-    let checksum_enabled = 1; // Default to enabled
+    let checksum_enabled = if checksum.unwrap_or(false) { 1 } else { 0 };
 
     unsafe {
         let c_in = file_to_c_file_read(&f_in);
@@ -669,7 +694,7 @@ mod tests {
     #[test]
     fn test_roundtrip() {
         let data = b"Hello, ZXC! This is a test of the safe Rust wrapper.";
-        let compressed = compress(data, Level::Default).unwrap();
+        let compressed = compress(data, Level::Default, None).unwrap();
         let decompressed = decompress(&compressed).unwrap();
         assert_eq!(&decompressed[..], &data[..]);
     }
@@ -679,7 +704,7 @@ mod tests {
         let data = b"Test data with repetition: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
 
         for level in Level::all() {
-            let compressed = compress(data, *level).unwrap();
+            let compressed = compress(data, *level, None).unwrap();
             let decompressed = decompress(&compressed).unwrap();
             assert_eq!(
                 &decompressed[..],
@@ -693,7 +718,7 @@ mod tests {
     #[test]
     fn test_empty() {
         let data: &[u8] = b"";
-        let compressed = compress(data, Level::Default).unwrap();
+        let compressed = compress(data, Level::Default, None).unwrap();
         let decompressed = decompress(&compressed).unwrap();
         assert_eq!(decompressed.len(), 0);
     }
@@ -719,7 +744,7 @@ mod tests {
     #[test]
     fn test_decompressed_size() {
         let data = b"Hello, world! Testing decompressed_size function.";
-        let compressed = compress(data, Level::Default).unwrap();
+        let compressed = compress(data, Level::Default, None).unwrap();
         let size = decompressed_size(&compressed);
         assert_eq!(size, Some(data.len()));
     }
@@ -760,7 +785,7 @@ mod tests {
             .map(|i| ((i % 256) ^ ((i / 256) % 256)) as u8)
             .collect();
 
-        let compressed = compress(&data, Level::Default).unwrap();
+        let compressed = compress(&data, Level::Default, None).unwrap();
         assert!(compressed.len() < data.len()); // Should compress
 
         let decompressed = decompress(&compressed).unwrap();
@@ -800,7 +825,7 @@ mod streaming_tests {
         }
 
         // Compress
-        let compressed_size = compress_file(&input_path, &compressed_path, Level::Default, None).unwrap();
+        let compressed_size = compress_file(&input_path, &compressed_path, Level::Default, None, None).unwrap();
         assert!(compressed_size > 0);
 
         // Decompress
@@ -832,7 +857,7 @@ mod streaming_tests {
             let mut f = fs::File::create(&input_path).unwrap();
             f.write_all(&data).unwrap();
         }
-        compress_file(&input_path, &compressed_path, Level::Default, None).unwrap();
+        compress_file(&input_path, &compressed_path, Level::Default, None, None).unwrap();
 
         // Query size
         let reported_size = file_decompressed_size(&compressed_path).unwrap();
@@ -862,7 +887,7 @@ mod streaming_tests {
             let output_path = temp_path(&format!("levels_{:?}_out.bin", level));
 
             // Compress with this level
-            compress_file(&input_path, &compressed_path, *level, Some(2)).unwrap();
+            compress_file(&input_path, &compressed_path, *level, Some(2), None).unwrap();
 
             // Decompress
             decompress_file(&compressed_path, &output_path, Some(2)).unwrap();
@@ -898,7 +923,7 @@ mod streaming_tests {
         // Test with different thread counts
         for threads in [1, 2, 4] {
             // Compress
-            compress_file(&input_path, &compressed_path, Level::Default, Some(threads)).unwrap();
+            compress_file(&input_path, &compressed_path, Level::Default, Some(threads), None).unwrap();
 
             // Decompress
             let size = decompress_file(&compressed_path, &output_path, Some(threads)).unwrap();
