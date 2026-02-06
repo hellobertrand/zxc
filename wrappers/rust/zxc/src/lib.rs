@@ -39,7 +39,7 @@
 //!
 //! # Features
 //!
-//! - **Checksum verification**: Enabled by default, can be disabled for performance
+//! - **Checksum verification**: Optional, disabled by default for maximum performance
 //! - **Zero-copy decompression bound**: Query the output size before decompressing
 
 #![warn(missing_docs)]
@@ -501,32 +501,108 @@ pub enum StreamError {
 pub type StreamResult<T> = std::result::Result<T, StreamError>;
 
 /// Convert a Rust File to a C FILE* for read operations.
+/// 
+/// This function duplicates the file descriptor before passing it to fdopen,
+/// so the returned FILE* owns its own fd and must be closed with fclose().
 #[cfg(unix)]
 unsafe fn file_to_c_file_read(file: &File) -> *mut libc::FILE {
     let fd = file.as_raw_fd();
-    unsafe { libc::fdopen(fd, b"rb\0".as_ptr() as *const libc::c_char) }
+    // Duplicate the fd so C FILE* has its own ownership
+    let dup_fd = unsafe { libc::dup(fd) };
+    if dup_fd < 0 {
+        return std::ptr::null_mut();
+    }
+    unsafe { libc::fdopen(dup_fd, b"rb\0".as_ptr() as *const libc::c_char) }
 }
 
 /// Convert a Rust File to a C FILE* for write operations.
+///
+/// This function duplicates the file descriptor before passing it to fdopen,
+/// so the returned FILE* owns its own fd and must be closed with fclose().
 #[cfg(unix)]
 unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
     let fd = file.as_raw_fd();
-    unsafe { libc::fdopen(fd, b"wb\0".as_ptr() as *const libc::c_char) }
+    // Duplicate the fd so C FILE* has its own ownership
+    let dup_fd = unsafe { libc::dup(fd) };
+    if dup_fd < 0 {
+        return std::ptr::null_mut();
+    }
+    unsafe { libc::fdopen(dup_fd, b"wb\0".as_ptr() as *const libc::c_char) }
 }
 
+/// Convert a Rust File to a C FILE* for read operations (Windows).
+///
+/// # Safety
+/// 
+/// This function duplicates the file handle before passing it to the C runtime,
+/// so the returned FILE* owns its own handle and must be closed with fclose().
 #[cfg(windows)]
 unsafe fn file_to_c_file_read(file: &File) -> *mut libc::FILE {
     use std::os::windows::io::AsRawHandle;
+    
     let handle = file.as_raw_handle();
-    let fd = libc::open_osfhandle(handle as libc::intptr_t, libc::O_RDONLY);
+    
+    // Duplicate the handle so C FILE* has its own ownership
+    let mut dup_handle: *mut std::ffi::c_void = std::ptr::null_mut();
+    let result = unsafe {
+        windows_sys::Win32::Foundation::DuplicateHandle(
+            windows_sys::Win32::Foundation::GetCurrentProcess(),
+            handle as isize,
+            windows_sys::Win32::Foundation::GetCurrentProcess(),
+            &mut dup_handle as *mut _ as *mut isize,
+            0,
+            0,
+            windows_sys::Win32::System::Threading::DUPLICATE_SAME_ACCESS,
+        )
+    };
+    
+    if result == 0 {
+        return std::ptr::null_mut();
+    }
+    
+    let fd = libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_RDONLY);
+    if fd < 0 {
+        return std::ptr::null_mut();
+    }
+    
     libc::fdopen(fd, b"rb\0".as_ptr() as *const libc::c_char)
 }
 
+/// Convert a Rust File to a C FILE* for write operations (Windows).
+///
+/// # Safety
+/// 
+/// This function duplicates the file handle before passing it to the C runtime,
+/// so the returned FILE* owns its own handle and must be closed with fclose().
 #[cfg(windows)]
 unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
     use std::os::windows::io::AsRawHandle;
+    
     let handle = file.as_raw_handle();
-    let fd = libc::open_osfhandle(handle as libc::intptr_t, libc::O_WRONLY);
+    
+    // Duplicate the handle so C FILE* has its own ownership
+    let mut dup_handle: *mut std::ffi::c_void = std::ptr::null_mut();
+    let result = unsafe {
+        windows_sys::Win32::Foundation::DuplicateHandle(
+            windows_sys::Win32::Foundation::GetCurrentProcess(),
+            handle as isize,
+            windows_sys::Win32::Foundation::GetCurrentProcess(),
+            &mut dup_handle as *mut _ as *mut isize,
+            0,
+            0,
+            windows_sys::Win32::System::Threading::DUPLICATE_SAME_ACCESS,
+        )
+    };
+    
+    if result == 0 {
+        return std::ptr::null_mut();
+    }
+    
+    let fd = libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_WRONLY);
+    if fd < 0 {
+        return std::ptr::null_mut();
+    }
+    
     libc::fdopen(fd, b"wb\0".as_ptr() as *const libc::c_char)
 }
 
@@ -577,7 +653,15 @@ pub fn compress_file<P: AsRef<Path>>(
         let c_in = file_to_c_file_read(&f_in);
         let c_out = file_to_c_file_write(&f_out);
 
-        if c_in.is_null() || c_out.is_null() {
+        // Check for errors and cleanup on failure
+        if c_in.is_null() {
+            if !c_out.is_null() {
+                libc::fclose(c_out);
+            }
+            return Err(StreamError::Io(io::Error::last_os_error()));
+        }
+        if c_out.is_null() {
+            libc::fclose(c_in);
             return Err(StreamError::Io(io::Error::last_os_error()));
         }
 
@@ -589,9 +673,9 @@ pub fn compress_file<P: AsRef<Path>>(
             checksum_enabled,
         );
 
-        // Flush and close C FILE handles
-        libc::fflush(c_out);
-        // Note: We don't fclose because Rust's File owns the fd
+        // Always close C FILE handles (they own duplicated fds)
+        libc::fclose(c_in);
+        libc::fclose(c_out);
 
         if result < 0 {
             Err(StreamError::CompressionFailed)
@@ -628,7 +712,15 @@ pub fn decompress_file<P: AsRef<Path>>(
         let c_in = file_to_c_file_read(&f_in);
         let c_out = file_to_c_file_write(&f_out);
 
-        if c_in.is_null() || c_out.is_null() {
+        // Check for errors and cleanup on failure
+        if c_in.is_null() {
+            if !c_out.is_null() {
+                libc::fclose(c_out);
+            }
+            return Err(StreamError::Io(io::Error::last_os_error()));
+        }
+        if c_out.is_null() {
+            libc::fclose(c_in);
             return Err(StreamError::Io(io::Error::last_os_error()));
         }
 
@@ -639,7 +731,9 @@ pub fn decompress_file<P: AsRef<Path>>(
             checksum_enabled,
         );
 
-        libc::fflush(c_out);
+        // Always close C FILE handles (they own duplicated fds)
+        libc::fclose(c_in);
+        libc::fclose(c_out);
 
         if result < 0 {
             Err(StreamError::DecompressionFailed)

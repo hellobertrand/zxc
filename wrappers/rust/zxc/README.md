@@ -14,8 +14,8 @@ use zxc::{compress, decompress, Level};
 fn main() -> Result<(), zxc::Error> {
     let data = b"Hello, ZXC! This is some data to compress.";
     
-    // Compress with default level
-    let compressed = compress(data, Level::Default)?;
+    // Compress (no checksum for max speed)
+    let compressed = compress(data, Level::Default, None)?;
     println!("Compressed {} -> {} bytes", data.len(), compressed.len());
     
     // Decompress
@@ -40,7 +40,8 @@ fn main() -> Result<(), zxc::Error> {
 
 - **Fast decompression**: Optimized for read-heavy workloads
 - **5 compression levels**: Trade off speed vs ratio
-- **Checksum support**: Optional data integrity verification
+- **Optional checksums**: Disabled by default for maximum performance, enable for data integrity
+- **File streaming**: Multi-threaded compression/decompression for large files
 - **Zero-allocation API**: `compress_to` and `decompress_to` for buffer reuse
 - **Pure Rust API**: Safe, idiomatic interface over the C library
 
