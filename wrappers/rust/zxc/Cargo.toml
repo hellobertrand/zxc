@@ -1,0 +1,21 @@
+[package]
+name = "zxc"
+description = "Safe Rust bindings to the ZXC compression library - fast LZ77 compression"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[dependencies]
+zxc-sys = { path = "../zxc-sys" }
+thiserror = "2.0"
+
+[dev-dependencies]
+rand = "0.9"
+
+[features]
+default = []

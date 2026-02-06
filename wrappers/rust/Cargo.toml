@@ -1,0 +1,12 @@
+[workspace]
+members = ["zxc-sys", "zxc"]
+resolver = "2"
+
+[workspace.package]
+version = "0.6.0"
+authors = ["Bertrand Lebonnois"]
+edition = "2024"
+license = "BSD-3-Clause"
+repository = "https://github.com/hellobertrand/zxc"
+keywords = ["compression", "lz77", "zxc", "fast"]
+categories = ["compression", "encoding"]

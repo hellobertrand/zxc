@@ -1,0 +1,24 @@
+# Rust build artifacts
+target/
+
+# Cargo.lock for library crates (keep it for binaries)
+# Since zxc-sys and zxc are libraries, we ignore Cargo.lock
+Cargo.lock
+
+# Debug/release build output
+debug/
+release/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Backup files
+*.bak
+*.orig
