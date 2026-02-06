@@ -155,9 +155,77 @@ unsafe extern "C" {
 // Streaming API (FILE-based)
 // =============================================================================
 
-// Note: The streaming API uses FILE* pointers which are platform-specific.
-// For now, we expose only the buffer-based API which is more portable.
-// Streaming support can be added via Rust's std::io traits in the safe wrapper.
+unsafe extern "C" {
+    /// Compresses data from an input stream to an output stream.
+    ///
+    /// Uses a multi-threaded pipeline architecture for high throughput
+    /// on large files.
+    ///
+    /// # Safety
+    ///
+    /// - `f_in` must be a valid FILE* opened in "rb" mode
+    /// - `f_out` must be a valid FILE* opened in "wb" mode
+    /// - File handles must remain valid for the duration of the call
+    ///
+    /// # Arguments
+    ///
+    /// * `f_in` - Input file stream
+    /// * `f_out` - Output file stream  
+    /// * `n_threads` - Number of worker threads (0 = auto-detect CPU cores)
+    /// * `level` - Compression level (1-5)
+    /// * `checksum_enabled` - If non-zero, enables checksum verification
+    ///
+    /// # Returns
+    ///
+    /// Total compressed bytes written, or -1 on error.
+    pub fn zxc_stream_compress(
+        f_in: *mut libc::FILE,
+        f_out: *mut libc::FILE,
+        n_threads: c_int,
+        level: c_int,
+        checksum_enabled: c_int,
+    ) -> i64;
+
+    /// Decompresses data from an input stream to an output stream.
+    ///
+    /// Uses the same pipeline architecture as compression for maximum throughput.
+    ///
+    /// # Safety
+    ///
+    /// - `f_in` must be a valid FILE* opened in "rb" mode
+    /// - `f_out` must be a valid FILE* opened in "wb" mode
+    ///
+    /// # Arguments
+    ///
+    /// * `f_in` - Input file stream (compressed data)
+    /// * `f_out` - Output file stream (decompressed data)
+    /// * `n_threads` - Number of worker threads (0 = auto-detect)
+    /// * `checksum_enabled` - If non-zero, verifies checksums
+    ///
+    /// # Returns
+    ///
+    /// Total decompressed bytes written, or -1 on error.
+    pub fn zxc_stream_decompress(
+        f_in: *mut libc::FILE,
+        f_out: *mut libc::FILE,
+        n_threads: c_int,
+        checksum_enabled: c_int,
+    ) -> i64;
+
+    /// Returns the decompressed size stored in a ZXC compressed file.
+    ///
+    /// Reads the file footer to extract the original size without decompressing.
+    /// The file position is restored after reading.
+    ///
+    /// # Safety
+    ///
+    /// - `f_in` must be a valid FILE* opened in "rb" mode
+    ///
+    /// # Returns
+    ///
+    /// Original uncompressed size in bytes, or -1 on error.
+    pub fn zxc_stream_get_decompressed_size(f_in: *mut libc::FILE) -> i64;
+}
 
 // =============================================================================
 // Tests

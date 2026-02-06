@@ -11,6 +11,9 @@ categories.workspace = true
 links = "zxc"
 build = "build.rs"
 
+[dependencies]
+libc = "0.2"
+
 [build-dependencies]
 cc = "1.2"
 

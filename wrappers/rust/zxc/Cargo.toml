@@ -13,6 +13,7 @@ readme = "README.md"
 [dependencies]
 zxc-sys = { path = "../zxc-sys" }
 thiserror = "2.0"
+libc = "0.2"
 
 [dev-dependencies]
 rand = "0.9"
