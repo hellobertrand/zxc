@@ -419,11 +419,19 @@ and multitasking capabilities of your language.
 You will need only to include the extra public header `zxc_sans_io.h`, and implement
 your own behavior based on `zxc_driver.c`.
 
-### Community Bindings
+## Language Bindings
+
+Official wrappers maintained in this repository:
+
+| Language | Crate/Package | Documentation |
+|----------|---------------|---------------|
+| **Rust** | [`zxc`](https://crates.io/crates/zxc) | [README](wrappers/rust/zxc/README.md) |
+
+Community-maintained bindings:
 
 | Language | Repository                           |
 | -------- | ------------------------------------ |
-| Go       | <https://github.com/meysam81/go-zxc> |
+| **Go**       | <https://github.com/meysam81/go-zxc> |
 
 ## Safety & Quality
 * **Continuous Fuzzing**: Integrated with local ClusterFuzzLite suites.

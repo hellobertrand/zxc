@@ -1,0 +1,23 @@
+[package]
+name = "zxc-sys"
+description = "Low-level FFI bindings to the ZXC compression library"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+links = "zxc"
+build = "build.rs"
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+cc = "1.2"
+
+[features]
+default = []
+# Enable if you want to link against a system-installed ZXC library
+system = []
