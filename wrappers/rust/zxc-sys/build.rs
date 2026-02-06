@@ -16,14 +16,14 @@
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Extract version constants from zxc_constants.h
-fn extract_version(include_dir: &PathBuf) -> (u32, u32, u32) {
+fn extract_version(include_dir: &Path) -> (u32, u32, u32) {
     let header_path = include_dir.join("zxc_constants.h");
     let content = fs::read_to_string(&header_path)
         .expect("Failed to read zxc_constants.h");
-
+    
     let mut major = None;
     let mut minor = None;
     let mut patch = None;
@@ -53,7 +53,7 @@ fn extract_version(include_dir: &PathBuf) -> (u32, u32, u32) {
 }
 
 /// Extract compression level constants from zxc_constants.h
-fn extract_compression_levels(include_dir: &PathBuf) -> (i32, i32, i32, i32, i32) {
+fn extract_compression_levels(include_dir: &Path) -> (i32, i32, i32, i32, i32) {
     let header_path = include_dir.join("zxc_constants.h");
     let content = fs::read_to_string(&header_path)
         .expect("Failed to read zxc_constants.h");

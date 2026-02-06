@@ -249,14 +249,47 @@ pub fn compress_with_options(data: &[u8], options: &CompressOptions) -> Result<V
     let bound = compress_bound(data.len());
     let mut output = Vec::with_capacity(bound);
 
-    // compress_to writes exactly `written` initialized bytes to the buffer.
     let written = unsafe {
-        let slice = std::slice::from_raw_parts_mut(output.as_mut_ptr(), bound);
-        compress_to(data, slice, options)?
+        impl_compress(
+            data,
+            output.as_mut_ptr(),
+            output.capacity(),
+            options
+        )?
     };
 
     unsafe { output.set_len(written); }
     Ok(output)
+}
+
+/// Helper to handle the raw compression call.
+///
+/// # Safety
+///
+/// `dst_ptr` must be valid for writes up to `dst_cap` bytes.
+#[inline(always)]
+unsafe fn impl_compress(
+    data: &[u8],
+    dst_ptr: *mut u8,
+    dst_cap: usize,
+    options: &CompressOptions,
+) -> Result<usize> {
+    let written = unsafe {
+        zxc_sys::zxc_compress(
+            data.as_ptr() as *const c_void,
+            data.len(),
+            dst_ptr as *mut c_void,
+            dst_cap,
+            options.level as i32,
+            options.checksum as i32,
+        )
+    };
+
+    if written == 0 && !data.is_empty() {
+        return Err(Error::CompressionFailed);
+    }
+
+    Ok(written)
 }
 
 /// Compresses data into a pre-allocated buffer.
@@ -280,22 +313,9 @@ pub fn compress_with_options(data: &[u8], options: &CompressOptions) -> Result<V
 /// # Ok::<(), zxc::Error>(())
 /// ```
 pub fn compress_to(data: &[u8], output: &mut [u8], options: &CompressOptions) -> Result<usize> {
-    let written = unsafe {
-        zxc_sys::zxc_compress(
-            data.as_ptr() as *const c_void,
-            data.len(),
-            output.as_mut_ptr() as *mut c_void,
-            output.len(),
-            options.level as i32,
-            options.checksum as i32,
-        )
-    };
-
-    if written == 0 && !data.is_empty() {
-        return Err(Error::CompressionFailed);
+    unsafe {
+        impl_compress(data, output.as_mut_ptr(), output.len(), options)
     }
-
-    Ok(written)
 }
 
 /// Returns the original uncompressed size from compressed data.
@@ -348,13 +368,15 @@ pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>> {
 /// Decompresses data with full options control.
 pub fn decompress_with_options(compressed: &[u8], options: &DecompressOptions) -> Result<Vec<u8>> {
     let size = decompressed_size(compressed).ok_or(Error::InvalidData)?;
-
     let mut output = Vec::with_capacity(size);
 
-    // decompress_to writes exactly `written` initialized bytes to the buffer.
     let written = unsafe {
-        let slice = std::slice::from_raw_parts_mut(output.as_mut_ptr(), size);
-        decompress_to(compressed, slice, options)?
+        impl_decompress(
+            compressed,
+            output.as_mut_ptr(),
+            output.capacity(),
+            options
+        )?
     };
 
     if written != size {
@@ -363,6 +385,35 @@ pub fn decompress_with_options(compressed: &[u8], options: &DecompressOptions) -
 
     unsafe { output.set_len(written); }
     Ok(output)
+}
+
+/// Helper to handle the raw decompression call.
+///
+/// # Safety
+///
+/// `dst_ptr` must be valid for writes up to `dst_cap` bytes.
+#[inline(always)]
+unsafe fn impl_decompress(
+    compressed: &[u8],
+    dst_ptr: *mut u8,
+    dst_cap: usize,
+    options: &DecompressOptions,
+) -> Result<usize> {
+    let written = unsafe {
+        zxc_sys::zxc_decompress(
+            compressed.as_ptr() as *const c_void,
+            compressed.len(),
+            dst_ptr as *mut c_void,
+            dst_cap,
+            if options.verify_checksum { 1 } else { 0 },
+        )
+    };
+
+    if written == 0 && !compressed.is_empty() {
+        return Err(Error::DecompressionFailed("invalid data or buffer too small"));
+    }
+
+    Ok(written)
 }
 
 /// Decompresses data into a pre-allocated buffer.
@@ -378,21 +429,9 @@ pub fn decompress_to(
     output: &mut [u8],
     options: &DecompressOptions,
 ) -> Result<usize> {
-    let written = unsafe {
-        zxc_sys::zxc_decompress(
-            compressed.as_ptr() as *const c_void,
-            compressed.len(),
-            output.as_mut_ptr() as *mut c_void,
-            output.len(),
-            if options.verify_checksum { 1 } else { 0 },
-        )
-    };
-
-    if written == 0 && !compressed.is_empty() {
-        return Err(Error::DecompressionFailed("invalid data or buffer too small"));
+    unsafe {
+        impl_decompress(compressed, output.as_mut_ptr(), output.len(), options)
     }
-
-    Ok(written)
 }
 
 /// Returns the library version as a tuple (major, minor, patch).
@@ -524,7 +563,7 @@ unsafe fn file_to_c_file_read(file: &File) -> *mut libc::FILE {
         return std::ptr::null_mut();
     }
     
-    let file_ptr = unsafe { libc::fdopen(dup_fd, b"rb\0".as_ptr() as *const libc::c_char) };
+    let file_ptr = unsafe { libc::fdopen(dup_fd, c"rb".as_ptr()) };
     if file_ptr.is_null() {
         // fdopen failed, close the duplicated fd to avoid leak
         unsafe { libc::close(dup_fd); }
@@ -545,7 +584,7 @@ unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
         return std::ptr::null_mut();
     }
     
-    let file_ptr = unsafe { libc::fdopen(dup_fd, b"wb\0".as_ptr() as *const libc::c_char) };
+    let file_ptr = unsafe { libc::fdopen(dup_fd, c"wb".as_ptr()) };
     if file_ptr.is_null() {
         // fdopen failed, close the duplicated fd to avoid leak
         unsafe { libc::close(dup_fd); }
@@ -588,7 +627,7 @@ unsafe fn file_to_c_file_read(file: &File) -> *mut libc::FILE {
         return std::ptr::null_mut();
     }
     
-    let file_ptr = libc::fdopen(fd, b"rb\0".as_ptr() as *const libc::c_char);
+    let file_ptr = libc::fdopen(fd, c"rb".as_ptr());
     if file_ptr.is_null() {
         // fdopen failed, close the fd (which will close the handle)
         unsafe { libc::close(fd); }
@@ -631,7 +670,7 @@ unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
         return std::ptr::null_mut();
     }
     
-    let file_ptr = libc::fdopen(fd, b"wb\0".as_ptr() as *const libc::c_char);
+    let file_ptr = libc::fdopen(fd, c"wb".as_ptr());
     if file_ptr.is_null() {
         // fdopen failed, close the fd (which will close the handle)
         unsafe { libc::close(fd); }
@@ -881,9 +920,9 @@ mod tests {
         let (major, minor, patch) = version();
         assert_eq!(major, 0);
         assert_eq!(minor, 6);
-        assert_eq!(patch, 0);
+        assert_eq!(patch, 1);
 
-        assert_eq!(version_string(), "0.6.0");
+        assert_eq!(version_string(), "0.6.1");
     }
 
     #[test]
