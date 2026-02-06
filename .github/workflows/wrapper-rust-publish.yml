@@ -1,0 +1,70 @@
+name: Publish Rust Crates
+
+on:
+  workflow_dispatch:
+  release:
+    types: [ published ]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./wrappers/rust
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust Toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Verify Version Matches Release Tag
+        if: github.event_name == 'release'
+        run: |
+          RELEASE_VERSION="${{ github.event.release.tag_name }}"
+          # Remove 'v' prefix if present
+          RELEASE_VERSION="${RELEASE_VERSION#v}"
+          
+          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          
+          if [ "$RELEASE_VERSION" != "$CARGO_VERSION" ]; then
+            echo "Version mismatch: Release tag is $RELEASE_VERSION but Cargo.toml has $CARGO_VERSION"
+            exit 1
+          fi
+          
+          echo "Version matches: $RELEASE_VERSION"
+
+      - name: Run Tests
+        run: cargo test --workspace
+
+      - name: Publish zxc-sys (FFI bindings)
+        run: |
+          cd zxc-sys
+          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        continue-on-error: false
+
+      # Wait for zxc-sys to be available on crates.io before publishing zxc
+      - name: Wait for zxc-sys to propagate
+        run: sleep 30
+
+      - name: Publish zxc (safe wrapper)
+        run: |
+          cd zxc
+          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        continue-on-error: false
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "Successfully published:"
+          echo "- zxc-sys (FFI bindings)"
+          echo "- zxc (safe wrapper)"
+          echo ""
+          echo "Crates are now available on crates.io!"
