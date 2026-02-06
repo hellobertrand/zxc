@@ -8,7 +8,7 @@
 
 //! Safe Rust bindings to the ZXC compression library.
 //!
-//! ZXC is a fast LZ77-based compression library optimized for high decompression speed.
+//! ZXC is a fast compression library optimized for high decompression speed.
 //! This crate provides a safe, idiomatic Rust API.
 //!
 //! # Quick Start

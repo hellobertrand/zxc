@@ -15,7 +15,87 @@
 //! On x86_64: Compiles `_default`, `_avx2`, and `_avx512` variants
 
 use std::env;
+use std::fs;
 use std::path::PathBuf;
+
+/// Extract version constants from zxc_constants.h
+fn extract_version(include_dir: &PathBuf) -> (u32, u32, u32) {
+    let header_path = include_dir.join("zxc_constants.h");
+    let content = fs::read_to_string(&header_path)
+        .expect("Failed to read zxc_constants.h");
+
+    let mut major = None;
+    let mut minor = None;
+    let mut patch = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        
+        // Parse lines like: #define ZXC_VERSION_MAJOR 0
+        if trimmed.starts_with("#define") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 3 {
+                match parts[1] {
+                    "ZXC_VERSION_MAJOR" => major = parts[2].parse().ok(),
+                    "ZXC_VERSION_MINOR" => minor = parts[2].parse().ok(),
+                    "ZXC_VERSION_PATCH" => patch = parts[2].parse().ok(),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    (
+        major.expect("ZXC_VERSION_MAJOR not found"),
+        minor.expect("ZXC_VERSION_MINOR not found"),
+        patch.expect("ZXC_VERSION_PATCH not found"),
+    )
+}
+
+/// Extract compression level constants from zxc_constants.h
+fn extract_compression_levels(include_dir: &PathBuf) -> (i32, i32, i32, i32, i32) {
+    let header_path = include_dir.join("zxc_constants.h");
+    let content = fs::read_to_string(&header_path)
+        .expect("Failed to read zxc_constants.h");
+
+    let mut fastest = None;
+    let mut fast = None;
+    let mut default = None;
+    let mut balanced = None;
+    let mut compact = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        
+        // Parse lines like: ZXC_LEVEL_FASTEST = 1,
+        if trimmed.starts_with("ZXC_LEVEL_") {
+            let parts: Vec<&str> = trimmed.split('=').collect();
+            if parts.len() >= 2 {
+                let name = parts[0].trim();
+                // Extract number, removing comma and comments
+                let value_str = parts[1].split(&[',', '/'][..]).next().unwrap().trim();
+                let value: Option<i32> = value_str.parse().ok();
+                
+                match name {
+                    "ZXC_LEVEL_FASTEST" => fastest = value,
+                    "ZXC_LEVEL_FAST" => fast = value,
+                    "ZXC_LEVEL_DEFAULT" => default = value,
+                    "ZXC_LEVEL_BALANCED" => balanced = value,
+                    "ZXC_LEVEL_COMPACT" => compact = value,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    (
+        fastest.expect("ZXC_LEVEL_FASTEST not found"),
+        fast.expect("ZXC_LEVEL_FAST not found"),
+        default.expect("ZXC_LEVEL_DEFAULT not found"),
+        balanced.expect("ZXC_LEVEL_BALANCED not found"),
+        compact.expect("ZXC_LEVEL_COMPACT not found"),
+    )
+}
 
 fn main() {
     // Check if we should use system library instead of compiling from source
@@ -44,6 +124,20 @@ fn main() {
         "ZXC include directory not found: {:?}",
         include_dir
     );
+
+    // Extract version from header and make it available to lib.rs
+    let (major, minor, patch) = extract_version(&include_dir);
+    println!("cargo:rustc-env=ZXC_VERSION_MAJOR={}", major);
+    println!("cargo:rustc-env=ZXC_VERSION_MINOR={}", minor);
+    println!("cargo:rustc-env=ZXC_VERSION_PATCH={}", patch);
+
+    // Extract compression levels from header and make them available to lib.rs
+    let (fastest, fast, default, balanced, compact) = extract_compression_levels(&include_dir);
+    println!("cargo:rustc-env=ZXC_LEVEL_FASTEST={}", fastest);
+    println!("cargo:rustc-env=ZXC_LEVEL_FAST={}", fast);
+    println!("cargo:rustc-env=ZXC_LEVEL_DEFAULT={}", default);
+    println!("cargo:rustc-env=ZXC_LEVEL_BALANCED={}", balanced);
+    println!("cargo:rustc-env=ZXC_LEVEL_COMPACT={}", compact);
 
     let target = env::var("TARGET").unwrap_or_default();
     let is_arm64 = target.contains("aarch64") || target.contains("arm64");

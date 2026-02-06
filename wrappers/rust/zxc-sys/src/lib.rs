@@ -32,28 +32,66 @@ use std::os::raw::c_void;
 // ZXC Version Constants
 // =============================================================================
 
-pub const ZXC_VERSION_MAJOR: u32 = 0;
-pub const ZXC_VERSION_MINOR: u32 = 6;
-pub const ZXC_VERSION_PATCH: u32 = 0;
+// Version constants - automatically extracted from zxc_constants.h by build.rs
+const fn parse_version(s: &str) -> u32 {
+    let bytes = s.as_bytes();
+    let mut result = 0u32;
+    let mut i = 0;
+    while i < bytes.len() {
+        let digit = bytes[i];
+        if digit >= b'0' && digit <= b'9' {
+            result = result * 10 + (digit - b'0') as u32;
+        }
+        i += 1;
+    }
+    result
+}
+
+pub const ZXC_VERSION_MAJOR: u32 = parse_version(env!("ZXC_VERSION_MAJOR"));
+pub const ZXC_VERSION_MINOR: u32 = parse_version(env!("ZXC_VERSION_MINOR"));
+pub const ZXC_VERSION_PATCH: u32 = parse_version(env!("ZXC_VERSION_PATCH"));
 
 // =============================================================================
 // Compression Levels
 // =============================================================================
 
+// Helper function to parse integer from string literal at compile time
+const fn parse_i32(s: &str) -> i32 {
+    let bytes = s.as_bytes();
+    let mut result = 0i32;
+    let mut i = 0;
+    let mut sign = 1;
+
+    if i < bytes.len() && bytes[i] == b'-' {
+        sign = -1;
+        i += 1;
+    }
+
+    while i < bytes.len() {
+        let digit = bytes[i];
+        if digit >= b'0' && digit <= b'9' {
+            result = result * 10 + (digit - b'0') as i32;
+        }
+        i += 1;
+    }
+    result * sign
+}
+
+// Compression level constants - automatically extracted from zxc_constants.h by build.rs
 /// Fastest compression, best for real-time applications
-pub const ZXC_LEVEL_FASTEST: c_int = 1;
+pub const ZXC_LEVEL_FASTEST: i32 = parse_i32(env!("ZXC_LEVEL_FASTEST"));
 
 /// Fast compression, good for real-time applications
-pub const ZXC_LEVEL_FAST: c_int = 2;
+pub const ZXC_LEVEL_FAST: i32 = parse_i32(env!("ZXC_LEVEL_FAST"));
 
 /// Recommended: ratio > LZ4, decode speed > LZ4
-pub const ZXC_LEVEL_DEFAULT: c_int = 3;
+pub const ZXC_LEVEL_DEFAULT: i32 = parse_i32(env!("ZXC_LEVEL_DEFAULT"));
 
 /// Good ratio, good decode speed
-pub const ZXC_LEVEL_BALANCED: c_int = 4;
+pub const ZXC_LEVEL_BALANCED: i32 = parse_i32(env!("ZXC_LEVEL_BALANCED"));
 
 /// High density. Best for storage/firmware/assets.
-pub const ZXC_LEVEL_COMPACT: c_int = 5;
+pub const ZXC_LEVEL_COMPACT: i32 = parse_i32(env!("ZXC_LEVEL_COMPACT"));
 
 // =============================================================================
 // Buffer-Based API
