@@ -171,7 +171,7 @@ target_compile_definitions(zxc_lib PRIVATE
 # Coverage flags
 if(ZXC_ENABLE_COVERAGE)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(zxc_lib PRIVATE --coverage)
+        target_compile_options(zxc_lib PRIVATE --coverage -fprofile-update=atomic)
         target_link_options(zxc_lib PRIVATE --coverage)
     endif()
 endif()
