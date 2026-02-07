@@ -39,8 +39,8 @@ jobs:
         # Capture coverage data
         lcov --capture --directory . --output-file coverage.info
         
-        # Filter out system headers, external libraries, and test files
-        lcov --remove coverage.info '/usr/*' '*/tests/*' '*/include/rapidhash.h' --output-file coverage.info --ignore-errors unused
+        # Filter out system headers, external libraries, CLI frontend, and test files
+        lcov --remove coverage.info '/usr/*' '*/tests/*' '*/cli/*' '*/include/rapidhash.h' --output-file coverage.info --ignore-errors unused
         
         # Output file list
         lcov --list coverage.info
