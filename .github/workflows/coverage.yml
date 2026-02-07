@@ -1,0 +1,53 @@
+name: Coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y lcov
+
+    - name: Configure CMake
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DZXC_ENABLE_COVERAGE=ON -DZXC_NATIVE_ARCH=OFF
+
+    - name: Build
+      run: cmake --build build --parallel
+
+    - name: Run Unit Tests
+      working-directory: build
+      run: ctest --output-on-failure
+
+    - name: Run CLI Tests
+      run: |
+        chmod +x tests/test_cli.sh
+        ./tests/test_cli.sh build/zxc
+
+    - name: Generate Coverage Report
+      run: |
+        # Capture coverage data
+        lcov --capture --directory . --output-file coverage.info
+        
+        # Filter out system headers, external libraries, and test files
+        lcov --remove coverage.info '/usr/*' '*/tests/*' '*/include/rapidhash.h' --output-file coverage.info
+        
+        # Output summary
+        lcov --list coverage.info
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage.info
+        fail_ci_if_error: true

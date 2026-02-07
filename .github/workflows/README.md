@@ -19,6 +19,11 @@ Comprehensive build matrix testing across multiple architectures including 32-bi
 
 Runs performance benchmarks using LZbench on Ubuntu and macOS. Integrates ZXC into the LZbench framework and tests compression/decompression performance against the Silesia corpus.
 
+### coverage.yml - Code Coverage
+**Triggers:** Push to main, pull requests, manual dispatch
+
+Builds the project with coverage instrumentation (`-DZXC_ENABLE_COVERAGE=ON`), runs unit and CLI tests, and generates a coverage report using `lcov`. The report is then uploaded to Codecov for analysis.
+
 ### fuzzing.yml - Fuzz Testing
 **Triggers:** Pull requests, scheduled (every 3 days), manual dispatch
 
@@ -28,6 +33,11 @@ Executes fuzz testing using ClusterFuzzLite with multiple sanitizers (address, u
 **Triggers:** Push to main, pull requests, manual dispatch
 
 Performs static analysis using Cppcheck and Clang Static Analyzer. Runs memory leak detection with Valgrind to ensure code quality and identify potential bugs.
+
+### wrapper-rust-publish.yml - Publish Rust Crates
+**Triggers:** Release published, manual dispatch
+
+Automates the publishing of Rust crates to crates.io. It verifies the version matches the release tag, runs tests, and then publishes `zxc-sys` (FFI bindings) followed by `zxc` (safe wrapper).
 
 ### security.yml - Code Security
 **Triggers:** Push to main, pull requests

@@ -26,6 +26,7 @@ set(ZXC_PGO_MODE "OFF" CACHE STRING "Profile-Guided Optimization mode (OFF/GENER
 set_property(CACHE ZXC_PGO_MODE PROPERTY STRINGS OFF GENERATE USE)
 option(ZXC_BUILD_CLI "Build the command-line interface" ON)
 option(ZXC_BUILD_TESTS "Build unit tests" ON)
+option(ZXC_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 
 # =============================================================================
 # C Standard
@@ -35,7 +36,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 # Check for LTO support
-if(ZXC_ENABLE_LTO)
+if(ZXC_ENABLE_LTO AND NOT ZXC_ENABLE_COVERAGE)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT result OUTPUT output)
     if(result)
@@ -44,6 +45,10 @@ if(ZXC_ENABLE_LTO)
         message(WARNING "LTO/IPO is not supported: ${output}")
         set(ZXC_ENABLE_LTO OFF)
     endif()
+elseif(ZXC_ENABLE_COVERAGE)
+    message(STATUS "Code coverage enabled: Disabling LTO and PGO.")
+    set(ZXC_ENABLE_LTO OFF)
+    set(ZXC_PGO_MODE "OFF")
 endif()
 
 # =============================================================================
@@ -163,6 +168,14 @@ target_compile_definitions(zxc_lib PRIVATE
     $<$<NOT:$<C_COMPILER_ID:MSVC>>:_GNU_SOURCE>
 )
 
+# Coverage flags
+if(ZXC_ENABLE_COVERAGE)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(zxc_lib PRIVATE --coverage)
+        target_link_options(zxc_lib PRIVATE --coverage)
+    endif()
+endif()
+
 # Enable LTO cleanly
 if(ZXC_ENABLE_LTO)
     set_property(TARGET zxc_lib PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
@@ -196,6 +209,14 @@ if(ZXC_BUILD_CLI)
         $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
         $<$<NOT:$<C_COMPILER_ID:MSVC>>:_GNU_SOURCE>
     )
+
+    # Coverage flags for CLI
+    if(ZXC_ENABLE_COVERAGE)
+        if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(zxc PRIVATE --coverage)
+            target_link_options(zxc PRIVATE --coverage)
+        endif()
+    endif()
 
     # Enable LTO cleanly
     if(ZXC_ENABLE_LTO)
@@ -253,6 +274,14 @@ if(ZXC_BUILD_TESTS)
     target_compile_options(zxc_test PRIVATE
         $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>
     )
+    
+    # Coverage flags for Tests
+    if(ZXC_ENABLE_COVERAGE)
+        if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(zxc_test PRIVATE --coverage)
+            target_link_options(zxc_test PRIVATE --coverage)
+        endif()
+    endif()
     
     # Profile-Guided Optimization for tests
     if(NOT MSVC)
