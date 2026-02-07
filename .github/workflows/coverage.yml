@@ -1,0 +1,70 @@
+name: Code Coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y lcov
+
+    - name: Configure CMake
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DZXC_ENABLE_COVERAGE=ON -DZXC_NATIVE_ARCH=OFF
+
+    - name: Build
+      run: cmake --build build --parallel
+
+    - name: Run Unit Tests
+      working-directory: build
+      run: ctest --output-on-failure
+
+    - name: Run CLI Tests
+      run: |
+        chmod +x tests/test_cli.sh
+        ./tests/test_cli.sh build/zxc
+
+    - name: Generate Coverage Report
+      run: |
+        # Capture coverage data
+        lcov --capture --directory . --output-file coverage.info
+        
+        # Filter out system headers, external libraries, and test files
+        lcov --remove coverage.info '/usr/*' '*/tests/*' '*/include/rapidhash.h' --output-file coverage.info --ignore-errors unused
+        
+        # Output file list
+        lcov --list coverage.info
+
+    - name: Generate HTML Report
+      run: genhtml coverage.info --output-directory coverage-report
+
+    - name: Publish Coverage Summary
+      run: |
+        echo "## Code Coverage Summary" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        lcov --summary coverage.info 2>&1 | tail -n +2 >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+
+    - name: Upload Coverage Artifact
+      uses: actions/upload-artifact@v6
+      with:
+        name: coverage-report
+        path: coverage-report
+        retention-days: 10
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage.info
+        fail_ci_if_error: true
