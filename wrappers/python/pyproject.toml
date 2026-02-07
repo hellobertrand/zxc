@@ -1,0 +1,15 @@
+[build-system]
+requires = ["scikit-build-core>=0.9"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "zxc"
+version = "0.0.1"
+description = "ZXC: Package for high-performance, lossless, asymmetric compressions"
+readme = "README.md"
+
+[project.urls]
+Homepage = "https://github.com/hellobertrand/zxc"
+
+[tool.scikit-build]
+wheel.packages = ["src/zxc"]
