@@ -830,6 +830,60 @@ int test_global_checksum_order() {
     return 1;
 }
 
+// Test zxc_get_decompressed_size
+int test_get_decompressed_size() {
+    printf("=== TEST: Unit - zxc_get_decompressed_size ===\n");
+
+    // 1. Compress some data, then check decompressed size
+    size_t src_size = 64 * 1024;
+    uint8_t* src = malloc(src_size);
+    gen_lz_data(src, src_size);
+
+    size_t max_dst = zxc_compress_bound(src_size);
+    uint8_t* compressed = malloc(max_dst);
+
+    size_t comp_size = zxc_compress(src, src_size, compressed, max_dst, 3, 0);
+    if (comp_size == 0) {
+        printf("Failed: Compression returned 0\n");
+        free(src);
+        free(compressed);
+        return 0;
+    }
+
+    size_t reported = zxc_get_decompressed_size(compressed, comp_size);
+    if (reported != src_size) {
+        printf("Failed: Expected %zu, got %zu\n", src_size, reported);
+        free(src);
+        free(compressed);
+        return 0;
+    }
+    printf("  [PASS] Valid compressed data\n");
+
+    // 2. Too-small buffer
+    if (zxc_get_decompressed_size(compressed, 4) != 0) {
+        printf("Failed: Should return 0 for too-small buffer\n");
+        free(src);
+        free(compressed);
+        return 0;
+    }
+    printf("  [PASS] Too-small buffer\n");
+
+    // 3. Invalid magic word
+    uint8_t bad_buf[64] = {0};
+    if (zxc_get_decompressed_size(bad_buf, sizeof(bad_buf)) != 0) {
+        printf("Failed: Should return 0 for invalid magic\n");
+        free(src);
+        free(compressed);
+        return 0;
+    }
+    printf("  [PASS] Invalid magic word\n");
+
+    printf("PASS\n\n");
+    free(src);
+    free(compressed);
+    return 1;
+}
+
 int main() {
     srand(42);  // Fixed seed for reproducibility
     int total_failures = 0;
@@ -921,6 +975,7 @@ int main() {
     if (!test_eof_block_structure()) total_failures++;
     if (!test_header_checksum()) total_failures++;
     if (!test_global_checksum_order()) total_failures++;
+    if (!test_get_decompressed_size()) total_failures++;
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);
