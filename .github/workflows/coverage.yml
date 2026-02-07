@@ -40,7 +40,7 @@ jobs:
         lcov --capture --directory . --output-file coverage.info
         
         # Filter out system headers, external libraries, and test files
-        lcov --remove coverage.info '/usr/*' '*/tests/*' '*/include/rapidhash.h' --output-file coverage.info
+        lcov --remove coverage.info '/usr/*' '*/tests/*' '*/include/rapidhash.h' --output-file coverage.info --ignore-errors unused
         
         # Output summary
         lcov --list coverage.info

@@ -128,7 +128,7 @@ target_include_directories(zxc_lib
 # =============================================================================
 if(NOT MSVC)
     target_compile_options(zxc_lib PRIVATE
-        -O3 
+        $<$<NOT:$<BOOL:${ZXC_ENABLE_COVERAGE}>>:-O3>
         -Wall -Wextra 
         -fomit-frame-pointer 
         -fstrict-aliasing
@@ -278,7 +278,6 @@ if(ZXC_BUILD_TESTS)
     # Coverage flags for Tests
     if(ZXC_ENABLE_COVERAGE)
         if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-            target_compile_options(zxc_test PRIVATE --coverage)
             target_link_options(zxc_test PRIVATE --coverage)
         endif()
     endif()
