@@ -757,7 +757,14 @@ int test_global_checksum_order() {
     long comp_sz = ftell(f_comp);
     rewind(f_comp);
     uint8_t* comp_buf = malloc(comp_sz);
-    fread(comp_buf, 1, comp_sz, f_comp);
+    if (fread(comp_buf, 1, comp_sz, f_comp) != (size_t)comp_sz) {
+        printf("[FAIL] Failed to read compressed data\n");
+        free(val_buf);
+        free(comp_buf);
+        fclose(f_in);
+        fclose(f_comp);
+        return 0;
+    }
 
     // 4. Parse Blocks to identify Block 1 and Block 2
     // File Header: ZXC_FILE_HEADER_SIZE bytes
