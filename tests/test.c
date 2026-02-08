@@ -781,10 +781,12 @@ int test_global_checksum_order() {
     size_t len2 = ZXC_BLOCK_HEADER_SIZE + bh2.comp_size + ZXC_BLOCK_CHECKSUM_SIZE;
 
     // Ensure we have at least 2 full blocks + EOF + Global Checksum
-    if (off2 + len2 > comp_sz) {
+    if (off2 + len2 > (size_t)comp_sz) {
         printf("[FAIL] Compressed size too small for test\n");
         free(val_buf);
         free(comp_buf);
+        fclose(f_in);
+        fclose(f_comp);
         return 0;
     }
 
