@@ -407,7 +407,7 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
 
     if (total > 0) {
         // Known size: show percentage bar
-        int percent = (bytes_processed * 100) / total;
+        int percent = (int)((bytes_processed * 100) / total);
         if (percent > 100) percent = 100;
 
         const int bar_width = 20;
