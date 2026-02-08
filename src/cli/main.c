@@ -589,7 +589,13 @@ int main(int argc, char** argv) {
                 break;
             case 'b':
                 mode = MODE_BENCHMARK;
-                if (optarg) iterations = atoi(optarg);
+                if (optarg) {
+                    iterations = atoi(optarg);
+                    if (iterations < 1 || iterations > 10000) {
+                        fprintf(stderr, "Error: iterations must be between 1 and 10000\n");
+                        return 1;
+                    }
+                }
                 break;
             case '1':
             case '2':
@@ -600,6 +606,10 @@ int main(int argc, char** argv) {
                 break;
             case 'T':
                 num_threads = atoi(optarg);
+                if (num_threads < 0 || num_threads > 1024) {
+                    fprintf(stderr, "Error: num_threads must be between 0 and 1024\n");
+                    return 1;
+                }
                 break;
             case 'k':
                 keep_input = 1;
@@ -669,7 +679,18 @@ int main(int argc, char** argv) {
             return 1;
         }
         const char* in_path = argv[optind];
-        if (optind + 1 < argc) iterations = atoi(argv[optind + 1]);
+        if (optind + 1 < argc) {
+            iterations = atoi(argv[optind + 1]);
+            if (iterations < 1 || iterations > 10000) {
+                zxc_log("Error: iterations must be between 1 and 10000\n");
+                return 1;
+            }
+        }
+
+        if (num_threads < 0 || num_threads > 1024) {
+            zxc_log("Error: num_threads must be between 0 and 1024\n");
+            return 1;
+        }
 
         int ret = 1;
         uint8_t* ram = NULL;
