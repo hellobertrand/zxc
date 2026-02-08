@@ -813,21 +813,21 @@ int main(int argc, char** argv) {
     FILE* f_in = stdin;
     FILE* f_out = stdout;
     char* in_path = NULL;
+    char resolved_in_path[4096] = {0};
     char out_path[1024] = {0};
     int use_stdin = 1, use_stdout = 0;
 
     if (optind < argc && strcmp(argv[optind], "-") != 0) {
         in_path = argv[optind];
 
-        char resolved_path[4096];  // Sufficiently large buffer
-        if (zxc_validate_input_path(in_path, resolved_path, sizeof(resolved_path)) != 0) {
+        if (zxc_validate_input_path(in_path, resolved_in_path, sizeof(resolved_in_path)) != 0) {
             zxc_log("Error: Invalid input file '%s': %s\n", in_path, strerror(errno));
             return 1;
         }
 
-        f_in = fopen(resolved_path, "rb");
+        f_in = fopen(resolved_in_path, "rb");
         if (!f_in) {
-            zxc_log("Error open input %s: %s\n", resolved_path, strerror(errno));
+            zxc_log("Error open input %s: %s\n", resolved_in_path, strerror(errno));
             return 1;
         }
         use_stdin = 0;
@@ -1027,7 +1027,7 @@ int main(int argc, char** argv) {
         } else {
             zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
         }
-        if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY) unlink(in_path);
+        if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY) unlink(resolved_in_path);
     } else {
         if (mode == MODE_INTEGRITY) {
             fprintf(stderr, "%s: FAILED\n", in_path ? in_path : "<stdin>");
