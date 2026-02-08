@@ -37,7 +37,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.22.0
+        run: python -m pip install cibuildwheel>=2.22.0
 
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
@@ -48,11 +48,15 @@ jobs:
           # Skip 32-bit builds and musllinux
           CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
           CIBW_ARCHS: "${{ matrix.arch }}"
+          # Disable native architecture optimization for portability
+          CIBW_ENVIRONMENT: "CMAKE_ARGS='-DZXC_NATIVE_ARCH=OFF'"
+          # Test wheels after building
+          CIBW_TEST_COMMAND: "python -c 'import zxc; data=b\"test\"*100; c=zxc.compress(data); assert zxc.decompress(c,len(data))==data'"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-${{ matrix.os }}-${{ matrix.arch }}
           path: ./wrappers/python/wheelhouse/*.whl
 
   build_sdist:
@@ -80,9 +84,39 @@ jobs:
           name: sdist
           path: ./wrappers/python/dist/*.tar.gz
 
+  test_wheels:
+    name: Test wheels on ${{ matrix.os }}
+    needs: [build_wheels]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.9", "3.12", "3.13"]
+    
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: wheelhouse
+          pattern: wheels-*
+          merge-multiple: true
+      
+      - name: Install wheel
+        run: pip install --no-index --find-links wheelhouse zxc
+      
+      - name: Test import and basic functionality
+        run: |
+          python -c "import zxc; print('ZXC version:', zxc.__name__)"
+          python -c "import zxc; data=b'Hello, World!'*1000; compressed=zxc.compress(data, level=3); decompressed=zxc.decompress(compressed, len(data)); assert data == decompressed; print('Round-trip test passed!')"
+
   publish:
     name: Publish to PyPI
-    needs: [build_wheels, build_sdist]
+    needs: [build_wheels, build_sdist, test_wheels]
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
     permissions:
