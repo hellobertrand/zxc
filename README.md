@@ -294,7 +294,7 @@ Community-maintained bindings:
 
 ## License & Credits
 
-**ZXC Library** Copyright © 2025-2026, Bertrand Lebonnois.
+**ZXC** Copyright © 2025-2026, Bertrand Lebonnois.
 Licensed under the **BSD 3-Clause License**. See LICENSE for details.
 
 **Third-Party Components:**

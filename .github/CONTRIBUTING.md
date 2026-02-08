@@ -13,6 +13,18 @@ Add this to your commits:
 git commit -s -m "Your commit message"
 ```
 
+## License Headers
+To maintain legal clarity and recognize all contributors, every new source file (.c, .h, .rs, .py, etc.) must include the following header at the very top:
+
+```C
+/*
+ * ZXC - High-performance lossless compression
+ *
+ * Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+```
+
 ## Quick Start
 
 ### Build and Test
