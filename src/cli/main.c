@@ -750,9 +750,12 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
         rewind(fm_out);
         fread(c_dat, 1, (size_t)c_sz, fm_out);
-#endif
         fclose(fm_in);
         fclose(fm_out);
+#else
+        fclose(fm_in);
+        fclose(fm_out);
+#endif
 
 #ifdef _WIN32
         FILE* fc = tmpfile();
