@@ -94,10 +94,11 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
     char* curr = argv[optind];
     if (curr[0] == '-' && curr[1] == '-') {
         char* name_end = strchr(curr + 2, '=');
-        size_t name_len = name_end ? (size_t)(name_end - (curr + 2)) : strlen(curr + 2);
+        const size_t name_len = name_end ? (size_t)(name_end - (curr + 2)) : strlen(curr + 2);
         const struct option* p = longopts;
         while (p && p->name) {
-            if (strncmp(curr + 2, p->name, name_len) == 0 && p->name[name_len] == '\0') {
+            const size_t opt_len = strlen(p->name);
+            if (name_len == opt_len && strncmp(curr + 2, p->name, name_len) == 0) {
                 optind++;
                 if (p->has_arg == required_argument) {
                     if (name_end)
