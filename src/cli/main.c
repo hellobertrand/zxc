@@ -94,10 +94,11 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
     char* curr = argv[optind];
     if (curr[0] == '-' && curr[1] == '-') {
         char* name_end = strchr(curr + 2, '=');
-        size_t name_len = name_end ? (size_t)(name_end - (curr + 2)) : strlen(curr + 2);
+        const size_t name_len = name_end ? (size_t)(name_end - (curr + 2)) : strlen(curr + 2);
         const struct option* p = longopts;
         while (p && p->name) {
-            if (strncmp(curr + 2, p->name, name_len) == 0 && p->name[name_len] == '\0') {
+            const size_t opt_len = strlen(p->name);
+            if (name_len == opt_len && strncmp(curr + 2, p->name, name_len) == 0) {
                 optind++;
                 if (p->has_arg == required_argument) {
                     if (name_end)
@@ -332,7 +333,8 @@ void print_version(void) {
         snprintf(sys_info, sizeof(sys_info), "%s-%s", ZXC_ARCH, ZXC_OS);
 
 #endif
-    printf("zxc v%s (%s) by Bertrand Lebonnois & al.\nBSD 3-Clause License\n", ZXC_LIB_VERSION_STR, sys_info);
+    printf("zxc v%s (%s) by Bertrand Lebonnois & al.\nBSD 3-Clause License\n", ZXC_LIB_VERSION_STR,
+           sys_info);
 }
 
 typedef enum {
@@ -405,7 +407,7 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
 
     if (total > 0) {
         // Known size: show percentage bar
-        int percent = (bytes_processed * 100) / total;
+        int percent = (int)((bytes_processed * 100) / total);
         if (percent > 100) percent = 100;
 
         const int bar_width = 20;
@@ -587,17 +589,27 @@ int main(int argc, char** argv) {
                 break;
             case 'b':
                 mode = MODE_BENCHMARK;
-                if (optarg) iterations = atoi(optarg);
+                if (optarg) {
+                    iterations = atoi(optarg);
+                    if (iterations < 1 || iterations > 10000) {
+                        fprintf(stderr, "Error: iterations must be between 1 and 10000\n");
+                        return 1;
+                    }
+                }
                 break;
             case '1':
             case '2':
             case '3':
             case '4':
             case '5':
-                level = opt - '0';
+                if (opt >= '1' && opt <= '5') level = opt - '0';
                 break;
             case 'T':
                 num_threads = atoi(optarg);
+                if (num_threads < 0 || num_threads > 1024) {
+                    fprintf(stderr, "Error: num_threads must be between 0 and 1024\n");
+                    return 1;
+                }
                 break;
             case 'k':
                 keep_input = 1;
@@ -667,7 +679,18 @@ int main(int argc, char** argv) {
             return 1;
         }
         const char* in_path = argv[optind];
-        if (optind + 1 < argc) iterations = atoi(argv[optind + 1]);
+        if (optind + 1 < argc) {
+            iterations = atoi(argv[optind + 1]);
+            if (iterations < 1 || iterations > 10000) {
+                zxc_log("Error: iterations must be between 1 and 10000\n");
+                return 1;
+            }
+        }
+
+        if (num_threads < 0 || num_threads > 1024) {
+            zxc_log("Error: num_threads must be between 0 and 1024\n");
+            return 1;
+        }
 
         int ret = 1;
         uint8_t* ram = NULL;
@@ -750,9 +773,12 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
         rewind(fm_out);
         fread(c_dat, 1, (size_t)c_sz, fm_out);
-#endif
         fclose(fm_in);
         fclose(fm_out);
+#else
+        fclose(fm_in);
+        fclose(fm_out);
+#endif
 
 #ifdef _WIN32
         FILE* fc = tmpfile();
@@ -810,21 +836,21 @@ int main(int argc, char** argv) {
     FILE* f_in = stdin;
     FILE* f_out = stdout;
     char* in_path = NULL;
+    char resolved_in_path[4096] = {0};
     char out_path[1024] = {0};
     int use_stdin = 1, use_stdout = 0;
 
     if (optind < argc && strcmp(argv[optind], "-") != 0) {
         in_path = argv[optind];
 
-        char resolved_path[4096];  // Sufficiently large buffer
-        if (zxc_validate_input_path(in_path, resolved_path, sizeof(resolved_path)) != 0) {
+        if (zxc_validate_input_path(in_path, resolved_in_path, sizeof(resolved_in_path)) != 0) {
             zxc_log("Error: Invalid input file '%s': %s\n", in_path, strerror(errno));
             return 1;
         }
 
-        f_in = fopen(resolved_path, "rb");
+        f_in = fopen(resolved_in_path, "rb");
         if (!f_in) {
-            zxc_log("Error open input %s: %s\n", resolved_path, strerror(errno));
+            zxc_log("Error open input %s: %s\n", resolved_in_path, strerror(errno));
             return 1;
         }
         use_stdin = 0;
@@ -1024,7 +1050,8 @@ int main(int argc, char** argv) {
         } else {
             zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
         }
-        if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY) unlink(in_path);
+        if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY)
+            unlink(resolved_in_path);
     } else {
         if (mode == MODE_INTEGRITY) {
             fprintf(stderr, "%s: FAILED\n", in_path ? in_path : "<stdin>");

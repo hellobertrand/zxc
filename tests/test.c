@@ -757,7 +757,14 @@ int test_global_checksum_order() {
     long comp_sz = ftell(f_comp);
     rewind(f_comp);
     uint8_t* comp_buf = malloc(comp_sz);
-    fread(comp_buf, 1, comp_sz, f_comp);
+    if (fread(comp_buf, 1, comp_sz, f_comp) != (size_t)comp_sz) {
+        printf("[FAIL] Failed to read compressed data\n");
+        free(val_buf);
+        free(comp_buf);
+        fclose(f_in);
+        fclose(f_comp);
+        return 0;
+    }
 
     // 4. Parse Blocks to identify Block 1 and Block 2
     // File Header: ZXC_FILE_HEADER_SIZE bytes
@@ -774,10 +781,12 @@ int test_global_checksum_order() {
     size_t len2 = ZXC_BLOCK_HEADER_SIZE + bh2.comp_size + ZXC_BLOCK_CHECKSUM_SIZE;
 
     // Ensure we have at least 2 full blocks + EOF + Global Checksum
-    if (off2 + len2 > comp_sz) {
+    if (off2 + len2 > (size_t)comp_sz) {
         printf("[FAIL] Compressed size too small for test\n");
         free(val_buf);
         free(comp_buf);
+        fclose(f_in);
+        fclose(f_comp);
         return 0;
     }
 
