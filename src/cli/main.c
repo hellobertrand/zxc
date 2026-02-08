@@ -333,7 +333,8 @@ void print_version(void) {
         snprintf(sys_info, sizeof(sys_info), "%s-%s", ZXC_ARCH, ZXC_OS);
 
 #endif
-    printf("zxc v%s (%s) by Bertrand Lebonnois & al.\nBSD 3-Clause License\n", ZXC_LIB_VERSION_STR, sys_info);
+    printf("zxc v%s (%s) by Bertrand Lebonnois & al.\nBSD 3-Clause License\n", ZXC_LIB_VERSION_STR,
+           sys_info);
 }
 
 typedef enum {
@@ -595,7 +596,7 @@ int main(int argc, char** argv) {
             case '3':
             case '4':
             case '5':
-                level = opt - '0';
+                if (opt >= '1' && opt <= '5') level = opt - '0';
                 break;
             case 'T':
                 num_threads = atoi(optarg);
@@ -1028,7 +1029,8 @@ int main(int argc, char** argv) {
         } else {
             zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
         }
-        if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY) unlink(resolved_in_path);
+        if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY)
+            unlink(resolved_in_path);
     } else {
         if (mode == MODE_INTEGRITY) {
             fprintf(stderr, "%s: FAILED\n", in_path ? in_path : "<stdin>");
