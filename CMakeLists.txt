@@ -62,12 +62,20 @@ macro(zxc_add_variant suffix flags)
     add_library(zxc_compress${suffix} OBJECT src/lib/zxc_compress.c)
     target_compile_options(zxc_compress${suffix} PRIVATE ${flags})
     target_compile_definitions(zxc_compress${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix})
+    # For static builds, define ZXC_STATIC_DEFINE
+    if(NOT BUILD_SHARED_LIBS)
+        target_compile_definitions(zxc_compress${suffix} PRIVATE ZXC_STATIC_DEFINE)
+    endif()
     # Inherit include directories
     target_include_directories(zxc_compress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
     add_library(zxc_decompress${suffix} OBJECT src/lib/zxc_decompress.c)
     target_compile_options(zxc_decompress${suffix} PRIVATE ${flags})
     target_compile_definitions(zxc_decompress${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix})
+    # For static builds, define ZXC_STATIC_DEFINE
+    if(NOT BUILD_SHARED_LIBS)
+        target_compile_definitions(zxc_decompress${suffix} PRIVATE ZXC_STATIC_DEFINE)
+    endif()
     target_include_directories(zxc_decompress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     
     list(APPEND ZXC_VARIANT_OBJECTS $<TARGET_OBJECTS:zxc_compress${suffix}> $<TARGET_OBJECTS:zxc_decompress${suffix}>)
@@ -141,6 +149,9 @@ if(BUILD_SHARED_LIBS)
             VISIBILITY_INLINES_HIDDEN YES
         )
     endif()
+else()
+    # For static libraries, define ZXC_STATIC_DEFINE to avoid dllimport/dllexport
+    target_compile_definitions(zxc_lib PUBLIC ZXC_STATIC_DEFINE)
 endif()
 
 # =============================================================================
