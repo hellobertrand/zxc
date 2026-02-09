@@ -1,7 +1,7 @@
 name: "CodeQL Config"
 
 paths-ignore:
-  - 'include/xxhash.h'
+  - 'include/rapidhash.h'
 
 queries:
   - uses: security-and-quality
