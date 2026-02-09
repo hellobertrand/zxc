@@ -65,6 +65,11 @@ macro(zxc_add_variant suffix flags)
     # For static builds, define ZXC_STATIC_DEFINE
     if(NOT BUILD_SHARED_LIBS)
         target_compile_definitions(zxc_compress${suffix} PRIVATE ZXC_STATIC_DEFINE)
+    else()
+        # Hide variant symbols from shared library public ABI
+        if(NOT MSVC)
+            target_compile_options(zxc_compress${suffix} PRIVATE -fvisibility=hidden)
+        endif()
     endif()
     # Inherit include directories
     target_include_directories(zxc_compress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -75,6 +80,11 @@ macro(zxc_add_variant suffix flags)
     # For static builds, define ZXC_STATIC_DEFINE
     if(NOT BUILD_SHARED_LIBS)
         target_compile_definitions(zxc_decompress${suffix} PRIVATE ZXC_STATIC_DEFINE)
+    else()
+        # Hide variant symbols from shared library public ABI
+        if(NOT MSVC)
+            target_compile_options(zxc_decompress${suffix} PRIVATE -fvisibility=hidden)
+        endif()
     endif()
     target_include_directories(zxc_decompress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     
