@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'c-cpp' ]
+        language: [ 'c-cpp', 'rust' ]
 
     steps:
     - name: Checkout Repository
@@ -39,10 +39,15 @@ jobs:
 
     - name: Build Project
       run: |
-        mkdir -p build
-        cd build
-        cmake -DCMAKE_BUILD_TYPE=Release ..
-        make -j$(nproc)
+        if [ "${{ matrix.language }}" = "c-cpp" ]; then
+          mkdir -p build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release ..
+          make -j$(nproc)
+        elif [ "${{ matrix.language }}" = "rust" ]; then
+          cd wrappers/rust
+          cargo build --workspace --all-targets
+        fi
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v4
