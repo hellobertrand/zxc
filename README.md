@@ -180,6 +180,7 @@ make -j$(nproc)
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `BUILD_SHARED_LIBS` | OFF | Build shared libraries instead of static (`libzxc.so`, `libzxc.dylib`, `zxc.dll`) |
 | `ZXC_NATIVE_ARCH` | ON | Enable `-march=native` for maximum performance |
 | `ZXC_ENABLE_LTO` | ON | Enable Link-Time Optimization (LTO) |
 | `ZXC_PGO_MODE` | OFF | Profile-Guided Optimization mode (`OFF`, `GENERATE`, `USE`) |
@@ -188,6 +189,9 @@ make -j$(nproc)
 | `ZXC_ENABLE_COVERAGE` | OFF | Enable code coverage generation (disables LTO/PGO) |
 
 ```bash
+# Build shared library
+cmake -DBUILD_SHARED_LIBS=ON ..
+
 # Portable build (without -march=native)
 cmake -DZXC_NATIVE_ARCH=OFF ..
 

@@ -11,6 +11,28 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#ifdef ZXC_STATIC_DEFINE
+#  define ZXC_EXPORT
+#else
+#  ifndef ZXC_EXPORT
+#    ifdef zxc_lib_EXPORTS
+        // We are building this library
+#      ifdef _WIN32
+#        define ZXC_EXPORT __declspec(dllexport)
+#      else
+#        define ZXC_EXPORT __attribute__((visibility("default")))
+#      endif
+#    else
+        // We are using this library
+#      ifdef _WIN32
+#        define ZXC_EXPORT __declspec(dllimport)
+#      else
+#        define ZXC_EXPORT __attribute__((visibility("default")))
+#      endif
+#    endif
+#  endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -42,7 +64,7 @@ extern "C" {
  *
  * @return          Total compressed bytes written, or -1 if an error occurred.
  */
-int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads, const int level,
+ZXC_EXPORT int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads, const int level,
                             const int checksum_enabled);
 
 /**
@@ -60,7 +82,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads, const 
  * @return          Total decompressed bytes written, or -1 if an error
  * occurred.
  */
-int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads,
+ZXC_EXPORT int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads,
                               const int checksum_enabled);
 
 /**
@@ -74,7 +96,7 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads,
  * @return The original uncompressed size in bytes, or -1 if the file is invalid
  *         or an I/O error occurred.
  */
-int64_t zxc_stream_get_decompressed_size(FILE* f_in);
+ZXC_EXPORT int64_t zxc_stream_get_decompressed_size(FILE* f_in);
 
 /**
  * @brief Progress callback function type.
@@ -106,7 +128,7 @@ typedef void (*zxc_progress_callback_t)(uint64_t bytes_processed, uint64_t bytes
  *
  * @return          Total compressed bytes written, or -1 if an error occurred.
  */
-int64_t zxc_stream_compress_ex(FILE* f_in, FILE* f_out, const int n_threads, const int level,
+ZXC_EXPORT int64_t zxc_stream_compress_ex(FILE* f_in, FILE* f_out, const int n_threads, const int level,
                                const int checksum_enabled, zxc_progress_callback_t progress_cb,
                                void* user_data);
 
@@ -124,7 +146,7 @@ int64_t zxc_stream_compress_ex(FILE* f_in, FILE* f_out, const int n_threads, con
  *
  * @return          Total decompressed bytes written, or -1 if an error occurred.
  */
-int64_t zxc_stream_decompress_ex(FILE* f_in, FILE* f_out, const int n_threads,
+ZXC_EXPORT int64_t zxc_stream_decompress_ex(FILE* f_in, FILE* f_out, const int n_threads,
                                  const int checksum_enabled, zxc_progress_callback_t progress_cb,
                                  void* user_data);
 
