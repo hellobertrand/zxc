@@ -10,28 +10,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-
-#ifdef ZXC_STATIC_DEFINE
-#  define ZXC_EXPORT
-#else
-#  ifndef ZXC_EXPORT
-#    ifdef zxc_lib_EXPORTS
-        // We are building this library
-#      ifdef _WIN32
-#        define ZXC_EXPORT __declspec(dllexport)
-#      else
-#        define ZXC_EXPORT __attribute__((visibility("default")))
-#      endif
-#    else
-        // We are using this library
-#      ifdef _WIN32
-#        define ZXC_EXPORT __declspec(dllimport)
-#      else
-#        define ZXC_EXPORT __attribute__((visibility("default")))
-#      endif
-#    endif
-#  endif
-#endif
+#include "zxc_export.h"
 
 #ifdef __cplusplus
 extern "C" {

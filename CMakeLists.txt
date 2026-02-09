@@ -133,17 +133,6 @@ target_include_directories(zxc_lib
 
 # Symbol visibility for shared libraries
 if(BUILD_SHARED_LIBS)
-    # Generate export header
-    include(GenerateExportHeader)
-    generate_export_header(zxc_lib
-        BASE_NAME ZXC
-        EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/include/zxc_export.h
-    )
-    
-    target_include_directories(zxc_lib PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-    )
-    
     # Set visibility for GCC/Clang
     if(NOT MSVC)
         target_compile_options(zxc_lib PRIVATE -fvisibility=hidden)
@@ -152,14 +141,6 @@ if(BUILD_SHARED_LIBS)
             VISIBILITY_INLINES_HIDDEN YES
         )
     endif()
-    
-    # Windows DLL support
-    if(WIN32)
-        target_compile_definitions(zxc_lib PRIVATE ZXC_DLL_EXPORTS)
-    endif()
-else()
-    # For static builds, define empty export macro
-    target_compile_definitions(zxc_lib PUBLIC ZXC_STATIC_DEFINE)
 endif()
 
 # =============================================================================
@@ -387,13 +368,6 @@ install(DIRECTORY include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     FILES_MATCHING PATTERN "*.h"
 )
-
-# Install generated export header if building shared libraries
-if(BUILD_SHARED_LIBS)
-    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/zxc_export.h
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    )
-endif()
 
 if(ZXC_BUILD_CLI)
     install(TARGETS zxc
