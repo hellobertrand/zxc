@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+
 #include "zxc_export.h"
 
 #ifdef __cplusplus
@@ -43,8 +44,8 @@ extern "C" {
  *
  * @return          Total compressed bytes written, or -1 if an error occurred.
  */
-ZXC_EXPORT int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads, const int level,
-                            const int checksum_enabled);
+ZXC_EXPORT int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads,
+                                       const int level, const int checksum_enabled);
 
 /**
  * @brief Decompresses data from an input stream to an output stream.
@@ -62,7 +63,7 @@ ZXC_EXPORT int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_thre
  * occurred.
  */
 ZXC_EXPORT int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads,
-                              const int checksum_enabled);
+                                         const int checksum_enabled);
 
 /**
  * @brief Returns the decompressed size stored in a ZXC compressed file.
@@ -107,9 +108,9 @@ typedef void (*zxc_progress_callback_t)(uint64_t bytes_processed, uint64_t bytes
  *
  * @return          Total compressed bytes written, or -1 if an error occurred.
  */
-ZXC_EXPORT int64_t zxc_stream_compress_ex(FILE* f_in, FILE* f_out, const int n_threads, const int level,
-                               const int checksum_enabled, zxc_progress_callback_t progress_cb,
-                               void* user_data);
+ZXC_EXPORT int64_t zxc_stream_compress_ex(FILE* f_in, FILE* f_out, const int n_threads,
+                                          const int level, const int checksum_enabled,
+                                          zxc_progress_callback_t progress_cb, void* user_data);
 
 /**
  * @brief Decompresses data from an input stream to an output stream (with progress callback).
@@ -126,8 +127,8 @@ ZXC_EXPORT int64_t zxc_stream_compress_ex(FILE* f_in, FILE* f_out, const int n_t
  * @return          Total decompressed bytes written, or -1 if an error occurred.
  */
 ZXC_EXPORT int64_t zxc_stream_decompress_ex(FILE* f_in, FILE* f_out, const int n_threads,
-                                 const int checksum_enabled, zxc_progress_callback_t progress_cb,
-                                 void* user_data);
+                                            const int checksum_enabled,
+                                            zxc_progress_callback_t progress_cb, void* user_data);
 
 #ifdef __cplusplus
 }

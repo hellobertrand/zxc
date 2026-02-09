@@ -10,6 +10,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include "zxc_export.h"
 
 #ifdef __cplusplus
@@ -92,8 +93,8 @@ typedef struct {
  * @return 0 on success, or -1 if memory allocation fails for any of the
  * internal buffers.
  */
-ZXC_EXPORT int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, const int level,
-                  const int checksum_enabled);
+ZXC_EXPORT int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode,
+                             const int level, const int checksum_enabled);
 
 /**
  * @brief Frees resources associated with a ZXC compression context.
@@ -118,7 +119,8 @@ ZXC_EXPORT void zxc_cctx_free(zxc_cctx_t* ctx);
  * @return The number of bytes written (ZXC_FILE_HEADER_SIZE) on success,
  *         or -1 if the destination capacity is insufficient.
  */
-ZXC_EXPORT int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity, const int has_checksum);
+ZXC_EXPORT int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity,
+                                     const int has_checksum);
 
 /**
  * @brief Validates and reads the ZXC file header from a source buffer.
@@ -133,8 +135,8 @@ ZXC_EXPORT int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity, co
  * @return 0 if the header is valid, -1 otherwise (e.g., buffer too small,
  * invalid magic word, or incorrect version).
  */
-ZXC_EXPORT int zxc_read_file_header(const uint8_t* src, const size_t src_size, size_t* out_block_size,
-                         int* out_has_checksum);
+ZXC_EXPORT int zxc_read_file_header(const uint8_t* src, const size_t src_size,
+                                    size_t* out_block_size, int* out_has_checksum);
 
 /**
  * @struct zxc_block_header_t
@@ -179,7 +181,8 @@ typedef struct {
  * @return The number of bytes written (ZXC_BLOCK_HEADER_SIZE) on success,
  *         or -1 if the destination buffer capacity is insufficient.
  */
-ZXC_EXPORT int zxc_write_block_header(uint8_t* dst, const size_t dst_capacity, const zxc_block_header_t* bh);
+ZXC_EXPORT int zxc_write_block_header(uint8_t* dst, const size_t dst_capacity,
+                                      const zxc_block_header_t* bh);
 
 /**
  * @brief Read and parses a ZXC block header from a source buffer.
@@ -197,7 +200,8 @@ ZXC_EXPORT int zxc_write_block_header(uint8_t* dst, const size_t dst_capacity, c
  * @return 0 on success, or -1 if the source buffer is smaller than the
  *         required block header size.
  */
-ZXC_EXPORT int zxc_read_block_header(const uint8_t* src, const size_t src_size, zxc_block_header_t* bh);
+ZXC_EXPORT int zxc_read_block_header(const uint8_t* src, const size_t src_size,
+                                     zxc_block_header_t* bh);
 
 /**
  * @brief Writes the ZXC file footer.
@@ -209,8 +213,9 @@ ZXC_EXPORT int zxc_read_block_header(const uint8_t* src, const size_t src_size, 
  * @param[in] checksum_enabled Flag indicating if checksum is enabled.
  * @return Number of bytes written (12) on success, or -1 on failure.
  */
-ZXC_EXPORT int zxc_write_file_footer(uint8_t* dst, const size_t dst_capacity, const uint64_t src_size,
-                          const uint32_t global_hash, const int checksum_enabled);
+ZXC_EXPORT int zxc_write_file_footer(uint8_t* dst, const size_t dst_capacity,
+                                     const uint64_t src_size, const uint32_t global_hash,
+                                     const int checksum_enabled);
 
 #ifdef __cplusplus
 }
