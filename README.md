@@ -29,7 +29,7 @@ By performing heavy analysis upfront, the encoder produces a layout optimized fo
 *   **Build Time:** You generally compress only once (on CI/CD).
 *   **Run Time:** You decompress millions of times (on every user's device). **ZXC respects this asymmetry.**
 
-[👉 **Read the Technical Whitepaper**](./WHITEPAPER.md)
+[👉 **Read the Technical Whitepaper**](docs/WHITEPAPER.md)
 
 
 ## Benchmarks
