@@ -11,7 +11,7 @@ categories.workspace = true
 readme = "README.md"
 
 [dependencies]
-zxc-sys = { path = "../zxc-sys", version = "0.6.1" }
+zxc-sys = { path = "../zxc-sys", version = "0.6.2" }
 thiserror = "2.0"
 libc = "0.2"
 
