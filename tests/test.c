@@ -920,6 +920,11 @@ int main() {
     if (!test_round_trip("Small Input (50 bytes)", buffer, 50, 3, 0)) total_failures++;
     if (!test_round_trip("Empty Input (0 bytes)", buffer, 0, 3, 0)) total_failures++;
 
+    // Edge Cases: 1-byte file
+    gen_random_data(buffer, 1);
+    if (!test_round_trip("1-byte Input", buffer, 1, 3, 0)) total_failures++;
+    if (!test_round_trip("1-byte Input (with checksum)", buffer, 1, 3, 1)) total_failures++;
+
     printf("\n--- Test Coverage: Checksum ---\n");
     gen_lz_data(buffer, BUF_SIZE);
 
