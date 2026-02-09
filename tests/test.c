@@ -330,6 +330,65 @@ int test_invalid_arguments() {
     return 1;
 }
 
+// Checks behavior with truncated compressed input
+int test_truncated_input() {
+    printf("=== TEST: Unit - Truncated Input (Stream) ===\n");
+
+    const size_t SRC_SIZE = 1024;
+    uint8_t src[1024];
+    gen_lz_data(src, SRC_SIZE);
+
+    size_t cap = zxc_compress_bound(SRC_SIZE);
+    uint8_t* compressed = malloc(cap);
+    uint8_t* decomp_buf = malloc(SRC_SIZE);
+
+    if (!compressed || !decomp_buf) {
+        free(compressed);
+        free(decomp_buf);
+        return 0;
+    }
+
+    size_t comp_sz = zxc_compress(src, SRC_SIZE, compressed, cap, 3, 1);
+    if (comp_sz == 0) {
+        printf("Prepare failed\n");
+        free(compressed);
+        free(decomp_buf);
+        return 0;
+    }
+
+    // Try decompressing with progressively cropped size
+    // 1. Cut off the Footer (last ZXC_FILE_FOOTER_SIZE bytes)
+    if (comp_sz > ZXC_FILE_FOOTER_SIZE) {
+        if (zxc_decompress(compressed, comp_sz - ZXC_FILE_FOOTER_SIZE, decomp_buf, SRC_SIZE, 1) != 0) {
+            printf("Failed: Should fail when footer is missing\n");
+            free(compressed);
+            free(decomp_buf);
+            return 0;
+        }
+    }
+
+    // 2. Cut off half the file
+    if (zxc_decompress(compressed, comp_sz / 2, decomp_buf, SRC_SIZE, 1) != 0) {
+        printf("Failed: Should fail when stream is truncated by half\n");
+        free(compressed);
+        free(decomp_buf);
+        return 0;
+    }
+
+    // 3. Cut off just 1 byte
+    if (zxc_decompress(compressed, comp_sz - 1, decomp_buf, SRC_SIZE, 1) != 0) {
+        printf("Failed: Should fail when stream is truncated by 1 byte\n");
+        free(compressed);
+        free(decomp_buf);
+        return 0;
+    }
+
+    printf("PASS\n\n");
+    free(compressed);
+    free(decomp_buf);
+    return 1;
+}
+
 // Checks behavior if writing fails
 int test_io_failures() {
     printf("=== TEST: Unit - I/O Failures ===\n");
@@ -981,6 +1040,7 @@ int main() {
 
     if (!test_max_compressed_size_logic()) total_failures++;
     if (!test_invalid_arguments()) total_failures++;
+    if (!test_truncated_input()) total_failures++;
     if (!test_io_failures()) total_failures++;
     if (!test_thread_params()) total_failures++;
     if (!test_bit_reader()) total_failures++;
