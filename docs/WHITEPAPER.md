@@ -486,7 +486,7 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 **Figure A**: Decompression Throughput & Storage Ratio (Normalized to LZ4)
 
-![Benchmark Graph ARM64](docs/images/benchmark_arm64_0.6.0.png)
+![Benchmark Graph ARM64](./images/benchmark_arm64_0.6.0.png)
 
 
 ### 7.1 Client ARM64 Summary (Apple Silicon)
@@ -607,7 +607,7 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 **Figure B**: Decompression Efficiency : Cycles Per Byte Comparaison
 
-![Benchmark Cycles Per Byte](docs/images/benchmark_decompression_cycles_0.6.0.png)
+![Benchmark Cycles Per Byte](./images/benchmark_decompression_cycles_0.6.0.png)
 
 
 #### 7.4.1 ARM64 Architecture (Apple Silicon)
