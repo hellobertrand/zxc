@@ -36,6 +36,11 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+# Enable _GNU_SOURCE for ftello/fseeko on Linux
+if(UNIX)
+    add_compile_definitions(_GNU_SOURCE)
+endif()
+
 # Check for LTO support
 if(ZXC_ENABLE_LTO AND NOT ZXC_ENABLE_COVERAGE)
     include(CheckIPOSupported)
