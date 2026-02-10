@@ -82,18 +82,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
 
-      - name: Configure CMake
+      - name: Configure, Build & Test (Static & Shared)
+        shell: bash
         run: |
           # Initialize variables
           EXTRA_ARGS="-DZXC_NATIVE_ARCH=OFF" # Disable native arch detection (Runtime Dispatch enabled)
           
-          # WINDOWS CONFIGURATION
-          if [ "${{ matrix.os }}" = "windows" ]; then
-             # Visual Studio specific syntax for architecture (-A)
-             cmake -S . -B build -A ${{ matrix.cmake_arch }} $EXTRA_ARGS
-          
-          # LINUX / MAC CONFIGURATION
-          else
+          # Setup Environment for Linux/Mac (Flags & Cross-compilation)
+          if [ "${{ matrix.os }}" != "windows" ]; then
              # Handle C flags (e.g., -m32)
              if [ ! -z "${{ matrix.arch_flags }}" ]; then
                 export CFLAGS="${{ matrix.arch_flags }}"
@@ -117,11 +113,37 @@ jobs:
              if [ ! -z "${{ matrix.cross_strip }}" ]; then
                 EXTRA_ARGS="$EXTRA_ARGS -DCMAKE_STRIP=/usr/bin/${{ matrix.cross_strip }}"
              fi
-
-             # Standard CMake command
-             cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $EXTRA_ARGS
           fi
-        shell: bash
 
-      - name: Build
-        run: cmake --build build --config Release --parallel
+          # Iterate over Library Types
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+              
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+              
+              CURRENT_ARGS="$EXTRA_ARGS -DBUILD_SHARED_LIBS=$SHARED_FLAG"
+
+              # 1. Configure
+              if [ "${{ matrix.os }}" = "windows" ]; then
+                  # Visual Studio Generator
+                  cmake -S . -B $BUILD_DIR -A ${{ matrix.cmake_arch }} $CURRENT_ARGS
+              else
+                  # Ninja/Makefiles
+                  cmake -S . -B $BUILD_DIR -DCMAKE_BUILD_TYPE=Release $CURRENT_ARGS
+              fi
+              
+              # 2. Build
+              cmake --build $BUILD_DIR --config Release --parallel
+              
+              # 3. Test (Skip if cross-compiling)
+              if [ -z "${{ matrix.cross_compiler_c }}" ]; then
+                  echo "Running Tests for $LIB_TYPE..."
+                  ctest --test-dir $BUILD_DIR -C Release --output-on-failure
+              else
+                  echo "Skipping tests for $LIB_TYPE (Cross-compilation)"
+              fi
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
