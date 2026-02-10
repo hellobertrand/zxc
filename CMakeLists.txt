@@ -377,6 +377,12 @@ endif()
 # =============================================================================
 include(GNUInstallDirs)
 
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/zxc.pc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/zxc.pc
+    @ONLY
+)
+
 install(TARGETS zxc_lib
     EXPORT zxc-targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -395,6 +401,10 @@ if(ZXC_BUILD_CLI)
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 endif()
+
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/zxc.pc
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+)
 
 # =============================================================================
 # Summary
