@@ -53,6 +53,56 @@ elseif(ZXC_ENABLE_COVERAGE)
 endif()
 
 # =============================================================================
+# PGO Validation
+# =============================================================================
+if(ZXC_PGO_MODE STREQUAL "GENERATE")
+    message(STATUS "PGO: Generating profile data to ${CMAKE_BINARY_DIR}/pgo")
+elseif(ZXC_PGO_MODE STREQUAL "USE")
+    if(NOT EXISTS "${CMAKE_BINARY_DIR}/pgo")
+        message(FATAL_ERROR "PGO: Profile data not found. Run with ZXC_PGO_MODE=GENERATE first.")
+    endif()
+    message(STATUS "PGO: Using profile data from ${CMAKE_BINARY_DIR}/pgo")
+endif()
+
+# =============================================================================
+# Helper: Apply common build flags (LTO, PGO, coverage, dead-code strip)
+# =============================================================================
+function(zxc_apply_common_flags target)
+    target_compile_definitions(${target} PRIVATE
+        $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
+        $<$<NOT:$<C_COMPILER_ID:MSVC>>:_GNU_SOURCE>
+    )
+    if(NOT MSVC)
+        target_compile_options(${target} PRIVATE
+            $<$<BOOL:${ZXC_NATIVE_ARCH}>:-march=native>
+        )
+        if(APPLE)
+            target_link_options(${target} PRIVATE -Wl,-dead_strip)
+        else()
+            target_link_options(${target} PRIVATE -Wl,--gc-sections)
+        endif()
+        if(ZXC_PGO_MODE STREQUAL "GENERATE")
+            target_compile_options(${target} PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
+            target_link_options(${target} PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
+        elseif(ZXC_PGO_MODE STREQUAL "USE")
+            target_compile_options(${target} PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo -fprofile-correction)
+            target_link_options(${target} PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo)
+        endif()
+    endif()
+    if(ZXC_ENABLE_LTO)
+        set_property(TARGET ${target} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        if(NOT MSVC)
+            target_compile_options(${target} PRIVATE -flto)
+            target_link_options(${target} PRIVATE -flto)
+        endif()
+    endif()
+    if(ZXC_ENABLE_COVERAGE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${target} PRIVATE --coverage)
+        target_link_options(${target} PRIVATE --coverage)
+    endif()
+endfunction()
+
+# =============================================================================
 # Core Library & Runtime Dispatch
 # =============================================================================
 
@@ -165,66 +215,22 @@ else()
 endif()
 
 # =============================================================================
-# Compiler-specific options (using generator expressions)
+# Library-specific compiler options
 # =============================================================================
 if(NOT MSVC)
     target_compile_options(zxc_lib PRIVATE
         $<$<NOT:$<BOOL:${ZXC_ENABLE_COVERAGE}>>:-O3>
-        -Wall -Wextra 
-        -fomit-frame-pointer 
-        -fstrict-aliasing
-        # Native Arch
-        $<$<BOOL:${ZXC_NATIVE_ARCH}>:-march=native>
-        # Dead code elimination
+        -Wall -Wextra -fomit-frame-pointer -fstrict-aliasing
         -ffunction-sections -fdata-sections
     )
-    
-    # Profile-Guided Optimization
-    if(ZXC_PGO_MODE STREQUAL "GENERATE")
-        target_compile_options(zxc_lib PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
-        target_link_options(zxc_lib PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
-        message(STATUS "PGO: Generating profile data to ${CMAKE_BINARY_DIR}/pgo")
-    elseif(ZXC_PGO_MODE STREQUAL "USE")
-        if(EXISTS "${CMAKE_BINARY_DIR}/pgo")
-            target_compile_options(zxc_lib PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo -fprofile-correction)
-            target_link_options(zxc_lib PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo)
-            message(STATUS "PGO: Using profile data from ${CMAKE_BINARY_DIR}/pgo")
-        else()
-            message(FATAL_ERROR "PGO: Profile data not found. Run with ZXC_PGO_MODE=GENERATE first.")
-        endif()
-    endif()
-
-    # Linker options for Dead Code Stripping
-    if(APPLE)
-        target_link_options(zxc_lib PRIVATE -Wl,-dead_strip)
-    else()
-        target_link_options(zxc_lib PRIVATE -Wl,--gc-sections)
+    if(ZXC_ENABLE_COVERAGE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(zxc_lib PRIVATE -fprofile-update=atomic)
     endif()
 else()
     target_compile_options(zxc_lib PRIVATE /O2 /W3)
-    target_compile_definitions(zxc_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
-target_compile_definitions(zxc_lib PRIVATE
-    $<$<NOT:$<C_COMPILER_ID:MSVC>>:_GNU_SOURCE>
-)
-
-# Coverage flags
-if(ZXC_ENABLE_COVERAGE)
-    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(zxc_lib PRIVATE --coverage -fprofile-update=atomic)
-        target_link_options(zxc_lib PRIVATE --coverage)
-    endif()
-endif()
-
-# Enable LTO cleanly
-if(ZXC_ENABLE_LTO)
-    set_property(TARGET zxc_lib PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    if(NOT MSVC)
-        target_compile_options(zxc_lib PRIVATE -flto)
-        target_link_options(zxc_lib PRIVATE -flto)
-    endif()
-endif()
+zxc_apply_common_flags(zxc_lib)
 
 # Threading support
 find_package(Threads REQUIRED)
@@ -236,65 +242,17 @@ target_link_libraries(zxc_lib PRIVATE Threads::Threads)
 if(ZXC_BUILD_CLI)
     add_executable(zxc src/cli/main.c)
     target_link_libraries(zxc PRIVATE zxc_lib)
-    
-    # Math library on Unix
     if(UNIX)
         target_link_libraries(zxc PRIVATE m)
     endif()
-    
-    # Propagate compile options and definitions
-    target_compile_options(zxc PRIVATE
-        $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>
-    )
-    target_compile_definitions(zxc PRIVATE
-        $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
-        $<$<NOT:$<C_COMPILER_ID:MSVC>>:_GNU_SOURCE>
-    )
 
-    # Coverage flags for CLI
-    if(ZXC_ENABLE_COVERAGE)
-        if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-            target_compile_options(zxc PRIVATE --coverage)
-            target_link_options(zxc PRIVATE --coverage)
-        endif()
-    endif()
+    zxc_apply_common_flags(zxc)
 
-    # Enable LTO cleanly
-    if(ZXC_ENABLE_LTO)
-        set_property(TARGET zxc PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-        if(NOT MSVC)
-            target_compile_options(zxc PRIVATE -flto)
-            target_link_options(zxc PRIVATE -flto)
-        endif()
-    endif()
-    
-    # Profile-Guided Optimization for CLI
-    if(NOT MSVC)
-        if(ZXC_PGO_MODE STREQUAL "GENERATE")
-            target_compile_options(zxc PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
-            target_link_options(zxc PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
-        elseif(ZXC_PGO_MODE STREQUAL "USE")
-            target_compile_options(zxc PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo -fprofile-correction)
-            target_link_options(zxc PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo)
-        endif()
-    endif()
-
-    # Linker options for Dead Code Stripping
-    if(NOT MSVC)
-        if(APPLE)
-            target_link_options(zxc PRIVATE -Wl,-dead_strip)
-        else()
-            target_link_options(zxc PRIVATE -Wl,--gc-sections)
-        endif()
-    endif()
-    
-    # Strip symbols in Release mode for smaller binary
+    # Strip symbols in Release mode
     if(NOT MSVC AND CMAKE_BUILD_TYPE STREQUAL "Release")
-        # Set default strip command if not already set (e.g., for cross-compilation)
         if(NOT CMAKE_STRIP)
             set(CMAKE_STRIP strip)
         endif()
-        
         add_custom_command(TARGET zxc POST_BUILD
             COMMAND ${CMAKE_STRIP} $<TARGET_FILE:zxc>
             COMMENT "Stripping symbols from zxc"
@@ -307,68 +265,31 @@ endif()
 # =============================================================================
 if(ZXC_BUILD_TESTS)
     enable_testing()
-    
     add_executable(zxc_test tests/test.c)
-    
-    # When building shared libraries, create a static version for tests
-    # This allows tests to access internal functions for unit testing
+
+    # When building shared libs, create a static version for tests (access to internals)
     if(BUILD_SHARED_LIBS)
-        # Create a static library specifically for tests
         add_library(zxc_lib_static STATIC
-            src/lib/zxc_common.c
-            src/lib/zxc_driver.c
-            src/lib/zxc_dispatch.c
+            src/lib/zxc_common.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c
             ${ZXC_VARIANT_OBJECTS}
         )
-        
-        # Copy all properties from the shared library
         target_include_directories(zxc_lib_static
-            PUBLIC
-                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-                $<INSTALL_INTERFACE:include>
-            PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
+            PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
         )
-        
-        # Apply same compiler settings as main library
         target_compile_options(zxc_lib_static PRIVATE
             $<TARGET_PROPERTY:zxc_lib,COMPILE_OPTIONS>
         )
-        
         target_compile_definitions(zxc_lib_static PUBLIC ZXC_STATIC_DEFINE)
         target_link_libraries(zxc_lib_static PRIVATE Threads::Threads)
-        
-        # Link tests against static library
+        zxc_apply_common_flags(zxc_lib_static)
         target_link_libraries(zxc_test PRIVATE zxc_lib_static)
     else()
-        # For static builds, use the main library
         target_link_libraries(zxc_test PRIVATE zxc_lib)
     endif()
-    
-    # Propagate compile options
-    target_compile_options(zxc_test PRIVATE
-        $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>
-    )
-    
-    # Coverage flags for Tests
-    if(ZXC_ENABLE_COVERAGE)
-        if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-            target_link_options(zxc_test PRIVATE --coverage)
-        endif()
-    endif()
-    
-    # Profile-Guided Optimization for tests
-    if(NOT MSVC)
-        if(ZXC_PGO_MODE STREQUAL "GENERATE")
-            target_compile_options(zxc_test PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
-            target_link_options(zxc_test PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
-        elseif(ZXC_PGO_MODE STREQUAL "USE")
-            target_compile_options(zxc_test PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo -fprofile-correction)
-            target_link_options(zxc_test PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo)
-        endif()
-    endif()
-    
+
     target_include_directories(zxc_test PRIVATE src/lib)
+    zxc_apply_common_flags(zxc_test)
     add_test(NAME UnitTests COMMAND zxc_test)
 endif()
 
