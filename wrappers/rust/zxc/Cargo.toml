@@ -1,5 +1,5 @@
 [package]
-name = "zxc"
+name = "zxc-compress"
 description = "Safe Rust bindings to the ZXC compression library"
 version.workspace = true
 authors.workspace = true
@@ -10,8 +10,11 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
+[lib]
+name = "zxc"
+
 [dependencies]
-zxc-sys = { path = "../zxc-sys", version = "0.6.2" }
+zxc_sys = { path = "../zxc-sys", version = "0.6.2", package = "zxc-compress-sys" }
 thiserror = "2.0"
 libc = "0.2"
 

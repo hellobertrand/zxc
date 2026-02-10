@@ -3,7 +3,7 @@ requires = ["scikit-build-core>=0.9", "setuptools_scm[toml]>=7.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "python-zxc"
+name = "zxc-compress"
 dynamic = ["version"]  
 description = "ZXC: Package for high-performance, lossless, asymmetric compressions"
 readme = "README.md"
