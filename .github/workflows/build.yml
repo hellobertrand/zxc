@@ -83,35 +83,23 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          mkdir -p release_staging
-          BUILD_DIR="build"
+          # Install to staging directory using CMake (Standard way for all OS)
+          cmake --install build --prefix release_staging --config Release
           
-          # Find and copy binary (handle both Ninja and Visual Studio generators)
-          if [ -f "$BUILD_DIR/Release/${{ matrix.artifact_name }}" ]; then
-            cp "$BUILD_DIR/Release/${{ matrix.artifact_name }}" release_staging/
-          elif [ -f "$BUILD_DIR/${{ matrix.artifact_name }}" ]; then
-            cp "$BUILD_DIR/${{ matrix.artifact_name }}" release_staging/
-          else
-            echo "Binary not found!"
-            exit 1
-          fi
-          
-          # Strip binary on Unix-like systems only
+          # Strip binary on Unix-like systems only (installed to bin/)
           if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
-            strip release_staging/${{ matrix.artifact_name }}
+            strip release_staging/bin/${{ matrix.artifact_name }}
           fi
           
-          # Copy documentation
+          # Copy documentation to root
           cp LICENSE release_staging/LICENSE.txt
           cp README.md release_staging/README.md
           
-          # Create archive (platform-specific format)
+          # Create archive
           cd release_staging
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            # Windows: use 7z (available by default on windows-latest)
             7z a ../${{ matrix.asset_name }}.zip *
           else
-            # Unix-like: use tar
             tar -czvf ../${{ matrix.asset_name }}.tar.gz *
           fi
 
