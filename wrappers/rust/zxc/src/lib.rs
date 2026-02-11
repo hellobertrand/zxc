@@ -968,10 +968,22 @@ mod streaming_tests {
     use std::io::Write;
 
     fn temp_path(name: &str) -> String {
+        let dir_name = format!("zxc_test_{}", std::process::id());
+
+        // Try the system temp directory first
         let mut path = std::env::temp_dir();
-        path.push(format!("zxc_test_{}", std::process::id()));
-        // Ensure the subdirectory exists (handles missing temp dirs on Windows CI)
-        let _ = fs::create_dir_all(&path);
+        path.push(&dir_name);
+
+        // If we can't create the directory in the system temp, fall back
+        // to a subdirectory relative to the current working directory.
+        // This happens on some Windows CI runners where TEMP is missing or
+        // points to a path the process cannot access.
+        if fs::create_dir_all(&path).is_err() {
+            path = std::env::current_dir().expect("cannot determine current directory");
+            path.push(&dir_name);
+            fs::create_dir_all(&path).expect("failed to create temp directory in current dir");
+        }
+
         path.push(name);
         path.to_string_lossy().into_owned()
     }
