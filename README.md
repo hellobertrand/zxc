@@ -298,13 +298,6 @@ int64_t result = zxc_stream_decompress(f_in, f_out, threads, checksum);
 
 ## Language Bindings
 
-Official wrappers maintained in this repository:
-
-| Language | Package Manager | Install Command | Documentation | Author |
-|----------|-----------------|-----------------|---------------|--------|
-| **Rust** | [`crates.io`](https://crates.io/crates/zxc-compress) | `cargo add zxc-compress` | [README](wrappers/rust/zxc/README.md) | [@hellobertrand](https://github.com/hellobertrand) |
-| **Python**| [`PyPI`](https://pypi.org/project/zxc-compress) | `pip install zxc-compress` | [README](wrappers/python/README.md) | [@nuberchardzer1](https://github.com/nuberchardzer1) |
-
 Community-maintained bindings:
 
 | Language | Package Manager | Install Command | Repository | Author |
