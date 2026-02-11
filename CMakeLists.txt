@@ -415,6 +415,33 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/zxc.pc
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
 )
 
+# CMake package config files for find_package(zxc)
+include(CMakePackageConfigHelpers)
+
+install(EXPORT zxc-targets
+    FILE zxc-targets.cmake
+    NAMESPACE zxc::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
+)
+
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/zxcConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
+)
+
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
+)
+
 # =============================================================================
 # Summary
 # =============================================================================
