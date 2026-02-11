@@ -303,7 +303,7 @@ static PyObject *pyzxc_stream_compress(PyObject *self, PyObject *args,
     if (nwritten < 0)
         Py_Return_Err(PyExc_RuntimeError, "an error occurred");
 
-    Py_BuildValue("L", nwritten);
+    return Py_BuildValue("L", nwritten);
 }
 
 static PyObject *pyzxc_stream_decompress(PyObject *self, PyObject *args,
@@ -361,5 +361,5 @@ static PyObject *pyzxc_stream_decompress(PyObject *self, PyObject *args,
     if (nwritten < 0)
         Py_Return_Err(PyExc_RuntimeError, "an error occurred");
 
-    Py_BuildValue("L", nwritten);
+    return Py_BuildValue("L", nwritten);
 }

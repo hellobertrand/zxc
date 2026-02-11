@@ -92,7 +92,7 @@ jobs:
           path: ./wrappers/python/dist/*.tar.gz
 
   test_wheels:
-    name: Test wheels on ${{ matrix.os }}
+    name: Test wheels on ${{ matrix.os }} ${{ matrix.python }}
     needs: [build_wheels]
     runs-on: ${{ matrix.os }}
     strategy:
