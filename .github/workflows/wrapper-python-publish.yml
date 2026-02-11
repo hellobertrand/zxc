@@ -49,13 +49,12 @@ jobs:
         working-directory: ./wrappers/python
 
       - name: Build wheels
-        run: python -m cibuildwheel --output-dir wheelhouse
-        working-directory: ./wrappers/python
+        run: python -m cibuildwheel wrappers/python --output-dir wheelhouse
         env:
           # Build for Python 3.10-3.13
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
-          # Skip 32-bit builds, musllinux, and Python 3.10 on Windows (missing Development.Module)
-          CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_* cp310-win*"
+          # Skip 32-bit, musllinux, and Python 3.10-3.11 on Windows (missing Development.Module)
+          CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_* cp310-win* cp311-win*"
           CIBW_ARCHS: "${{ matrix.arch }}"
           CIBW_ENVIRONMENT: "CMAKE_ARGS='-DZXC_NATIVE_ARCH=OFF' SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.version.outputs.version }}"
 
@@ -63,7 +62,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.arch }}
-          path: ./wrappers/python/wheelhouse/*.whl
+          path: ./wheelhouse/*.whl
 
   build_sdist:
     name: Build source distribution
