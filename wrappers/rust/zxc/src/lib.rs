@@ -969,7 +969,10 @@ mod streaming_tests {
 
     fn temp_path(name: &str) -> String {
         let mut path = std::env::temp_dir();
-        path.push(format!("zxc_test_{}", name));
+        path.push(format!("zxc_test_{}", std::process::id()));
+        // Ensure the subdirectory exists (handles missing temp dirs on Windows CI)
+        let _ = fs::create_dir_all(&path);
+        path.push(name);
         path.to_string_lossy().into_owned()
     }
 
