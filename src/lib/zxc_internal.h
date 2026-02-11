@@ -66,7 +66,7 @@ extern "C" {
 
 /*
  * ============================================================================
- * LIKELY/UNLIKELY, PREFETCH, MEMCPY/MEMSET, ALIGN, ALWAYS_INLINE
+ * LIKELY/UNLIKELY, PREFETCH, MEMCPY/MEMSET, ALIGN, ALWAYS_INLINE, ENDIANNESS
  * ============================================================================
  */
 
@@ -114,6 +114,41 @@ extern "C" {
 #define ZXC_ALIGN(x) _Alignas(x)
 #else
 #define ZXC_ALIGN(x)
+#endif
+#endif
+
+/*
+ * Endianness detection
+ */
+#ifndef ZXC_LITTLE_ENDIAN
+#if defined(_WIN32) || defined(__LITTLE_ENDIAN__) || \
+    (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#define ZXC_LITTLE_ENDIAN
+#elif defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#define ZXC_BIG_ENDIAN
+#else
+#define ZXC_LITTLE_ENDIAN
+#endif
+#endif
+
+/*
+ * Byte-swap helpers (used on big-endian only).
+ */
+#ifdef ZXC_BIG_ENDIAN
+#if defined(__GNUC__) || defined(__clang__)
+#define ZXC_BSWAP16(x) __builtin_bswap16(x)
+#define ZXC_BSWAP32(x) __builtin_bswap32(x)
+#define ZXC_BSWAP64(x) __builtin_bswap64(x)
+#elif defined(_MSC_VER)
+#define ZXC_BSWAP16(x) _byteswap_ushort(x)
+#define ZXC_BSWAP32(x) _byteswap_ulong(x)
+#define ZXC_BSWAP64(x) _byteswap_uint64(x)
+#else
+#define ZXC_BSWAP16(x) ((uint16_t)(((x) >> 8) | ((x) << 8)))
+#define ZXC_BSWAP32(x) \
+    ((uint32_t)(((x) >> 24) | (((x) >> 8) & 0xFF00) | (((x) << 8) & 0xFF0000) | ((x) << 24)))
+#define ZXC_BSWAP64(x) \
+    ((uint64_t)(((uint64_t)ZXC_BSWAP32((uint32_t)(x)) << 32) | ZXC_BSWAP32((uint32_t)((x) >> 32))))
 #endif
 #endif
 
@@ -388,7 +423,11 @@ typedef struct {
 static ZXC_ALWAYS_INLINE uint16_t zxc_le16(const void* p) {
     uint16_t v;
     ZXC_MEMCPY(&v, p, sizeof(v));
+#ifdef ZXC_BIG_ENDIAN
+    return ZXC_BSWAP16(v);
+#else
     return v;
+#endif
 }
 
 /**
@@ -404,7 +443,11 @@ static ZXC_ALWAYS_INLINE uint16_t zxc_le16(const void* p) {
 static ZXC_ALWAYS_INLINE uint32_t zxc_le32(const void* p) {
     uint32_t v;
     ZXC_MEMCPY(&v, p, sizeof(v));
+#ifdef ZXC_BIG_ENDIAN
+    return ZXC_BSWAP32(v);
+#else
     return v;
+#endif
 }
 
 /**
@@ -420,7 +463,11 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_le32(const void* p) {
 static ZXC_ALWAYS_INLINE uint64_t zxc_le64(const void* p) {
     uint64_t v;
     ZXC_MEMCPY(&v, p, sizeof(v));
+#ifdef ZXC_BIG_ENDIAN
+    return ZXC_BSWAP64(v);
+#else
     return v;
+#endif
 }
 
 /**
@@ -439,7 +486,12 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_le64(const void* p) {
  * @param[in] v The 16-bit unsigned integer value to store.
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le16(void* p, const uint16_t v) {
+#ifdef ZXC_BIG_ENDIAN
+    const uint16_t s = ZXC_BSWAP16(v);
+    ZXC_MEMCPY(p, &s, sizeof(s));
+#else
     ZXC_MEMCPY(p, &v, sizeof(v));
+#endif
 }
 
 /**
@@ -455,7 +507,12 @@ static ZXC_ALWAYS_INLINE void zxc_store_le16(void* p, const uint16_t v) {
  * @param[in] v The 32-bit unsigned integer value to store.
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le32(void* p, const uint32_t v) {
+#ifdef ZXC_BIG_ENDIAN
+    const uint32_t s = ZXC_BSWAP32(v);
+    ZXC_MEMCPY(p, &s, sizeof(s));
+#else
     ZXC_MEMCPY(p, &v, sizeof(v));
+#endif
 }
 
 /**
@@ -473,7 +530,12 @@ static ZXC_ALWAYS_INLINE void zxc_store_le32(void* p, const uint32_t v) {
  * @param[in] v The 64-bit unsigned integer value to store.
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
+#ifdef ZXC_BIG_ENDIAN
+    const uint64_t s = ZXC_BSWAP64(v);
+    ZXC_MEMCPY(p, &s, sizeof(s));
+#else
     ZXC_MEMCPY(p, &v, sizeof(v));
+#endif
 }
 
 /**
