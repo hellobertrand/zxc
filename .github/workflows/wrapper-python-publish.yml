@@ -30,6 +30,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -43,8 +45,8 @@ jobs:
         run: python -m cibuildwheel --output-dir wheelhouse
         working-directory: ./wrappers/python
         env:
-          # Build for Python 3.9-3.13
-          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-*"
+          # Build for Python 3.10-3.13
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
           # Skip 32-bit builds and musllinux
           CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
           CIBW_ARCHS: "${{ matrix.arch }}"
@@ -65,6 +67,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -90,8 +94,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.9", "3.12", "3.13"]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest, windows-11-arm]
+        python: ["3.12", "3.13"]
     
     steps:
       - name: Set up Python
@@ -107,7 +111,7 @@ jobs:
           merge-multiple: true
       
       - name: Install wheel
-        run: pip install --no-index --find-links wheelhouse zxc
+        run: pip install --no-index --find-links wheelhouse zxc-compress
       
       - name: Test import and basic functionality
         run: |
