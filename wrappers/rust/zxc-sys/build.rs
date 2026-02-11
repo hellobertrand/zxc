@@ -189,6 +189,16 @@ fn main() {
         .opt_level(3)
         .warnings(false);
 
+    // Add architecture-specific flags to core build BEFORE compiling
+    if is_arm64 {
+        core_build.flag_if_supported("-march=armv8-a+crc");
+    } else if is_x86_64 {
+        core_build.flag_if_supported("-msse4.2");
+        core_build.flag_if_supported("-mpclmul");
+    }
+
+    core_build.compile("zxc_core");
+
     // Compile defaults
     default_compress.compile("zxc_compress_default");
     default_decompress.compile("zxc_decompress_default");
@@ -218,9 +228,6 @@ fn main() {
 
         neon_compress.compile("zxc_compress_neon");
         neon_decompress.compile("zxc_decompress_neon");
-
-        // Add ARM CRC extension for core build
-        core_build.flag_if_supported("-march=armv8-a+crc");
     } else if is_x86_64 {
         // AVX2 variant
         let mut avx2_compress = cc::Build::new();
@@ -277,17 +284,12 @@ fn main() {
 
         avx512_compress.compile("zxc_compress_avx512");
         avx512_decompress.compile("zxc_decompress_avx512");
-
-        // Add x86 extensions for core build
-        core_build.flag_if_supported("-msse4.2");
-        core_build.flag_if_supported("-mpclmul");
     }
 
-    // Compile core library
-    core_build.compile("zxc_core");
-
-    // Threading support
-    println!("cargo:rustc-link-lib=pthread");
+    // Threading support (not needed on Windows, which uses kernel32)
+    if !target.contains("windows") {
+        println!("cargo:rustc-link-lib=pthread");
+    }
 
     // Re-run build script if source files change
     println!("cargo:rerun-if-changed={}", src_lib.display());

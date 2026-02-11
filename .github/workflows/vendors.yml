@@ -1,4 +1,4 @@
-name: Update vendors
+name: Update Vendors
 
 on:
   workflow_dispatch:

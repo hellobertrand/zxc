@@ -47,9 +47,11 @@ extern "C" {
 #if defined(__AVX2__)
 #define ZXC_USE_AVX2
 #endif
-#elif (defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(ZXC_USE_NEON32) || \
-       defined(ZXC_USE_NEON64))
+#elif (defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(_M_ARM64) || \
+       defined(ZXC_USE_NEON32) || defined(ZXC_USE_NEON64))
+#if !defined(_MSC_VER)
 #include <arm_acle.h>
+#endif
 #include <arm_neon.h>
 #if defined(__aarch64__) || defined(_M_ARM64)
 #ifndef ZXC_USE_NEON64
@@ -602,7 +604,7 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(const uint64_t x) {
     if (x == 0) return 64;
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_ctzll(x);
-#elif defined(_MSC_VER) && defined(_M_X64)
+#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_ARM64))
     unsigned long r;
     _BitScanForward64(&r, x);
     return (int)r;

@@ -457,8 +457,6 @@ use std::io;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 
-#[cfg(windows)]
-use std::os::windows::io::AsRawHandle;
 
 /// Options for streaming compression operations.
 #[derive(Debug, Clone)]
@@ -605,13 +603,13 @@ unsafe fn file_to_c_file_read(file: &File) -> *mut libc::FILE {
     let mut dup_handle: *mut std::ffi::c_void = std::ptr::null_mut();
     let result = unsafe {
         windows_sys::Win32::Foundation::DuplicateHandle(
-            windows_sys::Win32::Foundation::GetCurrentProcess(),
-            handle as isize,
-            windows_sys::Win32::Foundation::GetCurrentProcess(),
-            &mut dup_handle as *mut _ as *mut isize,
+            windows_sys::Win32::System::Threading::GetCurrentProcess(),
+            handle as *mut std::ffi::c_void,
+            windows_sys::Win32::System::Threading::GetCurrentProcess(),
+            &mut dup_handle,
             0,
             0,
-            windows_sys::Win32::System::Threading::DUPLICATE_SAME_ACCESS,
+            windows_sys::Win32::Foundation::DUPLICATE_SAME_ACCESS,
         )
     };
     
@@ -619,14 +617,14 @@ unsafe fn file_to_c_file_read(file: &File) -> *mut libc::FILE {
         return std::ptr::null_mut();
     }
     
-    let fd = libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_RDONLY);
+    let fd = unsafe { libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_RDONLY) };
     if fd < 0 {
         // open_osfhandle failed, close the duplicated handle to avoid leak
-        unsafe { windows_sys::Win32::Foundation::CloseHandle(dup_handle as isize); }
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(dup_handle); }
         return std::ptr::null_mut();
     }
     
-    let file_ptr = libc::fdopen(fd, c"rb".as_ptr());
+    let file_ptr = unsafe { libc::fdopen(fd, c"rb".as_ptr()) };
     if file_ptr.is_null() {
         // fdopen failed, close the fd (which will close the handle)
         unsafe { libc::close(fd); }
@@ -648,13 +646,13 @@ unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
     let mut dup_handle: *mut std::ffi::c_void = std::ptr::null_mut();
     let result = unsafe {
         windows_sys::Win32::Foundation::DuplicateHandle(
-            windows_sys::Win32::Foundation::GetCurrentProcess(),
-            handle as isize,
-            windows_sys::Win32::Foundation::GetCurrentProcess(),
-            &mut dup_handle as *mut _ as *mut isize,
+            windows_sys::Win32::System::Threading::GetCurrentProcess(),
+            handle as *mut std::ffi::c_void,
+            windows_sys::Win32::System::Threading::GetCurrentProcess(),
+            &mut dup_handle,
             0,
             0,
-            windows_sys::Win32::System::Threading::DUPLICATE_SAME_ACCESS,
+            windows_sys::Win32::Foundation::DUPLICATE_SAME_ACCESS,
         )
     };
     
@@ -662,14 +660,14 @@ unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
         return std::ptr::null_mut();
     }
     
-    let fd = libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_WRONLY);
+    let fd = unsafe { libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_WRONLY) };
     if fd < 0 {
         // open_osfhandle failed, close the duplicated handle to avoid leak
-        unsafe { windows_sys::Win32::Foundation::CloseHandle(dup_handle as isize); }
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(dup_handle); }
         return std::ptr::null_mut();
     }
     
-    let file_ptr = libc::fdopen(fd, c"wb".as_ptr());
+    let file_ptr = unsafe { libc::fdopen(fd, c"wb".as_ptr()) };
     if file_ptr.is_null() {
         // fdopen failed, close the fd (which will close the handle)
         unsafe { libc::close(fd); }
@@ -970,7 +968,24 @@ mod streaming_tests {
     use std::io::Write;
 
     fn temp_path(name: &str) -> String {
-        format!("/tmp/zxc_test_{}", name)
+        let dir_name = format!("zxc_test_{}", std::process::id());
+
+        // Try the system temp directory first
+        let mut path = std::env::temp_dir();
+        path.push(&dir_name);
+
+        // If we can't create the directory in the system temp, fall back
+        // to a subdirectory relative to the current working directory.
+        // This happens on some Windows CI runners where TEMP is missing or
+        // points to a path the process cannot access.
+        if fs::create_dir_all(&path).is_err() {
+            path = std::env::current_dir().expect("cannot determine current directory");
+            path.push(&dir_name);
+            fs::create_dir_all(&path).expect("failed to create temp directory in current dir");
+        }
+
+        path.push(name);
+        path.to_string_lossy().into_owned()
     }
 
     #[test]
