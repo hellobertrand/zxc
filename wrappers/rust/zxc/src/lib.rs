@@ -617,14 +617,14 @@ unsafe fn file_to_c_file_read(file: &File) -> *mut libc::FILE {
         return std::ptr::null_mut();
     }
     
-    let fd = libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_RDONLY);
+    let fd = unsafe { libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_RDONLY) };
     if fd < 0 {
         // open_osfhandle failed, close the duplicated handle to avoid leak
         unsafe { windows_sys::Win32::Foundation::CloseHandle(dup_handle); }
         return std::ptr::null_mut();
     }
     
-    let file_ptr = libc::fdopen(fd, c"rb".as_ptr());
+    let file_ptr = unsafe { libc::fdopen(fd, c"rb".as_ptr()) };
     if file_ptr.is_null() {
         // fdopen failed, close the fd (which will close the handle)
         unsafe { libc::close(fd); }
@@ -660,14 +660,14 @@ unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
         return std::ptr::null_mut();
     }
     
-    let fd = libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_WRONLY);
+    let fd = unsafe { libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_WRONLY) };
     if fd < 0 {
         // open_osfhandle failed, close the duplicated handle to avoid leak
         unsafe { windows_sys::Win32::Foundation::CloseHandle(dup_handle); }
         return std::ptr::null_mut();
     }
     
-    let file_ptr = libc::fdopen(fd, c"wb".as_ptr());
+    let file_ptr = unsafe { libc::fdopen(fd, c"wb".as_ptr()) };
     if file_ptr.is_null() {
         // fdopen failed, close the fd (which will close the handle)
         unsafe { libc::close(fd); }
