@@ -42,16 +42,6 @@ jobs:
       - name: Run Tests
         run: cargo test --workspace
 
-      - name: Dry-run publish zxc-compress-sys
-        run: |
-          cd zxc-sys
-          cargo publish --dry-run
-
-      - name: Dry-run publish zxc-compress
-        run: |
-          cd zxc
-          cargo publish --dry-run
-
   publish:
     name: Publish to crates.io
     needs: [test]

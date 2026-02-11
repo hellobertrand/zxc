@@ -917,11 +917,12 @@ mod tests {
     #[test]
     fn test_version() {
         let (major, minor, patch) = version();
-        assert_eq!(major, 0);
-        assert_eq!(minor, 6);
-        assert_eq!(patch, 1);
 
-        assert_eq!(version_string(), "0.6.1");
+        let expected = format!("{}.{}.{}", major, minor, patch);
+        assert_eq!(version_string(), expected);
+
+        let cargo_version = env!("CARGO_PKG_VERSION");
+        assert_eq!(expected, cargo_version);
     }
 
     #[test]
