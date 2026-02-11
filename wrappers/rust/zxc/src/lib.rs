@@ -457,8 +457,6 @@ use std::io;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 
-#[cfg(windows)]
-use std::os::windows::io::AsRawHandle;
 
 /// Options for streaming compression operations.
 #[derive(Debug, Clone)]
@@ -602,11 +600,11 @@ unsafe fn file_to_c_file_read(file: &File) -> *mut libc::FILE {
     let handle = file.as_raw_handle();
     
     // Duplicate the handle so C FILE* has its own ownership
-    let mut dup_handle: isize = 0;
+    let mut dup_handle: *mut std::ffi::c_void = std::ptr::null_mut();
     let result = unsafe {
         windows_sys::Win32::Foundation::DuplicateHandle(
             windows_sys::Win32::System::Threading::GetCurrentProcess(),
-            handle as isize,
+            handle as *mut std::ffi::c_void,
             windows_sys::Win32::System::Threading::GetCurrentProcess(),
             &mut dup_handle,
             0,
@@ -645,11 +643,11 @@ unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
     let handle = file.as_raw_handle();
     
     // Duplicate the handle so C FILE* has its own ownership
-    let mut dup_handle: isize = 0;
+    let mut dup_handle: *mut std::ffi::c_void = std::ptr::null_mut();
     let result = unsafe {
         windows_sys::Win32::Foundation::DuplicateHandle(
             windows_sys::Win32::System::Threading::GetCurrentProcess(),
-            handle as isize,
+            handle as *mut std::ffi::c_void,
             windows_sys::Win32::System::Threading::GetCurrentProcess(),
             &mut dup_handle,
             0,
