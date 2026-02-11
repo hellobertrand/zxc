@@ -37,7 +37,12 @@ Performs static analysis using Cppcheck and Clang Static Analyzer. Runs memory l
 ### wrapper-rust-publish.yml - Publish Rust Crates
 **Triggers:** Release published, manual dispatch
 
-Automates the publishing of Rust crates to crates.io. It verifies the version matches the release tag, runs tests, and then publishes `zxc-sys` (FFI bindings) followed by `zxc` (safe wrapper).
+Tests and publishes Rust crates to crates.io. Verifies the version matches the release tag, runs tests across platforms, and publishes `zxc-compress-sys` (FFI bindings) followed by `zxc-compress` (safe wrapper).
+
+### wrapper-python-publish.yml - Publish Python Package
+**Triggers:** Release published, manual dispatch
+
+Builds platform-specific wheels using `cibuildwheel` for Linux (x86_64, ARM64), macOS (ARM64, Intel), and Windows (AMD64, ARM64). Tests wheels against Python 3.12-3.13, then publishes to PyPI via trusted publishing.
 
 ### security.yml - Code Security
 **Triggers:** Push to main, pull requests
