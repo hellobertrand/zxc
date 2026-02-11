@@ -739,7 +739,7 @@ int main(int argc, char** argv) {
         double dt_c = zxc_now() - t0;
         fclose(fm);
 
-        size_t max_c = zxc_compress_bound(in_size);
+        uint64_t max_c = zxc_compress_bound(in_size);
         c_dat = malloc(max_c);
         if (!c_dat) goto bench_cleanup;
 

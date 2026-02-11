@@ -100,7 +100,7 @@ unsafe extern "C" {
     /// Calculates the maximum compressed size for a given input.
     ///
     /// Useful for allocating output buffers before compression.
-    pub fn zxc_compress_bound(input_size: usize) -> usize;
+    pub fn zxc_compress_bound(input_size: usize) -> u64;
 
     /// Compresses a data buffer using the ZXC algorithm.
     ///
@@ -147,7 +147,7 @@ unsafe extern "C" {
     /// # Returns
     ///
     /// Original uncompressed size in bytes, or 0 if invalid.
-    pub fn zxc_get_decompressed_size(src: *const c_void, src_size: usize) -> usize;
+    pub fn zxc_get_decompressed_size(src: *const c_void, src_size: usize) -> u64;
 }
 
 // =============================================================================
@@ -253,7 +253,7 @@ mod tests {
 
         unsafe {
             // Allocate compression buffer
-            let bound = zxc_compress_bound(input.len());
+            let bound = zxc_compress_bound(input.len()) as usize;
             let mut compressed = vec![0u8; bound];
 
             // Compress
@@ -274,10 +274,10 @@ mod tests {
                 compressed.as_ptr() as *const c_void,
                 compressed_size,
             );
-            assert_eq!(decompressed_size, input.len());
+            assert_eq!(decompressed_size as usize, input.len());
 
             // Decompress
-            let mut decompressed = vec![0u8; decompressed_size];
+            let mut decompressed = vec![0u8; decompressed_size as usize];
             let result_size = zxc_decompress(
                 compressed.as_ptr() as *const c_void,
                 compressed_size,
@@ -303,7 +303,7 @@ mod tests {
             ZXC_LEVEL_COMPACT,
         ] {
             unsafe {
-                let bound = zxc_compress_bound(input.len());
+                let bound = zxc_compress_bound(input.len()) as usize;
                 let mut compressed = vec![0u8; bound];
 
                 let compressed_size = zxc_compress(

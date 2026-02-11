@@ -23,7 +23,7 @@ int main(void) {
     size_t original_size = strlen(original) + 1;  // Include null terminator
 
     // Step 1: Calculate maximum compressed size
-    size_t max_compressed_size = zxc_compress_bound(original_size);
+    uint64_t max_compressed_size = zxc_compress_bound(original_size);
 
     // Step 2: Allocate buffers
     void* compressed = malloc(max_compressed_size);

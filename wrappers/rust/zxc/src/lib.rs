@@ -195,7 +195,7 @@ impl DecompressOptions {
 /// assert!(bound > 1024); // Accounts for headers and worst-case expansion
 /// ```
 #[inline]
-pub fn compress_bound(input_size: usize) -> usize {
+pub fn compress_bound(input_size: usize) -> u64 {
     unsafe { zxc_sys::zxc_compress_bound(input_size) }
 }
 
@@ -245,7 +245,7 @@ pub fn compress(data: &[u8], level: Level, checksum: Option<bool>) -> Result<Vec
 /// # Ok::<(), zxc::Error>(())
 /// ```
 pub fn compress_with_options(data: &[u8], options: &CompressOptions) -> Result<Vec<u8>> {
-    let bound = compress_bound(data.len());
+    let bound = compress_bound(data.len()) as usize;
     let mut output = Vec::with_capacity(bound);
 
     let written = unsafe {
@@ -330,10 +330,10 @@ pub fn compress_to(data: &[u8], output: &mut [u8], options: &CompressOptions) ->
 /// let data = b"Hello, world!";
 /// let compressed = compress(data, Level::Default, None)?;
 /// let size = decompressed_size(&compressed);
-/// assert_eq!(size, Some(data.len()));
+/// assert_eq!(size, Some(data.len() as u64));
 /// # Ok::<(), zxc::Error>(())
 /// ```
-pub fn decompressed_size(compressed: &[u8]) -> Option<usize> {
+pub fn decompressed_size(compressed: &[u8]) -> Option<u64> {
     let size =
         unsafe { zxc_sys::zxc_get_decompressed_size(compressed.as_ptr() as *const c_void, compressed.len()) };
 
@@ -366,7 +366,7 @@ pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>> {
 
 /// Decompresses data with full options control.
 pub fn decompress_with_options(compressed: &[u8], options: &DecompressOptions) -> Result<Vec<u8>> {
-    let size = decompressed_size(compressed).ok_or(Error::InvalidData)?;
+    let size = decompressed_size(compressed).ok_or(Error::InvalidData)? as usize;
     let mut output = Vec::with_capacity(size);
 
     let written = unsafe {
