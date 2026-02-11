@@ -21,7 +21,9 @@ jobs:
           - os: ubuntu-24.04-arm
             arch: aarch64
           - os: macos-latest
-            arch: x86_64 arm64
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
           - os: windows-latest
             arch: AMD64
           - os: windows-11-arm
@@ -38,8 +40,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.3.1
+      - name: Install build tools
+        run: python -m pip install cibuildwheel==3.3.1 setuptools-scm
+
+      - name: Get version from git
+        id: version
+        run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
+        working-directory: ./wrappers/python
 
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
@@ -47,11 +54,10 @@ jobs:
         env:
           # Build for Python 3.10-3.13
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
-          # Skip 32-bit builds and musllinux
-          CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
+          # Skip 32-bit builds, musllinux, and Python 3.10 on Windows (missing Development.Module)
+          CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_* cp310-win*"
           CIBW_ARCHS: "${{ matrix.arch }}"
-          # Disable native architecture optimization for portability
-          CIBW_ENVIRONMENT: "CMAKE_ARGS='-DZXC_NATIVE_ARCH=OFF'"
+          CIBW_ENVIRONMENT: "CMAKE_ARGS='-DZXC_NATIVE_ARCH=OFF' SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.version.outputs.version }}"
           # Test wheels after building
           CIBW_TEST_REQUIRES: "pytest"
           CIBW_TEST_COMMAND: "pytest {project}/tests -v"
@@ -95,7 +101,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest, windows-11-arm]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest, windows-11-arm]
         python: ["3.12", "3.13"]
     
     steps:
