@@ -602,16 +602,16 @@ unsafe fn file_to_c_file_read(file: &File) -> *mut libc::FILE {
     let handle = file.as_raw_handle();
     
     // Duplicate the handle so C FILE* has its own ownership
-    let mut dup_handle: *mut std::ffi::c_void = std::ptr::null_mut();
+    let mut dup_handle: isize = 0;
     let result = unsafe {
         windows_sys::Win32::Foundation::DuplicateHandle(
-            windows_sys::Win32::Foundation::GetCurrentProcess(),
+            windows_sys::Win32::System::Threading::GetCurrentProcess(),
             handle as isize,
-            windows_sys::Win32::Foundation::GetCurrentProcess(),
-            &mut dup_handle as *mut _ as *mut isize,
+            windows_sys::Win32::System::Threading::GetCurrentProcess(),
+            &mut dup_handle,
             0,
             0,
-            windows_sys::Win32::System::Threading::DUPLICATE_SAME_ACCESS,
+            windows_sys::Win32::Foundation::DUPLICATE_SAME_ACCESS,
         )
     };
     
@@ -622,7 +622,7 @@ unsafe fn file_to_c_file_read(file: &File) -> *mut libc::FILE {
     let fd = libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_RDONLY);
     if fd < 0 {
         // open_osfhandle failed, close the duplicated handle to avoid leak
-        unsafe { windows_sys::Win32::Foundation::CloseHandle(dup_handle as isize); }
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(dup_handle); }
         return std::ptr::null_mut();
     }
     
@@ -645,16 +645,16 @@ unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
     let handle = file.as_raw_handle();
     
     // Duplicate the handle so C FILE* has its own ownership
-    let mut dup_handle: *mut std::ffi::c_void = std::ptr::null_mut();
+    let mut dup_handle: isize = 0;
     let result = unsafe {
         windows_sys::Win32::Foundation::DuplicateHandle(
-            windows_sys::Win32::Foundation::GetCurrentProcess(),
+            windows_sys::Win32::System::Threading::GetCurrentProcess(),
             handle as isize,
-            windows_sys::Win32::Foundation::GetCurrentProcess(),
-            &mut dup_handle as *mut _ as *mut isize,
+            windows_sys::Win32::System::Threading::GetCurrentProcess(),
+            &mut dup_handle,
             0,
             0,
-            windows_sys::Win32::System::Threading::DUPLICATE_SAME_ACCESS,
+            windows_sys::Win32::Foundation::DUPLICATE_SAME_ACCESS,
         )
     };
     
@@ -665,7 +665,7 @@ unsafe fn file_to_c_file_write(file: &File) -> *mut libc::FILE {
     let fd = libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_WRONLY);
     if fd < 0 {
         // open_osfhandle failed, close the duplicated handle to avoid leak
-        unsafe { windows_sys::Win32::Foundation::CloseHandle(dup_handle as isize); }
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(dup_handle); }
         return std::ptr::null_mut();
     }
     
