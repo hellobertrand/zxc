@@ -968,7 +968,9 @@ mod streaming_tests {
     use std::io::Write;
 
     fn temp_path(name: &str) -> String {
-        format!("/tmp/zxc_test_{}", name)
+        let mut path = std::env::temp_dir();
+        path.push(format!("zxc_test_{}", name));
+        path.to_string_lossy().into_owned()
     }
 
     #[test]
