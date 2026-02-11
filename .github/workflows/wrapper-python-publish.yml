@@ -56,7 +56,7 @@ jobs:
           # Skip 32-bit, musllinux, and Python 3.10-3.11 on Windows (missing Development.Module)
           CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_* cp310-win* cp311-win*"
           CIBW_ARCHS: "${{ matrix.arch }}"
-          CIBW_ENVIRONMENT: "CMAKE_ARGS='-DZXC_NATIVE_ARCH=OFF' SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.version.outputs.version }}"
+          CIBW_ENVIRONMENT: "CMAKE_ARGS='-DZXC_NATIVE_ARCH=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON' SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.version.outputs.version }}"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v6
