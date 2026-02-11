@@ -300,15 +300,16 @@ int64_t result = zxc_stream_decompress(f_in, f_out, threads, checksum);
 
 Official wrappers maintained in this repository:
 
-| Language | Crate/Package | Documentation |
-|----------|---------------|---------------|
-| **Rust** | [`zxc`](https://crates.io/crates/zxc) | [README](wrappers/rust/zxc/README.md) |
+| Language | Package Manager | Install Command | Documentation | Author |
+|----------|-----------------|-----------------|---------------|--------|
+| **Rust** | [`crates.io`](https://crates.io/crates/zxc-compress) | `cargo add zxc-compress` | [README](wrappers/rust/zxc/README.md) | [@hellobertrand](https://github.com/hellobertrand) |
+| **Python**| [`PyPI`](https://pypi.org/project/zxc-compress) | `pip install zxc-compress` | [README](wrappers/python/README.md) | [@nuberchardzer1](https://github.com/nuberchardzer1) |
 
 Community-maintained bindings:
 
-| Language | Repository                           |
-| -------- | ------------------------------------ |
-| **Go**       | <https://github.com/meysam81/go-zxc> |
+| Language | Package Manager | Install Command | Repository | Author |
+| -------- | --------------- | --------------- | ---------- | ------ |
+| **Go** | pkg.go.dev | `go get github.com/meysam81/go-zxc` | <https://github.com/meysam81/go-zxc> | [@meysam81](https://github.com/meysam81) |
 
 ## Safety & Quality
 * **Unit Tests**: Comprehensive test suite with CTest integration.

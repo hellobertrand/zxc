@@ -1,5 +1,5 @@
 [package]
-name = "zxc-sys"
+name = "zxc-compress-sys"
 description = "Low-level FFI bindings to the ZXC compression library"
 version.workspace = true
 authors.workspace = true
@@ -10,6 +10,9 @@ keywords.workspace = true
 categories.workspace = true
 links = "zxc"
 build = "build.rs"
+
+[lib]
+name = "zxc_sys"
 
 [dependencies]
 libc = "0.2"

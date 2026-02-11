@@ -9,9 +9,54 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+          - os: macos-latest
+            arch: x86_64 arm64
+          - os: windows-latest
+            arch: AMD64
+          - os: windows-11-arm
+            arch: ARM64
+    defaults:
+      run:
+        working-directory: ./wrappers/rust
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust Toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Run Tests
+        run: cargo test --workspace
+
+      - name: Dry-run publish zxc-compress-sys
+        run: |
+          cd zxc-sys
+          cargo publish --dry-run
+
+      - name: Dry-run publish zxc-compress
+        run: |
+          cd zxc
+          cargo publish --dry-run
+
   publish:
     name: Publish to crates.io
+    needs: [test]
     runs-on: ubuntu-latest
+    if: github.event_name == 'release'
     defaults:
       run:
         working-directory: ./wrappers/rust
@@ -26,7 +71,6 @@ jobs:
           toolchain: stable
 
       - name: Verify Version Matches Release Tag
-        if: github.event_name == 'release'
         run: |
           RELEASE_VERSION="${{ github.event.release.tag_name }}"
           # Remove 'v' prefix if present
@@ -41,20 +85,17 @@ jobs:
           
           echo "Version matches: $RELEASE_VERSION"
 
-      - name: Run Tests
-        run: cargo test --workspace
-
-      - name: Publish zxc-sys (FFI bindings)
+      - name: Publish zxc-compress-sys (FFI bindings)
         run: |
           cd zxc-sys
           cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
         continue-on-error: false
 
-      # Wait for zxc-sys to be available on crates.io before publishing zxc
-      - name: Wait for zxc-sys to propagate
+      # Wait for zxc-compress-sys to be available on crates.io before publishing zxc-compress
+      - name: Wait for zxc-compress-sys to propagate
         run: sleep 30
 
-      - name: Publish zxc (safe wrapper)
+      - name: Publish zxc-compress (safe wrapper)
         run: |
           cd zxc
           cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -64,7 +105,7 @@ jobs:
         if: success()
         run: |
           echo "Successfully published:"
-          echo "- zxc-sys (FFI bindings)"
-          echo "- zxc (safe wrapper)"
+          echo "- zxc-compress-sys (FFI bindings)"
+          echo "- zxc-compress (safe wrapper)"
           echo ""
           echo "Crates are now available on crates.io!"
