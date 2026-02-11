@@ -53,7 +53,8 @@ jobs:
           # Disable native architecture optimization for portability
           CIBW_ENVIRONMENT: "CMAKE_ARGS='-DZXC_NATIVE_ARCH=OFF'"
           # Test wheels after building
-          CIBW_TEST_COMMAND: "python -c 'import zxc; data=b\"test\"*100; c=zxc.compress(data); assert zxc.decompress(c,len(data))==data'"
+          CIBW_TEST_REQUIRES: "pytest"
+          CIBW_TEST_COMMAND: "pytest {project}/tests -v"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -98,6 +99,9 @@ jobs:
         python: ["3.12", "3.13"]
     
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -110,13 +114,13 @@ jobs:
           pattern: wheels-*
           merge-multiple: true
       
-      - name: Install wheel
-        run: pip install --no-index --find-links wheelhouse zxc-compress
-      
-      - name: Test import and basic functionality
+      - name: Install wheel and test dependencies
         run: |
-          python -c "import zxc; print('ZXC version:', zxc.__name__)"
-          python -c "import zxc; data=b'Hello, World!'*1000; compressed=zxc.compress(data, level=3); decompressed=zxc.decompress(compressed, len(data)); assert data == decompressed; print('Round-trip test passed!')"
+          pip install --no-index --find-links wheelhouse zxc-compress
+          pip install pytest
+      
+      - name: Run test suite
+        run: pytest wrappers/python/tests/ -v
 
   publish:
     name: Publish to PyPI
