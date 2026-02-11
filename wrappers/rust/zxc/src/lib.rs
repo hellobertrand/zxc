@@ -909,7 +909,7 @@ mod tests {
         let data = b"Hello, world! Testing decompressed_size function.";
         let compressed = compress(data, Level::Default, None).unwrap();
         let size = decompressed_size(&compressed);
-        assert_eq!(size, Some(data.len()));
+        assert_eq!(size, Some(data.len() as u64));
     }
 
     #[test]
@@ -933,7 +933,7 @@ mod tests {
     #[test]
     fn test_compress_to_buffer() {
         let data = b"Testing compress_to with pre-allocated buffer";
-        let mut output = vec![0u8; compress_bound(data.len())];
+        let mut output = vec![0u8; compress_bound(data.len()) as usize];
 
         let size = compress_to(data, &mut output, &CompressOptions::default()).unwrap();
         output.truncate(size);
