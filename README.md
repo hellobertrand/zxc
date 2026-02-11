@@ -141,45 +141,70 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 ### Option 1: Download Release (GitHub)
 
 1.  Go to the [Releases page](https://github.com/hellobertrand/zxc/releases).
-2.  Download the binary matching your architecture:
+2.  Download the archive matching your architecture:
     
     **macOS:**
-    *   `zxc-macos-arm64` (Universal: NEON32/64 optimizations included).
+    *   `zxc-macos-arm64.tar.gz` (NEON optimizations included).
     
     **Linux:**
-    *   `zxc-linux-aarch64` (Universal: NEON32/64 optimizations included).
-    *   `zxc-linux-x86_64` (Universal: Includes runtime dispatch for AVX2/AVX512).
+    *   `zxc-linux-aarch64.tar.gz` (NEON optimizations included).
+    *   `zxc-linux-x86_64.tar.gz` (Runtime dispatch for AVX2/AVX512).
     
     **Windows:**
-    *   `zxc-windows-x64.exe` (Universal: Includes runtime dispatch for AVX2/AVX512).
-    
-    **Windows:**
+    *   `zxc-windows-x64.zip` (Runtime dispatch for AVX2/AVX512).
 
-
-3.  Make the binary executable (Unix-like systems):
+3.  Extract and install:
     ```bash
-    chmod +x zxc-*
-    mv zxc-* zxc
+    tar -xzf zxc-linux-x86_64.tar.gz -C /usr/local
+    ```
+
+    Each archive contains:
+    ```
+    bin/zxc                          # CLI binary
+    include/                         # C headers (zxc.h, zxc_buffer.h, ...)
+    lib/libzxc.a                     # Static library
+    lib/pkgconfig/zxc.pc             # pkg-config support
+    lib/cmake/zxc/zxcConfig.cmake    # CMake find_package(zxc) support
+    ```
+
+4.  Use in your project:
+
+    **CMake:**
+    ```cmake
+    find_package(zxc REQUIRED)
+    target_link_libraries(myapp PRIVATE zxc::zxc_lib)
+    ```
+
+    **pkg-config:**
+    ```bash
+    cc myapp.c $(pkg-config --cflags --libs zxc) -o myapp
     ```
 
 ### Option 2: Building from Source
 
-**Requirements:** CMake (3.14+), C11 Compiler (Clang/GCC/MSVC).
+**Requirements:** CMake (3.14+), C17 Compiler (Clang/GCC/MSVC).
 
 ```bash
 git clone https://github.com/hellobertrand/zxc.git
 cd zxc
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
-# Binary usage:
-./zxc --help
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+
+# Run tests
+ctest --test-dir build -C Release --output-on-failure
+
+# CLI usage
+./build/zxc --help
+
+# Install library, headers, and CMake/pkg-config files
+sudo cmake --install build
 ```
 
 #### CMake Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `BUILD_SHARED_LIBS` | OFF | Build shared libraries instead of static (`libzxc.so`, `libzxc.dylib`, `zxc.dll`) |
 | `ZXC_NATIVE_ARCH` | ON | Enable `-march=native` for maximum performance |
 | `ZXC_ENABLE_LTO` | ON | Enable Link-Time Optimization (LTO) |
 | `ZXC_PGO_MODE` | OFF | Profile-Guided Optimization mode (`OFF`, `GENERATE`, `USE`) |
@@ -188,14 +213,17 @@ make -j$(nproc)
 | `ZXC_ENABLE_COVERAGE` | OFF | Enable code coverage generation (disables LTO/PGO) |
 
 ```bash
+# Build shared library
+cmake -B build -DBUILD_SHARED_LIBS=ON
+
 # Portable build (without -march=native)
-cmake -DZXC_NATIVE_ARCH=OFF ..
+cmake -B build -DZXC_NATIVE_ARCH=OFF
 
 # Library only (no CLI, no tests)
-cmake -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF ..
+cmake -B build -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
 
 # Code coverage build
-cmake -DZXC_ENABLE_COVERAGE=ON ..
+cmake -B build -DZXC_ENABLE_COVERAGE=ON
 ```
 
 ---

@@ -20,6 +20,7 @@ project(zxc
 # =============================================================================
 # Build Options
 # =============================================================================
+option(BUILD_SHARED_LIBS "Build shared libraries instead of static" OFF)
 option(ZXC_NATIVE_ARCH "Enable -march=native for maximum performance" ON)
 option(ZXC_ENABLE_LTO "Enable Interprocedural Optimization (LTO)" ON)
 set(ZXC_PGO_MODE "OFF" CACHE STRING "Profile-Guided Optimization mode (OFF/GENERATE/USE)")
@@ -34,6 +35,11 @@ option(ZXC_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
+
+# Enable _GNU_SOURCE for ftello/fseeko on Linux
+if(UNIX)
+    add_compile_definitions(_GNU_SOURCE)
+endif()
 
 # Check for LTO support
 if(ZXC_ENABLE_LTO AND NOT ZXC_ENABLE_COVERAGE)
@@ -61,12 +67,34 @@ macro(zxc_add_variant suffix flags)
     add_library(zxc_compress${suffix} OBJECT src/lib/zxc_compress.c)
     target_compile_options(zxc_compress${suffix} PRIVATE ${flags})
     target_compile_definitions(zxc_compress${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix})
+    # For static builds, define ZXC_STATIC_DEFINE
+    if(NOT BUILD_SHARED_LIBS)
+        target_compile_definitions(zxc_compress${suffix} PRIVATE ZXC_STATIC_DEFINE)
+    else()
+        # Mark as part of the DLL being built (avoids dllimport on internal symbols)
+        target_compile_definitions(zxc_compress${suffix} PRIVATE zxc_lib_EXPORTS)
+        # Hide variant symbols from shared library public ABI
+        if(NOT MSVC)
+            target_compile_options(zxc_compress${suffix} PRIVATE -fvisibility=hidden)
+        endif()
+    endif()
     # Inherit include directories
     target_include_directories(zxc_compress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
     add_library(zxc_decompress${suffix} OBJECT src/lib/zxc_decompress.c)
     target_compile_options(zxc_decompress${suffix} PRIVATE ${flags})
     target_compile_definitions(zxc_decompress${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix})
+    # For static builds, define ZXC_STATIC_DEFINE
+    if(NOT BUILD_SHARED_LIBS)
+        target_compile_definitions(zxc_decompress${suffix} PRIVATE ZXC_STATIC_DEFINE)
+    else()
+        # Mark as part of the DLL being built (avoids dllimport on internal symbols)
+        target_compile_definitions(zxc_decompress${suffix} PRIVATE zxc_lib_EXPORTS)
+        # Hide variant symbols from shared library public ABI
+        if(NOT MSVC)
+            target_compile_options(zxc_decompress${suffix} PRIVATE -fvisibility=hidden)
+        endif()
+    endif()
     target_include_directories(zxc_decompress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     
     list(APPEND ZXC_VARIANT_OBJECTS $<TARGET_OBJECTS:zxc_compress${suffix}> $<TARGET_OBJECTS:zxc_decompress${suffix}>)
@@ -107,11 +135,18 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
     zxc_add_variant(_neon "-march=armv7-a;-mfpu=neon")
 endif()
 
-add_library(zxc_lib STATIC
+add_library(zxc_lib
     src/lib/zxc_common.c
     src/lib/zxc_driver.c
     src/lib/zxc_dispatch.c
     ${ZXC_VARIANT_OBJECTS}
+)
+
+# Set library output name and version
+set_target_properties(zxc_lib PROPERTIES
+    OUTPUT_NAME zxc
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${MAJOR_VER}
 )
 
 # Target-based include directories for the main lib
@@ -122,6 +157,21 @@ target_include_directories(zxc_lib
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
 )
+
+# Symbol visibility for shared libraries
+if(BUILD_SHARED_LIBS)
+    # Set visibility for GCC/Clang
+    if(NOT MSVC)
+        target_compile_options(zxc_lib PRIVATE -fvisibility=hidden)
+        set_target_properties(zxc_lib PROPERTIES
+            C_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN YES
+        )
+    endif()
+else()
+    # For static libraries, define ZXC_STATIC_DEFINE to avoid dllimport/dllexport
+    target_compile_definitions(zxc_lib PUBLIC ZXC_STATIC_DEFINE)
+endif()
 
 # =============================================================================
 # Compiler-specific options (using generator expressions)
@@ -268,7 +318,41 @@ if(ZXC_BUILD_TESTS)
     enable_testing()
     
     add_executable(zxc_test tests/test.c)
-    target_link_libraries(zxc_test PRIVATE zxc_lib)
+    
+    # When building shared libraries, create a static version for tests
+    # This allows tests to access internal functions for unit testing
+    if(BUILD_SHARED_LIBS)
+        # Create a static library specifically for tests
+        add_library(zxc_lib_static STATIC
+            src/lib/zxc_common.c
+            src/lib/zxc_driver.c
+            src/lib/zxc_dispatch.c
+            ${ZXC_VARIANT_OBJECTS}
+        )
+        
+        # Copy all properties from the shared library
+        target_include_directories(zxc_lib_static
+            PUBLIC
+                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:include>
+            PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
+        )
+        
+        # Apply same compiler settings as main library
+        target_compile_options(zxc_lib_static PRIVATE
+            $<TARGET_PROPERTY:zxc_lib,COMPILE_OPTIONS>
+        )
+        
+        target_compile_definitions(zxc_lib_static PUBLIC ZXC_STATIC_DEFINE)
+        target_link_libraries(zxc_lib_static PRIVATE Threads::Threads)
+        
+        # Link tests against static library
+        target_link_libraries(zxc_test PRIVATE zxc_lib_static)
+    else()
+        # For static builds, use the main library
+        target_link_libraries(zxc_test PRIVATE zxc_lib)
+    endif()
     
     # Propagate compile options
     target_compile_options(zxc_test PRIVATE
@@ -302,10 +386,18 @@ endif()
 # =============================================================================
 include(GNUInstallDirs)
 
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/zxc.pc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/zxc.pc
+    @ONLY
+)
+
 install(TARGETS zxc_lib
     EXPORT zxc-targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
 install(DIRECTORY include/
@@ -319,12 +411,48 @@ if(ZXC_BUILD_CLI)
     )
 endif()
 
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/zxc.pc
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+)
+
+# CMake package config files for find_package(zxc)
+include(CMakePackageConfigHelpers)
+
+install(EXPORT zxc-targets
+    FILE zxc-targets.cmake
+    NAMESPACE zxc::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
+)
+
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/zxcConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
+)
+
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
+)
+
 # =============================================================================
 # Summary
 # =============================================================================
 message(STATUS "")
 message(STATUS "ZXC Configuration Summary:")
 message(STATUS "  Version:        ${PROJECT_VERSION}")
+if(BUILD_SHARED_LIBS)
+    message(STATUS "  Library Type:   Shared")
+else()
+    message(STATUS "  Library Type:   Static")
+endif()
 message(STATUS "  Native Arch:    ${ZXC_NATIVE_ARCH}")
 message(STATUS "  LTO Enabled:    ${ZXC_ENABLE_LTO}")
 message(STATUS "  PGO Mode:       ${ZXC_PGO_MODE}")
