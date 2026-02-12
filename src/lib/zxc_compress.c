@@ -1123,9 +1123,16 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             *p_curr++ = (uint8_t)buf_offsets[i];
         }
     } else {
-        // Write 2-byte offsets
+        // Write 2-byte offsets in little-endian order
+#ifdef ZXC_BIG_ENDIAN
+        for (uint32_t i = 0; i < seq_c; i++) {
+            zxc_store_le16(p_curr, buf_offsets[i]);
+            p_curr += 2;
+        }
+#else
         ZXC_MEMCPY(p_curr, buf_offsets, seq_c * 2);
         p_curr += seq_c * 2;
+#endif
     }
     rem -= sz_off;
 
@@ -1287,9 +1294,16 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     rem -= sz_lit;
 
     if (UNLIKELY(rem < sz_seq)) return -1;
-    // Sequential write of 64-bit records
+    // Write sequences in little-endian order
+#ifdef ZXC_BIG_ENDIAN
+    for (uint32_t i = 0; i < seq_c; i++) {
+        zxc_store_le32(p_curr, buf_sequences[i]);
+        p_curr += 4;
+    }
+#else
     ZXC_MEMCPY(p_curr, buf_sequences, sz_seq);
     p_curr += sz_seq;
+#endif
 
     // --- WRITE EXTRAS ---
     ZXC_MEMCPY(p_curr, buf_extras, sz_ext);

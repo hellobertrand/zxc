@@ -1010,7 +1010,7 @@ int main() {
     gen_binary_data(buffer, 128);
     if (!test_round_trip("Small Binary Data (128 bytes)", buffer, 128, 3, 0)) total_failures++;
 
-    printf("\n--- Test Coverage: Variable Offset Encoding (v0.4.0) ---\n");
+    printf("\n--- Test Coverage: Variable Offset Encoding ---\n");
 
     // Test 8-bit offset mode (enc_off=1): patterns with all offsets <= 255
     gen_small_offset_data(buffer, BUF_SIZE);

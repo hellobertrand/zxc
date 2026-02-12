@@ -178,7 +178,7 @@ Each data block consists of an **8-byte** generic header that precedes the speci
   - `Lit Enc`: Literal stream encoding (0=RAW, 1=RLE). **Currently used.**
   - `LL Enc`: Literal lengths encoding. **Reserved for future use** (lengths are packed in tokens).
   - `ML Enc`: Match lengths encoding. **Reserved for future use** (lengths are packed in tokens).
-  - `Off Enc`: Offset encoding mode. **Currently used (v0.4.0):**
+  - `Off Enc`: Offset encoding mode. **Currently used**
     - `0` = 16-bit offsets (2 bytes each, max distance 65535)
     - `1` = 8-bit offsets (1 byte each, max distance 255)
 * **Reserved**: Padding for alignment.
@@ -386,7 +386,7 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Tokens Buffer*: Packed `(LitLen << 4) | MatchLen`.
     *   *Offsets Buffer*: Variable-width distances (8-bit or 16-bit, see below).
     *   *Extras Buffer*: Overflow values for lengths >= 15 (Prefix Varint encoded).
-    *   *Offset Mode Selection (v0.4.0)*: The encoder tracks the maximum offset across all sequences. If all offsets are ≤ 255, the 8-bit mode (`enc_off=1`) is selected, saving 1 byte per sequence compared to 16-bit mode.
+    *   *Offset Mode Selection*: The encoder tracks the maximum offset across all sequences. If all offsets are ≤ 255, the 8-bit mode (`enc_off=1`) is selected, saving 1 byte per sequence compared to 16-bit mode.
 4.  **RLE Pass**: The literals buffer is scanned for run-length encoding opportunities (runs of identical bytes). If beneficial (>10% gain), it is compressed in place.
 5.  **Final Serialization**: All buffers are concatenated into the payload, preceded by section descriptors.
 
