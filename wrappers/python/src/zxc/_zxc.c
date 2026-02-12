@@ -141,7 +141,7 @@ static PyObject *pyzxc_compress(PyObject *self, PyObject *args,
 
     size_t src_size = (size_t)view.len;
 
-    size_t bound = zxc_compress_bound(src_size);
+    uint64_t bound = zxc_compress_bound(src_size);
 
     PyObject *out = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)bound);
     if (!out) {
@@ -186,11 +186,11 @@ static PyObject *pyzxc_get_decompressed_size(PyObject *self, PyObject *args,
         return NULL;
     }
 
-    size_t n = zxc_get_decompressed_size(view.buf, view.len);
+    uint64_t n = zxc_get_decompressed_size(view.buf, view.len);
     
     PyBuffer_Release(&view); 
     
-    return Py_BuildValue("k", n);
+    return Py_BuildValue("K", n);
 }
 
 static PyObject *pyzxc_decompress(PyObject *self, PyObject *args,

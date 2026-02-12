@@ -539,7 +539,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     uint32_t d_global_hash = 0;
 
-    size_t max_out = zxc_compress_bound(runtime_chunk_sz);
+    uint64_t max_out = zxc_compress_bound(runtime_chunk_sz);
     size_t raw_alloc_in = ((mode) ? runtime_chunk_sz : max_out) + ZXC_PAD_SIZE;
     size_t alloc_in = (raw_alloc_in + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
 

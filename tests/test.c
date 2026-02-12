@@ -68,11 +68,13 @@ void gen_binary_data(uint8_t* buf, size_t size) {
 // Generates data with small offsets (<=255 bytes) to force 1-byte offset encoding
 // This creates short repeating patterns with matches very close to each other
 void gen_small_offset_data(uint8_t* buf, size_t size) {
-    // Create short repeating patterns with very short distances
-    // Pattern: ABCDABCDABCD... where each match is only 4 bytes away
-    const uint8_t pattern[] = "ABCD";
+    // Create short repeating patterns with very short distances.
+    // Uses a 5-byte period (not aligned to uint32_t) to avoid being
+    // classified as NUM data by zxc_probe_is_numeric().
+    // LZ will match at offset=5 (< 255), exercising 8-bit offset encoding.
+    const uint8_t pattern[] = "ABCDE";
     for (size_t i = 0; i < size; i++) {
-        buf[i] = pattern[i % 4];
+        buf[i] = pattern[i % 5];
     }
 }
 
@@ -613,9 +615,9 @@ int test_bit_reader() {
     // Case 2: Small buffer initialization (should not crash)
     uint8_t small_buffer[4] = {0xAA, 0xBB, 0xCC, 0xDD};
     zxc_br_init(&br, small_buffer, 4);
-    // Should have read 4 bytes safely
-    uint64_t expected_accum = 0;
-    memcpy(&expected_accum, small_buffer, 4);
+    // Should have read 4 bytes safely (in LE order, matching zxc_le_partial)
+    uint64_t expected_accum = (uint64_t)small_buffer[0] | ((uint64_t)small_buffer[1] << 8) |
+                              ((uint64_t)small_buffer[2] << 16) | ((uint64_t)small_buffer[3] << 24);
     if (br.accum != expected_accum) return 0;
     if (br.ptr != small_buffer + 4) return 0;
     printf("  [PASS] Small buffer init\n");
@@ -751,7 +753,7 @@ int test_header_checksum() {
     }
 
     // Verify manually that checksum byte is non-zero (highly likely)
-    if (header_buf[3] == 0) {
+    if (header_buf[7] == 0) {
         // It's technically possible but very unlikely with a good hash
         printf("  [WARN] Checksum is 0 (unlikely but possible)\n");
     }
@@ -1010,7 +1012,7 @@ int main() {
     gen_binary_data(buffer, 128);
     if (!test_round_trip("Small Binary Data (128 bytes)", buffer, 128, 3, 0)) total_failures++;
 
-    printf("\n--- Test Coverage: Variable Offset Encoding (v0.4.0) ---\n");
+    printf("\n--- Test Coverage: Repetitive Pattern Encoding ---\n");
 
     // Test 8-bit offset mode (enc_off=1): patterns with all offsets <= 255
     gen_small_offset_data(buffer, BUF_SIZE);

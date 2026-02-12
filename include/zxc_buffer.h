@@ -9,6 +9,7 @@
 #define ZXC_BUFFER_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "zxc_export.h"
 
@@ -29,7 +30,7 @@
  *
  * @return           Maximum required buffer size in bytes.
  */
-ZXC_EXPORT size_t zxc_compress_bound(const size_t input_size);
+ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
 
 /**
  * @brief Compresses a data buffer using the ZXC algorithm.
@@ -85,6 +86,6 @@ ZXC_EXPORT size_t zxc_decompress(const void* src, const size_t src_size, void* d
  * @return The original uncompressed size in bytes, or 0 if the buffer is invalid
  *         or too small to contain a valid ZXC archive.
  */
-ZXC_EXPORT size_t zxc_get_decompressed_size(const void* src, const size_t src_size);
+ZXC_EXPORT uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size);
 
 #endif  // ZXC_BUFFER_H

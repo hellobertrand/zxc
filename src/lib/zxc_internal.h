@@ -66,7 +66,7 @@ extern "C" {
 
 /*
  * ============================================================================
- * LIKELY/UNLIKELY, PREFETCH, MEMCPY/MEMSET, ALIGN, ALWAYS_INLINE
+ * LIKELY/UNLIKELY, PREFETCH, MEMCPY/MEMSET, ALIGN, ALWAYS_INLINE, ENDIANNESS
  * ============================================================================
  */
 
@@ -114,6 +114,42 @@ extern "C" {
 #define ZXC_ALIGN(x) _Alignas(x)
 #else
 #define ZXC_ALIGN(x)
+#endif
+#endif
+
+/*
+ * Endianness detection
+ */
+#ifndef ZXC_LITTLE_ENDIAN
+#if defined(_WIN32) || defined(__LITTLE_ENDIAN__) || \
+    (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#define ZXC_LITTLE_ENDIAN
+#elif defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#define ZXC_BIG_ENDIAN
+#else
+#warning "Endianness not detected, defaulting to little-endian"
+#define ZXC_LITTLE_ENDIAN
+#endif
+#endif
+
+/*
+ * Byte-swap helpers (used on big-endian only).
+ */
+#ifdef ZXC_BIG_ENDIAN
+#if defined(__GNUC__) || defined(__clang__)
+#define ZXC_BSWAP16(x) __builtin_bswap16(x)
+#define ZXC_BSWAP32(x) __builtin_bswap32(x)
+#define ZXC_BSWAP64(x) __builtin_bswap64(x)
+#elif defined(_MSC_VER)
+#define ZXC_BSWAP16(x) _byteswap_ushort(x)
+#define ZXC_BSWAP32(x) _byteswap_ulong(x)
+#define ZXC_BSWAP64(x) _byteswap_uint64(x)
+#else
+#define ZXC_BSWAP16(x) ((uint16_t)(((x) >> 8) | ((x) << 8)))
+#define ZXC_BSWAP32(x) \
+    ((uint32_t)(((x) >> 24) | (((x) >> 8) & 0xFF00) | (((x) << 8) & 0xFF0000) | ((x) << 24)))
+#define ZXC_BSWAP64(x) \
+    ((uint64_t)(((uint64_t)ZXC_BSWAP32((uint32_t)(x)) << 32) | ZXC_BSWAP32((uint32_t)((x) >> 32))))
 #endif
 #endif
 
@@ -388,7 +424,11 @@ typedef struct {
 static ZXC_ALWAYS_INLINE uint16_t zxc_le16(const void* p) {
     uint16_t v;
     ZXC_MEMCPY(&v, p, sizeof(v));
+#ifdef ZXC_BIG_ENDIAN
+    return ZXC_BSWAP16(v);
+#else
     return v;
+#endif
 }
 
 /**
@@ -404,7 +444,11 @@ static ZXC_ALWAYS_INLINE uint16_t zxc_le16(const void* p) {
 static ZXC_ALWAYS_INLINE uint32_t zxc_le32(const void* p) {
     uint32_t v;
     ZXC_MEMCPY(&v, p, sizeof(v));
+#ifdef ZXC_BIG_ENDIAN
+    return ZXC_BSWAP32(v);
+#else
     return v;
+#endif
 }
 
 /**
@@ -420,7 +464,11 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_le32(const void* p) {
 static ZXC_ALWAYS_INLINE uint64_t zxc_le64(const void* p) {
     uint64_t v;
     ZXC_MEMCPY(&v, p, sizeof(v));
+#ifdef ZXC_BIG_ENDIAN
+    return ZXC_BSWAP64(v);
+#else
     return v;
+#endif
 }
 
 /**
@@ -439,7 +487,12 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_le64(const void* p) {
  * @param[in] v The 16-bit unsigned integer value to store.
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le16(void* p, const uint16_t v) {
+#ifdef ZXC_BIG_ENDIAN
+    const uint16_t s = ZXC_BSWAP16(v);
+    ZXC_MEMCPY(p, &s, sizeof(s));
+#else
     ZXC_MEMCPY(p, &v, sizeof(v));
+#endif
 }
 
 /**
@@ -455,7 +508,12 @@ static ZXC_ALWAYS_INLINE void zxc_store_le16(void* p, const uint16_t v) {
  * @param[in] v The 32-bit unsigned integer value to store.
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le32(void* p, const uint32_t v) {
+#ifdef ZXC_BIG_ENDIAN
+    const uint32_t s = ZXC_BSWAP32(v);
+    ZXC_MEMCPY(p, &s, sizeof(s));
+#else
     ZXC_MEMCPY(p, &v, sizeof(v));
+#endif
 }
 
 /**
@@ -473,7 +531,12 @@ static ZXC_ALWAYS_INLINE void zxc_store_le32(void* p, const uint32_t v) {
  * @param[in] v The 64-bit unsigned integer value to store.
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
+#ifdef ZXC_BIG_ENDIAN
+    const uint64_t s = ZXC_BSWAP64(v);
+    ZXC_MEMCPY(p, &s, sizeof(s));
+#else
     ZXC_MEMCPY(p, &v, sizeof(v));
+#endif
 }
 
 /**
@@ -753,6 +816,30 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
 }
 
 /**
+ * @brief Loads up to 7 bytes from memory in little-endian order into a uint64_t.
+ *
+ * This is used for partial reads at stream boundaries where fewer than 8 bytes
+ * remain. Unlike ZXC_MEMCPY into a uint64_t (which is endian-dependent), this
+ * function always produces a value with byte 0 in the least-significant bits.
+ *
+ * @param[in] p Pointer to the source bytes.
+ * @param[in] n Number of bytes to read (must be < 8).
+ * @return The loaded value in native host order, with bytes arranged as if
+ *         read from a little-endian stream.
+ */
+static ZXC_ALWAYS_INLINE uint64_t zxc_le_partial(const uint8_t* p, const size_t n) {
+#ifdef ZXC_BIG_ENDIAN
+    uint64_t v = 0;
+    for (size_t i = 0; i < n; i++) v |= (uint64_t)p[i] << (i * 8);
+    return v;
+#else
+    uint64_t v = 0;
+    ZXC_MEMCPY(&v, p, n);
+    return v;
+#endif
+}
+
+/**
  * @brief Initializes a bit reader structure.
  *
  * Sets up the internal state of the bit reader to read from the specified
@@ -768,10 +855,9 @@ static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* RESTRICT br,
     br->end = src + size;
     // Safety check: ensure we have at least 8 bytes to fill the accumulator
     if (UNLIKELY(size < sizeof(uint64_t))) {
-        br->accum = 0;
-        ZXC_MEMCPY(&br->accum, src, size);  // Safe partial copy
-        br->ptr += size;                    // Advance only valid bytes
-        br->bits = (int)(size * 8);         // Only size*8 bits are valid
+        br->accum = zxc_le_partial(src, size);
+        br->ptr += size;
+        br->bits = (int)(size * 8);
     } else {
         br->accum = zxc_le64(br->ptr);
         br->ptr += sizeof(uint64_t);
@@ -811,8 +897,7 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const
         size_t bytes_left = (size_t)(br->end - br->ptr);
         if (UNLIKELY(bytes_left < (size_t)bytes_needed)) {
             // Partial read (slow path / end of stream)
-            uint64_t raw = 0;
-            ZXC_MEMCPY(&raw, br->ptr, bytes_left);
+            uint64_t raw = zxc_le_partial(br->ptr, bytes_left);
             br->accum |= (raw << safe_bits);
             br->ptr += bytes_left;
             br->bits = safe_bits + (int)bytes_left * 8;

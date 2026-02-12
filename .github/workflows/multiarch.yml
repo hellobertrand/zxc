@@ -1,0 +1,296 @@
+name: Multi-Architecture Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+
+jobs:
+  # ===========================================================================
+  # Tier 1: Main architectures
+  # ===========================================================================
+  build-tier1:
+    name: "Tier 1: ${{ matrix.name }}"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-latest
+            os: linux
+            arch_flags: ""
+          - name: Linux x86 (32-bit)
+            runner: ubuntu-latest
+            os: linux
+            install_32bit_x86: true
+            arch_flags: "-m32"
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+            os: linux
+            arch_flags: ""
+          - name: Linux ARM (32-bit)
+            runner: ubuntu-latest
+            os: linux
+            install_32bit_arm: true
+            cross_compiler_c: arm-linux-gnueabihf-gcc
+            cross_compiler_cxx: arm-linux-gnueabihf-g++
+            cross_strip: arm-linux-gnueabihf-strip
+            cmake_system_name: "Linux"
+            cmake_system_processor: "arm"
+          - name: Windows x64
+            runner: windows-latest
+            os: windows
+            cmake_arch: "x64"
+          - name: Windows x86 (32-bit)
+            runner: windows-latest
+            os: windows
+            cmake_arch: "Win32"
+          - name: Windows ARM64
+            runner: windows-11-arm
+            os: windows
+            cmake_arch: "ARM64"
+          # Note: Windows ARM 32-bit removed - deprecated and unsupported by Windows SDK 10.0.26100+
+          - name: macOS Intel x64
+            runner: macos-15-intel
+            os: macos
+          - name: macOS ARM64
+            runner: macos-latest
+            os: macos
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      # Case: Linux x86 (32-bit)
+      - name: Install x86 32-bit libs
+        if: matrix.install_32bit_x86
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib
+
+      # Case: Linux ARM (32-bit)
+      - name: Install ARM 32-bit toolchain
+        if: matrix.install_32bit_arm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+
+      - name: Configure, Build & Test (Static & Shared)
+        shell: bash
+        run: |
+          # Initialize variables
+          EXTRA_ARGS="-DZXC_NATIVE_ARCH=OFF" # Disable native arch detection (Runtime Dispatch enabled)
+          
+          # Setup Environment for Linux/Mac (Flags & Cross-compilation)
+          if [ "${{ matrix.os }}" != "windows" ]; then
+             # Handle C flags (e.g., -m32)
+             if [ ! -z "${{ matrix.arch_flags }}" ]; then
+                export CFLAGS="${{ matrix.arch_flags }}"
+                export CXXFLAGS="${{ matrix.arch_flags }}"
+             fi
+             
+             # Handle cross-compiler (e.g., ARM 32-bit on Linux)
+             if [ ! -z "${{ matrix.cross_compiler_c }}" ]; then
+                EXTRA_ARGS="$EXTRA_ARGS -DCMAKE_C_COMPILER=${{ matrix.cross_compiler_c }} -DCMAKE_CXX_COMPILER=${{ matrix.cross_compiler_cxx }}"
+             fi
+
+             # Handle explicit System Name/Processor (crucial for cross-compilation)
+             if [ ! -z "${{ matrix.cmake_system_name }}" ]; then
+                EXTRA_ARGS="$EXTRA_ARGS -DCMAKE_SYSTEM_NAME=${{ matrix.cmake_system_name }}"
+             fi
+             if [ ! -z "${{ matrix.cmake_system_processor }}" ]; then
+                EXTRA_ARGS="$EXTRA_ARGS -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_system_processor }}"
+             fi
+             
+             # Handle cross-strip tool (e.g., ARM 32-bit on Linux)
+             if [ ! -z "${{ matrix.cross_strip }}" ]; then
+                EXTRA_ARGS="$EXTRA_ARGS -DCMAKE_STRIP=/usr/bin/${{ matrix.cross_strip }}"
+             fi
+          fi
+
+          # Iterate over Library Types
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+              
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+              
+              CURRENT_ARGS="$EXTRA_ARGS -DBUILD_SHARED_LIBS=$SHARED_FLAG"
+
+              # 1. Configure
+              if [ "${{ matrix.os }}" = "windows" ]; then
+                  # Visual Studio Generator
+                  cmake -S . -B $BUILD_DIR -A ${{ matrix.cmake_arch }} $CURRENT_ARGS
+              else
+                  # Ninja/Makefiles
+                  cmake -S . -B $BUILD_DIR -DCMAKE_BUILD_TYPE=Release $CURRENT_ARGS
+              fi
+              
+              # 2. Build
+              cmake --build $BUILD_DIR --config Release --parallel
+              
+              # 3. Test (Skip if cross-compiling)
+              if [ -z "${{ matrix.cross_compiler_c }}" ]; then
+                  echo "Running Tests for $LIB_TYPE..."
+                  ctest --test-dir $BUILD_DIR -C Release --output-on-failure
+              else
+                  echo "Skipping tests for $LIB_TYPE (Cross-compilation)"
+              fi
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
+
+  # ===========================================================================
+  # Tier 2: Extended Linux architectures (cross-compiled, tested via QEMU)
+  # ===========================================================================
+  build-tier2:
+    name: "Tier 2: ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux RISC-V 64
+            cross_pkg: gcc-riscv64-linux-gnu
+            cross_prefix: riscv64-linux-gnu
+            cmake_processor: riscv64
+            qemu_binary: qemu-riscv64
+          - name: Linux s390x
+            cross_pkg: gcc-s390x-linux-gnu
+            cross_prefix: s390x-linux-gnu
+            cmake_processor: s390x
+            qemu_binary: qemu-s390x
+          - name: Linux armhf
+            cross_pkg: gcc-arm-linux-gnueabihf
+            cross_prefix: arm-linux-gnueabihf
+            cmake_processor: arm
+            qemu_binary: qemu-arm
+          - name: Linux ppc64el
+            cross_pkg: gcc-powerpc64le-linux-gnu
+            cross_prefix: powerpc64le-linux-gnu
+            cmake_processor: ppc64le
+            qemu_binary: qemu-ppc64le
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Install cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.cross_pkg }} qemu-user
+
+      - name: Configure, Build & Test (Static & Shared)
+        shell: bash
+        run: |
+          CROSS_C=${{ matrix.cross_prefix }}-gcc
+          CROSS_CXX=${{ matrix.cross_prefix }}-g++
+          CROSS_STRIP=/usr/bin/${{ matrix.cross_prefix }}-strip
+          SYSROOT=/usr/${{ matrix.cross_prefix }}
+
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B $BUILD_DIR \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_C_COMPILER=$CROSS_C \
+                  -DCMAKE_CXX_COMPILER=$CROSS_CXX \
+                  -DCMAKE_STRIP=$CROSS_STRIP \
+                  -DCMAKE_SYSTEM_NAME=Linux \
+                  -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build $BUILD_DIR --config Release --parallel
+
+              echo "Running Tests for $LIB_TYPE via QEMU..."
+              ${{ matrix.qemu_binary }} -L $SYSROOT ./$BUILD_DIR/zxc_test
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
+
+  # ===========================================================================
+  # Tier 3: Experimental Linux architectures (cross-compiled, tested via QEMU)
+  # ===========================================================================
+  build-tier3:
+    name: "Tier 3: ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux armel
+            cross_pkg: gcc-arm-linux-gnueabi
+            cross_prefix: arm-linux-gnueabi
+            cmake_processor: arm
+            qemu_binary: qemu-arm
+          - name: Linux mips64el
+            cross_pkg: gcc-mips64el-linux-gnuabi64
+            cross_prefix: mips64el-linux-gnuabi64
+            cmake_processor: mips64
+            qemu_binary: qemu-mips64el
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Install cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.cross_pkg }} qemu-user
+
+      - name: Configure, Build & Test (Static & Shared)
+        shell: bash
+        run: |
+          CROSS_C=${{ matrix.cross_prefix }}-gcc
+          CROSS_CXX=${{ matrix.cross_prefix }}-g++
+          CROSS_STRIP=/usr/bin/${{ matrix.cross_prefix }}-strip
+          SYSROOT=/usr/${{ matrix.cross_prefix }}
+
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B $BUILD_DIR \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_C_COMPILER=$CROSS_C \
+                  -DCMAKE_CXX_COMPILER=$CROSS_CXX \
+                  -DCMAKE_STRIP=$CROSS_STRIP \
+                  -DCMAKE_SYSTEM_NAME=Linux \
+                  -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build $BUILD_DIR --config Release --parallel
+
+              echo "Running Tests for $LIB_TYPE via QEMU..."
+              ${{ matrix.qemu_binary }} -L $SYSROOT ./$BUILD_DIR/zxc_test
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done

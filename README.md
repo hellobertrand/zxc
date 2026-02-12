@@ -270,7 +270,7 @@ ZXC provides a **thread-safe, stateless API** with two usage patterns:
 #include "zxc.h"
 
 // Compression
-size_t bound = zxc_compress_bound(src_size);
+uint64_t bound = zxc_compress_bound(src_size);
 size_t compressed_size = zxc_compress(src, src_size, dst, bound, level, checksum);
 
 // Decompression

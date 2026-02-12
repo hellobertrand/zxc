@@ -414,14 +414,12 @@ size_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RES
     return (size_t)(op - op_start);
 }
 
-size_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
+uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE)) return 0;
 
     const uint8_t* p = (const uint8_t*)src;
     if (UNLIKELY(zxc_le32(p) != ZXC_MAGIC_WORD)) return 0;
 
     const uint8_t* footer = p + src_size - ZXC_FILE_FOOTER_SIZE;
-    uint64_t uncompressed_size = zxc_le64(footer);
-
-    return (size_t)uncompressed_size;
+    return zxc_le64(footer);
 }
