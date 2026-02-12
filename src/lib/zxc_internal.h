@@ -827,13 +827,14 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
  * @return The loaded value in native host order, with bytes arranged as if
  *         read from a little-endian stream.
  */
-static ZXC_ALWAYS_INLINE uint64_t zxc_le_partial(const uint8_t* p, const size_t n) {
+static ZXC_ALWAYS_INLINE uint64_t zxc_le_partial(const uint8_t* p, size_t n) {
 #ifdef ZXC_BIG_ENDIAN
     uint64_t v = 0;
     for (size_t i = 0; i < n; i++) v |= (uint64_t)p[i] << (i * 8);
     return v;
 #else
     uint64_t v = 0;
+    n = n > sizeof(v) ? sizeof(v) : n;
     ZXC_MEMCPY(&v, p, n);
     return v;
 #endif
