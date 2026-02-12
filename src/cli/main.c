@@ -224,8 +224,7 @@ static int zxc_validate_input_path(const char* path, char* resolved_buffer, size
  */
 static int zxc_validate_output_path(const char* path, char* resolved_buffer, size_t buffer_size) {
 #ifdef _WIN32
-    if (!_fullpath(resolved_buffer, path, buffer_size))
-        return -1;
+    if (!_fullpath(resolved_buffer, path, buffer_size)) return -1;
     DWORD attr = GetFileAttributesA(resolved_buffer);
     if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
         errno = EISDIR;
@@ -521,20 +520,19 @@ static int zxc_list_archive(const char* path, int json_output) {
 
     if (json_output) {
         // JSON mode
-        printf("{\n"
-               "  \"filename\": \"%s\",\n"
-               "  \"compressed_size_bytes\": %lld,\n"
-               "  \"uncompressed_size_bytes\": %lld,\n"
-               "  \"compression_ratio\": %.3f,\n"
-               "  \"format_version\": %u,\n"
-               "  \"block_size_kb\": %zu,\n"
-               "  \"checksum_method\": \"%s\",\n"
-               "  \"checksum_value\": \"0x%08X\"\n"
-               "}\n",
-               path, (long long)file_size, (long long)uncompressed_size, ratio,
-               format_version, block_units * 4, 
-               (stored_checksum != 0) ? "RapidHash" : "none",
-               stored_checksum);
+        printf(
+            "{\n"
+            "  \"filename\": \"%s\",\n"
+            "  \"compressed_size_bytes\": %lld,\n"
+            "  \"uncompressed_size_bytes\": %lld,\n"
+            "  \"compression_ratio\": %.3f,\n"
+            "  \"format_version\": %u,\n"
+            "  \"block_size_kb\": %zu,\n"
+            "  \"checksum_method\": \"%s\",\n"
+            "  \"checksum_value\": \"0x%08X\"\n"
+            "}\n",
+            path, (long long)file_size, (long long)uncompressed_size, ratio, format_version,
+            block_units * 4, (stored_checksum != 0) ? "RapidHash" : "none", stored_checksum);
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
         printf(
@@ -580,16 +578,23 @@ int main(int argc, char** argv) {
     int level = 3;
     int json_output = 0;
 
-    static const struct option long_options[] = {
-        {"compress", no_argument, 0, 'z'},    {"decompress", no_argument, 0, 'd'},
-        {"list", no_argument, 0, 'l'},        {"test", no_argument, 0, 't'},
-        {"bench", optional_argument, 0, 'b'}, {"threads", required_argument, 0, 'T'},
-        {"keep", no_argument, 0, 'k'},        {"force", no_argument, 0, 'f'},
-        {"stdout", no_argument, 0, 'c'},      {"verbose", no_argument, 0, 'v'},
-        {"quiet", no_argument, 0, 'q'},       {"checksum", no_argument, 0, 'C'},
-        {"no-checksum", no_argument, 0, 'N'}, {"json", no_argument, 0, 'j'},
-        {"version", no_argument, 0, 'V'},     {"help", no_argument, 0, 'h'},
-        {0, 0, 0, 0}};
+    static const struct option long_options[] = {{"compress", no_argument, 0, 'z'},
+                                                 {"decompress", no_argument, 0, 'd'},
+                                                 {"list", no_argument, 0, 'l'},
+                                                 {"test", no_argument, 0, 't'},
+                                                 {"bench", optional_argument, 0, 'b'},
+                                                 {"threads", required_argument, 0, 'T'},
+                                                 {"keep", no_argument, 0, 'k'},
+                                                 {"force", no_argument, 0, 'f'},
+                                                 {"stdout", no_argument, 0, 'c'},
+                                                 {"verbose", no_argument, 0, 'v'},
+                                                 {"quiet", no_argument, 0, 'q'},
+                                                 {"checksum", no_argument, 0, 'C'},
+                                                 {"no-checksum", no_argument, 0, 'N'},
+                                                 {"json", no_argument, 0, 'j'},
+                                                 {"version", no_argument, 0, 'V'},
+                                                 {"help", no_argument, 0, 'h'},
+                                                 {0, 0, 0, 0}};
 
     int opt;
     while ((opt = getopt_long(argc, argv, "12345b::cCdfhjklNqT:tvVz", long_options, NULL)) != -1) {
@@ -739,13 +744,13 @@ int main(int argc, char** argv) {
         f_in = NULL;
 
         if (!json_output)
-            printf("Input: %s (%zu bytes)\n"
-                   "Running %d iterations (Threads: %d)...\n",
-                   in_path, in_size, iterations, num_threads);
+            printf(
+                "Input: %s (%zu bytes)\n"
+                "Running %d iterations (Threads: %d)...\n",
+                in_path, in_size, iterations, num_threads);
 
 #ifdef _WIN32
-        if (!json_output)
-            printf("Note: Using tmpfile on Windows (slower than fmemopen).\n");
+        if (!json_output) printf("Note: Using tmpfile on Windows (slower than fmemopen).\n");
         FILE* fm = tmpfile();
         if (fm) {
             fwrite(ram, 1, in_size, fm);
@@ -828,28 +833,30 @@ int main(int argc, char** argv) {
         double ratio = (double)in_size / c_sz;
 
         if (json_output)
-            printf("{\n"
-                   "  \"input_file\": \"%s\",\n"
-                   "  \"input_size_bytes\": %zu,\n"
-                   "  \"compressed_size_bytes\": %lld,\n"
-                   "  \"compression_ratio\": %.3f,\n"
-                   "  \"iterations\": %d,\n"
-                   "  \"threads\": %d,\n"
-                   "  \"level\": %d,\n"
-                   "  \"checksum_enabled\": %s,\n"
-                   "  \"compress_speed_mbps\": %.3f,\n"
-                   "  \"decompress_speed_mbps\": %.3f,\n"
-                   "  \"compress_time_seconds\": %.6f,\n"
-                   "  \"decompress_time_seconds\": %.6f\n"
-                   "}\n",
-                   in_path, in_size, (long long)c_sz, ratio, iterations, num_threads, level,
-                   checksum ? "true" : "false", compress_speed_mbps, decompress_speed_mbps,
-                   dt_c, dt_d);
+            printf(
+                "{\n"
+                "  \"input_file\": \"%s\",\n"
+                "  \"input_size_bytes\": %zu,\n"
+                "  \"compressed_size_bytes\": %lld,\n"
+                "  \"compression_ratio\": %.3f,\n"
+                "  \"iterations\": %d,\n"
+                "  \"threads\": %d,\n"
+                "  \"level\": %d,\n"
+                "  \"checksum_enabled\": %s,\n"
+                "  \"compress_speed_mbps\": %.3f,\n"
+                "  \"decompress_speed_mbps\": %.3f,\n"
+                "  \"compress_time_seconds\": %.6f,\n"
+                "  \"decompress_time_seconds\": %.6f\n"
+                "}\n",
+                in_path, in_size, (long long)c_sz, ratio, iterations, num_threads, level,
+                checksum ? "true" : "false", compress_speed_mbps, decompress_speed_mbps, dt_c,
+                dt_d);
         else
-            printf("Compressed: %lld bytes (ratio %.3f)\n"
-                   "Avg Compress  : %.3f MiB/s\n"
-                   "Avg Decompress: %.3f MiB/s\n",
-                   (long long)c_sz, ratio, compress_speed_mbps, decompress_speed_mbps);
+            printf(
+                "Compressed: %lld bytes (ratio %.3f)\n"
+                "Avg Compress  : %.3f MiB/s\n"
+                "Avg Decompress: %.3f MiB/s\n",
+                (long long)c_sz, ratio, compress_speed_mbps, decompress_speed_mbps);
         ret = 0;
 
     bench_cleanup:
@@ -870,21 +877,20 @@ int main(int argc, char** argv) {
         }
         int ret = 0;
         int num_files = argc - optind;
-        
-        if (json_output && num_files > 1)
-            printf("[\n");
-        
+
+        if (json_output && num_files > 1) printf("[\n");
+
         for (int i = optind; i < argc; i++) {
             ret |= zxc_list_archive(argv[i], json_output);
             if (json_output && num_files > 1 && i < argc - 1) {
                 printf(",\n");
             }
         }
-        
+
         if (json_output && num_files > 1) {
             printf("]\n");
         }
-        
+
         return ret;
     }
 
@@ -1036,13 +1042,11 @@ int main(int argc, char** argv) {
         } else {
             // Decompression: get decompressed size from footer (BEFORE starting decompression)
             int64_t decomp_size = zxc_stream_get_decompressed_size(f_in);
-            if (decomp_size > 0)
-                total_size = (uint64_t)decomp_size;
+            if (decomp_size > 0) total_size = (uint64_t)decomp_size;
         }
 
         // Only show progress for files > 1MB
-        if (total_size > 1024 * 1024)
-            show_progress = 1;
+        if (total_size > 1024 * 1024) show_progress = 1;
     }
 
     // Set large buffers for I/O performance (AFTER file size detection)
@@ -1093,14 +1097,14 @@ int main(int argc, char** argv) {
         if (mode == MODE_INTEGRITY) {
             // Test mode: show result
             if (json_output) {
-                printf("{\n"
-                       "  \"filename\": \"%s\",\n"
-                       "  \"status\": \"ok\",\n"
-                       "  \"checksum_verified\": %s,\n"
-                       "  \"time_seconds\": %.6f\n"
-                       "}\n",
-                       in_path ? in_path : "<stdin>",
-                       checksum ? "true" : "false", dt);
+                printf(
+                    "{\n"
+                    "  \"filename\": \"%s\",\n"
+                    "  \"status\": \"ok\",\n"
+                    "  \"checksum_verified\": %s,\n"
+                    "  \"time_seconds\": %.6f\n"
+                    "}\n",
+                    in_path ? in_path : "<stdin>", checksum ? "true" : "false", dt);
             } else if (g_verbose) {
                 printf(
                     "%s: OK\n"
@@ -1119,17 +1123,19 @@ int main(int argc, char** argv) {
     } else {
         if (mode == MODE_INTEGRITY) {
             if (json_output) {
-                printf("{\n"
-                       "  \"filename\": \"%s\",\n"
-                       "  \"status\": \"failed\",\n"
-                       "  \"error\": \"Integrity check failed (corrupted data or invalid checksum)\"\n"
-                       "}\n",
-                       in_path ? in_path : "<stdin>");
+                printf(
+                    "{\n"
+                    "  \"filename\": \"%s\",\n"
+                    "  \"status\": \"failed\",\n"
+                    "  \"error\": \"Integrity check failed (corrupted data or invalid checksum)\"\n"
+                    "}\n",
+                    in_path ? in_path : "<stdin>");
             } else {
                 fprintf(stderr, "%s: FAILED\n", in_path ? in_path : "<stdin>");
                 if (g_verbose)
-                    fprintf(stderr,
-                            "  Reason: Integrity check failed (corrupted data or invalid checksum)\n");
+                    fprintf(
+                        stderr,
+                        "  Reason: Integrity check failed (corrupted data or invalid checksum)\n");
             }
         } else {
             zxc_log("Operation failed.\n");
