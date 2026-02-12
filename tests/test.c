@@ -613,9 +613,9 @@ int test_bit_reader() {
     // Case 2: Small buffer initialization (should not crash)
     uint8_t small_buffer[4] = {0xAA, 0xBB, 0xCC, 0xDD};
     zxc_br_init(&br, small_buffer, 4);
-    // Should have read 4 bytes safely
-    uint64_t expected_accum = 0;
-    memcpy(&expected_accum, small_buffer, 4);
+    // Should have read 4 bytes safely (in LE order, matching zxc_le_partial)
+    uint64_t expected_accum = (uint64_t)small_buffer[0] | ((uint64_t)small_buffer[1] << 8) |
+                              ((uint64_t)small_buffer[2] << 16) | ((uint64_t)small_buffer[3] << 24);
     if (br.accum != expected_accum) return 0;
     if (br.ptr != small_buffer + 4) return 0;
     printf("  [PASS] Small buffer init\n");
