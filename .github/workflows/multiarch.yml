@@ -162,6 +162,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: Linux amd64
+            cross_pkg: gcc
+            cross_prefix: x86_64-linux-gnu
+            cmake_processor: x86_64
+            qemu_binary: qemu-x86_64
+          - name: Linux arm64
+            cross_pkg: gcc-aarch64-linux-gnu
+            cross_prefix: aarch64-linux-gnu
+            cmake_processor: aarch64
+            qemu_binary: qemu-aarch64
+          - name: Linux i386
+            cross_pkg: gcc-i686-linux-gnu
+            cross_prefix: i686-linux-gnu
+            cmake_processor: i686
+            qemu_binary: qemu-i386
           - name: Linux RISC-V 64
             cross_pkg: gcc-riscv64-linux-gnu
             cross_prefix: riscv64-linux-gnu
