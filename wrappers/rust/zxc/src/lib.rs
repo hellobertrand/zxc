@@ -306,7 +306,7 @@ unsafe fn impl_compress(
 /// use zxc::{compress_to, compress_bound, CompressOptions};
 ///
 /// let data = b"Hello, world!";
-/// let mut output = vec![0u8; compress_bound(data.len())];
+/// let mut output = vec![0u8; compress_bound(data.len()) as usize];
 /// let size = compress_to(data, &mut output, &CompressOptions::default())?;
 /// output.truncate(size);
 /// # Ok::<(), zxc::Error>(())

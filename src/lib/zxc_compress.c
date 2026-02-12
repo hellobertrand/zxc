@@ -1127,11 +1127,11 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 #ifdef ZXC_BIG_ENDIAN
         for (uint32_t i = 0; i < seq_c; i++) {
             zxc_store_le16(p_curr, buf_offsets[i]);
-            p_curr += 2;
+            p_curr += sizeof(uint16_t);
         }
 #else
-        ZXC_MEMCPY(p_curr, buf_offsets, seq_c * 2);
-        p_curr += seq_c * 2;
+        ZXC_MEMCPY(p_curr, buf_offsets, seq_c * sizeof(uint16_t));
+        p_curr += seq_c * sizeof(uint16_t);
 #endif
     }
     rem -= sz_off;
@@ -1298,7 +1298,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 #ifdef ZXC_BIG_ENDIAN
     for (uint32_t i = 0; i < seq_c; i++) {
         zxc_store_le32(p_curr, buf_sequences[i]);
-        p_curr += 4;
+        p_curr += sizeof(uint32_t);
     }
 #else
     ZXC_MEMCPY(p_curr, buf_sequences, sz_seq);

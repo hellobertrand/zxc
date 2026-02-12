@@ -753,7 +753,7 @@ int test_header_checksum() {
     }
 
     // Verify manually that checksum byte is non-zero (highly likely)
-    if (header_buf[3] == 0) {
+    if (header_buf[7] == 0) {
         // It's technically possible but very unlikely with a good hash
         printf("  [WARN] Checksum is 0 (unlikely but possible)\n");
     }
