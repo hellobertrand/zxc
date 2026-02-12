@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   # ===========================================================================
-  # Tier 1: Main architectures (release + manual + PR)
+  # Tier 1: Main architectures
   # ===========================================================================
   build-tier1:
     name: "Tier 1: ${{ matrix.name }}"
@@ -152,12 +152,11 @@ jobs:
           done
 
   # ===========================================================================
-  # Tier 2: Extended Linux architectures (release + manual)
+  # Tier 2: Extended Linux architectures (cross-compiled, tested via QEMU)
   # ===========================================================================
   build-tier2:
     name: "Tier 2: ${{ matrix.name }}"
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
     strategy:
       fail-fast: false
       matrix:
@@ -230,13 +229,11 @@ jobs:
           done
 
   # ===========================================================================
-  # Tier 3: Experimental Linux architectures (manual only)
+  # Tier 3: Experimental Linux architectures (cross-compiled, tested via QEMU)
   # ===========================================================================
   build-tier3:
     name: "Tier 3: ${{ matrix.name }}"
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
