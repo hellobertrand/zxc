@@ -157,6 +157,7 @@ jobs:
   build-tier2:
     name: "Tier 2: ${{ matrix.name }}"
     runs-on: ubuntu-latest
+    container: debian:trixie
     strategy:
       fail-fast: false
       matrix:
@@ -186,13 +187,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Install cross-compiler
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ matrix.cross_pkg }} qemu-user
+          apt-get update
+          apt-get install -y cmake build-essential ninja-build ${{ matrix.cross_pkg }} qemu-user
 
       - name: Configure, Build & Test (Static & Shared)
         shell: bash
@@ -234,6 +232,7 @@ jobs:
   build-tier3:
     name: "Tier 3: ${{ matrix.name }}"
     runs-on: ubuntu-latest
+    container: debian:trixie
     strategy:
       fail-fast: false
       matrix:
@@ -253,13 +252,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Install cross-compiler
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ matrix.cross_pkg }} qemu-user
+          apt-get update
+          apt-get install -y cmake build-essential ninja-build ${{ matrix.cross_pkg }} qemu-user
 
       - name: Configure, Build & Test (Static & Shared)
         shell: bash
