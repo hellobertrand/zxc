@@ -15,8 +15,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
-  build:
-    name: ${{ matrix.name }}
+  # ===========================================================================
+  # Tier 1: Main architectures (release + manual + PR)
+  # ===========================================================================
+  build-tier1:
+    name: "Tier 1: ${{ matrix.name }}"
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -144,6 +147,153 @@ jobs:
               else
                   echo "Skipping tests for $LIB_TYPE (Cross-compilation)"
               fi
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
+
+  # ===========================================================================
+  # Tier 2: Extended Linux architectures (release + manual)
+  # ===========================================================================
+  build-tier2:
+    name: "Tier 2: ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux RISC-V 64
+            cross_pkg: gcc-riscv64-linux-gnu
+            cross_prefix: riscv64-linux-gnu
+            cmake_processor: riscv64
+            qemu_binary: qemu-riscv64
+          - name: Linux s390x
+            cross_pkg: gcc-s390x-linux-gnu
+            cross_prefix: s390x-linux-gnu
+            cmake_processor: s390x
+            qemu_binary: qemu-s390x
+          - name: Linux armhf
+            cross_pkg: gcc-arm-linux-gnueabihf
+            cross_prefix: arm-linux-gnueabihf
+            cmake_processor: arm
+            qemu_binary: qemu-arm
+          - name: Linux ppc64el
+            cross_pkg: gcc-powerpc64le-linux-gnu
+            cross_prefix: powerpc64le-linux-gnu
+            cmake_processor: ppc64le
+            qemu_binary: qemu-ppc64le
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Install cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.cross_pkg }} qemu-user
+
+      - name: Configure, Build & Test (Static & Shared)
+        shell: bash
+        run: |
+          CROSS_C=${{ matrix.cross_prefix }}-gcc
+          CROSS_CXX=${{ matrix.cross_prefix }}-g++
+          CROSS_STRIP=/usr/bin/${{ matrix.cross_prefix }}-strip
+          SYSROOT=/usr/${{ matrix.cross_prefix }}
+
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B $BUILD_DIR \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_C_COMPILER=$CROSS_C \
+                  -DCMAKE_CXX_COMPILER=$CROSS_CXX \
+                  -DCMAKE_STRIP=$CROSS_STRIP \
+                  -DCMAKE_SYSTEM_NAME=Linux \
+                  -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build $BUILD_DIR --config Release --parallel
+
+              echo "Running Tests for $LIB_TYPE via QEMU..."
+              ${{ matrix.qemu_binary }} -L $SYSROOT ./$BUILD_DIR/zxc_test
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
+
+  # ===========================================================================
+  # Tier 3: Experimental Linux architectures (manual only)
+  # ===========================================================================
+  build-tier3:
+    name: "Tier 3: ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux armel
+            cross_pkg: gcc-arm-linux-gnueabi
+            cross_prefix: arm-linux-gnueabi
+            cmake_processor: arm
+            qemu_binary: qemu-arm
+          - name: Linux mips64el
+            cross_pkg: gcc-mips64el-linux-gnuabi64
+            cross_prefix: mips64el-linux-gnuabi64
+            cmake_processor: mips64
+            qemu_binary: qemu-mips64el
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Install cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.cross_pkg }} qemu-user
+
+      - name: Configure, Build & Test (Static & Shared)
+        shell: bash
+        run: |
+          CROSS_C=${{ matrix.cross_prefix }}-gcc
+          CROSS_CXX=${{ matrix.cross_prefix }}-g++
+          CROSS_STRIP=/usr/bin/${{ matrix.cross_prefix }}-strip
+          SYSROOT=/usr/${{ matrix.cross_prefix }}
+
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B $BUILD_DIR \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_C_COMPILER=$CROSS_C \
+                  -DCMAKE_CXX_COMPILER=$CROSS_CXX \
+                  -DCMAKE_STRIP=$CROSS_STRIP \
+                  -DCMAKE_SYSTEM_NAME=Linux \
+                  -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build $BUILD_DIR --config Release --parallel
+
+              echo "Running Tests for $LIB_TYPE via QEMU..."
+              ${{ matrix.qemu_binary }} -L $SYSROOT ./$BUILD_DIR/zxc_test
+
               echo ">>> Completed Build: $LIB_TYPE"
               echo ""
           done
