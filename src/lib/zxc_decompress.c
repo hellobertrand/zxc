@@ -1017,6 +1017,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     // --- Trailing Literals ---
     // Copy remaining literals from source stream (literal exhaustion)
+    if (UNLIKELY(l_ptr > l_end)) return -1;
     const size_t remaining_literals = (size_t)(l_end - l_ptr);
     if (remaining_literals > 0) {
         if (UNLIKELY(d_ptr + remaining_literals > d_end)) return -1;
@@ -1461,6 +1462,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     // --- Trailing Literals ---
     // Copy remaining literals from source stream (literal exhaustion)
+    if (UNLIKELY(l_ptr > l_end)) return -1;
     const size_t remaining_literals = (size_t)(l_end - l_ptr);
     if (remaining_literals > 0) {
         if (UNLIKELY(d_ptr + remaining_literals > d_end)) return -1;
