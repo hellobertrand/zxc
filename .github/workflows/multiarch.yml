@@ -262,6 +262,11 @@ jobs:
             cross_prefix: mips64el-linux-gnuabi64
             cmake_processor: mips64
             qemu_binary: qemu-mips64el
+          - name: Linux loong64
+            cross_pkg: gcc-loongarch64-linux-gnu
+            cross_prefix: loongarch64-linux-gnu
+            cmake_processor: loongarch64
+            qemu_binary: qemu-loongarch64
 
     steps:
       - name: Checkout Repository
