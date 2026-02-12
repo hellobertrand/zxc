@@ -1,0 +1,32 @@
+name: Update Changelog
+
+on:
+  workflow_dispatch:
+  release:
+    types: [ published ]
+
+permissions:
+  contents: write
+
+jobs:
+  update-changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Generate Changelog
+        uses: janheinrichmerker/action-github-changelog-generator@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          output: CHANGELOG.md
+          excludeLabels: 'duplicate,question,invalid,wontfix'
+
+      - name: Commit and Push Changes
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: "Auto-update CHANGELOG.md"
+          file_pattern: "CHANGELOG.md"
+          commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
