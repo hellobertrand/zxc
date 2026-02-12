@@ -127,6 +127,7 @@ extern "C" {
 #elif defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 #define ZXC_BIG_ENDIAN
 #else
+warning "Endianness not detected, defaulting to little-endian"
 #define ZXC_LITTLE_ENDIAN
 #endif
 #endif
