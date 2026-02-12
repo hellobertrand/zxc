@@ -543,6 +543,99 @@ else
     log_fail "Large file multi-threading round-trip failed"
 fi
 
+# 20. JSON Output Tests
+echo "Testing JSON Output (-j, --json)..."
+
+# 20.1 List mode with JSON (single file)
+echo "  Testing list mode with JSON (single file)..."
+"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_FILE_XC_ARG")
+if [[ "$JSON_OUT" == *'"filename"'* ]] && \
+   [[ "$JSON_OUT" == *'"compressed_size_bytes"'* ]] && \
+   [[ "$JSON_OUT" == *'"uncompressed_size_bytes"'* ]] && \
+   [[ "$JSON_OUT" == *'"compression_ratio"'* ]] && \
+   [[ "$JSON_OUT" == *'"format_version"'* ]] && \
+   [[ "$JSON_OUT" == *'"checksum_method"'* ]]; then
+    log_pass "List mode JSON output (single file)"
+else
+    log_fail "List mode JSON output missing expected fields"
+fi
+
+# 20.2 List mode with JSON (multiple files)
+echo "  Testing list mode with JSON (multiple files)..."
+cp "$TEST_FILE_XC_ARG" "$TEST_DIR/test2.xc"
+JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_FILE_XC_ARG" "$TEST_DIR/test2.xc")
+if [[ "$JSON_OUT" == "["* ]] && \
+   [[ "$JSON_OUT" == *"]" ]] && \
+   [[ "$JSON_OUT" == *'"filename"'* ]] && \
+   [[ "$JSON_OUT" == *","* ]]; then
+    log_pass "List mode JSON output (multiple files - array)"
+else
+    log_fail "List mode JSON output should produce array for multiple files"
+fi
+
+# 20.3 Benchmark mode with JSON
+echo "  Testing benchmark mode with JSON..."
+JSON_OUT=$("$ZXC_BIN" -b -j "$TEST_FILE_ARG" 2>/dev/null)
+if [[ "$JSON_OUT" == *'"input_file"'* ]] && \
+   [[ "$JSON_OUT" == *'"input_size_bytes"'* ]] && \
+   [[ "$JSON_OUT" == *'"compressed_size_bytes"'* ]] && \
+   [[ "$JSON_OUT" == *'"compression_ratio"'* ]] && \
+   [[ "$JSON_OUT" == *'"iterations"'* ]] && \
+   [[ "$JSON_OUT" == *'"threads"'* ]] && \
+   [[ "$JSON_OUT" == *'"level"'* ]] && \
+   [[ "$JSON_OUT" == *'"checksum_enabled"'* ]] && \
+   [[ "$JSON_OUT" == *'"compress_speed_mbps"'* ]] && \
+   [[ "$JSON_OUT" == *'"decompress_speed_mbps"'* ]]; then
+    log_pass "Benchmark mode JSON output"
+else
+    log_fail "Benchmark mode JSON output missing expected fields"
+fi
+
+# 20.4 Integrity check with JSON (valid file)
+echo "  Testing integrity check with JSON (valid file)..."
+"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+JSON_OUT=$("$ZXC_BIN" -t -j "$TEST_FILE_XC_ARG")
+if [[ "$JSON_OUT" == *'"filename"'* ]] && \
+   [[ "$JSON_OUT" == *'"status": "ok"'* ]] && \
+   [[ "$JSON_OUT" == *'"checksum_verified"'* ]]; then
+    log_pass "Integrity check JSON output (valid file)"
+else
+    log_fail "Integrity check JSON output missing expected fields"
+fi
+
+# 20.5 Integrity check with JSON (corrupt file)
+echo "  Testing integrity check with JSON (corrupt file)..."
+"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+# Corrupt a byte
+printf '\xff' | dd of="$TEST_FILE_XC_ARG" bs=1 seek=100 count=1 conv=notrunc 2>/dev/null
+set +e
+JSON_OUT=$("$ZXC_BIN" -t -j "$TEST_FILE_XC_ARG" 2>&1)
+RET=$?
+set -e
+if [ $RET -ne 0 ] && \
+   [[ "$JSON_OUT" == *'"filename"'* ]] && \
+   [[ "$JSON_OUT" == *'"status": "failed"'* ]] && \
+   [[ "$JSON_OUT" == *'"error"'* ]]; then
+    log_pass "Integrity check JSON output (corrupt file)"
+else
+    log_fail "Integrity check JSON output for corrupt file incorrect"
+fi
+
+# 20.6 Verify JSON is parseable (if jq is available)
+echo "  Checking JSON validity (if jq available)..."
+if command -v jq &> /dev/null; then
+    "$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+    JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_FILE_XC_ARG")
+    if echo "$JSON_OUT" | jq . > /dev/null 2>&1; then
+        log_pass "JSON output is valid (verified with jq)"
+    else
+        log_fail "JSON output is not valid JSON"
+    fi
+else
+    echo "  [SKIP] jq not available, skipping JSON validation"
+fi
+
 echo "All tests passed!"
 exit 0
 
