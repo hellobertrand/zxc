@@ -1,6 +1,6 @@
 # ZXC: High-Performance Asymmetric Lossless Compression
 
-**Version**: 0.6.0
+**Version**: 0.7.0
 **Date**: February 2026
 **Author**: Bertrand Lebonnois
 
@@ -486,18 +486,18 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 **Figure A**: Decompression Throughput & Storage Ratio (Normalized to LZ4)
 
-![Benchmark Graph ARM64](./images/benchmark_arm64_0.6.0.png)
+![Benchmark Graph ARM64](./images/benchmark_arm64_0.7.0.png)
 
 
 ### 7.1 Client ARM64 Summary (Apple Silicon)
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.6.0 -1** | **2.33x** | **128.64** |
-| **zxc 0.6.0 -2** | **1.89x** | **114.91** |
-| **zxc 0.6.0 -1** | **1.43x** | **97.61** |
-| **zxc 0.6.0 -4** | **1.36x** | **91.22** |
-| **zxc 0.6.0 -5** | **1.25x** | **85.43** |
+| **zxc 0.7.0 -1** | **2.33x** | **128.64** |
+| **zxc 0.7.0 -2** | **1.89x** | **114.91** |
+| **zxc 0.7.0 -1** | **1.43x** | **97.61** |
+| **zxc 0.7.0 -4** | **1.36x** | **91.22** |
+| **zxc 0.7.0 -5** | **1.25x** | **85.43** |
 | lz4 1.10.0 --fast -17 | 1.18x | 130.57 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -12 | 0.95x | 76.59 |
@@ -511,11 +511,11 @@ Benchmarks were conducted using `lzbench` (by inikep).
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
 | memcpy                  | 0.066       | 1.00x (baseline)      |
-| **zxc 0.6.0 -1**        | **0.313**   | **4.7x**              |
-| **zxc 0.6.0 -2**        | **0.385**   | **5.8x**              |
-| **zxc 0.6.0 -3**        | **0.508**   | **7.7x**              |
-| **zxc 0.6.0 -4**        | **0.535**   | **8.1x**              |
-| **zxc 0.6.0 -5**        | **0.581**   | **8.8x**              |
+| **zxc 0.7.0 -1**        | **0.313**   | **4.7x**              |
+| **zxc 0.7.0 -2**        | **0.385**   | **5.8x**              |
+| **zxc 0.7.0 -3**        | **0.508**   | **7.7x**              |
+| **zxc 0.7.0 -4**        | **0.535**   | **8.1x**              |
+| **zxc 0.7.0 -5**        | **0.581**   | **8.8x**              |
 | lz4 1.10.0              | 0.729       | 11.0x                 |
 | lz4 1.10.0 --fast -17   | 0.619       | 9.4x                  |
 | lz4hc 1.10.0 -12        | 0.770       | 11.6x                 |
@@ -531,11 +531,11 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.6.0 -1** | **2.00x** | **128.64** |
-| **zxc 0.6.0 -2** | **1.67x** | **114.91** |
-| **zxc 0.6.0 -3** | **1.24x** | **97.61** |
-| **zxc 0.6.0 -4** | **1.18x** | **91.22** |
-| **zxc 0.6.0 -5** | **1.07x** | **85.43** |
+| **zxc 0.7.0 -1** | **2.00x** | **128.64** |
+| **zxc 0.7.0 -2** | **1.67x** | **114.91** |
+| **zxc 0.7.0 -3** | **1.24x** | **97.61** |
+| **zxc 0.7.0 -4** | **1.18x** | **91.22** |
+| **zxc 0.7.0 -5** | **1.07x** | **85.43** |
 | lz4 1.10.0 --fast -17 | 1.16x | 130.57 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -12 | 0.91x | 76.59 |
@@ -549,11 +549,11 @@ Benchmarks were conducted using `lzbench` (by inikep).
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
 | memcpy                  | 0.105       | 1.00x (baseline)      |
-| **zxc 0.6.0 -1**        | **0.310**   | **3.0x**              |
-| **zxc 0.6.0 -2**        | **0.373**   | **3.5x**              |
-| **zxc 0.6.0 -3**        | **0.502**   | **4.8x**              |
-| **zxc 0.6.0 -4**        | **0.526**   | **5.0x**              |
-| **zxc 0.6.0 -5**        | **0.580**   | **5.5x**              |
+| **zxc 0.7.0 -1**        | **0.310**   | **3.0x**              |
+| **zxc 0.7.0 -2**        | **0.373**   | **3.5x**              |
+| **zxc 0.7.0 -3**        | **0.502**   | **4.8x**              |
+| **zxc 0.7.0 -4**        | **0.526**   | **5.0x**              |
+| **zxc 0.7.0 -5**        | **0.580**   | **5.5x**              |
 | lz4 1.10.0              | 0.622       | 5.9x                  |
 | lz4 1.10.0 --fast -17   | 0.535       | 5.1x                  |
 | lz4hc 1.10.0 -12        | 0.684       | 6.5x                  |
@@ -569,11 +569,11 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.6.0 -1** | **1.68x** | **128.64** |
-| **zxc 0.6.0 -2** | **1.37x** | **114.91** |
-| **zxc 0.6.0 -3** | **1.09x** | **97.61** |
-| **zxc 0.6.0 -4** | **1.05x** | **91.22** |
-| **zxc 0.6.0 -5** | **0.98x** | **85.43** |
+| **zxc 0.7.0 -1** | **1.68x** | **128.64** |
+| **zxc 0.7.0 -2** | **1.37x** | **114.91** |
+| **zxc 0.7.0 -3** | **1.09x** | **97.61** |
+| **zxc 0.7.0 -4** | **1.05x** | **91.22** |
+| **zxc 0.7.0 -5** | **0.98x** | **85.43** |
 | lz4 1.10.0 --fast -17 | 1.16x | 130.57 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -12 | 0.98x | 76.59 |
@@ -587,11 +587,11 @@ Benchmarks were conducted using `lzbench` (by inikep).
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
 | memcpy                  | 0.123       | 1.00x (baseline)      |
-| **zxc 0.6.0 -1**        | **0.411**   | **3.3x**              |
-| **zxc 0.6.0 -2**        | **0.503**   | **4.1x**              |
-| **zxc 0.6.0 -3**        | **0.634**   | **5.2x**              |
-| **zxc 0.6.0 -4**        | **0.659**   | **5.4x**              |
-| **zxc 0.6.0 -5**        | **0.700**   | **5.7x**              |
+| **zxc 0.7.0 -1**        | **0.411**   | **3.3x**              |
+| **zxc 0.7.0 -2**        | **0.503**   | **4.1x**              |
+| **zxc 0.7.0 -3**        | **0.634**   | **5.2x**              |
+| **zxc 0.7.0 -4**        | **0.659**   | **5.4x**              |
+| **zxc 0.7.0 -5**        | **0.700**   | **5.7x**              |
 | lz4 1.10.0              | 0.689       | 5.6x                  |
 | lz4 1.10.0 --fast -17   | 0.595       | 4.8x                  |
 | lz4hc 1.10.0 -12        | 0.705       | 5.7x                  |
@@ -607,7 +607,7 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 **Figure B**: Decompression Efficiency : Cycles Per Byte Comparaison
 
-![Benchmark Cycles Per Byte](./images/benchmark_decompression_cycles_0.6.0.png)
+![Benchmark Cycles Per Byte](./images/benchmark_decompression_cycles_0.7.0.png)
 
 
 #### 7.4.1 ARM64 Architecture (Apple Silicon)
@@ -619,11 +619,11 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clan
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
 | memcpy                  | 52791 MB/s | 52860 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.6.0 -1**            |   908 MB/s | **11175 MB/s** |   129770958 | **61.23** | 12 files|
-| **zxc 0.6.0 -2**            |   605 MB/s |  **9091 MB/s** |   115921778 | **54.70** | 12 files|
-| **zxc 0.6.0 -3**            |   180 MB/s |  **6888 MB/s** |    98472307 | **46.46** | 12 files|
-| **zxc 0.6.0 -4**            |   125 MB/s |  **6544 MB/s** |    92027546 | **43.42** | 12 files|
-| **zxc 0.6.0 -5**            |  65.5 MB/s |  **6023 MB/s** |    86177811 | **40.66** | 12 files|
+| **zxc 0.7.0 -1**            |   908 MB/s | **11175 MB/s** |   129770958 | **61.23** | 12 files|
+| **zxc 0.7.0 -2**            |   605 MB/s |  **9091 MB/s** |   115921778 | **54.70** | 12 files|
+| **zxc 0.7.0 -3**            |   180 MB/s |  **6888 MB/s** |    98472307 | **46.46** | 12 files|
+| **zxc 0.7.0 -4**            |   125 MB/s |  **6544 MB/s** |    92027546 | **43.42** | 12 files|
+| **zxc 0.7.0 -5**            |  65.5 MB/s |  **6023 MB/s** |    86177811 | **40.66** | 12 files|
 | lz4 1.10.0              |   813 MB/s |  4801 MB/s |   100880147 | 47.60 | 12 files|
 | lz4 1.10.0 --fast -17   |  1345 MB/s |  5654 MB/s |   131723524 | 62.15 | 12 files|
 | lz4hc 1.10.0 -12        |  14.1 MB/s |  4544 MB/s |    77262399 | 36.46 | 12 files|
@@ -642,11 +642,11 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
 | memcpy                  | 25041 MB/s | 24706 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.6.0 -1**            |   812 MB/s |  **8378 MB/s** |   129770958 | **61.23** | 12 files|
-| **zxc 0.6.0 -2**            |   542 MB/s |  **6972 MB/s** |   115921778 | **54.70** | 12 files|
-| **zxc 0.6.0 -3**            |   160 MB/s |  **5181 MB/s** |    98472307 | **46.46** | 12 files|
-| **zxc 0.6.0 -4**            |   112 MB/s |  **4941 MB/s** |    92027546 | **43.42** | 12 files|
-| **zxc 0.6.0 -5**            |  58.3 MB/s |  **4485 MB/s** |    86177811 | **40.66** | 12 files|
+| **zxc 0.7.0 -1**            |   812 MB/s |  **8378 MB/s** |   129770958 | **61.23** | 12 files|
+| **zxc 0.7.0 -2**            |   542 MB/s |  **6972 MB/s** |   115921778 | **54.70** | 12 files|
+| **zxc 0.7.0 -3**            |   160 MB/s |  **5181 MB/s** |    98472307 | **46.46** | 12 files|
+| **zxc 0.7.0 -4**            |   112 MB/s |  **4941 MB/s** |    92027546 | **43.42** | 12 files|
+| **zxc 0.7.0 -5**            |  58.3 MB/s |  **4485 MB/s** |    86177811 | **40.66** | 12 files|
 | lz4 1.10.0              |   740 MB/s |  4181 MB/s |   100880147 | 47.60 | 12 files|
 | lz4 1.10.0 --fast -17   |  1291 MB/s |  4860 MB/s |   131723524 | 62.15 | 12 files|
 | lz4hc 1.10.0 -12        |  12.5 MB/s |  3799 MB/s |    77262399 | 36.46 | 12 files|
@@ -665,11 +665,11 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
 | memcpy                  | 20177 MB/s | 19960 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.6.0 -1**            |   608 MB/s |  **5962 MB/s** |   129770958 | **61.23** | 12 files|
-| **zxc 0.6.0 -2**            |   403 MB/s |  **4871 MB/s** |   115921778 | **54.70** | 12 files|
-| **zxc 0.6.0 -3**            |   127 MB/s |  **3863 MB/s** |    98472307 | **46.46** | 12 files|
-| **zxc 0.6.0 -4**            |  89.3 MB/s |  **3718 MB/s** |    92027546 | **43.42** | 12 files|
-| **zxc 0.6.0 -5**            |  47.3 MB/s |  **3498 MB/s** |    86177811 | **40.66** | 12 files|
+| **zxc 0.7.0 -1**            |   608 MB/s |  **5962 MB/s** |   129770958 | **61.23** | 12 files|
+| **zxc 0.7.0 -2**            |   403 MB/s |  **4871 MB/s** |   115921778 | **54.70** | 12 files|
+| **zxc 0.7.0 -3**            |   127 MB/s |  **3863 MB/s** |    98472307 | **46.46** | 12 files|
+| **zxc 0.7.0 -4**            |  89.3 MB/s |  **3718 MB/s** |    92027546 | **43.42** | 12 files|
+| **zxc 0.7.0 -5**            |  47.3 MB/s |  **3498 MB/s** |    86177811 | **40.66** | 12 files|
 | lz4 1.10.0              |   592 MB/s |  3557 MB/s |   100880147 | 47.60 | 12 files|
 | lz4 1.10.0 --fast -17   |  1033 MB/s |  4116 MB/s |   131723524 | 62.15 | 12 files|
 | lz4hc 1.10.0 -12        |  11.1 MB/s |  3475 MB/s |    77262399 | 36.46 | 12 files|
