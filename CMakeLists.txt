@@ -212,7 +212,7 @@ if(NOT MSVC)
         target_link_options(zxc_lib PRIVATE -Wl,--gc-sections)
     endif()
 else()
-    target_compile_options(zxc_lib PRIVATE /O2 /W3)
+    target_compile_options(zxc_lib PRIVATE $<$<CONFIG:Release>:/O2> /W3)
     target_compile_definitions(zxc_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
