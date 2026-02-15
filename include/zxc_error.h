@@ -54,6 +54,6 @@ typedef enum {
  * @return A constant string such as "ZXC_OK" or "ZXC_ERROR_MEMORY".
  *         Returns "ZXC_UNKNOWN_ERROR" for unrecognized codes.
  */
-ZXC_EXPORT const char* zxc_error_name(int code);
+ZXC_EXPORT const char* zxc_error_name(const int code);
 
 #endif /* ZXC_ERROR_H */
