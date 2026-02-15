@@ -209,7 +209,25 @@ find_package(zxc CONFIG REQUIRED)
 target_link_libraries(myapp PRIVATE zxc::zxc_lib)
 ```
 
-### Option 3: Building from Source
+### Option 3: Conan
+
+```bash
+conan install --requires="zxc/[*]" --build=missing
+```
+
+Or add to your `conanfile.txt`:
+```ini
+[requires]
+zxc/[*]
+```
+
+Then in your CMake project:
+```cmake
+find_package(zxc CONFIG REQUIRED)
+target_link_libraries(myapp PRIVATE zxc::zxc_lib)
+```
+
+### Option 4: Building from Source
 
 **Requirements:** CMake (3.14+), C17 Compiler (Clang/GCC/MSVC).
 
