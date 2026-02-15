@@ -1066,9 +1066,10 @@ int test_buffer_error_codes() {
     {
         const size_t src_sz = 4096;
         uint8_t* src = malloc(src_sz);
-        uint8_t* dst = malloc(ZXC_FILE_HEADER_SIZE + 1);  // Just barely fits the header
+        const size_t small_dst = 128;
+        uint8_t* dst = malloc(small_dst);
         gen_lz_data(src, src_sz);
-        r = zxc_compress(src, src_sz, dst, ZXC_FILE_HEADER_SIZE + 1, 3, 0);
+        r = zxc_compress(src, src_sz, dst, small_dst, 3, 0);
         if (r >= 0) {
             printf("  [FAIL] dst too small for chunk: expected < 0, got %lld\n", (long long)r);
             free(src);
@@ -1089,7 +1090,7 @@ int test_buffer_error_codes() {
         gen_lz_data(src, src_sz);
         const size_t full_cap = zxc_compress_bound(src_sz);
         uint8_t* full_dst = malloc(full_cap);
-        int64_t full_sz = zxc_compress(src, src_sz, full_dst, full_cap, 3, 0);
+        const int64_t full_sz = zxc_compress(src, src_sz, full_dst, full_cap, 3, 0);
         if (full_sz <= 0) {
             printf("  [SKIP] Cannot prepare for EOF test\n");
             free(src);
@@ -1108,8 +1109,9 @@ int test_buffer_error_codes() {
                 free(tight_dst);
                 return 0;
             }
-            free(tight_dst);
+            free(src);
             free(full_dst);
+            free(tight_dst);
         }
     }
     printf("  [PASS] zxc_compress dst too small for EOF+footer -> negative\n");
@@ -1169,7 +1171,7 @@ int test_buffer_error_codes() {
     gen_lz_data(test_src, test_src_sz);
     const size_t comp_cap = zxc_compress_bound(test_src_sz);
     uint8_t* comp_buf = malloc(comp_cap);
-    int64_t comp_sz = zxc_compress(test_src, test_src_sz, comp_buf, comp_cap, 3, 1);
+    const int64_t comp_sz = zxc_compress(test_src, test_src_sz, comp_buf, comp_cap, 3, 1);
     if (comp_sz <= 0) {
         printf("  [FAIL] Could not prepare compressed data\n");
         free(test_src);
@@ -1456,7 +1458,7 @@ int test_stream_engine_errors() {
 
         // Read the compressed data, corrupt the footer source size, rewrite
         fseek(f_comp_out, 0, SEEK_END);
-        long comp_file_sz = ftell(f_comp_out);
+        const long comp_file_sz = ftell(f_comp_out);
         uint8_t* comp_data = malloc(comp_file_sz);
         fseek(f_comp_out, 0, SEEK_SET);
         fread(comp_data, 1, comp_file_sz, f_comp_out);
@@ -1504,7 +1506,7 @@ int test_stream_engine_errors() {
         }
 
         fseek(f_comp_out, 0, SEEK_END);
-        long comp_file_sz = ftell(f_comp_out);
+        const long comp_file_sz = ftell(f_comp_out);
         uint8_t* comp_data = malloc(comp_file_sz);
         fseek(f_comp_out, 0, SEEK_SET);
         fread(comp_data, 1, comp_file_sz, f_comp_out);
@@ -1551,9 +1553,9 @@ int test_stream_engine_errors() {
         }
 
         fseek(f_comp_out, 0, SEEK_END);
-        long comp_file_sz = ftell(f_comp_out);
+        const long comp_file_sz = ftell(f_comp_out);
         // Truncate: remove the EOF block header + footer
-        long trunc_sz = comp_file_sz - (ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE);
+        const long trunc_sz = comp_file_sz - (ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE);
         uint8_t* comp_data = malloc(trunc_sz);
         fseek(f_comp_out, 0, SEEK_SET);
         fread(comp_data, 1, trunc_sz, f_comp_out);
