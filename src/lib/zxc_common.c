@@ -41,7 +41,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->compression_level = level;
     ctx->checksum_enabled = checksum_enabled;
 
-    if (mode == 0) return 0;
+    if (mode == 0) return ZXC_OK;
 
     size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
     size_t sz_hash = 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
@@ -86,7 +86,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->epoch = 1;
 
     ZXC_MEMSET(ctx->hash_table, 0, sz_hash);
-    return 0;
+    return ZXC_OK;
 }
 
 void zxc_cctx_free(zxc_cctx_t* ctx) {
@@ -157,7 +157,7 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     }
     if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
 
-    return 0;
+    return ZXC_OK;
 }
 
 int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
@@ -188,7 +188,7 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
     bh->reserved = src[2];
     bh->comp_size = zxc_le32(src + 3);
     bh->header_crc = src[7];
-    return 0;
+    return ZXC_OK;
 }
 
 int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
@@ -223,7 +223,7 @@ int zxc_read_num_header(const uint8_t* RESTRICT src, const size_t src_size,
 
     nh->n_values = zxc_le64(src);
     nh->frame_size = zxc_le16(src + 8);
-    return 0;
+    return ZXC_OK;
 }
 
 int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
@@ -272,7 +272,7 @@ int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
         desc[i].sizes = zxc_le64(p);
         p += ZXC_SECTION_DESC_BINARY_SIZE;
     }
-    return 0;
+    return ZXC_OK;
 }
 
 int zxc_write_ghi_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
@@ -321,7 +321,7 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
         desc[i].sizes = zxc_le64(p);
         p += ZXC_SECTION_DESC_BINARY_SIZE;
     }
-    return 0;
+    return ZXC_OK;
 }
 
 /*
