@@ -765,6 +765,7 @@ int main(int argc, char** argv) {
         double best_compress = 1e30;
         int compress_iters = 0;
         double compress_deadline = zxc_now() + bench_seconds;
+        double compress_start = zxc_now();
         while (zxc_now() < compress_deadline) {
             rewind(fm);
             double t0 = zxc_now();
@@ -772,7 +773,10 @@ int main(int argc, char** argv) {
             double dt = zxc_now() - t0;
             if (dt < best_compress) best_compress = dt;
             compress_iters++;
+            if (!json_output && !g_quiet)
+                fprintf(stderr, "\rCompressing... %d iters (%.1fs)", compress_iters, zxc_now() - compress_start);
         }
+        if (!json_output && !g_quiet) fprintf(stderr, "\r\033[K");
         fclose(fm);
 
         uint64_t max_c = zxc_compress_bound(in_size);
@@ -830,6 +834,7 @@ int main(int argc, char** argv) {
         double best_decompress = 1e30;
         int decompress_iters = 0;
         double decompress_deadline = zxc_now() + bench_seconds;
+        double decompress_start = zxc_now();
         while (zxc_now() < decompress_deadline) {
             rewind(fc);
             double t0 = zxc_now();
@@ -837,7 +842,10 @@ int main(int argc, char** argv) {
             double dt = zxc_now() - t0;
             if (dt < best_decompress) best_decompress = dt;
             decompress_iters++;
+            if (!json_output && !g_quiet)
+                fprintf(stderr, "\rDecompressing... %d iters (%.1fs)", decompress_iters, zxc_now() - decompress_start);
         }
+        if (!json_output && !g_quiet) fprintf(stderr, "\r\033[K");
         fclose(fc);
 
         double compress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_compress;
