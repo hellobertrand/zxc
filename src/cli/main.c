@@ -761,10 +761,6 @@ int main(int argc, char** argv) {
 #endif
         if (!fm) goto bench_cleanup;
 
-        // Warmup: 1 iteration to prime caches
-        rewind(fm);
-        zxc_stream_compress(fm, NULL, num_threads, level, checksum);
-
         // Timed: run for bench_seconds, keep best (fastest) iteration
         double best_compress = 1e30;
         int compress_iters = 0;
@@ -830,10 +826,6 @@ int main(int argc, char** argv) {
         if (!fc) goto bench_cleanup;
 #endif
 
-        // Warmup: 1 iteration to prime caches
-        rewind(fc);
-        zxc_stream_decompress(fc, NULL, num_threads, checksum);
-
         // Timed: run for bench_seconds, keep best (fastest) iteration
         double best_decompress = 1e30;
         int decompress_iters = 0;
@@ -848,8 +840,8 @@ int main(int argc, char** argv) {
         }
         fclose(fc);
 
-        double compress_speed_mbps = (double)in_size / (1024.0 * 1024.0) / best_compress;
-        double decompress_speed_mbps = (double)in_size / (1024.0 * 1024.0) / best_decompress;
+        double compress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_compress;
+        double decompress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_decompress;
         double ratio = (double)in_size / c_sz;
 
         if (json_output)
@@ -865,10 +857,10 @@ int main(int argc, char** argv) {
                 "  \"threads\": %d,\n"
                 "  \"level\": %d,\n"
                 "  \"checksum_enabled\": %s,\n"
-                "  \"best_compress_speed_mbps\": %.3f,\n"
-                "  \"best_decompress_speed_mbps\": %.3f,\n"
-                "  \"best_compress_time_seconds\": %.6f,\n"
-                "  \"best_decompress_time_seconds\": %.6f\n"
+                "  \"compress_speed_mbps\": %.3f,\n"
+                "  \"decompress_speed_mbps\": %.3f,\n"
+                "  \"compress_time_seconds\": %.6f,\n"
+                "  \"decompress_time_seconds\": %.6f\n"
                 "}\n",
                 in_path, in_size, (long long)c_sz, ratio, bench_seconds, compress_iters,
                 decompress_iters, num_threads, level, checksum ? "true" : "false",
@@ -876,8 +868,8 @@ int main(int argc, char** argv) {
         else
             printf(
                 "Compressed: %lld bytes (ratio %.3f)\n"
-                "Best Compress  : %.3f MiB/s (%d iters)\n"
-                "Best Decompress: %.3f MiB/s (%d iters)\n",
+                "Compress  : %.3f MB/s (%d iters)\n"
+                "Decompress: %.3f MB/s (%d iters)\n",
                 (long long)c_sz, ratio, compress_speed_mbps, compress_iters, decompress_speed_mbps,
                 decompress_iters);
         ret = 0;
