@@ -1111,7 +1111,6 @@ int test_buffer_error_codes() {
             free(tight_dst);
             free(full_dst);
         }
-        free(src);
     }
     printf("  [PASS] zxc_compress dst too small for EOF+footer -> negative\n");
 
@@ -1283,6 +1282,304 @@ int test_buffer_error_codes() {
     return 1;
 }
 
+int test_stream_get_decompressed_size_errors() {
+    printf("=== TEST: Unit - zxc_stream_get_decompressed_size Error Codes ===\n");
+
+    // 1. NULL FILE*
+    int64_t r = zxc_stream_get_decompressed_size(NULL);
+    if (r != ZXC_ERROR_NULL_INPUT) {
+        printf("  [FAIL] NULL FILE*: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
+        return 0;
+    }
+    printf("  [PASS] NULL FILE* -> ZXC_ERROR_NULL_INPUT\n");
+
+    // 2. File too small (less than header + footer)
+    {
+        FILE* f = tmpfile();
+        if (!f) {
+            printf("  [SKIP] tmpfile failed\n");
+            return 0;
+        }
+        fwrite("tiny", 1, 4, f);
+        fseek(f, 0, SEEK_SET);
+        r = zxc_stream_get_decompressed_size(f);
+        if (r != ZXC_ERROR_SRC_TOO_SMALL) {
+            printf("  [FAIL] file too small: expected %d, got %lld\n", ZXC_ERROR_SRC_TOO_SMALL,
+                   (long long)r);
+            fclose(f);
+            return 0;
+        }
+        fclose(f);
+    }
+    printf("  [PASS] file too small -> ZXC_ERROR_SRC_TOO_SMALL\n");
+
+    // 3. Bad magic word
+    {
+        FILE* f = tmpfile();
+        if (!f) {
+            printf("  [SKIP] tmpfile failed\n");
+            return 0;
+        }
+        // Write enough bytes but with wrong magic
+        uint8_t garbage[ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE];
+        memset(garbage, 0, sizeof(garbage));
+        fwrite(garbage, 1, sizeof(garbage), f);
+        fseek(f, 0, SEEK_SET);
+        r = zxc_stream_get_decompressed_size(f);
+        if (r != ZXC_ERROR_BAD_MAGIC) {
+            printf("  [FAIL] bad magic: expected %d, got %lld\n", ZXC_ERROR_BAD_MAGIC,
+                   (long long)r);
+            fclose(f);
+            return 0;
+        }
+        fclose(f);
+    }
+    printf("  [PASS] bad magic -> ZXC_ERROR_BAD_MAGIC\n");
+
+    // 4. Valid file returns correct size
+    {
+        // Create a valid compressed file in memory
+        const size_t src_sz = 512;
+        uint8_t* src = malloc(src_sz);
+        gen_lz_data(src, src_sz);
+        const size_t cap = zxc_compress_bound(src_sz);
+        uint8_t* comp = malloc(cap);
+        int64_t comp_sz = zxc_compress(src, src_sz, comp, cap, 3, 0);
+        if (comp_sz <= 0) {
+            printf("  [SKIP] compress failed\n");
+            free(src);
+            free(comp);
+            return 0;
+        }
+
+        FILE* f = tmpfile();
+        fwrite(comp, 1, (size_t)comp_sz, f);
+        fseek(f, 0, SEEK_SET);
+        r = zxc_stream_get_decompressed_size(f);
+        if (r != (int64_t)src_sz) {
+            printf("  [FAIL] valid file: expected %zu, got %lld\n", src_sz, (long long)r);
+            fclose(f);
+            free(src);
+            free(comp);
+            return 0;
+        }
+        fclose(f);
+        free(src);
+        free(comp);
+    }
+    printf("  [PASS] valid file -> correct size\n");
+
+    printf("PASS\n\n");
+    return 1;
+}
+
+int test_stream_engine_errors() {
+    printf("=== TEST: Unit - Stream Engine Error Codes ===\n");
+
+    // 1. zxc_stream_compress with NULL f_in
+    {
+        FILE* f_out = tmpfile();
+        int64_t r = zxc_stream_compress(NULL, f_out, 1, 3, 0);
+        if (r != ZXC_ERROR_NULL_INPUT) {
+            printf("  [FAIL] compress NULL f_in: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
+                   (long long)r);
+            if (f_out) fclose(f_out);
+            return 0;
+        }
+        if (f_out) fclose(f_out);
+    }
+    printf("  [PASS] zxc_stream_compress NULL f_in -> ZXC_ERROR_NULL_INPUT\n");
+
+    // 2. zxc_stream_decompress with NULL f_in
+    {
+        FILE* f_out = tmpfile();
+        int64_t r = zxc_stream_decompress(NULL, f_out, 1, 0);
+        if (r != ZXC_ERROR_NULL_INPUT) {
+            printf("  [FAIL] decompress NULL f_in: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
+                   (long long)r);
+            if (f_out) fclose(f_out);
+            return 0;
+        }
+        if (f_out) fclose(f_out);
+    }
+    printf("  [PASS] zxc_stream_decompress NULL f_in -> ZXC_ERROR_NULL_INPUT\n");
+
+    // 3. zxc_stream_decompress with bad header (invalid file)
+    {
+        FILE* f_in = tmpfile();
+        FILE* f_out = tmpfile();
+        if (!f_in || !f_out) {
+            if (f_in) fclose(f_in);
+            if (f_out) fclose(f_out);
+            printf("  [SKIP] tmpfile failed\n");
+            return 0;
+        }
+        // Write garbage data (bad magic)
+        uint8_t garbage[64];
+        memset(garbage, 0xAA, sizeof(garbage));
+        fwrite(garbage, 1, sizeof(garbage), f_in);
+        fseek(f_in, 0, SEEK_SET);
+
+        int64_t r = zxc_stream_decompress(f_in, f_out, 1, 0);
+        if (r != ZXC_ERROR_BAD_HEADER) {
+            printf("  [FAIL] bad header: expected %d, got %lld\n", ZXC_ERROR_BAD_HEADER,
+                   (long long)r);
+            fclose(f_in);
+            fclose(f_out);
+            return 0;
+        }
+        fclose(f_in);
+        fclose(f_out);
+    }
+    printf("  [PASS] zxc_stream_decompress bad header -> ZXC_ERROR_BAD_HEADER\n");
+
+    // 4. Stream decompress with corrupted footer (stored size mismatch)
+    {
+        // First, create a valid compressed stream
+        const size_t src_sz = 4096;
+        uint8_t* src = malloc(src_sz);
+        gen_lz_data(src, src_sz);
+
+        FILE* f_comp_in = tmpfile();
+        FILE* f_comp_out = tmpfile();
+        fwrite(src, 1, src_sz, f_comp_in);
+        fseek(f_comp_in, 0, SEEK_SET);
+
+        int64_t comp_sz = zxc_stream_compress(f_comp_in, f_comp_out, 1, 3, 1);
+        fclose(f_comp_in);
+        if (comp_sz <= 0) {
+            printf("  [SKIP] stream compress failed\n");
+            fclose(f_comp_out);
+            free(src);
+            return 0;
+        }
+
+        // Read the compressed data, corrupt the footer source size, rewrite
+        fseek(f_comp_out, 0, SEEK_END);
+        long comp_file_sz = ftell(f_comp_out);
+        uint8_t* comp_data = malloc(comp_file_sz);
+        fseek(f_comp_out, 0, SEEK_SET);
+        fread(comp_data, 1, comp_file_sz, f_comp_out);
+        fclose(f_comp_out);
+
+        // Corrupt the stored source size in footer (last 12 bytes: [src_size(8)] + [hash(4)])
+        const size_t footer_off = comp_file_sz - ZXC_FILE_FOOTER_SIZE;
+        comp_data[footer_off] ^= 0x01;  // Flip a bit in stored source size
+
+        FILE* f_corrupt = tmpfile();
+        FILE* f_dec_out = tmpfile();
+        fwrite(comp_data, 1, comp_file_sz, f_corrupt);
+        fseek(f_corrupt, 0, SEEK_SET);
+        free(comp_data);
+
+        int64_t r = zxc_stream_decompress(f_corrupt, f_dec_out, 1, 1);
+        fclose(f_corrupt);
+        fclose(f_dec_out);
+        free(src);
+        if (r >= 0) {
+            printf("  [FAIL] corrupt footer size: expected < 0, got %lld\n", (long long)r);
+            return 0;
+        }
+    }
+    printf("  [PASS] zxc_stream_decompress corrupt footer -> negative\n");
+
+    // 5. Stream decompress with corrupted global checksum
+    {
+        const size_t src_sz = 4096;
+        uint8_t* src = malloc(src_sz);
+        gen_lz_data(src, src_sz);
+
+        FILE* f_comp_in = tmpfile();
+        FILE* f_comp_out = tmpfile();
+        fwrite(src, 1, src_sz, f_comp_in);
+        fseek(f_comp_in, 0, SEEK_SET);
+
+        int64_t comp_sz = zxc_stream_compress(f_comp_in, f_comp_out, 1, 3, 1);
+        fclose(f_comp_in);
+        if (comp_sz <= 0) {
+            printf("  [SKIP] stream compress failed\n");
+            fclose(f_comp_out);
+            free(src);
+            return 0;
+        }
+
+        fseek(f_comp_out, 0, SEEK_END);
+        long comp_file_sz = ftell(f_comp_out);
+        uint8_t* comp_data = malloc(comp_file_sz);
+        fseek(f_comp_out, 0, SEEK_SET);
+        fread(comp_data, 1, comp_file_sz, f_comp_out);
+        fclose(f_comp_out);
+
+        // Corrupt the global checksum (last 4 bytes)
+        comp_data[comp_file_sz - 1] ^= 0xFF;
+
+        FILE* f_corrupt = tmpfile();
+        FILE* f_dec_out = tmpfile();
+        fwrite(comp_data, 1, comp_file_sz, f_corrupt);
+        fseek(f_corrupt, 0, SEEK_SET);
+        free(comp_data);
+
+        int64_t r = zxc_stream_decompress(f_corrupt, f_dec_out, 1, 1);
+        fclose(f_corrupt);
+        fclose(f_dec_out);
+        free(src);
+        if (r >= 0) {
+            printf("  [FAIL] corrupt global checksum: expected < 0, got %lld\n", (long long)r);
+            return 0;
+        }
+    }
+    printf("  [PASS] zxc_stream_decompress corrupt checksum -> negative\n");
+
+    // 6. Stream decompress truncated file (missing EOF + footer)
+    {
+        const size_t src_sz = 4096;
+        uint8_t* src = malloc(src_sz);
+        gen_lz_data(src, src_sz);
+
+        FILE* f_comp_in = tmpfile();
+        FILE* f_comp_out = tmpfile();
+        fwrite(src, 1, src_sz, f_comp_in);
+        fseek(f_comp_in, 0, SEEK_SET);
+
+        int64_t comp_sz = zxc_stream_compress(f_comp_in, f_comp_out, 1, 3, 0);
+        fclose(f_comp_in);
+        free(src);
+        if (comp_sz <= 0) {
+            printf("  [SKIP] stream compress failed\n");
+            fclose(f_comp_out);
+            return 0;
+        }
+
+        fseek(f_comp_out, 0, SEEK_END);
+        long comp_file_sz = ftell(f_comp_out);
+        // Truncate: remove the EOF block header + footer
+        long trunc_sz = comp_file_sz - (ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE);
+        uint8_t* comp_data = malloc(trunc_sz);
+        fseek(f_comp_out, 0, SEEK_SET);
+        fread(comp_data, 1, trunc_sz, f_comp_out);
+        fclose(f_comp_out);
+
+        FILE* f_corrupt = tmpfile();
+        FILE* f_dec_out = tmpfile();
+        fwrite(comp_data, 1, trunc_sz, f_corrupt);
+        fseek(f_corrupt, 0, SEEK_SET);
+        free(comp_data);
+
+        int64_t r = zxc_stream_decompress(f_corrupt, f_dec_out, 1, 0);
+        fclose(f_corrupt);
+        fclose(f_dec_out);
+        // Should fail: missing EOF/footer means io_error or bad read
+        if (r >= 0) {
+            printf("  [FAIL] truncated stream: expected < 0, got %lld\n", (long long)r);
+            return 0;
+        }
+    }
+    printf("  [PASS] zxc_stream_decompress truncated -> negative\n");
+
+    printf("PASS\n\n");
+    return 1;
+}
+
 int main() {
     srand(42);  // Fixed seed for reproducibility
     int total_failures = 0;
@@ -1383,6 +1680,8 @@ int main() {
     if (!test_get_decompressed_size()) total_failures++;
     if (!test_error_name()) total_failures++;
     if (!test_buffer_error_codes()) total_failures++;
+    if (!test_stream_get_decompressed_size_errors()) total_failures++;
+    if (!test_stream_engine_errors()) total_failures++;
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);
