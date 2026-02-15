@@ -180,7 +180,27 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
     cc myapp.c $(pkg-config --cflags --libs zxc) -o myapp
     ```
 
-### Option 2: Building from Source
+### Option 2: vcpkg
+
+**Classic mode:**
+```bash
+vcpkg install zxc
+```
+
+**Manifest mode** (add to `vcpkg.json`):
+```json
+{
+  "dependencies": ["zxc"]
+}
+```
+
+Then in your CMake project:
+```cmake
+find_package(zxc CONFIG REQUIRED)
+target_link_libraries(myapp PRIVATE zxc::zxc_lib)
+```
+
+### Option 3: Building from Source
 
 **Requirements:** CMake (3.14+), C17 Compiler (Clang/GCC/MSVC).
 
