@@ -48,7 +48,7 @@ ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
  * data (1 to enable, 0 to disable).
  *
  * @return The number of bytes written to dst (>0 on success),
- *         or a negative zxc_error_t code on failure.
+ *         or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) on failure.
  */
 ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* dst,
                                 const size_t dst_capacity, const int level,
@@ -69,7 +69,7 @@ ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* ds
  * data (1 to enable, 0 to disable).
  *
  * @return The number of bytes written to dst (>0 on success),
- *         or a negative zxc_error_t code on failure.
+ *         or a negative zxc_error_t code (e.g., ZXC_ERROR_CORRUPT_DATA) on failure.
  */
 ZXC_EXPORT int64_t zxc_decompress(const void* src, const size_t src_size, void* dst,
                                   const size_t dst_capacity, const int checksum_enabled);
