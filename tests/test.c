@@ -11,6 +11,7 @@
 #include <time.h>
 
 #include "../include/zxc_buffer.h"
+#include "../include/zxc_error.h"
 #include "../include/zxc_stream.h"
 #include "../src/lib/zxc_internal.h"
 
@@ -957,6 +958,57 @@ int test_get_decompressed_size() {
     return 1;
 }
 
+int test_error_name() {
+    printf("--- Test: zxc_error_name ---\n");
+
+    struct {
+        int code;
+        const char* expected;
+    } cases[] = {
+        {ZXC_OK, "ZXC_OK"},
+        {ZXC_ERROR_MEMORY, "ZXC_ERROR_MEMORY"},
+        {ZXC_ERROR_DST_TOO_SMALL, "ZXC_ERROR_DST_TOO_SMALL"},
+        {ZXC_ERROR_SRC_TOO_SMALL, "ZXC_ERROR_SRC_TOO_SMALL"},
+        {ZXC_ERROR_BAD_MAGIC, "ZXC_ERROR_BAD_MAGIC"},
+        {ZXC_ERROR_BAD_VERSION, "ZXC_ERROR_BAD_VERSION"},
+        {ZXC_ERROR_BAD_HEADER, "ZXC_ERROR_BAD_HEADER"},
+        {ZXC_ERROR_BAD_CHECKSUM, "ZXC_ERROR_BAD_CHECKSUM"},
+        {ZXC_ERROR_CORRUPT_DATA, "ZXC_ERROR_CORRUPT_DATA"},
+        {ZXC_ERROR_BAD_OFFSET, "ZXC_ERROR_BAD_OFFSET"},
+        {ZXC_ERROR_OVERFLOW, "ZXC_ERROR_OVERFLOW"},
+        {ZXC_ERROR_IO, "ZXC_ERROR_IO"},
+        {ZXC_ERROR_NULL_INPUT, "ZXC_ERROR_NULL_INPUT"},
+        {ZXC_ERROR_BAD_BLOCK_TYPE, "ZXC_ERROR_BAD_BLOCK_TYPE"},
+    };
+    const int n = sizeof(cases) / sizeof(cases[0]);
+
+    for (int i = 0; i < n; i++) {
+        const char* name = zxc_error_name(cases[i].code);
+        if (strcmp(name, cases[i].expected) != 0) {
+            printf("  [FAIL] zxc_error_name(%d) = \"%s\", expected \"%s\"\n", cases[i].code, name,
+                   cases[i].expected);
+            return 0;
+        }
+    }
+    printf("  [PASS] All %d known error codes\n", n);
+
+    // Unknown codes should return "ZXC_UNKNOWN_ERROR"
+    const char* unk = zxc_error_name(-999);
+    if (strcmp(unk, "ZXC_UNKNOWN_ERROR") != 0) {
+        printf("  [FAIL] zxc_error_name(-999) = \"%s\", expected \"ZXC_UNKNOWN_ERROR\"\n", unk);
+        return 0;
+    }
+    unk = zxc_error_name(42);
+    if (strcmp(unk, "ZXC_UNKNOWN_ERROR") != 0) {
+        printf("  [FAIL] zxc_error_name(42) = \"%s\", expected \"ZXC_UNKNOWN_ERROR\"\n", unk);
+        return 0;
+    }
+    printf("  [PASS] Unknown error codes\n");
+
+    printf("PASS\n\n");
+    return 1;
+}
+
 int main() {
     srand(42);  // Fixed seed for reproducibility
     int total_failures = 0;
@@ -1055,6 +1107,7 @@ int main() {
     if (!test_header_checksum()) total_failures++;
     if (!test_global_checksum_order()) total_failures++;
     if (!test_get_decompressed_size()) total_failures++;
+    if (!test_error_name()) total_failures++;
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);
