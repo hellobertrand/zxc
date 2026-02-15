@@ -47,12 +47,12 @@ ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
  * @param[in] checksum_enabled Flag indicating whether to verify the checksum of the
  * data (1 to enable, 0 to disable).
  *
- * @return The number of bytes written to dst, or 0 if the destination buffer
- * is too small or an error occurred.
+ * @return The number of bytes written to dst (>0 on success),
+ *         or a negative zxc_error_t code on failure.
  */
-ZXC_EXPORT size_t zxc_compress(const void* src, const size_t src_size, void* dst,
-                               const size_t dst_capacity, const int level,
-                               const int checksum_enabled);
+ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* dst,
+                                const size_t dst_capacity, const int level,
+                                const int checksum_enabled);
 
 /**
  * @brief Decompresses a ZXC compressed buffer.
@@ -68,11 +68,11 @@ ZXC_EXPORT size_t zxc_compress(const void* src, const size_t src_size, void* dst
  * @param[in] checksum_enabled Flag indicating whether to verify the checksum of the
  * data (1 to enable, 0 to disable).
  *
- * @return The number of bytes written to dst, or 0 if decompression fails
- * (invalid header, corruption, or destination too small).
+ * @return The number of bytes written to dst (>0 on success),
+ *         or a negative zxc_error_t code on failure.
  */
-ZXC_EXPORT size_t zxc_decompress(const void* src, const size_t src_size, void* dst,
-                                 const size_t dst_capacity, const int checksum_enabled);
+ZXC_EXPORT int64_t zxc_decompress(const void* src, const size_t src_size, void* dst,
+                                  const size_t dst_capacity, const int checksum_enabled);
 
 /**
  * @brief Returns the decompressed size stored in a ZXC compressed buffer.

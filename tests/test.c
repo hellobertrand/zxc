@@ -269,53 +269,53 @@ int test_invalid_arguments() {
     rewind(f_valid);
 
     // 1. Input NULL -> Must fail
-    if (zxc_stream_compress(NULL, f, 1, 5, 0) != -1) {
-        printf("Failed: Should return -1 when Input is NULL\n");
+    if (zxc_stream_compress(NULL, f, 1, 5, 0) >= 0) {
+        printf("Failed: Should return < 0 when Input is NULL\n");
         fclose(f);
         return 0;
     }
 
     // 2. Output NULL -> Must SUCCEED (Benchmark / Dry-Run Mode)
-    if (zxc_stream_compress(f, NULL, 1, 5, 0) == -1) {
+    if (zxc_stream_compress(f, NULL, 1, 5, 0) < 0) {
         printf("Failed: Should allow NULL Output (Benchmark mode support)\n");
         fclose(f);
         return 0;
     }
 
     // 3. Decompression Input NULL -> Must fail
-    if (zxc_stream_decompress(NULL, f, 1, 0) != -1) {
-        printf("Failed: Decompress should return -1 when Input is NULL\n");
+    if (zxc_stream_decompress(NULL, f, 1, 0) >= 0) {
+        printf("Failed: Decompress should return < 0 when Input is NULL\n");
         fclose(f);
         return 0;
     }
 
     // 3b. Decompression Output NULL -> Must SUCCEED (Benchmark mode)
-    if (zxc_stream_decompress(f_valid, NULL, 1, 0) == -1) {
+    if (zxc_stream_decompress(f_valid, NULL, 1, 0) < 0) {
         printf("Failed: Decompress should allow NULL Output (Benchmark mode support)\n");
         fclose(f_valid);
         return 0;
     }
 
     // 4. zxc_compress NULL checks
-    if (zxc_compress(NULL, 100, (void*)1, 100, 3, 0) != 0) {
-        printf("Failed: zxc_compress should return 0 when src is NULL\n");
+    if (zxc_compress(NULL, 100, (void*)1, 100, 3, 0) >= 0) {
+        printf("Failed: zxc_compress should return < 0 when src is NULL\n");
         fclose(f);
         return 0;
     }
-    if (zxc_compress((void*)1, 100, NULL, 100, 3, 0) != 0) {
-        printf("Failed: zxc_compress should return 0 when dst is NULL\n");
+    if (zxc_compress((void*)1, 100, NULL, 100, 3, 0) >= 0) {
+        printf("Failed: zxc_compress should return < 0 when dst is NULL\n");
         fclose(f);
         return 0;
     }
 
     // 5. zxc_decompress NULL checks
-    if (zxc_decompress(NULL, 100, (void*)1, 100, 0) != 0) {
-        printf("Failed: zxc_decompress should return 0 when src is NULL\n");
+    if (zxc_decompress(NULL, 100, (void*)1, 100, 0) >= 0) {
+        printf("Failed: zxc_decompress should return < 0 when src is NULL\n");
         fclose(f);
         return 0;
     }
-    if (zxc_decompress((void*)1, 100, NULL, 100, 0) != 0) {
-        printf("Failed: zxc_decompress should return 0 when dst is NULL\n");
+    if (zxc_decompress((void*)1, 100, NULL, 100, 0) >= 0) {
+        printf("Failed: zxc_decompress should return < 0 when dst is NULL\n");
         fclose(f);
         return 0;
     }
@@ -350,8 +350,8 @@ int test_truncated_input() {
         return 0;
     }
 
-    size_t comp_sz = zxc_compress(src, SRC_SIZE, compressed, cap, 3, 1);
-    if (comp_sz == 0) {
+    int64_t comp_sz = zxc_compress(src, SRC_SIZE, compressed, cap, 3, 1);
+    if (comp_sz <= 0) {
         printf("Prepare failed\n");
         free(compressed);
         free(decomp_buf);
@@ -361,7 +361,7 @@ int test_truncated_input() {
     // Try decompressing with progressively cropped size
     // 1. Cut off the Footer (last ZXC_FILE_FOOTER_SIZE bytes)
     if (comp_sz > ZXC_FILE_FOOTER_SIZE) {
-        if (zxc_decompress(compressed, comp_sz - ZXC_FILE_FOOTER_SIZE, decomp_buf, SRC_SIZE, 1) !=
+        if (zxc_decompress(compressed, comp_sz - ZXC_FILE_FOOTER_SIZE, decomp_buf, SRC_SIZE, 1) >=
             0) {
             printf("Failed: Should fail when footer is missing\n");
             free(compressed);
@@ -371,7 +371,7 @@ int test_truncated_input() {
     }
 
     // 2. Cut off half the file
-    if (zxc_decompress(compressed, comp_sz / 2, decomp_buf, SRC_SIZE, 1) != 0) {
+    if (zxc_decompress(compressed, comp_sz / 2, decomp_buf, SRC_SIZE, 1) >= 0) {
         printf("Failed: Should fail when stream is truncated by half\n");
         free(compressed);
         free(decomp_buf);
@@ -379,7 +379,7 @@ int test_truncated_input() {
     }
 
     // 3. Cut off just 1 byte
-    if (zxc_decompress(compressed, comp_sz - 1, decomp_buf, SRC_SIZE, 1) != 0) {
+    if (zxc_decompress(compressed, comp_sz - 1, decomp_buf, SRC_SIZE, 1) >= 0) {
         printf("Failed: Should fail when stream is truncated by 1 byte\n");
         free(compressed);
         free(decomp_buf);
@@ -417,8 +417,8 @@ int test_io_failures() {
     fputs("test data to compress", f_in);
     fseek(f_in, 0, SEEK_SET);
 
-    // This should fail cleanly (return -1) because writing to f_out is impossible
-    if (zxc_stream_compress(f_in, f_out, 1, 5, 0) != -1) {
+    // This should fail cleanly (return < 0) because writing to f_out is impossible
+    if (zxc_stream_compress(f_in, f_out, 1, 5, 0) >= 0) {
         printf("Failed: Should detect write error on read-only stream\n");
         fclose(f_in);
         fclose(f_out);
@@ -545,23 +545,24 @@ int test_buffer_api() {
     int checksum_enabled = 1;
 
     // 2. Compress
-    size_t compressed_size =
+    int64_t compressed_size =
         zxc_compress(src, src_size, compressed, max_dst_size, 3, checksum_enabled);
-    if (compressed_size == 0) {
-        printf("Failed: zxc_compress returned 0\n");
+    if (compressed_size <= 0) {
+        printf("Failed: zxc_compress returned %lld\n", (long long)compressed_size);
         free(src);
         free(compressed);
         return 0;
     }
-    printf("Compressed %zu bytes to %zu bytes\n", src_size, compressed_size);
+    printf("Compressed %zu bytes to %lld bytes\n", src_size, (long long)compressed_size);
 
     // 3. Decompress
     uint8_t* decompressed = malloc(src_size);
-    size_t decompressed_size =
+    int64_t decompressed_size =
         zxc_decompress(compressed, compressed_size, decompressed, src_size, checksum_enabled);
 
-    if (decompressed_size != src_size) {
-        printf("Failed: zxc_decompress returned %zu, expected %zu\n", decompressed_size, src_size);
+    if (decompressed_size != (int64_t)src_size) {
+        printf("Failed: zxc_decompress returned %lld, expected %zu\n", (long long)decompressed_size,
+               src_size);
         free(src);
         free(compressed);
         free(decompressed);
@@ -579,9 +580,11 @@ int test_buffer_api() {
 
     // 5. Test error case: Destination too small
     size_t small_capacity = compressed_size / 2;
-    size_t small_res = zxc_compress(src, src_size, compressed, small_capacity, 3, checksum_enabled);
-    if (small_res != 0) {
-        printf("Failed: zxc_compress should fail with small buffer (returned %zu)\n", small_res);
+    int64_t small_res =
+        zxc_compress(src, src_size, compressed, small_capacity, 3, checksum_enabled);
+    if (small_res >= 0) {
+        printf("Failed: zxc_compress should fail with small buffer (returned %lld)\n",
+               (long long)small_res);
         free(src);
         free(compressed);
         free(decompressed);
@@ -686,8 +689,8 @@ int test_eof_block_structure() {
     uint8_t* compressed = malloc(max_dst_size);
     if (!compressed) return 0;
 
-    size_t comp_size = zxc_compress(input, src_size, compressed, max_dst_size, 1, 0);
-    if (comp_size == 0) {
+    int64_t comp_size = zxc_compress(input, src_size, compressed, max_dst_size, 1, 0);
+    if (comp_size <= 0) {
         printf("Failed: Compression returned 0\n");
         free(compressed);
         return 0;
@@ -696,7 +699,7 @@ int test_eof_block_structure() {
     // Validating Footer and EOF Block
     // Total Overhead: 12 bytes (Footer) + 8 bytes (EOF Header) = 20 bytes
     if (comp_size < 20) {
-        printf("Failed: Compressed size too small for Footer + EOF (%zu)\n", comp_size);
+        printf("Failed: Compressed size too small for Footer + EOF (%lld)\n", (long long)comp_size);
         free(compressed);
         return 0;
     }
@@ -891,7 +894,7 @@ int test_global_checksum_order() {
     free(comp_buf);
     free(swapped_buf);
 
-    if (res != -1) {
+    if (res >= 0) {
         printf("  [FAIL] zxc_stream_decompress unexpectedly succeeded on swapped blocks\n");
         return 0;
     }
@@ -912,8 +915,8 @@ int test_get_decompressed_size() {
     size_t max_dst = zxc_compress_bound(src_size);
     uint8_t* compressed = malloc(max_dst);
 
-    size_t comp_size = zxc_compress(src, src_size, compressed, max_dst, 3, 0);
-    if (comp_size == 0) {
+    int64_t comp_size = zxc_compress(src, src_size, compressed, max_dst, 3, 0);
+    if (comp_size <= 0) {
         printf("Failed: Compression returned 0\n");
         free(src);
         free(compressed);
