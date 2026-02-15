@@ -641,7 +641,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
     // Checksum will be appended by the wrapper
     *out_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
-    return 0;
+    return ZXC_OK;
 }
 
 /**
@@ -1148,7 +1148,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     // Checksum will be appended by the wrapper
     *out_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
-    return 0;
+    return ZXC_OK;
 }
 
 /**
@@ -1316,7 +1316,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     // Checksum will be appended by the wrapper
     *out_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
-    return 0;
+    return ZXC_OK;
 }
 
 /**
@@ -1357,7 +1357,7 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
 
     // Checksum will be appended by the wrapper
     *out_sz = ZXC_BLOCK_HEADER_SIZE + src_sz;
-    return 0;
+    return ZXC_OK;
 }
 
 /**
