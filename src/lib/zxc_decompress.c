@@ -337,7 +337,7 @@ static ZXC_ALWAYS_INLINE __m512i zxc_mm512_prefix_sum_epi32(__m512i v) {
  * @param[in] dst_capacity Maximum capacity of the destination buffer in bytes.
  *
  * @return The number of bytes written to the destination buffer on success,
- *         or -1 if an error occurs (e.g., buffer overflow, invalid header,
+ *         or a negative zxc_error_t code if an error occurs (e.g., buffer overflow, invalid header,
  *         or malformed compressed stream).
  */
 static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_size,
@@ -483,7 +483,8 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
  * @param[in] dst_capacity Maximum capacity of the destination buffer.
  *
  * @return The number of bytes written to the destination buffer on success, or
- * -1 on failure (e.g., invalid header, buffer overflow, or corrupted data).
+ * a negative zxc_error_t code on failure (e.g., invalid header, buffer overflow, or corrupted
+ * data).
  */
 static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_size, uint8_t* RESTRICT dst,
@@ -1124,7 +1125,8 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
  * @param[in] src_size Size of the source buffer in bytes.
  * @param[out] dst Pointer to the destination buffer for decompressed data.
  * @param[in] dst_capacity Capacity of the destination buffer in bytes.
- * @return int Returns the number of bytes written on success, or -1 on failure.
+ * @return int Returns the number of bytes written on success, or a negative zxc_error_t code on
+ * failure.
  */
 static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_size, uint8_t* RESTRICT dst,
