@@ -199,7 +199,7 @@ fi
 
 # 5. Benchmark
 echo "Testing Benchmark..."
-"$ZXC_BIN" -b "$TEST_FILE_ARG" > /dev/null
+"$ZXC_BIN" -b1 "$TEST_FILE_ARG" > /dev/null
 if [ $? -eq 0 ]; then
     log_pass "Benchmark mode"
 else
@@ -576,17 +576,19 @@ fi
 
 # 20.3 Benchmark mode with JSON
 echo "  Testing benchmark mode with JSON..."
-JSON_OUT=$("$ZXC_BIN" -b -j "$TEST_FILE_ARG" 2>/dev/null)
+JSON_OUT=$("$ZXC_BIN" -b1 -j "$TEST_FILE_ARG" 2>/dev/null)
 if [[ "$JSON_OUT" == *'"input_file"'* ]] && \
    [[ "$JSON_OUT" == *'"input_size_bytes"'* ]] && \
    [[ "$JSON_OUT" == *'"compressed_size_bytes"'* ]] && \
    [[ "$JSON_OUT" == *'"compression_ratio"'* ]] && \
-   [[ "$JSON_OUT" == *'"iterations"'* ]] && \
+   [[ "$JSON_OUT" == *'"duration_seconds"'* ]] && \
+   [[ "$JSON_OUT" == *'"compress_iterations"'* ]] && \
+   [[ "$JSON_OUT" == *'"decompress_iterations"'* ]] && \
    [[ "$JSON_OUT" == *'"threads"'* ]] && \
    [[ "$JSON_OUT" == *'"level"'* ]] && \
    [[ "$JSON_OUT" == *'"checksum_enabled"'* ]] && \
-   [[ "$JSON_OUT" == *'"compress_speed_mbps"'* ]] && \
-   [[ "$JSON_OUT" == *'"decompress_speed_mbps"'* ]]; then
+   [[ "$JSON_OUT" == *'"best_compress_speed_mbps"'* ]] && \
+   [[ "$JSON_OUT" == *'"best_decompress_speed_mbps"'* ]]; then
     log_pass "Benchmark mode JSON output"
 else
     log_fail "Benchmark mode JSON output missing expected fields"

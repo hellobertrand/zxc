@@ -303,7 +303,7 @@ void print_help(const char* app) {
         "  -d, --decompress  Decompress FILE (or stdin -> stdout)\n"
         "  -l, --list        List archive information\n"
         "  -t, --test        Test compressed FILE integrity\n"
-        "  -b, --bench       Benchmark in-memory\n\n"
+        "  -b, --bench [N]   Benchmark in-memory (N=seconds, default 5)\n\n"
         "Special Options:\n"
         "  -V, --version     Show version information\n"
         "  -h, --help        Show this help message\n\n"
@@ -573,7 +573,7 @@ int main(int argc, char** argv) {
     int keep_input = 0;
     int force = 0;
     int to_stdout = 0;
-    int iterations = 5;
+    int bench_seconds = 5;
     int checksum = -1;
     int level = 3;
     int json_output = 0;
@@ -614,9 +614,9 @@ int main(int argc, char** argv) {
             case 'b':
                 mode = MODE_BENCHMARK;
                 if (optarg) {
-                    iterations = atoi(optarg);
-                    if (iterations < 1 || iterations > 10000) {
-                        fprintf(stderr, "Error: iterations must be between 1 and 10000\n");
+                    bench_seconds = atoi(optarg);
+                    if (bench_seconds < 1 || bench_seconds > 3600) {
+                        fprintf(stderr, "Error: duration must be between 1 and 3600 seconds\n");
                         return 1;
                     }
                 }
@@ -707,9 +707,9 @@ int main(int argc, char** argv) {
         }
         const char* in_path = argv[optind];
         if (optind + 1 < argc) {
-            iterations = atoi(argv[optind + 1]);
-            if (iterations < 1 || iterations > 10000) {
-                zxc_log("Error: iterations must be between 1 and 10000\n");
+            bench_seconds = atoi(argv[optind + 1]);
+            if (bench_seconds < 1 || bench_seconds > 3600) {
+                zxc_log("Error: duration must be between 1 and 3600 seconds\n");
                 return 1;
             }
         }
@@ -746,8 +746,8 @@ int main(int argc, char** argv) {
         if (!json_output)
             printf(
                 "Input: %s (%zu bytes)\n"
-                "Running %d iterations (Threads: %d)...\n",
-                in_path, in_size, iterations, num_threads);
+                "Running for %d seconds (Threads: %d)...\n",
+                in_path, in_size, bench_seconds, num_threads);
 
 #ifdef _WIN32
         if (!json_output) printf("Note: Using tmpfile on Windows (slower than fmemopen).\n");
@@ -761,12 +761,22 @@ int main(int argc, char** argv) {
 #endif
         if (!fm) goto bench_cleanup;
 
-        double t0 = zxc_now();
-        for (int i = 0; i < iterations; i++) {
+        // Warmup: 1 iteration to prime caches
+        rewind(fm);
+        zxc_stream_compress(fm, NULL, num_threads, level, checksum);
+
+        // Timed: run for bench_seconds, keep best (fastest) iteration
+        double best_compress = 1e30;
+        int compress_iters = 0;
+        double compress_deadline = zxc_now() + bench_seconds;
+        while (zxc_now() < compress_deadline) {
             rewind(fm);
+            double t0 = zxc_now();
             zxc_stream_compress(fm, NULL, num_threads, level, checksum);
+            double dt = zxc_now() - t0;
+            if (dt < best_compress) best_compress = dt;
+            compress_iters++;
         }
-        double dt_c = zxc_now() - t0;
         fclose(fm);
 
         uint64_t max_c = zxc_compress_bound(in_size);
@@ -820,16 +830,26 @@ int main(int argc, char** argv) {
         if (!fc) goto bench_cleanup;
 #endif
 
-        t0 = zxc_now();
-        for (int i = 0; i < iterations; i++) {
+        // Warmup: 1 iteration to prime caches
+        rewind(fc);
+        zxc_stream_decompress(fc, NULL, num_threads, checksum);
+
+        // Timed: run for bench_seconds, keep best (fastest) iteration
+        double best_decompress = 1e30;
+        int decompress_iters = 0;
+        double decompress_deadline = zxc_now() + bench_seconds;
+        while (zxc_now() < decompress_deadline) {
             rewind(fc);
+            double t0 = zxc_now();
             zxc_stream_decompress(fc, NULL, num_threads, checksum);
+            double dt = zxc_now() - t0;
+            if (dt < best_decompress) best_decompress = dt;
+            decompress_iters++;
         }
-        double dt_d = zxc_now() - t0;
         fclose(fc);
 
-        double compress_speed_mbps = (double)in_size * iterations / (1024.0 * 1024.0) / dt_c;
-        double decompress_speed_mbps = (double)in_size * iterations / (1024.0 * 1024.0) / dt_d;
+        double compress_speed_mbps = (double)in_size / (1024.0 * 1024.0) / best_compress;
+        double decompress_speed_mbps = (double)in_size / (1024.0 * 1024.0) / best_decompress;
         double ratio = (double)in_size / c_sz;
 
         if (json_output)
@@ -839,24 +859,27 @@ int main(int argc, char** argv) {
                 "  \"input_size_bytes\": %zu,\n"
                 "  \"compressed_size_bytes\": %lld,\n"
                 "  \"compression_ratio\": %.3f,\n"
-                "  \"iterations\": %d,\n"
+                "  \"duration_seconds\": %d,\n"
+                "  \"compress_iterations\": %d,\n"
+                "  \"decompress_iterations\": %d,\n"
                 "  \"threads\": %d,\n"
                 "  \"level\": %d,\n"
                 "  \"checksum_enabled\": %s,\n"
-                "  \"compress_speed_mbps\": %.3f,\n"
-                "  \"decompress_speed_mbps\": %.3f,\n"
-                "  \"compress_time_seconds\": %.6f,\n"
-                "  \"decompress_time_seconds\": %.6f\n"
+                "  \"best_compress_speed_mbps\": %.3f,\n"
+                "  \"best_decompress_speed_mbps\": %.3f,\n"
+                "  \"best_compress_time_seconds\": %.6f,\n"
+                "  \"best_decompress_time_seconds\": %.6f\n"
                 "}\n",
-                in_path, in_size, (long long)c_sz, ratio, iterations, num_threads, level,
-                checksum ? "true" : "false", compress_speed_mbps, decompress_speed_mbps, dt_c,
-                dt_d);
+                in_path, in_size, (long long)c_sz, ratio, bench_seconds, compress_iters,
+                decompress_iters, num_threads, level, checksum ? "true" : "false",
+                compress_speed_mbps, decompress_speed_mbps, best_compress, best_decompress);
         else
             printf(
                 "Compressed: %lld bytes (ratio %.3f)\n"
-                "Avg Compress  : %.3f MiB/s\n"
-                "Avg Decompress: %.3f MiB/s\n",
-                (long long)c_sz, ratio, compress_speed_mbps, decompress_speed_mbps);
+                "Best Compress  : %.3f MiB/s (%d iters)\n"
+                "Best Decompress: %.3f MiB/s (%d iters)\n",
+                (long long)c_sz, ratio, compress_speed_mbps, compress_iters, decompress_speed_mbps,
+                decompress_iters);
         ret = 0;
 
     bench_cleanup:
