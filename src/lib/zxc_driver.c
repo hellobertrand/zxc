@@ -10,6 +10,7 @@
 #include <stdio.h>
 
 #include "../../include/zxc_buffer.h"
+#include "../../include/zxc_error.h"
 #include "../../include/zxc_sans_io.h"
 #include "../../include/zxc_stream.h"
 #include "zxc_internal.h"
@@ -71,13 +72,13 @@ static unsigned __stdcall zxc_win_thread_entry(void* p) {
 static int pthread_create(pthread_t* thread, const void* attr, void* (*start_routine)(void*),
                           void* arg) {
     zxc_win_thread_arg_t* wrapper = malloc(sizeof(zxc_win_thread_arg_t));
-    if (UNLIKELY(!wrapper)) return -1;
+    if (UNLIKELY(!wrapper)) return ZXC_ERROR_MEMORY;
     wrapper->func = start_routine;
     wrapper->arg = arg;
     uintptr_t handle = _beginthreadex(NULL, 0, zxc_win_thread_entry, wrapper, 0, NULL);
     if (UNLIKELY(handle == 0)) {
         free(wrapper);
-        return -1;
+        return ZXC_ERROR_MEMORY;
     }
     *thread = (HANDLE)handle;
     return 0;
@@ -518,7 +519,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         if (UNLIKELY(fread(h, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE ||
                      zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz,
                                           &file_has_chk) != 0))
-            return -1;
+            return ZXC_ERROR_BAD_HEADER;
     }
 
     const int num_threads = (n_threads > 0) ? n_threads : (int)sysconf(_SC_NPROCESSORS_ONLN);
@@ -549,7 +550,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     size_t alloc_size =
         ctx.ring_size * (sizeof(zxc_stream_job_t) + sizeof(int) + alloc_in + alloc_out);
     uint8_t* mem_block = zxc_aligned_malloc(alloc_size, ZXC_CACHE_LINE_SIZE);
-    if (UNLIKELY(!mem_block)) return -1;
+    if (UNLIKELY(!mem_block)) return ZXC_ERROR_MEMORY;
 
     uint8_t* ptr = mem_block;
     ctx.jobs = (zxc_stream_job_t*)ptr;
@@ -581,7 +582,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     pthread_t* workers = malloc(num_workers * sizeof(pthread_t));
     if (UNLIKELY(!workers)) {
         zxc_aligned_free(mem_block);
-        return -1;
+        return ZXC_ERROR_MEMORY;
     }
     for (int i = 0; i < num_workers; i++)
         pthread_create(&workers[i], NULL, zxc_stream_worker, &ctx);
@@ -710,7 +711,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                               checksum_enabled);
 
         if (UNLIKELY(f_out && fwrite(final_buf, 1, sizeof(final_buf), f_out) != sizeof(final_buf)))
-            return -1;
+            return ZXC_ERROR_IO;
 
         w_args.total_bytes += sizeof(final_buf);
     } else if (mode == 0 && !ctx.io_error) {
@@ -731,7 +732,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     free(workers);
     zxc_aligned_free(mem_block);
 
-    if (UNLIKELY(ctx.io_error)) return -1;
+    if (UNLIKELY(ctx.io_error)) return ZXC_ERROR_IO;
 
     return w_args.total_bytes;
 }
@@ -739,7 +740,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 int64_t zxc_stream_compress_ex(FILE* f_in, FILE* f_out, const int n_threads, const int level,
                                const int checksum_enabled, zxc_progress_callback_t progress_cb,
                                void* user_data) {
-    if (UNLIKELY(!f_in)) return -1;
+    if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
 
     return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, checksum_enabled,
                                  zxc_compress_chunk_wrapper, progress_cb, user_data);
@@ -753,7 +754,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads, const 
 int64_t zxc_stream_decompress_ex(FILE* f_in, FILE* f_out, const int n_threads,
                                  const int checksum_enabled, zxc_progress_callback_t progress_cb,
                                  void* user_data) {
-    if (UNLIKELY(!f_in)) return -1;
+    if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
 
     return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, checksum_enabled,
                                  (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, progress_cb,
@@ -766,36 +767,36 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads,
 }
 
 int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
-    if (UNLIKELY(!f_in)) return -1;
+    if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
 
     long long saved_pos = ftello(f_in);
-    if (UNLIKELY(saved_pos < 0)) return -1;
+    if (UNLIKELY(saved_pos < 0)) return ZXC_ERROR_IO;
 
     // Get file size
-    if (fseeko(f_in, 0, SEEK_END) != 0) return -1;
+    if (fseeko(f_in, 0, SEEK_END) != 0) return ZXC_ERROR_IO;
     long long file_size = ftello(f_in);
     if (UNLIKELY(file_size < (long long)(ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))) {
         fseeko(f_in, saved_pos, SEEK_SET);
-        return -1;
+        return ZXC_ERROR_SRC_TOO_SMALL;
     }
 
     uint8_t header[ZXC_FILE_HEADER_SIZE];
     if (UNLIKELY(fseeko(f_in, 0, SEEK_SET) != 0 ||
                  fread(header, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE)) {
         fseeko(f_in, saved_pos, SEEK_SET);
-        return -1;
+        return ZXC_ERROR_IO;
     }
 
     if (UNLIKELY(zxc_le32(header) != ZXC_MAGIC_WORD)) {
         fseeko(f_in, saved_pos, SEEK_SET);
-        return -1;
+        return ZXC_ERROR_BAD_MAGIC;
     }
 
     uint8_t footer[ZXC_FILE_FOOTER_SIZE];
     if (UNLIKELY(fseeko(f_in, file_size - ZXC_FILE_FOOTER_SIZE, SEEK_SET) != 0 ||
                  fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE)) {
         fseeko(f_in, saved_pos, SEEK_SET);
-        return -1;
+        return ZXC_ERROR_IO;
     }
 
     fseeko(f_in, saved_pos, SEEK_SET);
