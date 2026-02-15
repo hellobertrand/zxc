@@ -112,7 +112,7 @@ unsafe extern "C" {
     ///
     /// # Returns
     ///
-    /// Number of bytes written to `dst`, or 0 on error.
+    /// Number of bytes written to `dst` (>0 on success), or a negative error code.
     pub fn zxc_compress(
         src: *const c_void,
         src_size: usize,
@@ -120,7 +120,7 @@ unsafe extern "C" {
         dst_capacity: usize,
         level: c_int,
         checksum_enabled: c_int,
-    ) -> usize;
+    ) -> i64;
 
     /// Decompresses a ZXC compressed buffer.
     ///
@@ -131,14 +131,14 @@ unsafe extern "C" {
     ///
     /// # Returns
     ///
-    /// Number of decompressed bytes written to `dst`, or 0 on error.
+    /// Number of decompressed bytes written to `dst` (>0 on success), or a negative error code.
     pub fn zxc_decompress(
         src: *const c_void,
         src_size: usize,
         dst: *mut c_void,
         dst_capacity: usize,
         checksum_enabled: c_int,
-    ) -> usize;
+    ) -> i64;
 
     /// Returns the decompressed size stored in a ZXC compressed buffer.
     ///
@@ -267,12 +267,12 @@ mod tests {
             );
             assert!(compressed_size > 0, "Compression failed");
             // Highly repetitive data should compress significantly
-            assert!(compressed_size < input.len() / 2, "Data should compress well");
+            assert!((compressed_size as usize) < input.len() / 2, "Data should compress well");
 
             // Get decompressed size
             let decompressed_size = zxc_get_decompressed_size(
                 compressed.as_ptr() as *const c_void,
-                compressed_size,
+                compressed_size as usize,
             );
             assert_eq!(decompressed_size as usize, input.len());
 
@@ -280,12 +280,12 @@ mod tests {
             let mut decompressed = vec![0u8; decompressed_size as usize];
             let result_size = zxc_decompress(
                 compressed.as_ptr() as *const c_void,
-                compressed_size,
+                compressed_size as usize,
                 decompressed.as_mut_ptr() as *mut c_void,
                 decompressed.len(),
                 1, // checksum enabled
             );
-            assert_eq!(result_size, input.len());
+            assert_eq!(result_size, input.len() as i64);
             assert_eq!(&decompressed[..], &input[..]);
         }
     }
