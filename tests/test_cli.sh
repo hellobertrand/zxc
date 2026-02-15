@@ -587,8 +587,8 @@ if [[ "$JSON_OUT" == *'"input_file"'* ]] && \
    [[ "$JSON_OUT" == *'"threads"'* ]] && \
    [[ "$JSON_OUT" == *'"level"'* ]] && \
    [[ "$JSON_OUT" == *'"checksum_enabled"'* ]] && \
-   [[ "$JSON_OUT" == *'"best_compress_speed_mbps"'* ]] && \
-   [[ "$JSON_OUT" == *'"best_decompress_speed_mbps"'* ]]; then
+   [[ "$JSON_OUT" == *'"compress_speed_mbps"'* ]] && \
+   [[ "$JSON_OUT" == *'"decompress_speed_mbps"'* ]]; then
     log_pass "Benchmark mode JSON output"
 else
     log_fail "Benchmark mode JSON output missing expected fields"

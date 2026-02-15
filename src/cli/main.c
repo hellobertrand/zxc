@@ -732,9 +732,9 @@ int main(int argc, char** argv) {
         if (!f_in) goto bench_cleanup;
 
         if (fseeko(f_in, 0, SEEK_END) != 0) goto bench_cleanup;
-        long long fsize = ftello(f_in);
+        const long long fsize = ftello(f_in);
         if (fsize <= 0) goto bench_cleanup;
-        size_t in_size = (size_t)fsize;
+        const size_t in_size = (size_t)fsize;
         if (fseeko(f_in, 0, SEEK_SET) != 0) goto bench_cleanup;
 
         ram = malloc(in_size);
@@ -746,7 +746,7 @@ int main(int argc, char** argv) {
         if (!json_output)
             printf(
                 "Input: %s (%zu bytes)\n"
-                "Running for %d seconds (Threads: %d)...\n",
+                "Running for %d seconds (threads: %d)...\n",
                 in_path, in_size, bench_seconds, num_threads);
 
 #ifdef _WIN32
@@ -761,11 +761,10 @@ int main(int argc, char** argv) {
 #endif
         if (!fm) goto bench_cleanup;
 
-        // Timed: run for bench_seconds, keep best (fastest) iteration
         double best_compress = 1e30;
         int compress_iters = 0;
-        double compress_deadline = zxc_now() + bench_seconds;
-        double compress_start = zxc_now();
+        const double compress_deadline = zxc_now() + bench_seconds;
+        const double compress_start = zxc_now();
         while (zxc_now() < compress_deadline) {
             rewind(fm);
             double t0 = zxc_now();
@@ -774,12 +773,13 @@ int main(int argc, char** argv) {
             if (dt < best_compress) best_compress = dt;
             compress_iters++;
             if (!json_output && !g_quiet)
-                fprintf(stderr, "\rCompressing... %d iters (%.1fs)", compress_iters, zxc_now() - compress_start);
+                fprintf(stderr, "\rCompressing... %d iters (%.1fs)", compress_iters,
+                        zxc_now() - compress_start);
         }
         if (!json_output && !g_quiet) fprintf(stderr, "\r\033[K");
         fclose(fm);
 
-        uint64_t max_c = zxc_compress_bound(in_size);
+        const uint64_t max_c = zxc_compress_bound(in_size);
         c_dat = malloc(max_c);
         if (!c_dat) goto bench_cleanup;
 
@@ -803,7 +803,7 @@ int main(int argc, char** argv) {
         }
 #endif
 
-        int64_t c_sz = zxc_stream_compress(fm_in, fm_out, num_threads, level, checksum);
+        const int64_t c_sz = zxc_stream_compress(fm_in, fm_out, num_threads, level, checksum);
         if (c_sz < 0) {
             fclose(fm_in);
             fclose(fm_out);
@@ -830,11 +830,10 @@ int main(int argc, char** argv) {
         if (!fc) goto bench_cleanup;
 #endif
 
-        // Timed: run for bench_seconds, keep best (fastest) iteration
         double best_decompress = 1e30;
         int decompress_iters = 0;
-        double decompress_deadline = zxc_now() + bench_seconds;
-        double decompress_start = zxc_now();
+        const double decompress_deadline = zxc_now() + bench_seconds;
+        const double decompress_start = zxc_now();
         while (zxc_now() < decompress_deadline) {
             rewind(fc);
             double t0 = zxc_now();
@@ -843,14 +842,15 @@ int main(int argc, char** argv) {
             if (dt < best_decompress) best_decompress = dt;
             decompress_iters++;
             if (!json_output && !g_quiet)
-                fprintf(stderr, "\rDecompressing... %d iters (%.1fs)", decompress_iters, zxc_now() - decompress_start);
+                fprintf(stderr, "\rDecompressing... %d iters (%.1fs)", decompress_iters,
+                        zxc_now() - decompress_start);
         }
         if (!json_output && !g_quiet) fprintf(stderr, "\r\033[K");
         fclose(fc);
 
-        double compress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_compress;
-        double decompress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_decompress;
-        double ratio = (double)in_size / c_sz;
+        const double compress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_compress;
+        const double decompress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_decompress;
+        const double ratio = (double)in_size / c_sz;
 
         if (json_output)
             printf(
