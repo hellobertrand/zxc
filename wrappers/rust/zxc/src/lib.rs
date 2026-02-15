@@ -284,11 +284,11 @@ unsafe fn impl_compress(
         )
     };
 
-    if written == 0 && !data.is_empty() {
+    if written < 0 {
         return Err(Error::CompressionFailed);
     }
 
-    Ok(written)
+    Ok(written as usize)
 }
 
 /// Compresses data into a pre-allocated buffer.
@@ -408,11 +408,11 @@ unsafe fn impl_decompress(
         )
     };
 
-    if written == 0 && !compressed.is_empty() {
+    if written < 0 {
         return Err(Error::DecompressionFailed("invalid data or buffer too small"));
     }
 
-    Ok(written)
+    Ok(written as usize)
 }
 
 /// Decompresses data into a pre-allocated buffer.
@@ -881,9 +881,8 @@ mod tests {
     #[test]
     fn test_empty() {
         let data: &[u8] = b"";
-        let compressed = compress(data, Level::Default, None).unwrap();
-        let decompressed = decompress(&compressed).unwrap();
-        assert_eq!(decompressed.len(), 0);
+        let result = compress(data, Level::Default, None);
+        assert!(result.is_err(), "Compressing empty data should return an error");
     }
 
     #[test]

@@ -25,7 +25,7 @@ def test_compress_invalid_type(data):
     "data,corrupt_func,exc",
     [
         (b"hello world" * 10, lambda x: x[:-1] + b"\x01", RuntimeError),  
-        (b"a" * 10, lambda x: b"", ValueError),                     
+        (b"a" * 10, lambda x: b"", RuntimeError),                     
     ],
     ids=["corrupted_data", "invalid_header"],
 )
