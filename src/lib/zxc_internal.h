@@ -990,7 +990,7 @@ int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
  * @param[out] gh Pointer to the generic header structure to populate.
  * @param[out] desc Array of 4 section descriptors to populate.
  *
- * @return int Returns 0 on success, or a negative error code on failure.
+ * @return int Returns ZXC_OK on success, or a negative zxc_error_t code on failure.
  */
 int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
                                  zxc_gnr_header_t* RESTRICT gh,
@@ -1022,7 +1022,7 @@ int zxc_write_ghi_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
  * @param[out] desc Array of 3 zxc_section_desc_t structures to store the parsed section
  * descriptors.
  *
- * @return int Returns 0 on success, or a negative error code on failure.
+ * @return int Returns ZXC_OK on success, or a negative zxc_error_t code on failure.
  */
 int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
                                  zxc_gnr_header_t* RESTRICT gh,
@@ -1044,7 +1044,7 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  * @param[in] dst_cap Capacity of the destination buffer (maximum bytes that can be
  * written).
  *
- * @return int    Returns 0 on success, or a negative error code on failure.
+ * @return int    Returns ZXC_OK on success, or a negative zxc_error_t code on failure.
  *                Specific error codes depend on the underlying ZXC
  * implementation.
  */

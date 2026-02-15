@@ -90,8 +90,8 @@ typedef struct {
  * @param[in] mode The operation mode (1 for compression, 0 for decompression).
  * @param[in] level The desired compression level to be stored in the context.
  * @param[in] checksum_enabled
- * @return 0 on success, or -1 if memory allocation fails for any of the
- * internal buffers.
+ * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_MEMORY) if memory
+ * allocation fails.
  */
 ZXC_EXPORT int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode,
                              const int level, const int checksum_enabled);
@@ -117,7 +117,7 @@ ZXC_EXPORT void zxc_cctx_free(zxc_cctx_t* ctx);
  * @param[out] dst The destination buffer where the header will be written.
  * @param[in] dst_capacity The total capacity of the destination buffer in bytes.
  * @return The number of bytes written (ZXC_FILE_HEADER_SIZE) on success,
- *         or -1 if the destination capacity is insufficient.
+ *         or ZXC_ERROR_DST_TOO_SMALL if the destination capacity is insufficient.
  */
 ZXC_EXPORT int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity,
                                      const int has_checksum);
@@ -132,8 +132,8 @@ ZXC_EXPORT int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity,
  * @param[in] src Pointer to the source buffer containing the file data.
  * @param[in] src_size Size of the source buffer in bytes.
  * @param[out] out_block_size Optional pointer to receive the recommended block size.
- * @return 0 if the header is valid, -1 otherwise (e.g., buffer too small,
- * invalid magic word, or incorrect version).
+ * @return ZXC_OK on success, or a negative error code (e.g., ZXC_ERROR_SRC_TOO_SMALL,
+ * ZXC_ERROR_BAD_MAGIC, ZXC_ERROR_BAD_VERSION).
  */
 ZXC_EXPORT int zxc_read_file_header(const uint8_t* src, const size_t src_size,
                                     size_t* out_block_size, int* out_has_checksum);
@@ -179,7 +179,7 @@ typedef struct {
  * write.
  *
  * @return The number of bytes written (ZXC_BLOCK_HEADER_SIZE) on success,
- *         or -1 if the destination buffer capacity is insufficient.
+ *         or ZXC_ERROR_DST_TOO_SMALL if the destination buffer capacity is insufficient.
  */
 ZXC_EXPORT int zxc_write_block_header(uint8_t* dst, const size_t dst_capacity,
                                       const zxc_block_header_t* bh);
@@ -197,8 +197,8 @@ ZXC_EXPORT int zxc_write_block_header(uint8_t* dst, const size_t dst_capacity,
  * @param[out] bh        Pointer to a `zxc_block_header_t` structure where the parsed
  *                  header information will be stored.
  *
- * @return 0 on success, or -1 if the source buffer is smaller than the
- *         required block header size.
+ * @return ZXC_OK on success, or ZXC_ERROR_SRC_TOO_SMALL if the source buffer is smaller
+ *         than the required block header size.
  */
 ZXC_EXPORT int zxc_read_block_header(const uint8_t* src, const size_t src_size,
                                      zxc_block_header_t* bh);
@@ -211,7 +211,7 @@ ZXC_EXPORT int zxc_read_block_header(const uint8_t* src, const size_t src_size,
  * @param[in] src_size         Original uncompressed size of the data.
  * @param[in] global_hash      Global checksum hash (if enabled).
  * @param[in] checksum_enabled Flag indicating if checksum is enabled.
- * @return Number of bytes written (12) on success, or -1 on failure.
+ * @return Number of bytes written (12) on success, or ZXC_ERROR_DST_TOO_SMALL on failure.
  */
 ZXC_EXPORT int zxc_write_file_footer(uint8_t* dst, const size_t dst_capacity,
                                      const uint64_t src_size, const uint32_t global_hash,

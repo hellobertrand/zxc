@@ -478,8 +478,8 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
  * @param[out] out_sz Pointer to a variable where the total size of the compressed
  * output will be stored.
  *
- * @return 0 on success, or -1 on failure (e.g., invalid input size, destination
- * buffer too small).
+ * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if an
+ * error occurs (e.g., invalid input size, destination buffer too small).
  */
 static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
@@ -688,7 +688,8 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  * @param[out] out_sz    [Out] Pointer to a variable that will receive the total size
  * of the compressed output.
  *
- * @return 0 on success, or -1 if an error occurs (e.g., buffer overflow).
+ * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if an
+ * error occurs (e.g., buffer overflow).
  */
 static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
@@ -1024,7 +1025,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
     desc[3].sizes = (uint64_t)extras_sz | ((uint64_t)extras_sz << 32);
 
-    int ghs = zxc_write_glo_header_and_desc(p, rem, &gh, desc);
+    const int ghs = zxc_write_glo_header_and_desc(p, rem, &gh, desc);
     if (UNLIKELY(ghs < 0)) return ghs;
 
     uint8_t* p_curr = p + ghs;
@@ -1167,17 +1168,18 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
  * This format minimizes the number of expensive VByte reads during decompression for common
  * sequences where lengths are between 16 and 255.
  *
- * @param[in,out] ctx       Pointer to the compression context containing hash tables
+ * @param[in,out] ctx   Pointer to the compression context containing hash tables
  * and configuration.
  * @param[in] src       Pointer to the input source data.
- * @param[in] src_sz  Size of the input data in bytes.
- * @param[out] dst       Pointer to the destination buffer where compressed data will
+ * @param[in] src_sz    Size of the input data in bytes.
+ * @param[out] dst      Pointer to the destination buffer where compressed data will
  * be written.
  * @param[in] dst_cap   Maximum capacity of the destination buffer.
- * @param[out] out_sz    [Out] Pointer to a variable that will receive the total size
+ * @param[out] out_sz   Pointer to a variable that will receive the total size
  * of the compressed output.
  *
- * @return 0 on success, or -1 if an error occurs (e.g., buffer overflow).
+ * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if an
+ * error occurs (e.g., buffer overflow).
  */
 static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
@@ -1335,8 +1337,8 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
  * + data + checksum).
  * @param[in] chk Boolean flag: if non-zero, a checksum is calculated and added.
  *
- * @return 0 on success, -1 if the destination buffer capacity is
- * insufficient.
+ * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if the
+ * destination buffer capacity is insufficient.
  */
 static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz,
                                 uint8_t* RESTRICT const dst, const size_t dst_cap,

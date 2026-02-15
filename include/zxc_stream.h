@@ -42,7 +42,8 @@ extern "C" {
  * @param[in] checksum_enabled  If non-zero, enables checksum verification for data
  * integrity.
  *
- * @return          Total compressed bytes written, or -1 if an error occurred.
+ * @return          Total compressed bytes written, or a negative zxc_error_t code (e.g.,
+ * ZXC_ERROR_IO) if an error occurred.
  */
 ZXC_EXPORT int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_threads,
                                        const int level, const int checksum_enabled);
@@ -59,8 +60,8 @@ ZXC_EXPORT int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const int n_thre
  * @param[in] checksum_enabled  If non-zero, enables checksum verification for data
  * integrity.
  *
- * @return          Total decompressed bytes written, or -1 if an error
- * occurred.
+ * @return          Total decompressed bytes written, or a negative zxc_error_t code (e.g.,
+ * ZXC_ERROR_BAD_HEADER) if an error occurred.
  */
 ZXC_EXPORT int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads,
                                          const int checksum_enabled);
@@ -73,8 +74,8 @@ ZXC_EXPORT int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_th
  *
  * @param[in] f_in  Input file stream (must be opened in "rb" mode).
  *
- * @return The original uncompressed size in bytes, or -1 if the file is invalid
- *         or an I/O error occurred.
+ * @return The original uncompressed size in bytes, or a negative zxc_error_t code (e.g.,
+ * ZXC_ERROR_BAD_MAGIC) if the file is invalid or an I/O error occurred.
  */
 ZXC_EXPORT int64_t zxc_stream_get_decompressed_size(FILE* f_in);
 
@@ -106,7 +107,8 @@ typedef void (*zxc_progress_callback_t)(uint64_t bytes_processed, uint64_t bytes
  * @param[in] progress_cb      Optional progress callback (NULL to disable).
  * @param[in] user_data        User context pointer passed to progress callback.
  *
- * @return          Total compressed bytes written, or -1 if an error occurred.
+ * @return          Total compressed bytes written, or a negative zxc_error_t code if an error
+ * occurred.
  */
 ZXC_EXPORT int64_t zxc_stream_compress_ex(FILE* f_in, FILE* f_out, const int n_threads,
                                           const int level, const int checksum_enabled,
@@ -124,7 +126,8 @@ ZXC_EXPORT int64_t zxc_stream_compress_ex(FILE* f_in, FILE* f_out, const int n_t
  * @param[in] progress_cb      Optional progress callback (NULL to disable).
  * @param[in] user_data        User context pointer passed to progress callback.
  *
- * @return          Total decompressed bytes written, or -1 if an error occurred.
+ * @return          Total decompressed bytes written, or a negative zxc_error_t code if an error
+ * occurred.
  */
 ZXC_EXPORT int64_t zxc_stream_decompress_ex(FILE* f_in, FILE* f_out, const int n_threads,
                                             const int checksum_enabled,
