@@ -9,7 +9,7 @@
  * @file zxc_driver.c
  * @brief Multi-threaded streaming compression / decompression engine.
  *
- * Implements a ring-buffer producer–worker–consumer architecture that
+ * Implements a ring-buffer producer-worker-consumer architecture that
  * parallelises block processing over @c FILE* streams.  Also provides
  * the public @ref zxc_stream_compress, @ref zxc_stream_decompress, and
  * extended variants with progress callbacks.

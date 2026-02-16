@@ -11,12 +11,12 @@
  *
  * This header provides the streaming driver that reads from a @c FILE* input and
  * writes compressed (or decompressed) output to a @c FILE*.  Internally the
- * driver uses an asynchronous Producer–Consumer pipeline via a ring buffer to
+ * driver uses an asynchronous Producer-Consumer pipeline via a ring buffer to
  * separate I/O from CPU-intensive work:
  *
- * 1. **Reader thread**  – reads chunks from `f_in`.
- * 2. **Worker threads** – compress/decompress chunks in parallel.
- * 3. **Writer thread**  – orders the results and writes them to `f_out`.
+ * 1. **Reader thread**  - reads chunks from `f_in`.
+ * 2. **Worker threads** - compress/decompress chunks in parallel.
+ * 3. **Writer thread**  - orders the results and writes them to `f_out`.
  *
  * Extended variants (`_ex` suffix) accept an optional progress callback that
  * is invoked from the writer thread after each block.
@@ -55,7 +55,7 @@ extern "C" {
  * @param[out] f_out     Output file stream (must be opened in "wb" mode).
  * @param[in] n_threads Number of worker threads to spawn (0 = auto-detect number of
  * CPU cores).
- * @param[in] level     Compression level (1–5, see @ref zxc_compression_level_t).
+ * @param[in] level     Compression level (1-5, see @ref zxc_compression_level_t).
  * @param[in] checksum_enabled  If non-zero, enables checksum verification for data
  * integrity.
  *
@@ -119,7 +119,7 @@ typedef void (*zxc_progress_callback_t)(uint64_t bytes_processed, uint64_t bytes
  * @param[in] f_in             Input file stream (must be opened in "rb" mode).
  * @param[out] f_out           Output file stream (must be opened in "wb" mode).
  * @param[in] n_threads        Number of worker threads to spawn (0 = auto-detect).
- * @param[in] level            Compression level (1–5, see @ref zxc_compression_level_t).
+ * @param[in] level            Compression level (1-5, see @ref zxc_compression_level_t).
  * @param[in] checksum_enabled If non-zero, enables checksum verification.
  * @param[in] progress_cb      Optional progress callback (NULL to disable).
  * @param[in] user_data        User context pointer passed to progress callback.
