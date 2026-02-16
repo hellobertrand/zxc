@@ -80,6 +80,7 @@
 
 #endif /* ZXC_STATIC_DEFINE */
 
+#ifndef ZXC_DEPRECATED
 /**
  * @def ZXC_DEPRECATED
  * @brief Marks a symbol as deprecated.
@@ -88,7 +89,6 @@
  * Expands to `__declspec(deprecated)` on MSVC or
  * `__attribute__((__deprecated__))` on GCC/Clang.
  */
-#ifndef ZXC_DEPRECATED
 #ifdef _WIN32
 #define ZXC_DEPRECATED __declspec(deprecated)
 #else
@@ -98,7 +98,7 @@
 
 /**
  * @def ZXC_DEPRECATED_EXPORT
- * @brief Combines @ref ZXC_EXPORT with @ref ZXC_DEPRECATED.
+ * @brief Combines `ZXC_EXPORT` with `ZXC_DEPRECATED`.
  */
 #ifndef ZXC_DEPRECATED_EXPORT
 #define ZXC_DEPRECATED_EXPORT ZXC_EXPORT ZXC_DEPRECATED
@@ -106,7 +106,7 @@
 
 /**
  * @def ZXC_DEPRECATED_NO_EXPORT
- * @brief Combines @ref ZXC_NO_EXPORT with @ref ZXC_DEPRECATED.
+ * @brief Combines `ZXC_NO_EXPORT` with `ZXC_DEPRECATED`.
  */
 #ifndef ZXC_DEPRECATED_NO_EXPORT
 #define ZXC_DEPRECATED_NO_EXPORT ZXC_NO_EXPORT ZXC_DEPRECATED
