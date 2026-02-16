@@ -75,3 +75,13 @@ CMakeUserPresets.json
 #cmake-build-*
 
 build/*
+
+# Doxygen
+docs/html/
+docs/latex/
+docs/rtf/
+docs/man/
+docs/xml/
+*.doxygen_sqlite3
+doxyfile.inc
+searchdata.xml
