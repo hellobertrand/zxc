@@ -1,0 +1,5 @@
+node_modules/
+build/
+prebuilds/
+*.node
+package-lock.json

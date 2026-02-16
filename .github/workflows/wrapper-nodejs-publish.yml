@@ -1,0 +1,134 @@
+name: Publish Node.js Package
+
+on:
+  workflow_dispatch:
+  release:
+    types: [ published ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+          - os: macos-latest
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
+          - os: windows-latest
+            arch: AMD64
+          - os: windows-11-arm
+            arch: ARM64
+    defaults:
+      run:
+        working-directory: ./wrappers/nodejs
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install dependencies and build
+        run: npm install
+
+      - name: Run tests
+        run: npx vitest run --globals
+
+      - name: Package prebuilt addon
+        run: |
+          mkdir -p prebuilds/${{ matrix.os }}-${{ matrix.arch }}
+          cp build/Release/zxc_nodejs.node prebuilds/${{ matrix.os }}-${{ matrix.arch }}/
+
+      - name: Upload prebuilt addon
+        uses: actions/upload-artifact@v6
+        with:
+          name: prebuilt-${{ matrix.os }}-${{ matrix.arch }}
+          path: wrappers/nodejs/prebuilds/
+
+  test:
+    name: Test on ${{ matrix.os }} Node ${{ matrix.node }}
+    needs: [build]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest, windows-11-arm]
+        node: ["18", "20", "22"]
+    defaults:
+      run:
+        working-directory: ./wrappers/nodejs
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install dependencies and build
+        run: npm install
+
+      - name: Run tests
+        run: npx vitest run --globals
+
+  publish:
+    name: Publish to npm
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    permissions:
+      id-token: write
+    defaults:
+      run:
+        working-directory: ./wrappers/nodejs
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Verify Version Matches Release Tag
+        run: |
+          RELEASE_VERSION="${{ github.event.release.tag_name }}"
+          # Remove 'v' prefix if present
+          RELEASE_VERSION="${RELEASE_VERSION#v}"
+
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+
+          if [ "$RELEASE_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Version mismatch: Release tag is $RELEASE_VERSION but package.json has $PACKAGE_VERSION"
+            exit 1
+          fi
+
+          echo "Version matches: $RELEASE_VERSION"
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "Successfully published zxc-compress to npm!"
+          echo "Package: https://www.npmjs.com/package/zxc-compress"
