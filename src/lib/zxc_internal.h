@@ -72,10 +72,10 @@ extern "C" {
  *
  * Depending on the target architecture and compiler flags the following macros
  * may be defined:
- * - @c ZXC_USE_AVX512 – AVX-512F + AVX-512BW available.
- * - @c ZXC_USE_AVX2   – AVX2 available.
- * - @c ZXC_USE_NEON64 – AArch64 NEON available.
- * - @c ZXC_USE_NEON32 – ARMv7 NEON available.
+ * - @c ZXC_USE_AVX512 - AVX-512F + AVX-512BW available.
+ * - @c ZXC_USE_AVX2   - AVX2 available.
+ * - @c ZXC_USE_NEON64 - AArch64 NEON available.
+ * - @c ZXC_USE_NEON32 - ARMv7 NEON available.
  * @{
  */
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
