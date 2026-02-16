@@ -327,7 +327,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
  * @param[in]  src_size         Size of @p src in bytes.
  * @param[out] dst              Destination buffer (use zxc_compress_bound() to size).
  * @param[in]  dst_capacity     Capacity of @p dst.
- * @param[in]  level            Compression level (1–5).
+ * @param[in]  level            Compression level (1-5).
  * @param[in]  checksum_enabled Non-zero to enable per-block and global checksums.
  * @return Total compressed size in bytes, or a negative @ref zxc_error_t code.
  */

@@ -12,9 +12,9 @@
  * This header is **not** part of the public API.  It is shared across the
  * library's translation units and contains:
  * - Platform detection and SIMD intrinsic includes.
- * - Compiler-abstraction macros (LIKELY, PREFETCH, MEMCPY, ALIGN, …).
+ * - Compiler-abstraction macros (LIKELY, PREFETCH, MEMCPY, ALIGN, ...).
  * - Endianness detection and byte-swap helpers.
- * - File-format constants (magic word, header sizes, block sizes, …).
+ * - File-format constants (magic word, header sizes, block sizes, ...).
  * - Inline helpers for hashing, endian-safe loads/stores, bit manipulation,
  *   ZigZag encoding, aligned allocation, and bitstream reading.
  * - Internal function prototypes for chunk-level compression/decompression.
