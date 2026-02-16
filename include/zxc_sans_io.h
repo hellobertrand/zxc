@@ -11,7 +11,7 @@
  *
  * This header exposes the building blocks used by the higher-level buffer and
  * streaming APIs.  It is intended for callers who need to drive compression or
- * decompression themselves — for example, to integrate ZXC into a custom I/O
+ * decompression themselves - for example, to integrate ZXC into a custom I/O
  * pipeline or an event loop.
  *
  * A typical usage pattern is:

@@ -169,7 +169,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  * Layout (16 bytes): Magic (4) | Version (1) | Chunk (1) | Flags (1) |
  * Reserved (7) | CRC-16 (2).
  *
- * @param[out] dst          Destination buffer (≥ @ref ZXC_FILE_HEADER_SIZE bytes).
+ * @param[out] dst          Destination buffer (>= @ref ZXC_FILE_HEADER_SIZE bytes).
  * @param[in]  dst_capacity Capacity of @p dst.
  * @param[in]  has_checksum Non-zero to set the checksum flag.
  * @return Number of bytes written (@ref ZXC_FILE_HEADER_SIZE) on success,
@@ -200,7 +200,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
  *
  * Checks the magic word, format version, and CRC-16.
  *
- * @param[in]  src              Source buffer (≥ @ref ZXC_FILE_HEADER_SIZE bytes).
+ * @param[in]  src              Source buffer (>= @ref ZXC_FILE_HEADER_SIZE bytes).
  * @param[in]  src_size         Size of @p src.
  * @param[out] out_block_size   Receives the decoded block size (may be @c NULL).
  * @param[out] out_has_checksum Receives 1 if checksums are present, 0 otherwise
@@ -232,7 +232,7 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
 /**
  * @brief Serialises a block header (8 bytes) into @p dst.
  *
- * @param[out] dst          Destination buffer (≥ @ref ZXC_BLOCK_HEADER_SIZE bytes).
+ * @param[out] dst          Destination buffer (>= @ref ZXC_BLOCK_HEADER_SIZE bytes).
  * @param[in]  dst_capacity Capacity of @p dst.
  * @param[in]  bh           Populated block header descriptor.
  * @return Number of bytes written (@ref ZXC_BLOCK_HEADER_SIZE) on success,
@@ -257,7 +257,7 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
  *
  * Validates the 8-bit CRC embedded in the header.
  *
- * @param[in]  src      Source buffer (≥ @ref ZXC_BLOCK_HEADER_SIZE bytes).
+ * @param[in]  src      Source buffer (>= @ref ZXC_BLOCK_HEADER_SIZE bytes).
  * @param[in]  src_size Size of @p src.
  * @param[out] bh       Receives the decoded block header fields.
  * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
@@ -282,7 +282,7 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 /**
  * @brief Writes the 12-byte file footer (source size + global checksum).
  *
- * @param[out] dst              Destination buffer (≥ @ref ZXC_FILE_FOOTER_SIZE bytes).
+ * @param[out] dst              Destination buffer (>= @ref ZXC_FILE_FOOTER_SIZE bytes).
  * @param[in]  dst_capacity     Capacity of @p dst.
  * @param[in]  src_size         Original uncompressed size in bytes.
  * @param[in]  global_hash      Accumulated global checksum value.
@@ -308,7 +308,7 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
 /**
  * @brief Serialises a NUM block header (16 bytes).
  *
- * @param[out] dst Destination buffer (≥ @ref ZXC_NUM_HEADER_BINARY_SIZE bytes).
+ * @param[out] dst Destination buffer (>= @ref ZXC_NUM_HEADER_BINARY_SIZE bytes).
  * @param[in]  rem Remaining capacity of @p dst.
  * @param[in]  nh  Populated NUM header descriptor.
  * @return Number of bytes written on success, or a negative @ref zxc_error_t code.
@@ -327,7 +327,7 @@ int zxc_write_num_header(uint8_t* RESTRICT dst, const size_t rem,
 /**
  * @brief Parses a NUM block header from @p src.
  *
- * @param[in]  src      Source buffer (≥ @ref ZXC_NUM_HEADER_BINARY_SIZE bytes).
+ * @param[in]  src      Source buffer (>= @ref ZXC_NUM_HEADER_BINARY_SIZE bytes).
  * @param[in]  src_size Size of @p src.
  * @param[out] nh       Receives the decoded NUM header fields.
  * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
@@ -490,7 +490,7 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  * @param[in]  count   Number of values to pack.
  * @param[out] dst     Destination byte buffer.
  * @param[in]  dst_cap Capacity of @p dst.
- * @param[in]  bits    Number of bits per value (0–32).
+ * @param[in]  bits    Number of bits per value (0-32).
  * @return Number of bytes written on success, or a negative @ref zxc_error_t code.
  */
 int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
