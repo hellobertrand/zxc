@@ -197,6 +197,31 @@ jobs:
             cross_prefix: powerpc64le-linux-gnu
             cmake_processor: ppc64le
             qemu_binary: qemu-ppc64le
+          - name: Linux mipsel
+            cross_pkg: gcc-mipsel-linux-gnu
+            cross_prefix: mipsel-linux-gnu
+            cmake_processor: mipsel
+            qemu_binary: qemu-mipsel
+          - name: Linux powerpc
+            cross_pkg: gcc-powerpc-linux-gnu
+            cross_prefix: powerpc-linux-gnu
+            cmake_processor: powerpc
+            qemu_binary: qemu-ppc
+          - name: Linux ppc64
+            cross_pkg: gcc-powerpc64-linux-gnu
+            cross_prefix: powerpc64-linux-gnu
+            cmake_processor: ppc64
+            qemu_binary: qemu-ppc64
+          - name: Linux sparc64
+            cross_pkg: gcc-sparc64-linux-gnu
+            cross_prefix: sparc64-linux-gnu
+            cmake_processor: sparc64
+            qemu_binary: qemu-sparc64
+          - name: Linux armel
+            cross_pkg: gcc-arm-linux-gnueabi
+            cross_prefix: arm-linux-gnueabi
+            cmake_processor: arm
+            qemu_binary: qemu-arm
 
     steps:
       - name: Checkout Repository
@@ -252,11 +277,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux armel
-            cross_pkg: gcc-arm-linux-gnueabi
-            cross_prefix: arm-linux-gnueabi
-            cmake_processor: arm
-            qemu_binary: qemu-arm
           - name: Linux mips64el
             cross_pkg: gcc-mips64el-linux-gnuabi64
             cross_prefix: mips64el-linux-gnuabi64
