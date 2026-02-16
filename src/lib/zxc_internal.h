@@ -117,14 +117,54 @@ extern "C" {
  */
 
 #if defined(__GNUC__) || defined(__clang__)
+/** @def LIKELY
+ * @brief Branch prediction hint: expression is likely true.
+ * @param x Expression to evaluate.
+ */
 #define LIKELY(x) (__builtin_expect(!!(x), 1))
+
+/** @def UNLIKELY
+ * @brief Branch prediction hint: expression is unlikely to be true.
+ * @param x Expression to evaluate.
+ */
 #define UNLIKELY(x) (__builtin_expect(!!(x), 0))
+
+/** @def RESTRICT
+ * @brief Pointer aliasing hint (maps to __restrict__).
+ */
 #define RESTRICT __restrict__
+
+/** @def ZXC_PREFETCH_READ
+ * @brief Prefetch data for reading.
+ * @param ptr Pointer to data to prefetch.
+ */
 #define ZXC_PREFETCH_READ(ptr) __builtin_prefetch((const void*)(ptr), 0, 3)
+
+/** @def ZXC_PREFETCH_WRITE
+ * @brief Prefetch data for writing.
+ * @param ptr Pointer to data to prefetch.
+ */
 #define ZXC_PREFETCH_WRITE(ptr) __builtin_prefetch((const void*)(ptr), 1, 3)
+
+/** @def ZXC_MEMCPY
+ * @brief Optimized memory copy using compiler built-in.
+ */
 #define ZXC_MEMCPY(dst, src, n) __builtin_memcpy(dst, src, n)
+
+/** @def ZXC_MEMSET
+ * @brief Optimized memory set using compiler built-in.
+ */
 #define ZXC_MEMSET(dst, val, n) __builtin_memset(dst, val, n)
+
+/** @def ZXC_ALIGN
+ * @brief Specifies memory alignment for a variable or structure.
+ * @param x Alignment boundary in bytes (must be a power of 2).
+ */
 #define ZXC_ALIGN(x) __attribute__((aligned(x)))
+
+/** @def ZXC_ALWAYS_INLINE
+ * @brief Forces a function to be inlined at all optimization levels.
+ */
 #define ZXC_ALWAYS_INLINE inline __attribute__((always_inline))
 
 #elif defined(_MSC_VER)
@@ -143,7 +183,16 @@ extern "C" {
 #pragma intrinsic(memcpy, memset)
 #define ZXC_MEMCPY(dst, src, n) memcpy(dst, src, n)
 #define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
+
+/** @def ZXC_ALIGN
+ * @brief Specifies memory alignment for a variable or structure (MSVC).
+ * @param x Alignment boundary in bytes (must be a power of 2).
+ */
 #define ZXC_ALIGN(x) __declspec(align(x))
+
+/** @def ZXC_ALWAYS_INLINE
+ * @brief Forces a function to be inlined at all optimization levels (MSVC).
+ */
 #define ZXC_ALWAYS_INLINE __forceinline
 #pragma intrinsic(_BitScanReverse)
 #else
@@ -154,11 +203,24 @@ extern "C" {
 #define ZXC_PREFETCH_WRITE(ptr)
 #define ZXC_MEMCPY(dst, src, n) memcpy(dst, src, n)
 #define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
+
+/** @def ZXC_ALWAYS_INLINE
+ * @brief Forces a function to be inlined (fallback for non-GCC/Clang/MSVC compilers).
+ */
 #define ZXC_ALWAYS_INLINE inline
+
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #include <stdalign.h>
+/** @def ZXC_ALIGN
+ * @brief Specifies memory alignment using C11 _Alignas.
+ * @param x Alignment boundary in bytes (must be a power of 2).
+ */
 #define ZXC_ALIGN(x) _Alignas(x)
 #else
+/** @def ZXC_ALIGN
+ * @brief No-op alignment macro for compilers without alignment support.
+ * @param x Ignored (alignment not supported).
+ */
 #define ZXC_ALIGN(x)
 #endif
 #endif
@@ -343,17 +405,19 @@ extern "C" {
 #define ZXC_HASH_PRIME4 0x27D4EB2FU
 /** @} */
 
+/** @} */ /* end of File Format Constants */
+
 /**
  * @struct zxc_lz77_params_t
  * @brief Search parameters for LZ77 compression levels.
  */
 typedef struct {
-    int search_depth;     // Max matches to check in hash chain
-    int sufficient_len;   // Stop searching if match >= this length
-    int use_lazy;         // Use lazy matching (check next position)
-    int lazy_attempts;    // Max matches to check for lazy matching
-    uint32_t step_base;   // Base step for literal advancement
-    uint32_t step_shift;  // Shift for distance-based stepping
+    int search_depth;    /**< Maximum number of matches to check in hash chain. */
+    int sufficient_len;  /**< Stop searching if match length >= this value. */
+    int use_lazy;        /**< Enable lazy matching (check next position for better match). */
+    int lazy_attempts;   /**< Maximum matches to check during lazy matching. */
+    uint32_t step_base;  /**< Base step size for literal advancement. */
+    uint32_t step_shift; /**< Shift amount for distance-based stepping. */
 } zxc_lz77_params_t;
 
 /**
@@ -458,14 +522,9 @@ typedef struct {
  *
  * Used to track the compressed and uncompressed sizes of sub-components
  * (e.g., a literal stream or offset stream) within a block.
- *
- * @var zxc_section_desc_t::comp_size
- * The size of the section on disk (compressed).
- * @var zxc_section_desc_t::raw_size
- * The size of the section in memory (decompressed).
  */
 typedef struct {
-    uint64_t sizes;  // comp_size (low 32) | raw_size (high 32)
+    uint64_t sizes; /**< Packed sizes: compressed size (low 32 bits) | raw size (high 32 bits). */
 } zxc_section_desc_t;
 
 /**
@@ -485,27 +544,18 @@ typedef struct {
 } zxc_num_header_t;
 
 /**
- * @typedef zxc_bit_reader_t
+ * @struct zxc_bit_reader_t
  * @brief Internal bit reader structure for ZXC compression/decompression.
  *
  * This structure maintains the state of the bit stream reading operation.
  * It buffers bits from the input byte stream into an accumulator to allow
  * reading variable-length bit sequences.
- *
- * @field ptr Pointer to the current position in the input byte stream. This
- * pointer advances as bytes are loaded into the accumulator.
- * @field end Pointer to the end of the input byte stream. Used to prevent
- * reading past the bounds of the input buffer.
- * @field accum Bit accumulator holding buffered bits. A 64-bit buffer that
- * holds the bits currently loaded from the stream but not yet consumed.
- * @field bits Number of valid bits currently in the accumulator. Indicates how
- * many bits are available in @c accum to be read.
  */
 typedef struct {
-    const uint8_t* ptr;
-    const uint8_t* end;
-    uint64_t accum;
-    int bits;
+    const uint8_t* ptr; /**< Pointer to the current position in the input byte stream. */
+    const uint8_t* end; /**< Pointer to the end of the input byte stream. */
+    uint64_t accum;     /**< Bit accumulator holding buffered bits (64-bit buffer). */
+    int bits;           /**< Number of valid bits currently in the accumulator. */
 } zxc_bit_reader_t;
 
 /**

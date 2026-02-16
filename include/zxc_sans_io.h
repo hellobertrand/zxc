@@ -44,7 +44,7 @@ extern "C" {
  */
 
 /**
- * @typedef zxc_cctx_t
+ * @struct zxc_cctx_t
  * @brief Compression Context structure.
  *
  * This structure holds the state and buffers required for the compression
@@ -62,19 +62,19 @@ extern "C" {
  * store `(epoch << 16) | offset`. If the stored epoch doesn't match the current
  * `ctx->epoch`, the entry is considered invalid/empty.
  *
- * @field hash_table Pointer to the hash table used for LZ77 match finding.
- * @field chain_table Pointer to the chain table for collision resolution.
- * @field memory_block Pointer to the single allocation block containing all buffers.
- * @field epoch Current epoch counter for lazy hash table invalidation.
- * @field buf_extras Pointer to the buffer for extra lengths (LL >= 15 or ML >= 15).
- * @field buf_offsets Pointer to the buffer for offsets.
- * @field buf_tokens Pointer to the buffer for token sequences.
- * @field literals Pointer to the buffer for raw literal bytes.
- * @field lit_buffer Pointer to a scratch buffer for literal processing (e.g.,
+ * hash_table Pointer to the hash table used for LZ77 match finding.
+ * chain_table Pointer to the chain table for collision resolution.
+ * memory_block Pointer to the single allocation block containing all buffers.
+ * epoch Current epoch counter for lazy hash table invalidation.
+ * buf_extras Pointer to the buffer for extra lengths (LL >= 15 or ML >= 15).
+ * buf_offsets Pointer to the buffer for offsets.
+ * buf_tokens Pointer to the buffer for token sequences.
+ * literals Pointer to the buffer for raw literal bytes.
+ * lit_buffer Pointer to a scratch buffer for literal processing (e.g.,
  * RLE decoding).
- * @field lit_buffer_cap Current capacity of the literal scratch buffer.
- * @field checksum_enabled Flag indicating if checksums should be computed.
- * @field compression_level The configured compression level.
+ * lit_buffer_cap Current capacity of the literal scratch buffer.
+ * checksum_enabled Flag indicating if checksums should be computed.
+ * compression_level The configured compression level.
  */
 typedef struct {
     /* Hot zone: random access / high frequency.

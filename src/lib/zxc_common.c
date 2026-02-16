@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-/**
+/*
  * @file zxc_common.c
  * @brief Shared library utilities: context management, header I/O, bitpacking,
  *        compress-bound calculation, and error-code name lookup.
@@ -25,7 +25,7 @@
  * ============================================================================
  */
 
-/**
+/*
  * @brief Allocates memory aligned to the specified boundary.
  *
  * Uses `_aligned_malloc` on Windows and `posix_memalign` elsewhere.
@@ -44,7 +44,7 @@ void* zxc_aligned_malloc(const size_t size, const size_t alignment) {
 #endif
 }
 
-/**
+/*
  * @brief Frees memory previously allocated by zxc_aligned_malloc().
  *
  * @param[in] ptr Pointer returned by zxc_aligned_malloc() (may be @c NULL).
@@ -57,7 +57,7 @@ void zxc_aligned_free(void* ptr) {
 #endif
 }
 
-/**
+/*
  * @brief Initialises a compression context, allocating all internal buffers.
  *
  * A single cache-line-aligned allocation is carved into hash table, chain
@@ -126,7 +126,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     return ZXC_OK;
 }
 
-/**
+/*
  * @brief Releases all resources owned by a compression context.
  *
  * After this call every pointer inside @p ctx is @c NULL and the context
@@ -163,7 +163,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  * ============================================================================
  */
 
-/**
+/*
  * @brief Serialises a ZXC file header into @p dst.
  *
  * Layout (16 bytes): Magic (4) | Version (1) | Chunk (1) | Flags (1) |
@@ -195,7 +195,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     return ZXC_FILE_HEADER_SIZE;
 }
 
-/**
+/*
  * @brief Parses and validates a ZXC file header from @p src.
  *
  * Checks the magic word, format version, and CRC-16.
@@ -229,7 +229,7 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     return ZXC_OK;
 }
 
-/**
+/*
  * @brief Serialises a block header (8 bytes) into @p dst.
  *
  * @param[out] dst          Destination buffer (>= @ref ZXC_BLOCK_HEADER_SIZE bytes).
@@ -252,7 +252,7 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     return ZXC_BLOCK_HEADER_SIZE;
 }
 
-/**
+/*
  * @brief Parses and validates a block header from @p src.
  *
  * Validates the 8-bit CRC embedded in the header.
@@ -279,7 +279,7 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
     return ZXC_OK;
 }
 
-/**
+/*
  * @brief Writes the 12-byte file footer (source size + global checksum).
  *
  * @param[out] dst              Destination buffer (>= @ref ZXC_FILE_FOOTER_SIZE bytes).
@@ -305,7 +305,7 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     return ZXC_FILE_FOOTER_SIZE;
 }
 
-/**
+/*
  * @brief Serialises a NUM block header (16 bytes).
  *
  * @param[out] dst Destination buffer (>= @ref ZXC_NUM_HEADER_BINARY_SIZE bytes).
@@ -324,7 +324,7 @@ int zxc_write_num_header(uint8_t* RESTRICT dst, const size_t rem,
     return ZXC_NUM_HEADER_BINARY_SIZE;
 }
 
-/**
+/*
  * @brief Parses a NUM block header from @p src.
  *
  * @param[in]  src      Source buffer (>= @ref ZXC_NUM_HEADER_BINARY_SIZE bytes).
@@ -341,7 +341,7 @@ int zxc_read_num_header(const uint8_t* RESTRICT src, const size_t src_size,
     return ZXC_OK;
 }
 
-/**
+/*
  * @brief Serialises a GLO block header followed by its section descriptors.
  *
  * @param[out] dst  Destination buffer.
@@ -376,7 +376,7 @@ int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
     return (int)needed;
 }
 
-/**
+/*
  * @brief Parses a GLO block header and its section descriptors from @p src.
  *
  * @param[in]  src  Source buffer.
@@ -408,7 +408,7 @@ int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
     return ZXC_OK;
 }
 
-/**
+/*
  * @brief Serialises a GHI block header followed by its section descriptors.
  *
  * @param[out] dst  Destination buffer.
@@ -443,7 +443,7 @@ int zxc_write_ghi_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
     return (int)needed;
 }
 
-/**
+/*
  * @brief Parses a GHI block header and its section descriptors from @p src.
  *
  * @param[in]  src  Source buffer.
@@ -481,7 +481,7 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  * ============================================================================
  */
 
-/**
+/*
  * @brief Bit-packs an array of 32-bit values into a compact byte stream.
  *
  * Each value is masked to @p bits width and packed contiguously.
@@ -534,7 +534,7 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint
  * COMPRESS BOUND CALCULATION
  * ============================================================================
  */
-/**
+/*
  * @brief Returns the maximum compressed size for a given input size.
  *
  * The result accounts for the file header, per-block headers, block
@@ -558,7 +558,7 @@ uint64_t zxc_compress_bound(const size_t input_size) {
  * ============================================================================
  */
 
-/**
+/*
  * @brief Returns a human-readable string for the given error code.
  *
  * @param[in] code An error code from @ref zxc_error_t (or @ref ZXC_OK).
