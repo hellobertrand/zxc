@@ -5,6 +5,15 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file zxc_decompress.c
+ * @brief Block-level decompression: NUM / GLO / GHI / RAW decoding with
+ *        SIMD-accelerated prefix-sum, bit-unpacking, and overlapping copies.
+ *
+ * Like @ref zxc_compress.c, this file is compiled multiple times with
+ * @c ZXC_FUNCTION_SUFFIX to produce per-ISA variants.
+ */
+
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_sans_io.h"
 #include "zxc_internal.h"

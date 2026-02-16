@@ -5,6 +5,16 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file zxc_driver.c
+ * @brief Multi-threaded streaming compression / decompression engine.
+ *
+ * Implements a ring-buffer producer–worker–consumer architecture that
+ * parallelises block processing over @c FILE* streams.  Also provides
+ * the public @ref zxc_stream_compress, @ref zxc_stream_decompress, and
+ * extended variants with progress callbacks.
+ */
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
