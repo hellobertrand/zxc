@@ -5,6 +5,32 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file zxc_buffer.h
+ * @brief Buffer-based (single-shot) compression and decompression API.
+ *
+ * This header exposes the simplest way to use ZXC: pass an entire input buffer
+ * and receive the result in a single output buffer.  All functions in this
+ * header are single-threaded and blocking.
+ *
+ * @par Typical usage
+ * @code
+ * // Compress
+ * size_t bound = zxc_compress_bound(src_size);
+ * void *dst    = malloc(bound);
+ * int64_t csize = zxc_compress(src, src_size, dst, bound,
+ *                              ZXC_LEVEL_DEFAULT, 1);
+ *
+ * // Decompress
+ * uint64_t orig = zxc_get_decompressed_size(dst, csize);
+ * void *out     = malloc(orig);
+ * int64_t dsize = zxc_decompress(dst, csize, out, orig, 1);
+ * @endcode
+ *
+ * @see zxc_stream.h  for the streaming (multi-threaded) API.
+ * @see zxc_sans_io.h for the low-level sans-I/O building blocks.
+ */
+
 #ifndef ZXC_BUFFER_H
 #define ZXC_BUFFER_H
 
@@ -13,10 +39,10 @@
 
 #include "zxc_export.h"
 
-/*
- * ============================================================================
- * ZXC Compression Library - Public API (Buffer-Based)
- * ============================================================================
+/**
+ * @defgroup buffer_api Buffer API
+ * @brief Single-shot, buffer-based compression and decompression.
+ * @{
  */
 
 /**
@@ -37,7 +63,7 @@ ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
  *
  * This version uses standard size_t types and void pointers.
  * It executes in a single thread (blocking operation).
- * It writes the ZXC file header followed by compressed blocks
+ * It writes the ZXC file header followed by compressed blocks.
  *
  * @param[in] src          Pointer to the source buffer.
  * @param[in] src_size     Size of the source data in bytes.
@@ -87,5 +113,7 @@ ZXC_EXPORT int64_t zxc_decompress(const void* src, const size_t src_size, void* 
  *         or too small to contain a valid ZXC archive.
  */
 ZXC_EXPORT uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size);
+
+/** @} */ /* end of buffer_api */
 
 #endif  // ZXC_BUFFER_H
