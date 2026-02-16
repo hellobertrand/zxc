@@ -5,6 +5,16 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file zxc_compress.c
+ * @brief Block-level compression: LZ77 parsing, NUM / GLO / GHI / RAW encoding,
+ *        and the chunk-wrapper entry point.
+ *
+ * Compiled multiple times with different @c ZXC_FUNCTION_SUFFIX values to
+ * produce AVX2, AVX-512, NEON, and scalar variants dispatched at runtime
+ * by @ref zxc_dispatch.c.
+ */
+
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_sans_io.h"
 #include "zxc_internal.h"

@@ -5,6 +5,16 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file zxc_dispatch.c
+ * @brief Runtime CPU feature detection and SIMD dispatch layer.
+ *
+ * Detects AVX2/AVX512/NEON at runtime and routes compress/decompress calls
+ * to the best available implementation via lazy-initialised function pointers.
+ * Also contains the public one-shot buffer API (@ref zxc_compress,
+ * @ref zxc_decompress, @ref zxc_get_decompressed_size).
+ */
+
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 #if defined(_MSC_VER)
@@ -67,13 +77,25 @@ int zxc_compress_chunk_wrapper_neon(zxc_cctx_t* RESTRICT ctx, const uint8_t* RES
  * ============================================================================
  */
 
+/**
+ * @enum zxc_cpu_feature_t
+ * @brief Detected CPU SIMD capability level.
+ */
 typedef enum {
-    ZXC_CPU_GENERIC = 0,
-    ZXC_CPU_AVX2 = 1,
-    ZXC_CPU_AVX512 = 2,
-    ZXC_CPU_NEON = 3
+    ZXC_CPU_GENERIC = 0, /**< @brief Scalar-only fallback.   */
+    ZXC_CPU_AVX2 = 1,    /**< @brief x86-64 AVX2 available.  */
+    ZXC_CPU_AVX512 = 2,  /**< @brief x86-64 AVX-512F+BW available. */
+    ZXC_CPU_NEON = 3     /**< @brief ARM NEON available.      */
 } zxc_cpu_feature_t;
 
+/**
+ * @brief Probes the running CPU for SIMD support.
+ *
+ * Uses CPUID on x86-64 (MSVC and GCC/Clang paths), `getauxval` on
+ * 32-bit ARM Linux, and compile-time constants on AArch64.
+ *
+ * @return The highest @ref zxc_cpu_feature_t level supported.
+ */
 static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 #ifdef ZXC_ONLY_DEFAULT
     return ZXC_CPU_GENERIC;
@@ -147,15 +169,24 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
  * We use a function pointer initialized on first use (lazy initialization).
  */
 
+/** @brief Function pointer type for the chunk decompressor. */
 typedef int (*zxc_decompress_func_t)(zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT, const size_t,
                                      uint8_t* RESTRICT, const size_t);
+/** @brief Function pointer type for the chunk compressor. */
 typedef int (*zxc_compress_func_t)(zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT, const size_t,
                                    uint8_t* RESTRICT, const size_t);
 
+/** @brief Lazily-resolved pointer to the best decompression variant. */
 static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_ptr = NULL;
+/** @brief Lazily-resolved pointer to the best compression variant. */
 static ZXC_ATOMIC zxc_compress_func_t zxc_compress_ptr = NULL;
 
-// Initializer for Decompression
+/**
+ * @brief First-call initialiser for the decompression dispatcher.
+ *
+ * Detects CPU features, selects the best implementation, stores the
+ * pointer atomically, then tail-calls into it.
+ */
 static int zxc_decompress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                         const size_t src_sz, uint8_t* RESTRICT dst,
                                         const size_t dst_cap) {
@@ -193,7 +224,12 @@ static int zxc_decompress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t*
     return zxc_decompress_ptr_local(ctx, src, src_sz, dst, dst_cap);
 }
 
-// Initializer for Compression
+/**
+ * @brief First-call initialiser for the compression dispatcher.
+ *
+ * Detects CPU features, selects the best implementation, stores the
+ * pointer atomically, then tail-calls into it.
+ */
 static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap) {
@@ -231,8 +267,16 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     return zxc_compress_ptr_local(ctx, src, src_sz, dst, dst_cap);
 }
 
-// Public Wrappers (Dispatcher and Main API)
-
+/**
+ * @brief Public decompression dispatcher (calls lazily-resolved implementation).
+ *
+ * @param[in,out] ctx    Decompression context.
+ * @param[in]     src    Compressed input chunk (header + payload + optional checksum).
+ * @param[in]     src_sz Size of @p src in bytes.
+ * @param[out]    dst    Destination buffer for decompressed data.
+ * @param[in]     dst_cap Capacity of @p dst.
+ * @return Decompressed size in bytes, or a negative @ref zxc_error_t code.
+ */
 int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                  const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
 #if ZXC_USE_C11_ATOMICS
@@ -244,6 +288,16 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
     return func(ctx, src, src_sz, dst, dst_cap);
 }
 
+/**
+ * @brief Public compression dispatcher (calls lazily-resolved implementation).
+ *
+ * @param[in,out] ctx    Compression context.
+ * @param[in]     src    Uncompressed input chunk.
+ * @param[in]     src_sz Size of @p src in bytes.
+ * @param[out]    dst    Destination buffer for compressed data.
+ * @param[in]     dst_cap Capacity of @p dst.
+ * @return Compressed size in bytes, or a negative @ref zxc_error_t code.
+ */
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
 #if ZXC_USE_C11_ATOMICS
@@ -263,6 +317,20 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
  * allocation and looping over blocks. They call the dispatched wrappers above.
  */
 
+/**
+ * @brief Compresses an entire buffer in one call.
+ *
+ * Manages context allocation internally, loops over blocks, writes the
+ * file header / EOF block / footer, and accumulates the global checksum.
+ *
+ * @param[in]  src              Uncompressed input data.
+ * @param[in]  src_size         Size of @p src in bytes.
+ * @param[out] dst              Destination buffer (use zxc_compress_bound() to size).
+ * @param[in]  dst_capacity     Capacity of @p dst.
+ * @param[in]  level            Compression level (1–5).
+ * @param[in]  checksum_enabled Non-zero to enable per-block and global checksums.
+ * @return Total compressed size in bytes, or a negative @ref zxc_error_t code.
+ */
 // cppcheck-suppress unusedFunction
 int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTRICT dst,
                      const size_t dst_capacity, const int level, const int checksum_enabled) {
@@ -331,6 +399,19 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     return (int64_t)(op - op_start);
 }
 
+/**
+ * @brief Decompresses an entire buffer in one call.
+ *
+ * Validates the file header and footer, loops over compressed blocks,
+ * and verifies the global checksum when enabled.
+ *
+ * @param[in]  src              Compressed input data.
+ * @param[in]  src_size         Size of @p src in bytes.
+ * @param[out] dst              Destination buffer for decompressed data.
+ * @param[in]  dst_capacity     Capacity of @p dst.
+ * @param[in]  checksum_enabled Non-zero to verify per-block and global checksums.
+ * @return Total decompressed size in bytes, or a negative @ref zxc_error_t code.
+ */
 // cppcheck-suppress unusedFunction
 int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RESTRICT dst,
                        const size_t dst_capacity, const int checksum_enabled) {
@@ -416,6 +497,15 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
     return (int64_t)(op - op_start);
 }
 
+/**
+ * @brief Reads the decompressed size from a ZXC-compressed buffer.
+ *
+ * The size is stored in the file footer (last @ref ZXC_FILE_FOOTER_SIZE bytes).
+ *
+ * @param[in] src      Compressed data.
+ * @param[in] src_size Size of @p src in bytes.
+ * @return Original uncompressed size, or 0 on error.
+ */
 uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE)) return 0;
 

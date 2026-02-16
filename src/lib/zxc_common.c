@@ -5,6 +5,15 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file zxc_common.c
+ * @brief Shared library utilities: context management, header I/O, bitpacking,
+ *        compress-bound calculation, and error-code name lookup.
+ *
+ * This translation unit contains the functions shared by both the buffer and
+ * streaming APIs.  It is linked into every build of libzxc.
+ */
+
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_sans_io.h"
@@ -16,6 +25,15 @@
  * ============================================================================
  */
 
+/**
+ * @brief Allocates memory aligned to the specified boundary.
+ *
+ * Uses `_aligned_malloc` on Windows and `posix_memalign` elsewhere.
+ *
+ * @param[in] size      Number of bytes to allocate.
+ * @param[in] alignment Required alignment (must be a power of two).
+ * @return Pointer to the allocated block, or @c NULL on failure.
+ */
 void* zxc_aligned_malloc(const size_t size, const size_t alignment) {
 #if defined(_WIN32)
     return _aligned_malloc(size, alignment);
@@ -26,6 +44,11 @@ void* zxc_aligned_malloc(const size_t size, const size_t alignment) {
 #endif
 }
 
+/**
+ * @brief Frees memory previously allocated by zxc_aligned_malloc().
+ *
+ * @param[in] ptr Pointer returned by zxc_aligned_malloc() (may be @c NULL).
+ */
 void zxc_aligned_free(void* ptr) {
 #if defined(_WIN32)
     _aligned_free(ptr);
@@ -34,6 +57,20 @@ void zxc_aligned_free(void* ptr) {
 #endif
 }
 
+/**
+ * @brief Initialises a compression context, allocating all internal buffers.
+ *
+ * A single cache-line-aligned allocation is carved into hash table, chain
+ * table, sequence buffers, token buffers, offset buffers, extra-length
+ * buffers, and a literal buffer.
+ *
+ * @param[out] ctx              Context to initialise (zeroed on entry).
+ * @param[in]  chunk_size       Maximum uncompressed chunk size (bytes).
+ * @param[in]  mode             0 = decompression (skip buffer alloc), 1 = compression.
+ * @param[in]  level            Compression level (stored in ctx).
+ * @param[in]  checksum_enabled Non-zero to enable checksum generation/verification.
+ * @return @ref ZXC_OK on success, or @ref ZXC_ERROR_MEMORY on allocation failure.
+ */
 int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int mode,
                   const int level, const int checksum_enabled) {
     ZXC_MEMSET(ctx, 0, sizeof(zxc_cctx_t));
@@ -89,6 +126,14 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     return ZXC_OK;
 }
 
+/**
+ * @brief Releases all resources owned by a compression context.
+ *
+ * After this call every pointer inside @p ctx is @c NULL and the context
+ * may be safely re-initialised with zxc_cctx_init().
+ *
+ * @param[in,out] ctx Context to tear down.
+ */
 void zxc_cctx_free(zxc_cctx_t* ctx) {
     if (ctx->memory_block) {
         zxc_aligned_free(ctx->memory_block);
@@ -118,6 +163,18 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  * ============================================================================
  */
 
+/**
+ * @brief Serialises a ZXC file header into @p dst.
+ *
+ * Layout (16 bytes): Magic (4) | Version (1) | Chunk (1) | Flags (1) |
+ * Reserved (7) | CRC-16 (2).
+ *
+ * @param[out] dst          Destination buffer (≥ @ref ZXC_FILE_HEADER_SIZE bytes).
+ * @param[in]  dst_capacity Capacity of @p dst.
+ * @param[in]  has_checksum Non-zero to set the checksum flag.
+ * @return Number of bytes written (@ref ZXC_FILE_HEADER_SIZE) on success,
+ *         or a negative @ref zxc_error_t code.
+ */
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
                           const int has_checksum) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
@@ -138,6 +195,18 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     return ZXC_FILE_HEADER_SIZE;
 }
 
+/**
+ * @brief Parses and validates a ZXC file header from @p src.
+ *
+ * Checks the magic word, format version, and CRC-16.
+ *
+ * @param[in]  src              Source buffer (≥ @ref ZXC_FILE_HEADER_SIZE bytes).
+ * @param[in]  src_size         Size of @p src.
+ * @param[out] out_block_size   Receives the decoded block size (may be @c NULL).
+ * @param[out] out_has_checksum Receives 1 if checksums are present, 0 otherwise
+ *                              (may be @c NULL).
+ * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
+ */
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
                          size_t* RESTRICT out_block_size, int* RESTRICT out_has_checksum) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
@@ -160,6 +229,15 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     return ZXC_OK;
 }
 
+/**
+ * @brief Serialises a block header (8 bytes) into @p dst.
+ *
+ * @param[out] dst          Destination buffer (≥ @ref ZXC_BLOCK_HEADER_SIZE bytes).
+ * @param[in]  dst_capacity Capacity of @p dst.
+ * @param[in]  bh           Populated block header descriptor.
+ * @return Number of bytes written (@ref ZXC_BLOCK_HEADER_SIZE) on success,
+ *         or a negative @ref zxc_error_t code.
+ */
 int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
                            const zxc_block_header_t* RESTRICT bh) {
     if (UNLIKELY(dst_capacity < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
@@ -174,6 +252,16 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     return ZXC_BLOCK_HEADER_SIZE;
 }
 
+/**
+ * @brief Parses and validates a block header from @p src.
+ *
+ * Validates the 8-bit CRC embedded in the header.
+ *
+ * @param[in]  src      Source buffer (≥ @ref ZXC_BLOCK_HEADER_SIZE bytes).
+ * @param[in]  src_size Size of @p src.
+ * @param[out] bh       Receives the decoded block header fields.
+ * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
+ */
 int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
                           zxc_block_header_t* RESTRICT bh) {
     if (UNLIKELY(src_size < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
@@ -191,6 +279,17 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
     return ZXC_OK;
 }
 
+/**
+ * @brief Writes the 12-byte file footer (source size + global checksum).
+ *
+ * @param[out] dst              Destination buffer (≥ @ref ZXC_FILE_FOOTER_SIZE bytes).
+ * @param[in]  dst_capacity     Capacity of @p dst.
+ * @param[in]  src_size         Original uncompressed size in bytes.
+ * @param[in]  global_hash      Accumulated global checksum value.
+ * @param[in]  checksum_enabled Non-zero to write the checksum; zero to zero-fill.
+ * @return Number of bytes written (@ref ZXC_FILE_FOOTER_SIZE) on success,
+ *         or a negative @ref zxc_error_t code.
+ */
 int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
                           const uint32_t global_hash, const int checksum_enabled) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_FOOTER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
@@ -206,6 +305,14 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     return ZXC_FILE_FOOTER_SIZE;
 }
 
+/**
+ * @brief Serialises a NUM block header (16 bytes).
+ *
+ * @param[out] dst Destination buffer (≥ @ref ZXC_NUM_HEADER_BINARY_SIZE bytes).
+ * @param[in]  rem Remaining capacity of @p dst.
+ * @param[in]  nh  Populated NUM header descriptor.
+ * @return Number of bytes written on success, or a negative @ref zxc_error_t code.
+ */
 int zxc_write_num_header(uint8_t* RESTRICT dst, const size_t rem,
                          const zxc_num_header_t* RESTRICT nh) {
     if (UNLIKELY(rem < ZXC_NUM_HEADER_BINARY_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
@@ -217,6 +324,14 @@ int zxc_write_num_header(uint8_t* RESTRICT dst, const size_t rem,
     return ZXC_NUM_HEADER_BINARY_SIZE;
 }
 
+/**
+ * @brief Parses a NUM block header from @p src.
+ *
+ * @param[in]  src      Source buffer (≥ @ref ZXC_NUM_HEADER_BINARY_SIZE bytes).
+ * @param[in]  src_size Size of @p src.
+ * @param[out] nh       Receives the decoded NUM header fields.
+ * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
+ */
 int zxc_read_num_header(const uint8_t* RESTRICT src, const size_t src_size,
                         zxc_num_header_t* RESTRICT nh) {
     if (UNLIKELY(src_size < ZXC_NUM_HEADER_BINARY_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
@@ -226,6 +341,15 @@ int zxc_read_num_header(const uint8_t* RESTRICT src, const size_t src_size,
     return ZXC_OK;
 }
 
+/**
+ * @brief Serialises a GLO block header followed by its section descriptors.
+ *
+ * @param[out] dst  Destination buffer.
+ * @param[in]  rem  Remaining capacity of @p dst.
+ * @param[in]  gh   Populated GLO header descriptor.
+ * @param[in]  desc Array of @ref ZXC_GLO_SECTIONS section descriptors.
+ * @return Total bytes written on success, or a negative @ref zxc_error_t code.
+ */
 int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
                                   const zxc_gnr_header_t* RESTRICT gh,
                                   const zxc_section_desc_t desc[ZXC_GLO_SECTIONS]) {
@@ -252,6 +376,15 @@ int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
     return (int)needed;
 }
 
+/**
+ * @brief Parses a GLO block header and its section descriptors from @p src.
+ *
+ * @param[in]  src  Source buffer.
+ * @param[in]  len  Size of @p src.
+ * @param[out] gh   Receives the decoded GLO header.
+ * @param[out] desc Receives @ref ZXC_GLO_SECTIONS decoded section descriptors.
+ * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
+ */
 int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
                                  zxc_gnr_header_t* RESTRICT gh,
                                  zxc_section_desc_t desc[ZXC_GLO_SECTIONS]) {
@@ -275,6 +408,15 @@ int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
     return ZXC_OK;
 }
 
+/**
+ * @brief Serialises a GHI block header followed by its section descriptors.
+ *
+ * @param[out] dst  Destination buffer.
+ * @param[in]  rem  Remaining capacity of @p dst.
+ * @param[in]  gh   Populated GHI header descriptor.
+ * @param[in]  desc Array of @ref ZXC_GHI_SECTIONS section descriptors.
+ * @return Total bytes written on success, or a negative @ref zxc_error_t code.
+ */
 int zxc_write_ghi_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
                                   const zxc_gnr_header_t* RESTRICT gh,
                                   const zxc_section_desc_t desc[ZXC_GHI_SECTIONS]) {
@@ -301,6 +443,15 @@ int zxc_write_ghi_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
     return (int)needed;
 }
 
+/**
+ * @brief Parses a GHI block header and its section descriptors from @p src.
+ *
+ * @param[in]  src  Source buffer.
+ * @param[in]  len  Size of @p src.
+ * @param[out] gh   Receives the decoded GHI header.
+ * @param[out] desc Receives @ref ZXC_GHI_SECTIONS decoded section descriptors.
+ * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
+ */
 int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
                                  zxc_gnr_header_t* RESTRICT gh,
                                  zxc_section_desc_t desc[ZXC_GHI_SECTIONS]) {
@@ -330,6 +481,18 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  * ============================================================================
  */
 
+/**
+ * @brief Bit-packs an array of 32-bit values into a compact byte stream.
+ *
+ * Each value is masked to @p bits width and packed contiguously.
+ *
+ * @param[in]  src     Source array of 32-bit integers.
+ * @param[in]  count   Number of values to pack.
+ * @param[out] dst     Destination byte buffer.
+ * @param[in]  dst_cap Capacity of @p dst.
+ * @param[in]  bits    Number of bits per value (0–32).
+ * @return Number of bytes written on success, or a negative @ref zxc_error_t code.
+ */
 int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
                           const size_t dst_cap, const uint8_t bits) {
     size_t out_bytes = ((count * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
@@ -371,6 +534,15 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint
  * COMPRESS BOUND CALCULATION
  * ============================================================================
  */
+/**
+ * @brief Returns the maximum compressed size for a given input size.
+ *
+ * The result accounts for the file header, per-block headers, block
+ * checksums, worst-case expansion, EOF block, and the file footer.
+ *
+ * @param[in] input_size Uncompressed input size in bytes.
+ * @return Upper bound on compressed size, or 0 if @p input_size would overflow.
+ */
 uint64_t zxc_compress_bound(const size_t input_size) {
     // Guard UINT64_MAX / SIZE_MAX would overflow.
     if (UNLIKELY(input_size > (SIZE_MAX - (SIZE_MAX >> 8)))) return 0;
@@ -386,6 +558,13 @@ uint64_t zxc_compress_bound(const size_t input_size) {
  * ============================================================================
  */
 
+/**
+ * @brief Returns a human-readable string for the given error code.
+ *
+ * @param[in] code An error code from @ref zxc_error_t (or @ref ZXC_OK).
+ * @return A static string such as @c "ZXC_OK" or @c "ZXC_ERROR_MEMORY".
+ *         Returns @c "ZXC_UNKNOWN_ERROR" for unrecognised codes.
+ */
 const char* zxc_error_name(const int code) {
     switch ((zxc_error_t)code) {
         case ZXC_OK:
