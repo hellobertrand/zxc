@@ -49,6 +49,11 @@ use std::ffi::c_void;
 pub use zxc_sys::{
     ZXC_LEVEL_BALANCED, ZXC_LEVEL_COMPACT, ZXC_LEVEL_DEFAULT, ZXC_LEVEL_FAST, ZXC_LEVEL_FASTEST,
     ZXC_VERSION_MAJOR, ZXC_VERSION_MINOR, ZXC_VERSION_PATCH,
+    // Error codes
+    ZXC_OK, ZXC_ERROR_MEMORY, ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_SRC_TOO_SMALL,
+    ZXC_ERROR_BAD_MAGIC, ZXC_ERROR_BAD_VERSION, ZXC_ERROR_BAD_HEADER,
+    ZXC_ERROR_BAD_CHECKSUM, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_BAD_OFFSET,
+    ZXC_ERROR_OVERFLOW, ZXC_ERROR_IO, ZXC_ERROR_NULL_INPUT, ZXC_ERROR_BAD_BLOCK_TYPE,
 };
 
 // =============================================================================
@@ -56,19 +61,87 @@ pub use zxc_sys::{
 // =============================================================================
 
 /// Errors that can occur during ZXC operations.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
-    /// Compression failed (output buffer too small or internal error)
-    #[error("compression failed")]
-    CompressionFailed,
+    /// Memory allocation failure
+    #[error("memory allocation failed")]
+    Memory,
 
-    /// Decompression failed (invalid data, corruption, or buffer too small)
-    #[error("decompression failed: {0}")]
-    DecompressionFailed(&'static str),
+    /// Destination buffer too small
+    #[error("destination buffer too small")]
+    DstTooSmall,
+
+    /// Source buffer too small or truncated input
+    #[error("source buffer too small or truncated")]
+    SrcTooSmall,
+
+    /// Invalid magic word in file header
+    #[error("invalid magic word in header")]
+    BadMagic,
+
+    /// Unsupported file format version
+    #[error("unsupported file format version")]
+    BadVersion,
+
+    /// Corrupted or invalid header (CRC mismatch)
+    #[error("corrupted or invalid header")]
+    BadHeader,
+
+    /// Block or global checksum verification failed
+    #[error("checksum verification failed")]
+    BadChecksum,
+
+    /// Corrupted compressed data
+    #[error("corrupted compressed data")]
+    CorruptData,
+
+    /// Invalid match offset during decompression
+    #[error("invalid match offset")]
+    BadOffset,
+
+    /// Buffer overflow detected during processing
+    #[error("buffer overflow detected")]
+    Overflow,
+
+    /// Read/write/seek failure on file
+    #[error("I/O error")]
+    Io,
+
+    /// Required input pointer is NULL
+    #[error("null input pointer")]
+    NullInput,
+
+    /// Unknown or unexpected block type
+    #[error("unknown block type")]
+    BadBlockType,
 
     /// The compressed data appears to be invalid or truncated
     #[error("invalid compressed data")]
     InvalidData,
+
+    /// Unknown error code from C library
+    #[error("unknown error (code: {0})")]
+    Unknown(i32),
+}
+
+/// Convert a negative error code from the C library to a Rust Error.
+fn error_from_code(code: i64) -> Error {
+    match code as i32 {
+        ZXC_ERROR_MEMORY => Error::Memory,
+        ZXC_ERROR_DST_TOO_SMALL => Error::DstTooSmall,
+        ZXC_ERROR_SRC_TOO_SMALL => Error::SrcTooSmall,
+        ZXC_ERROR_BAD_MAGIC => Error::BadMagic,
+        ZXC_ERROR_BAD_VERSION => Error::BadVersion,
+        ZXC_ERROR_BAD_HEADER => Error::BadHeader,
+        ZXC_ERROR_BAD_CHECKSUM => Error::BadChecksum,
+        ZXC_ERROR_CORRUPT_DATA => Error::CorruptData,
+        ZXC_ERROR_BAD_OFFSET => Error::BadOffset,
+        ZXC_ERROR_OVERFLOW => Error::Overflow,
+        ZXC_ERROR_IO => Error::Io,
+        ZXC_ERROR_NULL_INPUT => Error::NullInput,
+        ZXC_ERROR_BAD_BLOCK_TYPE => Error::BadBlockType,
+        _ => Error::Unknown(code as i32),
+    }
 }
 
 /// Result type for ZXC operations.
@@ -285,7 +358,11 @@ unsafe fn impl_compress(
     };
 
     if written < 0 {
-        return Err(Error::CompressionFailed);
+        return Err(error_from_code(written));
+    }
+
+    if written == 0 && !data.is_empty() {
+        return Err(Error::InvalidData);
     }
 
     Ok(written as usize)
@@ -379,7 +456,7 @@ pub fn decompress_with_options(compressed: &[u8], options: &DecompressOptions) -
     };
 
     if written != size {
-        return Err(Error::DecompressionFailed("size mismatch"));
+        return Err(Error::InvalidData);
     }
 
     unsafe { output.set_len(written); }
@@ -409,7 +486,11 @@ unsafe fn impl_decompress(
     };
 
     if written < 0 {
-        return Err(Error::DecompressionFailed("invalid data or buffer too small"));
+        return Err(error_from_code(written));
+    }
+
+    if written == 0 && !compressed.is_empty() {
+        return Err(Error::InvalidData);
     }
 
     Ok(written as usize)
@@ -530,6 +611,10 @@ pub enum StreamError {
     /// I/O error during file operations
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+
+    /// Error from buffer operations
+    #[error("buffer error: {0}")]
+    BufferError(#[from] Error),
 
     /// Streaming compression failed
     #[error("stream compression failed")]
@@ -747,7 +832,7 @@ pub fn compress_file<P: AsRef<Path>>(
         libc::fclose(c_out);
 
         if result < 0 {
-            Err(StreamError::CompressionFailed)
+            Err(StreamError::BufferError(error_from_code(result)))
         } else {
             Ok(result as u64)
         }
@@ -805,7 +890,7 @@ pub fn decompress_file<P: AsRef<Path>>(
         libc::fclose(c_out);
 
         if result < 0 {
-            Err(StreamError::DecompressionFailed)
+            Err(StreamError::BufferError(error_from_code(result)))
         } else {
             Ok(result as u64)
         }
@@ -927,6 +1012,46 @@ mod tests {
         let garbage = b"not valid zxc data";
         let result = decompress(garbage);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_specific_error_codes() {
+        // Test invalid magic - size detection should fail first and return InvalidData
+        let invalid_magic = b"INVALID_DATA_NOT_ZXC";
+        let result = decompress(invalid_magic);
+        assert!(result.is_err(), "Should fail on invalid data");
+
+        // Test truncated data - should produce specific error
+        let data = b"Hello, world! Testing error codes with enough data to compress well.";
+        let compressed = compress(data, Level::Default, None).unwrap();
+        let truncated = &compressed[..10]; // Too short to be valid
+        match decompress(truncated) {
+            Err(Error::InvalidData) | Err(Error::SrcTooSmall) | Err(Error::BadHeader) | Err(Error::BadMagic) => {
+                // Any of these errors are acceptable for truncated data
+            }
+            other => panic!("Expected specific error for truncated data, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_error_messages() {
+        // Verify error messages are descriptive
+        let errors = vec![
+            (Error::Memory, "memory allocation failed"),
+            (Error::BadChecksum, "checksum verification failed"),
+            (Error::CorruptData, "corrupted compressed data"),
+            (Error::DstTooSmall, "destination buffer too small"),
+        ];
+
+        for (error, expected_msg) in errors {
+            let msg = error.to_string();
+            assert!(
+                msg.contains(expected_msg),
+                "Error message '{}' should contain '{}'",
+                msg,
+                expected_msg
+            );
+        }
     }
 
     #[test]

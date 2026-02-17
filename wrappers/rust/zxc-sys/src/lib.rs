@@ -93,6 +93,52 @@ pub const ZXC_LEVEL_BALANCED: i32 = parse_i32(env!("ZXC_LEVEL_BALANCED"));
 pub const ZXC_LEVEL_COMPACT: i32 = parse_i32(env!("ZXC_LEVEL_COMPACT"));
 
 // =============================================================================
+// Error Codes
+// =============================================================================
+
+/// Success (no error)
+pub const ZXC_OK: i32 = 0;
+
+/// Memory allocation failure
+pub const ZXC_ERROR_MEMORY: i32 = -1;
+
+/// Destination buffer too small
+pub const ZXC_ERROR_DST_TOO_SMALL: i32 = -2;
+
+/// Source buffer too small or truncated input
+pub const ZXC_ERROR_SRC_TOO_SMALL: i32 = -3;
+
+/// Invalid magic word in file header
+pub const ZXC_ERROR_BAD_MAGIC: i32 = -4;
+
+/// Unsupported file format version
+pub const ZXC_ERROR_BAD_VERSION: i32 = -5;
+
+/// Corrupted or invalid header (CRC mismatch)
+pub const ZXC_ERROR_BAD_HEADER: i32 = -6;
+
+/// Block or global checksum verification failed
+pub const ZXC_ERROR_BAD_CHECKSUM: i32 = -7;
+
+/// Corrupted compressed data
+pub const ZXC_ERROR_CORRUPT_DATA: i32 = -8;
+
+/// Invalid match offset during decompression
+pub const ZXC_ERROR_BAD_OFFSET: i32 = -9;
+
+/// Buffer overflow detected during processing
+pub const ZXC_ERROR_OVERFLOW: i32 = -10;
+
+/// Read/write/seek failure on file
+pub const ZXC_ERROR_IO: i32 = -11;
+
+/// Required input pointer is NULL
+pub const ZXC_ERROR_NULL_INPUT: i32 = -12;
+
+/// Unknown or unexpected block type
+pub const ZXC_ERROR_BAD_BLOCK_TYPE: i32 = -13;
+
+// =============================================================================
 // Buffer-Based API
 // =============================================================================
 
@@ -148,6 +194,18 @@ unsafe extern "C" {
     ///
     /// Original uncompressed size in bytes, or 0 if invalid.
     pub fn zxc_get_decompressed_size(src: *const c_void, src_size: usize) -> u64;
+
+    /// Returns a human-readable name for the given error code.
+    ///
+    /// # Arguments
+    ///
+    /// * `code` - An error code from zxc_error_t (or any integer)
+    ///
+    /// # Returns
+    ///
+    /// A constant string such as "ZXC_OK" or "ZXC_ERROR_MEMORY".
+    /// Returns "ZXC_UNKNOWN_ERROR" for unrecognized codes.
+    pub fn zxc_error_name(code: c_int) -> *const std::os::raw::c_char;
 }
 
 // =============================================================================
