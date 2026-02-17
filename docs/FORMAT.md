@@ -1,7 +1,10 @@
 # ZXC Compressed File Format (Technical Specification)
 
+**Date**: February 17, 2026
+**Format Version**: 4
+
 This document describes the on-disk binary format of a ZXC compressed file.
-It is based on `docs/WHITEPAPER.md` and aligned with the current format implementation (`file format version = 4`).
+It is formalizes the current reference implementation of format version **4**.
 
 ## 1. Conventions
 
