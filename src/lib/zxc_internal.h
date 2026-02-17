@@ -303,7 +303,7 @@ extern "C" {
 #define ZXC_FILE_HEADER_SIZE 16
 /** @brief Bit flag in the Flags byte indicating checksum presence (bit 7). */
 #define ZXC_FILE_FLAG_HAS_CHECKSUM 0x80U
-/** @brief Mask for the checksum algorithm id (bits 0–3). */
+/** @brief Mask for the checksum algorithm id (bits 0-3). */
 #define ZXC_FILE_CHECKSUM_ALGO_MASK 0x0FU
 
 /** @brief Block header size: Type(1)+Flags(1)+Reserved(1)+CRC(1)+CompSize(4). */
