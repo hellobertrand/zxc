@@ -13,6 +13,7 @@ LIB_SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.
 for fuzzer in $AVAILABLE_FUZZERS; do
     if [ -z "${FUZZER_TARGET:-}" ] || [ "${FUZZER_TARGET}" == "$fuzzer" ]; then
         $CC $CFLAGS -I include \
+            -I src/lib/vendors \
             -DZXC_FUNCTION_SUFFIX=_default -DZXC_ONLY_DEFAULT \
             $LIB_SOURCES \
             tests/fuzz_${fuzzer}.c \
