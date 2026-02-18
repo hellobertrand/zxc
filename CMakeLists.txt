@@ -80,7 +80,7 @@ macro(zxc_add_variant suffix flags)
         endif()
     endif()
     # Inherit include directories
-    target_include_directories(zxc_compress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_include_directories(zxc_compress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib ${CMAKE_CURRENT_SOURCE_DIR}/src/lib/vendors PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
     add_library(zxc_decompress${suffix} OBJECT src/lib/zxc_decompress.c)
     target_compile_options(zxc_decompress${suffix} PRIVATE ${flags})
@@ -97,7 +97,7 @@ macro(zxc_add_variant suffix flags)
             target_compile_options(zxc_decompress${suffix} PRIVATE -fvisibility=hidden)
         endif()
     endif()
-    target_include_directories(zxc_decompress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_include_directories(zxc_decompress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib ${CMAKE_CURRENT_SOURCE_DIR}/src/lib/vendors PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     
     list(APPEND ZXC_VARIANT_OBJECTS $<TARGET_OBJECTS:zxc_compress${suffix}> $<TARGET_OBJECTS:zxc_decompress${suffix}>)
 endmacro()
@@ -158,6 +158,7 @@ target_include_directories(zxc_lib
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/lib/vendors
 )
 
 # Symbol visibility for shared libraries
@@ -247,6 +248,7 @@ target_link_libraries(zxc_lib PRIVATE Threads::Threads)
 if(ZXC_BUILD_CLI)
     add_executable(zxc src/cli/main.c)
     target_link_libraries(zxc PRIVATE zxc_lib)
+    target_include_directories(zxc PRIVATE src/lib/vendors)
     
     # Math library on Unix
     if(UNIX)
@@ -339,6 +341,7 @@ if(ZXC_BUILD_TESTS)
                 $<INSTALL_INTERFACE:include>
             PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/lib/vendors
         )
         
         # Apply same compiler settings as main library
@@ -379,7 +382,7 @@ if(ZXC_BUILD_TESTS)
         endif()
     endif()
     
-    target_include_directories(zxc_test PRIVATE src/lib)
+    target_include_directories(zxc_test PRIVATE src/lib src/lib/vendors)
     add_test(NAME UnitTests COMMAND zxc_test)
 endif()
 

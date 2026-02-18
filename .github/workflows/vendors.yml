@@ -19,7 +19,7 @@ jobs:
 
       - name: Download latest rapidhash.h
         run: |
-          curl -o include/rapidhash.h https://raw.githubusercontent.com/Nicoshev/rapidhash/refs/heads/master/rapidhash.h
+          curl -o src/lib/vendors/rapidhash.h https://raw.githubusercontent.com/Nicoshev/rapidhash/refs/heads/master/rapidhash.h
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v8
