@@ -1461,7 +1461,13 @@ int test_stream_engine_errors() {
         const long comp_file_sz = ftell(f_comp_out);
         uint8_t* comp_data = malloc(comp_file_sz);
         fseek(f_comp_out, 0, SEEK_SET);
-        fread(comp_data, 1, comp_file_sz, f_comp_out);
+        if (fread(comp_data, 1, comp_file_sz, f_comp_out) != (size_t)comp_file_sz) {
+            printf("  [FAIL] fread failed\n");
+            fclose(f_comp_out);
+            free(comp_data);
+            free(src);
+            return 0;
+        }
         fclose(f_comp_out);
 
         // Corrupt the stored source size in footer (last 12 bytes: [src_size(8)] + [hash(4)])
@@ -1509,7 +1515,13 @@ int test_stream_engine_errors() {
         const long comp_file_sz = ftell(f_comp_out);
         uint8_t* comp_data = malloc(comp_file_sz);
         fseek(f_comp_out, 0, SEEK_SET);
-        fread(comp_data, 1, comp_file_sz, f_comp_out);
+        if (fread(comp_data, 1, comp_file_sz, f_comp_out) != (size_t)comp_file_sz) {
+            printf("  [FAIL] fread failed\n");
+            fclose(f_comp_out);
+            free(comp_data);
+            free(src);
+            return 0;
+        }
         fclose(f_comp_out);
 
         // Corrupt the global checksum (last 4 bytes)
@@ -1558,7 +1570,12 @@ int test_stream_engine_errors() {
         const long trunc_sz = comp_file_sz - (ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE);
         uint8_t* comp_data = malloc(trunc_sz);
         fseek(f_comp_out, 0, SEEK_SET);
-        fread(comp_data, 1, trunc_sz, f_comp_out);
+        if (fread(comp_data, 1, trunc_sz, f_comp_out) != (size_t)trunc_sz) {
+            printf("  [FAIL] fread failed\n");
+            fclose(f_comp_out);
+            free(comp_data);
+            return 0;
+        }
         fclose(f_comp_out);
 
         FILE* f_corrupt = tmpfile();
