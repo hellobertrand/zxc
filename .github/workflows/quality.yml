@@ -43,7 +43,7 @@ jobs:
         run: |
           cppcheck --project=build_x86/compile_commands.json \
             --enable=all \
-            --suppress=missingIncludeSystem --suppress=*:include/rapidhash.h \
+            --suppress=missingIncludeSystem --suppress=*:src/lib/vendors/rapidhash.h \
             --check-level=exhaustive \
             --inline-suppr \
             --error-exitcode=1 \
@@ -53,7 +53,7 @@ jobs:
         run: |
           cppcheck --project=build_arm/compile_commands.json \
             --enable=all \
-            --suppress=missingIncludeSystem --suppress=*:include/rapidhash.h \
+            --suppress=missingIncludeSystem --suppress=*:src/lib/vendors/rapidhash.h \
             --check-level=exhaustive \
             --inline-suppr \
             --error-exitcode=1 \

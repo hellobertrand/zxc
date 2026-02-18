@@ -15,9 +15,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../include/rapidhash.h"
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_sans_io.h"
+#include "rapidhash.h"
 
 #ifdef __cplusplus
 extern "C" {
