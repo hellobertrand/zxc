@@ -37,16 +37,17 @@ jobs:
 
       - name: Clone LZbench
         run: |
-          git clone https://github.com/inikep/lzbench "${LZBENCH_DIR}"
+          # git clone https://github.com/inikep/lzbench "${LZBENCH_DIR}"
+          git clone -b zxc-0.7.3 https://github.com/hellobertrand/lzbench "${LZBENCH_DIR}"
 
       - name: Copy Lib ZXC
         run: |
           mkdir -p ${LZBENCH_DIR}/lz/zxc/include/
           mkdir -p ${LZBENCH_DIR}/lz/zxc/src/lib/
 
-          cp include/* ${LZBENCH_DIR}/lz/zxc/include/
-          cp src/lib/* ${LZBENCH_DIR}/lz/zxc/src/lib/
-  
+          cp -r include ${LZBENCH_DIR}/lz/zxc/
+          cp -r src/lib ${LZBENCH_DIR}/lz/zxc/src/
+
       - name: Build Lzbench
         working-directory: ${{ env.LZBENCH_DIR }}
         run: |

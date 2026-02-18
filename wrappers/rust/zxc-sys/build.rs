@@ -159,6 +159,7 @@ fn main() {
     core_build
         .include(&include_dir)
         .include(&src_lib)
+        .include(src_lib.join("vendors"))
         .file(src_lib.join("zxc_common.c"))
         .file(src_lib.join("zxc_driver.c"))
         .file(src_lib.join("zxc_dispatch.c"))
@@ -175,6 +176,7 @@ fn main() {
     default_compress
         .include(&include_dir)
         .include(&src_lib)
+        .include(src_lib.join("vendors"))
         .file(src_lib.join("zxc_compress.c"))
         .define("ZXC_FUNCTION_SUFFIX", "_default")
         .opt_level(3)
@@ -184,6 +186,7 @@ fn main() {
     default_decompress
         .include(&include_dir)
         .include(&src_lib)
+        .include(src_lib.join("vendors"))
         .file(src_lib.join("zxc_decompress.c"))
         .define("ZXC_FUNCTION_SUFFIX", "_default")
         .opt_level(3)
@@ -210,6 +213,7 @@ fn main() {
         neon_compress
             .include(&include_dir)
             .include(&src_lib)
+            .include(src_lib.join("vendors"))
             .file(src_lib.join("zxc_compress.c"))
             .define("ZXC_FUNCTION_SUFFIX", "_neon")
             .flag_if_supported("-march=armv8-a+simd")
@@ -220,6 +224,7 @@ fn main() {
         neon_decompress
             .include(&include_dir)
             .include(&src_lib)
+            .include(src_lib.join("vendors"))
             .file(src_lib.join("zxc_decompress.c"))
             .define("ZXC_FUNCTION_SUFFIX", "_neon")
             .flag_if_supported("-march=armv8-a+simd")
@@ -234,6 +239,7 @@ fn main() {
         avx2_compress
             .include(&include_dir)
             .include(&src_lib)
+            .include(src_lib.join("vendors"))
             .file(src_lib.join("zxc_compress.c"))
             .define("ZXC_FUNCTION_SUFFIX", "_avx2")
             .flag_if_supported("-mavx2")
@@ -246,6 +252,7 @@ fn main() {
         avx2_decompress
             .include(&include_dir)
             .include(&src_lib)
+            .include(src_lib.join("vendors"))
             .file(src_lib.join("zxc_decompress.c"))
             .define("ZXC_FUNCTION_SUFFIX", "_avx2")
             .flag_if_supported("-mavx2")
@@ -262,6 +269,7 @@ fn main() {
         avx512_compress
             .include(&include_dir)
             .include(&src_lib)
+            .include(src_lib.join("vendors"))
             .file(src_lib.join("zxc_compress.c"))
             .define("ZXC_FUNCTION_SUFFIX", "_avx512")
             .flag_if_supported("-mavx512f")
@@ -274,6 +282,7 @@ fn main() {
         avx512_decompress
             .include(&include_dir)
             .include(&src_lib)
+            .include(src_lib.join("vendors"))
             .file(src_lib.join("zxc_decompress.c"))
             .define("ZXC_FUNCTION_SUFFIX", "_avx512")
             .flag_if_supported("-mavx512f")
