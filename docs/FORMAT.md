@@ -219,6 +219,8 @@ Section order:
   - `LL` and `ML` are 4-bit fields.
 - **Offsets stream**:
   - `n_sequences × 1` byte if `enc_off=1`, else `n_sequences × 2` bytes LE.
+  - Values are **biased**: stored value = `actual_offset - 1`. Decoder adds `+ 1`.
+  - This makes `offset == 0` impossible by construction (minimum decoded offset = 1).
 - **Extras stream**:
   - Prefix-varint overflow values for token saturations:
     - if `LL == 15`, read varint and add to LL
@@ -270,7 +272,7 @@ Each descriptor uses the same packed size encoding as GLO (`u64`: comp32|raw32).
 ```text
 Bits 31..24 : LL (literal length, 8 bits)
 Bits 23..16 : ML (match length minus 5, 8 bits)
-Bits 15..0  : Offset (16 bits)
+Bits 15..0  : Offset - 1 (16 bits, biased; decode: stored + 1)
 ```
 
 Memory order (little-endian word):
