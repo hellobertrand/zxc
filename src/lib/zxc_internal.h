@@ -312,6 +312,8 @@ extern "C" {
 #define ZXC_BLOCK_CHECKSUM_SIZE 4
 /** @brief Binary size of a NUM block sub-header. */
 #define ZXC_NUM_HEADER_BINARY_SIZE 16
+/** @brief Binary size of a NUM chunk sub-frame header (nvals + bits + base + psize). */
+#define ZXC_NUM_CHUNK_HEADER_SIZE 16
 /** @brief Binary size of a GLO block sub-header. */
 #define ZXC_GLO_HEADER_BINARY_SIZE 16
 /** @brief Binary size of a GHI block sub-header. */

@@ -629,15 +629,15 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
         uint8_t bits = zxc_highbit32(max_d);
         size_t packed = ((frames * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
-        if (UNLIKELY(rem < 16 + packed)) return ZXC_ERROR_DST_TOO_SMALL;
+        if (UNLIKELY(rem < ZXC_NUM_CHUNK_HEADER_SIZE + packed)) return ZXC_ERROR_DST_TOO_SMALL;
 
         zxc_store_le16(p_curr, (uint16_t)frames);
         zxc_store_le16(p_curr + 2, bits);
         zxc_store_le64(p_curr + 4, (uint64_t)base);
         zxc_store_le32(p_curr + 12, (uint32_t)packed);
 
-        p_curr += 16;
-        rem -= 16;
+        p_curr += ZXC_NUM_CHUNK_HEADER_SIZE;
+        rem -= ZXC_NUM_CHUNK_HEADER_SIZE;
 
         int pb = zxc_bitpack_stream_32(deltas, frames, p_curr, rem, bits);
         if (UNLIKELY(pb < 0)) return pb;
