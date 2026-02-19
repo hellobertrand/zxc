@@ -365,12 +365,13 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 
     while (vals_remaining > 0) {
         if (UNLIKELY(offset + 16 > src_size)) return ZXC_ERROR_SRC_TOO_SMALL;
+
         uint16_t nvals = zxc_le16(src + offset + 0);
         uint16_t bits = zxc_le16(src + offset + 2);
         uint32_t psize = zxc_le32(src + offset + 12);
         offset += 16;
 
-        if (UNLIKELY(src_size < offset + psize ||
+        if (UNLIKELY(nvals > vals_remaining || src_size < offset + psize ||
                      (size_t)(d_end - d_ptr) < (size_t)nvals * sizeof(uint32_t) ||
                      bits > (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)))
             return ZXC_ERROR_CORRUPT_DATA;
@@ -473,7 +474,6 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
         }
 
         offset += psize;
-        if (UNLIKELY(nvals > vals_remaining)) return ZXC_ERROR_CORRUPT_DATA;
         vals_remaining -= nvals;
     }
     return (int)(d_ptr - dst);
