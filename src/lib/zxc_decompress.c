@@ -1161,6 +1161,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     // Validate streams don't overflow source buffer
     if (UNLIKELY(extras_end != src + src_size)) return ZXC_ERROR_CORRUPT_DATA;
 
+
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
     const uint8_t* const d_end_safe = d_end - (ZXC_PAD_SIZE * 4);  // 128
@@ -1551,7 +1552,8 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         d_ptr += ll;
 
         const uint8_t* match_src = d_ptr - offset;
-        if (UNLIKELY(match_src < dst || d_ptr + ml > d_end)) return ZXC_ERROR_BAD_OFFSET;
+        if (UNLIKELY(match_src < dst || d_ptr + ml > d_end))
+            return ZXC_ERROR_BAD_OFFSET;
 
         if (offset < ml) {
             for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
