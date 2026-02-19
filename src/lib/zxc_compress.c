@@ -1389,13 +1389,13 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
  * @return int Returns 1 if the array is numeric, 0 otherwise.
  */
 static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
-    if (UNLIKELY(size % 4 != 0 || size < 16)) return 0;
+    if (UNLIKELY(size % sizeof(uint32_t) != 0 || size < (4 * sizeof(uint32_t)))) return 0;
 
-    size_t count = size / 4;
-    if (count > 128) count = 128;  // Sample more values for accuracy
+    size_t count = size / sizeof(uint32_t);
+    count = count < 128 ? count : 128;  // Sample more values for accuracy
 
     uint32_t prev = zxc_le32(src);
-    const uint8_t* p = src + 4;
+    const uint8_t* p = src + sizeof(uint32_t);
 
     uint32_t max_zigzag = 0;
     uint32_t small_count = 0;   // Deltas < 256 (8 bits)
@@ -1406,16 +1406,12 @@ static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
         const int32_t diff = (int32_t)(curr - prev);
         const uint32_t zigzag = zxc_zigzag_encode(diff);
 
-        if (zigzag > max_zigzag) max_zigzag = zigzag;
-
-        if (zigzag < 256) {
-            small_count++;
-        } else if (zigzag < 65536) {
-            medium_count++;
-        }
+        max_zigzag = zigzag > max_zigzag ? zigzag : max_zigzag;
+        small_count  += (uint32_t)(zigzag < 256);
+        medium_count += (uint32_t)(zigzag >= 256) & (uint32_t)(zigzag < 65536);
 
         prev = curr;
-        p += 4;
+        p += sizeof(uint32_t);
     }
 
     // Calculate bit width needed for max delta
@@ -1442,13 +1438,12 @@ static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
     size_t w = 0;
-    int res = -1;
-    int try_num = 0;
+    int res = ZXC_OK;
+    int try_num = UNLIKELY(zxc_probe_is_numeric(chunk, src_sz));
 
-    if (UNLIKELY(zxc_probe_is_numeric(chunk, src_sz))) try_num = 1;
     if (UNLIKELY(try_num)) {
         res = zxc_encode_block_num(ctx, chunk, src_sz, dst, dst_cap, &w);
-        if (res != 0 || w > (src_sz - (src_sz >> 2)))  // w > 75% of src_sz
+        if (res != ZXC_OK || w > (src_sz - (src_sz >> 2)))  // w > 75% of src_sz
             try_num = 0;  // NUM didn't compress well, try GLO/GHI instead
     }
 
@@ -1460,9 +1455,9 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     }
 
     // Check expansion. W contains Header + Payload.
-    if (UNLIKELY(res != 0 || w >= src_sz)) {
+    if (UNLIKELY(res != ZXC_OK || w >= src_sz)) {
         res = zxc_encode_block_raw(chunk, src_sz, dst, dst_cap, &w);
-        if (UNLIKELY(res != 0)) return res;
+        if (UNLIKELY(res != ZXC_OK)) return res;
     }
 
     if (ctx->checksum_enabled) {
