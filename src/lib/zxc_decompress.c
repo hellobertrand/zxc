@@ -1604,7 +1604,7 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
         if (UNLIKELY(stored != calc)) return ZXC_ERROR_BAD_CHECKSUM;
     }
 
-    int decoded_sz = -1;
+    int decoded_sz = ZXC_ERROR_BAD_BLOCK_TYPE;
 
     switch (type) {
         case ZXC_BLOCK_GLO:
