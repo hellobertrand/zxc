@@ -233,16 +233,21 @@ static int zxc_validate_output_path(const char* path, char* resolved_buffer, siz
     return 0;
 #else
     // POSIX output path validation
-    char temp_path[4096];
-    strncpy(temp_path, path, sizeof(temp_path) - 1);
-    temp_path[sizeof(temp_path) - 1] = '\0';
+    // Reject paths that would be truncated by our fixed-size buffers
+    const size_t path_len = strlen(path);
+    if (path_len >= PATH_MAX) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+
+    char temp_path[PATH_MAX];
+    memcpy(temp_path, path, path_len + 1);
 
     // Split into dir and base
     char* dir = dirname(temp_path);  // Note: dirname may modify string or return static
     // We need another copy for basename as dirname might modify
-    char temp_path2[4096];
-    strncpy(temp_path2, path, sizeof(temp_path2) - 1);
-    temp_path2[sizeof(temp_path2) - 1] = '\0';
+    char temp_path2[PATH_MAX];
+    memcpy(temp_path2, path, path_len + 1);
     const char* base = basename(temp_path2);
 
     char resolved_dir[PATH_MAX];
@@ -953,20 +958,33 @@ int main(int argc, char** argv) {
         use_stdout = 0;
         f_out = NULL;
     } else if (!use_stdin && optind < argc) {
-        strncpy(out_path, argv[optind], 1023);
+        const int n = snprintf(out_path, sizeof(out_path), "%s", argv[optind]);
+        if (n < 0 || (size_t)n >= sizeof(out_path)) {
+            zxc_log("Error: Output path too long\n");
+            if (f_in) fclose(f_in);
+            return 1;
+        }
         use_stdout = 0;
     } else if (to_stdout) {
         use_stdout = 1;
     } else if (!use_stdin) {
         // Auto-generate output filename if input is a file and no output specified
         if (mode == MODE_COMPRESS)
-            snprintf(out_path, 1024, "%s.xc", in_path);
+            snprintf(out_path, sizeof(out_path), "%s.xc", in_path);
         else {
-            size_t len = strlen(in_path);
-            if (len > 3 && !strcmp(in_path + len - 3, ".xc"))
-                strncpy(out_path, in_path, len - 3);
-            else
-                snprintf(out_path, 1024, "%s", in_path);
+            const size_t len = strlen(in_path);
+            if (len > 3 && !strcmp(in_path + len - 3, ".xc")) {
+                const size_t base_len = len - 3;
+                if (base_len >= sizeof(out_path)) {
+                    zxc_log("Error: Output path too long\n");
+                    if (f_in) fclose(f_in);
+                    return 1;
+                }
+                memcpy(out_path, in_path, base_len);
+                out_path[base_len] = '\0';
+            } else {
+                snprintf(out_path, sizeof(out_path), "%s", in_path);
+            }
         }
         use_stdout = 0;
     }
