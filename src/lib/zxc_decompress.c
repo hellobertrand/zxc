@@ -364,12 +364,13 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
     uint32_t deltas[ZXC_DEC_BATCH];
 
     while (vals_remaining > 0) {
-        if (UNLIKELY(offset + 16 > src_size)) return ZXC_ERROR_SRC_TOO_SMALL;
+        if (UNLIKELY(offset + ZXC_NUM_CHUNK_HEADER_SIZE > src_size))
+            return ZXC_ERROR_SRC_TOO_SMALL;
 
-        uint16_t nvals = zxc_le16(src + offset + 0);
+        uint16_t nvals = zxc_le16(src + offset);
         uint16_t bits = zxc_le16(src + offset + 2);
-        uint32_t psize = zxc_le32(src + offset + 12);
-        offset += 16;
+        uint32_t psize = zxc_le32(src + offset + 12);  // padding + nvals + bits
+        offset += ZXC_NUM_CHUNK_HEADER_SIZE;
 
         if (UNLIKELY(nvals > vals_remaining || src_size < offset + psize ||
                      (size_t)(d_end - d_ptr) < (size_t)nvals * sizeof(uint32_t) ||
