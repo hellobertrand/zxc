@@ -821,10 +821,6 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             off4 = (uint32_t)((offsets >> 48) & 0xFFFF);
         }
 
-        // Reject zero offsets
-        if (UNLIKELY((off1 == 0) | (off2 == 0) | (off3 == 0) | (off4 == 0)))
-            return ZXC_ERROR_BAD_OFFSET;
-
         uint32_t ll1 = (tokens & 0x0F0) >> 4;
         uint32_t ml1 = (tokens & 0x00F);
         if (UNLIKELY(ll1 == ZXC_TOKEN_LL_MASK)) {
@@ -1043,7 +1039,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         {
             // Skip check if written >= bounds_threshold (256 for 8-bit, 65536 for 16-bit)
-            if (UNLIKELY(written < bounds_threshold && (offset == 0 || offset > written)))
+            if (UNLIKELY(written < bounds_threshold && (offset - 1U) >= written))
                 return ZXC_ERROR_BAD_OFFSET;
 
             const uint8_t* match_src = d_ptr - offset;
@@ -1165,6 +1161,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     // Validate streams don't overflow source buffer
     if (UNLIKELY(extras_end != src + src_size)) return ZXC_ERROR_CORRUPT_DATA;
+
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
@@ -1361,10 +1358,9 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             d_ptr += ll;
             written += ll;
 
-            if (UNLIKELY(offset == 0 || offset > written)) return ZXC_ERROR_BAD_OFFSET;
+            if (UNLIKELY((offset - 1U) >= written || d_ptr + ml > d_end))
+                return ZXC_ERROR_BAD_OFFSET;
             const uint8_t* match_src = d_ptr - offset;
-            if (UNLIKELY(match_src < dst || d_ptr + ml > d_end))
-                return ZXC_ERROR_BAD_OFFSET;  // Bounds check
 
             if (offset < ml) {
                 for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
@@ -1375,7 +1371,6 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             written += ml;
         } else {
             // Safe to process with wild copies
-            if (UNLIKELY(offset == 0)) return ZXC_ERROR_BAD_OFFSET;
             DECODE_SEQ_SAFE(ll, ml, offset);
         }
         n_seq--;
@@ -1506,7 +1501,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         {
             // Skip check if written >= bounds_threshold (256 for 8-bit, 65536 for 16-bit)
-            if (UNLIKELY(written < bounds_threshold && (offset == 0 || offset > written)))
+            if (UNLIKELY(written < bounds_threshold && (offset - 1U) >= written))
                 return ZXC_ERROR_BAD_OFFSET;
 
             const uint8_t* match_src = d_ptr - offset;
@@ -1558,7 +1553,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         d_ptr += ll;
 
         const uint8_t* match_src = d_ptr - offset;
-        if (UNLIKELY(offset == 0 || match_src < dst || d_ptr + ml > d_end))
+        if (UNLIKELY(match_src < dst || d_ptr + ml > d_end))
             return ZXC_ERROR_BAD_OFFSET;
 
         if (offset < ml) {
