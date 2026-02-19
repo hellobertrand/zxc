@@ -455,7 +455,6 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
         }
 
         offset += psize;
-        if (UNLIKELY(nvals > vals_remaining)) return ZXC_ERROR_CORRUPT_DATA;
         vals_remaining -= nvals;
     }
     return (int)(d_ptr - dst);
