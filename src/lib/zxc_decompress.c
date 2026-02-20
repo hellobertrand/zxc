@@ -419,7 +419,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
                 running_val = ((uint32_t*)&batch_dst[k])[7];  // Update running_val
             }
 
-#elif defined(ZXC_USE_NEON64)
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
             uint32x4_t v_run = vdupq_n_u32(running_val);  // Broadcast running total
             for (int k = 0; k < ZXC_DEC_BATCH; k += 4) {
                 uint32x4_t v_deltas = vld1q_u32(&deltas[k]);  // Load 4 deltas
@@ -431,20 +431,6 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 
                 running_val = vgetq_lane_u32(v_sum, 3);  // Extract last element
                 v_run = vdupq_n_u32(running_val);        // Update vector for next iter
-            }
-
-#elif defined(ZXC_USE_NEON32)
-            uint32x4_t v_run = vdupq_n_u32(running_val);
-            for (int k = 0; k < ZXC_DEC_BATCH; k += 4) {
-                uint32x4_t v_deltas = vld1q_u32(&deltas[k]);
-
-                uint32x4_t v_sum = zxc_neon_prefix_sum_u32(v_deltas);
-                v_sum = vaddq_u32(v_sum, v_run);
-
-                vst1q_u32(&batch_dst[k], v_sum);
-
-                running_val = vgetq_lane_u32(v_sum, 3);
-                v_run = vdupq_n_u32(running_val);
             }
 
 #else
