@@ -395,6 +395,8 @@ extern "C" {
 #define ZXC_LZ_WINDOW_SIZE (1U << 16)
 /** @brief Minimum match length for an LZ77 match. */
 #define ZXC_LZ_MIN_MATCH_LEN 5
+/** @brief Base bias added to encoded offsets (stored = actual - bias). */
+#define ZXC_LZ_OFFSET_BIAS 1
 /** @brief Maximum allowed offset distance. */
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
 /**

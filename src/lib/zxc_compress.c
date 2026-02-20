@@ -746,8 +746,9 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             const uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
             const uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
             buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
-            buf_offsets[seq_c] = (uint16_t)(off - 1);
-            if ((off - 1) > max_offset) max_offset = (uint16_t)(off - 1);
+            buf_offsets[seq_c] = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
+            if ((off - ZXC_LZ_OFFSET_BIAS) > max_offset)
+                max_offset = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
 
             if (ll >= ZXC_TOKEN_LL_MASK) {
                 extras_sz += zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
@@ -1236,8 +1237,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             const uint32_t ml_write = (ml >= ZXC_SEQ_ML_MASK) ? 255U : ml;
             const uint32_t seq_val = (ll_write << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
                                      (ml_write << ZXC_SEQ_OFF_BITS) |
-                                     ((off - 1) & ZXC_SEQ_OFF_MASK);
-            if ((off - 1) > max_offset) max_offset = (uint16_t)(off - 1);
+                                     ((off - ZXC_LZ_OFFSET_BIAS) & ZXC_SEQ_OFF_MASK);
+            if ((off - ZXC_LZ_OFFSET_BIAS) > max_offset)
+                max_offset = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
             buf_sequences[seq_c] = seq_val;
             seq_c++;
 
