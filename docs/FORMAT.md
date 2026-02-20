@@ -1,7 +1,7 @@
 # ZXC Compressed File Format (Technical Specification)
 
-**Date**: February 17, 2026
-**Format Version**: 4
+**Date**: February 20, 2026
+**Format Version**: 5
 
 This document describes the on-disk binary format of a ZXC compressed file.
 It is formalizes the current reference implementation of format version **4**.
@@ -52,7 +52,7 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): currently `4`.
+- **Format Version** (`u8`): currently `5`.
 - **Chunk Size Code** (`u8`):
   - `0` means default legacy value = 64 units.
   - otherwise actual chunk size = `code * 4096` bytes.
