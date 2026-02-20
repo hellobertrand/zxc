@@ -188,7 +188,8 @@ static const ZXC_ALIGN(16) uint8_t zxc_overlap_masks[16][16] = {
  */
 // codeql[cpp/unused-static-function] : False positive, used in DECODE_SEQ_SAFE/FAST macros
 static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
-    // off is always >= 1 by design (offset bias encoding: stored + 1)
+    // off is always >= ZXC_LZ_OFFSET_BIAS by design (offset bias encoding: stored +
+    // ZXC_LZ_OFFSET_BIAS)
 #if defined(ZXC_USE_NEON64)
     uint8x16_t mask = vld1q_u8(zxc_overlap_masks[off]);
     uint8x16_t src_data = vld1q_u8(dst - off);
@@ -803,18 +804,18 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             // Read 4 x 1-byte offsets
             uint32_t offsets = zxc_le32(o_ptr);
             o_ptr += 4;
-            off1 = (offsets & 0xFF) + 1;
-            off2 = ((offsets >> 8) & 0xFF) + 1;
-            off3 = ((offsets >> 16) & 0xFF) + 1;
-            off4 = ((offsets >> 24) & 0xFF) + 1;
+            off1 = (offsets & 0xFF) + ZXC_LZ_OFFSET_BIAS;
+            off2 = ((offsets >> 8) & 0xFF) + ZXC_LZ_OFFSET_BIAS;
+            off3 = ((offsets >> 16) & 0xFF) + ZXC_LZ_OFFSET_BIAS;
+            off4 = ((offsets >> 24) & 0xFF) + ZXC_LZ_OFFSET_BIAS;
         } else {
             // Read 4 x 2-byte offsets
             uint64_t offsets = zxc_le64(o_ptr);
             o_ptr += 8;
-            off1 = (uint32_t)(offsets & 0xFFFF) + 1;
-            off2 = (uint32_t)((offsets >> 16) & 0xFFFF) + 1;
-            off3 = (uint32_t)((offsets >> 32) & 0xFFFF) + 1;
-            off4 = (uint32_t)((offsets >> 48) & 0xFFFF) + 1;
+            off1 = (uint32_t)(offsets & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+            off2 = (uint32_t)((offsets >> 16) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+            off3 = (uint32_t)((offsets >> 32) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+            off4 = (uint32_t)((offsets >> 48) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
         }
 
         uint32_t ll1 = (tokens & 0x0F0) >> 4;
@@ -890,18 +891,18 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             // Read 4 x 1-byte offsets
             uint32_t offsets = zxc_le32(o_ptr);
             o_ptr += 4;
-            off1 = (offsets & 0xFF) + 1;
-            off2 = ((offsets >> 8) & 0xFF) + 1;
-            off3 = ((offsets >> 16) & 0xFF) + 1;
-            off4 = ((offsets >> 24) & 0xFF) + 1;
+            off1 = (offsets & 0xFF) + ZXC_LZ_OFFSET_BIAS;
+            off2 = ((offsets >> 8) & 0xFF) + ZXC_LZ_OFFSET_BIAS;
+            off3 = ((offsets >> 16) & 0xFF) + ZXC_LZ_OFFSET_BIAS;
+            off4 = ((offsets >> 24) & 0xFF) + ZXC_LZ_OFFSET_BIAS;
         } else {
             // Read 4 x 2-byte offsets
             uint64_t offsets = zxc_le64(o_ptr);
             o_ptr += 8;
-            off1 = (uint32_t)(offsets & 0xFFFF) + 1;
-            off2 = (uint32_t)((offsets >> 16) & 0xFFFF) + 1;
-            off3 = (uint32_t)((offsets >> 32) & 0xFFFF) + 1;
-            off4 = (uint32_t)((offsets >> 48) & 0xFFFF) + 1;
+            off1 = (uint32_t)(offsets & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+            off2 = (uint32_t)((offsets >> 16) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+            off3 = (uint32_t)((offsets >> 32) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+            off4 = (uint32_t)((offsets >> 48) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
         }
 
         uint32_t ll1 = (tokens & 0x0F0) >> 4;
@@ -990,7 +991,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             offset = ((uint32_t)o_ptr[0] | ((uint32_t)o_ptr[1] << 8));  // 2-byte offset (biased)
             o_ptr += 2;
         }
-        offset++;
+        offset += ZXC_LZ_OFFSET_BIAS;
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {
             ll += zxc_read_varint(&e_ptr, e_end);
@@ -1081,7 +1082,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             offset = ((uint32_t)o_ptr[0] | ((uint32_t)o_ptr[1] << 8));  // 2-byte offset (biased)
             o_ptr += 2;
         }
-        offset++;
+        offset += ZXC_LZ_OFFSET_BIAS;
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) ll += zxc_read_varint(&e_ptr, e_end);
         if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) ml += zxc_read_varint(&e_ptr, e_end);
@@ -1344,7 +1345,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_varint(&extras_ptr, extras_end);
 
-        uint32_t offset = (uint32_t)(seq & 0xFFFF) + 1;
+        uint32_t offset = (uint32_t)(seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
 
         // Strict bounds check: sequence must fit, AND wild copies must not overshoot
         if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end)) {
@@ -1391,7 +1392,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             ml1 += zxc_read_varint(&extras_ptr, extras_end);
             if (UNLIKELY(d_ptr + ll1 + ml1 > d_end)) return ZXC_ERROR_OVERFLOW;
         }
-        uint32_t off1 = (uint32_t)(s1 & 0xFFFF) + 1;
+        uint32_t off1 = (uint32_t)(s1 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
         DECODE_SEQ_FAST(ll1, ml1, off1);
 
         uint32_t ll2 = (uint32_t)(s2 >> 24);
@@ -1405,7 +1406,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             ml2 += zxc_read_varint(&extras_ptr, extras_end);
             if (UNLIKELY(d_ptr + ll2 + ml2 > d_end)) return ZXC_ERROR_OVERFLOW;
         }
-        uint32_t off2 = (uint32_t)(s2 & 0xFFFF) + 1;
+        uint32_t off2 = (uint32_t)(s2 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
         DECODE_SEQ_FAST(ll2, ml2, off2);
 
         uint32_t ll3 = (uint32_t)(s3 >> 24);
@@ -1419,7 +1420,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             ml3 += zxc_read_varint(&extras_ptr, extras_end);
             if (UNLIKELY(d_ptr + ll3 + ml3 > d_end)) return ZXC_ERROR_OVERFLOW;
         }
-        uint32_t off3 = (uint32_t)(s3 & 0xFFFF) + 1;
+        uint32_t off3 = (uint32_t)(s3 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
         DECODE_SEQ_FAST(ll3, ml3, off3);
 
         uint32_t ll4 = (uint32_t)(s4 >> 24);
@@ -1433,7 +1434,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             ml4 += zxc_read_varint(&extras_ptr, extras_end);
             if (UNLIKELY(d_ptr + ll4 + ml4 > d_end)) return ZXC_ERROR_OVERFLOW;
         }
-        uint32_t off4 = (uint32_t)(s4 & 0xFFFF) + 1;
+        uint32_t off4 = (uint32_t)(s4 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
         DECODE_SEQ_FAST(ll4, ml4, off4);
 
         n_seq -= 4;
@@ -1472,7 +1473,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             extras_ptr = ext_save;
             break;
         }
-        uint32_t offset = (uint32_t)(seq & 0xFFFF) + 1;
+        uint32_t offset = (uint32_t)(seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
 
         {
             const uint8_t* src_lit = l_ptr;
@@ -1541,7 +1542,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint32_t m_bits = (uint32_t)((seq >> 16) & 0xFF);
         uint32_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_varint(&extras_ptr, extras_end);
-        uint32_t offset = (uint32_t)(seq & 0xFFFF) + 1;
+        uint32_t offset = (uint32_t)(seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
 
         if (UNLIKELY(d_ptr + ll > d_end || l_ptr + ll > l_end)) return ZXC_ERROR_OVERFLOW;
         ZXC_MEMCPY(d_ptr, l_ptr, ll);
