@@ -50,6 +50,36 @@ void gen_num_data(uint8_t* buf, size_t size) {
     }
 }
 
+// Generates numeric sequence with 0 deltas (all identical)
+void gen_num_data_zero(uint8_t* buf, size_t size) {
+    uint32_t* ptr = (uint32_t*)buf;
+    size_t count = size / 4;
+    for (size_t i = 0; i < count; i++) {
+        ptr[i] = 42;
+    }
+}
+
+// Generates numeric data with alternating small deltas (+1, -1)
+void gen_num_data_small(uint8_t* buf, size_t size) {
+    uint32_t* ptr = (uint32_t*)buf;
+    size_t count = size / 4;
+    uint32_t val = 1000;
+    for (size_t i = 0; i < count; i++) {
+        ptr[i] = val;
+        val += (i % 2 == 0) ? 1 : -1;
+    }
+}
+
+// Generates numeric data with very large deltas to maximize bit width
+void gen_num_data_large(uint8_t* buf, size_t size) {
+    uint32_t* ptr = (uint32_t*)buf;
+    size_t count = size / 4;
+    for (size_t i = 0; i < count; i++) {
+        // Alternate between 0 and 0xFFFFFFFF (delta is huge)
+        ptr[i] = (i % 2 == 0) ? 0 : 0xFFFFFFFF;
+    }
+}
+
 void gen_binary_data(uint8_t* buf, size_t size) {
     // Pattern with problematic bytes that could be corrupted in text mode:
     // 0x0A (LF), 0x0D (CR), 0x00 (NULL), 0x1A (EOF/CTRL-Z), 0xFF
@@ -1623,6 +1653,15 @@ int main() {
     gen_num_data(buffer, BUF_SIZE);
     if (!test_round_trip("NUM Block (Integer Sequence)", buffer, BUF_SIZE, 3, 0)) total_failures++;
 
+    gen_num_data_zero(buffer, BUF_SIZE);
+    if (!test_round_trip("NUM Block (Zero Deltas)", buffer, BUF_SIZE, 3, 0)) total_failures++;
+
+    gen_num_data_small(buffer, BUF_SIZE);
+    if (!test_round_trip("NUM Block (Small Deltas)", buffer, BUF_SIZE, 3, 0)) total_failures++;
+
+    gen_num_data_large(buffer, BUF_SIZE);
+    if (!test_round_trip("NUM Block (Large Deltas)", buffer, BUF_SIZE, 3, 0)) total_failures++;
+
     gen_random_data(buffer, 50);
     if (!test_round_trip("Small Input (50 bytes)", buffer, 50, 3, 0)) total_failures++;
     if (!test_round_trip("Empty Input (0 bytes)", buffer, 0, 3, 0)) total_failures++;
@@ -1631,6 +1670,27 @@ int main() {
     gen_random_data(buffer, 1);
     if (!test_round_trip("1-byte Input", buffer, 1, 3, 0)) total_failures++;
     if (!test_round_trip("1-byte Input (with checksum)", buffer, 1, 3, 1)) total_failures++;
+
+    // Large File Case: Cross block boundaries
+    const size_t LARGE_BUF_SIZE = 15 * 1024 * 1024;  // 15 MB
+    uint8_t* large_buffer = malloc(LARGE_BUF_SIZE);
+    if (large_buffer) {
+        gen_lz_data(large_buffer, LARGE_BUF_SIZE);  // Good mix of repetitive data
+        if (!test_round_trip("Large File (15MB Multi-Block)", large_buffer, LARGE_BUF_SIZE, 3, 1)) {
+            total_failures++;
+        }
+
+        // Test NUM block specifically over a large size to stress boundaries
+        gen_num_data(large_buffer, LARGE_BUF_SIZE);
+        if (!test_round_trip("Large File NUM (15MB Multi-Block)", large_buffer, LARGE_BUF_SIZE, 3,
+                             1)) {
+            total_failures++;
+        }
+
+        free(large_buffer);
+    } else {
+        printf("Failed to allocate 15MB buffer for large file test.\n");
+    }
 
     printf("\n--- Test Coverage: Checksum ---\n");
     gen_lz_data(buffer, BUF_SIZE);
