@@ -13,7 +13,13 @@
 **ZXC** is a high-performance, lossless, asymmetric compression library optimized for **Content Delivery** and **Embedded Systems** (Game Assets, Firmware, App Bundles).
 It is designed to be *"Write Once, Read Many"*. Unlike codecs like LZ4, ZXC trades compression speed (build-time) for **maximum decompression throughput** (run-time).
 
-> **Key Result:** ZXC outperforms LZ4 decompression by **>+40% on Apple Silicon**, **>+20% on Cloud ARM (Google Axion)**, and **>+7% on x86_64** with **better compression ratios**, accepting **slower compression speed** as the strategic trade-off.
+## TL;DR
+
+- **What:** A C library for lossless compression, optimized for **maximum decompression speed**.
+- **Key Result:** Up to **>40% faster** decompression than LZ4 on Apple Silicon, **>25% faster** on Google Axion (ARM64), **>5% faster** on x86_64, **all with better compression ratios**.
+- **Use Cases:** Game assets, firmware, app bundles, anything *compressed once, decompressed millions of times*.
+- **Install:** `vcpkg install zxc` · `pip install zxc-compress` · `cargo add zxc-compress`
+- **Quality:** Fuzzed, sanitized, formally tested, thread-safe API. BSD-3-Clause.
 
 > **Verified:** ZXC has been officially merged into the **[lzbench master branch](https://github.com/inikep/lzbench)**. You can now verify these results independently using the industry-standard benchmark suite.
 
@@ -36,7 +42,7 @@ By performing heavy analysis upfront, the encoder produces a layout optimized fo
 ## Benchmarks
 
 To ensure consistent performance, benchmarks are automatically executed on every commit via GitHub Actions.
-We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M1/M2) runners to track compression speed, decompression speed, and ratios.
+We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) runners to track compression speed, decompression speed, and ratios.
 
 *(See the [latest benchmark logs](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml))*
 
