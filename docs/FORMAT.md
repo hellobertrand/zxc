@@ -1,7 +1,7 @@
 # ZXC Compressed File Format (Technical Specification)
 
-**Date**: February 17, 2026
-**Format Version**: 4
+**Date**: February 20, 2026
+**Format Version**: 5
 
 This document describes the on-disk binary format of a ZXC compressed file.
 It is formalizes the current reference implementation of format version **4**.
@@ -52,7 +52,7 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): currently `4`.
+- **Format Version** (`u8`): currently `5`.
 - **Chunk Size Code** (`u8`):
   - `0` means default legacy value = 64 units.
   - otherwise actual chunk size = `code * 4096` bytes.
@@ -219,6 +219,8 @@ Section order:
   - `LL` and `ML` are 4-bit fields.
 - **Offsets stream**:
   - `n_sequences × 1` byte if `enc_off=1`, else `n_sequences × 2` bytes LE.
+  - Values are **biased**: stored value = `actual_offset - 1`. Decoder adds `+ 1`.
+  - This makes `offset == 0` impossible by construction (minimum decoded offset = 1).
 - **Extras stream**:
   - Prefix-varint overflow values for token saturations:
     - if `LL == 15`, read varint and add to LL
@@ -270,7 +272,7 @@ Each descriptor uses the same packed size encoding as GLO (`u64`: comp32|raw32).
 ```text
 Bits 31..24 : LL (literal length, 8 bits)
 Bits 23..16 : ML (match length minus 5, 8 bits)
-Bits 15..0  : Offset (16 bits)
+Bits 15..0  : Offset - 1 (16 bits, biased; decode: stored + 1)
 ```
 
 Memory order (little-endian word):

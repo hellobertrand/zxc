@@ -233,16 +233,21 @@ static int zxc_validate_output_path(const char* path, char* resolved_buffer, siz
     return 0;
 #else
     // POSIX output path validation
-    char temp_path[4096];
-    strncpy(temp_path, path, sizeof(temp_path) - 1);
-    temp_path[sizeof(temp_path) - 1] = '\0';
+    // Reject paths that would be truncated by our fixed-size buffers
+    const size_t path_len = strlen(path);
+    if (path_len >= PATH_MAX) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+
+    char temp_path[PATH_MAX];
+    memcpy(temp_path, path, path_len + 1);
 
     // Split into dir and base
     char* dir = dirname(temp_path);  // Note: dirname may modify string or return static
     // We need another copy for basename as dirname might modify
-    char temp_path2[4096];
-    strncpy(temp_path2, path, sizeof(temp_path2) - 1);
-    temp_path2[sizeof(temp_path2) - 1] = '\0';
+    char temp_path2[PATH_MAX];
+    memcpy(temp_path2, path, path_len + 1);
     const char* base = basename(temp_path2);
 
     char resolved_dir[PATH_MAX];
@@ -303,7 +308,7 @@ void print_help(const char* app) {
         "  -d, --decompress  Decompress FILE (or stdin -> stdout)\n"
         "  -l, --list        List archive information\n"
         "  -t, --test        Test compressed FILE integrity\n"
-        "  -b, --bench       Benchmark in-memory\n\n"
+        "  -b, --bench [N]   Benchmark in-memory (N=seconds, default 5)\n\n"
         "Special Options:\n"
         "  -V, --version     Show version information\n"
         "  -h, --help        Show this help message\n\n"
@@ -573,7 +578,7 @@ int main(int argc, char** argv) {
     int keep_input = 0;
     int force = 0;
     int to_stdout = 0;
-    int iterations = 5;
+    int bench_seconds = 5;
     int checksum = -1;
     int level = 3;
     int json_output = 0;
@@ -614,9 +619,9 @@ int main(int argc, char** argv) {
             case 'b':
                 mode = MODE_BENCHMARK;
                 if (optarg) {
-                    iterations = atoi(optarg);
-                    if (iterations < 1 || iterations > 10000) {
-                        fprintf(stderr, "Error: iterations must be between 1 and 10000\n");
+                    bench_seconds = atoi(optarg);
+                    if (bench_seconds < 1 || bench_seconds > 3600) {
+                        fprintf(stderr, "Error: duration must be between 1 and 3600 seconds\n");
                         return 1;
                     }
                 }
@@ -707,9 +712,9 @@ int main(int argc, char** argv) {
         }
         const char* in_path = argv[optind];
         if (optind + 1 < argc) {
-            iterations = atoi(argv[optind + 1]);
-            if (iterations < 1 || iterations > 10000) {
-                zxc_log("Error: iterations must be between 1 and 10000\n");
+            bench_seconds = atoi(argv[optind + 1]);
+            if (bench_seconds < 1 || bench_seconds > 3600) {
+                zxc_log("Error: duration must be between 1 and 3600 seconds\n");
                 return 1;
             }
         }
@@ -732,9 +737,9 @@ int main(int argc, char** argv) {
         if (!f_in) goto bench_cleanup;
 
         if (fseeko(f_in, 0, SEEK_END) != 0) goto bench_cleanup;
-        long long fsize = ftello(f_in);
+        const long long fsize = ftello(f_in);
         if (fsize <= 0) goto bench_cleanup;
-        size_t in_size = (size_t)fsize;
+        const size_t in_size = (size_t)fsize;
         if (fseeko(f_in, 0, SEEK_SET) != 0) goto bench_cleanup;
 
         ram = malloc(in_size);
@@ -746,8 +751,8 @@ int main(int argc, char** argv) {
         if (!json_output)
             printf(
                 "Input: %s (%zu bytes)\n"
-                "Running %d iterations (Threads: %d)...\n",
-                in_path, in_size, iterations, num_threads);
+                "Running for %d seconds (threads: %d)...\n",
+                in_path, in_size, bench_seconds, num_threads);
 
 #ifdef _WIN32
         if (!json_output) printf("Note: Using tmpfile on Windows (slower than fmemopen).\n");
@@ -761,15 +766,25 @@ int main(int argc, char** argv) {
 #endif
         if (!fm) goto bench_cleanup;
 
-        double t0 = zxc_now();
-        for (int i = 0; i < iterations; i++) {
+        double best_compress = 1e30;
+        int compress_iters = 0;
+        const double compress_deadline = zxc_now() + bench_seconds;
+        const double compress_start = zxc_now();
+        while (zxc_now() < compress_deadline) {
             rewind(fm);
+            double t0 = zxc_now();
             zxc_stream_compress(fm, NULL, num_threads, level, checksum);
+            double dt = zxc_now() - t0;
+            if (dt < best_compress) best_compress = dt;
+            compress_iters++;
+            if (!json_output && !g_quiet)
+                fprintf(stderr, "\rCompressing... %d iters (%.1fs)", compress_iters,
+                        zxc_now() - compress_start);
         }
-        double dt_c = zxc_now() - t0;
+        if (!json_output && !g_quiet) fprintf(stderr, "\r\033[K");
         fclose(fm);
 
-        uint64_t max_c = zxc_compress_bound(in_size);
+        const uint64_t max_c = zxc_compress_bound(in_size);
         c_dat = malloc(max_c);
         if (!c_dat) goto bench_cleanup;
 
@@ -793,7 +808,7 @@ int main(int argc, char** argv) {
         }
 #endif
 
-        int64_t c_sz = zxc_stream_compress(fm_in, fm_out, num_threads, level, checksum);
+        const int64_t c_sz = zxc_stream_compress(fm_in, fm_out, num_threads, level, checksum);
         if (c_sz < 0) {
             fclose(fm_in);
             fclose(fm_out);
@@ -820,17 +835,27 @@ int main(int argc, char** argv) {
         if (!fc) goto bench_cleanup;
 #endif
 
-        t0 = zxc_now();
-        for (int i = 0; i < iterations; i++) {
+        double best_decompress = 1e30;
+        int decompress_iters = 0;
+        const double decompress_deadline = zxc_now() + bench_seconds;
+        const double decompress_start = zxc_now();
+        while (zxc_now() < decompress_deadline) {
             rewind(fc);
+            double t0 = zxc_now();
             zxc_stream_decompress(fc, NULL, num_threads, checksum);
+            double dt = zxc_now() - t0;
+            if (dt < best_decompress) best_decompress = dt;
+            decompress_iters++;
+            if (!json_output && !g_quiet)
+                fprintf(stderr, "\rDecompressing... %d iters (%.1fs)", decompress_iters,
+                        zxc_now() - decompress_start);
         }
-        double dt_d = zxc_now() - t0;
+        if (!json_output && !g_quiet) fprintf(stderr, "\r\033[K");
         fclose(fc);
 
-        double compress_speed_mbps = (double)in_size * iterations / (1024.0 * 1024.0) / dt_c;
-        double decompress_speed_mbps = (double)in_size * iterations / (1024.0 * 1024.0) / dt_d;
-        double ratio = (double)in_size / c_sz;
+        const double compress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_compress;
+        const double decompress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_decompress;
+        const double ratio = (double)in_size / c_sz;
 
         if (json_output)
             printf(
@@ -839,7 +864,9 @@ int main(int argc, char** argv) {
                 "  \"input_size_bytes\": %zu,\n"
                 "  \"compressed_size_bytes\": %lld,\n"
                 "  \"compression_ratio\": %.3f,\n"
-                "  \"iterations\": %d,\n"
+                "  \"duration_seconds\": %d,\n"
+                "  \"compress_iterations\": %d,\n"
+                "  \"decompress_iterations\": %d,\n"
                 "  \"threads\": %d,\n"
                 "  \"level\": %d,\n"
                 "  \"checksum_enabled\": %s,\n"
@@ -848,15 +875,16 @@ int main(int argc, char** argv) {
                 "  \"compress_time_seconds\": %.6f,\n"
                 "  \"decompress_time_seconds\": %.6f\n"
                 "}\n",
-                in_path, in_size, (long long)c_sz, ratio, iterations, num_threads, level,
-                checksum ? "true" : "false", compress_speed_mbps, decompress_speed_mbps, dt_c,
-                dt_d);
+                in_path, in_size, (long long)c_sz, ratio, bench_seconds, compress_iters,
+                decompress_iters, num_threads, level, checksum ? "true" : "false",
+                compress_speed_mbps, decompress_speed_mbps, best_compress, best_decompress);
         else
             printf(
                 "Compressed: %lld bytes (ratio %.3f)\n"
-                "Avg Compress  : %.3f MiB/s\n"
-                "Avg Decompress: %.3f MiB/s\n",
-                (long long)c_sz, ratio, compress_speed_mbps, decompress_speed_mbps);
+                "Compress  : %.3f MB/s (%d iters)\n"
+                "Decompress: %.3f MB/s (%d iters)\n",
+                (long long)c_sz, ratio, compress_speed_mbps, compress_iters, decompress_speed_mbps,
+                decompress_iters);
         ret = 0;
 
     bench_cleanup:
@@ -930,20 +958,33 @@ int main(int argc, char** argv) {
         use_stdout = 0;
         f_out = NULL;
     } else if (!use_stdin && optind < argc) {
-        strncpy(out_path, argv[optind], 1023);
+        const int n = snprintf(out_path, sizeof(out_path), "%s", argv[optind]);
+        if (n < 0 || (size_t)n >= sizeof(out_path)) {
+            zxc_log("Error: Output path too long\n");
+            if (f_in) fclose(f_in);
+            return 1;
+        }
         use_stdout = 0;
     } else if (to_stdout) {
         use_stdout = 1;
     } else if (!use_stdin) {
         // Auto-generate output filename if input is a file and no output specified
         if (mode == MODE_COMPRESS)
-            snprintf(out_path, 1024, "%s.xc", in_path);
+            snprintf(out_path, sizeof(out_path), "%s.xc", in_path);
         else {
-            size_t len = strlen(in_path);
-            if (len > 3 && !strcmp(in_path + len - 3, ".xc"))
-                strncpy(out_path, in_path, len - 3);
-            else
-                snprintf(out_path, 1024, "%s", in_path);
+            const size_t len = strlen(in_path);
+            if (len > 3 && !strcmp(in_path + len - 3, ".xc")) {
+                const size_t base_len = len - 3;
+                if (base_len >= sizeof(out_path)) {
+                    zxc_log("Error: Output path too long\n");
+                    if (f_in) fclose(f_in);
+                    return 1;
+                }
+                memcpy(out_path, in_path, base_len);
+                out_path[base_len] = '\0';
+            } else {
+                snprintf(out_path, sizeof(out_path), "%s", in_path);
+            }
         }
         use_stdout = 0;
     }
