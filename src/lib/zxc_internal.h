@@ -387,14 +387,16 @@ extern "C" {
  *  `(epoch << 18) | offset`, totalling 64 KB of memory.
  *  The 64 KB sliding window allows `chain_table` to use `uint16_t`.
  *  @{ */
-/** @brief Address bits for the LZ77 hash table (2^13 = 8 192). */
-#define ZXC_LZ_HASH_BITS 13
+/** @brief Address bits for the LZ77 hash table (2^14 = 16 384 max). */
+#define ZXC_LZ_HASH_BITS_MAX 14
+/** @brief Address bits for the LZ77 hash table (2^13 = 8 192 min). */
+#define ZXC_LZ_HASH_BITS_MIN 13
 /** @brief Knuth's multiplicative hash constant (golden ratio * 2^32). */
 #define ZXC_LZ_HASH32_PRIME 2654435761U
 /** @brief xxHash64 prime constant for 5-byte hashing. */
 #define ZXC_LZ_HASH64_PRIME 11400714785074694791ULL
-/** @brief Number of entries in the hash table. */
-#define ZXC_LZ_HASH_SIZE (1U << ZXC_LZ_HASH_BITS)
+/** @brief Maximum number of entries in the hash table. */
+#define ZXC_LZ_HASH_SIZE_MAX (1U << ZXC_LZ_HASH_BITS_MAX)
 /** @brief Sliding window size (64 KB). */
 #define ZXC_LZ_WINDOW_SIZE (1U << 16)
 /** @brief Minimum match length for an LZ77 match. */
