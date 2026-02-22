@@ -391,10 +391,10 @@ extern "C" {
 #define ZXC_LZ_HASH_BITS_MAX 14
 /** @brief Address bits for the LZ77 hash table (2^13 = 8 192 min). */
 #define ZXC_LZ_HASH_BITS_MIN 13
-/** @brief Knuth's multiplicative hash constant (golden ratio * 2^32). */
-#define ZXC_LZ_HASH32_PRIME 2654435761U
-/** @brief xxHash64 prime constant for 5-byte hashing. */
-#define ZXC_LZ_HASH64_PRIME 11400714785074694791ULL
+/** @brief Knuth's multiplicative hash multiplier (golden ratio * 2^32). */
+#define ZXC_LZ_HASH32_MUL 2654435761U
+/** @brief xxHash64 constant multiplier for 5-byte hashing. */
+#define ZXC_LZ_HASH64_MUL 11400714785074694791ULL
 /** @brief Maximum number of entries in the hash table. */
 #define ZXC_LZ_HASH_SIZE_MAX (1U << ZXC_LZ_HASH_BITS_MAX)
 /** @brief Sliding window size (64 KB). */

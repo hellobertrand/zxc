@@ -40,12 +40,12 @@
 static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int use_hash5,
                                                 const uint32_t hash_bits) {
     if (use_hash5) {
-        // Mask out the upper 3 bytes to keep only 5 bytes, then multiply by xxHash64 prime
+        // Mask out the upper 3 bytes to keep only 5 bytes, then multiply by xxHash64 constant
         const uint64_t v5 = val & 0xFFFFFFFFFFULL;
-        return (uint32_t)((v5 * ZXC_LZ_HASH64_PRIME) >> (64 - hash_bits));
+        return (uint32_t)((v5 * ZXC_LZ_HASH64_MUL) >> (64 - hash_bits));
     } else {
         // First 4 bytes, Knuth multiplicative hash
-        return ((uint32_t)val * ZXC_LZ_HASH32_PRIME) >> (32 - hash_bits);
+        return ((uint32_t)val * ZXC_LZ_HASH32_MUL) >> (32 - hash_bits);
     }
 }
 
