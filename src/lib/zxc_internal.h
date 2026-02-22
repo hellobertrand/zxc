@@ -389,6 +389,10 @@ extern "C" {
  *  @{ */
 /** @brief Address bits for the LZ77 hash table (2^13 = 8 192). */
 #define ZXC_LZ_HASH_BITS 13
+/** @brief Knuth's multiplicative hash constant (golden ratio * 2^32). */
+#define ZXC_LZ_HASH32_PRIME 2654435761U
+/** @brief xxHash64 prime constant for 5-byte hashing. */
+#define ZXC_LZ_HASH64_PRIME 11400714785074694791ULL
 /** @brief Number of entries in the hash table. */
 #define ZXC_LZ_HASH_SIZE (1U << ZXC_LZ_HASH_BITS)
 /** @brief Sliding window size (64 KB). */
@@ -454,8 +458,8 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
         {4, 16, 0, 0, 4, 4},  // fallback
         {4, 16, 0, 0, 4, 4},  // level 1
         {6, 24, 0, 0, 3, 6},  // level 2
-        {4, 32, 1, 8, 1, 4},  // level 3
-        {4, 32, 1, 8, 1, 5}   // level 4
+        {3, 18, 1, 4, 1, 4},  // level 3
+        {3, 18, 1, 4, 1, 5}   // level 4
     };
     return table[level < 1 ? 1 : level];
 }
