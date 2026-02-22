@@ -34,16 +34,18 @@
  *
  * @param[in] val The 64-bit integer sequence (e.g., 8 bytes read from input stream).
  * @param[in] use_hash5 Non-zero to use the 5-byte xxHash64 hash, zero for 4-byte Knuth hash.
+ * @param[in] hash_bits The number of hash bits to use (13 for FAST, 14 for HIGHER levels).
  * @return uint32_t A hash value suitable for indexing the match table.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int use_hash5) {
+static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int use_hash5,
+                                                const uint32_t hash_bits) {
     if (use_hash5) {
         // Mask out the upper 3 bytes to keep only 5 bytes, then multiply by xxHash64 prime
         const uint64_t v5 = val & 0xFFFFFFFFFFULL;
-        return (uint32_t)((v5 * ZXC_LZ_HASH64_PRIME) >> (64 - ZXC_LZ_HASH_BITS));
+        return (uint32_t)((v5 * ZXC_LZ_HASH64_PRIME) >> (64 - hash_bits));
     } else {
         // First 4 bytes, Knuth multiplicative hash
-        return ((uint32_t)val * ZXC_LZ_HASH32_PRIME) >> (32 - ZXC_LZ_HASH_BITS);
+        return ((uint32_t)val * ZXC_LZ_HASH32_PRIME) >> (32 - hash_bits);
     }
 }
 
@@ -169,7 +171,7 @@ typedef struct {
 static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* mflimit,
     const uint8_t* anchor, uint32_t* RESTRICT hash_table, uint16_t* RESTRICT chain_table,
-    uint32_t epoch_mark, const int level, const zxc_lz77_params_t p) {
+    uint32_t epoch_mark, const int level, const zxc_lz77_params_t p, const uint32_t hash_bits) {
     const int use_hash5 = (level >= 3);
     // Track the best match found so far.
     //  ref is the pointer to the start of the match in the history buffer,
@@ -181,7 +183,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     uint64_t cur_val8 = zxc_le64(ip);
     // First 4 bytes for tag and old lookups
     uint32_t cur_val = (uint32_t)cur_val8;
-    uint32_t h = zxc_hash_func(cur_val8, use_hash5);
+    uint32_t h = zxc_hash_func(cur_val8, use_hash5, hash_bits);
 
     // For levels 1-2, enhance tag with byte5 info via XOR (preserves byte4 info)
     // High byte becomes (byte4 ^ byte5), keeping discrimination from both bytes
@@ -376,7 +378,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     if (p.use_lazy && best.ref && best.len < 128 && ip + 1 < mflimit) {
         const uint64_t next_val8 = zxc_le64(ip + 1);
         const uint32_t next_val = (uint32_t)next_val8;
-        const uint32_t h2 = zxc_hash_func(next_val8, use_hash5);
+        const uint32_t h2 = zxc_hash_func(next_val8, use_hash5, hash_bits);
         const uint32_t next_head = hash_table[2 * h2];
         const uint32_t next_stored_tag = hash_table[2 * h2 + 1];
         uint32_t next_idx =
@@ -416,7 +418,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         } else if (level >= 4 && ip + 2 < mflimit) {
             const uint64_t val3_8 = zxc_le64(ip + 2);
             const uint32_t val3 = (uint32_t)val3_8;
-            const uint32_t h3 = zxc_hash_func(val3_8, use_hash5);
+            const uint32_t h3 = zxc_hash_func(val3_8, use_hash5, hash_bits);
             const uint32_t head3 = hash_table[2 * h3];
             const uint32_t tag3 = hash_table[2 * h3 + 1];
             uint32_t idx3 =
@@ -702,12 +704,13 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
                                 size_t* RESTRICT out_sz) {
     const int level = ctx->compression_level;
-
     const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
+    const uint32_t hash_bits = (level >= 3) ? ZXC_LZ_HASH_BITS_MAX : ZXC_LZ_HASH_BITS_MIN;
+    const size_t hash_size = (size_t)1 << hash_bits;
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
-        ZXC_MEMSET(ctx->hash_table, 0, 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
+        ZXC_MEMSET(ctx->hash_table, 0, 2 * hash_size * sizeof(uint32_t));
         ctx->epoch = 1;
     }
     const uint32_t epoch_mark = ctx->epoch << (32 - ZXC_EPOCH_BITS);
@@ -732,8 +735,9 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         ZXC_PREFETCH_READ(ip + step * 4 + ZXC_CACHE_LINE_SIZE);
 
-        const zxc_match_t m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table,
-                                                       chain_table, epoch_mark, level, lzp);
+        const zxc_match_t m =
+            zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, chain_table,
+                                     epoch_mark, level, lzp, hash_bits);
 
         if (m.ref) {
             ip -= m.backtrack;
@@ -773,7 +777,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                     const uint64_t val_u8 = zxc_le64(match_end - 2);
                     const uint32_t val_u = (uint32_t)val_u8;
                     const uint32_t h_u =
-                        zxc_hash_func(val_u8, 1);  // Only for level > 4, uses hash5
+                        zxc_hash_func(val_u8, 1, hash_bits);  // Only for level > 4, uses hash5
                     const uint32_t prev_head = hash_table[2 * h_u];
                     const uint32_t prev_idx = (prev_head & ~ZXC_OFFSET_MASK) == epoch_mark
                                                   ? (prev_head & ZXC_OFFSET_MASK)
@@ -1197,10 +1201,12 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const int level = ctx->compression_level;
 
     const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
+    const uint32_t hash_bits = (level >= 3) ? ZXC_LZ_HASH_BITS_MAX : ZXC_LZ_HASH_BITS_MIN;
+    const size_t hash_size = (size_t)1 << hash_bits;
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
-        ZXC_MEMSET(ctx->hash_table, 0, 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
+        ZXC_MEMSET(ctx->hash_table, 0, 2 * hash_size * sizeof(uint32_t));
         ctx->epoch = 1;
     }
     const uint32_t epoch_mark = ctx->epoch << (32 - ZXC_EPOCH_BITS);
@@ -1224,8 +1230,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         ZXC_PREFETCH_READ(ip + step * 4 + 64);
 
-        const zxc_match_t m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table,
-                                                       chain_table, epoch_mark, level, lzp);
+        const zxc_match_t m =
+            zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, chain_table,
+                                     epoch_mark, level, lzp, hash_bits);
 
         if (m.ref) {
             ip -= m.backtrack;
