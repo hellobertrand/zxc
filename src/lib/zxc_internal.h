@@ -420,13 +420,9 @@ extern "C" {
  *  @brief Mixing primes used by internal hash functions.
  *  @{ */
 /** @brief Hash prime 1. */
-#define ZXC_HASH_PRIME1 0x9E3779B1U
+#define ZXC_HASH_PRIME1 0x9E3779B97F4A7C15ULL
 /** @brief Hash prime 2. */
-#define ZXC_HASH_PRIME2 0x85BA2D97U
-/** @brief Hash prime 3. */
-#define ZXC_HASH_PRIME3 0xB0F57EE3U
-/** @brief Hash prime 4. */
-#define ZXC_HASH_PRIME4 0x27D4EB2FU
+#define ZXC_HASH_PRIME2 0xD2D84A61D2D84A61ULL
 /** @} */
 
 /** @} */ /* end of File Format Constants */
@@ -720,16 +716,18 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
 /**
  * @brief Computes the 1-byte checksum for block headers.
  *
+ * Implementation based on Marsaglia's Xorshift (PRNG) principles.
+ *
  * @param[in] p Pointer to the input data to be hashed (8 bytes)
  * @return uint8_t The computed hash value.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
     const uint64_t v = zxc_le64(p);
-    uint64_t h = v * ZXC_HASH_PRIME1;
-    h ^= (h >> 32);
-    h *= ZXC_HASH_PRIME2;
-    h ^= (h >> 32);
-    return (uint8_t)h;
+    uint64_t x = v ^ ZXC_HASH_PRIME1;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    return (uint8_t)((x >> 32) ^ x);
 }
 
 /**
@@ -737,24 +735,20 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
  *
  * This function generates a hash value by reading data from the given pointer.
  * The result is a 16-bit hash.
+ * Implementation based on Marsaglia's Xorshift (PRNG) principles.
  *
  * @param[in] p Pointer to the input data to be hashed (16 bytes)
  * @return uint16_t The computed hash value.
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
-    const uint32_t v0 = zxc_le32(p);
-    const uint32_t v1 = zxc_le32(p + 4);
-    const uint32_t v2 = zxc_le32(p + 8);
-    const uint32_t v3 = zxc_le32(p + 12);
-
-    uint32_t h = (v0 * ZXC_HASH_PRIME1);
-    h ^= (v1 * ZXC_HASH_PRIME2);
-    h ^= (v2 * ZXC_HASH_PRIME3);
-    h ^= (v3 * ZXC_HASH_PRIME4);
-
-    h = (h << 13) | (h >> 19);
-    h *= ZXC_HASH_PRIME1;
-    return (uint16_t)((h ^ (h >> 16)) & 0xFFFF);
+    const uint64_t h1 = zxc_le64(p);
+    const uint64_t h2 = zxc_le64(p + 8);
+    uint64_t x = h1 ^ h2 ^ ZXC_HASH_PRIME2;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    uint32_t res = (uint32_t)((x >> 32) ^ x);
+    return (uint16_t)((res >> 16) ^ res);
 }
 
 /**
