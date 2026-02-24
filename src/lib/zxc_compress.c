@@ -37,14 +37,13 @@
  * @param[in] hash_bits The number of hash bits to use (13 for FAST, 14 for HIGHER levels).
  * @return uint32_t A hash value suitable for indexing the match table.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int use_hash5) {
+static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint64_t val, const int use_hash5) {
     if (use_hash5) {
-        // Mask out the upper 3 bytes to keep only 5 bytes, then multiply by xxHash64 constant
         const uint64_t v5 = val & 0xFFFFFFFFFFULL;
-        return (uint32_t)((v5 * ZXC_LZ_HASH64_MUL) >> (64 - ZXC_LZ_HASH_BITS_MAX));
+        return (uint32_t)((v5 * 0x2545F4914F6CDD1DULL) >> (64 - ZXC_LZ_HASH_BITS_MAX));
     } else {
-        // First 4 bytes, Knuth multiplicative hash
-        return ((uint32_t)val * ZXC_LZ_HASH32_MUL) >> (32 - ZXC_LZ_HASH_BITS_MIN);
+        val ^= (val >> 15);
+        return ((uint32_t)val * 0x2D35182DU) >> (32 - ZXC_LZ_HASH_BITS_MAX);
     }
 }
 
