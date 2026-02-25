@@ -389,9 +389,9 @@ extern "C" {
  *  @{ */
 /** @brief Address bits for the LZ77 hash table (2^14 = 16 384 max). */
 #define ZXC_LZ_HASH_BITS 14
-/** @brief Masaglia constant multiplier for 4-byte hashing. */
+/** @brief Marsaglia multiplicative hash constant for 4-byte hashing. */
 #define ZXC_LZ_HASH_PRIME1 0x2D35182DU
-/** @brief Masaglia constant multiplier for 5-byte hashing. */
+/** @brief Marsaglia/Vigna xorshift* multiplier for 5-byte hashing. */
 #define ZXC_LZ_HASH_PRIME2 0x2545F4914F6CDD1DULL
 /** @brief Maximum number of entries in the hash table. */
 #define ZXC_LZ_HASH_SIZE (1U << ZXC_LZ_HASH_BITS)

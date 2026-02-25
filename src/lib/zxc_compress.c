@@ -33,7 +33,8 @@
  * @brief Computes a hash value for either a 4-byte or 5-byte sequence.
  *
  * @param[in] val The 64-bit integer sequence (e.g., 8 bytes read from input stream).
- * @param[in] use_hash5 Non-zero to use the 5-byte Masaglia hash, zero for 4-byte Masaglia hash.
+ * @param[in] use_hash5 Non-zero to use the 5-byte xorshift64* hash (Marsaglia/Vigna), zero for
+ * 4-byte Marsaglia hash.
  * @return uint32_t A hash value suitable for indexing the match table.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint64_t val, const int use_hash5) {

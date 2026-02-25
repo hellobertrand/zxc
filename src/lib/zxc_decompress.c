@@ -1147,7 +1147,6 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     // Validate streams don't overflow source buffer
     if (UNLIKELY(extras_end != src + src_size)) return ZXC_ERROR_CORRUPT_DATA;
 
-
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
     const uint8_t* const d_end_safe = d_end - (ZXC_PAD_SIZE * 4);  // 128
