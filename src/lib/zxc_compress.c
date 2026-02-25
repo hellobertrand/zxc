@@ -702,13 +702,12 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
                                 size_t* RESTRICT out_sz) {
     const int level = ctx->compression_level;
+
     const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
-    const uint32_t hash_bits = (level >= 3) ? ZXC_LZ_HASH_BITS_MAX : ZXC_LZ_HASH_BITS_MIN;
-    const size_t hash_size = (size_t)1 << hash_bits;
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
-        ZXC_MEMSET(ctx->hash_table, 0, 2 * hash_size * sizeof(uint32_t));
+        ZXC_MEMSET(ctx->hash_table, 0, 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
         ctx->epoch = 1;
     }
     const uint32_t epoch_mark = ctx->epoch << (32 - ZXC_EPOCH_BITS);
@@ -1198,12 +1197,10 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const int level = ctx->compression_level;
 
     const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
-    const uint32_t hash_bits = (level >= 3) ? ZXC_LZ_HASH_BITS_MAX : ZXC_LZ_HASH_BITS_MIN;
-    const size_t hash_size = (size_t)1 << hash_bits;
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
-        ZXC_MEMSET(ctx->hash_table, 0, 2 * hash_size * sizeof(uint32_t));
+        ZXC_MEMSET(ctx->hash_table, 0, 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
         ctx->epoch = 1;
     }
     const uint32_t epoch_mark = ctx->epoch << (32 - ZXC_EPOCH_BITS);
