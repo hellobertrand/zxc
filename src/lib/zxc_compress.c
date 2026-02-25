@@ -33,17 +33,16 @@
  * @brief Computes a hash value for either a 4-byte or 5-byte sequence.
  *
  * @param[in] val The 64-bit integer sequence (e.g., 8 bytes read from input stream).
- * @param[in] use_hash5 Non-zero to use the 5-byte xxHash64 hash, zero for 4-byte Knuth hash.
- * @param[in] hash_bits The number of hash bits to use (13 for FAST, 14 for HIGHER levels).
+ * @param[in] use_hash5 Non-zero to use the 5-byte Masaglia hash, zero for 4-byte Masaglia hash.
  * @return uint32_t A hash value suitable for indexing the match table.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint64_t val, const int use_hash5) {
     if (use_hash5) {
         const uint64_t v5 = val & 0xFFFFFFFFFFULL;
-        return (uint32_t)((v5 * 0x2545F4914F6CDD1DULL) >> (64 - ZXC_LZ_HASH_BITS_MAX));
+        return (uint32_t)((v5 * ZXC_LZ_HASH_PRIME2) >> (64 - ZXC_LZ_HASH_BITS));
     } else {
-        val ^= (val >> 15);
-        return ((uint32_t)val * 0x2D35182DU) >> (32 - ZXC_LZ_HASH_BITS_MAX);
+        val ^= val >> 15;
+        return ((uint32_t)val * ZXC_LZ_HASH_PRIME1) >> (32 - ZXC_LZ_HASH_BITS);
     }
 }
 
@@ -702,13 +701,12 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
                                 size_t* RESTRICT out_sz) {
     const int level = ctx->compression_level;
+
     const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
-    const uint32_t hash_bits = (level >= 3) ? ZXC_LZ_HASH_BITS_MAX : ZXC_LZ_HASH_BITS_MIN;
-    const size_t hash_size = (size_t)1 << hash_bits;
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
-        ZXC_MEMSET(ctx->hash_table, 0, 2 * hash_size * sizeof(uint32_t));
+        ZXC_MEMSET(ctx->hash_table, 0, 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
         ctx->epoch = 1;
     }
     const uint32_t epoch_mark = ctx->epoch << (32 - ZXC_EPOCH_BITS);
@@ -1198,12 +1196,10 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const int level = ctx->compression_level;
 
     const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
-    const uint32_t hash_bits = (level >= 3) ? ZXC_LZ_HASH_BITS_MAX : ZXC_LZ_HASH_BITS_MIN;
-    const size_t hash_size = (size_t)1 << hash_bits;
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ZXC_MAX_EPOCH)) {
-        ZXC_MEMSET(ctx->hash_table, 0, 2 * hash_size * sizeof(uint32_t));
+        ZXC_MEMSET(ctx->hash_table, 0, 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
         ctx->epoch = 1;
     }
     const uint32_t epoch_mark = ctx->epoch << (32 - ZXC_EPOCH_BITS);

@@ -382,21 +382,19 @@ extern "C" {
 /** @name LZ77 Constants
  *  @brief Hash table geometry, sliding window, and match parameters.
  *
- *  The hash table uses 13 bits for addressing (8 192 entries), doubled to
+ *  The hash table uses 14 bits for addressing (16 384 entries), doubled to
  *  keep the load factor below 0.5.  Each entry stores
  *  `(epoch << 18) | offset`, totalling 64 KB of memory.
  *  The 64 KB sliding window allows `chain_table` to use `uint16_t`.
  *  @{ */
 /** @brief Address bits for the LZ77 hash table (2^14 = 16 384 max). */
-#define ZXC_LZ_HASH_BITS_MAX 14
-/** @brief Address bits for the LZ77 hash table (2^13 = 8 192 min). */
-#define ZXC_LZ_HASH_BITS_MIN 13
-/** @brief Knuth's multiplicative hash multiplier (golden ratio * 2^32). */
-#define ZXC_LZ_HASH32_MUL 2654435761U
-/** @brief xxHash64 constant multiplier for 5-byte hashing. */
-#define ZXC_LZ_HASH64_MUL 11400714785074694791ULL
+#define ZXC_LZ_HASH_BITS 14
+/** @brief Masaglia constant multiplier for 4-byte hashing. */
+#define ZXC_LZ_HASH_PRIME1 0x2D35182DU
+/** @brief Masaglia constant multiplier for 5-byte hashing. */
+#define ZXC_LZ_HASH_PRIME2 0x2545F4914F6CDD1DULL
 /** @brief Maximum number of entries in the hash table. */
-#define ZXC_LZ_HASH_SIZE_MAX (1U << ZXC_LZ_HASH_BITS_MAX)
+#define ZXC_LZ_HASH_SIZE (1U << ZXC_LZ_HASH_BITS)
 /** @brief Sliding window size (64 KB). */
 #define ZXC_LZ_WINDOW_SIZE (1U << 16)
 /** @brief Minimum match length for an LZ77 match. */

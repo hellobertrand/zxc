@@ -81,7 +81,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     if (mode == 0) return ZXC_OK;
 
     size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
-    size_t sz_hash = 2 * ZXC_LZ_HASH_SIZE_MAX * sizeof(uint32_t);
+    size_t sz_hash = 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
     size_t sz_chain = chunk_size * sizeof(uint16_t);
     size_t sz_sequences = max_seq * sizeof(uint32_t);
     size_t sz_tokens = max_seq * sizeof(uint8_t);
