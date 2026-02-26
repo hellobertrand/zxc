@@ -30,7 +30,7 @@ npm install
 const zxc = require('zxc-compress');
 
 // Compress
-const data = Buffer.from('Hello, World!'.repeat(1000));
+const data = Buffer.from('Hello, World!'.repeat(1_000));
 const compressed = zxc.compress(data, { level: zxc.LEVEL_DEFAULT });
 
 // Decompress (auto-detects size)

@@ -9,6 +9,7 @@
 [![vcpkg](https://img.shields.io/vcpkg/v/zxc)](https://vcpkg.io/en/package/zxc)
 [![Crates.io](https://img.shields.io/crates/v/zxc-compress)](https://crates.io/crates/zxc-compress)
 [![PyPi](https://img.shields.io/pypi/v/zxc-compress)](https://pypi.org/project/zxc-compress)
+[![npm](https://img.shields.io/npm/v/zxc-compress)](https://www.npmjs.com/package/zxc-compress)
 
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 
@@ -333,6 +334,7 @@ Official wrappers maintained in this repository:
 |----------|-----------------|-----------------|---------------|--------|
 | **Rust** | [`crates.io`](https://crates.io/crates/zxc-compress) | `cargo add zxc-compress` | [README](wrappers/rust/zxc/README.md) | [@hellobertrand](https://github.com/hellobertrand) |
 | **Python**| [`PyPI`](https://pypi.org/project/zxc-compress) | `pip install zxc-compress` | [README](wrappers/python/README.md) | [@nuberchardzer1](https://github.com/nuberchardzer1) |
+| **Node.js**| [`npm`](https://www.npmjs.com/package/zxc-compress) | `npm install zxc-compress` | [README](wrappers/nodejs/README.md) | [@hellobertrand](https://github.com/hellobertrand) |
 
 Community-maintained bindings:
 

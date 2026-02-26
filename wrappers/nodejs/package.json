@@ -1,6 +1,6 @@
 {
   "name": "zxc-compress",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "ZXC: High-performance lossless asymmetric compression for Node.js",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -42,6 +42,8 @@
     "vitest": "^4.0.0"
   },
   "binary": {
-    "napi_versions": [8]
+    "napi_versions": [
+      8
+    ]
   }
 }
