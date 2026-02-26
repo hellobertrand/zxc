@@ -336,12 +336,12 @@ typedef struct {
  * @return Always returns NULL.
  */
 static void* zxc_stream_worker(void* arg) {
-    zxc_stream_ctx_t* ctx = (zxc_stream_ctx_t*)arg;
+    zxc_stream_ctx_t* const ctx = (zxc_stream_ctx_t*)arg;
     zxc_cctx_t cctx;
 
-    int unified_chk = (ctx->compression_mode == 1)
-                          ? ctx->checksum_enabled
-                          : (ctx->file_has_checksum && ctx->checksum_enabled);
+    const int unified_chk = (ctx->compression_mode == 1)
+                                ? ctx->checksum_enabled
+                                : (ctx->file_has_checksum && ctx->checksum_enabled);
 
     if (zxc_cctx_init(&cctx, ctx->chunk_size, ctx->compression_mode, ctx->compression_level,
                       unified_chk) != 0) {
@@ -411,10 +411,10 @@ static void* zxc_stream_worker(void* arg) {
  * @return Always returns NULL.
  */
 static void* zxc_async_writer(void* arg) {
-    writer_args_t* args = (writer_args_t*)arg;
-    zxc_stream_ctx_t* ctx = args->ctx;
+    writer_args_t* const args = (writer_args_t*)arg;
+    zxc_stream_ctx_t* const ctx = args->ctx;
     while (1) {
-        zxc_stream_job_t* job = &ctx->jobs[ctx->write_idx];
+        zxc_stream_job_t* const job = &ctx->jobs[ctx->write_idx];
         pthread_mutex_lock(&ctx->lock);
         while (job->status != JOB_STATUS_PROCESSED)
             pthread_cond_wait(&ctx->cond_writer, &ctx->lock);
@@ -513,10 +513,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     // For decompression, the CLI precomputes the size and passes it via user_data
     uint64_t total_file_size = 0;
     if (mode == 1 && progress_cb) {
-        long long saved_pos = ftello(f_in);
+        const long long saved_pos = ftello(f_in);
         if (saved_pos >= 0) {
             if (fseeko(f_in, 0, SEEK_END) == 0) {
-                long long size = ftello(f_in);
+                const long long size = ftello(f_in);
                 if (size > 0) total_file_size = (uint64_t)size;
                 fseeko(f_in, saved_pos, SEEK_SET);
             }
@@ -550,16 +550,16 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     uint32_t d_global_hash = 0;
 
-    uint64_t max_out = zxc_compress_bound(runtime_chunk_sz);
-    size_t raw_alloc_in = ((mode) ? runtime_chunk_sz : max_out) + ZXC_PAD_SIZE;
-    size_t alloc_in = (raw_alloc_in + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    const uint64_t max_out = zxc_compress_bound(runtime_chunk_sz);
+    const size_t raw_alloc_in = ((mode) ? runtime_chunk_sz : max_out) + ZXC_PAD_SIZE;
+    const size_t alloc_in = (raw_alloc_in + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
 
-    size_t raw_alloc_out = ((mode) ? max_out : runtime_chunk_sz) + ZXC_PAD_SIZE;
-    size_t alloc_out = (raw_alloc_out + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    const size_t raw_alloc_out = ((mode) ? max_out : runtime_chunk_sz) + ZXC_PAD_SIZE;
+    const size_t alloc_out = (raw_alloc_out + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
 
     size_t alloc_size =
         ctx.ring_size * (sizeof(zxc_stream_job_t) + sizeof(int) + alloc_in + alloc_out);
-    uint8_t* mem_block = zxc_aligned_malloc(alloc_size, ZXC_CACHE_LINE_SIZE);
+    uint8_t* const mem_block = zxc_aligned_malloc(alloc_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem_block)) return ZXC_ERROR_MEMORY;
 
     uint8_t* ptr = mem_block;
@@ -589,7 +589,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     pthread_cond_init(&ctx.cond_worker, NULL);
     pthread_cond_init(&ctx.cond_writer, NULL);
 
-    pthread_t* workers = malloc(num_workers * sizeof(pthread_t));
+    pthread_t* const workers = malloc(num_workers * sizeof(pthread_t));
     if (UNLIKELY(!workers)) {
         zxc_aligned_free(mem_block);
         return ZXC_ERROR_MEMORY;
@@ -616,7 +616,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     // Reader Loop: Reads from file, prepares jobs, pushes to worker queue.
     while (!read_eof && !ctx.io_error) {
-        zxc_stream_job_t* job = &ctx.jobs[read_idx];
+        zxc_stream_job_t* const job = &ctx.jobs[read_idx];
         pthread_mutex_lock(&ctx.lock);
         while (job->status != JOB_STATUS_FREE) pthread_cond_wait(&ctx.cond_reader, &ctx.lock);
         pthread_mutex_unlock(&ctx.lock);
@@ -693,7 +693,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         if (UNLIKELY(read_sz < ZXC_BLOCK_SIZE && mode == 1)) read_eof = 1;
     }
 
-    zxc_stream_job_t* end_job = &ctx.jobs[read_idx];
+    zxc_stream_job_t* const end_job = &ctx.jobs[read_idx];
     pthread_mutex_lock(&ctx.lock);
     while (end_job->status != JOB_STATUS_FREE) pthread_cond_wait(&ctx.cond_reader, &ctx.lock);
     end_job->result_sz = -1;
@@ -711,8 +711,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     // Write EOF Block if compression and no error
     if (mode == 1 && !ctx.io_error && w_args.total_bytes >= 0) {
         uint8_t final_buf[ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE];
-        uint8_t* eof_buf = final_buf;
-        uint8_t* footer = final_buf + ZXC_BLOCK_HEADER_SIZE;
+        uint8_t* const eof_buf = final_buf;
+        uint8_t* const footer = final_buf + ZXC_BLOCK_HEADER_SIZE;
 
         zxc_block_header_t eof_bh = {
             .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
@@ -779,12 +779,12 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const int n_threads,
 int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
 
-    long long saved_pos = ftello(f_in);
+    const long long saved_pos = ftello(f_in);
     if (UNLIKELY(saved_pos < 0)) return ZXC_ERROR_IO;
 
     // Get file size
     if (fseeko(f_in, 0, SEEK_END) != 0) return ZXC_ERROR_IO;
-    long long file_size = ftello(f_in);
+    const long long file_size = ftello(f_in);
     if (UNLIKELY(file_size < (long long)(ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))) {
         fseeko(f_in, saved_pos, SEEK_SET);
         return ZXC_ERROR_SRC_TOO_SMALL;
