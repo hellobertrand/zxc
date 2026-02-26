@@ -18,13 +18,13 @@
 // --- Helpers ---
 
 // Generates a buffer of random data (To force RAW)
-void gen_random_data(uint8_t* buf, size_t size) {
+void gen_random_data(uint8_t* const buf, const size_t size) {
     for (size_t i = 0; i < size; i++) buf[i] = rand() & 0xFF;
 }
 
 // Generates repetitive data (To force GLO/GHI/LZ)
-void gen_lz_data(uint8_t* buf, size_t size) {
-    const char* pattern =
+void gen_lz_data(uint8_t* const buf, const size_t size) {
+    const char* const pattern =
         "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod "
         "tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim "
         "veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea "
@@ -32,15 +32,15 @@ void gen_lz_data(uint8_t* buf, size_t size) {
         "velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint "
         "occaecat cupidatat non proident, sunt in culpa qui officia deserunt "
         "mollit anim id est laborum.";
-    size_t pat_len = strlen(pattern);
+    const size_t pat_len = strlen(pattern);
     for (size_t i = 0; i < size; i++) buf[i] = pattern[i % pat_len];
 }
 
 // Generates a regular numeric sequence (To force NUM)
-void gen_num_data(uint8_t* buf, size_t size) {
+void gen_num_data(uint8_t* const buf, const size_t size) {
     // Fill with 32-bit integers
-    uint32_t* ptr = (uint32_t*)buf;
-    size_t count = size / 4;
+    uint32_t* const ptr = (uint32_t*)buf;
+    const size_t count = size / 4;
     uint32_t val = 0;
     for (size_t i = 0; i < count; i++) {
         // Arithmetic sequence: 0, 100, 200...
@@ -51,18 +51,18 @@ void gen_num_data(uint8_t* buf, size_t size) {
 }
 
 // Generates numeric sequence with 0 deltas (all identical)
-void gen_num_data_zero(uint8_t* buf, size_t size) {
-    uint32_t* ptr = (uint32_t*)buf;
-    size_t count = size / 4;
+void gen_num_data_zero(uint8_t* const buf, const size_t size) {
+    uint32_t* const ptr = (uint32_t*)buf;
+    const size_t count = size / 4;
     for (size_t i = 0; i < count; i++) {
         ptr[i] = 42;
     }
 }
 
 // Generates numeric data with alternating small deltas (+1, -1)
-void gen_num_data_small(uint8_t* buf, size_t size) {
-    uint32_t* ptr = (uint32_t*)buf;
-    size_t count = size / 4;
+void gen_num_data_small(uint8_t* const buf, const size_t size) {
+    uint32_t* const ptr = (uint32_t*)buf;
+    const size_t count = size / 4;
     uint32_t val = 1000;
     for (size_t i = 0; i < count; i++) {
         ptr[i] = val;
@@ -71,16 +71,16 @@ void gen_num_data_small(uint8_t* buf, size_t size) {
 }
 
 // Generates numeric data with very large deltas to maximize bit width
-void gen_num_data_large(uint8_t* buf, size_t size) {
-    uint32_t* ptr = (uint32_t*)buf;
-    size_t count = size / 4;
+void gen_num_data_large(uint8_t* const buf, const size_t size) {
+    uint32_t* const ptr = (uint32_t*)buf;
+    const size_t count = size / 4;
     for (size_t i = 0; i < count; i++) {
         // Alternate between 0 and 0xFFFFFFFF (delta is huge)
         ptr[i] = (i % 2 == 0) ? 0 : 0xFFFFFFFF;
     }
 }
 
-void gen_binary_data(uint8_t* buf, size_t size) {
+void gen_binary_data(uint8_t* const buf, const size_t size) {
     // Pattern with problematic bytes that could be corrupted in text mode:
     // 0x0A (LF), 0x0D (CR), 0x00 (NULL), 0x1A (EOF/CTRL-Z), 0xFF
     const uint8_t pattern[] = {
@@ -90,7 +90,7 @@ void gen_binary_data(uint8_t* buf, size_t size) {
         0x1A, 0x00, 0x0A, 0x0D,  // EOF marker + NULL + LF/CR
         0x00, 0x00, 0x0A, 0x0A,  // Multiple NULLs and LFs
     };
-    size_t pat_len = sizeof(pattern);
+    const size_t pat_len = sizeof(pattern);
     for (size_t i = 0; i < size; i++) {
         buf[i] = pattern[i % pat_len];
     }
@@ -98,7 +98,7 @@ void gen_binary_data(uint8_t* buf, size_t size) {
 
 // Generates data with small offsets (<=255 bytes) to force 1-byte offset encoding
 // This creates short repeating patterns with matches very close to each other
-void gen_small_offset_data(uint8_t* buf, size_t size) {
+void gen_small_offset_data(uint8_t* const buf, const size_t size) {
     // Create short repeating patterns with very short distances.
     // Uses a 5-byte period (not aligned to uint32_t) to avoid being
     // classified as NUM data by zxc_probe_is_numeric().
@@ -111,7 +111,7 @@ void gen_small_offset_data(uint8_t* buf, size_t size) {
 
 // Generates data with large offsets (>255 bytes) to force 2-byte offset encoding
 // This creates patterns where matches are far apart
-void gen_large_offset_data(uint8_t* buf, size_t size) {
+void gen_large_offset_data(uint8_t* const buf, const size_t size) {
     // First 300 bytes: unique random data (no matches possible)
     for (size_t i = 0; i < 300 && i < size; i++) {
         buf[i] = (uint8_t)((i * 7 + 13) % 256);
@@ -128,9 +128,9 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
     printf("=== TEST: %s (Sz: %zu, Lvl: %d, CRC: %s) ===\n", test_name, size, level,
            checksum ? "Enabled" : "Disabled");
 
-    FILE* f_in = tmpfile();
-    FILE* f_comp = tmpfile();
-    FILE* f_decomp = tmpfile();
+    FILE* const f_in = tmpfile();
+    FILE* const f_comp = tmpfile();
+    FILE* const f_decomp = tmpfile();
 
     if (!f_in || !f_comp || !f_decomp) {
         perror("tmpfile");
