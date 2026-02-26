@@ -28,8 +28,6 @@
 #define zxc_decompress_chunk_wrapper ZXC_CAT(zxc_decompress_chunk_wrapper, ZXC_FUNCTION_SUFFIX)
 #endif
 
-#define ZXC_DEC_BATCH 32  // Number of sequences to decode in a batch
-
 /**
  * @brief Consumes a specified number of bits from the bit reader buffer without
  * performing safety checks.

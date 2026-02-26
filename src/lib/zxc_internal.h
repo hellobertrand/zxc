@@ -314,6 +314,11 @@ extern "C" {
 #define ZXC_NUM_HEADER_BINARY_SIZE 16
 /** @brief Binary size of a NUM chunk sub-frame header (nvals + bits + base + psize). */
 #define ZXC_NUM_CHUNK_HEADER_SIZE 16
+/** @brief Number of numeric values to decode in a single SIMD batch (NUM block). */
+#define ZXC_DEC_BATCH 32
+/** @brief Maximum number of frames that can be processed in a single compression operation (NUM
+ * block). */
+#define ZXC_NUM_FRAME_SIZE 128
 /** @brief Binary size of a GLO block sub-header. */
 #define ZXC_GLO_HEADER_BINARY_SIZE 16
 /** @brief Binary size of a GHI block sub-header. */
@@ -392,6 +397,15 @@ extern "C" {
 #define ZXC_LZ_MIN_MATCH_LEN 5
 /** @brief Maximum allowed offset distance. */
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
+/**
+ * @brief Number of bits reserved for epoch tracking in compressed pointers.
+ * Derived from chunk size: 2^18 = ZXC_BLOCK_SIZE => 32 - 18 = 14 bits.
+ */
+#define ZXC_EPOCH_BITS 14
+/** @brief Mask to extract the offset bits from a compressed pointer. */
+#define ZXC_OFFSET_MASK ((1U << (32 - ZXC_EPOCH_BITS)) - 1)
+/** @brief Maximum number of epochs supported by the compression system. */
+#define ZXC_MAX_EPOCH (1U << ZXC_EPOCH_BITS)
 /** @} */
 
 /** @name Hash Prime Constants
