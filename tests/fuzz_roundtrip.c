@@ -15,12 +15,12 @@
 #include "../include/zxc_stream.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    FILE* f_in = fmemopen((void*)data, size, "rb");
+    FILE* const f_in = fmemopen((void*)data, size, "rb");
     if (!f_in) return 0;
 
     char* comp_buf = NULL;
     size_t comp_size = 0;
-    FILE* f_comp = open_memstream(&comp_buf, &comp_size);
+    FILE* const f_comp = open_memstream(&comp_buf, &comp_size);
     if (!f_comp) {
         fclose(f_in);
         return 0;
@@ -36,11 +36,11 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     fclose(f_comp);
     fclose(f_in);
 
-    FILE* f_comp_read = fmemopen(comp_buf, comp_size, "rb");
+    FILE* const f_comp_read = fmemopen(comp_buf, comp_size, "rb");
 
     char* decomp_buf = NULL;
     size_t decomp_size = 0;
-    FILE* f_decomp = open_memstream(&decomp_buf, &decomp_size);
+    FILE* const f_decomp = open_memstream(&decomp_buf, &decomp_size);
 
     if (!f_comp_read || !f_decomp) {
         if (f_comp_read) fclose(f_comp_read);
@@ -50,7 +50,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         return 0;
     }
 
-    int64_t res = zxc_stream_decompress(f_comp_read, f_decomp, 1, 0);
+    const int64_t res = zxc_stream_decompress(f_comp_read, f_decomp, 1, 0);
 
     fclose(f_comp_read);
     fclose(f_decomp);
