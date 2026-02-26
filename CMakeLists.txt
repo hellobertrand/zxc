@@ -475,3 +475,20 @@ message(STATUS "  PGO Mode:       ${ZXC_PGO_MODE}")
 message(STATUS "  Build CLI:      ${ZXC_BUILD_CLI}")
 message(STATUS "  Build Tests:    ${ZXC_BUILD_TESTS}")
 message(STATUS "")
+
+# =============================================================================
+# Documentation (Doxygen)
+# =============================================================================
+find_package(Doxygen)
+if(DOXYGEN_FOUND)
+    # Generate the Doxyfile with the current project version
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
+    
+    # Add a 'doc' target to generate documentation (e.g. 'make doc' or 'cmake --build . --target doc')
+    add_custom_target(doc
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Generating API documentation with Doxygen"
+        VERBATIM
+    )
+endif()

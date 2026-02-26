@@ -5,6 +5,17 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file zxc_compress.c
+ * @brief Block-level compression: LZ77 parsing, NUM / GLO / GHI / RAW encoding,
+ *        and the chunk-wrapper entry point.
+ *
+ * Compiled multiple times with different @c ZXC_FUNCTION_SUFFIX values to
+ * produce AVX2, AVX-512, NEON, and scalar variants dispatched at runtime
+ * by @ref zxc_dispatch.c.
+ */
+
+#include "../../include/zxc_error.h"
 #include "../../include/zxc_sans_io.h"
 #include "zxc_internal.h"
 
@@ -477,15 +488,15 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
  * @param[out] out_sz Pointer to a variable where the total size of the compressed
  * output will be stored.
  *
- * @return 0 on success, or -1 on failure (e.g., invalid input size, destination
- * buffer too small).
+ * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if an
+ * error occurs (e.g., invalid input size, destination buffer too small).
  */
 static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
                                 size_t* RESTRICT out_sz) {
     if (UNLIKELY(src_sz % sizeof(uint32_t) != 0 || src_sz == 0 ||
                  dst_cap < ZXC_BLOCK_HEADER_SIZE + ZXC_NUM_HEADER_BINARY_SIZE))
-        return -1;
+        return ZXC_ERROR_DST_TOO_SMALL;
 
     const size_t count = src_sz / sizeof(uint32_t);
 
@@ -495,7 +506,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     zxc_num_header_t nh = {.n_values = count, .frame_size = ZXC_NUM_FRAME_SIZE};
 
     const int hs = zxc_write_num_header(p_curr, rem, &nh);
-    if (UNLIKELY(hs < 0)) return -1;
+    if (UNLIKELY(hs < 0)) return hs;
 
     p_curr += hs;
     rem -= hs;
@@ -618,7 +629,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
         uint8_t bits = zxc_highbit32(max_d);
         size_t packed = ((frames * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
-        if (UNLIKELY(rem < 16 + packed)) return -1;
+        if (UNLIKELY(rem < 16 + packed)) return ZXC_ERROR_DST_TOO_SMALL;
 
         zxc_store_le16(p_curr, (uint16_t)frames);
         zxc_store_le16(p_curr + 2, bits);
@@ -629,18 +640,18 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         rem -= 16;
 
         int pb = zxc_bitpack_stream_32(deltas, frames, p_curr, rem, bits);
-        if (UNLIKELY(pb < 0)) return -1;
+        if (UNLIKELY(pb < 0)) return pb;
         p_curr += pb;
         rem -= pb;
     }
 
     bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
-    if (UNLIKELY(hw < 0)) return -1;
+    if (UNLIKELY(hw < 0)) return hw;
 
     // Checksum will be appended by the wrapper
     *out_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
-    return 0;
+    return ZXC_OK;
 }
 
 /**
@@ -687,7 +698,8 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  * @param[out] out_sz    [Out] Pointer to a variable that will receive the total size
  * of the compressed output.
  *
- * @return 0 on success, or -1 if an error occurs (e.g., buffer overflow).
+ * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if an
+ * error occurs (e.g., buffer overflow).
  */
 static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
@@ -1023,8 +1035,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
     desc[3].sizes = (uint64_t)extras_sz | ((uint64_t)extras_sz << 32);
 
-    int ghs = zxc_write_glo_header_and_desc(p, rem, &gh, desc);
-    if (UNLIKELY(ghs < 0)) return -1;
+    const int ghs = zxc_write_glo_header_and_desc(p, rem, &gh, desc);
+    if (UNLIKELY(ghs < 0)) return ghs;
 
     uint8_t* p_curr = p + ghs;
     rem -= ghs;
@@ -1035,7 +1047,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const size_t sz_off = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
     const size_t sz_ext = (size_t)(desc[3].sizes & ZXC_SECTION_SIZE_MASK);
 
-    if (UNLIKELY(rem < sz_lit)) return -1;
+    if (UNLIKELY(rem < sz_lit)) return ZXC_ERROR_DST_TOO_SMALL;
 
     if (use_rle) {
         // Write RLE - optimized single-pass encoding
@@ -1097,13 +1109,13 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     }
     rem -= sz_lit;
 
-    if (UNLIKELY(rem < sz_tok)) return -1;
+    if (UNLIKELY(rem < sz_tok)) return ZXC_ERROR_DST_TOO_SMALL;
 
     ZXC_MEMCPY(p_curr, buf_tokens, seq_c);
     p_curr += seq_c;
     rem -= sz_tok;
 
-    if (UNLIKELY(rem < sz_off)) return -1;
+    if (UNLIKELY(rem < sz_off)) return ZXC_ERROR_DST_TOO_SMALL;
 
     if (use_8bit_off) {
         // Write 1-byte offsets - unroll for better throughput
@@ -1136,18 +1148,18 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     }
     rem -= sz_off;
 
-    if (UNLIKELY(rem < sz_ext)) return -1;
+    if (UNLIKELY(rem < sz_ext)) return ZXC_ERROR_DST_TOO_SMALL;
 
     ZXC_MEMCPY(p_curr, buf_extras, extras_sz);
     p_curr += extras_sz;
 
     bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
-    if (UNLIKELY(hw < 0)) return -1;
+    if (UNLIKELY(hw < 0)) return hw;
 
     // Checksum will be appended by the wrapper
     *out_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
-    return 0;
+    return ZXC_OK;
 }
 
 /**
@@ -1166,17 +1178,18 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
  * This format minimizes the number of expensive VByte reads during decompression for common
  * sequences where lengths are between 16 and 255.
  *
- * @param[in,out] ctx       Pointer to the compression context containing hash tables
+ * @param[in,out] ctx   Pointer to the compression context containing hash tables
  * and configuration.
  * @param[in] src       Pointer to the input source data.
- * @param[in] src_sz  Size of the input data in bytes.
- * @param[out] dst       Pointer to the destination buffer where compressed data will
+ * @param[in] src_sz    Size of the input data in bytes.
+ * @param[out] dst      Pointer to the destination buffer where compressed data will
  * be written.
  * @param[in] dst_cap   Maximum capacity of the destination buffer.
- * @param[out] out_sz    [Out] Pointer to a variable that will receive the total size
+ * @param[out] out_sz   Pointer to a variable that will receive the total size
  * of the compressed output.
  *
- * @return 0 on success, or -1 if an error occurs (e.g., buffer overflow).
+ * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if an
+ * error occurs (e.g., buffer overflow).
  */
 static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
@@ -1277,7 +1290,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     desc[2].sizes = (uint64_t)extras_c | ((uint64_t)extras_c << 32);
 
     const int ghs = zxc_write_ghi_header_and_desc(p, rem, &gh, desc);
-    if (UNLIKELY(ghs < 0)) return -1;
+    if (UNLIKELY(ghs < 0)) return ghs;
 
     uint8_t* p_curr = p + ghs;
     rem -= ghs;
@@ -1287,13 +1300,13 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const size_t sz_seq = (size_t)(desc[1].sizes & ZXC_SECTION_SIZE_MASK);
     const size_t sz_ext = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
 
-    if (UNLIKELY(rem < sz_lit + sz_seq + sz_ext)) return -1;
+    if (UNLIKELY(rem < sz_lit + sz_seq + sz_ext)) return ZXC_ERROR_DST_TOO_SMALL;
 
     ZXC_MEMCPY(p_curr, literals, lit_c);
     p_curr += lit_c;
     rem -= sz_lit;
 
-    if (UNLIKELY(rem < sz_seq)) return -1;
+    if (UNLIKELY(rem < sz_seq)) return ZXC_ERROR_DST_TOO_SMALL;
     // Write sequences in little-endian order
 #ifdef ZXC_BIG_ENDIAN
     for (uint32_t i = 0; i < seq_c; i++) {
@@ -1311,11 +1324,11 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
-    if (UNLIKELY(hw < 0)) return -1;
+    if (UNLIKELY(hw < 0)) return hw;
 
     // Checksum will be appended by the wrapper
     *out_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
-    return 0;
+    return ZXC_OK;
 }
 
 /**
@@ -1334,13 +1347,13 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
  * + data + checksum).
  * @param[in] chk Boolean flag: if non-zero, a checksum is calculated and added.
  *
- * @return 0 on success, -1 if the destination buffer capacity is
- * insufficient.
+ * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if the
+ * destination buffer capacity is insufficient.
  */
 static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz,
                                 uint8_t* RESTRICT const dst, const size_t dst_cap,
                                 size_t* RESTRICT const out_sz) {
-    if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE + src_sz)) return -1;
+    if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE + src_sz)) return ZXC_ERROR_DST_TOO_SMALL;
 
     // Compute block RAW
     zxc_block_header_t bh;
@@ -1350,13 +1363,13 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
     bh.comp_size = (uint32_t)src_sz;
 
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
-    if (UNLIKELY(hw < 0)) return -1;
+    if (UNLIKELY(hw < 0)) return hw;
 
     ZXC_MEMCPY(dst + ZXC_BLOCK_HEADER_SIZE, src, src_sz);
 
     // Checksum will be appended by the wrapper
     *out_sz = ZXC_BLOCK_HEADER_SIZE + src_sz;
-    return 0;
+    return ZXC_OK;
 }
 
 /**
@@ -1376,13 +1389,13 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
  * @return int Returns 1 if the array is numeric, 0 otherwise.
  */
 static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
-    if (UNLIKELY(size % 4 != 0 || size < 16)) return 0;
+    if (UNLIKELY(size % sizeof(uint32_t) != 0 || size < (4 * sizeof(uint32_t)))) return 0;
 
-    size_t count = size / 4;
-    if (count > 128) count = 128;  // Sample more values for accuracy
+    size_t count = size / sizeof(uint32_t);
+    count = count < 128 ? count : 128;  // Sample more values for accuracy
 
     uint32_t prev = zxc_le32(src);
-    const uint8_t* p = src + 4;
+    const uint8_t* p = src + sizeof(uint32_t);
 
     uint32_t max_zigzag = 0;
     uint32_t small_count = 0;   // Deltas < 256 (8 bits)
@@ -1393,16 +1406,12 @@ static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
         const int32_t diff = (int32_t)(curr - prev);
         const uint32_t zigzag = zxc_zigzag_encode(diff);
 
-        if (zigzag > max_zigzag) max_zigzag = zigzag;
-
-        if (zigzag < 256) {
-            small_count++;
-        } else if (zigzag < 65536) {
-            medium_count++;
-        }
+        max_zigzag = zigzag > max_zigzag ? zigzag : max_zigzag;
+        small_count  += (uint32_t)(zigzag < 256);
+        medium_count += (uint32_t)(zigzag >= 256) & (uint32_t)(zigzag < 65536);
 
         prev = curr;
-        p += 4;
+        p += sizeof(uint32_t);
     }
 
     // Calculate bit width needed for max delta
@@ -1429,13 +1438,12 @@ static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
     size_t w = 0;
-    int res = -1;
-    int try_num = 0;
+    int res = ZXC_OK;
+    int try_num = UNLIKELY(zxc_probe_is_numeric(chunk, src_sz));
 
-    if (UNLIKELY(zxc_probe_is_numeric(chunk, src_sz))) try_num = 1;
     if (UNLIKELY(try_num)) {
         res = zxc_encode_block_num(ctx, chunk, src_sz, dst, dst_cap, &w);
-        if (res != 0 || w > (src_sz - (src_sz >> 2)))  // w > 75% of src_sz
+        if (res != ZXC_OK || w > (src_sz - (src_sz >> 2)))  // w > 75% of src_sz
             try_num = 0;  // NUM didn't compress well, try GLO/GHI instead
     }
 
@@ -1447,15 +1455,16 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     }
 
     // Check expansion. W contains Header + Payload.
-    if (UNLIKELY(res != 0 || w >= src_sz)) {
+    if (UNLIKELY(res != ZXC_OK || w >= src_sz)) {
         res = zxc_encode_block_raw(chunk, src_sz, dst, dst_cap, &w);
-        if (UNLIKELY(res != 0)) return res;
+        if (UNLIKELY(res != ZXC_OK)) return res;
     }
 
     if (ctx->checksum_enabled) {
         // Calculate checksum on the compressed payload (w currently excludes checksum)
         // Header is at dst, data starts at dst + ZXC_BLOCK_HEADER_SIZE
-        if (UNLIKELY(w < ZXC_BLOCK_HEADER_SIZE || w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap)) return -1;
+        if (UNLIKELY(w < ZXC_BLOCK_HEADER_SIZE || w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap))
+            return ZXC_ERROR_OVERFLOW;
 
         uint32_t payload_sz = (uint32_t)(w - ZXC_BLOCK_HEADER_SIZE);
         uint32_t crc =
