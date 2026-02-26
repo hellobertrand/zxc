@@ -356,7 +356,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
     uint32_t running_val = 0;
 
     ZXC_ALIGN(ZXC_CACHE_LINE_SIZE)
-    uint32_t deltas[ZXC_DEC_BATCH];
+    uint32_t deltas[ZXC_NUM_DEC_BATCH];
 
     while (vals_remaining > 0) {
         if (UNLIKELY(offset + ZXC_NUM_CHUNK_HEADER_SIZE > src_size)) return ZXC_ERROR_SRC_TOO_SMALL;
@@ -375,8 +375,8 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
         zxc_br_init(&br, src + offset, psize);
         size_t i = 0;
 
-        for (; i + ZXC_DEC_BATCH <= nvals; i += ZXC_DEC_BATCH) {
-            for (int k = 0; k < ZXC_DEC_BATCH; k += 4) {
+        for (; i + ZXC_NUM_DEC_BATCH <= nvals; i += ZXC_NUM_DEC_BATCH) {
+            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 4) {
                 zxc_br_ensure(&br, bits);
                 deltas[k + 0] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
                 zxc_br_ensure(&br, bits);
@@ -390,7 +390,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
             uint32_t* batch_dst = (uint32_t*)d_ptr;
 
 #if defined(ZXC_USE_AVX512)
-            for (int k = 0; k < ZXC_DEC_BATCH; k += 16) {
+            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 16) {
                 __m512i v_deltas = _mm512_load_si512((void*)&deltas[k]);  // Load 16 deltas
                 __m512i v_run = _mm512_set1_epi32(running_val);  // Broadcast current running total
 
@@ -407,7 +407,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
             }
 
 #elif defined(ZXC_USE_AVX2)
-            for (int k = 0; k < ZXC_DEC_BATCH; k += 8) {
+            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 8) {
                 __m256i v_deltas = _mm256_load_si256((const __m256i*)&deltas[k]);  // Load 8 deltas
                 __m256i v_run = _mm256_set1_epi32(running_val);  // Broadcast running total
 
@@ -421,7 +421,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
             uint32x4_t v_run = vdupq_n_u32(running_val);  // Broadcast running total
-            for (int k = 0; k < ZXC_DEC_BATCH; k += 4) {
+            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 4) {
                 uint32x4_t v_deltas = vld1q_u32(&deltas[k]);  // Load 4 deltas
 
                 uint32x4_t v_sum = zxc_neon_prefix_sum_u32(v_deltas);  // Compute local prefix sums
@@ -434,7 +434,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
             }
 
 #else
-            for (int k = 0; k < ZXC_DEC_BATCH; k++) {
+            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k++) {
                 running_val += deltas[k];
 #ifdef ZXC_BIG_ENDIAN
                 zxc_store_le32(&batch_dst[k], running_val);
@@ -443,7 +443,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 #endif
             }
 #endif
-            d_ptr += ZXC_DEC_BATCH * sizeof(uint32_t);
+            d_ptr += ZXC_NUM_DEC_BATCH * sizeof(uint32_t);
         }
 
         for (; i < nvals; i++) {

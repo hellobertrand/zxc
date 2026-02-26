@@ -1005,7 +1005,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 #endif
                 size_t lit_run = (size_t)(p - lit_start);
                 // 1 header per 128 bytes + all data bytes
-                // = lit_run + ceil(lit_run / 128)
+                // lit_run + ceil(lit_run / 128)
                 rle_size += lit_run + ((lit_run + 127) >> 7);
             }
         }
