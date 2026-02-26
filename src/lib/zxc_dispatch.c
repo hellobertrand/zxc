@@ -144,7 +144,7 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 #elif defined(__arm__) || defined(_M_ARM)
     // ARM32 Runtime detection for Linux
 #if defined(__linux__)
-    unsigned long hwcaps = getauxval(AT_HWCAP);
+    const unsigned long hwcaps = getauxval(AT_HWCAP);
     if (hwcaps & HWCAP_NEON) {
         features = ZXC_CPU_NEON;
     }
@@ -383,7 +383,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
     // Write EOF Block (Checksum flag handled by Block Header, but we zero it out now)
     const size_t rem_cap = (size_t)(op_end - op);
-    zxc_block_header_t eof_bh = {
+    const zxc_block_header_t eof_bh = {
         .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
     const int eof_val = zxc_write_block_header(op, rem_cap, &eof_bh);
     if (UNLIKELY(eof_val < 0)) return eof_val;
