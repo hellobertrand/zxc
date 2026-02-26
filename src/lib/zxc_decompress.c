@@ -50,9 +50,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* br, uint
     // BMI2 Optimization: _bzhi_u64(x, n) copies the lower n bits of x to dst and
     // clears the rest. It is equivalent to x & ((1ULL << n) - 1) but executes in
     // a single cycle without dependency chains.
-    uint32_t val = (uint32_t)_bzhi_u64(br->accum, n);
+    const uint32_t val = (uint32_t)_bzhi_u64(br->accum, n);
 #else
-    uint32_t val = (uint32_t)(br->accum & ((1ULL << n) - 1));
+    const uint32_t val = (uint32_t)(br->accum & ((1ULL << n) - 1));
 #endif
     br->accum >>= n;
     br->bits -= n;
@@ -229,16 +229,16 @@ static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
  * @return A uint32x4_t vector containing the prefix sums.
  */
 static ZXC_ALWAYS_INLINE uint32x4_t zxc_neon_prefix_sum_u32(uint32x4_t v) {
-    uint32x4_t zero = vdupq_n_u32(0);  // Create a vector of zeros
+    const uint32x4_t zero = vdupq_n_u32(0);  // Create a vector of zeros
 
     // Rotate right by 1 element (shift 4 bytes)
-    uint32x4_t s1 =
+    const uint32x4_t s1 =
         vreinterpretq_u32_u8(vextq_u8(vreinterpretq_u8_u32(zero), vreinterpretq_u8_u32(v), 12));
     v = vaddq_u32(v, s1);  // Add shifted version: [a, b, c, d] + [0, a, b, c] ->
                            // [a, a+b, b+c, c+d]
 
     // Rotate right by 2 elements (shift 8 bytes)
-    uint32x4_t s2 =
+    const uint32x4_t s2 =
         vreinterpretq_u32_u8(vextq_u8(vreinterpretq_u8_u32(zero), vreinterpretq_u8_u32(v), 8));
     v = vaddq_u32(v, s2);  // Add shifted version to complete prefix sum
 
@@ -361,9 +361,9 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
     while (vals_remaining > 0) {
         if (UNLIKELY(offset + ZXC_NUM_CHUNK_HEADER_SIZE > src_size)) return ZXC_ERROR_SRC_TOO_SMALL;
 
-        uint16_t nvals = zxc_le16(src + offset);
-        uint16_t bits = zxc_le16(src + offset + 2);
-        uint32_t psize = zxc_le32(src + offset + 12);  // padding + nvals + bits
+        const uint16_t nvals = zxc_le16(src + offset);
+        const uint16_t bits = zxc_le16(src + offset + 2);
+        const uint32_t psize = zxc_le32(src + offset + 12);  // padding + nvals + bits
         offset += ZXC_NUM_CHUNK_HEADER_SIZE;
 
         if (UNLIKELY(nvals > vals_remaining || src_size < offset + psize ||
@@ -448,7 +448,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 
         for (; i < nvals; i++) {
             zxc_br_ensure(&br, bits);
-            uint32_t delta = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
+            const uint32_t delta = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
             running_val += delta;
             zxc_store_le32(d_ptr, running_val);
             d_ptr += sizeof(uint32_t);
@@ -498,7 +498,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     size_t lit_stream_size = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
 
     if (gh.enc_lit == 1) {
-        size_t required_size = (size_t)(desc[0].sizes >> 32);
+        const size_t required_size = (size_t)(desc[0].sizes >> 32);
 
         if (required_size > 0) {
             if (UNLIKELY(required_size > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
@@ -529,7 +529,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                 if (LIKELY(!(token & ZXC_LIT_RLE_FLAG))) {
                     // Raw copy (most common path): use ZXC_PAD_SIZE-byte wild copies
                     // token is 7-bit (0-127), so len is 1-128 bytes
-                    uint32_t len = (uint32_t)token + 1;
+                    const uint32_t len = (uint32_t)token + 1;
                     if (UNLIKELY(w_ptr + len > w_end || r_ptr + len > r_end))
                         return ZXC_ERROR_CORRUPT_DATA;
 
@@ -563,7 +563,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                     r_ptr += len;
                 } else {
                     // RLE run: fill with single byte
-                    uint32_t len = (token & ZXC_LIT_LEN_MASK) + 4;
+                    const uint32_t len = (token & ZXC_LIT_LEN_MASK) + 4;
                     if (UNLIKELY(w_ptr + len > w_end || r_ptr >= r_end))
                         return ZXC_ERROR_CORRUPT_DATA;
                     ZXC_MEMSET(w_ptr, *r_ptr++, len);
@@ -1433,7 +1433,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         const uint8_t* seq_save = seq_ptr;
         const uint8_t* ext_save = extras_ptr;
 
-        uint32_t seq = zxc_le32(seq_ptr);
+        const uint32_t seq = zxc_le32(seq_ptr);
         seq_ptr += 4;
 
         uint32_t ll = (uint32_t)(seq >> 24);
