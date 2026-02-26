@@ -29,17 +29,6 @@
 #define zxc_compress_chunk_wrapper ZXC_CAT(zxc_compress_chunk_wrapper, ZXC_FUNCTION_SUFFIX)
 #endif
 
-#define ZXC_NUM_FRAME_SIZE \
-    128  // Maximum number of frames that can be processed in a single compression operation.
-#define ZXC_EPOCH_BITS \
-    14  // Number of bits reserved for epoch tracking in compressed pointers.
-        // Derived from chunk size: 2^18 = ZXC_BLOCK_SIZE => 32 - 18 = 14 bits.
-#define ZXC_OFFSET_MASK              \
-    ((1U << (32 - ZXC_EPOCH_BITS)) - \
-     1)  // Mask to extract the offset bits from a compressed pointer.
-#define ZXC_MAX_EPOCH \
-    (1U << ZXC_EPOCH_BITS)  // Maximum number of epochs supported by the compression system.
-
 /**
  * @brief Computes a hash value optimized for LZ77 pattern matching speed.
  *
@@ -629,15 +618,15 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
         uint8_t bits = zxc_highbit32(max_d);
         size_t packed = ((frames * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
-        if (UNLIKELY(rem < 16 + packed)) return ZXC_ERROR_DST_TOO_SMALL;
+        if (UNLIKELY(rem < ZXC_NUM_CHUNK_HEADER_SIZE + packed)) return ZXC_ERROR_DST_TOO_SMALL;
 
         zxc_store_le16(p_curr, (uint16_t)frames);
         zxc_store_le16(p_curr + 2, bits);
         zxc_store_le64(p_curr + 4, (uint64_t)base);
         zxc_store_le32(p_curr + 12, (uint32_t)packed);
 
-        p_curr += 16;
-        rem -= 16;
+        p_curr += ZXC_NUM_CHUNK_HEADER_SIZE;
+        rem -= ZXC_NUM_CHUNK_HEADER_SIZE;
 
         int pb = zxc_bitpack_stream_32(deltas, frames, p_curr, rem, bits);
         if (UNLIKELY(pb < 0)) return pb;
@@ -1407,7 +1396,7 @@ static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
         const uint32_t zigzag = zxc_zigzag_encode(diff);
 
         max_zigzag = zigzag > max_zigzag ? zigzag : max_zigzag;
-        small_count  += (uint32_t)(zigzag < 256);
+        small_count += (uint32_t)(zigzag < 256);
         medium_count += (uint32_t)(zigzag >= 256) & (uint32_t)(zigzag < 65536);
 
         prev = curr;
