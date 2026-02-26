@@ -16,6 +16,34 @@ const LEVEL_DEFAULT  = native.LEVEL_DEFAULT;
 const LEVEL_BALANCED = native.LEVEL_BALANCED;
 const LEVEL_COMPACT  = native.LEVEL_COMPACT;
 
+// Re-export error constants
+const ERROR_MEMORY         = native.ERROR_MEMORY;
+const ERROR_DST_TOO_SMALL  = native.ERROR_DST_TOO_SMALL;
+const ERROR_SRC_TOO_SMALL  = native.ERROR_SRC_TOO_SMALL;
+const ERROR_BAD_MAGIC      = native.ERROR_BAD_MAGIC;
+const ERROR_BAD_VERSION    = native.ERROR_BAD_VERSION;
+const ERROR_BAD_HEADER     = native.ERROR_BAD_HEADER;
+const ERROR_BAD_CHECKSUM   = native.ERROR_BAD_CHECKSUM;
+const ERROR_CORRUPT_DATA   = native.ERROR_CORRUPT_DATA;
+const ERROR_BAD_OFFSET     = native.ERROR_BAD_OFFSET;
+const ERROR_OVERFLOW       = native.ERROR_OVERFLOW;
+const ERROR_IO             = native.ERROR_IO;
+const ERROR_NULL_INPUT     = native.ERROR_NULL_INPUT;
+const ERROR_BAD_BLOCK_TYPE = native.ERROR_BAD_BLOCK_TYPE;
+
+/**
+ * Returns a human-readable name for a given error code.
+ *
+ * @param {number} code - ZXC error code.
+ * @returns {string} Error name (e.g., "ZXC_ERROR_DST_TOO_SMALL").
+ */
+function errorName(code) {
+    if (typeof code !== 'number') {
+        throw new TypeError('code must be a number');
+    }
+    return native.errorName(code);
+}
+
 /**
  * Returns the maximum compressed size for a given input size.
  * Useful for pre-allocating output buffers.
@@ -112,4 +140,20 @@ module.exports = {
     LEVEL_DEFAULT,
     LEVEL_BALANCED,
     LEVEL_COMPACT,
+
+    // Error handling
+    errorName,
+    ERROR_MEMORY,
+    ERROR_DST_TOO_SMALL,
+    ERROR_SRC_TOO_SMALL,
+    ERROR_BAD_MAGIC,
+    ERROR_BAD_VERSION,
+    ERROR_BAD_HEADER,
+    ERROR_BAD_CHECKSUM,
+    ERROR_CORRUPT_DATA,
+    ERROR_BAD_OFFSET,
+    ERROR_OVERFLOW,
+    ERROR_IO,
+    ERROR_NULL_INPUT,
+    ERROR_BAD_BLOCK_TYPE,
 };

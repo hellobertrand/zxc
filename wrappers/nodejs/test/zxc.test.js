@@ -123,3 +123,52 @@ describe('constants', () => {
         expect(zxc.LEVEL_COMPACT).toBe(5);
     });
 });
+
+// =============================================================================
+// Error Handling
+// =============================================================================
+
+describe('error handling', () => {
+    test('error constants are defined', () => {
+        expect(zxc.ERROR_MEMORY).toBe(-1);
+        expect(zxc.ERROR_DST_TOO_SMALL).toBe(-2);
+        expect(zxc.ERROR_SRC_TOO_SMALL).toBe(-3);
+        expect(zxc.ERROR_BAD_MAGIC).toBe(-4);
+        expect(zxc.ERROR_BAD_VERSION).toBe(-5);
+        expect(zxc.ERROR_BAD_HEADER).toBe(-6);
+        expect(zxc.ERROR_BAD_CHECKSUM).toBe(-7);
+        expect(zxc.ERROR_CORRUPT_DATA).toBe(-8);
+        expect(zxc.ERROR_BAD_OFFSET).toBe(-9);
+        expect(zxc.ERROR_OVERFLOW).toBe(-10);
+        expect(zxc.ERROR_IO).toBe(-11);
+        expect(zxc.ERROR_NULL_INPUT).toBe(-12);
+        expect(zxc.ERROR_BAD_BLOCK_TYPE).toBe(-13);
+    });
+
+    test('errorName works', () => {
+        expect(zxc.errorName(zxc.ERROR_DST_TOO_SMALL)).toBe('ZXC_ERROR_DST_TOO_SMALL');
+        expect(zxc.errorName(-999)).toBe('ZXC_UNKNOWN_ERROR');
+    });
+
+    test('thrown errors have code property', () => {
+        try {
+            zxc.decompress(Buffer.from([0x01, 0x02, 0x03]), { size: 100 });
+            throw new Error('Should have thrown');
+        } catch (err) {
+            expect(err.code).toBe(zxc.ERROR_NULL_INPUT);
+            expect(err.message).toBe('ZXC_ERROR_NULL_INPUT');
+        }
+    });
+
+    test('detects bad magic with correct code', () => {
+        try {
+            // Provide enough bytes (16 for header) but fake magic
+            const fakeHeader = Buffer.alloc(32);
+            fakeHeader.write('FAKE', 0, 'utf8');
+            zxc.decompress(fakeHeader, { size: 100 });
+            throw new Error('Should have thrown');
+        } catch (err) {
+            expect(err.code).toBe(zxc.ERROR_BAD_HEADER);
+        }
+    });
+});

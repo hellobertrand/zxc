@@ -68,8 +68,10 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
                                      level, checksum);
 
     if (nwritten < 0) {
-        Napi::Error::New(env, zxc_error_name(static_cast<int>(nwritten)))
-            .ThrowAsJavaScriptException();
+        int err_code = static_cast<int>(nwritten);
+        Napi::Error err = Napi::Error::New(env, zxc_error_name(err_code));
+        err.Set("code", Napi::Number::New(env, err_code));
+        err.ThrowAsJavaScriptException();
         return env.Undefined();
     }
 
@@ -112,8 +114,10 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
                                        checksum);
 
     if (nwritten < 0) {
-        Napi::Error::New(env, zxc_error_name(static_cast<int>(nwritten)))
-            .ThrowAsJavaScriptException();
+        int err_code = static_cast<int>(nwritten);
+        Napi::Error err = Napi::Error::New(env, zxc_error_name(err_code));
+        err.Set("code", Napi::Number::New(env, err_code));
+        err.ThrowAsJavaScriptException();
         return env.Undefined();
     }
 
@@ -178,6 +182,21 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("LEVEL_DEFAULT",  Napi::Number::New(env, ZXC_LEVEL_DEFAULT));
     exports.Set("LEVEL_BALANCED", Napi::Number::New(env, ZXC_LEVEL_BALANCED));
     exports.Set("LEVEL_COMPACT",  Napi::Number::New(env, ZXC_LEVEL_COMPACT));
+
+    // Error constants
+    exports.Set("ERROR_MEMORY",         Napi::Number::New(env, ZXC_ERROR_MEMORY));
+    exports.Set("ERROR_DST_TOO_SMALL",  Napi::Number::New(env, ZXC_ERROR_DST_TOO_SMALL));
+    exports.Set("ERROR_SRC_TOO_SMALL",  Napi::Number::New(env, ZXC_ERROR_SRC_TOO_SMALL));
+    exports.Set("ERROR_BAD_MAGIC",      Napi::Number::New(env, ZXC_ERROR_BAD_MAGIC));
+    exports.Set("ERROR_BAD_VERSION",    Napi::Number::New(env, ZXC_ERROR_BAD_VERSION));
+    exports.Set("ERROR_BAD_HEADER",     Napi::Number::New(env, ZXC_ERROR_BAD_HEADER));
+    exports.Set("ERROR_BAD_CHECKSUM",   Napi::Number::New(env, ZXC_ERROR_BAD_CHECKSUM));
+    exports.Set("ERROR_CORRUPT_DATA",   Napi::Number::New(env, ZXC_ERROR_CORRUPT_DATA));
+    exports.Set("ERROR_BAD_OFFSET",     Napi::Number::New(env, ZXC_ERROR_BAD_OFFSET));
+    exports.Set("ERROR_OVERFLOW",       Napi::Number::New(env, ZXC_ERROR_OVERFLOW));
+    exports.Set("ERROR_IO",             Napi::Number::New(env, ZXC_ERROR_IO));
+    exports.Set("ERROR_NULL_INPUT",     Napi::Number::New(env, ZXC_ERROR_NULL_INPUT));
+    exports.Set("ERROR_BAD_BLOCK_TYPE", Napi::Number::New(env, ZXC_ERROR_BAD_BLOCK_TYPE));
 
     return exports;
 }
