@@ -312,17 +312,18 @@ extern "C" {
 #define ZXC_BLOCK_CHECKSUM_SIZE 4
 /** @brief Binary size of a NUM block sub-header. */
 #define ZXC_NUM_HEADER_BINARY_SIZE 16
-/** @brief Binary size of a NUM chunk sub-frame header (nvals + bits + base + psize). */
-#define ZXC_NUM_CHUNK_HEADER_SIZE 16
-/** @brief Number of numeric values to decode in a single SIMD batch (NUM block). */
-#define ZXC_DEC_BATCH 32
-/** @brief Maximum number of frames that can be processed in a single compression operation (NUM
- * block). */
-#define ZXC_NUM_FRAME_SIZE 128
 /** @brief Binary size of a GLO block sub-header. */
 #define ZXC_GLO_HEADER_BINARY_SIZE 16
 /** @brief Binary size of a GHI block sub-header. */
 #define ZXC_GHI_HEADER_BINARY_SIZE 16
+
+/** @brief Binary size of a NUM chunk sub-frame header (nvals + bits + base + psize). */
+#define ZXC_NUM_CHUNK_HEADER_SIZE 16
+/** @brief Number of numeric values to decode in a single SIMD batch (NUM block). */
+#define ZXC_NUM_DEC_BATCH 32
+/** @brief Maximum number of frames that can be processed in a single compression operation (NUM
+ * block). */
+#define ZXC_NUM_FRAME_SIZE 128
 
 /** @brief Binary size of a section descriptor (comp_size + raw_size). */
 #define ZXC_SECTION_DESC_BINARY_SIZE 8
