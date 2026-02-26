@@ -477,10 +477,10 @@ static int zxc_list_archive(const char* path, int json_output) {
         fprintf(stderr, "Error: Cannot seek in file\n");
         return 1;
     }
-    long long file_size = ftello(f);
+    const long long file_size = ftello(f);
 
     // Use public API to get decompressed size
-    int64_t uncompressed_size = zxc_stream_get_decompressed_size(f);
+    const int64_t uncompressed_size = zxc_stream_get_decompressed_size(f);
     if (uncompressed_size < 0) {
         fclose(f);
         fprintf(stderr, "Error: Not a valid ZXC archive\n");
@@ -511,12 +511,12 @@ static int zxc_list_archive(const char* path, int json_output) {
     fclose(f);
 
     // Parse checksum (if non-zero, checksum was enabled)
-    uint32_t stored_checksum = footer[8] | ((uint32_t)footer[9] << 8) |
-                               ((uint32_t)footer[10] << 16) | ((uint32_t)footer[11] << 24);
+    const uint32_t stored_checksum = footer[8] | ((uint32_t)footer[9] << 8) |
+                                     ((uint32_t)footer[10] << 16) | ((uint32_t)footer[11] << 24);
     const char* checksum_method = (stored_checksum != 0) ? "RapidHash" : "-";
 
     // Calculate ratio (uncompressed / compressed, e.g., 2.5 means 2.5x compression)
-    double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;
+    const double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;
 
     // Format sizes
     char comp_str[32], uncomp_str[32];
@@ -904,7 +904,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         int ret = 0;
-        int num_files = argc - optind;
+        const int num_files = argc - optind;
 
         if (json_output && num_files > 1) printf("[\n");
 
@@ -1015,7 +1015,7 @@ int main(int argc, char** argv) {
         f_out = fopen(resolved_out, "wb");
 #else
         // Restrict permissions to 0644
-        int fd =
+        const int fd =
             open(resolved_out, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         if (fd == -1) {
             zxc_log("Error creating output %s: %s\n", resolved_out, strerror(errno));
@@ -1072,17 +1072,17 @@ int main(int argc, char** argv) {
         // Get file size based on mode
         if (mode == MODE_COMPRESS) {
             // Compression: get input file size
-            long long saved_pos = ftello(f_in);
+            const long long saved_pos = ftello(f_in);
             if (saved_pos >= 0) {
                 if (fseeko(f_in, 0, SEEK_END) == 0) {
-                    long long size = ftello(f_in);
+                    const long long size = ftello(f_in);
                     if (size > 0) total_size = (uint64_t)size;
                     fseeko(f_in, saved_pos, SEEK_SET);
                 }
             }
         } else {
             // Decompression: get decompressed size from footer (BEFORE starting decompression)
-            int64_t decomp_size = zxc_stream_get_decompressed_size(f_in);
+            const int64_t decomp_size = zxc_stream_get_decompressed_size(f_in);
             if (decomp_size > 0) total_size = (uint64_t)decomp_size;
         }
 
@@ -1103,7 +1103,7 @@ int main(int argc, char** argv) {
                            .operation = (mode == MODE_COMPRESS) ? "Compressing" : "Decompressing",
                            .total_size = total_size};
 
-    double t0 = zxc_now();
+    const double t0 = zxc_now();
     int64_t bytes;
     if (mode == MODE_COMPRESS)
         bytes = zxc_stream_compress_ex(f_in, f_out, num_threads, level, checksum,
