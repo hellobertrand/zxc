@@ -689,7 +689,9 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     FILE* f_out = stdout;
     char resolved_in_path[4096] = {0};
     char out_path[1024] = {0};
+    char resolved_out_path[4096] = {0};
     int use_stdin = 1, use_stdout = 0;
+    int created_out_file = 0;
 
     int overall_ret = 0;
 
@@ -750,27 +752,26 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
     // Open output file if not writing to stdout
     if (!use_stdout && mode != MODE_INTEGRITY) {
-        char resolved_out[4096];
-        if (zxc_validate_output_path(out_path, resolved_out, sizeof(resolved_out)) != 0) {
+        if (zxc_validate_output_path(out_path, resolved_out_path, sizeof(resolved_out_path)) != 0) {
             zxc_log("Error: Invalid output path '%s': %s\n", out_path, strerror(errno));
             if (f_in) fclose(f_in);
             return 1;
         }
 
-        if (!force && access(resolved_out, F_OK) == 0) {
-            zxc_log("Output exists. Use -f to overwrite '%s'.\n", resolved_out);
+        if (!force && access(resolved_out_path, F_OK) == 0) {
+            zxc_log("Output exists. Use -f to overwrite '%s'.\n", resolved_out_path);
             fclose(f_in);
             return 1;
         }
 
 #ifdef _WIN32
-        f_out = fopen(resolved_out, "wb");
+        f_out = fopen(resolved_out_path, "wb");
 #else
         // Restrict permissions to 0644
-        const int fd =
-            open(resolved_out, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        const int fd = open(resolved_out_path, O_CREAT | O_WRONLY | O_TRUNC,
+                            S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         if (fd == -1) {
-            zxc_log("Error creating output %s: %s\n", resolved_out, strerror(errno));
+            zxc_log("Error creating output %s: %s\n", resolved_out_path, strerror(errno));
             fclose(f_in);
             return 1;
         }
@@ -778,13 +779,14 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 #endif
 
         if (!f_out) {
-            zxc_log("Error open output %s: %s\n", resolved_out, strerror(errno));
+            zxc_log("Error open output %s: %s\n", resolved_out_path, strerror(errno));
             if (f_in) fclose(f_in);
 #ifndef _WIN32
             if (fd != -1) close(fd);
 #endif
             return 1;
         }
+        created_out_file = 1;
     }
 
     // Prevent writing binary data to the terminal unless forced
@@ -844,8 +846,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
     // Set large buffers for I/O performance (AFTER file size detection)
     char *b1 = malloc(1024 * 1024), *b2 = malloc(1024 * 1024);
-    setvbuf(f_in, b1, _IOFBF, 1024 * 1024);
-    if (f_out) setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
+    if (b1) setvbuf(f_in, b1, _IOFBF, 1024 * 1024);
+    if (f_out && b2) setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
 
     if (in_path && !g_quiet) {
         zxc_log_v("Processing %s... (Compression Level %d)\n", in_path, level);
@@ -934,6 +936,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             }
         } else {
             zxc_log("Operation failed on %s.\n", in_path ? in_path : "<stdin>");
+            if (created_out_file) unlink(resolved_out_path);
         }
         overall_ret = 1;
     }
