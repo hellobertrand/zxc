@@ -1157,7 +1157,7 @@ int main(int argc, char** argv) {
 
         double best_compress = 1e30;
         int compress_iters = 0;
-        const double compress_deadline = zxc_now() + bench_seconds;
+        const double compress_deadline = zxc_now() + (double)bench_seconds;
         const double compress_start = zxc_now();
         while (zxc_now() < compress_deadline) {
             rewind(fm);
@@ -1226,7 +1226,7 @@ int main(int argc, char** argv) {
 
         double best_decompress = 1e30;
         int decompress_iters = 0;
-        const double decompress_deadline = zxc_now() + bench_seconds;
+        const double decompress_deadline = zxc_now() + (double)bench_seconds;
         const double decompress_start = zxc_now();
         while (zxc_now() < decompress_deadline) {
             rewind(fc);
