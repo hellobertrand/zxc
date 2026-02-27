@@ -414,9 +414,9 @@ Generated archive size: **58 bytes**.
 ### 11.1 Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 04 40 80 00 00 00 00 00 00 00 F8 F4
-00000010: 00 00 00 0A 00 00 00 50 48 65 6C 6C 6F 20 5A 58
-00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 DC 0A 00
+00000000: F5 2E B0 9C 05 40 80 00 00 00 00 00 00 00 26 2E
+00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
+00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
 ```
 
@@ -425,28 +425,28 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 04 | 40 | 80 | 00 00 00 00 00 00 00 | F8 F4
+F5 2E B0 9C | 05 | 40 | 80 | 00 00 00 00 00 00 00 | 26 2E
 ```
 
 - `F5 2E B0 9C` → magic word (LE) = `0x9CB02EF5`.
-- `04` → format version 4.
+- `05` → format version 5.
 - `40` → chunk-size code 64 (`64 * 4096 = 262144` bytes, i.e. 256 KiB).
 - `80` → checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `F8 F4` → header CRC16.
+- `26 2E` → header CRC16.
 
 #### B) Data Block #0 (RAW)
 
 Block header at offset `0x10`:
 
 ```text
-00 | 00 | 00 | 0A 00 00 00 | 50
+00 | 00 | 00 | 0A 00 00 00 | 69
 ```
 
 - type `00` = RAW.
 - flags `00`, reserved `00`.
 - `comp_size = 0x0000000A = 10` bytes.
-- header CRC8 = `0x50`.
+- header CRC8 = `0x69`.
 
 Payload at `0x18..0x21` (10 bytes):
 
@@ -467,12 +467,12 @@ LE value: `0x75A1BB90`.
 #### C) EOF Block (offset `0x26`, 8 bytes)
 
 ```text
-FF | 00 | 00 | 00 00 00 00 | DC
+FF | 00 | 00 | 00 00 00 00 | 02
 ```
 
 - type `FF` = EOF.
 - `comp_size = 0` (mandatory).
-- header CRC8 = `0xDC`.
+- header CRC8 = `0x02`.
 
 #### D) File Footer (offset `0x2E`, 12 bytes)
 

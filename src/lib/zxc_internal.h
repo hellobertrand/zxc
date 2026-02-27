@@ -382,14 +382,18 @@ extern "C" {
 /** @name LZ77 Constants
  *  @brief Hash table geometry, sliding window, and match parameters.
  *
- *  The hash table uses 13 bits for addressing (8 192 entries), doubled to
+ *  The hash table uses 14 bits for addressing (16 384 entries), doubled to
  *  keep the load factor below 0.5.  Each entry stores
  *  `(epoch << 18) | offset`, totalling 64 KB of memory.
  *  The 64 KB sliding window allows `chain_table` to use `uint16_t`.
  *  @{ */
-/** @brief Address bits for the LZ77 hash table (2^13 = 8 192). */
-#define ZXC_LZ_HASH_BITS 13
-/** @brief Number of entries in the hash table. */
+/** @brief Address bits for the LZ77 hash table (2^14 = 16 384 max). */
+#define ZXC_LZ_HASH_BITS 14
+/** @brief Marsaglia multiplicative hash constant for 4-byte hashing. */
+#define ZXC_LZ_HASH_PRIME1 0x2D35182DU
+/** @brief Marsaglia/Vigna xorshift* multiplier for 5-byte hashing. */
+#define ZXC_LZ_HASH_PRIME2 0x2545F4914F6CDD1DULL
+/** @brief Maximum number of entries in the hash table. */
 #define ZXC_LZ_HASH_SIZE (1U << ZXC_LZ_HASH_BITS)
 /** @brief Sliding window size (64 KB). */
 #define ZXC_LZ_WINDOW_SIZE (1U << 16)
@@ -414,13 +418,9 @@ extern "C" {
  *  @brief Mixing primes used by internal hash functions.
  *  @{ */
 /** @brief Hash prime 1. */
-#define ZXC_HASH_PRIME1 0x9E3779B1U
+#define ZXC_HASH_PRIME1 0x9E3779B97F4A7C15ULL
 /** @brief Hash prime 2. */
-#define ZXC_HASH_PRIME2 0x85BA2D97U
-/** @brief Hash prime 3. */
-#define ZXC_HASH_PRIME3 0xB0F57EE3U
-/** @brief Hash prime 4. */
-#define ZXC_HASH_PRIME4 0x27D4EB2FU
+#define ZXC_HASH_PRIME2 0xD2D84A61D2D84A61ULL
 /** @} */
 
 /** @} */ /* end of File Format Constants */
@@ -454,8 +454,8 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
         {4, 16, 0, 0, 4, 4},  // fallback
         {4, 16, 0, 0, 4, 4},  // level 1
         {6, 24, 0, 0, 3, 6},  // level 2
-        {4, 32, 1, 8, 1, 4},  // level 3
-        {4, 32, 1, 8, 1, 5}   // level 4
+        {3, 18, 1, 4, 1, 4},  // level 3
+        {3, 18, 1, 4, 1, 5}   // level 4
     };
     return table[level < 1 ? 1 : level];
 }
@@ -714,16 +714,18 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
 /**
  * @brief Computes the 1-byte checksum for block headers.
  *
+ * Implementation based on Marsaglia's Xorshift (PRNG) principles.
+ *
  * @param[in] p Pointer to the input data to be hashed (8 bytes)
  * @return uint8_t The computed hash value.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
     const uint64_t v = zxc_le64(p);
-    uint64_t h = v * ZXC_HASH_PRIME1;
-    h ^= (h >> 32);
-    h *= ZXC_HASH_PRIME2;
-    h ^= (h >> 32);
-    return (uint8_t)h;
+    uint64_t h = v ^ ZXC_HASH_PRIME1;
+    h ^= h << 13;
+    h ^= h >> 7;
+    h ^= h << 17;
+    return (uint8_t)((h >> 32) ^ h);
 }
 
 /**
@@ -731,24 +733,20 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
  *
  * This function generates a hash value by reading data from the given pointer.
  * The result is a 16-bit hash.
+ * Implementation based on Marsaglia's Xorshift (PRNG) principles.
  *
  * @param[in] p Pointer to the input data to be hashed (16 bytes)
  * @return uint16_t The computed hash value.
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
-    const uint32_t v0 = zxc_le32(p);
-    const uint32_t v1 = zxc_le32(p + 4);
-    const uint32_t v2 = zxc_le32(p + 8);
-    const uint32_t v3 = zxc_le32(p + 12);
-
-    uint32_t h = (v0 * ZXC_HASH_PRIME1);
-    h ^= (v1 * ZXC_HASH_PRIME2);
-    h ^= (v2 * ZXC_HASH_PRIME3);
-    h ^= (v3 * ZXC_HASH_PRIME4);
-
-    h = (h << 13) | (h >> 19);
-    h *= ZXC_HASH_PRIME1;
-    return (uint16_t)((h ^ (h >> 16)) & 0xFFFF);
+    const uint64_t h1 = zxc_le64(p);
+    const uint64_t h2 = zxc_le64(p + 8);
+    uint64_t h = h1 ^ h2 ^ ZXC_HASH_PRIME2;
+    h ^= h << 13;
+    h ^= h >> 7;
+    h ^= h << 17;
+    uint32_t res = (uint32_t)((h >> 32) ^ h);
+    return (uint16_t)((res >> 16) ^ res);
 }
 
 /**

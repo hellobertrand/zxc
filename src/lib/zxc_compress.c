@@ -30,17 +30,21 @@
 #endif
 
 /**
- * @brief Computes a hash value optimized for LZ77 pattern matching speed.
+ * @brief Computes a hash value for either a 4-byte or 5-byte sequence.
  *
- * Knuth's multiplicative hash constant: 2654435761 (golden ratio * 2^32)
- * Returns upper bits which have the best avalanche properties
- * The caller applies the mask (& (ZXC_LZ_HASH_SIZE - 1))
- *
- * @param[in] val The 32-bit integer sequence (e.g., 4 bytes from the input stream).
+ * @param[in] val The 64-bit integer sequence (e.g., 8 bytes read from input stream).
+ * @param[in] use_hash5 Non-zero to use the 5-byte xorshift64* hash (Marsaglia/Vigna), zero for
+ * 4-byte Marsaglia hash.
  * @return uint32_t A hash value suitable for indexing the match table.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint32_t val) {
-    return (val * 2654435761U) >> (32 - ZXC_LZ_HASH_BITS);
+static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint64_t val, const int use_hash5) {
+    if (use_hash5) {
+        const uint64_t v5 = val & 0xFFFFFFFFFFULL;
+        return (uint32_t)((v5 * ZXC_LZ_HASH_PRIME2) >> (64 - ZXC_LZ_HASH_BITS));
+    } else {
+        val ^= val >> 15;
+        return ((uint32_t)val * ZXC_LZ_HASH_PRIME1) >> (32 - ZXC_LZ_HASH_BITS);
+    }
 }
 
 #if defined(ZXC_USE_AVX2)
@@ -166,20 +170,22 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* mflimit,
     const uint8_t* anchor, uint32_t* RESTRICT hash_table, uint16_t* RESTRICT chain_table,
     uint32_t epoch_mark, const int level, const zxc_lz77_params_t p) {
+    const int use_hash5 = (level >= 3);
     // Track the best match found so far.
     //  ref is the pointer to the start of the match in the history buffer,
     //  len is the match length, and backtrack is the distance from ip to ref.
     //  Start with a sentinel length just below the minimum so any valid match will replace it.
     zxc_match_t best = (zxc_match_t){NULL, ZXC_LZ_MIN_MATCH_LEN - 1, 0};
 
-    // Load the 4-byte sequence at the current position and hash it.
-    // The hash value h is used to index into the LZ77 hash table.
-    uint32_t cur_val = zxc_le32(ip);
-    uint32_t h = zxc_hash_func(cur_val);
+    // Load the 8-byte sequence at the current position.
+    uint64_t cur_val8 = zxc_le64(ip);
+    // First 4 bytes for tag and old lookups
+    uint32_t cur_val = (uint32_t)cur_val8;
+    uint32_t h = zxc_hash_func(cur_val8, use_hash5);
 
     // For levels 1-2, enhance tag with byte5 info via XOR (preserves byte4 info)
     // High byte becomes (byte4 ^ byte5), keeping discrimination from both bytes
-    uint32_t cur_tag = (level <= 2) ? (cur_val ^ ((uint32_t)ip[4] << 24)) : cur_val;
+    uint32_t cur_tag = (level <= 2) ? (cur_val ^ ((uint32_t)(cur_val8 >> 32) << 24)) : cur_val;
 
     // Current position in the input buffer expressed as a 32-bit index.
     // This index is what we store in / retrieve from the hash/chain tables.
@@ -368,10 +374,11 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     }
 
     if (p.use_lazy && best.ref && best.len < 128 && ip + 1 < mflimit) {
-        uint32_t next_val = zxc_le32(ip + 1);
-        uint32_t h2 = zxc_hash_func(next_val);
-        uint32_t next_head = hash_table[2 * h2];
-        uint32_t next_stored_tag = hash_table[2 * h2 + 1];
+        const uint64_t next_val8 = zxc_le64(ip + 1);
+        const uint32_t next_val = (uint32_t)next_val8;
+        const uint32_t h2 = zxc_hash_func(next_val8, use_hash5);
+        const uint32_t next_head = hash_table[2 * h2];
+        const uint32_t next_stored_tag = hash_table[2 * h2 + 1];
         uint32_t next_idx =
             (next_head & ~ZXC_OFFSET_MASK) == epoch_mark ? (next_head & ZXC_OFFSET_MASK) : 0;
         int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_val);
@@ -407,10 +414,11 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         if (max_lazy > best.len + 1) {
             best.ref = NULL;
         } else if (level >= 4 && ip + 2 < mflimit) {
-            uint32_t val3 = zxc_le32(ip + 2);
-            uint32_t h3 = zxc_hash_func(val3);
-            uint32_t head3 = hash_table[2 * h3];
-            uint32_t tag3 = hash_table[2 * h3 + 1];
+            const uint64_t val3_8 = zxc_le64(ip + 2);
+            const uint32_t val3 = (uint32_t)val3_8;
+            const uint32_t h3 = zxc_hash_func(val3_8, use_hash5);
+            const uint32_t head3 = hash_table[2 * h3];
+            const uint32_t tag3 = hash_table[2 * h3 + 1];
             uint32_t idx3 =
                 (head3 & ~ZXC_OFFSET_MASK) == epoch_mark ? (head3 & ZXC_OFFSET_MASK) : 0;
             int skip_head3 = (idx3 > 0 && tag3 != val3);
@@ -760,14 +768,16 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
             if (m.len > 2 && level > 4) {
                 const uint8_t* match_end = ip + m.len;
-                if (match_end < iend - 3) {
-                    uint32_t pos_u = (uint32_t)((match_end - 2) - src);
-                    uint32_t val_u = zxc_le32(match_end - 2);
-                    uint32_t h_u = zxc_hash_func(val_u);
-                    uint32_t prev_head = hash_table[2 * h_u];
-                    uint32_t prev_idx = (prev_head & ~ZXC_OFFSET_MASK) == epoch_mark
-                                            ? (prev_head & ZXC_OFFSET_MASK)
-                                            : 0;
+                if (match_end < iend - 7) {
+                    const uint32_t pos_u = (uint32_t)((match_end - 2) - src);
+                    const uint64_t val_u8 = zxc_le64(match_end - 2);
+                    const uint32_t val_u = (uint32_t)val_u8;
+                    const uint32_t h_u =
+                        zxc_hash_func(val_u8, 1);  // Only for level > 4, uses hash5
+                    const uint32_t prev_head = hash_table[2 * h_u];
+                    const uint32_t prev_idx = (prev_head & ~ZXC_OFFSET_MASK) == epoch_mark
+                                                  ? (prev_head & ZXC_OFFSET_MASK)
+                                                  : 0;
                     hash_table[2 * h_u] = epoch_mark | pos_u;
                     hash_table[2 * h_u + 1] = val_u;
                     chain_table[pos_u] = (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
