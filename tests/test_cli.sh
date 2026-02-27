@@ -638,6 +638,44 @@ else
     echo "  [SKIP] jq not available, skipping JSON validation"
 fi
 
+# 21. Multiple Mode (-m) Tests
+echo "Testing Multiple Mode (-m)..."
+
+# 21.1 Compress multiple files
+echo "  Testing compress multiple files..."
+cp "$TEST_FILE" "$TEST_DIR/multi1.txt"
+cp "$TEST_FILE" "$TEST_DIR/multi2.txt"
+"$ZXC_BIN" -m -3 "$TEST_DIR/multi1.txt" "$TEST_DIR/multi2.txt"
+
+if [ -f "$TEST_DIR/multi1.txt.xc" ] && [ -f "$TEST_DIR/multi2.txt.xc" ]; then
+    log_pass "Compress multiple files (-m)"
+else
+    log_fail "Compress multiple files failed"
+fi
+
+# 21.2 Decompress multiple files
+echo "  Testing decompress multiple files..."
+rm -f "$TEST_DIR/multi1.txt" "$TEST_DIR/multi2.txt"
+"$ZXC_BIN" -d -m "$TEST_DIR/multi1.txt.xc" "$TEST_DIR/multi2.txt.xc"
+
+if cmp -s "$TEST_FILE" "$TEST_DIR/multi1.txt" && cmp -s "$TEST_FILE" "$TEST_DIR/multi2.txt"; then
+    log_pass "Decompress multiple files (-d -m)"
+else
+    log_fail "Decompress multiple files failed (content mismatch or missing files)"
+fi
+
+# 21.3 Error on multiple and stdout
+echo "  Testing stdout restriction with multiple mode..."
+set +e
+"$ZXC_BIN" -m -c "$TEST_DIR/multi1.txt" "$TEST_DIR/multi2.txt" > /dev/null 2>&1
+RET=$?
+set -e
+if [ $RET -ne 0 ]; then
+    log_pass "Stdout rejected with multiple mode"
+else
+    log_fail "Stdout should be rejected with multiple mode"
+fi
+
 echo "All tests passed!"
 exit 0
 

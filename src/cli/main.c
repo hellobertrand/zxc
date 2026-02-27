@@ -599,10 +599,12 @@ int main(int argc, char** argv) {
                                                  {"json", no_argument, 0, 'j'},
                                                  {"version", no_argument, 0, 'V'},
                                                  {"help", no_argument, 0, 'h'},
+                                                 {"multiple", no_argument, 0, 'm'},
                                                  {0, 0, 0, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "12345b::cCdfhjklNqT:tvVz", long_options, NULL)) != -1) {
+    int multiple_mode = 0;
+    while ((opt = getopt_long(argc, argv, "12345b::cCdfhjklmNqT:tvVz", long_options, NULL)) != -1) {
         switch (opt) {
             case 'z':
                 mode = MODE_COMPRESS;
@@ -663,6 +665,9 @@ int main(int argc, char** argv) {
                 break;
             case 'j':
                 json_output = 1;
+                break;
+            case 'm':
+                multiple_mode = 1;
                 break;
             case '?':
             case 'V':
@@ -922,266 +927,305 @@ int main(int argc, char** argv) {
         return ret;
     }
 
+    // Cannot combine multiple mode with stdout unless specifically allowed (lz4 allows it if all outputs concatenate, but usually it's better to restrict it or we just ignore it and write multiple to stdout... Wait, standard lz4 -m does not write to stdout, it writes to files).
+    // Let's enforce that if multiple_mode is set, we use auto-generated filenames and do not use stdout.
+    if (multiple_mode && to_stdout) {
+        zxc_log("Error: cannot write to stdout when using multiple files mode (-m).\n");
+        return 1;
+    }
+
     /*
      * File Processing Mode
-     * Determines input/output paths. Defaults to stdin/stdout if not specified.
-     * Handles output filename generation (.xc extension).
+     * Loops over files and determines input/output paths.
      */
-    FILE* f_in = stdin;
-    FILE* f_out = stdout;
-    char* in_path = NULL;
-    char resolved_in_path[4096] = {0};
-    char out_path[1024] = {0};
-    int use_stdin = 1, use_stdout = 0;
-
-    if (optind < argc && strcmp(argv[optind], "-") != 0) {
-        in_path = argv[optind];
-
-        if (zxc_validate_input_path(in_path, resolved_in_path, sizeof(resolved_in_path)) != 0) {
-            zxc_log("Error: Invalid input file '%s': %s\n", in_path, strerror(errno));
-            return 1;
-        }
-
-        f_in = fopen(resolved_in_path, "rb");
-        if (!f_in) {
-            zxc_log("Error open input %s: %s\n", resolved_in_path, strerror(errno));
-            return 1;
-        }
-        use_stdin = 0;
-        optind++;  // Move past input file
-    } else {
-        use_stdin = 1;
-        use_stdout = 1;  // Default to stdout if reading from stdin
+    int overall_ret = 0;
+    int start_optind = optind;
+    
+    // If no files passed but we aren't using stdin, or mode expects files:
+    if (optind >= argc && mode == MODE_INTEGRITY) {
+         zxc_log("Test mode requires at least one input file.\n");
+         return 1;
     }
 
-    if (mode == MODE_INTEGRITY) {
-        use_stdout = 0;
-        f_out = NULL;
-    } else if (!use_stdin && optind < argc) {
-        const int n = snprintf(out_path, sizeof(out_path), "%s", argv[optind]);
-        if (n < 0 || (size_t)n >= sizeof(out_path)) {
-            zxc_log("Error: Output path too long\n");
-            if (f_in) fclose(f_in);
-            return 1;
-        }
-        use_stdout = 0;
-    } else if (to_stdout) {
-        use_stdout = 1;
-    } else if (!use_stdin) {
-        // Auto-generate output filename if input is a file and no output specified
-        if (mode == MODE_COMPRESS)
-            snprintf(out_path, sizeof(out_path), "%s.xc", in_path);
-        else {
-            const size_t len = strlen(in_path);
-            if (len > 3 && !strcmp(in_path + len - 3, ".xc")) {
-                const size_t base_len = len - 3;
-                if (base_len >= sizeof(out_path)) {
-                    zxc_log("Error: Output path too long\n");
-                    if (f_in) fclose(f_in);
-                    return 1;
-                }
-                memcpy(out_path, in_path, base_len);
-                out_path[base_len] = '\0';
-            } else {
-                snprintf(out_path, sizeof(out_path), "%s", in_path);
+    if (multiple_mode && optind >= argc) {
+         zxc_log("Multiple files mode requires at least one input file.\n");
+         return 1;
+    }
+
+    // Default to processing at least once (for stdin) if no files are passed and not in a mode that strictly needs files
+    int num_files_to_process = (optind < argc) ? (argc - optind) : 1;
+    
+    for (int file_idx = 0; file_idx < num_files_to_process; file_idx++) {
+        FILE* f_in = stdin;
+        FILE* f_out = stdout;
+        char* in_path = NULL;
+        char resolved_in_path[4096] = {0};
+        char out_path[1024] = {0};
+        int use_stdin = 1, use_stdout = 0;
+
+        if (start_optind + file_idx < argc && strcmp(argv[start_optind + file_idx], "-") != 0) {
+            in_path = argv[start_optind + file_idx];
+
+            if (zxc_validate_input_path(in_path, resolved_in_path, sizeof(resolved_in_path)) != 0) {
+                zxc_log("Error: Invalid input file '%s': %s\n", in_path, strerror(errno));
+                overall_ret = 1;
+                continue;
             }
+
+            f_in = fopen(resolved_in_path, "rb");
+            if (!f_in) {
+                zxc_log("Error open input %s: %s\n", resolved_in_path, strerror(errno));
+                overall_ret = 1;
+                continue;
+            }
+            use_stdin = 0;
+        } else {
+            use_stdin = 1;
+            use_stdout = 1;  // Default to stdout if reading from stdin
         }
-        use_stdout = 0;
-    }
 
-    // Safety check: prevent overwriting input file
-    if (mode != MODE_INTEGRITY && !use_stdin && !use_stdout && strcmp(in_path, out_path) == 0) {
-        zxc_log("Error: Input and output filenames are identical.\n");
-        if (f_in) fclose(f_in);
-        return 1;
-    }
+        if (mode == MODE_INTEGRITY) {
+            use_stdout = 0;
+            f_out = NULL;
+        } else if (!use_stdin && !multiple_mode && start_optind + 1 < argc) {
+            // Only allow explicit output path if NOT in multiple mode and we have exactly 2 arguments (input and output)
+            // Wait, if start_optind + 1 < argc, then the second arg is the output path.
+            // But if multiple_mode is on, all args are inputs.
+            const int n = snprintf(out_path, sizeof(out_path), "%s", argv[start_optind + 1]);
+            if (n < 0 || (size_t)n >= sizeof(out_path)) {
+                zxc_log("Error: Output path too long\n");
+                if (f_in) fclose(f_in);
+                overall_ret = 1;
+                break; // Stop processing, this is a fatal arg error
+            }
+            use_stdout = 0;
+            // Since we explicitly grabbed the second arg as output, we shouldn't loop again.
+            num_files_to_process = 1; 
+        } else if (to_stdout) {
+            use_stdout = 1;
+        } else if (!use_stdin) {
+            // Auto-generate output filename if input is a file and no output specified, OR if multiple_mode is on.
+            if (mode == MODE_COMPRESS)
+                snprintf(out_path, sizeof(out_path), "%s.xc", in_path);
+            else {
+                const size_t len = strlen(in_path);
+                if (len > 3 && !strcmp(in_path + len - 3, ".xc")) {
+                    const size_t base_len = len - 3;
+                    if (base_len >= sizeof(out_path)) {
+                        zxc_log("Error: Output path too long\n");
+                        if (f_in) fclose(f_in);
+                        overall_ret = 1;
+                        continue;
+                    }
+                    memcpy(out_path, in_path, base_len);
+                    out_path[base_len] = '\0';
+                } else {
+                    snprintf(out_path, sizeof(out_path), "%s", in_path);
+                }
+            }
+            use_stdout = 0;
+        }
 
-    // Open output file if not writing to stdout
-    if (!use_stdout && mode != MODE_INTEGRITY) {
-        char resolved_out[4096];
-        if (zxc_validate_output_path(out_path, resolved_out, sizeof(resolved_out)) != 0) {
-            zxc_log("Error: Invalid output path '%s': %s\n", out_path, strerror(errno));
+        // Safety check: prevent overwriting input file
+        if (mode != MODE_INTEGRITY && !use_stdin && !use_stdout && strcmp(in_path, out_path) == 0) {
+            zxc_log("Error: Input and output filenames are identical for '%s'.\n", in_path);
             if (f_in) fclose(f_in);
-            return 1;
+            overall_ret = 1;
+            continue;
         }
 
-        if (!force && access(resolved_out, F_OK) == 0) {
-            zxc_log("Output exists. Use -f.\n");
-            fclose(f_in);
-            return 1;
-        }
+        // Open output file if not writing to stdout
+        if (!use_stdout && mode != MODE_INTEGRITY) {
+            char resolved_out[4096];
+            if (zxc_validate_output_path(out_path, resolved_out, sizeof(resolved_out)) != 0) {
+                zxc_log("Error: Invalid output path '%s': %s\n", out_path, strerror(errno));
+                if (f_in) fclose(f_in);
+                overall_ret = 1;
+                continue;
+            }
+
+            if (!force && access(resolved_out, F_OK) == 0) {
+                zxc_log("Output exists. Use -f to overwrite '%s'.\n", resolved_out);
+                fclose(f_in);
+                overall_ret = 1;
+                continue;
+            }
 
 #ifdef _WIN32
-        f_out = fopen(resolved_out, "wb");
+            f_out = fopen(resolved_out, "wb");
 #else
-        // Restrict permissions to 0644
-        const int fd =
-            open(resolved_out, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-        if (fd == -1) {
-            zxc_log("Error creating output %s: %s\n", resolved_out, strerror(errno));
-            fclose(f_in);
-            return 1;
-        }
-        f_out = fdopen(fd, "wb");
+            // Restrict permissions to 0644
+            const int fd =
+                open(resolved_out, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+            if (fd == -1) {
+                zxc_log("Error creating output %s: %s\n", resolved_out, strerror(errno));
+                fclose(f_in);
+                overall_ret = 1;
+                continue;
+            }
+            f_out = fdopen(fd, "wb");
 #endif
 
-        if (!f_out) {
-            zxc_log("Error open output %s: %s\n", resolved_out, strerror(errno));
-            if (f_in) fclose(f_in);
+            if (!f_out) {
+                zxc_log("Error open output %s: %s\n", resolved_out, strerror(errno));
+                if (f_in) fclose(f_in);
 #ifndef _WIN32
-            if (fd != -1) close(fd);
+                if (fd != -1) close(fd);
 #endif
-            return 1;
+                overall_ret = 1;
+                continue;
+            }
         }
-    }
 
-    // Prevent writing binary data to the terminal unless forced
-    if (use_stdout && isatty(fileno(stdout)) && mode == MODE_COMPRESS && !force) {
-        zxc_log(
-            "Refusing to write compressed data to terminal.\n"
-            "For help, type: zxc -h\n");
-        fclose(f_in);
-        return 1;
-    }
+        // Prevent writing binary data to the terminal unless forced
+        if (use_stdout && isatty(fileno(stdout)) && mode == MODE_COMPRESS && !force) {
+            zxc_log(
+                "Refusing to write compressed data to terminal.\n"
+                "For help, type: zxc -h\n");
+            fclose(f_in);
+            overall_ret = 1;
+            continue;
+        }
 
-    // Set stdin/stdout to binary mode if using them
+        // Set stdin/stdout to binary mode if using them
 #ifdef _WIN32
-    if (use_stdin) _setmode(_fileno(stdin), _O_BINARY);
-    if (use_stdout) _setmode(_fileno(stdout), _O_BINARY);
+        if (use_stdin) _setmode(_fileno(stdin), _O_BINARY);
+        if (use_stdout) _setmode(_fileno(stdout), _O_BINARY);
 
 #else
-    // On POSIX systems, there's no text/binary distinction, but we ensure
-    // no buffering issues occur by using freopen if needed
-    if (use_stdin) {
-        if (!freopen(NULL, "rb", stdin))
-            zxc_log("Warning: Failed to reopen stdin in binary mode\n");
-    }
-    if (use_stdout) {
-        if (!freopen(NULL, "wb", stdout))
-            zxc_log("Warning: Failed to reopen stdout in binary mode\n");
-    }
+        // On POSIX systems, there's no text/binary distinction, but we ensure
+        // no buffering issues occur by using freopen if needed
+        if (use_stdin) {
+            if (!freopen(NULL, "rb", stdin))
+                zxc_log("Warning: Failed to reopen stdin in binary mode\n");
+        }
+        if (use_stdout) {
+            if (!freopen(NULL, "wb", stdout))
+                zxc_log("Warning: Failed to reopen stdout in binary mode\n");
+        }
 #endif
 
-    // Determine if we should show progress bar and get file size
-    // IMPORTANT: This must be done BEFORE setting large buffers with setvbuf
-    // to avoid buffer inconsistency issues when reading the footer
-    int show_progress = 0;
-    uint64_t total_size = 0;
+        // Determine if we should show progress bar and get file size
+        // IMPORTANT: This must be done BEFORE setting large buffers with setvbuf
+        // to avoid buffer inconsistency issues when reading the footer
+        int show_progress = 0;
+        uint64_t total_size = 0;
 
-    if (!g_quiet && !use_stdout && !use_stdin && isatty(fileno(stderr))) {
-        // Get file size based on mode
-        if (mode == MODE_COMPRESS) {
-            // Compression: get input file size
-            const long long saved_pos = ftello(f_in);
-            if (saved_pos >= 0) {
-                if (fseeko(f_in, 0, SEEK_END) == 0) {
-                    const long long size = ftello(f_in);
-                    if (size > 0) total_size = (uint64_t)size;
-                    fseeko(f_in, saved_pos, SEEK_SET);
+        if (!g_quiet && !use_stdout && !use_stdin && isatty(fileno(stderr))) {
+            // Get file size based on mode
+            if (mode == MODE_COMPRESS) {
+                // Compression: get input file size
+                const long long saved_pos = ftello(f_in);
+                if (saved_pos >= 0) {
+                    if (fseeko(f_in, 0, SEEK_END) == 0) {
+                        const long long size = ftello(f_in);
+                        if (size > 0) total_size = (uint64_t)size;
+                        fseeko(f_in, saved_pos, SEEK_SET);
+                    }
                 }
-            }
-        } else {
-            // Decompression: get decompressed size from footer (BEFORE starting decompression)
-            const int64_t decomp_size = zxc_stream_get_decompressed_size(f_in);
-            if (decomp_size > 0) total_size = (uint64_t)decomp_size;
-        }
-
-        // Only show progress for files > 1MB
-        if (total_size > 1024 * 1024) show_progress = 1;
-    }
-
-    // Set large buffers for I/O performance (AFTER file size detection)
-    char *b1 = malloc(1024 * 1024), *b2 = malloc(1024 * 1024);
-    setvbuf(f_in, b1, _IOFBF, 1024 * 1024);
-    if (f_out) setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
-
-    zxc_log_v("Starting... (Compression Level %d)\n", level);
-    if (g_verbose) zxc_log("Checksum: %s\n", checksum ? "enabled" : "disabled");
-
-    // Prepare progress context
-    progress_ctx_t pctx = {.start_time = zxc_now(),
-                           .operation = (mode == MODE_COMPRESS) ? "Compressing" : "Decompressing",
-                           .total_size = total_size};
-
-    const double t0 = zxc_now();
-    int64_t bytes;
-    if (mode == MODE_COMPRESS)
-        bytes = zxc_stream_compress_ex(f_in, f_out, num_threads, level, checksum,
-                                       show_progress ? cli_progress_callback : NULL, &pctx);
-    else
-        bytes = zxc_stream_decompress_ex(f_in, f_out, num_threads, checksum,
-                                         show_progress ? cli_progress_callback : NULL, &pctx);
-    double dt = zxc_now() - t0;
-
-    // Clear progress line on completion
-    if (show_progress) {
-        fprintf(stderr, "\r\033[K");
-        fflush(stderr);
-    }
-
-    if (!use_stdin)
-        fclose(f_in);
-    else
-        setvbuf(stdin, NULL, _IONBF, 0);
-
-    if (!use_stdout) {
-        if (f_out) fclose(f_out);
-    } else {
-        fflush(f_out);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-
-    free(b1);
-    free(b2);
-
-    if (bytes >= 0) {
-        if (mode == MODE_INTEGRITY) {
-            // Test mode: show result
-            if (json_output) {
-                printf(
-                    "{\n"
-                    "  \"filename\": \"%s\",\n"
-                    "  \"status\": \"ok\",\n"
-                    "  \"checksum_verified\": %s,\n"
-                    "  \"time_seconds\": %.6f\n"
-                    "}\n",
-                    in_path ? in_path : "<stdin>", checksum ? "true" : "false", dt);
-            } else if (g_verbose) {
-                printf(
-                    "%s: OK\n"
-                    "  Checksum:     %s\n"
-                    "  Time:         %.3fs\n",
-                    in_path ? in_path : "<stdin>",
-                    checksum ? "verified (RapidHash)" : "not verified", dt);
             } else {
-                printf("%s: OK\n", in_path ? in_path : "<stdin>");
+                // Decompression: get decompressed size from footer (BEFORE starting decompression)
+                const int64_t decomp_size = zxc_stream_get_decompressed_size(f_in);
+                if (decomp_size > 0) total_size = (uint64_t)decomp_size;
             }
-        } else {
-            zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
+
+            // Only show progress for files > 1MB
+            if (total_size > 1024 * 1024) show_progress = 1;
         }
-        if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY)
-            unlink(resolved_in_path);
-    } else {
-        if (mode == MODE_INTEGRITY) {
-            if (json_output) {
-                printf(
-                    "{\n"
-                    "  \"filename\": \"%s\",\n"
-                    "  \"status\": \"failed\",\n"
-                    "  \"error\": \"Integrity check failed (corrupted data or invalid checksum)\"\n"
-                    "}\n",
-                    in_path ? in_path : "<stdin>");
+
+        // Set large buffers for I/O performance (AFTER file size detection)
+        char *b1 = malloc(1024 * 1024), *b2 = malloc(1024 * 1024);
+        setvbuf(f_in, b1, _IOFBF, 1024 * 1024);
+        if (f_out) setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
+
+        zxc_log_v("Starting... (Compression Level %d)\n", level);
+        if (g_verbose) zxc_log("Checksum: %s\n", checksum ? "enabled" : "disabled");
+
+        // Prepare progress context
+        progress_ctx_t pctx = {.start_time = zxc_now(),
+                               .operation = (mode == MODE_COMPRESS) ? "Compressing" : "Decompressing",
+                               .total_size = total_size};
+
+        const double t0 = zxc_now();
+        int64_t bytes;
+        if (mode == MODE_COMPRESS)
+            bytes = zxc_stream_compress_ex(f_in, f_out, num_threads, level, checksum,
+                                           show_progress ? cli_progress_callback : NULL, &pctx);
+        else
+            bytes = zxc_stream_decompress_ex(f_in, f_out, num_threads, checksum,
+                                             show_progress ? cli_progress_callback : NULL, &pctx);
+        double dt = zxc_now() - t0;
+
+        // Clear progress line on completion
+        if (show_progress) {
+            fprintf(stderr, "\r\033[K");
+            fflush(stderr);
+        }
+
+        if (!use_stdin)
+            fclose(f_in);
+        else
+            setvbuf(stdin, NULL, _IONBF, 0);
+
+        if (!use_stdout) {
+            if (f_out) fclose(f_out);
+        } else {
+            fflush(f_out);
+            setvbuf(stdout, NULL, _IONBF, 0);
+        }
+
+        free(b1);
+        free(b2);
+
+        if (bytes >= 0) {
+            if (mode == MODE_INTEGRITY) {
+                // Test mode: show result
+                if (json_output) {
+                    printf(
+                        "{\n"
+                        "  \"filename\": \"%s\",\n"
+                        "  \"status\": \"ok\",\n"
+                        "  \"checksum_verified\": %s,\n"
+                        "  \"time_seconds\": %.6f\n"
+                        "}\n",
+                        in_path ? in_path : "<stdin>", checksum ? "true" : "false", dt);
+                } else if (g_verbose) {
+                    printf(
+                        "%s: OK\n"
+                        "  Checksum:     %s\n"
+                        "  Time:         %.3fs\n",
+                        in_path ? in_path : "<stdin>",
+                        checksum ? "verified (RapidHash)" : "not verified", dt);
+                } else {
+                    printf("%s: OK\n", in_path ? in_path : "<stdin>");
+                }
             } else {
-                fprintf(stderr, "%s: FAILED\n", in_path ? in_path : "<stdin>");
-                if (g_verbose)
-                    fprintf(
-                        stderr,
-                        "  Reason: Integrity check failed (corrupted data or invalid checksum)\n");
+                zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
             }
+            if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY)
+                unlink(resolved_in_path);
         } else {
-            zxc_log("Operation failed.\n");
+            if (mode == MODE_INTEGRITY) {
+                if (json_output) {
+                    printf(
+                        "{\n"
+                        "  \"filename\": \"%s\",\n"
+                        "  \"status\": \"failed\",\n"
+                        "  \"error\": \"Integrity check failed (corrupted data or invalid checksum)\"\n"
+                        "}\n",
+                        in_path ? in_path : "<stdin>");
+                } else {
+                    fprintf(stderr, "%s: FAILED\n", in_path ? in_path : "<stdin>");
+                    if (g_verbose)
+                        fprintf(
+                            stderr,
+                            "  Reason: Integrity check failed (corrupted data or invalid checksum)\n");
+                }
+            } else {
+                zxc_log("Operation failed on %s.\n", in_path ? in_path : "<stdin>");
+            }
+            overall_ret = 1;
         }
-        return 1;
     }
-    return 0;
+    return overall_ret;
 }
