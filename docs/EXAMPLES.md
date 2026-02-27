@@ -211,7 +211,6 @@ For non-C languages, see the official bindings:
 |----------|---------|-----------------|---------------|
 | **Rust** | [`crates.io`](https://crates.io/crates/zxc-compress) | `cargo add zxc-compress` | [README](../wrappers/rust/zxc/README.md) |
 | **Python**| [`PyPI`](https://pypi.org/project/zxc-compress) | `pip install zxc-compress` | [README](../wrappers/python/README.md) |
-| **Node.js**| [`npm`](https://www.npmjs.com/package/zxc-compress) | `npm install zxc-compress` | [README](../wrappers/nodejs/README.md) |
 
 Community-maintained:
 - **Go**: https://github.com/meysam81/go-zxc
