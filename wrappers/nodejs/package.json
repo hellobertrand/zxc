@@ -1,0 +1,49 @@
+{
+  "name": "zxc-compress",
+  "version": "0.7.3",
+  "description": "ZXC: High-performance lossless asymmetric compression for Node.js",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib/",
+    "src/",
+    "CMakeLists.txt"
+  ],
+  "scripts": {
+    "install": "cmake-js compile",
+    "build": "cmake-js compile",
+    "rebuild": "cmake-js rebuild",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "compression",
+    "decompression",
+    "lossless",
+    "zxc",
+    "performance",
+    "lz77"
+  ],
+  "author": "Bertrand Lebonnois",
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hellobertrand/zxc.git",
+    "directory": "wrappers/nodejs"
+  },
+  "homepage": "https://github.com/hellobertrand/zxc",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.5.0",
+    "cmake-js": "^8.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.0"
+  },
+  "binary": {
+    "napi_versions": [
+      8
+    ]
+  }
+}
