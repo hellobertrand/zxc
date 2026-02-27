@@ -111,6 +111,22 @@ PyMODINIT_FUNC PyInit__zxc(void) {
     PyModule_AddIntConstant(m, "LEVEL_DEFAULT", ZXC_LEVEL_DEFAULT);
     PyModule_AddIntConstant(m, "LEVEL_BALANCED", ZXC_LEVEL_BALANCED);
     PyModule_AddIntConstant(m, "LEVEL_COMPACT", ZXC_LEVEL_COMPACT);
+
+    /* Error Enums */
+    PyModule_AddIntConstant(m, "ERROR_MEMORY", ZXC_ERROR_MEMORY);
+    PyModule_AddIntConstant(m, "ERROR_DST_TOO_SMALL", ZXC_ERROR_DST_TOO_SMALL);
+    PyModule_AddIntConstant(m, "ERROR_SRC_TOO_SMALL", ZXC_ERROR_SRC_TOO_SMALL);
+    PyModule_AddIntConstant(m, "ERROR_BAD_MAGIC", ZXC_ERROR_BAD_MAGIC);
+    PyModule_AddIntConstant(m, "ERROR_BAD_VERSION", ZXC_ERROR_BAD_VERSION);
+    PyModule_AddIntConstant(m, "ERROR_BAD_HEADER", ZXC_ERROR_BAD_HEADER);
+    PyModule_AddIntConstant(m, "ERROR_BAD_CHECKSUM", ZXC_ERROR_BAD_CHECKSUM);
+    PyModule_AddIntConstant(m, "ERROR_CORRUPT_DATA", ZXC_ERROR_CORRUPT_DATA);
+    PyModule_AddIntConstant(m, "ERROR_BAD_OFFSET", ZXC_ERROR_BAD_OFFSET);
+    PyModule_AddIntConstant(m, "ERROR_OVERFLOW", ZXC_ERROR_OVERFLOW);
+    PyModule_AddIntConstant(m, "ERROR_IO", ZXC_ERROR_IO);
+    PyModule_AddIntConstant(m, "ERROR_NULL_INPUT", ZXC_ERROR_NULL_INPUT);
+    PyModule_AddIntConstant(m, "ERROR_BAD_BLOCK_TYPE", ZXC_ERROR_BAD_BLOCK_TYPE);
+
     return m;
 }
 
@@ -287,7 +303,7 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
         fclose(fdst);
     fclose(fsrc);
 
-    if (nwritten < 0) Py_Return_Err(PyExc_RuntimeError, "an error occurred");
+    if (nwritten < 0) Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)nwritten));
 
     return Py_BuildValue("L", nwritten);
 }
@@ -342,7 +358,7 @@ static PyObject* pyzxc_stream_decompress(PyObject* self, PyObject* args, PyObjec
         fclose(fdst);
     fclose(fsrc);
 
-    if (nwritten < 0) Py_Return_Err(PyExc_RuntimeError, "an error occurred");
+    if (nwritten < 0) Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)nwritten));
 
     return Py_BuildValue("L", nwritten);
 }
