@@ -783,23 +783,24 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint32_t tokens = zxc_le32(t_ptr);
         t_ptr += 4;
 
-        uint32_t off1, off2, off3, off4;
+        uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS, off3 = ZXC_LZ_OFFSET_BIAS,
+                 off4 = ZXC_LZ_OFFSET_BIAS;
         if (gh.enc_off == 1) {
             // Read 4 x 1-byte offsets
             uint32_t offsets = zxc_le32(o_ptr);
             o_ptr += 4;
-            off1 = (offsets & 0xFF) + ZXC_LZ_OFFSET_BIAS;
-            off2 = ((offsets >> 8) & 0xFF) + ZXC_LZ_OFFSET_BIAS;
-            off3 = ((offsets >> 16) & 0xFF) + ZXC_LZ_OFFSET_BIAS;
-            off4 = ((offsets >> 24) & 0xFF) + ZXC_LZ_OFFSET_BIAS;
+            off1 += offsets & 0xFF;
+            off2 += (offsets >> 8) & 0xFF;
+            off3 += (offsets >> 16) & 0xFF;
+            off4 += (offsets >> 24) & 0xFF;
         } else {
             // Read 4 x 2-byte offsets
             uint64_t offsets = zxc_le64(o_ptr);
             o_ptr += 8;
-            off1 = (uint32_t)(offsets & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
-            off2 = (uint32_t)((offsets >> 16) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
-            off3 = (uint32_t)((offsets >> 32) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
-            off4 = (uint32_t)((offsets >> 48) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+            off1 += (uint32_t)(offsets & 0xFFFF);
+            off2 += (uint32_t)((offsets >> 16) & 0xFFFF);
+            off3 += (uint32_t)((offsets >> 32) & 0xFFFF);
+            off4 += (uint32_t)((offsets >> 48) & 0xFFFF);
         }
 
         uint32_t ll1 = (tokens & 0x0F0) >> 4;
@@ -870,23 +871,24 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint32_t tokens = zxc_le32(t_ptr);
         t_ptr += 4;
 
-        uint32_t off1, off2, off3, off4;
+        uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS, off3 = ZXC_LZ_OFFSET_BIAS,
+                 off4 = ZXC_LZ_OFFSET_BIAS;
         if (gh.enc_off == 1) {
             // Read 4 x 1-byte offsets
             uint32_t offsets = zxc_le32(o_ptr);
             o_ptr += 4;
-            off1 = (offsets & 0xFF) + ZXC_LZ_OFFSET_BIAS;
-            off2 = ((offsets >> 8) & 0xFF) + ZXC_LZ_OFFSET_BIAS;
-            off3 = ((offsets >> 16) & 0xFF) + ZXC_LZ_OFFSET_BIAS;
-            off4 = ((offsets >> 24) & 0xFF) + ZXC_LZ_OFFSET_BIAS;
+            off1 += offsets & 0xFF;
+            off2 += (offsets >> 8) & 0xFF;
+            off3 += (offsets >> 16) & 0xFF;
+            off4 += (offsets >> 24) & 0xFF;
         } else {
             // Read 4 x 2-byte offsets
             uint64_t offsets = zxc_le64(o_ptr);
             o_ptr += 8;
-            off1 = (uint32_t)(offsets & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
-            off2 = (uint32_t)((offsets >> 16) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
-            off3 = (uint32_t)((offsets >> 32) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
-            off4 = (uint32_t)((offsets >> 48) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+            off1 += (uint32_t)(offsets & 0xFFFF);
+            off2 += (uint32_t)((offsets >> 16) & 0xFFFF);
+            off3 += (uint32_t)((offsets >> 32) & 0xFFFF);
+            off4 += (uint32_t)((offsets >> 48) & 0xFFFF);
         }
 
         uint32_t ll1 = (tokens & 0x0F0) >> 4;
@@ -968,14 +970,13 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint8_t token = *t_ptr++;
         uint32_t ll = token >> ZXC_TOKEN_LIT_BITS;
         uint32_t ml = token & ZXC_TOKEN_ML_MASK;
-        uint32_t offset;
+        uint32_t offset = ZXC_LZ_OFFSET_BIAS;
         if (gh.enc_off == 1) {
-            offset = *o_ptr++;  // 1-byte offset (biased)
+            offset += *o_ptr++;  // 1-byte offset (biased)
         } else {
-            offset = ((uint32_t)o_ptr[0] | ((uint32_t)o_ptr[1] << 8));  // 2-byte offset (biased)
+            offset += zxc_le16(o_ptr);  // 2-byte offset (biased)
             o_ptr += 2;
         }
-        offset += ZXC_LZ_OFFSET_BIAS;
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {
             ll += zxc_read_varint(&e_ptr, e_end);
@@ -1059,14 +1060,13 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint8_t token = *t_ptr++;
         uint32_t ll = token >> ZXC_TOKEN_LIT_BITS;
         uint32_t ml = token & ZXC_TOKEN_ML_MASK;
-        uint32_t offset;
+        uint32_t offset = ZXC_LZ_OFFSET_BIAS;
         if (gh.enc_off == 1) {
-            offset = *o_ptr++;  // 1-byte offset (biased)
+            offset += *o_ptr++;  // 1-byte offset (biased)
         } else {
-            offset = ((uint32_t)o_ptr[0] | ((uint32_t)o_ptr[1] << 8));  // 2-byte offset (biased)
+            offset += zxc_le16(o_ptr);  // 2-byte offset (biased)
             o_ptr += 2;
         }
-        offset += ZXC_LZ_OFFSET_BIAS;
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) ll += zxc_read_varint(&e_ptr, e_end);
         if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) ml += zxc_read_varint(&e_ptr, e_end);
