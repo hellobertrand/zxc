@@ -386,7 +386,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         return 1;
     }
 
-    struct dirent* entry;
+    const struct dirent* entry;
     while ((entry = readdir(dir)) != NULL) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
