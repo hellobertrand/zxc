@@ -34,6 +34,12 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 
 ## OPTIONS
 
+**-m**, **--multiple**
+: Process multiple files at once. When specified, all subsequent non-option arguments are treated as input files. For each input file, a corresponding `.xc` file is created (or decompressed into its original name). Output cannot be written to standard output (`stdout`) when this mode is enabled.
+
+**-r**, **--recursive**
+: Recursively process directories. When specified, any directory listed as an argument will be traversed, and all regular files within it will be processed (compressed or decompressed). This option implicitly enables `--multiple` mode.
+
 **-1**..**-5**
 : Set the compression level from 1 (fastest compression) to 5 (highest density).
 - **-1, -2 (Fast):** Optimized for real-time assets or when compression speed is a priority.
@@ -85,6 +91,15 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 
 **Decompress a file:**
   zxc -d data.txt.xc
+
+**Compress multiple files independently:**
+  zxc -m file1.txt file2.txt file3.txt
+
+**Compress all files in a directory recursively:**
+  zxc -r ./my_folder
+
+**Decompress all files in a directory recursively:**
+  zxc -d -r ./my_folder
 
 **Decompress a file to standard output:**
   zxc -dc data.txt.xc > data.txt
