@@ -12,12 +12,12 @@
 #include "../include/zxc_stream.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    FILE* f_in = fmemopen((void*)data, size, "rb");
+    FILE* const f_in = fmemopen((void*)data, size, "rb");
     if (!f_in) return 0;
 
     char* out_buf = NULL;
     size_t out_size = 0;
-    FILE* f_out = open_memstream(&out_buf, &out_size);
+    FILE* const f_out = open_memstream(&out_buf, &out_size);
 
     if (!f_out) {
         fclose(f_in);

@@ -80,35 +80,35 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
 
     if (mode == 0) return ZXC_OK;
 
-    size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
-    size_t sz_hash = 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
-    size_t sz_chain = chunk_size * sizeof(uint16_t);
-    size_t sz_sequences = max_seq * sizeof(uint32_t);
-    size_t sz_tokens = max_seq * sizeof(uint8_t);
-    size_t sz_offsets = max_seq * sizeof(uint16_t);
-    size_t sz_extras =
+    const size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
+    const size_t sz_hash = 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
+    const size_t sz_chain = chunk_size * sizeof(uint16_t);
+    const size_t sz_sequences = max_seq * sizeof(uint32_t);
+    const size_t sz_tokens = max_seq * sizeof(uint8_t);
+    const size_t sz_offsets = max_seq * sizeof(uint16_t);
+    const size_t sz_extras =
         max_seq * 2 *
         ZXC_VBYTE_ALLOC_LEN;  // Max 3 bytes per LL/ML VByte (sufficient for 256KB block)
-    size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
+    const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
     // Calculate sizes with alignment padding (64 bytes for cache line alignment)
     size_t total_size = 0;
-    size_t off_hash = total_size;
+    const size_t off_hash = total_size;
     total_size += (sz_hash + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
-    size_t off_chain = total_size;
+    const size_t off_chain = total_size;
     total_size += (sz_chain + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
-    size_t off_sequences = total_size;
+    const size_t off_sequences = total_size;
     total_size += (sz_sequences + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
-    size_t off_tokens = total_size;
+    const size_t off_tokens = total_size;
     total_size += (sz_tokens + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
-    size_t off_offsets = total_size;
+    const size_t off_offsets = total_size;
     total_size += (sz_offsets + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
-    size_t off_extras = total_size;
+    const size_t off_extras = total_size;
     total_size += (sz_extras + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
-    size_t off_lit = total_size;
+    const size_t off_lit = total_size;
     total_size += (sz_lit + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
 
-    uint8_t* mem = (uint8_t*)zxc_aligned_malloc(total_size, ZXC_CACHE_LINE_SIZE);
+    uint8_t* const mem = (uint8_t*)zxc_aligned_malloc(total_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
 
     ctx->memory_block = mem;
@@ -189,7 +189,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
 
     // Bytes 14-15: CRC (16-bit)
     zxc_store_le16(dst + 14, 0);  // Zero out before hashing
-    uint16_t crc = zxc_hash16(dst);
+    const uint16_t crc = zxc_hash16(dst);
     zxc_store_le16(dst + 14, crc);
 
     return ZXC_FILE_HEADER_SIZE;
@@ -353,7 +353,8 @@ int zxc_read_num_header(const uint8_t* RESTRICT src, const size_t src_size,
 int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
                                   const zxc_gnr_header_t* RESTRICT gh,
                                   const zxc_section_desc_t desc[ZXC_GLO_SECTIONS]) {
-    size_t needed = ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+    const size_t needed =
+        ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
     if (UNLIKELY(rem < needed)) return ZXC_ERROR_DST_TOO_SMALL;
 
@@ -388,7 +389,8 @@ int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
 int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
                                  zxc_gnr_header_t* RESTRICT gh,
                                  zxc_section_desc_t desc[ZXC_GLO_SECTIONS]) {
-    size_t needed = ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+    const size_t needed =
+        ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
     if (UNLIKELY(len < needed)) return ZXC_ERROR_SRC_TOO_SMALL;
 
@@ -420,7 +422,8 @@ int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
 int zxc_write_ghi_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
                                   const zxc_gnr_header_t* RESTRICT gh,
                                   const zxc_section_desc_t desc[ZXC_GHI_SECTIONS]) {
-    size_t needed = ZXC_GHI_HEADER_BINARY_SIZE + ZXC_GHI_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+    const size_t needed =
+        ZXC_GHI_HEADER_BINARY_SIZE + ZXC_GHI_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
     if (UNLIKELY(rem < needed)) return ZXC_ERROR_DST_TOO_SMALL;
 
@@ -455,7 +458,8 @@ int zxc_write_ghi_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
 int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
                                  zxc_gnr_header_t* RESTRICT gh,
                                  zxc_section_desc_t desc[ZXC_GHI_SECTIONS]) {
-    size_t needed = ZXC_GHI_HEADER_BINARY_SIZE + ZXC_GHI_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+    const size_t needed =
+        ZXC_GHI_HEADER_BINARY_SIZE + ZXC_GHI_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
     if (UNLIKELY(len < needed)) return ZXC_ERROR_SRC_TOO_SMALL;
 
@@ -495,7 +499,7 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  */
 int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
                           const size_t dst_cap, const uint8_t bits) {
-    size_t out_bytes = ((count * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
+    const size_t out_bytes = ((count * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
 
     if (UNLIKELY(dst_cap < out_bytes)) return ZXC_ERROR_DST_TOO_SMALL;
 
@@ -507,14 +511,14 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint
     // but here we use uint64_t. (1ULL << 32) is fine on 64-bit.
     // However, if bits=64 (unlikely for a 32-bit packer), it would be an issue.
     // For 0 < bits <= 32:
-    uint64_t val_mask =
+    const uint64_t val_mask =
         (bits == sizeof(uint32_t) * ZXC_BITS_PER_BYTE) ? UINT32_MAX : ((1ULL << bits) - 1);
 
     for (size_t i = 0; i < count; i++) {
         // Mask the input value to ensure we don't write garbage
-        uint64_t v = ((uint64_t)src[i] & val_mask) << (bit_pos % ZXC_BITS_PER_BYTE);
+        const uint64_t v = ((uint64_t)src[i] & val_mask) << (bit_pos % ZXC_BITS_PER_BYTE);
 
-        size_t byte_idx = bit_pos / ZXC_BITS_PER_BYTE;
+        const size_t byte_idx = bit_pos / ZXC_BITS_PER_BYTE;
         dst[byte_idx] |= (uint8_t)v;
         if (bits + (bit_pos % ZXC_BITS_PER_BYTE) > 1 * ZXC_BITS_PER_BYTE)
             dst[byte_idx + 1] |= (uint8_t)(v >> (1 * ZXC_BITS_PER_BYTE));

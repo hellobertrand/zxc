@@ -312,17 +312,18 @@ extern "C" {
 #define ZXC_BLOCK_CHECKSUM_SIZE 4
 /** @brief Binary size of a NUM block sub-header. */
 #define ZXC_NUM_HEADER_BINARY_SIZE 16
-/** @brief Binary size of a NUM chunk sub-frame header (nvals + bits + base + psize). */
-#define ZXC_NUM_CHUNK_HEADER_SIZE 16
-/** @brief Number of numeric values to decode in a single SIMD batch (NUM block). */
-#define ZXC_DEC_BATCH 32
-/** @brief Maximum number of frames that can be processed in a single compression operation (NUM
- * block). */
-#define ZXC_NUM_FRAME_SIZE 128
 /** @brief Binary size of a GLO block sub-header. */
 #define ZXC_GLO_HEADER_BINARY_SIZE 16
 /** @brief Binary size of a GHI block sub-header. */
 #define ZXC_GHI_HEADER_BINARY_SIZE 16
+
+/** @brief Binary size of a NUM chunk sub-frame header (nvals + bits + base + psize). */
+#define ZXC_NUM_CHUNK_HEADER_SIZE 16
+/** @brief Number of numeric values to decode in a single SIMD batch (NUM block). */
+#define ZXC_NUM_DEC_BATCH 32
+/** @brief Maximum number of frames that can be processed in a single compression operation (NUM
+ * block). */
+#define ZXC_NUM_FRAME_SIZE 128
 
 /** @brief Binary size of a section descriptor (comp_size + raw_size). */
 #define ZXC_SECTION_DESC_BINARY_SIZE 8
@@ -1049,7 +1050,7 @@ static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* RESTRICT br,
  */
 static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const int needed) {
     if (UNLIKELY(br->bits < needed)) {
-        int safe_bits = (br->bits < 0) ? 0 : br->bits;
+        const int safe_bits = (br->bits < 0) ? 0 : br->bits;
         br->bits = safe_bits;
 
         // Mask out garbage bits (retain only valid existing bits)
@@ -1062,19 +1063,19 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const
         // Calculate how many bytes we can read
         // We want to fill up to the accumulation capability (64 bits for uint64_t)
         // Bytes needed = (capacity_bits - safe_bits) / 8
-        int bytes_needed = ((int)(sizeof(uint64_t) * 8) - safe_bits) >> 3;
+        const int bytes_needed = ((int)(sizeof(uint64_t) * 8) - safe_bits) >> 3;
 
         // Bounds check: don't read past end
-        size_t bytes_left = (size_t)(br->end - br->ptr);
+        const size_t bytes_left = (size_t)(br->end - br->ptr);
         if (UNLIKELY(bytes_left < (size_t)bytes_needed)) {
             // Partial read (slow path / end of stream)
-            uint64_t raw = zxc_le_partial(br->ptr, bytes_left);
+            const uint64_t raw = zxc_le_partial(br->ptr, bytes_left);
             br->accum |= (raw << safe_bits);
             br->ptr += bytes_left;
             br->bits = safe_bits + (int)bytes_left * 8;
         } else {
             // Fast path: standard read
-            uint64_t raw = zxc_le64(br->ptr);
+            const uint64_t raw = zxc_le64(br->ptr);
             br->accum |= (raw << safe_bits);
             br->ptr += bytes_needed;
             br->bits = safe_bits + bytes_needed * 8;
