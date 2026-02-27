@@ -488,7 +488,7 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 **Figure A**: Decompression Throughput & Storage Ratio (Normalized to LZ4)
 
-![Benchmark Graph ARM64](./images/benchmark_arm64_0.7.1.webp)
+![Benchmark Graph ARM64](./images/benchmark_arm64_0.8.0.webp)
 
 
 ### 7.1 Client ARM64 Summary (Apple Silicon)
