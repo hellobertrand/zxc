@@ -508,10 +508,10 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
     if (!pctx) return;
 
     // Use pre-determined total size from context (not the parameter)
-    uint64_t total = pctx->total_size;
+    const uint64_t total = pctx->total_size;
 
-    double now = zxc_now();
-    double elapsed = now - pctx->start_time;
+    const double now = zxc_now();
+    const double elapsed = now - pctx->start_time;
 
     // Calculate throughput speed
     double speed_mbps = 0.0;
@@ -862,7 +862,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     else
         bytes = zxc_stream_decompress_ex(f_in, f_out, num_threads, checksum,
                                          show_progress ? cli_progress_callback : NULL, &pctx);
-    double dt = zxc_now() - t0;
+    const double dt = zxc_now() - t0;
 
     // Clear progress line on completion
     if (show_progress) {
@@ -1155,9 +1155,9 @@ int main(int argc, char** argv) {
         const double compress_start = zxc_now();
         while (zxc_now() < compress_deadline) {
             rewind(fm);
-            double t0 = zxc_now();
+            const double t0 = zxc_now();
             zxc_stream_compress(fm, NULL, num_threads, level, checksum);
-            double dt = zxc_now() - t0;
+            const double dt = zxc_now() - t0;
             if (dt < best_compress) best_compress = dt;
             compress_iters++;
             if (!json_output && !g_quiet)
@@ -1224,9 +1224,9 @@ int main(int argc, char** argv) {
         const double decompress_start = zxc_now();
         while (zxc_now() < decompress_deadline) {
             rewind(fc);
-            double t0 = zxc_now();
+            const double t0 = zxc_now();
             zxc_stream_decompress(fc, NULL, num_threads, checksum);
-            double dt = zxc_now() - t0;
+            const double dt = zxc_now() - t0;
             if (dt < best_decompress) best_decompress = dt;
             decompress_iters++;
             if (!json_output && !g_quiet)
@@ -1315,7 +1315,7 @@ int main(int argc, char** argv) {
      * Loops over files and determines input/output paths.
      */
     int overall_ret = 0;
-    int start_optind = optind;
+    const int start_optind = optind;
 
     // If no files passed but we aren't using stdin, or mode expects files:
     if (optind >= argc && mode == MODE_INTEGRITY) {
@@ -1330,7 +1330,7 @@ int main(int argc, char** argv) {
 
     // Default to processing at least once (for stdin) if no files are passed and not in a mode that
     // strictly needs files
-    int num_files_to_process = (optind < argc) ? (argc - optind) : 1;
+    const int num_files_to_process = (optind < argc) ? (argc - optind) : 1;
 
     for (int file_idx = 0; file_idx < num_files_to_process; file_idx++) {
         const char* current_arg = (optind < argc) ? argv[start_optind + file_idx] : NULL;
