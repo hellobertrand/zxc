@@ -279,7 +279,7 @@ extern "C" {
 /** @brief Magic word identifying ZXC files (little-endian 0x9CB02EF5). */
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
 /** @brief Current on-disk file format version. */
-#define ZXC_FILE_FORMAT_VERSION 4
+#define ZXC_FILE_FORMAT_VERSION 5
 /** @brief Block size unit (4 KB). */
 #define ZXC_BLOCK_UNIT (4 * 1024)
 /** @brief Default block size processed per thread (256 KB). */
@@ -395,6 +395,8 @@ extern "C" {
 #define ZXC_LZ_WINDOW_SIZE (1U << 16)
 /** @brief Minimum match length for an LZ77 match. */
 #define ZXC_LZ_MIN_MATCH_LEN 5
+/** @brief Base bias added to encoded offsets (stored = actual - bias). */
+#define ZXC_LZ_OFFSET_BIAS 1
 /** @brief Maximum allowed offset distance. */
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
 /**
