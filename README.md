@@ -78,7 +78,7 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 
 *(Benchmark Graph ARM64 : Decompression Throughput & Storage Ratio (Normalized to LZ4))*
-![Benchmark Graph ARM64](docs/images/benchmark_arm64_0.7.1.png)
+![Benchmark Graph ARM64](docs/images/benchmark_arm64_0.7.1.webp)
 
 
 ### Benchmark ARM64 (Apple Silicon)
