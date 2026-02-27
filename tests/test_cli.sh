@@ -676,6 +676,41 @@ else
     log_fail "Stdout should be rejected with multiple mode"
 fi
 
+# 22. Recursive Mode (-r) Tests
+echo "Testing Recursive Mode (-r)..."
+
+# Create a nested directory structure
+mkdir -p "$TEST_DIR/rec_test/subdir1"
+mkdir -p "$TEST_DIR/rec_test/subdir2"
+cp "$TEST_FILE" "$TEST_DIR/rec_test/fileA.txt"
+cp "$TEST_FILE" "$TEST_DIR/rec_test/subdir1/fileB.txt"
+cp "$TEST_FILE" "$TEST_DIR/rec_test/subdir2/fileC.txt"
+
+# 22.1 Compress recursively
+echo "  Testing compress recursive directory..."
+"$ZXC_BIN" -r -3 "$TEST_DIR/rec_test"
+
+if [ -f "$TEST_DIR/rec_test/fileA.txt.xc" ] && \
+   [ -f "$TEST_DIR/rec_test/subdir1/fileB.txt.xc" ] && \
+   [ -f "$TEST_DIR/rec_test/subdir2/fileC.txt.xc" ]; then
+    log_pass "Compress recursive directory (-r)"
+else
+    log_fail "Compress recursive directory failed"
+fi
+
+# 22.2 Decompress recursively
+echo "  Testing decompress recursive directory..."
+rm -f "$TEST_DIR/rec_test/fileA.txt" "$TEST_DIR/rec_test/subdir1/fileB.txt" "$TEST_DIR/rec_test/subdir2/fileC.txt"
+"$ZXC_BIN" -d -r "$TEST_DIR/rec_test"
+
+if cmp -s "$TEST_FILE" "$TEST_DIR/rec_test/fileA.txt" && \
+   cmp -s "$TEST_FILE" "$TEST_DIR/rec_test/subdir1/fileB.txt" && \
+   cmp -s "$TEST_FILE" "$TEST_DIR/rec_test/subdir2/fileC.txt"; then
+    log_pass "Decompress recursive directory (-d -r)"
+else
+    log_fail "Decompress recursive directory failed (content mismatch or missing files)"
+fi
+
 echo "All tests passed!"
 exit 0
 
