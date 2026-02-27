@@ -80,7 +80,7 @@ build/*
 docs/html/
 docs/latex/
 docs/rtf/
-docs/man/
+docs/man/*.1
 docs/xml/
 *.doxygen_sqlite3
 doxyfile.inc
