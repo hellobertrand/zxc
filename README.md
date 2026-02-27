@@ -54,9 +54,9 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **11,045 MB/s** vs 5,651 MB/s **1.95x Faster** | **61.2** vs 62.2 **Smaller** (-1.5%) | **ZXC** leads in raw throughput. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **6,948 MB/s** vs 4,802 MB/s **1.45x Faster** | **46.5** vs 47.6 **Smaller** (-2.4%) | **ZXC** outperforms LZ4 in read speed and ratio. |
-| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **6,072 MB/s** vs 2,159 MB/s **2.81x Faster** | **40.7** vs 41.0 **Equivalent** (-0.9%) | **ZXC** outperforms Zstd in decoding speed. |
+| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **11,934 MB/s** vs 5,647 MB/s **2.11x Faster** | **61.5** vs 62.2 **Smaller** (-1.0%) | **ZXC** leads in raw throughput. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **6,925 MB/s** vs 4,804 MB/s **1.44x Faster** | **46.4** vs 47.6 **Smaller** (-2.6%) | **ZXC** outperforms LZ4 in read speed and ratio. |
+| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **6,090 MB/s** vs 2,167 MB/s **2.81x Faster** | **40.6** vs 41.0 **Equivalent** (-1.0%) | **ZXC** outperforms Zstd in decoding speed. |
 
 ### 2. Cloud Server: Google Axion (ARM Neoverse V2)
 *Scenario: High-throughput Microservices, ARM Cloud Instances.*
@@ -72,9 +72,9 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **6,233 MB/s** vs 4,109 MB/s **1.52x Faster** | **61.2** vs 62.2 **Smaller** (-1.5%) | **ZXC** achieves higher throughput. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **3,814 MB/s** vs 3,555 MB/s **1.07x Faster** | **46.5** vs 47.6 **Smaller** (-2.4%) | ZXC offers improved speed and ratio. |
-| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **3,448 MB/s** vs 1,572 MB/s **2.19x Faster** | **40.7** vs 41.0 **Equivalent** (-0.9%) | **ZXC** provides faster decoding. |
+| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **6,779 MB/s** vs 4,116 MB/s **1.65x Faster** | **61.5** vs 62.2 **Smaller** (-1.0%) | **ZXC** achieves higher throughput. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **3,849 MB/s** vs 3,573 MB/s **1.08x Faster** | **46.4** vs 47.6 **Smaller** (-2.6%) | ZXC offers improved speed and ratio. |
+| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **3,495 MB/s** vs 1,573 MB/s **2.22x Faster** | **40.6** vs 41.0 **Equivalent** (-1.0%) | **ZXC** provides faster decoding. |
 
 
 *(Benchmark Graph ARM64 : Decompression Throughput & Storage Ratio (Normalized to LZ4))*
@@ -87,19 +87,19 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clan
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 52833 MB/s | 52754 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.7.1 -1**            |   913 MB/s | **11045 MB/s** |   129770958 | **61.23** | 12 files|
-| **zxc 0.7.1 -2**            |   608 MB/s |  **8974 MB/s** |   115921778 | **54.70** | 12 files|
-| **zxc 0.7.1 -3**            |   180 MB/s |  **6948 MB/s** |    98472307 | **46.46** | 12 files|
-| **zxc 0.7.1 -4**            |   123 MB/s |  **6599 MB/s** |    92027546 | **43.42** | 12 files|
-| **zxc 0.7.1 -5**            |  65.2 MB/s |  **6072 MB/s** |    86177811 | **40.66** | 12 files|
-| lz4 1.10.0              |   814 MB/s |  4802 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1342 MB/s |  5651 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  13.9 MB/s |  4543 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   644 MB/s |  1620 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   724 MB/s |  2159 MB/s |    86932028 | 41.02 | 12 files|
-| brotli 1.2.0 -0         |   539 MB/s |   418 MB/s |    78306095 | 36.95 | 12 files|
-| snappy 1.2.2            |   880 MB/s |  3262 MB/s |   101352257 | 47.82 | 12 files|
+| memcpy                  | 52905 MB/s | 52854 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.8.0 -1**            |   950 MB/s | **11934 MB/s** |   130408237 | **61.53** | 12 files|
+| **zxc 0.8.0 -2**            |   615 MB/s |  **9879 MB/s** |   114657730 | **54.10** | 12 files|
+| **zxc 0.8.0 -3**            |   240 MB/s |  **6925 MB/s** |    98234598 | **46.35** | 12 files|
+| **zxc 0.8.0 -4**            |   169 MB/s |  **6584 MB/s** |    91698141 | **43.27** | 12 files|
+| **zxc 0.8.0 -5**            |  93.2 MB/s |  **6090 MB/s** |    86054926 | **40.60** | 12 files|
+| lz4 1.10.0              |   815 MB/s |  4804 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1345 MB/s |  5647 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  14.0 MB/s |  4537 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   644 MB/s |  1622 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   725 MB/s |  2167 MB/s |    86932028 | 41.02 | 12 files|
+| brotli 1.2.0 -0         |   539 MB/s |   405 MB/s |    78306095 | 36.95 | 12 files|
+| snappy 1.2.2            |   830 MB/s |  3265 MB/s |   101352257 | 47.82 | 12 files|
 
 ### Benchmark ARM64 (Google Axion)
 
@@ -128,20 +128,19 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 20222 MB/s | 20186 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.7.1 -1**            |   601 MB/s |  **6233 MB/s** |   129770958 | **61.23** | 12 files|
-| **zxc 0.7.1 -2**            |   397 MB/s |  **5081 MB/s** |   115921778 | **54.70** | 12 files|
-| **zxc 0.7.1 -3**            |   128 MB/s |  **3814 MB/s** |    98472307 | **46.46** | 12 files|
-| **zxc 0.7.1 -4**            |  89.7 MB/s |  **3665 MB/s** |    92027546 | **43.42** | 12 files|
-| **zxc 0.7.1 -5**            |  48.2 MB/s |  **3448 MB/s** |    86177811 | **40.66** | 12 files|
-| lz4 1.10.0              |   594 MB/s |  3555 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1034 MB/s |  4109 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  11.3 MB/s |  3479 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   414 MB/s |  1197 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   453 MB/s |  1572 MB/s |    86932028 | 41.02 | 12 files|
-| brotli 1.2.0 -0         |   358 MB/s |   287 MB/s |    78306095 | 36.95 | 12 files|
-| snappy 1.2.2            |   612 MB/s |  1587 MB/s |   101464727 | 47.87 | 12 files|
-
+| memcpy                  | 18697 MB/s | 18663 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.8.0 -1**            |   642 MB/s |  **6779 MB/s** |   130408237 | **61.53** | 12 files|
+| **zxc 0.8.0 -2**            |   414 MB/s |  **5778 MB/s** |   114657730 | **54.10** | 12 files|
+| **zxc 0.8.0 -3**            |   171 MB/s |  **3849 MB/s** |    98234598 | **46.35** | 12 files|
+| **zxc 0.8.0 -4**            |   122 MB/s |  **3674 MB/s** |    91698141 | **43.27** | 12 files|
+| **zxc 0.8.0 -5**            |  67.0 MB/s |  **3495 MB/s** |    86054926 | **40.60** | 12 files|
+| lz4 1.10.0              |   592 MB/s |  3573 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1033 MB/s |  4116 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  11.2 MB/s |  3484 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   412 MB/s |  1198 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   451 MB/s |  1573 MB/s |    86932028 | 41.02 | 12 files|
+| brotli 1.2.0 -0         |   354 MB/s |   281 MB/s |    78306095 | 36.95 | 12 files|
+| snappy 1.2.2            |   611 MB/s |  1592 MB/s |   101464727 | 47.87 | 12 files|
 
 ---
 
