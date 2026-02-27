@@ -488,43 +488,43 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 **Figure A**: Decompression Throughput & Storage Ratio (Normalized to LZ4)
 
-![Benchmark Graph ARM64](./images/benchmark_arm64_0.7.1.webp)
+![Benchmark Graph ARM64](./images/benchmark_arm64_0.8.0.webp)
 
 
 ### 7.1 Client ARM64 Summary (Apple Silicon)
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.7.1 -1** | **2.30x** | **128.64** |
-| **zxc 0.7.1 -2** | **1.87x** | **114.91** |
-| **zxc 0.7.1 -3** | **1.45x** | **97.61** |
-| **zxc 0.7.1 -4** | **1.37x** | **91.22** |
-| **zxc 0.7.1 -5** | **1.26x** | **85.43** |
+| **zxc 0.8.0 -1** | **2.48x** | **129.27** |
+| **zxc 0.8.0 -2** | **2.06x** | **113.66** |
+| **zxc 0.8.0 -3** | **1.44x** | **97.38** |
+| **zxc 0.8.0 -4** | **1.37x** | **90.90** |
+| **zxc 0.8.0 -5** | **1.27x** | **85.30** |
 | lz4 1.10.0 --fast -17 | 1.18x | 130.57 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
-| lz4hc 1.10.0 -12 | 0.95x | 76.59 |
+| lz4hc 1.10.0 -12 | 0.94x | 76.59 |
 | snappy 1.2.2 | 0.68x | 100.47 |
-| brotli 1.2.0 -0 | 0.09x | 77.62 |
+| brotli 1.2.0 -0 | 0.08x | 77.62 |
 | zstd 1.5.7 --fast --1 | 0.45x | 86.17 |
-| zstd 1.5.7 -1 | 0.34x | 72.60 |
+| zstd 1.5.7 -1 | 0.34x | 72.59 |
 
 **Decompression Efficiency (Cycles per Byte @ 3.5 GHz)**
 
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
 | memcpy                  | 0.066       | 1.00x (baseline)      |
-| **zxc 0.7.1 -1**        | **0.317**   | **4.8x**              |
-| **zxc 0.7.1 -2**        | **0.390**   | **5.9x**              |
-| **zxc 0.7.1 -3**        | **0.504**   | **7.6x**              |
-| **zxc 0.7.1 -4**        | **0.530**   | **8.0x**              |
-| **zxc 0.7.1 -5**        | **0.576**   | **8.7x**              |
+| **zxc 0.8.0 -1**        | **0.293**   | **4.4x**              |
+| **zxc 0.8.0 -2**        | **0.354**   | **5.4x**              |
+| **zxc 0.8.0 -3**        | **0.505**   | **7.6x**              |
+| **zxc 0.8.0 -4**        | **0.532**   | **8.0x**              |
+| **zxc 0.8.0 -5**        | **0.575**   | **8.7x**              |
 | lz4 1.10.0              | 0.729       | 11.0x                 |
-| lz4 1.10.0 --fast -17   | 0.619       | 9.4x                  |
-| lz4hc 1.10.0 -12        | 0.770       | 11.6x                 |
-| zstd 1.5.7 -1           | 2.156       | 32.6x                 |
-| zstd 1.5.7 --fast --1   | 1.622       | 24.5x                 |
+| lz4 1.10.0 --fast -17   | 0.620       | 9.4x                  |
+| lz4hc 1.10.0 -12        | 0.771       | 11.6x                 |
+| zstd 1.5.7 -1           | 2.158       | 32.6x                 |
+| zstd 1.5.7 --fast --1   | 1.615       | 24.4x                 |
 | snappy 1.2.2            | 1.072       | 16.2x                 |
-| brotli 1.2.0 -0         | 8.373       | 126x                  |
+| brotli 1.2.0 -0         | 8.642       | 130x                  |
 
 *Lower is better. Calculated using Apple M2 Performance Core frequency (3.5 GHz).*
 
@@ -533,36 +533,36 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.7.1 -1** | **2.03x** | **128.64** |
-| **zxc 0.7.1 -2** | **1.69x** | **114.91** |
-| **zxc 0.7.1 -3** | **1.26x** | **97.61** |
-| **zxc 0.7.1 -4** | **1.20x** | **91.22** |
-| **zxc 0.7.1 -5** | **1.09x** | **85.43** |
-| lz4 1.10.0 --fast -17 | 1.17x | 130.57 |
+| **zxc 0.8.0 -1** | **2.09x** | **129.27** |
+| **zxc 0.8.0 -2** | **1.75x** | **113.66** |
+| **zxc 0.8.0 -3** | **1.23x** | **97.38** |
+| **zxc 0.8.0 -4** | **1.17x** | **90.90** |
+| **zxc 0.8.0 -5** | **1.07x** | **85.30** |
+| lz4 1.10.0 --fast -17 | 1.16x | 130.57 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -12 | 0.91x | 76.59 |
 | snappy 1.2.2 | 0.44x | 100.47 |
 | brotli 1.2.0 -0 | 0.09x | 77.62 |
 | zstd 1.5.7 --fast --1 | 0.42x | 86.17 |
-| zstd 1.5.7 -1 | 0.32x | 72.59 |
+| zstd 1.5.7 -1 | 0.33x | 72.59 |
 
 **Decompression Efficiency (Cycles per Byte @ 2.6 GHz)**
 
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
 | memcpy                  | 0.108       | 1.00x (baseline)      |
-| **zxc 0.7.1 -1**        | **0.308**   | **2.8x**              |
-| **zxc 0.7.1 -2**        | **0.371**   | **3.4x**              |
-| **zxc 0.7.1 -3**        | **0.499**   | **4.6x**              |
-| **zxc 0.7.1 -4**        | **0.523**   | **4.8x**              |
-| **zxc 0.7.1 -5**        | **0.577**   | **5.3x**              |
-| lz4 1.10.0              | 0.626       | 5.8x                  |
-| lz4 1.10.0 --fast -17   | 0.536       | 4.9x                  |
-| lz4hc 1.10.0 -12        | 0.689       | 6.3x                  |
-| zstd 1.5.7 -1           | 1.933       | 17.8x                 |
-| zstd 1.5.7 --fast --1   | 1.487       | 13.7x                 |
-| snappy 1.2.2            | 1.419       | 13.1x                 |
-| brotli 1.2.0 -0         | 6.753       | 62.3x                 |
+| **zxc 0.8.0 -1**        | **0.298**   | **2.8x**              |
+| **zxc 0.8.0 -2**        | **0.356**   | **3.3x**              |
+| **zxc 0.8.0 -3**        | **0.507**   | **4.7x**              |
+| **zxc 0.8.0 -4**        | **0.533**   | **4.9x**              |
+| **zxc 0.8.0 -5**        | **0.581**   | **5.4x**              |
+| lz4 1.10.0              | 0.622       | 5.8x                  |
+| lz4 1.10.0 --fast -17   | 0.534       | 5.0x                  |
+| lz4hc 1.10.0 -12        | 0.685       | 6.4x                  |
+| zstd 1.5.7 -1           | 1.906       | 17.7x                 |
+| zstd 1.5.7 --fast --1   | 1.475       | 13.7x                 |
+| snappy 1.2.2            | 1.406       | 13.1x                 |
+| brotli 1.2.0 -0         | 6.736       | 62.5x                 |
 
 *Lower is better. Calculated using Neoverse-V2 base frequency (2.6 GHz).*
 
@@ -571,12 +571,12 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.7.1 -1** | **1.75x** | **128.64** |
-| **zxc 0.7.1 -2** | **1.43x** | **114.91** |
-| **zxc 0.7.1 -3** | **1.07x** | **97.61** |
-| **zxc 0.7.1 -4** | **1.03x** | **91.22** |
-| **zxc 0.7.1 -5** | **0.97x** | **85.43** |
-| lz4 1.10.0 --fast -17 | 1.16x | 130.57 |
+| **zxc 0.8.0 -1** | **1.90x** | **129.27** |
+| **zxc 0.8.0 -2** | **1.62x** | **113.66** |
+| **zxc 0.8.0 -3** | **1.08x** | **97.38** |
+| **zxc 0.8.0 -4** | **1.03x** | **90.90** |
+| **zxc 0.8.0 -5** | **0.98x** | **85.30** |
+| lz4 1.10.0 --fast -17 | 1.15x | 130.57 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -12 | 0.98x | 76.59 |
 | snappy 1.2.2 | 0.45x | 100.58 |
@@ -588,19 +588,19 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
-| memcpy                  | 0.121       | 1.00x (baseline)      |
-| **zxc 0.7.1 -1**        | **0.393**   | **3.2x**              |
-| **zxc 0.7.1 -2**        | **0.482**   | **4.0x**              |
-| **zxc 0.7.1 -3**        | **0.642**   | **5.3x**              |
-| **zxc 0.7.1 -4**        | **0.669**   | **5.5x**              |
-| **zxc 0.7.1 -5**        | **0.711**   | **5.9x**              |
-| lz4 1.10.0              | 0.689       | 5.7x                  |
-| lz4 1.10.0 --fast -17   | 0.596       | 4.9x                  |
-| lz4hc 1.10.0 -12        | 0.704       | 5.8x                  |
-| zstd 1.5.7 -1           | 2.047       | 16.9x                 |
-| zstd 1.5.7 --fast --1   | 1.559       | 12.8x                 |
-| snappy 1.2.2            | 1.544       | 12.7x                 |
-| brotli 1.2.0 -0         | 8.537       | 70.3x                 |
+| memcpy                  | 0.131       | 1.00x (baseline)      |
+| **zxc 0.8.0 -1**        | **0.361**   | **2.8x**              |
+| **zxc 0.8.0 -2**        | **0.424**   | **3.2x**              |
+| **zxc 0.8.0 -3**        | **0.637**   | **4.9x**              |
+| **zxc 0.8.0 -4**        | **0.667**   | **5.1x**              |
+| **zxc 0.8.0 -5**        | **0.701**   | **5.4x**              |
+| lz4 1.10.0              | 0.686       | 5.2x                  |
+| lz4 1.10.0 --fast -17   | 0.595       | 4.5x                  |
+| lz4hc 1.10.0 -12        | 0.703       | 5.4x                  |
+| zstd 1.5.7 -1           | 2.045       | 15.6x                 |
+| zstd 1.5.7 --fast --1   | 1.558       | 11.9x                 |
+| snappy 1.2.2            | 1.539       | 11.7x                 |
+| brotli 1.2.0 -0         | 8.719       | 66.6x                 |
 
 *Lower is better. Calculated using AMD EPYC 7763 base frequency (2.45 GHz).*
 
@@ -609,7 +609,7 @@ Benchmarks were conducted using `lzbench` (by inikep).
 
 **Figure B**: Decompression Efficiency : Cycles Per Byte Comparaison
 
-![Benchmark Cycles Per Byte](./images/benchmark_decompression_cycles_0.7.1.webp)
+![Benchmark Cycles Per Byte](./images/benchmark_decompression_cycles_0.8.0.webp)
 
 
 #### 7.4.1 ARM64 Architecture (Apple Silicon)
@@ -620,19 +620,19 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clan
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 52833 MB/s | 52754 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.7.1 -1**            |   913 MB/s | **11045 MB/s** |   129770958 | **61.23** | 12 files|
-| **zxc 0.7.1 -2**            |   608 MB/s |  **8974 MB/s** |   115921778 | **54.70** | 12 files|
-| **zxc 0.7.1 -3**            |   180 MB/s |  **6948 MB/s** |    98472307 | **46.46** | 12 files|
-| **zxc 0.7.1 -4**            |   123 MB/s |  **6599 MB/s** |    92027546 | **43.42** | 12 files|
-| **zxc 0.7.1 -5**            |  65.2 MB/s |  **6072 MB/s** |    86177811 | **40.66** | 12 files|
-| lz4 1.10.0              |   814 MB/s |  4802 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1342 MB/s |  5651 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  13.9 MB/s |  4543 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   644 MB/s |  1620 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   724 MB/s |  2159 MB/s |    86932028 | 41.02 | 12 files|
-| brotli 1.2.0 -0         |   539 MB/s |   418 MB/s |    78306095 | 36.95 | 12 files|
-| snappy 1.2.2            |   880 MB/s |  3262 MB/s |   101352257 | 47.82 | 12 files|
+| memcpy                  | 52905 MB/s | 52854 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.8.0 -1**            |   950 MB/s | **11934 MB/s** |   130408237 | **61.53** | 12 files|
+| **zxc 0.8.0 -2**            |   615 MB/s |  **9879 MB/s** |   114657730 | **54.10** | 12 files|
+| **zxc 0.8.0 -3**            |   240 MB/s |  **6925 MB/s** |    98234598 | **46.35** | 12 files|
+| **zxc 0.8.0 -4**            |   169 MB/s |  **6584 MB/s** |    91698141 | **43.27** | 12 files|
+| **zxc 0.8.0 -5**            |  93.2 MB/s |  **6090 MB/s** |    86054926 | **40.60** | 12 files|
+| lz4 1.10.0              |   815 MB/s |  4804 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1345 MB/s |  5647 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  14.0 MB/s |  4537 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   644 MB/s |  1622 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   725 MB/s |  2167 MB/s |    86932028 | 41.02 | 12 files|
+| brotli 1.2.0 -0         |   539 MB/s |   405 MB/s |    78306095 | 36.95 | 12 files|
+| snappy 1.2.2            |   830 MB/s |  3265 MB/s |   101352257 | 47.82 | 12 files|
 
 
 ### 7.4.2 ARM64 Architecture (Google Axion)
@@ -643,19 +643,19 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 23949 MB/s | 23969 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.7.1 -1**            |   808 MB/s |  **8437 MB/s** |   129770958 | **61.23** | 12 files|
-| **zxc 0.7.1 -2**            |   539 MB/s |  **7003 MB/s** |   115921778 | **54.70** | 12 files|
-| **zxc 0.7.1 -3**            |   163 MB/s |  **5215 MB/s** |    98472307 | **46.46** | 12 files|
-| **zxc 0.7.1 -4**            |   111 MB/s |  **4968 MB/s** |    92027546 | **43.42** | 12 files|
-| **zxc 0.7.1 -5**            |  58.2 MB/s |  **4509 MB/s** |    86177811 | **40.66** | 12 files|
-| lz4 1.10.0              |   740 MB/s |  4151 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1282 MB/s |  4847 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  12.4 MB/s |  3776 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   519 MB/s |  1345 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   605 MB/s |  1748 MB/s |    86932028 | 41.02 | 12 files|
-| brotli 1.2.0 -0         |   422 MB/s |   385 MB/s |    78306095 | 36.95 | 12 files|
-| snappy 1.2.2            |   747 MB/s |  1832 MB/s |   101352257 | 47.82 | 12 files|
+| memcpy                  | 24237 MB/s | 24131 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.8.0 -1**            |   853 MB/s |  **8727 MB/s** |   130408237 | **61.53** | 12 files|
+| **zxc 0.8.0 -2**            |   556 MB/s |  **7303 MB/s** |   114657730 | **54.10** | 12 files|
+| **zxc 0.8.0 -3**            |   226 MB/s |  **5130 MB/s** |    98234598 | **46.35** | 12 files|
+| **zxc 0.8.0 -4**            |   159 MB/s |  **4879 MB/s** |    91698141 | **43.27** | 12 files|
+| **zxc 0.8.0 -5**            |  84.9 MB/s |  **4475 MB/s** |    86054926 | **40.60** | 12 files|
+| lz4 1.10.0              |   749 MB/s |  4182 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1303 MB/s |  4868 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  12.9 MB/s |  3796 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   527 MB/s |  1364 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   610 MB/s |  1763 MB/s |    86932028 | 41.02 | 12 files|
+| brotli 1.2.0 -0         |   429 MB/s |   386 MB/s |    78306095 | 36.95 | 12 files|
+| snappy 1.2.2            |   756 MB/s |  1849 MB/s |   101352257 | 47.82 | 12 files|
 
 
 #### 7.4.3 x86_64 Architecture (AMD EPYC)
@@ -666,19 +666,19 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 20222 MB/s | 20186 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.7.1 -1**            |   601 MB/s |  **6233 MB/s** |   129770958 | **61.23** | 12 files|
-| **zxc 0.7.1 -2**            |   397 MB/s |  **5081 MB/s** |   115921778 | **54.70** | 12 files|
-| **zxc 0.7.1 -3**            |   128 MB/s |  **3814 MB/s** |    98472307 | **46.46** | 12 files|
-| **zxc 0.7.1 -4**            |  89.7 MB/s |  **3665 MB/s** |    92027546 | **43.42** | 12 files|
-| **zxc 0.7.1 -5**            |  48.2 MB/s |  **3448 MB/s** |    86177811 | **40.66** | 12 files|
-| lz4 1.10.0              |   594 MB/s |  3555 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1034 MB/s |  4109 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  11.3 MB/s |  3479 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   414 MB/s |  1197 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   453 MB/s |  1572 MB/s |    86932028 | 41.02 | 12 files|
-| brotli 1.2.0 -0         |   358 MB/s |   287 MB/s |    78306095 | 36.95 | 12 files|
-| snappy 1.2.2            |   612 MB/s |  1587 MB/s |   101464727 | 47.87 | 12 files|
+| memcpy                  | 18697 MB/s | 18663 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.8.0 -1**            |   642 MB/s |  **6779 MB/s** |   130408237 | **61.53** | 12 files|
+| **zxc 0.8.0 -2**            |   414 MB/s |  **5778 MB/s** |   114657730 | **54.10** | 12 files|
+| **zxc 0.8.0 -3**            |   171 MB/s |  **3849 MB/s** |    98234598 | **46.35** | 12 files|
+| **zxc 0.8.0 -4**            |   122 MB/s |  **3674 MB/s** |    91698141 | **43.27** | 12 files|
+| **zxc 0.8.0 -5**            |  67.0 MB/s |  **3495 MB/s** |    86054926 | **40.60** | 12 files|
+| lz4 1.10.0              |   592 MB/s |  3573 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1033 MB/s |  4116 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  11.2 MB/s |  3484 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   412 MB/s |  1198 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   451 MB/s |  1573 MB/s |    86932028 | 41.02 | 12 files|
+| brotli 1.2.0 -0         |   354 MB/s |   281 MB/s |    78306095 | 36.95 | 12 files|
+| snappy 1.2.2            |   611 MB/s |  1592 MB/s |   101464727 | 47.87 | 12 files|
 
 
 ## 8. Strategic Implementation
