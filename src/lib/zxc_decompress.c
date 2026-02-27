@@ -977,7 +977,6 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             offset += zxc_le16(o_ptr);  // 2-byte offset (biased)
             o_ptr += 2;
         }
-        offset += ZXC_LZ_OFFSET_BIAS;
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {
             ll += zxc_read_varint(&e_ptr, e_end);
@@ -1068,7 +1067,6 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             offset += zxc_le16(o_ptr);  // 2-byte offset (biased)
             o_ptr += 2;
         }
-        offset += ZXC_LZ_OFFSET_BIAS;
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) ll += zxc_read_varint(&e_ptr, e_end);
         if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) ml += zxc_read_varint(&e_ptr, e_end);
