@@ -36,7 +36,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ==============================================================================
 This project includes code from rapidhash
 Copyright (C) 2025 Nicolas De Carli
-License: MIT
+License: MIT (Expat)
 ==============================================================================
 
 rapidhash - Very fast, high quality, platform-independent hashing algorithm.
