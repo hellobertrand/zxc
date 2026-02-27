@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'c-cpp', 'rust' ]
+        language: [ 'c-cpp', 'rust', 'python' ]
 
     steps:
     - name: Checkout Repository
@@ -47,6 +47,9 @@ jobs:
         elif [ "${{ matrix.language }}" = "rust" ]; then
           cd wrappers/rust
           cargo build --workspace --all-targets
+        elif [ "${{ matrix.language }}" = "python" ]; then
+          cd wrappers/python
+          python3 -m pip install -e .
         fi
 
     - name: Perform CodeQL Analysis

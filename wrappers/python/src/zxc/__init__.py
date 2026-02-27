@@ -16,6 +16,19 @@ from ._zxc import (
     LEVEL_DEFAULT,
     LEVEL_BALANCED,
     LEVEL_COMPACT,
+    ERROR_MEMORY,
+    ERROR_DST_TOO_SMALL,
+    ERROR_SRC_TOO_SMALL,
+    ERROR_BAD_MAGIC,
+    ERROR_BAD_VERSION,
+    ERROR_BAD_HEADER,
+    ERROR_BAD_CHECKSUM,
+    ERROR_CORRUPT_DATA,
+    ERROR_BAD_OFFSET,
+    ERROR_OVERFLOW,
+    ERROR_IO,
+    ERROR_NULL_INPUT,
+    ERROR_BAD_BLOCK_TYPE,
 )
 
 try:
@@ -37,6 +50,21 @@ __all__ = [
     "LEVEL_DEFAULT",
     "LEVEL_BALANCED",
     "LEVEL_COMPACT",
+
+    # Error Constants
+    "ERROR_MEMORY",
+    "ERROR_DST_TOO_SMALL",
+    "ERROR_SRC_TOO_SMALL",
+    "ERROR_BAD_MAGIC",
+    "ERROR_BAD_VERSION",
+    "ERROR_BAD_HEADER",
+    "ERROR_BAD_CHECKSUM",
+    "ERROR_CORRUPT_DATA",
+    "ERROR_BAD_OFFSET",
+    "ERROR_OVERFLOW",
+    "ERROR_IO",
+    "ERROR_NULL_INPUT",
+    "ERROR_BAD_BLOCK_TYPE",
 ]
 
 def compress(data, level = LEVEL_DEFAULT, checksum = False) -> bytes:
