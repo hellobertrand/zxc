@@ -54,8 +54,8 @@ Offset  Size  Field
 - **Magic Word** (`u32`): `0x9CB02EF5`.
 - **Format Version** (`u8`): currently `5`.
 - **Chunk Size Code** (`u8`):
-  - `0` means default legacy value = 64 units.
-  - otherwise actual chunk size = `code * 4096` bytes.
+  - `0` is interpreted as `1` unit (minimum size).
+  - actual chunk size = `max(1, code) * 16384` bytes.
 - **Flags** (`u8`):
   - Bit 7 (`0x80`): `HAS_CHECKSUM`.
   - Bits 0..3: checksum algorithm id (`0` = RapidHash-based folding).
@@ -414,7 +414,7 @@ Generated archive size: **58 bytes**.
 ### 11.1 Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 05 40 80 00 00 00 00 00 00 00 26 2E
+00000000: F5 2E B0 9C 05 10 80 00 00 00 00 00 00 00 D2 D5
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
@@ -425,15 +425,15 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 05 | 40 | 80 | 00 00 00 00 00 00 00 | 26 2E
+F5 2E B0 9C | 05 | 10 | 80 | 00 00 00 00 00 00 00 | D2 D5
 ```
 
 - `F5 2E B0 9C` → magic word (LE) = `0x9CB02EF5`.
 - `05` → format version 5.
-- `40` → chunk-size code 64 (`64 * 4096 = 262144` bytes, i.e. 256 KiB).
+- `10` → chunk-size code 16 (`16 * 16384 = 262144` bytes, i.e. 256 KB).
 - `80` → checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `26 2E` → header CRC16.
+- `D2 D5` → header CRC16.
 
 #### B) Data Block #0 (RAW)
 
