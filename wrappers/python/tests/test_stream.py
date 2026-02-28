@@ -53,11 +53,17 @@ def test_stream_invalid_src_dst(tmp_path, src, dst, expected_error, match):
         src = open(src_path, "rb")
         dst = open(dst_path, "wb")
 
-    if not expected_error:
-        _ = zxc.stream_compress(src, dst)
-    else:
-        with pytest.raises(expected_error, match=match):
-            zxc.stream_compress(src, dst)
+    try:
+        if not expected_error:
+            _ = zxc.stream_compress(src, dst)
+        else:
+            with pytest.raises(expected_error, match=match):
+                zxc.stream_compress(src, dst)
+    finally:
+        if hasattr(src, "close"):
+            src.close()
+        if hasattr(dst, "close"):
+            dst.close()
 
 
 @pytest.mark.parametrize(
