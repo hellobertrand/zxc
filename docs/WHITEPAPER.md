@@ -104,8 +104,8 @@ The file begins with a **16-byte** header that identifies the format and specifi
 * **Magic Word (4 bytes)**: `0x9 0xCB 0x02E 0xF5`.
 * **Version (1 byte)**: Current version is `5`.
 * **Chunk Size Code (1 byte)**: Defines the processing block size:
-  - `0` is interpreted as `1` unit (minimum size 16 KB)
-  - `N` = Chunk size is `N × 16384` bytes (e.g., `16` = 256 KB)
+  - `0` = Default mode (256 KB, for backward compatibility)
+  - `N` = Chunk size is `N × 4096` bytes (e.g., `62` = 248 KB)
 * **Flags (1 byte)**: Global configuration flags.
   - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream. Every block will carry a trailing 4-byte checksum, and the footer will contain a global checksum. If `0`, no checksums are present.
   - **Bits 4-6**: Reserved.
