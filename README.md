@@ -63,9 +63,9 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **8,437 MB/s** vs 4,847 MB/s **1.74x Faster** | **61.2** vs 62.2 **Smaller** (-1.5%) | **ZXC** leads in raw throughput. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **5,215 MB/s** vs 4,151 MB/s **1.26x Faster** | **46.5** vs 47.6 **Smaller** (-2.4%) | **ZXC** outperforms LZ4 in read speed and ratio. |
-| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **4,509 MB/s** vs 1,748 MB/s **2.58x Faster** | **40.7** vs 41.0 **Equivalent** (-0.9%) | **ZXC** outperforms Zstd in decoding speed. |
+| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **8,727 MB/s** vs 4,868 MB/s **1.79x Faster** | **61.5** vs 62.2 **Smaller** (-1.0%) | **ZXC** leads in raw throughput. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **5,130 MB/s** vs 4,182 MB/s **1.23x Faster** | **46.4** vs 47.6 **Smaller** (-2.6%) | **ZXC** outperforms LZ4 in read speed and ratio. |
+| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **4,475 MB/s** vs 1,763 MB/s **2.54x Faster** | **40.6** vs 41.0 **Equivalent** (-1.0%) | **ZXC** outperforms Zstd in decoding speed. |
 
 ### 3. Build Server: x86_64 (AMD EPYC 7763)
 *Scenario: CI/CD Pipelines compatibility.*
@@ -101,25 +101,27 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clan
 | brotli 1.2.0 -0         |   539 MB/s |   405 MB/s |    78306095 | 36.95 | 12 files|
 | snappy 1.2.2            |   830 MB/s |  3265 MB/s |   101352257 | 47.82 | 12 files|
 
+
 ### Benchmark ARM64 (Google Axion)
 
 Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 12.2.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Debian GNU/Linux 12 (bookworm). The reference hardware is a Google Neoverse-V2 processor (ARM64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus.
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 23949 MB/s | 23969 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.7.1 -1**            |   808 MB/s |  **8437 MB/s** |   129770958 | **61.23** | 12 files|
-| **zxc 0.7.1 -2**            |   539 MB/s |  **7003 MB/s** |   115921778 | **54.70** | 12 files|
-| **zxc 0.7.1 -3**            |   163 MB/s |  **5215 MB/s** |    98472307 | **46.46** | 12 files|
-| **zxc 0.7.1 -4**            |   111 MB/s |  **4968 MB/s** |    92027546 | **43.42** | 12 files|
-| **zxc 0.7.1 -5**            |  58.2 MB/s |  **4509 MB/s** |    86177811 | **40.66** | 12 files|
-| lz4 1.10.0              |   740 MB/s |  4151 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1282 MB/s |  4847 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  12.4 MB/s |  3776 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   519 MB/s |  1345 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   605 MB/s |  1748 MB/s |    86932028 | 41.02 | 12 files|
-| brotli 1.2.0 -0         |   422 MB/s |   385 MB/s |    78306095 | 36.95 | 12 files|
-| snappy 1.2.2            |   747 MB/s |  1832 MB/s |   101352257 | 47.82 | 12 files|
+| memcpy                  | 24237 MB/s | 24131 MB/s |   211938580 |100.00 | 12 files|
+| **zxc 0.8.0 -1**            |   853 MB/s |  **8727 MB/s** |   130408237 | **61.53** | 12 files|
+| **zxc 0.8.0 -2**            |   556 MB/s |  **7303 MB/s** |   114657730 | **54.10** | 12 files|
+| **zxc 0.8.0 -3**            |   226 MB/s |  **5130 MB/s** |    98234598 | **46.35** | 12 files|
+| **zxc 0.8.0 -4**            |   159 MB/s |  **4879 MB/s** |    91698141 | **43.27** | 12 files|
+| **zxc 0.8.0 -5**            |  84.9 MB/s |  **4475 MB/s** |    86054926 | **40.60** | 12 files|
+| lz4 1.10.0              |   749 MB/s |  4182 MB/s |   100880147 | 47.60 | 12 files|
+| lz4 1.10.0 --fast -17   |  1303 MB/s |  4868 MB/s |   131723524 | 62.15 | 12 files|
+| lz4hc 1.10.0 -12        |  12.9 MB/s |  3796 MB/s |    77262399 | 36.46 | 12 files|
+| zstd 1.5.7 -1           |   527 MB/s |  1364 MB/s |    73229468 | 34.55 | 12 files|
+| zstd 1.5.7 --fast --1   |   610 MB/s |  1763 MB/s |    86932028 | 41.02 | 12 files|
+| brotli 1.2.0 -0         |   429 MB/s |   386 MB/s |    78306095 | 36.95 | 12 files|
+| snappy 1.2.2            |   756 MB/s |  1849 MB/s |   101352257 | 47.82 | 12 files|
+
 
 
 ### Benchmark x86_64
@@ -141,6 +143,7 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 | zstd 1.5.7 --fast --1   |   451 MB/s |  1573 MB/s |    86932028 | 41.02 | 12 files|
 | brotli 1.2.0 -0         |   354 MB/s |   281 MB/s |    78306095 | 36.95 | 12 files|
 | snappy 1.2.2            |   611 MB/s |  1592 MB/s |   101464727 | 47.87 | 12 files|
+
 
 ---
 
