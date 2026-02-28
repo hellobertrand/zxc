@@ -183,9 +183,9 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     dst[4] = ZXC_FILE_FORMAT_VERSION;
 
     // Dual-scale chunk size encoding
+    // Large scale multiplier is 64 KB, fine scale is 4 KB (ratio: 64 / 4 = 16)
     const uint32_t units = (uint32_t)(ZXC_BLOCK_SIZE / ZXC_BLOCK_UNIT);
-    const uint32_t is_large = (units > 127);
-    dst[5] = (uint8_t)((is_large << 7) | (units >> (is_large << 2)));
+    dst[5] = units <= 127 ? (uint8_t)units : (uint8_t)((units / 16) | 0x80);
 
     // Flags are at offset 6
     dst[6] = has_checksum ? (ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_CHECKSUM_RAPIDHASH) : 0;
