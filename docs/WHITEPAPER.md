@@ -103,9 +103,12 @@ The file begins with a **16-byte** header that identifies the format and specifi
 
 * **Magic Word (4 bytes)**: `0x9 0xCB 0x02E 0xF5`.
 * **Version (1 byte)**: Current version is `5`.
-* **Chunk Size Code (1 byte)**: Defines the processing block size:
-  - `0` = Default mode (256 KB, for backward compatibility)
-  - `N` = Chunk size is `N × 4096` bytes (e.g., `62` = 248 KB)
+* **Chunk Size Code (1 byte)**: Defines the processing block size using a "Dual Scale" flag:
+  - **Bit 7 (MSB)**: Multiplier scale. `0` = 4 KB multiplier, `1` = 64 KB multiplier.
+  - **Bits 0-6**: Base value `V` (from 1 to 127). `0` defaults to `1` (minimum block size is 4 KB).
+  - *Example 1 (Fine)*: `16` (MSB=0, V=16) → 16 × 4 KB = 64 KB.
+  - *Example 2 (Large)*: `132` (MSB=1, V=4) → 4 × 64 KB = 256 KB.
+  - *Example 3 (Max)*: `255` (MSB=1, V=127) → 127 × 64 KB = ~8.1 MB.
 * **Flags (1 byte)**: Global configuration flags.
   - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream. Every block will carry a trailing 4-byte checksum, and the footer will contain a global checksum. If `0`, no checksums are present.
   - **Bits 4-6**: Reserved.

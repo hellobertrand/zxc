@@ -181,10 +181,16 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
 
     zxc_store_le32(dst, ZXC_MAGIC_WORD);
     dst[4] = ZXC_FILE_FORMAT_VERSION;
-    dst[5] = (uint8_t)(ZXC_BLOCK_SIZE / ZXC_BLOCK_UNIT);
+
+    // Dual-scale chunk size encoding
+    const uint32_t units = (uint32_t)(ZXC_BLOCK_SIZE / ZXC_BLOCK_UNIT);
+    const uint32_t is_large = (units > 127);
+    dst[5] = (uint8_t)((is_large << 7) | (units >> (is_large << 2)));
+
+    // Flags are at offset 6
     dst[6] = has_checksum ? (ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_CHECKSUM_RAPIDHASH) : 0;
 
-    // Bytes 7-13: Reserved (must be 0)
+    // Bytes 7-13: Reserved (must be 0, 7 bytes)
     ZXC_MEMSET(dst + 7, 0, 7);
 
     // Bytes 14-15: CRC (16-bit)
@@ -221,9 +227,15 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     if (UNLIKELY(zxc_le16(src + 14) != zxc_hash16(temp))) return ZXC_ERROR_BAD_HEADER;
 
     if (out_block_size) {
-        const size_t units = src[5] ? src[5] : 64;  // Default to 64 block units (256KB)
-        *out_block_size = units * ZXC_BLOCK_UNIT;
+        // Read Dual-Scale Chunk Size Code
+        const uint8_t code = src[5];
+        const size_t scale = (code & 0x80) ? (16 * ZXC_BLOCK_UNIT) : ZXC_BLOCK_UNIT;
+        size_t value = code & 0x7F;
+        if (UNLIKELY(value == 0)) value = 1;
+
+        *out_block_size = value * scale;
     }
+    // Flags are at offset 6
     if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
 
     return ZXC_OK;
