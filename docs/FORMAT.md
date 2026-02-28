@@ -54,8 +54,11 @@ Offset  Size  Field
 - **Magic Word** (`u32`): `0x9CB02EF5`.
 - **Format Version** (`u8`): currently `5`.
 - **Chunk Size Code** (`u8`):
-  - `0` means default legacy value = 64 units.
-  - otherwise actual chunk size = `code * 4096` bytes.
+  - Uses a "Dual Scale" flag on the MSB (Bit 7).
+  - Bits 0..6 encode the base value `V` (1 to 127). If `0`, it defaults to `1` (4 KB).
+  - If Bit 7 is `0`, multiplier is 4 KB (`Multi = 4096`).
+  - If Bit 7 is `1`, multiplier is 64 KB (`Multi = 65536`).
+  - Actual block size is computed as `V * Multi` bytes.
 - **Flags** (`u8`):
   - Bit 7 (`0x80`): `HAS_CHECKSUM`.
   - Bits 0..3: checksum algorithm id (`0` = RapidHash-based folding).
@@ -430,7 +433,7 @@ F5 2E B0 9C | 05 | 40 | 80 | 00 00 00 00 00 00 00 | 26 2E
 
 - `F5 2E B0 9C` → magic word (LE) = `0x9CB02EF5`.
 - `05` → format version 5.
-- `40` → chunk-size code 64 (`64 * 4096 = 262144` bytes, i.e. 256 KiB).
+- `40` → chunk-size code 64 (Bit 7=0, V=64) (`64 * 4096 = 262144` bytes, i.e. 256 KiB).
 - `80` → checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
 - `26 2E` → header CRC16.
