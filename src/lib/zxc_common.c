@@ -221,7 +221,7 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     if (UNLIKELY(zxc_le16(src + 14) != zxc_hash16(temp))) return ZXC_ERROR_BAD_HEADER;
 
     if (out_block_size) {
-        const size_t units = src[5] ? src[5] : 64;  // Default to 64 block units (256KB)
+        const size_t units = src[5] ? src[5] : 1;  // Minimum 1 block unit (16KB)
         *out_block_size = units * ZXC_BLOCK_UNIT;
     }
     if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
