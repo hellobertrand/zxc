@@ -200,19 +200,31 @@ static int zxc_validate_input_path(const char* path, char* resolved_buffer, size
     }
     return 0;
 #else
-    const char* res = realpath(path, resolved_buffer);
+    char* const res = realpath(path, NULL);
     if (!res) {
         // realpath failed (e.g. file does not exist)
         return -1;
     }
     struct stat st;
-    if (stat(resolved_buffer, &st) != 0) {
+    if (stat(res, &st) != 0) {
+        free(res);
         return -1;
     }
     if (!S_ISREG(st.st_mode)) {
+        free(res);
         errno = EISDIR;  // Generic error for non-regular file
         return -1;
     }
+
+    const size_t len = strlen(res);
+    if (len >= buffer_size) {
+        free(res);
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+
+    memcpy(resolved_buffer, res, len + 1);
+    free(res);
     return 0;
 #endif
 }
@@ -236,38 +248,43 @@ static int zxc_validate_output_path(const char* path, char* resolved_buffer, siz
     return 0;
 #else
     // POSIX output path validation
-    // Reject paths that would be truncated by our fixed-size buffers
-    const size_t path_len = strlen(path);
-    if (path_len >= PATH_MAX) {
-        errno = ENAMETOOLONG;
+    char* const temp_path = strdup(path);
+    if (!temp_path) return -1;
+
+    char* const temp_path2 = strdup(path);
+    if (!temp_path2) {
+        free(temp_path);
         return -1;
     }
 
-    char temp_path[PATH_MAX];
-    memcpy(temp_path, path, path_len + 1);
-
     // Split into dir and base
-    char* dir = dirname(temp_path);  // Note: dirname may modify string or return static
-    // We need another copy for basename as dirname might modify
-    char temp_path2[PATH_MAX];
-    memcpy(temp_path2, path, path_len + 1);
-    const char* base = basename(temp_path2);
+    char* const dir = dirname(temp_path);  // Note: dirname may modify string or return static
+    const char* const base = basename(temp_path2);
 
-    char resolved_dir[PATH_MAX];
-    if (!realpath(dir, resolved_dir)) {
+    char* const resolved_dir = realpath(dir, NULL);
+    if (!resolved_dir) {
         // Parent directory must exist
+        free(temp_path);
+        free(temp_path2);
         return -1;
     }
 
     struct stat st;
     if (stat(resolved_dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        free(resolved_dir);
+        free(temp_path);
+        free(temp_path2);
         errno = EISDIR;
         return -1;
     }
 
     // Reconstruct valid path: resolved_dir / base
     // Ensure we don't overflow buffer
-    int written = snprintf(resolved_buffer, buffer_size, "%s/%s", resolved_dir, base);
+    const int written = snprintf(resolved_buffer, buffer_size, "%s/%s", resolved_dir, base);
+    free(resolved_dir);
+    free(temp_path);
+    free(temp_path2);
+
     if (written < 0 || (size_t)written >= buffer_size) {
         errno = ENAMETOOLONG;
         return -1;
@@ -392,10 +409,17 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             continue;
         }
 
-        char full_path[PATH_MAX];
-        const int n = snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
-        if (n < 0 || (size_t)n >= sizeof(full_path)) {
+        const size_t path_len = strlen(dir_path) + 1 + strlen(entry->d_name) + 1;
+        char* const full_path = malloc(path_len);
+        if (!full_path) {
+            zxc_log("Error allocating memory for path in directory '%s'\n", dir_path);
+            continue;
+        }
+
+        const int n = snprintf(full_path, path_len, "%s/%s", dir_path, entry->d_name);
+        if (n < 0 || (size_t)n >= path_len) {
             zxc_log("Error: path too long in directory '%s'\n", dir_path);
+            free(full_path);
             continue;
         }
 
@@ -409,6 +433,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                 if (mode == MODE_COMPRESS) {
                     const size_t len = strlen(full_path);
                     if (len >= 3 && strcmp(full_path + len - 3, ".xc") == 0) {
+                        free(full_path);
                         continue;  // Skip already compressed files in recursive compression
                     }
                 }
@@ -416,6 +441,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                                                    force, to_stdout, checksum, level, json_output);
             }
         }
+        free(full_path);
     }
     closedir(dir);
 #endif
