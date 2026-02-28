@@ -55,9 +55,9 @@ Offset  Size  Field
 - **Format Version** (`u8`): currently `5`.
 - **Chunk Size Code** (`u8`):
   - Uses a "Dual Scale" flag on the MSB (Bit 7).
-  - Bits 0..6 encode the base value $V$ (1 to 127). If $0$, it defaults to $1$ (4 KB).
-  - If Bit 7 is `0`, multiplier is 4 KB ($Multi = 4096$).
-  - If Bit 7 is `1`, multiplier is 64 KB ($Multi = 65536$).
+  - Bits 0..6 encode the base value `V` (1 to 127). If `0`, it defaults to `1` (4 KB).
+  - If Bit 7 is `0`, multiplier is 4 KB (`Multi = 4096`).
+  - If Bit 7 is `1`, multiplier is 64 KB (`Multi = 65536`).
   - Actual block size is computed as `V * Multi` bytes.
 - **Flags** (`u8`):
   - Bit 7 (`0x80`): `HAS_CHECKSUM`.
