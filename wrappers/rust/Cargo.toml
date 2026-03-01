@@ -3,7 +3,7 @@ members = ["zxc-sys", "zxc"]
 resolver = "2"
 
 [workspace.package]
-version = "0.8.0"
+version = "0.8.1"
 authors = ["Bertrand Lebonnois"]
 edition = "2024"
 rust-version = "1.85"

@@ -155,11 +155,17 @@ add_library(zxc_lib
     ${ZXC_VARIANT_OBJECTS}
 )
 
+# =============================================================================
+# ABI Versioning (Debian/Linux shared libraries)
+# =============================================================================
+# Increment this number ONLY when breaking the ABI. 
+set(ZXC_SOVERSION 1)
+
 # Set library output name and version
 set_target_properties(zxc_lib PROPERTIES
     OUTPUT_NAME zxc
     VERSION ${PROJECT_VERSION}
-    SOVERSION ${MAJOR_VER}
+    SOVERSION ${ZXC_SOVERSION}
 )
 
 # Target-based include directories for the main lib
