@@ -53,7 +53,7 @@ jobs:
           cp build/Release/zxc_nodejs.node prebuilds/${{ matrix.os }}-${{ matrix.arch }}/
 
       - name: Upload prebuilt addon
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: prebuilt-${{ matrix.os }}-${{ matrix.arch }}
           path: wrappers/nodejs/prebuilds/
