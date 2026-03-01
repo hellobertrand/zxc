@@ -287,6 +287,11 @@ jobs:
             cross_prefix: loongarch64-linux-gnu
             cmake_processor: loongarch64
             qemu_binary: qemu-loongarch64
+          - name: Linux alpha
+            cross_pkg: gcc-alpha-linux-gnu
+            cross_prefix: alpha-linux-gnu
+            cmake_processor: alpha
+            qemu_binary: qemu-alpha
 
     steps:
       - name: Checkout Repository
