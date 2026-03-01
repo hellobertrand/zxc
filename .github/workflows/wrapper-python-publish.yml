@@ -110,7 +110,7 @@ jobs:
           python-version: ${{ matrix.python }}
       
       - name: Download wheels
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: wheelhouse
           pattern: wheels-*
@@ -134,7 +134,7 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
