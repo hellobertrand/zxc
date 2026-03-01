@@ -59,7 +59,7 @@ jobs:
           CIBW_ENVIRONMENT: "CMAKE_ARGS='-DZXC_NATIVE_ARCH=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON' SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.version.outputs.version }}"
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.arch }}
           path: ./wheelhouse/*.whl
@@ -86,7 +86,7 @@ jobs:
         working-directory: ./wrappers/python
 
       - name: Upload sdist
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: ./wrappers/python/dist/*.tar.gz
