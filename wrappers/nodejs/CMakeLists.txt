@@ -25,6 +25,13 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_JS_INC}
 )
 
+# Generate node.lib on Windows (cmake-js provides .def but not .lib)
+if(MSVC AND CMAKE_JS_NODELIB_DEF AND CMAKE_JS_NODELIB_TARGET)
+    execute_process(COMMAND ${CMAKE_AR} /def:${CMAKE_JS_NODELIB_DEF}
+                    /out:${CMAKE_JS_NODELIB_TARGET}
+                    ${CMAKE_STATIC_LINKER_FLAGS})
+endif()
+
 target_link_libraries(${PROJECT_NAME} PRIVATE
     zxc_lib
     ${CMAKE_JS_LIB}

@@ -67,6 +67,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest, windows-11-arm]
         node: ["18", "20", "22"]
+        exclude:
+          # Node.js 18 and 20 don't have official Windows ARM64 builds
+          - os: windows-11-arm
+            node: "18"
+          - os: windows-11-arm
+            node: "20"
     defaults:
       run:
         working-directory: ./wrappers/nodejs
