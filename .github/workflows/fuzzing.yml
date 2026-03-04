@@ -68,7 +68,7 @@ jobs:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         sanitizer: ${{ matrix.sanitizer }}
 
-    - name: Run Fuzzers (${{ matrix.sanitizer }})
+    - name: Run Fuzzers (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
       id: run
       uses: google/clusterfuzzlite/actions/run_fuzzers@v1
       with:
