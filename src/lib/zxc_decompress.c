@@ -800,7 +800,11 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         if (UNLIKELY(_slow)) {                                                         \
             if (UNLIKELY(d_ptr >= d_end_safe || l_ptr >= l_end_safe_4x)) {             \
                 t_ptr -= (t_rewind);                                                   \
-                o_ptr -= (gh.enc_off == 1) ? (o_rewind_1) : (o_rewind_2);              \
+                if ((o_rewind_1) == (o_rewind_2)) {                                    \
+                    o_ptr -= (o_rewind_1);                                             \
+                } else {                                                               \
+                    o_ptr -= (gh.enc_off == 1) ? (o_rewind_1) : (o_rewind_2);          \
+                }                                                                      \
                 n_seq -= (num);                                                        \
                 goto glo_unrolled_break;                                               \
             }                                                                          \
