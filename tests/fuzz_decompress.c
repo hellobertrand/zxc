@@ -5,29 +5,23 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+#include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 
-#include "../include/zxc_stream.h"
+#include "../include/zxc_buffer.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    FILE* const f_in = fmemopen((void*)data, size, "rb");
-    if (!f_in) return 0;
+    size_t out_capacity = 1048576; /* 1 MB max for fuzzer */
+    uint64_t expected_size = zxc_get_decompressed_size(data, size);
 
-    char* out_buf = NULL;
-    size_t out_size = 0;
-    FILE* const f_out = open_memstream(&out_buf, &out_size);
+    if (expected_size > 0 && expected_size <= out_capacity) out_capacity = (size_t)expected_size;
 
-    if (!f_out) {
-        fclose(f_in);
-        return 0;
-    }
+    void* out_buf = malloc(out_capacity);
+    if (!out_buf) return 0;
 
-    zxc_stream_decompress(f_in, f_out, 1, 0);
+    zxc_decompress(data, size, out_buf, out_capacity, 0);
 
-    fclose(f_in);
-    fclose(f_out);
     free(out_buf);
 
     return 0;
