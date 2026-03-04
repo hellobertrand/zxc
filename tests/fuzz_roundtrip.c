@@ -14,25 +14,30 @@
 #include "../include/zxc_buffer.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+    static void* comp_buf = NULL;
+    static size_t comp_cap = 0;
+    static void* decomp_buf = NULL;
+    static size_t decomp_cap = 0;
+
     const size_t bound = zxc_compress_bound(size);
-    void* comp_buf = malloc(bound);
-    if (!comp_buf) return 0;
+    if (bound > comp_cap) {
+        void* new_buf = realloc(comp_buf, bound);
+        if (!new_buf) return 0;
+        comp_buf = new_buf;
+        comp_cap = bound;
+    }
 
     const int level = size > 0 ? (data[0] % 5) + 1 : 1;
     const int64_t csize = zxc_compress(data, size, comp_buf, bound, level, 0);
-    if (csize < 0) {
-        free(comp_buf);
-        return 0;
-    }
+    if (csize < 0) return 0;
 
-    if (size == 0) {
-        free(comp_buf);
-        return 0;
-    }
-    void* decomp_buf = malloc(size);
-    if (!decomp_buf) {
-        free(comp_buf);
-        return 0;
+    if (size == 0) return 0;
+
+    if (size > decomp_cap) {
+        void* new_buf = realloc(decomp_buf, size);
+        if (!new_buf) return 0;
+        decomp_buf = new_buf;
+        decomp_cap = size;
     }
 
     const int64_t dsize = zxc_decompress(comp_buf, (size_t)csize, decomp_buf, size, 0);
@@ -41,9 +46,6 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         assert((size_t)dsize == size);
         assert(memcmp(data, decomp_buf, size) == 0);
     }
-
-    free(decomp_buf);
-    free(comp_buf);
 
     return 0;
 }
