@@ -776,6 +776,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 #define GLO_DECODE_UNROLLED(num, ll, ml, off, t_rewind, o_rewind_1, o_rewind_2, MACRO) \
     do {                                                                               \
         int _slow = 0;                                                                 \
+        const uint8_t* e_save = e_ptr;                                                 \
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {                                       \
             ll += zxc_read_varint(&e_ptr, e_end);                                      \
             _slow = 1;                                                                 \
@@ -787,8 +788,13 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         ml += ZXC_LZ_MIN_MATCH_LEN;                                                    \
         if (UNLIKELY(_slow)) {                                                         \
             if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end ||                     \
-                         l_ptr + ll + ZXC_PAD_SIZE > l_end))                           \
-                return ZXC_ERROR_OVERFLOW;                                             \
+                         l_ptr + ll + ZXC_PAD_SIZE > l_end)) {                         \
+                t_ptr -= (t_rewind) + 1;                                               \
+                o_ptr -= (gh.enc_off == 1) ? (o_rewind_1 + 1) : (o_rewind_2 + 2);      \
+                n_seq -= (num) - 1;                                                    \
+                e_ptr = e_save;                                                        \
+                goto glo_unrolled_break;                                               \
+            }                                                                          \
         }                                                                              \
         MACRO(ll, ml, off);                                                            \
         if (UNLIKELY(_slow)) {                                                         \
@@ -1302,6 +1308,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 #define GHI_DECODE_UNROLLED(num, ll, m_bits, off, s_rewind, MACRO, D_SAFE) \
     do {                                                                   \
         int _slow = 0;                                                     \
+        const uint8_t* extras_save = extras_ptr;                           \
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) {                             \
             ll += zxc_read_varint(&extras_ptr, extras_end);                \
             _slow = 1;                                                     \
@@ -1313,8 +1320,12 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }                                                                  \
         if (UNLIKELY(_slow)) {                                             \
             if (UNLIKELY(d_ptr + ll + _ml + ZXC_PAD_SIZE > d_end ||        \
-                         l_ptr + ll + ZXC_PAD_SIZE > l_end))               \
-                return ZXC_ERROR_OVERFLOW;                                 \
+                         l_ptr + ll + ZXC_PAD_SIZE > l_end)) {             \
+                seq_ptr -= (s_rewind) + 4;                                 \
+                n_seq -= (num) - 1;                                        \
+                extras_ptr = extras_save;                                  \
+                goto ghi_unrolled_break;                                   \
+            }                                                              \
         }                                                                  \
         MACRO(ll, _ml, off);                                               \
         if (UNLIKELY(_slow)) {                                             \
