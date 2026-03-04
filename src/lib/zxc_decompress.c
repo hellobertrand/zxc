@@ -1333,9 +1333,10 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint32_t offset = (uint32_t)(seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
 
         // Strict bounds check: sequence must fit, AND wild copies must not overshoot
-        if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end)) {
+        // Check both destination (d_ptr) and source literal stream (l_ptr)
+        if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end || l_ptr + ll + ZXC_PAD_SIZE > l_end)) {
             // Fallback to exact copy (slow but safe)
-            if (UNLIKELY(d_ptr + ll > d_end)) return ZXC_ERROR_OVERFLOW;
+            if (UNLIKELY(d_ptr + ll > d_end || l_ptr + ll > l_end)) return ZXC_ERROR_OVERFLOW;
             ZXC_MEMCPY(d_ptr, l_ptr, ll);
             l_ptr += ll;
             d_ptr += ll;
