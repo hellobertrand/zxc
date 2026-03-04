@@ -437,6 +437,15 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
     ip += ZXC_FILE_HEADER_SIZE;
 
+    // GLO/GHI wild copies (zxc_copy32) overshoot by up to ZXC_PAD_SIZE bytes.
+    // Decode into a padded scratch buffer, then memcpy the exact result out.
+    const size_t work_sz = runtime_chunk_size + ZXC_PAD_SIZE;
+    uint8_t* const work_buf = (uint8_t*)malloc(work_sz);
+    if (UNLIKELY(!work_buf)) {
+        zxc_cctx_free(&ctx);
+        return ZXC_ERROR_MEMORY;
+    }
+
     // Block decompression loop
     uint32_t global_hash = 0;
 
@@ -445,6 +454,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         zxc_block_header_t bh;
         // Read the block header to determine the compressed size
         if (UNLIKELY(zxc_read_block_header(ip, rem_src, &bh) != 0)) {
+            free(work_buf);
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_BAD_HEADER;
         }
@@ -453,6 +463,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
             // Validate we have the footer after the header
             if (UNLIKELY(rem_src < ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE)) {
+                free(work_buf);
                 zxc_cctx_free(&ctx);
                 return ZXC_ERROR_SRC_TOO_SMALL;
             }
@@ -461,6 +472,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             // Validate source size matches what we decompressed
             const uint64_t stored_size = zxc_le64(footer);
             if (UNLIKELY(stored_size != (uint64_t)(op - op_start))) {
+                free(work_buf);
                 zxc_cctx_free(&ctx);
                 return ZXC_ERROR_CORRUPT_DATA;
             }
@@ -469,6 +481,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             if (checksum_enabled && file_has_checksums) {
                 const uint32_t stored_hash = zxc_le32(footer + sizeof(uint64_t));
                 if (UNLIKELY(stored_hash != global_hash)) {
+                    free(work_buf);
                     zxc_cctx_free(&ctx);
                     return ZXC_ERROR_BAD_CHECKSUM;
                 }
@@ -477,11 +490,19 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         }
 
         const size_t rem_cap = (size_t)(op_end - op);
-        const int res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op, rem_cap);
+        const int res =
+            zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, work_buf, runtime_chunk_size);
         if (UNLIKELY(res < 0)) {
+            free(work_buf);
             zxc_cctx_free(&ctx);
             return res;
         }
+        if (UNLIKELY((size_t)res > rem_cap)) {
+            free(work_buf);
+            zxc_cctx_free(&ctx);
+            return ZXC_ERROR_DST_TOO_SMALL;
+        }
+        ZXC_MEMCPY(op, work_buf, (size_t)res);
 
         // Update global hash from block checksum
         if (checksum_enabled && file_has_checksums) {
@@ -494,6 +515,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         op += res;
     }
 
+    free(work_buf);
     zxc_cctx_free(&ctx);
     return (int64_t)(op - op_start);
 }

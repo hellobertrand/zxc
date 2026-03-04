@@ -607,8 +607,9 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
     // Destination safe margin for 4x loop: max output without varint extension.
-    // ll_max = 14, ml_max = 14 + 5 = 19, per-seq = 33, 4x = 132 + 4 safety = 136
-    const uint8_t* const d_end_safe = d_end - 136;
+    // ll_max = 14, ml_max = 14 + 5 = 19, per-seq = 33, 4x = 132.
+    // Add ZXC_PAD_SIZE (32) for the wild zxc_copy32 overshoot + 4 safety = 168.
+    const uint8_t* const d_end_safe = d_end - (132 + ZXC_PAD_SIZE + 4);
 
     // Literal stream safe threshold for 4x-unrolled loops.
     // Without varint extension, max ll per sequence = ZXC_TOKEN_LL_MASK - 1 = 14.
