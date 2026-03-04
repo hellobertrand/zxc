@@ -773,42 +773,38 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }                                                                \
     } while (0)
 
-#define GLO_DECODE_UNROLLED(num, ll, ml, off, t_rewind, o_rewind_1, o_rewind_2, MACRO) \
-    do {                                                                               \
-        int _slow = 0;                                                                 \
-        const uint8_t* e_save = e_ptr;                                                 \
-        if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {                                       \
-            ll += zxc_read_varint(&e_ptr, e_end);                                      \
-            _slow = 1;                                                                 \
-        }                                                                              \
-        if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) {                                       \
-            ml += zxc_read_varint(&e_ptr, e_end);                                      \
-            _slow = 1;                                                                 \
-        }                                                                              \
-        ml += ZXC_LZ_MIN_MATCH_LEN;                                                    \
-        if (UNLIKELY(_slow)) {                                                         \
-            if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end ||                     \
-                         l_ptr + ll + ZXC_PAD_SIZE > l_end)) {                         \
-                t_ptr -= (t_rewind) + 1;                                               \
-                o_ptr -= (gh.enc_off == 1) ? (o_rewind_1 + 1) : (o_rewind_2 + 2);      \
-                n_seq -= (num) - 1;                                                    \
-                e_ptr = e_save;                                                        \
-                goto glo_unrolled_break;                                               \
-            }                                                                          \
-        }                                                                              \
-        MACRO(ll, ml, off);                                                            \
-        if (UNLIKELY(_slow)) {                                                         \
-            if (UNLIKELY(d_ptr >= d_end_safe || l_ptr >= l_end_safe_4x)) {             \
-                t_ptr -= (t_rewind);                                                   \
-                if ((o_rewind_1) == (o_rewind_2)) {                                    \
-                    o_ptr -= (o_rewind_1);                                             \
-                } else {                                                               \
-                    o_ptr -= (gh.enc_off == 1) ? (o_rewind_1) : (o_rewind_2);          \
-                }                                                                      \
-                n_seq -= (num);                                                        \
-                goto glo_unrolled_break;                                               \
-            }                                                                          \
-        }                                                                              \
+#define GLO_DECODE_UNROLLED(num, ll, ml, off, t_rewind, o_rewind_up, o_rewind_down, MACRO) \
+    do {                                                                                   \
+        int _slow = 0;                                                                     \
+        const uint8_t* e_save = e_ptr;                                                     \
+        if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {                                           \
+            ll += zxc_read_varint(&e_ptr, e_end);                                          \
+            _slow = 1;                                                                     \
+        }                                                                                  \
+        if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) {                                           \
+            ml += zxc_read_varint(&e_ptr, e_end);                                          \
+            _slow = 1;                                                                     \
+        }                                                                                  \
+        ml += ZXC_LZ_MIN_MATCH_LEN;                                                        \
+        if (UNLIKELY(_slow)) {                                                             \
+            if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end ||                         \
+                         l_ptr + ll + ZXC_PAD_SIZE > l_end)) {                             \
+                t_ptr -= (t_rewind) + 1;                                                   \
+                o_ptr -= (o_rewind_up);                                                    \
+                n_seq -= (num) - 1;                                                        \
+                e_ptr = e_save;                                                            \
+                goto glo_unrolled_break;                                                   \
+            }                                                                              \
+        }                                                                                  \
+        MACRO(ll, ml, off);                                                                \
+        if (UNLIKELY(_slow)) {                                                             \
+            if (UNLIKELY(d_ptr >= d_end_safe || l_ptr >= l_end_safe_4x)) {                 \
+                t_ptr -= (t_rewind);                                                       \
+                o_ptr -= (o_rewind_down);                                                  \
+                n_seq -= (num);                                                            \
+                goto glo_unrolled_break;                                                   \
+            }                                                                              \
+        }                                                                                  \
     } while (0)
 
     // --- SAFE Loop: offset validation until threshold (4x unroll) ---
@@ -843,19 +839,22 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         uint32_t ll1 = (tokens & 0x0F0) >> 4;
         uint32_t ml1 = (tokens & 0x00F);
-        GLO_DECODE_UNROLLED(1, ll1, ml1, off1, 3, 3, 6, DECODE_SEQ_SAFE);
+        GLO_DECODE_UNROLLED(1, ll1, ml1, off1, 3, (gh.enc_off == 1) ? 4 : 8,
+                            (gh.enc_off == 1) ? 3 : 6, DECODE_SEQ_SAFE);
 
         uint32_t ll2 = (tokens & 0x0F000) >> 12;
         uint32_t ml2 = (tokens & 0x00F00) >> 8;
-        GLO_DECODE_UNROLLED(2, ll2, ml2, off2, 2, 2, 4, DECODE_SEQ_SAFE);
+        GLO_DECODE_UNROLLED(2, ll2, ml2, off2, 2, (gh.enc_off == 1) ? 3 : 6,
+                            (gh.enc_off == 1) ? 2 : 4, DECODE_SEQ_SAFE);
 
         uint32_t ll3 = (tokens & 0x0F00000) >> 20;
         uint32_t ml3 = (tokens & 0x00F0000) >> 16;
-        GLO_DECODE_UNROLLED(3, ll3, ml3, off3, 1, 1, 2, DECODE_SEQ_SAFE);
+        GLO_DECODE_UNROLLED(3, ll3, ml3, off3, 1, (gh.enc_off == 1) ? 2 : 4,
+                            (gh.enc_off == 1) ? 1 : 2, DECODE_SEQ_SAFE);
 
         uint32_t ll4 = (tokens >> 28);
         uint32_t ml4 = (tokens >> 24) & 0x0F;
-        GLO_DECODE_UNROLLED(4, ll4, ml4, off4, 0, 0, 0, DECODE_SEQ_SAFE);
+        GLO_DECODE_UNROLLED(4, ll4, ml4, off4, 0, (gh.enc_off == 1) ? 1 : 2, 0, DECODE_SEQ_SAFE);
 
         n_seq -= 4;
     }
@@ -887,19 +886,22 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         uint32_t ll1 = (tokens & 0x0F0) >> 4;
         uint32_t ml1 = (tokens & 0x00F);
-        GLO_DECODE_UNROLLED(1, ll1, ml1, off1, 3, 3, 6, DECODE_SEQ_FAST);
+        GLO_DECODE_UNROLLED(1, ll1, ml1, off1, 3, (gh.enc_off == 1) ? 4 : 8,
+                            (gh.enc_off == 1) ? 3 : 6, DECODE_SEQ_FAST);
 
         uint32_t ll2 = (tokens & 0x0F000) >> 12;
         uint32_t ml2 = (tokens & 0x00F00) >> 8;
-        GLO_DECODE_UNROLLED(2, ll2, ml2, off2, 2, 2, 4, DECODE_SEQ_FAST);
+        GLO_DECODE_UNROLLED(2, ll2, ml2, off2, 2, (gh.enc_off == 1) ? 3 : 6,
+                            (gh.enc_off == 1) ? 2 : 4, DECODE_SEQ_FAST);
 
         uint32_t ll3 = (tokens & 0x0F00000) >> 20;
         uint32_t ml3 = (tokens & 0x00F0000) >> 16;
-        GLO_DECODE_UNROLLED(3, ll3, ml3, off3, 1, 1, 2, DECODE_SEQ_FAST);
+        GLO_DECODE_UNROLLED(3, ll3, ml3, off3, 1, (gh.enc_off == 1) ? 2 : 4,
+                            (gh.enc_off == 1) ? 1 : 2, DECODE_SEQ_FAST);
 
         uint32_t ll4 = (tokens >> 28);
         uint32_t ml4 = (tokens >> 24) & 0x0F;
-        GLO_DECODE_UNROLLED(4, ll4, ml4, off4, 0, 0, 0, DECODE_SEQ_FAST);
+        GLO_DECODE_UNROLLED(4, ll4, ml4, off4, 0, (gh.enc_off == 1) ? 1 : 2, 0, DECODE_SEQ_FAST);
 
         n_seq -= 4;
     }
