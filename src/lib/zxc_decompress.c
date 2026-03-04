@@ -775,19 +775,12 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
 #define GLO_DECODE_UNROLLED(num, ll, ml, off, t_rewind, o_rewind_up, o_rewind_down, MACRO) \
     do {                                                                                   \
-        int _slow = 0;                                                                     \
-        const uint8_t* e_save = e_ptr;                                                     \
-        if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {                                           \
-            ll += zxc_read_varint(&e_ptr, e_end);                                          \
-            _slow = 1;                                                                     \
-        }                                                                                  \
-        if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) {                                           \
-            ml += zxc_read_varint(&e_ptr, e_end);                                          \
-            _slow = 1;                                                                     \
-        }                                                                                  \
-        ml += ZXC_LZ_MIN_MATCH_LEN;                                                        \
-        if (UNLIKELY(_slow)) {                                                             \
-            if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end ||                         \
+        const uint32_t _is_varint = (ll == ZXC_TOKEN_LL_MASK) | (ml == ZXC_TOKEN_ML_MASK); \
+        if (UNLIKELY(_is_varint)) {                                                        \
+            const uint8_t* e_save = e_ptr;                                                 \
+            if (ll == ZXC_TOKEN_LL_MASK) ll += zxc_read_varint(&e_ptr, e_end);             \
+            if (ml == ZXC_TOKEN_ML_MASK) ml += zxc_read_varint(&e_ptr, e_end);             \
+            if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE + ZXC_LZ_MIN_MATCH_LEN > d_end ||  \
                          l_ptr + ll + ZXC_PAD_SIZE > l_end)) {                             \
                 t_ptr -= (t_rewind) + 1;                                                   \
                 o_ptr -= (o_rewind_up);                                                    \
@@ -796,8 +789,9 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                 goto glo_unrolled_break;                                                   \
             }                                                                              \
         }                                                                                  \
+        ml += ZXC_LZ_MIN_MATCH_LEN;                                                        \
         MACRO(ll, ml, off);                                                                \
-        if (UNLIKELY(_slow)) {                                                             \
+        if (UNLIKELY(_is_varint)) {                                                        \
             if (UNLIKELY(d_ptr >= d_end_safe || l_ptr >= l_end_safe_4x)) {                 \
                 t_ptr -= (t_rewind);                                                       \
                 o_ptr -= (o_rewind_down);                                                  \
@@ -1311,36 +1305,30 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         n_seq--;
     }
 
-#define GHI_DECODE_UNROLLED(num, ll, m_bits, off, s_rewind, MACRO, D_SAFE) \
-    do {                                                                   \
-        int _slow = 0;                                                     \
-        const uint8_t* extras_save = extras_ptr;                           \
-        if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) {                             \
-            ll += zxc_read_varint(&extras_ptr, extras_end);                \
-            _slow = 1;                                                     \
-        }                                                                  \
-        uint32_t _ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;                      \
-        if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) {                         \
-            _ml += zxc_read_varint(&extras_ptr, extras_end);               \
-            _slow = 1;                                                     \
-        }                                                                  \
-        if (UNLIKELY(_slow)) {                                             \
-            if (UNLIKELY(d_ptr + ll + _ml + ZXC_PAD_SIZE > d_end ||        \
-                         l_ptr + ll + ZXC_PAD_SIZE > l_end)) {             \
-                seq_ptr -= (s_rewind) + 4;                                 \
-                n_seq -= (num) - 1;                                        \
-                extras_ptr = extras_save;                                  \
-                goto ghi_unrolled_break;                                   \
-            }                                                              \
-        }                                                                  \
-        MACRO(ll, _ml, off);                                               \
-        if (UNLIKELY(_slow)) {                                             \
-            if (UNLIKELY(d_ptr >= (D_SAFE) || l_ptr >= l_end_safe_4x)) {   \
-                seq_ptr -= (s_rewind);                                     \
-                n_seq -= (num);                                            \
-                goto ghi_unrolled_break;                                   \
-            }                                                              \
-        }                                                                  \
+#define GHI_DECODE_UNROLLED(num, ll, m_bits, off, s_rewind, MACRO, D_SAFE)                     \
+    do {                                                                                       \
+        const uint32_t _is_varint = (ll == ZXC_SEQ_LL_MASK) | (m_bits == ZXC_SEQ_ML_MASK);     \
+        if (UNLIKELY(_is_varint)) {                                                            \
+            const uint8_t* extras_save = extras_ptr;                                           \
+            if (ll == ZXC_SEQ_LL_MASK) ll += zxc_read_varint(&extras_ptr, extras_end);         \
+            if (m_bits == ZXC_SEQ_ML_MASK) m_bits += zxc_read_varint(&extras_ptr, extras_end); \
+            if (UNLIKELY(d_ptr + ll + m_bits + ZXC_PAD_SIZE + ZXC_LZ_MIN_MATCH_LEN > d_end ||  \
+                         l_ptr + ll + ZXC_PAD_SIZE > l_end)) {                                 \
+                seq_ptr -= (s_rewind) + 4;                                                     \
+                n_seq -= (num) - 1;                                                            \
+                extras_ptr = extras_save;                                                      \
+                goto ghi_unrolled_break;                                                       \
+            }                                                                                  \
+        }                                                                                      \
+        uint32_t _ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;                                          \
+        MACRO(ll, _ml, off);                                                                   \
+        if (UNLIKELY(_is_varint)) {                                                            \
+            if (UNLIKELY(d_ptr >= (D_SAFE) || l_ptr >= l_end_safe_4x)) {                       \
+                seq_ptr -= (s_rewind);                                                         \
+                n_seq -= (num);                                                                \
+                goto ghi_unrolled_break;                                                       \
+            }                                                                                  \
+        }                                                                                      \
     } while (0)
 
     // --- FAST Loop: After threshold, check large margin to avoid individual bounds checks ---
