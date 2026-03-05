@@ -256,7 +256,7 @@ typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
  */
 typedef struct {
     zxc_stream_job_t* jobs;
-    int ring_size;
+    size_t ring_size;
     int* worker_queue;
     int wq_head, wq_tail, wq_count;
     pthread_mutex_t lock;
@@ -540,7 +540,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ctx.processor = func;
     ctx.io_error = 0;
     ctx.compression_level = level;
-    ctx.ring_size = num_workers * 4;
+    ctx.ring_size = (size_t)num_workers * 4U;
     ctx.chunk_size = runtime_chunk_sz;
     ctx.checksum_enabled = checksum_enabled;
     ctx.file_has_checksum = mode == 1 ? checksum_enabled : file_has_chk;
@@ -573,7 +573,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     ZXC_MEMSET(buf_in, 0, ctx.ring_size * alloc_in);
 
-    for (int i = 0; i < ctx.ring_size; i++) {
+    for (size_t i = 0; i < ctx.ring_size; i++) {
         ctx.jobs[i].job_id = i;
         ctx.jobs[i].status = JOB_STATUS_FREE;
         ctx.jobs[i].in_buf = buf_in + (i * alloc_in);
@@ -589,7 +589,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     pthread_cond_init(&ctx.cond_worker, NULL);
     pthread_cond_init(&ctx.cond_writer, NULL);
 
-    pthread_t* const workers = malloc(num_workers * sizeof(pthread_t));
+    pthread_t* const workers = malloc((size_t)num_workers * sizeof(pthread_t));
     if (UNLIKELY(!workers)) {
         zxc_aligned_free(mem_block);
         return ZXC_ERROR_MEMORY;
