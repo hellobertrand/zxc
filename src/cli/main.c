@@ -907,10 +907,10 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     else
         setvbuf(stdin, NULL, _IONBF, 0);
 
-    if (!use_stdout) {
-        if (f_out) fclose(f_out);
-    } else {
-        fflush(f_out);
+    if (created_out_file && f_out) {
+        fclose(f_out);
+    } else if (use_stdout) {
+        fflush(stdout);
         setvbuf(stdout, NULL, _IONBF, 0);
     }
 
@@ -1052,8 +1052,9 @@ int main(int argc, char** argv) {
                 break;
             case 'T':
                 num_threads = atoi(optarg);
-                if (num_threads < 0 || num_threads > 1024) {
-                    fprintf(stderr, "Error: num_threads must be between 0 and 1024\n");
+                if (num_threads < 0 || num_threads > ZXC_MAX_THREADS) {
+                    fprintf(stderr, "Error: num_threads must be between 0 and %d\n",
+                            ZXC_MAX_THREADS);
                     return 1;
                 }
                 break;
@@ -1143,8 +1144,8 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (num_threads < 0 || num_threads > 1024) {
-            zxc_log("Error: num_threads must be between 0 and 1024\n");
+        if (num_threads < 0 || num_threads > ZXC_MAX_THREADS) {
+            zxc_log("Error: num_threads must be between 0 and %d\n", ZXC_MAX_THREADS);
             return 1;
         }
 
