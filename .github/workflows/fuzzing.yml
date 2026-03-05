@@ -77,6 +77,8 @@ jobs:
         fuzz-seconds: ${{ github.event_name == 'pull_request' && 120 || inputs.fuzz_seconds || 3600 }}
         sanitizer: ${{ matrix.sanitizer }}
         output-sarif: true
+        storage-repo: https://${{ secrets.CFLITE_CORPUS_TOKEN }}@github.com/hellobertrand/zxc-fuzz-corpus.git
+        storage-repo-branch: main
 
     - name: Upload SARIF to GitHub Security
       if: success() || failure()
