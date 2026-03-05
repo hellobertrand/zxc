@@ -532,7 +532,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
             return ZXC_ERROR_BAD_HEADER;
     }
 
-    const int num_threads = (n_threads > 0) ? n_threads : (int)sysconf(_SC_NPROCESSORS_ONLN);
+    int num_threads = (n_threads > 0) ? n_threads : (int)sysconf(_SC_NPROCESSORS_ONLN);
+    if (num_threads > ZXC_MAX_THREADS) num_threads = ZXC_MAX_THREADS;
     // Reserve 1 thread for Writer/Reader overhead if possible
     const int num_workers = (num_threads > 1) ? num_threads - 1 : 1;
 
