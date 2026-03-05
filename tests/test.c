@@ -1629,6 +1629,137 @@ int test_stream_engine_errors() {
     return 1;
 }
 
+// Tests the buffer API scratch buffer (work_buf) used to safely absorb
+// zxc_copy32 wild-copy overshoot during decompression.
+int test_buffer_api_scratch_buf() {
+    printf("=== TEST: Unit - Buffer API Scratch Buffer (work_buf) ===\n");
+
+    // 1. Small data roundtrip (177 bytes)
+    {
+        const size_t sz = 177;
+        uint8_t src[177];
+        gen_lz_data(src, sz);
+
+        const size_t comp_cap = zxc_compress_bound(sz);
+        uint8_t* comp = malloc(comp_cap);
+        const int64_t comp_sz = zxc_compress(src, sz, comp, comp_cap, 3, 0);
+        if (comp_sz <= 0) {
+            printf("  [FAIL] compress 177B\n");
+            free(comp);
+            return 0;
+        }
+
+        uint8_t dec[177];
+        const int64_t dec_sz = zxc_decompress(comp, comp_sz, dec, sz, 0);
+        if (dec_sz != (int64_t)sz || memcmp(src, dec, sz) != 0) {
+            printf("  [FAIL] roundtrip 177B\n");
+            free(comp);
+            return 0;
+        }
+        free(comp);
+        printf("  [PASS] small data roundtrip (177 bytes)\n");
+    }
+
+    // 2. Exact-fit destination (dst_capacity == decompressed size, no slack)
+    {
+        const size_t sz = 1024;
+        uint8_t* src = malloc(sz);
+        gen_lz_data(src, sz);
+
+        const size_t comp_cap = zxc_compress_bound(sz);
+        uint8_t* comp = malloc(comp_cap);
+        const int64_t comp_sz = zxc_compress(src, sz, comp, comp_cap, 1, 1);
+        if (comp_sz <= 0) {
+            printf("  [FAIL] compress 1KB\n");
+            free(src);
+            free(comp);
+            return 0;
+        }
+
+        uint8_t* dec = malloc(sz);  // exactly sz, no extra room
+        const int64_t dec_sz = zxc_decompress(comp, comp_sz, dec, sz, 1);
+        if (dec_sz != (int64_t)sz || memcmp(src, dec, sz) != 0) {
+            printf("  [FAIL] exact-fit 1KB\n");
+            free(src);
+            free(comp);
+            free(dec);
+            return 0;
+        }
+        free(src);
+        free(comp);
+        free(dec);
+        printf("  [PASS] exact-fit destination (1KB)\n");
+    }
+
+    // 3. Tiny data (1 byte)
+    {
+        const uint8_t src = 0x42;
+        const size_t comp_cap = zxc_compress_bound(1);
+        uint8_t* comp = malloc(comp_cap);
+        const int64_t comp_sz = zxc_compress(&src, 1, comp, comp_cap, 1, 0);
+        if (comp_sz <= 0) {
+            printf("  [FAIL] compress 1B\n");
+            free(comp);
+            return 0;
+        }
+
+        uint8_t dec = 0;
+        const int64_t dec_sz = zxc_decompress(comp, comp_sz, &dec, 1, 0);
+        if (dec_sz != 1 || dec != 0x42) {
+            printf("  [FAIL] roundtrip 1B\n");
+            free(comp);
+            return 0;
+        }
+        free(comp);
+        printf("  [PASS] tiny data roundtrip (1 byte)\n");
+    }
+
+    // 4. Malformed input must not crash (safe error return)
+    {
+        uint8_t garbage[64];
+        for (int i = 0; i < 64; i++) garbage[i] = (uint8_t)(i * 37);
+        uint8_t out[256];
+        const int64_t r = zxc_decompress(garbage, sizeof(garbage), out, sizeof(out), 0);
+        if (r >= 0) {
+            printf("  [FAIL] malformed input should return < 0\n");
+            return 0;
+        }
+        printf("  [PASS] malformed input -> error %lld (no crash)\n", (long long)r);
+    }
+
+    // 5. Destination too small
+    {
+        const size_t sz = 512;
+        uint8_t* src = malloc(sz);
+        gen_lz_data(src, sz);
+
+        const size_t comp_cap = zxc_compress_bound(sz);
+        uint8_t* comp = malloc(comp_cap);
+        const int64_t comp_sz = zxc_compress(src, sz, comp, comp_cap, 1, 0);
+        if (comp_sz <= 0) {
+            printf("  [FAIL] compress 512B\n");
+            free(src);
+            free(comp);
+            return 0;
+        }
+
+        uint8_t tiny_dst[8];
+        const int64_t r = zxc_decompress(comp, comp_sz, tiny_dst, sizeof(tiny_dst), 0);
+        if (r >= 0) {
+            printf("  [FAIL] dst too small should return < 0\n");
+            free(src);
+            free(comp);
+            return 0;
+        }
+        free(src);
+        free(comp);
+        printf("  [PASS] zxc_decompress dst too small -> negative\n");
+    }
+
+    printf("PASS\n\n");
+    return 1;
+}
+
 int main() {
     srand(42);  // Fixed seed for reproducibility
     int total_failures = 0;
@@ -1761,6 +1892,7 @@ int main() {
     if (!test_buffer_error_codes()) total_failures++;
     if (!test_stream_get_decompressed_size_errors()) total_failures++;
     if (!test_stream_engine_errors()) total_failures++;
+    if (!test_buffer_api_scratch_buf()) total_failures++;
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);
