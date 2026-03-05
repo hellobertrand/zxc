@@ -1207,6 +1207,7 @@ int main(int argc, char** argv) {
         }
         if (!json_output && !g_quiet) fprintf(stderr, "\r\033[K");
         fclose(fm);
+        fm = NULL;
 
         const uint64_t max_c = zxc_compress_bound(in_size);
         c_dat = malloc(max_c);
