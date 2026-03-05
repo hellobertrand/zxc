@@ -1227,6 +1227,8 @@ int main(int argc, char** argv) {
         if (c_sz < 0) {
             fclose(fm_in);
             fclose(fm_out);
+            fm_in = NULL;
+            fm_out = NULL;
             goto bench_cleanup;
         }
 
