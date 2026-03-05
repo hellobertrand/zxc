@@ -1152,6 +1152,7 @@ int main(int argc, char** argv) {
         int ret = 1;
         uint8_t* ram = NULL;
         uint8_t* c_dat = NULL;
+        FILE* fm = NULL;
         char resolved_path[4096];
         if (zxc_validate_input_path(in_path, resolved_path, sizeof(resolved_path)) != 0) {
             zxc_log("Error: Invalid input file '%s': %s\n", in_path, strerror(errno));
@@ -1181,13 +1182,13 @@ int main(int argc, char** argv) {
 
 #ifdef _WIN32
         if (!json_output) printf("Note: Using tmpfile on Windows (slower than fmemopen).\n");
-        FILE* fm = tmpfile();
+        fm = tmpfile();
         if (fm) {
             fwrite(ram, 1, in_size, fm);
             rewind(fm);
         }
 #else
-        FILE* fm = fmemopen(ram, in_size, "rb");
+        fm = fmemopen(ram, in_size, "rb");
 #endif
         if (!fm) goto bench_cleanup;
 
@@ -1316,6 +1317,7 @@ int main(int argc, char** argv) {
         ret = 0;
 
     bench_cleanup:
+        if (fm) fclose(fm);
         if (f_in) fclose(f_in);
         free(ram);
         free(c_dat);
