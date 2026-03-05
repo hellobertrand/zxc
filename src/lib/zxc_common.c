@@ -141,8 +141,13 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     }
 
     if (ctx->lit_buffer) {
-        free(ctx->lit_buffer);  // Use standard free (allocated with realloc)
+        free(ctx->lit_buffer);
         ctx->lit_buffer = NULL;
+    }
+
+    if (ctx->work_buf) {
+        free(ctx->work_buf);
+        ctx->work_buf = NULL;
     }
 
     ctx->hash_table = NULL;
@@ -155,6 +160,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
 
     ctx->epoch = 0;
     ctx->lit_buffer_cap = 0;
+    ctx->work_buf_cap = 0;
 }
 
 /*
