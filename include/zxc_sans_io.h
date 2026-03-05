@@ -94,6 +94,8 @@ typedef struct {
     /* Cold zone: configuration / scratch / resizeable. */
     uint8_t* lit_buffer;   /**< Scratch buffer for literals (RLE). */
     size_t lit_buffer_cap; /**< Current capacity of the scratch buffer. */
+    uint8_t* work_buf;     /**< Padded scratch buffer for buffer-API decompression. */
+    size_t work_buf_cap;   /**< Capacity of the work buffer. */
     int checksum_enabled;  /**< 1 if checksum calculation/verification is enabled. */
     int compression_level; /**< Compression level. */
 } zxc_cctx_t;

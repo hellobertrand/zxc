@@ -1065,16 +1065,18 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const
         // Bytes needed = (capacity_bits - safe_bits) / 8
         const int bytes_needed = ((int)(sizeof(uint64_t) * 8) - safe_bits) >> 3;
 
-        // Bounds check: don't read past end
+        // Bounds check: zxc_le64 always reads 8 bytes, so we need at least 8
         const size_t bytes_left = (size_t)(br->end - br->ptr);
-        if (UNLIKELY(bytes_left < (size_t)bytes_needed)) {
+        if (UNLIKELY(bytes_left < sizeof(uint64_t))) {
             // Partial read (slow path / end of stream)
-            const uint64_t raw = zxc_le_partial(br->ptr, bytes_left);
+            const size_t to_read =
+                (bytes_left < (size_t)bytes_needed) ? bytes_left : (size_t)bytes_needed;
+            const uint64_t raw = zxc_le_partial(br->ptr, to_read);
             br->accum |= (raw << safe_bits);
-            br->ptr += bytes_left;
-            br->bits = safe_bits + (int)bytes_left * 8;
+            br->ptr += to_read;
+            br->bits = safe_bits + (int)to_read * 8;
         } else {
-            // Fast path: standard read
+            // Fast path: full 8-byte read is safe
             const uint64_t raw = zxc_le64(br->ptr);
             br->accum |= (raw << safe_bits);
             br->ptr += bytes_needed;

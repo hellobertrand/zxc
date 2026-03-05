@@ -745,9 +745,9 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             const uint32_t off = (uint32_t)(ip - m.ref);
 
             if (ll > 0) {
-                if (ll <= 16)
+                if (ll <= 16 && anchor + 16 <= iend)
                     zxc_copy16(literals + lit_c, anchor);
-                else if (ll <= 32)
+                else if (ll <= 32 && anchor + 32 <= iend)
                     zxc_copy32(literals + lit_c, anchor);
                 else
                     ZXC_MEMCPY(literals + lit_c, anchor, ll);
@@ -1237,9 +1237,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             const uint32_t off = (uint32_t)(ip - m.ref);
 
             if (ll > 0) {
-                if (ll <= 16)
+                if (ll <= 16 && anchor + 16 <= iend)
                     zxc_copy16(literals + lit_c, anchor);
-                else if (ll <= 32)
+                else if (ll <= 32 && anchor + 32 <= iend)
                     zxc_copy32(literals + lit_c, anchor);
                 else
                     ZXC_MEMCPY(literals + lit_c, anchor, ll);
