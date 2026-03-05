@@ -820,7 +820,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         zxc_log(
             "Refusing to write compressed data to terminal.\n"
             "For help, type: zxc -h\n");
-        fclose(f_in);
+        if (f_in) fclose(f_in);
+        if (f_out) fclose(f_out);
         return 1;
     }
 
@@ -1035,11 +1036,19 @@ int main(int argc, char** argv) {
                 }
                 break;
             case '1':
+                level = 1;
+                break;
             case '2':
+                level = 2;
+                break;
             case '3':
+                level = 3;
+                break;
             case '4':
+                level = 4;
+                break;
             case '5':
-                if (opt >= '1' && opt <= '5') level = opt - '0';
+                level = 5;
                 break;
             case 'T':
                 num_threads = atoi(optarg);
@@ -1198,6 +1207,7 @@ int main(int argc, char** argv) {
         }
         if (!json_output && !g_quiet) fprintf(stderr, "\r\033[K");
         fclose(fm);
+        fm = NULL;
 
         const uint64_t max_c = zxc_compress_bound(in_size);
         c_dat = malloc(max_c);
@@ -1227,6 +1237,8 @@ int main(int argc, char** argv) {
         if (c_sz < 0) {
             fclose(fm_in);
             fclose(fm_out);
+            fm_in = NULL;
+            fm_out = NULL;
             goto bench_cleanup;
         }
 
