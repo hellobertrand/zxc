@@ -907,9 +907,9 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     else
         setvbuf(stdin, NULL, _IONBF, 0);
 
-    if (created_out_file && f_out) {
+    if (f_out && f_out != stdout)
         fclose(f_out);
-    } else if (use_stdout) {
+    else if (use_stdout) {
         fflush(stdout);
         setvbuf(stdout, NULL, _IONBF, 0);
     }
