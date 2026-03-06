@@ -1,0 +1,266 @@
+name: Compiler Compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+
+jobs:
+  # ===========================================================================
+  # Clang 12–20 on Ubuntu
+  # ===========================================================================
+  clang:
+    name: "Clang ${{ matrix.version }}"
+    runs-on: ubuntu-latest
+    container: silkeh/clang:${{ matrix.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Install build tools
+        run: apt-get update && apt-get install -y cmake make
+
+      - name: Configure, Build & Test (Static & Shared)
+        shell: bash
+        run: |
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: Clang ${{ matrix.version }} – $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B $BUILD_DIR \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_C_COMPILER=clang \
+                  -DCMAKE_CXX_COMPILER=clang++ \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build $BUILD_DIR --config Release --parallel
+
+              echo "Running Tests for $LIB_TYPE..."
+              ctest --test-dir $BUILD_DIR -C Release --output-on-failure
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
+
+  # ===========================================================================
+  # Apple Clang on macOS 14
+  # ===========================================================================
+  clang-macos:
+    name: "Apple Clang (macOS 14)"
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Configure, Build & Test (Static & Shared)
+        shell: bash
+        run: |
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: Apple Clang – $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B $BUILD_DIR \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build $BUILD_DIR --config Release --parallel
+
+              echo "Running Tests for $LIB_TYPE..."
+              ctest --test-dir $BUILD_DIR -C Release --output-on-failure
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
+
+  # ===========================================================================
+  # GCC 9–14 on Ubuntu
+  # ===========================================================================
+  gcc:
+    name: "GCC ${{ matrix.version }}"
+    runs-on: ubuntu-latest
+    container: gcc:${{ matrix.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [9, 10, 11, 12, 13, 14]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Install build tools
+        run: apt-get update && apt-get install -y cmake make
+
+      - name: Configure, Build & Test (Static & Shared)
+        shell: bash
+        run: |
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: GCC ${{ matrix.version }} – $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B $BUILD_DIR \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_C_COMPILER=gcc \
+                  -DCMAKE_CXX_COMPILER=g++ \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build $BUILD_DIR --config Release --parallel
+
+              echo "Running Tests for $LIB_TYPE..."
+              ctest --test-dir $BUILD_DIR -C Release --output-on-failure
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
+
+  # ===========================================================================
+  # MinGW on Windows (32-bit & 64-bit)
+  # ===========================================================================
+  mingw:
+    name: "MinGW ${{ matrix.name }}"
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "x86 32-bit"
+            msystem: MINGW32
+            pkg_prefix: mingw-w64-i686
+          - name: "x86_64 64-bit"
+            msystem: MINGW64
+            pkg_prefix: mingw-w64-x86_64
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            ${{ matrix.pkg_prefix }}-gcc
+            ${{ matrix.pkg_prefix }}-cmake
+            make
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Configure, Build & Test (Static & Shared)
+        run: |
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: MinGW ${{ matrix.name }} – $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B $BUILD_DIR \
+                  -G "MSYS Makefiles" \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build $BUILD_DIR --config Release --parallel
+
+              echo "Running Tests for $LIB_TYPE..."
+              ctest --test-dir $BUILD_DIR -C Release --output-on-failure
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
+
+  # ===========================================================================
+  # GCC ARM cross-compilation on Ubuntu (32-bit & 64-bit)
+  # ===========================================================================
+  gcc-arm:
+    name: "GCC ARM ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "32-bit (armhf)"
+            cross_pkg: gcc-arm-linux-gnueabihf
+            cross_prefix: arm-linux-gnueabihf
+            cmake_processor: arm
+            qemu_binary: qemu-arm
+          - name: "64-bit (aarch64)"
+            cross_pkg: gcc-aarch64-linux-gnu
+            cross_prefix: aarch64-linux-gnu
+            cmake_processor: aarch64
+            qemu_binary: qemu-aarch64
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Install cross-compiler & QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential ${{ matrix.cross_pkg }} qemu-user
+
+      - name: Configure, Build & Test (Static & Shared)
+        shell: bash
+        run: |
+          CROSS_C=${{ matrix.cross_prefix }}-gcc
+          CROSS_CXX=${{ matrix.cross_prefix }}-g++
+          CROSS_STRIP=/usr/bin/${{ matrix.cross_prefix }}-strip
+          SYSROOT=/usr/${{ matrix.cross_prefix }}
+
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: GCC ARM ${{ matrix.name }} – $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B $BUILD_DIR \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_C_COMPILER=$CROSS_C \
+                  -DCMAKE_CXX_COMPILER=$CROSS_CXX \
+                  -DCMAKE_STRIP=$CROSS_STRIP \
+                  -DCMAKE_SYSTEM_NAME=Linux \
+                  -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build $BUILD_DIR --config Release --parallel
+
+              echo "Running Tests for $LIB_TYPE via QEMU..."
+              ${{ matrix.qemu_binary }} -L $SYSROOT ./$BUILD_DIR/zxc_test
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
