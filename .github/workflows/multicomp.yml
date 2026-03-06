@@ -19,9 +19,8 @@ jobs:
   # Clang 12–20 on Ubuntu
   # ===========================================================================
   clang:
-    name: "Clang ${{ matrix.version }}"
-    runs-on: ubuntu-latest
-    container: silkeh/clang:${{ matrix.version }}
+    name: "Clang ${{ matrix.version }} (Ubuntu 22.04)"
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -31,8 +30,12 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Install build tools
-        run: apt-get update && apt-get install -y cmake make
+      - name: Install Clang ${{ matrix.version }}
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.version }} main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-${{ matrix.version }}
 
       - name: Configure, Build & Test (Static & Shared)
         shell: bash
@@ -46,8 +49,8 @@ jobs:
 
               cmake -S . -B $BUILD_DIR \
                   -DCMAKE_BUILD_TYPE=Release \
-                  -DCMAKE_C_COMPILER=clang \
-                  -DCMAKE_CXX_COMPILER=clang++ \
+                  -DCMAKE_C_COMPILER=clang-${{ matrix.version }} \
+                  -DCMAKE_C_STANDARD=17 \
                   -DZXC_NATIVE_ARCH=OFF \
                   -DBUILD_SHARED_LIBS=$SHARED_FLAG
 
@@ -85,6 +88,7 @@ jobs:
 
               cmake -S . -B $BUILD_DIR \
                   -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_C_STANDARD=17 \
                   -DZXC_NATIVE_ARCH=OFF \
                   -DBUILD_SHARED_LIBS=$SHARED_FLAG
 
@@ -100,21 +104,23 @@ jobs:
   # ===========================================================================
   # GCC 9–14 on Ubuntu
   # ===========================================================================
-  gcc:
-    name: "GCC ${{ matrix.version }}"
-    runs-on: ubuntu-latest
-    container: gcc:${{ matrix.version }}
+  gcc-jammy:
+    name: "GCC ${{ matrix.version }} (Ubuntu 22.04)"
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        version: [9, 10, 11, 12, 13, 14]
+        version: [9, 10, 11, 12, 13]
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Install build tools
-        run: apt-get update && apt-get install -y cmake make
+      - name: Install GCC ${{ matrix.version }}
+        run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y gcc-${{ matrix.version }} g++-${{ matrix.version }}
 
       - name: Configure, Build & Test (Static & Shared)
         shell: bash
@@ -128,8 +134,52 @@ jobs:
 
               cmake -S . -B $BUILD_DIR \
                   -DCMAKE_BUILD_TYPE=Release \
-                  -DCMAKE_C_COMPILER=gcc \
-                  -DCMAKE_CXX_COMPILER=g++ \
+                  -DCMAKE_C_COMPILER=gcc-${{ matrix.version }} \
+                  -DCMAKE_CXX_COMPILER=g++-${{ matrix.version }} \
+                  -DCMAKE_C_STANDARD=17 \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build $BUILD_DIR --config Release --parallel
+
+              echo "Running Tests for $LIB_TYPE..."
+              ctest --test-dir $BUILD_DIR -C Release --output-on-failure
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
+
+  # ===========================================================================
+  # GCC 14 on Ubuntu 24.04
+  # ===========================================================================
+  gcc-latest:
+    name: "GCC 14 (Ubuntu 24.04)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Install GCC 14
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14
+
+      - name: Configure, Build & Test (Static & Shared)
+        shell: bash
+        run: |
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: GCC 14 – $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B $BUILD_DIR \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_C_COMPILER=gcc-14 \
+                  -DCMAKE_CXX_COMPILER=g++-14 \
+                  -DCMAKE_C_STANDARD=17 \
                   -DZXC_NATIVE_ARCH=OFF \
                   -DBUILD_SHARED_LIBS=$SHARED_FLAG
 
@@ -189,6 +239,7 @@ jobs:
               cmake -S . -B $BUILD_DIR \
                   -G "MSYS Makefiles" \
                   -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_C_STANDARD=17 \
                   -DZXC_NATIVE_ARCH=OFF \
                   -DBUILD_SHARED_LIBS=$SHARED_FLAG
 
@@ -253,6 +304,7 @@ jobs:
                   -DCMAKE_STRIP=$CROSS_STRIP \
                   -DCMAKE_SYSTEM_NAME=Linux \
                   -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} \
+                  -DCMAKE_C_STANDARD=17 \
                   -DZXC_NATIVE_ARCH=OFF \
                   -DBUILD_SHARED_LIBS=$SHARED_FLAG
 
