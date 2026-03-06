@@ -52,6 +52,7 @@ jobs:
                   -DCMAKE_C_COMPILER=clang-${{ matrix.version }} \
                   -DCMAKE_C_STANDARD=17 \
                   -DZXC_NATIVE_ARCH=OFF \
+                  -DZXC_ENABLE_LTO=OFF \
                   -DBUILD_SHARED_LIBS=$SHARED_FLAG
 
               cmake --build $BUILD_DIR --config Release --parallel
