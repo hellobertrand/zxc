@@ -247,7 +247,9 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
         size_t value = code & 0x7F;
         if (UNLIKELY(value == 0)) value = 1;
 
-        *out_block_size = value * scale;
+        const size_t bs = value * scale;
+        if (UNLIKELY(!zxc_validate_block_size(bs))) return ZXC_ERROR_BAD_HEADER;
+        *out_block_size = bs;
     }
     // Flags are at offset 6
     if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
