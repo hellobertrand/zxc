@@ -44,6 +44,23 @@
 /** @} */ /* end of version */
 
 /**
+ * @defgroup block_size Block Size
+ * @brief Block size constraints for compression.
+ *
+ * Block size must be a power of two in range
+ * [@ref ZXC_BLOCK_SIZE_MIN, @ref ZXC_BLOCK_SIZE_MAX].
+ * Pass 0 to any API to use @ref ZXC_BLOCK_SIZE_DEFAULT.
+ * @{
+ */
+/** @brief Default block size (256 KB). */
+#define ZXC_BLOCK_SIZE_DEFAULT (256 * 1024)
+/** @brief Minimum allowed block size (4 KB). */
+#define ZXC_BLOCK_SIZE_MIN (4 * 1024)
+/** @brief Maximum allowed block size (2 MB). */
+#define ZXC_BLOCK_SIZE_MAX (2 * 1024 * 1024)
+/** @} */ /* end of block_size */
+
+/**
  * @defgroup levels Compression Levels
  * @brief Predefined compression levels for the ZXC library.
  *

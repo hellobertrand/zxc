@@ -78,6 +78,13 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->compression_level = level;
     ctx->checksum_enabled = checksum_enabled;
 
+    /* Compute block-size derived parameters. */
+    ctx->chunk_size = chunk_size;
+    const uint32_t ob = zxc_log2_u32((uint32_t)chunk_size);
+    ctx->offset_bits = ob;
+    ctx->offset_mask = (1U << ob) - 1;
+    ctx->max_epoch = 1U << (32 - ob);
+
     if (mode == 0) return ZXC_OK;
 
     const size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
@@ -181,7 +188,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  * @return Number of bytes written (@ref ZXC_FILE_HEADER_SIZE) on success,
  *         or a negative @ref zxc_error_t code.
  */
-int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
+int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, const size_t chunk_size,
                           const int has_checksum) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
 
@@ -190,7 +197,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
 
     // Dual-scale chunk size encoding
     // Large scale multiplier is 64 KB, fine scale is 4 KB (ratio: 64 / 4 = 16)
-    const uint32_t units = (uint32_t)(ZXC_BLOCK_SIZE / ZXC_BLOCK_UNIT);
+    const uint32_t units = (uint32_t)(chunk_size / ZXC_BLOCK_UNIT);
     dst[5] = units <= 127 ? (uint8_t)units : (uint8_t)((units / 16) | 0x80);
 
     // Flags are at offset 6

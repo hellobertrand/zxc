@@ -334,8 +334,12 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
  */
 // cppcheck-suppress unusedFunction
 int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTRICT dst,
-                     const size_t dst_capacity, const int level, const int checksum_enabled) {
+                     const size_t dst_capacity, const zxc_compress_opts_t* opts) {
     if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return ZXC_ERROR_NULL_INPUT;
+
+    const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
+    const size_t bsz = (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE;
+    const int checksum_enabled = opts ? opts->checksum : 0;
 
     const uint8_t* ip = (const uint8_t*)src;
     uint8_t* op = (uint8_t*)dst;
@@ -344,10 +348,10 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     uint32_t global_hash = 0;
     zxc_cctx_t ctx;
 
-    if (UNLIKELY(zxc_cctx_init(&ctx, ZXC_BLOCK_SIZE, 1, level, checksum_enabled) != 0))
+    if (UNLIKELY(zxc_cctx_init(&ctx, bsz, 1, level, checksum_enabled) != 0))
         return ZXC_ERROR_MEMORY;
 
-    const int h_val = zxc_write_file_header(op, (size_t)(op_end - op), checksum_enabled);
+    const int h_val = zxc_write_file_header(op, (size_t)(op_end - op), bsz, checksum_enabled);
     if (UNLIKELY(h_val < 0)) {
         zxc_cctx_free(&ctx);
         return h_val;
@@ -356,8 +360,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
     size_t pos = 0;
     while (pos < src_size) {
-        const size_t chunk_len =
-            (src_size - pos > ZXC_BLOCK_SIZE) ? ZXC_BLOCK_SIZE : (src_size - pos);
+        const size_t chunk_len = (src_size - pos > bsz) ? bsz : (src_size - pos);
         const size_t rem_cap = (size_t)(op_end - op);
 
         const int res = zxc_compress_chunk_wrapper(&ctx, ip + pos, chunk_len, op, rem_cap);
@@ -415,8 +418,10 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
  */
 // cppcheck-suppress unusedFunction
 int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RESTRICT dst,
-                       const size_t dst_capacity, const int checksum_enabled) {
+                       const size_t dst_capacity, const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!src || !dst || src_size < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_NULL_INPUT;
+
+    const int checksum_enabled = opts ? opts->checksum : 0;
 
     const uint8_t* ip = (const uint8_t*)src;
     const uint8_t* ip_end = ip + src_size;

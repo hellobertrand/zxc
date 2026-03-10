@@ -18,13 +18,14 @@
  * // Compress
  * size_t bound = zxc_compress_bound(src_size);
  * void *dst    = malloc(bound);
- * int64_t csize = zxc_compress(src, src_size, dst, bound,
- *                              ZXC_LEVEL_DEFAULT, 1);
+ * zxc_compress_opts_t opts = { .level = ZXC_LEVEL_DEFAULT, .checksum = 1 };
+ * int64_t csize = zxc_compress(src, src_size, dst, bound, &opts);
  *
  * // Decompress
  * uint64_t orig = zxc_get_decompressed_size(dst, csize);
  * void *out     = malloc(orig);
- * int64_t dsize = zxc_decompress(dst, csize, out, orig, 1);
+ * zxc_decompress_opts_t dopts = { .checksum = 1 };
+ * int64_t dsize = zxc_decompress(dst, csize, out, orig, &dopts);
  * @endcode
  *
  * @see zxc_stream.h  for the streaming (multi-threaded) API.
@@ -38,6 +39,7 @@
 #include <stdint.h>
 
 #include "zxc_export.h"
+#include "zxc_stream.h" /* zxc_compress_opts_t, zxc_decompress_opts_t */
 
 /**
  * @defgroup buffer_api Buffer API
@@ -69,16 +71,14 @@ ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
  * @param[in] src_size     Size of the source data in bytes.
  * @param[out] dst          Pointer to the destination buffer.
  * @param[in] dst_capacity Maximum capacity of the destination buffer.
- * @param[in] level        Compression level (e.g., ZXC_LEVEL_BALANCED).
- * @param[in] checksum_enabled Flag indicating whether to verify the checksum of the
- * data (1 to enable, 0 to disable).
+ * @param[in] opts         Compression options (NULL uses all defaults).
+ *                         Only @c level, @c block_size, and @c checksum are used.
  *
  * @return The number of bytes written to dst (>0 on success),
  *         or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) on failure.
  */
 ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* dst,
-                                const size_t dst_capacity, const int level,
-                                const int checksum_enabled);
+                                const size_t dst_capacity, const zxc_compress_opts_t* opts);
 
 /**
  * @brief Decompresses a ZXC compressed buffer.
@@ -91,14 +91,14 @@ ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* ds
  * @param[in] src_size      Size of the compressed data in bytes.
  * @param[out] dst          Pointer to the destination buffer.
  * @param[in] dst_capacity  Capacity of the destination buffer.
- * @param[in] checksum_enabled Flag indicating whether to verify the checksum of the
- * data (1 to enable, 0 to disable).
+ * @param[in] opts          Decompression options (NULL uses all defaults).
+ *                          Only @c checksum is used.
  *
  * @return The number of bytes written to dst (>0 on success),
  *         or a negative zxc_error_t code (e.g., ZXC_ERROR_CORRUPT_DATA) on failure.
  */
 ZXC_EXPORT int64_t zxc_decompress(const void* src, const size_t src_size, void* dst,
-                                  const size_t dst_capacity, const int checksum_enabled);
+                                  const size_t dst_capacity, const zxc_decompress_opts_t* opts);
 
 /**
  * @brief Returns the decompressed size stored in a ZXC compressed buffer.
