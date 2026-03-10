@@ -124,9 +124,9 @@ void gen_large_offset_data(uint8_t* const buf, const size_t size) {
 
 // Generic Round-Trip test function (Compress -> Decompress -> Compare)
 int test_round_trip(const char* test_name, const uint8_t* input, size_t size, int level,
-                    int checksum) {
+                    int checksum_enabled) {
     printf("=== TEST: %s (Sz: %zu, Lvl: %d, CRC: %s) ===\n", test_name, size, level,
-           checksum ? "Enabled" : "Disabled");
+           checksum_enabled ? "Enabled" : "Disabled");
 
     FILE* const f_in = tmpfile();
     FILE* const f_comp = tmpfile();
@@ -143,7 +143,8 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
     fwrite(input, 1, size, f_in);
     fseek(f_in, 0, SEEK_SET);
 
-    zxc_compress_opts_t _sco1 = {.n_threads = 1, .level = level, .checksum = checksum};
+    zxc_compress_opts_t _sco1 = {
+        .n_threads = 1, .level = level, .checksum_enabled = checksum_enabled};
     if (zxc_stream_compress(f_in, f_comp, &_sco1) < 0) {
         printf("Compression Failed!\n");
         fclose(f_in);
@@ -157,7 +158,7 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
            (double)size / (comp_size > 0 ? comp_size : 1));
     fseek(f_comp, 0, SEEK_SET);
 
-    zxc_decompress_opts_t _sdo2 = {.n_threads = 1, .checksum = checksum};
+    zxc_decompress_opts_t _sdo2 = {.n_threads = 1, .checksum_enabled = checksum_enabled};
     if (zxc_stream_decompress(f_comp, f_decomp, &_sdo2) < 0) {
         printf("Decompression Failed!\n");
         fclose(f_in);
@@ -228,7 +229,7 @@ int test_null_output_decompression() {
     fseek(f_in, 0, SEEK_SET);
 
     // Compress with checksum
-    zxc_compress_opts_t _sco3 = {.n_threads = 1, .level = 3, .checksum = 1};
+    zxc_compress_opts_t _sco3 = {.n_threads = 1, .level = 3, .checksum_enabled = 1};
     if (zxc_stream_compress(f_in, f_comp, &_sco3) < 0) {
         printf("Compression Failed!\n");
         fclose(f_in);
@@ -240,7 +241,7 @@ int test_null_output_decompression() {
 
     // Decompress with NULL output
     // This should return the decompressed size but write nothing
-    zxc_decompress_opts_t _sdo4 = {.n_threads = 1, .checksum = 1};
+    zxc_decompress_opts_t _sdo4 = {.n_threads = 1, .checksum_enabled = 1};
     int64_t d_sz = zxc_stream_decompress(f_comp, NULL, &_sdo4);
 
     if (d_sz != (int64_t)size) {
@@ -300,12 +301,12 @@ int test_invalid_arguments() {
         return 0;
     }
     // Prepare a valid compressed stream for decompression tests
-    zxc_compress_opts_t _sco5 = {.n_threads = 1, .level = 1, .checksum = 0};
+    zxc_compress_opts_t _sco5 = {.n_threads = 1, .level = 1, .checksum_enabled = 0};
     zxc_stream_compress(f, f_valid, &_sco5);
     rewind(f_valid);
 
     // 1. Input NULL -> Must fail
-    zxc_compress_opts_t _sco6 = {.n_threads = 1, .level = 5, .checksum = 0};
+    zxc_compress_opts_t _sco6 = {.n_threads = 1, .level = 5, .checksum_enabled = 0};
     if (zxc_stream_compress(NULL, f, &_sco6) >= 0) {
         printf("Failed: Should return < 0 when Input is NULL\n");
         fclose(f);
@@ -313,7 +314,7 @@ int test_invalid_arguments() {
     }
 
     // 2. Output NULL -> Must SUCCEED (Benchmark / Dry-Run Mode)
-    zxc_compress_opts_t _sco7 = {.n_threads = 1, .level = 5, .checksum = 0};
+    zxc_compress_opts_t _sco7 = {.n_threads = 1, .level = 5, .checksum_enabled = 0};
     if (zxc_stream_compress(f, NULL, &_sco7) < 0) {
         printf("Failed: Should allow NULL Output (Benchmark mode support)\n");
         fclose(f);
@@ -321,7 +322,7 @@ int test_invalid_arguments() {
     }
 
     // 3. Decompression Input NULL -> Must fail
-    zxc_decompress_opts_t _sdo8 = {.n_threads = 1, .checksum = 0};
+    zxc_decompress_opts_t _sdo8 = {.n_threads = 1, .checksum_enabled = 0};
     if (zxc_stream_decompress(NULL, f, &_sdo8) >= 0) {
         printf("Failed: Decompress should return < 0 when Input is NULL\n");
         fclose(f);
@@ -329,7 +330,7 @@ int test_invalid_arguments() {
     }
 
     // 3b. Decompression Output NULL -> Must SUCCEED (Benchmark mode)
-    zxc_decompress_opts_t _sdo9 = {.n_threads = 1, .checksum = 0};
+    zxc_decompress_opts_t _sdo9 = {.n_threads = 1, .checksum_enabled = 0};
     if (zxc_stream_decompress(f_valid, NULL, &_sdo9) < 0) {
         printf("Failed: Decompress should allow NULL Output (Benchmark mode support)\n");
         fclose(f_valid);
@@ -337,13 +338,13 @@ int test_invalid_arguments() {
     }
 
     // 4. zxc_compress NULL checks
-    zxc_compress_opts_t _co10 = {.level = 3, .checksum = 0};
+    zxc_compress_opts_t _co10 = {.level = 3, .checksum_enabled = 0};
     if (zxc_compress(NULL, 100, (void*)1, 100, &_co10) >= 0) {
         printf("Failed: zxc_compress should return < 0 when src is NULL\n");
         fclose(f);
         return 0;
     }
-    zxc_compress_opts_t _co11 = {.level = 3, .checksum = 0};
+    zxc_compress_opts_t _co11 = {.level = 3, .checksum_enabled = 0};
     if (zxc_compress((void*)1, 100, NULL, 100, &_co11) >= 0) {
         printf("Failed: zxc_compress should return < 0 when dst is NULL\n");
         fclose(f);
@@ -351,13 +352,13 @@ int test_invalid_arguments() {
     }
 
     // 5. zxc_decompress NULL checks
-    zxc_decompress_opts_t _do12 = {.checksum = 0};
+    zxc_decompress_opts_t _do12 = {.checksum_enabled = 0};
     if (zxc_decompress(NULL, 100, (void*)1, 100, &_do12) >= 0) {
         printf("Failed: zxc_decompress should return < 0 when src is NULL\n");
         fclose(f);
         return 0;
     }
-    zxc_decompress_opts_t _do13 = {.checksum = 0};
+    zxc_decompress_opts_t _do13 = {.checksum_enabled = 0};
     if (zxc_decompress((void*)1, 100, NULL, 100, &_do13) >= 0) {
         printf("Failed: zxc_decompress should return < 0 when dst is NULL\n");
         fclose(f);
@@ -394,7 +395,7 @@ int test_truncated_input() {
         return 0;
     }
 
-    zxc_compress_opts_t _co14 = {.level = 3, .checksum = 1};
+    zxc_compress_opts_t _co14 = {.level = 3, .checksum_enabled = 1};
     int64_t comp_sz = zxc_compress(src, SRC_SIZE, compressed, cap, &_co14);
     if (comp_sz <= 0) {
         printf("Prepare failed\n");
@@ -406,7 +407,7 @@ int test_truncated_input() {
     // Try decompressing with progressively cropped size
     // 1. Cut off the Footer (last ZXC_FILE_FOOTER_SIZE bytes)
     if (comp_sz > ZXC_FILE_FOOTER_SIZE) {
-        zxc_decompress_opts_t _do15 = {.checksum = 1};
+        zxc_decompress_opts_t _do15 = {.checksum_enabled = 1};
         if (zxc_decompress(compressed, comp_sz - ZXC_FILE_FOOTER_SIZE, decomp_buf, SRC_SIZE,
                            &_do15) >= 0) {
             printf("Failed: Should fail when footer is missing\n");
@@ -417,7 +418,7 @@ int test_truncated_input() {
     }
 
     // 2. Cut off half the file
-    zxc_decompress_opts_t _do16 = {.checksum = 1};
+    zxc_decompress_opts_t _do16 = {.checksum_enabled = 1};
     if (zxc_decompress(compressed, comp_sz / 2, decomp_buf, SRC_SIZE, &_do16) >= 0) {
         printf("Failed: Should fail when stream is truncated by half\n");
         free(compressed);
@@ -426,7 +427,7 @@ int test_truncated_input() {
     }
 
     // 3. Cut off just 1 byte
-    zxc_decompress_opts_t _do17 = {.checksum = 1};
+    zxc_decompress_opts_t _do17 = {.checksum_enabled = 1};
     if (zxc_decompress(compressed, comp_sz - 1, decomp_buf, SRC_SIZE, &_do17) >= 0) {
         printf("Failed: Should fail when stream is truncated by 1 byte\n");
         free(compressed);
@@ -466,7 +467,7 @@ int test_io_failures() {
     fseek(f_in, 0, SEEK_SET);
 
     // This should fail cleanly (return < 0) because writing to f_out is impossible
-    zxc_compress_opts_t _sco18 = {.n_threads = 1, .level = 5, .checksum = 0};
+    zxc_compress_opts_t _sco18 = {.n_threads = 1, .level = 5, .checksum_enabled = 0};
     if (zxc_stream_compress(f_in, f_out, &_sco18) >= 0) {
         printf("Failed: Should detect write error on read-only stream\n");
         fclose(f_in);
@@ -495,11 +496,11 @@ int test_thread_params() {
     }
 
     // Test with 0 (Auto) and negative value - must not crash
-    zxc_compress_opts_t _sco19 = {.n_threads = 0, .level = 5, .checksum = 0};
+    zxc_compress_opts_t _sco19 = {.n_threads = 0, .level = 5, .checksum_enabled = 0};
     zxc_stream_compress(f_in, f_out, &_sco19);
     fseek(f_in, 0, SEEK_SET);
     fseek(f_out, 0, SEEK_SET);
-    zxc_compress_opts_t _sco20 = {.n_threads = -5, .level = 5, .checksum = 0};
+    zxc_compress_opts_t _sco20 = {.n_threads = -5, .level = 5, .checksum_enabled = 0};
     zxc_stream_compress(f_in, f_out, &_sco20);
 
     printf("PASS (No crash observed)\n\n");
@@ -537,7 +538,7 @@ int test_multithread_roundtrip() {
 
         // Vary thread count: 2, 4, 8
         int num_threads = 2 << iter;
-        zxc_compress_opts_t _sco21 = {.n_threads = num_threads, .level = 3, .checksum = 1};
+        zxc_compress_opts_t _sco21 = {.n_threads = num_threads, .level = 3, .checksum_enabled = 1};
         if (zxc_stream_compress(f_in, f_comp, &_sco21) < 0) {
             printf("Compression failed (threads=%d)!\n", num_threads);
             fclose(f_in);
@@ -548,7 +549,7 @@ int test_multithread_roundtrip() {
 
         fseek(f_comp, 0, SEEK_SET);
 
-        zxc_decompress_opts_t _sdo22 = {.n_threads = num_threads, .checksum = 1};
+        zxc_decompress_opts_t _sdo22 = {.n_threads = num_threads, .checksum_enabled = 1};
         if (zxc_stream_decompress(f_comp, f_decomp, &_sdo22) < 0) {
             printf("Decompression failed (threads=%d)!\n", num_threads);
             fclose(f_in);
@@ -598,7 +599,7 @@ int test_buffer_api() {
     int checksum_enabled = 1;
 
     // 2. Compress
-    zxc_compress_opts_t _co23 = {.level = 3, .checksum = checksum_enabled};
+    zxc_compress_opts_t _co23 = {.level = 3, .checksum_enabled = checksum_enabled};
     int64_t compressed_size = zxc_compress(src, src_size, compressed, max_dst_size, &_co23);
     if (compressed_size <= 0) {
         printf("Failed: zxc_compress returned %lld\n", (long long)compressed_size);
@@ -610,7 +611,7 @@ int test_buffer_api() {
 
     // 3. Decompress
     uint8_t* decompressed = malloc(src_size);
-    zxc_decompress_opts_t _do24 = {.checksum = checksum_enabled};
+    zxc_decompress_opts_t _do24 = {.checksum_enabled = checksum_enabled};
     int64_t decompressed_size =
         zxc_decompress(compressed, compressed_size, decompressed, src_size, &_do24);
 
@@ -634,7 +635,7 @@ int test_buffer_api() {
 
     // 5. Test error case: Destination too small
     size_t small_capacity = compressed_size / 2;
-    zxc_compress_opts_t _co25 = {.level = 3, .checksum = checksum_enabled};
+    zxc_compress_opts_t _co25 = {.level = 3, .checksum_enabled = checksum_enabled};
     int64_t small_res = zxc_compress(src, src_size, compressed, small_capacity, &_co25);
     if (small_res >= 0) {
         printf("Failed: zxc_compress should fail with small buffer (returned %lld)\n",
@@ -743,7 +744,7 @@ int test_eof_block_structure() {
     uint8_t* compressed = malloc(max_dst_size);
     if (!compressed) return 0;
 
-    zxc_compress_opts_t _co26 = {.level = 1, .checksum = 0};
+    zxc_compress_opts_t _co26 = {.level = 1, .checksum_enabled = 0};
     int64_t comp_size = zxc_compress(input, src_size, compressed, max_dst_size, &_co26);
     if (comp_size <= 0) {
         printf("Failed: Compression returned 0\n");
@@ -871,7 +872,7 @@ int test_global_checksum_order() {
     rewind(f_in);
 
     // 2. Compress with Checksum Enabled
-    zxc_compress_opts_t _sco27 = {.n_threads = 1, .level = 1, .checksum = 1};
+    zxc_compress_opts_t _sco27 = {.n_threads = 1, .level = 1, .checksum_enabled = 1};
     zxc_stream_compress(f_in, f_comp, &_sco27);
 
     // 3. Read compressed data to memory
@@ -940,7 +941,7 @@ int test_global_checksum_order() {
 
     // 7. Attempt Decompression
     FILE* f_out = tmpfile();
-    zxc_decompress_opts_t _sdo28 = {.n_threads = 1, .checksum = 1};
+    zxc_decompress_opts_t _sdo28 = {.n_threads = 1, .checksum_enabled = 1};
     int64_t res = zxc_stream_decompress(f_bad, f_out, &_sdo28);
 
     fclose(f_in);
@@ -972,7 +973,7 @@ int test_get_decompressed_size() {
     size_t max_dst = zxc_compress_bound(src_size);
     uint8_t* compressed = malloc(max_dst);
 
-    zxc_compress_opts_t _co29 = {.level = 3, .checksum = 0};
+    zxc_compress_opts_t _co29 = {.level = 3, .checksum_enabled = 0};
     int64_t comp_size = zxc_compress(src, src_size, compressed, max_dst, &_co29);
     if (comp_size <= 0) {
         printf("Failed: Compression returned 0\n");
@@ -1074,7 +1075,7 @@ int test_buffer_error_codes() {
     /* ------------------------------------------------------------------ */
 
     // 1. NULL src
-    zxc_compress_opts_t _co30 = {.level = 3, .checksum = 0};
+    zxc_compress_opts_t _co30 = {.level = 3, .checksum_enabled = 0};
     int64_t r = zxc_compress(NULL, 100, (void*)1, 100, &_co30);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] NULL src: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
@@ -1083,7 +1084,7 @@ int test_buffer_error_codes() {
     printf("  [PASS] zxc_compress NULL src -> ZXC_ERROR_NULL_INPUT\n");
 
     // 2. NULL dst
-    zxc_compress_opts_t _co31 = {.level = 3, .checksum = 0};
+    zxc_compress_opts_t _co31 = {.level = 3, .checksum_enabled = 0};
     r = zxc_compress((void*)1, 100, NULL, 100, &_co31);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] NULL dst: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
@@ -1093,7 +1094,7 @@ int test_buffer_error_codes() {
 
     // 3. src_size == 0
     uint8_t dummy[16];
-    zxc_compress_opts_t _co32 = {.level = 3, .checksum = 0};
+    zxc_compress_opts_t _co32 = {.level = 3, .checksum_enabled = 0};
     r = zxc_compress(dummy, 0, dummy, sizeof(dummy), &_co32);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] src_size==0: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
@@ -1102,7 +1103,7 @@ int test_buffer_error_codes() {
     printf("  [PASS] zxc_compress src_size==0 -> ZXC_ERROR_NULL_INPUT\n");
 
     // 4. dst_capacity == 0
-    zxc_compress_opts_t _co33 = {.level = 3, .checksum = 0};
+    zxc_compress_opts_t _co33 = {.level = 3, .checksum_enabled = 0};
     r = zxc_compress(dummy, sizeof(dummy), dummy, 0, &_co33);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] dst_cap==0: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
@@ -1115,7 +1116,7 @@ int test_buffer_error_codes() {
         uint8_t src[64];
         uint8_t dst[8];  // Too small for file header (16 bytes)
         gen_lz_data(src, sizeof(src));
-        zxc_compress_opts_t _co34 = {.level = 3, .checksum = 0};
+        zxc_compress_opts_t _co34 = {.level = 3, .checksum_enabled = 0};
         r = zxc_compress(src, sizeof(src), dst, sizeof(dst), &_co34);
         if (r >= 0) {
             printf("  [FAIL] dst too small for header: expected < 0, got %lld\n", (long long)r);
@@ -1131,7 +1132,7 @@ int test_buffer_error_codes() {
         const size_t small_dst = 128;
         uint8_t* dst = malloc(small_dst);
         gen_lz_data(src, src_sz);
-        zxc_compress_opts_t _co35 = {.level = 3, .checksum = 0};
+        zxc_compress_opts_t _co35 = {.level = 3, .checksum_enabled = 0};
         r = zxc_compress(src, src_sz, dst, small_dst, &_co35);
         if (r >= 0) {
             printf("  [FAIL] dst too small for chunk: expected < 0, got %lld\n", (long long)r);
@@ -1153,7 +1154,7 @@ int test_buffer_error_codes() {
         gen_lz_data(src, src_sz);
         const size_t full_cap = zxc_compress_bound(src_sz);
         uint8_t* full_dst = malloc(full_cap);
-        zxc_compress_opts_t _co36 = {.level = 3, .checksum = 0};
+        zxc_compress_opts_t _co36 = {.level = 3, .checksum_enabled = 0};
         const int64_t full_sz = zxc_compress(src, src_sz, full_dst, full_cap, &_co36);
         if (full_sz <= 0) {
             printf("  [SKIP] Cannot prepare for EOF test\n");
@@ -1164,7 +1165,7 @@ int test_buffer_error_codes() {
             // Try with a buffer that's just a few bytes too small.
             const size_t tight = (size_t)full_sz - 5;
             uint8_t* tight_dst = malloc(tight);
-            zxc_compress_opts_t _co37 = {.level = 3, .checksum = 0};
+            zxc_compress_opts_t _co37 = {.level = 3, .checksum_enabled = 0};
             r = zxc_compress(src, src_sz, tight_dst, tight, &_co37);
             if (r >= 0) {
                 printf("  [FAIL] dst too small for EOF+footer: expected < 0, got %lld\n",
@@ -1186,7 +1187,7 @@ int test_buffer_error_codes() {
     /* ------------------------------------------------------------------ */
 
     // 8. NULL src
-    zxc_decompress_opts_t _do38 = {.checksum = 0};
+    zxc_decompress_opts_t _do38 = {.checksum_enabled = 0};
     r = zxc_decompress(NULL, 100, (void*)1, 100, &_do38);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] decompress NULL src: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
@@ -1196,7 +1197,7 @@ int test_buffer_error_codes() {
     printf("  [PASS] zxc_decompress NULL src -> ZXC_ERROR_NULL_INPUT\n");
 
     // 9. NULL dst
-    zxc_decompress_opts_t _do39 = {.checksum = 0};
+    zxc_decompress_opts_t _do39 = {.checksum_enabled = 0};
     r = zxc_decompress((void*)1, 100, NULL, 100, &_do39);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] decompress NULL dst: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
@@ -1209,7 +1210,7 @@ int test_buffer_error_codes() {
     {
         uint8_t tiny[4] = {0};
         uint8_t out[64];
-        zxc_decompress_opts_t _do40 = {.checksum = 0};
+        zxc_decompress_opts_t _do40 = {.checksum_enabled = 0};
         r = zxc_decompress(tiny, sizeof(tiny), out, sizeof(out), &_do40);
         if (r != ZXC_ERROR_NULL_INPUT) {
             printf("  [FAIL] src too small: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
@@ -1224,7 +1225,7 @@ int test_buffer_error_codes() {
         uint8_t bad_src[64];
         memset(bad_src, 0, sizeof(bad_src));
         uint8_t out[64];
-        zxc_decompress_opts_t _do41 = {.checksum = 0};
+        zxc_decompress_opts_t _do41 = {.checksum_enabled = 0};
         r = zxc_decompress(bad_src, sizeof(bad_src), out, sizeof(out), &_do41);
         if (r != ZXC_ERROR_BAD_HEADER) {
             printf("  [FAIL] bad magic: expected %d, got %lld\n", ZXC_ERROR_BAD_HEADER,
@@ -1240,7 +1241,7 @@ int test_buffer_error_codes() {
     gen_lz_data(test_src, test_src_sz);
     const size_t comp_cap = zxc_compress_bound(test_src_sz);
     uint8_t* comp_buf = malloc(comp_cap);
-    zxc_compress_opts_t _co42 = {.level = 3, .checksum = 1};
+    zxc_compress_opts_t _co42 = {.level = 3, .checksum_enabled = 1};
     const int64_t comp_sz = zxc_compress(test_src, test_src_sz, comp_buf, comp_cap, &_co42);
     if (comp_sz <= 0) {
         printf("  [FAIL] Could not prepare compressed data\n");
@@ -1256,7 +1257,7 @@ int test_buffer_error_codes() {
         // Corrupt the block type byte at offset ZXC_FILE_HEADER_SIZE
         corrupt[ZXC_FILE_HEADER_SIZE] = 0xFF;  // Invalid block type
         uint8_t* out = malloc(test_src_sz);
-        zxc_decompress_opts_t _do43 = {.checksum = 1};
+        zxc_decompress_opts_t _do43 = {.checksum_enabled = 1};
         r = zxc_decompress(corrupt, comp_sz, out, test_src_sz, &_do43);
         if (r >= 0) {
             printf("  [FAIL] corrupt block header: expected < 0, got %lld\n", (long long)r);
@@ -1277,7 +1278,7 @@ int test_buffer_error_codes() {
         // Truncate so the footer is missing
         const size_t trunc_sz = (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE + 2;  // Cut most of footer
         uint8_t* out = malloc(test_src_sz);
-        zxc_decompress_opts_t _do44 = {.checksum = 1};
+        zxc_decompress_opts_t _do44 = {.checksum_enabled = 1};
         r = zxc_decompress(comp_buf, trunc_sz, out, test_src_sz, &_do44);
         if (r >= 0) {
             printf("  [FAIL] truncated footer: expected < 0, got %lld\n", (long long)r);
@@ -1299,7 +1300,7 @@ int test_buffer_error_codes() {
         const size_t footer_offset = (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE;
         corrupt[footer_offset] ^= 0x01;  // Flip a bit in the stored source size
         uint8_t* out = malloc(test_src_sz);
-        zxc_decompress_opts_t _do45 = {.checksum = 1};
+        zxc_decompress_opts_t _do45 = {.checksum_enabled = 1};
         r = zxc_decompress(corrupt, comp_sz, out, test_src_sz, &_do45);
         if (r >= 0) {
             printf("  [FAIL] size mismatch: expected < 0, got %lld\n", (long long)r);
@@ -1321,7 +1322,7 @@ int test_buffer_error_codes() {
         // Global hash is the last 4 bytes of the file
         corrupt[comp_sz - 1] ^= 0xFF;
         uint8_t* out = malloc(test_src_sz);
-        zxc_decompress_opts_t _do46 = {.checksum = 1};
+        zxc_decompress_opts_t _do46 = {.checksum_enabled = 1};
         r = zxc_decompress(corrupt, comp_sz, out, test_src_sz, &_do46);
         if (r != ZXC_ERROR_BAD_CHECKSUM) {
             printf("  [FAIL] bad global checksum: expected %d, got %lld\n", ZXC_ERROR_BAD_CHECKSUM,
@@ -1340,7 +1341,7 @@ int test_buffer_error_codes() {
     // 16. dst too small for decompression
     {
         uint8_t* out = malloc(test_src_sz / 4);  // Way too small
-        zxc_decompress_opts_t _do47 = {.checksum = 0};
+        zxc_decompress_opts_t _do47 = {.checksum_enabled = 0};
         r = zxc_decompress(comp_buf, comp_sz, out, test_src_sz / 4, &_do47);
         if (r >= 0) {
             printf("  [FAIL] dst too small for decompress: expected < 0, got %lld\n", (long long)r);
@@ -1421,7 +1422,7 @@ int test_stream_get_decompressed_size_errors() {
         gen_lz_data(src, src_sz);
         const size_t cap = zxc_compress_bound(src_sz);
         uint8_t* comp = malloc(cap);
-        zxc_compress_opts_t _co48 = {.level = 3, .checksum = 0};
+        zxc_compress_opts_t _co48 = {.level = 3, .checksum_enabled = 0};
         int64_t comp_sz = zxc_compress(src, src_sz, comp, cap, &_co48);
         if (comp_sz <= 0) {
             printf("  [SKIP] compress failed\n");
@@ -1457,7 +1458,7 @@ int test_stream_engine_errors() {
     // 1. zxc_stream_compress with NULL f_in
     {
         FILE* f_out = tmpfile();
-        zxc_compress_opts_t _sco49 = {.n_threads = 1, .level = 3, .checksum = 0};
+        zxc_compress_opts_t _sco49 = {.n_threads = 1, .level = 3, .checksum_enabled = 0};
         int64_t r = zxc_stream_compress(NULL, f_out, &_sco49);
         if (r != ZXC_ERROR_NULL_INPUT) {
             printf("  [FAIL] compress NULL f_in: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
@@ -1472,7 +1473,7 @@ int test_stream_engine_errors() {
     // 2. zxc_stream_decompress with NULL f_in
     {
         FILE* f_out = tmpfile();
-        zxc_decompress_opts_t _sdo50 = {.n_threads = 1, .checksum = 0};
+        zxc_decompress_opts_t _sdo50 = {.n_threads = 1, .checksum_enabled = 0};
         int64_t r = zxc_stream_decompress(NULL, f_out, &_sdo50);
         if (r != ZXC_ERROR_NULL_INPUT) {
             printf("  [FAIL] decompress NULL f_in: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
@@ -1500,7 +1501,7 @@ int test_stream_engine_errors() {
         fwrite(garbage, 1, sizeof(garbage), f_in);
         fseek(f_in, 0, SEEK_SET);
 
-        zxc_decompress_opts_t _sdo51 = {.n_threads = 1, .checksum = 0};
+        zxc_decompress_opts_t _sdo51 = {.n_threads = 1, .checksum_enabled = 0};
         int64_t r = zxc_stream_decompress(f_in, f_out, &_sdo51);
         if (r != ZXC_ERROR_BAD_HEADER) {
             printf("  [FAIL] bad header: expected %d, got %lld\n", ZXC_ERROR_BAD_HEADER,
@@ -1526,7 +1527,7 @@ int test_stream_engine_errors() {
         fwrite(src, 1, src_sz, f_comp_in);
         fseek(f_comp_in, 0, SEEK_SET);
 
-        zxc_compress_opts_t _sco52 = {.n_threads = 1, .level = 3, .checksum = 1};
+        zxc_compress_opts_t _sco52 = {.n_threads = 1, .level = 3, .checksum_enabled = 1};
         int64_t comp_sz = zxc_stream_compress(f_comp_in, f_comp_out, &_sco52);
         fclose(f_comp_in);
         if (comp_sz <= 0) {
@@ -1560,7 +1561,7 @@ int test_stream_engine_errors() {
         fseek(f_corrupt, 0, SEEK_SET);
         free(comp_data);
 
-        zxc_decompress_opts_t _sdo53 = {.n_threads = 1, .checksum = 1};
+        zxc_decompress_opts_t _sdo53 = {.n_threads = 1, .checksum_enabled = 1};
         int64_t r = zxc_stream_decompress(f_corrupt, f_dec_out, &_sdo53);
         fclose(f_corrupt);
         fclose(f_dec_out);
@@ -1583,7 +1584,7 @@ int test_stream_engine_errors() {
         fwrite(src, 1, src_sz, f_comp_in);
         fseek(f_comp_in, 0, SEEK_SET);
 
-        zxc_compress_opts_t _sco54 = {.n_threads = 1, .level = 3, .checksum = 1};
+        zxc_compress_opts_t _sco54 = {.n_threads = 1, .level = 3, .checksum_enabled = 1};
         int64_t comp_sz = zxc_stream_compress(f_comp_in, f_comp_out, &_sco54);
         fclose(f_comp_in);
         if (comp_sz <= 0) {
@@ -1615,7 +1616,7 @@ int test_stream_engine_errors() {
         fseek(f_corrupt, 0, SEEK_SET);
         free(comp_data);
 
-        zxc_decompress_opts_t _sdo55 = {.n_threads = 1, .checksum = 1};
+        zxc_decompress_opts_t _sdo55 = {.n_threads = 1, .checksum_enabled = 1};
         int64_t r = zxc_stream_decompress(f_corrupt, f_dec_out, &_sdo55);
         fclose(f_corrupt);
         fclose(f_dec_out);
@@ -1638,7 +1639,7 @@ int test_stream_engine_errors() {
         fwrite(src, 1, src_sz, f_comp_in);
         fseek(f_comp_in, 0, SEEK_SET);
 
-        zxc_compress_opts_t _sco56 = {.n_threads = 1, .level = 3, .checksum = 0};
+        zxc_compress_opts_t _sco56 = {.n_threads = 1, .level = 3, .checksum_enabled = 0};
         int64_t comp_sz = zxc_stream_compress(f_comp_in, f_comp_out, &_sco56);
         fclose(f_comp_in);
         free(src);
@@ -1668,7 +1669,7 @@ int test_stream_engine_errors() {
         fseek(f_corrupt, 0, SEEK_SET);
         free(comp_data);
 
-        zxc_decompress_opts_t _sdo57 = {.n_threads = 1, .checksum = 0};
+        zxc_decompress_opts_t _sdo57 = {.n_threads = 1, .checksum_enabled = 0};
         int64_t r = zxc_stream_decompress(f_corrupt, f_dec_out, &_sdo57);
         fclose(f_corrupt);
         fclose(f_dec_out);
@@ -1697,7 +1698,7 @@ int test_buffer_api_scratch_buf() {
 
         const size_t comp_cap = zxc_compress_bound(sz);
         uint8_t* comp = malloc(comp_cap);
-        zxc_compress_opts_t _co58 = {.level = 3, .checksum = 0};
+        zxc_compress_opts_t _co58 = {.level = 3, .checksum_enabled = 0};
         const int64_t comp_sz = zxc_compress(src, sz, comp, comp_cap, &_co58);
         if (comp_sz <= 0) {
             printf("  [FAIL] compress 177B\n");
@@ -1706,7 +1707,7 @@ int test_buffer_api_scratch_buf() {
         }
 
         uint8_t dec[177];
-        zxc_decompress_opts_t _do59 = {.checksum = 0};
+        zxc_decompress_opts_t _do59 = {.checksum_enabled = 0};
         const int64_t dec_sz = zxc_decompress(comp, comp_sz, dec, sz, &_do59);
         if (dec_sz != (int64_t)sz || memcmp(src, dec, sz) != 0) {
             printf("  [FAIL] roundtrip 177B\n");
@@ -1725,7 +1726,7 @@ int test_buffer_api_scratch_buf() {
 
         const size_t comp_cap = zxc_compress_bound(sz);
         uint8_t* comp = malloc(comp_cap);
-        zxc_compress_opts_t _co60 = {.level = 1, .checksum = 1};
+        zxc_compress_opts_t _co60 = {.level = 1, .checksum_enabled = 1};
         const int64_t comp_sz = zxc_compress(src, sz, comp, comp_cap, &_co60);
         if (comp_sz <= 0) {
             printf("  [FAIL] compress 1KB\n");
@@ -1735,7 +1736,7 @@ int test_buffer_api_scratch_buf() {
         }
 
         uint8_t* dec = malloc(sz);  // exactly sz, no extra room
-        zxc_decompress_opts_t _do61 = {.checksum = 1};
+        zxc_decompress_opts_t _do61 = {.checksum_enabled = 1};
         const int64_t dec_sz = zxc_decompress(comp, comp_sz, dec, sz, &_do61);
         if (dec_sz != (int64_t)sz || memcmp(src, dec, sz) != 0) {
             printf("  [FAIL] exact-fit 1KB\n");
@@ -1755,7 +1756,7 @@ int test_buffer_api_scratch_buf() {
         const uint8_t src = 0x42;
         const size_t comp_cap = zxc_compress_bound(1);
         uint8_t* comp = malloc(comp_cap);
-        zxc_compress_opts_t _co62 = {.level = 1, .checksum = 0};
+        zxc_compress_opts_t _co62 = {.level = 1, .checksum_enabled = 0};
         const int64_t comp_sz = zxc_compress(&src, 1, comp, comp_cap, &_co62);
         if (comp_sz <= 0) {
             printf("  [FAIL] compress 1B\n");
@@ -1764,7 +1765,7 @@ int test_buffer_api_scratch_buf() {
         }
 
         uint8_t dec = 0;
-        zxc_decompress_opts_t _do63 = {.checksum = 0};
+        zxc_decompress_opts_t _do63 = {.checksum_enabled = 0};
         const int64_t dec_sz = zxc_decompress(comp, comp_sz, &dec, 1, &_do63);
         if (dec_sz != 1 || dec != 0x42) {
             printf("  [FAIL] roundtrip 1B\n");
@@ -1780,7 +1781,7 @@ int test_buffer_api_scratch_buf() {
         uint8_t garbage[64];
         for (int i = 0; i < 64; i++) garbage[i] = (uint8_t)(i * 37);
         uint8_t out[256];
-        zxc_decompress_opts_t _do64 = {.checksum = 0};
+        zxc_decompress_opts_t _do64 = {.checksum_enabled = 0};
         const int64_t r = zxc_decompress(garbage, sizeof(garbage), out, sizeof(out), &_do64);
         if (r >= 0) {
             printf("  [FAIL] malformed input should return < 0\n");
@@ -1797,7 +1798,7 @@ int test_buffer_api_scratch_buf() {
 
         const size_t comp_cap = zxc_compress_bound(sz);
         uint8_t* comp = malloc(comp_cap);
-        zxc_compress_opts_t _co65 = {.level = 1, .checksum = 0};
+        zxc_compress_opts_t _co65 = {.level = 1, .checksum_enabled = 0};
         const int64_t comp_sz = zxc_compress(src, sz, comp, comp_cap, &_co65);
         if (comp_sz <= 0) {
             printf("  [FAIL] compress 512B\n");
@@ -1807,7 +1808,7 @@ int test_buffer_api_scratch_buf() {
         }
 
         uint8_t tiny_dst[8];
-        zxc_decompress_opts_t _do66 = {.checksum = 0};
+        zxc_decompress_opts_t _do66 = {.checksum_enabled = 0};
         const int64_t r = zxc_decompress(comp, comp_sz, tiny_dst, sizeof(tiny_dst), &_do66);
         if (r >= 0) {
             printf("  [FAIL] dst too small should return < 0\n");

@@ -73,7 +73,7 @@ typedef struct {
     int level;         /**< Compression level 1-5 (0 = default, ZXC_LEVEL_DEFAULT). */
     size_t block_size; /**< Block size in bytes (0 = default 256 KB). Must be power of 2, 4 KB – 2
                           MB. */
-    int checksum;      /**< 1 to enable per-block and global checksums, 0 to disable. */
+    int checksum_enabled; /**< 1 to enable per-block and global checksums, 0 to disable. */
     zxc_progress_callback_t progress_cb; /**< Optional progress callback (NULL to disable). */
     void* user_data;                     /**< User context pointer passed to progress_cb. */
 } zxc_compress_opts_t;
@@ -89,8 +89,8 @@ typedef struct {
  * @endcode
  */
 typedef struct {
-    int n_threads; /**< Worker thread count (0 = auto-detect CPU cores). */
-    int checksum;  /**< 1 to verify per-block and global checksums, 0 to skip. */
+    int n_threads;        /**< Worker thread count (0 = auto-detect CPU cores). */
+    int checksum_enabled; /**< 1 to verify per-block and global checksums, 0 to skip. */
     zxc_progress_callback_t progress_cb; /**< Optional progress callback (NULL to disable). */
     void* user_data;                     /**< User context pointer passed to progress_cb. */
 } zxc_decompress_opts_t;

@@ -346,7 +346,7 @@ static void* zxc_stream_worker(void* arg) {
                                 : (ctx->file_has_checksum && ctx->checksum_enabled);
 
     if (zxc_cctx_init(&cctx, ctx->chunk_size, ctx->compression_mode, ctx->compression_level,
-                      unified_chk) != 0) {
+                      unified_chk) != ZXC_OK) {
         zxc_cctx_free(&cctx);
         return NULL;
     }
@@ -754,13 +754,15 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
 
     const int n_threads = opts ? opts->n_threads : 0;
+    const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
-    const size_t bsz = (opts) ? opts->block_size : 0;
-    const int checksum = opts ? opts->checksum : 0;
+    const size_t block_size = (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE;
     zxc_progress_callback_t cb = opts ? opts->progress_cb : NULL;
     void* ud = opts ? opts->user_data : NULL;
 
-    return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, bsz, checksum,
+    if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
+
+    return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, block_size, checksum_enabled,
                                  zxc_compress_chunk_wrapper, cb, ud);
 }
 
@@ -768,11 +770,11 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
 
     const int n_threads = opts ? opts->n_threads : 0;
-    const int checksum = opts ? opts->checksum : 0;
+    const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     zxc_progress_callback_t cb = opts ? opts->progress_cb : NULL;
     void* ud = opts ? opts->user_data : NULL;
 
-    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum,
+    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled,
                                  (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, cb, ud);
 }
 

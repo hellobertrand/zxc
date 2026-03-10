@@ -337,9 +337,11 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
                      const size_t dst_capacity, const zxc_compress_opts_t* opts) {
     if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return ZXC_ERROR_NULL_INPUT;
 
+    const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
     const size_t block_size = (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE;
-    const int checksum_enabled = opts ? opts->checksum : 0;
+
+    if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
     const uint8_t* ip = (const uint8_t*)src;
     uint8_t* op = (uint8_t*)dst;
@@ -348,7 +350,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     uint32_t global_hash = 0;
     zxc_cctx_t ctx;
 
-    if (UNLIKELY(zxc_cctx_init(&ctx, block_size, 1, level, checksum_enabled) != 0))
+    if (UNLIKELY(zxc_cctx_init(&ctx, block_size, 1, level, checksum_enabled) != ZXC_OK))
         return ZXC_ERROR_MEMORY;
 
     const int h_val =
@@ -422,7 +424,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
                        const size_t dst_capacity, const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!src || !dst || src_size < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_NULL_INPUT;
 
-    const int checksum_enabled = opts ? opts->checksum : 0;
+    const int checksum_enabled = opts ? opts->checksum_enabled : 0;
 
     const uint8_t* ip = (const uint8_t*)src;
     const uint8_t* ip_end = ip + src_size;
@@ -437,7 +439,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
     if (UNLIKELY(
             zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums) != 0 ||
             zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0, file_has_checksums && checksum_enabled) !=
-                0)) {
+                ZXC_OK)) {
         return ZXC_ERROR_BAD_HEADER;
     }
 

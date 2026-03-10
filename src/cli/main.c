@@ -715,7 +715,8 @@ static int zxc_list_archive(const char* path, int json_output) {
 
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
-                               int checksum, int level, size_t block_size, int json_output) {
+                               int checksum_enabled, int level, size_t block_size,
+                               int json_output) {
     FILE* f_in = stdin;
     FILE* f_out = stdout;
     char resolved_in_path[4096] = {0};
@@ -884,7 +885,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (in_path && !g_quiet) {
         zxc_log_v("Processing %s... (Compression Level %d)\n", in_path, level);
     }
-    if (g_verbose) zxc_log("Checksum: %s\n", checksum ? "enabled" : "disabled");
+    if (g_verbose) zxc_log("Checksum: %s\n", checksum_enabled ? "enabled" : "disabled");
 
     // Prepare progress context
     progress_ctx_t pctx = {.start_time = zxc_now(),
@@ -898,7 +899,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .n_threads = num_threads,
             .level = level,
             .block_size = block_size,
-            .checksum = checksum,
+            .checksum_enabled = checksum_enabled,
             .progress_cb = show_progress ? cli_progress_callback : NULL,
             .user_data = &pctx,
         };
@@ -906,7 +907,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     } else {
         zxc_decompress_opts_t dopts = {
             .n_threads = num_threads,
-            .checksum = checksum,
+            .checksum_enabled = checksum_enabled,
             .progress_cb = show_progress ? cli_progress_callback : NULL,
             .user_data = &pctx,
         };
@@ -946,14 +947,14 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                     "  \"checksum_verified\": %s,\n"
                     "  \"time_seconds\": %.6f\n"
                     "}\n",
-                    in_path ? in_path : "<stdin>", checksum ? "true" : "false", dt);
+                    in_path ? in_path : "<stdin>", checksum_enabled ? "true" : "false", dt);
             } else if (g_verbose) {
                 printf(
                     "%s: OK\n"
                     "  Checksum:     %s\n"
                     "  Time:         %.3fs\n",
                     in_path ? in_path : "<stdin>",
-                    checksum ? "verified (RapidHash)" : "not verified", dt);
+                    checksum_enabled ? "verified (RapidHash)" : "not verified", dt);
             } else {
                 printf("%s: OK\n", in_path ? in_path : "<stdin>");
             }
@@ -1251,7 +1252,7 @@ int main(int argc, char** argv) {
             zxc_compress_opts_t bench_copts = {.n_threads = num_threads,
                                                .level = level,
                                                .block_size = block_size,
-                                               .checksum = checksum};
+                                               .checksum_enabled = checksum};
             zxc_stream_compress(fm, NULL, &bench_copts);
             const double dt = zxc_now() - t0;
             if (dt < best_compress) best_compress = dt;
@@ -1291,7 +1292,7 @@ int main(int argc, char** argv) {
         zxc_compress_opts_t bench_copts2 = {.n_threads = num_threads,
                                             .level = level,
                                             .block_size = block_size,
-                                            .checksum = checksum};
+                                            .checksum_enabled = checksum};
         const int64_t c_sz = zxc_stream_compress(fm_in, fm_out, &bench_copts2);
         if (c_sz < 0) {
             fclose(fm_in);
@@ -1328,7 +1329,8 @@ int main(int argc, char** argv) {
         while (zxc_now() < decompress_deadline) {
             rewind(fc);
             const double t0 = zxc_now();
-            zxc_decompress_opts_t bench_dopts = {.n_threads = num_threads, .checksum = checksum};
+            zxc_decompress_opts_t bench_dopts = {.n_threads = num_threads,
+                                                 .checksum_enabled = checksum};
             zxc_stream_decompress(fc, NULL, &bench_dopts);
             const double dt = zxc_now() - t0;
             if (dt < best_decompress) best_decompress = dt;

@@ -78,8 +78,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->compression_level = level;
     ctx->checksum_enabled = checksum_enabled;
 
-    /* Validate and compute block-size derived parameters. */
-    if (!zxc_validate_block_size(chunk_size)) return ZXC_ERROR_NULL_INPUT;
+    /* Compute block-size derived parameters. */
     ctx->chunk_size = chunk_size;
     const uint32_t ob = zxc_log2_u32((uint32_t)chunk_size);
     ctx->offset_bits = ob;
@@ -196,10 +195,8 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     zxc_store_le32(dst, ZXC_MAGIC_WORD);
     dst[4] = ZXC_FILE_FORMAT_VERSION;
 
-    // Dual-scale chunk size encoding
-    // Large scale multiplier is 64 KB, fine scale is 4 KB (ratio: 64 / 4 = 16)
-    const uint32_t units = (uint32_t)(chunk_size / ZXC_BLOCK_UNIT);
-    dst[5] = units <= 127 ? (uint8_t)units : (uint8_t)((units / 16) | 0x80);
+    // Block size stored as log2 exponent (e.g. 18 = 256 KB)
+    dst[5] = (uint8_t)zxc_log2_u32((uint32_t)chunk_size);
 
     // Flags are at offset 6
     dst[6] = has_checksum ? (ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_CHECKSUM_RAPIDHASH) : 0;
@@ -241,14 +238,17 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     if (UNLIKELY(zxc_le16(src + 14) != zxc_hash16(temp))) return ZXC_ERROR_BAD_HEADER;
 
     if (out_block_size) {
-        // Read Dual-Scale Chunk Size Code
         const uint8_t code = src[5];
-        const size_t scale = (code & 0x80) ? (16 * ZXC_BLOCK_UNIT) : ZXC_BLOCK_UNIT;
-        size_t value = code & 0x7F;
-        if (UNLIKELY(value == 0)) value = 1;
-
-        const size_t bs = value * scale;
-        if (UNLIKELY(!zxc_validate_block_size(bs))) return ZXC_ERROR_BAD_HEADER;
+        size_t bs;
+        if (code >= 12 && code <= 21) {
+            // Exponent encoding: block_size = 2^code  (4 KB – 2 MB)
+            bs = (size_t)1 << code;
+        } else if (code == 64) {
+            // Legacy: hardcoded 256 KB default
+            bs = ZXC_BLOCK_SIZE;
+        } else {
+            return ZXC_ERROR_BAD_BLOCK_SIZE;
+        }
         *out_block_size = bs;
     }
     // Flags are at offset 6
@@ -627,6 +627,8 @@ const char* zxc_error_name(const int code) {
             return "ZXC_ERROR_NULL_INPUT";
         case ZXC_ERROR_BAD_BLOCK_TYPE:
             return "ZXC_ERROR_BAD_BLOCK_TYPE";
+        case ZXC_ERROR_BAD_BLOCK_SIZE:
+            return "ZXC_ERROR_BAD_BLOCK_SIZE";
         default:
             return "ZXC_UNKNOWN_ERROR";
     }
