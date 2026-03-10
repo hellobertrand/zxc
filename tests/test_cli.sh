@@ -710,6 +710,77 @@ else
     log_fail "Decompress recursive directory failed (content mismatch or missing files)"
 fi
 
+# 23. Block Size Tests (-B)
+echo "Testing Block Size (-B)..."
+
+# 23.1 Round-trip with different block sizes
+for BS in 4K 64K 512K 1M; do
+    echo "  Testing block size -B $BS..."
+    "$ZXC_BIN" -3 -B "$BS" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_${BS}.xc"
+    if [ ! -s "$TEST_DIR/test_bs_${BS}.xc" ]; then
+        log_fail "Block size $BS compression produced empty output"
+    fi
+    "$ZXC_BIN" -d -c "$TEST_DIR/test_bs_${BS}.xc" > "$TEST_DIR/test_bs_${BS}.dec"
+    if cmp -s "$TEST_FILE" "$TEST_DIR/test_bs_${BS}.dec"; then
+        SIZE_BS=$(wc -c < "$TEST_DIR/test_bs_${BS}.xc" | tr -d ' ')
+        log_pass "Block size -B $BS (Size: $SIZE_BS)"
+    else
+        log_fail "Block size $BS round-trip failed"
+    fi
+done
+
+# 23.2 Test suffix formats (KB, M, MB)
+echo "  Testing block size suffix formats..."
+"$ZXC_BIN" -3 -B 128KB -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_128KB.xc"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_bs_128KB.xc" > "$TEST_DIR/test_bs_128KB.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/test_bs_128KB.dec"; then
+    log_pass "Block size suffix KB"
+else
+    log_fail "Block size suffix KB round-trip failed"
+fi
+
+"$ZXC_BIN" -3 -B 2MB -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_2MB.xc"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_bs_2MB.xc" > "$TEST_DIR/test_bs_2MB.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/test_bs_2MB.dec"; then
+    log_pass "Block size suffix MB"
+else
+    log_fail "Block size suffix MB round-trip failed"
+fi
+
+# 23.3 Error: invalid block size (not power of 2)
+echo "  Testing invalid block size..."
+set +e
+"$ZXC_BIN" -3 -B 100K "$TEST_FILE_ARG" > /dev/null 2>&1
+RET=$?
+set -e
+if [ $RET -ne 0 ]; then
+    log_pass "Invalid block size rejected (100K)"
+else
+    log_fail "Invalid block size should be rejected (100K is not power of 2)"
+fi
+
+# 23.4 Error: block size too small
+set +e
+"$ZXC_BIN" -3 -B 2K "$TEST_FILE_ARG" > /dev/null 2>&1
+RET=$?
+set -e
+if [ $RET -ne 0 ]; then
+    log_pass "Block size too small rejected (2K)"
+else
+    log_fail "Block size 2K should be rejected (min is 4K)"
+fi
+
+# 23.5 Error: block size too large
+set +e
+"$ZXC_BIN" -3 -B 4M "$TEST_FILE_ARG" > /dev/null 2>&1
+RET=$?
+set -e
+if [ $RET -ne 0 ]; then
+    log_pass "Block size too large rejected (4M)"
+else
+    log_fail "Block size 4M should be rejected (max is 2M)"
+fi
+
 echo "All tests passed!"
 exit 0
 
