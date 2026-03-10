@@ -78,7 +78,8 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->compression_level = level;
     ctx->checksum_enabled = checksum_enabled;
 
-    /* Compute block-size derived parameters. */
+    /* Validate and compute block-size derived parameters. */
+    if (!zxc_validate_block_size(chunk_size)) return ZXC_ERROR_NULL_INPUT;
     ctx->chunk_size = chunk_size;
     const uint32_t ob = zxc_log2_u32((uint32_t)chunk_size);
     ctx->offset_bits = ob;
