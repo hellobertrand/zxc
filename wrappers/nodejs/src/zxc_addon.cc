@@ -18,8 +18,7 @@ static Napi::Value CompressBound(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
 
     if (info.Length() < 1 || !info[0].IsNumber()) {
-        Napi::TypeError::New(env, "Expected a number (inputSize)")
-            .ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "Expected a number (inputSize)").ThrowAsJavaScriptException();
         return env.Undefined();
     }
 
@@ -63,9 +62,12 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     uint64_t bound = zxc_compress_bound(src_size);
     Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, static_cast<size_t>(bound));
 
-    int64_t nwritten = zxc_compress(src, src_size,
-                                     dst_buf.Data(), static_cast<size_t>(bound),
-                                     level, checksum);
+    zxc_compress_opts_t opts = {0};
+    opts.level = level;
+    opts.checksum = checksum;
+
+    int64_t nwritten =
+        zxc_compress(src, src_size, dst_buf.Data(), static_cast<size_t>(bound), &opts);
 
     if (nwritten < 0) {
         int err_code = static_cast<int>(nwritten);
@@ -76,8 +78,7 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     }
 
     if (nwritten == 0) {
-        Napi::Error::New(env, "Input is too small to be compressed")
-            .ThrowAsJavaScriptException();
+        Napi::Error::New(env, "Input is too small to be compressed").ThrowAsJavaScriptException();
         return env.Undefined();
     }
 
@@ -109,9 +110,10 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
 
     Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, decompress_size);
 
-    int64_t nwritten = zxc_decompress(src, src_size,
-                                       dst_buf.Data(), decompress_size,
-                                       checksum);
+    zxc_decompress_opts_t dopts = {0};
+    dopts.checksum = checksum;
+
+    int64_t nwritten = zxc_decompress(src, src_size, dst_buf.Data(), decompress_size, &dopts);
 
     if (nwritten < 0) {
         int err_code = static_cast<int>(nwritten);
@@ -149,8 +151,7 @@ static Napi::Value ErrorName(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
 
     if (info.Length() < 1 || !info[0].IsNumber()) {
-        Napi::TypeError::New(env, "Expected a number (error code)")
-            .ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "Expected a number (error code)").ThrowAsJavaScriptException();
         return env.Undefined();
     }
 
@@ -165,37 +166,33 @@ static Napi::Value ErrorName(const Napi::CallbackInfo& info) {
 // =============================================================================
 static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     // Functions
-    exports.Set("compressBound",
-                Napi::Function::New(env, CompressBound, "compressBound"));
-    exports.Set("compress",
-                Napi::Function::New(env, Compress, "compress"));
-    exports.Set("decompress",
-                Napi::Function::New(env, Decompress, "decompress"));
+    exports.Set("compressBound", Napi::Function::New(env, CompressBound, "compressBound"));
+    exports.Set("compress", Napi::Function::New(env, Compress, "compress"));
+    exports.Set("decompress", Napi::Function::New(env, Decompress, "decompress"));
     exports.Set("getDecompressedSize",
                 Napi::Function::New(env, GetDecompressedSize, "getDecompressedSize"));
-    exports.Set("errorName",
-                Napi::Function::New(env, ErrorName, "errorName"));
+    exports.Set("errorName", Napi::Function::New(env, ErrorName, "errorName"));
 
     // Compression level constants
-    exports.Set("LEVEL_FASTEST",  Napi::Number::New(env, ZXC_LEVEL_FASTEST));
-    exports.Set("LEVEL_FAST",     Napi::Number::New(env, ZXC_LEVEL_FAST));
-    exports.Set("LEVEL_DEFAULT",  Napi::Number::New(env, ZXC_LEVEL_DEFAULT));
+    exports.Set("LEVEL_FASTEST", Napi::Number::New(env, ZXC_LEVEL_FASTEST));
+    exports.Set("LEVEL_FAST", Napi::Number::New(env, ZXC_LEVEL_FAST));
+    exports.Set("LEVEL_DEFAULT", Napi::Number::New(env, ZXC_LEVEL_DEFAULT));
     exports.Set("LEVEL_BALANCED", Napi::Number::New(env, ZXC_LEVEL_BALANCED));
-    exports.Set("LEVEL_COMPACT",  Napi::Number::New(env, ZXC_LEVEL_COMPACT));
+    exports.Set("LEVEL_COMPACT", Napi::Number::New(env, ZXC_LEVEL_COMPACT));
 
     // Error constants
-    exports.Set("ERROR_MEMORY",         Napi::Number::New(env, ZXC_ERROR_MEMORY));
-    exports.Set("ERROR_DST_TOO_SMALL",  Napi::Number::New(env, ZXC_ERROR_DST_TOO_SMALL));
-    exports.Set("ERROR_SRC_TOO_SMALL",  Napi::Number::New(env, ZXC_ERROR_SRC_TOO_SMALL));
-    exports.Set("ERROR_BAD_MAGIC",      Napi::Number::New(env, ZXC_ERROR_BAD_MAGIC));
-    exports.Set("ERROR_BAD_VERSION",    Napi::Number::New(env, ZXC_ERROR_BAD_VERSION));
-    exports.Set("ERROR_BAD_HEADER",     Napi::Number::New(env, ZXC_ERROR_BAD_HEADER));
-    exports.Set("ERROR_BAD_CHECKSUM",   Napi::Number::New(env, ZXC_ERROR_BAD_CHECKSUM));
-    exports.Set("ERROR_CORRUPT_DATA",   Napi::Number::New(env, ZXC_ERROR_CORRUPT_DATA));
-    exports.Set("ERROR_BAD_OFFSET",     Napi::Number::New(env, ZXC_ERROR_BAD_OFFSET));
-    exports.Set("ERROR_OVERFLOW",       Napi::Number::New(env, ZXC_ERROR_OVERFLOW));
-    exports.Set("ERROR_IO",             Napi::Number::New(env, ZXC_ERROR_IO));
-    exports.Set("ERROR_NULL_INPUT",     Napi::Number::New(env, ZXC_ERROR_NULL_INPUT));
+    exports.Set("ERROR_MEMORY", Napi::Number::New(env, ZXC_ERROR_MEMORY));
+    exports.Set("ERROR_DST_TOO_SMALL", Napi::Number::New(env, ZXC_ERROR_DST_TOO_SMALL));
+    exports.Set("ERROR_SRC_TOO_SMALL", Napi::Number::New(env, ZXC_ERROR_SRC_TOO_SMALL));
+    exports.Set("ERROR_BAD_MAGIC", Napi::Number::New(env, ZXC_ERROR_BAD_MAGIC));
+    exports.Set("ERROR_BAD_VERSION", Napi::Number::New(env, ZXC_ERROR_BAD_VERSION));
+    exports.Set("ERROR_BAD_HEADER", Napi::Number::New(env, ZXC_ERROR_BAD_HEADER));
+    exports.Set("ERROR_BAD_CHECKSUM", Napi::Number::New(env, ZXC_ERROR_BAD_CHECKSUM));
+    exports.Set("ERROR_CORRUPT_DATA", Napi::Number::New(env, ZXC_ERROR_CORRUPT_DATA));
+    exports.Set("ERROR_BAD_OFFSET", Napi::Number::New(env, ZXC_ERROR_BAD_OFFSET));
+    exports.Set("ERROR_OVERFLOW", Napi::Number::New(env, ZXC_ERROR_OVERFLOW));
+    exports.Set("ERROR_IO", Napi::Number::New(env, ZXC_ERROR_IO));
+    exports.Set("ERROR_NULL_INPUT", Napi::Number::New(env, ZXC_ERROR_NULL_INPUT));
     exports.Set("ERROR_BAD_BLOCK_TYPE", Napi::Number::New(env, ZXC_ERROR_BAD_BLOCK_TYPE));
 
     return exports;
