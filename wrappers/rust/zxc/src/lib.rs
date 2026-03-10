@@ -347,13 +347,17 @@ unsafe fn impl_compress(
     options: &CompressOptions,
 ) -> Result<usize> {
     let written = unsafe {
+        let copts = zxc_sys::zxc_compress_opts_t {
+            level: options.level as i32,
+            checksum: options.checksum as i32,
+            ..Default::default()
+        };
         zxc_sys::zxc_compress(
             data.as_ptr() as *const c_void,
             data.len(),
             dst_ptr as *mut c_void,
             dst_cap,
-            options.level as i32,
-            options.checksum as i32,
+            &copts,
         )
     };
 
@@ -476,12 +480,16 @@ unsafe fn impl_decompress(
     options: &DecompressOptions,
 ) -> Result<usize> {
     let written = unsafe {
+        let dopts = zxc_sys::zxc_decompress_opts_t {
+            checksum: if options.verify_checksum { 1 } else { 0 },
+            ..Default::default()
+        };
         zxc_sys::zxc_decompress(
             compressed.as_ptr() as *const c_void,
             compressed.len(),
             dst_ptr as *mut c_void,
             dst_cap,
-            if options.verify_checksum { 1 } else { 0 },
+            &dopts,
         )
     };
 
@@ -822,9 +830,12 @@ pub fn compress_file<P: AsRef<Path>>(
         let result = zxc_sys::zxc_stream_compress(
             c_in,
             c_out,
-            n_threads,
-            level as i32,
-            checksum_enabled,
+            &zxc_sys::zxc_compress_opts_t {
+                n_threads: n_threads,
+                level: level as i32,
+                checksum: checksum_enabled,
+                ..Default::default()
+            },
         );
 
         // Always close C FILE handles (they own duplicated fds)
@@ -881,8 +892,11 @@ pub fn decompress_file<P: AsRef<Path>>(
         let result = zxc_sys::zxc_stream_decompress(
             c_in,
             c_out,
-            n_threads,
-            checksum_enabled,
+            &zxc_sys::zxc_decompress_opts_t {
+                n_threads: n_threads,
+                checksum: checksum_enabled,
+                ..Default::default()
+            },
         );
 
         // Always close C FILE handles (they own duplicated fds)

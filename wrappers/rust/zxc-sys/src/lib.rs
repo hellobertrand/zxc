@@ -139,6 +139,66 @@ pub const ZXC_ERROR_NULL_INPUT: i32 = -12;
 pub const ZXC_ERROR_BAD_BLOCK_TYPE: i32 = -13;
 
 // =============================================================================
+// Options Structs (mirroring C API)
+// =============================================================================
+
+/// Compression options (mirrors `zxc_compress_opts_t` from C API).
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct zxc_compress_opts_t {
+    /// Worker thread count (0 = auto-detect CPU cores).
+    pub n_threads: c_int,
+    /// Compression level 1-5 (0 = default).
+    pub level: c_int,
+    /// Block size in bytes (0 = default 256 KB). Must be power of 2, 4 KB – 2 MB.
+    pub block_size: usize,
+    /// 1 to enable per-block and global checksums, 0 to disable.
+    pub checksum: c_int,
+    /// Progress callback (NULL to disable).
+    pub progress_cb: *const c_void,
+    /// User context pointer passed to progress_cb.
+    pub user_data: *mut c_void,
+}
+
+impl Default for zxc_compress_opts_t {
+    fn default() -> Self {
+        Self {
+            n_threads: 0,
+            level: 0,
+            block_size: 0,
+            checksum: 0,
+            progress_cb: std::ptr::null(),
+            user_data: std::ptr::null_mut(),
+        }
+    }
+}
+
+/// Decompression options (mirrors `zxc_decompress_opts_t` from C API).
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct zxc_decompress_opts_t {
+    /// Worker thread count (0 = auto-detect CPU cores).
+    pub n_threads: c_int,
+    /// 1 to verify per-block and global checksums, 0 to skip.
+    pub checksum: c_int,
+    /// Progress callback (NULL to disable).
+    pub progress_cb: *const c_void,
+    /// User context pointer passed to progress_cb.
+    pub user_data: *mut c_void,
+}
+
+impl Default for zxc_decompress_opts_t {
+    fn default() -> Self {
+        Self {
+            n_threads: 0,
+            checksum: 0,
+            progress_cb: std::ptr::null(),
+            user_data: std::ptr::null_mut(),
+        }
+    }
+}
+
+// =============================================================================
 // Buffer-Based API
 // =============================================================================
 
@@ -164,8 +224,7 @@ unsafe extern "C" {
         src_size: usize,
         dst: *mut c_void,
         dst_capacity: usize,
-        level: c_int,
-        checksum_enabled: c_int,
+        opts: *const zxc_compress_opts_t,
     ) -> i64;
 
     /// Decompresses a ZXC compressed buffer.
@@ -183,7 +242,7 @@ unsafe extern "C" {
         src_size: usize,
         dst: *mut c_void,
         dst_capacity: usize,
-        checksum_enabled: c_int,
+        opts: *const zxc_decompress_opts_t,
     ) -> i64;
 
     /// Returns the decompressed size stored in a ZXC compressed buffer.
@@ -238,9 +297,7 @@ unsafe extern "C" {
     pub fn zxc_stream_compress(
         f_in: *mut libc::FILE,
         f_out: *mut libc::FILE,
-        n_threads: c_int,
-        level: c_int,
-        checksum_enabled: c_int,
+        opts: *const zxc_compress_opts_t,
     ) -> i64;
 
     /// Decompresses data from an input stream to an output stream.
@@ -265,8 +322,7 @@ unsafe extern "C" {
     pub fn zxc_stream_decompress(
         f_in: *mut libc::FILE,
         f_out: *mut libc::FILE,
-        n_threads: c_int,
-        checksum_enabled: c_int,
+        opts: *const zxc_decompress_opts_t,
     ) -> i64;
 
     /// Returns the decompressed size stored in a ZXC compressed file.
@@ -315,13 +371,17 @@ mod tests {
             let mut compressed = vec![0u8; bound];
 
             // Compress
+            let copts = zxc_compress_opts_t {
+                level: ZXC_LEVEL_DEFAULT,
+                checksum: 1,
+                ..Default::default()
+            };
             let compressed_size = zxc_compress(
                 input.as_ptr() as *const c_void,
                 input.len(),
                 compressed.as_mut_ptr() as *mut c_void,
                 compressed.len(),
-                ZXC_LEVEL_DEFAULT,
-                1, // checksum enabled
+                &copts,
             );
             assert!(compressed_size > 0, "Compression failed");
             // Highly repetitive data should compress significantly
@@ -336,12 +396,16 @@ mod tests {
 
             // Decompress
             let mut decompressed = vec![0u8; decompressed_size as usize];
+            let dopts = zxc_decompress_opts_t {
+                checksum: 1,
+                ..Default::default()
+            };
             let result_size = zxc_decompress(
                 compressed.as_ptr() as *const c_void,
                 compressed_size as usize,
                 decompressed.as_mut_ptr() as *mut c_void,
                 decompressed.len(),
-                1, // checksum enabled
+                &dopts,
             );
             assert_eq!(result_size, input.len() as i64);
             assert_eq!(&decompressed[..], &input[..]);
@@ -364,13 +428,17 @@ mod tests {
                 let bound = zxc_compress_bound(input.len()) as usize;
                 let mut compressed = vec![0u8; bound];
 
+                let copts = zxc_compress_opts_t {
+                    level,
+                    checksum: 1,
+                    ..Default::default()
+                };
                 let compressed_size = zxc_compress(
                     input.as_ptr() as *const c_void,
                     input.len(),
                     compressed.as_mut_ptr() as *mut c_void,
                     compressed.len(),
-                    level,
-                    1,
+                    &copts,
                 );
                 assert!(
                     compressed_size > 0,
