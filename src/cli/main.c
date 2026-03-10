@@ -1110,13 +1110,32 @@ int main(int argc, char** argv) {
                 multiple_mode = 1;  // Recursive implies multiple mode for files processing
                 break;
             case 'B': {
-                const long long bs_val = atoll(optarg);
-                if (bs_val <= 0 || !zxc_validate_block_size((size_t)bs_val)) {
-                    fprintf(stderr, "Error: block-size must be a power of 2 between %d and %d\n",
-                            ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX);
+                char* end = NULL;
+                const long long bs_val = strtoll(optarg, &end, 10);
+                if (bs_val <= 0 || end == optarg) {
+                    fprintf(stderr,
+                            "Error: block-size must be a power of 2 between 4K and 2M\n"
+                            "  Examples: -B 4K, -B 128K, -B 1M, -B 2M\n");
                     return 1;
                 }
-                block_size = (size_t)bs_val;
+                long long multiplier = 1;
+                if (end && (*end == 'k' || *end == 'K')) {
+                    multiplier = 1024;
+                    end++;
+                    if (*end == 'b' || *end == 'B') end++;  // optional "B" in "KB"
+                } else if (end && (*end == 'm' || *end == 'M')) {
+                    multiplier = 1024 * 1024;
+                    end++;
+                    if (*end == 'b' || *end == 'B') end++;  // optional "B" in "MB"
+                }
+                const long long bs_bytes = bs_val * multiplier;
+                if (!zxc_validate_block_size((size_t)bs_bytes)) {
+                    fprintf(stderr,
+                            "Error: block-size must be a power of 2 between 4K and 2M\n"
+                            "  Examples: -B 4K, -B 128K, -B 1M, -B 2M\n");
+                    return 1;
+                }
+                block_size = (size_t)bs_bytes;
                 break;
             }
             case '?':

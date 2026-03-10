@@ -338,7 +338,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return ZXC_ERROR_NULL_INPUT;
 
     const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
-    const size_t bsz = (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE;
+    const size_t block_size = (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE;
     const int checksum_enabled = opts ? opts->checksum : 0;
 
     const uint8_t* ip = (const uint8_t*)src;
@@ -348,10 +348,11 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     uint32_t global_hash = 0;
     zxc_cctx_t ctx;
 
-    if (UNLIKELY(zxc_cctx_init(&ctx, bsz, 1, level, checksum_enabled) != 0))
+    if (UNLIKELY(zxc_cctx_init(&ctx, block_size, 1, level, checksum_enabled) != 0))
         return ZXC_ERROR_MEMORY;
 
-    const int h_val = zxc_write_file_header(op, (size_t)(op_end - op), bsz, checksum_enabled);
+    const int h_val =
+        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled);
     if (UNLIKELY(h_val < 0)) {
         zxc_cctx_free(&ctx);
         return h_val;
@@ -360,7 +361,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
     size_t pos = 0;
     while (pos < src_size) {
-        const size_t chunk_len = (src_size - pos > bsz) ? bsz : (src_size - pos);
+        const size_t chunk_len = (src_size - pos > block_size) ? block_size : (src_size - pos);
         const size_t rem_cap = (size_t)(op_end - op);
 
         const int res = zxc_compress_chunk_wrapper(&ctx, ip + pos, chunk_len, op, rem_cap);
