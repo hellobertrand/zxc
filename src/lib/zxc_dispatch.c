@@ -763,11 +763,19 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
         }
 
         const size_t rem_cap = (size_t)(op_end - op);
-        const int res =
-            zxc_decompress_chunk_wrapper(ctx, ip, rem_src, ctx->work_buf, runtime_chunk_size);
-        if (UNLIKELY(res < 0 || (size_t)res > rem_cap))
-            return (res < 0) ? res : ZXC_ERROR_DST_TOO_SMALL;
-        ZXC_MEMCPY(op, ctx->work_buf, (size_t)res);
+        int res;
+        if (LIKELY(rem_cap >= runtime_chunk_size + ZXC_PAD_SIZE)) {
+            // Fast path: decode directly into dst (enough padding for wild copies).
+            res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, op, rem_cap);
+        } else {
+            // Safe path: decode into bounce buffer, then copy exact result.
+            res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, ctx->work_buf, runtime_chunk_size);
+            if (LIKELY(res > 0)) {
+                if (UNLIKELY((size_t)res > rem_cap)) return ZXC_ERROR_DST_TOO_SMALL;
+                ZXC_MEMCPY(op, ctx->work_buf, (size_t)res);
+            }
+        }
+        if (UNLIKELY(res < 0)) return res;
 
         if (checksum_enabled && file_has_checksums) {
             const uint32_t block_hash = zxc_le32(ip + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
