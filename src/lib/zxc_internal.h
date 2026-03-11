@@ -281,8 +281,6 @@ extern "C" {
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
 /** @brief Current on-disk file format version. */
 #define ZXC_FILE_FORMAT_VERSION 5
-/** @brief Default block size processed per thread (256 KB). */
-#define ZXC_BLOCK_SIZE (256 * 1024)
 /** @brief Size of stdio I/O buffers (1 MB). */
 #define ZXC_IO_BUFFER_SIZE (1024 * 1024)
 /** @brief Maximum number of threads allowed for streaming operations. */
@@ -407,7 +405,7 @@ extern "C" {
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
 /**
  * @brief Number of bits reserved for epoch tracking in compressed pointers.
- * Derived from chunk size: 2^18 = ZXC_BLOCK_SIZE => 32 - 18 = 14 bits.
+ * Derived from chunk size: 2^18 = ZXC_BLOCK_SIZE_DEFAULT => 32 - 18 = 14 bits.
  */
 #define ZXC_EPOCH_BITS 14
 /** @brief Mask to extract the offset bits from a compressed pointer. */

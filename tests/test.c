@@ -856,7 +856,7 @@ int test_global_checksum_order() {
     printf("TEST: Global Checksum Order Sensitivity... ");
 
     // 1. Create input data withDISTINCT patterns for 2 blocks (so blocks are different)
-    // ZXC_BLOCK_SIZE is 256KB. We need > 256KB. Let's use 600KB.
+    // ZXC_BLOCK_SIZE_DEFAULT is 256KB. We need > 256KB. Let's use 600KB.
     size_t input_sz = 600 * 1024;
     uint8_t* val_buf = malloc(input_sz);
     if (!val_buf) return 0;

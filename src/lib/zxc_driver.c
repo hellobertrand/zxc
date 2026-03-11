@@ -508,7 +508,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     zxc_stream_ctx_t ctx;
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
 
-    size_t runtime_chunk_sz = (block_size > 0) ? block_size : ZXC_BLOCK_SIZE;
+    size_t runtime_chunk_sz = (block_size > 0) ? block_size : ZXC_BLOCK_SIZE_DEFAULT;
     int file_has_chk = 0;
 
     // Try to get input file size for progress tracking (compression mode only)
@@ -530,7 +530,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         uint8_t h[ZXC_FILE_HEADER_SIZE];
         if (UNLIKELY(fread(h, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE ||
                      zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz,
-                                          &file_has_chk) != 0))
+                                          &file_has_chk) != ZXC_OK))
             return ZXC_ERROR_BAD_HEADER;
     }
 
@@ -638,7 +638,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                 read_eof = 1;
             } else {
                 zxc_block_header_t bh;
-                if (UNLIKELY(zxc_read_block_header(bh_buf, ZXC_BLOCK_HEADER_SIZE, &bh) != 0)) {
+                if (UNLIKELY(zxc_read_block_header(bh_buf, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK)) {
                     read_eof = 1;
                     goto _job_prepared;
                 }
@@ -756,7 +756,8 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     const int n_threads = opts ? opts->n_threads : 0;
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
-    const size_t block_size = (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE;
+    const size_t block_size =
+        (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
     zxc_progress_callback_t cb = opts ? opts->progress_cb : NULL;
     void* ud = opts ? opts->user_data : NULL;
 

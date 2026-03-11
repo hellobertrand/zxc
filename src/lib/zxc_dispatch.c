@@ -339,7 +339,8 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
-    const size_t block_size = (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE;
+    const size_t block_size =
+        (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
@@ -436,10 +437,10 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
     int file_has_checksums = 0;
     // File header verification and context initialization
-    if (UNLIKELY(
-            zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums) != 0 ||
-            zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0, file_has_checksums && checksum_enabled) !=
-                ZXC_OK)) {
+    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums) !=
+                     ZXC_OK ||
+                 zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0,
+                               file_has_checksums && checksum_enabled) != ZXC_OK)) {
         return ZXC_ERROR_BAD_HEADER;
     }
 
@@ -465,7 +466,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         const size_t rem_src = (size_t)(ip_end - ip);
         zxc_block_header_t bh;
         // Read the block header to determine the compressed size
-        if (UNLIKELY(zxc_read_block_header(ip, rem_src, &bh) != 0)) {
+        if (UNLIKELY(zxc_read_block_header(ip, rem_src, &bh) != ZXC_OK)) {
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_BAD_HEADER;
         }
@@ -572,15 +573,17 @@ struct zxc_cctx_s {
 
 zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
     zxc_cctx* const cctx = (zxc_cctx*)calloc(1, sizeof(zxc_cctx));
-    if (!cctx) return NULL;
+    if (UNLIKELY(!cctx)) return NULL;
 
     if (opts) {
         const int level = (opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
-        const size_t block_size = (opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE;
+        const size_t block_size =
+            (opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
         const int checksum_enabled = opts->checksum_enabled;
 
-        if (!zxc_validate_block_size(block_size) ||
-            zxc_cctx_init(&cctx->inner, block_size, 1, level, checksum_enabled) != ZXC_OK) {
+        if (UNLIKELY(!zxc_validate_block_size(block_size) ||
+                     zxc_cctx_init(&cctx->inner, block_size, 1, level, checksum_enabled) !=
+                         ZXC_OK)) {
             free(cctx);
             return NULL;
         }
@@ -605,7 +608,8 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
-    const size_t block_size = (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE;
+    const size_t block_size =
+        (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
@@ -707,7 +711,8 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     size_t runtime_chunk_size = 0;
     int file_has_checksums = 0;
 
-    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums) != 0))
+    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums) !=
+                 ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
 
     /* Re-init only when block size changed. */
@@ -739,7 +744,8 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     while (ip < ip_end) {
         const size_t rem_src = (size_t)(ip_end - ip);
         zxc_block_header_t bh;
-        if (UNLIKELY(zxc_read_block_header(ip, rem_src, &bh) != 0)) return ZXC_ERROR_BAD_HEADER;
+        if (UNLIKELY(zxc_read_block_header(ip, rem_src, &bh) != ZXC_OK))
+            return ZXC_ERROR_BAD_HEADER;
 
         if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
             if (UNLIKELY(rem_src < ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))

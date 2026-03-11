@@ -239,17 +239,17 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
 
     if (out_block_size) {
         const uint8_t code = src[5];
-        size_t bs;
-        if (LIKELY(code >= 12 && code <= 21)) {
+        size_t block_size;
+        if (LIKELY(code >= ZXC_BLOCK_SIZE_MIN_LOG2 && code <= ZXC_BLOCK_SIZE_MAX_LOG2)) {
             // Exponent encoding: block_size = 2^code  (4 KB – 2 MB)
-            bs = (size_t)1 << code;
+            block_size = (size_t)1U << code;
         } else if (code == 64) {
             // Legacy: hardcoded 256 KB default
-            bs = ZXC_BLOCK_SIZE;
+            block_size = ZXC_BLOCK_SIZE_DEFAULT;
         } else {
             return ZXC_ERROR_BAD_BLOCK_SIZE;
         }
-        *out_block_size = bs;
+        *out_block_size = block_size;
     }
     // Flags are at offset 6
     if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
@@ -304,6 +304,7 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
     bh->reserved = src[2];
     bh->comp_size = zxc_le32(src + 3);
     bh->header_crc = src[7];
+
     return ZXC_OK;
 }
 
@@ -349,6 +350,7 @@ int zxc_write_num_header(uint8_t* RESTRICT dst, const size_t rem,
     zxc_store_le16(dst + 8, nh->frame_size);
     zxc_store_le16(dst + 10, 0);
     zxc_store_le32(dst + 12, 0);
+
     return ZXC_NUM_HEADER_BINARY_SIZE;
 }
 
@@ -366,6 +368,7 @@ int zxc_read_num_header(const uint8_t* RESTRICT src, const size_t src_size,
 
     nh->n_values = zxc_le64(src);
     nh->frame_size = zxc_le16(src + 8);
+
     return ZXC_OK;
 }
 
@@ -578,7 +581,7 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint
 uint64_t zxc_compress_bound(const size_t input_size) {
     // Guard UINT64_MAX / SIZE_MAX would overflow.
     if (UNLIKELY(input_size > (SIZE_MAX - (SIZE_MAX >> 8)))) return 0;
-    uint64_t n = ((uint64_t)input_size + ZXC_BLOCK_SIZE - 1) / ZXC_BLOCK_SIZE;
+    uint64_t n = ((uint64_t)input_size + ZXC_BLOCK_SIZE_DEFAULT - 1) / ZXC_BLOCK_SIZE_DEFAULT;
     if (n == 0) n = 1;
     return ZXC_FILE_HEADER_SIZE + (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + 64)) +
            (uint64_t)input_size + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;

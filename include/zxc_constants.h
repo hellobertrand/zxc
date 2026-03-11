@@ -52,12 +52,16 @@
  * Pass 0 to any API to use @ref ZXC_BLOCK_SIZE_DEFAULT.
  * @{
  */
+/** @brief log2(ZXC_BLOCK_SIZE_MIN) — exponent code for minimum block size. */
+#define ZXC_BLOCK_SIZE_MIN_LOG2 12
+/** @brief log2(ZXC_BLOCK_SIZE_MAX) — exponent code for maximum block size. */
+#define ZXC_BLOCK_SIZE_MAX_LOG2 21
 /** @brief Default block size (256 KB). */
 #define ZXC_BLOCK_SIZE_DEFAULT (256 * 1024)
-/** @brief Minimum allowed block size (4 KB). */
-#define ZXC_BLOCK_SIZE_MIN (4 * 1024)
-/** @brief Maximum allowed block size (2 MB). */
-#define ZXC_BLOCK_SIZE_MAX (2 * 1024 * 1024)
+/** @brief Minimum allowed block size (4 KB = 2^12). */
+#define ZXC_BLOCK_SIZE_MIN (1U << ZXC_BLOCK_SIZE_MIN_LOG2)
+/** @brief Maximum allowed block size (2 MB = 2^21). */
+#define ZXC_BLOCK_SIZE_MAX (1U << ZXC_BLOCK_SIZE_MAX_LOG2)
 /** @} */ /* end of block_size */
 
 /**
