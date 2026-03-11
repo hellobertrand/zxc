@@ -1760,6 +1760,134 @@ int test_buffer_api_scratch_buf() {
     return 1;
 }
 
+// Tests that the two decompression paths in zxc_decompress() produce
+// identical results:
+//   - Fast path: rem_cap >= runtime_chunk_size + ZXC_PAD_SIZE
+//     -> decompress directly into dst (enough padding for wild copies).
+//   - Safe path: rem_cap < runtime_chunk_size + ZXC_PAD_SIZE
+//     -> decompress into bounce buffer (work_buf), then memcpy exact result.
+//
+int test_decompress_fast_vs_safe_path() {
+    printf("=== TEST: Unit - Decompress Fast Path vs Safe Path ===\n");
+
+    // Use a multi-block input: ZXC_BLOCK_SIZE + extra so we get at least 2 blocks.
+    // Block size = 256KB (ZXC_BLOCK_SIZE). Second block is small.
+    const size_t src_sz = ZXC_BLOCK_SIZE + 4096;  // 256KB + 4KB -> 2 blocks
+    uint8_t* src = malloc(src_sz);
+    if (!src) return 0;
+    gen_lz_data(src, src_sz);
+
+    const size_t comp_cap = zxc_compress_bound(src_sz);
+    uint8_t* comp = malloc(comp_cap);
+    const int64_t comp_sz = zxc_compress(src, src_sz, comp, comp_cap, 3, 1);
+    if (comp_sz <= 0) {
+        printf("  [FAIL] compression failed\n");
+        free(src);
+        free(comp);
+        return 0;
+    }
+
+    // ----- Sub-test 1: Fast path -----
+    // Provide a very large dst buffer so all chunks decompress directly into
+    // dst (rem_cap >= runtime_chunk_size + ZXC_PAD_SIZE at every iteration).
+    {
+        const size_t big_cap = src_sz + ZXC_BLOCK_SIZE;  // way more than enough
+        uint8_t* dst = malloc(big_cap);
+        const int64_t dec_sz = zxc_decompress(comp, comp_sz, dst, big_cap, 1);
+        if (dec_sz != (int64_t)src_sz) {
+            printf("  [FAIL] fast path size: expected %zu, got %lld\n", src_sz, (long long)dec_sz);
+            free(dst);
+            free(src);
+            free(comp);
+            return 0;
+        }
+        if (memcmp(src, dst, src_sz) != 0) {
+            printf("  [FAIL] fast path content mismatch\n");
+            free(dst);
+            free(src);
+            free(comp);
+            return 0;
+        }
+        free(dst);
+        printf("  [PASS] fast path (oversized dst)\n");
+    }
+
+    // ----- Sub-test 2: Safe path (exact-fit) -----
+    // Provide dst_capacity == src_sz exactly. After the first 256KB block is
+    // written, rem_cap for the second block (4KB) is exactly 4KB which is
+    // < runtime_chunk_size (256KB) + ZXC_PAD_SIZE (32). This forces the
+    // safe path (bounce buffer) for the second block.
+    {
+        uint8_t* dst = malloc(src_sz);  // no slack at all
+        const int64_t dec_sz = zxc_decompress(comp, comp_sz, dst, src_sz, 1);
+        if (dec_sz != (int64_t)src_sz) {
+            printf("  [FAIL] safe path size: expected %zu, got %lld\n", src_sz, (long long)dec_sz);
+            free(dst);
+            free(src);
+            free(comp);
+            return 0;
+        }
+        if (memcmp(src, dst, src_sz) != 0) {
+            printf("  [FAIL] safe path content mismatch\n");
+            free(dst);
+            free(src);
+            free(comp);
+            return 0;
+        }
+        free(dst);
+        printf("  [PASS] safe path (exact-fit dst)\n");
+    }
+
+    // ----- Sub-test 3: Boundary -----
+    // dst_capacity = src_sz + ZXC_PAD_SIZE - 1 (just below the fast path
+    // threshold for the LAST chunk). The last chunk should still fall into
+    // the safe path here.
+    {
+        const size_t tight_cap = src_sz + ZXC_PAD_SIZE - 1;
+        uint8_t* dst = malloc(tight_cap);
+        const int64_t dec_sz = zxc_decompress(comp, comp_sz, dst, tight_cap, 1);
+        if (dec_sz != (int64_t)src_sz) {
+            printf("  [FAIL] boundary size: expected %zu, got %lld\n", src_sz, (long long)dec_sz);
+            free(dst);
+            free(src);
+            free(comp);
+            return 0;
+        }
+        if (memcmp(src, dst, src_sz) != 0) {
+            printf("  [FAIL] boundary content mismatch\n");
+            free(dst);
+            free(src);
+            free(comp);
+            return 0;
+        }
+        free(dst);
+        printf("  [PASS] boundary (dst = src_sz + PAD - 1)\n");
+    }
+
+    // ----- Sub-test 4: Safe path with dst too small -----
+    // The safe path detects that the decompressed chunk doesn't fit and
+    // returns ZXC_ERROR_DST_TOO_SMALL (covers the res > rem_cap guard).
+    {
+        const size_t tiny_cap = ZXC_BLOCK_SIZE / 2;  // Enough for half a block
+        uint8_t* dst = malloc(tiny_cap);
+        const int64_t dec_sz = zxc_decompress(comp, comp_sz, dst, tiny_cap, 0);
+        if (dec_sz >= 0) {
+            printf("  [FAIL] safe path dst-too-small should fail, got %lld\n", (long long)dec_sz);
+            free(dst);
+            free(src);
+            free(comp);
+            return 0;
+        }
+        free(dst);
+        printf("  [PASS] safe path dst too small -> negative\n");
+    }
+
+    free(src);
+    free(comp);
+    printf("PASS\n\n");
+    return 1;
+}
+
 int main() {
     srand(42);  // Fixed seed for reproducibility
     int total_failures = 0;
@@ -1893,6 +2021,7 @@ int main() {
     if (!test_stream_get_decompressed_size_errors()) total_failures++;
     if (!test_stream_engine_errors()) total_failures++;
     if (!test_buffer_api_scratch_buf()) total_failures++;
+    if (!test_decompress_fast_vs_safe_path()) total_failures++;
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);
