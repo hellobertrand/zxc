@@ -126,6 +126,7 @@ PyMODINIT_FUNC PyInit__zxc(void) {
     PyModule_AddIntConstant(m, "ERROR_IO", ZXC_ERROR_IO);
     PyModule_AddIntConstant(m, "ERROR_NULL_INPUT", ZXC_ERROR_NULL_INPUT);
     PyModule_AddIntConstant(m, "ERROR_BAD_BLOCK_TYPE", ZXC_ERROR_BAD_BLOCK_TYPE);
+    PyModule_AddIntConstant(m, "ERROR_BAD_BLOCK_SIZE", ZXC_ERROR_BAD_BLOCK_SIZE);
 
     return m;
 }
@@ -166,7 +167,7 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
 
     zxc_compress_opts_t copts = {0};
     copts.level = level;
-    copts.checksum = checksum;
+    copts.checksum_enabled = checksum;
 
     Py_BEGIN_ALLOW_THREADS nwritten = zxc_compress(view.buf,  // Source buffer
                                                    src_size,  // Source size
@@ -238,7 +239,7 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
     int64_t nwritten;                   // The number of bytes written to dst
 
     zxc_decompress_opts_t dopts = {0};
-    dopts.checksum = checksum;
+    dopts.checksum_enabled = checksum;
 
     Py_BEGIN_ALLOW_THREADS nwritten = zxc_decompress(view.buf,         // Source buffer
                                                      src_size,         // Source size
@@ -306,7 +307,7 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
     zxc_compress_opts_t scopts = {0};
     scopts.n_threads = nthreads;
     scopts.level = level;
-    scopts.checksum = checksum;
+    scopts.checksum_enabled = checksum;
 
     Py_BEGIN_ALLOW_THREADS nwritten = zxc_stream_compress(fsrc, fdst, &scopts);
     Py_END_ALLOW_THREADS
@@ -365,7 +366,7 @@ static PyObject* pyzxc_stream_decompress(PyObject* self, PyObject* args, PyObjec
 
     zxc_decompress_opts_t sdopts = {0};
     sdopts.n_threads = nthreads;
-    sdopts.checksum = checksum;
+    sdopts.checksum_enabled = checksum;
 
     Py_BEGIN_ALLOW_THREADS nwritten = zxc_stream_decompress(fsrc, fdst, &sdopts);
     Py_END_ALLOW_THREADS

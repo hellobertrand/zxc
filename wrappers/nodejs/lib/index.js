@@ -30,6 +30,7 @@ const ERROR_OVERFLOW       = native.ERROR_OVERFLOW;
 const ERROR_IO             = native.ERROR_IO;
 const ERROR_NULL_INPUT     = native.ERROR_NULL_INPUT;
 const ERROR_BAD_BLOCK_TYPE = native.ERROR_BAD_BLOCK_TYPE;
+const ERROR_BAD_BLOCK_SIZE = native.ERROR_BAD_BLOCK_SIZE;
 
 /**
  * Returns a human-readable name for a given error code.
@@ -156,4 +157,5 @@ module.exports = {
     ERROR_IO,
     ERROR_NULL_INPUT,
     ERROR_BAD_BLOCK_TYPE,
+    ERROR_BAD_BLOCK_SIZE,
 };

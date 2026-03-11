@@ -138,6 +138,9 @@ pub const ZXC_ERROR_NULL_INPUT: i32 = -12;
 /// Unknown or unexpected block type
 pub const ZXC_ERROR_BAD_BLOCK_TYPE: i32 = -13;
 
+/// Invalid block size
+pub const ZXC_ERROR_BAD_BLOCK_SIZE: i32 = -14;
+
 // =============================================================================
 // Options Structs (mirroring C API)
 // =============================================================================
@@ -153,7 +156,7 @@ pub struct zxc_compress_opts_t {
     /// Block size in bytes (0 = default 256 KB). Must be power of 2, 4 KB – 2 MB.
     pub block_size: usize,
     /// 1 to enable per-block and global checksums, 0 to disable.
-    pub checksum: c_int,
+    pub checksum_enabled: c_int,
     /// Progress callback (NULL to disable).
     pub progress_cb: *const c_void,
     /// User context pointer passed to progress_cb.
@@ -166,7 +169,7 @@ impl Default for zxc_compress_opts_t {
             n_threads: 0,
             level: 0,
             block_size: 0,
-            checksum: 0,
+            checksum_enabled: 0,
             progress_cb: std::ptr::null(),
             user_data: std::ptr::null_mut(),
         }
@@ -180,7 +183,7 @@ pub struct zxc_decompress_opts_t {
     /// Worker thread count (0 = auto-detect CPU cores).
     pub n_threads: c_int,
     /// 1 to verify per-block and global checksums, 0 to skip.
-    pub checksum: c_int,
+    pub checksum_enabled: c_int,
     /// Progress callback (NULL to disable).
     pub progress_cb: *const c_void,
     /// User context pointer passed to progress_cb.
@@ -191,7 +194,7 @@ impl Default for zxc_decompress_opts_t {
     fn default() -> Self {
         Self {
             n_threads: 0,
-            checksum: 0,
+            checksum_enabled: 0,
             progress_cb: std::ptr::null(),
             user_data: std::ptr::null_mut(),
         }
@@ -373,7 +376,7 @@ mod tests {
             // Compress
             let copts = zxc_compress_opts_t {
                 level: ZXC_LEVEL_DEFAULT,
-                checksum: 1,
+                checksum_enabled: 1,
                 ..Default::default()
             };
             let compressed_size = zxc_compress(
@@ -397,7 +400,7 @@ mod tests {
             // Decompress
             let mut decompressed = vec![0u8; decompressed_size as usize];
             let dopts = zxc_decompress_opts_t {
-                checksum: 1,
+                checksum_enabled: 1,
                 ..Default::default()
             };
             let result_size = zxc_decompress(
@@ -430,7 +433,7 @@ mod tests {
 
                 let copts = zxc_compress_opts_t {
                     level,
-                    checksum: 1,
+                    checksum_enabled: 1,
                     ..Default::default()
                 };
                 let compressed_size = zxc_compress(

@@ -64,7 +64,7 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
 
     zxc_compress_opts_t opts = {0};
     opts.level = level;
-    opts.checksum = checksum;
+    opts.checksum_enabled = checksum;
 
     int64_t nwritten =
         zxc_compress(src, src_size, dst_buf.Data(), static_cast<size_t>(bound), &opts);
@@ -111,7 +111,7 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
     Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, decompress_size);
 
     zxc_decompress_opts_t dopts = {0};
-    dopts.checksum = checksum;
+    dopts.checksum_enabled = checksum;
 
     int64_t nwritten = zxc_decompress(src, src_size, dst_buf.Data(), decompress_size, &dopts);
 
@@ -194,6 +194,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("ERROR_IO", Napi::Number::New(env, ZXC_ERROR_IO));
     exports.Set("ERROR_NULL_INPUT", Napi::Number::New(env, ZXC_ERROR_NULL_INPUT));
     exports.Set("ERROR_BAD_BLOCK_TYPE", Napi::Number::New(env, ZXC_ERROR_BAD_BLOCK_TYPE));
+    exports.Set("ERROR_BAD_BLOCK_SIZE", Napi::Number::New(env, ZXC_ERROR_BAD_BLOCK_SIZE));
 
     return exports;
 }
