@@ -240,7 +240,7 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     if (out_block_size) {
         const uint8_t code = src[5];
         size_t bs;
-        if (code >= 12 && code <= 21) {
+        if (LIKELY(code >= 12 && code <= 21)) {
             // Exponent encoding: block_size = 2^code  (4 KB – 2 MB)
             bs = (size_t)1 << code;
         } else if (code == 64) {
