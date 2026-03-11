@@ -1,3 +1,8 @@
+# ZXC - High-performance lossless compression
+#
+# Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.14)
 
 # =============================================================================
