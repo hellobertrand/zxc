@@ -75,15 +75,14 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
                   const int level, const int checksum_enabled) {
     ZXC_MEMSET(ctx, 0, sizeof(zxc_cctx_t));
 
-    ctx->compression_level = level;
     ctx->checksum_enabled = checksum_enabled;
 
     /* Compute block-size derived parameters. */
     ctx->chunk_size = chunk_size;
-    const uint32_t ob = zxc_log2_u32((uint32_t)chunk_size);
-    ctx->offset_bits = ob;
-    ctx->offset_mask = (1U << ob) - 1;
-    ctx->max_epoch = 1U << (32 - ob);
+    const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
+    ctx->offset_bits = offset_bits;
+    ctx->offset_mask = (1U << offset_bits) - 1;
+    ctx->max_epoch = 1U << (32 - offset_bits);
 
     if (mode == 0) return ZXC_OK;
 
@@ -127,6 +126,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->buf_extras = (uint8_t*)(mem + off_extras);
     ctx->literals = (uint8_t*)(mem + off_lit);
 
+    ctx->compression_level = level;
     ctx->epoch = 1;
 
     ZXC_MEMSET(ctx->hash_table, 0, sz_hash);

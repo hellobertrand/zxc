@@ -114,6 +114,110 @@ ZXC_EXPORT int64_t zxc_decompress(const void* src, const size_t src_size, void* 
  */
 ZXC_EXPORT uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size);
 
+/* ========================================================================= */
+/*  Reusable Context API (opaque, heap-allocated)                            */
+/* ========================================================================= */
+
+/**
+ * @defgroup context_api Reusable Context API
+ * @brief Opaque, reusable compression / decompression contexts.
+ *
+ * This API eliminates per-call allocation overhead by letting callers retain
+ * a context across multiple operations.  The internal layout is hidden behind
+ * an opaque pointer.
+ *
+ * @{
+ */
+
+/* --- Compression context ------------------------------------------------- */
+
+/** @brief Opaque compression context (forward-declared). */
+typedef struct zxc_cctx_s zxc_cctx;
+
+/**
+ * @brief Creates a new reusable compression context.
+ *
+ * When @p opts is non-NULL the context pre-allocates all internal buffers
+ * using the supplied level, block_size, and checksum_enabled settings.
+ * When @p opts is NULL, allocation is deferred to the first call to
+ * zxc_compress_cctx().
+ *
+ * The returned context must be freed with zxc_free_cctx().
+ *
+ * @param[in] opts  Compression options for eager init, or NULL for lazy init.
+ * @return Pointer to the new context, or @c NULL on allocation failure.
+ */
+ZXC_EXPORT zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts);
+
+/**
+ * @brief Frees a compression context and all associated resources.
+ *
+ * It is safe to pass @c NULL; the call is a no-op in that case.
+ *
+ * @param[in] cctx Context to free.
+ */
+ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
+
+/**
+ * @brief Compresses data using a reusable context.
+ *
+ * Identical to zxc_compress() but reuses the internal buffers from @p cctx,
+ * avoiding per-call malloc/free overhead.  The context automatically
+ * re-initializes when block_size or level changes between calls.
+ *
+ * @param[in,out] cctx         Reusable compression context.
+ * @param[in]     src          Source data.
+ * @param[in]     src_size     Source data size in bytes.
+ * @param[out]    dst          Destination buffer.
+ * @param[in]     dst_capacity Capacity of the destination buffer.
+ * @param[in]     opts         Compression options (NULL for defaults).
+ *
+ * @return Compressed size in bytes (> 0) on success,
+ *         or a negative @ref zxc_error_t code on failure.
+ */
+ZXC_EXPORT int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* src, size_t src_size, void* dst,
+                                     size_t dst_capacity, const zxc_compress_opts_t* opts);
+
+/* --- Decompression context ----------------------------------------------- */
+
+/** @brief Opaque decompression context (forward-declared). */
+typedef struct zxc_dctx_s zxc_dctx;
+
+/**
+ * @brief Creates a new reusable decompression context.
+ *
+ * @return Pointer to the new context, or @c NULL on allocation failure.
+ */
+ZXC_EXPORT zxc_dctx* zxc_create_dctx(void);
+
+/**
+ * @brief Frees a decompression context and all associated resources.
+ *
+ * It is safe to pass @c NULL.
+ *
+ * @param[in] dctx Context to free.
+ */
+ZXC_EXPORT void zxc_free_dctx(zxc_dctx* dctx);
+
+/**
+ * @brief Decompresses data using a reusable context.
+ *
+ * Identical to zxc_decompress() but reuses buffers from @p dctx.
+ *
+ * @param[in,out] dctx         Reusable decompression context.
+ * @param[in]     src          Compressed data.
+ * @param[in]     src_size     Compressed data size in bytes.
+ * @param[out]    dst          Destination buffer.
+ * @param[in]     dst_capacity Capacity of the destination buffer.
+ * @param[in]     opts         Decompression options (NULL for defaults).
+ *
+ * @return Decompressed size in bytes (> 0) on success,
+ *         or a negative @ref zxc_error_t code on failure.
+ */
+ZXC_EXPORT int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* src, size_t src_size, void* dst,
+                                       size_t dst_capacity, const zxc_decompress_opts_t* opts);
+
+/** @} */ /* end of context_api */
 /** @} */ /* end of buffer_api */
 
 #endif  // ZXC_BUFFER_H
