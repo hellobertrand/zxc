@@ -19,6 +19,10 @@
 
 #include "zxc_export.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @defgroup error Error Handling
  * @brief Error codes returned by ZXC library functions.
@@ -74,5 +78,9 @@ typedef enum {
 ZXC_EXPORT const char* zxc_error_name(const int code);
 
 /** @} */ /* end of error */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* ZXC_ERROR_H */

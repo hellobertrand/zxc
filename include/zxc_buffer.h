@@ -41,6 +41,10 @@
 #include "zxc_export.h"
 #include "zxc_stream.h" /* zxc_compress_opts_t, zxc_decompress_opts_t */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @defgroup buffer_api Buffer API
  * @brief Single-shot, buffer-based compression and decompression.
@@ -219,5 +223,9 @@ ZXC_EXPORT int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* src, size_t s
 
 /** @} */ /* end of context_api */
 /** @} */ /* end of buffer_api */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  // ZXC_BUFFER_H
