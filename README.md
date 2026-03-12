@@ -6,6 +6,7 @@
 [![Benchmark](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml)
 [![Code Coverage](https://codecov.io/github/hellobertrand/zxc/branch/main/graph/badge.svg?token=LHA03HOA1X)](https://codecov.io/github/hellobertrand/zxc)
 
+[![Conan Center](https://img.shields.io/conan/v/zxc)](https://conan.io/center/recipes/zxc)
 [![vcpkg](https://img.shields.io/vcpkg/v/zxc)](https://vcpkg.io/en/package/zxc)
 [![Crates.io](https://img.shields.io/crates/v/zxc-compress)](https://crates.io/crates/zxc-compress)
 [![PyPi](https://img.shields.io/pypi/v/zxc-compress)](https://pypi.org/project/zxc-compress)
@@ -154,14 +155,14 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
 1.  Go to the [Releases page](https://github.com/hellobertrand/zxc/releases).
 2.  Download the archive matching your architecture:
-    
+
     **macOS:**
     *   `zxc-macos-arm64.tar.gz` (NEON optimizations included).
-    
+
     **Linux:**
     *   `zxc-linux-aarch64.tar.gz` (NEON optimizations included).
     *   `zxc-linux-x86_64.tar.gz` (Runtime dispatch for AVX2/AVX512).
-    
+
     **Windows:**
     *   `zxc-windows-x64.zip` (Runtime dispatch for AVX2/AVX512).
 
@@ -212,7 +213,17 @@ find_package(zxc CONFIG REQUIRED)
 target_link_libraries(myapp PRIVATE zxc::zxc_lib)
 ```
 
-### Option 3: Building from Source
+### Option 3: Conan
+
+You also can download and install zxc using the [Conan](https://conan.io/) package manager:
+
+    conan install -r conancenter --requires="zxc/[*]" --build=missing
+
+The zxc package in Conan Center is kept up to date by
+[ConanCenterIndex](https://github.com/conan-io/conan-center-index) contributors.
+If the version is out of date, please create an issue or pull request on the Conan Center Index repository.
+
+### Option 4: Building from Source
 
 **Requirements:** CMake (3.14+), C17 Compiler (Clang/GCC/MSVC).
 
