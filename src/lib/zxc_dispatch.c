@@ -490,13 +490,25 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         }
 
         const size_t rem_cap = (size_t)(op_end - op);
-        const int res =
-            zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, ctx.work_buf, runtime_chunk_size);
-        if (UNLIKELY(res < 0 || (size_t)res > rem_cap)) {
-            zxc_cctx_free(&ctx);
-            return (res < 0) ? res : ZXC_ERROR_DST_TOO_SMALL;
+        int res;
+        if (LIKELY(rem_cap >= runtime_chunk_size + ZXC_PAD_SIZE)) {
+            // Fast path: decode directly into dst (enough padding for wild copies).
+            res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op, rem_cap);
+        } else {
+            // Safe path: decode into bounce buffer, then copy exact result.
+            res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, ctx.work_buf, runtime_chunk_size);
+            if (LIKELY(res > 0)) {
+                if (UNLIKELY((size_t)res > rem_cap)) {
+                    zxc_cctx_free(&ctx);
+                    return ZXC_ERROR_DST_TOO_SMALL;
+                }
+                ZXC_MEMCPY(op, ctx.work_buf, (size_t)res);
+            }
         }
-        ZXC_MEMCPY(op, ctx.work_buf, (size_t)res);
+        if (UNLIKELY(res < 0)) {
+            zxc_cctx_free(&ctx);
+            return res;
+        }
 
         // Update global hash from block checksum
         if (checksum_enabled && file_has_checksums) {
