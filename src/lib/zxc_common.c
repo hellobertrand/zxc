@@ -241,7 +241,7 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
         const uint8_t code = src[5];
         size_t block_size;
         if (LIKELY(code >= ZXC_BLOCK_SIZE_MIN_LOG2 && code <= ZXC_BLOCK_SIZE_MAX_LOG2)) {
-            // Exponent encoding: block_size = 2^code  (4 KB – 2 MB)
+            // Exponent encoding: block_size = 2^code  (4 KB - 2 MB)
             block_size = (size_t)1U << code;
         } else if (code == 64) {
             // Legacy: hardcoded 256 KB default

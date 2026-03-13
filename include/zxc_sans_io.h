@@ -101,7 +101,7 @@ typedef struct {
 
     /* Block-size derived parameters (computed once at init). */
     size_t chunk_size;    /**< Effective block size in bytes. */
-    uint32_t offset_bits; /**< log2(chunk_size) — governs epoch_mark shift. */
+    uint32_t offset_bits; /**< log2(chunk_size) - governs epoch_mark shift. */
     uint32_t offset_mask; /**< (1U << offset_bits) - 1 */
     uint32_t max_epoch;   /**< 1U << (32 - offset_bits) */
 } zxc_cctx_t;
