@@ -6,23 +6,26 @@
 [![Benchmark](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml)
 [![Code Coverage](https://codecov.io/github/hellobertrand/zxc/branch/main/graph/badge.svg?token=LHA03HOA1X)](https://codecov.io/github/hellobertrand/zxc)
 
-[![Conan Center](https://img.shields.io/conan/v/zxc)](https://conan.io/center/recipes/zxc)
-[![vcpkg](https://img.shields.io/vcpkg/v/zxc)](https://vcpkg.io/en/package/zxc)
+[![ConanCenter](https://repology.org/badge/version-for-repo/conancenter/zxc.svg)](https://repology.org/project/zxc/versions)
+[![Vcpkg](https://repology.org/badge/version-for-repo/vcpkg/zxc.svg)](https://repology.org/project/zxc/versions)
+[![Debian 14](https://repology.org/badge/version-for-repo/debian_14/zxc.svg)](https://repology.org/project/zxc/versions)
+[![Ubuntu 26.04](https://repology.org/badge/version-for-repo/ubuntu_26_04/zxc.svg)](https://repology.org/project/zxc/versions)
+
 [![Crates.io](https://img.shields.io/crates/v/zxc-compress)](https://crates.io/crates/zxc-compress)
 [![PyPi](https://img.shields.io/pypi/v/zxc-compress)](https://pypi.org/project/zxc-compress)
 [![npm](https://img.shields.io/npm/v/zxc-compress)](https://www.npmjs.com/package/zxc-compress)
 
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 
-**ZXC** is a high-performance, lossless, asymmetric compression library optimized for **Content Delivery** and **Embedded Systems** (Game Assets, Firmware, App Bundles).
-It is designed to be *"Write Once, Read Many"*. Unlike codecs like LZ4, ZXC trades compression speed (build-time) for **maximum decompression throughput** (run-time).
+**ZXC** is a high-performance, lossless, asymmetric compression library optimized for Content Delivery and Embedded Systems (Game Assets, Firmware, App Bundles).
+It is designed to be **"Write Once, Read Many"** *(WORM)*. Unlike codecs like LZ4, ZXC trades compression speed (build-time) for **maximum decompression throughput** (run-time).
 
 ## TL;DR
 
 - **What:** A C library for lossless compression, optimized for **maximum decompression speed**.
 - **Key Result:** Up to **>40% faster** decompression than LZ4 on Apple Silicon, **>25% faster** on Google Axion (ARM64), **>5% faster** on x86_64, **all with better compression ratios**.
 - **Use Cases:** Game assets, firmware, app bundles, anything *compressed once, decompressed millions of times*.
-- **Install:** `vcpkg install zxc` · `pip install zxc-compress` · `cargo add zxc-compress`
+- **Install:** `conan install --requires="zxc/[*]"` · `vcpkg install zxc` · `pip install zxc-compress` · `cargo add zxc-compress` · `npm i zxc-compress`
 - **Quality:** Fuzzed, sanitized, formally tested, thread-safe API. BSD-3-Clause.
 
 > **Verified:** ZXC has been officially merged into the **[lzbench master branch](https://github.com/inikep/lzbench)**. You can now verify these results independently using the industry-standard benchmark suite.
@@ -217,7 +220,15 @@ target_link_libraries(myapp PRIVATE zxc::zxc_lib)
 
 You also can download and install zxc using the [Conan](https://conan.io/) package manager:
 
+```bash
     conan install -r conancenter --requires="zxc/[*]" --build=missing
+```
+
+Or add to your `conanfile.txt`:
+```ini
+[requires]
+zxc/[*]
+```
 
 The zxc package in Conan Center is kept up to date by
 [ConanCenterIndex](https://github.com/conan-io/conan-center-index) contributors.
@@ -268,6 +279,10 @@ cmake -B build -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
 # Code coverage build
 cmake -B build -DZXC_ENABLE_COVERAGE=ON
 ```
+
+### Packaging Status
+
+[![Packaging status](https://repology.org/badge/vertical-allrepos/zxc.svg)](https://repology.org/project/zxc/versions)
 
 ---
 
@@ -340,6 +355,10 @@ int64_t result = zxc_stream_decompress(f_in, f_out, threads, checksum);
 **[See complete examples and advanced usage →](docs/EXAMPLES.md)**
 
 ## Language Bindings
+
+[![Crates.io](https://img.shields.io/crates/v/zxc-compress)](https://crates.io/crates/zxc-compress)
+[![PyPi](https://img.shields.io/pypi/v/zxc-compress)](https://pypi.org/project/zxc-compress)
+[![npm](https://img.shields.io/npm/v/zxc-compress)](https://www.npmjs.com/package/zxc-compress)
 
 Official wrappers maintained in this repository:
 
