@@ -593,16 +593,16 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const size_t expected_off_size =
         (gh.enc_off == 1) ? (size_t)gh.n_sequences : (size_t)gh.n_sequences * 2;
 
-    if (UNLIKELY(sz_tokens < gh.n_sequences || sz_offsets < expected_off_size))
-        return ZXC_ERROR_CORRUPT_DATA;
-
     const uint8_t* t_ptr = p_curr;
     const uint8_t* o_ptr = t_ptr + sz_tokens;
     const uint8_t* e_ptr = o_ptr + sz_offsets;
     const uint8_t* const e_end = e_ptr + sz_extras;  // For vbyte overflow detection
 
-    // Validate streams don't overflow source buffer
-    if (UNLIKELY(e_end != src + src_size)) return ZXC_ERROR_CORRUPT_DATA;
+    // Validate streams don't overflow source buffer +
+    // Validate stream sizes match sequence count (early rejection of malformed data)
+    if (UNLIKELY((e_end != src + src_size) || sz_tokens < gh.n_sequences ||
+                 sz_offsets < expected_off_size))
+        return ZXC_ERROR_CORRUPT_DATA;
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
@@ -1143,8 +1143,10 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const uint8_t* extras_ptr = p_curr + sz_seqs;
     const uint8_t* const extras_end = extras_ptr + sz_exts;
 
-    // Validate streams don't overflow source buffer
-    if (UNLIKELY(extras_end != src + src_size)) return ZXC_ERROR_CORRUPT_DATA;
+    // Validate streams don't overflow source buffer +
+    // Validate sequence stream size matches sequence count
+    if (UNLIKELY((extras_end != src + src_size) || (sz_seqs < (size_t)gh.n_sequences * 4)))
+        return ZXC_ERROR_CORRUPT_DATA;
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
