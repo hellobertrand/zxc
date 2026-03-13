@@ -3,11 +3,14 @@
 This document provides complete, working examples for using the ZXC compression library in C.
 
 ## Table of Contents
-- [Buffer API (Single-Threaded)](#buffer-api-single-threaded)
+- [Buffer API (In-Memory)](#buffer-api-in-memory)
 - [Stream API (Multi-Threaded)](#stream-api-multi-threaded)
+- [Reusable Context API](#reusable-context-api)
 - [Language Bindings](#language-bindings)
 
-## Buffer API (Single-Threaded)
+---
+
+## Buffer API (In-Memory)
 
 Ideal for small assets or simple integrations. Thread-safe and ready for highly concurrent environments (Go routines, Node.js workers, Python threads).
 
@@ -26,7 +29,7 @@ int main(void) {
     uint64_t max_compressed_size = zxc_compress_bound(original_size);
 
     // Step 2: Allocate buffers
-    void* compressed = malloc(max_compressed_size);
+    void* compressed   = malloc(max_compressed_size);
     void* decompressed = malloc(original_size);
 
     if (!compressed || !decompressed) {
@@ -36,45 +39,51 @@ int main(void) {
         return 1;
     }
 
-    // Step 3: Compress data (Level 3, checksum enabled)
-    size_t compressed_size = zxc_compress(
-        original,           // Source buffer
-        original_size,      // Source size
-        compressed,         // Destination buffer
-        max_compressed_size,// Destination capacity
-        ZXC_LEVEL_DEFAULT,  // Compression level
-        1                   // Enable checksum
+    // Step 3: Compress data (level 3, checksum enabled, default block size)
+    zxc_compress_opts_t c_opts = {
+        .level            = ZXC_LEVEL_DEFAULT,
+        .checksum_enabled = 1,
+        /* .block_size = 0  ->  256 KB default */
+    };
+    int64_t compressed_size = zxc_compress(
+        original,            // Source buffer
+        original_size,       // Source size
+        compressed,          // Destination buffer
+        max_compressed_size, // Destination capacity
+        &c_opts              // Options (NULL = all defaults)
     );
 
-    if (compressed_size == 0) {
-        fprintf(stderr, "Compression failed\n");
+    if (compressed_size <= 0) {
+        fprintf(stderr, "Compression failed (error %lld)\n", (long long)compressed_size);
         free(compressed);
         free(decompressed);
         return 1;
     }
 
-    printf("Original size: %zu bytes\n", original_size);
-    printf("Compressed size: %zu bytes (%.1f%% ratio)\n",
-           compressed_size, 100.0 * compressed_size / original_size);
+    printf("Original size:   %zu bytes\n", original_size);
+    printf("Compressed size: %lld bytes (%.1f%% ratio)\n",
+           (long long)compressed_size,
+           100.0 * (double)compressed_size / (double)original_size);
 
     // Step 4: Decompress data (checksum verification enabled)
-    size_t decompressed_size = zxc_decompress(
-        compressed,         // Source buffer
-        compressed_size,    // Source size
-        decompressed,       // Destination buffer
-        original_size,      // Destination capacity
-        1                   // Verify checksum
+    zxc_decompress_opts_t d_opts = { .checksum_enabled = 1 };
+    int64_t decompressed_size = zxc_decompress(
+        compressed,          // Source buffer
+        (size_t)compressed_size,
+        decompressed,        // Destination buffer
+        original_size,       // Destination capacity
+        &d_opts              // Options (NULL = all defaults)
     );
 
-    if (decompressed_size == 0) {
-        fprintf(stderr, "Decompression failed\n");
+    if (decompressed_size <= 0) {
+        fprintf(stderr, "Decompression failed (error %lld)\n", (long long)decompressed_size);
         free(compressed);
         free(decompressed);
         return 1;
     }
 
     // Step 5: Verify integrity
-    if (decompressed_size == original_size &&
+    if ((size_t)decompressed_size == original_size &&
         memcmp(original, decompressed, original_size) == 0) {
         printf("Success! Data integrity verified.\n");
         printf("Decompressed: %s\n", (char*)decompressed);
@@ -94,9 +103,11 @@ int main(void) {
 gcc -o buffer_example buffer_example.c -I include -L build -lzxc_lib
 ```
 
+---
+
 ## Stream API (Multi-Threaded)
 
-For large files, use the streaming API to process data in parallel chunks. This example demonstrates parallel file compression and decompression.
+For large files, use the streaming API to process data in parallel chunks.
 
 ```c
 #include "zxc.h"
@@ -109,63 +120,72 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    const char* input_path = argv[1];
+    const char* input_path      = argv[1];
     const char* compressed_path = argv[2];
-    const char* output_path = argv[3];
+    const char* output_path     = argv[3];
 
-    // Step 1: Compress the input file using multi-threaded streaming
+    /* ------------------------------------------------------------------ */
+    /* Step 1: Compress                                                     */
+    /* ------------------------------------------------------------------ */
     printf("Compressing '%s' to '%s'...\n", input_path, compressed_path);
 
     FILE* f_in = fopen(input_path, "rb");
     if (!f_in) {
-        fprintf(stderr, "Error: Cannot open input file '%s'\n", input_path);
+        fprintf(stderr, "Error: cannot open '%s'\n", input_path);
         return 1;
     }
 
     FILE* f_out = fopen(compressed_path, "wb");
     if (!f_out) {
-        fprintf(stderr, "Error: Cannot create output file '%s'\n", compressed_path);
+        fprintf(stderr, "Error: cannot create '%s'\n", compressed_path);
         fclose(f_in);
         return 1;
     }
 
-    // Compress with auto-detected threads (0), level 3, checksum enabled
-    int64_t compressed_bytes = zxc_stream_compress(f_in, f_out, 0, ZXC_LEVEL_DEFAULT, 1);
+    // 0 threads = auto-detect CPU cores; 0 block_size = 256 KB default
+    zxc_compress_opts_t c_opts = {
+        .n_threads        = 0,
+        .level            = ZXC_LEVEL_DEFAULT,
+        .checksum_enabled = 1,
+        /* .block_size = 0  ->  256 KB */
+    };
+    int64_t compressed_bytes = zxc_stream_compress(f_in, f_out, &c_opts);
 
     fclose(f_in);
     fclose(f_out);
 
     if (compressed_bytes < 0) {
-        fprintf(stderr, "Compression failed\n");
+        fprintf(stderr, "Compression failed (error %lld)\n", (long long)compressed_bytes);
         return 1;
     }
-
     printf("Compression complete: %lld bytes written\n", (long long)compressed_bytes);
 
-    // Step 2: Decompress the file back using multi-threaded streaming
+    /* ------------------------------------------------------------------ */
+    /* Step 2: Decompress                                                   */
+    /* ------------------------------------------------------------------ */
     printf("\nDecompressing '%s' to '%s'...\n", compressed_path, output_path);
 
     FILE* f_compressed = fopen(compressed_path, "rb");
     if (!f_compressed) {
-        fprintf(stderr, "Error: Cannot open compressed file '%s'\n", compressed_path);
+        fprintf(stderr, "Error: cannot open '%s'\n", compressed_path);
         return 1;
     }
 
     FILE* f_decompressed = fopen(output_path, "wb");
     if (!f_decompressed) {
-        fprintf(stderr, "Error: Cannot create output file '%s'\n", output_path);
+        fprintf(stderr, "Error: cannot create '%s'\n", output_path);
         fclose(f_compressed);
         return 1;
     }
 
-    // Decompress with auto-detected threads (0), checksum verification enabled
-    int64_t decompressed_bytes = zxc_stream_decompress(f_compressed, f_decompressed, 0, 1);
+    zxc_decompress_opts_t d_opts = { .n_threads = 0, .checksum_enabled = 1 };
+    int64_t decompressed_bytes = zxc_stream_decompress(f_compressed, f_decompressed, &d_opts);
 
     fclose(f_compressed);
     fclose(f_decompressed);
 
     if (decompressed_bytes < 0) {
-        fprintf(stderr, "Decompression failed\n");
+        fprintf(stderr, "Decompression failed (error %lld)\n", (long long)decompressed_bytes);
         return 1;
     }
 
@@ -190,7 +210,84 @@ gcc -o stream_example stream_example.c -I include -L build -lzxc_lib -lpthread -
 - Multi-threaded parallel processing (auto-detects CPU cores)
 - Checksum validation for data integrity
 - Error handling for file operations
-- Progress tracking via return values
+
+---
+
+## Reusable Context API
+
+For tight loops — such as filesystem plug-ins (squashfs, dwarfs, erofs) —
+where allocating and freeing internal buffers on every call would add latency,
+ZXC provides opaque reusable contexts.
+
+Internal buffers are only reallocated when the **block size changes**, so the
+common case (same block size, different data) is completely allocation-free.
+
+```c
+#include "zxc.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define BLOCK_SIZE   (64 * 1024)   // 64 KB — typical squashfs block size
+#define NUM_BLOCKS   32
+
+int main(void) {
+    // Allocate contexts once
+    zxc_compress_opts_t create_opts = {
+        .level            = 3,
+        .checksum_enabled = 0,
+        .block_size       = BLOCK_SIZE,
+    };
+    zxc_cctx* cctx = zxc_create_cctx(&create_opts);
+    zxc_dctx* dctx = zxc_create_dctx();
+
+    if (!cctx || !dctx) {
+        fprintf(stderr, "Context creation failed\n");
+        zxc_free_cctx(cctx);
+        zxc_free_dctx(dctx);
+        return 1;
+    }
+
+    const size_t comp_cap = (size_t)(BLOCK_SIZE * 1.1) + 512;  // conservative bound
+    uint8_t* src  = malloc(BLOCK_SIZE);
+    uint8_t* comp = malloc(comp_cap);
+    uint8_t* dec  = malloc(BLOCK_SIZE);
+
+    zxc_compress_opts_t   c_opts = { .level = 3, .checksum_enabled = 0, .block_size = BLOCK_SIZE };
+    zxc_decompress_opts_t d_opts = { .checksum_enabled = 0 };
+
+    for (int i = 0; i < NUM_BLOCKS; i++) {
+        // Fill block with pseudo-random data
+        for (size_t j = 0; j < BLOCK_SIZE; j++) src[j] = (uint8_t)(i ^ j);
+
+        // Compress — no malloc/free inside
+        int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap, &c_opts);
+        if (csz <= 0) { fprintf(stderr, "Block %d: compress error %lld\n", i, (long long)csz); break; }
+
+        // Decompress — no malloc/free inside
+        int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, BLOCK_SIZE, &d_opts);
+        if (dsz != BLOCK_SIZE || memcmp(src, dec, BLOCK_SIZE) != 0) {
+            fprintf(stderr, "Block %d: roundtrip mismatch\n", i);
+            break;
+        }
+    }
+
+    printf("Processed %d blocks of %d KB — no per-block allocation.\n",
+           NUM_BLOCKS, BLOCK_SIZE / 1024);
+
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    free(src); free(comp); free(dec);
+    return 0;
+}
+```
+
+**Compilation:**
+```bash
+gcc -o ctx_example ctx_example.c -I include -L build -lzxc_lib
+```
+
+---
 
 ## Writing Your Own Streaming Driver
 
@@ -202,6 +299,8 @@ To implement a custom driver:
 1. Include the extra public header `zxc_sans_io.h`
 2. Study the reference implementation in `src/lib/zxc_driver.c`
 3. Implement your own I/O and threading logic
+
+---
 
 ## Language Bindings
 

@@ -321,7 +321,7 @@ zxc -b input_file
 ```
 ### 2. API
 
-ZXC provides a **thread-safe, stateless API** with two usage patterns:
+ZXC provides a **thread-safe API** with two usage patterns. Parameters are passed through dedicated options structs, making call sites self-documenting and forward-compatible.
 
 #### Buffer API (In-Memory)
 ```c
@@ -329,28 +329,62 @@ ZXC provides a **thread-safe, stateless API** with two usage patterns:
 
 // Compression
 uint64_t bound = zxc_compress_bound(src_size);
-size_t compressed_size = zxc_compress(src, src_size, dst, bound, level, checksum);
+zxc_compress_opts_t c_opts = {
+    .level            = ZXC_LEVEL_DEFAULT,
+    .checksum_enabled = 1,
+    /* .block_size = 0 → 256 KB default */
+};
+int64_t compressed_size = zxc_compress(src, src_size, dst, bound, &c_opts);
 
 // Decompression
-size_t decompressed_size = zxc_decompress(src, src_size, dst, dst_capacity, checksum);
+zxc_decompress_opts_t d_opts = { .checksum_enabled = 1 };
+int64_t decompressed_size = zxc_decompress(src, src_size, dst, dst_capacity, &d_opts);
 ```
 
 #### Stream API (Files, Multi-Threaded)
 ```c
 #include "zxc.h"
 
-// Compression
-int64_t result = zxc_stream_compress(f_in, f_out, threads, level, checksum);
+// Compression (auto-detect threads, level 3, checksum on)
+zxc_compress_opts_t c_opts = {
+    .n_threads        = 0,               // 0 = auto
+    .level            = ZXC_LEVEL_DEFAULT,
+    .checksum_enabled = 1,
+    /* .block_size = 0 → 256 KB default */
+};
+int64_t bytes_written = zxc_stream_compress(f_in, f_out, &c_opts);
 
 // Decompression
-int64_t result = zxc_stream_decompress(f_in, f_out, threads, checksum);
+zxc_decompress_opts_t d_opts = { .n_threads = 0, .checksum_enabled = 1 };
+int64_t bytes_out = zxc_stream_decompress(f_in, f_out, &d_opts);
+```
+
+#### Reusable Context API (Low-Latency / Embedded)
+
+For tight loops (e.g. filesystem plug-ins) where per-call `malloc`/`free`
+overhead matters, use opaque reusable contexts:
+```c
+#include "zxc.h"
+
+zxc_compress_opts_t opts = { .level = 3, .checksum_enabled = 0 };
+zxc_cctx* cctx = zxc_create_cctx(&opts);   // allocate once
+zxc_dctx* dctx = zxc_create_dctx();        // allocate once
+
+// reuse across many blocks:
+int64_t csz = zxc_compress_cctx(cctx, src, src_sz, dst, dst_cap, &opts);
+int64_t dsz = zxc_decompress_dctx(dctx, dst, csz, out, src_sz, NULL);
+
+zxc_free_cctx(cctx);
+zxc_free_dctx(dctx);
 ```
 
 **Features:**
 - Caller-allocated buffers with explicit bounds
 - Thread-safe (stateless)
+- Configurable block sizes (4 KB – 2 MB, powers of 2)
 - Multi-threaded streaming (auto-detects CPU cores)
 - Optional checksum validation
+- Reusable contexts for high-frequency call sites
 
 **[See complete examples and advanced usage →](docs/EXAMPLES.md)**
 
