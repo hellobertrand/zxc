@@ -532,10 +532,12 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint
                           const size_t dst_cap, const uint8_t bits) {
     const size_t out_bytes = ((count * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
 
-    if (UNLIKELY(dst_cap < out_bytes)) return ZXC_ERROR_DST_TOO_SMALL;
+    // +4 bytes: packing may write past out_bytes when the last value straddles a byte boundary.
+    const size_t safe_bytes = out_bytes + sizeof(uint32_t);
+    if (UNLIKELY(dst_cap < safe_bytes)) return ZXC_ERROR_DST_TOO_SMALL;
 
     size_t bit_pos = 0;
-    ZXC_MEMSET(dst, 0, out_bytes);
+    ZXC_MEMSET(dst, 0, safe_bytes);
 
     // Create a mask for the input bits to prevent overflow
     // If bits is 32, the shift (1ULL << 32) is undefined behavior on 32-bit types,

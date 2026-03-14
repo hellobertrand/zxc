@@ -628,7 +628,8 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
         const uint8_t bits = zxc_highbit32(max_d);
         const size_t packed = ((frames * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
-        if (UNLIKELY(rem < ZXC_NUM_CHUNK_HEADER_SIZE + packed)) return ZXC_ERROR_DST_TOO_SMALL;
+        if (UNLIKELY(rem < ZXC_NUM_CHUNK_HEADER_SIZE + packed + sizeof(uint32_t)))
+            return ZXC_ERROR_DST_TOO_SMALL;
 
         zxc_store_le16(p_curr, (uint16_t)frames);
         zxc_store_le16(p_curr + 2, bits);
