@@ -567,27 +567,32 @@ uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
 
 struct zxc_cctx_s {
     zxc_cctx_t inner;       /* existing internal context */
-    size_t last_block_size; /* block size used for last init */
     int initialized;        /* 1 if inner has live allocations */
+    size_t last_block_size; /* block size used for last init */
+    /* Sticky options (remembered from create or last compress call). */
+    int stored_level;
+    int stored_checksum;
+    size_t stored_block_size;
 };
 
 zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
     zxc_cctx* const cctx = (zxc_cctx*)calloc(1, sizeof(zxc_cctx));
     if (UNLIKELY(!cctx)) return NULL;
 
-    if (opts) {
-        const int level = (opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
-        const size_t block_size =
-            (opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
-        const int checksum_enabled = opts->checksum_enabled;
+    /* Resolve and store sticky defaults. */
+    cctx->stored_level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
+    cctx->stored_block_size =
+        (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
+    cctx->stored_checksum = opts ? opts->checksum_enabled : 0;
 
-        if (UNLIKELY(!zxc_validate_block_size(block_size) ||
-                     zxc_cctx_init(&cctx->inner, block_size, 1, level, checksum_enabled) !=
-                         ZXC_OK)) {
+    if (opts) {
+        if (UNLIKELY(!zxc_validate_block_size(cctx->stored_block_size) ||
+                     zxc_cctx_init(&cctx->inner, cctx->stored_block_size, 1, cctx->stored_level,
+                                   cctx->stored_checksum) != ZXC_OK)) {
             free(cctx);
             return NULL;
         }
-        cctx->last_block_size = block_size;
+        cctx->last_block_size = cctx->stored_block_size;
         cctx->initialized = 1;
     }
 
@@ -606,10 +611,14 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     if (UNLIKELY(!cctx)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return ZXC_ERROR_NULL_INPUT;
 
-    const int checksum_enabled = opts ? opts->checksum_enabled : 0;
-    const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
+    const int checksum_enabled = opts ? opts->checksum_enabled : cctx->stored_checksum;
+    const int level = (opts && opts->level > 0) ? opts->level : cctx->stored_level;
     const size_t block_size =
-        (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
+        (opts && opts->block_size > 0) ? opts->block_size : cctx->stored_block_size;
+
+    cctx->stored_level = level;
+    cctx->stored_block_size = block_size;
+    cctx->stored_checksum = checksum_enabled;
 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 

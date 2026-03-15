@@ -169,12 +169,17 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  * avoiding per-call malloc/free overhead.  The context automatically
  * re-initializes when block_size or level changes between calls.
  *
+ * Options are **sticky**: settings passed via @p opts are remembered and
+ * reused on subsequent calls where @p opts is NULL.  The initial sticky
+ * values come from the @p opts passed to zxc_create_cctx().
+ *
  * @param[in,out] cctx         Reusable compression context.
  * @param[in]     src          Source data.
  * @param[in]     src_size     Source data size in bytes.
  * @param[out]    dst          Destination buffer.
  * @param[in]     dst_capacity Capacity of the destination buffer.
- * @param[in]     opts         Compression options (NULL for defaults).
+ * @param[in]     opts         Compression options, or NULL to reuse
+ *                             settings from create / last call.
  *
  * @return Compressed size in bytes (> 0) on success,
  *         or a negative @ref zxc_error_t code on failure.
