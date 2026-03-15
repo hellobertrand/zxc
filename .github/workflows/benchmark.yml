@@ -37,7 +37,7 @@ jobs:
 
       - name: Clone LZbench
         run: |
-          git clone --depth 1 https://github.com/inikep/lzbench "${LZBENCH_DIR}"
+          git clone -b zxc-0.9.x https://github.com/hellobertrand/lzbench "${LZBENCH_DIR}"
 
       - name: Copy Lib ZXC
         run: |
@@ -50,7 +50,7 @@ jobs:
       - name: Build Lzbench
         working-directory: ${{ env.LZBENCH_DIR }}
         run: |
-          make -j"$(nproc)" MOREFLAGS="-march=native"
+          make -j MOREFLAGS="-march=native"
 
       - name: Cache Silesia Corpus
         id: cache-silesia

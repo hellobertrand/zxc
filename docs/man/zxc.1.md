@@ -49,6 +49,9 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **-T**, **--threads** *N*
 : Set the number of threads to use for compression and decompression. A value of `0` means auto-detection based on the number of available CPU cores.
 
+**-B**, **--block-size** *SIZE*
+: Set the compression block size. *SIZE* must be a power of two between **4K** and **2M** (e.g. `4K`, `64K`, `256K`, `1M`). Smaller blocks reduce memory usage and improve random-access decompression; larger blocks generally yield better compression ratios. The default is **256K**. This option is only meaningful during compression; the block size is stored in the archive header and automatically used during decompression.
+
 **-C**, **--checksum**
 : Enable block hashing during compression using the rapidhash algorithm. Recommended for data integrity validation. Checksum verification is automatically performed during extraction when enabled.
 
@@ -106,6 +109,12 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 
 **List archive information:**
   zxc -l data.txt.xc
+
+**Compress with a custom block size (64 KB — squashfs-style):**
+  zxc -B 64K data.bin data.xc
+
+**Compress with maximum block size (2 MB):**
+  zxc -5 -B 2M data.bin data.xc
 
 **Run a benchmark for 10 seconds:**
   zxc -b 10 data.txt

@@ -349,15 +349,17 @@ enum { OPT_VERSION = 1000, OPT_HELP };
 // Forward declaration for recursive mode
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
-                               int checksum, int level, int json_output);
+                               int checksum, int level, size_t block_size, int json_output);
 
 // Forward declaration for processing directory
 static int process_directory(const char* dir_path, zxc_mode_t mode, int num_threads, int keep_input,
-                             int force, int to_stdout, int checksum, int level, int json_output);
+                             int force, int to_stdout, int checksum, int level, size_t block_size,
+                             int json_output);
 
 // OS-specific implementation of directory processing
 static int process_directory(const char* dir_path, zxc_mode_t mode, int num_threads, int keep_input,
-                             int force, int to_stdout, int checksum, int level, int json_output) {
+                             int force, int to_stdout, int checksum, int level, size_t block_size,
+                             int json_output) {
     int overall_ret = 0;
 #ifdef _WIN32
     char search_path[MAX_PATH];
@@ -381,7 +383,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
 
         if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
-                                             to_stdout, checksum, level, json_output);
+                                             to_stdout, checksum, level, block_size, json_output);
         } else {
             // Check if it ends with .xc to skip it if compressing to avoid double compression
             if (mode == MODE_COMPRESS) {
@@ -390,8 +392,9 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                     continue;  // Skip already compressed files in recursive compression
                 }
             }
-            overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
-                                               force, to_stdout, checksum, level, json_output);
+            overall_ret |=
+                process_single_file(full_path, NULL, mode, num_threads, keep_input, force,
+                                    to_stdout, checksum, level, block_size, json_output);
         }
     } while (FindNextFileA(hFind, &find_data) != 0);
 
@@ -426,8 +429,9 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         struct stat st;
         if (stat(full_path, &st) == 0) {
             if (S_ISDIR(st.st_mode)) {
-                overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
-                                                 to_stdout, checksum, level, json_output);
+                overall_ret |=
+                    process_directory(full_path, mode, num_threads, keep_input, force, to_stdout,
+                                      checksum, level, block_size, json_output);
             } else if (S_ISREG(st.st_mode)) {
                 // Check if it ends with .xc to skip it if compressing to avoid double compression
                 if (mode == MODE_COMPRESS) {
@@ -437,8 +441,9 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                         continue;  // Skip already compressed files in recursive compression
                     }
                 }
-                overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
-                                                   force, to_stdout, checksum, level, json_output);
+                overall_ret |=
+                    process_single_file(full_path, NULL, mode, num_threads, keep_input, force,
+                                        to_stdout, checksum, level, block_size, json_output);
             }
         }
         free(full_path);
@@ -710,7 +715,8 @@ static int zxc_list_archive(const char* path, int json_output) {
 
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
-                               int checksum, int level, int json_output) {
+                               int checksum_enabled, int level, size_t block_size,
+                               int json_output) {
     FILE* f_in = stdin;
     FILE* f_out = stdout;
     char resolved_in_path[4096] = {0};
@@ -879,7 +885,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (in_path && !g_quiet) {
         zxc_log_v("Processing %s... (Compression Level %d)\n", in_path, level);
     }
-    if (g_verbose) zxc_log("Checksum: %s\n", checksum ? "enabled" : "disabled");
+    if (g_verbose) zxc_log("Checksum: %s\n", checksum_enabled ? "enabled" : "disabled");
 
     // Prepare progress context
     progress_ctx_t pctx = {.start_time = zxc_now(),
@@ -888,12 +894,25 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
     const double t0 = zxc_now();
     int64_t bytes;
-    if (mode == MODE_COMPRESS)
-        bytes = zxc_stream_compress_ex(f_in, f_out, num_threads, level, checksum,
-                                       show_progress ? cli_progress_callback : NULL, &pctx);
-    else
-        bytes = zxc_stream_decompress_ex(f_in, f_out, num_threads, checksum,
-                                         show_progress ? cli_progress_callback : NULL, &pctx);
+    if (mode == MODE_COMPRESS) {
+        zxc_compress_opts_t copts = {
+            .n_threads = num_threads,
+            .level = level,
+            .block_size = block_size,
+            .checksum_enabled = checksum_enabled,
+            .progress_cb = show_progress ? cli_progress_callback : NULL,
+            .user_data = &pctx,
+        };
+        bytes = zxc_stream_compress(f_in, f_out, &copts);
+    } else {
+        zxc_decompress_opts_t dopts = {
+            .n_threads = num_threads,
+            .checksum_enabled = checksum_enabled,
+            .progress_cb = show_progress ? cli_progress_callback : NULL,
+            .user_data = &pctx,
+        };
+        bytes = zxc_stream_decompress(f_in, f_out, &dopts);
+    }
     const double dt = zxc_now() - t0;
 
     // Clear progress line on completion
@@ -928,14 +947,14 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                     "  \"checksum_verified\": %s,\n"
                     "  \"time_seconds\": %.6f\n"
                     "}\n",
-                    in_path ? in_path : "<stdin>", checksum ? "true" : "false", dt);
+                    in_path ? in_path : "<stdin>", checksum_enabled ? "true" : "false", dt);
             } else if (g_verbose) {
                 printf(
                     "%s: OK\n"
                     "  Checksum:     %s\n"
                     "  Time:         %.3fs\n",
                     in_path ? in_path : "<stdin>",
-                    checksum ? "verified (RapidHash)" : "not verified", dt);
+                    checksum_enabled ? "verified (RapidHash)" : "not verified", dt);
             } else {
                 printf("%s: OK\n", in_path ? in_path : "<stdin>");
             }
@@ -986,6 +1005,7 @@ int main(int argc, char** argv) {
     int checksum = -1;
     int level = 3;
     int json_output = 0;
+    size_t block_size = 0;
 
     static const struct option long_options[] = {{"compress", no_argument, 0, 'z'},
                                                  {"decompress", no_argument, 0, 'd'},
@@ -1005,12 +1025,13 @@ int main(int argc, char** argv) {
                                                  {"help", no_argument, 0, 'h'},
                                                  {"multiple", no_argument, 0, 'm'},
                                                  {"recursive", no_argument, 0, 'r'},
+                                                 {"block-size", required_argument, 0, 'B'},
                                                  {0, 0, 0, 0}};
 
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
-    while ((opt = getopt_long(argc, argv, "12345b::cCdfhjklmrNqT:tvVz", long_options, NULL)) !=
+    while ((opt = getopt_long(argc, argv, "12345b::B:cCdfhjklmrNqT:tvVz", long_options, NULL)) !=
            -1) {
         switch (opt) {
             case 'z':
@@ -1089,6 +1110,35 @@ int main(int argc, char** argv) {
                 recursive_mode = 1;
                 multiple_mode = 1;  // Recursive implies multiple mode for files processing
                 break;
+            case 'B': {
+                char* end = NULL;
+                const long long bs_val = strtoll(optarg, &end, 10);
+                if (bs_val <= 0 || end == optarg) {
+                    fprintf(stderr,
+                            "Error: block-size must be a power of 2 between 4K and 2M\n"
+                            "  Examples: -B 4K, -B 128K, -B 1M, -B 2M\n");
+                    return 1;
+                }
+                long long multiplier = 1;
+                if (end && (*end == 'k' || *end == 'K')) {
+                    multiplier = 1024;
+                    end++;
+                    if (*end == 'b' || *end == 'B') end++;  // optional "B" in "KB"
+                } else if (end && (*end == 'm' || *end == 'M')) {
+                    multiplier = 1024 * 1024;
+                    end++;
+                    if (*end == 'b' || *end == 'B') end++;  // optional "B" in "MB"
+                }
+                const long long bs_bytes = bs_val * multiplier;
+                if (!zxc_validate_block_size((size_t)bs_bytes)) {
+                    fprintf(stderr,
+                            "Error: block-size must be a power of 2 between 4K and 2M\n"
+                            "  Examples: -B 4K, -B 128K, -B 1M, -B 2M\n");
+                    return 1;
+                }
+                block_size = (size_t)bs_bytes;
+                break;
+            }
             case '?':
             case 'V':
                 print_version();
@@ -1199,7 +1249,11 @@ int main(int argc, char** argv) {
         while (zxc_now() < compress_deadline) {
             rewind(fm);
             const double t0 = zxc_now();
-            zxc_stream_compress(fm, NULL, num_threads, level, checksum);
+            zxc_compress_opts_t bench_copts = {.n_threads = num_threads,
+                                               .level = level,
+                                               .block_size = block_size,
+                                               .checksum_enabled = checksum};
+            zxc_stream_compress(fm, NULL, &bench_copts);
             const double dt = zxc_now() - t0;
             if (dt < best_compress) best_compress = dt;
             compress_iters++;
@@ -1235,7 +1289,11 @@ int main(int argc, char** argv) {
         }
 #endif
 
-        const int64_t c_sz = zxc_stream_compress(fm_in, fm_out, num_threads, level, checksum);
+        zxc_compress_opts_t bench_copts2 = {.n_threads = num_threads,
+                                            .level = level,
+                                            .block_size = block_size,
+                                            .checksum_enabled = checksum};
+        const int64_t c_sz = zxc_stream_compress(fm_in, fm_out, &bench_copts2);
         if (c_sz < 0) {
             fclose(fm_in);
             fclose(fm_out);
@@ -1271,7 +1329,9 @@ int main(int argc, char** argv) {
         while (zxc_now() < decompress_deadline) {
             rewind(fc);
             const double t0 = zxc_now();
-            zxc_stream_decompress(fc, NULL, num_threads, checksum);
+            zxc_decompress_opts_t bench_dopts = {.n_threads = num_threads,
+                                                 .checksum_enabled = checksum};
+            zxc_stream_decompress(fc, NULL, &bench_dopts);
             const double dt = zxc_now() - t0;
             if (dt < best_decompress) best_decompress = dt;
             decompress_iters++;
@@ -1385,7 +1445,7 @@ int main(int argc, char** argv) {
         if (recursive_mode && current_arg && strcmp(current_arg, "-") != 0 &&
             zxc_is_directory(current_arg)) {
             overall_ret |= process_directory(current_arg, mode, num_threads, keep_input, force,
-                                             to_stdout, checksum, level, json_output);
+                                             to_stdout, checksum, level, block_size, json_output);
         } else {
             const char* explicit_out_path = (!multiple_mode && optind + 1 < argc && current_arg &&
                                              strcmp(current_arg, "-") != 0 && !to_stdout)
@@ -1394,7 +1454,7 @@ int main(int argc, char** argv) {
 
             overall_ret |=
                 process_single_file(current_arg, explicit_out_path, mode, num_threads, keep_input,
-                                    force, to_stdout, checksum, level, json_output);
+                                    force, to_stdout, checksum, level, block_size, json_output);
         }
 
         if (!multiple_mode) {

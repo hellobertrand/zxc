@@ -42,6 +42,8 @@ export const ERROR_IO: number;
 export const ERROR_NULL_INPUT: number;
 /** Unknown or unexpected block type. */
 export const ERROR_BAD_BLOCK_TYPE: number;
+/** Invalid block size. */
+export const ERROR_BAD_BLOCK_SIZE: number;
 
 export interface CompressOptions {
     /** Compression level (1-5). Defaults to LEVEL_DEFAULT. */

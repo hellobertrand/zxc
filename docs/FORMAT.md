@@ -4,7 +4,7 @@
 **Format Version**: 5
 
 This document describes the on-disk binary format of a ZXC compressed file.
-It is formalizes the current reference implementation of format version **4**.
+It formalizes the current reference implementation of format version **5**.
 
 ## 1. Conventions
 
@@ -54,11 +54,11 @@ Offset  Size  Field
 - **Magic Word** (`u32`): `0x9CB02EF5`.
 - **Format Version** (`u8`): currently `5`.
 - **Chunk Size Code** (`u8`):
-  - Uses a "Dual Scale" flag on the MSB (Bit 7).
-  - Bits 0..6 encode the base value `V` (1 to 127). If `0`, it defaults to `1` (4 KB).
-  - If Bit 7 is `0`, multiplier is 4 KB (`Multi = 4096`).
-  - If Bit 7 is `1`, multiplier is 64 KB (`Multi = 65536`).
-  - Actual block size is computed as `V * Multi` bytes.
+  - If the value is in the range `[12, 21]`, it is an **exponent**: `block_size = 2^code`.
+    - `12` = 4 KB, `13` = 8 KB, ..., `18` = 256 KB (default), ..., `21` = 2 MB.
+  - The legacy value `64` (from older encoders) is accepted and maps to 256 KB (default).
+  - All other values are rejected (`ZXC_ERROR_BAD_BLOCK_SIZE`).
+  - Valid block sizes are powers of 2 in the range **4 KB – 2 MB**.
 - **Flags** (`u8`):
   - Bit 7 (`0x80`): `HAS_CHECKSUM`.
   - Bits 0..3: checksum algorithm id (`0` = RapidHash-based folding).
@@ -417,7 +417,7 @@ Generated archive size: **58 bytes**.
 ### 11.1 Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 05 40 80 00 00 00 00 00 00 00 26 2E
+00000000: F5 2E B0 9C 05 12 80 00 00 00 00 00 00 00 9E 53
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
@@ -428,15 +428,15 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 05 | 40 | 80 | 00 00 00 00 00 00 00 | 26 2E
+F5 2E B0 9C | 05 | 12 | 80 | 00 00 00 00 00 00 00 | 9E 53
 ```
 
 - `F5 2E B0 9C` → magic word (LE) = `0x9CB02EF5`.
 - `05` → format version 5.
-- `40` → chunk-size code 64 (Bit 7=0, V=64) (`64 * 4096 = 262144` bytes, i.e. 256 KiB).
+- `12` → chunk-size code 18 (exponent encoding: `2^18 = 262144` bytes, i.e. 256 KiB).
 - `80` → checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `26 2E` → header CRC16.
+- `9E 53` → header CRC16.
 
 #### B) Data Block #0 (RAW)
 

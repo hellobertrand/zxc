@@ -143,6 +143,7 @@ describe('error handling', () => {
         expect(zxc.ERROR_IO).toBe(-11);
         expect(zxc.ERROR_NULL_INPUT).toBe(-12);
         expect(zxc.ERROR_BAD_BLOCK_TYPE).toBe(-13);
+        expect(zxc.ERROR_BAD_BLOCK_SIZE).toBe(-14);
     });
 
     test('errorName works', () => {

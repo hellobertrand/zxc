@@ -35,7 +35,7 @@ ZXC utilizes a hybrid approach combining LZ77 (Lempel-Ziv) dictionary matching w
 
 ### 4.1 LZ77 Engine
 The heart of ZXC is a heavily optimized LZ77 engine that adapts its behavior based on the requested compression level:
-*   **Hash Chain & Collision Resolution**: Uses a fast hash table with chaining to find matches in the history window (64KB sliding window).
+*   **Hash Chain & Collision Resolution**: Uses a fast hash table with chaining to find matches in the history window (configurable sliding window, power-of-2 from 4 KB to 2 MB, default 256 KB).
 *   **Lazy Matching**: Implements a "lookahead" strategy to find better matches at the cost of slight encoding speed, significantly improving decompression density.
 
 ### 4.2 Specialized SIMD Acceleration & Hardware Hashing
@@ -103,11 +103,11 @@ The file begins with a **16-byte** header that identifies the format and specifi
 
 * **Magic Word (4 bytes)**: `0x9 0xCB 0x02E 0xF5`.
 * **Version (1 byte)**: Current version is `5`.
-* **Chunk Size Code (1 byte)**: Defines the processing block size using a "Dual Scale" flag:
-  - **Bit 7 (MSB)**: Multiplier scale. `0` = 4 KB multiplier, `1` = 64 KB multiplier.
-  - **Bits 0-6**: Base value `V` (from 1 to 127). `0` defaults to `1` (minimum block size is 4 KB).
-  - **MSB=0 (Fine Scale)**: Range from `4 KB` (V=1) to `508 KB` (V=127).
-  - **MSB=1 (Large Scale)**: Range from `64 KB` (V=1) to `8128 KB` (V=127).
+* **Chunk Size Code (1 byte)**: Defines the processing block size using **exponent encoding**:
+  - If the value is in `[12, 21]`: block size = `2^value` bytes (4 KB to 2 MB).
+    - `12` = 4 KB, `13` = 8 KB, `14` = 16 KB, `15` = 32 KB, `16` = 64 KB, `17` = 128 KB, `18` = 256 KB (default), `19` = 512 KB, `20` = 1 MB, `21` = 2 MB.
+  - Legacy value `64` is accepted for backward compatibility (maps to 256 KB).
+  - Block sizes must be powers of 2.
 * **Flags (1 byte)**: Global configuration flags.
   - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream. Every block will carry a trailing 4-byte checksum, and the footer will contain a global checksum. If `0`, no checksums are present.
   - **Bits 4-6**: Reserved.
@@ -462,7 +462,7 @@ The default `rapidhash` algorithm is based on wyhash and was developed by Nicola
 ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-core CPUs.
 
 ### 6.1 Asynchronous Compression Pipeline
-1.  **Block Splitting (Main Thread)**: The input file is read and sliced into fixed-size chunks (default 256KB).
+1.  **Block Splitting (Main Thread)**: The input file is read and sliced into fixed-size chunks (configurable, default 256 KB, power of 2 from 4 KB to 2 MB).
 2.  **Ring Buffer Submission**: Chunks are placed into a lock-free ring buffer.
 3.  **Parallel Compression (Worker Threads)**:
     *   Workers pull chunks from the queue.

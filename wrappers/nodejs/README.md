@@ -5,10 +5,10 @@ Designed for *Write Once, Read Many* workloads like ML datasets, game assets, an
 
 ## Features
 
-- **Blazing fast decompression** — ZXC is specifically optimized for read-heavy workloads.
-- **Native N-API addon** — compiled C code via cmake-js for maximum performance.
-- **Buffer support** — works directly with Node.js `Buffer` objects.
-- **TypeScript declarations** — full type definitions included.
+- **Blazing fast decompression** - ZXC is specifically optimized for read-heavy workloads.
+- **Native N-API addon** - compiled C code via cmake-js for maximum performance.
+- **Buffer support** - works directly with Node.js `Buffer` objects.
+- **TypeScript declarations** - full type definitions included.
 
 ## Installation (from source)
 
@@ -49,11 +49,11 @@ Compress a Buffer.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `data` | `Buffer` | — | Input data |
+| `data` | `Buffer` | - | Input data |
 | `options.level` | `number` | `LEVEL_DEFAULT` | Compression level (1–5) |
 | `options.checksum` | `boolean` | `false` | Enable checksum |
 
-Returns: `Buffer` — compressed data.
+Returns: `Buffer` - compressed data.
 
 ### `decompress(data, options?)`
 
@@ -61,11 +61,11 @@ Decompress a ZXC compressed Buffer.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `data` | `Buffer` | — | Compressed data |
+| `data` | `Buffer` | - | Compressed data |
 | `options.size` | `number` | auto | Expected decompressed size |
 | `options.checksum` | `boolean` | `false` | Verify checksum |
 
-Returns: `Buffer` — decompressed data.
+Returns: `Buffer` - decompressed data.
 
 ### `compressBound(inputSize)`
 

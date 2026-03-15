@@ -28,7 +28,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     }
 
     const int level = size > 0 ? (data[0] % 5) + 1 : 1;
-    const int64_t csize = zxc_compress(data, size, comp_buf, bound, level, 0);
+    zxc_compress_opts_t copts = {.level = level};
+    const int64_t csize = zxc_compress(data, size, comp_buf, bound, &copts);
     if (csize < 0) return 0;
 
     if (size == 0) return 0;
@@ -40,7 +41,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         decomp_cap = size;
     }
 
-    const int64_t dsize = zxc_decompress(comp_buf, (size_t)csize, decomp_buf, size, 0);
+    const int64_t dsize = zxc_decompress(comp_buf, (size_t)csize, decomp_buf, size, NULL);
 
     if (dsize >= 0) {
         assert((size_t)dsize == size);

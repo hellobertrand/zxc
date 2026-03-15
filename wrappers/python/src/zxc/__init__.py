@@ -29,6 +29,7 @@ from ._zxc import (
     ERROR_IO,
     ERROR_NULL_INPUT,
     ERROR_BAD_BLOCK_TYPE,
+    ERROR_BAD_BLOCK_SIZE,
 )
 
 try:
@@ -65,6 +66,7 @@ __all__ = [
     "ERROR_IO",
     "ERROR_NULL_INPUT",
     "ERROR_BAD_BLOCK_TYPE",
+    "ERROR_BAD_BLOCK_SIZE",
 ]
 
 def compress(data, level = LEVEL_DEFAULT, checksum = False) -> bytes:
