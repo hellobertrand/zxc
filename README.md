@@ -328,6 +328,25 @@ zxc -d compressed_file output_file
 # Benchmark Mode (Testing speed on your machine)
 zxc -b input_file
 ```
+
+#### Using with `tar`
+
+ZXC works as a drop-in external compressor for `tar` (reads stdin, writes stdout, returns 0 on success):
+
+```bash
+# GNU tar (Linux)
+tar -I 'zxc -5' -cf archive.tar.zxc data/
+tar -I 'zxc -d' -xf archive.tar.zxc
+
+# bsdtar (macOS)
+tar --use-compress-program='zxc -5' -cf archive.tar.zxc data/
+tar --use-compress-program='zxc -d' -xf archive.tar.zxc
+
+# Pipes (universal)
+tar cf - data/ | zxc > archive.tar.zxc
+zxc -d < archive.tar.zxc | tar xf -
+```
+
 ### 2. API
 
 ZXC provides a **thread-safe API** with two usage patterns. Parameters are passed through dedicated options structs, making call sites self-documenting and forward-compatible.
