@@ -26,7 +26,7 @@ It is designed to be **"Write Once, Read Many"** *(WORM)*. Unlike codecs like LZ
 - **What:** A C library for lossless compression, optimized for **maximum decompression speed**.
 - **Key Result:** Up to **>40% faster** decompression than LZ4 on Apple Silicon, **>25% faster** on Google Axion (ARM64), **>5% faster** on x86_64, **all with better compression ratios**.
 - **Use Cases:** Game assets, firmware, app bundles, anything *compressed once, decompressed millions of times*.
-- **Install:** `conan install --requires="zxc/[*]"` · `vcpkg install zxc` · `pip install zxc-compress` · `cargo add zxc-compress` · `npm i zxc-compress`
+- **Install:** `conan install --requires="zxc/[*]"` · `vcpkg install zxc` · `brew install zxc` · `pip install zxc-compress` · `cargo add zxc-compress` · `npm i zxc-compress`
 - **Quality:** Fuzzed, sanitized, formally tested, thread-safe API. BSD-3-Clause.
 
 > **Verified:** ZXC has been officially merged into the **[lzbench master branch](https://github.com/inikep/lzbench)**. You can now verify these results independently using the industry-standard benchmark suite.
@@ -235,7 +235,15 @@ The zxc package in Conan Center is kept up to date by
 [ConanCenterIndex](https://github.com/conan-io/conan-center-index) contributors.
 If the version is out of date, please create an issue or pull request on the Conan Center Index repository.
 
-### Option 4: Building from Source
+### Option 4: Homebrew
+
+```bash
+brew install zxc
+```
+
+The formula is maintained in [homebrew-core](https://formulae.brew.sh/formula/zxc).
+
+### Option 5: Building from Source
 
 **Requirements:** CMake (3.14+), C17 Compiler (Clang/GCC/MSVC).
 
