@@ -222,6 +222,10 @@ ZXC provides opaque reusable contexts.
 Internal buffers are only reallocated when the **block size changes**, so the
 common case (same block size, different data) is completely allocation-free.
 
+Options are **sticky**: settings passed via `opts` to `zxc_create_cctx()` or
+`zxc_compress_cctx()` are remembered and reused on subsequent calls where
+`opts` is `NULL`.
+
 ```c
 #include "zxc.h"
 #include <stdio.h>
@@ -232,7 +236,8 @@ common case (same block size, different data) is completely allocation-free.
 #define NUM_BLOCKS   32
 
 int main(void) {
-    // Allocate contexts once
+    // Create context with sticky options (level 3, no checksum, 64 KB blocks).
+    // These settings are remembered for all subsequent calls.
     zxc_compress_opts_t create_opts = {
         .level            = 3,
         .checksum_enabled = 0,
@@ -248,29 +253,33 @@ int main(void) {
         return 1;
     }
 
-    const size_t comp_cap = (size_t)(BLOCK_SIZE * 1.1) + 512;  // conservative bound
-    uint8_t* src  = malloc(BLOCK_SIZE);
+    const size_t comp_cap = (size_t)zxc_compress_bound(BLOCK_SIZE);
     uint8_t* comp = malloc(comp_cap);
+    uint8_t* src  = malloc(BLOCK_SIZE);
     uint8_t* dec  = malloc(BLOCK_SIZE);
-
-    zxc_compress_opts_t   c_opts = { .level = 3, .checksum_enabled = 0, .block_size = BLOCK_SIZE };
-    zxc_decompress_opts_t d_opts = { .checksum_enabled = 0 };
 
     for (int i = 0; i < NUM_BLOCKS; i++) {
         // Fill block with pseudo-random data
         for (size_t j = 0; j < BLOCK_SIZE; j++) src[j] = (uint8_t)(i ^ j);
 
-        // Compress — no malloc/free inside
-        int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap, &c_opts);
+        // Compress — pass NULL to reuse sticky settings from create_opts.
+        // No malloc/free inside, no need to pass opts again.
+        int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap, NULL);
         if (csz <= 0) { fprintf(stderr, "Block %d: compress error %lld\n", i, (long long)csz); break; }
 
         // Decompress — no malloc/free inside
-        int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, BLOCK_SIZE, &d_opts);
+        int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, BLOCK_SIZE, NULL);
         if (dsz != BLOCK_SIZE || memcmp(src, dec, BLOCK_SIZE) != 0) {
             fprintf(stderr, "Block %d: roundtrip mismatch\n", i);
             break;
         }
     }
+
+    // Override sticky settings for a single call (e.g. switch to level 5).
+    // This also updates the sticky settings for future NULL calls.
+    zxc_compress_opts_t high_opts = { .level = 5 };
+    int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap, &high_opts);
+    printf("Level-5 compressed: %lld bytes\n", (long long)csz);
 
     printf("Processed %d blocks of %d KB — no per-block allocation.\n",
            NUM_BLOCKS, BLOCK_SIZE / 1024);

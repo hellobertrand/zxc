@@ -371,16 +371,18 @@ int64_t bytes_out = zxc_stream_decompress(f_in, f_out, &d_opts);
 #### Reusable Context API (Low-Latency / Embedded)
 
 For tight loops (e.g. filesystem plug-ins) where per-call `malloc`/`free`
-overhead matters, use opaque reusable contexts:
+overhead matters, use opaque reusable contexts.
+Options are **sticky** — settings from `zxc_create_cctx()` are reused when
+passing `NULL`:
 ```c
 #include "zxc.h"
 
 zxc_compress_opts_t opts = { .level = 3, .checksum_enabled = 0 };
-zxc_cctx* cctx = zxc_create_cctx(&opts);   // allocate once
+zxc_cctx* cctx = zxc_create_cctx(&opts);   // allocate once, settings remembered
 zxc_dctx* dctx = zxc_create_dctx();        // allocate once
 
-// reuse across many blocks:
-int64_t csz = zxc_compress_cctx(cctx, src, src_sz, dst, dst_cap, &opts);
+// reuse across many blocks — NULL reuses sticky settings:
+int64_t csz = zxc_compress_cctx(cctx, src, src_sz, dst, dst_cap, NULL);
 int64_t dsz = zxc_decompress_dctx(dctx, dst, csz, out, src_sz, NULL);
 
 zxc_free_cctx(cctx);
