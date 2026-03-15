@@ -84,7 +84,7 @@ libzxc.so.{SOVERSION}.{MAJOR}.{MINOR}.{PATCH}
 | Field | Description | Current |
 |-------|-------------|---------|
 | `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **2** |
-| `VERSION` | Tracks the library release. | **0.8.3** |
+| `VERSION` | Tracks the library release. | **0.9.0** |
 
 **Compatibility rule**: any binary compiled against SOVERSION N will load against
 any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
@@ -93,8 +93,8 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` → `libzxc.so.2` → `libzxc.so.0.8.3` |
-| macOS | `libzxc.dylib` → `libzxc.2.dylib` → `libzxc.0.8.3.dylib` |
+| Linux | `libzxc.so` → `libzxc.so.2` → `libzxc.so.0.9.0` |
+| macOS | `libzxc.dylib` → `libzxc.2.dylib` → `libzxc.0.9.0.dylib` |
 | Windows | `zxc.dll` + `zxc.lib` (import) |
 
 ---
