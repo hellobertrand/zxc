@@ -470,6 +470,7 @@ void print_help(const char* app) {
         "  -h, --help        Show this help message\n\n"
         "Options:\n"
         "  -1..-5            Compression level {3}\n"
+        "  -B, --block-size  Block size: 4K..2M, power of 2 {256K}\n"
         "  -T, --threads N   Number of threads (0=auto)\n"
         "  -C, --checksum    Enable checksum\n"
         "  -N, --no-checksum Disable checksum\n"
