@@ -1,6 +1,6 @@
 # ZXC API & ABI Reference
 
-**Library version**: 0.9.0
+**Library version**: 0.9.1
 **SOVERSION**: 2  
 **License**: BSD-3-Clause
 
@@ -84,7 +84,7 @@ libzxc.so.{SOVERSION}.{MAJOR}.{MINOR}.{PATCH}
 | Field | Description | Current |
 |-------|-------------|---------|
 | `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **2** |
-| `VERSION` | Tracks the library release. | **0.9.0** |
+| `VERSION` | Tracks the library release. | **0.9.1** |
 
 **Compatibility rule**: any binary compiled against SOVERSION N will load against
 any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
@@ -93,8 +93,8 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` → `libzxc.so.2` → `libzxc.so.0.9.0` |
-| macOS | `libzxc.dylib` → `libzxc.2.dylib` → `libzxc.0.9.0.dylib` |
+| Linux | `libzxc.so` → `libzxc.so.2` → `libzxc.so.0.9.1` |
+| macOS | `libzxc.dylib` → `libzxc.2.dylib` → `libzxc.0.9.1.dylib` |
 | Windows | `zxc.dll` + `zxc.lib` (import) |
 
 ---
@@ -121,8 +121,8 @@ Defined in `zxc_constants.h`:
 ```c
 #define ZXC_VERSION_MAJOR     0
 #define ZXC_VERSION_MINOR     9
-#define ZXC_VERSION_PATCH     0
-#define ZXC_LIB_VERSION_STR   "0.9.0"
+#define ZXC_VERSION_PATCH     1
+#define ZXC_LIB_VERSION_STR   "0.9.1"
 ```
 
 ### 5.2 Block Size Constraints
