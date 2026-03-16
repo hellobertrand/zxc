@@ -470,6 +470,7 @@ void print_help(const char* app) {
         "  -h, --help        Show this help message\n\n"
         "Options:\n"
         "  -1..-5            Compression level {3}\n"
+        "  -B, --block-size  Block size: 4K..2M, power of 2 {256K}\n"
         "  -T, --threads N   Number of threads (0=auto)\n"
         "  -C, --checksum    Enable checksum\n"
         "  -N, --no-checksum Disable checksum\n"
@@ -1048,8 +1049,11 @@ int main(int argc, char** argv) {
                 break;
             case 'b':
                 mode = MODE_BENCHMARK;
-                if (optarg) {
-                    bench_seconds = atoi(optarg);
+                const char* bench_arg = optarg;
+                if (!bench_arg && optind < argc && argv[optind][0] >= '1' && argv[optind][0] <= '9')
+                    bench_arg = argv[optind++];
+                if (bench_arg) {
+                    bench_seconds = atoi(bench_arg);
                     if (bench_seconds < 1 || bench_seconds > 3600) {
                         fprintf(stderr, "Error: duration must be between 1 and 3600 seconds\n");
                         return 1;
@@ -1186,26 +1190,18 @@ int main(int argc, char** argv) {
             return 1;
         }
         const char* in_path = argv[optind];
-        if (optind + 1 < argc) {
-            bench_seconds = atoi(argv[optind + 1]);
-            if (bench_seconds < 1 || bench_seconds > 3600) {
-                zxc_log("Error: duration must be between 1 and 3600 seconds\n");
-                return 1;
-            }
-        }
-
-        if (num_threads < 0 || num_threads > ZXC_MAX_THREADS) {
-            zxc_log("Error: num_threads must be between 0 and %d\n", ZXC_MAX_THREADS);
-            return 1;
-        }
-
         int ret = 1;
         uint8_t* ram = NULL;
         uint8_t* c_dat = NULL;
         FILE* fm = NULL;
+
         char resolved_path[4096];
         if (zxc_validate_input_path(in_path, resolved_path, sizeof(resolved_path)) != 0) {
             zxc_log("Error: Invalid input file '%s': %s\n", in_path, strerror(errno));
+            return 1;
+        }
+        if (num_threads < 0 || num_threads > ZXC_MAX_THREADS) {
+            zxc_log("Error: num_threads must be between 0 and %d\n", ZXC_MAX_THREADS);
             return 1;
         }
 
