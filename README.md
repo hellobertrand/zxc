@@ -319,7 +319,7 @@ zxc -z -5 input_file output_file
 # -z for compression can be omitted
 zxc input_file output_file
 
-# as well as output file; it will be automatically assigned to input_file.xc
+# as well as output file; it will be automatically assigned to input_file.zxc
 zxc input_file
 
 # Decompression
