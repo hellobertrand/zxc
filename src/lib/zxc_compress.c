@@ -713,7 +713,9 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         ZXC_MEMSET(ctx->hash_table, 0, 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
         ctx->epoch = 1;
     }
-    const uint32_t epoch_mark = ctx->epoch << ctx->offset_bits;
+    const uint32_t offset_bits = ctx->offset_bits;
+    const uint32_t offset_mask = ctx->offset_mask;
+    const uint32_t epoch_mark = ctx->epoch << offset_bits;
     const uint8_t *ip = src, *iend = src + src_sz, *anchor = ip, *mflimit = iend - 12;
 
     uint32_t* const hash_table = ctx->hash_table;
@@ -737,7 +739,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         const zxc_match_t m =
             zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, chain_table,
-                                     epoch_mark, ctx->offset_mask, level, lzp);
+                                     epoch_mark, offset_mask, level, lzp);
 
         if (m.ref) {
             ip -= m.backtrack;
@@ -779,9 +781,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                     const uint32_t h_u =
                         zxc_hash_func(val_u8, 1);  // Only for level > 4, uses hash5
                     const uint32_t prev_head = hash_table[2 * h_u];
-                    const uint32_t prev_idx = (prev_head & ~ctx->offset_mask) == epoch_mark
-                                                  ? (prev_head & ctx->offset_mask)
-                                                  : 0;
+                    const uint32_t prev_idx =
+                        (prev_head & ~offset_mask) == epoch_mark ? (prev_head & offset_mask) : 0;
                     hash_table[2 * h_u] = epoch_mark | pos_u;
                     hash_table[2 * h_u + 1] = val_u;
                     chain_table[pos_u] = (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
@@ -1207,7 +1208,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         ZXC_MEMSET(ctx->hash_table, 0, 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
         ctx->epoch = 1;
     }
-    const uint32_t epoch_mark = ctx->epoch << ctx->offset_bits;
+    const uint32_t offset_bits = ctx->offset_bits;
+    const uint32_t offset_mask = ctx->offset_mask;
+    const uint32_t epoch_mark = ctx->epoch << offset_bits;
     const uint8_t *ip = src, *iend = src + src_sz, *anchor = ip, *mflimit = iend - 12;
 
     uint32_t* const hash_table = ctx->hash_table;
@@ -1230,7 +1233,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         const zxc_match_t m =
             zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, chain_table,
-                                     epoch_mark, ctx->offset_mask, level, lzp);
+                                     epoch_mark, offset_mask, level, lzp);
 
         if (m.ref) {
             ip -= m.backtrack;
