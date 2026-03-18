@@ -1176,7 +1176,7 @@ int main(int argc, char** argv) {
     }
 
     if (checksum == -1) {
-        checksum = 1;
+        checksum = (mode == MODE_BENCHMARK) ? 0 : 1;
     }
 
     /*
