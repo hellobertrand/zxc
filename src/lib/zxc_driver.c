@@ -375,10 +375,10 @@ static void* zxc_stream_worker(void* arg) {
         pthread_mutex_unlock(&ctx->lock);
 
         const int res = ctx->processor(&cctx, job->in_buf, job->in_sz, job->out_buf, job->out_cap);
-        job->result_sz = UNLIKELY(res < 0) ? 0 : (size_t)res;
-        job->status = JOB_STATUS_PROCESSED;
 
         pthread_mutex_lock(&ctx->lock);
+        job->result_sz = UNLIKELY(res < 0) ? 0 : (size_t)res;
+        job->status = JOB_STATUS_PROCESSED;
         if (UNLIKELY(res < 0)) {
             ctx->io_error = 1;
             pthread_cond_broadcast(&ctx->cond_writer);
@@ -434,7 +434,10 @@ static void* zxc_async_writer(void* arg) {
 
         if (args->f && job->result_sz > 0) {
             if (fwrite(job->out_buf, 1, job->result_sz, args->f) != job->result_sz) {
+                pthread_mutex_lock(&ctx->lock);
                 ctx->io_error = 1;
+                pthread_cond_signal(&ctx->cond_reader);
+                pthread_mutex_unlock(&ctx->lock);
             } else if (ctx->checksum_enabled && ctx->compression_mode == 1) {
                 // Update Global Hash (Rotation + XOR)
                 if (LIKELY(job->result_sz >= ZXC_GLOBAL_CHECKSUM_SIZE)) {
