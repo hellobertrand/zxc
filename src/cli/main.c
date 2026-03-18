@@ -472,7 +472,7 @@ void print_help(const char* app) {
         "  -1..-5            Compression level {3}\n"
         "  -B, --block-size  Block size: 4K..2M, power of 2 {256K}\n"
         "  -T, --threads N   Number of threads (0=auto)\n"
-        "  -C, --checksum    Enable checksum\n"
+        "  -C, --checksum    Enable checksum {default}\n"
         "  -N, --no-checksum Disable checksum\n"
         "  -k, --keep        Keep input file\n"
         "  -f, --force       Force overwrite\n"
@@ -1176,7 +1176,7 @@ int main(int argc, char** argv) {
     }
 
     if (checksum == -1) {
-        checksum = (mode == MODE_INTEGRITY) ? 1 : 0;
+        checksum = (mode == MODE_BENCHMARK) ? 0 : 1;
     }
 
     /*
