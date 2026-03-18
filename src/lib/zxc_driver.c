@@ -711,6 +711,11 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     pthread_mutex_unlock(&ctx.lock);
     for (int i = 0; i < num_workers; i++) pthread_join(workers[i], NULL);
 
+    pthread_cond_destroy(&ctx.cond_writer);
+    pthread_cond_destroy(&ctx.cond_worker);
+    pthread_cond_destroy(&ctx.cond_reader);
+    pthread_mutex_destroy(&ctx.lock);
+
     // Write EOF Block if compression and no error
     if (mode == 1 && !ctx.io_error && w_args.total_bytes >= 0) {
         uint8_t final_buf[ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE];
@@ -724,7 +729,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                               checksum_enabled);
 
         if (UNLIKELY(f_out && fwrite(final_buf, 1, sizeof(final_buf), f_out) != sizeof(final_buf)))
-            return ZXC_ERROR_IO;
+            ctx.io_error = 1;
 
         w_args.total_bytes += sizeof(final_buf);
     } else if (mode == 0 && !ctx.io_error) {
