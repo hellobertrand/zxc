@@ -414,8 +414,8 @@ endif()
 include(GNUInstallDirs)
 
 configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/zxc.pc.in
-    ${CMAKE_CURRENT_BINARY_DIR}/zxc.pc
+    ${CMAKE_CURRENT_SOURCE_DIR}/libzxc.pc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
     @ONLY
 )
 
@@ -438,7 +438,7 @@ if(ZXC_BUILD_CLI)
     )
 endif()
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/zxc.pc
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
 )
 

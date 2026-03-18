@@ -3,7 +3,7 @@ exec_prefix=${prefix}
 libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
 includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 
-Name: zxc
+Name: libzxc
 Description: High-performance asymmetric lossless compression
 License: BSD 3-Clause
 Version: @PROJECT_VERSION@
