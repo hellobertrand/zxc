@@ -565,10 +565,13 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     const size_t raw_alloc_out = ((mode) ? max_out : runtime_chunk_sz) + ZXC_PAD_SIZE;
     const size_t alloc_out = (raw_alloc_out + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
 
-    size_t alloc_size =
-        ctx.ring_size * (sizeof(zxc_stream_job_t) + sizeof(int) + alloc_in + alloc_out);
+    const size_t per_job_sz = sizeof(zxc_stream_job_t) + sizeof(int) + alloc_in + alloc_out;
+    const size_t alloc_size = ctx.ring_size * per_job_sz;
     uint8_t* const mem_block = zxc_aligned_malloc(alloc_size, ZXC_CACHE_LINE_SIZE);
-    if (UNLIKELY(!mem_block)) return ZXC_ERROR_MEMORY;
+    if (UNLIKELY(!mem_block || per_job_sz > SIZE_MAX / ctx.ring_size)) {
+        zxc_aligned_free(mem_block);
+        return ZXC_ERROR_MEMORY;
+    }
 
     uint8_t* ptr = mem_block;
     ctx.jobs = (zxc_stream_job_t*)ptr;
