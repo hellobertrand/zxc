@@ -180,7 +180,7 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
     bin/zxc                          # CLI binary
     include/                         # C headers (zxc.h, zxc_buffer.h, ...)
     lib/libzxc.a                     # Static library
-    lib/pkgconfig/zxc.pc             # pkg-config support
+    lib/pkgconfig/libzxc.pc          # pkg-config support
     lib/cmake/zxc/zxcConfig.cmake    # CMake find_package(zxc) support
     ```
 
@@ -194,7 +194,7 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
     **pkg-config:**
     ```bash
-    cc myapp.c $(pkg-config --cflags --libs zxc) -o myapp
+    cc myapp.c $(pkg-config --cflags --libs libzxc) -o myapp
     ```
 
 ### Option 2: vcpkg
