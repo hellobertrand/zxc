@@ -18,9 +18,9 @@ mkdir -p "$TEST_DIR"
 
 # Test Files
 TEST_FILE="$TEST_DIR/testdata"
-TEST_FILE_XC="${TEST_FILE}.xc"
+TEST_FILE_XC="${TEST_FILE}.zxc"
 TEST_FILE_DEC="${TEST_FILE}.dec"
-PIPE_XC="$TEST_DIR/test_pipe.xc"
+PIPE_XC="$TEST_DIR/test_pipe.zxc"
 PIPE_DEC="$TEST_DIR/test_pipe.dec"
 
 # Variables for checking file existence
@@ -177,7 +177,7 @@ if [ ! -f "$TEST_FILE_XC_BASH" ]; then log_fail "Level 1 flag failed"; fi
 log_pass "Flag -1"
 
 # Force Overwrite (-f)
-touch "$TEST_DIR/out.xc"
+touch "$TEST_DIR/out.zxc"
 touch "${TEST_FILE_XC_BASH}"
 set +e
 "$ZXC_BIN" -z -k "$TEST_FILE_ARG" > /dev/null 2>&1
@@ -296,7 +296,7 @@ else
 fi
 
 # Ensure no output file is created
-if [ -f "${TEST_FILE}.xc.xc" ] || [ -f "${TEST_FILE}.xc.dec" ]; then
+if [ -f "${TEST_FILE}.zxc.zxc" ] || [ -f "${TEST_FILE}.zxc.dec" ]; then
     log_fail "Integrity check created output file unexpectedly"
 fi
 
@@ -334,18 +334,18 @@ fi
 # 12. Compression Levels (All)
 echo "Testing All Compression Levels..."
 for LEVEL in 1 2 3 4 5; do
-    "$ZXC_BIN" -$LEVEL -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_lvl${LEVEL}.xc"
-    if [ ! -f "$TEST_DIR/test_lvl${LEVEL}.xc" ]; then
+    "$ZXC_BIN" -$LEVEL -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_lvl${LEVEL}.zxc"
+    if [ ! -f "$TEST_DIR/test_lvl${LEVEL}.zxc" ]; then
         log_fail "Compression level $LEVEL failed"
     fi
     
     # Decompress and verify
-    "$ZXC_BIN" -d -c "$TEST_DIR/test_lvl${LEVEL}.xc" > "$TEST_DIR/test_lvl${LEVEL}.dec"
+    "$ZXC_BIN" -d -c "$TEST_DIR/test_lvl${LEVEL}.zxc" > "$TEST_DIR/test_lvl${LEVEL}.dec"
     if ! cmp -s "$TEST_FILE" "$TEST_DIR/test_lvl${LEVEL}.dec"; then
         log_fail "Level $LEVEL decompression mismatch"
     fi
     
-    SIZE=$(wc -c < "$TEST_DIR/test_lvl${LEVEL}.xc" | tr -d ' ')
+    SIZE=$(wc -c < "$TEST_DIR/test_lvl${LEVEL}.zxc" | tr -d ' ')
     log_pass "Level $LEVEL (Size: $SIZE bytes)"
 done
 
@@ -356,13 +356,13 @@ echo "Testing Different Data Types..."
 echo "  Testing repetitive data..."
 yes "Lorem ipsum dolor sit amet" | head -n 1000 > "$TEST_DIR/test_repetitive.txt"
 "$ZXC_BIN" -3 -k "$TEST_DIR/test_repetitive.txt"
-if [ ! -f "$TEST_DIR/test_repetitive.txt.xc" ]; then
+if [ ! -f "$TEST_DIR/test_repetitive.txt.zxc" ]; then
     log_fail "Repetitive data compression failed"
 fi
-"$ZXC_BIN" -d -c "$TEST_DIR/test_repetitive.txt.xc" > "$TEST_DIR/test_repetitive.dec"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_repetitive.txt.zxc" > "$TEST_DIR/test_repetitive.dec"
 if cmp -s "$TEST_DIR/test_repetitive.txt" "$TEST_DIR/test_repetitive.dec"; then
     SIZE_ORIG=$(wc -c < "$TEST_DIR/test_repetitive.txt" | tr -d ' ')
-    SIZE_COMP=$(wc -c < "$TEST_DIR/test_repetitive.txt.xc" | tr -d ' ')
+    SIZE_COMP=$(wc -c < "$TEST_DIR/test_repetitive.txt.zxc" | tr -d ' ')
     RATIO=$((SIZE_ORIG / SIZE_COMP))
     log_pass "Repetitive text (Ratio: ${RATIO}:1)"
 else
@@ -373,13 +373,13 @@ fi
 echo "  Testing binary zeros..."
 dd if=/dev/zero bs=1024 count=100 of="$TEST_DIR/test_zeros.bin" 2>/dev/null
 "$ZXC_BIN" -3 -k "$TEST_DIR/test_zeros.bin"
-if [ ! -f "$TEST_DIR/test_zeros.bin.xc" ]; then
+if [ ! -f "$TEST_DIR/test_zeros.bin.zxc" ]; then
     log_fail "Binary zeros compression failed"
 fi
-"$ZXC_BIN" -d -c "$TEST_DIR/test_zeros.bin.xc" > "$TEST_DIR/test_zeros.dec"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_zeros.bin.zxc" > "$TEST_DIR/test_zeros.dec"
 if cmp -s "$TEST_DIR/test_zeros.bin" "$TEST_DIR/test_zeros.dec"; then
     SIZE_ORIG=$(wc -c < "$TEST_DIR/test_zeros.bin" | tr -d ' ')
-    SIZE_COMP=$(wc -c < "$TEST_DIR/test_zeros.bin.xc" | tr -d ' ')
+    SIZE_COMP=$(wc -c < "$TEST_DIR/test_zeros.bin.zxc" | tr -d ' ')
     RATIO=$((SIZE_ORIG / SIZE_COMP))
     log_pass "Binary zeros (Ratio: ${RATIO}:1)"
 else
@@ -390,13 +390,13 @@ fi
 echo "  Testing random data (incompressible)..."
 dd if=/dev/urandom bs=1024 count=100 of="$TEST_DIR/test_random.bin" 2>/dev/null
 "$ZXC_BIN" -3 -k "$TEST_DIR/test_random.bin"
-if [ ! -f "$TEST_DIR/test_random.bin.xc" ]; then
+if [ ! -f "$TEST_DIR/test_random.bin.zxc" ]; then
     log_fail "Random data compression failed"
 fi
-"$ZXC_BIN" -d -c "$TEST_DIR/test_random.bin.xc" > "$TEST_DIR/test_random.dec"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_random.bin.zxc" > "$TEST_DIR/test_random.dec"
 if cmp -s "$TEST_DIR/test_random.bin" "$TEST_DIR/test_random.dec"; then
     SIZE_ORIG=$(wc -c < "$TEST_DIR/test_random.bin" | tr -d ' ')
-    SIZE_COMP=$(wc -c < "$TEST_DIR/test_random.bin.xc" | tr -d ' ')
+    SIZE_COMP=$(wc -c < "$TEST_DIR/test_random.bin.zxc" | tr -d ' ')
     # Random data should expand slightly (RAW blocks + headers)
     if [ $SIZE_COMP -le $((SIZE_ORIG + 200)) ]; then
         log_pass "Random data (RAW blocks, minimal expansion)"
@@ -413,7 +413,7 @@ dd if=/dev/zero bs=1M count=10 of="$TEST_DIR/test_large.bin" 2>/dev/null
 if ! "$ZXC_BIN" -3 -k "$TEST_DIR/test_large.bin"; then
     log_fail "Large file compression failed"
 fi
-if ! "$ZXC_BIN" -d -c "$TEST_DIR/test_large.bin.xc" > "$TEST_DIR/test_large.dec"; then
+if ! "$ZXC_BIN" -d -c "$TEST_DIR/test_large.bin.zxc" > "$TEST_DIR/test_large.dec"; then
     log_fail "Large file decompression failed"
 fi
 if cmp -s "$TEST_DIR/test_large.bin" "$TEST_DIR/test_large.dec"; then
@@ -435,10 +435,10 @@ fi
 echo "Testing Empty File..."
 touch "$TEST_DIR/test_empty.txt"
 "$ZXC_BIN" -3 -k "$TEST_DIR/test_empty.txt"
-if [ ! -f "$TEST_DIR/test_empty.txt.xc" ]; then
+if [ ! -f "$TEST_DIR/test_empty.txt.zxc" ]; then
     log_fail "Empty file compression failed"
 fi
-"$ZXC_BIN" -d -c "$TEST_DIR/test_empty.txt.xc" > "$TEST_DIR/test_empty.dec"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_empty.txt.zxc" > "$TEST_DIR/test_empty.dec"
 if [ ! -s "$TEST_DIR/test_empty.dec" ]; then
     log_pass "Empty file round-trip"
 else
@@ -447,9 +447,9 @@ fi
 
 # 17. Stdin Detection (No -c flag needed for compression)
 echo "Testing Stdin Auto-Detection..."
-cat "$TEST_FILE" | "$ZXC_BIN" > "$TEST_DIR/test_stdin_auto.xc" 2>/dev/null
-if [ -s "$TEST_DIR/test_stdin_auto.xc" ]; then
-    "$ZXC_BIN" -d -c "$TEST_DIR/test_stdin_auto.xc" > "$TEST_DIR/test_stdin_auto.dec"
+cat "$TEST_FILE" | "$ZXC_BIN" > "$TEST_DIR/test_stdin_auto.zxc" 2>/dev/null
+if [ -s "$TEST_DIR/test_stdin_auto.zxc" ]; then
+    "$ZXC_BIN" -d -c "$TEST_DIR/test_stdin_auto.zxc" > "$TEST_DIR/test_stdin_auto.dec"
     if cmp -s "$TEST_FILE" "$TEST_DIR/test_stdin_auto.dec"; then
         log_pass "Stdin auto-detection (compression)"
     else
@@ -463,7 +463,7 @@ fi
 echo "Testing Keep Source (-k)..."
 cp "$TEST_FILE" "$TEST_DIR/test_keep.txt"
 "$ZXC_BIN" -k "$TEST_DIR/test_keep.txt"
-if [ -f "$TEST_DIR/test_keep.txt" ] && [ -f "$TEST_DIR/test_keep.txt.xc" ]; then
+if [ -f "$TEST_DIR/test_keep.txt" ] && [ -f "$TEST_DIR/test_keep.txt.zxc" ]; then
     log_pass "Keep source file (-k)"
 else
     log_fail "Keep source file failed (source was deleted)"
@@ -474,13 +474,13 @@ echo "Testing Multi-Threading..."
 
 # 19.1 Single Thread (baseline)
 echo "  Testing single thread (-T1)..."
-"$ZXC_BIN" -3 -T1 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_T1.xc"
-if [ ! -f "$TEST_DIR/test_T1.xc" ]; then
+"$ZXC_BIN" -3 -T1 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_T1.zxc"
+if [ ! -f "$TEST_DIR/test_T1.zxc" ]; then
     log_fail "Single thread compression failed"
 fi
-"$ZXC_BIN" -d -c "$TEST_DIR/test_T1.xc" > "$TEST_DIR/test_T1.dec"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_T1.zxc" > "$TEST_DIR/test_T1.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/test_T1.dec"; then
-    SIZE_T1=$(wc -c < "$TEST_DIR/test_T1.xc" | tr -d ' ')
+    SIZE_T1=$(wc -c < "$TEST_DIR/test_T1.zxc" | tr -d ' ')
     log_pass "Single thread (-T1, Size: $SIZE_T1)"
 else
     log_fail "Single thread round-trip failed"
@@ -488,13 +488,13 @@ fi
 
 # 19.2 Multi-Thread (2 threads)
 echo "  Testing 2 threads (-T2)..."
-"$ZXC_BIN" -3 -T2 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_T2.xc"
-if [ ! -f "$TEST_DIR/test_T2.xc" ]; then
+"$ZXC_BIN" -3 -T2 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_T2.zxc"
+if [ ! -f "$TEST_DIR/test_T2.zxc" ]; then
     log_fail "2-thread compression failed"
 fi
-"$ZXC_BIN" -d -c "$TEST_DIR/test_T2.xc" > "$TEST_DIR/test_T2.dec"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_T2.zxc" > "$TEST_DIR/test_T2.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/test_T2.dec"; then
-    SIZE_T2=$(wc -c < "$TEST_DIR/test_T2.xc" | tr -d ' ')
+    SIZE_T2=$(wc -c < "$TEST_DIR/test_T2.zxc" | tr -d ' ')
     log_pass "2 threads (-T2, Size: $SIZE_T2)"
 else
     log_fail "2-thread round-trip failed"
@@ -502,13 +502,13 @@ fi
 
 # 19.3 Multi-Thread (all threads)
 echo "  Testing all threads (-T0)..."
-"$ZXC_BIN" -3 -T0 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_T0.xc"
-if [ ! -f "$TEST_DIR/test_T0.xc" ]; then
+"$ZXC_BIN" -3 -T0 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_T0.zxc"
+if [ ! -f "$TEST_DIR/test_T0.zxc" ]; then
     log_fail "all-thread compression failed"
 fi
-"$ZXC_BIN" -d -c "$TEST_DIR/test_T0.xc" > "$TEST_DIR/test_T0.dec"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_T0.zxc" > "$TEST_DIR/test_T0.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/test_T0.dec"; then
-    SIZE_T0=$(wc -c < "$TEST_DIR/test_T0.xc" | tr -d ' ')
+    SIZE_T0=$(wc -c < "$TEST_DIR/test_T0.zxc" | tr -d ' ')
     log_pass "all threads (-T0, Size: $SIZE_T0)"
 else
     log_fail "all-thread round-trip failed"
@@ -524,7 +524,7 @@ fi
 
 # 19.5 Cross-compatibility: File compressed with -T2 should decompress without -T flag
 echo "  Testing cross-compatibility..."
-"$ZXC_BIN" -d -c "$TEST_DIR/test_T2.xc" > "$TEST_DIR/test_T2_compat.dec"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_T2.zxc" > "$TEST_DIR/test_T2_compat.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/test_T2_compat.dec"; then
     log_pass "Cross-compatible decompression"
 else
@@ -534,8 +534,8 @@ fi
 # 19.6 Large file with threads (performance validation)
 echo "  Testing large file with threads..."
 dd if=/dev/zero bs=1M count=5 of="$TEST_DIR/test_large_mt.bin" 2>/dev/null
-"$ZXC_BIN" -3 -T4 -c -k "$TEST_DIR/test_large_mt.bin" > "$TEST_DIR/test_large_mt.xc"
-"$ZXC_BIN" -d -c "$TEST_DIR/test_large_mt.xc" > "$TEST_DIR/test_large_mt.dec"
+"$ZXC_BIN" -3 -T4 -c -k "$TEST_DIR/test_large_mt.bin" > "$TEST_DIR/test_large_mt.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_large_mt.zxc" > "$TEST_DIR/test_large_mt.dec"
 if cmp -s "$TEST_DIR/test_large_mt.bin" "$TEST_DIR/test_large_mt.dec"; then
     log_pass "Large file multi-threading"
 else
@@ -562,8 +562,8 @@ fi
 
 # 20.2 List mode with JSON (multiple files)
 echo "  Testing list mode with JSON (multiple files)..."
-cp "$TEST_FILE_XC_ARG" "$TEST_DIR/test2.xc"
-JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_FILE_XC_ARG" "$TEST_DIR/test2.xc")
+cp "$TEST_FILE_XC_ARG" "$TEST_DIR/test2.zxc"
+JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_FILE_XC_ARG" "$TEST_DIR/test2.zxc")
 if [[ "$JSON_OUT" == "["* ]] && \
    [[ "$JSON_OUT" == *"]" ]] && \
    [[ "$JSON_OUT" == *'"filename"'* ]] && \
@@ -646,7 +646,7 @@ cp "$TEST_FILE" "$TEST_DIR/multi1.txt"
 cp "$TEST_FILE" "$TEST_DIR/multi2.txt"
 "$ZXC_BIN" -m -3 "$TEST_DIR/multi1.txt" "$TEST_DIR/multi2.txt"
 
-if [ -f "$TEST_DIR/multi1.txt.xc" ] && [ -f "$TEST_DIR/multi2.txt.xc" ]; then
+if [ -f "$TEST_DIR/multi1.txt.zxc" ] && [ -f "$TEST_DIR/multi2.txt.zxc" ]; then
     log_pass "Compress multiple files (-m)"
 else
     log_fail "Compress multiple files failed"
@@ -655,7 +655,7 @@ fi
 # 21.2 Decompress multiple files
 echo "  Testing decompress multiple files..."
 rm -f "$TEST_DIR/multi1.txt" "$TEST_DIR/multi2.txt"
-"$ZXC_BIN" -d -m "$TEST_DIR/multi1.txt.xc" "$TEST_DIR/multi2.txt.xc"
+"$ZXC_BIN" -d -m "$TEST_DIR/multi1.txt.zxc" "$TEST_DIR/multi2.txt.zxc"
 
 if cmp -s "$TEST_FILE" "$TEST_DIR/multi1.txt" && cmp -s "$TEST_FILE" "$TEST_DIR/multi2.txt"; then
     log_pass "Decompress multiple files (-d -m)"
@@ -689,9 +689,9 @@ cp "$TEST_FILE" "$TEST_DIR/rec_test/subdir2/fileC.txt"
 echo "  Testing compress recursive directory..."
 "$ZXC_BIN" -r -3 "$TEST_DIR/rec_test"
 
-if [ -f "$TEST_DIR/rec_test/fileA.txt.xc" ] && \
-   [ -f "$TEST_DIR/rec_test/subdir1/fileB.txt.xc" ] && \
-   [ -f "$TEST_DIR/rec_test/subdir2/fileC.txt.xc" ]; then
+if [ -f "$TEST_DIR/rec_test/fileA.txt.zxc" ] && \
+   [ -f "$TEST_DIR/rec_test/subdir1/fileB.txt.zxc" ] && \
+   [ -f "$TEST_DIR/rec_test/subdir2/fileC.txt.zxc" ]; then
     log_pass "Compress recursive directory (-r)"
 else
     log_fail "Compress recursive directory failed"
@@ -716,13 +716,13 @@ echo "Testing Block Size (-B)..."
 # 23.1 Round-trip with different block sizes
 for BS in 4K 64K 512K 1M; do
     echo "  Testing block size -B $BS..."
-    "$ZXC_BIN" -3 -B "$BS" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_${BS}.xc"
-    if [ ! -s "$TEST_DIR/test_bs_${BS}.xc" ]; then
+    "$ZXC_BIN" -3 -B "$BS" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_${BS}.zxc"
+    if [ ! -s "$TEST_DIR/test_bs_${BS}.zxc" ]; then
         log_fail "Block size $BS compression produced empty output"
     fi
-    "$ZXC_BIN" -d -c "$TEST_DIR/test_bs_${BS}.xc" > "$TEST_DIR/test_bs_${BS}.dec"
+    "$ZXC_BIN" -d -c "$TEST_DIR/test_bs_${BS}.zxc" > "$TEST_DIR/test_bs_${BS}.dec"
     if cmp -s "$TEST_FILE" "$TEST_DIR/test_bs_${BS}.dec"; then
-        SIZE_BS=$(wc -c < "$TEST_DIR/test_bs_${BS}.xc" | tr -d ' ')
+        SIZE_BS=$(wc -c < "$TEST_DIR/test_bs_${BS}.zxc" | tr -d ' ')
         log_pass "Block size -B $BS (Size: $SIZE_BS)"
     else
         log_fail "Block size $BS round-trip failed"
@@ -731,16 +731,16 @@ done
 
 # 23.2 Test suffix formats (KB, M, MB)
 echo "  Testing block size suffix formats..."
-"$ZXC_BIN" -3 -B 128KB -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_128KB.xc"
-"$ZXC_BIN" -d -c "$TEST_DIR/test_bs_128KB.xc" > "$TEST_DIR/test_bs_128KB.dec"
+"$ZXC_BIN" -3 -B 128KB -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_128KB.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_bs_128KB.zxc" > "$TEST_DIR/test_bs_128KB.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/test_bs_128KB.dec"; then
     log_pass "Block size suffix KB"
 else
     log_fail "Block size suffix KB round-trip failed"
 fi
 
-"$ZXC_BIN" -3 -B 2MB -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_2MB.xc"
-"$ZXC_BIN" -d -c "$TEST_DIR/test_bs_2MB.xc" > "$TEST_DIR/test_bs_2MB.dec"
+"$ZXC_BIN" -3 -B 2MB -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_2MB.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_bs_2MB.zxc" > "$TEST_DIR/test_bs_2MB.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/test_bs_2MB.dec"; then
     log_pass "Block size suffix MB"
 else

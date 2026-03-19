@@ -12,7 +12,7 @@
 **zxc** is designed for the *"Write Once, Read Many"* paradigm. It trades compression speed to generate a bitstream specifically structured to maximize decompression speed, effectively offloading complexity from the decoder to the encoder. It aims to provide very high decompression speeds across modern architectures while maintaining competitive compression ratios.
 ZXC is particularly suited for scenarios such as Game Assets, Firmware or App Bundles where data is compressed once on a build server and decompressed millions of times on user devices.
 
-By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is provided, **zxc** will automatically append the `.xc` extension to the input filename. If no *INPUT-FILE* is provided, **zxc** will read from standard input (`stdin`) and write to standard output (`stdout`).
+By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is provided, **zxc** will automatically append the `.zxc` extension to the input filename. If no *INPUT-FILE* is provided, **zxc** will read from standard input (`stdin`) and write to standard output (`stdout`).
 
 
 ## STANDARD MODES
@@ -35,7 +35,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 ## OPTIONS
 
 **-m**, **--multiple**
-: Process multiple files at once. When specified, all subsequent non-option arguments are treated as input files. For each input file, a corresponding `.xc` file is created (or decompressed into its original name). Output cannot be written to standard output (`stdout`) when this mode is enabled.
+: Process multiple files at once. When specified, all subsequent non-option arguments are treated as input files. For each input file, a corresponding `.zxc` file is created (or decompressed into its original name). Output cannot be written to standard output (`stdout`) when this mode is enabled.
 
 **-r**, **--recursive**
 : Recursively process directories. When specified, any directory listed as an argument will be traversed, and all regular files within it will be processed (compressed or decompressed). This option implicitly enables `--multiple` mode.
@@ -93,7 +93,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
   zxc -5 data.bin
 
 **Decompress a file:**
-  zxc -d data.txt.xc
+  zxc -d data.txt.zxc
 
 **Compress multiple files independently:**
   zxc -m file1.txt file2.txt file3.txt
@@ -105,16 +105,16 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
   zxc -d -r ./my_folder
 
 **Decompress a file to standard output:**
-  zxc -dc data.txt.xc > data.txt
+  zxc -dc data.txt.zxc > data.txt
 
 **List archive information:**
-  zxc -l data.txt.xc
+  zxc -l data.txt.zxc
 
 **Compress with a custom block size (64 KB — squashfs-style):**
-  zxc -B 64K data.bin data.xc
+  zxc -B 64K data.bin data.zxc
 
 **Compress with maximum block size (2 MB):**
-  zxc -5 -B 2M data.bin data.xc
+  zxc -5 -B 2M data.bin data.zxc
 
 **Run a benchmark for 10 seconds:**
   zxc -b 10 data.txt

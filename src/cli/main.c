@@ -385,10 +385,10 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
                                              to_stdout, checksum, level, block_size, json_output);
         } else {
-            // Check if it ends with .xc to skip it if compressing to avoid double compression
+            // Check if it ends with .zxc to skip if compressing to avoid double compression
             if (mode == MODE_COMPRESS) {
                 const size_t len = strlen(full_path);
-                if (len >= 3 && strcmp(full_path + len - 3, ".xc") == 0) {
+                if (len >= 4 && strcmp(full_path + len - 4, ".zxc") == 0) {
                     continue;  // Skip already compressed files in recursive compression
                 }
             }
@@ -433,10 +433,10 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                     process_directory(full_path, mode, num_threads, keep_input, force, to_stdout,
                                       checksum, level, block_size, json_output);
             } else if (S_ISREG(st.st_mode)) {
-                // Check if it ends with .xc to skip it if compressing to avoid double compression
+                // Check if it ends with .zxc to skip if compressing to avoid double compression
                 if (mode == MODE_COMPRESS) {
                     const size_t len = strlen(full_path);
-                    if (len >= 3 && strcmp(full_path + len - 3, ".xc") == 0) {
+                    if (len >= 4 && strcmp(full_path + len - 4, ".zxc") == 0) {
                         free(full_path);
                         continue;  // Skip already compressed files in recursive compression
                     }
@@ -756,11 +756,11 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         if (out_path_override) {
             snprintf(out_path, sizeof(out_path), "%s", out_path_override);
         } else if (mode == MODE_COMPRESS) {
-            snprintf(out_path, sizeof(out_path), "%s.xc", in_path);
+            snprintf(out_path, sizeof(out_path), "%s.zxc", in_path);
         } else {
             const size_t len = strlen(in_path);
-            if (len > 3 && !strcmp(in_path + len - 3, ".xc")) {
-                const size_t base_len = len - 3;
+            if (len > 4 && !strcmp(in_path + len - 4, ".zxc")) {
+                const size_t base_len = len - 4;
                 if (base_len >= sizeof(out_path)) {
                     zxc_log("Error: Output path too long\n");
                     if (f_in) fclose(f_in);

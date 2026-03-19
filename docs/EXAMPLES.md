@@ -203,7 +203,7 @@ gcc -o stream_example stream_example.c -I include -L build -lzxc_lib -lpthread -
 
 **Usage:**
 ```bash
-./stream_example large_file.bin compressed.xc decompressed.bin
+./stream_example large_file.bin compressed.zxc decompressed.bin
 ```
 
 **Features demonstrated:**
