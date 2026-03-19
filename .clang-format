@@ -12,4 +12,3 @@ AlignConsecutiveAssignments: false
 AlignConsecutiveDeclarations: false
 
 BreakBeforeBraces: Attach
----

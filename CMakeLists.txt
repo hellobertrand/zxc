@@ -470,6 +470,36 @@ install(FILES
 )
 
 # =============================================================================
+# Code Formatting (clang-format)
+# =============================================================================
+find_program(CLANG_FORMAT clang-format)
+if(CLANG_FORMAT)
+    file(GLOB_RECURSE ZXC_FORMAT_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/*.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/*.h"
+    )
+    # Exclude vendored third-party code
+    list(FILTER ZXC_FORMAT_SOURCES EXCLUDE REGEX ".*/vendors/.*")
+
+    add_custom_target(format
+        COMMAND ${CLANG_FORMAT} --style=file -i ${ZXC_FORMAT_SOURCES}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Formatting ${CMAKE_CURRENT_SOURCE_DIR}/include and src/lib with clang-format"
+        VERBATIM
+    )
+
+    add_custom_target(format-check
+        COMMAND ${CLANG_FORMAT} --style=file --dry-run --Werror ${ZXC_FORMAT_SOURCES}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Checking formatting of include/ and src/lib/"
+        VERBATIM
+    )
+else()
+    message(STATUS "clang-format not found — format/format-check targets disabled")
+endif()
+
+# =============================================================================
 # Summary
 # =============================================================================
 message(STATUS "")
