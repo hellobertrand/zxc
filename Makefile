@@ -14,21 +14,23 @@
 #   make clean        Remove build directory
 #
 # Override build directory:  make BUILD=mybuild
+# Pass extra CMake flags:   make CMAKE_EXTRA="-DZXC_NATIVE_ARCH=OFF"
 
-BUILD    ?= build
-CMAKE    ?= cmake
-JOBS     ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+BUILD       ?= build
+CMAKE       ?= cmake
+CMAKE_EXTRA ?=
+JOBS        ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 .PHONY: all test format format-check doc clean
 
 # ── Build ────────────────────────────────────────────────────
 all:
-	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Release
+	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Release $(CMAKE_EXTRA)
 	@$(CMAKE) --build $(BUILD) -j$(JOBS)
 
 # ── Test ─────────────────────────────────────────────────────
 test:
-	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Debug -DZXC_BUILD_TESTS=ON
+	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Debug -DZXC_BUILD_TESTS=ON $(CMAKE_EXTRA)
 	@$(CMAKE) --build $(BUILD) -j$(JOBS)
 	@cd $(BUILD) && ctest --output-on-failure
 

@@ -40,10 +40,7 @@ jobs:
     - name: Build Project
       run: |
         if [ "${{ matrix.language }}" = "c-cpp" ]; then
-          mkdir -p build
-          cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
-          make -j$(nproc)
+          make
         elif [ "${{ matrix.language }}" = "rust" ]; then
           cd wrappers/rust
           cargo build --workspace --all-targets

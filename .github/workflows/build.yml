@@ -50,15 +50,18 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Configure CMake
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }}
+      - name: Build & Test (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          make CMAKE_EXTRA="${{ matrix.cmake_flags }}"
+          make test CMAKE_EXTRA="${{ matrix.cmake_flags }}"
 
-      - name: Build 
-        run: cmake --build build --config Release --parallel
-
-      - name: Test (native)
-        working-directory: build
-        run: ctest -C Release --output-on-failure
+      - name: Build & Test (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }}
+          cmake --build build --config Release --parallel
+          cd build && ctest -C Release --output-on-failure
 
       - name: Test CLI
         shell: bash
