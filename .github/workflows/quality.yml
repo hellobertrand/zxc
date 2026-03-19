@@ -15,6 +15,26 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
+  format:
+    name: Code Quality - Clang-Format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Install clang-format 22
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm-22.list
+          sudo apt-get update
+          sudo apt-get install -y clang-format-22
+
+      - name: Check Formatting
+        run: make format-check
+        env:
+          CLANG_FORMAT: clang-format-22
+
   cppcheck:
     name: Code Quality - Cppcheck
     runs-on: ubuntu-latest

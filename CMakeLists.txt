@@ -470,6 +470,41 @@ install(FILES
 )
 
 # =============================================================================
+# Code Formatting (clang-format)
+# =============================================================================
+# Allow override via environment variable (e.g., CLANG_FORMAT=clang-format-22)
+if(DEFINED ENV{CLANG_FORMAT})
+    set(CLANG_FORMAT "$ENV{CLANG_FORMAT}")
+else()
+    find_program(CLANG_FORMAT clang-format)
+endif()
+if(CLANG_FORMAT)
+    file(GLOB_RECURSE ZXC_FORMAT_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/*.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/*.h"
+    )
+    # Exclude vendored third-party code
+    list(FILTER ZXC_FORMAT_SOURCES EXCLUDE REGEX ".*/vendors/.*")
+
+    add_custom_target(format
+        COMMAND ${CLANG_FORMAT} --style=file -i ${ZXC_FORMAT_SOURCES}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Formatting ${CMAKE_CURRENT_SOURCE_DIR}/include and src/lib with clang-format"
+        VERBATIM
+    )
+
+    add_custom_target(format-check
+        COMMAND ${CLANG_FORMAT} --style=file --dry-run --Werror ${ZXC_FORMAT_SOURCES}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Checking formatting of include/ and src/lib/"
+        VERBATIM
+    )
+else()
+    message(STATUS "clang-format not found — format/format-check targets disabled")
+endif()
+
+# =============================================================================
 # Summary
 # =============================================================================
 message(STATUS "")
@@ -498,7 +533,7 @@ if(DOXYGEN_FOUND)
     # Add a 'doc' target to generate documentation (e.g. 'make doc' or 'cmake --build . --target doc')
     add_custom_target(doc
         COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "Generating API documentation with Doxygen"
         VERBATIM
     )
