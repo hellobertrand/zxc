@@ -9,20 +9,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-#ifdef _WIN32
 #include <fcntl.h>
+#include <sys/stat.h>
+#ifdef _MSC_VER
 #include <io.h>
-#include <sys/stat.h>
-#else
-#include <fcntl.h>
-#include <sys/stat.h>
+#include <share.h>
 #endif
 
 // Creates a temporary file with restricted permissions (0600).
 // Returns a FILE* opened for writing, or NULL on failure.
 static FILE* create_restricted_file(const char* path) {
-#ifdef _WIN32
+#ifdef _MSC_VER
     int fd = -1;
     _sopen_s(&fd, path, _O_CREAT | _O_WRONLY | _O_TRUNC, _SH_DENYNO, _S_IREAD | _S_IWRITE);
     return fd >= 0 ? _fdopen(fd, "w") : NULL;
