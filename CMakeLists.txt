@@ -472,7 +472,12 @@ install(FILES
 # =============================================================================
 # Code Formatting (clang-format)
 # =============================================================================
-find_program(CLANG_FORMAT clang-format)
+# Allow override via environment variable (e.g., CLANG_FORMAT=clang-format-22)
+if(DEFINED ENV{CLANG_FORMAT})
+    set(CLANG_FORMAT "$ENV{CLANG_FORMAT}")
+else()
+    find_program(CLANG_FORMAT clang-format)
+endif()
 if(CLANG_FORMAT)
     file(GLOB_RECURSE ZXC_FORMAT_SOURCES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
