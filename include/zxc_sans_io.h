@@ -144,6 +144,7 @@ ZXC_EXPORT void zxc_cctx_free(zxc_cctx_t* ctx);
  *
  * @param[out] dst The destination buffer where the header will be written.
  * @param[in] dst_capacity The total capacity of the destination buffer in bytes.
+ * @param[in] chunk_size The block size to encode in the header.
  * @param[in] has_checksum Flag indicating whether the checksum bit should be set.
  * @return The number of bytes written (ZXC_FILE_HEADER_SIZE) on success,
  *         or ZXC_ERROR_DST_TOO_SMALL if the destination capacity is insufficient.

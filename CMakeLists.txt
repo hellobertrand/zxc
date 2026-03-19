@@ -533,7 +533,7 @@ if(DOXYGEN_FOUND)
     # Add a 'doc' target to generate documentation (e.g. 'make doc' or 'cmake --build . --target doc')
     add_custom_target(doc
         COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "Generating API documentation with Doxygen"
         VERBATIM
     )
