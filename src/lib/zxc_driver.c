@@ -347,6 +347,7 @@ static void* zxc_stream_worker(void* arg) {
 
     if (zxc_cctx_init(&cctx, ctx->chunk_size, ctx->compression_mode, ctx->compression_level,
                       unified_chk) != ZXC_OK) {
+        // LCOV_EXCL_START
         zxc_cctx_free(&cctx);
         pthread_mutex_lock(&ctx->lock);
         ctx->io_error = 1;
@@ -354,6 +355,7 @@ static void* zxc_stream_worker(void* arg) {
         pthread_cond_broadcast(&ctx->cond_reader);
         pthread_mutex_unlock(&ctx->lock);
         return NULL;
+        // LCOV_EXCL_STOP
     }
 
     cctx.compression_level = ctx->compression_level;
@@ -572,8 +574,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     const size_t alloc_size = ctx.ring_size * per_job_sz;
     uint8_t* const mem_block = zxc_aligned_malloc(alloc_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem_block || per_job_sz > SIZE_MAX / ctx.ring_size)) {
+        // LCOV_EXCL_START
         zxc_aligned_free(mem_block);
         return ZXC_ERROR_MEMORY;
+        // LCOV_EXCL_STOP
     }
 
     uint8_t* ptr = mem_block;
@@ -605,8 +609,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     pthread_t* const workers = malloc((size_t)num_workers * sizeof(pthread_t));
     if (UNLIKELY(!workers)) {
+        // LCOV_EXCL_START
         zxc_aligned_free(mem_block);
         return ZXC_ERROR_MEMORY;
+        // LCOV_EXCL_STOP
     }
     int started_workers = 0;
     for (int i = 0; i < num_workers; i++) {
@@ -614,6 +620,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         started_workers++;
     }
     if (UNLIKELY(started_workers == 0)) {
+        // LCOV_EXCL_START
         pthread_cond_destroy(&ctx.cond_writer);
         pthread_cond_destroy(&ctx.cond_worker);
         pthread_cond_destroy(&ctx.cond_reader);
@@ -621,6 +628,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         free(workers);
         zxc_aligned_free(mem_block);
         return ZXC_ERROR_MEMORY;
+        // LCOV_EXCL_STOP
     }
 
     writer_args_t w_args = {&ctx, f_out, 0, 0, 0};
@@ -635,6 +643,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     }
     pthread_t writer_th;
     if (UNLIKELY(pthread_create(&writer_th, NULL, zxc_async_writer, &w_args) != 0)) {
+        // LCOV_EXCL_START
         pthread_mutex_lock(&ctx.lock);
         ctx.shutdown_workers = 1;
         pthread_cond_broadcast(&ctx.cond_worker);
@@ -647,6 +656,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         free(workers);
         zxc_aligned_free(mem_block);
         return ZXC_ERROR_MEMORY;
+        // LCOV_EXCL_STOP
     }
 
     int read_idx = 0;
