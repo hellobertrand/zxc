@@ -721,7 +721,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     FILE* f_in = stdin;
     FILE* f_out = stdout;
     char resolved_in_path[4096] = {0};
-    char out_path[1024] = {0};
+    char out_path[4096] = {0};
     char resolved_out_path[4096] = {0};
     int use_stdin = 1, use_stdout = 0;
     int created_out_file = 0;

@@ -348,6 +348,11 @@ static void* zxc_stream_worker(void* arg) {
     if (zxc_cctx_init(&cctx, ctx->chunk_size, ctx->compression_mode, ctx->compression_level,
                       unified_chk) != ZXC_OK) {
         zxc_cctx_free(&cctx);
+        pthread_mutex_lock(&ctx->lock);
+        ctx->io_error = 1;
+        pthread_cond_broadcast(&ctx->cond_writer);
+        pthread_cond_broadcast(&ctx->cond_reader);
+        pthread_mutex_unlock(&ctx->lock);
         return NULL;
     }
 
@@ -370,10 +375,10 @@ static void* zxc_stream_worker(void* arg) {
         pthread_mutex_unlock(&ctx->lock);
 
         const int res = ctx->processor(&cctx, job->in_buf, job->in_sz, job->out_buf, job->out_cap);
-        job->result_sz = UNLIKELY(res < 0) ? 0 : (size_t)res;
-        job->status = JOB_STATUS_PROCESSED;
 
         pthread_mutex_lock(&ctx->lock);
+        job->result_sz = UNLIKELY(res < 0) ? 0 : (size_t)res;
+        job->status = JOB_STATUS_PROCESSED;
         if (UNLIKELY(res < 0)) {
             ctx->io_error = 1;
             pthread_cond_broadcast(&ctx->cond_writer);
@@ -429,7 +434,10 @@ static void* zxc_async_writer(void* arg) {
 
         if (args->f && job->result_sz > 0) {
             if (fwrite(job->out_buf, 1, job->result_sz, args->f) != job->result_sz) {
+                pthread_mutex_lock(&ctx->lock);
                 ctx->io_error = 1;
+                pthread_cond_signal(&ctx->cond_reader);
+                pthread_mutex_unlock(&ctx->lock);
             } else if (ctx->checksum_enabled && ctx->compression_mode == 1) {
                 // Update Global Hash (Rotation + XOR)
                 if (LIKELY(job->result_sz >= ZXC_GLOBAL_CHECKSUM_SIZE)) {
@@ -560,10 +568,13 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     const size_t raw_alloc_out = ((mode) ? max_out : runtime_chunk_sz) + ZXC_PAD_SIZE;
     const size_t alloc_out = (raw_alloc_out + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
 
-    size_t alloc_size =
-        ctx.ring_size * (sizeof(zxc_stream_job_t) + sizeof(int) + alloc_in + alloc_out);
+    const size_t per_job_sz = sizeof(zxc_stream_job_t) + sizeof(int) + alloc_in + alloc_out;
+    const size_t alloc_size = ctx.ring_size * per_job_sz;
     uint8_t* const mem_block = zxc_aligned_malloc(alloc_size, ZXC_CACHE_LINE_SIZE);
-    if (UNLIKELY(!mem_block)) return ZXC_ERROR_MEMORY;
+    if (UNLIKELY(!mem_block || per_job_sz > SIZE_MAX / ctx.ring_size)) {
+        zxc_aligned_free(mem_block);
+        return ZXC_ERROR_MEMORY;
+    }
 
     uint8_t* ptr = mem_block;
     ctx.jobs = (zxc_stream_job_t*)ptr;
@@ -597,8 +608,20 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         zxc_aligned_free(mem_block);
         return ZXC_ERROR_MEMORY;
     }
-    for (int i = 0; i < num_workers; i++)
-        pthread_create(&workers[i], NULL, zxc_stream_worker, &ctx);
+    int started_workers = 0;
+    for (int i = 0; i < num_workers; i++) {
+        if (UNLIKELY(pthread_create(&workers[i], NULL, zxc_stream_worker, &ctx) != 0)) break;
+        started_workers++;
+    }
+    if (UNLIKELY(started_workers == 0)) {
+        pthread_cond_destroy(&ctx.cond_writer);
+        pthread_cond_destroy(&ctx.cond_worker);
+        pthread_cond_destroy(&ctx.cond_reader);
+        pthread_mutex_destroy(&ctx.lock);
+        free(workers);
+        zxc_aligned_free(mem_block);
+        return ZXC_ERROR_MEMORY;
+    }
 
     writer_args_t w_args = {&ctx, f_out, 0, 0, 0};
 
@@ -611,7 +634,20 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         w_args.total_bytes = ZXC_FILE_HEADER_SIZE;
     }
     pthread_t writer_th;
-    pthread_create(&writer_th, NULL, zxc_async_writer, &w_args);
+    if (UNLIKELY(pthread_create(&writer_th, NULL, zxc_async_writer, &w_args) != 0)) {
+        pthread_mutex_lock(&ctx.lock);
+        ctx.shutdown_workers = 1;
+        pthread_cond_broadcast(&ctx.cond_worker);
+        pthread_mutex_unlock(&ctx.lock);
+        for (int i = 0; i < started_workers; i++) pthread_join(workers[i], NULL);
+        pthread_cond_destroy(&ctx.cond_writer);
+        pthread_cond_destroy(&ctx.cond_worker);
+        pthread_cond_destroy(&ctx.cond_reader);
+        pthread_mutex_destroy(&ctx.lock);
+        free(workers);
+        zxc_aligned_free(mem_block);
+        return ZXC_ERROR_MEMORY;
+    }
 
     int read_idx = 0;
     int read_eof = 0;
@@ -670,7 +706,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                     fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE, 1, body_total, f_in);
 
                 if (UNLIKELY(body_read != body_total)) {
-                    read_eof = 1;
+                    ctx.io_error = 1;
+                    break;
                 } else if (has_crc) {
                     // Update Global Hash for Decompression
                     const uint32_t b_crc =
@@ -709,7 +746,12 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ctx.shutdown_workers = 1;
     pthread_cond_broadcast(&ctx.cond_worker);
     pthread_mutex_unlock(&ctx.lock);
-    for (int i = 0; i < num_workers; i++) pthread_join(workers[i], NULL);
+    for (int i = 0; i < started_workers; i++) pthread_join(workers[i], NULL);
+
+    pthread_cond_destroy(&ctx.cond_writer);
+    pthread_cond_destroy(&ctx.cond_worker);
+    pthread_cond_destroy(&ctx.cond_reader);
+    pthread_mutex_destroy(&ctx.lock);
 
     // Write EOF Block if compression and no error
     if (mode == 1 && !ctx.io_error && w_args.total_bytes >= 0) {
@@ -724,9 +766,9 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                               checksum_enabled);
 
         if (UNLIKELY(f_out && fwrite(final_buf, 1, sizeof(final_buf), f_out) != sizeof(final_buf)))
-            return ZXC_ERROR_IO;
-
-        w_args.total_bytes += sizeof(final_buf);
+            ctx.io_error = 1;
+        else
+            w_args.total_bytes += sizeof(final_buf);
     } else if (mode == 0 && !ctx.io_error) {
         // Verification: Expect 12-byte footer
         uint8_t footer[ZXC_FILE_FOOTER_SIZE];

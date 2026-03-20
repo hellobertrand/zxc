@@ -284,7 +284,7 @@ extern "C" {
 /** @brief Size of stdio I/O buffers (1 MB). */
 #define ZXC_IO_BUFFER_SIZE (1024 * 1024)
 /** @brief Maximum number of threads allowed for streaming operations. */
-#define ZXC_MAX_THREADS 1024
+#define ZXC_MAX_THREADS 512
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
 /** @brief Number of bits per byte (constant 8). */

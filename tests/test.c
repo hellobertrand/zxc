@@ -9,6 +9,25 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#ifdef _MSC_VER
+#include <io.h>
+#include <share.h>
+#endif
+
+// Creates a temporary file with restricted permissions (0600).
+// Returns a FILE* opened for writing, or NULL on failure.
+static FILE* create_restricted_file(const char* path) {
+#ifdef _MSC_VER
+    int fd = -1;
+    _sopen_s(&fd, path, _O_CREAT | _O_WRONLY | _O_TRUNC, _SH_DENYNO, _S_IREAD | _S_IWRITE);
+    return fd >= 0 ? _fdopen(fd, "w") : NULL;
+#else
+    const int fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR);
+    return fd >= 0 ? fdopen(fd, "w") : NULL;
+#endif
+}
 
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_error.h"
@@ -452,7 +471,7 @@ int test_io_failures() {
     // Open it in "rb" (read-only) and pass it as "wb" output file.
     // fwrite should return 0 and trigger the error.
     const char* bad_filename = "zxc_test_readonly.tmp";
-    FILE* f_dummy = fopen(bad_filename, "w");
+    FILE* f_dummy = create_restricted_file(bad_filename);
     if (f_dummy) fclose(f_dummy);
 
     FILE* f_out = fopen(bad_filename, "rb");
@@ -1744,6 +1763,142 @@ int test_stream_engine_errors() {
         }
     }
     printf("  [PASS] zxc_stream_decompress truncated -> negative\n");
+
+    // 7. Stream decompress with mid-block body truncation
+    {
+        const size_t src_sz = 64 * 1024;
+        uint8_t* src = malloc(src_sz);
+        gen_lz_data(src, src_sz);
+
+        FILE* f_comp_in = tmpfile();
+        FILE* f_comp_out = tmpfile();
+        fwrite(src, 1, src_sz, f_comp_in);
+        fseek(f_comp_in, 0, SEEK_SET);
+
+        zxc_compress_opts_t sco_mb = {.n_threads = 1, .level = 3, .checksum_enabled = 0};
+        int64_t comp_sz = zxc_stream_compress(f_comp_in, f_comp_out, &sco_mb);
+        fclose(f_comp_in);
+        free(src);
+        if (comp_sz <= 0) {
+            printf("  [SKIP] stream compress failed\n");
+            fclose(f_comp_out);
+            return 0;
+        }
+
+        fseek(f_comp_out, 0, SEEK_END);
+        const long comp_file_sz = ftell(f_comp_out);
+        // Truncate mid-block: keep header + first block header + partial body
+        const long trunc_sz = ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + 16;
+        if (trunc_sz < comp_file_sz) {
+            uint8_t* comp_data = malloc(trunc_sz);
+            fseek(f_comp_out, 0, SEEK_SET);
+            if (fread(comp_data, 1, trunc_sz, f_comp_out) == (size_t)trunc_sz) {
+                FILE* f_trunc = tmpfile();
+                FILE* f_dec_out = tmpfile();
+                fwrite(comp_data, 1, trunc_sz, f_trunc);
+                fseek(f_trunc, 0, SEEK_SET);
+
+                zxc_decompress_opts_t sdo_mb = {.n_threads = 1, .checksum_enabled = 0};
+                int64_t r = zxc_stream_decompress(f_trunc, f_dec_out, &sdo_mb);
+                fclose(f_trunc);
+                fclose(f_dec_out);
+                if (r >= 0) {
+                    printf("  [FAIL] mid-block truncated: expected < 0, got %lld\n", (long long)r);
+                    free(comp_data);
+                    fclose(f_comp_out);
+                    return 0;
+                }
+            }
+            free(comp_data);
+        }
+        fclose(f_comp_out);
+    }
+    printf("  [PASS] zxc_stream_decompress mid-block truncated -> negative\n");
+
+    // 8. Streaming fwrite error: compress real data, then decompress to a read-only file
+    {
+        const size_t src_sz = 64 * 1024;
+        uint8_t* src = malloc(src_sz);
+        gen_lz_data(src, src_sz);
+
+        FILE* f_comp_in = tmpfile();
+        FILE* f_comp_out = tmpfile();
+        fwrite(src, 1, src_sz, f_comp_in);
+        fseek(f_comp_in, 0, SEEK_SET);
+        free(src);
+
+        zxc_compress_opts_t sco_io = {.n_threads = 1, .level = 1, .checksum_enabled = 0};
+        int64_t comp_sz = zxc_stream_compress(f_comp_in, f_comp_out, &sco_io);
+        fclose(f_comp_in);
+        if (comp_sz <= 0) {
+            printf("  [SKIP] compress failed\n");
+            fclose(f_comp_out);
+            return 0;
+        }
+        fseek(f_comp_out, 0, SEEK_SET);
+
+        // Open a read-only file as the output: fwrite will fail
+        const char* ro_file = "zxc_test_stream_readonly.tmp";
+        FILE* f_ro = create_restricted_file(ro_file);
+        if (f_ro) fclose(f_ro);
+        FILE* f_bad_out = fopen(ro_file, "rb");
+        if (f_bad_out) {
+            zxc_decompress_opts_t sdo_io = {.n_threads = 1, .checksum_enabled = 0};
+            int64_t r = zxc_stream_decompress(f_comp_out, f_bad_out, &sdo_io);
+            fclose(f_bad_out);
+            if (r >= 0) {
+                printf("  [FAIL] fwrite error: expected < 0, got %lld\n", (long long)r);
+                fclose(f_comp_out);
+                remove(ro_file);
+                return 0;
+            }
+        }
+        fclose(f_comp_out);
+        remove(ro_file);
+    }
+    printf("  [PASS] zxc_stream_decompress fwrite error -> negative\n");
+
+    // 9. Multi-threaded streaming I/O failure (writer fwrite error with multiple workers)
+    {
+        const size_t src_sz = 256 * 1024;
+        uint8_t* src = malloc(src_sz);
+        gen_lz_data(src, src_sz);
+
+        FILE* f_comp_in = tmpfile();
+        FILE* f_comp_out = tmpfile();
+        fwrite(src, 1, src_sz, f_comp_in);
+        fseek(f_comp_in, 0, SEEK_SET);
+        free(src);
+
+        zxc_compress_opts_t sco_mt = {.n_threads = 4, .level = 1, .checksum_enabled = 0};
+        int64_t comp_sz = zxc_stream_compress(f_comp_in, f_comp_out, &sco_mt);
+        fclose(f_comp_in);
+        if (comp_sz <= 0) {
+            printf("  [SKIP] mt compress failed\n");
+            fclose(f_comp_out);
+            return 0;
+        }
+        fseek(f_comp_out, 0, SEEK_SET);
+
+        const char* ro_file2 = "zxc_test_stream_mt_readonly.tmp";
+        FILE* f_ro2 = create_restricted_file(ro_file2);
+        if (f_ro2) fclose(f_ro2);
+        FILE* f_bad_out2 = fopen(ro_file2, "rb");
+        if (f_bad_out2) {
+            zxc_decompress_opts_t sdo_mt = {.n_threads = 4, .checksum_enabled = 0};
+            int64_t r = zxc_stream_decompress(f_comp_out, f_bad_out2, &sdo_mt);
+            fclose(f_bad_out2);
+            if (r >= 0) {
+                printf("  [FAIL] mt fwrite error: expected < 0, got %lld\n", (long long)r);
+                fclose(f_comp_out);
+                remove(ro_file2);
+                return 0;
+            }
+        }
+        fclose(f_comp_out);
+        remove(ro_file2);
+    }
+    printf("  [PASS] zxc_stream_decompress mt fwrite error -> negative\n");
 
     printf("PASS\n\n");
     return 1;
