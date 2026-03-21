@@ -590,6 +590,18 @@ uint64_t zxc_compress_bound(const size_t input_size) {
 }
 
 /*
+ * @brief Returns the maximum compressed size for a single block (no file framing).
+ *
+ * @param[in] input_size Uncompressed block size in bytes.
+ * @return Upper bound on compressed block size, or 0 on overflow.
+ */
+uint64_t zxc_compress_block_bound(const size_t input_size) {
+    if (UNLIKELY(input_size > (SIZE_MAX - (SIZE_MAX >> 8)))) return 0;
+    // Block header + worst-case expansion (64B overhead) + checksum
+    return (uint64_t)ZXC_BLOCK_HEADER_SIZE + (uint64_t)input_size + 64 + ZXC_BLOCK_CHECKSUM_SIZE;
+}
+
+/*
  * ============================================================================
  * ERROR CODE UTILITIES
  * ============================================================================

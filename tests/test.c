@@ -2177,6 +2177,133 @@ int test_decompress_fast_vs_safe_path() {
     return 1;
 }
 
+int test_block_api() {
+    printf("=== TEST: Unit - Block API (zxc_compress_block/zxc_decompress_block) ===\n");
+
+    const size_t src_size = 128 * 1024;  // 128 KB
+    int result = 0;
+
+    /* All resources initialized to NULL for centralized cleanup. */
+    uint8_t* src = NULL;
+    uint8_t* compressed = NULL;
+    uint8_t* decompressed = NULL;
+    zxc_cctx* cctx = NULL;
+    zxc_dctx* dctx = NULL;
+
+    src = malloc(src_size);
+    if (!src) goto cleanup;
+    gen_lz_data(src, src_size);
+
+    // 1. zxc_compress_block_bound
+    const uint64_t block_bound = zxc_compress_block_bound(src_size);
+    const uint64_t file_bound = zxc_compress_bound(src_size);
+    if (block_bound == 0 || block_bound >= file_bound) {
+        printf("Failed: block_bound=%llu should be >0 and < file_bound=%llu\n",
+               (unsigned long long)block_bound, (unsigned long long)file_bound);
+        goto cleanup;
+    }
+    printf("  [PASS] block_bound=%llu < file_bound=%llu\n", (unsigned long long)block_bound,
+           (unsigned long long)file_bound);
+
+    // 2. Allocate buffers and contexts
+    compressed = malloc((size_t)block_bound);
+    decompressed = malloc(src_size);
+    cctx = zxc_create_cctx(NULL);
+    dctx = zxc_create_dctx();
+    if (!compressed || !decompressed || !cctx || !dctx) {
+        printf("Failed: Allocation failed\n");
+        goto cleanup;
+    }
+
+    // 3. Compress block (no checksum)
+    zxc_compress_opts_t copts = {.level = 3, .checksum_enabled = 0};
+    int64_t csize = zxc_compress_block(cctx, src, src_size, compressed, (size_t)block_bound, &copts);
+    if (csize <= 0) {
+        printf("Failed: zxc_compress_block returned %lld\n", (long long)csize);
+        goto cleanup;
+    }
+    printf("  [PASS] Compress block: %zu -> %lld bytes\n", src_size, (long long)csize);
+
+    // 4. Decompress block (no checksum)
+    zxc_decompress_opts_t dopts = {.checksum_enabled = 0};
+    int64_t dsize =
+        zxc_decompress_block(dctx, compressed, (size_t)csize, decompressed, src_size, &dopts);
+    if (dsize != (int64_t)src_size) {
+        printf("Failed: zxc_decompress_block returned %lld, expected %zu\n", (long long)dsize,
+               src_size);
+        goto cleanup;
+    }
+    if (memcmp(src, decompressed, src_size) != 0) {
+        printf("Failed: Content mismatch after block decompression\n");
+        goto cleanup;
+    }
+    printf("  [PASS] Decompress block: roundtrip OK (no checksum)\n");
+
+    // 5. With checksum enabled
+    copts.checksum_enabled = 1;
+    csize = zxc_compress_block(cctx, src, src_size, compressed, (size_t)block_bound, &copts);
+    if (csize <= 0) {
+        printf("Failed: zxc_compress_block with checksum returned %lld\n", (long long)csize);
+        goto cleanup;
+    }
+    dopts.checksum_enabled = 1;
+    dsize = zxc_decompress_block(dctx, compressed, (size_t)csize, decompressed, src_size, &dopts);
+    if (dsize != (int64_t)src_size || memcmp(src, decompressed, src_size) != 0) {
+        printf("Failed: Roundtrip with checksum failed\n");
+        goto cleanup;
+    }
+    printf("  [PASS] Decompress block: roundtrip OK (with checksum)\n");
+
+    // 6. Error cases
+    if (zxc_compress_block(NULL, src, src_size, compressed, (size_t)block_bound, &copts) >= 0) {
+        printf("Failed: Should fail with NULL cctx\n");
+        goto cleanup;
+    }
+    if (zxc_compress_block(cctx, NULL, src_size, compressed, (size_t)block_bound, &copts) >= 0) {
+        printf("Failed: Should fail with NULL src\n");
+        goto cleanup;
+    }
+    if (zxc_decompress_block(NULL, compressed, (size_t)csize, decompressed, src_size, &dopts) >=
+        0) {
+        printf("Failed: Should fail with NULL dctx\n");
+        goto cleanup;
+    }
+    printf("  [PASS] Error cases handled correctly\n");
+
+    // 7. Context reuse across multiple blocks
+    for (int i = 0; i < 3; i++) {
+        gen_lz_data(src, src_size);
+        src[0] = (uint8_t)i;
+
+        copts.checksum_enabled = 0;
+        csize =
+            zxc_compress_block(cctx, src, src_size, compressed, (size_t)block_bound, &copts);
+        if (csize <= 0) {
+            printf("Failed: Reuse iteration %d compress failed\n", i);
+            goto cleanup;
+        }
+        dopts.checksum_enabled = 0;
+        dsize = zxc_decompress_block(dctx, compressed, (size_t)csize, decompressed, src_size,
+                                     &dopts);
+        if (dsize != (int64_t)src_size || memcmp(src, decompressed, src_size) != 0) {
+            printf("Failed: Reuse iteration %d roundtrip failed\n", i);
+            goto cleanup;
+        }
+    }
+    printf("  [PASS] Context reuse: 3 independent blocks OK\n");
+
+    printf("PASS\n\n");
+    result = 1;
+
+cleanup:
+    zxc_free_cctx(cctx);  /* safe with NULL */
+    zxc_free_dctx(dctx);  /* safe with NULL */
+    free(compressed);
+    free(decompressed);
+    free(src);
+    return result;
+}
+
 int test_opaque_context_api() {
     printf("=== TEST: Opaque Context API (zxc_create_cctx / zxc_create_dctx) ===\n");
 
@@ -2393,6 +2520,7 @@ int main() {
     if (!test_decompress_fast_vs_safe_path()) total_failures++;
 
     if (!test_opaque_context_api()) total_failures++;
+    if (!test_block_api()) total_failures++;
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);
