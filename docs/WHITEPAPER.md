@@ -681,7 +681,30 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 | snappy 1.2.2            |   611 MB/s |  1592 MB/s |   101464727 | 47.87 | 12 files|
 
 
-## 8. Strategic Implementation
+## 8. Compression Ratio Benchmarks
+
+To evaluate compression effectiveness across diverse data distributions, the compressed size is reported as a percentage of the original input for each corpus. All measurements were performed using lzbench 2.2.1 (inikep), compiled with GCC 13.3.0 and *MOREFLAGS="-march=native"* on Linux 64-bit Ubuntu 24.04. The reference platform is an AMD EPYC 7763 (x86_64). ZXC was configured with its default block size of 256KB. Lower values indicate superior compression density.
+
+| Corpus | zxc 0.9.0 -1 | zxc 0.9.0 -2 | zxc 0.9.0 -3 | zxc 0.9.0 -4 | zxc 0.9.0 -5 | lz4 1.10.0 | lz4 1.10.0 --fast -17 | lz4hc 1.10.0 -12 | zstd 1.5.7 -1 | zstd 1.5.7 --fast --1 | Source |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 4SICS-GeekLounge-151020 | 23.66 | 24.74 | 19.76 | 19.73 | 19.39 | 21.82 | 29.02 | 17.54 | 12.62 | 13.64 | [www.netresec.com](https://www.netresec.com/?page=PCAP4SICS) |
+| 4SICS-GeekLounge-151022 | 40.73 | 39.84 | 33.21 | 32.85 | 31.94 | 37.35 | 48.38 | 30.15 | 23.51 | 24.34 | [www.netresec.com](https://www.netresec.com/?page=PCAP4SICS) |
+| Calgary Large | 80.07 | 62.03 | 48.51 | 44.88 | 42.83 | 51.97 | 74.37 | 38.38 | 35.80 | 46.49 | [data-compression.info](https://www.data-compression.info/Corpora/CalgaryCorpus/) |
+| Canterbury | 59.45 | 52.64 | 38.71 | 35.21 | 33.69 | 43.73 | 58.12 | 33.27 | 24.43 | 31.42 | [corpus.canterbury.ac.nz](https://corpus.canterbury.ac.nz/) |
+| Canterbury Artificial | 34.64 | 34.65 | 34.64 | 34.64 | 34.64 | 33.74 | 33.75 | 33.70 | 25.04 | 33.36 | [corpus.canterbury.ac.nz](https://corpus.canterbury.ac.nz/) |
+| Canterbury Large | 71.75 | 59.85 | 44.16 | 43.52 | 39.54 | 51.97 | 66.89 | 33.78 | 31.13 | 37.05 | [corpus.canterbury.ac.nz](https://corpus.canterbury.ac.nz/) |
+| employees_100KB | 14.70 | 13.33 | 11.20 | 11.20 | 9.42 | 12.70 | 16.96 | 8.51 | 7.97 | 9.52 | [sample.json-format.com](https://sample.json-format.com/) |
+| employees_10KB | 29.68 | 28.23 | 21.51 | 21.51 | 18.85 | 22.02 | 30.07 | 16.92 | 14.44 | 17.22 | [sample.json-format.com](https://sample.json-format.com/) |
+| employees_500MB | 13.37 | 12.17 | 10.28 | 10.22 | 8.70 | 11.44 | 15.34 | 7.09 | 6.42 | 7.48 | [sample.json-format.com](https://sample.json-format.com/) |
+| employees_50MB | 13.36 | 12.17 | 10.27 | 10.21 | 8.69 | 11.43 | 15.36 | 7.09 | 6.42 | 7.48 | [sample.json-format.com](https://sample.json-format.com/) |
+| enwik8 | 90.27 | 69.87 | 53.84 | 49.22 | 47.43 | 57.26 | 86.21 | 41.91 | 40.66 | 51.62 | [www.mattmahoney.net](https://www.mattmahoney.net/dc/textdata.html) |
+| enwik9 | 78.60 | 61.57 | 46.82 | 43.84 | 42.25 | 50.92 | 76.73 | 37.17 | 35.68 | 45.30 | [www.mattmahoney.net](https://www.mattmahoney.net/dc/textdata.html) |
+| Manzini (tar) | 52.68 | 45.06 | 34.17 | 32.60 | 30.94 | 37.47 | 54.61 | 26.49 | 23.91 | 30.66 | [www.unsw.adfa.edu.au](https://people.unipmn.it/manzini/lightweight/corpus) |
+| Silesia | 61.53 | 54.10 | 46.35 | 43.27 | 40.60 | 47.60 | 62.15 | 36.46 | 34.55 | 41.02 | [https://sun.aei.polsl.pl](https://sun.aei.polsl.pl/~sdeor/index.php?page=silesia) |
+| Taxi (raw) | 23.02 | 22.27 | 17.95 | 17.81 | 15.40 | 21.20 | 21.56 | 11.37 | 12.17 | 16.38 | [www.kaggle.com](https://www.kaggle.com/datasets/shayanshahid997/yellow-taxi-trip-record-of-january-2024/data?select=yellow_tripdata_2024-01.parquet) |
+
+
+## 9. Strategic Implementation
 
 ZXC is designed to adapt to various deployment scenarios by selecting the appropriate compression level:
 
@@ -694,6 +717,6 @@ ZXC is designed to adapt to various deployment scenarios by selecting the approp
 *   **Data Archival (Levels 4-5)**:
     A high-efficiency alternative for cold storage, providing better compression ratios than LZ4 and significantly faster retrieval speeds than Zstd.
 
-## 9. Conclusion
+## 10. Conclusion
 
 ZXC redefines asset distribution by prioritizing the end-user experience. Through its asymmetric design and modular architecture, it shifts computational cost to the build pipeline, unlocking unparalleled decompression speeds on ARM devices. This efficiency translates directly into faster load times, reduced battery consumption, and a smoother user experience, making ZXC a best choice for modern, high-performance deployment constraints.
