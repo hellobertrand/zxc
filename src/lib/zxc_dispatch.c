@@ -806,8 +806,8 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_t src_size,
                            void* RESTRICT dst, const size_t dst_capacity,
                            const zxc_compress_opts_t* opts) {
-    if (UNLIKELY(!cctx)) return ZXC_ERROR_NULL_INPUT;
-    if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!cctx || !src || !dst || src_size == 0 || dst_capacity == 0))
+        return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : cctx->stored_checksum;
     const int level = (opts && opts->level > 0) ? opts->level : cctx->stored_level;
@@ -822,7 +822,10 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
 
     /* Re-init only when block_size changed. */
     if (!cctx->initialized || cctx->last_block_size != effective_block_size) {
-        if (cctx->initialized) zxc_cctx_free(&cctx->inner);
+        if (cctx->initialized) {
+            zxc_cctx_free(&cctx->inner);
+            cctx->initialized = 0;
+        }
         if (UNLIKELY(zxc_cctx_init(&cctx->inner, effective_block_size, 1, level,
                                    checksum_enabled) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
@@ -842,8 +845,8 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
 int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
                              void* RESTRICT dst, const size_t dst_capacity,
                              const zxc_decompress_opts_t* opts) {
-    if (UNLIKELY(!dctx)) return ZXC_ERROR_NULL_INPUT;
-    if (UNLIKELY(!src || !dst || src_size < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!dctx || !src || !dst || src_size < ZXC_BLOCK_HEADER_SIZE))
+        return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
 
@@ -853,7 +856,10 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
      */
     const size_t block_size = dst_capacity;
     if (!dctx->initialized || dctx->last_block_size != block_size) {
-        if (dctx->initialized) zxc_cctx_free(&dctx->inner);
+        if (dctx->initialized) {
+            zxc_cctx_free(&dctx->inner);
+            dctx->initialized = 0;
+        }
         if (UNLIKELY(zxc_cctx_init(&dctx->inner, block_size, 0, 0, checksum_enabled) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         dctx->last_block_size = block_size;
