@@ -460,9 +460,11 @@ static void* zxc_async_writer(void* arg) {
 
         // Update progress callback
         if (ctx->progress_cb) {
+            // LCOV_EXCL_START
             args->bytes_processed += ctx->compression_mode == 1 ? job->in_sz : job->result_sz;
             ctx->progress_cb(args->bytes_processed, ctx->total_input_bytes,
                              ctx->progress_user_data);
+            // LCOV_EXCL_STOP
         }
 
         pthread_mutex_lock(&ctx->lock);
@@ -525,6 +527,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     // For decompression, the CLI precomputes the size and passes it via user_data
     uint64_t total_file_size = 0;
     if (mode == 1 && progress_cb) {
+        // LCOV_EXCL_START
         const long long saved_pos = ftello(f_in);
         if (saved_pos >= 0) {
             if (fseeko(f_in, 0, SEEK_END) == 0) {
@@ -533,6 +536,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                 fseeko(f_in, saved_pos, SEEK_SET);
             }
         }
+        // LCOV_EXCL_STOP
     }
 
     if (mode == 0) {
