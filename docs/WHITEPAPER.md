@@ -700,7 +700,7 @@ To evaluate compression effectiveness across diverse data distributions, the com
 | enwik8 | 90.27 | 69.87 | 53.84 | 49.22 | 47.43 | 57.26 | 86.21 | 41.91 | 40.66 | 51.62 | [www.mattmahoney.net](https://www.mattmahoney.net/dc/textdata.html) |
 | enwik9 | 78.60 | 61.57 | 46.82 | 43.84 | 42.25 | 50.92 | 76.73 | 37.17 | 35.68 | 45.30 | [www.mattmahoney.net](https://www.mattmahoney.net/dc/textdata.html) |
 | Manzini (tar) | 52.68 | 45.06 | 34.17 | 32.60 | 30.94 | 37.47 | 54.61 | 26.49 | 23.91 | 30.66 | [www.unsw.adfa.edu.au](https://people.unipmn.it/manzini/lightweight/corpus) |
-| Silesia | 61.53 | 54.10 | 46.35 | 43.27 | 40.60 | 47.60 | 62.15 | 36.46 | 34.55 | 41.02 | [https://sun.aei.polsl.pl](https://sun.aei.polsl.pl/~sdeor/index.php?page=silesia) |
+| Silesia | 61.53 | 54.10 | 46.35 | 43.27 | 40.60 | 47.60 | 62.15 | 36.46 | 34.55 | 41.02 | [sun.aei.polsl.pl](https://sun.aei.polsl.pl/~sdeor/index.php?page=silesia) |
 | Taxi (raw) | 23.02 | 22.27 | 17.95 | 17.81 | 15.40 | 21.20 | 21.56 | 11.37 | 12.17 | 16.38 | [www.kaggle.com](https://www.kaggle.com/datasets/shayanshahid997/yellow-taxi-trip-record-of-january-2024/data?select=yellow_tripdata_2024-01.parquet) |
 
 
