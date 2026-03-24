@@ -1,6 +1,6 @@
 # ZXC API & ABI Reference
 
-**Library version**: 0.9.1
+**Library version**: 0.10.0
 **SOVERSION**: 2  
 **License**: BSD-3-Clause
 
@@ -22,12 +22,13 @@ For the on-disk binary format see [`FORMAT.md`](FORMAT.md).
 - [5. Constants and Enumerations](#5-constants-and-enumerations)
 - [6. Type Definitions](#6-type-definitions)
 - [7. Buffer API](#7-buffer-api)
-- [8. Reusable Context API](#8-reusable-context-api)
-- [9. Streaming API](#9-streaming-api)
-- [10. Sans-IO API](#10-sans-io-api)
-- [11. Error Handling](#11-error-handling)
-- [12. Thread Safety](#12-thread-safety)
-- [13. Exported Symbols Summary](#13-exported-symbols-summary)
+- [8. Block API](#8-block-api)
+- [9. Reusable Context API](#9-reusable-context-api)
+- [10. Streaming API](#10-streaming-api)
+- [11. Sans-IO API](#11-sans-io-api)
+- [12. Error Handling](#12-error-handling)
+- [13. Thread Safety](#13-thread-safety)
+- [14. Exported Symbols Summary](#14-exported-symbols-summary)
 
 ---
 
@@ -84,7 +85,7 @@ libzxc.so.{SOVERSION}.{MAJOR}.{MINOR}.{PATCH}
 | Field | Description | Current |
 |-------|-------------|---------|
 | `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **2** |
-| `VERSION` | Tracks the library release. | **0.9.1** |
+| `VERSION` | Tracks the library release. | **0.10.0** |
 
 **Compatibility rule**: any binary compiled against SOVERSION N will load against
 any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
@@ -93,8 +94,8 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` -> `libzxc.so.2` -> `libzxc.so.0.9.1` |
-| macOS | `libzxc.dylib` -> `libzxc.2.dylib` -> `libzxc.0.9.1.dylib` |
+| Linux | `libzxc.so` → `libzxc.so.2` → `libzxc.so.0.10.0` |
+| macOS | `libzxc.dylib` → `libzxc.2.dylib` → `libzxc.0.10.0.dylib` |
 | Windows | `zxc.dll` + `zxc.lib` (import) |
 
 ---
@@ -120,9 +121,9 @@ Defined in `zxc_constants.h`:
 
 ```c
 #define ZXC_VERSION_MAJOR     0
-#define ZXC_VERSION_MINOR     9
-#define ZXC_VERSION_PATCH     1
-#define ZXC_LIB_VERSION_STR   "0.9.1"
+#define ZXC_VERSION_MINOR     10
+#define ZXC_VERSION_PATCH     0
+#define ZXC_LIB_VERSION_STR   "0.10.0"
 ```
 
 ### 5.2 Block Size Constraints
@@ -336,7 +337,66 @@ Reads the original size from the file footer without decompressing.
 
 ---
 
-## 8. Reusable Context API
+## 8. Block API
+
+Declared in `zxc_buffer.h`. Single-block compression and decompression
+**without file framing** (no file header, EOF block, or footer). Designed
+for filesystem integrations (DwarFS, EROFS, SquashFS) where the caller
+manages its own block indexing.
+
+Output format: `block_header (8 B)` + compressed payload + optional `checksum (4 B)`.
+
+### `zxc_compress_block_bound`
+
+```c
+ZXC_EXPORT uint64_t zxc_compress_block_bound(size_t input_size);
+```
+
+Returns the maximum compressed size for a single block.  
+Unlike `zxc_compress_bound()`, this does **not** include file header,
+EOF block, or footer overhead.
+
+**Returns**: upper bound in bytes, or `0` on overflow.
+
+### `zxc_compress_block`
+
+```c
+ZXC_EXPORT int64_t zxc_compress_block(
+    zxc_cctx*                  cctx,
+    const void*                src,
+    size_t                     src_size,
+    void*                      dst,
+    size_t                     dst_capacity,
+    const zxc_compress_opts_t* opts       // NULL = defaults
+);
+```
+
+Compresses a single block using a reusable context.  
+Only `level`, `block_size`, and `checksum_enabled` fields of `opts` are used.
+
+**Returns**: compressed block size (> 0) on success, or negative `zxc_error_t`.
+
+### `zxc_decompress_block`
+
+```c
+ZXC_EXPORT int64_t zxc_decompress_block(
+    zxc_dctx*                    dctx,
+    const void*                  src,
+    size_t                       src_size,
+    void*                        dst,
+    size_t                       dst_capacity,
+    const zxc_decompress_opts_t* opts     // NULL = defaults
+);
+```
+
+Decompresses a single block produced by `zxc_compress_block()`.  
+Only `checksum_enabled` is used.
+
+**Returns**: decompressed size (> 0) on success, or negative `zxc_error_t`.
+
+---
+
+## 9. Reusable Context API
 
 Declared in `zxc_buffer.h`. Eliminates per-call allocation overhead for
 hot-path integrations (filesystem plug-ins, batch processing).
@@ -410,7 +470,7 @@ Same as `zxc_decompress()` but reuses buffers from `dctx`.
 
 ---
 
-## 9. Streaming API
+## 10. Streaming API
 
 Declared in `zxc_stream.h`. Multi-threaded, `FILE*`-based pipeline
 (reader -> workers -> writer).
@@ -456,7 +516,7 @@ Reads the original size from the file footer. File position is restored.
 
 ---
 
-## 10. Sans-IO API
+## 11. Sans-IO API
 
 Declared in `zxc_sans_io.h` (not included by `zxc.h` - opt-in).
 Low-level primitives for building custom compression drivers.
@@ -557,7 +617,7 @@ Writes the 12-byte footer (original size + optional global hash).
 
 ---
 
-## 11. Error Handling
+## 12. Error Handling
 
 ### `zxc_error_name`
 
@@ -582,11 +642,12 @@ if (result < 0) {
 
 ---
 
-## 12. Thread Safety
+## 13. Thread Safety
 
 | API Layer | Safe to call concurrently? | Notes |
 |-----------|---------------------------|-------|
 | **Buffer API** | Yes (stateless) | Each call is self-contained.  Multiple threads can compress/decompress simultaneously with independent buffers. |
+| **Block API** | Per-context | Uses `zxc_cctx` / `zxc_dctx` — same rule as Context API.  Create one context per thread. |
 | **Context API** | Per-context | A single `zxc_cctx` / `zxc_dctx` must not be shared between threads.  Create one context per thread. |
 | **Streaming API** | Per-call | Each `zxc_stream_*` call manages its own thread pool internally.  Do not call from multiple threads on the same `FILE*`. |
 | **Sans-IO API** | Per-context | Same rule as context API - one `zxc_cctx_t` per thread. |
@@ -594,9 +655,9 @@ if (result < 0) {
 
 ---
 
-## 13. Exported Symbols Summary
+## 14. Exported Symbols Summary
 
-The shared library exports exactly **21 symbols** (verified with `nm -gU`):
+The shared library exports exactly **24 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -604,23 +665,26 @@ The shared library exports exactly **21 symbols** (verified with `nm -gU`):
 | 2 | `zxc_compress` | Buffer | `zxc_buffer.h` |
 | 3 | `zxc_decompress` | Buffer | `zxc_buffer.h` |
 | 4 | `zxc_get_decompressed_size` | Buffer | `zxc_buffer.h` |
-| 5 | `zxc_create_cctx` | Context | `zxc_buffer.h` |
-| 6 | `zxc_free_cctx` | Context | `zxc_buffer.h` |
-| 7 | `zxc_compress_cctx` | Context | `zxc_buffer.h` |
-| 8 | `zxc_create_dctx` | Context | `zxc_buffer.h` |
-| 9 | `zxc_free_dctx` | Context | `zxc_buffer.h` |
-| 10 | `zxc_decompress_dctx` | Context | `zxc_buffer.h` |
-| 11 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
-| 12 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
-| 13 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
-| 14 | `zxc_cctx_init` | Sans-IO | `zxc_sans_io.h` |
-| 15 | `zxc_cctx_free` | Sans-IO | `zxc_sans_io.h` |
-| 16 | `zxc_write_file_header` | Sans-IO | `zxc_sans_io.h` |
-| 17 | `zxc_read_file_header` | Sans-IO | `zxc_sans_io.h` |
-| 18 | `zxc_write_block_header` | Sans-IO | `zxc_sans_io.h` |
-| 19 | `zxc_read_block_header` | Sans-IO | `zxc_sans_io.h` |
-| 20 | `zxc_write_file_footer` | Sans-IO | `zxc_sans_io.h` |
-| 21 | `zxc_error_name` | Error | `zxc_error.h` |
+| 5 | `zxc_compress_block_bound` | Block | `zxc_buffer.h` |
+| 6 | `zxc_compress_block` | Block | `zxc_buffer.h` |
+| 7 | `zxc_decompress_block` | Block | `zxc_buffer.h` |
+| 8 | `zxc_create_cctx` | Context | `zxc_buffer.h` |
+| 9 | `zxc_free_cctx` | Context | `zxc_buffer.h` |
+| 10 | `zxc_compress_cctx` | Context | `zxc_buffer.h` |
+| 11 | `zxc_create_dctx` | Context | `zxc_buffer.h` |
+| 12 | `zxc_free_dctx` | Context | `zxc_buffer.h` |
+| 13 | `zxc_decompress_dctx` | Context | `zxc_buffer.h` |
+| 14 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
+| 15 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
+| 16 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
+| 17 | `zxc_cctx_init` | Sans-IO | `zxc_sans_io.h` |
+| 18 | `zxc_cctx_free` | Sans-IO | `zxc_sans_io.h` |
+| 19 | `zxc_write_file_header` | Sans-IO | `zxc_sans_io.h` |
+| 20 | `zxc_read_file_header` | Sans-IO | `zxc_sans_io.h` |
+| 21 | `zxc_write_block_header` | Sans-IO | `zxc_sans_io.h` |
+| 22 | `zxc_read_block_header` | Sans-IO | `zxc_sans_io.h` |
+| 23 | `zxc_write_file_footer` | Sans-IO | `zxc_sans_io.h` |
+| 24 | `zxc_error_name` | Error | `zxc_error.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon`, `_avx2`, `_avx512`) are compiled with
