@@ -831,10 +831,6 @@ static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
     // AVX2/AVX512: Single 128-bit unaligned load/store
     _mm_storeu_si128((__m128i*)dst, _mm_loadu_si128((const __m128i*)src));
-#elif defined(ZXC_USE_SVE2)
-    // SVE2: Predicated 16-byte load/store
-    svbool_t pg = svwhilelt_b8((uint64_t)0, (uint64_t)16);
-    svst1_u8(pg, (uint8_t*)dst, svld1_u8(pg, (const uint8_t*)src));
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));
 #else
@@ -854,10 +850,6 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
     // AVX2/AVX512: Single 256-bit (32 byte) unaligned load/store
     _mm256_storeu_si256((__m256i*)dst, _mm256_loadu_si256((const __m256i*)src));
-#elif defined(ZXC_USE_SVE2)
-    // SVE2: Predicated 32-byte load/store (uses full VL when >= 256 bits)
-    svbool_t pg = svwhilelt_b8((uint64_t)0, (uint64_t)32);
-    svst1_u8(pg, (uint8_t*)dst, svld1_u8(pg, (const uint8_t*)src));
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     // NEON: Two 128-bit (16 byte) unaligned load/stores
     vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));
