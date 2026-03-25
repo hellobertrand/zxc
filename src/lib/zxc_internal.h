@@ -868,6 +868,48 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
 }
 
 /**
+ * @brief Copies `len` bytes from src to dst using the widest available SIMD.
+ *
+ * Vector-Length Agnostic (VLA) bulk copy: on SVE2, each iteration copies
+ * svcntb() bytes (32B @ VL=256, 64B @ VL=512, 128B @ VL=1024), adapting
+ * automatically to the hardware vector length. On other architectures,
+ * falls back to 32-byte wild copies.
+ *
+ * @warning Source and destination must NOT overlap. The caller must ensure
+ *          at least ZXC_PAD_SIZE bytes of safe overrun space past dst+len.
+ *
+ * @param[out] dst  Destination pointer.
+ * @param[in]  src  Source pointer.
+ * @param[in]  len  Number of bytes to copy (must be > 0).
+ */
+static ZXC_ALWAYS_INLINE void zxc_wild_copy(uint8_t* dst, const uint8_t* src, size_t len) {
+#if defined(ZXC_USE_SVE2)
+    // SVE2 VLA: each iteration copies svcntb() bytes (VL-dependent).
+    // The final iteration uses a predicate to handle the tail exactly.
+    const uint64_t vl = svcntb();
+    while (len > vl) {
+        svbool_t pg = svptrue_b8();
+        svst1_u8(pg, dst, svld1_u8(pg, src));
+        dst += vl;
+        src += vl;
+        len -= vl;
+    }
+    // Tail: predicated copy for remaining bytes
+    svbool_t pg = svwhilelt_b8((uint64_t)0, (uint64_t)len);
+    svst1_u8(pg, dst, svld1_u8(pg, src));
+#else
+    // Fallback: 32-byte wild copies (AVX2/NEON/scalar)
+    while (len > ZXC_PAD_SIZE) {
+        zxc_copy32(dst, src);
+        dst += ZXC_PAD_SIZE;
+        src += ZXC_PAD_SIZE;
+        len -= ZXC_PAD_SIZE;
+    }
+    zxc_copy32(dst, src);
+#endif
+}
+
+/**
  * @brief Counts trailing zeros in a 32-bit unsigned integer.
  *
  * This function returns the number of contiguous zero bits starting from the
