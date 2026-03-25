@@ -215,7 +215,7 @@ static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
 #endif
 }
 
-#if defined(ZXC_USE_SVE2) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+#if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
 /**
  * @brief Computes the prefix sum of a 128-bit vector of 32-bit unsigned
  * integers using NEON intrinsics.
@@ -419,7 +419,29 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
                 running_val = ((uint32_t*)&batch_dst[k])[7];  // Update running_val
             }
 
-#elif defined(ZXC_USE_SVE2) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+#elif defined(ZXC_USE_SVE2)
+            // SVE2 VLA prefix-sum: processes svcntw() elements per iteration
+            // (8 on Neoverse V2 @ VL=256b, 16 @ VL=512b, etc.)
+            {
+                const uint64_t vl = svcntw();
+                uint32_t partial[ZXC_NUM_DEC_BATCH];
+                for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += (int)vl) {
+                    svbool_t pg = svptrue_b32();
+
+                    // Store deltas to partial buffer for prefix-sum
+                    svst1_u32(pg, &partial[k], svld1_u32(pg, &deltas[k]));
+
+                    // In-place prefix-sum on VL elements (scalar, L1-hot)
+                    partial[k] += running_val;
+                    for (uint64_t j = 1; j < vl; j++) partial[k + j] += partial[k + j - 1];
+
+                    // Reload and store to output
+                    svst1_u32(pg, &batch_dst[k], svld1_u32(pg, &partial[k]));
+                    running_val = partial[k + vl - 1];
+                }
+            }
+
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
             uint32x4_t v_run = vdupq_n_u32(running_val);  // Broadcast running total
             for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 4) {
                 uint32x4_t v_deltas = vld1q_u32(&deltas[k]);  // Load 4 deltas
