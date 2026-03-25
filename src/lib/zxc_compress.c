@@ -235,6 +235,91 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         attempts--;
     }
 
+#if defined(ZXC_USE_SVE2)
+    // SVE2 Gather-Load: batch-collect chain indices, parallel tag comparison.
+    // Collect up to 8 candidates at a time, gather their tags with one instruction.
+    {
+        uint32_t candidates[8];  // Indices collected from chain walk
+        while (match_idx > 0 && attempts > 0) {
+            // Phase 1: Collect candidate indices from the chain (sequential, fast)
+            int n_cand = 0;
+            uint32_t walk_idx = match_idx;
+            while (walk_idx > 0 && n_cand < 8 && attempts-- >= 0) {
+                if (UNLIKELY(cur_pos - walk_idx > ZXC_LZ_MAX_DIST)) {
+                    walk_idx = 0;
+                    break;
+                }
+                candidates[n_cand++] = walk_idx;
+                const uint16_t delta = chain_table[walk_idx];
+                walk_idx = (delta != 0) ? (walk_idx - delta) : 0;
+            }
+            match_idx = walk_idx;  // Resume point for next batch
+
+            if (n_cand == 0) break;
+
+            // Phase 2: Gather-load tags from src for all candidates in parallel
+            svbool_t pg = svwhilelt_b32((uint64_t)0, (uint64_t)n_cand);
+            svuint32_t v_indices = svld1_u32(pg, candidates);
+
+            // Multiply by 1 (byte offset = index itself, since src is uint8_t*)
+            // Load 4 bytes at each src+candidate[i] position
+            svuint32_t v_tags = svld1_gather_u32offset_u32(pg, (const uint32_t*)src, v_indices);
+
+            // Compare all tags against cur_val
+            svbool_t tag_hits = svcmpeq_u32(pg, v_tags, svdup_n_u32(cur_val));
+
+            // Phase 3: Process hits (typically 0-2 out of 8)
+            if (svptest_any(pg, tag_hits)) {
+                for (int ci = 0; ci < n_cand; ci++) {
+                    if (!svptest_any(svwhilelt_b32((uint64_t)ci, (uint64_t)(ci + 1)), tag_hits))
+                        continue;
+
+                    const uint32_t cand_idx = candidates[ci];
+                    const uint8_t* ref = src + cand_idx;
+
+                    // Verify next-byte filter
+                    if (ref[best.len] != ip[best.len]) continue;
+
+                    uint32_t mlen = sizeof(uint32_t);
+                    const uint8_t* limit_8 = iend - sizeof(uint64_t);
+                    const uint8_t* scalar_limit = ip + mlen + 64;
+                    if (scalar_limit > limit_8) scalar_limit = limit_8;
+
+                    while (ip + mlen < scalar_limit) {
+                        uint64_t diff = zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen);
+                        if (diff == 0)
+                            mlen += sizeof(uint64_t);
+                        else {
+                            mlen += (zxc_ctz64(diff) >> 3);
+                            goto _sve2_match_done;
+                        }
+                    }
+
+                    // SVE2 long match extension
+                    while (ip + mlen < iend) {
+                        const uint64_t remaining = (uint64_t)(iend - (ip + mlen));
+                        svbool_t mpg = svwhilelt_b8((uint64_t)0, remaining);
+                        svuint8_t v_src = svld1_u8(mpg, ip + mlen);
+                        svuint8_t v_ref = svld1_u8(mpg, ref + mlen);
+                        svbool_t neq = svbrkb_z(mpg, svcmpne_u8(mpg, v_src, v_ref));
+                        uint32_t mb = (uint32_t)svcntp_b8(mpg, neq);
+                        mlen += mb;
+                        if (mb < svcntb()) goto _sve2_match_done;
+                    }
+
+                _sve2_match_done:;
+                    const int better = (mlen > best.len);
+                    best.len = better ? mlen : best.len;
+                    best.ref = better ? ref : best.ref;
+
+                    if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend))
+                        goto _chain_done;
+                }
+            }
+        }
+    _chain_done:;
+    }
+#else
     while (match_idx > 0 && attempts-- >= 0) {
         if (UNLIKELY(cur_pos - match_idx > ZXC_LZ_MAX_DIST)) break;
         const uint8_t* ref = src + match_idx;
@@ -372,6 +457,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
         match_idx = (delta != 0) ? next_idx : 0;
     }
+#endif
 
     if (best.ref) {
         // Backtrack to extend match backwards
