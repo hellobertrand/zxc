@@ -10,7 +10,7 @@
 //! This script compiles the ZXC C library with Function Multi-Versioning (FMV)
 //! to support runtime CPU feature detection and optimized code paths.
 //!
-//! On ARM64: Compiles `_default` and `_neon` variants
+//! On ARM64: Compiles `_default`, `_neon`, and `_sve2` variants
 //! On x86_64: Compiles `_default`, `_avx2`, and `_avx512` variants
 
 use std::env;
@@ -233,6 +233,32 @@ fn main() {
 
         neon_compress.compile("zxc_compress_neon");
         neon_decompress.compile("zxc_decompress_neon");
+
+        // SVE2 variant for ARM64
+        let mut sve2_compress = cc::Build::new();
+        sve2_compress
+            .include(&include_dir)
+            .include(&src_lib)
+            .include(src_lib.join("vendors"))
+            .file(src_lib.join("zxc_compress.c"))
+            .define("ZXC_FUNCTION_SUFFIX", "_sve2")
+            .flag_if_supported("-march=armv9-a+sve2")
+            .opt_level(3)
+            .warnings(false);
+
+        let mut sve2_decompress = cc::Build::new();
+        sve2_decompress
+            .include(&include_dir)
+            .include(&src_lib)
+            .include(src_lib.join("vendors"))
+            .file(src_lib.join("zxc_decompress.c"))
+            .define("ZXC_FUNCTION_SUFFIX", "_sve2")
+            .flag_if_supported("-march=armv9-a+sve2")
+            .opt_level(3)
+            .warnings(false);
+
+        sve2_compress.compile("zxc_compress_sve2");
+        sve2_decompress.compile("zxc_decompress_sve2");
     } else if is_x86_64 {
         // AVX2 variant
         let mut avx2_compress = cc::Build::new();

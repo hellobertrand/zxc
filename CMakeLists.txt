@@ -146,6 +146,8 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
     else()
         # NEON is usually default on AArch64, but we add a specific variant for structure
         zxc_add_variant(_neon "-march=armv8-a+simd")
+        # SVE2 variant for ARMv9 cores
+        zxc_add_variant(_sve2 "-march=armv9-a+sve2")
     endif()
 
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")

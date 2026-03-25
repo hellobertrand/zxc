@@ -69,12 +69,13 @@ extern "C" {
 
 /**
  * @name SIMD Intrinsics & Compiler Macros
- * @brief Auto-detected SIMD feature macros for x86 (SSE/AVX) and ARM (NEON).
+ * @brief Auto-detected SIMD feature macros for x86 (SSE/AVX) and ARM (NEON/SVE2).
  *
  * Depending on the target architecture and compiler flags the following macros
  * may be defined:
  * - @c ZXC_USE_AVX512 - AVX-512F + AVX-512BW available.
  * - @c ZXC_USE_AVX2   - AVX2 available.
+ * - @c ZXC_USE_SVE2   - AArch64 SVE2 available.
  * - @c ZXC_USE_NEON64 - AArch64 NEON available.
  * - @c ZXC_USE_NEON32 - ARMv7 NEON available.
  * @{
@@ -98,6 +99,12 @@ extern "C" {
 #include <arm_acle.h>
 #endif
 #include <arm_neon.h>
+#if defined(__ARM_FEATURE_SVE2)
+#include <arm_sve.h>
+#ifndef ZXC_USE_SVE2
+#define ZXC_USE_SVE2
+#endif
+#endif
 #if defined(__aarch64__) || defined(_M_ARM64)
 #ifndef ZXC_USE_NEON64
 #define ZXC_USE_NEON64
@@ -824,6 +831,10 @@ static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
     // AVX2/AVX512: Single 128-bit unaligned load/store
     _mm_storeu_si128((__m128i*)dst, _mm_loadu_si128((const __m128i*)src));
+#elif defined(ZXC_USE_SVE2)
+    // SVE2: Predicated 16-byte load/store
+    svbool_t pg = svwhilelt_b8((uint64_t)0, (uint64_t)16);
+    svst1_u8(pg, (uint8_t*)dst, svld1_u8(pg, (const uint8_t*)src));
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));
 #else
@@ -834,7 +845,7 @@ static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
 /**
  * @brief Copies 32 bytes from source to destination using SIMD when available.
  *
- * Uses AVX2 on x86, NEON on ARM64/ARM32, or two 16-byte copies as fallback.
+ * Uses AVX2 on x86, SVE2 or NEON on ARM64/ARM32, or two 16-byte copies as fallback.
  *
  * @param[out] dst Pointer to the destination memory block.
  * @param[in] src Pointer to the source memory block.
@@ -843,6 +854,10 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
     // AVX2/AVX512: Single 256-bit (32 byte) unaligned load/store
     _mm256_storeu_si256((__m256i*)dst, _mm256_loadu_si256((const __m256i*)src));
+#elif defined(ZXC_USE_SVE2)
+    // SVE2: Predicated 32-byte load/store (uses full VL when >= 256 bits)
+    svbool_t pg = svwhilelt_b8((uint64_t)0, (uint64_t)32);
+    svst1_u8(pg, (uint8_t*)dst, svld1_u8(pg, (const uint8_t*)src));
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     // NEON: Two 128-bit (16 byte) unaligned load/stores
     vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));

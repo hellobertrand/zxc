@@ -138,8 +138,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
  * Shared between ARM NEON and x86 SSSE3. Each row defines how to replicate
  * source bytes to fill 16 bytes when offset < 16.
  */
-#if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(ZXC_USE_AVX2) || \
-    defined(ZXC_USE_AVX512)
+#if defined(ZXC_USE_SVE2) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || \
+    defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
 /**
  * @brief Precomputed masks for handling overlapping data during decompression.
  *
@@ -188,7 +188,7 @@ static const ZXC_ALIGN(16) uint8_t zxc_overlap_masks[16][16] = {
 static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
     // off is always >= ZXC_LZ_OFFSET_BIAS by design (offset bias encoding: stored +
     // ZXC_LZ_OFFSET_BIAS)
-#if defined(ZXC_USE_NEON64)
+#if defined(ZXC_USE_SVE2) || defined(ZXC_USE_NEON64)
     uint8x16_t mask = vld1q_u8(zxc_overlap_masks[off]);
     uint8x16_t src_data = vld1q_u8(dst - off);
     vst1q_u8(dst, vqtbl1q_u8(src_data, mask));
@@ -215,7 +215,7 @@ static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
 #endif
 }
 
-#if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+#if defined(ZXC_USE_SVE2) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
 /**
  * @brief Computes the prefix sum of a 128-bit vector of 32-bit unsigned
  * integers using NEON intrinsics.
@@ -419,7 +419,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
                 running_val = ((uint32_t*)&batch_dst[k])[7];  // Update running_val
             }
 
-#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+#elif defined(ZXC_USE_SVE2) || defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
             uint32x4_t v_run = vdupq_n_u32(running_val);  // Broadcast running total
             for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 4) {
                 uint32x4_t v_deltas = vld1q_u32(&deltas[k]);  // Load 4 deltas

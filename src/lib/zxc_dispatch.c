@@ -26,6 +26,13 @@
 #include <sys/auxv.h>
 #endif
 
+#if defined(__linux__) && (defined(__aarch64__) || defined(_M_ARM64))
+#include <sys/auxv.h>
+#ifndef HWCAP2_SVE2
+#define HWCAP2_SVE2 (1UL << 1)
+#endif
+#endif
+
 /*
  * ============================================================================
  * PROTOTYPES FOR MULTI-VERSIONED VARIANTS
@@ -50,6 +57,11 @@ int zxc_decompress_chunk_wrapper_avx512(zxc_cctx_t* RESTRICT ctx, const uint8_t*
 int zxc_decompress_chunk_wrapper_neon(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap);
+#if defined(__aarch64__) || defined(_M_ARM64)
+int zxc_decompress_chunk_wrapper_sve2(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                      const size_t src_sz, uint8_t* RESTRICT dst,
+                                      const size_t dst_cap);
+#endif
 #endif
 #endif
 
@@ -69,6 +81,11 @@ int zxc_compress_chunk_wrapper_avx512(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 int zxc_compress_chunk_wrapper_neon(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                     const size_t src_sz, uint8_t* RESTRICT dst,
                                     const size_t dst_cap);
+#if defined(__aarch64__) || defined(_M_ARM64)
+int zxc_compress_chunk_wrapper_sve2(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                    const size_t src_sz, uint8_t* RESTRICT dst,
+                                    const size_t dst_cap);
+#endif
 #endif
 
 /*
@@ -85,7 +102,8 @@ typedef enum {
     ZXC_CPU_GENERIC = 0, /**< @brief Scalar-only fallback.   */
     ZXC_CPU_AVX2 = 1,    /**< @brief x86-64 AVX2 available.  */
     ZXC_CPU_AVX512 = 2,  /**< @brief x86-64 AVX-512F+BW available. */
-    ZXC_CPU_NEON = 3     /**< @brief ARM NEON available.      */
+    ZXC_CPU_NEON = 3,    /**< @brief ARM NEON available.      */
+    ZXC_CPU_SVE2 = 4     /**< @brief ARM SVE2 available. */
 } zxc_cpu_feature_t;
 
 /**
@@ -140,6 +158,13 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 #elif defined(__aarch64__) || defined(_M_ARM64)
     // ARM64 usually guarantees NEON
     features = ZXC_CPU_NEON;
+#if defined(__linux__)
+    // Runtime SVE2 detection via HWCAP2
+    if (getauxval(AT_HWCAP2) & HWCAP2_SVE2) features = ZXC_CPU_SVE2;
+#elif defined(__ARM_FEATURE_SVE2)
+    // Compile-time SVE2 detection for non-Linux ARM64
+    features = ZXC_CPU_SVE2;
+#endif
 
 #elif defined(__arm__) || defined(_M_ARM)
     // ARM32 Runtime detection for Linux
@@ -203,7 +228,9 @@ static int zxc_decompress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t*
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
     // cppcheck-suppress knownConditionTrueFalse
-    if (cpu == ZXC_CPU_NEON)
+    if (cpu == ZXC_CPU_SVE2)
+        zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_sve2;
+    else if (cpu == ZXC_CPU_NEON)
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_neon;
     else
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
@@ -246,7 +273,9 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_default;
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
     // cppcheck-suppress knownConditionTrueFalse
-    if (cpu == ZXC_CPU_NEON)
+    if (cpu == ZXC_CPU_SVE2)
+        zxc_compress_ptr_local = zxc_compress_chunk_wrapper_sve2;
+    else if (cpu == ZXC_CPU_NEON)
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_neon;
     else
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_default;

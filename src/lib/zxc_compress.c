@@ -291,6 +291,18 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                     goto _match_len_done;
                 }
             }
+#elif defined(ZXC_USE_SVE2)
+            // SVE2: Variable-length compare for match extension
+            while (ip + mlen < iend) {
+                const uint64_t remaining = (uint64_t)(iend - (ip + mlen));
+                svbool_t pg = svwhilelt_b8((uint64_t)0, remaining);
+                svuint8_t v_src = svld1_u8(pg, ip + mlen);
+                svuint8_t v_ref = svld1_u8(pg, ref + mlen);
+                svbool_t neq = svbrkb_z(pg, svcmpne_u8(pg, v_src, v_ref));
+                uint32_t match_bytes = (uint32_t)svcntp_b8(pg, neq);
+                mlen += match_bytes;
+                if (match_bytes < svcntb()) goto _match_len_done;
+            }
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
             const uint8_t* limit_16 = iend - 16;
             while (ip + mlen < limit_16) {
@@ -571,6 +583,50 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                 prev = zxc_le32(in_ptr + (j - 1) * 4);
             }
         }
+#elif defined(ZXC_USE_SVE2)
+        // SVE2: Variable-length delta + zigzag encoding
+        if (frames >= 4) {
+            const uint64_t vl = svcntw();  // Elements per SVE vector
+
+            for (; j + vl <= frames; j += vl) {
+                if (UNLIKELY(i == 0 && j == 0)) goto _scalar;
+
+                svbool_t pg = svptrue_b32();
+                svuint32_t vc = svld1_u32(pg, (const uint32_t*)(in_ptr + j * 4));
+                svuint32_t vp = svld1_u32(pg, (const uint32_t*)(in_ptr + j * 4 - 4));
+
+                svint32_t diff = svreinterpret_s32_u32(svsub_u32_x(pg, vc, vp));
+
+                // ZigZag encode: (diff << 1) ^ (diff >> 31)
+                svint32_t z1 = svlsl_n_s32_x(pg, diff, 1);
+                svint32_t z2 = svasr_n_s32_x(pg, diff, 31);
+                svuint32_t zigzag = svreinterpret_u32_s32(sveor_s32_x(pg, z1, z2));
+
+                svst1_u32(pg, &deltas[j], zigzag);
+                max_d |= svmaxv_u32(pg, zigzag);
+            }
+
+            // Process remaining elements with predicate
+            if (j < (frames & ~3)) {
+                uint64_t rem = frames - j;
+                if (rem > 0 && !(i == 0 && j == 0)) {
+                    svbool_t pg = svwhilelt_b32((uint64_t)0, rem);
+                    svuint32_t vc = svld1_u32(pg, (const uint32_t*)(in_ptr + j * 4));
+                    svuint32_t vp = svld1_u32(pg, (const uint32_t*)(in_ptr + j * 4 - 4));
+
+                    svint32_t diff = svreinterpret_s32_u32(svsub_u32_x(pg, vc, vp));
+                    svint32_t z1 = svlsl_n_s32_x(pg, diff, 1);
+                    svint32_t z2 = svasr_n_s32_x(pg, diff, 31);
+                    svuint32_t zigzag = svreinterpret_u32_s32(sveor_s32_x(pg, z1, z2));
+
+                    svst1_u32(pg, &deltas[j], zigzag);
+                    max_d |= svmaxv_u32(pg, zigzag);
+                    j += (uint32_t)svcntp_b32(pg, pg);
+                }
+            }
+
+            if (j > 0) prev = zxc_le32(in_ptr + (j - 1) * sizeof(uint32_t));
+        }
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
         // NEON processes 128-bit vectors (4 uint32 integers)
         if (frames >= 4) {
@@ -613,8 +669,8 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
             if (j > 0) prev = zxc_le32(in_ptr + (j - 1) * sizeof(uint32_t));
         }
 #endif
-#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512) || defined(ZXC_USE_NEON64) || \
-    defined(ZXC_USE_NEON32)
+#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512) || defined(ZXC_USE_SVE2) || \
+    defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     _scalar:
 #endif
         for (; j < frames; j++) {
@@ -840,6 +896,20 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                 }
                 p += 32;
             }
+#elif defined(ZXC_USE_SVE2)
+            // SVE2: Predicated run scan using VLA
+            while (p < p_end) {
+                const uint64_t remaining = (uint64_t)(p_end - p);
+                svbool_t pg = svwhilelt_b8((uint64_t)0, remaining);
+                svuint8_t sv = svld1_u8(pg, p);
+                svuint8_t vb_sve = svdup_n_u8(b);
+                svbool_t neq = svcmpne_u8(pg, sv, vb_sve);
+                if (svptest_any(pg, neq)) {
+                    p += svcntp_b8(pg, svbrkb_z(pg, neq));
+                    goto _run_done;
+                }
+                p += svcntb();
+            }
 #elif defined(ZXC_USE_NEON64)
             const uint8x16_t vb = vdupq_n_u8(b);
             while (p <= p_end - 16) {
@@ -890,8 +960,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 #endif
             while (p < p_end && *p == b) p++;
 
-#if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || \
-    defined(ZXC_USE_NEON32)
+#if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_SVE2) || \
+    defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
         _run_done:;
 #endif
             const size_t run = (size_t)(p - run_start);
@@ -962,6 +1032,26 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                     }
                     p += 16;
                 }
+#elif defined(ZXC_USE_SVE2)
+                while (p <= p_end - 16) {
+                    uint8x16_t v0 = vld1q_u8(p);
+                    uint8x16_t v1 = vld1q_u8(p + 1);
+                    uint8x16_t v2 = vld1q_u8(p + 2);
+                    uint8x16_t v3 = vld1q_u8(p + 3);
+                    uint8x16_t eq =
+                        vandq_u8(vceqq_u8(v0, v1), vandq_u8(vceqq_u8(v1, v2), vceqq_u8(v2, v3)));
+                    uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 0);
+                    if (lo != 0) {
+                        p += (zxc_ctz64(lo) >> 3);
+                        goto _lit_done;
+                    }
+                    uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 1);
+                    if (hi != 0) {
+                        p += 8 + (zxc_ctz64(hi) >> 3);
+                        goto _lit_done;
+                    }
+                    p += 16;
+                }
 #elif defined(ZXC_USE_NEON32)
                 while (p <= p_end_4 - 16) {
                     uint8x16_t v0 = vld1q_u8(p);
@@ -1004,8 +1094,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                     p++;
                 }
 
-#if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || \
-    defined(ZXC_USE_NEON32)
+#if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_SVE2) || \
+    defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
             _lit_done:;
 #endif
                 const size_t lit_run = (size_t)(p - lit_start);
