@@ -28,9 +28,14 @@
 
 #if defined(__linux__) && (defined(__aarch64__) || defined(_M_ARM64))
 #include <sys/auxv.h>
+#include <sys/prctl.h>
 #ifndef HWCAP2_SVE2
 #define HWCAP2_SVE2 (1UL << 1)
 #endif
+#ifndef PR_SVE_GET_VL
+#define PR_SVE_GET_VL 51
+#endif
+#define PR_SVE_VL_LEN_MASK 0xffff
 #endif
 
 /*
@@ -159,11 +164,18 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
     // ARM64 usually guarantees NEON
     features = ZXC_CPU_NEON;
 #if defined(__linux__)
-    // Runtime SVE2 detection via HWCAP2
-    if (getauxval(AT_HWCAP2) & HWCAP2_SVE2) features = ZXC_CPU_SVE2;
+    // Runtime SVE2 detection via HWCAP2 + VL check.
+    // Only use SVE2 when VL > 128 bits (> 16 bytes), otherwise NEON is equally fast.
+    if (getauxval(AT_HWCAP2) & HWCAP2_SVE2) {
+        const long vl = prctl(PR_SVE_GET_VL);
+        if (vl > 0 && (vl & PR_SVE_VL_LEN_MASK) > 16)
+            features = ZXC_CPU_SVE2;
+    }
 #elif defined(__ARM_FEATURE_SVE2)
-    // Compile-time SVE2 detection for non-Linux ARM64
-    features = ZXC_CPU_SVE2;
+    // Compile-time SVE2 detection for non-Linux ARM64.
+    // Only use SVE2 when VL > 128 bits.
+    if (svcntb() > 16)
+        features = ZXC_CPU_SVE2;
 #endif
 
 #elif defined(__arm__) || defined(_M_ARM)
