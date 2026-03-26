@@ -19,6 +19,7 @@ jobs:
           - os: ubuntu-latest
           - os: ubuntu-24.04-arm
           - os: macos-latest
+          - os: windows-latest
 
     steps:
       - name: Checkout Repository
@@ -31,17 +32,31 @@ jobs:
 
       - name: Build ZXC Core Library
         run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DZXC_BUILD_CLI=OFF \
-            -DZXC_BUILD_TESTS=OFF
-          cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
+          cmake --build build --config Release --parallel
 
-      - name: Run Go Tests
+      - name: Run Go Tests (Unix)
+        if: runner.os != 'Windows'
         working-directory: ./wrappers/go
         run: CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -v -count=1 ./...
 
-      - name: Run Go Benchmarks
+      - name: Run Go Tests (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ./wrappers/go
+        env:
+          CGO_ENABLED: "1"
+          CGO_LDFLAGS: "-L../../build/Release -lzxc"
+        run: go test -v -count=1 ./...
+
+      - name: Run Go Benchmarks (Unix)
+        if: runner.os != 'Windows'
         working-directory: ./wrappers/go
         run: CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -bench=. -benchmem -count=1 ./...
+
+      - name: Run Go Benchmarks (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ./wrappers/go
+        env:
+          CGO_ENABLED: "1"
+          CGO_LDFLAGS: "-L../../build/Release -lzxc"
+        run: go test -bench=. -benchmem -count=1 ./...

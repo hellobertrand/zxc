@@ -32,7 +32,6 @@ package zxc
 
 #include <stdlib.h>
 #include <stdio.h>
-#include <unistd.h>
 #include "zxc.h"
 */
 import "C"
@@ -335,6 +334,9 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if size == 0 {
+		return []byte{}, nil
+	}
 
 	o := applyOptions(opts)
 	dst := make([]byte, size)
@@ -492,51 +494,4 @@ func DecompressFile(input, output string, opts ...Option) (int64, error) {
 		return 0, errorFromCode(result)
 	}
 	return int64(result), nil
-}
-
-// ============================================================================
-// Internal helpers
-// ============================================================================
-
-// C mode strings — allocated once, never freed (intentional; they live for the
-// process lifetime and avoid per-call C.CString/C.free overhead).
-var (
-	cModeRead  = C.CString("rb")
-	cModeWrite = C.CString("wb")
-)
-
-// dupFileRead duplicates a Go *os.File's fd and wraps it in a C FILE* for
-// reading. The returned FILE* owns its own fd and must be closed with
-// C.fclose().
-func dupFileRead(f *os.File) (*C.FILE, error) {
-	fd := C.int(f.Fd())
-	dupFd := C.dup(fd)
-	if dupFd < 0 {
-		return nil, fmt.Errorf("zxc: dup failed for read fd")
-	}
-
-	cFile := C.fdopen(dupFd, cModeRead)
-	if cFile == nil {
-		C.close(dupFd)
-		return nil, fmt.Errorf("zxc: fdopen failed for read fd")
-	}
-	return cFile, nil
-}
-
-// dupFileWrite duplicates a Go *os.File's fd and wraps it in a C FILE* for
-// writing. The returned FILE* owns its own fd and must be closed with
-// C.fclose().
-func dupFileWrite(f *os.File) (*C.FILE, error) {
-	fd := C.int(f.Fd())
-	dupFd := C.dup(fd)
-	if dupFd < 0 {
-		return nil, fmt.Errorf("zxc: dup failed for write fd")
-	}
-
-	cFile := C.fdopen(dupFd, cModeWrite)
-	if cFile == nil {
-		C.close(dupFd)
-		return nil, fmt.Errorf("zxc: fdopen failed for write fd")
-	}
-	return cFile, nil
 }
