@@ -1479,7 +1479,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 
         uint32_t payload_sz = (uint32_t)(w - ZXC_BLOCK_HEADER_SIZE);
         uint32_t crc =
-            zxc_checksum(dst + ZXC_BLOCK_HEADER_SIZE, payload_sz, ZXC_CHECKSUM_RAPIDHASH);
+            zxc_checksum(dst + ZXC_BLOCK_HEADER_SIZE, payload_sz, (uint8_t)ctx->checksum_algo);
         zxc_store_le32(dst + w, crc);
         w += ZXC_BLOCK_CHECKSUM_SIZE;
     }

@@ -1117,7 +1117,7 @@ int test_legacy_header() {
 
     size_t block_size = 0;
     int has_checksum = -1;
-    int rc = zxc_read_file_header(hdr, sizeof(hdr), &block_size, &has_checksum);
+    int rc = zxc_read_file_header(hdr, sizeof(hdr), &block_size, &has_checksum, NULL);
 
     if (rc != ZXC_OK) {
         printf("  [FAIL] zxc_read_file_header returned %d (%s)\n", rc, zxc_error_name(rc));
@@ -1141,7 +1141,7 @@ int test_legacy_header() {
     hdr[14] = (uint8_t)(crc & 0xFF);
     hdr[15] = (uint8_t)(crc >> 8);
 
-    rc = zxc_read_file_header(hdr, sizeof(hdr), &block_size, &has_checksum);
+    rc = zxc_read_file_header(hdr, sizeof(hdr), &block_size, &has_checksum, NULL);
     if (rc != ZXC_ERROR_BAD_BLOCK_SIZE) {
         printf("  [FAIL] invalid code 99: expected %d, got %d\n", ZXC_ERROR_BAD_BLOCK_SIZE, rc);
         return 0;
