@@ -72,11 +72,10 @@ void zxc_aligned_free(void* ptr) {
  * @return @ref ZXC_OK on success, or @ref ZXC_ERROR_MEMORY on allocation failure.
  */
 int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int mode,
-                  const int level, const int checksum_enabled, const int checksum_algo) {
+                  const int level, const int checksum_enabled) {
     ZXC_MEMSET(ctx, 0, sizeof(zxc_cctx_t));
 
     ctx->checksum_enabled = checksum_enabled;
-    ctx->checksum_algo = checksum_algo;
 
     /* Compute block-size derived parameters. */
     ctx->chunk_size = chunk_size;
@@ -190,7 +189,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  *         or a negative @ref zxc_error_t code.
  */
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, const size_t chunk_size,
-                          const int has_checksum, const int checksum_algo) {
+                          const int has_checksum) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
 
     zxc_store_le32(dst, ZXC_MAGIC_WORD);
@@ -200,10 +199,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     dst[5] = (uint8_t)zxc_log2_u32((uint32_t)chunk_size);
 
     // Flags are at offset 6
-    dst[6] =
-        has_checksum
-            ? (ZXC_FILE_FLAG_HAS_CHECKSUM | ((uint8_t)checksum_algo & ZXC_FILE_CHECKSUM_ALGO_MASK))
-            : 0U;
+    dst[6] = has_checksum ? (ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_CHECKSUM_RAPIDHASH) : 0U;
 
     // Bytes 7-13: Reserved (must be 0, 7 bytes)
     ZXC_MEMSET(dst + 7, 0, 7);
@@ -229,8 +225,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
  */
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
-                         size_t* RESTRICT out_block_size, int* RESTRICT out_has_checksum,
-                         int* RESTRICT out_checksum_algo) {
+                         size_t* RESTRICT out_block_size, int* RESTRICT out_has_checksum) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
     if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
     if (UNLIKELY(src[4] != ZXC_FILE_FORMAT_VERSION)) return ZXC_ERROR_BAD_VERSION;
@@ -258,7 +253,6 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     }
     // Flags are at offset 6
     if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
-    if (out_checksum_algo) *out_checksum_algo = (int)(src[6] & ZXC_FILE_CHECKSUM_ALGO_MASK);
 
     return ZXC_OK;
 }

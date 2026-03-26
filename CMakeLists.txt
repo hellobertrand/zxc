@@ -164,7 +164,7 @@ add_library(zxc_lib
 # ABI Versioning (Debian/Linux shared libraries)
 # =============================================================================
 # Increment this number ONLY when breaking the ABI. 
-set(ZXC_SOVERSION 3)
+set(ZXC_SOVERSION 2)
 
 # Set library output name and version
 set_target_properties(zxc_lib PROPERTIES

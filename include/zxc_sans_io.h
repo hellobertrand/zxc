@@ -97,7 +97,6 @@ typedef struct {
     uint8_t* work_buf;     /**< Padded scratch buffer for buffer-API decompression. */
     size_t work_buf_cap;   /**< Capacity of the work buffer. */
     int checksum_enabled;  /**< 1 if checksum calculation/verification is enabled. */
-    int checksum_algo;     /**< Checksum algorithm ID (see @ref zxc_checksum_algo_t). */
     int compression_level; /**< Compression level. */
 
     /* Block-size derived parameters (computed once at init). */
@@ -119,13 +118,11 @@ typedef struct {
  * @param[in] mode The operation mode (1 for compression, 0 for decompression).
  * @param[in] level The desired compression level to be stored in the context.
  * @param[in] checksum_enabled 1 to enable checksums, 0 to disable.
- * @param[in] checksum_algo    Checksum algorithm ID (see @ref zxc_checksum_algo_t).
- *                             Pass 0 for the default (RapidHash).
  * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_MEMORY) if memory
  * allocation fails.
  */
 ZXC_EXPORT int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode,
-                             const int level, const int checksum_enabled, const int checksum_algo);
+                             const int level, const int checksum_enabled);
 
 /**
  * @brief Frees resources associated with a ZXC compression context.
@@ -149,14 +146,11 @@ ZXC_EXPORT void zxc_cctx_free(zxc_cctx_t* ctx);
  * @param[in] dst_capacity The total capacity of the destination buffer in bytes.
  * @param[in] chunk_size    The block size to encode in the header.
  * @param[in] has_checksum  Flag indicating whether the checksum bit should be set.
- * @param[in] checksum_algo Checksum algorithm ID written into bits 0-3 of the Flags byte
- *                          (see @ref zxc_checksum_algo_t). Ignored when @p has_checksum is 0.
  * @return The number of bytes written (ZXC_FILE_HEADER_SIZE) on success,
  *         or ZXC_ERROR_DST_TOO_SMALL if the destination capacity is insufficient.
  */
 ZXC_EXPORT int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity,
-                                     const size_t chunk_size, const int has_checksum,
-                                     const int checksum_algo);
+                                     const size_t chunk_size, const int has_checksum);
 
 /**
  * @brief Validates and reads the ZXC file header from a source buffer.
@@ -169,15 +163,11 @@ ZXC_EXPORT int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity,
  * @param[in] src_size Size of the source buffer in bytes.
  * @param[out] out_block_size    Optional pointer to receive the recommended block size.
  * @param[out] out_has_checksum  Optional pointer to receive the checksum flag.
- * @param[out] out_checksum_algo Optional pointer to receive the checksum algorithm ID
- *                               (see @ref zxc_checksum_algo_t). Always set when non-NULL,
- *                               even when @p out_has_checksum is 0.
  * @return ZXC_OK on success, or a negative error code (e.g., ZXC_ERROR_SRC_TOO_SMALL,
  * ZXC_ERROR_BAD_MAGIC, ZXC_ERROR_BAD_VERSION).
  */
 ZXC_EXPORT int zxc_read_file_header(const uint8_t* src, const size_t src_size,
-                                    size_t* out_block_size, int* out_has_checksum,
-                                    int* out_checksum_algo);
+                                    size_t* out_block_size, int* out_has_checksum);
 
 /**
  * @struct zxc_block_header_t
