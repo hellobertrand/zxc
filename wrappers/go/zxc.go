@@ -27,7 +27,7 @@ SPDX-License-Identifier: BSD-3-Clause
 package zxc
 
 /*
-#cgo CFLAGS:  -I${SRCDIR}/../../include
+#cgo CFLAGS:  -I${SRCDIR}/../../include -DZXC_STATIC_DEFINE
 #cgo LDFLAGS: -lpthread
 
 #include <stdlib.h>
