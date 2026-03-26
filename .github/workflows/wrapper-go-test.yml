@@ -1,0 +1,47 @@
+name: Go Wrapper Tests
+
+on:
+  workflow_dispatch:
+  release:
+    types: [ published ]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
+          - os: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build ZXC Core Library
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DZXC_BUILD_CLI=OFF \
+            -DZXC_BUILD_TESTS=OFF
+          cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Run Go Tests
+        working-directory: ./wrappers/go
+        run: CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -v -count=1 ./...
+
+      - name: Run Go Benchmarks
+        working-directory: ./wrappers/go
+        run: CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -bench=. -benchmem -count=1 ./...
