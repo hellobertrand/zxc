@@ -27,7 +27,7 @@ cmake --build build
 ```bash
 git clone https://github.com/hellobertrand/zxc.git
 cd zxc/wrappers/go
-CGO_LDFLAGS="-L../../build -lzxc -lpthread" go build ./...
+CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go build ./...
 ```
 
 ## Quick Start
@@ -79,13 +79,13 @@ n, err = zxc.DecompressFile("output.zxc", "restored.bin")
 
 ```bash
 cd zxc/wrappers/go
-CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -v -count=1 ./...
+CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -v -count=1 ./...
 ```
 
 ## Benchmarks
 
 ```bash
-CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -bench=. -benchmem ./...
+CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -bench=. -benchmem ./...
 ```
 
 ## License
