@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'c-cpp', 'rust', 'python' ]
+        language: [ 'c-cpp', 'rust', 'python', 'go', 'javascript-typescript' ]
 
     steps:
     - name: Checkout Repository
@@ -47,6 +47,14 @@ jobs:
         elif [ "${{ matrix.language }}" = "python" ]; then
           cd wrappers/python
           python3 -m pip install -e .
+        elif [ "${{ matrix.language }}" = "go" ]; then
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
+          cmake --build build --parallel
+          cd wrappers/go
+          CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go build ./...
+        elif [ "${{ matrix.language }}" = "javascript-typescript" ]; then
+          cd wrappers/nodejs
+          npm install
         fi
 
     - name: Perform CodeQL Analysis
