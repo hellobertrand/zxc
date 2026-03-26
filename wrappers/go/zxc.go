@@ -1,0 +1,542 @@
+/*
+ZXC - High-performance lossless compression
+
+Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
+SPDX-License-Identifier: BSD-3-Clause
+*/
+
+// Package zxc provides Go bindings to the ZXC high-performance lossless
+// compression library.
+//
+// ZXC is optimised for fast decompression speed: it is designed for
+// "Write Once, Read Many" workloads such as ML datasets, game assets,
+// firmware images and caches.
+//
+// # Quick Start
+//
+//	compressed, err := zxc.Compress(data)
+//	if err != nil { log.Fatal(err) }
+//
+//	original, err := zxc.Decompress(compressed)
+//	if err != nil { log.Fatal(err) }
+//
+// # Streaming (file-based)
+//
+//	n, err := zxc.CompressFile("input.bin", "output.zxc")
+//	n, err  = zxc.DecompressFile("output.zxc", "restored.bin")
+package zxc
+
+/*
+#cgo CFLAGS:  -I${SRCDIR}/../../include
+#cgo LDFLAGS: -lpthread
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#include "zxc.h"
+*/
+import "C"
+import (
+	"errors"
+	"fmt"
+	"os"
+	"unsafe"
+)
+
+// ============================================================================
+// Compression Levels
+// ============================================================================
+
+// Level represents a ZXC compression level.
+type Level int
+
+const (
+	// LevelFastest provides the fastest compression, best for real-time
+	// applications (level 1).
+	LevelFastest Level = C.ZXC_LEVEL_FASTEST
+
+	// LevelFast provides fast compression, good for real-time applications
+	// (level 2).
+	LevelFast Level = C.ZXC_LEVEL_FAST
+
+	// LevelDefault is the recommended default: ratio > LZ4, decode speed > LZ4
+	// (level 3).
+	LevelDefault Level = C.ZXC_LEVEL_DEFAULT
+
+	// LevelBalanced provides good ratio with good decode speed (level 4).
+	LevelBalanced Level = C.ZXC_LEVEL_BALANCED
+
+	// LevelCompact provides the highest density. Best for storage, firmware
+	// and assets (level 5).
+	LevelCompact Level = C.ZXC_LEVEL_COMPACT
+)
+
+// AllLevels returns all available compression levels from fastest to most
+// compact.
+func AllLevels() []Level {
+	return []Level{LevelFastest, LevelFast, LevelDefault, LevelBalanced, LevelCompact}
+}
+
+// ============================================================================
+// Version
+// ============================================================================
+
+const (
+	// VersionMajor is the major version of the underlying C library.
+	VersionMajor = C.ZXC_VERSION_MAJOR
+
+	// VersionMinor is the minor version of the underlying C library.
+	VersionMinor = C.ZXC_VERSION_MINOR
+
+	// VersionPatch is the patch version of the underlying C library.
+	VersionPatch = C.ZXC_VERSION_PATCH
+)
+
+// Version returns the library version as (major, minor, patch).
+func Version() (int, int, int) {
+	return int(VersionMajor), int(VersionMinor), int(VersionPatch)
+}
+
+// VersionString returns the library version as a "major.minor.patch" string.
+func VersionString() string {
+	return fmt.Sprintf("%d.%d.%d", VersionMajor, VersionMinor, VersionPatch)
+}
+
+// ============================================================================
+// Error Handling
+// ============================================================================
+
+// Error represents a ZXC library error.
+type Error struct {
+	Code int
+	Name string
+}
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("zxc: %s (code %d)", e.Name, e.Code)
+}
+
+// Sentinel errors for each ZXC error code.
+var (
+	ErrMemory       = &Error{Code: int(C.ZXC_ERROR_MEMORY), Name: "memory allocation failed"}
+	ErrDstTooSmall  = &Error{Code: int(C.ZXC_ERROR_DST_TOO_SMALL), Name: "destination buffer too small"}
+	ErrSrcTooSmall  = &Error{Code: int(C.ZXC_ERROR_SRC_TOO_SMALL), Name: "source buffer too small"}
+	ErrBadMagic     = &Error{Code: int(C.ZXC_ERROR_BAD_MAGIC), Name: "invalid magic word"}
+	ErrBadVersion   = &Error{Code: int(C.ZXC_ERROR_BAD_VERSION), Name: "unsupported format version"}
+	ErrBadHeader    = &Error{Code: int(C.ZXC_ERROR_BAD_HEADER), Name: "corrupted header"}
+	ErrBadChecksum  = &Error{Code: int(C.ZXC_ERROR_BAD_CHECKSUM), Name: "checksum verification failed"}
+	ErrCorruptData  = &Error{Code: int(C.ZXC_ERROR_CORRUPT_DATA), Name: "corrupted compressed data"}
+	ErrBadOffset    = &Error{Code: int(C.ZXC_ERROR_BAD_OFFSET), Name: "invalid match offset"}
+	ErrOverflow     = &Error{Code: int(C.ZXC_ERROR_OVERFLOW), Name: "buffer overflow detected"}
+	ErrIO           = &Error{Code: int(C.ZXC_ERROR_IO), Name: "I/O error"}
+	ErrNullInput    = &Error{Code: int(C.ZXC_ERROR_NULL_INPUT), Name: "null input pointer"}
+	ErrBadBlockType = &Error{Code: int(C.ZXC_ERROR_BAD_BLOCK_TYPE), Name: "unknown block type"}
+	ErrBadBlockSize = &Error{Code: int(C.ZXC_ERROR_BAD_BLOCK_SIZE), Name: "invalid block size"}
+	ErrInvalidData  = errors.New("zxc: invalid compressed data")
+)
+
+// errorFromCode converts a negative C error code to a Go error.
+func errorFromCode(code C.int64_t) error {
+	switch int(code) {
+	case int(C.ZXC_ERROR_MEMORY):
+		return ErrMemory
+	case int(C.ZXC_ERROR_DST_TOO_SMALL):
+		return ErrDstTooSmall
+	case int(C.ZXC_ERROR_SRC_TOO_SMALL):
+		return ErrSrcTooSmall
+	case int(C.ZXC_ERROR_BAD_MAGIC):
+		return ErrBadMagic
+	case int(C.ZXC_ERROR_BAD_VERSION):
+		return ErrBadVersion
+	case int(C.ZXC_ERROR_BAD_HEADER):
+		return ErrBadHeader
+	case int(C.ZXC_ERROR_BAD_CHECKSUM):
+		return ErrBadChecksum
+	case int(C.ZXC_ERROR_CORRUPT_DATA):
+		return ErrCorruptData
+	case int(C.ZXC_ERROR_BAD_OFFSET):
+		return ErrBadOffset
+	case int(C.ZXC_ERROR_OVERFLOW):
+		return ErrOverflow
+	case int(C.ZXC_ERROR_IO):
+		return ErrIO
+	case int(C.ZXC_ERROR_NULL_INPUT):
+		return ErrNullInput
+	case int(C.ZXC_ERROR_BAD_BLOCK_TYPE):
+		return ErrBadBlockType
+	case int(C.ZXC_ERROR_BAD_BLOCK_SIZE):
+		return ErrBadBlockSize
+	default:
+		return fmt.Errorf("zxc: unknown error (code %d)", int(code))
+	}
+}
+
+// ============================================================================
+// Options (functional options pattern)
+// ============================================================================
+
+// options holds all configurable parameters.
+type options struct {
+	level    Level
+	checksum bool
+	threads  int
+}
+
+func defaultOptions() options {
+	return options{
+		level:    LevelDefault,
+		checksum: false,
+		threads:  0, // auto-detect
+	}
+}
+
+// Option configures compression or decompression.
+type Option func(*options)
+
+// WithLevel sets the compression level.
+func WithLevel(l Level) Option {
+	return func(o *options) { o.level = l }
+}
+
+// WithChecksum enables checksum computation and verification.
+func WithChecksum(enabled bool) Option {
+	return func(o *options) { o.checksum = enabled }
+}
+
+// WithThreads sets the number of worker threads for streaming operations.
+// A value of 0 means auto-detect the CPU core count.
+func WithThreads(n int) Option {
+	return func(o *options) { o.threads = n }
+}
+
+func applyOptions(opts []Option) options {
+	o := defaultOptions()
+	for _, fn := range opts {
+		fn(&o)
+	}
+	return o
+}
+
+// ============================================================================
+// Buffer API
+// ============================================================================
+
+// CompressBound returns the maximum compressed size for an input of the given
+// size. Use this to pre-allocate output buffers.
+func CompressBound(inputSize int) uint64 {
+	return uint64(C.zxc_compress_bound(C.size_t(inputSize)))
+}
+
+// Compress compresses data using the ZXC algorithm.
+//
+// Options: [WithLevel], [WithChecksum].
+//
+//	out, err := zxc.Compress(data, zxc.WithLevel(zxc.LevelCompact))
+func Compress(data []byte, opts ...Option) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, ErrSrcTooSmall
+	}
+
+	o := applyOptions(opts)
+	bound := CompressBound(len(data))
+	dst := make([]byte, bound)
+
+	var copts C.zxc_compress_opts_t
+	copts.level = C.int(o.level)
+	if o.checksum {
+		copts.checksum_enabled = 1
+	}
+
+	written := C.zxc_compress(
+		unsafe.Pointer(&data[0]),
+		C.size_t(len(data)),
+		unsafe.Pointer(&dst[0]),
+		C.size_t(bound),
+		&copts,
+	)
+
+	if written < 0 {
+		return nil, errorFromCode(written)
+	}
+	if written == 0 {
+		return nil, ErrInvalidData
+	}
+
+	return dst[:int(written)], nil
+}
+
+// CompressTo compresses data into a pre-allocated output buffer.
+// Returns the number of bytes written.
+func CompressTo(data []byte, output []byte, opts ...Option) (int, error) {
+	if len(data) == 0 {
+		return 0, ErrSrcTooSmall
+	}
+	if len(output) == 0 {
+		return 0, ErrDstTooSmall
+	}
+
+	o := applyOptions(opts)
+
+	var copts C.zxc_compress_opts_t
+	copts.level = C.int(o.level)
+	if o.checksum {
+		copts.checksum_enabled = 1
+	}
+
+	written := C.zxc_compress(
+		unsafe.Pointer(&data[0]),
+		C.size_t(len(data)),
+		unsafe.Pointer(&output[0]),
+		C.size_t(len(output)),
+		&copts,
+	)
+
+	if written < 0 {
+		return 0, errorFromCode(written)
+	}
+	if written == 0 {
+		return 0, ErrInvalidData
+	}
+
+	return int(written), nil
+}
+
+// DecompressedSize returns the original uncompressed size stored in the
+// compressed data footer. Returns 0, ErrInvalidData if the data is too small
+// or invalid.
+func DecompressedSize(data []byte) (uint64, error) {
+	if len(data) == 0 {
+		return 0, ErrInvalidData
+	}
+
+	size := C.zxc_get_decompressed_size(
+		unsafe.Pointer(&data[0]),
+		C.size_t(len(data)),
+	)
+
+	if size == 0 {
+		return 0, ErrInvalidData
+	}
+	return uint64(size), nil
+}
+
+// Decompress decompresses ZXC-compressed data.
+//
+// The output size is read from the compressed data footer. For pre-allocated
+// buffers, use [DecompressTo].
+//
+// Options: [WithChecksum].
+func Decompress(data []byte, opts ...Option) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, ErrInvalidData
+	}
+
+	size, err := DecompressedSize(data)
+	if err != nil {
+		return nil, err
+	}
+
+	o := applyOptions(opts)
+	dst := make([]byte, size)
+
+	var dopts C.zxc_decompress_opts_t
+	if o.checksum {
+		dopts.checksum_enabled = 1
+	}
+
+	written := C.zxc_decompress(
+		unsafe.Pointer(&data[0]),
+		C.size_t(len(data)),
+		unsafe.Pointer(&dst[0]),
+		C.size_t(size),
+		&dopts,
+	)
+
+	if written < 0 {
+		return nil, errorFromCode(written)
+	}
+	if uint64(written) != size {
+		return nil, ErrInvalidData
+	}
+
+	return dst[:int(written)], nil
+}
+
+// DecompressTo decompresses data into a pre-allocated output buffer.
+// Returns the number of bytes written.
+func DecompressTo(data []byte, output []byte, opts ...Option) (int, error) {
+	if len(data) == 0 {
+		return 0, ErrInvalidData
+	}
+	if len(output) == 0 {
+		return 0, ErrDstTooSmall
+	}
+
+	o := applyOptions(opts)
+
+	var dopts C.zxc_decompress_opts_t
+	if o.checksum {
+		dopts.checksum_enabled = 1
+	}
+
+	written := C.zxc_decompress(
+		unsafe.Pointer(&data[0]),
+		C.size_t(len(data)),
+		unsafe.Pointer(&output[0]),
+		C.size_t(len(output)),
+		&dopts,
+	)
+
+	if written < 0 {
+		return 0, errorFromCode(written)
+	}
+
+	return int(written), nil
+}
+
+// ============================================================================
+// Streaming API (file-based)
+// ============================================================================
+
+// CompressFile compresses src to dst using multi-threaded streaming.
+//
+// This is the recommended method for large files. It uses an asynchronous
+// pipeline with separate reader, worker, and writer threads.
+//
+// Options: [WithLevel], [WithChecksum], [WithThreads].
+//
+//	n, err := zxc.CompressFile("input.bin", "output.zxc",
+//	    zxc.WithLevel(zxc.LevelCompact), zxc.WithThreads(4))
+func CompressFile(input, output string, opts ...Option) (int64, error) {
+	o := applyOptions(opts)
+
+	fIn, err := os.Open(input)
+	if err != nil {
+		return 0, fmt.Errorf("zxc: open input: %w", err)
+	}
+	defer fIn.Close()
+
+	fOut, err := os.Create(output)
+	if err != nil {
+		return 0, fmt.Errorf("zxc: create output: %w", err)
+	}
+	defer fOut.Close()
+
+	// Duplicate file descriptors so the C FILE* owns its own fd.
+	cIn, err := dupFileRead(fIn)
+	if err != nil {
+		return 0, err
+	}
+	defer C.fclose(cIn)
+
+	cOut, err := dupFileWrite(fOut)
+	if err != nil {
+		return 0, err
+	}
+	defer C.fclose(cOut)
+
+	var copts C.zxc_compress_opts_t
+	copts.n_threads = C.int(o.threads)
+	copts.level = C.int(o.level)
+	if o.checksum {
+		copts.checksum_enabled = 1
+	}
+
+	result := C.zxc_stream_compress(cIn, cOut, &copts)
+	if result < 0 {
+		return 0, errorFromCode(result)
+	}
+	return int64(result), nil
+}
+
+// DecompressFile decompresses src to dst using multi-threaded streaming.
+//
+// Options: [WithChecksum], [WithThreads].
+//
+//	n, err := zxc.DecompressFile("compressed.zxc", "output.bin")
+func DecompressFile(input, output string, opts ...Option) (int64, error) {
+	o := applyOptions(opts)
+
+	fIn, err := os.Open(input)
+	if err != nil {
+		return 0, fmt.Errorf("zxc: open input: %w", err)
+	}
+	defer fIn.Close()
+
+	fOut, err := os.Create(output)
+	if err != nil {
+		return 0, fmt.Errorf("zxc: create output: %w", err)
+	}
+	defer fOut.Close()
+
+	cIn, err := dupFileRead(fIn)
+	if err != nil {
+		return 0, err
+	}
+	defer C.fclose(cIn)
+
+	cOut, err := dupFileWrite(fOut)
+	if err != nil {
+		return 0, err
+	}
+	defer C.fclose(cOut)
+
+	var dopts C.zxc_decompress_opts_t
+	dopts.n_threads = C.int(o.threads)
+	if o.checksum {
+		dopts.checksum_enabled = 1
+	}
+
+	result := C.zxc_stream_decompress(cIn, cOut, &dopts)
+	if result < 0 {
+		return 0, errorFromCode(result)
+	}
+	return int64(result), nil
+}
+
+// ============================================================================
+// Internal helpers
+// ============================================================================
+
+// C mode strings — allocated once, never freed (intentional; they live for the
+// process lifetime and avoid per-call C.CString/C.free overhead).
+var (
+	cModeRead  = C.CString("rb")
+	cModeWrite = C.CString("wb")
+)
+
+// dupFileRead duplicates a Go *os.File's fd and wraps it in a C FILE* for
+// reading. The returned FILE* owns its own fd and must be closed with
+// C.fclose().
+func dupFileRead(f *os.File) (*C.FILE, error) {
+	fd := C.int(f.Fd())
+	dupFd := C.dup(fd)
+	if dupFd < 0 {
+		return nil, fmt.Errorf("zxc: dup failed for read fd")
+	}
+
+	cFile := C.fdopen(dupFd, cModeRead)
+	if cFile == nil {
+		C.close(dupFd)
+		return nil, fmt.Errorf("zxc: fdopen failed for read fd")
+	}
+	return cFile, nil
+}
+
+// dupFileWrite duplicates a Go *os.File's fd and wraps it in a C FILE* for
+// writing. The returned FILE* owns its own fd and must be closed with
+// C.fclose().
+func dupFileWrite(f *os.File) (*C.FILE, error) {
+	fd := C.int(f.Fd())
+	dupFd := C.dup(fd)
+	if dupFd < 0 {
+		return nil, fmt.Errorf("zxc: dup failed for write fd")
+	}
+
+	cFile := C.fdopen(dupFd, cModeWrite)
+	if cFile == nil {
+		C.close(dupFd)
+		return nil, fmt.Errorf("zxc: fdopen failed for write fd")
+	}
+	return cFile, nil
+}
