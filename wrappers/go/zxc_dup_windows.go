@@ -5,6 +5,7 @@ package zxc
 /*
 #include <io.h>
 #include <stdio.h>
+#include <fcntl.h>
 */
 import "C"
 import (
@@ -20,12 +21,25 @@ var (
 	cModeWrite = C.CString("wb")
 )
 
-// dupFileRead duplicates a Go *os.File's fd and wraps it in a C FILE* for
-// reading. Uses Windows CRT _dup/_fdopen/_close.
+// dupFileRead converts a Go *os.File to a C FILE* for reading on Windows.
+//
+// os.File.Fd() returns a Windows HANDLE (not a CRT fd), so we must use
+// _open_osfhandle() to wrap it as a CRT fd, then _dup() to own it
+// independently, since _open_osfhandle() transfers ownership of the HANDLE.
 func dupFileRead(f *os.File) (*C.FILE, error) {
-	fd := C.int(f.Fd())
-	dupFd := C._dup(fd)
+	handle := C.intptr_t(f.Fd())
 	runtime.KeepAlive(f)
+
+	// Wrap the HANDLE as a read-only CRT fd.
+	crtFd := C._open_osfhandle(handle, C._O_RDONLY)
+	if crtFd < 0 {
+		return nil, fmt.Errorf("zxc: _open_osfhandle failed for read fd")
+	}
+
+	// Dup so we own this fd independently from Go's *os.File.
+	// Do NOT close crtFd: _open_osfhandle transfers HANDLE ownership to the
+	// CRT; closing it would also close the HANDLE still owned by Go.
+	dupFd := C._dup(crtFd)
 	if dupFd < 0 {
 		return nil, fmt.Errorf("zxc: _dup failed for read fd")
 	}
@@ -38,12 +52,17 @@ func dupFileRead(f *os.File) (*C.FILE, error) {
 	return cFile, nil
 }
 
-// dupFileWrite duplicates a Go *os.File's fd and wraps it in a C FILE* for
-// writing. Uses Windows CRT _dup/_fdopen/_close.
+// dupFileWrite converts a Go *os.File to a C FILE* for writing on Windows.
 func dupFileWrite(f *os.File) (*C.FILE, error) {
-	fd := C.int(f.Fd())
-	dupFd := C._dup(fd)
+	handle := C.intptr_t(f.Fd())
 	runtime.KeepAlive(f)
+
+	crtFd := C._open_osfhandle(handle, C._O_WRONLY)
+	if crtFd < 0 {
+		return nil, fmt.Errorf("zxc: _open_osfhandle failed for write fd")
+	}
+
+	dupFd := C._dup(crtFd)
 	if dupFd < 0 {
 		return nil, fmt.Errorf("zxc: _dup failed for write fd")
 	}
