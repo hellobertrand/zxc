@@ -31,10 +31,17 @@ jobs:
           go-version: '1.21'
           cache: false
 
-      - name: Build ZXC Core Library
+      - name: Build ZXC Core Library (Unix)
+        if: runner.os != 'Windows'
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
-          cmake --build build --config Release --parallel
+          cmake --build build --parallel
+
+      - name: Build ZXC Core Library (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
+          cmake --build build --parallel
 
       - name: Run Go Tests (Unix)
         if: runner.os != 'Windows'
@@ -46,7 +53,7 @@ jobs:
         working-directory: ./wrappers/go
         env:
           CGO_ENABLED: "1"
-          CGO_LDFLAGS: "-L../../build/Release -lzxc"
+          CGO_LDFLAGS: "-L../../build -lzxc"
         run: go test -v -count=1 ./...
 
       - name: Run Go Benchmarks (Unix)
@@ -59,5 +66,5 @@ jobs:
         working-directory: ./wrappers/go
         env:
           CGO_ENABLED: "1"
-          CGO_LDFLAGS: "-L../../build/Release -lzxc"
+          CGO_LDFLAGS: "-L../../build -lzxc"
         run: go test -bench=. -benchmem -count=1 ./...
