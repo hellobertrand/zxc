@@ -866,7 +866,6 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
         }
-        /* Block API has no file header to read algo from; default to rapidhash. */
         if (UNLIKELY(zxc_cctx_init(&dctx->inner, block_size, 0, 0, checksum_enabled) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         dctx->last_block_size = block_size;

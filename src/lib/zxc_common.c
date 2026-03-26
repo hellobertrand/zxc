@@ -199,7 +199,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     dst[5] = (uint8_t)zxc_log2_u32((uint32_t)chunk_size);
 
     // Flags are at offset 6
-    dst[6] = has_checksum ? (ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_CHECKSUM_RAPIDHASH) : 0U;
+    dst[6] = has_checksum ? (ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_CHECKSUM_RAPIDHASH) : 0;
 
     // Bytes 7-13: Reserved (must be 0, 7 bytes)
     ZXC_MEMSET(dst + 7, 0, 7);
