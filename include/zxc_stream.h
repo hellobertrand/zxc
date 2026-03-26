@@ -74,6 +74,8 @@ typedef struct {
     size_t block_size;    /**< Block size in bytes (0 = default 256 KB). Must be power of 2, [4KB -
                              2MB]. */
     int checksum_enabled; /**< 1 to enable per-block and global checksums, 0 to disable. */
+    int checksum_algo;    /**< Checksum algorithm (see @ref zxc_checksum_algo_t).
+                             0 = ZXC_CHECKSUM_ALGO_RAPIDHASH (default, zero-init safe). */
     zxc_progress_callback_t progress_cb; /**< Optional progress callback (NULL to disable). */
     void* user_data;                     /**< User context pointer passed to progress_cb. */
 } zxc_compress_opts_t;

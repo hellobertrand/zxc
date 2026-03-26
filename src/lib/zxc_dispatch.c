@@ -338,6 +338,8 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
+    const int checksum_algo =
+        (opts && opts->checksum_algo) ? opts->checksum_algo : ZXC_CHECKSUM_RAPIDHASH;
     const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
@@ -351,11 +353,12 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     uint32_t global_hash = 0;
     zxc_cctx_t ctx;
 
-    if (UNLIKELY(zxc_cctx_init(&ctx, block_size, 1, level, checksum_enabled) != ZXC_OK))
+    if (UNLIKELY(zxc_cctx_init(&ctx, block_size, 1, level, checksum_enabled, checksum_algo) !=
+                 ZXC_OK))
         return ZXC_ERROR_MEMORY;
 
-    const int h_val =
-        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled);
+    const int h_val = zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled,
+                                            checksum_algo);
     if (UNLIKELY(h_val < 0)) {
         zxc_cctx_free(&ctx);
         return h_val;
@@ -436,11 +439,13 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
     zxc_cctx_t ctx;
 
     int file_has_checksums = 0;
+    int file_checksum_algo = ZXC_CHECKSUM_RAPIDHASH;
     // File header verification and context initialization
-    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums) !=
-                     ZXC_OK ||
+    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
+                                      &file_checksum_algo) != ZXC_OK ||
                  zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0,
-                               file_has_checksums && checksum_enabled) != ZXC_OK)) {
+                               file_has_checksums && checksum_enabled,
+                               file_checksum_algo) != ZXC_OK)) {
         return ZXC_ERROR_BAD_HEADER;
     }
 
@@ -572,6 +577,7 @@ struct zxc_cctx_s {
     /* Sticky options (remembered from create or last compress call). */
     int stored_level;
     int stored_checksum;
+    int stored_algo;
     size_t stored_block_size;
 };
 
@@ -584,11 +590,13 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
     cctx->stored_block_size =
         (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
     cctx->stored_checksum = opts ? opts->checksum_enabled : 0;
+    cctx->stored_algo =
+        (opts && opts->checksum_algo) ? opts->checksum_algo : ZXC_CHECKSUM_RAPIDHASH;
 
     if (opts) {
         if (UNLIKELY(!zxc_validate_block_size(cctx->stored_block_size) ||
                      zxc_cctx_init(&cctx->inner, cctx->stored_block_size, 1, cctx->stored_level,
-                                   cctx->stored_checksum) != ZXC_OK)) {
+                                   cctx->stored_checksum, cctx->stored_algo) != ZXC_OK)) {
             free(cctx);
             return NULL;
         }
@@ -612,6 +620,8 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : cctx->stored_checksum;
+    const int checksum_algo =
+        (opts && opts->checksum_algo) ? opts->checksum_algo : cctx->stored_algo;
     const int level = (opts && opts->level > 0) ? opts->level : cctx->stored_level;
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : cctx->stored_block_size;
@@ -619,6 +629,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     cctx->stored_level = level;
     cctx->stored_block_size = block_size;
     cctx->stored_checksum = checksum_enabled;
+    cctx->stored_algo = checksum_algo;
 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
@@ -628,7 +639,8 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
             zxc_cctx_free(&cctx->inner);
             cctx->initialized = 0;
         }
-        if (UNLIKELY(zxc_cctx_init(&cctx->inner, block_size, 1, level, checksum_enabled) != ZXC_OK))
+        if (UNLIKELY(zxc_cctx_init(&cctx->inner, block_size, 1, level, checksum_enabled,
+                                   checksum_algo) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         cctx->last_block_size = block_size;
         cctx->initialized = 1;
@@ -636,6 +648,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         /* Same block_size: update level + checksum without realloc. */
         cctx->inner.compression_level = level;
         cctx->inner.checksum_enabled = checksum_enabled;
+        cctx->inner.checksum_algo = checksum_algo;
     }
 
     zxc_cctx_t* const ctx = &cctx->inner;
@@ -646,8 +659,8 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     const uint8_t* const ip = (const uint8_t*)src;
     uint32_t global_hash = 0;
 
-    const int h_val =
-        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled);
+    const int h_val = zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled,
+                                            checksum_algo);
     if (UNLIKELY(h_val < 0)) return h_val;
     op += h_val;
 
@@ -722,9 +735,10 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     const uint8_t* const op_end = op + dst_capacity;
     size_t runtime_chunk_size = 0;
     int file_has_checksums = 0;
+    int file_checksum_algo = ZXC_CHECKSUM_RAPIDHASH;
 
-    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums) !=
-                 ZXC_OK))
+    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
+                                      &file_checksum_algo) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
 
     /* Re-init only when block size changed. */
@@ -734,12 +748,14 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
             dctx->initialized = 0;
         }
         if (UNLIKELY(zxc_cctx_init(&dctx->inner, runtime_chunk_size, 0, 0,
-                                   file_has_checksums && checksum_enabled) != ZXC_OK))
+                                   file_has_checksums && checksum_enabled,
+                                   file_checksum_algo) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         dctx->last_block_size = runtime_chunk_size;
         dctx->initialized = 1;
     } else {
         dctx->inner.checksum_enabled = file_has_checksums && checksum_enabled;
+        dctx->inner.checksum_algo = file_checksum_algo;
     }
 
     zxc_cctx_t* const ctx = &dctx->inner;
@@ -816,6 +832,8 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
         return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : cctx->stored_checksum;
+    const int checksum_algo =
+        (opts && opts->checksum_algo) ? opts->checksum_algo : cctx->stored_algo;
     const int level = (opts && opts->level > 0) ? opts->level : cctx->stored_level;
     /* For block API, block_size == src_size (the caller compresses one block at a time). */
     const size_t block_size =
@@ -825,6 +843,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     cctx->stored_level = level;
     cctx->stored_block_size = effective_block_size;
     cctx->stored_checksum = checksum_enabled;
+    cctx->stored_algo = checksum_algo;
 
     /* Re-init only when block_size changed. */
     if (!cctx->initialized || cctx->last_block_size != effective_block_size) {
@@ -832,14 +851,15 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
             zxc_cctx_free(&cctx->inner);
             cctx->initialized = 0;
         }
-        if (UNLIKELY(zxc_cctx_init(&cctx->inner, effective_block_size, 1, level,
-                                   checksum_enabled) != ZXC_OK))
+        if (UNLIKELY(zxc_cctx_init(&cctx->inner, effective_block_size, 1, level, checksum_enabled,
+                                   checksum_algo) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         cctx->last_block_size = effective_block_size;
         cctx->initialized = 1;
     } else {
         cctx->inner.compression_level = level;
         cctx->inner.checksum_enabled = checksum_enabled;
+        cctx->inner.checksum_algo = checksum_algo;
     }
 
     const int res = zxc_compress_chunk_wrapper(&cctx->inner, (const uint8_t*)src, src_size,
@@ -866,7 +886,8 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
         }
-        if (UNLIKELY(zxc_cctx_init(&dctx->inner, block_size, 0, 0, checksum_enabled) != ZXC_OK))
+        /* Block API has no file header to read algo from; default to rapidhash. */
+        if (UNLIKELY(zxc_cctx_init(&dctx->inner, block_size, 0, 0, checksum_enabled, 0) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         dctx->last_block_size = block_size;
         dctx->initialized = 1;
