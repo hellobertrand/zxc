@@ -144,8 +144,8 @@ ZXC_EXPORT void zxc_cctx_free(zxc_cctx_t* ctx);
  *
  * @param[out] dst The destination buffer where the header will be written.
  * @param[in] dst_capacity The total capacity of the destination buffer in bytes.
- * @param[in] chunk_size The block size to encode in the header.
- * @param[in] has_checksum Flag indicating whether the checksum bit should be set.
+ * @param[in] chunk_size    The block size to encode in the header.
+ * @param[in] has_checksum  Flag indicating whether the checksum bit should be set.
  * @return The number of bytes written (ZXC_FILE_HEADER_SIZE) on success,
  *         or ZXC_ERROR_DST_TOO_SMALL if the destination capacity is insufficient.
  */
@@ -161,8 +161,8 @@ ZXC_EXPORT int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity,
  *
  * @param[in] src Pointer to the source buffer containing the file data.
  * @param[in] src_size Size of the source buffer in bytes.
- * @param[out] out_block_size Optional pointer to receive the recommended block size.
- * @param[out] out_has_checksum Optional pointer to receive the checksum flag.
+ * @param[out] out_block_size    Optional pointer to receive the recommended block size.
+ * @param[out] out_has_checksum  Optional pointer to receive the checksum flag.
  * @return ZXC_OK on success, or a negative error code (e.g., ZXC_ERROR_SRC_TOO_SMALL,
  * ZXC_ERROR_BAD_MAGIC, ZXC_ERROR_BAD_VERSION).
  */

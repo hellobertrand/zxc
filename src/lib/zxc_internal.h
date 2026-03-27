@@ -333,8 +333,9 @@ extern "C" {
 /** @brief Number of sections in a GHI block. */
 #define ZXC_GHI_SECTIONS 3
 
-/** @brief Checksum algorithm id for rapidhash (default). */
-#define ZXC_CHECKSUM_RAPIDHASH 0x00U
+/** @brief Checksum algorithm id for rapidhash (default). Alias for @ref
+ * ZXC_CHECKSUM_ALGO_RAPIDHASH. */
+#define ZXC_CHECKSUM_RAPIDHASH ((uint8_t)ZXC_CHECKSUM_ALGO_RAPIDHASH)
 
 /** @brief Size of the global checksum appended after EOF block (4 bytes). */
 #define ZXC_GLOBAL_CHECKSUM_SIZE 4
@@ -982,12 +983,8 @@ void zxc_aligned_free(void* ptr);
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const size_t len,
                                                const uint8_t hash_method) {
-    uint64_t hash;
-    if (LIKELY(hash_method == ZXC_CHECKSUM_RAPIDHASH))
-        hash = rapidhash(input, len);
-    else
-        // Default fallthrough to rapidhash for unknown types (safe default)
-        hash = rapidhash(input, len);
+    (void)hash_method; /* single algorithm for now; extend when adding more */
+    const uint64_t hash = rapidhash(input, len);
 
     return (uint32_t)(hash ^ (hash >> (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)));
 }
