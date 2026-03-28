@@ -60,7 +60,7 @@ jobs:
           path: |
             ${{ env.SILESIA_DIR }}
             ${{ env.SILESIA_TAR }}
-          key: silesia-corpus-${{ runner.os }}-v2
+          key: silesia-corpus-${{ runner.os }}-v3
 
       - name: Download Silesia Corpus (${{ runner.os }})
         if: steps.cache-silesia.outputs.cache-hit != 'true'
@@ -69,10 +69,23 @@ jobs:
           mkdir -p "${SILESIA_DIR}"
           unzip -q silesia.zip -d "${SILESIA_DIR}"
 
-      - name: Create Silesia tar (portable format)
+      - name: Create Silesia tar (deterministic, cross-platform)
         run: |
           if [ ! -f "${SILESIA_TAR}" ]; then
-            tar --format=ustar -cf "${SILESIA_TAR}" -C "${SILESIA_DIR}" dickens mozilla mr nci ooffice osdb reymont samba sao webster x-ray xml
+            python3 -c "
+          import tarfile, os
+          files = ['dickens','mozilla','mr','nci','ooffice','osdb','reymont','samba','sao','webster','x-ray','xml']
+          with tarfile.open('${SILESIA_TAR}', 'w', format=tarfile.USTAR_FORMAT) as tar:
+              for f in files:
+                  path = os.path.join('${SILESIA_DIR}', f)
+                  info = tar.gettarinfo(path, arcname=f)
+                  info.uid = info.gid = 0
+                  info.uname = info.gname = ''
+                  info.mtime = 0
+                  info.mode = 0o644
+                  with open(path, 'rb') as fh:
+                      tar.addfile(info, fh)
+          "
           fi
 
       - name: Run Lzbench on Silesia Corpus
