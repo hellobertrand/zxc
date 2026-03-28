@@ -30,6 +30,7 @@ jobs:
     env:
         LZBENCH_DIR: lzbench
         SILESIA_DIR: silesia
+        SILESIA_TAR: silesia.tar
 
     steps:
       - name: Checkout Repository
@@ -56,8 +57,10 @@ jobs:
         id: cache-silesia
         uses: actions/cache@v5
         with:
-          path: ${{ env.SILESIA_DIR }}
-          key: silesia-corpus-${{ runner.os }}-v1
+          path: |
+            ${{ env.SILESIA_DIR }}
+            ${{ env.SILESIA_TAR }}
+          key: silesia-corpus-${{ runner.os }}-v2
 
       - name: Download Silesia Corpus (${{ runner.os }})
         if: steps.cache-silesia.outputs.cache-hit != 'true'
@@ -66,12 +69,18 @@ jobs:
           mkdir -p "${SILESIA_DIR}"
           unzip -q silesia.zip -d "${SILESIA_DIR}"
 
+      - name: Create Silesia tar (portable format)
+        run: |
+          if [ ! -f "${SILESIA_TAR}" ]; then
+            tar --format=ustar -cf "${SILESIA_TAR}" -C "${SILESIA_DIR}" dickens mozilla mr nci ooffice osdb reymont samba sao webster x-ray xml
+          fi
+
       - name: Run Lzbench on Silesia Corpus
         working-directory: ${{ env.LZBENCH_DIR }}
         run: |
           ./lzbench \
             -e"memcpy/zxc/lz4/lz4fast,17/lz4hc,9/lzav,1/snappy/zstd,1/zstd_fast,-1/zlib,1" \
-            -j -t8,8 -o1 -r "../${SILESIA_DIR}"/ \
+            -j -t8,8 -o1 "../${SILESIA_TAR}" \
             > ../benchmark.md
 
           echo "Benchmark finished. First lines:"
