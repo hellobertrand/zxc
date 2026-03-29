@@ -30,6 +30,7 @@ jobs:
     env:
         LZBENCH_DIR: lzbench
         SILESIA_DIR: silesia
+        SILESIA_TAR: silesia.tar
 
     steps:
       - name: Checkout Repository
@@ -56,8 +57,10 @@ jobs:
         id: cache-silesia
         uses: actions/cache@v5
         with:
-          path: ${{ env.SILESIA_DIR }}
-          key: silesia-corpus-${{ runner.os }}-v1
+          path: |
+            ${{ env.SILESIA_DIR }}
+            ${{ env.SILESIA_TAR }}
+          key: silesia-corpus-${{ runner.os }}-v3
 
       - name: Download Silesia Corpus (${{ runner.os }})
         if: steps.cache-silesia.outputs.cache-hit != 'true'
@@ -66,21 +69,39 @@ jobs:
           mkdir -p "${SILESIA_DIR}"
           unzip -q silesia.zip -d "${SILESIA_DIR}"
 
+      - name: Create Silesia tar (deterministic, cross-platform)
+        run: |
+          if [ ! -f "${SILESIA_TAR}" ]; then
+            python3 -c "
+          import tarfile, os
+          files = ['dickens','mozilla','mr','nci','ooffice','osdb','reymont','samba','sao','webster','x-ray','xml']
+          with tarfile.open('${SILESIA_TAR}', 'w', format=tarfile.USTAR_FORMAT) as tar:
+              for f in files:
+                  path = os.path.join('${SILESIA_DIR}', f)
+                  info = tar.gettarinfo(path, arcname=f)
+                  info.uid = info.gid = 0
+                  info.uname = info.gname = ''
+                  info.mtime = 0
+                  info.mode = 0o644
+                  with open(path, 'rb') as fh:
+                      tar.addfile(info, fh)
+          "
+          fi
+
       - name: Run Lzbench on Silesia Corpus
         working-directory: ${{ env.LZBENCH_DIR }}
         run: |
           ./lzbench \
-            -e"memcpy/zxc/lz4/lz4fast,17/lz4hc,12/zstd,1/zstd_fast,-1/brotli,0/snappy" \
-            -j -t8,8 -o1 -r "../${SILESIA_DIR}"/ \
+            -e"memcpy/zxc/lz4/lz4fast,17/lz4hc,9/lzav,1/snappy/zstd_fast,-1/zstd,1/zlib,1" \
+            -j -t8,8 -o1 "../${SILESIA_TAR}" \
             > ../benchmark.md
 
           echo "Benchmark finished. First lines:"
           head -n 40 ../benchmark.md
 
       - name: Add Benchmark to Job Summary
-        if: always()
         run: |
-          echo "### Résultats Benchmark (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
+          echo "### Benchmark Results (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
           cat benchmark.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Benchmark Result as Artifact
