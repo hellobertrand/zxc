@@ -482,7 +482,7 @@ typedef struct {
     int lazy_attempts;
 
     /** Skip lazy evaluation when the current match length already reaches
-     *  this threshold — a match this long is unlikely to be beaten at the
+     *  this threshold: a match this long is unlikely to be beaten at the
      *  next byte.  Set to 0 when @ref use_lazy is disabled. */
     int lazy_len_threshold;
 
