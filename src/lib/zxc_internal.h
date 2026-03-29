@@ -456,12 +456,13 @@ static ZXC_ALWAYS_INLINE int zxc_validate_block_size(const size_t bs) {
  * @brief Search parameters for LZ77 compression levels.
  */
 typedef struct {
-    int search_depth;    /**< Maximum number of matches to check in hash chain. */
-    int sufficient_len;  /**< Stop searching if match length >= this value. */
-    int use_lazy;        /**< Enable lazy matching (check next position for better match). */
-    int lazy_attempts;   /**< Maximum matches to check during lazy matching. */
-    uint32_t step_base;  /**< Base step size for literal advancement. */
-    uint32_t step_shift; /**< Shift amount for distance-based stepping. */
+    int search_depth;       /**< Maximum number of matches to check in hash chain. */
+    int sufficient_len;     /**< Stop searching if match length >= this value. */
+    int use_lazy;           /**< Enable lazy matching (check next position for better match). */
+    int lazy_attempts;      /**< Maximum matches to check during lazy matching. */
+    int lazy_len_threshold; /**< Skip lazy evaluation when match length >= this value. */
+    uint32_t step_base;     /**< Base step size for literal advancement. */
+    uint32_t step_shift;    /**< Shift amount for distance-based stepping. */
 } zxc_lz77_params_t;
 
 /**
@@ -474,14 +475,15 @@ typedef struct {
  * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
-    if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 1, 8};
-    // search_depth, sufficient_len, use_lazy, lazy_attempts, step_base, step_shift
+    if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 128, 1, 8};
+    // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
+    // step_shift
     static const zxc_lz77_params_t table[5] = {
-        {4, 16, 0, 0, 4, 4},  // fallback
-        {4, 16, 0, 0, 4, 4},  // level 1
-        {6, 24, 0, 0, 3, 6},  // level 2
-        {3, 18, 1, 4, 1, 4},  // level 3
-        {3, 18, 1, 4, 1, 5}   // level 4
+        {4, 16, 0, 0, 0, 4, 4},    // fallback
+        {4, 16, 0, 0, 0, 4, 4},    // level 1
+        {6, 24, 0, 0, 0, 3, 6},    // level 2
+        {3, 18, 1, 4, 128, 1, 4},  // level 3
+        {3, 18, 1, 4, 128, 1, 5}   // level 4
     };
     return table[level < 1 ? 1 : level];
 }

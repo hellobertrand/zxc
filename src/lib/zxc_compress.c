@@ -374,7 +374,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         best.ref = b_ref;
     }
 
-    if (p.use_lazy && best.ref && best.len < 128 && ip + 1 < mflimit) {
+    if (p.use_lazy && best.ref && best.len < (uint32_t)p.lazy_len_threshold && ip + 1 < mflimit) {
         const uint64_t next_val8 = zxc_le64(ip + 1);
         const uint32_t next_val = (uint32_t)next_val8;
         const uint32_t h2 = zxc_hash_func(next_val8, use_hash5);
