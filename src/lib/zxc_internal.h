@@ -433,10 +433,13 @@ extern "C" {
  * @param v Must be a power of two (undefined for zero).
  * @return Floor of log2(v).
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_log2_u32(uint32_t v) {
-    uint32_t r = 0;
-    while (v >>= 1) r++;
-    return r;
+static ZXC_ALWAYS_INLINE uint32_t zxc_log2_u32(const uint32_t v) {
+#ifdef _MSC_VER
+    unsigned long index;
+    return (v == 0) ? 0 : (_BitScanReverse(&index, v) ? index : 0);
+#else
+    return (v == 0) ? 0 : (uint32_t)(31 - __builtin_clz(v));
+#endif
 }
 
 /**
