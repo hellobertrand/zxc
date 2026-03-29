@@ -480,8 +480,8 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
         {4, 16, 0, 0, 4, 4},  // fallback
         {4, 16, 0, 0, 4, 4},  // level 1
         {6, 24, 0, 0, 3, 6},  // level 2
-        {3, 18, 1, 4, 1, 4},  // level 3
-        {3, 18, 1, 4, 1, 5}   // level 4
+        {4, 16, 1, 4, 1, 4},  // level 3
+        {4, 16, 1, 4, 1, 5}   // level 4
     };
     return table[level < 1 ? 1 : level];
 }
