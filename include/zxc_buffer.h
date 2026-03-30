@@ -46,6 +46,55 @@ extern "C" {
 #endif
 
 /**
+ * @defgroup library_info Library Information
+ * @brief Runtime-queryable library metadata.
+ *
+ * These functions allow callers (including filesystem integrations)
+ * to discover the supported compression level range and library version at
+ * runtime, without relying on compile-time constants alone.
+ * @{
+ */
+
+/**
+ * @brief Returns the minimum supported compression level.
+ *
+ * Currently returns @ref ZXC_LEVEL_FASTEST (1).
+ *
+ * @return Minimum compression level value.
+ */
+ZXC_EXPORT int zxc_min_level(void);
+
+/**
+ * @brief Returns the maximum supported compression level.
+ *
+ * Currently returns @ref ZXC_LEVEL_COMPACT (5).
+ *
+ * @return Maximum compression level value.
+ */
+ZXC_EXPORT int zxc_max_level(void);
+
+/**
+ * @brief Returns the default compression level.
+ *
+ * Currently returns @ref ZXC_LEVEL_DEFAULT (3).
+ *
+ * @return Default compression level value.
+ */
+ZXC_EXPORT int zxc_default_level(void);
+
+/**
+ * @brief Returns the human-readable library version string.
+ *
+ * The returned pointer is a compile-time constant and must not be freed.
+ * Example: "0.9.1".
+ *
+ * @return Null-terminated version string.
+ */
+ZXC_EXPORT const char* zxc_version_string(void);
+
+/** @} */ /* end of library_info */
+
+/**
  * @defgroup buffer_api Buffer API
  * @brief Single-shot, buffer-based compression and decompression.
  * @{
