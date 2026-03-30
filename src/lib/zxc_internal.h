@@ -281,8 +281,8 @@ extern "C" {
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
 /** @brief Current on-disk file format version. */
 #define ZXC_FILE_FORMAT_VERSION 5
-/** @brief Size of stdio I/O buffers (1 MB). */
-#define ZXC_IO_BUFFER_SIZE (1024 * 1024)
+/** @brief Size of stdio I/O buffers (2 MB, matches ZXC_BLOCK_SIZE_MAX). */
+#define ZXC_IO_BUFFER_SIZE (2 * 1024 * 1024)
 /** @brief Maximum number of threads allowed for streaming operations. */
 #define ZXC_MAX_THREADS 512
 /** @brief Safety padding appended to buffers to tolerate overruns. */
