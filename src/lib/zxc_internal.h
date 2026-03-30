@@ -454,14 +454,46 @@ static ZXC_ALWAYS_INLINE int zxc_validate_block_size(const size_t bs) {
 /**
  * @struct zxc_lz77_params_t
  * @brief Search parameters for LZ77 compression levels.
+ *
+ * Each compression level maps to a specific set of parameters that control the
+ * trade-off between compression speed and ratio.  Higher search depths and lazy
+ * matching improve ratio at the expense of throughput; larger step values
+ * accelerate literal scanning but may miss short matches.
  */
 typedef struct {
-    int search_depth;    /**< Maximum number of matches to check in hash chain. */
-    int sufficient_len;  /**< Stop searching if match length >= this value. */
-    int use_lazy;        /**< Enable lazy matching (check next position for better match). */
-    int lazy_attempts;   /**< Maximum matches to check during lazy matching. */
-    uint32_t step_base;  /**< Base step size for literal advancement. */
-    uint32_t step_shift; /**< Shift amount for distance-based stepping. */
+    /** Maximum number of candidates explored in the hash chain per position.
+     *  Higher values find better matches but increase CPU cost linearly. */
+    int search_depth;
+
+    /** "Good enough" match length: once a match reaches this threshold the
+     *  chain walk stops immediately, avoiding wasted effort on an already
+     *  excellent match. */
+    int sufficient_len;
+
+    /** Enable lazy matching.  When set, after finding a match at position
+     *  @c ip the compressor probes @c ip+1 (and @c ip+2 for level >= 4) to
+     *  see if a longer match exists.  If so, a literal is emitted and the
+     *  better match is taken instead.  Improves ratio but costs extra work. */
+    int use_lazy;
+
+    /** Maximum number of candidates explored during lazy evaluation (same
+     *  semantics as @ref search_depth but applied to the ip+1 / ip+2 probes).
+     *  Only meaningful when @ref use_lazy is non-zero. */
+    int lazy_attempts;
+
+    /** Skip lazy evaluation when the current match length already reaches
+     *  this threshold: a match this long is unlikely to be beaten at the
+     *  next byte.  Set to 0 when @ref use_lazy is disabled. */
+    int lazy_len_threshold;
+
+    /** Base step size when advancing through unmatched literals.
+     *  1 = test every byte (best ratio), 4 = skip aggressively (fastest). */
+    uint32_t step_base;
+
+    /** Acceleration factor for step size: @c step = step_base + (distance >> step_shift).
+     *  A larger value keeps the step conservative (grows slowly with distance);
+     *  a smaller value ramps up quickly, skipping more in long literal runs. */
+    uint32_t step_shift;
 } zxc_lz77_params_t;
 
 /**
@@ -474,14 +506,15 @@ typedef struct {
  * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
-    if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 1, 31};
-    // search_depth, sufficient_len, use_lazy, lazy_attempts, step_base, step_shift
+    if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 128, 1, 8};
+    // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
+    // step_shift
     static const zxc_lz77_params_t table[5] = {
-        {4, 16, 0, 0, 4, 4},  // fallback
-        {4, 16, 0, 0, 4, 4},  // level 1
-        {6, 24, 0, 0, 3, 6},  // level 2
-        {3, 18, 1, 4, 1, 4},  // level 3
-        {3, 18, 1, 4, 1, 5}   // level 4
+        {4, 16, 0, 0, 0, 4, 4},    // fallback
+        {4, 16, 0, 0, 0, 4, 4},    // level 1
+        {6, 24, 0, 0, 0, 3, 6},    // level 2
+        {3, 18, 1, 4, 128, 1, 4},  // level 3
+        {3, 18, 1, 4, 128, 1, 5}   // level 4
     };
     return table[level < 1 ? 1 : level];
 }

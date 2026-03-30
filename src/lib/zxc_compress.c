@@ -37,13 +37,13 @@
  * 4-byte Marsaglia hash.
  * @return uint32_t A hash value suitable for indexing the match table.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(uint64_t val, const int use_hash5) {
+static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int use_hash5) {
     if (use_hash5) {
         const uint64_t v5 = val & 0xFFFFFFFFFFULL;
         return (uint32_t)((v5 * ZXC_LZ_HASH_PRIME2) >> (64 - ZXC_LZ_HASH_BITS));
     } else {
-        val ^= val >> 15;
-        return ((uint32_t)val * ZXC_LZ_HASH_PRIME1) >> (32 - ZXC_LZ_HASH_BITS);
+        const uint64_t v4 = val ^ (val >> 15);
+        return ((uint32_t)v4 * ZXC_LZ_HASH_PRIME1) >> (32 - ZXC_LZ_HASH_BITS);
     }
 }
 
@@ -374,7 +374,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         best.ref = b_ref;
     }
 
-    if (p.use_lazy && best.ref && best.len < 128 && ip + 1 < mflimit) {
+    if (p.use_lazy && best.ref && best.len < (uint32_t)p.lazy_len_threshold && ip + 1 < mflimit) {
         const uint64_t next_val8 = zxc_le64(ip + 1);
         const uint32_t next_val = (uint32_t)next_val8;
         const uint32_t h2 = zxc_hash_func(next_val8, use_hash5);
@@ -764,12 +764,12 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             if ((off - ZXC_LZ_OFFSET_BIAS) > max_offset)
                 max_offset = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
 
-            if (ll >= ZXC_TOKEN_LL_MASK) {
+            if (ll >= ZXC_TOKEN_LL_MASK)
                 extras_sz += zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
-            }
-            if (ml >= ZXC_TOKEN_ML_MASK) {
+
+            if (ml >= ZXC_TOKEN_ML_MASK)
                 extras_sz += zxc_write_varint(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
-            }
+
             seq_c++;
 
             if (m.len > 2 && level > 4) {
@@ -1229,7 +1229,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         size_t step = lzp.step_base + (dist >> lzp.step_shift);
         if (UNLIKELY(ip + step >= mflimit)) step = 1;
 
-        ZXC_PREFETCH_READ(ip + step * 4 + 64);
+        ZXC_PREFETCH_READ(ip + step * 4 + ZXC_CACHE_LINE_SIZE);
 
         const zxc_match_t m =
             zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, chain_table,
@@ -1261,12 +1261,10 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             buf_sequences[seq_c] = seq_val;
             seq_c++;
 
-            if (ll >= ZXC_SEQ_LL_MASK) {
+            if (ll >= ZXC_SEQ_LL_MASK)
                 extras_c += zxc_write_varint(buf_extras + extras_c, ll - ZXC_SEQ_LL_MASK);
-            }
-            if (ml >= ZXC_SEQ_ML_MASK) {
+            if (ml >= ZXC_SEQ_ML_MASK)
                 extras_c += zxc_write_varint(buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
-            }
 
             ip += m.len;
             anchor = ip;
@@ -1449,7 +1447,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
     size_t w = 0;
     int res = ZXC_OK;
-    int try_num = UNLIKELY(zxc_probe_is_numeric(chunk, src_sz));
+    int try_num = zxc_probe_is_numeric(chunk, src_sz);
 
     if (UNLIKELY(try_num)) {
         res = zxc_encode_block_num(ctx, chunk, src_sz, dst, dst_cap, &w);
