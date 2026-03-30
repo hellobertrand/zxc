@@ -78,3 +78,6 @@ docs/xml/
 *.doxygen_sqlite3
 doxyfile.inc
 searchdata.xml
+
+# Coverage
+build-cov/
