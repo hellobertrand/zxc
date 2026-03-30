@@ -98,3 +98,69 @@ jobs:
           cmake --build build
       - name: Run Tests
         run: ctest --test-dir build --output-on-failure
+
+  coverage:
+    name: Fuzz Coverage Report
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install LLVM
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang llvm
+
+      - name: Clone Fuzz Corpus
+        run: |
+          git clone --depth=1 \
+            https://${{ secrets.CFLITE_CORPUS_TOKEN }}@github.com/hellobertrand/zxc-fuzz-corpus.git \
+            corpus
+          echo "roundtrip inputs: $(find corpus/corpus/zxc_fuzzer_roundtrip -type f | wc -l)"
+          echo "decompress inputs: $(find corpus/corpus/zxc_fuzzer_decompress -type f | wc -l)"
+
+      - name: Build Coverage Harnesses
+        run: |
+          mkdir -p build-cov
+          CFLAGS="-g -O1 -fprofile-instr-generate -fcoverage-mapping"
+          DEFS="-DZXC_FUNCTION_SUFFIX=_default -DZXC_ONLY_DEFAULT"
+          INCLUDES="-I include -I src/lib/vendors"
+          SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c"
+
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_roundtrip.c \
+            -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_roundtrip
+
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_decompress.c \
+            -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_decompress
+
+      - name: Replay Corpora
+        run: |
+          LLVM_PROFILE_FILE="build-cov/roundtrip.profraw" \
+            build-cov/fuzz_roundtrip corpus/corpus/zxc_fuzzer_roundtrip/ -runs=0 2>&1 | tail -1
+          LLVM_PROFILE_FILE="build-cov/decompress.profraw" \
+            build-cov/fuzz_decompress corpus/corpus/zxc_fuzzer_decompress/ -runs=0 2>&1 | tail -1
+
+      - name: Generate Coverage Report
+        run: |
+          llvm-profdata merge \
+            build-cov/roundtrip.profraw build-cov/decompress.profraw \
+            -o build-cov/fuzz.profdata
+
+          echo "=== COVERAGE SUMMARY ==="
+          llvm-cov report \
+            build-cov/fuzz_roundtrip -object build-cov/fuzz_decompress \
+            -instr-profile=build-cov/fuzz.profdata \
+            --ignore-filename-regex='(vendors/|tests/|fuzz_|zxc_driver)'
+
+          llvm-cov show \
+            build-cov/fuzz_roundtrip -object build-cov/fuzz_decompress \
+            -instr-profile=build-cov/fuzz.profdata \
+            --ignore-filename-regex='(vendors/|tests/|fuzz_|zxc_driver)' \
+            --format=html -output-dir=build-cov/coverage_html
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-coverage-report
+          path: build-cov/coverage_html/
+          retention-days: 30
