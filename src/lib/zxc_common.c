@@ -81,8 +81,8 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->chunk_size = chunk_size;
     const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
     ctx->offset_bits = offset_bits;
-    ctx->offset_mask = (1U << offset_bits) - 1;
-    ctx->max_epoch = 1U << (32 - offset_bits);
+    ctx->offset_mask = (uint32_t)((1ULL << offset_bits) - 1);
+    ctx->max_epoch = (uint32_t)(1ULL << (32 - offset_bits));
 
     if (mode == 0) return ZXC_OK;
 
