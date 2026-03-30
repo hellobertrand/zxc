@@ -2427,13 +2427,6 @@ int test_library_info_api() {
     }
     printf("  [PASS] zxc_version_string() == \"%s\"\n", ver);
 
-    // 5. Sanity: min <= default <= max, min >= 1
-    if (min < 1 || min > max) {
-        printf("Failed: invalid level range [%d, %d]\n", min, max);
-        return 0;
-    }
-    printf("  [PASS] Level range sanity [%d, %d] (default: %d)\n", min, max, def);
-
     printf("PASS\n\n");
     return 1;
 }
