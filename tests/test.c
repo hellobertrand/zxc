@@ -2383,6 +2383,61 @@ fail:
     return 0;
 }
 
+int test_library_info_api() {
+    printf("=== TEST: Unit - Library Info API (zxc_min/max/default_level, zxc_version_string) ===\n");
+
+    // 1. Min level must match compile-time constant
+    int min = zxc_min_level();
+    if (min != ZXC_LEVEL_FASTEST) {
+        printf("Failed: zxc_min_level() returned %d, expected %d\n", min, ZXC_LEVEL_FASTEST);
+        return 0;
+    }
+    printf("  [PASS] zxc_min_level() == %d\n", min);
+
+    // 2. Max level must match compile-time constant
+    int max = zxc_max_level();
+    if (max != ZXC_LEVEL_COMPACT) {
+        printf("Failed: zxc_max_level() returned %d, expected %d\n", max, ZXC_LEVEL_COMPACT);
+        return 0;
+    }
+    printf("  [PASS] zxc_max_level() == %d\n", max);
+
+    // 3. Default level must be within [min, max]
+    int def = zxc_default_level();
+    if (def < min || def > max) {
+        printf("Failed: zxc_default_level() returned %d, not in [%d, %d]\n", def, min, max);
+        return 0;
+    }
+    if (def != ZXC_LEVEL_DEFAULT) {
+        printf("Failed: zxc_default_level() returned %d, expected %d\n", def, ZXC_LEVEL_DEFAULT);
+        return 0;
+    }
+    printf("  [PASS] zxc_default_level() == %d\n", def);
+
+    // 4. Version string must be non-NULL and match compile-time version
+    const char* ver = zxc_version_string();
+    if (!ver) {
+        printf("Failed: zxc_version_string() returned NULL\n");
+        return 0;
+    }
+    if (strcmp(ver, ZXC_LIB_VERSION_STR) != 0) {
+        printf("Failed: zxc_version_string() returned \"%s\", expected \"%s\"\n", ver,
+               ZXC_LIB_VERSION_STR);
+        return 0;
+    }
+    printf("  [PASS] zxc_version_string() == \"%s\"\n", ver);
+
+    // 5. Sanity: min <= default <= max, min >= 1
+    if (min < 1 || min > max) {
+        printf("Failed: invalid level range [%d, %d]\n", min, max);
+        return 0;
+    }
+    printf("  [PASS] Level range sanity [%d, %d] (default: %d)\n", min, max, def);
+
+    printf("PASS\n\n");
+    return 1;
+}
+
 int main() {
     srand(42);  // Fixed seed for reproducibility
     int total_failures = 0;
@@ -2495,11 +2550,8 @@ int main() {
     // --- UNIT TESTS (ROBUSTNESS/API) ---
 
     if (!test_buffer_api()) total_failures++;
-
     if (!test_multithread_roundtrip()) total_failures++;
-
     if (!test_null_output_decompression()) total_failures++;
-
     if (!test_max_compressed_size_logic()) total_failures++;
     if (!test_invalid_arguments()) total_failures++;
     if (!test_truncated_input()) total_failures++;
@@ -2518,9 +2570,9 @@ int main() {
     if (!test_stream_engine_errors()) total_failures++;
     if (!test_buffer_api_scratch_buf()) total_failures++;
     if (!test_decompress_fast_vs_safe_path()) total_failures++;
-
     if (!test_opaque_context_api()) total_failures++;
     if (!test_block_api()) total_failures++;
+    if (!test_library_info_api()) total_failures++;
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);
