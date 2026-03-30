@@ -650,3 +650,40 @@ const char* zxc_error_name(const int code) {
             return "ZXC_UNKNOWN_ERROR";
     }
 }
+
+/*
+ * ============================================================================
+ * LIBRARY INFORMATION
+ * ============================================================================
+ */
+
+/*
+ * @brief Returns the minimum supported compression level.
+ *
+ * Returns the value of ZXC_LEVEL_FASTEST (currently 1).
+ * This allows integrators to discover the level range at runtime without relying on
+ * compile-time macros alone.
+ */
+int zxc_min_level(void) { return ZXC_LEVEL_FASTEST; }
+
+/*
+ * @brief Returns the maximum supported compression level.
+ *
+ * Returns the value of ZXC_LEVEL_COMPACT (currently 5).
+ */
+int zxc_max_level(void) { return ZXC_LEVEL_COMPACT; }
+
+/*
+ * @brief Returns the default compression level.
+ *
+ * Returns the value of ZXC_LEVEL_DEFAULT (currently 3).
+ */
+int zxc_default_level(void) { return ZXC_LEVEL_DEFAULT; }
+
+/*
+ * @brief Returns the human-readable library version string.
+ *
+ * The returned pointer is a compile-time constant and must not be freed.
+ * Example: "0.9.1".
+ */
+const char* zxc_version_string(void) { return ZXC_LIB_VERSION_STR; }
