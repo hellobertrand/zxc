@@ -875,13 +875,13 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         }
 
         // Only show progress for files > 1MB
-        if (total_size > 1024 * 1024) show_progress = 1;
+        if (total_size > ZXC_IO_BUFFER_SIZE) show_progress = 1;
     }
 
     // Set large buffers for I/O performance (AFTER file size detection)
-    char *b1 = malloc(1024 * 1024), *b2 = malloc(1024 * 1024);
-    if (b1) setvbuf(f_in, b1, _IOFBF, 1024 * 1024);
-    if (f_out && b2) setvbuf(f_out, b2, _IOFBF, 1024 * 1024);
+    char *b1 = malloc(ZXC_IO_BUFFER_SIZE), *b2 = malloc(ZXC_IO_BUFFER_SIZE);
+    if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_IO_BUFFER_SIZE);
+    if (f_out && b2) setvbuf(f_out, b2, _IOFBF, ZXC_IO_BUFFER_SIZE);
 
     if (in_path && !g_quiet) {
         zxc_log_v("Processing %s... (Compression Level %d)\n", in_path, level);
