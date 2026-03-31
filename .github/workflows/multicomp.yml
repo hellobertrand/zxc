@@ -163,10 +163,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Install GCC 14
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-14 g++-14
 
       - name: Configure, Build & Test (Static & Shared)
         shell: bash
