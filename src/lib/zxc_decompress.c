@@ -390,9 +390,9 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
             uint32_t* batch_dst = (uint32_t*)d_ptr;
 
 #if defined(ZXC_USE_AVX512)
+            __m512i v_run = _mm512_set1_epi32(running_val);  // Broadcast initial running total
             for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 16) {
                 __m512i v_deltas = _mm512_load_si512((void*)&deltas[k]);  // Load 16 deltas
-                __m512i v_run = _mm512_set1_epi32(running_val);  // Broadcast current running total
 
                 __m512i v_sum = zxc_mm512_prefix_sum_epi32(v_deltas);  // Compute local prefix sums
                 v_sum = _mm512_add_epi32(v_sum, v_run);                // Add base running total
@@ -400,24 +400,34 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
                 _mm512_storeu_si512((void*)&batch_dst[k],
                                     v_sum);  // Store decoded values
 
-                // Extract the last value (15th element) to update running_val for next
-                // batch
-                __m128i v_last128 = _mm512_extracti32x4_epi32(v_sum, 3);
-                running_val = (uint32_t)_mm_cvtsi128_si32(_mm_shuffle_epi32(v_last128, 0xFF));
+                // Broadcast 15th element of v_sum to v_run directly within ZMM registers
+                // 1. Align upper 128-bit lane down to all lanes
+                __m512i v_last128 = _mm512_shuffle_i32x4(v_sum, v_sum, 0xFF); 
+                // 2. Broadcast the 3rd element of those lanes
+                v_run = _mm512_shuffle_epi32(v_last128, 0xFF);
             }
+            // Extract final running_val back to GPR for scalar fallback
+            running_val = (uint32_t)_mm_cvtsi128_si32(_mm512_castsi512_si128(v_run));
 
 #elif defined(ZXC_USE_AVX2)
+            __m256i v_run = _mm256_set1_epi32(running_val);  // Broadcast initial running total
             for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 8) {
                 __m256i v_deltas = _mm256_load_si256((const __m256i*)&deltas[k]);  // Load 8 deltas
-                __m256i v_run = _mm256_set1_epi32(running_val);  // Broadcast running total
 
                 __m256i v_sum = zxc_mm256_prefix_sum_epi32(v_deltas);  // Compute local prefix sums
                 v_sum = _mm256_add_epi32(v_sum, v_run);                // Add base
 
                 _mm256_storeu_si256((__m256i*)&batch_dst[k],
                                     v_sum);                   // Store decoded values
-                running_val = ((uint32_t*)&batch_dst[k])[7];  // Update running_val
+
+                // Compute v_run directly from vector register without memory readback
+                // Duplicate upper 128-bits into both lanes
+                __m256i last_val = _mm256_permute2x128_si256(v_sum, v_sum, 0x11);
+                // Broadcast 4th element to all elements
+                v_run = _mm256_shuffle_epi32(last_val, 0xFF);
             }
+            // Extract final running_val back to GPR for scalar fallback
+            running_val = (uint32_t)_mm_cvtsi128_si32(_mm256_castsi256_si128(v_run));
 
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
             uint32x4_t v_run = vdupq_n_u32(running_val);  // Broadcast running total
