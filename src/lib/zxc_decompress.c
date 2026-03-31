@@ -402,7 +402,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 
                 // Broadcast 15th element of v_sum to v_run directly within ZMM registers
                 // 1. Align upper 128-bit lane down to all lanes
-                __m512i v_last128 = _mm512_shuffle_i32x4(v_sum, v_sum, 0xFF); 
+                __m512i v_last128 = _mm512_shuffle_i32x4(v_sum, v_sum, 0xFF);
                 // 2. Broadcast the 3rd element of those lanes
                 v_run = _mm512_shuffle_epi32(v_last128, 0xFF);
             }
@@ -418,7 +418,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
                 v_sum = _mm256_add_epi32(v_sum, v_run);                // Add base
 
                 _mm256_storeu_si256((__m256i*)&batch_dst[k],
-                                    v_sum);                   // Store decoded values
+                                    v_sum);  // Store decoded values
 
                 // Compute v_run directly from vector register without memory readback
                 // Duplicate upper 128-bits into both lanes
