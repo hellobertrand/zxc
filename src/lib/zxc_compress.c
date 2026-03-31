@@ -735,8 +735,6 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         size_t step = lzp.step_base + (dist >> lzp.step_shift);
         if (UNLIKELY(ip + step >= mflimit)) step = 1;
 
-        ZXC_PREFETCH_READ(ip + step * 4 + ZXC_CACHE_LINE_SIZE);
-
         const zxc_match_t m =
             zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, chain_table,
                                      epoch_mark, offset_mask, level, lzp);
