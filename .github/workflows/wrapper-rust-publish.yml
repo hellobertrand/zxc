@@ -45,7 +45,7 @@ jobs:
   publish:
     name: Publish to crates.io
     needs: [test]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     if: github.event_name == 'release'
     defaults:
       run:
