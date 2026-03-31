@@ -76,7 +76,7 @@ jobs:
           path: |
             ${{ env.SILESIA_DIR }}
             ${{ env.SILESIA_TAR }}
-          key: silesia-corpus-${{ runner.os }}-v3
+          key: silesia-corpus-${{ runner.os }}-v4
 
       - name: Download Silesia Corpus (${{ runner.os }})
         if: steps.cache-silesia.outputs.cache-hit != 'true'
