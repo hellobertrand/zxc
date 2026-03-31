@@ -429,9 +429,16 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 
                 vst1q_u32(&batch_dst[k], v_sum);  // Store decoded values
 
+#if defined(ZXC_USE_NEON64)
+                v_run = vdupq_laneq_u32(v_sum, 3);  // Update vector directly (no GPR transit)
+#else
                 running_val = vgetq_lane_u32(v_sum, 3);  // Extract last element
                 v_run = vdupq_n_u32(running_val);        // Update vector for next iter
+#endif
             }
+#if defined(ZXC_USE_NEON64)
+            running_val = vgetq_lane_u32(v_run, 0);  // Extract once at the end of the batch
+#endif
 
 #else
             for (int k = 0; k < ZXC_NUM_DEC_BATCH; k++) {
