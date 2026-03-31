@@ -845,18 +845,19 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             while (p <= p_end - 16) {
                 const uint8x16_t v = vld1q_u8(p);
                 const uint8x16_t eq = vceqq_u8(v, vb);
-                const uint8x16_t not_eq = vmvnq_u8(eq);
-                const uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 0);
-                if (lo != 0) {
-                    p += (zxc_ctz64(lo) >> 3);
+                if (vminvq_u8(eq) == 0xFF) {
+                    p += 16;
+                } else {
+                    const uint8x16_t not_eq = vmvnq_u8(eq);
+                    const uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 0);
+                    if (lo != 0) {
+                        p += (zxc_ctz64(lo) >> 3);
+                    } else {
+                        const uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 1);
+                        p += 8 + (zxc_ctz64(hi) >> 3);
+                    }
                     goto _run_done;
                 }
-                uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 1);
-                if (hi != 0) {
-                    p += 8 + (zxc_ctz64(hi) >> 3);
-                    goto _run_done;
-                }
-                p += 16;
             }
 #elif defined(ZXC_USE_NEON32)
             uint8x16_t vb = vdupq_n_u8(b);
@@ -950,17 +951,18 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                     uint8x16_t v3 = vld1q_u8(p + 3);
                     uint8x16_t eq =
                         vandq_u8(vceqq_u8(v0, v1), vandq_u8(vceqq_u8(v1, v2), vceqq_u8(v2, v3)));
-                    uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 0);
-                    if (lo != 0) {
-                        p += (zxc_ctz64(lo) >> 3);
+                    if (vmaxvq_u8(eq) == 0) {
+                        p += 16;
+                    } else {
+                        uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 0);
+                        if (lo != 0) {
+                            p += (zxc_ctz64(lo) >> 3);
+                        } else {
+                            uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 1);
+                            p += 8 + (zxc_ctz64(hi) >> 3);
+                        }
                         goto _lit_done;
                     }
-                    uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 1);
-                    if (hi != 0) {
-                        p += 8 + (zxc_ctz64(hi) >> 3);
-                        goto _lit_done;
-                    }
-                    p += 16;
                 }
 #elif defined(ZXC_USE_NEON32)
                 while (p <= p_end_4 - 16) {
