@@ -29,9 +29,7 @@ jobs:
 
     env:
         LZBENCH_DIR: lzbench
-        SILESIA_DIR: silesia
         SILESIA_TAR: silesia.tar
-        SILESIA_RAW: silesia.raw
 
     steps:
       - name: Checkout Repository
@@ -74,44 +72,18 @@ jobs:
         id: cache-silesia
         uses: actions/cache@v5
         with:
-          path: ${{ env.SILESIA_DIR }}
-          key: silesia-corpus-${{ runner.os }}-v5
+          path: ${{ env.SILESIA_TAR }}
+          key: silesia-tar-v1
 
-      - name: Download Silesia Corpus (${{ runner.os }})
+      - name: Download Silesia Corpus
         if: steps.cache-silesia.outputs.cache-hit != 'true'
         run: |
-          wget --no-check-certificate -q https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip -O silesia.zip
-          mkdir -p "${SILESIA_DIR}"
-          unzip -q silesia.zip -d "${SILESIA_DIR}"
-
-      # - name: Create Silesia tar (deterministic, cross-platform)
-      #   run: |
-      #     # Use GNU tar (gtar on macOS, tar on Linux)
-      #     TAR_CMD="tar"
-      #     command -v gtar &>/dev/null && TAR_CMD="gtar"
-      #
-      #     $TAR_CMD --create \
-      #       --file="${SILESIA_TAR}" \
-      #       --format=gnu \
-      #       --sort=name \
-      #       --owner=0 --group=0 --numeric-owner \
-      #       --mtime='1970-01-01 00:00:00Z' \
-      #       --no-acls --no-xattrs \
-      #       --mode=0644 \
-      #       --directory="${SILESIA_DIR}" \
-      #       dickens mozilla mr nci ooffice osdb reymont samba sao webster x-ray xml
-
-      - name: Create Silesia raw file (deterministic, cross-platform)
-        run: |
-          cat ${SILESIA_DIR}/dickens ${SILESIA_DIR}/mozilla ${SILESIA_DIR}/mr \
-              ${SILESIA_DIR}/nci ${SILESIA_DIR}/ooffice ${SILESIA_DIR}/osdb \
-              ${SILESIA_DIR}/reymont ${SILESIA_DIR}/samba ${SILESIA_DIR}/sao \
-              ${SILESIA_DIR}/webster ${SILESIA_DIR}/x-ray ${SILESIA_DIR}/xml \
-              > "${SILESIA_RAW}"
+          wget -q https://github.com/DataCompression/corpus-collection/raw/main/Silesia-Corpus/silesia.tar.gz -O silesia.tar.gz
+          gunzip silesia.tar.gz
 
       - name: SHA256 Checksum
         run: |
-          shasum -a 256 "${SILESIA_RAW}"
+          shasum -a 256 "${SILESIA_TAR}"
 
       - name: Run Lzbench on Silesia Corpus
         working-directory: ${{ env.LZBENCH_DIR }}
@@ -122,7 +94,7 @@ jobs:
             CODECS="memcpy/zxc/lz4/lz4fast,17/lz4hc,9/lzav,1/snappy/zstd_fast,-1/zstd,1/zlib,1"
           fi
       
-          ./lzbench -e"${CODECS}" -j -t8,8 -o1 "../${SILESIA_RAW}" > ../benchmark.md
+          ./lzbench -e"${CODECS}" -j -t8,8 -o1 "../${SILESIA_TAR}" > ../benchmark.md
       
           echo "Benchmark finished. First lines:"
           head -n 40 ../benchmark.md
