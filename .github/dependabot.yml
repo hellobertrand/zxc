@@ -5,3 +5,19 @@ updates:
     directory: /
     schedule:
       interval: monthly
+  - package-ecosystem: pip
+    directory: /wrappers/python
+    schedule:
+      interval: monthly
+  - package-ecosystem: cargo
+    directory: /wrappers/rust
+    schedule:
+      interval: monthly
+  - package-ecosystem: npm
+    directory: /wrappers/nodejs
+    schedule:
+      interval: monthly
+  - package-ecosystem: gomod
+    directory: /wrappers/go
+    schedule:
+      interval: monthly
