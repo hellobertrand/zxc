@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest-xlarge]
+        os: [ubuntu-latest, macos-26-xlarge]
 
     env:
         LZBENCH_DIR: lzbench
@@ -34,6 +34,12 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
+
+      - name: Select Latest Xcode
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.4_Release_Candidate.app
+          clang --version
 
       - name: Clone LZbench
         run: |
@@ -69,9 +75,6 @@ jobs:
           # Use latest available compiler per platform
           if [ "$RUNNER_OS" = "Linux" ]; then
             export CC=gcc-14 CXX=g++-14
-          elif [ "$RUNNER_OS" = "macOS" ]; then
-            LLVM_PREFIX="$(brew --prefix llvm@20)"
-            export CC="${LLVM_PREFIX}/bin/clang" CXX="${LLVM_PREFIX}/bin/clang++"
           fi
 
           make -j $SKIP_CODECS CC="${CC:-cc}" MOREFLAGS="-march=native"
