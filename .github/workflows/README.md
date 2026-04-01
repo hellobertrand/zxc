@@ -2,22 +2,29 @@
 
 This directory contains CI/CD workflows for the ZXC compression library.
 
-## Workflows
+## Core Workflows
 
 ### build.yml - Build & Release
 **Triggers:** Push to main, tags, pull requests, manual dispatch
 
 Builds and tests ZXC across multiple platforms (Linux x86_64/ARM64, macOS ARM64, Windows x64). Generates release artifacts and uploads binaries when tags are pushed.
 
-### build_all.yml - Multi-Architecture Build
+### multiarch.yml - Multi-Architecture Build
 **Triggers:** Push to main, pull requests, manual dispatch
 
 Comprehensive build matrix testing across multiple architectures including 32-bit and 64-bit variants for Linux (x64, x86, ARM64, ARM) and Windows (x64, x86). Validates compilation compatibility across different platforms.
+
+### multicomp.yml - Compiler Compatibility
+**Triggers:** Push to main, pull requests, manual dispatch
+
+Tests the codebase against a wide range of compilers (various versions of GCC and Clang) to ensure compatibility and identify any compiler-specific issues or warnings.
 
 ### benchmark.yml - Performance Benchmark
 **Triggers:** Push to main (src changes), pull requests, manual dispatch
 
 Runs performance benchmarks using LZbench on Ubuntu and macOS. Integrates ZXC into the LZbench framework and tests compression/decompression performance against the Silesia corpus.
+
+## Quality & Security
 
 ### coverage.yml - Code Coverage
 **Triggers:** Push to main, pull requests, manual dispatch
@@ -34,6 +41,18 @@ Executes fuzz testing using ClusterFuzzLite with multiple sanitizers (address, u
 
 Performs static analysis using Cppcheck and Clang Static Analyzer. Runs memory leak detection with Valgrind to ensure code quality and identify potential bugs.
 
+### security.yml - Code Security
+**Triggers:** Push to main, pull requests
+
+Runs CodeQL security analysis to detect potential security vulnerabilities and coding errors in the C/C++ codebase.
+
+### vendors.yml - Vendor Maintenance
+**Triggers:** Scheduled (weekly), manual dispatch
+
+Automatically checks for and updates third-party dependencies (like `rapidhash.h`) to ensure the project uses the latest stable versions of its vendors.
+
+## Language Bindings
+
 ### wrapper-rust-publish.yml - Publish Rust Crates
 **Triggers:** Release published, manual dispatch
 
@@ -44,7 +63,12 @@ Tests and publishes Rust crates to crates.io. Verifies the version matches the r
 
 Builds platform-specific wheels using `cibuildwheel` for Linux (x86_64, ARM64), macOS (ARM64, Intel), and Windows (AMD64, ARM64). Tests wheels against Python 3.12-3.13, then publishes to PyPI via trusted publishing.
 
-### security.yml - Code Security
-**Triggers:** Push to main, pull requests
+### wrapper-nodejs-publish.yml - Publish Node.js Package
+**Triggers:** Release published, manual dispatch
 
-Runs CodeQL security analysis to detect potential security vulnerabilities and coding errors in the C/C++ codebase.
+Builds and publishes the Node.js package to npm. Handles the compilation of native bindings and ensures the package is correctly versioned and distributed.
+
+### wrapper-go-test.yml - Test Go Package
+**Triggers:** Release published, manual dispatch
+
+Runs comprehensive tests for the Go bindings across various platforms and architectures to ensure the Go package is stable and functional.
