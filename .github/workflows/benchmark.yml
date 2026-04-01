@@ -73,9 +73,7 @@ jobs:
         id: cache-silesia
         uses: actions/cache@v5
         with:
-          path: |
-            ${{ env.SILESIA_DIR }}
-            ${{ env.SILESIA_TAR }}
+          path: ${{ env.SILESIA_DIR }}
           key: silesia-corpus-${{ runner.os }}-v5
 
       - name: Download Silesia Corpus (${{ runner.os }})
@@ -86,7 +84,6 @@ jobs:
           unzip -q silesia.zip -d "${SILESIA_DIR}"
 
       - name: Create Silesia tar (deterministic, cross-platform)
-        if: steps.cache-silesia.outputs.cache-hit != 'true'
         run: |
           # Use GNU tar (gtar on macOS, tar on Linux)
           TAR_CMD="tar"
@@ -94,7 +91,7 @@ jobs:
 
           $TAR_CMD --create \
             --file="${SILESIA_TAR}" \
-            --format=gnu \
+            --format=posix \
             --sort=name \
             --owner=0 --group=0 --numeric-owner \
             --mtime='1970-01-01 00:00:00Z' \
