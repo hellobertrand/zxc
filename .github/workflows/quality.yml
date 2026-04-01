@@ -90,7 +90,7 @@ jobs:
       - name: Install Analysis Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-tools valgrind cmake
+          sudo apt-get install -y clang-tools valgrind
 
       - name: Clang Static Analyzer (Scan-Build)
         run: |

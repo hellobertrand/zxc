@@ -32,11 +32,6 @@ jobs:
         languages: ${{ matrix.language }}
         config-file: ./.github/codeql/codeql-config.yml
 
-    - name: Install Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y cmake build-essential
-
     - name: Build Project
       run: |
         if [ "${{ matrix.language }}" = "c-cpp" ]; then

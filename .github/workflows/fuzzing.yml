@@ -50,8 +50,6 @@ jobs:
       run: |
         # ClusterFuzzLite v1 uses Docker API 1.41 which is incompatible with Docker 29.0+
         # Downgrade to Docker 28 until the action is updated
-        sudo apt-get update
-        sudo apt-get install -y apt-transport-https ca-certificates curl
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
         echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
         sudo apt-get update
@@ -106,10 +104,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install LLVM
+      - name: Install LLVM Tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq clang llvm
+          sudo apt-get install -y -qq llvm
 
       - name: Clone Fuzz Corpus
         run: |
