@@ -35,7 +35,7 @@ jobs:
             asset_name: zxc-linux-aarch64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
           - name: macOS ARM64
-            os: macos-latest
+            os: macos-26
             artifact_name: zxc
             asset_name: zxc-macos-arm64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
@@ -49,6 +49,19 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
+
+      - name: Select Latest Compiler (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo "CC=gcc-14" >> $GITHUB_ENV
+          echo "CXX=g++-14" >> $GITHUB_ENV
+          gcc-14 --version
+
+      - name: Select Latest Xcode (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.4_Release_Candidate.app
+          clang --version
 
       - name: Configure CMake
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }}

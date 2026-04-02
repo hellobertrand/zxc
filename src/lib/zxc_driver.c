@@ -596,7 +596,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ZXC_MEMSET(buf_in, 0, ctx.ring_size * alloc_in);
 
     for (size_t i = 0; i < ctx.ring_size; i++) {
-        ctx.jobs[i].job_id = i;
+        ctx.jobs[i].job_id = (int)i;
         ctx.jobs[i].status = JOB_STATUS_FREE;
         ctx.jobs[i].in_buf = buf_in + (i * alloc_in);
         ctx.jobs[i].in_cap = alloc_in - ZXC_PAD_SIZE;
