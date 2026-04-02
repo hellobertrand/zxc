@@ -61,7 +61,7 @@ jobs:
             cmake_arch: "ARM64"
           # Note: Windows ARM 32-bit removed - deprecated and unsupported by Windows SDK 10.0.26100+
           - name: macOS Intel x64
-            runner: macos-15-intel
+            runner: macos-26-intel
             os: macos
           - name: macOS ARM64
             runner: macos-26
