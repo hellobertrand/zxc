@@ -593,7 +593,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ptr += ctx.ring_size * alloc_in;
     uint8_t* buf_out = ptr;
 
-    ZXC_MEMSET(buf_in, 0, ctx.ring_size * alloc_in);
+    ZXC_MEMSET(mem_block, 0, alloc_size);
 
     for (size_t i = 0; i < ctx.ring_size; i++) {
         ctx.jobs[i].job_id = (int)i;
