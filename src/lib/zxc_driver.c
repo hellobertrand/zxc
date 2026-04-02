@@ -425,7 +425,7 @@ static void* zxc_async_writer(void* arg) {
     while (1) {
         zxc_stream_job_t* const job = &ctx->jobs[ctx->write_idx];
         pthread_mutex_lock(&ctx->lock);
-        while (job->status != JOB_STATUS_PROCESSED)
+        while (job->status != JOB_STATUS_PROCESSED && !ctx->io_error)
             pthread_cond_wait(&ctx->cond_writer, &ctx->lock);
 
         if (job->result_sz == (size_t)-1) {
@@ -593,7 +593,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ptr += ctx.ring_size * alloc_in;
     uint8_t* buf_out = ptr;
 
-    ZXC_MEMSET(buf_in, 0, ctx.ring_size * alloc_in);
+    ZXC_MEMSET(mem_block, 0, alloc_size);
 
     for (size_t i = 0; i < ctx.ring_size; i++) {
         ctx.jobs[i].job_id = (int)i;
@@ -671,7 +671,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     while (!read_eof && !ctx.io_error) {
         zxc_stream_job_t* const job = &ctx.jobs[read_idx];
         pthread_mutex_lock(&ctx.lock);
-        while (job->status != JOB_STATUS_FREE) pthread_cond_wait(&ctx.cond_reader, &ctx.lock);
+        while (job->status != JOB_STATUS_FREE && !ctx.io_error)
+            pthread_cond_wait(&ctx.cond_reader, &ctx.lock);
         pthread_mutex_unlock(&ctx.lock);
 
         if (UNLIKELY(ctx.io_error)) break;
@@ -749,7 +750,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     zxc_stream_job_t* const end_job = &ctx.jobs[read_idx];
     pthread_mutex_lock(&ctx.lock);
-    while (end_job->status != JOB_STATUS_FREE) pthread_cond_wait(&ctx.cond_reader, &ctx.lock);
+    while (end_job->status != JOB_STATUS_FREE && !ctx.io_error)
+        pthread_cond_wait(&ctx.cond_reader, &ctx.lock);
     end_job->result_sz = -1;
     end_job->status = JOB_STATUS_PROCESSED;
     pthread_cond_broadcast(&ctx.cond_writer);

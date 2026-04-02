@@ -769,7 +769,10 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                 memcpy(out_path, in_path, base_len);
                 out_path[base_len] = '\0';
             } else {
-                snprintf(out_path, sizeof(out_path), "%s", in_path);
+                zxc_log("Error: Cannot determine output filename: '%s' does not end with .zxc\n",
+                        in_path);
+                if (f_in) fclose(f_in);
+                return 1;
             }
         }
         use_stdout = 0;
@@ -1144,6 +1147,8 @@ int main(int argc, char** argv) {
                 break;
             }
             case '?':
+                print_help(argv[0]);
+                return 1;
             case 'V':
                 print_version();
                 return 0;
@@ -1340,7 +1345,7 @@ int main(int argc, char** argv) {
 
         const double compress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_compress;
         const double decompress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_decompress;
-        const double ratio = (double)in_size / c_sz;
+        const double ratio = (c_sz > 0) ? ((double)in_size / c_sz) : 0.0;
 
         if (json_output)
             printf(
