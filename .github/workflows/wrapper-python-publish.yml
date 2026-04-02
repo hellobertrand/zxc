@@ -35,6 +35,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Select Latest Compiler (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo "CC=gcc-14" >> $GITHUB_ENV
+          echo "CXX=g++-14" >> $GITHUB_ENV
+          gcc-14 --version
+
+      - name: Select Latest Xcode (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.4_Release_Candidate.app
+          clang --version
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:

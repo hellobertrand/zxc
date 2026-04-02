@@ -36,6 +36,19 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
+      - name: Select Latest Compiler (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo "CC=gcc-14" >> $GITHUB_ENV
+          echo "CXX=g++-14" >> $GITHUB_ENV
+          gcc-14 --version
+
+      - name: Select Latest Xcode (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.4_Release_Candidate.app
+          clang --version
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -80,6 +93,19 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
+
+      - name: Select Latest Compiler (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo "CC=gcc-14" >> $GITHUB_ENV
+          echo "CXX=g++-14" >> $GITHUB_ENV
+          gcc-14 --version
+
+      - name: Select Latest Xcode (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.4_Release_Candidate.app
+          clang --version
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
