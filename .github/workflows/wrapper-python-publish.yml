@@ -20,7 +20,7 @@ jobs:
             arch: x86_64
           - os: ubuntu-24.04-arm
             arch: aarch64
-          - os: macos-latest
+          - os: macos-26
             arch: arm64
           - os: macos-15-intel
             arch: x86_64
@@ -97,7 +97,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest, windows-11-arm]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-26, macos-15-intel, windows-latest, windows-11-arm]
         python: ["3.12", "3.13"]
     
     steps:

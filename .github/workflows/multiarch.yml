@@ -64,7 +64,7 @@ jobs:
             runner: macos-15-intel
             os: macos
           - name: macOS ARM64
-            runner: macos-latest
+            runner: macos-26
             os: macos
 
     steps:
