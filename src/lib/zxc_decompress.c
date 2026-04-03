@@ -767,6 +767,11 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             off4 += (uint32_t)((offsets >> 48) & 0xFFFF);
         }
 
+        ZXC_PREFETCH_READ(d_ptr - off1);
+        ZXC_PREFETCH_READ(d_ptr - off2);
+        ZXC_PREFETCH_READ(d_ptr - off3);
+        ZXC_PREFETCH_READ(d_ptr - off4);
+
         uint32_t ll1 = (tokens & 0x0F0) >> 4;
         uint32_t ml1 = (tokens & 0x00F);
         if (UNLIKELY(ll1 == ZXC_TOKEN_LL_MASK)) {
@@ -854,6 +859,11 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             off3 += (uint32_t)((offsets >> 32) & 0xFFFF);
             off4 += (uint32_t)((offsets >> 48) & 0xFFFF);
         }
+
+        ZXC_PREFETCH_READ(d_ptr - off1);
+        ZXC_PREFETCH_READ(d_ptr - off2);
+        ZXC_PREFETCH_READ(d_ptr - off3);
+        ZXC_PREFETCH_READ(d_ptr - off4);
 
         uint32_t ll1 = (tokens & 0x0F0) >> 4;
         uint32_t ml1 = (tokens & 0x00F);
@@ -1275,6 +1285,11 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint32_t s3 = zxc_le32(seq_ptr + 8);
         uint32_t s4 = zxc_le32(seq_ptr + 12);
         seq_ptr += 16;
+
+        ZXC_PREFETCH_READ(d_ptr - ((s1 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS));
+        ZXC_PREFETCH_READ(d_ptr - ((s2 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS));
+        ZXC_PREFETCH_READ(d_ptr - ((s3 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS));
+        ZXC_PREFETCH_READ(d_ptr - ((s4 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS));
 
         uint32_t ll1 = (uint32_t)(s1 >> 24);
         if (UNLIKELY(ll1 == ZXC_SEQ_LL_MASK)) {
