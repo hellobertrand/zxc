@@ -615,7 +615,7 @@ Benchmarks were conducted using `lzbench` (by inikep) with the **default block s
 
 **Figure B**: Decompression Efficiency : Cycles Per Byte Comparaison
 
-![Benchmark Cycles Per Byte](./images/benchmark_decompression_cycles_0.9.0.webp)
+![Benchmark Cycles Per Byte](./images/benchmark_decompression_cycles_0.10.0.webp)
 
 
 #### 7.4.1 ARM64 Architecture (Apple Silicon M2)
