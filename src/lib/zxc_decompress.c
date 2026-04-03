@@ -737,97 +737,57 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         DECODE_COPY_MATCH(ml, off);  \
     } while (0)
 
-    // --- SAFE Loop: offset validation until threshold (4x unroll) ---
+    // --- SAFE Loop: offset validation until threshold ---
     // For 1-byte offsets: bounds check until 256 bytes written
     // For 2-byte offsets: bounds check until 65536 bytes written
     const size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
 
-    while (n_seq >= 4 && d_ptr < d_end_safe && l_ptr < l_end_safe_4x &&
-           written < bounds_threshold) {
-        uint32_t tokens = zxc_le32(t_ptr);
-        t_ptr += 4;
-
-        uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS, off3 = ZXC_LZ_OFFSET_BIAS,
-                 off4 = ZXC_LZ_OFFSET_BIAS;
+    while (n_seq > 0 && d_ptr < d_end_safe && written < bounds_threshold) {
+        uint8_t token = *t_ptr++;
+        uint32_t ll = token >> ZXC_TOKEN_LIT_BITS;
+        uint32_t ml = token & ZXC_TOKEN_ML_MASK;
+        uint32_t offset = ZXC_LZ_OFFSET_BIAS;
         if (gh.enc_off == 1) {
-            // Read 4 x 1-byte offsets
-            uint32_t offsets = zxc_le32(o_ptr);
-            o_ptr += 4;
-            off1 += offsets & 0xFF;
-            off2 += (offsets >> 8) & 0xFF;
-            off3 += (offsets >> 16) & 0xFF;
-            off4 += (offsets >> 24) & 0xFF;
+            offset += *o_ptr++;
         } else {
-            // Read 4 x 2-byte offsets
-            uint64_t offsets = zxc_le64(o_ptr);
-            o_ptr += 8;
-            off1 += (uint32_t)(offsets & 0xFFFF);
-            off2 += (uint32_t)((offsets >> 16) & 0xFFFF);
-            off3 += (uint32_t)((offsets >> 32) & 0xFFFF);
-            off4 += (uint32_t)((offsets >> 48) & 0xFFFF);
+            offset += zxc_le16(o_ptr);
+            o_ptr += 2;
         }
 
-        uint32_t ll1 = (tokens & 0x0F0) >> 4;
-        uint32_t ml1 = (tokens & 0x00F);
-        if (UNLIKELY(ll1 == ZXC_TOKEN_LL_MASK)) {
-            ll1 += zxc_read_varint(&e_ptr, e_end);
-            if (UNLIKELY(l_ptr + ll1 > l_end || d_ptr + ll1 > d_end)) return ZXC_ERROR_OVERFLOW;
+        if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {
+            ll += zxc_read_varint(&e_ptr, e_end);
+            if (UNLIKELY(l_ptr + ll > l_end || d_ptr + ll > d_end)) return ZXC_ERROR_OVERFLOW;
         }
-        if (UNLIKELY(ml1 == ZXC_TOKEN_ML_MASK)) {
-            ml1 += zxc_read_varint(&e_ptr, e_end);
-            ml1 += ZXC_LZ_MIN_MATCH_LEN;
-            if (UNLIKELY(d_ptr + ll1 + ml1 > d_end)) return ZXC_ERROR_OVERFLOW;
+        if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) {
+            ml += zxc_read_varint(&e_ptr, e_end);
+            ml += ZXC_LZ_MIN_MATCH_LEN;
+            if (UNLIKELY(d_ptr + ll + ml > d_end)) return ZXC_ERROR_OVERFLOW;
         } else {
-            ml1 += ZXC_LZ_MIN_MATCH_LEN;
+            ml += ZXC_LZ_MIN_MATCH_LEN;
         }
-        DECODE_SEQ_SAFE(ll1, ml1, off1);
 
-        uint32_t ll2 = (tokens & 0x0F000) >> 12;
-        uint32_t ml2 = (tokens & 0x00F00) >> 8;
-        if (UNLIKELY(ll2 == ZXC_TOKEN_LL_MASK)) {
-            ll2 += zxc_read_varint(&e_ptr, e_end);
-            if (UNLIKELY(l_ptr + ll2 > l_end || d_ptr + ll2 > d_end)) return ZXC_ERROR_OVERFLOW;
-        }
-        if (UNLIKELY(ml2 == ZXC_TOKEN_ML_MASK)) {
-            ml2 += zxc_read_varint(&e_ptr, e_end);
-            ml2 += ZXC_LZ_MIN_MATCH_LEN;
-            if (UNLIKELY(d_ptr + ll2 + ml2 > d_end)) return ZXC_ERROR_OVERFLOW;
+        // Strict bounds check: sequence must fit, AND wild copies must not overshoot
+        if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end || l_ptr + ll + ZXC_PAD_SIZE > l_end)) {
+            // Fallback to exact copy (slow but safe)
+            if (UNLIKELY(d_ptr + ll > d_end || l_ptr + ll > l_end)) return ZXC_ERROR_OVERFLOW;
+            ZXC_MEMCPY(d_ptr, l_ptr, ll);
+            l_ptr += ll;
+            d_ptr += ll;
+            written += ll;
+
+            if (UNLIKELY(offset > written || d_ptr + ml > d_end)) return ZXC_ERROR_BAD_OFFSET;
+            const uint8_t* match_src = d_ptr - offset;
+            if (offset < ml) {
+                for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
+            } else {
+                ZXC_MEMCPY(d_ptr, match_src, ml);
+            }
+            d_ptr += ml;
+            written += ml;
         } else {
-            ml2 += ZXC_LZ_MIN_MATCH_LEN;
+            DECODE_SEQ_SAFE(ll, ml, offset);
         }
-        DECODE_SEQ_SAFE(ll2, ml2, off2);
-
-        uint32_t ll3 = (tokens & 0x0F00000) >> 20;
-        uint32_t ml3 = (tokens & 0x00F0000) >> 16;
-        if (UNLIKELY(ll3 == ZXC_TOKEN_LL_MASK)) {
-            ll3 += zxc_read_varint(&e_ptr, e_end);
-            if (UNLIKELY(l_ptr + ll3 > l_end || d_ptr + ll3 > d_end)) return ZXC_ERROR_OVERFLOW;
-        }
-        if (UNLIKELY(ml3 == ZXC_TOKEN_ML_MASK)) {
-            ml3 += zxc_read_varint(&e_ptr, e_end);
-            ml3 += ZXC_LZ_MIN_MATCH_LEN;
-            if (UNLIKELY(d_ptr + ll3 + ml3 > d_end)) return ZXC_ERROR_OVERFLOW;
-        } else {
-            ml3 += ZXC_LZ_MIN_MATCH_LEN;
-        }
-        DECODE_SEQ_SAFE(ll3, ml3, off3);
-
-        uint32_t ll4 = (tokens >> 28);
-        uint32_t ml4 = (tokens >> 24) & 0x0F;
-        if (UNLIKELY(ll4 == ZXC_TOKEN_LL_MASK)) {
-            ll4 += zxc_read_varint(&e_ptr, e_end);
-            if (UNLIKELY(l_ptr + ll4 > l_end || d_ptr + ll4 > d_end)) return ZXC_ERROR_OVERFLOW;
-        }
-        if (UNLIKELY(ml4 == ZXC_TOKEN_ML_MASK)) {
-            ml4 += zxc_read_varint(&e_ptr, e_end);
-            ml4 += ZXC_LZ_MIN_MATCH_LEN;
-            if (UNLIKELY(d_ptr + ll4 + ml4 > d_end)) return ZXC_ERROR_OVERFLOW;
-        } else {
-            ml4 += ZXC_LZ_MIN_MATCH_LEN;
-        }
-        DECODE_SEQ_SAFE(ll4, ml4, off4);
-
-        n_seq -= 4;
+        n_seq--;
     }
 
     // --- FAST Loop: After threshold, no offset validation needed (4x unroll) ---
