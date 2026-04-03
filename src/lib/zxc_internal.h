@@ -77,8 +77,13 @@ extern "C" {
  * - @c ZXC_USE_AVX2   - AVX2 available.
  * - @c ZXC_USE_NEON64 - AArch64 NEON available.
  * - @c ZXC_USE_NEON32 - ARMv7 NEON available.
+ *
+ * Define @c ZXC_NO_INTRINSICS to disable all SIMD intrinsics and compile in
+ * pure scalar mode.  This is useful for baseline benchmarking, debugging,
+ * portability to exotic targets, or security audits.
  * @{
  */
+#ifndef ZXC_NO_INTRINSICS
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #include <immintrin.h>
 #include <nmmintrin.h>
@@ -108,6 +113,7 @@ extern "C" {
 #endif
 #endif
 #endif
+#endif    /* ZXC_NO_INTRINSICS */
 /** @} */ /* end of SIMD Intrinsics */
 
 /**
@@ -1111,7 +1117,7 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const
         br->bits = safe_bits;
 
         // Mask out garbage bits (retain only valid existing bits)
-#if defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
+#if !defined(ZXC_NO_INTRINSICS) && defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
         br->accum = _bzhi_u64(br->accum, safe_bits);
 #else
         br->accum &= ((1ULL << safe_bits) - 1);

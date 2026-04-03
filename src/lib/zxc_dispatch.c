@@ -17,6 +17,15 @@
 
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
+
+/*
+ * When building in pure scalar mode (ZXC_NO_INTRINSICS), force the dispatch
+ * layer to use only the default (scalar) variant — no AVX2/AVX512/NEON probing.
+ */
+#if defined(ZXC_NO_INTRINSICS) && !defined(ZXC_ONLY_DEFAULT)
+#define ZXC_ONLY_DEFAULT
+#endif
+
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
