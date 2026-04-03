@@ -26,7 +26,7 @@ It is designed to be **"Write Once, Read Many"** *(WORM)*. Unlike codecs like LZ
 ## TL;DR
 
 - **What:** A C library for lossless compression, optimized for **maximum decompression speed**.
-- **Key Result:** Up to **>40% faster** decompression than LZ4 on Apple Silicon, **>25% faster** on Google Axion (ARM64), **>5% faster** on x86_64, **all with better compression ratios**.
+- **Key Result:** Up to **>40% faster** decompression than LZ4 on Apple Silicon, **>25% faster** on Google Axion (ARM64), **>10% faster** on x86_64, **all with better compression ratios**.
 - **Use Cases:** Game assets, firmware, app bundles, anything *compressed once, decompressed millions of times*.
 - **Install:** `conan install --requires="zxc/[*]"` · `vcpkg install zxc` · `brew install zxc` · `pip install zxc-compress` · `cargo add zxc-compress` · `npm i zxc-compress`
 - **Quality:** Fuzzed, sanitized, formally tested, thread-safe API. BSD-3-Clause.
@@ -86,7 +86,7 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 
 *(Benchmark Graph ARM64 : Decompression Throughput & Storage Ratio (Normalized to LZ4))*
-![Benchmark Graph ARM64](docs/images/benchmark_arm64_0.9.0.webp)
+![Benchmark Graph ARM64](docs/images/benchmark_arm64_0.10.0.webp)
 
 
 ### Benchmark ARM64 (Apple Silicon M2)
