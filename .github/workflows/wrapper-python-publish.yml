@@ -45,7 +45,7 @@ jobs:
       - name: Select Latest Xcode (macOS)
         if: runner.os == 'macOS'
         run: |
-          sudo xcode-select -s /Applications/Xcode_26.4_Release_Candidate.app
+          sudo xcode-select -s /Applications/Xcode_26.4.app
           clang --version
 
       - name: Set up Python
