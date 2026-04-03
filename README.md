@@ -134,7 +134,6 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 | zlib 1.3.1 -1           |   114 MB/s |   390 MB/s |    77259029 | 36.45 | 1 files|
 
 
-
 ### Benchmark x86_64 (AMD EPYC 9B45)
 
 Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Ubuntu 24.04. The reference hardware is an AMD EPYC 9B45 processor (x86_64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.
@@ -155,6 +154,28 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 | zstd 1.5.7 --fast --1   |   642 MB/s |  2378 MB/s |    86916294 | 41.01 | 1 files|
 | zstd 1.5.7 -1           |   588 MB/s |  1851 MB/s |    73193704 | 34.53 | 1 files|
 | zlib 1.3.1 -1           |   131 MB/s |   385 MB/s |    77259029 | 36.45 | 1 files|
+
+
+### Benchmark x86_64 (AMD EPYC 7763)
+
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.2.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Ubuntu 24.04. The reference hardware is an AMD EPYC 7763 64-Core processor (x86_64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.
+
+| Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
+| ---------------         | -----------| -----------| ----------- | ----- | -------- |
+| memcpy                  | 23987 MB/s | 23852 MB/s |   211947520 |100.00 | 1 files|
+| **zxc 0.10.0 -1**           |   636 MB/s |  **6901 MB/s** |   131081262 | **61.85** | 1 files|
+| **zxc 0.10.0 -2**           |   404 MB/s |  **5806 MB/s** |   114645515 | **54.09** | 1 files|
+| **zxc 0.10.0 -3**           |   173 MB/s |  **3968 MB/s** |    98255455 | **46.36** | 1 files|
+| **zxc 0.10.0 -4**           |   123 MB/s |  **3802 MB/s** |    91527983 | **43.18** | 1 files|
+| **zxc 0.10.0 -5**           |  72.4 MB/s |  **3632 MB/s** |    86199001 | **40.67** | 1 files|
+| lz4 1.10.0              |   582 MB/s |  3554 MB/s |   100880800 | 47.60 | 1 files|
+| lz4 1.10.0 --fast -17   |  1016 MB/s |  4102 MB/s |   131732802 | 62.15 | 1 files|
+| lz4hc 1.10.0 -9         |  34.0 MB/s |  3406 MB/s |    77884448 | 36.75 | 1 files|
+| lzav 5.7 -1             |   440 MB/s |  2638 MB/s |    84644732 | 39.94 | 1 files|
+| snappy 1.2.2            |   613 MB/s |  1593 MB/s |   101512076 | 47.89 | 1 files|
+| zstd 1.5.7 --fast --1   |   445 MB/s |  1626 MB/s |    86916294 | 41.01 | 1 files|
+| zstd 1.5.7 -1           |   405 MB/s |  1224 MB/s |    73193704 | 34.53 | 1 files|
+| zlib 1.3.1 -1           |  98.3 MB/s |   328 MB/s |    77259029 | 36.45 | 1 files|
 
 
 ---
