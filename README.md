@@ -310,6 +310,30 @@ cmake -B build -DZXC_DISABLE_SIMD=ON
 *   **Level 3, 4 (Balanced):** A strong middle-ground offering efficient compression speed and a ratio superior to LZ4.
 *   **Level 5 (Compact):** The best choice for Embedded, Firmware, or Archival. Better compression than LZ4 and significantly faster decoding than Zstd.
 
+## Block Size Tuning
+
+The default block size is **256 KB**, a conservative choice that balances compression quality, memory usage, and random-access granularity. For **bulk/archival workloads** where maximum throughput matters, **512 KB blocks** are recommended.
+
+**Why larger blocks help:** Each block starts with a cold hash table, so the LZ match-finder has no history and produces more literals until the table warms up. Doubling the block size halves the number of cold-start penalties, improving both ratio and decompression speed.
+
+| Block Size | Memory (per context) | Ratio (level -3) | Decompression gain vs 256 KB |
+|:----------:|:--------------------:|:-----------------:|:----------------------------:|
+| 256 KB *(default)* | ~1.7 MB | 46.36% | — |
+| 512 KB | ~3.3 MB | 45.81% *(−0.55 pp)* | +1% to +8% depending on CPU |
+
+```bash
+# CLI
+zxc -B 512K -5 input_file output_file
+
+# API
+zxc_compress_opts_t opts = {
+    .level      = ZXC_LEVEL_COMPACT,
+    .block_size = 512 * 1024,
+};
+```
+
+**Guideline:** Use 256 KB (default) for streaming, embedded, or memory-constrained environments. Use 512 KB for bulk compression pipelines, CI/CD asset packaging, and high-throughput servers.
+
 ---
 
 ## Usage

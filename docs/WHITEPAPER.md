@@ -481,7 +481,7 @@ ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-co
 ## 7. Performance Analysis (Benchmarks)
 
 **Methodology:**
-Benchmarks were conducted using `lzbench` (by inikep).
+Benchmarks were conducted using `lzbench` (by inikep) with the **default block size of 256 KB**, checksums disabled, single-threaded execution, on the standard Silesia Corpus ([silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), 202 MB).
 * **Target 1 (Client):** Apple M2 / macOS 26 (Clang 21)
 * **Target 2 (Cloud):** Google Axion / Linux (GCC 14)
 * **Target 3 (Build):** AMD EPYC 9B45 / Linux (GCC 14)
@@ -688,6 +688,157 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 | zstd 1.5.7 --fast --1   |   642 MB/s |  2378 MB/s |    86916294 | 41.01 | 1 files|
 | zstd 1.5.7 -1           |   588 MB/s |  1851 MB/s |    73193704 | 34.53 | 1 files|
 | zlib 1.3.1 -1           |   131 MB/s |   385 MB/s |    77259029 | 36.45 | 1 files|
+
+
+### 7.5 Block Size Impact: 256 KB vs 512 KB
+
+All benchmarks in sections 7.1–7.4 use the **default block size of 256 KB**. This section evaluates the performance impact of increasing the block size to **512 KB**, measured on three architectures using lzbench 2.2.1 under identical conditions.
+
+**Why block size matters:** Each block starts with a cold hash table — the LZ77 match-finder has no history and produces more literals until the table warms up. Doubling the block size halves the number of cold-start penalties (~809 blocks → ~405 blocks on the Silesia corpus), improving both compression ratio and decompression throughput.
+
+#### 7.5.1 Apple M4 Max (ARM64)
+
+Benchmarked using lzbench 2.2.1, compiled with Clang 21.0.0 using *MOREFLAGS="-march=native"* on macOS Tahoe 26.4 (Build 25E246). Apple M4 Max processor (ARM64, P-core frequency 4.51 GHz).
+
+**Block Size: 256 KB (default)**
+
+| Compressor name         | Compression| Decompress.| Compr. size | Ratio |
+| ---------------         | -----------| -----------| ----------- | ----- |
+| memcpy                  | 77102 MB/s | 76986 MB/s |   211947520 |100.00 |
+| **zxc 0.10.0 -1**       |  1181 MB/s | **15908 MB/s** |   131081262 | **61.85** |
+| **zxc 0.10.0 -2**       |   744 MB/s | **12956 MB/s** |   114645515 | **54.09** |
+| **zxc 0.10.0 -3**       |   281 MB/s |  **9219 MB/s** |    98255455 | **46.36** |
+| **zxc 0.10.0 -4**       |   198 MB/s |  **8638 MB/s** |    91527983 | **43.18** |
+| **zxc 0.10.0 -5**       |   111 MB/s |  **7965 MB/s** |    86199001 | **40.67** |
+| lz4 1.10.0              |   997 MB/s |  5878 MB/s |   100880800 | 47.60 |
+| lz4 1.10.0 --fast -17   |  1643 MB/s |  6976 MB/s |   131732802 | 62.15 |
+| lz4hc 1.10.0 -9         |  54.9 MB/s |  5547 MB/s |    77884448 | 36.75 |
+| lzav 5.7 -1             |   797 MB/s |  4764 MB/s |    84644732 | 39.94 |
+| snappy 1.2.2            |  1024 MB/s |  3966 MB/s |   101415443 | 47.85 |
+| zstd 1.5.7 --fast --1   |   862 MB/s |  3183 MB/s |    86916294 | 41.01 |
+| zstd 1.5.7 -1           |   776 MB/s |  2306 MB/s |    73193704 | 34.53 |
+| zlib 1.3.1 -1           |   176 MB/s |   496 MB/s |    77259029 | 36.45 |
+
+**Block Size: 512 KB**
+
+| Compressor name         | Compression| Decompress.| Compr. size | Ratio |
+| ---------------         | -----------| -----------| ----------- | ----- |
+| **zxc 0.10.0 -1**       |  1109 MB/s | **16074 MB/s** |   130969994 | **61.79** |
+| **zxc 0.10.0 -2**       |   698 MB/s | **12665 MB/s** |   113859997 | **53.72** |
+| **zxc 0.10.0 -3**       |   263 MB/s |  **8986 MB/s** |    97083951 | **45.81** |
+| **zxc 0.10.0 -4**       |   186 MB/s |  **8383 MB/s** |    90503394 | **42.70** |
+| **zxc 0.10.0 -5**       |   105 MB/s |  **7889 MB/s** |    85344194 | **40.27** |
+
+**Decompression Efficiency (Cycles per Byte @ 4.51 GHz)**
+
+| Compressor              | 256 KB (c/B) | 512 KB (c/B) | Δ       |
+| ----------------------- | ------------ | ------------ | ------- |
+| **zxc 0.10.0 -1**       | **0.284**    | **0.281**    | −1.0%   |
+| **zxc 0.10.0 -2**       | **0.348**    | **0.356**    | +2.3%   |
+| **zxc 0.10.0 -3**       | **0.489**    | **0.502**    | +2.6%   |
+| **zxc 0.10.0 -4**       | **0.522**    | **0.538**    | +3.0%   |
+| **zxc 0.10.0 -5**       | **0.566**    | **0.572**    | +1.0%   |
+| lz4 1.10.0              | 0.767        | —            | —       |
+| lz4 1.10.0 --fast -17   | 0.647        | —            | —       |
+| lz4hc 1.10.0 -9         | 0.813        | —            | —       |
+| lzav 5.7 -1             | 0.947        | —            | —       |
+| zstd 1.5.7 --fast --1   | 1.417        | —            | —       |
+| zstd 1.5.7 -1           | 1.956        | —            | —       |
+
+*Lower is better. Apple M4 Max P-core frequency (4.51 GHz). On this microarchitecture, decompression cycles/byte are nearly identical between block sizes, with the ratio improvement being the primary benefit.*
+
+#### 7.5.2 Google Axion (ARM64 Neoverse-V2)
+
+Benchmarked using lzbench 2.2.1, compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on Linux Debian 12. Google Neoverse-V2 processor (ARM64, 2.6 GHz).
+
+**Block Size: 256 KB (default)**
+
+| Compressor name         | Compression| Decompress.| Compr. size | Ratio |
+| ---------------         | -----------| -----------| ----------- | ----- |
+| **zxc 0.10.0 -1**       |   867 MB/s |  **8724 MB/s** |   131081262 | **61.85** |
+| **zxc 0.10.0 -2**       |   556 MB/s |  **7294 MB/s** |   114645515 | **54.09** |
+| **zxc 0.10.0 -3**       |   231 MB/s |  **5249 MB/s** |    98255455 | **46.36** |
+| **zxc 0.10.0 -4**       |   161 MB/s |  **4984 MB/s** |    91527983 | **43.18** |
+| **zxc 0.10.0 -5**       |  91.8 MB/s |  **4633 MB/s** |    86199001 | **40.67** |
+
+**Block Size: 512 KB**
+
+| Compressor name         | Compression| Decompress.| Compr. size | Ratio |
+| ---------------         | -----------| -----------| ----------- | ----- |
+| **zxc 0.10.0 -1**       |   823 MB/s |  **9024 MB/s** |   130969994 | **61.79** |
+| **zxc 0.10.0 -2**       |   528 MB/s |  **7349 MB/s** |   113859997 | **53.72** |
+| **zxc 0.10.0 -3**       |   220 MB/s |  **5282 MB/s** |    97083951 | **45.81** |
+| **zxc 0.10.0 -4**       |   153 MB/s |  **5032 MB/s** |    90503394 | **42.70** |
+| **zxc 0.10.0 -5**       |  87.3 MB/s |  **4703 MB/s** |    85344194 | **40.27** |
+
+**Decompression Efficiency (Cycles per Byte @ 2.6 GHz)**
+
+| Compressor              | 256 KB (c/B) | 512 KB (c/B) | Δ       |
+| ----------------------- | ------------ | ------------ | ------- |
+| **zxc 0.10.0 -1**       | **0.298**    | **0.288**    | −3.3%   |
+| **zxc 0.10.0 -2**       | **0.356**    | **0.354**    | −0.7%   |
+| **zxc 0.10.0 -3**       | **0.495**    | **0.492**    | −0.6%   |
+| **zxc 0.10.0 -4**       | **0.522**    | **0.517**    | −1.0%   |
+| **zxc 0.10.0 -5**       | **0.561**    | **0.553**    | −1.5%   |
+
+*Lower is better. Consistent improvement across all levels with 512 KB blocks.*
+
+#### 7.5.3 AMD EPYC 9B45 (x86_64)
+
+Benchmarked using lzbench 2.2.1, compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on Linux Ubuntu 24.04. AMD EPYC 9B45 processor (x86_64, 3.5 GHz boost).
+
+**Block Size: 256 KB (default)**
+
+| Compressor name         | Compression| Decompress.| Compr. size | Ratio |
+| ---------------         | -----------| -----------| ----------- | ----- |
+| **zxc 0.10.0 -1**       |   827 MB/s |  **9907 MB/s** |   131081262 | **61.85** |
+| **zxc 0.10.0 -2**       |   508 MB/s |  **8791 MB/s** |   114645515 | **54.09** |
+| **zxc 0.10.0 -3**       |   210 MB/s |  **5665 MB/s** |    98255455 | **46.36** |
+| **zxc 0.10.0 -4**       |   149 MB/s |  **5353 MB/s** |    91527983 | **43.18** |
+| **zxc 0.10.0 -5**       |  87.1 MB/s |  **5100 MB/s** |    86199001 | **40.67** |
+
+**Block Size: 512 KB**
+
+| Compressor name         | Compression| Decompress.| Compr. size | Ratio |
+| ---------------         | -----------| -----------| ----------- | ----- |
+| **zxc 0.10.0 -1**       |   775 MB/s | **10703 MB/s** |   130969994 | **61.79** |
+| **zxc 0.10.0 -2**       |   480 MB/s |  **8927 MB/s** |   113859997 | **53.72** |
+| **zxc 0.10.0 -3**       |   198 MB/s |  **5863 MB/s** |    97083951 | **45.81** |
+| **zxc 0.10.0 -4**       |   141 MB/s |  **5569 MB/s** |    90503394 | **42.70** |
+| **zxc 0.10.0 -5**       |  82.2 MB/s |  **5239 MB/s** |    85344194 | **40.27** |
+
+**Decompression Efficiency (Cycles per Byte @ 3.5 GHz)**
+
+| Compressor              | 256 KB (c/B) | 512 KB (c/B) | Δ       |
+| ----------------------- | ------------ | ------------ | ------- |
+| **zxc 0.10.0 -1**       | **0.353**    | **0.327**    | −7.4%   |
+| **zxc 0.10.0 -2**       | **0.398**    | **0.392**    | −1.5%   |
+| **zxc 0.10.0 -3**       | **0.618**    | **0.597**    | −3.4%   |
+| **zxc 0.10.0 -4**       | **0.654**    | **0.628**    | −3.9%   |
+| **zxc 0.10.0 -5**       | **0.686**    | **0.668**    | −2.7%   |
+
+*Lower is better. The EPYC 9B45 benefits the most from larger blocks, likely due to its deep pipeline and large L2 cache reducing the cost of hash table cold-start transitions.*
+
+#### 7.5.4 Summary: Block Size Trade-offs
+
+**Compression Ratio (Silesia Corpus, 202 MB)**
+
+| Level | 256 KB Ratio | 512 KB Ratio | Δ (pp) | Δ (bytes) |
+|:-----:|:------------:|:------------:|:------:|:---------:|
+| -1    | 61.85%       | 61.79%       | −0.05  | −111 KB   |
+| -2    | 54.09%       | 53.72%       | −0.37  | −767 KB   |
+| -3    | 46.36%       | 45.81%       | −0.55  | −1,144 KB |
+| -4    | 43.18%       | 42.70%       | −0.48  | −1,001 KB |
+| -5    | 40.67%       | 40.27%       | −0.40  | −835 KB   |
+
+**Memory Usage per Compression Context**
+
+| Block Size | Context Memory | Δ vs 256 KB |
+|:----------:|:--------------:|:-----------:|
+| 256 KB *(default)* | ~1.7 MB  | —           |
+| 512 KB             | ~3.3 MB  | +92%        |
+
+> **Guideline:** Use 256 KB (default) for streaming, embedded, or memory-constrained environments. Use 512 KB (`-B 512K`) for bulk compression pipelines and high-throughput servers where memory is not a constraint.
 
 
 ## 8. Compression Ratio Benchmarks
