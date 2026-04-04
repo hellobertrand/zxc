@@ -34,6 +34,9 @@ option(ZXC_BUILD_CLI "Build the command-line interface" ON)
 option(ZXC_BUILD_TESTS "Build unit tests" ON)
 option(ZXC_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 option(ZXC_DISABLE_SIMD "Disable explicit SIMD intrinsics (no AVX/NEON code paths)" OFF)
+if(ZXC_DISABLE_SIMD)
+    add_compile_definitions(ZXC_DISABLE_SIMD)
+endif()
 
 # =============================================================================
 # C Standard
@@ -83,8 +86,7 @@ endif()
 macro(zxc_add_variant suffix flags)
     add_library(zxc_compress${suffix} OBJECT src/lib/zxc_compress.c)
     target_compile_options(zxc_compress${suffix} PRIVATE ${flags})
-    target_compile_definitions(zxc_compress${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix}
-        $<$<BOOL:${ZXC_DISABLE_SIMD}>:ZXC_DISABLE_SIMD>)
+    target_compile_definitions(zxc_compress${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix})
     # For static builds, define ZXC_STATIC_DEFINE
     if(NOT BUILD_SHARED_LIBS)
         target_compile_definitions(zxc_compress${suffix} PRIVATE ZXC_STATIC_DEFINE)
@@ -102,8 +104,7 @@ macro(zxc_add_variant suffix flags)
 
     add_library(zxc_decompress${suffix} OBJECT src/lib/zxc_decompress.c)
     target_compile_options(zxc_decompress${suffix} PRIVATE ${flags})
-    target_compile_definitions(zxc_decompress${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix}
-        $<$<BOOL:${ZXC_DISABLE_SIMD}>:ZXC_DISABLE_SIMD>)
+    target_compile_definitions(zxc_decompress${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix})
     # For static builds, define ZXC_STATIC_DEFINE
     if(NOT BUILD_SHARED_LIBS)
         target_compile_definitions(zxc_decompress${suffix} PRIVATE ZXC_STATIC_DEFINE)
@@ -248,7 +249,6 @@ endif()
 
 target_compile_definitions(zxc_lib PRIVATE
     $<$<NOT:$<C_COMPILER_ID:MSVC>>:_GNU_SOURCE>
-    $<$<BOOL:${ZXC_DISABLE_SIMD}>:ZXC_DISABLE_SIMD>
 )
 
 # Coverage flags
