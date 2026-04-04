@@ -77,8 +77,12 @@ extern "C" {
  * - @c ZXC_USE_AVX2   - AVX2 available.
  * - @c ZXC_USE_NEON64 - AArch64 NEON available.
  * - @c ZXC_USE_NEON32 - ARMv7 NEON available.
+ *
+ * Define @c ZXC_DISABLE_SIMD to gate all hand-written SIMD paths (intrinsics,
+ * inline assembly).  Compiler auto-vectorisation is unaffected.
  * @{
  */
+#ifndef ZXC_DISABLE_SIMD
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #include <immintrin.h>
 #include <nmmintrin.h>
@@ -108,6 +112,7 @@ extern "C" {
 #endif
 #endif
 #endif
+#endif    /* ZXC_DISABLE_SIMD */
 /** @} */ /* end of SIMD Intrinsics */
 
 /**
@@ -1111,7 +1116,7 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const
         br->bits = safe_bits;
 
         // Mask out garbage bits (retain only valid existing bits)
-#if defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
+#if !defined(ZXC_DISABLE_SIMD) && defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
         br->accum = _bzhi_u64(br->accum, safe_bits);
 #else
         br->accum &= ((1ULL << safe_bits) - 1);

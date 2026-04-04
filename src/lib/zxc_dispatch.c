@@ -17,6 +17,15 @@
 
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
+
+/*
+ * ZXC_DISABLE_SIMD => force ZXC_ONLY_DEFAULT so the dispatcher never selects
+ * an AVX2/AVX512/NEON variant.
+ */
+#if defined(ZXC_DISABLE_SIMD) && !defined(ZXC_ONLY_DEFAULT)
+#define ZXC_ONLY_DEFAULT
+#endif
+
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif

@@ -33,6 +33,10 @@ set_property(CACHE ZXC_PGO_MODE PROPERTY STRINGS OFF GENERATE USE)
 option(ZXC_BUILD_CLI "Build the command-line interface" ON)
 option(ZXC_BUILD_TESTS "Build unit tests" ON)
 option(ZXC_ENABLE_COVERAGE "Enable code coverage generation" OFF)
+option(ZXC_DISABLE_SIMD "Disable explicit SIMD intrinsics (no AVX/NEON code paths)" OFF)
+if(ZXC_DISABLE_SIMD)
+    add_compile_definitions(ZXC_DISABLE_SIMD)
+endif()
 
 # =============================================================================
 # C Standard
@@ -123,7 +127,10 @@ set(ZXC_VARIANT_OBJECTS "")
 # --- 1. Default Variant (Scalar/Baseline) ---
 zxc_add_variant(_default "")
 
-# --- 2. Architecture Specific Variants ---
+# --- 2. Architecture Specific Variants (skipped in no-intrinsics mode) ---
+if(ZXC_DISABLE_SIMD)
+    message(STATUS "ZXC_DISABLE_SIMD: Skipping SIMD variants (no explicit AVX/NEON code paths).")
+else()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
     message(STATUS "Building x86_64 AVX2 and AVX512 variants...")
     if(MSVC)
@@ -151,6 +158,7 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
     message(STATUS "Building ARM NEON variant...")
     zxc_add_variant(_neon "-march=armv7-a;-mfpu=neon")
+endif()
 endif()
 
 add_library(zxc_lib
@@ -516,6 +524,7 @@ else()
     message(STATUS "  Library Type:   Static")
 endif()
 message(STATUS "  Native Arch:    ${ZXC_NATIVE_ARCH}")
+message(STATUS "  Disable SIMD:   ${ZXC_DISABLE_SIMD}")
 message(STATUS "  LTO Enabled:    ${ZXC_ENABLE_LTO}")
 message(STATUS "  PGO Mode:       ${ZXC_PGO_MODE}")
 message(STATUS "  Build CLI:      ${ZXC_BUILD_CLI}")
