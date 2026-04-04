@@ -110,7 +110,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **List archive information:**
   zxc -l data.txt.zxc
 
-**Compress with a custom block size (64 KB — squashfs-style):**
+**Compress with a custom block size (64 KB):**
   zxc -B 64K data.bin data.zxc
 
 **Compress with maximum block size (2 MB):**

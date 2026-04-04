@@ -275,6 +275,7 @@ sudo cmake --install build
 | `ZXC_BUILD_CLI` | ON | Build command-line interface |
 | `ZXC_BUILD_TESTS` | ON | Build unit tests |
 | `ZXC_ENABLE_COVERAGE` | OFF | Enable code coverage generation (disables LTO/PGO) |
+| `ZXC_DISABLE_SIMD` | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON) |
 
 ```bash
 # Build shared library
@@ -288,6 +289,9 @@ cmake -B build -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
 
 # Code coverage build
 cmake -B build -DZXC_ENABLE_COVERAGE=ON
+
+# Disable explicit SIMD code paths (compiler auto-vectorisation is unaffected)
+cmake -B build -DZXC_DISABLE_SIMD=ON
 ```
 
 ### Packaging Status
