@@ -77,7 +77,7 @@ jobs:
             export CC=gcc-14 CXX=g++-14
           fi
 
-          make ZXC_NO_INTRINSICS=1 -j $SKIP_CODECS CC="${CC:-cc}" MOREFLAGS="-march=native"
+          make ZXC_DISABLE_SIMD=1 -j $SKIP_CODECS CC="${CC:-cc}" MOREFLAGS="-march=native"
 
       - name: Cache Silesia Corpus
         id: cache-silesia

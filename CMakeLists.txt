@@ -33,7 +33,7 @@ set_property(CACHE ZXC_PGO_MODE PROPERTY STRINGS OFF GENERATE USE)
 option(ZXC_BUILD_CLI "Build the command-line interface" ON)
 option(ZXC_BUILD_TESTS "Build unit tests" ON)
 option(ZXC_ENABLE_COVERAGE "Enable code coverage generation" OFF)
-option(ZXC_NO_INTRINSICS "Disable all SIMD intrinsics (pure scalar build)" OFF)
+option(ZXC_DISABLE_SIMD "Disable explicit SIMD intrinsics (no AVX/NEON code paths)" OFF)
 
 # =============================================================================
 # C Standard
@@ -84,7 +84,7 @@ macro(zxc_add_variant suffix flags)
     add_library(zxc_compress${suffix} OBJECT src/lib/zxc_compress.c)
     target_compile_options(zxc_compress${suffix} PRIVATE ${flags})
     target_compile_definitions(zxc_compress${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix}
-        $<$<BOOL:${ZXC_NO_INTRINSICS}>:ZXC_NO_INTRINSICS>)
+        $<$<BOOL:${ZXC_DISABLE_SIMD}>:ZXC_DISABLE_SIMD>)
     # For static builds, define ZXC_STATIC_DEFINE
     if(NOT BUILD_SHARED_LIBS)
         target_compile_definitions(zxc_compress${suffix} PRIVATE ZXC_STATIC_DEFINE)
@@ -103,7 +103,7 @@ macro(zxc_add_variant suffix flags)
     add_library(zxc_decompress${suffix} OBJECT src/lib/zxc_decompress.c)
     target_compile_options(zxc_decompress${suffix} PRIVATE ${flags})
     target_compile_definitions(zxc_decompress${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix}
-        $<$<BOOL:${ZXC_NO_INTRINSICS}>:ZXC_NO_INTRINSICS>)
+        $<$<BOOL:${ZXC_DISABLE_SIMD}>:ZXC_DISABLE_SIMD>)
     # For static builds, define ZXC_STATIC_DEFINE
     if(NOT BUILD_SHARED_LIBS)
         target_compile_definitions(zxc_decompress${suffix} PRIVATE ZXC_STATIC_DEFINE)
@@ -127,8 +127,8 @@ set(ZXC_VARIANT_OBJECTS "")
 zxc_add_variant(_default "")
 
 # --- 2. Architecture Specific Variants (skipped in no-intrinsics mode) ---
-if(ZXC_NO_INTRINSICS)
-    message(STATUS "ZXC_NO_INTRINSICS: Building scalar-only (no SIMD variants).")
+if(ZXC_DISABLE_SIMD)
+    message(STATUS "ZXC_DISABLE_SIMD: Skipping SIMD variants (no explicit AVX/NEON code paths).")
 else()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
     message(STATUS "Building x86_64 AVX2 and AVX512 variants...")
@@ -248,7 +248,7 @@ endif()
 
 target_compile_definitions(zxc_lib PRIVATE
     $<$<NOT:$<C_COMPILER_ID:MSVC>>:_GNU_SOURCE>
-    $<$<BOOL:${ZXC_NO_INTRINSICS}>:ZXC_NO_INTRINSICS>
+    $<$<BOOL:${ZXC_DISABLE_SIMD}>:ZXC_DISABLE_SIMD>
 )
 
 # Coverage flags
@@ -524,7 +524,7 @@ else()
     message(STATUS "  Library Type:   Static")
 endif()
 message(STATUS "  Native Arch:    ${ZXC_NATIVE_ARCH}")
-message(STATUS "  No Intrinsics:  ${ZXC_NO_INTRINSICS}")
+message(STATUS "  Disable SIMD:   ${ZXC_DISABLE_SIMD}")
 message(STATUS "  LTO Enabled:    ${ZXC_ENABLE_LTO}")
 message(STATUS "  PGO Mode:       ${ZXC_PGO_MODE}")
 message(STATUS "  Build CLI:      ${ZXC_BUILD_CLI}")

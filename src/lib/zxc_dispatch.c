@@ -19,10 +19,10 @@
 #include "zxc_internal.h"
 
 /*
- * When building in pure scalar mode (ZXC_NO_INTRINSICS), force the dispatch
+ * When building in pure scalar mode (ZXC_DISABLE_SIMD), force the dispatch
  * layer to use only the default (scalar) variant: no AVX2/AVX512/NEON probing.
  */
-#if defined(ZXC_NO_INTRINSICS) && !defined(ZXC_ONLY_DEFAULT)
+#if defined(ZXC_DISABLE_SIMD) && !defined(ZXC_ONLY_DEFAULT)
 #define ZXC_ONLY_DEFAULT
 #endif
 
