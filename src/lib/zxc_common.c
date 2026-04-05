@@ -86,8 +86,20 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
 
     if (mode == 0) return ZXC_OK;
 
+    // Adaptive hash table sizing: larger blocks get larger hash tables to reduce collisions.
+    // 14 bits (16K entries,  128KB) for blocks <= 32K
+    // 15 bits (32K entries,  256KB) for blocks 64K
+    // 16 bits (64K entries,  512KB) for blocks >= 128K
+    uint32_t hash_bits = ZXC_LZ_HASH_BITS;
+    if (chunk_size >= (128U << 10))
+        hash_bits = 16;
+    else if (chunk_size >= (64U << 10))
+        hash_bits = 15;
+    ctx->hash_bits = hash_bits;
+    ctx->hash_size = 1U << hash_bits;
+
     const size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
-    const size_t sz_hash = 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
+    const size_t sz_hash = 2 * ctx->hash_size * sizeof(uint32_t);
     const size_t sz_chain = chunk_size * sizeof(uint16_t);
     const size_t sz_sequences = max_seq * sizeof(uint32_t);
     const size_t sz_tokens = max_seq * sizeof(uint8_t);

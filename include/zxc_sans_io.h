@@ -104,6 +104,8 @@ typedef struct {
     uint32_t offset_bits; /**< log2(chunk_size) - governs epoch_mark shift. */
     uint32_t offset_mask; /**< (1U << offset_bits) - 1 */
     uint32_t max_epoch;   /**< 1U << (32 - offset_bits) */
+    uint32_t hash_bits;   /**< Adaptive hash table address bits (14-16). */
+    uint32_t hash_size;   /**< Adaptive hash table entry count: 1U << hash_bits. */
 } zxc_cctx_t;
 
 /**
