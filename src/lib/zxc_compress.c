@@ -1027,7 +1027,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     if (level >= 6 && lit_c >= ZXC_HUF_MIN_LITERALS) {
         // Use the lit_buffer as scratch space for Huffman encoding.
         // Ensure we have enough scratch capacity.
-        const size_t huf_scratch_needed = lit_c + ZXC_HUF_HEADER_SIZE + ZXC_PAD_SIZE;
+        const size_t huf_scratch_needed =
+            lit_c + ZXC_HUF_HEADER_SIZE + ZXC_HUF_STREAMS_HDR_SIZE + ZXC_PAD_SIZE;
         if (ctx->lit_buffer_cap < huf_scratch_needed) {
             uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, huf_scratch_needed);
             if (UNLIKELY(!new_buf)) {
