@@ -514,7 +514,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     size_t lit_stream_size = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
 
-    if (gh.enc_lit == 1) {
+    if (gh.enc_lit == ZXC_SECTION_ENCODING_RLE) {
         const size_t required_size = (size_t)(desc[0].sizes >> 32);
 
         if (required_size > 0) {

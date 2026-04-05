@@ -94,7 +94,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     const size_t sz_offsets = max_seq * sizeof(uint16_t);
     const size_t sz_extras =
         max_seq * 2 *
-        ZXC_VBYTE_ALLOC_LEN;  // Max 3 bytes per LL/ML VByte (sufficient for 256KB block)
+        ZXC_VBYTE_ALLOC_LEN;  // Max 3 bytes per LL/ML VByte (21 bits, sufficient for <= 2MB block)
     const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
     // Calculate sizes with alignment padding (64 bytes for cache line alignment)
@@ -245,7 +245,7 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
             block_size = (size_t)1U << code;
         } else if (code == 64) {
             // Legacy: hardcoded 256 KB default
-            block_size = ZXC_BLOCK_SIZE_DEFAULT;
+            block_size = 256 * 1024;
         } else {
             return ZXC_ERROR_BAD_BLOCK_SIZE;
         }
