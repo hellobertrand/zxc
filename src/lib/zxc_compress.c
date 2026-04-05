@@ -1419,17 +1419,16 @@ static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
         small_count += (uint32_t)(zigzag < 256);
         medium_count += (uint32_t)(zigzag >= 256) & (uint32_t)(zigzag < 65536);
 
+        // Early exit: if after 16 samples the data is clearly non-numeric, stop.
+        if (i == 16 && zxc_highbit32(max_zigzag) > 20 &&
+            (small_count + medium_count) < (16 * 3) / 4)
+            return 0;
+
         prev = curr;
         p += sizeof(uint32_t);
     }
 
-    // Calculate bit width needed for max delta
-    uint32_t bits_needed = 0;
-    uint32_t tmp = max_zigzag;
-    while (tmp > 0) {
-        bits_needed++;
-        tmp >>= 1;
-    }
+    const uint32_t bits_needed = zxc_highbit32(max_zigzag);
 
     // Estimate compression ratio:
     // NUM uses ~bits_needed per value, Raw uses 32 bits per value
