@@ -1027,13 +1027,13 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const int use_8bit_off = (max_offset <= 255) ? 1 : 0;
     const size_t off_stream_size = use_8bit_off ? seq_c : (seq_c * 2);
 
-    const zxc_gnr_header_t gh = {.n_sequences = seq_c,
-                                 .n_literals = (uint32_t)lit_c,
-                                 .enc_lit = use_rle ? ZXC_SECTION_ENCODING_RLE
-                                                     : ZXC_SECTION_ENCODING_RAW,
-                                 .enc_litlen = 0,
-                                 .enc_mlen = 0,
-                                 .enc_off = (uint8_t)use_8bit_off};
+    const zxc_gnr_header_t gh = {
+        .n_sequences = seq_c,
+        .n_literals = (uint32_t)lit_c,
+        .enc_lit = use_rle ? ZXC_SECTION_ENCODING_RLE : ZXC_SECTION_ENCODING_RAW,
+        .enc_litlen = 0,
+        .enc_mlen = 0,
+        .enc_off = (uint8_t)use_8bit_off};
 
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS] = {0};
     desc[0].sizes = (uint64_t)(use_rle ? rle_size : lit_c) | ((uint64_t)lit_c << 32);

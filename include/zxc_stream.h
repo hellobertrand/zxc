@@ -69,10 +69,10 @@ typedef void (*zxc_progress_callback_t)(uint64_t bytes_processed, uint64_t bytes
  * @endcode
  */
 typedef struct {
-    int n_threads;        /**< Worker thread count (0 = auto-detect CPU cores). */
-    int level;            /**< Compression level 1-5 (0 = default, ZXC_LEVEL_DEFAULT). */
-    size_t block_size;    /**< Block size in bytes (0 = default ZXC_BLOCK_SIZE_DEFAULT). Must be power of 2, [4KB -
-                             2MB]. */
+    int n_threads;     /**< Worker thread count (0 = auto-detect CPU cores). */
+    int level;         /**< Compression level 1-5 (0 = default, ZXC_LEVEL_DEFAULT). */
+    size_t block_size; /**< Block size in bytes (0 = default ZXC_BLOCK_SIZE_DEFAULT). Must be power
+                          of 2, [4KB - 2MB]. */
     int checksum_enabled; /**< 1 to enable per-block and global checksums, 0 to disable. */
     zxc_progress_callback_t progress_cb; /**< Optional progress callback (NULL to disable). */
     void* user_data;                     /**< User context pointer passed to progress_cb. */

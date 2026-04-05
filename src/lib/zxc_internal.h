@@ -550,10 +550,7 @@ typedef enum {
  * - `ZXC_SECTION_ENCODING_RAW`: Data is stored uncompressed.
  * - `ZXC_SECTION_ENCODING_RLE`: Run-Length Encoding.
  */
-typedef enum {
-    ZXC_SECTION_ENCODING_RAW = 0,
-    ZXC_SECTION_ENCODING_RLE = 1
-} zxc_section_encoding_t;
+typedef enum { ZXC_SECTION_ENCODING_RAW = 0, ZXC_SECTION_ENCODING_RLE = 1 } zxc_section_encoding_t;
 
 /**
  * @struct zxc_gnr_header_t
