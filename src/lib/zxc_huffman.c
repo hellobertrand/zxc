@@ -245,6 +245,40 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_huf_reverse_bits(uint32_t val, const int b
     return result;
 }
 
+/**
+ * @brief Encodes a sub-stream of symbols into an LSB-first bitstream.
+ *
+ * @param[in]  src      Source symbols.
+ * @param[in]  count    Number of symbols to encode.
+ * @param[in]  codes    Canonical codes per symbol (bit-reversed).
+ * @param[in]  lengths  Bit-lengths per symbol.
+ * @param[out] out      Output buffer (must be pre-zeroed by caller).
+ * @return Number of bytes written to out.
+ */
+static size_t zxc_huf_write_stream(const uint8_t* src, const size_t count,
+                                   const uint32_t codes[ZXC_HUF_NUM_SYMBOLS],
+                                   const uint8_t lengths[ZXC_HUF_NUM_SYMBOLS], uint8_t* out) {
+    uint64_t accum = 0;
+    int accum_bits = 0;
+    size_t pos = 0;
+
+    for (size_t i = 0; i < count; i++) {
+        const uint8_t sym = src[i];
+        accum |= ((uint64_t)codes[sym] << accum_bits);
+        accum_bits += lengths[sym];
+
+        while (accum_bits >= ZXC_BITS_PER_BYTE) {
+            out[pos++] = (uint8_t)(accum & 0xFF);
+            accum >>= ZXC_BITS_PER_BYTE;
+            accum_bits -= ZXC_BITS_PER_BYTE;
+        }
+    }
+    if (accum_bits > 0) {
+        out[pos++] = (uint8_t)(accum & 0xFF);
+    }
+    return pos;
+}
+
 /*
  * ============================================================================
  * PUBLIC API
@@ -278,8 +312,6 @@ int zxc_huf_encode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
 
     /* Single-symbol edge case: entire stream is one byte repeated */
     if (n_symbols <= 1) {
-        /* Encode as 1-bit codes: the single symbol gets length 1.
-         * Output = header + ceil(src_size / 8) bytes. */
         uint8_t lengths[ZXC_HUF_NUM_SYMBOLS];
         ZXC_MEMSET(lengths, 0, sizeof(lengths));
         for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
@@ -289,17 +321,37 @@ int zxc_huf_encode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
             }
         }
 
-        /* Write header */
+        /* Write codebook header */
         ZXC_MEMCPY(dst, lengths, ZXC_HUF_NUM_SYMBOLS);
         dst[ZXC_HUF_NUM_SYMBOLS] = 1; /* max_bits = 1 */
         *out_max_bits = 1;
 
-        const size_t bitstream_bytes = (src_size + 7) / 8;
-        if (dst_cap < ZXC_HUF_HEADER_SIZE + bitstream_bytes) return ZXC_ERROR_DST_TOO_SMALL;
+        /* 4-stream layout: split bits evenly across 4 streams */
+        const size_t quarter = src_size / ZXC_HUF_NUM_STREAMS;
+        const size_t counts[ZXC_HUF_NUM_STREAMS] = {quarter, quarter, quarter,
+                                                    src_size - 3 * quarter};
+        const size_t overhead = ZXC_HUF_HEADER_SIZE + ZXC_HUF_STREAMS_HDR_SIZE;
 
-        ZXC_MEMSET(dst + ZXC_HUF_HEADER_SIZE, 0, bitstream_bytes);
-        /* All bits are 0 (canonical code for the only symbol is 0) */
-        return (int)(ZXC_HUF_HEADER_SIZE + bitstream_bytes);
+        size_t total_bits_all = 0;
+        for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
+            total_bits_all += (counts[s] + 7) / ZXC_BITS_PER_BYTE;
+        }
+        if (dst_cap < overhead + total_bits_all) return ZXC_ERROR_DST_TOO_SMALL;
+
+        uint8_t* sp = dst + ZXC_HUF_HEADER_SIZE;
+        uint8_t* out = sp + ZXC_HUF_STREAMS_HDR_SIZE;
+        for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
+            const size_t sz = (counts[s] + 7) / ZXC_BITS_PER_BYTE;
+            ZXC_MEMSET(out, 0, sz);
+            if (s < ZXC_HUF_NUM_STREAMS - 1) {
+                sp[s * 4 + 0] = (uint8_t)(sz);
+                sp[s * 4 + 1] = (uint8_t)(sz >> 8);
+                sp[s * 4 + 2] = (uint8_t)(sz >> 16);
+                sp[s * 4 + 3] = (uint8_t)(sz >> 24);
+            }
+            out += sz;
+        }
+        return (int)(overhead + total_bits_all);
     }
 
     /* --- 2. Build Huffman tree via min-heap --- */
@@ -354,13 +406,18 @@ int zxc_huf_encode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
     /* --- 4. Length-limit to ZXC_HUF_MAX_BITS --- */
     zxc_huf_limit_lengths(lengths, ZXC_HUF_MAX_BITS);
 
-    /* --- 5. Assign canonical codes --- */
+    /* --- 5. Assign canonical codes (then reverse for LSB-first output) --- */
     uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
     uint8_t max_bits = 0;
     zxc_huf_assign_canonical(lengths, codes, &max_bits);
     *out_max_bits = max_bits;
 
-    /* --- 6. Write header --- */
+    /* Pre-reverse codes once (avoids per-symbol reversal in hot loop) */
+    for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
+        if (lengths[i] > 0) codes[i] = zxc_huf_reverse_bits(codes[i], lengths[i]);
+    }
+
+    /* --- 6. Write codebook header --- */
     ZXC_MEMCPY(dst, lengths, ZXC_HUF_NUM_SYMBOLS);
     dst[ZXC_HUF_NUM_SYMBOLS] = max_bits;
 
@@ -369,72 +426,84 @@ int zxc_huf_encode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
         total_bits += (uint64_t)freq[i] * lengths[i];
     }
-    const size_t bitstream_bytes = (size_t)((total_bits + 7) / 8);
-    const size_t total_out = ZXC_HUF_HEADER_SIZE + bitstream_bytes;
+    const size_t bitstream_bytes = (size_t)((total_bits + 7) / ZXC_BITS_PER_BYTE);
+    const size_t total_overhead = ZXC_HUF_HEADER_SIZE + ZXC_HUF_STREAMS_HDR_SIZE;
+    const size_t total_out = total_overhead + bitstream_bytes;
 
     if (UNLIKELY(total_out > dst_cap)) return ZXC_ERROR_DST_TOO_SMALL;
 
-    /* --- 8. Encode bitstream (LSB-first) --- */
-    uint8_t* out = dst + ZXC_HUF_HEADER_SIZE;
-    ZXC_MEMSET(out, 0, bitstream_bytes + 1); /* +1 for partial-byte safety */
+    /* --- 8. Encode 4 interleaved streams --- */
+    /*
+     * Split source into 4 equal parts.  Each quarter is encoded into its
+     * own bitstream.  The decoder interleaves decoding across all four
+     * to expose instruction-level parallelism on OoO cores.
+     *
+     * On-disk layout after codebook header:
+     *   [12 bytes: stream sizes 0-2 (LE uint32 each)]
+     *   [stream 0 data] [stream 1 data] [stream 2 data] [stream 3 data]
+     *
+     * Stream 3 size is implicit (total - s0 - s1 - s2).
+     */
+    const size_t quarter = src_size / ZXC_HUF_NUM_STREAMS;
+    const size_t stream_counts[ZXC_HUF_NUM_STREAMS] = {
+        quarter, quarter, quarter, src_size - 3 * quarter /* absorbs remainder */
+    };
 
-    uint64_t accum = 0;
-    int accum_bits = 0;
-    size_t out_pos = 0;
+    uint8_t* size_ptr = dst + ZXC_HUF_HEADER_SIZE;
+    uint8_t* out_ptr = size_ptr + ZXC_HUF_STREAMS_HDR_SIZE;
 
-    for (size_t i = 0; i < src_size; i++) {
-        const uint8_t sym = src[i];
-        const uint32_t code = zxc_huf_reverse_bits(codes[sym], lengths[sym]);
-        const int nbits = lengths[sym];
+    ZXC_MEMSET(out_ptr, 0, bitstream_bytes + ZXC_HUF_NUM_STREAMS); /* +padding per stream flush */
 
-        accum |= ((uint64_t)code << accum_bits);
-        accum_bits += nbits;
+    const uint8_t* stream_src = src;
+    size_t written_total = 0;
 
-        /* Flush complete bytes */
-        while (accum_bits >= 8) {
-            out[out_pos++] = (uint8_t)(accum & 0xFF);
-            accum >>= 8;
-            accum_bits -= 8;
+    for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
+        const size_t sz =
+            zxc_huf_write_stream(stream_src, stream_counts[s], codes, lengths, out_ptr);
+        if (s < ZXC_HUF_NUM_STREAMS - 1) {
+            /* Write stream size (little-endian uint32) */
+            size_ptr[s * 4 + 0] = (uint8_t)(sz);
+            size_ptr[s * 4 + 1] = (uint8_t)(sz >> 8);
+            size_ptr[s * 4 + 2] = (uint8_t)(sz >> 16);
+            size_ptr[s * 4 + 3] = (uint8_t)(sz >> 24);
         }
-    }
-    /* Flush remaining bits */
-    if (accum_bits > 0) {
-        out[out_pos++] = (uint8_t)(accum & 0xFF);
+        stream_src += stream_counts[s];
+        out_ptr += sz;
+        written_total += sz;
     }
 
-    return (int)(ZXC_HUF_HEADER_SIZE + out_pos);
+    return (int)(total_overhead + written_total);
 }
 
 /**
  * @brief Decodes a canonical Huffman-compressed literal stream.
  *
- * Reads the 257-byte header, builds a 2^max_bits lookup table, and
- * decodes each symbol in O(1) per symbol via table lookup.
+ * Uses 4-stream interleaved decoding for instruction-level parallelism.
+ * The source is split into 4 sub-streams sharing a single Huffman table.
+ * The decoder alternates symbol extraction across streams so the CPU
+ * can pipeline independent table lookups and accumulator shifts.
  */
 int zxc_huf_decode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* RESTRICT dst,
                    const size_t dst_cap, const size_t raw_size) {
-    if (UNLIKELY(src_size < ZXC_HUF_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
+    const size_t min_hdr = ZXC_HUF_HEADER_SIZE + ZXC_HUF_STREAMS_HDR_SIZE;
+    if (UNLIKELY(src_size < min_hdr)) return ZXC_ERROR_SRC_TOO_SMALL;
     if (UNLIKELY(raw_size > dst_cap)) return ZXC_ERROR_DST_TOO_SMALL;
     if (UNLIKELY(raw_size == 0)) return 0;
 
-    /* --- 1. Read header --- */
-    const uint8_t* lengths = src; /* ZXC_HUF_NUM_SYMBOLS bit-lengths */
+    /* --- 1. Read codebook header --- */
+    const uint8_t* lengths = src;
     const uint8_t max_bits = src[ZXC_HUF_NUM_SYMBOLS];
 
     if (UNLIKELY(max_bits == 0 || max_bits > ZXC_HUF_MAX_BITS)) return ZXC_ERROR_CORRUPT_DATA;
 
     /* --- 2. Build decode table --- */
-    /* Each entry: (symbol << 8) | code_length */
     uint16_t table[ZXC_HUF_TABLE_SIZE];
     ZXC_MEMSET(table, 0, sizeof(table));
 
-    /* Reconstruct canonical codes from lengths (same algorithm as encoder) */
     uint32_t bl_count[ZXC_HUF_MAX_BITS + 1];
     ZXC_MEMSET(bl_count, 0, sizeof(bl_count));
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
-        if (lengths[i] > 0 && lengths[i] <= max_bits) {
-            bl_count[lengths[i]]++;
-        }
+        if (lengths[i] > 0 && lengths[i] <= max_bits) bl_count[lengths[i]]++;
     }
 
     uint32_t next_code[ZXC_HUF_MAX_BITS + 2];
@@ -449,10 +518,7 @@ int zxc_huf_decode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
         if (len == 0) continue;
         if (UNLIKELY(len > max_bits)) return ZXC_ERROR_CORRUPT_DATA;
 
-        uint32_t code = next_code[len]++;
-
-        /* Fill all table entries for this symbol.
-         * A code of length `len` occupies 2^(max_bits - len) entries. */
+        const uint32_t code = next_code[len]++;
         const uint32_t reversed = zxc_huf_reverse_bits(code, len);
         const int fill = 1 << (max_bits - len);
         const uint16_t entry = (uint16_t)(((uint16_t)sym << 8) | (uint16_t)len);
@@ -464,28 +530,116 @@ int zxc_huf_decode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
         }
     }
 
-    /* --- 3. Decode bitstream --- */
-    const uint8_t* bitstream = src + ZXC_HUF_HEADER_SIZE;
-    const size_t bitstream_size = src_size - ZXC_HUF_HEADER_SIZE;
+    /* --- 3. Parse stream sizes --- */
+    const uint8_t* sp = src + ZXC_HUF_HEADER_SIZE;
+    const size_t body_size = src_size - min_hdr;
 
-    zxc_bit_reader_t br;
-    zxc_br_init(&br, bitstream, bitstream_size);
+    uint32_t s_sizes[ZXC_HUF_NUM_STREAMS];
+    uint32_t s_total = 0;
+    for (int s = 0; s < ZXC_HUF_NUM_STREAMS - 1; s++) {
+        s_sizes[s] = zxc_le32(sp + s * 4);
+        s_total += s_sizes[s];
+    }
+    if (UNLIKELY(s_total > body_size)) return ZXC_ERROR_CORRUPT_DATA;
+    s_sizes[ZXC_HUF_NUM_STREAMS - 1] = (uint32_t)(body_size - s_total);
 
+    /* --- 4. Initialise 4 bit readers --- */
+    const uint8_t* body = sp + ZXC_HUF_STREAMS_HDR_SIZE;
+    zxc_bit_reader_t br[ZXC_HUF_NUM_STREAMS];
+    const uint8_t* stream_ptr = body;
+    for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
+        zxc_br_init(&br[s], stream_ptr, s_sizes[s]);
+        stream_ptr += s_sizes[s];
+    }
+
+    /* Output split: first 3 quarters equal, 4th absorbs remainder */
+    const size_t quarter = raw_size / ZXC_HUF_NUM_STREAMS;
+    uint8_t* d[ZXC_HUF_NUM_STREAMS];
+    size_t d_count[ZXC_HUF_NUM_STREAMS];
+    for (int s = 0; s < ZXC_HUF_NUM_STREAMS - 1; s++) {
+        d[s] = dst + s * quarter;
+        d_count[s] = quarter;
+    }
+    d[ZXC_HUF_NUM_STREAMS - 1] = dst + 3 * quarter;
+    d_count[ZXC_HUF_NUM_STREAMS - 1] = raw_size - 3 * quarter;
+
+    /* --- 5. Interleaved batch decode --- */
     const uint32_t mask = (1U << max_bits) - 1;
 
-    for (size_t i = 0; i < raw_size; i++) {
-        zxc_br_ensure(&br, max_bits);
-        const uint32_t bits = (uint32_t)(br.accum & mask);
-        const uint16_t entry = table[bits];
-        const uint8_t sym = (uint8_t)(entry >> 8);
-        const uint8_t len = (uint8_t)(entry & 0xFF);
+    /*
+     * Decode 4 symbols per iteration (one from each stream) to expose ILP.
+     * The CPU can pipeline br[1]'s table lookup while waiting for br[0]'s
+     * shift result, since the accumulators are independent.
+     *
+     * Inner batch: 4 symbols per stream per refill (4 × max_bits <= 44 <= 64).
+     * Total: 16 symbols per outer iteration (4 streams × 4 symbols).
+     */
+#define ZXC_HUF_INNER_BATCH 4 /* symbols per stream per refill */
 
-        if (UNLIKELY(len == 0)) return ZXC_ERROR_CORRUPT_DATA;
+/* Decode one symbol from a specific bit reader into dst. */
+#define ZXC_HUF_DECODE_SYM(br_ptr, out_ptr)                            \
+    do {                                                               \
+        const uint16_t e_ = table[(uint32_t)((br_ptr)->accum & mask)]; \
+        const uint8_t l_ = (uint8_t)(e_ & 0xFF);                       \
+        if (UNLIKELY(l_ == 0)) return ZXC_ERROR_CORRUPT_DATA;          \
+        *(out_ptr) = (uint8_t)(e_ >> 8);                               \
+        (br_ptr)->accum >>= l_;                                        \
+        (br_ptr)->bits -= l_;                                          \
+    } while (0)
 
-        br.accum >>= len;
-        br.bits -= len;
-        dst[i] = sym;
+    const int refill_bits = ZXC_HUF_INNER_BATCH * max_bits;
+
+    /* Main loop: process min(d_count) symbols in 4-way interleaved batches */
+    size_t min_count = d_count[0];
+    for (int s = 1; s < ZXC_HUF_NUM_STREAMS; s++) {
+        if (d_count[s] < min_count) min_count = d_count[s];
     }
+
+    const size_t batch_end =
+        (min_count >= ZXC_HUF_INNER_BATCH) ? (min_count - (ZXC_HUF_INNER_BATCH - 1)) : 0;
+    size_t i = 0;
+    while (i < batch_end) {
+        /* Single refill per stream for 4 symbols each */
+        zxc_br_ensure(&br[0], refill_bits);
+        zxc_br_ensure(&br[1], refill_bits);
+        zxc_br_ensure(&br[2], refill_bits);
+        zxc_br_ensure(&br[3], refill_bits);
+
+        /* Round 0 — interleave all 4 streams */
+        ZXC_HUF_DECODE_SYM(&br[0], &d[0][i]);
+        ZXC_HUF_DECODE_SYM(&br[1], &d[1][i]);
+        ZXC_HUF_DECODE_SYM(&br[2], &d[2][i]);
+        ZXC_HUF_DECODE_SYM(&br[3], &d[3][i]);
+        /* Round 1 */
+        ZXC_HUF_DECODE_SYM(&br[0], &d[0][i + 1]);
+        ZXC_HUF_DECODE_SYM(&br[1], &d[1][i + 1]);
+        ZXC_HUF_DECODE_SYM(&br[2], &d[2][i + 1]);
+        ZXC_HUF_DECODE_SYM(&br[3], &d[3][i + 1]);
+        /* Round 2 */
+        ZXC_HUF_DECODE_SYM(&br[0], &d[0][i + 2]);
+        ZXC_HUF_DECODE_SYM(&br[1], &d[1][i + 2]);
+        ZXC_HUF_DECODE_SYM(&br[2], &d[2][i + 2]);
+        ZXC_HUF_DECODE_SYM(&br[3], &d[3][i + 2]);
+        /* Round 3 */
+        ZXC_HUF_DECODE_SYM(&br[0], &d[0][i + 3]);
+        ZXC_HUF_DECODE_SYM(&br[1], &d[1][i + 3]);
+        ZXC_HUF_DECODE_SYM(&br[2], &d[2][i + 3]);
+        ZXC_HUF_DECODE_SYM(&br[3], &d[3][i + 3]);
+
+        i += ZXC_HUF_INNER_BATCH;
+    }
+
+    /* Tail: finish each stream individually from where the main loop stopped */
+    const size_t tail_start = i;
+    for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
+        for (size_t j = tail_start; j < d_count[s]; j++) {
+            zxc_br_ensure(&br[s], max_bits);
+            ZXC_HUF_DECODE_SYM(&br[s], &d[s][j]);
+        }
+    }
+
+#undef ZXC_HUF_DECODE_SYM
+#undef ZXC_HUF_INNER_BATCH
 
     return (int)raw_size;
 }

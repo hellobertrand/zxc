@@ -598,6 +598,10 @@ typedef enum {
 #define ZXC_HUF_MIN_LITERALS 128
 /** @brief Minimum gain (bytes) vs RAW for Huffman to be selected. */
 #define ZXC_HUF_MIN_GAIN 32
+/** @brief Number of interleaved decode streams (ILP for OoO CPUs). */
+#define ZXC_HUF_NUM_STREAMS 4
+/** @brief On-disk: encoded sizes for streams 1–3 (stream 4 is implicit). */
+#define ZXC_HUF_STREAMS_HDR_SIZE ((ZXC_HUF_NUM_STREAMS - 1) * (int)sizeof(uint32_t))
 
 /**
  * @struct zxc_gnr_header_t
