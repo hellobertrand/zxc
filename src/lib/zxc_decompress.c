@@ -835,6 +835,11 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint32_t tokens = zxc_le32(t_ptr);
         t_ptr += 4;
 
+        // Prefetch ahead in literal, offset, and extras streams to hide memory latency
+        ZXC_PREFETCH_READ(l_ptr + ZXC_CACHE_LINE_SIZE);
+        ZXC_PREFETCH_READ(o_ptr + ZXC_CACHE_LINE_SIZE);
+        ZXC_PREFETCH_READ(e_ptr + ZXC_CACHE_LINE_SIZE);
+
         uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS, off3 = ZXC_LZ_OFFSET_BIAS,
                  off4 = ZXC_LZ_OFFSET_BIAS;
         if (gh.enc_off == 1) {
@@ -1275,6 +1280,9 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint32_t s3 = zxc_le32(seq_ptr + 8);
         uint32_t s4 = zxc_le32(seq_ptr + 12);
         seq_ptr += 16;
+
+        // Prefetch ahead in literal and extras streams to hide memory latency
+        ZXC_PREFETCH_READ(l_ptr + ZXC_CACHE_LINE_SIZE);
 
         uint32_t ll1 = (uint32_t)(s1 >> 24);
         if (UNLIKELY(ll1 == ZXC_SEQ_LL_MASK)) {

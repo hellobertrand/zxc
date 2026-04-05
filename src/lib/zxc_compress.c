@@ -357,6 +357,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         const uint16_t delta = chain_table[match_idx];
         const uint32_t next_idx = match_idx - delta;
         ZXC_PREFETCH_READ(src + next_idx);
+        ZXC_PREFETCH_READ(&chain_table[next_idx]);
 
         match_idx = (delta != 0) ? next_idx : 0;
     }
