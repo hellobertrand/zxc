@@ -86,15 +86,20 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
 
     if (mode == 0) return ZXC_OK;
 
-    // Adaptive hash table sizing: larger blocks get larger hash tables to reduce collisions.
-    // 14 bits (16K entries,  128KB) for blocks <= 32K
-    // 15 bits (32K entries,  256KB) for blocks 64K
-    // 16 bits (64K entries,  512KB) for blocks >= 128K
+    // Adaptive hash table sizing based on block size AND compression level.
+    // L1-L2 use shallow chains (search_depth 4-6), so a larger table wastes
+    // cache without improving match quality. L3+ walk deeper chains and
+    // benefit from fewer collisions.
+    //   14 bits (16K entries,  128KB) — always for L1-L2, or blocks <= 32K
+    //   15 bits (32K entries,  256KB) — L3+ with blocks 64K
+    //   16 bits (64K entries,  512KB) — L3+ with blocks >= 128K
     uint32_t hash_bits = ZXC_LZ_HASH_BITS;
-    if (chunk_size >= (128U << 10))
-        hash_bits = 16;
-    else if (chunk_size >= (64U << 10))
-        hash_bits = 15;
+    if (level >= 3) {
+        if (chunk_size >= (128U << 10))
+            hash_bits = 16;
+        else if (chunk_size >= (64U << 10))
+            hash_bits = 15;
+    }
     ctx->hash_bits = hash_bits;
     ctx->hash_size = 1U << hash_bits;
 
