@@ -808,6 +808,32 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     int use_rle = 0;
 
     if (lit_c > 0) {
+        // Early-exit heuristic: sample the first 256 bytes.
+        // If the prefix shows no RLE savings, skip the full O(n) scan.
+        const size_t sample_sz = (lit_c < 256) ? lit_c : 256;
+        {
+            const uint8_t* sp = literals;
+            const uint8_t* const sp_end = literals + sample_sz;
+            size_t sample_rle = 0;
+            while (sp < sp_end) {
+                const uint8_t b = *sp;
+                const uint8_t* run_start = sp++;
+                while (sp < sp_end && *sp == b) sp++;
+                const size_t run = (size_t)(sp - run_start);
+                if (run >= 4) {
+                    const size_t full_chunks = run / 131;
+                    const size_t rem = run - full_chunks * 131;
+                    sample_rle += full_chunks * 2;
+                    if (rem >= 4) sample_rle += 2;
+                    else if (rem > 0) sample_rle += 1 + rem;
+                } else {
+                    sample_rle += run + ((run + 127) >> 7);
+                }
+            }
+            // If the sample prefix shows no savings (>= 97% of raw), skip full analysis
+            if (sample_rle >= sample_sz - (sample_sz >> 5)) goto _rle_skip;
+        }
+
         const uint8_t* p = literals;
         const uint8_t* const p_end = literals + lit_c;
         const uint8_t* const p_end_4 = p_end - 3;  // Safe limit for 4-byte lookahead
@@ -1019,6 +1045,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         // Threshold: ~3% savings using integer math (97% ~= 1 - 1/32)
         if (rle_size < lit_c - (lit_c >> 5)) use_rle = 1;
     }
+_rle_skip:;
 
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GLO};
     uint8_t* const p = dst + ZXC_BLOCK_HEADER_SIZE;
