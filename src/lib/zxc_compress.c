@@ -1010,6 +1010,41 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         if (rle_size < lit_c - (lit_c >> 5)) enc_lit = ZXC_SECTION_ENCODING_RLE;
     }
 
+    // --- HUFFMAN ANALYSIS (Level 6) ---
+    int use_huffman = 0;
+    int huf_encoded_size = 0;
+    uint8_t huf_max_bits = 0;
+
+    if (level >= 6 && lit_c >= ZXC_HUF_MIN_LITERALS) {
+        // Use the lit_buffer as scratch space for Huffman encoding.
+        // Ensure we have enough scratch capacity.
+        const size_t huf_scratch_needed = lit_c + ZXC_HUF_HEADER_SIZE + ZXC_PAD_SIZE;
+        if (ctx->lit_buffer_cap < huf_scratch_needed) {
+            uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, huf_scratch_needed);
+            if (UNLIKELY(!new_buf)) {
+                free(ctx->lit_buffer);
+                ctx->lit_buffer = NULL;
+                ctx->lit_buffer_cap = 0;
+                return ZXC_ERROR_MEMORY;
+            }
+            ctx->lit_buffer = new_buf;
+            ctx->lit_buffer_cap = huf_scratch_needed;
+        }
+
+        huf_encoded_size =
+            zxc_huf_encode(literals, lit_c, ctx->lit_buffer, ctx->lit_buffer_cap, &huf_max_bits);
+
+        if (huf_encoded_size > 0) {
+            const size_t huf_sz = (size_t)huf_encoded_size;
+            // Pick the best: Huffman vs RLE vs RAW
+            const size_t best_alt = use_rle ? rle_size : lit_c;
+            if (huf_sz + ZXC_HUF_MIN_GAIN < best_alt) {
+                use_huffman = 1;
+                use_rle = 0;  // Huffman supersedes RLE
+            }
+        }
+    }
+
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GLO};
     uint8_t* const p = dst + ZXC_BLOCK_HEADER_SIZE;
     size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
@@ -1018,16 +1053,29 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const int use_8bit_off = (max_offset <= 255) ? 1 : 0;
     const size_t off_stream_size = use_8bit_off ? seq_c : (seq_c * 2);
 
+    // Determine literal encoding mode
+    uint8_t enc_lit_mode;
+    size_t lit_stream_out_size;
+    if (use_huffman) {
+        enc_lit_mode = ZXC_SECTION_ENCODING_HUFFMAN;
+        lit_stream_out_size = (size_t)huf_encoded_size;
+    } else if (use_rle) {
+        enc_lit_mode = ZXC_SECTION_ENCODING_RLE;
+        lit_stream_out_size = rle_size;
+    } else {
+        enc_lit_mode = ZXC_SECTION_ENCODING_RAW;
+        lit_stream_out_size = lit_c;
+    }
+
     const zxc_gnr_header_t gh = {.n_sequences = seq_c,
                                  .n_literals = (uint32_t)lit_c,
-                                 .enc_lit = enc_lit,
+                                 .enc_lit = enc_lit_mode,
                                  .enc_litlen = 0,
                                  .enc_mlen = 0,
                                  .enc_off = (uint8_t)use_8bit_off};
 
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS] = {0};
-    desc[0].sizes = (uint64_t)(enc_lit == ZXC_SECTION_ENCODING_RLE ? rle_size : lit_c) |
-                    ((uint64_t)lit_c << 32);
+    desc[0].sizes = (uint64_t)lit_stream_out_size | ((uint64_t)lit_c << 32);
     desc[1].sizes = (uint64_t)seq_c | ((uint64_t)seq_c << 32);
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
     desc[3].sizes = (uint64_t)extras_sz | ((uint64_t)extras_sz << 32);
@@ -1046,7 +1094,11 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     if (UNLIKELY(rem < sz_lit)) return ZXC_ERROR_DST_TOO_SMALL;
 
-    if (enc_lit == ZXC_SECTION_ENCODING_RLE) {
+    if (use_huffman) {
+        // Write pre-encoded Huffman bitstream from lit_buffer
+        ZXC_MEMCPY(p_curr, ctx->lit_buffer, (size_t)huf_encoded_size);
+        p_curr += huf_encoded_size;
+    } else if (use_rle) {
         // Write RLE - optimized single-pass encoding
         const uint8_t* lit_ptr = literals;
         const uint8_t* const lit_end = literals + lit_c;

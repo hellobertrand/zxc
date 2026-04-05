@@ -84,7 +84,8 @@ typedef enum {
     ZXC_LEVEL_FAST = 2,     /**< Fast compression, good for real-time applications. */
     ZXC_LEVEL_DEFAULT = 3,  /**< Recommended: ratio > LZ4, decode speed > LZ4. */
     ZXC_LEVEL_BALANCED = 4, /**< Good ratio, good decode speed. */
-    ZXC_LEVEL_COMPACT = 5   /**< High density. Best for storage/firmware/assets. */
+    ZXC_LEVEL_COMPACT = 5,  /**< High density. Best for storage/firmware/assets. */
+    ZXC_LEVEL_MAX = 6       /**< Maximum density. Huffman-coded literals for best ratio. */
 } zxc_compression_level_t;
 
 /** @} */ /* end of levels */

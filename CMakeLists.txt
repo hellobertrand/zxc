@@ -233,6 +233,7 @@ else()
         src/lib/zxc_driver.c
         src/lib/zxc_dispatch.c
         src/lib/zxc_seekable.c
+        src/lib/zxc_huffman.c
     )
 endif()
 
@@ -425,6 +426,7 @@ if(ZXC_BUILD_TESTS)
             src/lib/zxc_driver.c
             src/lib/zxc_dispatch.c
             src/lib/zxc_seekable.c
+            src/lib/zxc_huffman.c
             ${ZXC_VARIANT_OBJECTS}
         )
         
