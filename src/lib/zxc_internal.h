@@ -298,8 +298,6 @@ extern "C" {
 #define ZXC_CACHE_LINE_SIZE 64
 /** @brief Bitmask for cache-line alignment checks. */
 #define ZXC_ALIGNMENT_MASK (ZXC_CACHE_LINE_SIZE - 1)
-/** @brief Maximum byte length of a variable-byte encoded integer. */
-#define ZXC_VBYTE_MAX_LEN 5
 /** @brief Allocation-safe max vbyte length (sufficient for < 2 MB blocks). */
 #define ZXC_VBYTE_ALLOC_LEN 3
 
@@ -409,15 +407,6 @@ extern "C" {
 #define ZXC_LZ_OFFSET_BIAS 1
 /** @brief Maximum allowed offset distance. */
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
-/**
- * @brief Number of bits reserved for epoch tracking in compressed pointers.
- * Derived from chunk size: 2^18 = ZXC_BLOCK_SIZE_DEFAULT => 32 - 18 = 14 bits.
- */
-#define ZXC_EPOCH_BITS 14
-/** @brief Mask to extract the offset bits from a compressed pointer. */
-#define ZXC_OFFSET_MASK ((1U << (32 - ZXC_EPOCH_BITS)) - 1)
-/** @brief Maximum number of epochs supported by the compression system. */
-#define ZXC_MAX_EPOCH (1U << ZXC_EPOCH_BITS)
 /** @} */
 
 /** @name Hash Prime Constants
@@ -560,16 +549,10 @@ typedef enum {
  * or offsets) are stored within a block.
  * - `ZXC_SECTION_ENCODING_RAW`: Data is stored uncompressed.
  * - `ZXC_SECTION_ENCODING_RLE`: Run-Length Encoding.
- * - `ZXC_SECTION_ENCODING_BITPACK`: Bitpacking for integer values.
- * - `ZXC_SECTION_ENCODING_FSE`: Finite State Entropy (Reserved).
- * - `ZXC_SECTION_ENCODING_BITPACK_FSE`: Combined Bitpacking and FSE (Reserved).
  */
 typedef enum {
     ZXC_SECTION_ENCODING_RAW = 0,
-    ZXC_SECTION_ENCODING_RLE = 1,
-    ZXC_SECTION_ENCODING_BITPACK = 2,
-    ZXC_SECTION_ENCODING_FSE = 3,         // Reserved
-    ZXC_SECTION_ENCODING_BITPACK_FSE = 4  // Reserved
+    ZXC_SECTION_ENCODING_RLE = 1
 } zxc_section_encoding_t;
 
 /**
