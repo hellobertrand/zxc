@@ -571,13 +571,27 @@ int zxc_huf_decode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
      * The CPU can pipeline br[1]'s table lookup while waiting for br[0]'s
      * shift result, since the accumulators are independent.
      *
-     * Inner batch: 4 symbols per stream per refill (4 × max_bits <= 44 <= 64).
-     * Total: 16 symbols per outer iteration (4 streams × 4 symbols).
+     * Inner batch: 5 symbols per stream per refill (5 × max_bits ≤ 55 ≤ 64).
+     * Total: 20 symbols per outer iteration (4 streams × 5 symbols).
      */
-#define ZXC_HUF_INNER_BATCH 4 /* symbols per stream per refill */
+#define ZXC_HUF_INNER_BATCH 5 /* floor(64 / ZXC_HUF_MAX_BITS) */
 
-/* Decode one symbol from a specific bit reader into dst. */
+/*
+ * Hot-path decode: no corruption check.  The decode table is fully
+ * populated during construction (every index 0..2^max_bits-1 has a
+ * valid entry), so len==0 is impossible for valid compressed data.
+ */
 #define ZXC_HUF_DECODE_SYM(br_ptr, out_ptr)                            \
+    do {                                                               \
+        const uint16_t e_ = table[(uint32_t)((br_ptr)->accum & mask)]; \
+        const uint8_t l_ = (uint8_t)(e_ & 0xFF);                       \
+        *(out_ptr) = (uint8_t)(e_ >> 8);                               \
+        (br_ptr)->accum >>= l_;                                        \
+        (br_ptr)->bits -= l_;                                          \
+    } while (0)
+
+/* Tail-path decode: retains corruption check for safety. */
+#define ZXC_HUF_DECODE_SYM_SAFE(br_ptr, out_ptr)                       \
     do {                                                               \
         const uint16_t e_ = table[(uint32_t)((br_ptr)->accum & mask)]; \
         const uint8_t l_ = (uint8_t)(e_ & 0xFF);                       \
@@ -599,13 +613,12 @@ int zxc_huf_decode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
         (min_count >= ZXC_HUF_INNER_BATCH) ? (min_count - (ZXC_HUF_INNER_BATCH - 1)) : 0;
     size_t i = 0;
     while (i < batch_end) {
-        /* Single refill per stream for 4 symbols each */
         zxc_br_ensure(&br[0], refill_bits);
         zxc_br_ensure(&br[1], refill_bits);
         zxc_br_ensure(&br[2], refill_bits);
         zxc_br_ensure(&br[3], refill_bits);
 
-        /* Round 0 — interleave all 4 streams */
+        /* Round 0 */
         ZXC_HUF_DECODE_SYM(&br[0], &d[0][i]);
         ZXC_HUF_DECODE_SYM(&br[1], &d[1][i]);
         ZXC_HUF_DECODE_SYM(&br[2], &d[2][i]);
@@ -625,20 +638,26 @@ int zxc_huf_decode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
         ZXC_HUF_DECODE_SYM(&br[1], &d[1][i + 3]);
         ZXC_HUF_DECODE_SYM(&br[2], &d[2][i + 3]);
         ZXC_HUF_DECODE_SYM(&br[3], &d[3][i + 3]);
+        /* Round 4 */
+        ZXC_HUF_DECODE_SYM(&br[0], &d[0][i + 4]);
+        ZXC_HUF_DECODE_SYM(&br[1], &d[1][i + 4]);
+        ZXC_HUF_DECODE_SYM(&br[2], &d[2][i + 4]);
+        ZXC_HUF_DECODE_SYM(&br[3], &d[3][i + 4]);
 
         i += ZXC_HUF_INNER_BATCH;
     }
 
-    /* Tail: finish each stream individually from where the main loop stopped */
+    /* Tail: finish each stream individually (with corruption check) */
     const size_t tail_start = i;
     for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
         for (size_t j = tail_start; j < d_count[s]; j++) {
             zxc_br_ensure(&br[s], max_bits);
-            ZXC_HUF_DECODE_SYM(&br[s], &d[s][j]);
+            ZXC_HUF_DECODE_SYM_SAFE(&br[s], &d[s][j]);
         }
     }
 
 #undef ZXC_HUF_DECODE_SYM
+#undef ZXC_HUF_DECODE_SYM_SAFE
 #undef ZXC_HUF_INNER_BATCH
 
     return (int)raw_size;

@@ -551,12 +551,12 @@ typedef enum {
  * or offsets) are stored within a block.
  * - `ZXC_SECTION_ENCODING_RAW`: Data is stored uncompressed.
  * - `ZXC_SECTION_ENCODING_RLE`: Run-Length Encoding.
+ * - `ZXC_SECTION_ENCODING_HUFFMAN`: Canonical Huffman coding (Level 6).
  */
 typedef enum {
     ZXC_SECTION_ENCODING_RAW = 0,     /**< Data is stored uncompressed. */
     ZXC_SECTION_ENCODING_RLE = 1,     /**< Run-Length Encoding. */
-    ZXC_SECTION_ENCODING_BITPACK = 2, /**< Bitpacking for integer values. */
-    ZXC_SECTION_ENCODING_HUFFMAN = 3  /**< Canonical Huffman coding (Level 6). */
+    ZXC_SECTION_ENCODING_HUFFMAN = 2  /**< Canonical Huffman coding (Level 6). */
 } zxc_section_encoding_t;
 
 /*
