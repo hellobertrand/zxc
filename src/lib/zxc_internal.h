@@ -503,15 +503,17 @@ typedef struct {
  * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
-    if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 128, 1, 8};
+    if (level >= 6) return (zxc_lz77_params_t){96, 256, 1, 24, 256, 1, 8};
+    // if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 128, 1, 8};
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
     // step_shift
-    static const zxc_lz77_params_t table[5] = {
-        {4, 16, 0, 0, 0, 4, 4},    // fallback
-        {4, 16, 0, 0, 0, 4, 4},    // level 1
-        {6, 24, 0, 0, 0, 3, 6},    // level 2
-        {3, 18, 1, 4, 128, 1, 4},  // level 3
-        {3, 18, 1, 4, 128, 1, 5}   // level 4
+    static const zxc_lz77_params_t table[6] = {
+        {4, 16, 0, 0, 0, 4, 4},      // fallback
+        {4, 16, 0, 0, 0, 4, 4},      // level 1
+        {6, 24, 0, 0, 0, 3, 6},      // level 2
+        {3, 18, 1, 4, 128, 1, 4},    // level 3
+        {3, 18, 1, 4, 128, 1, 5},    // level 4
+        {64, 256, 1, 16, 128, 1, 8}  // level 5
     };
     return table[level < 1 ? 1 : level];
 }
@@ -550,7 +552,31 @@ typedef enum {
  * - `ZXC_SECTION_ENCODING_RAW`: Data is stored uncompressed.
  * - `ZXC_SECTION_ENCODING_RLE`: Run-Length Encoding.
  */
-typedef enum { ZXC_SECTION_ENCODING_RAW = 0, ZXC_SECTION_ENCODING_RLE = 1 } zxc_section_encoding_t;
+typedef enum {
+    ZXC_SECTION_ENCODING_RAW = 0,     /**< Data is stored uncompressed. */
+    ZXC_SECTION_ENCODING_RLE = 1,     /**< Run-Length Encoding. */
+    ZXC_SECTION_ENCODING_BITPACK = 2, /**< Bitpacking for integer values. */
+    ZXC_SECTION_ENCODING_HUFFMAN = 3  /**< Canonical Huffman coding (Level 6). */
+} zxc_section_encoding_t;
+
+/*
+ * ============================================================================
+ * CANONICAL HUFFMAN CONSTANTS
+ * ============================================================================
+ */
+
+/** @brief Maximum code length for canonical Huffman (11 bits → 2048-entry table, ~4 KB). */
+#define ZXC_HUF_MAX_BITS 11
+/** @brief Size of the Huffman decode lookup table. */
+#define ZXC_HUF_TABLE_SIZE (1U << ZXC_HUF_MAX_BITS)
+/** @brief Number of distinct byte symbols. */
+#define ZXC_HUF_NUM_SYMBOLS 256
+/** @brief On-disk header: 256 bit-lengths (1 byte each) + 1 byte max_bits. */
+#define ZXC_HUF_HEADER_SIZE (ZXC_HUF_NUM_SYMBOLS + 1)
+/** @brief Minimum compressed literal count to attempt Huffman (below this, overhead dominates). */
+#define ZXC_HUF_MIN_LITERALS 128
+/** @brief Minimum gain (bytes) vs RAW for Huffman to be selected. */
+#define ZXC_HUF_MIN_GAIN 32
 
 /**
  * @struct zxc_gnr_header_t
@@ -1283,6 +1309,40 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
  */
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
+
+/*
+ * ============================================================================
+ * CANONICAL HUFFMAN CODEC (zxc_huffman.c)
+ * ============================================================================
+ */
+
+/**
+ * @brief Encodes a literal byte stream using canonical Huffman coding.
+ *
+ * @param[in]  src         Source literal bytes.
+ * @param[in]  src_size    Number of source bytes.
+ * @param[out] dst         Destination buffer (must be >= src_size + ZXC_HUF_HEADER_SIZE).
+ * @param[in]  dst_cap     Capacity of the destination buffer.
+ * @param[out] out_max_bits Receives the maximum code length used (for header).
+ * @return Number of bytes written to dst on success (header + bitstream),
+ *         or a negative zxc_error_t code on failure.
+ */
+int zxc_huf_encode(const uint8_t* RESTRICT src, size_t src_size, uint8_t* RESTRICT dst,
+                   size_t dst_cap, uint8_t* out_max_bits);
+
+/**
+ * @brief Decodes a canonical Huffman-compressed literal stream.
+ *
+ * @param[in]  src        Source buffer (header + bitstream).
+ * @param[in]  src_size   Size of the source buffer.
+ * @param[out] dst        Destination buffer for decoded literals.
+ * @param[in]  dst_cap    Capacity of the destination buffer.
+ * @param[in]  raw_size   Expected number of decoded bytes (from section descriptor).
+ * @return Number of bytes written to dst on success,
+ *         or a negative zxc_error_t code on failure.
+ */
+int zxc_huf_decode(const uint8_t* RESTRICT src, size_t src_size, uint8_t* RESTRICT dst,
+                   size_t dst_cap, size_t raw_size);
 
 /** @} */ /* end of internal */
 

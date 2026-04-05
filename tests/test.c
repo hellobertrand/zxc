@@ -2396,8 +2396,8 @@ int test_library_info_api() {
 
     // 2. Max level must match compile-time constant
     int max = zxc_max_level();
-    if (max != ZXC_LEVEL_COMPACT) {
-        printf("Failed: zxc_max_level() returned %d, expected %d\n", max, ZXC_LEVEL_COMPACT);
+    if (max != ZXC_LEVEL_MAX) {
+        printf("Failed: zxc_max_level() returned %d, expected %d\n", max, ZXC_LEVEL_MAX);
         return 0;
     }
     printf("  [PASS] zxc_max_level() == %d\n", max);
@@ -2508,6 +2508,7 @@ int main() {
     if (!test_round_trip("Level 3", buffer, BUF_SIZE, 3, 1)) total_failures++;
     if (!test_round_trip("Level 4", buffer, BUF_SIZE, 4, 1)) total_failures++;
     if (!test_round_trip("Level 5", buffer, BUF_SIZE, 5, 1)) total_failures++;
+    if (!test_round_trip("Level 6 (Huffman)", buffer, BUF_SIZE, 6, 1)) total_failures++;
 
     printf("\n--- Test Coverage: Binary Data Preservation ---\n");
     gen_binary_data(buffer, BUF_SIZE);

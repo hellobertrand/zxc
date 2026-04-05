@@ -671,7 +671,7 @@ int zxc_min_level(void) { return ZXC_LEVEL_FASTEST; }
  *
  * Returns the value of ZXC_LEVEL_COMPACT (currently 5).
  */
-int zxc_max_level(void) { return ZXC_LEVEL_COMPACT; }
+int zxc_max_level(void) { return ZXC_LEVEL_MAX; }
 
 /*
  * @brief Returns the default compression level.

@@ -594,6 +594,39 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             l_ptr = p_curr;
             l_end = p_curr;
         }
+    } else if (gh.enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) {
+        // --- Huffman-coded literals (Level 6) ---
+        const size_t required_size = (size_t)(desc[0].sizes >> 32);
+
+        if (required_size > 0) {
+            if (UNLIKELY(required_size > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
+
+            if (ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE) {
+                uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, required_size + ZXC_PAD_SIZE);
+                if (UNLIKELY(!new_buf)) {
+                    free(ctx->lit_buffer);
+                    ctx->lit_buffer = NULL;
+                    ctx->lit_buffer_cap = 0;
+                    return ZXC_ERROR_MEMORY;
+                }
+                ctx->lit_buffer = new_buf;
+                ctx->lit_buffer_cap = required_size + ZXC_PAD_SIZE;
+            }
+
+            if (UNLIKELY(lit_stream_size > (size_t)(src + src_size - p_curr)))
+                return ZXC_ERROR_CORRUPT_DATA;
+
+            const int decoded = zxc_huf_decode(p_curr, lit_stream_size, ctx->lit_buffer,
+                                               ctx->lit_buffer_cap, required_size);
+            if (UNLIKELY(decoded < 0)) return decoded;
+            if (UNLIKELY((size_t)decoded != required_size)) return ZXC_ERROR_CORRUPT_DATA;
+
+            l_ptr = ctx->lit_buffer;
+            l_end = ctx->lit_buffer + required_size;
+        } else {
+            l_ptr = p_curr;
+            l_end = p_curr;
+        }
     } else {
         l_ptr = p_curr;
         l_end = p_curr + lit_stream_size;
