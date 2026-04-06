@@ -507,11 +507,12 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             break;  // EOF reached, exit loop
         }
 
-        const size_t rem_cap = (size_t)(op_end - op);
         int res;
-        if (LIKELY(rem_cap >= runtime_chunk_size + ZXC_PAD_SIZE)) {
-            // Fast path: decode directly into dst (enough padding for wild copies).
-            res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op, rem_cap);
+        const size_t rem_cap = (size_t)(op_end - op);
+        if (LIKELY(rem_cap >= runtime_chunk_size + 2 * ZXC_PAD_SIZE)) {
+            // Fast path: decode directly into dst. Cap dst_cap to chunk_size + PAD
+            res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op,
+                                               runtime_chunk_size + ZXC_PAD_SIZE);
         } else {
             // Safe path: decode into bounce buffer, then copy exact result.
             res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, ctx.work_buf, runtime_chunk_size);
