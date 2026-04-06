@@ -380,18 +380,15 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         const uint32_t next_val = (uint32_t)next_val8;
         const uint32_t h2 = zxc_hash_func(next_val8, use_hash5);
         const uint32_t next_head = hash_table[2 * h2];
-        const uint32_t next_stored_tag = hash_table[2 * h2 + 1];
         uint32_t next_idx =
             (next_head & ~offset_mask) == epoch_mark ? (next_head & offset_mask) : 0;
-        const int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_val);
         uint32_t max_lazy = 0;
         int lazy_att = p.lazy_attempts;
-        int is_lazy_first = 1;
 
         while (next_idx > 0 && lazy_att-- > 0) {
             if (UNLIKELY((uint32_t)(ip + 1 - src) - next_idx > ZXC_LZ_MAX_DIST)) break;
             const uint8_t* ref2 = src + next_idx;
-            if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
+            if (zxc_le32(ref2) == next_val) {
                 uint32_t l2 = sizeof(uint32_t);
                 const uint8_t* limit8 = iend - sizeof(uint64_t);
                 while (ip + 1 + l2 < limit8) {
@@ -410,7 +407,6 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             const uint16_t delta = chain_table[next_idx];
             if (UNLIKELY(delta == 0)) break;
             next_idx -= delta;
-            is_lazy_first = 0;
         }
 
         // --- Lazy evaluation at ip+2 (computed in parallel, no dependency on lazy 1) ---
@@ -420,15 +416,12 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             const uint32_t val3 = (uint32_t)val3_8;
             const uint32_t h3 = zxc_hash_func(val3_8, use_hash5);
             const uint32_t head3 = hash_table[2 * h3];
-            const uint32_t tag3 = hash_table[2 * h3 + 1];
             uint32_t idx3 = (head3 & ~offset_mask) == epoch_mark ? (head3 & offset_mask) : 0;
-            const int skip_head3 = (idx3 > 0 && tag3 != val3);
-            int is_first3 = 1;
             lazy_att = p.lazy_attempts;
             while (idx3 > 0 && lazy_att-- > 0) {
                 if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 > ZXC_LZ_MAX_DIST)) break;
                 const uint8_t* ref3 = src + idx3;
-                if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
+                if (zxc_le32(ref3) == val3) {
                     uint32_t l3 = sizeof(uint32_t);
                     const uint8_t* limit8_3 = iend - sizeof(uint64_t);
                     while (ip + 2 + l3 < limit8_3) {
@@ -447,7 +440,6 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 const uint16_t delta = chain_table[idx3];
                 if (UNLIKELY(delta == 0)) break;
                 idx3 -= delta;
-                is_first3 = 0;
             }
         }
 
