@@ -375,6 +375,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     }
 
     if (p.use_lazy && best.ref && best.len < (uint32_t)p.lazy_len_threshold && ip + 1 < mflimit) {
+        // --- Lazy evaluation at ip+1 ---
         const uint64_t next_val8 = zxc_le64(ip + 1);
         const uint32_t next_val = (uint32_t)next_val8;
         const uint32_t h2 = zxc_hash_func(next_val8, use_hash5);
@@ -412,9 +413,9 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             is_lazy_first = 0;
         }
 
-        if (max_lazy > best.len + 1) {
-            best.ref = NULL;
-        } else if (level >= 4 && ip + 2 < mflimit) {
+        // --- Lazy evaluation at ip+2 (computed in parallel, no dependency on lazy 1) ---
+        uint32_t max_lazy3 = 0;
+        if (level >= 4 && ip + 2 < mflimit) {
             const uint64_t val3_8 = zxc_le64(ip + 2);
             const uint32_t val3 = (uint32_t)val3_8;
             const uint32_t h3 = zxc_hash_func(val3_8, use_hash5);
@@ -423,7 +424,6 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             uint32_t idx3 = (head3 & ~offset_mask) == epoch_mark ? (head3 & offset_mask) : 0;
             const int skip_head3 = (idx3 > 0 && tag3 != val3);
             int is_first3 = 1;
-            uint32_t max_lazy3 = 0;
             lazy_att = p.lazy_attempts;
             while (idx3 > 0 && lazy_att-- > 0) {
                 if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 > ZXC_LZ_MAX_DIST)) break;
@@ -449,8 +449,10 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 idx3 -= delta;
                 is_first3 = 0;
             }
-            if (max_lazy3 > best.len + 2) best.ref = NULL;
         }
+
+        // Single decision: invalidate if either lazy position found a better match
+        if (max_lazy > best.len + 1 || max_lazy3 > best.len + 2) best.ref = NULL;
     }
 
     return best;
