@@ -783,6 +783,8 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         DECODE_SEQ_SAFE(ll1, ml1, off1);
 
+        if (UNLIKELY(d_ptr >= d_end_safe)) { n_seq -= 1; break; }
+
         uint32_t ll2 = (tokens & 0x0F000) >> 12;
         uint32_t ml2 = (tokens & 0x00F00) >> 8;
         if (UNLIKELY(ll2 == ZXC_TOKEN_LL_MASK)) {
@@ -799,6 +801,8 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         DECODE_SEQ_SAFE(ll2, ml2, off2);
 
+        if (UNLIKELY(d_ptr >= d_end_safe)) { n_seq -= 2; break; }
+
         uint32_t ll3 = (tokens & 0x0F00000) >> 20;
         uint32_t ml3 = (tokens & 0x00F0000) >> 16;
         if (UNLIKELY(ll3 == ZXC_TOKEN_LL_MASK)) {
@@ -814,6 +818,8 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             ml3 += ZXC_LZ_MIN_MATCH_LEN;
         }
         DECODE_SEQ_SAFE(ll3, ml3, off3);
+
+        if (UNLIKELY(d_ptr >= d_end_safe)) { n_seq -= 3; break; }
 
         uint32_t ll4 = (tokens >> 28);
         uint32_t ml4 = (tokens >> 24) & 0x0F;
@@ -875,6 +881,8 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         DECODE_SEQ_FAST(ll1, ml1, off1);
 
+        if (UNLIKELY(d_ptr >= d_end_safe)) { n_seq -= 1; break; }
+
         uint32_t ll2 = (tokens & 0x0F000) >> 12;
         uint32_t ml2 = (tokens & 0x00F00) >> 8;
         if (UNLIKELY(ll2 == ZXC_TOKEN_LL_MASK)) {
@@ -891,6 +899,8 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         DECODE_SEQ_FAST(ll2, ml2, off2);
 
+        if (UNLIKELY(d_ptr >= d_end_safe)) { n_seq -= 2; break; }
+
         uint32_t ll3 = (tokens & 0x0F00000) >> 20;
         uint32_t ml3 = (tokens & 0x00F0000) >> 16;
         if (UNLIKELY(ll3 == ZXC_TOKEN_LL_MASK)) {
@@ -906,6 +916,8 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             ml3 += ZXC_LZ_MIN_MATCH_LEN;
         }
         DECODE_SEQ_FAST(ll3, ml3, off3);
+
+        if (UNLIKELY(d_ptr >= d_end_safe)) { n_seq -= 3; break; }
 
         uint32_t ll4 = (tokens >> 28);
         uint32_t ml4 = (tokens >> 24) & 0x0F;
@@ -1259,6 +1271,8 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint32_t off1 = (uint32_t)(s1 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
         DECODE_SEQ_SAFE(ll1, ml1, off1);
 
+        if (UNLIKELY(d_ptr >= d_end_safe)) { n_seq -= 1; break; }
+
         uint32_t ll2 = (uint32_t)(s2 >> 24);
         if (UNLIKELY(ll2 == ZXC_SEQ_LL_MASK)) {
             ll2 += zxc_read_varint(&extras_ptr, extras_end);
@@ -1274,6 +1288,8 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint32_t off2 = (uint32_t)(s2 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
         DECODE_SEQ_SAFE(ll2, ml2, off2);
 
+        if (UNLIKELY(d_ptr >= d_end_safe)) { n_seq -= 2; break; }
+
         uint32_t ll3 = (uint32_t)(s3 >> 24);
         if (UNLIKELY(ll3 == ZXC_SEQ_LL_MASK)) {
             ll3 += zxc_read_varint(&extras_ptr, extras_end);
@@ -1288,6 +1304,8 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         uint32_t off3 = (uint32_t)(s3 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
         DECODE_SEQ_SAFE(ll3, ml3, off3);
+
+        if (UNLIKELY(d_ptr >= d_end_safe)) { n_seq -= 3; break; }
 
         uint32_t ll4 = (uint32_t)(s4 >> 24);
         if (UNLIKELY(ll4 == ZXC_SEQ_LL_MASK)) {
@@ -1374,6 +1392,8 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint32_t off1 = (uint32_t)(s1 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
         DECODE_SEQ_FAST(ll1, ml1, off1);
 
+        if (UNLIKELY(d_ptr >= d_end_fast)) { n_seq -= 1; break; }
+
         uint32_t ll2 = (uint32_t)(s2 >> 24);
         if (UNLIKELY(ll2 == ZXC_SEQ_LL_MASK)) {
             ll2 += zxc_read_varint(&extras_ptr, extras_end);
@@ -1389,6 +1409,8 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         uint32_t off2 = (uint32_t)(s2 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
         DECODE_SEQ_FAST(ll2, ml2, off2);
 
+        if (UNLIKELY(d_ptr >= d_end_fast)) { n_seq -= 2; break; }
+
         uint32_t ll3 = (uint32_t)(s3 >> 24);
         if (UNLIKELY(ll3 == ZXC_SEQ_LL_MASK)) {
             ll3 += zxc_read_varint(&extras_ptr, extras_end);
@@ -1403,6 +1425,8 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         uint32_t off3 = (uint32_t)(s3 & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
         DECODE_SEQ_FAST(ll3, ml3, off3);
+
+        if (UNLIKELY(d_ptr >= d_end_fast)) { n_seq -= 3; break; }
 
         uint32_t ll4 = (uint32_t)(s4 >> 24);
         if (UNLIKELY(ll4 == ZXC_SEQ_LL_MASK)) {
