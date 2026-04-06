@@ -1099,7 +1099,7 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const
 #if !defined(ZXC_DISABLE_SIMD) && defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
         br->accum = _bzhi_u64(br->accum, safe_bits);
 #else
-        br->accum &= ((1ULL << safe_bits) - 1);
+        br->accum &= (safe_bits < 64) ? ((1ULL << safe_bits) - 1) : ~0ULL;
 #endif
 
         // Calculate how many bytes we can read
@@ -1114,13 +1114,13 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const
             const size_t to_read =
                 (bytes_left < (size_t)bytes_needed) ? bytes_left : (size_t)bytes_needed;
             const uint64_t raw = zxc_le_partial(br->ptr, to_read);
-            br->accum |= (raw << safe_bits);
+            br->accum |= (safe_bits < 64) ? (raw << safe_bits) : 0;
             br->ptr += to_read;
             br->bits = safe_bits + (int)to_read * 8;
         } else {
             // Fast path: full 8-byte read is safe
             const uint64_t raw = zxc_le64(br->ptr);
-            br->accum |= (raw << safe_bits);
+            br->accum |= (safe_bits < 64) ? (raw << safe_bits) : 0;
             br->ptr += bytes_needed;
             br->bits = safe_bits + bytes_needed * 8;
         }

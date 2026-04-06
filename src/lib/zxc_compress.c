@@ -375,6 +375,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     }
 
     if (p.use_lazy && best.ref && best.len < (uint32_t)p.lazy_len_threshold && ip + 1 < mflimit) {
+        // --- Lazy evaluation at ip+1 ---
         const uint64_t next_val8 = zxc_le64(ip + 1);
         const uint32_t next_val = (uint32_t)next_val8;
         const uint32_t h2 = zxc_hash_func(next_val8, use_hash5);
@@ -412,9 +413,9 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             is_lazy_first = 0;
         }
 
-        if (max_lazy > best.len + 1) {
-            best.ref = NULL;
-        } else if (level >= 4 && ip + 2 < mflimit) {
+        // --- Lazy evaluation at ip+2 (computed in parallel, no dependency on lazy 1) ---
+        uint32_t max_lazy3 = 0;
+        if (level >= 4 && ip + 2 < mflimit) {
             const uint64_t val3_8 = zxc_le64(ip + 2);
             const uint32_t val3 = (uint32_t)val3_8;
             const uint32_t h3 = zxc_hash_func(val3_8, use_hash5);
@@ -423,7 +424,6 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             uint32_t idx3 = (head3 & ~offset_mask) == epoch_mark ? (head3 & offset_mask) : 0;
             const int skip_head3 = (idx3 > 0 && tag3 != val3);
             int is_first3 = 1;
-            uint32_t max_lazy3 = 0;
             lazy_att = p.lazy_attempts;
             while (idx3 > 0 && lazy_att-- > 0) {
                 if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 > ZXC_LZ_MAX_DIST)) break;
@@ -449,8 +449,10 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 idx3 -= delta;
                 is_first3 = 0;
             }
-            if (max_lazy3 > best.len + 2) best.ref = NULL;
         }
+
+        // Single decision: invalidate if either lazy position found a better match
+        if (max_lazy > best.len + 1 || max_lazy3 > best.len + 2) best.ref = NULL;
     }
 
     return best;
@@ -1400,45 +1402,51 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
 static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
     if (UNLIKELY(size % sizeof(uint32_t) != 0 || size < (4 * sizeof(uint32_t)))) return 0;
 
-    size_t count = size / sizeof(uint32_t);
-    count = count < 128 ? count : 128;  // Sample more values for accuracy
+    const size_t total_vals = size / sizeof(uint32_t);
+    const size_t sample_len = 16;
 
-    uint32_t prev = zxc_le32(src);
-    const uint8_t* p = src + sizeof(uint32_t);
+    // Sample 2 contiguous regions: start and middle of the block.
+    // Each region computes its own deltas independently.
+    const size_t offsets[2] = {0, (total_vals / 2) & ~(size_t)3};  // Align to uint32_t boundary
+    const size_t n_regions = (total_vals > sample_len * 2) ? 2 : 1;
 
     uint32_t max_zigzag = 0;
     uint32_t small_count = 0;   // Deltas < 256 (8 bits)
     uint32_t medium_count = 0;  // Deltas < 65536 (16 bits)
+    size_t total_sampled = 0;
 
-    for (size_t i = 1; i < count; i++) {
-        const uint32_t curr = zxc_le32(p);
-        const int32_t diff = (int32_t)(curr - prev);
-        const uint32_t zigzag = zxc_zigzag_encode(diff);
-
-        max_zigzag = zigzag > max_zigzag ? zigzag : max_zigzag;
-        small_count += (uint32_t)(zigzag < 256);
-        medium_count += (uint32_t)(zigzag >= 256) & (uint32_t)(zigzag < 65536);
-
-        prev = curr;
+    for (size_t r = 0; r < n_regions; r++) {
+        const uint8_t* p = src + offsets[r] * sizeof(uint32_t);
+        const size_t region_count =
+            ((total_vals - offsets[r]) < sample_len) ? (total_vals - offsets[r]) : sample_len;
+        uint32_t prev = zxc_le32(p);
         p += sizeof(uint32_t);
+
+        for (size_t i = 1; i < region_count; i++) {
+            const uint32_t curr = zxc_le32(p);
+            const int32_t diff = (int32_t)(curr - prev);
+            const uint32_t zigzag = zxc_zigzag_encode(diff);
+
+            max_zigzag = zigzag > max_zigzag ? zigzag : max_zigzag;
+            small_count += (uint32_t)(zigzag < 256);
+            medium_count += (uint32_t)(zigzag >= 256) & (uint32_t)(zigzag < 65536);
+
+            prev = curr;
+            p += sizeof(uint32_t);
+        }
+        total_sampled += region_count - 1;
     }
 
-    // Calculate bit width needed for max delta
-    uint32_t bits_needed = 0;
-    uint32_t tmp = max_zigzag;
-    while (tmp > 0) {
-        bits_needed++;
-        tmp >>= 1;
-    }
+    const uint32_t bits_needed = zxc_highbit32(max_zigzag);
 
     // Estimate compression ratio:
     // NUM uses ~bits_needed per value, Raw uses 32 bits per value
     // Worth it if bits_needed <= 20 (saves >37.5%)
     if (bits_needed <= 16) return 1;
-    if (bits_needed <= 20 && (small_count + medium_count) >= (count * 85) / 100) return 1;
+    if (bits_needed <= 20 && (small_count + medium_count) >= (total_sampled * 85) / 100) return 1;
 
     // Fallback: if 90% of deltas are small, still use NUM
-    if ((small_count + medium_count) >= (count * 90) / 100) return 1;
+    if ((small_count + medium_count) >= (total_sampled * 90) / 100) return 1;
 
     return 0;
 }
