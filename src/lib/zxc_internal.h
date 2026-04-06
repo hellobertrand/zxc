@@ -1095,8 +1095,6 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const
         const int safe_bits = (br->bits < 0) ? 0 : br->bits;
         br->bits = safe_bits;
 
-        if (UNLIKELY(safe_bits >= needed)) return;
-
         // Mask out garbage bits (retain only valid existing bits)
 #if !defined(ZXC_DISABLE_SIMD) && defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
         br->accum = _bzhi_u64(br->accum, safe_bits);

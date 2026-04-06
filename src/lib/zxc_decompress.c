@@ -377,22 +377,14 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 
         for (; i + ZXC_NUM_DEC_BATCH <= nvals; i += ZXC_NUM_DEC_BATCH) {
             for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 4) {
-                if (bits <= 16) {
-                    // Fast path: 4 values fit in one 64-bit accumulator refill
-                    zxc_br_ensure(&br, bits * 4);
-                    deltas[k + 0] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-                    deltas[k + 1] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-                    deltas[k + 2] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-                    deltas[k + 3] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-                } else {
-                    // Fallback: 2 values per ensure (bits <= 32, so 2*bits <= 64)
-                    zxc_br_ensure(&br, bits * 2);
-                    deltas[k + 0] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-                    deltas[k + 1] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-                    zxc_br_ensure(&br, bits * 2);
-                    deltas[k + 2] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-                    deltas[k + 3] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-                }
+                zxc_br_ensure(&br, bits);
+                deltas[k + 0] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
+                zxc_br_ensure(&br, bits);
+                deltas[k + 1] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
+                zxc_br_ensure(&br, bits);
+                deltas[k + 2] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
+                zxc_br_ensure(&br, bits);
+                deltas[k + 3] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
             }
 
             uint32_t* batch_dst = (uint32_t*)d_ptr;
