@@ -806,7 +806,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     // --- RLE ANALYSIS ---
     size_t rle_size = 0;
-    int use_rle = 0;
+    int enc_lit = ZXC_SECTION_ENCODING_RAW;
 
     if (lit_c > 0) {
         const uint8_t* p = literals;
@@ -1018,7 +1018,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
 
         // Threshold: ~3% savings using integer math (97% ~= 1 - 1/32)
-        if (rle_size < lit_c - (lit_c >> 5)) use_rle = 1;
+        if (rle_size < lit_c - (lit_c >> 5)) enc_lit = ZXC_SECTION_ENCODING_RLE;
     }
 
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GLO};
@@ -1029,16 +1029,16 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const int use_8bit_off = (max_offset <= 255) ? 1 : 0;
     const size_t off_stream_size = use_8bit_off ? seq_c : (seq_c * 2);
 
-    const zxc_gnr_header_t gh = {
-        .n_sequences = seq_c,
-        .n_literals = (uint32_t)lit_c,
-        .enc_lit = use_rle ? ZXC_SECTION_ENCODING_RLE : ZXC_SECTION_ENCODING_RAW,
-        .enc_litlen = 0,
-        .enc_mlen = 0,
-        .enc_off = (uint8_t)use_8bit_off};
+    const zxc_gnr_header_t gh = {.n_sequences = seq_c,
+                                 .n_literals = (uint32_t)lit_c,
+                                 .enc_lit = enc_lit,
+                                 .enc_litlen = 0,
+                                 .enc_mlen = 0,
+                                 .enc_off = (uint8_t)use_8bit_off};
 
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS] = {0};
-    desc[0].sizes = (uint64_t)(use_rle ? rle_size : lit_c) | ((uint64_t)lit_c << 32);
+    desc[0].sizes = (uint64_t)(enc_lit == ZXC_SECTION_ENCODING_RLE ? rle_size : lit_c) |
+                    ((uint64_t)lit_c << 32);
     desc[1].sizes = (uint64_t)seq_c | ((uint64_t)seq_c << 32);
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
     desc[3].sizes = (uint64_t)extras_sz | ((uint64_t)extras_sz << 32);
@@ -1057,7 +1057,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     if (UNLIKELY(rem < sz_lit)) return ZXC_ERROR_DST_TOO_SMALL;
 
-    if (use_rle) {
+    if (enc_lit == ZXC_SECTION_ENCODING_RLE) {
         // Write RLE - optimized single-pass encoding
         const uint8_t* lit_ptr = literals;
         const uint8_t* const lit_end = literals + lit_c;
