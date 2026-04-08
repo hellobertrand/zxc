@@ -511,8 +511,8 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
     // step_shift
     static const zxc_lz77_params_t table[5] = {
         {4, 16, 0, 0, 0, 4, 4},    // fallback
-        {3, 14, 0, 0, 0, 4, 4},    // level 1
-        {3, 18, 0, 0, 0, 3, 6},    // level 2
+        {4, 16, 0, 0, 0, 4, 4},    // level 1
+        {4, 18, 0, 0, 0, 3, 6},    // level 2
         {3, 16, 1, 4, 128, 1, 4},  // level 3
         {3, 18, 1, 4, 128, 1, 5}   // level 4
     };
