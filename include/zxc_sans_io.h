@@ -52,8 +52,8 @@ extern "C" {
  * the overhead of repeated memory allocations.
  *
  * **Key Fields:**
- * - `hash_table`: Stores epoch-tagged positions (`ZXC_LZ_HASH_SIZE` × 4 bytes).
- * - `hash_tags`:  Stores 16-bit tags for fast rejection (`ZXC_LZ_HASH_SIZE` × 2 bytes).
+ * - `hash_table`: Stores epoch-tagged positions (`ZXC_LZ_HASH_SIZE` * 4 bytes).
+ * - `hash_tags`:  Stores 16-bit tags for fast rejection (`ZXC_LZ_HASH_SIZE` * 2 bytes).
  * - `chain_table`: Handles collisions by storing the *previous* occurrence of a
  *   hash. This forms a linked list for each hash bucket, allowing us to
  * traverse history.
