@@ -185,7 +185,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     uint32_t h = zxc_hash_func(cur_val8, use_hash5);
 
     // 8-bit tag: XOR fold of first 4 bytes for fast rejection
-    const uint8_t cur_tag8 = (uint8_t)(cur_val ^ (cur_val >> 16));
+    const uint8_t cur_tag = (uint8_t)(cur_val ^ (cur_val >> 16));
 
     // Current position in the input buffer expressed as a 32-bit index.
     const uint32_t cur_pos = (uint32_t)(ip - src);
@@ -200,7 +200,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     uint32_t match_idx = (raw_head & offset_mask) & epoch_mask;
 
     // Decide whether to skip the head entry of the hash chain.
-    const int skip_head = (match_idx != 0) & (stored_tag != cur_tag8);
+    const int skip_head = (match_idx != 0) & (stored_tag != cur_tag);
 
     // If we should skip the head and level is low (<= 2), we drop the match entirely.
     const uint32_t drop_mask = (uint32_t)((skip_head & (level <= 2)) - 1);
@@ -208,7 +208,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
     // Split table writes
     hash_table[h] = epoch_mark | cur_pos;
-    hash_tags[h] = cur_tag8;
+    hash_tags[h] = cur_tag;
 
     // Branchless chain table update
     const uint32_t dist = cur_pos - match_idx;
@@ -376,8 +376,8 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         const uint32_t next_head = hash_table[h2];
         uint32_t next_idx =
             (next_head & ~offset_mask) == epoch_mark ? (next_head & offset_mask) : 0;
-        const uint8_t next_tag8 = (uint8_t)(next_val ^ (next_val >> 16));
-        const int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_tag8);
+        const uint8_t next_tag = (uint8_t)(next_val ^ (next_val >> 16));
+        const int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_tag);
         uint32_t max_lazy = 0;
         int lazy_att = p.lazy_attempts;
         int is_lazy_first = 1;
@@ -385,10 +385,12 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         while (next_idx > 0 && lazy_att-- > 0) {
             if (UNLIKELY((uint32_t)(ip + 1 - src) - next_idx > ZXC_LZ_MAX_DIST)) break;
             const uint8_t* ref2 = src + next_idx;
+
             if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
                 uint32_t l2 = sizeof(uint32_t);
-                const uint8_t* limit8 = iend - sizeof(uint64_t);
-                while (ip + 1 + l2 < limit8) {
+                const uint8_t* limit = iend - sizeof(uint64_t);
+
+                while (ip + 1 + l2 < limit) {
                     const uint64_t v1 = zxc_le64(ip + 1 + l2);
                     const uint64_t v2 = zxc_le64(ref2 + l2);
                     if (v1 != v2) {
@@ -401,6 +403,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             lazy1_done:
                 if (l2 > max_lazy) max_lazy = l2;
             }
+
             const uint16_t delta = chain_table[next_idx];
             if (UNLIKELY(delta == 0)) break;
             next_idx -= delta;
@@ -416,17 +419,20 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             const uint8_t tag3 = hash_tags[h3];
             const uint32_t head3 = hash_table[h3];
             uint32_t idx3 = (head3 & ~offset_mask) == epoch_mark ? (head3 & offset_mask) : 0;
-            const uint8_t tag3_8 = (uint8_t)(val3 ^ (val3 >> 16));
-            const int skip_head3 = (idx3 > 0 && tag3 != tag3_8);
+            const uint8_t cur_tag3 = (uint8_t)(val3 ^ (val3 >> 16));
+            const int skip_head3 = (idx3 > 0 && tag3 != cur_tag3);
+
             int is_first3 = 1;
             lazy_att = p.lazy_attempts;
             while (idx3 > 0 && lazy_att-- > 0) {
                 if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 > ZXC_LZ_MAX_DIST)) break;
+
                 const uint8_t* ref3 = src + idx3;
                 if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
                     uint32_t l3 = sizeof(uint32_t);
-                    const uint8_t* limit8_3 = iend - sizeof(uint64_t);
-                    while (ip + 2 + l3 < limit8_3) {
+                    const uint8_t* limit = iend - sizeof(uint64_t);
+
+                    while (ip + 2 + l3 < limit) {
                         const uint64_t v1 = zxc_le64(ip + 2 + l3);
                         const uint64_t v2 = zxc_le64(ref3 + l3);
                         if (v1 != v2) {
@@ -439,6 +445,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 lazy2_done:
                     if (l3 > max_lazy3) max_lazy3 = l3;
                 }
+
                 const uint16_t delta = chain_table[idx3];
                 if (UNLIKELY(delta == 0)) break;
                 idx3 -= delta;
