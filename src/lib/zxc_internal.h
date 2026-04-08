@@ -386,13 +386,16 @@ extern "C" {
 /** @name LZ77 Constants
  *  @brief Hash table geometry, sliding window, and match parameters.
  *
- *  The hash table uses 14 bits for addressing (16 384 entries), doubled to
- *  keep the load factor below 0.5.  Each entry stores
- *  `(epoch << 18) | offset`, totalling 64 KB of memory.
+ *  The hash table uses a split layout with 15-bit addressing (32 768 buckets):
+ *  - `hash_positions[]`: uint32_t, stores `(epoch << offset_bits) | position` (128 KB).
+ *  - `hash_tags[]`:      uint16_t, stores a 16-bit tag for fast rejection (64 KB).
+ *  Total: 192 KB.  The tag table fits comfortably in L2 cache, enabling a
+ *  "filter-first" access pattern that avoids cold loads into hash_positions
+ *  on the ~60-75% of lookups where the tag mismatches.
  *  The 64 KB sliding window allows `chain_table` to use `uint16_t`.
  *  @{ */
-/** @brief Address bits for the LZ77 hash table (2^14 = 16 384 max). */
-#define ZXC_LZ_HASH_BITS 14
+/** @brief Address bits for the LZ77 hash table (2^15 = 32 768 buckets). */
+#define ZXC_LZ_HASH_BITS 15
 /** @brief Marsaglia multiplicative hash constant for 4-byte hashing. */
 #define ZXC_LZ_HASH_PRIME1 0x2D35182DU
 /** @brief Marsaglia/Vigna xorshift* multiplier for 5-byte hashing. */
