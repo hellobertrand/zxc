@@ -88,7 +88,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
 
     const size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
     const size_t sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
-    const size_t sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint16_t);
+    const size_t sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint8_t);
     const size_t sz_chain = chunk_size * sizeof(uint16_t);
     const size_t sz_sequences = max_seq * sizeof(uint32_t);
     const size_t sz_tokens = max_seq * sizeof(uint8_t);
@@ -122,7 +122,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
 
     ctx->memory_block = mem;
     ctx->hash_table = (uint32_t*)(mem + off_hash_pos);
-    ctx->hash_tags = (uint16_t*)(mem + off_hash_tags);
+    ctx->hash_tags = (uint8_t*)(mem + off_hash_tags);
     ctx->chain_table = (uint16_t*)(mem + off_chain);
     ctx->buf_sequences = (uint32_t*)(mem + off_sequences);
     ctx->buf_tokens = (uint8_t*)(mem + off_tokens);

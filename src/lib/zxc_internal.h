@@ -388,8 +388,8 @@ extern "C" {
  *
  *  The hash table uses a split layout with 15-bit addressing (32 768 buckets):
  *  - `hash_positions[]`: uint32_t, stores `(epoch << offset_bits) | position` (128 KB).
- *  - `hash_tags[]`:      uint16_t, stores a 16-bit tag for fast rejection (64 KB).
- *  Total: 192 KB.  The tag table fits comfortably in L2 cache, enabling a
+ *  - `hash_tags[]`:      uint8_t, stores an 8-bit tag for fast rejection (32 KB).
+ *  Total: 160 KB.  The tag table fits in L1 cache, enabling a
  *  "filter-first" access pattern that avoids cold loads into hash_positions
  *  on the ~60-75% of lookups where the tag mismatches.
  *  The 64 KB sliding window allows `chain_table` to use `uint16_t`.

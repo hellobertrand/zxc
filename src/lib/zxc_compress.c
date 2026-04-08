@@ -152,7 +152,7 @@ typedef struct {
  *
  * Uses a split hash table layout:
  * - hash_table[h]  : uint32_t position + epoch (128 KB for 15-bit hash)
- * - hash_tags[h]   : uint16_t tag for fast rejection (64 KB, L2-resident)
+ * - hash_tags[h]   : uint8_t tag for fast rejection (32 KB, L1-resident)
  *
  * @param[in] src Pointer to the start of the source buffer.
  * @param[in] ip Current input position pointer.
@@ -169,7 +169,7 @@ typedef struct {
  */
 static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* mflimit,
-    const uint8_t* anchor, uint32_t* RESTRICT hash_table, uint16_t* RESTRICT hash_tags,
+    const uint8_t* anchor, uint32_t* RESTRICT hash_table, uint8_t* RESTRICT hash_tags,
     uint16_t* RESTRICT chain_table, uint32_t epoch_mark, uint32_t offset_mask, const int level,
     const zxc_lz77_params_t p) {
     const int use_hash5 = (level >= 3);
@@ -184,14 +184,14 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     uint32_t cur_val = (uint32_t)cur_val8;
     uint32_t h = zxc_hash_func(cur_val8, use_hash5);
 
-    // 16-bit tag: multiplicative hash of first 4 bytes for fast rejection
-    const uint16_t cur_tag16 = (uint16_t)((cur_val * ZXC_LZ_HASH_PRIME1) >> 16);
+    // 8-bit tag: multiplicative hash of first 4 bytes for fast rejection
+    const uint8_t cur_tag8 = (uint8_t)((cur_val * ZXC_LZ_HASH_PRIME1) >> 24);
 
     // Current position in the input buffer expressed as a 32-bit index.
     const uint32_t cur_pos = (uint32_t)(ip - src);
 
     // Split table reads: tag table (64 KB, L2-resident) + position table (128 KB)
-    const uint16_t stored_tag = hash_tags[h];
+    const uint8_t stored_tag = hash_tags[h];
     const uint32_t raw_head = hash_table[h];
 
     // If the epoch in raw_head matches the current epoch_mark, extract the
@@ -200,7 +200,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     uint32_t match_idx = (raw_head & offset_mask) & epoch_mask;
 
     // Decide whether to skip the head entry of the hash chain.
-    const int skip_head = (match_idx != 0) & (stored_tag != cur_tag16);
+    const int skip_head = (match_idx != 0) & (stored_tag != cur_tag8);
 
     // If we should skip the head and level is low (<= 2), we drop the match entirely.
     const uint32_t drop_mask = (uint32_t)((skip_head & (level <= 2)) - 1);
@@ -208,7 +208,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
     // Split table writes
     hash_table[h] = epoch_mark | cur_pos;
-    hash_tags[h] = cur_tag16;
+    hash_tags[h] = cur_tag8;
 
     // Branchless chain table update
     const uint32_t dist = cur_pos - match_idx;
@@ -372,12 +372,12 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         const uint64_t next_val8 = zxc_le64(ip + 1);
         const uint32_t next_val = (uint32_t)next_val8;
         const uint32_t h2 = zxc_hash_func(next_val8, use_hash5);
-        const uint16_t next_stored_tag = hash_tags[h2];
+        const uint8_t next_stored_tag = hash_tags[h2];
         const uint32_t next_head = hash_table[h2];
         uint32_t next_idx =
             (next_head & ~offset_mask) == epoch_mark ? (next_head & offset_mask) : 0;
-        const uint16_t next_tag16 = (uint16_t)((next_val * ZXC_LZ_HASH_PRIME1) >> 16);
-        const int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_tag16);
+        const uint8_t next_tag8 = (uint8_t)((next_val * ZXC_LZ_HASH_PRIME1) >> 24);
+        const int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_tag8);
         uint32_t max_lazy = 0;
         int lazy_att = p.lazy_attempts;
         int is_lazy_first = 1;
@@ -413,11 +413,11 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             const uint64_t val3_8 = zxc_le64(ip + 2);
             const uint32_t val3 = (uint32_t)val3_8;
             const uint32_t h3 = zxc_hash_func(val3_8, use_hash5);
-            const uint16_t tag3 = hash_tags[h3];
+            const uint8_t tag3 = hash_tags[h3];
             const uint32_t head3 = hash_table[h3];
             uint32_t idx3 = (head3 & ~offset_mask) == epoch_mark ? (head3 & offset_mask) : 0;
-            const uint16_t tag3_16 = (uint16_t)((val3 * ZXC_LZ_HASH_PRIME1) >> 16);
-            const int skip_head3 = (idx3 > 0 && tag3 != tag3_16);
+            const uint8_t tag3_8 = (uint8_t)((val3 * ZXC_LZ_HASH_PRIME1) >> 24);
+            const int skip_head3 = (idx3 > 0 && tag3 != tag3_8);
             int is_first3 = 1;
             lazy_att = p.lazy_attempts;
             while (idx3 > 0 && lazy_att-- > 0) {
@@ -708,7 +708,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {
         ZXC_MEMSET(ctx->hash_table, 0, ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
-        ZXC_MEMSET(ctx->hash_tags, 0, ZXC_LZ_HASH_SIZE * sizeof(uint16_t));
+        ZXC_MEMSET(ctx->hash_tags, 0, ZXC_LZ_HASH_SIZE * sizeof(uint8_t));
         ctx->epoch = 1;
     }
     const uint32_t offset_bits = ctx->offset_bits;
@@ -717,7 +717,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const uint8_t *ip = src, *iend = src + src_sz, *anchor = ip, *mflimit = iend - 12;
 
     uint32_t* const hash_table = ctx->hash_table;
-    uint16_t* const hash_tags = ctx->hash_tags;
+    uint8_t* const hash_tags = ctx->hash_tags;
     uint16_t* const chain_table = ctx->chain_table;
     uint8_t* const literals = ctx->literals;
     uint8_t* const buf_tokens = ctx->buf_tokens;
@@ -781,7 +781,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                     const uint32_t prev_idx =
                         (prev_head & ~offset_mask) == epoch_mark ? (prev_head & offset_mask) : 0;
                     hash_table[h_u] = epoch_mark | pos_u;
-                    hash_tags[h_u] = (uint16_t)((val_u * ZXC_LZ_HASH_PRIME1) >> 16);
+                    hash_tags[h_u] = (uint8_t)((val_u * ZXC_LZ_HASH_PRIME1) >> 24);
                     chain_table[pos_u] = (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
                                              ? (uint16_t)(pos_u - prev_idx)
                                              : 0;
@@ -1206,7 +1206,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {
         ZXC_MEMSET(ctx->hash_table, 0, ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
-        ZXC_MEMSET(ctx->hash_tags, 0, ZXC_LZ_HASH_SIZE * sizeof(uint16_t));
+        ZXC_MEMSET(ctx->hash_tags, 0, ZXC_LZ_HASH_SIZE * sizeof(uint8_t));
         ctx->epoch = 1;
     }
     const uint32_t offset_bits = ctx->offset_bits;
@@ -1215,7 +1215,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const uint8_t *ip = src, *iend = src + src_sz, *anchor = ip, *mflimit = iend - 12;
 
     uint32_t* const hash_table = ctx->hash_table;
-    uint16_t* const hash_tags = ctx->hash_tags;
+    uint8_t* const hash_tags = ctx->hash_tags;
     uint8_t* const buf_extras = ctx->buf_extras;
     uint16_t* const chain_table = ctx->chain_table;
     uint8_t* const literals = ctx->literals;

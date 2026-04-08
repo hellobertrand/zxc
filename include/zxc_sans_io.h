@@ -53,7 +53,7 @@ extern "C" {
  *
  * **Key Fields:**
  * - `hash_table`: Stores epoch-tagged positions (`ZXC_LZ_HASH_SIZE` * 4 bytes).
- * - `hash_tags`:  Stores 16-bit tags for fast rejection (`ZXC_LZ_HASH_SIZE` * 2 bytes).
+ * - `hash_tags`:  Stores 8-bit tags for fast rejection (`ZXC_LZ_HASH_SIZE` * 1 byte).
  * - `chain_table`: Handles collisions by storing the *previous* occurrence of a
  *   hash. This forms a linked list for each hash bucket, allowing us to
  * traverse history.
@@ -80,7 +80,7 @@ typedef struct {
     /* Hot zone: random access / high frequency.
      * Kept at the start to ensure they reside in the first cache line (64 bytes). */
     uint32_t* hash_table;  /**< Hash table for LZ77 match positions (epoch|pos). */
-    uint16_t* hash_tags;   /**< Split tag table for fast match rejection (16-bit tags). */
+    uint8_t* hash_tags;    /**< Split tag table for fast match rejection (8-bit tags). */
     uint16_t* chain_table; /**< Chain table for collision resolution. */
     void* memory_block;    /**< Single allocation block owner. */
     uint32_t epoch;        /**< Current epoch for lazy hash table invalidation. */
