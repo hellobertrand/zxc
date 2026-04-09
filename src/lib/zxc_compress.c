@@ -752,12 +752,15 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             const uint32_t off = (uint32_t)(ip - m.ref);
 
             if (ll > 0) {
-                if (ll <= 16 && anchor + 16 <= iend)
-                    zxc_copy16(literals + lit_c, anchor);
-                else if (ll <= 32 && anchor + 32 <= iend)
+                if (LIKELY(anchor + ZXC_PAD_SIZE <= iend)) {
                     zxc_copy32(literals + lit_c, anchor);
-                else
+                    if (UNLIKELY(ll > ZXC_PAD_SIZE)) {
+                        ZXC_MEMCPY(literals + lit_c + ZXC_PAD_SIZE, anchor + ZXC_PAD_SIZE,
+                                   ll - ZXC_PAD_SIZE);
+                    }
+                } else {
                     ZXC_MEMCPY(literals + lit_c, anchor, ll);
+                }
                 lit_c += ll;
             }
 
@@ -1251,12 +1254,15 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             const uint32_t off = (uint32_t)(ip - m.ref);
 
             if (ll > 0) {
-                if (ll <= 16 && anchor + 16 <= iend)
-                    zxc_copy16(literals + lit_c, anchor);
-                else if (ll <= 32 && anchor + 32 <= iend)
+                if (LIKELY(anchor + ZXC_PAD_SIZE <= iend)) {
                     zxc_copy32(literals + lit_c, anchor);
-                else
+                    if (UNLIKELY(ll > ZXC_PAD_SIZE)) {
+                        ZXC_MEMCPY(literals + lit_c + ZXC_PAD_SIZE, anchor + ZXC_PAD_SIZE,
+                                   ll - ZXC_PAD_SIZE);
+                    }
+                } else {
                     ZXC_MEMCPY(literals + lit_c, anchor, ll);
+                }
                 lit_c += ll;
             }
 
