@@ -386,13 +386,16 @@ extern "C" {
 /** @name LZ77 Constants
  *  @brief Hash table geometry, sliding window, and match parameters.
  *
- *  The hash table uses 14 bits for addressing (16 384 entries), doubled to
- *  keep the load factor below 0.5.  Each entry stores
- *  `(epoch << 18) | offset`, totalling 64 KB of memory.
+ *  The hash table uses a split layout with 15-bit addressing (32 768 buckets):
+ *  - `hash_positions[]`: uint32_t, stores `(epoch << offset_bits) | position` (128 KB).
+ *  - `hash_tags[]`:      uint8_t, stores an 8-bit tag for fast rejection (32 KB).
+ *  Total: 160 KB.  The tag table fits in L1 cache, enabling a
+ *  "filter-first" access pattern that avoids cold loads into hash_positions
+ *  on the ~60-75% of lookups where the tag mismatches.
  *  The 64 KB sliding window allows `chain_table` to use `uint16_t`.
  *  @{ */
-/** @brief Address bits for the LZ77 hash table (2^14 = 16 384 max). */
-#define ZXC_LZ_HASH_BITS 14
+/** @brief Address bits for the LZ77 hash table (2^15 = 32 768 buckets). */
+#define ZXC_LZ_HASH_BITS 15
 /** @brief Marsaglia multiplicative hash constant for 4-byte hashing. */
 #define ZXC_LZ_HASH_PRIME1 0x2D35182DU
 /** @brief Marsaglia/Vigna xorshift* multiplier for 5-byte hashing. */
@@ -507,10 +510,10 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
     // step_shift
     static const zxc_lz77_params_t table[5] = {
-        {4, 16, 0, 0, 0, 4, 4},    // fallback
-        {4, 16, 0, 0, 0, 4, 4},    // level 1
-        {6, 24, 0, 0, 0, 3, 6},    // level 2
-        {3, 18, 1, 4, 128, 1, 4},  // level 3
+        {3, 16, 0, 0, 0, 4, 4},    // fallback
+        {3, 16, 0, 0, 0, 4, 4},    // level 1
+        {3, 18, 0, 0, 0, 3, 6},    // level 2
+        {3, 16, 1, 4, 128, 1, 4},  // level 3
         {3, 18, 1, 4, 128, 1, 5}   // level 4
     };
     return table[level < 1 ? 1 : level];

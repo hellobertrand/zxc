@@ -87,7 +87,8 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     if (mode == 0) return ZXC_OK;
 
     const size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
-    const size_t sz_hash = 2 * ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
+    const size_t sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
+    const size_t sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint8_t);
     const size_t sz_chain = chunk_size * sizeof(uint16_t);
     const size_t sz_sequences = max_seq * sizeof(uint32_t);
     const size_t sz_tokens = max_seq * sizeof(uint8_t);
@@ -99,8 +100,10 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
 
     // Calculate sizes with alignment padding (64 bytes for cache line alignment)
     size_t total_size = 0;
-    const size_t off_hash = total_size;
-    total_size += (sz_hash + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    const size_t off_hash_pos = total_size;
+    total_size += (sz_hash_pos + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    const size_t off_hash_tags = total_size;
+    total_size += (sz_hash_tags + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
     const size_t off_chain = total_size;
     total_size += (sz_chain + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
     const size_t off_sequences = total_size;
@@ -118,7 +121,8 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
 
     ctx->memory_block = mem;
-    ctx->hash_table = (uint32_t*)(mem + off_hash);
+    ctx->hash_table = (uint32_t*)(mem + off_hash_pos);
+    ctx->hash_tags = (uint8_t*)(mem + off_hash_tags);
     ctx->chain_table = (uint16_t*)(mem + off_chain);
     ctx->buf_sequences = (uint32_t*)(mem + off_sequences);
     ctx->buf_tokens = (uint8_t*)(mem + off_tokens);
@@ -129,7 +133,8 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->compression_level = level;
     ctx->epoch = 1;
 
-    ZXC_MEMSET(ctx->hash_table, 0, sz_hash);
+    ZXC_MEMSET(ctx->hash_table, 0, sz_hash_pos);
+    ZXC_MEMSET(ctx->hash_tags, 0, sz_hash_tags);
     return ZXC_OK;
 }
 
@@ -158,6 +163,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     }
 
     ctx->hash_table = NULL;
+    ctx->hash_tags = NULL;
     ctx->chain_table = NULL;
     ctx->buf_sequences = NULL;
     ctx->buf_tokens = NULL;
