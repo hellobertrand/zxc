@@ -707,9 +707,6 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                 zxc_copy16(out, ref);                                \
             }                                                        \
             d_ptr += ml;                                             \
-        } else if (off == 1) {                                       \
-            ZXC_MEMSET(d_ptr, match_src[0], ml);                     \
-            d_ptr += ml;                                             \
         } else {                                                     \
             size_t copied = 0;                                       \
             while (copied < ml) {                                    \
@@ -1201,9 +1198,6 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                 }                                                    \
                 zxc_copy16(out, ref);                                \
             }                                                        \
-            d_ptr += ml;                                             \
-        } else if (off == 1) {                                       \
-            ZXC_MEMSET(d_ptr, match_src[0], ml);                     \
             d_ptr += ml;                                             \
         } else {                                                     \
             size_t copied = 0;                                       \
