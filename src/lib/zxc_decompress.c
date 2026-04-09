@@ -692,7 +692,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                 zxc_copy32(out, ref);                                \
             }                                                        \
             d_ptr += ml;                                             \
-        } else if (off >= (ZXC_PAD_SIZE / 2)) {                      \
+        } else if (LIKELY(off >= (ZXC_PAD_SIZE / 2))) {                \
             zxc_copy16(d_ptr, match_src);                            \
             if (UNLIKELY(ml > (ZXC_PAD_SIZE / 2))) {                 \
                 uint8_t* out = d_ptr + (ZXC_PAD_SIZE / 2);           \
@@ -1187,7 +1187,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                 zxc_copy32(out, ref);                                \
             }                                                        \
             d_ptr += ml;                                             \
-        } else if (off >= (ZXC_PAD_SIZE / 2)) {                      \
+        } else if (LIKELY(off >= (ZXC_PAD_SIZE / 2))) {                \
             zxc_copy16(d_ptr, match_src);                            \
             if (UNLIKELY(ml > (ZXC_PAD_SIZE / 2))) {                 \
                 uint8_t* out = d_ptr + (ZXC_PAD_SIZE / 2);           \
