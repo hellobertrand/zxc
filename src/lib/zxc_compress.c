@@ -195,8 +195,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
     // If the epoch in raw_head matches the current epoch_mark, extract the
     // stored position; otherwise treat this bucket as empty (index 0).
-    const uint32_t epoch_mask = -((int32_t)((raw_head & ~offset_mask) == epoch_mark));
-    uint32_t match_idx = (raw_head & offset_mask) & epoch_mask;
+    uint32_t match_idx = ((raw_head & ~offset_mask) == epoch_mark) ? (raw_head & offset_mask) : 0;
 
     // Decide whether to skip the head entry of the hash chain.
     const int skip_head = (match_idx != 0) & (stored_tag != cur_tag);
@@ -373,8 +372,8 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         const uint32_t h2 = zxc_hash_func(next_val8, use_hash5);
         const uint8_t next_stored_tag = hash_tags[h2];
         const uint32_t next_head = hash_table[h2];
-        const uint32_t epoch_mask2 = -((int32_t)((next_head & ~offset_mask) == epoch_mark));
-        uint32_t next_idx = (next_head & offset_mask) & epoch_mask2;
+        uint32_t next_idx =
+            (next_head & ~offset_mask) == epoch_mark ? (next_head & offset_mask) : 0;
         const uint8_t next_tag = (uint8_t)(next_val ^ (next_val >> 16));
         const int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_tag);
         uint32_t max_lazy = 0;
@@ -417,8 +416,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             const uint32_t h3 = zxc_hash_func(val3_8, use_hash5);
             const uint8_t tag3 = hash_tags[h3];
             const uint32_t head3 = hash_table[h3];
-            const uint32_t epoch_mask3 = -((int32_t)((head3 & ~offset_mask) == epoch_mark));
-            uint32_t idx3 = (head3 & offset_mask) & epoch_mask3;
+            uint32_t idx3 = (head3 & ~offset_mask) == epoch_mark ? (head3 & offset_mask) : 0;
             const uint8_t cur_tag3 = (uint8_t)(val3 ^ (val3 >> 16));
             const int skip_head3 = (idx3 > 0 && tag3 != cur_tag3);
 
