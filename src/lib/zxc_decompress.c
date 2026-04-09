@@ -67,11 +67,11 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* br, uint
  * the total length (1-5 bytes).
  *
  * Format:
- * - 1 byte (0xxxxxxx): 7 bits (val < 128)
- * - 2 bytes (10xxxxxx ...): 14 bits (val < 16384)
- * - 3 bytes (110xxxxx ...): 21 bits (val < 2M)
- * - 4 bytes (1110xxxx ...): 28 bits (val < 256M)
- * - 5 bytes (11110xxx ...): 32 bits (Full Range)
+ * - 1 byte  (0xxxxxxx):  7-bit payload (val < 2^7  = 128)
+ * - 2 bytes (10xxxxxx): 14-bit payload (val < 2^14 = 16 384)
+ * - 3 bytes (110xxxxx): 21-bit payload (val < 2^21 = 2 097 152)
+ * - 4 bytes (1110xxxx): 28-bit payload (val < 2^28 = 268 435 456)
+ * - 5 bytes (11110xxx): 32-bit payload (full uint32_t range)
  *
  * @param[in,out] ptr Pointer to a pointer to the current position in the stream.
  * @param[in] end Pointer to the end of the readable stream (for bounds checking).
@@ -84,14 +84,14 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
 
     const uint32_t b0 = p[0];
 
-    // 1 Byte: 0xxxxxxx (7 bits) -> val < 128
-    if (LIKELY(b0 < 128)) {
+    // 1 Byte: 0xxxxxxx (7 bits)
+    if (LIKELY(b0 < 0x80)) {
         *ptr = p + 1;
         return b0;
     }
 
     // 2 Bytes: 10xxxxxx xxxxxxxx (14 bits)
-    if (b0 < 0xC0) {
+    if (LIKELY(b0 < 0xC0)) {
         if (UNLIKELY(p + 1 >= end)) {
             *ptr = end;
             return 0;
