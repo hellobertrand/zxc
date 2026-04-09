@@ -99,14 +99,14 @@ static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, uint32_t
     }
 
     // 2 bytes: 10xxxxxx xxxxxxxx (14 bits) -> val < 16384 (2^14)
-    if (LIKELY(val < 16384)) {
+    if (val < 16384) {
         dst[0] = (uint8_t)(0x80 | (val & 0x3F));
         dst[1] = (uint8_t)(val >> 6);
         return 2;
     }
 
     // 3 bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2097152 (2^21)
-    if (LIKELY(val < 2097152)) {
+    if (val < 2097152) {
         dst[0] = (uint8_t)(0xC0 | (val & 0x1F));
         dst[1] = (uint8_t)(val >> 5);
         dst[2] = (uint8_t)(val >> 13);
@@ -114,7 +114,7 @@ static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, uint32_t
     }
 
     // 4 bytes: 1110xxxx xxxxxxxx xxxxxxxx xxxxxxxx (28 bits) -> val < 268435456 (2^28)
-    if (LIKELY(val < 268435456)) {
+    if (val < 268435456) {
         dst[0] = (uint8_t)(0xE0 | (val & 0x0F));
         dst[1] = (uint8_t)(val >> 4);
         dst[2] = (uint8_t)(val >> 12);
