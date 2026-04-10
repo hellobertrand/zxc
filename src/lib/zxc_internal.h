@@ -789,13 +789,13 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
  * @return uint16_t The computed hash value.
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
-    const uint64_t h1 = zxc_le64(p);
-    const uint64_t h2 = zxc_le64(p + 8);
-    uint64_t h = h1 ^ h2 ^ ZXC_HASH_PRIME2;
+    const uint64_t v1 = zxc_le64(p);
+    const uint64_t v2 = zxc_le64(p + 8);
+    uint64_t h = v1 ^ v2 ^ ZXC_HASH_PRIME2;
     h ^= h << 13;
     h ^= h >> 7;
     h ^= h << 17;
-    uint32_t res = (uint32_t)((h >> 32) ^ h);
+    const uint32_t res = (uint32_t)((h >> 32) ^ h);
     return (uint16_t)((res >> 16) ^ res);
 }
 
