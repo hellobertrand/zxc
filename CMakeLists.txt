@@ -81,6 +81,43 @@ endif()
 # Core Library & Runtime Dispatch
 # =============================================================================
 
+# --- PGO flag selection (Clang vs GCC) ---
+set(ZXC_PGO_DIR "${CMAKE_BINARY_DIR}/pgo")
+set(ZXC_PGO_GEN_CFLAGS "")
+set(ZXC_PGO_GEN_LDFLAGS "")
+set(ZXC_PGO_USE_CFLAGS "")
+set(ZXC_PGO_USE_LDFLAGS "")
+
+if(NOT MSVC AND NOT ZXC_PGO_MODE STREQUAL "OFF")
+    if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+        # Clang: instrumentation-based PGO
+        set(ZXC_PGO_PROFDATA "${ZXC_PGO_DIR}/default.profdata")
+        set(ZXC_PGO_GEN_CFLAGS  -fprofile-instr-generate=${ZXC_PGO_DIR}/default_%m.profraw)
+        set(ZXC_PGO_GEN_LDFLAGS -fprofile-instr-generate)
+        set(ZXC_PGO_USE_CFLAGS  -fprofile-instr-use=${ZXC_PGO_PROFDATA})
+        set(ZXC_PGO_USE_LDFLAGS -fprofile-instr-use=${ZXC_PGO_PROFDATA})
+    else()
+        # GCC: directory-based PGO
+        set(ZXC_PGO_GEN_CFLAGS  -fprofile-generate=${ZXC_PGO_DIR})
+        set(ZXC_PGO_GEN_LDFLAGS -fprofile-generate=${ZXC_PGO_DIR})
+        set(ZXC_PGO_USE_CFLAGS  -fprofile-use=${ZXC_PGO_DIR} -fprofile-correction)
+        set(ZXC_PGO_USE_LDFLAGS -fprofile-use=${ZXC_PGO_DIR})
+    endif()
+endif()
+
+# Helper: apply PGO flags to a target
+macro(zxc_apply_pgo target)
+    if(ZXC_PGO_MODE STREQUAL "GENERATE")
+        target_compile_options(${target} PRIVATE ${ZXC_PGO_GEN_CFLAGS})
+        target_link_options(${target} PRIVATE ${ZXC_PGO_GEN_LDFLAGS})
+    elseif(ZXC_PGO_MODE STREQUAL "USE")
+        if(EXISTS "${ZXC_PGO_DIR}")
+            target_compile_options(${target} PRIVATE ${ZXC_PGO_USE_CFLAGS})
+            target_link_options(${target} PRIVATE ${ZXC_PGO_USE_LDFLAGS})
+        endif()
+    endif()
+endmacro()
+
 # Function Multi-Versioning Helper
 # Compiles src/lib/zxc_compress.c and src/lib/zxc_decompress.c with specific flags and suffix.
 macro(zxc_add_variant suffix flags)
@@ -118,7 +155,11 @@ macro(zxc_add_variant suffix flags)
         endif()
     endif()
     target_include_directories(zxc_decompress${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib ${RAPIDHASH_INCLUDE_DIR} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-    
+
+    # Propagate PGO flags to variant objects
+    zxc_apply_pgo(zxc_compress${suffix})
+    zxc_apply_pgo(zxc_decompress${suffix})
+
     list(APPEND ZXC_VARIANT_OBJECTS $<TARGET_OBJECTS:zxc_compress${suffix}> $<TARGET_OBJECTS:zxc_decompress${suffix}>)
 endmacro()
 
@@ -222,18 +263,14 @@ if(NOT MSVC)
     )
     
     # Profile-Guided Optimization
+    zxc_apply_pgo(zxc_lib)
     if(ZXC_PGO_MODE STREQUAL "GENERATE")
-        target_compile_options(zxc_lib PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
-        target_link_options(zxc_lib PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
-        message(STATUS "PGO: Generating profile data to ${CMAKE_BINARY_DIR}/pgo")
+        message(STATUS "PGO: Generating profile data to ${ZXC_PGO_DIR}")
     elseif(ZXC_PGO_MODE STREQUAL "USE")
-        if(EXISTS "${CMAKE_BINARY_DIR}/pgo")
-            target_compile_options(zxc_lib PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo -fprofile-correction)
-            target_link_options(zxc_lib PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo)
-            message(STATUS "PGO: Using profile data from ${CMAKE_BINARY_DIR}/pgo")
-        else()
-            message(FATAL_ERROR "PGO: Profile data not found. Run with ZXC_PGO_MODE=GENERATE first.")
+        if(NOT EXISTS "${ZXC_PGO_DIR}")
+            message(FATAL_ERROR "PGO: Profile data not found at ${ZXC_PGO_DIR}. Run with ZXC_PGO_MODE=GENERATE first.")
         endif()
+        message(STATUS "PGO: Using profile data from ${ZXC_PGO_DIR}")
     endif()
 
     # Linker options for Dead Code Stripping
@@ -312,15 +349,7 @@ if(ZXC_BUILD_CLI)
     endif()
     
     # Profile-Guided Optimization for CLI
-    if(NOT MSVC)
-        if(ZXC_PGO_MODE STREQUAL "GENERATE")
-            target_compile_options(zxc PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
-            target_link_options(zxc PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
-        elseif(ZXC_PGO_MODE STREQUAL "USE")
-            target_compile_options(zxc PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo -fprofile-correction)
-            target_link_options(zxc PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo)
-        endif()
-    endif()
+    zxc_apply_pgo(zxc)
 
     # Linker options for Dead Code Stripping
     if(NOT MSVC)
@@ -402,15 +431,7 @@ if(ZXC_BUILD_TESTS)
     endif()
     
     # Profile-Guided Optimization for tests
-    if(NOT MSVC)
-        if(ZXC_PGO_MODE STREQUAL "GENERATE")
-            target_compile_options(zxc_test PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
-            target_link_options(zxc_test PRIVATE -fprofile-generate=${CMAKE_BINARY_DIR}/pgo)
-        elseif(ZXC_PGO_MODE STREQUAL "USE")
-            target_compile_options(zxc_test PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo -fprofile-correction)
-            target_link_options(zxc_test PRIVATE -fprofile-use=${CMAKE_BINARY_DIR}/pgo)
-        endif()
-    endif()
+    zxc_apply_pgo(zxc_test)
     
     target_include_directories(zxc_test PRIVATE src/lib ${RAPIDHASH_INCLUDE_DIR})
     add_test(NAME UnitTests COMMAND zxc_test)
