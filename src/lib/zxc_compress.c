@@ -105,12 +105,17 @@ static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, uint32_t
     }
 
     // 3 bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) = 2^21 = 2097152
-    if (LIKELY(val < (1 << 21))) {
+    if (val < (1 << 21)) {
         dst[0] = (uint8_t)(0xC0 | (val & 0x1F));
         dst[1] = (uint8_t)(val >> 5);
         dst[2] = (uint8_t)(val >> 13);
         return 3;
     }
+
+    // Note: With current max block size of 2MB (2^21), varint values never exceed
+    // 2^21 - (ZXC_TOKEN_LL_MASK | ZXC_LZ_MIN_MATCH_LEN - ZXC_TOKEN_ML_MASK) (approx 2MB), so 4-byte
+    // and 5-byte paths below are unreachable. Kept for forward-compatibility if block size
+    // increases.
 
     // 4 bytes: 1110xxxx xxxxxxxx xxxxxxxx xxxxxxxx (28 bits) = 2^28 = 268435456
     if (val < (1 << 28)) {
