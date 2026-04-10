@@ -118,21 +118,21 @@ static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, uint32_t
     // increases.
 
     // 4 bytes: 1110xxxx xxxxxxxx xxxxxxxx xxxxxxxx (28 bits) = 2^28 = 268435456
-    if (val < (1 << 28)) {
-        dst[0] = (uint8_t)(0xE0 | (val & 0x0F));
-        dst[1] = (uint8_t)(val >> 4);
-        dst[2] = (uint8_t)(val >> 12);
-        dst[3] = (uint8_t)(val >> 20);
-        return 4;
-    }
+    // if (val < (1 << 28)) {
+    //     dst[0] = (uint8_t)(0xE0 | (val & 0x0F));
+    //     dst[1] = (uint8_t)(val >> 4);
+    //     dst[2] = (uint8_t)(val >> 12);
+    //     dst[3] = (uint8_t)(val >> 20);
+    //     return 4;
+    // }
 
-    // 5 bytes: 11110xxx ... (35 bits) -> Full 32-bit range
-    dst[0] = (uint8_t)(0xF0 | (val & 0x07));
-    dst[1] = (uint8_t)(val >> 3);
-    dst[2] = (uint8_t)(val >> 11);
-    dst[3] = (uint8_t)(val >> 19);
-    dst[4] = (uint8_t)(val >> 27);
-    return 5;
+    // // 5 bytes: 11110xxx ... (35 bits) -> Full 32-bit range
+    // dst[0] = (uint8_t)(0xF0 | (val & 0x07));
+    // dst[1] = (uint8_t)(val >> 3);
+    // dst[2] = (uint8_t)(val >> 11);
+    // dst[3] = (uint8_t)(val >> 19);
+    // dst[4] = (uint8_t)(val >> 27);
+    // return 5;
 }
 
 /**
@@ -405,7 +405,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 }
                 while (ip + 1 + l2 < iend && ref2[l2] == ip[1 + l2]) l2++;
             lazy1_done:
-                if (l2 > max_lazy) max_lazy = l2;
+                max_lazy = l2 > max_lazy ? l2 : max_lazy;
             }
 
             const uint16_t delta = chain_table[next_idx];
@@ -415,7 +415,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         }
 
         // --- Lazy evaluation at ip+2 (computed in parallel, no dependency on lazy 1) ---
-        uint32_t max_lazy3 = 0;
+        uint32_t max_lazy2 = 0;
         if (level >= 4 && ip + 2 < mflimit) {
             const uint64_t val3_8 = zxc_le64(ip + 2);
             const uint32_t val3 = (uint32_t)val3_8;
@@ -447,7 +447,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                     }
                     while (ip + 2 + l3 < iend && ref3[l3] == ip[2 + l3]) l3++;
                 lazy2_done:
-                    if (l3 > max_lazy3) max_lazy3 = l3;
+                    max_lazy2 = l3 > max_lazy2 ? l3 : max_lazy2;
                 }
 
                 const uint16_t delta = chain_table[idx3];
@@ -458,7 +458,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         }
 
         // Single decision: invalidate if either lazy position found a better match
-        if (max_lazy > best.len + 1 || max_lazy3 > best.len + 2) best.ref = NULL;
+        if (max_lazy > best.len + 1 || max_lazy2 > best.len + 2) best.ref = NULL;
     }
 
     return best;
