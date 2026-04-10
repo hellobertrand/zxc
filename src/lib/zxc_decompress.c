@@ -45,7 +45,8 @@
  * depending on implementation).
  * @return The value of the consumed bits as a 32-bit unsigned integer.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* RESTRICT br, const uint8_t n) {
+static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* RESTRICT br,
+                                                      const uint8_t n) {
 #if !defined(ZXC_DISABLE_SIMD) && defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
     // BMI2 Optimization: _bzhi_u64(x, n) copies the lower n bits of x to dst and
     // clears the rest. It is equivalent to x & ((1ULL << n) - 1) but executes in
