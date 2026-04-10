@@ -294,6 +294,38 @@ cmake -B build -DZXC_ENABLE_COVERAGE=ON
 cmake -B build -DZXC_DISABLE_SIMD=ON
 ```
 
+#### Profile-Guided Optimization (PGO)
+
+PGO uses runtime profiling data to optimize branch layout, inlining decisions, and code placement.
+
+**Step 1 — Build with instrumentation:**
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DZXC_PGO_MODE=GENERATE
+cmake --build build --parallel
+```
+
+**Step 2 — Run a representative workload to collect profile data:**
+```bash
+# Run the test suite (exercises all block types and compression levels)
+./build/zxc_test
+
+# Or compress/decompress representative data
+./build/zxc -b your_data_file
+```
+
+**Step 3 — (Clang only) Merge raw profiles:**
+```bash
+# Clang generates .profraw files that must be merged before use
+llvm-profdata merge -output=build/pgo/default.profdata build/pgo/*.profraw
+```
+> GCC uses a directory-based format and does not require this step.
+
+**Step 4 — Rebuild with profile data:**
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DZXC_PGO_MODE=USE
+cmake --build build --parallel
+```
+
 ### Packaging Status
 
 [![Packaging status](https://repology.org/badge/vertical-allrepos/zxc.svg)](https://repology.org/project/zxc/versions)
