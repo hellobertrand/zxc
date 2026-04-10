@@ -105,34 +105,12 @@ static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, uint32_t
     }
 
     // 3 bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) = 2^21 = 2097152
-    if (val < (1 << 21)) {
-        dst[0] = (uint8_t)(0xC0 | (val & 0x1F));
-        dst[1] = (uint8_t)(val >> 5);
-        dst[2] = (uint8_t)(val >> 13);
-        return 3;
-    }
-
-    // Note: With current max block size of 2MB (2^21), varint values never exceed
-    // 2^21 - (ZXC_TOKEN_LL_MASK | ZXC_LZ_MIN_MATCH_LEN - ZXC_TOKEN_ML_MASK) (approx 2MB), so 4-byte
-    // and 5-byte paths below are unreachable. Kept for forward-compatibility if block size
-    // increases.
-
-    // 4 bytes: 1110xxxx xxxxxxxx xxxxxxxx xxxxxxxx (28 bits) = 2^28 = 268435456
-    // if (val < (1 << 28)) {
-    //     dst[0] = (uint8_t)(0xE0 | (val & 0x0F));
-    //     dst[1] = (uint8_t)(val >> 4);
-    //     dst[2] = (uint8_t)(val >> 12);
-    //     dst[3] = (uint8_t)(val >> 20);
-    //     return 4;
-    // }
-
-    // // 5 bytes: 11110xxx ... (35 bits) -> Full 32-bit range
-    // dst[0] = (uint8_t)(0xF0 | (val & 0x07));
-    // dst[1] = (uint8_t)(val >> 3);
-    // dst[2] = (uint8_t)(val >> 11);
-    // dst[3] = (uint8_t)(val >> 19);
-    // dst[4] = (uint8_t)(val >> 27);
-    // return 5;
+    // Max varint value is bounded by ZXC_BLOCK_SIZE_MAX (2MB = 2^21).
+    // ZXC_VBYTE_ALLOC_LEN == 3 guarantees this is the last reachable path.
+    dst[0] = (uint8_t)(0xC0 | (val & 0x1F));
+    dst[1] = (uint8_t)(val >> 5);
+    dst[2] = (uint8_t)(val >> 13);
+    return ZXC_VBYTE_ALLOC_LEN;
 }
 
 /**
