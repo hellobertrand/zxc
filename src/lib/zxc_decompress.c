@@ -495,8 +495,8 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
  * data).
  */
 static ZXC_HOT int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                const size_t src_size, uint8_t* RESTRICT dst,
-                                const size_t dst_capacity) {
+                                        const size_t src_size, uint8_t* RESTRICT dst,
+                                        const size_t dst_capacity) {
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS];
 
@@ -1084,8 +1084,8 @@ static ZXC_HOT int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t*
  * failure.
  */
 static ZXC_HOT int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                const size_t src_size, uint8_t* RESTRICT dst,
-                                const size_t dst_capacity) {
+                                        const size_t src_size, uint8_t* RESTRICT dst,
+                                        const size_t dst_capacity) {
     (void)ctx;
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[ZXC_GHI_SECTIONS];
