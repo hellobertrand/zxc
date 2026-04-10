@@ -90,45 +90,27 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  * @param[in] val The 32-bit unsigned integer value to encode.
  * @return The number of bytes written to the destination buffer.
  */
-static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, uint32_t val) {
-    // Prefix Varint Encoding
-    // 1 byte: 0xxxxxxx (7 bits) -> val < 128
-    if (LIKELY(val < 128)) {
+static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, const uint32_t val) {
+    // 1 byte: 0xxxxxxx (7 bits) = 2^7 = 128
+    if (LIKELY(val < (1 << 7))) {
         dst[0] = (uint8_t)val;
         return 1;
     }
 
-    // 2 bytes: 10xxxxxx xxxxxxxx (14 bits) -> val < 16384 (2^14)
-    if (LIKELY(val < 16384)) {
+    // 2 bytes: 10xxxxxx xxxxxxxx (14 bits) = 2^14 = 16384
+    if (LIKELY(val < (1 << 14))) {
         dst[0] = (uint8_t)(0x80 | (val & 0x3F));
         dst[1] = (uint8_t)(val >> 6);
         return 2;
     }
 
-    // 3 bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2097152 (2^21)
-    if (LIKELY(val < 2097152)) {
-        dst[0] = (uint8_t)(0xC0 | (val & 0x1F));
-        dst[1] = (uint8_t)(val >> 5);
-        dst[2] = (uint8_t)(val >> 13);
-        return 3;
-    }
-
-    // 4 bytes: 1110xxxx xxxxxxxx xxxxxxxx xxxxxxxx (28 bits) -> val < 268435456 (2^28)
-    if (LIKELY(val < 268435456)) {
-        dst[0] = (uint8_t)(0xE0 | (val & 0x0F));
-        dst[1] = (uint8_t)(val >> 4);
-        dst[2] = (uint8_t)(val >> 12);
-        dst[3] = (uint8_t)(val >> 20);
-        return 4;
-    }
-
-    // 5 bytes: 11110xxx ... (35 bits) -> Full 32-bit range
-    dst[0] = (uint8_t)(0xF0 | (val & 0x07));
-    dst[1] = (uint8_t)(val >> 3);
-    dst[2] = (uint8_t)(val >> 11);
-    dst[3] = (uint8_t)(val >> 19);
-    dst[4] = (uint8_t)(val >> 27);
-    return 5;
+    // 3 bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) = 2^21 = 2097152
+    // Max varint value is bounded by ZXC_BLOCK_SIZE_MAX (2MB = 2^21).
+    // ZXC_VBYTE_ALLOC_LEN == 3 guarantees this is the last reachable path.
+    dst[0] = (uint8_t)(0xC0 | (val & 0x1F));
+    dst[1] = (uint8_t)(val >> 5);
+    dst[2] = (uint8_t)(val >> 13);
+    return ZXC_VBYTE_ALLOC_LEN;
 }
 
 /**
@@ -170,8 +152,8 @@ typedef struct {
 static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* mflimit,
     const uint8_t* anchor, uint32_t* RESTRICT hash_table, uint8_t* RESTRICT hash_tags,
-    uint16_t* RESTRICT chain_table, uint32_t epoch_mark, uint32_t offset_mask, const int level,
-    const zxc_lz77_params_t p) {
+    uint16_t* RESTRICT chain_table, const uint32_t epoch_mark, const uint32_t offset_mask,
+    const int level, const zxc_lz77_params_t p) {
     const int use_hash5 = (level >= 3);
     // Track the best match found so far.
     //  ref is the pointer to the start of the match in the history buffer,
@@ -196,8 +178,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
     // If the epoch in raw_head matches the current epoch_mark, extract the
     // stored position; otherwise treat this bucket as empty (index 0).
-    const uint32_t epoch_mask = -((int32_t)((raw_head & ~offset_mask) == epoch_mark));
-    uint32_t match_idx = (raw_head & offset_mask) & epoch_mask;
+    uint32_t match_idx = ((raw_head & ~offset_mask) == epoch_mark) ? (raw_head & offset_mask) : 0;
 
     // Decide whether to skip the head entry of the hash chain.
     const int skip_head = (match_idx != 0) & (stored_tag != cur_tag);
@@ -378,7 +359,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             (next_head & ~offset_mask) == epoch_mark ? (next_head & offset_mask) : 0;
         const uint8_t next_tag = (uint8_t)(next_val ^ (next_val >> 16));
         const int skip_lazy_head = (next_idx > 0 && next_stored_tag != next_tag);
-        uint32_t max_lazy = 0;
+        uint32_t max_lazy2 = 0;
         int lazy_att = p.lazy_attempts;
         int is_lazy_first = 1;
 
@@ -395,13 +376,13 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                     const uint64_t v2 = zxc_le64(ref2 + l2);
                     if (v1 != v2) {
                         l2 += (uint32_t)(zxc_ctz64(v1 ^ v2) >> 3);
-                        goto lazy1_done;
+                        goto lazy2_done;
                     }
                     l2 += sizeof(uint64_t);
                 }
                 while (ip + 1 + l2 < iend && ref2[l2] == ip[1 + l2]) l2++;
-            lazy1_done:
-                if (l2 > max_lazy) max_lazy = l2;
+            lazy2_done:
+                max_lazy2 = l2 > max_lazy2 ? l2 : max_lazy2;
             }
 
             const uint16_t delta = chain_table[next_idx];
@@ -437,13 +418,13 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                         const uint64_t v2 = zxc_le64(ref3 + l3);
                         if (v1 != v2) {
                             l3 += (uint32_t)(zxc_ctz64(v1 ^ v2) >> 3);
-                            goto lazy2_done;
+                            goto lazy3_done;
                         }
                         l3 += sizeof(uint64_t);
                     }
                     while (ip + 2 + l3 < iend && ref3[l3] == ip[2 + l3]) l3++;
-                lazy2_done:
-                    if (l3 > max_lazy3) max_lazy3 = l3;
+                lazy3_done:
+                    max_lazy3 = l3 > max_lazy3 ? l3 : max_lazy3;
                 }
 
                 const uint16_t delta = chain_table[idx3];
@@ -454,7 +435,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         }
 
         // Single decision: invalidate if either lazy position found a better match
-        if (max_lazy > best.len + 1 || max_lazy3 > best.len + 2) best.ref = NULL;
+        if (max_lazy2 > best.len + 1 || max_lazy3 > best.len + 2) best.ref = NULL;
     }
 
     return best;
