@@ -91,30 +91,29 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  * @return The number of bytes written to the destination buffer.
  */
 static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, uint32_t val) {
-    // Prefix Varint Encoding
-    // 1 byte: 0xxxxxxx (7 bits) -> val < 128
-    if (LIKELY(val < 128)) {
+    // 1 byte: 0xxxxxxx (7 bits) = 2^7 = 128
+    if (LIKELY(val < (1 << 7))) {
         dst[0] = (uint8_t)val;
         return 1;
     }
 
-    // 2 bytes: 10xxxxxx xxxxxxxx (14 bits) -> val < 16384 (2^14)
-    if (LIKELY(val < 16384)) {
+    // 2 bytes: 10xxxxxx xxxxxxxx (14 bits) = 2^14 = 16384
+    if (LIKELY(val < (1 << 14))) {
         dst[0] = (uint8_t)(0x80 | (val & 0x3F));
         dst[1] = (uint8_t)(val >> 6);
         return 2;
     }
 
-    // 3 bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2097152 (2^21)
-    if (LIKELY(val < 2097152)) {
+    // 3 bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) = 2^21 = 2097152
+    if (LIKELY(val < (1 << 21))) {
         dst[0] = (uint8_t)(0xC0 | (val & 0x1F));
         dst[1] = (uint8_t)(val >> 5);
         dst[2] = (uint8_t)(val >> 13);
         return 3;
     }
 
-    // 4 bytes: 1110xxxx xxxxxxxx xxxxxxxx xxxxxxxx (28 bits) -> val < 268435456 (2^28)
-    if (LIKELY(val < 268435456)) {
+    // 4 bytes: 1110xxxx xxxxxxxx xxxxxxxx xxxxxxxx (28 bits) = 2^28 = 268435456
+    if (val < (1 << 28)) {
         dst[0] = (uint8_t)(0xE0 | (val & 0x0F));
         dst[1] = (uint8_t)(val >> 4);
         dst[2] = (uint8_t)(val >> 12);
