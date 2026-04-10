@@ -172,6 +172,10 @@ extern "C" {
  * @brief Forces a function to be inlined at all optimization levels.
  */
 #define ZXC_ALWAYS_INLINE inline __attribute__((always_inline))
+/** @def ZXC_HOT
+ * @brief Marks a function as a hot path for aggressive optimization and code layout.
+ */
+#define ZXC_HOT __attribute__((hot))
 
 #elif defined(_MSC_VER)
 #include <intrin.h>
@@ -200,6 +204,7 @@ extern "C" {
  * @brief Forces a function to be inlined at all optimization levels (MSVC).
  */
 #define ZXC_ALWAYS_INLINE __forceinline
+#define ZXC_HOT
 #pragma intrinsic(_BitScanReverse)
 #else
 #define LIKELY(x) (x)
@@ -214,6 +219,7 @@ extern "C" {
  * @brief Forces a function to be inlined (fallback for non-GCC/Clang/MSVC compilers).
  */
 #define ZXC_ALWAYS_INLINE inline
+#define ZXC_HOT
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #include <stdalign.h>

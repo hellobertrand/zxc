@@ -84,13 +84,13 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
 
     const uint32_t b0 = p[0];
 
-    // 1 Byte: 0xxxxxxx (7 bits) -> val < 128
+    // 1 Byte: 0xxxxxxx (7 bits) -> val < 128 (2^7)
     if (LIKELY(b0 < 0x80)) {
         *ptr = p + 1;
         return b0;
     }
 
-    // 2 Bytes: 10xxxxxx xxxxxxxx (14 bits)
+    // 2 Bytes: 10xxxxxx xxxxxxxx (14 bits) -> val < 16384 (2^14)
     if (LIKELY(b0 < 0xC0)) {
         if (UNLIKELY(p + 1 >= end)) {
             *ptr = end;
@@ -100,7 +100,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
         return (b0 & 0x3F) | ((uint32_t)p[1] << 6);
     }
 
-    // 3 Bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits)
+    // 3 Bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2097152 (2^21)
     if (LIKELY(b0 < 0xE0)) {
         if (UNLIKELY(p + 2 >= end)) {
             *ptr = end;
@@ -110,7 +110,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
         return (b0 & 0x1F) | ((uint32_t)p[1] << 5) | ((uint32_t)p[2] << 13);
     }
 
-    // 4 Bytes: 1110xxxx ... (28 bits)
+    // 4 Bytes: 1110xxxx ... (28 bits) -> val < 268435456 (2^28)
     if (UNLIKELY(b0 < 0xF0)) {
         if (UNLIKELY(p + 3 >= end)) {
             *ptr = end;
@@ -121,7 +121,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
                ((uint32_t)p[3] << 20);
     }
 
-    // 5 Bytes: 11110xxx ... (32 bits)
+    // 5 Bytes: 11110xxx ... (32 bits) -> val < 4294967296 (2^32)
     if (UNLIKELY(p + 4 >= end)) {
         *ptr = end;
         return 0;
@@ -494,7 +494,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
  * a negative zxc_error_t code on failure (e.g., invalid header, buffer overflow, or corrupted
  * data).
  */
-static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+static ZXC_HOT int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_size, uint8_t* RESTRICT dst,
                                 const size_t dst_capacity) {
     zxc_gnr_header_t gh;
@@ -1083,7 +1083,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
  * @return int Returns the number of bytes written on success, or a negative zxc_error_t code on
  * failure.
  */
-static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+static ZXC_HOT int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_size, uint8_t* RESTRICT dst,
                                 const size_t dst_capacity) {
     (void)ctx;
