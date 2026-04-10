@@ -45,7 +45,7 @@
  * depending on implementation).
  * @return The value of the consumed bits as a 32-bit unsigned integer.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* br, uint8_t n) {
+static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* RESTRICT br, const uint8_t n) {
 #if !defined(ZXC_DISABLE_SIMD) && defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
     // BMI2 Optimization: _bzhi_u64(x, n) copies the lower n bits of x to dst and
     // clears the rest. It is equivalent to x & ((1ULL << n) - 1) but executes in
@@ -185,7 +185,7 @@ static const ZXC_ALIGN(16) uint8_t zxc_overlap_masks[16][16] = {
  *                 (i.e., source address is `dst - off`).
  */
 // codeql[cpp/unused-static-function] : False positive, used in DECODE_SEQ_SAFE/FAST macros
-static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
+static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, const uint32_t off) {
     // off is always >= ZXC_LZ_OFFSET_BIAS by design (offset bias encoding: stored +
     // ZXC_LZ_OFFSET_BIAS)
 #if defined(ZXC_USE_NEON64)
