@@ -1013,7 +1013,13 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                 d_ptr += ml;
                 written += ml;
             } else {
-                for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
+                for (uint32_t i = 0; i < offset; i++) d_ptr[i] = match_src[i];
+                uint32_t copied = offset;
+                while (copied < ml) {
+                    uint32_t n = copied < ml - copied ? copied : ml - copied;
+                    ZXC_MEMCPY(d_ptr + copied, d_ptr, n);
+                    copied += n;
+                }
                 d_ptr += ml;
                 written += ml;
             }
@@ -1047,7 +1053,13 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         if (UNLIKELY(match_src < dst || d_ptr + ml > d_end)) return ZXC_ERROR_BAD_OFFSET;
 
         if (offset < ml) {
-            for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
+            for (uint32_t i = 0; i < offset; i++) d_ptr[i] = match_src[i];
+            uint32_t copied = offset;
+            while (copied < ml) {
+                uint32_t n = copied < ml - copied ? copied : ml - copied;
+                ZXC_MEMCPY(d_ptr + copied, d_ptr, n);
+                copied += n;
+            }
         } else {
             ZXC_MEMCPY(d_ptr, match_src, ml);
         }
@@ -1327,7 +1339,13 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             const uint8_t* match_src = d_ptr - offset;
 
             if (offset < ml) {
-                for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
+                for (uint32_t i = 0; i < offset; i++) d_ptr[i] = match_src[i];
+                uint32_t copied = offset;
+                while (copied < ml) {
+                    uint32_t n = copied < ml - copied ? copied : ml - copied;
+                    ZXC_MEMCPY(d_ptr + copied, d_ptr, n);
+                    copied += n;
+                }
             } else {
                 ZXC_MEMCPY(d_ptr, match_src, ml);
             }
@@ -1499,7 +1517,13 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                 d_ptr += ml;
                 written += ml;
             } else {
-                for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
+                for (uint32_t i = 0; i < offset; i++) d_ptr[i] = match_src[i];
+                uint32_t copied = offset;
+                while (copied < ml) {
+                    uint32_t n = copied < ml - copied ? copied : ml - copied;
+                    ZXC_MEMCPY(d_ptr + copied, d_ptr, n);
+                    copied += n;
+                }
                 d_ptr += ml;
                 written += ml;
             }
@@ -1529,7 +1553,13 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         if (UNLIKELY(match_src < dst || d_ptr + ml > d_end)) return ZXC_ERROR_BAD_OFFSET;
 
         if (offset < ml) {
-            for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
+            for (uint32_t i = 0; i < offset; i++) d_ptr[i] = match_src[i];
+            uint32_t copied = offset;
+            while (copied < ml) {
+                uint32_t n = copied < ml - copied ? copied : ml - copied;
+                ZXC_MEMCPY(d_ptr + copied, d_ptr, n);
+                copied += n;
+            }
         } else {
             ZXC_MEMCPY(d_ptr, match_src, ml);
         }
