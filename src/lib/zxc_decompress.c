@@ -45,7 +45,8 @@
  * depending on implementation).
  * @return The value of the consumed bits as a 32-bit unsigned integer.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* br, uint8_t n) {
+static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* RESTRICT br,
+                                                      const uint8_t n) {
 #if !defined(ZXC_DISABLE_SIMD) && defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
     // BMI2 Optimization: _bzhi_u64(x, n) copies the lower n bits of x to dst and
     // clears the rest. It is equivalent to x & ((1ULL << n) - 1) but executes in
@@ -67,11 +68,11 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* br, uint
  * the total length (1-5 bytes).
  *
  * Format:
- * - 1 byte (0xxxxxxx): 7 bits (val < 128)
- * - 2 bytes (10xxxxxx ...): 14 bits (val < 16384)
- * - 3 bytes (110xxxxx ...): 21 bits (val < 2M)
- * - 4 bytes (1110xxxx ...): 28 bits (val < 256M)
- * - 5 bytes (11110xxx ...): 32 bits (Full Range)
+ * - 1 byte  (0xxxxxxx):  7-bit payload (val < 2^7  = 128)
+ * - 2 bytes (10xxxxxx): 14-bit payload (val < 2^14 = 16384)
+ * - 3 bytes (110xxxxx): 21-bit payload (val < 2^21 = 2097152)
+ * - 4 bytes (1110xxxx): 28-bit payload (val < 2^28 = 268435456)
+ * - 5 bytes (11110xxx): 32-bit payload (full uint32_t range)
  *
  * @param[in,out] ptr Pointer to a pointer to the current position in the stream.
  * @param[in] end Pointer to the end of the readable stream (for bounds checking).
@@ -84,13 +85,13 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
 
     const uint32_t b0 = p[0];
 
-    // 1 Byte: 0xxxxxxx (7 bits) -> val < 128
-    if (LIKELY(b0 < 128)) {
+    // 1 Byte: 0xxxxxxx (7 bits) -> val < 128 (2^7)
+    if (LIKELY(b0 < 0x80)) {
         *ptr = p + 1;
         return b0;
     }
 
-    // 2 Bytes: 10xxxxxx xxxxxxxx (14 bits)
+    // 2 Bytes: 10xxxxxx xxxxxxxx (14 bits) -> val < 16384 (2^14)
     if (LIKELY(b0 < 0xC0)) {
         if (UNLIKELY(p + 1 >= end)) {
             *ptr = end;
@@ -100,7 +101,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
         return (b0 & 0x3F) | ((uint32_t)p[1] << 6);
     }
 
-    // 3 Bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits)
+    // 3 Bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2097152 (2^21)
     if (LIKELY(b0 < 0xE0)) {
         if (UNLIKELY(p + 2 >= end)) {
             *ptr = end;
@@ -110,7 +111,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
         return (b0 & 0x1F) | ((uint32_t)p[1] << 5) | ((uint32_t)p[2] << 13);
     }
 
-    // 4 Bytes: 1110xxxx ... (28 bits)
+    // 4 Bytes: 1110xxxx ... (28 bits) -> val < 268435456 (2^28)
     if (UNLIKELY(b0 < 0xF0)) {
         if (UNLIKELY(p + 3 >= end)) {
             *ptr = end;
@@ -121,7 +122,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
                ((uint32_t)p[3] << 20);
     }
 
-    // 5 Bytes: 11110xxx ... (32 bits)
+    // 5 Bytes: 11110xxx ... (32 bits) -> val < 4294967296 (2^32)
     if (UNLIKELY(p + 4 >= end)) {
         *ptr = end;
         return 0;
@@ -368,7 +369,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 
         if (UNLIKELY(nvals > vals_remaining || src_size < offset + psize ||
                      (size_t)(d_end - d_ptr) < (size_t)nvals * sizeof(uint32_t) ||
-                     bits > (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)))
+                     bits > (sizeof(uint32_t) * CHAR_BIT)))
             return ZXC_ERROR_CORRUPT_DATA;
 
         zxc_bit_reader_t br;
@@ -776,11 +777,10 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         if (UNLIKELY(ml1 == ZXC_TOKEN_ML_MASK)) {
             ml1 += zxc_read_varint(&e_ptr, e_end);
-            ml1 += ZXC_LZ_MIN_MATCH_LEN;
-            if (UNLIKELY(d_ptr + ll1 + ml1 + ZXC_PAD_SIZE > d_end)) return ZXC_ERROR_OVERFLOW;
-        } else {
-            ml1 += ZXC_LZ_MIN_MATCH_LEN;
+            if (UNLIKELY(d_ptr + ll1 + ml1 + ZXC_LZ_MIN_MATCH_LEN + ZXC_PAD_SIZE > d_end))
+                return ZXC_ERROR_OVERFLOW;
         }
+        ml1 += ZXC_LZ_MIN_MATCH_LEN;
         DECODE_SEQ_SAFE(ll1, ml1, off1);
 
         uint32_t ll2 = (tokens & 0x0F000) >> 12;
@@ -792,11 +792,10 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         if (UNLIKELY(ml2 == ZXC_TOKEN_ML_MASK)) {
             ml2 += zxc_read_varint(&e_ptr, e_end);
-            ml2 += ZXC_LZ_MIN_MATCH_LEN;
-            if (UNLIKELY(d_ptr + ll2 + ml2 + ZXC_PAD_SIZE > d_end)) return ZXC_ERROR_OVERFLOW;
-        } else {
-            ml2 += ZXC_LZ_MIN_MATCH_LEN;
+            if (UNLIKELY(d_ptr + ll2 + ml2 + ZXC_LZ_MIN_MATCH_LEN + ZXC_PAD_SIZE > d_end))
+                return ZXC_ERROR_OVERFLOW;
         }
+        ml2 += ZXC_LZ_MIN_MATCH_LEN;
         DECODE_SEQ_SAFE(ll2, ml2, off2);
 
         uint32_t ll3 = (tokens & 0x0F00000) >> 20;
@@ -808,11 +807,10 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         if (UNLIKELY(ml3 == ZXC_TOKEN_ML_MASK)) {
             ml3 += zxc_read_varint(&e_ptr, e_end);
-            ml3 += ZXC_LZ_MIN_MATCH_LEN;
-            if (UNLIKELY(d_ptr + ll3 + ml3 + ZXC_PAD_SIZE > d_end)) return ZXC_ERROR_OVERFLOW;
-        } else {
-            ml3 += ZXC_LZ_MIN_MATCH_LEN;
+            if (UNLIKELY(d_ptr + ll3 + ml3 + ZXC_LZ_MIN_MATCH_LEN + ZXC_PAD_SIZE > d_end))
+                return ZXC_ERROR_OVERFLOW;
         }
+        ml3 += ZXC_LZ_MIN_MATCH_LEN;
         DECODE_SEQ_SAFE(ll3, ml3, off3);
 
         uint32_t ll4 = (tokens >> 28);
@@ -824,11 +822,10 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         if (UNLIKELY(ml4 == ZXC_TOKEN_ML_MASK)) {
             ml4 += zxc_read_varint(&e_ptr, e_end);
-            ml4 += ZXC_LZ_MIN_MATCH_LEN;
-            if (UNLIKELY(d_ptr + ll4 + ml4 + ZXC_PAD_SIZE > d_end)) return ZXC_ERROR_OVERFLOW;
-        } else {
-            ml4 += ZXC_LZ_MIN_MATCH_LEN;
+            if (UNLIKELY(d_ptr + ll4 + ml4 + ZXC_LZ_MIN_MATCH_LEN + ZXC_PAD_SIZE > d_end))
+                return ZXC_ERROR_OVERFLOW;
         }
+        ml4 += ZXC_LZ_MIN_MATCH_LEN;
         DECODE_SEQ_SAFE(ll4, ml4, off4);
 
         n_seq -= 4;
@@ -868,11 +865,10 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         if (UNLIKELY(ml1 == ZXC_TOKEN_ML_MASK)) {
             ml1 += zxc_read_varint(&e_ptr, e_end);
-            ml1 += ZXC_LZ_MIN_MATCH_LEN;
-            if (UNLIKELY(d_ptr + ll1 + ml1 + ZXC_PAD_SIZE > d_end)) return ZXC_ERROR_OVERFLOW;
-        } else {
-            ml1 += ZXC_LZ_MIN_MATCH_LEN;
+            if (UNLIKELY(d_ptr + ll1 + ml1 + ZXC_LZ_MIN_MATCH_LEN + ZXC_PAD_SIZE > d_end))
+                return ZXC_ERROR_OVERFLOW;
         }
+        ml1 += ZXC_LZ_MIN_MATCH_LEN;
         DECODE_SEQ_FAST(ll1, ml1, off1);
 
         uint32_t ll2 = (tokens & 0x0F000) >> 12;
@@ -884,11 +880,10 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         if (UNLIKELY(ml2 == ZXC_TOKEN_ML_MASK)) {
             ml2 += zxc_read_varint(&e_ptr, e_end);
-            ml2 += ZXC_LZ_MIN_MATCH_LEN;
-            if (UNLIKELY(d_ptr + ll2 + ml2 + ZXC_PAD_SIZE > d_end)) return ZXC_ERROR_OVERFLOW;
-        } else {
-            ml2 += ZXC_LZ_MIN_MATCH_LEN;
+            if (UNLIKELY(d_ptr + ll2 + ml2 + ZXC_LZ_MIN_MATCH_LEN + ZXC_PAD_SIZE > d_end))
+                return ZXC_ERROR_OVERFLOW;
         }
+        ml2 += ZXC_LZ_MIN_MATCH_LEN;
         DECODE_SEQ_FAST(ll2, ml2, off2);
 
         uint32_t ll3 = (tokens & 0x0F00000) >> 20;
@@ -900,11 +895,10 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         if (UNLIKELY(ml3 == ZXC_TOKEN_ML_MASK)) {
             ml3 += zxc_read_varint(&e_ptr, e_end);
-            ml3 += ZXC_LZ_MIN_MATCH_LEN;
-            if (UNLIKELY(d_ptr + ll3 + ml3 + ZXC_PAD_SIZE > d_end)) return ZXC_ERROR_OVERFLOW;
-        } else {
-            ml3 += ZXC_LZ_MIN_MATCH_LEN;
+            if (UNLIKELY(d_ptr + ll3 + ml3 + ZXC_LZ_MIN_MATCH_LEN + ZXC_PAD_SIZE > d_end))
+                return ZXC_ERROR_OVERFLOW;
         }
+        ml3 += ZXC_LZ_MIN_MATCH_LEN;
         DECODE_SEQ_FAST(ll3, ml3, off3);
 
         uint32_t ll4 = (tokens >> 28);
@@ -916,11 +910,10 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
         if (UNLIKELY(ml4 == ZXC_TOKEN_ML_MASK)) {
             ml4 += zxc_read_varint(&e_ptr, e_end);
-            ml4 += ZXC_LZ_MIN_MATCH_LEN;
-            if (UNLIKELY(d_ptr + ll4 + ml4 + ZXC_PAD_SIZE > d_end)) return ZXC_ERROR_OVERFLOW;
-        } else {
-            ml4 += ZXC_LZ_MIN_MATCH_LEN;
+            if (UNLIKELY(d_ptr + ll4 + ml4 + ZXC_LZ_MIN_MATCH_LEN + ZXC_PAD_SIZE > d_end))
+                return ZXC_ERROR_OVERFLOW;
         }
+        ml4 += ZXC_LZ_MIN_MATCH_LEN;
         DECODE_SEQ_FAST(ll4, ml4, off4);
 
         n_seq -= 4;

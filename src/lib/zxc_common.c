@@ -536,7 +536,7 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  */
 int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
                           const size_t dst_cap, const uint8_t bits) {
-    const size_t out_bytes = ((count * bits) + ZXC_BITS_PER_BYTE - 1) / ZXC_BITS_PER_BYTE;
+    const size_t out_bytes = ((count * bits) + CHAR_BIT - 1) / CHAR_BIT;
 
     // +4 bytes: packing may write past out_bytes when the last value straddles a byte boundary.
     const size_t safe_bytes = out_bytes + sizeof(uint32_t);
@@ -551,22 +551,22 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint
     // However, if bits=64 (unlikely for a 32-bit packer), it would be an issue.
     // For 0 < bits <= 32:
     const uint64_t val_mask =
-        (bits == sizeof(uint32_t) * ZXC_BITS_PER_BYTE) ? UINT32_MAX : ((1ULL << bits) - 1);
+        (bits == sizeof(uint32_t) * CHAR_BIT) ? UINT32_MAX : ((1ULL << bits) - 1);
 
     for (size_t i = 0; i < count; i++) {
         // Mask the input value to ensure we don't write garbage
-        const uint64_t v = ((uint64_t)src[i] & val_mask) << (bit_pos % ZXC_BITS_PER_BYTE);
+        const uint64_t v = ((uint64_t)src[i] & val_mask) << (bit_pos % CHAR_BIT);
 
-        const size_t byte_idx = bit_pos / ZXC_BITS_PER_BYTE;
+        const size_t byte_idx = bit_pos / CHAR_BIT;
         dst[byte_idx] |= (uint8_t)v;
-        if (bits + (bit_pos % ZXC_BITS_PER_BYTE) > 1 * ZXC_BITS_PER_BYTE)
-            dst[byte_idx + 1] |= (uint8_t)(v >> (1 * ZXC_BITS_PER_BYTE));
-        if (bits + (bit_pos % ZXC_BITS_PER_BYTE) > 2 * ZXC_BITS_PER_BYTE)
-            dst[byte_idx + 2] |= (uint8_t)(v >> (2 * ZXC_BITS_PER_BYTE));
-        if (bits + (bit_pos % ZXC_BITS_PER_BYTE) > 3 * ZXC_BITS_PER_BYTE)
-            dst[byte_idx + 3] |= (uint8_t)(v >> (3 * ZXC_BITS_PER_BYTE));
-        if (bits + (bit_pos % ZXC_BITS_PER_BYTE) > 4 * ZXC_BITS_PER_BYTE)
-            dst[byte_idx + 4] |= (uint8_t)(v >> (4 * ZXC_BITS_PER_BYTE));
+        if (bits + (bit_pos % CHAR_BIT) > 1 * CHAR_BIT)
+            dst[byte_idx + 1] |= (uint8_t)(v >> (1 * CHAR_BIT));
+        if (bits + (bit_pos % CHAR_BIT) > 2 * CHAR_BIT)
+            dst[byte_idx + 2] |= (uint8_t)(v >> (2 * CHAR_BIT));
+        if (bits + (bit_pos % CHAR_BIT) > 3 * CHAR_BIT)
+            dst[byte_idx + 3] |= (uint8_t)(v >> (3 * CHAR_BIT));
+        if (bits + (bit_pos % CHAR_BIT) > 4 * CHAR_BIT)
+            dst[byte_idx + 4] |= (uint8_t)(v >> (4 * CHAR_BIT));
         bit_pos += bits;
     }
     return (int)out_bytes;
