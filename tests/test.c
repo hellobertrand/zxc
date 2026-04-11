@@ -2447,17 +2447,12 @@ int test_seekable_table_sizes() {
     printf("=== TEST: Seekable - Table Sizes ===\n");
 
     /* block_header(8) + 10*8 + tail(4) = 92 */
-    if (zxc_seek_table_size(10, 0) != 92) {
-        printf("Failed: no-checksum size\n");
-        return 0;
-    }
-    /* block_header(8) + 10*12 + tail(4) = 132 */
-    if (zxc_seek_table_size(10, 1) != 132) {
-        printf("Failed: checksum size\n");
+    if (zxc_seek_table_size(10) != 92) {
+        printf("Failed: size for 10 blocks\n");
         return 0;
     }
     /* block_header(8) + 0 + tail(4) = 12 */
-    if (zxc_seek_table_size(0, 0) != 12) {
+    if (zxc_seek_table_size(0) != 12) {
         printf("Failed: zero blocks size\n");
         return 0;
     }
@@ -2471,11 +2466,11 @@ int test_seekable_table_write() {
 
     const uint32_t comp[] = {100, 200, 150};
     const uint32_t decomp[] = {1000, 2000, 1500};
-    const size_t sz = zxc_seek_table_size(3, 0);
+    const size_t sz = zxc_seek_table_size(3);
     uint8_t* buf = malloc(sz);
     if (!buf) return 0;
 
-    const int64_t written = zxc_write_seek_table(buf, sz, comp, decomp, 3, 0);
+    const int64_t written = zxc_write_seek_table(buf, sz, comp, decomp, 3);
     if (written != (int64_t)sz) {
         printf("Failed: write size mismatch\n");
         free(buf);

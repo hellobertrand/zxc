@@ -453,8 +453,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     /* Seekable: write seek table between EOF block and footer */
     if (seekable && seek_count > 0) {
         const size_t st_cap = (size_t)(op_end - op);
-        const int64_t st_val =
-            zxc_write_seek_table(op, st_cap, seek_comp, seek_decomp, seek_count, 0);
+        const int64_t st_val = zxc_write_seek_table(op, st_cap, seek_comp, seek_decomp, seek_count);
         free(seek_comp);
         free(seek_decomp);
         if (UNLIKELY(st_val < 0)) return (int64_t)st_val;

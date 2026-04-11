@@ -356,14 +356,10 @@ extern "C" {
  *  file footer contain @c num_blocks (u32 LE).  If non-zero, the reader
  *  can compute the seek block size and validate the block header.
  *  @{ */
-/** @brief Per-block entry size without checksum: comp(4) + decomp(4). */
+/** @brief Per-block entry size: comp(4) + decomp(4). */
 #define ZXC_SEEK_ENTRY_SIZE 8
-/** @brief Per-block entry size with checksum: comp(4) + decomp(4) + crc(4). */
-#define ZXC_SEEK_ENTRY_SIZE_CRC 12
 /** @brief Size of the seek table tail: num_blocks(4). */
 #define ZXC_SEEK_TAIL_SIZE 4
-/** @brief Bit in @c block_flags indicating per-block checksums in the seek table. */
-#define ZXC_SEEK_FLAG_CHECKSUM 0x01U
 /** @} */ /* end of Seekable Format Constants */
 
 /** @name GLO Token Constants
