@@ -44,6 +44,11 @@ Tests and publishes Rust crates to crates.io. Verifies the version matches the r
 
 Builds platform-specific wheels using `cibuildwheel` for Linux (x86_64, ARM64), macOS (ARM64, Intel), and Windows (AMD64, ARM64). Tests wheels against Python 3.12-3.13, then publishes to PyPI via trusted publishing.
 
+### wrapper-wasm.yml - WASM Build & Test
+**Triggers:** Push to main/feat/wasm (src/include/wrappers/wasm changes), pull requests
+
+Builds the WebAssembly target using Emscripten SDK. Compiles the library with SIMD disabled (scalar codepath) and no threading, then runs a Node.js roundtrip test suite covering all compression levels, reusable contexts, and error handling. Uploads `zxc.js` + `zxc.wasm` as build artifacts.
+
 ### security.yml - Code Security
 **Triggers:** Push to main, pull requests
 

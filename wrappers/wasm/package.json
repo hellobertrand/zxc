@@ -1,0 +1,36 @@
+{
+  "name": "zxc-wasm",
+  "version": "0.0.1",
+  "description": "ZXC high-performance lossless compression — WebAssembly build",
+  "type": "module",
+  "main": "zxc_wasm.js",
+  "exports": {
+    ".": "./zxc_wasm.js"
+  },
+  "files": [
+    "zxc_wasm.js",
+    "zxc.js",
+    "zxc.wasm",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "keywords": [
+    "compression",
+    "decompression",
+    "lz77",
+    "wasm",
+    "webassembly",
+    "zxc",
+    "lossless",
+    "high-performance"
+  ],
+  "author": "Bertrand Lebonnois",
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hellobertrand/zxc.git",
+    "directory": "wrappers/wasm"
+  }
+}

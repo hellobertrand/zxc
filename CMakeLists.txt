@@ -34,6 +34,21 @@ option(ZXC_BUILD_CLI "Build the command-line interface" ON)
 option(ZXC_BUILD_TESTS "Build unit tests" ON)
 option(ZXC_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 option(ZXC_DISABLE_SIMD "Disable explicit SIMD intrinsics (no AVX/NEON code paths)" OFF)
+
+# =============================================================================
+# Emscripten / WebAssembly overrides
+# =============================================================================
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    message(STATUS "Emscripten detected — configuring for WebAssembly.")
+    set(ZXC_DISABLE_SIMD ON  CACHE BOOL "" FORCE)
+    set(ZXC_BUILD_CLI    OFF CACHE BOOL "" FORCE)
+    set(ZXC_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
+    set(ZXC_NATIVE_ARCH  OFF CACHE BOOL "" FORCE)
+    set(ZXC_ENABLE_LTO   OFF CACHE BOOL "" FORCE)
+    set(ZXC_PGO_MODE     "OFF" CACHE STRING "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+endif()
+
 if(ZXC_DISABLE_SIMD)
     add_compile_definitions(ZXC_DISABLE_SIMD)
 endif()
@@ -202,10 +217,22 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
 endif()
 endif()
 
+# Sources: exclude zxc_driver.c for Emscripten (requires pthreads + FILE* I/O)
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    set(ZXC_CORE_SOURCES
+        src/lib/zxc_common.c
+        src/lib/zxc_dispatch.c
+    )
+else()
+    set(ZXC_CORE_SOURCES
+        src/lib/zxc_common.c
+        src/lib/zxc_driver.c
+        src/lib/zxc_dispatch.c
+    )
+endif()
+
 add_library(zxc_lib
-    src/lib/zxc_common.c
-    src/lib/zxc_driver.c
-    src/lib/zxc_dispatch.c
+    ${ZXC_CORE_SOURCES}
     ${ZXC_VARIANT_OBJECTS}
 )
 
@@ -305,9 +332,11 @@ if(ZXC_ENABLE_LTO)
     endif()
 endif()
 
-# Threading support
-find_package(Threads REQUIRED)
-target_link_libraries(zxc_lib PRIVATE Threads::Threads)
+# Threading support (not available in WASM single-threaded builds)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    find_package(Threads REQUIRED)
+    target_link_libraries(zxc_lib PRIVATE Threads::Threads)
+endif()
 
 # =============================================================================
 # CLI Executable
@@ -551,6 +580,59 @@ message(STATUS "  PGO Mode:       ${ZXC_PGO_MODE}")
 message(STATUS "  Build CLI:      ${ZXC_BUILD_CLI}")
 message(STATUS "  Build Tests:    ${ZXC_BUILD_TESTS}")
 message(STATUS "")
+
+# =============================================================================
+# WebAssembly (Emscripten) Target
+# =============================================================================
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    # Exported C functions (with leading underscore for Emscripten convention)
+    set(ZXC_WASM_EXPORTS
+        "_zxc_compress"
+        "_zxc_decompress"
+        "_zxc_compress_bound"
+        "_zxc_compress_block_bound"
+        "_zxc_get_decompressed_size"
+        "_zxc_create_cctx"
+        "_zxc_free_cctx"
+        "_zxc_compress_cctx"
+        "_zxc_create_dctx"
+        "_zxc_free_dctx"
+        "_zxc_decompress_dctx"
+        "_zxc_compress_block"
+        "_zxc_decompress_block"
+        "_zxc_min_level"
+        "_zxc_max_level"
+        "_zxc_default_level"
+        "_zxc_version_string"
+        "_zxc_error_name"
+        "_malloc"
+        "_free"
+    )
+    # Join list with commas for Emscripten linker flag
+    string(JOIN "," ZXC_WASM_EXPORTS_STR ${ZXC_WASM_EXPORTS})
+
+    add_executable(zxc_wasm wrappers/wasm/wasm_entry.c)
+    target_link_libraries(zxc_wasm PRIVATE zxc_lib)
+    set_target_properties(zxc_wasm PROPERTIES
+        OUTPUT_NAME "zxc"
+        SUFFIX ".js"
+    )
+    target_link_options(zxc_wasm PRIVATE
+        "-sEXPORTED_FUNCTIONS=[${ZXC_WASM_EXPORTS_STR}]"
+        "-sEXPORTED_RUNTIME_METHODS=[ccall,cwrap,getValue,setValue,UTF8ToString]"
+        "-sMODULARIZE=1"
+        "-sEXPORT_NAME=ZXCModule"
+        "-sALLOW_MEMORY_GROWTH=1"
+        "-sINITIAL_MEMORY=2097152"
+        "-sSTACK_SIZE=131072"
+        "-sENVIRONMENT=web,node"
+        "-sNO_FILESYSTEM=1"
+        "-sSTRICT=1"
+    )
+    target_compile_options(zxc_wasm PRIVATE -O3)
+
+    message(STATUS "  WASM Target:    zxc.js + zxc.wasm")
+endif()
 
 # =============================================================================
 # Documentation (Doxygen)
