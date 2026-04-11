@@ -34,6 +34,98 @@
 #include "zxc_internal.h"
 
 /* ========================================================================= */
+/*  Platform Threading & I/O Layer                                           */
+/* ========================================================================= */
+
+#if defined(_WIN32)
+#include <windows.h>
+
+/* Map POSIX threading primitives to Windows equivalents */
+typedef HANDLE zxc_thread_t;
+
+typedef struct {
+    void* (*func)(void*);
+    void* arg;
+} zxc_seek_thread_arg_t;
+
+static unsigned __stdcall zxc_seek_thread_entry(void* p) {
+    zxc_seek_thread_arg_t* a = (zxc_seek_thread_arg_t*)p;
+    void* (*f)(void*) = a->func;
+    void* arg = a->arg;
+    free(a);
+    f(arg);
+    return 0;
+}
+
+static int zxc_seek_thread_create(zxc_thread_t* t, void* (*fn)(void*), void* arg) {
+    zxc_seek_thread_arg_t* wrapper = malloc(sizeof(zxc_seek_thread_arg_t));
+    if (UNLIKELY(!wrapper)) return ZXC_ERROR_MEMORY;
+    wrapper->func = fn;
+    wrapper->arg = arg;
+    uintptr_t handle = _beginthreadex(NULL, 0, zxc_seek_thread_entry, wrapper, 0, NULL);
+    if (UNLIKELY(handle == 0)) { free(wrapper); return ZXC_ERROR_MEMORY; }
+    *t = (HANDLE)handle;
+    return 0;
+}
+
+static void zxc_seek_thread_join(zxc_thread_t t) {
+    WaitForSingleObject(t, INFINITE);
+    CloseHandle(t);
+}
+
+static int zxc_seek_get_num_procs(void) {
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return (int)si.dwNumberOfProcessors;
+}
+
+/**
+ * @brief Thread-safe positional read (Windows).
+ *
+ * Uses ReadFile + Overlapped to read at a specific offset without moving the
+ * file pointer, making it safe for concurrent access from multiple threads.
+ */
+static int zxc_seek_pread(HANDLE hFile, void* buf, size_t count, uint64_t offset) {
+    OVERLAPPED ov;
+    ZXC_MEMSET(&ov, 0, sizeof(ov));
+    ov.Offset = (DWORD)(offset & 0xFFFFFFFF);
+    ov.OffsetHigh = (DWORD)(offset >> 32);
+    DWORD bytes_read = 0;
+    if (!ReadFile(hFile, buf, (DWORD)count, &bytes_read, &ov)) return ZXC_ERROR_IO;
+    return (bytes_read == (DWORD)count) ? (int)count : ZXC_ERROR_IO;
+}
+
+#else /* POSIX */
+#include <pthread.h>
+#include <unistd.h>
+
+typedef pthread_t zxc_thread_t;
+
+static int zxc_seek_thread_create(zxc_thread_t* t, void* (*fn)(void*), void* arg) {
+    return pthread_create(t, NULL, fn, arg) == 0 ? 0 : ZXC_ERROR_MEMORY;
+}
+
+static void zxc_seek_thread_join(zxc_thread_t t) { pthread_join(t, NULL); }
+
+static int zxc_seek_get_num_procs(void) {
+    const long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return (n > 0) ? (int)n : 1;
+}
+
+/**
+ * @brief Thread-safe positional read (POSIX).
+ *
+ * Uses pread() which reads at a given offset without modifying the file
+ * descriptor's current position, making it inherently thread-safe.
+ */
+static int zxc_seek_pread(int fd, void* buf, size_t count, uint64_t offset) {
+    const ssize_t r = pread(fd, buf, count, (off_t)offset);
+    return (r == (ssize_t)count) ? (int)count : ZXC_ERROR_IO;
+}
+
+#endif /* _WIN32 */
+
+/* ========================================================================= */
 /*  Seek Table Writer                                                        */
 /* ========================================================================= */
 
@@ -81,6 +173,13 @@ struct zxc_seekable_s {
     size_t src_size;
     FILE* file;
 
+    /* Native file descriptor for thread-safe pread() I/O */
+#if defined(_WIN32)
+    HANDLE native_handle; /* from GetOSFileHandle or _get_osfhandle */
+#else
+    int fd; /* from fileno() */
+#endif
+
     /* Parsed seek table */
     uint32_t num_blocks;
     uint32_t* comp_sizes;     /* array[num_blocks] */
@@ -93,7 +192,7 @@ struct zxc_seekable_s {
     size_t block_size;
     int file_has_checksums;
 
-    /* Reusable decompression context */
+    /* Reusable decompression context (single-threaded path only) */
     zxc_cctx_t dctx;
     int dctx_initialized;
 };
@@ -228,6 +327,11 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
             s->src = NULL;
             s->src_size = (size_t)file_size;
             s->file = f;
+#if defined(_WIN32)
+            s->native_handle = (HANDLE)_get_osfhandle(_fileno(f));
+#else
+            s->fd = fileno(f);
+#endif
         }
         free(full);
         return s;
@@ -300,6 +404,11 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
 
     s->file = f;
     s->src = NULL;
+#if defined(_WIN32)
+    s->native_handle = (HANDLE)_get_osfhandle(_fileno(f));
+#else
+    s->fd = fileno(f);
+#endif
     s->src_size = (size_t)file_size;
     s->num_blocks = num_blocks;
     s->block_size = bs;
@@ -466,6 +575,230 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
 
     free(read_buf);
     return (int64_t)len;
+}
+
+/* ========================================================================= */
+/*  Multi-Threaded Random-Access Decompression (Fork–Join)                   */
+/* ========================================================================= */
+
+/**
+ * @brief Per-block job descriptor for multi-threaded decompression.
+ *
+ * Each worker thread receives a pointer to one of these, performs the read +
+ * decompress + memcpy sequence, and writes the result code into @c result.
+ * The main thread inspects @c result after join.
+ */
+typedef struct {
+    const zxc_seekable* s;  /* shared handle (read-only) */
+    uint32_t block_idx;     /* block to decompress */
+    uint8_t* dst;           /* output pointer within caller's buffer */
+    size_t skip;            /* bytes to skip at start of decompressed block */
+    size_t copy_len;        /* bytes to copy into dst */
+    int result;             /* 0 = OK, < 0 = error */
+} zxc_seek_mt_job_t;
+
+/**
+ * @brief Thread-safe block read using pread (for file mode) or memcpy (buffer mode).
+ */
+static int zxc_seek_read_block_mt(const zxc_seekable* s, const uint32_t block_idx, uint8_t* buf,
+                                  const size_t buf_cap) {
+    const uint64_t off = s->comp_offsets[block_idx];
+    const uint32_t csz = s->comp_sizes[block_idx];
+    if (UNLIKELY(csz > buf_cap)) return ZXC_ERROR_DST_TOO_SMALL;
+
+    if (s->src) {
+        /* Buffer mode — memcpy is inherently thread-safe on const data */
+        if (UNLIKELY(off + csz > s->src_size)) return ZXC_ERROR_SRC_TOO_SMALL;
+        ZXC_MEMCPY(buf, s->src + off, csz);
+    } else if (s->file) {
+        /* File mode — use pread for concurrent, lock-free reads */
+#if defined(_WIN32)
+        const int r = zxc_seek_pread(s->native_handle, buf, csz, off);
+#else
+        const int r = zxc_seek_pread(s->fd, buf, csz, off);
+#endif
+        if (UNLIKELY(r < 0)) return r;
+    } else {
+        return ZXC_ERROR_NULL_INPUT;
+    }
+    return (int)csz;
+}
+
+/**
+ * @brief Worker thread entry point for multi-threaded seekable decompression.
+ *
+ * Each worker:
+ *   1. Allocates a thread-local decompression context.
+ *   2. Reads the compressed block via pread (thread-safe).
+ *   3. Decompresses into a local work buffer.
+ *   4. Copies the requested sub-range into the caller's output buffer.
+ */
+static void* zxc_seek_mt_worker(void* arg) {
+    zxc_seek_mt_job_t* const job = (zxc_seek_mt_job_t*)arg;
+    const zxc_seekable* const s = job->s;
+    const uint32_t bi = job->block_idx;
+
+    /* Thread-local decompression context (mode=0 for decompress-only) */
+    zxc_cctx_t dctx;
+    if (UNLIKELY(zxc_cctx_init(&dctx, s->block_size, 0, 0, 0) != ZXC_OK)) {
+        job->result = ZXC_ERROR_MEMORY;
+        return NULL;
+    }
+
+    /* Allocate work buffer for decompressed output */
+    const size_t work_sz = s->block_size + ZXC_PAD_SIZE;
+    dctx.work_buf = (uint8_t*)malloc(work_sz);
+    if (UNLIKELY(!dctx.work_buf)) {
+        zxc_cctx_free(&dctx);
+        job->result = ZXC_ERROR_MEMORY;
+        return NULL;
+    }
+    dctx.work_buf_cap = work_sz;
+
+    /* Read compressed block */
+    const uint32_t csz = s->comp_sizes[bi];
+    uint8_t* const read_buf = (uint8_t*)malloc(csz + ZXC_PAD_SIZE);
+    if (UNLIKELY(!read_buf)) {
+        zxc_cctx_free(&dctx);
+        job->result = ZXC_ERROR_MEMORY;
+        return NULL;
+    }
+
+    const int read_res = zxc_seek_read_block_mt(s, bi, read_buf, csz + ZXC_PAD_SIZE);
+    if (UNLIKELY(read_res < 0)) {
+        free(read_buf);
+        zxc_cctx_free(&dctx);
+        job->result = read_res;
+        return NULL;
+    }
+
+    /* Decompress */
+    const int dec_res =
+        zxc_decompress_chunk_wrapper(&dctx, read_buf, (size_t)read_res, dctx.work_buf, work_sz);
+    free(read_buf);
+
+    if (UNLIKELY(dec_res < 0)) {
+        zxc_cctx_free(&dctx);
+        job->result = dec_res;
+        return NULL;
+    }
+
+    /* Copy the requested portion directly into the caller's output buffer */
+    ZXC_MEMCPY(job->dst, dctx.work_buf + job->skip, job->copy_len);
+
+    zxc_cctx_free(&dctx);
+    job->result = 0;
+    return NULL;
+}
+
+int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_t dst_capacity,
+                                         const uint64_t offset, const size_t len,
+                                         int n_threads) {
+    if (UNLIKELY(!s || !dst)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(len == 0)) return 0;
+    if (UNLIKELY(dst_capacity < len)) return ZXC_ERROR_DST_TOO_SMALL;
+    if (UNLIKELY(offset + len > s->total_decomp)) return ZXC_ERROR_SRC_TOO_SMALL;
+
+    /* Find block range */
+    const uint32_t blk_start = zxc_seek_find_block(s->decomp_offsets, s->num_blocks, offset);
+    const uint32_t blk_end =
+        zxc_seek_find_block(s->decomp_offsets, s->num_blocks, offset + len - 1);
+    const uint32_t num_jobs = blk_end - blk_start + 1;
+
+    /* Fallback to single-threaded path for trivial cases */
+    if (n_threads <= 1 || num_jobs <= 1) {
+        return zxc_seekable_decompress_range(s, dst, dst_capacity, offset, len);
+    }
+
+    /* Auto-detect thread count */
+    if (n_threads == 0) n_threads = zxc_seek_get_num_procs();
+
+    /* Cap threads to number of blocks and max limit */
+    if ((uint32_t)n_threads > num_jobs) n_threads = (int)num_jobs;
+    if (n_threads > ZXC_MAX_THREADS) n_threads = ZXC_MAX_THREADS;
+
+    /* Allocate job descriptors */
+    zxc_seek_mt_job_t* const jobs =
+        (zxc_seek_mt_job_t*)calloc(num_jobs, sizeof(zxc_seek_mt_job_t));
+    if (UNLIKELY(!jobs)) return ZXC_ERROR_MEMORY;
+
+    /* Plan jobs: compute skip, copy_len, and dst pointer for each block */
+    uint8_t* out = (uint8_t*)dst;
+    size_t remaining = len;
+    for (uint32_t i = 0; i < num_jobs; i++) {
+        const uint32_t bi = blk_start + i;
+        const uint64_t blk_decomp_start = s->decomp_offsets[bi];
+        const size_t skip = (offset > blk_decomp_start) ? (size_t)(offset - blk_decomp_start) : 0;
+        const size_t blk_decomp_sz = s->decomp_sizes[bi];
+        const size_t avail = blk_decomp_sz - skip;
+        const size_t copy = (avail < remaining) ? avail : remaining;
+
+        jobs[i].s = s;
+        jobs[i].block_idx = bi;
+        jobs[i].dst = out;
+        jobs[i].skip = skip;
+        jobs[i].copy_len = copy;
+        jobs[i].result = 0;
+
+        out += copy;
+        remaining -= copy;
+    }
+
+    /* Launch worker threads (fork phase) */
+    zxc_thread_t* const threads = (zxc_thread_t*)malloc((size_t)n_threads * sizeof(zxc_thread_t));
+    if (UNLIKELY(!threads)) {
+        free(jobs);
+        return ZXC_ERROR_MEMORY;
+    }
+
+    /*
+     * Distribute jobs across threads round-robin style.
+     * If num_jobs > n_threads, some threads handle multiple blocks sequentially.
+     * We process jobs in waves: spawn n_threads at a time, join, repeat.
+     */
+    int error = 0;
+    uint32_t job_idx = 0;
+
+    while (job_idx < num_jobs && !error) {
+        const int wave_size =
+            ((int)(num_jobs - job_idx) < n_threads) ? (int)(num_jobs - job_idx) : n_threads;
+
+        int launched = 0;
+        for (int t = 0; t < wave_size; t++) {
+            if (zxc_seek_thread_create(&threads[t], zxc_seek_mt_worker, &jobs[job_idx + t]) != 0) {
+                /* Failed to create thread — mark remaining jobs as errors */
+                for (uint32_t j = job_idx + (uint32_t)t; j < num_jobs; j++)
+                    jobs[j].result = ZXC_ERROR_MEMORY;
+                error = 1;
+                break;
+            }
+            launched++;
+        }
+
+        /* Join phase */
+        for (int t = 0; t < launched; t++) {
+            zxc_seek_thread_join(threads[t]);
+            if (jobs[job_idx + t].result < 0) error = 1;
+        }
+
+        job_idx += (uint32_t)launched;
+    }
+
+    free(threads);
+
+    /* Check for errors */
+    int64_t result = (int64_t)len;
+    if (error) {
+        for (uint32_t i = 0; i < num_jobs; i++) {
+            if (jobs[i].result < 0) {
+                result = (int64_t)jobs[i].result;
+                break;
+            }
+        }
+    }
+
+    free(jobs);
+    return result;
 }
 
 void zxc_seekable_free(zxc_seekable* s) {

@@ -146,6 +146,28 @@ ZXC_EXPORT int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, siz
                                                  uint64_t offset, size_t len);
 
 /**
+ * @brief Multi-threaded variant of zxc_seekable_decompress_range().
+ *
+ * Decompresses blocks in parallel using a fork–join thread pool.  Each worker
+ * thread owns its own decompression context and reads compressed data via
+ * @c pread() (POSIX) or @c ReadFile() (Windows) for lock-free concurrent I/O.
+ *
+ * Falls back to single-threaded mode when @p n_threads <= 1 or when the
+ * requested range spans a single block.
+ *
+ * @param[in,out] s            Seekable handle.
+ * @param[out]    dst          Destination buffer.
+ * @param[in]     dst_capacity Capacity of @p dst (must be >= @p len).
+ * @param[in]     offset       Byte offset into the original uncompressed data.
+ * @param[in]     len          Number of bytes to decompress.
+ * @param[in]     n_threads    Number of worker threads (0 = auto-detect CPU cores).
+ * @return Number of bytes written to @p dst (== @p len on success),
+ *         or a negative @ref zxc_error_t code on failure.
+ */
+ZXC_EXPORT int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, size_t dst_capacity,
+                                                    uint64_t offset, size_t len, int n_threads);
+
+/**
  * @brief Frees a seekable handle and all associated resources.
  *
  * Safe to call with @c NULL.
