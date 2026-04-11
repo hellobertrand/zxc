@@ -389,7 +389,92 @@ Offset  Size  Field
 
 ---
 
-## 10. Summary of Useful Fixed Sizes
+## 10. Versioning Policy
+
+### 10.1 Format version field
+
+The format version is a single byte at offset `0x04` of the file header.
+A conforming decoder **MUST** reject any file whose version it does not support.
+
+### 10.2 Version bump criteria
+
+| Change class | Version action | Example |
+|---|---|---|
+| New block type added | **No bump** (forward-compatible) | Adding a hypothetical `GLR` block type |
+| New flag bit defined | **No bump** (forward-compatible) | Using a reserved flag bit |
+| Existing block encoding changed | **Major bump** | Changing GLO token layout |
+| Header/footer layout changed | **Major bump** | Resizing the file header |
+| Checksum algorithm changed | **Major bump** | Replacing RapidHash with Komihash |
+
+### 10.3 Compatibility rules
+
+- **Backward compatibility**: a decoder supporting version *N* **MUST** decode all files produced by encoders of version *N*. It **MAY** also accept earlier versions.
+- **Forward compatibility**: a decoder encountering an **unknown block type** (not RAW, GLO, NUM, GHI, or EOF) **SHOULD** skip it using `comp_size` to advance past its payload (and optional checksum), rather than rejecting the file outright. This allows older decoders to partially process files from newer encoders that introduce additive block types.
+- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. Decoders **MUST** ignore reserved fields (not reject non-zero values), unless a future version assigns them meaning.
+
+### 10.4 Minimum conforming decoder
+
+A minimal conforming decoder for version 5 **MUST** support:
+- File header parsing and CRC16 validation.
+- **RAW** blocks (type 0) — passthrough copy.
+- **GLO** blocks (type 1) — full LZ decode with extras varint.
+- **GHI** blocks (type 3) — full LZ decode with extras varint.
+- **EOF** block (type 255) — stream termination.
+- File footer validation (source size check).
+
+Support for **NUM** (type 2) and checksum verification is **RECOMMENDED** but not strictly required for a minimal implementation.
+
+---
+
+## 11. Error Handling
+
+### 11.1 Error classes
+
+Decoders **MUST** detect and handle the following error conditions.
+The recommended behavior for each class is specified below.
+
+| Error | Detection point | Required behavior |
+|---|---|---|
+| **Bad magic** | File header, offset 0x00 | Reject immediately. Not a ZXC file. |
+| **Unsupported version** | File header, offset 0x04 | Reject immediately. Version not supported. |
+| **Header CRC16 mismatch** | File header, offset 0x0E | Reject. Header is corrupt or truncated. |
+| **Invalid chunk size code** | File header, offset 0x05 | Reject. Code outside valid range `[12..21]` and not legacy `64`. |
+| **Block header CRC8 mismatch** | Block header, offset 0x07 | Reject block. Stream is corrupt. |
+| **Unknown block type** | Block header, offset 0x00 | Skip block using `comp_size` (see §10.3), or reject. |
+| **Block payload truncated** | During `fread` of `comp_size` bytes | Reject. Unexpected end of stream. |
+| **Block checksum mismatch** | Trailing 4-byte checksum | Reject block. Payload is corrupt. |
+| **EOF block with non-zero comp_size** | EOF block header | Reject. Malformed EOF marker. |
+| **Footer source size mismatch** | File footer, offset 0x00 | Reject. Output size does not match declared original size. |
+| **Footer global hash mismatch** | File footer, offset 0x08 | Reject (if checksum mode active). Integrity failure. |
+| **Decompressed output exceeds chunk size** | During LZ decode | Reject. Corrupt or malicious payload. |
+| **Match offset out of bounds** | During LZ copy | Reject. Offset references data before output start. |
+| **Varint exceeds maximum length** | Extras stream | Reject. Overflow or corrupt extras data. |
+
+### 11.2 Severity levels
+
+- **Fatal**: the decoder **MUST** stop processing and report an error. All errors in the table above are fatal by default.
+- **Warning**: not currently defined. Future versions may introduce non-fatal conditions (e.g. unknown flag bits set in reserved positions).
+
+### 11.3 Partial output
+
+When a fatal error occurs mid-stream, the decoder **SHOULD**:
+1. Stop producing output immediately.
+2. Report the specific error condition (see `zxc_error_name` in the reference implementation).
+3. Not return partially decompressed data as a valid result.
+
+Buffer-mode decoders **MUST** return a negative error code. Stream-mode decoders **MUST** signal the error and cease writing to the output.
+
+### 11.4 Decoder hardening recommendations
+
+For decoders processing untrusted input (e.g. network data, user uploads):
+- Validate **all** header checksums before processing payloads.
+- Enforce maximum allocation limits based on `comp_size` and chunk size code.
+- Reject files where `comp_size` exceeds `zxc_compress_bound(chunk_size)`.
+- Use bounded memory copies — never trust decoded lengths without cross-checking against output buffer capacity.
+
+---
+
+## 12. Summary of Useful Fixed Sizes
 
 - File header: **16** bytes
 - Block header: **8** bytes
@@ -404,7 +489,7 @@ Offset  Size  Field
 
 ---
 
-## 11. Worked Example (Real Hexdump)
+## 13. Worked Example (Real Hexdump)
 
 This example was produced with the CLI from a 10-byte input (`Hello ZXC\n`) using:
 
@@ -414,7 +499,7 @@ zxc -z -C -1 sample.txt
 
 Generated archive size: **58 bytes**.
 
-### 11.1 Full hexdump
+### 13.1 Full hexdump
 
 ```text
 00000000: F5 2E B0 9C 05 12 80 00 00 00 00 00 00 00 9E 53
@@ -423,7 +508,7 @@ Generated archive size: **58 bytes**.
 00000030: 00 00 00 00 00 00 90 BB A1 75
 ```
 
-### 11.2 Byte-level decoding
+### 13.2 Byte-level decoding
 
 #### A) File Header (offset `0x00`, 16 bytes)
 
@@ -493,7 +578,7 @@ global0 = 0
 global1 = rotl1(global0) XOR block_crc = block_crc
 ```
 
-### 11.3 Structural view with absolute offsets
+### 13.3 Structural view with absolute offsets
 
 ```text
 0x00..0x0F  File Header (16)
