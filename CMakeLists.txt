@@ -419,6 +419,7 @@ if(ZXC_BUILD_TESTS)
             src/lib/zxc_common.c
             src/lib/zxc_driver.c
             src/lib/zxc_dispatch.c
+            src/lib/zxc_seekable.c
             ${ZXC_VARIANT_OBJECTS}
         )
         

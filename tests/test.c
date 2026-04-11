@@ -31,6 +31,8 @@ static FILE* create_restricted_file(const char* path) {
 
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_error.h"
+#include "../include/zxc_sans_io.h"
+#include "../include/zxc_seekable.h"
 #include "../include/zxc_stream.h"
 #include "../src/lib/zxc_internal.h"
 
@@ -2431,6 +2433,304 @@ int test_library_info_api() {
     return 1;
 }
 
+/* ========================================================================= */
+/*  Seekable Tests                                                           */
+/* ========================================================================= */
+
+static void fill_seek_data(uint8_t* buf, size_t size, uint8_t seed) {
+    for (size_t i = 0; i < size; i++) {
+        buf[i] = (uint8_t)(seed + (i * 17) + (i >> 8));
+    }
+}
+
+int test_seekable_table_sizes() {
+    printf("=== TEST: Seekable - Table Sizes ===\n");
+
+    /* block_header(8) + 10*8 + tail(4) = 92 */
+    if (zxc_seek_table_size(10, 0) != 92) {
+        printf("Failed: no-checksum size\n");
+        return 0;
+    }
+    /* block_header(8) + 10*12 + tail(4) = 132 */
+    if (zxc_seek_table_size(10, 1) != 132) {
+        printf("Failed: checksum size\n");
+        return 0;
+    }
+    /* block_header(8) + 0 + tail(4) = 12 */
+    if (zxc_seek_table_size(0, 0) != 12) {
+        printf("Failed: zero blocks size\n");
+        return 0;
+    }
+
+    printf("PASS\n\n");
+    return 1;
+}
+
+int test_seekable_table_write() {
+    printf("=== TEST: Seekable - Table Write/Validate ===\n");
+
+    const uint32_t comp[] = {100, 200, 150};
+    const uint32_t decomp[] = {1000, 2000, 1500};
+    const size_t sz = zxc_seek_table_size(3, 0);
+    uint8_t* buf = malloc(sz);
+    if (!buf) return 0;
+
+    const int64_t written = zxc_write_seek_table(buf, sz, comp, decomp, 3, 0);
+    if (written != (int64_t)sz) {
+        printf("Failed: write size mismatch\n");
+        free(buf);
+        return 0;
+    }
+
+    /* Validate block_type == SEK in the block header */
+    if (buf[0] != ZXC_BLOCK_SEK) {
+        printf("Failed: bad block_type (%u)\n", buf[0]);
+        free(buf);
+        return 0;
+    }
+
+    /* Validate num_blocks in the tail (last 4 bytes) */
+    if (zxc_le32(buf + sz - 4) != 3) {
+        printf("Failed: bad num_blocks\n");
+        free(buf);
+        return 0;
+    }
+
+    free(buf);
+    printf("PASS\n\n");
+    return 1;
+}
+
+int test_seekable_roundtrip() {
+    printf("=== TEST: Seekable - Compress/Decompress Roundtrip ===\n");
+
+    const size_t SRC_SIZE = 256 * 1024;
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    fill_seek_data(src, SRC_SIZE, 42);
+
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
+    uint8_t* dst = malloc(dst_cap);
+    uint8_t* dec = malloc(SRC_SIZE);
+    if (!dst || !dec) { free(src); free(dst); free(dec); return 0; }
+
+    zxc_compress_opts_t opts = {.level = ZXC_LEVEL_DEFAULT, .block_size = 64 * 1024,
+                                .checksum_enabled = 1, .seekable = 1};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    if (csize <= 0) { printf("Failed: compress\n"); free(src); free(dst); free(dec); return 0; }
+
+    /* Full decompression with standard API (backward compatibility) */
+    zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
+    const int64_t dsize = zxc_decompress(dst, (size_t)csize, dec, SRC_SIZE, &dopts);
+    if (dsize != (int64_t)SRC_SIZE || memcmp(src, dec, SRC_SIZE) != 0) {
+        printf("Failed: decompress mismatch\n");
+        free(src); free(dst); free(dec);
+        return 0;
+    }
+
+    free(src); free(dst); free(dec);
+    printf("PASS\n\n");
+    return 1;
+}
+
+int test_seekable_open_query() {
+    printf("=== TEST: Seekable - Open and Query ===\n");
+
+    const size_t SRC_SIZE = 200 * 1024;
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    fill_seek_data(src, SRC_SIZE, 99);
+
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
+    uint8_t* dst = malloc(dst_cap);
+    if (!dst) { free(src); return 0; }
+
+    zxc_compress_opts_t opts = {.level = 2, .block_size = 64 * 1024, .seekable = 1};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    if (csize <= 0) { printf("Failed: compress\n"); free(src); free(dst); return 0; }
+
+    zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
+    if (!s) { printf("Failed: open\n"); free(src); free(dst); return 0; }
+
+    const uint32_t nb = zxc_seekable_get_num_blocks(s);
+    if (nb < 3) { printf("Failed: expected >= 3 blocks, got %u\n", nb); zxc_seekable_free(s); free(src); free(dst); return 0; }
+
+    const uint64_t total = zxc_seekable_get_decompressed_size(s);
+    if (total != SRC_SIZE) { printf("Failed: decomp size\n"); zxc_seekable_free(s); free(src); free(dst); return 0; }
+
+    uint64_t sum = 0;
+    for (uint32_t i = 0; i < nb; i++) {
+        sum += zxc_seekable_get_block_decomp_size(s, i);
+        if (zxc_seekable_get_block_comp_size(s, i) == 0) {
+            printf("Failed: zero comp size\n"); zxc_seekable_free(s); free(src); free(dst); return 0;
+        }
+    }
+    if (sum != SRC_SIZE) { printf("Failed: block sizes sum\n"); zxc_seekable_free(s); free(src); free(dst); return 0; }
+
+    zxc_seekable_free(s);
+    free(src); free(dst);
+    printf("PASS\n\n");
+    return 1;
+}
+
+int test_seekable_random_access() {
+    printf("=== TEST: Seekable - Random Access ===\n");
+
+    const size_t SRC_SIZE = 300 * 1024;
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    fill_seek_data(src, SRC_SIZE, 77);
+
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
+    uint8_t* dst = malloc(dst_cap);
+    if (!dst) { free(src); return 0; }
+
+    zxc_compress_opts_t opts = {.level = 3, .block_size = 64 * 1024, .seekable = 1};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    if (csize <= 0) { printf("Failed: compress\n"); free(src); free(dst); return 0; }
+
+    zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
+    if (!s) { printf("Failed: open\n"); free(src); free(dst); return 0; }
+
+    /* First 1000 bytes */
+    uint8_t out1[1000];
+    int64_t r = zxc_seekable_decompress_range(s, out1, 1000, 0, 1000);
+    if (r != 1000 || memcmp(src, out1, 1000) != 0) {
+        printf("Failed: first 1000 bytes\n"); zxc_seekable_free(s); free(src); free(dst); return 0;
+    }
+
+    /* Middle range spanning multiple blocks */
+    const uint64_t off = 100 * 1024;
+    const size_t len = 80 * 1024;
+    uint8_t* out2 = malloc(len);
+    if (!out2) { zxc_seekable_free(s); free(src); free(dst); return 0; }
+    r = zxc_seekable_decompress_range(s, out2, len, off, len);
+    if (r != (int64_t)len || memcmp(src + off, out2, len) != 0) {
+        printf("Failed: mid-range\n"); free(out2); zxc_seekable_free(s); free(src); free(dst); return 0;
+    }
+    free(out2);
+
+    /* Last bytes */
+    uint8_t out3[512];
+    r = zxc_seekable_decompress_range(s, out3, 512, SRC_SIZE - 512, 512);
+    if (r != 512 || memcmp(src + SRC_SIZE - 512, out3, 512) != 0) {
+        printf("Failed: tail\n"); zxc_seekable_free(s); free(src); free(dst); return 0;
+    }
+
+    /* Entire file */
+    uint8_t* out4 = malloc(SRC_SIZE);
+    if (!out4) { zxc_seekable_free(s); free(src); free(dst); return 0; }
+    r = zxc_seekable_decompress_range(s, out4, SRC_SIZE, 0, SRC_SIZE);
+    if (r != (int64_t)SRC_SIZE || memcmp(src, out4, SRC_SIZE) != 0) {
+        printf("Failed: full range\n"); free(out4); zxc_seekable_free(s); free(src); free(dst); return 0;
+    }
+    free(out4);
+
+    /* Zero length */
+    uint8_t dummy;
+    r = zxc_seekable_decompress_range(s, &dummy, 1, 0, 0);
+    if (r != 0) { printf("Failed: zero-length\n"); zxc_seekable_free(s); free(src); free(dst); return 0; }
+
+    zxc_seekable_free(s);
+    free(src); free(dst);
+    printf("PASS\n\n");
+    return 1;
+}
+
+int test_seekable_non_seekable_reject() {
+    printf("=== TEST: Seekable - Non-Seekable Archive Rejected ===\n");
+
+    const size_t SRC_SIZE = 10000;
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    fill_seek_data(src, SRC_SIZE, 11);
+
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE);
+    uint8_t* dst = malloc(dst_cap);
+    if (!dst) { free(src); return 0; }
+
+    zxc_compress_opts_t opts = {.level = 1, .seekable = 0};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    if (csize <= 0) { printf("Failed: compress\n"); free(src); free(dst); return 0; }
+
+    zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
+    if (s != NULL) {
+        printf("Failed: expected NULL for non-seekable\n");
+        zxc_seekable_free(s); free(src); free(dst); return 0;
+    }
+
+    free(src); free(dst);
+    printf("PASS\n\n");
+    return 1;
+}
+
+int test_seekable_single_block() {
+    printf("=== TEST: Seekable - Single Block ===\n");
+
+    const size_t SRC_SIZE = 1024;
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    fill_seek_data(src, SRC_SIZE, 55);
+
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 256;
+    uint8_t* dst = malloc(dst_cap);
+    if (!dst) { free(src); return 0; }
+
+    zxc_compress_opts_t opts = {.level = 1, .seekable = 1};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    if (csize <= 0) { printf("Failed: compress\n"); free(src); free(dst); return 0; }
+
+    zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
+    if (!s) { printf("Failed: open\n"); free(src); free(dst); return 0; }
+    if (zxc_seekable_get_num_blocks(s) != 1) {
+        printf("Failed: expected 1 block\n"); zxc_seekable_free(s); free(src); free(dst); return 0;
+    }
+
+    uint8_t out[100];
+    int64_t r = zxc_seekable_decompress_range(s, out, 100, 500, 100);
+    if (r != 100 || memcmp(src + 500, out, 100) != 0) {
+        printf("Failed: range data\n"); zxc_seekable_free(s); free(src); free(dst); return 0;
+    }
+
+    zxc_seekable_free(s);
+    free(src); free(dst);
+    printf("PASS\n\n");
+    return 1;
+}
+
+int test_seekable_all_levels() {
+    printf("=== TEST: Seekable - All Compression Levels ===\n");
+
+    const size_t SRC_SIZE = 128 * 1024;
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    fill_seek_data(src, SRC_SIZE, 33);
+
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
+    uint8_t* dst = malloc(dst_cap);
+    uint8_t* dec = malloc(SRC_SIZE);
+    if (!dst || !dec) { free(src); free(dst); free(dec); return 0; }
+
+    for (int lvl = 1; lvl <= 5; lvl++) {
+        zxc_compress_opts_t opts = {.level = lvl, .block_size = 32 * 1024, .seekable = 1};
+        const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+        if (csize <= 0) { printf("Failed: compress level %d\n", lvl); free(src); free(dst); free(dec); return 0; }
+
+        zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
+        if (!s) { printf("Failed: open level %d\n", lvl); free(src); free(dst); free(dec); return 0; }
+
+        int64_t r = zxc_seekable_decompress_range(s, dec, SRC_SIZE, 0, SRC_SIZE);
+        if (r != (int64_t)SRC_SIZE || memcmp(src, dec, SRC_SIZE) != 0) {
+            printf("Failed: level %d data mismatch\n", lvl); zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+        }
+        zxc_seekable_free(s);
+    }
+
+    free(src); free(dst); free(dec);
+    printf("PASS\n\n");
+    return 1;
+}
+
 int main() {
     srand(42);  // Fixed seed for reproducibility
     int total_failures = 0;
@@ -2566,6 +2866,16 @@ int main() {
     if (!test_opaque_context_api()) total_failures++;
     if (!test_block_api()) total_failures++;
     if (!test_library_info_api()) total_failures++;
+
+    // --- SEEKABLE TESTS ---
+    if (!test_seekable_table_sizes()) total_failures++;
+    if (!test_seekable_table_write()) total_failures++;
+    if (!test_seekable_roundtrip()) total_failures++;
+    if (!test_seekable_open_query()) total_failures++;
+    if (!test_seekable_random_access()) total_failures++;
+    if (!test_seekable_non_seekable_reject()) total_failures++;
+    if (!test_seekable_single_block()) total_failures++;
+    if (!test_seekable_all_levels()) total_failures++;
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);

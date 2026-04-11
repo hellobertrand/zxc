@@ -344,6 +344,28 @@ extern "C" {
 /** @brief File footer size: original_size(8) + global_checksum(4). */
 #define ZXC_FILE_FOOTER_SIZE 12
 
+/** @name Seekable Format Constants
+ *  @brief Seek table block appended between EOF block and footer.
+ *
+ *  The seek table is optional (opt-in at compression time) and allows
+ *  random-access decompression by recording per-block compressed and
+ *  decompressed sizes.  It uses a standard ZXC block header with
+ *  @c block_type = @ref ZXC_BLOCK_SEK.
+ *
+ *  Detection from the end of the file: the last 4 bytes before the
+ *  file footer contain @c num_blocks (u32 LE).  If non-zero, the reader
+ *  can compute the seek block size and validate the block header.
+ *  @{ */
+/** @brief Per-block entry size without checksum: comp(4) + decomp(4). */
+#define ZXC_SEEK_ENTRY_SIZE 8
+/** @brief Per-block entry size with checksum: comp(4) + decomp(4) + crc(4). */
+#define ZXC_SEEK_ENTRY_SIZE_CRC 12
+/** @brief Size of the seek table tail: num_blocks(4). */
+#define ZXC_SEEK_TAIL_SIZE 4
+/** @brief Bit in @c block_flags indicating per-block checksums in the seek table. */
+#define ZXC_SEEK_FLAG_CHECKSUM 0x01U
+/** @} */ /* end of Seekable Format Constants */
+
 /** @name GLO Token Constants
  *  @brief 4-bit literal length / 4-bit match length / 16-bit offset.
  *  @{ */
@@ -533,6 +555,8 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
  *   Uses Delta Encoding + ZigZag + Bitpacking.
  * - `ZXC_BLOCK_GHI` (3): General-purpose high-velocity mode using LZ77 with advanced
  * techniques (lazy matching, step skipping) for maximum ratio. Includes 3 sections descriptors.
+ * - `ZXC_BLOCK_SEK` (254): Seek table block. Contains per-block compressed/decompressed sizes
+ *   for random-access decompression. Placed between EOF block and file footer.
  * - `ZXC_BLOCK_EOF` (255): End of file marker.
  */
 typedef enum {
@@ -540,6 +564,7 @@ typedef enum {
     ZXC_BLOCK_GLO = 1,
     ZXC_BLOCK_NUM = 2,
     ZXC_BLOCK_GHI = 3,
+    ZXC_BLOCK_SEK = 254,
     ZXC_BLOCK_EOF = 255
 } zxc_block_type_t;
 
