@@ -63,7 +63,10 @@ static int zxc_seek_thread_create(zxc_thread_t* t, void* (*fn)(void*), void* arg
     wrapper->func = fn;
     wrapper->arg = arg;
     uintptr_t handle = _beginthreadex(NULL, 0, zxc_seek_thread_entry, wrapper, 0, NULL);
-    if (UNLIKELY(handle == 0)) { free(wrapper); return ZXC_ERROR_MEMORY; }
+    if (UNLIKELY(handle == 0)) {
+        free(wrapper);
+        return ZXC_ERROR_MEMORY;
+    }
     *t = (HANDLE)handle;
     return 0;
 }
@@ -589,12 +592,12 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
  * The main thread inspects @c result after join.
  */
 typedef struct {
-    const zxc_seekable* s;  /* shared handle (read-only) */
-    uint32_t block_idx;     /* block to decompress */
-    uint8_t* dst;           /* output pointer within caller's buffer */
-    size_t skip;            /* bytes to skip at start of decompressed block */
-    size_t copy_len;        /* bytes to copy into dst */
-    int result;             /* 0 = OK, < 0 = error */
+    const zxc_seekable* s; /* shared handle (read-only) */
+    uint32_t block_idx;    /* block to decompress */
+    uint8_t* dst;          /* output pointer within caller's buffer */
+    size_t skip;           /* bytes to skip at start of decompressed block */
+    size_t copy_len;       /* bytes to copy into dst */
+    int result;            /* 0 = OK, < 0 = error */
 } zxc_seek_mt_job_t;
 
 /**
@@ -692,8 +695,7 @@ static void* zxc_seek_mt_worker(void* arg) {
 }
 
 int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_t dst_capacity,
-                                         const uint64_t offset, const size_t len,
-                                         int n_threads) {
+                                         const uint64_t offset, const size_t len, int n_threads) {
     if (UNLIKELY(!s || !dst)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(len == 0)) return 0;
     if (UNLIKELY(dst_capacity < len)) return ZXC_ERROR_DST_TOO_SMALL;
@@ -718,8 +720,7 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
     if (n_threads > ZXC_MAX_THREADS) n_threads = ZXC_MAX_THREADS;
 
     /* Allocate job descriptors */
-    zxc_seek_mt_job_t* const jobs =
-        (zxc_seek_mt_job_t*)calloc(num_jobs, sizeof(zxc_seek_mt_job_t));
+    zxc_seek_mt_job_t* const jobs = (zxc_seek_mt_job_t*)calloc(num_jobs, sizeof(zxc_seek_mt_job_t));
     if (UNLIKELY(!jobs)) return ZXC_ERROR_MEMORY;
 
     /* Plan jobs: compute skip, copy_len, and dst pointer for each block */

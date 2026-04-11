@@ -77,7 +77,7 @@ typedef struct zxc_seekable_s zxc_seekable;
  * @return Handle on success, or @c NULL if the buffer does not contain a
  *         valid seekable archive (e.g. missing seek block, bad block type).
  */
-ZXC_EXPORT zxc_seekable* zxc_seekable_open(const void* src, size_t src_size);
+ZXC_EXPORT zxc_seekable* zxc_seekable_open(const void* src, const size_t src_size);
 
 /**
  * @brief Opens a seekable archive from a FILE*.
@@ -117,7 +117,8 @@ ZXC_EXPORT uint64_t zxc_seekable_get_decompressed_size(const zxc_seekable* s);
  * @param[in] block_idx  Zero-based block index.
  * @return Compressed block size, or 0 if @p block_idx is out of range.
  */
-ZXC_EXPORT uint32_t zxc_seekable_get_block_comp_size(const zxc_seekable* s, uint32_t block_idx);
+ZXC_EXPORT uint32_t zxc_seekable_get_block_comp_size(const zxc_seekable* s,
+                                                     const uint32_t block_idx);
 
 /**
  * @brief Returns the decompressed size of a specific block.
@@ -126,7 +127,8 @@ ZXC_EXPORT uint32_t zxc_seekable_get_block_comp_size(const zxc_seekable* s, uint
  * @param[in] block_idx  Zero-based block index.
  * @return Decompressed block size, or 0 if @p block_idx is out of range.
  */
-ZXC_EXPORT uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s, uint32_t block_idx);
+ZXC_EXPORT uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s,
+                                                       const uint32_t block_idx);
 
 /**
  * @brief Decompresses an arbitrary byte range from the original data.
@@ -142,8 +144,9 @@ ZXC_EXPORT uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s, ui
  * @return Number of bytes written to @p dst (== @p len on success),
  *         or a negative @ref zxc_error_t code on failure.
  */
-ZXC_EXPORT int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, size_t dst_capacity,
-                                                 uint64_t offset, size_t len);
+ZXC_EXPORT int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst,
+                                                 const size_t dst_capacity, const uint64_t offset,
+                                                 const size_t len);
 
 /**
  * @brief Multi-threaded variant of zxc_seekable_decompress_range().
@@ -164,8 +167,10 @@ ZXC_EXPORT int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, siz
  * @return Number of bytes written to @p dst (== @p len on success),
  *         or a negative @ref zxc_error_t code on failure.
  */
-ZXC_EXPORT int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, size_t dst_capacity,
-                                                    uint64_t offset, size_t len, int n_threads);
+ZXC_EXPORT int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst,
+                                                    const size_t dst_capacity,
+                                                    const uint64_t offset, const size_t len,
+                                                    int n_threads);
 
 /**
  * @brief Frees a seekable handle and all associated resources.
@@ -193,9 +198,9 @@ ZXC_EXPORT void zxc_seekable_free(zxc_seekable* s);
  * @param[in]  num_blocks      Number of blocks.
  * @return Number of bytes written, or a negative @ref zxc_error_t on failure.
  */
-ZXC_EXPORT int64_t zxc_write_seek_table(uint8_t* dst, size_t dst_capacity,
+ZXC_EXPORT int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity,
                                         const uint32_t* comp_sizes, const uint32_t* decomp_sizes,
-                                        uint32_t num_blocks);
+                                        const uint32_t num_blocks);
 
 /**
  * @brief Returns the encoded size of a seek table for the given block count.
@@ -203,7 +208,7 @@ ZXC_EXPORT int64_t zxc_write_seek_table(uint8_t* dst, size_t dst_capacity,
  * @param[in] num_blocks     Number of blocks.
  * @return Total byte size of the seek table.
  */
-ZXC_EXPORT size_t zxc_seek_table_size(uint32_t num_blocks);
+ZXC_EXPORT size_t zxc_seek_table_size(const uint32_t num_blocks);
 
 /** @} */ /* end of seekable_api */
 
