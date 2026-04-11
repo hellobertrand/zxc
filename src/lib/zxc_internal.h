@@ -28,6 +28,7 @@
 
 #include <assert.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -292,8 +293,6 @@ extern "C" {
 #define ZXC_MAX_THREADS 512
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
-/** @brief Number of bits per byte (constant 8). */
-#define ZXC_BITS_PER_BYTE 8
 /** @brief Assumed CPU cache line size for alignment. */
 #define ZXC_CACHE_LINE_SIZE 64
 /** @brief Bitmask for cache-line alignment checks. */
@@ -1010,7 +1009,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const
     (void)hash_method; /* single algorithm for now; extend when adding more */
     const uint64_t hash = rapidhash(input, len);
 
-    return (uint32_t)(hash ^ (hash >> (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)));
+    return (uint32_t)(hash ^ (hash >> (sizeof(uint32_t) * CHAR_BIT)));
 }
 
 /**
@@ -1046,7 +1045,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
 static ZXC_ALWAYS_INLINE uint64_t zxc_le_partial(const uint8_t* p, size_t n) {
 #ifdef ZXC_BIG_ENDIAN
     uint64_t v = 0;
-    for (size_t i = 0; i < n; i++) v |= (uint64_t)p[i] << (i * ZXC_BITS_PER_BYTE);
+    for (size_t i = 0; i < n; i++) v |= (uint64_t)p[i] << (i * CHAR_BIT);
     return v;
 #else
     uint64_t v = 0;
@@ -1074,11 +1073,11 @@ static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* RESTRICT br,
     if (UNLIKELY(size < sizeof(uint64_t))) {
         br->accum = zxc_le_partial(src, size);
         br->ptr += size;
-        br->bits = (int)(size * ZXC_BITS_PER_BYTE);
+        br->bits = (int)(size * CHAR_BIT);
     } else {
         br->accum = zxc_le64(br->ptr);
         br->ptr += sizeof(uint64_t);
-        br->bits = sizeof(uint64_t) * ZXC_BITS_PER_BYTE;
+        br->bits = sizeof(uint64_t) * CHAR_BIT;
     }
 }
 
@@ -1108,7 +1107,7 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const
         // Calculate how many bytes we can read
         // We want to fill up to the accumulation capability (64 bits for uint64_t)
         // Bytes needed = (capacity_bits - safe_bits) / 8
-        const int bytes_needed = ((int)(sizeof(uint64_t) * ZXC_BITS_PER_BYTE) - safe_bits) >> 3;
+        const int bytes_needed = ((int)(sizeof(uint64_t) * CHAR_BIT) - safe_bits) / CHAR_BIT;
 
         // Bounds check: zxc_le64 always reads 8 bytes, so we need at least 8
         const size_t bytes_left = (size_t)(br->end - br->ptr);
@@ -1119,13 +1118,13 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const
             const uint64_t raw = zxc_le_partial(br->ptr, to_read);
             br->accum |= (safe_bits < 64) ? (raw << safe_bits) : 0;
             br->ptr += to_read;
-            br->bits = safe_bits + (int)to_read * ZXC_BITS_PER_BYTE;
+            br->bits = safe_bits + (int)to_read * CHAR_BIT;
         } else {
             // Fast path: full 8-byte read is safe
             const uint64_t raw = zxc_le64(br->ptr);
             br->accum |= (safe_bits < 64) ? (raw << safe_bits) : 0;
             br->ptr += bytes_needed;
-            br->bits = safe_bits + bytes_needed * ZXC_BITS_PER_BYTE;
+            br->bits = safe_bits + bytes_needed * CHAR_BIT;
         }
     }
 }

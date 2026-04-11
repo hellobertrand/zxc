@@ -369,7 +369,7 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 
         if (UNLIKELY(nvals > vals_remaining || src_size < offset + psize ||
                      (size_t)(d_end - d_ptr) < (size_t)nvals * sizeof(uint32_t) ||
-                     bits > (sizeof(uint32_t) * ZXC_BITS_PER_BYTE)))
+                     bits > (sizeof(uint32_t) * CHAR_BIT)))
             return ZXC_ERROR_CORRUPT_DATA;
 
         zxc_bit_reader_t br;
