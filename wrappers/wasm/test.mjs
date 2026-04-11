@@ -16,7 +16,11 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const buildDir = process.env.BUILD_DIR || join(__dirname, '..', '..', 'build-wasm');
+// Resolve BUILD_DIR relative to CWD (not the test file location)
+import { resolve } from 'path';
+const buildDir = process.env.BUILD_DIR
+    ? resolve(process.cwd(), process.env.BUILD_DIR)
+    : join(__dirname, '..', '..', 'build-wasm');
 
 // Emscripten generates a CJS module; use createRequire to load it.
 const require = createRequire(import.meta.url);
