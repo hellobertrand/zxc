@@ -781,6 +781,19 @@ else
     log_fail "Block size 4M should be rejected (max is 2M)"
 fi
 
+# 24. Seekable Format (-S)
+echo "Testing Seekable Format (-S)..."
+rm -f "$TEST_FILE_XC_ARG" "$TEST_FILE_DEC_BASH"
+"$ZXC_BIN" -S -c "$TEST_FILE_ARG" > "$TEST_FILE_XC_ARG"
+if [ ! -s "$TEST_FILE_XC_BASH" ]; then
+    log_fail "Seekable compression failed"
+fi
+"$ZXC_BIN" -d -c "$TEST_FILE_XC_ARG" > "$TEST_FILE_DEC_BASH"
+if cmp -s "$TEST_FILE" "$TEST_FILE_DEC_BASH"; then
+    log_pass "Seekable flag (-S)"
+else
+    log_fail "Seekable decompression mismatch"
+fi
+
 echo "All tests passed!"
 exit 0
-
