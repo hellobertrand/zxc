@@ -619,7 +619,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     )
     target_link_options(zxc_wasm PRIVATE
         "-sEXPORTED_FUNCTIONS=[${ZXC_WASM_EXPORTS_STR}]"
-        "-sEXPORTED_RUNTIME_METHODS=[ccall,cwrap,getValue,setValue,UTF8ToString]"
+        "-sEXPORTED_RUNTIME_METHODS=[ccall,cwrap,getValue,setValue,UTF8ToString,HEAPU8,HEAP32,HEAPU32]"
         "-sMODULARIZE=1"
         "-sEXPORT_NAME=ZXCModule"
         "-sALLOW_MEMORY_GROWTH=1"
