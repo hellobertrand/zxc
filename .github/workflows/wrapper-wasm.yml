@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
@@ -56,7 +56,7 @@ jobs:
           wc -c build-wasm/zxc.wasm
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
 
@@ -64,7 +64,7 @@ jobs:
         run: BUILD_DIR=build-wasm node wrappers/wasm/test.mjs
 
       - name: Upload WASM Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: zxc-wasm
           path: |
