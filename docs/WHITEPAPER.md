@@ -457,6 +457,13 @@ ZXC supports multiple integrity verification algorithms (though currently standa
 #### Credit
 The default `rapidhash` algorithm is based on wyhash and was developed by Nicolas De Carli. It is designed to fully exploit hardware performance while maintaining top-tier mathematical distribution qualities.
 
+### 5.10 Seekable Archives (Random Access)
+ZXC supports **O(log N)** random-access decompression without decoding the entire stream. This is achieved by appending an optional **Seek Table** (a `SEK` block) at the end of the archive, immediately before the file footer.
+
+*   **Structure**: The seek table contains an array of 8-byte entries (compressed size + decompressed size) for every block in the archive.
+*   **Performance**: Reading backward from the file footer instantly locates the seek table. A binary search on the `decompressed` prefix-sums quickly identifies the exact target block.
+*   **Use Cases**: This feature transforms ZXC from a sequential stream into a random-access volume format, perfect for **Compressed Filesystems (SquashFS)**, **Game Assets (VFS)**, and **Big Data Parquet/Log analysis**.
+
 ## 6. System Architecture (Threading)
 
 ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-core CPUs.

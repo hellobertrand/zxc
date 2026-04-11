@@ -31,6 +31,8 @@ It formalizes the current reference implementation of format version **5**.
 +----------------------+
 | EOF Block            | 8 bytes (type=255, comp_size=0)
 +----------------------+
+| SEK Block (Optional) | table of contents for random access
++----------------------+
 | File Footer          | 12 bytes
 +----------------------+
 ```
@@ -88,6 +90,7 @@ Offset  Size  Field
   - `1` = GLO
   - `2` = NUM
   - `3` = GHI
+  - `254` = SEK
   - `255` = EOF
 - **Block Flags**: currently not used by implementation (written as `0`).
 - **Reserved**: must be 0.
@@ -304,7 +307,32 @@ Constraints:
 - no payload
 - no per-block trailing checksum
 
-Immediately after EOF block header comes the 12-byte file footer.
+Immediately after EOF block header comes the Optional SEK block, followed by the 12-byte file footer.
+
+---
+
+## 5.6 SEK block (`type=254`)
+
+The **Seek Table** block is an optional block appended between the EOF block and the File Footer. It provides `O(log N)` random-access capabilities by recording the compressed and decompressed sizes of every block in the archive.
+
+**Layout of a SEK Block**:
+```text
+  Offset             Size    Field
+  0x00               8       Block Header (type=254, comp_size=N*8+4)
+  0x08               4       Block 0 Compressed Size (u32 LE)
+  0x0C               4       Block 0 Decompressed Size (u32 LE)
+  ...                ...     ...
+  8 + (N-1)*8        4       Block N-1 Compressed Size (u32 LE)
+  12 + (N-1)*8       4       Block N-1 Decompressed Size (u32 LE)
+  8 + N*8            4       Number of Blocks (u32 LE / Tail)
+```
+
+**Backward Detection Strategy**:
+1. Read the File Footer (last 12 bytes of file).
+2. Read 4 bytes **immediately before** the footer. This is the `Number of Blocks`.
+3. If `Number of Blocks > 0`, calculating `seek_block_size = 8 + (N * 8) + 4` gives the length of the seek block.
+4. Seek backward by `seek_block_size` bytes from the start of the footer to read the Block Header.
+5. Validate `block_type == 254 (SEK)`.
 
 ---
 
