@@ -326,8 +326,8 @@ The **Seek Table** block is an optional block appended between the EOF block and
 ```
 
 **Backward Detection Strategy**:
-1. Read the **File Header** (first 16 bytes) → extract `block_size`.
-2. Read the **File Footer** (last 12 bytes) → extract `total_decompressed_size`.
+1. Read the **File Header** (first 16 bytes) -> extract `block_size`.
+2. Read the **File Footer** (last 12 bytes) -> extract `total_decompressed_size`.
 3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`.
 4. Calculate `seek_block_size = 8 + (N × 4)`.
 5. Seek backward by `seek_block_size` bytes from the start of the footer to read the Block Header.
@@ -341,11 +341,11 @@ ZXC extras use a prefix-length varint.
 
 Length is encoded in unary form in the high bits of first byte:
 
-- `0xxxxxxx` → 1 byte total
-- `10xxxxxx` → 2 bytes total
-- `110xxxxx` → 3 bytes total
-- `1110xxxx` → 4 bytes total
-- `11110xxx` → 5 bytes total
+- `0xxxxxxx` -> 1 byte total
+- `10xxxxxx` -> 2 bytes total
+- `110xxxxx` -> 3 bytes total
+- `1110xxxx` -> 4 bytes total
+- `11110xxx` -> 5 bytes total
 
 Payload bits from following bytes are concatenated little-endian style (low bits first).
 
@@ -543,12 +543,12 @@ Generated archive size: **58 bytes**.
 F5 2E B0 9C | 05 | 12 | 80 | 00 00 00 00 00 00 00 | 9E 53
 ```
 
-- `F5 2E B0 9C` → magic word (LE) = `0x9CB02EF5`.
-- `05` → format version 5.
-- `12` → chunk-size code 18 (exponent encoding: `2^18 = 262144` bytes, i.e. 256 KiB).
-- `80` → checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
+- `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
+- `05` -> format version 5.
+- `12` -> chunk-size code 18 (exponent encoding: `2^18 = 262144` bytes, i.e. 256 KiB).
+- `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `9E 53` → header CRC16.
+- `9E 53` -> header CRC16.
 
 #### B) Data Block #0 (RAW)
 

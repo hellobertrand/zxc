@@ -397,7 +397,7 @@ uint64_t bound = zxc_compress_bound(src_size);
 zxc_compress_opts_t c_opts = {
     .level            = ZXC_LEVEL_DEFAULT,
     .checksum_enabled = 1,
-    /* .block_size = 0 → 256 KB default */
+    /* .block_size = 0 -> 256 KB default */
 };
 int64_t compressed_size = zxc_compress(src, src_size, dst, bound, &c_opts);
 
@@ -415,7 +415,7 @@ zxc_compress_opts_t c_opts = {
     .n_threads        = 0,               // 0 = auto
     .level            = ZXC_LEVEL_DEFAULT,
     .checksum_enabled = 1,
-    /* .block_size = 0 → 256 KB default */
+    /* .block_size = 0 -> 256 KB default */
 };
 int64_t bytes_written = zxc_stream_compress(f_in, f_out, &c_opts);
 
@@ -453,7 +453,7 @@ zxc_free_dctx(dctx);
 - Optional checksum validation
 - Reusable contexts for high-frequency call sites
 
-**[See complete examples and advanced usage →](docs/EXAMPLES.md)**
+**[See complete examples and advanced usage ->](docs/EXAMPLES.md)**
 
 ## Language Bindings
 

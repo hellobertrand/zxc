@@ -93,8 +93,8 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` → `libzxc.so.2` → `libzxc.so.0.9.1` |
-| macOS | `libzxc.dylib` → `libzxc.2.dylib` → `libzxc.0.9.1.dylib` |
+| Linux | `libzxc.so` -> `libzxc.so.2` -> `libzxc.so.0.9.1` |
+| macOS | `libzxc.dylib` -> `libzxc.2.dylib` -> `libzxc.0.9.1.dylib` |
 | Windows | `zxc.dll` + `zxc.lib` (import) |
 
 ---
@@ -413,7 +413,7 @@ Same as `zxc_decompress()` but reuses buffers from `dctx`.
 ## 9. Streaming API
 
 Declared in `zxc_stream.h`. Multi-threaded, `FILE*`-based pipeline
-(reader → workers → writer).
+(reader -> workers -> writer).
 
 ### `zxc_stream_compress`
 
@@ -425,7 +425,7 @@ ZXC_EXPORT int64_t zxc_stream_compress(
 );
 ```
 
-Compresses `f_in` → `f_out` using a parallel pipeline.
+Compresses `f_in` -> `f_out` using a parallel pipeline.
 All fields of `opts` are used, including `n_threads` and `progress_cb`.
 
 **Returns**: total compressed bytes written, or negative `zxc_error_t`.
@@ -440,7 +440,7 @@ ZXC_EXPORT int64_t zxc_stream_decompress(
 );
 ```
 
-Decompresses `f_in` → `f_out` using a parallel pipeline.
+Decompresses `f_in` -> `f_out` using a parallel pipeline.
 
 **Returns**: total decompressed bytes written, or negative `zxc_error_t`.
 
