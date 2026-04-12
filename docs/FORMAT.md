@@ -615,3 +615,77 @@ global1 = rotl1(global0) XOR block_crc = block_crc
 0x26..0x2D  EOF Block Header (8)
 0x2E..0x39  File Footer (12)
 ```
+
+### 13.4 Seekable Variant (with Seek Table)
+
+Same 10-byte input (`Hello ZXC\n`), compressed with seekable mode enabled:
+
+```bash
+zxc -z -C -1 -S sample.txt
+```
+
+Generated archive size: **70 bytes** (12 bytes larger than the non-seekable variant).
+
+#### Full hexdump
+
+```text
+00000000: F5 2E B0 9C 05 12 80 00 00 00 00 00 00 00 9E 53
+00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
+00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
+00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00
+00000040: 00 00 90 BB A1 75
+```
+
+#### Byte-level decoding
+
+**A) File Header** (offset `0x00`, 16 bytes) - identical to non-seekable.
+
+**B) Data Block #0 (RAW)** (offset `0x10`, 22 bytes) - identical to non-seekable.
+
+**C) EOF Block** (offset `0x26`, 8 bytes) - identical to non-seekable.
+
+**D) SEK Block** (offset `0x2E`, 12 bytes)
+
+Block header at `0x2E`:
+
+```text
+FE | 00 | 00 | 04 00 00 00 | D2
+```
+
+- `FE` -> type 254 = SEK (Seek Table).
+- flags `00`, reserved `00`.
+- `comp_size = 0x00000004 = 4` bytes (one entry x 4 bytes/entry).
+- header CRC8 = `0xD2`.
+
+Seek table entry at `0x36`:
+
+```text
+16 00 00 00
+```
+
+- Entry #0: compressed block size = `0x00000016 = 22` bytes.
+  This is the total size of data block #0 including its header (8) + payload (10) + checksum (4) = 22. ✓
+
+**E) File Footer** (offset `0x3A`, 12 bytes)
+
+```text
+0A 00 00 00 00 00 00 00 | 90 BB A1 75
+```
+
+- original source size = `10` bytes.
+- global hash = `0x75A1BB90`.
+
+#### Structural view with absolute offsets
+
+```text
+0x00..0x0F  File Header (16)
+0x10..0x17  RAW Block Header (8)
+0x18..0x21  RAW Payload (10)
+0x22..0x25  RAW Block Checksum (4)
+0x26..0x2D  EOF Block Header (8)
+0x2E..0x35  SEK Block Header (8)    <- seek table
+0x36..0x39  SEK Entry #0 (4)        <- comp_size of block #0
+0x3A..0x45  File Footer (12)
+```
+
+> **Key difference**: The SEK block is inserted between the EOF block and the file footer. A decoder that does not support seekable archives simply ignores the SEK block since it encounters the EOF block first and stops. The footer remains the last 12 bytes of the file regardless of whether a seek table is present.
