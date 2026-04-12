@@ -910,8 +910,15 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(const uint64_t x) {
     unsigned long r;
     _BitScanForward64(&r, x);
     return (int)r;
+#elif defined(_MSC_VER)
+    // Use two 32-bit scans to avoid fragile 64-bit De Bruijn multiplication.
+    unsigned long r;
+    const uint32_t lo = (uint32_t)x;
+    if (_BitScanForward(&r, lo)) return (int)r;
+    _BitScanForward(&r, (uint32_t)(x >> 32));
+    return 32 + (int)r;
 #else
-    // Fallback De Bruijn
+    // Fallback De Bruijn for non-GCC/non-MSVC compilers
     static const int Debruijn64[64] = {
         0,  1,  48, 2,  57, 49, 28, 3,  61, 58, 50, 42, 38, 29, 17, 4,  62, 55, 59, 36, 53, 51,
         43, 22, 45, 39, 33, 30, 24, 18, 12, 5,  63, 47, 56, 27, 60, 41, 37, 16, 54, 35, 52, 21,

@@ -2512,21 +2512,57 @@ int test_seekable_roundtrip() {
                                 .checksum_enabled = 1, .seekable = 1};
     const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
     if (csize <= 0) { printf("Failed: compress\n"); free(src); free(dst); free(dec); return 0; }
-    /* Sub-test A0: CONTROL - same data with default block_size (256KB) */
+    /* Sub-test A0: CONTROL - compare gen_lz_data vs fill_seek_data with same params */
     {
         const size_t SMALL = 60 * 1024;
+        uint8_t* src2 = malloc(SMALL);
+        if (!src2) { free(src); free(dst); free(dec); return 0; }
+        gen_lz_data(src2, SMALL);
+
+        /* A0a: gen_lz_data (should always pass) */
         memset(dec, 0, SMALL);
         zxc_compress_opts_t opts_ctrl = {.level = ZXC_LEVEL_DEFAULT, .block_size = 256 * 1024,
                                          .checksum_enabled = 1, .seekable = 0};
-        const int64_t c0 = zxc_compress(src, SMALL, dst, dst_cap, &opts_ctrl);
-        if (c0 <= 0) { printf("Failed: A0 compress\n"); free(src); free(dst); free(dec); return 0; }
+        int64_t c0 = zxc_compress(src2, SMALL, dst, dst_cap, &opts_ctrl);
+        if (c0 <= 0) { printf("Failed: A0a compress\n"); free(src2); free(src); free(dst); free(dec); return 0; }
+        printf("  A0a compressed %zu -> %lld (block type=%d)\n", SMALL, (long long)c0, (int)dst[16]);
         zxc_decompress_opts_t d0 = {.checksum_enabled = 1};
-        const int64_t d0s = zxc_decompress(dst, (size_t)c0, dec, SMALL, &d0);
-        if (d0s != (int64_t)SMALL || memcmp(src, dec, SMALL) != 0) {
-            printf("Failed: A0 control (256KB block) mismatch\n");
-            free(src); free(dst); free(dec); return 0;
+        int64_t d0s = zxc_decompress(dst, (size_t)c0, dec, SMALL, &d0);
+        if (d0s != (int64_t)SMALL || memcmp(src2, dec, SMALL) != 0) {
+            printf("Failed: A0a gen_lz_data mismatch (THIS IS UNEXPECTED)\n");
+            if (d0s == (int64_t)SMALL) {
+                for (size_t i = 0; i < SMALL; i++) {
+                    if (src2[i] != dec[i]) { printf("  first diff at byte %zu: src=0x%02x dec=0x%02x\n", i, src2[i], dec[i]); break; }
+                }
+            }
+            free(src2); free(src); free(dst); free(dec); return 0;
         }
-        printf("  sub-test A0 (control 256KB block, 60KB): OK\n");
+        printf("  sub-test A0a (gen_lz_data 256KB block): OK\n");
+
+        /* A0b: fill_seek_data with same params */
+        memset(dec, 0, SMALL);
+        c0 = zxc_compress(src, SMALL, dst, dst_cap, &opts_ctrl);
+        if (c0 <= 0) { printf("Failed: A0b compress\n"); free(src2); free(src); free(dst); free(dec); return 0; }
+        printf("  A0b compressed %zu -> %lld (block type=%d)\n", SMALL, (long long)c0, (int)dst[16]);
+        d0s = zxc_decompress(dst, (size_t)c0, dec, SMALL, &d0);
+        if (d0s != (int64_t)SMALL || memcmp(src, dec, SMALL) != 0) {
+            printf("  A0b fill_seek_data mismatch!\n");
+            if (d0s == (int64_t)SMALL) {
+                int diff_count = 0;
+                for (size_t i = 0; i < SMALL && diff_count < 5; i++) {
+                    if (src[i] != dec[i]) {
+                        printf("  diff at byte %zu: src=0x%02x dec=0x%02x (delta=%+d)\n",
+                               i, src[i], dec[i], (int)dec[i] - (int)src[i]);
+                        diff_count++;
+                    }
+                }
+            } else {
+                printf("  dsize=%lld\n", (long long)d0s);
+            }
+            free(src2); free(src); free(dst); free(dec); return 0;
+        }
+        printf("  sub-test A0b (fill_seek_data 256KB block): OK\n");
+        free(src2);
     }
     /* Sub-test A1: per-level isolation with block_size=64KB */
     {
