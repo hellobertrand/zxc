@@ -175,7 +175,7 @@ int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity, const uint
 struct zxc_seekable_s {
     /* Source - exactly one is non-NULL */
     const uint8_t* src;
-    size_t src_size;
+    uint64_t src_size;
     FILE* file;
 
     /* Native file descriptor for thread-safe pread() I/O */
@@ -191,8 +191,10 @@ struct zxc_seekable_s {
     uint64_t* comp_offsets; /* prefix-sum: byte offset in compressed file per block */
     uint64_t total_decomp;  /* total decompressed size (from footer) */
 
-    /* File header info */
-    size_t block_size;
+    /* File header info - block_size is always a power of 2 in [4KB, 2MB],
+     * fits in 21 bits.  Using uint32_t avoids size_t width differences
+     * between ILP32 and LP64 that caused ARM32 failures. */
+    uint32_t block_size;
     int file_has_checksums;
 
     /* Reusable decompression context (single-threaded path only) */
@@ -218,10 +220,11 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     if (UNLIKELY(data_size < MIN_SEEKABLE_SIZE)) return NULL;
 
     /* Step 1: validate file header => block_size */
-    size_t block_size = 0;
+    size_t block_size_sz = 0;
     int file_has_chk = 0;
-    if (UNLIKELY(zxc_read_file_header(data, data_size, &block_size, &file_has_chk) != ZXC_OK))
+    if (UNLIKELY(zxc_read_file_header(data, data_size, &block_size_sz, &file_has_chk) != ZXC_OK))
         return NULL;
+    const uint32_t block_size = (uint32_t)block_size_sz;
 
     /* Step 2: read total decompressed size from the file footer */
     const uint8_t* const footer_ptr = data + data_size - ZXC_FILE_FOOTER_SIZE;
@@ -230,15 +233,12 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     /* A value of 0 means empty file - no seek table */
     if (UNLIKELY(total_decomp == 0)) return NULL;
 
-    /* Step 3: derive num_blocks = ceil(total_decomp / block_size)
-     * Guard against uint32_t overflow: max representable is ~4 billion blocks.
-     * With block_size >= 4096, total_decomp would need to exceed ~16 TB. */
+    /* Step 3: derive num_blocks = ceil(total_decomp / block_size) */
     const uint64_t num_blocks_64 = (total_decomp + block_size - 1) / block_size;
     if (UNLIKELY(num_blocks_64 > UINT32_MAX)) return NULL;
     const uint32_t num_blocks = (uint32_t)num_blocks_64;
 
-    /* Step 4: compute seek block position and validate.
-     * Guard against size_t multiplication overflow. */
+    /* Step 4: compute seek block position and validate. */
     const uint64_t entries_total_64 = (uint64_t)num_blocks * ZXC_SEEK_ENTRY_SIZE;
     if (UNLIKELY(entries_total_64 > SIZE_MAX - ZXC_BLOCK_HEADER_SIZE)) return NULL;
     const size_t entries_total = (size_t)entries_total_64;
@@ -263,7 +263,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     s->block_size = block_size;
     s->file_has_checksums = file_has_chk;
     s->src = data;
-    s->src_size = data_size;
+    s->src_size = (uint64_t)data_size;
 
     /* Allocate arrays */
     s->comp_sizes = (uint32_t*)calloc(num_blocks, sizeof(uint32_t));
@@ -284,7 +284,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
         ep += sizeof(uint32_t);
 
         /* Reject entries larger than the entire file - prevents prefix overflow */
-        if (UNLIKELY(s->comp_sizes[i] > data_size)) {
+        if (UNLIKELY(s->comp_sizes[i] > (uint64_t)data_size)) {
             zxc_seekable_free(s);
             return NULL;
         }
@@ -333,7 +333,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
         zxc_seekable* const s = zxc_seekable_parse(full, (size_t)file_size);
         if (s) {
             s->src = NULL;
-            s->src_size = (size_t)file_size;
+            s->src_size = (uint64_t)file_size;
             s->file = f;
 #if defined(_WIN32)
             s->native_handle = (HANDLE)(intptr_t)_get_osfhandle(_fileno(f));
@@ -353,12 +353,13 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
         return NULL;
     }
 
-    size_t bs = 0;
+    size_t bs_sz = 0;
     int fhc = 0;
-    if (UNLIKELY(zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &bs, &fhc) != ZXC_OK)) {
+    if (UNLIKELY(zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &bs_sz, &fhc) != ZXC_OK)) {
         fseeko(f, saved_pos, SEEK_SET);
         return NULL;
     }
+    const uint32_t bs = (uint32_t)bs_sz;
 
     /* Read footer (12 bytes) to get total_decomp_size */
     uint8_t footer_buf[ZXC_FILE_FOOTER_SIZE];
@@ -430,7 +431,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
 #else
     s->fd = fileno(f);
 #endif
-    s->src_size = (size_t)file_size;
+    s->src_size = (uint64_t)file_size;
     s->num_blocks = num_blocks;
     s->block_size = bs;
     s->file_has_checksums = fhc;
@@ -478,9 +479,9 @@ uint32_t zxc_seekable_get_block_comp_size(const zxc_seekable* s, const uint32_t 
 
 uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s, const uint32_t block_idx) {
     if (UNLIKELY(!s || block_idx >= s->num_blocks)) return 0;
-    const uint64_t start = (uint64_t)block_idx * s->block_size;
+    const uint64_t start = (uint64_t)block_idx * (uint64_t)s->block_size;
     const uint64_t remaining = s->total_decomp - start;
-    return (remaining >= s->block_size) ? (uint32_t)s->block_size : (uint32_t)remaining;
+    return (remaining >= (uint64_t)s->block_size) ? s->block_size : (uint32_t)remaining;
 }
 
 /* ========================================================================= */
@@ -488,21 +489,21 @@ uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s, const uint32_
 /* ========================================================================= */
 
 /** @brief O(1) block lookup: block_index = offset / block_size. */
-static uint32_t zxc_seek_find_block(const size_t block_size, const uint64_t offset) {
-    return (uint32_t)(offset / block_size);
+static uint32_t zxc_seek_find_block(const uint32_t block_size, const uint64_t offset) {
+    return (uint32_t)(offset / (uint64_t)block_size);
 }
 
 /** @brief O(1) decompressed offset for block @p idx. */
-static uint64_t zxc_seek_decomp_offset(const size_t block_size, const uint32_t idx) {
-    return (uint64_t)idx * block_size;
+static uint64_t zxc_seek_decomp_offset(const uint32_t block_size, const uint32_t idx) {
+    return (uint64_t)idx * (uint64_t)block_size;
 }
 
 /** @brief O(1) decompressed size for block @p idx. */
-static uint32_t zxc_seek_decomp_size(const size_t block_size, const uint64_t total_decomp,
+static uint32_t zxc_seek_decomp_size(const uint32_t block_size, const uint64_t total_decomp,
                                      const uint32_t idx) {
-    const uint64_t start = (uint64_t)idx * block_size;
+    const uint64_t start = (uint64_t)idx * (uint64_t)block_size;
     const uint64_t remaining = total_decomp - start;
-    return (remaining >= block_size) ? (uint32_t)block_size : (uint32_t)remaining;
+    return (remaining >= (uint64_t)block_size) ? block_size : (uint32_t)remaining;
 }
 
 /**
@@ -538,13 +539,13 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
 
     /* Initialize decompression context on first use */
     if (!s->dctx_initialized) {
-        if (UNLIKELY(zxc_cctx_init(&s->dctx, s->block_size, 0, 0, 0) != ZXC_OK))
+        if (UNLIKELY(zxc_cctx_init(&s->dctx, (size_t)s->block_size, 0, 0, 0) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         s->dctx_initialized = 1;
     }
 
     /* Ensure work buffer is large enough */
-    const size_t work_sz = s->block_size + ZXC_PAD_SIZE;
+    const size_t work_sz = (size_t)s->block_size + ZXC_PAD_SIZE;
     if (s->dctx.work_buf_cap < work_sz) {
         free(s->dctx.work_buf);
         s->dctx.work_buf = (uint8_t*)malloc(work_sz);
@@ -661,13 +662,13 @@ static void* zxc_seek_mt_worker(void* arg) {
 
     /* Thread-local decompression context (mode=0 for decompress-only) */
     zxc_cctx_t dctx;
-    if (UNLIKELY(zxc_cctx_init(&dctx, s->block_size, 0, 0, 0) != ZXC_OK)) {
+    if (UNLIKELY(zxc_cctx_init(&dctx, (size_t)s->block_size, 0, 0, 0) != ZXC_OK)) {
         job->result = ZXC_ERROR_MEMORY;
         return NULL;
     }
 
     /* Allocate work buffer for decompressed output */
-    const size_t work_sz = s->block_size + ZXC_PAD_SIZE;
+    const size_t work_sz = (size_t)s->block_size + ZXC_PAD_SIZE;
     dctx.work_buf = (uint8_t*)malloc(work_sz);
     if (UNLIKELY(!dctx.work_buf)) {
         zxc_cctx_free(&dctx);
