@@ -2917,6 +2917,80 @@ int test_seekable_many_blocks() {
     return 1;
 }
 
+int test_seekable_open_file() {
+    printf("=== TEST: Seekable - Open File ===\n");
+
+    /* Compress seekable data into a buffer, write to tmpfile, then open via file API */
+    const size_t SRC_SIZE = 128 * 1024;
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    fill_seek_data(src, SRC_SIZE, 99);
+
+    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    uint8_t* dst = malloc(dst_cap);
+    uint8_t* dec = malloc(SRC_SIZE);
+    if (!dst || !dec) { free(src); free(dst); free(dec); return 0; }
+
+    zxc_compress_opts_t opts = {.level = ZXC_LEVEL_DEFAULT, .block_size = 32 * 1024,
+                                .checksum_enabled = 1, .seekable = 1};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    if (csize <= 0) {
+        printf("Failed: compress (%lld)\n", (long long)csize);
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Write compressed data to a temp file */
+    FILE* tf = tmpfile();
+    if (!tf) { printf("Failed: tmpfile\n"); free(src); free(dst); free(dec); return 0; }
+    if (fwrite(dst, 1, (size_t)csize, tf) != (size_t)csize) {
+        printf("Failed: fwrite\n"); fclose(tf); free(src); free(dst); free(dec); return 0;
+    }
+    fflush(tf);
+
+    /* Open via file API */
+    zxc_seekable* s = zxc_seekable_open_file(tf);
+    if (!s) {
+        printf("Failed: zxc_seekable_open_file returned NULL\n");
+        fclose(tf); free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Verify block count: 128KB / 32KB = 4 blocks */
+    const uint32_t n_blocks = zxc_seekable_get_num_blocks(s);
+    if (n_blocks != 4) {
+        printf("Failed: expected 4 blocks, got %u\n", n_blocks);
+        zxc_seekable_free(s); fclose(tf); free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Full decompress from file */
+    int64_t r = zxc_seekable_decompress_range(s, dec, SRC_SIZE, 0, SRC_SIZE);
+    if (r != (int64_t)SRC_SIZE || memcmp(src, dec, SRC_SIZE) != 0) {
+        printf("Failed: full decompress from file (r=%lld)\n", (long long)r);
+        zxc_seekable_free(s); fclose(tf); free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Random access from file: read 200 bytes spanning block boundary */
+    const uint64_t cross_off = 32 * 1024 - 100;  /* last 100B of block 0 + first 100B of block 1 */
+    uint8_t cross[200];
+    r = zxc_seekable_decompress_range(s, cross, 200, cross_off, 200);
+    if (r != 200 || memcmp(src + cross_off, cross, 200) != 0) {
+        printf("Failed: cross-block read from file\n");
+        zxc_seekable_free(s); fclose(tf); free(src); free(dst); free(dec); return 0;
+    }
+
+    zxc_seekable_free(s);
+    fclose(tf);
+
+    /* NULL input rejection */
+    if (zxc_seekable_open_file(NULL) != NULL) {
+        printf("Failed: NULL not rejected\n");
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    free(src); free(dst); free(dec);
+    printf("PASS\n\n");
+    return 1;
+}
+
 /* ========================================================================= */
 /*  Multi-Threaded Seekable Tests                                            */
 /* ========================================================================= */
@@ -3212,6 +3286,7 @@ int main() {
     if (!test_seekable_single_block()) total_failures++;
     if (!test_seekable_all_levels()) total_failures++;
     if (!test_seekable_many_blocks()) total_failures++;
+    if (!test_seekable_open_file()) total_failures++;
 
     // --- SEEKABLE MT TESTS ---
     if (!test_seekable_mt_roundtrip()) total_failures++;
