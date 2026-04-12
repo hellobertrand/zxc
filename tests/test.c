@@ -2512,6 +2512,53 @@ int test_seekable_roundtrip() {
                                 .checksum_enabled = 1, .seekable = 1};
     const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
     if (csize <= 0) { printf("Failed: compress\n"); free(src); free(dst); free(dec); return 0; }
+    /* Sub-test A0: CONTROL - same data with default block_size (256KB) */
+    {
+        const size_t SMALL = 60 * 1024;
+        memset(dec, 0, SMALL);
+        zxc_compress_opts_t opts_ctrl = {.level = ZXC_LEVEL_DEFAULT, .block_size = 256 * 1024,
+                                         .checksum_enabled = 1, .seekable = 0};
+        const int64_t c0 = zxc_compress(src, SMALL, dst, dst_cap, &opts_ctrl);
+        if (c0 <= 0) { printf("Failed: A0 compress\n"); free(src); free(dst); free(dec); return 0; }
+        zxc_decompress_opts_t d0 = {.checksum_enabled = 1};
+        const int64_t d0s = zxc_decompress(dst, (size_t)c0, dec, SMALL, &d0);
+        if (d0s != (int64_t)SMALL || memcmp(src, dec, SMALL) != 0) {
+            printf("Failed: A0 control (256KB block) mismatch\n");
+            free(src); free(dst); free(dec); return 0;
+        }
+        printf("  sub-test A0 (control 256KB block, 60KB): OK\n");
+    }
+    /* Sub-test A1: per-level isolation with block_size=64KB */
+    {
+        const size_t SMALL = 60 * 1024;
+        for (int lvl = 1; lvl <= 5; lvl++) {
+            memset(dec, 0, SMALL);
+            zxc_compress_opts_t opts_l = {.level = lvl, .block_size = 64 * 1024,
+                                          .checksum_enabled = 1, .seekable = 0};
+            const int64_t cl = zxc_compress(src, SMALL, dst, dst_cap, &opts_l);
+            if (cl <= 0) {
+                printf("Failed: A1 level %d compress\n", lvl);
+                free(src); free(dst); free(dec); return 0;
+            }
+            zxc_decompress_opts_t dl = {.checksum_enabled = 1};
+            const int64_t dls = zxc_decompress(dst, (size_t)cl, dec, SMALL, &dl);
+            if (dls != (int64_t)SMALL || memcmp(src, dec, SMALL) != 0) {
+                printf("  A1 level %d: FAIL at ", lvl);
+                if (dls == (int64_t)SMALL) {
+                    for (size_t i = 0; i < SMALL; i++) {
+                        if (src[i] != dec[i]) {
+                            printf("byte %zu: src=0x%02x dec=0x%02x\n", i, src[i], dec[i]);
+                            break;
+                        }
+                    }
+                } else {
+                    printf("size %lld\n", (long long)dls);
+                }
+                free(src); free(dst); free(dec); return 0;
+            }
+            printf("  A1 level %d (64KB block): OK\n", lvl);
+        }
+    }
     /* Sub-test A: single block (data < block_size), safe path (dst=SMALL) */
     {
         const size_t SMALL = 60 * 1024; /* fits in one 64KB block */
@@ -2540,10 +2587,10 @@ int test_seekable_roundtrip() {
         }
         printf("  sub-test A (safe path, 60KB): OK\n");
     }
-    /* Sub-test A2: same data but oversized dst → fast path in decompressor */
+    /* Sub-test A2: same data but oversized dst => fast path in decompressor */
     {
         const size_t SMALL = 60 * 1024;
-        const size_t BIG_DST = 128 * 1024;  /* oversized → fast path */
+        const size_t BIG_DST = 128 * 1024;  /* oversized => fast path */
         uint8_t* dec2 = calloc(1, BIG_DST);
         if (!dec2) { free(src); free(dst); free(dec); return 0; }
         zxc_compress_opts_t opts_a2 = {.level = ZXC_LEVEL_DEFAULT, .block_size = 64 * 1024,
