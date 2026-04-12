@@ -5,11 +5,11 @@ Designed for *Write Once, Read Many* workloads like ML datasets, game assets, an
 
 ## Features
 
-- **Blazing fast decompression** — ZXC is specifically optimised for read-heavy workloads.
-- **Buffer API** — compress/decompress `[]byte` slices in a single call.
-- **Streaming API** — multi-threaded file compression/decompression.
-- **Functional options** — clean, composable configuration (`WithLevel`, `WithChecksum`, `WithThreads`).
-- **Typed errors** — sentinel error values for every ZXC error code.
+- **Blazing fast decompression** - ZXC is specifically optimised for read-heavy workloads.
+- **Buffer API** - compress/decompress `[]byte` slices in a single call.
+- **Streaming API** - multi-threaded file compression/decompression.
+- **Functional options** - clean, composable configuration (`WithLevel`, `WithChecksum`, `WithThreads`).
+- **Typed errors** - sentinel error values for every ZXC error code.
 
 ## Prerequisites
 
@@ -90,4 +90,4 @@ CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -bench=. -benc
 
 ## License
 
-BSD-3-Clause — see [LICENSE](../../LICENSE).
+BSD-3-Clause - see [LICENSE](../../LICENSE).

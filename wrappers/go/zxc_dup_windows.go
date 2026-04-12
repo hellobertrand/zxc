@@ -14,7 +14,7 @@ import (
 	"runtime"
 )
 
-// C mode strings — allocated once, never freed (intentional; they live for the
+// C mode strings - allocated once, never freed (intentional; they live for the
 // process lifetime and avoid per-call C.CString/C.free overhead).
 var (
 	cModeRead  = C.CString("rb")

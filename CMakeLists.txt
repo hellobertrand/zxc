@@ -560,7 +560,7 @@ if(CLANG_FORMAT)
         VERBATIM
     )
 else()
-    message(STATUS "clang-format not found — format/format-check targets disabled")
+    message(STATUS "clang-format not found - format/format-check targets disabled")
 endif()
 
 # =============================================================================

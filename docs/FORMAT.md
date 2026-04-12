@@ -443,10 +443,10 @@ A conforming decoder **MUST** reject any file whose version it does not support.
 
 A minimal conforming decoder for version 5 **MUST** support:
 - File header parsing and CRC16 validation.
-- **RAW** blocks (type 0) — passthrough copy.
-- **GLO** blocks (type 1) — full LZ decode with extras varint.
-- **GHI** blocks (type 3) — full LZ decode with extras varint.
-- **EOF** block (type 255) — stream termination.
+- **RAW** blocks (type 0) - passthrough copy.
+- **GLO** blocks (type 1) - full LZ decode with extras varint.
+- **GHI** blocks (type 3) - full LZ decode with extras varint.
+- **EOF** block (type 255) - stream termination.
 - File footer validation (source size check).
 
 Support for **NUM** (type 2) and checksum verification is **RECOMMENDED** but not strictly required for a minimal implementation.
@@ -497,7 +497,7 @@ For decoders processing untrusted input (e.g. network data, user uploads):
 - Validate **all** header checksums before processing payloads.
 - Enforce maximum allocation limits based on `comp_size` and chunk size code.
 - Reject files where `comp_size` exceeds `zxc_compress_bound(chunk_size)`.
-- Use bounded memory copies — never trust decoded lengths without cross-checking against output buffer capacity.
+- Use bounded memory copies - never trust decoded lengths without cross-checking against output buffer capacity.
 
 ---
 

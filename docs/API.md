@@ -458,7 +458,7 @@ Reads the original size from the file footer. File position is restored.
 
 ## 10. Sans-IO API
 
-Declared in `zxc_sans_io.h` (not included by `zxc.h` — opt-in).
+Declared in `zxc_sans_io.h` (not included by `zxc.h` - opt-in).
 Low-level primitives for building custom compression drivers.
 
 ### `zxc_cctx_init`
@@ -589,7 +589,7 @@ if (result < 0) {
 | **Buffer API** | Yes (stateless) | Each call is self-contained.  Multiple threads can compress/decompress simultaneously with independent buffers. |
 | **Context API** | Per-context | A single `zxc_cctx` / `zxc_dctx` must not be shared between threads.  Create one context per thread. |
 | **Streaming API** | Per-call | Each `zxc_stream_*` call manages its own thread pool internally.  Do not call from multiple threads on the same `FILE*`. |
-| **Sans-IO API** | Per-context | Same rule as context API — one `zxc_cctx_t` per thread. |
+| **Sans-IO API** | Per-context | Same rule as context API - one `zxc_cctx_t` per thread. |
 | `zxc_error_name` | Yes | Returns a pointer to a static string. |
 
 ---

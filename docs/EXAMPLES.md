@@ -215,7 +215,7 @@ gcc -o stream_example stream_example.c -I include -L build -lzxc_lib -lpthread -
 
 ## Reusable Context API
 
-For tight loops — such as filesystem plug-ins (squashfs, dwarfs, erofs) —
+For tight loops - such as filesystem plug-ins (squashfs, dwarfs, erofs) -
 where allocating and freeing internal buffers on every call would add latency,
 ZXC provides opaque reusable contexts.
 
@@ -232,7 +232,7 @@ Options are **sticky**: settings passed via `opts` to `zxc_create_cctx()` or
 #include <stdlib.h>
 #include <string.h>
 
-#define BLOCK_SIZE   (64 * 1024)   // 64 KB — typical squashfs block size
+#define BLOCK_SIZE   (64 * 1024)   // 64 KB - typical squashfs block size
 #define NUM_BLOCKS   32
 
 int main(void) {
@@ -262,12 +262,12 @@ int main(void) {
         // Fill block with pseudo-random data
         for (size_t j = 0; j < BLOCK_SIZE; j++) src[j] = (uint8_t)(i ^ j);
 
-        // Compress — pass NULL to reuse sticky settings from create_opts.
+        // Compress - pass NULL to reuse sticky settings from create_opts.
         // No malloc/free inside, no need to pass opts again.
         int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap, NULL);
         if (csz <= 0) { fprintf(stderr, "Block %d: compress error %lld\n", i, (long long)csz); break; }
 
-        // Decompress — no malloc/free inside
+        // Decompress - no malloc/free inside
         int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, BLOCK_SIZE, NULL);
         if (dsz != BLOCK_SIZE || memcmp(src, dec, BLOCK_SIZE) != 0) {
             fprintf(stderr, "Block %d: roundtrip mismatch\n", i);
@@ -281,7 +281,7 @@ int main(void) {
     int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap, &high_opts);
     printf("Level-5 compressed: %lld bytes\n", (long long)csz);
 
-    printf("Processed %d blocks of %d KB — no per-block allocation.\n",
+    printf("Processed %d blocks of %d KB - no per-block allocation.\n",
            NUM_BLOCKS, BLOCK_SIZE / 1024);
 
     zxc_free_cctx(cctx);

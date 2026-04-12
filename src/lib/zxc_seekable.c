@@ -17,7 +17,7 @@
  * On-disk layout of a SEK block:
  *
  *   [Block Header (8B)]   block_type=SEK, block_flags=0, comp_size=N*4
- *   [N × Entry (4B)]      comp_size(u32 LE) per block
+ *   [N x Entry (4B)]      comp_size(u32 LE) per block
  *
  * Detection from end of file:
  *   1. Read file header (first 16 bytes) => block_size
@@ -42,7 +42,7 @@
 #include <process.h> /* _beginthreadex */
 #include <windows.h>
 
-/* MSVC does not provide fseeko/ftello — map to 64-bit equivalents */
+/* MSVC does not provide fseeko/ftello - map to 64-bit equivalents */
 #if defined(_MSC_VER) && !defined(fseeko)
 #define fseeko _fseeki64
 #define ftello _ftelli64
@@ -173,7 +173,7 @@ int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity, const uint
 /* ========================================================================= */
 
 struct zxc_seekable_s {
-    /* Source — exactly one is non-NULL */
+    /* Source - exactly one is non-NULL */
     const uint8_t* src;
     size_t src_size;
     FILE* file;
@@ -227,7 +227,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     const uint8_t* const footer_ptr = data + data_size - ZXC_FILE_FOOTER_SIZE;
     const uint64_t total_decomp = zxc_le64(footer_ptr);
 
-    /* A value of 0 means empty file — no seek table */
+    /* A value of 0 means empty file - no seek table */
     if (UNLIKELY(total_decomp == 0)) return NULL;
 
     /* Step 3: derive num_blocks = ceil(total_decomp / block_size)
@@ -283,7 +283,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
         s->comp_sizes[i] = zxc_le32(ep);
         ep += sizeof(uint32_t);
 
-        /* Reject entries larger than the entire file — prevents prefix overflow */
+        /* Reject entries larger than the entire file - prevents prefix overflow */
         if (UNLIKELY(s->comp_sizes[i] > data_size)) {
             zxc_seekable_free(s);
             return NULL;
@@ -552,7 +552,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         s->dctx.work_buf_cap = work_sz;
     }
 
-    /* Find block range — O(1) division */
+    /* Find block range - O(1) division */
     const uint32_t blk_start = zxc_seek_find_block(s->block_size, offset);
     const uint32_t blk_end = zxc_seek_find_block(s->block_size, offset + len - 1);
 
@@ -628,11 +628,11 @@ static int zxc_seek_read_block_mt(const zxc_seekable* s, const uint32_t block_id
     if (UNLIKELY(csz > buf_cap)) return ZXC_ERROR_DST_TOO_SMALL;
 
     if (s->src) {
-        /* Buffer mode — memcpy is inherently thread-safe on const data */
+        /* Buffer mode - memcpy is inherently thread-safe on const data */
         if (UNLIKELY(off + csz > s->src_size)) return ZXC_ERROR_SRC_TOO_SMALL;
         ZXC_MEMCPY(buf, s->src + off, csz);
     } else if (s->file) {
-        /* File mode — use pread for concurrent, lock-free reads */
+        /* File mode - use pread for concurrent, lock-free reads */
 #if defined(_WIN32)
         const int r = zxc_seek_pread(s->native_handle, buf, csz, off);
 #else
@@ -719,7 +719,7 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
     if (UNLIKELY(dst_capacity < len)) return ZXC_ERROR_DST_TOO_SMALL;
     if (UNLIKELY(offset + len > s->total_decomp)) return ZXC_ERROR_SRC_TOO_SMALL;
 
-    /* Find block range — O(1) division */
+    /* Find block range - O(1) division */
     const uint32_t blk_start = zxc_seek_find_block(s->block_size, offset);
     const uint32_t blk_end = zxc_seek_find_block(s->block_size, offset + len - 1);
     const uint32_t num_jobs = blk_end - blk_start + 1;
@@ -784,7 +784,7 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
         int launched = 0;
         for (int t = 0; t < wave_size; t++) {
             if (zxc_seek_thread_create(&threads[t], zxc_seek_mt_worker, &jobs[job_idx + t]) != 0) {
-                /* Failed to create thread — mark remaining jobs as errors */
+                /* Failed to create thread - mark remaining jobs as errors */
                 for (uint32_t j = job_idx + (uint32_t)t; j < num_jobs; j++)
                     jobs[j].result = ZXC_ERROR_MEMORY;
                 error = 1;
