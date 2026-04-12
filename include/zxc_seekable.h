@@ -151,7 +151,7 @@ ZXC_EXPORT int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst,
 /**
  * @brief Multi-threaded variant of zxc_seekable_decompress_range().
  *
- * Decompresses blocks in parallel using a fork–join thread pool.  Each worker
+ * Decompresses blocks in parallel using a fork-join thread pool.  Each worker
  * thread owns its own decompression context and reads compressed data via
  * @c pread() (POSIX) or @c ReadFile() (Windows) for lock-free concurrent I/O.
  *

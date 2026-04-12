@@ -599,7 +599,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
 }
 
 /* ========================================================================= */
-/*  Multi-Threaded Random-Access Decompression (Fork–Join)                   */
+/*  Multi-Threaded Random-Access Decompression (Fork-Join)                   */
 /* ========================================================================= */
 
 /**

@@ -1279,7 +1279,7 @@ int main(int argc, char** argv) {
         fm = NULL;
 
         const uint64_t max_c = zxc_compress_bound(in_size);
-        c_dat = malloc(max_c);
+        c_dat = malloc((size_t)max_c);
         if (!c_dat) goto bench_cleanup;
 
 #ifdef _WIN32
