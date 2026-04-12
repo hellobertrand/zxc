@@ -2851,6 +2851,72 @@ int test_seekable_all_levels() {
     return 1;
 }
 
+int test_seekable_many_blocks() {
+    printf("=== TEST: Seekable - Many Small Blocks ===\n");
+
+    /* Use minimum block size (4KB) with 256KB data => 64 blocks.
+     * This stresses the seekable block tracking array (dispatch lines 410-424)
+     * and ensures the seek table handles high block counts correctly. */
+    const size_t SRC_SIZE = 256 * 1024;
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    fill_seek_data(src, SRC_SIZE, 77);
+
+    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 4096;
+    uint8_t* dst = malloc(dst_cap);
+    uint8_t* dec = malloc(SRC_SIZE);
+    if (!dst || !dec) { free(src); free(dst); free(dec); return 0; }
+
+    /* Compress with minimum block_size = 4096 */
+    zxc_compress_opts_t opts = {.level = ZXC_LEVEL_DEFAULT, .block_size = 4096,
+                                .checksum_enabled = 1, .seekable = 1};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    if (csize <= 0) {
+        printf("Failed: compress (%lld)\n", (long long)csize);
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Open and verify block count = 64 */
+    zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
+    if (!s) { printf("Failed: open\n"); free(src); free(dst); free(dec); return 0; }
+
+    const uint32_t n_blocks = zxc_seekable_get_num_blocks(s);
+    if (n_blocks != 64) {
+        printf("Failed: expected 64 blocks, got %u\n", n_blocks);
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Full decompress via seekable API */
+    int64_t r = zxc_seekable_decompress_range(s, dec, SRC_SIZE, 0, SRC_SIZE);
+    if (r != (int64_t)SRC_SIZE || memcmp(src, dec, SRC_SIZE) != 0) {
+        printf("Failed: full decompress mismatch (r=%lld)\n", (long long)r);
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Random access: read 100 bytes from the middle of block 32 */
+    const uint64_t mid_off = 32 * 4096 + 2000;
+    uint8_t spot[100];
+    r = zxc_seekable_decompress_range(s, spot, 100, mid_off, 100);
+    if (r != 100 || memcmp(src + mid_off, spot, 100) != 0) {
+        printf("Failed: random access at offset %llu\n", (unsigned long long)mid_off);
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Cross-block read: span block boundary (last 50B of block 15 + first 50B of block 16) */
+    const uint64_t cross_off = 16 * 4096 - 50;
+    uint8_t cross[100];
+    r = zxc_seekable_decompress_range(s, cross, 100, cross_off, 100);
+    if (r != 100 || memcmp(src + cross_off, cross, 100) != 0) {
+        printf("Failed: cross-block read at offset %llu\n", (unsigned long long)cross_off);
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    zxc_seekable_free(s);
+    free(src); free(dst); free(dec);
+    printf("PASS\n\n");
+    return 1;
+}
+
 /* ========================================================================= */
 /*  Multi-Threaded Seekable Tests                                            */
 /* ========================================================================= */
@@ -3145,6 +3211,7 @@ int main() {
     if (!test_seekable_non_seekable_reject()) total_failures++;
     if (!test_seekable_single_block()) total_failures++;
     if (!test_seekable_all_levels()) total_failures++;
+    if (!test_seekable_many_blocks()) total_failures++;
 
     // --- SEEKABLE MT TESTS ---
     if (!test_seekable_mt_roundtrip()) total_failures++;
