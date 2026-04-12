@@ -37,7 +37,7 @@
 /*  Platform Threading & I/O Layer                                           */
 /* ========================================================================= */
 
-// LCOV_EXCL_START — Windows platform layer, not reachable on POSIX CI
+// LCOV_EXCL_START - Windows platform layer, not reachable on POSIX CI
 #if defined(_WIN32)
 #include <io.h>      /* _get_osfhandle, _fileno */
 #include <process.h> /* _beginthreadex */
@@ -311,9 +311,9 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
     if (UNLIKELY(!f)) return NULL;
 
     const long long saved_pos = ftello(f);
-    if (UNLIKELY(saved_pos < 0)) return NULL; // LCOV_EXCL_LINE
+    if (UNLIKELY(saved_pos < 0)) return NULL;  // LCOV_EXCL_LINE
 
-    if (UNLIKELY(fseeko(f, 0, SEEK_END) != 0)) return NULL; // LCOV_EXCL_LINE
+    if (UNLIKELY(fseeko(f, 0, SEEK_END) != 0)) return NULL;  // LCOV_EXCL_LINE
     const long long file_size = ftello(f);
     // LCOV_EXCL_START
     if (UNLIKELY(file_size <= 0)) {
@@ -355,7 +355,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
         return s;
     }
 
-    // LCOV_EXCL_START — large file path (>64MB), not reachable in unit tests
+    // LCOV_EXCL_START - large file path (>64MB), not reachable in unit tests
     /* Large file: read header + footer separately */
     uint8_t header[ZXC_FILE_HEADER_SIZE];
     if (UNLIKELY(fseeko(f, 0, SEEK_SET) != 0 ||
@@ -539,7 +539,7 @@ static int zxc_seek_read_block(const zxc_seekable* s, const uint32_t block_idx, 
             return ZXC_ERROR_IO;
         // LCOV_EXCL_STOP
     } else {
-        return ZXC_ERROR_NULL_INPUT; // LCOV_EXCL_LINE
+        return ZXC_ERROR_NULL_INPUT;  // LCOV_EXCL_LINE
     }
     return (int)csz;
 }
@@ -565,7 +565,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     if (s->dctx.work_buf_cap < work_sz) {
         free(s->dctx.work_buf);
         s->dctx.work_buf = (uint8_t*)malloc(work_sz);
-        if (UNLIKELY(!s->dctx.work_buf)) return ZXC_ERROR_MEMORY; // LCOV_EXCL_LINE
+        if (UNLIKELY(!s->dctx.work_buf)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
         s->dctx.work_buf_cap = work_sz;
     }
 
@@ -582,7 +582,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         if (s->comp_sizes[bi] > max_comp) max_comp = s->comp_sizes[bi];
     }
     uint8_t* const read_buf = (uint8_t*)malloc(max_comp + ZXC_PAD_SIZE);
-    if (UNLIKELY(!read_buf)) return ZXC_ERROR_MEMORY; // LCOV_EXCL_LINE
+    if (UNLIKELY(!read_buf)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
 
     for (uint32_t bi = blk_start; bi <= blk_end; bi++) {
         /* Read compressed block data */
@@ -657,7 +657,7 @@ static int zxc_seek_read_block_mt(const zxc_seekable* s, const uint32_t block_id
 #endif
         if (UNLIKELY(r < 0)) return r;
     } else {
-        return ZXC_ERROR_NULL_INPUT; // LCOV_EXCL_LINE
+        return ZXC_ERROR_NULL_INPUT;  // LCOV_EXCL_LINE
     }
     return (int)csz;
 }
@@ -765,7 +765,7 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
 
     /* Allocate job descriptors */
     zxc_seek_mt_job_t* const jobs = (zxc_seek_mt_job_t*)calloc(num_jobs, sizeof(zxc_seek_mt_job_t));
-    if (UNLIKELY(!jobs)) return ZXC_ERROR_MEMORY; // LCOV_EXCL_LINE
+    if (UNLIKELY(!jobs)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
 
     /* Plan jobs: compute skip, copy_len, and dst pointer for each block */
     uint8_t* out = (uint8_t*)dst;
