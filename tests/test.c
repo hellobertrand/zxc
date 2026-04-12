@@ -2513,11 +2513,60 @@ int test_seekable_roundtrip() {
     const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
     if (csize <= 0) { printf("Failed: compress\n"); free(src); free(dst); free(dec); return 0; }
 
+    /* Sanity: non-seekable compress with same block_size must round-trip */
+    {
+        memset(dec, 0, SRC_SIZE);
+        zxc_compress_opts_t opts_ns = {.level = ZXC_LEVEL_DEFAULT, .block_size = 64 * 1024,
+                                       .checksum_enabled = 1, .seekable = 0};
+        const int64_t ns_csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts_ns);
+        if (ns_csize <= 0) {
+            printf("Failed: non-seekable compress (%lld)\n", (long long)ns_csize);
+            free(src); free(dst); free(dec);
+            return 0;
+        }
+        zxc_decompress_opts_t nd = {.checksum_enabled = 1};
+        const int64_t ns_dsize = zxc_decompress(dst, (size_t)ns_csize, dec, SRC_SIZE, &nd);
+        if (ns_dsize != (int64_t)SRC_SIZE || memcmp(src, dec, SRC_SIZE) != 0) {
+            printf("Failed: non-seekable 64KB block_size roundtrip (dsize=%lld)\n",
+                   (long long)ns_dsize);
+            if (ns_dsize == (int64_t)SRC_SIZE) {
+                for (size_t i = 0; i < SRC_SIZE; i++) {
+                    if (src[i] != dec[i]) {
+                        printf("  first diff at byte %zu: src=0x%02x dec=0x%02x\n",
+                               i, src[i], dec[i]);
+                        break;
+                    }
+                }
+            }
+            free(src); free(dst); free(dec);
+            return 0;
+        }
+    }
+
+    /* Re-compress with seekable=1 for the actual test */
+    memset(dec, 0, SRC_SIZE);
+    const int64_t csize2 = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    if (csize2 <= 0) {
+        printf("Failed: seekable re-compress (%lld)\n", (long long)csize2);
+        free(src); free(dst); free(dec);
+        return 0;
+    }
+
     /* Full decompression with standard API (backward compatibility) */
     zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
-    const int64_t dsize = zxc_decompress(dst, (size_t)csize, dec, SRC_SIZE, &dopts);
+    const int64_t dsize = zxc_decompress(dst, (size_t)csize2, dec, SRC_SIZE, &dopts);
     if (dsize != (int64_t)SRC_SIZE || memcmp(src, dec, SRC_SIZE) != 0) {
-        printf("Failed: decompress mismatch\n");
+        printf("Failed: decompress mismatch (csize=%lld dsize=%lld expected=%zu)\n",
+               (long long)csize2, (long long)dsize, SRC_SIZE);
+        if (dsize == (int64_t)SRC_SIZE) {
+            for (size_t i = 0; i < SRC_SIZE; i++) {
+                if (src[i] != dec[i]) {
+                    printf("  first diff at byte %zu: src=0x%02x dec=0x%02x\n",
+                           i, src[i], dec[i]);
+                    break;
+                }
+            }
+        }
         free(src); free(dst); free(dec);
         return 0;
     }
@@ -2590,7 +2639,17 @@ int test_seekable_random_access() {
     uint8_t out1[1000];
     int64_t r = zxc_seekable_decompress_range(s, out1, 1000, 0, 1000);
     if (r != 1000 || memcmp(src, out1, 1000) != 0) {
-        printf("Failed: first 1000 bytes\n"); zxc_seekable_free(s); free(src); free(dst); return 0;
+        printf("Failed: first 1000 bytes (r=%lld)\n", (long long)r);
+        if (r == 1000) {
+            for (int i = 0; i < 1000; i++) {
+                if (src[i] != out1[i]) {
+                    printf("  first diff at byte %d: src=0x%02x out=0x%02x\n",
+                           i, src[i], out1[i]);
+                    break;
+                }
+            }
+        }
+        zxc_seekable_free(s); free(src); free(dst); return 0;
     }
 
     /* Middle range spanning multiple blocks */
@@ -2715,7 +2774,18 @@ int test_seekable_all_levels() {
 
         int64_t r = zxc_seekable_decompress_range(s, dec, SRC_SIZE, 0, SRC_SIZE);
         if (r != (int64_t)SRC_SIZE || memcmp(src, dec, SRC_SIZE) != 0) {
-            printf("Failed: level %d data mismatch\n", lvl); zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+            printf("Failed: level %d data mismatch (r=%lld expected=%zu)\n",
+                   lvl, (long long)r, SRC_SIZE);
+            if (r == (int64_t)SRC_SIZE) {
+                for (size_t i = 0; i < SRC_SIZE; i++) {
+                    if (src[i] != dec[i]) {
+                        printf("  first diff at byte %zu: src=0x%02x dec=0x%02x\n",
+                               i, src[i], dec[i]);
+                        break;
+                    }
+                }
+            }
+            zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
         }
         zxc_seekable_free(s);
     }

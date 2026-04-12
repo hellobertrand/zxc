@@ -61,7 +61,10 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 # Enable _GNU_SOURCE for ftello/fseeko on Linux
-if(UNIX)
+# Enable 64-bit off_t on 32-bit Linux to prevent fseeko/ftello/pread truncation
+if(UNIX AND NOT APPLE)
+    add_compile_definitions(_GNU_SOURCE _FILE_OFFSET_BITS=64 _LARGEFILE_SOURCE)
+elseif(APPLE)
     add_compile_definitions(_GNU_SOURCE)
 endif()
 
