@@ -163,6 +163,7 @@ fn main() {
         .file(src_lib.join("zxc_common.c"))
         .file(src_lib.join("zxc_driver.c"))
         .file(src_lib.join("zxc_dispatch.c"))
+        .file(src_lib.join("zxc_seekable.c"))
         .opt_level(3)
         .warnings(false)
         .flag_if_supported("-pthread");

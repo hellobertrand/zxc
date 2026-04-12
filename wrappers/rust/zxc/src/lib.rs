@@ -317,6 +317,7 @@ pub fn compress(data: &[u8], level: Level, checksum: Option<bool>) -> Result<Vec
     let opts = CompressOptions {
         level,
         checksum: checksum.unwrap_or(false),
+        seekable: false,
     };
     compress_with_options(data, &opts)
 }
