@@ -313,26 +313,25 @@ Immediately after EOF block header comes the Optional SEK block, followed by the
 
 ## 5.6 SEK block (`type=254`)
 
-The **Seek Table** block is an optional block appended between the EOF block and the File Footer. It provides `O(log N)` random-access capabilities by recording the compressed and decompressed sizes of every block in the archive.
+The **Seek Table** block is an optional block appended between the EOF block and the File Footer. It provides `O(1)` random-access capabilities by recording the compressed size of every block in the archive. Decompressed sizes and block indices are derived from the file header's `block_size` (all blocks are `block_size` except the last, which may be smaller).
 
 **Layout of a SEK Block**:
 ```text
   Offset             Size    Field
-  0x00               8       Block Header (type=254, comp_size=N*8+4)
+  0x00               8       Block Header (type=254, comp_size=N*4)
   0x08               4       Block 0 Compressed Size (u32 LE)
-  0x0C               4       Block 0 Decompressed Size (u32 LE)
+  0x0C               4       Block 1 Compressed Size (u32 LE)
   ...                ...     ...
-  8 + (N-1)*8        4       Block N-1 Compressed Size (u32 LE)
-  12 + (N-1)*8       4       Block N-1 Decompressed Size (u32 LE)
-  8 + N*8            4       Number of Blocks (u32 LE / Tail)
+  8 + (N-1)*4        4       Block N-1 Compressed Size (u32 LE)
 ```
 
 **Backward Detection Strategy**:
-1. Read the File Footer (last 12 bytes of file).
-2. Read 4 bytes **immediately before** the footer. This is the `Number of Blocks`.
-3. If `Number of Blocks > 0`, calculating `seek_block_size = 8 + (N * 8) + 4` gives the length of the seek block.
-4. Seek backward by `seek_block_size` bytes from the start of the footer to read the Block Header.
-5. Validate `block_type == 254 (SEK)`.
+1. Read the **File Header** (first 16 bytes) → extract `block_size`.
+2. Read the **File Footer** (last 12 bytes) → extract `total_decompressed_size`.
+3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`.
+4. Calculate `seek_block_size = 8 + (N × 4)`.
+5. Seek backward by `seek_block_size` bytes from the start of the footer to read the Block Header.
+6. Validate `block_type == 254 (SEK)` and `comp_size == N × 4`.
 
 ---
 

@@ -373,18 +373,14 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     }
     op += h_val;
 
-    /* Seekable: dynamic arrays for per-block sizes */
+    /* Seekable: dynamic array for per-block compressed sizes */
     uint32_t* seek_comp = NULL;
-    uint32_t* seek_decomp = NULL;
     uint32_t seek_count = 0;
     uint32_t seek_cap = 0;
     if (seekable) {
         seek_cap = (uint32_t)((src_size / block_size) + 2);
         seek_comp = (uint32_t*)malloc(seek_cap * sizeof(uint32_t));
-        seek_decomp = (uint32_t*)malloc(seek_cap * sizeof(uint32_t));
-        if (UNLIKELY(!seek_comp || !seek_decomp)) {
-            free(seek_comp);
-            free(seek_decomp);
+        if (UNLIKELY(!seek_comp)) {
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_MEMORY;
         }
@@ -398,7 +394,6 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         const int res = zxc_compress_chunk_wrapper(&ctx, ip + pos, chunk_len, op, rem_cap);
         if (UNLIKELY(res < 0)) {
             free(seek_comp);
-            free(seek_decomp);
             zxc_cctx_free(&ctx);
             return res;
         }
@@ -412,23 +407,19 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
             }
         }
 
-        /* Seekable: record block sizes */
+        /* Seekable: record compressed block size */
         if (seekable) {
             if (UNLIKELY(seek_count >= seek_cap)) {
                 seek_cap = seek_cap * 2;
                 uint32_t* nc = (uint32_t*)realloc(seek_comp, seek_cap * sizeof(uint32_t));
-                uint32_t* nd = (uint32_t*)realloc(seek_decomp, seek_cap * sizeof(uint32_t));
-                if (UNLIKELY(!nc || !nd)) {
-                    free(nc ? nc : seek_comp);
-                    free(nd ? nd : seek_decomp);
+                if (UNLIKELY(!nc)) {
+                    free(seek_comp);
                     zxc_cctx_free(&ctx);
                     return ZXC_ERROR_MEMORY;
                 }
                 seek_comp = nc;
-                seek_decomp = nd;
             }
             seek_comp[seek_count] = (uint32_t)res;
-            seek_decomp[seek_count] = (uint32_t)chunk_len;
             seek_count++;
         }
 
@@ -445,7 +436,6 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     const int eof_val = zxc_write_block_header(op, rem_cap, &eof_bh);
     if (UNLIKELY(eof_val < 0)) {
         free(seek_comp);
-        free(seek_decomp);
         return eof_val;
     }
     op += eof_val;
@@ -453,14 +443,12 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     /* Seekable: write seek table between EOF block and footer */
     if (seekable && seek_count > 0) {
         const size_t st_cap = (size_t)(op_end - op);
-        const int64_t st_val = zxc_write_seek_table(op, st_cap, seek_comp, seek_decomp, seek_count);
+        const int64_t st_val = zxc_write_seek_table(op, st_cap, seek_comp, seek_count);
         free(seek_comp);
-        free(seek_decomp);
         if (UNLIKELY(st_val < 0)) return (int64_t)st_val;
         op += st_val;
     } else {
         free(seek_comp);
-        free(seek_decomp);
     }
 
     if (UNLIKELY((size_t)(op_end - op) < ZXC_FILE_FOOTER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;

@@ -352,14 +352,13 @@ extern "C" {
  *  decompressed sizes.  It uses a standard ZXC block header with
  *  @c block_type = @ref ZXC_BLOCK_SEK.
  *
- *  Detection from the end of the file: the last 4 bytes before the
- *  file footer contain @c num_blocks (u32 LE).  If non-zero, the reader
- *  can compute the seek block size and validate the block header.
+ *  Detection from the end of the file: the reader derives @c num_blocks
+ *  from the file footer (total decompressed size) and file header (block size).
+ *  It then seeks backward to validate the SEK block header.
  *  @{ */
-/** @brief Per-block entry size: comp(4) + decomp(4). */
-#define ZXC_SEEK_ENTRY_SIZE 8
-/** @brief Size of the seek table tail: num_blocks(4). */
-#define ZXC_SEEK_TAIL_SIZE 4
+/** @brief Per-block entry size: comp_size(4) only.  decomp_size is derived
+ *  from the file header's block_size (all blocks except the last are full). */
+#define ZXC_SEEK_ENTRY_SIZE 4
 /** @} */ /* end of Seekable Format Constants */
 
 /** @name GLO Token Constants

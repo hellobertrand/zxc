@@ -189,18 +189,19 @@ ZXC_EXPORT void zxc_seekable_free(zxc_seekable* s);
  * @brief Writes a seek table to the destination buffer.
  *
  * This is a low-level helper used internally by the seekable compression
- * paths.  It writes: block_header(8) + N entries(8 each) + tail(4).
+ * paths.  It writes: block_header(8) + N entries(4 each).
+ * Each entry stores only @c comp_size; decompressed sizes are derived at
+ * read time from the file header's block_size.
  *
  * @param[out] dst             Destination buffer.
  * @param[in]  dst_capacity    Capacity of @p dst in bytes.
  * @param[in]  comp_sizes      Array of compressed block sizes.
- * @param[in]  decomp_sizes    Array of decompressed block sizes.
  * @param[in]  num_blocks      Number of blocks.
  * @return Number of bytes written, or a negative @ref zxc_error_t on failure.
  */
 ZXC_EXPORT int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity,
-                                        const uint32_t* comp_sizes, const uint32_t* decomp_sizes,
-                                        const uint32_t num_blocks);
+                                         const uint32_t* comp_sizes,
+                                         const uint32_t num_blocks);
 
 /**
  * @brief Returns the encoded size of a seek table for the given block count.
