@@ -50,6 +50,8 @@ export interface CompressOptions {
     level?: number;
     /** Enable checksum verification. Defaults to false. */
     checksum?: boolean;
+    /** Enable seek table for random-access decompression. Defaults to false. */
+    seekable?: boolean;
 }
 
 export interface DecompressOptions {
