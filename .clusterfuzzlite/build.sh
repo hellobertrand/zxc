@@ -8,7 +8,7 @@
 
 AVAILABLE_FUZZERS="decompress roundtrip"
 
-LIB_SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c"
+LIB_SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_seekable.c"
 
 for fuzzer in $AVAILABLE_FUZZERS; do
     if [ -z "${FUZZER_TARGET:-}" ] || [ "${FUZZER_TARGET}" == "$fuzzer" ]; then
