@@ -16,15 +16,15 @@
  *
  * On-disk layout of a SEK block:
  *
- *   [Block Header (8B)]   block_type=SEK, block_flags=0, comp_size
- *   [N × Entry (8B)]      comp_size(4) + decomp_size(4)
- *   [num_blocks (4B LE)]  tail for backward detection
+ *   [Block Header (8B)]   block_type=SEK, block_flags=0, comp_size=N*4
+ *   [N × Entry (4B)]      comp_size(u32 LE) per block
  *
  * Detection from end of file:
- *   1. Read file footer (last 12 bytes)
- *   2. Read 4 bytes before footer → num_blocks (u32 LE)
- *   3. Compute seek block size, read backward to the block header
- *   4. Validate block_type == ZXC_BLOCK_SEK
+ *   1. Read file header (first 16 bytes) → block_size
+ *   2. Read file footer (last 12 bytes) → total_decompressed_size
+ *   3. Derive num_blocks = ceil(total_decomp / block_size)
+ *   4. Compute seek block size, read backward to the block header
+ *   5. Validate block_type == ZXC_BLOCK_SEK
  */
 
 #include "../../include/zxc_seekable.h"
@@ -179,9 +179,9 @@ struct zxc_seekable_s {
 
     /* Parsed seek table */
     uint32_t num_blocks;
-    uint32_t* comp_sizes;     /* array[num_blocks] */
-    uint64_t* comp_offsets;   /* prefix-sum: byte offset in compressed file per block */
-    uint64_t total_decomp;    /* total decompressed size (from footer) */
+    uint32_t* comp_sizes;   /* array[num_blocks] */
+    uint64_t* comp_offsets; /* prefix-sum: byte offset in compressed file per block */
+    uint64_t total_decomp;  /* total decompressed size (from footer) */
 
     /* File header info */
     size_t block_size;
@@ -222,12 +222,20 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     /* A value of 0 means empty file — no seek table */
     if (UNLIKELY(total_decomp == 0)) return NULL;
 
-    /* Step 3: derive num_blocks = ceil(total_decomp / block_size) */
-    const uint32_t num_blocks = (uint32_t)((total_decomp + block_size - 1) / block_size);
+    /* Step 3: derive num_blocks = ceil(total_decomp / block_size)
+     * Guard against uint32_t overflow: max representable is ~4 billion blocks.
+     * With block_size >= 4096, total_decomp would need to exceed ~16 TB. */
+    const uint64_t num_blocks_64 = (total_decomp + block_size - 1) / block_size;
+    if (UNLIKELY(num_blocks_64 > UINT32_MAX)) return NULL;
+    const uint32_t num_blocks = (uint32_t)num_blocks_64;
 
-    /* Step 4: compute seek block position and validate */
-    const size_t entries_total = (size_t)num_blocks * ZXC_SEEK_ENTRY_SIZE;
+    /* Step 4: compute seek block position and validate.
+     * Guard against size_t multiplication overflow. */
+    const uint64_t entries_total_64 = (uint64_t)num_blocks * ZXC_SEEK_ENTRY_SIZE;
+    if (UNLIKELY(entries_total_64 > SIZE_MAX - ZXC_BLOCK_HEADER_SIZE)) return NULL;
+    const size_t entries_total = (size_t)entries_total_64;
     const size_t seek_block_total = ZXC_BLOCK_HEADER_SIZE + entries_total;
+    if (UNLIKELY(seek_block_total + ZXC_FILE_FOOTER_SIZE > data_size)) return NULL;
     const uint8_t* const seek_block_start =
         data + data_size - ZXC_FILE_FOOTER_SIZE - seek_block_total;
     if (UNLIKELY(seek_block_start < data)) return NULL;
@@ -258,12 +266,20 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     }
     s->total_decomp = total_decomp;
 
-    /* Parse comp_sizes and build compressed prefix sums */
+    /* Parse comp_sizes and build compressed prefix sums.
+     * Validate each comp_size against data_size to prevent prefix-sum overflow
+     * and out-of-bounds reads during decompression. */
     const uint8_t* ep = seek_block_start + ZXC_BLOCK_HEADER_SIZE;
     uint64_t comp_acc = ZXC_FILE_HEADER_SIZE; /* blocks start after file header */
     for (uint32_t i = 0; i < num_blocks; i++) {
         s->comp_sizes[i] = zxc_le32(ep);
         ep += sizeof(uint32_t);
+
+        /* Reject entries larger than the entire file — prevents prefix overflow */
+        if (UNLIKELY(s->comp_sizes[i] > data_size)) {
+            zxc_seekable_free(s);
+            return NULL;
+        }
         s->comp_offsets[i] = comp_acc;
         comp_acc += s->comp_sizes[i];
     }
@@ -350,12 +366,24 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
         return NULL;
     }
 
-    /* Derive num_blocks = ceil(total_decomp / block_size) */
-    const uint32_t num_blocks = (uint32_t)((total_decomp + bs - 1) / bs);
+    /* Derive num_blocks = ceil(total_decomp / block_size).
+     * Guard against uint32_t overflow. */
+    const uint64_t num_blocks_64 = (total_decomp + bs - 1) / bs;
+    if (UNLIKELY(num_blocks_64 > UINT32_MAX)) {
+        fseeko(f, saved_pos, SEEK_SET);
+        return NULL;
+    }
+    const uint32_t num_blocks = (uint32_t)num_blocks_64;
+
+    /* Guard against size_t multiplication overflow. */
+    const uint64_t entries_total_64 = (uint64_t)num_blocks * ZXC_SEEK_ENTRY_SIZE;
+    if (UNLIKELY(entries_total_64 > SIZE_MAX - ZXC_BLOCK_HEADER_SIZE)) {
+        fseeko(f, saved_pos, SEEK_SET);
+        return NULL;
+    }
 
     /* Read the full seek block */
-    const size_t seek_block_total =
-        ZXC_BLOCK_HEADER_SIZE + (size_t)num_blocks * ZXC_SEEK_ENTRY_SIZE;
+    const size_t seek_block_total = ZXC_BLOCK_HEADER_SIZE + (size_t)entries_total_64;
     uint8_t* const seek_buf = (uint8_t*)malloc(seek_block_total);
     if (UNLIKELY(!seek_buf)) {
         fseeko(f, saved_pos, SEEK_SET);
@@ -375,8 +403,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
     /* Validate block header */
     zxc_block_header_t bh;
     if (UNLIKELY(zxc_read_block_header(seek_buf, seek_block_total, &bh) != ZXC_OK) ||
-        bh.block_type != ZXC_BLOCK_SEK ||
-        bh.comp_size != (uint32_t)((size_t)num_blocks * ZXC_SEEK_ENTRY_SIZE)) {
+        bh.block_type != ZXC_BLOCK_SEK || bh.comp_size != (uint32_t)entries_total_64) {
         free(seek_buf);
         return NULL;
     }
@@ -414,6 +441,13 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
     for (uint32_t i = 0; i < num_blocks; i++) {
         s->comp_sizes[i] = zxc_le32(ep);
         ep += sizeof(uint32_t);
+
+        /* Reject entries larger than the entire file */
+        if (UNLIKELY(s->comp_sizes[i] > (uint64_t)file_size)) {
+            free(seek_buf);
+            zxc_seekable_free(s);
+            return NULL;
+        }
         s->comp_offsets[i] = comp_acc;
         comp_acc += s->comp_sizes[i];
     }

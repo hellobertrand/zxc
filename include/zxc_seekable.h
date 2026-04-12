@@ -200,8 +200,7 @@ ZXC_EXPORT void zxc_seekable_free(zxc_seekable* s);
  * @return Number of bytes written, or a negative @ref zxc_error_t on failure.
  */
 ZXC_EXPORT int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity,
-                                         const uint32_t* comp_sizes,
-                                         const uint32_t num_blocks);
+                                        const uint32_t* comp_sizes, const uint32_t num_blocks);
 
 /**
  * @brief Returns the encoded size of a seek table for the given block count.
