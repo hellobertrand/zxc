@@ -2512,8 +2512,55 @@ int test_seekable_roundtrip() {
                                 .checksum_enabled = 1, .seekable = 1};
     const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
     if (csize <= 0) { printf("Failed: compress\n"); free(src); free(dst); free(dec); return 0; }
-
     /* Sanity: non-seekable compress with same block_size must round-trip */
+    /* Sub-test A: single block (data < block_size) */
+    {
+        const size_t SMALL = 60 * 1024; /* fits in one 64KB block */
+        memset(dec, 0, SMALL);
+        zxc_compress_opts_t opts_a = {.level = ZXC_LEVEL_DEFAULT, .block_size = 64 * 1024,
+                                      .checksum_enabled = 1, .seekable = 0};
+        const int64_t a_csize = zxc_compress(src, SMALL, dst, dst_cap, &opts_a);
+        if (a_csize <= 0) {
+            printf("Failed: single-block 64KB compress (%lld)\n", (long long)a_csize);
+            free(src); free(dst); free(dec); return 0;
+        }
+        zxc_decompress_opts_t ad = {.checksum_enabled = 1};
+        const int64_t a_dsize = zxc_decompress(dst, (size_t)a_csize, dec, SMALL, &ad);
+        if (a_dsize != (int64_t)SMALL || memcmp(src, dec, SMALL) != 0) {
+            printf("Failed: single-block 64KB roundtrip (dsize=%lld)\n", (long long)a_dsize);
+            free(src); free(dst); free(dec); return 0;
+        }
+        printf("  sub-test A (1 block, 60KB): OK\n");
+    }
+    /* Sub-test B: exactly 2 blocks (128KB with 64KB block_size) */
+    {
+        const size_t TWO = 128 * 1024;
+        memset(dec, 0, TWO);
+        zxc_compress_opts_t opts_b = {.level = ZXC_LEVEL_DEFAULT, .block_size = 64 * 1024,
+                                      .checksum_enabled = 1, .seekable = 0};
+        const int64_t b_csize = zxc_compress(src, TWO, dst, dst_cap, &opts_b);
+        if (b_csize <= 0) {
+            printf("Failed: 2-block 64KB compress (%lld)\n", (long long)b_csize);
+            free(src); free(dst); free(dec); return 0;
+        }
+        zxc_decompress_opts_t bd = {.checksum_enabled = 1};
+        const int64_t b_dsize = zxc_decompress(dst, (size_t)b_csize, dec, TWO, &bd);
+        if (b_dsize != (int64_t)TWO || memcmp(src, dec, TWO) != 0) {
+            printf("Failed: 2-block 64KB roundtrip (dsize=%lld)\n", (long long)b_dsize);
+            if (b_dsize == (int64_t)TWO) {
+                for (size_t i = 0; i < TWO; i++) {
+                    if (src[i] != dec[i]) {
+                        printf("  first diff at byte %zu: src=0x%02x dec=0x%02x\n",
+                               i, src[i], dec[i]);
+                        break;
+                    }
+                }
+            }
+            free(src); free(dst); free(dec); return 0;
+        }
+        printf("  sub-test B (2 blocks, 128KB): OK\n");
+    }
+    /* Sub-test C: full 256KB (4 blocks × 64KB) */
     {
         memset(dec, 0, SRC_SIZE);
         zxc_compress_opts_t opts_ns = {.level = ZXC_LEVEL_DEFAULT, .block_size = 64 * 1024,
@@ -2541,6 +2588,7 @@ int test_seekable_roundtrip() {
             free(src); free(dst); free(dec);
             return 0;
         }
+        printf("  sub-test C (4 blocks, 256KB): OK\n");
     }
 
     /* Re-compress with seekable=1 for the actual test */
