@@ -50,7 +50,7 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    fmt.Printf("Compressed %d → %d bytes\n", len(data), len(compressed))
+    fmt.Printf("Compressed %d => %d bytes\n", len(data), len(compressed))
 
     // Decompress
     original, err := zxc.Decompress(compressed)

@@ -20,8 +20,8 @@
  *   [N × Entry (4B)]      comp_size(u32 LE) per block
  *
  * Detection from end of file:
- *   1. Read file header (first 16 bytes) → block_size
- *   2. Read file footer (last 12 bytes) → total_decompressed_size
+ *   1. Read file header (first 16 bytes) => block_size
+ *   2. Read file footer (last 12 bytes) => total_decompressed_size
  *   3. Derive num_blocks = ceil(total_decomp / block_size)
  *   4. Compute seek block size, read backward to the block header
  *   5. Validate block_type == ZXC_BLOCK_SEK
@@ -196,8 +196,8 @@ struct zxc_seekable_s {
  * @brief Parses the seek table from raw bytes at the end of the archive.
  *
  * Detection (backward from end):
- *   1. Read file header → block_size
- *   2. Read file footer → total_decomp_size
+ *   1. Read file header => block_size
+ *   2. Read file footer => total_decomp_size
  *   3. Derive num_blocks = ceil(total_decomp_size / block_size)
  *   4. Compute expected seek block position, validate block_type == SEK
  *   5. Read comp_sizes; derive decomp_sizes from block_size
@@ -209,7 +209,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
         ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
     if (UNLIKELY(data_size < MIN_SEEKABLE_SIZE)) return NULL;
 
-    /* Step 1: validate file header → block_size */
+    /* Step 1: validate file header => block_size */
     size_t block_size = 0;
     int file_has_chk = 0;
     if (UNLIKELY(zxc_read_file_header(data, data_size, &block_size, &file_has_chk) != ZXC_OK))
@@ -716,13 +716,13 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
     const uint32_t blk_end = zxc_seek_find_block(s->block_size, offset + len - 1);
     const uint32_t num_jobs = blk_end - blk_start + 1;
 
+    /* Auto-detect thread count (0 = use all available cores) */
+    if (n_threads == 0) n_threads = zxc_seek_get_num_procs();
+
     /* Fallback to single-threaded path for trivial cases */
     if (n_threads <= 1 || num_jobs <= 1) {
         return zxc_seekable_decompress_range(s, dst, dst_capacity, offset, len);
     }
-
-    /* Auto-detect thread count */
-    if (n_threads == 0) n_threads = zxc_seek_get_num_procs();
 
     /* Cap threads to number of blocks and max limit */
     if ((uint32_t)n_threads > num_jobs) n_threads = (int)num_jobs;

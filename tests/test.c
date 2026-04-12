@@ -2777,7 +2777,7 @@ int test_seekable_mt_single_block() {
     uint8_t* dec = malloc(SRC_SIZE);
     if (!dst || !dec) { free(src); free(dst); free(dec); return 0; }
 
-    /* Compress with block_size >= SRC_SIZE → only 1 block */
+    /* Compress with block_size >= SRC_SIZE => only 1 block */
     zxc_compress_opts_t opts = {.level = 3, .block_size = 64 * 1024, .seekable = 1};
     const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
     if (csize <= 0) { printf("Failed: compress\n"); free(src); free(dst); free(dec); return 0; }
