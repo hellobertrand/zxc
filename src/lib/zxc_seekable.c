@@ -38,7 +38,15 @@
 /* ========================================================================= */
 
 #if defined(_WIN32)
+#include <io.h>      /* _get_osfhandle, _fileno */
+#include <process.h> /* _beginthreadex */
 #include <windows.h>
+
+/* MSVC does not provide fseeko/ftello — map to 64-bit equivalents */
+#if defined(_MSC_VER) && !defined(fseeko)
+#define fseeko _fseeki64
+#define ftello _ftelli64
+#endif
 
 /* Map POSIX threading primitives to Windows equivalents */
 typedef HANDLE zxc_thread_t;
@@ -328,7 +336,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
             s->src_size = (size_t)file_size;
             s->file = f;
 #if defined(_WIN32)
-            s->native_handle = (HANDLE)_get_osfhandle(_fileno(f));
+            s->native_handle = (HANDLE)(intptr_t)_get_osfhandle(_fileno(f));
 #else
             s->fd = fileno(f);
 #endif
@@ -418,7 +426,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
     s->file = f;
     s->src = NULL;
 #if defined(_WIN32)
-    s->native_handle = (HANDLE)_get_osfhandle(_fileno(f));
+    s->native_handle = (HANDLE)(intptr_t)_get_osfhandle(_fileno(f));
 #else
     s->fd = fileno(f);
 #endif
