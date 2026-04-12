@@ -125,7 +125,7 @@ def decompress(data, decompress_size=None, checksum=False) -> bytes:
 
     return pyzxc_decompress(data, decompress_size, checksum)
 
-def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False) -> int:
+def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False, seekable=False) -> int:
     """Compress data from src to dst (file-like objects).
 
     Args:
@@ -134,6 +134,7 @@ def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False) 
         n_threads: Number of threads to use for compression. 0 uses default.
         level: Compression level. Use constants like LEVEL_FASTEST, LEVEL_DEFAULT, etc.
         checksum: If True, append a checksum for integrity verification.
+        seekable: If True, append a seek table for random-access decompression.
 
     Returns:
         Number of bytes written to `dst`.
@@ -158,7 +159,7 @@ def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False) 
     if hasattr(dst, "flush"):
         dst.flush()
 
-    return pyzxc_stream_compress(src, dst, n_threads, level, checksum)
+    return pyzxc_stream_compress(src, dst, n_threads, level, checksum, seekable)
 
 def stream_decompress(src, dst, n_threads=0, checksum=False) -> int:
     """Decompress data from src to dst (file-like objects).

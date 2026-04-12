@@ -157,6 +157,8 @@ pub struct zxc_compress_opts_t {
     pub block_size: usize,
     /// 1 to enable per-block and global checksums, 0 to disable.
     pub checksum_enabled: c_int,
+    /// 1 to append a seek table for random-access decompression, 0 to disable.
+    pub seekable: c_int,
     /// Progress callback (NULL to disable).
     pub progress_cb: *const c_void,
     /// User context pointer passed to progress_cb.
@@ -170,6 +172,7 @@ impl Default for zxc_compress_opts_t {
             level: 0,
             block_size: 0,
             checksum_enabled: 0,
+            seekable: 0,
             progress_cb: std::ptr::null(),
             user_data: std::ptr::null_mut(),
         }

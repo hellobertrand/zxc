@@ -264,11 +264,12 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
     int nthreads = 0;
     int level = ZXC_LEVEL_DEFAULT;
     int checksum = 0;
+    int seekable = 0;
 
-    static char* kwlist[] = {"src", "dst", "n_threads", "level", "checksum", NULL};
+    static char* kwlist[] = {"src", "dst", "n_threads", "level", "checksum", "seekable", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|iip", kwlist, &src, &dst, &nthreads, &level,
-                                     &checksum)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|iipp", kwlist, &src, &dst, &nthreads, &level,
+                                     &checksum, &seekable)) {
         return NULL;
     }
 
@@ -308,6 +309,7 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
     scopts.n_threads = nthreads;
     scopts.level = level;
     scopts.checksum_enabled = checksum;
+    scopts.seekable = seekable;
 
     Py_BEGIN_ALLOW_THREADS nwritten = zxc_stream_compress(fsrc, fdst, &scopts);
     Py_END_ALLOW_THREADS

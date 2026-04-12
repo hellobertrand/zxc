@@ -212,6 +212,9 @@ pub struct CompressOptions {
 
     /// Enable checksum for data integrity (default: `true`)
     pub checksum: bool,
+
+    /// Enable seek table for random-access decompression (default: `false`)
+    pub seekable: bool,
 }
 
 impl Default for CompressOptions {
@@ -219,6 +222,7 @@ impl Default for CompressOptions {
         Self {
             level: Level::Default,
             checksum: true,
+            seekable: false,
         }
     }
 }
@@ -235,6 +239,12 @@ impl CompressOptions {
     /// Disable checksum computation for faster compression.
     pub fn without_checksum(mut self) -> Self {
         self.checksum = false;
+        self
+    }
+
+    /// Enable seek table for random-access decompression.
+    pub fn with_seekable(mut self) -> Self {
+        self.seekable = true;
         self
     }
 }
@@ -356,6 +366,7 @@ unsafe fn impl_compress(
         let copts = zxc_sys::zxc_compress_opts_t {
             level: options.level as i32,
             checksum_enabled: options.checksum as i32,
+            seekable: options.seekable as i32,
             ..Default::default()
         };
         zxc_sys::zxc_compress(
@@ -562,6 +573,8 @@ pub struct StreamCompressOptions {
     pub threads: Option<usize>,
     /// Enable checksum for data integrity (default: `true`)
     pub checksum: bool,
+    /// Enable seek table for random-access decompression (default: `false`)
+    pub seekable: bool,
 }
 
 impl Default for StreamCompressOptions {
@@ -570,6 +583,7 @@ impl Default for StreamCompressOptions {
             level: Level::Default,
             threads: None,
             checksum: true,
+            seekable: false,
         }
     }
 }
@@ -592,6 +606,12 @@ impl StreamCompressOptions {
     /// Disable checksum computation.
     pub fn without_checksum(mut self) -> Self {
         self.checksum = false;
+        self
+    }
+
+    /// Enable seek table for random-access decompression.
+    pub fn with_seekable(mut self) -> Self {
+        self.seekable = true;
         self
     }
 }
