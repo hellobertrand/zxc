@@ -22,6 +22,7 @@
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_sans_io.h"
+#include "../../include/zxc_seekable.h"
 #include "../../include/zxc_stream.h"
 #include "zxc_internal.h"
 
@@ -300,6 +301,15 @@ typedef struct {
  *
  * @var writer_args_t::bytes_processed
  * The number of bytes processed so far, used for progress reporting.
+ *
+ * @var writer_args_t::seek_comp
+ * Array of compressed block sizes for seek table construction.
+ *
+ * @var writer_args_t::seek_count
+ * Number of entries in the seek table.
+ *
+ * @var writer_args_t::seek_cap
+ * Capacity of the seek table array.
  */
 typedef struct {
     zxc_stream_ctx_t* ctx;
@@ -307,6 +317,9 @@ typedef struct {
     int64_t total_bytes;
     uint32_t global_hash;
     uint64_t bytes_processed;  // For progress callback
+    uint32_t* seek_comp;
+    uint32_t seek_count;
+    uint32_t seek_cap;
 } writer_args_t;
 
 /**
@@ -458,6 +471,27 @@ static void* zxc_async_writer(void* arg) {
         }
         args->total_bytes += (int64_t)job->result_sz;
 
+        /* Seekable: record compressed block size */
+        if (args->seek_comp && ctx->compression_mode == 1) {
+            if (UNLIKELY(args->seek_count >= args->seek_cap)) {
+                args->seek_cap = args->seek_cap * 2;
+                uint32_t* nc =
+                    (uint32_t*)realloc(args->seek_comp, args->seek_cap * sizeof(uint32_t));
+                // LCOV_EXCL_START
+                if (UNLIKELY(!nc)) {
+                    ctx->io_error = 1;
+                    pthread_mutex_lock(&ctx->lock);
+                    job->status = JOB_STATUS_FREE;
+                    pthread_cond_signal(&ctx->cond_reader);
+                    pthread_mutex_unlock(&ctx->lock);
+                    break;
+                }
+                // LCOV_EXCL_STOP
+                args->seek_comp = nc;
+            }
+            args->seek_comp[args->seek_count++] = (uint32_t)job->result_sz;
+        }
+
         // Update progress callback
         if (ctx->progress_cb) {
             // LCOV_EXCL_START
@@ -515,7 +549,8 @@ static void* zxc_async_writer(void* arg) {
  */
 static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_threads, const int mode,
                                      const int level, const size_t block_size,
-                                     const int checksum_enabled, zxc_chunk_processor_t func,
+                                     const int checksum_enabled, const int seekable,
+                                     zxc_chunk_processor_t func,
                                      zxc_progress_callback_t progress_cb, void* user_data) {
     zxc_stream_ctx_t ctx;
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
@@ -635,7 +670,14 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         // LCOV_EXCL_STOP
     }
 
-    writer_args_t w_args = {&ctx, f_out, 0, 0, 0};
+    writer_args_t w_args = {&ctx, f_out, 0, 0, 0, NULL, 0, 0};
+
+    /* Seekable: allocate initial block-size tracking array */
+    if (mode == 1 && seekable) {
+        w_args.seek_cap = 64;
+        w_args.seek_comp = (uint32_t*)malloc(w_args.seek_cap * sizeof(uint32_t));
+        /* malloc failure → fall through without seekable (graceful degradation) */
+    }
 
     if (mode == 1 && f_out) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
@@ -769,37 +811,79 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     pthread_cond_destroy(&ctx.cond_reader);
     pthread_mutex_destroy(&ctx.lock);
 
-    // Write EOF Block if compression and no error
+    // Write EOF Block + optional Seek Table + Footer if compression and no error
     if (mode == 1 && !ctx.io_error && w_args.total_bytes >= 0) {
-        uint8_t final_buf[ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE];
-        uint8_t* const eof_buf = final_buf;
-        uint8_t* const footer = final_buf + ZXC_BLOCK_HEADER_SIZE;
-
-        zxc_block_header_t eof_bh = {
+        /* EOF block */
+        uint8_t eof_buf[ZXC_BLOCK_HEADER_SIZE];
+        const zxc_block_header_t eof_bh = {
             .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
         zxc_write_block_header(eof_buf, ZXC_BLOCK_HEADER_SIZE, &eof_bh);
-        zxc_write_file_footer(footer, ZXC_FILE_FOOTER_SIZE, total_src_bytes, w_args.global_hash,
-                              checksum_enabled);
-
-        if (UNLIKELY(f_out && fwrite(final_buf, 1, sizeof(final_buf), f_out) != sizeof(final_buf)))
+        if (UNLIKELY(f_out &&
+                     fwrite(eof_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_out) != ZXC_BLOCK_HEADER_SIZE))
             ctx.io_error = 1;
         else
-            w_args.total_bytes += sizeof(final_buf);
-    } else if (mode == 0 && !ctx.io_error) {
-        // Verification: Expect 12-byte footer
-        uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-        if (UNLIKELY(fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE)) {
-            ctx.io_error = 1;
-        } else {
-            // Verify Footer Content: Source Size and Global Checksum
-            int valid = (zxc_le64(footer) == (uint64_t)w_args.total_bytes);
-            if (valid && checksum_enabled && ctx.file_has_checksum)
-                valid = (zxc_le32(footer + sizeof(uint64_t)) == d_global_hash);
+            w_args.total_bytes += ZXC_BLOCK_HEADER_SIZE;
 
-            if (UNLIKELY(!valid)) ctx.io_error = 1;
+        /* Seekable: write SEK block between EOF and footer */
+        if (!ctx.io_error && w_args.seek_comp && w_args.seek_count > 0) {
+            const size_t st_size = zxc_seek_table_size(w_args.seek_count);
+            uint8_t* const st_buf = (uint8_t*)malloc(st_size);
+            if (st_buf) {
+                const int64_t st_val =
+                    zxc_write_seek_table(st_buf, st_size, w_args.seek_comp, w_args.seek_count);
+                if (st_val > 0 && f_out &&
+                    fwrite(st_buf, 1, (size_t)st_val, f_out) == (size_t)st_val)
+                    w_args.total_bytes += st_val;
+                free(st_buf);
+            }
+        }
+
+        /* Footer */
+        uint8_t footer_buf[ZXC_FILE_FOOTER_SIZE];
+        zxc_write_file_footer(footer_buf, ZXC_FILE_FOOTER_SIZE, total_src_bytes, w_args.global_hash,
+                              checksum_enabled);
+        if (UNLIKELY(f_out &&
+                     fwrite(footer_buf, 1, ZXC_FILE_FOOTER_SIZE, f_out) != ZXC_FILE_FOOTER_SIZE))
+            ctx.io_error = 1;
+        else
+            w_args.total_bytes += ZXC_FILE_FOOTER_SIZE;
+    } else if (mode == 0 && !ctx.io_error) {
+        /* Skip optional SEK block(s) between EOF and footer */
+        uint8_t peek_buf[ZXC_BLOCK_HEADER_SIZE];
+        if (LIKELY(fread(peek_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in) == ZXC_BLOCK_HEADER_SIZE)) {
+            zxc_block_header_t peek_bh;
+            if (zxc_read_block_header(peek_buf, ZXC_BLOCK_HEADER_SIZE, &peek_bh) == ZXC_OK &&
+                peek_bh.block_type == ZXC_BLOCK_SEK) {
+                /* Skip the SEK payload */
+                if (UNLIKELY(fseeko(f_in, (long long)peek_bh.comp_size, SEEK_CUR) != 0))
+                    ctx.io_error = 1;
+                /* Now read the footer normally */
+            } else {
+                /* Not a SEK block — this IS the start of the footer; rewind */
+                if (UNLIKELY(fseeko(f_in, -(long long)ZXC_BLOCK_HEADER_SIZE, SEEK_CUR) != 0))
+                    ctx.io_error = 1;
+            }
+        } else {
+            ctx.io_error = 1;
+        }
+
+        // Verification: Expect 12-byte footer
+        if (!ctx.io_error) {
+            uint8_t footer[ZXC_FILE_FOOTER_SIZE];
+            if (UNLIKELY(fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE)) {
+                ctx.io_error = 1;
+            } else {
+                // Verify Footer Content: Source Size and Global Checksum
+                int valid = (zxc_le64(footer) == (uint64_t)w_args.total_bytes);
+                if (valid && checksum_enabled && ctx.file_has_checksum)
+                    valid = (zxc_le32(footer + sizeof(uint64_t)) == d_global_hash);
+
+                if (UNLIKELY(!valid)) ctx.io_error = 1;
+            }
         }
     }
 
+    free(w_args.seek_comp);
     free(workers);
     zxc_aligned_free(mem_block);
 
@@ -813,6 +897,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
 
     const int n_threads = opts ? opts->n_threads : 0;
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
+    const int seekable = opts ? opts->seekable : 0;
     const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
@@ -822,7 +907,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
     return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, block_size, checksum_enabled,
-                                 zxc_compress_chunk_wrapper, cb, ud);
+                                 seekable, zxc_compress_chunk_wrapper, cb, ud);
 }
 
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts_t* opts) {
@@ -833,7 +918,7 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
     zxc_progress_callback_t cb = opts ? opts->progress_cb : NULL;
     void* ud = opts ? opts->user_data : NULL;
 
-    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled,
+    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled, 0,
                                  (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, cb, ud);
 }
 
