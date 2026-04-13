@@ -676,7 +676,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 1 && seekable) {
         w_args.seek_cap = 64;
         w_args.seek_comp = (uint32_t*)malloc(w_args.seek_cap * sizeof(uint32_t));
-        /* malloc failure → fall through without seekable (graceful degradation) */
+        /* malloc failure -> fall through without seekable (graceful degradation) */
     }
 
     if (mode == 1 && f_out) {
@@ -848,38 +848,51 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         else
             w_args.total_bytes += ZXC_FILE_FOOTER_SIZE;
     } else if (mode == 0 && !ctx.io_error) {
-        /* Skip optional SEK block(s) between EOF and footer */
+        /*
+         * After the EOF block, the stream may contain:
+         *   (a) [FOOTER 12B]                  - no seekable table
+         *   (b) [SEK header 8B] [payload] [FOOTER 12B] - seekable archive
+         */
         uint8_t peek_buf[ZXC_BLOCK_HEADER_SIZE];
-        if (LIKELY(fread(peek_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in) == ZXC_BLOCK_HEADER_SIZE)) {
+        uint8_t footer[ZXC_FILE_FOOTER_SIZE];
+
+        if (UNLIKELY(fread(peek_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in) != ZXC_BLOCK_HEADER_SIZE)) {
+            ctx.io_error = 1;
+        } else {
             zxc_block_header_t peek_bh;
-            if (zxc_read_block_header(peek_buf, ZXC_BLOCK_HEADER_SIZE, &peek_bh) == ZXC_OK &&
-                peek_bh.block_type == ZXC_BLOCK_SEK) {
-                /* Skip the SEK payload */
-                if (UNLIKELY(fseeko(f_in, (long long)peek_bh.comp_size, SEEK_CUR) != 0))
+            const int is_sek =
+                (zxc_read_block_header(peek_buf, ZXC_BLOCK_HEADER_SIZE, &peek_bh) == ZXC_OK &&
+                 peek_bh.block_type == ZXC_BLOCK_SEK);
+
+            if (is_sek) {
+                /* Drain the SEK payload (read + discard) */
+                size_t remaining = (size_t)peek_bh.comp_size;
+                uint8_t discard[512];
+                while (remaining > 0 && !ctx.io_error) {
+                    const size_t chunk = remaining < sizeof(discard) ? remaining : sizeof(discard);
+                    if (UNLIKELY(fread(discard, 1, chunk, f_in) != chunk)) ctx.io_error = 1;
+                    remaining -= chunk;
+                }
+                /* Read full 12-byte footer */
+                if (!ctx.io_error &&
+                    UNLIKELY(fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE))
                     ctx.io_error = 1;
-                /* Now read the footer normally */
             } else {
-                /* Not a SEK block — this IS the start of the footer; rewind */
-                if (UNLIKELY(fseeko(f_in, -(long long)ZXC_BLOCK_HEADER_SIZE, SEEK_CUR) != 0))
+                /* peek_buf contains the first 8 bytes of the 12-byte footer.
+                 * Read the remaining 4 bytes and assemble. */
+                ZXC_MEMCPY(footer, peek_buf, ZXC_BLOCK_HEADER_SIZE);
+                const size_t tail = ZXC_FILE_FOOTER_SIZE - ZXC_BLOCK_HEADER_SIZE; /* 4 */
+                if (UNLIKELY(fread(footer + ZXC_BLOCK_HEADER_SIZE, 1, tail, f_in) != tail))
                     ctx.io_error = 1;
             }
-        } else {
-            ctx.io_error = 1;
         }
 
-        // Verification: Expect 12-byte footer
+        /* Verify Footer Content: Source Size and Global Checksum */
         if (!ctx.io_error) {
-            uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-            if (UNLIKELY(fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE)) {
-                ctx.io_error = 1;
-            } else {
-                // Verify Footer Content: Source Size and Global Checksum
-                int valid = (zxc_le64(footer) == (uint64_t)w_args.total_bytes);
-                if (valid && checksum_enabled && ctx.file_has_checksum)
-                    valid = (zxc_le32(footer + sizeof(uint64_t)) == d_global_hash);
-
-                if (UNLIKELY(!valid)) ctx.io_error = 1;
-            }
+            int valid = (zxc_le64(footer) == (uint64_t)w_args.total_bytes);
+            if (valid && checksum_enabled && ctx.file_has_checksum)
+                valid = (zxc_le32(footer + sizeof(uint64_t)) == d_global_hash);
+            if (UNLIKELY(!valid)) ctx.io_error = 1;
         }
     }
 
