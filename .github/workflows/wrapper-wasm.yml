@@ -7,15 +7,10 @@ name: WASM Build
 
 on:
   push:
-    branches: [main, feat/wasm]
-    paths:
-      - 'src/**'
-      - 'include/**'
-      - 'wrappers/wasm/**'
-      - 'CMakeLists.txt'
-      - '.github/workflows/wrapper-wasm.yml'
-  pull_request:
-    branches: [main]
+    workflow_dispatch:
+    release:
+      types: [ published ]
+    branches: [ main ]
     paths:
       - 'src/**'
       - 'include/**'
