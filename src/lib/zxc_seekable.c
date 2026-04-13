@@ -194,8 +194,7 @@ struct zxc_seekable_s {
     uint64_t total_decomp;  /* total decompressed size (from footer) */
 
     /* File header info - block_size is always a power of 2 in [4KB, 2MB],
-     * fits in 21 bits.  Using uint32_t avoids size_t width differences
-     * between ILP32 and LP64 that caused ARM32 failures. */
+     * fits in 21 bits. */
     uint32_t block_size;
     int file_has_checksums;
 
@@ -227,6 +226,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     if (UNLIKELY(zxc_read_file_header(data, data_size, &block_size_sz, &file_has_chk) != ZXC_OK))
         return NULL;
     const uint32_t block_size = (uint32_t)block_size_sz;
+    if (UNLIKELY(block_size == 0)) return NULL;  // LCOV_EXCL_LINE
 
     /* Step 2: read total decompressed size from the file footer */
     const uint8_t* const footer_ptr = data + data_size - ZXC_FILE_FOOTER_SIZE;
@@ -241,7 +241,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     const uint32_t num_blocks = (uint32_t)num_blocks_64;
 
     /* Step 4: compute seek block position and validate. */
-    const uint64_t entries_total_64 = (uint64_t)num_blocks * ZXC_SEEK_ENTRY_SIZE;
+    const uint64_t entries_total_64 = num_blocks_64 * ZXC_SEEK_ENTRY_SIZE;
     if (UNLIKELY(entries_total_64 > SIZE_MAX - ZXC_BLOCK_HEADER_SIZE)) return NULL;
     const size_t entries_total = (size_t)entries_total_64;
     const size_t seek_block_total = ZXC_BLOCK_HEADER_SIZE + entries_total;
@@ -296,6 +296,11 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
         }
         s->comp_offsets[i] = comp_acc;
         comp_acc += s->comp_sizes[i];
+        /* Reject if cumulative offset exceeds file size (inconsistent table) */
+        if (UNLIKELY(comp_acc > (uint64_t)data_size)) {
+            zxc_seekable_free(s);
+            return NULL;
+        }
     }
     s->comp_offsets[num_blocks] = comp_acc;
 
@@ -323,7 +328,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
     // LCOV_EXCL_STOP
 
     /* For simplicity and correctness: read the file into memory.
-     * The seek table parsing needs the file header + the tail section. */
+     * The seek table parsing needs the file header. */
     if ((size_t)file_size <= 64 * 1024 * 1024) {
         /* File <= 64 MB: read it all into memory */
         uint8_t* const full = (uint8_t*)malloc((size_t)file_size);
