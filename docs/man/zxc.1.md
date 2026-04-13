@@ -59,7 +59,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : Explicitly disable checksum generation.
 
 **-S**, **--seekable**
-: Append a seek table to the archive during compression. This transforms the file into a random-access format (Seekable Archive), allowing the decoder to instantly locate and decompress specific blocks in `O(log N)` time without reading the entire file. Ideal for compressed filesystems, game assets, and log analysis.
+: Append a seek table to the archive during compression. This transforms the file into a random-access format (Seekable Archive), allowing the decoder to instantly locate and decompress specific blocks in `O(1)` time without reading the entire file. Ideal for compressed filesystems, game assets, and log analysis.
 
 **-k**, **--keep**
 : Keep the input file after compression or decompression. (Currently, the input file is preserved by default, but this flag ensures compatibility with future changes).

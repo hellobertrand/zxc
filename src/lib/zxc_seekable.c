@@ -11,7 +11,7 @@
  *
  * The seek table is a standard ZXC block (type = ZXC_BLOCK_SEK) appended
  * between the EOF block and the file footer.  It records the compressed and
- * decompressed sizes of every block, enabling O(log N) lookup + O(block_size)
+ * decompressed sizes of every block, enabling O(1) lookup + O(block_size)
  * decompression for any byte range.
  *
  * On-disk layout of a SEK block:
