@@ -73,10 +73,13 @@ void zxc_aligned_free(void* ptr) {
  */
 int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int mode,
                   const int level, const int checksum_enabled, const int checksum_algo) {
+    (void)checksum_algo;
+
     ZXC_MEMSET(ctx, 0, sizeof(zxc_cctx_t));
 
     ctx->checksum_enabled = checksum_enabled;
-    ctx->checksum_algo = checksum_algo;
+    /* Only RapidHash is implemented; silently clamp to the sole valid value. */
+    ctx->checksum_algo = ZXC_CHECKSUM_ALGO_RAPIDHASH;
 
     /* Compute block-size derived parameters. */
     ctx->chunk_size = chunk_size;
@@ -198,6 +201,8 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, const size_t chunk_size,
                           const int has_checksum, const int checksum_algo) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
+    /* Only RapidHash is supported; reject anything else early. */
+    if (UNLIKELY(checksum_algo != ZXC_CHECKSUM_ALGO_RAPIDHASH)) return ZXC_ERROR_BAD_HEADER;
 
     zxc_store_le32(dst, ZXC_MAGIC_WORD);
     dst[4] = ZXC_FILE_FORMAT_VERSION;
@@ -263,8 +268,14 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
         *out_block_size = block_size;
     }
     // Flags are at offset 6
-    if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
-    if (out_checksum_algo) *out_checksum_algo = (int)(src[6] & ZXC_FILE_CHECKSUM_ALGO_MASK);
+    const int has_chk = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
+    const int algo_id = (int)(src[6] & ZXC_FILE_CHECKSUM_ALGO_MASK);
+
+    /* Reject files that require a checksum algorithm we do not implement. */
+    if (UNLIKELY(has_chk && algo_id != ZXC_CHECKSUM_ALGO_RAPIDHASH)) return ZXC_ERROR_BAD_HEADER;
+
+    if (out_has_checksum) *out_has_checksum = has_chk;
+    if (out_checksum_algo) *out_checksum_algo = algo_id;
 
     return ZXC_OK;
 }
