@@ -382,7 +382,12 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     uint32_t seek_count = 0;
     uint32_t seek_cap = 0;
     if (seekable) {
-        seek_cap = (uint32_t)((src_size / block_size) + 2);
+        const size_t block_count = src_size / block_size;
+        if (UNLIKELY(block_count > (size_t)UINT32_MAX - 2)) {
+            zxc_cctx_free(&ctx);
+            return ZXC_ERROR_BAD_BLOCK_SIZE;
+        }
+        seek_cap = (uint32_t)(block_count + 2);
         seek_comp = (uint32_t*)malloc(seek_cap * sizeof(uint32_t));
         // LCOV_EXCL_START
         if (UNLIKELY(!seek_comp)) {
