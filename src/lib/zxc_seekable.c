@@ -148,11 +148,13 @@ size_t zxc_seek_table_size(const uint32_t num_blocks) {
 
 int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity, const uint32_t* comp_sizes,
                              const uint32_t num_blocks) {
+    if (UNLIKELY(num_blocks > UINT32_MAX / ZXC_SEEK_ENTRY_SIZE)) return ZXC_ERROR_OVERFLOW;
+
     const size_t total = zxc_seek_table_size(num_blocks);
     if (UNLIKELY(dst_capacity < total)) return ZXC_ERROR_DST_TOO_SMALL;
     if (UNLIKELY(!dst || !comp_sizes)) return ZXC_ERROR_NULL_INPUT;
 
-    const uint32_t payload_size = (uint32_t)(num_blocks * ZXC_SEEK_ENTRY_SIZE);
+    const uint32_t payload_size = num_blocks * ZXC_SEEK_ENTRY_SIZE;
 
     /* Write standard ZXC block header */
     const zxc_block_header_t bh = {
