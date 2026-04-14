@@ -688,4 +688,4 @@ Seek table entry at `0x36`:
 0x3A..0x45  File Footer (12)
 ```
 
-> **Key difference**: The SEK block is inserted between the EOF block and the file footer. A decoder that does not support seekable archives simply ignores the SEK block since it encounters the EOF block first and stops. The footer remains the last 12 bytes of the file regardless of whether a seek table is present.
+> **Compatibility note**: The SEK block is inserted between the EOF block and the file footer. The footer always remains the **last 12 bytes of the file**, so decoders that locate the footer from the end of the file (e.g. `src + src_size - 12` for buffer APIs, or `fseek(END - 12)` for file APIs) work unchanged with seekable archives. However, **streaming decoders** that read the footer sequentially immediately after the EOF block must be updated to detect and skip the SEK block. In practice, all ZXC decoders since v0.9.0 handle both seekable and non-seekable archives transparently.
