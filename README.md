@@ -27,6 +27,7 @@ It is designed to be **"Write Once, Read Many"** *(WORM)*. Unlike codecs like LZ
 - **What:** A C library for lossless compression, optimized for **maximum decompression speed**.
 - **Key Result:** Up to **>40% faster** decompression than LZ4 on Apple Silicon, **>25% faster** on Google Axion (ARM64), **>5% faster** on x86_64, **all with better compression ratios**.
 - **Use Cases:** Game assets, firmware, app bundles, anything *compressed once, decompressed millions of times*.
+- **Seekable:** Built-in seek table for **O(1) random-access** decompression, load any block without scanning the entire file.
 - **Install:** `conan install --requires="zxc/[*]"` · `vcpkg install zxc` · `brew install zxc` · `pip install zxc-compress` · `cargo add zxc-compress` · `npm i zxc-compress`
 - **Quality:** Fuzzed, sanitized, formally tested, thread-safe API. BSD-3-Clause.
 
@@ -353,6 +354,9 @@ zxc -z input_file output_file
 # High Compression (Level 5)
 zxc -z -5 input_file output_file
 
+# Seekable Archive (enables O(1) random-access decompression)
+zxc -z -S input_file output_file
+
 # -z for compression can be omitted
 zxc input_file output_file
 
@@ -452,6 +456,7 @@ zxc_free_dctx(dctx);
 - Multi-threaded streaming (auto-detects CPU cores)
 - Optional checksum validation
 - Reusable contexts for high-frequency call sites
+- Seekable archives: optional seek table for O(1) random-access decompression (`.seekable = 1`)
 
 **[See complete examples and advanced usage ->](docs/EXAMPLES.md)**
 
