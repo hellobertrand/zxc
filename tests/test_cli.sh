@@ -788,7 +788,7 @@ echo "Testing Seekable Format (-S)..."
 echo "  Testing basic seekable round-trip..."
 rm -f "$TEST_FILE_XC_ARG" "$TEST_FILE_DEC_BASH"
 "$ZXC_BIN" -S -c "$TEST_FILE_ARG" > "$TEST_FILE_XC_ARG"
-if [ ! -s "$TEST_FILE_XC_BASH" ]; then
+if [ ! -s "$TEST_FILE_XC_ARG" ]; then
     log_fail "Seekable compression failed"
 fi
 "$ZXC_BIN" -d -c "$TEST_FILE_XC_ARG" > "$TEST_FILE_DEC_BASH"
