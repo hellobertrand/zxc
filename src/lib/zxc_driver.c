@@ -676,7 +676,22 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 1 && seekable) {
         w_args.seek_cap = 64;
         w_args.seek_comp = (uint32_t*)malloc(w_args.seek_cap * sizeof(uint32_t));
-        /* malloc failure -> fall through without seekable (graceful degradation) */
+        // LCOV_EXCL_START
+        if (UNLIKELY(!w_args.seek_comp)) {
+            pthread_mutex_lock(&ctx.lock);
+            ctx.shutdown_workers = 1;
+            pthread_cond_broadcast(&ctx.cond_worker);
+            pthread_mutex_unlock(&ctx.lock);
+            for (int i = 0; i < started_workers; i++) pthread_join(workers[i], NULL);
+            pthread_cond_destroy(&ctx.cond_writer);
+            pthread_cond_destroy(&ctx.cond_worker);
+            pthread_cond_destroy(&ctx.cond_reader);
+            pthread_mutex_destroy(&ctx.lock);
+            free(workers);
+            zxc_aligned_free(mem_block);
+            return ZXC_ERROR_MEMORY;
+        }
+        // LCOV_EXCL_STOP
     }
 
     if (mode == 1 && f_out) {
