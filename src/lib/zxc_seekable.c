@@ -291,8 +291,9 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
         s->comp_sizes[i] = zxc_le32(ep);
         ep += sizeof(uint32_t);
 
-        /* Reject entries larger than the entire file - prevents prefix overflow */
-        if (UNLIKELY(s->comp_sizes[i] > (uint64_t)data_size)) {
+        /* Reject entries below minimum (block header) or larger than the file */
+        if (UNLIKELY(s->comp_sizes[i] < ZXC_BLOCK_HEADER_SIZE ||
+                     s->comp_sizes[i] > (uint64_t)data_size)) {
             zxc_seekable_free(s);
             return NULL;
         }
@@ -305,6 +306,28 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
         }
     }
     s->comp_offsets[num_blocks] = comp_acc;
+
+    /* Verify prefix-sum lands exactly at the EOF block position.
+     * Expected layout: [header 16][data blocks][EOF 8][SEK block][footer 12]
+     * So comp_acc (end of data blocks) + EOF(8) == seek_block_start. */
+    const uint64_t expected_eof_offset =
+        (uint64_t)(seek_block_start - data) - ZXC_BLOCK_HEADER_SIZE;
+    if (UNLIKELY(comp_acc != expected_eof_offset)) {
+        zxc_seekable_free(s);
+        return NULL;
+    }
+
+    /* Validate that an actual EOF block header exists at the computed offset */
+    if (UNLIKELY(comp_acc + ZXC_BLOCK_HEADER_SIZE > data_size)) {
+        zxc_seekable_free(s);
+        return NULL;
+    }
+    zxc_block_header_t eof_bh;
+    if (UNLIKELY(zxc_read_block_header(data + comp_acc, ZXC_BLOCK_HEADER_SIZE, &eof_bh) != ZXC_OK ||
+                 eof_bh.block_type != ZXC_BLOCK_EOF)) {
+        zxc_seekable_free(s);
+        return NULL;
+    }
 
     return s;
 }
