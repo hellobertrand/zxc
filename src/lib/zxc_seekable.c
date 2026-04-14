@@ -639,6 +639,10 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         /* Calculate which portion of this block's decompressed data we need */
         const uint64_t blk_decomp_start = zxc_seek_decomp_offset(s->block_size, bi);
         const size_t skip = (offset > blk_decomp_start) ? (size_t)(offset - blk_decomp_start) : 0;
+        if (UNLIKELY((size_t)dec_res < skip)) {
+            free(read_buf);
+            return ZXC_ERROR_CORRUPT_DATA;
+        }
         const size_t avail = (size_t)dec_res - skip;
         const size_t copy = (avail < remaining) ? avail : remaining;
 
@@ -767,6 +771,13 @@ static void* zxc_seek_mt_worker(void* arg) {
     }
     // LCOV_EXCL_STOP
 
+    /* Validate decompressed size covers the skip offset */
+    if (UNLIKELY((size_t)dec_res < job->skip)) {
+        zxc_cctx_free(&dctx);
+        job->result = ZXC_ERROR_CORRUPT_DATA;
+        return NULL;
+    }
+
     /* Copy the requested portion directly into the caller's output buffer */
     ZXC_MEMCPY(job->dst, dctx.work_buf + job->skip, job->copy_len);
 
@@ -811,6 +822,10 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
         const uint64_t blk_decomp_start = zxc_seek_decomp_offset(s->block_size, bi);
         const size_t skip = (offset > blk_decomp_start) ? (size_t)(offset - blk_decomp_start) : 0;
         const size_t blk_decomp_sz = zxc_seek_decomp_size(s->block_size, s->total_decomp, bi);
+        if (UNLIKELY(blk_decomp_sz < skip)) {
+            free(jobs);
+            return ZXC_ERROR_CORRUPT_DATA;
+        }
         const size_t avail = blk_decomp_sz - skip;
         const size_t copy = (avail < remaining) ? avail : remaining;
 
