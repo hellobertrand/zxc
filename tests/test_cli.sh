@@ -861,6 +861,34 @@ done
 if [ "$SEEK_ALL_OK" -eq 1 ]; then
     log_pass "Seekable across all levels (1-5)"
 fi
+# 24.7 Seekable pipe round-trip (no fseeko - validates SEK skip on stdin)
+echo "  Testing seekable pipe round-trip..."
+cat "$TEST_FILE" | "$ZXC_BIN" -S -c | "$ZXC_BIN" -dc > "$TEST_DIR/seekable_pipe.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/seekable_pipe.dec"; then
+    log_pass "Seekable pipe round-trip"
+else
+    log_fail "Seekable pipe round-trip content mismatch"
+fi
+
+# 24.8 Seekable + no-checksum
+echo "  Testing seekable + no-checksum (-S -N)..."
+"$ZXC_BIN" -3 -S -N -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_nochk.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/seekable_nochk.zxc" > "$TEST_DIR/seekable_nochk.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/seekable_nochk.dec"; then
+    log_pass "Seekable + no-checksum (-S -N)"
+else
+    log_fail "Seekable + no-checksum round-trip failed"
+fi
+
+# 24.9 List command on seekable archive
+echo "  Testing list command on seekable archive..."
+"$ZXC_BIN" -3 -S -C -k -f "$TEST_FILE_ARG"
+OUT=$("$ZXC_BIN" -l "$TEST_FILE_XC_ARG")
+if [[ "$OUT" == *"Compressed"* ]] && [[ "$OUT" == *"Uncompressed"* ]]; then
+    log_pass "List command on seekable archive"
+else
+    log_fail "List command on seekable archive failed"
+fi
 
 echo "All tests passed!"
 exit 0
