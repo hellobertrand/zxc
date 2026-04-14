@@ -10,9 +10,9 @@
  * @brief Seekable archive reader (random-access decompression) and seek table writer.
  *
  * The seek table is a standard ZXC block (type = ZXC_BLOCK_SEK) appended
- * between the EOF block and the file footer.  It records the compressed and
- * decompressed sizes of every block, enabling O(1) lookup + O(block_size)
- * decompression for any byte range.
+ * between the EOF block and the file footer.  It records the compressed size
+ * of every block (decompressed sizes are derived from the header's block_size),
+ * enabling O(1) lookup + O(block_size) decompression for any byte range.
  *
  * On-disk layout of a SEK block:
  *

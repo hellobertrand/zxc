@@ -13,9 +13,10 @@
  * decompress arbitrary byte ranges without reading the entire file.
  *
  * A seekable archive embeds a Seek Table block (block_type = @c ZXC_BLOCK_SEK)
- * after the EOF block, recording the compressed and decompressed size of every
- * block.  The table is detected at read time by reading the @c num_blocks tail
- * (last 4 bytes before the file footer) and validating the block header.
+ * after the EOF block, recording the compressed size of every block.
+ * The table is detected at read time by deriving @c num_blocks from the file
+ * footer's total decompressed size and the header's block size, then seeking
+ * backward to validate the SEK block header.
  * Standard (non-seekable) decompressors ignore the seek table entirely.
  *
  * @par Creating a seekable archive
