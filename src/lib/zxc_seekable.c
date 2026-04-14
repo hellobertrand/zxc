@@ -320,7 +320,13 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
     const long long saved_pos = ftello(f);
     if (UNLIKELY(saved_pos < 0)) return NULL;  // LCOV_EXCL_LINE
 
-    if (UNLIKELY(fseeko(f, 0, SEEK_END) != 0)) return NULL;  // LCOV_EXCL_LINE
+    // LCOV_EXCL_START
+    if (UNLIKELY(fseeko(f, 0, SEEK_END) != 0)) {
+        fseeko(f, saved_pos, SEEK_SET);
+        return NULL;
+    }
+    // LCOV_EXCL_STOP
+
     const long long file_size = ftello(f);
     // LCOV_EXCL_START
     if (UNLIKELY(file_size <= 0)) {
