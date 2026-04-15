@@ -364,6 +364,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     uint32_t global_hash = 0;
     zxc_cctx_t ctx;
 
+    // LCOV_EXCL_START
     if (UNLIKELY(zxc_cctx_init(&ctx, block_size, 1, level, checksum_enabled, checksum_algo) !=
                  ZXC_OK))
         return ZXC_ERROR_MEMORY;
@@ -371,6 +372,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
     const int h_val = zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled,
                                             checksum_algo);
+    // LCOV_EXCL_START
     if (UNLIKELY(h_val < 0)) {
         zxc_cctx_free(&ctx);
         return h_val;
@@ -718,6 +720,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
             zxc_cctx_free(&cctx->inner);
             cctx->initialized = 0;
         }
+        // LCOV_EXCL_START
         if (UNLIKELY(zxc_cctx_init(&cctx->inner, block_size, 1, level, checksum_enabled,
                                    checksum_algo) != ZXC_OK))
             return ZXC_ERROR_MEMORY;

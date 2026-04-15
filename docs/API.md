@@ -191,6 +191,8 @@ typedef struct {
     int    level;             // Compression level 1–5 (0 = default).
     size_t block_size;        // Block size in bytes (0 = 256 KB default).
     int    checksum_enabled;  // 1 = enable checksums, 0 = disable.
+    int    checksum_algo;     // Checksum algorithm (0 = RapidHash default).
+    int    seekable;          // 1 = append seek table for random access.
     zxc_progress_callback_t progress_cb;  // Optional callback (NULL to disable).
     void*  user_data;                     // Passed through to progress_cb.
 } zxc_compress_opts_t;
@@ -469,7 +471,8 @@ ZXC_EXPORT int zxc_cctx_init(
     size_t      chunk_size,
     int         mode,              // 1 = compression, 0 = decompression
     int         level,
-    int         checksum_enabled
+    int         checksum_enabled,
+    int         checksum_algo      // 0 = ZXC_CHECKSUM_RAPIDHASH (default)
 );
 ```
 
@@ -492,7 +495,8 @@ ZXC_EXPORT int zxc_write_file_header(
     uint8_t* dst,
     size_t   dst_capacity,
     size_t   chunk_size,
-    int      has_checksum
+    int      has_checksum,
+    int      checksum_algo         // 0 = ZXC_CHECKSUM_RAPIDHASH (default)
 );
 ```
 
@@ -506,7 +510,8 @@ ZXC_EXPORT int zxc_read_file_header(
     const uint8_t* src,
     size_t         src_size,
     size_t*        out_block_size,    // optional
-    int*           out_has_checksum   // optional
+    int*           out_has_checksum,  // optional
+    int*           out_checksum_algo  // optional
 );
 ```
 
