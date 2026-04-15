@@ -199,6 +199,7 @@ struct zxc_seekable_s {
      * fits in 21 bits. */
     uint32_t block_size;
     int file_has_checksums;
+    int checksum_algo;
 
     /* Reusable decompression context (single-threaded path only) */
     zxc_cctx_t dctx;
@@ -225,7 +226,9 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     /* Step 1: validate file header => block_size */
     size_t block_size_sz = 0;
     int file_has_chk = 0;
-    if (UNLIKELY(zxc_read_file_header(data, data_size, &block_size_sz, &file_has_chk) != ZXC_OK))
+    int chk_algo = 0;
+    if (UNLIKELY(zxc_read_file_header(data, data_size, &block_size_sz, &file_has_chk, &chk_algo) !=
+                 ZXC_OK))
         return NULL;
     const uint32_t block_size = (uint32_t)block_size_sz;
     if (UNLIKELY(block_size == 0)) return NULL;  // LCOV_EXCL_LINE
@@ -268,6 +271,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     s->num_blocks = num_blocks;
     s->block_size = block_size;
     s->file_has_checksums = file_has_chk;
+    s->checksum_algo = chk_algo;
     s->src = data;
     s->src_size = (uint64_t)data_size;
 
@@ -402,7 +406,9 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
 
     size_t bs_sz = 0;
     int fhc = 0;
-    if (UNLIKELY(zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &bs_sz, &fhc) != ZXC_OK)) {
+    int chk_algo = 0;
+    if (UNLIKELY(zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &bs_sz, &fhc, &chk_algo) !=
+                 ZXC_OK)) {
         fseeko(f, saved_pos, SEEK_SET);
         return NULL;
     }
@@ -482,6 +488,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
     s->num_blocks = num_blocks;
     s->block_size = bs;
     s->file_has_checksums = fhc;
+    s->checksum_algo = chk_algo;
 
     s->comp_sizes = (uint32_t*)calloc(num_blocks, sizeof(uint32_t));
     s->comp_offsets = (uint64_t*)calloc((size_t)num_blocks + 1, sizeof(uint64_t));
@@ -590,7 +597,8 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     /* Initialize decompression context on first use */
     if (!s->dctx_initialized) {
         // LCOV_EXCL_START
-        if (UNLIKELY(zxc_cctx_init(&s->dctx, (size_t)s->block_size, 0, 0, 0) != ZXC_OK))
+        if (UNLIKELY(zxc_cctx_init(&s->dctx, (size_t)s->block_size, 0, 0, 0, s->checksum_algo) !=
+                     ZXC_OK))
             return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
         s->dctx_initialized = 1;
@@ -719,7 +727,8 @@ static void* zxc_seek_mt_worker(void* arg) {
     /* Thread-local decompression context (mode=0 for decompress-only) */
     zxc_cctx_t dctx;
     // LCOV_EXCL_START
-    if (UNLIKELY(zxc_cctx_init(&dctx, (size_t)s->block_size, 0, 0, 0) != ZXC_OK)) {
+    if (UNLIKELY(zxc_cctx_init(&dctx, (size_t)s->block_size, 0, 0, 0, s->checksum_algo) !=
+                 ZXC_OK)) {
         job->result = ZXC_ERROR_MEMORY;
         return NULL;
     }
