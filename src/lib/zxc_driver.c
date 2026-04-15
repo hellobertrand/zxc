@@ -934,7 +934,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     const int n_threads = opts ? opts->n_threads : 0;
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int checksum_algo =
-        (opts && opts->checksum_algo) ? opts->checksum_algo : ZXC_CHECKSUM_RAPIDHASH;
+        (opts && opts->checksum_algo) ? opts->checksum_algo : ZXC_CHECKSUM_ALGO_RAPIDHASH;
     const int seekable = opts ? opts->seekable : 0;
     const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
     const size_t block_size =

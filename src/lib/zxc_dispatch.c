@@ -349,7 +349,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int checksum_algo =
-        (opts && opts->checksum_algo) ? opts->checksum_algo : ZXC_CHECKSUM_RAPIDHASH;
+        (opts && opts->checksum_algo) ? opts->checksum_algo : ZXC_CHECKSUM_ALGO_RAPIDHASH;
     const int seekable = opts ? opts->seekable : 0;
     const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
     const size_t block_size =
@@ -510,7 +510,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
     zxc_cctx_t ctx;
 
     int file_has_checksums = 0;
-    int file_checksum_algo = ZXC_CHECKSUM_RAPIDHASH;
+    int file_checksum_algo = ZXC_CHECKSUM_ALGO_RAPIDHASH;
     // File header verification and context initialization
     if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
                                       &file_checksum_algo) != ZXC_OK ||
@@ -670,7 +670,7 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
         (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
     cctx->stored_checksum = opts ? opts->checksum_enabled : 0;
     cctx->stored_algo =
-        (opts && opts->checksum_algo) ? opts->checksum_algo : ZXC_CHECKSUM_RAPIDHASH;
+        (opts && opts->checksum_algo) ? opts->checksum_algo : ZXC_CHECKSUM_ALGO_RAPIDHASH;
 
     if (opts) {
         // LCOV_EXCL_START
@@ -819,7 +819,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     const uint8_t* const op_end = op + dst_capacity;
     size_t runtime_chunk_size = 0;
     int file_has_checksums = 0;
-    int file_checksum_algo = ZXC_CHECKSUM_RAPIDHASH;
+    int file_checksum_algo = ZXC_CHECKSUM_ALGO_RAPIDHASH;
 
     if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
                                       &file_checksum_algo) != ZXC_OK))

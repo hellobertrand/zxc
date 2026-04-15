@@ -335,10 +335,6 @@ extern "C" {
 /** @brief Number of sections in a GHI block. */
 #define ZXC_GHI_SECTIONS 3
 
-/** @brief Checksum algorithm id for rapidhash (default). Alias for @ref
- * ZXC_CHECKSUM_ALGO_RAPIDHASH. */
-#define ZXC_CHECKSUM_RAPIDHASH ((uint8_t)ZXC_CHECKSUM_ALGO_RAPIDHASH)
-
 /** @brief Size of the global checksum appended after EOF block (4 bytes). */
 #define ZXC_GLOBAL_CHECKSUM_SIZE 4
 /** @brief File footer size: original_size(8) + global_checksum(4). */
@@ -1028,7 +1024,7 @@ void zxc_aligned_free(void* ptr);
  * @brief Calculates a 32-bit hash for a given input buffer.
  * @param[in] input Pointer to the data buffer.
  * @param[in] len Length of the data in bytes.
- * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_RAPIDHASH).
+ * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_ALGO_RAPIDHASH).
  * @return The calculated 32-bit hash value.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const size_t len,
