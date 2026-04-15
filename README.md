@@ -171,6 +171,7 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
     **Windows:**
     *   `zxc-windows-x64.zip` (Runtime dispatch for AVX2/AVX512).
+    *   `zxc-windows-arm64.zip` (NEON optimizations included).
 
 3.  Extract and install:
     ```bash

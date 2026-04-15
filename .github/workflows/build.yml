@@ -44,6 +44,11 @@ jobs:
             artifact_name: zxc.exe
             asset_name: zxc-windows-x64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
+          - name: Windows ARM64
+            os: windows-11-arm
+            artifact_name: zxc.exe
+            asset_name: zxc-windows-arm64
+            cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
 
 
     steps:
