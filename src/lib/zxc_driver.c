@@ -551,8 +551,8 @@ static void* zxc_async_writer(void* arg) {
  */
 static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_threads, const int mode,
                                      const int level, const size_t block_size,
-                                     const int checksum_enabled, const int checksum_algo, const int seekable,
-                                     zxc_chunk_processor_t func,
+                                     const int checksum_enabled, const int checksum_algo,
+                                     const int seekable, zxc_chunk_processor_t func,
                                      zxc_progress_callback_t progress_cb, void* user_data) {
     zxc_stream_ctx_t ctx;
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
@@ -955,7 +955,7 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
     zxc_progress_callback_t cb = opts ? opts->progress_cb : NULL;
     void* ud = opts ? opts->user_data : NULL;
 
-    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled, 0,
+    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled, 0, 0,
                                  (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, cb, ud);
 }
 
