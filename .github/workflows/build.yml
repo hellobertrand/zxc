@@ -42,7 +42,7 @@ jobs:
           - name: Windows x64
             os: windows-latest
             artifact_name: zxc.exe
-            asset_name: zxc-windows-x64.exe
+            asset_name: zxc-windows-x64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
 
 
