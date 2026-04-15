@@ -702,9 +702,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     if (mode == 1 && f_out) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
-        zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE, runtime_chunk_sz, checksum_enabled,
-                              ctx.checksum_algo);
-        if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
+        const int hdr_rc = zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE, runtime_chunk_sz,
+                                                 checksum_enabled, ctx.checksum_algo);
+        if (UNLIKELY(hdr_rc < 0 ||
+                     fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
             ctx.io_error = 1;
 
         w_args.total_bytes = ZXC_FILE_HEADER_SIZE;
