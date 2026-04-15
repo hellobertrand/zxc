@@ -551,10 +551,10 @@ Benchmarks were conducted using `lzbench` (by inikep) with the **default block s
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -9 | 0.90x | 77.20 |
 | lzav 5.7 -1 | 0.65x | 83.91 |
-| snappy 1.2.2 | 0.28x | 100.53 |
-| zstd 1.5.7 --fast --1 | 0.28x | 86.16 |
-| zstd 1.5.7 -1 | 0.20x | 72.55 |
-| zlib 1.3.1 -1 | 0.05x | 76.58 |
+| snappy 1.2.2 | 0.54x | 100.53 |
+| zstd 1.5.7 --fast --1 | 0.54x | 86.16 |
+| zstd 1.5.7 -1 | 0.39x | 72.55 |
+| zlib 1.3.1 -1 | 0.09x | 76.58 |
 
 **Decompression Efficiency (Cycles per Byte @ 2.6 GHz)**
 
@@ -570,10 +570,10 @@ Benchmarks were conducted using `lzbench` (by inikep) with the **default block s
 | lz4 1.10.0 --fast -17   | 0.525       | 4.8x                  |
 | lz4hc 1.10.0 -9         | 0.675       | 6.2x                  |
 | lzav 5.7 -1             | 0.937       | 8.6x                  |
-| zstd 1.5.7 -1           | 3.081       | 28.4x                 |
-| zstd 1.5.7 --fast --1   | 2.194       | 20.2x                 |
-| snappy 1.2.2            | 2.190       | 20.2x                 |
-| zlib 1.3.1 -1           | 13.333      | 123x                  |
+| zstd 1.5.7 -1           | 1.581       | 14.6x                 |
+| zstd 1.5.7 --fast --1   | 1.134       | 10.4x                 |
+| snappy 1.2.2            | 1.131       | 10.4x                 |
+| zlib 1.3.1 -1           | 6.667       | 61.4x                 |
 
 *Lower is better. Calculated using Neoverse-V2 base frequency (2.6 GHz). Formula: `Cycles/Byte = 2600 / Decompression Speed (MB/s)`.*
 
@@ -667,10 +667,10 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 | lz4 1.10.0 --fast -17   |  1278 MB/s |  4950 MB/s |   131732802 | 62.15 | 1 files|
 | lz4hc 1.10.0 -9         |  43.3 MB/s |  3850 MB/s |    77884448 | 36.75 | 1 files|
 | lzav 5.7 -1             |   554 MB/s |  2776 MB/s |    84644732 | 39.94 | 1 files|
-| snappy 1.2.2            |   757 MB/s |  1187 MB/s |   101415443 | 47.85 | 1 files|
-| zstd 1.5.7 --fast --1   |   304 MB/s |  1185 MB/s |    86916294 | 41.01 | 1 files|
-| zstd 1.5.7 -1           |   263 MB/s |   844 MB/s |    73193704 | 34.53 | 1 files|
-| zlib 1.3.1 -1           |  57.5 MB/s |   195 MB/s |    77259029 | 36.45 | 1 files|
+| snappy 1.2.2            |   757 MB/s |  2298 MB/s |   101415443 | 47.85 | 1 files|
+| zstd 1.5.7 --fast --1   |   606 MB/s |  2293 MB/s |    86916294 | 41.01 | 1 files|
+| zstd 1.5.7 -1           |   524 MB/s |  1645 MB/s |    73193704 | 34.53 | 1 files|
+| zlib 1.3.1 -1           |  57.2 MB/s |   390 MB/s |    77259029 | 36.45 | 1 files|
 
 
 #### 7.4.3 x86_64 Architecture (AMD EPYC 9B45)
