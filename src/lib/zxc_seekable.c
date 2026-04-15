@@ -769,14 +769,12 @@ static void* zxc_seek_mt_worker(void* arg) {
         job->result = dec_res;
         return NULL;
     }
-    // LCOV_EXCL_STOP
-
-    /* Validate decompressed size covers the skip offset */
-    if (UNLIKELY((size_t)dec_res < job->skip)) {
+    if (UNLIKELY((size_t)dec_res < job->skip + job->copy_len)) {
         zxc_cctx_free(&dctx);
         job->result = ZXC_ERROR_CORRUPT_DATA;
         return NULL;
     }
+    // LCOV_EXCL_STOP
 
     /* Copy the requested portion directly into the caller's output buffer */
     ZXC_MEMCPY(job->dst, dctx.work_buf + job->skip, job->copy_len);
