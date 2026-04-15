@@ -105,7 +105,7 @@ jobs:
           cmake --install build --prefix release_staging --config Release
           
           # Strip binary on Unix-like systems only (installed to bin/)
-          if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
+          if [[ "${{ runner.os }}" != "Windows" ]]; then
             strip release_staging/bin/${{ matrix.artifact_name }}
           fi
           
@@ -115,7 +115,7 @@ jobs:
           
           # Create archive
           cd release_staging
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
             7z a ../${{ matrix.asset_name }}.zip *
           else
             tar -czvf ../${{ matrix.asset_name }}.tar.gz *
