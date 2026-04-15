@@ -335,9 +335,8 @@ extern "C" {
 /** @brief Number of sections in a GHI block. */
 #define ZXC_GHI_SECTIONS 3
 
-/** @brief Checksum algorithm id for rapidhash (default). Alias for @ref
- * ZXC_CHECKSUM_ALGO_RAPIDHASH. */
-#define ZXC_CHECKSUM_RAPIDHASH ((uint8_t)ZXC_CHECKSUM_ALGO_RAPIDHASH)
+/** @brief Checksum algorithm id for RapidHash (default, sole implementation). */
+#define ZXC_CHECKSUM_RAPIDHASH 0
 
 /** @brief Size of the global checksum appended after EOF block (4 bytes). */
 #define ZXC_GLOBAL_CHECKSUM_SIZE 4
