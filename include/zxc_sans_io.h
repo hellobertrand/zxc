@@ -153,7 +153,9 @@ ZXC_EXPORT void zxc_cctx_free(zxc_cctx_t* ctx);
  * @param[in] checksum_algo Checksum algorithm ID written into bits 0-3 of the Flags byte
  *                          (see @ref zxc_checksum_algo_t). Ignored when @p has_checksum is 0.
  * @return The number of bytes written (ZXC_FILE_HEADER_SIZE) on success,
- *         or ZXC_ERROR_DST_TOO_SMALL if the destination capacity is insufficient.
+ *         ZXC_ERROR_DST_TOO_SMALL if the destination capacity is insufficient,
+ *         or ZXC_ERROR_BAD_HEADER if @p has_checksum is set and @p checksum_algo
+ *         is not a supported algorithm.
  */
 ZXC_EXPORT int zxc_write_file_header(uint8_t* dst, const size_t dst_capacity,
                                      const size_t chunk_size, const int has_checksum,

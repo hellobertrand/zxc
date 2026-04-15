@@ -1152,6 +1152,108 @@ int test_legacy_header() {
     return 1;
 }
 
+int test_checksum_algo_validation() {
+    printf("=== TEST: Checksum Algorithm Validation ===\n");
+
+    /* ---- zxc_read_file_header: reject unsupported algo when checksum set ---- */
+
+    /* Build a valid header with HAS_CHECKSUM + a fake algo_id = 3. */
+    uint8_t hdr[ZXC_FILE_HEADER_SIZE];
+    memset(hdr, 0, sizeof(hdr));
+    hdr[0] = 0xF5;
+    hdr[1] = 0x2E;
+    hdr[2] = 0xB0;
+    hdr[3] = 0x9C; /* magic */
+    hdr[4] = ZXC_FILE_FORMAT_VERSION;
+    hdr[5] = 18; /* log2(256 KB) */
+    hdr[6] = ZXC_FILE_FLAG_HAS_CHECKSUM | 0x03; /* checksum enabled, algo = 3 (unsupported) */
+    /* CRC16 */
+    hdr[14] = 0;
+    hdr[15] = 0;
+    uint16_t crc = zxc_hash16(hdr);
+    hdr[14] = (uint8_t)(crc & 0xFF);
+    hdr[15] = (uint8_t)(crc >> 8);
+
+    size_t block_size = 0;
+    int has_checksum = -1;
+    int algo = -1;
+    int rc = zxc_read_file_header(hdr, sizeof(hdr), &block_size, &has_checksum, &algo);
+    if (rc != ZXC_ERROR_BAD_HEADER) {
+        printf("  [FAIL] read_file_header unsupported algo: expected %d, got %d\n",
+               ZXC_ERROR_BAD_HEADER, rc);
+        return 0;
+    }
+    printf("  [PASS] zxc_read_file_header rejects unsupported checksum algo\n");
+
+    /* Same header but with checksum flag cleared -> algo bits are ignored, should pass. */
+    hdr[6] = 0x03; /* no HAS_CHECKSUM flag, algo bits still set */
+    hdr[14] = 0;
+    hdr[15] = 0;
+    crc = zxc_hash16(hdr);
+    hdr[14] = (uint8_t)(crc & 0xFF);
+    hdr[15] = (uint8_t)(crc >> 8);
+
+    rc = zxc_read_file_header(hdr, sizeof(hdr), &block_size, &has_checksum, &algo);
+    if (rc != ZXC_OK) {
+        printf("  [FAIL] read_file_header no-checksum with algo bits: expected %d, got %d\n",
+               ZXC_OK, rc);
+        return 0;
+    }
+    printf("  [PASS] zxc_read_file_header accepts algo bits when checksum disabled\n");
+
+    /* Valid header: HAS_CHECKSUM + RapidHash (0) -> should succeed. */
+    hdr[6] = ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_CHECKSUM_ALGO_RAPIDHASH;
+    hdr[14] = 0;
+    hdr[15] = 0;
+    crc = zxc_hash16(hdr);
+    hdr[14] = (uint8_t)(crc & 0xFF);
+    hdr[15] = (uint8_t)(crc >> 8);
+
+    rc = zxc_read_file_header(hdr, sizeof(hdr), &block_size, &has_checksum, &algo);
+    if (rc != ZXC_OK) {
+        printf("  [FAIL] read_file_header RapidHash: expected %d, got %d\n", ZXC_OK, rc);
+        return 0;
+    }
+    if (has_checksum != 1 || algo != ZXC_CHECKSUM_ALGO_RAPIDHASH) {
+        printf("  [FAIL] read_file_header RapidHash: has_checksum=%d, algo=%d\n",
+               has_checksum, algo);
+        return 0;
+    }
+    printf("  [PASS] zxc_read_file_header accepts RapidHash with checksum enabled\n");
+
+    /* ---- zxc_write_file_header: reject unsupported algo when checksum set ---- */
+
+    uint8_t buf[ZXC_FILE_HEADER_SIZE];
+    rc = zxc_write_file_header(buf, sizeof(buf), 256 * 1024, 1, 7);
+    if (rc != ZXC_ERROR_BAD_HEADER) {
+        printf("  [FAIL] write_file_header unsupported algo: expected %d, got %d\n",
+               ZXC_ERROR_BAD_HEADER, rc);
+        return 0;
+    }
+    printf("  [PASS] zxc_write_file_header rejects unsupported checksum algo\n");
+
+    /* Checksums disabled -> unsupported algo is accepted (ignored). */
+    rc = zxc_write_file_header(buf, sizeof(buf), 256 * 1024, 0, 7);
+    if (rc < 0) {
+        printf("  [FAIL] write_file_header no-checksum with bad algo: expected success, got %d\n",
+               rc);
+        return 0;
+    }
+    printf("  [PASS] zxc_write_file_header accepts any algo when checksum disabled\n");
+
+    /* Valid: checksums enabled + RapidHash -> should succeed. */
+    rc = zxc_write_file_header(buf, sizeof(buf), 256 * 1024, 1, ZXC_CHECKSUM_ALGO_RAPIDHASH);
+    if (rc != ZXC_FILE_HEADER_SIZE) {
+        printf("  [FAIL] write_file_header RapidHash: expected %d, got %d\n",
+               ZXC_FILE_HEADER_SIZE, rc);
+        return 0;
+    }
+    printf("  [PASS] zxc_write_file_header succeeds with RapidHash\n");
+
+    printf("PASS\n\n");
+    return 1;
+}
+
 int test_buffer_error_codes() {
     printf("=== TEST: Unit - Buffer API Error Codes ===\n");
 
@@ -3625,6 +3727,7 @@ int main() {
     if (!test_get_decompressed_size()) total_failures++;
     if (!test_error_name()) total_failures++;
     if (!test_legacy_header()) total_failures++;
+    if (!test_checksum_algo_validation()) total_failures++;
     if (!test_buffer_error_codes()) total_failures++;
     if (!test_stream_get_decompressed_size_errors()) total_failures++;
     if (!test_stream_engine_errors()) total_failures++;

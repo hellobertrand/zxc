@@ -472,7 +472,7 @@ ZXC_EXPORT int zxc_cctx_init(
     int         mode,              // 1 = compression, 0 = decompression
     int         level,
     int         checksum_enabled,
-    int         checksum_algo      // 0 = ZXC_CHECKSUM_RAPIDHASH (default)
+    int         checksum_algo      // 0 = ZXC_CHECKSUM_ALGO_RAPIDHASH (default)
 );
 ```
 
@@ -496,7 +496,7 @@ ZXC_EXPORT int zxc_write_file_header(
     size_t   dst_capacity,
     size_t   chunk_size,
     int      has_checksum,
-    int      checksum_algo         // 0 = ZXC_CHECKSUM_RAPIDHASH (default)
+    int      checksum_algo         // 0 = ZXC_CHECKSUM_ALGO_RAPIDHASH (default)
 );
 ```
 
