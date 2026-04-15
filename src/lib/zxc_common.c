@@ -581,7 +581,11 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint
  * @brief Returns the maximum compressed size for a given input size.
  *
  * The result accounts for the file header, per-block headers, block
- * checksums, worst-case expansion, EOF block, and the file footer.
+ * checksums, worst-case expansion, EOF block, seekable overhead (SEK
+ * block), and the file footer.
+ *
+ * The block count is derived from @ref ZXC_BLOCK_SIZE_MIN (4 KB) to
+ * guarantee the bound holds for all valid block sizes and seekable mode.
  *
  * @param[in] input_size Uncompressed input size in bytes.
  * @return Upper bound on compressed size, or 0 if @p input_size would overflow.
@@ -589,10 +593,13 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint
 uint64_t zxc_compress_bound(const size_t input_size) {
     // Guard UINT64_MAX / SIZE_MAX would overflow.
     if (UNLIKELY(input_size > (SIZE_MAX - (SIZE_MAX >> 8)))) return 0;
-    uint64_t n = ((uint64_t)input_size + ZXC_BLOCK_SIZE_DEFAULT - 1) / ZXC_BLOCK_SIZE_DEFAULT;
+    uint64_t n = ((uint64_t)input_size + ZXC_BLOCK_SIZE_MIN - 1) / ZXC_BLOCK_SIZE_MIN;
     if (n == 0) n = 1;
     return ZXC_FILE_HEADER_SIZE + (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + 64)) +
-           (uint64_t)input_size + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
+           (uint64_t)input_size + ZXC_BLOCK_HEADER_SIZE + /* EOF block */
+           ZXC_BLOCK_HEADER_SIZE +                        /* SEK block header (seekable) */
+           (n * ZXC_SEEK_ENTRY_SIZE) +                    /* SEK entries: 4 bytes per block */
+           ZXC_FILE_FOOTER_SIZE;
 }
 
 /*

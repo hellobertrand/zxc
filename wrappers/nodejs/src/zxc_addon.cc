@@ -29,7 +29,7 @@ static Napi::Value CompressBound(const Napi::CallbackInfo& info) {
 }
 
 // =============================================================================
-// compress(buffer: Buffer, level?: number, checksum?: boolean): Buffer
+// compress(buffer: Buffer, level?: number, checksum?: boolean, seekable?: boolean): Buffer
 // =============================================================================
 static Napi::Value Compress(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
@@ -54,6 +54,11 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
         checksum = info[2].As<Napi::Boolean>().Value() ? 1 : 0;
     }
 
+    int seekable = 0;
+    if (info.Length() >= 4 && info[3].IsBoolean()) {
+        seekable = info[3].As<Napi::Boolean>().Value() ? 1 : 0;
+    }
+
     // Handle empty input
     if (src_size == 0 && !checksum) {
         return Napi::Buffer<uint8_t>::New(env, 0);
@@ -65,6 +70,7 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     zxc_compress_opts_t opts = {0};
     opts.level = level;
     opts.checksum_enabled = checksum;
+    opts.seekable = seekable;
 
     int64_t nwritten =
         zxc_compress(src, src_size, dst_buf.Data(), static_cast<size_t>(bound), &opts);

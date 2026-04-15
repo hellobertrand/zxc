@@ -123,7 +123,7 @@ jobs:
           CFLAGS="-g -O1 -fprofile-instr-generate -fcoverage-mapping"
           DEFS="-DZXC_FUNCTION_SUFFIX=_default -DZXC_ONLY_DEFAULT"
           INCLUDES="-I include -I src/lib/vendors"
-          SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c"
+          SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_seekable.c"
 
           clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_roundtrip.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_roundtrip

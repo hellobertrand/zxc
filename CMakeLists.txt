@@ -61,7 +61,10 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 # Enable _GNU_SOURCE for ftello/fseeko on Linux
-if(UNIX)
+# Enable 64-bit off_t on 32-bit Linux to prevent fseeko/ftello/pread truncation
+if(UNIX AND NOT APPLE)
+    add_compile_definitions(_GNU_SOURCE _FILE_OFFSET_BITS=64 _LARGEFILE_SOURCE)
+elseif(APPLE)
     add_compile_definitions(_GNU_SOURCE)
 endif()
 
@@ -222,12 +225,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set(ZXC_CORE_SOURCES
         src/lib/zxc_common.c
         src/lib/zxc_dispatch.c
+        src/lib/zxc_seekable.c
     )
 else()
     set(ZXC_CORE_SOURCES
         src/lib/zxc_common.c
         src/lib/zxc_driver.c
         src/lib/zxc_dispatch.c
+        src/lib/zxc_seekable.c
     )
 endif()
 
@@ -240,7 +245,7 @@ add_library(zxc_lib
 # ABI Versioning (Debian/Linux shared libraries)
 # =============================================================================
 # Increment this number ONLY when breaking the ABI. 
-set(ZXC_SOVERSION 2)
+set(ZXC_SOVERSION 3)
 
 # Set library output name and version
 set_target_properties(zxc_lib PROPERTIES
@@ -419,6 +424,7 @@ if(ZXC_BUILD_TESTS)
             src/lib/zxc_common.c
             src/lib/zxc_driver.c
             src/lib/zxc_dispatch.c
+            src/lib/zxc_seekable.c
             ${ZXC_VARIANT_OBJECTS}
         )
         
@@ -559,7 +565,7 @@ if(CLANG_FORMAT)
         VERBATIM
     )
 else()
-    message(STATUS "clang-format not found — format/format-check targets disabled")
+    message(STATUS "clang-format not found - format/format-check targets disabled")
 endif()
 
 # =============================================================================

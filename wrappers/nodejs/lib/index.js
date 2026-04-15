@@ -66,6 +66,7 @@ function compressBound(inputSize) {
  * @param {object} [options] - Compression options.
  * @param {number} [options.level=LEVEL_DEFAULT] - Compression level (1-5).
  * @param {boolean} [options.checksum=false] - Enable checksum verification.
+ * @param {boolean} [options.seekable=false] - Enable seek table for random-access decompression.
  * @returns {Buffer} Compressed data.
  */
 function compress(data, options = {}) {
@@ -75,12 +76,13 @@ function compress(data, options = {}) {
 
     const level = options.level !== undefined ? options.level : LEVEL_DEFAULT;
     const checksum = options.checksum !== undefined ? options.checksum : false;
+    const seekable = options.seekable !== undefined ? options.seekable : false;
 
     if (data.length === 0 && !checksum) {
         return Buffer.alloc(0);
     }
 
-    return native.compress(data, level, checksum);
+    return native.compress(data, level, checksum, seekable);
 }
 
 /**

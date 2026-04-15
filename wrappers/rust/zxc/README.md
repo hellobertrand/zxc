@@ -1,6 +1,6 @@
 # zxc
 
-Safe Rust bindings to the **ZXC compression library** — a fast LZ77-based compressor optimized for high decompression speed.
+Safe Rust bindings to the **ZXC compression library** - a fast LZ77-based compressor optimized for high decompression speed.
 
 [![Crates.io](https://img.shields.io/crates/v/zxc.svg)](https://crates.io/crates/zxc)
 [![Documentation](https://docs.rs/zxc/badge.svg)](https://docs.rs/zxc)
@@ -88,4 +88,4 @@ if let Some(size) = decompressed_size(&compressed) {
 
 ## License
 
-BSD-3-Clause — see [LICENSE](../../LICENSE) for details.
+BSD-3-Clause - see [LICENSE](../../LICENSE) for details.

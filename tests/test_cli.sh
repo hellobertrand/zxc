@@ -781,6 +781,114 @@ else
     log_fail "Block size 4M should be rejected (max is 2M)"
 fi
 
+# 24. Seekable Format (-S)
+echo "Testing Seekable Format (-S)..."
+
+# 24.1 Basic seekable round-trip
+echo "  Testing basic seekable round-trip..."
+rm -f "$TEST_FILE_XC_ARG" "$TEST_FILE_DEC_BASH"
+"$ZXC_BIN" -S -c "$TEST_FILE_ARG" > "$TEST_FILE_XC_ARG"
+if [ ! -s "$TEST_FILE_XC_ARG" ]; then
+    log_fail "Seekable compression failed"
+fi
+"$ZXC_BIN" -d -c "$TEST_FILE_XC_ARG" > "$TEST_FILE_DEC_BASH"
+if cmp -s "$TEST_FILE" "$TEST_FILE_DEC_BASH"; then
+    log_pass "Seekable basic round-trip (-S)"
+else
+    log_fail "Seekable decompression mismatch"
+fi
+
+# 24.2 Seekable file must be larger than normal (SEK block overhead)
+echo "  Testing seekable overhead..."
+"$ZXC_BIN" -3 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/normal.zxc"
+"$ZXC_BIN" -3 -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable.zxc"
+SIZE_NORMAL=$(wc -c < "$TEST_DIR/normal.zxc" | tr -d ' ')
+SIZE_SEEKABLE=$(wc -c < "$TEST_DIR/seekable.zxc" | tr -d ' ')
+if [ "$SIZE_SEEKABLE" -gt "$SIZE_NORMAL" ]; then
+    OVERHEAD=$((SIZE_SEEKABLE - SIZE_NORMAL))
+    log_pass "Seekable overhead verified (+${OVERHEAD} bytes)"
+else
+    log_fail "Seekable file should be larger than normal (SEK block missing?)"
+fi
+
+# 24.3 Seekable with small block size (many blocks = larger seek table)
+echo "  Testing seekable with small blocks (-B 4K)..."
+"$ZXC_BIN" -3 -S -B 4K -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_4k.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/seekable_4k.zxc" > "$TEST_DIR/seekable_4k.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/seekable_4k.dec"; then
+    SIZE_4K=$(wc -c < "$TEST_DIR/seekable_4k.zxc" | tr -d ' ')
+    # With 4K blocks, overhead should be larger than with default 256K blocks
+    if [ "$SIZE_4K" -gt "$SIZE_SEEKABLE" ]; then
+        log_pass "Seekable small blocks (-B 4K, Size: $SIZE_4K, more entries)"
+    else
+        log_pass "Seekable small blocks (-B 4K, Size: $SIZE_4K)"
+    fi
+else
+    log_fail "Seekable small blocks round-trip failed"
+fi
+
+# 24.4 Seekable with checksum
+echo "  Testing seekable + checksum (-S -C)..."
+"$ZXC_BIN" -3 -S -C -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_chk.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/seekable_chk.zxc" > "$TEST_DIR/seekable_chk.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/seekable_chk.dec"; then
+    log_pass "Seekable + checksum (-S -C)"
+else
+    log_fail "Seekable + checksum round-trip failed"
+fi
+
+# 24.5 Seekable with multi-threading
+echo "  Testing seekable + threads (-S -T2)..."
+"$ZXC_BIN" -3 -S -T2 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_mt.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/seekable_mt.zxc" > "$TEST_DIR/seekable_mt.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/seekable_mt.dec"; then
+    log_pass "Seekable + multi-threading (-S -T2)"
+else
+    log_fail "Seekable + multi-threading round-trip failed"
+fi
+
+# 24.6 Seekable across all levels
+echo "  Testing seekable across all levels..."
+SEEK_ALL_OK=1
+for LEVEL in 1 2 3 4 5; do
+    "$ZXC_BIN" -$LEVEL -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_lvl${LEVEL}.zxc"
+    "$ZXC_BIN" -d -c "$TEST_DIR/seekable_lvl${LEVEL}.zxc" > "$TEST_DIR/seekable_lvl${LEVEL}.dec"
+    if ! cmp -s "$TEST_FILE" "$TEST_DIR/seekable_lvl${LEVEL}.dec"; then
+        SEEK_ALL_OK=0
+        log_fail "Seekable level $LEVEL round-trip failed"
+    fi
+done
+if [ "$SEEK_ALL_OK" -eq 1 ]; then
+    log_pass "Seekable across all levels (1-5)"
+fi
+# 24.7 Seekable pipe round-trip (no fseeko - validates SEK skip on stdin)
+echo "  Testing seekable pipe round-trip..."
+cat "$TEST_FILE" | "$ZXC_BIN" -S -c | "$ZXC_BIN" -dc > "$TEST_DIR/seekable_pipe.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/seekable_pipe.dec"; then
+    log_pass "Seekable pipe round-trip"
+else
+    log_fail "Seekable pipe round-trip content mismatch"
+fi
+
+# 24.8 Seekable + no-checksum
+echo "  Testing seekable + no-checksum (-S -N)..."
+"$ZXC_BIN" -3 -S -N -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_nochk.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/seekable_nochk.zxc" > "$TEST_DIR/seekable_nochk.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/seekable_nochk.dec"; then
+    log_pass "Seekable + no-checksum (-S -N)"
+else
+    log_fail "Seekable + no-checksum round-trip failed"
+fi
+
+# 24.9 List command on seekable archive
+echo "  Testing list command on seekable archive..."
+"$ZXC_BIN" -3 -S -C -k -f "$TEST_FILE_ARG"
+OUT=$("$ZXC_BIN" -l "$TEST_FILE_XC_ARG")
+if [[ "$OUT" == *"Compressed"* ]] && [[ "$OUT" == *"Uncompressed"* ]]; then
+    log_pass "List command on seekable archive"
+else
+    log_fail "List command on seekable archive failed"
+fi
+
 echo "All tests passed!"
 exit 0
-

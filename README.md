@@ -27,6 +27,7 @@ It is designed to be **"Write Once, Read Many"** *(WORM)*. Unlike codecs like LZ
 - **What:** A C library for lossless compression, optimized for **maximum decompression speed**.
 - **Key Result:** Up to **>40% faster** decompression than LZ4 on Apple Silicon, **>25% faster** on Google Axion (ARM64), **>5% faster** on x86_64, **all with better compression ratios**.
 - **Use Cases:** Game assets, firmware, app bundles, anything *compressed once, decompressed millions of times*.
+- **Seekable:** Built-in seek table for **O(1) random-access** decompression, load any block without scanning the entire file.
 - **Install:** `conan install --requires="zxc/[*]"` · `vcpkg install zxc` · `brew install zxc` · `pip install zxc-compress` · `cargo add zxc-compress` · `npm i zxc-compress`
 - **Quality:** Fuzzed, sanitized, formally tested, thread-safe API. BSD-3-Clause.
 
@@ -298,13 +299,13 @@ cmake -B build -DZXC_DISABLE_SIMD=ON
 
 PGO uses runtime profiling data to optimize branch layout, inlining decisions, and code placement.
 
-**Step 1 — Build with instrumentation:**
+**Step 1 - Build with instrumentation:**
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DZXC_PGO_MODE=GENERATE
 cmake --build build --parallel
 ```
 
-**Step 2 — Run a representative workload to collect profile data:**
+**Step 2 - Run a representative workload to collect profile data:**
 ```bash
 # Run the test suite (exercises all block types and compression levels)
 ./build/zxc_test
@@ -313,14 +314,14 @@ cmake --build build --parallel
 ./build/zxc -b your_data_file
 ```
 
-**Step 3 — (Clang only) Merge raw profiles:**
+**Step 3 - (Clang only) Merge raw profiles:**
 ```bash
 # Clang generates .profraw files that must be merged before use
 llvm-profdata merge -output=build/pgo/default.profdata build/pgo/*.profraw
 ```
 > GCC uses a directory-based format and does not require this step.
 
-**Step 4 — Rebuild with profile data:**
+**Step 4 - Rebuild with profile data:**
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DZXC_PGO_MODE=USE
 cmake --build build --parallel
@@ -352,6 +353,9 @@ zxc -z input_file output_file
 
 # High Compression (Level 5)
 zxc -z -5 input_file output_file
+
+# Seekable Archive (enables O(1) random-access decompression)
+zxc -z -S input_file output_file
 
 # -z for compression can be omitted
 zxc input_file output_file
@@ -397,7 +401,7 @@ uint64_t bound = zxc_compress_bound(src_size);
 zxc_compress_opts_t c_opts = {
     .level            = ZXC_LEVEL_DEFAULT,
     .checksum_enabled = 1,
-    /* .block_size = 0 → 256 KB default */
+    /* .block_size = 0 -> 256 KB default */
 };
 int64_t compressed_size = zxc_compress(src, src_size, dst, bound, &c_opts);
 
@@ -415,7 +419,7 @@ zxc_compress_opts_t c_opts = {
     .n_threads        = 0,               // 0 = auto
     .level            = ZXC_LEVEL_DEFAULT,
     .checksum_enabled = 1,
-    /* .block_size = 0 → 256 KB default */
+    /* .block_size = 0 -> 256 KB default */
 };
 int64_t bytes_written = zxc_stream_compress(f_in, f_out, &c_opts);
 
@@ -428,7 +432,7 @@ int64_t bytes_out = zxc_stream_decompress(f_in, f_out, &d_opts);
 
 For tight loops (e.g. filesystem plug-ins) where per-call `malloc`/`free`
 overhead matters, use opaque reusable contexts.
-Options are **sticky** — settings from `zxc_create_cctx()` are reused when
+Options are **sticky** - settings from `zxc_create_cctx()` are reused when
 passing `NULL`:
 ```c
 #include "zxc.h"
@@ -437,7 +441,7 @@ zxc_compress_opts_t opts = { .level = 3, .checksum_enabled = 0 };
 zxc_cctx* cctx = zxc_create_cctx(&opts);   // allocate once, settings remembered
 zxc_dctx* dctx = zxc_create_dctx();        // allocate once
 
-// reuse across many blocks — NULL reuses sticky settings:
+// reuse across many blocks - NULL reuses sticky settings:
 int64_t csz = zxc_compress_cctx(cctx, src, src_sz, dst, dst_cap, NULL);
 int64_t dsz = zxc_decompress_dctx(dctx, dst, csz, out, src_sz, NULL);
 
@@ -452,8 +456,9 @@ zxc_free_dctx(dctx);
 - Multi-threaded streaming (auto-detects CPU cores)
 - Optional checksum validation
 - Reusable contexts for high-frequency call sites
+- Seekable archives: optional seek table for O(1) random-access decompression (`.seekable = 1`)
 
-**[See complete examples and advanced usage →](docs/EXAMPLES.md)**
+**[See complete examples and advanced usage ->](docs/EXAMPLES.md)**
 
 ## Language Bindings
 

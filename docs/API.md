@@ -93,8 +93,8 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` → `libzxc.so.2` → `libzxc.so.0.9.1` |
-| macOS | `libzxc.dylib` → `libzxc.2.dylib` → `libzxc.0.9.1.dylib` |
+| Linux | `libzxc.so` -> `libzxc.so.2` -> `libzxc.so.0.9.1` |
+| macOS | `libzxc.dylib` -> `libzxc.2.dylib` -> `libzxc.0.9.1.dylib` |
 | Windows | `zxc.dll` + `zxc.lib` (import) |
 
 ---
@@ -413,7 +413,7 @@ Same as `zxc_decompress()` but reuses buffers from `dctx`.
 ## 9. Streaming API
 
 Declared in `zxc_stream.h`. Multi-threaded, `FILE*`-based pipeline
-(reader → workers → writer).
+(reader -> workers -> writer).
 
 ### `zxc_stream_compress`
 
@@ -425,7 +425,7 @@ ZXC_EXPORT int64_t zxc_stream_compress(
 );
 ```
 
-Compresses `f_in` → `f_out` using a parallel pipeline.
+Compresses `f_in` -> `f_out` using a parallel pipeline.
 All fields of `opts` are used, including `n_threads` and `progress_cb`.
 
 **Returns**: total compressed bytes written, or negative `zxc_error_t`.
@@ -440,7 +440,7 @@ ZXC_EXPORT int64_t zxc_stream_decompress(
 );
 ```
 
-Decompresses `f_in` → `f_out` using a parallel pipeline.
+Decompresses `f_in` -> `f_out` using a parallel pipeline.
 
 **Returns**: total decompressed bytes written, or negative `zxc_error_t`.
 
@@ -458,7 +458,7 @@ Reads the original size from the file footer. File position is restored.
 
 ## 10. Sans-IO API
 
-Declared in `zxc_sans_io.h` (not included by `zxc.h` — opt-in).
+Declared in `zxc_sans_io.h` (not included by `zxc.h` - opt-in).
 Low-level primitives for building custom compression drivers.
 
 ### `zxc_cctx_init`
@@ -589,7 +589,7 @@ if (result < 0) {
 | **Buffer API** | Yes (stateless) | Each call is self-contained.  Multiple threads can compress/decompress simultaneously with independent buffers. |
 | **Context API** | Per-context | A single `zxc_cctx` / `zxc_dctx` must not be shared between threads.  Create one context per thread. |
 | **Streaming API** | Per-call | Each `zxc_stream_*` call manages its own thread pool internally.  Do not call from multiple threads on the same `FILE*`. |
-| **Sans-IO API** | Per-context | Same rule as context API — one `zxc_cctx_t` per thread. |
+| **Sans-IO API** | Per-context | Same rule as context API - one `zxc_cctx_t` per thread. |
 | `zxc_error_name` | Yes | Returns a pointer to a static string. |
 
 ---

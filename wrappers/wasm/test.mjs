@@ -136,9 +136,9 @@ async function main() {
             const dstPtr = Module._malloc(bound);
             Module.HEAPU8.set(input, srcPtr);
 
-            // Build opts struct: {n_threads=0, level, block_size=0, checksum=1, ...}
-            const optsPtr = Module._malloc(24);
-            for (let i = 0; i < 24; i++) Module.HEAPU8[optsPtr + i] = 0;
+            // Build opts struct: {n_threads=0, level, block_size=0, checksum=1, seekable=0, ...}
+            const optsPtr = Module._malloc(28);
+            for (let i = 0; i < 28; i++) Module.HEAPU8[optsPtr + i] = 0;
             Module.HEAP32[(optsPtr >> 2) + 1] = level;  // level
             Module.HEAP32[(optsPtr >> 2) + 3] = 1;      // checksum_enabled
 

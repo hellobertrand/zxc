@@ -57,11 +57,12 @@ export default async function createZXC(moduleOverrides) {
     const _free   = Module._free;
 
     // --- Options struct layout -----------------------------------------------
-    // zxc_compress_opts_t:
+    // zxc_compress_opts_t (WASM32 layout):
     //   int n_threads (4)  | int level (4)  | size_t block_size (4 in wasm32)
-    //   int checksum_enabled (4) | ptr progress_cb (4) | ptr user_data (4)
-    // Total: 24 bytes in WASM32
-    const COMPRESS_OPTS_SIZE = 24;
+    //   int checksum_enabled (4) | int seekable (4)
+    //   ptr progress_cb (4) | ptr user_data (4)
+    // Total: 28 bytes in WASM32
+    const COMPRESS_OPTS_SIZE = 28;
 
     // zxc_decompress_opts_t:
     //   int n_threads (4) | int checksum_enabled (4) | ptr progress_cb (4) | ptr user_data (4)
@@ -72,7 +73,7 @@ export default async function createZXC(moduleOverrides) {
      * Write a zxc_compress_opts_t struct into WASM memory.
      * @returns {number} Pointer to the struct (caller must free).
      */
-    function _writeCompressOpts(level, checksum) {
+    function _writeCompressOpts(level, checksum, seekable) {
         const ptr = _malloc(COMPRESS_OPTS_SIZE);
         // Zero-fill first
         for (let i = 0; i < COMPRESS_OPTS_SIZE; i++) {
@@ -86,7 +87,9 @@ export default async function createZXC(moduleOverrides) {
         Module.HEAPU32[(ptr >> 2) + 2] = 0;
         // checksum_enabled (offset 12)
         Module.HEAP32[(ptr >> 2) + 3] = checksum ? 1 : 0;
-        // progress_cb = NULL (offset 16), user_data = NULL (offset 20)
+        // seekable (offset 16)
+        Module.HEAP32[(ptr >> 2) + 4] = seekable ? 1 : 0;
+        // progress_cb = NULL (offset 20), user_data = NULL (offset 24)
         return ptr;
     }
 
@@ -116,19 +119,21 @@ export default async function createZXC(moduleOverrides) {
      * @param {object} [opts] - Options.
      * @param {number} [opts.level=3] - Compression level (1-5).
      * @param {boolean} [opts.checksum=false] - Enable checksums.
+     * @param {boolean} [opts.seekable=false] - Append seek table for random-access.
      * @returns {Uint8Array} Compressed data.
      * @throws {Error} On compression failure.
      */
     function compress(data, opts) {
         const level    = (opts && opts.level)    || _default_level();
         const checksum = (opts && opts.checksum) || false;
+        const seekable = (opts && opts.seekable) || false;
 
         const bound = _compress_bound(data.length);
         if (bound === 0) throw new Error('ZXC: compress_bound returned 0');
 
         const srcPtr = _malloc(data.length);
         const dstPtr = _malloc(bound);
-        const optsPtr = _writeCompressOpts(level, checksum);
+        const optsPtr = _writeCompressOpts(level, checksum, seekable);
 
         try {
             Module.HEAPU8.set(data, srcPtr);
@@ -216,8 +221,9 @@ export default async function createZXC(moduleOverrides) {
     function createCompressContext(opts) {
         const level    = (opts && opts.level)    || _default_level();
         const checksum = (opts && opts.checksum) || false;
+        const seekable = (opts && opts.seekable) || false;
 
-        const optsPtr = _writeCompressOpts(level, checksum);
+        const optsPtr = _writeCompressOpts(level, checksum, seekable);
         const cctx = _create_cctx(optsPtr);
         _free(optsPtr);
 

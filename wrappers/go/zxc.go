@@ -178,6 +178,7 @@ func errorFromCode(code C.int64_t) error {
 type options struct {
 	level    Level
 	checksum bool
+	seekable bool
 	threads  int
 }
 
@@ -206,6 +207,11 @@ func WithChecksum(enabled bool) Option {
 // A value of 0 means auto-detect the CPU core count.
 func WithThreads(n int) Option {
 	return func(o *options) { o.threads = n }
+}
+
+// WithSeekable enables seek table generation for random-access decompression.
+func WithSeekable(enabled bool) Option {
+	return func(o *options) { o.seekable = enabled }
 }
 
 func applyOptions(opts []Option) options {
@@ -442,6 +448,9 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 	copts.level = C.int(o.level)
 	if o.checksum {
 		copts.checksum_enabled = 1
+	}
+	if o.seekable {
+		copts.seekable = 1
 	}
 
 	result := C.zxc_stream_compress(cIn, cOut, &copts)

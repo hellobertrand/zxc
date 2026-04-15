@@ -31,6 +31,8 @@ It formalizes the current reference implementation of format version **5**.
 +----------------------+
 | EOF Block            | 8 bytes (type=255, comp_size=0)
 +----------------------+
+| SEK Block (Optional) | table of contents for random access
++----------------------+
 | File Footer          | 12 bytes
 +----------------------+
 ```
@@ -88,6 +90,7 @@ Offset  Size  Field
   - `1` = GLO
   - `2` = NUM
   - `3` = GHI
+  - `254` = SEK
   - `255` = EOF
 - **Block Flags**: currently not used by implementation (written as `0`).
 - **Reserved**: must be 0.
@@ -304,7 +307,31 @@ Constraints:
 - no payload
 - no per-block trailing checksum
 
-Immediately after EOF block header comes the 12-byte file footer.
+Immediately after EOF block header comes the Optional SEK block, followed by the 12-byte file footer.
+
+---
+
+## 5.6 SEK block (`type=254`)
+
+The **Seek Table** block is an optional block appended between the EOF block and the File Footer. It provides `O(1)` random-access capabilities by recording the compressed size of every block in the archive. Decompressed sizes and block indices are derived from the file header's `block_size` (all blocks are `block_size` except the last, which may be smaller).
+
+**Layout of a SEK Block**:
+```text
+  Offset             Size    Field
+  0x00               8       Block Header (type=254, comp_size=N*4)
+  0x08               4       Block 0 Compressed Size (u32 LE)
+  0x0C               4       Block 1 Compressed Size (u32 LE)
+  ...                ...     ...
+  8 + (N-1)*4        4       Block N-1 Compressed Size (u32 LE)
+```
+
+**Backward Detection Strategy**:
+1. Read the **File Header** (first 16 bytes) -> extract `block_size`.
+2. Read the **File Footer** (last 12 bytes) -> extract `total_decompressed_size`.
+3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`.
+4. Calculate `seek_block_size = 8 + (N × 4)`.
+5. Seek backward by `seek_block_size` bytes from the start of the footer to read the Block Header.
+6. Validate `block_type == 254 (SEK)` and `comp_size == N × 4`.
 
 ---
 
@@ -314,11 +341,11 @@ ZXC extras use a prefix-length varint.
 
 Length is encoded in unary form in the high bits of first byte:
 
-- `0xxxxxxx` → 1 byte total
-- `10xxxxxx` → 2 bytes total
-- `110xxxxx` → 3 bytes total
-- `1110xxxx` → 4 bytes total
-- `11110xxx` → 5 bytes total
+- `0xxxxxxx` -> 1 byte total
+- `10xxxxxx` -> 2 bytes total
+- `110xxxxx` -> 3 bytes total
+- `1110xxxx` -> 4 bytes total
+- `11110xxx` -> 5 bytes total
 
 Payload bits from following bytes are concatenated little-endian style (low bits first).
 
@@ -416,10 +443,10 @@ A conforming decoder **MUST** reject any file whose version it does not support.
 
 A minimal conforming decoder for version 5 **MUST** support:
 - File header parsing and CRC16 validation.
-- **RAW** blocks (type 0) — passthrough copy.
-- **GLO** blocks (type 1) — full LZ decode with extras varint.
-- **GHI** blocks (type 3) — full LZ decode with extras varint.
-- **EOF** block (type 255) — stream termination.
+- **RAW** blocks (type 0) - passthrough copy.
+- **GLO** blocks (type 1) - full LZ decode with extras varint.
+- **GHI** blocks (type 3) - full LZ decode with extras varint.
+- **EOF** block (type 255) - stream termination.
 - File footer validation (source size check).
 
 Support for **NUM** (type 2) and checksum verification is **RECOMMENDED** but not strictly required for a minimal implementation.
@@ -470,7 +497,7 @@ For decoders processing untrusted input (e.g. network data, user uploads):
 - Validate **all** header checksums before processing payloads.
 - Enforce maximum allocation limits based on `comp_size` and chunk size code.
 - Reject files where `comp_size` exceeds `zxc_compress_bound(chunk_size)`.
-- Use bounded memory copies — never trust decoded lengths without cross-checking against output buffer capacity.
+- Use bounded memory copies - never trust decoded lengths without cross-checking against output buffer capacity.
 
 ---
 
@@ -516,12 +543,12 @@ Generated archive size: **58 bytes**.
 F5 2E B0 9C | 05 | 12 | 80 | 00 00 00 00 00 00 00 | 9E 53
 ```
 
-- `F5 2E B0 9C` → magic word (LE) = `0x9CB02EF5`.
-- `05` → format version 5.
-- `12` → chunk-size code 18 (exponent encoding: `2^18 = 262144` bytes, i.e. 256 KiB).
-- `80` → checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
+- `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
+- `05` -> format version 5.
+- `12` -> chunk-size code 18 (exponent encoding: `2^18 = 262144` bytes, i.e. 256 KiB).
+- `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `9E 53` → header CRC16.
+- `9E 53` -> header CRC16.
 
 #### B) Data Block #0 (RAW)
 
@@ -588,3 +615,77 @@ global1 = rotl1(global0) XOR block_crc = block_crc
 0x26..0x2D  EOF Block Header (8)
 0x2E..0x39  File Footer (12)
 ```
+
+### 13.4 Seekable Variant (with Seek Table)
+
+Same 10-byte input (`Hello ZXC\n`), compressed with seekable mode enabled:
+
+```bash
+zxc -z -C -1 -S sample.txt
+```
+
+Generated archive size: **70 bytes** (12 bytes larger than the non-seekable variant).
+
+#### Full hexdump
+
+```text
+00000000: F5 2E B0 9C 05 12 80 00 00 00 00 00 00 00 9E 53
+00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
+00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
+00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00
+00000040: 00 00 90 BB A1 75
+```
+
+#### Byte-level decoding
+
+**A) File Header** (offset `0x00`, 16 bytes) - identical to non-seekable.
+
+**B) Data Block #0 (RAW)** (offset `0x10`, 22 bytes) - identical to non-seekable.
+
+**C) EOF Block** (offset `0x26`, 8 bytes) - identical to non-seekable.
+
+**D) SEK Block** (offset `0x2E`, 12 bytes)
+
+Block header at `0x2E`:
+
+```text
+FE | 00 | 00 | 04 00 00 00 | D2
+```
+
+- `FE` -> type 254 = SEK (Seek Table).
+- flags `00`, reserved `00`.
+- `comp_size = 0x00000004 = 4` bytes (one entry x 4 bytes/entry).
+- header CRC8 = `0xD2`.
+
+Seek table entry at `0x36`:
+
+```text
+16 00 00 00
+```
+
+- Entry #0: compressed block size = `0x00000016 = 22` bytes.
+  This is the total size of data block #0 including its header (8) + payload (10) + checksum (4) = 22. ✓
+
+**E) File Footer** (offset `0x3A`, 12 bytes)
+
+```text
+0A 00 00 00 00 00 00 00 | 90 BB A1 75
+```
+
+- original source size = `10` bytes.
+- global hash = `0x75A1BB90`.
+
+#### Structural view with absolute offsets
+
+```text
+0x00..0x0F  File Header (16)
+0x10..0x17  RAW Block Header (8)
+0x18..0x21  RAW Payload (10)
+0x22..0x25  RAW Block Checksum (4)
+0x26..0x2D  EOF Block Header (8)
+0x2E..0x35  SEK Block Header (8)    <- seek table
+0x36..0x39  SEK Entry #0 (4)        <- comp_size of block #0
+0x3A..0x45  File Footer (12)
+```
+
+> **Compatibility note**: The SEK block is inserted between the EOF block and the file footer. The footer always remains the **last 12 bytes of the file**, so decoders that locate the footer from the end of the file (e.g. `src + src_size - 12` for buffer APIs, or `fseek(END - 12)` for file APIs) work unchanged with seekable archives. However, **streaming decoders** that read the footer sequentially immediately after the EOF block must be updated to detect and skip the SEK block. In practice, all ZXC decoders since v0.9.0 handle both seekable and non-seekable archives transparently.

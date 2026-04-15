@@ -5,10 +5,10 @@ Designed for *Write Once, Read Many* workloads like ML datasets, game assets, an
 
 ## Features
 
-- **Blazing fast decompression** — ZXC is specifically optimized for read-heavy workloads.
-- **Buffer protocol support** — works with `bytes`, `bytearray`, `memoryview`, and even NumPy arrays.
-- **Releases the GIL** during compression/decompression — true parallelism with Python threads.
-- **Stream helpers** — compress/decompress file-like objects.
+- **Blazing fast decompression** - ZXC is specifically optimized for read-heavy workloads.
+- **Buffer protocol support** - works with `bytes`, `bytearray`, `memoryview`, and even NumPy arrays.
+- **Releases the GIL** during compression/decompression - true parallelism with Python threads.
+- **Stream helpers** - compress/decompress file-like objects.
 
 ## Installation (from source)
 

@@ -349,17 +349,18 @@ enum { OPT_VERSION = 1000, OPT_HELP };
 // Forward declaration for recursive mode
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
-                               int checksum, int level, size_t block_size, int json_output);
+                               int checksum, int level, size_t block_size, int json_output,
+                               int seekable);
 
 // Forward declaration for processing directory
 static int process_directory(const char* dir_path, zxc_mode_t mode, int num_threads, int keep_input,
                              int force, int to_stdout, int checksum, int level, size_t block_size,
-                             int json_output);
+                             int json_output, int seekable);
 
 // OS-specific implementation of directory processing
 static int process_directory(const char* dir_path, zxc_mode_t mode, int num_threads, int keep_input,
                              int force, int to_stdout, int checksum, int level, size_t block_size,
-                             int json_output) {
+                             int json_output, int seekable) {
     int overall_ret = 0;
 #ifdef _WIN32
     char search_path[MAX_PATH];
@@ -383,7 +384,8 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
 
         if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
-                                             to_stdout, checksum, level, block_size, json_output);
+                                             to_stdout, checksum, level, block_size, json_output,
+                                             seekable);
         } else {
             // Check if it ends with .zxc to skip if compressing to avoid double compression
             if (mode == MODE_COMPRESS) {
@@ -394,7 +396,8 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             }
             overall_ret |=
                 process_single_file(full_path, NULL, mode, num_threads, keep_input, force,
-                                    to_stdout, checksum, level, block_size, json_output);
+                                    to_stdout, checksum, level, block_size, json_output,
+                                    seekable);
         }
     } while (FindNextFileA(hFind, &find_data) != 0);
 
@@ -431,7 +434,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             if (S_ISDIR(st.st_mode)) {
                 overall_ret |=
                     process_directory(full_path, mode, num_threads, keep_input, force, to_stdout,
-                                      checksum, level, block_size, json_output);
+                                      checksum, level, block_size, json_output, seekable);
             } else if (S_ISREG(st.st_mode)) {
                 // Check if it ends with .zxc to skip if compressing to avoid double compression
                 if (mode == MODE_COMPRESS) {
@@ -443,7 +446,8 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                 }
                 overall_ret |=
                     process_single_file(full_path, NULL, mode, num_threads, keep_input, force,
-                                        to_stdout, checksum, level, block_size, json_output);
+                                        to_stdout, checksum, level, block_size, json_output,
+                                        seekable);
             }
         }
         free(full_path);
@@ -474,6 +478,7 @@ void print_help(const char* app) {
         "  -T, --threads N   Number of threads (0=auto)\n"
         "  -C, --checksum    Enable checksum {default}\n"
         "  -N, --no-checksum Disable checksum\n"
+        "  -S, --seekable    Append seek table for random-access decompression\n"
         "  -k, --keep        Keep input file\n"
         "  -f, --force       Force overwrite\n"
         "  -c, --stdout      Write to stdout\n"
@@ -717,7 +722,7 @@ static int zxc_list_archive(const char* path, int json_output) {
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
                                int checksum_enabled, int level, size_t block_size,
-                               int json_output) {
+                               int json_output, int seekable) {
     FILE* f_in = stdin;
     FILE* f_out = stdout;
     char resolved_in_path[4096] = {0};
@@ -890,6 +895,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         zxc_log_v("Processing %s... (Compression Level %d)\n", in_path, level);
     }
     if (g_verbose) zxc_log("Checksum: %s\n", checksum_enabled ? "enabled" : "disabled");
+    if (g_verbose && seekable) zxc_log("Seekable: enabled\n");
 
     // Prepare progress context
     progress_ctx_t pctx = {.start_time = zxc_now(),
@@ -904,6 +910,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .level = level,
             .block_size = block_size,
             .checksum_enabled = checksum_enabled,
+            .seekable = seekable,
             .progress_cb = show_progress ? cli_progress_callback : NULL,
             .user_data = &pctx,
         };
@@ -1010,6 +1017,7 @@ int main(int argc, char** argv) {
     int level = 3;
     int json_output = 0;
     size_t block_size = 0;
+    int seekable = 0;
 
     static const struct option long_options[] = {{"compress", no_argument, 0, 'z'},
                                                  {"decompress", no_argument, 0, 'd'},
@@ -1030,12 +1038,13 @@ int main(int argc, char** argv) {
                                                  {"multiple", no_argument, 0, 'm'},
                                                  {"recursive", no_argument, 0, 'r'},
                                                  {"block-size", required_argument, 0, 'B'},
+                                                 {"seekable", no_argument, 0, 'S'},
                                                  {0, 0, 0, 0}};
 
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
-    while ((opt = getopt_long(argc, argv, "12345b::B:cCdfhjklmrNqT:tvVz", long_options, NULL)) !=
+    while ((opt = getopt_long(argc, argv, "12345b::B:cCdfhjklmrNqST:tvVz", long_options, NULL)) !=
            -1) {
         switch (opt) {
             case 'z':
@@ -1112,6 +1121,9 @@ int main(int argc, char** argv) {
                 break;
             case 'm':
                 multiple_mode = 1;
+                break;
+            case 'S':
+                seekable = 1;
                 break;
             case 'r':
                 recursive_mode = 1;
@@ -1267,7 +1279,7 @@ int main(int argc, char** argv) {
         fm = NULL;
 
         const uint64_t max_c = zxc_compress_bound(in_size);
-        c_dat = malloc(max_c);
+        c_dat = malloc((size_t)max_c);
         if (!c_dat) goto bench_cleanup;
 
 #ifdef _WIN32
@@ -1446,7 +1458,8 @@ int main(int argc, char** argv) {
         if (recursive_mode && current_arg && strcmp(current_arg, "-") != 0 &&
             zxc_is_directory(current_arg)) {
             overall_ret |= process_directory(current_arg, mode, num_threads, keep_input, force,
-                                             to_stdout, checksum, level, block_size, json_output);
+                                             to_stdout, checksum, level, block_size, json_output,
+                                             seekable);
         } else {
             const char* explicit_out_path = (!multiple_mode && optind + 1 < argc && current_arg &&
                                              strcmp(current_arg, "-") != 0 && !to_stdout)
@@ -1455,7 +1468,8 @@ int main(int argc, char** argv) {
 
             overall_ret |=
                 process_single_file(current_arg, explicit_out_path, mode, num_threads, keep_input,
-                                    force, to_stdout, checksum, level, block_size, json_output);
+                                    force, to_stdout, checksum, level, block_size, json_output,
+                                    seekable);
         }
 
         if (!multiple_mode) {

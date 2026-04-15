@@ -344,6 +344,23 @@ extern "C" {
 /** @brief File footer size: original_size(8) + global_checksum(4). */
 #define ZXC_FILE_FOOTER_SIZE 12
 
+/** @name Seekable Format Constants
+ *  @brief Seek table block appended between EOF block and footer.
+ *
+ *  The seek table is optional (opt-in at compression time) and allows
+ *  random-access decompression by recording per-block compressed and
+ *  decompressed sizes.  It uses a standard ZXC block header with
+ *  @c block_type = @ref ZXC_BLOCK_SEK.
+ *
+ *  Detection from the end of the file: the reader derives @c num_blocks
+ *  from the file footer (total decompressed size) and file header (block size).
+ *  It then seeks backward to validate the SEK block header.
+ *  @{ */
+/** @brief Per-block entry size: comp_size(4) only.  decomp_size is derived
+ *  from the file header's block_size (all blocks except the last are full). */
+#define ZXC_SEEK_ENTRY_SIZE 4
+/** @} */ /* end of Seekable Format Constants */
+
 /** @name GLO Token Constants
  *  @brief 4-bit literal length / 4-bit match length / 16-bit offset.
  *  @{ */
@@ -533,6 +550,8 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
  *   Uses Delta Encoding + ZigZag + Bitpacking.
  * - `ZXC_BLOCK_GHI` (3): General-purpose high-velocity mode using LZ77 with advanced
  * techniques (lazy matching, step skipping) for maximum ratio. Includes 3 sections descriptors.
+ * - `ZXC_BLOCK_SEK` (254): Seek table block. Contains per-block compressed/decompressed sizes
+ *   for random-access decompression. Placed between EOF block and file footer.
  * - `ZXC_BLOCK_EOF` (255): End of file marker.
  */
 typedef enum {
@@ -540,6 +559,7 @@ typedef enum {
     ZXC_BLOCK_GLO = 1,
     ZXC_BLOCK_NUM = 2,
     ZXC_BLOCK_GHI = 3,
+    ZXC_BLOCK_SEK = 254,
     ZXC_BLOCK_EOF = 255
 } zxc_block_type_t;
 
@@ -890,8 +910,15 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(const uint64_t x) {
     unsigned long r;
     _BitScanForward64(&r, x);
     return (int)r;
+#elif defined(_MSC_VER)
+    // Use two 32-bit scans to avoid fragile 64-bit De Bruijn multiplication.
+    unsigned long r;
+    const uint32_t lo = (uint32_t)x;
+    if (_BitScanForward(&r, lo)) return (int)r;
+    _BitScanForward(&r, (uint32_t)(x >> 32));
+    return 32 + (int)r;
 #else
-    // Fallback De Bruijn
+    // Fallback De Bruijn for non-GCC/non-MSVC compilers
     static const int Debruijn64[64] = {
         0,  1,  48, 2,  57, 49, 28, 3,  61, 58, 50, 42, 38, 29, 17, 4,  62, 55, 59, 36, 53, 51,
         43, 22, 45, 39, 33, 30, 24, 18, 12, 5,  63, 47, 56, 27, 60, 41, 37, 16, 54, 35, 52, 21,
