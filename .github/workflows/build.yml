@@ -42,8 +42,13 @@ jobs:
           - name: Windows x64
             os: windows-latest
             artifact_name: zxc.exe
-            asset_name: zxc-windows-x64.exe
-            cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
+            asset_name: zxc-windows-x64
+            cmake_flags: "-A x64 -DZXC_NATIVE_ARCH=OFF"
+          - name: Windows ARM64
+            os: windows-11-arm
+            artifact_name: zxc.exe
+            asset_name: zxc-windows-arm64
+            cmake_flags: "-A ARM64 -DZXC_NATIVE_ARCH=OFF"
 
 
     steps:
@@ -100,7 +105,7 @@ jobs:
           cmake --install build --prefix release_staging --config Release
           
           # Strip binary on Unix-like systems only (installed to bin/)
-          if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
+          if [[ "${{ runner.os }}" != "Windows" ]]; then
             strip release_staging/bin/${{ matrix.artifact_name }}
           fi
           
@@ -110,7 +115,7 @@ jobs:
           
           # Create archive
           cd release_staging
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
             7z a ../${{ matrix.asset_name }}.zip *
           else
             tar -czvf ../${{ matrix.asset_name }}.tar.gz *
