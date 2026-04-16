@@ -12,7 +12,7 @@
 #include "../include/zxc_buffer.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    static uint8_t out_buf[1048576]; /* 1 MB max for fuzzer */
+    static uint8_t out_buf[4 << 20]; /* 4 MiB */
     size_t out_capacity = sizeof(out_buf);
 
     uint64_t expected_size = zxc_get_decompressed_size(data, size);
