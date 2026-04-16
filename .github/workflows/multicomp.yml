@@ -107,19 +107,28 @@ jobs:
   # ===========================================================================
   # GCC 9–14 on Ubuntu
   # ===========================================================================
-  gcc-jammy:
-    name: "GCC ${{ matrix.version }} (Ubuntu 22.04)"
-    runs-on: ubuntu-22.04
+  gcc:
+    name: "GCC ${{ matrix.version }} (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        version: [9, 10, 11, 12, 13]
+        include:
+          # Ubuntu 22.04 ships GCC 10, 11, 12 — only GCC 9 needs PPA
+          - { os: ubuntu-22.04, version: 9,  needs_ppa: true }
+          - { os: ubuntu-22.04, version: 10, needs_ppa: false }
+          - { os: ubuntu-22.04, version: 11, needs_ppa: false }
+          - { os: ubuntu-22.04, version: 12, needs_ppa: false }
+          # Ubuntu 24.04 ships GCC 12, 13, 14
+          - { os: ubuntu-latest, version: 13, needs_ppa: false }
+          - { os: ubuntu-latest, version: 14, needs_ppa: false }
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Install GCC ${{ matrix.version }}
+      - name: Install GCC ${{ matrix.version }} (PPA)
+        if: matrix.needs_ppa
         run: |
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
@@ -141,45 +150,7 @@ jobs:
                   -DCMAKE_CXX_COMPILER=g++-${{ matrix.version }} \
                   -DCMAKE_C_STANDARD=17 \
                   -DZXC_NATIVE_ARCH=OFF \
-                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
-
-              cmake --build $BUILD_DIR --config Release --parallel
-
-              echo "Running Tests for $LIB_TYPE..."
-              ctest --test-dir $BUILD_DIR -C Release --output-on-failure
-
-              echo ">>> Completed Build: $LIB_TYPE"
-              echo ""
-          done
-
-  # ===========================================================================
-  # GCC 14 on Ubuntu 24.04
-  # ===========================================================================
-  gcc-latest:
-    name: "GCC 14 (Ubuntu 24.04)"
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v6
-
-
-      - name: Configure, Build & Test (Static & Shared)
-        shell: bash
-        run: |
-          for LIB_TYPE in "STATIC" "SHARED"; do
-              echo ">>> Starting Build: GCC 14 – $LIB_TYPE"
-              BUILD_DIR="build_${LIB_TYPE}"
-
-              SHARED_FLAG="OFF"
-              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
-
-              cmake -S . -B $BUILD_DIR \
-                  -DCMAKE_BUILD_TYPE=Release \
-                  -DCMAKE_C_COMPILER=gcc-14 \
-                  -DCMAKE_CXX_COMPILER=g++-14 \
-                  -DCMAKE_C_STANDARD=17 \
-                  -DZXC_NATIVE_ARCH=OFF \
+                  -DZXC_ENABLE_LTO=OFF \
                   -DBUILD_SHARED_LIBS=$SHARED_FLAG
 
               cmake --build $BUILD_DIR --config Release --parallel
