@@ -140,7 +140,7 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: [build_wheels, build_sdist, test_wheels]
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     if: github.event_name == 'release'
     permissions:
       id-token: write
