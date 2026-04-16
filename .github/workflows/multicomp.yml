@@ -19,23 +19,39 @@ jobs:
   # Clang 12–20 on Ubuntu
   # ===========================================================================
   clang:
-    name: "Clang ${{ matrix.version }} (Ubuntu 22.04)"
-    runs-on: ubuntu-22.04
+    name: "Clang ${{ matrix.version }} (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        version: [12, 13, 14, 15, 16, 17, 18, 19, 20]
+        include:
+          # Ubuntu 22.04 ships Clang 13, 14, 15 — Clang 12 is in standard repos
+          - { os: ubuntu-22.04, version: 12, needs_install: true,  needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-22.04, version: 13, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-22.04, version: 14, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-22.04, version: 15, needs_llvm_apt: false, llvm_distro: "" }
+          # Ubuntu 24.04 ships Clang 16, 17, 18 — 19/20 need LLVM APT
+          - { os: ubuntu-latest, version: 16, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-latest, version: 17, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-latest, version: 18, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-latest, version: 19, needs_llvm_apt: true,  llvm_distro: noble }
+          - { os: ubuntu-latest, version: 20, needs_llvm_apt: true,  llvm_distro: noble }
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Install Clang ${{ matrix.version }}
+      - name: Install Clang ${{ matrix.version }} (standard repos)
+        if: matrix.needs_install && !matrix.needs_llvm_apt
         run: |
-          if [ ${{ matrix.version }} -ge 15 ]; then
-            wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-            echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.version }} main" | sudo tee /etc/apt/sources.list.d/llvm.list
-          fi
+          sudo apt-get update
+          sudo apt-get install -y clang-${{ matrix.version }}
+
+      - name: Install Clang ${{ matrix.version }} (LLVM APT)
+        if: matrix.needs_llvm_apt
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/${{ matrix.llvm_distro }}/ llvm-toolchain-${{ matrix.llvm_distro }}-${{ matrix.version }} main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
           sudo apt-get install -y clang-${{ matrix.version }}
 
@@ -107,19 +123,28 @@ jobs:
   # ===========================================================================
   # GCC 9–14 on Ubuntu
   # ===========================================================================
-  gcc-jammy:
-    name: "GCC ${{ matrix.version }} (Ubuntu 22.04)"
-    runs-on: ubuntu-22.04
+  gcc:
+    name: "GCC ${{ matrix.version }} (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        version: [9, 10, 11, 12, 13]
+        include:
+          # Ubuntu 22.04 ships GCC 10, 11, 12 — only GCC 9 needs PPA
+          - { os: ubuntu-22.04, version: 9,  needs_ppa: true }
+          - { os: ubuntu-22.04, version: 10, needs_ppa: false }
+          - { os: ubuntu-22.04, version: 11, needs_ppa: false }
+          - { os: ubuntu-22.04, version: 12, needs_ppa: false }
+          # Ubuntu 24.04 ships GCC 12, 13, 14
+          - { os: ubuntu-latest, version: 13, needs_ppa: false }
+          - { os: ubuntu-latest, version: 14, needs_ppa: false }
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Install GCC ${{ matrix.version }}
+      - name: Install GCC ${{ matrix.version }} (PPA)
+        if: matrix.needs_ppa
         run: |
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
@@ -141,45 +166,7 @@ jobs:
                   -DCMAKE_CXX_COMPILER=g++-${{ matrix.version }} \
                   -DCMAKE_C_STANDARD=17 \
                   -DZXC_NATIVE_ARCH=OFF \
-                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
-
-              cmake --build $BUILD_DIR --config Release --parallel
-
-              echo "Running Tests for $LIB_TYPE..."
-              ctest --test-dir $BUILD_DIR -C Release --output-on-failure
-
-              echo ">>> Completed Build: $LIB_TYPE"
-              echo ""
-          done
-
-  # ===========================================================================
-  # GCC 14 on Ubuntu 24.04
-  # ===========================================================================
-  gcc-latest:
-    name: "GCC 14 (Ubuntu 24.04)"
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v6
-
-
-      - name: Configure, Build & Test (Static & Shared)
-        shell: bash
-        run: |
-          for LIB_TYPE in "STATIC" "SHARED"; do
-              echo ">>> Starting Build: GCC 14 – $LIB_TYPE"
-              BUILD_DIR="build_${LIB_TYPE}"
-
-              SHARED_FLAG="OFF"
-              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
-
-              cmake -S . -B $BUILD_DIR \
-                  -DCMAKE_BUILD_TYPE=Release \
-                  -DCMAKE_C_COMPILER=gcc-14 \
-                  -DCMAKE_CXX_COMPILER=g++-14 \
-                  -DCMAKE_C_STANDARD=17 \
-                  -DZXC_NATIVE_ARCH=OFF \
+                  -DZXC_ENABLE_LTO=OFF \
                   -DBUILD_SHARED_LIBS=$SHARED_FLAG
 
               cmake --build $BUILD_DIR --config Release --parallel

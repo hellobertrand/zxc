@@ -6,10 +6,10 @@
 name: WASM Build
 
 on:
+  workflow_dispatch:
+  release:
+    types: [ published ]
   push:
-    workflow_dispatch:
-    release:
-      types: [ published ]
     branches: [ main ]
     paths:
       - 'src/**'
@@ -53,7 +53,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Run Tests
         run: BUILD_DIR=build-wasm node wrappers/wasm/test.mjs
