@@ -19,23 +19,33 @@ jobs:
   # Clang 12–20 on Ubuntu
   # ===========================================================================
   clang:
-    name: "Clang ${{ matrix.version }} (Ubuntu 22.04)"
-    runs-on: ubuntu-22.04
+    name: "Clang ${{ matrix.version }} (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        version: [12, 13, 14, 15, 16, 17, 18, 19, 20]
+        include:
+          # Ubuntu 22.04 ships Clang 13, 14, 15 — only 12 needs LLVM APT
+          - { os: ubuntu-22.04, version: 12, needs_llvm_apt: true,  llvm_distro: jammy }
+          - { os: ubuntu-22.04, version: 13, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-22.04, version: 14, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-22.04, version: 15, needs_llvm_apt: false, llvm_distro: "" }
+          # Ubuntu 24.04 ships Clang 16, 17, 18 — 19/20 need LLVM APT
+          - { os: ubuntu-latest, version: 16, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-latest, version: 17, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-latest, version: 18, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-latest, version: 19, needs_llvm_apt: true,  llvm_distro: noble }
+          - { os: ubuntu-latest, version: 20, needs_llvm_apt: true,  llvm_distro: noble }
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Install Clang ${{ matrix.version }}
+      - name: Install Clang ${{ matrix.version }} (LLVM APT)
+        if: matrix.needs_llvm_apt
         run: |
-          if [ ${{ matrix.version }} -ge 15 ]; then
-            wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-            echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.version }} main" | sudo tee /etc/apt/sources.list.d/llvm.list
-          fi
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/${{ matrix.llvm_distro }}/ llvm-toolchain-${{ matrix.llvm_distro }}-${{ matrix.version }} main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
           sudo apt-get install -y clang-${{ matrix.version }}
 
