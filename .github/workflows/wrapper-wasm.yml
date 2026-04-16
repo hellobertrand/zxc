@@ -6,10 +6,10 @@
 name: WASM Build
 
 on:
+  workflow_dispatch:
+  release:
+    types: [ published ]
   push:
-    workflow_dispatch:
-    release:
-      types: [ published ]
     branches: [ main ]
     paths:
       - 'src/**'
