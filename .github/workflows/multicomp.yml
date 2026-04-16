@@ -25,8 +25,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu 22.04 ships Clang 13, 14, 15 — only 12 needs LLVM APT
-          - { os: ubuntu-22.04, version: 12, needs_llvm_apt: true,  llvm_distro: jammy }
+          # Ubuntu 22.04 ships Clang 13, 14, 15 — Clang 12 is in standard repos
+          - { os: ubuntu-22.04, version: 12, needs_install: true,  needs_llvm_apt: false, llvm_distro: "" }
           - { os: ubuntu-22.04, version: 13, needs_llvm_apt: false, llvm_distro: "" }
           - { os: ubuntu-22.04, version: 14, needs_llvm_apt: false, llvm_distro: "" }
           - { os: ubuntu-22.04, version: 15, needs_llvm_apt: false, llvm_distro: "" }
@@ -40,6 +40,12 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
+
+      - name: Install Clang ${{ matrix.version }} (standard repos)
+        if: matrix.needs_install && !matrix.needs_llvm_apt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-${{ matrix.version }}
 
       - name: Install Clang ${{ matrix.version }} (LLVM APT)
         if: matrix.needs_llvm_apt
