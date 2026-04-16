@@ -1,10 +1,12 @@
 # ZXC: High-Performance Asymmetric Lossless Compression
 
 [![Build & Release](https://github.com/hellobertrand/zxc/actions/workflows/build.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/build.yml)
-[![Code Security](https://github.com/hellobertrand/zxc/actions/workflows/security.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/security.yml)
+[![Code Quality](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml)
 [![Fuzzing](https://github.com/hellobertrand/zxc/actions/workflows/fuzzing.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/fuzzing.yml)
 [![Benchmark](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml)
-[![Snyk Security](https://snyk.io/test/github/hellobertrand/zxc/badge.svg)](https://snyk.io/test/github/hellobertrand/zxc)
+
+<!-- [![Snyk Security](https://snyk.io/test/github/hellobertrand/zxc/badge.svg)](https://snyk.io/test/github/hellobertrand/zxc) -->
+[![Code Security](https://github.com/hellobertrand/zxc/actions/workflows/security.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/security.yml)
 [![Code Coverage](https://codecov.io/github/hellobertrand/zxc/branch/main/graph/badge.svg?token=LHA03HOA1X)](https://codecov.io/github/hellobertrand/zxc)
 
 [![ConanCenter](https://repology.org/badge/version-for-repo/conancenter/zxc.svg)](https://repology.org/project/zxc/versions)
@@ -25,7 +27,7 @@ It is designed to be **"Write Once, Read Many"** *(WORM)*. Unlike codecs like LZ
 ## TL;DR
 
 - **What:** A C library for lossless compression, optimized for **maximum decompression speed**.
-- **Key Result:** Up to **>40% faster** decompression than LZ4 on Apple Silicon, **>25% faster** on Google Axion (ARM64), **>5% faster** on x86_64, **all with better compression ratios**.
+- **Key Result:** Up to **>40% faster** decompression than LZ4 on Apple Silicon, **>20% faster** on Google Axion (ARM64), **>10% faster** on x86_64, **all with better compression ratios**.
 - **Use Cases:** Game assets, firmware, app bundles, anything *compressed once, decompressed millions of times*.
 - **Seekable:** Built-in seek table for **O(1) random-access** decompression, load any block without scanning the entire file.
 - **Install:** `conan install --requires="zxc/[*]"` · `vcpkg install zxc` · `brew install zxc` · `pip install zxc-compress` · `cargo add zxc-compress` · `npm i zxc-compress`
@@ -62,96 +64,119 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **11,934 MB/s** vs 5,647 MB/s **2.11x Faster** | **61.5** vs 62.2 **Smaller** (-1.0%) | **ZXC** leads in raw throughput. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **6,925 MB/s** vs 4,804 MB/s **1.44x Faster** | **46.4** vs 47.6 **Smaller** (-2.6%) | **ZXC** outperforms LZ4 in read speed and ratio. |
-| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **6,090 MB/s** vs 2,167 MB/s **2.81x Faster** | **40.6** vs 41.0 **Equivalent** (-1.0%) | **ZXC** outperforms Zstd in decoding speed. |
+| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **12,195 MB/s** vs 5,633 MB/s **2.16x Faster** | **61.6** vs 62.2 **Smaller** (-0.6%) | **ZXC** leads in raw throughput. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **7,008 MB/s** vs 4,787 MB/s **1.46x Faster** | **46.4** vs 47.6 **Smaller** (-2.6%) | **ZXC** outperforms LZ4 in read speed and ratio. |
+| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **6,181 MB/s** vs 2,527 MB/s **2.45x Faster** | **40.7** vs 41.0 **Equivalent** (-0.8%) | **ZXC** outperforms Zstd in decoding speed. |
 
 ### 2. Cloud Server: Google Axion (ARM Neoverse V2)
 *Scenario: High-throughput Microservices, ARM Cloud Instances.*
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **8,727 MB/s** vs 4,868 MB/s **1.79x Faster** | **61.5** vs 62.2 **Smaller** (-1.0%) | **ZXC** leads in raw throughput. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **5,130 MB/s** vs 4,182 MB/s **1.23x Faster** | **46.4** vs 47.6 **Smaller** (-2.6%) | **ZXC** outperforms LZ4 in read speed and ratio. |
-| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **4,475 MB/s** vs 1,763 MB/s **2.54x Faster** | **40.6** vs 41.0 **Equivalent** (-1.0%) | **ZXC** outperforms Zstd in decoding speed. |
+| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **8,924 MB/s** vs 4,950 MB/s **1.80x Faster** | **61.6** vs 62.2 **Smaller** (-0.6%) | **ZXC** leads in raw throughput. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **5,297 MB/s** vs 4,262 MB/s **1.24x Faster** | **46.4** vs 47.6 **Smaller** (-2.6%) | **ZXC** outperforms LZ4 in read speed and ratio. |
+| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **4,676 MB/s** vs 2,293 MB/s **2.04x Faster** | **40.7** vs 41.0 **Equivalent** (-0.8%) | **ZXC** outperforms Zstd in decoding speed. |
 
-### 3. Build Server: x86_64 (AMD EPYC 7763)
+### 3. Build Server: x86_64 (AMD EPYC 9B45)
 *Scenario: CI/CD Pipelines compatibility.*
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **6,779 MB/s** vs 4,116 MB/s **1.65x Faster** | **61.5** vs 62.2 **Smaller** (-1.0%) | **ZXC** achieves higher throughput. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **3,849 MB/s** vs 3,573 MB/s **1.08x Faster** | **46.4** vs 47.6 **Smaller** (-2.6%) | ZXC offers improved speed and ratio. |
-| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **3,495 MB/s** vs 1,573 MB/s **2.22x Faster** | **40.6** vs 41.0 **Equivalent** (-1.0%) | **ZXC** provides faster decoding. |
+| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **10,526 MB/s** vs 5,080 MB/s **2.07x Faster** | **61.8** vs 62.2 **Smaller** (-0.6%) | **ZXC** achieves higher throughput. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **5,815 MB/s** vs 4,825 MB/s **1.21x Faster** | **45.8** vs 47.6 **Smaller** (-3.8%) | ZXC offers improved speed and ratio. |
+| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **5,217 MB/s** vs 2,335 MB/s **2.23x Faster** | **40.3** vs 41.0 **Smaller** (-1.8%) | **ZXC** provides faster decoding. |
 
 
 *(Benchmark Graph ARM64 : Decompression Throughput & Storage Ratio (Normalized to LZ4))*
-![Benchmark Graph ARM64](docs/images/benchmark_arm64_0.9.0.webp)
+![Benchmark Graph ARM64](docs/images/benchmark_arm64_0.10.0.webp)
 
 
-### Benchmark ARM64 (Apple Silicon)
+### Benchmark ARM64 (Apple Silicon M2)
 
-Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clang 17.0.0 using *MOREFLAGS="-march=native"* on macOS Sequoia 15.7.2 (Build 24G325). The reference hardware is an Apple M2 processor (ARM64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus.
-
-| Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
-| ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 52905 MB/s | 52854 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.9.0 -1**            |   950 MB/s | **11934 MB/s** |   130408237 | **61.53** | 12 files|
-| **zxc 0.9.0 -2**            |   615 MB/s |  **9879 MB/s** |   114657730 | **54.10** | 12 files|
-| **zxc 0.9.0 -3**            |   240 MB/s |  **6925 MB/s** |    98234598 | **46.35** | 12 files|
-| **zxc 0.9.0 -4**            |   169 MB/s |  **6584 MB/s** |    91698141 | **43.27** | 12 files|
-| **zxc 0.9.0 -5**            |  93.2 MB/s |  **6090 MB/s** |    86054926 | **40.60** | 12 files|
-| lz4 1.10.0              |   815 MB/s |  4804 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1345 MB/s |  5647 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  14.0 MB/s |  4537 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   644 MB/s |  1622 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   725 MB/s |  2167 MB/s |    86932028 | 41.02 | 12 files|
-| brotli 1.2.0 -0         |   539 MB/s |   405 MB/s |    78306095 | 36.95 | 12 files|
-| snappy 1.2.2            |   830 MB/s |  3265 MB/s |   101352257 | 47.82 | 12 files|
-
-
-### Benchmark ARM64 (Google Axion)
-
-Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 12.2.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Debian GNU/Linux 12 (bookworm). The reference hardware is a Google Neoverse-V2 processor (ARM64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus.
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clang 21.0.0 using *MOREFLAGS="-march=native"* on macOS Tahoe 26.4 (Build 25E246). The reference hardware is an Apple M2 processor (ARM64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 24237 MB/s | 24131 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.9.0 -1**            |   853 MB/s |  **8727 MB/s** |   130408237 | **61.53** | 12 files|
-| **zxc 0.9.0 -2**            |   556 MB/s |  **7303 MB/s** |   114657730 | **54.10** | 12 files|
-| **zxc 0.9.0 -3**            |   226 MB/s |  **5130 MB/s** |    98234598 | **46.35** | 12 files|
-| **zxc 0.9.0 -4**            |   159 MB/s |  **4879 MB/s** |    91698141 | **43.27** | 12 files|
-| **zxc 0.9.0 -5**            |  84.9 MB/s |  **4475 MB/s** |    86054926 | **40.60** | 12 files|
-| lz4 1.10.0              |   749 MB/s |  4182 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1303 MB/s |  4868 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  12.9 MB/s |  3796 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   527 MB/s |  1364 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   610 MB/s |  1763 MB/s |    86932028 | 41.02 | 12 files|
-| brotli 1.2.0 -0         |   429 MB/s |   386 MB/s |    78306095 | 36.95 | 12 files|
-| snappy 1.2.2            |   756 MB/s |  1849 MB/s |   101352257 | 47.82 | 12 files|
+| memcpy                  | 52855 MB/s | 52786 MB/s |   211947520 |100.00 | 1 files|
+| **zxc 0.10.0 -1**           |   904 MB/s | **12195 MB/s** |   130468706 | **61.56** | 1 files|
+| **zxc 0.10.0 -2**           |   600 MB/s | **10044 MB/s** |   114455432 | **54.00** | 1 files|
+| **zxc 0.10.0 -3**           |   257 MB/s | **7008 MB/s** |    98233034 | **46.35** | 1 files|
+| **zxc 0.10.0 -4**           |   176 MB/s | **6636 MB/s** |    91429653 | **43.14** | 1 files|
+| **zxc 0.10.0 -5**           |   104 MB/s | **6181 MB/s** |    86196446 | **40.67** | 1 files|
+| lz4 1.10.0              |   792 MB/s |  4787 MB/s |   100880800 | 47.60 | 1 files|
+| lz4 1.10.0 --fast -17   |  1316 MB/s |  5633 MB/s |   131732802 | 62.15 | 1 files|
+| lz4hc 1.10.0 -9         |  46.3 MB/s |  4531 MB/s |    77884448 | 36.75 | 1 files|
+| lzav 5.7 -1             |   625 MB/s |  3859 MB/s |    84644732 | 39.94 | 1 files|
+| snappy 1.2.2            |   857 MB/s |  3258 MB/s |   101415443 | 47.85 | 1 files|
+| zstd 1.5.7 --fast --1   |   704 MB/s |  2527 MB/s |    86916294 | 41.01 | 1 files|
+| zstd 1.5.7 -1           |   625 MB/s |  1776 MB/s |    73193704 | 34.53 | 1 files|
+| zlib 1.3.1 -1           |   145 MB/s |   397 MB/s |    77259029 | 36.45 | 1 files|
 
 
+### Benchmark ARM64 (Google Axion Neoverse-V2)
 
-### Benchmark x86_64
-
-Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 13.3.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Ubuntu 24.04. The reference hardware is an AMD EPYC 7763 processor (x86_64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus.
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Debian GNU/Linux 12 (bookworm). The reference hardware is a Google Neoverse-V2 processor (ARM64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 18697 MB/s | 18663 MB/s |   211938580 |100.00 | 12 files|
-| **zxc 0.9.0 -1**            |   642 MB/s |  **6779 MB/s** |   130408237 | **61.53** | 12 files|
-| **zxc 0.9.0 -2**            |   414 MB/s |  **5778 MB/s** |   114657730 | **54.10** | 12 files|
-| **zxc 0.9.0 -3**            |   171 MB/s |  **3849 MB/s** |    98234598 | **46.35** | 12 files|
-| **zxc 0.9.0 -4**            |   122 MB/s |  **3674 MB/s** |    91698141 | **43.27** | 12 files|
-| **zxc 0.9.0 -5**            |  67.0 MB/s |  **3495 MB/s** |    86054926 | **40.60** | 12 files|
-| lz4 1.10.0              |   592 MB/s |  3573 MB/s |   100880147 | 47.60 | 12 files|
-| lz4 1.10.0 --fast -17   |  1033 MB/s |  4116 MB/s |   131723524 | 62.15 | 12 files|
-| lz4hc 1.10.0 -12        |  11.2 MB/s |  3484 MB/s |    77262399 | 36.46 | 12 files|
-| zstd 1.5.7 -1           |   412 MB/s |  1198 MB/s |    73229468 | 34.55 | 12 files|
-| zstd 1.5.7 --fast --1   |   451 MB/s |  1573 MB/s |    86932028 | 41.02 | 12 files|
-| brotli 1.2.0 -0         |   354 MB/s |   281 MB/s |    78306095 | 36.95 | 12 files|
-| snappy 1.2.2            |   611 MB/s |  1592 MB/s |   101464727 | 47.87 | 12 files|
+| memcpy                  | 23971 MB/s | 23953 MB/s |   211947520 |100.00 | 1 files|
+| **zxc 0.10.0 -1**           |   810 MB/s |  **8924 MB/s** |   130468706 | **61.56** | 1 files|
+| **zxc 0.10.0 -2**           |   523 MB/s |  **7461 MB/s** |   114455432 | **54.00** | 1 files|
+| **zxc 0.10.0 -3**           |   246 MB/s |  **5297 MB/s** |    98233034 | **46.35** | 1 files|
+| **zxc 0.10.0 -4**           |   170 MB/s |  **5038 MB/s** |    91429653 | **43.14** | 1 files|
+| **zxc 0.10.0 -5**           |   100 MB/s |  **4676 MB/s** |    86196446 | **40.67** | 1 files|
+| lz4 1.10.0              |   731 MB/s |  4262 MB/s |   100880800 | 47.60 | 1 files|
+| lz4 1.10.0 --fast -17   |  1278 MB/s |  4950 MB/s |   131732802 | 62.15 | 1 files|
+| lz4hc 1.10.0 -9         |  43.3 MB/s |  3850 MB/s |    77884448 | 36.75 | 1 files|
+| lzav 5.7 -1             |   554 MB/s |  2776 MB/s |    84644732 | 39.94 | 1 files|
+| snappy 1.2.2            |   757 MB/s |  2298 MB/s |   101415443 | 47.85 | 1 files|
+| zstd 1.5.7 --fast --1   |   606 MB/s |  2293 MB/s |    86916294 | 41.01 | 1 files|
+| zstd 1.5.7 -1           |   524 MB/s |  1645 MB/s |    73193704 | 34.53 | 1 files|
+| zlib 1.3.1 -1           |  57.2 MB/s |   390 MB/s |    77259029 | 36.45 | 1 files|
 
+
+### Benchmark x86_64 (AMD EPYC 9B45)
+
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Ubuntu 24.04. The reference hardware is an AMD EPYC 9B45 processor (x86_64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.
+
+| Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
+| ---------------         | -----------| -----------| ----------- | ----- | -------- |
+| memcpy                  | 23564 MB/s | 23993 MB/s |   211947520 |100.00 | 1 files|
+| **zxc 0.10.0 -1**           |   810 MB/s | **10526 MB/s** |   130969994 | **61.79** | 1 files|
+| **zxc 0.10.0 -2**           |   511 MB/s | **9120 MB/s** |   113859997 | **53.72** | 1 files|
+| **zxc 0.10.0 -3**           |   205 MB/s | **5815 MB/s** |    97083951 | **45.81** | 1 files|
+| **zxc 0.10.0 -4**           |   147 MB/s | **5533 MB/s** |    90503394 | **42.70** | 1 files|
+| **zxc 0.10.0 -5**           |  77.7 MB/s | **5217 MB/s** |    85344194 | **40.27** | 1 files|
+| lz4 1.10.0              |   745 MB/s |  4825 MB/s |   100880800 | 47.60 | 1 files|
+| lz4 1.10.0 --fast -17   |  1249 MB/s |  5080 MB/s |   131732802 | 62.15 | 1 files|
+| lz4hc 1.10.0 -9         |  42.8 MB/s |  4623 MB/s |    77884448 | 36.75 | 1 files|
+| lzav 5.7 -1             |   581 MB/s |  3422 MB/s |    84644732 | 39.94 | 1 files|
+| snappy 1.2.2            |   721 MB/s |  2004 MB/s |   101512076 | 47.89 | 1 files|
+| zstd 1.5.7 --fast --1   |   627 MB/s |  2335 MB/s |    86916294 | 41.01 | 1 files|
+| zstd 1.5.7 -1           |   575 MB/s |  1814 MB/s |    73193704 | 34.53 | 1 files|
+| zlib 1.3.1 -1           |   129 MB/s |   376 MB/s |    77259029 | 36.45 | 1 files|
+
+
+### Benchmark x86_64 (AMD EPYC 7763)
+
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.2.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Ubuntu 24.04. The reference hardware is an AMD EPYC 7763 64-Core processor (x86_64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.
+
+| Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
+| ---------------         | -----------| -----------| ----------- | ----- | -------- |
+| memcpy                  | 22410 MB/s | 22392 MB/s |   211947520 |100.00 | 1 files|
+| **zxc 0.10.0 -1**           |   601 MB/s |  **6921 MB/s** |   130468706 | **61.56** | 1 files|
+| **zxc 0.10.0 -2**           |   388 MB/s |  **5787 MB/s** |   114455432 | **54.00** | 1 files|
+| **zxc 0.10.0 -3**           |   186 MB/s |  **3903 MB/s** |    98233034 | **46.35** | 1 files|
+| **zxc 0.10.0 -4**           |   130 MB/s |  **3738 MB/s** |    91429653 | **43.14** | 1 files|
+| **zxc 0.10.0 -5**           |  80.4 MB/s |  **3565 MB/s** |    86196446 | **40.67** | 1 files|
+| lz4 1.10.0              |   582 MB/s |  3551 MB/s |   100880800 | 47.60 | 1 files|
+| lz4 1.10.0 --fast -17   |  1015 MB/s |  4102 MB/s |   131732802 | 62.15 | 1 files|
+| lz4hc 1.10.0 -9         |  33.3 MB/s |  3407 MB/s |    77884448 | 36.75 | 1 files|
+| lzav 5.7 -1             |   416 MB/s |  2647 MB/s |    84644732 | 39.94 | 1 files|
+| snappy 1.2.2            |   613 MB/s |  1593 MB/s |   101512076 | 47.89 | 1 files|
+| zstd 1.5.7 --fast --1   |   448 MB/s |  1626 MB/s |    86916294 | 41.01 | 1 files|
+| zstd 1.5.7 -1           |   409 MB/s |  1221 MB/s |    73193704 | 34.53 | 1 files|
+| zlib 1.3.1 -1           |  98.5 MB/s |   328 MB/s |    77259029 | 36.45 | 1 files|
 
 ---
 
@@ -339,6 +364,30 @@ cmake --build build --parallel
 *   **Level 1, 2 (Fast):** Optimized for real-time assets (Gaming, UI).
 *   **Level 3, 4 (Balanced):** A strong middle-ground offering efficient compression speed and a ratio superior to LZ4.
 *   **Level 5 (Compact):** The best choice for Embedded, Firmware, or Archival. Better compression than LZ4 and significantly faster decoding than Zstd.
+
+## Block Size Tuning
+
+The default block size is **256 KB**, a conservative choice that balances compression quality, memory usage, and random-access granularity. For **bulk/archival workloads** where maximum throughput matters, **512 KB blocks** are recommended.
+
+**Why larger blocks help:** Each block starts with a cold hash table, so the LZ match-finder has no history and produces more literals until the table warms up. Doubling the block size halves the number of cold-start penalties, improving both ratio and decompression speed.
+
+| Block Size | Memory (per context) | Ratio (level -3) | Decompression gain vs 256 KB |
+|:----------:|:--------------------:|:-----------------:|:----------------------------:|
+| 256 KB *(default)* | ~1.7 MB | 46.36% | — |
+| 512 KB | ~3.3 MB | 45.81% *(−0.55 pp)* | +1% to +8% depending on CPU |
+
+```bash
+# CLI
+zxc -B 512K -5 input_file output_file
+
+# API
+zxc_compress_opts_t opts = {
+    .level      = ZXC_LEVEL_COMPACT,
+    .block_size = 512 * 1024,
+};
+```
+
+**Guideline:** Use 256 KB (default) for streaming, embedded, or memory-constrained environments. Use 512 KB for bulk compression pipelines, CI/CD asset packaging, and high-throughput servers.
 
 ---
 
