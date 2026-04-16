@@ -23,6 +23,8 @@
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_seekable.h"
 
+#define FUZZ_SEEKABLE_MAX_INPUT (4 << 20) /* 4 MiB */
+
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (size < 2) return 0;
 
@@ -33,14 +35,26 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     data += 2;
     size -= 2;
 
-    if (size == 0) return 0;
+    if (size == 0 || size > FUZZ_SEEKABLE_MAX_INPUT) return 0;
+
+    /* Persistent buffers - reused across iterations to reduce allocator pressure */
+    static uint8_t* comp_buf = NULL;
+    static size_t comp_cap = 0;
+    static uint8_t* decomp_buf = NULL;
+    static size_t decomp_cap = 0;
 
     /* ------------------------------------------------------------------ */
     /* Phase 1: Compress with seekable=1                                   */
     /* ------------------------------------------------------------------ */
-    const size_t bound = zxc_compress_bound(size);
-    uint8_t* comp_buf = (uint8_t*)malloc(bound);
-    if (!comp_buf) return 0;
+    const uint64_t bound64 = zxc_compress_bound(size);
+    if (bound64 == 0 || bound64 > SIZE_MAX) return 0;
+    const size_t bound = (size_t)bound64;
+    if (bound > comp_cap) {
+        void* new_buf = realloc(comp_buf, bound);
+        if (!new_buf) return 0;
+        comp_buf = (uint8_t*)new_buf;
+        comp_cap = bound;
+    }
 
     zxc_compress_opts_t copts = {
         .level = level,
@@ -84,11 +98,14 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* ------------------------------------------------------------------ */
     /* Phase 4: Full decompression via seekable range                       */
     /* ------------------------------------------------------------------ */
-    uint8_t* decomp_buf = (uint8_t*)malloc(size);
-    if (!decomp_buf) {
-        zxc_seekable_free(s);
-        free(comp_buf);
-        return 0;
+    if (size > decomp_cap) {
+        void* new_buf = realloc(decomp_buf, size);
+        if (!new_buf) {
+            zxc_seekable_free(s);
+            return 0;
+        }
+        decomp_buf = (uint8_t*)new_buf;
+        decomp_cap = size;
     }
 
     int64_t dec_result;
@@ -128,9 +145,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     assert(zxc_seekable_get_decompressed_size(NULL) == 0);
 
     /* ------------------------------------------------------------------ */
-    /* Cleanup                                                              */
+    /* Cleanup (comp_buf and decomp_buf are static, not freed)              */
     /* ------------------------------------------------------------------ */
-    free(decomp_buf);
     zxc_seekable_free(s);
 
     /* ------------------------------------------------------------------ */
@@ -150,6 +166,6 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         zxc_seekable_free(s2);
     }
 
-    free(comp_buf);
+
     return 0;
 }
