@@ -39,6 +39,17 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.4.app
           clang --version
 
+      - name: Install llvm-mingw (Windows ARM64)
+        if: matrix.os == 'windows-11-arm'
+        shell: pwsh
+        run: |
+          $LLVM_MINGW_URL = "https://github.com/mstorsjo/llvm-mingw/releases/download/20260407/llvm-mingw-20260407-ucrt-aarch64.zip"
+          Invoke-WebRequest -Uri $LLVM_MINGW_URL -OutFile llvm-mingw.zip
+          Expand-Archive llvm-mingw.zip -DestinationPath C:\llvm-mingw
+          $MINGW_BIN = "C:\llvm-mingw\llvm-mingw-20260407-ucrt-aarch64\bin"
+          echo "$MINGW_BIN" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "CC=aarch64-w64-mingw32-gcc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
