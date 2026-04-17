@@ -585,7 +585,7 @@ typedef enum {
  * ============================================================================
  */
 
-/** @brief Maximum code length for canonical Huffman (11 bits → 2048-entry table, ~4 KB). */
+/** @brief Maximum code length for canonical Huffman (11 bits -> 2048-entry table, ~4 KB). */
 #define ZXC_HUF_MAX_BITS 11
 /** @brief Size of the Huffman decode lookup table. */
 #define ZXC_HUF_TABLE_SIZE (1U << ZXC_HUF_MAX_BITS)

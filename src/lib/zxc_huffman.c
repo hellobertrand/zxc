@@ -476,6 +476,27 @@ int zxc_huf_encode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
 }
 
 /**
+ * @brief Branchless bit reader refill for the Huffman decode hot path.
+ *
+ * Unconditionally loads 8 bytes from the current read position and merges
+ * them into the accumulator above the remaining valid bits.  The read pointer
+ * advances by exactly the number of fully consumed bytes.
+ *
+ * @pre bits < 64 (guaranteed after decoding at least one symbol).
+ * @pre ptr points into a buffer with at least 8 readable bytes
+ *      (guaranteed because the 4 Huffman streams are contiguous in memory
+ *       and followed by other valid block data in the same allocation).
+ */
+static ZXC_ALWAYS_INLINE void zxc_br_refill_fast(zxc_bit_reader_t* RESTRICT br) {
+    br->accum |= (zxc_le64(br->ptr) << br->bits);
+    /* Use 63 (not 64) to guarantee bits never reaches 64, which would
+     * cause undefined behaviour on the next refill's << bits shift. */
+    const int advance = (63 - br->bits) >> 3;
+    br->ptr += advance;
+    br->bits += advance << 3;
+}
+
+/**
  * @brief Decodes a canonical Huffman-compressed literal stream.
  *
  * Uses 4-stream interleaved decoding for instruction-level parallelism.
@@ -567,14 +588,14 @@ int zxc_huf_decode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
     const uint32_t mask = (1U << max_bits) - 1;
 
     /*
-     * Decode 4 symbols per iteration (one from each stream) to expose ILP.
+     * Decode 4 symbols per round (one from each stream) to expose ILP.
      * The CPU can pipeline br[1]'s table lookup while waiting for br[0]'s
      * shift result, since the accumulators are independent.
      *
-     * Inner batch: 5 symbols per stream per refill (5 × max_bits ≤ 55 ≤ 64).
-     * Total: 20 symbols per outer iteration (4 streams × 5 symbols).
+     * Inner batch: 5 symbols per stream per refill (5 x max_bits <= 55 <= 64).
+     * Total: 20 symbols per outer iteration (4 streams x 5 symbols).
      */
-#define ZXC_HUF_INNER_BATCH 5 /* floor(64 / ZXC_HUF_MAX_BITS) */
+#define ZXC_HUF_INNER_BATCH 5
 
 /*
  * Hot-path decode: no corruption check.  The decode table is fully
@@ -601,8 +622,6 @@ int zxc_huf_decode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
         (br_ptr)->bits -= l_;                                          \
     } while (0)
 
-    const int refill_bits = ZXC_HUF_INNER_BATCH * max_bits;
-
     /* Main loop: process min(d_count) symbols in 4-way interleaved batches */
     size_t min_count = d_count[0];
     for (int s = 1; s < ZXC_HUF_NUM_STREAMS; s++) {
@@ -612,11 +631,54 @@ int zxc_huf_decode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
     const size_t batch_end =
         (min_count >= ZXC_HUF_INNER_BATCH) ? (min_count - (ZXC_HUF_INNER_BATCH - 1)) : 0;
     size_t i = 0;
+
+    /*
+     * First batch: uses the full 64 bits loaded by zxc_br_init.
+     * No refill needed because bits == 64 for all 4 readers.
+     */
+    if (i < batch_end) {
+        /* Round 0 */
+        ZXC_HUF_DECODE_SYM(&br[0], &d[0][i]);
+        ZXC_HUF_DECODE_SYM(&br[1], &d[1][i]);
+        ZXC_HUF_DECODE_SYM(&br[2], &d[2][i]);
+        ZXC_HUF_DECODE_SYM(&br[3], &d[3][i]);
+        /* Round 1 */
+        ZXC_HUF_DECODE_SYM(&br[0], &d[0][i + 1]);
+        ZXC_HUF_DECODE_SYM(&br[1], &d[1][i + 1]);
+        ZXC_HUF_DECODE_SYM(&br[2], &d[2][i + 1]);
+        ZXC_HUF_DECODE_SYM(&br[3], &d[3][i + 1]);
+        /* Round 2 */
+        ZXC_HUF_DECODE_SYM(&br[0], &d[0][i + 2]);
+        ZXC_HUF_DECODE_SYM(&br[1], &d[1][i + 2]);
+        ZXC_HUF_DECODE_SYM(&br[2], &d[2][i + 2]);
+        ZXC_HUF_DECODE_SYM(&br[3], &d[3][i + 2]);
+        /* Round 3 */
+        ZXC_HUF_DECODE_SYM(&br[0], &d[0][i + 3]);
+        ZXC_HUF_DECODE_SYM(&br[1], &d[1][i + 3]);
+        ZXC_HUF_DECODE_SYM(&br[2], &d[2][i + 3]);
+        ZXC_HUF_DECODE_SYM(&br[3], &d[3][i + 3]);
+        /* Round 4 */
+        ZXC_HUF_DECODE_SYM(&br[0], &d[0][i + 4]);
+        ZXC_HUF_DECODE_SYM(&br[1], &d[1][i + 4]);
+        ZXC_HUF_DECODE_SYM(&br[2], &d[2][i + 4]);
+        ZXC_HUF_DECODE_SYM(&br[3], &d[3][i + 4]);
+        i += ZXC_HUF_INNER_BATCH;
+    }
+
+    /*
+     * Hot loop: branchless refill + decode.
+     * After the first batch, bits is in [9, 59] (consumed 5-55 of 64),
+     * so the refill's zxc_le64() << bits shift is well-defined (< 64).
+     * The capped advance in zxc_br_refill_fast guarantees bits never
+     * reaches 64, preventing UB on subsequent refills.
+     * Streams are contiguous in the source buffer, so 8-byte reads
+     * past an individual stream boundary land in valid adjacent data.
+     */
     while (i < batch_end) {
-        zxc_br_ensure(&br[0], refill_bits);
-        zxc_br_ensure(&br[1], refill_bits);
-        zxc_br_ensure(&br[2], refill_bits);
-        zxc_br_ensure(&br[3], refill_bits);
+        zxc_br_refill_fast(&br[0]);
+        zxc_br_refill_fast(&br[1]);
+        zxc_br_refill_fast(&br[2]);
+        zxc_br_refill_fast(&br[3]);
 
         /* Round 0 */
         ZXC_HUF_DECODE_SYM(&br[0], &d[0][i]);
