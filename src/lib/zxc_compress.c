@@ -795,7 +795,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     // --- RLE ANALYSIS ---
     size_t rle_size = 0;
-    int enc_lit = ZXC_SECTION_ENCODING_RAW;
+    int enc_lit_mode = ZXC_SECTION_ENCODING_RAW;
 
     if (lit_c > 0) {
         const uint8_t* p = literals;
@@ -1007,11 +1007,11 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
 
         // Threshold: ~3% savings using integer math (97% ~= 1 - 1/32)
-        if (rle_size < lit_c - (lit_c >> 5)) enc_lit = ZXC_SECTION_ENCODING_RLE;
+        if (rle_size < lit_c - (lit_c >> 5)) enc_lit_mode = ZXC_SECTION_ENCODING_RLE;
     }
 
     // --- HUFFMAN ANALYSIS (Level 6) ---
-    int use_huffman = 0;
+    // int use_huffman = 0;
     int huf_encoded_size = 0;
     uint8_t huf_max_bits = 0;
 
@@ -1038,10 +1038,9 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         if (huf_encoded_size > 0) {
             const size_t huf_sz = (size_t)huf_encoded_size;
             // Pick the best: Huffman vs RLE vs RAW
-            const size_t best_alt = use_rle ? rle_size : lit_c;
+            const size_t best_alt = (enc_lit_mode == ZXC_SECTION_ENCODING_RLE) ? rle_size : lit_c;
             if (huf_sz + ZXC_HUF_MIN_GAIN < best_alt) {
-                use_huffman = 1;
-                use_rle = 0;  // Huffman supersedes RLE
+                enc_lit_mode = ZXC_SECTION_ENCODING_HUFFMAN;
             }
         }
     }
@@ -1054,19 +1053,10 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const int use_8bit_off = (max_offset <= 255) ? 1 : 0;
     const size_t off_stream_size = use_8bit_off ? seq_c : (seq_c * 2);
 
-    // Determine literal encoding mode
-    uint8_t enc_lit_mode;
-    size_t lit_stream_out_size;
-    if (use_huffman) {
-        enc_lit_mode = ZXC_SECTION_ENCODING_HUFFMAN;
-        lit_stream_out_size = (size_t)huf_encoded_size;
-    } else if (use_rle) {
-        enc_lit_mode = ZXC_SECTION_ENCODING_RLE;
-        lit_stream_out_size = rle_size;
-    } else {
-        enc_lit_mode = ZXC_SECTION_ENCODING_RAW;
-        lit_stream_out_size = lit_c;
-    }
+    // Determine literal stream output size (branchless)
+    // enc_lit_mode: RAW=0 -> lit_c, RLE=1 -> rle_size, HUFFMAN=2 -> huf_encoded_size
+    const size_t lit_size_table[3] = {lit_c, rle_size, (size_t)huf_encoded_size};
+    const size_t lit_stream_out_size = lit_size_table[enc_lit_mode];
 
     const zxc_gnr_header_t gh = {.n_sequences = seq_c,
                                  .n_literals = (uint32_t)lit_c,
@@ -1095,11 +1085,11 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     if (UNLIKELY(rem < sz_lit)) return ZXC_ERROR_DST_TOO_SMALL;
 
-    if (use_huffman) {
+    if (enc_lit_mode == ZXC_SECTION_ENCODING_HUFFMAN) {
         // Write pre-encoded Huffman bitstream from lit_buffer
         ZXC_MEMCPY(p_curr, ctx->lit_buffer, (size_t)huf_encoded_size);
         p_curr += huf_encoded_size;
-    } else if (use_rle) {
+    } else if (enc_lit_mode == ZXC_SECTION_ENCODING_RLE) {
         // Write RLE - optimized single-pass encoding
         const uint8_t* lit_ptr = literals;
         const uint8_t* const lit_end = literals + lit_c;

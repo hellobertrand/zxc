@@ -521,17 +521,16 @@ typedef struct {
  * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
-    if (level >= 6) return (zxc_lz77_params_t){96, 256, 1, 24, 256, 1, 8};
-    // if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 128, 1, 8};
+    if (level >= 6) return (zxc_lz77_params_t){96, 256, 1, 24, 128, 1, 8};
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
     // step_shift
     static const zxc_lz77_params_t table[6] = {
-        {3, 16, 0, 0, 0, 4, 4},    // fallback
-        {3, 16, 0, 0, 0, 4, 4},    // level 1
-        {3, 18, 0, 0, 0, 3, 6},    // level 2
-        {3, 16, 1, 4, 128, 1, 4},  // level 3
-        {3, 18, 1, 4, 128, 1, 5}   // level 4
-        {64, 256, 1, 16, 128, 1, 8} // level 5
+        {3, 16, 0, 0, 0, 4, 4},      // fallback
+        {3, 16, 0, 0, 0, 4, 4},      // level 1
+        {3, 18, 0, 0, 0, 3, 6},      // level 2
+        {3, 16, 1, 4, 128, 1, 4},    // level 3
+        {3, 18, 1, 4, 128, 1, 5},    // level 4
+        {64, 256, 1, 16, 128, 1, 8}  // level 5
     };
     return table[level < 1 ? 1 : level];
 }
@@ -575,9 +574,9 @@ typedef enum {
  * - `ZXC_SECTION_ENCODING_HUFFMAN`: Canonical Huffman coding (Level 6).
  */
 typedef enum {
-    ZXC_SECTION_ENCODING_RAW = 0,     /**< Data is stored uncompressed. */
-    ZXC_SECTION_ENCODING_RLE = 1,     /**< Run-Length Encoding. */
-    ZXC_SECTION_ENCODING_HUFFMAN = 2  /**< Canonical Huffman coding (Level 6). */
+    ZXC_SECTION_ENCODING_RAW = 0,    /**< Data is stored uncompressed. */
+    ZXC_SECTION_ENCODING_RLE = 1,    /**< Run-Length Encoding. */
+    ZXC_SECTION_ENCODING_HUFFMAN = 2 /**< Canonical Huffman coding (Level 6). */
 } zxc_section_encoding_t;
 
 /*

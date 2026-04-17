@@ -267,10 +267,10 @@ static size_t zxc_huf_write_stream(const uint8_t* src, const size_t count,
         accum |= ((uint64_t)codes[sym] << accum_bits);
         accum_bits += lengths[sym];
 
-        while (accum_bits >= ZXC_BITS_PER_BYTE) {
+        while (accum_bits >= CHAR_BIT) {
             out[pos++] = (uint8_t)(accum & 0xFF);
-            accum >>= ZXC_BITS_PER_BYTE;
-            accum_bits -= ZXC_BITS_PER_BYTE;
+            accum >>= CHAR_BIT;
+            accum_bits -= CHAR_BIT;
         }
     }
     if (accum_bits > 0) {
@@ -334,14 +334,14 @@ int zxc_huf_encode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
 
         size_t total_bits_all = 0;
         for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
-            total_bits_all += (counts[s] + 7) / ZXC_BITS_PER_BYTE;
+            total_bits_all += (counts[s] + 7) / CHAR_BIT;
         }
         if (dst_cap < overhead + total_bits_all) return ZXC_ERROR_DST_TOO_SMALL;
 
         uint8_t* sp = dst + ZXC_HUF_HEADER_SIZE;
         uint8_t* out = sp + ZXC_HUF_STREAMS_HDR_SIZE;
         for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
-            const size_t sz = (counts[s] + 7) / ZXC_BITS_PER_BYTE;
+            const size_t sz = (counts[s] + 7) / CHAR_BIT;
             ZXC_MEMSET(out, 0, sz);
             if (s < ZXC_HUF_NUM_STREAMS - 1) {
                 sp[s * 4 + 0] = (uint8_t)(sz);
@@ -426,7 +426,7 @@ int zxc_huf_encode(const uint8_t* RESTRICT src, const size_t src_size, uint8_t* 
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
         total_bits += (uint64_t)freq[i] * lengths[i];
     }
-    const size_t bitstream_bytes = (size_t)((total_bits + 7) / ZXC_BITS_PER_BYTE);
+    const size_t bitstream_bytes = (size_t)((total_bits + 7) / CHAR_BIT);
     const size_t total_overhead = ZXC_HUF_HEADER_SIZE + ZXC_HUF_STREAMS_HDR_SIZE;
     const size_t total_out = total_overhead + bitstream_bytes;
 
