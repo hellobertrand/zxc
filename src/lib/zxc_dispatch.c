@@ -907,7 +907,10 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     /* For block API, block_size == src_size (the caller compresses one block at a time). */
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : cctx->stored_block_size;
-    const size_t effective_block_size = (block_size > 0) ? block_size : src_size;
+    const size_t effective_block_size = (block_size > 0) ? block_size : ZXC_BLOCK_SIZE_DEFAULT;
+
+    /* Guard: internal buffers are sized to block_size; src_size must fit. */
+    if (UNLIKELY(src_size > effective_block_size)) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
     cctx->stored_level = level;
     cctx->stored_block_size = effective_block_size;
