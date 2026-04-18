@@ -3497,6 +3497,122 @@ int test_seekable_with_checksum() {
     return 1;
 }
 
+/**
+ * @brief Stress-test the block API with boundary sizes across all levels.
+ *
+ * Tests zxc_compress_block / zxc_decompress_block with input sizes carefully
+ * chosen to land near internal buffer limits (mflimit, page boundaries).
+ * On strict-alignment architectures like s390x, 8-byte reads near the buffer
+ * end can cross into unmapped pages and cause SIGSEGV.
+ *
+ * This test covers:
+ *   - Sizes near the LZ match-finder safety margin (12-20 bytes)
+ *   - Odd sizes that stress alignment assumptions
+ *   - Data patterns that trigger each block type encoder (GLO, GHI, NUM, RAW)
+ *   - All compression levels
+ */
+int test_block_api_boundary_sizes() {
+    printf("=== TEST: Block API - Boundary Sizes (s390x regression) ===\n");
+
+    /* Edge-case sizes: near mflimit (iend-12), near page boundaries, odd */
+    const size_t sizes[] = {
+        13, 14, 15, 16, 17, 19, 20, 23, 24, 25,       /* Near mflimit margin */
+        31, 32, 33, 48, 63, 64, 65,                     /* Cache line edges */
+        100, 127, 128, 129, 255, 256, 257,               /* Byte boundary edges */
+        511, 512, 513, 1023, 1024, 1025,                 /* 1 KB edges */
+        4095, 4096, 4097,                                /* Page boundary */
+        8191, 8192, 8193,                                /* 2-page boundary */
+        16383, 16384, 16385,                             /* 4-page boundary */
+        65535, 65536, 65537,                             /* 64 KB boundary */
+    };
+    const int num_sizes = (int)(sizeof(sizes) / sizeof(sizes[0]));
+
+    /* Data generators: each triggers a different encoder path */
+    typedef void (*gen_fn)(uint8_t*, size_t);
+    const struct {
+        const char* name;
+        gen_fn gen;
+    } patterns[] = {
+        {"LZ (GLO/GHI)", gen_lz_data},
+        {"Random (RAW)", gen_random_data},
+        {"Numeric (NUM)", gen_num_data},
+    };
+    const int num_patterns = (int)(sizeof(patterns) / sizeof(patterns[0]));
+
+    const size_t max_size = sizes[num_sizes - 1];
+    uint8_t* src = malloc(max_size);
+    const uint64_t bound = zxc_compress_block_bound(max_size);
+    uint8_t* compressed = malloc((size_t)bound);
+    uint8_t* decompressed = malloc(max_size);
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_dctx* dctx = zxc_create_dctx();
+
+    if (!src || !compressed || !decompressed || !cctx || !dctx) {
+        printf("  [FAIL] allocation failed\n");
+        free(src); free(compressed); free(decompressed);
+        zxc_free_cctx(cctx); zxc_free_dctx(dctx);
+        return 0;
+    }
+
+    int failures = 0;
+
+    for (int p = 0; p < num_patterns; p++) {
+        /* Generate data once at max size; smaller tests use prefix */
+        patterns[p].gen(src, max_size);
+
+        for (int lvl = 1; lvl <= 5; lvl++) {
+            for (int s = 0; s < num_sizes; s++) {
+                const size_t sz = sizes[s];
+                /* NUM encoder needs size >= 16 && multiple of 4 */
+                if (p == 2 && (sz < 16 || sz % 4 != 0)) continue;
+
+                zxc_compress_opts_t copts = {.level = lvl, .checksum_enabled = 0};
+                const int64_t csize = zxc_compress_block(
+                    cctx, src, sz, compressed, (size_t)bound, &copts);
+
+                if (csize <= 0) {
+                    /* RAW fallback or incompressible is OK, but actual errors are not */
+                    if (csize < 0 && csize != ZXC_ERROR_DST_TOO_SMALL) {
+                        printf("  [FAIL] %s lvl=%d sz=%zu: compress error %lld\n",
+                               patterns[p].name, lvl, sz, (long long)csize);
+                        failures++;
+                    }
+                    continue;
+                }
+
+                zxc_decompress_opts_t dopts = {.checksum_enabled = 0};
+                const int64_t dsize = zxc_decompress_block(
+                    dctx, compressed, (size_t)csize, decompressed, sz, &dopts);
+
+                if (dsize != (int64_t)sz) {
+                    printf("  [FAIL] %s lvl=%d sz=%zu: decompress returned %lld (expected %zu)\n",
+                           patterns[p].name, lvl, sz, (long long)dsize, sz);
+                    failures++;
+                    continue;
+                }
+
+                if (memcmp(src, decompressed, sz) != 0) {
+                    printf("  [FAIL] %s lvl=%d sz=%zu: content mismatch\n",
+                           patterns[p].name, lvl, sz);
+                    failures++;
+                }
+            }
+        }
+    }
+
+    free(src); free(compressed); free(decompressed);
+    zxc_free_cctx(cctx); zxc_free_dctx(dctx);
+
+    if (failures > 0) {
+        printf("  [FAIL] %d sub-tests failed\n", failures);
+        return 0;
+    }
+
+    printf("  [PASS] All boundary sizes passed (%d patterns x 5 levels x %d sizes)\n",
+           num_patterns, num_sizes);
+    return 1;
+}
+
 int main() {
     srand(42);  // Fixed seed for reproducibility
     int total_failures = 0;
@@ -3632,6 +3748,7 @@ int main() {
     if (!test_decompress_fast_vs_safe_path()) total_failures++;
     if (!test_opaque_context_api()) total_failures++;
     if (!test_block_api()) total_failures++;
+    if (!test_block_api_boundary_sizes()) total_failures++;
     if (!test_library_info_api()) total_failures++;
 
     // --- SEEKABLE TESTS ---
