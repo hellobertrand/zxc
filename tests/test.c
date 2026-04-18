@@ -3583,12 +3583,7 @@ int test_block_api_boundary_sizes() {
                 /* NUM encoder needs size >= 16 && multiple of 4 */
                 if (p == 2 && (sz < 16 || sz % 4 != 0)) continue;
 
-                /* block_size must be a power of 2 in [MIN, MAX]; round up */
-                size_t bs = ZXC_BLOCK_SIZE_MIN;
-                while (bs < sz && bs < ZXC_BLOCK_SIZE_MAX) bs <<= 1;
-
-                zxc_compress_opts_t copts = {
-                    .level = lvl, .block_size = bs, .checksum_enabled = 0};
+                zxc_compress_opts_t copts = {.level = lvl, .checksum_enabled = 0};
                 const int64_t csize = zxc_compress_block(
                     cctx, src, sz, compressed, (size_t)bound, &copts);
 
