@@ -83,7 +83,7 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
 | **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **10,803 MB/s** vs 5,312 MB/s **2.03x Faster** | **61.6** vs 62.2 **Smaller** (-0.6%) | **ZXC** achieves higher throughput. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **5,964 MB/s** vs 5,050 MB/s **1.18x Faster** | **46.4** vs 47.6 **Smaller** (-2.6%) | ZXC offers improved speed and ratio. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **5,964 MB/s** vs 5,050 MB/s **1.18x Faster** | **46.4** vs 47.6 **Smaller** (-2.6%) | **ZXC** offers improved speed and ratio. |
 | **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **5,316 MB/s** vs 2,445 MB/s **2.17x Faster** | **40.7** vs 41.0 **Smaller** (-0.8%) | **ZXC** provides faster decoding. |
 
 
