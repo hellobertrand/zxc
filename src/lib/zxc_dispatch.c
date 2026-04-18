@@ -908,7 +908,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : cctx->stored_block_size;
     /* Branchless bit_ceil(src_size): next power of two >= src_size */
-    uint64_t v = src_size > 0 ? src_size - 1 : 0;
+    uint64_t v = src_size - 1;
     v |= v >> 1;
     v |= v >> 2;
     v |= v >> 4;
