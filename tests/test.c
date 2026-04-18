@@ -3502,8 +3502,6 @@ int test_seekable_with_checksum() {
  *
  * Tests zxc_compress_block / zxc_decompress_block with input sizes carefully
  * chosen to land near internal buffer limits (mflimit, page boundaries).
- * On strict-alignment architectures like s390x, 8-byte reads near the buffer
- * end can cross into unmapped pages and cause SIGSEGV.
  *
  * This test covers:
  *   - Sizes near the LZ match-finder safety margin (12-20 bytes)
@@ -3512,9 +3510,10 @@ int test_seekable_with_checksum() {
  *   - All compression levels
  */
 int test_block_api_boundary_sizes() {
-    printf("=== TEST: Block API - Boundary Sizes (s390x regression) ===\n");
+    printf("=== TEST: Block API - Boundary Sizes ===\n");
 
-    /* Edge-case sizes: near mflimit (iend-12), near page boundaries, odd */
+    /* Edge-case sizes: near mflimit (iend-12), near page boundaries, odd,
+     * and large block sizes (128KB - 2MB) */
     const size_t sizes[] = {
         13, 14, 15, 16, 17, 19, 20, 23, 24, 25,       /* Near mflimit margin */
         31, 32, 33, 48, 63, 64, 65,                     /* Cache line edges */
@@ -3524,6 +3523,11 @@ int test_block_api_boundary_sizes() {
         8191, 8192, 8193,                                /* 2-page boundary */
         16383, 16384, 16385,                             /* 4-page boundary */
         65535, 65536, 65537,                             /* 64 KB boundary */
+        128 * 1024, 128 * 1024 + 1,                      /* 128 KB block */
+        256 * 1024, 256 * 1024 - 1,                      /* 256 KB block */
+        512 * 1024,                                      /* 512 KB block */
+        1024 * 1024,                                     /* 1 MB */
+        2 * 1024 * 1024,                                 /* 2 MB max block */
     };
     const int num_sizes = (int)(sizeof(sizes) / sizeof(sizes[0]));
 
