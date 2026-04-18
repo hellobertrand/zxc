@@ -907,7 +907,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     /* For block API, block_size == src_size (the caller compresses one block at a time). */
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : cctx->stored_block_size;
-
+    /* Branchless bit_ceil(src_size): next power of two >= src_size */
     uint64_t v = src_size > 0 ? src_size - 1 : 0;
     v |= v >> 1;
     v |= v >> 2;
@@ -916,15 +916,11 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     v |= v >> 16;
     v |= v >> 32;
     v++;
+    size_t min_bs = (size_t)v;
+    min_bs = (min_bs < ZXC_BLOCK_SIZE_MIN) ? ZXC_BLOCK_SIZE_MIN : min_bs;
 
-    size_t pow2 = (size_t)v;
-    pow2 = (pow2 < ZXC_BLOCK_SIZE_MIN) ? ZXC_BLOCK_SIZE_MIN : pow2;
-    pow2 = (pow2 > ZXC_BLOCK_SIZE_MAX) ? ZXC_BLOCK_SIZE_MAX : pow2;
-
-    const size_t effective_block_size = (block_size > 0) ? block_size : pow2;
-
-    /* Guard: internal buffers are sized to block_size; src_size must fit. */
-    if (UNLIKELY(src_size > effective_block_size)) return ZXC_ERROR_BAD_BLOCK_SIZE;
+    /* Always ensure internal buffers can hold src_size. */
+    const size_t effective_block_size = (block_size > min_bs) ? block_size : min_bs;
 
     cctx->stored_level = level;
     cctx->stored_block_size = effective_block_size;

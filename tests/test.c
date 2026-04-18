@@ -2294,17 +2294,17 @@ int test_block_api() {
     }
     printf("  [PASS] Context reuse: 3 independent blocks OK\n");
 
-    // 8. Guard: src_size > block_size must be rejected
+    // 8. Auto-resize: src_size > block_size must succeed (ZXC auto-sizes)
     {
         zxc_compress_opts_t guard_opts = {.level = 3, .block_size = 4096, .checksum_enabled = 0};
         int64_t guard_rc = zxc_compress_block(cctx, src, src_size, compressed,
                                               (size_t)block_bound, &guard_opts);
-        if (guard_rc != ZXC_ERROR_BAD_BLOCK_SIZE) {
-            printf("Failed: src_size > block_size should return BAD_BLOCK_SIZE, got %lld\n",
+        if (guard_rc <= 0) {
+            printf("Failed: src_size > block_size should auto-resize, got %lld\n",
                    (long long)guard_rc);
             goto cleanup;
         }
-        printf("  [PASS] Guard: src_size > block_size rejected\n");
+        printf("  [PASS] Auto-resize: src_size > block_size succeeded\n");
     }
 
     printf("PASS\n\n");
