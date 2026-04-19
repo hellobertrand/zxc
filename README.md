@@ -35,7 +35,12 @@ It is designed to be **"Write Once, Read Many"** *(WORM)*. Unlike codecs like LZ
 - **Install:** `conan install --requires="zxc/[*]"` · `vcpkg install zxc` · `brew install zxc` · `pip install zxc-compress` · `cargo add zxc-compress` · `npm i zxc-compress`
 - **Quality:** Fuzzed, sanitized, formally tested, thread-safe API. BSD-3-Clause.
 
-> **Verified:** ZXC has been officially merged into the **[lzbench master branch](https://github.com/inikep/lzbench)**. You can verify these results independently using the industry-standard benchmark suite.
+> **Independently Verified:** ZXC has been officially merged into both major open-source compression benchmark suites:
+>
+> - **[lzbench](https://github.com/inikep/lzbench)** (master branch, by @inikep)
+> - **[TurboBench](https://github.com/powturbo/TurboBench)** (master branch, by @powturbo)
+>
+> You can reproduce these results independently using either industry-standard benchmark, alongside 70+ other codecs.
 
 
 ## ZXC Design Philosophy
