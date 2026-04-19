@@ -218,6 +218,25 @@ typedef struct zxc_dctx_s zxc_dctx;
 ZXC_EXPORT uint64_t zxc_compress_block_bound(size_t input_size);
 
 /**
+ * @brief Returns the minimum destination capacity required by
+ *        zxc_decompress_block() for a block of @p uncompressed_size bytes.
+ *
+ * The decoder uses speculative (wild-copy) writes on its fast path and
+ * therefore needs a tail pad beyond the declared uncompressed size.
+ * Passing exactly @c uncompressed_size as @c dst_capacity forces the slow
+ * tail path and may trigger @ref ZXC_ERROR_OVERFLOW on some inputs.
+ *
+ * Use this helper to size the destination buffer. The returned value is
+ * guaranteed to enable the fastest decode path without aliasing or
+ * overrun checks tripping.
+ *
+ * @param[in] uncompressed_size Original uncompressed block size in bytes.
+ * @return Minimum @c dst_capacity to pass to zxc_decompress_block(),
+ *         or 0 if @p uncompressed_size would overflow.
+ */
+ZXC_EXPORT uint64_t zxc_decompress_block_bound(size_t uncompressed_size);
+
+/**
  * @brief Compresses a single block without file framing.
  *
  * Output format: @c block_header(8B) + payload + optional @c checksum(4B).
