@@ -2319,6 +2319,92 @@ cleanup:
     return result;
 }
 
+int test_decompress_block_bound() {
+    printf("=== TEST: Unit - zxc_decompress_block_bound ===\n");
+
+    /* 1. Sanity: helper must return more than the input (tail pad > 0). */
+    {
+        const size_t n = 4096;
+        const uint64_t b = zxc_decompress_block_bound(n);
+        if (b <= n) {
+            printf("Failed: bound(%zu)=%llu must exceed input (tail pad missing)\n", n,
+                   (unsigned long long)b);
+            return 0;
+        }
+        /* Pad is a fixed margin, so the delta must be constant. */
+        const uint64_t pad = b - n;
+        const uint64_t b2 = zxc_decompress_block_bound(n * 4);
+        if (b2 - n * 4 != pad) {
+            printf("Failed: tail pad must be constant, got %llu vs %llu\n",
+                   (unsigned long long)pad, (unsigned long long)(b2 - n * 4));
+            return 0;
+        }
+        printf("  [PASS] bound(n) = n + %llu (constant tail pad)\n", (unsigned long long)pad);
+    }
+
+    /* 2. Overflow: huge input must return 0. */
+    {
+        if (zxc_decompress_block_bound(SIZE_MAX) != 0) {
+            printf("Failed: bound(SIZE_MAX) must return 0 on overflow\n");
+            return 0;
+        }
+        printf("  [PASS] bound(SIZE_MAX) -> 0 (overflow guard)\n");
+    }
+
+    /* 3. Edge: bound(0) must still return a valid non-zero pad. */
+    {
+        if (zxc_decompress_block_bound(0) == 0) {
+            printf("Failed: bound(0) must be > 0 (tail pad always required)\n");
+            return 0;
+        }
+        printf("  [PASS] bound(0) > 0\n");
+    }
+
+    /* 4. Functional: a roundtrip using bound-sized dst must succeed. */
+    {
+        const size_t src_size = 64 * 1024;
+        uint8_t* src = malloc(src_size);
+        if (!src) return 0;
+        gen_lz_data(src, src_size);
+
+        const uint64_t cbound = zxc_compress_block_bound(src_size);
+        uint8_t* compressed = malloc((size_t)cbound);
+        const uint64_t dbound = zxc_decompress_block_bound(src_size);
+        uint8_t* decompressed = malloc((size_t)dbound);
+
+        zxc_cctx* cctx = zxc_create_cctx(NULL);
+        zxc_dctx* dctx = zxc_create_dctx();
+
+        int ok = 0;
+        if (compressed && decompressed && cctx && dctx) {
+            zxc_compress_opts_t copts = {.level = 3};
+            int64_t csize = zxc_compress_block(cctx, src, src_size, compressed,
+                                               (size_t)cbound, &copts);
+            if (csize > 0) {
+                int64_t dsize = zxc_decompress_block(dctx, compressed, (size_t)csize,
+                                                     decompressed, (size_t)dbound, NULL);
+                ok = (dsize == (int64_t)src_size) &&
+                     memcmp(src, decompressed, src_size) == 0;
+            }
+        }
+
+        zxc_free_cctx(cctx);
+        zxc_free_dctx(dctx);
+        free(decompressed);
+        free(compressed);
+        free(src);
+
+        if (!ok) {
+            printf("Failed: roundtrip with bound-sized dst failed\n");
+            return 0;
+        }
+        printf("  [PASS] roundtrip into bound-sized dst OK\n");
+    }
+
+    printf("PASS\n\n");
+    return 1;
+}
+
 int test_opaque_context_api() {
     printf("=== TEST: Opaque Context API (zxc_create_cctx / zxc_create_dctx) ===\n");
 
@@ -3766,6 +3852,7 @@ int main() {
     if (!test_opaque_context_api()) total_failures++;
     if (!test_block_api()) total_failures++;
     if (!test_block_api_boundary_sizes()) total_failures++;
+    if (!test_decompress_block_bound()) total_failures++;
     if (!test_library_info_api()) total_failures++;
 
     // --- SEEKABLE TESTS ---
