@@ -907,7 +907,10 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     /* For block API, block_size == src_size (the caller compresses one block at a time). */
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : cctx->stored_block_size;
-    const size_t effective_block_size = (block_size > 0) ? block_size : src_size;
+    const size_t min_bs = zxc_block_size_ceil(src_size);
+
+    /* Always ensure internal buffers can hold src_size. */
+    const size_t effective_block_size = (block_size > min_bs) ? block_size : min_bs;
 
     cctx->stored_level = level;
     cctx->stored_block_size = effective_block_size;
@@ -940,16 +943,13 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
 int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
                              void* RESTRICT dst, const size_t dst_capacity,
                              const zxc_decompress_opts_t* opts) {
-    if (UNLIKELY(!dctx || !src || !dst || src_size < ZXC_BLOCK_HEADER_SIZE))
+    if (UNLIKELY(!dctx || !src || !dst || src_size < ZXC_BLOCK_HEADER_SIZE || dst_capacity == 0))
         return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
 
-    /*
-     * Derive the block_size from dst_capacity (callers know the original size).
-     * Re-init only when needed.
-     */
-    const size_t block_size = dst_capacity;
+    /* Derive the block_size from dst_capacity (callers know the original size). */
+    const size_t block_size = zxc_block_size_ceil(dst_capacity);
     if (!dctx->initialized || dctx->last_block_size != block_size) {
         if (dctx->initialized) {
             zxc_cctx_free(&dctx->inner);

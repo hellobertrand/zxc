@@ -1119,7 +1119,7 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const uint8_t* const d_end_safe = d_end - (ZXC_PAD_SIZE * 4);  // 128
     // Safety margin for 4x unrolled loop: 4 * (ZXC_SEQ_LL_MASK LL +
     // ZXC_SEQ_ML_MASK+ZXC_LZ_MIN_MATCH_LEN ML) + ZXC_PAD_SIZE Pad = 4 x (255 + 255 + 5) + 32 = 2092
-    const uint8_t* const d_end_fast = d_end - (ZXC_PAD_SIZE * 66);  // 2112
+    const uint8_t* const d_end_fast = d_end - ZXC_DECOMPRESS_TAIL_PAD;  // 2112
 
     // Literal stream safe thresholds for GHI loops.
     // Without varint extension, max ll per sequence = ZXC_SEQ_LL_MASK - 1 = 254.
