@@ -293,6 +293,18 @@ extern "C" {
 #define ZXC_MAX_THREADS 512
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
+/**
+ * @brief Tail padding required on the decompression destination buffer.
+ *
+ * The decoder's fast path uses speculative wild-copy writes and gates
+ * fast-loop entry on @c d_end - ZXC_DECOMPRESS_TAIL_PAD. Sizing
+ * @c dst_capacity to @c uncompressed_size + ZXC_DECOMPRESS_TAIL_PAD
+ * guarantees the fast path is reachable and that tail bounds checks
+ * never spuriously reject the last literals of a valid block.
+ *
+ * @see zxc_decompress_block_bound()
+ */
+#define ZXC_DECOMPRESS_TAIL_PAD (ZXC_PAD_SIZE * 66)
 /** @brief Assumed CPU cache line size for alignment. */
 #define ZXC_CACHE_LINE_SIZE 64
 /** @brief Bitmask for cache-line alignment checks. */
