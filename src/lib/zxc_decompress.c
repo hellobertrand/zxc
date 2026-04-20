@@ -1873,14 +1873,11 @@ static int zxc_decode_block_glo_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
         n_seq -= 4;
     }
 
-#undef DECODE_SEQ_SAFE
-#undef DECODE_SEQ_FAST
-#undef DECODE_COPY_LITERALS
-#undef DECODE_COPY_MATCH
-
     if (UNLIKELY(e_ptr > e_end)) return ZXC_ERROR_CORRUPT_DATA;
 
-    // --- Safe Path for Remaining Sequences (strict memcpy, no wild writes) ---
+    // --- Safe Path for Remaining Sequences ---
+    // Takes the SIMD wild-copy fast branch when we still have PAD_SIZE of headroom
+    // in both dst and the literal stream; falls back to strict memcpy near d_end.
     while (n_seq > 0) {
         uint8_t token = *t_ptr++;
         uint32_t ll = token >> ZXC_TOKEN_LIT_BITS;
@@ -1897,22 +1894,46 @@ static int zxc_decode_block_glo_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
         if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) ml += zxc_read_varint(&e_ptr, e_end);
         ml += ZXC_LZ_MIN_MATCH_LEN;
 
-        if (UNLIKELY(d_ptr + ll > d_end || l_ptr + ll > l_end)) return ZXC_ERROR_OVERFLOW;
-        ZXC_MEMCPY(d_ptr, l_ptr, ll);
-        l_ptr += ll;
-        d_ptr += ll;
-
-        const uint8_t* match_src = d_ptr - offset;
-        if (UNLIKELY(match_src < dst || d_ptr + ml > d_end)) return ZXC_ERROR_BAD_OFFSET;
-
-        if (offset < ml) {
-            for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
+        if (LIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE <= d_end && l_ptr + ll + ZXC_PAD_SIZE <= l_end)) {
+            /* SIMD wild-copy path: headroom is sufficient. */
+            DECODE_COPY_LITERALS(ll);
+            if (UNLIKELY(offset > (size_t)(d_ptr - dst))) return ZXC_ERROR_BAD_OFFSET;
+            DECODE_COPY_MATCH(ml, offset);
         } else {
-            ZXC_MEMCPY(d_ptr, match_src, ml);
+            /* Strict memcpy path for the last few sequences near d_end. */
+            if (UNLIKELY(d_ptr + ll > d_end || l_ptr + ll > l_end)) return ZXC_ERROR_OVERFLOW;
+            ZXC_MEMCPY(d_ptr, l_ptr, ll);
+            l_ptr += ll;
+            d_ptr += ll;
+
+            const uint8_t* match_src = d_ptr - offset;
+            if (UNLIKELY(match_src < dst || d_ptr + ml > d_end)) return ZXC_ERROR_BAD_OFFSET;
+
+            if (offset >= ZXC_PAD_SIZE) {
+                /* Source and dest don't overlap within a 32-byte chunk: SIMD bulk + memcpy tail. */
+                size_t copied = 0;
+                while (copied + ZXC_PAD_SIZE <= ml) {
+                    zxc_copy32(d_ptr + copied, match_src + copied);
+                    copied += ZXC_PAD_SIZE;
+                }
+                if (copied < ml) ZXC_MEMCPY(d_ptr + copied, match_src + copied, ml - copied);
+            } else if (offset == 1) {
+                ZXC_MEMSET(d_ptr, match_src[0], ml);
+            } else if (offset >= ml) {
+                ZXC_MEMCPY(d_ptr, match_src, ml);
+            } else {
+                /* Small-offset overlap (2..31): byte-by-byte for correctness. */
+                for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
+            }
+            d_ptr += ml;
         }
-        d_ptr += ml;
         n_seq--;
     }
+
+#undef DECODE_SEQ_SAFE
+#undef DECODE_SEQ_FAST
+#undef DECODE_COPY_LITERALS
+#undef DECODE_COPY_MATCH
 
     // --- Trailing Literals ---
     if (UNLIKELY(l_ptr > l_end)) return ZXC_ERROR_CORRUPT_DATA;
@@ -2179,12 +2200,9 @@ static int zxc_decode_block_ghi_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
         n_seq -= 4;
     }
 
-#undef DECODE_SEQ_SAFE
-#undef DECODE_SEQ_FAST
-#undef DECODE_COPY_LITERALS
-#undef DECODE_COPY_MATCH
-
     // --- Safe Path for Remaining Sequences ---
+    // Takes the SIMD wild-copy fast branch when we still have PAD_SIZE of headroom
+    // in both dst and the literal stream; falls back to strict memcpy near d_end.
     while (n_seq > 0) {
         uint32_t seq = zxc_le32(seq_ptr);
         seq_ptr += 4;
@@ -2197,22 +2215,44 @@ static int zxc_decode_block_ghi_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_varint(&extras_ptr, extras_end);
         uint32_t offset = (uint32_t)(seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
 
-        if (UNLIKELY(d_ptr + ll > d_end || l_ptr + ll > l_end)) return ZXC_ERROR_OVERFLOW;
-        ZXC_MEMCPY(d_ptr, l_ptr, ll);
-        l_ptr += ll;
-        d_ptr += ll;
-
-        const uint8_t* match_src = d_ptr - offset;
-        if (UNLIKELY(match_src < dst || d_ptr + ml > d_end)) return ZXC_ERROR_BAD_OFFSET;
-
-        if (offset < ml) {
-            for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
+        if (LIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE <= d_end && l_ptr + ll + ZXC_PAD_SIZE <= l_end)) {
+            DECODE_COPY_LITERALS(ll);
+            if (UNLIKELY(offset > (size_t)(d_ptr - dst))) return ZXC_ERROR_BAD_OFFSET;
+            DECODE_COPY_MATCH(ml, offset);
         } else {
-            ZXC_MEMCPY(d_ptr, match_src, ml);
+            if (UNLIKELY(d_ptr + ll > d_end || l_ptr + ll > l_end)) return ZXC_ERROR_OVERFLOW;
+            ZXC_MEMCPY(d_ptr, l_ptr, ll);
+            l_ptr += ll;
+            d_ptr += ll;
+
+            const uint8_t* match_src = d_ptr - offset;
+            if (UNLIKELY(match_src < dst || d_ptr + ml > d_end)) return ZXC_ERROR_BAD_OFFSET;
+
+            if (offset >= ZXC_PAD_SIZE) {
+                /* Source and dest don't overlap within a 32-byte chunk: SIMD bulk + memcpy tail. */
+                size_t copied = 0;
+                while (copied + ZXC_PAD_SIZE <= ml) {
+                    zxc_copy32(d_ptr + copied, match_src + copied);
+                    copied += ZXC_PAD_SIZE;
+                }
+                if (copied < ml) ZXC_MEMCPY(d_ptr + copied, match_src + copied, ml - copied);
+            } else if (offset == 1) {
+                ZXC_MEMSET(d_ptr, match_src[0], ml);
+            } else if (offset >= ml) {
+                ZXC_MEMCPY(d_ptr, match_src, ml);
+            } else {
+                /* Small-offset overlap (2..31): byte-by-byte for correctness. */
+                for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
+            }
+            d_ptr += ml;
         }
-        d_ptr += ml;
         n_seq--;
     }
+
+#undef DECODE_SEQ_SAFE
+#undef DECODE_SEQ_FAST
+#undef DECODE_COPY_LITERALS
+#undef DECODE_COPY_MATCH
 
     // --- Trailing Literals ---
     if (UNLIKELY(l_ptr > l_end)) return ZXC_ERROR_CORRUPT_DATA;
