@@ -2172,8 +2172,8 @@ static int zxc_decode_block_glo_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
  * destination buffer. The 4x-unrolled loops are gated on per-seq varint flags.
  */
 static int zxc_decode_block_ghi_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                const size_t src_size, uint8_t* RESTRICT dst,
-                                const size_t dst_capacity) {
+                                     const size_t src_size, uint8_t* RESTRICT dst,
+                                     const size_t dst_capacity) {
     (void)ctx;
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[ZXC_GHI_SECTIONS];
@@ -2316,7 +2316,7 @@ static int zxc_decode_block_ghi_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
     // For 2-byte offsets (enc_off==0): validate until 65536 bytes written
     const size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
 
-    while (n_seq >= 4 && d_ptr < d_end_safe && l_ptr < l_end_safe_4x &&
+    while (n_seq >= 4 && d_ptr < d_end_fast && l_ptr < l_end_safe_4x &&
            written < bounds_threshold) {
         /* Safe-variant: save full state so an OVERFLOW in this batch can rollback
          * and let the 1x FAST loop / Safe Path handle it. Already-committed wild
