@@ -276,6 +276,37 @@ ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t sr
 ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t src_size, void* dst,
                                         size_t dst_capacity, const zxc_decompress_opts_t* opts);
 
+/**
+ * @brief Decompresses a single block with a strict-sized destination buffer.
+ *
+ * Identical semantics to zxc_decompress_block() but accepts
+ * @p dst_capacity == @c uncompressed_size (no trailing @c ZXC_DECOMPRESS_TAIL_PAD
+ * required). Intended for integrations whose destination buffer cannot be
+ * oversized (for example, in-place page-aligned decoding).
+ *
+ * This path is slightly slower than zxc_decompress_block() on the same input
+ * because it avoids the wild-copy overshoot that the fast decoder relies on.
+ * Output is bit-identical to zxc_decompress_block().
+ *
+ * NUM and RAW blocks transparently forward to zxc_decompress_block(); only
+ * GLO/GHI use the strict-tail decoder path.
+ *
+ * @param[in,out] dctx         Reusable decompression context.
+ * @param[in]     src          Compressed block data.
+ * @param[in]     src_size     Compressed data size in bytes.
+ * @param[out]    dst          Destination buffer for decompressed data.
+ * @param[in]     dst_capacity Capacity of the destination buffer (may equal
+ *                             the original uncompressed size exactly).
+ * @param[in]     opts         Decompression options (NULL for defaults).
+ *                             Only @c checksum_enabled is used.
+ *
+ * @return Decompressed size in bytes (> 0) on success,
+ *         or a negative @ref zxc_error_t code on failure.
+ */
+ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, size_t src_size,
+                                             void* dst, size_t dst_capacity,
+                                             const zxc_decompress_opts_t* opts);
+
 /** @} */ /* end of block_api */
 
 /* ========================================================================= */

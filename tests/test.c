@@ -2319,6 +2319,173 @@ cleanup:
     return result;
 }
 
+/* Roundtrip helper: compress src into a newly-malloc'd buffer; return compressed size (or <0). */
+static int64_t sbs_compress(const uint8_t* src, size_t src_size, int level,
+                            int checksum, uint8_t** out_buf, size_t* out_cap) {
+    const uint64_t cbound = zxc_compress_block_bound(src_size);
+    uint8_t* buf = (uint8_t*)malloc((size_t)cbound);
+    if (!buf) return -1;
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_compress_opts_t co = {.level = level, .checksum_enabled = checksum,
+                              .block_size = src_size};
+    int64_t csz = zxc_compress_block(cctx, src, src_size, buf, (size_t)cbound, &co);
+    zxc_free_cctx(cctx);
+    if (csz <= 0) { free(buf); return csz; }
+    *out_buf = buf;
+    *out_cap = (size_t)cbound;
+    return csz;
+}
+
+int test_decompress_block_safe() {
+    printf("=== TEST: Unit - zxc_decompress_block_safe ===\n");
+
+    const size_t sizes[] = {4 * 1024, 64 * 1024, 256 * 1024, 2 * 1024 * 1024};
+    const int levels[] = {1, 3, 5};
+
+    /* 1. Roundtrip with dst_capacity == uncompressed_size at multiple sizes & levels. */
+    for (size_t si = 0; si < sizeof(sizes) / sizeof(sizes[0]); si++) {
+        for (size_t li = 0; li < sizeof(levels) / sizeof(levels[0]); li++) {
+            for (int checksum = 0; checksum <= 1; checksum++) {
+                const size_t n = sizes[si];
+                const int lvl = levels[li];
+                uint8_t* src = (uint8_t*)malloc(n);
+                if (!src) { printf("Failed: malloc src\n"); return 0; }
+                gen_lz_data(src, n);
+
+                uint8_t* comp = NULL;
+                size_t comp_cap = 0;
+                int64_t csz = sbs_compress(src, n, lvl, checksum, &comp, &comp_cap);
+                if (csz <= 0) {
+                    printf("Failed: compress (n=%zu lvl=%d chk=%d) -> %lld\n",
+                           n, lvl, checksum, (long long)csz);
+                    free(src); free(comp); return 0;
+                }
+
+                uint8_t* dst = (uint8_t*)malloc(n); /* tight: no tail pad */
+                if (!dst) { free(src); free(comp); return 0; }
+
+                zxc_dctx* dctx = zxc_create_dctx();
+                zxc_decompress_opts_t dopts = {.checksum_enabled = checksum};
+                int64_t dsz = zxc_decompress_block_safe(dctx, comp, (size_t)csz,
+                                                       dst, n, &dopts);
+                int ok = (dsz == (int64_t)n) && memcmp(src, dst, n) == 0;
+                zxc_free_dctx(dctx);
+                free(dst); free(comp); free(src);
+                if (!ok) {
+                    printf("Failed: safe roundtrip n=%zu lvl=%d chk=%d -> dsz=%lld\n",
+                           n, lvl, checksum, (long long)dsz);
+                    return 0;
+                }
+            }
+        }
+    }
+    printf("  [PASS] safe roundtrip across sizes/levels/checksum\n");
+
+    /* 2. Bit-identical vs zxc_decompress_block on the same compressed payload. */
+    {
+        const size_t n = 128 * 1024;
+        uint8_t* src = (uint8_t*)malloc(n);
+        gen_lz_data(src, n);
+        uint8_t* comp = NULL;
+        size_t comp_cap = 0;
+        int64_t csz = sbs_compress(src, n, 3, 0, &comp, &comp_cap);
+        const uint64_t dbound = zxc_decompress_block_bound(n);
+        uint8_t* dst_fast = (uint8_t*)malloc((size_t)dbound);
+        uint8_t* dst_safe = (uint8_t*)malloc(n);
+
+        zxc_dctx* dctx1 = zxc_create_dctx();
+        zxc_dctx* dctx2 = zxc_create_dctx();
+        int64_t r1 = zxc_decompress_block(dctx1, comp, (size_t)csz, dst_fast,
+                                          (size_t)dbound, NULL);
+        int64_t r2 = zxc_decompress_block_safe(dctx2, comp, (size_t)csz, dst_safe, n, NULL);
+        int ok = (r1 == (int64_t)n) && (r2 == (int64_t)n) &&
+                 memcmp(dst_fast, dst_safe, n) == 0;
+        zxc_free_dctx(dctx1); zxc_free_dctx(dctx2);
+        free(dst_safe); free(dst_fast); free(comp); free(src);
+        if (!ok) {
+            printf("Failed: safe/fast not bit-identical: r1=%lld r2=%lld\n",
+                   (long long)r1, (long long)r2);
+            return 0;
+        }
+        printf("  [PASS] bit-identical output vs fast path\n");
+    }
+
+    /* 3. dst_capacity < uncompressed_size -> negative error. */
+    {
+        const size_t n = 64 * 1024;
+        uint8_t* src = (uint8_t*)malloc(n);
+        gen_lz_data(src, n);
+        uint8_t* comp = NULL;
+        size_t comp_cap = 0;
+        int64_t csz = sbs_compress(src, n, 3, 0, &comp, &comp_cap);
+        uint8_t* dst = (uint8_t*)malloc(n);
+
+        zxc_dctx* dctx = zxc_create_dctx();
+        int64_t r = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n - 128, NULL);
+        int ok = (r < 0);
+        zxc_free_dctx(dctx);
+        free(dst); free(comp); free(src);
+        if (!ok) {
+            printf("Failed: expected negative error for undersized dst, got %lld\n",
+                   (long long)r);
+            return 0;
+        }
+        printf("  [PASS] negative error on dst_capacity < uncompressed_size\n");
+    }
+
+    /* 4. Literal-heavy input: would trip OVERFLOW in the fast path when
+     *    dst_capacity == uncompressed_size; must succeed with the safe API. */
+    {
+        const size_t n = 32 * 1024;
+        uint8_t* src = (uint8_t*)malloc(n);
+        gen_random_data(src, n); /* random data -> heavy literal runs, varint-prone */
+        uint8_t* comp = NULL;
+        size_t comp_cap = 0;
+        int64_t csz = sbs_compress(src, n, 3, 0, &comp, &comp_cap);
+        if (csz <= 0) { printf("Failed: compress literal-heavy\n"); return 0; }
+        uint8_t* dst = (uint8_t*)malloc(n);
+
+        zxc_dctx* dctx = zxc_create_dctx();
+        int64_t r = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n, NULL);
+        int ok = (r == (int64_t)n) && memcmp(src, dst, n) == 0;
+        zxc_free_dctx(dctx);
+        free(dst); free(comp); free(src);
+        if (!ok) {
+            printf("Failed: literal-heavy safe decode: r=%lld\n", (long long)r);
+            return 0;
+        }
+        printf("  [PASS] literal-heavy tail decodes into tight dst\n");
+    }
+
+    /* 5. Corrupted stream returns a negative error and does not crash. */
+    {
+        const size_t n = 16 * 1024;
+        uint8_t* src = (uint8_t*)malloc(n);
+        gen_lz_data(src, n);
+        uint8_t* comp = NULL;
+        size_t comp_cap = 0;
+        int64_t csz = sbs_compress(src, n, 3, 1, &comp, &comp_cap); /* with checksum */
+        /* Flip a byte in the payload to corrupt. */
+        comp[ZXC_BLOCK_HEADER_SIZE + (csz - ZXC_BLOCK_HEADER_SIZE) / 2] ^= 0xA5;
+        uint8_t* dst = (uint8_t*)malloc(n);
+
+        zxc_dctx* dctx = zxc_create_dctx();
+        zxc_decompress_opts_t opts = {.checksum_enabled = 1};
+        int64_t r = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n, &opts);
+        int ok = (r < 0);
+        zxc_free_dctx(dctx);
+        free(dst); free(comp); free(src);
+        if (!ok) {
+            printf("Failed: corrupted stream should fail, got %lld\n", (long long)r);
+            return 0;
+        }
+        printf("  [PASS] corrupted stream -> negative error (no crash)\n");
+    }
+
+    printf("PASS\n\n");
+    return 1;
+}
+
 int test_decompress_block_bound() {
     printf("=== TEST: Unit - zxc_decompress_block_bound ===\n");
 
@@ -3853,6 +4020,7 @@ int main() {
     if (!test_block_api()) total_failures++;
     if (!test_block_api_boundary_sizes()) total_failures++;
     if (!test_decompress_block_bound()) total_failures++;
+    if (!test_decompress_block_safe()) total_failures++;
     if (!test_library_info_api()) total_failures++;
 
     // --- SEEKABLE TESTS ---

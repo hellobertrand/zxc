@@ -47,6 +47,9 @@
 int zxc_decompress_chunk_wrapper_default(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                          const size_t src_sz, uint8_t* RESTRICT dst,
                                          const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_safe_default(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                              const size_t src_sz, uint8_t* RESTRICT dst,
+                                              const size_t dst_cap);
 
 #ifndef ZXC_ONLY_DEFAULT
 #if defined(__x86_64__) || defined(_M_X64)
@@ -56,10 +59,19 @@ int zxc_decompress_chunk_wrapper_avx2(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 int zxc_decompress_chunk_wrapper_avx512(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                         const size_t src_sz, uint8_t* RESTRICT dst,
                                         const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_safe_avx2(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                           const size_t src_sz, uint8_t* RESTRICT dst,
+                                           const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_safe_avx512(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                             const size_t src_sz, uint8_t* RESTRICT dst,
+                                             const size_t dst_cap);
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
 int zxc_decompress_chunk_wrapper_neon(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_safe_neon(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                           const size_t src_sz, uint8_t* RESTRICT dst,
+                                           const size_t dst_cap);
 #endif
 #endif
 
@@ -188,6 +200,8 @@ typedef int (*zxc_compress_func_t)(zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT
 
 /** @brief Lazily-resolved pointer to the best decompression variant. */
 static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_ptr = (zxc_decompress_func_t)0;
+/** @brief Lazily-resolved pointer to the best safe-decompression variant. */
+static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_safe_ptr = (zxc_decompress_func_t)0;
 /** @brief Lazily-resolved pointer to the best compression variant. */
 static ZXC_ATOMIC zxc_compress_func_t zxc_compress_ptr = (zxc_compress_func_t)0;
 
@@ -232,6 +246,50 @@ static int zxc_decompress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t*
     zxc_decompress_ptr = zxc_decompress_ptr_local;
 #endif
     return zxc_decompress_ptr_local(ctx, src, src_sz, dst, dst_cap);
+}
+
+/**
+ * @brief First-call initialiser for the safe-decompression dispatcher.
+ *
+ * Mirrors @ref zxc_decompress_dispatch_init but selects the `_safe_*`
+ * decoder variants used by @ref zxc_decompress_block_safe.
+ */
+static int zxc_decompress_safe_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                             const size_t src_sz, uint8_t* RESTRICT dst,
+                                             const size_t dst_cap) {
+    const zxc_cpu_feature_t cpu = zxc_detect_cpu_features();
+    zxc_decompress_func_t zxc_decompress_safe_ptr_local = NULL;
+
+#ifndef ZXC_ONLY_DEFAULT
+#if defined(__x86_64__) || defined(_M_X64)
+    if (cpu == ZXC_CPU_AVX512)
+        zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_avx512;
+    else if (cpu == ZXC_CPU_AVX2)
+        zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_avx2;
+    else
+        zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_default;
+#elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
+    // cppcheck-suppress knownConditionTrueFalse
+    if (cpu == ZXC_CPU_NEON)
+        zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_neon;
+    else
+        zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_default;
+#else
+    (void)cpu;
+    zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_default;
+#endif
+#else
+    (void)cpu;
+    zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_default;
+#endif
+
+#if ZXC_USE_C11_ATOMICS
+    atomic_store_explicit(&zxc_decompress_safe_ptr, zxc_decompress_safe_ptr_local,
+                          memory_order_release);
+#else
+    zxc_decompress_safe_ptr = zxc_decompress_safe_ptr_local;
+#endif
+    return zxc_decompress_safe_ptr_local(ctx, src, src_sz, dst, dst_cap);
 }
 
 /**
@@ -296,6 +354,23 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
     const zxc_decompress_func_t func = zxc_decompress_ptr;
 #endif
     if (UNLIKELY(!func)) return zxc_decompress_dispatch_init(ctx, src, src_sz, dst, dst_cap);
+    return func(ctx, src, src_sz, dst, dst_cap);
+}
+
+/**
+ * @brief Internal safe-decompression dispatcher (strict dst_capacity == uncompressed_size).
+ */
+static int zxc_decompress_chunk_wrapper_safe_public(zxc_cctx_t* RESTRICT ctx,
+                                                    const uint8_t* RESTRICT src,
+                                                    const size_t src_sz, uint8_t* RESTRICT dst,
+                                                    const size_t dst_cap) {
+#if ZXC_USE_C11_ATOMICS
+    const zxc_decompress_func_t func =
+        atomic_load_explicit(&zxc_decompress_safe_ptr, memory_order_acquire);
+#else
+    const zxc_decompress_func_t func = zxc_decompress_safe_ptr;
+#endif
+    if (UNLIKELY(!func)) return zxc_decompress_safe_dispatch_init(ctx, src, src_sz, dst, dst_cap);
     return func(ctx, src, src_sz, dst, dst_cap);
 }
 
@@ -989,6 +1064,50 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
             ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
         }
     }
+    if (UNLIKELY(res < 0)) return res;
+    return (int64_t)res;
+}
+
+/**
+ * @brief Safe-variant block decompressor: accepts dst_capacity == uncompressed_size.
+ *
+ * Router: NUM/RAW blocks (which never wild-write past dst_capacity) are
+ * forwarded to the existing fast path. GLO/GHI blocks use the strict safe
+ * decoder, avoiding the bounce buffer and the +ZXC_DECOMPRESS_TAIL_PAD
+ * requirement of @ref zxc_decompress_block.
+ */
+int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
+                                  void* RESTRICT dst, const size_t dst_capacity,
+                                  const zxc_decompress_opts_t* opts) {
+    if (UNLIKELY(!dctx || !src || !dst || src_size < ZXC_BLOCK_HEADER_SIZE || dst_capacity == 0))
+        return ZXC_ERROR_NULL_INPUT;
+
+    const uint8_t type = ((const uint8_t*)src)[0];
+    /* NUM/RAW never wild-write past dst_capacity: route to the existing fast API. */
+    if (type == ZXC_BLOCK_NUM || type == ZXC_BLOCK_RAW) {
+        return zxc_decompress_block(dctx, src, src_size, dst, dst_capacity, opts);
+    }
+
+    /* GLO/GHI: use the strict-tail decoder (no bounce buffer required). */
+    const int checksum_enabled = opts ? opts->checksum_enabled : 0;
+    const size_t block_size = zxc_block_size_ceil(dst_capacity);
+    if (!dctx->initialized || dctx->last_block_size != block_size) {
+        if (dctx->initialized) {
+            zxc_cctx_free(&dctx->inner);
+            dctx->initialized = 0;
+        }
+        // LCOV_EXCL_START
+        if (UNLIKELY(zxc_cctx_init(&dctx->inner, block_size, 0, 0, checksum_enabled) != ZXC_OK))
+            return ZXC_ERROR_MEMORY;
+        // LCOV_EXCL_STOP
+        dctx->last_block_size = block_size;
+        dctx->initialized = 1;
+    } else {
+        dctx->inner.checksum_enabled = checksum_enabled;
+    }
+
+    const int res = zxc_decompress_chunk_wrapper_safe_public(&dctx->inner, (const uint8_t*)src,
+                                                             src_size, (uint8_t*)dst, dst_capacity);
     if (UNLIKELY(res < 0)) return res;
     return (int64_t)res;
 }

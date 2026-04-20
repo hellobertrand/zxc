@@ -606,6 +606,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_decompress_dctx"
         "_zxc_compress_block"
         "_zxc_decompress_block"
+        "_zxc_decompress_block_safe"
         "_zxc_min_level"
         "_zxc_max_level"
         "_zxc_default_level"
