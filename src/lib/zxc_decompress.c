@@ -1982,11 +1982,27 @@ static int zxc_decode_block_ghi_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
-    const uint8_t* const d_end_safe =
-        (dst_capacity > (size_t)(ZXC_PAD_SIZE * 4)) ? d_end - (ZXC_PAD_SIZE * 4) : dst;
+    /* Pre-computed outer gates: once we pass these, the hot-path loops can
+     * wild-copy without any per-iteration bounds check. Sized for worst-case
+     * non-varinted sequences (varint gate ensures the varint flag is absent):
+     *   4x loop: 4 * (LL_MAX + ML_MAX + MIN_MATCH) + PAD overshoot
+     *          = 4 * (254 + 254 + 5) + 32 = 2084
+     *   1x loop:       (LL_MAX + ML_MAX + MIN_MATCH) + PAD = 545
+     */
+    const size_t ghi_margin_d_4x =
+        4 * (ZXC_SEQ_LL_MASK - 1 + ZXC_SEQ_ML_MASK - 1 + ZXC_LZ_MIN_MATCH_LEN) +
+        ZXC_PAD_SIZE;  // 2084
+    const size_t ghi_margin_d_1x =
+        (ZXC_SEQ_LL_MASK - 1 + ZXC_SEQ_ML_MASK - 1 + ZXC_LZ_MIN_MATCH_LEN) + ZXC_PAD_SIZE;  // 545
+    const uint8_t* const d_end_safe_4x =
+        (dst_capacity > ghi_margin_d_4x) ? d_end - ghi_margin_d_4x : dst;
+    const uint8_t* const d_end_safe_1x =
+        (dst_capacity > ghi_margin_d_1x) ? d_end - ghi_margin_d_1x : dst;
 
     const size_t ghi_margin_4x = 4 * (ZXC_SEQ_LL_MASK - 1);  // 1016
+    const size_t ghi_margin_1x = (ZXC_SEQ_LL_MASK - 1);      // 254
     const uint8_t* const l_end_safe_4x = (sz_lit > ghi_margin_4x) ? l_end - ghi_margin_4x : l_ptr;
+    const uint8_t* const l_end_safe_1x = (sz_lit > ghi_margin_1x) ? l_end - ghi_margin_1x : l_ptr;
 
     uint32_t n_seq = gh.n_sequences;
     size_t written = 0;
@@ -2075,8 +2091,8 @@ static int zxc_decode_block_ghi_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
 
     const size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
 
-    // --- SAFE Loop (4x) with varint-gate ---
-    while (n_seq >= 4 && d_ptr < d_end_safe && l_ptr < l_end_safe_4x &&
+    // --- SAFE Loop (4x) with varint-gate + wide outer gate (no per-iter headroom check) ---
+    while (n_seq >= 4 && d_ptr < d_end_safe_4x && l_ptr < l_end_safe_4x &&
            written < bounds_threshold) {
         uint32_t s1 = zxc_le32(seq_ptr);
         uint32_t s2 = zxc_le32(seq_ptr + 4);
@@ -2120,8 +2136,9 @@ static int zxc_decode_block_ghi_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
         n_seq -= 4;
     }
 
-    // --- SAFE Loop tail (1x) with varint-gate: peek and break on varint flag ---
-    while (n_seq > 0 && d_ptr < d_end_safe && written < bounds_threshold) {
+    // --- SAFE Loop tail (1x) with varint-gate + wide outer gate (no per-iter check) ---
+    while (n_seq > 0 && d_ptr < d_end_safe_1x && l_ptr < l_end_safe_1x &&
+           written < bounds_threshold) {
         uint32_t seq = zxc_le32(seq_ptr);
         if (UNLIKELY(((seq >> 16) & 0xFFu) == ZXC_SEQ_ML_MASK ||
                      ((seq >> 24) & 0xFFu) == ZXC_SEQ_LL_MASK)) {
@@ -2132,31 +2149,12 @@ static int zxc_decode_block_ghi_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
         uint32_t ll = (uint32_t)(seq >> 24);
         uint32_t ml = (uint32_t)((seq >> 16) & 0xFF) + ZXC_LZ_MIN_MATCH_LEN;
         uint32_t offset = (uint32_t)(seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
-
-        if (UNLIKELY(d_ptr + ll + ml + ZXC_PAD_SIZE > d_end || l_ptr + ll + ZXC_PAD_SIZE > l_end)) {
-            if (UNLIKELY(d_ptr + ll > d_end || l_ptr + ll > l_end)) return ZXC_ERROR_OVERFLOW;
-            ZXC_MEMCPY(d_ptr, l_ptr, ll);
-            l_ptr += ll;
-            d_ptr += ll;
-            written += ll;
-
-            if (UNLIKELY(offset > written || d_ptr + ml > d_end)) return ZXC_ERROR_BAD_OFFSET;
-            const uint8_t* match_src = d_ptr - offset;
-            if (offset < ml) {
-                for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
-            } else {
-                ZXC_MEMCPY(d_ptr, match_src, ml);
-            }
-            d_ptr += ml;
-            written += ml;
-        } else {
-            DECODE_SEQ_SAFE(ll, ml, offset);
-        }
+        DECODE_SEQ_SAFE(ll, ml, offset);
         n_seq--;
     }
 
-    // --- FAST Loop (4x) with varint-gate ---
-    while (n_seq >= 4 && d_ptr < d_end_safe && l_ptr < l_end_safe_4x) {
+    // --- FAST Loop (4x) with varint-gate + wide outer gate ---
+    while (n_seq >= 4 && d_ptr < d_end_safe_4x && l_ptr < l_end_safe_4x) {
         uint32_t s1 = zxc_le32(seq_ptr);
         uint32_t s2 = zxc_le32(seq_ptr + 4);
         uint32_t s3 = zxc_le32(seq_ptr + 8);
@@ -2198,6 +2196,22 @@ static int zxc_decode_block_ghi_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
         DECODE_SEQ_FAST(ll4, ml4, off4);
 
         n_seq -= 4;
+    }
+
+    // --- FAST Loop tail (1x) with varint-gate + wide outer gate (no per-iter check) ---
+    while (n_seq > 0 && d_ptr < d_end_safe_1x && l_ptr < l_end_safe_1x) {
+        uint32_t seq = zxc_le32(seq_ptr);
+        if (UNLIKELY(((seq >> 16) & 0xFFu) == ZXC_SEQ_ML_MASK ||
+                     ((seq >> 24) & 0xFFu) == ZXC_SEQ_LL_MASK)) {
+            break;
+        }
+        seq_ptr += 4;
+
+        uint32_t ll = (uint32_t)(seq >> 24);
+        uint32_t ml = (uint32_t)((seq >> 16) & 0xFF) + ZXC_LZ_MIN_MATCH_LEN;
+        uint32_t offset = (uint32_t)(seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+        DECODE_SEQ_FAST(ll, ml, offset);
+        n_seq--;
     }
 
     // --- Safe Path for Remaining Sequences ---
