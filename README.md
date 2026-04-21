@@ -538,6 +538,7 @@ Community-maintained bindings:
 | Language | Package Manager | Install Command | Repository | Author |
 | -------- | --------------- | --------------- | ---------- | ------ |
 | **Go** | pkg.go.dev | `go get github.com/meysam81/go-zxc` | <https://github.com/meysam81/go-zxc> | [@meysam81](https://github.com/meysam81) |
+| **Nim** | nimble | `nimble install zxc` | <https://github.com/openpeeps/zxc-nim> | [@georgelemon](https://github.com/georgelemon) |
 
 ## Safety & Quality
 * **Unit Tests**: Comprehensive test suite with CTest integration.

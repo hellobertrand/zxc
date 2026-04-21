@@ -324,3 +324,4 @@ For non-C languages, see the official bindings:
 
 Community-maintained:
 - **Go**: https://github.com/meysam81/go-zxc
+- **Nim**: https://github.com/openpeeps/zxc-nim
