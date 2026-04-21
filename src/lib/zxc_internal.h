@@ -468,7 +468,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_log2_u32(const uint32_t v) {
 
 /**
  * @brief Branchless bit_ceil: smallest power of two >= v, clamped to ZXC_BLOCK_SIZE_MIN.
- * @param v Input size (must be > 0).
+ * @param[in] v Input size (must be > 0).
  */
 static ZXC_ALWAYS_INLINE size_t zxc_block_size_ceil(const size_t v) {
     uint64_t x = (uint64_t)v - 1;
@@ -486,6 +486,7 @@ static ZXC_ALWAYS_INLINE size_t zxc_block_size_ceil(const size_t v) {
 /**
  * @brief Validates a block size.
  * Must be a power of two in [ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX].
+ * @param[in] bs Block size to validate.
  * @return 1 if valid, 0 otherwise.
  */
 static ZXC_ALWAYS_INLINE int zxc_validate_block_size(const size_t bs) {

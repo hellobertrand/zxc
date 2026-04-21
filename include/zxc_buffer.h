@@ -234,7 +234,7 @@ ZXC_EXPORT uint64_t zxc_compress_block_bound(size_t input_size);
  * @return Minimum @c dst_capacity to pass to zxc_decompress_block(),
  *         or 0 if @p uncompressed_size would overflow.
  */
-ZXC_EXPORT uint64_t zxc_decompress_block_bound(size_t uncompressed_size);
+ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
 
 /**
  * @brief Compresses a single block without file framing.
@@ -303,8 +303,8 @@ ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t 
  * @return Decompressed size in bytes (> 0) on success,
  *         or a negative @ref zxc_error_t code on failure.
  */
-ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, size_t src_size,
-                                             void* dst, size_t dst_capacity,
+ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, const size_t src_size,
+                                             void* dst, const size_t dst_capacity,
                                              const zxc_decompress_opts_t* opts);
 
 /** @} */ /* end of block_api */
