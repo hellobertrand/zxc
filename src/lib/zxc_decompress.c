@@ -626,7 +626,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
         if (required_size > 0) {
             if (UNLIKELY(required_size > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
 
-            if (ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE) {
+            if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE)) {
                 uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, required_size + ZXC_PAD_SIZE);
                 if (UNLIKELY(!new_buf)) {
                     free(ctx->lit_buffer);
