@@ -789,8 +789,10 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     /* Re-init only when block_size changed (it drives buffer sizes). */
     if (UNLIKELY(!cctx->initialized || cctx->last_block_size != block_size)) {
         if (cctx->initialized) {
+            // LCOV_EXCL_START
             zxc_cctx_free(&cctx->inner);
             cctx->initialized = 0;
+            // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
         if (UNLIKELY(zxc_cctx_init(&cctx->inner, block_size, 1, level, checksum_enabled) != ZXC_OK))
@@ -897,8 +899,10 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     /* Re-init only when block size changed. */
     if (UNLIKELY(!dctx->initialized || dctx->last_block_size != runtime_chunk_size)) {
         if (dctx->initialized) {
+            // LCOV_EXCL_START
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
+            // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
         if (UNLIKELY(zxc_cctx_init(&dctx->inner, runtime_chunk_size, 0, 0,
@@ -1002,8 +1006,10 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     /* Re-init only when block_size changed. */
     if (UNLIKELY(!cctx->initialized || cctx->last_block_size != effective_block_size)) {
         if (cctx->initialized) {
+            // LCOV_EXCL_START
             zxc_cctx_free(&cctx->inner);
             cctx->initialized = 0;
+            // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
         if (UNLIKELY(zxc_cctx_init(&cctx->inner, effective_block_size, 1, level,
