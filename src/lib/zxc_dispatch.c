@@ -118,6 +118,7 @@ typedef enum {
  *
  * @return The highest @ref zxc_cpu_feature_t level supported.
  */
+// LCOV_EXCL_START
 static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 #ifdef ZXC_ONLY_DEFAULT
     return ZXC_CPU_GENERIC;
@@ -183,6 +184,7 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
     return features;
 #endif
 }
+// LCOV_EXCL_STOP
 
 /*
  * ============================================================================
@@ -211,6 +213,7 @@ static ZXC_ATOMIC zxc_compress_func_t zxc_compress_ptr = (zxc_compress_func_t)0;
  * Detects CPU features, selects the best implementation, stores the
  * pointer atomically, then tail-calls into it.
  */
+// LCOV_EXCL_START
 static int zxc_decompress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                         const size_t src_sz, uint8_t* RESTRICT dst,
                                         const size_t dst_cap) {
@@ -247,6 +250,7 @@ static int zxc_decompress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t*
 #endif
     return zxc_decompress_ptr_local(ctx, src, src_sz, dst, dst_cap);
 }
+// LCOV_EXCL_STOP
 
 /**
  * @brief First-call initialiser for the safe-decompression dispatcher.
@@ -254,6 +258,7 @@ static int zxc_decompress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t*
  * Mirrors @ref zxc_decompress_dispatch_init but selects the `_safe_*`
  * decoder variants used by @ref zxc_decompress_block_safe.
  */
+// LCOV_EXCL_START
 static int zxc_decompress_safe_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                              const size_t src_sz, uint8_t* RESTRICT dst,
                                              const size_t dst_cap) {
@@ -291,6 +296,7 @@ static int zxc_decompress_safe_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uin
 #endif
     return zxc_decompress_safe_ptr_local(ctx, src, src_sz, dst, dst_cap);
 }
+// LCOV_EXCL_STOP
 
 /**
  * @brief First-call initialiser for the compression dispatcher.
@@ -298,6 +304,7 @@ static int zxc_decompress_safe_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uin
  * Detects CPU features, selects the best implementation, stores the
  * pointer atomically, then tail-calls into it.
  */
+// LCOV_EXCL_START
 static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap) {
@@ -334,6 +341,7 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 #endif
     return zxc_compress_ptr_local(ctx, src, src_sz, dst, dst_cap);
 }
+// LCOV_EXCL_STOP
 
 /**
  * @brief Public decompression dispatcher (calls lazily-resolved implementation).
