@@ -11,6 +11,10 @@ from ._zxc import (
     pyzxc_stream_compress,
     pyzxc_stream_decompress,
     pyzxc_get_decompressed_size,
+    pyzxc_min_level,
+    pyzxc_max_level,
+    pyzxc_default_level,
+    pyzxc_version_string,
     LEVEL_FASTEST,
     LEVEL_FAST,
     LEVEL_DEFAULT,
@@ -45,7 +49,13 @@ __all__ = [
     "stream_decompress",
     "pyzxc_get_decompressed_size",
 
-    # Constants 
+    # Library info helpers
+    "min_level",
+    "max_level",
+    "default_level",
+    "library_version",
+
+    # Constants
     "LEVEL_FASTEST",
     "LEVEL_FAST",
     "LEVEL_DEFAULT",
@@ -68,6 +78,27 @@ __all__ = [
     "ERROR_BAD_BLOCK_TYPE",
     "ERROR_BAD_BLOCK_SIZE",
 ]
+
+def min_level() -> int:
+    """Return the minimum supported compression level (currently 1)."""
+    return pyzxc_min_level()
+
+
+def max_level() -> int:
+    """Return the maximum supported compression level (currently 5)."""
+    return pyzxc_max_level()
+
+
+def default_level() -> int:
+    """Return the default compression level (currently 3)."""
+    return pyzxc_default_level()
+
+
+def library_version() -> str:
+    """Return the version string reported by the linked native libzxc
+    (e.g. ``"0.10.0"``). Distinct from the Python package ``__version__``."""
+    return pyzxc_version_string()
+
 
 def compress(data, level = LEVEL_DEFAULT, checksum = False) -> bytes:
     """Compress a bytes object.
