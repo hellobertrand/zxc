@@ -764,7 +764,7 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
 }
 
 void zxc_free_cctx(zxc_cctx* cctx) {
-    if (!cctx) return;
+    if (UNLIKELY(!cctx)) return;
     if (cctx->initialized) zxc_cctx_free(&cctx->inner);
     free(cctx);
 }
@@ -787,7 +787,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
     /* Re-init only when block_size changed (it drives buffer sizes). */
-    if (!cctx->initialized || cctx->last_block_size != block_size) {
+    if (UNLIKELY(!cctx->initialized || cctx->last_block_size != block_size)) {
         if (cctx->initialized) {
             zxc_cctx_free(&cctx->inner);
             cctx->initialized = 0;
@@ -869,7 +869,7 @@ zxc_dctx* zxc_create_dctx(void) {
 }
 
 void zxc_free_dctx(zxc_dctx* dctx) {
-    if (!dctx) return;
+    if (UNLIKELY(!dctx)) return;
     if (dctx->initialized) zxc_cctx_free(&dctx->inner);
     free(dctx);
 }
@@ -895,7 +895,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
         return ZXC_ERROR_BAD_HEADER;
 
     /* Re-init only when block size changed. */
-    if (!dctx->initialized || dctx->last_block_size != runtime_chunk_size) {
+    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != runtime_chunk_size)) {
         if (dctx->initialized) {
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
@@ -1000,7 +1000,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     cctx->stored_checksum = checksum_enabled;
 
     /* Re-init only when block_size changed. */
-    if (!cctx->initialized || cctx->last_block_size != effective_block_size) {
+    if (UNLIKELY(!cctx->initialized || cctx->last_block_size != effective_block_size)) {
         if (cctx->initialized) {
             zxc_cctx_free(&cctx->inner);
             cctx->initialized = 0;
@@ -1033,7 +1033,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 
     /* Derive the block_size from dst_capacity (callers know the original size). */
     const size_t block_size = zxc_block_size_ceil(dst_capacity);
-    if (!dctx->initialized || dctx->last_block_size != block_size) {
+    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != block_size)) {
         if (dctx->initialized) {
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
@@ -1099,7 +1099,7 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
     /* GLO/GHI: use the strict-tail decoder (no bounce buffer required). */
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const size_t block_size = zxc_block_size_ceil(dst_capacity);
-    if (!dctx->initialized || dctx->last_block_size != block_size) {
+    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != block_size)) {
         if (dctx->initialized) {
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
