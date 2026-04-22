@@ -757,7 +757,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
     // --- SAFE Loop: offset validation until threshold (4x unroll) ---
     // For 1-byte offsets: bounds check until 256 bytes written
     // For 2-byte offsets: bounds check until 65536 bytes written
-    // Uses the file-scope DECODE_* macros.
     const size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
 
     if (safe) {
@@ -1287,12 +1286,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
     return (int)(d_ptr - dst);
 }
 
-static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                const size_t src_size, uint8_t* RESTRICT dst,
-                                const size_t dst_capacity) {
-    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0);
-}
-
 /**
  * @brief Decodes a GHI (General High) format compressed block.
  *
@@ -1313,11 +1306,7 @@ static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
  *
  * @p safe must be a compile-time constant (0 or 1). The two 4x-unrolled loops
  * are duplicated verbatim inside @c if(safe)/else branches so that each
- * variant keeps its own single-assignment @c const save pointers — the sole
- * structural property that earlier attempts at a unified body lost, causing
- * a small (~19-instruction) codegen regression on the safe path. After
- * constant propagation only one branch survives per wrapper, yielding
- * binary-equivalent code to the hand-written pair.
+ * variant keeps its own single-assignment @c const save pointers.
  */
 static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
@@ -1373,9 +1362,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
     // For 2-byte offsets (enc_off==0): validate until 65536 bytes written (max 16-bit offset)
     // After threshold, all offsets are guaranteed valid (can't exceed written bytes)
     size_t written = 0;
-
-    // Uses the file-scope DECODE_COPY_LITERALS / DECODE_COPY_MATCH /
-    // DECODE_SEQ_SAFE / DECODE_SEQ_FAST macros.
 
     // --- SAFE Loop: offset validation until threshold (4x unroll) ---
     // Since offset is 16-bit, threshold is 65536.
@@ -1881,6 +1867,12 @@ static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                 const size_t src_size, uint8_t* RESTRICT dst,
                                 const size_t dst_capacity) {
     return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 0);
+}
+
+static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                const size_t src_size, uint8_t* RESTRICT dst,
+                                const size_t dst_capacity) {
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0);
 }
 
 static int zxc_decode_block_glo_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
