@@ -33,6 +33,39 @@ const ERROR_BAD_BLOCK_TYPE = native.ERROR_BAD_BLOCK_TYPE;
 const ERROR_BAD_BLOCK_SIZE = native.ERROR_BAD_BLOCK_SIZE;
 
 /**
+ * Returns the minimum supported compression level (currently 1).
+ * @returns {number}
+ */
+function minLevel() {
+    return native.minLevel();
+}
+
+/**
+ * Returns the maximum supported compression level (currently 5).
+ * @returns {number}
+ */
+function maxLevel() {
+    return native.maxLevel();
+}
+
+/**
+ * Returns the default compression level (currently 3).
+ * @returns {number}
+ */
+function defaultLevel() {
+    return native.defaultLevel();
+}
+
+/**
+ * Returns the version string reported by the linked native libzxc
+ * (e.g. "0.10.0"). Distinct from the npm package version.
+ * @returns {string}
+ */
+function libraryVersion() {
+    return native.libraryVersion();
+}
+
+/**
  * Returns a human-readable name for a given error code.
  *
  * @param {number} code - ZXC error code.
@@ -136,6 +169,12 @@ module.exports = {
     decompress,
     compressBound,
     getDecompressedSize,
+
+    // Library info helpers
+    minLevel,
+    maxLevel,
+    defaultLevel,
+    libraryVersion,
 
     // Constants
     LEVEL_FASTEST,

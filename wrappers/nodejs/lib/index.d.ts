@@ -87,3 +87,18 @@ export function decompress(data: Buffer, options?: DecompressOptions): Buffer;
  * Returns a human-readable name for a given error code.
  */
 export function errorName(code: number): string;
+
+/** Returns the minimum supported compression level (currently 1). */
+export function minLevel(): number;
+
+/** Returns the maximum supported compression level (currently 5). */
+export function maxLevel(): number;
+
+/** Returns the default compression level (currently 3). */
+export function defaultLevel(): number;
+
+/**
+ * Returns the version string reported by the linked native libzxc
+ * (e.g. "0.10.0"). Distinct from the npm package version.
+ */
+export function libraryVersion(): string;
