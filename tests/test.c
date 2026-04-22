@@ -3883,6 +3883,102 @@ int test_block_api_boundary_sizes() {
     return 1;
 }
 
+/*
+ * Regression test for blocks > 2 MiB.
+ *
+ * Before the varint extension, zxc_write_varint silently truncated LL/ML
+ * values >= 2^21 (21 bits), corrupting the output for any block that
+ * produced a literal run or match length exceeding 2 MiB. The encoder
+ * now writes 4- and 5-byte varints (28/32 bits), matching the decoder
+ * which already supported them.
+ *
+ * This test round-trips highly repetitive data in blocks of 3, 4 and 8 MiB.
+ * The LZ77 path on such data produces match lengths close to block size,
+ * reliably exercising the 4-byte varint branch.
+ */
+int test_block_api_large_block_varint() {
+    printf("=== TEST: Block API - Varint >21 bits (blocks > 2 MiB) ===\n");
+
+    const struct {
+        size_t size;
+        const char* name;
+    } cases[] = {
+        {3 * 1024 * 1024, "3 MiB"},
+        {4 * 1024 * 1024, "4 MiB"},
+        {8 * 1024 * 1024, "8 MiB"},
+    };
+    const int num_cases = (int)(sizeof(cases) / sizeof(cases[0]));
+
+    int failures = 0;
+
+    for (int i = 0; i < num_cases; i++) {
+        const size_t sz = cases[i].size;
+        uint8_t* src = malloc(sz);
+        const uint64_t bound = zxc_compress_block_bound(sz);
+        uint8_t* compressed = bound ? malloc((size_t)bound) : NULL;
+        uint8_t* decompressed = malloc(sz);
+        zxc_cctx* cctx = zxc_create_cctx(NULL);
+        zxc_dctx* dctx = zxc_create_dctx();
+
+        if (!src || !compressed || !decompressed || !cctx || !dctx) {
+            printf("  [FAIL] %s: allocation failed\n", cases[i].name);
+            failures++;
+            goto per_case_cleanup;
+        }
+
+        /* Repetitive pattern: after the initial ~400 byte literal run, the
+         * rest of the buffer matches, producing a match length close to sz
+         * (well above 2^21) — the 4-byte varint encoding path. */
+        gen_lz_data(src, sz);
+
+        for (int lvl = 1; lvl <= 5; lvl++) {
+            zxc_compress_opts_t copts = {.level = lvl, .checksum_enabled = 1};
+            const int64_t csize = zxc_compress_block(cctx, src, sz, compressed,
+                                                     (size_t)bound, &copts);
+            if (csize <= 0) {
+                printf("  [FAIL] %s lvl=%d: compress returned %lld\n",
+                       cases[i].name, lvl, (long long)csize);
+                failures++;
+                continue;
+            }
+
+            zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
+            const int64_t dsize = zxc_decompress_block(dctx, compressed, (size_t)csize,
+                                                      decompressed, sz, &dopts);
+            if (dsize != (int64_t)sz) {
+                printf("  [FAIL] %s lvl=%d: decompress returned %lld (expected %zu)\n",
+                       cases[i].name, lvl, (long long)dsize, sz);
+                failures++;
+                continue;
+            }
+            if (memcmp(src, decompressed, sz) != 0) {
+                printf("  [FAIL] %s lvl=%d: content mismatch after roundtrip\n",
+                       cases[i].name, lvl);
+                failures++;
+                continue;
+            }
+        }
+
+        if (!failures) {
+            printf("  [PASS] %s roundtrip OK across levels 1-5\n", cases[i].name);
+        }
+
+    per_case_cleanup:
+        free(src);
+        free(compressed);
+        free(decompressed);
+        zxc_free_cctx(cctx);
+        zxc_free_dctx(dctx);
+    }
+
+    if (failures > 0) {
+        printf("FAILED: %d sub-tests failed\n", failures);
+        return 0;
+    }
+    printf("PASS\n\n");
+    return 1;
+}
+
 int main() {
     srand(42);  // Fixed seed for reproducibility
     int total_failures = 0;
@@ -4019,6 +4115,7 @@ int main() {
     if (!test_opaque_context_api()) total_failures++;
     if (!test_block_api()) total_failures++;
     if (!test_block_api_boundary_sizes()) total_failures++;
+    if (!test_block_api_large_block_varint()) total_failures++;
     if (!test_decompress_block_bound()) total_failures++;
     if (!test_decompress_block_safe()) total_failures++;
     if (!test_library_info_api()) total_failures++;

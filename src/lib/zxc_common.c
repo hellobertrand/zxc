@@ -93,9 +93,9 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     const size_t sz_sequences = max_seq * sizeof(uint32_t);
     const size_t sz_tokens = max_seq * sizeof(uint8_t);
     const size_t sz_offsets = max_seq * sizeof(uint16_t);
-    const size_t sz_extras =
-        max_seq * 2 *
-        ZXC_VBYTE_ALLOC_LEN;  // Max 3 bytes per LL/ML VByte (21 bits, sufficient for <= 2MB block)
+    /* Varint bytes per LL/ML: ceil(log2(chunk_size) / 7). Scales with block size. */
+    const size_t vbyte_len = (offset_bits + 6) / 7;
+    const size_t sz_extras = max_seq * 2 * vbyte_len;
     const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
     // Calculate sizes with alignment padding (64 bytes for cache line alignment)

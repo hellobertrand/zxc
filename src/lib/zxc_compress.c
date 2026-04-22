@@ -92,25 +92,42 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  */
 static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, const uint32_t val) {
     // 1 byte: 0xxxxxxx (7 bits) = 2^7 = 128
-    if (LIKELY(val < (1 << 7))) {
+    if (LIKELY(val < (1U << 7))) {
         dst[0] = (uint8_t)val;
         return 1;
     }
 
     // 2 bytes: 10xxxxxx xxxxxxxx (14 bits) = 2^14 = 16384
-    if (LIKELY(val < (1 << 14))) {
+    if (LIKELY(val < (1U << 14))) {
         dst[0] = (uint8_t)(0x80 | (val & 0x3F));
         dst[1] = (uint8_t)(val >> 6);
         return 2;
     }
 
     // 3 bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) = 2^21 = 2097152
-    // Max varint value is bounded by ZXC_BLOCK_SIZE_MAX (2MB = 2^21).
-    // ZXC_VBYTE_ALLOC_LEN == 3 guarantees this is the last reachable path.
-    dst[0] = (uint8_t)(0xC0 | (val & 0x1F));
-    dst[1] = (uint8_t)(val >> 5);
-    dst[2] = (uint8_t)(val >> 13);
-    return ZXC_VBYTE_ALLOC_LEN;
+    if (LIKELY(val < (1U << 21))) {
+        dst[0] = (uint8_t)(0xC0 | (val & 0x1F));
+        dst[1] = (uint8_t)(val >> 5);
+        dst[2] = (uint8_t)(val >> 13);
+        return 3;
+    }
+
+    // 4 bytes: 1110xxxx xxxxxxxx xxxxxxxx xxxxxxxx (28 bits) = 2^28 = 268435456
+    if (val < (1U << 28)) {
+        dst[0] = (uint8_t)(0xE0 | (val & 0x0F));
+        dst[1] = (uint8_t)(val >> 4);
+        dst[2] = (uint8_t)(val >> 12);
+        dst[3] = (uint8_t)(val >> 20);
+        return 4;
+    }
+
+    // 5 bytes: 11110xxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx (32 bits)
+    dst[0] = (uint8_t)(0xF0 | (val & 0x07));
+    dst[1] = (uint8_t)(val >> 3);
+    dst[2] = (uint8_t)(val >> 11);
+    dst[3] = (uint8_t)(val >> 19);
+    dst[4] = (uint8_t)(val >> 27);
+    return 5;
 }
 
 /**

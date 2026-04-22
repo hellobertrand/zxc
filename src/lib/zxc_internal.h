@@ -309,8 +309,6 @@ extern "C" {
 #define ZXC_CACHE_LINE_SIZE 64
 /** @brief Bitmask for cache-line alignment checks. */
 #define ZXC_ALIGNMENT_MASK (ZXC_CACHE_LINE_SIZE - 1)
-/** @brief Allocation-safe max vbyte length (sufficient for < 2 MB blocks). */
-#define ZXC_VBYTE_ALLOC_LEN 3
 
 /** @brief File header size: Magic(4)+Version(1)+Chunk(1)+Flags(1)+Reserved(7)+CRC(2). */
 #define ZXC_FILE_HEADER_SIZE 16
