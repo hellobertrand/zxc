@@ -25,7 +25,7 @@
 #![allow(non_upper_case_globals)]
 
 use std::ffi::c_int;
-use std::os::raw::c_void;
+use std::os::raw::{c_char, c_void};
 
 // =============================================================================
 // ZXC Version Constants
@@ -205,6 +205,42 @@ impl Default for zxc_decompress_opts_t {
 }
 
 // =============================================================================
+// Opaque Context Handles
+// =============================================================================
+
+/// Opaque compression context. Use [`zxc_create_cctx`] to create.
+#[repr(C)]
+pub struct zxc_cctx {
+    _private: [u8; 0],
+}
+
+/// Opaque decompression context. Use [`zxc_create_dctx`] to create.
+#[repr(C)]
+pub struct zxc_dctx {
+    _private: [u8; 0],
+}
+
+// =============================================================================
+// Library Info Helpers
+// =============================================================================
+
+unsafe extern "C" {
+    /// Returns the minimum supported compression level (currently 1).
+    pub fn zxc_min_level() -> c_int;
+
+    /// Returns the maximum supported compression level (currently 5).
+    pub fn zxc_max_level() -> c_int;
+
+    /// Returns the default compression level (currently 3).
+    pub fn zxc_default_level() -> c_int;
+
+    /// Returns the library version as a null-terminated string (e.g. "0.10.0").
+    ///
+    /// The returned pointer is a compile-time constant and must not be freed.
+    pub fn zxc_version_string() -> *const c_char;
+}
+
+// =============================================================================
 // Buffer-Based API
 // =============================================================================
 
@@ -271,6 +307,123 @@ unsafe extern "C" {
     /// A constant string such as "ZXC_OK" or "ZXC_ERROR_MEMORY".
     /// Returns "ZXC_UNKNOWN_ERROR" for unrecognized codes.
     pub fn zxc_error_name(code: c_int) -> *const std::os::raw::c_char;
+}
+
+// =============================================================================
+// Block API (single block, no file framing)
+// =============================================================================
+
+unsafe extern "C" {
+    /// Returns the maximum compressed size for a single block (no file framing).
+    pub fn zxc_compress_block_bound(input_size: usize) -> u64;
+
+    /// Returns the minimum `dst_capacity` required by [`zxc_decompress_block`]
+    /// for a block of `uncompressed_size` bytes. Accounts for the wild-copy
+    /// tail pad used by the fast decoder.
+    pub fn zxc_decompress_block_bound(uncompressed_size: usize) -> u64;
+
+    /// Compresses a single block without file framing.
+    ///
+    /// Output format: `block_header(8B) + payload + optional checksum(4B)`.
+    ///
+    /// # Safety
+    /// - `cctx` must be a valid pointer returned by [`zxc_create_cctx`].
+    /// - `src`, `dst` must point to `src_size` / `dst_capacity` bytes.
+    pub fn zxc_compress_block(
+        cctx: *mut zxc_cctx,
+        src: *const c_void,
+        src_size: usize,
+        dst: *mut c_void,
+        dst_capacity: usize,
+        opts: *const zxc_compress_opts_t,
+    ) -> i64;
+
+    /// Decompresses a single block produced by [`zxc_compress_block`].
+    ///
+    /// `dst_capacity` should be at least
+    /// [`zxc_decompress_block_bound(uncompressed_size)`](zxc_decompress_block_bound)
+    /// to enable the fast path.
+    ///
+    /// # Safety
+    /// - `dctx` must be a valid pointer returned by [`zxc_create_dctx`].
+    pub fn zxc_decompress_block(
+        dctx: *mut zxc_dctx,
+        src: *const c_void,
+        src_size: usize,
+        dst: *mut c_void,
+        dst_capacity: usize,
+        opts: *const zxc_decompress_opts_t,
+    ) -> i64;
+
+    /// Strict-sized variant of [`zxc_decompress_block`]: accepts
+    /// `dst_capacity == uncompressed_size` exactly (no tail pad required).
+    /// Slightly slower than the fast path; output is bit-identical.
+    ///
+    /// # Safety
+    /// - `dctx` must be a valid pointer returned by [`zxc_create_dctx`].
+    pub fn zxc_decompress_block_safe(
+        dctx: *mut zxc_dctx,
+        src: *const c_void,
+        src_size: usize,
+        dst: *mut c_void,
+        dst_capacity: usize,
+        opts: *const zxc_decompress_opts_t,
+    ) -> i64;
+}
+
+// =============================================================================
+// Reusable Context API (opaque, heap-allocated)
+// =============================================================================
+
+unsafe extern "C" {
+    /// Creates a heap-allocated compression context.
+    ///
+    /// When `opts` is non-NULL, internal buffers are pre-allocated.
+    /// When `opts` is NULL, allocation is deferred to first use.
+    /// Returns NULL on allocation failure. Free with [`zxc_free_cctx`].
+    pub fn zxc_create_cctx(opts: *const zxc_compress_opts_t) -> *mut zxc_cctx;
+
+    /// Frees a compression context. Safe to call with a null pointer.
+    ///
+    /// # Safety
+    /// - `cctx` must be a pointer returned by [`zxc_create_cctx`] (or null).
+    pub fn zxc_free_cctx(cctx: *mut zxc_cctx);
+
+    /// Compresses a full file-framed buffer using a reusable context.
+    ///
+    /// # Safety
+    /// - `cctx` must be a valid pointer returned by [`zxc_create_cctx`].
+    pub fn zxc_compress_cctx(
+        cctx: *mut zxc_cctx,
+        src: *const c_void,
+        src_size: usize,
+        dst: *mut c_void,
+        dst_capacity: usize,
+        opts: *const zxc_compress_opts_t,
+    ) -> i64;
+
+    /// Creates a heap-allocated decompression context.
+    /// Returns NULL on allocation failure. Free with [`zxc_free_dctx`].
+    pub fn zxc_create_dctx() -> *mut zxc_dctx;
+
+    /// Frees a decompression context. Safe to call with a null pointer.
+    ///
+    /// # Safety
+    /// - `dctx` must be a pointer returned by [`zxc_create_dctx`] (or null).
+    pub fn zxc_free_dctx(dctx: *mut zxc_dctx);
+
+    /// Decompresses a full file-framed buffer using a reusable context.
+    ///
+    /// # Safety
+    /// - `dctx` must be a valid pointer returned by [`zxc_create_dctx`].
+    pub fn zxc_decompress_dctx(
+        dctx: *mut zxc_dctx,
+        src: *const c_void,
+        src_size: usize,
+        dst: *mut c_void,
+        dst_capacity: usize,
+        opts: *const zxc_decompress_opts_t,
+    ) -> i64;
 }
 
 // =============================================================================
