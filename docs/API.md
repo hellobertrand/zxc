@@ -285,6 +285,48 @@ typedef struct {
 
 Declared in `zxc_buffer.h`. Single-threaded, blocking, in-memory operations.
 
+### Library Info Helpers
+
+Runtime-queryable library metadata. Exposed so integrations and language
+bindings can discover the supported level range and library version without
+relying on compile-time constants alone.
+
+#### `zxc_min_level`
+
+```c
+ZXC_EXPORT int zxc_min_level(void);
+```
+
+Returns the minimum supported compression level (currently `1`,
+equivalent to `ZXC_LEVEL_FASTEST`).
+
+#### `zxc_max_level`
+
+```c
+ZXC_EXPORT int zxc_max_level(void);
+```
+
+Returns the maximum supported compression level (currently `5`,
+equivalent to `ZXC_LEVEL_COMPACT`).
+
+#### `zxc_default_level`
+
+```c
+ZXC_EXPORT int zxc_default_level(void);
+```
+
+Returns the default compression level (currently `3`,
+equivalent to `ZXC_LEVEL_DEFAULT`).
+
+#### `zxc_version_string`
+
+```c
+ZXC_EXPORT const char* zxc_version_string(void);
+```
+
+Returns the library version as a null-terminated string (e.g. `"0.10.0"`).
+The returned pointer is a compile-time constant and must not be freed.
+
 ### `zxc_compress_bound`
 
 ```c
@@ -363,6 +405,25 @@ EOF block, or footer overhead.
 
 **Returns**: upper bound in bytes, or `0` on overflow.
 
+### `zxc_decompress_block_bound`
+
+```c
+ZXC_EXPORT uint64_t zxc_decompress_block_bound(size_t uncompressed_size);
+```
+
+Returns the minimum `dst_capacity` required by `zxc_decompress_block()` for
+a block of `uncompressed_size` bytes. The fast decoder uses speculative
+wild-copy writes and needs a small tail pad beyond the declared uncompressed
+size: passing exactly `uncompressed_size` as `dst_capacity` forces the slow
+tail path and may trigger `ZXC_ERROR_OVERFLOW` on some inputs.
+
+Use this helper to size destination buffers for the fast path. For callers
+that genuinely cannot oversize their output buffer, use
+`zxc_decompress_block_safe()` instead.
+
+**Returns**: minimum `dst_capacity` in bytes, or `0` if `uncompressed_size`
+would overflow.
+
 ### `zxc_compress_block`
 
 ```c
@@ -394,7 +455,36 @@ ZXC_EXPORT int64_t zxc_decompress_block(
 );
 ```
 
-Decompresses a single block produced by `zxc_compress_block()`.  
+Decompresses a single block produced by `zxc_compress_block()`.
+`dst_capacity` should be at least
+`zxc_decompress_block_bound(uncompressed_size)` to enable the fast path.
+Only `checksum_enabled` is used.
+
+**Returns**: decompressed size (> 0) on success, or negative `zxc_error_t`.
+
+### `zxc_decompress_block_safe`
+
+```c
+ZXC_EXPORT int64_t zxc_decompress_block_safe(
+    zxc_dctx*                    dctx,
+    const void*                  src,
+    size_t                       src_size,
+    void*                        dst,
+    size_t                       dst_capacity,
+    const zxc_decompress_opts_t* opts     // NULL = defaults
+);
+```
+
+Strict-sized variant of `zxc_decompress_block()`. Accepts
+`dst_capacity == uncompressed_size` exactly: no tail pad required. Intended
+for integrations whose output buffer cannot be oversized (page-aligned
+decoding into mapped pages, fixed-size slots in a columnar layout, etc.).
+
+Output is **bit-identical** to `zxc_decompress_block()`. NUM and RAW blocks
+transparently forward to the fast path; only GLO/GHI blocks use the
+strict-tail decoder, which is slightly slower than the wild-copy fast path
+(see the performance table in `EXAMPLES.md`).
+
 Only `checksum_enabled` is used.
 
 **Returns**: decompressed size (> 0) on success, or negative `zxc_error_t`.
@@ -523,7 +613,7 @@ Reads the original size from the file footer. File position is restored.
 
 ## 11. Seekable API
 
-Declared in `zxc_seekable.h` (not included by `zxc.h` — opt-in).
+Declared in `zxc_seekable.h` (not included by `zxc.h`: opt-in, optional).
 Random-access decompression of seekable archives produced with `seekable = 1`.
 
 ### Creating a Seekable Archive
@@ -538,7 +628,7 @@ int64_t csize = zxc_compress(src, src_size, dst, dst_cap, &opts);
 
 The resulting archive contains a Seek Table block (SEK) between the EOF block
 and the file footer.  Standard decompressors handle seekable archives
-transparently — the seek table is skipped during sequential decompression.
+transparently, the seek table is skipped during sequential decompression.
 
 ### `zxc_seekable_open`
 
@@ -801,56 +891,62 @@ if (result < 0) {
 | API Layer | Safe to call concurrently? | Notes |
 |-----------|---------------------------|-------|
 | **Buffer API** | Yes (stateless) | Each call is self-contained.  Multiple threads can compress/decompress simultaneously with independent buffers. |
-| **Block API** | Per-context | Uses `zxc_cctx` / `zxc_dctx` — same rule as Context API.  Create one context per thread. |
+| **Block API** | Per-context | Uses `zxc_cctx` / `zxc_dctx`: same rule as Context API.  Create one context per thread. |
 | **Context API** | Per-context | A single `zxc_cctx` / `zxc_dctx` must not be shared between threads.  Create one context per thread. |
 | **Streaming API** | Per-call | Each `zxc_stream_*` call manages its own thread pool internally.  Do not call from multiple threads on the same `FILE*`. |
 | **Seekable API** | Per-handle | A single `zxc_seekable` handle must not be shared between threads for single-threaded decompression.  Use `zxc_seekable_decompress_range_mt()` for parallel access. |
-| **Sans-IO API** | Per-context | Same rule as context API - one `zxc_cctx_t` per thread. |
+| **Sans-IO API** | Per-context | Same rule as context API: one `zxc_cctx_t` per thread. |
 | `zxc_error_name` | Yes | Returns a pointer to a static string. |
 
 ---
 
 ## 15. Exported Symbols Summary
 
-The shared library exports exactly **35 symbols** (verified with `nm -gU`):
+The shared library exports exactly **41 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
-| 1 | `zxc_compress_bound` | Buffer | `zxc_buffer.h` |
-| 2 | `zxc_compress` | Buffer | `zxc_buffer.h` |
-| 3 | `zxc_decompress` | Buffer | `zxc_buffer.h` |
-| 4 | `zxc_get_decompressed_size` | Buffer | `zxc_buffer.h` |
-| 5 | `zxc_compress_block_bound` | Block | `zxc_buffer.h` |
-| 6 | `zxc_compress_block` | Block | `zxc_buffer.h` |
-| 7 | `zxc_decompress_block` | Block | `zxc_buffer.h` |
-| 8 | `zxc_create_cctx` | Context | `zxc_buffer.h` |
-| 9 | `zxc_free_cctx` | Context | `zxc_buffer.h` |
-| 10 | `zxc_compress_cctx` | Context | `zxc_buffer.h` |
-| 11 | `zxc_create_dctx` | Context | `zxc_buffer.h` |
-| 12 | `zxc_free_dctx` | Context | `zxc_buffer.h` |
-| 13 | `zxc_decompress_dctx` | Context | `zxc_buffer.h` |
-| 14 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
-| 15 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
-| 16 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
-| 17 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
-| 18 | `zxc_seekable_open_file` | Seekable | `zxc_seekable.h` |
-| 19 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
-| 20 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
-| 21 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
-| 22 | `zxc_seekable_get_block_decomp_size` | Seekable | `zxc_seekable.h` |
-| 23 | `zxc_seekable_decompress_range` | Seekable | `zxc_seekable.h` |
-| 24 | `zxc_seekable_decompress_range_mt` | Seekable | `zxc_seekable.h` |
-| 25 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
-| 26 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
-| 27 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
-| 28 | `zxc_cctx_init` | Sans-IO | `zxc_sans_io.h` |
-| 29 | `zxc_cctx_free` | Sans-IO | `zxc_sans_io.h` |
-| 30 | `zxc_write_file_header` | Sans-IO | `zxc_sans_io.h` |
-| 31 | `zxc_read_file_header` | Sans-IO | `zxc_sans_io.h` |
-| 32 | `zxc_write_block_header` | Sans-IO | `zxc_sans_io.h` |
-| 33 | `zxc_read_block_header` | Sans-IO | `zxc_sans_io.h` |
-| 34 | `zxc_write_file_footer` | Sans-IO | `zxc_sans_io.h` |
-| 35 | `zxc_error_name` | Error | `zxc_error.h` |
+| 1 | `zxc_min_level` | Info | `zxc_buffer.h` |
+| 2 | `zxc_max_level` | Info | `zxc_buffer.h` |
+| 3 | `zxc_default_level` | Info | `zxc_buffer.h` |
+| 4 | `zxc_version_string` | Info | `zxc_buffer.h` |
+| 5 | `zxc_compress_bound` | Buffer | `zxc_buffer.h` |
+| 6 | `zxc_compress` | Buffer | `zxc_buffer.h` |
+| 7 | `zxc_decompress` | Buffer | `zxc_buffer.h` |
+| 8 | `zxc_get_decompressed_size` | Buffer | `zxc_buffer.h` |
+| 9 | `zxc_compress_block_bound` | Block | `zxc_buffer.h` |
+| 10 | `zxc_decompress_block_bound` | Block | `zxc_buffer.h` |
+| 11 | `zxc_compress_block` | Block | `zxc_buffer.h` |
+| 12 | `zxc_decompress_block` | Block | `zxc_buffer.h` |
+| 13 | `zxc_decompress_block_safe` | Block | `zxc_buffer.h` |
+| 14 | `zxc_create_cctx` | Context | `zxc_buffer.h` |
+| 15 | `zxc_free_cctx` | Context | `zxc_buffer.h` |
+| 16 | `zxc_compress_cctx` | Context | `zxc_buffer.h` |
+| 17 | `zxc_create_dctx` | Context | `zxc_buffer.h` |
+| 18 | `zxc_free_dctx` | Context | `zxc_buffer.h` |
+| 19 | `zxc_decompress_dctx` | Context | `zxc_buffer.h` |
+| 20 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
+| 21 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
+| 22 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
+| 23 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
+| 24 | `zxc_seekable_open_file` | Seekable | `zxc_seekable.h` |
+| 25 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
+| 26 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
+| 27 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
+| 28 | `zxc_seekable_get_block_decomp_size` | Seekable | `zxc_seekable.h` |
+| 29 | `zxc_seekable_decompress_range` | Seekable | `zxc_seekable.h` |
+| 30 | `zxc_seekable_decompress_range_mt` | Seekable | `zxc_seekable.h` |
+| 31 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
+| 32 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
+| 33 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
+| 34 | `zxc_cctx_init` | Sans-IO | `zxc_sans_io.h` |
+| 35 | `zxc_cctx_free` | Sans-IO | `zxc_sans_io.h` |
+| 36 | `zxc_write_file_header` | Sans-IO | `zxc_sans_io.h` |
+| 37 | `zxc_read_file_header` | Sans-IO | `zxc_sans_io.h` |
+| 38 | `zxc_write_block_header` | Sans-IO | `zxc_sans_io.h` |
+| 39 | `zxc_read_block_header` | Sans-IO | `zxc_sans_io.h` |
+| 40 | `zxc_write_file_footer` | Sans-IO | `zxc_sans_io.h` |
+| 41 | `zxc_error_name` | Error | `zxc_error.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon`, `_avx2`, `_avx512`) are compiled with
