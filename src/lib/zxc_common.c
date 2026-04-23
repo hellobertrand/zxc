@@ -89,7 +89,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
 
     if (mode == 0) return ZXC_OK;
 
-    const size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
+    const size_t max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
     const size_t sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
     const size_t sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint8_t);
     const size_t sz_chain = ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t);
@@ -638,7 +638,7 @@ uint64_t zxc_estimate_cctx_size(const size_t src_size) {
 
     const size_t chunk_size = zxc_block_size_ceil(src_size);
     const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
-    const size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
+    const size_t max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
     const size_t vbyte_len = (offset_bits + 6) / 7;
 
     uint64_t total = 0;
