@@ -659,13 +659,12 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
         int res;
         const size_t rem_cap = (size_t)(op_end - op);
-        if (LIKELY(rem_cap >= runtime_chunk_size + 2 * ZXC_PAD_SIZE)) {
+        if (LIKELY(rem_cap >= work_sz)) {
             // Fast path: decode directly into dst. Cap dst_cap to chunk_size + PAD
-            res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op,
-                                               runtime_chunk_size + ZXC_PAD_SIZE);
+            res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op, work_sz);
         } else {
             // Safe path: decode into bounce buffer, then copy exact result.
-            res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, ctx.work_buf, runtime_chunk_size);
+            res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, ctx.work_buf, ctx.work_buf_cap);
             if (LIKELY(res > 0)) {
                 // LCOV_EXCL_START
                 if (UNLIKELY((size_t)res > rem_cap)) {
@@ -879,8 +878,8 @@ void zxc_free_dctx(zxc_dctx* dctx) {
 int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
                             void* RESTRICT dst, const size_t dst_capacity,
                             const zxc_decompress_opts_t* opts) {
-    if (UNLIKELY(!dctx)) return ZXC_ERROR_NULL_INPUT;
-    if (UNLIKELY(!src || !dst || src_size < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!dctx || !src || !dst || src_size < ZXC_FILE_HEADER_SIZE))
+        return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
 
@@ -891,6 +890,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     const uint8_t* const op_end = op + dst_capacity;
     size_t runtime_chunk_size = 0;
     int file_has_checksums = 0;
+    uint32_t global_hash = 0;
 
     if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums) !=
                  ZXC_OK))
@@ -920,14 +920,12 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 
     /* Ensure scratch buffer is large enough. */
     const size_t work_sz = runtime_chunk_size + ZXC_PAD_SIZE;
-    if (ctx->work_buf_cap < work_sz) {
+    if (UNLIKELY(ctx->work_buf_cap < work_sz)) {
         free(ctx->work_buf);
         ctx->work_buf = (uint8_t*)malloc(work_sz);
         if (UNLIKELY(!ctx->work_buf)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
         ctx->work_buf_cap = work_sz;
     }
-
-    uint32_t global_hash = 0;
 
     while (ip < ip_end) {
         const size_t rem_src = (size_t)(ip_end - ip);
@@ -952,12 +950,12 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 
         const size_t rem_cap = (size_t)(op_end - op);
         int res;
-        if (LIKELY(rem_cap >= runtime_chunk_size + ZXC_PAD_SIZE)) {
+        if (LIKELY(rem_cap >= work_sz)) {
             // Fast path: decode directly into dst (enough padding for wild copies).
             res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, op, rem_cap);
         } else {
             // Safe path: decode into bounce buffer, then copy exact result.
-            res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, ctx->work_buf, runtime_chunk_size);
+            res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, ctx->work_buf, ctx->work_buf_cap);
             if (LIKELY(res > 0)) {
                 if (UNLIKELY((size_t)res > rem_cap))
                     return ZXC_ERROR_DST_TOO_SMALL;  // LCOV_EXCL_LINE
@@ -1066,13 +1064,13 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
     }
 
     int res;
-    if (LIKELY(dst_capacity >= block_size + ZXC_PAD_SIZE)) {
+    if (LIKELY(dst_capacity >= work_sz)) {
         res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
                                            dst_capacity);
     } else {
         /* Bounce through work_buf when output can't absorb wild copies. */
         res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, ctx->work_buf,
-                                           block_size);
+                                           ctx->work_buf_cap);
         if (LIKELY(res > 0)) {
             if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
             ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
