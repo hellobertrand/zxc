@@ -211,7 +211,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     // Branchless chain table update
     const uint32_t dist = cur_pos - match_idx;
     const uint32_t valid_mask = -((int32_t)((match_idx != 0) & (dist < ZXC_LZ_WINDOW_SIZE)));
-    chain_table[cur_pos] = (uint16_t)(dist & valid_mask);
+    chain_table[cur_pos & ZXC_LZ_WINDOW_MASK] = (uint16_t)(dist & valid_mask);
 
     if (match_idx == 0) return best;
 
@@ -220,7 +220,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     // Optimization: If head tag doesn't match, advance immediately without loading the first
     // mismatch.
     if (skip_head) {
-        const uint16_t delta = chain_table[match_idx];
+        const uint16_t delta = chain_table[match_idx & ZXC_LZ_WINDOW_MASK];
         const uint32_t next_idx = match_idx - delta;
         match_idx = (delta != 0) ? next_idx : 0;
         attempts--;
@@ -346,7 +346,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend)) break;
         }
 
-        const uint16_t delta = chain_table[match_idx];
+        const uint16_t delta = chain_table[match_idx & ZXC_LZ_WINDOW_MASK];
         const uint32_t next_idx = match_idx - delta;
         ZXC_PREFETCH_READ(src + next_idx);
 
@@ -403,7 +403,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 max_lazy2 = l2 > max_lazy2 ? l2 : max_lazy2;
             }
 
-            const uint16_t delta = chain_table[next_idx];
+            const uint16_t delta = chain_table[next_idx & ZXC_LZ_WINDOW_MASK];
             if (UNLIKELY(delta == 0)) break;
             next_idx -= delta;
             is_lazy_first = 0;
@@ -445,7 +445,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                     max_lazy3 = l3 > max_lazy3 ? l3 : max_lazy3;
                 }
 
-                const uint16_t delta = chain_table[idx3];
+                const uint16_t delta = chain_table[idx3 & ZXC_LZ_WINDOW_MASK];
                 if (UNLIKELY(delta == 0)) break;
                 idx3 -= delta;
                 is_first3 = 0;
@@ -791,9 +791,10 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                         (prev_head & ~offset_mask) == epoch_mark ? (prev_head & offset_mask) : 0;
                     hash_table[h_u] = epoch_mark | pos_u;
                     hash_tags[h_u] = (uint8_t)(val_u ^ (val_u >> 16));
-                    chain_table[pos_u] = (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
-                                             ? (uint16_t)(pos_u - prev_idx)
-                                             : 0;
+                    chain_table[pos_u & ZXC_LZ_WINDOW_MASK] =
+                        (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
+                            ? (uint16_t)(pos_u - prev_idx)
+                            : 0;
                 }
             }
 

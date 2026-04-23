@@ -429,6 +429,8 @@ extern "C" {
 #define ZXC_LZ_HASH_SIZE (1U << ZXC_LZ_HASH_BITS)
 /** @brief Sliding window size (64 KB). */
 #define ZXC_LZ_WINDOW_SIZE (1U << 16)
+/** @brief Mask for ring-buffer indexing into chain_table (power-of-two window). */
+#define ZXC_LZ_WINDOW_MASK (ZXC_LZ_WINDOW_SIZE - 1U)
 /** @brief Minimum match length for an LZ77 match. */
 #define ZXC_LZ_MIN_MATCH_LEN 5
 /** @brief Base bias added to encoded offsets (stored = actual - bias). */

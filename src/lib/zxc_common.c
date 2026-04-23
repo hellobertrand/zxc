@@ -25,6 +25,9 @@
  * ============================================================================
  */
 
+/* Round @p x up to the next cache-line boundary. */
+#define ZXC_ALIGN_CL(x) (((x) + ZXC_ALIGNMENT_MASK) & ~(size_t)ZXC_ALIGNMENT_MASK)
+
 /*
  * @brief Allocates memory aligned to the specified boundary.
  *
@@ -89,33 +92,33 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     const size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
     const size_t sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
     const size_t sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint8_t);
-    const size_t sz_chain = chunk_size * sizeof(uint16_t);
+    const size_t sz_chain = ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t);
     const size_t sz_sequences = max_seq * sizeof(uint32_t);
     const size_t sz_tokens = max_seq * sizeof(uint8_t);
     const size_t sz_offsets = max_seq * sizeof(uint16_t);
-    /* Varint bytes per LL/ML: ceil(log2(chunk_size) / 7). Scales with block size. */
+    /* Varint bytes per LL/ML: scales with chunk_size. */
     const size_t vbyte_len = (offset_bits + 6) / 7;
     const size_t sz_extras = max_seq * 2 * vbyte_len;
     const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
-    // Calculate sizes with alignment padding (64 bytes for cache line alignment)
+    /* Calculate sizes with alignment padding (64 bytes for cache line alignment) */
     size_t total_size = 0;
     const size_t off_hash_pos = total_size;
-    total_size += (sz_hash_pos + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    total_size += ZXC_ALIGN_CL(sz_hash_pos);
     const size_t off_hash_tags = total_size;
-    total_size += (sz_hash_tags + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    total_size += ZXC_ALIGN_CL(sz_hash_tags);
     const size_t off_chain = total_size;
-    total_size += (sz_chain + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    total_size += ZXC_ALIGN_CL(sz_chain);
     const size_t off_sequences = total_size;
-    total_size += (sz_sequences + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    total_size += ZXC_ALIGN_CL(sz_sequences);
     const size_t off_tokens = total_size;
-    total_size += (sz_tokens + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    total_size += ZXC_ALIGN_CL(sz_tokens);
     const size_t off_offsets = total_size;
-    total_size += (sz_offsets + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    total_size += ZXC_ALIGN_CL(sz_offsets);
     const size_t off_extras = total_size;
-    total_size += (sz_extras + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    total_size += ZXC_ALIGN_CL(sz_extras);
     const size_t off_lit = total_size;
-    total_size += (sz_lit + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    total_size += ZXC_ALIGN_CL(sz_lit);
 
     uint8_t* const mem = (uint8_t*)zxc_aligned_malloc(total_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
@@ -642,17 +645,15 @@ uint64_t zxc_estimate_cctx_size(const size_t src_size) {
     const size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
     const size_t vbyte_len = (offset_bits + 6) / 7;
 
-#define ZXC_ALIGN_CL(x) (((uint64_t)(x) + ZXC_ALIGNMENT_MASK) & ~(uint64_t)ZXC_ALIGNMENT_MASK)
     uint64_t total = 0;
-    total += ZXC_ALIGN_CL(ZXC_LZ_HASH_SIZE * sizeof(uint32_t)); /* hash_table */
-    total += ZXC_ALIGN_CL(ZXC_LZ_HASH_SIZE * sizeof(uint8_t));  /* hash_tags */
-    total += ZXC_ALIGN_CL(chunk_size * sizeof(uint16_t));       /* chain_table */
-    total += ZXC_ALIGN_CL(max_seq * sizeof(uint32_t));          /* buf_sequences */
-    total += ZXC_ALIGN_CL(max_seq * sizeof(uint8_t));           /* buf_tokens */
-    total += ZXC_ALIGN_CL(max_seq * sizeof(uint16_t));          /* buf_offsets */
-    total += ZXC_ALIGN_CL(max_seq * 2 * vbyte_len);             /* buf_extras */
-    total += ZXC_ALIGN_CL(chunk_size + ZXC_PAD_SIZE);           /* literals */
-#undef ZXC_ALIGN_CL
+    total += ZXC_ALIGN_CL(ZXC_LZ_HASH_SIZE * sizeof(uint32_t));   /* hash_table */
+    total += ZXC_ALIGN_CL(ZXC_LZ_HASH_SIZE * sizeof(uint8_t));    /* hash_tags */
+    total += ZXC_ALIGN_CL(ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t)); /* chain_table (ring) */
+    total += ZXC_ALIGN_CL(max_seq * sizeof(uint32_t));            /* buf_sequences */
+    total += ZXC_ALIGN_CL(max_seq * sizeof(uint8_t));             /* buf_tokens */
+    total += ZXC_ALIGN_CL(max_seq * sizeof(uint16_t));            /* buf_offsets */
+    total += ZXC_ALIGN_CL(max_seq * 2 * vbyte_len);               /* buf_extras */
+    total += ZXC_ALIGN_CL(chunk_size + ZXC_PAD_SIZE);             /* literals */
 
     /* The opaque wrapper struct allocated by zxc_create_cctx() adds a tiny
      * fixed overhead (< 128 B) that is negligible next to the per-chunk
