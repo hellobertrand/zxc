@@ -2651,6 +2651,68 @@ fail:
     return 0;
 }
 
+int test_estimate_cctx_size() {
+    printf("=== TEST: Unit - zxc_estimate_cctx_size ===\n");
+
+    /* 1. Zero input returns zero. */
+    if (zxc_estimate_cctx_size(0) != 0) {
+        printf("  [FAIL] estimate(0) must return 0\n");
+        return 0;
+    }
+    printf("  [PASS] estimate(0) == 0\n");
+
+    /* 2. Non-zero input returns non-zero estimate. */
+    const uint64_t e1k = zxc_estimate_cctx_size(1024);
+    if (e1k == 0) {
+        printf("  [FAIL] estimate(1 KiB) must be > 0\n");
+        return 0;
+    }
+    printf("  [PASS] estimate(1 KiB) = %llu bytes\n", (unsigned long long)e1k);
+
+    /* 3. Sizes below ZXC_BLOCK_SIZE_MIN collapse to the same estimate. */
+    if (zxc_estimate_cctx_size(512) != e1k ||
+        zxc_estimate_cctx_size(4096) != e1k) {
+        printf("  [FAIL] estimates below MIN must round to ZXC_BLOCK_SIZE_MIN\n");
+        return 0;
+    }
+    printf("  [PASS] estimate rounds sub-MIN inputs to the same value\n");
+
+    /* 4. Monotonic: estimate grows with src_size across block_size tiers. */
+    const uint64_t e64k = zxc_estimate_cctx_size(64 * 1024);
+    const uint64_t e1m = zxc_estimate_cctx_size(1024 * 1024);
+    const uint64_t e8m = zxc_estimate_cctx_size(8 * 1024 * 1024);
+    if (!(e1k <= e64k && e64k <= e1m && e1m <= e8m)) {
+        printf("  [FAIL] estimates must be monotonic: %llu, %llu, %llu, %llu\n",
+               (unsigned long long)e1k, (unsigned long long)e64k,
+               (unsigned long long)e1m, (unsigned long long)e8m);
+        return 0;
+    }
+    printf("  [PASS] monotonic: 1K=%llu, 64K=%llu, 1M=%llu, 8M=%llu\n",
+           (unsigned long long)e1k, (unsigned long long)e64k,
+           (unsigned long long)e1m, (unsigned long long)e8m);
+
+    /* 5. Sanity: estimate for a large block must exceed the block itself. */
+    if (e1m < 1024 * 1024) {
+        printf("  [FAIL] estimate(1 MiB)=%llu should exceed 1 MiB\n",
+               (unsigned long long)e1m);
+        return 0;
+    }
+    printf("  [PASS] estimate exceeds raw block size (context overhead present)\n");
+
+    /* 6. Sub-linear scaling: doubling src_size must roughly double the estimate,
+     *    bounded above by 10x factor (chain 2x, everything else 1x). */
+    if (e8m < 4 * e1m || e8m > 12 * e1m) {
+        printf("  [FAIL] 8x src_size yields %.2fx memory (expected ~8x)\n",
+               (double)e8m / (double)e1m);
+        return 0;
+    }
+    printf("  [PASS] scaling: 8x src_size -> %.2fx memory\n",
+           (double)e8m / (double)e1m);
+
+    printf("PASS\n\n");
+    return 1;
+}
+
 int test_library_info_api() {
     printf("=== TEST: Unit - Library Info API (zxc_min/max/default_level, zxc_version_string) ===\n");
 
@@ -3928,7 +3990,7 @@ int test_block_api_large_block_varint() {
 
         /* Repetitive pattern: after the initial ~400 byte literal run, the
          * rest of the buffer matches, producing a match length close to sz
-         * (well above 2^21) — the 4-byte varint encoding path. */
+         * (well above 2^21) triggering the 4-byte varint encoding path. */
         gen_lz_data(src, sz);
 
         for (int lvl = 1; lvl <= 5; lvl++) {
@@ -4118,6 +4180,7 @@ int main() {
     if (!test_block_api_large_block_varint()) total_failures++;
     if (!test_decompress_block_bound()) total_failures++;
     if (!test_decompress_block_safe()) total_failures++;
+    if (!test_estimate_cctx_size()) total_failures++;
     if (!test_library_info_api()) total_failures++;
 
     // --- SEEKABLE TESTS ---

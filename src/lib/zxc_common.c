@@ -628,6 +628,40 @@ uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
 }
 
 /*
+ * @brief Estimates the total buffer bytes allocated inside a cctx for a block.
+ *
+ * Mirrors the allocation layout in zxc_cctx_init(): each sub-buffer is rounded
+ * up to the cache-line boundary, so the returned value matches the single
+ * aligned allocation performed by the initializer.
+ */
+uint64_t zxc_estimate_cctx_size(const size_t src_size) {
+    if (UNLIKELY(src_size == 0)) return 0;
+
+    const size_t chunk_size = zxc_block_size_ceil(src_size);
+    const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
+    const size_t max_seq = chunk_size / sizeof(uint32_t) + 256;
+    const size_t vbyte_len = (offset_bits + 6) / 7;
+
+#define ZXC_ALIGN_CL(x) (((uint64_t)(x) + ZXC_ALIGNMENT_MASK) & ~(uint64_t)ZXC_ALIGNMENT_MASK)
+    uint64_t total = 0;
+    total += ZXC_ALIGN_CL(ZXC_LZ_HASH_SIZE * sizeof(uint32_t)); /* hash_table */
+    total += ZXC_ALIGN_CL(ZXC_LZ_HASH_SIZE * sizeof(uint8_t));  /* hash_tags */
+    total += ZXC_ALIGN_CL(chunk_size * sizeof(uint16_t));       /* chain_table */
+    total += ZXC_ALIGN_CL(max_seq * sizeof(uint32_t));          /* buf_sequences */
+    total += ZXC_ALIGN_CL(max_seq * sizeof(uint8_t));           /* buf_tokens */
+    total += ZXC_ALIGN_CL(max_seq * sizeof(uint16_t));          /* buf_offsets */
+    total += ZXC_ALIGN_CL(max_seq * 2 * vbyte_len);             /* buf_extras */
+    total += ZXC_ALIGN_CL(chunk_size + ZXC_PAD_SIZE);           /* literals */
+#undef ZXC_ALIGN_CL
+
+    /* The opaque wrapper struct allocated by zxc_create_cctx() adds a tiny
+     * fixed overhead (< 128 B) that is negligible next to the per-chunk
+     * buffers above and is intentionally omitted. */
+
+    return total;
+}
+
+/*
  * ============================================================================
  * ERROR CODE UTILITIES
  * ============================================================================
