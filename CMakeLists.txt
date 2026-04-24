@@ -414,7 +414,18 @@ endif()
 if(ZXC_BUILD_TESTS)
     enable_testing()
     
-    add_executable(zxc_test tests/test.c)
+    add_executable(zxc_test
+        tests/test_main.c
+        tests/test_common.c
+        tests/test_buffer_api.c
+        tests/test_block_api.c
+        tests/test_context_api.c
+        tests/test_stream_api.c
+        tests/test_seekable.c
+        tests/test_seekable_mt.c
+        tests/test_format.c
+        tests/test_misc.c
+    )
     
     # When building shared libraries, create a static version for tests
     # This allows tests to access internal functions for unit testing
@@ -469,7 +480,17 @@ if(ZXC_BUILD_TESTS)
     zxc_apply_pgo(zxc_test)
     
     target_include_directories(zxc_test PRIVATE src/lib ${RAPIDHASH_INCLUDE_DIR})
-    add_test(NAME UnitTests COMMAND zxc_test)
+
+    file(STRINGS tests/test_main.c ZXC_TEST_CASE_LINES REGEX "TEST_CASE\\(")
+    set(ZXC_TEST_NAMES "")
+    foreach(_line IN LISTS ZXC_TEST_CASE_LINES)
+        if(_line MATCHES "TEST_CASE\\(([A-Za-z0-9_]+)\\)")
+            list(APPEND ZXC_TEST_NAMES ${CMAKE_MATCH_1})
+        endif()
+    endforeach()
+    foreach(_name IN LISTS ZXC_TEST_NAMES)
+        add_test(NAME ${_name} COMMAND zxc_test --exact ${_name})
+    endforeach()
 endif()
 
 # =============================================================================
