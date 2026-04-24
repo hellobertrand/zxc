@@ -293,12 +293,22 @@ extern "C" {
 #define ZXC_MAX_THREADS 512
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
+/**
+ * @brief Tail padding required on the decompression destination buffer.
+ *
+ * The decoder's fast path uses speculative wild-copy writes and gates
+ * fast-loop entry on @c d_end - ZXC_DECOMPRESS_TAIL_PAD. Sizing
+ * @c dst_capacity to @c uncompressed_size + ZXC_DECOMPRESS_TAIL_PAD
+ * guarantees the fast path is reachable and that tail bounds checks
+ * never spuriously reject the last literals of a valid block.
+ *
+ * @see zxc_decompress_block_bound()
+ */
+#define ZXC_DECOMPRESS_TAIL_PAD (ZXC_PAD_SIZE * 66)
 /** @brief Assumed CPU cache line size for alignment. */
 #define ZXC_CACHE_LINE_SIZE 64
 /** @brief Bitmask for cache-line alignment checks. */
 #define ZXC_ALIGNMENT_MASK (ZXC_CACHE_LINE_SIZE - 1)
-/** @brief Allocation-safe max vbyte length (sufficient for < 2 MB blocks). */
-#define ZXC_VBYTE_ALLOC_LEN 3
 
 /** @brief File header size: Magic(4)+Version(1)+Chunk(1)+Flags(1)+Reserved(7)+CRC(2). */
 #define ZXC_FILE_HEADER_SIZE 16
@@ -419,6 +429,8 @@ extern "C" {
 #define ZXC_LZ_HASH_SIZE (1U << ZXC_LZ_HASH_BITS)
 /** @brief Sliding window size (64 KB). */
 #define ZXC_LZ_WINDOW_SIZE (1U << 16)
+/** @brief Mask for ring-buffer indexing into chain_table (power-of-two window). */
+#define ZXC_LZ_WINDOW_MASK (ZXC_LZ_WINDOW_SIZE - 1U)
 /** @brief Minimum match length for an LZ77 match. */
 #define ZXC_LZ_MIN_MATCH_LEN 5
 /** @brief Base bias added to encoded offsets (stored = actual - bias). */
@@ -455,8 +467,26 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_log2_u32(const uint32_t v) {
 }
 
 /**
+ * @brief Branchless bit_ceil: smallest power of two >= v, clamped to ZXC_BLOCK_SIZE_MIN.
+ * @param[in] v Input size (must be > 0).
+ */
+static ZXC_ALWAYS_INLINE size_t zxc_block_size_ceil(const size_t v) {
+    uint64_t x = (uint64_t)v - 1;
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    x |= x >> 32;
+    x++;
+    const size_t bs = (size_t)x;
+    return (bs < ZXC_BLOCK_SIZE_MIN) ? ZXC_BLOCK_SIZE_MIN : bs;
+}
+
+/**
  * @brief Validates a block size.
  * Must be a power of two in [ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX].
+ * @param[in] bs Block size to validate.
  * @return 1 if valid, 0 otherwise.
  */
 static ZXC_ALWAYS_INLINE int zxc_validate_block_size(const size_t bs) {

@@ -60,6 +60,10 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
 static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_stream_decompress(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_get_decompressed_size(PyObject* self, PyObject* args, PyObject* kwargs);
+static PyObject* pyzxc_min_level(PyObject* self, PyObject* args);
+static PyObject* pyzxc_max_level(PyObject* self, PyObject* args);
+static PyObject* pyzxc_default_level(PyObject* self, PyObject* args);
+static PyObject* pyzxc_version_string(PyObject* self, PyObject* args);
 
 // =============================================================================
 // Initialize python module
@@ -97,6 +101,10 @@ static PyMethodDef zxc_methods[] = {
      NULL},
     {"pyzxc_get_decompressed_size", (PyCFunction)pyzxc_get_decompressed_size,
      METH_VARARGS | METH_KEYWORDS, NULL},
+    {"pyzxc_min_level", (PyCFunction)pyzxc_min_level, METH_NOARGS, NULL},
+    {"pyzxc_max_level", (PyCFunction)pyzxc_max_level, METH_NOARGS, NULL},
+    {"pyzxc_default_level", (PyCFunction)pyzxc_default_level, METH_NOARGS, NULL},
+    {"pyzxc_version_string", (PyCFunction)pyzxc_version_string, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}  // sentinel
 };
 
@@ -379,4 +387,33 @@ static PyObject* pyzxc_stream_decompress(PyObject* self, PyObject* args, PyObjec
     if (nwritten < 0) Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)nwritten));
 
     return Py_BuildValue("L", nwritten);
+}
+
+// =============================================================================
+// Library Info Helpers
+// =============================================================================
+
+static PyObject* pyzxc_min_level(PyObject* self, PyObject* args) {
+    (void)self;
+    (void)args;
+    return PyLong_FromLong(zxc_min_level());
+}
+
+static PyObject* pyzxc_max_level(PyObject* self, PyObject* args) {
+    (void)self;
+    (void)args;
+    return PyLong_FromLong(zxc_max_level());
+}
+
+static PyObject* pyzxc_default_level(PyObject* self, PyObject* args) {
+    (void)self;
+    (void)args;
+    return PyLong_FromLong(zxc_default_level());
+}
+
+static PyObject* pyzxc_version_string(PyObject* self, PyObject* args) {
+    (void)self;
+    (void)args;
+    const char* const v = zxc_version_string();
+    return PyUnicode_FromString(v ? v : "");
 }

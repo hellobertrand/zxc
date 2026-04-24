@@ -151,6 +151,29 @@ static Napi::Value GetDecompressedSize(const Napi::CallbackInfo& info) {
 }
 
 // =============================================================================
+// minLevel(): number
+// maxLevel(): number
+// defaultLevel(): number
+// libraryVersion(): string
+// =============================================================================
+static Napi::Value MinLevel(const Napi::CallbackInfo& info) {
+    return Napi::Number::New(info.Env(), zxc_min_level());
+}
+
+static Napi::Value MaxLevel(const Napi::CallbackInfo& info) {
+    return Napi::Number::New(info.Env(), zxc_max_level());
+}
+
+static Napi::Value DefaultLevel(const Napi::CallbackInfo& info) {
+    return Napi::Number::New(info.Env(), zxc_default_level());
+}
+
+static Napi::Value LibraryVersion(const Napi::CallbackInfo& info) {
+    const char* v = zxc_version_string();
+    return Napi::String::New(info.Env(), v ? v : "");
+}
+
+// =============================================================================
 // errorName(code: number): string
 // =============================================================================
 static Napi::Value ErrorName(const Napi::CallbackInfo& info) {
@@ -178,6 +201,12 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("getDecompressedSize",
                 Napi::Function::New(env, GetDecompressedSize, "getDecompressedSize"));
     exports.Set("errorName", Napi::Function::New(env, ErrorName, "errorName"));
+
+    // Library info helpers
+    exports.Set("minLevel", Napi::Function::New(env, MinLevel, "minLevel"));
+    exports.Set("maxLevel", Napi::Function::New(env, MaxLevel, "maxLevel"));
+    exports.Set("defaultLevel", Napi::Function::New(env, DefaultLevel, "defaultLevel"));
+    exports.Set("libraryVersion", Napi::Function::New(env, LibraryVersion, "libraryVersion"));
 
     // Compression level constants
     exports.Set("LEVEL_FASTEST", Napi::Number::New(env, ZXC_LEVEL_FASTEST));
