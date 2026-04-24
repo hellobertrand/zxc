@@ -485,6 +485,29 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 	return int64(result), nil
 }
 
+// FileDecompressedSize reads the original uncompressed size from the footer
+// of a ZXC compressed file without performing decompression. The file is
+// opened in "rb" mode; the underlying file position is restored internally.
+func FileDecompressedSize(path string) (int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, fmt.Errorf("zxc: open input: %w", err)
+	}
+	defer f.Close()
+
+	cf, err := dupFileRead(f)
+	if err != nil {
+		return 0, err
+	}
+	defer C.fclose(cf)
+
+	result := C.zxc_stream_get_decompressed_size(cf)
+	if result < 0 {
+		return 0, errorFromCode(result)
+	}
+	return int64(result), nil
+}
+
 // DecompressFile decompresses src to dst using multi-threaded streaming.
 //
 // Options: [WithChecksum], [WithThreads].
@@ -554,6 +577,23 @@ func DecompressBlockBound(uncompressedSize int) uint64 {
 		return 0
 	}
 	return uint64(C.zxc_decompress_block_bound(C.size_t(uncompressedSize)))
+}
+
+// EstimateCctxSize returns an accurate estimate of the memory a compression
+// context reserves when compressing a single block of srcSize bytes via
+// [Cctx.CompressBlock].
+//
+// The estimate covers all per-chunk working buffers (chain table, literals,
+// sequence/token/offset/extras buffers) plus the fixed hash tables and
+// cache-line alignment padding. It scales roughly linearly with srcSize and
+// is intended for integrators that need an accurate memory budget.
+//
+// Returns 0 if srcSize is 0 or negative.
+func EstimateCctxSize(srcSize int) uint64 {
+	if srcSize <= 0 {
+		return 0
+	}
+	return uint64(C.zxc_estimate_cctx_size(C.size_t(srcSize)))
 }
 
 // Cctx is a reusable compression context for the Block API.

@@ -369,6 +369,16 @@ unsafe extern "C" {
         dst_capacity: usize,
         opts: *const zxc_decompress_opts_t,
     ) -> i64;
+
+    /// Estimates the memory reserved by a compression context for a single
+    /// block of `src_size` bytes via [`zxc_compress_block`].
+    ///
+    /// Covers all per-chunk working buffers (chain table, literals,
+    /// sequence/token/offset/extras buffers) plus the fixed hash tables and
+    /// cache-line alignment padding.
+    ///
+    /// Returns the estimated memory usage in bytes, or 0 if `src_size == 0`.
+    pub fn zxc_estimate_cctx_size(src_size: usize) -> u64;
 }
 
 // =============================================================================
@@ -497,6 +507,277 @@ unsafe extern "C" {
     ///
     /// Original uncompressed size in bytes, or -1 on error.
     pub fn zxc_stream_get_decompressed_size(f_in: *mut libc::FILE) -> i64;
+}
+
+// =============================================================================
+// Seekable API (random-access decompression)
+// =============================================================================
+
+/// Opaque handle for a seekable ZXC archive.
+///
+/// Created by [`zxc_seekable_open`] or [`zxc_seekable_open_file`].
+/// Must be freed with [`zxc_seekable_free`].
+#[repr(C)]
+pub struct zxc_seekable {
+    _private: [u8; 0],
+}
+
+unsafe extern "C" {
+    /// Opens a seekable archive from a memory buffer.
+    ///
+    /// The buffer must remain valid for the lifetime of the handle.
+    ///
+    /// # Safety
+    /// - `src` must be a valid pointer to `src_size` bytes.
+    ///
+    /// Returns NULL if the buffer is not a valid seekable archive.
+    pub fn zxc_seekable_open(src: *const c_void, src_size: usize) -> *mut zxc_seekable;
+
+    /// Opens a seekable archive from a `FILE*`. The file must be seekable
+    /// (not stdin/pipe). The current file position is saved and restored.
+    /// The FILE* must remain open for the lifetime of the handle.
+    ///
+    /// # Safety
+    /// - `f` must be a valid FILE* opened in "rb" mode.
+    pub fn zxc_seekable_open_file(f: *mut libc::FILE) -> *mut zxc_seekable;
+
+    /// Returns the total number of data blocks in the archive (excluding EOF).
+    pub fn zxc_seekable_get_num_blocks(s: *const zxc_seekable) -> u32;
+
+    /// Returns the total decompressed size of the archive in bytes.
+    pub fn zxc_seekable_get_decompressed_size(s: *const zxc_seekable) -> u64;
+
+    /// Returns the on-disk compressed size of a specific block
+    /// (block header + payload + optional per-block checksum).
+    ///
+    /// Returns 0 if `block_idx` is out of range.
+    pub fn zxc_seekable_get_block_comp_size(s: *const zxc_seekable, block_idx: u32) -> u32;
+
+    /// Returns the decompressed size of a specific block.
+    ///
+    /// Returns 0 if `block_idx` is out of range.
+    pub fn zxc_seekable_get_block_decomp_size(s: *const zxc_seekable, block_idx: u32) -> u32;
+
+    /// Decompresses `len` bytes starting at byte `offset` in the original
+    /// uncompressed data. Only the blocks overlapping the requested range
+    /// are read and decompressed.
+    ///
+    /// # Safety
+    /// - `s` must be a valid handle returned by [`zxc_seekable_open`].
+    /// - `dst` must point to at least `dst_capacity` bytes.
+    ///
+    /// Returns `len` on success, or a negative `zxc_error_t` on failure.
+    pub fn zxc_seekable_decompress_range(
+        s: *mut zxc_seekable,
+        dst: *mut c_void,
+        dst_capacity: usize,
+        offset: u64,
+        len: usize,
+    ) -> i64;
+
+    /// Multi-threaded variant of [`zxc_seekable_decompress_range`].
+    ///
+    /// Each worker owns its own decompression context and reads via `pread()`
+    /// (POSIX) or `ReadFile()` (Windows) for lock-free concurrent I/O.
+    /// Falls back to single-threaded mode when `n_threads <= 1` or the range
+    /// spans a single block.
+    ///
+    /// # Safety
+    /// - `s` must be a valid handle returned by [`zxc_seekable_open`].
+    /// - `dst` must point to at least `dst_capacity` bytes.
+    pub fn zxc_seekable_decompress_range_mt(
+        s: *mut zxc_seekable,
+        dst: *mut c_void,
+        dst_capacity: usize,
+        offset: u64,
+        len: usize,
+        n_threads: c_int,
+    ) -> i64;
+
+    /// Frees a seekable handle and all associated resources.
+    /// Safe to call with a null pointer.
+    ///
+    /// # Safety
+    /// - `s` must be a pointer returned by [`zxc_seekable_open`] /
+    ///   [`zxc_seekable_open_file`], or null.
+    pub fn zxc_seekable_free(s: *mut zxc_seekable);
+
+    /// Low-level: writes a seek table (block header + entries) to `dst`.
+    ///
+    /// # Safety
+    /// - `dst` must point to at least `dst_capacity` bytes.
+    /// - `comp_sizes` must point to at least `num_blocks` entries.
+    ///
+    /// Returns bytes written, or a negative `zxc_error_t` on failure.
+    pub fn zxc_write_seek_table(
+        dst: *mut u8,
+        dst_capacity: usize,
+        comp_sizes: *const u32,
+        num_blocks: u32,
+    ) -> i64;
+
+    /// Returns the encoded byte size of a seek table for `num_blocks` blocks.
+    pub fn zxc_seek_table_size(num_blocks: u32) -> usize;
+}
+
+// =============================================================================
+// Sans-IO API (low-level primitives for building custom drivers)
+// =============================================================================
+
+/// Compression context used by the sans-IO primitives (mirrors
+/// `zxc_cctx_t` from `zxc_sans_io.h`). Fields are public for advanced
+/// integrators; most users should prefer the opaque [`zxc_cctx`] /
+/// [`zxc_dctx`] handles.
+#[repr(C)]
+pub struct zxc_cctx_t {
+    /// Hash table for LZ77 match positions (epoch|pos).
+    pub hash_table: *mut u32,
+    /// Split tag table for fast match rejection (8-bit tags).
+    pub hash_tags: *mut u8,
+    /// Chain table for collision resolution.
+    pub chain_table: *mut u16,
+    /// Single allocation block owner.
+    pub memory_block: *mut c_void,
+    /// Current epoch for lazy hash table invalidation.
+    pub epoch: u32,
+
+    /// Buffer for sequence records (packed: LL|ML|Offset).
+    pub buf_sequences: *mut u32,
+    /// Buffer for token sequences.
+    pub buf_tokens: *mut u8,
+    /// Buffer for offsets.
+    pub buf_offsets: *mut u16,
+    /// Buffer for extra lengths (vbytes for LL/ML).
+    pub buf_extras: *mut u8,
+    /// Buffer for literal bytes.
+    pub literals: *mut u8,
+
+    /// Scratch buffer for literals (RLE).
+    pub lit_buffer: *mut u8,
+    /// Current capacity of the scratch buffer.
+    pub lit_buffer_cap: usize,
+    /// Padded scratch buffer for buffer-API decompression.
+    pub work_buf: *mut u8,
+    /// Capacity of the work buffer.
+    pub work_buf_cap: usize,
+    /// 1 if checksum calculation/verification is enabled.
+    pub checksum_enabled: c_int,
+    /// Compression level.
+    pub compression_level: c_int,
+
+    /// Effective block size in bytes.
+    pub chunk_size: usize,
+    /// `log2(chunk_size)` - governs epoch_mark shift.
+    pub offset_bits: u32,
+    /// `(1 << offset_bits) - 1`.
+    pub offset_mask: u32,
+    /// `1 << (32 - offset_bits)`.
+    pub max_epoch: u32,
+}
+
+/// On-disk block header (8 bytes, little-endian).
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct zxc_block_header_t {
+    /// Block type (see FORMAT.md).
+    pub block_type: u8,
+    /// Flags (e.g., checksum presence).
+    pub block_flags: u8,
+    /// Reserved for future protocol extensions.
+    pub reserved: u8,
+    /// 1-byte header CRC.
+    pub header_crc: u8,
+    /// Compressed payload size (excluding this header).
+    pub comp_size: u32,
+}
+
+unsafe extern "C" {
+    /// Initializes a ZXC compression context.
+    ///
+    /// # Safety
+    /// - `ctx` must point to a valid (uninitialised) `zxc_cctx_t`.
+    ///
+    /// Returns `ZXC_OK` on success, or a negative error code.
+    pub fn zxc_cctx_init(
+        ctx: *mut zxc_cctx_t,
+        chunk_size: usize,
+        mode: c_int,
+        level: c_int,
+        checksum_enabled: c_int,
+    ) -> c_int;
+
+    /// Frees internal buffers owned by a `zxc_cctx_t`.
+    ///
+    /// Does NOT free the context pointer itself.
+    ///
+    /// # Safety
+    /// - `ctx` must be a context previously initialised with
+    ///   [`zxc_cctx_init`] (or null).
+    pub fn zxc_cctx_free(ctx: *mut zxc_cctx_t);
+
+    /// Writes the standard ZXC file header to `dst`.
+    ///
+    /// # Safety
+    /// - `dst` must point to at least `dst_capacity` bytes.
+    ///
+    /// Returns `ZXC_FILE_HEADER_SIZE` on success, or `ZXC_ERROR_DST_TOO_SMALL`.
+    pub fn zxc_write_file_header(
+        dst: *mut u8,
+        dst_capacity: usize,
+        chunk_size: usize,
+        has_checksum: c_int,
+    ) -> c_int;
+
+    /// Validates and parses the ZXC file header from `src`.
+    ///
+    /// `out_block_size` and `out_has_checksum` may be null.
+    ///
+    /// # Safety
+    /// - `src` must point to at least `src_size` bytes.
+    pub fn zxc_read_file_header(
+        src: *const u8,
+        src_size: usize,
+        out_block_size: *mut usize,
+        out_has_checksum: *mut c_int,
+    ) -> c_int;
+
+    /// Serialises a block header into `dst` (8 bytes, little-endian).
+    ///
+    /// # Safety
+    /// - `dst` must point to at least `dst_capacity` bytes.
+    /// - `bh` must be non-null.
+    ///
+    /// Returns `ZXC_BLOCK_HEADER_SIZE` on success, or `ZXC_ERROR_DST_TOO_SMALL`.
+    pub fn zxc_write_block_header(
+        dst: *mut u8,
+        dst_capacity: usize,
+        bh: *const zxc_block_header_t,
+    ) -> c_int;
+
+    /// Parses a block header from `src` (endianness conversion included).
+    ///
+    /// # Safety
+    /// - `src` must point to at least `src_size` bytes.
+    /// - `bh` must be a valid (possibly uninitialised) output pointer.
+    pub fn zxc_read_block_header(
+        src: *const u8,
+        src_size: usize,
+        bh: *mut zxc_block_header_t,
+    ) -> c_int;
+
+    /// Writes the 12-byte file footer (original size + optional global hash).
+    ///
+    /// # Safety
+    /// - `dst` must point to at least `dst_capacity` bytes.
+    ///
+    /// Returns bytes written, or `ZXC_ERROR_DST_TOO_SMALL`.
+    pub fn zxc_write_file_footer(
+        dst: *mut u8,
+        dst_capacity: usize,
+        src_size: u64,
+        global_hash: u32,
+        checksum_enabled: c_int,
+    ) -> c_int;
 }
 
 // =============================================================================

@@ -47,7 +47,7 @@ __all__ = [
     "decompress",
     "stream_compress",
     "stream_decompress",
-    "pyzxc_get_decompressed_size",
+    "get_decompressed_size",
 
     # Library info helpers
     "min_level",
@@ -127,11 +127,12 @@ def get_decompressed_size(data: bytes) -> int:
 
     Returns:
         int: Original uncompressed size in bytes, or 0 if the buffer is invalid or too small.
-    
+
     Note:
         This function does not decompress the data, it only reads the footer for size info.
     """
     return pyzxc_get_decompressed_size(data)
+
 
 def decompress(data, decompress_size=None, checksum=False) -> bytes:
     """Decompress a bytes object.

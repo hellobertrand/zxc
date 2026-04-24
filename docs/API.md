@@ -489,6 +489,23 @@ Only `checksum_enabled` is used.
 
 **Returns**: decompressed size (> 0) on success, or negative `zxc_error_t`.
 
+### `zxc_estimate_cctx_size`
+
+```c
+ZXC_EXPORT uint64_t zxc_estimate_cctx_size(size_t src_size);
+```
+
+Returns an accurate estimate of the memory a compression context reserves
+when compressing a single block of `src_size` bytes via `zxc_compress_block()`.
+
+The estimate covers all per-chunk working buffers (chain table, literals,
+sequence/token/offset/extras buffers) plus the fixed hash tables and the
+cache-line alignment padding. It scales roughly linearly with `src_size`
+and is intended for integrators that need to build an accurate memory
+budget (filesystems, embedded devices, sandboxed workloads).
+
+**Returns**: estimated cctx memory usage in bytes, or `0` if `src_size == 0`.
+
 ---
 
 ## 9. Reusable Context API
@@ -902,7 +919,7 @@ if (result < 0) {
 
 ## 15. Exported Symbols Summary
 
-The shared library exports exactly **41 symbols** (verified with `nm -gU`):
+The shared library exports exactly **42 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -919,34 +936,35 @@ The shared library exports exactly **41 symbols** (verified with `nm -gU`):
 | 11 | `zxc_compress_block` | Block | `zxc_buffer.h` |
 | 12 | `zxc_decompress_block` | Block | `zxc_buffer.h` |
 | 13 | `zxc_decompress_block_safe` | Block | `zxc_buffer.h` |
-| 14 | `zxc_create_cctx` | Context | `zxc_buffer.h` |
-| 15 | `zxc_free_cctx` | Context | `zxc_buffer.h` |
-| 16 | `zxc_compress_cctx` | Context | `zxc_buffer.h` |
-| 17 | `zxc_create_dctx` | Context | `zxc_buffer.h` |
-| 18 | `zxc_free_dctx` | Context | `zxc_buffer.h` |
-| 19 | `zxc_decompress_dctx` | Context | `zxc_buffer.h` |
-| 20 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
-| 21 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
-| 22 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
-| 23 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
-| 24 | `zxc_seekable_open_file` | Seekable | `zxc_seekable.h` |
-| 25 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
-| 26 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
-| 27 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
-| 28 | `zxc_seekable_get_block_decomp_size` | Seekable | `zxc_seekable.h` |
-| 29 | `zxc_seekable_decompress_range` | Seekable | `zxc_seekable.h` |
-| 30 | `zxc_seekable_decompress_range_mt` | Seekable | `zxc_seekable.h` |
-| 31 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
-| 32 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
-| 33 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
-| 34 | `zxc_cctx_init` | Sans-IO | `zxc_sans_io.h` |
-| 35 | `zxc_cctx_free` | Sans-IO | `zxc_sans_io.h` |
-| 36 | `zxc_write_file_header` | Sans-IO | `zxc_sans_io.h` |
-| 37 | `zxc_read_file_header` | Sans-IO | `zxc_sans_io.h` |
-| 38 | `zxc_write_block_header` | Sans-IO | `zxc_sans_io.h` |
-| 39 | `zxc_read_block_header` | Sans-IO | `zxc_sans_io.h` |
-| 40 | `zxc_write_file_footer` | Sans-IO | `zxc_sans_io.h` |
-| 41 | `zxc_error_name` | Error | `zxc_error.h` |
+| 14 | `zxc_estimate_cctx_size` | Block | `zxc_buffer.h` |
+| 15 | `zxc_create_cctx` | Context | `zxc_buffer.h` |
+| 16 | `zxc_free_cctx` | Context | `zxc_buffer.h` |
+| 17 | `zxc_compress_cctx` | Context | `zxc_buffer.h` |
+| 18 | `zxc_create_dctx` | Context | `zxc_buffer.h` |
+| 19 | `zxc_free_dctx` | Context | `zxc_buffer.h` |
+| 20 | `zxc_decompress_dctx` | Context | `zxc_buffer.h` |
+| 21 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
+| 22 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
+| 23 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
+| 24 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
+| 25 | `zxc_seekable_open_file` | Seekable | `zxc_seekable.h` |
+| 26 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
+| 27 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
+| 28 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
+| 29 | `zxc_seekable_get_block_decomp_size` | Seekable | `zxc_seekable.h` |
+| 30 | `zxc_seekable_decompress_range` | Seekable | `zxc_seekable.h` |
+| 31 | `zxc_seekable_decompress_range_mt` | Seekable | `zxc_seekable.h` |
+| 32 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
+| 33 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
+| 34 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
+| 35 | `zxc_cctx_init` | Sans-IO | `zxc_sans_io.h` |
+| 36 | `zxc_cctx_free` | Sans-IO | `zxc_sans_io.h` |
+| 37 | `zxc_write_file_header` | Sans-IO | `zxc_sans_io.h` |
+| 38 | `zxc_read_file_header` | Sans-IO | `zxc_sans_io.h` |
+| 39 | `zxc_write_block_header` | Sans-IO | `zxc_sans_io.h` |
+| 40 | `zxc_read_block_header` | Sans-IO | `zxc_sans_io.h` |
+| 41 | `zxc_write_file_footer` | Sans-IO | `zxc_sans_io.h` |
+| 42 | `zxc_error_name` | Error | `zxc_error.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon`, `_avx2`, `_avx512`) are compiled with
