@@ -132,26 +132,31 @@ int main(int argc, char** argv) {
     const char* filter = NULL;
     int exact = 0;
 
-    for (int i = 1; i < argc; i++) {
-        const char* a = argv[i];
-        if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
-            print_usage(argv[0]);
-            return 0;
-        }
-        if (strcmp(a, "--list") == 0) {
-            for (size_t k = 0; k < g_tests_count; k++) printf("%s\n", g_tests[k].name);
-            return 0;
-        }
-        if (strcmp(a, "-e") == 0 || strcmp(a, "--exact") == 0) {
-            exact = 1;
-            if (i + 1 >= argc) {
-                printf("error: %s requires a test name\n", a);
-                return 1;
+    {
+        int ai = 1;
+        while (ai < argc) {
+            const char* a = argv[ai];
+            if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
+                print_usage(argv[0]);
+                return 0;
             }
-            filter = argv[++i];
-            continue;
+            if (strcmp(a, "--list") == 0) {
+                for (size_t k = 0; k < g_tests_count; k++) printf("%s\n", g_tests[k].name);
+                return 0;
+            }
+            if (strcmp(a, "-e") == 0 || strcmp(a, "--exact") == 0) {
+                exact = 1;
+                if (ai + 1 >= argc) {
+                    printf("error: %s requires a test name\n", a);
+                    return 1;
+                }
+                filter = argv[ai + 1];
+                ai += 2;
+                continue;
+            }
+            filter = a;
+            ai += 1;
         }
-        filter = a;
     }
 
     int total_failures = 0;
