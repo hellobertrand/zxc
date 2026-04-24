@@ -1,6 +1,6 @@
 {
   "name": "zxc-wasm",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "ZXC high-performance lossless compression — WebAssembly build",
   "type": "module",
   "main": "zxc_wasm.js",

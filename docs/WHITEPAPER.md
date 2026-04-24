@@ -1,6 +1,6 @@
 # ZXC: High-Performance Asymmetric Lossless Compression
 
-**Version**: 0.10.0
+**Version**: 0.10.1
 **Date**: April 2026
 **Author**: Bertrand Lebonnois
 

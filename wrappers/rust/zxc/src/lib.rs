@@ -558,7 +558,7 @@ pub fn version_string() -> String {
 }
 
 /// Returns the version string reported by the linked native library
-/// (e.g. `"0.10.0"`). Useful for verifying that the dynamically-linked
+/// (e.g. `"0.10.1"`). Useful for verifying that the dynamically-linked
 /// libzxc matches the version `zxc-sys` was built against.
 pub fn runtime_version() -> &'static str {
     unsafe {

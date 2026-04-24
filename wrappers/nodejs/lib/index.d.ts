@@ -99,7 +99,7 @@ export function defaultLevel(): number;
 
 /**
  * Returns the version string reported by the linked native libzxc
- * (e.g. "0.10.0"). Distinct from the npm package version.
+ * (e.g. "0.10.1"). Distinct from the npm package version.
  */
 export function libraryVersion(): string;
 
