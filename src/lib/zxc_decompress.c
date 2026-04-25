@@ -362,14 +362,14 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
     uint32_t deltas[ZXC_NUM_DEC_BATCH];
 
     while (vals_remaining > 0) {
-        if (UNLIKELY(offset + ZXC_NUM_CHUNK_HEADER_SIZE > src_size)) return ZXC_ERROR_SRC_TOO_SMALL;
+        if (UNLIKELY(offset > src_size - ZXC_NUM_CHUNK_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
 
         const uint16_t nvals = zxc_le16(src + offset);
         const uint16_t bits = zxc_le16(src + offset + 2);
         const uint32_t psize = zxc_le32(src + offset + 12);  // padding + nvals + bits
         offset += ZXC_NUM_CHUNK_HEADER_SIZE;
 
-        if (UNLIKELY(nvals > vals_remaining || src_size < offset + psize ||
+        if (UNLIKELY(nvals > vals_remaining || psize > src_size - offset ||
                      (size_t)(d_end - d_ptr) < (size_t)nvals * sizeof(uint32_t) ||
                      bits > (sizeof(uint32_t) * CHAR_BIT)))
             return ZXC_ERROR_CORRUPT_DATA;
@@ -624,10 +624,12 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
         const size_t required_size = (size_t)(desc[0].sizes >> 32);
 
         if (required_size > 0) {
-            if (UNLIKELY(required_size > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
+            if (UNLIKELY(required_size > dst_capacity || required_size > SIZE_MAX - ZXC_PAD_SIZE))
+                return ZXC_ERROR_DST_TOO_SMALL;
+            const size_t alloc_size = required_size + ZXC_PAD_SIZE;
 
-            if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE)) {
-                uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, required_size + ZXC_PAD_SIZE);
+            if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) {
+                uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, alloc_size);
                 if (UNLIKELY(!new_buf)) {
                     free(ctx->lit_buffer);
                     ctx->lit_buffer = NULL;
@@ -635,7 +637,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
                     return ZXC_ERROR_MEMORY;
                 }
                 ctx->lit_buffer = new_buf;
-                ctx->lit_buffer_cap = required_size + ZXC_PAD_SIZE;
+                ctx->lit_buffer_cap = alloc_size;
             }
 
             rle_buf = ctx->lit_buffer;
@@ -713,8 +715,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
     const size_t sz_extras = (size_t)(desc[3].sizes & ZXC_SECTION_SIZE_MASK);
 
     // Validate stream sizes match sequence count (early rejection of malformed data)
-    const size_t expected_off_size =
-        (gh.enc_off == 1) ? (size_t)gh.n_sequences : (size_t)gh.n_sequences * 2;
+    const uint64_t expected_off_size =
+        (gh.enc_off == 1) ? (uint64_t)gh.n_sequences : (uint64_t)gh.n_sequences * 2;
 
     const uint8_t* t_ptr = p_curr;
     const uint8_t* o_ptr = t_ptr + sz_tokens;
@@ -724,7 +726,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
     // Validate streams don't overflow source buffer +
     // Validate stream sizes match sequence count (early rejection of malformed data)
     if (UNLIKELY((e_end != src + src_size) || sz_tokens < gh.n_sequences ||
-                 sz_offsets < expected_off_size))
+                 (uint64_t)sz_offsets < expected_off_size))
         return ZXC_ERROR_CORRUPT_DATA;
 
     uint8_t* d_ptr = dst;
@@ -1336,7 +1338,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
 
     // Validate streams don't overflow source buffer +
     // Validate sequence stream size matches sequence count
-    if (UNLIKELY((extras_end != src + src_size) || (sz_seqs < (size_t)gh.n_sequences * 4)))
+    if (UNLIKELY((extras_end != src + src_size) ||
+                 ((uint64_t)sz_seqs < (uint64_t)gh.n_sequences * 4)))
         return ZXC_ERROR_CORRUPT_DATA;
 
     uint8_t* d_ptr = dst;
