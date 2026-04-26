@@ -225,6 +225,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set(ZXC_CORE_SOURCES
         src/lib/zxc_common.c
         src/lib/zxc_dispatch.c
+        src/lib/zxc_pstream.c
         src/lib/zxc_seekable.c
     )
 else()
@@ -232,6 +233,7 @@ else()
         src/lib/zxc_common.c
         src/lib/zxc_driver.c
         src/lib/zxc_dispatch.c
+        src/lib/zxc_pstream.c
         src/lib/zxc_seekable.c
     )
 endif()
@@ -420,6 +422,7 @@ if(ZXC_BUILD_TESTS)
         tests/test_buffer_api.c
         tests/test_block_api.c
         tests/test_context_api.c
+        tests/test_pstream_api.c
         tests/test_stream_api.c
         tests/test_seekable.c
         tests/test_seekable_mt.c
@@ -435,6 +438,7 @@ if(ZXC_BUILD_TESTS)
             src/lib/zxc_common.c
             src/lib/zxc_driver.c
             src/lib/zxc_dispatch.c
+            src/lib/zxc_pstream.c
             src/lib/zxc_seekable.c
             ${ZXC_VARIANT_OBJECTS}
         )

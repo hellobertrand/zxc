@@ -25,6 +25,7 @@ For the on-disk binary format see [`FORMAT.md`](FORMAT.md).
 - [8. Block API](#8-block-api)
 - [9. Reusable Context API](#9-reusable-context-api)
 - [10. Streaming API](#10-streaming-api)
+- [10b. Push Streaming API](#10b-push-streaming-api)
 - [11. Seekable API](#11-seekable-api)
 - [12. Sans-IO API](#12-sans-io-api)
 - [13. Error Handling](#13-error-handling)
@@ -44,6 +45,9 @@ zxc.h                  <- umbrella header (includes everything below)
 ├── zxc_constants.h    <- version macros, compression levels, block sizes
 ├── zxc_error.h        <- error codes + zxc_error_name()
 │   └── zxc_export.h
+├── zxc_pstream.h      <- Push streaming API (caller-driven, single-thread)
+│   ├── zxc_export.h
+│   └── zxc_stream.h
 └── (not included by zxc.h)
     zxc_seekable.h     <- Seekable random-access API (opt-in)
         └── zxc_export.h
@@ -628,6 +632,219 @@ Reads the original size from the file footer. File position is restored.
 
 ---
 
+## 10b. Push Streaming API
+
+Declared in `zxc_pstream.h`. Single-threaded, **caller-driven** streaming —
+the inverse of the `FILE*`-based pipeline.  Designed for callback-based
+integrations (libarchive, libcurl, libuv, async runtimes, network protocols)
+that cannot block on a `FILE*` and need to feed/drain in arbitrary chunks.
+
+The on-disk output is **bit-compatible** with the Buffer / Stream APIs:
+files produced by the push API decode with `zxc_decompress()` /
+`zxc_stream_decompress()`, and vice-versa.
+
+### Buffer Descriptors
+
+```c
+typedef struct {
+    const void* src;
+    size_t      size;
+    size_t      pos;   // advanced by the library
+} zxc_inbuf_t;
+
+typedef struct {
+    void*  dst;
+    size_t size;
+    size_t pos;        // advanced by the library
+} zxc_outbuf_t;
+```
+
+The library reads `[src+pos .. src+size)` and writes `[dst+pos .. dst+size)`,
+advancing `pos` by what it consumed/produced.  Buffers are caller-owned.
+
+### Compression
+
+#### `zxc_cstream_create`
+
+```c
+ZXC_EXPORT zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts);
+```
+
+Creates a push compression context.  Settings (`level`, `block_size`,
+`checksum_enabled`) are copied from `opts` and frozen for the lifetime of
+the stream.  `n_threads`, `progress_cb`, `seekable` are ignored on this
+path.
+
+**Returns**: context, or `NULL` on allocation failure.
+
+#### `zxc_cstream_free`
+
+```c
+ZXC_EXPORT void zxc_cstream_free(zxc_cstream* cs);
+```
+
+Releases all resources.  Safe with `NULL`.
+
+#### `zxc_cstream_compress`
+
+```c
+ZXC_EXPORT int64_t zxc_cstream_compress(
+    zxc_cstream*  cs,
+    zxc_outbuf_t* out,
+    zxc_inbuf_t*  in
+);
+```
+
+Pushes input into the stream and drains compressed output:
+
+- emits the file header on the first call;
+- copies input into the internal block accumulator;
+- compresses one block whenever the accumulator fills, writing it into
+  `out` (up to `out->size`);
+- returns when `in` is fully consumed *and* no more compressed bytes are
+  pending, or when `out` has no room left.
+
+Fully reentrant: if `out` fills mid-block, the next call resumes draining
+where it left off.  Safe to call with empty input (drain-only).
+
+**Returns**:
+- `0` — `in` fully consumed and no pending output;
+- `>0` — bytes still pending in the staging buffer (drain `out` and call again);
+- `<0` — `zxc_error_t` (sticky: subsequent calls return the same code).
+
+#### `zxc_cstream_end`
+
+```c
+ZXC_EXPORT int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out);
+```
+
+Finalises the stream: compresses any partial last block, emits the EOF
+block (8 B) and the file footer (12 B).  **Must be called** to produce a
+valid ZXC file.
+
+Reentrant the same way `_compress` is: loop until it returns `0`.
+
+After `_end` returns `0`, the stream is in DONE state and any further call
+returns `ZXC_ERROR_NULL_INPUT`.
+
+**Returns**:
+- `0` — finalisation complete;
+- `>0` — bytes still pending (drain `out` and call again);
+- `<0` — `zxc_error_t`.
+
+#### `zxc_cstream_in_size` / `zxc_cstream_out_size`
+
+```c
+ZXC_EXPORT size_t zxc_cstream_in_size(const zxc_cstream* cs);
+ZXC_EXPORT size_t zxc_cstream_out_size(const zxc_cstream* cs);
+```
+
+Suggested buffer sizes for best throughput.  The caller may use any size;
+these are purely performance hints.
+
+### Decompression
+
+#### `zxc_dstream_create`
+
+```c
+ZXC_EXPORT zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts);
+```
+
+Creates a push decompression context.  Only `checksum_enabled` from `opts`
+is honoured (controls whether the global file-level checksum is verified
+when the file carries one).
+
+**Returns**: context, or `NULL` on allocation failure.
+
+#### `zxc_dstream_free`
+
+```c
+ZXC_EXPORT void zxc_dstream_free(zxc_dstream* ds);
+```
+
+Releases all resources.  Safe with `NULL`.
+
+#### `zxc_dstream_decompress`
+
+```c
+ZXC_EXPORT int64_t zxc_dstream_decompress(
+    zxc_dstream*  ds,
+    zxc_outbuf_t* out,
+    zxc_inbuf_t*  in
+);
+```
+
+Drives the parser state machine (file header → blocks → EOF → optional
+SEK → footer).  Each call makes as much progress as `in` and `out` allow.
+
+Trailing bytes after the validated footer are silently ignored (the
+caller can inspect `in->pos` to detect how many were consumed).
+
+**Returns**:
+- `>0` — number of decompressed bytes written into `out` this call;
+- `0` — either DONE (use `zxc_dstream_finished` to confirm) or no progress
+  possible without more input;
+- `<0` — `zxc_error_t` (sticky).
+
+#### `zxc_dstream_finished`
+
+```c
+ZXC_EXPORT int zxc_dstream_finished(const zxc_dstream* ds);
+```
+
+Returns `1` iff the parser has fully validated the file footer.  Callers
+that have finished feeding input should check this to detect truncated
+streams: `zxc_dstream_decompress` returning `0` with no output is
+ambiguous (DONE vs need-more-input) — `_finished` disambiguates.
+
+#### `zxc_dstream_in_size` / `zxc_dstream_out_size`
+
+```c
+ZXC_EXPORT size_t zxc_dstream_in_size(const zxc_dstream* ds);
+ZXC_EXPORT size_t zxc_dstream_out_size(const zxc_dstream* ds);
+```
+
+Suggested buffer sizes.  Returns `0` if `ds` is `NULL` or the file header
+has not yet been parsed (the recommended decompress in-size depends on
+the block size, which is learned from the header).
+
+### Threading
+
+Each `zxc_cstream` / `zxc_dstream` is single-threaded: one context, one
+thread.  Multiple contexts may be used concurrently from different
+threads.
+
+### Compression Example
+
+```c
+zxc_compress_opts_t opts = { .level = 3, .checksum_enabled = 1 };
+zxc_cstream* cs = zxc_cstream_create(&opts);
+
+uint8_t in_buf[64*1024], out_buf[64*1024];
+zxc_outbuf_t out = { out_buf, sizeof out_buf, 0 };
+
+ssize_t n;
+while ((n = read_some(in_buf, sizeof in_buf)) > 0) {
+    zxc_inbuf_t in = { in_buf, (size_t)n, 0 };
+    while (in.pos < in.size) {
+        int64_t r = zxc_cstream_compress(cs, &out, &in);
+        if (r < 0) goto fatal;
+        if (out.pos > 0) { write_to_sink(out_buf, out.pos); out.pos = 0; }
+    }
+}
+
+int64_t pending;
+do {
+    pending = zxc_cstream_end(cs, &out);
+    if (pending < 0) goto fatal;
+    if (out.pos > 0) { write_to_sink(out_buf, out.pos); out.pos = 0; }
+} while (pending > 0);
+
+zxc_cstream_free(cs);
+```
+
+---
+
 ## 11. Seekable API
 
 Declared in `zxc_seekable.h` (not included by `zxc.h`: opt-in, optional).
@@ -919,7 +1136,7 @@ if (result < 0) {
 
 ## 15. Exported Symbols Summary
 
-The shared library exports exactly **42 symbols** (verified with `nm -gU`):
+The shared library exports exactly **54 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -946,25 +1163,37 @@ The shared library exports exactly **42 symbols** (verified with `nm -gU`):
 | 21 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
 | 22 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
 | 23 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
-| 24 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
-| 25 | `zxc_seekable_open_file` | Seekable | `zxc_seekable.h` |
-| 26 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
-| 27 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
-| 28 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
-| 29 | `zxc_seekable_get_block_decomp_size` | Seekable | `zxc_seekable.h` |
-| 30 | `zxc_seekable_decompress_range` | Seekable | `zxc_seekable.h` |
-| 31 | `zxc_seekable_decompress_range_mt` | Seekable | `zxc_seekable.h` |
-| 32 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
-| 33 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
-| 34 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
-| 35 | `zxc_cctx_init` | Sans-IO | `zxc_sans_io.h` |
-| 36 | `zxc_cctx_free` | Sans-IO | `zxc_sans_io.h` |
-| 37 | `zxc_write_file_header` | Sans-IO | `zxc_sans_io.h` |
-| 38 | `zxc_read_file_header` | Sans-IO | `zxc_sans_io.h` |
-| 39 | `zxc_write_block_header` | Sans-IO | `zxc_sans_io.h` |
-| 40 | `zxc_read_block_header` | Sans-IO | `zxc_sans_io.h` |
-| 41 | `zxc_write_file_footer` | Sans-IO | `zxc_sans_io.h` |
-| 42 | `zxc_error_name` | Error | `zxc_error.h` |
+| 24 | `zxc_cstream_create` | Push Streaming | `zxc_pstream.h` |
+| 25 | `zxc_cstream_free` | Push Streaming | `zxc_pstream.h` |
+| 26 | `zxc_cstream_compress` | Push Streaming | `zxc_pstream.h` |
+| 27 | `zxc_cstream_end` | Push Streaming | `zxc_pstream.h` |
+| 28 | `zxc_cstream_in_size` | Push Streaming | `zxc_pstream.h` |
+| 29 | `zxc_cstream_out_size` | Push Streaming | `zxc_pstream.h` |
+| 30 | `zxc_dstream_create` | Push Streaming | `zxc_pstream.h` |
+| 31 | `zxc_dstream_free` | Push Streaming | `zxc_pstream.h` |
+| 32 | `zxc_dstream_decompress` | Push Streaming | `zxc_pstream.h` |
+| 33 | `zxc_dstream_finished` | Push Streaming | `zxc_pstream.h` |
+| 34 | `zxc_dstream_in_size` | Push Streaming | `zxc_pstream.h` |
+| 35 | `zxc_dstream_out_size` | Push Streaming | `zxc_pstream.h` |
+| 36 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
+| 37 | `zxc_seekable_open_file` | Seekable | `zxc_seekable.h` |
+| 38 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
+| 39 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
+| 40 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
+| 41 | `zxc_seekable_get_block_decomp_size` | Seekable | `zxc_seekable.h` |
+| 42 | `zxc_seekable_decompress_range` | Seekable | `zxc_seekable.h` |
+| 43 | `zxc_seekable_decompress_range_mt` | Seekable | `zxc_seekable.h` |
+| 44 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
+| 45 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
+| 46 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
+| 47 | `zxc_cctx_init` | Sans-IO | `zxc_sans_io.h` |
+| 48 | `zxc_cctx_free` | Sans-IO | `zxc_sans_io.h` |
+| 49 | `zxc_write_file_header` | Sans-IO | `zxc_sans_io.h` |
+| 50 | `zxc_read_file_header` | Sans-IO | `zxc_sans_io.h` |
+| 51 | `zxc_write_block_header` | Sans-IO | `zxc_sans_io.h` |
+| 52 | `zxc_read_block_header` | Sans-IO | `zxc_sans_io.h` |
+| 53 | `zxc_write_file_footer` | Sans-IO | `zxc_sans_io.h` |
+| 54 | `zxc_error_name` | Error | `zxc_error.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon`, `_avx2`, `_avx512`) are compiled with
