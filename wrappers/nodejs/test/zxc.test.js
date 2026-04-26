@@ -173,3 +173,85 @@ describe('error handling', () => {
         }
     });
 });
+
+// =============================================================================
+// Push Streaming API (zxc.CStream / zxc.DStream)
+// =============================================================================
+
+function pstreamRoundtrip(data, { level, checksum } = {}) {
+    const cs = new zxc.CStream({ level, checksum });
+    const compressedChunks = [];
+    // Feed in 17-byte slices to exercise the buffering/state machine.
+    const step = Math.max(1, Math.min(17, data.length));
+    for (let i = 0; i < data.length; i += step) {
+        compressedChunks.push(cs.compress(data.subarray(i, i + step)));
+    }
+    compressedChunks.push(cs.end());
+    cs.close();
+    const compressed = Buffer.concat(compressedChunks);
+
+    const ds = new zxc.DStream({ checksum });
+    const outChunks = [];
+    const dstep = Math.max(1, Math.min(31, compressed.length));
+    for (let i = 0; i < compressed.length; i += dstep) {
+        outChunks.push(ds.decompress(compressed.subarray(i, i + dstep)));
+    }
+    expect(ds.finished()).toBe(true);
+    ds.close();
+    return Buffer.concat(outChunks);
+}
+
+describe('pstream roundtrip', () => {
+    test('small payload', () => {
+        const data = Buffer.from('Hello pstream! Round-trip through the Node.js push API.');
+        expect(pstreamRoundtrip(data).equals(data)).toBe(true);
+    });
+
+    test('with checksum', () => {
+        const data = Buffer.alloc(32 * 1024);
+        for (let i = 0; i < data.length; i++) data[i] = i % 251;
+        expect(pstreamRoundtrip(data, { checksum: true }).equals(data)).toBe(true);
+    });
+
+    test('multi-block (>256 KB)', () => {
+        const data = Buffer.alloc(512 * 1024);
+        for (let i = 0; i < data.length; i++) data[i] = (i * 7) % 256;
+        expect(pstreamRoundtrip(data).equals(data)).toBe(true);
+    });
+});
+
+describe('pstream lifecycle', () => {
+    test('size hints non-zero', () => {
+        const cs = new zxc.CStream();
+        expect(cs.inSize()).toBeGreaterThan(0);
+        expect(cs.outSize()).toBeGreaterThan(0);
+        cs.close();
+
+        const ds = new zxc.DStream();
+        expect(ds.inSize()).toBeGreaterThan(0);
+        expect(ds.outSize()).toBeGreaterThan(0);
+        expect(ds.finished()).toBe(false);
+        ds.close();
+    });
+
+    test('use after close throws', () => {
+        const cs = new zxc.CStream();
+        cs.close();
+        expect(() => cs.compress(Buffer.from('x'))).toThrow(/closed/);
+
+        const ds = new zxc.DStream();
+        ds.close();
+        expect(() => ds.decompress(Buffer.from('x'))).toThrow(/closed/);
+    });
+
+    test('truncated stream not finished', () => {
+        const cs = new zxc.CStream();
+        const compressed = Buffer.concat([cs.compress(Buffer.from('hello '.repeat(1000))), cs.end()]);
+        cs.close();
+
+        const ds = new zxc.DStream();
+        ds.decompress(compressed.subarray(0, compressed.length - 5));
+        expect(ds.finished()).toBe(false);
+        ds.close();
+    });
+});

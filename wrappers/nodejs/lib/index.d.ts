@@ -102,3 +102,56 @@ export function defaultLevel(): number;
  * (e.g. "0.10.0"). Distinct from the npm package version.
  */
 export function libraryVersion(): string;
+
+export interface CStreamOptions {
+    /** Compression level (1-5). Defaults to LEVEL_DEFAULT. */
+    level?: number;
+    /** Enable per-block and global checksums. Defaults to false. */
+    checksum?: boolean;
+    /** Block size in bytes (0 = default 256 KB). Power of 2, 4 KB – 2 MB. */
+    blockSize?: number;
+}
+
+/**
+ * Push-based, single-threaded compression stream.
+ *
+ * The Node.js counterpart of the C `zxc_cstream`. Each call to
+ * `compress(buf)` returns the compressed bytes produced from that input
+ * (may be empty if the bytes fit in the internal block accumulator).
+ * Always call `end()` to flush the residual block, EOF marker and footer.
+ */
+export class CStream {
+    constructor(options?: CStreamOptions);
+    /** Push input and return any compressed bytes produced this call. */
+    compress(data: Buffer): Buffer;
+    /** Finalise the stream: residual block + EOF + file footer. */
+    end(): Buffer;
+    /** Release native resources. Idempotent. */
+    close(): void;
+    /** Suggested input chunk size in bytes. */
+    inSize(): number;
+    /** Suggested output chunk size in bytes. */
+    outSize(): number;
+}
+
+export interface DStreamOptions {
+    /** Verify per-block and global checksums when present. Defaults to false. */
+    checksum?: boolean;
+}
+
+/**
+ * Push-based, single-threaded decompression stream.
+ */
+export class DStream {
+    constructor(options?: DStreamOptions);
+    /** Push compressed bytes and return any decompressed bytes produced. */
+    decompress(data: Buffer): Buffer;
+    /** True once the decoder has reached and validated the file footer. */
+    finished(): boolean;
+    /** Release native resources. Idempotent. */
+    close(): void;
+    /** Suggested input chunk size in bytes. */
+    inSize(): number;
+    /** Suggested output chunk size in bytes. */
+    outSize(): number;
+}

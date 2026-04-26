@@ -47,6 +47,23 @@ export default async function createZXC(moduleOverrides) {
     const _decompress_dctx = Module.cwrap('zxc_decompress_dctx', 'number',
         ['number', 'number', 'number', 'number', 'number', 'number']);
 
+    // Push streaming API
+    const _cstream_create   = Module.cwrap('zxc_cstream_create', 'number', ['number']);
+    const _cstream_free     = Module.cwrap('zxc_cstream_free', 'void', ['number']);
+    const _cstream_compress = Module.cwrap('zxc_cstream_compress', 'number',
+        ['number', 'number', 'number']);
+    const _cstream_end      = Module.cwrap('zxc_cstream_end', 'number', ['number', 'number']);
+    const _cstream_in_size  = Module.cwrap('zxc_cstream_in_size', 'number', ['number']);
+    const _cstream_out_size = Module.cwrap('zxc_cstream_out_size', 'number', ['number']);
+
+    const _dstream_create     = Module.cwrap('zxc_dstream_create', 'number', ['number']);
+    const _dstream_free       = Module.cwrap('zxc_dstream_free', 'void', ['number']);
+    const _dstream_decompress = Module.cwrap('zxc_dstream_decompress', 'number',
+        ['number', 'number', 'number']);
+    const _dstream_finished   = Module.cwrap('zxc_dstream_finished', 'number', ['number']);
+    const _dstream_in_size    = Module.cwrap('zxc_dstream_in_size', 'number', ['number']);
+    const _dstream_out_size   = Module.cwrap('zxc_dstream_out_size', 'number', ['number']);
+
     const _version_string = Module.cwrap('zxc_version_string', 'string', []);
     const _error_name     = Module.cwrap('zxc_error_name', 'string', ['number']);
     const _min_level      = Module.cwrap('zxc_min_level', 'number', []);
@@ -68,6 +85,11 @@ export default async function createZXC(moduleOverrides) {
     //   int n_threads (4) | int checksum_enabled (4) | ptr progress_cb (4) | ptr user_data (4)
     // Total: 16 bytes in WASM32
     const DECOMPRESS_OPTS_SIZE = 16;
+
+    // zxc_inbuf_t / zxc_outbuf_t (WASM32 layout):
+    //   ptr src/dst (4) | size_t size (4) | size_t pos (4)
+    // Total: 12 bytes in WASM32
+    const IO_BUF_SIZE = 12;
 
     /**
      * Write a zxc_compress_opts_t struct into WASM memory.
@@ -301,6 +323,189 @@ export default async function createZXC(moduleOverrides) {
         };
     }
 
+    // --- Push streaming helpers ----------------------------------------------
+
+    /** Write a zxc_inbuf_t at `bufPtr` pointing to `srcPtr` (size bytes, pos=0). */
+    function _writeInbuf(bufPtr, srcPtr, size) {
+        Module.HEAP32[(bufPtr >> 2) + 0] = srcPtr;
+        Module.HEAPU32[(bufPtr >> 2) + 1] = size;
+        Module.HEAPU32[(bufPtr >> 2) + 2] = 0;
+    }
+    /** Write a zxc_outbuf_t at `bufPtr` pointing to `dstPtr` (size bytes, pos=0). */
+    function _writeOutbuf(bufPtr, dstPtr, size) {
+        Module.HEAP32[(bufPtr >> 2) + 0] = dstPtr;
+        Module.HEAPU32[(bufPtr >> 2) + 1] = size;
+        Module.HEAPU32[(bufPtr >> 2) + 2] = 0;
+    }
+    function _readPos(bufPtr) {
+        return Module.HEAPU32[(bufPtr >> 2) + 2];
+    }
+
+    /* Concatenate JS-side slices into a single Uint8Array. */
+    function _concatChunks(chunks, totalLen) {
+        const out = new Uint8Array(totalLen);
+        let off = 0;
+        for (const c of chunks) {
+            out.set(c, off);
+            off += c.length;
+        }
+        return out;
+    }
+
+    /**
+     * Create a push-based, single-threaded compression stream.
+     * @param {object} [opts]
+     * @param {number} [opts.level=3]
+     * @param {boolean} [opts.checksum=false]
+     * @returns {{ compress(Uint8Array): Uint8Array, end(): Uint8Array, free(): void, inSize(): number, outSize(): number }}
+     */
+    function createCStream(opts) {
+        const level    = (opts && opts.level)    || _default_level();
+        const checksum = (opts && opts.checksum) || false;
+
+        const optsPtr = _writeCompressOpts(level, checksum, false);
+        const cs = _cstream_create(optsPtr);
+        _free(optsPtr);
+        if (cs === 0) throw new Error('ZXC: failed to create cstream');
+
+        // Reusable scratch buffers in the WASM heap. The compress/end calls
+        // never reallocate, so these pointers stay valid for the stream's
+        // lifetime even if the heap grows (cwrap re-reads HEAPU8 internally).
+        const inDescPtr  = _malloc(IO_BUF_SIZE);
+        const outDescPtr = _malloc(IO_BUF_SIZE);
+        const stageCap   = Math.max(_cstream_out_size(cs), 64 * 1024);
+        const stagePtr   = _malloc(stageCap);
+
+        function drainCompress(srcPtr, srcLen) {
+            const chunks = [];
+            let total = 0;
+            _writeInbuf(inDescPtr, srcPtr, srcLen);
+            for (;;) {
+                _writeOutbuf(outDescPtr, stagePtr, stageCap);
+                const r = _cstream_compress(cs, outDescPtr, inDescPtr);
+                if (r < 0) {
+                    throw new Error(`ZXC cstream compress error: ${_error_name(r)} (${r})`);
+                }
+                const produced = _readPos(outDescPtr);
+                if (produced > 0) {
+                    chunks.push(new Uint8Array(Module.HEAPU8.buffer, stagePtr, produced).slice());
+                    total += produced;
+                }
+                if (r === 0 && _readPos(inDescPtr) === srcLen) break;
+            }
+            return _concatChunks(chunks, total);
+        }
+
+        function drainEnd() {
+            const chunks = [];
+            let total = 0;
+            for (;;) {
+                _writeOutbuf(outDescPtr, stagePtr, stageCap);
+                const r = _cstream_end(cs, outDescPtr);
+                if (r < 0) {
+                    throw new Error(`ZXC cstream end error: ${_error_name(r)} (${r})`);
+                }
+                const produced = _readPos(outDescPtr);
+                if (produced > 0) {
+                    chunks.push(new Uint8Array(Module.HEAPU8.buffer, stagePtr, produced).slice());
+                    total += produced;
+                }
+                if (r === 0) break;
+            }
+            return _concatChunks(chunks, total);
+        }
+
+        return {
+            /** Push input and return any compressed bytes produced. */
+            compress(data) {
+                if (data.length === 0) return drainCompress(stagePtr, 0);
+                const srcPtr = _malloc(data.length);
+                try {
+                    Module.HEAPU8.set(data, srcPtr);
+                    return drainCompress(srcPtr, data.length);
+                } finally {
+                    _free(srcPtr);
+                }
+            },
+            /** Finalise: residual block + EOF + footer. */
+            end() {
+                return drainEnd();
+            },
+            /** Free the stream and its scratch buffers. */
+            free() {
+                _cstream_free(cs);
+                _free(inDescPtr);
+                _free(outDescPtr);
+                _free(stagePtr);
+            },
+            inSize()  { return _cstream_in_size(cs); },
+            outSize() { return _cstream_out_size(cs); }
+        };
+    }
+
+    /**
+     * Create a push-based, single-threaded decompression stream.
+     * @param {object} [opts]
+     * @param {boolean} [opts.checksum=false]
+     * @returns {{ decompress(Uint8Array): Uint8Array, finished(): boolean, free(): void, inSize(): number, outSize(): number }}
+     */
+    function createDStream(opts) {
+        const checksum = (opts && opts.checksum) || false;
+        const optsPtr  = _writeDecompressOpts(checksum);
+        const ds = _dstream_create(optsPtr);
+        _free(optsPtr);
+        if (ds === 0) throw new Error('ZXC: failed to create dstream');
+
+        const inDescPtr  = _malloc(IO_BUF_SIZE);
+        const outDescPtr = _malloc(IO_BUF_SIZE);
+        // Default block size is 256 KB; size the stage for one decompressed block.
+        const stageCap   = 256 * 1024;
+        const stagePtr   = _malloc(stageCap);
+
+        return {
+            /** Push compressed bytes; return any decompressed bytes produced. */
+            decompress(data) {
+                const srcPtr = data.length > 0 ? _malloc(data.length) : 0;
+                try {
+                    if (srcPtr) Module.HEAPU8.set(data, srcPtr);
+                    _writeInbuf(inDescPtr, srcPtr, data.length);
+
+                    const chunks = [];
+                    let total = 0;
+                    for (;;) {
+                        const beforeIn = _readPos(inDescPtr);
+                        _writeOutbuf(outDescPtr, stagePtr, stageCap);
+                        const r = _dstream_decompress(ds, outDescPtr, inDescPtr);
+                        if (r < 0) {
+                            throw new Error(`ZXC dstream error: ${_error_name(r)} (${r})`);
+                        }
+                        const produced = _readPos(outDescPtr);
+                        if (produced > 0) {
+                            chunks.push(new Uint8Array(Module.HEAPU8.buffer, stagePtr, produced).slice());
+                            total += produced;
+                        }
+                        const afterIn = _readPos(inDescPtr);
+                        if (afterIn === beforeIn && produced === 0) break;
+                        if (afterIn === data.length) break;
+                    }
+                    return _concatChunks(chunks, total);
+                } finally {
+                    if (srcPtr) _free(srcPtr);
+                }
+            },
+            /** True iff the file footer has been consumed and validated. */
+            finished() { return _dstream_finished(ds) !== 0; },
+            free() {
+                _dstream_free(ds);
+                _free(inDescPtr);
+                _free(outDescPtr);
+                _free(stagePtr);
+            },
+            inSize()  { return _dstream_in_size(ds); },
+            outSize() { return _dstream_out_size(ds); }
+        };
+    }
+
     // --- Exposed API object --------------------------------------------------
     return Object.freeze({
         compress,
@@ -309,6 +514,8 @@ export default async function createZXC(moduleOverrides) {
         getDecompressedSize,
         createCompressContext,
         createDecompressContext,
+        createCStream,
+        createDStream,
 
         /** Library version string (e.g. "0.10.0"). */
         version: _version_string(),

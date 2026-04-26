@@ -461,32 +461,50 @@ static PyObject* pyzxc_version_string(PyObject* self, PyObject* args) {
 #define ZXC_CSTREAM_CAPSULE "zxc_cstream"
 #define ZXC_DSTREAM_CAPSULE "zxc_dstream"
 
+typedef struct {
+    zxc_cstream* cs;
+} pyzxc_cstream_holder_t;
+
+typedef struct {
+    zxc_dstream* ds;
+} pyzxc_dstream_holder_t;
+
 static void cstream_capsule_destructor(PyObject* capsule) {
-    zxc_cstream* cs = (zxc_cstream*)PyCapsule_GetPointer(capsule, ZXC_CSTREAM_CAPSULE);
-    if (cs) zxc_cstream_free(cs);
+    pyzxc_cstream_holder_t* h =
+        (pyzxc_cstream_holder_t*)PyCapsule_GetPointer(capsule, ZXC_CSTREAM_CAPSULE);
+    if (h) {
+        if (h->cs) zxc_cstream_free(h->cs);
+        PyMem_Free(h);
+    }
 }
 
 static void dstream_capsule_destructor(PyObject* capsule) {
-    zxc_dstream* ds = (zxc_dstream*)PyCapsule_GetPointer(capsule, ZXC_DSTREAM_CAPSULE);
-    if (ds) zxc_dstream_free(ds);
+    pyzxc_dstream_holder_t* h =
+        (pyzxc_dstream_holder_t*)PyCapsule_GetPointer(capsule, ZXC_DSTREAM_CAPSULE);
+    if (h) {
+        if (h->ds) zxc_dstream_free(h->ds);
+        PyMem_Free(h);
+    }
 }
 
 static zxc_cstream* cstream_from_capsule(PyObject* capsule) {
-    zxc_cstream* cs = (zxc_cstream*)PyCapsule_GetPointer(capsule, ZXC_CSTREAM_CAPSULE);
-    if (!cs) {
-        PyErr_SetString(PyExc_ValueError, "cstream is closed or invalid");
+    pyzxc_cstream_holder_t* h =
+        (pyzxc_cstream_holder_t*)PyCapsule_GetPointer(capsule, ZXC_CSTREAM_CAPSULE);
+    if (!h || !h->cs) {
+        if (!PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "cstream is closed or invalid");
         return NULL;
     }
-    return cs;
+    return h->cs;
 }
 
 static zxc_dstream* dstream_from_capsule(PyObject* capsule) {
-    zxc_dstream* ds = (zxc_dstream*)PyCapsule_GetPointer(capsule, ZXC_DSTREAM_CAPSULE);
-    if (!ds) {
-        PyErr_SetString(PyExc_ValueError, "dstream is closed or invalid");
+    pyzxc_dstream_holder_t* h =
+        (pyzxc_dstream_holder_t*)PyCapsule_GetPointer(capsule, ZXC_DSTREAM_CAPSULE);
+    if (!h || !h->ds) {
+        if (!PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "dstream is closed or invalid");
         return NULL;
     }
-    return ds;
+    return h->ds;
 }
 
 static PyObject* pyzxc_cstream_create(PyObject* self, PyObject* args, PyObject* kwargs) {
@@ -512,9 +530,16 @@ static PyObject* pyzxc_cstream_create(PyObject* self, PyObject* args, PyObject* 
     zxc_cstream* cs = zxc_cstream_create(&copts);
     if (!cs) Py_Return_Err(PyExc_MemoryError, "zxc_cstream_create failed");
 
-    PyObject* cap = PyCapsule_New(cs, ZXC_CSTREAM_CAPSULE, cstream_capsule_destructor);
+    pyzxc_cstream_holder_t* h = (pyzxc_cstream_holder_t*)PyMem_Malloc(sizeof(*h));
+    if (!h) {
+        zxc_cstream_free(cs);
+        return PyErr_NoMemory();
+    }
+    h->cs = cs;
+    PyObject* cap = PyCapsule_New(h, ZXC_CSTREAM_CAPSULE, cstream_capsule_destructor);
     if (!cap) {
         zxc_cstream_free(cs);
+        PyMem_Free(h);
         return NULL;
     }
     return cap;
@@ -668,11 +693,11 @@ static PyObject* pyzxc_cstream_out_size(PyObject* self, PyObject* capsule) {
 static PyObject* pyzxc_cstream_free(PyObject* self, PyObject* capsule) {
     (void)self;
     if (!PyCapsule_IsValid(capsule, ZXC_CSTREAM_CAPSULE)) Py_RETURN_NONE;
-    zxc_cstream* cs = (zxc_cstream*)PyCapsule_GetPointer(capsule, ZXC_CSTREAM_CAPSULE);
-    if (cs) {
-        zxc_cstream_free(cs);
-        PyCapsule_SetPointer(capsule, NULL);
-        PyCapsule_SetDestructor(capsule, NULL);
+    pyzxc_cstream_holder_t* h =
+        (pyzxc_cstream_holder_t*)PyCapsule_GetPointer(capsule, ZXC_CSTREAM_CAPSULE);
+    if (h && h->cs) {
+        zxc_cstream_free(h->cs);
+        h->cs = NULL;
     }
     Py_RETURN_NONE;
 }
@@ -689,9 +714,16 @@ static PyObject* pyzxc_dstream_create(PyObject* self, PyObject* args, PyObject* 
     zxc_dstream* ds = zxc_dstream_create(&dopts);
     if (!ds) Py_Return_Err(PyExc_MemoryError, "zxc_dstream_create failed");
 
-    PyObject* cap = PyCapsule_New(ds, ZXC_DSTREAM_CAPSULE, dstream_capsule_destructor);
+    pyzxc_dstream_holder_t* h = (pyzxc_dstream_holder_t*)PyMem_Malloc(sizeof(*h));
+    if (!h) {
+        zxc_dstream_free(ds);
+        return PyErr_NoMemory();
+    }
+    h->ds = ds;
+    PyObject* cap = PyCapsule_New(h, ZXC_DSTREAM_CAPSULE, dstream_capsule_destructor);
     if (!cap) {
         zxc_dstream_free(ds);
+        PyMem_Free(h);
         return NULL;
     }
     return cap;
@@ -795,11 +827,11 @@ static PyObject* pyzxc_dstream_out_size(PyObject* self, PyObject* capsule) {
 static PyObject* pyzxc_dstream_free(PyObject* self, PyObject* capsule) {
     (void)self;
     if (!PyCapsule_IsValid(capsule, ZXC_DSTREAM_CAPSULE)) Py_RETURN_NONE;
-    zxc_dstream* ds = (zxc_dstream*)PyCapsule_GetPointer(capsule, ZXC_DSTREAM_CAPSULE);
-    if (ds) {
-        zxc_dstream_free(ds);
-        PyCapsule_SetPointer(capsule, NULL);
-        PyCapsule_SetDestructor(capsule, NULL);
+    pyzxc_dstream_holder_t* h =
+        (pyzxc_dstream_holder_t*)PyCapsule_GetPointer(capsule, ZXC_DSTREAM_CAPSULE);
+    if (h && h->ds) {
+        zxc_dstream_free(h->ds);
+        h->ds = NULL;
     }
     Py_RETURN_NONE;
 }

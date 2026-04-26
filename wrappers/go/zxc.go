@@ -39,6 +39,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"unsafe"
 )
 
@@ -844,14 +845,19 @@ func (c *CStream) Compress(out, in []byte) (consumed, produced int, pending int6
 		return 0, 0, 0, ErrNullInput
 	}
 
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+
 	var inBuf C.zxc_inbuf_t
 	if len(in) > 0 {
+		pinner.Pin(&in[0])
 		inBuf.src = unsafe.Pointer(&in[0])
 	}
 	inBuf.size = C.size_t(len(in))
 
 	var outBuf C.zxc_outbuf_t
 	if len(out) > 0 {
+		pinner.Pin(&out[0])
 		outBuf.dst = unsafe.Pointer(&out[0])
 	}
 	outBuf.size = C.size_t(len(out))
@@ -875,8 +881,12 @@ func (c *CStream) End(out []byte) (produced int, pending int64, err error) {
 		return 0, 0, ErrNullInput
 	}
 
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+
 	var outBuf C.zxc_outbuf_t
 	if len(out) > 0 {
+		pinner.Pin(&out[0])
 		outBuf.dst = unsafe.Pointer(&out[0])
 	}
 	outBuf.size = C.size_t(len(out))
@@ -962,14 +972,19 @@ func (d *DStream) Decompress(out, in []byte) (consumed, produced int, err error)
 		return 0, 0, ErrNullInput
 	}
 
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+
 	var inBuf C.zxc_inbuf_t
 	if len(in) > 0 {
+		pinner.Pin(&in[0])
 		inBuf.src = unsafe.Pointer(&in[0])
 	}
 	inBuf.size = C.size_t(len(in))
 
 	var outBuf C.zxc_outbuf_t
 	if len(out) > 0 {
+		pinner.Pin(&out[0])
 		outBuf.dst = unsafe.Pointer(&out[0])
 	}
 	outBuf.size = C.size_t(len(out))
