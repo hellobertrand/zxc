@@ -66,6 +66,7 @@ struct zxc_cstream_s {
  * cs->in_used must be > 0.  Returns ZXC_OK on success, negative on failure. */
 static int cs_compress_one_block(zxc_cstream* cs) {
     const uint64_t bound = zxc_compress_block_bound(cs->in_used);
+    // LCOV_EXCL_START
     if (UNLIKELY(bound == 0 || bound > SIZE_MAX)) return ZXC_ERROR_OVERFLOW;
     if (UNLIKELY(bound > cs->pending_cap)) {
         uint8_t* nb = (uint8_t*)realloc(cs->pending, (size_t)bound);
@@ -73,9 +74,10 @@ static int cs_compress_one_block(zxc_cstream* cs) {
         cs->pending = nb;
         cs->pending_cap = (size_t)bound;
     }
+    // LCOV_EXCL_STOP
     const int64_t csize = zxc_compress_block(cs->cctx, cs->in_block, cs->in_used, cs->pending,
                                              cs->pending_cap, &cs->opts);
-    if (UNLIKELY(csize < 0)) return (int)csize;
+    if (UNLIKELY(csize < 0)) return (int)csize;  // LCOV_EXCL_LINE
 
     cs->pending_len = (size_t)csize;
     cs->pending_pos = 0;
@@ -107,7 +109,7 @@ static int cs_drain_pending(zxc_cstream* cs, zxc_outbuf_t* out) {
 
 zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
     zxc_cstream* cs = (zxc_cstream*)calloc(1, sizeof(*cs));
-    if (UNLIKELY(!cs)) return NULL;
+    if (UNLIKELY(!cs)) return NULL;  // LCOV_EXCL_LINE
 
     if (opts) cs->opts = *opts;
     if (cs->opts.level == 0) cs->opts.level = ZXC_LEVEL_DEFAULT;
@@ -120,6 +122,7 @@ zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
     cs->block_size = cs->opts.block_size;
 
     cs->cctx = zxc_create_cctx(&cs->opts);
+    // LCOV_EXCL_START
     if (UNLIKELY(!cs->cctx)) {
         free(cs);
         return NULL;
@@ -130,16 +133,19 @@ zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
         free(cs);
         return NULL;
     }
+    // LCOV_EXCL_STOP
     /* Pre-size pending so the file header path never needs realloc. */
     cs->pending_cap =
         ZXC_FILE_HEADER_SIZE > ZXC_FILE_FOOTER_SIZE ? ZXC_FILE_HEADER_SIZE : ZXC_FILE_FOOTER_SIZE;
     cs->pending = (uint8_t*)malloc(cs->pending_cap);
+    // LCOV_EXCL_START
     if (UNLIKELY(!cs->pending)) {
         free(cs->in_block);
         zxc_free_cctx(cs->cctx);
         free(cs);
         return NULL;
     }
+    // LCOV_EXCL_STOP
     cs->state = CS_INIT;
     return cs;
 }
@@ -148,7 +154,7 @@ zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
 static int cs_stage_file_header(zxc_cstream* cs) {
     const int w = zxc_write_file_header(cs->pending, cs->pending_cap, cs->block_size,
                                         cs->opts.checksum_enabled);
-    if (UNLIKELY(w < 0)) return w;
+    if (UNLIKELY(w < 0)) return w;  // LCOV_EXCL_LINE
     cs->pending_len = (size_t)w;
     cs->pending_pos = 0;
     return ZXC_OK;
@@ -156,12 +162,14 @@ static int cs_stage_file_header(zxc_cstream* cs) {
 
 /* Stages an EOF block (8 bytes) into pending. */
 static int cs_stage_eof(zxc_cstream* cs) {
+    // LCOV_EXCL_START
     if (UNLIKELY(ZXC_BLOCK_HEADER_SIZE > cs->pending_cap)) {
         uint8_t* nb = (uint8_t*)realloc(cs->pending, ZXC_BLOCK_HEADER_SIZE);
         if (UNLIKELY(!nb)) return ZXC_ERROR_MEMORY;
         cs->pending = nb;
         cs->pending_cap = ZXC_BLOCK_HEADER_SIZE;
     }
+    // LCOV_EXCL_STOP
     const zxc_block_header_t eof = {
         .block_type = (uint8_t)ZXC_BLOCK_EOF,
         .block_flags = 0,
@@ -170,7 +178,7 @@ static int cs_stage_eof(zxc_cstream* cs) {
         .comp_size = 0,
     };
     const int w = zxc_write_block_header(cs->pending, cs->pending_cap, &eof);
-    if (UNLIKELY(w < 0)) return w;
+    if (UNLIKELY(w < 0)) return w;  // LCOV_EXCL_LINE
     cs->pending_len = (size_t)w;
     cs->pending_pos = 0;
     return ZXC_OK;
@@ -178,15 +186,17 @@ static int cs_stage_eof(zxc_cstream* cs) {
 
 /* Stages the file footer (12 bytes) into pending. */
 static int cs_stage_footer(zxc_cstream* cs) {
+    // LCOV_EXCL_START
     if (UNLIKELY(ZXC_FILE_FOOTER_SIZE > cs->pending_cap)) {
         uint8_t* nb = (uint8_t*)realloc(cs->pending, ZXC_FILE_FOOTER_SIZE);
         if (UNLIKELY(!nb)) return ZXC_ERROR_MEMORY;
         cs->pending = nb;
         cs->pending_cap = ZXC_FILE_FOOTER_SIZE;
     }
+    // LCOV_EXCL_STOP
     const int w = zxc_write_file_footer(cs->pending, cs->pending_cap, cs->total_in, cs->global_hash,
                                         cs->opts.checksum_enabled);
-    if (UNLIKELY(w < 0)) return w;
+    if (UNLIKELY(w < 0)) return w;  // LCOV_EXCL_LINE
     cs->pending_len = (size_t)w;
     cs->pending_pos = 0;
     return ZXC_OK;
@@ -209,9 +219,12 @@ size_t zxc_cstream_out_size(const zxc_cstream* cs) {
 }
 
 int64_t zxc_cstream_compress(zxc_cstream* cs, zxc_outbuf_t* out, zxc_inbuf_t* in) {
-    if (UNLIKELY(!cs || !out || !in)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!cs || !out || !in || in->pos > in->size || out->pos > out->size ||
+                 (in->size > in->pos && !in->src) || (out->size > out->pos && !out->dst) ||
+                 cs->state == CS_DONE)) {
+        return ZXC_ERROR_NULL_INPUT;
+    }
     if (UNLIKELY(cs->state == CS_ERRORED)) return cs->error_code;
-    if (UNLIKELY(cs->state == CS_DONE)) return ZXC_ERROR_NULL_INPUT;
 
     for (;;) {
         switch (cs->state) {
@@ -275,8 +288,8 @@ int64_t zxc_cstream_compress(zxc_cstream* cs, zxc_outbuf_t* out, zxc_inbuf_t* in
 
 int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out) {
     if (UNLIKELY(!cs || !out)) return ZXC_ERROR_NULL_INPUT;
-    if (UNLIKELY(cs->state == CS_ERRORED)) return cs->error_code;
     if (UNLIKELY(cs->state == CS_DONE)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(cs->state == CS_ERRORED)) return cs->error_code;
 
     for (;;) {
         switch (cs->state) {
@@ -449,7 +462,7 @@ static int ds_pull_payload(zxc_dstream* ds, zxc_inbuf_t* in) {
 
 zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts) {
     zxc_dstream* ds = (zxc_dstream*)calloc(1, sizeof(*ds));
-    if (UNLIKELY(!ds)) return NULL;
+    if (UNLIKELY(!ds)) return NULL;  // LCOV_EXCL_LINE
     if (opts) ds->opts = *opts;
     ds->opts.n_threads = 0;
     ds->opts.progress_cb = NULL;
@@ -520,11 +533,13 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
 
                 /* Allocate payload + decoded buffers now that block_size is known. */
                 const uint64_t pb = zxc_compress_block_bound(ds->block_size);
+                // LCOV_EXCL_START
                 if (UNLIKELY(pb == 0 || pb > SIZE_MAX)) {
                     ds->error_code = ZXC_ERROR_OVERFLOW;
                     ds->state = DS_ERRORED;
                     return ZXC_ERROR_OVERFLOW;
                 }
+                // LCOV_EXCL_STOP
                 ds->payload_cap = (size_t)pb;
                 ds->payload = (uint8_t*)malloc(ds->payload_cap);
 
@@ -535,18 +550,23 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                  * wild-copy overflow we never emit. */
                 ds->decoded_cap = ds->block_size + ZXC_PAD_SIZE;
                 ds->decoded = (uint8_t*)malloc(ds->decoded_cap);
+                // LCOV_EXCL_START
                 if (UNLIKELY(!ds->payload || !ds->decoded)) {
                     ds->error_code = ZXC_ERROR_MEMORY;
                     ds->state = DS_ERRORED;
                     return ZXC_ERROR_MEMORY;
                 }
+                // LCOV_EXCL_STOP
 
+                // LCOV_EXCL_START
                 if (UNLIKELY(zxc_cctx_init(&ds->inner, ds->block_size, 0, 0,
-                                           ds->file_has_checksum) != ZXC_OK)) {
+                                           ds->file_has_checksum && ds->opts.checksum_enabled) !=
+                             ZXC_OK)) {
                     ds->error_code = ZXC_ERROR_MEMORY;
                     ds->state = DS_ERRORED;
                     return ZXC_ERROR_MEMORY;
                 }
+                // LCOV_EXCL_STOP
                 ds->inner_initialized = 1;
 
                 ds->state = DS_NEED_BLOCK_HEADER;
@@ -592,6 +612,7 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                 ZXC_MEMCPY(ds->payload, ds->scratch, ZXC_BLOCK_HEADER_SIZE);
                 ds->payload_used = ZXC_BLOCK_HEADER_SIZE;
                 ds->payload_need += ZXC_BLOCK_HEADER_SIZE;
+                // LCOV_EXCL_START
                 if (UNLIKELY(ds->payload_need > ds->payload_cap)) {
                     /* grow */
                     uint8_t* nb = (uint8_t*)realloc(ds->payload, ds->payload_need);
@@ -603,6 +624,7 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                     ds->payload = nb;
                     ds->payload_cap = ds->payload_need;
                 }
+                // LCOV_EXCL_STOP
                 ds->state = DS_NEED_BLOCK_PAYLOAD;
                 break;
             }
@@ -624,9 +646,10 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                 ds->decoded_size = (size_t)dsz;
                 ds->decoded_pos = 0;
 
-                /* If file-level checksum is on, fold this block's trailer into
-                 * the rolling global hash (last 4 bytes of the *raw* block). */
-                if (ds->file_has_checksum && ds->payload_used >= 4) {
+                /* If file-level checksum verification is enabled, fold this
+                 * block's trailer into the rolling global hash (last 4 bytes
+                 * of the *raw* block). */
+                if (ds->opts.checksum_enabled && ds->file_has_checksum && ds->payload_used >= 4) {
                     const uint32_t bh = zxc_le32(ds->payload + ds->payload_used - 4);
                     ds->global_hash = zxc_hash_combine_rotate(ds->global_hash, bh);
                 }
@@ -682,15 +705,15 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             case DS_VALIDATE_FOOTER: {
                 const uint64_t declared = zxc_le64(ds->scratch);
                 if (UNLIKELY(declared != ds->total_out)) {
-                    ds->error_code = ZXC_ERROR_BAD_CHECKSUM;
                     ds->state = DS_ERRORED;
-                    return ZXC_ERROR_BAD_CHECKSUM;
+                    ds->error_code = ZXC_ERROR_CORRUPT_DATA;
+                    return ZXC_ERROR_CORRUPT_DATA;
                 }
                 if (ds->opts.checksum_enabled && ds->file_has_checksum) {
                     const uint32_t fh = zxc_le32(ds->scratch + sizeof(uint64_t));
                     if (UNLIKELY(fh != ds->global_hash)) {
-                        ds->error_code = ZXC_ERROR_BAD_CHECKSUM;
                         ds->state = DS_ERRORED;
+                        ds->error_code = ZXC_ERROR_BAD_CHECKSUM;
                         return ZXC_ERROR_BAD_CHECKSUM;
                     }
                 }

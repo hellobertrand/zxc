@@ -189,7 +189,8 @@ static int do_roundtrip(const char* label, const uint8_t* src, size_t size, size
         return 0;
     }
     size_t dec_size = 0;
-    uint8_t* dec = pstream_decompress_in_chunks(comp, comp_size, in_chunk, out_chunk, 1, &dec_size);
+    uint8_t* dec = pstream_decompress_in_chunks(comp, comp_size, in_chunk, out_chunk,
+                                                checksum_enabled, &dec_size);
     if (!dec) {
         printf("  [%s] decompress failed (comp_size=%zu)\n", label, comp_size);
         free(comp);
@@ -424,7 +425,7 @@ int test_pstream_truncated_input(void) {
     size_t dec_size = 0;
     uint8_t* dec = pstream_decompress_in_chunks(comp, trunc_size, 1024, 1024, 1, &dec_size);
     /* Either the helper returns NULL (error during decode), or it returns a
-     * partial buffer that doesn't match — in both cases, NOT a clean success. */
+     * partial buffer that doesn't match, in both cases, NOT a clean success. */
     int ok = (dec == NULL) || (dec_size != size);
     free(src);
     free(comp);

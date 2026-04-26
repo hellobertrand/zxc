@@ -804,9 +804,11 @@ ZXC_EXPORT size_t zxc_dstream_in_size(const zxc_dstream* ds);
 ZXC_EXPORT size_t zxc_dstream_out_size(const zxc_dstream* ds);
 ```
 
-Suggested buffer sizes.  Returns `0` if `ds` is `NULL` or the file header
-has not yet been parsed (the recommended decompress in-size depends on
-the block size, which is learned from the header).
+Suggested buffer sizes.  Returns `0` if `ds` is `NULL`.  Before the file
+header has been parsed, `zxc_dstream_in_size()` may return a default
+recommended input size hint (for example `ZXC_BLOCK_SIZE_DEFAULT`),
+because the actual block size is not known until it is learned from the
+header.
 
 ### Threading
 
