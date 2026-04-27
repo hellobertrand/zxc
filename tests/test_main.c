@@ -36,6 +36,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_roundtrip_level3),
     TEST_CASE(test_roundtrip_level4),
     TEST_CASE(test_roundtrip_level5),
+    TEST_CASE(test_roundtrip_level6),
     TEST_CASE(test_roundtrip_binary),
     TEST_CASE(test_roundtrip_binary_crc),
     TEST_CASE(test_roundtrip_binary_small),
@@ -94,6 +95,7 @@ static const test_entry_t g_tests[] = {
     /* --- Format (on-disk) --- */
     TEST_CASE(test_bit_reader),
     TEST_CASE(test_bitpack),
+    TEST_CASE(test_huffman_codec),
     TEST_CASE(test_eof_block_structure),
     TEST_CASE(test_header_checksum),
     TEST_CASE(test_global_checksum_order),

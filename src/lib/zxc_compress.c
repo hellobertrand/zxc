@@ -17,6 +17,7 @@
 
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_sans_io.h"
+#include "zxc_huffman.h"
 #include "zxc_internal.h"
 
 /*
@@ -1028,6 +1029,36 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         if (rle_size < lit_c - (lit_c >> 5)) enc_lit = ZXC_SECTION_ENCODING_RLE;
     }
 
+    /* Level >= 6: also evaluate Huffman as a 3rd literal-encoding candidate.
+     * Build a histogram and length-limited canonical code lengths, compute the
+     * exact byte size of the 4-way interleaved bitstream + 134-byte header,
+     * and switch to HUFFMAN if it beats the current choice by >= 3%. */
+    uint8_t huf_code_len[ZXC_HUF_NUM_SYMBOLS];
+    size_t huf_total_size = SIZE_MAX;
+    if (level >= ZXC_LEVEL_MAX && lit_c >= ZXC_HUF_MIN_LITERALS) {
+        uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
+        for (size_t i = 0; i < lit_c; i++) freq[literals[i]]++;
+        if (zxc_huf_build_code_lengths(freq, huf_code_len) == ZXC_OK) {
+            const size_t Q = (lit_c + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
+            size_t streams_bytes = 0;
+            for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
+                size_t start = (size_t)s * Q;
+                size_t stop = start + Q;
+                if (start > lit_c) start = lit_c;
+                if (stop > lit_c) stop = lit_c;
+                uint64_t bits = 0;
+                for (size_t i = start; i < stop; i++) bits += huf_code_len[literals[i]];
+                streams_bytes += (size_t)((bits + 7) / 8);
+            }
+            huf_total_size = ZXC_HUF_HEADER_SIZE + streams_bytes;
+            const size_t baseline =
+                (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : (size_t)lit_c;
+            if (huf_total_size < baseline - (baseline >> 5)) {
+                enc_lit = ZXC_SECTION_ENCODING_HUFFMAN;
+            }
+        }
+    }
+
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GLO};
     uint8_t* const p = dst + ZXC_BLOCK_HEADER_SIZE;
     size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
@@ -1044,8 +1075,10 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                  .enc_off = (uint8_t)use_8bit_off};
 
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS] = {0};
-    desc[0].sizes = (uint64_t)(enc_lit == ZXC_SECTION_ENCODING_RLE ? rle_size : lit_c) |
-                    ((uint64_t)lit_c << 32);
+    const size_t lit_section_size = (enc_lit == ZXC_SECTION_ENCODING_RLE)     ? rle_size
+                                    : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) ? huf_total_size
+                                                                                : (size_t)lit_c;
+    desc[0].sizes = (uint64_t)lit_section_size | ((uint64_t)lit_c << 32);
     desc[1].sizes = (uint64_t)seq_c | ((uint64_t)seq_c << 32);
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
     desc[3].sizes = (uint64_t)extras_sz | ((uint64_t)extras_sz << 32);
@@ -1064,7 +1097,13 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     if (UNLIKELY(rem < sz_lit)) return ZXC_ERROR_DST_TOO_SMALL;
 
-    if (enc_lit == ZXC_SECTION_ENCODING_RLE) {
+    if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) {
+        const int written = zxc_huf_encode_section(literals, (size_t)lit_c, huf_code_len, p_curr,
+                                                   rem);
+        if (UNLIKELY(written < 0)) return written;
+        if (UNLIKELY((size_t)written != huf_total_size)) return ZXC_ERROR_DST_TOO_SMALL;
+        p_curr += written;
+    } else if (enc_lit == ZXC_SECTION_ENCODING_RLE) {
         // Write RLE - optimized single-pass encoding
         const uint8_t* lit_ptr = literals;
         const uint8_t* const lit_end = literals + lit_c;

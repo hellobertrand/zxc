@@ -123,6 +123,7 @@ int test_roundtrip_level2(void);
 int test_roundtrip_level3(void);
 int test_roundtrip_level4(void);
 int test_roundtrip_level5(void);
+int test_roundtrip_level6(void);
 int test_roundtrip_binary(void);
 int test_roundtrip_binary_crc(void);
 int test_roundtrip_binary_small(void);
@@ -161,6 +162,7 @@ int test_seekable_mt_full_file(void);
 /* Format (on-disk) */
 int test_bit_reader(void);
 int test_bitpack(void);
+int test_huffman_codec(void);
 int test_eof_block_structure(void);
 int test_header_checksum(void);
 int test_global_checksum_order(void);

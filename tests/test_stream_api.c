@@ -868,6 +868,7 @@ RT_WRAPPER(test_roundtrip_level2,       "Level 2",                        gen_lz
 RT_WRAPPER(test_roundtrip_level3,       "Level 3",                        gen_lz_data, RT_BUF, 3, 1)
 RT_WRAPPER(test_roundtrip_level4,       "Level 4",                        gen_lz_data, RT_BUF, 4, 1)
 RT_WRAPPER(test_roundtrip_level5,       "Level 5",                        gen_lz_data, RT_BUF, 5, 1)
+RT_WRAPPER(test_roundtrip_level6,       "Level 6 (Huffman literals)",     gen_lz_data, RT_BUF, 6, 1)
 
 /* Binary data preservation */
 RT_WRAPPER(test_roundtrip_binary,       "Binary Data (0x00, 0x0A, 0x0D, 0xFF)", gen_binary_data, RT_BUF, 3, 0)
