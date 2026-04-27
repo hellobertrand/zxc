@@ -98,6 +98,9 @@ int test_pstream_decompress_compatible_with_buffer_api(void);
 int test_pstream_invalid_args(void);
 int test_pstream_truncated_input(void);
 int test_pstream_corrupted_magic(void);
+int test_pstream_decode_seekable_archive(void);
+int test_pstream_compress_after_end_rejected(void);
+int test_pstream_compress_drain_block_resume(void);
 
 /* Stream round-trip coverage (patterns x sizes x levels x checksum) */
 int test_roundtrip_raw_random(void);

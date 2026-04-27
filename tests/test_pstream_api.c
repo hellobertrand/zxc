@@ -25,9 +25,7 @@
 static uint8_t* pstream_compress_in_chunks(const uint8_t* src, size_t src_size, size_t in_chunk,
                                            size_t out_chunk, int level, int checksum_enabled,
                                            size_t* out_size) {
-    zxc_compress_opts_t opts = {0};
-    opts.level = level;
-    opts.checksum_enabled = checksum_enabled;
+    const zxc_compress_opts_t opts = {.level = level, .checksum_enabled = checksum_enabled};
     zxc_cstream* cs = zxc_cstream_create(&opts);
     if (!cs) return NULL;
 
@@ -67,7 +65,7 @@ static uint8_t* pstream_compress_in_chunks(const uint8_t* src, size_t src_size, 
         const size_t n = (src_size - off) < in_chunk ? (src_size - off) : in_chunk;
         zxc_inbuf_t in = {src + off, n, 0};
         while (in.pos < in.size) {
-            int64_t r = zxc_cstream_compress(cs, &out, &in);
+            const int64_t r = zxc_cstream_compress(cs, &out, &in);
             if (r < 0) {
                 free(blob);
                 free(obuf);
@@ -109,8 +107,7 @@ static uint8_t* pstream_compress_in_chunks(const uint8_t* src, size_t src_size, 
 static uint8_t* pstream_decompress_in_chunks(const uint8_t* src, size_t src_size, size_t in_chunk,
                                              size_t out_chunk, int checksum_enabled,
                                              size_t* out_size) {
-    zxc_decompress_opts_t opts = {0};
-    opts.checksum_enabled = checksum_enabled;
+    const zxc_decompress_opts_t opts = {.checksum_enabled = checksum_enabled};
     zxc_dstream* ds = zxc_dstream_create(&opts);
     if (!ds) return NULL;
 
@@ -134,7 +131,7 @@ static uint8_t* pstream_decompress_in_chunks(const uint8_t* src, size_t src_size
         const size_t n = remaining < in_chunk ? remaining : in_chunk;
         zxc_inbuf_t in = {n ? src + off : NULL, n, 0};
 
-        int64_t r = zxc_dstream_decompress(ds, &out, &in);
+        const int64_t r = zxc_dstream_decompress(ds, &out, &in);
         if (r < 0) {
             free(dec);
             free(obuf);
@@ -215,7 +212,7 @@ int test_pstream_roundtrip_basic(void) {
     uint8_t* src = (uint8_t*)malloc(size);
     if (!src) return 0;
     gen_lz_data(src, size);
-    int ok = do_roundtrip("default 64KiB chunks", src, size, 64 * 1024, 64 * 1024, 3, 1);
+    const int ok = do_roundtrip("default 64KiB chunks", src, size, 64 * 1024, 64 * 1024, 3, 1);
     free(src);
     if (ok) printf("PASS\n\n");
     return ok;
@@ -227,7 +224,7 @@ int test_pstream_roundtrip_no_checksum(void) {
     uint8_t* src = (uint8_t*)malloc(size);
     if (!src) return 0;
     gen_lz_data(src, size);
-    int ok = do_roundtrip("no csum", src, size, 32 * 1024, 32 * 1024, 3, 0);
+    const int ok = do_roundtrip("no csum", src, size, 32 * 1024, 32 * 1024, 3, 0);
     free(src);
     if (ok) printf("PASS\n\n");
     return ok;
@@ -258,7 +255,7 @@ int test_pstream_tiny_chunks(void) {
     uint8_t* src = (uint8_t*)malloc(size);
     if (!src) return 0;
     gen_lz_data(src, size);
-    int ok = do_roundtrip("tiny", src, size, 137, 53, 3, 1);
+    const int ok = do_roundtrip("tiny", src, size, 137, 53, 3, 1);
     free(src);
     if (ok) printf("PASS\n\n");
     return ok;
@@ -270,7 +267,7 @@ int test_pstream_drip_one_byte(void) {
     uint8_t* src = (uint8_t*)malloc(size);
     if (!src) return 0;
     gen_lz_data(src, size);
-    int ok = do_roundtrip("1B", src, size, 1, 4096, 3, 1);
+    const int ok = do_roundtrip("1B", src, size, 1, 4096, 3, 1);
     free(src);
     if (ok) printf("PASS\n\n");
     return ok;
@@ -315,7 +312,7 @@ int test_pstream_large_random(void) {
     uint8_t* src = (uint8_t*)malloc(size);
     if (!src) return 0;
     gen_lz_data(src, size);
-    int ok = do_roundtrip("1.5MiB / level5", src, size, 13 * 1024, 7 * 1024, 5, 1);
+    const int ok = do_roundtrip("1.5MiB / level5", src, size, 13 * 1024, 7 * 1024, 5, 1);
     free(src);
     if (ok) printf("PASS\n\n");
     return ok;
@@ -340,10 +337,9 @@ int test_pstream_compatible_with_buffer_api(void) {
         free(comp);
         return 0;
     }
-    zxc_decompress_opts_t dopts = {0};
-    dopts.checksum_enabled = 1;
-    int64_t dsz = zxc_decompress(comp, comp_size, dec, size, &dopts);
-    int ok = (dsz == (int64_t)size && memcmp(dec, src, size) == 0);
+    const zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
+    const int64_t dsz = zxc_decompress(comp, comp_size, dec, size, &dopts);
+    const int ok = (dsz == (int64_t)size && memcmp(dec, src, size) == 0);
     if (!ok) {
         printf("FAIL: dsz=%lld, expected %zu\n", (long long)dsz, size);
     }
@@ -367,10 +363,8 @@ int test_pstream_decompress_compatible_with_buffer_api(void) {
         free(src);
         return 0;
     }
-    zxc_compress_opts_t copts = {0};
-    copts.level = 3;
-    copts.checksum_enabled = 1;
-    int64_t csz = zxc_compress(src, size, comp, (size_t)bound, &copts);
+    const zxc_compress_opts_t copts = {.level = 3, .checksum_enabled = 1};
+    const int64_t csz = zxc_compress(src, size, comp, (size_t)bound, &copts);
     if (csz <= 0) {
         free(src);
         free(comp);
@@ -379,7 +373,7 @@ int test_pstream_decompress_compatible_with_buffer_api(void) {
     /* Decode with the streaming push API (small chunks). */
     size_t dec_size = 0;
     uint8_t* dec = pstream_decompress_in_chunks(comp, (size_t)csz, 511, 7 * 1024, 1, &dec_size);
-    int ok = (dec && dec_size == size && memcmp(dec, src, size) == 0);
+    const int ok = (dec && dec_size == size && memcmp(dec, src, size) == 0);
     if (!ok) {
         printf("FAIL: dec_size=%zu, expected %zu\n", dec_size, size);
     }
@@ -426,7 +420,7 @@ int test_pstream_truncated_input(void) {
     uint8_t* dec = pstream_decompress_in_chunks(comp, trunc_size, 1024, 1024, 1, &dec_size);
     /* Either the helper returns NULL (error during decode), or it returns a
      * partial buffer that doesn't match, in both cases, NOT a clean success. */
-    int ok = (dec == NULL) || (dec_size != size);
+    const int ok = (dec == NULL) || (dec_size != size);
     free(src);
     free(comp);
     free(dec);
@@ -439,13 +433,13 @@ int test_pstream_corrupted_magic(void) {
     /* Hand-craft 16 bogus bytes of "file header". */
     uint8_t junk[16];
     for (int i = 0; i < 16; i++) junk[i] = (uint8_t)(0xAA ^ i);
-    zxc_decompress_opts_t opts = {0};
+    const zxc_decompress_opts_t opts = {0};
     zxc_dstream* ds = zxc_dstream_create(&opts);
     if (!ds) return 0;
     uint8_t out_buf[64];
     zxc_outbuf_t out = {out_buf, sizeof out_buf, 0};
     zxc_inbuf_t in = {junk, sizeof junk, 0};
-    int64_t r = zxc_dstream_decompress(ds, &out, &in);
+    const int64_t r = zxc_dstream_decompress(ds, &out, &in);
     int ok = (r == ZXC_ERROR_BAD_MAGIC);
     if (!ok) printf("FAIL: expected ZXC_ERROR_BAD_MAGIC (-4), got %lld\n", (long long)r);
     /* Sticky error: subsequent call returns the same code. */
@@ -455,6 +449,192 @@ int test_pstream_corrupted_magic(void) {
         ok = 0;
     }
     zxc_dstream_free(ds);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* Decompress a SEEKABLE archive through the pstream API: after the EOF block
+ * the decoder peeks 8 bytes, recognises a SEK block, and skips its payload
+ * in DS_DRAIN_SEK_PAYLOAD before consuming the file footer. */
+int test_pstream_decode_seekable_archive(void) {
+    printf("=== TEST: PStream decodes seekable archive (DS_DRAIN_SEK_PAYLOAD) ===\n");
+    const size_t size = 96 * 1024; /* > one default block to force >1 SEK entry */
+    uint8_t* src = (uint8_t*)malloc(size);
+    if (!src) return 0;
+    gen_lz_data(src, size);
+
+    /* Compress with seekable=1 via the buffer API (pstream cstream forces
+     * seekable=0, so we need another producer to emit a SEK block). */
+    const uint64_t bound = zxc_compress_bound(size);
+    uint8_t* comp = (uint8_t*)malloc((size_t)bound);
+    if (!comp) {
+        free(src);
+        return 0;
+    }
+    const zxc_compress_opts_t copts = {
+        .level = 3, .checksum_enabled = 1, .seekable = 1, .block_size = 32 * 1024};
+    const int64_t comp_size = zxc_compress(src, size, comp, (size_t)bound, &copts);
+    if (comp_size <= 0) {
+        printf("FAIL: zxc_compress(seekable=1) returned %lld\n", (long long)comp_size);
+        free(src);
+        free(comp);
+        return 0;
+    }
+
+    /* Drive the seekable blob through zxc_dstream_decompress and check that
+     * decoded bytes match the source. We feed the input in 4 KB chunks and
+     * receive the output via 8 KB chunks: this stresses the SEK skip across
+     * multiple calls (DS_DRAIN_SEK_PAYLOAD returns when the input is exhausted
+     * mid-skip). */
+    const zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
+    zxc_dstream* ds = zxc_dstream_create(&dopts);
+    if (!ds) {
+        free(src);
+        free(comp);
+        return 0;
+    }
+    uint8_t* dec = (uint8_t*)malloc(size);
+    /* Zero-initialised: the decoder writes the first `out.pos` bytes per call
+     * but cppcheck cannot see through the pointer chain in zxc_outbuf_t. */
+    uint8_t out_chunk[8192] = {0};
+    if (!dec) {
+        zxc_dstream_free(ds);
+        free(src);
+        free(comp);
+        return 0;
+    }
+    size_t dec_used = 0;
+    size_t in_off = 0;
+    const size_t in_step = 4096;
+    int ok = 1;
+    while (in_off < (size_t)comp_size && !zxc_dstream_finished(ds)) {
+        const size_t n =
+            ((size_t)comp_size - in_off) < in_step ? ((size_t)comp_size - in_off) : in_step;
+        zxc_inbuf_t in = {comp + in_off, n, 0};
+        zxc_outbuf_t out = {out_chunk, sizeof out_chunk, 0};
+        const int64_t r = zxc_dstream_decompress(ds, &out, &in);
+        if (r < 0) {
+            printf("FAIL: zxc_dstream_decompress returned %lld\n", (long long)r);
+            ok = 0;
+            break;
+        }
+        if (dec_used + out.pos > size) {
+            printf("FAIL: decoded bytes exceed source size\n");
+            ok = 0;
+            break;
+        }
+        memcpy(dec + dec_used, out_chunk, out.pos);
+        dec_used += out.pos;
+        in_off += in.pos;
+        if (in.pos == 0 && out.pos == 0) break; /* no progress */
+    }
+    if (ok && !zxc_dstream_finished(ds)) {
+        printf("FAIL: decoder did not finalise after consuming seekable input\n");
+        ok = 0;
+    }
+    if (ok && (dec_used != size || memcmp(dec, src, size) != 0)) {
+        printf("FAIL: decoded payload does not match source\n");
+        ok = 0;
+    }
+    zxc_dstream_free(ds);
+    free(src);
+    free(comp);
+    free(dec);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* Calling _compress() after _end() has started transitioning to a drain-tail
+ * state must return ZXC_ERROR_NULL_INPUT. Covers the
+ * `case CS_DRAIN_LAST/CS_DRAIN_EOF/CS_DRAIN_FOOTER/CS_ERRORED:` branch in
+ * zxc_cstream_compress(). */
+int test_pstream_compress_after_end_rejected(void) {
+    printf("=== TEST: PStream _compress() after _end() -> ZXC_ERROR_NULL_INPUT ===\n");
+    const zxc_compress_opts_t opts = {.level = 3};
+    zxc_cstream* cs = zxc_cstream_create(&opts);
+    if (!cs) return 0;
+
+    /* Feed a few bytes so _end has actual residual data to flush. */
+    uint8_t src[64];
+    for (size_t i = 0; i < sizeof src; i++) src[i] = (uint8_t)i;
+    uint8_t obuf[1024];
+    zxc_inbuf_t in = {src, sizeof src, 0};
+    zxc_outbuf_t out = {obuf, sizeof obuf, 0};
+    if (zxc_cstream_compress(cs, &out, &in) < 0) {
+        zxc_cstream_free(cs);
+        return 0;
+    }
+
+    /* Tiny output buffer so _end returns >0 (still pending) and the stream
+     * is parked in CS_DRAIN_LAST / CS_DRAIN_EOF / CS_DRAIN_FOOTER. */
+    uint8_t tiny[4];
+    zxc_outbuf_t tiny_out = {tiny, sizeof tiny, 0};
+    const int64_t pending = zxc_cstream_end(cs, &tiny_out);
+    if (pending <= 0) {
+        printf("FAIL: expected _end() to return >0 with tiny output, got %lld\n",
+               (long long)pending);
+        zxc_cstream_free(cs);
+        return 0;
+    }
+
+    /* Now state contains {CS_DRAIN_LAST, CS_DRAIN_EOF, CS_DRAIN_FOOTER}. _compress
+     * must reject. */
+    zxc_inbuf_t more = {src, sizeof src, 0};
+    zxc_outbuf_t out2 = {obuf, sizeof obuf, 0};
+    const int64_t r = zxc_cstream_compress(cs, &out2, &more);
+    const int ok = (r == ZXC_ERROR_NULL_INPUT);
+    if (!ok) printf("FAIL: expected ZXC_ERROR_NULL_INPUT (-12), got %lld\n", (long long)r);
+    zxc_cstream_free(cs);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* When _compress() fills a block but the caller's output buffer is too small
+ * to drain it in one call, the next _compress() resumes at CS_DRAIN_BLOCK.
+ * This test exercises that resume path inside zxc_cstream_compress (distinct
+ * from the CS_DRAIN_BLOCK case in _end). */
+int test_pstream_compress_drain_block_resume(void) {
+    printf("=== TEST: PStream _compress() resumes CS_DRAIN_BLOCK across calls ===\n");
+    /* Small block size so we trigger the block boundary quickly. */
+    const zxc_compress_opts_t opts = {.level = 3, .block_size = 4096};
+    zxc_cstream* cs = zxc_cstream_create(&opts);
+    if (!cs) return 0;
+
+    /* Enough input for one full block (+ a little) but no more. */
+    const size_t src_size = 4096 + 256;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    if (!src) {
+        zxc_cstream_free(cs);
+        return 0;
+    }
+    gen_lz_data(src, src_size);
+
+    /* Output buffer smaller than one compressed block: forces partial drains
+     * and re-entries into CS_DRAIN_BLOCK. Zero-initialised to silence the
+     * cppcheck false-positive that fires when an uninit array's address is
+     * stored in zxc_outbuf_t.dst. */
+    uint8_t obuf[37] = {0};
+    zxc_inbuf_t in = {src, src_size, 0};
+    int saw_pending_drain = 0;
+    int ok = 1;
+    /* Drive the loop until input is exhausted; if any call returns >0 it
+     * means the next call will hit CS_DRAIN_BLOCK in the switch. */
+    while (in.pos < in.size) {
+        zxc_outbuf_t out = {obuf, sizeof obuf, 0};
+        const int64_t r = zxc_cstream_compress(cs, &out, &in);
+        if (r < 0) {
+            printf("FAIL: _compress returned %lld\n", (long long)r);
+            ok = 0;
+            break;
+        }
+        if (r > 0) saw_pending_drain = 1;
+    }
+    if (ok && !saw_pending_drain) {
+        printf("FAIL: expected at least one >0 return to exercise CS_DRAIN_BLOCK resume\n");
+        ok = 0;
+    }
+    zxc_cstream_free(cs);
+    free(src);
     if (ok) printf("PASS\n\n");
     return ok;
 }
