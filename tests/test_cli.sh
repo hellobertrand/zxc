@@ -333,7 +333,7 @@ fi
 
 # 12. Compression Levels (All)
 echo "Testing All Compression Levels..."
-for LEVEL in 1 2 3 4 5; do
+for LEVEL in 1 2 3 4 5 6; do
     "$ZXC_BIN" -$LEVEL -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_lvl${LEVEL}.zxc"
     if [ ! -f "$TEST_DIR/test_lvl${LEVEL}.zxc" ]; then
         log_fail "Compression level $LEVEL failed"
@@ -850,7 +850,7 @@ fi
 # 24.6 Seekable across all levels
 echo "  Testing seekable across all levels..."
 SEEK_ALL_OK=1
-for LEVEL in 1 2 3 4 5; do
+for LEVEL in 1 2 3 4 5 6; do
     "$ZXC_BIN" -$LEVEL -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_lvl${LEVEL}.zxc"
     "$ZXC_BIN" -d -c "$TEST_DIR/seekable_lvl${LEVEL}.zxc" > "$TEST_DIR/seekable_lvl${LEVEL}.dec"
     if ! cmp -s "$TEST_FILE" "$TEST_DIR/seekable_lvl${LEVEL}.dec"; then

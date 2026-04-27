@@ -67,7 +67,7 @@ ZXC_EXPORT int zxc_min_level(void);
 /**
  * @brief Returns the maximum supported compression level.
  *
- * Currently returns @ref ZXC_LEVEL_COMPACT (5).
+ * Currently returns @ref ZXC_LEVEL_MAX (6).
  *
  * @return Maximum compression level value.
  */

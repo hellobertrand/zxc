@@ -168,7 +168,7 @@ int test_decompress_block_safe() {
     printf("=== TEST: Unit - zxc_decompress_block_safe ===\n");
 
     const size_t sizes[] = {4 * 1024, 64 * 1024, 256 * 1024, 2 * 1024 * 1024};
-    const int levels[] = {1, 3, 5};
+    const int levels[] = {1, 3, 5, 6};
 
     /* 1. Roundtrip with dst_capacity == uncompressed_size at multiple sizes & levels. */
     for (size_t si = 0; si < sizeof(sizes) / sizeof(sizes[0]); si++) {

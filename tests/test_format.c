@@ -6,6 +6,7 @@
  */
 
 #include "test_common.h"
+#include "../src/lib/zxc_huffman.h"
 
 /*
  * Test for zxc_br_init and zxc_br_ensure
@@ -84,6 +85,114 @@ int test_bitpack() {
     if (zxc_le32(dst) != 0x12345678) return 0;
     printf("  [PASS] Bitpack 32 bits\n");
 
+    printf("PASS\n\n");
+    return 1;
+}
+
+/* Round-trip the Huffman codec over a few representative literal distributions. */
+static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t n) {
+    uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
+    for (size_t i = 0; i < n; i++) freq[literals[i]]++;
+
+    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+    if (zxc_huf_build_code_lengths(freq, code_len) != ZXC_OK) {
+        printf("Failed [%s]: build_code_lengths\n", label);
+        return 0;
+    }
+    /* Validate the lengths-limit invariant. */
+    for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
+        if (code_len[i] > ZXC_HUF_MAX_CODE_LEN) {
+            printf("Failed [%s]: code_len[%d] = %d > %d\n", label, i, code_len[i],
+                   ZXC_HUF_MAX_CODE_LEN);
+            return 0;
+        }
+    }
+
+    /* Worst-case payload size: 134-byte header + n bytes (RAW upper bound). */
+    const size_t cap = ZXC_HUF_HEADER_SIZE + n + 64;
+    uint8_t* enc = (uint8_t*)malloc(cap);
+    uint8_t* dec = (uint8_t*)malloc(n);
+    if (!enc || !dec) {
+        free(enc);
+        free(dec);
+        printf("Failed [%s]: alloc\n", label);
+        return 0;
+    }
+
+    const int written = zxc_huf_encode_section(literals, n, code_len, enc, cap);
+    if (written < 0) {
+        free(enc);
+        free(dec);
+        printf("Failed [%s]: encode_section -> %d\n", label, written);
+        return 0;
+    }
+
+    const int rc = zxc_huf_decode_section(enc, (size_t)written, dec, n);
+    if (rc != ZXC_OK) {
+        free(enc);
+        free(dec);
+        printf("Failed [%s]: decode_section -> %d\n", label, rc);
+        return 0;
+    }
+
+    if (memcmp(literals, dec, n) != 0) {
+        free(enc);
+        free(dec);
+        printf("Failed [%s]: roundtrip mismatch\n", label);
+        return 0;
+    }
+
+    free(enc);
+    free(dec);
+    printf("  [PASS] %s (n=%zu, encoded=%d B, ratio=%.1f%%)\n", label, n, written,
+           100.0 * (double)written / (double)n);
+    return 1;
+}
+
+int test_huffman_codec() {
+    printf("=== TEST: Unit - Huffman Codec (build/encode/decode roundtrip) ===\n");
+
+    const size_t N = 8192;
+    uint8_t* buf = (uint8_t*)malloc(N);
+    if (!buf) return 0;
+
+    /* Case 1: heavily skewed (90% one byte, 10% noise). */
+    for (size_t i = 0; i < N; i++) buf[i] = (rand() % 10 == 0) ? (uint8_t)(rand() & 0xFF) : 'A';
+    if (!huf_roundtrip_case("Skewed (90% 'A')", buf, N)) {
+        free(buf);
+        return 0;
+    }
+
+    /* Case 2: uniform random — Huffman should be near no-op (~1 byte/sym). */
+    for (size_t i = 0; i < N; i++) buf[i] = (uint8_t)(rand() & 0xFF);
+    if (!huf_roundtrip_case("Uniform random", buf, N)) {
+        free(buf);
+        return 0;
+    }
+
+    /* Case 3: two-symbol alphabet — best case, ~1 bit/symbol. */
+    for (size_t i = 0; i < N; i++) buf[i] = (rand() & 1) ? 'X' : 'Y';
+    if (!huf_roundtrip_case("Two-symbol alphabet", buf, N)) {
+        free(buf);
+        return 0;
+    }
+
+    /* Case 4: single-symbol — degenerate but must still roundtrip. */
+    for (size_t i = 0; i < N; i++) buf[i] = 'Z';
+    if (!huf_roundtrip_case("Single-symbol", buf, N)) {
+        free(buf);
+        return 0;
+    }
+
+    /* Case 5: small block (just above the min-literals threshold). */
+    for (size_t i = 0; i < ZXC_HUF_MIN_LITERALS; i++)
+        buf[i] = (rand() % 4 == 0) ? (uint8_t)(rand() & 0xFF) : 'k';
+    if (!huf_roundtrip_case("Small block at threshold", buf, ZXC_HUF_MIN_LITERALS)) {
+        free(buf);
+        return 0;
+    }
+
+    free(buf);
     printf("PASS\n\n");
     return 1;
 }

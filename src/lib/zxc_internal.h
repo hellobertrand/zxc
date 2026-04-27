@@ -551,7 +551,8 @@ typedef struct {
  * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
-    if (level >= ZXC_LEVEL_COMPACT) return (zxc_lz77_params_t){64, 256, 1, 16, 128, 1, 8};
+    if (level >= 6) return (zxc_lz77_params_t){128, 512, 1, 32, 256, 1, 8};
+    if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 128, 1, 8};
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
     // step_shift
     static const zxc_lz77_params_t table[5] = {
@@ -600,8 +601,15 @@ typedef enum {
  * or offsets) are stored within a block.
  * - `ZXC_SECTION_ENCODING_RAW`: Data is stored uncompressed.
  * - `ZXC_SECTION_ENCODING_RLE`: Run-Length Encoding.
+ * - `ZXC_SECTION_ENCODING_HUFFMAN`: Canonical Huffman, 4-way interleaved
+ *   sub-streams, max 11-bit codes, LSB-first. Only valid for the literal
+ *   stream (`enc_lit`) of GLO blocks. Produced exclusively at level >= 6.
  */
-typedef enum { ZXC_SECTION_ENCODING_RAW = 0, ZXC_SECTION_ENCODING_RLE = 1 } zxc_section_encoding_t;
+typedef enum {
+    ZXC_SECTION_ENCODING_RAW = 0,
+    ZXC_SECTION_ENCODING_RLE = 1,
+    ZXC_SECTION_ENCODING_HUFFMAN = 2
+} zxc_section_encoding_t;
 
 /**
  * @struct zxc_gnr_header_t
