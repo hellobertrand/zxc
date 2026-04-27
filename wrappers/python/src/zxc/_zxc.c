@@ -568,7 +568,7 @@ static PyObject* pyzxc_cstream_compress(PyObject* self, PyObject* args, PyObject
     size_t out_cap = zxc_cstream_out_size(cs);
     if (out_cap < 4096) out_cap = 4096;
     size_t out_len = 0;
-    uint8_t* out_buf = (uint8_t*)PyMem_Malloc(out_cap);
+    uint8_t* out_buf = (uint8_t*)malloc(out_cap);
     if (!out_buf) {
         PyBuffer_Release(&view);
         return PyErr_NoMemory();
@@ -585,7 +585,7 @@ static PyObject* pyzxc_cstream_compress(PyObject* self, PyObject* args, PyObject
         if (out_cap - out_len < want) {
             size_t new_cap = out_cap * 2;
             if (new_cap < out_len + want) new_cap = out_len + want;
-            uint8_t* nb = (uint8_t*)PyMem_Realloc(out_buf, new_cap);
+            uint8_t* nb = (uint8_t*)realloc(out_buf, new_cap);
             if (!nb) {
                 oom = 1;
                 break;
@@ -609,16 +609,16 @@ static PyObject* pyzxc_cstream_compress(PyObject* self, PyObject* args, PyObject
         PyBuffer_Release(&view);
 
     if (oom) {
-        PyMem_Free(out_buf);
+        free(out_buf);
         return PyErr_NoMemory();
     }
     if (err_code) {
-        PyMem_Free(out_buf);
+        free(out_buf);
         Py_Return_Err(PyExc_RuntimeError, zxc_error_name(err_code));
     }
 
     PyObject* result = PyBytes_FromStringAndSize((const char*)out_buf, (Py_ssize_t)out_len);
-    PyMem_Free(out_buf);
+    free(out_buf);
     return result;
 }
 
@@ -635,7 +635,7 @@ static PyObject* pyzxc_cstream_end(PyObject* self, PyObject* args, PyObject* kwa
     size_t out_cap = zxc_cstream_out_size(cs);
     if (out_cap < 4096) out_cap = 4096;
     size_t out_len = 0;
-    uint8_t* out_buf = (uint8_t*)PyMem_Malloc(out_cap);
+    uint8_t* out_buf = (uint8_t*)malloc(out_cap);
     if (!out_buf) return PyErr_NoMemory();
 
     int err_code = 0;
@@ -644,7 +644,7 @@ static PyObject* pyzxc_cstream_end(PyObject* self, PyObject* args, PyObject* kwa
     Py_BEGIN_ALLOW_THREADS for (;;) {
         if (out_cap - out_len < 4096) {
             size_t new_cap = out_cap * 2;
-            uint8_t* nb = (uint8_t*)PyMem_Realloc(out_buf, new_cap);
+            uint8_t* nb = (uint8_t*)realloc(out_buf, new_cap);
             if (!nb) {
                 oom = 1;
                 break;
@@ -664,15 +664,15 @@ static PyObject* pyzxc_cstream_end(PyObject* self, PyObject* args, PyObject* kwa
     Py_END_ALLOW_THREADS
 
         if (oom) {
-        PyMem_Free(out_buf);
+        free(out_buf);
         return PyErr_NoMemory();
     }
     if (err_code) {
-        PyMem_Free(out_buf);
+        free(out_buf);
         Py_Return_Err(PyExc_RuntimeError, zxc_error_name(err_code));
     }
     PyObject* result = PyBytes_FromStringAndSize((const char*)out_buf, (Py_ssize_t)out_len);
-    PyMem_Free(out_buf);
+    free(out_buf);
     return result;
 }
 
@@ -748,7 +748,7 @@ static PyObject* pyzxc_dstream_decompress(PyObject* self, PyObject* args, PyObje
     size_t out_cap = zxc_dstream_out_size(ds);
     if (out_cap < 4096) out_cap = 4096;
     size_t out_len = 0;
-    uint8_t* out_buf = (uint8_t*)PyMem_Malloc(out_cap);
+    uint8_t* out_buf = (uint8_t*)malloc(out_cap);
     if (!out_buf) {
         PyBuffer_Release(&view);
         return PyErr_NoMemory();
@@ -764,7 +764,7 @@ static PyObject* pyzxc_dstream_decompress(PyObject* self, PyObject* args, PyObje
         if (out_cap - out_len < want) {
             size_t new_cap = out_cap * 2;
             if (new_cap < out_len + want) new_cap = out_len + want;
-            uint8_t* nb = (uint8_t*)PyMem_Realloc(out_buf, new_cap);
+            uint8_t* nb = (uint8_t*)realloc(out_buf, new_cap);
             if (!nb) {
                 oom = 1;
                 break;
@@ -773,33 +773,39 @@ static PyObject* pyzxc_dstream_decompress(PyObject* self, PyObject* args, PyObje
             out_cap = new_cap;
         }
         zxc_outbuf_t out = {.dst = out_buf + out_len, .size = out_cap - out_len, .pos = 0};
-        const size_t before_in = in.pos;
+        /* Once the caller's input is consumed, switch to an empty descriptor
+         * so the dstream can flush any decoded bytes still staged inside its
+         * internal buffer (a single user input chunk may decode N blocks but
+         * only emit N-1 if our staging filled mid-block). */
+        zxc_inbuf_t empty_in = {.src = NULL, .size = 0, .pos = 0};
+        zxc_inbuf_t* cur_in = (in.pos < in.size) ? &in : &empty_in;
+        const size_t before_in = cur_in->pos;
         const size_t before_out = out.pos;
-        const int64_t r = zxc_dstream_decompress(ds, &out, &in);
+        const int64_t r = zxc_dstream_decompress(ds, &out, cur_in);
         out_len += out.pos;
         if (r < 0) {
             err_code = (int)r;
             break;
         }
-        /* Stop when no progress was made or the input is exhausted. */
-        if (in.pos == before_in && out.pos == before_out) break;
-        if (in.pos == in.size) break;
+        /* Keep draining even after input is exhausted; stop only when no
+         * progress was made (no input consumed AND no output produced). */
+        if (cur_in->pos == before_in && out.pos == before_out) break;
     }
     Py_END_ALLOW_THREADS
 
         PyBuffer_Release(&view);
 
     if (oom) {
-        PyMem_Free(out_buf);
+        free(out_buf);
         return PyErr_NoMemory();
     }
     if (err_code) {
-        PyMem_Free(out_buf);
+        free(out_buf);
         Py_Return_Err(PyExc_RuntimeError, zxc_error_name(err_code));
     }
 
     PyObject* result = PyBytes_FromStringAndSize((const char*)out_buf, (Py_ssize_t)out_len);
-    PyMem_Free(out_buf);
+    free(out_buf);
     return result;
 }
 
