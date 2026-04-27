@@ -394,6 +394,45 @@ int test_pstream_invalid_args(void) {
     if (zxc_cstream_out_size(NULL) != 0) return 0;
     if (zxc_dstream_in_size(NULL) != 0) return 0;
     if (zxc_dstream_out_size(NULL) != 0) return 0;
+
+    /* Malformed descriptors must be rejected before any helper does an
+     * unchecked memcpy() that could underflow size_t arithmetic or
+     * dereference NULL. */
+    {
+        const zxc_decompress_opts_t dopts = {0};
+        zxc_dstream* ds = zxc_dstream_create(&dopts);
+        if (!ds) return 0;
+        uint8_t buf[16] = {0};
+        zxc_outbuf_t good_out = {buf, sizeof buf, 0};
+
+        /* in->pos > in->size */
+        zxc_inbuf_t bad1 = {buf, 4, 5};
+        if (zxc_dstream_decompress(ds, &good_out, &bad1) != ZXC_ERROR_NULL_INPUT) {
+            zxc_dstream_free(ds);
+            return 0;
+        }
+        /* out->pos > out->size */
+        zxc_outbuf_t bad_out = {buf, 4, 5};
+        zxc_inbuf_t empty_in = {NULL, 0, 0};
+        if (zxc_dstream_decompress(ds, &bad_out, &empty_in) != ZXC_ERROR_NULL_INPUT) {
+            zxc_dstream_free(ds);
+            return 0;
+        }
+        /* in claims bytes but src is NULL */
+        zxc_inbuf_t bad2 = {NULL, 16, 0};
+        if (zxc_dstream_decompress(ds, &good_out, &bad2) != ZXC_ERROR_NULL_INPUT) {
+            zxc_dstream_free(ds);
+            return 0;
+        }
+        /* out claims capacity but dst is NULL */
+        zxc_outbuf_t bad_out2 = {NULL, 16, 0};
+        if (zxc_dstream_decompress(ds, &bad_out2, &empty_in) != ZXC_ERROR_NULL_INPUT) {
+            zxc_dstream_free(ds);
+            return 0;
+        }
+        zxc_dstream_free(ds);
+    }
+
     /* free(NULL) is a no-op, must not crash. */
     zxc_cstream_free(NULL);
     zxc_dstream_free(NULL);

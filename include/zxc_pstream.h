@@ -121,9 +121,14 @@ typedef struct zxc_dstream_s zxc_dstream;
  * @c n_threads is ignored (this API is single-threaded; use
  * @ref zxc_stream_compress for the multi-threaded @c FILE* pipeline).
  *
+ * If @p opts is not @c NULL, the honoured fields must contain valid values.
+ * Invalid option values (for example an unsupported @c block_size) cause
+ * stream creation to fail.
+ *
  * @param[in] opts  Compression options, or @c NULL for all defaults.
  * @return Allocated context to be released with @ref zxc_cstream_free,
- *         or @c NULL on memory allocation failure.
+ *         or @c NULL if stream creation fails due to memory allocation
+ *         failure or invalid option values in @p opts.
  */
 ZXC_EXPORT zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts);
 

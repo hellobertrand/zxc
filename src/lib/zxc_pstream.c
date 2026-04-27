@@ -579,7 +579,10 @@ static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
 }
 
 int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* in) {
-    if (UNLIKELY(!ds || !out || !in)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!ds || !out || !in || in->pos > in->size || out->pos > out->size ||
+                 (in->size > in->pos && !in->src) || (out->size > out->pos && !out->dst))) {
+        return ZXC_ERROR_NULL_INPUT;
+    }
     if (UNLIKELY(ds->state == DS_ERRORED)) return ds->error_code;
     if (UNLIKELY(ds->state == DS_DONE)) return 0;
 
