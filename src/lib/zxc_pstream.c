@@ -509,6 +509,113 @@ static int ds_drain_decoded(zxc_dstream* ds, zxc_outbuf_t* out, size_t* produced
     return ds->decoded_pos == ds->decoded_size;
 }
 
+static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
+    if (!ds_pull_scratch(ds, in)) return 1;
+
+    size_t bs = 0;
+    int has_csum = 0;
+    const int rc = zxc_read_file_header(ds->scratch, ds->scratch_used, &bs, &has_csum);
+    if (UNLIKELY(rc != ZXC_OK)) {
+        ds->error_code = rc;
+        ds->state = DS_ERRORED;
+        return rc;
+    }
+    ds->block_size = bs;
+    ds->file_has_checksum = has_csum;
+
+    /* Allocate payload + decoded buffers now that block_size is known. */
+    const uint64_t pb = zxc_compress_block_bound(ds->block_size);
+    // LCOV_EXCL_START
+    if (UNLIKELY(pb == 0 || pb > SIZE_MAX)) {
+        ds->error_code = ZXC_ERROR_OVERFLOW;
+        ds->state = DS_ERRORED;
+        return ZXC_ERROR_OVERFLOW;
+    }
+    // LCOV_EXCL_STOP
+    ds->payload_cap = (size_t)pb;
+    ds->payload = (uint8_t*)malloc(ds->payload_cap);
+
+    /* Decoded buffer is sized for the wild-copy fast path: block_size +
+     * ZXC_PAD_SIZE; same pattern as the buffer API uses internally.  Real
+     * decoded payload lives in [0..decoded_size); the trailing PAD bytes
+     * hold wild-copy overflow we never emit. */
+    ds->decoded_cap = ds->block_size + ZXC_PAD_SIZE;
+    ds->decoded = (uint8_t*)malloc(ds->decoded_cap);
+    // LCOV_EXCL_START
+    if (UNLIKELY(!ds->payload || !ds->decoded)) {
+        ds->error_code = ZXC_ERROR_MEMORY;
+        ds->state = DS_ERRORED;
+        return ZXC_ERROR_MEMORY;
+    }
+
+    if (UNLIKELY(zxc_cctx_init(&ds->inner, ds->block_size, 0, 0,
+                               ds->file_has_checksum && ds->opts.checksum_enabled) != ZXC_OK)) {
+        ds->error_code = ZXC_ERROR_MEMORY;
+        ds->state = DS_ERRORED;
+        return ZXC_ERROR_MEMORY;
+    }
+    // LCOV_EXCL_STOP
+    ds->inner_initialized = 1;
+
+    ds->state = DS_NEED_BLOCK_HEADER;
+    ds->scratch_used = 0;
+    ds->scratch_need = ZXC_BLOCK_HEADER_SIZE;
+    return 0;
+}
+
+static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
+    if (!ds_pull_scratch(ds, in)) return 1;
+
+    const int rc = zxc_read_block_header(ds->scratch, ds->scratch_used, &ds->cur_bh);
+    if (UNLIKELY(rc != ZXC_OK)) {
+        ds->error_code = rc;
+        ds->state = DS_ERRORED;
+        return rc;
+    }
+
+    if (ds->cur_bh.block_type == (uint8_t)ZXC_BLOCK_EOF) {
+        /* EOF block: comp_size must be 0; no payload, no checksum. */
+        if (UNLIKELY(ds->cur_bh.comp_size != 0)) {
+            ds->error_code = ZXC_ERROR_BAD_BLOCK_SIZE;
+            ds->state = DS_ERRORED;
+            return ZXC_ERROR_BAD_BLOCK_SIZE;
+        }
+        ds->state = DS_PEEK_TAIL;
+        ds->scratch_used = 0;
+        ds->scratch_need = ZXC_BLOCK_HEADER_SIZE; /* sniff */
+        return 0;
+    }
+
+    /* Normal data block: read comp_size [+ 4 if file-level checksums]. */
+    const uint64_t need = (uint64_t)ds->cur_bh.comp_size + (ds->file_has_checksum ? 4u : 0u);
+    if (UNLIKELY(need > ds->payload_cap)) {
+        ds->error_code = ZXC_ERROR_BAD_BLOCK_SIZE;
+        ds->state = DS_ERRORED;
+        return ZXC_ERROR_BAD_BLOCK_SIZE;
+    }
+
+    /* Feed the full block (header + payload + opt csum) to zxc_decompress_block,
+     * so prefix with the 8-byte header we just parsed. */
+    ZXC_MEMCPY(ds->payload, ds->scratch, ZXC_BLOCK_HEADER_SIZE);
+    ds->payload_used = ZXC_BLOCK_HEADER_SIZE;
+    ds->payload_need = (size_t)need + ZXC_BLOCK_HEADER_SIZE;
+    // LCOV_EXCL_START
+    if (UNLIKELY(ds->payload_need > ds->payload_cap)) {
+        /* grow */
+        uint8_t* nb = (uint8_t*)realloc(ds->payload, ds->payload_need);
+        if (UNLIKELY(!nb)) {
+            ds->error_code = ZXC_ERROR_MEMORY;
+            ds->state = DS_ERRORED;
+            return ZXC_ERROR_MEMORY;
+        }
+        ds->payload = nb;
+        ds->payload_cap = ds->payload_need;
+    }
+    // LCOV_EXCL_STOP
+    ds->state = DS_NEED_BLOCK_PAYLOAD;
+    return 0;
+}
+
 int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* in) {
     if (UNLIKELY(!ds || !out || !in)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(ds->state == DS_ERRORED)) return ds->error_code;
@@ -519,113 +626,16 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
     for (;;) {
         switch (ds->state) {
             case DS_NEED_FILE_HEADER: {
-                if (!ds_pull_scratch(ds, in)) return (int64_t)produced;
-                size_t bs = 0;
-                int has_csum = 0;
-                const int rc = zxc_read_file_header(ds->scratch, ds->scratch_used, &bs, &has_csum);
-                if (UNLIKELY(rc != ZXC_OK)) {
-                    ds->error_code = rc;
-                    ds->state = DS_ERRORED;
-                    return rc;
-                }
-                ds->block_size = bs;
-                ds->file_has_checksum = has_csum;
-
-                /* Allocate payload + decoded buffers now that block_size is known. */
-                const uint64_t pb = zxc_compress_block_bound(ds->block_size);
-                // LCOV_EXCL_START
-                if (UNLIKELY(pb == 0 || pb > SIZE_MAX)) {
-                    ds->error_code = ZXC_ERROR_OVERFLOW;
-                    ds->state = DS_ERRORED;
-                    return ZXC_ERROR_OVERFLOW;
-                }
-                // LCOV_EXCL_STOP
-                ds->payload_cap = (size_t)pb;
-                ds->payload = (uint8_t*)malloc(ds->payload_cap);
-
-                /* Decoded buffer is sized for the wild-copy fast path:
-                 * block_size + ZXC_PAD_SIZE; same allocation pattern as
-                 * the buffer API uses internally.  Real decoded payload
-                 * lives in [0..decoded_size); the trailing PAD bytes hold
-                 * wild-copy overflow we never emit. */
-                ds->decoded_cap = ds->block_size + ZXC_PAD_SIZE;
-                ds->decoded = (uint8_t*)malloc(ds->decoded_cap);
-                // LCOV_EXCL_START
-                if (UNLIKELY(!ds->payload || !ds->decoded)) {
-                    ds->error_code = ZXC_ERROR_MEMORY;
-                    ds->state = DS_ERRORED;
-                    return ZXC_ERROR_MEMORY;
-                }
-                // LCOV_EXCL_STOP
-
-                // LCOV_EXCL_START
-                if (UNLIKELY(zxc_cctx_init(&ds->inner, ds->block_size, 0, 0,
-                                           ds->file_has_checksum && ds->opts.checksum_enabled) !=
-                             ZXC_OK)) {
-                    ds->error_code = ZXC_ERROR_MEMORY;
-                    ds->state = DS_ERRORED;
-                    return ZXC_ERROR_MEMORY;
-                }
-                // LCOV_EXCL_STOP
-                ds->inner_initialized = 1;
-
-                ds->state = DS_NEED_BLOCK_HEADER;
-                ds->scratch_used = 0;
-                ds->scratch_need = ZXC_BLOCK_HEADER_SIZE;
+                const int rc = ds_handle_need_file_header(ds, in);
+                if (rc == 1) return (int64_t)produced;
+                if (rc < 0) return rc;
                 break;
             }
 
             case DS_NEED_BLOCK_HEADER: {
-                if (!ds_pull_scratch(ds, in)) return (int64_t)produced;
-                const int rc = zxc_read_block_header(ds->scratch, ds->scratch_used, &ds->cur_bh);
-                if (UNLIKELY(rc != ZXC_OK)) {
-                    ds->error_code = rc;
-                    ds->state = DS_ERRORED;
-                    return rc;
-                }
-                if (ds->cur_bh.block_type == (uint8_t)ZXC_BLOCK_EOF) {
-                    /* EOF block: comp_size must be 0; no payload, no checksum. */
-                    if (UNLIKELY(ds->cur_bh.comp_size != 0)) {
-                        ds->error_code = ZXC_ERROR_BAD_BLOCK_SIZE;
-                        ds->state = DS_ERRORED;
-                        return ZXC_ERROR_BAD_BLOCK_SIZE;
-                    }
-                    ds->state = DS_PEEK_TAIL;
-                    ds->scratch_used = 0;
-                    ds->scratch_need = ZXC_BLOCK_HEADER_SIZE; /* sniff */
-                    break;
-                }
-
-                /* Normal data block: read comp_size [+ 4 if file-level checksums]. */
-                const uint64_t need =
-                    (uint64_t)ds->cur_bh.comp_size + (ds->file_has_checksum ? 4u : 0u);
-                if (UNLIKELY(need > ds->payload_cap)) {
-                    ds->error_code = ZXC_ERROR_BAD_BLOCK_SIZE;
-                    ds->state = DS_ERRORED;
-                    return ZXC_ERROR_BAD_BLOCK_SIZE;
-                }
-                ds->payload_need = (size_t)need;
-                ds->payload_used = 0;
-                /* We need to feed the full block (header + payload + opt csum) to
-                 * zxc_decompress_block, so prefix with the 8-byte header we just
-                 * parsed. */
-                ZXC_MEMCPY(ds->payload, ds->scratch, ZXC_BLOCK_HEADER_SIZE);
-                ds->payload_used = ZXC_BLOCK_HEADER_SIZE;
-                ds->payload_need += ZXC_BLOCK_HEADER_SIZE;
-                // LCOV_EXCL_START
-                if (UNLIKELY(ds->payload_need > ds->payload_cap)) {
-                    /* grow */
-                    uint8_t* nb = (uint8_t*)realloc(ds->payload, ds->payload_need);
-                    if (UNLIKELY(!nb)) {
-                        ds->error_code = ZXC_ERROR_MEMORY;
-                        ds->state = DS_ERRORED;
-                        return ZXC_ERROR_MEMORY;
-                    }
-                    ds->payload = nb;
-                    ds->payload_cap = ds->payload_need;
-                }
-                // LCOV_EXCL_STOP
-                ds->state = DS_NEED_BLOCK_PAYLOAD;
+                const int rc = ds_handle_need_block_header(ds, in);
+                if (rc == 1) return (int64_t)produced;
+                if (rc < 0) return rc;
                 break;
             }
 
