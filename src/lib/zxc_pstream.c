@@ -62,6 +62,16 @@ struct zxc_cstream_s {
     int error_code; /* sticky */
 };
 
+/* Latches a sticky error on the compression stream: stores `code` in
+ * cs->error_code, transitions the state to CS_ERRORED, and returns `code`.
+ * Once errored, subsequent _compress / _end calls return the same code
+ * without performing further work. */
+static int cs_set_error(zxc_cstream* cs, const int code) {
+    cs->error_code = code;
+    cs->state = CS_ERRORED;
+    return code;
+}
+
 /* Compress the contents of cs->in_block into cs->pending and update bookkeeping.
  * cs->in_used must be > 0.  Returns ZXC_OK on success, negative on failure. */
 static int cs_compress_one_block(zxc_cstream* cs) {
@@ -230,11 +240,7 @@ int64_t zxc_cstream_compress(zxc_cstream* cs, zxc_outbuf_t* out, zxc_inbuf_t* in
         switch (cs->state) {
             case CS_INIT: {
                 const int rc = cs_stage_file_header(cs);
-                if (UNLIKELY(rc < 0)) {
-                    cs->error_code = rc;
-                    cs->state = CS_ERRORED;
-                    return rc;
-                }
+                if (UNLIKELY(rc < 0)) return cs_set_error(cs, rc);  // LCOV_EXCL_LINE
                 cs->state = CS_DRAIN_HEADER;
                 break;
             }
@@ -263,11 +269,7 @@ int64_t zxc_cstream_compress(zxc_cstream* cs, zxc_outbuf_t* out, zxc_inbuf_t* in
 
                 if (cs->in_used == cs->block_size) {
                     const int rc = cs_compress_one_block(cs);
-                    if (UNLIKELY(rc < 0)) {
-                        cs->error_code = rc;
-                        cs->state = CS_ERRORED;
-                        return rc;
-                    }
+                    if (UNLIKELY(rc < 0)) return cs_set_error(cs, rc);  // LCOV_EXCL_LINE
                     cs->state = CS_DRAIN_BLOCK;
                     break;
                 }
@@ -296,11 +298,7 @@ int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out) {
             case CS_INIT: {
                 /* _end before any input, still need to emit file header. */
                 const int rc = cs_stage_file_header(cs);
-                if (UNLIKELY(rc < 0)) {
-                    cs->error_code = rc;
-                    cs->state = CS_ERRORED;
-                    return rc;
-                }
+                if (UNLIKELY(rc < 0)) return cs_set_error(cs, rc);  // LCOV_EXCL_LINE
                 cs->state = CS_DRAIN_HEADER;
                 break;
             }
@@ -322,22 +320,14 @@ int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out) {
                 /* Compress the residual partial block (if any), then EOF + footer. */
                 if (cs->in_used > 0) {
                     const int rc = cs_compress_one_block(cs);
-                    if (UNLIKELY(rc < 0)) {
-                        cs->error_code = rc;
-                        cs->state = CS_ERRORED;
-                        return rc;
-                    }
+                    if (UNLIKELY(rc < 0)) return cs_set_error(cs, rc);  // LCOV_EXCL_LINE
                     cs->state = CS_DRAIN_LAST;
                     break;
                 }
                 /* No residual data: go straight to EOF. */
                 {
                     const int rc = cs_stage_eof(cs);
-                    if (UNLIKELY(rc < 0)) {
-                        cs->error_code = rc;
-                        cs->state = CS_ERRORED;
-                        return rc;
-                    }
+                    if (UNLIKELY(rc < 0)) return cs_set_error(cs, rc);  // LCOV_EXCL_LINE
                     cs->state = CS_DRAIN_EOF;
                     break;
                 }
@@ -347,11 +337,7 @@ int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out) {
                 if (!cs_drain_pending(cs, out)) return (int64_t)(cs->pending_len - cs->pending_pos);
                 /* After last data block -> EOF. */
                 const int rc = cs_stage_eof(cs);
-                if (UNLIKELY(rc < 0)) {
-                    cs->error_code = rc;
-                    cs->state = CS_ERRORED;
-                    return rc;
-                }
+                if (UNLIKELY(rc < 0)) return cs_set_error(cs, rc);  // LCOV_EXCL_LINE
                 cs->state = CS_DRAIN_EOF;
                 break;
             }
@@ -359,11 +345,7 @@ int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out) {
             case CS_DRAIN_EOF: {
                 if (!cs_drain_pending(cs, out)) return (int64_t)(cs->pending_len - cs->pending_pos);
                 const int rc = cs_stage_footer(cs);
-                if (UNLIKELY(rc < 0)) {
-                    cs->error_code = rc;
-                    cs->state = CS_ERRORED;
-                    return rc;
-                }
+                if (UNLIKELY(rc < 0)) return cs_set_error(cs, rc);  // LCOV_EXCL_LINE
                 cs->state = CS_DRAIN_FOOTER;
                 break;
             }
@@ -433,6 +415,16 @@ struct zxc_dstream_s {
     dstream_state_t state;
     int error_code;
 };
+
+/* Latches a sticky error on the decompression stream: stores `code` in
+ * ds->error_code, transitions the state to DS_ERRORED, and returns `code`.
+ * Once errored, subsequent _decompress calls return the same code without
+ * performing further work. */
+static int ds_set_error(zxc_dstream* ds, const int code) {
+    ds->error_code = code;
+    ds->state = DS_ERRORED;
+    return code;
+}
 
 /* Copy up to (need - have) bytes from in into ds->scratch. Returns 1 if fully filled. */
 static int ds_pull_scratch(zxc_dstream* ds, zxc_inbuf_t* in) {
@@ -515,22 +507,14 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     size_t bs = 0;
     int has_csum = 0;
     const int rc = zxc_read_file_header(ds->scratch, ds->scratch_used, &bs, &has_csum);
-    if (UNLIKELY(rc != ZXC_OK)) {
-        ds->error_code = rc;
-        ds->state = DS_ERRORED;
-        return rc;
-    }
+    if (UNLIKELY(rc != ZXC_OK)) return ds_set_error(ds, rc);  // LCOV_EXCL_LINE
     ds->block_size = bs;
     ds->file_has_checksum = has_csum;
 
     /* Allocate payload + decoded buffers now that block_size is known. */
     const uint64_t pb = zxc_compress_block_bound(ds->block_size);
     // LCOV_EXCL_START
-    if (UNLIKELY(pb == 0 || pb > SIZE_MAX)) {
-        ds->error_code = ZXC_ERROR_OVERFLOW;
-        ds->state = DS_ERRORED;
-        return ZXC_ERROR_OVERFLOW;
-    }
+    if (UNLIKELY(pb == 0 || pb > SIZE_MAX)) return ds_set_error(ds, ZXC_ERROR_OVERFLOW);
     // LCOV_EXCL_STOP
     ds->payload_cap = (size_t)pb;
     ds->payload = (uint8_t*)malloc(ds->payload_cap);
@@ -542,17 +526,11 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     ds->decoded_cap = ds->block_size + ZXC_PAD_SIZE;
     ds->decoded = (uint8_t*)malloc(ds->decoded_cap);
     // LCOV_EXCL_START
-    if (UNLIKELY(!ds->payload || !ds->decoded)) {
-        ds->error_code = ZXC_ERROR_MEMORY;
-        ds->state = DS_ERRORED;
-        return ZXC_ERROR_MEMORY;
-    }
+    if (UNLIKELY(!ds->payload || !ds->decoded)) return ds_set_error(ds, ZXC_ERROR_MEMORY);
 
     if (UNLIKELY(zxc_cctx_init(&ds->inner, ds->block_size, 0, 0,
                                ds->file_has_checksum && ds->opts.checksum_enabled) != ZXC_OK)) {
-        ds->error_code = ZXC_ERROR_MEMORY;
-        ds->state = DS_ERRORED;
-        return ZXC_ERROR_MEMORY;
+        return ds_set_error(ds, ZXC_ERROR_MEMORY);
     }
     // LCOV_EXCL_STOP
     ds->inner_initialized = 1;
@@ -567,19 +545,11 @@ static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     if (!ds_pull_scratch(ds, in)) return 1;
 
     const int rc = zxc_read_block_header(ds->scratch, ds->scratch_used, &ds->cur_bh);
-    if (UNLIKELY(rc != ZXC_OK)) {
-        ds->error_code = rc;
-        ds->state = DS_ERRORED;
-        return rc;
-    }
+    if (UNLIKELY(rc != ZXC_OK)) return ds_set_error(ds, rc);  // LCOV_EXCL_LINE
 
     if (ds->cur_bh.block_type == (uint8_t)ZXC_BLOCK_EOF) {
         /* EOF block: comp_size must be 0; no payload, no checksum. */
-        if (UNLIKELY(ds->cur_bh.comp_size != 0)) {
-            ds->error_code = ZXC_ERROR_BAD_BLOCK_SIZE;
-            ds->state = DS_ERRORED;
-            return ZXC_ERROR_BAD_BLOCK_SIZE;
-        }
+        if (UNLIKELY(ds->cur_bh.comp_size != 0)) return ds_set_error(ds, ZXC_ERROR_BAD_BLOCK_SIZE);
         ds->state = DS_PEEK_TAIL;
         ds->scratch_used = 0;
         ds->scratch_need = ZXC_BLOCK_HEADER_SIZE; /* sniff */
@@ -588,11 +558,7 @@ static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
 
     /* Normal data block: read comp_size [+ 4 if file-level checksums]. */
     const uint64_t need = (uint64_t)ds->cur_bh.comp_size + (ds->file_has_checksum ? 4u : 0u);
-    if (UNLIKELY(need > ds->payload_cap)) {
-        ds->error_code = ZXC_ERROR_BAD_BLOCK_SIZE;
-        ds->state = DS_ERRORED;
-        return ZXC_ERROR_BAD_BLOCK_SIZE;
-    }
+    if (UNLIKELY(need > ds->payload_cap)) return ds_set_error(ds, ZXC_ERROR_BAD_BLOCK_SIZE);
 
     /* Feed the full block (header + payload + opt csum) to zxc_decompress_block,
      * so prefix with the 8-byte header we just parsed. */
@@ -603,11 +569,7 @@ static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     if (UNLIKELY(ds->payload_need > ds->payload_cap)) {
         /* grow */
         uint8_t* nb = (uint8_t*)realloc(ds->payload, ds->payload_need);
-        if (UNLIKELY(!nb)) {
-            ds->error_code = ZXC_ERROR_MEMORY;
-            ds->state = DS_ERRORED;
-            return ZXC_ERROR_MEMORY;
-        }
+        if (UNLIKELY(!nb)) return ds_set_error(ds, ZXC_ERROR_MEMORY);
         ds->payload = nb;
         ds->payload_cap = ds->payload_need;
     }
@@ -648,11 +610,7 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             case DS_DECODE_BLOCK: {
                 const int dsz = zxc_decompress_chunk_wrapper(
                     &ds->inner, ds->payload, ds->payload_used, ds->decoded, ds->decoded_cap);
-                if (UNLIKELY(dsz < 0)) {
-                    ds->error_code = dsz;
-                    ds->state = DS_ERRORED;
-                    return dsz;
-                }
+                if (UNLIKELY(dsz < 0)) return ds_set_error(ds, dsz);
                 ds->decoded_size = (size_t)dsz;
                 ds->decoded_pos = 0;
 
@@ -714,18 +672,12 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
 
             case DS_VALIDATE_FOOTER: {
                 const uint64_t declared = zxc_le64(ds->scratch);
-                if (UNLIKELY(declared != ds->total_out)) {
-                    ds->state = DS_ERRORED;
-                    ds->error_code = ZXC_ERROR_CORRUPT_DATA;
-                    return ZXC_ERROR_CORRUPT_DATA;
-                }
+                if (UNLIKELY(declared != ds->total_out))
+                    return ds_set_error(ds, ZXC_ERROR_CORRUPT_DATA);
                 if (ds->opts.checksum_enabled && ds->file_has_checksum) {
                     const uint32_t fh = zxc_le32(ds->scratch + sizeof(uint64_t));
-                    if (UNLIKELY(fh != ds->global_hash)) {
-                        ds->state = DS_ERRORED;
-                        ds->error_code = ZXC_ERROR_BAD_CHECKSUM;
-                        return ZXC_ERROR_BAD_CHECKSUM;
-                    }
+                    if (UNLIKELY(fh != ds->global_hash))
+                        return ds_set_error(ds, ZXC_ERROR_BAD_CHECKSUM);
                 }
                 ds->state = DS_DONE;
                 return (int64_t)produced;
