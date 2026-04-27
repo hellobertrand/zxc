@@ -458,8 +458,7 @@ export default async function createZXC(moduleOverrides) {
 
         const inDescPtr  = _malloc(IO_BUF_SIZE);
         const outDescPtr = _malloc(IO_BUF_SIZE);
-        // Default block size is 256 KB; size the stage for one decompressed block.
-        const stageCap   = 256 * 1024;
+        const stageCap   = Math.max(_dstream_out_size(ds), 4096);
         const stagePtr   = _malloc(stageCap);
 
         return {
@@ -472,6 +471,7 @@ export default async function createZXC(moduleOverrides) {
 
                     const chunks = [];
                     let total = 0;
+                    let exhausted = data.length === 0;
                     for (;;) {
                         const beforeIn = _readPos(inDescPtr);
                         _writeOutbuf(outDescPtr, stagePtr, stageCap);
@@ -485,8 +485,13 @@ export default async function createZXC(moduleOverrides) {
                             total += produced;
                         }
                         const afterIn = _readPos(inDescPtr);
+                        // Stop only when the call made no progress at all
+                        // (no input consumed AND no output produced).
                         if (afterIn === beforeIn && produced === 0) break;
-                        if (afterIn === data.length) break;
+                        if (!exhausted && afterIn === data.length) {
+                            _writeInbuf(inDescPtr, 0, 0);
+                            exhausted = true;
+                        }
                     }
                     return _concatChunks(chunks, total);
                 } finally {

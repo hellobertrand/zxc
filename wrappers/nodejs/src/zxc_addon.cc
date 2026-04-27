@@ -219,8 +219,8 @@ class CStreamWrap : public Napi::ObjectWrap<CStreamWrap> {
                 opts.checksum_enabled = o.Get("checksum").As<Napi::Boolean>().Value() ? 1 : 0;
             }
             if (o.Has("blockSize") && o.Get("blockSize").IsNumber()) {
-                opts.block_size = static_cast<size_t>(
-                    o.Get("blockSize").As<Napi::Number>().Int64Value());
+                opts.block_size =
+                    static_cast<size_t>(o.Get("blockSize").As<Napi::Number>().Int64Value());
             }
         }
 
@@ -393,13 +393,16 @@ class DStreamWrap : public Napi::ObjectWrap<DStreamWrap> {
                 out.resize(out.size() * 2);
             }
             zxc_outbuf_t obuf = {out.data() + out_len, out.size() - out_len, 0};
-            const size_t before_in = in.pos;
+            zxc_inbuf_t empty_in = {nullptr, 0, 0};
+            zxc_inbuf_t* cur_in = (in.pos < in.size) ? &in : &empty_in;
+            const size_t before_in = cur_in->pos;
             const size_t before_out = obuf.pos;
-            int64_t r = zxc_dstream_decompress(ds_, &obuf, &in);
+            const int64_t r = zxc_dstream_decompress(ds_, &obuf, cur_in);
             out_len += obuf.pos;
             if (r < 0) return ThrowZxcError(env, static_cast<int>(r));
-            if (in.pos == before_in && obuf.pos == before_out) break;
-            if (in.pos == in.size) break;
+            /* Keep draining even after input is exhausted; stop only when
+             * no progress was made (no input consumed AND no output produced). */
+            if (cur_in->pos == before_in && obuf.pos == before_out) break;
         }
         return Napi::Buffer<uint8_t>::Copy(env, out.data(), out_len);
     }
