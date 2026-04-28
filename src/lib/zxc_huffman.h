@@ -17,7 +17,7 @@
  *
  * Code lengths are length-limited canonical Huffman with max length 11
  * (see ZXC_HUF_MAX_CODE_LEN). Codes are emitted LSB-first and decoded with a
- * single 2048-entry lookup table.
+ * single 1024-entry lookup table.
  */
 
 #ifndef ZXC_HUFFMAN_H
@@ -44,7 +44,7 @@ extern "C" {
 #define ZXC_HUF_MIN_LITERALS 1024
 
 /**
- * @brief 2048-entry decoder lookup table entry.
+ * @brief 1024-entry decoder lookup table entry.
  *
  * The encoder/decoder reads ZXC_HUF_MAX_CODE_LEN bits and indexes this table.
  * Each entry packs `{symbol, code_length}`: low byte = symbol, high byte =
