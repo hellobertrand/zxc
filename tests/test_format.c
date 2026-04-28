@@ -6,7 +6,6 @@
  */
 
 #include "test_common.h"
-#include "../src/lib/zxc_huffman.h"
 
 /*
  * Test for zxc_br_init and zxc_br_ensure

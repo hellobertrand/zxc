@@ -7,16 +7,26 @@
  * Canonical, length-limited (L = 10) Huffman codec for the GLO literal
  * stream at compression level >= 6. Codes are emitted LSB-first; the
  * decoder uses a single 1024-entry lookup table and a 4-way interleaved
- * hot loop. See zxc_huffman.h for the on-disk layout.
+ * hot loop. Public declarations (constants, function prototypes) live in
+ * zxc_internal.h; the rest is private to this translation unit.
  */
-
-#include "zxc_huffman.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
+
+/* Private codec constants (only used inside this translation unit). */
+#define ZXC_HUF_TABLE_LOG ZXC_HUF_MAX_CODE_LEN
+#define ZXC_HUF_TABLE_SIZE (1u << ZXC_HUF_TABLE_LOG)
+#define ZXC_HUF_LENGTHS_HEADER_SIZE 128
+#define ZXC_HUF_STREAM_SIZES_HEADER_SIZE 6
+
+/* 1024-entry decoder lookup table entry: low byte = symbol, high byte = code length. */
+typedef struct {
+    uint16_t entry;
+} zxc_huf_dec_entry_t;
 
 /* ===========================================================================
  * Length-limited Huffman: boundary package-merge
@@ -281,20 +291,8 @@ static ZXC_ALWAYS_INLINE int bw_finish(bit_writer_t* bw) {
 }
 
 /* ===========================================================================
- * Estimator + encoder
+ * Encoder
  * =========================================================================*/
-
-size_t zxc_huf_estimate_size(const uint32_t freq[ZXC_HUF_NUM_SYMBOLS],
-                             const uint8_t code_len[ZXC_HUF_NUM_SYMBOLS], size_t n_literals) {
-    (void)n_literals;
-    uint64_t total_bits = 0;
-    for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
-        total_bits += (uint64_t)freq[i] * (uint64_t)code_len[i];
-    }
-    /* Per sub-stream tail-byte slack: 1 byte / sub-stream. */
-    const size_t bytes = (size_t)((total_bits + 7) / 8) + ZXC_HUF_NUM_STREAMS;
-    return ZXC_HUF_HEADER_SIZE + bytes;
-}
 
 int zxc_huf_encode_section(const uint8_t* literals, size_t n_literals,
                            const uint8_t code_len[ZXC_HUF_NUM_SYMBOLS], uint8_t* dst,

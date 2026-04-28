@@ -1305,6 +1305,62 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
                                  zxc_gnr_header_t* RESTRICT gh,
                                  zxc_section_desc_t desc[ZXC_GHI_SECTIONS]);
 
+/* ============================================================================
+ * Huffman codec for the GLO literal stream (level >= 6).
+ *
+ * Layout of the section payload:
+ *   [128 B] 256 x 4-bit packed code lengths.
+ *   [  6 B] 3 x uint16_t LE: sub-stream sizes s1, s2, s3 (s4 implied).
+ *   [  N B] 4 concatenated LSB-first bit-streams covering literal indices
+ *           [0,Q), [Q,2Q), [2Q,3Q), [3Q,n_literals) where Q = ceil(n/4).
+ *
+ * Codes are length-limited canonical Huffman with max length 10, decoded
+ * via a single 1024-entry lookup table and a 4-way interleaved hot loop.
+ * ============================================================================
+ */
+
+#define ZXC_HUF_MAX_CODE_LEN 10
+#define ZXC_HUF_NUM_SYMBOLS 256
+#define ZXC_HUF_NUM_STREAMS 4
+#define ZXC_HUF_HEADER_SIZE 134 /**< 128 B lengths + 6 B sub-stream sizes. */
+
+/** @brief Below this literal count Huffman cannot beat RAW after header overhead. */
+#define ZXC_HUF_MIN_LITERALS 1024
+
+/**
+ * @brief Build length-limited canonical Huffman code lengths from a frequency table.
+ *
+ * Uses the boundary package-merge algorithm capped at ZXC_HUF_MAX_CODE_LEN.
+ * Symbols with `freq[i] == 0` get `code_len[i] == 0`; others receive a value
+ * in [1, ZXC_HUF_MAX_CODE_LEN].
+ *
+ * @return ZXC_OK on success, negative error otherwise.
+ */
+int zxc_huf_build_code_lengths(const uint32_t freq[ZXC_HUF_NUM_SYMBOLS],
+                               uint8_t code_len[ZXC_HUF_NUM_SYMBOLS]);
+
+/**
+ * @brief Encode the literal stream into a Huffman section payload.
+ *
+ * Writes the 128-byte length header, the 6-byte sub-stream size table and
+ * the 4 concatenated LSB-first bit-streams.
+ *
+ * @return Total bytes written on success, negative error otherwise.
+ */
+int zxc_huf_encode_section(const uint8_t* literals, size_t n_literals,
+                           const uint8_t code_len[ZXC_HUF_NUM_SYMBOLS], uint8_t* dst,
+                           size_t dst_cap);
+
+/**
+ * @brief Decode a Huffman literal section payload of `payload_size` bytes.
+ *
+ * Writes exactly `n_literals` decoded bytes into `dst`.
+ *
+ * @return ZXC_OK on success, negative zxc_error_t code otherwise.
+ */
+int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t* dst,
+                           size_t n_literals);
+
 /**
  * @brief Internal wrapper function to decompress a single chunk of data.
  *
