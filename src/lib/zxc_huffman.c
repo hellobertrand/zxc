@@ -4,9 +4,9 @@
  * Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Canonical, length-limited (L = 11) Huffman codec for the GLO literal
+ * Canonical, length-limited (L = 10) Huffman codec for the GLO literal
  * stream at compression level >= 6. Codes are emitted LSB-first; the
- * decoder uses a single 2048-entry lookup table and a 4-way interleaved
+ * decoder uses a single 1024-entry lookup table and a 4-way interleaved
  * hot loop. See zxc_huffman.h for the on-disk layout.
  */
 
@@ -441,7 +441,7 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
         if (UNLIKELY(rc != ZXC_OK)) return rc;
     }
 
-    /* 2. Build the 2048-entry decode table. */
+    /* 2. Build the 1024-entry decode table. */
     zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE];
     {
         const int rc = build_decode_table(code_len, table);
@@ -492,11 +492,10 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
      *
      * Batch size is bounded by the byte-aligned bit stream: a refill grows
      * `bits` by an integer number of bytes, so from `bits = b` the post-
-     * refill value is `b + 8 * floor((64 - b) / 8)`. For this to ever reach
-     * `bits >= K * L_max`, we need K * L_max <= 57. With L_max = 10 the
-     * largest safe batch is therefore K = 5 (50 bits per refill, 20
-     * symbols per outer iteration). K = 6 would underflow `bits` for some
-     * post-decode rest values (b mod 8 in {1,2,3}).
+     * refill value is `b + 8 * floor((64 - b) / 8)`. For this to always
+     * reach `bits >= K * L_max`, we need K * L_max <= 57. With L_max = 10
+     * the largest safe batch is K = 5 (50 bits per refill, 20 symbols per
+     * outer iteration).
      *
      * To minimise codegen overhead the four bit readers' hot fields
      * (accum / bits / ptr / end) are hoisted into local variables for the
@@ -528,14 +527,17 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
     const uint8_t* const e3 = br[3].end;
 
     /* Inline refill: identical semantics to zxc_br_ensure(., BATCH_BITS).
-     * Hot path = mask stale high bits + single 8-byte LE load + shift-or;
-     * cold path handles the tail near end-of-stream byte by byte. The
-     * byte count uses `(64 - BB) >> 3` to add the maximum number of whole
-     * bytes that fit in the remaining accumulator capacity. */
+     * Hot path = single 8-byte LE load + shift-or; cold path handles the
+     * tail near end-of-stream byte by byte. The byte count uses
+     * `(64 - BB) >> 3` to add the maximum number of whole bytes that fit
+     * in the remaining accumulator capacity.
+     *
+     * The accumulator's high bits (positions BB..63) are guaranteed zero
+     * here: each DECODE_ONE() ends with `accum >>= len`, which is an
+     * unsigned right-shift that zero-fills the top bits. No mask needed. */
 #define REFILL(A, BB, P, E)                                              \
     do {                                                                  \
         if (UNLIKELY((BB) < ZXC_HUF_BATCH_BITS)) {                        \
-            (A) &= ((BB) < 64) ? ((1ULL << (BB)) - 1) : ~(uint64_t)0;     \
             if (LIKELY((P) + sizeof(uint64_t) <= (E))) {                  \
                 (A) |= zxc_le64(P) << (BB);                               \
                 const int _n = (64 - (BB)) >> 3;                          \
