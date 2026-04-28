@@ -1052,9 +1052,10 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             huf_total_size = ZXC_HUF_HEADER_SIZE + streams_bytes;
             const size_t baseline =
                 (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : (size_t)lit_c;
-            /* Threshold: ~0.78% savings (1 - 1/128) — more aggressive than the
-             * RLE 3% threshold so marginal blocks still get Huffman'd. */
-            if (huf_total_size < baseline - (baseline >> 7)) {
+            /* Threshold: Huffman must save >= ~3.13% (1/32) over the chosen
+             * RAW/RLE baseline to be worth its ~30-40% slower decode path.
+             * Smaller savings are not worth the decode-time penalty. */
+            if (huf_total_size < baseline - (baseline >> 5)) {
                 enc_lit = ZXC_SECTION_ENCODING_HUFFMAN;
             }
         }
