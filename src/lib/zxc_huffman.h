@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define ZXC_HUF_MAX_CODE_LEN 11
+#define ZXC_HUF_MAX_CODE_LEN 10
 #define ZXC_HUF_NUM_SYMBOLS 256
 #define ZXC_HUF_NUM_STREAMS 4
 #define ZXC_HUF_TABLE_LOG ZXC_HUF_MAX_CODE_LEN
