@@ -438,7 +438,10 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
         if (UNLIKELY(rc != ZXC_OK)) return rc;
     }
 
-    /* 2. Build the 512-entry decode table. */
+    /* 2. Build the 512-entry decode table. Cache-line aligned: the LUT
+     * spans 16 lines and is hammered every symbol; landing it on a 64-byte
+     * boundary avoids any cross-line load split. */
+    __attribute__((aligned(ZXC_CACHE_LINE_SIZE)))
     zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE];
     {
         const int rc = build_decode_table(code_len, table);
@@ -534,7 +537,7 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
      * unsigned right-shift that zero-fills the top bits. No mask needed. */
 #define REFILL(A, BB, P, E)                                              \
     do {                                                                  \
-        if (UNLIKELY((BB) < ZXC_HUF_BATCH_BITS)) {                        \
+        if (LIKELY((BB) < ZXC_HUF_BATCH_BITS)) {                          \
             if (LIKELY((P) + sizeof(uint64_t) <= (E))) {                  \
                 (A) |= zxc_le64(P) << (BB);                               \
                 const int _n = (64 - (BB)) >> 3;                          \
@@ -549,7 +552,12 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
         }                                                                 \
     } while (0)
 
-    /* Decode 1 symbol from each of the 4 streams; advance pointers/state. */
+    /* Decode 1 symbol from each of the 4 streams; advance pointers/state.
+     * `bits` is intentionally NOT decremented here: the per-stream length
+     * accumulators (sl0..sl3) sum the consumed bits and are folded back
+     * into bb0..bb3 once at end of batch. This trades 4 sub/iter (24 per
+     * batch) for 4 add/iter (24) + 4 sub/batch — same critical path on the
+     * accum chain, fewer ALU µops on x86 with limited add/sub ports. */
 #define DECODE_ONE()                                            \
     do {                                                         \
         const uint16_t _e0 = table[a0 & ZXC_HUF_TBL_MASK].entry; \
@@ -568,10 +576,10 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
         a1 >>= _l1;                                              \
         a2 >>= _l2;                                              \
         a3 >>= _l3;                                              \
-        bb0 -= _l0;                                              \
-        bb1 -= _l1;                                              \
-        bb2 -= _l2;                                              \
-        bb3 -= _l3;                                              \
+        sl0 += _l0;                                              \
+        sl1 += _l1;                                              \
+        sl2 += _l2;                                              \
+        sl3 += _l3;                                              \
     } while (0)
 
     for (size_t b = 0; b < batches; b++) {
@@ -580,12 +588,17 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
         REFILL(a2, bb2, p2, e2);
         REFILL(a3, bb3, p3, e3);
 
+        int sl0 = 0, sl1 = 0, sl2 = 0, sl3 = 0;
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();
+        bb0 -= sl0;
+        bb1 -= sl1;
+        bb2 -= sl2;
+        bb3 -= sl3;
     }
 
     /* Persist locals back to the bit readers before the scalar tail. */
