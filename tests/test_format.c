@@ -382,7 +382,7 @@ int test_legacy_header() {
  * Test for SA-IS suffix array construction on canonical inputs.
  */
 int test_suffix_array() {
-    printf("=== TEST: Unit - Suffix Array (SA-IS) ===\n");
+    printf("=== TEST: Unit - Suffix Array (Manber-Myers) ===\n");
 
     /* Case 1: "banana" → SA = [6, 5, 3, 1, 0, 4, 2]
      * Suffixes sorted: $, a, ana, anana, banana, na, nana */
@@ -390,9 +390,10 @@ int test_suffix_array() {
         const uint8_t T[] = "banana";
         const int32_t n = 6;
         int32_t SA[7];
-        int32_t work[256 + 7 + 16];
+        int32_t ISA[7];
+        int32_t work[2 * 8];
         const int32_t expected[7] = {6, 5, 3, 1, 0, 4, 2};
-        zxc_sais_build(T, SA, n, work);
+        zxc_suffix_array_build(T, SA, ISA, n, work);
         for (int i = 0; i <= n; i++) {
             if (SA[i] != expected[i]) {
                 printf("  [FAIL] banana SA[%d]=%d expected %d\n", i, SA[i], expected[i]);
@@ -409,9 +410,10 @@ int test_suffix_array() {
         const uint8_t T[] = "mississippi";
         const int32_t n = 11;
         int32_t SA[12];
-        int32_t work[256 + 12 + 32];
+        int32_t ISA[12];
+        int32_t work[2 * 13];
         const int32_t expected[12] = {11, 10, 7, 4, 1, 0, 9, 8, 6, 3, 5, 2};
-        zxc_sais_build(T, SA, n, work);
+        zxc_suffix_array_build(T, SA, ISA, n, work);
         for (int i = 0; i <= n; i++) {
             if (SA[i] != expected[i]) {
                 printf("  [FAIL] mississippi SA[%d]=%d expected %d\n", i, SA[i], expected[i]);
@@ -432,11 +434,10 @@ int test_suffix_array() {
         int32_t SA[7];
         int32_t ISA[7];
         int32_t LCP[7];
-        int32_t work[256 + 7 + 16];
+        int32_t work[2 * 8];
         const int32_t expected_isa[7] = {4, 3, 6, 2, 5, 1, 0};
         const int32_t expected_lcp[7] = {0, 0, 1, 3, 0, 0, 2};
-        zxc_sais_build(T, SA, n, work);
-        zxc_isa_build(SA, ISA, n);
+        zxc_suffix_array_build(T, SA, ISA, n, work);
         zxc_lcp_kasai(T, SA, ISA, LCP, n);
         for (int i = 0; i <= n; i++) {
             if (ISA[i] != expected_isa[i]) {
@@ -460,8 +461,9 @@ int test_suffix_array() {
         uint8_t T[4096];
         for (int i = 0; i < n; i++) T[i] = (uint8_t)((i * 2654435769u) >> 24);
         int32_t SA[4097];
-        int32_t work[256 + 4097 + 4097]; /* over-provisioned for recursion */
-        zxc_sais_build(T, SA, n, work);
+        int32_t ISA[4097];
+        int32_t work[2 * 4098];
+        zxc_suffix_array_build(T, SA, ISA, n, work);
         /* Permutation check */
         uint8_t seen[4097] = {0};
         for (int i = 0; i <= n; i++) {

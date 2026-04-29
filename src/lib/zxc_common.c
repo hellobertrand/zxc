@@ -101,11 +101,14 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     const size_t sz_extras = max_seq * 2 * vbyte_len;
     const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
-    /* Level 6: suffix-array buffers (sa, isa, lcp, sa_work). Each is
-     * (chunk_size + 1) * sizeof(int32_t) — the +1 is for the sentinel. */
+    /* Level 6: suffix-array buffers (sa, isa, lcp, sa_work). sa/isa/lcp
+     * are each (chunk_size + 1) * sizeof(int32_t) — the +1 is for the
+     * sentinel. sa_work is 2*(chunk_size + 1) * sizeof(int32_t) to fit
+     * the Manber-Myers radix-sort temporary array plus bucket counts. */
     const int need_sa = (level >= ZXC_LEVEL_PREMIUM);
     const size_t sa_n = need_sa ? (chunk_size + 1) : 0;
     const size_t sz_sa = sa_n * sizeof(int32_t);
+    const size_t sz_sa_work = 2 * sa_n * sizeof(int32_t);
 
     /* Calculate sizes with alignment padding (64 bytes for cache line alignment) */
     size_t total_size = 0;
@@ -128,7 +131,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     const size_t off_lcp = total_size;
     if (need_sa) total_size += ZXC_ALIGN_CL(sz_sa);
     const size_t off_sa_work = total_size;
-    if (need_sa) total_size += ZXC_ALIGN_CL(sz_sa);
+    if (need_sa) total_size += ZXC_ALIGN_CL(sz_sa_work);
 
     uint8_t* const mem = (uint8_t*)zxc_aligned_malloc(total_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
@@ -680,11 +683,13 @@ uint64_t zxc_estimate_cctx_size(const size_t src_size) {
     total += ZXC_ALIGN_CL(chunk_size + ZXC_PAD_SIZE);  /* literals */
 
     /* Pessimistic upper bound: the level-6 suffix-array buffers
-     * (sa, isa, lcp, sa_work) are 4 * (chunk_size + 1) * sizeof(int32_t).
-     * Included unconditionally so the estimate is a valid upper bound
-     * across all levels — the function does not take @level as input. */
+     * are sa+isa+lcp = 3 * (chunk_size + 1) * sizeof(int32_t) plus
+     * sa_work = 2 * (chunk_size + 1) * sizeof(int32_t). Included
+     * unconditionally so the estimate is a valid upper bound across
+     * all levels — the function does not take @level as input. */
     const size_t sa_n = chunk_size + 1;
-    total += 4 * ZXC_ALIGN_CL(sa_n * sizeof(int32_t));
+    total += 3 * ZXC_ALIGN_CL(sa_n * sizeof(int32_t));
+    total += ZXC_ALIGN_CL(2 * sa_n * sizeof(int32_t));
 
     /* The opaque wrapper struct allocated by zxc_create_cctx() adds a tiny
      * fixed overhead (< 128 B) that is negligible next to the per-chunk

@@ -821,8 +821,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
      * Match finder will then walk the SA per position instead of the hash chain. */
     const int use_sa = (lzp.sa_walk_bound > 0) && (ctx->sa != NULL);
     if (use_sa) {
-        zxc_sais_build(src, ctx->sa, (int32_t)src_sz, ctx->sa_work);
-        zxc_isa_build(ctx->sa, ctx->isa, (int32_t)src_sz);
+        zxc_suffix_array_build(src, ctx->sa, ctx->isa, (int32_t)src_sz, ctx->sa_work);
         zxc_lcp_kasai(src, ctx->sa, ctx->isa, ctx->lcp, (int32_t)src_sz);
     }
     const int32_t* const sa = ctx->sa;
