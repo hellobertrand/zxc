@@ -550,11 +550,11 @@ typedef struct {
 
 /** @name Suffix-array helpers (level 6 match finder)
  *  @brief Construction of SA / ISA / LCP for the level-6 exact match finder.
- *  Implementations live in zxc_suffix_array.c. SA is sized n+1 to include a
+ *  Implementations live in zxc_suffix.c. SA is sized n+1 to include a
  *  virtual sentinel at position n; LCP/ISA cover positions 0..n.
  *
- *  Algorithm: prefix doubling (Manber-Myers, 1990) with two-pass LSD radix
- *  sort. Patent-free.
+ *  Algorithm: DC3 / Skew (Karkkainen-Sanders, 2003), linear-time and
+ *  patent-free.
  *  @{ */
 void zxc_suffix_array_build(const uint8_t* T, int32_t* SA, int32_t* ISA, int32_t n,
                             int32_t* work);

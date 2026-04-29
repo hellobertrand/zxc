@@ -226,7 +226,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         src/lib/zxc_common.c
         src/lib/zxc_dispatch.c
         src/lib/zxc_seekable.c
-        src/lib/zxc_suffix_array.c
+        src/lib/zxc_suffix.c
     )
 else()
     set(ZXC_CORE_SOURCES
@@ -234,7 +234,7 @@ else()
         src/lib/zxc_driver.c
         src/lib/zxc_dispatch.c
         src/lib/zxc_seekable.c
-        src/lib/zxc_suffix_array.c
+        src/lib/zxc_suffix.c
     )
 endif()
 
