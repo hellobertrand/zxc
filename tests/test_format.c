@@ -377,3 +377,214 @@ int test_legacy_header() {
     printf("PASS\n\n");
     return 1;
 }
+
+/*
+ * Test for SA-IS suffix array construction on canonical inputs.
+ */
+int test_suffix_array() {
+    printf("=== TEST: Unit - Suffix Array (SA-IS) ===\n");
+
+    /* Case 1: "banana" → SA = [6, 5, 3, 1, 0, 4, 2]
+     * Suffixes sorted: $, a, ana, anana, banana, na, nana */
+    {
+        const uint8_t T[] = "banana";
+        const int32_t n = 6;
+        int32_t SA[7];
+        int32_t work[256 + 7 + 16];
+        const int32_t expected[7] = {6, 5, 3, 1, 0, 4, 2};
+        zxc_sais_build(T, SA, n, work);
+        for (int i = 0; i <= n; i++) {
+            if (SA[i] != expected[i]) {
+                printf("  [FAIL] banana SA[%d]=%d expected %d\n", i, SA[i], expected[i]);
+                return 0;
+            }
+        }
+        printf("  [PASS] banana\n");
+    }
+
+    /* Case 2: "mississippi" → SA = [11, 10, 7, 4, 1, 0, 9, 8, 6, 3, 5, 2]
+     * Sorted: $, i, ippi, issippi, ississippi, mississippi, pi, ppi,
+     *         sippi, sissippi, ssippi, ssissippi */
+    {
+        const uint8_t T[] = "mississippi";
+        const int32_t n = 11;
+        int32_t SA[12];
+        int32_t work[256 + 12 + 32];
+        const int32_t expected[12] = {11, 10, 7, 4, 1, 0, 9, 8, 6, 3, 5, 2};
+        zxc_sais_build(T, SA, n, work);
+        for (int i = 0; i <= n; i++) {
+            if (SA[i] != expected[i]) {
+                printf("  [FAIL] mississippi SA[%d]=%d expected %d\n", i, SA[i], expected[i]);
+                return 0;
+            }
+        }
+        printf("  [PASS] mississippi\n");
+    }
+
+    /* Case 3: ISA + Kasai LCP correctness on "banana".
+     * ISA[i] = position of suffix i in SA.
+     * Expected ISA = [4, 3, 6, 2, 5, 1, 0]
+     * LCP[k] = lcp(SA[k-1], SA[k]) for k >= 1.
+     * For "banana", LCP = [0, 0, 1, 3, 0, 0, 2] */
+    {
+        const uint8_t T[] = "banana";
+        const int32_t n = 6;
+        int32_t SA[7];
+        int32_t ISA[7];
+        int32_t LCP[7];
+        int32_t work[256 + 7 + 16];
+        const int32_t expected_isa[7] = {4, 3, 6, 2, 5, 1, 0};
+        const int32_t expected_lcp[7] = {0, 0, 1, 3, 0, 0, 2};
+        zxc_sais_build(T, SA, n, work);
+        zxc_isa_build(SA, ISA, n);
+        zxc_lcp_kasai(T, SA, ISA, LCP, n);
+        for (int i = 0; i <= n; i++) {
+            if (ISA[i] != expected_isa[i]) {
+                printf("  [FAIL] banana ISA[%d]=%d expected %d\n", i, ISA[i], expected_isa[i]);
+                return 0;
+            }
+        }
+        for (int i = 0; i <= n; i++) {
+            if (LCP[i] != expected_lcp[i]) {
+                printf("  [FAIL] banana LCP[%d]=%d expected %d\n", i, LCP[i], expected_lcp[i]);
+                return 0;
+            }
+        }
+        printf("  [PASS] banana ISA + LCP\n");
+    }
+
+    /* Case 4: long random-ish input, verify SA is a permutation of [0..n] and
+     * that suffixes are sorted. */
+    {
+        const int32_t n = 4096;
+        uint8_t T[4096];
+        for (int i = 0; i < n; i++) T[i] = (uint8_t)((i * 2654435769u) >> 24);
+        int32_t SA[4097];
+        int32_t work[256 + 4097 + 4097]; /* over-provisioned for recursion */
+        zxc_sais_build(T, SA, n, work);
+        /* Permutation check */
+        uint8_t seen[4097] = {0};
+        for (int i = 0; i <= n; i++) {
+            if (SA[i] < 0 || SA[i] > n || seen[SA[i]]) {
+                printf("  [FAIL] random: SA[%d]=%d invalid or duplicate\n", i, SA[i]);
+                return 0;
+            }
+            seen[SA[i]] = 1;
+        }
+        /* Sorted check: for each k > 0, suffix SA[k-1] < SA[k] lexicographically.
+         * Sentinel suffix at SA[0] is empty, smallest by convention. */
+        for (int k = 1; k < n; k++) {
+            int a = SA[k - 1], b = SA[k];
+            int la = n - a, lb = n - b;
+            int lim = la < lb ? la : lb;
+            int cmp = 0;
+            for (int d = 0; d < lim; d++) {
+                if (T[a + d] != T[b + d]) {
+                    cmp = T[a + d] < T[b + d] ? -1 : 1;
+                    break;
+                }
+            }
+            if (cmp == 0) cmp = (la < lb) ? -1 : (la > lb ? 1 : 0);
+            if (cmp > 0) {
+                printf("  [FAIL] random: SA[%d]=%d > SA[%d]=%d\n", k - 1, a, k, b);
+                return 0;
+            }
+        }
+        printf("  [PASS] 4096-byte random input\n");
+    }
+
+    printf("PASS\n\n");
+    return 1;
+}
+
+/*
+ * Test for level 6 (suffix-array match finder) end-to-end roundtrip.
+ */
+int test_level_6_roundtrip() {
+    printf("=== TEST: Unit - Level 6 SA Roundtrip ===\n");
+
+    /* Case 1: highly repetitive (good for SA match finder) */
+    {
+        const size_t N = 16 * 1024;
+        uint8_t* input = (uint8_t*)malloc(N);
+        if (!input) return 0;
+        for (size_t i = 0; i < N; i++) input[i] = "abcdefgh"[i & 7];
+        size_t cap = (size_t)zxc_compress_bound(N);
+        uint8_t* comp = (uint8_t*)malloc(cap);
+        uint8_t* dec = (uint8_t*)malloc(N);
+        if (!comp || !dec) {
+            free(input);
+            free(comp);
+            free(dec);
+            return 0;
+        }
+        zxc_compress_opts_t co = {.level = 6, .checksum_enabled = 0};
+        int64_t cs = zxc_compress(input, N, comp, cap, &co);
+        if (cs <= 0) {
+            printf("  [FAIL] compression failed: %lld\n", (long long)cs);
+            free(input);
+            free(comp);
+            free(dec);
+            return 0;
+        }
+        zxc_decompress_opts_t dco = {.checksum_enabled = 0};
+        int64_t ds = zxc_decompress(comp, (size_t)cs, dec, N, &dco);
+        if (ds != (int64_t)N || memcmp(input, dec, N) != 0) {
+            printf("  [FAIL] decompress mismatch (got %lld, expected %zu)\n", (long long)ds, N);
+            free(input);
+            free(comp);
+            free(dec);
+            return 0;
+        }
+        printf("  [PASS] 16KB repetitive (compressed to %lld bytes)\n", (long long)cs);
+        free(input);
+        free(comp);
+        free(dec);
+    }
+
+    /* Case 2: random bytes (worst case for match finder, validate correctness) */
+    {
+        const size_t N = 8 * 1024;
+        uint8_t* input = (uint8_t*)malloc(N);
+        if (!input) return 0;
+        uint32_t seed = 0xDEADBEEF;
+        for (size_t i = 0; i < N; i++) {
+            seed = seed * 1664525u + 1013904223u;
+            input[i] = (uint8_t)(seed >> 24);
+        }
+        size_t cap = (size_t)zxc_compress_bound(N);
+        uint8_t* comp = (uint8_t*)malloc(cap);
+        uint8_t* dec = (uint8_t*)malloc(N);
+        if (!comp || !dec) {
+            free(input);
+            free(comp);
+            free(dec);
+            return 0;
+        }
+        zxc_compress_opts_t co = {.level = 6, .checksum_enabled = 0};
+        int64_t cs = zxc_compress(input, N, comp, cap, &co);
+        if (cs <= 0) {
+            printf("  [FAIL] random compression failed: %lld\n", (long long)cs);
+            free(input);
+            free(comp);
+            free(dec);
+            return 0;
+        }
+        zxc_decompress_opts_t dco = {.checksum_enabled = 0};
+        int64_t ds = zxc_decompress(comp, (size_t)cs, dec, N, &dco);
+        if (ds != (int64_t)N || memcmp(input, dec, N) != 0) {
+            printf("  [FAIL] random decompress mismatch\n");
+            free(input);
+            free(comp);
+            free(dec);
+            return 0;
+        }
+        printf("  [PASS] 8KB random (compressed to %lld bytes)\n", (long long)cs);
+        free(input);
+        free(comp);
+        free(dec);
+    }
+
+    printf("PASS\n\n");
+    return 1;
+}

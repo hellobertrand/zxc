@@ -147,6 +147,93 @@ typedef struct {
 } zxc_match_t;
 
 /**
+ * @brief Finds the best LZ77 match using a precomputed suffix array (level 6).
+ *
+ * Walks the suffix array left and right from `isa[pos]`, tracking the running
+ * minimum LCP. Each adjacent rank gives an exact-LCP candidate; positions
+ * `j < pos` within the LZ77 window are eligible matches. The walk is bounded
+ * by `sa_walk_bound` per direction; it terminates early when `min_lcp` drops
+ * below `ZXC_LZ_MIN_MATCH_LEN` or below the current best (no longer match
+ * possible past that point along this direction). After the longest forward
+ * match is selected, the result is extended backwards from `ip`.
+ *
+ * @param[in] src           Block start.
+ * @param[in] ip            Current position pointer in @p src.
+ * @param[in] iend          Block end (sentinel for direct-byte compares).
+ * @param[in] anchor        Last emitted position (limits backward extension).
+ * @param[in] sa, isa, lcp  Suffix array, inverse SA, and LCP — all of length n+1.
+ * @param[in] n             Block length in bytes.
+ * @param[in] sa_walk_bound Max number of rank steps explored per direction.
+ * @return zxc_match_t with the best match found (or len < MIN_MATCH_LEN if none).
+ */
+static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match_sa(
+    const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* anchor,
+    const int32_t* sa, const int32_t* isa, const int32_t* lcp, int32_t n, int sa_walk_bound) {
+    (void)iend; /* min_lcp is bounded by suffix lengths so iend is implicit */
+    zxc_match_t best = (zxc_match_t){NULL, ZXC_LZ_MIN_MATCH_LEN - 1, 0};
+
+    const int32_t pos = (int32_t)(ip - src);
+    const int32_t rank = isa[pos];
+
+    /* Walk left in SA: candidates with smaller rank, lex-precedent suffixes. */
+    {
+        int32_t min_lcp = INT32_MAX;
+        int32_t k = rank;
+        for (int steps = 0; steps < sa_walk_bound; steps++) {
+            if (k <= 0) break;
+            int32_t l = lcp[k];
+            if (l < min_lcp) min_lcp = l;
+            if (min_lcp < (int32_t)ZXC_LZ_MIN_MATCH_LEN) break;
+            if (min_lcp <= (int32_t)best.len) break;
+            k--;
+            int32_t j = sa[k];
+            if (j == n) break; /* sentinel suffix */
+            if (j < pos && (uint32_t)(pos - j) <= ZXC_LZ_MAX_DIST) {
+                best.ref = src + j;
+                best.len = (uint32_t)min_lcp;
+                best.backtrack = 0;
+            }
+        }
+    }
+
+    /* Walk right in SA: candidates with larger rank, lex-following suffixes. */
+    {
+        int32_t min_lcp = INT32_MAX;
+        int32_t k = rank;
+        for (int steps = 0; steps < sa_walk_bound; steps++) {
+            if (k >= n) break;
+            int32_t l = lcp[k + 1];
+            if (l < min_lcp) min_lcp = l;
+            if (min_lcp < (int32_t)ZXC_LZ_MIN_MATCH_LEN) break;
+            if (min_lcp <= (int32_t)best.len) break;
+            k++;
+            int32_t j = sa[k];
+            if (j == n) break;
+            if (j < pos && (uint32_t)(pos - j) <= ZXC_LZ_MAX_DIST) {
+                best.ref = src + j;
+                best.len = (uint32_t)min_lcp;
+                best.backtrack = 0;
+            }
+        }
+    }
+
+    /* Backward extension (same as the hash-chain finder). */
+    if (best.ref) {
+        const uint8_t* b_ip = ip;
+        const uint8_t* b_ref = best.ref;
+        while (b_ip > anchor && b_ref > src && b_ip[-1] == b_ref[-1]) {
+            b_ip--;
+            b_ref--;
+            best.len++;
+            best.backtrack++;
+        }
+        best.ref = b_ref;
+    }
+
+    return best;
+}
+
+/**
  * @brief Finds the best matching sequence for LZ77 compression
  *
  * Uses a split hash table layout:
@@ -730,6 +817,18 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     uint16_t* const buf_offsets = ctx->buf_offsets;
     uint8_t* const buf_extras = ctx->buf_extras;
 
+    /* Level 6: build suffix array, inverse SA, and LCP for the entire block.
+     * Match finder will then walk the SA per position instead of the hash chain. */
+    const int use_sa = (lzp.sa_walk_bound > 0) && (ctx->sa != NULL);
+    if (use_sa) {
+        zxc_sais_build(src, ctx->sa, (int32_t)src_sz, ctx->sa_work);
+        zxc_isa_build(ctx->sa, ctx->isa, (int32_t)src_sz);
+        zxc_lcp_kasai(src, ctx->sa, ctx->isa, ctx->lcp, (int32_t)src_sz);
+    }
+    const int32_t* const sa = ctx->sa;
+    const int32_t* const isa = ctx->isa;
+    const int32_t* const lcp = ctx->lcp;
+
     uint32_t seq_c = 0;
     size_t lit_c = 0;
     size_t extras_sz = 0;
@@ -740,9 +839,36 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         size_t step = lzp.step_base + (dist >> lzp.step_shift);
         if (UNLIKELY(ip + step >= mflimit)) step = 1;
 
-        const zxc_match_t m =
-            zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, hash_tags,
-                                     chain_table, epoch_mark, offset_mask, level, lzp);
+        zxc_match_t m;
+        if (use_sa) {
+            m = zxc_lz77_find_best_match_sa(src, ip, iend, anchor, sa, isa, lcp,
+                                            (int32_t)src_sz, lzp.sa_walk_bound);
+            /* SA-aware lazy: probe ip+1 and ip+2; if a strictly longer match
+             * exists there, emit current byte as literal and shift forward. */
+            if (m.ref && ip + 2 < mflimit) {
+                zxc_match_t m1 = zxc_lz77_find_best_match_sa(src, ip + 1, iend, anchor, sa, isa,
+                                                              lcp, (int32_t)src_sz,
+                                                              lzp.sa_walk_bound);
+                zxc_match_t m2 = zxc_lz77_find_best_match_sa(src, ip + 2, iend, anchor, sa, isa,
+                                                              lcp, (int32_t)src_sz,
+                                                              lzp.sa_walk_bound);
+                /* Pick the offset that yields the largest "encoded gain":
+                 * match_len - literal_lead. (literal lead = +0 / +1 / +2.) */
+                int32_t g0 = (int32_t)m.len;
+                int32_t g1 = m1.ref ? (int32_t)m1.len - 1 : -1;
+                int32_t g2 = m2.ref ? (int32_t)m2.len - 2 : -1;
+                if (g1 > g0 && g1 >= g2) {
+                    ip += 1;
+                    m = m1;
+                } else if (g2 > g0) {
+                    ip += 2;
+                    m = m2;
+                }
+            }
+        } else {
+            m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, hash_tags,
+                                         chain_table, epoch_mark, offset_mask, level, lzp);
+        }
 
         if (m.ref) {
             ip -= m.backtrack;
@@ -1024,8 +1150,13 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             }
         }
 
-        // Threshold: ~3% savings using integer math (97% ~= 1 - 1/32)
-        if (rle_size < lit_c - (lit_c >> 5)) enc_lit = ZXC_SECTION_ENCODING_RLE;
+        // Threshold: ~3% savings using integer math (97% ~= 1 - 1/32). At
+        // level 6 we drop the threshold to ~0.8% (1 - 1/128) since the
+        // suffix-array path encodes more matches as literals on uncompressible
+        // sub-blocks; even a tiny RLE win is worth taking there.
+        const size_t rle_floor =
+            (level >= ZXC_LEVEL_PREMIUM) ? lit_c - (lit_c >> 7) : lit_c - (lit_c >> 5);
+        if (rle_size < rle_floor) enc_lit = ZXC_SECTION_ENCODING_RLE;
     }
 
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GLO};

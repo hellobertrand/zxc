@@ -81,6 +81,8 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_header_checksum),
     TEST_CASE(test_global_checksum_order),
     TEST_CASE(test_legacy_header),
+    TEST_CASE(test_suffix_array),
+    TEST_CASE(test_level_6_roundtrip),
 
     /* --- Misc --- */
     TEST_CASE(test_error_name),

@@ -147,6 +147,8 @@ int test_eof_block_structure(void);
 int test_header_checksum(void);
 int test_global_checksum_order(void);
 int test_legacy_header(void);
+int test_suffix_array(void);
+int test_level_6_roundtrip(void);
 
 /* Misc */
 int test_error_name(void);

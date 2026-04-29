@@ -105,6 +105,12 @@ typedef struct {
     uint32_t offset_bits; /**< log2(chunk_size) - governs epoch_mark shift. */
     uint32_t offset_mask; /**< (1U << offset_bits) - 1 */
     uint32_t max_epoch;   /**< 1U << (32 - offset_bits) */
+
+    /* Level 6 (suffix-array match finder) buffers. NULL when level < 6. */
+    int32_t* sa;        /**< Suffix array: sa[k] = start position of k-th sorted suffix. */
+    int32_t* isa;       /**< Inverse SA: isa[i] = rank of suffix at position i. */
+    int32_t* lcp;       /**< Longest common prefix between sa[k-1] and sa[k]. */
+    int32_t* sa_work;   /**< Scratch buffer for SA-IS recursion / bucket counts. */
 } zxc_cctx_t;
 
 /**

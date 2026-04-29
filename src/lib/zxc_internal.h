@@ -539,7 +539,25 @@ typedef struct {
      *  A larger value keeps the step conservative (grows slowly with distance);
      *  a smaller value ramps up quickly, skipping more in long literal runs. */
     uint32_t step_shift;
+
+    /** Suffix-array match finder walk bound (level 6).
+     *  When non-zero, use a SA-based exact match finder that walks at most
+     *  this many neighbours in the suffix array per position; the hash-chain
+     *  fields above (search_depth, sufficient_len, step_shift) are then
+     *  effectively ignored. Set to 0 for hash-chain-only levels (1..5). */
+    int sa_walk_bound;
 } zxc_lz77_params_t;
+
+/** @name Suffix-array helpers (level 6 match finder)
+ *  @brief Construction of SA / ISA / LCP for the level-6 exact match finder.
+ *  Implementations live in zxc_sais.c. SA is sized n+1 to include a virtual
+ *  sentinel at position n; LCP/ISA cover positions 0..n.
+ *  @{ */
+void zxc_sais_build(const uint8_t* T, int32_t* SA, int32_t n, int32_t* work);
+void zxc_isa_build(const int32_t* SA, int32_t* ISA, int32_t n);
+void zxc_lcp_kasai(const uint8_t* T, const int32_t* SA, const int32_t* ISA, int32_t* LCP,
+                   int32_t n);
+/** @} */
 
 /**
  * @brief Retrieves LZ77 compression parameters based on the specified compression level.
@@ -551,15 +569,22 @@ typedef struct {
  * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
-    if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 128, 1, 8};
+    /* Level 6: suffix-array match finder. Hash-chain fields are ignored;
+     * step_base=1 + large step_shift keeps step=1 across the whole block so
+     * every position is queried (SA finds optimal). Double-lazy is kept off
+     * by lazy_len_threshold=256 (large enough that any SA match is at or
+     * above threshold and skips the lazy path). */
+    if (level >= 6) return (zxc_lz77_params_t){0, 0, 0, 0, 0, 1, 30, 1024};
+    /* Level 5: hash-chain + double-lazy, deepest search of the chain levels. */
+    if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 128, 1, 8, 0};
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
-    // step_shift
+    // step_shift, sa_walk_bound
     static const zxc_lz77_params_t table[5] = {
-        {3, 16, 0, 0, 0, 4, 4},    // fallback
-        {3, 16, 0, 0, 0, 4, 4},    // level 1
-        {3, 18, 0, 0, 0, 3, 6},    // level 2
-        {3, 16, 1, 4, 128, 1, 4},  // level 3
-        {3, 18, 1, 4, 128, 1, 5}   // level 4
+        {3, 16, 0, 0, 0, 4, 4, 0},    // fallback
+        {3, 16, 0, 0, 0, 4, 4, 0},    // level 1
+        {3, 18, 0, 0, 0, 3, 6, 0},    // level 2
+        {3, 16, 1, 4, 128, 1, 4, 0},  // level 3
+        {3, 18, 1, 4, 128, 1, 5, 0}   // level 4
     };
     return table[level < 1 ? 1 : level];
 }
