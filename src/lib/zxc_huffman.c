@@ -4,9 +4,9 @@
  * Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Canonical, length-limited (L = 10) Huffman codec for the GLO literal
+ * Canonical, length-limited (L = 9) Huffman codec for the GLO literal
  * stream at compression level >= 6. Codes are emitted LSB-first; the
- * decoder uses a single 1024-entry lookup table and a 4-way interleaved
+ * decoder uses a single 512-entry lookup table and a 4-way interleaved
  * hot loop. Public declarations (constants, function prototypes) live in
  * zxc_internal.h; the rest is private to this translation unit.
  */
@@ -23,7 +23,7 @@
 #define ZXC_HUF_LENGTHS_HEADER_SIZE 128
 #define ZXC_HUF_STREAM_SIZES_HEADER_SIZE 6
 
-/* 1024-entry decoder lookup table entry: low byte = symbol, high byte = code length. */
+/* 512-entry decoder lookup table entry: low byte = symbol, high byte = code length. */
 typedef struct {
     uint16_t entry;
 } zxc_huf_dec_entry_t;
@@ -429,8 +429,7 @@ static int build_decode_table(const uint8_t code_len[ZXC_HUF_NUM_SYMBOLS],
 
 int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t* dst,
                            size_t n_literals) {
-    if (UNLIKELY(payload_size < ZXC_HUF_HEADER_SIZE)) return ZXC_ERROR_CORRUPT_DATA;
-    if (UNLIKELY(n_literals == 0)) return ZXC_ERROR_CORRUPT_DATA;
+    if (UNLIKELY(payload_size < ZXC_HUF_HEADER_SIZE || n_literals == 0)) return ZXC_ERROR_CORRUPT_DATA;
 
     /* 1. Parse length header. */
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
@@ -439,7 +438,7 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
         if (UNLIKELY(rc != ZXC_OK)) return rc;
     }
 
-    /* 2. Build the 1024-entry decode table. */
+    /* 2. Build the 512-entry decode table. */
     zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE];
     {
         const int rc = build_decode_table(code_len, table);
@@ -491,19 +490,19 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
      * Batch size is bounded by the byte-aligned bit stream: a refill grows
      * `bits` by an integer number of bytes, so from `bits = b` the post-
      * refill value is `b + 8 * floor((64 - b) / 8)`. For this to always
-     * reach `bits >= K * L_max`, we need K * L_max <= 57. With L_max = 10
-     * the largest safe batch is K = 5 (50 bits per refill, 20 symbols per
+     * reach `bits >= K * L_max`, we need K * L_max <= 57. With L_max = 9
+     * the largest safe batch is K = 6 (54 bits per refill, 24 symbols per
      * outer iteration).
      *
      * To minimise codegen overhead the four bit readers' hot fields
      * (accum / bits / ptr / end) are hoisted into local variables for the
      * full duration of the batched loop, the refill is inlined as a macro
      * (mirroring zxc_br_ensure), and the inner k-loop is manually unrolled
-     * 5x. All entries in `table` are guaranteed by build_decode_table()
+     * 6x. All entries in `table` are guaranteed by build_decode_table()
      * to have a non-zero length byte, so the per-symbol length check is
      * hoisted out of the hot path. */
-#define ZXC_HUF_BATCH 5
-#define ZXC_HUF_BATCH_BITS (ZXC_HUF_BATCH * ZXC_HUF_MAX_CODE_LEN)  /* = 50 */
+#define ZXC_HUF_BATCH 6
+#define ZXC_HUF_BATCH_BITS (ZXC_HUF_BATCH * ZXC_HUF_MAX_CODE_LEN)  /* = 54 */
 #define ZXC_HUF_TBL_MASK ((uint64_t)(ZXC_HUF_TABLE_SIZE - 1))
 
     uint8_t* d0 = s_dst[0];
@@ -581,6 +580,7 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
         REFILL(a2, bb2, p2, e2);
         REFILL(a3, bb3, p3, e3);
 
+        DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();

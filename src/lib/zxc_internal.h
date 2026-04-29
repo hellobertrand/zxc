@@ -1314,12 +1314,12 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  *   [  N B] 4 concatenated LSB-first bit-streams covering literal indices
  *           [0,Q), [Q,2Q), [2Q,3Q), [3Q,n_literals) where Q = ceil(n/4).
  *
- * Codes are length-limited canonical Huffman with max length 10, decoded
- * via a single 1024-entry lookup table and a 4-way interleaved hot loop.
+ * Codes are length-limited canonical Huffman with max length 9, decoded
+ * via a single 512-entry lookup table and a 4-way interleaved hot loop.
  * ============================================================================
  */
 
-#define ZXC_HUF_MAX_CODE_LEN 10
+#define ZXC_HUF_MAX_CODE_LEN 9
 #define ZXC_HUF_NUM_SYMBOLS 256
 #define ZXC_HUF_NUM_STREAMS 4
 #define ZXC_HUF_HEADER_SIZE 134 /**< 128 B lengths + 6 B sub-stream sizes. */
