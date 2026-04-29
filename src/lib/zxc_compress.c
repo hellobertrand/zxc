@@ -817,16 +817,16 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     uint16_t* const buf_offsets = ctx->buf_offsets;
     uint8_t* const buf_extras = ctx->buf_extras;
 
-    /* Level 6: build suffix array, inverse SA, and LCP for the entire block.
-     * Match finder will then walk the SA per position instead of the hash chain. */
-    const int use_sa = (lzp.sa_walk_bound > 0) && (ctx->sa != NULL);
+    /* Level 6: build suffix array, inverse SA, and LCP for the entire block. */
+    int32_t* const sa = ctx->sa;
+    int32_t* const isa = ctx->isa;
+    int32_t* const lcp = ctx->lcp;
+
+    const int use_sa = (lzp.sa_walk_bound > 0) && (sa != NULL);
     if (use_sa) {
-        zxc_suffix_array_build(src, ctx->sa, ctx->isa, (int32_t)src_sz, ctx->sa_work);
-        zxc_lcp_kasai(src, ctx->sa, ctx->isa, ctx->lcp, (int32_t)src_sz);
+        zxc_suffix_array_build(src, sa, isa, (int32_t)src_sz, NULL);
+        zxc_lcp_kasai(src, sa, isa, lcp, (int32_t)src_sz);
     }
-    const int32_t* const sa = ctx->sa;
-    const int32_t* const isa = ctx->isa;
-    const int32_t* const lcp = ctx->lcp;
 
     uint32_t seq_c = 0;
     size_t lit_c = 0;
@@ -840,17 +840,15 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         zxc_match_t m;
         if (use_sa) {
-            m = zxc_lz77_find_best_match_sa(src, ip, iend, anchor, sa, isa, lcp,
-                                            (int32_t)src_sz, lzp.sa_walk_bound);
+            m = zxc_lz77_find_best_match_sa(src, ip, iend, anchor, sa, isa, lcp, (int32_t)src_sz,
+                                            lzp.sa_walk_bound);
             /* SA-aware lazy: probe ip+1 and ip+2; if a strictly longer match
              * exists there, emit current byte as literal and shift forward. */
             if (m.ref && ip + 2 < mflimit) {
-                zxc_match_t m1 = zxc_lz77_find_best_match_sa(src, ip + 1, iend, anchor, sa, isa,
-                                                              lcp, (int32_t)src_sz,
-                                                              lzp.sa_walk_bound);
-                zxc_match_t m2 = zxc_lz77_find_best_match_sa(src, ip + 2, iend, anchor, sa, isa,
-                                                              lcp, (int32_t)src_sz,
-                                                              lzp.sa_walk_bound);
+                zxc_match_t m1 = zxc_lz77_find_best_match_sa(
+                    src, ip + 1, iend, anchor, sa, isa, lcp, (int32_t)src_sz, lzp.sa_walk_bound);
+                zxc_match_t m2 = zxc_lz77_find_best_match_sa(
+                    src, ip + 2, iend, anchor, sa, isa, lcp, (int32_t)src_sz, lzp.sa_walk_bound);
                 /* Pick the offset that yields the largest "encoded gain":
                  * match_len - literal_lead. (literal lead = +0 / +1 / +2.) */
                 int32_t g0 = (int32_t)m.len;
@@ -1154,7 +1152,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         // suffix-array path encodes more matches as literals on uncompressible
         // sub-blocks; even a tiny RLE win is worth taking there.
         const size_t rle_floor =
-            (level >= ZXC_LEVEL_PREMIUM) ? lit_c - (lit_c >> 7) : lit_c - (lit_c >> 5);
+            (level >= ZXC_LEVEL_DENSITY) ? lit_c - (lit_c >> 7) : lit_c - (lit_c >> 5);
         if (rle_size < rle_floor) enc_lit = ZXC_SECTION_ENCODING_RLE;
     }
 

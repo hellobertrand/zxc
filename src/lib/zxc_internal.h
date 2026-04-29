@@ -556,11 +556,11 @@ typedef struct {
  *  Algorithm: DC3 / Skew (Karkkainen-Sanders, 2003), linear-time and
  *  patent-free.
  *  @{ */
-void zxc_suffix_array_build(const uint8_t* T, int32_t* SA, int32_t* ISA, int32_t n,
-                            int32_t* work);
-void zxc_isa_build(const int32_t* SA, int32_t* ISA, int32_t n);
-void zxc_lcp_kasai(const uint8_t* T, const int32_t* SA, const int32_t* ISA, int32_t* LCP,
-                   int32_t n);
+void zxc_suffix_array_build(const uint8_t* RESTRICT T, int32_t* RESTRICT SA, int32_t* RESTRICT ISA,
+                            const int32_t n, int32_t* work);
+void zxc_isa_build(const int32_t* RESTRICT SA, int32_t* RESTRICT ISA, const int32_t n);
+void zxc_lcp_kasai(const uint8_t* RESTRICT T, const int32_t* RESTRICT SA,
+                   const int32_t* RESTRICT ISA, int32_t* RESTRICT LCP, const int32_t n);
 /** @} */
 
 /**

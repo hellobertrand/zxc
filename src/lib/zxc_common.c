@@ -101,14 +101,11 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     const size_t sz_extras = max_seq * 2 * vbyte_len;
     const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
-    /* Level 6: suffix-array buffers (sa, isa, lcp, sa_work). sa/isa/lcp
-     * are each (chunk_size + 1) * sizeof(int32_t) — the +1 is for the
-     * sentinel. sa_work is 2*(chunk_size + 1) * sizeof(int32_t) to fit
-     * the Manber-Myers radix-sort temporary array plus bucket counts. */
-    const int need_sa = (level >= ZXC_LEVEL_PREMIUM);
-    const size_t sa_n = need_sa ? (chunk_size + 1) : 0;
-    const size_t sz_sa = sa_n * sizeof(int32_t);
-    const size_t sz_sa_work = 2 * sa_n * sizeof(int32_t);
+    /* Level 6: persistent suffix-array buffers (sa, isa, lcp). Each is (chunk_size + 1) *
+     * sizeof(int32_t). */
+    const int need_sa = (level >= ZXC_LEVEL_DENSITY);
+    const size_t sa_factor = (size_t)need_sa;
+    const size_t sz_sa_aligned = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(int32_t));
 
     /* Calculate sizes with alignment padding (64 bytes for cache line alignment) */
     size_t total_size = 0;
@@ -125,16 +122,17 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     const size_t off_lit = total_size;
     total_size += ZXC_ALIGN_CL(sz_lit);
     const size_t off_sa = total_size;
-    if (need_sa) total_size += ZXC_ALIGN_CL(sz_sa);
+    total_size += sa_factor * sz_sa_aligned;
     const size_t off_isa = total_size;
-    if (need_sa) total_size += ZXC_ALIGN_CL(sz_sa);
+    total_size += sa_factor * sz_sa_aligned;
     const size_t off_lcp = total_size;
-    if (need_sa) total_size += ZXC_ALIGN_CL(sz_sa);
-    const size_t off_sa_work = total_size;
-    if (need_sa) total_size += ZXC_ALIGN_CL(sz_sa_work);
+    total_size += sa_factor * sz_sa_aligned;
 
     uint8_t* const mem = (uint8_t*)zxc_aligned_malloc(total_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
+
+    /* Pointer mask: 0 when !need_sa (NULL pointers), all-ones otherwise. */
+    const uintptr_t sa_mask = (uintptr_t)0 - (uintptr_t)need_sa;
 
     ctx->memory_block = mem;
     ctx->hash_table = (uint32_t*)(mem + off_hash_pos);
@@ -145,17 +143,9 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->buf_tokens = (uint8_t*)(mem + off_seq_union) + max_seq * sizeof(uint16_t);
     ctx->buf_extras = (uint8_t*)(mem + off_extras);
     ctx->literals = (uint8_t*)(mem + off_lit);
-    if (need_sa) {
-        ctx->sa = (int32_t*)(mem + off_sa);
-        ctx->isa = (int32_t*)(mem + off_isa);
-        ctx->lcp = (int32_t*)(mem + off_lcp);
-        ctx->sa_work = (int32_t*)(mem + off_sa_work);
-    } else {
-        ctx->sa = NULL;
-        ctx->isa = NULL;
-        ctx->lcp = NULL;
-        ctx->sa_work = NULL;
-    }
+    ctx->sa = (int32_t*)(((uintptr_t)mem + off_sa) & sa_mask);
+    ctx->isa = (int32_t*)(((uintptr_t)mem + off_isa) & sa_mask);
+    ctx->lcp = (int32_t*)(((uintptr_t)mem + off_lcp) & sa_mask);
 
     ctx->compression_level = level;
     ctx->epoch = 1;
@@ -200,7 +190,6 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->sa = NULL;
     ctx->isa = NULL;
     ctx->lcp = NULL;
-    ctx->sa_work = NULL;
 
     ctx->epoch = 0;
     ctx->lit_buffer_cap = 0;
@@ -663,9 +652,11 @@ uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
  *
  * Mirrors the allocation layout in zxc_cctx_init(): each sub-buffer is rounded
  * up to the cache-line boundary, so the returned value matches the single
- * aligned allocation performed by the initializer.
+ * aligned allocation performed by the initializer. The level-dependent
+ * suffix-array buffers (sa, isa, lcp) are added only when @p level reaches
+ * ZXC_LEVEL_DENSITY.
  */
-uint64_t zxc_estimate_cctx_size(const size_t src_size) {
+uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
     if (UNLIKELY(src_size == 0)) return 0;
 
     const size_t chunk_size = zxc_block_size_ceil(src_size);
@@ -682,14 +673,11 @@ uint64_t zxc_estimate_cctx_size(const size_t src_size) {
     total += ZXC_ALIGN_CL(max_seq * 2 * vbyte_len);    /* buf_extras */
     total += ZXC_ALIGN_CL(chunk_size + ZXC_PAD_SIZE);  /* literals */
 
-    /* Pessimistic upper bound: the level-6 suffix-array buffers
-     * are sa+isa+lcp = 3 * (chunk_size + 1) * sizeof(int32_t) plus
-     * sa_work = 2 * (chunk_size + 1) * sizeof(int32_t). Included
-     * unconditionally so the estimate is a valid upper bound across
-     * all levels — the function does not take @level as input. */
-    const size_t sa_n = chunk_size + 1;
-    total += 3 * ZXC_ALIGN_CL(sa_n * sizeof(int32_t));
-    total += ZXC_ALIGN_CL(2 * sa_n * sizeof(int32_t));
+    /* Level >= 6: persistent suffix-array buffers (sa + isa + lcp = 3 * (chunk_size + 1) *
+     * sizeof(int32_t)). */
+    const int needs_sa = level >= ZXC_LEVEL_DENSITY;
+    const uint64_t sa_aligned = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(int32_t));
+    total += (uint64_t)needs_sa * 3 * sa_aligned;
 
     /* The opaque wrapper struct allocated by zxc_create_cctx() adds a tiny
      * fixed overhead (< 128 B) that is negligible next to the per-chunk
@@ -768,7 +756,7 @@ int zxc_min_level(void) { return ZXC_LEVEL_FASTEST; }
  *
  * Returns the value of ZXC_LEVEL_COMPACT (currently 5).
  */
-int zxc_max_level(void) { return ZXC_LEVEL_PREMIUM; }
+int zxc_max_level(void) { return ZXC_LEVEL_DENSITY; }
 
 /*
  * @brief Returns the default compression level.

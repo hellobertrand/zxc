@@ -391,7 +391,7 @@ int test_suffix_array() {
         const int32_t n = 6;
         int32_t SA[7];
         int32_t ISA[7];
-        int32_t work[2 * 8];
+        int32_t work[12 * 8];
         const int32_t expected[7] = {6, 5, 3, 1, 0, 4, 2};
         zxc_suffix_array_build(T, SA, ISA, n, work);
         for (int i = 0; i <= n; i++) {
@@ -411,7 +411,7 @@ int test_suffix_array() {
         const int32_t n = 11;
         int32_t SA[12];
         int32_t ISA[12];
-        int32_t work[2 * 13];
+        int32_t work[12 * 13];
         const int32_t expected[12] = {11, 10, 7, 4, 1, 0, 9, 8, 6, 3, 5, 2};
         zxc_suffix_array_build(T, SA, ISA, n, work);
         for (int i = 0; i <= n; i++) {
@@ -434,7 +434,7 @@ int test_suffix_array() {
         int32_t SA[7];
         int32_t ISA[7];
         int32_t LCP[7];
-        int32_t work[2 * 8];
+        int32_t work[12 * 8];
         const int32_t expected_isa[7] = {4, 3, 6, 2, 5, 1, 0};
         const int32_t expected_lcp[7] = {0, 0, 1, 3, 0, 0, 2};
         zxc_suffix_array_build(T, SA, ISA, n, work);
@@ -462,7 +462,7 @@ int test_suffix_array() {
         for (int i = 0; i < n; i++) T[i] = (uint8_t)((i * 2654435769u) >> 24);
         int32_t SA[4097];
         int32_t ISA[4097];
-        int32_t work[2 * 4098];
+        static int32_t work[12 * 4098];
         zxc_suffix_array_build(T, SA, ISA, n, work);
         /* Permutation check */
         uint8_t seen[4097] = {0};

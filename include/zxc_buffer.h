@@ -311,16 +311,25 @@ ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, co
  * @brief Estimates the memory allocated by a compression context for a given block.
  *
  * Returns the total bytes reserved by @ref zxc_compress_block for a block of
- * @p src_size bytes: all per-chunk working buffers (chain table, literals,
- * sequence/token/offset/extras buffers) plus the fixed hash tables and
- * cache-line alignment padding. Scales roughly linearly with @p src_size.
+ * @p src_size bytes at compression @p level: all per-chunk working buffers
+ * (chain table, literals, sequence/token/offset/extras buffers) plus the
+ * fixed hash tables and cache-line alignment padding. Levels >=
+ * @ref ZXC_LEVEL_DENSITY additionally include the suffix-array buffers
+ * (sa, isa, lcp). Scales roughly linearly with @p src_size.
  *
- * Intended for integrators that need an accurate memory-budget figure
+ * The transient per-recursion scratch malloc'd by the DC3 builder during
+ * each block's compression is NOT counted (it is freed before return).
+ * For a worst-case peak figure, add ~36 * @p src_size bytes when
+ * @p level >= ZXC_LEVEL_DENSITY.
+ *
+ * Intended for integrators that need an accurate memory-budget figure.
  *
  * @param[in] src_size Uncompressed block size in bytes.
+ * @param[in] level    Compression level (0..@ref ZXC_LEVEL_DENSITY). Levels
+ *                     0 and 1 share the same allocation footprint.
  * @return Estimated cctx memory usage in bytes, or 0 if @p src_size is 0.
  */
-ZXC_EXPORT uint64_t zxc_estimate_cctx_size(size_t src_size);
+ZXC_EXPORT uint64_t zxc_estimate_cctx_size(size_t src_size, int level);
 
 /** @} */ /* end of block_api */
 

@@ -90,32 +90,32 @@ int test_estimate_cctx_size() {
     printf("=== TEST: Unit - zxc_estimate_cctx_size ===\n");
 
     /* 1. Zero input returns zero. */
-    if (zxc_estimate_cctx_size(0) != 0) {
-        printf("  [FAIL] estimate(0) must return 0\n");
+    if (zxc_estimate_cctx_size(0, ZXC_LEVEL_DEFAULT) != 0) {
+        printf("  [FAIL] estimate(0, level) must return 0\n");
         return 0;
     }
-    printf("  [PASS] estimate(0) == 0\n");
+    printf("  [PASS] estimate(0, level) == 0\n");
 
     /* 2. Non-zero input returns non-zero estimate. */
-    const uint64_t e1k = zxc_estimate_cctx_size(1024);
+    const uint64_t e1k = zxc_estimate_cctx_size(1024, ZXC_LEVEL_DEFAULT);
     if (e1k == 0) {
-        printf("  [FAIL] estimate(1 KiB) must be > 0\n");
+        printf("  [FAIL] estimate(1 KiB, level) must be > 0\n");
         return 0;
     }
-    printf("  [PASS] estimate(1 KiB) = %llu bytes\n", (unsigned long long)e1k);
+    printf("  [PASS] estimate(1 KiB, default) = %llu bytes\n", (unsigned long long)e1k);
 
     /* 3. Sizes below ZXC_BLOCK_SIZE_MIN collapse to the same estimate. */
-    if (zxc_estimate_cctx_size(512) != e1k ||
-        zxc_estimate_cctx_size(4096) != e1k) {
+    if (zxc_estimate_cctx_size(512, ZXC_LEVEL_DEFAULT) != e1k ||
+        zxc_estimate_cctx_size(4096, ZXC_LEVEL_DEFAULT) != e1k) {
         printf("  [FAIL] estimates below MIN must round to ZXC_BLOCK_SIZE_MIN\n");
         return 0;
     }
     printf("  [PASS] estimate rounds sub-MIN inputs to the same value\n");
 
     /* 4. Monotonic: estimate grows with src_size across block_size tiers. */
-    const uint64_t e64k = zxc_estimate_cctx_size(64 * 1024);
-    const uint64_t e1m = zxc_estimate_cctx_size(1024 * 1024);
-    const uint64_t e8m = zxc_estimate_cctx_size(8 * 1024 * 1024);
+    const uint64_t e64k = zxc_estimate_cctx_size(64 * 1024, ZXC_LEVEL_DEFAULT);
+    const uint64_t e1m = zxc_estimate_cctx_size(1024 * 1024, ZXC_LEVEL_DEFAULT);
+    const uint64_t e8m = zxc_estimate_cctx_size(8 * 1024 * 1024, ZXC_LEVEL_DEFAULT);
     if (!(e1k <= e64k && e64k <= e1m && e1m <= e8m)) {
         printf("  [FAIL] estimates must be monotonic: %llu, %llu, %llu, %llu\n",
                (unsigned long long)e1k, (unsigned long long)e64k,
@@ -143,6 +143,29 @@ int test_estimate_cctx_size() {
     }
     printf("  [PASS] scaling: 8x src_size -> %.2fx memory\n",
            (double)e8m / (double)e1m);
+
+    /* 7. Level-6 estimate must exceed level-5 by ~3 * (chunk_size+1) * 4
+     *    bytes (the persistent sa+isa+lcp buffers). */
+    const uint64_t e1m_l5 = zxc_estimate_cctx_size(1024 * 1024, ZXC_LEVEL_COMPACT);
+    const uint64_t e1m_l6 = zxc_estimate_cctx_size(1024 * 1024, ZXC_LEVEL_DENSITY);
+    if (e1m_l6 <= e1m_l5) {
+        printf("  [FAIL] level-6 estimate (%llu) must exceed level-5 (%llu)\n",
+               (unsigned long long)e1m_l6, (unsigned long long)e1m_l5);
+        return 0;
+    }
+    printf("  [PASS] level 6 estimate > level 5: %llu vs %llu (delta %llu)\n",
+           (unsigned long long)e1m_l6, (unsigned long long)e1m_l5,
+           (unsigned long long)(e1m_l6 - e1m_l5));
+
+    /* 8. level == 0 must match level == 1 (same allocation footprint). */
+    const uint64_t e1m_l0 = zxc_estimate_cctx_size(1024 * 1024, 0);
+    const uint64_t e1m_l1 = zxc_estimate_cctx_size(1024 * 1024, ZXC_LEVEL_FASTEST);
+    if (e1m_l0 != e1m_l1) {
+        printf("  [FAIL] level=0 (%llu) must equal level=1 (%llu)\n",
+               (unsigned long long)e1m_l0, (unsigned long long)e1m_l1);
+        return 0;
+    }
+    printf("  [PASS] level=0 matches level=1 footprint\n");
 
     printf("PASS\n\n");
     return 1;
