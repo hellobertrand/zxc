@@ -163,12 +163,43 @@ function decompress(data, options = {}) {
     return native.decompress(data, size, checksum);
 }
 
+/**
+ * Push-based, single-threaded compression stream.
+ *
+ * The Node.js counterpart of the C `zxc_cstream`. Use it when you cannot
+ * block on a `FILE*` (event loops, web frameworks, network protocols).
+ *
+ * @example
+ *   const cs = new zxc.CStream({ level: zxc.LEVEL_DEFAULT, checksum: true });
+ *   const chunks = [];
+ *   for await (const part of source) chunks.push(cs.compress(part));
+ *   chunks.push(cs.end());
+ *   cs.close();
+ *   sink.write(Buffer.concat(chunks));
+ */
+const CStream = native.CStream;
+
+/**
+ * Push-based, single-threaded decompression stream.
+ *
+ * @example
+ *   const ds = new zxc.DStream({ checksum: true });
+ *   for await (const part of compressed) sink.write(ds.decompress(part));
+ *   if (!ds.finished()) throw new Error('truncated');
+ *   ds.close();
+ */
+const DStream = native.DStream;
+
 module.exports = {
     // Functions
     compress,
     decompress,
     compressBound,
     getDecompressedSize,
+
+    // Push streaming classes
+    CStream,
+    DStream,
 
     // Library info helpers
     minLevel,

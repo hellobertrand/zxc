@@ -621,6 +621,123 @@ unsafe extern "C" {
 }
 
 // =============================================================================
+// Push Streaming API (single-threaded, caller-driven)
+// =============================================================================
+
+/// Input buffer descriptor for push streaming
+/// (mirrors `zxc_inbuf_t` from `zxc_pstream.h`).
+#[repr(C)]
+#[derive(Debug)]
+pub struct zxc_inbuf_t {
+    /// Caller-owned input bytes.
+    pub src: *const c_void,
+    /// Total bytes available in `src`.
+    pub size: usize,
+    /// Bytes already consumed by the library (in/out).
+    pub pos: usize,
+}
+
+/// Output buffer descriptor for push streaming
+/// (mirrors `zxc_outbuf_t` from `zxc_pstream.h`).
+#[repr(C)]
+#[derive(Debug)]
+pub struct zxc_outbuf_t {
+    /// Caller-owned output region.
+    pub dst: *mut c_void,
+    /// Total capacity available at `dst`.
+    pub size: usize,
+    /// Bytes already produced by the library (in/out).
+    pub pos: usize,
+}
+
+/// Opaque push compression stream. Use [`zxc_cstream_create`] to create.
+#[repr(C)]
+pub struct zxc_cstream {
+    _private: [u8; 0],
+}
+
+/// Opaque push decompression stream. Use [`zxc_dstream_create`] to create.
+#[repr(C)]
+pub struct zxc_dstream {
+    _private: [u8; 0],
+}
+
+unsafe extern "C" {
+    /// Creates a push compression stream. Returns NULL on allocation failure.
+    /// Free with [`zxc_cstream_free`].
+    pub fn zxc_cstream_create(opts: *const zxc_compress_opts_t) -> *mut zxc_cstream;
+
+    /// Releases a push compression stream. Safe to call with null.
+    ///
+    /// # Safety
+    /// - `cs` must be a pointer returned by [`zxc_cstream_create`] (or null).
+    pub fn zxc_cstream_free(cs: *mut zxc_cstream);
+
+    /// Pushes input bytes into the stream and drains compressed output.
+    ///
+    /// Returns 0 if `in` was fully consumed and no compressed bytes remain
+    /// pending; >0 number of bytes still pending; <0 on error.
+    ///
+    /// # Safety
+    /// - `cs` must be a valid stream from [`zxc_cstream_create`].
+    /// - `out` and `in_` must point to valid `zxc_outbuf_t` / `zxc_inbuf_t`.
+    pub fn zxc_cstream_compress(
+        cs: *mut zxc_cstream,
+        out: *mut zxc_outbuf_t,
+        in_: *mut zxc_inbuf_t,
+    ) -> i64;
+
+    /// Finalises the stream: flushes pending data, writes EOF block + footer.
+    ///
+    /// Returns 0 when finalisation is complete; >0 bytes still pending; <0
+    /// on error.
+    ///
+    /// # Safety
+    /// - `cs` must be a valid stream from [`zxc_cstream_create`].
+    /// - `out` must point to a valid `zxc_outbuf_t`.
+    pub fn zxc_cstream_end(cs: *mut zxc_cstream, out: *mut zxc_outbuf_t) -> i64;
+
+    /// Suggested input chunk size for best compressor throughput.
+    pub fn zxc_cstream_in_size(cs: *const zxc_cstream) -> usize;
+
+    /// Suggested output chunk size for the compressor.
+    pub fn zxc_cstream_out_size(cs: *const zxc_cstream) -> usize;
+
+    /// Creates a push decompression stream. Returns NULL on allocation
+    /// failure. Free with [`zxc_dstream_free`].
+    pub fn zxc_dstream_create(opts: *const zxc_decompress_opts_t) -> *mut zxc_dstream;
+
+    /// Releases a push decompression stream. Safe to call with null.
+    ///
+    /// # Safety
+    /// - `ds` must be a pointer returned by [`zxc_dstream_create`] (or null).
+    pub fn zxc_dstream_free(ds: *mut zxc_dstream);
+
+    /// Pushes compressed input and drains decompressed output.
+    ///
+    /// Returns >0 number of decompressed bytes written this call; 0 if the
+    /// stream is complete (DONE) or no progress is possible; <0 on error.
+    ///
+    /// # Safety
+    /// - `ds` must be a valid stream from [`zxc_dstream_create`].
+    /// - `out` and `in_` must point to valid `zxc_outbuf_t` / `zxc_inbuf_t`.
+    pub fn zxc_dstream_decompress(
+        ds: *mut zxc_dstream,
+        out: *mut zxc_outbuf_t,
+        in_: *mut zxc_inbuf_t,
+    ) -> i64;
+
+    /// Returns 1 iff the decoder reached and validated the file footer.
+    pub fn zxc_dstream_finished(ds: *const zxc_dstream) -> c_int;
+
+    /// Suggested input chunk size for the decompressor.
+    pub fn zxc_dstream_in_size(ds: *const zxc_dstream) -> usize;
+
+    /// Suggested output chunk size for the decompressor.
+    pub fn zxc_dstream_out_size(ds: *const zxc_dstream) -> usize;
+}
+
+// =============================================================================
 // Sans-IO API (low-level primitives for building custom drivers)
 // =============================================================================
 

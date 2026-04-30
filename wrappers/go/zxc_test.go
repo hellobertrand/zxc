@@ -333,6 +333,140 @@ func TestFileMultithreaded(t *testing.T) {
 }
 
 // ============================================================================
+// Push Streaming API Tests
+// ============================================================================
+
+// pstreamRoundtrip drives a CStream / DStream pair end-to-end and returns
+// the decoded bytes.
+func pstreamRoundtrip(t *testing.T, data []byte, copts, dopts []Option) []byte {
+	t.Helper()
+
+	cs, err := NewCStream(copts...)
+	if err != nil {
+		t.Fatalf("NewCStream: %v", err)
+	}
+	defer cs.Close()
+
+	outCap := cs.OutSize()
+	if outCap < 64 {
+		outCap = 64
+	}
+	out := make([]byte, outCap)
+	var compressed bytes.Buffer
+
+	cursor := 0
+	for cursor < len(data) {
+		consumed, produced, _, err := cs.Compress(out, data[cursor:])
+		if err != nil {
+			t.Fatalf("CStream.Compress: %v", err)
+		}
+		cursor += consumed
+		compressed.Write(out[:produced])
+	}
+	for {
+		produced, pending, err := cs.End(out)
+		if err != nil {
+			t.Fatalf("CStream.End: %v", err)
+		}
+		compressed.Write(out[:produced])
+		if pending == 0 {
+			break
+		}
+	}
+
+	ds, err := NewDStream(dopts...)
+	if err != nil {
+		t.Fatalf("NewDStream: %v", err)
+	}
+	defer ds.Close()
+
+	dout := make([]byte, 64*1024)
+	var decompressed bytes.Buffer
+	src := compressed.Bytes()
+	cursor = 0
+	for cursor < len(src) && !ds.Finished() {
+		consumed, produced, err := ds.Decompress(dout, src[cursor:])
+		if err != nil {
+			t.Fatalf("DStream.Decompress: %v", err)
+		}
+		cursor += consumed
+		decompressed.Write(dout[:produced])
+		if consumed == 0 && produced == 0 {
+			break
+		}
+	}
+	for {
+		_, produced, err := ds.Decompress(dout, nil)
+		if err != nil {
+			t.Fatalf("DStream.Decompress (drain): %v", err)
+		}
+		decompressed.Write(dout[:produced])
+		if produced == 0 {
+			break
+		}
+	}
+	if !ds.Finished() {
+		t.Fatalf("DStream did not finalise (truncated stream?)")
+	}
+	return decompressed.Bytes()
+}
+
+func TestPStreamSmallRoundtrip(t *testing.T) {
+	data := []byte("Hello pstream! Round-trip through the Go push API.")
+	got := pstreamRoundtrip(t, data, nil, nil)
+	if !bytes.Equal(got, data) {
+		t.Fatalf("mismatch: got %d bytes, want %d", len(got), len(data))
+	}
+}
+
+func TestPStreamWithChecksum(t *testing.T) {
+	data := make([]byte, 32*1024)
+	for i := range data {
+		data[i] = byte(i % 251)
+	}
+	copts := []Option{WithChecksum(true)}
+	dopts := []Option{WithChecksum(true)}
+	got := pstreamRoundtrip(t, data, copts, dopts)
+	if !bytes.Equal(got, data) {
+		t.Fatalf("checksum roundtrip mismatch (%d vs %d bytes)", len(got), len(data))
+	}
+}
+
+func TestPStreamMultiBlock(t *testing.T) {
+	data := make([]byte, 512*1024)
+	for i := range data {
+		data[i] = byte((i * 7) % 256)
+	}
+	got := pstreamRoundtrip(t, data, nil, nil)
+	if !bytes.Equal(got, data) {
+		t.Fatalf("multi-block roundtrip mismatch (%d vs %d bytes)", len(got), len(data))
+	}
+}
+
+func TestPStreamSizeHints(t *testing.T) {
+	cs, err := NewCStream()
+	if err != nil {
+		t.Fatalf("NewCStream: %v", err)
+	}
+	defer cs.Close()
+	if cs.InSize() == 0 || cs.OutSize() == 0 {
+		t.Fatalf("cstream size hints should be non-zero")
+	}
+
+	ds, err := NewDStream()
+	if err != nil {
+		t.Fatalf("NewDStream: %v", err)
+	}
+	defer ds.Close()
+	if ds.InSize() == 0 || ds.OutSize() == 0 {
+		t.Fatalf("dstream size hints should be non-zero")
+	}
+	if ds.Finished() {
+		t.Fatalf("dstream should not be finished before input")
+	}
+}
+
+// ============================================================================
 // Benchmarks
 // ============================================================================
 

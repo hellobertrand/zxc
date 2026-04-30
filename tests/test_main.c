@@ -74,6 +74,23 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_stream_get_decompressed_size_errors),
     TEST_CASE(test_stream_engine_errors),
 
+    /* --- Push Streaming API --- */
+    TEST_CASE(test_pstream_roundtrip_basic),
+    TEST_CASE(test_pstream_roundtrip_no_checksum),
+    TEST_CASE(test_pstream_roundtrip_levels),
+    TEST_CASE(test_pstream_tiny_chunks),
+    TEST_CASE(test_pstream_drip_one_byte),
+    TEST_CASE(test_pstream_empty_input),
+    TEST_CASE(test_pstream_large_random),
+    TEST_CASE(test_pstream_compatible_with_buffer_api),
+    TEST_CASE(test_pstream_decompress_compatible_with_buffer_api),
+    TEST_CASE(test_pstream_invalid_args),
+    TEST_CASE(test_pstream_truncated_input),
+    TEST_CASE(test_pstream_corrupted_magic),
+    TEST_CASE(test_pstream_decode_seekable_archive),
+    TEST_CASE(test_pstream_compress_after_end_rejected),
+    TEST_CASE(test_pstream_compress_drain_block_resume),
+
     /* --- Format (on-disk) --- */
     TEST_CASE(test_bit_reader),
     TEST_CASE(test_bitpack),

@@ -20,9 +20,6 @@
  * -# Compress or decompress individual blocks via the chunk wrappers.
  * -# Write the footer with zxc_write_file_footer().
  * -# Release the context with zxc_cctx_free().
- *
- * @see zxc_buffer.h  for the simple one-shot API.
- * @see zxc_stream.h  for the multi-threaded streaming API.
  */
 
 #ifndef ZXC_SANS_IO_H

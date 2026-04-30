@@ -235,6 +235,60 @@ async function main() {
         Module._free(outPtr);
     }
 
+    // --- 8. Push streaming API (high-level wrapper) -----------------------
+    console.log('\n8. Push Streaming API (CStream / DStream)');
+    {
+        // Use the high-level wrapper from zxc_wasm.js for ergonomics.
+        const { default: createZXC } = await import('./zxc_wasm.js');
+        // Pass the same already-loaded factory to avoid re-init: the wrapper
+        // accepts moduleOverrides, but it always re-invokes ZXCModule(). We
+        // accept that small cost in tests.
+        const zxc = await createZXC();
+
+        const cs = zxc.createCStream({ checksum: true });
+        assert(cs.inSize() > 0 && cs.outSize() > 0, `cstream size hints: in=${cs.inSize()} out=${cs.outSize()}`);
+
+        // Multi-block payload to exercise > 1 block.
+        const data = new Uint8Array(512 * 1024);
+        for (let i = 0; i < data.length; i++) data[i] = (i * 7) & 0xff;
+
+        const chunks = [];
+        let totalC = 0;
+        const step = 17_000;
+        for (let i = 0; i < data.length; i += step) {
+            const c = cs.compress(data.subarray(i, Math.min(i + step, data.length)));
+            chunks.push(c);
+            totalC += c.length;
+        }
+        const tail = cs.end();
+        chunks.push(tail);
+        totalC += tail.length;
+        cs.free();
+
+        const compressed = new Uint8Array(totalC);
+        let off = 0;
+        for (const c of chunks) { compressed.set(c, off); off += c.length; }
+        assert(compressed.length > 0, `pstream compressed ${data.length} → ${compressed.length} bytes`);
+
+        const ds = zxc.createDStream({ checksum: true });
+        const outChunks = [];
+        let totalD = 0;
+        const dstep = 31_000;
+        for (let i = 0; i < compressed.length; i += dstep) {
+            const o = ds.decompress(compressed.subarray(i, Math.min(i + dstep, compressed.length)));
+            outChunks.push(o);
+            totalD += o.length;
+        }
+        assert(ds.finished(), 'dstream finished after full input');
+        ds.free();
+
+        const decoded = new Uint8Array(totalD);
+        off = 0;
+        for (const c of outChunks) { decoded.set(c, off); off += c.length; }
+        assert(decoded.length === data.length, `pstream decoded ${decoded.length} bytes (expected ${data.length})`);
+        assert(arraysEqual(data, decoded), 'pstream roundtrip byte-exact match');
+    }
+
     // --- Summary ---
     console.log(`\n${'='.repeat(40)}`);
     console.log(`Results: ${passed} passed, ${failed} failed`);

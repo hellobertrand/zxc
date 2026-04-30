@@ -21,6 +21,7 @@
 
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_error.h"
+#include "../include/zxc_pstream.h"
 #include "../include/zxc_sans_io.h"
 #include "../include/zxc_seekable.h"
 #include "../include/zxc_stream.h"
@@ -83,6 +84,23 @@ int test_thread_params(void);
 int test_multithread_roundtrip(void);
 int test_stream_get_decompressed_size_errors(void);
 int test_stream_engine_errors(void);
+
+/* Push Streaming API (zxc_pstream.h) */
+int test_pstream_roundtrip_basic(void);
+int test_pstream_roundtrip_no_checksum(void);
+int test_pstream_roundtrip_levels(void);
+int test_pstream_tiny_chunks(void);
+int test_pstream_drip_one_byte(void);
+int test_pstream_empty_input(void);
+int test_pstream_large_random(void);
+int test_pstream_compatible_with_buffer_api(void);
+int test_pstream_decompress_compatible_with_buffer_api(void);
+int test_pstream_invalid_args(void);
+int test_pstream_truncated_input(void);
+int test_pstream_corrupted_magic(void);
+int test_pstream_decode_seekable_archive(void);
+int test_pstream_compress_after_end_rejected(void);
+int test_pstream_compress_drain_block_resume(void);
 
 /* Stream round-trip coverage (patterns x sizes x levels x checksum) */
 int test_roundtrip_raw_random(void);
