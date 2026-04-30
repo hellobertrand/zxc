@@ -51,6 +51,19 @@ static inline int zxc_close(int fd) {
 #endif
 }
 
+static int grow_output(uint8_t** buf, size_t* cap, size_t out_len, size_t want) {
+    const size_t limit = (size_t)PY_SSIZE_T_MAX;
+    if (out_len > limit || want > limit - out_len) return -1;
+    const size_t needed = out_len + want;
+    size_t new_cap = (*cap > limit / 2) ? limit : (*cap * 2);
+    if (new_cap < needed) new_cap = needed;
+    uint8_t* nb = (uint8_t*)realloc(*buf, new_cap);
+    if (!nb) return -2;
+    *buf = nb;
+    *cap = new_cap;
+    return 0;
+}
+
 // =============================================================================
 // Wrapper functions
 // =============================================================================
@@ -577,21 +590,22 @@ static PyObject* pyzxc_cstream_compress(PyObject* self, PyObject* args, PyObject
     zxc_inbuf_t in = {.src = view.buf, .size = (size_t)view.len, .pos = 0};
     int err_code = 0;
     int oom = 0;
+    int overflow = 0;
 
     Py_BEGIN_ALLOW_THREADS for (;;) {
         /* Make sure there's room to write at least one block worth. */
         size_t want = zxc_cstream_out_size(cs);
         if (want < 4096) want = 4096;
         if (out_cap - out_len < want) {
-            size_t new_cap = out_cap * 2;
-            if (new_cap < out_len + want) new_cap = out_len + want;
-            uint8_t* nb = (uint8_t*)realloc(out_buf, new_cap);
-            if (!nb) {
+            int rc = grow_output(&out_buf, &out_cap, out_len, want);
+            if (rc == -1) {
+                overflow = 1;
+                break;
+            }
+            if (rc == -2) {
                 oom = 1;
                 break;
             }
-            out_buf = nb;
-            out_cap = new_cap;
         }
 
         zxc_outbuf_t out = {.dst = out_buf + out_len, .size = out_cap - out_len, .pos = 0};
@@ -608,13 +622,14 @@ static PyObject* pyzxc_cstream_compress(PyObject* self, PyObject* args, PyObject
 
         PyBuffer_Release(&view);
 
-    if (oom) {
+    if (oom) PyErr_NoMemory();
+    else if (overflow)
+        PyErr_SetString(PyExc_OverflowError, "compressed output exceeds PY_SSIZE_T_MAX");
+    else if (err_code) PyErr_SetString(PyExc_RuntimeError, zxc_error_name(err_code));
+
+    if (PyErr_Occurred()) {
         free(out_buf);
-        return PyErr_NoMemory();
-    }
-    if (err_code) {
-        free(out_buf);
-        Py_Return_Err(PyExc_RuntimeError, zxc_error_name(err_code));
+        return NULL;
     }
 
     PyObject* result = PyBytes_FromStringAndSize((const char*)out_buf, (Py_ssize_t)out_len);
@@ -640,17 +655,19 @@ static PyObject* pyzxc_cstream_end(PyObject* self, PyObject* args, PyObject* kwa
 
     int err_code = 0;
     int oom = 0;
+    int overflow = 0;
 
     Py_BEGIN_ALLOW_THREADS for (;;) {
         if (out_cap - out_len < 4096) {
-            size_t new_cap = out_cap * 2;
-            uint8_t* nb = (uint8_t*)realloc(out_buf, new_cap);
-            if (!nb) {
+            int rc = grow_output(&out_buf, &out_cap, out_len, 4096);
+            if (rc == -1) {
+                overflow = 1;
+                break;
+            }
+            if (rc == -2) {
                 oom = 1;
                 break;
             }
-            out_buf = nb;
-            out_cap = new_cap;
         }
         zxc_outbuf_t out = {.dst = out_buf + out_len, .size = out_cap - out_len, .pos = 0};
         const int64_t r = zxc_cstream_end(cs, &out);
@@ -663,13 +680,14 @@ static PyObject* pyzxc_cstream_end(PyObject* self, PyObject* args, PyObject* kwa
     }
     Py_END_ALLOW_THREADS
 
-        if (oom) {
+    if (oom) PyErr_NoMemory();
+    else if (overflow)
+        PyErr_SetString(PyExc_OverflowError, "compressed output exceeds PY_SSIZE_T_MAX");
+    else if (err_code) PyErr_SetString(PyExc_RuntimeError, zxc_error_name(err_code));
+
+    if (PyErr_Occurred()) {
         free(out_buf);
-        return PyErr_NoMemory();
-    }
-    if (err_code) {
-        free(out_buf);
-        Py_Return_Err(PyExc_RuntimeError, zxc_error_name(err_code));
+        return NULL;
     }
     PyObject* result = PyBytes_FromStringAndSize((const char*)out_buf, (Py_ssize_t)out_len);
     free(out_buf);
@@ -757,26 +775,23 @@ static PyObject* pyzxc_dstream_decompress(PyObject* self, PyObject* args, PyObje
     zxc_inbuf_t in = {.src = view.buf, .size = (size_t)view.len, .pos = 0};
     int err_code = 0;
     int oom = 0;
+    int overflow = 0;
 
     Py_BEGIN_ALLOW_THREADS for (;;) {
         size_t want = zxc_dstream_out_size(ds);
         if (want < 4096) want = 4096;
         if (out_cap - out_len < want) {
-            size_t new_cap = out_cap * 2;
-            if (new_cap < out_len + want) new_cap = out_len + want;
-            uint8_t* nb = (uint8_t*)realloc(out_buf, new_cap);
-            if (!nb) {
+            int rc = grow_output(&out_buf, &out_cap, out_len, want);
+            if (rc == -1) {
+                overflow = 1;
+                break;
+            }
+            if (rc == -2) {
                 oom = 1;
                 break;
             }
-            out_buf = nb;
-            out_cap = new_cap;
         }
         zxc_outbuf_t out = {.dst = out_buf + out_len, .size = out_cap - out_len, .pos = 0};
-        /* Once the caller's input is consumed, switch to an empty descriptor
-         * so the dstream can flush any decoded bytes still staged inside its
-         * internal buffer (a single user input chunk may decode N blocks but
-         * only emit N-1 if our staging filled mid-block). */
         zxc_inbuf_t empty_in = {.src = NULL, .size = 0, .pos = 0};
         zxc_inbuf_t* cur_in = (in.pos < in.size) ? &in : &empty_in;
         const size_t before_in = cur_in->pos;
@@ -795,13 +810,14 @@ static PyObject* pyzxc_dstream_decompress(PyObject* self, PyObject* args, PyObje
 
         PyBuffer_Release(&view);
 
-    if (oom) {
+    if (oom) PyErr_NoMemory();
+    else if (overflow)
+        PyErr_SetString(PyExc_OverflowError, "decompressed output exceeds PY_SSIZE_T_MAX");
+    else if (err_code) PyErr_SetString(PyExc_RuntimeError, zxc_error_name(err_code));
+
+    if (PyErr_Occurred()) {
         free(out_buf);
-        return PyErr_NoMemory();
-    }
-    if (err_code) {
-        free(out_buf);
-        Py_Return_Err(PyExc_RuntimeError, zxc_error_name(err_code));
+        return NULL;
     }
 
     PyObject* result = PyBytes_FromStringAndSize((const char*)out_buf, (Py_ssize_t)out_len);
