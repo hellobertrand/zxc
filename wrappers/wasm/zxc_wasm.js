@@ -624,7 +624,7 @@ export default async function createZXC(moduleOverrides, factory) {
         createDecompressTransformStream,
         detectZxc,
 
-        /** Library version string (e.g. "0.10.1"). */
+        /** Library version string (e.g. "0.11.0"). */
         version: _version_string(),
         /** Minimum compression level. */
         minLevel: _min_level(),

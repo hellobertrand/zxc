@@ -378,14 +378,10 @@ The default block size is **512 KB**, tuned for bulk/archival workloads where ra
 
 **Why larger blocks help:** Each block starts with a cold hash table, so the LZ match-finder has no history and produces more literals until the table warms up. Doubling the block size halves the number of cold-start penalties, improving both ratio and decompression speed.
 
-| Block Size | Memory (per context) | Ratio (level -3) | Decompression vs 256 KB |
-|:----------:|:--------------------:|:-----------------:|:-----------------------:|
-| 256 KB             | ~1.7 MB | 46.36% | — |
-| 512 KB *(default)* | ~3.3 MB | 45.81% *(−0.55 pp)* | +1% to +8% depending on CPU |
 | Block Size | cctx memory | dctx memory | Ratio (level -3) | Decompression gain vs 256 KB |
 |:----------:|:-----------:|:-----------:|:----------------:|:----------------------------:|
-| 256 KB *(default)* | ~1.03 MB | ~256 KB | 46.36% | — |
-| 512 KB | ~1.78 MB | ~512 KB | 45.81% *(−0.55 pp)* | +1% to +8% depending on CPU |
+| 256 KB | ~1.03 MB | ~256 KB | 46.36% | — |
+| 512 KB *(default)* | ~1.78 MB | ~512 KB | 45.81% *(−0.55 pp)* | +1% to +8% depending on CPU |
 
 ```bash
 # CLI — fall back to 256 KB blocks (e.g. embedded / streaming)
