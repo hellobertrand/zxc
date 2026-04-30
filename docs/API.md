@@ -636,8 +636,7 @@ Reads the original size from the file footer. File position is restored.
 
 Declared in `zxc_pstream.h`. Single-threaded, **caller-driven** streaming —
 the inverse of the `FILE*`-based pipeline.  Designed for callback-based
-integrations (libarchive, libcurl, libuv, async runtimes, network protocols)
-that cannot block on a `FILE*` and need to feed/drain in arbitrary chunks.
+integrations (async runtimes, network protocols) that cannot block on a `FILE*` and need to feed/drain in arbitrary chunks.
 
 The on-disk output is **bit-compatible** with the Buffer / Stream APIs:
 files produced by the push API decode with `zxc_decompress()` /

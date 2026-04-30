@@ -196,10 +196,10 @@ static int cs_compress_one_block(zxc_cstream* cs) {
     cs->total_in += cs->in_used;
     cs->in_used = 0;
 
-    /* If checksums are on, the block trailer is the last 4 bytes of pending;
-     * fold it into the rolling global hash. */
-    if (cs->opts.checksum_enabled && cs->pending_len >= 4) {
-        const uint32_t bh = zxc_le32(cs->pending + cs->pending_len - 4);
+    /* If checksums are on, the block trailer is the last ZXC_BLOCK_CHECKSUM_SIZE
+     * bytes of pending; fold it into the rolling global hash. */
+    if (cs->opts.checksum_enabled && cs->pending_len >= ZXC_BLOCK_CHECKSUM_SIZE) {
+        const uint32_t bh = zxc_le32(cs->pending + cs->pending_len - ZXC_BLOCK_CHECKSUM_SIZE);
         cs->global_hash = zxc_hash_combine_rotate(cs->global_hash, bh);
     }
     return ZXC_OK;
@@ -972,8 +972,9 @@ static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
         return 0;
     }
 
-    /* Normal data block: read comp_size [+ 4 if file-level checksums]. */
-    const uint64_t need = (uint64_t)ds->cur_bh.comp_size + (ds->file_has_checksum ? 4u : 0u);
+    /* Normal data block: read comp_size [+ ZXC_BLOCK_CHECKSUM_SIZE if file-level checksums]. */
+    const uint64_t need = (uint64_t)ds->cur_bh.comp_size +
+                          (ds->file_has_checksum ? (uint64_t)ZXC_BLOCK_CHECKSUM_SIZE : 0u);
     if (UNLIKELY(need > ds->payload_cap)) return ds_set_error(ds, ZXC_ERROR_BAD_BLOCK_SIZE);
 
     /* Feed the full block (header + payload + opt csum) to zxc_decompress_block,
@@ -1059,10 +1060,12 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                 ds->decoded_pos = 0;
 
                 /* If file-level checksum verification is enabled, fold this
-                 * block's trailer into the rolling global hash (last 4 bytes
-                 * of the *raw* block). */
-                if (ds->opts.checksum_enabled && ds->file_has_checksum && ds->payload_used >= 4) {
-                    const uint32_t bh = zxc_le32(ds->payload + ds->payload_used - 4);
+                 * block's trailer into the rolling global hash (last
+                 * ZXC_BLOCK_CHECKSUM_SIZE bytes of the *raw* block). */
+                if (ds->opts.checksum_enabled && ds->file_has_checksum &&
+                    ds->payload_used >= ZXC_BLOCK_CHECKSUM_SIZE) {
+                    const uint32_t bh =
+                        zxc_le32(ds->payload + ds->payload_used - ZXC_BLOCK_CHECKSUM_SIZE);
                     ds->global_hash = zxc_hash_combine_rotate(ds->global_hash, bh);
                 }
                 ds->state = DS_EMIT_DECODED;
