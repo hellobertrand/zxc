@@ -12,8 +12,6 @@
  * pulled from zxc_internal.h.
  */
 
-#include "zxc_pstream.h"
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -22,6 +20,7 @@
 #include "zxc_error.h"    /* ZXC_OK, ZXC_ERROR_* */
 #include "zxc_internal.h" /* ZXC_BLOCK_*, ZXC_*_SIZE, zxc_hash_combine_rotate, zxc_le32 */
 #include "zxc_sans_io.h"
+#include "zxc_pstream.h"
 
 /* ===================================================================== */
 /*  Compression                                                          */
