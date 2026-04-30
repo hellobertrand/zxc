@@ -234,7 +234,7 @@ unsafe extern "C" {
     /// Returns the default compression level (currently 3).
     pub fn zxc_default_level() -> c_int;
 
-    /// Returns the library version as a null-terminated string (e.g. "0.10.1").
+    /// Returns the library version as a null-terminated string (e.g. "0.11.0").
     ///
     /// The returned pointer is a compile-time constant and must not be freed.
     pub fn zxc_version_string() -> *const c_char;
