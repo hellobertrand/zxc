@@ -66,7 +66,7 @@
 #include <stdint.h>
 
 #include "zxc_export.h"
-#include "zxc_stream.h" /* zxc_compress_opts_t, zxc_decompress_opts_t */
+#include "zxc_opts.h"
 
 #ifdef __cplusplus
 extern "C" {

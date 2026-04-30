@@ -29,7 +29,7 @@
  * @endcode
  *
  * @see zxc_stream.h  for the streaming (multi-threaded) API.
- * @see zxc_sans_io.h for the low-level sans-I/O building blocks.
+ * @see zxc_pstream.h for single-threaded push-based streaming.
  */
 
 #ifndef ZXC_BUFFER_H
@@ -39,7 +39,7 @@
 #include <stdint.h>
 
 #include "zxc_export.h"
-#include "zxc_stream.h" /* zxc_compress_opts_t, zxc_decompress_opts_t */
+#include "zxc_opts.h"
 
 #ifdef __cplusplus
 extern "C" {
