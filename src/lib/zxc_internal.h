@@ -553,8 +553,8 @@ typedef struct {
  *  Implementations live in zxc_suffix.c. SA is sized n+1 to include a
  *  virtual sentinel at position n; LCP/ISA cover positions 0..n.
  *
- *  Algorithm: DC3 / Skew (Karkkainen-Sanders, 2003), linear-time and
- *  patent-free.
+ *  Algorithm: Itoh-Tanaka two-stage induced sort with Bentley-Sedgewick
+ *  multi-key quicksort (1999, patent-free).
  *  @{ */
 void zxc_suffix_array_build(const uint8_t* RESTRICT T, int32_t* RESTRICT SA, int32_t* RESTRICT ISA,
                             const int32_t n, int32_t* work);
@@ -562,6 +562,23 @@ void zxc_isa_build(const int32_t* RESTRICT SA, int32_t* RESTRICT ISA, const int3
 void zxc_lcp_kasai(const uint8_t* RESTRICT T, const int32_t* RESTRICT SA,
                    const int32_t* RESTRICT ISA, int32_t* RESTRICT LCP, const int32_t n);
 /** @} */
+
+/**
+ * @brief Packed match record for level-6 optimal parsing.
+ *
+ * One entry per source position. @c off is the back-distance to the
+ * matched copy (>= 1); @c len is the match length in bytes (or 0 if
+ * no match was found at this position). Stored as @c uint64_t so the
+ * forward match-collection scan and the backward DP both touch a
+ * single cache line per position.
+ */
+typedef union {
+    uint64_t packed;
+    struct {
+        uint32_t off; /**< Back-distance to the match source. */
+        uint32_t len; /**< Match length, 0 if no match. */
+    } u;
+} zxc_op_match_t;
 
 /**
  * @brief Retrieves LZ77 compression parameters based on the specified compression level.

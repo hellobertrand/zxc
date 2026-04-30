@@ -101,11 +101,16 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     const size_t sz_extras = max_seq * 2 * vbyte_len;
     const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
-    /* Level 6: persistent suffix-array buffers (sa, isa, lcp). Each is (chunk_size + 1) *
-     * sizeof(int32_t). */
+    /* Level 6: persistent suffix-array buffers (sa, isa, lcp) plus
+     * optimal-parsing buffers (match_at, cost). Each SA-family buffer is
+     * (chunk_size + 1) * sizeof(int32_t). match_at is chunk_size *
+     * sizeof(zxc_op_match_t) (8 bytes per position); cost is
+     * (chunk_size + 1) * sizeof(uint32_t). */
     const int need_sa = (level >= ZXC_LEVEL_DENSITY);
     const size_t sa_factor = (size_t)need_sa;
     const size_t sz_sa_aligned = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(int32_t));
+    const size_t sz_match_at_aligned = ZXC_ALIGN_CL(chunk_size * sizeof(zxc_op_match_t));
+    const size_t sz_cost_aligned = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t));
 
     /* Calculate sizes with alignment padding (64 bytes for cache line alignment) */
     size_t total_size = 0;
@@ -127,6 +132,10 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     total_size += sa_factor * sz_sa_aligned;
     const size_t off_lcp = total_size;
     total_size += sa_factor * sz_sa_aligned;
+    const size_t off_match_at = total_size;
+    total_size += sa_factor * sz_match_at_aligned;
+    const size_t off_cost = total_size;
+    total_size += sa_factor * sz_cost_aligned;
 
     uint8_t* const mem = (uint8_t*)zxc_aligned_malloc(total_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
@@ -146,6 +155,8 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->sa = (int32_t*)(((uintptr_t)mem + off_sa) & sa_mask);
     ctx->isa = (int32_t*)(((uintptr_t)mem + off_isa) & sa_mask);
     ctx->lcp = (int32_t*)(((uintptr_t)mem + off_lcp) & sa_mask);
+    ctx->match_at = (void*)(((uintptr_t)mem + off_match_at) & sa_mask);
+    ctx->cost = (uint32_t*)(((uintptr_t)mem + off_cost) & sa_mask);
 
     ctx->compression_level = level;
     ctx->epoch = 1;
@@ -673,11 +684,14 @@ uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
     total += ZXC_ALIGN_CL(max_seq * 2 * vbyte_len);    /* buf_extras */
     total += ZXC_ALIGN_CL(chunk_size + ZXC_PAD_SIZE);  /* literals */
 
-    /* Level >= 6: persistent suffix-array buffers (sa + isa + lcp = 3 * (chunk_size + 1) *
-     * sizeof(int32_t)). */
+    /* Level >= 6: persistent suffix-array buffers (sa + isa + lcp = 3 x
+     * (chunk_size + 1) * sizeof(int32_t)) plus optimal-parsing buffers
+     * (match_at = chunk_size * 8 bytes, cost = (chunk_size + 1) * 4 bytes). */
     const int needs_sa = level >= ZXC_LEVEL_DENSITY;
     const uint64_t sa_aligned = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(int32_t));
-    total += (uint64_t)needs_sa * 3 * sa_aligned;
+    const uint64_t match_at_aligned = ZXC_ALIGN_CL(chunk_size * sizeof(zxc_op_match_t));
+    const uint64_t cost_aligned = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t));
+    total += (uint64_t)needs_sa * (3 * sa_aligned + match_at_aligned + cost_aligned);
 
     /* The opaque wrapper struct allocated by zxc_create_cctx() adds a tiny
      * fixed overhead (< 128 B) that is negligible next to the per-chunk

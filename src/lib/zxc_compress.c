@@ -833,55 +833,114 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     size_t extras_sz = 0;
     uint16_t max_offset = 0;  // Track max offset for 1-byte/2-byte mode decision
 
-    while (LIKELY(ip < mflimit)) {
-        const size_t dist = (size_t)(ip - anchor);
-        size_t step = lzp.step_base + (dist >> lzp.step_shift);
-        if (UNLIKELY(ip + step >= mflimit)) step = 1;
+    if (use_sa) {
+        /* Level 6 optimal parsing: three-phase backward DP over the entire
+         * block. The SA + LCP have already been built above; we now use
+         * them to find the best match at every position (phase A), compute
+         * the optimal parse cost via backward DP (phase B), and emit the
+         * chosen sequence forward (phase C). No format change — same
+         * tokens / offsets / literals / extras streams as the greedy path. */
+        zxc_op_match_t* const match_at = (zxc_op_match_t*)ctx->match_at;
+        uint32_t* const cost = ctx->cost;
+        const int32_t n = (int32_t)src_sz;
+        const int32_t mfl = (int32_t)(mflimit - src); /* limit for match starts */
 
-        zxc_match_t m;
-        if (use_sa) {
-            m = zxc_lz77_find_best_match_sa(src, ip, iend, anchor, sa, isa, lcp, (int32_t)src_sz,
-                                            lzp.sa_walk_bound);
-            /* SA-aware lazy: probe ip+1 and ip+2; if a strictly longer match
-             * exists there, emit current byte as literal and shift forward. */
-            if (m.ref && ip + 2 < mflimit) {
-                zxc_match_t m1 = zxc_lz77_find_best_match_sa(
-                    src, ip + 1, iend, anchor, sa, isa, lcp, (int32_t)src_sz, lzp.sa_walk_bound);
-                zxc_match_t m2 = zxc_lz77_find_best_match_sa(
-                    src, ip + 2, iend, anchor, sa, isa, lcp, (int32_t)src_sz, lzp.sa_walk_bound);
-                /* Pick the offset that yields the largest "encoded gain":
-                 * match_len - literal_lead. (literal lead = +0 / +1 / +2.) */
-                int32_t g0 = (int32_t)m.len;
-                int32_t g1 = m1.ref ? (int32_t)m1.len - 1 : -1;
-                int32_t g2 = m2.ref ? (int32_t)m2.len - 2 : -1;
-                if (g1 > g0 && g1 >= g2) {
-                    ip += 1;
-                    m = m1;
-                } else if (g2 > g0) {
-                    ip += 2;
-                    m = m2;
-                }
+        /* === Phase A: collect best match per position === */
+        for (int32_t p = 0; p < n; p++) match_at[p].packed = 0;
+        for (int32_t p = 0; p < mfl; p++) {
+            /* Pass anchor = src+p to disable backtrack — the DP decides
+             * literal/match boundaries, not the match finder. */
+            const zxc_match_t m = zxc_lz77_find_best_match_sa(
+                src, src + p, iend, src + p, sa, isa, lcp, n, lzp.sa_walk_bound);
+            if (m.ref && m.len >= ZXC_LZ_MIN_MATCH_LEN) {
+                const uint32_t off = (uint32_t)((src + p) - m.ref);
+                /* Cap match length so p + len never exceeds n (sentinel
+                 * tail of 12 bytes is encoded as trailing literals). */
+                uint32_t len = (uint32_t)m.len;
+                const int32_t max_len = n - p;
+                if ((int32_t)len > max_len) len = (uint32_t)max_len;
+                match_at[p].u.off = off;
+                match_at[p].u.len = len;
             }
-        } else {
-            m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, hash_tags,
-                                         chain_table, epoch_mark, offset_mask, level, lzp);
         }
 
-        if (m.ref) {
-            ip -= m.backtrack;
-            const uint32_t ll = (uint32_t)(ip - anchor);
-            const uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
-            const uint32_t off = (uint32_t)(ip - m.ref);
+        /* === Phase B: backward DP === */
+        /* Cost model in bytes:
+         *   - LIT_COST = 1 byte per literal byte (the ll varint header
+         *     overhead for runs > 14 is uncounted; depends on run length
+         *     which is not part of DP state).
+         *   - MATCH_COST_SHORT = 3 bytes for match len 5..19 (token + offset).
+         *   - MATCH_COST_LONG  = 4 bytes for match len >= 20 (token + offset
+         *     + ml-extension varint, 1 byte covers ml in [15, 142]).
+         *
+         * Truncation: at each position p with a long match L >= 20, also
+         * consider taking a short match of length 19 (saving 1 byte of
+         * varint at the cost of leaving more bytes to encode). The DP
+         * picks the cheaper option and writes the chosen length into
+         * @c match_at[p].u.len so phase C can re-emit verbatim. */
+        const uint32_t LIT_COST = 1;
+        const uint32_t MATCH_COST_SHORT = 3;
+        const uint32_t MATCH_COST_LONG = 4;
+        cost[n] = 0;
+        for (int32_t p = n - 1; p >= 0; p--) {
+            const uint32_t cost_lit = cost[p + 1] + LIT_COST;
+            uint32_t cost_match = UINT32_MAX;
+            uint32_t chosen_len = 0;
+            const uint32_t mlen = match_at[p].u.len;
+            if (mlen >= ZXC_LZ_MIN_MATCH_LEN) {
+                /* Full-length match. */
+                const uint32_t mc_full = (mlen >= 20) ? MATCH_COST_LONG : MATCH_COST_SHORT;
+                cost_match = cost[p + (int32_t)mlen] + mc_full;
+                chosen_len = mlen;
+
+                /* Truncated short match (length 19) when we have a long
+                 * match available — sometimes saving the varint byte
+                 * outweighs the extra bytes we need to encode after. */
+                if (mlen >= 20) {
+                    const uint32_t cm_short = cost[p + 19] + MATCH_COST_SHORT;
+                    if (cm_short < cost_match) {
+                        cost_match = cm_short;
+                        chosen_len = 19;
+                    }
+                }
+            }
+            if (cost_match < cost_lit) {
+                cost[p] = cost_match;
+                /* Overwrite match_at length with the chosen length;
+                 * phase C will read it directly. */
+                match_at[p].u.len = chosen_len;
+            } else {
+                cost[p] = cost_lit;
+                match_at[p].u.len = 0; /* literal */
+            }
+        }
+
+        /* === Phase C: forward emit === */
+        int32_t p = 0;
+        int32_t anchor_p = 0;
+        while (p < mfl) {
+            const zxc_op_match_t m = match_at[p];
+            const uint32_t mlen = m.u.len;
+            if (mlen < ZXC_LZ_MIN_MATCH_LEN) {
+                p += 1;
+                continue;
+            }
+
+            /* Emit literal_run [anchor_p, p) followed by the match. */
+            const uint32_t ll = (uint32_t)(p - anchor_p);
+            const uint32_t ml = mlen - ZXC_LZ_MIN_MATCH_LEN;
+            const uint32_t off = m.u.off;
 
             if (ll > 0) {
-                if (LIKELY(anchor + ZXC_PAD_SIZE <= iend)) {
-                    zxc_copy32(literals + lit_c, anchor);
+                const uint8_t* a = src + anchor_p;
+                if (LIKELY(a + ZXC_PAD_SIZE <= iend)) {
+                    zxc_copy32(literals + lit_c, a);
                     if (UNLIKELY(ll > ZXC_PAD_SIZE)) {
-                        ZXC_MEMCPY(literals + lit_c + ZXC_PAD_SIZE, anchor + ZXC_PAD_SIZE,
+                        ZXC_MEMCPY(literals + lit_c + ZXC_PAD_SIZE, a + ZXC_PAD_SIZE,
                                    ll - ZXC_PAD_SIZE);
                     }
                 } else {
-                    ZXC_MEMCPY(literals + lit_c, anchor, ll);
+                    ZXC_MEMCPY(literals + lit_c, a, ll);
                 }
                 lit_c += ll;
             }
@@ -895,36 +954,88 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
             if (ll >= ZXC_TOKEN_LL_MASK)
                 extras_sz += zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
-
             if (ml >= ZXC_TOKEN_ML_MASK)
                 extras_sz += zxc_write_varint(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
 
             seq_c++;
+            p += (int32_t)mlen;
+            anchor_p = p;
+        }
 
-            if (m.len > 2 && level > 4) {
-                const uint8_t* match_end = ip + m.len;
-                if (match_end < iend - 7) {
-                    const uint32_t pos_u = (uint32_t)((match_end - 2) - src);
-                    const uint64_t val_u8 = zxc_le64(match_end - 2);
-                    const uint32_t val_u = (uint32_t)val_u8;
-                    const uint32_t h_u =
-                        zxc_hash_func(val_u8, 1);  // Only for level > 4, uses hash5
-                    const uint32_t prev_head = hash_table[h_u];
-                    const uint32_t prev_idx =
-                        (prev_head & ~offset_mask) == epoch_mark ? (prev_head & offset_mask) : 0;
-                    hash_table[h_u] = epoch_mark | pos_u;
-                    hash_tags[h_u] = (uint8_t)(val_u ^ (val_u >> 16));
-                    chain_table[pos_u & ZXC_LZ_WINDOW_MASK] =
-                        (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
-                            ? (uint16_t)(pos_u - prev_idx)
-                            : 0;
+        /* Set anchor for the post-loop trailing-literals code. */
+        anchor = src + anchor_p;
+        ip = iend;
+    } else {
+        while (LIKELY(ip < mflimit)) {
+            const size_t dist = (size_t)(ip - anchor);
+            size_t step = lzp.step_base + (dist >> lzp.step_shift);
+            if (UNLIKELY(ip + step >= mflimit)) step = 1;
+
+            zxc_match_t m = zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table,
+                                                     hash_tags, chain_table, epoch_mark,
+                                                     offset_mask, level, lzp);
+
+            if (m.ref) {
+                ip -= m.backtrack;
+                const uint32_t ll = (uint32_t)(ip - anchor);
+                const uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
+                const uint32_t off = (uint32_t)(ip - m.ref);
+
+                if (ll > 0) {
+                    if (LIKELY(anchor + ZXC_PAD_SIZE <= iend)) {
+                        zxc_copy32(literals + lit_c, anchor);
+                        if (UNLIKELY(ll > ZXC_PAD_SIZE)) {
+                            ZXC_MEMCPY(literals + lit_c + ZXC_PAD_SIZE, anchor + ZXC_PAD_SIZE,
+                                       ll - ZXC_PAD_SIZE);
+                        }
+                    } else {
+                        ZXC_MEMCPY(literals + lit_c, anchor, ll);
+                    }
+                    lit_c += ll;
                 }
-            }
 
-            ip += m.len;
-            anchor = ip;
-        } else {
-            ip += step;
+                const uint8_t ll_code =
+                    (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
+                const uint8_t ml_code =
+                    (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
+                buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
+                buf_offsets[seq_c] = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
+                if ((off - ZXC_LZ_OFFSET_BIAS) > max_offset)
+                    max_offset = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
+
+                if (ll >= ZXC_TOKEN_LL_MASK)
+                    extras_sz += zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
+
+                if (ml >= ZXC_TOKEN_ML_MASK)
+                    extras_sz += zxc_write_varint(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
+
+                seq_c++;
+
+                if (m.len > 2 && level > 4) {
+                    const uint8_t* match_end = ip + m.len;
+                    if (match_end < iend - 7) {
+                        const uint32_t pos_u = (uint32_t)((match_end - 2) - src);
+                        const uint64_t val_u8 = zxc_le64(match_end - 2);
+                        const uint32_t val_u = (uint32_t)val_u8;
+                        const uint32_t h_u = zxc_hash_func(val_u8, 1);
+                        const uint32_t prev_head = hash_table[h_u];
+                        const uint32_t prev_idx = (prev_head & ~offset_mask) == epoch_mark
+                                                      ? (prev_head & offset_mask)
+                                                      : 0;
+                        hash_table[h_u] = epoch_mark | pos_u;
+                        hash_tags[h_u] = (uint8_t)(val_u ^ (val_u >> 16));
+                        chain_table[pos_u & ZXC_LZ_WINDOW_MASK] =
+                            (prev_idx > 0 && (pos_u - prev_idx) < ZXC_LZ_WINDOW_SIZE)
+                                ? (uint16_t)(pos_u - prev_idx)
+                                : 0;
+                    }
+                }
+
+                ip += m.len;
+                anchor = ip;
+            } else {
+                ip += step;
+            }
         }
     }
 

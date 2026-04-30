@@ -110,6 +110,14 @@ typedef struct {
     int32_t* sa;  /**< Suffix array: sa[k] = start position of k-th sorted suffix. */
     int32_t* isa; /**< Inverse SA: isa[i] = rank of suffix at position i. */
     int32_t* lcp; /**< Longest common prefix between sa[k-1] and sa[k]. */
+
+    /* Level 6 optimal parsing buffers. NULL when level < 6.
+     * @c match_at[p] holds the (offset, length) of the best match at
+     * position p (collected by the SA walker in phase A); @c cost[p] is
+     * the optimal-parsing DP cost for encoding T[p..n) (computed in
+     * phase B). */
+    void* match_at; /**< zxc_op_match_t* (opaque to public header). */
+    uint32_t* cost; /**< Optimal-parsing DP cost array (n+1 entries). */
 } zxc_cctx_t;
 
 /**
