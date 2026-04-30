@@ -50,16 +50,38 @@ typedef struct {
     int16_t sym;
 } pm_leaf_t;
 
+/**
+ * @brief qsort comparator for `pm_leaf_t` arrays.
+ *
+ * Orders leaves by ascending weight, breaking ties by ascending symbol value
+ * so the resulting code-length assignment is deterministic across runs.
+ *
+ * @param[in] a Pointer to a `pm_leaf_t` (cast from `const void*`).
+ * @param[in] b Pointer to a `pm_leaf_t` (cast from `const void*`).
+ * @return Negative / zero / positive per the `qsort` convention.
+ */
 static int pm_leaf_cmp(const void* a, const void* b) {
-    const pm_leaf_t* la = (const pm_leaf_t*)a;
-    const pm_leaf_t* lb = (const pm_leaf_t*)b;
+    const pm_leaf_t* const la = (const pm_leaf_t*)a;
+    const pm_leaf_t* const lb = (const pm_leaf_t*)b;
     if (la->w < lb->w) return -1;
     if (la->w > lb->w) return 1;
     return la->sym - lb->sym;
 }
 
-int zxc_huf_build_code_lengths(const uint32_t freq[ZXC_HUF_NUM_SYMBOLS],
-                               uint8_t code_len[ZXC_HUF_NUM_SYMBOLS]) {
+/**
+ * @brief Build length-limited canonical Huffman code lengths.
+ *
+ * Runs the boundary package-merge algorithm capped at `ZXC_HUF_MAX_CODE_LEN`.
+ * Symbols with `freq[i] == 0` get `code_len[i] == 0`; every other symbol
+ * receives a length in `[1, ZXC_HUF_MAX_CODE_LEN]`. The single-present-symbol
+ * case is handled as a degenerate code of length 1.
+ *
+ * @param[in]  freq     Frequency table indexed by symbol (0..255).
+ * @param[out] code_len Output code-length array, written in full.
+ * @return `ZXC_OK` on success, `ZXC_ERROR_MEMORY` or `ZXC_ERROR_CORRUPT_DATA`
+ *         on failure.
+ */
+int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len) {
     ZXC_MEMSET(code_len, 0, ZXC_HUF_NUM_SYMBOLS);
 
     pm_leaf_t leaves[ZXC_HUF_NUM_SYMBOLS];
@@ -177,7 +199,18 @@ int zxc_huf_build_code_lengths(const uint32_t freq[ZXC_HUF_NUM_SYMBOLS],
  * Canonical code construction (LSB-first by bit-reversing canonical MSB codes)
  * =========================================================================*/
 
-static uint32_t reverse_bits(uint32_t v, int n) {
+/**
+ * @brief Reverse the low @p n bits of @p v.
+ *
+ * Used to convert MSB-first canonical Huffman codes (the natural form
+ * produced by the canonical-code construction) into LSB-first codes that
+ * can be packed into the bit writer with a single shift-or.
+ *
+ * @param[in] v Value whose low @p n bits will be reversed.
+ * @param[in] n Number of significant bits in @p v (1..32).
+ * @return The bit-reversed value, with bits above position @p n set to 0.
+ */
+static uint32_t reverse_bits(uint32_t v, const int n) {
     uint32_t r = 0;
     for (int i = 0; i < n; i++) {
         r = (r << 1) | (v & 1u);
@@ -186,8 +219,17 @@ static uint32_t reverse_bits(uint32_t v, int n) {
     return r;
 }
 
-static void build_canonical_codes(const uint8_t code_len[ZXC_HUF_NUM_SYMBOLS],
-                                  uint32_t codes[ZXC_HUF_NUM_SYMBOLS]) {
+/**
+ * @brief Build the canonical LSB-first Huffman codes for a length table.
+ *
+ * Generates MSB-first canonical codes following RFC 1951 §3.2.2, then
+ * bit-reverses each so the encoder can emit them with a plain
+ * `accum |= code << bits` step. Absent symbols (length 0) receive code 0.
+ *
+ * @param[in]  code_len Per-symbol code lengths.
+ * @param[out] codes    Per-symbol LSB-first canonical codes.
+ */
+static void build_canonical_codes(const uint8_t* RESTRICT code_len, uint32_t* RESTRICT codes) {
     uint32_t bl_count[ZXC_HUF_MAX_CODE_LEN + 1] = {0};
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
         bl_count[code_len[i]]++;
@@ -216,8 +258,18 @@ static void build_canonical_codes(const uint8_t code_len[ZXC_HUF_NUM_SYMBOLS],
  * 128-byte length header: 256 x 4-bit lengths, low nibble first.
  * =========================================================================*/
 
-static void pack_lengths_header(const uint8_t code_len[ZXC_HUF_NUM_SYMBOLS],
-                                uint8_t out[ZXC_HUF_LENGTHS_HEADER_SIZE]) {
+/**
+ * @brief Pack 256 4-bit code lengths into the 128-byte section header.
+ *
+ * The packing is little-endian within each byte: low nibble holds
+ * `code_len[2*i]`, high nibble holds `code_len[2*i + 1]`. The function
+ * silently truncates any length > 15 — callers must enforce the cap of
+ * `ZXC_HUF_MAX_CODE_LEN` (≤ 15) before calling.
+ *
+ * @param[in]  code_len Per-symbol code lengths (length `ZXC_HUF_NUM_SYMBOLS`).
+ * @param[out] out      Output header buffer of `ZXC_HUF_LENGTHS_HEADER_SIZE` bytes.
+ */
+static void pack_lengths_header(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out) {
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i += 2) {
         const uint8_t lo = code_len[i] & 0x0F;
         const uint8_t hi = code_len[i + 1] & 0x0F;
@@ -225,8 +277,19 @@ static void pack_lengths_header(const uint8_t code_len[ZXC_HUF_NUM_SYMBOLS],
     }
 }
 
-static int unpack_lengths_header(const uint8_t in[ZXC_HUF_LENGTHS_HEADER_SIZE],
-                                 uint8_t code_len[ZXC_HUF_NUM_SYMBOLS]) {
+/**
+ * @brief Decode the 128-byte length header back into 256 code lengths.
+ *
+ * Inverts ::pack_lengths_header and validates the two structural invariants:
+ * no length exceeds `ZXC_HUF_MAX_CODE_LEN`, and at least one symbol is
+ * present.
+ *
+ * @param[in]  in       Input header buffer of `ZXC_HUF_LENGTHS_HEADER_SIZE` bytes.
+ * @param[out] code_len Output code-length array of length `ZXC_HUF_NUM_SYMBOLS`.
+ * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` if a length is too
+ *         large or the table is empty.
+ */
+static int unpack_lengths_header(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len) {
     int max_len = 0;
     int n_present = 0;
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i += 2) {
@@ -257,7 +320,15 @@ typedef struct {
     int err;
 } bit_writer_t;
 
-static ZXC_ALWAYS_INLINE void bw_init(bit_writer_t* bw, uint8_t* dst, size_t cap) {
+/**
+ * @brief Initialise an LSB-first bit writer over a caller-owned buffer.
+ *
+ * @param[out] bw  Writer to initialise.
+ * @param[out] dst Output buffer (writer takes no ownership).
+ * @param[in]  cap Capacity of @p dst in bytes.
+ */
+static ZXC_ALWAYS_INLINE void bw_init(bit_writer_t* RESTRICT bw, uint8_t* RESTRICT dst,
+                                      const size_t cap) {
     bw->ptr = dst;
     bw->end = dst + cap;
     bw->accum = 0;
@@ -265,7 +336,20 @@ static ZXC_ALWAYS_INLINE void bw_init(bit_writer_t* bw, uint8_t* dst, size_t cap
     bw->err = 0;
 }
 
-static ZXC_ALWAYS_INLINE void bw_put(bit_writer_t* bw, uint32_t code, int len) {
+/**
+ * @brief Append the low @p len bits of @p code to the writer's bitstream.
+ *
+ * Bits are consumed from the LSB end. When the internal accumulator has
+ * accumulated 8 or more bits, full bytes are flushed to the output buffer.
+ * If the buffer is exhausted mid-flush the writer's `err` flag is set;
+ * subsequent ::bw_finish reports `ZXC_ERROR_DST_TOO_SMALL`.
+ *
+ * @param[in,out] bw   Writer state.
+ * @param[in]     code Code bits to emit (the low @p len bits matter).
+ * @param[in]     len  Number of bits to emit (1..ZXC_HUF_MAX_CODE_LEN).
+ */
+static ZXC_ALWAYS_INLINE void bw_put(bit_writer_t* RESTRICT bw, const uint32_t code,
+                                     const int len) {
     bw->accum |= ((uint64_t)code) << bw->bits;
     bw->bits += len;
     while (bw->bits >= 8) {
@@ -280,7 +364,16 @@ static ZXC_ALWAYS_INLINE void bw_put(bit_writer_t* bw, uint32_t code, int len) {
     }
 }
 
-static ZXC_ALWAYS_INLINE int bw_finish(bit_writer_t* bw) {
+/**
+ * @brief Flush any partial trailing byte and finalise the bit writer.
+ *
+ * Writes the (zero-padded) trailing byte if the accumulator holds any bits.
+ *
+ * @param[in,out] bw Writer state.
+ * @return `ZXC_OK` on success, `ZXC_ERROR_DST_TOO_SMALL` if the buffer was
+ *         exhausted at any point.
+ */
+static ZXC_ALWAYS_INLINE int bw_finish(bit_writer_t* RESTRICT bw) {
     if (bw->bits > 0) {
         if (UNLIKELY(bw->ptr >= bw->end)) return ZXC_ERROR_DST_TOO_SMALL;
         *bw->ptr++ = (uint8_t)bw->accum;
@@ -294,9 +387,12 @@ static ZXC_ALWAYS_INLINE int bw_finish(bit_writer_t* bw) {
  * Encoder
  * =========================================================================*/
 
-int zxc_huf_encode_section(const uint8_t* literals, size_t n_literals,
-                           const uint8_t code_len[ZXC_HUF_NUM_SYMBOLS], uint8_t* dst,
-                           size_t dst_cap) {
+/**
+ * @copydoc zxc_huf_encode_section
+ */
+int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
+                           const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
+                           const size_t dst_cap) {
     if (UNLIKELY(n_literals == 0)) return ZXC_ERROR_CORRUPT_DATA;
     if (UNLIKELY(dst_cap < ZXC_HUF_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
 
@@ -351,8 +447,23 @@ int zxc_huf_encode_section(const uint8_t* literals, size_t n_literals,
  * Decoder table builder + 4-way interleaved decoder
  * =========================================================================*/
 
-static int build_decode_table(const uint8_t code_len[ZXC_HUF_NUM_SYMBOLS],
-                              zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE]) {
+/**
+ * @brief Build the 512-entry decoder lookup table from per-symbol code lengths.
+ *
+ * Validates the Kraft equality, generates the canonical LSB-first codes and
+ * fills every table slot with the matching `(symbol, length)` pair packed
+ * into a `uint16_t` (low byte = symbol, high byte = length). The single-
+ * present-symbol degenerate case is handled by replicating the one valid
+ * entry across the full table.
+ *
+ * @param[in]  code_len Per-symbol code lengths produced from the section header.
+ * @param[out] table    Destination 512-entry lookup table (must be aligned by
+ *                      the caller for hot-path performance).
+ * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` if the lengths fail
+ *         the Kraft check or yield an empty/invalid entry.
+ */
+static int build_decode_table(const uint8_t* RESTRICT code_len,
+                              zxc_huf_dec_entry_t* RESTRICT table) {
     uint32_t bl_count[ZXC_HUF_MAX_CODE_LEN + 1] = {0};
     int n_present = 0;
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
@@ -427,9 +538,13 @@ static int build_decode_table(const uint8_t code_len[ZXC_HUF_NUM_SYMBOLS],
     return ZXC_OK;
 }
 
-int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t* dst,
-                           size_t n_literals) {
-    if (UNLIKELY(payload_size < ZXC_HUF_HEADER_SIZE || n_literals == 0)) return ZXC_ERROR_CORRUPT_DATA;
+/**
+ * @copydoc zxc_huf_decode_section
+ */
+int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
+                           uint8_t* RESTRICT dst, const size_t n_literals) {
+    if (UNLIKELY(payload_size < ZXC_HUF_HEADER_SIZE || n_literals == 0))
+        return ZXC_ERROR_CORRUPT_DATA;
 
     /* 1. Parse length header. */
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
@@ -441,8 +556,7 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
     /* 2. Build the 512-entry decode table. Cache-line aligned: the LUT
      * spans 16 lines and is hammered every symbol; landing it on a 64-byte
      * boundary avoids any cross-line load split. */
-    __attribute__((aligned(ZXC_CACHE_LINE_SIZE)))
-    zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE];
+    __attribute__((aligned(ZXC_CACHE_LINE_SIZE))) zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE];
     {
         const int rc = build_decode_table(code_len, table);
         if (UNLIKELY(rc != ZXC_OK)) return rc;
@@ -505,7 +619,7 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
      * to have a non-zero length byte, so the per-symbol length check is
      * hoisted out of the hot path. */
 #define ZXC_HUF_BATCH 6
-#define ZXC_HUF_BATCH_BITS (ZXC_HUF_BATCH * ZXC_HUF_MAX_CODE_LEN)  /* = 54 */
+#define ZXC_HUF_BATCH_BITS (ZXC_HUF_BATCH * ZXC_HUF_MAX_CODE_LEN) /* = 54 */
 #define ZXC_HUF_TBL_MASK ((uint64_t)(ZXC_HUF_TABLE_SIZE - 1))
 
     uint8_t* d0 = s_dst[0];
@@ -535,21 +649,21 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
      * The accumulator's high bits (positions BB..63) are guaranteed zero
      * here: each DECODE_ONE() ends with `accum >>= len`, which is an
      * unsigned right-shift that zero-fills the top bits. No mask needed. */
-#define REFILL(A, BB, P, E)                                              \
-    do {                                                                  \
-        if (LIKELY((BB) < ZXC_HUF_BATCH_BITS)) {                          \
-            if (LIKELY((P) + sizeof(uint64_t) <= (E))) {                  \
-                (A) |= zxc_le64(P) << (BB);                               \
-                const int _n = (64 - (BB)) >> 3;                          \
-                (P) += _n;                                                \
-                (BB) += _n * 8;                                           \
-            } else {                                                      \
-                while ((BB) <= 56 && (P) < (E)) {                         \
-                    (A) |= ((uint64_t) * (P)++) << (BB);                  \
-                    (BB) += 8;                                            \
-                }                                                         \
-            }                                                             \
-        }                                                                 \
+#define REFILL(A, BB, P, E)                              \
+    do {                                                 \
+        if (LIKELY((BB) < ZXC_HUF_BATCH_BITS)) {         \
+            if (LIKELY((P) + sizeof(uint64_t) <= (E))) { \
+                (A) |= zxc_le64(P) << (BB);              \
+                const int _n = (64 - (BB)) >> 3;         \
+                (P) += _n;                               \
+                (BB) += _n * 8;                          \
+            } else {                                     \
+                while ((BB) <= 56 && (P) < (E)) {        \
+                    (A) |= ((uint64_t)*(P)++) << (BB);   \
+                    (BB) += 8;                           \
+                }                                        \
+            }                                            \
+        }                                                \
     } while (0)
 
     /* Decode 1 symbol from each of the 4 streams; advance pointers/state.
@@ -558,7 +672,7 @@ int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t*
      * into bb0..bb3 once at end of batch. This trades 4 sub/iter (24 per
      * batch) for 4 add/iter (24) + 4 sub/batch — same critical path on the
      * accum chain, fewer ALU µops on x86 with limited add/sub ports. */
-#define DECODE_ONE()                                            \
+#define DECODE_ONE()                                             \
     do {                                                         \
         const uint16_t _e0 = table[a0 & ZXC_HUF_TBL_MASK].entry; \
         const uint16_t _e1 = table[a1 & ZXC_HUF_TBL_MASK].entry; \

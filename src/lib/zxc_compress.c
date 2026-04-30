@@ -1079,7 +1079,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                  .enc_off = (uint8_t)use_8bit_off};
 
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS] = {0};
-    const size_t lit_section_size = (enc_lit == ZXC_SECTION_ENCODING_RLE)     ? rle_size
+    const size_t lit_section_size = (enc_lit == ZXC_SECTION_ENCODING_RLE)       ? rle_size
                                     : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) ? huf_total_size
                                                                                 : (size_t)lit_c;
     desc[0].sizes = (uint64_t)lit_section_size | ((uint64_t)lit_c << 32);
@@ -1102,8 +1102,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     if (UNLIKELY(rem < sz_lit)) return ZXC_ERROR_DST_TOO_SMALL;
 
     if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) {
-        const int written = zxc_huf_encode_section(literals, (size_t)lit_c, huf_code_len, p_curr,
-                                                   rem);
+        const int written =
+            zxc_huf_encode_section(literals, (size_t)lit_c, huf_code_len, p_curr, rem);
         if (UNLIKELY(written < 0)) return written;
         if (UNLIKELY((size_t)written != huf_total_size)) return ZXC_ERROR_DST_TOO_SMALL;
         p_curr += written;

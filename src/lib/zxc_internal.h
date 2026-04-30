@@ -1330,14 +1330,15 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
 /**
  * @brief Build length-limited canonical Huffman code lengths from a frequency table.
  *
- * Uses the boundary package-merge algorithm capped at ZXC_HUF_MAX_CODE_LEN.
+ * Uses the boundary package-merge algorithm capped at `ZXC_HUF_MAX_CODE_LEN`.
  * Symbols with `freq[i] == 0` get `code_len[i] == 0`; others receive a value
- * in [1, ZXC_HUF_MAX_CODE_LEN].
+ * in `[1, ZXC_HUF_MAX_CODE_LEN]`.
  *
- * @return ZXC_OK on success, negative error otherwise.
+ * @param[in]  freq     Frequency table of length `ZXC_HUF_NUM_SYMBOLS`.
+ * @param[out] code_len Output code-length array of length `ZXC_HUF_NUM_SYMBOLS`.
+ * @return `ZXC_OK` on success, negative `zxc_error_t` code on failure.
  */
-int zxc_huf_build_code_lengths(const uint32_t freq[ZXC_HUF_NUM_SYMBOLS],
-                               uint8_t code_len[ZXC_HUF_NUM_SYMBOLS]);
+int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len);
 
 /**
  * @brief Encode the literal stream into a Huffman section payload.
@@ -1345,21 +1346,31 @@ int zxc_huf_build_code_lengths(const uint32_t freq[ZXC_HUF_NUM_SYMBOLS],
  * Writes the 128-byte length header, the 6-byte sub-stream size table and
  * the 4 concatenated LSB-first bit-streams.
  *
- * @return Total bytes written on success, negative error otherwise.
+ * @param[in]  literals   Source literal bytes (must not alias `dst`).
+ * @param[in]  n_literals Number of source bytes.
+ * @param[in]  code_len   Per-symbol code lengths produced by
+ *                        ::zxc_huf_build_code_lengths.
+ * @param[out] dst        Destination buffer for the section payload.
+ * @param[in]  dst_cap    Capacity of @p dst in bytes.
+ * @return Total bytes written on success, negative `zxc_error_t` code on failure.
  */
-int zxc_huf_encode_section(const uint8_t* literals, size_t n_literals,
-                           const uint8_t code_len[ZXC_HUF_NUM_SYMBOLS], uint8_t* dst,
-                           size_t dst_cap);
+int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
+                           const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
+                           const size_t dst_cap);
 
 /**
  * @brief Decode a Huffman literal section payload of `payload_size` bytes.
  *
- * Writes exactly `n_literals` decoded bytes into `dst`.
+ * Writes exactly `n_literals` decoded bytes into @p dst.
  *
- * @return ZXC_OK on success, negative zxc_error_t code otherwise.
+ * @param[in]  payload      Section payload (header + 4 sub-streams).
+ * @param[in]  payload_size Total payload length in bytes.
+ * @param[out] dst          Destination buffer (must not alias @p payload).
+ * @param[in]  n_literals   Expected number of decoded bytes.
+ * @return `ZXC_OK` on success, negative `zxc_error_t` code on failure.
  */
-int zxc_huf_decode_section(const uint8_t* payload, size_t payload_size, uint8_t* dst,
-                           size_t n_literals);
+int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
+                           uint8_t* RESTRICT dst, const size_t n_literals);
 
 /**
  * @brief Internal wrapper function to decompress a single chunk of data.

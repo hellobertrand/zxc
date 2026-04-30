@@ -628,8 +628,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
             l_ptr = p_curr;
             l_end = p_curr;
         } else {
-            if (UNLIKELY(required_size > dst_capacity ||
-                         required_size > SIZE_MAX - ZXC_PAD_SIZE))
+            if (UNLIKELY(required_size > dst_capacity || required_size > SIZE_MAX - ZXC_PAD_SIZE))
                 return ZXC_ERROR_DST_TOO_SMALL;
             const size_t alloc_size = required_size + ZXC_PAD_SIZE;
             if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) {
