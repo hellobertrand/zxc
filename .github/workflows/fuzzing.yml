@@ -35,7 +35,7 @@ jobs:
       fail-fast: false
       matrix:
         sanitizer: [address, undefined]
-        fuzzer: [decompress, roundtrip, seekable]
+        fuzzer: [decompress, roundtrip, seekable, pstream]
 
     steps:
     - name: Checkout Repository
@@ -116,7 +116,8 @@ jobs:
             corpus
           echo "roundtrip inputs: $(find corpus/corpus/zxc_fuzzer_roundtrip -type f | wc -l)"
           echo "decompress inputs: $(find corpus/corpus/zxc_fuzzer_decompress -type f | wc -l)"
-          echo "seekable inputs: $(find corpus/corpus/zxc_fuzzer_seekable -type f 2>/dev/null | wc -l)"
+          echo "seekable inputs: $(find corpus/corpus/zxc_fuzzer_seekable -type f | wc -l)"
+          echo "pstream inputs: $(find corpus/corpus/zxc_fuzzer_pstream -type f | wc -l)"
 
       - name: Build Coverage Harnesses
         run: |
@@ -124,7 +125,7 @@ jobs:
           CFLAGS="-g -O1 -fprofile-instr-generate -fcoverage-mapping"
           DEFS="-DZXC_FUNCTION_SUFFIX=_default -DZXC_ONLY_DEFAULT"
           INCLUDES="-I include -I src/lib/vendors"
-          SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_seekable.c"
+          SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_seekable.c src/lib/zxc_pstream.c"
 
           clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_roundtrip.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_roundtrip
@@ -134,6 +135,9 @@ jobs:
 
           clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_seekable.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_seekable
+
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_pstream.c \
+            -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_pstream
 
       - name: Replay Corpora
         run: |
@@ -145,24 +149,31 @@ jobs:
             LLVM_PROFILE_FILE="build-cov/seekable.profraw" \
               build-cov/fuzz_seekable corpus/corpus/zxc_fuzzer_seekable/ -runs=0 2>&1 | tail -1
           fi
+          if [ -d corpus/corpus/zxc_fuzzer_pstream ]; then
+            LLVM_PROFILE_FILE="build-cov/pstream.profraw" \
+              build-cov/fuzz_pstream corpus/corpus/zxc_fuzzer_pstream/ -runs=0 2>&1 | tail -1
+          fi
 
       - name: Generate Coverage Report
         run: |
           llvm-profdata merge \
             build-cov/roundtrip.profraw build-cov/decompress.profraw \
             $([ -f build-cov/seekable.profraw ] && echo build-cov/seekable.profraw) \
+            $([ -f build-cov/pstream.profraw ] && echo build-cov/pstream.profraw) \
             -o build-cov/fuzz.profdata
 
           echo "=== COVERAGE SUMMARY ==="
           llvm-cov report \
             build-cov/fuzz_roundtrip -object build-cov/fuzz_decompress \
             $([ -f build-cov/fuzz_seekable ] && echo "-object build-cov/fuzz_seekable") \
+            $([ -f build-cov/fuzz_pstream ] && echo "-object build-cov/fuzz_pstream") \
             -instr-profile=build-cov/fuzz.profdata \
             --ignore-filename-regex='(vendors/|tests/|fuzz_|zxc_driver)'
 
           llvm-cov show \
             build-cov/fuzz_roundtrip -object build-cov/fuzz_decompress \
             $([ -f build-cov/fuzz_seekable ] && echo "-object build-cov/fuzz_seekable") \
+            $([ -f build-cov/fuzz_pstream ] && echo "-object build-cov/fuzz_pstream") \
             -instr-profile=build-cov/fuzz.profdata \
             --ignore-filename-regex='(vendors/|tests/|fuzz_|zxc_driver)' \
             --format=html -output-dir=build-cov/coverage_html

@@ -6,9 +6,9 @@
 #  This source code is licensed under the BSD-style license found in the
 #  LICENSE file in the root directory of this source tree.
 
-AVAILABLE_FUZZERS="decompress roundtrip seekable"
+AVAILABLE_FUZZERS="decompress roundtrip seekable pstream"
 
-LIB_SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_seekable.c"
+LIB_SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_seekable.c src/lib/zxc_pstream.c"
 
 for fuzzer in $AVAILABLE_FUZZERS; do
     if [ -z "${FUZZER_TARGET:-}" ] || [ "${FUZZER_TARGET}" == "$fuzzer" ]; then
