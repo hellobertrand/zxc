@@ -12,12 +12,11 @@
  */
 
 import { createRequire } from 'module';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Resolve BUILD_DIR relative to CWD (not the test file location)
-import { resolve } from 'path';
 const buildDir = process.env.BUILD_DIR
     ? resolve(process.cwd(), process.env.BUILD_DIR)
     : join(__dirname, '..', '..', 'build-wasm');
@@ -238,12 +237,8 @@ async function main() {
     // --- 8. Push streaming API (high-level wrapper) -----------------------
     console.log('\n8. Push Streaming API (CStream / DStream)');
     {
-        // Use the high-level wrapper from zxc_wasm.js for ergonomics.
         const { default: createZXC } = await import('./zxc_wasm.js');
-        // Pass the same already-loaded factory to avoid re-init: the wrapper
-        // accepts moduleOverrides, but it always re-invokes ZXCModule(). We
-        // accept that small cost in tests.
-        const zxc = await createZXC();
+        const zxc = await createZXC({}, ZXCModule);
 
         const cs = zxc.createCStream({ checksum: true });
         assert(cs.inSize() > 0 && cs.outSize() > 0, `cstream size hints: in=${cs.inSize()} out=${cs.outSize()}`);

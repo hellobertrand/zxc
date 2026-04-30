@@ -14,18 +14,17 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-// The Emscripten-generated module loader (zxc.js) must be in the same directory.
-// It exports a factory function named ZXCModule (set by -sEXPORT_NAME).
-import ZXCModule from './zxc.js';
-
 /**
  * Initialise the ZXC WASM module and return an ergonomic API object.
  *
  * @param {object} [moduleOverrides] - Optional Emscripten module overrides
  *        (e.g. { locateFile: ... } for custom .wasm path resolution).
+ * @param {Function} [factory] - Optional Emscripten module factory. If
+ *        omitted, the default sibling `./zxc.js` is dynamically imported.
  * @returns {Promise<ZXC>} Resolved API object.
  */
-export default async function createZXC(moduleOverrides) {
+export default async function createZXC(moduleOverrides, factory) {
+    const ZXCModule = factory || (await import('./zxc.js')).default;
     const Module = await ZXCModule(moduleOverrides || {});
 
     // --- Wrap C functions via cwrap ------------------------------------------
