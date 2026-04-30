@@ -192,6 +192,23 @@ static Napi::Value ThrowZxcError(Napi::Env env, int code) {
     return env.Undefined();
 }
 
+/* Grow `out` so at least `out_len + want` bytes are addressable. Doubles when
+ * possible, caps at vector::max_size(), and throws if the request can't fit. */
+static bool GrowOutput(Napi::Env env, std::vector<uint8_t>& out,
+                       size_t out_len, size_t want) {
+    const size_t cap = out.max_size();
+    if (want > cap - out_len) {
+        Napi::Error::New(env, "output buffer size overflow")
+            .ThrowAsJavaScriptException();
+        return false;
+    }
+    const size_t needed = out_len + want;
+    size_t new_size = (out.size() > cap / 2) ? cap : out.size() * 2;
+    if (new_size < needed) new_size = needed;
+    out.resize(new_size);
+    return true;
+}
+
 class CStreamWrap : public Napi::ObjectWrap<CStreamWrap> {
    public:
     static Napi::Function GetClass(Napi::Env env) {
@@ -260,7 +277,7 @@ class CStreamWrap : public Napi::ObjectWrap<CStreamWrap> {
             size_t want = zxc_cstream_out_size(cs_);
             if (want < 4096) want = 4096;
             if (out.size() - out_len < want) {
-                out.resize(out.size() * 2);
+                if (!GrowOutput(env, out, out_len, want)) return env.Undefined();
             }
             zxc_outbuf_t obuf = {out.data() + out_len, out.size() - out_len, 0};
             int64_t r = zxc_cstream_compress(cs_, &obuf, &in);
@@ -280,7 +297,7 @@ class CStreamWrap : public Napi::ObjectWrap<CStreamWrap> {
 
         for (;;) {
             if (out.size() - out_len < 4096) {
-                out.resize(out.size() * 2);
+                if (!GrowOutput(env, out, out_len, 4096)) return env.Undefined();
             }
             zxc_outbuf_t obuf = {out.data() + out_len, out.size() - out_len, 0};
             int64_t r = zxc_cstream_end(cs_, &obuf);
@@ -390,7 +407,7 @@ class DStreamWrap : public Napi::ObjectWrap<DStreamWrap> {
             size_t want = zxc_dstream_out_size(ds_);
             if (want < 4096) want = 4096;
             if (out.size() - out_len < want) {
-                out.resize(out.size() * 2);
+                if (!GrowOutput(env, out, out_len, want)) return env.Undefined();
             }
             zxc_outbuf_t obuf = {out.data() + out_len, out.size() - out_len, 0};
             zxc_inbuf_t empty_in = {nullptr, 0, 0};
