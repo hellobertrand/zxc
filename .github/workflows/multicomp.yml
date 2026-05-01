@@ -130,23 +130,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu 22.04 ships GCC 10, 11, 12 — only GCC 9 needs PPA
-          - { os: ubuntu-22.04, version: 9,  needs_ppa: true }
-          - { os: ubuntu-22.04, version: 10, needs_ppa: false }
-          - { os: ubuntu-22.04, version: 11, needs_ppa: false }
-          - { os: ubuntu-22.04, version: 12, needs_ppa: false }
+          # Ubuntu 22.04 ships GCC 9, 10, 11, 12 in universe
+          - { os: ubuntu-22.04, version: 9 }
+          - { os: ubuntu-22.04, version: 10 }
+          - { os: ubuntu-22.04, version: 11 }
+          - { os: ubuntu-22.04, version: 12 }
           # Ubuntu 24.04 ships GCC 12, 13, 14
-          - { os: ubuntu-latest, version: 13, needs_ppa: false }
-          - { os: ubuntu-latest, version: 14, needs_ppa: false }
+          - { os: ubuntu-latest, version: 13 }
+          - { os: ubuntu-latest, version: 14 }
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Install GCC ${{ matrix.version }} (PPA)
-        if: matrix.needs_ppa
+      - name: Install GCC ${{ matrix.version }}
         run: |
-          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
           sudo apt-get install -y gcc-${{ matrix.version }} g++-${{ matrix.version }}
 
