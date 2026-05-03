@@ -411,7 +411,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
         // --- Lazy evaluation at ip+2 (computed in parallel, no dependency on lazy 1) ---
         uint32_t max_lazy3 = 0;
-        if (level >= 4 && ip + 2 < mflimit) {
+        if (level >= ZXC_LEVEL_BALANCED && ip + 2 < mflimit) {
             const uint64_t val3_8 = zxc_le64(ip + 2);
             const uint32_t val3 = (uint32_t)val3_8;
             const uint32_t h3 = zxc_hash_func(val3_8, use_hash5);
@@ -778,7 +778,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
             seq_c++;
 
-            if (m.len > 2 && level > 4) {
+            if (m.len > 2 && level > ZXC_LEVEL_BALANCED) {
                 const uint8_t* match_end = ip + m.len;
                 if (match_end < iend - 7) {
                     const uint32_t pos_u = (uint32_t)((match_end - 2) - src);

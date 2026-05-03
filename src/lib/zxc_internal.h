@@ -551,7 +551,7 @@ typedef struct {
  * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
-    if (level >= 5) return (zxc_lz77_params_t){64, 256, 1, 16, 128, 1, 8};
+    if (level >= ZXC_LEVEL_COMPACT) return (zxc_lz77_params_t){64, 256, 1, 16, 128, 1, 8};
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
     // step_shift
     static const zxc_lz77_params_t table[5] = {
@@ -561,7 +561,7 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
         {3, 16, 1, 4, 128, 1, 4},  // level 3
         {3, 18, 1, 4, 128, 1, 5}   // level 4
     };
-    return table[level < 1 ? 1 : level];
+    return table[level < ZXC_LEVEL_FASTEST ? ZXC_LEVEL_FASTEST : level];
 }
 
 /**
