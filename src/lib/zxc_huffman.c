@@ -715,36 +715,53 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
         bb3 -= sl3;
     }
 
-    /* Persist locals back to the bit readers before the scalar tail. */
-    br[0].accum = a0;
-    br[1].accum = a1;
-    br[2].accum = a2;
-    br[3].accum = a3;
-    br[0].bits = bb0;
-    br[1].bits = bb1;
-    br[2].bits = bb2;
-    br[3].bits = bb3;
-    br[0].ptr = p0;
-    br[1].ptr = p1;
-    br[2].ptr = p2;
-    br[3].ptr = p3;
+    /* Vectorised tail. Up to ZXC_HUF_BATCH-1 = 5 symbols per stream
+     * remain in the common phase, plus up to 3 more on streams 0..2 when
+     * n_literals is not a multiple of 4 (stream 3 is always the shortest,
+     * so its count equals `common`). Bit-reader hot fields stay in the
+     * same locals used by the batched loop — no per-symbol zxc_br_ensure
+     * load/store of br->{accum,bits,ptr}. Phase A keeps 4-way ILP for
+     * the common-phase remainder; Phase B finishes the few stragglers on
+     * streams 0..2 sequentially. */
 
-    /* Leftover of the common phase (< ZXC_HUF_BATCH symbols per stream)
-     * plus any trailing symbols on streams 0..2 (when N is not a multiple
-     * of 4). Both fall through the scalar tail; d0..d3 have already been
-     * advanced past the batched_syms. */
-    uint8_t* tail_dst[ZXC_HUF_NUM_STREAMS] = {d0, d1, d2, d3};
-    for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
-        for (size_t i = batched_syms; i < s_count[s]; i++) {
-            zxc_br_ensure(&br[s], ZXC_HUF_MAX_CODE_LEN);
-            const uint16_t e = table[br[s].accum & ZXC_HUF_TBL_MASK].entry;
-            const int l = e >> 8;
-            *tail_dst[s]++ = (uint8_t)e;
-            br[s].accum >>= l;
-            br[s].bits -= l;
-        }
+    /* Phase A: common-phase tail, 4-way interleaved (0..5 iterations). */
+    const size_t common_tail = common - batched_syms;
+    for (size_t i = 0; i < common_tail; i++) {
+        REFILL(a0, bb0, p0, e0);
+        REFILL(a1, bb1, p1, e1);
+        REFILL(a2, bb2, p2, e2);
+        REFILL(a3, bb3, p3, e3);
+
+        const uint16_t _e0 = table[a0 & ZXC_HUF_TBL_MASK].entry;
+        const uint16_t _e1 = table[a1 & ZXC_HUF_TBL_MASK].entry;
+        const uint16_t _e2 = table[a2 & ZXC_HUF_TBL_MASK].entry;
+        const uint16_t _e3 = table[a3 & ZXC_HUF_TBL_MASK].entry;
+        *d0++ = (uint8_t)_e0;
+        *d1++ = (uint8_t)_e1;
+        *d2++ = (uint8_t)_e2;
+        *d3++ = (uint8_t)_e3;
+        const int _l0 = _e0 >> 8, _l1 = _e1 >> 8;
+        const int _l2 = _e2 >> 8, _l3 = _e3 >> 8;
+        a0 >>= _l0; a1 >>= _l1; a2 >>= _l2; a3 >>= _l3;
+        bb0 -= _l0; bb1 -= _l1; bb2 -= _l2; bb3 -= _l3;
     }
 
+    /* Phase B: extra symbols on streams 0..2 (≤ 3 each, when N % 4 != 0). */
+#define TAIL_ONE(A, BB, P, E, D)                                  \
+    do {                                                          \
+        REFILL(A, BB, P, E);                                      \
+        const uint16_t _e = table[(A) & ZXC_HUF_TBL_MASK].entry;  \
+        const int _l = _e >> 8;                                   \
+        *(D)++ = (uint8_t)_e;                                     \
+        (A) >>= _l;                                               \
+        (BB) -= _l;                                               \
+    } while (0)
+
+    for (size_t i = common; i < s_count[0]; i++) TAIL_ONE(a0, bb0, p0, e0, d0);
+    for (size_t i = common; i < s_count[1]; i++) TAIL_ONE(a1, bb1, p1, e1, d1);
+    for (size_t i = common; i < s_count[2]; i++) TAIL_ONE(a2, bb2, p2, e2, d2);
+
+#undef TAIL_ONE
 #undef DECODE_ONE
 #undef REFILL
 #undef ZXC_HUF_BATCH
