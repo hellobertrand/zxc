@@ -72,8 +72,8 @@ int test_library_info_api() {
 
     // 2. Max level must match compile-time constant
     int max = zxc_max_level();
-    if (max != ZXC_LEVEL_MAX) {
-        printf("Failed: zxc_max_level() returned %d, expected %d\n", max, ZXC_LEVEL_MAX);
+    if (max != ZXC_LEVEL_DENSITY) {
+        printf("Failed: zxc_max_level() returned %d, expected %d\n", max, ZXC_LEVEL_DENSITY);
         return 0;
     }
     printf("  [PASS] zxc_max_level() == %d\n", max);

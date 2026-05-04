@@ -1297,7 +1297,7 @@ parse_done:;
      * and switch to HUFFMAN if it beats the current choice by >= 3%. */
     uint8_t huf_code_len[ZXC_HUF_NUM_SYMBOLS];
     size_t huf_total_size = SIZE_MAX;
-    if (level >= ZXC_LEVEL_MAX && lit_c >= ZXC_HUF_MIN_LITERALS) {
+    if (level >= ZXC_LEVEL_DENSITY && lit_c >= ZXC_HUF_MIN_LITERALS) {
         uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
         for (size_t i = 0; i < lit_c; i++) freq[literals[i]]++;
         if (zxc_huf_build_code_lengths(freq, huf_code_len) == ZXC_OK) {

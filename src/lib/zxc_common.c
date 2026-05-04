@@ -660,7 +660,7 @@ uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
      * fixed overhead (< 128 B) that is negligible next to the per-chunk
      * buffers above and is intentionally omitted. */
 
-    if (level >= ZXC_LEVEL_MAX) {
+    if (level >= ZXC_LEVEL_DENSITY) {
         total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* dp         */
         total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* parent_len */
         total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t)); /* parent_off */
@@ -738,9 +738,9 @@ int zxc_min_level(void) { return ZXC_LEVEL_FASTEST; }
 /*
  * @brief Returns the maximum supported compression level.
  *
- * Returns the value of ZXC_LEVEL_MAX (currently 6).
+ * Returns the value of ZXC_LEVEL_DENSITY (currently 6).
  */
-int zxc_max_level(void) { return ZXC_LEVEL_MAX; }
+int zxc_max_level(void) { return ZXC_LEVEL_DENSITY; }
 
 /*
  * @brief Returns the default compression level.
