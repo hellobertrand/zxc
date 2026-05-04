@@ -1319,7 +1319,8 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  * ============================================================================
  */
 
-#define ZXC_HUF_MAX_CODE_LEN 9
+#define ZXC_HUF_MAX_CODE_LEN 8
+#define ZXC_HUF_LOOKUP_BITS 11 /**< Decoder LUT width: each lookup yields 1 or 2 symbols. */
 #define ZXC_HUF_NUM_SYMBOLS 256
 #define ZXC_HUF_NUM_STREAMS 4
 #define ZXC_HUF_HEADER_SIZE 134 /**< 128 B lengths + 6 B sub-stream sizes. */
