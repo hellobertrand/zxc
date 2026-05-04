@@ -26,7 +26,7 @@
 //!
 //! # Compression Levels
 //!
-//! ZXC provides 5 compression levels trading off speed vs ratio:
+//! ZXC provides 6 compression levels trading off speed vs ratio:
 //!
 //! | Level | Speed | Ratio | Use Case |
 //! |-------|-------|-------|----------|
@@ -35,6 +35,7 @@
 //! | `Default` | ★★★☆☆ | ★★★★☆ | General purpose |
 //! | `Balanced` | ★★☆☆☆ | ★★★★☆ | Archives |
 //! | `Compact` | ★☆☆☆☆ | ★★★★★ | Storage, firmware |
+//! | `Density` | ★☆☆☆☆ | ★★★★★ | Maximum density (Huffman literals + optimal parser) |
 //!
 //! # Features
 //!
@@ -45,12 +46,14 @@
 #![warn(rust_2018_idioms)]
 
 pub use zxc_sys::{
-    ZXC_ERROR_BAD_BLOCK_SIZE, ZXC_ERROR_BAD_BLOCK_TYPE, ZXC_ERROR_BAD_CHECKSUM,
-    ZXC_ERROR_BAD_HEADER, ZXC_ERROR_BAD_MAGIC, ZXC_ERROR_BAD_OFFSET, ZXC_ERROR_BAD_VERSION,
-    ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_IO, ZXC_ERROR_MEMORY,
-    ZXC_ERROR_NULL_INPUT, ZXC_ERROR_OVERFLOW, ZXC_ERROR_SRC_TOO_SMALL, ZXC_LEVEL_BALANCED,
-    ZXC_LEVEL_COMPACT, ZXC_LEVEL_DEFAULT, ZXC_LEVEL_FAST, ZXC_LEVEL_FASTEST, ZXC_OK,
-    ZXC_VERSION_MAJOR, ZXC_VERSION_MINOR, ZXC_VERSION_PATCH,
+    ZXC_LEVEL_BALANCED, ZXC_LEVEL_COMPACT, ZXC_LEVEL_DEFAULT, ZXC_LEVEL_DENSITY, ZXC_LEVEL_FAST,
+    ZXC_LEVEL_FASTEST, ZXC_VERSION_MAJOR, ZXC_VERSION_MINOR, ZXC_VERSION_PATCH,
+    // Error codes
+    ZXC_OK, ZXC_ERROR_MEMORY, ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_SRC_TOO_SMALL,
+    ZXC_ERROR_BAD_MAGIC, ZXC_ERROR_BAD_VERSION, ZXC_ERROR_BAD_HEADER,
+    ZXC_ERROR_BAD_CHECKSUM, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_BAD_OFFSET,
+    ZXC_ERROR_OVERFLOW, ZXC_ERROR_IO, ZXC_ERROR_NULL_INPUT, ZXC_ERROR_BAD_BLOCK_TYPE,
+    ZXC_ERROR_BAD_BLOCK_SIZE,
 };
 
 // =============================================================================
@@ -60,7 +63,9 @@ pub use zxc_sys::{
 /// Compression level presets.
 ///
 /// Higher levels produce smaller output but compress more slowly.
-/// Decompression speed is similar across all levels.
+/// Decompression speed is similar across most levels; level 6 sits a notch
+/// below the others because Huffman-coded literals add a per-block decode
+/// cost relative to RAW/RLE literals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(i32)]
 pub enum Level {
@@ -77,8 +82,13 @@ pub enum Level {
     /// Good ratio, good decode speed (level 4)
     Balanced = 4,
 
-    /// Highest density. Best for storage/firmware/assets (level 5)
+    /// High density: storage / firmware / assets (level 5)
     Compact = 5,
+
+    /// Maximum density: Huffman-coded literals on top of COMPACT plus a
+    /// price-based optimal LZ77 parser. Slowest compression, best ratio
+    /// (level 6).
+    Density = 6,
 }
 
 impl Level {
@@ -90,6 +100,7 @@ impl Level {
             Level::Default,
             Level::Balanced,
             Level::Compact,
+            Level::Density,
         ]
     }
 }

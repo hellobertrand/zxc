@@ -43,32 +43,32 @@ const decompressed = zxc.decompress(compressed, { checksum: true });
 
 ## API Reference
 
-### `createZXC(moduleOverrides?) → Promise<ZXC>`
+### `createZXC(moduleOverrides?) -> Promise<ZXC>`
 
 Initialise the WASM module. Returns a frozen API object.
 
-### `zxc.compress(data, opts?) → Uint8Array`
+### `zxc.compress(data, opts?) -> Uint8Array`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `level` | `number` | `3` | Compression level (1–5) |
 | `checksum` | `boolean` | `false` | Enable integrity checksums |
 
-### `zxc.decompress(data, opts?) → Uint8Array`
+### `zxc.decompress(data, opts?) -> Uint8Array`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `checksum` | `boolean` | `false` | Verify integrity checksums |
 
-### `zxc.compressBound(inputSize) → number`
+### `zxc.compressBound(inputSize) -> number`
 
 Maximum compressed output size for a given input size.
 
-### `zxc.getDecompressedSize(data) → number`
+### `zxc.getDecompressedSize(data) -> number`
 
 Read the original size from a compressed buffer without decompressing.
 
-### `zxc.createCompressContext(opts?) → CompressContext`
+### `zxc.createCompressContext(opts?) -> CompressContext`
 
 Create a reusable compression context (avoids per-call allocation).
 
@@ -79,7 +79,7 @@ const c2 = ctx.compress(data2);
 ctx.free(); // Release WASM memory
 ```
 
-### `zxc.createDecompressContext() → DecompressContext`
+### `zxc.createDecompressContext() -> DecompressContext`
 
 Create a reusable decompression context.
 

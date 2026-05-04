@@ -35,6 +35,7 @@ fn main() -> Result<(), zxc::Error> {
 | `Level::Default` | ★★★☆☆ | ★★★★☆ | General purpose |
 | `Level::Balanced` | ★★☆☆☆ | ★★★★☆ | Archives |
 | `Level::Compact` | ★☆☆☆☆ | ★★★★★ | Storage, firmware |
+| `Level::Density` | ★☆☆☆☆ | ★★★★★ | Maximum density (Huffman literals + optimal parser) |
 
 ## Features
 

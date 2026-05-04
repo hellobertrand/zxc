@@ -8,7 +8,7 @@
 
 AVAILABLE_FUZZERS="decompress roundtrip seekable pstream"
 
-LIB_SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_seekable.c src/lib/zxc_pstream.c"
+LIB_SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_huffman.c src/lib/zxc_seekable.c src/lib/zxc_pstream.c"
 
 for fuzzer in $AVAILABLE_FUZZERS; do
     if [ -z "${FUZZER_TARGET:-}" ] || [ "${FUZZER_TARGET}" == "$fuzzer" ]; then

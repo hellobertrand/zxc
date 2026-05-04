@@ -313,15 +313,15 @@ ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, co
  * Returns the total bytes reserved by @ref zxc_compress_block for a block of
  * @p src_size bytes: all per-chunk working buffers (chain table, literals,
  * sequence/token/offset/extras buffers) plus the fixed hash tables and
- * cache-line alignment padding. At @p level ≥ 6 the value also includes the
- * transient scratch (≈ 18 × @p src_size bytes) malloc'd by the price-based
+ * cache-line alignment padding. At @p level >= 6 the value also includes the
+ * transient scratch (= 18 x @p src_size bytes) malloc'd by the price-based
  * optimal parser for the duration of each block. Scales roughly linearly
  * with @p src_size.
  *
  * Intended for integrators that need an accurate memory-budget figure.
  *
  * @param[in] src_size Uncompressed block size in bytes.
- * @param[in] level    Compression level (1..6). Levels ≤ 5 share the same
+ * @param[in] level    Compression level (1..6). Levels <= 5 share the same
  *                     persistent cctx footprint; level 6 adds the optimal-
  *                     parser scratch.
  * @return Estimated peak cctx memory usage in bytes, or 0 if @p src_size is 0.

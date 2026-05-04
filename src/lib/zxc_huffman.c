@@ -236,7 +236,7 @@ static uint32_t reverse_bits(uint32_t v, const int n) {
 /**
  * @brief Build the canonical LSB-first Huffman codes for a length table.
  *
- * Generates MSB-first canonical codes following RFC 1951 §3.2.2, then
+ * Generates MSB-first canonical codes following RFC 1951 3.2.2, then
  * bit-reverses each so the encoder can emit them with a plain
  * `accum |= code << bits` step. Absent symbols (length 0) receive code 0.
  *
@@ -278,7 +278,7 @@ static void build_canonical_codes(const uint8_t* RESTRICT code_len, uint32_t* RE
  * The packing is little-endian within each byte: low nibble holds
  * `code_len[2*i]`, high nibble holds `code_len[2*i + 1]`. The function
  * silently truncates any length > 15; callers must enforce the cap of
- * `ZXC_HUF_MAX_CODE_LEN` (≤ 15) before calling.
+ * `ZXC_HUF_MAX_CODE_LEN` (<= 15) before calling.
  *
  * @param[in]  code_len Per-symbol code lengths (length `ZXC_HUF_NUM_SYMBOLS`).
  * @param[out] out      Output header buffer of `ZXC_HUF_LENGTHS_HEADER_SIZE` bytes.
@@ -467,11 +467,11 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_lite
  * Strategy: build a temporary 256-entry single-symbol (8-bit) table, then
  * use it to populate the 2048-entry (11-bit) multi-symbol table. For each
  * 11-bit prefix p:
- *   1. (sym1, len1) = ss[p & 0xFF]   -- always valid, 1 ≤ len1 ≤ 8.
- *   2. rem = 11 - len1 ∈ [3, 10] bits remain after consuming the first code.
- *   3. (sym2_cand, len2_cand) = ss[(p >> len1) & 0xFF]. If len2_cand ≤ rem,
- *      both codes fit in 11 bits → encode 2-symbol entry. Otherwise the
- *      second code's bit window extends past the lookup width → keep only
+ *   1. (sym1, len1) = ss[p & 0xFF]   -- always valid, 1 <= len1 <= 8.
+ *   2. rem = 11 - len1 E [3, 10] bits remain after consuming the first code.
+ *   3. (sym2_cand, len2_cand) = ss[(p >> len1) & 0xFF]. If len2_cand <= rem,
+ *      both codes fit in 11 bits -> encode 2-symbol entry. Otherwise the
+ *      second code's bit window extends past the lookup width -> keep only
  *      the first symbol and let the next iteration handle the rest.
  *
  * Validates Kraft equality (or the single-present-symbol degenerate case).
@@ -643,18 +643,18 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
      *
      * Each lookup of an 11-bit window decodes 1 or 2 symbols depending on
      * whether the cumulative code length fits in the lookup width. Batch
-     * math: each iter consumes ≤ ZXC_HUF_LOOKUP_BITS = 11 bits per stream.
+     * math: each iter consumes <= ZXC_HUF_LOOKUP_BITS = 11 bits per stream.
      * With ZXC_HUF_BATCH = 5 iterations per refill the worst-case
-     * consumption is 55 bits, ≤ 57 (the upper bound for which an 8B refill
-     * always reaches BB ≥ 56).
+     * consumption is 55 bits, <= 57 (the upper bound for which an 8B refill
+     * always reaches BB >= 56).
      *
      * Speculative writes: each iter unconditionally writes 2 bytes per
      * stream (sym1 to d_s[0], sym2 to d_s[1]) and advances d_s by 1 or 2.
      * If only 1 symbol was decoded, the spec write at d_s[1] is overwritten
      * by the next iter's first write, except at the very end of a stream
      * where it would corrupt the adjacent stream's region. The batched loop
-     * therefore runs only while every stream has ≥ 2 * ZXC_HUF_BATCH = 10
-     * bytes of headroom; the per-stream scalar tail handles ≤ 9 trailing
+     * therefore runs only while every stream has >= 2 * ZXC_HUF_BATCH = 10
+     * bytes of headroom; the per-stream scalar tail handles <= 9 trailing
      * symbols safely with single-symbol advance (no spec write). */
 #define ZXC_HUF_BATCH 5
 #define ZXC_HUF_BATCH_BITS (ZXC_HUF_BATCH * ZXC_HUF_LOOKUP_BITS) /* = 55 */
@@ -760,7 +760,7 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
         bb3 -= sl3;
     }
 
-    /* Per-stream scalar tail (≤ ZXC_HUF_SAFE_MARGIN - 1 = 9 symbols per
+    /* Per-stream scalar tail (<= ZXC_HUF_SAFE_MARGIN - 1 = 9 symbols per
      * stream). Single-symbol decode using the same 2048-entry table,
      * we read sym1 + len1 only and advance by 1 byte, no spec write. */
 #define TAIL_ONE(A, BB, P, E, D)                                 \

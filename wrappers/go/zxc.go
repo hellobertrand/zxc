@@ -63,15 +63,20 @@ const (
 	// LevelBalanced provides good ratio with good decode speed (level 4).
 	LevelBalanced Level = C.ZXC_LEVEL_BALANCED
 
-	// LevelCompact provides the highest density. Best for storage, firmware
-	// and assets (level 5).
+	// LevelCompact provides high density: storage, firmware and assets
+	// (level 5).
 	LevelCompact Level = C.ZXC_LEVEL_COMPACT
+
+	// LevelDensity provides maximum density: Huffman-coded literals on top
+	// of LevelCompact plus a price-based optimal LZ77 parser. Slowest
+	// compression, best ratio (level 6).
+	LevelDensity Level = C.ZXC_LEVEL_DENSITY
 )
 
 // AllLevels returns all available compression levels from fastest to most
 // compact.
 func AllLevels() []Level {
-	return []Level{LevelFastest, LevelFast, LevelDefault, LevelBalanced, LevelCompact}
+	return []Level{LevelFastest, LevelFast, LevelDefault, LevelBalanced, LevelCompact, LevelDensity}
 }
 
 // ============================================================================
@@ -114,7 +119,7 @@ func MinLevel() int {
 	return int(C.zxc_min_level())
 }
 
-// MaxLevel returns the maximum supported compression level (currently 5).
+// MaxLevel returns the maximum supported compression level (currently 6).
 func MaxLevel() int {
 	return int(C.zxc_max_level())
 }

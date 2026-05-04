@@ -1,7 +1,7 @@
 /**
  * ZXC WASM Roundtrip Test
  *
- * Validates compress → decompress correctness via Node.js.
+ * Validates compress -> decompress correctness via Node.js.
  * Run: node wrappers/wasm/test.mjs
  *
  * Expects the built zxc.js + zxc.wasm to be in the build directory.
@@ -94,7 +94,7 @@ async function main() {
         Module.HEAPU8.set(input, srcPtr);
 
         const csize = _compress(srcPtr, input.length, dstPtr, bound, 0);
-        assert(csize > 0, `Compressed ${input.length} → ${csize} bytes`);
+        assert(csize > 0, `Compressed ${input.length} -> ${csize} bytes`);
         assert(csize < input.length, `Compression ratio: ${(input.length / csize).toFixed(2)}x`);
 
         // Read back compressed data
@@ -263,7 +263,7 @@ async function main() {
         const compressed = new Uint8Array(totalC);
         let off = 0;
         for (const c of chunks) { compressed.set(c, off); off += c.length; }
-        assert(compressed.length > 0, `pstream compressed ${data.length} → ${compressed.length} bytes`);
+        assert(compressed.length > 0, `pstream compressed ${data.length} -> ${compressed.length} bytes`);
 
         const ds = zxc.createDStream({ checksum: true });
         const outChunks = [];

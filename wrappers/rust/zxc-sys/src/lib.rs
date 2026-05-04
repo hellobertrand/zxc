@@ -92,6 +92,10 @@ pub const ZXC_LEVEL_BALANCED: i32 = parse_i32(env!("ZXC_LEVEL_BALANCED"));
 /// High density. Best for storage/firmware/assets.
 pub const ZXC_LEVEL_COMPACT: i32 = parse_i32(env!("ZXC_LEVEL_COMPACT"));
 
+/// Maximum density: Huffman-coded literals on top of COMPACT,
+/// price-based optimal LZ77 parser. Slowest compression, best ratio.
+pub const ZXC_LEVEL_DENSITY: i32 = parse_i32(env!("ZXC_LEVEL_DENSITY"));
+
 // =============================================================================
 // Error Codes
 // =============================================================================
@@ -376,7 +380,7 @@ unsafe extern "C" {
     /// Covers all per-chunk working buffers (chain table, literals,
     /// sequence/token/offset/extras buffers) plus the fixed hash tables and
     /// cache-line alignment padding. At `level >= 6` the value also accounts
-    /// for the price-based optimal parser's transient DP scratch (~18 ×
+    /// for the price-based optimal parser's transient DP scratch (~18 x
     /// `src_size` bytes), free'd at the end of each block.
     ///
     /// Returns the estimated peak memory usage in bytes, or 0 if `src_size == 0`.

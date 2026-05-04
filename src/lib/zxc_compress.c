@@ -744,7 +744,7 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
     const uint8_t* const mflimit = src + mflimit_pos;
 
     /* DP arrays. dp[p] = min cost in bits to encode src[0..p).
-     * parent_len[p]: 0 = literal of length 1; ≥ MIN_MATCH = match length.
+     * parent_len[p]: 0 = literal of length 1; >= MIN_MATCH = match length.
      * parent_off[p]: offset (distance) of the match that ends at p. */
     uint32_t* const dp = (uint32_t*)malloc((src_sz + 1) * sizeof(uint32_t));
     uint32_t* const parent_len = (uint32_t*)calloc(src_sz + 1, sizeof(uint32_t));
@@ -778,7 +778,7 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
         if (p < skip_until) continue;
 
         /* Match transition: call find_best_match (no lazy, no backtrack via
-         * anchor=ip). Iterate sub-lengths since any L ≤ max_L matches at the
+         * anchor=ip). Iterate sub-lengths since any L <= max_L matches at the
          * same offset and may end at a more useful DP position. */
         const uint8_t* ip = src + p;
         const zxc_match_t m =
