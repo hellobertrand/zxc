@@ -4,10 +4,11 @@
  * Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Canonical, length-limited (L = 9) Huffman codec for the GLO literal
+ * Canonical, length-limited (L = 8) Huffman codec for the GLO literal
  * stream at compression level >= 6. Codes are emitted LSB-first; the
- * decoder uses a single 512-entry lookup table and a 4-way interleaved
- * hot loop. Public declarations (constants, function prototypes) live in
+ * decoder uses a 2048-entry multi-symbol lookup table (11-bit lookup,
+ * 1 or 2 symbols per lookup depending on the cumulative code length)
+ * and a 4-way interleaved hot loop. Public declarations live in
  * zxc_internal.h; the rest is private to this translation unit.
  */
 
@@ -18,15 +19,28 @@
 #include "zxc_internal.h"
 
 /* Private codec constants (only used inside this translation unit). */
-#define ZXC_HUF_TABLE_LOG ZXC_HUF_MAX_CODE_LEN
+#define ZXC_HUF_TABLE_LOG ZXC_HUF_LOOKUP_BITS
 #define ZXC_HUF_TABLE_SIZE (1u << ZXC_HUF_TABLE_LOG)
 #define ZXC_HUF_LENGTHS_HEADER_SIZE 128
 #define ZXC_HUF_STREAM_SIZES_HEADER_SIZE 6
 
-/* 512-entry decoder lookup table entry: low byte = symbol, high byte = code length. */
+/* 2048-entry multi-symbol decoder lookup table entry. Bit layout:
+ *   bits  0..7   sym1       — first decoded symbol
+ *   bits  8..15  sym2       — second decoded symbol (junk if n_extra == 0)
+ *   bits 16..19  len1       — bit length of sym1's code (1..8)
+ *   bits 20..23  len_total  — total bits consumed (1..11)
+ *   bit  24      n_extra    — 0 if 1 symbol, 1 if 2 symbols decoded
+ *
+ * Single-symbol path (tail) reads sym1 + len1; multi-symbol path (hot
+ * batched loop) reads sym1, sym2 (always written, possibly overwritten
+ * next iter), len_total, n_extra. */
 typedef struct {
-    uint16_t entry;
+    uint32_t entry;
 } zxc_huf_dec_entry_t;
+
+#define ZXC_HUF_ENTRY(sym1, sym2, len1, len_total, n_extra)                  \
+    ((uint32_t)(sym1) | ((uint32_t)(sym2) << 8) | ((uint32_t)(len1) << 16) | \
+     ((uint32_t)(len_total) << 20) | ((uint32_t)(n_extra) << 24))
 
 /* ===========================================================================
  * Length-limited Huffman: boundary package-merge
@@ -448,19 +462,23 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_lite
  * =========================================================================*/
 
 /**
- * @brief Build the 512-entry decoder lookup table from per-symbol code lengths.
+ * @brief Build the 2048-entry multi-symbol decoder lookup table.
  *
- * Validates the Kraft equality, generates the canonical LSB-first codes and
- * fills every table slot with the matching `(symbol, length)` pair packed
- * into a `uint16_t` (low byte = symbol, high byte = length). The single-
- * present-symbol degenerate case is handled by replicating the one valid
- * entry across the full table.
+ * Strategy: build a temporary 256-entry single-symbol (8-bit) table, then
+ * use it to populate the 2048-entry (11-bit) multi-symbol table. For each
+ * 11-bit prefix p:
+ *   1. (sym1, len1) = ss[p & 0xFF]   -- always valid, 1 ≤ len1 ≤ 8.
+ *   2. rem = 11 - len1 ∈ [3, 10] bits remain after consuming the first code.
+ *   3. (sym2_cand, len2_cand) = ss[(p >> len1) & 0xFF]. If len2_cand ≤ rem,
+ *      both codes fit in 11 bits → encode 2-symbol entry. Otherwise the
+ *      second code's bit window extends past the lookup width → keep only
+ *      the first symbol and let the next iteration handle the rest.
  *
- * @param[in]  code_len Per-symbol code lengths produced from the section header.
- * @param[out] table    Destination 512-entry lookup table (must be aligned by
- *                      the caller for hot-path performance).
- * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` if the lengths fail
- *         the Kraft check or yield an empty/invalid entry.
+ * Validates Kraft equality (or the single-present-symbol degenerate case).
+ *
+ * @param[in]  code_len Per-symbol code lengths from the section header.
+ * @param[out] table    Destination 2048-entry lookup table (caller-aligned).
+ * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` on validation failure.
  */
 static int build_decode_table(const uint8_t* RESTRICT code_len,
                               zxc_huf_dec_entry_t* RESTRICT table) {
@@ -475,13 +493,12 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
     if (UNLIKELY(n_present == 0)) return ZXC_ERROR_CORRUPT_DATA;
     bl_count[0] = 0;
 
-    /* Validate Kraft inequality (==): sum(2^(L - len)) must equal 2^L. */
+    /* Validate Kraft equality on the L_max axis. */
     {
         uint64_t kraft = 0;
         for (int k = 1; k <= ZXC_HUF_MAX_CODE_LEN; k++) {
             kraft += (uint64_t)bl_count[k] << (ZXC_HUF_MAX_CODE_LEN - k);
         }
-        /* Special case: a single present symbol with len 1 is the only valid degenerate code. */
         if (n_present == 1) {
             if (UNLIKELY(bl_count[1] != 1)) return ZXC_ERROR_CORRUPT_DATA;
         } else {
@@ -491,15 +508,20 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
     }
 
     uint32_t next_code[ZXC_HUF_MAX_CODE_LEN + 2] = {0};
-    uint32_t code = 0;
-    for (int k = 1; k <= ZXC_HUF_MAX_CODE_LEN + 1; k++) {
-        code = (code + bl_count[k - 1]) << 1;
-        next_code[k] = code;
+    {
+        uint32_t code = 0;
+        for (int k = 1; k <= ZXC_HUF_MAX_CODE_LEN + 1; k++) {
+            code = (code + bl_count[k - 1]) << 1;
+            next_code[k] = code;
+        }
     }
 
-    /* Initialise the table to "invalid" so corrupt streams that read an unused
-     * index get rejected by the high-byte length check at decode time. */
-    for (uint32_t i = 0; i < ZXC_HUF_TABLE_SIZE; i++) table[i].entry = 0;
+    /* Single-symbol intermediate (L_max-bit lookup). Layout: low byte = sym,
+     * high byte = len. Filled by replicating each canonical code across all
+     * L_max-bit windows that share its low `len` bits. */
+#define ZXC_HUF_SS_SIZE (1u << ZXC_HUF_MAX_CODE_LEN)
+#define ZXC_HUF_SS_MASK ((uint32_t)(ZXC_HUF_SS_SIZE - 1))
+    uint16_t ss[ZXC_HUF_SS_SIZE] = {0};
 
     for (int sym = 0; sym < ZXC_HUF_NUM_SYMBOLS; sym++) {
         const int l = code_len[sym];
@@ -508,31 +530,63 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
         const uint32_t lsb_code = reverse_bits(msb_code, l);
         const uint16_t entry = (uint16_t)((unsigned)l << 8 | (unsigned)sym);
         const uint32_t step = (uint32_t)1 << l;
-        for (uint32_t fill = lsb_code; fill < ZXC_HUF_TABLE_SIZE; fill += step) {
-            table[fill].entry = entry;
+        for (uint32_t fill = lsb_code; fill < ZXC_HUF_SS_SIZE; fill += step) {
+            ss[fill] = entry;
         }
     }
 
-    /* Single-symbol degenerate code: only half the table was filled because
-     * Kraft sum is 2^(L-1) instead of 2^L. Replicate the one valid entry
-     * across every slot so any padded-zero peek decodes to the same symbol. */
+    /* Single-symbol degenerate (Kraft sum = 2^(L-1)): replicate the one
+     * valid entry across every slot. */
     if (n_present == 1) {
         uint16_t valid = 0;
-        for (uint32_t i = 0; i < ZXC_HUF_TABLE_SIZE; i++) {
-            if (table[i].entry != 0) {
-                valid = table[i].entry;
+        for (uint32_t i = 0; i < ZXC_HUF_SS_SIZE; i++) {
+            if (ss[i] != 0) {
+                valid = ss[i];
                 break;
             }
         }
-        for (uint32_t i = 0; i < ZXC_HUF_TABLE_SIZE; i++) {
-            if (table[i].entry == 0) table[i].entry = valid;
+        for (uint32_t i = 0; i < ZXC_HUF_SS_SIZE; i++) {
+            if (ss[i] == 0) ss[i] = valid;
         }
     }
 
-    /* Final invariant: every entry must have a non-zero length byte so the
-     * hot decode loop can skip its per-symbol length-validity check. */
+    for (uint32_t i = 0; i < ZXC_HUF_SS_SIZE; i++) {
+        if (UNLIKELY((ss[i] >> 8) == 0)) return ZXC_ERROR_CORRUPT_DATA;
+    }
+
+    /* Build the multi-symbol table. */
+    for (uint32_t p = 0; p < ZXC_HUF_TABLE_SIZE; p++) {
+        const uint16_t e1 = ss[p & ZXC_HUF_SS_MASK];
+        const uint8_t sym1 = (uint8_t)e1;
+        const int len1 = e1 >> 8;
+        const int rem = ZXC_HUF_LOOKUP_BITS - len1;
+
+        uint8_t sym2 = 0;
+        int len_total = len1;
+        int n_extra = 0;
+
+        /* (p >> len1) has only `11 - len1` valid bits (high bits zero from the
+         * 11-bit prefix). The single-symbol lookup may return a code whose
+         * length L2 exceeds rem — in that case the high bits of the matched
+         * code came from out-of-range zeros and the entry is bogus, so we
+         * keep only sym1 and let the next iteration consume the real bits. */
+        const uint16_t e2 = ss[(p >> len1) & ZXC_HUF_SS_MASK];
+        const int len2 = e2 >> 8;
+        if (len2 <= rem) {
+            sym2 = (uint8_t)e2;
+            len_total = len1 + len2;
+            n_extra = 1;
+        }
+
+        table[p].entry = ZXC_HUF_ENTRY(sym1, sym2, len1, len_total, n_extra);
+    }
+#undef ZXC_HUF_SS_SIZE
+#undef ZXC_HUF_SS_MASK
+
+    /* Final invariant: every entry must have a non-zero len1 (≥ 1). */
     for (uint32_t i = 0; i < ZXC_HUF_TABLE_SIZE; i++) {
-        if (UNLIKELY((table[i].entry >> 8) == 0)) return ZXC_ERROR_CORRUPT_DATA;
+        const int len1 = (int)((table[i].entry >> 16) & 0xF);
+        if (UNLIKELY(len1 == 0)) return ZXC_ERROR_CORRUPT_DATA;
     }
 
     return ZXC_OK;
@@ -583,10 +637,10 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
         zxc_br_init(&br[s], stream_base + off[s], sz[s]);
     }
 
-    /* 5. 4-way interleaved decode. Each sub-stream owns a contiguous slice
-     * of dst: stream s covers literal indices [s*Q, min((s+1)*Q, N)). With
-     * Q = ceil(N/4) the first 3 streams have exactly Q symbols and stream 3
-     * has `N - 3Q` symbols (always the shortest, possibly 0). */
+    /* 5. 4-way interleaved multi-symbol decode. Each sub-stream owns a
+     * contiguous slice of dst: stream s covers literal indices
+     * [s*Q, min((s+1)*Q, N)). With Q = ceil(N/4) the first 3 streams have
+     * exactly Q symbols and stream 3 has `N - 3Q` symbols. */
     const size_t Q = (n_literals + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
     size_t s_count[ZXC_HUF_NUM_STREAMS];
     uint8_t* s_dst[ZXC_HUF_NUM_STREAMS];
@@ -598,40 +652,41 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
         s_count[s] = stop - start;
         s_dst[s] = dst + start;
     }
-    size_t common = s_count[0];
-    for (int s = 1; s < ZXC_HUF_NUM_STREAMS; s++)
-        if (s_count[s] < common) common = s_count[s];
 
-    /* Batched 4-way interleaved decode.
+    /* Batched multi-symbol decode.
      *
-     * Batch size is bounded by the byte-aligned bit stream: a refill grows
-     * `bits` by an integer number of bytes, so from `bits = b` the post-
-     * refill value is `b + 8 * floor((64 - b) / 8)`. For this to always
-     * reach `bits >= K * L_max`, we need K * L_max <= 57. With L_max = 9
-     * the largest safe batch is K = 6 (54 bits per refill, 24 symbols per
-     * outer iteration).
+     * Each lookup of an 11-bit window decodes 1 or 2 symbols depending on
+     * whether the cumulative code length fits in the lookup width. Batch
+     * math: each iter consumes ≤ ZXC_HUF_LOOKUP_BITS = 11 bits per stream.
+     * With ZXC_HUF_BATCH = 5 iterations per refill the worst-case
+     * consumption is 55 bits, ≤ 57 (the upper bound for which an 8B refill
+     * always reaches BB ≥ 56).
      *
-     * To minimise codegen overhead the four bit readers' hot fields
-     * (accum / bits / ptr / end) are hoisted into local variables for the
-     * full duration of the batched loop, the refill is inlined as a macro
-     * (mirroring zxc_br_ensure), and the inner k-loop is manually unrolled
-     * 6x. All entries in `table` are guaranteed by build_decode_table()
-     * to have a non-zero length byte, so the per-symbol length check is
-     * hoisted out of the hot path. */
-#define ZXC_HUF_BATCH 6
-#define ZXC_HUF_BATCH_BITS (ZXC_HUF_BATCH * ZXC_HUF_MAX_CODE_LEN) /* = 54 */
+     * Speculative writes: each iter unconditionally writes 2 bytes per
+     * stream (sym1 to d_s[0], sym2 to d_s[1]) and advances d_s by 1 or 2.
+     * If only 1 symbol was decoded, the spec write at d_s[1] is overwritten
+     * by the next iter's first write — except at the very end of a stream
+     * where it would corrupt the adjacent stream's region. The batched loop
+     * therefore runs only while every stream has ≥ 2 * ZXC_HUF_BATCH = 10
+     * bytes of headroom; the per-stream scalar tail handles ≤ 9 trailing
+     * symbols safely with single-symbol advance (no spec write). */
+#define ZXC_HUF_BATCH 5
+#define ZXC_HUF_BATCH_BITS (ZXC_HUF_BATCH * ZXC_HUF_LOOKUP_BITS) /* = 55 */
 #define ZXC_HUF_TBL_MASK ((uint64_t)(ZXC_HUF_TABLE_SIZE - 1))
+#define ZXC_HUF_SAFE_MARGIN ((size_t)(2 * ZXC_HUF_BATCH))
 
     uint8_t* d0 = s_dst[0];
     uint8_t* d1 = s_dst[1];
     uint8_t* d2 = s_dst[2];
     uint8_t* d3 = s_dst[3];
 
-    const size_t batches = common / ZXC_HUF_BATCH;
-    const size_t batched_syms = batches * ZXC_HUF_BATCH;
+    const uint8_t* const dend0 = s_dst[0] + s_count[0];
+    const uint8_t* const dend1 = s_dst[1] + s_count[1];
+    const uint8_t* const dend2 = s_dst[2] + s_count[2];
+    const uint8_t* const dend3 = s_dst[3] + s_count[3];
 
-    /* Hoist all four bit-reader hot fields into locals.
-     * They live in registers for the full duration of the batched loop. */
+    /* Hoist all four bit-reader hot fields into locals. They live in
+     * registers for the full duration of the batched loop. */
     uint64_t a0 = br[0].accum, a1 = br[1].accum, a2 = br[2].accum, a3 = br[3].accum;
     int bb0 = br[0].bits, bb1 = br[1].bits, bb2 = br[2].bits, bb3 = br[3].bits;
     const uint8_t *p0 = br[0].ptr, *p1 = br[1].ptr, *p2 = br[2].ptr, *p3 = br[3].ptr;
@@ -640,15 +695,11 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
     const uint8_t* const e2 = br[2].end;
     const uint8_t* const e3 = br[3].end;
 
-    /* Inline refill: identical semantics to zxc_br_ensure(., BATCH_BITS).
-     * Hot path = single 8-byte LE load + shift-or; cold path handles the
-     * tail near end-of-stream byte by byte. The byte count uses
-     * `(64 - BB) >> 3` to add the maximum number of whole bytes that fit
-     * in the remaining accumulator capacity.
-     *
-     * The accumulator's high bits (positions BB..63) are guaranteed zero
-     * here: each DECODE_ONE() ends with `accum >>= len`, which is an
-     * unsigned right-shift that zero-fills the top bits. No mask needed. */
+    /* Inline refill: same shape as zxc_br_ensure(., BATCH_BITS). Fast path =
+     * one 8-byte LE load + shift-or; cold path handles end-of-stream
+     * byte-by-byte. The accumulator's high bits (positions BB..63) are
+     * guaranteed zero (every DECODE_ONE ends with `accum >>= len_total`,
+     * an unsigned right-shift). */
 #define REFILL(A, BB, P, E)                              \
     do {                                                 \
         if (LIKELY((BB) < ZXC_HUF_BATCH_BITS)) {         \
@@ -666,37 +717,46 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
         }                                                \
     } while (0)
 
-    /* Decode 1 symbol from each of the 4 streams; advance pointers/state.
-     * `bits` is intentionally NOT decremented here: the per-stream length
-     * accumulators (sl0..sl3) sum the consumed bits and are folded back
-     * into bb0..bb3 once at end of batch. This trades 4 sub/iter (24 per
-     * batch) for 4 add/iter (24) + 4 sub/batch — same critical path on the
-     * accum chain, fewer ALU µops on x86 with limited add/sub ports. */
+    /* Decode one 11-bit window per stream. Always writes 2 bytes per stream
+     * (sym1 + spec sym2); advances d_s by 1 + n_extra; advances accum by
+     * len_total. Per-stream length accumulators sl0..sl3 collect consumed
+     * bits across the batch and are folded into bb_s once at end of batch. */
 #define DECODE_ONE()                                             \
     do {                                                         \
-        const uint16_t _e0 = table[a0 & ZXC_HUF_TBL_MASK].entry; \
-        const uint16_t _e1 = table[a1 & ZXC_HUF_TBL_MASK].entry; \
-        const uint16_t _e2 = table[a2 & ZXC_HUF_TBL_MASK].entry; \
-        const uint16_t _e3 = table[a3 & ZXC_HUF_TBL_MASK].entry; \
-        *d0++ = (uint8_t)_e0;                                    \
-        *d1++ = (uint8_t)_e1;                                    \
-        *d2++ = (uint8_t)_e2;                                    \
-        *d3++ = (uint8_t)_e3;                                    \
-        const int _l0 = _e0 >> 8;                                \
-        const int _l1 = _e1 >> 8;                                \
-        const int _l2 = _e2 >> 8;                                \
-        const int _l3 = _e3 >> 8;                                \
-        a0 >>= _l0;                                              \
-        a1 >>= _l1;                                              \
-        a2 >>= _l2;                                              \
-        a3 >>= _l3;                                              \
-        sl0 += _l0;                                              \
-        sl1 += _l1;                                              \
-        sl2 += _l2;                                              \
-        sl3 += _l3;                                              \
+        const uint32_t _e0 = table[a0 & ZXC_HUF_TBL_MASK].entry; \
+        const uint32_t _e1 = table[a1 & ZXC_HUF_TBL_MASK].entry; \
+        const uint32_t _e2 = table[a2 & ZXC_HUF_TBL_MASK].entry; \
+        const uint32_t _e3 = table[a3 & ZXC_HUF_TBL_MASK].entry; \
+        d0[0] = (uint8_t)_e0;                                    \
+        d0[1] = (uint8_t)(_e0 >> 8);                             \
+        d1[0] = (uint8_t)_e1;                                    \
+        d1[1] = (uint8_t)(_e1 >> 8);                             \
+        d2[0] = (uint8_t)_e2;                                    \
+        d2[1] = (uint8_t)(_e2 >> 8);                             \
+        d3[0] = (uint8_t)_e3;                                    \
+        d3[1] = (uint8_t)(_e3 >> 8);                             \
+        const int _t0 = (int)((_e0 >> 20) & 0xF);                \
+        const int _t1 = (int)((_e1 >> 20) & 0xF);                \
+        const int _t2 = (int)((_e2 >> 20) & 0xF);                \
+        const int _t3 = (int)((_e3 >> 20) & 0xF);                \
+        d0 += 1 + (int)((_e0 >> 24) & 1);                        \
+        d1 += 1 + (int)((_e1 >> 24) & 1);                        \
+        d2 += 1 + (int)((_e2 >> 24) & 1);                        \
+        d3 += 1 + (int)((_e3 >> 24) & 1);                        \
+        a0 >>= _t0;                                              \
+        a1 >>= _t1;                                              \
+        a2 >>= _t2;                                              \
+        a3 >>= _t3;                                              \
+        sl0 += _t0;                                              \
+        sl1 += _t1;                                              \
+        sl2 += _t2;                                              \
+        sl3 += _t3;                                              \
     } while (0)
 
-    for (size_t b = 0; b < batches; b++) {
+    while ((size_t)(dend0 - d0) >= ZXC_HUF_SAFE_MARGIN &&
+           (size_t)(dend1 - d1) >= ZXC_HUF_SAFE_MARGIN &&
+           (size_t)(dend2 - d2) >= ZXC_HUF_SAFE_MARGIN &&
+           (size_t)(dend3 - d3) >= ZXC_HUF_SAFE_MARGIN) {
         REFILL(a0, bb0, p0, e0);
         REFILL(a1, bb1, p1, e1);
         REFILL(a2, bb2, p2, e2);
@@ -708,58 +768,29 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();
-        DECODE_ONE();
         bb0 -= sl0;
         bb1 -= sl1;
         bb2 -= sl2;
         bb3 -= sl3;
     }
 
-    /* Vectorised tail. Up to ZXC_HUF_BATCH-1 = 5 symbols per stream
-     * remain in the common phase, plus up to 3 more on streams 0..2 when
-     * n_literals is not a multiple of 4 (stream 3 is always the shortest,
-     * so its count equals `common`). Bit-reader hot fields stay in the
-     * same locals used by the batched loop — no per-symbol zxc_br_ensure
-     * load/store of br->{accum,bits,ptr}. Phase A keeps 4-way ILP for
-     * the common-phase remainder; Phase B finishes the few stragglers on
-     * streams 0..2 sequentially. */
-
-    /* Phase A: common-phase tail, 4-way interleaved (0..5 iterations). */
-    const size_t common_tail = common - batched_syms;
-    for (size_t i = 0; i < common_tail; i++) {
-        REFILL(a0, bb0, p0, e0);
-        REFILL(a1, bb1, p1, e1);
-        REFILL(a2, bb2, p2, e2);
-        REFILL(a3, bb3, p3, e3);
-
-        const uint16_t _e0 = table[a0 & ZXC_HUF_TBL_MASK].entry;
-        const uint16_t _e1 = table[a1 & ZXC_HUF_TBL_MASK].entry;
-        const uint16_t _e2 = table[a2 & ZXC_HUF_TBL_MASK].entry;
-        const uint16_t _e3 = table[a3 & ZXC_HUF_TBL_MASK].entry;
-        *d0++ = (uint8_t)_e0;
-        *d1++ = (uint8_t)_e1;
-        *d2++ = (uint8_t)_e2;
-        *d3++ = (uint8_t)_e3;
-        const int _l0 = _e0 >> 8, _l1 = _e1 >> 8;
-        const int _l2 = _e2 >> 8, _l3 = _e3 >> 8;
-        a0 >>= _l0; a1 >>= _l1; a2 >>= _l2; a3 >>= _l3;
-        bb0 -= _l0; bb1 -= _l1; bb2 -= _l2; bb3 -= _l3;
-    }
-
-    /* Phase B: extra symbols on streams 0..2 (≤ 3 each, when N % 4 != 0). */
-#define TAIL_ONE(A, BB, P, E, D)                                  \
-    do {                                                          \
-        REFILL(A, BB, P, E);                                      \
-        const uint16_t _e = table[(A) & ZXC_HUF_TBL_MASK].entry;  \
-        const int _l = _e >> 8;                                   \
-        *(D)++ = (uint8_t)_e;                                     \
-        (A) >>= _l;                                               \
-        (BB) -= _l;                                               \
+    /* Per-stream scalar tail (≤ ZXC_HUF_SAFE_MARGIN - 1 = 9 symbols per
+     * stream). Single-symbol decode using the same 2048-entry table —
+     * we read sym1 + len1 only and advance by 1 byte, no spec write. */
+#define TAIL_ONE(A, BB, P, E, D)                                 \
+    do {                                                         \
+        REFILL(A, BB, P, E);                                     \
+        const uint32_t _e = table[(A) & ZXC_HUF_TBL_MASK].entry; \
+        *(D)++ = (uint8_t)_e;                                    \
+        const int _l1 = (int)((_e >> 16) & 0xF);                 \
+        (A) >>= _l1;                                             \
+        (BB) -= _l1;                                             \
     } while (0)
 
-    for (size_t i = common; i < s_count[0]; i++) TAIL_ONE(a0, bb0, p0, e0, d0);
-    for (size_t i = common; i < s_count[1]; i++) TAIL_ONE(a1, bb1, p1, e1, d1);
-    for (size_t i = common; i < s_count[2]; i++) TAIL_ONE(a2, bb2, p2, e2, d2);
+    while (d0 < dend0) TAIL_ONE(a0, bb0, p0, e0, d0);
+    while (d1 < dend1) TAIL_ONE(a1, bb1, p1, e1, d1);
+    while (d2 < dend2) TAIL_ONE(a2, bb2, p2, e2, d2);
+    while (d3 < dend3) TAIL_ONE(a3, bb3, p3, e3, d3);
 
 #undef TAIL_ONE
 #undef DECODE_ONE
@@ -767,5 +798,6 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
 #undef ZXC_HUF_BATCH
 #undef ZXC_HUF_BATCH_BITS
 #undef ZXC_HUF_TBL_MASK
+#undef ZXC_HUF_SAFE_MARGIN
     return ZXC_OK;
 }
