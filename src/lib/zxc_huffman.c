@@ -4,6 +4,12 @@
  * Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
  * SPDX-License-Identifier: BSD-3-Clause
  *
+ */
+
+/**
+ * @file zxc_huffman.c
+ * @brief Canonical, length-limited (L = 8) Huffman codec for the GLO literal
+ *
  * Canonical, length-limited (L = 8) Huffman codec for the GLO literal
  * stream at compression level >= 6. Codes are emitted LSB-first; the
  * decoder uses a 2048-entry multi-symbol lookup table (11-bit lookup,

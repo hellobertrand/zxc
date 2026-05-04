@@ -90,12 +90,15 @@ typedef struct {
     uint8_t* literals;       /**< Buffer for literal bytes. */
 
     /* Cold zone: configuration / scratch / resizeable. */
-    uint8_t* lit_buffer;   /**< Scratch buffer for literals (RLE). */
-    size_t lit_buffer_cap; /**< Current capacity of the scratch buffer. */
-    uint8_t* work_buf;     /**< Padded scratch buffer for buffer-API decompression. */
-    size_t work_buf_cap;   /**< Capacity of the work buffer. */
-    int checksum_enabled;  /**< 1 if checksum calculation/verification is enabled. */
-    int compression_level; /**< Compression level. */
+    uint8_t* lit_buffer;    /**< Scratch buffer for literals (RLE). */
+    size_t lit_buffer_cap;  /**< Current capacity of the scratch buffer. */
+    uint8_t* work_buf;      /**< Padded scratch buffer for buffer-API decompression. */
+    size_t work_buf_cap;    /**< Capacity of the work buffer. */
+    uint8_t* opt_scratch;   /**< Optimal-parser DP scratch (level >= 6 only,
+                                 lazy-allocated, packs dp/parent_len/parent_off/actions). */
+    size_t opt_scratch_cap; /**< Current capacity of opt_scratch in bytes. */
+    int checksum_enabled;   /**< 1 if checksum calculation/verification is enabled. */
+    int compression_level;  /**< Compression level. */
 
     /* Block-size derived parameters (computed once at init). */
     size_t chunk_size;    /**< Effective block size in bytes. */

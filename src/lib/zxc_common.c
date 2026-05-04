@@ -25,9 +25,6 @@
  * ============================================================================
  */
 
-/* Round @p x up to the next cache-line boundary. */
-#define ZXC_ALIGN_CL(x) (((x) + ZXC_ALIGNMENT_MASK) & ~(size_t)ZXC_ALIGNMENT_MASK)
-
 /*
  * @brief Allocates memory aligned to the specified boundary.
  *
@@ -161,6 +158,11 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
         ctx->work_buf = NULL;
     }
 
+    if (ctx->opt_scratch) {
+        zxc_aligned_free(ctx->opt_scratch);
+        ctx->opt_scratch = NULL;
+    }
+
     ctx->hash_table = NULL;
     ctx->hash_tags = NULL;
     ctx->chain_table = NULL;
@@ -173,6 +175,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->epoch = 0;
     ctx->lit_buffer_cap = 0;
     ctx->work_buf_cap = 0;
+    ctx->opt_scratch_cap = 0;
 }
 
 /*
@@ -633,11 +636,10 @@ uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
  * is rounded up to the cache-line boundary, so the returned value matches the
  * single aligned allocation performed by the initializer.
  *
- * For @p level >= 6 the price-based optimal parser inside
- * zxc_lz77_optimal_parse_glo() malloc's transient DP scratch (dp / parent_len /
- * parent_off / actions) of ~18 bytes per source byte, free'd at the end of
- * each block. That peak is added on top so the returned value is a usable
- * upper bound for memory budgeting at level 6.
+ * For @p level >= 6 the figure also includes ctx->opt_scratch (~18 bytes per
+ * chunk_size byte), the cache-line-aligned scratch used by the optimal
+ * parser. It is lazy-allocated on the first level-6 call and persists for
+ * the lifetime of the cctx (no per-block malloc/free).
  */
 uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
     if (UNLIKELY(src_size == 0)) return 0;

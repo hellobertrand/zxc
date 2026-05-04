@@ -695,6 +695,10 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  * `max_L`; the skip threshold means each long-match region only pays its
  * O(L) cost once at the starting position, keeping total work O(N).
  *
+ * @param[in,out] ctx           Compression context. The lazy-allocated
+ *                              `opt_scratch` field provides the DP arrays;
+ *                              it is grown on first use and reused on
+ *                              subsequent blocks.
  * @param[in]  src              Source buffer to parse.
  * @param[in]  src_sz           Length of @p src in bytes.
  * @param[in,out] hash_table    LZ77 hash table (epoch | position entries).
@@ -716,14 +720,14 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  * @return `ZXC_OK` on success, or `ZXC_ERROR_MEMORY` if the DP scratch
  *         allocations fail.
  */
-static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t src_sz,
-                                      uint32_t* RESTRICT hash_table, uint8_t* RESTRICT hash_tags,
-                                      uint16_t* RESTRICT chain_table, const uint32_t epoch_mark,
-                                      const uint32_t offset_mask, const int level,
-                                      uint8_t* RESTRICT literals, uint8_t* RESTRICT buf_tokens,
-                                      uint16_t* RESTRICT buf_offsets, uint8_t* RESTRICT buf_extras,
-                                      uint32_t* RESTRICT seq_c_out, size_t* RESTRICT lit_c_out,
-                                      size_t* RESTRICT extras_sz_out,
+static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                      const size_t src_sz, uint32_t* RESTRICT hash_table,
+                                      uint8_t* RESTRICT hash_tags, uint16_t* RESTRICT chain_table,
+                                      const uint32_t epoch_mark, const uint32_t offset_mask,
+                                      const int level, uint8_t* RESTRICT literals,
+                                      uint8_t* RESTRICT buf_tokens, uint16_t* RESTRICT buf_offsets,
+                                      uint8_t* RESTRICT buf_extras, uint32_t* RESTRICT seq_c_out,
+                                      size_t* RESTRICT lit_c_out, size_t* RESTRICT extras_sz_out,
                                       uint16_t* RESTRICT max_offset_out) {
     zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level);
     lzp_opt.use_lazy = 0;  // guard
@@ -743,18 +747,37 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
     const size_t mflimit_pos = src_sz - 12;
     const uint8_t* const mflimit = src + mflimit_pos;
 
-    /* DP arrays. dp[p] = min cost in bits to encode src[0..p).
-     * parent_len[p]: 0 = literal of length 1; >= MIN_MATCH = match length.
-     * parent_off[p]: offset (distance) of the match that ends at p. */
-    uint32_t* const dp = (uint32_t*)malloc((src_sz + 1) * sizeof(uint32_t));
-    uint32_t* const parent_len = (uint32_t*)calloc(src_sz + 1, sizeof(uint32_t));
-    uint16_t* const parent_off = (uint16_t*)malloc((src_sz + 1) * sizeof(uint16_t));
-    if (UNLIKELY(!dp || !parent_len || !parent_off)) {
-        free(dp);
-        free(parent_len);
-        free(parent_off);
-        return ZXC_ERROR_MEMORY;
+    /* DP arrays carved from ctx->opt_scratch: a single allocation lazy-
+     * grown on the first level-6 call and reused across blocks. Each
+     * sub-buffer is cache-line padded so the next one starts on a 64 B
+     * boundary. The total `needed` matches zxc_opt_scratch_size() used
+     * by zxc_estimate_cctx_size() keep the formula in sync.
+     *
+     *   dp         : (chunk+1) x uint32_t: min cost to reach position p.
+     *   parent_len : (chunk+1) x uint32_t: 0 = literal, >= MIN_MATCH = match.
+     *   parent_off : (chunk+1) x uint16_t: biased match offset (distance-1).
+     *   actions    : chunk x 2 x uint32_t: backtrack stack (act_t padded
+     *                                        to 2 x uint32_t = 8 B). */
+    const size_t chunk = ctx->chunk_size;
+    const size_t sz_dp = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint32_t));
+    const size_t sz_pl = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint32_t));
+    const size_t sz_po = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint16_t));
+    const size_t sz_ac = ZXC_ALIGN_CL(chunk * 2 * sizeof(uint32_t));
+    const size_t needed = sz_dp + sz_pl + sz_po + sz_ac;
+
+    if (UNLIKELY(ctx->opt_scratch_cap < needed)) {
+        if (ctx->opt_scratch) zxc_aligned_free(ctx->opt_scratch);
+        ctx->opt_scratch = (uint8_t*)zxc_aligned_malloc(needed, ZXC_CACHE_LINE_SIZE);
+        if (UNLIKELY(!ctx->opt_scratch)) {
+            ctx->opt_scratch_cap = 0;
+            return ZXC_ERROR_MEMORY;
+        }
+        ctx->opt_scratch_cap = needed;
     }
+
+    uint32_t* const dp = (uint32_t*)ctx->opt_scratch;
+    uint32_t* const parent_len = (uint32_t*)(ctx->opt_scratch + sz_dp);
+    uint16_t* const parent_off = (uint16_t*)(ctx->opt_scratch + sz_dp + sz_pl);
 
     dp[0] = 0;
     for (size_t i = 1; i <= src_sz; i++) dp[i] = UINT32_MAX;
@@ -805,7 +828,7 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
                     if (nxt < dp[p + L]) {
                         dp[p + L] = nxt;
                         parent_len[p + L] = (uint32_t)L;
-                        parent_off[p + L] = (uint16_t)off;
+                        parent_off[p + L] = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
                     }
                 }
                 if (UNLIKELY(L_max >= ZXC_OPT_LONG_MATCH_SKIP)) skip_until = p + L_max - 1;
@@ -828,13 +851,7 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
         uint32_t length; /* 0 = literal */
         uint16_t offset; /* valid if length > 0 */
     } act_t;
-    act_t* const actions = (act_t*)malloc(src_sz * sizeof(act_t));
-    if (UNLIKELY(!actions)) {
-        free(dp);
-        free(parent_len);
-        free(parent_off);
-        return ZXC_ERROR_MEMORY;
-    }
+    act_t* const actions = (act_t*)(ctx->opt_scratch + sz_dp + sz_pl + sz_po);
     size_t n_actions = 0;
     size_t pos = src_sz;
     while (pos > 0) {
@@ -876,9 +893,8 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
         const uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
         const uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
         buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
-        const uint16_t off_biased = (uint16_t)(a.offset - ZXC_LZ_OFFSET_BIAS);
-        buf_offsets[seq_c] = off_biased;
-        if (off_biased > max_offset) max_offset = off_biased;
+        buf_offsets[seq_c] = a.offset;
+        if (a.offset > max_offset) max_offset = a.offset;
 
         if (UNLIKELY(ll >= ZXC_TOKEN_LL_MASK))
             extras_sz += zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
@@ -902,10 +918,6 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
     *extras_sz_out = extras_sz;
     *max_offset_out = max_offset;
 
-    free(actions);
-    free(dp);
-    free(parent_len);
-    free(parent_off);
     return ZXC_OK;
 }
 
@@ -989,9 +1001,9 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     /* Level 6+: price-based optimal parser (fills outputs and skips the
      * lazy loop + last_lits handling below via `goto parse_done`). */
-    if (level >= 6) {
+    if (level >= ZXC_LEVEL_DENSITY) {
         const int rc_opt = zxc_lz77_optimal_parse_glo(
-            src, src_sz, hash_table, hash_tags, chain_table, epoch_mark, offset_mask, level,
+            ctx, src, src_sz, hash_table, hash_tags, chain_table, epoch_mark, offset_mask, level,
             literals, buf_tokens, buf_offsets, buf_extras, &seq_c, &lit_c, &extras_sz, &max_offset);
         if (UNLIKELY(rc_opt != ZXC_OK)) return rc_opt;
         goto parse_done;

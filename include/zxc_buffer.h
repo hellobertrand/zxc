@@ -314,9 +314,10 @@ ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, co
  * @p src_size bytes: all per-chunk working buffers (chain table, literals,
  * sequence/token/offset/extras buffers) plus the fixed hash tables and
  * cache-line alignment padding. At @p level >= 6 the value also includes the
- * transient scratch (= 18 x @p src_size bytes) malloc'd by the price-based
- * optimal parser for the duration of each block. Scales roughly linearly
- * with @p src_size.
+ * `opt_scratch` region (~18 x @p src_size bytes) used by the price-based
+ * optimal parser. That region is lazy-allocated on the first level-6 call
+ * and reused across blocks for the lifetime of the cctx. Scales roughly
+ * linearly with @p src_size.
  *
  * Intended for integrators that need an accurate memory-budget figure.
  *
