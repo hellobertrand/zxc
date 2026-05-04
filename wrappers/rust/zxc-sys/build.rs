@@ -171,6 +171,7 @@ fn main() {
         .file(src_lib.join("zxc_dispatch.c"))
         .file(src_lib.join("zxc_seekable.c"))
         .file(src_lib.join("zxc_pstream.c"))
+        .file(src_lib.join("zxc_huffman.c"))
         .opt_level(3)
         .warnings(false)
         .flag_if_supported("-pthread");
