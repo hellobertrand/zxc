@@ -657,29 +657,64 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     return ZXC_OK;
 }
 
+/* === Optimal-parser tuning constants (level 6) ============================
+ * ZXC_OPT_LITERAL_COST    : static price (bits) of a single literal byte —
+ *                           Huffman-friendly estimate for skewed distributions.
+ * ZXC_OPT_MATCH_COST_BASE : static price (bits) of a match token before
+ *                           varint extras: 1 byte token + 2 byte offset.
+ * ZXC_OPT_LONG_MATCH_SKIP : threshold above which find_best_match is skipped
+ *                           at intra-match positions, keeping the parser O(N)
+ *                           on highly repetitive data. */
+#define ZXC_OPT_LITERAL_COST 9U
+#define ZXC_OPT_MATCH_COST_BASE ((uint32_t)(3U * CHAR_BIT))
+#define ZXC_OPT_LONG_MATCH_SKIP ((size_t)1024)
+
 /**
  * @brief Static price-based optimal LZ77 parser for level 6.
  *
- * Forward DP over the block's positions: dp[p] = min bit cost to encode
- * src[0..p). Per-position transitions are
- *   • literal: dp[p+1] ← dp[p] + LITERAL_COST
- *   • match  : dp[p+L] ← dp[p] + MATCH_COST(L) for L in [MIN_MATCH, max_L]
- * where max_L is the longest match found by `zxc_lz77_find_best_match` at p
- * (with lazy disabled — the DP itself handles position-based optimization).
+ * Forward DP over the block's positions: `dp[p]` = min bit cost to encode
+ * `src[0..p)`. Per-position transitions are
+ *   - literal: `dp[p+1] = min(dp[p+1], dp[p] + ZXC_OPT_LITERAL_COST)`
+ *   - match  : `dp[p+L] = min(dp[p+L], dp[p] + match_cost(L))` for L in
+ *              `[MIN_MATCH, max_L]`
+ * where `max_L` is the longest match found by ::zxc_lz77_find_best_match at
+ * `p` (with lazy disabled — the DP itself handles position-based
+ * optimization). Backtracking from `dp[src_sz]` reconstructs the
+ * optimal token sequence.
  *
- * Static prices: literal = 9 bits (Huffman-friendly estimate), match base
- * cost = 8 (token byte) + 16 (assume 2B offset, 84 % of Silesia matches),
- * +8 bits for varint extras when ML excess ≥ 15.
+ * Static prices: literal = ::ZXC_OPT_LITERAL_COST bits (Huffman-friendly
+ * estimate), match base = ::ZXC_OPT_MATCH_COST_BASE bits (1 byte token +
+ * 2 byte offset), plus CHAR_BIT bits per varint byte once the ML excess
+ * crosses 15.
  *
- * Two complexity guards keep DP work tractable on adversarial inputs:
- *   • L_LIMIT caps the per-position sub-length update loop at 64; for a
- *     longer match we still emit one "one-shot" transition for the full L.
- *   • LONG_MATCH_SKIP causes find_best_match to be skipped at positions
- *     strictly inside a long match (≥ 64 bytes) — without this guard,
- *     highly repetitive data (e.g. Lorem-loop with multi-MB matches at
- *     every offset) makes the parser quadratic and tests run for minutes.
+ * Complexity guard: ::ZXC_OPT_LONG_MATCH_SKIP causes ::zxc_lz77_find_best_match
+ * to be skipped at positions strictly inside a long match — without this
+ * guard, highly repetitive data (e.g. Lorem-loop with multi-MB matches at
+ * every offset) makes the parser quadratic and unit tests run for minutes.
+ * The inner sub-length update loop visits every L from `MIN_MATCH` to
+ * `max_L`; the skip threshold means each long-match region only pays its
+ * O(L) cost once at the starting position, keeping total work O(N).
  *
- * @return ZXC_OK or ZXC_ERROR_MEMORY on allocation failure.
+ * @param[in]  src              Source buffer to parse.
+ * @param[in]  src_sz           Length of @p src in bytes.
+ * @param[in,out] hash_table    LZ77 hash table (epoch | position entries).
+ * @param[in,out] hash_tags     8-bit fast-rejection tags paired with @p hash_table.
+ * @param[in,out] chain_table   Hash-chain link table (ring buffer).
+ * @param[in]  epoch_mark       Current epoch shifted into the high bits.
+ * @param[in]  offset_mask      Mask isolating the position bits in chain entries.
+ * @param[in]  level            Compression level (used to size the matcher).
+ * @param[out] literals         Buffer receiving the gathered literal bytes.
+ * @param[out] buf_tokens       Buffer receiving the per-sequence token bytes.
+ * @param[out] buf_offsets      Buffer receiving the per-sequence offsets.
+ * @param[out] buf_extras       Buffer receiving variable-length overflow data.
+ * @param[out] seq_c_out        Number of emitted sequences.
+ * @param[out] lit_c_out        Number of literal bytes written into @p literals.
+ * @param[out] extras_sz_out    Number of bytes written into @p buf_extras.
+ * @param[out] max_offset_out   Largest biased offset emitted (used by the caller
+ *                              to choose 1-byte vs 2-byte offset encoding).
+ *
+ * @return `ZXC_OK` on success, or `ZXC_ERROR_MEMORY` if the DP scratch
+ *         allocations fail.
  */
 static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t src_sz,
                                       uint32_t* RESTRICT hash_table, uint8_t* RESTRICT hash_tags,
@@ -690,12 +725,8 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
                                       uint32_t* RESTRICT seq_c_out, size_t* RESTRICT lit_c_out,
                                       size_t* RESTRICT extras_sz_out,
                                       uint16_t* RESTRICT max_offset_out) {
-    /* Optimal parser params: lazy disabled (DP handles it), step 1 (visit
-     * every position). search_depth=32, sufficient_len=64 — the matcher
-     * returns the longest reasonable match so the DP gets full coverage
-     * on sub-length transitions. Quadratic blowup on adversarial
-     * repetitive data is bounded by the LONG_MATCH_SKIP guard below. */
-    const zxc_lz77_params_t lzp_opt = {32, 64, 0, 0, 0, 1, 8};
+    zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level);
+    lzp_opt.use_lazy = 0;  // guard
 
     const uint8_t* const iend = src + src_sz;
 
@@ -728,11 +759,6 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
     dp[0] = 0;
     for (size_t i = 1; i <= src_sz; i++) dp[i] = UINT32_MAX;
 
-    const uint32_t LITERAL_COST = 9;
-    const uint32_t MATCH_COST_BASE = 24; /* 8 token + 16 offset (assume 2B) */
-    const size_t L_LIMIT = 64;
-    const size_t LONG_MATCH_SKIP = 512;
-
     /* Forward DP: visit every position, update reachable successors.
      * `skip_until` skips find_best_match at positions strictly inside the
      * last long match — the DP transition from the start of the match
@@ -743,7 +769,7 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
         if (dp[p] == UINT32_MAX) continue;
 
         /* Literal transition. */
-        const uint32_t lit_next = dp[p] + LITERAL_COST;
+        const uint32_t lit_next = dp[p] + ZXC_OPT_LITERAL_COST;
         if (lit_next < dp[p + 1]) {
             dp[p + 1] = lit_next;
             parent_len[p + 1] = 0;
@@ -763,26 +789,17 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
             const uint32_t off = (uint32_t)(ip - m.ref);
             if (off > 0 && off <= ZXC_LZ_WINDOW_SIZE) {
                 const size_t L_max = (m.len > src_sz - p) ? (src_sz - p) : (size_t)m.len;
-                const size_t L_loop = (L_max < L_LIMIT) ? L_max : L_LIMIT;
-                for (size_t L = ZXC_LZ_MIN_MATCH_LEN; L <= L_loop; L++) {
-                    uint32_t cost = MATCH_COST_BASE;
-                    const uint32_t ml_excess = (uint32_t)(L - ZXC_LZ_MIN_MATCH_LEN);
-                    if (ml_excess >= ZXC_TOKEN_ML_MASK) cost += 8; /* approx 1-byte varint */
-                    const uint32_t nxt = dp[p] + cost;
-                    if (nxt < dp[p + L]) {
-                        dp[p + L] = nxt;
-                        parent_len[p + L] = (uint32_t)L;
-                        parent_off[p + L] = (uint16_t)off;
-                    }
-                }
-                if (L_max > L_LIMIT) {
-                    const size_t L = L_max;
-                    const uint32_t ml_excess = (uint32_t)(L - ZXC_LZ_MIN_MATCH_LEN);
-                    uint32_t cost = MATCH_COST_BASE;
-                    uint32_t v = ml_excess;
-                    while (v >= ZXC_TOKEN_ML_MASK) {
-                        cost += 8;
-                        v >>= 7;
+
+                for (size_t L = ZXC_LZ_MIN_MATCH_LEN; L <= L_max; L++) {
+                    uint32_t cost = ZXC_OPT_MATCH_COST_BASE;
+                    uint32_t v = (uint32_t)(L - ZXC_LZ_MIN_MATCH_LEN);
+                    if (v >= ZXC_TOKEN_ML_MASK) {
+                        v -= ZXC_TOKEN_ML_MASK;
+                        cost += CHAR_BIT;
+                        while (v >= 128) {
+                            v >>= 7;
+                            cost += CHAR_BIT;
+                        }
                     }
                     const uint32_t nxt = dp[p] + cost;
                     if (nxt < dp[p + L]) {
@@ -790,8 +807,8 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
                         parent_len[p + L] = (uint32_t)L;
                         parent_off[p + L] = (uint16_t)off;
                     }
-                    if (L_max >= LONG_MATCH_SKIP) skip_until = p + L_max - 1;
                 }
+                if (L_max >= ZXC_OPT_LONG_MATCH_SKIP) skip_until = p + L_max - 1;
             }
         }
     }
@@ -799,7 +816,7 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
     /* Last 12 bytes can only be literals (matches must end before iend). */
     for (size_t p = mflimit_pos; p < src_sz; p++) {
         if (dp[p] == UINT32_MAX) continue;
-        const uint32_t lit_next = dp[p] + LITERAL_COST;
+        const uint32_t lit_next = dp[p] + ZXC_OPT_LITERAL_COST;
         if (lit_next < dp[p + 1]) {
             dp[p + 1] = lit_next;
             parent_len[p + 1] = 0;
