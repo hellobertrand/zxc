@@ -550,10 +550,6 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
         }
     }
 
-    for (uint32_t i = 0; i < ZXC_HUF_SS_SIZE; i++) {
-        if (UNLIKELY((ss[i] >> 8) == 0)) return ZXC_ERROR_CORRUPT_DATA;
-    }
-
     /* Build the multi-symbol table. */
     for (uint32_t p = 0; p < ZXC_HUF_TABLE_SIZE; p++) {
         const uint16_t e1 = ss[p & ZXC_HUF_SS_MASK];
@@ -582,12 +578,6 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
     }
 #undef ZXC_HUF_SS_SIZE
 #undef ZXC_HUF_SS_MASK
-
-    /* Final invariant: every entry must have a non-zero len1 (≥ 1). */
-    for (uint32_t i = 0; i < ZXC_HUF_TABLE_SIZE; i++) {
-        const int len1 = (int)((table[i].entry >> 16) & 0xF);
-        if (UNLIKELY(len1 == 0)) return ZXC_ERROR_CORRUPT_DATA;
-    }
 
     return ZXC_OK;
 }
