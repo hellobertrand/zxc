@@ -30,7 +30,7 @@ all:
 
 # ── Test ─────────────────────────────────────────────────────
 test:
-	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Debug -DZXC_BUILD_TESTS=ON $(CMAKE_EXTRA)
+	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Release -DZXC_BUILD_TESTS=ON $(CMAKE_EXTRA)
 	@$(CMAKE) --build $(BUILD) -j$(JOBS)
 	@cd $(BUILD) && ctest --output-on-failure
 
