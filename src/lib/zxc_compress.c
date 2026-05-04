@@ -731,7 +731,7 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
     const uint8_t* const iend = src + src_sz;
 
     /* Block too small for any match: emit all as literals. */
-    if (src_sz < 13) {
+    if (UNLIKELY(src_sz < 13)) {
         if (src_sz > 0) ZXC_MEMCPY(literals, src, src_sz);
         *lit_c_out = src_sz;
         *seq_c_out = 0;
@@ -746,9 +746,9 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
     /* DP arrays. dp[p] = min cost in bits to encode src[0..p).
      * parent_len[p]: 0 = literal of length 1; ≥ MIN_MATCH = match length.
      * parent_off[p]: offset (distance) of the match that ends at p. */
-    uint32_t* dp = (uint32_t*)malloc((src_sz + 1) * sizeof(uint32_t));
-    uint32_t* parent_len = (uint32_t*)calloc(src_sz + 1, sizeof(uint32_t));
-    uint16_t* parent_off = (uint16_t*)malloc((src_sz + 1) * sizeof(uint16_t));
+    uint32_t* const dp = (uint32_t*)malloc((src_sz + 1) * sizeof(uint32_t));
+    uint32_t* const parent_len = (uint32_t*)calloc(src_sz + 1, sizeof(uint32_t));
+    uint16_t* const parent_off = (uint16_t*)malloc((src_sz + 1) * sizeof(uint16_t));
     if (UNLIKELY(!dp || !parent_len || !parent_off)) {
         free(dp);
         free(parent_len);
@@ -766,7 +766,7 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
      * position is what makes the parser quadratic on repetitive inputs. */
     size_t skip_until = 0;
     for (size_t p = 0; p < mflimit_pos; p++) {
-        if (dp[p] == UINT32_MAX) continue;
+        if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
 
         /* Literal transition. */
         const uint32_t lit_next = dp[p] + ZXC_OPT_LITERAL_COST;
@@ -793,7 +793,7 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
                 for (size_t L = ZXC_LZ_MIN_MATCH_LEN; L <= L_max; L++) {
                     uint32_t cost = ZXC_OPT_MATCH_COST_BASE;
                     uint32_t v = (uint32_t)(L - ZXC_LZ_MIN_MATCH_LEN);
-                    if (v >= ZXC_TOKEN_ML_MASK) {
+                    if (UNLIKELY(v >= ZXC_TOKEN_ML_MASK)) {
                         v -= ZXC_TOKEN_ML_MASK;
                         cost += CHAR_BIT;
                         while (v >= 128) {
@@ -808,14 +808,14 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
                         parent_off[p + L] = (uint16_t)off;
                     }
                 }
-                if (L_max >= ZXC_OPT_LONG_MATCH_SKIP) skip_until = p + L_max - 1;
+                if (UNLIKELY(L_max >= ZXC_OPT_LONG_MATCH_SKIP)) skip_until = p + L_max - 1;
             }
         }
     }
 
     /* Last 12 bytes can only be literals (matches must end before iend). */
     for (size_t p = mflimit_pos; p < src_sz; p++) {
-        if (dp[p] == UINT32_MAX) continue;
+        if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
         const uint32_t lit_next = dp[p] + ZXC_OPT_LITERAL_COST;
         if (lit_next < dp[p + 1]) {
             dp[p + 1] = lit_next;
@@ -828,7 +828,7 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
         uint32_t length; /* 0 = literal */
         uint16_t offset; /* valid if length > 0 */
     } act_t;
-    act_t* actions = (act_t*)malloc(src_sz * sizeof(act_t));
+    act_t* const actions = (act_t*)malloc(src_sz * sizeof(act_t));
     if (UNLIKELY(!actions)) {
         free(dp);
         free(parent_len);
@@ -880,9 +880,9 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
         buf_offsets[seq_c] = off_biased;
         if (off_biased > max_offset) max_offset = off_biased;
 
-        if (ll >= ZXC_TOKEN_LL_MASK)
+        if (UNLIKELY(ll >= ZXC_TOKEN_LL_MASK))
             extras_sz += zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
-        if (ml >= ZXC_TOKEN_ML_MASK)
+        if (UNLIKELY(ml >= ZXC_TOKEN_ML_MASK))
             extras_sz += zxc_write_varint(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
 
         seq_c++;

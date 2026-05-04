@@ -499,7 +499,7 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
         for (int k = 1; k <= ZXC_HUF_MAX_CODE_LEN; k++) {
             kraft += (uint64_t)bl_count[k] << (ZXC_HUF_MAX_CODE_LEN - k);
         }
-        if (n_present == 1) {
+        if (UNLIKELY(n_present == 1)) {
             if (UNLIKELY(bl_count[1] != 1)) return ZXC_ERROR_CORRUPT_DATA;
         } else {
             if (UNLIKELY(kraft != ((uint64_t)1 << ZXC_HUF_MAX_CODE_LEN)))
@@ -537,7 +537,7 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
 
     /* Single-symbol degenerate (Kraft sum = 2^(L-1)): replicate the one
      * valid entry across every slot. */
-    if (n_present == 1) {
+    if (UNLIKELY(n_present == 1)) {
         uint16_t valid = 0;
         for (uint32_t i = 0; i < ZXC_HUF_SS_SIZE; i++) {
             if (ss[i] != 0) {
@@ -597,9 +597,10 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
         if (UNLIKELY(rc != ZXC_OK)) return rc;
     }
 
-    /* 2. Build the 512-entry decode table. Cache-line aligned: the LUT
-     * spans 16 lines and is hammered every symbol; landing it on a 64-byte
-     * boundary avoids any cross-line load split. */
+    /* 2. Build the 2048-entry multi-symbol decode table. Cache-line
+     * aligned: the LUT spans 128 lines (8 KB / 64 B) and is hammered every
+     * symbol — landing it on a 64-byte boundary avoids any cross-line
+     * load split on the per-iteration entry fetch. */
     __attribute__((aligned(ZXC_CACHE_LINE_SIZE))) zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE];
     {
         const int rc = build_decode_table(code_len, table);
