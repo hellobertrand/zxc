@@ -25,11 +25,11 @@
 #define ZXC_HUF_STREAM_SIZES_HEADER_SIZE 6
 
 /* 2048-entry multi-symbol decoder lookup table entry. Bit layout:
- *   bits  0..7   sym1       — first decoded symbol
- *   bits  8..15  sym2       — second decoded symbol (junk if n_extra == 0)
- *   bits 16..19  len1       — bit length of sym1's code (1..8)
- *   bits 20..23  len_total  — total bits consumed (1..11)
- *   bit  24      n_extra    — 0 if 1 symbol, 1 if 2 symbols decoded
+ *   bits  0..7   sym1       - first decoded symbol
+ *   bits  8..15  sym2       - second decoded symbol (junk if n_extra == 0)
+ *   bits 16..19  len1       - bit length of sym1's code (1..8)
+ *   bits 20..23  len_total  - total bits consumed (1..11)
+ *   bit  24      n_extra    - 0 if 1 symbol, 1 if 2 symbols decoded
  *
  * Single-symbol path (tail) reads sym1 + len1; multi-symbol path (hot
  * batched loop) reads sym1, sym2 (always written, possibly overwritten
@@ -277,7 +277,7 @@ static void build_canonical_codes(const uint8_t* RESTRICT code_len, uint32_t* RE
  *
  * The packing is little-endian within each byte: low nibble holds
  * `code_len[2*i]`, high nibble holds `code_len[2*i + 1]`. The function
- * silently truncates any length > 15 — callers must enforce the cap of
+ * silently truncates any length > 15; callers must enforce the cap of
  * `ZXC_HUF_MAX_CODE_LEN` (≤ 15) before calling.
  *
  * @param[in]  code_len Per-symbol code lengths (length `ZXC_HUF_NUM_SYMBOLS`).
@@ -420,7 +420,7 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_lite
     /* 3. Reserve 6 bytes for sub-stream sizes; encode 4 sub-streams after them. */
     uint8_t* const sizes_hdr = dst + ZXC_HUF_LENGTHS_HEADER_SIZE;
     uint8_t* const stream_base = sizes_hdr + ZXC_HUF_STREAM_SIZES_HEADER_SIZE;
-    uint8_t* const stream_end = dst + dst_cap;
+    const uint8_t* const stream_end = dst + dst_cap;
 
     const size_t Q = (n_literals + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
 
@@ -561,11 +561,6 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
         int len_total = len1;
         int n_extra = 0;
 
-        /* (p >> len1) has only `11 - len1` valid bits (high bits zero from the
-         * 11-bit prefix). The single-symbol lookup may return a code whose
-         * length L2 exceeds rem — in that case the high bits of the matched
-         * code came from out-of-range zeros and the entry is bogus, so we
-         * keep only sym1 and let the next iteration consume the real bits. */
         const uint16_t e2 = ss[(p >> len1) & ZXC_HUF_SS_MASK];
         const int len2 = e2 >> 8;
         if (len2 <= rem) {
@@ -599,9 +594,9 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
 
     /* 2. Build the 2048-entry multi-symbol decode table. Cache-line
      * aligned: the LUT spans 128 lines (8 KB / 64 B) and is hammered every
-     * symbol — landing it on a 64-byte boundary avoids any cross-line
+     * symbol, landing it on a 64-byte boundary avoids any cross-line
      * load split on the per-iteration entry fetch. */
-    __attribute__((aligned(ZXC_CACHE_LINE_SIZE))) zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE];
+    ZXC_ALIGN(ZXC_CACHE_LINE_SIZE) zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE];
     {
         const int rc = build_decode_table(code_len, table);
         if (UNLIKELY(rc != ZXC_OK)) return rc;
@@ -656,7 +651,7 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
      * Speculative writes: each iter unconditionally writes 2 bytes per
      * stream (sym1 to d_s[0], sym2 to d_s[1]) and advances d_s by 1 or 2.
      * If only 1 symbol was decoded, the spec write at d_s[1] is overwritten
-     * by the next iter's first write — except at the very end of a stream
+     * by the next iter's first write, except at the very end of a stream
      * where it would corrupt the adjacent stream's region. The batched loop
      * therefore runs only while every stream has ≥ 2 * ZXC_HUF_BATCH = 10
      * bytes of headroom; the per-stream scalar tail handles ≤ 9 trailing
@@ -766,7 +761,7 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
     }
 
     /* Per-stream scalar tail (≤ ZXC_HUF_SAFE_MARGIN - 1 = 9 symbols per
-     * stream). Single-symbol decode using the same 2048-entry table —
+     * stream). Single-symbol decode using the same 2048-entry table,
      * we read sym1 + len1 only and advance by 1 byte, no spec write. */
 #define TAIL_ONE(A, BB, P, E, D)                                 \
     do {                                                         \

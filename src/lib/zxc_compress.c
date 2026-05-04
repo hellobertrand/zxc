@@ -658,7 +658,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 }
 
 /* === Optimal-parser tuning constants (level 6) ============================
- * ZXC_OPT_LITERAL_COST    : static price (bits) of a single literal byte —
+ * ZXC_OPT_LITERAL_COST    : static price (bits) of a single literal byte.
  *                           Huffman-friendly estimate for skewed distributions.
  * ZXC_OPT_MATCH_COST_BASE : static price (bits) of a match token before
  *                           varint extras: 1 byte token + 2 byte offset.
@@ -678,7 +678,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  *   - match  : `dp[p+L] = min(dp[p+L], dp[p] + match_cost(L))` for L in
  *              `[MIN_MATCH, max_L]`
  * where `max_L` is the longest match found by ::zxc_lz77_find_best_match at
- * `p` (with lazy disabled — the DP itself handles position-based
+ * `p` (with lazy disabled, the DP itself handles position-based
  * optimization). Backtracking from `dp[src_sz]` reconstructs the
  * optimal token sequence.
  *
@@ -688,7 +688,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  * crosses 15.
  *
  * Complexity guard: ::ZXC_OPT_LONG_MATCH_SKIP causes ::zxc_lz77_find_best_match
- * to be skipped at positions strictly inside a long match — without this
+ * to be skipped at positions strictly inside a long match, without this
  * guard, highly repetitive data (e.g. Lorem-loop with multi-MB matches at
  * every offset) makes the parser quadratic and unit tests run for minutes.
  * The inner sub-length update loop visits every L from `MIN_MATCH` to
@@ -761,7 +761,7 @@ static int zxc_lz77_optimal_parse_glo(const uint8_t* RESTRICT src, const size_t 
 
     /* Forward DP: visit every position, update reachable successors.
      * `skip_until` skips find_best_match at positions strictly inside the
-     * last long match — the DP transition from the start of the match
+     * last long match, the DP transition from the start of the match
      * already covers dp[p+1..p+L], and re-searching at every intra-match
      * position is what makes the parser quadratic on repetitive inputs. */
     size_t skip_until = 0;
@@ -1316,7 +1316,7 @@ parse_done:;
             const size_t baseline =
                 (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : (size_t)lit_c;
             /* Threshold: Huffman must save >= ~12.5% (1/8) over the chosen
-             * RAW/RLE baseline. Speed-favouring choice — marginal blocks fall
+             * RAW/RLE baseline. Speed-favouring choice, marginal blocks fall
              * back to RAW/RLE which decode much faster than Huffman. Trades
              * ~0.7 pp of ratio for ~+15% decode throughput vs a tighter
              * threshold. */

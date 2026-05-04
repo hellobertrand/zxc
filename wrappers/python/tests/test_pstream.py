@@ -88,7 +88,7 @@ def test_pstream_truncated_stream_not_finished():
     compressed = cs.compress(data) + cs.end()
     cs.close()
 
-    # Drop the last 5 bytes (partial footer) — decoder should not finalise.
+    # Drop the last 5 bytes (partial footer), decoder should not finalise.
     ds = zxc.DStream()
     ds.decompress(compressed[:-5])
     assert not ds.finished

@@ -162,21 +162,21 @@ int test_huffman_codec() {
         return 0;
     }
 
-    /* Case 2: uniform random — Huffman should be near no-op (~1 byte/sym). */
+    /* Case 2: uniform random - Huffman should be near no-op (~1 byte/sym). */
     for (size_t i = 0; i < N; i++) buf[i] = (uint8_t)(rand() & 0xFF);
     if (!huf_roundtrip_case("Uniform random", buf, N)) {
         free(buf);
         return 0;
     }
 
-    /* Case 3: two-symbol alphabet — best case, ~1 bit/symbol. */
+    /* Case 3: two-symbol alphabet - best case, ~1 bit/symbol. */
     for (size_t i = 0; i < N; i++) buf[i] = (rand() & 1) ? 'X' : 'Y';
     if (!huf_roundtrip_case("Two-symbol alphabet", buf, N)) {
         free(buf);
         return 0;
     }
 
-    /* Case 4: single-symbol — degenerate but must still roundtrip. */
+    /* Case 4: single-symbol - degenerate but must still roundtrip. */
     for (size_t i = 0; i < N; i++) buf[i] = 'Z';
     if (!huf_roundtrip_case("Single-symbol", buf, N)) {
         free(buf);

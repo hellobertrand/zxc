@@ -39,7 +39,7 @@ option(ZXC_DISABLE_SIMD "Disable explicit SIMD intrinsics (no AVX/NEON code path
 # Emscripten / WebAssembly overrides
 # =============================================================================
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
-    message(STATUS "Emscripten detected — configuring for WebAssembly.")
+    message(STATUS "Emscripten detected - configuring for WebAssembly.")
     set(ZXC_DISABLE_SIMD ON  CACHE BOOL "" FORCE)
     set(ZXC_BUILD_CLI    OFF CACHE BOOL "" FORCE)
     set(ZXC_BUILD_TESTS  OFF CACHE BOOL "" FORCE)

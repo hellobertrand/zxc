@@ -25,12 +25,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu 22.04 ships Clang 13, 14, 15 — Clang 12 is in standard repos
+          # Ubuntu 22.04 ships Clang 13, 14, 15 - Clang 12 is in standard repos
           - { os: ubuntu-22.04, version: 12, needs_install: true,  needs_llvm_apt: false, llvm_distro: "" }
           - { os: ubuntu-22.04, version: 13, needs_llvm_apt: false, llvm_distro: "" }
           - { os: ubuntu-22.04, version: 14, needs_llvm_apt: false, llvm_distro: "" }
           - { os: ubuntu-22.04, version: 15, needs_llvm_apt: false, llvm_distro: "" }
-          # Ubuntu 24.04 ships Clang 16, 17, 18 — 19/20 need LLVM APT
+          # Ubuntu 24.04 ships Clang 16, 17, 18 - 19/20 need LLVM APT
           - { os: ubuntu-latest, version: 16, needs_llvm_apt: false, llvm_distro: "" }
           - { os: ubuntu-latest, version: 17, needs_llvm_apt: false, llvm_distro: "" }
           - { os: ubuntu-latest, version: 18, needs_llvm_apt: false, llvm_distro: "" }

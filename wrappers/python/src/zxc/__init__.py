@@ -256,7 +256,7 @@ class CStream:
 
     The Python counterpart of the C ``zxc_cstream``. Use this when the
     multi-threaded ``stream_compress`` (which takes ``FILE*``) is not
-    appropriate — e.g. async event loops, in-memory streams (``io.BytesIO``),
+    appropriate - e.g. async event loops, in-memory streams (``io.BytesIO``),
     network protocols, or callback-driven libraries.
 
     The stream is not thread-safe. Each call to :meth:`compress` returns the
