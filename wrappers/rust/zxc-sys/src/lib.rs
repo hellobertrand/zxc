@@ -375,10 +375,12 @@ unsafe extern "C" {
     ///
     /// Covers all per-chunk working buffers (chain table, literals,
     /// sequence/token/offset/extras buffers) plus the fixed hash tables and
-    /// cache-line alignment padding.
+    /// cache-line alignment padding. At `level >= 6` the value also accounts
+    /// for the price-based optimal parser's transient DP scratch (~18 ×
+    /// `src_size` bytes), free'd at the end of each block.
     ///
-    /// Returns the estimated memory usage in bytes, or 0 if `src_size == 0`.
-    pub fn zxc_estimate_cctx_size(src_size: usize) -> u64;
+    /// Returns the estimated peak memory usage in bytes, or 0 if `src_size == 0`.
+    pub fn zxc_estimate_cctx_size(src_size: usize, level: c_int) -> u64;
 }
 
 // =============================================================================

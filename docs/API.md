@@ -496,19 +496,21 @@ Only `checksum_enabled` is used.
 ### `zxc_estimate_cctx_size`
 
 ```c
-ZXC_EXPORT uint64_t zxc_estimate_cctx_size(size_t src_size);
+ZXC_EXPORT uint64_t zxc_estimate_cctx_size(size_t src_size, int level);
 ```
 
-Returns an accurate estimate of the memory a compression context reserves
-when compressing a single block of `src_size` bytes via `zxc_compress_block()`.
+Returns an accurate estimate of the peak memory used when compressing a single
+block of `src_size` bytes at the given `level` via `zxc_compress_block()`.
 
 The estimate covers all per-chunk working buffers (chain table, literals,
 sequence/token/offset/extras buffers) plus the fixed hash tables and the
-cache-line alignment padding. It scales roughly linearly with `src_size`
-and is intended for integrators that need to build an accurate memory
-budget (filesystems, embedded devices, sandboxed workloads).
+cache-line alignment padding. At `level >= 6` it also includes the transient
+DP scratch (~18 × `src_size` bytes) malloc'd by the price-based optimal parser
+for the duration of each block. It scales roughly linearly with `src_size` and
+is intended for integrators that need to build an accurate memory budget
+(filesystems, embedded devices, sandboxed workloads).
 
-**Returns**: estimated cctx memory usage in bytes, or `0` if `src_size == 0`.
+**Returns**: estimated peak cctx memory usage in bytes, or `0` if `src_size == 0`.
 
 ---
 

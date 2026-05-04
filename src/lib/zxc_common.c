@@ -629,11 +629,17 @@ uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
 /*
  * @brief Estimates the total buffer bytes allocated inside a cctx for a block.
  *
- * Mirrors the allocation layout in zxc_cctx_init(): each sub-buffer is rounded
- * up to the cache-line boundary, so the returned value matches the single
- * aligned allocation performed by the initializer.
+ * Mirrors the persistent allocation layout in zxc_cctx_init(): each sub-buffer
+ * is rounded up to the cache-line boundary, so the returned value matches the
+ * single aligned allocation performed by the initializer.
+ *
+ * For @p level >= 6 the price-based optimal parser inside
+ * zxc_lz77_optimal_parse_glo() malloc's transient DP scratch (dp / parent_len /
+ * parent_off / actions) of ~18 bytes per source byte, free'd at the end of
+ * each block. That peak is added on top so the returned value is a usable
+ * upper bound for memory budgeting at level 6.
  */
-uint64_t zxc_estimate_cctx_size(const size_t src_size) {
+uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
     if (UNLIKELY(src_size == 0)) return 0;
 
     const size_t chunk_size = zxc_block_size_ceil(src_size);
@@ -653,6 +659,13 @@ uint64_t zxc_estimate_cctx_size(const size_t src_size) {
     /* The opaque wrapper struct allocated by zxc_create_cctx() adds a tiny
      * fixed overhead (< 128 B) that is negligible next to the per-chunk
      * buffers above and is intentionally omitted. */
+
+    if (level >= ZXC_LEVEL_MAX) {
+        total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* dp         */
+        total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* parent_len */
+        total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t)); /* parent_off */
+        total += ZXC_ALIGN_CL(chunk_size * 2 * sizeof(uint32_t));   /* actions[]  */
+    }
 
     return total;
 }
