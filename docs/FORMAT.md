@@ -196,7 +196,7 @@ General LZ-style format with separated streams.
 Offset  Size  Field
 0x00    4     n_sequences (u32)
 0x04    4     n_literals (u32)
-0x08    1     enc_lit   (0=RAW, 1=RLE)
+0x08    1     enc_lit   (0=RAW, 1=RLE, 2=HUFFMAN)
 0x09    1     enc_litlen (reserved)
 0x0A    1     enc_mlen   (reserved)
 0x0B    1     enc_off    (0=16-bit offsets, 1=8-bit offsets)
@@ -218,8 +218,9 @@ Section order:
 ### GLO stream content
 
 - **Literals stream**:
-  - raw literal bytes, or
-  - RLE tokenized if `enc_lit=1`.
+  - raw literal bytes if `enc_lit=0`, or
+  - RLE tokenized if `enc_lit=1`, or
+  - Huffman-coded if `enc_lit=2` (see [§ 5.3.1 Huffman literal section](#531-huffman-literal-section)).
 - **Tokens stream**:
   - one byte per sequence: `(LL << 4) | ML`.
   - `LL` and `ML` are 4-bit fields.
@@ -232,6 +233,48 @@ Section order:
     - if `LL == 15`, read varint and add to LL
     - if `ML == 15`, read varint and add to ML
   - actual match length is `ML + 5` (minimum match = 5).
+
+### 5.3.1 Huffman literal section
+
+Selected by the encoder only at compression level ≥ 6, only when at least
+`ZXC_HUF_MIN_LITERALS = 1024` literals are present, and only when the Huffman
+payload is at least ~3 % smaller than the corresponding RAW or RLE encoding of
+the same literals. Any block where the heuristic does not pick HUFFMAN keeps
+`enc_lit ∈ {0, 1}`.
+
+The Huffman literal section payload is structured as follows:
+
+```text
+Offset  Size  Field
+0x00    128   Code-length header
+              256 × 4-bit code lengths, packed two-per-byte (low nibble first).
+              code_len[i] ∈ [0, 8] (0 means symbol absent).
+0x80    6     Sub-stream sizes
+              s1, s2, s3 as little-endian u16 (size of streams 0, 1, 2 in bytes).
+              The size of stream 3 is implied: s4 = total_payload_size - 134 - s1 - s2 - s3.
+0x86    var   Stream 0 bit-stream (s1 bytes, LSB-first)
+        var   Stream 1 bit-stream (s2 bytes)
+        var   Stream 2 bit-stream (s3 bytes)
+        var   Stream 3 bit-stream (s4 bytes)
+```
+
+Codes are canonical, length-limited at `L = 8`, emitted **LSB-first**.
+The `n_literals` value from the GLO header is split into 4 contiguous regions
+of size `Q = ceil(n_literals / 4)` (the last region may be shorter), each
+encoded into its own bit-stream so that 4 decoders can run in parallel.
+
+The decoder reconstructs the canonical code table from the 128-byte length
+header, validates the Kraft equality, and decodes each sub-stream into its
+output region. See [WHITEPAPER §5.8](WHITEPAPER.md) for the multi-symbol
+2048-entry lookup table strategy used on the decode hot path.
+
+Decoder validation requirements:
+- Every code length must satisfy `code_len[i] ≤ 8`.
+- At least one symbol must be present (`code_len[i] != 0` for some `i`).
+- The Kraft sum `Σ 2^(8 − code_len[i])` over present symbols must equal `2^8`,
+  except for the single-present-symbol degenerate case where exactly one
+  symbol has `code_len = 1` and the Kraft sum is `2^7`.
+- A failure on any of the above results in `ZXC_ERROR_CORRUPT_DATA`.
 
 ---
 

@@ -331,6 +331,8 @@ GHI Block Data Layout:
 | **Memory Access**  | Multiple stream pointers        | Single aligned 4-byte reads      |
 | **Decoder Speed**  | Fast                            | Fastest (optimized for ARM/x86)  |
 | **RLE Support**    | Yes (literals)                  | No                               |
+| **Huffman Literals** | Yes (level ≥ 6, ≥ 1024 lits)  | No                               |
+| **Parser**         | Lazy (≤ L5), Optimal DP (L6)    | Lazy                             |
 | **Best For**       | General data, good compression  | Maximum decode throughput        |
 
 > **Design Rationale**: The 32-bit packed format eliminates pointer chasing between token and offset streams. By reading a single aligned word per sequence, the decoder achieves better cache utilization and enables aggressive loop unrolling (4x) for maximum throughput on modern CPUs.
@@ -378,7 +380,8 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
 **Encoding Process**:
 1.  **LZ77 Parsing**: The encoder iterates through the input using a rolling hash to detect matches.
     *   *Hash Chain*: Collisions are resolved via a chain table to find optimal matches in dense data.
-    *   *Lazy Matching*: If a match is found, the encoder checks the next position. If a better match starts there, the current byte is emitted as a literal (deferred matching).
+    *   *Lazy Matching* (levels 3–5): If a match is found, the encoder checks the next position. If a better match starts there, the current byte is emitted as a literal (deferred matching).
+    *   *Price-Based Optimal Parser* (level 6): A forward dynamic-programming pass replaces the lazy parser. `dp[p]` holds the minimum bit-cost to encode `src[0..p)`; transitions consider either emitting a single literal or any sub-length of the longest match found at `p`, using static prices (literal ≈ 9 bits, match ≈ 24 bits + varint extras). Backtracking from `dp[N]` yields the globally optimal token sequence. A long-match guard skips re-search at intra-match positions to keep the parser O(N) on highly repetitive data.
 2.  **Tokenization**: Matches are split into three components:
     *   *Literal Length*: Number of raw bytes before the match.
     *   *Match Length*: Duration of the repeated pattern.
@@ -390,12 +393,17 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Extras Buffer*: Overflow values for lengths >= 15 (Prefix Varint encoded).
     *   *Offset Mode Selection*: The encoder tracks the maximum offset across all sequences. If all offsets are ≤ 255, the 8-bit mode (`enc_off=1`) is selected, saving 1 byte per sequence compared to 16-bit mode.
 4.  **RLE Pass**: The literals buffer is scanned for run-length encoding opportunities (runs of identical bytes). If beneficial (>10% gain), it is compressed in place.
-5.  **Final Serialization**: All buffers are concatenated into the payload, preceded by section descriptors.
+5.  **Huffman Pass** (level ≥ 6 only, ≥ 1024 literals only): A length-limited canonical Huffman code (`L = 8`) is fitted to the literal byte distribution and the literals are split into 4 LSB-first interleaved bit-streams. The encoding is selected (`enc_lit = 2`) only if it is at least ~3 % smaller than the chosen RAW or RLE baseline.
+6.  **Final Serialization**: All buffers are concatenated into the payload, preceded by section descriptors.
 
 **Decoding Process**:
 1.  **Deserizalization**: The decoder reads the section descriptors to obtain pointers to the start of each stream (Literals, Tokens, Offsets).
-2.  **Vertical Execution**: The main loop reads from all three streams simultaneously.
-3.  **Wild Copy**:
+2.  **Literal Decompression**:
+    *   `enc_lit = 0` (RAW): zero-copy view into the source buffer.
+    *   `enc_lit = 1` (RLE): single pass that expands runs and copies literal chunks.
+    *   `enc_lit = 2` (HUFFMAN): canonical Huffman section decoded by 4 parallel decoders sharing a cache-line-aligned 2048-entry lookup table (11-bit window). Each lookup returns 1 or 2 symbols depending on whether the cumulative length of the next two codes fits in the 11-bit window — on typical literal distributions ~50–70 % of lookups yield 2 symbols, raising effective throughput well above one symbol per memory access. A small per-stream scalar tail (≤ 9 symbols) handles the trailing bytes safely without speculative writes.
+3.  **Vertical Execution**: The main loop reads from all three streams simultaneously.
+4.  **Wild Copy**:
     *   *Literals*: Copied using unaligned 16-byte SIMD loads/stores (`vld1/vst1` on ARM).
     *   *Matches*: Copied using 16-byte stores. Overlapping matches (e.g., repeating pattern "ABC" for 100 bytes) are handled naturally by the CPU's store forwarding or by specific overlapped-copy primitives.
     *   **Safety**: A "Safe Zone" at the end of the buffer forces a switch to a cautious byte-by-byte loop, allowing the main loop to run without bounds checks.
