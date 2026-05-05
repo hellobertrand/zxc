@@ -1310,8 +1310,25 @@ parse_done:;
     uint8_t huf_code_len[ZXC_HUF_NUM_SYMBOLS];
     size_t huf_total_size = SIZE_MAX;
     if (level >= ZXC_LEVEL_DENSITY && lit_c >= ZXC_HUF_MIN_LITERALS) {
-        uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
-        for (size_t i = 0; i < lit_c; i++) freq[literals[i]]++;
+        uint32_t freq0[ZXC_HUF_NUM_SYMBOLS] = {0};
+        uint32_t freq1[ZXC_HUF_NUM_SYMBOLS] = {0};
+        uint32_t freq2[ZXC_HUF_NUM_SYMBOLS] = {0};
+        uint32_t freq3[ZXC_HUF_NUM_SYMBOLS] = {0};
+        {
+            size_t i = 0;
+            for (; i + 4 <= lit_c; i += 4) {
+                freq0[literals[i + 0]]++;
+                freq1[literals[i + 1]]++;
+                freq2[literals[i + 2]]++;
+                freq3[literals[i + 3]]++;
+            }
+            for (; i < lit_c; i++) freq0[literals[i]]++;
+        }
+        uint32_t freq[ZXC_HUF_NUM_SYMBOLS];
+        for (int k = 0; k < ZXC_HUF_NUM_SYMBOLS; k++) {
+            freq[k] = freq0[k] + freq1[k] + freq2[k] + freq3[k];
+        }
+
         if (zxc_huf_build_code_lengths(freq, huf_code_len) == ZXC_OK) {
             const size_t Q = (lit_c + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
             size_t streams_bytes = 0;
@@ -1320,8 +1337,17 @@ parse_done:;
                 size_t stop = start + Q;
                 if (start > lit_c) start = lit_c;
                 if (stop > lit_c) stop = lit_c;
-                uint64_t bits = 0;
-                for (size_t i = start; i < stop; i++) bits += huf_code_len[literals[i]];
+                uint64_t b0 = 0, b1 = 0, b2 = 0, b3 = 0;
+                size_t i = start;
+
+                for (; i + 4 <= stop; i += 4) {
+                    b0 += huf_code_len[literals[i + 0]];
+                    b1 += huf_code_len[literals[i + 1]];
+                    b2 += huf_code_len[literals[i + 2]];
+                    b3 += huf_code_len[literals[i + 3]];
+                }
+                uint64_t bits = b0 + b1 + b2 + b3;
+                for (; i < stop; i++) bits += huf_code_len[literals[i]];
                 streams_bytes += (size_t)((bits + 7) / 8);
             }
             huf_total_size = ZXC_HUF_HEADER_SIZE + streams_bytes;
