@@ -8,9 +8,9 @@
 
 /**
  * @file zxc_huffman.c
- * @brief Canonical, length-limited (L = 8) Huffman codec for the GLO literal
+ * @brief Canonical, length-limited (ZXC_HUF_MAX_CODE_LEN) Huffman codec for the GLO literal
  *
- * Canonical, length-limited (L = 8) Huffman codec for the GLO literal
+ * Canonical, length-limited (ZXC_HUF_MAX_CODE_LEN) Huffman codec for the GLO literal
  * stream at compression level >= 6. Codes are emitted LSB-first; the
  * decoder uses a 2048-entry multi-symbol lookup table (11-bit lookup,
  * 1 or 2 symbols per lookup depending on the cumulative code length)
@@ -52,10 +52,11 @@ typedef struct {
  * Length-limited Huffman: boundary package-merge
  * ===========================================================================
  *
- * Builds optimal length-limited Huffman code lengths (max length L) on
- * 256-symbol alphabets. Package-merge is run for L levels; each level holds
- * up to 2N items (leaves + paired packages). Selection of the cheapest
- * 2N - 2 items at level L gives the appearance count of each leaf, which is
+ * Builds optimal length-limited Huffman code lengths (max length
+ * ZXC_HUF_MAX_CODE_LEN) on 256-symbol alphabets. Package-merge is run for
+ * ZXC_HUF_MAX_CODE_LEN levels; each level holds up to 2N items (leaves +
+ * paired packages). Selection of the cheapest 2N - 2 items at level
+ * ZXC_HUF_MAX_CODE_LEN gives the appearance count of each leaf, which is
  * its code length.
  */
 
@@ -121,12 +122,12 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
 
     qsort(leaves, (size_t)n, sizeof(pm_leaf_t), pm_leaf_cmp);
 
-    /* n <= 256 <= 2^L for L = 11, so length-limit is always feasible. */
-    const int L = ZXC_HUF_MAX_CODE_LEN;
+    /* n <= 256 <= 2^ZXC_HUF_MAX_CODE_LEN, so length-limit is always feasible. */
     const int max_per_level = 2 * n;
 
-    pm_item_t* items = (pm_item_t*)malloc((size_t)L * (size_t)max_per_level * sizeof(pm_item_t));
-    int* counts = (int*)calloc((size_t)L, sizeof(int));
+    pm_item_t* items = (pm_item_t*)malloc((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)max_per_level *
+                                          sizeof(pm_item_t));
+    int* counts = (int*)calloc((size_t)ZXC_HUF_MAX_CODE_LEN, sizeof(int));
     if (UNLIKELY(!items || !counts)) {
         free(items);
         free(counts);
@@ -143,8 +144,9 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     }
     counts[0] = n;
 
-    /* Levels 1..L-1: merge sorted leaves with sorted packages from the previous level. */
-    for (int k = 1; k < L; k++) {
+    /* Levels 1..ZXC_HUF_MAX_CODE_LEN-1: merge sorted leaves with sorted packages from the previous
+     * level. */
+    for (int k = 1; k < ZXC_HUF_MAX_CODE_LEN; k++) {
         const int prev = counts[k - 1];
         const int packs = prev / 2;
         int li = 0, pi = 0, n_lvl = 0;
@@ -172,16 +174,19 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         counts[k] = n_lvl;
     }
 
-    /* Step 3: take first 2n-2 items at level L-1; trace back, counting leaf appearances. */
+    /* Step 3: take first 2n-2 items at level ZXC_HUF_MAX_CODE_LEN-1; trace back, counting leaf
+     * appearances. */
     int n_take = 2 * n - 2;
-    if (n_take > counts[L - 1]) n_take = counts[L - 1];
+    if (n_take > counts[ZXC_HUF_MAX_CODE_LEN - 1]) n_take = counts[ZXC_HUF_MAX_CODE_LEN - 1];
 
     typedef struct {
         int8_t lvl;
         int16_t idx;
     } frame_t;
-    /* Worst case stack depth: (L * n_take) frames; bounded by L * 2n. */
-    frame_t* stack = (frame_t*)malloc((size_t)L * (size_t)max_per_level * sizeof(frame_t));
+    /* Worst case stack depth: (ZXC_HUF_MAX_CODE_LEN * n_take) frames; bounded by
+     * ZXC_HUF_MAX_CODE_LEN * 2n. */
+    frame_t* stack =
+        (frame_t*)malloc((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)max_per_level * sizeof(frame_t));
     if (UNLIKELY(!stack)) {
         free(items);
         free(counts);
@@ -189,7 +194,7 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     }
     int sp = 0;
     for (int i = 0; i < n_take; i++) {
-        stack[sp].lvl = (int8_t)(L - 1);
+        stack[sp].lvl = (int8_t)(ZXC_HUF_MAX_CODE_LEN - 1);
         stack[sp].idx = (int16_t)i;
         sp++;
     }
@@ -545,7 +550,7 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
         }
     }
 
-    /* Single-symbol degenerate (Kraft sum = 2^(L-1)): replicate the one
+    /* Single-symbol degenerate (Kraft sum = 2^(ZXC_HUF_MAX_CODE_LEN-1)): replicate the one
      * valid entry across every slot. */
     if (UNLIKELY(n_present == 1)) {
         uint16_t valid = 0;
