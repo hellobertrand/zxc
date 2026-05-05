@@ -7,6 +7,7 @@
 
 'use strict';
 
+const { Transform } = require('node:stream');
 const native = require('../build/Release/zxc_nodejs.node');
 
 // Re-export compression level constants
@@ -190,6 +191,163 @@ const CStream = native.CStream;
  */
 const DStream = native.DStream;
 
+// =============================================================================
+// stream.Transform adapters over the push streaming API
+// =============================================================================
+//
+// Mirror of the wrappers shipped by the Go, Rust and Python bindings: turns a
+// CStream / DStream pair into a Node.js `stream.Transform` so ZXC can be
+// piped through any code that expects standard Node streams (tar-stream,
+// node-tar, OCI registry clients, HTTP request/response, etc.).
+
+// Magic word identifying a ZXC file frame: little-endian 0x9CB02EF5.
+const ZXC_MAGIC_LE = Buffer.from([0xF5, 0x2E, 0xB0, 0x9C]);
+
+/**
+ * Returns true if `buf` starts with the ZXC file magic word.
+ *
+ * Useful for content-type sniffing in containers / object stores that need
+ * to dispatch on media type (e.g. OCI). Cheap and side-effect free; does
+ * not validate the rest of the header or the footer.
+ *
+ * @param {Buffer|Uint8Array} buf
+ * @returns {boolean}
+ */
+function detectZxc(buf) {
+    if (!buf || buf.length < 4) return false;
+    return buf[0] === 0xF5 && buf[1] === 0x2E && buf[2] === 0xB0 && buf[3] === 0x9C;
+}
+
+/**
+ * A Node.js `stream.Transform` that compresses bytes through a ZXC frame.
+ *
+ * @example
+ *   const fs = require('node:fs');
+ *   const { pipeline } = require('node:stream/promises');
+ *   await pipeline(
+ *     fs.createReadStream('input.bin'),
+ *     zxc.createCompressStream({ level: zxc.LEVEL_DEFAULT }),
+ *     fs.createWriteStream('output.zxc'),
+ *   );
+ */
+class CompressStream extends Transform {
+    constructor(options = {}) {
+        const { level, checksum, blockSize, ...transformOpts } = options;
+        super(transformOpts);
+        this._cs = new CStream({
+            ...(level !== undefined ? { level } : {}),
+            ...(checksum !== undefined ? { checksum } : {}),
+            ...(blockSize !== undefined ? { blockSize } : {}),
+        });
+    }
+
+    _transform(chunk, encoding, callback) {
+        try {
+            const buf = Buffer.isBuffer(chunk)
+                ? chunk
+                : Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8');
+            const out = this._cs.compress(buf);
+            if (out.length > 0) this.push(out);
+            callback();
+        } catch (err) {
+            callback(err);
+        }
+    }
+
+    _flush(callback) {
+        try {
+            const tail = this._cs.end();
+            if (tail.length > 0) this.push(tail);
+            this._cs.close();
+            callback();
+        } catch (err) {
+            callback(err);
+        }
+    }
+
+    _destroy(err, callback) {
+        try { this._cs.close(); } catch (_) { /* idempotent */ }
+        callback(err);
+    }
+}
+
+/**
+ * A Node.js `stream.Transform` that decompresses a ZXC frame.
+ *
+ * Emits `'error'` with code `'ZXC_TRUNCATED'` if the input ends before the
+ * footer is reached.
+ *
+ * @example
+ *   const fs = require('node:fs');
+ *   const { pipeline } = require('node:stream/promises');
+ *   await pipeline(
+ *     fs.createReadStream('input.zxc'),
+ *     zxc.createDecompressStream(),
+ *     fs.createWriteStream('output.bin'),
+ *   );
+ */
+class DecompressStream extends Transform {
+    constructor(options = {}) {
+        const { checksum, ...transformOpts } = options;
+        super(transformOpts);
+        this._ds = new DStream({
+            ...(checksum !== undefined ? { checksum } : {}),
+        });
+    }
+
+    _transform(chunk, encoding, callback) {
+        try {
+            const buf = Buffer.isBuffer(chunk)
+                ? chunk
+                : Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8');
+            const out = this._ds.decompress(buf);
+            if (out.length > 0) this.push(out);
+            callback();
+        } catch (err) {
+            callback(err);
+        }
+    }
+
+    _flush(callback) {
+        try {
+            if (!this._ds.finished()) {
+                const err = new Error('zxc: input drained before footer (truncated frame)');
+                err.code = 'ZXC_TRUNCATED';
+                this._ds.close();
+                callback(err);
+                return;
+            }
+            this._ds.close();
+            callback();
+        } catch (err) {
+            callback(err);
+        }
+    }
+
+    _destroy(err, callback) {
+        try { this._ds.close(); } catch (_) { /* idempotent */ }
+        callback(err);
+    }
+}
+
+/**
+ * Factory matching the `zlib.createGzip()` convention.
+ * @param {object} [options]
+ * @returns {CompressStream}
+ */
+function createCompressStream(options) {
+    return new CompressStream(options);
+}
+
+/**
+ * Factory matching the `zlib.createGunzip()` convention.
+ * @param {object} [options]
+ * @returns {DecompressStream}
+ */
+function createDecompressStream(options) {
+    return new DecompressStream(options);
+}
+
 module.exports = {
     // Functions
     compress,
@@ -200,6 +358,13 @@ module.exports = {
     // Push streaming classes
     CStream,
     DStream,
+
+    // stream.Transform adapters
+    CompressStream,
+    DecompressStream,
+    createCompressStream,
+    createDecompressStream,
+    detectZxc,
 
     // Library info helpers
     minLevel,

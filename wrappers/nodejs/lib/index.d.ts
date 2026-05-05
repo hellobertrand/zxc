@@ -155,3 +155,33 @@ export class DStream {
     /** Suggested output chunk size in bytes. */
     outSize(): number;
 }
+
+// ---------- stream.Transform adapters ----------
+
+import { Transform, TransformOptions } from 'node:stream';
+
+/** Returns true if `buf` starts with the ZXC file magic word. */
+export function detectZxc(buf: Buffer | Uint8Array): boolean;
+
+export interface CompressStreamOptions extends TransformOptions, CStreamOptions {}
+export interface DecompressStreamOptions extends TransformOptions, DStreamOptions {}
+
+/**
+ * `stream.Transform` that compresses bytes through a ZXC frame. Designed to
+ * be piped between any Node Readable/Writable (fs, http, tar-stream, OCI
+ * registry clients, etc.). Mirrors `zlib.createGzip()` ergonomics.
+ */
+export class CompressStream extends Transform {
+    constructor(options?: CompressStreamOptions);
+}
+
+/**
+ * `stream.Transform` that decompresses a ZXC frame. Emits `'error'` with
+ * `code === 'ZXC_TRUNCATED'` if the input ends before the footer.
+ */
+export class DecompressStream extends Transform {
+    constructor(options?: DecompressStreamOptions);
+}
+
+export function createCompressStream(options?: CompressStreamOptions): CompressStream;
+export function createDecompressStream(options?: DecompressStreamOptions): DecompressStream;
