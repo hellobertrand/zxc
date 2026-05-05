@@ -26,7 +26,7 @@
 
 /* Private codec constants (only used inside this translation unit). */
 #define ZXC_HUF_TABLE_LOG ZXC_HUF_LOOKUP_BITS
-#define ZXC_HUF_TABLE_SIZE (1u << ZXC_HUF_TABLE_LOG)
+#define ZXC_HUF_TABLE_SIZE (1U << ZXC_HUF_TABLE_LOG)
 #define ZXC_HUF_LENGTHS_HEADER_SIZE 128
 #define ZXC_HUF_STREAM_SIZES_HEADER_SIZE 6
 
@@ -465,8 +465,7 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_lite
     /* 4. Persist the 3 explicit sub-stream sizes (s4 is implied). */
     for (int s = 0; s < ZXC_HUF_NUM_STREAMS - 1; s++) {
         if (UNLIKELY(s_sizes[s] > 0xFFFFu)) return ZXC_ERROR_DST_TOO_SMALL;
-        sizes_hdr[2 * s] = (uint8_t)(s_sizes[s] & 0xFF);
-        sizes_hdr[2 * s + 1] = (uint8_t)((s_sizes[s] >> 8) & 0xFF);
+        zxc_store_le16(sizes_hdr + 2 * s, (uint16_t)s_sizes[s]);
     }
 
     return (int)(p - dst);
@@ -620,9 +619,9 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
 
     /* 3. Parse sub-stream sizes. */
     const uint8_t* const sizes_hdr = payload + ZXC_HUF_LENGTHS_HEADER_SIZE;
-    const uint16_t s1 = (uint16_t)(sizes_hdr[0] | ((uint16_t)sizes_hdr[1] << 8));
-    const uint16_t s2 = (uint16_t)(sizes_hdr[2] | ((uint16_t)sizes_hdr[3] << 8));
-    const uint16_t s3 = (uint16_t)(sizes_hdr[4] | ((uint16_t)sizes_hdr[5] << 8));
+    const uint16_t s1 = zxc_le16(sizes_hdr + 0);
+    const uint16_t s2 = zxc_le16(sizes_hdr + 2);
+    const uint16_t s3 = zxc_le16(sizes_hdr + 4);
 
     const size_t streams_total = payload_size - ZXC_HUF_HEADER_SIZE;
     const size_t s123 = (size_t)s1 + (size_t)s2 + (size_t)s3;
