@@ -672,7 +672,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  *        cost, in parallel where the target ISA allows.
  *
  * For each L in [L_start, L_end), if @p nxt is strictly less than the
- * current dp[p+L], rewrite dp/parent_len/parent_off in lockstep — same
+ * current dp[p+L], rewrite dp/parent_len/parent_off in lockstep: same
  * semantics as the scalar update inside ::zxc_lz77_optimal_parse_glo.
  * Caller guarantees @p nxt is independent of L (the cost of the L-th
  * transition does not vary across the requested span).
@@ -704,6 +704,8 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  *                           value stored when a transition wins.
  * @return The first L value not processed (i.e., @p L_end on success).
  */
+// codeql[cpp/unused-static-function] : ALWAYS_INLINE: out-of-line copy may be elided after inlining
+// at level >= ZXC_LEVEL_DENSITY.
 static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
     uint32_t* RESTRICT dp, uint32_t* RESTRICT parent_len, uint16_t* RESTRICT parent_off,
     const size_t p, size_t L, const size_t L_end, const uint32_t nxt, const uint16_t off_biased) {
@@ -754,8 +756,6 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
     }
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     if (L + 4 <= L_end) {
-        /* {0, 1, 2, 3} via vld1q_u32 on a static const array — portable
-         * across MSVC/GCC/Clang (the GCC vector-literal extension is not). */
         static const uint32_t k_inc_array[4] = {0, 1, 2, 3};
         const uint32x4_t v_inc = vld1q_u32(k_inc_array);
         const uint32x4_t v_nxt = vdupq_n_u32(nxt);
