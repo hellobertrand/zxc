@@ -289,16 +289,14 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 const uint8x16_t v_ref = vld1q_u8(ref + mlen);
                 const uint8x16_t v_cmp = vceqq_u8(v_src, v_ref);
 #if defined(ZXC_USE_NEON64)
-                if (vminvq_u8(v_cmp) == 0xFF)
+                /* Compress 128-bit byte-mask -> 64-bit nibble-mask via
+                 * SHRN: each 0x00/0xFF byte becomes a 0x0/0xF nibble. */
+                const uint64_t mask = vget_lane_u64(
+                    vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(v_cmp), 4)), 0);
+                if (LIKELY(mask == ~(uint64_t)0)) {
                     mlen += 16;
-                else {
-                    uint8x16_t v_diff = vmvnq_u8(v_cmp);
-                    uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(v_diff), 0);
-                    if (lo != 0)
-                        mlen += (zxc_ctz64(lo) >> 3);
-                    else
-                        mlen +=
-                            8 + (zxc_ctz64(vgetq_lane_u64(vreinterpretq_u64_u8(v_diff), 1)) >> 3);
+                } else {
+                    mlen += (uint32_t)(zxc_ctz64(~mask) >> 2);
                     goto _match_len_done;
                 }
 #else
@@ -1127,17 +1125,13 @@ parse_done:;
             while (p <= p_end - 16) {
                 const uint8x16_t v = vld1q_u8(p);
                 const uint8x16_t eq = vceqq_u8(v, vb);
-                if (vminvq_u8(eq) == 0xFF) {
+                /* SHRN nibble-mask: see find_best_match above for rationale. */
+                const uint64_t mask =
+                    vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
+                if (LIKELY(mask == ~(uint64_t)0)) {
                     p += 16;
                 } else {
-                    const uint8x16_t not_eq = vmvnq_u8(eq);
-                    const uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 0);
-                    if (lo != 0) {
-                        p += (zxc_ctz64(lo) >> 3);
-                    } else {
-                        const uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(not_eq), 1);
-                        p += 8 + (zxc_ctz64(hi) >> 3);
-                    }
+                    p += (size_t)(zxc_ctz64(~mask) >> 2);
                     goto _run_done;
                 }
             }
@@ -1233,16 +1227,16 @@ parse_done:;
                     uint8x16_t v3 = vld1q_u8(p + 3);
                     uint8x16_t eq =
                         vandq_u8(vceqq_u8(v0, v1), vandq_u8(vceqq_u8(v1, v2), vceqq_u8(v2, v3)));
-                    if (vmaxvq_u8(eq) == 0) {
+                    /* Dual of the run scan: searching for the FIRST set
+                     * nibble (a position where 4 consecutive bytes match).
+                     * mask == 0 means no break found in this 16-byte
+                     * window. Same SHRN compression as elsewhere. */
+                    const uint64_t mask = vget_lane_u64(
+                        vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
+                    if (LIKELY(mask == 0)) {
                         p += 16;
                     } else {
-                        uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 0);
-                        if (lo != 0) {
-                            p += (zxc_ctz64(lo) >> 3);
-                        } else {
-                            uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(eq), 1);
-                            p += 8 + (zxc_ctz64(hi) >> 3);
-                        }
+                        p += (size_t)(zxc_ctz64(mask) >> 2);
                         goto _lit_done;
                     }
                 }
