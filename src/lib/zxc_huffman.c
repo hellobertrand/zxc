@@ -508,18 +508,18 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
     if (UNLIKELY(n_present == 0)) return ZXC_ERROR_CORRUPT_DATA;
     bl_count[0] = 0;
 
-    /* Validate Kraft equality on the L_max axis. */
+    /* Validate Kraft equality on the ZXC_HUF_MAX_CODE_LEN axis. */
     {
         uint64_t kraft = 0;
         for (int k = 1; k <= ZXC_HUF_MAX_CODE_LEN; k++) {
             kraft += (uint64_t)bl_count[k] << (ZXC_HUF_MAX_CODE_LEN - k);
         }
-        if (UNLIKELY(n_present == 1)) {
-            if (UNLIKELY(bl_count[1] != 1)) return ZXC_ERROR_CORRUPT_DATA;
-        } else {
-            if (UNLIKELY(kraft != ((uint64_t)1 << ZXC_HUF_MAX_CODE_LEN)))
-                return ZXC_ERROR_CORRUPT_DATA;
-        }
+        /* Degenerate: single symbol with length 1 (Kraft sum =
+         * 2^(ZXC_HUF_MAX_CODE_LEN-1)). Otherwise: full Kraft equality
+         * on the ZXC_HUF_MAX_CODE_LEN axis. */
+        const int kraft_ok = (n_present == 1) ? (bl_count[1] == 1)
+                                              : (kraft == ((uint64_t)1 << ZXC_HUF_MAX_CODE_LEN));
+        if (UNLIKELY(!kraft_ok)) return ZXC_ERROR_CORRUPT_DATA;
     }
 
     uint32_t next_code[ZXC_HUF_MAX_CODE_LEN + 2] = {0};
@@ -531,9 +531,10 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
         }
     }
 
-    /* Single-symbol intermediate (L_max-bit lookup). Layout: low byte = sym,
-     * high byte = len. Filled by replicating each canonical code across all
-     * L_max-bit windows that share its low `len` bits. */
+    /* Single-symbol intermediate (ZXC_HUF_MAX_CODE_LEN-bit lookup). Layout:
+     * low byte = sym, high byte = len. Filled by replicating each canonical
+     * code across all ZXC_HUF_MAX_CODE_LEN-bit windows that share its low
+     * `len` bits. */
 #define ZXC_HUF_SS_SIZE (1u << ZXC_HUF_MAX_CODE_LEN)
 #define ZXC_HUF_SS_MASK ((uint32_t)(ZXC_HUF_SS_SIZE - 1))
     uint16_t ss[ZXC_HUF_SS_SIZE] = {0};
