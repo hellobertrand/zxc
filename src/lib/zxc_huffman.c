@@ -372,16 +372,20 @@ static ZXC_ALWAYS_INLINE void bw_put(bit_writer_t* RESTRICT bw, const uint32_t c
                                      const int len) {
     bw->accum |= ((uint64_t)code) << bw->bits;
     bw->bits += len;
-    while (bw->bits >= 8) {
+    if (LIKELY((size_t)(bw->end - bw->ptr) >= sizeof(uint64_t))) {
+        zxc_store_le64(bw->ptr, bw->accum);
+    } else {
         if (UNLIKELY(bw->ptr >= bw->end)) {
             bw->err = 1;
             bw->bits = 0;
             return;
         }
-        *bw->ptr++ = (uint8_t)bw->accum;
-        bw->accum >>= 8;
-        bw->bits -= 8;
+        *bw->ptr = (uint8_t)bw->accum;
     }
+    const int n = bw->bits >> 3; /* 0 or 1 full byte to flush */
+    bw->ptr += n;
+    bw->accum >>= n << 3;
+    bw->bits &= 7;
 }
 
 /**
@@ -687,26 +691,20 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
     const uint8_t* const e2 = br[2].end;
     const uint8_t* const e3 = br[3].end;
 
-    /* Inline refill: same shape as zxc_br_ensure(., BATCH_BITS). Fast path =
-     * one 8-byte LE load + shift-or; cold path handles end-of-stream
-     * byte-by-byte. The accumulator's high bits (positions BB..63) are
-     * guaranteed zero (every DECODE_ONE ends with `accum >>= len_total`,
-     * an unsigned right-shift). */
-#define REFILL(A, BB, P, E)                              \
-    do {                                                 \
-        if (LIKELY((BB) < ZXC_HUF_BATCH_BITS)) {         \
-            if (LIKELY((P) + sizeof(uint64_t) <= (E))) { \
-                (A) |= zxc_le64(P) << (BB);              \
-                const int _n = (64 - (BB)) >> 3;         \
-                (P) += _n;                               \
-                (BB) += _n * 8;                          \
-            } else {                                     \
-                while ((BB) <= 56 && (P) < (E)) {        \
-                    (A) |= ((uint64_t)*(P)++) << (BB);   \
-                    (BB) += 8;                           \
-                }                                        \
-            }                                            \
-        }                                                \
+/* Refill the bit accumulator with up to (64 - BB) bits from P. */                \
+#define REFILL(A, BB, P, E)                                                       \
+    do {                                                                          \
+        if (LIKELY((BB) < ZXC_HUF_BATCH_BITS && (P) + sizeof(uint64_t) <= (E))) { \
+            (A) |= zxc_le64(P) << (BB);                                           \
+            const int _n = (64 - (BB)) >> 3;                                      \
+            (P) += _n;                                                            \
+            (BB) += _n * 8;                                                       \
+        } else {                                                                  \
+            while ((BB) <= 56 && (P) < (E)) {                                     \
+                (A) |= ((uint64_t)*(P)++) << (BB);                                \
+                (BB) += 8;                                                        \
+            }                                                                     \
+        }                                                                         \
     } while (0)
 
     /* Decode one 11-bit window per stream. Always writes 2 bytes per stream
