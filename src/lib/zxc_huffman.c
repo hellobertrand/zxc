@@ -719,14 +719,10 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
         const uint32_t _e1 = table[a1 & ZXC_HUF_TBL_MASK].entry; \
         const uint32_t _e2 = table[a2 & ZXC_HUF_TBL_MASK].entry; \
         const uint32_t _e3 = table[a3 & ZXC_HUF_TBL_MASK].entry; \
-        d0[0] = (uint8_t)_e0;                                    \
-        d0[1] = (uint8_t)(_e0 >> 8);                             \
-        d1[0] = (uint8_t)_e1;                                    \
-        d1[1] = (uint8_t)(_e1 >> 8);                             \
-        d2[0] = (uint8_t)_e2;                                    \
-        d2[1] = (uint8_t)(_e2 >> 8);                             \
-        d3[0] = (uint8_t)_e3;                                    \
-        d3[1] = (uint8_t)(_e3 >> 8);                             \
+        zxc_store_le16(d0, (uint16_t)_e0);                       \
+        zxc_store_le16(d1, (uint16_t)_e1);                       \
+        zxc_store_le16(d2, (uint16_t)_e2);                       \
+        zxc_store_le16(d3, (uint16_t)_e3);                       \
         const int _t0 = (int)((_e0 >> 20) & 0xF);                \
         const int _t1 = (int)((_e1 >> 20) & 0xF);                \
         const int _t2 = (int)((_e2 >> 20) & 0xF);                \
