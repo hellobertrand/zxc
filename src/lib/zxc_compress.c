@@ -668,6 +668,123 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 #define ZXC_OPT_LONG_MATCH_SKIP ((size_t)1024)
 
 /**
+ * @brief Update dp[p + L_start .. p + L_end) with a constant transition
+ *        cost, in parallel where the target ISA allows.
+ *
+ * For each L in [L_start, L_end), if @p nxt is strictly less than the
+ * current dp[p+L], rewrite dp/parent_len/parent_off in lockstep — same
+ * semantics as the scalar update inside ::zxc_lz77_optimal_parse_glo.
+ * Caller guarantees @p nxt is independent of L (the cost of the L-th
+ * transition does not vary across the requested span).
+ *
+ * Vectorized prologue per ISA, falling through to a scalar tail:
+ *   - AVX-512 BW + VL : 16-wide via vpcmpud + vmask{store,storeu}.
+ *                       Falls back to AVX2 if VL is absent.
+ *   - AVX2            : 8-wide via biased vpcmpgt + vpblendvb (no 32-bit
+ *                       unsigned cmpgt before AVX-512). parent_off is
+ *                       updated with a packed 8x16 mask + 128-bit blend.
+ *   - NEON64 / NEON32 : 4-wide via vcgtq_u32 + vbslq_u32, with vmovn_u32
+ *                       to narrow the mask for the 4x16 parent_off update.
+ *
+ * @param[in,out] dp         DP cost array; dp[p + L] is relaxed when
+ *                           @p nxt < dp[p + L].
+ * @param[in,out] parent_len Backtrack length array, written in lockstep
+ *                           with @p dp; receives the L of the relaxing
+ *                           transition.
+ * @param[in,out] parent_off Backtrack offset array, written in lockstep;
+ *                           receives @p off_biased on relaxation.
+ * @param[in]     p          Source DP position the transitions originate
+ *                           from. Indexing into the three arrays is
+ *                           `p + L`.
+ * @param[in]     L          Initial L value (start of the span, inclusive).
+ * @param[in]     L_end      End of the span (exclusive).
+ * @param[in]     nxt        Constant successor cost `dp[p] + transition`,
+ *                           shared across the [L, L_end) span.
+ * @param[in]     off_biased Match offset minus ::ZXC_LZ_OFFSET_BIAS, the
+ *                           value stored when a transition wins.
+ * @return The first L value not processed (i.e., @p L_end on success).
+ */
+static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
+    uint32_t* RESTRICT dp, uint32_t* RESTRICT parent_len, uint16_t* RESTRICT parent_off,
+    const size_t p, size_t L, const size_t L_end, const uint32_t nxt, const uint16_t off_biased) {
+#if defined(ZXC_USE_AVX512) && defined(__AVX512VL__)
+    if (L + 16 <= L_end) {
+        const __m512i v_inc =
+            _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+        const __m512i v_nxt = _mm512_set1_epi32((int)nxt);
+        const __m256i v_off = _mm256_set1_epi16((int16_t)off_biased);
+        for (; L + 16 <= L_end; L += 16) {
+            const __m512i v_L_lanes = _mm512_add_epi32(v_inc, _mm512_set1_epi32((int)L));
+            const __m512i v_dp = _mm512_loadu_si512((const void*)&dp[p + L]);
+            const __mmask16 m = _mm512_cmplt_epu32_mask(v_nxt, v_dp);
+            _mm512_mask_storeu_epi32(&dp[p + L], m, v_nxt);
+            _mm512_mask_storeu_epi32(&parent_len[p + L], m, v_L_lanes);
+            _mm256_mask_storeu_epi16((void*)&parent_off[p + L], m, v_off);
+        }
+    }
+#elif defined(ZXC_USE_AVX2)
+    if (L + 8 <= L_end) {
+        const __m256i v_inc = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+        const __m256i v_nxt = _mm256_set1_epi32((int)nxt);
+        const __m256i v_bias = _mm256_set1_epi32((int)0x80000000);
+        const __m256i v_nxt_b = _mm256_xor_si256(v_nxt, v_bias);
+        const __m128i v_off = _mm_set1_epi16((int16_t)off_biased);
+        for (; L + 8 <= L_end; L += 8) {
+            const __m256i v_L_lanes = _mm256_add_epi32(v_inc, _mm256_set1_epi32((int)L));
+            const __m256i v_dp = _mm256_loadu_si256((const __m256i*)&dp[p + L]);
+            /* Unsigned-compare-via-bias trick:
+             *   (dp ^ 0x80000000) > (nxt ^ 0x80000000)  iff  dp > nxt
+             * because XOR with the sign bit maps unsigned ordering to
+             * signed ordering. AVX2 only has signed cmpgt for 32-bit. */
+            const __m256i v_dp_b = _mm256_xor_si256(v_dp, v_bias);
+            const __m256i v_mask = _mm256_cmpgt_epi32(v_dp_b, v_nxt_b);
+            const __m256i v_dp_new = _mm256_blendv_epi8(v_dp, v_nxt, v_mask);
+            _mm256_storeu_si256((__m256i*)&dp[p + L], v_dp_new);
+            const __m256i v_pl = _mm256_loadu_si256((const __m256i*)&parent_len[p + L]);
+            const __m256i v_pl_new = _mm256_blendv_epi8(v_pl, v_L_lanes, v_mask);
+            _mm256_storeu_si256((__m256i*)&parent_len[p + L], v_pl_new);
+            /* Pack 8x int32 mask -> 8x int16 mask with signed saturation:
+             * 0xFFFFFFFF -> 0xFFFF, 0x00000000 -> 0x0000. */
+            const __m128i v_mask16 = _mm_packs_epi32(_mm256_castsi256_si128(v_mask),
+                                                     _mm256_extracti128_si256(v_mask, 1));
+            const __m128i v_po = _mm_loadu_si128((const __m128i*)&parent_off[p + L]);
+            const __m128i v_po_new = _mm_blendv_epi8(v_po, v_off, v_mask16);
+            _mm_storeu_si128((__m128i*)&parent_off[p + L], v_po_new);
+        }
+    }
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+    if (L + 4 <= L_end) {
+        /* {0, 1, 2, 3} via vld1q_u32 on a static const array — portable
+         * across MSVC/GCC/Clang (the GCC vector-literal extension is not). */
+        static const uint32_t k_inc_array[4] = {0, 1, 2, 3};
+        const uint32x4_t v_inc = vld1q_u32(k_inc_array);
+        const uint32x4_t v_nxt = vdupq_n_u32(nxt);
+        const uint16x4_t v_off = vdup_n_u16(off_biased);
+        for (; L + 4 <= L_end; L += 4) {
+            const uint32x4_t v_L_lanes = vaddq_u32(v_inc, vdupq_n_u32((uint32_t)L));
+            const uint32x4_t v_dp = vld1q_u32(&dp[p + L]);
+            const uint32x4_t v_mask = vcgtq_u32(v_dp, v_nxt);
+            vst1q_u32(&dp[p + L], vbslq_u32(v_mask, v_nxt, v_dp));
+            const uint32x4_t v_pl = vld1q_u32(&parent_len[p + L]);
+            vst1q_u32(&parent_len[p + L], vbslq_u32(v_mask, v_L_lanes, v_pl));
+            const uint16x4_t v_mask16 = vmovn_u32(v_mask);
+            const uint16x4_t v_po = vld1_u16(&parent_off[p + L]);
+            vst1_u16(&parent_off[p + L], vbsl_u16(v_mask16, v_off, v_po));
+        }
+    }
+#endif
+    /* Scalar tail (and full path on archs without SIMD). */
+    for (; L < L_end; L++) {
+        if (nxt < dp[p + L]) {
+            dp[p + L] = nxt;
+            parent_len[p + L] = (uint32_t)L;
+            parent_off[p + L] = off_biased;
+        }
+    }
+    return L;
+}
+
+/**
  * @brief Static price-based optimal LZ77 parser for level 6.
  *
  * Forward DP over the block's positions: `dp[p]` = min bit cost to encode
@@ -812,22 +929,53 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
             if (off > 0 && off <= ZXC_LZ_WINDOW_SIZE) {
                 const size_t L_max = (m.len > src_sz - p) ? (src_sz - p) : (size_t)m.len;
 
-                for (size_t L = ZXC_LZ_MIN_MATCH_LEN; L <= L_max; L++) {
+                /* The L-iteration cost function is piecewise constant in
+                 * varint segments. Split the [MIN_MATCH, L_max] span into:
+                 *   1. cheap   : v < ML_MASK            -> cost = base
+                 *   2. varint1 : v in [ML_MASK, ML_MASK + 128) -> cost = base + 8
+                 *   3. varint2+: v >= ML_MASK + 128     -> cost = base + 16, +24, ...
+                 *
+                 * Steps 1 and 2 use constant nxt and are vectorized via
+                 * the helper. Step 3 is rare (typical matches are short)
+                 * and stays scalar. */
+                const uint16_t off_biased = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
+                const size_t L_max_plus = L_max + 1;
+                size_t L = ZXC_LZ_MIN_MATCH_LEN;
+
+                /* 1. Cheap range. */
+                {
+                    const size_t L_cheap_end = ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK;
+                    const size_t L_end = (L_max_plus < L_cheap_end) ? L_max_plus : L_cheap_end;
+                    const uint32_t nxt = dp[p] + ZXC_OPT_MATCH_COST_BASE;
+                    L = zxc_opt_dp_update_const_cost(dp, parent_len, parent_off, p, L, L_end, nxt,
+                                                     off_biased);
+                }
+
+                /* 2. First varint level (1-byte extension). */
+                if (L < L_max_plus) {
+                    const size_t L_v1_end = ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK + 128;
+                    const size_t L_end = (L_max_plus < L_v1_end) ? L_max_plus : L_v1_end;
+                    const uint32_t nxt = dp[p] + ZXC_OPT_MATCH_COST_BASE + CHAR_BIT;
+                    L = zxc_opt_dp_update_const_cost(dp, parent_len, parent_off, p, L, L_end, nxt,
+                                                     off_biased);
+                }
+
+                /* 3. Higher varint levels: variable cost, kept scalar.
+                 * Reached only by L >= ML_MASK + 128 + MIN_MATCH, so the
+                 * v >= ML_MASK guard from the original loop is implied. */
+                for (; L < L_max_plus; L++) {
                     uint32_t cost = ZXC_OPT_MATCH_COST_BASE;
-                    uint32_t v = (uint32_t)(L - ZXC_LZ_MIN_MATCH_LEN);
-                    if (UNLIKELY(v >= ZXC_TOKEN_ML_MASK)) {
-                        v -= ZXC_TOKEN_ML_MASK;
+                    uint32_t v = (uint32_t)(L - ZXC_LZ_MIN_MATCH_LEN) - ZXC_TOKEN_ML_MASK;
+                    cost += CHAR_BIT;
+                    while (v >= 128) {
+                        v >>= 7;
                         cost += CHAR_BIT;
-                        while (v >= 128) {
-                            v >>= 7;
-                            cost += CHAR_BIT;
-                        }
                     }
                     const uint32_t nxt = dp[p] + cost;
                     if (nxt < dp[p + L]) {
                         dp[p + L] = nxt;
                         parent_len[p + L] = (uint32_t)L;
-                        parent_off[p + L] = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
+                        parent_off[p + L] = off_biased;
                     }
                 }
                 if (UNLIKELY(L_max >= ZXC_OPT_LONG_MATCH_SKIP)) skip_until = p + L_max - 1;
