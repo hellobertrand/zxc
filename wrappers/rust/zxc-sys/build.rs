@@ -171,7 +171,6 @@ fn main() {
         .file(src_lib.join("zxc_dispatch.c"))
         .file(src_lib.join("zxc_seekable.c"))
         .file(src_lib.join("zxc_pstream.c"))
-        .file(src_lib.join("zxc_huffman.c"))
         .opt_level(3)
         .warnings(false)
         .flag_if_supported("-pthread");
@@ -203,6 +202,17 @@ fn main() {
         .opt_level(3)
         .warnings(false);
 
+    let mut default_huffman = cc::Build::new();
+    default_huffman
+        .include(&include_dir)
+        .include(&src_lib)
+        .include(src_lib.join("vendors"))
+        .define("ZXC_STATIC_DEFINE", None)
+        .file(src_lib.join("zxc_huffman.c"))
+        .define("ZXC_FUNCTION_SUFFIX", "_default")
+        .opt_level(3)
+        .warnings(false);
+
     // Add architecture-specific flags to core build BEFORE compiling
     if is_arm64 {
         core_build.flag_if_supported("-march=armv8-a+crc");
@@ -216,6 +226,7 @@ fn main() {
     // Compile defaults
     default_compress.compile("zxc_compress_default");
     default_decompress.compile("zxc_decompress_default");
+    default_huffman.compile("zxc_huffman_default");
 
     // --- Architecture-specific variants ---
     if is_arm64 {
@@ -244,8 +255,21 @@ fn main() {
             .opt_level(3)
             .warnings(false);
 
+        let mut neon_huffman = cc::Build::new();
+        neon_huffman
+            .include(&include_dir)
+            .include(&src_lib)
+            .include(src_lib.join("vendors"))
+            .define("ZXC_STATIC_DEFINE", None)
+            .file(src_lib.join("zxc_huffman.c"))
+            .define("ZXC_FUNCTION_SUFFIX", "_neon")
+            .flag_if_supported("-march=armv8-a+simd")
+            .opt_level(3)
+            .warnings(false);
+
         neon_compress.compile("zxc_compress_neon");
         neon_decompress.compile("zxc_decompress_neon");
+        neon_huffman.compile("zxc_huffman_neon");
     } else if is_x86_64 {
         // AVX2 variant
         let mut avx2_compress = cc::Build::new();
@@ -276,8 +300,23 @@ fn main() {
             .opt_level(3)
             .warnings(false);
 
+        let mut avx2_huffman = cc::Build::new();
+        avx2_huffman
+            .include(&include_dir)
+            .include(&src_lib)
+            .include(src_lib.join("vendors"))
+            .define("ZXC_STATIC_DEFINE", None)
+            .file(src_lib.join("zxc_huffman.c"))
+            .define("ZXC_FUNCTION_SUFFIX", "_avx2")
+            .flag_if_supported("-mavx2")
+            .flag_if_supported("-mfma")
+            .flag_if_supported("-mbmi2")
+            .opt_level(3)
+            .warnings(false);
+
         avx2_compress.compile("zxc_compress_avx2");
         avx2_decompress.compile("zxc_decompress_avx2");
+        avx2_huffman.compile("zxc_huffman_avx2");
 
         // AVX512 variant
         let mut avx512_compress = cc::Build::new();
@@ -308,8 +347,23 @@ fn main() {
             .opt_level(3)
             .warnings(false);
 
+        let mut avx512_huffman = cc::Build::new();
+        avx512_huffman
+            .include(&include_dir)
+            .include(&src_lib)
+            .include(src_lib.join("vendors"))
+            .define("ZXC_STATIC_DEFINE", None)
+            .file(src_lib.join("zxc_huffman.c"))
+            .define("ZXC_FUNCTION_SUFFIX", "_avx512")
+            .flag_if_supported("-mavx512f")
+            .flag_if_supported("-mavx512bw")
+            .flag_if_supported("-mbmi2")
+            .opt_level(3)
+            .warnings(false);
+
         avx512_compress.compile("zxc_compress_avx512");
         avx512_decompress.compile("zxc_decompress_avx512");
+        avx512_huffman.compile("zxc_huffman_avx512");
     }
 
     // Threading support (not needed on Windows, which uses kernel32)
