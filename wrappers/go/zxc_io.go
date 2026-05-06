@@ -170,14 +170,10 @@ func NewReader(r io.Reader, opts ...Option) (*Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	sz := ds.InSize()
-	if sz < 64*1024 {
-		sz = 64 * 1024
-	}
 	return &Reader{
 		src:   r,
 		ds:    ds,
-		inBuf: make([]byte, sz),
+		inBuf: make([]byte, ds.InSize()),
 	}, nil
 }
 
