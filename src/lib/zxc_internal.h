@@ -450,6 +450,60 @@ extern "C" {
 #define ZXC_HASH_PRIME2 0xD2D84A61D2D84A61ULL
 /** @} */
 
+/** @name Huffman Codec Constants
+ *  @brief Length-limited canonical Huffman codec for the GLO literal stream
+ *         (active at compression level >= 6).
+ *
+ *  On-disk section payload layout:
+ *  - @c ZXC_HUF_LENGTHS_HEADER_SIZE bytes: @c ZXC_HUF_NUM_SYMBOLS code lengths
+ *    packed two per byte (4 bits each).
+ *  - @c ZXC_HUF_STREAM_SIZES_HEADER_SIZE bytes: the first
+ *    `ZXC_HUF_NUM_STREAMS - 1` sub-stream sizes as little-endian @c uint16_t;
+ *    the last sub-stream size is derived from the enclosing section length.
+ *  - Payload: @c ZXC_HUF_NUM_STREAMS concatenated LSB-first bit-streams,
+ *    each covering an equal share of the literal indices (the last absorbs
+ *    the remainder).
+ *
+ *  The decoder uses a single lookup table of @c ZXC_HUF_TABLE_SIZE entries
+ *  (width @c ZXC_HUF_LOOKUP_BITS) that yields 1 or 2 symbols per lookup,
+ *  feeding a `ZXC_HUF_NUM_STREAMS`-way interleaved hot loop.
+ *  @{ */
+/** @brief Maximum code length, in bits. Capped well below the package-merge
+ *         algorithmic ceiling (14) to keep the decoder LUT small. */
+#define ZXC_HUF_MAX_CODE_LEN 8
+/** @brief Decoder LUT width: each lookup consumes this many bits and yields
+ *         1 or 2 symbols. */
+#define ZXC_HUF_LOOKUP_BITS 11
+/** @brief Number of entries in the multi-symbol decoder lookup table. */
+#define ZXC_HUF_TABLE_SIZE (1U << ZXC_HUF_LOOKUP_BITS)
+/** @brief Alphabet size: one entry per possible byte value. */
+#define ZXC_HUF_NUM_SYMBOLS 256
+/** @brief Interleaved bit-stream count for parallel decoding. */
+#define ZXC_HUF_NUM_STREAMS 4
+/** @brief Packed 4-bit code-lengths header size: two lengths per byte. */
+#define ZXC_HUF_LENGTHS_HEADER_SIZE (ZXC_HUF_NUM_SYMBOLS / 2)
+/** @brief Sub-stream sizes header: `(ZXC_HUF_NUM_STREAMS - 1)` little-endian
+ *         @c uint16_t values; the last sub-stream size is derived from the
+ *         enclosing section length. */
+#define ZXC_HUF_STREAM_SIZES_HEADER_SIZE ((int)((ZXC_HUF_NUM_STREAMS - 1) * sizeof(uint16_t)))
+/** @brief Total Huffman header size: lengths + sub-stream sizes. */
+#define ZXC_HUF_HEADER_SIZE (ZXC_HUF_LENGTHS_HEADER_SIZE + ZXC_HUF_STREAM_SIZES_HEADER_SIZE)
+/** @brief Below this literal count Huffman cannot beat RAW after header overhead. */
+#define ZXC_HUF_MIN_LITERALS 1024
+/** @brief Decoder batch size: lookups per stream between two refills. */
+#define ZXC_HUF_BATCH 5
+/** @brief Worst-case bits consumed per stream per batch. Must stay <= 57 so
+ *         that an 8-byte refill always brings the bit accumulator back to
+ *         >= 56 bits before the next batch. */
+#define ZXC_HUF_BATCH_BITS (ZXC_HUF_BATCH * ZXC_HUF_LOOKUP_BITS)
+/** @brief Mask for indexing into the multi-symbol decoder lookup table. */
+#define ZXC_HUF_TBL_MASK ((uint64_t)(ZXC_HUF_TABLE_SIZE - 1))
+/** @brief Per-stream output headroom required to enter the batched fast loop:
+ *         each iteration speculatively writes 2 bytes per stream and runs
+ *         @c ZXC_HUF_BATCH iterations before re-checking the bound. */
+#define ZXC_HUF_SAFE_MARGIN ((size_t)(2 * ZXC_HUF_BATCH))
+/** @} */
+
 /** @name Block Size Helpers
  *  @brief Runtime helpers for variable block sizes.
  *  @{ */
@@ -1310,25 +1364,11 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
 /* ============================================================================
  * Huffman codec for the GLO literal stream (level >= 6).
  *
- * Layout of the section payload:
- *   [128 B] 256 x 4-bit packed code lengths.
- *   [  6 B] 3 x uint16_t LE: sub-stream sizes s1, s2, s3 (s4 implied).
- *   [  N B] 4 concatenated LSB-first bit-streams covering literal indices
- *           [0,Q), [Q,2Q), [2Q,3Q), [3Q,n_literals) where Q = ceil(n/4).
- *
- * Codes are length-limited canonical Huffman with max length 9, decoded
- * via a single 512-entry lookup table and a 4-way interleaved hot loop.
+ * On-disk layout, decoder geometry and tunables: see
+ * @ref ZXC_HUF_MAX_CODE_LEN and the surrounding "Huffman Codec Constants"
+ * group above.
  * ============================================================================
  */
-
-#define ZXC_HUF_MAX_CODE_LEN 8
-#define ZXC_HUF_LOOKUP_BITS 11 /**< Decoder LUT width: each lookup yields 1 or 2 symbols. */
-#define ZXC_HUF_NUM_SYMBOLS 256
-#define ZXC_HUF_NUM_STREAMS 4
-#define ZXC_HUF_HEADER_SIZE 134 /**< 128 B lengths + 6 B sub-stream sizes. */
-
-/** @brief Below this literal count Huffman cannot beat RAW after header overhead. */
-#define ZXC_HUF_MIN_LITERALS 1024
 
 /**
  * @brief Build length-limited canonical Huffman code lengths from a frequency table.

@@ -24,12 +24,6 @@
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
-/* Private codec constants (only used inside this translation unit). */
-#define ZXC_HUF_TABLE_LOG ZXC_HUF_LOOKUP_BITS
-#define ZXC_HUF_TABLE_SIZE (1U << ZXC_HUF_TABLE_LOG)
-#define ZXC_HUF_LENGTHS_HEADER_SIZE 128
-#define ZXC_HUF_STREAM_SIZES_HEADER_SIZE 6
-
 /* 2048-entry multi-symbol decoder lookup table entry. Bit layout:
  *   bits  0..7   sym1       - first decoded symbol
  *   bits  8..15  sym2       - second decoded symbol (junk if n_extra == 0)
@@ -671,10 +665,6 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
      * therefore runs only while every stream has >= 2 * ZXC_HUF_BATCH = 10
      * bytes of headroom; the per-stream scalar tail handles <= 9 trailing
      * symbols safely with single-symbol advance (no spec write). */
-#define ZXC_HUF_BATCH 5
-#define ZXC_HUF_BATCH_BITS (ZXC_HUF_BATCH * ZXC_HUF_LOOKUP_BITS) /* = 55 */
-#define ZXC_HUF_TBL_MASK ((uint64_t)(ZXC_HUF_TABLE_SIZE - 1))
-#define ZXC_HUF_SAFE_MARGIN ((size_t)(2 * ZXC_HUF_BATCH))
 
     uint8_t* d0 = s_dst[0];
     uint8_t* d1 = s_dst[1];
@@ -786,9 +776,5 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
 #undef TAIL_ONE
 #undef DECODE_ONE
 #undef REFILL
-#undef ZXC_HUF_BATCH
-#undef ZXC_HUF_BATCH_BITS
-#undef ZXC_HUF_TBL_MASK
-#undef ZXC_HUF_SAFE_MARGIN
     return ZXC_OK;
 }
