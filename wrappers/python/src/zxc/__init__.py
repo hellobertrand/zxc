@@ -339,6 +339,80 @@ class CStream:
             pass
 
 
+class DStream:
+    """Push-based, single-threaded decompression stream.
+
+    The Python counterpart of the C ``zxc_dstream``. Feed compressed bytes
+    via :meth:`decompress`; each call returns the decompressed bytes
+    produced so far. After all input has been fed, :attr:`finished` becomes
+    ``True`` once the file footer is validated.
+
+    Example::
+
+        ds = zxc.DStream(checksum=True)
+        out = b"".join(ds.decompress(chunk) for chunk in compressed_chunks)
+        if not ds.finished:
+            raise ValueError("truncated stream")
+        ds.close()
+    """
+
+    __slots__ = ("_handle",)
+
+    def __init__(self, checksum: bool = False):
+        self._handle = pyzxc_dstream_create(checksum)
+
+    def decompress(self, data) -> bytes:
+        """Push *data* and return the decompressed bytes produced.
+
+        May return ``b""`` if the parser is still waiting for more input
+        (e.g. mid-header).
+        """
+        if self._handle is None:
+            raise ValueError("DStream is closed")
+        return pyzxc_dstream_decompress(self._handle, data)
+
+    @property
+    def finished(self) -> bool:
+        """``True`` once the decoder has reached and validated the file
+        footer. Useful to detect truncated input."""
+        if self._handle is None:
+            return False
+        return pyzxc_dstream_finished(self._handle)
+
+    @property
+    def in_size(self) -> int:
+        """Suggested input chunk size for the decompressor."""
+        if self._handle is None:
+            return 0
+        return pyzxc_dstream_in_size(self._handle)
+
+    @property
+    def out_size(self) -> int:
+        """Suggested output chunk size for the decompressor."""
+        if self._handle is None:
+            return 0
+        return pyzxc_dstream_out_size(self._handle)
+
+    def close(self) -> None:
+        """Release native resources. Idempotent."""
+        if self._handle is not None:
+            pyzxc_dstream_free(self._handle)
+            self._handle = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
 # ============================================================================
 # io.RawIOBase adapters over the push streaming API
 # ============================================================================
@@ -376,7 +450,7 @@ class ZxcReader(_io.RawIOBase):
         self._src = fileobj
         self._ds = DStream(checksum=checksum)
         if buffer_size <= 0:
-            buffer_size = max(self._ds.in_size, 64 * 1024)
+            buffer_size = self._ds.in_size
         self._bufsize = buffer_size
         self._pending = b""    # decompressed bytes not yet returned
         self._inbuf = b""      # compressed bytes pulled from src, not yet fed
@@ -496,77 +570,3 @@ def detect_zxc(data) -> bool:
         return False
     mv = memoryview(data)
     return len(mv) >= 4 and bytes(mv[:4]) == _ZXC_MAGIC_LE
-
-
-class DStream:
-    """Push-based, single-threaded decompression stream.
-
-    The Python counterpart of the C ``zxc_dstream``. Feed compressed bytes
-    via :meth:`decompress`; each call returns the decompressed bytes
-    produced so far. After all input has been fed, :attr:`finished` becomes
-    ``True`` once the file footer is validated.
-
-    Example::
-
-        ds = zxc.DStream(checksum=True)
-        out = b"".join(ds.decompress(chunk) for chunk in compressed_chunks)
-        if not ds.finished:
-            raise ValueError("truncated stream")
-        ds.close()
-    """
-
-    __slots__ = ("_handle",)
-
-    def __init__(self, checksum: bool = False):
-        self._handle = pyzxc_dstream_create(checksum)
-
-    def decompress(self, data) -> bytes:
-        """Push *data* and return the decompressed bytes produced.
-
-        May return ``b""`` if the parser is still waiting for more input
-        (e.g. mid-header).
-        """
-        if self._handle is None:
-            raise ValueError("DStream is closed")
-        return pyzxc_dstream_decompress(self._handle, data)
-
-    @property
-    def finished(self) -> bool:
-        """``True`` once the decoder has reached and validated the file
-        footer. Useful to detect truncated input."""
-        if self._handle is None:
-            return False
-        return pyzxc_dstream_finished(self._handle)
-
-    @property
-    def in_size(self) -> int:
-        """Suggested input chunk size for the decompressor."""
-        if self._handle is None:
-            return 0
-        return pyzxc_dstream_in_size(self._handle)
-
-    @property
-    def out_size(self) -> int:
-        """Suggested output chunk size for the decompressor."""
-        if self._handle is None:
-            return 0
-        return pyzxc_dstream_out_size(self._handle)
-
-    def close(self) -> None:
-        """Release native resources. Idempotent."""
-        if self._handle is not None:
-            pyzxc_dstream_free(self._handle)
-            self._handle = None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        self.close()
-        return False
-
-    def __del__(self):
-        try:
-            self.close()
-        except Exception:
-            pass
