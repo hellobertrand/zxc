@@ -419,12 +419,13 @@ if(ZXC_BUILD_TESTS)
     # When building shared libraries, create a static version for tests
     # This allows tests to access internal functions for unit testing
     if(BUILD_SHARED_LIBS)
-        # Create a static library specifically for tests
+        # Create a static library specifically for tests.
+        # zxc_huffman.c lives in the per-variant build (see zxc_add_variant)
+        # and is already pulled in via ${ZXC_VARIANT_OBJECTS} below.
         add_library(zxc_lib_static STATIC
             src/lib/zxc_common.c
             src/lib/zxc_driver.c
             src/lib/zxc_dispatch.c
-            src/lib/zxc_huffman.c
             src/lib/zxc_pstream.c
             src/lib/zxc_seekable.c
             ${ZXC_VARIANT_OBJECTS}

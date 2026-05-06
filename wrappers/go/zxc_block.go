@@ -40,20 +40,21 @@ func DecompressBlockBound(uncompressedSize int) uint64 {
 }
 
 // EstimateCctxSize returns an accurate estimate of the memory a compression
-// context reserves when compressing a single block of srcSize bytes via
-// [Cctx.CompressBlock].
+// context reserves when compressing a single block of srcSize bytes at the
+// given compression level via [Cctx.CompressBlock].
 //
 // The estimate covers all per-chunk working buffers (chain table, literals,
 // sequence/token/offset/extras buffers) plus the fixed hash tables and
-// cache-line alignment padding. It scales roughly linearly with srcSize and
-// is intended for integrators that need an accurate memory budget.
+// cache-line alignment padding. At level 6+ it also accounts for the
+// optimal-parser scratch. It scales roughly linearly with srcSize and is
+// intended for integrators that need an accurate memory budget.
 //
 // Returns 0 if srcSize is 0 or negative.
-func EstimateCctxSize(srcSize int) uint64 {
+func EstimateCctxSize(srcSize, level int) uint64 {
 	if srcSize <= 0 {
 		return 0
 	}
-	return uint64(C.zxc_estimate_cctx_size(C.size_t(srcSize)))
+	return uint64(C.zxc_estimate_cctx_size(C.size_t(srcSize), C.int(level)))
 }
 
 // Cctx is a reusable compression context for the Block API.
