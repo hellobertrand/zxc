@@ -636,8 +636,9 @@ uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
  * is rounded up to the cache-line boundary, so the returned value matches the
  * single aligned allocation performed by the initializer.
  *
- * For @p level >= 6 the figure also includes ctx->opt_scratch (~18 bytes per
- * chunk_size byte), the cache-line-aligned scratch used by the optimal
+ * For @p level >= 6 the figure also includes ctx->opt_scratch (~10.125 bytes
+ * per chunk_size byte: dp + parent_len + parent_off + a 1-bit-per-position
+ * match-end bitmap), the cache-line-aligned scratch used by the optimal
  * parser. It is lazy-allocated on the first level-6 call and persists for
  * the lifetime of the cctx (no per-block malloc/free).
  */
@@ -663,10 +664,11 @@ uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
      * buffers above and is intentionally omitted. */
 
     if (level >= ZXC_LEVEL_DENSITY) {
-        total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* dp         */
-        total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* parent_len */
-        total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t)); /* parent_off */
-        total += ZXC_ALIGN_CL(chunk_size * 2 * sizeof(uint32_t));   /* actions[]  */
+        const size_t n_bm_words = (chunk_size + 1 + 63) / 64;
+        total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* dp             */
+        total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* parent_len     */
+        total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t)); /* parent_off     */
+        total += ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));       /* match_end_bits */
     }
 
     return total;

@@ -870,20 +870,26 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     /* DP arrays carved from ctx->opt_scratch: a single allocation lazy-
      * grown on the first level-6 call and reused across blocks. Each
      * sub-buffer is cache-line padded so the next one starts on a 64 B
-     * boundary. The total `needed` matches zxc_opt_scratch_size() used
-     * by zxc_estimate_cctx_size() keep the formula in sync.
+     * boundary. The total `needed` matches zxc_estimate_cctx_size() keep
+     * the formula in sync.
      *
-     *   dp         : (chunk+1) x uint32_t: min cost to reach position p.
-     *   parent_len : (chunk+1) x uint32_t: 0 = literal, >= MIN_MATCH = match.
-     *   parent_off : (chunk+1) x uint16_t: biased match offset (distance-1).
-     *   actions    : chunk x 2 x uint32_t: backtrack stack (act_t padded
-     *                                        to 2 x uint32_t = 8 B). */
+     *   dp             : (chunk+1) x uint32_t: min cost to reach position p.
+     *   parent_len     : (chunk+1) x uint32_t: 0 = literal, >= MIN_MATCH = match.
+     *   parent_off     : (chunk+1) x uint16_t: biased match offset (distance-1).
+     *   match_end_bits : ceil((chunk+1)/64) x uint64_t: 1 bit per position,
+     *                                                  set when that position
+     *                                                  is the end of a match
+     *                                                  on the chosen DP path.
+     *                                                  Replaces a forward-order
+     *                                                  actions[] stack at 1/64
+     *                                                  the cost. */
     const size_t chunk = ctx->chunk_size;
     const size_t sz_dp = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint32_t));
     const size_t sz_pl = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint32_t));
     const size_t sz_po = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint16_t));
-    const size_t sz_ac = ZXC_ALIGN_CL(chunk * 2 * sizeof(uint32_t));
-    const size_t needed = sz_dp + sz_pl + sz_po + sz_ac;
+    const size_t n_bm_words = (chunk + 1 + 63) / 64;
+    const size_t sz_bm = ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));
+    const size_t needed = sz_dp + sz_pl + sz_po + sz_bm;
 
     if (UNLIKELY(ctx->opt_scratch_cap < needed)) {
         if (ctx->opt_scratch) zxc_aligned_free(ctx->opt_scratch);
@@ -898,10 +904,11 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     uint32_t* const dp = (uint32_t*)ctx->opt_scratch;
     uint32_t* const parent_len = (uint32_t*)(ctx->opt_scratch + sz_dp);
     uint16_t* const parent_off = (uint16_t*)(ctx->opt_scratch + sz_dp + sz_pl);
+    uint64_t* const match_end_bits = (uint64_t*)(ctx->opt_scratch + sz_dp + sz_pl + sz_po);
 
     dp[0] = 0;
     ZXC_MEMSET(dp + 1, 0xFF, src_sz * sizeof(uint32_t));
-    ZXC_MEMSET(parent_len, 0, sz_pl + sz_po);
+    ZXC_MEMSET(parent_len, 0, sz_pl + sz_po + sz_bm);
 
     /* Forward DP: visit every position, update reachable successors.
      * `skip_until` skips find_best_match at positions strictly inside the
@@ -998,67 +1005,65 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         }
     }
 
-    /* Backtrack from src_sz to 0, collecting actions in reverse. */
-    typedef struct {
-        uint32_t length; /* 0 = literal */
-        uint16_t offset; /* valid if length > 0 */
-    } act_t;
-    act_t* const actions = (act_t*)(ctx->opt_scratch + sz_dp + sz_pl + sz_po);
-    size_t n_actions = 0;
-    size_t pos = src_sz;
-    while (pos > 0) {
-        const uint32_t L = parent_len[pos];
-        if (L == 0) {
-            actions[n_actions].length = 0;
-            actions[n_actions].offset = 0;
-            pos -= 1;
-        } else {
-            actions[n_actions].length = L;
-            actions[n_actions].offset = parent_off[pos];
-            pos -= L;
+    /* Backtrack from src_sz to 0: only match endpoints are recorded (one bit
+     * per position in match_end_bits). Literals between matches are implicit
+     * runs of unmarked positions and are reconstructed during forward emission
+     * via lit_start tracking, so they need no backtrack storage. */
+    {
+        size_t pos = src_sz;
+        while (pos > 0) {
+            const uint32_t L = parent_len[pos];
+            if (L == 0) {
+                pos -= 1;
+            } else {
+                match_end_bits[pos >> 6] |= (uint64_t)1 << (pos & 63);
+                pos -= L;
+            }
         }
-        n_actions++;
     }
 
-    /* Emit tokens, offsets, extras, and literals in forward order. */
+    /* Forward emission: walk match_end_bits word-by-word, peeling set bits
+     * with ctzll. Each set bit gives a match endpoint; parent_len/parent_off
+     * at that position recover (length, offset). */
     uint32_t seq_c = 0;
     size_t lit_c = 0;
     size_t extras_sz = 0;
     uint16_t max_offset = 0;
-    size_t cursor = 0;
     size_t lit_start = 0;
 
-    for (size_t i = n_actions; i > 0; i--) {
-        const act_t a = actions[i - 1];
-        if (a.length == 0) {
-            cursor++;
-            continue;
-        }
-        /* Match at `cursor` with length a.length and offset a.offset. */
-        const size_t LL = cursor - lit_start;
-        if (LL > 0) {
-            ZXC_MEMCPY(literals + lit_c, src + lit_start, LL);
-            lit_c += LL;
-        }
-        const uint32_t ll = (uint32_t)LL;
-        const uint32_t ml = (uint32_t)a.length - ZXC_LZ_MIN_MATCH_LEN;
-        const uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
-        const uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
-        buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
-        buf_offsets[seq_c] = a.offset;
-        if (a.offset > max_offset) max_offset = a.offset;
+    for (size_t word_idx = 0; word_idx < n_bm_words; word_idx++) {
+        uint64_t w = match_end_bits[word_idx];
+        while (w) {
+            const size_t pos = (word_idx << 6) + (size_t)__builtin_ctzll(w);
+            w &= w - 1;
+            const uint32_t L = parent_len[pos];
+            const uint16_t off_biased = parent_off[pos];
+            const size_t match_start = pos - L;
 
-        if (UNLIKELY(ll >= ZXC_TOKEN_LL_MASK))
-            extras_sz += zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
-        if (UNLIKELY(ml >= ZXC_TOKEN_ML_MASK))
-            extras_sz += zxc_write_varint(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
+            const size_t LL = match_start - lit_start;
+            if (LL > 0) {
+                ZXC_MEMCPY(literals + lit_c, src + lit_start, LL);
+                lit_c += LL;
+            }
+            const uint32_t ll = (uint32_t)LL;
+            const uint32_t ml = L - ZXC_LZ_MIN_MATCH_LEN;
+            const uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
+            const uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
+            buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
+            buf_offsets[seq_c] = off_biased;
+            if (off_biased > max_offset) max_offset = off_biased;
 
-        seq_c++;
-        cursor += a.length;
-        lit_start = cursor;
+            if (UNLIKELY(ll >= ZXC_TOKEN_LL_MASK))
+                extras_sz += zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
+            if (UNLIKELY(ml >= ZXC_TOKEN_ML_MASK))
+                extras_sz += zxc_write_varint(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
+
+            seq_c++;
+            lit_start = pos;
+        }
     }
 
-    /* Tail literals after the last match. */
+    /* Tail literals after the last match (or all literals if no match). */
     if (lit_start < src_sz) {
         const size_t tail = src_sz - lit_start;
         ZXC_MEMCPY(literals + lit_c, src + lit_start, tail);
