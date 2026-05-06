@@ -284,6 +284,81 @@ async function main() {
         assert(arraysEqual(data, decoded), 'pstream roundtrip byte-exact match');
     }
 
+    // --- 9. WHATWG TransformStream adapters -------------------------------
+    console.log('\n9. WHATWG TransformStream adapters + detectZxc');
+    {
+        const { default: createZXC, detectZxc } = await import('./zxc_wasm.js');
+        const zxc = await createZXC({}, ZXCModule);
+
+        // detectZxc: works without WASM init too (pure JS), but check both
+        // call sites as they share the same implementation.
+        assert(detectZxc === zxc.detectZxc, 'detectZxc exported at module + API level');
+        assert(!detectZxc(null), 'detectZxc(null) === false');
+        assert(!detectZxc(new Uint8Array([0xF5, 0x2E, 0xB0])), 'detectZxc rejects 3-byte input');
+        assert(!detectZxc(new Uint8Array(4)), 'detectZxc rejects zero buffer');
+
+        // Build a frame with the buffer API and sniff it.
+        const frame = zxc.compress(new Uint8Array([1, 2, 3, 4, 5]));
+        assert(detectZxc(frame), 'detectZxc accepts compress() output');
+        assert(detectZxc(frame.buffer), 'detectZxc accepts ArrayBuffer');
+
+        // TransformStream roundtrip via pipeThrough().
+        const data = new Uint8Array(64 * 1024);
+        for (let i = 0; i < data.length; i++) data[i] = (i ^ 0x5A) & 0xFF;
+
+        const sourceCompressed = new ReadableStream({
+            start(c) { c.enqueue(data); c.close(); }
+        }).pipeThrough(zxc.createCompressTransformStream());
+
+        const compressedChunks = [];
+        let cTotal = 0;
+        for await (const c of sourceCompressed) {
+            compressedChunks.push(c);
+            cTotal += c.length;
+        }
+        const compressed = new Uint8Array(cTotal);
+        {
+            let off = 0;
+            for (const c of compressedChunks) { compressed.set(c, off); off += c.length; }
+        }
+        assert(detectZxc(compressed), 'TransformStream output is a valid ZXC frame');
+
+        const sourceDecompressed = new ReadableStream({
+            start(c) { c.enqueue(compressed); c.close(); }
+        }).pipeThrough(zxc.createDecompressTransformStream());
+
+        const outChunks = [];
+        let dTotal = 0;
+        for await (const c of sourceDecompressed) {
+            outChunks.push(c);
+            dTotal += c.length;
+        }
+        const decoded = new Uint8Array(dTotal);
+        {
+            let off = 0;
+            for (const c of outChunks) { decoded.set(c, off); off += c.length; }
+        }
+        assert(decoded.length === data.length, `TransformStream decoded ${decoded.length} bytes (expected ${data.length})`);
+        assert(arraysEqual(data, decoded), 'TransformStream roundtrip byte-exact match');
+
+        // Truncated frame must error the decode stream.
+        const truncated = compressed.subarray(0, Math.floor(compressed.length / 2));
+        const truncSource = new ReadableStream({
+            start(c) { c.enqueue(truncated); c.close(); }
+        }).pipeThrough(zxc.createDecompressTransformStream());
+
+        let didThrow = false;
+        let errorCode;
+        try {
+            for await (const _ of truncSource) { /* drain */ }
+        } catch (e) {
+            didThrow = true;
+            errorCode = e?.code;
+        }
+        assert(didThrow, 'truncated frame throws an error');
+        assert(errorCode === 'ZXC_TRUNCATED', 'truncated frame error code is ZXC_TRUNCATED');
+    }
+
     // --- Summary ---
     console.log(`\n${'='.repeat(40)}`);
     console.log(`Results: ${passed} passed, ${failed} failed`);

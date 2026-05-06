@@ -3,16 +3,27 @@
  *
  * High-level JavaScript API for ZXC compression/decompression via WASM.
  *
- * @example
- * import createZXC from './zxc_wasm.js';
- * const zxc = await createZXC();
- *
- * const compressed = zxc.compress(inputUint8Array, { level: 3 });
- * const decompressed = zxc.decompress(compressed);
- *
  * Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
  * SPDX-License-Identifier: BSD-3-Clause
  */
+
+/**
+ * Returns true if `buf` starts with the ZXC file magic word
+ * (little-endian 0x9CB02EF5).
+ *
+ * Side-effect free, synchronous, does not require WASM initialisation —
+ * suitable for content-type sniffing in fetch/Service Worker pipelines and
+ * for OCI media-type negotiation.
+ *
+ * @param {Uint8Array | ArrayBuffer | null | undefined} buf
+ * @returns {boolean}
+ */
+export function detectZxc(buf) {
+    if (!buf) return false;
+    const view = buf instanceof ArrayBuffer ? new Uint8Array(buf) : buf;
+    if (!view || view.length < 4) return false;
+    return view[0] === 0xF5 && view[1] === 0x2E && view[2] === 0xB0 && view[3] === 0x9C;
+}
 
 /**
  * Initialise the ZXC WASM module and return an ergonomic API object.
@@ -510,6 +521,95 @@ export default async function createZXC(moduleOverrides, factory) {
         };
     }
 
+    // --- WHATWG TransformStream adapters -------------------------------------
+    //
+    // Mirror of the wrappers shipped by the Go, Rust, Python and Node bindings:
+    // turn a CStream / DStream pair into a `TransformStream` so ZXC can be
+    // wired into fetch pipelines, Service Workers, Deno, Bun, Node ≥18 — any
+    // host that exposes the Streams API. Useful for OCI use cases such as
+    // streaming a compressed layer through `fetch().body.pipeThrough(...)`.
+
+    /**
+     * Returns a WHATWG TransformStream that compresses bytes through a ZXC
+     * frame. Pipe a ReadableStream<Uint8Array> through it to produce a
+     * compressed ReadableStream<Uint8Array>.
+     *
+     * @param {object} [opts]
+     * @param {number} [opts.level]
+     * @param {boolean} [opts.checksum]
+     * @returns {TransformStream<Uint8Array, Uint8Array>}
+     */
+    function createCompressTransformStream(opts) {
+        let cs;
+        return new TransformStream({
+            start() {
+                cs = createCStream(opts);
+            },
+            transform(chunk, controller) {
+                try {
+                    const out = cs.compress(chunk);
+                    if (out.length > 0) controller.enqueue(out);
+                } catch (e) {
+                    controller.error(e);
+                    try { cs.free(); } catch (_) { /* idempotent */ }
+                }
+            },
+            flush(controller) {
+                try {
+                    const tail = cs.end();
+                    if (tail.length > 0) controller.enqueue(tail);
+                } catch (e) {
+                    controller.error(e);
+                } finally {
+                    try { cs.free(); } catch (_) { /* idempotent */ }
+                }
+            },
+        });
+    }
+
+    /**
+     * Returns a WHATWG TransformStream that decompresses a ZXC frame.
+     *
+     * Errors the stream with a `'ZXC_TRUNCATED'`-tagged Error if the input
+     * ends before the footer is reached.
+     *
+     * @param {object} [opts]
+     * @param {boolean} [opts.checksum]
+     * @returns {TransformStream<Uint8Array, Uint8Array>}
+     */
+    function createDecompressTransformStream(opts) {
+        let ds;
+        return new TransformStream({
+            start() {
+                ds = createDStream(opts);
+            },
+            transform(chunk, controller) {
+                try {
+                    const out = ds.decompress(chunk);
+                    if (out.length > 0) controller.enqueue(out);
+                } catch (e) {
+                    controller.error(e);
+                    try { ds.free(); } catch (_) { /* idempotent */ }
+                }
+            },
+            flush(controller) {
+                try {
+                    if (!ds.finished()) {
+                        const err = new Error(
+                            'ZXC: input drained before footer (truncated frame)');
+                        err.code = 'ZXC_TRUNCATED';
+                        controller.error(err);
+                        return;
+                    }
+                } catch (e) {
+                    controller.error(e);
+                } finally {
+                    try { ds.free(); } catch (_) { /* idempotent */ }
+                }
+            },
+        });
+    }
+
     // --- Exposed API object --------------------------------------------------
     return Object.freeze({
         compress,
@@ -520,6 +620,9 @@ export default async function createZXC(moduleOverrides, factory) {
         createDecompressContext,
         createCStream,
         createDStream,
+        createCompressTransformStream,
+        createDecompressTransformStream,
+        detectZxc,
 
         /** Library version string (e.g. "0.10.0"). */
         version: _version_string(),
