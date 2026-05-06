@@ -67,14 +67,11 @@ func NewWriter(w io.Writer, opts ...Option) (*Writer, error) {
 	if err != nil {
 		return nil, err
 	}
-	sz := cs.OutSize()
-	if sz < 64*1024 {
-		sz = 64 * 1024
-	}
+
 	return &Writer{
 		dst:    w,
 		cs:     cs,
-		outBuf: make([]byte, sz),
+		outBuf: make([]byte, cs.OutSize()),
 	}, nil
 }
 
