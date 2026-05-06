@@ -9,8 +9,7 @@
 //!
 //! Mirror of the wrapper exposed by the Go binding: turns a [`CStream`] /
 //! [`DStream`] pair into the standard streaming traits so ZXC can be plugged
-//! into pipelines that expect them — OCI content stores, tar pipelines, HTTP
-//! transports, etc.
+//! into pipelines that expect them.
 
 use std::io::{self, Read, Write};
 
@@ -22,7 +21,7 @@ const ZXC_MAGIC_LE: [u8; 4] = [0xF5, 0x2E, 0xB0, 0x9C];
 /// Reports whether `data` starts with the ZXC file magic word.
 ///
 /// Useful for content-type sniffing in containers / object stores that need
-/// to decide which decoder to dispatch (e.g. OCI media-type negotiation).
+/// to decide which decoder to dispatch.
 /// The check is cheap and side-effect free; it does not validate the rest of
 /// the header or the footer.
 ///
@@ -80,7 +79,7 @@ impl<W: Write> Encoder<W> {
     /// API is single-threaded and never emits a seek table).
     pub fn with_options(writer: W, opts: Option<&CompressOptions>) -> Result<Self, Error> {
         let cs = CStream::new(opts)?;
-        let cap = cs.out_size().max(64 * 1024);
+        let cap = cs.out_size();
         Ok(Self {
             inner: Some(writer),
             cs: Some(cs),
@@ -219,7 +218,7 @@ impl<R: Read> Decoder<R> {
     /// Creates a decoder honouring `opts`.
     pub fn with_options(reader: R, opts: Option<&DecompressOptions>) -> Result<Self, Error> {
         let ds = DStream::new(opts)?;
-        let cap = ds.in_size().max(64 * 1024);
+        let cap = ds.in_size();
         Ok(Self {
             inner: reader,
             ds,
