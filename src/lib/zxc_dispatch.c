@@ -80,6 +80,17 @@ int zxc_compress_chunk_wrapper_default(zxc_cctx_t* RESTRICT ctx, const uint8_t* 
                                        const size_t src_sz, uint8_t* RESTRICT dst,
                                        const size_t dst_cap);
 
+// Huffman Prototypes (variant TUs of zxc_huffman.c). The compressor and
+// decompressor variants resolve their Huffman calls to the matching suffixed
+// symbol at compile time (zero dispatch overhead in the hot path); the thin
+// wrappers below expose the un-suffixed names for tests and external callers.
+int zxc_huf_build_code_lengths_default(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len);
+int zxc_huf_encode_section_default(const uint8_t* RESTRICT literals, const size_t n_literals,
+                                   const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
+                                   const size_t dst_cap);
+int zxc_huf_decode_section_default(const uint8_t* RESTRICT payload, const size_t payload_size,
+                                   uint8_t* RESTRICT dst, const size_t n_literals);
+
 #if defined(__x86_64__) || defined(_M_X64)
 int zxc_compress_chunk_wrapper_avx2(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                     const size_t src_sz, uint8_t* RESTRICT dst,
@@ -401,6 +412,35 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 #endif
     if (UNLIKELY(!func)) return zxc_compress_dispatch_init(ctx, src, src_sz, dst, dst_cap);
     return func(ctx, src, src_sz, dst, dst_cap);
+}
+
+/*
+ * ============================================================================
+ * HUFFMAN TRAMPOLINES
+ * ============================================================================
+ * The Huffman codec is built per-variant (default / avx2 / avx512 / neon)
+ * alongside zxc_compress.c and zxc_decompress.c, so the LZ77 stages and the
+ * Huffman stage in a given variant share the same ISA flags (e.g. -mbmi2 on
+ * the AVX2/AVX512 variants). The compress/decompress variant TUs resolve
+ * their Huffman calls to the matching suffixed symbol at compile time, so
+ * the production hot path has zero dispatch overhead.
+ *
+ * These thin wrappers exist only for tests and external callers that link
+ * against the un-suffixed names. They forward to the default (scalar) variant.
+ */
+int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len) {
+    return zxc_huf_build_code_lengths_default(freq, code_len);
+}
+
+int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
+                           const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
+                           const size_t dst_cap) {
+    return zxc_huf_encode_section_default(literals, n_literals, code_len, dst, dst_cap);
+}
+
+int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
+                           uint8_t* RESTRICT dst, const size_t n_literals) {
+    return zxc_huf_decode_section_default(payload, payload_size, dst, n_literals);
 }
 
 /*

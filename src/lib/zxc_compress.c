@@ -15,19 +15,24 @@
  * by @ref zxc_dispatch.c.
  */
 
-#include "../../include/zxc_error.h"
-#include "../../include/zxc_sans_io.h"
-#include "zxc_internal.h"
-
 /*
  * Function Multi-Versioning Support
- * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2), rename the public entry point.
+ * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2, _neon), rename the public
+ * entry point AND the Huffman entry points consumed by this TU. The defines
+ * sit before zxc_internal.h so that the prototypes the header declares are
+ * also rewritten with the suffix, keeping callers and callees consistent.
  */
 #ifdef ZXC_FUNCTION_SUFFIX
 #define ZXC_CAT_IMPL(x, y) x##y
 #define ZXC_CAT(x, y) ZXC_CAT_IMPL(x, y)
 #define zxc_compress_chunk_wrapper ZXC_CAT(zxc_compress_chunk_wrapper, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_build_code_lengths ZXC_CAT(zxc_huf_build_code_lengths, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_encode_section ZXC_CAT(zxc_huf_encode_section, ZXC_FUNCTION_SUFFIX)
 #endif
+
+#include "../../include/zxc_error.h"
+#include "../../include/zxc_sans_io.h"
+#include "zxc_internal.h"
 
 /**
  * @brief Computes a hash value for either a 4-byte or 5-byte sequence.

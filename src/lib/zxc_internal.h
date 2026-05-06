@@ -490,6 +490,9 @@ extern "C" {
 #define ZXC_HUF_HEADER_SIZE (ZXC_HUF_LENGTHS_HEADER_SIZE + ZXC_HUF_STREAM_SIZES_HEADER_SIZE)
 /** @brief Below this literal count Huffman cannot beat RAW after header overhead. */
 #define ZXC_HUF_MIN_LITERALS 1024
+/** @brief Width of the decoder bit accumulator, in bits
+ *         (`sizeof(uint64_t) * CHAR_BIT`). */
+#define ZXC_HUF_ACCUM_BITS 64
 /** @brief Decoder batch size: lookups per stream between two refills. */
 #define ZXC_HUF_BATCH 5
 /** @brief Worst-case bits consumed per stream per batch. Must stay <= 57 so

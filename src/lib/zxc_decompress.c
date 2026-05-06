@@ -14,13 +14,12 @@
  * @c ZXC_FUNCTION_SUFFIX to produce per-ISA variants.
  */
 
-#include "../../include/zxc_error.h"
-#include "../../include/zxc_sans_io.h"
-#include "zxc_internal.h"
-
 /*
  * Function Multi-Versioning Support
- * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2), rename the public entry point.
+ * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2, _neon), rename the public
+ * entry point AND the Huffman decoder consumed by this TU. The defines sit
+ * before zxc_internal.h so that the prototypes the header declares are also
+ * rewritten with the suffix, keeping callers and callees consistent.
  */
 #ifdef ZXC_FUNCTION_SUFFIX
 #define ZXC_CAT_IMPL(x, y) x##y
@@ -28,7 +27,12 @@
 #define zxc_decompress_chunk_wrapper ZXC_CAT(zxc_decompress_chunk_wrapper, ZXC_FUNCTION_SUFFIX)
 #define zxc_decompress_chunk_wrapper_safe \
     ZXC_CAT(zxc_decompress_chunk_wrapper_safe, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_decode_section ZXC_CAT(zxc_huf_decode_section, ZXC_FUNCTION_SUFFIX)
 #endif
+
+#include "../../include/zxc_error.h"
+#include "../../include/zxc_sans_io.h"
+#include "zxc_internal.h"
 
 /**
  * @brief Consumes a specified number of bits from the bit reader buffer without
