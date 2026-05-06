@@ -194,14 +194,7 @@ const DStream = native.DStream;
 // =============================================================================
 // stream.Transform adapters over the push streaming API
 // =============================================================================
-//
-// Mirror of the wrappers shipped by the Go, Rust and Python bindings: turns a
-// CStream / DStream pair into a Node.js `stream.Transform` so ZXC can be
-// piped through any code that expects standard Node streams (tar-stream,
-// node-tar, OCI registry clients, HTTP request/response, etc.).
 
-// Magic word identifying a ZXC file frame: little-endian 0x9CB02EF5.
-const ZXC_MAGIC_LE = Buffer.from([0xF5, 0x2E, 0xB0, 0x9C]);
 
 /**
  * Returns true if `buf` starts with the ZXC file magic word.
@@ -210,6 +203,8 @@ const ZXC_MAGIC_LE = Buffer.from([0xF5, 0x2E, 0xB0, 0x9C]);
  * to dispatch on media type (e.g. OCI). Cheap and side-effect free; does
  * not validate the rest of the header or the footer.
  *
+ * Magic word identifying a ZXC file frame: little-endian 0x9CB02EF5.
+ * 
  * @param {Buffer|Uint8Array} buf
  * @returns {boolean}
  */
