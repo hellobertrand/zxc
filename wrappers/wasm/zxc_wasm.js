@@ -3,13 +3,6 @@
  *
  * High-level JavaScript API for ZXC compression/decompression via WASM.
  *
- * @example
- * import createZXC from './zxc_wasm.js';
- * const zxc = await createZXC();
- *
- * const compressed = zxc.compress(inputUint8Array, { level: 3 });
- * const decompressed = zxc.decompress(compressed);
- *
  * Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
  * SPDX-License-Identifier: BSD-3-Clause
  */

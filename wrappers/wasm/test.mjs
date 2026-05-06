@@ -347,13 +347,16 @@ async function main() {
             start(c) { c.enqueue(truncated); c.close(); }
         }).pipeThrough(zxc.createDecompressTransformStream());
 
-        let caught = null;
+        let didThrow = false;
+        let errorCode;
         try {
             for await (const _ of truncSource) { /* drain */ }
         } catch (e) {
-            caught = e;
+            didThrow = true;
+            errorCode = e?.code;
         }
-        assert(caught && caught.code === 'ZXC_TRUNCATED', 'truncated frame errors with code ZXC_TRUNCATED');
+        assert(didThrow, 'truncated frame throws an error');
+        assert(errorCode === 'ZXC_TRUNCATED', 'truncated frame error code is ZXC_TRUNCATED');
     }
 
     // --- Summary ---
