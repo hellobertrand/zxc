@@ -5,6 +5,8 @@ Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
 SPDX-License-Identifier: BSD-3-Clause
 """
 
+import io as _io
+
 from ._zxc import (
     pyzxc_compress,
     pyzxc_decompress,
@@ -64,6 +66,11 @@ __all__ = [
     # Push streaming
     "CStream",
     "DStream",
+
+    # io.RawIOBase adapters
+    "ZxcReader",
+    "ZxcWriter",
+    "detect_zxc",
 
     # Library info helpers
     "min_level",
@@ -404,3 +411,162 @@ class DStream:
             self.close()
         except Exception:
             pass
+
+
+# ============================================================================
+# io.RawIOBase adapters over the push streaming API
+# ============================================================================
+#
+# Mirror of the wrappers shipped by the Go and Rust bindings: turn a
+# CStream / DStream pair into Python's standard binary file-like protocol so
+# ZXC can be plugged into pipelines that expect it — tarfile, requests,
+# oras-py / OCI registry clients, etc.
+#
+# Wrap with ``io.BufferedReader`` / ``io.BufferedWriter`` for buffering when
+# performance matters.
+
+
+class ZxcReader(_io.RawIOBase):
+    """Decompresses a ZXC frame read from a binary file-like object.
+
+    Implements the standard :class:`io.RawIOBase` interface so it can be
+    plugged into any code that expects a readable binary stream.
+
+    Raises :class:`OSError` with ``errno=None`` if the underlying source is
+    drained before the ZXC footer is reached (truncated frame).
+
+    Example::
+
+        with open("data.zxc", "rb") as f, zxc.ZxcReader(f) as r:
+            payload = r.read()
+
+    The wrapped reader is **not** closed by :meth:`close`.
+    """
+
+    def __init__(self, fileobj, *, checksum: bool = False, buffer_size: int = 0):
+        super().__init__()
+        if not hasattr(fileobj, "read"):
+            raise TypeError("fileobj must have a .read() method")
+        self._src = fileobj
+        self._ds = DStream(checksum=checksum)
+        if buffer_size <= 0:
+            buffer_size = self._ds.in_size
+        self._bufsize = buffer_size
+        self._pending = b""    # decompressed bytes not yet returned
+        self._inbuf = b""      # compressed bytes pulled from src, not yet fed
+        self._eof_src = False  # True once src.read() returned empty bytes
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, b) -> int:
+        if self.closed:
+            raise ValueError("I/O operation on closed reader")
+        n_out = len(b)
+        if n_out == 0:
+            return 0
+
+        while not self._pending:
+            if self._ds.finished:
+                return 0
+            if not self._inbuf and not self._eof_src:
+                chunk = self._src.read(self._bufsize)
+                if not chunk:
+                    self._eof_src = True
+                else:
+                    self._inbuf = chunk
+
+            produced = self._ds.decompress(self._inbuf)
+            self._inbuf = b""
+            if produced:
+                self._pending = produced
+                break
+            if self._eof_src:
+                if self._ds.finished:
+                    return 0
+                raise OSError("zxc: input drained before footer (truncated stream)")
+
+        take = min(n_out, len(self._pending))
+        b[:take] = self._pending[:take]
+        self._pending = self._pending[take:]
+        return take
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        try:
+            self._ds.close()
+        finally:
+            super().close()
+
+
+class ZxcWriter(_io.RawIOBase):
+    """Compresses bytes written to it and forwards the ZXC frame to a binary
+    file-like object.
+
+    Implements the standard :class:`io.RawIOBase` interface.
+
+    The frame is finalised (residual block, EOF marker, footer) when
+    :meth:`close` is called. **You must close the writer to obtain a valid
+    archive** — closing the wrapped file before the writer leaves a truncated
+    frame on disk. Use the context-manager form to make this automatic::
+
+        with open("out.zxc", "wb") as f, zxc.ZxcWriter(f) as w:
+            w.write(payload)
+
+    The wrapped writer is **not** closed by :meth:`close`.
+    """
+
+    def __init__(self, fileobj, *, level: int = LEVEL_DEFAULT, checksum: bool = False):
+        super().__init__()
+        if not hasattr(fileobj, "write"):
+            raise TypeError("fileobj must have a .write() method")
+        self._dst = fileobj
+        self._cs = CStream(level=level, checksum=checksum)
+        self._finalized = False
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, b) -> int:
+        if self.closed:
+            raise ValueError("I/O operation on closed writer")
+        if self._finalized:
+            raise ValueError("ZxcWriter already finalised")
+        mv = memoryview(b)
+        if mv.nbytes == 0:
+            return 0
+        chunk = self._cs.compress(bytes(mv))
+        if chunk:
+            self._dst.write(chunk)
+        return mv.nbytes
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        try:
+            if not self._finalized:
+                tail = self._cs.end()
+                if tail:
+                    self._dst.write(tail)
+                self._finalized = True
+        finally:
+            self._cs.close()
+            super().close()
+
+
+# Magic word identifying a ZXC file frame: little-endian 0x9CB02EF5.
+_ZXC_MAGIC_LE = b"\xf5\x2e\xb0\x9c"
+
+
+def detect_zxc(data) -> bool:
+    """Return ``True`` if *data* starts with the ZXC file magic word.
+
+    Useful for content-type sniffing in containers / object stores that need
+    to dispatch on media type (e.g. OCI). Cheap and side-effect free; does
+    not validate the rest of the header or the footer.
+    """
+    if data is None:
+        return False
+    mv = memoryview(data)
+    return len(mv) >= 4 and bytes(mv[:4]) == _ZXC_MAGIC_LE
