@@ -712,7 +712,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 // codeql[cpp/unused-static-function] : ALWAYS_INLINE: out-of-line copy may be elided after inlining
 // at level >= ZXC_LEVEL_DENSITY.
 static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
-    uint32_t* RESTRICT dp, uint32_t* RESTRICT parent_len, uint16_t* RESTRICT parent_off,
+    uint32_t* RESTRICT dp, uint16_t* RESTRICT parent_len, uint16_t* RESTRICT parent_off,
     const size_t p, size_t L, const size_t L_end, const uint32_t nxt, const uint16_t off_biased) {
 #if defined(ZXC_USE_AVX512) && defined(__AVX512VL__)
     if (L + 16 <= L_end) {
@@ -725,7 +725,8 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
             const __m512i v_dp = _mm512_loadu_si512((const void*)&dp[p + L]);
             const __mmask16 m = _mm512_cmplt_epu32_mask(v_nxt, v_dp);
             _mm512_mask_storeu_epi32(&dp[p + L], m, v_nxt);
-            _mm512_mask_storeu_epi32(&parent_len[p + L], m, v_L_lanes);
+            const __m256i v_L_u16 = _mm512_cvtusepi32_epi16(v_L_lanes);
+            _mm256_mask_storeu_epi16((void*)&parent_len[p + L], m, v_L_u16);
             _mm256_mask_storeu_epi16((void*)&parent_off[p + L], m, v_off);
         }
     }
@@ -747,13 +748,15 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
             const __m256i v_mask = _mm256_cmpgt_epi32(v_dp_b, v_nxt_b);
             const __m256i v_dp_new = _mm256_blendv_epi8(v_dp, v_nxt, v_mask);
             _mm256_storeu_si256((__m256i*)&dp[p + L], v_dp_new);
-            const __m256i v_pl = _mm256_loadu_si256((const __m256i*)&parent_len[p + L]);
-            const __m256i v_pl_new = _mm256_blendv_epi8(v_pl, v_L_lanes, v_mask);
-            _mm256_storeu_si256((__m256i*)&parent_len[p + L], v_pl_new);
             /* Pack 8x int32 mask -> 8x int16 mask with signed saturation:
              * 0xFFFFFFFF -> 0xFFFF, 0x00000000 -> 0x0000. */
             const __m128i v_mask16 = _mm_packs_epi32(_mm256_castsi256_si128(v_mask),
                                                      _mm256_extracti128_si256(v_mask, 1));
+            const __m128i v_L_u16 = _mm_packus_epi32(_mm256_castsi256_si128(v_L_lanes),
+                                                     _mm256_extracti128_si256(v_L_lanes, 1));
+            const __m128i v_pl = _mm_loadu_si128((const __m128i*)&parent_len[p + L]);
+            const __m128i v_pl_new = _mm_blendv_epi8(v_pl, v_L_u16, v_mask16);
+            _mm_storeu_si128((__m128i*)&parent_len[p + L], v_pl_new);
             const __m128i v_po = _mm_loadu_si128((const __m128i*)&parent_off[p + L]);
             const __m128i v_po_new = _mm_blendv_epi8(v_po, v_off, v_mask16);
             _mm_storeu_si128((__m128i*)&parent_off[p + L], v_po_new);
@@ -770,9 +773,10 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
             const uint32x4_t v_dp = vld1q_u32(&dp[p + L]);
             const uint32x4_t v_mask = vcgtq_u32(v_dp, v_nxt);
             vst1q_u32(&dp[p + L], vbslq_u32(v_mask, v_nxt, v_dp));
-            const uint32x4_t v_pl = vld1q_u32(&parent_len[p + L]);
-            vst1q_u32(&parent_len[p + L], vbslq_u32(v_mask, v_L_lanes, v_pl));
             const uint16x4_t v_mask16 = vmovn_u32(v_mask);
+            const uint16x4_t v_L_u16 = vqmovn_u32(v_L_lanes);
+            const uint16x4_t v_pl = vld1_u16(&parent_len[p + L]);
+            vst1_u16(&parent_len[p + L], vbsl_u16(v_mask16, v_L_u16, v_pl));
             const uint16x4_t v_po = vld1_u16(&parent_off[p + L]);
             vst1_u16(&parent_off[p + L], vbsl_u16(v_mask16, v_off, v_po));
         }
@@ -782,7 +786,7 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
     for (; L < L_end; L++) {
         if (nxt < dp[p + L]) {
             dp[p + L] = nxt;
-            parent_len[p + L] = (uint32_t)L;
+            parent_len[p + L] = (L > UINT16_MAX) ? (uint16_t)UINT16_MAX : (uint16_t)L;
             parent_off[p + L] = off_biased;
         }
     }
@@ -874,7 +878,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
      * the formula in sync.
      *
      *   dp             : (chunk+1) x uint32_t: min cost to reach position p.
-     *   parent_len     : (chunk+1) x uint32_t: 0 = literal, >= MIN_MATCH = match.
+     *   parent_len     : (chunk+1) x uint16_t: 0 = literal, >= MIN_MATCH = match.
      *   parent_off     : (chunk+1) x uint16_t: biased match offset (distance-1).
      *   match_end_bits : ceil((chunk+1)/64) x uint64_t: 1 bit per position,
      *                                                  set when that position
@@ -885,7 +889,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
      *                                                  the cost. */
     const size_t chunk = ctx->chunk_size;
     const size_t sz_dp = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint32_t));
-    const size_t sz_pl = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint32_t));
+    const size_t sz_pl = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint16_t));
     const size_t sz_po = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint16_t));
     const size_t n_bm_words = (chunk + 1 + 63) / 64;
     const size_t sz_bm = ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));
@@ -902,7 +906,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     }
 
     uint32_t* const dp = (uint32_t*)ctx->opt_scratch;
-    uint32_t* const parent_len = (uint32_t*)(ctx->opt_scratch + sz_dp);
+    uint16_t* const parent_len = (uint16_t*)(ctx->opt_scratch + sz_dp);
     uint16_t* const parent_off = (uint16_t*)(ctx->opt_scratch + sz_dp + sz_pl);
     uint64_t* const match_end_bits = (uint64_t*)(ctx->opt_scratch + sz_dp + sz_pl + sz_po);
 
@@ -986,7 +990,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                     const uint32_t nxt = dp[p] + cost;
                     if (nxt < dp[p + L]) {
                         dp[p + L] = nxt;
-                        parent_len[p + L] = (uint32_t)L;
+                        parent_len[p + L] = (L > UINT16_MAX) ? (uint16_t)UINT16_MAX : (uint16_t)L;
                         parent_off[p + L] = off_biased;
                     }
                 }
@@ -1034,7 +1038,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     for (size_t word_idx = 0; word_idx < n_bm_words; word_idx++) {
         uint64_t w = match_end_bits[word_idx];
         while (w) {
-            const size_t pos = (word_idx << 6) + (size_t)__builtin_ctzll(w);
+            const size_t pos = (word_idx << 6) + (size_t)zxc_ctz64(w);
             w &= w - 1;
             const uint32_t L = parent_len[pos];
             const uint16_t off_biased = parent_off[pos];
