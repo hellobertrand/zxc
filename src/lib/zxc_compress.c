@@ -661,14 +661,11 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 }
 
 /* === Optimal-parser tuning constants (level 6) ============================
- * ZXC_OPT_LITERAL_COST    : static price (bits) of a single literal byte.
- *                           Huffman-friendly estimate for skewed distributions.
  * ZXC_OPT_MATCH_COST_BASE : static price (bits) of a match token before
  *                           varint extras: 1 byte token + 2 byte offset.
  * ZXC_OPT_LONG_MATCH_SKIP : threshold above which find_best_match is skipped
  *                           at intra-match positions, keeping the parser O(N)
  *                           on highly repetitive data. */
-#define ZXC_OPT_LITERAL_COST 7U
 #define ZXC_OPT_MATCH_COST_BASE ((uint32_t)(3U * CHAR_BIT))
 #define ZXC_OPT_LONG_MATCH_SKIP ((size_t)1024)
 
@@ -796,22 +793,63 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
 }
 
 /**
+ * @brief Estimate per-block literal cost from a sampled histogram passed
+ *        through the actual length-limited Huffman builder.
+ *
+ * Strategy: build a strided sample of @p src (4096 entries), run the same
+ * length-limited Huffman code construction the encoder uses, and report the
+ * sample-weighted average code length. This is the predicted bits/byte
+ * for Huffman-encoded literals on this distribution — no calibration
+ * constants, no per-corpus tuning. The cap at 8 reflects that RAW is
+ * always available at exactly that cost; if Huffman doesn't beat 8 on the
+ * sample, the encoder will pick RAW and 8 is the right price.
+ *
+ * @param[in] src    Source buffer for the block.
+ * @param[in] src_sz Length of @p src in bytes.
+ * @return Estimated literal cost in bits, in `[1, 8]`.
+ */
+static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const size_t src_sz) {
+    if (UNLIKELY(src_sz < ZXC_HUF_MIN_LITERALS)) return CHAR_BIT;
+
+    uint32_t hist[ZXC_HUF_NUM_SYMBOLS] = {0};
+    const size_t step = (src_sz > 4096) ? (src_sz >> 12) : 1U;
+    size_t sampled = 0;
+    for (size_t i = 0; i < src_sz; i += step) {
+        hist[src[i]]++;
+        sampled++;
+    }
+
+    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+    if (UNLIKELY(zxc_huf_build_code_lengths(hist, code_len) != ZXC_OK))
+        return CHAR_BIT;
+
+    /* Sample-weighted sum of code lengths == predicted total Huffman bits
+     * for the sample. Divide by sample count for bits/byte, rounded up
+     * (DP works in integer bits; rounding up errs on the conservative
+     * side, slightly favoring matches over fractional-cost literals). */
+    uint64_t total_bits = 0;
+    for (int k = 0; k < ZXC_HUF_NUM_SYMBOLS; k++) {
+        total_bits += (uint64_t)hist[k] * (uint64_t)code_len[k];
+    }
+    const uint32_t avg = (uint32_t)((total_bits + sampled - 1) / sampled);
+
+    /* Cap at RAW cost: if Huffman can't beat 8 bits/byte on the sample,
+     * the encoder will pick RAW anyway and 8 is the actual literal cost. */
+    return (avg < CHAR_BIT) ? avg : CHAR_BIT;
+}
+
+/**
  * @brief Static price-based optimal LZ77 parser for level 6.
  *
  * Forward DP over the block's positions: `dp[p]` = min bit cost to encode
  * `src[0..p)`. Per-position transitions are
- *   - literal: `dp[p+1] = min(dp[p+1], dp[p] + ZXC_OPT_LITERAL_COST)`
+ *   - literal: `dp[p+1] = min(dp[p+1], dp[p] + lit_cost`
  *   - match  : `dp[p+L] = min(dp[p+L], dp[p] + match_cost(L))` for L in
  *              `[MIN_MATCH, max_L]`
  * where `max_L` is the longest match found by ::zxc_lz77_find_best_match at
  * `p` (with lazy disabled, the DP itself handles position-based
  * optimization). Backtracking from `dp[src_sz]` reconstructs the
  * optimal token sequence.
- *
- * Static prices: literal = ::ZXC_OPT_LITERAL_COST bits (Huffman-friendly
- * estimate), match base = ::ZXC_OPT_MATCH_COST_BASE bits (1 byte token +
- * 2 byte offset), plus CHAR_BIT bits per varint byte once the ML excess
- * crosses 15.
  *
  * Complexity guard: ::ZXC_OPT_LONG_MATCH_SKIP causes ::zxc_lz77_find_best_match
  * to be skipped at positions strictly inside a long match, without this
@@ -857,6 +895,9 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                                       uint16_t* RESTRICT max_offset_out) {
     zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level);
     lzp_opt.use_lazy = 0;  // guard
+
+    /* Per-block literal cost */
+    const uint32_t lit_cost = zxc_opt_estimate_lit_bits(src, src_sz);
 
     const uint8_t* const iend = src + src_sz;
 
@@ -926,7 +967,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
 
         /* Literal transition. */
-        const uint32_t lit_next = dp[p] + ZXC_OPT_LITERAL_COST;
+        const uint32_t lit_next = dp[p] + lit_cost;
         if (lit_next < dp[p + 1]) {
             dp[p + 1] = lit_next;
             parent_len[p + 1] = 0;
@@ -1005,7 +1046,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     /* Last 12 bytes can only be literals (matches must end before iend). */
     for (size_t p = mflimit_pos; p < src_sz; p++) {
         if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
-        const uint32_t lit_next = dp[p] + ZXC_OPT_LITERAL_COST;
+        const uint32_t lit_next = dp[p] + lit_cost;
         if (lit_next < dp[p + 1]) {
             dp[p + 1] = lit_next;
             parent_len[p + 1] = 0;
