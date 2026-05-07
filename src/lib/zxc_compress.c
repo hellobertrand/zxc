@@ -796,60 +796,6 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
 }
 
 /**
- * @brief Estimate per-block literal cost (in bits) from a cheap order-0
- *        entropy proxy.
- *
- * The optimal parser's static literal price is a single value, but the
- * pipeline behind it (RAW vs RLE vs Huffman literal encoding) produces
- * very different per-byte costs depending on the block's symbol
- * distribution. A fixed price systematically over- or under-prices
- * literals on one regime, biasing the DP toward too many or too few
- * short matches.
- *
- * Strategy: build a strided histogram of @p src capped at ~4096 samples
- * regardless of block size, then map the maximum-bucket dominance ratio
- * to a value in `{5, 6, 7, 8}` bits/byte. ~3-4 µs per block on M3.
- *
- * The src histogram is a slight under-estimate of the post-LZ77 literal
- * histogram (literals are the leftovers after match extraction, flatter
- * than src); the bucket ratios fold a small bias to compensate. Buckets
- * tuned so that typical silesia blocks land on ::ZXC_OPT_LITERAL_COST,
- * skewed blocks pull down toward 5-6, and near-uniform blocks sit at 8.
- *
- * @param[in] src    Source buffer for the block.
- * @param[in] src_sz Length of @p src in bytes.
- * @return Estimated literal cost in bits. Falls back to
- *         ::ZXC_OPT_LITERAL_COST for blocks below the Huffman gate.
- */
-static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const size_t src_sz) {
-    if (UNLIKELY(src_sz < ZXC_HUF_MIN_LITERALS)) return ZXC_OPT_LITERAL_COST;
-
-    /* Strided histogram: 4096 samples regardless of block size. */
-    uint32_t h[256] = {0};
-    const size_t step = (src_sz > 4096) ? (src_sz >> 12) : 1U;
-    size_t sampled = 0;
-    for (size_t i = 0; i < src_sz; i += step) {
-        h[src[i]]++;
-        sampled++;
-    }
-
-    uint32_t maxh = 0;
-    for (int k = 0; k < 256; k++) {
-        if (h[k] > maxh) maxh = h[k];
-    }
-
-    /* Dominance ratio buckets (maxh / sampled). Conservative around the
-     * empirical global default to avoid regressing typical blocks: the
-     * helper only returns < default when the sample clearly shows skew,
-     * and only returns > default when the sample looks near-uniform. */
-    if (maxh * 4U  >= sampled) return 5U;                    /* >= 25%: very skewed */
-    if (maxh * 8U  >= sampled) return 6U;                    /* >= 12.5%: mid-skewed */
-    return ZXC_OPT_LITERAL_COST;
-}
-
-
-
-/**
  * @brief Static price-based optimal LZ77 parser for level 6.
  *
  * Forward DP over the block's positions: `dp[p]` = min bit cost to encode
@@ -911,10 +857,6 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                                       uint16_t* RESTRICT max_offset_out) {
     zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level);
     lzp_opt.use_lazy = 0;  // guard
-
-    /* Per-block literal cost (replaces the fixed ZXC_OPT_LITERAL_COST in
-     * the DP). See zxc_opt_estimate_lit_bits. */
-    const uint32_t lit_cost = zxc_opt_estimate_lit_bits(src, src_sz);
 
     const uint8_t* const iend = src + src_sz;
 
@@ -984,7 +926,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
 
         /* Literal transition. */
-        const uint32_t lit_next = dp[p] + lit_cost;
+        const uint32_t lit_next = dp[p] + ZXC_OPT_LITERAL_COST;
         if (lit_next < dp[p + 1]) {
             dp[p + 1] = lit_next;
             parent_len[p + 1] = 0;
@@ -1063,7 +1005,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     /* Last 12 bytes can only be literals (matches must end before iend). */
     for (size_t p = mflimit_pos; p < src_sz; p++) {
         if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
-        const uint32_t lit_next = dp[p] + lit_cost;
+        const uint32_t lit_next = dp[p] + ZXC_OPT_LITERAL_COST;
         if (lit_next < dp[p + 1]) {
             dp[p + 1] = lit_next;
             parent_len[p + 1] = 0;
