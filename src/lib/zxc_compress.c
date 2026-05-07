@@ -668,7 +668,7 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  * ZXC_OPT_LONG_MATCH_SKIP : threshold above which find_best_match is skipped
  *                           at intra-match positions, keeping the parser O(N)
  *                           on highly repetitive data. */
-#define ZXC_OPT_LITERAL_COST 6U
+#define ZXC_OPT_LITERAL_COST 7U
 #define ZXC_OPT_MATCH_COST_BASE ((uint32_t)(3U * CHAR_BIT))
 #define ZXC_OPT_LONG_MATCH_SKIP ((size_t)1024)
 
