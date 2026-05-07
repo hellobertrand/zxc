@@ -1513,11 +1513,8 @@ parse_done:;
             huf_total_size = ZXC_HUF_HEADER_SIZE + streams_bytes;
             const size_t baseline =
                 (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : (size_t)lit_c;
-            /* Threshold: Huffman must save >= ~12.5% (1/8) over the chosen
-             * RAW/RLE baseline. Speed-favouring choice, marginal blocks fall
-             * back to RAW/RLE which decode much faster than Huffman. Trades
-             * ~0.7 pp of ratio for ~+15% decode throughput vs a tighter
-             * threshold. */
+            /* Threshold: 3% savings (1/32) over the chosen RAW/RLE baseline.
+             * Same heuristic as the RAW/RLE switch above. */
             if (huf_total_size < baseline - (baseline >> 5)) {
                 enc_lit = ZXC_SECTION_ENCODING_HUFFMAN;
             }
