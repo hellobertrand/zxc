@@ -450,7 +450,7 @@ extern "C" {
 #define ZXC_OPT_MATCH_COST_BASE ((uint32_t)(3U * CHAR_BIT))
 /** @brief Threshold above which `find_best_match` is skipped at intra-match
  *         positions, keeping the parser O(N) on highly repetitive data. */
-#define ZXC_OPT_LONG_MATCH_SKIP ((size_t)1024)
+#define ZXC_OPT_LONG_MATCH_SKIP ((size_t)256)
 /** @} */
 
 /** @name Hash Prime Constants
@@ -553,7 +553,7 @@ typedef struct {
 
 /**
  * @brief Integer log-base-2 for a 32-bit value.
- * @param v Must be a power of two (undefined for zero).
+ * @param v Must be a power of two (returns 0 for zero).
  * @return Floor of log2(v).
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_log2_u32(const uint32_t v) {
