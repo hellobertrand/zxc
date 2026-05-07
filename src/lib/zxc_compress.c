@@ -702,15 +702,16 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  *                           from. Indexing into the three arrays is
  *                           `p + L`.
  * @param[in]     L          Initial L value (start of the span, inclusive).
- * @param[in]     L_end      End of the span (exclusive).
+ * @param[in]     L_end      End of the span (exclusive). Must satisfy
+ *                           @p L_end <= UINT16_MAX so every written length
+ *                           fits in @c parent_len's @c uint16_t cells.
  * @param[in]     nxt        Constant successor cost `dp[p] + transition`,
  *                           shared across the [L, L_end) span.
  * @param[in]     off_biased Match offset minus ::ZXC_LZ_OFFSET_BIAS, the
  *                           value stored when a transition wins.
  * @return The first L value not processed (i.e., @p L_end on success).
  */
-// codeql[cpp/unused-static-function] : ALWAYS_INLINE: out-of-line copy may be elided after inlining
-// at level >= ZXC_LEVEL_DENSITY.
+// codeql[cpp/unused-static-function]: false positive
 static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
     uint32_t* RESTRICT dp, uint16_t* RESTRICT parent_len, uint16_t* RESTRICT parent_off,
     const size_t p, size_t L, const size_t L_end, const uint32_t nxt, const uint16_t off_biased) {
@@ -782,11 +783,12 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
         }
     }
 #endif
-    /* Scalar tail (and full path on archs without SIMD). */
+    /* Scalar tail (and full path on archs without SIMD).
+     * L < L_end <= UINT16_MAX (caller precondition), so the cast is lossless. */
     for (; L < L_end; L++) {
         if (nxt < dp[p + L]) {
             dp[p + L] = nxt;
-            parent_len[p + L] = (L > UINT16_MAX) ? (uint16_t)UINT16_MAX : (uint16_t)L;
+            parent_len[p + L] = (uint16_t)L;
             parent_off[p + L] = off_biased;
         }
     }
@@ -943,7 +945,8 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         if (m.ref) {
             const uint32_t off = (uint32_t)(ip - m.ref);
             if (off > 0 && off <= ZXC_LZ_WINDOW_SIZE) {
-                const size_t L_max = (m.len > src_sz - p) ? (src_sz - p) : (size_t)m.len;
+                const size_t L_max_raw = (m.len > src_sz - p) ? (src_sz - p) : (size_t)m.len;
+                const size_t L_max = (L_max_raw > UINT16_MAX) ? UINT16_MAX : L_max_raw;
 
                 /* The L-iteration cost function is piecewise constant in
                  * varint segments. Split the [MIN_MATCH, L_max] span into:
@@ -990,7 +993,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                     const uint32_t nxt = dp[p] + cost;
                     if (nxt < dp[p + L]) {
                         dp[p + L] = nxt;
-                        parent_len[p + L] = (L > UINT16_MAX) ? (uint16_t)UINT16_MAX : (uint16_t)L;
+                        parent_len[p + L] = (uint16_t)L;
                         parent_off[p + L] = off_biased;
                     }
                 }
