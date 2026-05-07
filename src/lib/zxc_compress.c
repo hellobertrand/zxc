@@ -790,7 +790,7 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
  * Strategy: build a strided sample of @p src (4096 entries), run the same
  * length-limited Huffman code construction the encoder uses, and report the
  * sample-weighted average code length. This is the predicted bits/byte
- * for Huffman-encoded literals on this distribution — no calibration
+ * for Huffman-encoded literals on this distribution: no calibration
  * constants, no per-corpus tuning. The cap at 8 reflects that RAW is
  * always available at exactly that cost; if Huffman doesn't beat 8 on the
  * sample, the encoder will pick RAW and 8 is the right price.
