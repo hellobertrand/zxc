@@ -505,6 +505,34 @@ extern "C" {
  *         each iteration speculatively writes 2 bytes per stream and runs
  *         @c ZXC_HUF_BATCH iterations before re-checking the bound. */
 #define ZXC_HUF_SAFE_MARGIN ((size_t)(2 * ZXC_HUF_BATCH))
+
+/* Boundary package-merge work item. Each level holds at most
+ * `2 * ZXC_HUF_NUM_SYMBOLS` of these; exposed so callers can size
+ * pre-allocated scratch via ::ZXC_HUF_BUILD_SCRATCH_SIZE. */
+typedef struct {
+    uint32_t weight;
+    int16_t left, right;
+    int16_t sym;
+} zxc_huf_pm_item_t;
+
+/* Trace-back stack frame for the package-merge code-length recovery. */
+typedef struct {
+    int8_t lvl;
+    int16_t idx;
+} zxc_huf_pm_frame_t;
+
+/** @brief Per-level item bound: at most leaves + paired packages from the
+ *         previous level. */
+#define ZXC_HUF_PM_LEVEL_BOUND (2 * ZXC_HUF_NUM_SYMBOLS)
+
+/** @brief Worst-case scratch size (bytes) for ::zxc_huf_build_code_lengths.
+ *         Carved by the function into items / counts / stack regions; sized
+ *         for the worst-case alphabet (n = `ZXC_HUF_NUM_SYMBOLS`). Includes
+ *         a small alignment slack between regions. */
+#define ZXC_HUF_BUILD_SCRATCH_SIZE                                                              \
+    ((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)ZXC_HUF_PM_LEVEL_BOUND * sizeof(zxc_huf_pm_item_t)  \
+     + 8U + (size_t)ZXC_HUF_MAX_CODE_LEN * sizeof(int) + 8U                                     \
+     + (size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)ZXC_HUF_PM_LEVEL_BOUND * sizeof(zxc_huf_pm_frame_t))
 /** @} */
 
 /** @name Block Size Helpers
@@ -1382,9 +1410,14 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  *
  * @param[in]  freq     Frequency table of length `ZXC_HUF_NUM_SYMBOLS`.
  * @param[out] code_len Output code-length array of length `ZXC_HUF_NUM_SYMBOLS`.
+ * @param[in]  scratch  Optional caller-owned scratch buffer of at least
+ *                      ::ZXC_HUF_BUILD_SCRATCH_SIZE bytes. If `NULL`, the
+ *                      function allocates its own working memory and frees
+ *                      it before returning.
  * @return `ZXC_OK` on success, negative `zxc_error_t` code on failure.
  */
-int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len);
+int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
+                               void* RESTRICT scratch);
 
 /**
  * @brief Encode the literal stream into a Huffman section payload.

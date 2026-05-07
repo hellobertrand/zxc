@@ -94,7 +94,7 @@ static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t
     for (size_t i = 0; i < n; i++) freq[literals[i]]++;
 
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-    if (zxc_huf_build_code_lengths(freq, code_len) != ZXC_OK) {
+    if (zxc_huf_build_code_lengths(freq, code_len, NULL) != ZXC_OK) {
         printf("Failed [%s]: build_code_lengths\n", label);
         return 0;
     }

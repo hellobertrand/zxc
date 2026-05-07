@@ -804,12 +804,16 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
  * always available at exactly that cost; if Huffman doesn't beat 8 on the
  * sample, the encoder will pick RAW and 8 is the right price.
  *
- * @param[in] src    Source buffer for the block.
- * @param[in] src_sz Length of @p src in bytes.
+ * @param[in] src     Source buffer for the block.
+ * @param[in] src_sz  Length of @p src in bytes.
+ * @param[in] scratch Package-merge scratch (pre-allocated in the cctx for
+ *                    level >= 6). May be `NULL`, in which case the builder
+ *                    allocates its own working memory.
  * @return Estimated literal cost in bits, in `[1, 8]`.
  */
  // codeql[cpp/unused-static-function]: false positive
-static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const size_t src_sz) {
+static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const size_t src_sz,
+                                          void* RESTRICT scratch) {
     if (UNLIKELY(src_sz < ZXC_HUF_MIN_LITERALS)) return CHAR_BIT;
 
     uint32_t hist[ZXC_HUF_NUM_SYMBOLS] = {0};
@@ -821,7 +825,7 @@ static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const siz
     }
 
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-    if (UNLIKELY(zxc_huf_build_code_lengths(hist, code_len) != ZXC_OK))
+    if (UNLIKELY(zxc_huf_build_code_lengths(hist, code_len, scratch) != ZXC_OK))
         return CHAR_BIT;
 
     /* Sample-weighted sum of code lengths == predicted total Huffman bits
@@ -897,9 +901,6 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level);
     lzp_opt.use_lazy = 0;  // guard
 
-    /* Per-block literal cost */
-    const uint32_t lit_cost = zxc_opt_estimate_lit_bits(src, src_sz);
-
     const uint8_t* const iend = src + src_sz;
 
     /* Block too small for any match: emit all as literals. */
@@ -930,14 +931,23 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
      *                                                  on the chosen DP path.
      *                                                  Replaces a forward-order
      *                                                  actions[] stack at 1/64
-     *                                                  the cost. */
+     *                                                  the cost.
+     *
+     * The same buffer is reused as transient scratch for the length-limited
+     * Huffman code-length builder (see zxc_opt_estimate_lit_bits below and
+     * the Huffman selection in zxc_encode_block_glo): the package-merge
+     * scratch is needed before the DP runs and again after the parse has
+     * been read out, so the lifetimes never overlap. The capacity is the
+     * larger of the two demands. */
     const size_t chunk = ctx->chunk_size;
     const size_t sz_dp = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint32_t));
     const size_t sz_pl = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint16_t));
     const size_t sz_po = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint16_t));
     const size_t n_bm_words = (chunk + 1 + 63) / 64;
     const size_t sz_bm = ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));
-    const size_t needed = sz_dp + sz_pl + sz_po + sz_bm;
+    const size_t dp_needed = sz_dp + sz_pl + sz_po + sz_bm;
+    const size_t needed =
+        (dp_needed > ZXC_HUF_BUILD_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_BUILD_SCRATCH_SIZE;
 
     if (UNLIKELY(ctx->opt_scratch_cap < needed)) {
         if (ctx->opt_scratch) zxc_aligned_free(ctx->opt_scratch);
@@ -948,6 +958,9 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         }
         ctx->opt_scratch_cap = needed;
     }
+
+    /* Per-block literal cost: */
+    const uint32_t lit_cost = zxc_opt_estimate_lit_bits(src, src_sz, ctx->opt_scratch);
 
     uint32_t* const dp = (uint32_t*)ctx->opt_scratch;
     uint16_t* const parent_len = (uint16_t*)(ctx->opt_scratch + sz_dp);
@@ -1531,7 +1544,7 @@ parse_done:;
             freq[k] = freq0[k] + freq1[k] + freq2[k] + freq3[k];
         }
 
-        if (zxc_huf_build_code_lengths(freq, huf_code_len) == ZXC_OK) {
+        if (zxc_huf_build_code_lengths(freq, huf_code_len, ctx->opt_scratch) == ZXC_OK) {
             const size_t Q = (lit_c + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
             size_t streams_bytes = 0;
             for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {

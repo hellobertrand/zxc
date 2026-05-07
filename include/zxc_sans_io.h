@@ -95,7 +95,9 @@ typedef struct {
     uint8_t* work_buf;      /**< Padded scratch buffer for buffer-API decompression. */
     size_t work_buf_cap;    /**< Capacity of the work buffer. */
     uint8_t* opt_scratch;   /**< Optimal-parser DP scratch (level >= 6 only,
-                                 lazy-allocated, packs dp/parent_len/parent_off/actions). */
+                                 lazy-allocated, packs dp/parent_len/parent_off/actions).
+                                 Also reused as transient scratch for the
+                                 length-limited Huffman code-length builder. */
     size_t opt_scratch_cap; /**< Current capacity of opt_scratch in bytes. */
     int checksum_enabled;   /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;  /**< Compression level. */

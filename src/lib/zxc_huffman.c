@@ -72,16 +72,14 @@ typedef struct {
  * its code length.
  */
 
-typedef struct {
-    uint32_t weight;
-    int16_t left, right;
-    int16_t sym;
-} pm_item_t;
+typedef zxc_huf_pm_item_t pm_item_t;
 
 typedef struct {
     uint32_t w;
     int16_t sym;
 } pm_leaf_t;
+
+typedef zxc_huf_pm_frame_t frame_t;
 
 /**
  * @brief qsort comparator for `pm_leaf_t` arrays.
@@ -111,10 +109,15 @@ static int pm_leaf_cmp(const void* a, const void* b) {
  *
  * @param[in]  freq     Frequency table indexed by symbol (0..255).
  * @param[out] code_len Output code-length array, written in full.
+ * @param[in]  scratch  Optional scratch of `ZXC_HUF_BUILD_SCRATCH_SIZE` bytes
+ *                      (carved into items / counts / stack regions). If
+ *                      `NULL`, the function allocates its own working memory
+ *                      for the duration of the call.
  * @return `ZXC_OK` on success, `ZXC_ERROR_MEMORY` or `ZXC_ERROR_CORRUPT_DATA`
  *         on failure.
  */
-int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len) {
+int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
+                               void* RESTRICT scratch) {
     ZXC_MEMSET(code_len, 0, ZXC_HUF_NUM_SYMBOLS);
 
     pm_leaf_t leaves[ZXC_HUF_NUM_SYMBOLS];
@@ -137,13 +140,39 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     /* n <= 256 <= 2^ZXC_HUF_MAX_CODE_LEN, so length-limit is always feasible. */
     const int max_per_level = 2 * n;
 
-    pm_item_t* items = (pm_item_t*)malloc((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)max_per_level *
-                                          sizeof(pm_item_t));
-    int* counts = (int*)calloc((size_t)ZXC_HUF_MAX_CODE_LEN, sizeof(int));
-    if (UNLIKELY(!items || !counts)) {
-        free(items);
-        free(counts);
-        return ZXC_ERROR_MEMORY;
+    /* Working buffers: either carve from caller-provided scratch (sized for
+     * the worst-case alphabet) or fall back to per-call malloc/free. */
+    pm_item_t* items;
+    int* counts;
+    frame_t* stack;
+    uint8_t* owned_items = NULL;
+    uint8_t* owned_counts = NULL;
+    uint8_t* owned_stack = NULL;
+    if (scratch) {
+        uint8_t* p = (uint8_t*)scratch;
+        items = (pm_item_t*)p;
+        p += (size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)ZXC_HUF_PM_LEVEL_BOUND * sizeof(pm_item_t);
+        p = (uint8_t*)(((uintptr_t)p + 7u) & ~(uintptr_t)7u);
+        counts = (int*)p;
+        ZXC_MEMSET(counts, 0, (size_t)ZXC_HUF_MAX_CODE_LEN * sizeof(int));
+        p += (size_t)ZXC_HUF_MAX_CODE_LEN * sizeof(int);
+        p = (uint8_t*)(((uintptr_t)p + 7u) & ~(uintptr_t)7u);
+        stack = (frame_t*)p;
+    } else {
+        owned_items = (uint8_t*)malloc((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)max_per_level *
+                                       sizeof(pm_item_t));
+        owned_counts = (uint8_t*)calloc((size_t)ZXC_HUF_MAX_CODE_LEN, sizeof(int));
+        owned_stack = (uint8_t*)malloc((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)max_per_level *
+                                       sizeof(frame_t));
+        if (UNLIKELY(!owned_items || !owned_counts || !owned_stack)) {
+            free(owned_items);
+            free(owned_counts);
+            free(owned_stack);
+            return ZXC_ERROR_MEMORY;
+        }
+        items = (pm_item_t*)owned_items;
+        counts = (int*)owned_counts;
+        stack = (frame_t*)owned_stack;
     }
 #define ITEM(k, i) items[(size_t)(k) * (size_t)max_per_level + (size_t)(i)]
 
@@ -191,19 +220,9 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     int n_take = 2 * n - 2;
     if (n_take > counts[ZXC_HUF_MAX_CODE_LEN - 1]) n_take = counts[ZXC_HUF_MAX_CODE_LEN - 1];
 
-    typedef struct {
-        int8_t lvl;
-        int16_t idx;
-    } frame_t;
     /* Worst case stack depth: (ZXC_HUF_MAX_CODE_LEN * n_take) frames; bounded by
-     * ZXC_HUF_MAX_CODE_LEN * 2n. */
-    frame_t* stack =
-        (frame_t*)malloc((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)max_per_level * sizeof(frame_t));
-    if (UNLIKELY(!stack)) {
-        free(items);
-        free(counts);
-        return ZXC_ERROR_MEMORY;
-    }
+     * ZXC_HUF_MAX_CODE_LEN * 2n. `stack` was set up earlier from scratch (or
+     * the local malloc fallback). */
     int sp = 0;
     for (int i = 0; i < n_take; i++) {
         stack[sp].lvl = (int8_t)(ZXC_HUF_MAX_CODE_LEN - 1);
@@ -225,9 +244,11 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         }
     }
 
-    free(stack);
-    free(items);
-    free(counts);
+    if (owned_items) {
+        free(owned_items);
+        free(owned_counts);
+        free(owned_stack);
+    }
 #undef ITEM
     return ZXC_OK;
 }

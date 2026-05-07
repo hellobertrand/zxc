@@ -665,10 +665,15 @@ uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
 
     if (level >= ZXC_LEVEL_DENSITY) {
         const size_t n_bm_words = (chunk_size + 1 + 63) / 64;
-        total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* dp             */
-        total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t)); /* parent_len     */
-        total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t)); /* parent_off     */
-        total += ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));       /* match_end_bits */
+        size_t opt = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* dp             */
+        opt += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));       /* parent_len     */
+        opt += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));       /* parent_off     */
+        opt += ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));             /* match_end_bits */
+        /* opt_scratch is sized to hold both the DP arrays and (transiently)
+         * the package-merge scratch for the Huffman code-length builder;
+         * report the larger of the two. */
+        const size_t huf = ZXC_ALIGN_CL(ZXC_HUF_BUILD_SCRATCH_SIZE);
+        total += (opt > huf) ? opt : huf;
     }
 
     return total;
