@@ -822,9 +822,9 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
  *         ::ZXC_OPT_LITERAL_COST for blocks below the Huffman gate.
  */
 static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const size_t src_sz) {
-    if (src_sz < ZXC_HUF_MIN_LITERALS) return ZXC_OPT_LITERAL_COST;
+    if (UNLIKELY(src_sz < ZXC_HUF_MIN_LITERALS)) return ZXC_OPT_LITERAL_COST;
 
-    /* Strided histogram: ~4096 samples regardless of block size. */
+    /* Strided histogram: 4096 samples regardless of block size. */
     uint32_t h[256] = {0};
     const size_t step = (src_sz > 4096) ? (src_sz >> 12) : 1U;
     size_t sampled = 0;
@@ -844,8 +844,7 @@ static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const siz
      * and only returns > default when the sample looks near-uniform. */
     if (maxh * 4U  >= sampled) return 5U;                    /* >= 25%: very skewed */
     if (maxh * 8U  >= sampled) return 6U;                    /* >= 12.5%: mid-skewed */
-    if (maxh * 64U >= sampled) return ZXC_OPT_LITERAL_COST;  /* default */
-    return 8U;                                               /* near-uniform: RAW */
+    return ZXC_OPT_LITERAL_COST;
 }
 
 
