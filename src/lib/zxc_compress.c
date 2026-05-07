@@ -660,15 +660,6 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     return ZXC_OK;
 }
 
-/* === Optimal-parser tuning constants (level 6) ============================
- * ZXC_OPT_MATCH_COST_BASE : static price (bits) of a match token before
- *                           varint extras: 1 byte token + 2 byte offset.
- * ZXC_OPT_LONG_MATCH_SKIP : threshold above which find_best_match is skipped
- *                           at intra-match positions, keeping the parser O(N)
- *                           on highly repetitive data. */
-#define ZXC_OPT_MATCH_COST_BASE ((uint32_t)(3U * CHAR_BIT))
-#define ZXC_OPT_LONG_MATCH_SKIP ((size_t)1024)
-
 /**
  * @brief Update dp[p + L_start .. p + L_end) with a constant transition
  *        cost, in parallel where the target ISA allows.
@@ -811,7 +802,7 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
  *                    allocates its own working memory.
  * @return Estimated literal cost in bits, in `[1, 8]`.
  */
- // codeql[cpp/unused-static-function]: false positive
+// codeql[cpp/unused-static-function]: false positive
 static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const size_t src_sz,
                                           void* RESTRICT scratch) {
     if (UNLIKELY(src_sz < ZXC_HUF_MIN_LITERALS)) return CHAR_BIT;
@@ -825,8 +816,7 @@ static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const siz
     }
 
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-    if (UNLIKELY(zxc_huf_build_code_lengths(hist, code_len, scratch) != ZXC_OK))
-        return CHAR_BIT;
+    if (UNLIKELY(zxc_huf_build_code_lengths(hist, code_len, scratch) != ZXC_OK)) return CHAR_BIT;
 
     /* Sample-weighted sum of code lengths == predicted total Huffman bits
      * for the sample. Divide by sample count for bits/byte, rounded up

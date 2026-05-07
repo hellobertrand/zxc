@@ -441,6 +441,18 @@ extern "C" {
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
 /** @} */
 
+/** @name Optimal Parser Tuning (level >= 6)
+ *  @brief Static prices and complexity guards used by the level-6 optimal
+ *         LZ77 parser DP.
+ *  @{ */
+/** @brief Static price (bits) of a match token before varint extras: 1 byte
+ *         token + 2 byte offset. */
+#define ZXC_OPT_MATCH_COST_BASE ((uint32_t)(3U * CHAR_BIT))
+/** @brief Threshold above which `find_best_match` is skipped at intra-match
+ *         positions, keeping the parser O(N) on highly repetitive data. */
+#define ZXC_OPT_LONG_MATCH_SKIP ((size_t)1024)
+/** @} */
+
 /** @name Hash Prime Constants
  *  @brief Mixing primes used by internal hash functions.
  *  @{ */
@@ -529,10 +541,10 @@ typedef struct {
  *         Carved by the function into items / counts / stack regions; sized
  *         for the worst-case alphabet (n = `ZXC_HUF_NUM_SYMBOLS`). Includes
  *         a small alignment slack between regions. */
-#define ZXC_HUF_BUILD_SCRATCH_SIZE                                                              \
-    ((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)ZXC_HUF_PM_LEVEL_BOUND * sizeof(zxc_huf_pm_item_t)  \
-     + 8U + (size_t)ZXC_HUF_MAX_CODE_LEN * sizeof(int) + 8U                                     \
-     + (size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)ZXC_HUF_PM_LEVEL_BOUND * sizeof(zxc_huf_pm_frame_t))
+#define ZXC_HUF_BUILD_SCRATCH_SIZE                                                               \
+    ((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)ZXC_HUF_PM_LEVEL_BOUND * sizeof(zxc_huf_pm_item_t) + \
+     8U + (size_t)ZXC_HUF_MAX_CODE_LEN * sizeof(int) + 8U +                                      \
+     (size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)ZXC_HUF_PM_LEVEL_BOUND * sizeof(zxc_huf_pm_frame_t))
 /** @} */
 
 /** @name Block Size Helpers
