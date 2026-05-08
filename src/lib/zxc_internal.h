@@ -511,10 +511,10 @@ extern "C" {
  *         floor, the precise size accounting at the call site decides per
  *         block, so the threshold is corpus-agnostic.
  *
- *         Derivation: the call site requires `huf_total < baseline · 31/32`
+ *         Derivation: the call site requires `huf_total < baseline * 31/32`
  *         (3 % margin = `baseline >> 5`). At zero-entropy literals the
  *         payload vanishes and `huf_total = HEADER`, giving
- *         `N > HEADER · 32/31`. The `+30` is the standard ceiling-division
+ *         `N > HEADER x 32/31`. The `+30` is the standard ceiling-division
  *         offset (`b - 1` with `b = 31`). Constants:
  *           - 32 = inverse of the 3 % margin (`1/32`)
  *           - 31 = `32 - 1`, the fraction kept after the margin
