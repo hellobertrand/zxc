@@ -35,7 +35,7 @@ ZXC utilizes a hybrid approach combining LZ77 (Lempel-Ziv) dictionary matching w
 
 ### 4.1 LZ77 Engine
 The heart of ZXC is a heavily optimized LZ77 engine that adapts its behavior based on the requested compression level:
-*   **Hash Chain & Collision Resolution**: Uses a fast hash table with chaining to find matches in the history window (configurable sliding window, power-of-2 from 4 KB to 2 MB, default 256 KB).
+*   **Hash Chain & Collision Resolution**: Uses a fast hash table with chaining to find matches in the history window (configurable sliding window, power-of-2 from 4 KB to 2 MB, default 512 KB).
 *   **Lazy Matching**: Implements a "lookahead" strategy to find better matches at the cost of slight encoding speed, significantly improving decompression density.
 
 ### 4.2 Specialized SIMD Acceleration & Hardware Hashing
@@ -105,7 +105,7 @@ The file begins with a **16-byte** header that identifies the format and specifi
 * **Version (1 byte)**: Current version is `5`.
 * **Chunk Size Code (1 byte)**: Defines the processing block size using **exponent encoding**:
   - If the value is in `[12, 21]`: block size = `2^value` bytes (4 KB to 2 MB).
-    - `12` = 4 KB, `13` = 8 KB, `14` = 16 KB, `15` = 32 KB, `16` = 64 KB, `17` = 128 KB, `18` = 256 KB (default), `19` = 512 KB, `20` = 1 MB, `21` = 2 MB.
+    - `12` = 4 KB, `13` = 8 KB, `14` = 16 KB, `15` = 32 KB, `16` = 64 KB, `17` = 128 KB, `18` = 256 KB, `19` = 512 KB (default), `20` = 1 MB, `21` = 2 MB.
   - Legacy value `64` is accepted for backward compatibility (maps to 256 KB).
   - Block sizes must be powers of 2.
 * **Flags (1 byte)**: Global configuration flags.
@@ -477,7 +477,7 @@ ZXC supports **O(1)** random-access decompression without decoding the entire st
 ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-core CPUs.
 
 ### 6.1 Asynchronous Compression Pipeline
-1.  **Block Splitting (Main Thread)**: The input file is read and sliced into fixed-size chunks (configurable, default 256 KB, power of 2 from 4 KB to 2 MB).
+1.  **Block Splitting (Main Thread)**: The input file is read and sliced into fixed-size chunks (configurable, default 512 KB, power of 2 from 4 KB to 2 MB).
 2.  **Ring Buffer Submission**: Chunks are placed into a lock-free ring buffer.
 3.  **Parallel Compression (Worker Threads)**:
     *   Workers pull chunks from the queue.
@@ -496,7 +496,7 @@ ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-co
 ## 7. Performance Analysis (Benchmarks)
 
 **Methodology:**
-Benchmarks were conducted using `lzbench` (by inikep) with the **default block size of 256 KB**, checksums disabled, single-threaded execution, on the standard Silesia Corpus ([silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), 202 MB).
+Benchmarks were conducted using `lzbench` (by inikep) with a **block size of 256 KB**, checksums disabled, single-threaded execution, on the standard Silesia Corpus ([silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), 202 MB).
 * **Target 1 (Client):** Apple M2 / macOS 26 (Clang 21)
 * **Target 2 (Cloud):** Google Axion / Linux (GCC 14)
 * **Target 3 (Build):** AMD EPYC 9B45 / Linux (GCC 14)
@@ -707,7 +707,7 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
 ### 7.5 Block Size Impact: 256 KB vs 512 KB
 
-All benchmarks in sections 7.1–7.4 use the **default block size of 256 KB**. This section evaluates the performance impact of increasing the block size to **512 KB**, measured on three architectures using lzbench 2.2.1 under identical conditions.
+All benchmarks in sections 7.1–7.4 use a **block size of 256 KB** (the previous default; the current default is 512 KB). This section evaluates the performance impact of increasing the block size from **256 KB** to **512 KB (current default)**, measured on three architectures using lzbench 2.2.1 under identical conditions.
 
 **Why block size matters:** Each block starts with a cold hash table, so the LZ77 match-finder has no history and produces more literals until the table warms up. Doubling the block size halves the number of cold-start penalties (~809 blocks to ~405 blocks on the Silesia corpus), improving both compression ratio and decompression throughput.
 
@@ -717,7 +717,7 @@ All benchmarks in sections 7.1–7.4 use the **default block size of 256 KB**. T
 
 Benchmarked using lzbench 2.2.1, compiled with Clang 21.0.0 using *MOREFLAGS="-march=native"* on macOS Tahoe 26.4 (Build 25E246). Apple M2 processor (ARM64, P-core frequency 3.5 GHz).
 
-**Block Size: 256 KB (default)**
+**Block Size: 256 KB**
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio |
 | ---------------         | -----------| -----------| ----------- | ----- |
@@ -727,7 +727,7 @@ Benchmarked using lzbench 2.2.1, compiled with Clang 21.0.0 using *MOREFLAGS="-m
 | **zxc 0.10.0 -4**       |   176 MB/s |  **6636 MB/s** |    91429653 | **43.14** |
 | **zxc 0.10.0 -5**       |   104 MB/s |  **6181 MB/s** |    86196446 | **40.67** |
 
-**Block Size: 512 KB**
+**Block Size: 512 KB (default)**
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio |
 | ---------------         | -----------| -----------| ----------- | ----- |
@@ -753,7 +753,7 @@ Benchmarked using lzbench 2.2.1, compiled with Clang 21.0.0 using *MOREFLAGS="-m
 
 Benchmarked using lzbench 2.2.1, compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on Linux Debian 12. Google Neoverse-V2 processor (ARM64, 2.6 GHz).
 
-**Block Size: 256 KB (default)**
+**Block Size: 256 KB**
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio |
 | ---------------         | -----------| -----------| ----------- | ----- |
@@ -763,7 +763,7 @@ Benchmarked using lzbench 2.2.1, compiled with GCC 14.3.0 using *MOREFLAGS="-mar
 | **zxc 0.10.0 -4**       |   170 MB/s |  **5038 MB/s** |    91429653 | **43.14** |
 | **zxc 0.10.0 -5**       |   100 MB/s |  **4676 MB/s** |    86196446 | **40.67** |
 
-**Block Size: 512 KB**
+**Block Size: 512 KB (default)**
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio |
 | ---------------         | -----------| -----------| ----------- | ----- |
@@ -789,7 +789,7 @@ Benchmarked using lzbench 2.2.1, compiled with GCC 14.3.0 using *MOREFLAGS="-mar
 
 Benchmarked using lzbench 2.2.1, compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on Linux Ubuntu 24.04. AMD EPYC 9B45 processor (x86_64, 2.1 GHz).
 
-**Block Size: 256 KB (default)**
+**Block Size: 256 KB**
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio |
 | ---------------         | -----------| -----------| ----------- | ----- |
@@ -799,7 +799,7 @@ Benchmarked using lzbench 2.2.1, compiled with GCC 14.3.0 using *MOREFLAGS="-mar
 | **zxc 0.10.0 -4**       |   169 MB/s |  **5660 MB/s** |    91429653 | **43.14** |
 | **zxc 0.10.0 -5**       |   100 MB/s |  **5316 MB/s** |    86196446 | **40.67** |
 
-**Block Size: 512 KB**
+**Block Size: 512 KB (default)**
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio |
 | ---------------         | -----------| -----------| ----------- | ----- |
@@ -825,7 +825,7 @@ Benchmarked using lzbench 2.2.1, compiled with GCC 14.3.0 using *MOREFLAGS="-mar
 
 Benchmarked using lzbench 2.2.1, compiled with GCC 14.2.0 using *MOREFLAGS="-march=native"* on Linux Ubuntu 24.04. AMD EPYC 7763 64-Core processor (x86_64, 2.45 GHz).
 
-**Block Size: 256 KB (default)**
+**Block Size: 256 KB**
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
@@ -844,7 +844,7 @@ Benchmarked using lzbench 2.2.1, compiled with GCC 14.2.0 using *MOREFLAGS="-mar
 | zstd 1.5.7 -1           |   409 MB/s |  1221 MB/s |    73193704 | 34.53 | 1 files|
 | zlib 1.3.1 -1           |  98.5 MB/s |   328 MB/s |    77259029 | 36.45 | 1 files|
 
-**Block Size: 512 KB**
+**Block Size: 512 KB (default)**
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio |
 | ---------------         | -----------| -----------| ----------- | ----- |
@@ -882,15 +882,15 @@ Benchmarked using lzbench 2.2.1, compiled with GCC 14.2.0 using *MOREFLAGS="-mar
 
 | Block Size | Context Memory | Δ vs 256 KB |
 |:----------:|:--------------:|:-----------:|
-| 256 KB *(default)* | ~1.7 MB  | —           |
-| 512 KB             | ~3.3 MB  | +92%        |
+| 256 KB             | ~1.7 MB  | —           |
+| 512 KB *(default)* | ~3.3 MB  | +92%        |
 
-> **Guideline:** Use 256 KB (default) for streaming, embedded, or memory-constrained environments. Use 512 KB (`-B 512K`) for bulk compression pipelines and high-throughput servers where memory is not a constraint.
+> **Guideline:** Use 512 KB (default) for bulk compression pipelines and high-throughput servers, where the better ratio and decompression throughput outweigh the extra ~1.6 MB of context memory. Use 256 KB (`-B 256K`) for streaming, embedded, or memory-constrained environments.
 
 
 ## 8. Compression Ratio Benchmarks
 
-To evaluate compression effectiveness across diverse data distributions, the compressed size is reported as a percentage of the original input for each corpus. All measurements were performed using lzbench 2.2.1 (inikep), compiled with GCC 13.3.0 and *MOREFLAGS="-march=native"* on Linux 64-bit Ubuntu 24.04. The reference platform is an AMD EPYC 7763 (x86_64). ZXC was configured with its default block size of 256KB. Lower values indicate superior compression density.
+To evaluate compression effectiveness across diverse data distributions, the compressed size is reported as a percentage of the original input for each corpus. All measurements were performed using lzbench 2.2.1 (inikep), compiled with GCC 13.3.0 and *MOREFLAGS="-march=native"* on Linux 64-bit Ubuntu 24.04. The reference platform is an AMD EPYC 7763 (x86_64). ZXC was configured with a block size of 256 KB. Lower values indicate superior compression density.
 
 | Corpus | zxc 0.9.0 -1 | zxc 0.9.0 -2 | zxc 0.9.0 -3 | zxc 0.9.0 -4 | zxc 0.9.0 -5 | lz4 1.10.0 | lz4 1.10.0 --fast -17 | lz4hc 1.10.0 -12 | zstd 1.5.7 -1 | zstd 1.5.7 --fast --1 | Source |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

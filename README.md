@@ -374,27 +374,27 @@ cmake --build build --parallel
 
 ## Block Size Tuning
 
-The default block size is **256 KB**, a conservative choice that balances compression quality, memory usage, and random-access granularity. For **bulk/archival workloads** where maximum throughput matters, **512 KB blocks** are recommended.
+The default block size is **512 KB**, tuned for bulk/archival workloads where ratio and decompression throughput matter most. For **memory-constrained or streaming use cases**, **256 KB blocks** halve the per-context memory footprint at a small cost in ratio and decompression speed.
 
 **Why larger blocks help:** Each block starts with a cold hash table, so the LZ match-finder has no history and produces more literals until the table warms up. Doubling the block size halves the number of cold-start penalties, improving both ratio and decompression speed.
 
-| Block Size | Memory (per context) | Ratio (level -3) | Decompression gain vs 256 KB |
-|:----------:|:--------------------:|:-----------------:|:----------------------------:|
-| 256 KB *(default)* | ~1.7 MB | 46.36% | — |
-| 512 KB | ~3.3 MB | 45.81% *(−0.55 pp)* | +1% to +8% depending on CPU |
+| Block Size | Memory (per context) | Ratio (level -3) | Decompression vs 256 KB |
+|:----------:|:--------------------:|:-----------------:|:-----------------------:|
+| 256 KB             | ~1.7 MB | 46.36% | — |
+| 512 KB *(default)* | ~3.3 MB | 45.81% *(−0.55 pp)* | +1% to +8% depending on CPU |
 
 ```bash
-# CLI
-zxc -B 512K -5 input_file output_file
+# CLI — fall back to 256 KB blocks (e.g. embedded / streaming)
+zxc -B 256K -5 input_file output_file
 
 # API
 zxc_compress_opts_t opts = {
     .level      = ZXC_LEVEL_COMPACT,
-    .block_size = 512 * 1024,
+    .block_size = 256 * 1024,
 };
 ```
 
-**Guideline:** Use 256 KB (default) for streaming, embedded, or memory-constrained environments. Use 512 KB for bulk compression pipelines, CI/CD asset packaging, and high-throughput servers.
+**Guideline:** Stick with 512 KB (default) for bulk compression pipelines, CI/CD asset packaging, and high-throughput servers. Use 256 KB (`-B 256K`) for streaming, embedded, or memory-constrained environments.
 
 ---
 
@@ -458,7 +458,7 @@ uint64_t bound = zxc_compress_bound(src_size);
 zxc_compress_opts_t c_opts = {
     .level            = ZXC_LEVEL_DEFAULT,
     .checksum_enabled = 1,
-    /* .block_size = 0 -> 256 KB default */
+    /* .block_size = 0 -> 512 KB default */
 };
 int64_t compressed_size = zxc_compress(src, src_size, dst, bound, &c_opts);
 
@@ -476,7 +476,7 @@ zxc_compress_opts_t c_opts = {
     .n_threads        = 0,               // 0 = auto
     .level            = ZXC_LEVEL_DEFAULT,
     .checksum_enabled = 1,
-    /* .block_size = 0 -> 256 KB default */
+    /* .block_size = 0 -> 512 KB default */
 };
 int64_t bytes_written = zxc_stream_compress(f_in, f_out, &c_opts);
 

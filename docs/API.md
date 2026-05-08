@@ -141,7 +141,7 @@ Defined in `zxc_constants.h`:
 #define ZXC_BLOCK_SIZE_MAX_LOG2  21              // exponent for maximum
 #define ZXC_BLOCK_SIZE_MIN       (1U << 12)      // 4 KB
 #define ZXC_BLOCK_SIZE_MAX       (1U << 21)      // 2 MB
-#define ZXC_BLOCK_SIZE_DEFAULT   (256 * 1024)    // 256 KB
+#define ZXC_BLOCK_SIZE_DEFAULT   (512 * 1024)    // 512 KB
 ```
 
 Block size must be a power of two within `[ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX]`.
@@ -201,7 +201,7 @@ All public functions that can fail return negative `zxc_error_t` values on error
 typedef struct {
     int    n_threads;         // Worker thread count (0 = auto-detect).
     int    level;             // Compression level 1–6 (0 = default).
-    size_t block_size;        // Block size in bytes (0 = 256 KB default).
+    size_t block_size;        // Block size in bytes (0 = 512 KB default).
     int    checksum_enabled;  // 1 = enable checksums, 0 = disable.
     int    seekable;          // 1 = append seek table for random access.
     zxc_progress_callback_t progress_cb;  // Optional callback (NULL to disable).

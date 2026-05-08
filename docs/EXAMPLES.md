@@ -43,7 +43,7 @@ int main(void) {
     zxc_compress_opts_t c_opts = {
         .level            = ZXC_LEVEL_DEFAULT,
         .checksum_enabled = 1,
-        /* .block_size = 0  ->  256 KB default */
+        /* .block_size = 0  ->  512 KB default */
     };
     int64_t compressed_size = zxc_compress(
         original,            // Source buffer
@@ -142,12 +142,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 0 threads = auto-detect CPU cores; 0 block_size = 256 KB default
+    // 0 threads = auto-detect CPU cores; 0 block_size = 512 KB default
     zxc_compress_opts_t c_opts = {
         .n_threads        = 0,
         .level            = ZXC_LEVEL_DEFAULT,
         .checksum_enabled = 1,
-        /* .block_size = 0  ->  256 KB */
+        /* .block_size = 0  ->  512 KB */
     };
     int64_t compressed_bytes = zxc_stream_compress(f_in, f_out, &c_opts);
 

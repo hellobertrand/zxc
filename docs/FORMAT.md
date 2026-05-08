@@ -57,8 +57,8 @@ Offset  Size  Field
 - **Format Version** (`u8`): currently `5`.
 - **Chunk Size Code** (`u8`):
   - If the value is in the range `[12, 21]`, it is an **exponent**: `block_size = 2^code`.
-    - `12` = 4 KB, `13` = 8 KB, ..., `18` = 256 KB (default), ..., `21` = 2 MB.
-  - The legacy value `64` (from older encoders) is accepted and maps to 256 KB (default).
+    - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
+  - The legacy value `64` (from older encoders) is accepted and maps to 256 KB.
   - All other values are rejected (`ZXC_ERROR_BAD_BLOCK_SIZE`).
   - Valid block sizes are powers of 2 in the range **4 KB – 2 MB**.
 - **Flags** (`u8`):
