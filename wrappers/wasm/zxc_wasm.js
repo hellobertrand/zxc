@@ -149,7 +149,7 @@ export default async function createZXC(moduleOverrides, factory) {
      *
      * @param {Uint8Array} data - Input data to compress.
      * @param {object} [opts] - Options.
-     * @param {number} [opts.level=3] - Compression level (1-5).
+     * @param {number} [opts.level=3] - Compression level (1-6).
      * @param {boolean} [opts.checksum=false] - Enable checksums.
      * @param {boolean} [opts.seekable=false] - Append seek table for random-access.
      * @returns {Uint8Array} Compressed data.

@@ -34,6 +34,7 @@ from ._zxc import (
     LEVEL_DEFAULT,
     LEVEL_BALANCED,
     LEVEL_COMPACT,
+    LEVEL_DENSITY,
     ERROR_MEMORY,
     ERROR_DST_TOO_SMALL,
     ERROR_SRC_TOO_SMALL,
@@ -84,6 +85,7 @@ __all__ = [
     "LEVEL_DEFAULT",
     "LEVEL_BALANCED",
     "LEVEL_COMPACT",
+    "LEVEL_DENSITY",
 
     # Error Constants
     "ERROR_MEMORY",

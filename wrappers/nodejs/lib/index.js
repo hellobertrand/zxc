@@ -16,6 +16,7 @@ const LEVEL_FAST     = native.LEVEL_FAST;
 const LEVEL_DEFAULT  = native.LEVEL_DEFAULT;
 const LEVEL_BALANCED = native.LEVEL_BALANCED;
 const LEVEL_COMPACT  = native.LEVEL_COMPACT;
+const LEVEL_DENSITY  = native.LEVEL_DENSITY;
 
 // Re-export error constants
 const ERROR_MEMORY         = native.ERROR_MEMORY;
@@ -42,7 +43,7 @@ function minLevel() {
 }
 
 /**
- * Returns the maximum supported compression level (currently 5).
+ * Returns the maximum supported compression level (currently 6).
  * @returns {number}
  */
 function maxLevel() {
@@ -98,7 +99,7 @@ function compressBound(inputSize) {
  *
  * @param {Buffer} data - Buffer to compress.
  * @param {object} [options] - Compression options.
- * @param {number} [options.level=LEVEL_DEFAULT] - Compression level (1-5).
+ * @param {number} [options.level=LEVEL_DEFAULT] - Compression level (1-6).
  * @param {boolean} [options.checksum=false] - Enable checksum verification.
  * @param {boolean} [options.seekable=false] - Enable seek table for random-access decompression.
  * @returns {Buffer} Compressed data.
@@ -373,6 +374,7 @@ module.exports = {
     LEVEL_DEFAULT,
     LEVEL_BALANCED,
     LEVEL_COMPACT,
+    LEVEL_DENSITY,
 
     // Error handling
     errorName,

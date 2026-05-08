@@ -164,6 +164,7 @@ PyMODINIT_FUNC PyInit__zxc(void) {
     PyModule_AddIntConstant(m, "LEVEL_DEFAULT", ZXC_LEVEL_DEFAULT);
     PyModule_AddIntConstant(m, "LEVEL_BALANCED", ZXC_LEVEL_BALANCED);
     PyModule_AddIntConstant(m, "LEVEL_COMPACT", ZXC_LEVEL_COMPACT);
+    PyModule_AddIntConstant(m, "LEVEL_DENSITY", ZXC_LEVEL_DENSITY);
 
     /* Error Enums */
     PyModule_AddIntConstant(m, "ERROR_MEMORY", ZXC_ERROR_MEMORY);

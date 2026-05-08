@@ -155,7 +155,7 @@ pub const ZXC_ERROR_BAD_BLOCK_SIZE: i32 = -14;
 pub struct zxc_compress_opts_t {
     /// Worker thread count (0 = auto-detect CPU cores).
     pub n_threads: c_int,
-    /// Compression level 1-5 (0 = default).
+    /// Compression level 1-6 (0 = default).
     pub level: c_int,
     /// Block size in bytes (0 = default 256 KB). Must be power of 2, 4 KB – 2 MB.
     pub block_size: usize,
@@ -463,7 +463,7 @@ unsafe extern "C" {
     /// * `f_in` - Input file stream
     /// * `f_out` - Output file stream  
     /// * `n_threads` - Number of worker threads (0 = auto-detect CPU cores)
-    /// * `level` - Compression level (1-5)
+    /// * `level` - Compression level (1-6)
     /// * `checksum_enabled` - If non-zero, enables checksum verification
     ///
     /// # Returns
@@ -986,6 +986,7 @@ mod tests {
             ZXC_LEVEL_DEFAULT,
             ZXC_LEVEL_BALANCED,
             ZXC_LEVEL_COMPACT,
+            ZXC_LEVEL_DENSITY,
         ] {
             unsafe {
                 let bound = zxc_compress_bound(input.len()) as usize;
