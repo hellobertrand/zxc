@@ -1223,6 +1223,13 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         size_t step = lzp.step_base + (dist >> lzp.step_shift);
         if (UNLIKELY(ip + step >= mflimit)) step = 1;
 
+        if (LIKELY(ip + step + sizeof(uint64_t) <= iend)) {
+            const uint64_t v_next = zxc_le64(ip + step);
+            const uint32_t h_next = zxc_hash_func(v_next, /*use_hash5=*/level >= 3);
+            ZXC_PREFETCH_READ(&hash_tags[h_next]);
+            ZXC_PREFETCH_READ(&hash_table[h_next]);
+        }
+
         const zxc_match_t m =
             zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, hash_tags,
                                      chain_table, epoch_mark, offset_mask, level, lzp);
@@ -1788,6 +1795,13 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         if (UNLIKELY(ip + step >= mflimit)) step = 1;
 
         ZXC_PREFETCH_READ(ip + step * 4 + ZXC_CACHE_LINE_SIZE);
+
+        if (LIKELY(ip + step + sizeof(uint64_t) <= iend)) {
+            const uint64_t v_next = zxc_le64(ip + step);
+            const uint32_t h_next = zxc_hash_func(v_next, /*use_hash5=*/level >= 3);
+            ZXC_PREFETCH_READ(&hash_tags[h_next]);
+            ZXC_PREFETCH_READ(&hash_table[h_next]);
+        }
 
         const zxc_match_t m =
             zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, hash_tags,
