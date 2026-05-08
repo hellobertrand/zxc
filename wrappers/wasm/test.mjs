@@ -73,7 +73,7 @@ async function main() {
     const version = _version_string();
     assert(typeof version === 'string' && version.length > 0, `Version: ${version}`);
     assert(_min_level() === 1, `Min level: ${_min_level()}`);
-    assert(_max_level() === 5, `Max level: ${_max_level()}`);
+    assert(_max_level() === 6, `Max level: ${_max_level()}`);
     assert(_default_level() === 3, `Default level: ${_default_level()}`);
 
     // --- 3. Compress bound ---
@@ -130,7 +130,7 @@ async function main() {
         }
         const bound = _compress_bound(input.length);
 
-        for (let level = 1; level <= 5; level++) {
+        for (let level = 1; level <= 6; level++) {
             const srcPtr = Module._malloc(input.length);
             const dstPtr = Module._malloc(bound);
             Module.HEAPU8.set(input, srcPtr);
