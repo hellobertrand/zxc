@@ -1225,7 +1225,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         if (LIKELY(ip + step + sizeof(uint64_t) <= iend)) {
             const uint64_t v_next = zxc_le64(ip + step);
-            const uint32_t h_next = zxc_hash_func(v_next, /*use_hash5=*/level >= 3);
+            // cppcheck-suppress unreadVariable
+            const uint32_t h_next = zxc_hash_func(v_next, 1);
             ZXC_PREFETCH_READ(&hash_tags[h_next]);
             ZXC_PREFETCH_READ(&hash_table[h_next]);
         }
@@ -1274,8 +1275,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                     const uint32_t pos_u = (uint32_t)((match_end - 2) - src);
                     const uint64_t val_u8 = zxc_le64(match_end - 2);
                     const uint32_t val_u = (uint32_t)val_u8;
-                    const uint32_t h_u =
-                        zxc_hash_func(val_u8, 1);  // Only for level > 4, uses hash5
+                    const uint32_t h_u = zxc_hash_func(val_u8, 1);
                     const uint32_t prev_head = hash_table[h_u];
                     const uint32_t prev_idx =
                         (prev_head & ~offset_mask) == epoch_mark ? (prev_head & offset_mask) : 0;
@@ -1798,7 +1798,8 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         if (LIKELY(ip + step + sizeof(uint64_t) <= iend)) {
             const uint64_t v_next = zxc_le64(ip + step);
-            const uint32_t h_next = zxc_hash_func(v_next, /*use_hash5=*/level >= 3);
+            // cppcheck-suppress unreadVariable
+            const uint32_t h_next = zxc_hash_func(v_next, 0);
             ZXC_PREFETCH_READ(&hash_tags[h_next]);
             ZXC_PREFETCH_READ(&hash_table[h_next]);
         }
