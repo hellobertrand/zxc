@@ -194,20 +194,20 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     // Current position in the input buffer expressed as a 32-bit index.
     const uint32_t cur_pos = (uint32_t)(ip - src);
 
-    // Split table reads: tag table + position table
+    // Tag-first filter on fast levels.
     const uint8_t stored_tag = hash_tags[h];
-    const uint32_t raw_head = hash_table[h];
+    uint32_t match_idx;
+    if (level <= ZXC_LEVEL_FAST && stored_tag != cur_tag) {
+        match_idx = 0;
+    } else {
+        const uint32_t raw_head = hash_table[h];
+        match_idx = ((raw_head & ~offset_mask) == epoch_mark) ? (raw_head & offset_mask) : 0;
+    }
 
-    // If the epoch in raw_head matches the current epoch_mark, extract the
-    // stored position; otherwise treat this bucket as empty (index 0).
-    uint32_t match_idx = ((raw_head & ~offset_mask) == epoch_mark) ? (raw_head & offset_mask) : 0;
-
-    // Decide whether to skip the head entry of the hash chain.
+    // skip_head still drives the chain walk on level >= 3 (advances past the
+    // mismatched head without comparing). On level <= 2 it is always 0 here:
+    // either match_idx == 0 (filter-skip) or stored_tag == cur_tag.
     const int skip_head = (match_idx != 0) & (stored_tag != cur_tag);
-
-    // If we should skip the head and level is low (<= 2), we drop the match entirely.
-    const uint32_t drop_mask = (uint32_t)((skip_head & (level <= 2)) - 1);
-    match_idx &= drop_mask;
 
     // Split table writes
     hash_table[h] = epoch_mark | cur_pos;
