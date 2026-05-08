@@ -451,6 +451,12 @@ extern "C" {
 /** @brief Threshold above which `find_best_match` is skipped at intra-match
  *         positions, keeping the parser O(N) on highly repetitive data. */
 #define ZXC_OPT_LONG_MATCH_SKIP ((size_t)256)
+/** @brief Minimum literal count for the sample-based Huffman cost estimator
+ *         used by the optimal parser. Below this, the strided sample is too
+ *         small for the resulting code-lengths to be statistically reliable,
+ *         so the estimator falls back to RAW cost (8 bits/byte). */
+#define ZXC_OPT_LIT_SAMPLE_MIN 1024
+
 /** @} */
 
 /** @name Hash Prime Constants
@@ -500,8 +506,20 @@ extern "C" {
 #define ZXC_HUF_STREAM_SIZES_HEADER_SIZE ((int)((ZXC_HUF_NUM_STREAMS - 1) * sizeof(uint16_t)))
 /** @brief Total Huffman header size: lengths + sub-stream sizes. */
 #define ZXC_HUF_HEADER_SIZE (ZXC_HUF_LENGTHS_HEADER_SIZE + ZXC_HUF_STREAM_SIZES_HEADER_SIZE)
-/** @brief Below this literal count Huffman cannot beat RAW after header overhead. */
-#define ZXC_HUF_MIN_LITERALS 1024
+/** @brief Absolute floor below which Huffman cannot beat RAW even with
+ *         zero-entropy literals after the 3 % savings margin. Above this
+ *         floor, the precise size accounting at the call site decides per
+ *         block, so the threshold is corpus-agnostic.
+ *
+ *         Derivation: the call site requires `huf_total < baseline · 31/32`
+ *         (3 % margin = `baseline >> 5`). At zero-entropy literals the
+ *         payload vanishes and `huf_total = HEADER`, giving
+ *         `N > HEADER · 32/31`. The `+30` is the standard ceiling-division
+ *         offset (`b - 1` with `b = 31`). Constants:
+ *           - 32 = inverse of the 3 % margin (`1/32`)
+ *           - 31 = `32 - 1`, the fraction kept after the margin
+ *           - 30 = `31 - 1`, ceiling-division rounding offset */
+#define ZXC_HUF_MIN_LITERALS ((ZXC_HUF_HEADER_SIZE * 32 + 30) / 31)
 /** @brief Width of the decoder bit accumulator, in bits
  *         (`sizeof(uint64_t) * CHAR_BIT`). */
 #define ZXC_HUF_ACCUM_BITS 64

@@ -805,7 +805,7 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
 // codeql[cpp/unused-static-function]: false positive
 static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const size_t src_sz,
                                           void* RESTRICT scratch) {
-    if (UNLIKELY(src_sz < ZXC_HUF_MIN_LITERALS)) return CHAR_BIT;
+    if (UNLIKELY(src_sz < ZXC_OPT_LIT_SAMPLE_MIN)) return CHAR_BIT;
 
     uint32_t hist[ZXC_HUF_NUM_SYMBOLS] = {0};
     const size_t step = (src_sz > 4096) ? (src_sz >> 12) : 1U;
