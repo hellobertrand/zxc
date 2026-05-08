@@ -200,7 +200,7 @@ ZXC_EXPORT int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out);
 /**
  * @brief Suggested input chunk size for best throughput.
  *
- * Equal to the configured block size (default 256 KB).  The caller may
+ * Equal to the configured block size (default 512 KB).  The caller may
  * supply any input chunk; this is purely a performance hint.
  *
  * @param[in] cs  Compression stream.

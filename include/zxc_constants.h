@@ -56,8 +56,8 @@
 #define ZXC_BLOCK_SIZE_MIN_LOG2 12
 /** @brief log2(ZXC_BLOCK_SIZE_MAX) - exponent code for maximum block size. */
 #define ZXC_BLOCK_SIZE_MAX_LOG2 21
-/** @brief Default block size (256 KB). */
-#define ZXC_BLOCK_SIZE_DEFAULT (256 * 1024)
+/** @brief Default block size (512 KB). */
+#define ZXC_BLOCK_SIZE_DEFAULT (512 * 1024)
 /** @brief Minimum allowed block size (4 KB = 2^12). */
 #define ZXC_BLOCK_SIZE_MIN (1U << ZXC_BLOCK_SIZE_MIN_LOG2)
 /** @brief Maximum allowed block size (2 MB = 2^21). */
