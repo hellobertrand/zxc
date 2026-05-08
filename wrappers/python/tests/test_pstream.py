@@ -43,8 +43,8 @@ def test_pstream_with_checksum():
 
 
 def test_pstream_multi_block():
-    # Larger than one default block (256 KB) to force multiple blocks.
-    data = bytes(((i * 7) % 256 for i in range(512 * 1024)))
+    # Larger than one default block (512 KB) to force multiple blocks.
+    data = bytes(((i * 7) % 256 for i in range(1536 * 1024)))
     assert _roundtrip(data) == data
 
 

@@ -110,7 +110,7 @@ export interface CStreamOptions {
     level?: number;
     /** Enable per-block and global checksums. Defaults to false. */
     checksum?: boolean;
-    /** Block size in bytes (0 = default 256 KB). Power of 2, 4 KB – 2 MB. */
+    /** Block size in bytes (0 = default 512 KB). Power of 2, 4 KB – 2 MB. */
     blockSize?: number;
 }
 

@@ -353,8 +353,8 @@ mod tests {
 
     #[test]
     fn pstream_multi_block() {
-        // Larger than one default block (256 KB) to force multiple blocks.
-        let data: Vec<u8> = (0..512 * 1024).map(|i| ((i * 7) % 256) as u8).collect();
+        // Larger than one default block (512 KB) to force multiple blocks.
+        let data: Vec<u8> = (0..1536 * 1024).map(|i| ((i * 7) % 256) as u8).collect();
         let out = pstream_roundtrip(&data, None, None);
         assert_eq!(out, data);
     }

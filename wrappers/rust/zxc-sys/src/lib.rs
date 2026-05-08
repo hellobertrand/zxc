@@ -157,7 +157,7 @@ pub struct zxc_compress_opts_t {
     pub n_threads: c_int,
     /// Compression level 1-6 (0 = default).
     pub level: c_int,
-    /// Block size in bytes (0 = default 256 KB). Must be power of 2, 4 KB – 2 MB.
+    /// Block size in bytes (0 = default 512 KB). Must be power of 2, 4 KB – 2 MB.
     pub block_size: usize,
     /// 1 to enable per-block and global checksums, 0 to disable.
     pub checksum_enabled: c_int,

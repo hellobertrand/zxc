@@ -214,8 +214,8 @@ describe('pstream roundtrip', () => {
         expect(pstreamRoundtrip(data, { checksum: true }).equals(data)).toBe(true);
     });
 
-    test('multi-block (>256 KB)', () => {
-        const data = Buffer.alloc(512 * 1024);
+    test('multi-block (>512 KB)', () => {
+        const data = Buffer.alloc(1536 * 1024);
         for (let i = 0; i < data.length; i++) data[i] = (i * 7) % 256;
         expect(pstreamRoundtrip(data).equals(data)).toBe(true);
     });
