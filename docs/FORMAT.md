@@ -572,7 +572,7 @@ Generated archive size: **58 bytes**.
 ### 13.1 Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 05 12 80 00 00 00 00 00 00 00 9E 53
+00000000: F5 2E B0 9C 05 13 80 00 00 00 00 00 00 00 B8 90
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
@@ -583,15 +583,15 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 05 | 12 | 80 | 00 00 00 00 00 00 00 | 9E 53
+F5 2E B0 9C | 05 | 13 | 80 | 00 00 00 00 00 00 00 | B8 90
 ```
 
 - `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
 - `05` -> format version 5.
-- `12` -> chunk-size code 18 (exponent encoding: `2^18 = 262144` bytes, i.e. 256 KiB).
+- `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
 - `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `9E 53` -> header CRC16.
+- `B8 90` -> header CRC16.
 
 #### B) Data Block #0 (RAW)
 
@@ -672,7 +672,7 @@ Generated archive size: **70 bytes** (12 bytes larger than the non-seekable vari
 #### Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 05 12 80 00 00 00 00 00 00 00 9E 53
+00000000: F5 2E B0 9C 05 13 80 00 00 00 00 00 00 00 B8 90
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
 00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00
