@@ -703,6 +703,10 @@ This metric expresses how much *original* data is delivered per unit of compress
 
 ![Benchmark Cycles Per Byte](./images/benchmark_decompression_cycles_0.11.0.webp)
 
+**Figure C**: Effective Throughput — Ratio-Normalized Decode (vs LZ4 baseline = 1.00x)
+
+![Effective Throughput vs LZ4](./images/benchmark_effective_throughput_0.11.0.webp)
+
 
 #### 7.4.1 ARM64 Architecture (Apple Silicon M2)
 
