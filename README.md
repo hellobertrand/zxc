@@ -33,7 +33,7 @@ It is designed to be **"Write Once, Read Many"** *(WORM)*. Unlike codecs like LZ
 - **Use Cases:** Game assets, firmware, app bundles, anything *compressed once, decompressed millions of times*.
 - **Seekable:** Built-in seek table for **O(1) random-access** decompression, load any block without scanning the entire file.
 - **Install:** `conan install --requires="zxc/[*]"` · `vcpkg install zxc` · `brew install zxc` · `pip install zxc-compress` · `cargo add zxc-compress` · `npm i zxc-compress`
-- **Quality:** Fuzzed, sanitized, formally tested, thread-safe API. BSD-3-Clause.
+- **Quality:** Fuzzed (5B+ iterations to date), sanitized, formally tested, thread-safe API. BSD-3-Clause.
 
 > **Independently Verified:** ZXC has been officially merged into both major open-source compression benchmark suites:
 >
@@ -553,7 +553,7 @@ Community-maintained bindings:
 
 ## Safety & Quality
 * **Unit Tests**: Comprehensive test suite with CTest integration.
-* **Continuous Fuzzing**: Integrated with ClusterFuzzLite suites.
+* **Continuous Fuzzing**: Integrated with ClusterFuzzLite suites — **5+ billion iterations** accumulated to date across compress, decompress, streaming and seekable API surfaces.
 * **Static Analysis**: Checked with Cppcheck & Clang Static Analyzer.
 * **CodeQL Analysis**: GitHub Advanced Security scanning for vulnerabilities.
 * **Code Coverage**: Automated tracking with Codecov integration.
