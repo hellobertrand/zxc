@@ -952,14 +952,26 @@ Benchmarked using lzbench 2.2.1, compiled with GCC 14.2.0 using *MOREFLAGS="-mar
 | -4    | 43.14%       | 42.65%       | −0.49  | −1,036 KB |
 | -5    | 40.67%       | 40.27%       | −0.40  | −854 KB   |
 
-**Memory Usage per Compression Context**
+**Memory Usage per Compression Context (by level × block size)**
 
-| Block Size | Context Memory | Δ vs 256 KB |
-|:----------:|:--------------:|:-----------:|
-| 256 KB             | ~1.3 MB  | —           |
-| 512 KB *(default)* | ~1.7 MB  | +30%        |
+Memory consumption per `zxc_cctx_t`, measured directly via the public API call `zxc_estimate_cctx_size(block_size, level)`. Levels -1 to -5 share the same context layout (LZ77 hash table + chain ring + sequence / literal buffers); level -6 (DENSITY) additionally allocates the optimal-parser scratch (per-position DP cost, parent length / offset, packed match-end bitmap), explaining the step-up at the densest palier.
 
-> **Guideline:** Use 512 KB (default) for bulk compression pipelines and high-throughput servers, where the better ratio and decompression throughput outweigh the extra ~0.4 MB of context memory. Use 256 KB (`-B 256K`) for streaming, embedded, or memory-constrained environments.
+| Block Size            | Levels -1 to -5 | Level -6 (DENSITY) | Δ −6 vs −1..−5 |
+|:---------------------:|----------------:|-------------------:|:--------------:|
+| 4 KB *(min)*          |       298.7 KB  |          362.7 KB  | ×1.21          |
+| 8 KB                  |       309.1 KB  |          374.3 KB  | ×1.21          |
+| 16 KB                 |       329.8 KB  |          460.1 KB  | ×1.39          |
+| 32 KB                 |       384.3 KB  |          644.5 KB  | ×1.68          |
+| 64 KB                 |       480.3 KB  |        1 000.6 KB  | ×2.08          |
+| 128 KB                |       672.3 KB  |        1 712.6 KB  | ×2.55          |
+| 256 KB                |     1 056.3 KB  |        3 136.5 KB  | ×2.97          |
+| **512 KB** *(default)*| **1 824.3 KB**  |    **5 984.5 KB**  | **×3.28**      |
+| 1 MB                  |     3 360.3 KB  |       11 680.6 KB  | ×3.48          |
+| 2 MB *(max)*          |     6 432.3 KB  |       23 072.6 KB  | ×3.59          |
+
+*Memory scales linearly with block size for levels -1 to -5; level -6 grows super-linearly relative to the LZ-only baseline because the optimal parser allocates DP arrays sized in `chunk_size + 1` entries (4 B `dp` + 2×2 B parent fields + 1 b/pos bitmap), whereas the hash + chain tables are fixed regardless of block size.*
+
+> **Guideline:** Default 512 KB block keeps cctx under 6 MB even at the densest level (-6) — well within reach for typical server / desktop pipelines. For streaming, embedded, or memory-constrained environments, use `-B 256K` (or smaller) and stick to levels -1 to -5 (~1 MB or less). Level -6 is best reserved for offline encoding pipelines where ratio matters and per-thread RAM is plentiful.
 
 
 ## 8. Compression Ratio Benchmarks
