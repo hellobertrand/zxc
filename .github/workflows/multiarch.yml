@@ -230,7 +230,7 @@ jobs:
       - name: Install cross-compiler
         run: |
           apt-get update
-          apt-get install -y cmake build-essential ninja-build ${{ matrix.cross_pkg }} qemu-user
+          apt-get install -y cmake build-essential ${{ matrix.cross_pkg }} qemu-user
 
       - name: Configure, Build & Test (Static & Shared)
         shell: bash
@@ -300,7 +300,7 @@ jobs:
       - name: Install cross-compiler
         run: |
           apt-get update
-          apt-get install -y cmake build-essential ninja-build ${{ matrix.cross_pkg }} qemu-user
+          apt-get install -y cmake build-essential ${{ matrix.cross_pkg }} qemu-user
 
       - name: Configure, Build & Test (Static & Shared)
         shell: bash
