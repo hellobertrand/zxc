@@ -130,12 +130,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu 22.04 ships GCC 9, 10, 11, 12 in universe
-          - { os: ubuntu-22.04, version: 9 }
+          # Ubuntu 22.04 preinstalls GCC 10, 11, 12; GCC 9 lives in universe.
+          - { os: ubuntu-22.04, version: 9, needs_install: true }
           - { os: ubuntu-22.04, version: 10 }
           - { os: ubuntu-22.04, version: 11 }
           - { os: ubuntu-22.04, version: 12 }
-          # Ubuntu 24.04 ships GCC 12, 13, 14
+          # Ubuntu 24.04 preinstalls GCC 12, 13, 14.
           - { os: ubuntu-latest, version: 13 }
           - { os: ubuntu-latest, version: 14 }
 
@@ -144,6 +144,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install GCC ${{ matrix.version }}
+        if: matrix.needs_install
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-${{ matrix.version }} g++-${{ matrix.version }}
@@ -264,7 +265,7 @@ jobs:
       - name: Install cross-compiler & QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential ${{ matrix.cross_pkg }} qemu-user
+          sudo apt-get install -y ${{ matrix.cross_pkg }} qemu-user
 
       - name: Configure, Build & Test (Static & Shared)
         shell: bash
