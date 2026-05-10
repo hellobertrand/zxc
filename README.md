@@ -71,10 +71,10 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **12,521 MB/s** vs 5,621 MB/s **2.23x Faster** | **61.5** vs 62.2 **Smaller** (-0.7%) | **ZXC** leads in raw throughput. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **7,051 MB/s** vs 4,782 MB/s **1.47x Faster** | **45.8** vs 47.6 **Smaller** (-1.8%) | **ZXC** outperforms LZ4 in read speed and ratio. |
-| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **6,245 MB/s** vs 2,542 MB/s **2.46x Faster** | **40.3** vs 41.0 **Equivalent** (-0.7%) | **ZXC** outperforms Zstd in decoding speed. |
-| **4. Max Density** | **ZXC -6** vs *lz4hc -9* | **5,621 MB/s** vs 4,529 MB/s **1.24x Faster** | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** beats lz4hc on both decode speed and ratio. |
+| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **12,530 MB/s** vs 5,623 MB/s **2.23x Faster** | **61.5** vs 62.2 **Smaller** (-0.7%) | **ZXC** leads in raw throughput. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **7,049 MB/s** vs 4,783 MB/s **1.47x Faster** | **45.8** vs 47.6 **Smaller** (-1.8%) | **ZXC** outperforms LZ4 in read speed and ratio. |
+| **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **6,267 MB/s** vs 2,538 MB/s **2.47x Faster** | **40.3** vs 41.0 **Equivalent** (-0.7%) | **ZXC** outperforms Zstd in decoding speed. |
+| **4. Max Density** | **ZXC -6** vs *lz4hc -9* | **5,620 MB/s** vs 4,528 MB/s **1.24x Faster** | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** beats lz4hc on both decode speed and ratio. |
 
 ### 2. Cloud Server: Google Axion (ARM Neoverse V2)
 *Scenario: High-throughput Microservices, ARM Cloud Instances.*
@@ -103,6 +103,12 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 *(Effective Throughput : Ratio-Normalized Decode across ARM64 and x86 — `decode × 100 / ratio`, LZ4 baseline = 1.00x)*
 ![Effective Throughput vs LZ4](docs/images/benchmark_effective_throughput_0.11.0.webp)
 
+> **What is Effective Throughput?**
+>
+> Raw decode speed misses half the picture: in real workloads (asset streaming, container pulls, microservice payloads), the decoder is fed by a compressed-byte source - disk, network, inter-core - whose bandwidth is the bottleneck. The right question is *how much original data is delivered per MB of compressed input*.
+>
+> Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC palier sits above LZ4** on every architecture, peaking at **2.0x on Apple Silicon** and ranging **1.15x–1.70x** on x86 and ARM cloud platforms.
+
 
 ### Benchmark ARM64 (Apple Silicon M2)
 
@@ -110,21 +116,21 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clan
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 52895 MB/s | 52940 MB/s |   211947520 |100.00 | 1 files|
-| **zxc 0.11.0 -1**           |   878 MB/s | **12521 MB/s** |   130356444 | **61.50** | 1 files|
-| **zxc 0.11.0 -2**           |   588 MB/s | **10341 MB/s** |   113634139 | **53.61** | 1 files|
-| **zxc 0.11.0 -3**           |   245 MB/s |  **7051 MB/s** |    97051816 | **45.79** | 1 files|
-| **zxc 0.11.0 -4**           |   162 MB/s |  **6325 MB/s** |    90393215 | **42.65** | 1 files|
-| **zxc 0.11.0 -5**           |  96.2 MB/s |  **6245 MB/s** |    85341643 | **40.27** | 1 files|
-| **zxc 0.11.0 -6**           |  11.1 MB/s |  **5621 MB/s** |    76888252 | **36.28** | 1 files|
-| lz4 1.10.0              |   814 MB/s |  4782 MB/s |   100880800 | 47.60 | 1 files|
-| lz4 1.10.0 --fast -17   |  1352 MB/s |  5621 MB/s |   131732802 | 62.15 | 1 files|
-| lz4hc 1.10.0 -9         |  48.4 MB/s |  4529 MB/s |    77884448 | 36.75 | 1 files|
-| lzav 5.7 -1             |   671 MB/s |  3876 MB/s |    84644732 | 39.94 | 1 files|
-| snappy 1.2.2            |   882 MB/s |  3264 MB/s |   101415443 | 47.85 | 1 files|
-| zstd 1.5.7 --fast --1   |   726 MB/s |  2542 MB/s |    86916294 | 41.01 | 1 files|
-| zstd 1.5.7 -1           |   647 MB/s |  1809 MB/s |    73193704 | 34.53 | 1 files|
-| zlib 1.3.1 -1           |   150 MB/s |   412 MB/s |    77259029 | 36.45 | 1 files|
+| memcpy                  | 52866 MB/s | 52887 MB/s |   211947520 |100.00 | 1 files|
+| **zxc 0.11.0 -1**           |   876 MB/s | **12530 MB/s** |   130356444 | **61.50** | 1 files|
+| **zxc 0.11.0 -2**           |   586 MB/s | **10360 MB/s** |   113634139 | **53.61** | 1 files|
+| **zxc 0.11.0 -3**           |   253 MB/s |  **7049 MB/s** |    97051816 | **45.79** | 1 files|
+| **zxc 0.11.0 -4**           |   174 MB/s |  **6697 MB/s** |    90393215 | **42.65** | 1 files|
+| **zxc 0.11.0 -5**           |   102 MB/s |  **6267 MB/s** |    85341643 | **40.27** | 1 files|
+| **zxc 0.11.0 -6**           |  11.8 MB/s |  **5620 MB/s** |    76888252 | **36.28** | 1 files|
+| lz4 1.10.0              |   813 MB/s |  4783 MB/s |   100880800 | 47.60 | 1 files|
+| lz4 1.10.0 --fast -17   |  1350 MB/s |  5623 MB/s |   131732802 | 62.15 | 1 files|
+| lz4hc 1.10.0 -9         |  48.2 MB/s |  4528 MB/s |    77884448 | 36.75 | 1 files|
+| lzav 5.7 -1             |   665 MB/s |  3877 MB/s |    84644732 | 39.94 | 1 files|
+| snappy 1.2.2            |   880 MB/s |  3264 MB/s |   101415443 | 47.85 | 1 files|
+| zstd 1.5.7 --fast --1   |   724 MB/s |  2538 MB/s |    86916294 | 41.01 | 1 files|
+| zstd 1.5.7 -1           |   645 MB/s |  1806 MB/s |    73193704 | 34.53 | 1 files|
+| zlib 1.3.1 -1           |   150 MB/s |   410 MB/s |    77259029 | 36.45 | 1 files|
 
 
 ### Benchmark ARM64 (Google Axion Neoverse-V2)
