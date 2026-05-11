@@ -65,8 +65,8 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 *(See the [latest benchmark logs](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml))*
 
-*(Benchmark Graph ARM64 : Decompression Throughput & Storage Ratio (Normalized to LZ4))*
-![Benchmark Graph ARM64](docs/images/bench-arm64-0.11.0.webp)
+*(Decompression Bandwidth Frontier : ZXC vs. State-of-the-Art across ARM64 & x86_64)*
+![Decompression Bandwidth Frontier](docs/images/bench-frontier-0.11.0.webp)
 
 ### 1. Mobile & Client: Apple Silicon (M2)
 *Scenario: Game Assets loading, App startup.*
@@ -98,9 +98,6 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 | **3. High Density** | **ZXC -5** vs *Zstd --fast 1* | **5,259 MB/s** vs 2,407 MB/s **2.18x Faster** | **40.3** vs 41.0 **Smaller** (-0.7%) | **ZXC** provides faster decoding. |
 | **4. Max Density** | **ZXC -6** vs *lz4hc -9* | 4,695 MB/s vs **4,841 MB/s** **0.97x** | **36.3** vs 36.8 **Smaller** (-0.5%) | **Equivalent** decode (~3% slower), **ZXC** wins on ratio. |
 
-
-*(Decompression Bandwidth Frontier : ZXC vs. State-of-the-Art across ARM64 & x86_64)*
-![Decompression Bandwidth Frontier](docs/images/bench-frontier-0.11.0.webp)
 
 *(Effective Throughput : Ratio-Normalized Decode across ARM64 and x86 — `decode × 100 / ratio`, LZ4 baseline = 1.00x)*
 ![Effective Throughput vs LZ4](docs/images/bench-effective-0.11.0.webp)

@@ -501,9 +501,9 @@ Benchmarks were conducted using `lzbench` (by inikep) with a **block size of 256
 * **Target 2 (Cloud):** Google Axion / Linux (GCC 14)
 * **Target 3 (Build):** AMD EPYC 9B45 / Linux (GCC 14)
 
-**Figure A**: Decompression Throughput & Storage Ratio (Normalized to LZ4)
+**Figure A**: Decompression Bandwidth Frontier — ZXC vs. State-of-the-Art across ARM64 & x86_64
 
-![Benchmark Graph ARM64](./images/bench-arm64-0.11.0.webp)
+![Decompression Bandwidth Frontier](./images/bench-frontier-0.11.0.webp)
 
 
 ### 7.1 Client ARM64 Summary (Apple Silicon M2)
