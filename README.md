@@ -65,10 +65,10 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 *(See the [latest benchmark logs](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml))*
 
-*(ZXC vs LZ4 family : decode speedup and compressed-size reduction across 4 CPUs and 3 deployment tiers)*
-![ZXC vs LZ4 Dominance](docs/images/bench-dominance-0.11.0.webp)
+*Decompression Speed vs Compressed Size — ARM64 Apple M2*
 
-**Across 4 CPUs × 3 deployment tiers, ZXC wins on both decode speed and ratio versus the LZ4 family**, the only nuance: at the densest tier, x86 decode trails `lz4hc -9` by 3–6% while keeping a smaller compressed size.
+![Decompression Speed vs Compressed Size](docs/images/bench-arm64-0.11.0.svg)
+
 
 ### 1. Mobile & Client: Apple Silicon (M2)
 *Scenario: Game Assets loading, App startup.*
@@ -106,12 +106,10 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 | **2. Standard** | **ZXC -3** vs *LZ4 Default* | **3,922 MB/s** vs 3,546 MB/s **1.11x Faster** | **45.8** vs 47.6 **Smaller** (-1.8%) | **ZXC** delivers faster decode and smaller output. |
 | **3. Max Density** | **ZXC -6** vs *LZ4HC -9* | 3,196 MB/s vs **3,401 MB/s** (decode within 6%) | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** wins on ratio; decode trails `LZ4HC -9` by ~6% on Zen 3. |
 
+*Decompression Speed: ZXC vs LZ4 family at equivalent ratio tiers, across 4 CPUs (Fast ≈ 62%, Default ≈ 47%, High ≈ 37%)*
 
-*(Decompression Bandwidth Frontier : ZXC envelope vs. competitor envelope across ARM64 & x86_64 — the shaded blue area is the "ZXC dominance region")*
-![Decompression Bandwidth Frontier](docs/images/bench-frontier-0.11.0.webp)
+![Decompression Speed: ZXC vs LZ4 family at equivalent ratio tiers](docs/images/bench-bars-0.11.0.svg)
 
-*(Effective Throughput : Ratio-Normalized Decode across ARM64 and x86 — `decode × 100 / ratio`, LZ4 baseline = 1.00x)*
-![Effective Throughput vs LZ4](docs/images/bench-effective-0.11.0.webp)
 
 > **What is Effective Throughput?**
 >
@@ -119,6 +117,10 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 >
 > Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC level sits above LZ4** on every architecture, peaking at **2.0x on Apple Silicon** and ranging **1.15x–1.70x** on x86 and ARM cloud platforms.
 
+
+*Effective Throughput : Ratio-Normalized Decode across ARM64 and x86 (`decode x 100 / ratio`, LZ4 baseline = 1.00x)*
+
+![Effective Throughput](docs/images/bench-effective-0.11.0.svg)
 
 ### Benchmark ARM64 (Apple Silicon M2)
 

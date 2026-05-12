@@ -502,13 +502,9 @@ Benchmarks were conducted using `lzbench` (by inikep) with a **block size of 256
 * **Target 3 (Build):** AMD EPYC 9B45 / Linux (GCC 14)
 * **Target 4 (Production):** AMD EPYC 7763 / Linux (GCC 14)
 
-**Figure A**: ZXC vs LZ4 family — Decode speedup and size reduction across 4 CPUs (headline result)
+**Figure A**: Pareto Frontier — Decompression Speed vs. Compressed Size (across 4 CPUs)
 
-![ZXC vs LZ4 Dominance](./images/bench-dominance-0.11.0.webp)
-
-**Figure B**: Decompression Bandwidth Frontier — ZXC envelope vs. competitor envelope across ARM64 & x86_64
-
-![Decompression Bandwidth Frontier](./images/bench-frontier-0.11.0.webp)
+![Pareto Frontier — Decompression Speed vs Compressed Size](./images/bench-pareto-ratio-0.11.0.svg)
 
 
 ### 7.1 Client ARM64 Summary (Apple Silicon M2)
@@ -775,13 +771,13 @@ This metric expresses how much *original* data is delivered per unit of compress
 
 ### 7.5 Benchmarks Results
 
-**Figure C**: Decompression Efficiency : Cycles Per Byte Comparaison
+**Figure B**: Decompression Efficiency : Cycles Per Byte Comparaison
 
-![Benchmark Cycles Per Byte](./images/bench-cycles-0.11.0.webp)
+![Benchmark Cycles Per Byte](./images/bench-cycles-0.11.0.svg)
 
-**Figure D**: Effective Throughput — Ratio-Normalized Decode (vs LZ4 baseline = 1.00x)
+**Figure C**: Effective Throughput — Ratio-Normalized Decode (vs LZ4 baseline = 1.00x)
 
-![Effective Throughput vs LZ4](./images/bench-effective-0.11.0.webp)
+![Effective Throughput vs LZ4](./images/bench-effective-0.11.0.svg)
 
 
 #### 7.5.1 ARM64 Architecture (Apple Silicon M2)
@@ -896,28 +892,6 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
 > **Guideline:** Default 512 KB block keeps cctx under 6 MB even at the densest level (-6) — well within reach for typical server / desktop pipelines. For streaming, embedded, or memory-constrained environments, use `-B 256K` (or smaller) and stick to levels -1 to -5. Level -6 is best reserved for offline encoding pipelines where ratio matters and per-thread RAM is plentiful.
 
-
-### 7.7 Appendix — Pareto Analysis (Research-grade Views)
-
-The previous sections cover the headline pitch (ZXC vs LZ4 family per tier and per CPU). This appendix complements that view with three complementary "research-grade" perspectives commonly used in compression literature: a normalized scatter, formal Pareto frontiers per CPU, and a Pareto-efficiency robustness count.
-
-**Figure E**: Normalized decode speed and compressed size — every codec, every CPU, both axes normalized to LZ4 default of the same CPU.
-
-![ZXC vs the rest — Normalized scatter](./images/bench-normalized-0.11.0.webp)
-
-*Reading: LZ4 default sits at the origin (100, 1.00×). The 4 ZXC curves (one per CPU) cross the LZ4 baseline diagonally, descending through the L1 → L6 progression. ZXC stays above the lz4 family's own dashed curve at every comparable ratio bracket on all 4 CPUs.*
-
-**Figure F**: Per-CPU Pareto fronts (decode speed vs compressed size). Codecs on the frontier are Pareto-optimal; codecs below the frontier are dominated.
-
-![Pareto Fronts per CPU](./images/bench-pareto-fronts-0.11.0.webp)
-
-*Reading: every ZXC variant sits on or near the Pareto frontier across all 4 CPUs. The only non-ZXC codecs that join the frontier are `zstd -1` (smallest ratio bracket) and `lz4 --fast -17` (largest ratio bracket) — ZXC owns every operating point in between.*
-
-**Figure G**: Pareto-efficiency robustness — for every codec, count of (CPU × tradeoff plane) combinations on which it sits on the Pareto frontier (out of 16 = 4 CPUs × 4 planes).
-
-![Pareto Efficiency](./images/bench-pareto-efficiency-0.11.0.webp)
-
-*Reading: ZXC variants dominate the robustness ranking, sitting on the Pareto frontier in 12 to 16 of the 16 combinations. Non-ZXC codecs typically max out at 4-8 wins, and only at the extreme ends (lz4 --fast for speed, zstd -1 for ratio).*
 
 
 ## 8. Strategic Implementation
