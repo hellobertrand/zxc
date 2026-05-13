@@ -103,16 +103,31 @@ jobs:
         run: |
           # Install to staging directory using CMake (Standard way for all OS)
           cmake --install build --prefix release_staging --config Release
-          
+
           # Strip binary on Unix-like systems only (installed to bin/)
           if [[ "${{ runner.os }}" != "Windows" ]]; then
             strip release_staging/bin/${{ matrix.artifact_name }}
           fi
-          
-          # Copy documentation to root
+
           cp LICENSE release_staging/LICENSE.txt
-          cp README.md release_staging/README.md
-          
+          cp docs/man/zxc.1.md release_staging/MANUAL.md
+          cat > release_staging/README.md <<EOF
+          # ZXC ${GITHUB_REF_NAME#v}
+
+          High-performance asymmetric lossless compression — optimized for maximum decompression throughput.
+
+          **Contents:**
+          - \`bin/\` — \`zxc\` CLI compressor/decompressor
+          - \`lib/\` — shared and static libraries
+          - \`include/\` — C headers
+
+          **CLI usage:** See [MANUAL.md](MANUAL.md) for the full reference (synopsis, options, examples).
+
+          **Documentation, benchmarks & source:** https://github.com/${GITHUB_REPOSITORY}
+
+          License: BSD-3-Clause (see LICENSE.txt)
+          EOF
+
           # Create archive
           cd release_staging
           if [[ "${{ runner.os }}" == "Windows" ]]; then

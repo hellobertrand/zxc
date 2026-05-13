@@ -40,17 +40,18 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **-r**, **--recursive**
 : Recursively process directories. When specified, any directory listed as an argument will be traversed, and all regular files within it will be processed (compressed or decompressed). This option implicitly enables `--multiple` mode.
 
-**-1**..**-5**
-: Set the compression level from 1 (fastest compression) to 5 (highest density).
+**-1**..**-6**
+: Set the compression level from 1 (fastest compression) to 6 (highest density).
 - **-1, -2 (Fast):** Optimized for real-time assets or when compression speed is a priority.
 - **-3 (Default):** Balanced middle-ground offering efficient compression and superior ratio to fast codecs.
-- **-4, -5 (Compact):** Best choice for distribution, archival or firmware.
+- **-4, -5 (Compact):** Better ratio than LZ4 with faster decoding than Zstd. Suited for embedded systems and firmware.
+- **-6 (Max):** Highest ratio tier, matching LZ4-HC while keeping ZXC's decode advantage. Best for archival and write-once / read-many workloads where compression time is amortized over many reads.
 
 **-T**, **--threads** *N*
 : Set the number of threads to use for compression and decompression. A value of `0` means auto-detection based on the number of available CPU cores.
 
 **-B**, **--block-size** *SIZE*
-: Set the compression block size. *SIZE* must be a power of two between **4K** and **2M** (e.g. `4K`, `64K`, `256K`, `1M`). Smaller blocks reduce memory usage and improve random-access decompression; larger blocks generally yield better compression ratios. The default is **256K**. This option is only meaningful during compression; the block size is stored in the archive header and automatically used during decompression.
+: Set the compression block size. *SIZE* must be a power of two between **4K** and **2M** (e.g. `4K`, `64K`, `256K`, `512K`, `1M`). Smaller blocks reduce memory usage and improve random-access decompression; larger blocks generally yield better compression ratios. The default is **512K**, tuned for bulk/archival workloads where ratio and decompression throughput matter most. This option is only meaningful during compression; the block size is stored in the archive header and automatically used during decompression.
 
 **-C**, **--checksum**
 : Enable block hashing during compression using the rapidhash algorithm. Recommended for data integrity validation. Checksum verification is automatically performed during extraction when enabled.
@@ -92,8 +93,8 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **Compress a file:**
   zxc data.txt
 
-**Compress a file with high density (Level 5):**
-  zxc -5 data.bin
+**Compress a file with high density (Level 6, archival):**
+  zxc -6 data.bin
 
 **Decompress a file:**
   zxc -d data.txt.zxc
@@ -117,7 +118,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
   zxc -B 64K data.bin data.zxc
 
 **Compress with maximum block size (2 MB):**
-  zxc -5 -B 2M data.bin data.zxc
+  zxc -6 -B 2M data.bin data.zxc
 
 **Run a benchmark for 10 seconds:**
   zxc -b 10 data.txt

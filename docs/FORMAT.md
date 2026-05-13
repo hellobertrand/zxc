@@ -1,6 +1,6 @@
 # ZXC Compressed File Format (Technical Specification)
 
-**Date**: March 2026
+**Date**: May 2026
 **Format Version**: 5
 
 This document describes the on-disk binary format of a ZXC compressed file.
