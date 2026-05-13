@@ -22,7 +22,6 @@ on:
       - 'include/**'
       - 'tests/fuzz_*.c'
       - '.clusterfuzzlite/**'
-      - '.github/workflows/fuzzing.yml'
   schedule:
     - cron: '0 1 * * 1'
 

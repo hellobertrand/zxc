@@ -4,8 +4,16 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
   pull_request:
     branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
 
 jobs:
   coverage:
