@@ -47,7 +47,20 @@ ZXC leverages modern instruction sets to maximize throughput on both ARM and x86
 ### 4.3 Entropy Coding & Bitpacking
 *   **RLE (Run-Length Encoding)**: Automatically detects runs of identical bytes.
 *   **Prefix Varint Encoding**: Variable-length integer encoding (similar to LEB128 but prefix-based) for overflow values.
+*   **Canonical Huffman (Literals, level ≥ 6)**: Length-limited (`L = 8`) canonical Huffman code over the literal byte distribution, split into 4 LSB-first interleaved bit-streams. Decoded via a cache-line-aligned 2048-entry lookup table (11-bit window) that returns **1 or 2 symbols per access** depending on whether the next two codes fit the window. On typical literal distributions ~50–70 % of lookups yield 2 symbols, pushing effective throughput above one symbol per memory access.
 *   **Bit-Packing**: Compressed sequences are packed into dedicated streams using minimal bit widths.
+
+#### Multi-Symbol Huffman LUT
+
+The Huffman decoder is the hot path for high-compression levels, so ZXC trades a larger table for fewer lookups. The classical trade-off is between table size (cache footprint) and the number of symbols decoded per memory access. ZXC's design:
+
+*   **Length limit `L = 8`**: With a maximum codeword length of 8 bits, the longest *pair* of codes never exceeds 16 bits, which keeps the multi-symbol lookup tractable.
+*   **11-bit window**: The LUT is indexed by 11 bits read ahead from the stream. Each entry stores either a single symbol (when the first code is ≥ 4 bits and the cumulative length of the *first two codes* would exceed 11 bits) or a pair of symbols (when both fit). This single branch (fits-in-window?) is resolved by a precomputed flag in the LUT entry, no per-lookup re-decoding.
+*   **2048-entry, cache-aligned**: 2048 × 4-byte entries = 8 KB, aligned on a cache line. Easily fits L1d on every target CPU.
+*   **4 parallel bit-streams**: Literals are interleaved across 4 LSB-first streams so each decoder consumes independent bits, breaking the serial dependency that limits classical Huffman to one symbol per cycle.
+*   **Scalar tail**: A small per-stream scalar epilogue (≤ 9 symbols) handles the trailing bytes safely without speculative writes past the destination buffer.
+
+Selection is conservative: `enc_lit = 2` (Huffman) is chosen only if the Huffman section is at least ~3 % smaller than the RAW or RLE baseline, avoiding setup overhead on near-uniform literal distributions where the entropy savings would not justify the decoder cost.
 
 #### Prefix Varint Format
 
@@ -177,7 +190,7 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 * **N Sequences**: Total count of LZ sequences in the block.
 * **N Literals**: Total count of literal bytes.
 * **Encoding Types**
-  - `Lit Enc`: Literal stream encoding (0=RAW, 1=RLE). **Currently used.**
+  - `Lit Enc`: Literal stream encoding (0=RAW, 1=RLE, 2=HUFFMAN). **Currently used.**
   - `LL Enc`: Literal lengths encoding. **Reserved for future use** (lengths are packed in tokens).
   - `ML Enc`: Match lengths encoding. **Reserved for future use** (lengths are packed in tokens).
   - `Off Enc`: Offset encoding mode. **Currently used**
@@ -504,7 +517,7 @@ Benchmarks were conducted using `lzbench` (by inikep) with a **block size of 256
 
 **Figure A**: Pareto Frontier — Decompression Speed vs. Compressed Size (across 4 CPUs)
 
-![Pareto Frontier — Decompression Speed vs Compressed Size](./images/bench-pareto-ratio-0.11.0.svg)
+![Pareto Frontier — Decompression Speed vs Compressed Size](./images/bench-pareto-ratio.svg)
 
 
 ### 7.1 Client ARM64 Summary (Apple Silicon M2)
@@ -639,7 +652,7 @@ This metric expresses how much *original* data is delivered per unit of compress
 *Reading: at ZXC -6, every MB/s of compressed input yields **11 591 MB/s** of original output — **1.11x** more effective bandwidth than `lz4hc -9` at equivalent ratio (36.28 vs 36.75), and **1.30x** more than LZ4 default. ZXC's full level range stays above 1.29x LZ4 across all levels.*
 
 
-### 7.3 Build Server Summary (x86_64 / AMD EPYC 9B45)
+### 7.3 Build Server Summary (x86_64 / AMD EPYC 9B45, Zen 5)
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
@@ -704,7 +717,7 @@ This metric expresses how much *original* data is delivered per unit of compress
 *Reading: on EPYC 9B45, ZXC's full level range delivers between 1.23x and 1.70x LZ4 effective bandwidth. Note that on this x86_64 platform `lz4hc -9` (1.25x) edges out ZXC -6 (1.23x) on this metric — lz4hc's decode (4 841 MB/s) runs ~3% faster than ZXC -6 (4 695 MB/s) here, while ZXC -6 keeps the ratio advantage (36.28 vs 36.75). The two are practically tied on this platform.*
 
 
-### 7.4 Production x86 Summary (AMD EPYC 7763, Zen 3)
+### 7.4 Production Server Summary (x86_64 / AMD EPYC 7763, Zen 3)
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
@@ -773,11 +786,11 @@ This metric expresses how much *original* data is delivered per unit of compress
 
 **Figure B**: Decompression Efficiency : Cycles Per Byte Comparaison
 
-![Benchmark Cycles Per Byte](./images/bench-cycles-0.11.0.svg)
+![Benchmark Cycles Per Byte](./images/bench-cycles.svg)
 
 **Figure C**: Effective Throughput — Ratio-Normalized Decode (vs LZ4 baseline = 1.00x)
 
-![Effective Throughput vs LZ4](./images/bench-effective-0.11.0.svg)
+![Effective Throughput vs LZ4](./images/bench-effective.svg)
 
 
 #### 7.5.1 ARM64 Architecture (Apple Silicon M2)
@@ -904,8 +917,8 @@ ZXC is designed to adapt to various deployment scenarios by selecting the approp
 *   **Embedded Systems & Firmware (Levels 3-4-5)**:
     The sweet spot for maximizing storage density on limited flash memory (e.g., Kernel, Initramfs) while ensuring rapid "instant-on" (XIP-like) boot performance.
 
-*   **Data Archival (Levels 4-5)**:
-    A high-efficiency alternative for cold storage, providing better compression ratios than LZ4 and significantly faster retrieval speeds than Zstd.
+*   **Data Archival (Levels 5-6)**:
+    A high-efficiency alternative for cold storage, providing better compression ratios than LZ4 and significantly faster retrieval speeds than Zstd. **Level 6** (DENSITY) matches LZ4-HC's ratio while keeping ZXC's decode advantage: ideal for write-once / read-many archives where compression time is amortized over many reads.
 
 ## 9. Conclusion
 

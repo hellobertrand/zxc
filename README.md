@@ -21,8 +21,8 @@
 
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 
-**ZXC** is a high-performance, lossless, asymmetric compression library optimized for Content Delivery and Embedded Systems (Game Assets, Firmware, App Bundles).
-It is designed to be **"Write Once, Read Many"** *(WORM)*. Unlike codecs like LZ4, ZXC trades compression speed (build-time) for **maximum decompression throughput** (run-time).
+**ZXC** is a high-performance, lossless, asymmetric compression library that trades compress speed for **maximum decode throughput**: ideal for Content Delivery, Embedded Systems, FOTA (Firmware Over-The-Air) updates, Game Assets, and App Bundles.
+It follows a **"Write Once, Read Many"** *(WORM)* design: compression happens at build-time, decompression is hot-path at run-time.
 
 **ZXC runs on all major architectures** (x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER (ppc64el), s390x, i386) with hand-tuned SIMD paths (AVX2/AVX-512 on x86_64, NEON on ARMv8+). It shows especially strong gains on modern ARM cores (Apple Silicon, AWS Graviton, Google Axion) thanks to a bitstream layout tuned for their deep pipelines.
 
@@ -45,12 +45,9 @@ It is designed to be **"Write Once, Read Many"** *(WORM)*. Unlike codecs like LZ
 
 ## ZXC Design Philosophy
 
-Traditional codecs often force a trade-off between **symmetric speed** (LZ4) and **archival density** (Zstd).
+Traditional codecs force a trade-off between **symmetric speed** (LZ4) and **archival density** (Zstd). **ZXC takes a third path: Asymmetric Efficiency.**
 
-**ZXC focuses on Asymmetric Efficiency.**
-
-Designed for the "Write-Once, Read-Many" reality of software distribution, ZXC utilizes a computationally intensive encoder to generate a bitstream specifically structured to **maximize decompression throughput**.
-By performing heavy analysis upfront, the encoder produces a layout optimized for the instruction pipelining and branch prediction capabilities of modern CPUs, particularly ARMv8, effectively offloading complexity from the decoder to the encoder.
+The encoder performs heavy analysis upfront: match selection, optimal parsing, statistics tuning, to produce a bitstream structured for the instruction pipelining and branch prediction of modern CPUs (particularly ARMv8). Complexity is **offloaded from the decoder to the encoder**, which is exactly the trade-off WORM workloads want.
 
 *   **Build Time:** You generally compress only once (on CI/CD).
 *   **Run Time:** You decompress millions of times (on every user's device). **ZXC respects this asymmetry.**
@@ -67,7 +64,7 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 *Decompression Speed vs Compressed Size — ARM64 Apple M2*
 
-![Decompression Speed vs Compressed Size](docs/images/bench-arm64-0.11.0.svg)
+![Decompression Speed vs Compressed Size](docs/images/bench-arm64.svg)
 
 
 ### 1. Mobile & Client: Apple Silicon (M2)
@@ -88,7 +85,7 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 | **2. Standard** | **ZXC -3** vs *LZ4 Default* | **5,297 MB/s** vs 4,259 MB/s **1.24x Faster** | **45.8** vs 47.6 **Smaller** (-1.8%) | **ZXC** outperforms LZ4 in read speed and ratio. |
 | **3. Max Density** | **ZXC -6** vs *LZ4HC -9* | **4,205 MB/s** vs 3,849 MB/s **1.09x Faster** | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** beats LZ4HC on both decode speed and ratio. |
 
-### 3. Build Server: x86_64 (AMD EPYC 9B45)
+### 3. Build Server: x86_64 (AMD EPYC 9B45 / Zen 5)
 *Scenario: CI/CD Pipelines compatibility.*
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
@@ -97,7 +94,7 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 | **2. Standard** | **ZXC -3** vs *LZ4 Default* | **5,955 MB/s** vs 5,013 MB/s **1.19x Faster** | **45.8** vs 47.6 **Smaller** (-1.8%) | **ZXC** offers improved speed and ratio. |
 | **3. Max Density** | **ZXC -6** vs *LZ4HC -9* | 4,695 MB/s vs **4,841 MB/s** (decode within 3%) | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** wins on ratio; decode trails `LZ4HC -9` by ~3%. |
 
-### 4. Production x86 Server: AMD EPYC 7763 (Zen 3)
+### 4. Production Server: x86_64 (AMD EPYC 7763 / Zen 3)
 *Scenario: Mainstream cloud workloads (AWS c6a, Azure HBv3, GCP n2d).*
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
@@ -108,19 +105,18 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 *Decompression Speed: ZXC vs LZ4 family at equivalent ratio tiers, across 4 CPUs (Fast ≈ 62%, Default ≈ 47%, High ≈ 37%)*
 
-![Decompression Speed: ZXC vs LZ4 family at equivalent ratio tiers](docs/images/bench-bars-0.11.0.svg)
+![Decompression Speed: ZXC vs LZ4 family at equivalent ratio tiers](docs/images/bench-bars.svg)
 
+
+*Effective Throughput : Ratio-Normalized Decode across ARM64 and x86 (decode x 100 / ratio%, LZ4 baseline = 1.00x)*
+
+![Effective Throughput](docs/images/bench-effective.svg)
 
 > **What is Effective Throughput?**
 >
 > Raw decode speed misses half the picture: in real workloads (asset streaming, container pulls, microservice payloads), the decoder is fed by a compressed-byte source - disk, network, inter-core - whose bandwidth is the bottleneck. The right question is *how much original data is delivered per MB of compressed input*.
 >
 > Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC level sits above LZ4** on every architecture, peaking at **2.0x on Apple Silicon** and ranging **1.15x–1.70x** on x86 and ARM cloud platforms.
-
-
-*Effective Throughput : Ratio-Normalized Decode across ARM64 and x86 (`decode x 100 / ratio`, LZ4 baseline = 1.00x)*
-
-![Effective Throughput](docs/images/bench-effective-0.11.0.svg)
 
 ### Benchmark ARM64 (Apple Silicon M2)
 
@@ -398,7 +394,8 @@ cmake --build build --parallel
 
 *   **Level 1, 2 (Fast):** Optimized for real-time assets (Gaming, UI).
 *   **Level 3, 4 (Balanced):** A strong middle-ground offering efficient compression speed and a ratio superior to LZ4.
-*   **Level 5 (Compact):** The best choice for Embedded, Firmware, or Archival. Better compression than LZ4 and significantly faster decoding than Zstd.
+*   **Level 5 (Compact):** A good choice for Embedded and Firmware. Better compression than LZ4 and significantly faster decoding than Zstd.
+*   **Level 6 (Max):** Highest ratio tier, matching LZ4-HC while keeping ZXC's decode advantage. Best for Archival and write-once / read-many workloads where compression time is amortized over many reads.
 
 ## Block Size Tuning
 
@@ -574,6 +571,7 @@ Community-maintained bindings:
 * **Continuous Fuzzing**: Integrated with ClusterFuzzLite suites — **5+ billion iterations** accumulated to date across compress, decompress, streaming and seekable API surfaces.
 * **Static Analysis**: Checked with Cppcheck & Clang Static Analyzer.
 * **CodeQL Analysis**: GitHub Advanced Security scanning for vulnerabilities.
+* **Snyk**: Continuous security and code analysis for dependencies and source.
 * **Code Coverage**: Automated tracking with Codecov integration.
 * **Dynamic Analysis**: Validated with Valgrind and ASan/UBSan in CI pipelines.
 * **Safe API**: Explicit buffer capacity is required for all operations.
