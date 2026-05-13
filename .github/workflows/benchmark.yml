@@ -6,9 +6,12 @@ on:
     branches: [ main ]
     paths:
       - 'src/**'
-      - '.github/workflows/benchmark.yml'
+      - 'include/**'
   pull_request:
     branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
 
 permissions:
   contents: read

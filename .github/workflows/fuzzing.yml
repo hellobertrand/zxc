@@ -17,6 +17,11 @@ on:
         default: '3600'
   pull_request:
     branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/fuzz_*.c'
+      - '.clusterfuzzlite/**'
   schedule:
     - cron: '0 1 * * 1'
 

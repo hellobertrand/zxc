@@ -51,6 +51,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
+          cache-workspaces: "wrappers/rust -> target"
 
       - name: Run Tests
         run: cargo test --workspace
@@ -72,6 +73,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
+          cache-workspaces: "wrappers/rust -> target"
 
       - name: Verify Version Matches Release Tag
         run: |
@@ -88,10 +90,13 @@ jobs:
           
           echo "Version matches: $RELEASE_VERSION"
 
+      - name: Authenticate with crates.io
+        run: cargo login ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
       - name: Publish zxc-compress-sys (FFI bindings)
         run: |
           cd zxc-sys
-          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          cargo publish
         continue-on-error: false
 
       # Wait for zxc-compress-sys to be available on crates.io before publishing zxc-compress
@@ -101,7 +106,7 @@ jobs:
       - name: Publish zxc-compress (safe wrapper)
         run: |
           cd zxc
-          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          cargo publish
         continue-on-error: false
 
       - name: Summary
