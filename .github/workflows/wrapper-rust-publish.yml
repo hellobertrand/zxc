@@ -51,6 +51,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
+          cache-workspaces: "wrappers/rust -> target"
 
       - name: Run Tests
         run: cargo test --workspace
@@ -72,6 +73,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
+          cache-workspaces: "wrappers/rust -> target"
 
       - name: Verify Version Matches Release Tag
         run: |
