@@ -169,9 +169,28 @@ jobs:
           name: zxc-${{ matrix.platform }}
           path: ${{ env.ARCHIVE }}
 
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Sanitize ref name
+        id: ref
+        run: echo "slug=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          artifact-name: zxc-${{ steps.ref.outputs.slug }}-sbom.spdx.json
+          upload-release-assets: false
+
   release:
     name: Create GitHub Release
-    needs: build-and-test
+    needs: [build-and-test, sbom]
     runs-on: ubuntu-slim
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -194,5 +213,6 @@ jobs:
           files: |
             release/*.tar.gz
             release/*.zip
+            release/*.spdx.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
