@@ -1,0 +1,58 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "zxc",
+  "documentNamespace": "https://github.com/hellobertrand/zxc/sbom/@VERSION@-@COMMIT@",
+  "creationInfo": {
+    "created": "@CREATED@",
+    "creators": ["Tool: zxc-build-workflow"]
+  },
+  "packages": [
+    {
+      "name": "zxc",
+      "SPDXID": "SPDXRef-Package-zxc",
+      "versionInfo": "@VERSION@",
+      "supplier": "Person: Bertrand Lebonnois",
+      "originator": "Person: Bertrand Lebonnois",
+      "downloadLocation": "https://github.com/hellobertrand/zxc",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "APPLICATION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/hellobertrand/zxc@@VERSION@"
+        }
+      ]
+    },
+    {
+      "name": "rapidhash",
+      "SPDXID": "SPDXRef-Package-rapidhash",
+      "versionInfo": "V3",
+      "supplier": "Person: Nicolas De Carli",
+      "originator": "Person: Nicolas De Carli",
+      "downloadLocation": "https://github.com/Nicoshev/rapidhash",
+      "filesAnalyzed": false,
+      "sourceInfo": "Vendored single-header at src/lib/vendors/rapidhash.h",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright (C) 2025 Nicolas De Carli",
+      "primaryPackagePurpose": "SOURCE",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/Nicoshev/rapidhash@V3"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    { "spdxElementId": "SPDXRef-DOCUMENT",    "relationshipType": "DESCRIBES",   "relatedSpdxElement": "SPDXRef-Package-zxc" },
+    { "spdxElementId": "SPDXRef-Package-zxc", "relationshipType": "STATIC_LINK", "relatedSpdxElement": "SPDXRef-Package-rapidhash" }
+  ]
+}
