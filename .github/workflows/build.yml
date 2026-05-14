@@ -180,60 +180,71 @@ jobs:
         id: ref
         run: echo "slug=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
 
-      - name: Install Syft
-        uses: anchore/sbom-action/download-syft@v0
-
-      - name: Generate and augment SBOM
+      - name: Generate SBOM (SPDX 2.3)
         shell: bash
         env:
           SBOM_FILE: zxc-${{ steps.ref.outputs.slug }}-sbom.spdx.json
           VERSION: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
         run: |
-          syft scan dir:src/ -o spdx-json="$SBOM_FILE"
-          jq --arg version "$VERSION" --arg repo "$REPO" '
-            .name = "zxc" |
-            .packages += [
-              {
-                name: "zxc",
-                SPDXID: "SPDXRef-Package-zxc",
-                versionInfo: $version,
-                supplier: ("Organization: " + ($repo | split("/")[0])),
-                downloadLocation: ("https://github.com/" + $repo),
-                filesAnalyzed: false,
-                licenseConcluded: "BSD-3-Clause",
-                licenseDeclared: "BSD-3-Clause",
-                copyrightText: "NOASSERTION",
-                externalRefs: [{
-                  referenceCategory: "PACKAGE-MANAGER",
-                  referenceType: "purl",
-                  referenceLocator: ("pkg:github/" + $repo + "@" + $version)
-                }]
+          jq -n \
+            --arg version "$VERSION" \
+            --arg repo "$REPO" \
+            --arg sha "$SHA" \
+            --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              spdxVersion: "SPDX-2.3",
+              dataLicense: "CC0-1.0",
+              SPDXID: "SPDXRef-DOCUMENT",
+              name: "zxc",
+              documentNamespace: ("https://github.com/" + $repo + "/sbom/" + $version + "-" + $sha),
+              creationInfo: {
+                created: $created,
+                creators: ["Tool: zxc-build-workflow"]
               },
-              {
-                name: "rapidhash",
-                SPDXID: "SPDXRef-Package-rapidhash",
-                versionInfo: "V3",
-                supplier: "Person: Nicolas De Carli",
-                originator: "Person: Nicolas De Carli",
-                downloadLocation: "https://github.com/Nicoshev/rapidhash",
-                filesAnalyzed: false,
-                sourceInfo: "Vendored single-header at src/lib/vendors/rapidhash.h",
-                licenseConcluded: "MIT",
-                licenseDeclared: "MIT",
-                copyrightText: "Copyright (C) 2025 Nicolas De Carli",
-                externalRefs: [{
-                  referenceCategory: "PACKAGE-MANAGER",
-                  referenceType: "purl",
-                  referenceLocator: "pkg:github/Nicoshev/rapidhash@V3"
-                }]
-              }
-            ] |
-            .relationships = ((.relationships // []) + [
-              { spdxElementId: "SPDXRef-DOCUMENT",     relationshipType: "DESCRIBES",   relatedSpdxElement: "SPDXRef-Package-zxc" },
-              { spdxElementId: "SPDXRef-Package-zxc",  relationshipType: "STATIC_LINK", relatedSpdxElement: "SPDXRef-Package-rapidhash" }
-            ])
-          ' "$SBOM_FILE" > "$SBOM_FILE.tmp" && mv "$SBOM_FILE.tmp" "$SBOM_FILE"
+              packages: [
+                {
+                  name: "zxc",
+                  SPDXID: "SPDXRef-Package-zxc",
+                  versionInfo: $version,
+                  supplier: "Person: Bertrand Lebonnois",
+                  originator: "Person: Bertrand Lebonnois",
+                  downloadLocation: ("https://github.com/" + $repo),
+                  filesAnalyzed: false,
+                  licenseConcluded: "BSD-3-Clause",
+                  licenseDeclared: "BSD-3-Clause",
+                  copyrightText: "NOASSERTION",
+                  externalRefs: [{
+                    referenceCategory: "PACKAGE-MANAGER",
+                    referenceType: "purl",
+                    referenceLocator: ("pkg:github/" + $repo + "@" + $version)
+                  }]
+                },
+                {
+                  name: "rapidhash",
+                  SPDXID: "SPDXRef-Package-rapidhash",
+                  versionInfo: "V3",
+                  supplier: "Person: Nicolas De Carli",
+                  originator: "Person: Nicolas De Carli",
+                  downloadLocation: "https://github.com/Nicoshev/rapidhash",
+                  filesAnalyzed: false,
+                  sourceInfo: "Vendored single-header at src/lib/vendors/rapidhash.h",
+                  licenseConcluded: "MIT",
+                  licenseDeclared: "MIT",
+                  copyrightText: "Copyright (C) 2025 Nicolas De Carli",
+                  externalRefs: [{
+                    referenceCategory: "PACKAGE-MANAGER",
+                    referenceType: "purl",
+                    referenceLocator: "pkg:github/Nicoshev/rapidhash@V3"
+                  }]
+                }
+              ],
+              relationships: [
+                { spdxElementId: "SPDXRef-DOCUMENT",    relationshipType: "DESCRIBES",   relatedSpdxElement: "SPDXRef-Package-zxc" },
+                { spdxElementId: "SPDXRef-Package-zxc", relationshipType: "STATIC_LINK", relatedSpdxElement: "SPDXRef-Package-rapidhash" }
+              ]
+            }' > "$SBOM_FILE"
 
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v7
