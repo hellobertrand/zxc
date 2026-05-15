@@ -54,7 +54,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tools
-        run: python -m pip install cibuildwheel==3.3.1 setuptools-scm
+        run: python -m pip install --require-hashes -r wrappers/python/requirements/build.txt
 
       - name: Get version from git
         id: version
@@ -92,7 +92,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install build
-        run: python -m pip install build
+        run: python -m pip install --require-hashes -r wrappers/python/requirements/sdist.txt
 
       - name: Build sdist
         run: python -m build --sdist
@@ -132,7 +132,7 @@ jobs:
       - name: Install wheel and test dependencies
         run: |
           pip install --no-index --find-links wheelhouse zxc-compress
-          pip install pytest
+          pip install --require-hashes -r wrappers/python/requirements/test.txt
       
       - name: Run test suite
         run: pytest wrappers/python/tests/ -v
