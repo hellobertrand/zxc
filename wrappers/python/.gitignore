@@ -47,6 +47,7 @@ GTAGS
 ###################
 build
 build-*
+!requirements/build-*
 _build
 _version.py
 
