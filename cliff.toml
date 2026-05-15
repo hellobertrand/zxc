@@ -5,14 +5,14 @@
 header = """
 # Changelog
 
-Generated automatically from git history (commits + tags) by git-cliff on every push to `main`. Do not edit manually.
+Generated automatically from git history (commits + tags) by git-cliff at release time. Do not edit manually.
 
 """
 body = """
 {% if version -%}
-{{ version }} ({{ timestamp | date(format="%b %Y") }})
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
 {% else -%}
-Unreleased
+## [Unreleased]
 {% endif -%}
 {% for group, commits in commits | group_by(attribute="group") -%}
 {% for commit in commits -%}
