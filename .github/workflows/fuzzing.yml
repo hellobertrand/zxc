@@ -25,14 +25,16 @@ on:
   schedule:
     - cron: '0 1 * * 1'
 
-permissions: 
+permissions:
   contents: read
-  security-events: write
 
 jobs:
   fuzzing:
     name: Run Fuzzing (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.fuzzer }}-${{ matrix.sanitizer }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true

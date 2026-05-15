@@ -18,6 +18,9 @@ on:
       - 'CMakeLists.txt'
       - '.github/workflows/wrapper-wasm.yml'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
