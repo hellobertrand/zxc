@@ -25,14 +25,16 @@ on:
   schedule:
     - cron: '0 1 * * 1'
 
-permissions: 
+permissions:
   contents: read
-  security-events: write
 
 jobs:
   fuzzing:
     name: Run Fuzzing (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.fuzzer }}-${{ matrix.sanitizer }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
@@ -44,7 +46,7 @@ jobs:
 
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
     - name: Configure Fuzzer Target
       run: |
@@ -65,7 +67,7 @@ jobs:
 
     - name: Build Fuzzers (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
       id: build
-      uses: google/clusterfuzzlite/actions/build_fuzzers@v1
+      uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
       with:
         language: c
         github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -73,7 +75,7 @@ jobs:
 
     - name: Run Fuzzers (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
       id: run
-      uses: google/clusterfuzzlite/actions/run_fuzzers@v1
+      uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         mode: ${{ github.event_name == 'pull_request' && 'code-change' || inputs.mode || 'batch' }}
@@ -85,7 +87,7 @@ jobs:
 
     - name: Upload SARIF to GitHub Security
       if: success() || failure()
-      uses: github/codeql-action/upload-sarif@v4
+      uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
       with:
         sarif_file: .
         category: clusterfuzzlite-${{ matrix.fuzzer }}-${{ matrix.sanitizer }}
@@ -94,7 +96,7 @@ jobs:
     name: Thread Sanitizer
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Build with TSan
         run: |
           cmake -B build -DCMAKE_C_FLAGS="-fsanitize=thread -g -fno-omit-frame-pointer" -DCMAKE_BUILD_TYPE=Debug
@@ -107,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install LLVM Tools
         run: |
@@ -184,7 +186,7 @@ jobs:
             --format=html -output-dir=build-cov/coverage_html
 
       - name: Upload Coverage Report
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-coverage-report
           path: build-cov/coverage_html/

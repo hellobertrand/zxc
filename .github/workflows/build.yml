@@ -20,6 +20,10 @@ jobs:
   build-and-test:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -53,7 +57,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Select Latest Compiler (Linux)
         if: runner.os == 'Linux'
@@ -125,6 +129,11 @@ jobs:
 
           **Documentation, benchmarks & source:** https://github.com/${GITHUB_REPOSITORY}
 
+          **Verify build provenance (SLSA):** every archive is signed via [GitHub Artifact Attestations](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds). Verify with:
+          \`\`\`
+          gh attestation verify <archive> --repo ${GITHUB_REPOSITORY}
+          \`\`\`
+
           License: BSD-3-Clause (see LICENSE.txt)
           EOF
 
@@ -136,9 +145,17 @@ jobs:
             tar -czvf ../${{ matrix.asset_name }}.tar.gz *
           fi
 
+      - name: Attest build provenance (SLSA)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-path: |
+            ${{ matrix.asset_name }}.tar.gz
+            ${{ matrix.asset_name }}.zip
+
       - name: Upload Artifacts
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.asset_name }}
           path: |
@@ -154,10 +171,10 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
 
       - name: Create Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           files: |
             **/*.tar.gz

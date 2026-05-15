@@ -46,6 +46,11 @@ Performs static analysis using Cppcheck and Clang Static Analyzer. Runs memory l
 
 Runs CodeQL security analysis to detect potential security vulnerabilities and coding errors in the C/C++ codebase.
 
+### scorecard.yml - OSSF Scorecard
+**Triggers:** Push to main, scheduled (weekly), manual dispatch
+
+Runs the [OSSF Scorecard](https://github.com/ossf/scorecard) analysis to evaluate the project against open source security best practices (branch protection, signed releases, dependency pinning, etc.). Results are published to the OpenSSF public dashboard and uploaded to GitHub's code scanning view as SARIF.
+
 ### vendors.yml - Vendor Maintenance
 **Triggers:** Scheduled (weekly), manual dispatch
 
