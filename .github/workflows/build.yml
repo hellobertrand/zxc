@@ -20,6 +20,10 @@ jobs:
   build-and-test:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -125,6 +129,11 @@ jobs:
 
           **Documentation, benchmarks & source:** https://github.com/${GITHUB_REPOSITORY}
 
+          **Verify build provenance (SLSA):** every archive is signed via [GitHub Artifact Attestations](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds). Verify with:
+          \`\`\`
+          gh attestation verify <archive> --repo ${GITHUB_REPOSITORY}
+          \`\`\`
+
           License: BSD-3-Clause (see LICENSE.txt)
           EOF
 
@@ -135,6 +144,14 @@ jobs:
           else
             tar -czvf ../${{ matrix.asset_name }}.tar.gz *
           fi
+
+      - name: Attest build provenance (SLSA)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            ${{ matrix.asset_name }}.tar.gz
+            ${{ matrix.asset_name }}.zip
 
       - name: Upload Artifacts
         if: startsWith(github.ref, 'refs/tags/')
