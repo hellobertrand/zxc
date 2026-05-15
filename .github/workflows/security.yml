@@ -42,8 +42,8 @@ jobs:
           cd wrappers/rust
           cargo build --workspace --all-targets
         elif [ "${{ matrix.language }}" = "python" ]; then
-          cd wrappers/python
-          python3 -m pip install -e .
+          python3 -m pip install --require-hashes -r wrappers/python/requirements/build-deps.txt
+          python3 -m pip install -e wrappers/python --no-build-isolation --no-deps
         elif [ "${{ matrix.language }}" = "go" ]; then
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
           cmake --build build --parallel
