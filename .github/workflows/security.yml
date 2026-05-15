@@ -51,7 +51,7 @@ jobs:
           CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go build ./...
         elif [ "${{ matrix.language }}" = "javascript-typescript" ]; then
           cd wrappers/nodejs
-          npm install
+          npm ci
         fi
 
     - name: Perform CodeQL Analysis

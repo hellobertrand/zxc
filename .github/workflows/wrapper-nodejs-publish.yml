@@ -55,7 +55,7 @@ jobs:
           node-version: "22"
 
       - name: Install dependencies and build
-        run: npm install
+        run: npm ci
 
       - name: Run tests
         run: npx vitest run --globals
@@ -107,7 +107,7 @@ jobs:
           node-version: ${{ matrix.node }}
 
       - name: Install dependencies and build
-        run: npm install
+        run: npm ci
 
       - name: Run tests
         run: npx vitest run --globals
