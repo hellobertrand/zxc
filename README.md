@@ -217,25 +217,33 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 ### Option 1: Download Release (GitHub)
 
 1.  Go to the [Releases page](https://github.com/hellobertrand/zxc/releases).
-2.  Download the archive matching your architecture:
+2.  Download the archive matching your architecture (replace `<version>` with the release, e.g. `0.11.0`):
 
     **macOS:**
-    *   `zxc-macos-arm64.tar.gz` (NEON optimizations included).
+    *   `zxc-<version>-macos-arm64.tar.gz` (NEON optimizations included).
 
     **Linux:**
-    *   `zxc-linux-aarch64.tar.gz` (NEON optimizations included).
-    *   `zxc-linux-x86_64.tar.gz` (Runtime dispatch for AVX2/AVX512).
+    *   `zxc-<version>-linux-arm64.tar.gz` (NEON optimizations included).
+    *   `zxc-<version>-linux-x86_64.tar.gz` (Runtime dispatch for AVX2/AVX512).
 
     **Windows:**
-    *   `zxc-windows-x64.zip` (Runtime dispatch for AVX2/AVX512).
-    *   `zxc-windows-arm64.zip` (NEON optimizations included).
+    *   `zxc-<version>-windows-x86_64.zip` (Runtime dispatch for AVX2/AVX512).
+    *   `zxc-<version>-windows-arm64.zip` (NEON optimizations included).
 
-3.  Extract and install:
+3.  Verify, then extract. Each archive ships with a `.sha256` companion:
     ```bash
-    tar -xzf zxc-linux-x86_64.tar.gz -C /usr/local
+    # Quick integrity check (against download corruption / mirrors)
+    sha256sum -c zxc-<version>-linux-x86_64.tar.gz.sha256
+
+    # Authenticity check (SLSA build provenance — each archive is signed)
+    gh attestation verify zxc-<version>-linux-x86_64.tar.gz --repo hellobertrand/zxc
+
+    # Extract
+    tar -xzf zxc-<version>-linux-x86_64.tar.gz
+    sudo cp -r zxc-<version>-linux-x86_64/* /usr/local/
     ```
 
-    Each archive contains:
+    Each archive contains a versioned top-level directory with:
     ```
     bin/zxc                          # CLI binary
     include/                         # C headers (zxc.h, zxc_buffer.h, ...)

@@ -31,27 +31,27 @@ jobs:
           - name: Linux x86_64
             os: ubuntu-latest
             artifact_name: zxc
-            asset_name: zxc-linux-x86_64
+            platform: linux-x86_64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
           - name: Linux ARM64
             os: ubuntu-24.04-arm
             artifact_name: zxc
-            asset_name: zxc-linux-aarch64
+            platform: linux-arm64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
           - name: macOS ARM64
             os: macos-26
             artifact_name: zxc
-            asset_name: zxc-macos-arm64
+            platform: macos-arm64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
-          - name: Windows x64
+          - name: Windows x86_64
             os: windows-latest
             artifact_name: zxc.exe
-            asset_name: zxc-windows-x64
+            platform: windows-x86_64
             cmake_flags: "-A x64 -DZXC_NATIVE_ARCH=OFF"
           - name: Windows ARM64
             os: windows-11-arm
             artifact_name: zxc.exe
-            asset_name: zxc-windows-arm64
+            platform: windows-arm64
             cmake_flags: "-A ARM64 -DZXC_NATIVE_ARCH=OFF"
 
 
@@ -105,18 +105,27 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCHIVE_BASE="zxc-${VERSION}-${{ matrix.platform }}"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            ARCHIVE="${ARCHIVE_BASE}.zip"
+          else
+            ARCHIVE="${ARCHIVE_BASE}.tar.gz"
+          fi
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
           # Install to staging directory using CMake (Standard way for all OS)
-          cmake --install build --prefix release_staging --config Release
+          cmake --install build --prefix "release_staging/${ARCHIVE_BASE}" --config Release
 
           # Strip binary on Unix-like systems only (installed to bin/)
           if [[ "${{ runner.os }}" != "Windows" ]]; then
-            strip release_staging/bin/${{ matrix.artifact_name }}
+            strip "release_staging/${ARCHIVE_BASE}/bin/${{ matrix.artifact_name }}"
           fi
 
-          cp LICENSE release_staging/LICENSE.txt
-          cp docs/man/zxc.1.md release_staging/MANUAL.md
-          cat > release_staging/README.md <<EOF
-          # ZXC ${GITHUB_REF_NAME#v}
+          cp LICENSE "release_staging/${ARCHIVE_BASE}/LICENSE.txt"
+          cp docs/man/zxc.1.md "release_staging/${ARCHIVE_BASE}/MANUAL.md"
+          cat > "release_staging/${ARCHIVE_BASE}/README.md" <<EOF
+          # ZXC ${VERSION}
 
           High-performance asymmetric lossless compression — optimized for maximum decompression throughput.
 
@@ -137,30 +146,33 @@ jobs:
           License: BSD-3-Clause (see LICENSE.txt)
           EOF
 
-          # Create archive
+          # Create archive with versioned top-level directory
           cd release_staging
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            7z a ../${{ matrix.asset_name }}.zip *
+            7z a "../${ARCHIVE}" "${ARCHIVE_BASE}"
           else
-            tar -czvf ../${{ matrix.asset_name }}.tar.gz *
+            tar -czvf "../${ARCHIVE}" "${ARCHIVE_BASE}"
           fi
+          cd ..
+
+          # Per-file checksum companion
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          cat "${ARCHIVE}.sha256"
 
       - name: Attest build provenance (SLSA)
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
         with:
-          subject-path: |
-            ${{ matrix.asset_name }}.tar.gz
-            ${{ matrix.asset_name }}.zip
+          subject-path: ${{ env.ARCHIVE }}
 
       - name: Upload Artifacts
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.asset_name }}
+          name: zxc-${{ matrix.platform }}
           path: |
-            ${{ matrix.asset_name }}.tar.gz
-            ${{ matrix.asset_name }}.zip
+            ${{ env.ARCHIVE }}
+            ${{ env.ARCHIVE }}.sha256
 
   release:
     name: Create GitHub Release
@@ -172,12 +184,21 @@ jobs:
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) -exec mv {} release/ \;
+          ls -la release
 
       - name: Create Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           files: |
-            **/*.tar.gz
-            **/*.zip
+            release/*.tar.gz
+            release/*.zip
+            release/*.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
