@@ -798,22 +798,6 @@ pub struct zxc_cctx_t {
     pub max_epoch: u32,
 }
 
-/// On-disk block header (8 bytes, little-endian).
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct zxc_block_header_t {
-    /// Block type (see FORMAT.md).
-    pub block_type: u8,
-    /// Flags (e.g., checksum presence).
-    pub block_flags: u8,
-    /// Reserved for future protocol extensions.
-    pub reserved: u8,
-    /// 1-byte header CRC.
-    pub header_crc: u8,
-    /// Compressed payload size (excluding this header).
-    pub comp_size: u32,
-}
-
 unsafe extern "C" {
     /// Initializes a ZXC compression context.
     ///
@@ -837,70 +821,6 @@ unsafe extern "C" {
     /// - `ctx` must be a context previously initialised with
     ///   [`zxc_cctx_init`] (or null).
     pub fn zxc_cctx_free(ctx: *mut zxc_cctx_t);
-
-    /// Writes the standard ZXC file header to `dst`.
-    ///
-    /// # Safety
-    /// - `dst` must point to at least `dst_capacity` bytes.
-    ///
-    /// Returns `ZXC_FILE_HEADER_SIZE` on success, or `ZXC_ERROR_DST_TOO_SMALL`.
-    pub fn zxc_write_file_header(
-        dst: *mut u8,
-        dst_capacity: usize,
-        chunk_size: usize,
-        has_checksum: c_int,
-    ) -> c_int;
-
-    /// Validates and parses the ZXC file header from `src`.
-    ///
-    /// `out_block_size` and `out_has_checksum` may be null.
-    ///
-    /// # Safety
-    /// - `src` must point to at least `src_size` bytes.
-    pub fn zxc_read_file_header(
-        src: *const u8,
-        src_size: usize,
-        out_block_size: *mut usize,
-        out_has_checksum: *mut c_int,
-    ) -> c_int;
-
-    /// Serialises a block header into `dst` (8 bytes, little-endian).
-    ///
-    /// # Safety
-    /// - `dst` must point to at least `dst_capacity` bytes.
-    /// - `bh` must be non-null.
-    ///
-    /// Returns `ZXC_BLOCK_HEADER_SIZE` on success, or `ZXC_ERROR_DST_TOO_SMALL`.
-    pub fn zxc_write_block_header(
-        dst: *mut u8,
-        dst_capacity: usize,
-        bh: *const zxc_block_header_t,
-    ) -> c_int;
-
-    /// Parses a block header from `src` (endianness conversion included).
-    ///
-    /// # Safety
-    /// - `src` must point to at least `src_size` bytes.
-    /// - `bh` must be a valid (possibly uninitialised) output pointer.
-    pub fn zxc_read_block_header(
-        src: *const u8,
-        src_size: usize,
-        bh: *mut zxc_block_header_t,
-    ) -> c_int;
-
-    /// Writes the 12-byte file footer (original size + optional global hash).
-    ///
-    /// # Safety
-    /// - `dst` must point to at least `dst_capacity` bytes.
-    ///
-    /// Returns bytes written, or `ZXC_ERROR_DST_TOO_SMALL`.
-    pub fn zxc_write_file_footer(
-        dst: *mut u8,
-        dst_capacity: usize,
-        src_size: u64,
-        global_hash: u32,
-        checksum_enabled: c_int,
-    ) -> c_int;
 }
 
 // =============================================================================

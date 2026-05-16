@@ -274,18 +274,6 @@ typedef struct {
 } zxc_cctx_t;
 ```
 
-**Block header** (8 bytes on disk):
-
-```c
-typedef struct {
-    uint8_t  block_type;   // See FORMAT.md §4
-    uint8_t  block_flags;
-    uint8_t  reserved;
-    uint8_t  header_crc;   // 1-byte header CRC
-    uint32_t comp_size;    // Compressed payload size (excl. header)
-} zxc_block_header_t;
-```
-
 ---
 
 ## 7. Buffer API
@@ -1003,7 +991,12 @@ Returns the encoded byte size of a seek table for `num_blocks` blocks.
 ## 12. Sans-IO API
 
 Declared in `zxc_sans_io.h` (not included by `zxc.h` - opt-in).
-Low-level primitives for building custom compression drivers.
+Exposes a reusable compression context for callers that need to drive
+multiple blocks through their own loop.
+
+Frame primitives (file header, block header, file footer) are intentionally
+kept private while the on-disk layout is still allowed to evolve - use the
+buffer or streaming APIs to produce/consume complete ZXC frames.
 
 ### `zxc_cctx_init`
 
@@ -1028,76 +1021,6 @@ ZXC_EXPORT void zxc_cctx_free(zxc_cctx_t* ctx);
 ```
 
 Frees internal buffers. Does **not** free `ctx` itself.
-
-### `zxc_write_file_header`
-
-```c
-ZXC_EXPORT int zxc_write_file_header(
-    uint8_t* dst,
-    size_t   dst_capacity,
-    size_t   chunk_size,
-    int      has_checksum
-);
-```
-
-Writes the 16-byte file header.  
-**Returns**: bytes written, or `ZXC_ERROR_DST_TOO_SMALL`.
-
-### `zxc_read_file_header`
-
-```c
-ZXC_EXPORT int zxc_read_file_header(
-    const uint8_t* src,
-    size_t         src_size,
-    size_t*        out_block_size,    // optional
-    int*           out_has_checksum   // optional
-);
-```
-
-Validates the file header (magic, version, CRC16).  
-**Returns**: `ZXC_OK`, or `ZXC_ERROR_BAD_MAGIC` / `ZXC_ERROR_BAD_VERSION` /
-`ZXC_ERROR_SRC_TOO_SMALL`.
-
-### `zxc_write_block_header`
-
-```c
-ZXC_EXPORT int zxc_write_block_header(
-    uint8_t*                  dst,
-    size_t                    dst_capacity,
-    const zxc_block_header_t* bh
-);
-```
-
-Serializes a block header (8 bytes, little-endian).  
-**Returns**: bytes written, or `ZXC_ERROR_DST_TOO_SMALL`.
-
-### `zxc_read_block_header`
-
-```c
-ZXC_EXPORT int zxc_read_block_header(
-    const uint8_t*      src,
-    size_t              src_size,
-    zxc_block_header_t* bh
-);
-```
-
-Parses a block header (endianness conversion included).  
-**Returns**: `ZXC_OK` or `ZXC_ERROR_SRC_TOO_SMALL`.
-
-### `zxc_write_file_footer`
-
-```c
-ZXC_EXPORT int zxc_write_file_footer(
-    uint8_t* dst,
-    size_t   dst_capacity,
-    uint64_t src_size,
-    uint32_t global_hash,
-    int      checksum_enabled
-);
-```
-
-Writes the 12-byte footer (original size + optional global hash).  
-**Returns**: bytes written, or `ZXC_ERROR_DST_TOO_SMALL`.
 
 ---
 
@@ -1194,12 +1117,7 @@ The shared library exports exactly **54 symbols** (verified with `nm -gU`):
 | 46 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
 | 47 | `zxc_cctx_init` | Sans-IO | `zxc_sans_io.h` |
 | 48 | `zxc_cctx_free` | Sans-IO | `zxc_sans_io.h` |
-| 49 | `zxc_write_file_header` | Sans-IO | `zxc_sans_io.h` |
-| 50 | `zxc_read_file_header` | Sans-IO | `zxc_sans_io.h` |
-| 51 | `zxc_write_block_header` | Sans-IO | `zxc_sans_io.h` |
-| 52 | `zxc_read_block_header` | Sans-IO | `zxc_sans_io.h` |
-| 53 | `zxc_write_file_footer` | Sans-IO | `zxc_sans_io.h` |
-| 54 | `zxc_error_name` | Error | `zxc_error.h` |
+| 49 | `zxc_error_name` | Error | `zxc_error.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon`, `_avx2`, `_avx512`) are compiled with

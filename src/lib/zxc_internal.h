@@ -1526,6 +1526,120 @@ int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRI
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
 
+/* ---------------------------------------------------------------------------
+ * Internal frame primitives.
+ *
+ * Read/write the ZXC file header, block header, and file footer. These were
+ * previously exposed via zxc_sans_io.h but no in-tree consumer outside of the
+ * library implementation needs them, and exposing them freezes on-disk layout
+ * details (block_flags layout, footer composition) that we want to keep free
+ * to evolve until the format is declared stable.
+ * --------------------------------------------------------------------------- */
+
+/**
+ * @brief On-disk header structure for a ZXC block (8 bytes, little-endian).
+ *
+ * @c raw_size is not stored in the header; decoders derive it from Section
+ * Descriptors within the compressed payload.
+ */
+typedef struct {
+    uint8_t block_type;  /**< Block type (see @ref zxc_block_type_t). */
+    uint8_t block_flags; /**< Flags (e.g., checksum presence). */
+    uint8_t reserved;    /**< Reserved for future protocol extensions. */
+    uint8_t header_crc;  /**< Header integrity checksum (1 byte). */
+    uint32_t comp_size;  /**< Compressed size excluding this header. */
+} zxc_block_header_t;
+
+/**
+ * @brief Writes the standard ZXC file header into @p dst.
+ *
+ * Stores the magic word (little-endian) and the version number into the
+ * provided buffer, after checking that it has sufficient capacity.
+ *
+ * @param[out] dst           Destination buffer.
+ * @param[in]  dst_capacity  Total capacity of @p dst in bytes.
+ * @param[in]  chunk_size    Block size to encode in the header.
+ * @param[in]  has_checksum  Non-zero if the checksum bit must be set.
+ *
+ * @return Number of bytes written (@c ZXC_FILE_HEADER_SIZE) on success,
+ *         or @c ZXC_ERROR_DST_TOO_SMALL if @p dst_capacity is insufficient.
+ */
+int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, const size_t chunk_size,
+                          const int has_checksum);
+
+/**
+ * @brief Validates and reads the ZXC file header from @p src.
+ *
+ * Checks that the source buffer is large enough to contain a ZXC file header
+ * and that the magic word and version number match the expected format.
+ *
+ * @param[in]  src               Pointer to the source buffer.
+ * @param[in]  src_size          Size of the source buffer in bytes.
+ * @param[out] out_block_size    Optional pointer that receives the recommended
+ *                               block size. May be @c NULL.
+ * @param[out] out_has_checksum  Optional pointer that receives the checksum
+ *                               flag. May be @c NULL.
+ *
+ * @return @c ZXC_OK on success, or a negative error code (e.g.
+ *         @c ZXC_ERROR_SRC_TOO_SMALL, @c ZXC_ERROR_BAD_MAGIC,
+ *         @c ZXC_ERROR_BAD_VERSION).
+ */
+int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size, size_t* out_block_size,
+                         int* out_has_checksum);
+
+/**
+ * @brief Encodes a block header into @p dst.
+ *
+ * Serialises the contents of a @ref zxc_block_header_t structure into a byte
+ * array in little-endian format, after checking that @p dst has sufficient
+ * capacity.
+ *
+ * @param[out] dst           Destination buffer.
+ * @param[in]  dst_capacity  Total capacity of @p dst in bytes.
+ * @param[in]  bh            Source block header structure to serialise.
+ *
+ * @return Number of bytes written (@c ZXC_BLOCK_HEADER_SIZE) on success,
+ *         or @c ZXC_ERROR_DST_TOO_SMALL if @p dst_capacity is insufficient.
+ */
+int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
+                           const zxc_block_header_t* bh);
+
+/**
+ * @brief Reads and parses a ZXC block header from @p src.
+ *
+ * Extracts the block type, flags, reserved fields, and compressed size from
+ * the first @c ZXC_BLOCK_HEADER_SIZE bytes of @p src. Multi-byte fields are
+ * decoded as little-endian.
+ *
+ * @param[in]  src       Source buffer holding the encoded block header.
+ * @param[in]  src_size  Size of @p src in bytes.
+ * @param[out] bh        Block header structure populated with the parsed data.
+ *
+ * @return @c ZXC_OK on success, or @c ZXC_ERROR_SRC_TOO_SMALL if @p src is
+ *         smaller than @c ZXC_BLOCK_HEADER_SIZE.
+ */
+int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
+                          zxc_block_header_t* bh);
+
+/**
+ * @brief Writes the ZXC file footer into @p dst.
+ *
+ * The footer stores the original uncompressed size and an optional global
+ * checksum. It is always @c ZXC_FILE_FOOTER_SIZE (12) bytes long.
+ *
+ * @param[out] dst               Destination buffer.
+ * @param[in]  dst_capacity      Total capacity of @p dst in bytes.
+ * @param[in]  src_size          Original uncompressed size of the data.
+ * @param[in]  global_hash       Global checksum hash (used only when
+ *                               @p checksum_enabled is non-zero).
+ * @param[in]  checksum_enabled  Non-zero if the checksum should be emitted.
+ *
+ * @return Number of bytes written (@c ZXC_FILE_FOOTER_SIZE) on success,
+ *         or @c ZXC_ERROR_DST_TOO_SMALL on failure.
+ */
+int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
+                          const uint32_t global_hash, const int checksum_enabled);
+
 /** @} */ /* end of internal */
 
 #ifdef __cplusplus
