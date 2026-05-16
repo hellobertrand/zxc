@@ -153,11 +153,6 @@ jobs:
           else
             tar -czvf "../${ARCHIVE}" "${ARCHIVE_BASE}"
           fi
-          cd ..
-
-          # Per-file checksum companion
-          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
-          cat "${ARCHIVE}.sha256"
 
       - name: Attest build provenance (SLSA)
         if: startsWith(github.ref, 'refs/tags/')
@@ -170,9 +165,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zxc-${{ matrix.platform }}
-          path: |
-            ${{ env.ARCHIVE }}
-            ${{ env.ARCHIVE }}.sha256
+          path: ${{ env.ARCHIVE }}
 
   release:
     name: Create GitHub Release
@@ -190,7 +183,7 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release
-          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) -exec mv {} release/ \;
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec mv {} release/ \;
           ls -la release
 
       - name: Create Release
@@ -199,6 +192,5 @@ jobs:
           files: |
             release/*.tar.gz
             release/*.zip
-            release/*.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

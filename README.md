@@ -230,12 +230,9 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
     *   `zxc-<version>-windows-x86_64.zip` (Runtime dispatch for AVX2/AVX512).
     *   `zxc-<version>-windows-arm64.zip` (NEON optimizations included).
 
-3.  Verify, then extract. Each archive ships with a `.sha256` companion:
+3.  Verify, then extract. Every archive is signed via SLSA build provenance; the SHA-256 of each asset is also shown directly on the GitHub release page:
     ```bash
-    # Quick integrity check (against download corruption / mirrors)
-    sha256sum -c zxc-<version>-linux-x86_64.tar.gz.sha256
-
-    # Authenticity check (SLSA build provenance — each archive is signed)
+    # Authenticity + integrity in one shot (SLSA — recommended)
     gh attestation verify zxc-<version>-linux-x86_64.tar.gz --repo hellobertrand/zxc
 
     # Extract
