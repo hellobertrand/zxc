@@ -20,7 +20,7 @@
  * - Internal function prototypes for chunk-level compression/decompression.
  *
  * @warning Do not include this header from user code; use the public headers
- *          zxc_buffer.h, zxc_stream.h, or zxc_sans_io.h instead.
+ *          zxc_buffer.h or zxc_stream.h instead.
  */
 
 #ifndef ZXC_INTERNAL_H
@@ -36,7 +36,6 @@
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
-#include "../../include/zxc_sans_io.h"
 #include "rapidhash.h"
 
 #ifdef __cplusplus
@@ -1480,6 +1479,98 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_lite
  */
 int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
                            uint8_t* RESTRICT dst, const size_t n_literals);
+
+/* ---------------------------------------------------------------------------
+ * Compression / decompression context.
+ *
+ * The context owns the working buffers (hash table, sequence buffers, scratch
+ * memory) that the encoder and decoder reuse across blocks. It used to be
+ * exposed via zxc_sans_io.h, but no consumer outside of the library itself
+ * needs to drive it directly - the public buffer / streaming / seekable APIs
+ * already provide opaque wrappers (`zxc_create_cctx` / `zxc_create_dctx`).
+ * Keeping the layout private lets us evolve the buffer layout (cache-line
+ * placement, additional scratch arenas) without breaking the ABI.
+ * --------------------------------------------------------------------------- */
+
+/**
+ * @struct zxc_cctx_t
+ * @brief Compression / decompression context.
+ *
+ * Holds the buffers reused across blocks to avoid repeated allocations.
+ *
+ * **Key fields:**
+ * - @c hash_table: epoch-tagged positions (`ZXC_LZ_HASH_SIZE` * 4 bytes).
+ * - @c hash_tags:  8-bit tags for fast match rejection
+ *   (`ZXC_LZ_HASH_SIZE` * 1 byte).
+ * - @c chain_table: collision chain storing the *previous* occurrence of a
+ *   hash, forming a linked list per bucket and enabling history traversal.
+ * - @c epoch: drives "lazy hash table invalidation". Instead of memset-ing
+ *   the hash table for every block, we store `(epoch << 16) | offset`; an
+ *   entry whose stored epoch differs from `ctx->epoch` is treated as empty.
+ */
+typedef struct {
+    /* Hot zone: random access / high frequency.
+     * Kept at the start to ensure they reside in the first cache line (64 bytes). */
+    uint32_t* hash_table;  /**< Hash table for LZ77 match positions (epoch|pos). */
+    uint8_t* hash_tags;    /**< Split tag table for fast match rejection (8-bit tags). */
+    uint16_t* chain_table; /**< Chain table for collision resolution. */
+    void* memory_block;    /**< Single allocation block owner. */
+    uint32_t epoch;        /**< Current epoch for lazy hash table invalidation. */
+
+    /* Warm zone: sequential access per sequence. */
+    uint32_t* buf_sequences; /**< Buffer for sequence records (packed: LL(8)|ML(8)|Offset(16)). */
+    uint8_t* buf_tokens;     /**< Buffer for token sequences. */
+    uint16_t* buf_offsets;   /**< Buffer for offsets. */
+    uint8_t* buf_extras;     /**< Buffer for extra lengths (vbytes for LL/ML). */
+    uint8_t* literals;       /**< Buffer for literal bytes. */
+
+    /* Cold zone: configuration / scratch / resizeable. */
+    uint8_t* lit_buffer;    /**< Scratch buffer for literals (RLE). */
+    size_t lit_buffer_cap;  /**< Current capacity of the scratch buffer. */
+    uint8_t* work_buf;      /**< Padded scratch buffer for buffer-API decompression. */
+    size_t work_buf_cap;    /**< Capacity of the work buffer. */
+    uint8_t* opt_scratch;   /**< Optimal-parser DP scratch (level >= 6 only,
+                                 lazy-allocated, packs dp/parent_len/parent_off/actions).
+                                 Also reused as transient scratch for the
+                                 length-limited Huffman code-length builder. */
+    size_t opt_scratch_cap; /**< Current capacity of opt_scratch in bytes. */
+    int checksum_enabled;   /**< 1 if checksum calculation/verification is enabled. */
+    int compression_level;  /**< Compression level. */
+
+    /* Block-size derived parameters (computed once at init). */
+    size_t chunk_size;    /**< Effective block size in bytes. */
+    uint32_t offset_bits; /**< log2(chunk_size) - governs epoch_mark shift. */
+    uint32_t offset_mask; /**< (1U << offset_bits) - 1 */
+    uint32_t max_epoch;   /**< 1U << (32 - offset_bits) */
+} zxc_cctx_t;
+
+/**
+ * @brief Initialises a ZXC compression / decompression context in place.
+ *
+ * Allocates the internal buffers (hash table, sequence buffers, scratch) sized
+ * for @p chunk_size and the requested @p mode.
+ *
+ * @param[out] ctx               Context to initialise.
+ * @param[in]  chunk_size        Block size driving buffer sizing.
+ * @param[in]  mode              1 for compression, 0 for decompression.
+ * @param[in]  level             Compression level (ignored when @p mode == 0).
+ * @param[in]  checksum_enabled  Non-zero to enable checksum computation.
+ *
+ * @return @c ZXC_OK on success, or a negative @ref zxc_error_t code (notably
+ *         @c ZXC_ERROR_MEMORY on allocation failure).
+ */
+int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, const int level,
+                  const int checksum_enabled);
+
+/**
+ * @brief Releases the internal buffers owned by a context.
+ *
+ * Does NOT free @p ctx itself - the caller owns the struct storage. The
+ * context may safely be re-initialised with zxc_cctx_init() afterwards.
+ *
+ * @param[in,out] ctx Context whose buffers should be released.
+ */
+void zxc_cctx_free(zxc_cctx_t* ctx);
 
 /**
  * @brief Internal wrapper function to decompress a single chunk of data.

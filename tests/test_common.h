@@ -22,7 +22,6 @@
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_error.h"
 #include "../include/zxc_pstream.h"
-#include "../include/zxc_sans_io.h"
 #include "../include/zxc_seekable.h"
 #include "../include/zxc_stream.h"
 #include "../src/lib/zxc_internal.h"

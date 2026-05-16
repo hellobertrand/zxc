@@ -298,19 +298,6 @@ gcc -o ctx_example ctx_example.c -I include -L build -lzxc_lib
 
 ---
 
-## Writing Your Own Streaming Driver
-
-The streaming multi-threaded API shown above is the default provided driver. However, ZXC is written in a **"sans-IO" style** that separates compute from I/O and multitasking.
-
-This allows you to write your own driver in any language of your choice, using the native I/O and multitasking capabilities of that language.
-
-To implement a custom driver:
-1. Include the extra public header `zxc_sans_io.h`
-2. Study the reference implementation in `src/lib/zxc_driver.c`
-3. Implement your own I/O and threading logic
-
----
-
 ## Language Bindings
 
 For non-C languages, see the official bindings:
