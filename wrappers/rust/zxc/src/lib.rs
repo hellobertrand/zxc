@@ -189,6 +189,7 @@ mod error;
 mod file;
 mod oneshot;
 mod pstream;
+pub mod seekable;
 mod stdio;
 
 pub use error::{Error, Result};
@@ -203,4 +204,5 @@ pub use file::{
     StreamDecompressOptions, StreamError, StreamResult,
 };
 pub use pstream::{CStream, CStreamProgress, DStream, DStreamProgress};
+pub use seekable::{seek_table_size, write_seek_table, Seekable};
 pub use stdio::{detect_zxc, Decoder, Encoder};
