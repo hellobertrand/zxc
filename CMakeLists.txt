@@ -668,6 +668,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sENVIRONMENT=web,node"
         "-sNO_FILESYSTEM=1"
         "-sSTRICT=1"
+        "-sWASM_BIGINT=0"
     )
     target_compile_options(zxc_wasm PRIVATE -O3)
 
