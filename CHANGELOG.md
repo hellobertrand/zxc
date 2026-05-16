@@ -42,8 +42,6 @@ doc: Updates README with architecture support and ARM performance details
 doc: Updates formatting in README performance table
 doc: Updates benchmark decompression cycles image for v0.10.0
 doc: Updates benchmark performance metrics in documentation
-misc: Bump version to v0.11.0
-misc: Bump version to v0.10.1
 misc: Feat: add Python io.RawIOBase adapters and zxc magic detection (#210)
 misc: Refine: Use named constants for compression level checks
 misc: Bump mymindstorm/setup-emsdk from 14 to 16 (#206)
@@ -53,9 +51,7 @@ misc: Harden decompression logic against integer overflows on 32-bits platforms 
 misc: Split monolithic tests (#200)
 
 ## [0.10.0] - 2026-04-16
-api: Bumps version to 0.10.0 and updates benchmarks and documentation
 api: Adds Seekable API documentation and bumps SOVERSION to 3
-api: Bumps version to 0.10.0
 api: Simplifies checksum selection and standardizes on RapidHash
 api: Adds seekable archives for random access (#188)
 api: Adds WebAssembly (WASM) support (#189)
@@ -125,12 +121,10 @@ misc: Cache context variables locally in encoder blocks (#141)
 ## [0.9.1] - 2026-03-16
 fix: Fix CLI parsing and adds block size option (#140)
 doc: Add tar integration instructions to README
-misc: Bumps version to 0.9.1
 
 ## [0.9.0] - 2026-03-15
 api: Add flexible block sizes options and reusable contexts (#138)
 cli: Update license headers and add SPDX identifier
-build: Bump version to 0.9.0
 build: Use upstream lzbench and shallow clone in benchmark workflow
 doc: Update documentation for sticky options in reusable contexts
 doc: Add Homebrew installation instructions to README
@@ -144,14 +138,12 @@ misc: Implement direct decompression fast path (#135)
 
 ## [0.8.3] - 2026-03-06
 build: Add compiler compatibility CI workflow (#134)
-misc: Bumps version to 0.8.3
 
 ## [0.8.2] - 2026-03-05
 api: Optimizes fuzzers for buffer API and memory reuse (#126)
 fix: Fix file handle leak in CLI benchmark (#132)
 cli: Resource management and enforces thread limits (#131)
 cli: CLI: enhances robustness and resource handling (#130)
-misc: Bumps version to 0.8.2
 misc: Refine output file closing logic to avoid closing stdout (#133)
 misc: Prevents out-of-bounds memory access (#129)
 
@@ -171,7 +163,6 @@ cli: Adds recursive directory mode (#112)
 cli: Enforces const correctness for local variables (#110)
 build: Adds CI support for Alpha architecture (#122)
 build: Wrapper Python: closes file handles in stream tests (#115)
-build: Bumps version to 0.8.0
 build: Updates benchmark branch
 build: Wrapper Python: exposes C error constants and enhances error reporting (#111)
 build: Adds vcpkg installation instructions
@@ -196,36 +187,30 @@ misc: Add comprehensive ZXC file format spec with byte-level structures and work
 
 ## [0.7.3] - 2026-02-18
 fix: Fix workfows builds
-build: Bumps version to 0.7.3
 build: Moves rapidhash.h to vendor directory
 misc: Finds rapidhash via system or vendored fallback
 misc: Use lzbench master branch
 
 ## [0.7.2] - 2026-02-16
 fix: Fix warning for AVX2/AVX512 macro redefinition in native mode build (#94)
-build: Bumps version to 0.7.2
 
 ## [0.7.1] - 2026-02-14
 fix: Fixes potential out-of-bounds read in decompression (#92)
 doc: Updates documentation
 misc: Specifies Release config for /O2 flag (#93)
-misc: Bump version to 0.7.1
 misc: Uses zxc-add-0.7.x branch of lzbench fork
-misc: Bumps version to 0.7.1
 
 ## [0.7.0] - 2026-02-13
 fix: Fix potential out-of-bounds read (static analysis) (#89)
 cli: Adds JSON output option for CLI (#88)
 build: Refactors multiarch CI to use Debian containers (#91)
 build: Enables big-endian architecture support (#86)
-misc: Bump version to 0.7.0
 
 ## [0.6.3] - 2026-02-11
 api: Add shared library support with BUILD_SHARED_LIBS option (#81)
 fix: Fix rust version test
 fix: Fix whitepaper links to graphs
 build: Improves workflows and wrapper builds (#85)
-build: Bump version to 0.6.3
 build: Updates binding package names (#84)
 build: Add Python wrapper (#75)
 doc: Update bindings docs
@@ -241,7 +226,6 @@ cli: Enables code coverage reporting (#72)
 build: Reverts to official LZbench repository
 build: Wrapper Rust: improves compression/decompression handling (#70)
 doc: Move WHITEPAPER to docs folder
-misc: Bump version to 0.6.2
 misc: Add snyk config file
 misc: Updates license headers and contributing guidelines (#76)
 misc: Updates contribution guidelines
@@ -249,7 +233,6 @@ misc: Adds TODO list for future development
 
 ## [0.6.1] - 2026-02-06
 api: Adds Rust wrapper for ZXC compression (#68)
-misc: Bump version to 0.6.1
 misc: Corrects bit reader initialization (#67)
 
 ## [0.6.0] - 2026-02-05
@@ -289,7 +272,6 @@ perf: v0.4.0 - Variable offsets, optimized parsing & layout (#23)
 ## [0.3.3] - 2026-01-06
 fix: Fixes buffering issues with stdin and stdout (#37)
 portability: set binary mode for standard streams (#39)
-misc: Increments patch version to 0.3.3 (#38)
 
 ## [0.3.2] - 2026-01-05
 cli: Updates build system and CI configuration (#24)
@@ -307,7 +289,6 @@ misc: Replaces not operator for branchless evaluation. (#29)
 ## [0.3.1] - 2025-12-27
 doc: Add community bindings to readme (#21)
 doc: Update documentation
-misc: Increments patch version to 0.3.1
 misc: Fix: flush stdout buffer before exit when using -c flag (#22)
 
 ## [0.3.0] - 2025-12-26
@@ -360,7 +341,6 @@ build: Enhances fuzzing workflow with manual control
 build: Updates fuzzing workflow concurrency group
 build: Adds fuzzing infrastructure with ClusterFuzzLite
 doc: Update README
-misc: Increments patch version to 0.1.1
 misc: Quotes cron expression for fuzzing schedule
 misc: Prevents potential buffer overruns
 misc: Adds zstd_fast to benchmark

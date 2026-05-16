@@ -22,7 +22,7 @@ concurrency:
 jobs:
   generate:
     name: Generate CHANGELOG.md
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     steps:
       - name: Checkout repository
