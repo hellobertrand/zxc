@@ -192,6 +192,57 @@ const CStream = native.CStream;
  */
 const DStream = native.DStream;
 
+/**
+ * Handle on a seekable ZXC archive, suitable for random-access
+ * decompression of byte ranges.
+ *
+ * The constructor takes a compressed Buffer (must carry an embedded seek
+ * table - produce one by passing `{ seekable: true }` to `compress`). The
+ * Buffer is copied into the addon's heap and kept alive for the lifetime
+ * of the handle; call `.close()` to release both the native handle and
+ * the copy.
+ *
+ * @example
+ *   const s = new zxc.Seekable(compressedBuf);
+ *   try {
+ *     const slice = s.decompressRange(1024, 4096);
+ *     console.log(`first 16 bytes: ${slice.subarray(0, 16).toString('hex')}`);
+ *   } finally {
+ *     s.close();
+ *   }
+ */
+const Seekable = native.Seekable;
+
+/**
+ * Encoded byte size of a seek table covering `numBlocks` data blocks.
+ * Use this to size a destination buffer for {@link writeSeekTable}.
+ * @param {number} numBlocks
+ * @returns {number}
+ */
+function seekTableSize(numBlocks) {
+    if (typeof numBlocks !== 'number' || numBlocks < 0) {
+        throw new TypeError('numBlocks must be a non-negative number');
+    }
+    return native.seekTableSize(numBlocks);
+}
+
+/**
+ * Low-level: write a seek table (header + entries) for the given
+ * per-block on-disk compressed sizes.
+ *
+ * Most callers do not need this directly; the buffer and streaming APIs
+ * emit a seek table when `seekable: true` is set.
+ *
+ * @param {number[]} compSizes - Per-block compressed sizes, in order.
+ * @returns {Buffer} The encoded seek table.
+ */
+function writeSeekTable(compSizes) {
+    if (!Array.isArray(compSizes) || compSizes.length === 0) {
+        throw new TypeError('compSizes must be a non-empty array of numbers');
+    }
+    return native.writeSeekTable(compSizes);
+}
+
 // =============================================================================
 // stream.Transform adapters over the push streaming API
 // =============================================================================
@@ -354,6 +405,11 @@ module.exports = {
     // Push streaming classes
     CStream,
     DStream,
+
+    // Seekable random-access decompression
+    Seekable,
+    seekTableSize,
+    writeSeekTable,
 
     // stream.Transform adapters
     CompressStream,

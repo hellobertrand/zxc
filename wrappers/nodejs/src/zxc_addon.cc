@@ -465,6 +465,190 @@ static Napi::Value ErrorName(const Napi::CallbackInfo& info) {
 }
 
 // =============================================================================
+// Seekable API: random-access decompression (single-threaded)
+// =============================================================================
+class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
+   public:
+    static Napi::Function GetClass(Napi::Env env) {
+        return DefineClass(
+            env, "Seekable",
+            {
+                InstanceMethod("numBlocks", &SeekableWrap::NumBlocks),
+                InstanceMethod("decompressedSize", &SeekableWrap::DecompressedSize),
+                InstanceMethod("blockCompressedSize", &SeekableWrap::BlockCompressedSize),
+                InstanceMethod("blockDecompressedSize", &SeekableWrap::BlockDecompressedSize),
+                InstanceMethod("decompressRange", &SeekableWrap::DecompressRange),
+                InstanceMethod("close", &SeekableWrap::Close),
+            });
+    }
+
+    SeekableWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<SeekableWrap>(info) {
+        Napi::Env env = info.Env();
+        if (info.Length() < 1 || !info[0].IsBuffer()) {
+            Napi::TypeError::New(env, "Expected a Buffer as first argument")
+                .ThrowAsJavaScriptException();
+            return;
+        }
+
+        Napi::Buffer<uint8_t> src_buf = info[0].As<Napi::Buffer<uint8_t>>();
+        if (src_buf.Length() == 0) {
+            Napi::TypeError::New(env, "Seekable buffer must be non-empty")
+                .ThrowAsJavaScriptException();
+            return;
+        }
+
+        // Copy the source so the JS-side Buffer doesn't have to outlive us.
+        src_.assign(src_buf.Data(), src_buf.Data() + src_buf.Length());
+
+        s_ = zxc_seekable_open(src_.data(), src_.size());
+        if (!s_) {
+            Napi::Error::New(env, "zxc_seekable_open failed (invalid archive?)")
+                .ThrowAsJavaScriptException();
+        }
+    }
+
+    ~SeekableWrap() {
+        if (s_) zxc_seekable_free(s_);
+    }
+
+   private:
+    zxc_seekable* s_ = nullptr;
+    std::vector<uint8_t> src_;
+
+    bool requireOpen(Napi::Env env) {
+        if (!s_) {
+            Napi::Error::New(env, "Seekable is closed").ThrowAsJavaScriptException();
+            return false;
+        }
+        return true;
+    }
+
+    Napi::Value NumBlocks(const Napi::CallbackInfo& info) {
+        if (!requireOpen(info.Env())) return info.Env().Undefined();
+        return Napi::Number::New(info.Env(), zxc_seekable_get_num_blocks(s_));
+    }
+
+    Napi::Value DecompressedSize(const Napi::CallbackInfo& info) {
+        if (!requireOpen(info.Env())) return info.Env().Undefined();
+        uint64_t v = zxc_seekable_get_decompressed_size(s_);
+        return Napi::Number::New(info.Env(), static_cast<double>(v));
+    }
+
+    Napi::Value BlockCompressedSize(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+        if (!requireOpen(env)) return env.Undefined();
+        if (info.Length() < 1 || !info[0].IsNumber()) {
+            Napi::TypeError::New(env, "Expected a block index")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        uint32_t idx = info[0].As<Napi::Number>().Uint32Value();
+        if (idx >= zxc_seekable_get_num_blocks(s_)) return env.Null();
+        return Napi::Number::New(env, zxc_seekable_get_block_comp_size(s_, idx));
+    }
+
+    Napi::Value BlockDecompressedSize(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+        if (!requireOpen(env)) return env.Undefined();
+        if (info.Length() < 1 || !info[0].IsNumber()) {
+            Napi::TypeError::New(env, "Expected a block index")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        uint32_t idx = info[0].As<Napi::Number>().Uint32Value();
+        if (idx >= zxc_seekable_get_num_blocks(s_)) return env.Null();
+        return Napi::Number::New(env, zxc_seekable_get_block_decomp_size(s_, idx));
+    }
+
+    Napi::Value DecompressRange(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+        if (!requireOpen(env)) return env.Undefined();
+        if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsNumber()) {
+            Napi::TypeError::New(env, "Expected (offset: number, length: number)")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        uint64_t offset = static_cast<uint64_t>(info[0].As<Napi::Number>().Int64Value());
+        int64_t length = info[1].As<Napi::Number>().Int64Value();
+        if (length < 0) {
+            Napi::TypeError::New(env, "length must be non-negative")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        Napi::Buffer<uint8_t> out =
+            Napi::Buffer<uint8_t>::New(env, static_cast<size_t>(length));
+        if (length == 0) return out;
+
+        int64_t r = zxc_seekable_decompress_range(s_, out.Data(), static_cast<size_t>(length),
+                                                  offset, static_cast<size_t>(length));
+        if (r < 0) {
+            return ThrowZxcError(env, static_cast<int>(r));
+        }
+        return Napi::Buffer<uint8_t>::Copy(env, out.Data(), static_cast<size_t>(r));
+    }
+
+    Napi::Value Close(const Napi::CallbackInfo& info) {
+        if (s_) {
+            zxc_seekable_free(s_);
+            s_ = nullptr;
+        }
+        return info.Env().Undefined();
+    }
+};
+
+// =============================================================================
+// seekTableSize(numBlocks: number): number
+// =============================================================================
+static Napi::Value SeekTableSize(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsNumber()) {
+        Napi::TypeError::New(env, "Expected a number (numBlocks)")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    uint32_t n = info[0].As<Napi::Number>().Uint32Value();
+    return Napi::Number::New(env, static_cast<double>(zxc_seek_table_size(n)));
+}
+
+// =============================================================================
+// writeSeekTable(compSizes: number[] | Uint32Array): Buffer
+// =============================================================================
+static Napi::Value WriteSeekTable(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsArray()) {
+        Napi::TypeError::New(env, "Expected an array of per-block compressed sizes")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    Napi::Array arr = info[0].As<Napi::Array>();
+    uint32_t n = arr.Length();
+    if (n == 0) {
+        Napi::TypeError::New(env, "compSizes must be non-empty")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    std::vector<uint32_t> sizes(n);
+    for (uint32_t i = 0; i < n; ++i) {
+        Napi::Value v = arr.Get(i);
+        if (!v.IsNumber()) {
+            Napi::TypeError::New(env, "compSizes entries must be numbers")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        sizes[i] = v.As<Napi::Number>().Uint32Value();
+    }
+
+    size_t sz = zxc_seek_table_size(n);
+    Napi::Buffer<uint8_t> out = Napi::Buffer<uint8_t>::New(env, sz);
+    int64_t r = zxc_write_seek_table(out.Data(), sz, sizes.data(), n);
+    if (r < 0) {
+        return ThrowZxcError(env, static_cast<int>(r));
+    }
+    return Napi::Buffer<uint8_t>::Copy(env, out.Data(), static_cast<size_t>(r));
+}
+
+// =============================================================================
 // Module initialization
 // =============================================================================
 static Napi::Object Init(Napi::Env env, Napi::Object exports) {
@@ -485,6 +669,11 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     // Push streaming classes
     exports.Set("CStream", CStreamWrap::GetClass(env));
     exports.Set("DStream", DStreamWrap::GetClass(env));
+
+    // Seekable random-access decompression
+    exports.Set("Seekable", SeekableWrap::GetClass(env));
+    exports.Set("seekTableSize", Napi::Function::New(env, SeekTableSize, "seekTableSize"));
+    exports.Set("writeSeekTable", Napi::Function::New(env, WriteSeekTable, "writeSeekTable"));
 
     // Compression level constants
     exports.Set("LEVEL_FASTEST", Napi::Number::New(env, ZXC_LEVEL_FASTEST));
