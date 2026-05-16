@@ -5,8 +5,6 @@
 header = """
 # Changelog
 
-Generated automatically from git history (commits + tags) by git-cliff at release time. Do not edit manually.
-
 """
 body = """
 {% if version -%}
@@ -45,7 +43,7 @@ commit_parsers = [
   { message = "(?i)\\.ds_store",                                                                                      skip = true },
   { message = "^[Mm]erge ",                                                                                           skip = true },
 
-  # ---- Categories (zstd-style) ----
+  # ---- Categories ----
   { message = "^feat",                                                                                                group = "01-api" },
   { message = "^api[:(]",                                                                                             group = "01-api" },
   { message = "(?i)\\bapi\\b",                                                                                        group = "01-api" },

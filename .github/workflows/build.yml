@@ -17,59 +17,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
-  changelog:
-    name: Generate CHANGELOG
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-
-      - name: Generate full CHANGELOG
-        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4.8.0
-        with:
-          config: cliff.toml
-          args: --verbose
-        env:
-          OUTPUT: CHANGELOG.md
-          GITHUB_REPO: ${{ github.repository }}
-
-      - name: Generate latest-only CHANGELOG (release body)
-        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4.8.0
-        with:
-          config: cliff.toml
-          args: --verbose --latest --strip header
-        env:
-          OUTPUT: CHANGELOG-latest.md
-          GITHUB_REPO: ${{ github.repository }}
-
-      - name: Prepend auto-generated marker
-        run: |
-          {
-            echo ""
-            echo "---"
-            echo ""
-            echo "_Auto-generated changelog (full history in [CHANGELOG.md](CHANGELOG.md)):_"
-            echo ""
-            cat CHANGELOG-latest.md
-          } > CHANGELOG-latest.tmp.md
-          mv CHANGELOG-latest.tmp.md CHANGELOG-latest.md
-
-      - name: Upload CHANGELOG artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: changelog
-          path: |
-            CHANGELOG.md
-            CHANGELOG-latest.md
-
   build-and-test:
     name: Build ${{ matrix.name }}
-    needs: [changelog]
-    if: ${{ !cancelled() && (needs.changelog.result == 'success' || needs.changelog.result == 'skipped') }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -152,13 +101,6 @@ jobs:
           chmod +x tests/test_cli.sh
           ./tests/test_cli.sh "$ZXC_BIN"
 
-      - name: Download generated CHANGELOG
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: changelog
-          path: .
-
       - name: Package Release (Archive)
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -229,13 +171,16 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: [build-and-test, changelog]
+    needs: [build-and-test]
     runs-on: ubuntu-slim
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     steps:
-      - name: Download all artifacts
+      - name: Checkout repository (for CHANGELOG.md)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download all build artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
@@ -249,44 +194,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
-          body_path: changelog/CHANGELOG-latest.md
+          body_path: release-notes.md
           append_body: true
           files: |
             release/*.tar.gz
             release/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  commit-changelog:
-    name: Commit CHANGELOG to main
-    needs: [release]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout main
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: main
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download generated CHANGELOG
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: changelog
-          path: .
-
-      - name: Commit and push if changed
-        run: |
-          if git diff --quiet -- CHANGELOG.md; then
-            echo "CHANGELOG.md unchanged — nothing to commit."
-            exit 0
-          fi
-          git config user.name  'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add CHANGELOG.md
-          git commit -m "docs(changelog): regenerate for ${GITHUB_REF_NAME}"
-          git push origin HEAD:main
