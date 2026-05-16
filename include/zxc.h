@@ -13,6 +13,7 @@
 #include "zxc_error.h"      // IWYU pragma: keep
 #include "zxc_opts.h"       // IWYU pragma: keep
 #include "zxc_pstream.h"    // IWYU pragma: keep
+#include "zxc_seekable.h"   // IWYU pragma: keep
 #include "zxc_stream.h"     // IWYU pragma: keep
 
 #endif  // ZXC_H
