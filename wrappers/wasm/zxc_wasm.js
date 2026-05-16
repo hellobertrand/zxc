@@ -81,7 +81,10 @@ export default async function createZXC(moduleOverrides, factory) {
     const _seekable_decompressed_size  = Module.cwrap('zxc_seekable_get_decompressed_size', 'number', ['number']);
     const _seekable_block_comp_size    = Module.cwrap('zxc_seekable_get_block_comp_size', 'number', ['number', 'number']);
     const _seekable_block_decomp_size  = Module.cwrap('zxc_seekable_get_block_decomp_size', 'number', ['number', 'number']);
-    const _seekable_decompress_range   = Module.cwrap('zxc_seekable_decompress_range', 'number',
+    // Use the i32-offset shim from wasm_entry.c: cwrap cannot pass a uint64_t
+    // argument without -sWASM_BIGINT=1, and the wasm32 heap is itself bounded
+    // to 4 GiB, so a 32-bit offset is enough for any in-memory archive.
+    const _seekable_decompress_range   = Module.cwrap('zxcw_seekable_decompress_range', 'number',
         ['number', 'number', 'number', 'number', 'number']);
     const _seek_table_size  = Module.cwrap('zxc_seek_table_size', 'number', ['number']);
     const _write_seek_table = Module.cwrap('zxc_write_seek_table', 'number',

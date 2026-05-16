@@ -637,7 +637,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_seekable_get_decompressed_size"
         "_zxc_seekable_get_block_comp_size"
         "_zxc_seekable_get_block_decomp_size"
-        "_zxc_seekable_decompress_range"
+        # i32-offset shim for seekable_decompress_range (see wasm_entry.c);
+        # avoids the i64 offset arg which cwrap cannot pass without BigInt.
+        "_zxcw_seekable_decompress_range"
         "_zxc_write_seek_table"
         "_zxc_seek_table_size"
         "_zxc_min_level"
