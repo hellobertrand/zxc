@@ -56,6 +56,11 @@ Runs the [OSSF Scorecard](https://github.com/ossf/scorecard) analysis to evaluat
 
 Automatically checks for and updates third-party dependencies (like `rapidhash.h`) to ensure the project uses the latest stable versions of its vendors.
 
+### changelog.yml - Generate CHANGELOG
+**Triggers:** Push to `bump/**` or `release/**` branches, manual dispatch
+
+Regenerates [`CHANGELOG.md`](../../CHANGELOG.md) with [`git-cliff`](https://git-cliff.org/), grouping all commits under their respective tags. On `bump/vX.Y.Z` and `release/vX.Y.Z` branches the version tag is auto-detected from the branch name; manual dispatch accepts an explicit `tag` input (empty = `Unreleased`). The generated file is uploaded as a workflow artifact, it is **not** committed back to the repo. Configuration lives in [`cliff.toml`](../../cliff.toml).
+
 ## Language Bindings
 
 ### wrapper-rust-publish.yml - Publish Rust Crates

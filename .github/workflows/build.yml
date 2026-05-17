@@ -136,6 +136,8 @@ jobs:
 
           **CLI usage:** See [MANUAL.md](MANUAL.md) for the full reference (synopsis, options, examples).
 
+          **Release history:** https://github.com/${GITHUB_REPOSITORY}/releases
+
           **Documentation, benchmarks & source:** https://github.com/${GITHUB_REPOSITORY}
 
           **Verify build provenance (SLSA):** every archive is signed via [GitHub Artifact Attestations](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds). Verify with:

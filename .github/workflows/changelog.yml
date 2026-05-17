@@ -1,0 +1,63 @@
+name: Generate CHANGELOG
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag for the latest section (e.g. v0.12.0). Leave empty to label "Unreleased".'
+        required: false
+        type: string
+  push:
+    branches:
+      - 'bump/**'
+      - 'release/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: changelog-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: Generate CHANGELOG.md
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Determine version tag
+        id: ver
+        shell: bash
+        run: |
+          INPUT_TAG="${{ inputs.tag }}"
+          if [[ -n "$INPUT_TAG" ]]; then
+            echo "tag_arg=--tag $INPUT_TAG" >> "$GITHUB_OUTPUT"
+            echo "Using dispatch input tag: $INPUT_TAG"
+          elif [[ "${GITHUB_REF}" =~ ^refs/heads/(bump|release)/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            DETECTED="${BASH_REMATCH[2]}"
+            echo "tag_arg=--tag $DETECTED" >> "$GITHUB_OUTPUT"
+            echo "Detected tag from branch name: $DETECTED"
+          else
+            echo "tag_arg=" >> "$GITHUB_OUTPUT"
+            echo "No tag determined — latest section will be 'Unreleased'."
+          fi
+
+      - name: Generate CHANGELOG
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4.8.0
+        with:
+          config: cliff.toml
+          args: --verbose ${{ steps.ver.outputs.tag_arg }}
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Upload CHANGELOG artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CHANGELOG
+          path: CHANGELOG.md
