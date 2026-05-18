@@ -513,7 +513,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
             return ZXC_ERROR_BAD_BLOCK_SIZE;
         }
         seek_cap = (uint32_t)(block_count + 2);
-        seek_comp = (uint32_t*)malloc(seek_cap * sizeof(uint32_t));
+        seek_comp = (uint32_t*)ZXC_MALLOC(seek_cap * sizeof(uint32_t));
         // LCOV_EXCL_START
         if (UNLIKELY(!seek_comp)) {
             zxc_cctx_free(&ctx);
@@ -529,7 +529,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
         const int res = zxc_compress_chunk_wrapper(&ctx, ip + pos, chunk_len, op, rem_cap);
         if (UNLIKELY(res < 0)) {
-            free(seek_comp);
+            ZXC_FREE(seek_comp);
             zxc_cctx_free(&ctx);
             return res;
         }
@@ -548,9 +548,9 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
             // LCOV_EXCL_START
             if (UNLIKELY(seek_count >= seek_cap)) {
                 seek_cap = seek_cap * 2;
-                uint32_t* nc = (uint32_t*)realloc(seek_comp, seek_cap * sizeof(uint32_t));
+                uint32_t* nc = (uint32_t*)ZXC_REALLOC(seek_comp, seek_cap * sizeof(uint32_t));
                 if (UNLIKELY(!nc)) {
-                    free(seek_comp);
+                    ZXC_FREE(seek_comp);
                     zxc_cctx_free(&ctx);
                     return ZXC_ERROR_MEMORY;
                 }
@@ -574,7 +574,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     const int eof_val = zxc_write_block_header(op, rem_cap, &eof_bh);
     // LCOV_EXCL_START
     if (UNLIKELY(eof_val < 0)) {
-        free(seek_comp);
+        ZXC_FREE(seek_comp);
         return eof_val;
     }
     // LCOV_EXCL_STOP
@@ -584,11 +584,11 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (seekable && seek_count > 0) {
         const size_t st_cap = (size_t)(op_end - op);
         const int64_t st_val = zxc_write_seek_table(op, st_cap, seek_comp, seek_count);
-        free(seek_comp);
+        ZXC_FREE(seek_comp);
         if (UNLIKELY(st_val < 0)) return (int64_t)st_val;  // LCOV_EXCL_LINE
         op += st_val;
     } else {
-        free(seek_comp);
+        ZXC_FREE(seek_comp);
     }
 
     if (UNLIKELY((size_t)(op_end - op) < ZXC_FILE_FOOTER_SIZE))
@@ -646,8 +646,8 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
     // Decode into a padded scratch buffer, then memcpy the exact result out.
     const size_t work_sz = runtime_chunk_size + ZXC_PAD_SIZE;
     if (ctx.work_buf_cap < work_sz) {
-        free(ctx.work_buf);
-        ctx.work_buf = (uint8_t*)malloc(work_sz);
+        ZXC_FREE(ctx.work_buf);
+        ctx.work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
         // LCOV_EXCL_START
         if (UNLIKELY(!ctx.work_buf)) {
             zxc_cctx_free(&ctx);
@@ -779,7 +779,7 @@ struct zxc_cctx_s {
 };
 
 zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
-    zxc_cctx* const cctx = (zxc_cctx*)calloc(1, sizeof(zxc_cctx));
+    zxc_cctx* const cctx = (zxc_cctx*)ZXC_CALLOC(1, sizeof(zxc_cctx));
     if (UNLIKELY(!cctx)) return NULL;  // LCOV_EXCL_LINE
 
     /* Resolve and store sticky defaults. */
@@ -793,7 +793,7 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
         if (UNLIKELY(!zxc_validate_block_size(cctx->stored_block_size) ||
                      zxc_cctx_init(&cctx->inner, cctx->stored_block_size, 1, cctx->stored_level,
                                    cctx->stored_checksum) != ZXC_OK)) {
-            free(cctx);
+            ZXC_FREE(cctx);
             return NULL;
         }
         // LCOV_EXCL_STOP
@@ -807,7 +807,7 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
 void zxc_free_cctx(zxc_cctx* cctx) {
     if (UNLIKELY(!cctx)) return;
     if (cctx->initialized) zxc_cctx_free(&cctx->inner);
-    free(cctx);
+    ZXC_FREE(cctx);
 }
 
 int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t src_size,
@@ -907,14 +907,14 @@ struct zxc_dctx_s {
 };
 
 zxc_dctx* zxc_create_dctx(void) {
-    zxc_dctx* const dctx = (zxc_dctx*)calloc(1, sizeof(zxc_dctx));
+    zxc_dctx* const dctx = (zxc_dctx*)ZXC_CALLOC(1, sizeof(zxc_dctx));
     return dctx;
 }
 
 void zxc_free_dctx(zxc_dctx* dctx) {
     if (UNLIKELY(!dctx)) return;
     if (dctx->initialized) zxc_cctx_free(&dctx->inner);
-    free(dctx);
+    ZXC_FREE(dctx);
 }
 
 int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
@@ -963,8 +963,8 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     /* Ensure scratch buffer is large enough. */
     const size_t work_sz = runtime_chunk_size + ZXC_PAD_SIZE;
     if (UNLIKELY(ctx->work_buf_cap < work_sz)) {
-        free(ctx->work_buf);
-        ctx->work_buf = (uint8_t*)malloc(work_sz);
+        ZXC_FREE(ctx->work_buf);
+        ctx->work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
         if (UNLIKELY(!ctx->work_buf)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
         ctx->work_buf_cap = work_sz;
     }
@@ -1099,8 +1099,8 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
     /* Ensure scratch buffer for safe-path wild copies. */
     const size_t work_sz = block_size + ZXC_PAD_SIZE;
     if (ctx->work_buf_cap < work_sz) {
-        free(ctx->work_buf);
-        ctx->work_buf = (uint8_t*)malloc(work_sz);
+        ZXC_FREE(ctx->work_buf);
+        ctx->work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
         if (UNLIKELY(!ctx->work_buf)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
         ctx->work_buf_cap = work_sz;
     }

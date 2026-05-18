@@ -36,9 +36,6 @@
 #define zxc_huf_decode_section ZXC_CAT(zxc_huf_decode_section, ZXC_FUNCTION_SUFFIX)
 #endif
 
-#include <stdlib.h>
-#include <string.h>
-
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
@@ -135,7 +132,7 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         return ZXC_OK;
     }
 
-    qsort(leaves, (size_t)n, sizeof(pm_leaf_t), pm_leaf_cmp);
+    ZXC_QSORT(leaves, (size_t)n, sizeof(pm_leaf_t), pm_leaf_cmp);
 
     /* n <= 256 <= 2^ZXC_HUF_MAX_CODE_LEN, so length-limit is always feasible. */
     const int max_per_level = 2 * n;
@@ -159,15 +156,15 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         p = (uint8_t*)(((uintptr_t)p + 7u) & ~(uintptr_t)7u);
         stack = (frame_t*)p;
     } else {
-        owned_items = (pm_item_t*)malloc((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)max_per_level *
-                                         sizeof(pm_item_t));
-        owned_counts = (int*)calloc((size_t)ZXC_HUF_MAX_CODE_LEN, sizeof(int));
-        owned_stack = (frame_t*)malloc((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)max_per_level *
-                                       sizeof(frame_t));
+        owned_items = (pm_item_t*)ZXC_MALLOC((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)max_per_level *
+                                             sizeof(pm_item_t));
+        owned_counts = (int*)ZXC_CALLOC((size_t)ZXC_HUF_MAX_CODE_LEN, sizeof(int));
+        owned_stack = (frame_t*)ZXC_MALLOC((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)max_per_level *
+                                           sizeof(frame_t));
         if (UNLIKELY(!owned_items || !owned_counts || !owned_stack)) {
-            free(owned_items);
-            free(owned_counts);
-            free(owned_stack);
+            ZXC_FREE(owned_items);
+            ZXC_FREE(owned_counts);
+            ZXC_FREE(owned_stack);
             return ZXC_ERROR_MEMORY;
         }
         items = owned_items;
@@ -245,9 +242,9 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     }
 
     if (owned_items) {
-        free(owned_items);
-        free(owned_counts);
-        free(owned_stack);
+        ZXC_FREE(owned_items);
+        ZXC_FREE(owned_counts);
+        ZXC_FREE(owned_stack);
     }
 #undef ITEM
     return ZXC_OK;

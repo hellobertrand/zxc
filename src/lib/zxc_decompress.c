@@ -635,9 +635,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
                 return ZXC_ERROR_DST_TOO_SMALL;
             const size_t alloc_size = required_size + ZXC_PAD_SIZE;
             if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) {
-                uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, alloc_size);
+                uint8_t* new_buf = (uint8_t*)ZXC_REALLOC(ctx->lit_buffer, alloc_size);
                 if (UNLIKELY(!new_buf)) {
-                    free(ctx->lit_buffer);
+                    ZXC_FREE(ctx->lit_buffer);
                     ctx->lit_buffer = NULL;
                     ctx->lit_buffer_cap = 0;
                     return ZXC_ERROR_MEMORY;
@@ -660,9 +660,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
             const size_t alloc_size = required_size + ZXC_PAD_SIZE;
 
             if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) {
-                uint8_t* new_buf = (uint8_t*)realloc(ctx->lit_buffer, alloc_size);
+                uint8_t* new_buf = (uint8_t*)ZXC_REALLOC(ctx->lit_buffer, alloc_size);
                 if (UNLIKELY(!new_buf)) {
-                    free(ctx->lit_buffer);
+                    ZXC_FREE(ctx->lit_buffer);
                     ctx->lit_buffer = NULL;
                     ctx->lit_buffer_cap = 0;
                     return ZXC_ERROR_MEMORY;
