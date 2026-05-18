@@ -21,3 +21,7 @@ updates:
     directory: /wrappers/go
     schedule:
       interval: monthly
+  - package-ecosystem: docker
+    directory: /.clusterfuzzlite
+    schedule:
+      interval: monthly
