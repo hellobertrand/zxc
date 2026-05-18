@@ -26,7 +26,6 @@
 #ifndef ZXC_INTERNAL_H
 #define ZXC_INTERNAL_H
 
-#include <assert.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdint.h>
