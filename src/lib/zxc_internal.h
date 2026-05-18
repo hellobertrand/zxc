@@ -286,10 +286,7 @@ extern "C" {
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
 /** @brief Current on-disk file format version. */
 #define ZXC_FILE_FORMAT_VERSION 5
-/** @brief Size of stdio I/O buffers (1 MB). */
-#define ZXC_IO_BUFFER_SIZE (1024 * 1024)
-/** @brief Maximum number of threads allowed for streaming operations. */
-#define ZXC_MAX_THREADS 512
+
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
 /**
@@ -311,8 +308,6 @@ extern "C" {
 /** @brief Round @p x up to the next cache-line boundary. */
 #define ZXC_ALIGN_CL(x) (((x) + ZXC_ALIGNMENT_MASK) & ~(size_t)ZXC_ALIGNMENT_MASK)
 
-/** @brief File header size: Magic(4)+Version(1)+Chunk(1)+Flags(1)+Reserved(7)+CRC(2). */
-#define ZXC_FILE_HEADER_SIZE 16
 /** @brief Bit flag in the Flags byte indicating checksum presence (bit 7). */
 #define ZXC_FILE_FLAG_HAS_CHECKSUM 0x80U
 /** @brief Mask for the checksum algorithm id (bits 0-3). */
@@ -351,8 +346,6 @@ extern "C" {
 
 /** @brief Size of the global checksum appended after EOF block (4 bytes). */
 #define ZXC_GLOBAL_CHECKSUM_SIZE 4
-/** @brief File footer size: original_size(8) + global_checksum(4). */
-#define ZXC_FILE_FOOTER_SIZE 12
 
 /** @name Seekable Format Constants
  *  @brief Seek table block appended between EOF block and footer.

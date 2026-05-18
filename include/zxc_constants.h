@@ -65,6 +65,28 @@
 /** @} */ /* end of block_size */
 
 /**
+ * @defgroup threading Threading Limits
+ * @brief Bounds on thread-count parameters accepted by the streaming APIs.
+ * @{
+ */
+/** @brief Maximum value accepted for `num_threads` in `zxc_stream_compress`
+ *  / `zxc_stream_decompress`. Passing a higher value returns `ZXC_ERROR_INVALID_OPTION`. */
+#define ZXC_MAX_THREADS 512
+/** @} */ /* end of threading */
+
+/**
+ * @defgroup file_format File Format Constants
+ * @brief On-disk byte sizes of the archive header and footer.
+ *
+ * @{
+ */
+/** @brief File header size: Magic(4) + Version(1) + Chunk(1) + Flags(1) + Reserved(7) + CRC(2). */
+#define ZXC_FILE_HEADER_SIZE 16
+/** @brief File footer size: original_size(8) + global_checksum(4). */
+#define ZXC_FILE_FOOTER_SIZE 12
+/** @} */ /* end of file_format */
+
+/**
  * @defgroup levels Compression Levels
  * @brief Predefined compression levels for the ZXC library.
  *

@@ -23,7 +23,10 @@
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
 #include "../../include/zxc_stream.h"
-#include "../lib/zxc_internal.h"
+
+/* Size of stdio I/O buffers attached to f_in/f_out via setvbuf. CLI-local
+ * implementation detail; not a contract of libzxc. */
+#define ZXC_STDIO_BUFFER_SIZE (1024 * 1024)
 
 #if defined(_WIN32)
 #define ZXC_OS "windows"
@@ -883,13 +886,13 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         }
 
         // Only show progress for files > 1MB
-        if (total_size > ZXC_IO_BUFFER_SIZE) show_progress = 1;
+        if (total_size > ZXC_STDIO_BUFFER_SIZE) show_progress = 1;
     }
 
     // Set large buffers for I/O performance (AFTER file size detection)
-    char *b1 = malloc(ZXC_IO_BUFFER_SIZE), *b2 = malloc(ZXC_IO_BUFFER_SIZE);
-    if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_IO_BUFFER_SIZE);
-    if (f_out && b2) setvbuf(f_out, b2, _IOFBF, ZXC_IO_BUFFER_SIZE);
+    char *b1 = malloc(ZXC_STDIO_BUFFER_SIZE), *b2 = malloc(ZXC_STDIO_BUFFER_SIZE);
+    if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
+    if (f_out && b2) setvbuf(f_out, b2, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
 
     if (in_path && !g_quiet) {
         zxc_log_v("Processing %s... (Compression Level %d)\n", in_path, level);
@@ -1152,13 +1155,14 @@ int main(int argc, char** argv) {
                     if (*end == 'b' || *end == 'B') end++;  // optional "B" in "MB"
                 }
                 const long long bs_bytes = bs_val * multiplier;
-                if (!zxc_validate_block_size((size_t)bs_bytes)) {
+                const size_t bs = (size_t)bs_bytes;
+                if (bs < ZXC_BLOCK_SIZE_MIN || bs > ZXC_BLOCK_SIZE_MAX || (bs & (bs - 1)) != 0) {
                     fprintf(stderr,
                             "Error: block-size must be a power of 2 between 4K and 2M\n"
                             "  Examples: -B 4K, -B 128K, -B 1M, -B 2M\n");
                     return 1;
                 }
-                block_size = (size_t)bs_bytes;
+                block_size = bs;
                 break;
             }
             case '?':
