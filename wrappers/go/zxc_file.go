@@ -9,7 +9,6 @@ package zxc
 
 /*
 #include <stdio.h>
-#include "zxc.h"
 #include "zxc_stream.h"
 */
 import "C"

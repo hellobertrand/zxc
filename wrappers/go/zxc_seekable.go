@@ -11,7 +11,6 @@ package zxc
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "zxc.h"
 #include "zxc_seekable.h"
 */
 import "C"

@@ -24,8 +24,6 @@
 #include "../../include/zxc_constants.h"
 #include "../../include/zxc_stream.h"
 
-/* Size of stdio I/O buffers attached to f_in/f_out via setvbuf. CLI-local
- * implementation detail; not a contract of libzxc. */
 #define ZXC_STDIO_BUFFER_SIZE (1024 * 1024)
 
 #if defined(_WIN32)
