@@ -11,6 +11,7 @@
 #include <Python.h>
 
 #include "zxc.h"
+#include "zxc_stream.h"
 
 #define Py_Return_Errno(err)     \
     do {                         \

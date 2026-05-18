@@ -12,6 +12,7 @@ package zxc
 #include <stdlib.h>
 #include <string.h>
 #include "zxc.h"
+#include "zxc_seekable.h"
 */
 import "C"
 

@@ -20,6 +20,7 @@
 #include <stdint.h>
 
 #include "zxc.h"
+#include "zxc_seekable.h"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>

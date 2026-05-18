@@ -36,24 +36,33 @@ For the on-disk binary format see [`FORMAT.md`](FORMAT.md).
 ## 1. Headers and Include Graph
 
 ```text
-zxc.h                  <- umbrella header (includes everything below)
+zxc.h                  <- freestanding umbrella (no <stdio.h>; kernel-safe)
 ├── zxc_buffer.h       <- Buffer API + Reusable Context API
-│   ├── zxc_export.h   <- visibility macros
-│   └── zxc_stream.h   <- Streaming API + opts structs
-│       └── zxc_export.h
+│   └── zxc_export.h   <- visibility macros
 ├── zxc_constants.h    <- version macros, compression levels, block sizes
 ├── zxc_error.h        <- error codes + zxc_error_name()
 │   └── zxc_export.h
-├── zxc_pstream.h      <- Push streaming API (caller-driven, single-thread)
-│   ├── zxc_export.h
-│   └── zxc_stream.h
-└── (not included by zxc.h)
-    zxc_seekable.h     <- Seekable random-access API (opt-in)
+├── zxc_opts.h         <- compression / decompression options structs
+│   └── zxc_export.h
+└── zxc_pstream.h      <- Push streaming API (caller-driven, single-thread)
+    └── zxc_export.h
+
+opt-in (require <stdio.h>; userspace only, not freestanding-safe):
+    zxc_stream.h       <- Multi-threaded FILE*-based streaming
+        └── zxc_export.h
+    zxc_seekable.h     <- Seekable random-access API (FILE*-aware)
         └── zxc_export.h
 ```
 
-Include `<zxc.h>` to access the buffer, context, streaming, and push-stream APIs.  
-Include `<zxc_seekable.h>` explicitly for random-access decompression.
+`<zxc.h>` pulls only freestanding-compatible headers (no `<stdio.h>`
+dependency) and is therefore suitable for kernel-space, embedded, or any
+target where `<stdio.h>` is unavailable. It covers the Buffer, Reusable
+Context, Push Streaming, and one-shot Block APIs.
+
+The `FILE*`-based streaming and seekable random-access APIs are opt-in:
+userspace integrations must include `<zxc_stream.h>` and/or
+`<zxc_seekable.h>` explicitly. Both pull `<stdio.h>` transitively and are
+not suitable for freestanding builds.
 
 ---
 
@@ -549,8 +558,9 @@ Same as `zxc_decompress()` but reuses buffers from `dctx`.
 
 ## 10. Streaming API
 
-Declared in `zxc_stream.h`. Multi-threaded, `FILE*`-based pipeline
-(reader -> workers -> writer).
+Declared in `zxc_stream.h` (opt-in: **not** included by `<zxc.h>` because it
+depends on `<stdio.h>`, which would break freestanding/kernel builds).
+Multi-threaded, `FILE*`-based pipeline (reader -> workers -> writer).
 
 ### `zxc_stream_compress`
 
@@ -809,7 +819,8 @@ zxc_cstream_free(cs);
 
 ## 11. Seekable API
 
-Declared in `zxc_seekable.h` (not included by `zxc.h`: opt-in, optional).
+Declared in `zxc_seekable.h` (opt-in: **not** included by `<zxc.h>` because it
+depends on `<stdio.h>`, which would break freestanding/kernel builds).
 Random-access decompression of seekable archives produced with `seekable = 1`.
 
 ### Creating a Seekable Archive
