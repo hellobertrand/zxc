@@ -610,10 +610,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     const size_t per_job_sz = sizeof(zxc_stream_job_t) + sizeof(int) + alloc_in + alloc_out;
     const size_t alloc_size = ctx.ring_size * per_job_sz;
-    uint8_t* const mem_block = zxc_aligned_malloc(alloc_size, ZXC_CACHE_LINE_SIZE);
+    uint8_t* const mem_block = ZXC_ALIGNED_MALLOC(alloc_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem_block || per_job_sz > SIZE_MAX / ctx.ring_size)) {
         // LCOV_EXCL_START
-        zxc_aligned_free(mem_block);
+        ZXC_ALIGNED_FREE(mem_block);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
@@ -648,7 +648,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     pthread_t* const workers = ZXC_MALLOC((size_t)num_workers * sizeof(pthread_t));
     if (UNLIKELY(!workers)) {
         // LCOV_EXCL_START
-        zxc_aligned_free(mem_block);
+        ZXC_ALIGNED_FREE(mem_block);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
@@ -664,7 +664,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         pthread_cond_destroy(&ctx.cond_reader);
         pthread_mutex_destroy(&ctx.lock);
         ZXC_FREE(workers);
-        zxc_aligned_free(mem_block);
+        ZXC_ALIGNED_FREE(mem_block);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
@@ -687,7 +687,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
             pthread_cond_destroy(&ctx.cond_reader);
             pthread_mutex_destroy(&ctx.lock);
             ZXC_FREE(workers);
-            zxc_aligned_free(mem_block);
+            ZXC_ALIGNED_FREE(mem_block);
             return ZXC_ERROR_MEMORY;
         }
         // LCOV_EXCL_STOP
@@ -714,7 +714,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         pthread_cond_destroy(&ctx.cond_reader);
         pthread_mutex_destroy(&ctx.lock);
         ZXC_FREE(workers);
-        zxc_aligned_free(mem_block);
+        ZXC_ALIGNED_FREE(mem_block);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
@@ -912,7 +912,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     ZXC_FREE(w_args.seek_comp);
     ZXC_FREE(workers);
-    zxc_aligned_free(mem_block);
+    ZXC_ALIGNED_FREE(mem_block);
 
     if (UNLIKELY(ctx.io_error)) return ZXC_ERROR_IO;
 

@@ -264,6 +264,39 @@ extern "C" {
 /** @} */
 
 /**
+ * @name Aligned Allocator Abstraction
+ * @brief Macros around the cache-line-aligned allocator used for compression
+ * workspace and per-context scratch buffers.
+ *
+ * The default expansion calls the internal helpers @ref zxc_aligned_malloc /
+ * @ref zxc_aligned_free, which wrap `_aligned_malloc`/`_aligned_free` on
+ * Windows and `posix_memalign`/`free` on POSIX. The malloc/free pair is
+ * opaque — if you override one, you **must** override the other (a pointer
+ * returned by an override must not be freed by the default, and vice versa).
+ *
+ * Example kernel-side override:
+ * @code
+ * // kmalloc returns memory aligned to ARCH_KMALLOC_MINALIGN (>= cache line
+ * // on most modern archs). For stricter alignment, use kmem_cache_* with
+ * // SLAB_HWCACHE_ALIGN and a per-context cache.
+ * -DZXC_ALIGNED_MALLOC(s,a)=kmalloc(s, GFP_KERNEL)
+ * -DZXC_ALIGNED_FREE(p)=kfree(p)
+ * @endcode
+ *
+ * @note Both call sites pass `ZXC_CACHE_LINE_SIZE` as alignment. The kernel
+ * override may ignore the @c align argument if its allocator guarantees a
+ * sufficient natural alignment.
+ * @{
+ */
+#ifndef ZXC_ALIGNED_MALLOC
+#define ZXC_ALIGNED_MALLOC(size, alignment) zxc_aligned_malloc(size, alignment)
+#endif
+#ifndef ZXC_ALIGNED_FREE
+#define ZXC_ALIGNED_FREE(ptr) zxc_aligned_free(ptr)
+#endif
+/** @} */
+
+/**
  * @name Endianness Detection
  * @brief Compile-time detection of host byte order.
  *
