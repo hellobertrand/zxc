@@ -16,9 +16,9 @@ certifi==2026.4.22 \
     --hash=sha256:3cb2210c8f88ba2318d29b0388d1023c8492ff72ecdde4ebdaddbb13a31b1c4a \
     --hash=sha256:8d455352a37b71bf76a79caa83a3d6c25afee4a385d632127b6afb3963f1c580
     # via cibuildwheel
-cibuildwheel==3.3.1 \
-    --hash=sha256:6d3c387e77c5850819294863eeee4e57fb7e8ecdf87b7412e763222c16e26424 \
-    --hash=sha256:ae6eafe6f7ed3bab38919e08bf3eb92085f6387c5f7a746b40cc4775a8462f9a
+cibuildwheel==3.4.1 \
+    --hash=sha256:c3ba783013e190849bb2d22e49359a911e368daebab8b02e3996320ab9315d34 \
+    --hash=sha256:d495eb8780473029382976e86363562923401ac575c18bc52e6a9102512853ad
     # via -r requirements/build.in
 colorama==0.4.6 ; os_name == 'nt' \
     --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
@@ -72,7 +72,9 @@ pyproject-hooks==1.2.0 \
 setuptools==82.0.1 \
     --hash=sha256:7d872682c5d01cfde07da7bccc7b65469d3dca203318515ada1de5eda35efbf9 \
     --hash=sha256:a59e362652f08dcd477c78bb6e7bd9d80a7995bc73ce773050228a348ce2e5bb
-    # via setuptools-scm
+    # via
+    #   -r requirements/build.in
+    #   setuptools-scm
 setuptools-scm==10.0.5 \
     --hash=sha256:bbba8fe754516cdefd017f4456721775e6ef9662bd7887fb52ae26813d4838c3 \
     --hash=sha256:f611037d8aae618221503b8fa89319f073438252ae3420e01c9ceec249131a0a
