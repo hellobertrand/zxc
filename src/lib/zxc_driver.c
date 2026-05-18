@@ -74,7 +74,7 @@ static unsigned __stdcall zxc_win_thread_entry(void* p) {
     zxc_win_thread_arg_t* a = (zxc_win_thread_arg_t*)p;
     void* (*f)(void*) = a->func;
     void* arg = a->arg;
-    free(a);
+    ZXC_FREE(a);
     f(arg);
     return 0;
 }
@@ -82,13 +82,13 @@ static unsigned __stdcall zxc_win_thread_entry(void* p) {
 static int pthread_create(pthread_t* thread, const void* attr, void* (*start_routine)(void*),
                           void* arg) {
     (void)attr;
-    zxc_win_thread_arg_t* wrapper = malloc(sizeof(zxc_win_thread_arg_t));
+    zxc_win_thread_arg_t* wrapper = ZXC_MALLOC(sizeof(zxc_win_thread_arg_t));
     if (UNLIKELY(!wrapper)) return ZXC_ERROR_MEMORY;
     wrapper->func = start_routine;
     wrapper->arg = arg;
     uintptr_t handle = _beginthreadex(NULL, 0, zxc_win_thread_entry, wrapper, 0, NULL);
     if (UNLIKELY(handle == 0)) {
-        free(wrapper);
+        ZXC_FREE(wrapper);
         return ZXC_ERROR_MEMORY;
     }
     *thread = (HANDLE)handle;
@@ -475,7 +475,7 @@ static void* zxc_async_writer(void* arg) {
             if (UNLIKELY(args->seek_count >= args->seek_cap)) {
                 args->seek_cap = args->seek_cap * 2;
                 uint32_t* nc =
-                    (uint32_t*)realloc(args->seek_comp, args->seek_cap * sizeof(uint32_t));
+                    (uint32_t*)ZXC_REALLOC(args->seek_comp, args->seek_cap * sizeof(uint32_t));
                 // LCOV_EXCL_START
                 if (UNLIKELY(!nc)) {
                     pthread_mutex_lock(&ctx->lock);
@@ -645,7 +645,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     pthread_cond_init(&ctx.cond_worker, NULL);
     pthread_cond_init(&ctx.cond_writer, NULL);
 
-    pthread_t* const workers = malloc((size_t)num_workers * sizeof(pthread_t));
+    pthread_t* const workers = ZXC_MALLOC((size_t)num_workers * sizeof(pthread_t));
     if (UNLIKELY(!workers)) {
         // LCOV_EXCL_START
         zxc_aligned_free(mem_block);
@@ -663,7 +663,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         pthread_cond_destroy(&ctx.cond_worker);
         pthread_cond_destroy(&ctx.cond_reader);
         pthread_mutex_destroy(&ctx.lock);
-        free(workers);
+        ZXC_FREE(workers);
         zxc_aligned_free(mem_block);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
@@ -674,7 +674,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     /* Seekable: allocate initial block-size tracking array */
     if (mode == 1 && seekable) {
         w_args.seek_cap = 64;
-        w_args.seek_comp = (uint32_t*)malloc(w_args.seek_cap * sizeof(uint32_t));
+        w_args.seek_comp = (uint32_t*)ZXC_MALLOC(w_args.seek_cap * sizeof(uint32_t));
         // LCOV_EXCL_START
         if (UNLIKELY(!w_args.seek_comp)) {
             pthread_mutex_lock(&ctx.lock);
@@ -686,7 +686,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
             pthread_cond_destroy(&ctx.cond_worker);
             pthread_cond_destroy(&ctx.cond_reader);
             pthread_mutex_destroy(&ctx.lock);
-            free(workers);
+            ZXC_FREE(workers);
             zxc_aligned_free(mem_block);
             return ZXC_ERROR_MEMORY;
         }
@@ -713,7 +713,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         pthread_cond_destroy(&ctx.cond_worker);
         pthread_cond_destroy(&ctx.cond_reader);
         pthread_mutex_destroy(&ctx.lock);
-        free(workers);
+        ZXC_FREE(workers);
         zxc_aligned_free(mem_block);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
@@ -841,14 +841,14 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         /* Seekable: write SEK block between EOF and footer */
         if (!ctx.io_error && w_args.seek_comp && w_args.seek_count > 0) {
             const size_t st_size = zxc_seek_table_size(w_args.seek_count);
-            uint8_t* const st_buf = (uint8_t*)malloc(st_size);
+            uint8_t* const st_buf = (uint8_t*)ZXC_MALLOC(st_size);
             if (st_buf) {
                 const int64_t st_val =
                     zxc_write_seek_table(st_buf, st_size, w_args.seek_comp, w_args.seek_count);
                 if (st_val > 0 && f_out &&
                     fwrite(st_buf, 1, (size_t)st_val, f_out) == (size_t)st_val)
                     w_args.total_bytes += st_val;
-                free(st_buf);
+                ZXC_FREE(st_buf);
             }
         }
 
@@ -910,8 +910,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         }
     }
 
-    free(w_args.seek_comp);
-    free(workers);
+    ZXC_FREE(w_args.seek_comp);
+    ZXC_FREE(workers);
     zxc_aligned_free(mem_block);
 
     if (UNLIKELY(ctx.io_error)) return ZXC_ERROR_IO;

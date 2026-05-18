@@ -52,7 +52,7 @@ void zxc_aligned_free(void* ptr) {
 #if defined(_WIN32)
     _aligned_free(ptr);
 #else
-    free(ptr);
+    ZXC_FREE(ptr);
 #endif
 }
 
@@ -148,12 +148,12 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     }
 
     if (ctx->lit_buffer) {
-        free(ctx->lit_buffer);
+        ZXC_FREE(ctx->lit_buffer);
         ctx->lit_buffer = NULL;
     }
 
     if (ctx->work_buf) {
-        free(ctx->work_buf);
+        ZXC_FREE(ctx->work_buf);
         ctx->work_buf = NULL;
     }
 

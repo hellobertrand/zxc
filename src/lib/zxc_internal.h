@@ -233,6 +233,38 @@ extern "C" {
 /** @} */ /* end of Compiler Abstractions */
 
 /**
+ * @name Heap Allocator Abstraction
+ * @brief Macros around the libc allocators so non-libc targets (Linux kernel,
+ * embedded freestanding builds, custom arenas) can override them via `-D`
+ * flags **before** including any zxc header.
+ *
+ * Example kernel-side override:
+ * @code
+ * -DZXC_MALLOC(n)=kmalloc(n, GFP_KERNEL)
+ * -DZXC_CALLOC(n, s)=kcalloc(n, s, GFP_KERNEL)
+ * -DZXC_REALLOC(p, n)=krealloc(p, n, GFP_KERNEL)
+ * -DZXC_FREE(p)=kfree(p)
+ * @endcode
+ *
+ * @note Aligned allocations still go through @ref zxc_aligned_malloc /
+ * @ref zxc_aligned_free, which are platform-specific and not covered here.
+ * @{
+ */
+#ifndef ZXC_MALLOC
+#define ZXC_MALLOC(size) malloc(size)
+#endif
+#ifndef ZXC_CALLOC
+#define ZXC_CALLOC(nmemb, size) calloc(nmemb, size)
+#endif
+#ifndef ZXC_REALLOC
+#define ZXC_REALLOC(ptr, size) realloc(ptr, size)
+#endif
+#ifndef ZXC_FREE
+#define ZXC_FREE(ptr) free(ptr)
+#endif
+/** @} */
+
+/**
  * @name Endianness Detection
  * @brief Compile-time detection of host byte order.
  *

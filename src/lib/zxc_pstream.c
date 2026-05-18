@@ -180,7 +180,7 @@ static int cs_compress_one_block(zxc_cstream* cs) {
     // LCOV_EXCL_START
     if (UNLIKELY(bound == 0 || bound > SIZE_MAX)) return ZXC_ERROR_OVERFLOW;
     if (UNLIKELY(bound > cs->pending_cap)) {
-        uint8_t* nb = (uint8_t*)realloc(cs->pending, (size_t)bound);
+        uint8_t* nb = (uint8_t*)ZXC_REALLOC(cs->pending, (size_t)bound);
         if (UNLIKELY(!nb)) return ZXC_ERROR_MEMORY;
         cs->pending = nb;
         cs->pending_cap = (size_t)bound;
@@ -244,7 +244,7 @@ static int cs_drain_pending(zxc_cstream* cs, zxc_outbuf_t* out) {
  *         failure / invalid option values.
  */
 zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
-    zxc_cstream* cs = (zxc_cstream*)calloc(1, sizeof(*cs));
+    zxc_cstream* cs = (zxc_cstream*)ZXC_CALLOC(1, sizeof(*cs));
     if (UNLIKELY(!cs)) return NULL;  // LCOV_EXCL_LINE
 
     if (opts) cs->opts = *opts;
@@ -260,25 +260,25 @@ zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
     cs->cctx = zxc_create_cctx(&cs->opts);
     // LCOV_EXCL_START
     if (UNLIKELY(!cs->cctx)) {
-        free(cs);
+        ZXC_FREE(cs);
         return NULL;
     }
-    cs->in_block = (uint8_t*)malloc(cs->block_size);
+    cs->in_block = (uint8_t*)ZXC_MALLOC(cs->block_size);
     if (UNLIKELY(!cs->in_block)) {
         zxc_free_cctx(cs->cctx);
-        free(cs);
+        ZXC_FREE(cs);
         return NULL;
     }
     // LCOV_EXCL_STOP
     /* Pre-size pending so the file header path never needs realloc. */
     cs->pending_cap =
         ZXC_FILE_HEADER_SIZE > ZXC_FILE_FOOTER_SIZE ? ZXC_FILE_HEADER_SIZE : ZXC_FILE_FOOTER_SIZE;
-    cs->pending = (uint8_t*)malloc(cs->pending_cap);
+    cs->pending = (uint8_t*)ZXC_MALLOC(cs->pending_cap);
     // LCOV_EXCL_START
     if (UNLIKELY(!cs->pending)) {
-        free(cs->in_block);
+        ZXC_FREE(cs->in_block);
         zxc_free_cctx(cs->cctx);
-        free(cs);
+        ZXC_FREE(cs);
         return NULL;
     }
     // LCOV_EXCL_STOP
@@ -313,7 +313,7 @@ static int cs_stage_file_header(zxc_cstream* cs) {
 static int cs_stage_eof(zxc_cstream* cs) {
     // LCOV_EXCL_START
     if (UNLIKELY(ZXC_BLOCK_HEADER_SIZE > cs->pending_cap)) {
-        uint8_t* nb = (uint8_t*)realloc(cs->pending, ZXC_BLOCK_HEADER_SIZE);
+        uint8_t* nb = (uint8_t*)ZXC_REALLOC(cs->pending, ZXC_BLOCK_HEADER_SIZE);
         if (UNLIKELY(!nb)) return ZXC_ERROR_MEMORY;
         cs->pending = nb;
         cs->pending_cap = ZXC_BLOCK_HEADER_SIZE;
@@ -345,7 +345,7 @@ static int cs_stage_eof(zxc_cstream* cs) {
 static int cs_stage_footer(zxc_cstream* cs) {
     // LCOV_EXCL_START
     if (UNLIKELY(ZXC_FILE_FOOTER_SIZE > cs->pending_cap)) {
-        uint8_t* nb = (uint8_t*)realloc(cs->pending, ZXC_FILE_FOOTER_SIZE);
+        uint8_t* nb = (uint8_t*)ZXC_REALLOC(cs->pending, ZXC_FILE_FOOTER_SIZE);
         if (UNLIKELY(!nb)) return ZXC_ERROR_MEMORY;
         cs->pending = nb;
         cs->pending_cap = ZXC_FILE_FOOTER_SIZE;
@@ -368,10 +368,10 @@ static int cs_stage_footer(zxc_cstream* cs) {
  */
 void zxc_cstream_free(zxc_cstream* cs) {
     if (!cs) return;
-    free(cs->pending);
-    free(cs->in_block);
+    ZXC_FREE(cs->pending);
+    ZXC_FREE(cs->in_block);
     zxc_free_cctx(cs->cctx);
-    free(cs);
+    ZXC_FREE(cs);
 }
 
 /**
@@ -794,7 +794,7 @@ static int ds_pull_payload(zxc_dstream* ds, zxc_inbuf_t* in) {
  * @return New stream owned by the caller, or @c NULL on allocation failure.
  */
 zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts) {
-    zxc_dstream* ds = (zxc_dstream*)calloc(1, sizeof(*ds));
+    zxc_dstream* ds = (zxc_dstream*)ZXC_CALLOC(1, sizeof(*ds));
     if (UNLIKELY(!ds)) return NULL;  // LCOV_EXCL_LINE
     if (opts) ds->opts = *opts;
     ds->opts.n_threads = 0;
@@ -814,10 +814,10 @@ zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts) {
  */
 void zxc_dstream_free(zxc_dstream* ds) {
     if (!ds) return;
-    free(ds->payload);
-    free(ds->decoded);
+    ZXC_FREE(ds->payload);
+    ZXC_FREE(ds->decoded);
     if (ds->inner_initialized) zxc_cctx_free(&ds->inner);
-    free(ds);
+    ZXC_FREE(ds);
 }
 
 /**
@@ -916,14 +916,14 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     if (UNLIKELY(pb == 0 || pb > SIZE_MAX)) return ds_set_error(ds, ZXC_ERROR_OVERFLOW);
     // LCOV_EXCL_STOP
     ds->payload_cap = (size_t)pb;
-    ds->payload = (uint8_t*)malloc(ds->payload_cap);
+    ds->payload = (uint8_t*)ZXC_MALLOC(ds->payload_cap);
 
     /* Decoded buffer is sized for the wild-copy fast path: block_size +
      * ZXC_PAD_SIZE; same pattern as the buffer API uses internally.  Real
      * decoded payload lives in [0..decoded_size); the trailing PAD bytes
      * hold wild-copy overflow we never emit. */
     ds->decoded_cap = ds->block_size + ZXC_PAD_SIZE;
-    ds->decoded = (uint8_t*)malloc(ds->decoded_cap);
+    ds->decoded = (uint8_t*)ZXC_MALLOC(ds->decoded_cap);
     // LCOV_EXCL_START
     if (UNLIKELY(!ds->payload || !ds->decoded)) return ds_set_error(ds, ZXC_ERROR_MEMORY);
 
@@ -984,7 +984,7 @@ static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     // LCOV_EXCL_START
     if (UNLIKELY(ds->payload_need > ds->payload_cap)) {
         /* grow */
-        uint8_t* nb = (uint8_t*)realloc(ds->payload, ds->payload_need);
+        uint8_t* nb = (uint8_t*)ZXC_REALLOC(ds->payload, ds->payload_need);
         if (UNLIKELY(!nb)) return ds_set_error(ds, ZXC_ERROR_MEMORY);
         ds->payload = nb;
         ds->payload_cap = ds->payload_need;
