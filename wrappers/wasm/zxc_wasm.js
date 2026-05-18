@@ -74,6 +74,22 @@ export default async function createZXC(moduleOverrides, factory) {
     const _dstream_in_size    = Module.cwrap('zxc_dstream_in_size', 'number', ['number']);
     const _dstream_out_size   = Module.cwrap('zxc_dstream_out_size', 'number', ['number']);
 
+    // Seekable API (random-access decompression, single-threaded)
+    const _seekable_open      = Module.cwrap('zxc_seekable_open', 'number', ['number', 'number']);
+    const _seekable_free      = Module.cwrap('zxc_seekable_free', 'void', ['number']);
+    const _seekable_num_blocks         = Module.cwrap('zxc_seekable_get_num_blocks', 'number', ['number']);
+    const _seekable_decompressed_size  = Module.cwrap('zxc_seekable_get_decompressed_size', 'number', ['number']);
+    const _seekable_block_comp_size    = Module.cwrap('zxc_seekable_get_block_comp_size', 'number', ['number', 'number']);
+    const _seekable_block_decomp_size  = Module.cwrap('zxc_seekable_get_block_decomp_size', 'number', ['number', 'number']);
+    // Use the i32-offset shim from wasm_entry.c: cwrap cannot pass a uint64_t
+    // argument without -sWASM_BIGINT=1, and the wasm32 heap is itself bounded
+    // to 4 GiB, so a 32-bit offset is enough for any in-memory archive.
+    const _seekable_decompress_range   = Module.cwrap('zxcw_seekable_decompress_range', 'number',
+        ['number', 'number', 'number', 'number', 'number']);
+    const _seek_table_size  = Module.cwrap('zxc_seek_table_size', 'number', ['number']);
+    const _write_seek_table = Module.cwrap('zxc_write_seek_table', 'number',
+        ['number', 'number', 'number', 'number']);
+
     const _version_string = Module.cwrap('zxc_version_string', 'string', []);
     const _error_name     = Module.cwrap('zxc_error_name', 'string', ['number']);
     const _min_level      = Module.cwrap('zxc_min_level', 'number', []);
@@ -521,6 +537,128 @@ export default async function createZXC(moduleOverrides, factory) {
         };
     }
 
+    // --- Seekable API --------------------------------------------------------
+
+    /**
+     * Open a seekable ZXC archive for random-access decompression.
+     *
+     * The compressed buffer is copied into the WASM heap and held alive
+     * for the lifetime of the handle. Call `.free()` to release both the
+     * native handle and the WASM-side copy.
+     *
+     * Throws on invalid archives (bad magic, truncated seek table, ...).
+     *
+     * @param {Uint8Array} data - Compressed buffer, ideally produced with
+     *        `{ seekable: true }` so it carries an embedded seek table.
+     * @returns {{
+     *   numBlocks(): number,
+     *   decompressedSize(): number,
+     *   blockCompressedSize(idx: number): (number | null),
+     *   blockDecompressedSize(idx: number): (number | null),
+     *   decompressRange(offset: number, length: number): Uint8Array,
+     *   free(): void
+     * }}
+     */
+    function createSeekable(data) {
+        if (!data || data.length === 0) {
+            throw new Error('ZXC: createSeekable requires a non-empty buffer');
+        }
+
+        const srcLen = data.length;
+        const srcPtr = _malloc(srcLen);
+        if (!srcPtr) throw new Error('ZXC: malloc failed for seekable buffer');
+        Module.HEAPU8.set(data, srcPtr);
+
+        const handle = _seekable_open(srcPtr, srcLen);
+        if (handle === 0) {
+            _free(srcPtr);
+            throw new Error('ZXC: invalid seekable archive');
+        }
+
+        return {
+            numBlocks() { return _seekable_num_blocks(handle); },
+            decompressedSize() { return _seekable_decompressed_size(handle); },
+            blockCompressedSize(idx) {
+                if (idx < 0 || idx >= _seekable_num_blocks(handle)) return null;
+                return _seekable_block_comp_size(handle, idx);
+            },
+            blockDecompressedSize(idx) {
+                if (idx < 0 || idx >= _seekable_num_blocks(handle)) return null;
+                return _seekable_block_decomp_size(handle, idx);
+            },
+            decompressRange(offset, length) {
+                if (length < 0) throw new Error('ZXC: length must be non-negative');
+                if (length === 0) return new Uint8Array(0);
+                const dstPtr = _malloc(length);
+                if (!dstPtr) throw new Error('ZXC: malloc failed for output buffer');
+                try {
+                    const r = _seekable_decompress_range(handle, dstPtr, length, offset, length);
+                    if (r < 0) {
+                        throw new Error(`ZXC seekable decompress error: ${_error_name(r)} (${r})`);
+                    }
+                    return new Uint8Array(Module.HEAPU8.buffer, dstPtr, r).slice();
+                } finally {
+                    _free(dstPtr);
+                }
+            },
+            free() {
+                _seekable_free(handle);
+                _free(srcPtr);
+            },
+        };
+    }
+
+    /**
+     * Encoded byte size of a seek table covering `numBlocks` data blocks.
+     * Use this to size a destination buffer for [writeSeekTable].
+     * @param {number} numBlocks
+     * @returns {number}
+     */
+    function seekTableSize(numBlocks) {
+        return _seek_table_size(numBlocks >>> 0);
+    }
+
+    /**
+     * Low-level: write a seek table (header + entries) for the given
+     * per-block on-disk compressed sizes.
+     *
+     * Most callers do not need this directly; the buffer and streaming
+     * APIs emit a seek table when `seekable: true` is set.
+     *
+     * @param {ArrayLike<number>} compSizes - Per-block compressed sizes,
+     *        in order. Each entry is treated as an unsigned 32-bit value.
+     * @returns {Uint8Array} The encoded seek table.
+     */
+    function writeSeekTable(compSizes) {
+        if (!compSizes || compSizes.length === 0) {
+            throw new Error('ZXC: compSizes must be non-empty');
+        }
+        const numBlocks = compSizes.length;
+        const sz = _seek_table_size(numBlocks);
+        const dstPtr = _malloc(sz);
+        if (!dstPtr) throw new Error('ZXC: malloc failed for seek table');
+
+        const csPtr = _malloc(numBlocks * 4);
+        if (!csPtr) {
+            _free(dstPtr);
+            throw new Error('ZXC: malloc failed for compSizes scratch');
+        }
+
+        try {
+            for (let i = 0; i < numBlocks; i++) {
+                Module.HEAPU32[(csPtr >> 2) + i] = compSizes[i] >>> 0;
+            }
+            const r = _write_seek_table(dstPtr, sz, csPtr, numBlocks);
+            if (r < 0) {
+                throw new Error(`ZXC write_seek_table error: ${_error_name(r)} (${r})`);
+            }
+            return new Uint8Array(Module.HEAPU8.buffer, dstPtr, r).slice();
+        } finally {
+            _free(dstPtr);
+            _free(csPtr);
+        }
+    }
+
     // --- WHATWG TransformStream adapters -------------------------------------
     //
     // Mirror of the wrappers shipped by the Go, Rust, Python and Node bindings:
@@ -622,6 +760,9 @@ export default async function createZXC(moduleOverrides, factory) {
         createDStream,
         createCompressTransformStream,
         createDecompressTransformStream,
+        createSeekable,
+        seekTableSize,
+        writeSeekTable,
         detectZxc,
 
         /** Library version string (e.g. "0.11.0"). */

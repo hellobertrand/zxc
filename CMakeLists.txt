@@ -630,6 +630,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_dstream_finished"
         "_zxc_dstream_in_size"
         "_zxc_dstream_out_size"
+        # Seekable API
+        "_zxc_seekable_open"
+        "_zxc_seekable_free"
+        "_zxc_seekable_get_num_blocks"
+        "_zxc_seekable_get_decompressed_size"
+        "_zxc_seekable_get_block_comp_size"
+        "_zxc_seekable_get_block_decomp_size"
+        # i32-offset shim for seekable_decompress_range (see wasm_entry.c);
+        # avoids the i64 offset arg which cwrap cannot pass without BigInt.
+        "_zxcw_seekable_decompress_range"
+        "_zxc_write_seek_table"
+        "_zxc_seek_table_size"
         "_zxc_min_level"
         "_zxc_max_level"
         "_zxc_default_level"
@@ -658,6 +670,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sENVIRONMENT=web,node"
         "-sNO_FILESYSTEM=1"
         "-sSTRICT=1"
+        "-sWASM_BIGINT=0"
     )
     target_compile_options(zxc_wasm PRIVATE -O3)
 

@@ -187,3 +187,57 @@ export class DecompressStream extends Transform {
 
 export function createCompressStream(options?: CompressStreamOptions): CompressStream;
 export function createDecompressStream(options?: DecompressStreamOptions): DecompressStream;
+
+// ---------- Seekable random-access decompression ----------
+
+/**
+ * Handle on a seekable ZXC archive.
+ *
+ * Pass a compressed Buffer that carries an embedded seek table (produced
+ * by `compress(..., { seekable: true })`). The Buffer is copied into the
+ * addon's heap; call `close()` to release both the native handle and the
+ * internal copy.
+ *
+ * A Seekable handle is single-threaded - do not share it across worker
+ * threads.
+ */
+export class Seekable {
+    constructor(compressed: Buffer);
+    /** Total number of data blocks (excluding the EOF marker block). */
+    numBlocks(): number;
+    /** Total decompressed size of the archive in bytes. */
+    decompressedSize(): number;
+    /**
+     * On-disk compressed size of a specific block (block header +
+     * payload + optional per-block checksum). Returns `null` if
+     * `blockIdx` is out of range.
+     */
+    blockCompressedSize(blockIdx: number): number | null;
+    /**
+     * Decompressed size of a specific block, or `null` if `blockIdx` is
+     * out of range.
+     */
+    blockDecompressedSize(blockIdx: number): number | null;
+    /**
+     * Decompress `length` bytes starting at `offset` (in the original
+     * uncompressed byte stream). Only the blocks overlapping the
+     * requested range are read.
+     */
+    decompressRange(offset: number, length: number): Buffer;
+    /** Release native resources. Idempotent. */
+    close(): void;
+}
+
+/**
+ * Encoded byte size of a seek table covering `numBlocks` data blocks.
+ * Use this to size a destination buffer for {@link writeSeekTable}.
+ */
+export function seekTableSize(numBlocks: number): number;
+
+/**
+ * Low-level: write a seek table (header + entries) for the given
+ * per-block on-disk compressed sizes. Most callers do not need this -
+ * the buffer and streaming APIs emit a seek table automatically when
+ * `seekable: true` is set.
+ */
+export function writeSeekTable(compSizes: number[]): Buffer;

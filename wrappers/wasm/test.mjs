@@ -359,6 +359,63 @@ async function main() {
         assert(errorCode === 'ZXC_TRUNCATED', 'truncated frame error code is ZXC_TRUNCATED');
     }
 
+    // --- 10. Seekable API (random-access decompression) -------------------
+    console.log('\n10. Seekable API');
+    {
+        const { default: createZXC } = await import('./zxc_wasm.js');
+        const zxc = await createZXC({}, ZXCModule);
+
+        // Build a payload that exercises both block-level and intra-block ranges.
+        const payload = new Uint8Array(64 * 1024);
+        for (let i = 0; i < payload.length; i++) payload[i] = (i * 31) & 0xFF;
+
+        const compressed = zxc.compress(payload, { seekable: true, checksum: true });
+        assert(compressed.length > 0, `seekable archive compressed to ${compressed.length} bytes`);
+
+        const s = zxc.createSeekable(compressed);
+        try {
+            assert(s.decompressedSize() === payload.length,
+                `decompressedSize=${s.decompressedSize()} (expected ${payload.length})`);
+            assert(s.numBlocks() >= 1, `numBlocks=${s.numBlocks()}`);
+
+            const cs0 = s.blockCompressedSize(0);
+            const ds0 = s.blockDecompressedSize(0);
+            assert(typeof cs0 === 'number' && cs0 > 0, `block 0 compressed size=${cs0}`);
+            assert(typeof ds0 === 'number' && ds0 > 0, `block 0 decompressed size=${ds0}`);
+            assert(s.blockCompressedSize(s.numBlocks()) === null,
+                'out-of-range block index returns null');
+
+            // Full-range round-trip.
+            const full = s.decompressRange(0, payload.length);
+            assert(full.length === payload.length, `full range length=${full.length}`);
+            assert(arraysEqual(full, payload), 'seekable full-range byte-exact match');
+
+            // Mid-range slice.
+            const off = 1024, len = 8192;
+            const mid = s.decompressRange(off, len);
+            assert(mid.length === len, `mid range length=${mid.length}`);
+            assert(arraysEqual(mid, payload.subarray(off, off + len)),
+                'seekable mid-range byte-exact match');
+        } finally {
+            s.free();
+        }
+
+        // Invalid archive throws.
+        let didThrow = false;
+        try {
+            zxc.createSeekable(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
+        } catch (_) {
+            didThrow = true;
+        }
+        assert(didThrow, 'createSeekable on garbage throws');
+
+        // Low-level seek table helpers.
+        const compSizes = [128, 256, 200, 4];
+        const tableSize = zxc.seekTableSize(compSizes.length);
+        const table = zxc.writeSeekTable(compSizes);
+        assert(table.length === tableSize, `writeSeekTable bytes=${table.length} (expected ${tableSize})`);
+    }
+
     // --- Summary ---
     console.log(`\n${'='.repeat(40)}`);
     console.log(`Results: ${passed} passed, ${failed} failed`);
