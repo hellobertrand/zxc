@@ -46,6 +46,11 @@ Performs static analysis using Cppcheck and Clang Static Analyzer. Runs memory l
 
 Runs CodeQL security analysis to detect potential security vulnerabilities and coding errors in the C/C++ codebase.
 
+### abi-check.yml - ABI Stability Check
+**Triggers:** Pull requests (lib/header changes), push to main, manual dispatch
+
+Builds `libzxc.so` with debug info, generates an ABI XML via [`abidw`](https://sourceware.org/libabigail/), and compares it against the committed baseline at [`docs/abi/libzxc-linux-x86_64.abi.xml`](../../docs/abi/libzxc-linux-x86_64.abi.xml) using `abidiff --no-added-syms`. Adding new symbols passes (MINOR bump); removing or changing existing symbols fails (MAJOR bump required + regenerate baseline). Run with `mode=regenerate` to produce a fresh baseline as a downloadable artifact.
+
 ### scorecard.yml - OSSF Scorecard
 **Triggers:** Push to main, scheduled (weekly), manual dispatch
 

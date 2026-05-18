@@ -1,0 +1,135 @@
+name: ABI Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'check = diff against baseline; regenerate = produce a new baseline as artifact'
+        required: true
+        default: 'check'
+        type: choice
+        options:
+          - check
+          - regenerate
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/lib/**'
+      - 'include/**'
+      - 'CMakeLists.txt'
+      - 'docs/abi/**'
+      - '.github/workflows/abi-check.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/lib/**'
+      - 'include/**'
+      - 'CMakeLists.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: abi-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  abi:
+    name: Compare ABI vs baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install abigail-tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq abigail-tools
+          abidiff --version
+
+      - name: Build libzxc.so (with debug info)
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DBUILD_SHARED_LIBS=ON \
+            -DZXC_BUILD_CLI=OFF \
+            -DZXC_BUILD_TESTS=OFF \
+            -DZXC_NATIVE_ARCH=OFF
+          cmake --build build --parallel
+
+      - name: Locate libzxc.so
+        id: lib
+        run: |
+          LIB=$(find build -maxdepth 3 -name 'libzxc.so*' -not -type l | head -1)
+          if [ -z "$LIB" ]; then
+            echo "::error::libzxc.so not found in build/"
+            find build -name 'libzxc*'
+            exit 1
+          fi
+          echo "Using $LIB"
+          echo "path=$LIB" >> "$GITHUB_OUTPUT"
+
+      - name: Generate current ABI XML
+        run: |
+          abidw --headers-dir include "${{ steps.lib.outputs.path }}" \
+                --out-file build/current.abi.xml
+          echo "=== Symbols summary ==="
+          grep -c '<elf-symbol' build/current.abi.xml || true
+
+      # ---- regenerate mode: publish artifact, do not diff ----
+      - name: Upload regenerated baseline
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'regenerate'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: abi-baseline-linux-x86_64
+          path: build/current.abi.xml
+          retention-days: 30
+
+      - name: Regenerate summary
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'regenerate'
+        run: |
+          {
+            echo "## ABI baseline regenerated"
+            echo
+            echo "Download the **abi-baseline-linux-x86_64** artifact above and commit it as:"
+            echo
+            echo '```'
+            echo 'docs/abi/libzxc-linux-x86_64.abi.xml'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- check mode (PR / push / manual): diff against committed baseline ----
+      - name: Diff against committed baseline
+        if: github.event_name != 'workflow_dispatch' || inputs.mode != 'regenerate'
+        run: |
+          BASELINE=docs/abi/libzxc-linux-x86_64.abi.xml
+          if [ ! -f "$BASELINE" ]; then
+            echo "::error::Baseline $BASELINE not found. Run this workflow with mode=regenerate first, then commit the artifact."
+            exit 1
+          fi
+
+          # --no-added-syms: adding symbols is allowed (MINOR bump);
+          # removals/changes are reported as ABI breaks (MAJOR bump required).
+          set +e
+          abidiff --no-added-syms "$BASELINE" build/current.abi.xml | tee abi-report.txt
+          STATUS=$?
+          set -e
+
+          {
+            echo "## ABI diff vs baseline"
+            echo
+            echo '```'
+            cat abi-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # abidiff exit codes:
+          #   0           = compatible
+          #   bit 2 (4)   = ABI incompatible change  -> fail
+          #   bit 3 (8)   = ABI compatible change    -> pass (we report it)
+          if [ $((STATUS & 4)) -ne 0 ]; then
+            echo "::error::ABI break detected — bump SOVERSION and regenerate the baseline."
+            exit 1
+          fi
+          exit 0
