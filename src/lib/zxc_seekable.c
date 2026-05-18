@@ -30,7 +30,6 @@
 #include "../../include/zxc_seekable.h"
 
 #include "../../include/zxc_error.h"
-#include "../../include/zxc_sans_io.h"
 #include "zxc_internal.h"
 
 /* ========================================================================= */

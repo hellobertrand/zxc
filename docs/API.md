@@ -1,7 +1,7 @@
 # ZXC API & ABI Reference
 
 **Library version**: 0.11.0
-**SOVERSION**: 3  
+**SOVERSION**: 4  
 **License**: BSD-3-Clause
 
 This document is the authoritative reference for the public API surface and ABI
@@ -27,10 +27,9 @@ For the on-disk binary format see [`FORMAT.md`](FORMAT.md).
 - [10. Streaming API](#10-streaming-api)
 - [10b. Push Streaming API](#10b-push-streaming-api)
 - [11. Seekable API](#11-seekable-api)
-- [12. Sans-IO API](#12-sans-io-api)
-- [13. Error Handling](#13-error-handling)
-- [14. Thread Safety](#14-thread-safety)
-- [15. Exported Symbols Summary](#15-exported-symbols-summary)
+- [12. Error Handling](#12-error-handling)
+- [13. Thread Safety](#13-thread-safety)
+- [14. Exported Symbols Summary](#14-exported-symbols-summary)
 
 ---
 
@@ -51,13 +50,10 @@ zxc.h                  <- umbrella header (includes everything below)
 └── (not included by zxc.h)
     zxc_seekable.h     <- Seekable random-access API (opt-in)
         └── zxc_export.h
-    zxc_sans_io.h      <- Low-level primitives (opt-in)
-        └── zxc_export.h
 ```
 
-Include `<zxc.h>` to access everything except the sans-IO and seekable layers.  
-Include `<zxc_seekable.h>` explicitly for random-access decompression.  
-Include `<zxc_sans_io.h>` explicitly when building custom drivers.
+Include `<zxc.h>` to access the buffer, context, streaming, and push-stream APIs.  
+Include `<zxc_seekable.h>` explicitly for random-access decompression.
 
 ---
 
@@ -92,7 +88,7 @@ libzxc.so.{SOVERSION}.{MAJOR}.{MINOR}.{PATCH}
 
 | Field | Description | Current |
 |-------|-------------|---------|
-| `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **3** |
+| `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **4** |
 | `VERSION` | Tracks the library release. | **0.11.0** |
 
 **Compatibility rule**: any binary compiled against SOVERSION N will load against
@@ -102,8 +98,8 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` -> `libzxc.so.3` -> `libzxc.so.0.11.0` |
-| macOS | `libzxc.dylib` -> `libzxc.3.dylib` -> `libzxc.0.11.0.dylib` |
+| Linux | `libzxc.so` -> `libzxc.so.4` -> `libzxc.so.0.11.0` |
+| macOS | `libzxc.dylib` -> `libzxc.4.dylib` -> `libzxc.0.11.0.dylib` |
 | Windows | `zxc.dll` + `zxc.lib` (import) |
 
 ---
@@ -245,46 +241,6 @@ typedef struct zxc_dctx_s zxc_dctx;  // Opaque decompression context
 
 Internal layout is hidden. Interact only through `zxc_create_*` / `zxc_free_*` /
 `zxc_*_cctx` / `zxc_*_dctx` functions.
-
-### 6.4 Sans-IO Types
-
-**Compression context** (public struct, for advanced use only):
-
-```c
-typedef struct {
-    uint32_t* hash_table;     // LZ77 hash table
-    uint16_t* chain_table;    // Collision chain table
-    void*     memory_block;   // Single allocation owner
-    uint32_t  epoch;          // Lazy hash invalidation counter
-    uint32_t* buf_sequences;  // Packed sequence records
-    uint8_t*  buf_tokens;     // Token buffer
-    uint16_t* buf_offsets;    // Offset buffer
-    uint8_t*  buf_extras;     // Extra-length buffer
-    uint8_t*  literals;       // Literal bytes
-    uint8_t*  lit_buffer;     // Scratch buffer for RLE
-    size_t    lit_buffer_cap;
-    uint8_t*  work_buf;       // Padded scratch for buffer-API decompression
-    size_t    work_buf_cap;
-    int       checksum_enabled;
-    int       compression_level;
-    size_t    chunk_size;     // Effective block size
-    uint32_t  offset_bits;    // log2(chunk_size)
-    uint32_t  offset_mask;    // (1 << offset_bits) - 1
-    uint32_t  max_epoch;      // 1 << (32 - offset_bits)
-} zxc_cctx_t;
-```
-
-**Block header** (8 bytes on disk):
-
-```c
-typedef struct {
-    uint8_t  block_type;   // See FORMAT.md §4
-    uint8_t  block_flags;
-    uint8_t  reserved;
-    uint8_t  header_crc;   // 1-byte header CRC
-    uint32_t comp_size;    // Compressed payload size (excl. header)
-} zxc_block_header_t;
-```
 
 ---
 
@@ -1000,108 +956,7 @@ Returns the encoded byte size of a seek table for `num_blocks` blocks.
 
 ---
 
-## 12. Sans-IO API
-
-Declared in `zxc_sans_io.h` (not included by `zxc.h` - opt-in).
-Low-level primitives for building custom compression drivers.
-
-### `zxc_cctx_init`
-
-```c
-ZXC_EXPORT int zxc_cctx_init(
-    zxc_cctx_t* ctx,
-    size_t      chunk_size,
-    int         mode,              // 1 = compression, 0 = decompression
-    int         level,
-    int         checksum_enabled
-);
-```
-
-Allocates internal buffers sized for `chunk_size`.
-
-**Returns**: `ZXC_OK` or `ZXC_ERROR_MEMORY`.
-
-### `zxc_cctx_free`
-
-```c
-ZXC_EXPORT void zxc_cctx_free(zxc_cctx_t* ctx);
-```
-
-Frees internal buffers. Does **not** free `ctx` itself.
-
-### `zxc_write_file_header`
-
-```c
-ZXC_EXPORT int zxc_write_file_header(
-    uint8_t* dst,
-    size_t   dst_capacity,
-    size_t   chunk_size,
-    int      has_checksum
-);
-```
-
-Writes the 16-byte file header.  
-**Returns**: bytes written, or `ZXC_ERROR_DST_TOO_SMALL`.
-
-### `zxc_read_file_header`
-
-```c
-ZXC_EXPORT int zxc_read_file_header(
-    const uint8_t* src,
-    size_t         src_size,
-    size_t*        out_block_size,    // optional
-    int*           out_has_checksum   // optional
-);
-```
-
-Validates the file header (magic, version, CRC16).  
-**Returns**: `ZXC_OK`, or `ZXC_ERROR_BAD_MAGIC` / `ZXC_ERROR_BAD_VERSION` /
-`ZXC_ERROR_SRC_TOO_SMALL`.
-
-### `zxc_write_block_header`
-
-```c
-ZXC_EXPORT int zxc_write_block_header(
-    uint8_t*                  dst,
-    size_t                    dst_capacity,
-    const zxc_block_header_t* bh
-);
-```
-
-Serializes a block header (8 bytes, little-endian).  
-**Returns**: bytes written, or `ZXC_ERROR_DST_TOO_SMALL`.
-
-### `zxc_read_block_header`
-
-```c
-ZXC_EXPORT int zxc_read_block_header(
-    const uint8_t*      src,
-    size_t              src_size,
-    zxc_block_header_t* bh
-);
-```
-
-Parses a block header (endianness conversion included).  
-**Returns**: `ZXC_OK` or `ZXC_ERROR_SRC_TOO_SMALL`.
-
-### `zxc_write_file_footer`
-
-```c
-ZXC_EXPORT int zxc_write_file_footer(
-    uint8_t* dst,
-    size_t   dst_capacity,
-    uint64_t src_size,
-    uint32_t global_hash,
-    int      checksum_enabled
-);
-```
-
-Writes the 12-byte footer (original size + optional global hash).  
-**Returns**: bytes written, or `ZXC_ERROR_DST_TOO_SMALL`.
-
----
-
-## 13. Error Handling
+## 12. Error Handling
 
 ### `zxc_error_name`
 
@@ -1126,7 +981,7 @@ if (result < 0) {
 
 ---
 
-## 14. Thread Safety
+## 13. Thread Safety
 
 | API Layer | Safe to call concurrently? | Notes |
 |-----------|---------------------------|-------|
@@ -1135,14 +990,13 @@ if (result < 0) {
 | **Context API** | Per-context | A single `zxc_cctx` / `zxc_dctx` must not be shared between threads.  Create one context per thread. |
 | **Streaming API** | Per-call | Each `zxc_stream_*` call manages its own thread pool internally.  Do not call from multiple threads on the same `FILE*`. |
 | **Seekable API** | Per-handle | A single `zxc_seekable` handle must not be shared between threads for single-threaded decompression.  Use `zxc_seekable_decompress_range_mt()` for parallel access. |
-| **Sans-IO API** | Per-context | Same rule as context API: one `zxc_cctx_t` per thread. |
 | `zxc_error_name` | Yes | Returns a pointer to a static string. |
 
 ---
 
-## 15. Exported Symbols Summary
+## 14. Exported Symbols Summary
 
-The shared library exports exactly **54 symbols** (verified with `nm -gU`):
+The shared library exports **47 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -1192,14 +1046,7 @@ The shared library exports exactly **54 symbols** (verified with `nm -gU`):
 | 44 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
 | 45 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
 | 46 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
-| 47 | `zxc_cctx_init` | Sans-IO | `zxc_sans_io.h` |
-| 48 | `zxc_cctx_free` | Sans-IO | `zxc_sans_io.h` |
-| 49 | `zxc_write_file_header` | Sans-IO | `zxc_sans_io.h` |
-| 50 | `zxc_read_file_header` | Sans-IO | `zxc_sans_io.h` |
-| 51 | `zxc_write_block_header` | Sans-IO | `zxc_sans_io.h` |
-| 52 | `zxc_read_block_header` | Sans-IO | `zxc_sans_io.h` |
-| 53 | `zxc_write_file_footer` | Sans-IO | `zxc_sans_io.h` |
-| 54 | `zxc_error_name` | Error | `zxc_error.h` |
+| 47 | `zxc_error_name` | Error | `zxc_error.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon`, `_avx2`, `_avx512`) are compiled with
