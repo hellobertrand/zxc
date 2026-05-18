@@ -939,8 +939,8 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         (dp_needed > ZXC_HUF_BUILD_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_BUILD_SCRATCH_SIZE;
 
     if (UNLIKELY(ctx->opt_scratch_cap < needed)) {
-        if (ctx->opt_scratch) zxc_aligned_free(ctx->opt_scratch);
-        ctx->opt_scratch = (uint8_t*)zxc_aligned_malloc(needed, ZXC_CACHE_LINE_SIZE);
+        if (ctx->opt_scratch) ZXC_ALIGNED_FREE(ctx->opt_scratch);
+        ctx->opt_scratch = (uint8_t*)ZXC_ALIGNED_MALLOC(needed, ZXC_CACHE_LINE_SIZE);
         if (UNLIKELY(!ctx->opt_scratch)) {
             ctx->opt_scratch_cap = 0;
             return ZXC_ERROR_MEMORY;

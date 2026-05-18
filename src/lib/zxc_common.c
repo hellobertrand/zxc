@@ -112,7 +112,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     const size_t off_lit = total_size;
     total_size += ZXC_ALIGN_CL(sz_lit);
 
-    uint8_t* const mem = (uint8_t*)zxc_aligned_malloc(total_size, ZXC_CACHE_LINE_SIZE);
+    uint8_t* const mem = (uint8_t*)ZXC_ALIGNED_MALLOC(total_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
 
     ctx->memory_block = mem;
@@ -143,22 +143,22 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
  */
 void zxc_cctx_free(zxc_cctx_t* ctx) {
     if (ctx->memory_block) {
-        zxc_aligned_free(ctx->memory_block);
+        ZXC_ALIGNED_FREE(ctx->memory_block);
         ctx->memory_block = NULL;
     }
 
     if (ctx->lit_buffer) {
-        free(ctx->lit_buffer);
+        ZXC_FREE(ctx->lit_buffer);
         ctx->lit_buffer = NULL;
     }
 
     if (ctx->work_buf) {
-        free(ctx->work_buf);
+        ZXC_FREE(ctx->work_buf);
         ctx->work_buf = NULL;
     }
 
     if (ctx->opt_scratch) {
-        zxc_aligned_free(ctx->opt_scratch);
+        ZXC_ALIGNED_FREE(ctx->opt_scratch);
         ctx->opt_scratch = NULL;
     }
 

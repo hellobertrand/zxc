@@ -60,19 +60,19 @@ static unsigned __stdcall zxc_seek_thread_entry(void* p) {
     zxc_seek_thread_arg_t* a = (zxc_seek_thread_arg_t*)p;
     void* (*f)(void*) = a->func;
     void* arg = a->arg;
-    free(a);
+    ZXC_FREE(a);
     f(arg);
     return 0;
 }
 
 static int zxc_seek_thread_create(zxc_thread_t* t, void* (*fn)(void*), void* arg) {
-    zxc_seek_thread_arg_t* wrapper = malloc(sizeof(zxc_seek_thread_arg_t));
+    zxc_seek_thread_arg_t* wrapper = ZXC_MALLOC(sizeof(zxc_seek_thread_arg_t));
     if (UNLIKELY(!wrapper)) return ZXC_ERROR_MEMORY;
     wrapper->func = fn;
     wrapper->arg = arg;
     uintptr_t handle = _beginthreadex(NULL, 0, zxc_seek_thread_entry, wrapper, 0, NULL);
     if (UNLIKELY(handle == 0)) {
-        free(wrapper);
+        ZXC_FREE(wrapper);
         return ZXC_ERROR_MEMORY;
     }
     *t = (HANDLE)handle;
@@ -259,7 +259,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     if (UNLIKELY(bh.comp_size != (uint32_t)entries_total)) return NULL;
 
     /* Step 5: allocate handle and parse entries */
-    zxc_seekable* const s = (zxc_seekable*)calloc(1, sizeof(zxc_seekable));
+    zxc_seekable* const s = (zxc_seekable*)ZXC_CALLOC(1, sizeof(zxc_seekable));
     // LCOV_EXCL_START
     if (UNLIKELY(!s)) return NULL;
     // LCOV_EXCL_STOP
@@ -271,8 +271,8 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     s->src_size = (uint64_t)data_size;
 
     /* Allocate arrays */
-    s->comp_sizes = (uint32_t*)calloc(num_blocks, sizeof(uint32_t));
-    s->comp_offsets = (uint64_t*)calloc((size_t)num_blocks + 1, sizeof(uint64_t));
+    s->comp_sizes = (uint32_t*)ZXC_CALLOC(num_blocks, sizeof(uint32_t));
+    s->comp_offsets = (uint64_t*)ZXC_CALLOC((size_t)num_blocks + 1, sizeof(uint64_t));
     // LCOV_EXCL_START
     if (UNLIKELY(!s->comp_sizes || !s->comp_offsets)) {
         zxc_seekable_free(s);
@@ -361,7 +361,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
      * The seek table parsing needs the file header. */
     if ((size_t)file_size <= 64 * 1024 * 1024) {
         /* File <= 64 MB: read it all into memory */
-        uint8_t* const full = (uint8_t*)malloc((size_t)file_size);
+        uint8_t* const full = (uint8_t*)ZXC_MALLOC((size_t)file_size);
         // LCOV_EXCL_START
         if (UNLIKELY(!full)) {
             fseeko(f, saved_pos, SEEK_SET);
@@ -369,7 +369,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
         }
         if (UNLIKELY(fseeko(f, 0, SEEK_SET) != 0 ||
                      fread(full, 1, (size_t)file_size, f) != (size_t)file_size)) {
-            free(full);
+            ZXC_FREE(full);
             fseeko(f, saved_pos, SEEK_SET);
             return NULL;
         }
@@ -386,7 +386,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
             s->fd = fileno(f);
 #endif
         }
-        free(full);
+        ZXC_FREE(full);
         return s;
     }
 
@@ -439,7 +439,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
 
     /* Read the full seek block */
     const size_t seek_block_total = ZXC_BLOCK_HEADER_SIZE + (size_t)entries_total_64;
-    uint8_t* const seek_buf = (uint8_t*)malloc(seek_block_total);
+    uint8_t* const seek_buf = (uint8_t*)ZXC_MALLOC(seek_block_total);
     if (UNLIKELY(!seek_buf)) {
         fseeko(f, saved_pos, SEEK_SET);
         return NULL;
@@ -449,7 +449,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
         file_size - (long long)ZXC_FILE_FOOTER_SIZE - (long long)seek_block_total;
     if (UNLIKELY(seek_offset < 0 || fseeko(f, seek_offset, SEEK_SET) != 0 ||
                  fread(seek_buf, 1, seek_block_total, f) != seek_block_total)) {
-        free(seek_buf);
+        ZXC_FREE(seek_buf);
         fseeko(f, saved_pos, SEEK_SET);
         return NULL;
     }
@@ -459,14 +459,14 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
     zxc_block_header_t bh;
     if (UNLIKELY(zxc_read_block_header(seek_buf, seek_block_total, &bh) != ZXC_OK) ||
         bh.block_type != ZXC_BLOCK_SEK || bh.comp_size != (uint32_t)entries_total_64) {
-        free(seek_buf);
+        ZXC_FREE(seek_buf);
         return NULL;
     }
 
     /* Build seekable handle */
-    zxc_seekable* const s = (zxc_seekable*)calloc(1, sizeof(zxc_seekable));
+    zxc_seekable* const s = (zxc_seekable*)ZXC_CALLOC(1, sizeof(zxc_seekable));
     if (UNLIKELY(!s)) {
-        free(seek_buf);
+        ZXC_FREE(seek_buf);
         return NULL;
     }
 
@@ -482,10 +482,10 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
     s->block_size = bs;
     s->file_has_checksums = fhc;
 
-    s->comp_sizes = (uint32_t*)calloc(num_blocks, sizeof(uint32_t));
-    s->comp_offsets = (uint64_t*)calloc((size_t)num_blocks + 1, sizeof(uint64_t));
+    s->comp_sizes = (uint32_t*)ZXC_CALLOC(num_blocks, sizeof(uint32_t));
+    s->comp_offsets = (uint64_t*)ZXC_CALLOC((size_t)num_blocks + 1, sizeof(uint64_t));
     if (UNLIKELY(!s->comp_sizes || !s->comp_offsets)) {
-        free(seek_buf);
+        ZXC_FREE(seek_buf);
         zxc_seekable_free(s);
         return NULL;
     }
@@ -499,7 +499,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
 
         /* Reject entries larger than the entire file */
         if (UNLIKELY(s->comp_sizes[i] > (uint64_t)file_size)) {
-            free(seek_buf);
+            ZXC_FREE(seek_buf);
             zxc_seekable_free(s);
             return NULL;
         }
@@ -508,7 +508,7 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
     }
     s->comp_offsets[num_blocks] = comp_acc;
 
-    free(seek_buf);
+    ZXC_FREE(seek_buf);
     return s;
     // LCOV_EXCL_STOP
 }
@@ -598,8 +598,8 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     /* Ensure work buffer is large enough */
     const size_t work_sz = (size_t)s->block_size + ZXC_PAD_SIZE;
     if (s->dctx.work_buf_cap < work_sz) {
-        free(s->dctx.work_buf);
-        s->dctx.work_buf = (uint8_t*)malloc(work_sz);
+        ZXC_FREE(s->dctx.work_buf);
+        s->dctx.work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
         if (UNLIKELY(!s->dctx.work_buf)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
         s->dctx.work_buf_cap = work_sz;
     }
@@ -616,31 +616,37 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     for (uint32_t bi = blk_start; bi <= blk_end; bi++) {
         if (s->comp_sizes[bi] > max_comp) max_comp = s->comp_sizes[bi];
     }
-    uint8_t* const read_buf = (uint8_t*)malloc(max_comp + ZXC_PAD_SIZE);
+    uint8_t* const read_buf = (uint8_t*)ZXC_MALLOC(max_comp + ZXC_PAD_SIZE);
     if (UNLIKELY(!read_buf)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
 
     for (uint32_t bi = blk_start; bi <= blk_end; bi++) {
         /* Read compressed block data */
         const int read_res = zxc_seek_read_block(s, bi, read_buf, max_comp + ZXC_PAD_SIZE);
         if (UNLIKELY(read_res < 0)) {
-            free(read_buf);
+            // LCOV_EXCL_START
+            ZXC_FREE(read_buf);
             return read_res;
+            // LCOV_EXCL_STOP
         }
 
         /* Decompress the block */
         const int dec_res = zxc_decompress_chunk_wrapper(&s->dctx, read_buf, (size_t)read_res,
                                                          s->dctx.work_buf, work_sz);
         if (UNLIKELY(dec_res < 0)) {
-            free(read_buf);
+            // LCOV_EXCL_START
+            ZXC_FREE(read_buf);
             return dec_res;
+            // LCOV_EXCL_STOP
         }
 
         /* Calculate which portion of this block's decompressed data we need */
         const uint64_t blk_decomp_start = zxc_seek_decomp_offset(s->block_size, bi);
         const size_t skip = (offset > blk_decomp_start) ? (size_t)(offset - blk_decomp_start) : 0;
         if (UNLIKELY((size_t)dec_res < skip)) {
-            free(read_buf);
+            // LCOV_EXCL_START
+            ZXC_FREE(read_buf);
             return ZXC_ERROR_CORRUPT_DATA;
+            // LCOV_EXCL_STOP
         }
         const size_t avail = (size_t)dec_res - skip;
         const size_t copy = (avail < remaining) ? avail : remaining;
@@ -650,7 +656,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         remaining -= copy;
     }
 
-    free(read_buf);
+    ZXC_FREE(read_buf);
     return (int64_t)len;
 }
 
@@ -726,7 +732,7 @@ static void* zxc_seek_mt_worker(void* arg) {
 
     /* Allocate work buffer for decompressed output */
     const size_t work_sz = (size_t)s->block_size + ZXC_PAD_SIZE;
-    dctx.work_buf = (uint8_t*)malloc(work_sz);
+    dctx.work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
     // LCOV_EXCL_START
     if (UNLIKELY(!dctx.work_buf)) {
         zxc_cctx_free(&dctx);
@@ -738,7 +744,7 @@ static void* zxc_seek_mt_worker(void* arg) {
 
     /* Read compressed block */
     const uint32_t csz = s->comp_sizes[bi];
-    uint8_t* const read_buf = (uint8_t*)malloc(csz + ZXC_PAD_SIZE);
+    uint8_t* const read_buf = (uint8_t*)ZXC_MALLOC(csz + ZXC_PAD_SIZE);
     // LCOV_EXCL_START
     if (UNLIKELY(!read_buf)) {
         zxc_cctx_free(&dctx);
@@ -750,7 +756,7 @@ static void* zxc_seek_mt_worker(void* arg) {
     const int read_res = zxc_seek_read_block_mt(s, bi, read_buf, csz + ZXC_PAD_SIZE);
     // LCOV_EXCL_START
     if (UNLIKELY(read_res < 0)) {
-        free(read_buf);
+        ZXC_FREE(read_buf);
         zxc_cctx_free(&dctx);
         job->result = read_res;
         return NULL;
@@ -760,7 +766,7 @@ static void* zxc_seek_mt_worker(void* arg) {
     /* Decompress */
     const int dec_res =
         zxc_decompress_chunk_wrapper(&dctx, read_buf, (size_t)read_res, dctx.work_buf, work_sz);
-    free(read_buf);
+    ZXC_FREE(read_buf);
 
     // LCOV_EXCL_START
     if (UNLIKELY(dec_res < 0)) {
@@ -808,7 +814,8 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
     if (n_threads > ZXC_MAX_THREADS) n_threads = ZXC_MAX_THREADS;
 
     /* Allocate job descriptors */
-    zxc_seek_mt_job_t* const jobs = (zxc_seek_mt_job_t*)calloc(num_jobs, sizeof(zxc_seek_mt_job_t));
+    zxc_seek_mt_job_t* const jobs =
+        (zxc_seek_mt_job_t*)ZXC_CALLOC(num_jobs, sizeof(zxc_seek_mt_job_t));
     if (UNLIKELY(!jobs)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
 
     /* Plan jobs: compute skip, copy_len, and dst pointer for each block */
@@ -820,8 +827,10 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
         const size_t skip = (offset > blk_decomp_start) ? (size_t)(offset - blk_decomp_start) : 0;
         const size_t blk_decomp_sz = zxc_seek_decomp_size(s->block_size, s->total_decomp, bi);
         if (UNLIKELY(blk_decomp_sz < skip)) {
-            free(jobs);
+            // LCOV_EXCL_START
+            ZXC_FREE(jobs);
             return ZXC_ERROR_CORRUPT_DATA;
+            // LCOV_EXCL_STOP
         }
         const size_t avail = blk_decomp_sz - skip;
         const size_t copy = (avail < remaining) ? avail : remaining;
@@ -838,10 +847,11 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
     }
 
     /* Launch worker threads (fork phase) */
-    zxc_thread_t* const threads = (zxc_thread_t*)malloc((size_t)n_threads * sizeof(zxc_thread_t));
+    zxc_thread_t* const threads =
+        (zxc_thread_t*)ZXC_MALLOC((size_t)n_threads * sizeof(zxc_thread_t));
     // LCOV_EXCL_START
     if (UNLIKELY(!threads)) {
-        free(jobs);
+        ZXC_FREE(jobs);
         return ZXC_ERROR_MEMORY;
     }
     // LCOV_EXCL_STOP
@@ -881,7 +891,7 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
         job_idx += (uint32_t)launched;
     }
 
-    free(threads);
+    ZXC_FREE(threads);
 
     /* Check for errors */
     int64_t result = (int64_t)len;
@@ -894,14 +904,14 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
         }
     }
 
-    free(jobs);
+    ZXC_FREE(jobs);
     return result;
 }
 
 void zxc_seekable_free(zxc_seekable* s) {
     if (!s) return;
     if (s->dctx_initialized) zxc_cctx_free(&s->dctx);
-    free(s->comp_sizes);
-    free(s->comp_offsets);
-    free(s);
+    ZXC_FREE(s->comp_sizes);
+    ZXC_FREE(s->comp_offsets);
+    ZXC_FREE(s);
 }
