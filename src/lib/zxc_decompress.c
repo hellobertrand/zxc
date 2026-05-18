@@ -686,7 +686,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
                     // Raw copy (most common path): use ZXC_PAD_SIZE-byte wild copies
                     // token is 7-bit (0-127), so len is 1-128 bytes
                     const uint32_t len = (uint32_t)token + 1;
-                    if (UNLIKELY(w_ptr + len > w_end || r_ptr + len > r_end))
+                    if (UNLIKELY((size_t)(w_end - w_ptr) < len || (size_t)(r_end - r_ptr) < len))
                         return ZXC_ERROR_CORRUPT_DATA;
 
                     // Destination has ZXC_PAD_SIZE bytes of safe overrun space.
