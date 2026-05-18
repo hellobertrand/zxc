@@ -36,9 +36,6 @@
 #define zxc_huf_decode_section ZXC_CAT(zxc_huf_decode_section, ZXC_FUNCTION_SUFFIX)
 #endif
 
-#include <stdlib.h>
-#include <string.h>
-
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
@@ -135,7 +132,7 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         return ZXC_OK;
     }
 
-    qsort(leaves, (size_t)n, sizeof(pm_leaf_t), pm_leaf_cmp);
+    ZXC_QSORT(leaves, (size_t)n, sizeof(pm_leaf_t), pm_leaf_cmp);
 
     /* n <= 256 <= 2^ZXC_HUF_MAX_CODE_LEN, so length-limit is always feasible. */
     const int max_per_level = 2 * n;

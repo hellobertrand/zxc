@@ -26,10 +26,8 @@
 #ifndef ZXC_INTERNAL_H
 #define ZXC_INTERNAL_H
 
-#include <inttypes.h>
 #include <limits.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -261,6 +259,9 @@ extern "C" {
 #ifndef ZXC_FREE
 #define ZXC_FREE(ptr) free(ptr)
 #endif
+#ifndef ZXC_QSORT
+#define ZXC_QSORT(base, nmemb, size, cmp) qsort(base, nmemb, size, cmp)
+#endif
 /** @} */
 
 /**
@@ -270,22 +271,8 @@ extern "C" {
  *
  * The default expansion calls the internal helpers @ref zxc_aligned_malloc /
  * @ref zxc_aligned_free, which wrap `_aligned_malloc`/`_aligned_free` on
- * Windows and `posix_memalign`/`free` on POSIX. The malloc/free pair is
- * opaque — if you override one, you **must** override the other (a pointer
- * returned by an override must not be freed by the default, and vice versa).
+ * Windows and `posix_memalign`/`free` on POSIX.
  *
- * Example kernel-side override:
- * @code
- * // kmalloc returns memory aligned to ARCH_KMALLOC_MINALIGN (>= cache line
- * // on most modern archs). For stricter alignment, use kmem_cache_* with
- * // SLAB_HWCACHE_ALIGN and a per-context cache.
- * -DZXC_ALIGNED_MALLOC(s,a)=kmalloc(s, GFP_KERNEL)
- * -DZXC_ALIGNED_FREE(p)=kfree(p)
- * @endcode
- *
- * @note Both call sites pass `ZXC_CACHE_LINE_SIZE` as alignment. The kernel
- * override may ignore the @c align argument if its allocator guarantees a
- * sufficient natural alignment.
  * @{
  */
 #ifndef ZXC_ALIGNED_MALLOC

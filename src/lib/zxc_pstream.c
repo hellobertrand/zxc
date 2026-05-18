@@ -24,9 +24,6 @@
 
 #include "../../include/zxc_pstream.h"
 
-#include <stdlib.h>
-#include <string.h>
-
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
 #include "../../include/zxc_error.h"
