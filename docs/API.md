@@ -840,7 +840,7 @@ transparently, the seek table is skipped during sequential decompression.
 ### `zxc_seekable_open`
 
 ```c
-ZXC_EXPORT zxc_seekable* zxc_seekable_open(const void* src, size_t src_size);
+ZXC_EXPORT zxc_seekable* zxc_seekable_open(const void* src, const size_t src_size);
 ```
 
 Opens a seekable archive from a memory buffer.  The buffer must remain
@@ -858,6 +858,46 @@ Opens a seekable archive from a `FILE*`.  The file must be seekable (not
 stdin/pipe).  The file position is saved and restored after parsing.
 
 **Returns**: handle on success, or `NULL` on error.
+
+### `zxc_reader_t`
+
+```c
+typedef struct {
+    int64_t (*read_at)(void* ctx, void* dst, size_t len, uint64_t offset);
+    void*    ctx;
+    uint64_t size;   // total size of the compressed archive in bytes
+} zxc_reader_t;
+```
+
+Storage-agnostic reader interface. Lets the caller plug any backend that
+supports positional reads — `mmap`, HTTP `Range:` requests, S3, a custom VFS,
+`vfs_read()` in Linux kernel space, etc. — behind the seekable API.
+
+`read_at` returns the number of bytes read (`== len` on success), or a
+negative `zxc_error_t` on failure. Short reads are treated as errors.
+
+**Thread safety**: `read_at` MUST be safe to call concurrently from multiple
+threads when the resulting handle is used with
+`zxc_seekable_decompress_range_mt()`. The single-threaded path makes no
+concurrent calls.
+
+**Lifetime**: `ctx` and the backing storage must remain valid until
+`zxc_seekable_free()`.
+
+### `zxc_seekable_open_reader`
+
+```c
+ZXC_EXPORT zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r);
+```
+
+Opens a seekable archive through a user-supplied reader. The reader is invoked
+to fetch the file header, footer, and seek table at open time (3 reads), then
+once per block during decompression. No `FILE*` is involved — this is the
+entry point to use for kernel space, networked storage, or any non-POSIX
+backend.
+
+**Returns**: handle on success, or `NULL` if `r`/`r->read_at` is `NULL`,
+`r->size` is `0`, the archive is not seekable, or any `read_at` call fails.
 
 ### `zxc_seekable_get_num_blocks`
 
