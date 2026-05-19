@@ -1,3 +1,3 @@
 cibuildwheel==3.4.1
-setuptools-scm
-setuptools
+setuptools-scm==10.0.5
+setuptools==82.0.1
