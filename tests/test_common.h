@@ -143,6 +143,8 @@ int test_seekable_single_block(void);
 int test_seekable_all_levels(void);
 int test_seekable_many_blocks(void);
 int test_seekable_open_file(void);
+int test_seekable_open_reader(void);
+int test_seekable_open_reader_mt(void);
 int test_seekable_cross_boundary(void);
 int test_seekable_truncated_input(void);
 int test_seekable_corrupted_sek(void);

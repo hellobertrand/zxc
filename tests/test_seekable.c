@@ -858,6 +858,202 @@ int test_seekable_no_checksum() {
     return 1;
 }
 
+/* ========================================================================= */
+/*  Reader-callback API (zxc_seekable_open_reader)                           */
+/* ========================================================================= */
+
+/* In-memory reader: counts invocations so we can assert lazy I/O. */
+typedef struct {
+    const uint8_t* data;
+    uint64_t size;
+    int call_count;
+    uint64_t bytes_read;
+} reader_test_ctx_t;
+
+static int64_t reader_test_read_at(void* ctx, void* dst, size_t len, uint64_t offset) {
+    reader_test_ctx_t* m = (reader_test_ctx_t*)ctx;
+    m->call_count++;
+    if (offset > m->size || len > m->size - offset) return -1;
+    memcpy(dst, m->data + offset, len);
+    m->bytes_read += (uint64_t)len;
+    return (int64_t)len;
+}
+
+/* Reader that always reports a short read - must be rejected at open(). */
+static int64_t reader_short_read_at(void* ctx, void* dst, size_t len, uint64_t offset) {
+    (void)ctx; (void)dst; (void)offset;
+    return (int64_t)(len > 0 ? len - 1 : 0);
+}
+
+/* Reader that returns a negative error code - must propagate. */
+static int64_t reader_error_read_at(void* ctx, void* dst, size_t len, uint64_t offset) {
+    (void)ctx; (void)dst; (void)len; (void)offset;
+    return ZXC_ERROR_IO;
+}
+
+/* Open and roundtrip via a user-supplied callback reader (single-threaded). */
+int test_seekable_open_reader() {
+    printf("=== TEST: Seekable - Open Reader Callback ===\n");
+
+    const size_t SRC_SIZE = 256 * 1024;
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    fill_seek_data(src, SRC_SIZE, 211);
+
+    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    uint8_t* dst = malloc(dst_cap);
+    uint8_t* dec = malloc(SRC_SIZE);
+    if (!dst || !dec) { free(src); free(dst); free(dec); return 0; }
+
+    zxc_compress_opts_t opts = {.level = 3, .block_size = 64 * 1024,
+                                .checksum_enabled = 1, .seekable = 1};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    if (csize <= 0) {
+        printf("Failed: compress (%lld)\n", (long long)csize);
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Open through the reader callback */
+    reader_test_ctx_t mctx = { .data = dst, .size = (uint64_t)csize, .call_count = 0,
+                               .bytes_read = 0 };
+    zxc_reader_t r = { .read_at = reader_test_read_at, .ctx = &mctx, .size = (uint64_t)csize };
+
+    zxc_seekable* s = zxc_seekable_open_reader(&r);
+    if (!s) {
+        printf("Failed: zxc_seekable_open_reader returned NULL\n");
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    /* open() should perform exactly 3 reads: header, footer, seek block. */
+    if (mctx.call_count != 3) {
+        printf("Failed: expected 3 reads at open, got %d\n", mctx.call_count);
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    /* 256KB / 64KB = 4 blocks */
+    if (zxc_seekable_get_num_blocks(s) != 4) {
+        printf("Failed: expected 4 blocks, got %u\n", zxc_seekable_get_num_blocks(s));
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+    if (zxc_seekable_get_decompressed_size(s) != SRC_SIZE) {
+        printf("Failed: bad total decompressed size\n");
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Full-range decompress */
+    int64_t n = zxc_seekable_decompress_range(s, dec, SRC_SIZE, 0, SRC_SIZE);
+    if (n != (int64_t)SRC_SIZE || memcmp(src, dec, SRC_SIZE) != 0) {
+        printf("Failed: full range mismatch (n=%lld)\n", (long long)n);
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Cross-block sub-range */
+    const uint64_t off = 64 * 1024 - 200;
+    const size_t len = 400;
+    uint8_t cross[400];
+    n = zxc_seekable_decompress_range(s, cross, len, off, len);
+    if (n != (int64_t)len || memcmp(cross, src + off, len) != 0) {
+        printf("Failed: cross-block sub-range mismatch\n");
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Lazy I/O: a sub-range inside block 2 only must trigger exactly 1 extra read. */
+    const int before = mctx.call_count;
+    n = zxc_seekable_decompress_range(s, cross, len, 128 * 1024 + 10, len);
+    if (n != (int64_t)len || mctx.call_count != before + 1) {
+        printf("Failed: single-block read should trigger 1 read_at (got %d)\n",
+               mctx.call_count - before);
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    zxc_seekable_free(s);
+
+    /* NULL reader rejection */
+    if (zxc_seekable_open_reader(NULL) != NULL) {
+        printf("Failed: NULL reader not rejected\n");
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Missing read_at rejection */
+    zxc_reader_t bad = { .read_at = NULL, .ctx = NULL, .size = 100 };
+    if (zxc_seekable_open_reader(&bad) != NULL) {
+        printf("Failed: NULL read_at not rejected\n");
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Zero size rejection */
+    zxc_reader_t empty = { .read_at = reader_test_read_at, .ctx = &mctx, .size = 0 };
+    if (zxc_seekable_open_reader(&empty) != NULL) {
+        printf("Failed: zero size not rejected\n");
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Short read at open: must reject */
+    zxc_reader_t short_r = { .read_at = reader_short_read_at, .ctx = NULL,
+                             .size = (uint64_t)csize };
+    if (zxc_seekable_open_reader(&short_r) != NULL) {
+        printf("Failed: short-read reader not rejected\n");
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    /* Negative return at open: must reject */
+    zxc_reader_t err_r = { .read_at = reader_error_read_at, .ctx = NULL,
+                           .size = (uint64_t)csize };
+    if (zxc_seekable_open_reader(&err_r) != NULL) {
+        printf("Failed: error-returning reader not rejected\n");
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    free(src); free(dst); free(dec);
+    printf("PASS\n\n");
+    return 1;
+}
+
+/* Multi-threaded decompression through a reader callback.
+ * The callback only does memcpy on const data, so it is naturally thread-safe. */
+int test_seekable_open_reader_mt() {
+    printf("=== TEST: Seekable - Open Reader Callback (MT) ===\n");
+
+    const size_t SRC_SIZE = 1 * 1024 * 1024; /* 1 MB => 16 x 64KB blocks */
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    fill_seek_data(src, SRC_SIZE, 137);
+
+    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    uint8_t* dst = malloc(dst_cap);
+    uint8_t* dec = malloc(SRC_SIZE);
+    if (!dst || !dec) { free(src); free(dst); free(dec); return 0; }
+
+    zxc_compress_opts_t opts = {.level = 3, .block_size = 64 * 1024,
+                                .checksum_enabled = 1, .seekable = 1};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    if (csize <= 0) {
+        printf("Failed: compress (%lld)\n", (long long)csize);
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    reader_test_ctx_t mctx = { .data = dst, .size = (uint64_t)csize, .call_count = 0,
+                               .bytes_read = 0 };
+    zxc_reader_t r = { .read_at = reader_test_read_at, .ctx = &mctx, .size = (uint64_t)csize };
+
+    zxc_seekable* s = zxc_seekable_open_reader(&r);
+    if (!s) {
+        printf("Failed: open_reader\n");
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    int64_t n = zxc_seekable_decompress_range_mt(s, dec, SRC_SIZE, 0, SRC_SIZE, 4);
+    if (n != (int64_t)SRC_SIZE || memcmp(src, dec, SRC_SIZE) != 0) {
+        printf("Failed: MT full range mismatch (n=%lld)\n", (long long)n);
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    zxc_seekable_free(s);
+    free(src); free(dst); free(dec);
+    printf("PASS\n\n");
+    return 1;
+}
+
 /* Seekable with checksum (seekable=1, checksum_enabled=1) */
 int test_seekable_with_checksum() {
     printf("=== TEST: Seekable - With Checksum ===\n");

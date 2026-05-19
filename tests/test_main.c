@@ -116,12 +116,14 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_seekable_all_levels),
     TEST_CASE(test_seekable_many_blocks),
     TEST_CASE(test_seekable_open_file),
+    TEST_CASE(test_seekable_open_reader),
 
     /* --- Seekable MT --- */
     TEST_CASE(test_seekable_mt_roundtrip),
     TEST_CASE(test_seekable_mt_single_block),
     TEST_CASE(test_seekable_mt_random_access),
     TEST_CASE(test_seekable_mt_full_file),
+    TEST_CASE(test_seekable_open_reader_mt),
 
     /* --- Seekable edge cases --- */
     TEST_CASE(test_seekable_cross_boundary),
