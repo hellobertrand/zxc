@@ -90,6 +90,56 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open(const void* src, const size_t src_siz
 ZXC_EXPORT zxc_seekable* zxc_seekable_open_file(FILE* f);
 
 /**
+ * @brief Storage-agnostic reader interface for seekable archives.
+ *
+ * Lets the caller plug any backend (mmap, HTTP range requests, S3, a custom
+ * VFS, kernel @c vfs_read, etc.) behind the seekable reader.  The reader
+ * exposes positional reads only; no seeking state is implied.
+ *
+ * @par Thread safety
+ * @c read_at MUST be safe to call concurrently from multiple threads when the
+ * resulting handle is used with zxc_seekable_decompress_range_mt().  The
+ * single-threaded path makes no concurrent calls.
+ *
+ * @par Lifetime
+ * Both @c ctx and the backing storage must remain valid for the lifetime of
+ * the returned zxc_seekable handle (until zxc_seekable_free()).
+ */
+typedef struct {
+    /**
+     * @brief Reads exactly @c len bytes at @c offset into @c dst.
+     *
+     * @param[in,out] ctx     Opaque user context (forwarded from zxc_reader_t::ctx).
+     * @param[out]    dst     Destination buffer.
+     * @param[in]     len     Number of bytes to read.
+     * @param[in]     offset  Byte offset from the start of the archive.
+     * @return Number of bytes read (@c == @c len on success), or a negative
+     *         @ref zxc_error_t code on failure.  Short reads are treated as
+     *         errors by the seekable reader.
+     */
+    int64_t (*read_at)(void* ctx, void* dst, size_t len, uint64_t offset);
+
+    /** @brief Opaque user context passed unchanged to @c read_at. */
+    void* ctx;
+
+    /** @brief Total size of the compressed archive in bytes. */
+    uint64_t size;
+} zxc_reader_t;
+
+/**
+ * @brief Opens a seekable archive through a user-supplied reader.
+ *
+ * The reader is invoked to fetch the file header, footer, and seek table at
+ * open time, then again on every block read during decompression.  Use this
+ * entry point to back the seekable API with any storage that supports
+ * positional reads (e.g. mmap, HTTP, S3, a kernel file descriptor).
+ *
+ * @param[in] r  Reader interface (must remain valid for the handle lifetime).
+ * @return Handle on success, or @c NULL on error.
+ */
+ZXC_EXPORT zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r);
+
+/**
  * @brief Returns the total number of blocks in the seekable archive.
  *
  * @param[in] s  Seekable handle.

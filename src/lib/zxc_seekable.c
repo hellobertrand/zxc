@@ -176,10 +176,11 @@ int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity, const uint
 /* ========================================================================= */
 
 struct zxc_seekable_s {
-    /* Source - exactly one is non-NULL */
+    /* Source - exactly one of {src, file, reader.read_at} is set */
     const uint8_t* src;
     uint64_t src_size;
     FILE* file;
+    zxc_reader_t reader; /* user-supplied callback reader; read_at == NULL when unused */
 
     /* Native file descriptor for thread-safe pread() I/O */
 #if defined(_WIN32)
@@ -513,6 +514,118 @@ zxc_seekable* zxc_seekable_open_file(FILE* f) {
     // LCOV_EXCL_STOP
 }
 
+zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r) {
+    if (UNLIKELY(!r || !r->read_at || r->size == 0)) return NULL;
+
+    /* Minimum: file_header(16) + eof_block(8) + seek_block_header(8)
+     *          + file_footer(12) = 44 */
+    const uint64_t MIN_SEEKABLE_SIZE =
+        ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
+    if (UNLIKELY(r->size < MIN_SEEKABLE_SIZE)) return NULL;
+
+    /* Read file header => block_size */
+    uint8_t header[ZXC_FILE_HEADER_SIZE];
+    if (UNLIKELY(r->read_at(r->ctx, header, ZXC_FILE_HEADER_SIZE, 0) !=
+                 (int64_t)ZXC_FILE_HEADER_SIZE))
+        return NULL;
+
+    size_t bs_sz = 0;
+    int fhc = 0;
+    if (UNLIKELY(zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &bs_sz, &fhc) != ZXC_OK))
+        return NULL;
+    const uint32_t bs = (uint32_t)bs_sz;
+    if (UNLIKELY(bs == 0)) return NULL;
+
+    /* Read footer => total_decomp_size */
+    uint8_t footer_buf[ZXC_FILE_FOOTER_SIZE];
+    if (UNLIKELY(r->read_at(r->ctx, footer_buf, ZXC_FILE_FOOTER_SIZE,
+                            r->size - ZXC_FILE_FOOTER_SIZE) != (int64_t)ZXC_FILE_FOOTER_SIZE))
+        return NULL;
+
+    const uint64_t total_decomp = zxc_le64(footer_buf);
+    if (UNLIKELY(total_decomp == 0)) return NULL;
+
+    /* Derive num_blocks = ceil(total_decomp / block_size) */
+    const uint64_t num_blocks_64 = (total_decomp + bs - 1) / bs;
+    if (UNLIKELY(num_blocks_64 > UINT32_MAX)) return NULL;
+    const uint32_t num_blocks = (uint32_t)num_blocks_64;
+
+    /* Guard against size_t multiplication overflow */
+    const uint64_t entries_total_64 = (uint64_t)num_blocks * ZXC_SEEK_ENTRY_SIZE;
+    if (UNLIKELY(entries_total_64 > SIZE_MAX - ZXC_BLOCK_HEADER_SIZE)) return NULL;
+
+    /* Read the full seek block */
+    const size_t seek_block_total = ZXC_BLOCK_HEADER_SIZE + (size_t)entries_total_64;
+    if (UNLIKELY(seek_block_total + ZXC_FILE_FOOTER_SIZE > r->size)) return NULL;
+
+    uint8_t* const seek_buf = (uint8_t*)ZXC_MALLOC(seek_block_total);
+    if (UNLIKELY(!seek_buf)) return NULL;
+
+    const uint64_t seek_offset = r->size - ZXC_FILE_FOOTER_SIZE - (uint64_t)seek_block_total;
+    if (UNLIKELY(r->read_at(r->ctx, seek_buf, seek_block_total, seek_offset) !=
+                 (int64_t)seek_block_total)) {
+        ZXC_FREE(seek_buf);
+        return NULL;
+    }
+
+    /* Validate SEK block header */
+    zxc_block_header_t bh;
+    if (UNLIKELY(zxc_read_block_header(seek_buf, seek_block_total, &bh) != ZXC_OK) ||
+        bh.block_type != ZXC_BLOCK_SEK || bh.comp_size != (uint32_t)entries_total_64) {
+        ZXC_FREE(seek_buf);
+        return NULL;
+    }
+
+    /* Build seekable handle */
+    zxc_seekable* const s = (zxc_seekable*)ZXC_CALLOC(1, sizeof(zxc_seekable));
+    if (UNLIKELY(!s)) {
+        ZXC_FREE(seek_buf);
+        return NULL;
+    }
+
+    s->reader = *r;
+    s->src = NULL;
+    s->file = NULL;
+    s->src_size = r->size;
+    s->num_blocks = num_blocks;
+    s->block_size = bs;
+    s->file_has_checksums = fhc;
+
+    s->comp_sizes = (uint32_t*)ZXC_CALLOC(num_blocks, sizeof(uint32_t));
+    s->comp_offsets = (uint64_t*)ZXC_CALLOC((size_t)num_blocks + 1, sizeof(uint64_t));
+    if (UNLIKELY(!s->comp_sizes || !s->comp_offsets)) {
+        ZXC_FREE(seek_buf);
+        zxc_seekable_free(s);
+        return NULL;
+    }
+    s->total_decomp = total_decomp;
+
+    /* Parse comp_sizes and build prefix sums; validate against archive size. */
+    const uint8_t* ep = seek_buf + ZXC_BLOCK_HEADER_SIZE;
+    uint64_t comp_acc = ZXC_FILE_HEADER_SIZE;
+    for (uint32_t i = 0; i < num_blocks; i++) {
+        s->comp_sizes[i] = zxc_le32(ep);
+        ep += sizeof(uint32_t);
+
+        if (UNLIKELY(s->comp_sizes[i] < ZXC_BLOCK_HEADER_SIZE || s->comp_sizes[i] > r->size)) {
+            ZXC_FREE(seek_buf);
+            zxc_seekable_free(s);
+            return NULL;
+        }
+        s->comp_offsets[i] = comp_acc;
+        comp_acc += s->comp_sizes[i];
+        if (UNLIKELY(comp_acc > r->size)) {
+            ZXC_FREE(seek_buf);
+            zxc_seekable_free(s);
+            return NULL;
+        }
+    }
+    s->comp_offsets[num_blocks] = comp_acc;
+
+    ZXC_FREE(seek_buf);
+    return s;
+}
+
 uint32_t zxc_seekable_get_num_blocks(const zxc_seekable* s) { return s ? s->num_blocks : 0; }
 
 uint64_t zxc_seekable_get_decompressed_size(const zxc_seekable* s) {
@@ -573,6 +686,10 @@ static int zxc_seek_read_block(const zxc_seekable* s, const uint32_t block_idx, 
                      fread(buf, 1, csz, s->file) != csz))
             return ZXC_ERROR_IO;
         // LCOV_EXCL_STOP
+    } else if (s->reader.read_at) {
+        /* User-supplied callback reader */
+        const int64_t r = s->reader.read_at(s->reader.ctx, buf, csz, off);
+        if (UNLIKELY(r != (int64_t)csz)) return (r < 0) ? (int)r : ZXC_ERROR_IO;
     } else {
         return ZXC_ERROR_NULL_INPUT;  // LCOV_EXCL_LINE
     }
@@ -701,6 +818,10 @@ static int zxc_seek_read_block_mt(const zxc_seekable* s, const uint32_t block_id
         const int r = zxc_seek_pread(s->fd, buf, csz, off);
 #endif
         if (UNLIKELY(r < 0)) return r;
+    } else if (s->reader.read_at) {
+        /* Reader callback - caller-supplied read_at must be thread-safe */
+        const int64_t r = s->reader.read_at(s->reader.ctx, buf, csz, off);
+        if (UNLIKELY(r != (int64_t)csz)) return (r < 0) ? (int)r : ZXC_ERROR_IO;
     } else {
         return ZXC_ERROR_NULL_INPUT;  // LCOV_EXCL_LINE
     }
