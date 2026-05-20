@@ -932,21 +932,17 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     const size_t sz_dp = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint32_t));
     const size_t sz_pl = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint16_t));
     const size_t sz_po = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint16_t));
-    const size_t n_bm_words = (chunk + 1 + 63) / 64;
+    const size_t n_bm_words = ZXC_BITMAP_WORDS(chunk + 1);
     const size_t sz_bm = ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));
     const size_t dp_needed = sz_dp + sz_pl + sz_po + sz_bm;
     const size_t needed =
         (dp_needed > ZXC_HUF_BUILD_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_BUILD_SCRATCH_SIZE;
 
-    if (UNLIKELY(ctx->opt_scratch_cap < needed)) {
-        if (ctx->opt_scratch) ZXC_ALIGNED_FREE(ctx->opt_scratch);
-        ctx->opt_scratch = (uint8_t*)ZXC_ALIGNED_MALLOC(needed, ZXC_CACHE_LINE_SIZE);
-        if (UNLIKELY(!ctx->opt_scratch)) {
-            ctx->opt_scratch_cap = 0;
-            return ZXC_ERROR_MEMORY;
-        }
-        ctx->opt_scratch_cap = needed;
-    }
+    /* opt_scratch is now pre-allocated inside ctx->memory_block by
+     * zxc_cctx_init when level >= ZXC_LEVEL_DENSITY. The formula above must
+     * stay byte-for-byte in sync with the one in zxc_cctx_init() and
+     * zxc_estimate_cctx_size(). */
+    (void)needed;
 
     /* Per-block literal cost: */
     const uint32_t lit_cost = zxc_opt_estimate_lit_bits(src, src_sz, ctx->opt_scratch);

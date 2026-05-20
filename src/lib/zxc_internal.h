@@ -309,6 +309,13 @@ extern "C" {
 /** @brief Round @p x up to the next cache-line boundary. */
 #define ZXC_ALIGN_CL(x) (((x) + ZXC_ALIGNMENT_MASK) & ~(size_t)ZXC_ALIGNMENT_MASK)
 
+/**
+ * @brief Number of @c uint64_t words needed to hold a bitmap of @p n_bits.
+ *
+ * Equivalent to @c ceil(n_bits / 64).
+ */
+#define ZXC_BITMAP_WORDS(n_bits) (((n_bits) + 63) / 64)
+
 /** @brief Bit flag in the Flags byte indicating checksum presence (bit 7). */
 #define ZXC_FILE_FLAG_HAS_CHECKSUM 0x80U
 /** @brief Mask for the checksum algorithm id (bits 0-3). */
@@ -1519,7 +1526,7 @@ typedef struct {
     uint8_t* literals;       /**< Buffer for literal bytes. */
 
     /* Cold zone: configuration / scratch / resizeable. */
-    uint8_t* lit_buffer;    /**< Scratch buffer for literals (RLE). */
+    uint8_t* lit_buffer;    /**< Scratch buffer for literals (RLE / Huffman). */
     size_t lit_buffer_cap;  /**< Current capacity of the scratch buffer. */
     uint8_t* work_buf;      /**< Padded scratch buffer for buffer-API decompression. */
     size_t work_buf_cap;    /**< Capacity of the work buffer. */

@@ -83,7 +83,35 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->offset_mask = (uint32_t)((1ULL << offset_bits) - 1);
     ctx->max_epoch = (uint32_t)(1ULL << (32 - offset_bits));
 
-    if (mode == 0) return ZXC_OK;
+    /* Decompress mode: two padded scratch buffers (work_buf and lit_buffer)
+     * are the only persistent allocations; the rest of the cctx hot/warm
+     * zones are compress-only. Both are partitioned inside memory_block so
+     * a static-cctx workspace sees one contiguous allocation.
+     *
+     * lit_buffer is sized for the worst case (chunk_size + ZXC_PAD_SIZE)
+     * because the decoder cannot predict the per-block literal encoding
+     * (RAW / RLE / HUFFMAN) at init time.
+     */
+    if (mode == 0) {
+        const size_t sz_work = chunk_size + ZXC_PAD_SIZE;
+        const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
+
+        size_t total_size = 0;
+        const size_t off_work = total_size;
+        total_size += ZXC_ALIGN_CL(sz_work);
+        const size_t off_lit = total_size;
+        total_size += ZXC_ALIGN_CL(sz_lit);
+
+        uint8_t* const mem = (uint8_t*)ZXC_ALIGNED_MALLOC(total_size, ZXC_CACHE_LINE_SIZE);
+        if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
+
+        ctx->memory_block = mem;
+        ctx->work_buf = mem + off_work;
+        ctx->work_buf_cap = sz_work;
+        ctx->lit_buffer = mem + off_lit;
+        ctx->lit_buffer_cap = sz_lit;
+        return ZXC_OK;
+    }
 
     const size_t max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
     const size_t sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
@@ -96,6 +124,20 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     const size_t vbyte_len = (offset_bits + 6) / 7;
     const size_t sz_extras = max_seq * 2 * vbyte_len;
     const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
+
+    /* opt_scratch (level >= 6 only): DP arrays for the optimal parser, also
+     * reused transiently as the package-merge scratch for the length-limited
+     * Huffman code-length builder. Sized to the larger of the two demands. */
+    size_t sz_opt = 0;
+    if (level >= ZXC_LEVEL_DENSITY) {
+        const size_t sz_dp = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t));
+        const size_t sz_pl = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
+        const size_t sz_po = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
+        const size_t n_bm_words = ZXC_BITMAP_WORDS(chunk_size + 1);
+        const size_t sz_bm = ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));
+        const size_t dp_needed = sz_dp + sz_pl + sz_po + sz_bm;
+        sz_opt = (dp_needed > ZXC_HUF_BUILD_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_BUILD_SCRATCH_SIZE;
+    }
 
     /* Calculate sizes with alignment padding (64 bytes for cache line alignment) */
     size_t total_size = 0;
@@ -111,6 +153,13 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     total_size += ZXC_ALIGN_CL(sz_extras);
     const size_t off_lit = total_size;
     total_size += ZXC_ALIGN_CL(sz_lit);
+    /* opt_scratch is appended last so it is absent for levels 1..5 (zero
+     * waste on the common path) and only inflates the workspace at level 6. */
+    size_t off_opt = 0;
+    if (sz_opt) {
+        off_opt = total_size;
+        total_size += ZXC_ALIGN_CL(sz_opt);
+    }
 
     uint8_t* const mem = (uint8_t*)ZXC_ALIGNED_MALLOC(total_size, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
@@ -124,6 +173,10 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     ctx->buf_tokens = (uint8_t*)(mem + off_seq_union) + max_seq * sizeof(uint16_t);
     ctx->buf_extras = (uint8_t*)(mem + off_extras);
     ctx->literals = (uint8_t*)(mem + off_lit);
+    if (sz_opt) {
+        ctx->opt_scratch = mem + off_opt;
+        ctx->opt_scratch_cap = sz_opt;
+    }
 
     ctx->compression_level = level;
     ctx->epoch = 1;
@@ -147,21 +200,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
         ctx->memory_block = NULL;
     }
 
-    if (ctx->lit_buffer) {
-        ZXC_FREE(ctx->lit_buffer);
-        ctx->lit_buffer = NULL;
-    }
-
-    if (ctx->work_buf) {
-        ZXC_FREE(ctx->work_buf);
-        ctx->work_buf = NULL;
-    }
-
-    if (ctx->opt_scratch) {
-        ZXC_ALIGNED_FREE(ctx->opt_scratch);
-        ctx->opt_scratch = NULL;
-    }
-
+    ctx->lit_buffer = NULL;
     ctx->hash_table = NULL;
     ctx->hash_tags = NULL;
     ctx->chain_table = NULL;
@@ -170,6 +209,8 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->buf_offsets = NULL;
     ctx->buf_extras = NULL;
     ctx->literals = NULL;
+    ctx->work_buf = NULL;
+    ctx->opt_scratch = NULL;
 
     ctx->epoch = 0;
     ctx->lit_buffer_cap = 0;
@@ -663,7 +704,7 @@ uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
      * buffers above and is intentionally omitted. */
 
     if (level >= ZXC_LEVEL_DENSITY) {
-        const size_t n_bm_words = (chunk_size + 1 + 63) / 64;
+        const size_t n_bm_words = ZXC_BITMAP_WORDS(chunk_size + 1);
         size_t opt = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* dp             */
         opt += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));       /* parent_len     */
         opt += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));       /* parent_off     */

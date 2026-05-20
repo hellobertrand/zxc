@@ -634,17 +634,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
             if (UNLIKELY(required_size > dst_capacity || required_size > SIZE_MAX - ZXC_PAD_SIZE))
                 return ZXC_ERROR_DST_TOO_SMALL;
             const size_t alloc_size = required_size + ZXC_PAD_SIZE;
-            if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) {
-                uint8_t* new_buf = (uint8_t*)ZXC_REALLOC(ctx->lit_buffer, alloc_size);
-                if (UNLIKELY(!new_buf)) {
-                    ZXC_FREE(ctx->lit_buffer);
-                    ctx->lit_buffer = NULL;
-                    ctx->lit_buffer_cap = 0;
-                    return ZXC_ERROR_MEMORY;
-                }
-                ctx->lit_buffer = new_buf;
-                ctx->lit_buffer_cap = alloc_size;
-            }
+            /* lit_buffer is pre-allocated to chunk_size + ZXC_PAD_SIZE by
+             * zxc_cctx_init (mode == 0). */
+            if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) return ZXC_ERROR_CORRUPT_DATA;
             const int rc =
                 zxc_huf_decode_section(p_curr, lit_stream_size, ctx->lit_buffer, required_size);
             if (UNLIKELY(rc != ZXC_OK)) return rc;
@@ -659,17 +651,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
                 return ZXC_ERROR_DST_TOO_SMALL;
             const size_t alloc_size = required_size + ZXC_PAD_SIZE;
 
-            if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) {
-                uint8_t* new_buf = (uint8_t*)ZXC_REALLOC(ctx->lit_buffer, alloc_size);
-                if (UNLIKELY(!new_buf)) {
-                    ZXC_FREE(ctx->lit_buffer);
-                    ctx->lit_buffer = NULL;
-                    ctx->lit_buffer_cap = 0;
-                    return ZXC_ERROR_MEMORY;
-                }
-                ctx->lit_buffer = new_buf;
-                ctx->lit_buffer_cap = alloc_size;
-            }
+            /* lit_buffer is pre-allocated to chunk_size + ZXC_PAD_SIZE by
+             * zxc_cctx_init (mode == 0).*/
+            if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) return ZXC_ERROR_CORRUPT_DATA;
 
             rle_buf = ctx->lit_buffer;
             if (UNLIKELY(!rle_buf || lit_stream_size > (size_t)(src + src_size - p_curr)))
