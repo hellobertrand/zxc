@@ -33,6 +33,7 @@
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
+#include "../../include/zxc_seekable.h"
 #include "rapidhash.h"
 
 #ifdef __cplusplus
@@ -1774,6 +1775,26 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
  */
 int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
                           const uint32_t global_hash, const int checksum_enabled);
+
+/* ---------------------------------------------------------------------------
+ * Seekable cross-TU hooks (defined in zxc_seekable.c, consumed by the
+ * FILE*-flavored open helper in zxc_driver.c).
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @brief Hands ownership of a heap-allocated reader context to a seekable
+ *        handle.  The context will be released via @c ZXC_FREE when
+ *        @ref zxc_seekable_free is called on @p s.
+ *
+ * Safe to call exactly once per handle.  Intended for thin wrappers that
+ * build a @ref zxc_reader_t over their own allocated state
+ * (@ref zxc_seekable_open_file) and need that state to outlive the call
+ * site.
+ *
+ * @param[in,out] s    Seekable handle returned by @ref zxc_seekable_open_reader.
+ * @param[in]     ctx  Pointer previously returned by @c ZXC_MALLOC / @c ZXC_CALLOC.
+ */
+void zxc_seekable_attach_owned_ctx(zxc_seekable* s, void* ctx);
 
 /** @} */ /* end of internal */
 

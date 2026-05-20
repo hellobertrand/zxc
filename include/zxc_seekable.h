@@ -19,17 +19,29 @@
  * backward to validate the SEK block header.
  * Standard (non-seekable) decompressors ignore the seek table entirely.
  *
+ * This header is freestanding: it depends only on @c <stddef.h>, @c <stdint.h>
+ * and the rest of the ZXC public API. It does not pull in @c <stdio.h>, so it
+ * is includable from kernel-space or other freestanding environments.
+ * The @c FILE*-based @ref zxc_seekable_open_file entry point lives in the
+ * companion header @c zxc_seekable_file.h.
+ *
  * @par Creating a seekable archive
  * @code
  * zxc_compress_opts_t opts = { .level = 3, .seekable = 1 };
  * int64_t csize = zxc_compress(src, src_size, dst, dst_cap, &opts);
  * @endcode
  *
- * @par Random-access decompression
+ * @par Random-access decompression (buffer-backed)
  * @code
  * zxc_seekable* s = zxc_seekable_open(compressed, csize);
  * int64_t n = zxc_seekable_decompress_range(s, out, out_cap, offset, len);
  * zxc_seekable_free(s);
+ * @endcode
+ *
+ * @par Random-access decompression (custom storage)
+ * @code
+ * zxc_reader_t r = { .read_at = my_read_at, .ctx = my_state, .size = total };
+ * zxc_seekable* s = zxc_seekable_open_reader(&r);
  * @endcode
  */
 
@@ -38,7 +50,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include "zxc_export.h"
 
@@ -59,7 +70,8 @@ extern "C" {
 /**
  * @brief Opaque handle for a seekable ZXC archive.
  *
- * Created by zxc_seekable_open() or zxc_seekable_open_file().
+ * Created by zxc_seekable_open(), zxc_seekable_open_reader(), or
+ * zxc_seekable_open_file() (see @c zxc_seekable_file.h).
  * Must be freed with zxc_seekable_free().
  */
 typedef struct zxc_seekable_s zxc_seekable;
@@ -76,18 +88,6 @@ typedef struct zxc_seekable_s zxc_seekable;
  *         valid seekable archive (e.g. missing seek block, bad block type).
  */
 ZXC_EXPORT zxc_seekable* zxc_seekable_open(const void* src, const size_t src_size);
-
-/**
- * @brief Opens a seekable archive from a FILE*.
- *
- * The file must be seekable (not stdin/pipe).  The current file position
- * is saved and restored after parsing the seek table.  The FILE* must
- * remain open for the lifetime of the handle.
- *
- * @param[in] f  File opened in "rb" mode.
- * @return Handle on success, or @c NULL on error.
- */
-ZXC_EXPORT zxc_seekable* zxc_seekable_open_file(FILE* f);
 
 /**
  * @brief Storage-agnostic reader interface for seekable archives.

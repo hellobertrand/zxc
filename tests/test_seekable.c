@@ -6,6 +6,7 @@
  */
 
 #include "test_common.h"
+#include "../include/zxc_stream.h"
 
 int test_seekable_table_sizes() {
     printf("=== TEST: Seekable - Table Sizes ===\n");

@@ -851,11 +851,19 @@ valid for the lifetime of the handle.
 ### `zxc_seekable_open_file`
 
 ```c
+#include <zxc_stream.h>
+
 ZXC_EXPORT zxc_seekable* zxc_seekable_open_file(FILE* f);
 ```
 
 Opens a seekable archive from a `FILE*`.  The file must be seekable (not
 stdin/pipe).  The file position is saved and restored after parsing.
+Internally builds a `zxc_reader_t` over `pread()`/`ReadFile()` and delegates
+to `zxc_seekable_open_reader`.
+
+Declared in `zxc_stream.h` (which gathers all `FILE*`-flavored entry points)
+rather than `zxc_seekable.h` — that header stays freestanding so it can be
+included from kernel-space / freestanding environments.
 
 **Returns**: handle on success, or `NULL` on error.
 
@@ -1087,7 +1095,7 @@ The shared library exports **47 symbols** (verified with `nm -gU`):
 | 34 | `zxc_dstream_in_size` | Push Streaming | `zxc_pstream.h` |
 | 35 | `zxc_dstream_out_size` | Push Streaming | `zxc_pstream.h` |
 | 36 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
-| 37 | `zxc_seekable_open_file` | Seekable | `zxc_seekable.h` |
+| 37 | `zxc_seekable_open_file` | Seekable | `zxc_stream.h` |
 | 38 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
 | 39 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
 | 40 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
