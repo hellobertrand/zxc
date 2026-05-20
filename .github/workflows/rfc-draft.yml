@@ -1,0 +1,66 @@
+name: RFC Draft
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/FORMAT.md'
+      - '.github/workflows/rfc-draft.yml'
+  pull_request:
+    paths:
+      - 'docs/FORMAT.md'
+      - '.github/workflows/rfc-draft.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build draft-lebonnois-zxc-format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Install kramdown-rfc and xml2rfc
+        run: |
+          gem install kramdown-rfc
+          python -m pip install --upgrade pip
+          pip install xml2rfc
+
+      - name: Generate XML from kramdown-rfc source
+        run: |
+          mkdir -p build/rfc
+          kramdown-rfc docs/FORMAT.md > build/rfc/draft-lebonnois-zxc-format-00.xml
+
+      - name: Render text, html, and pdf outputs
+        run: |
+          cd build/rfc
+          xml2rfc --text --html --pdf draft-lebonnois-zxc-format-00.xml
+
+      - name: Validate xml2rfc output
+        run: |
+          test -s build/rfc/draft-lebonnois-zxc-format-00.txt
+          test -s build/rfc/draft-lebonnois-zxc-format-00.html
+          test -s build/rfc/draft-lebonnois-zxc-format-00.pdf
+          test -s build/rfc/draft-lebonnois-zxc-format-00.xml
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: draft-lebonnois-zxc-format-00
+          path: build/rfc/draft-lebonnois-zxc-format-00.*
+          if-no-files-found: error
+          retention-days: 30

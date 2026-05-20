@@ -73,6 +73,11 @@ Automatically checks for and updates third-party dependencies (like `rapidhash.h
 
 Regenerates [`CHANGELOG.md`](../../CHANGELOG.md) with [`git-cliff`](https://git-cliff.org/), grouping all commits under their respective tags. On `bump/vX.Y.Z` and `release/vX.Y.Z` branches the version tag is auto-detected from the branch name; manual dispatch accepts an explicit `tag` input (empty = `Unreleased`). The generated file is uploaded as a workflow artifact, it is **not** committed back to the repo. Configuration lives in [`cliff.toml`](../../cliff.toml).
 
+### rfc-draft.yml - Build RFC Draft
+**Triggers:** Push to main (docs/FORMAT.md changes), pull requests, manual dispatch
+
+Renders the kramdown-rfc source at [`docs/FORMAT.md`](../../docs/FORMAT.md) into IETF-publishable `.xml`, `.txt`, `.html`, and `.pdf` outputs using [`kramdown-rfc`](https://github.com/cabo/kramdown-rfc) and [`xml2rfc`](https://github.com/ietf-tools/xml2rfc). Artifacts are uploaded as `draft-lebonnois-zxc-format-00.*` for 30 days. The canonical `.txt` is what gets submitted to the IETF Datatracker.
+
 ## Language Bindings
 
 ### wrapper-rust.yml - Wrapper Rust
