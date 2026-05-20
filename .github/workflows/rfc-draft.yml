@@ -34,11 +34,20 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install Pango (required by xml2rfc --pdf via WeasyPrint)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 \
+            libpangoft2-1.0-0 \
+            libharfbuzz0b \
+            libfontconfig1
+
       - name: Install kramdown-rfc and xml2rfc
         run: |
           gem install kramdown-rfc
           python -m pip install --upgrade pip
-          pip install xml2rfc
+          pip install 'xml2rfc[pdf]'
 
       - name: Generate XML from kramdown-rfc source
         run: |
