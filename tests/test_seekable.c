@@ -886,6 +886,7 @@ typedef struct {
     uint64_t size;
 } reader_test_ctx_mt_t;
 
+// cppcheck-suppress constParameterCallback
 static int64_t reader_test_read_at_mt(void* ctx, void* dst, size_t len, uint64_t offset) {
     const reader_test_ctx_mt_t* m = (const reader_test_ctx_mt_t*)ctx;
     if (offset > m->size || len > m->size - offset) return -1;
@@ -971,10 +972,15 @@ int test_seekable_open_reader() {
         zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
     }
 
-    /* Lazy I/O: a sub-range inside block 2 only must trigger exactly 1 extra read. */
+    // Lazy I/O: a sub-range inside block 2 only must trigger exactly 1
+    // extra read. read_at is invoked from inside decompress_range via a
+    // function pointer cppcheck cannot follow, so it folds the before/after
+    // comparison to a constant; suppress the two resulting false positives.
     const int before = mctx.call_count;
     n = zxc_seekable_decompress_range(s, cross, len, 128 * 1024 + 10, len);
+    // cppcheck-suppress duplicateExpression
     const int delta = mctx.call_count - before;
+    // cppcheck-suppress knownConditionTrueFalse
     if (n != (int64_t)len || delta != 1) {
         printf("Failed: single-block read should trigger 1 read_at (got %d)\n", delta);
         zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
