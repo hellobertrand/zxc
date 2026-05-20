@@ -974,9 +974,9 @@ int test_seekable_open_reader() {
     /* Lazy I/O: a sub-range inside block 2 only must trigger exactly 1 extra read. */
     const int before = mctx.call_count;
     n = zxc_seekable_decompress_range(s, cross, len, 128 * 1024 + 10, len);
-    if (n != (int64_t)len || mctx.call_count != before + 1) {
-        printf("Failed: single-block read should trigger 1 read_at (got %d)\n",
-               mctx.call_count - before);
+    const int delta = mctx.call_count - before;
+    if (n != (int64_t)len || delta != 1) {
+        printf("Failed: single-block read should trigger 1 read_at (got %d)\n", delta);
         zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
     }
 
