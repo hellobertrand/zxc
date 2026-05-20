@@ -1564,6 +1564,48 @@ int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, cons
                   const int checksum_enabled);
 
 /**
+ * @brief Returns the byte count that @ref zxc_cctx_init would allocate for
+ *        the given parameters.
+ *
+ * Used by the static-cctx public API to size a caller-supplied workspace
+ * before calling @ref zxc_cctx_init_in_workspace.
+ *
+ * @param[in] chunk_size  Block size in bytes (must satisfy
+ *                        @ref zxc_validate_block_size).
+ * @param[in] mode        1 = compression, 0 = decompression.
+ * @param[in] level       Compression level (only consulted when @p mode == 1).
+ * @return Size in bytes, or 0 if the parameters are invalid.
+ */
+size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, const int level);
+
+/**
+ * @brief Initialises a compression / decompression context inside a
+ *        caller-supplied workspace.
+ *
+ * Identical to @ref zxc_cctx_init except that the persistent buffer is
+ * carved out of @p workspace instead of being @c ZXC_ALIGNED_MALLOC'd
+ * internally.  @p workspace must be cache-line aligned and at least as
+ * large as @ref zxc_cctx_compute_workspace_size for the same parameters.
+ *
+ * The caller owns @p workspace and must keep it alive for the lifetime of
+ * @p ctx.  @ref zxc_cctx_free becomes a no-op for contexts initialised
+ * this way (the workspace is not freed by the library).
+ *
+ * @param[out] ctx               Context to initialise (zeroed on entry).
+ * @param[in]  workspace         Caller-allocated, cache-line-aligned buffer.
+ * @param[in]  workspace_size    Capacity of @p workspace in bytes.
+ * @param[in]  chunk_size        Block size in bytes.
+ * @param[in]  mode              1 = compression, 0 = decompression.
+ * @param[in]  level             Compression level (ignored when @p mode == 0).
+ * @param[in]  checksum_enabled  Non-zero to enable checksum computation.
+ * @return @c ZXC_OK on success, @c ZXC_ERROR_DST_TOO_SMALL if the workspace
+ *         is too small, or another negative @ref zxc_error_t.
+ */
+int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspace,
+                               const size_t workspace_size, const size_t chunk_size, const int mode,
+                               const int level, const int checksum_enabled);
+
+/**
  * @brief Releases the internal buffers owned by a context.
  *
  * Does NOT free @p ctx itself - the caller owns the struct storage. The

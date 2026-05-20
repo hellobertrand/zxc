@@ -408,6 +408,7 @@ if(ZXC_BUILD_TESTS)
         tests/test_buffer_api.c
         tests/test_block_api.c
         tests/test_context_api.c
+        tests/test_static_ctx.c
         tests/test_pstream_api.c
         tests/test_stream_api.c
         tests/test_seekable.c
