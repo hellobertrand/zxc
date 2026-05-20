@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-26, macos-26-xlarge]
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest","macos-26"]' || '["ubuntu-latest","macos-26-xlarge"]') }}
 
     env:
         LZBENCH_DIR: lzbench
@@ -102,7 +102,7 @@ jobs:
         working-directory: ${{ env.LZBENCH_DIR }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            CODECS="memcpy/zxc/lz4"
+            CODECS="memcpy/zxc/lz4/lz4fast,17/lz4hc,9"
           else
             CODECS="memcpy/zxc/lz4/lz4fast,17/lz4hc,9/lzav,1/snappy/zstd_fast,-1/zstd,1/zlib,1"
           fi
