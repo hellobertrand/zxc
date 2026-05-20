@@ -32,9 +32,6 @@ author:
     email: zxc.codec@gmail.com
 
 normative:
-  RFC2119:
-  RFC8174:
-  RFC8126:
 
 informative:
   RFC5116:
@@ -128,7 +125,7 @@ Block:
 Block size:
 : The maximum decompressed size of a single block, derived from the
   chunk-size code in the file header. A block size is a power of two
-  in the range [4 KiB, 2 MiB].
+  in the range \[4 KiB, 2 MiB\].
 
 Sequence:
 : In LZ-coded blocks, the triple (literal length, match length,
@@ -195,7 +192,7 @@ Format Version (u8):
   does not support.
 
 Chunk Size Code (u8):
-: Values in the range [12, 21] are interpreted as exponents, where
+: Values in the range \[12, 21\] are interpreted as exponents, where
   block_size = 2^code. This yields valid block sizes from 4 KiB
   (code 12) to 2 MiB (code 21). The default block size in the
   reference implementation is 512 KiB (code 19). The value 64 is
@@ -327,7 +324,7 @@ of the literal stream.
  0x0C    4     RESERVED
 ~~~
 
-## Section Descriptors
+## Section Descriptors {#glo-section-descriptors}
 
 Four section descriptors follow the GLO header. Each descriptor is
 an 8-byte packed u64:
@@ -391,10 +388,10 @@ to enable parallel decoding.
 A conforming decoder MUST enforce the following constraints on the
 code-length header:
 
-1. Every code length MUST satisfy code_len[i] <= 8.
-2. At least one symbol MUST be present (code_len[i] != 0 for some
+1. Every code length MUST satisfy `code_len[i]` <= 8.
+2. At least one symbol MUST be present (`code_len[i]` != 0 for some
    i).
-3. The Kraft sum, defined as the sum of 2^(8 - code_len[i]) over
+3. The Kraft sum, defined as the sum of 2^(8 - `code_len[i]`) over
    present symbols, MUST equal 2^8, except for the
    single-present-symbol degenerate case in which exactly one symbol
    has code_len = 1 and the Kraft sum equals 2^7.
@@ -473,7 +470,7 @@ The GHI header is binary-identical to the GLO header. In practice
 for GHI, enc_lit is always 0 (raw literals), and enc_off is
 metadata only because sequence words always store 16-bit offsets.
 
-## Section Descriptors
+## Section Descriptors {#ghi-section-descriptors}
 
 Three section descriptors follow the GHI header, in the order:
 Literals, Sequences, Extras. Each descriptor uses the same packed
@@ -731,7 +728,7 @@ all errors in the table are fatal by default.
 | Bad magic                              | File header offset 0x00     | Reject immediately. Not a ZXC file.             |
 | Unsupported version                    | File header offset 0x04     | Reject immediately.                             |
 | Header CRC16 mismatch                  | File header offset 0x0E     | Reject. Header is corrupt or truncated.         |
-| Invalid chunk size code                | File header offset 0x05     | Reject. Code outside [12..21] and not legacy 64.|
+| Invalid chunk size code                | File header offset 0x05     | Reject. Code outside \[12..21\] and not legacy 64.|
 | Block header CRC8 mismatch             | Block header offset 0x07    | Reject block. Stream is corrupt.                |
 | Unknown block type                     | Block header offset 0x00    | Skip block per {{compatibility-rules}}, or reject.|
 | Block payload truncated                | During payload read         | Reject. Unexpected end of stream.               |
@@ -901,7 +898,7 @@ following considerations apply.
 
 The per-block decompressed size is bounded by the Chunk Size Code
 in the File Header, which is constrained to the range
-[4 KiB, 2 MiB]. A decoder MUST enforce this bound while decoding.
+\[4 KiB, 2 MiB\]. A decoder MUST enforce this bound while decoding.
 A decoder SHOULD additionally enforce an external bound on the
 total decompressed size (for example, derived from
 original_source_size) before allocating large output buffers.

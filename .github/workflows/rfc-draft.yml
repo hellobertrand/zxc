@@ -1,6 +1,7 @@
 name: RFC Draft
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -10,7 +11,6 @@ on:
     paths:
       - 'docs/FORMAT.md'
       - '.github/workflows/rfc-draft.yml'
-  workflow_dispatch:
 
 permissions:
   contents: read
