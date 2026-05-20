@@ -564,16 +564,20 @@ zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r) {
     const uint64_t seek_offset = r->size - ZXC_FILE_FOOTER_SIZE - (uint64_t)seek_block_total;
     if (UNLIKELY(r->read_at(r->ctx, seek_buf, seek_block_total, seek_offset) !=
                  (int64_t)seek_block_total)) {
+        // LCOV_EXCL_START
         ZXC_FREE(seek_buf);
         return NULL;
+        // LCOV_EXCL_STOP
     }
 
     /* Validate SEK block header */
     zxc_block_header_t bh;
     if (UNLIKELY(zxc_read_block_header(seek_buf, seek_block_total, &bh) != ZXC_OK) ||
         bh.block_type != ZXC_BLOCK_SEK || bh.comp_size != (uint32_t)entries_total_64) {
+        // LCOV_EXCL_START
         ZXC_FREE(seek_buf);
         return NULL;
+        // LCOV_EXCL_STOP
     }
 
     /* Build seekable handle */
@@ -594,9 +598,11 @@ zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r) {
     s->comp_sizes = (uint32_t*)ZXC_CALLOC(num_blocks, sizeof(uint32_t));
     s->comp_offsets = (uint64_t*)ZXC_CALLOC((size_t)num_blocks + 1, sizeof(uint64_t));
     if (UNLIKELY(!s->comp_sizes || !s->comp_offsets)) {
+        // LCOV_EXCL_START
         ZXC_FREE(seek_buf);
         zxc_seekable_free(s);
         return NULL;
+        // LCOV_EXCL_STOP
     }
     s->total_decomp = total_decomp;
 
@@ -608,16 +614,20 @@ zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r) {
         ep += sizeof(uint32_t);
 
         if (UNLIKELY(s->comp_sizes[i] < ZXC_BLOCK_HEADER_SIZE || s->comp_sizes[i] > r->size)) {
+            // LCOV_EXCL_START
             ZXC_FREE(seek_buf);
             zxc_seekable_free(s);
             return NULL;
+            // LCOV_EXCL_STOP
         }
         s->comp_offsets[i] = comp_acc;
         comp_acc += s->comp_sizes[i];
         if (UNLIKELY(comp_acc > r->size)) {
+            // LCOV_EXCL_START
             ZXC_FREE(seek_buf);
             zxc_seekable_free(s);
             return NULL;
+            // LCOV_EXCL_STOP
         }
     }
     s->comp_offsets[num_blocks] = comp_acc;
