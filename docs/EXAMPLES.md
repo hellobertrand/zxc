@@ -109,9 +109,13 @@ gcc -o buffer_example buffer_example.c -I include -L build -lzxc_lib
 ## Stream API (Multi-Threaded)
 
 For large files, use the streaming API to process data in parallel chunks.
+The `FILE*`-based entry points live in `zxc_stream.h`, which the freestanding
+`<zxc.h>` umbrella does *not* pull (so kernel/embedded builds stay clean of
+`<stdio.h>`). Userspace consumers include it explicitly.
 
 ```c
 #include "zxc.h"
+#include "zxc_stream.h"   // FILE*-based streaming, opt-in
 #include <stdio.h>
 #include <stdlib.h>
 

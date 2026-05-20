@@ -47,22 +47,37 @@ zxc.h                  <- freestanding umbrella (no <stdio.h>; kernel-safe)
 └── zxc_pstream.h      <- Push streaming API (caller-driven, single-thread)
     └── zxc_export.h
 
-opt-in (require <stdio.h>; userspace only, not freestanding-safe):
-    zxc_stream.h       <- Multi-threaded FILE*-based streaming
+opt-in, freestanding-safe (no <stdio.h>):
+    zxc_seekable.h     <- Seekable random-access API (storage-agnostic via
+                          zxc_reader_t; usable from kernel-space)
         └── zxc_export.h
-    zxc_seekable.h     <- Seekable random-access API (FILE*-aware)
+
+opt-in, userspace only (pull <stdio.h>; not freestanding-safe):
+    zxc_stream.h       <- Multi-threaded FILE*-based streaming + the FILE*
+                          open helper for the seekable API
+                          (zxc_seekable_open_file)
         └── zxc_export.h
+        └── zxc_seekable.h
 ```
 
-`<zxc.h>` pulls only freestanding-compatible headers (no `<stdio.h>`
-dependency) and is therefore suitable for kernel-space, embedded, or any
-target where `<stdio.h>` is unavailable. It covers the Buffer, Reusable
-Context, Push Streaming, and one-shot Block APIs.
+`<zxc.h>` pulls only the minimal freestanding-compatible core (Buffer,
+Reusable Context, Push Streaming, one-shot Block APIs) and is therefore
+suitable for kernel-space, embedded, or any target where `<stdio.h>` is
+unavailable.
 
-The `FILE*`-based streaming and seekable random-access APIs are opt-in:
-userspace integrations must include `<zxc_stream.h>` and/or
-`<zxc_seekable.h>` explicitly. Both pull `<stdio.h>` transitively and are
-not suitable for freestanding builds.
+`zxc_seekable.h` is **also freestanding-safe**: it provides the
+random-access reader API on top of a caller-supplied `zxc_reader_t`
+callback. It is opt-in only because most consumers do not need
+random-access decompression; it does not pull `<stdio.h>`. Kernel /
+embedded consumers can include it directly.
+
+`zxc_stream.h` is the only header that requires `<stdio.h>`. It groups
+every `FILE*`-flavored entry point: the multi-threaded streaming driver
+(`zxc_stream_compress` / `zxc_stream_decompress`) and the seekable
+`FILE*` open helper (`zxc_seekable_open_file`, a thin wrapper that builds
+a `pread`/`ReadFile`-backed `zxc_reader_t` and delegates to
+`zxc_seekable_open_reader`). Kernel / freestanding builds simply do not
+include this header.
 
 ---
 
@@ -200,7 +215,7 @@ All public functions that can fail return negative `zxc_error_t` values on error
 
 ### 6.1 Options Structs
 
-**Compression options** (defined in `zxc_stream.h`, used by all compression functions):
+**Compression options** (defined in `zxc_opts.h`, used by all compression functions):
 
 ```c
 typedef struct {
@@ -558,9 +573,11 @@ Same as `zxc_decompress()` but reuses buffers from `dctx`.
 
 ## 10. Streaming API
 
-Declared in `zxc_stream.h` (opt-in: **not** included by `<zxc.h>` because it
-depends on `<stdio.h>`, which would break freestanding/kernel builds).
-Multi-threaded, `FILE*`-based pipeline (reader -> workers -> writer).
+Declared in `zxc_stream.h` — the umbrella for every `FILE*`-flavored entry
+point (opt-in: **not** included by `<zxc.h>` because `<stdio.h>` would break
+freestanding/kernel builds). Hosts the multi-threaded streaming pipeline
+described below (reader -> workers -> writer) **and** the seekable `FILE*`
+open helper `zxc_seekable_open_file` (documented in §11).
 
 ### `zxc_stream_compress`
 
@@ -605,7 +622,7 @@ Reads the original size from the file footer. File position is restored.
 
 ## 10b. Push Streaming API
 
-Declared in `zxc_pstream.h`. Single-threaded, **caller-driven** streaming —
+Declared in `zxc_pstream.h`. Single-threaded, **caller-driven** streaming,
 the inverse of the `FILE*`-based pipeline.  Designed for callback-based
 integrations (async runtimes, network protocols) that cannot block on a `FILE*` and need to feed/drain in arbitrary chunks.
 
@@ -819,9 +836,13 @@ zxc_cstream_free(cs);
 
 ## 11. Seekable API
 
-Declared in `zxc_seekable.h` (opt-in: **not** included by `<zxc.h>` because it
-depends on `<stdio.h>`, which would break freestanding/kernel builds).
-Random-access decompression of seekable archives produced with `seekable = 1`.
+Declared in `zxc_seekable.h` (opt-in: not included by `<zxc.h>` because most
+consumers do not need random-access decompression). The header is
+**freestanding-safe** — it does not pull `<stdio.h>` — so kernel / embedded
+consumers can include it directly and plug their own storage backend behind
+the `zxc_reader_t` callback. The `FILE*` convenience open
+(`zxc_seekable_open_file`) lives in `zxc_stream.h` instead. Seekable archives
+are produced with `seekable = 1` in `zxc_compress_opts_t`.
 
 ### Creating a Seekable Archive
 
