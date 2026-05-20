@@ -108,6 +108,73 @@ describe('Seekable: error handling', () => {
     });
 });
 
+describe('Seekable: reader callback', () => {
+    const payload = buildPayload(128 * 1024);
+    const compressed = buildSeekableArchive(payload);
+
+    test('roundtrip via in-memory readAt', () => {
+        let calls = 0;
+        const reader = {
+            size: compressed.length,
+            readAt(dst, offset) {
+                calls++;
+                compressed.copy(dst, 0, offset, offset + dst.length);
+            },
+        };
+        const s = new zxc.Seekable(reader);
+        try {
+            // 3 reads at open: header, footer, seek table.
+            expect(calls).toBe(3);
+            expect(s.decompressedSize()).toBe(payload.length);
+            const out = s.decompressRange(0, payload.length);
+            expect(Buffer.compare(out, payload)).toBe(0);
+
+            const before = calls;
+            const chunk = s.decompressRange(2048, 1024);
+            expect(Buffer.compare(chunk, payload.subarray(2048, 2048 + 1024))).toBe(0);
+            // Single-block sub-range must trigger exactly one extra read.
+            expect(calls - before).toBe(1);
+        } finally {
+            s.close();
+        }
+    });
+
+    test('readAt throwing maps to decompress_range error', () => {
+        let attempted = 0;
+        const reader = {
+            size: compressed.length,
+            readAt(dst, offset) {
+                attempted++;
+                if (attempted > 3) throw new Error('boom');
+                compressed.copy(dst, 0, offset, offset + dst.length);
+            },
+        };
+        const s = new zxc.Seekable(reader);
+        try {
+            expect(() => s.decompressRange(0, payload.length)).toThrow();
+        } finally {
+            s.close();
+        }
+    });
+
+    test('rejects missing size / readAt', () => {
+        expect(() => new zxc.Seekable({})).toThrow();
+        expect(() => new zxc.Seekable({ size: 100 })).toThrow();
+        expect(() => new zxc.Seekable({ readAt: () => {} })).toThrow();
+        expect(() => new zxc.Seekable({ size: 0, readAt: () => {} })).toThrow();
+    });
+
+    test('rejects garbage reader', () => {
+        const reader = {
+            size: 64,
+            readAt(dst /* , offset */) {
+                dst.fill(0);
+            },
+        };
+        expect(() => new zxc.Seekable(reader)).toThrow();
+    });
+});
+
 describe('Seekable: low-level seek table helpers', () => {
     test('seekTableSize / writeSeekTable round trip', () => {
         const compSizes = [128, 256, 200, 4];

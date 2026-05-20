@@ -7,6 +7,7 @@
 
 #include <napi.h>
 
+#include <cstring>
 #include <vector>
 
 extern "C" {
@@ -485,8 +486,47 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
 
     SeekableWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<SeekableWrap>(info) {
         Napi::Env env = info.Env();
-        if (info.Length() < 1 || !info[0].IsBuffer()) {
-            Napi::TypeError::New(env, "Expected a Buffer as first argument")
+        if (info.Length() < 1) {
+            Napi::TypeError::New(env, "Expected a Buffer or { size, readAt } object")
+                .ThrowAsJavaScriptException();
+            return;
+        }
+
+        // Reader-callback form: { size: number, readAt: (buf, offset) => void }.
+        // Single-threaded only — the JS callback is invoked synchronously on
+        // the calling thread.
+        if (info[0].IsObject() && !info[0].IsBuffer()) {
+            Napi::Object opts = info[0].As<Napi::Object>();
+            if (!opts.Has("size") || !opts.Has("readAt") ||
+                !opts.Get("size").IsNumber() || !opts.Get("readAt").IsFunction()) {
+                Napi::TypeError::New(env,
+                                     "Reader object must have { size: number, readAt: function }")
+                    .ThrowAsJavaScriptException();
+                return;
+            }
+            int64_t sz = opts.Get("size").As<Napi::Number>().Int64Value();
+            if (sz <= 0) {
+                Napi::TypeError::New(env, "size must be > 0")
+                    .ThrowAsJavaScriptException();
+                return;
+            }
+            env_ = env;
+            read_at_ref_ = Napi::Persistent(opts.Get("readAt").As<Napi::Function>());
+            zxc_reader_t r;
+            r.read_at = &SeekableWrap::ReadAtTrampoline;
+            r.ctx     = this;
+            r.size    = static_cast<uint64_t>(sz);
+            s_ = zxc_seekable_open_reader(&r);
+            if (!s_) {
+                read_at_ref_.Reset();
+                Napi::Error::New(env, "zxc_seekable_open_reader failed (invalid archive?)")
+                    .ThrowAsJavaScriptException();
+            }
+            return;
+        }
+
+        if (!info[0].IsBuffer()) {
+            Napi::TypeError::New(env, "Expected a Buffer or { size, readAt } object")
                 .ThrowAsJavaScriptException();
             return;
         }
@@ -510,11 +550,40 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
 
     ~SeekableWrap() {
         if (s_) zxc_seekable_free(s_);
+        if (!read_at_ref_.IsEmpty()) read_at_ref_.Reset();
     }
 
    private:
     zxc_seekable* s_ = nullptr;
     std::vector<uint8_t> src_;
+    // Reader-callback state. read_at_ref_.IsEmpty() == true when not in
+    // reader mode.
+    Napi::FunctionReference read_at_ref_;
+    Napi::Env env_{nullptr};
+
+    // C trampoline invoked by the library for every positional read against
+    // a user-supplied JS `readAt`. Always called on the V8 main thread —
+    // never use this binding with the multi-threaded decompress_range_mt
+    // entry point. Any exception thrown from JS is swallowed and surfaced
+    // as ZXC_ERROR_IO so it doesn't unwind through C.
+    static int64_t ReadAtTrampoline(void* ctx, void* dst, size_t len, uint64_t offset) {
+        constexpr int64_t kZxcErrorIo = -11;
+        SeekableWrap* self = static_cast<SeekableWrap*>(ctx);
+        if (!self || self->read_at_ref_.IsEmpty()) return kZxcErrorIo;
+        Napi::Env env = self->env_;
+        Napi::HandleScope scope(env);
+        // Allocate a fresh JS Buffer of `len` bytes for the callback to fill,
+        // then memcpy back into `dst`. This avoids exposing the C-side
+        // pointer to JS lifetime hazards.
+        Napi::Buffer<uint8_t> jsbuf = Napi::Buffer<uint8_t>::New(env, len);
+        try {
+            self->read_at_ref_.Call({jsbuf, Napi::Number::New(env, static_cast<double>(offset))});
+        } catch (const Napi::Error&) {
+            return kZxcErrorIo;
+        }
+        std::memcpy(dst, jsbuf.Data(), len);
+        return static_cast<int64_t>(len);
+    }
 
     bool requireOpen(Napi::Env env) {
         if (!s_) {
