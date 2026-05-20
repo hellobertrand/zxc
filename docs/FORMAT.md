@@ -1,938 +1,1076 @@
-# ZXC Compressed File Format (Technical Specification)
+% Title = "The ZXC Compressed Data Format Specification"
+% abbrev = "ZXC Format"
+% docName = "draft-lebonnois-zxc-format-00"
+% category = "info"
+% ipr = "trust200902"
+% area = "Applications"
+% workgroup = "Independent Submission"
+% submissionType = "independent"
+% date = 2026-05-20T00:00:00Z
+%
+% [[author]]
+% initials = "B."
+% surname = "Lebonnois"
+% fullname = "Bertrand Lebonnois"
+% role = "editor"
 
-**Date**: July 2026
-**Format Version**: 7
+```
+Independent Submission                                      B. Lebonnois
+Internet-Draft                                                  May 2026
+Intended Status: Informational
+Expires: November 20, 2026
 
-This document describes the on-disk binary format of a ZXC compressed file.
-It formalizes the current reference implementation of format version **7**.
 
-## 1. Conventions
-
-- **Byte order**: all multi-byte integers are **little-endian**.
-- **Unit**: offsets are in bytes, zero-based from the start of each structure.
-- **Checksum mode**: enabled globally by a flag in the file header.
-- **Block model**: a file is a sequence of blocks terminated by an EOF block, then a footer.
-
----
-
-## 2. Full File Layout
-
-```text
-+----------------------+ 16 bytes
-| File Header          |
-+----------------------+
-| Block #0             |
-|  - 8B Block Header   |
-|  - Block Payload     |
-|  - Optional 4B CRC32 |
-+----------------------+
-| Block #1             |
-|  ...                 |
-+----------------------+
-| EOF Block            | 8 bytes (type=255, comp_size=0)
-+----------------------+
-| SEK Block (Optional) | table of contents for random access
-+----------------------+
-| File Footer          | 12 bytes
-+----------------------+
+            The ZXC Compressed Data Format Specification
+                    draft-lebonnois-zxc-format-00
 ```
 
----
+## Abstract
 
-## 3. File Header (16 bytes)
+This document describes the ZXC compressed data format. ZXC is a
+block-oriented, seekable, integrity-checked compression container
+targeting high decompression throughput and kernel-space integration.
+It defines a fixed-size file header, an extensible block container,
+four payload encodings (RAW, GLO, GHI, NUM), an optional seek table,
+and a fixed-size file footer.
 
-```text
-Offset  Size  Field
-0x00    4     Magic Word
-0x04    1     Format Version
-0x05    1     Chunk Size Code
-0x06    1     Flags
-0x07    7     Reserved (must be 0)
-0x0E    2     Header CRC16
+The format described in this document corresponds to wire-format
+version 5 of the reference implementation and is intended to be
+published as Version 1.0 of the ZXC specification.
+
+
+## Status of This Memo
+
+This Internet-Draft is submitted in full conformance with the
+provisions of BCP 78 and BCP 79.
+
+Internet-Drafts are working documents of the Internet Engineering
+Task Force (IETF). Note that other groups may also distribute working
+documents as Internet-Drafts. The list of current Internet-Drafts is
+at https://datatracker.ietf.org/drafts/current/.
+
+Internet-Drafts are draft documents valid for a maximum of six months
+and may be updated, replaced, or obsoleted by other documents at any
+time. It is inappropriate to use Internet-Drafts as reference material
+or to cite them other than as "work in progress."
+
+This Internet-Draft will expire on November 20, 2026.
+
+
+## Copyright Notice
+
+Copyright (c) 2026 Bertrand Lebonnois and the persons identified as
+the document authors. All rights reserved.
+
+This document is subject to BCP 78 and the IETF Trust's Legal
+Provisions Relating to IETF Documents
+(https://trustee.ietf.org/license-info) in effect on the date of
+publication of this document. Please review these documents
+carefully, as they describe your rights and restrictions with respect
+to this document.
+
+
+# Table of Contents
+
+1. Introduction
+2. Conventions and Terminology
+3. Overall Structure of a ZXC File
+4. File Header
+5. Block Container
+6. RAW Block (Type 0)
+7. GLO Block (Type 1)
+8. NUM Block (Type 2)
+9. GHI Block (Type 3)
+10. SEK Block (Type 254)
+11. EOF Block (Type 255)
+12. Prefix Varint Encoding
+13. Checksums and Integrity
+14. File Footer
+15. Decoder Operation
+16. Versioning Policy
+17. Error Handling
+18. Worked Example
+19. Security Considerations
+20. IANA Considerations
+21. References
+22. Author's Address
+
+
+# 1. Introduction
+
+ZXC is a general-purpose lossless compression format designed around
+three goals:
+
+1. **Decompression throughput** in the multi-GB/s range on commodity
+   CPUs, in the same family as LZ4 [LZ4] rather than the higher-ratio
+   family of Zstandard [RFC8478].
+2. **Random access** via an optional seek table appended to the
+   archive, allowing O(1) navigation to any block.
+3. **Kernel-space friendliness**: no dynamic allocation in the hot
+   path, no dependency on the C standard I/O library, and a small
+   self-contained core suitable for embedding in operating system
+   kernels or freestanding environments.
+
+The format is block-oriented. A file is a sequence of independently
+decodable blocks of a fixed maximum decompressed size, terminated by
+a distinguished end-of-stream block and followed by a small footer
+carrying the original source size and a global integrity hash.
+
+Four payload encodings are defined: RAW (uncompressed), GLO
+(general-purpose LZ with separated streams and optional Huffman
+coding of literals), GHI (high-throughput LZ with packed 32-bit
+sequence words), and NUM (specialised encoding for 32-bit integer
+streams using delta-zigzag bitpacking).
+
+This document specifies the on-disk binary format only. It does not
+mandate any particular encoder strategy. Any byte sequence that
+satisfies the syntactic and integrity constraints of this document
+is a conforming ZXC stream.
+
+
+# 2. Conventions and Terminology
+
+## 2.1. Requirements Language
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT",
+"SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and
+"OPTIONAL" in this document are to be interpreted as described in
+BCP 14 [RFC2119] [RFC8174] when, and only when, they appear in all
+capitals, as shown here.
+
+## 2.2. Byte Order and Units
+
+All multi-byte integers in this format are encoded in little-endian
+byte order. Offsets are expressed in bytes and are zero-based from
+the start of each enclosing structure unless otherwise stated.
+
+## 2.3. Definitions
+
+- **Block**: a self-contained unit produced by the encoder, consisting
+  of an 8-byte block header, a payload of `comp_size` bytes, and an
+  OPTIONAL 4-byte trailing checksum.
+- **Block size**: the maximum decompressed size of a single block,
+  derived from the chunk-size code in the file header. A block size
+  is a power of two in the range [4 KiB, 2 MiB].
+- **Sequence**: in LZ-coded blocks, the triple (literal length,
+  match length, match offset) emitted by the LZ77-style parser.
+- **Conforming decoder**: an implementation that, given a syntactically
+  valid ZXC stream produced by a conforming encoder at the same major
+  version, reproduces the original input bytes exactly and detects
+  every error condition listed in Section 17.
+
+
+# 3. Overall Structure of a ZXC File
+
+A ZXC file is the concatenation, in this order, of:
+
+```
++-----------------------------+
+|   File Header (16 bytes)    |
++-----------------------------+
+|   Data Block #0             |
+|   Data Block #1             |
+|   ...                       |
+|   Data Block #N-1           |
++-----------------------------+
+|   EOF Block (8 bytes)       |
++-----------------------------+
+|   SEK Block (optional)      |
++-----------------------------+
+|   File Footer (12 bytes)    |
++-----------------------------+
 ```
 
-### 3.1 Field definitions
+The File Footer is always the last 12 bytes of the file. Decoders
+MAY rely on this invariant to locate the footer by seeking to
+`file_size - 12`.
 
-- **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): `7`. Any other value is rejected (`ZXC_ERROR_BAD_VERSION`);
-- **Chunk Size Code** (`u8`):
-  - The value is an **exponent** in the range `[12, 21]`: `block_size = 2^code`.
-    - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
-  - All other values are rejected (`ZXC_ERROR_BAD_BLOCK_SIZE`).
-  - Valid block sizes are powers of 2 in the range **4 KB – 2 MB**.
-- **Flags** (`u8`):
-  - Bit 7 (`0x80`): `HAS_CHECKSUM`.
-  - Bit 6 (`0x40`): `HAS_DICTIONARY` — a pre-trained dictionary is required for decompression.
-  - Bits 0..3: checksum algorithm id (`0` = RapidHash-based folding).
-  - Bits 4..5: reserved.
-- **Reserved / Dictionary ID**: 7 bytes.
-  - When `HAS_DICTIONARY` is set: bytes `0x07..0x0A` contain a `dict_id` (`u32` LE), a 32-bit hash of the dictionary content. Bytes `0x0B..0x0D` remain zero.
-  - When `HAS_DICTIONARY` is clear: all 7 bytes are zero.
-- **Header CRC16** (`u16`): computed with `zxc_hash16` on the 16-byte header where bytes `0x0E..0x0F` are zeroed.
+A conforming encoder MUST emit at least one EOF block, and MUST
+write the footer immediately after the EOF block or, when present,
+immediately after the SEK block.
 
----
 
-## 4. Generic Block Container
+# 4. File Header
 
-Each block starts with a fixed 8-byte block header.
+The File Header is 16 bytes long and is laid out as follows:
 
-```text
-Offset  Size  Field
-0x00    1     Block Type
-0x01    1     Block Flags
-0x02    1     Reserved
-0x03    4     Compressed Payload Size (comp_size)
-0x07    1     Header CRC8
+```
+ Offset  Size  Field
+ 0x00    4     Magic
+ 0x04    1     Format Version
+ 0x05    1     Chunk Size Code
+ 0x06    1     Flags
+ 0x07    7     Reserved
+ 0x0E    2     Header CRC16
 ```
 
-### 4.1 Header semantics
+## 4.1. Field Definitions
 
-- **Block Type**:
-  - `0` = RAW
-  - `1` = GLO
-  - `2` = GHI
-  - `254` = SEK
-  - `255` = EOF
-- **Block Flags**: currently not used by implementation (written as `0`).
-- **Reserved**: must be 0.
-- **comp_size**: payload size in bytes (does **not** include the optional trailing 4-byte block checksum).
-- **Header CRC8**: `zxc_hash8` over the 8-byte header with byte `0x07` forced to zero before hashing.
+- **Magic** (u32): MUST be `0x9CB02EF5`. Stored little-endian, the
+  on-disk byte sequence is `F5 2E B0 9C`.
+- **Format Version** (u8): the wire-format version. This document
+  specifies version `5`. A conforming decoder MUST reject any file
+  whose Format Version it does not support.
+- **Chunk Size Code** (u8):
+  - Values in the range `[12, 21]` are interpreted as exponents,
+    where `block_size = 2^code`. This yields valid block sizes from
+    4 KiB (code 12) to 2 MiB (code 21). The default block size in
+    the reference implementation is 512 KiB (code 19).
+  - The value `64` is RESERVED for backward compatibility with
+    legacy encoders and maps to 256 KiB. New encoders SHOULD NOT
+    emit this value.
+  - All other values MUST be rejected with an
+    `ZXC_ERROR_BAD_BLOCK_SIZE` condition.
+- **Flags** (u8):
+  - Bit 7 (`0x80`): `HAS_CHECKSUM`. When set, each non-EOF block
+    carries a trailing 4-byte checksum (Section 13.2).
+  - Bits 0..3: checksum algorithm identifier. The value `0` denotes
+    a 32-bit folding of the RapidHash function [RAPIDHASH]. Other
+    values are RESERVED.
+  - Bits 4..6: RESERVED. Encoders MUST set these bits to zero.
+    Decoders MUST ignore these bits.
+- **Reserved**: 7 bytes. Encoders MUST set these bytes to zero.
+  Decoders MUST ignore their content.
+- **Header CRC16** (u16): a 16-bit hash computed by `zxc_hash16`
+  over the 16-byte header with the two bytes at offset `0x0E..0x0F`
+  treated as zero during hashing.
 
-### 4.2 Block physical layout
 
-```text
-[8B Block Header] + [comp_size bytes payload] + [optional 4B checksum]
+# 5. Block Container
+
+Every block in a ZXC file begins with an 8-byte block header:
+
+```
+ Offset  Size  Field
+ 0x00    1     Block Type
+ 0x01    1     Block Flags
+ 0x02    1     Reserved
+ 0x03    4     Compressed Payload Size (comp_size)
+ 0x07    1     Header CRC8
 ```
 
-When checksums are enabled at file level, each non-EOF block carries one trailing 4-byte checksum of its compressed payload.
+## 5.1. Block Types
 
----
+The following Block Type values are assigned by this document:
 
-## 5. Block Types and Payload Formats
+| Value | Mnemonic | Section |
+|-------|----------|---------|
+|   0   |   RAW    |    6    |
+|   1   |   GLO    |    7    |
+|   2   |   NUM    |    8    |
+|   3   |   GHI    |    9    |
+|  254  |   SEK    |   10    |
+|  255  |   EOF    |   11    |
 
-## 5.1 RAW block (`type=0`)
+All other values are unassigned. An unassigned block type MAY be
+introduced by a future minor revision of this format without bumping
+the Format Version field, provided that a conforming decoder of the
+present version can skip the block using `comp_size`. See
+Section 16.
 
-Payload is uncompressed data.
+## 5.2. Block Header Semantics
 
-```text
-Payload = raw bytes
+- **Block Flags** (u8): RESERVED. Encoders MUST write `0`. Decoders
+  MUST ignore non-zero values from future revisions.
+- **Reserved** (u8): MUST be set to `0` by encoders. MUST be ignored
+  by decoders.
+- **comp_size** (u32): the size in bytes of the block payload. This
+  size does NOT include the 8-byte block header nor the OPTIONAL
+  trailing 4-byte checksum.
+- **Header CRC8** (u8): an 8-bit hash computed by `zxc_hash8` over
+  the 8-byte block header with byte `0x07` treated as zero during
+  hashing.
+
+## 5.3. Physical Block Layout
+
+```
+[ 8-byte Block Header ]
+[ comp_size bytes Payload ]
+[ 4-byte Trailing Checksum (only if HAS_CHECKSUM=1 and type != EOF) ]
+```
+
+The EOF block (type `255`) MUST NOT carry a trailing checksum even
+when `HAS_CHECKSUM=1` is set in the file header.
+
+
+# 6. RAW Block (Type 0)
+
+A RAW block carries uncompressed data. The payload of a RAW block
+is `comp_size` bytes of literal input data, with no internal
+sub-header.
+
+```
 raw_size = comp_size
 ```
 
-No internal sub-header.
+Encoders MAY emit a RAW block whenever a compressed encoding would
+not yield a worthwhile size reduction. A conforming decoder MUST
+support RAW blocks.
 
----
 
-## 5.2 GLO block (`type=1`)
+# 7. GLO Block (Type 1)
 
-General LZ-style format with separated streams.
+The GLO block ("general LZ") is the primary compressed encoding.
+It uses an LZ77-style sequence stream with literal, token, offset,
+and extras streams stored contiguously, and OPTIONAL Huffman coding
+of the literal stream.
 
-### GLO payload layout
+## 7.1. GLO Payload Layout
 
-```text
+```
 +-------------------------------+
 | GLO Header (16 bytes)         |
-+-------------------------------+
-| 4 Section Descriptors (32B)   |
-+-------------------------------+
+| 4 Section Descriptors (32 B)  |
 | Literals stream               |
-+-------------------------------+
 | Tokens stream                 |
-+-------------------------------+
 | Offsets stream                |
-+-------------------------------+
 | Extras stream                 |
 +-------------------------------+
 ```
 
-### GLO Header (16 bytes)
+## 7.2. GLO Header
 
-```text
-Offset  Size  Field
-0x00    4     n_sequences (u32)
-0x04    4     n_literals (u32)
-0x08    1     enc_lit    (0=RAW, 1=RLE, 2=HUFFMAN, 3=HUFFMAN_DICT)
-0x09    1     enc_litlen (0=RAW tokens, 2=HUFFMAN tokens; level 7 only)
-0x0A    1     enc_mlen   (reserved; match lengths share the token byte)
-0x0B    1     enc_off    (0=16-bit offsets, 1=8-bit offsets)
-0x0C    4     reserved
+```
+ Offset  Size  Field
+ 0x00    4     n_sequences (u32)
+ 0x04    4     n_literals  (u32)
+ 0x08    1     enc_lit     (0=RAW, 1=RLE, 2=HUFFMAN)
+ 0x09    1     enc_litlen  (RESERVED)
+ 0x0A    1     enc_mlen    (RESERVED)
+ 0x0B    1     enc_off     (0=16-bit offsets, 1=8-bit offsets)
+ 0x0C    4     RESERVED
 ```
 
-### GLO section descriptors (4 × 8 bytes)
+## 7.3. Section Descriptors
 
-Descriptor format (packed `u64`):
-- low 32 bits: compressed size
-- high 32 bits: raw size
+Four section descriptors follow the GLO header. Each descriptor is
+an 8-byte packed `u64`:
 
-Section order:
-1. Literals
-2. Tokens
-3. Offsets
-4. Extras
+- Bits 0..31: compressed size of the section in bytes.
+- Bits 32..63: raw (decoded) size of the section in bytes.
 
-### GLO stream content
+The descriptors appear in the order: Literals, Tokens, Offsets,
+Extras.
 
-- **Literals stream**:
-  - raw literal bytes if `enc_lit=0`, or
-  - RLE tokenized if `enc_lit=1`, or
-  - Huffman-coded if `enc_lit=2`
-    (see [§ 5.2.1 Huffman literal section](#521-huffman-literal-section)), or
-  - Huffman-coded with the dictionary's shared code lengths if
-    `enc_lit=3` (dictionary-compressed archives only; same section layout,
-    no inline lengths header).
-- **Tokens stream**:
-  - one byte per sequence: `(LL << 4) | ML`, `LL` and `ML` being 4-bit fields.
-  - if `enc_litlen=0` (all levels ≤ 6), these `n_sequences` bytes are stored
-    verbatim and the Tokens section's compressed size equals `n_sequences`.
-  - if `enc_litlen=2` (level 7 only), the token bytes are Huffman-coded
-    over the token alphabet using the exact § 5.2.1 layout (inline 128-byte
-    lengths header included); the section's compressed size is the encoded
-    payload size and the decoder expands it back to `n_sequences` bytes.
-- **Offsets stream**:
-  - `n_sequences × 1` byte if `enc_off=1`, else `n_sequences × 2` bytes LE.
-  - Values are **biased**: stored value = `actual_offset - 1`. Decoder adds `+ 1`.
-  - This makes `offset == 0` impossible by construction (minimum decoded offset = 1).
-- **Extras stream**:
-  - Prefix-varint overflow values for token saturations:
-    - if `LL == 15`, read varint and add to LL
-    - if `ML == 15`, read varint and add to ML
-  - actual match length is `ML + 5` (minimum match = 5).
+## 7.4. Stream Content
 
-### 5.2.1 Huffman literal section
+- **Literals**:
+  - If `enc_lit = 0`, raw literal bytes.
+  - If `enc_lit = 1`, RLE-tokenised literals (see implementation).
+  - If `enc_lit = 2`, Huffman-coded literals (Section 7.5).
+- **Tokens**: one byte per sequence. The high nibble is `LL`
+  (literal length) and the low nibble is `ML` (match length minus
+  the minimum match of 5).
+- **Offsets**: `n_sequences` entries, each 1 byte if `enc_off = 1`
+  or 2 bytes (little-endian) if `enc_off = 0`. Stored values are
+  biased: the decoder MUST add `+1` to the stored value to obtain
+  the actual match offset. This makes a stored offset of zero
+  impossible by construction; the minimum decoded offset is 1.
+- **Extras**: a sequence of prefix-varints (Section 12) carrying
+  overflow values:
+  - When `LL == 15` is read from a token, a varint MUST be read
+    from Extras and added to LL.
+  - When `ML == 15` is read from a token, a varint MUST be read
+    from Extras and added to ML.
+  - The actual match length is `ML + 5` (the minimum match).
 
-`enc_lit=2` carries a length-limited **canonical Huffman code** over the
-literal bytes. The bits are placed on the wire with the **PivCo layout**
-(level-ordered Huffman, after
-[Giesen 2026](https://fgiesen.wordpress.com/2026/06/21/pivco-huffman-merge-operations/)):
-the encoding is ordinary Huffman — same code lengths, same code bits, same
-size — and PivCo only reorders those bits, grouping them by TREE LEVEL rather
-than by symbol so decoding runs data-parallel list merges instead of a serial
-bit chain.
+## 7.5. Huffman Literal Section
 
-```text
-Offset  Size  Field
-0x00    128   256 x 4-bit code lengths, packed two-per-byte (low nibble first).
-              code_len[i] in [0, 11] (0 means symbol absent).
-0x80    var   One run per EMITTING node of the canonical code tree, in BFS
-              order (parents before children, left before right). Runs are
-              LSB-first within bytes and each run is padded to a byte
-              boundary. Emitting nodes and run contents are defined below.
+When `enc_lit = 2`, the Literals stream is Huffman-coded as
+follows:
+
+```
+ Offset  Size  Field
+ 0x00    128   Code-length header (256 x 4-bit lengths, packed
+               two-per-byte, low nibble first)
+ 0x80    6     Sub-stream sizes s1, s2, s3 (u16 LE each)
+ 0x86    s1    Stream 0 bit-stream (LSB-first)
+ ...     s2    Stream 1 bit-stream
+ ...     s3    Stream 2 bit-stream
+ ...     s4    Stream 3 bit-stream (size implied)
 ```
 
-**Canonical code.** Codes are length-limited at `L = 11` bits (levels ≤ 6
-never emit codes longer than 8; level 7 / ULTRA may emit up to 11). Symbols
-are ordered by `(code_len, symbol)` and assigned consecutive code values in
-that order, starting at 0 and left-shifting when the length increases — the
-standard canonical construction. The **code tree** is the binary trie of
-these codewords read MSB-first: at depth `d`, a codeword's bit `code_len-1-d`
-selects the left (0) or right (1) child. The Kraft equality (validated below)
-makes this trie complete: every internal node has exactly two children.
+The size of Stream 3 is `s4 = total_section_size - 134 - s1 - s2 - s3`.
 
-**Emitting nodes and flat subtrees.** Both sides derive, from the code
-lengths alone, the set of *flat roots*: an internal node is a flat root iff
+Codes are canonical, length-limited at `L = 8` bits, and emitted
+LSB-first. The `n_literals` value from the GLO header is split into
+four contiguous regions of size `Q = ceil(n_literals / 4)` (the
+fourth region MAY be shorter), each encoded into its own bit-stream
+to enable parallel decoding.
 
-1. it is not itself inside another flat subtree (BFS order resolves this:
-   parents are classified first), and
-2. every leaf below it sits at the same relative depth `D`, and
-3. `D >= 2`.
+### 7.5.1. Decoder Validation Requirements
 
-(Completeness of the trie makes condition 2 imply a perfect binary subtree of
-`2^D` leaves. Every maximal complete subtree of depth `D >= 2` is a flat
-root — a fixed format rule. The reference decoder unpacks the packed codes
-directly, with SIMD kernels for `D` in 2..6 and a scalar table lookup for
-`D >= 7`, instead of running the level-merge cascade.)
+A conforming decoder MUST enforce the following constraints on the
+code-length header:
 
-Every internal node that is neither a flat root nor a descendant of one is a
-**bitmap node**: its run holds one branch bit per symbol routed through it,
-in symbol-sequence order (0 = left child, 1 = right child). A **flat root**'s
-run instead holds `D` packed bits per symbol routed through it, in symbol
-sequence order: bit `j` (bit 0 first) is the branch taken at relative depth
-`j` below the flat root. Strict descendants of a flat root emit **no run at
-all** — they are skipped in the BFS enumeration.
+1. Every code length MUST satisfy `code_len[i] <= 8`.
+2. At least one symbol MUST be present
+   (`code_len[i] != 0` for some `i`).
+3. The Kraft sum
+   `Sigma 2^(8 - code_len[i])` over present symbols MUST equal
+   `2^8`, except for the single-present-symbol degenerate case in
+   which exactly one symbol has `code_len = 1` and the Kraft sum
+   equals `2^7`.
 
-**Derived sizes.** There is no stored size field of any kind: the root
-handles `n_literals` symbols, the popcount of a bitmap node's bits equals its
-right child's symbol count, and a flat root consuming `c` symbols occupies
-exactly `ceil(c*D/8)` bytes, so every run length is derived while walking the
-BFS order once.
+A violation of any of the above MUST be reported as
+`ZXC_ERROR_CORRUPT_DATA`.
 
-Selection is an encoder policy, not a format rule: the reference encoder
-requires level ≥ 6 and at least 1024 literals, prices every candidate
-(RAW / RLE / Huffman / shared-table Huffman) as
-`J = size + premium(level) * n_decoded_bytes`, and picks the minimum — a
-space-speed Lagrangian with a per-level decode-time premium.
 
-Decoder validation requirements:
-- Every code length must satisfy `code_len[i] ≤ 11`.
-- At least one symbol must be present (`code_len[i] != 0` for some `i`).
-- The Kraft sum `Σ 2^(11 − code_len[i])` over present symbols must equal
-  `2^11`, except for the single-present-symbol degenerate case where exactly
-  one symbol has `code_len = 1` and the Kraft sum is `2^10`.
-- Every node's run (bitmap or flat) must lie within the section payload.
-- A popcount that routes symbols to an absent child is a corruption error.
-- A failure on any of the above results in `ZXC_ERROR_CORRUPT_DATA`.
+# 8. NUM Block (Type 2)
 
-### 5.2.2 Shared-table Huffman literal section
+The NUM block is a specialised encoding for streams of 32-bit
+integers using delta encoding, zigzag mapping, and bitpacking.
 
-`enc_lit=3` is only valid in archives compressed with a dictionary
-(`HAS_DICTIONARY` set): the payload is the same Huffman/PivCo section as
-§ 5.2.1 with the 128-byte lengths header **omitted** — the code lengths come
-from the shared literal
-table carried by the `.zxd` dictionary (see § 12.4), validated once when the
-dictionary is attached (same rules as § 5.2.1). Decoders **MUST** reject
-`enc_lit=3` sections with `ZXC_ERROR_DICT_REQUIRED` when no dictionary table
-is attached. The archive's `dict_id` binds the (content, table) pair, so a
-matching table is guaranteed present whenever the dictionary check passed.
+## 8.1. NUM Payload Layout
 
-The shared table is trained on the corpus' post-LZ literal distribution and
-covers only the symbols seen in training; the encoder falls back to a
-per-block table (`enc_lit=2`) or RAW/RLE for any block containing a literal
-byte without a code.
+```
++--------------------------+
+| NUM Header (16 bytes)    |
++--------------------------+
+| Frame #0 Header (16 B)   |
+| Frame #0 Packed Bits     |
+| Frame #1 Header (16 B)   |
+| Frame #1 Packed Bits     |
+| ...                      |
++--------------------------+
+```
 
-The level-7 token section reuses the § 5.2.1 layout (`enc_litlen=2`, with the
-inline lengths header) over the token byte alphabet.
+## 8.2. NUM Header
 
-## 5.3 GHI block (`type=2`)
+```
+ Offset  Size  Field
+ 0x00    8     n_values   (u64)
+ 0x08    2     frame_size (u16, currently 128)
+ 0x0A    6     RESERVED
+```
 
-High-throughput LZ format with packed 32-bit sequences.
+## 8.3. NUM Frame Record
 
-### GHI payload layout
+```
+ Offset  Size  Field
+ 0x00    2     nvals       (u16)
+ 0x02    2     bits_per_value (u16)
+ 0x04    8     base_seed   (u64)
+ 0x0C    4     packed_size (u32, in bytes)
+ 0x10    var   Packed delta bit-stream (packed_size bytes)
+```
 
-```text
+Values are reconstructed by bit-unpacking the delta stream, applying
+the zigzag-inverse mapping, and accumulating from `base_seed` by
+prefix sum.
+
+Support for NUM blocks by a decoder is RECOMMENDED but not REQUIRED
+for a minimal conforming implementation; see Section 16.4.
+
+
+# 9. GHI Block (Type 3)
+
+The GHI block ("high-throughput LZ") is an alternate compressed
+encoding optimised for raw decompression speed. It uses packed
+32-bit sequence words rather than separated streams.
+
+## 9.1. GHI Payload Layout
+
+```
 +-------------------------------+
 | GHI Header (16 bytes)         |
-+-------------------------------+
-| 3 Section Descriptors (24B)   |
-+-------------------------------+
+| 3 Section Descriptors (24 B)  |
 | Literals stream               |
-+-------------------------------+
-| Sequences stream (N * 4B)     |
-+-------------------------------+
+| Sequences stream (N x 4 B)    |
 | Extras stream                 |
 +-------------------------------+
 ```
 
-### GHI Header (16 bytes)
+## 9.2. GHI Header
 
-Same binary layout as GLO header:
-- `n_sequences`, `n_literals`, `enc_lit`, `enc_litlen`, `enc_mlen`, `enc_off`, reserved.
-
+The GHI header is binary-identical to the GLO header (Section 7.2).
 In practice for GHI:
-- `enc_lit = 0` (raw literals)
-- `enc_off` is metadata (sequence words always store 16-bit offsets)
 
-### GHI section descriptors (3 × 8 bytes)
+- `enc_lit` is always `0` (raw literals).
+- `enc_off` is metadata only; sequence words always store 16-bit
+  offsets.
 
-Section order:
-1. Literals
-2. Sequences
-3. Extras
+## 9.3. Section Descriptors
 
-Each descriptor uses the same packed size encoding as GLO (`u64`: comp32|raw32).
+Three section descriptors follow the GHI header, in the order:
+Literals, Sequences, Extras. Each descriptor uses the same packed
+`u64` encoding as in Section 7.3.
 
-### GHI sequence word format (32 bits)
+## 9.4. Sequence Word Format
 
-```text
-Bits 31..24 : LL (literal length, 8 bits)
-Bits 23..16 : ML (match length minus 5, 8 bits)
-Bits 15..0  : Offset - 1 (16 bits, biased; decode: stored + 1)
+Each sequence is encoded as a 32-bit little-endian word:
+
+```
+Bits 31..24 : LL  (literal length, 8 bits)
+Bits 23..16 : ML  (match length minus 5, 8 bits)
+Bits 15..0  : Offset - 1 (16 bits, biased: decode = stored + 1)
 ```
 
-Memory order (little-endian word):
+The little-endian memory order is:
 
-```text
+```
 byte0 = offset low
 byte1 = offset high
 byte2 = ML
 byte3 = LL
 ```
 
-Overflow rules:
-- if `LL == 255`, read varint from Extras and add it to LL.
-- if `ML == 255`, read varint, then add minimum match (`+5`).
-- otherwise decoded match length is `ML + 5`.
+## 9.5. Overflow Rules
 
----
+- When `LL == 255`, the decoder MUST read a varint from the Extras
+  stream and add it to LL.
+- When `ML == 255`, the decoder MUST read a varint from the Extras
+  stream and add it to ML. The actual match length is then
+  `ML + 5`.
+- Otherwise the actual match length is `ML + 5`.
 
-## 5.4 EOF block (`type=255`)
 
-EOF marks end of block stream.
+# 10. SEK Block (Type 254)
 
-Constraints:
-- block header is present (8 bytes)
-- `comp_size` **must be 0**
-- no payload
-- no per-block trailing checksum
+The SEK block is an OPTIONAL block appended between the EOF block
+and the File Footer. It provides O(1) random access by recording
+the compressed size of every data block in the archive.
 
-Immediately after EOF block header comes the Optional SEK block, followed by the 12-byte file footer.
+## 10.1. SEK Layout
 
----
-
-## 5.5 SEK block (`type=254`)
-
-The **Seek Table** block is an optional block appended between the EOF block and the File Footer. It provides `O(1)` random-access capabilities by recording the compressed size of every block in the archive. Decompressed sizes and block indices are derived from the file header's `block_size` (all blocks are `block_size` except the last, which may be smaller).
-
-**Layout of a SEK Block**:
-```text
-  Offset             Size    Field
-  0x00               8       Block Header (type=254, comp_size=N*4)
-  0x08               4       Block 0 Compressed Size (u32 LE)
-  0x0C               4       Block 1 Compressed Size (u32 LE)
-  ...                ...     ...
-  8 + (N-1)*4        4       Block N-1 Compressed Size (u32 LE)
+```
+ Offset           Size    Field
+ 0x00             8       Block Header (type=254, comp_size = N x 4)
+ 0x08             4       Block 0 Compressed Size (u32 LE)
+ 0x0C             4       Block 1 Compressed Size (u32 LE)
+ ...              ...     ...
+ 8 + (N-1)*4      4       Block N-1 Compressed Size (u32 LE)
 ```
 
-**Backward Detection Strategy**:
-1. Read the **File Header** (first 16 bytes) -> extract `block_size`.
-2. Read the **File Footer** (last 12 bytes) -> extract `total_decompressed_size`.
-3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`.
-4. Calculate `seek_block_size = 8 + (N × 4)`.
-5. Seek backward by `seek_block_size` bytes from the start of the footer to read the Block Header.
-6. Validate `block_type == 254 (SEK)` and `comp_size == N × 4`.
+The decompressed size of each block and the total number of blocks
+N are derived from the File Header's `block_size` field and the
+footer's `original_source_size`: all blocks have decompressed size
+`block_size` except the last, which MAY be shorter.
 
----
+## 10.2. Backward Detection Strategy
 
-## 6. Prefix Varint (Extras stream)
+A decoder that wishes to access the SEK block without scanning the
+archive linearly MAY use the following procedure:
 
-ZXC extras use a prefix-length varint.
+1. Read the File Header (first 16 bytes) and extract `block_size`.
+2. Read the File Footer (last 12 bytes) and extract
+   `original_source_size`.
+3. Compute `N = ceil(original_source_size / block_size)`.
+4. Compute `seek_block_size = 8 + (N x 4)`.
+5. Seek backward `seek_block_size` bytes from the start of the
+   footer to locate the SEK block header.
+6. Validate that the located block has `Block Type == 254` and
+   `comp_size == N x 4`. If validation fails, the SEK block is
+   absent or corrupt and the decoder MUST fall back to linear
+   scanning.
 
-The length is encoded in unary form in the high bits of the first byte: the
-number of leading `1` bits, followed by a terminating `0`, indicates how
-many additional payload bytes follow. The scheme generalizes to N bytes
-(`11110xxx` = 5, `111110xx` = 6, ...), but the current ZXC spec caps the
-encoding at 3 bytes because no legitimate value exceeds 21 bits (see below).
 
-Encodings used:
+# 11. EOF Block (Type 255)
 
-- `0xxxxxxx` -> 1 byte total (7 bits payload, value < 128)
-- `10xxxxxx` -> 2 bytes total (14 bits, value < 16384)
-- `110xxxxx` -> 3 bytes total (21 bits, value < 2 MiB)
+The EOF block marks the end of the data block stream.
 
-Payload bits from the following bytes are concatenated little-endian style
-(low bits first). Used by GLO/GHI to carry LL/ML overflows beyond
-token/sequence inline limits.
+A conforming EOF block:
 
-**Value bound**: a varint encodes `(LL - MASK)` or `(ML - MASK)`.
-Since LL/ML are bounded by `ZXC_BLOCK_SIZE_MAX = 2 MiB` (2^21), every
-legitimate varint value is strictly less than 2^21 and therefore fits in
-**at most 3 bytes**.
+- MUST have an 8-byte block header.
+- MUST have `comp_size == 0`.
+- MUST NOT carry a payload.
+- MUST NOT be followed by a trailing 4-byte checksum, regardless of
+  the `HAS_CHECKSUM` flag.
 
-Any prefix indicating a length >= 4 bytes (first byte `>= 0xE0`) is out of
-spec for this format version: encoders must never emit such a varint, and
-conforming decoders reject it as corrupt input. This caps the varint
-surface to the format-defined block size limit and neutralizes
-integer-overflow attacks in downstream bounds arithmetic. A future version
-of the format that raises `ZXC_BLOCK_SIZE_MAX` would also extend the
-accepted prefix lengths.
+Immediately after the EOF block header, the encoder MUST emit either
+the OPTIONAL SEK block followed by the File Footer, or the File
+Footer alone.
 
----
 
-## 7. Checksums and Integrity
+# 12. Prefix Varint Encoding
 
-## 7.1 Header checksums
+ZXC Extras streams use a prefix-length variable-length integer
+encoding. The length of the encoded value is signalled in unary
+form in the high bits of the first byte:
 
-- File header: 16-bit (`zxc_hash16`).
-- Block header: 8-bit (`zxc_hash8`).
+| First-byte prefix | Total bytes | Payload bits |
+|-------------------|-------------|--------------|
+| `0xxxxxxx`        |      1      |      7       |
+| `10xxxxxx`        |      2      |     14       |
+| `110xxxxx`        |      3      |     21       |
+| `1110xxxx`        |      4      |     28       |
+| `11110xxx`        |      5      |     35       |
 
-These protect metadata/navigation fields.
+Payload bits from following bytes are concatenated little-endian
+style (low-order bits first). A decoder encountering a first byte
+with more than four leading `1` bits MUST report an error.
 
-## 7.2 Per-block checksum (optional)
 
-When file header has `HAS_CHECKSUM=1`:
-- each data block appends a 4-byte checksum after payload.
-- checksum input is **compressed payload bytes only** (not block header).
-- algorithm id currently `0` (RapidHash folded to 32-bit).
+# 13. Checksums and Integrity
 
-## 7.3 Global stream hash
+## 13.1. Header Checksums
 
-A rolling global hash is maintained from per-block checksums in stream order:
+- The File Header carries a 16-bit checksum (`zxc_hash16`) at offset
+  `0x0E..0x0F` (Section 4.1).
+- Every block header carries an 8-bit checksum (`zxc_hash8`) at
+  offset `0x07` (Section 5.2).
 
-```text
+These checksums protect metadata and navigation fields. A conforming
+decoder MUST validate both before relying on any other field of the
+corresponding header.
+
+## 13.2. Per-Block Payload Checksum
+
+When the File Header has `HAS_CHECKSUM = 1`:
+
+- Every non-EOF block MUST carry a 4-byte trailing checksum.
+- The checksum input is the compressed payload bytes only, NOT the
+  block header.
+- The algorithm identifier `0` denotes a 32-bit folding of RapidHash.
+
+## 13.3. Global Stream Hash
+
+When `HAS_CHECKSUM = 1`, a rolling global hash is maintained from
+per-block checksums in stream order:
+
+```
 global = 0
-for each data block checksum b:
+for each data block checksum b (in stream order):
     global = ((global << 1) | (global >> 31)) XOR b
 ```
 
-This value is stored in the file footer (or zeroed when checksum mode is disabled).
+The 32-bit truncation of `global` is stored in the File Footer
+(Section 14). When `HAS_CHECKSUM = 0`, the global hash field MUST
+be written as zero by encoders and MUST NOT be validated by
+decoders.
 
----
 
-## 8. File Footer (12 bytes)
+# 14. File Footer
 
-Footer is mandatory and placed immediately after EOF block header.
+The File Footer is 12 bytes and MUST be the last 12 bytes of the
+file.
 
-```text
-Offset  Size  Field
-0x00    8     original_source_size (u64)
-0x08    4     global_hash (u32)
+```
+ Offset  Size  Field
+ 0x00    8     original_source_size (u64)
+ 0x08    4     global_hash          (u32)
 ```
 
-- **original_source_size**: full uncompressed size of the file.
-- **global_hash**:
-  - valid when checksum mode is active;
-  - set to zero when checksum mode is disabled.
+- **original_source_size**: the total uncompressed size of the
+  source data, in bytes. After decoding, a conforming decoder MUST
+  verify that its produced output size matches this value.
+- **global_hash**: the rolling global hash defined in Section 13.3,
+  or zero when `HAS_CHECKSUM = 0`.
 
----
 
-## 9. Decoder Validation Checklist (Practical)
+# 15. Decoder Operation
 
-1. Validate file header magic/version/CRC16.
-2. Parse blocks sequentially:
-   - validate block header CRC8,
-   - check block bounds using `comp_size`,
-   - if enabled, verify trailing block checksum.
-3. Decode payload according to block type.
-4. On EOF:
-   - require `comp_size == 0`,
-   - read footer,
-   - compare footer `original_source_size` with produced output size,
-   - if enabled, compare footer `global_hash` with recomputed rolling hash.
+A conforming decoder SHOULD process a ZXC stream according to the
+following procedure:
 
----
+1. Read the 16-byte File Header. Validate the Magic, Format
+   Version, Chunk Size Code, and Header CRC16.
+2. Loop over blocks:
+   a. Read the 8-byte block header. Validate the Header CRC8.
+   b. If the block is the EOF block, exit the loop.
+   c. Read `comp_size` bytes of payload.
+   d. If `HAS_CHECKSUM = 1`, read the 4-byte trailing checksum and
+      verify it against the payload; update the rolling global hash.
+   e. Decode the payload according to the Block Type (Sections
+      6-9).
+3. If a SEK block is present, the decoder MAY validate or skip it.
+4. Read the 12-byte File Footer. Verify that the produced output
+   size matches `original_source_size`. If `HAS_CHECKSUM = 1`,
+   verify that the recomputed rolling global hash matches the
+   footer's `global_hash`.
 
-## 10. Versioning Policy
+A decoder MUST NOT return successfully if any of the validation
+steps above fail.
 
-### 10.1 Format version field
 
-The format version is a single byte at offset `0x04` of the file header.
-A conforming decoder **MUST** reject any file whose version it does not support.
+# 16. Versioning Policy
 
-### 10.2 Version bump criteria
+## 16.1. Format Version Field
 
-ZXC has **no forward compatibility**: the set of block types and the meaning of
-every field are fixed per format version. Any change a decoder must understand —
-adding a block type, assigning meaning to a reserved field/flag bit, changing an
-encoding, layout, or the checksum algorithm — requires a **version bump**.
+The Format Version is a single byte at offset `0x04` of the File
+Header. A conforming decoder MUST reject any file whose Format
+Version it does not support, with the sole exception described in
+Section 16.3 ("forward compatibility").
 
-| Change class | Version action | Example |
-|---|---|---|
-| New block type added | **Version bump** (decoders reject unknown types) | Adding a hypothetical `GLR` block type |
-| Reserved field/flag bit assigned meaning | **Version bump** | Defining a reserved flag bit |
-| Existing block encoding changed | **Version bump** | Changing GLO token layout |
-| Header/footer layout changed | **Version bump** | Resizing the file header |
-| Checksum algorithm changed | **Version bump** | Replacing RapidHash with Komihash |
+## 16.2. Version Bump Criteria
 
-### 10.3 Compatibility rules
+| Change class                       | Action          | Example                              |
+|------------------------------------|-----------------|--------------------------------------|
+| New block type added               | No bump         | Adding a hypothetical GLR block      |
+| New flag bit defined               | No bump         | Using a reserved flag bit            |
+| Existing block encoding changed    | Major bump      | Changing GLO token layout            |
+| Header or footer layout changed    | Major bump      | Resizing the File Header             |
+| Checksum algorithm changed         | Major bump      | Replacing RapidHash with another     |
 
-- **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version with `ZXC_ERROR_BAD_VERSION`. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
-- **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version (`ZXC_ERROR_BAD_BLOCK_TYPE`). The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
-- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header CRC, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension.
-- **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values (`ZXC_ERROR_BAD_HEADER`).
+## 16.3. Compatibility Rules
 
-### 10.4 Minimum conforming decoder
+- **Backward compatibility**: a decoder supporting Format Version N
+  MUST decode all files produced by encoders at the same version.
+  It MAY also accept earlier versions.
+- **Forward compatibility**: a decoder encountering an unknown
+  Block Type (not RAW, GLO, NUM, GHI, SEK, or EOF) SHOULD skip the
+  block using `comp_size` and the optional trailing checksum,
+  rather than rejecting the file outright. This allows decoders to
+  partially process files from newer encoders that introduce
+  additive block types.
+- **Reserved fields**: all reserved bytes and flag bits MUST be
+  written as zero by encoders. Decoders MUST NOT reject a file
+  solely because a reserved field is non-zero, unless a future
+  revision of this document assigns the field a meaning.
 
-A minimal conforming decoder for version 7 **MUST** support:
-- File header parsing and CRC16 validation
-- **RAW** blocks (type 0) - passthrough copy.
-- **GLO** blocks (type 1) - full LZ decode with extras varint, including Huffman
-  entropy sections (§5.2.1, PivCo layout) with code lengths up to 11 bits.
-- **GHI** blocks (type 2) - full LZ decode with extras varint.
-- **EOF** block (type 255) - stream termination.
+## 16.4. Minimum Conforming Decoder
+
+A minimum conforming decoder for Format Version 5 MUST support:
+
+- File header parsing and CRC16 validation.
+- RAW blocks (type 0): passthrough copy.
+- GLO blocks (type 1): full LZ decoding with extras varints.
+- GHI blocks (type 3): full LZ decoding with extras varints.
+- EOF block (type 255): stream termination.
 - File footer validation (source size check).
 
-Support for checksum verification is **RECOMMENDED** but not strictly required for a minimal implementation.
+Support for NUM blocks (type 2), Huffman-coded literals
+(Section 7.5), and per-block checksum verification (Section 13.2)
+is RECOMMENDED but not REQUIRED.
 
----
 
-## 11. Error Handling
+# 17. Error Handling
 
-### 11.1 Error classes
+## 17.1. Error Classes
 
-Decoders **MUST** detect and handle the following error conditions.
-The recommended behavior for each class is specified below.
+A conforming decoder MUST detect and handle the following error
+conditions. The recommended behaviour for each is specified below;
+all errors in the table are fatal by default.
 
-| Error | Detection point | Required behavior |
-|---|---|---|
-| **Bad magic** | File header, offset 0x00 | Reject immediately. Not a ZXC file. |
-| **Unsupported version** | File header, offset 0x04 | Reject immediately. Version not supported. |
-| **Header CRC16 mismatch** | File header, offset 0x0E | Reject. Header is corrupt or truncated. |
-| **Invalid chunk size code** | File header, offset 0x05 | Reject. Code outside the valid range `[12..21]`. |
-| **Block header CRC8 mismatch** | Block header, offset 0x07 | Reject block. Stream is corrupt. |
-| **Unknown block type** | Block header, offset 0x00 | Skip block using `comp_size` (see §10.3), or reject. |
-| **Block payload truncated** | During `fread` of `comp_size` bytes | Reject. Unexpected end of stream. |
-| **Block checksum mismatch** | Trailing 4-byte checksum | Reject block. Payload is corrupt. |
-| **EOF block with non-zero comp_size** | EOF block header | Reject. Malformed EOF marker. |
-| **Footer source size mismatch** | File footer, offset 0x00 | Reject. Output size does not match declared original size. |
-| **Footer global hash mismatch** | File footer, offset 0x08 | Reject (if checksum mode active). Integrity failure. |
-| **Decompressed output exceeds chunk size** | During LZ decode | Reject. Corrupt or malicious payload. |
-| **Match offset out of bounds** | During LZ copy | Reject. Offset references data before output start. |
-| **Varint exceeds maximum length** | Extras stream | Reject. Overflow or corrupt extras data. |
+| Error                                 | Detection point             | Required behaviour                                |
+|---------------------------------------|-----------------------------|---------------------------------------------------|
+| Bad magic                             | File header offset 0x00     | Reject immediately. Not a ZXC file.               |
+| Unsupported version                   | File header offset 0x04     | Reject immediately.                               |
+| Header CRC16 mismatch                 | File header offset 0x0E     | Reject. Header is corrupt or truncated.           |
+| Invalid chunk size code               | File header offset 0x05     | Reject. Code outside `[12..21]` and not legacy 64.|
+| Block header CRC8 mismatch            | Block header offset 0x07    | Reject block. Stream is corrupt.                  |
+| Unknown block type                    | Block header offset 0x00    | Skip block per Section 16.3, or reject.           |
+| Block payload truncated               | During payload read         | Reject. Unexpected end of stream.                 |
+| Block checksum mismatch               | Trailing 4-byte checksum    | Reject block. Payload is corrupt.                 |
+| EOF block with non-zero comp_size     | EOF block header            | Reject. Malformed EOF marker.                     |
+| Footer source-size mismatch           | File footer offset 0x00     | Reject. Output size does not match.               |
+| Footer global hash mismatch           | File footer offset 0x08     | Reject (if checksum mode active).                 |
+| Decompressed output exceeds chunk size | During LZ decode           | Reject. Corrupt or malicious payload.             |
+| Match offset out of bounds            | During LZ copy              | Reject. Offset references data before output.     |
+| Varint exceeds maximum length         | Extras stream               | Reject. Overflow or corrupt extras data.          |
 
-### 11.2 Severity levels
+## 17.2. Severity Levels
 
-- **Fatal**: the decoder **MUST** stop processing and report an error. All errors in the table above are fatal by default.
-- **Warning**: not currently defined. Future versions may introduce non-fatal conditions (e.g. unknown flag bits set in reserved positions).
+- **Fatal**: the decoder MUST stop processing and report an error.
+  All errors in Section 17.1 are fatal by default.
+- **Warning**: no warning-class condition is defined by this
+  document. Future revisions MAY introduce non-fatal conditions
+  (for example, unknown flag bits set in RESERVED positions).
 
-### 11.3 Partial output
+## 17.3. Partial Output
 
-When a fatal error occurs mid-stream, the decoder **SHOULD**:
+When a fatal error occurs mid-stream, a conforming decoder SHOULD:
+
 1. Stop producing output immediately.
-2. Report the specific error condition (see `zxc_error_name` in the reference implementation).
+2. Report the specific error condition.
 3. Not return partially decompressed data as a valid result.
 
-Buffer-mode decoders **MUST** return a negative error code. Stream-mode decoders **MUST** signal the error and cease writing to the output.
+Buffer-mode decoders MUST return a negative error code. Stream-mode
+decoders MUST signal the error to the caller and cease writing to
+the output sink.
 
-### 11.4 Decoder hardening recommendations
+## 17.4. Decoder Hardening Recommendations
 
-For decoders processing untrusted input (e.g. network data, user uploads):
-- Validate **all** header checksums before processing payloads.
-- Enforce maximum allocation limits based on `comp_size` and chunk size code.
-- Reject files where `comp_size` exceeds `zxc_compress_bound(chunk_size)`.
-- Use bounded memory copies - never trust decoded lengths without cross-checking against output buffer capacity.
+Decoders that process untrusted input (for example, network data or
+user uploads) SHOULD additionally:
 
----
+- Validate all header checksums before processing any payload.
+- Enforce a maximum allocation limit derived from `comp_size` and
+  the chunk size code.
+- Reject files where `comp_size` exceeds the compression upper bound
+  for the configured chunk size.
+- Use bounded memory copies. Decoded lengths MUST NOT be trusted
+  without cross-checking against the output buffer capacity.
 
-## 12. Pre-Trained Dictionary Support
 
-### 12.1 Overview
+# 18. Worked Example
 
-A pre-trained dictionary improves compression ratio on small, similar payloads
-(e.g. JSON API responses, game assets, structured logs) by prefilling the LZ77
-sliding window at the start of each block. The dictionary is an external file
-(`.zxd` format) referenced by a 32-bit ID in the ZXC file header.
+This section is non-normative.
 
-### 12.2 Mechanism
+The following example was produced by the reference encoder from a
+10-byte input (`Hello ZXC\n`) using the equivalent of:
 
-The dictionary contains raw byte content (max 64 KB, bounded by the 64 KB LZ
-sliding window). At compression time, the dictionary is logically prepended to
-each block's input, seeding the hash tables so the match finder can reference
-dictionary content immediately. At decompression time, the dictionary is
-prepended to the output buffer so match copies that reference dictionary bytes
-resolve naturally via pointer arithmetic.
-
-Since each block is independent, the dictionary prefill happens per-block.
-This preserves O(1) seekable random-access: load the dictionary once, then
-decompress any block independently.
-
-### 12.3 File header encoding
-
-When `HAS_DICTIONARY` (flag bit 6) is set, the reserved bytes at offsets
-`0x07..0x0A` contain the `dict_id` (`u32` LE). A decoder **MUST**:
-1. Verify that a dictionary is provided (`ZXC_ERROR_DICT_REQUIRED` if not).
-2. Verify that the dictionary id matches `header.dict_id`
-   (`ZXC_ERROR_DICT_MISMATCH` if not). For a raw in-memory dictionary without
-   a shared table, the id is `zxc_dict_id(dict, dict_size, NULL)`. When a shared
-   literal table is attached, the id also binds the table:
-   `id = fold32(hash(table_128_bytes, seed = hash(content)))` (i.e. `zxc_dict_id(content, size, table)`).
-
-Older decoders that do not recognize the `HAS_DICTIONARY` flag will ignore it
-(per §10.3: reserved flag bits are ignored). However, blocks compressed with a
-dictionary contain match offsets that reference dictionary content; decoding
-without the dictionary produces corrupt output. Per-block and global checksums
-(when enabled) will detect this corruption.
-
-### 12.4 Dictionary file format (`.zxd`)
-
-Dictionaries are stored as standalone `.zxd` files with the following layout:
-
-```text
-Offset  Size  Field
-0x00    4     Magic Word (0x9CB0D1C7 LE)
-0x04    1     Dictionary format version (currently 1)
-0x05    1     Flags (bits 0..3: checksum algorithm id; bits 4..7 reserved)
-0x06    2     Content size (u16 LE, max 65535)
-0x08    4     dict_id (u32 LE, binds content AND shared table, see below)
-0x0C    2     Reserved (0)
-0x0E    2     Header CRC16 (zxc_hash16, computed with bytes 0x0C-0x0F zeroed)
-0x10    N     Dictionary content (raw bytes)
-0x10+N  128   Shared literal Huffman table (256 × 4-bit packed code lengths,
-              same layout as the § 5.2.1 code-length header; always present)
 ```
-
-- **Magic Word**: `0x9CB0D1C7`. Allows immediate rejection of non-dictionary files.
-- **Version**: `1`. Decoders reject any other version with
-  `ZXC_ERROR_BAD_VERSION`.
-- **Flags**: bits `0..3` carry the checksum algorithm id (`0` = RapidHash-based folding), matching the ZXC file header flags; bits `4..7` are reserved (must be 0).
-- **Shared literal Huffman table**: code lengths for the `enc_lit=3` literal
-  sections (§ 5.2.2), trained on the corpus' post-LZ literal distribution.
-- **dict_id**: `fold32(hash(table_128_bytes, seed = hash(content)))` —
-  binds the exact (content, table) pair. Must match the `dict_id` stored in
-  any ZXC file header that references this dictionary.
-- **Header CRC16**: `zxc_hash16` checksum of the 16-byte header with bytes `0x0C..0x0F` zeroed before hashing — same method as the ZXC file header.
-- **Content**: raw bytes that prefill the LZ77 window. Not compressed.
-
-### 12.5 Dictionary training
-
-The `zxc_train_dict()` function analyzes a corpus of representative samples to
-select byte segments that maximize LZ77 match coverage. The most frequently
-matched segments are placed at the end of the dictionary so they produce the
-shortest offsets (closest to the block start in the virtual window).
-
-### 12.6 Naming convention
-
-The `.zxd` extension is cosmetic — files are identified by the magic word at
-offset `0x00`, never by extension. This is a tooling convention, not a format
-requirement; it does not affect bytes on the wire. The reference CLI applies it
-as follows:
-
-- `zxc --train -o <dir>/ <files>` writes the trained dictionary as
-  `<dir>/dictionary_<dict_id>.zxd`, where `<dict_id>` is the lowercase 8-digit
-  hex of the dictionary id (e.g. `dictionary_bc46eec1.zxd`). Embedding the id
-  keeps the name unique per dictionary and easy to match against the `Dict ID`
-  reported by `zxc -l`. With no `-o`, the file is written to the current
-  directory; with `-o <file>` it is written there verbatim.
-- On **decompression**, a dictionary is **not** auto-located: an archive that
-  was compressed with a dictionary must be decompressed by passing that
-  dictionary explicitly with `-D`. Without it, decompression fails with
-  `ZXC_ERROR_DICT_REQUIRED` (the `dict_id` in the header is still verified
-  against the supplied dictionary, yielding `ZXC_ERROR_DICT_MISMATCH` on a
-  mismatch).
-
----
-
-## 13. Summary of Useful Fixed Sizes
-
-- File header: **16** bytes
-- Block header: **8** bytes
-- Block checksum (optional): **4** bytes
-- GLO header: **16** bytes
-- GHI header: **16** bytes
-- Section descriptor: **8** bytes
-- GLO descriptors total: **32** bytes
-- GHI descriptors total: **24** bytes
-- File footer: **12** bytes
-- Dictionary file header (`.zxd`): **16** bytes
-
-**Magic words** — both are little-endian `u32` at offset `0x00` and deliberately share the `0x9CB0...` family prefix, so check the full value (or the file extension) to tell them apart:
-
-| File | Magic (value) | On-disk bytes (LE) |
-|------|---------------|--------------------|
-| ZXC archive (`.zxc`) | `0x9CB02EF5` | `F5 2E B0 9C` |
-| ZXC dictionary (`.zxd`) | `0x9CB0D1C7` | `C7 D1 B0 9C` |
-
----
-
-## 14. Worked Example (Real Hexdump)
-
-This example was produced with the CLI from a 10-byte input (`Hello ZXC\n`) using:
-
-```bash
 zxc -z -C -1 sample.txt
 ```
 
-Generated archive size: **58 bytes**.
+The resulting archive is 58 bytes.
 
-### 14.1 Full hexdump
+## 18.1. Hexdump
 
-```text
-00000000: F5 2E B0 9C 07 13 80 00 00 00 00 00 00 00 3E 5D
+```
+00000000: F5 2E B0 9C 05 13 80 00 00 00 00 00 00 00 B8 90
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
 ```
 
-### 14.2 Byte-level decoding
+## 18.2. Byte-Level Decoding
 
-#### A) File Header (offset `0x00`, 16 bytes)
+### 18.2.1. File Header (offset 0x00, 16 bytes)
 
-```text
-F5 2E B0 9C | 07 | 13 | 80 | 00 00 00 00 00 00 00 | 3E 5D
+```
+F5 2E B0 9C | 05 | 13 | 80 | 00 00 00 00 00 00 00 | B8 90
 ```
 
-- `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
-- `07` -> format version 7.
-- `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
-- `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
-- next 7 bytes are reserved zeros.
-- `3E 5D` -> header CRC16 (LE value `0x5D3E`).
+- `F5 2E B0 9C` -> Magic = `0x9CB02EF5`.
+- `05` -> Format Version 5.
+- `13` -> Chunk Size Code 19 (`2^19 = 524288` bytes = 512 KiB).
+- `80` -> Flags: `HAS_CHECKSUM = 1`, algo id `0`.
+- Seven RESERVED zero bytes.
+- `B8 90` -> Header CRC16.
 
-#### B) Data Block #0 (RAW)
+### 18.2.2. Data Block #0 (RAW, offset 0x10)
 
-Block header at offset `0x10`:
+Block header:
 
-```text
+```
 00 | 00 | 00 | 0A 00 00 00 | 69
 ```
 
-- type `00` = RAW.
-- flags `00`, reserved `00`.
-- `comp_size = 0x0000000A = 10` bytes.
-- header CRC8 = `0x69`.
+- Type `00` = RAW.
+- Flags `00`, Reserved `00`.
+- `comp_size = 10`.
+- Header CRC8 = `0x69`.
 
-Payload at `0x18..0x21` (10 bytes):
+Payload at offset `0x18..0x21`:
 
-```text
-48 65 6C 6C 6F 20 5A 58 43 0A
+```
+48 65 6C 6C 6F 20 5A 58 43 0A   (ASCII "Hello ZXC\n")
 ```
 
-ASCII: `Hello ZXC\n`.
+Trailing checksum at `0x22..0x25`:
 
-Trailing block checksum at `0x22..0x25`:
-
-```text
-90 BB A1 75
+```
+90 BB A1 75   (LE = 0x75A1BB90)
 ```
 
-LE value: `0x75A1BB90`.
+### 18.2.3. EOF Block (offset 0x26, 8 bytes)
 
-#### C) EOF Block (offset `0x26`, 8 bytes)
-
-```text
+```
 FF | 00 | 00 | 00 00 00 00 | 02
 ```
 
-- type `FF` = EOF.
-- `comp_size = 0` (mandatory).
-- header CRC8 = `0x02`.
+### 18.2.4. File Footer (offset 0x2E, 12 bytes)
 
-#### D) File Footer (offset `0x2E`, 12 bytes)
-
-```text
+```
 0A 00 00 00 00 00 00 00 | 90 BB A1 75
 ```
 
-- original source size = `10` bytes.
-- global hash = `0x75A1BB90`.
+- `original_source_size = 10`.
+- `global_hash = 0x75A1BB90`.
 
-Since there is exactly one data block, the global hash equals that block checksum:
+With a single data block, the global hash equals that block's
+checksum:
 
-```text
+```
 global0 = 0
 global1 = rotl1(global0) XOR block_crc = block_crc
 ```
 
-### 14.3 Structural view with absolute offsets
+## 18.3. Structural View
 
-```text
-0x00..0x0F  File Header (16)
-0x10..0x17  RAW Block Header (8)
-0x18..0x21  RAW Payload (10)
-0x22..0x25  RAW Block Checksum (4)
-0x26..0x2D  EOF Block Header (8)
-0x2E..0x39  File Footer (12)
+```
+0x00..0x0F  File Header                (16 B)
+0x10..0x17  RAW Block Header           ( 8 B)
+0x18..0x21  RAW Payload                (10 B)
+0x22..0x25  RAW Block Checksum         ( 4 B)
+0x26..0x2D  EOF Block Header           ( 8 B)
+0x2E..0x39  File Footer                (12 B)
 ```
 
-### 14.4 Seekable Variant (with Seek Table)
+## 18.4. Seekable Variant
 
-Same 10-byte input (`Hello ZXC\n`), compressed with seekable mode enabled:
+The same input compressed with the seek table enabled
+(`zxc -z -C -1 -S sample.txt`) yields a 70-byte archive:
 
-```bash
-zxc -z -C -1 -S sample.txt
 ```
-
-Generated archive size: **70 bytes** (12 bytes larger than the non-seekable variant).
-
-#### Full hexdump
-
-```text
-00000000: F5 2E B0 9C 07 13 80 00 00 00 00 00 00 00 3E 5D
+00000000: F5 2E B0 9C 05 13 80 00 00 00 00 00 00 00 B8 90
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
 00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00
 00000040: 00 00 90 BB A1 75
 ```
 
-#### Byte-level decoding
+Differences with respect to Section 18.1:
 
-**A) File Header** (offset `0x00`, 16 bytes) - identical to non-seekable.
+- A SEK block of 12 bytes is inserted between the EOF block and the
+  File Footer.
+- The SEK block header is `FE 00 00 04 00 00 00 D2`, with `comp_size
+  = 4` (one 4-byte entry) and CRC8 = `0xD2`.
+- The single entry `16 00 00 00` (= 22) is the total on-disk size of
+  data block #0: 8 (header) + 10 (payload) + 4 (checksum).
 
-**B) Data Block #0 (RAW)** (offset `0x10`, 22 bytes) - identical to non-seekable.
+The File Footer remains the last 12 bytes of the file, so a decoder
+locating the footer from the end of the file requires no
+modification to support seekable archives.
 
-**C) EOF Block** (offset `0x26`, 8 bytes) - identical to non-seekable.
 
-**D) SEK Block** (offset `0x2E`, 12 bytes)
+# 19. Security Considerations
 
-Block header at `0x2E`:
+ZXC is a lossless compression format. Like any binary format that
+will be parsed from untrusted sources, a faulty or malicious ZXC
+stream can be crafted to attempt to exploit a decoder. The following
+considerations apply.
 
-```text
-FE | 00 | 00 | 04 00 00 00 | D2
+## 19.1. Decompression Bomb Resistance
+
+The per-block decompressed size is bounded by the Chunk Size Code in
+the File Header, which is constrained to the range
+[4 KiB, 2 MiB]. A decoder MUST enforce this bound while decoding.
+A decoder SHOULD additionally enforce an external bound on the total
+decompressed size (for example, derived from
+`original_source_size`) before allocating large output buffers.
+
+## 19.2. Memory Safety in LZ Decoding
+
+The LZ decoders for GLO and GHI MUST validate that every match
+reference stays strictly within the bounds of the currently produced
+output. A negative offset or an offset greater than the number of
+bytes already produced MUST be rejected as
+`ZXC_ERROR_CORRUPT_DATA`.
+
+## 19.3. Integer Overflow
+
+All length and size fields are bounded by their on-wire types. A
+decoder MUST perform arithmetic on these fields using types large
+enough to represent the result without overflow, and MUST treat any
+arithmetic overflow as a fatal error.
+
+## 19.4. Checksum Strength
+
+The CRC8 and CRC16 header checksums and the 32-bit per-block
+checksum defined in this document are designed for the detection of
+accidental corruption only. They are NOT cryptographic. A ZXC
+archive MUST NOT be used as the sole integrity mechanism against an
+adversary capable of modifying the archive.
+
+Applications requiring authentication SHOULD wrap or sign the ZXC
+archive using a separate cryptographic mechanism such as an
+authenticated encryption scheme [RFC5116].
+
+## 19.5. Reserved Fields
+
+A decoder that follows Section 16.3 will tolerate non-zero values in
+RESERVED bytes and flag bits. Encoder authors MUST NOT rely on this
+tolerance to smuggle data; future revisions of this document MAY
+assign meaning to any RESERVED field.
+
+## 19.6. Side Channels
+
+The parallel-decode design of the Huffman literal section
+(Section 7.5) does not introduce data-dependent secret memory access
+beyond what is intrinsic to canonical Huffman decoding. Implementers
+processing secrets through a ZXC decoder SHOULD perform their own
+side-channel analysis and consider constant-time alternatives where
+required.
+
+
+# 20. IANA Considerations
+
+This document requests the following actions from IANA.
+
+## 20.1. Media Type Registration
+
+The following media type registration is requested for ZXC streams:
+
+- Type name: `application`
+- Subtype name: `zxc`
+- Required parameters: none
+- Optional parameters: none
+- Encoding considerations: binary
+- Security considerations: see Section 19
+- Interoperability considerations: see this document
+- Published specification: this document
+- Applications which use this media type: file compression,
+  archival, on-the-wire compression
+- Fragment identifier considerations: none
+- Restrictions on usage: none
+- Provisional registration: yes
+- Author: Bertrand Lebonnois
+- Change controller: Bertrand Lebonnois
+- Magic number(s): the first four bytes of a ZXC stream are
+  `F5 2E B0 9C` (little-endian encoding of `0x9CB02EF5`).
+- File extension(s): `.zxc`
+
+## 20.2. File Extension
+
+The conventional file extension for a ZXC archive is `.zxc`.
+
+## 20.3. Block Type Registry
+
+This document requests the creation of a "ZXC Block Types" registry
+with the following initial assignments:
+
+| Value      | Mnemonic | Reference        |
+|------------|----------|------------------|
+| 0          | RAW      | Section 6        |
+| 1          | GLO      | Section 7        |
+| 2          | NUM      | Section 8        |
+| 3          | GHI      | Section 9        |
+| 4..253     | Unassigned | -              |
+| 254        | SEK      | Section 10       |
+| 255        | EOF      | Section 11       |
+
+The registration policy for new Block Type values is "Specification
+Required" [RFC8126].
+
+
+# 21. References
+
+## 21.1. Normative References
+
+[RFC2119]   Bradner, S., "Key words for use in RFCs to Indicate
+            Requirement Levels", BCP 14, RFC 2119,
+            DOI 10.17487/RFC2119, March 1997,
+            <https://www.rfc-editor.org/info/rfc2119>.
+
+[RFC8174]   Leiba, B., "Ambiguity of Uppercase vs Lowercase in
+            RFC 2119 Key Words", BCP 14, RFC 8174,
+            DOI 10.17487/RFC8174, May 2017,
+            <https://www.rfc-editor.org/info/rfc8174>.
+
+[RFC8126]   Cotton, M., Leiba, B., and T. Narten, "Guidelines for
+            Writing an IANA Considerations Section in RFCs",
+            BCP 26, RFC 8126, DOI 10.17487/RFC8126, June 2017,
+            <https://www.rfc-editor.org/info/rfc8126>.
+
+## 21.2. Informative References
+
+[RFC5116]   McGrew, D., "An Interface and Algorithms for
+            Authenticated Encryption", RFC 5116,
+            DOI 10.17487/RFC5116, January 2008,
+            <https://www.rfc-editor.org/info/rfc5116>.
+
+[RFC8478]   Collet, Y. and M. Kucherawy, Ed., "Zstandard Compression
+            and the 'application/zstd' Media Type", RFC 8478,
+            DOI 10.17487/RFC8478, October 2018,
+            <https://www.rfc-editor.org/info/rfc8478>.
+
+[LZ4]       Collet, Y., "LZ4 - Extremely fast compression",
+            <https://lz4.github.io/lz4/>.
+
+[RAPIDHASH] "RapidHash: a fast, high-quality non-cryptographic hash
+            function", <https://github.com/Nicoshev/rapidhash>.
+
+[ZXC-WP]    Lebonnois, B., "The ZXC Compressor: design and
+            implementation notes", WHITEPAPER.md in the ZXC source
+            distribution.
+
+
+# 22. Author's Address
+
 ```
-
-- `FE` -> type 254 = SEK (Seek Table).
-- flags `00`, reserved `00`.
-- `comp_size = 0x00000004 = 4` bytes (one entry x 4 bytes/entry).
-- header CRC8 = `0xD2`.
-
-Seek table entry at `0x36`:
-
-```text
-16 00 00 00
-```
-
-- Entry #0: compressed block size = `0x00000016 = 22` bytes.
-  This is the total size of data block #0 including its header (8) + payload (10) + checksum (4) = 22. ✓
-
-**E) File Footer** (offset `0x3A`, 12 bytes)
-
-```text
-0A 00 00 00 00 00 00 00 | 90 BB A1 75
-```
-
-- original source size = `10` bytes.
-- global hash = `0x75A1BB90`.
-
-#### Structural view with absolute offsets
-
-```text
-0x00..0x0F  File Header (16)
-0x10..0x17  RAW Block Header (8)
-0x18..0x21  RAW Payload (10)
-0x22..0x25  RAW Block Checksum (4)
-0x26..0x2D  EOF Block Header (8)
-0x2E..0x35  SEK Block Header (8)    <- seek table
-0x36..0x39  SEK Entry #0 (4)        <- comp_size of block #0
-0x3A..0x45  File Footer (12)
-```
-
-> **Compatibility note**: The SEK block is inserted between the EOF block and the file footer. The footer always remains the **last 12 bytes of the file**, so decoders that locate the footer from the end of the file (e.g. `src + src_size - 12` for buffer APIs, or `fseek(END - 12)` for file APIs) work unchanged with seekable archives. However, **streaming decoders** that read the footer sequentially immediately after the EOF block must be updated to detect and skip the SEK block. In practice, all ZXC decoders since v0.9.0 handle both seekable and non-seekable archives transparently.
-
----
-
-## 15. Worked Example: Dictionary File (`.zxd` Hexdump)
-
-A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size: **149 bytes** (16-byte header + 5-byte content + 128-byte shared Huffman table). This is the on-disk form produced by `zxc_dict_save()` (see §12.4); the table is always present.
-
-### 15.1 Full hexdump
-
-```text
-00000000: C7 D1 B0 9C 01 00 05 00 23 58 DF 6F 00 00 63 65
-00000010: 68 65 6C 6C 6F 00 00 00 00 00 00 00 00 00 00 00
-00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00000030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00000040: 00 00 00 00 00 00 00 20 00 02 00 02 20 00 00 00
-00000050: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00000060: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00000070: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00000080: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00000090: 00 00 00 00 00
-```
-
-### 15.2 Byte-level decoding
-
-#### A) Dictionary Header (offset `0x00`, 16 bytes)
-
-```text
-C7 D1 B0 9C | 01 | 00 | 05 00 | 17 0F 72 9A | 00 00 | 4A D9
-```
-
-- `C7 D1 B0 9C` -> magic word (LE) = `0x9CB0D1C7` (`.zxd` dictionary).
-- `01` -> dictionary format version 1.
-- `00` -> flags (bits 0..3 = checksum algorithm id `0` = RapidHash; bits 4..7 reserved).
-- `05 00` -> content size (LE) = `5` bytes.
-- `23 58 DF 6F` -> `dict_id` (LE) = `0x6FDF5823`. Binds the **(content, table)** pair (see §12.4) and must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
-- `00 00` -> reserved.
-- `63 65` -> header CRC16 (LE) = `0x6563`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the CRC is the last 2 bytes of the header).
-
-#### B) Dictionary Content (offset `0x10`, 5 bytes)
-
-```text
-68 65 6C 6C 6F
-```
-
-ASCII: `hello`. Raw bytes that prefill the LZ77 window — not compressed.
-
-#### C) Shared Huffman Table (offset `0x15`, 128 bytes)
-
-```text
-... 20 00 02 00 02 20 ...   (remaining bytes 0x00)
-```
-
-256 × 4-bit code lengths, packed two-per-byte (low nibble first), for the shared literal table (§5.2.2). Symbols absent from the training distribution have length `0`; here only the four bytes of `hello` carry codes (e.g. the nibble at table index `'e'`=0x65 gives length `2`), so all other entries are zero.
-
-### 15.3 Structural view with absolute offsets
-
-```text
-0x00..0x0F  Dictionary Header (16)
-0x10..0x14  Dictionary Content (5)
-0x15..0x94  Shared Huffman Table (128)
+Bertrand Lebonnois
+Email: zxc.codec@gmail.com
 ```
