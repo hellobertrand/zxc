@@ -879,6 +879,20 @@ static int64_t reader_test_read_at(void* ctx, void* dst, size_t len, uint64_t of
     return (int64_t)len;
 }
 
+/* Thread-safe in-memory reader for the MT test. Holds no mutable state, so
+ * concurrent invocations from worker threads are race-free by construction. */
+typedef struct {
+    const uint8_t* data;
+    uint64_t size;
+} reader_test_ctx_mt_t;
+
+static int64_t reader_test_read_at_mt(void* ctx, void* dst, size_t len, uint64_t offset) {
+    const reader_test_ctx_mt_t* m = (const reader_test_ctx_mt_t*)ctx;
+    if (offset > m->size || len > m->size - offset) return -1;
+    memcpy(dst, m->data + offset, len);
+    return (int64_t)len;
+}
+
 /* Reader that always reports a short read - must be rejected at open(). */
 static int64_t reader_short_read_at(void* ctx, void* dst, size_t len, uint64_t offset) {
     (void)ctx; (void)dst; (void)offset;
@@ -1032,9 +1046,10 @@ int test_seekable_open_reader_mt() {
         free(src); free(dst); free(dec); return 0;
     }
 
-    reader_test_ctx_t mctx = { .data = dst, .size = (uint64_t)csize, .call_count = 0,
-                               .bytes_read = 0 };
-    zxc_reader_t r = { .read_at = reader_test_read_at, .ctx = &mctx, .size = (uint64_t)csize };
+    /* Use the stateless reader: worker threads call it concurrently. */
+    reader_test_ctx_mt_t mctx = { .data = dst, .size = (uint64_t)csize };
+    zxc_reader_t r = { .read_at = reader_test_read_at_mt, .ctx = &mctx,
+                       .size = (uint64_t)csize };
 
     zxc_seekable* s = zxc_seekable_open_reader(&r);
     if (!s) {
