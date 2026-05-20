@@ -9,8 +9,10 @@ package zxc
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 )
 
@@ -126,6 +128,87 @@ func TestSeekableInvalidBytes(t *testing.T) {
 	}
 	if _, err := OpenBytes(nil); err == nil {
 		t.Fatalf("OpenBytes(nil) should fail")
+	}
+}
+
+// countingReaderAt wraps bytes.Reader and counts ReadAt invocations so
+// tests can assert lazy I/O at open and per-block reads.
+type countingReaderAt struct {
+	inner io.ReaderAt
+	calls int64
+}
+
+func (c *countingReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	atomic.AddInt64(&c.calls, 1)
+	return c.inner.ReadAt(p, off)
+}
+
+func TestSeekableOpenReader(t *testing.T) {
+	payload := make([]byte, 256*1024)
+	for i := range payload {
+		payload[i] = byte(i*7) ^ 0x5A
+	}
+	path := buildSeekableArchive(t, payload)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+
+	cr := &countingReaderAt{inner: bytes.NewReader(data)}
+	s, err := OpenReader(cr, int64(len(data)))
+	if err != nil {
+		t.Fatalf("OpenReader: %v", err)
+	}
+	defer s.Close()
+
+	// open_reader should have done exactly 3 reads: header, footer, seek
+	// table.
+	if got := atomic.LoadInt64(&cr.calls); got != 3 {
+		t.Fatalf("open phase calls = %d, want 3", got)
+	}
+
+	if got := s.DecompressedSize(); got != uint64(len(payload)) {
+		t.Fatalf("DecompressedSize = %d, want %d", got, len(payload))
+	}
+
+	// Full-range round-trip.
+	out := make([]byte, len(payload))
+	if _, err := s.DecompressRange(out, 0, len(payload)); err != nil {
+		t.Fatalf("DecompressRange full: %v", err)
+	}
+	if !bytes.Equal(out, payload) {
+		t.Fatalf("payload mismatch after full DecompressRange")
+	}
+
+	// Sub-range within a single block: must trigger exactly one extra read.
+	before := atomic.LoadInt64(&cr.calls)
+	chunk := make([]byte, 1024)
+	if _, err := s.DecompressRange(chunk, 100, 1024); err != nil {
+		t.Fatalf("DecompressRange sub: %v", err)
+	}
+	if !bytes.Equal(chunk, payload[100:1124]) {
+		t.Fatalf("sub-range mismatch")
+	}
+	if delta := atomic.LoadInt64(&cr.calls) - before; delta != 1 {
+		t.Fatalf("single-block sub-range should trigger 1 read, got %d", delta)
+	}
+}
+
+func TestSeekableOpenReaderRejectsNilAndZero(t *testing.T) {
+	if _, err := OpenReader(nil, 100); err == nil {
+		t.Fatalf("OpenReader(nil, 100) should fail")
+	}
+	if _, err := OpenReader(bytes.NewReader([]byte{1, 2, 3}), 0); err == nil {
+		t.Fatalf("OpenReader(r, 0) should fail")
+	}
+}
+
+func TestSeekableOpenReaderRejectsGarbage(t *testing.T) {
+	// 64 bytes of zeros pass the minimum-size check but parse as invalid.
+	// The cgo handle must still be released (no leak in steady state).
+	garbage := bytes.NewReader(make([]byte, 64))
+	if _, err := OpenReader(garbage, 64); err == nil {
+		t.Fatalf("OpenReader on garbage should fail")
 	}
 }
 
