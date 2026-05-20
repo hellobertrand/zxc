@@ -26,10 +26,9 @@
 #ifndef ZXC_INTERNAL_H
 #define ZXC_INTERNAL_H
 
-#include <limits.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
+#include "zxc_deps.h" /* libc deps: <limits.h>, <stdint.h>, <stdlib.h>, <string.h>,
+                        and the ZXC_MALLOC / ZXC_ALIGNED_MALLOC / ZXC_QSORT macros.
+                        Vendor this file to retarget non-libc environments. */
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
@@ -230,59 +229,9 @@ extern "C" {
 #endif
 /** @} */ /* end of Compiler Abstractions */
 
-/**
- * @name Heap Allocator Abstraction
- * @brief Macros around the libc allocators so non-libc targets (Linux kernel,
- * embedded freestanding builds, custom arenas) can override them via `-D`
- * flags **before** including any zxc header.
- *
- * Example kernel-side override:
- * @code
- * -DZXC_MALLOC(n)=kmalloc(n, GFP_KERNEL)
- * -DZXC_CALLOC(n, s)=kcalloc(n, s, GFP_KERNEL)
- * -DZXC_REALLOC(p, n)=krealloc(p, n, GFP_KERNEL)
- * -DZXC_FREE(p)=kfree(p)
- * @endcode
- *
- * @note Aligned allocations still go through @ref zxc_aligned_malloc /
- * @ref zxc_aligned_free, which are platform-specific and not covered here.
- * @{
- */
-#ifndef ZXC_MALLOC
-#define ZXC_MALLOC(size) malloc(size)
-#endif
-#ifndef ZXC_CALLOC
-#define ZXC_CALLOC(nmemb, size) calloc(nmemb, size)
-#endif
-#ifndef ZXC_REALLOC
-#define ZXC_REALLOC(ptr, size) realloc(ptr, size)
-#endif
-#ifndef ZXC_FREE
-#define ZXC_FREE(ptr) free(ptr)
-#endif
-#ifndef ZXC_QSORT
-#define ZXC_QSORT(base, nmemb, size, cmp) qsort(base, nmemb, size, cmp)
-#endif
-/** @} */
-
-/**
- * @name Aligned Allocator Abstraction
- * @brief Macros around the cache-line-aligned allocator used for compression
- * workspace and per-context scratch buffers.
- *
- * The default expansion calls the internal helpers @ref zxc_aligned_malloc /
- * @ref zxc_aligned_free, which wrap `_aligned_malloc`/`_aligned_free` on
- * Windows and `posix_memalign`/`free` on POSIX.
- *
- * @{
- */
-#ifndef ZXC_ALIGNED_MALLOC
-#define ZXC_ALIGNED_MALLOC(size, alignment) zxc_aligned_malloc(size, alignment)
-#endif
-#ifndef ZXC_ALIGNED_FREE
-#define ZXC_ALIGNED_FREE(ptr) zxc_aligned_free(ptr)
-#endif
-/** @} */
+/* Heap allocator and cache-line-aligned allocator macros are now defined
+ * in @c zxc_deps.h (included at the top of this header), so non-libc
+ * targets can override them by vendoring that single file. */
 
 /**
  * @name Endianness Detection
