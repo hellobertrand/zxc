@@ -24,6 +24,7 @@ For the on-disk binary format see [`FORMAT.md`](FORMAT.md).
 - [7. Buffer API](#7-buffer-api)
 - [8. Block API](#8-block-api)
 - [9. Reusable Context API](#9-reusable-context-api)
+- [9b. Static Context API](#9b-static-context-api)
 - [10. Streaming API](#10-streaming-api)
 - [10b. Push Streaming API](#10b-push-streaming-api)
 - [11. Seekable API](#11-seekable-api)
@@ -571,6 +572,166 @@ Same as `zxc_decompress()` but reuses buffers from `dctx`.
 
 ---
 
+## 9b. Static Context API
+
+Declared in `zxc_buffer.h`. Mirrors the Reusable Context API but places the
+entire context, opaque handle plus every persistent sub-buffer, inside a
+**single buffer allocated and owned by the caller**. This pattern is
+mandatory for environments where the library cannot call into the host
+allocator on the hot path: Linux kernel filesystems (one workspace per mount,
+served via `vmalloc` / `kmalloc` up front), embedded targets without a heap
+(`.bss` or stack-allocated workspace), sandboxed runtimes with a fixed
+memory budget, etc.
+
+Trade-off vs the dynamic API: the workspace is **pinned** to a single `block_size` at init time;
+subsequent compress / decompress calls cannot enlarge the footprint, so a
+workload that needs to mix block sizes must size the workspace for the
+maximum block size up front.
+
+### Properties
+
+- **Single allocation.** All hash tables, chain table, sequence buffers,
+  literal scratch, work buffer, and (at `ZXC_LEVEL_DENSITY`) the optimal-
+  parser scratch live inside the caller-supplied buffer. No further
+  `ZXC_MALLOC` / `ZXC_ALIGNED_MALLOC` is performed for the lifetime of
+  the context.
+- **`zxc_free_*ctx` is a no-op** on a static handle. The caller owns the
+  workspace.
+- **`block_size` is locked.** A subsequent call passing a different
+  `block_size` returns `ZXC_ERROR_BAD_BLOCK_SIZE` without re-initialising.
+  `level` and `checksum_enabled` may still vary per call (they affect only
+  the encoder state, not the buffer layout).
+- **Workspace alignment.** Must be at least cache-line (64-byte) aligned.
+  Use `posix_memalign(..., 64, ...)`, `aligned_alloc(64, ...)`, the slab
+  allocator (kmalloc returns ≥ `ARCH_KMALLOC_MINALIGN`), or a
+  `_Alignas(64)` static array.
+
+### `zxc_static_cctx_workspace_size`
+
+```c
+ZXC_EXPORT size_t zxc_static_cctx_workspace_size(
+    const size_t block_size,
+    const int    level
+);
+```
+
+Returns the exact byte count required by a static compression workspace
+for the given `block_size` and `level`. Sum of the opaque `zxc_cctx`
+wrapper plus every persistent sub-buffer the library would partition.
+
+**Returns**: workspace size in bytes, or `0` if either argument is invalid
+(non-power-of-two `block_size`, out-of-range level, ...).
+
+**Note**: level 6 (`ZXC_LEVEL_DENSITY`) adds the optimal-parser scratch
+(~8.125 × `block_size`); levels 1–5 share the same workspace size.
+
+### `zxc_init_static_cctx`
+
+```c
+ZXC_EXPORT zxc_cctx* zxc_init_static_cctx(
+    void*                       workspace,
+    const size_t                workspace_size,
+    const zxc_compress_opts_t*  opts
+);
+```
+
+Initialises a compression context inside a caller-supplied workspace.
+`workspace_size` must be at least `zxc_static_cctx_workspace_size` for the
+same `block_size` / `level`. `opts` is **required**: `block_size` and
+`level` are pinned at init time and must be set explicitly.
+
+The returned handle points **inside** `workspace`; the workspace must
+remain valid for the lifetime of the handle. `zxc_free_cctx` is a no-op.
+
+**Returns**: handle pointing inside `workspace`, or `NULL` if the
+workspace is too small, the options are invalid, or `workspace` / `opts`
+is `NULL`.
+
+### `zxc_static_dctx_workspace_size`
+
+```c
+ZXC_EXPORT size_t zxc_static_dctx_workspace_size(
+    const size_t block_size
+);
+```
+
+Returns the exact byte count required by a static decompression workspace
+for the given `block_size`. Unlike the compression variant, this size is
+**independent of the source archive's level**: `lit_buffer` is always
+provisioned worst-case because the decoder cannot predict the per-block
+literal encoding (RAW / RLE / HUFFMAN) until it sees each block header.
+
+**Returns**: workspace size in bytes, or `0` if `block_size` is invalid.
+
+### `zxc_init_static_dctx`
+
+```c
+ZXC_EXPORT zxc_dctx* zxc_init_static_dctx(
+    void*         workspace,
+    const size_t  workspace_size,
+    const size_t  block_size
+);
+```
+
+Initialises a decompression context inside a caller-supplied workspace.
+`block_size` is **pinned** at init time: feeding the returned handle an
+archive whose file header declares a different `block_size` returns
+`ZXC_ERROR_BAD_BLOCK_SIZE`.
+
+The returned handle points inside `workspace`; the workspace must remain
+valid for the lifetime of the handle. `zxc_free_dctx` is a no-op.
+
+**Returns**: handle pointing inside `workspace`, or `NULL` if the
+workspace is too small, `block_size` is invalid, or `workspace` is
+`NULL`.
+
+### Typical usage
+
+```c
+#include <zxc.h>
+
+#define BLOCK_SZ   (64 * 1024)   /* must match the archive's block_size at decode */
+#define LEVEL      ZXC_LEVEL_DEFAULT
+
+/* --- Compression side --- */
+size_t cws_sz = zxc_static_cctx_workspace_size(BLOCK_SZ, LEVEL);
+void  *cws    = NULL;
+posix_memalign(&cws, 64, cws_sz);                  /* or kmalloc / vmalloc / .bss */
+
+zxc_compress_opts_t copts = { .level = LEVEL, .block_size = BLOCK_SZ };
+zxc_cctx *cctx = zxc_init_static_cctx(cws, cws_sz, &copts);
+
+for (/* each block */) {
+    zxc_compress_cctx(cctx, src, n, dst, cap, NULL);  /* no allocation */
+}
+zxc_free_cctx(cctx);  /* no-op for static */
+free(cws);            /* caller owns the workspace */
+
+/* --- Decompression side --- */
+size_t dws_sz = zxc_static_dctx_workspace_size(BLOCK_SZ);
+void  *dws    = NULL;
+posix_memalign(&dws, 64, dws_sz);
+
+zxc_dctx *dctx = zxc_init_static_dctx(dws, dws_sz, BLOCK_SZ);
+zxc_decompress_dctx(dctx, in, in_sz, out, out_cap, NULL);
+zxc_free_dctx(dctx);  /* no-op */
+free(dws);
+```
+
+### Sizing notes
+
+| `block_size` | level 1–5 cctx | level 6 cctx | dctx |
+|---|---|---|---|
+| 4 KB        | ~280 KB         | ~320 KB       | ~9 KB  |
+| 64 KB       | ~410 KB         | ~930 KB       | ~129 KB |
+| 512 KB      | ~1.5 MB         | ~5.7 MB       | ~1 MB  |
+| 2 MB        | ~5.0 MB         | ~21 MB        | ~4 MB  |
+
+(Exact figures depend on architecture and alignment padding; always query
+`zxc_static_*_workspace_size` rather than hard-coding.)
+
+---
+
 ## 10. Streaming API
 
 Declared in `zxc_stream.h` — the umbrella for every `FILE*`-flavored entry
@@ -1068,6 +1229,7 @@ if (result < 0) {
 | **Buffer API** | Yes (stateless) | Each call is self-contained.  Multiple threads can compress/decompress simultaneously with independent buffers. |
 | **Block API** | Per-context | Uses `zxc_cctx` / `zxc_dctx`: same rule as Context API.  Create one context per thread. |
 | **Context API** | Per-context | A single `zxc_cctx` / `zxc_dctx` must not be shared between threads.  Create one context per thread. |
+| **Static Context API** | Per-handle | Same per-context rule as the dynamic Context API.  Allocate one workspace per thread; the static handle does not introduce any cross-thread synchronisation. |
 | **Streaming API** | Per-call | Each `zxc_stream_*` call manages its own thread pool internally.  Do not call from multiple threads on the same `FILE*`. |
 | **Seekable API** | Per-handle | A single `zxc_seekable` handle must not be shared between threads for single-threaded decompression.  Use `zxc_seekable_decompress_range_mt()` for parallel access. |
 | `zxc_error_name` | Yes | Returns a pointer to a static string. |
@@ -1100,33 +1262,37 @@ The shared library exports **47 symbols** (verified with `nm -gU`):
 | 18 | `zxc_create_dctx` | Context | `zxc_buffer.h` |
 | 19 | `zxc_free_dctx` | Context | `zxc_buffer.h` |
 | 20 | `zxc_decompress_dctx` | Context | `zxc_buffer.h` |
-| 21 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
-| 22 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
-| 23 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
-| 24 | `zxc_cstream_create` | Push Streaming | `zxc_pstream.h` |
-| 25 | `zxc_cstream_free` | Push Streaming | `zxc_pstream.h` |
-| 26 | `zxc_cstream_compress` | Push Streaming | `zxc_pstream.h` |
-| 27 | `zxc_cstream_end` | Push Streaming | `zxc_pstream.h` |
-| 28 | `zxc_cstream_in_size` | Push Streaming | `zxc_pstream.h` |
-| 29 | `zxc_cstream_out_size` | Push Streaming | `zxc_pstream.h` |
-| 30 | `zxc_dstream_create` | Push Streaming | `zxc_pstream.h` |
-| 31 | `zxc_dstream_free` | Push Streaming | `zxc_pstream.h` |
-| 32 | `zxc_dstream_decompress` | Push Streaming | `zxc_pstream.h` |
-| 33 | `zxc_dstream_finished` | Push Streaming | `zxc_pstream.h` |
-| 34 | `zxc_dstream_in_size` | Push Streaming | `zxc_pstream.h` |
-| 35 | `zxc_dstream_out_size` | Push Streaming | `zxc_pstream.h` |
-| 36 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
-| 37 | `zxc_seekable_open_file` | Seekable | `zxc_stream.h` |
-| 38 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
-| 39 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
-| 40 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
-| 41 | `zxc_seekable_get_block_decomp_size` | Seekable | `zxc_seekable.h` |
-| 42 | `zxc_seekable_decompress_range` | Seekable | `zxc_seekable.h` |
-| 43 | `zxc_seekable_decompress_range_mt` | Seekable | `zxc_seekable.h` |
-| 44 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
-| 45 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
-| 46 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
-| 47 | `zxc_error_name` | Error | `zxc_error.h` |
+| 21 | `zxc_static_cctx_workspace_size` | Static Context | `zxc_buffer.h` |
+| 22 | `zxc_init_static_cctx` | Static Context | `zxc_buffer.h` |
+| 23 | `zxc_static_dctx_workspace_size` | Static Context | `zxc_buffer.h` |
+| 24 | `zxc_init_static_dctx` | Static Context | `zxc_buffer.h` |
+| 25 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
+| 26 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
+| 27 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
+| 28 | `zxc_cstream_create` | Push Streaming | `zxc_pstream.h` |
+| 29 | `zxc_cstream_free` | Push Streaming | `zxc_pstream.h` |
+| 30 | `zxc_cstream_compress` | Push Streaming | `zxc_pstream.h` |
+| 31 | `zxc_cstream_end` | Push Streaming | `zxc_pstream.h` |
+| 32 | `zxc_cstream_in_size` | Push Streaming | `zxc_pstream.h` |
+| 33 | `zxc_cstream_out_size` | Push Streaming | `zxc_pstream.h` |
+| 34 | `zxc_dstream_create` | Push Streaming | `zxc_pstream.h` |
+| 35 | `zxc_dstream_free` | Push Streaming | `zxc_pstream.h` |
+| 36 | `zxc_dstream_decompress` | Push Streaming | `zxc_pstream.h` |
+| 37 | `zxc_dstream_finished` | Push Streaming | `zxc_pstream.h` |
+| 38 | `zxc_dstream_in_size` | Push Streaming | `zxc_pstream.h` |
+| 39 | `zxc_dstream_out_size` | Push Streaming | `zxc_pstream.h` |
+| 40 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
+| 41 | `zxc_seekable_open_file` | Seekable | `zxc_stream.h` |
+| 42 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
+| 43 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
+| 44 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
+| 45 | `zxc_seekable_get_block_decomp_size` | Seekable | `zxc_seekable.h` |
+| 46 | `zxc_seekable_decompress_range` | Seekable | `zxc_seekable.h` |
+| 47 | `zxc_seekable_decompress_range_mt` | Seekable | `zxc_seekable.h` |
+| 48 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
+| 49 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
+| 50 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
+| 51 | `zxc_error_name` | Error | `zxc_error.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon`, `_avx2`, `_avx512`) are compiled with
