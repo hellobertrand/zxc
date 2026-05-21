@@ -162,16 +162,34 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux amd64
+          - name: Linux amd64 (baseline, no SIMD)
             cross_pkg: gcc
             cross_prefix: x86_64-linux-gnu
             cmake_processor: x86_64
             qemu_binary: qemu-x86_64
+          - name: Linux amd64 (AVX2)
+            cross_pkg: gcc
+            cross_prefix: x86_64-linux-gnu
+            cmake_processor: x86_64
+            qemu_binary: qemu-x86_64
+            qemu_cpu: Haswell-noTSX
+          - name: Linux amd64 (AVX-512)
+            cross_pkg: gcc
+            cross_prefix: x86_64-linux-gnu
+            cmake_processor: x86_64
+            qemu_binary: qemu-x86_64
+            qemu_cpu: Skylake-Server-noTSX-IBRS
           - name: Linux arm64
             cross_pkg: gcc-aarch64-linux-gnu
             cross_prefix: aarch64-linux-gnu
             cmake_processor: aarch64
             qemu_binary: qemu-aarch64
+          - name: Linux arm64 (cortex-a53)
+            cross_pkg: gcc-aarch64-linux-gnu
+            cross_prefix: aarch64-linux-gnu
+            cmake_processor: aarch64
+            qemu_binary: qemu-aarch64
+            qemu_cpu: cortex-a53
           - name: Linux i386
             cross_pkg: gcc-i686-linux-gnu
             cross_prefix: i686-linux-gnu
@@ -259,8 +277,13 @@ jobs:
 
               cmake --build $BUILD_DIR --config Release --parallel
 
+              QEMU_CPU_ARG=""
+              if [ -n "${{ matrix.qemu_cpu }}" ]; then
+                  QEMU_CPU_ARG="-cpu ${{ matrix.qemu_cpu }}"
+              fi
+
               echo "Running Tests for $LIB_TYPE via QEMU..."
-              ${{ matrix.qemu_binary }} -L $SYSROOT ./$BUILD_DIR/zxc_test
+              ${{ matrix.qemu_binary }} $QEMU_CPU_ARG -L $SYSROOT ./$BUILD_DIR/zxc_test
 
               echo ">>> Completed Build: $LIB_TYPE"
               echo ""
