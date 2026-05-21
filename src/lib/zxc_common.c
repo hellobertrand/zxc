@@ -724,51 +724,21 @@ uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
 /*
  * @brief Estimates the total buffer bytes allocated inside a cctx for a block.
  *
- * Mirrors the persistent allocation layout in zxc_cctx_init(): each sub-buffer
- * is rounded up to the cache-line boundary, so the returned value matches the
- * single aligned allocation performed by the initializer.
+ * Thin wrapper around @ref zxc_cctx_compute_workspace_size for @c mode == 1
+ * (compress), with @c src_size clamped up to a valid block size via
+ * @ref zxc_block_size_ceil.  The opaque wrapper struct allocated by
+ * @ref zxc_create_cctx adds a fixed overhead (< 128 B) that is negligible
+ * next to the per-chunk buffers and is intentionally omitted.
  *
- * For @p level >= 6 the figure also includes ctx->opt_scratch (~8.125 bytes
- * per chunk_size byte: dp + parent_len + parent_off + a 1-bit-per-position
- * match-end bitmap), the cache-line-aligned scratch used by the optimal
- * parser. It is lazy-allocated on the first level-6 call and persists for
- * the lifetime of the cctx (no per-block malloc/free).
+ * For @p level >= 6 the figure includes the optimal-parser scratch
+ * (@c opt_scratch, ~8.125 bytes per chunk_size byte) used by the optimal
+ * parser and reused as transient package-merge scratch for the Huffman
+ * code-length builder.
  */
 uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
     if (UNLIKELY(src_size == 0)) return 0;
-
     const size_t chunk_size = zxc_block_size_ceil(src_size);
-    const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
-    const size_t max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
-    const size_t vbyte_len = (offset_bits + 6) / 7;
-
-    uint64_t total = 0;
-    total += ZXC_ALIGN_CL(ZXC_LZ_HASH_SIZE * sizeof(uint32_t));   /* hash_table */
-    total += ZXC_ALIGN_CL(ZXC_LZ_HASH_SIZE * sizeof(uint8_t));    /* hash_tags */
-    total += ZXC_ALIGN_CL(ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t)); /* chain_table (ring) */
-    /* sequences / tokens+offsets alias the same region (see zxc_cctx_init). */
-    total += ZXC_ALIGN_CL(max_seq * sizeof(uint32_t)); /* seq_union */
-    total += ZXC_ALIGN_CL(max_seq * 2 * vbyte_len);    /* buf_extras */
-    total += ZXC_ALIGN_CL(chunk_size + ZXC_PAD_SIZE);  /* literals */
-
-    /* The opaque wrapper struct allocated by zxc_create_cctx() adds a tiny
-     * fixed overhead (< 128 B) that is negligible next to the per-chunk
-     * buffers above and is intentionally omitted. */
-
-    if (level >= ZXC_LEVEL_DENSITY) {
-        const size_t n_bm_words = ZXC_BITMAP_WORDS(chunk_size + 1);
-        size_t opt = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* dp             */
-        opt += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));       /* parent_len     */
-        opt += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));       /* parent_off     */
-        opt += ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));             /* match_end_bits */
-        /* opt_scratch is sized to hold both the DP arrays and (transiently)
-         * the package-merge scratch for the Huffman code-length builder;
-         * report the larger of the two. */
-        const size_t huf = ZXC_ALIGN_CL(ZXC_HUF_BUILD_SCRATCH_SIZE);
-        total += (opt > huf) ? opt : huf;
-    }
-
-    return total;
+    return (uint64_t)zxc_cctx_compute_workspace_size(chunk_size, 1, level);
 }
 
 /*
