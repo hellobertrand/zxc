@@ -6,6 +6,7 @@ This document provides complete, working examples for using the ZXC compression 
 - [Buffer API (In-Memory)](#buffer-api-in-memory)
 - [Stream API (Multi-Threaded)](#stream-api-multi-threaded)
 - [Reusable Context API](#reusable-context-api)
+- [Seekable Reader (Custom Storage Backend)](#seekable-reader-custom-storage-backend)
 - [Language Bindings](#language-bindings)
 
 ---
@@ -108,9 +109,13 @@ gcc -o buffer_example buffer_example.c -I include -L build -lzxc_lib
 ## Stream API (Multi-Threaded)
 
 For large files, use the streaming API to process data in parallel chunks.
+The `FILE*`-based entry points live in `zxc_stream.h`, which the freestanding
+`<zxc.h>` umbrella does *not* pull (so kernel/embedded builds stay clean of
+`<stdio.h>`). Userspace consumers include it explicitly.
 
 ```c
 #include "zxc.h"
+#include "zxc_stream.h"   // FILE*-based streaming, opt-in
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -295,6 +300,127 @@ int main(void) {
 ```bash
 gcc -o ctx_example ctx_example.c -I include -L build -lzxc_lib
 ```
+
+---
+
+## Seekable Reader (Custom Storage Backend)
+
+The seekable API also accepts a user-supplied **reader callback**, letting you
+back random-access decompression with any storage that supports positional
+reads: `mmap`, an HTTP range-request client, an S3 object, a custom VFS,
+`vfs_read()` in kernel space, etc.
+
+The reader exposes a single primitive:
+
+```c
+typedef struct {
+    int64_t (*read_at)(void* ctx, void* dst, size_t len, uint64_t offset);
+    void*    ctx;
+    uint64_t size;   // total size of the compressed archive
+} zxc_reader_t;
+```
+
+`read_at` MUST be safe to call concurrently from multiple threads if you intend
+to use `zxc_seekable_decompress_range_mt()`. The single-threaded path makes no
+concurrent calls.
+
+The example below wires the reader to an `mmap()`'d archive file, then
+decompresses an arbitrary byte range — no `FILE*` is involved.
+
+```c
+#include "zxc.h"
+#include "zxc_seekable.h"
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+typedef struct {
+    const uint8_t* base;   // mmap'd start of the archive
+    uint64_t       size;
+} mmap_reader_ctx_t;
+
+// read_at: just memcpy from the mapping. Naturally thread-safe.
+static int64_t mmap_read_at(void* ctx, void* dst, size_t len, uint64_t offset) {
+    mmap_reader_ctx_t* m = (mmap_reader_ctx_t*)ctx;
+    if (offset > m->size || len > m->size - offset) return -1;  // bounds check
+    memcpy(dst, m->base + offset, len);
+    return (int64_t)len;
+}
+
+int main(int argc, char** argv) {
+    if (argc != 4) {
+        fprintf(stderr, "Usage: %s <archive.zxc> <offset> <length>\n", argv[0]);
+        return 1;
+    }
+
+    // Open and mmap the seekable archive.
+    int fd = open(argv[1], O_RDONLY);
+    if (fd < 0) { perror("open"); return 1; }
+
+    struct stat st;
+    if (fstat(fd, &st) != 0) { perror("fstat"); close(fd); return 1; }
+
+    void* mapping = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (mapping == MAP_FAILED) { perror("mmap"); close(fd); return 1; }
+
+    // Wire the reader callback to the mmap'd region.
+    mmap_reader_ctx_t mctx = { .base = (const uint8_t*)mapping,
+                               .size = (uint64_t)st.st_size };
+    zxc_reader_t reader = { .read_at = mmap_read_at,
+                            .ctx     = &mctx,
+                            .size    = (uint64_t)st.st_size };
+
+    zxc_seekable* s = zxc_seekable_open_reader(&reader);
+    if (!s) {
+        fprintf(stderr, "Not a valid seekable ZXC archive\n");
+        munmap(mapping, (size_t)st.st_size);
+        close(fd);
+        return 1;
+    }
+
+    fprintf(stderr, "Archive: %u blocks, %llu bytes decompressed.\n",
+            zxc_seekable_get_num_blocks(s),
+            (unsigned long long)zxc_seekable_get_decompressed_size(s));
+
+    // Decompress a user-requested byte range.
+    const uint64_t offset = strtoull(argv[2], NULL, 0);
+    const size_t   length = (size_t)strtoull(argv[3], NULL, 0);
+    uint8_t* out = malloc(length);
+    if (!out) { zxc_seekable_free(s); munmap(mapping, st.st_size); close(fd); return 1; }
+
+    // The MT path is safe here because mmap_read_at is reentrant.
+    int64_t n = zxc_seekable_decompress_range_mt(s, out, length, offset, length, 0);
+    if (n < 0) {
+        fprintf(stderr, "decompress_range failed: %lld\n", (long long)n);
+        free(out); zxc_seekable_free(s); munmap(mapping, st.st_size); close(fd);
+        return 1;
+    }
+
+    fwrite(out, 1, (size_t)n, stdout);
+
+    free(out);
+    zxc_seekable_free(s);
+    munmap(mapping, (size_t)st.st_size);
+    close(fd);
+    return 0;
+}
+```
+
+**Compilation:**
+```bash
+gcc -o seekable_reader seekable_reader.c -I include -L build -lzxc -lpthread
+```
+
+**Other backends.** The same pattern applies to anything addressable by
+offset: an HTTP `Range:` GET (return `-1` on a non-`206` response), an S3
+`GetObject` with `--range`, a kernel `vfs_read(file, ..., &pos)`, a custom VFS
+plug-in. As long as `read_at` returns exactly the requested length (or a
+negative `zxc_error_t` code), the seekable API treats it as a transparent
+backend.
 
 ---
 

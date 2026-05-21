@@ -528,6 +528,28 @@ pub struct zxc_seekable {
     _private: [u8; 0],
 }
 
+/// Storage-agnostic reader interface for seekable archives (mirrors
+/// `zxc_reader_t` from `zxc_seekable.h`).
+///
+/// `read_at` is the only primitive the library calls on the backend. It must
+/// return the number of bytes read (`== len` on success) or a negative
+/// `zxc_error_t` on failure. Short reads are treated as errors by the library.
+///
+/// `read_at` MUST be safe to call concurrently from multiple threads when the
+/// resulting handle is used with [`zxc_seekable_decompress_range_mt`]. The
+/// single-threaded path makes no concurrent calls.
+#[repr(C)]
+pub struct zxc_reader_t {
+    /// Positional read callback. NULL is rejected at open time.
+    pub read_at: Option<
+        unsafe extern "C" fn(ctx: *mut c_void, dst: *mut c_void, len: usize, offset: u64) -> i64,
+    >,
+    /// Opaque user context passed unchanged to `read_at`.
+    pub ctx: *mut c_void,
+    /// Total size of the compressed archive in bytes.
+    pub size: u64,
+}
+
 unsafe extern "C" {
     /// Opens a seekable archive from a memory buffer.
     ///
@@ -546,6 +568,22 @@ unsafe extern "C" {
     /// # Safety
     /// - `f` must be a valid FILE* opened in "rb" mode.
     pub fn zxc_seekable_open_file(f: *mut libc::FILE) -> *mut zxc_seekable;
+
+    /// Opens a seekable archive through a user-supplied [`zxc_reader_t`].
+    ///
+    /// The reader is invoked to fetch the file header, footer, and seek table
+    /// at open time (3 reads), then once per block during decompression.
+    /// Use this entry point to back the seekable API with any storage that
+    /// supports positional reads (mmap, HTTP `Range:`, S3, kernel
+    /// `vfs_read()`, etc.).
+    ///
+    /// # Safety
+    /// - `r` must point to a valid [`zxc_reader_t`] whose `read_at`,
+    ///   `ctx`, and backing storage remain valid for the lifetime of the
+    ///   returned handle.
+    ///
+    /// Returns NULL on any open-time error.
+    pub fn zxc_seekable_open_reader(r: *const zxc_reader_t) -> *mut zxc_seekable;
 
     /// Returns the total number of data blocks in the archive (excluding EOF).
     pub fn zxc_seekable_get_num_blocks(s: *const zxc_seekable) -> u32;

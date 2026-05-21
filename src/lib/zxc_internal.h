@@ -26,13 +26,13 @@
 #ifndef ZXC_INTERNAL_H
 #define ZXC_INTERNAL_H
 
-#include <limits.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
+#include "zxc_deps.h" /* libc deps: <limits.h>, <stdint.h>, <stdlib.h>, <string.h>,
+                        and the ZXC_MALLOC / ZXC_ALIGNED_MALLOC / ZXC_QSORT macros.
+                        Vendor this file to retarget non-libc environments. */
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
+#include "../../include/zxc_seekable.h"
 #include "rapidhash.h"
 
 #ifdef __cplusplus
@@ -229,59 +229,9 @@ extern "C" {
 #endif
 /** @} */ /* end of Compiler Abstractions */
 
-/**
- * @name Heap Allocator Abstraction
- * @brief Macros around the libc allocators so non-libc targets (Linux kernel,
- * embedded freestanding builds, custom arenas) can override them via `-D`
- * flags **before** including any zxc header.
- *
- * Example kernel-side override:
- * @code
- * -DZXC_MALLOC(n)=kmalloc(n, GFP_KERNEL)
- * -DZXC_CALLOC(n, s)=kcalloc(n, s, GFP_KERNEL)
- * -DZXC_REALLOC(p, n)=krealloc(p, n, GFP_KERNEL)
- * -DZXC_FREE(p)=kfree(p)
- * @endcode
- *
- * @note Aligned allocations still go through @ref zxc_aligned_malloc /
- * @ref zxc_aligned_free, which are platform-specific and not covered here.
- * @{
- */
-#ifndef ZXC_MALLOC
-#define ZXC_MALLOC(size) malloc(size)
-#endif
-#ifndef ZXC_CALLOC
-#define ZXC_CALLOC(nmemb, size) calloc(nmemb, size)
-#endif
-#ifndef ZXC_REALLOC
-#define ZXC_REALLOC(ptr, size) realloc(ptr, size)
-#endif
-#ifndef ZXC_FREE
-#define ZXC_FREE(ptr) free(ptr)
-#endif
-#ifndef ZXC_QSORT
-#define ZXC_QSORT(base, nmemb, size, cmp) qsort(base, nmemb, size, cmp)
-#endif
-/** @} */
-
-/**
- * @name Aligned Allocator Abstraction
- * @brief Macros around the cache-line-aligned allocator used for compression
- * workspace and per-context scratch buffers.
- *
- * The default expansion calls the internal helpers @ref zxc_aligned_malloc /
- * @ref zxc_aligned_free, which wrap `_aligned_malloc`/`_aligned_free` on
- * Windows and `posix_memalign`/`free` on POSIX.
- *
- * @{
- */
-#ifndef ZXC_ALIGNED_MALLOC
-#define ZXC_ALIGNED_MALLOC(size, alignment) zxc_aligned_malloc(size, alignment)
-#endif
-#ifndef ZXC_ALIGNED_FREE
-#define ZXC_ALIGNED_FREE(ptr) zxc_aligned_free(ptr)
-#endif
-/** @} */
+/* Heap allocator and cache-line-aligned allocator macros are now defined
+ * in @c zxc_deps.h (included at the top of this header), so non-libc
+ * targets can override them by vendoring that single file. */
 
 /**
  * @name Endianness Detection
@@ -1774,6 +1724,26 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
  */
 int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
                           const uint32_t global_hash, const int checksum_enabled);
+
+/* ---------------------------------------------------------------------------
+ * Seekable cross-TU hooks (defined in zxc_seekable.c, consumed by the
+ * FILE*-flavored open helper in zxc_driver.c).
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @brief Hands ownership of a heap-allocated reader context to a seekable
+ *        handle.  The context will be released via @c ZXC_FREE when
+ *        @ref zxc_seekable_free is called on @p s.
+ *
+ * Safe to call exactly once per handle.  Intended for thin wrappers that
+ * build a @ref zxc_reader_t over their own allocated state
+ * (@ref zxc_seekable_open_file) and need that state to outlive the call
+ * site.
+ *
+ * @param[in,out] s    Seekable handle returned by @ref zxc_seekable_open_reader.
+ * @param[in]     ctx  Pointer previously returned by @c ZXC_MALLOC / @c ZXC_CALLOC.
+ */
+void zxc_seekable_attach_owned_ctx(zxc_seekable* s, void* ctx);
 
 /** @} */ /* end of internal */
 

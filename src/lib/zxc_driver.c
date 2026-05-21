@@ -7,12 +7,24 @@
 
 /**
  * @file zxc_driver.c
- * @brief Multi-threaded streaming compression / decompression engine.
+ * @brief Userspace @c FILE*-flavored driver: multi-threaded streaming and
+ *        the seekable @c FILE* open helper.
  *
- * Implements a ring-buffer producer-worker-consumer architecture that
- * parallelises block processing over @c FILE* streams.  Also provides
- * the public @ref zxc_stream_compress, @ref zxc_stream_decompress, and
- * extended variants with progress callbacks.
+ * Two distinct subsystems live in this translation unit because they share
+ * the same userspace-only host requirements (@c <stdio.h>, threading, and
+ * platform file-descriptor extraction): keeping them together means a
+ * single TU to exclude when building for kernel / freestanding targets.
+ *
+ *   1. Streaming engine: a ring-buffer producer / worker / consumer
+ *      pipeline that parallelises block processing over @c FILE* streams.
+ *      Public API: @ref zxc_stream_compress, @ref zxc_stream_decompress,
+ *      @ref zxc_stream_get_decompressed_size.
+ *
+ *   2. Seekable @c FILE* wrapper: builds a @ref zxc_reader_t whose
+ *      @c read_at uses @c pread / @c ReadFile on the file descriptor
+ *      extracted from a @c FILE*, then delegates to
+ *      @ref zxc_seekable_open_reader.  Public API:
+ *      @ref zxc_seekable_open_file.
  */
 
 #include <stddef.h>
@@ -34,6 +46,7 @@
  * Linux/macOS and Windows.
  */
 #if defined(_WIN32)
+#include <io.h> /* _get_osfhandle, _fileno (used by zxc_seekable_open_file) */
 #include <malloc.h>
 #include <process.h>
 #include <sys/types.h>
@@ -985,4 +998,84 @@ int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
     fseeko(f_in, saved_pos, SEEK_SET);
 
     return (int64_t)zxc_le64(footer);
+}
+
+/*
+ * ============================================================================
+ * SEEKABLE FILE* WRAPPER
+ * ============================================================================
+ * Adapts a FILE* into a thread-safe zxc_reader_t (pread on POSIX, ReadFile +
+ * OVERLAPPED on Windows) and delegates to zxc_seekable_open_reader.  Keeping
+ * this entry point alongside the stream driver, rather than in the kernel-
+ * safe zxc_seekable.c, means zxc_seekable.c stays freestanding.
+ */
+
+#if defined(_WIN32)
+typedef struct {
+    HANDLE handle;
+    uint64_t size;
+} zxc_stdio_ctx_t;
+
+// LCOV_EXCL_START - Windows I/O path, not reachable on POSIX CI
+static int64_t zxc_stdio_read_at(void* vctx, void* dst, size_t len, uint64_t offset) {
+    zxc_stdio_ctx_t* const ctx = (zxc_stdio_ctx_t*)vctx;
+    OVERLAPPED ov;
+    ZXC_MEMSET(&ov, 0, sizeof(ov));
+    ov.Offset = (DWORD)(offset & 0xFFFFFFFFu);
+    ov.OffsetHigh = (DWORD)(offset >> 32);
+    DWORD bytes_read = 0;
+    if (!ReadFile(ctx->handle, dst, (DWORD)len, &bytes_read, &ov)) return ZXC_ERROR_IO;
+    return (bytes_read == (DWORD)len) ? (int64_t)len : ZXC_ERROR_IO;
+}
+// LCOV_EXCL_STOP
+
+#else  /* POSIX */
+typedef struct {
+    int fd;
+    uint64_t size;
+} zxc_stdio_ctx_t;
+
+static int64_t zxc_stdio_read_at(void* vctx, void* dst, size_t len, uint64_t offset) {
+    zxc_stdio_ctx_t* const ctx = (zxc_stdio_ctx_t*)vctx;
+    const ssize_t r = pread(ctx->fd, dst, len, (off_t)offset);
+    return (r == (ssize_t)len) ? (int64_t)len : ZXC_ERROR_IO;
+}
+#endif /* _WIN32 */
+
+zxc_seekable* zxc_seekable_open_file(FILE* f) {
+    if (UNLIKELY(!f)) return NULL;
+
+    /* Snapshot the caller's file position so we can restore it. */
+    const long long saved_pos = ftello(f);
+    if (UNLIKELY(saved_pos < 0)) return NULL;  // LCOV_EXCL_LINE
+
+    // LCOV_EXCL_START - ftello/fseeko failure paths not reachable in CI
+    if (UNLIKELY(fseeko(f, 0, SEEK_END) != 0)) return NULL;
+    const long long file_size = ftello(f);
+    (void)fseeko(f, saved_pos, SEEK_SET);
+    if (UNLIKELY(file_size <= 0)) return NULL;
+    // LCOV_EXCL_STOP
+
+    zxc_stdio_ctx_t* const ctx = (zxc_stdio_ctx_t*)ZXC_MALLOC(sizeof(*ctx));
+    if (UNLIKELY(!ctx)) return NULL;  // LCOV_EXCL_LINE
+
+#if defined(_WIN32)
+    ctx->handle = (HANDLE)(intptr_t)_get_osfhandle(_fileno(f));  // LCOV_EXCL_LINE
+#else
+    ctx->fd = fileno(f);
+#endif
+    ctx->size = (uint64_t)file_size;
+
+    const zxc_reader_t reader = {
+        .read_at = zxc_stdio_read_at, .ctx = ctx, .size = (uint64_t)file_size};
+
+    zxc_seekable* const s = zxc_seekable_open_reader(&reader);
+    if (UNLIKELY(!s)) {
+        ZXC_FREE(ctx);
+        return NULL;
+    }
+
+    /* Hand the ctx lifetime over to the seekable handle. */
+    zxc_seekable_attach_owned_ctx(s, ctx);
+    return s;
 }

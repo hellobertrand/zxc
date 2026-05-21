@@ -143,6 +143,8 @@ int test_seekable_single_block(void);
 int test_seekable_all_levels(void);
 int test_seekable_many_blocks(void);
 int test_seekable_open_file(void);
+int test_seekable_open_reader(void);
+int test_seekable_open_reader_mt(void);
 int test_seekable_cross_boundary(void);
 int test_seekable_truncated_input(void);
 int test_seekable_corrupted_sek(void);
@@ -151,6 +153,7 @@ int test_seekable_dst_too_small(void);
 int test_seekable_empty_file(void);
 int test_seekable_no_checksum(void);
 int test_seekable_with_checksum(void);
+int test_seekable_work_buf_tail_pad(void);
 
 /* Seekable (multi-threaded) */
 int test_seekable_mt_roundtrip(void);

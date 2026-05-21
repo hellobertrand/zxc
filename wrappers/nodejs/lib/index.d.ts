@@ -191,18 +191,46 @@ export function createDecompressStream(options?: DecompressStreamOptions): Decom
 // ---------- Seekable random-access decompression ----------
 
 /**
+ * Storage-agnostic reader interface for {@link Seekable.constructor}.
+ *
+ * Supply this when the archive is too large to fit in a Buffer, or when
+ * it lives behind a custom backend (file descriptor, HTTP range, S3, etc.).
+ * `readAt` is invoked synchronously on the calling thread; do not perform
+ * async I/O here. Use `fs.readSync(fd, buf, 0, buf.length, offset)` or
+ * similar.
+ */
+export interface SeekableReader {
+    /** Total size of the compressed archive in bytes. */
+    size: number;
+    /**
+     * Fill `buf` with `buf.length` bytes starting at `offset` in the
+     * archive. Throwing causes the surrounding Seekable operation to
+     * fail with an I/O error.
+     */
+    readAt(buf: Buffer, offset: number): void;
+}
+
+/**
  * Handle on a seekable ZXC archive.
  *
- * Pass a compressed Buffer that carries an embedded seek table (produced
- * by `compress(..., { seekable: true })`). The Buffer is copied into the
- * addon's heap; call `close()` to release both the native handle and the
- * internal copy.
+ * Two source modes:
+ * - **Buffer**: pass a compressed Buffer carrying an embedded seek table
+ *   (produced by `compress(..., { seekable: true })`). The Buffer is
+ *   copied into the addon's heap.
+ * - **Reader callback**: pass a {@link SeekableReader} to back the archive
+ *   with any storage that supports positional reads (file descriptor,
+ *   HTTP range, S3, custom VFS). `readAt` runs synchronously on the
+ *   calling thread; this binding does not support multi-threaded
+ *   decompression when a reader callback is used.
+ *
+ * Call `close()` to release native resources.
  *
  * A Seekable handle is single-threaded - do not share it across worker
  * threads.
  */
 export class Seekable {
     constructor(compressed: Buffer);
+    constructor(reader: SeekableReader);
     /** Total number of data blocks (excluding the EOF marker block). */
     numBlocks(): number;
     /** Total decompressed size of the archive in bytes. */

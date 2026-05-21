@@ -51,6 +51,10 @@ pub struct Seekable {
     /// When opened via `from_bytes`, we own the source buffer for the
     /// lifetime of the handle.
     _buf: Option<Vec<u8>>,
+    /// When opened via `open_reader`, we own a heap-allocated
+    /// `Box<dyn ReadAt>` whose address is passed as the C `ctx`. Must be
+    /// freed after the C handle is released.
+    reader_ctx: Option<*mut Box<dyn ReadAt>>,
 }
 
 // SAFETY: the underlying handle is opaque and the library guarantees
@@ -72,6 +76,7 @@ impl Seekable {
             inner,
             file: None,
             _buf: Some(data),
+            reader_ctx: None,
         })
     }
 
@@ -100,6 +105,60 @@ impl Seekable {
             inner,
             file: Some(f),
             _buf: None,
+            reader_ctx: None,
+        })
+    }
+
+    /// Opens a seekable archive backed by a user-supplied [`ReadAt`]
+    /// implementation.
+    ///
+    /// Use this to plug any storage that supports positional reads behind
+    /// the seekable API: an mmap'd region, an HTTP `Range:` client, an S3
+    /// object, a custom VFS. The reader is moved into the handle and freed
+    /// when the handle is dropped.
+    ///
+    /// `read_at` is invoked exactly three times during this call (file
+    /// header, footer, seek table), then once per block during subsequent
+    /// [`Seekable::decompress_range`] calls.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidData`] if the archive is not a valid
+    /// seekable ZXC archive, or if any of the open-time reads fail.
+    pub fn open_reader<R: ReadAt + 'static>(reader: R) -> Result<Self> {
+        // Heap-allocate the trait object so its address is stable across
+        // the FFI boundary. The outer Box gives us a thin pointer to pass
+        // as the C `ctx`.
+        let boxed: Box<dyn ReadAt> = Box::new(reader);
+        let outer: Box<Box<dyn ReadAt>> = Box::new(boxed);
+        let size = outer.size();
+        let ctx_raw = Box::into_raw(outer);
+
+        let c_reader = zxc_sys::zxc_reader_t {
+            read_at: Some(reader_trampoline),
+            ctx: ctx_raw as *mut c_void,
+            size,
+        };
+
+        // SAFETY: `c_reader` is a valid stack-allocated struct; the C library
+        // copies its contents at open time.
+        let ptr = unsafe { zxc_sys::zxc_seekable_open_reader(&c_reader) };
+        let inner = match NonNull::new(ptr) {
+            Some(p) => p,
+            None => {
+                // SAFETY: ctx_raw was just produced by Box::into_raw above
+                // and has not been freed. Reclaim ownership to drop it.
+                unsafe {
+                    drop(Box::from_raw(ctx_raw));
+                }
+                return Err(Error::InvalidData);
+            }
+        };
+        Ok(Self {
+            inner,
+            file: None,
+            _buf: None,
+            reader_ctx: Some(ctx_raw),
         })
     }
 
@@ -170,14 +229,80 @@ impl Seekable {
 
 impl Drop for Seekable {
     fn drop(&mut self) {
-        // SAFETY: inner was created by zxc_seekable_open / _open_file
-        // and has not been freed yet.
+        // SAFETY: inner was created by zxc_seekable_open / _open_file /
+        // _open_reader and has not been freed yet. Free the C handle
+        // first so no in-flight `read_at` calls reference our reader_ctx.
         unsafe { zxc_sys::zxc_seekable_free(self.inner.as_ptr()) };
         if let Some(f) = self.file.take() {
             // SAFETY: f was returned by libc::fopen above.
             unsafe { libc::fclose(f) };
         }
+        if let Some(ctx) = self.reader_ctx.take() {
+            // SAFETY: ctx was produced by Box::into_raw in open_reader
+            // and has not been freed. The C handle was just freed above,
+            // so no further read_at calls are possible.
+            unsafe {
+                drop(Box::from_raw(ctx));
+            }
+        }
     }
+}
+
+/// Storage-agnostic positional reader for [`Seekable::open_reader`].
+///
+/// Implement this trait on any type that can serve byte ranges of a ZXC
+/// archive: an mmap'd region, an HTTP range-request client, an S3 object, a
+/// custom VFS, or any kernel-space file descriptor.
+///
+/// # Contract
+///
+/// - [`ReadAt::size`] returns the total size of the archive in bytes and
+///   should be constant for the lifetime of the reader.
+/// - [`ReadAt::read_at`] must fill `dst` completely from the requested
+///   `offset`. Short reads are reported as errors by the library.
+///
+/// # Thread safety (future)
+///
+/// The current Rust crate only exposes the single-threaded
+/// [`Seekable::decompress_range`], so implementations do not need to be
+/// thread-safe. A future multi-threaded entry point will require
+/// `Send + Sync`.
+pub trait ReadAt {
+    /// Total size of the archive in bytes.
+    fn size(&self) -> u64;
+
+    /// Reads exactly `dst.len()` bytes at `offset` into `dst`.
+    ///
+    /// Returning `Err` (or panicking) causes the surrounding ZXC operation
+    /// to fail with an I/O error.
+    fn read_at(&self, dst: &mut [u8], offset: u64) -> std::io::Result<()>;
+}
+
+/// Trampoline invoked by the C library on every read. Translates the
+/// C-level `(ctx, dst, len, offset)` call into a Rust [`ReadAt::read_at`]
+/// invocation. Panics across the FFI boundary are caught and surfaced as
+/// `ZXC_ERROR_IO`.
+unsafe extern "C" fn reader_trampoline(
+    ctx: *mut c_void,
+    dst: *mut c_void,
+    len: usize,
+    offset: u64,
+) -> i64 {
+    let result = std::panic::catch_unwind(|| {
+        // SAFETY: ctx is the `Box<Box<dyn ReadAt>>` raw pointer we stored
+        // in `Seekable::reader_ctx`. It remains valid for the lifetime of
+        // the seekable handle, and `read_at` is only called between
+        // `open_reader` and `Drop`.
+        let reader: &Box<dyn ReadAt> = unsafe { &*(ctx as *const Box<dyn ReadAt>) };
+        // SAFETY: the C library guarantees `dst` points to `len` writable
+        // bytes for the duration of the call.
+        let buf = unsafe { std::slice::from_raw_parts_mut(dst as *mut u8, len) };
+        match reader.read_at(buf, offset) {
+            Ok(()) => len as i64,
+            Err(_) => zxc_sys::ZXC_ERROR_IO as i64,
+        }
+    });
+    result.unwrap_or(zxc_sys::ZXC_ERROR_IO as i64)
 }
 
 /// Encoded byte size of a seek table covering `num_blocks` data blocks.
@@ -283,6 +408,79 @@ mod tests {
     fn invalid_buffer_fails() {
         let garbage = vec![0u8; 32];
         assert!(Seekable::from_bytes(garbage).is_err());
+    }
+
+    /// In-memory `ReadAt` impl backed by a Vec. The cell counts invocations
+    /// so the test can assert lazy I/O at open and per-block reads.
+    struct VecReader {
+        data: Vec<u8>,
+        calls: std::cell::Cell<u32>,
+    }
+
+    impl VecReader {
+        fn new(data: Vec<u8>) -> Self {
+            Self {
+                data,
+                calls: std::cell::Cell::new(0),
+            }
+        }
+    }
+
+    impl ReadAt for VecReader {
+        fn size(&self) -> u64 {
+            self.data.len() as u64
+        }
+        fn read_at(&self, dst: &mut [u8], offset: u64) -> std::io::Result<()> {
+            self.calls.set(self.calls.get() + 1);
+            let off = offset as usize;
+            if off.checked_add(dst.len()).map_or(true, |end| end > self.data.len()) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "out of bounds",
+                ));
+            }
+            dst.copy_from_slice(&self.data[off..off + dst.len()]);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn open_reader_roundtrip() {
+        let payload: Vec<u8> = (0..64_000).map(|i| (i as u8) ^ 0x5A).collect();
+        let archive = build_archive(&payload);
+        let archive_len = archive.len();
+
+        let mut s = Seekable::open_reader(VecReader::new(archive)).expect("open_reader failed");
+        assert_eq!(s.decompressed_size(), payload.len() as u64);
+        assert!(s.num_blocks() >= 1);
+        let _ = archive_len; // silence unused
+
+        let mut out = vec![0u8; payload.len()];
+        let n = s
+            .decompress_range(&mut out, 0, payload.len())
+            .expect("decompress_range failed");
+        assert_eq!(n, payload.len());
+        assert_eq!(out, payload);
+
+        // Sub-range read.
+        let start = 1024usize;
+        let len = 8192usize;
+        let mut out = vec![0u8; len];
+        let n = s
+            .decompress_range(&mut out, start as u64, len)
+            .expect("decompress_range failed");
+        assert_eq!(n, len);
+        assert_eq!(out, payload[start..start + len]);
+    }
+
+    #[test]
+    fn open_reader_invalid_archive_releases_reader() {
+        // 64 bytes of zeros: passes the minimum-size check but parses as
+        // invalid. open_reader must fail and free our reader_ctx box
+        // (verified at runtime by miri / address sanitizer; here we just
+        // check the Err path).
+        let r = VecReader::new(vec![0u8; 64]);
+        assert!(Seekable::open_reader(r).is_err());
     }
 
     #[test]
