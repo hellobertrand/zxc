@@ -7,6 +7,21 @@
 
 #include "test_common.h"
 
+#if defined(_WIN32)
+#include <malloc.h>
+static void* test_aligned_alloc(size_t alignment, size_t size) {
+    return _aligned_malloc(size, alignment);
+}
+static void test_aligned_free(void* p) { _aligned_free(p); }
+#else
+static void* test_aligned_alloc(size_t alignment, size_t size) {
+    void* p = NULL;
+    if (posix_memalign(&p, alignment, size) != 0) return NULL;
+    return p;
+}
+static void test_aligned_free(void* p) { free(p); }
+#endif
+
 /* Helper: produce a deterministic compressible payload. */
 static void fill_payload(uint8_t* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = (uint8_t)((i * 31u) ^ (i >> 8));
@@ -44,9 +59,9 @@ int test_static_ctx_roundtrip_all_levels(void) {
             printf("  [FAIL] level %d: cctx_ws_sz == 0\n", lvl);
             goto fail;
         }
-        void* cctx_ws = NULL;
-        if (posix_memalign(&cctx_ws, 64, cctx_ws_sz) != 0) {
-            printf("  [FAIL] level %d: posix_memalign(cctx_ws)\n", lvl);
+        void* const cctx_ws = test_aligned_alloc(64, cctx_ws_sz);
+        if (!cctx_ws) {
+            printf("  [FAIL] level %d: aligned_alloc(cctx_ws)\n", lvl);
             goto fail;
         }
 
@@ -55,13 +70,13 @@ int test_static_ctx_roundtrip_all_levels(void) {
         zxc_cctx* const cctx = zxc_init_static_cctx(cctx_ws, cctx_ws_sz, &copts);
         if (!cctx) {
             printf("  [FAIL] level %d: zxc_init_static_cctx returned NULL\n", lvl);
-            free(cctx_ws);
+            test_aligned_free(cctx_ws);
             goto fail;
         }
 
         const int64_t csz = zxc_compress_cctx(cctx, src, src_sz, enc, cap, NULL);
         zxc_free_cctx(cctx); /* no-op for static */
-        free(cctx_ws);
+        test_aligned_free(cctx_ws);
         if (csz <= 0) {
             printf("  [FAIL] level %d: compress returned %lld\n", lvl, (long long)csz);
             goto fail;
@@ -73,22 +88,22 @@ int test_static_ctx_roundtrip_all_levels(void) {
             printf("  [FAIL] level %d: dctx_ws_sz == 0\n", lvl);
             goto fail;
         }
-        void* dctx_ws = NULL;
-        if (posix_memalign(&dctx_ws, 64, dctx_ws_sz) != 0) {
-            printf("  [FAIL] level %d: posix_memalign(dctx_ws)\n", lvl);
+        void* const dctx_ws = test_aligned_alloc(64, dctx_ws_sz);
+        if (!dctx_ws) {
+            printf("  [FAIL] level %d: aligned_alloc(dctx_ws)\n", lvl);
             goto fail;
         }
         zxc_dctx* const dctx = zxc_init_static_dctx(dctx_ws, dctx_ws_sz, block_size);
         if (!dctx) {
             printf("  [FAIL] level %d: zxc_init_static_dctx returned NULL\n", lvl);
-            free(dctx_ws);
+            test_aligned_free(dctx_ws);
             goto fail;
         }
 
         zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
         const int64_t dsz = zxc_decompress_dctx(dctx, enc, (size_t)csz, dec, src_sz, &dopts);
         zxc_free_dctx(dctx); /* no-op for static */
-        free(dctx_ws);
+        test_aligned_free(dctx_ws);
         if (dsz != (int64_t)src_sz || memcmp(src, dec, src_sz) != 0) {
             printf("  [FAIL] level %d: roundtrip mismatch (dsz=%lld)\n", lvl, (long long)dsz);
             goto fail;
@@ -166,27 +181,27 @@ int test_static_ctx_workspace_too_small(void) {
     const size_t block_size = 64 * 1024;
     const size_t needed = zxc_static_cctx_workspace_size(block_size, ZXC_LEVEL_DEFAULT);
     /* Provide exactly one byte less than needed. */
-    void* ws = NULL;
-    if (posix_memalign(&ws, 64, needed) != 0) {
-        printf("  [FAIL] posix_memalign\n");
+    void* const ws = test_aligned_alloc(64, needed);
+    if (!ws) {
+        printf("  [FAIL] aligned_alloc\n");
         return 0;
     }
 
     zxc_compress_opts_t opts = {.level = ZXC_LEVEL_DEFAULT, .block_size = block_size};
     if (zxc_init_static_cctx(ws, needed - 1, &opts) != NULL) {
         printf("  [FAIL] init should reject undersized workspace\n");
-        free(ws);
+        test_aligned_free(ws);
         return 0;
     }
     /* Same size: should succeed. */
     zxc_cctx* const cctx = zxc_init_static_cctx(ws, needed, &opts);
     if (!cctx) {
         printf("  [FAIL] init should accept exact-sized workspace\n");
-        free(ws);
+        test_aligned_free(ws);
         return 0;
     }
     zxc_free_cctx(cctx); /* no-op */
-    free(ws);
+    test_aligned_free(ws);
     printf("  [PASS] init rejects undersized, accepts exact-sized workspace\n");
     return 1;
 }
@@ -198,9 +213,9 @@ int test_static_ctx_block_size_locked(void) {
 
     const size_t pinned_bs = 64 * 1024;
     const size_t ws_sz = zxc_static_cctx_workspace_size(pinned_bs, ZXC_LEVEL_DEFAULT);
-    void* ws = NULL;
-    if (posix_memalign(&ws, 64, ws_sz) != 0) {
-        printf("  [FAIL] posix_memalign\n");
+    void* const ws = test_aligned_alloc(64, ws_sz);
+    if (!ws) {
+        printf("  [FAIL] aligned_alloc\n");
         return 0;
     }
 
@@ -208,7 +223,7 @@ int test_static_ctx_block_size_locked(void) {
     zxc_cctx* const cctx = zxc_init_static_cctx(ws, ws_sz, &opts);
     if (!cctx) {
         printf("  [FAIL] init_static_cctx\n");
-        free(ws);
+        test_aligned_free(ws);
         return 0;
     }
 
@@ -221,7 +236,7 @@ int test_static_ctx_block_size_locked(void) {
     if (rc != ZXC_ERROR_BAD_BLOCK_SIZE) {
         printf("  [FAIL] expected ZXC_ERROR_BAD_BLOCK_SIZE, got %lld\n", (long long)rc);
         zxc_free_cctx(cctx);
-        free(ws);
+        test_aligned_free(ws);
         return 0;
     }
 
@@ -230,12 +245,12 @@ int test_static_ctx_block_size_locked(void) {
     if (rc2 <= 0) {
         printf("  [FAIL] same-block_size compress returned %lld\n", (long long)rc2);
         zxc_free_cctx(cctx);
-        free(ws);
+        test_aligned_free(ws);
         return 0;
     }
 
     zxc_free_cctx(cctx);
-    free(ws);
+    test_aligned_free(ws);
     printf("  [PASS] mismatched block_size rejected; matching one accepted\n");
     return 1;
 }
