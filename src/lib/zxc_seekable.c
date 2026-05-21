@@ -637,18 +637,7 @@ static void* zxc_seek_mt_worker(void* arg) {
         return NULL;
     }
     // LCOV_EXCL_STOP
-
-    /* Allocate work buffer for decompressed output */
     const size_t work_sz = (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
-    dctx.work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
-    // LCOV_EXCL_START
-    if (UNLIKELY(!dctx.work_buf)) {
-        zxc_cctx_free(&dctx);
-        job->result = ZXC_ERROR_MEMORY;
-        return NULL;
-    }
-    // LCOV_EXCL_STOP
-    dctx.work_buf_cap = work_sz;
 
     /* Read compressed block */
     const uint32_t csz = s->comp_sizes[bi];
