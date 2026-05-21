@@ -511,7 +511,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     }
 
     /* Ensure work buffer is large enough */
-    const size_t work_sz = (size_t)s->block_size + ZXC_PAD_SIZE;
+    const size_t work_sz = (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
     if (s->dctx.work_buf_cap < work_sz) {
         ZXC_FREE(s->dctx.work_buf);
         s->dctx.work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
@@ -644,7 +644,7 @@ static void* zxc_seek_mt_worker(void* arg) {
     // LCOV_EXCL_STOP
 
     /* Allocate work buffer for decompressed output */
-    const size_t work_sz = (size_t)s->block_size + ZXC_PAD_SIZE;
+    const size_t work_sz = (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
     dctx.work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
     // LCOV_EXCL_START
     if (UNLIKELY(!dctx.work_buf)) {

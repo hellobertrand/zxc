@@ -1130,3 +1130,69 @@ int test_seekable_with_checksum() {
     printf("PASS\n\n");
     return 1;
 }
+
+int test_seekable_work_buf_tail_pad(void) {
+    printf("=== TEST: Seekable - full-size blocks at default block_size ===\n");
+
+    const size_t SRC_SIZE = 1536 * 1024;
+    const size_t BLK = 512 * 1024;
+
+    uint8_t* const src = (uint8_t*)malloc(SRC_SIZE);
+    if (!src) { printf("Failed: malloc src\n"); return 0; }
+    gen_lz_data(src, SRC_SIZE);
+
+    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 4096;
+    uint8_t* const dst = (uint8_t*)malloc(dst_cap);
+    uint8_t* const dec = (uint8_t*)malloc(SRC_SIZE);
+    if (!dst || !dec) {
+        printf("Failed: malloc dst/dec\n");
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    zxc_compress_opts_t opts = {.level = ZXC_LEVEL_DEFAULT,
+                                .block_size = BLK,
+                                .checksum_enabled = 1,
+                                .seekable = 1};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    if (csize <= 0) {
+        printf("Failed: compress returned %lld\n", (long long)csize);
+        free(src); free(dst); free(dec); return 0;
+    }
+
+    zxc_seekable* const s = zxc_seekable_open(dst, (size_t)csize);
+    if (!s) {
+        printf("Failed: zxc_seekable_open returned NULL\n");
+        free(src); free(dst); free(dec); return 0;
+    }
+    if (zxc_seekable_get_num_blocks(s) < 2) {
+        printf("Failed: need >= 2 full blocks, got %u\n", zxc_seekable_get_num_blocks(s));
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    const int64_t r = zxc_seekable_decompress_range(s, dec, SRC_SIZE, 0, SRC_SIZE);
+    if (r != (int64_t)SRC_SIZE || memcmp(src, dec, SRC_SIZE) != 0) {
+        printf("Failed: full-range decompress returned %lld (expected %zu)\n",
+               (long long)r, SRC_SIZE);
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    const uint64_t mid_off = 200 * 1024;
+    const size_t mid_len = 100 * 1024;
+    uint8_t* const mid = (uint8_t*)malloc(mid_len);
+    if (!mid) {
+        printf("Failed: malloc mid\n");
+        zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+    const int64_t r2 = zxc_seekable_decompress_range(s, mid, mid_len, mid_off, mid_len);
+    if (r2 != (int64_t)mid_len || memcmp(src + mid_off, mid, mid_len) != 0) {
+        printf("Failed: mid-block decompress returned %lld (expected %zu)\n",
+               (long long)r2, mid_len);
+        free(mid); zxc_seekable_free(s); free(src); free(dst); free(dec); return 0;
+    }
+
+    free(mid);
+    zxc_seekable_free(s);
+    free(src); free(dst); free(dec);
+    printf("PASS\n\n");
+    return 1;
+}

@@ -642,9 +642,8 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
     ip += ZXC_FILE_HEADER_SIZE;
 
-    // GLO/GHI wild copies (zxc_copy32) overshoot by up to ZXC_PAD_SIZE bytes.
     // Decode into a padded scratch buffer, then memcpy the exact result out.
-    const size_t work_sz = runtime_chunk_size + ZXC_PAD_SIZE;
+    const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
     if (ctx.work_buf_cap < work_sz) {
         ZXC_FREE(ctx.work_buf);
         ctx.work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
@@ -961,7 +960,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     ip += ZXC_FILE_HEADER_SIZE;
 
     /* Ensure scratch buffer is large enough. */
-    const size_t work_sz = runtime_chunk_size + ZXC_PAD_SIZE;
+    const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
     if (UNLIKELY(ctx->work_buf_cap < work_sz)) {
         ZXC_FREE(ctx->work_buf);
         ctx->work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
@@ -1097,7 +1096,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
     zxc_cctx_t* const ctx = &dctx->inner;
 
     /* Ensure scratch buffer for safe-path wild copies. */
-    const size_t work_sz = block_size + ZXC_PAD_SIZE;
+    const size_t work_sz = block_size + ZXC_DECOMPRESS_TAIL_PAD;
     if (ctx->work_buf_cap < work_sz) {
         ZXC_FREE(ctx->work_buf);
         ctx->work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
