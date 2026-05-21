@@ -684,7 +684,7 @@ endif()
 find_package(Doxygen)
 if(DOXYGEN_FOUND)
     # Generate the Doxyfile with the current project version
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
     
     # Add a 'doc' target to generate documentation (e.g. 'make doc' or 'cmake --build . --target doc')
     add_custom_target(doc
