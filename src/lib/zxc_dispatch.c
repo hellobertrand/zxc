@@ -642,10 +642,10 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
     ip += ZXC_FILE_HEADER_SIZE;
 
-    // work_buf is sized to runtime_chunk_size + ZXC_PAD_SIZE inside
-    // zxc_cctx_init (mode == 0): GLO/GHI wild copies overshoot by up to
-    // ZXC_PAD_SIZE and land in this padded scratch.
-    const size_t work_sz = runtime_chunk_size + ZXC_PAD_SIZE;
+    // work_buf is sized to runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD
+    // inside zxc_cctx_init (mode == 0).  The threshold below must match so
+    // the fast-path / bounce decision uses the actual work_buf capacity.
+    const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
 
     // Block decompression loop
     uint32_t global_hash = 0;
@@ -973,10 +973,10 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     zxc_cctx_t* const ctx = &dctx->inner;
     ip += ZXC_FILE_HEADER_SIZE;
 
-    /* work_buf was pre-sized to runtime_chunk_size + ZXC_PAD_SIZE inside the
-     * matching zxc_cctx_init call above; the re-init guard ensures it stays
-     * in sync when chunk_size changes between calls. */
-    const size_t work_sz = runtime_chunk_size + ZXC_PAD_SIZE;
+    /* work_buf was pre-sized to runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD
+     * inside the matching zxc_cctx_init call above; the re-init guard ensures
+     * it stays in sync when chunk_size changes between calls. */
+    const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
 
     while (ip < ip_end) {
         const size_t rem_src = (size_t)(ip_end - ip);
@@ -1105,9 +1105,9 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 
     zxc_cctx_t* const ctx = &dctx->inner;
 
-    /* work_buf was pre-sized to block_size + ZXC_PAD_SIZE inside the
-     * matching zxc_cctx_init call above. */
-    const size_t work_sz = block_size + ZXC_PAD_SIZE;
+    /* work_buf was pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD inside
+     * the matching zxc_cctx_init call above. */
+    const size_t work_sz = block_size + ZXC_DECOMPRESS_TAIL_PAD;
 
     int res;
     if (LIKELY(dst_capacity >= work_sz)) {

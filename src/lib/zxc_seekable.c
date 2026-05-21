@@ -510,9 +510,9 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         s->dctx_initialized = 1;
     }
 
-    /* work_buf is pre-sized to block_size + ZXC_PAD_SIZE by the matching
-     * zxc_cctx_init above. */
-    const size_t work_sz = (size_t)s->block_size + ZXC_PAD_SIZE;
+    /* work_buf is pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD by the
+     * matching zxc_cctx_init above. */
+    const size_t work_sz = (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
 
     /* Find block range - O(1) division */
     const uint32_t blk_start = zxc_seek_find_block(s->block_size, offset);

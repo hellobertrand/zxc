@@ -87,10 +87,10 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
 
     if (mode == 0) {
         /* Decompress: work_buf + lit_buffer, both padded for wild-copy
-         * overshoot and sized worst-case (chunk_size + PAD).  lit_buffer is
-         * provisioned regardless of level because the decoder cannot
+         * overshoot and sized worst-case (chunk_size + ZXC_DECOMPRESS_TAIL_PAD).
+         * lit_buffer is provisioned regardless of level because the decoder cannot
          * predict the per-block literal encoding (RAW / RLE / HUFFMAN). */
-        const size_t sz_work = chunk_size + ZXC_PAD_SIZE;
+        const size_t sz_work = chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
         const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
         layout.off_work = layout.total;
@@ -178,7 +178,7 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
 
     if (mode == 0) {
         ctx->work_buf = mem + layout.off_work;
-        ctx->work_buf_cap = chunk_size + ZXC_PAD_SIZE;
+        ctx->work_buf_cap = chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
         ctx->lit_buffer = mem + layout.off_lit_dctx;
         ctx->lit_buffer_cap = chunk_size + ZXC_PAD_SIZE;
         return ZXC_OK;
