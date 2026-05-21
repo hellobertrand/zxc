@@ -642,19 +642,10 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
     ip += ZXC_FILE_HEADER_SIZE;
 
-    // Decode into a padded scratch buffer, then memcpy the exact result out.
+    // work_buf is sized to runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD
+    // inside zxc_cctx_init (mode == 0).  The threshold below must match so
+    // the fast-path / bounce decision uses the actual work_buf capacity.
     const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
-    if (ctx.work_buf_cap < work_sz) {
-        ZXC_FREE(ctx.work_buf);
-        ctx.work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
-        // LCOV_EXCL_START
-        if (UNLIKELY(!ctx.work_buf)) {
-            zxc_cctx_free(&ctx);
-            return ZXC_ERROR_MEMORY;
-        }
-        // LCOV_EXCL_STOP
-        ctx.work_buf_cap = work_sz;
-    }
 
     // Block decompression loop
     uint32_t global_hash = 0;
@@ -770,6 +761,9 @@ uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
 struct zxc_cctx_s {
     zxc_cctx_t inner;       /* existing internal context */
     int initialized;        /* 1 if inner has live allocations */
+    int owns_workspace;     /* 0 = library-allocated (free in zxc_free_cctx),
+                               1 = caller-supplied static workspace (no-op free,
+                               block_size pinned at init) */
     size_t last_block_size; /* block size used for last init */
     /* Sticky options (remembered from create or last compress call). */
     int stored_level;
@@ -805,6 +799,9 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
 
 void zxc_free_cctx(zxc_cctx* cctx) {
     if (UNLIKELY(!cctx)) return;
+    /* Static cctx: handle + inner buffers live inside the caller's workspace,
+     * which we do not own. Free is a no-op; the caller owns the workspace. */
+    if (cctx->owns_workspace) return;
     if (cctx->initialized) zxc_cctx_free(&cctx->inner);
     ZXC_FREE(cctx);
 }
@@ -820,11 +817,17 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : cctx->stored_block_size;
 
+    if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
+
+    /* Static cctx: block_size is locked at workspace init.  Reject any opts
+     * that would force a re-partition, since the workspace cannot grow.
+     * level / checksum_enabled may still vary per call. */
+    if (UNLIKELY(cctx->owns_workspace && block_size != cctx->last_block_size))
+        return ZXC_ERROR_BAD_BLOCK_SIZE;
+
     cctx->stored_level = level;
     cctx->stored_block_size = block_size;
     cctx->stored_checksum = checksum_enabled;
-
-    if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
     /* Re-init only when block_size changed (it drives buffer sizes). */
     if (UNLIKELY(!cctx->initialized || cctx->last_block_size != block_size)) {
@@ -903,6 +906,9 @@ struct zxc_dctx_s {
     zxc_cctx_t inner;       /* reuses the same internal context type */
     size_t last_block_size; /* block size from last header parse */
     int initialized;        /* 1 if inner has live allocations */
+    int owns_workspace;     /* 0 = library-allocated (free in zxc_free_dctx),
+                               1 = caller-supplied static workspace (no-op free,
+                               block_size pinned at init) */
 };
 
 zxc_dctx* zxc_create_dctx(void) {
@@ -912,6 +918,9 @@ zxc_dctx* zxc_create_dctx(void) {
 
 void zxc_free_dctx(zxc_dctx* dctx) {
     if (UNLIKELY(!dctx)) return;
+    /* Static dctx: handle + inner buffers live inside the caller's workspace,
+     * which we do not own. Free is a no-op; the caller owns the workspace. */
+    if (dctx->owns_workspace) return;
     if (dctx->initialized) zxc_cctx_free(&dctx->inner);
     ZXC_FREE(dctx);
 }
@@ -937,6 +946,11 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
                  ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
 
+    /* Static dctx: block_size is locked at workspace init; reject any
+     * archive whose declared block_size would require a re-partition. */
+    if (UNLIKELY(dctx->owns_workspace && runtime_chunk_size != dctx->last_block_size))
+        return ZXC_ERROR_BAD_BLOCK_SIZE;
+
     /* Re-init only when block size changed. */
     if (UNLIKELY(!dctx->initialized || dctx->last_block_size != runtime_chunk_size)) {
         if (dctx->initialized) {
@@ -959,14 +973,10 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     zxc_cctx_t* const ctx = &dctx->inner;
     ip += ZXC_FILE_HEADER_SIZE;
 
-    /* Ensure scratch buffer is large enough. */
+    /* work_buf was pre-sized to runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD
+     * inside the matching zxc_cctx_init call above; the re-init guard ensures
+     * it stays in sync when chunk_size changes between calls. */
     const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
-    if (UNLIKELY(ctx->work_buf_cap < work_sz)) {
-        ZXC_FREE(ctx->work_buf);
-        ctx->work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
-        if (UNLIKELY(!ctx->work_buf)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
-        ctx->work_buf_cap = work_sz;
-    }
 
     while (ip < ip_end) {
         const size_t rem_src = (size_t)(ip_end - ip);
@@ -1095,14 +1105,9 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 
     zxc_cctx_t* const ctx = &dctx->inner;
 
-    /* Ensure scratch buffer for safe-path wild copies. */
+    /* work_buf was pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD inside
+     * the matching zxc_cctx_init call above. */
     const size_t work_sz = block_size + ZXC_DECOMPRESS_TAIL_PAD;
-    if (ctx->work_buf_cap < work_sz) {
-        ZXC_FREE(ctx->work_buf);
-        ctx->work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
-        if (UNLIKELY(!ctx->work_buf)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
-        ctx->work_buf_cap = work_sz;
-    }
 
     int res;
     if (LIKELY(dst_capacity >= work_sz)) {
@@ -1163,4 +1168,92 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
                                                              src_size, (uint8_t*)dst, dst_capacity);
     if (UNLIKELY(res < 0)) return res;
     return (int64_t)res;
+}
+
+/*
+ * ============================================================================
+ * STATIC CONTEXT API (caller-allocated workspace)
+ * ============================================================================
+ * Places the public handle struct at the start of the workspace, then carves
+ * the persistent buffer (via zxc_cctx_init_in_workspace) in the remaining
+ * cache-line-aligned tail.  The caller owns the whole workspace; free
+ * functions become no-ops via the owns_workspace flag.
+ */
+
+/* Size occupied by the opaque handle at the start of the workspace, rounded
+ * up to a cache-line boundary so the persistent buffer (which expects 64 B
+ * alignment for the hot zones) starts aligned. */
+#define ZXC_STATIC_CCTX_HDR_SIZE ZXC_ALIGN_CL(sizeof(struct zxc_cctx_s))
+#define ZXC_STATIC_DCTX_HDR_SIZE ZXC_ALIGN_CL(sizeof(struct zxc_dctx_s))
+
+size_t zxc_static_cctx_workspace_size(const size_t block_size, const int level) {
+    if (UNLIKELY(!zxc_validate_block_size(block_size))) return 0;
+    if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_DENSITY)) return 0;
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level);
+    if (UNLIKELY(inner_sz == 0)) return 0;
+    return ZXC_STATIC_CCTX_HDR_SIZE + inner_sz;
+}
+
+zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_size,
+                               const zxc_compress_opts_t* RESTRICT opts) {
+    if (UNLIKELY(!workspace || !opts)) return NULL;
+
+    const int level = (opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
+    const size_t block_size = (opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
+    const int checksum_enabled = opts->checksum_enabled;
+
+    if (UNLIKELY(!zxc_validate_block_size(block_size))) return NULL;
+    if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_DENSITY)) return NULL;
+
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level);
+    if (UNLIKELY(inner_sz == 0)) return NULL;
+    if (UNLIKELY(workspace_size < ZXC_STATIC_CCTX_HDR_SIZE + inner_sz)) return NULL;
+
+    zxc_cctx* const cctx = (zxc_cctx*)workspace;
+    ZXC_MEMSET(cctx, 0, sizeof(*cctx));
+
+    uint8_t* const inner_ws = (uint8_t*)workspace + ZXC_STATIC_CCTX_HDR_SIZE;
+    if (UNLIKELY(zxc_cctx_init_in_workspace(&cctx->inner, inner_ws, inner_sz, block_size, 1, level,
+                                            checksum_enabled) != ZXC_OK))
+        return NULL;
+
+    cctx->owns_workspace = 1;
+    cctx->initialized = 1;
+    cctx->last_block_size = block_size;
+    cctx->stored_level = level;
+    cctx->stored_block_size = block_size;
+    cctx->stored_checksum = checksum_enabled;
+    return cctx;
+}
+
+size_t zxc_static_dctx_workspace_size(const size_t block_size) {
+    if (UNLIKELY(!zxc_validate_block_size(block_size))) return 0;
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 0, 0);
+    if (UNLIKELY(inner_sz == 0)) return 0;
+    return ZXC_STATIC_DCTX_HDR_SIZE + inner_sz;
+}
+
+zxc_dctx* zxc_init_static_dctx(void* RESTRICT workspace, const size_t workspace_size,
+                               const size_t block_size) {
+    if (UNLIKELY(!workspace)) return NULL;
+    if (UNLIKELY(!zxc_validate_block_size(block_size))) return NULL;
+
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 0, 0);
+    if (UNLIKELY(inner_sz == 0)) return NULL;
+    if (UNLIKELY(workspace_size < ZXC_STATIC_DCTX_HDR_SIZE + inner_sz)) return NULL;
+
+    zxc_dctx* const dctx = (zxc_dctx*)workspace;
+    ZXC_MEMSET(dctx, 0, sizeof(*dctx));
+
+    uint8_t* const inner_ws = (uint8_t*)workspace + ZXC_STATIC_DCTX_HDR_SIZE;
+    /* mode == 0 init: checksum_enabled is updated per-call from the file
+     * header flags, so it does not need to be locked at workspace init. */
+    if (UNLIKELY(zxc_cctx_init_in_workspace(&dctx->inner, inner_ws, inner_sz, block_size, 0, 0,
+                                            0) != ZXC_OK))
+        return NULL;
+
+    dctx->owns_workspace = 1;
+    dctx->initialized = 1;
+    dctx->last_block_size = block_size;
+    return dctx;
 }

@@ -510,14 +510,9 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         s->dctx_initialized = 1;
     }
 
-    /* Ensure work buffer is large enough */
+    /* work_buf is pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD by the
+     * matching zxc_cctx_init above. */
     const size_t work_sz = (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
-    if (s->dctx.work_buf_cap < work_sz) {
-        ZXC_FREE(s->dctx.work_buf);
-        s->dctx.work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
-        if (UNLIKELY(!s->dctx.work_buf)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
-        s->dctx.work_buf_cap = work_sz;
-    }
 
     /* Find block range - O(1) division */
     const uint32_t blk_start = zxc_seek_find_block(s->block_size, offset);
@@ -642,18 +637,7 @@ static void* zxc_seek_mt_worker(void* arg) {
         return NULL;
     }
     // LCOV_EXCL_STOP
-
-    /* Allocate work buffer for decompressed output */
     const size_t work_sz = (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
-    dctx.work_buf = (uint8_t*)ZXC_MALLOC(work_sz);
-    // LCOV_EXCL_START
-    if (UNLIKELY(!dctx.work_buf)) {
-        zxc_cctx_free(&dctx);
-        job->result = ZXC_ERROR_MEMORY;
-        return NULL;
-    }
-    // LCOV_EXCL_STOP
-    dctx.work_buf_cap = work_sz;
 
     /* Read compressed block */
     const uint32_t csz = s->comp_sizes[bi];

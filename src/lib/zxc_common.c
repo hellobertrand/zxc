@@ -57,79 +57,184 @@ void zxc_aligned_free(void* ptr) {
 }
 
 /*
- * @brief Initialises a compression context, allocating all internal buffers.
- *
- * A single cache-line-aligned allocation is carved into hash table, chain
- * table, sequence buffers, token buffers, offset buffers, extra-length
- * buffers, and a literal buffer.
- *
- * @param[out] ctx              Context to initialise (zeroed on entry).
- * @param[in]  chunk_size       Maximum uncompressed chunk size (bytes).
- * @param[in]  mode             0 = decompression (skip buffer alloc), 1 = compression.
- * @param[in]  level            Compression level (stored in ctx).
- * @param[in]  checksum_enabled Non-zero to enable checksum generation/verification.
- * @return @ref ZXC_OK on success, or @ref ZXC_ERROR_MEMORY on allocation failure.
+ * Layout of the persistent buffer carved by every cctx/dctx init: both modes
+ * (compress, decompress) compute the same offset table, used by the workspace
+ * sizer and the in-place init.
  */
-int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int mode,
-                  const int level, const int checksum_enabled) {
+typedef struct {
+    size_t total;
+    /* mode == 0 (decompress) */
+    size_t off_work;
+    size_t off_lit_dctx;
+    /* mode == 1 (compress) */
+    size_t off_hash_pos;
+    size_t off_hash_tags;
+    size_t off_chain;
+    size_t off_seq_union;
+    size_t off_extras;
+    size_t off_lit_cctx;
+    size_t off_opt; /* meaningful only when sz_opt > 0 (level >= 6). */
+    /* Sub-buffer sizes (re-used by the partitioning step + zero-init). */
+    size_t sz_hash_pos;
+    size_t sz_hash_tags;
+    size_t sz_opt;
+    size_t max_seq;
+} zxc_cctx_layout_t;
+
+static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int mode,
+                                             const int level) {
+    zxc_cctx_layout_t layout = {0};
+
+    if (mode == 0) {
+        /* Decompress: work_buf + lit_buffer, both padded for wild-copy
+         * overshoot and sized worst-case (chunk_size + ZXC_DECOMPRESS_TAIL_PAD).
+         * lit_buffer is provisioned regardless of level because the decoder cannot
+         * predict the per-block literal encoding (RAW / RLE / HUFFMAN). */
+        const size_t sz_work = chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
+        const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
+
+        layout.off_work = layout.total;
+        layout.total += ZXC_ALIGN_CL(sz_work);
+        layout.off_lit_dctx = layout.total;
+        layout.total += ZXC_ALIGN_CL(sz_lit);
+        return layout;
+    }
+
+    /* Compress: 6 partitions + optional opt_scratch at level >= 6. */
+    const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
+    layout.max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
+    layout.sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
+    layout.sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint8_t);
+    const size_t sz_chain = ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t);
+    /* buf_sequences (GHI, level <= 2) aliases buf_offsets + buf_tokens (GLO,
+     * level >= 3). Mutually exclusive per block; sized for the larger. */
+    const size_t sz_seq_union = layout.max_seq * sizeof(uint32_t);
+    const size_t vbyte_len = (offset_bits + 6) / 7;
+    const size_t sz_extras = layout.max_seq * 2 * vbyte_len;
+    const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
+
+    /* opt_scratch (level >= 6 only): DP arrays for the optimal parser, also
+     * reused transiently as the package-merge scratch for the length-limited
+     * Huffman code-length builder. Sized to the larger of the two demands.
+     * The formula must stay in sync with zxc_estimate_cctx_size() and the
+     * consumer in zxc_compress.c. */
+    if (level >= ZXC_LEVEL_DENSITY) {
+        const size_t sz_dp = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t));
+        const size_t sz_pl = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
+        const size_t sz_po = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
+        const size_t n_bm_words = ZXC_BITMAP_WORDS(chunk_size + 1);
+        const size_t sz_bm = ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));
+        const size_t dp_needed = sz_dp + sz_pl + sz_po + sz_bm;
+        layout.sz_opt =
+            (dp_needed > ZXC_HUF_BUILD_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_BUILD_SCRATCH_SIZE;
+    }
+
+    layout.off_hash_pos = layout.total;
+    layout.total += ZXC_ALIGN_CL(layout.sz_hash_pos);
+    layout.off_hash_tags = layout.total;
+    layout.total += ZXC_ALIGN_CL(layout.sz_hash_tags);
+    layout.off_chain = layout.total;
+    layout.total += ZXC_ALIGN_CL(sz_chain);
+    layout.off_seq_union = layout.total;
+    layout.total += ZXC_ALIGN_CL(sz_seq_union);
+    layout.off_extras = layout.total;
+    layout.total += ZXC_ALIGN_CL(sz_extras);
+    layout.off_lit_cctx = layout.total;
+    layout.total += ZXC_ALIGN_CL(sz_lit);
+    /* opt_scratch is appended last so it is absent for levels 1..5 (zero
+     * waste on the common path) and only inflates the workspace at level 6. */
+    if (layout.sz_opt) {
+        layout.off_opt = layout.total;
+        layout.total += ZXC_ALIGN_CL(layout.sz_opt);
+    }
+    return layout;
+}
+
+size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, const int level) {
+    if (UNLIKELY(chunk_size == 0)) return 0;
+    return compute_cctx_layout(chunk_size, mode, level).total;
+}
+
+int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspace,
+                               const size_t workspace_size, const size_t chunk_size, const int mode,
+                               const int level, const int checksum_enabled) {
+    if (UNLIKELY(!ctx || !workspace || chunk_size == 0)) return ZXC_ERROR_NULL_INPUT;
+
+    const zxc_cctx_layout_t layout = compute_cctx_layout(chunk_size, mode, level);
+    if (UNLIKELY(workspace_size < layout.total)) return ZXC_ERROR_DST_TOO_SMALL;
+
     ZXC_MEMSET(ctx, 0, sizeof(zxc_cctx_t));
-
     ctx->checksum_enabled = checksum_enabled;
-
-    /* Compute block-size derived parameters. */
     ctx->chunk_size = chunk_size;
     const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
     ctx->offset_bits = offset_bits;
     ctx->offset_mask = (uint32_t)((1ULL << offset_bits) - 1);
     ctx->max_epoch = (uint32_t)(1ULL << (32 - offset_bits));
 
-    if (mode == 0) return ZXC_OK;
+    /* memory_block stays NULL on the static-init path so zxc_cctx_free does
+     * not try to free the caller's workspace.  Sub-buffer pointers carry the
+     * partition; ownership is implicit (the caller owns @p workspace). */
+    uint8_t* const mem = (uint8_t*)workspace;
 
-    const size_t max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
-    const size_t sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
-    const size_t sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint8_t);
-    const size_t sz_chain = ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t);
-    /* buf_sequences (GHI, level <= 2) aliases buf_offsets + buf_tokens (GLO,
-     * level >= 3). Mutually exclusive per block; sized for the larger. */
-    const size_t sz_seq_union = max_seq * sizeof(uint32_t);
-    /* Varint bytes per LL/ML: scales with chunk_size. */
-    const size_t vbyte_len = (offset_bits + 6) / 7;
-    const size_t sz_extras = max_seq * 2 * vbyte_len;
-    const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
+    if (mode == 0) {
+        ctx->work_buf = mem + layout.off_work;
+        ctx->work_buf_cap = chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
+        ctx->lit_buffer = mem + layout.off_lit_dctx;
+        ctx->lit_buffer_cap = chunk_size + ZXC_PAD_SIZE;
+        return ZXC_OK;
+    }
 
-    /* Calculate sizes with alignment padding (64 bytes for cache line alignment) */
-    size_t total_size = 0;
-    const size_t off_hash_pos = total_size;
-    total_size += ZXC_ALIGN_CL(sz_hash_pos);
-    const size_t off_hash_tags = total_size;
-    total_size += ZXC_ALIGN_CL(sz_hash_tags);
-    const size_t off_chain = total_size;
-    total_size += ZXC_ALIGN_CL(sz_chain);
-    const size_t off_seq_union = total_size;
-    total_size += ZXC_ALIGN_CL(sz_seq_union);
-    const size_t off_extras = total_size;
-    total_size += ZXC_ALIGN_CL(sz_extras);
-    const size_t off_lit = total_size;
-    total_size += ZXC_ALIGN_CL(sz_lit);
-
-    uint8_t* const mem = (uint8_t*)ZXC_ALIGNED_MALLOC(total_size, ZXC_CACHE_LINE_SIZE);
-    if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
-
-    ctx->memory_block = mem;
-    ctx->hash_table = (uint32_t*)(mem + off_hash_pos);
-    ctx->hash_tags = (uint8_t*)(mem + off_hash_tags);
-    ctx->chain_table = (uint16_t*)(mem + off_chain);
-    ctx->buf_sequences = (uint32_t*)(mem + off_seq_union);
-    ctx->buf_offsets = (uint16_t*)(mem + off_seq_union);
-    ctx->buf_tokens = (uint8_t*)(mem + off_seq_union) + max_seq * sizeof(uint16_t);
-    ctx->buf_extras = (uint8_t*)(mem + off_extras);
-    ctx->literals = (uint8_t*)(mem + off_lit);
+    ctx->hash_table = (uint32_t*)(mem + layout.off_hash_pos);
+    ctx->hash_tags = (uint8_t*)(mem + layout.off_hash_tags);
+    ctx->chain_table = (uint16_t*)(mem + layout.off_chain);
+    ctx->buf_sequences = (uint32_t*)(mem + layout.off_seq_union);
+    ctx->buf_offsets = (uint16_t*)(mem + layout.off_seq_union);
+    ctx->buf_tokens = (uint8_t*)(mem + layout.off_seq_union) + layout.max_seq * sizeof(uint16_t);
+    ctx->buf_extras = (uint8_t*)(mem + layout.off_extras);
+    ctx->literals = (uint8_t*)(mem + layout.off_lit_cctx);
+    if (layout.sz_opt) {
+        ctx->opt_scratch = mem + layout.off_opt;
+        ctx->opt_scratch_cap = layout.sz_opt;
+    }
 
     ctx->compression_level = level;
     ctx->epoch = 1;
 
-    ZXC_MEMSET(ctx->hash_table, 0, sz_hash_pos);
-    ZXC_MEMSET(ctx->hash_tags, 0, sz_hash_tags);
+    ZXC_MEMSET(ctx->hash_table, 0, layout.sz_hash_pos);
+    ZXC_MEMSET(ctx->hash_tags, 0, layout.sz_hash_tags);
+    return ZXC_OK;
+}
+
+/*
+ * @brief Initialises a compression / decompression context, allocating the
+ *        persistent buffer with @c ZXC_ALIGNED_MALLOC.
+ *
+ * Thin wrapper around @ref zxc_cctx_init_in_workspace: sizes the buffer via
+ * @ref zxc_cctx_compute_workspace_size, allocates it, then partitions it.
+ * The pointer is stored in @c ctx->memory_block so @ref zxc_cctx_free can
+ * release it.  The static-cctx public API (see @c zxc_buffer.h) bypasses
+ * this wrapper and partitions a caller-supplied workspace directly.
+ *
+ * @return @ref ZXC_OK on success, @ref ZXC_ERROR_MEMORY on allocation failure.
+ */
+int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int mode,
+                  const int level, const int checksum_enabled) {
+    const size_t total = zxc_cctx_compute_workspace_size(chunk_size, mode, level);
+    if (UNLIKELY(total == 0)) return ZXC_ERROR_NULL_INPUT;
+
+    uint8_t* const mem = (uint8_t*)ZXC_ALIGNED_MALLOC(total, ZXC_CACHE_LINE_SIZE);
+    if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
+
+    const int rc =
+        zxc_cctx_init_in_workspace(ctx, mem, total, chunk_size, mode, level, checksum_enabled);
+    if (UNLIKELY(rc != ZXC_OK)) {
+        // LCOV_EXCL_START
+        ZXC_ALIGNED_FREE(mem);
+        return rc;
+        // LCOV_EXCL_STOP
+    }
+    /* Library-owned buffer: record the allocation so zxc_cctx_free frees it. */
+    ctx->memory_block = mem;
     return ZXC_OK;
 }
 
@@ -147,21 +252,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
         ctx->memory_block = NULL;
     }
 
-    if (ctx->lit_buffer) {
-        ZXC_FREE(ctx->lit_buffer);
-        ctx->lit_buffer = NULL;
-    }
-
-    if (ctx->work_buf) {
-        ZXC_FREE(ctx->work_buf);
-        ctx->work_buf = NULL;
-    }
-
-    if (ctx->opt_scratch) {
-        ZXC_ALIGNED_FREE(ctx->opt_scratch);
-        ctx->opt_scratch = NULL;
-    }
-
+    ctx->lit_buffer = NULL;
     ctx->hash_table = NULL;
     ctx->hash_tags = NULL;
     ctx->chain_table = NULL;
@@ -170,6 +261,8 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->buf_offsets = NULL;
     ctx->buf_extras = NULL;
     ctx->literals = NULL;
+    ctx->work_buf = NULL;
+    ctx->opt_scratch = NULL;
 
     ctx->epoch = 0;
     ctx->lit_buffer_cap = 0;
@@ -631,51 +724,21 @@ uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
 /*
  * @brief Estimates the total buffer bytes allocated inside a cctx for a block.
  *
- * Mirrors the persistent allocation layout in zxc_cctx_init(): each sub-buffer
- * is rounded up to the cache-line boundary, so the returned value matches the
- * single aligned allocation performed by the initializer.
+ * Thin wrapper around @ref zxc_cctx_compute_workspace_size for @c mode == 1
+ * (compress), with @c src_size clamped up to a valid block size via
+ * @ref zxc_block_size_ceil.  The opaque wrapper struct allocated by
+ * @ref zxc_create_cctx adds a fixed overhead (< 128 B) that is negligible
+ * next to the per-chunk buffers and is intentionally omitted.
  *
- * For @p level >= 6 the figure also includes ctx->opt_scratch (~8.125 bytes
- * per chunk_size byte: dp + parent_len + parent_off + a 1-bit-per-position
- * match-end bitmap), the cache-line-aligned scratch used by the optimal
- * parser. It is lazy-allocated on the first level-6 call and persists for
- * the lifetime of the cctx (no per-block malloc/free).
+ * For @p level >= 6 the figure includes the optimal-parser scratch
+ * (@c opt_scratch, ~8.125 bytes per chunk_size byte) used by the optimal
+ * parser and reused as transient package-merge scratch for the Huffman
+ * code-length builder.
  */
 uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
     if (UNLIKELY(src_size == 0)) return 0;
-
     const size_t chunk_size = zxc_block_size_ceil(src_size);
-    const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
-    const size_t max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
-    const size_t vbyte_len = (offset_bits + 6) / 7;
-
-    uint64_t total = 0;
-    total += ZXC_ALIGN_CL(ZXC_LZ_HASH_SIZE * sizeof(uint32_t));   /* hash_table */
-    total += ZXC_ALIGN_CL(ZXC_LZ_HASH_SIZE * sizeof(uint8_t));    /* hash_tags */
-    total += ZXC_ALIGN_CL(ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t)); /* chain_table (ring) */
-    /* sequences / tokens+offsets alias the same region (see zxc_cctx_init). */
-    total += ZXC_ALIGN_CL(max_seq * sizeof(uint32_t)); /* seq_union */
-    total += ZXC_ALIGN_CL(max_seq * 2 * vbyte_len);    /* buf_extras */
-    total += ZXC_ALIGN_CL(chunk_size + ZXC_PAD_SIZE);  /* literals */
-
-    /* The opaque wrapper struct allocated by zxc_create_cctx() adds a tiny
-     * fixed overhead (< 128 B) that is negligible next to the per-chunk
-     * buffers above and is intentionally omitted. */
-
-    if (level >= ZXC_LEVEL_DENSITY) {
-        const size_t n_bm_words = (chunk_size + 1 + 63) / 64;
-        size_t opt = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t)); /* dp             */
-        opt += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));       /* parent_len     */
-        opt += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));       /* parent_off     */
-        opt += ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));             /* match_end_bits */
-        /* opt_scratch is sized to hold both the DP arrays and (transiently)
-         * the package-merge scratch for the Huffman code-length builder;
-         * report the larger of the two. */
-        const size_t huf = ZXC_ALIGN_CL(ZXC_HUF_BUILD_SCRATCH_SIZE);
-        total += (opt > huf) ? opt : huf;
-    }
-
-    return total;
+    return (uint64_t)zxc_cctx_compute_workspace_size(chunk_size, 1, level);
 }
 
 /*

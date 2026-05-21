@@ -433,6 +433,133 @@ ZXC_EXPORT void zxc_free_dctx(zxc_dctx* dctx);
 ZXC_EXPORT int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* src, size_t src_size, void* dst,
                                        size_t dst_capacity, const zxc_decompress_opts_t* opts);
 
+/* ========================================================================= */
+/*  Static Context API (caller-allocated workspace)                          */
+/* ========================================================================= */
+
+/**
+ * @defgroup static_context_api Static Context API
+ * @brief Caller-allocated, fixed-footprint compression / decompression
+ *        contexts.
+ *
+ * Mirrors the dynamic Reusable Context API but places the entire context
+ * (handle + persistent buffers) inside a single buffer allocated and owned
+ * by the caller.  This pattern is mandatory for environments where the
+ * library cannot call into the host allocator on the hot path: Linux
+ * kernel filesystems (one workspace per mount, served via @c vmalloc /
+ * @c kmalloc up front), embedded targets without a heap (`.bss` or
+ * stack-allocated workspace), sandboxed runtimes with a fixed memory
+ * budget, etc.
+ *
+ * The trade-off vs the dynamic API: the workspace is pinned to a single @c block_size and @c level
+ * at init time; subsequent compress/decompress calls cannot enlarge the footprint, so a workload
+ * that needs to mix block sizes must size the workspace for the maximum block_size up front.
+ *
+ * @par Typical usage
+ * @code
+ * size_t ws_sz = zxc_static_cctx_workspace_size(64 * 1024, ZXC_LEVEL_DEFAULT);
+ * void *ws = aligned_alloc(64, ws_sz);                   // or kmalloc, vmalloc, .bss
+ * zxc_compress_opts_t opts = { .level = ZXC_LEVEL_DEFAULT, .block_size = 64 * 1024 };
+ * zxc_cctx *cctx = zxc_init_static_cctx(ws, ws_sz, &opts);
+ *
+ * for (each block) zxc_compress_cctx(cctx, src, n, dst, cap, NULL);
+ *
+ * // zxc_free_cctx is a no-op on a static cctx; the caller owns @c ws.
+ * free(ws);
+ * @endcode
+ * @{
+ */
+
+/**
+ * @brief Returns the exact byte count required by a static compression
+ *        workspace for the given @p block_size and @p level.
+ *
+ * The value is the sum of the opaque @ref zxc_cctx wrapper plus every
+ * persistent sub-buffer the library would partition (hash tables, chain
+ * table, sequence buffers, literal scratch, plus the optimal-parser
+ * scratch at @ref ZXC_LEVEL_DENSITY). Round up to your allocator's
+ * alignment before calling @c posix_memalign / @c aligned_alloc, the
+ * workspace must be at least cache-line aligned.
+ *
+ * @param[in] block_size  Block size in bytes (must satisfy the regular
+ *                        block-size constraints: power of two in
+ *                        [@ref ZXC_BLOCK_SIZE_MIN, @ref ZXC_BLOCK_SIZE_MAX]).
+ * @param[in] level       Compression level (1..6); higher levels at
+ *                        @ref ZXC_LEVEL_DENSITY add the optimal-parser
+ *                        scratch (~8.125 x block_size).
+ * @return Workspace size in bytes, or 0 if either argument is invalid.
+ */
+ZXC_EXPORT size_t zxc_static_cctx_workspace_size(const size_t block_size, const int level);
+
+/**
+ * @brief Initialises a compression context inside a caller-supplied
+ *        workspace.
+ *
+ * @p workspace_size must be at least @ref zxc_static_cctx_workspace_size
+ * for the same @c block_size and @c level.  The workspace must remain
+ * valid for the lifetime of the returned handle and must be cache-line
+ * (64-byte) aligned.  The caller owns the workspace; @ref zxc_free_cctx
+ * is a no-op on the returned handle.
+ *
+ * @par Locked parameters
+ * The @c block_size, @c level, and @c checksum_enabled fields of @p opts
+ * are pinned at init time.  Subsequent @ref zxc_compress_cctx calls that
+ * pass options requesting a different @c block_size return
+ * @ref ZXC_ERROR_BAD_BLOCK_SIZE without re-initialising.  A different
+ * @c level / @c checksum_enabled is honoured per-call without
+ * re-partitioning.
+ *
+ * @param[in,out] workspace       Caller-allocated buffer, cache-line aligned.
+ * @param[in]     workspace_size  Capacity of @p workspace in bytes.
+ * @param[in]     opts            Must be non-NULL: @c block_size and
+ *                                @c level must be set explicitly to size
+ *                                the workspace correctly.
+ * @return Handle pointing inside @p workspace on success, or @c NULL if
+ *         the workspace is too small or the options are invalid.
+ */
+ZXC_EXPORT zxc_cctx* zxc_init_static_cctx(void* workspace, const size_t workspace_size,
+                                          const zxc_compress_opts_t* opts);
+
+/**
+ * @brief Returns the exact byte count required by a static decompression
+ *        workspace for the given @p block_size.
+ *
+ * Unlike the compression variant, this size is independent of the source
+ * archive's level: @c lit_buffer is always provisioned worst-case because
+ * the decoder cannot predict the per-block literal encoding until it sees
+ * each block header.
+ *
+ * @param[in] block_size  Maximum block size the decoder will encounter
+ *                        (must satisfy the regular block-size constraints).
+ * @return Workspace size in bytes, or 0 if @p block_size is invalid.
+ */
+ZXC_EXPORT size_t zxc_static_dctx_workspace_size(const size_t block_size);
+
+/**
+ * @brief Initialises a decompression context inside a caller-supplied
+ *        workspace.
+ *
+ * @p workspace_size must be at least @ref zxc_static_dctx_workspace_size
+ * for the same @p block_size.  The workspace must remain valid for the
+ * lifetime of the returned handle and must be cache-line aligned.  The
+ * caller owns the workspace; @ref zxc_free_dctx is a no-op on the
+ * returned handle.
+ *
+ * @par Locked block size
+ * @p block_size is pinned at init time: feeding the returned handle an
+ * archive whose header declares a different @c block_size returns
+ * @ref ZXC_ERROR_BAD_BLOCK_SIZE.
+ *
+ * @param[in,out] workspace       Caller-allocated buffer, cache-line aligned.
+ * @param[in]     workspace_size  Capacity of @p workspace in bytes.
+ * @param[in]     block_size      Block size the decoder will accept.
+ * @return Handle pointing inside @p workspace on success, or @c NULL if
+ *         the workspace is too small or @p block_size is invalid.
+ */
+ZXC_EXPORT zxc_dctx* zxc_init_static_dctx(void* workspace, const size_t workspace_size,
+                                          const size_t block_size);
+
+/** @} */ /* end of static_context_api */
 /** @} */ /* end of context_api */
 /** @} */ /* end of buffer_api */
 

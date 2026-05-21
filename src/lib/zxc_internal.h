@@ -309,6 +309,13 @@ extern "C" {
 /** @brief Round @p x up to the next cache-line boundary. */
 #define ZXC_ALIGN_CL(x) (((x) + ZXC_ALIGNMENT_MASK) & ~(size_t)ZXC_ALIGNMENT_MASK)
 
+/**
+ * @brief Number of @c uint64_t words needed to hold a bitmap of @p n_bits.
+ *
+ * Equivalent to @c ceil(n_bits / 64).
+ */
+#define ZXC_BITMAP_WORDS(n_bits) (((n_bits) + 63) / 64)
+
 /** @brief Bit flag in the Flags byte indicating checksum presence (bit 7). */
 #define ZXC_FILE_FLAG_HAS_CHECKSUM 0x80U
 /** @brief Mask for the checksum algorithm id (bits 0-3). */
@@ -1519,7 +1526,7 @@ typedef struct {
     uint8_t* literals;       /**< Buffer for literal bytes. */
 
     /* Cold zone: configuration / scratch / resizeable. */
-    uint8_t* lit_buffer;    /**< Scratch buffer for literals (RLE). */
+    uint8_t* lit_buffer;    /**< Scratch buffer for literals (RLE / Huffman). */
     size_t lit_buffer_cap;  /**< Current capacity of the scratch buffer. */
     uint8_t* work_buf;      /**< Padded scratch buffer for buffer-API decompression. */
     size_t work_buf_cap;    /**< Capacity of the work buffer. */
@@ -1555,6 +1562,48 @@ typedef struct {
  */
 int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, const int level,
                   const int checksum_enabled);
+
+/**
+ * @brief Returns the byte count that @ref zxc_cctx_init would allocate for
+ *        the given parameters.
+ *
+ * Used by the static-cctx public API to size a caller-supplied workspace
+ * before calling @ref zxc_cctx_init_in_workspace.
+ *
+ * @param[in] chunk_size  Block size in bytes (must satisfy
+ *                        @ref zxc_validate_block_size).
+ * @param[in] mode        1 = compression, 0 = decompression.
+ * @param[in] level       Compression level (only consulted when @p mode == 1).
+ * @return Size in bytes, or 0 if the parameters are invalid.
+ */
+size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, const int level);
+
+/**
+ * @brief Initialises a compression / decompression context inside a
+ *        caller-supplied workspace.
+ *
+ * Identical to @ref zxc_cctx_init except that the persistent buffer is
+ * carved out of @p workspace instead of being @c ZXC_ALIGNED_MALLOC'd
+ * internally.  @p workspace must be cache-line aligned and at least as
+ * large as @ref zxc_cctx_compute_workspace_size for the same parameters.
+ *
+ * The caller owns @p workspace and must keep it alive for the lifetime of
+ * @p ctx.  @ref zxc_cctx_free becomes a no-op for contexts initialised
+ * this way (the workspace is not freed by the library).
+ *
+ * @param[out] ctx               Context to initialise (zeroed on entry).
+ * @param[in]  workspace         Caller-allocated, cache-line-aligned buffer.
+ * @param[in]  workspace_size    Capacity of @p workspace in bytes.
+ * @param[in]  chunk_size        Block size in bytes.
+ * @param[in]  mode              1 = compression, 0 = decompression.
+ * @param[in]  level             Compression level (ignored when @p mode == 0).
+ * @param[in]  checksum_enabled  Non-zero to enable checksum computation.
+ * @return @c ZXC_OK on success, @c ZXC_ERROR_DST_TOO_SMALL if the workspace
+ *         is too small, or another negative @ref zxc_error_t.
+ */
+int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspace,
+                               const size_t workspace_size, const size_t chunk_size, const int mode,
+                               const int level, const int checksum_enabled);
 
 /**
  * @brief Releases the internal buffers owned by a context.

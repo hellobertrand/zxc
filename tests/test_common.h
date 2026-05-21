@@ -74,6 +74,13 @@ int test_decompress_block_bound(void);
 int test_opaque_context_api(void);
 int test_estimate_cctx_size(void);
 
+/* Static Context API */
+int test_static_ctx_roundtrip_all_levels(void);
+int test_static_ctx_size_query(void);
+int test_static_ctx_workspace_too_small(void);
+int test_static_ctx_block_size_locked(void);
+int test_static_ctx_null_inputs(void);
+
 /* Stream API */
 int test_null_output_decompression(void);
 int test_invalid_arguments(void);
