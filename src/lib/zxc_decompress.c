@@ -1231,7 +1231,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {
             ll += zxc_read_varint(&e_ptr, e_end);
-            if (UNLIKELY(l_ptr + ll > l_end)) {
+            if (UNLIKELY((size_t)(l_end - l_ptr) < ll)) {
                 t_ptr = t_save;
                 o_ptr = o_save;
                 e_ptr = e_save;
@@ -1323,14 +1323,14 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
         if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) ml += zxc_read_varint(&e_ptr, e_end);
         ml += ZXC_LZ_MIN_MATCH_LEN;
 
-        if (UNLIKELY((size_t)(d_end - d_ptr) < ll || (size_t)(l_end - l_ptr) < ll))
+        if (UNLIKELY((uint64_t)ll + ml > (uint64_t)(d_end - d_ptr) || (size_t)(l_end - l_ptr) < ll))
             return ZXC_ERROR_OVERFLOW;
         ZXC_MEMCPY(d_ptr, l_ptr, ll);
         l_ptr += ll;
         d_ptr += ll;
 
         const uint8_t* match_src = d_ptr - offset;
-        if (UNLIKELY(match_src < dst || (size_t)(d_end - d_ptr) < ml)) return ZXC_ERROR_BAD_OFFSET;
+        if (UNLIKELY(match_src < dst)) return ZXC_ERROR_BAD_OFFSET;
 
         if (offset < ml) {
             for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
@@ -1346,7 +1346,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
     if (UNLIKELY(l_ptr > l_end)) return ZXC_ERROR_CORRUPT_DATA;
     const size_t remaining_literals = (size_t)(l_end - l_ptr);
     if (remaining_literals > 0) {
-        if (UNLIKELY(d_ptr + remaining_literals > d_end)) return ZXC_ERROR_OVERFLOW;
+        if (UNLIKELY((size_t)(d_end - d_ptr) < remaining_literals)) return ZXC_ERROR_OVERFLOW;
         ZXC_MEMCPY(d_ptr, l_ptr, remaining_literals);
         d_ptr += remaining_literals;
     }
@@ -1640,13 +1640,15 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
         if (UNLIKELY((uint64_t)ll + ml + ZXC_PAD_SIZE > (uint64_t)(d_end - d_ptr) ||
                      (uint64_t)ll + ZXC_PAD_SIZE > (uint64_t)(l_end - l_ptr))) {
             // Fallback to exact copy (slow but safe)
-            if (UNLIKELY(d_ptr + ll > d_end || l_ptr + ll > l_end)) return ZXC_ERROR_OVERFLOW;
+            if (UNLIKELY((size_t)(d_end - d_ptr) < ll || (size_t)(l_end - l_ptr) < ll))
+                return ZXC_ERROR_OVERFLOW;
             ZXC_MEMCPY(d_ptr, l_ptr, ll);
             l_ptr += ll;
             d_ptr += ll;
             written += ll;
 
-            if (UNLIKELY(offset > written || d_ptr + ml > d_end)) return ZXC_ERROR_BAD_OFFSET;
+            if (UNLIKELY(offset > written || (size_t)(d_end - d_ptr) < ml))
+                return ZXC_ERROR_BAD_OFFSET;
             const uint8_t* match_src = d_ptr - offset;
 
             if (offset < ml) {
@@ -1858,7 +1860,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
         uint32_t ll = (uint32_t)(seq >> 24);
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) {
             ll += zxc_read_varint(&extras_ptr, extras_end);
-            if (UNLIKELY(l_ptr + ll > l_end)) {
+            if (UNLIKELY((size_t)(l_end - l_ptr) < ll)) {
                 seq_ptr = seq_save;
                 extras_ptr = ext_save;
                 break;
@@ -1947,14 +1949,14 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_varint(&extras_ptr, extras_end);
         uint32_t offset = (uint32_t)(seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
 
-        if (UNLIKELY((size_t)(d_end - d_ptr) < ll || (size_t)(l_end - l_ptr) < ll))
+        if (UNLIKELY((uint64_t)ll + ml > (uint64_t)(d_end - d_ptr) || (size_t)(l_end - l_ptr) < ll))
             return ZXC_ERROR_OVERFLOW;
         ZXC_MEMCPY(d_ptr, l_ptr, ll);
         l_ptr += ll;
         d_ptr += ll;
 
         const uint8_t* match_src = d_ptr - offset;
-        if (UNLIKELY(match_src < dst || (size_t)(d_end - d_ptr) < ml)) return ZXC_ERROR_BAD_OFFSET;
+        if (UNLIKELY(match_src < dst)) return ZXC_ERROR_BAD_OFFSET;
 
         if (offset < ml) {
             for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
@@ -1970,7 +1972,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
     if (UNLIKELY(l_ptr > l_end)) return ZXC_ERROR_CORRUPT_DATA;
     const size_t remaining_literals = (size_t)(l_end - l_ptr);
     if (remaining_literals > 0) {
-        if (UNLIKELY(d_ptr + remaining_literals > d_end)) return ZXC_ERROR_OVERFLOW;
+        if (UNLIKELY((size_t)(d_end - d_ptr) < remaining_literals)) return ZXC_ERROR_OVERFLOW;
         ZXC_MEMCPY(d_ptr, l_ptr, remaining_literals);
         d_ptr += remaining_literals;
     }
