@@ -730,6 +730,68 @@ free(dws);
 (Exact figures depend on architecture and alignment padding; always query
 `zxc_static_*_workspace_size` rather than hard-coding.)
 
+### Discovering `block_size` at decode time
+
+`zxc_init_static_dctx` pins `block_size` at workspace creation, so the caller
+must know it *before* calling `init`. Four patterns cover every use case:
+
+1. **Pinned by contract.** Producer and consumer agree on `block_size` at
+   deployment time (kernel module, embedded firmware, intra-application
+   pipeline). The constant lives in a shared header — no runtime
+   discovery needed. This is the canonical static-context use case.
+
+2. **Seekable archive — read the SEK table.** The block size is recoverable
+   from the table opened in any backing mode (buffer, `FILE*`, or
+   `zxc_reader_t`):
+
+   ```c
+   zxc_seekable* s = zxc_seekable_open_reader(&r);  /* parses SEK table only */
+   const uint32_t bs = zxc_seekable_get_block_decomp_size(s, 0);
+   /* For multi-block archives, block index 0 is always a full block.
+    * For a single-block archive, bs equals the total decompressed size. */
+   ```
+
+3. **Stream / buffer archive — peek the 16-byte file header.** The block
+   size is encoded at offset `0x05` (the *Chunk Size Code*, see
+   [FORMAT.md §3](FORMAT.md)). Read the first `ZXC_FILE_HEADER_SIZE`
+   bytes, validate the magic word, then decode:
+
+   ```c
+   uint8_t hdr[ZXC_FILE_HEADER_SIZE];
+   /* fread / read / pread the first 16 bytes of the archive */
+
+   const uint32_t magic = (uint32_t)hdr[0]       | ((uint32_t)hdr[1] << 8)
+                        | ((uint32_t)hdr[2] << 16) | ((uint32_t)hdr[3] << 24);
+   if (magic != 0x9CB02EF5U) { /* not a ZXC archive */ }
+
+   const uint8_t code = hdr[5];
+   size_t block_size;
+   if (code >= ZXC_BLOCK_SIZE_MIN_LOG2 && code <= ZXC_BLOCK_SIZE_MAX_LOG2)
+       block_size = (size_t)1U << code;       /* current encoders: 4 KB..2 MB */
+   else if (code == 64)
+       block_size = 256U * 1024U;             /* legacy encoder: 256 KB */
+   else
+       /* invalid archive */;
+   ```
+
+   After peeking, rewind the input (or keep the 16-byte prefix) and feed
+   the whole archive to `zxc_decompress_dctx` / streaming decoder
+   normally — the decoder re-parses the header.
+
+4. **Worst-case sizing fallback.** When the archive's block size cannot be
+   pre-fetched (e.g., a one-shot streaming decoder that consumes the
+   header in the same pass), size the dctx workspace for
+   `ZXC_BLOCK_SIZE_MAX` (2 MB). The handle accepts any conforming
+   archive at the cost of over-allocation (~4 MB dctx).
+
+   ```c
+   size_t dws_sz = zxc_static_dctx_workspace_size(ZXC_BLOCK_SIZE_MAX);
+   ```
+
+   If the workspace pool must stay tight and worst-case sizing is too
+   expensive, fall back to the dynamic Context API (`zxc_create_dctx`)
+   — its `block_size` is set per call.
+
 ---
 
 ## 10. Streaming API
