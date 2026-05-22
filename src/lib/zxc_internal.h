@@ -435,6 +435,14 @@ extern "C" {
 #define ZXC_LZ_WINDOW_MASK (ZXC_LZ_WINDOW_SIZE - 1U)
 /** @brief Minimum match length for an LZ77 match. */
 #define ZXC_LZ_MIN_MATCH_LEN 5
+/** @brief Maximum decoded output of a single sequence with INLINE ll/ml
+ *         (non-varint). Used by 4x decoder bounds checks to reserve space for
+ *         subsequent inline sequences in the same batch when the current
+ *         sequence has a varint-extended ml. */
+#define ZXC_GLO_MAX_INLINE_OUT_PER_SEQ \
+    ((ZXC_TOKEN_LL_MASK - 1U) + (ZXC_TOKEN_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 33 */
+#define ZXC_GHI_MAX_INLINE_OUT_PER_SEQ \
+    ((ZXC_SEQ_LL_MASK - 1U) + (ZXC_SEQ_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 513 */
 /** @brief Base bias added to encoded offsets (stored = actual - bias). */
 #define ZXC_LZ_OFFSET_BIAS 1
 /** @brief Maximum allowed offset distance. */
