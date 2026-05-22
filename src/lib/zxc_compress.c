@@ -95,6 +95,15 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  * @return The number of bytes written to the destination buffer.
  */
 static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, const uint32_t val) {
+    // Symmetry with the decoder cap: refuse to emit varints above
+    // ZXC_MAX_VARINT_VALUE since they would be rejected at decode time.
+    // For valid compressor inputs (block_size << 2 GB), this never triggers;
+    // it is a defense-in-depth check against bugs that would produce out-of-range
+    // values upstream. Callers must treat a return of 0 as an encoding error.
+    if (UNLIKELY(val > ZXC_MAX_VARINT_VALUE)) {
+        return 0;
+    }
+
     // 1 byte: 0xxxxxxx (7 bits) = 2^7 = 128
     if (LIKELY(val < (1U << 7))) {
         dst[0] = (uint8_t)val;
@@ -875,15 +884,15 @@ static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const siz
  * @param[out] max_offset_out   Largest biased offset emitted (used by the caller
  *                              to choose 1-byte vs 2-byte offset encoding).
  */
-static void zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                       const size_t src_sz, uint32_t* RESTRICT hash_table,
-                                       uint8_t* RESTRICT hash_tags, uint16_t* RESTRICT chain_table,
-                                       const uint32_t epoch_mark, const uint32_t offset_mask,
-                                       const int level, uint8_t* RESTRICT literals,
-                                       uint8_t* RESTRICT buf_tokens, uint16_t* RESTRICT buf_offsets,
-                                       uint8_t* RESTRICT buf_extras, uint32_t* RESTRICT seq_c_out,
-                                       size_t* RESTRICT lit_c_out, size_t* RESTRICT extras_sz_out,
-                                       uint16_t* RESTRICT max_offset_out) {
+static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                      const size_t src_sz, uint32_t* RESTRICT hash_table,
+                                      uint8_t* RESTRICT hash_tags, uint16_t* RESTRICT chain_table,
+                                      const uint32_t epoch_mark, const uint32_t offset_mask,
+                                      const int level, uint8_t* RESTRICT literals,
+                                      uint8_t* RESTRICT buf_tokens, uint16_t* RESTRICT buf_offsets,
+                                      uint8_t* RESTRICT buf_extras, uint32_t* RESTRICT seq_c_out,
+                                      size_t* RESTRICT lit_c_out, size_t* RESTRICT extras_sz_out,
+                                      uint16_t* RESTRICT max_offset_out) {
     zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level);
     lzp_opt.use_lazy = 0;  // guard
 
@@ -896,7 +905,7 @@ static void zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* 
         *seq_c_out = 0;
         *extras_sz_out = 0;
         *max_offset_out = 0;
-        return;
+        return 0;
     }
 
     const size_t mflimit_pos = src_sz - 12;
@@ -1097,10 +1106,16 @@ static void zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* 
             buf_offsets[seq_c] = off_biased;
             if (off_biased > max_offset) max_offset = off_biased;
 
-            if (UNLIKELY(ll >= ZXC_TOKEN_LL_MASK))
-                extras_sz += zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
-            if (UNLIKELY(ml >= ZXC_TOKEN_ML_MASK))
-                extras_sz += zxc_write_varint(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
+            if (UNLIKELY(ll >= ZXC_TOKEN_LL_MASK)) {
+                const size_t n = zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
+                if (UNLIKELY(n == 0)) return ZXC_ERROR_OVERFLOW;
+                extras_sz += n;
+            }
+            if (UNLIKELY(ml >= ZXC_TOKEN_ML_MASK)) {
+                const size_t n = zxc_write_varint(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
+                if (UNLIKELY(n == 0)) return ZXC_ERROR_OVERFLOW;
+                extras_sz += n;
+            }
 
             seq_c++;
             lit_start = pos;
@@ -1118,6 +1133,7 @@ static void zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* 
     *lit_c_out = lit_c;
     *extras_sz_out = extras_sz;
     *max_offset_out = max_offset;
+    return 0;
 }
 
 /**
@@ -1201,9 +1217,10 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     /* Level 6+: price-based optimal parser (fills outputs and skips the
      * lazy loop + last_lits handling below via `goto parse_done`). */
     if (level >= ZXC_LEVEL_DENSITY) {
-        zxc_lz77_optimal_parse_glo(ctx, src, src_sz, hash_table, hash_tags, chain_table, epoch_mark,
-                                   offset_mask, level, literals, buf_tokens, buf_offsets,
-                                   buf_extras, &seq_c, &lit_c, &extras_sz, &max_offset);
+        const int rc = zxc_lz77_optimal_parse_glo(
+            ctx, src, src_sz, hash_table, hash_tags, chain_table, epoch_mark, offset_mask, level,
+            literals, buf_tokens, buf_offsets, buf_extras, &seq_c, &lit_c, &extras_sz, &max_offset);
+        if (UNLIKELY(rc != 0)) return rc;
         goto parse_done;
     }
 
@@ -1250,11 +1267,16 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             if ((off - ZXC_LZ_OFFSET_BIAS) > max_offset)
                 max_offset = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
 
-            if (ll >= ZXC_TOKEN_LL_MASK)
-                extras_sz += zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
-
-            if (ml >= ZXC_TOKEN_ML_MASK)
-                extras_sz += zxc_write_varint(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
+            if (ll >= ZXC_TOKEN_LL_MASK) {
+                const size_t n = zxc_write_varint(buf_extras + extras_sz, ll - ZXC_TOKEN_LL_MASK);
+                if (UNLIKELY(n == 0)) return ZXC_ERROR_OVERFLOW;
+                extras_sz += n;
+            }
+            if (ml >= ZXC_TOKEN_ML_MASK) {
+                const size_t n = zxc_write_varint(buf_extras + extras_sz, ml - ZXC_TOKEN_ML_MASK);
+                if (UNLIKELY(n == 0)) return ZXC_ERROR_OVERFLOW;
+                extras_sz += n;
+            }
 
             seq_c++;
 
@@ -1826,10 +1848,16 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             buf_sequences[seq_c] = seq_val;
             seq_c++;
 
-            if (ll >= ZXC_SEQ_LL_MASK)
-                extras_c += zxc_write_varint(buf_extras + extras_c, ll - ZXC_SEQ_LL_MASK);
-            if (ml >= ZXC_SEQ_ML_MASK)
-                extras_c += zxc_write_varint(buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
+            if (ll >= ZXC_SEQ_LL_MASK) {
+                const size_t n = zxc_write_varint(buf_extras + extras_c, ll - ZXC_SEQ_LL_MASK);
+                if (UNLIKELY(n == 0)) return ZXC_ERROR_OVERFLOW;
+                extras_c += n;
+            }
+            if (ml >= ZXC_SEQ_ML_MASK) {
+                const size_t n = zxc_write_varint(buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
+                if (UNLIKELY(n == 0)) return ZXC_ERROR_OVERFLOW;
+                extras_c += n;
+            }
 
             ip += m.len;
             anchor = ip;
