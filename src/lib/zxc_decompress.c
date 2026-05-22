@@ -1557,7 +1557,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
             break;
         }
     } else {
-        while (n_seq >= 4 && d_ptr < d_end_safe && l_ptr < l_end_safe_4x &&
+        while (n_seq >= 4 && d_ptr < d_end_fast && l_ptr < l_end_safe_4x &&
                written < bounds_threshold) {
             uint32_t s1 = zxc_le32(seq_ptr);
             uint32_t s2 = zxc_le32(seq_ptr + sizeof(uint32_t));
@@ -1900,7 +1900,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_varint(&extras_ptr, extras_end);
 
         // Strict bounds checks (including wild copy overrun safety)
-        if (UNLIKELY(ll + ml + ZXC_PAD_SIZE > (size_t)(d_end - d_ptr))) {
+        if (UNLIKELY(ll + ml + ZXC_PAD_SIZE > (size_t)(d_end - d_ptr) ||
+                     ll + ZXC_PAD_SIZE > (size_t)(l_end - l_ptr))) {
             // Restore state and break to Safe Path
             seq_ptr = seq_save;
             extras_ptr = ext_save;
