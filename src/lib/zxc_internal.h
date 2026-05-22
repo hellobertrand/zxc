@@ -435,6 +435,18 @@ extern "C" {
 #define ZXC_LZ_WINDOW_MASK (ZXC_LZ_WINDOW_SIZE - 1U)
 /** @brief Minimum match length for an LZ77 match. */
 #define ZXC_LZ_MIN_MATCH_LEN 5
+/** @brief Maximum legitimate value a varint can decode to.
+ *
+ * The 5-byte varint encoding accepts values up to 2^32-1, but no legitimate
+ * compressor ever emits values beyond block_size. Capping the decoder rejects
+ * crafted inputs that exceed this bound, preventing integer-overflow attacks
+ * in downstream bounds arithmetic while preserving backward compatibility
+ * with files containing any legitimate varint value (val < 2^31).
+ *
+ * 2^31 - 1 (2 GB) is the largest cap that still guarantees uint32 safety in
+ * the bounds checks: worst-case (MASK + cap) * 2 + PAD + reserve stays below
+ * UINT32_MAX, so all downstream arithmetic remains wrap-free by construction. */
+#define ZXC_MAX_VARINT_VALUE ((uint32_t)((1U << 31) - 1))
 /** @brief Maximum decoded output of a single sequence with INLINE ll/ml
  *         (non-varint). Used by 4x decoder bounds checks to reserve space for
  *         subsequent inline sequences in the same batch when the current

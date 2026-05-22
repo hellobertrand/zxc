@@ -132,10 +132,14 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
         *ptr = end;
         return 0;
     }
-
+    const uint32_t v5 = (b0 & 0x07) | ((uint32_t)p[1] << 3) | ((uint32_t)p[2] << 11) |
+                        ((uint32_t)p[3] << 19) | ((uint32_t)p[4] << 27);
+    if (UNLIKELY(v5 > ZXC_MAX_VARINT_VALUE)) {
+        *ptr = end;  // exhaust extras stream: caller treats as corrupt
+        return 0;
+    }
     *ptr = p + 5;
-    return (b0 & 0x07) | ((uint32_t)p[1] << 3) | ((uint32_t)p[2] << 11) | ((uint32_t)p[3] << 19) |
-           ((uint32_t)p[4] << 27);
+    return v5;
 }
 
 /**
