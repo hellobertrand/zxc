@@ -793,20 +793,20 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
             const uint8_t* const l_save = l_ptr;
             const size_t w_save = written;
             uint32_t tokens = zxc_le32(t_ptr);
-            t_ptr += 4;
+            t_ptr += sizeof(uint32_t);
 
             uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS,
                      off3 = ZXC_LZ_OFFSET_BIAS, off4 = ZXC_LZ_OFFSET_BIAS;
             if (gh.enc_off == 1) {
                 uint32_t offsets = zxc_le32(o_ptr);
-                o_ptr += 4;
+                o_ptr += sizeof(uint32_t);
                 off1 += offsets & 0xFF;
                 off2 += (offsets >> 8) & 0xFF;
                 off3 += (offsets >> 16) & 0xFF;
                 off4 += (offsets >> 24) & 0xFF;
             } else {
                 uint64_t offsets = zxc_le64(o_ptr);
-                o_ptr += 8;
+                o_ptr += sizeof(uint64_t);
                 off1 += (uint32_t)(offsets & 0xFFFF);
                 off2 += (uint32_t)((offsets >> 16) & 0xFFFF);
                 off3 += (uint32_t)((offsets >> 32) & 0xFFFF);
@@ -904,14 +904,14 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
         while (n_seq >= 4 && d_ptr < d_end_safe && l_ptr < l_end_safe_4x &&
                written < bounds_threshold) {
             uint32_t tokens = zxc_le32(t_ptr);
-            t_ptr += 4;
+            t_ptr += sizeof(uint32_t);
 
             uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS,
                      off3 = ZXC_LZ_OFFSET_BIAS, off4 = ZXC_LZ_OFFSET_BIAS;
             if (gh.enc_off == 1) {
                 // Read 4 x 1-byte offsets
                 uint32_t offsets = zxc_le32(o_ptr);
-                o_ptr += 4;
+                o_ptr += sizeof(uint32_t);
                 off1 += offsets & 0xFF;
                 off2 += (offsets >> 8) & 0xFF;
                 off3 += (offsets >> 16) & 0xFF;
@@ -919,7 +919,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
             } else {
                 // Read 4 x 2-byte offsets
                 uint64_t offsets = zxc_le64(o_ptr);
-                o_ptr += 8;
+                o_ptr += sizeof(uint64_t);
                 off1 += (uint32_t)(offsets & 0xFFFF);
                 off2 += (uint32_t)((offsets >> 16) & 0xFFFF);
                 off3 += (uint32_t)((offsets >> 32) & 0xFFFF);
@@ -1014,20 +1014,20 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
             uint8_t* const d_save = d_ptr;
             const uint8_t* const l_save = l_ptr;
             uint32_t tokens = zxc_le32(t_ptr);
-            t_ptr += 4;
+            t_ptr += sizeof(uint32_t);
 
             uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS,
                      off3 = ZXC_LZ_OFFSET_BIAS, off4 = ZXC_LZ_OFFSET_BIAS;
             if (gh.enc_off == 1) {
                 uint32_t offsets = zxc_le32(o_ptr);
-                o_ptr += 4;
+                o_ptr += sizeof(uint32_t);
                 off1 += offsets & 0xFF;
                 off2 += (offsets >> 8) & 0xFF;
                 off3 += (offsets >> 16) & 0xFF;
                 off4 += (offsets >> 24) & 0xFF;
             } else {
                 uint64_t offsets = zxc_le64(o_ptr);
-                o_ptr += 8;
+                o_ptr += sizeof(uint64_t);
                 off1 += (uint32_t)(offsets & 0xFFFF);
                 off2 += (uint32_t)((offsets >> 16) & 0xFFFF);
                 off3 += (uint32_t)((offsets >> 32) & 0xFFFF);
@@ -1123,14 +1123,14 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
     } else {
         while (n_seq >= 4 && d_ptr < d_end_safe && l_ptr < l_end_safe_4x) {
             uint32_t tokens = zxc_le32(t_ptr);
-            t_ptr += 4;
+            t_ptr += sizeof(uint32_t);
 
             uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS,
                      off3 = ZXC_LZ_OFFSET_BIAS, off4 = ZXC_LZ_OFFSET_BIAS;
             if (gh.enc_off == 1) {
                 // Read 4 x 1-byte offsets
                 uint32_t offsets = zxc_le32(o_ptr);
-                o_ptr += 4;
+                o_ptr += sizeof(uint32_t);
                 off1 += offsets & 0xFF;
                 off2 += (offsets >> 8) & 0xFF;
                 off3 += (offsets >> 16) & 0xFF;
@@ -1138,7 +1138,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
             } else {
                 // Read 4 x 2-byte offsets
                 uint64_t offsets = zxc_le64(o_ptr);
-                o_ptr += 8;
+                o_ptr += sizeof(uint64_t);
                 off1 += (uint32_t)(offsets & 0xFFFF);
                 off2 += (uint32_t)((offsets >> 16) & 0xFFFF);
                 off3 += (uint32_t)((offsets >> 32) & 0xFFFF);
@@ -1242,7 +1242,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
             offset += *o_ptr++;  // 1-byte offset (biased)
         } else {
             offset += zxc_le16(o_ptr);  // 2-byte offset (biased)
-            o_ptr += 2;
+            o_ptr += sizeof(uint16_t);
         }
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {
@@ -1332,7 +1332,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
             offset += *o_ptr++;  // 1-byte offset (biased)
         } else {
             offset += zxc_le16(o_ptr);  // 2-byte offset (biased)
-            o_ptr += 2;
+            o_ptr += sizeof(uint16_t);
         }
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) ll += zxc_read_varint(&e_ptr, e_end);
@@ -1466,10 +1466,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
             const uint8_t* const l_save = l_ptr;
             const size_t w_save = written;
             uint32_t s1 = zxc_le32(seq_ptr);
-            uint32_t s2 = zxc_le32(seq_ptr + 4);
-            uint32_t s3 = zxc_le32(seq_ptr + 8);
-            uint32_t s4 = zxc_le32(seq_ptr + 12);
-            seq_ptr += 16;
+            uint32_t s2 = zxc_le32(seq_ptr + sizeof(uint32_t));
+            uint32_t s3 = zxc_le32(seq_ptr + 2 * sizeof(uint32_t));
+            uint32_t s4 = zxc_le32(seq_ptr + 3 * sizeof(uint32_t));
+            seq_ptr += 4 * sizeof(uint32_t);
 
             uint64_t ll1 = (uint32_t)(s1 >> 24);
             if (UNLIKELY(ll1 == ZXC_SEQ_LL_MASK)) {
@@ -1560,10 +1560,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
         while (n_seq >= 4 && d_ptr < d_end_safe && l_ptr < l_end_safe_4x &&
                written < bounds_threshold) {
             uint32_t s1 = zxc_le32(seq_ptr);
-            uint32_t s2 = zxc_le32(seq_ptr + 4);
-            uint32_t s3 = zxc_le32(seq_ptr + 8);
-            uint32_t s4 = zxc_le32(seq_ptr + 12);
-            seq_ptr += 16;
+            uint32_t s2 = zxc_le32(seq_ptr + sizeof(uint32_t));
+            uint32_t s3 = zxc_le32(seq_ptr + 2 * sizeof(uint32_t));
+            uint32_t s4 = zxc_le32(seq_ptr + 3 * sizeof(uint32_t));
+            seq_ptr += 4 * sizeof(uint32_t);
 
             uint64_t ll1 = (uint32_t)(s1 >> 24);
             if (UNLIKELY(ll1 == ZXC_SEQ_LL_MASK)) {
@@ -1646,7 +1646,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
     // --- SAFE Loop tail: remaining sequences with offset validation (1x) ---
     while (n_seq > 0 && d_ptr < d_end_safe && written < bounds_threshold) {
         uint32_t seq = zxc_le32(seq_ptr);
-        seq_ptr += 4;
+        seq_ptr += sizeof(uint32_t);
 
         uint64_t ll = (uint32_t)(seq >> 24);
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) ll += zxc_read_varint(&extras_ptr, extras_end);
@@ -1695,10 +1695,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
             uint8_t* const d_save = d_ptr;
             const uint8_t* const l_save = l_ptr;
             uint32_t s1 = zxc_le32(seq_ptr);
-            uint32_t s2 = zxc_le32(seq_ptr + 4);
-            uint32_t s3 = zxc_le32(seq_ptr + 8);
-            uint32_t s4 = zxc_le32(seq_ptr + 12);
-            seq_ptr += 16;
+            uint32_t s2 = zxc_le32(seq_ptr + sizeof(uint32_t));
+            uint32_t s3 = zxc_le32(seq_ptr + 2 * sizeof(uint32_t));
+            uint32_t s4 = zxc_le32(seq_ptr + 3 * sizeof(uint32_t));
+            seq_ptr += 4 * sizeof(uint32_t);
 
             // Prefetch ahead in literal and extras streams to hide memory latency
             ZXC_PREFETCH_READ(l_ptr + ZXC_CACHE_LINE_SIZE);
@@ -1790,10 +1790,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
     } else {
         while (n_seq >= 4 && d_ptr < d_end_fast && l_ptr < l_end_safe_4x) {
             uint32_t s1 = zxc_le32(seq_ptr);
-            uint32_t s2 = zxc_le32(seq_ptr + 4);
-            uint32_t s3 = zxc_le32(seq_ptr + 8);
-            uint32_t s4 = zxc_le32(seq_ptr + 12);
-            seq_ptr += 16;
+            uint32_t s2 = zxc_le32(seq_ptr + sizeof(uint32_t));
+            uint32_t s3 = zxc_le32(seq_ptr + 2 * sizeof(uint32_t));
+            uint32_t s4 = zxc_le32(seq_ptr + 3 * sizeof(uint32_t));
+            seq_ptr += 4 * sizeof(uint32_t);
 
             // Prefetch ahead in literal and extras streams to hide memory latency
             ZXC_PREFETCH_READ(l_ptr + ZXC_CACHE_LINE_SIZE);
@@ -1883,7 +1883,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
         const uint8_t* ext_save = extras_ptr;
 
         const uint32_t seq = zxc_le32(seq_ptr);
-        seq_ptr += 4;
+        seq_ptr += sizeof(uint32_t);
 
         uint64_t ll = (uint32_t)(seq >> 24);
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) {
@@ -1967,7 +1967,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
     // --- Safe Path for Remaining Sequences ---
     while (n_seq > 0) {
         uint32_t seq = zxc_le32(seq_ptr);
-        seq_ptr += 4;
+        seq_ptr += sizeof(uint32_t);
 
         uint64_t ll = (uint32_t)(seq >> 24);
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) ll += zxc_read_varint(&extras_ptr, extras_end);
