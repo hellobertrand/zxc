@@ -106,7 +106,10 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
         return (b0 & 0x3F) | ((uint32_t)p[1] << 6);
     }
 
-    // 3 Bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2097152 (2^21)
+    // 3 Bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2097152 (2^21).
+    // This is the largest length a legitimate varint can take: block_size_max
+    // is 2^21 and varint values represent (ll - MASK) or (ml - MASK), which is
+    // always strictly less than block_size_max.
     if (LIKELY(b0 < 0xE0)) {
         if (UNLIKELY(p + 2 >= end)) {
             *ptr = end;
@@ -116,30 +119,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
         return (b0 & 0x1F) | ((uint32_t)p[1] << 5) | ((uint32_t)p[2] << 13);
     }
 
-    // 4 Bytes: 1110xxxx ... (28 bits) -> val < 268435456 (2^28)
-    if (UNLIKELY(b0 < 0xF0)) {
-        if (UNLIKELY(p + 3 >= end)) {
-            *ptr = end;
-            return 0;
-        }
-        *ptr = p + 4;
-        return (b0 & 0x0F) | ((uint32_t)p[1] << 4) | ((uint32_t)p[2] << 12) |
-               ((uint32_t)p[3] << 20);
-    }
-
-    // 5 Bytes: 11110xxx ... (32 bits) -> val < 4294967296 (2^32)
-    if (UNLIKELY(p + 4 >= end)) {
-        *ptr = end;
-        return 0;
-    }
-    const uint32_t v5 = (b0 & 0x07) | ((uint32_t)p[1] << 3) | ((uint32_t)p[2] << 11) |
-                        ((uint32_t)p[3] << 19) | ((uint32_t)p[4] << 27);
-    if (UNLIKELY(v5 > ZXC_MAX_VARINT_VALUE)) {
-        *ptr = end;  // exhaust extras stream: caller treats as corrupt
-        return 0;
-    }
-    *ptr = p + 5;
-    return v5;
+    // 4- or 5-byte encoding: out-of-spec for the current format, reject.
+    *ptr = end;
+    return 0;
 }
 
 /**

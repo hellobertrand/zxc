@@ -95,11 +95,12 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  * @return The number of bytes written to the destination buffer.
  */
 static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, const uint32_t val) {
-    // Symmetry with the decoder cap: refuse to emit varints above
-    // ZXC_MAX_VARINT_VALUE since they would be rejected at decode time.
-    // For valid compressor inputs (block_size << 2 GB), this never triggers;
-    // it is a defense-in-depth check against bugs that would produce out-of-range
-    // values upstream. Callers must treat a return of 0 as an encoding error.
+    // Refuse to emit varints above ZXC_MAX_VARINT_VALUE: such values are
+    // out-of-spec (block_size_max is 2^21, the largest legitimate varint is
+    // strictly less) and would be rejected by the decoder. For valid inputs
+    // from the Block API (src_size <= ZXC_BLOCK_SIZE_MAX) this never triggers;
+    // it is a defense-in-depth check. Callers must treat a return of 0 as an
+    // encoding error.
     if (UNLIKELY(val > ZXC_MAX_VARINT_VALUE)) {
         return 0;
     }
@@ -117,30 +118,12 @@ static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, const ui
         return 2;
     }
 
-    // 3 bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) = 2^21 = 2097152
-    if (LIKELY(val < (1U << 21))) {
-        dst[0] = (uint8_t)(0xC0 | (val & 0x1F));
-        dst[1] = (uint8_t)(val >> 5);
-        dst[2] = (uint8_t)(val >> 13);
-        return 3;
-    }
-
-    // 4 bytes: 1110xxxx xxxxxxxx xxxxxxxx xxxxxxxx (28 bits) = 2^28 = 268435456
-    if (val < (1U << 28)) {
-        dst[0] = (uint8_t)(0xE0 | (val & 0x0F));
-        dst[1] = (uint8_t)(val >> 4);
-        dst[2] = (uint8_t)(val >> 12);
-        dst[3] = (uint8_t)(val >> 20);
-        return 4;
-    }
-
-    // 5 bytes: 11110xxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx (32 bits)
-    dst[0] = (uint8_t)(0xF0 | (val & 0x07));
-    dst[1] = (uint8_t)(val >> 3);
-    dst[2] = (uint8_t)(val >> 11);
-    dst[3] = (uint8_t)(val >> 19);
-    dst[4] = (uint8_t)(val >> 27);
-    return 5;
+    // 3 bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> max emittable value,
+    // matching ZXC_MAX_VARINT_VALUE = ZXC_BLOCK_SIZE_MAX - 1.
+    dst[0] = (uint8_t)(0xC0 | (val & 0x1F));
+    dst[1] = (uint8_t)(val >> 5);
+    dst[2] = (uint8_t)(val >> 13);
+    return 3;
 }
 
 /**
