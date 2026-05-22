@@ -382,17 +382,34 @@ The **Seek Table** block is an optional block appended between the EOF block and
 
 ZXC extras use a prefix-length varint.
 
-Length is encoded in unary form in the high bits of first byte:
+The length is encoded in unary form in the high bits of the first byte: the
+number of leading `1` bits, followed by a terminating `0`, indicates how
+many additional payload bytes follow. The scheme generalizes to N bytes
+(`11110xxx` = 5, `111110xx` = 6, ...), but the current ZXC spec caps the
+encoding at 3 bytes because no legitimate value exceeds 21 bits (see below).
 
-- `0xxxxxxx` -> 1 byte total
-- `10xxxxxx` -> 2 bytes total
-- `110xxxxx` -> 3 bytes total
-- `1110xxxx` -> 4 bytes total
-- `11110xxx` -> 5 bytes total
+Encodings used:
 
-Payload bits from following bytes are concatenated little-endian style (low bits first).
+- `0xxxxxxx` -> 1 byte total (7 bits payload, value < 128)
+- `10xxxxxx` -> 2 bytes total (14 bits, value < 16384)
+- `110xxxxx` -> 3 bytes total (21 bits, value < 2 MiB)
 
-Used by GLO/GHI to carry LL/ML overflows beyond token/sequence inline limits.
+Payload bits from the following bytes are concatenated little-endian style
+(low bits first). Used by GLO/GHI to carry LL/ML overflows beyond
+token/sequence inline limits.
+
+**Value bound**: a varint encodes `(LL - MASK)` or `(ML - MASK)`.
+Since LL/ML are bounded by `ZXC_BLOCK_SIZE_MAX = 2 MiB` (2^21), every
+legitimate varint value is strictly less than 2^21 and therefore fits in
+**at most 3 bytes**.
+
+Any prefix indicating a length >= 4 bytes (first byte `>= 0xE0`) is out of
+spec for this format version: encoders must never emit such a varint, and
+conforming decoders reject it as corrupt input. This caps the varint
+surface to the format-defined block size limit and neutralizes
+integer-overflow attacks in downstream bounds arithmetic. A future version
+of the format that raises `ZXC_BLOCK_SIZE_MAX` would also extend the
+accepted prefix lengths.
 
 ---
 

@@ -580,7 +580,16 @@ int test_block_api_large_block_varint() {
             goto per_case_cleanup;
         }
 
-        printf("  [PASS] %s correctly rejected by both compress and decompress\n",
+        const int64_t dssize =
+            zxc_decompress_block_safe(dctx, src, sz, decompressed, sz, &dopts);
+        if (dssize != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf("  [FAIL] %s decompress_safe: expected ZXC_ERROR_BAD_BLOCK_SIZE (%d), got %lld\n",
+                   cases[i].name, ZXC_ERROR_BAD_BLOCK_SIZE, (long long)dssize);
+            failures++;
+            goto per_case_cleanup;
+        }
+
+        printf("  [PASS] %s correctly rejected by compress, decompress, and decompress_safe\n",
                cases[i].name);
 
     per_case_cleanup:

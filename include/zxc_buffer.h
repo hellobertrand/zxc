@@ -242,9 +242,15 @@ ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
  * Output format: @c block_header(8B) + payload + optional @c checksum(4B).
  * The output can be decompressed with zxc_decompress_block().
  *
+ * The Block API processes a single format-conformant block at a time:
+ * @p src_size must not exceed @ref ZXC_BLOCK_SIZE_MAX (2 MiB). For larger
+ * payloads, use the frame API (zxc_compress) or the streaming API
+ * (zxc_cstream_*), both of which chunk transparently into compliant blocks.
+ *
  * @param[in,out] cctx         Reusable compression context.
  * @param[in]     src          Source data.
- * @param[in]     src_size     Source data size in bytes.
+ * @param[in]     src_size     Source data size in bytes
+ *                             (must be in [1, @ref ZXC_BLOCK_SIZE_MAX]).
  * @param[out]    dst          Destination buffer.
  * @param[in]     dst_capacity Capacity of the destination buffer
  *                             (use zxc_compress_block_bound() to size).
@@ -254,6 +260,8 @@ ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
  *
  * @return Compressed block size in bytes (> 0) on success,
  *         or a negative @ref zxc_error_t code on failure.
+ *         Returns @ref ZXC_ERROR_BAD_BLOCK_SIZE if
+ *         @p src_size > @ref ZXC_BLOCK_SIZE_MAX.
  */
 ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t src_size, void* dst,
                                       size_t dst_capacity, const zxc_compress_opts_t* opts);
@@ -261,17 +269,27 @@ ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t sr
 /**
  * @brief Decompresses a single block produced by zxc_compress_block().
  *
+ * The Block API decompresses a single format-conformant block at a time:
+ * @p dst_capacity must not exceed @ref ZXC_BLOCK_SIZE_MAX +
+ * @ref ZXC_DECOMPRESS_TAIL_PAD (the size returned by
+ * zxc_decompress_block_bound() for the maximum block size). For payloads
+ * produced by the frame or streaming APIs, use zxc_decompress instead.
+ *
  * @param[in,out] dctx         Reusable decompression context.
  * @param[in]     src          Compressed block data.
  * @param[in]     src_size     Compressed data size in bytes.
  * @param[out]    dst          Destination buffer for decompressed data.
  * @param[in]     dst_capacity Capacity of the destination buffer (must be
- *                             at least the original uncompressed size).
+ *                             at least the original uncompressed size,
+ *                             and at most @ref ZXC_BLOCK_SIZE_MAX +
+ *                             @ref ZXC_DECOMPRESS_TAIL_PAD).
  * @param[in]     opts         Decompression options (NULL for defaults).
  *                             Only @c checksum_enabled is used.
  *
  * @return Decompressed size in bytes (> 0) on success,
  *         or a negative @ref zxc_error_t code on failure.
+ *         Returns @ref ZXC_ERROR_BAD_BLOCK_SIZE if @p dst_capacity exceeds
+ *         the per-block limit.
  */
 ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t src_size, void* dst,
                                         size_t dst_capacity, const zxc_decompress_opts_t* opts);
@@ -291,17 +309,24 @@ ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t 
  * NUM and RAW blocks transparently forward to zxc_decompress_block(); only
  * GLO/GHI use the strict-tail decoder path.
  *
+ * Strict-tail variant: @p dst_capacity is the exact uncompressed size with
+ * no tail-pad margin, so the upper limit is @ref ZXC_BLOCK_SIZE_MAX (not
+ * @c MAX+TAIL_PAD as for zxc_decompress_block).
+ *
  * @param[in,out] dctx         Reusable decompression context.
  * @param[in]     src          Compressed block data.
  * @param[in]     src_size     Compressed data size in bytes.
  * @param[out]    dst          Destination buffer for decompressed data.
  * @param[in]     dst_capacity Capacity of the destination buffer (may equal
- *                             the original uncompressed size exactly).
+ *                             the original uncompressed size exactly,
+ *                             must be <= @ref ZXC_BLOCK_SIZE_MAX).
  * @param[in]     opts         Decompression options (NULL for defaults).
  *                             Only @c checksum_enabled is used.
  *
  * @return Decompressed size in bytes (> 0) on success,
  *         or a negative @ref zxc_error_t code on failure.
+ *         Returns @ref ZXC_ERROR_BAD_BLOCK_SIZE if
+ *         @p dst_capacity > @ref ZXC_BLOCK_SIZE_MAX.
  */
 ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, const size_t src_size,
                                              void* dst, const size_t dst_capacity,

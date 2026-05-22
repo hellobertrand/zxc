@@ -1152,9 +1152,8 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
     if (UNLIKELY(!dctx || !src || !dst || src_size < ZXC_BLOCK_HEADER_SIZE || dst_capacity == 0))
         return ZXC_ERROR_NULL_INPUT;
 
-    /* Same single-block constraint as zxc_decompress_block. */
-    if (UNLIKELY(dst_capacity > ZXC_BLOCK_SIZE_MAX + ZXC_DECOMPRESS_TAIL_PAD))
-        return ZXC_ERROR_BAD_BLOCK_SIZE;
+    /* Strict-tail variant: dst_capacity matches the exact uncompressed size */
+    if (UNLIKELY(dst_capacity > ZXC_BLOCK_SIZE_MAX)) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
     const uint8_t type = ((const uint8_t*)src)[0];
     /* NUM/RAW never wild-write past dst_capacity: route to the existing fast API. */
