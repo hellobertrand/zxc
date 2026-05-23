@@ -322,9 +322,11 @@ ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t 
  * @param[in]     src          Compressed block data.
  * @param[in]     src_size     Compressed data size in bytes.
  * @param[out]    dst          Destination buffer for decompressed data.
- * @param[in]     dst_capacity Capacity of the destination buffer (may equal
- *                             the original uncompressed size exactly,
- *                             must be <= @ref ZXC_BLOCK_SIZE_MAX).
+ * @param[in]     dst_capacity Capacity of the destination buffer (must be
+ *                             at least the original uncompressed size,
+ *                             and at most @ref ZXC_BLOCK_SIZE_MAX; unlike
+ *                             zxc_decompress_block, no trailing tail-pad
+ *                             margin is required).
  * @param[in]     opts         Decompression options (NULL for defaults).
  *                             Only @c checksum_enabled is used.
  *
