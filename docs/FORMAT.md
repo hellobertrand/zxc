@@ -6,7 +6,6 @@ category: info
 ipr: trust200902
 area: Applications
 submissionType: independent
-date: 2026-05-20
 keyword:
   - compression
   - lossless
