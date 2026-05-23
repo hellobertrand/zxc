@@ -563,7 +563,9 @@ File Footer alone.
 
 ZXC Extras streams use a prefix-length variable-length integer
 encoding. The length of the encoded value is signalled in unary
-form in the high bits of the first byte:
+form in the high bits of the first byte. The encoding is
+generalisable to any number of bytes by extending the prefix-length
+table below.
 
 | First-byte prefix | Total bytes | Payload bits |
 |-------------------|------------:|-------------:|
@@ -574,8 +576,35 @@ form in the high bits of the first byte:
 | 11110xxx          |      5      |     35       |
 
 Payload bits from following bytes are concatenated little-endian
-style (low-order bits first). A decoder encountering a first byte
-with more than four leading 1 bits MUST report an error.
+style (low-order bits first).
+
+## ZXC v1 Length Cap {#varint-cap-v1}
+
+A decoder MUST be parameterised by a maximum varint length L_MAX
+(in bytes) and reject any encoding whose first byte signals a
+total length greater than L_MAX.
+
+For ZXC Format Version 1, L_MAX is **3** (21-bit payload). The
+maximum legitimate decoded value is therefore (2^21 - 1) =
+2,097,151, which equals ZXC_BLOCK_SIZE_MAX - 1, the largest
+overflow value that can appear given the per-block size limit
+defined in {{file-header}}.
+
+A conforming v1 decoder:
+
+- MUST reject a first byte whose prefix signals 4 or 5 bytes
+  (high nibble 0xE.. or 0xF..).
+- MUST treat such an encoding as a fatal format error
+  (see {{error-handling}}).
+
+A conforming v1 encoder:
+
+- MUST NOT emit a varint encoding longer than 3 bytes.
+- MUST NOT emit a value greater than (2^21 - 1).
+
+Future format versions MAY raise L_MAX (and correspondingly the
+per-block size limit) without breaking the encoding scheme; the
+1- to 3-byte forms remain bit-compatible across versions.
 
 # Checksums and Integrity {#checksums}
 
@@ -738,7 +767,7 @@ all errors in the table are fatal by default.
 | Footer global hash mismatch            | File footer offset 0x08     | Reject (if checksum mode active).               |
 | Decompressed output exceeds chunk size | During LZ decode            | Reject. Corrupt or malicious payload.           |
 | Match offset out of bounds             | During LZ copy              | Reject. Offset references data before output.   |
-| Varint exceeds maximum length          | Extras stream               | Reject. Overflow or corrupt extras data.        |
+| Varint exceeds L_MAX (3 bytes in v1)   | Extras stream               | Reject. See {{varint-cap-v1}}. Overflow or corrupt extras data.|
 
 ## Severity Levels
 
