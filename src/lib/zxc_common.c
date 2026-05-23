@@ -685,11 +685,13 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint
  * @return Upper bound on compressed size, or 0 if @p input_size would overflow.
  */
 uint64_t zxc_compress_bound(const size_t input_size) {
-    // Guard UINT64_MAX / SIZE_MAX would overflow.
+    // Guard against uint64 overflow when summing per-block overhead
+    // across very large inputs (input_size approaching SIZE_MAX).
     if (UNLIKELY(input_size > (SIZE_MAX - (SIZE_MAX >> 8)))) return 0;
     uint64_t n = ((uint64_t)input_size + ZXC_BLOCK_SIZE_MIN - 1) / ZXC_BLOCK_SIZE_MIN;
     if (n == 0) n = 1;
-    return ZXC_FILE_HEADER_SIZE + (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + 64)) +
+    return ZXC_FILE_HEADER_SIZE +
+           (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + ZXC_BLOCK_FORMAT_OVERHEAD)) +
            (uint64_t)input_size + ZXC_BLOCK_HEADER_SIZE + /* EOF block */
            ZXC_BLOCK_HEADER_SIZE +                        /* SEK block header (seekable) */
            (n * ZXC_SEEK_ENTRY_SIZE) +                    /* SEK entries: 4 bytes per block */
@@ -699,13 +701,23 @@ uint64_t zxc_compress_bound(const size_t input_size) {
 /*
  * @brief Returns the maximum compressed size for a single block (no file framing).
  *
- * @param[in] input_size Uncompressed block size in bytes.
- * @return Upper bound on compressed block size, or 0 on overflow.
+ * @param[in] input_size Uncompressed block size in bytes
+ *                       (must be <= @ref ZXC_BLOCK_SIZE_MAX).
+ * @return Upper bound on compressed block size, or 0 if @p input_size is out
+ *         of range for the Block API (i.e. exceeds ZXC_BLOCK_SIZE_MAX) or if
+ *         the arithmetic would overflow.
  */
 uint64_t zxc_compress_block_bound(const size_t input_size) {
-    if (UNLIKELY(input_size > (SIZE_MAX - (SIZE_MAX >> 8)))) return 0;
-    // Block header + worst-case expansion (64B overhead) + checksum
-    return (uint64_t)ZXC_BLOCK_HEADER_SIZE + (uint64_t)input_size + 64 + ZXC_BLOCK_CHECKSUM_SIZE;
+    // Mirror the Block API contract: src_size must be in [1, ZXC_BLOCK_SIZE_MAX].
+    // Inputs outside this range cause zxc_compress_block to fail
+    // (NULL_INPUT for 0, BAD_BLOCK_SIZE above MAX), so the bound is undefined.
+    // Returning 0 signals "unusable" upfront. The cap also makes the addition
+    // below trivially overflow-free.
+    if (UNLIKELY(input_size == 0 || input_size > ZXC_BLOCK_SIZE_MAX)) return 0;
+    // Outer block header + payload (worst case: incompressible, raw bytes)
+    // + inner format overhead + optional checksum.
+    return (uint64_t)ZXC_BLOCK_HEADER_SIZE + (uint64_t)input_size + ZXC_BLOCK_FORMAT_OVERHEAD +
+           ZXC_BLOCK_CHECKSUM_SIZE;
 }
 
 /*
@@ -715,9 +727,12 @@ uint64_t zxc_compress_block_bound(const size_t input_size) {
  * Sizing the destination to uncompressed_size + ZXC_PAD_SIZE*66 guarantees
  * the fast path is always reachable and that tail bounds checks never
  * spuriously reject the last literals of a valid block.
+ *
+ * Returns 0 if @p uncompressed_size exceeds ZXC_BLOCK_SIZE_MAX (the Block API
+ * limit), or if the arithmetic would overflow.
  */
 uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
-    if (UNLIKELY(uncompressed_size > SIZE_MAX - ZXC_DECOMPRESS_TAIL_PAD)) return 0;
+    if (UNLIKELY(uncompressed_size > ZXC_BLOCK_SIZE_MAX)) return 0;
     return (uint64_t)uncompressed_size + ZXC_DECOMPRESS_TAIL_PAD;
 }
 

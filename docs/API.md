@@ -391,7 +391,10 @@ Returns the maximum compressed size for a single block.
 Unlike `zxc_compress_bound()`, this does **not** include file header,
 EOF block, or footer overhead.
 
-**Returns**: upper bound in bytes, or `0` on overflow.
+`input_size` must be in `[0, ZXC_BLOCK_SIZE_MAX]` (the Block API limit).
+
+**Returns**: upper bound in bytes, or `0` if `input_size > ZXC_BLOCK_SIZE_MAX`
+or would overflow the computation.
 
 ### `zxc_decompress_block_bound`
 
@@ -409,8 +412,10 @@ Use this helper to size destination buffers for the fast path. For callers
 that genuinely cannot oversize their output buffer, use
 `zxc_decompress_block_safe()` instead.
 
-**Returns**: minimum `dst_capacity` in bytes, or `0` if `uncompressed_size`
-would overflow.
+`uncompressed_size` must be in `[0, ZXC_BLOCK_SIZE_MAX]` (the Block API limit).
+
+**Returns**: minimum `dst_capacity` in bytes, or `0` if
+`uncompressed_size > ZXC_BLOCK_SIZE_MAX` or would overflow the computation.
 
 ### `zxc_compress_block`
 
@@ -428,7 +433,12 @@ ZXC_EXPORT int64_t zxc_compress_block(
 Compresses a single block using a reusable context.  
 Only `level`, `block_size`, and `checksum_enabled` fields of `opts` are used.
 
+`src_size` must be in `[1, ZXC_BLOCK_SIZE_MAX]` (2 MiB). For larger payloads,
+use the frame API (`zxc_compress`) or streaming API (`zxc_cstream_*`), which
+chunk transparently into format-conformant blocks.
+
 **Returns**: compressed block size (> 0) on success, or negative `zxc_error_t`.
+Returns `ZXC_ERROR_BAD_BLOCK_SIZE` if `src_size > ZXC_BLOCK_SIZE_MAX`.
 
 ### `zxc_decompress_block`
 
@@ -445,10 +455,14 @@ ZXC_EXPORT int64_t zxc_decompress_block(
 
 Decompresses a single block produced by `zxc_compress_block()`.
 `dst_capacity` should be at least
-`zxc_decompress_block_bound(uncompressed_size)` to enable the fast path.
+`zxc_decompress_block_bound(uncompressed_size)` to enable the fast path, and
+**must not exceed** `ZXC_BLOCK_SIZE_MAX + ZXC_DECOMPRESS_TAIL_PAD`. For payloads
+produced by the frame or streaming APIs, use `zxc_decompress` instead.
 Only `checksum_enabled` is used.
 
 **Returns**: decompressed size (> 0) on success, or negative `zxc_error_t`.
+Returns `ZXC_ERROR_BAD_BLOCK_SIZE` if `dst_capacity` exceeds the per-block
+limit.
 
 ### `zxc_decompress_block_safe`
 
@@ -472,6 +486,11 @@ Output is **bit-identical** to `zxc_decompress_block()`. NUM and RAW blocks
 transparently forward to the fast path; only GLO/GHI blocks use the
 strict-tail decoder, which is slightly slower than the wild-copy fast path
 (see the performance table in `EXAMPLES.md`).
+
+Strict-tail variant: `dst_capacity` is the exact uncompressed size with no
+tail-pad margin, so the upper limit is `ZXC_BLOCK_SIZE_MAX` (not
+`MAX+TAIL_PAD` as for `zxc_decompress_block`). Returns
+`ZXC_ERROR_BAD_BLOCK_SIZE` if `dst_capacity > ZXC_BLOCK_SIZE_MAX`.
 
 Only `checksum_enabled` is used.
 

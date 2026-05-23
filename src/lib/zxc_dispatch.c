@@ -1038,6 +1038,11 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     if (UNLIKELY(!cctx || !src || !dst || src_size == 0 || dst_capacity == 0))
         return ZXC_ERROR_NULL_INPUT;
 
+    /* Block API processes a single format-conformant block: src_size must not
+     * exceed ZXC_BLOCK_SIZE_MAX. Callers with larger inputs should use the
+     * frame or streaming APIs which chunk transparently. */
+    if (UNLIKELY(src_size > ZXC_BLOCK_SIZE_MAX)) return ZXC_ERROR_BAD_BLOCK_SIZE;
+
     const int checksum_enabled = opts ? opts->checksum_enabled : cctx->stored_checksum;
     const int level = (opts && opts->level > 0) ? opts->level : cctx->stored_level;
     /* For block API, block_size == src_size (the caller compresses one block at a time). */
@@ -1083,6 +1088,13 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
                              const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!dctx || !src || !dst || src_size < ZXC_BLOCK_HEADER_SIZE || dst_capacity == 0))
         return ZXC_ERROR_NULL_INPUT;
+
+    /* Block API decompresses a single format-conformant block. Decoded payload
+     * cannot exceed ZXC_BLOCK_SIZE_MAX; dst_capacity is bounded accordingly to
+     * include the tail-pad needed for safe wild copies. Callers expecting
+     * larger outputs should use the frame or streaming APIs. */
+    if (UNLIKELY(dst_capacity > ZXC_BLOCK_SIZE_MAX + ZXC_DECOMPRESS_TAIL_PAD))
+        return ZXC_ERROR_BAD_BLOCK_SIZE;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
 
@@ -1139,6 +1151,9 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
                                   const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!dctx || !src || !dst || src_size < ZXC_BLOCK_HEADER_SIZE || dst_capacity == 0))
         return ZXC_ERROR_NULL_INPUT;
+
+    /* Strict-tail variant: dst_capacity matches the exact uncompressed size */
+    if (UNLIKELY(dst_capacity > ZXC_BLOCK_SIZE_MAX)) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
     const uint8_t type = ((const uint8_t*)src)[0];
     /* NUM/RAW never wild-write past dst_capacity: route to the existing fast API. */

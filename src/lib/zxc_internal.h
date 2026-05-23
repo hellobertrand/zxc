@@ -332,6 +332,15 @@ extern "C" {
 /** @brief Binary size of a GHI block sub-header. */
 #define ZXC_GHI_HEADER_BINARY_SIZE 16
 
+/** @brief Worst-case format overhead inside a single block beyond the outer
+ *  8-byte block header and the optional 4-byte checksum.
+ *
+ *  Covers the inner GLO/GHI sub-header (16 B) plus four section descriptors
+ *  (4 x 8 = 32 B) = 48 B, with a 16 B safety margin for future format
+ *  evolution. Used by zxc_compress_block_bound() and zxc_compress_bound()
+ *  to size the destination buffer in the worst (incompressible) case. */
+#define ZXC_BLOCK_FORMAT_OVERHEAD 64
+
 /** @brief Binary size of a NUM chunk sub-frame header (nvals + bits + base + psize). */
 #define ZXC_NUM_CHUNK_HEADER_SIZE 16
 /** @brief Number of numeric values to decode in a single SIMD batch (NUM block). */
@@ -435,6 +444,23 @@ extern "C" {
 #define ZXC_LZ_WINDOW_MASK (ZXC_LZ_WINDOW_SIZE - 1U)
 /** @brief Minimum match length for an LZ77 match. */
 #define ZXC_LZ_MIN_MATCH_LEN 5
+/** @brief Maximum legitimate value a varint can decode to.
+ *
+ * A varint value represents (ll - MASK) or (ml - MASK) and is therefore always
+ * strictly less than ZXC_BLOCK_SIZE_MAX (enforced by the Block API entry
+ * points). The cap is set to (ZXC_BLOCK_SIZE_MAX - 1), which fits cleanly in a
+ * 3-byte varint (21 bits): the decoder rejects any 4- or 5-byte encoding, and
+ * the encoder refuses to emit values above this bound. Together they bound the
+ * varint surface to exactly the format-defined block size limit. */
+#define ZXC_MAX_VARINT_VALUE ((uint32_t)(ZXC_BLOCK_SIZE_MAX - 1U))
+/** @brief Maximum decoded output of a single sequence with INLINE ll/ml
+ *         (non-varint). Used by 4x decoder bounds checks to reserve space for
+ *         subsequent inline sequences in the same batch when the current
+ *         sequence has a varint-extended ml. */
+#define ZXC_GLO_MAX_INLINE_OUT_PER_SEQ \
+    ((ZXC_TOKEN_LL_MASK - 1U) + (ZXC_TOKEN_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 33 */
+#define ZXC_GHI_MAX_INLINE_OUT_PER_SEQ \
+    ((ZXC_SEQ_LL_MASK - 1U) + (ZXC_SEQ_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 513 */
 /** @brief Base bias added to encoded offsets (stored = actual - bias). */
 #define ZXC_LZ_OFFSET_BIAS 1
 /** @brief Maximum allowed offset distance. */

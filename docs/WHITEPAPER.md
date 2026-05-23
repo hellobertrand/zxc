@@ -68,13 +68,30 @@ ZXC uses a **Prefix Varint** encoding for overflow values. Unlike standard VByte
 
 **Encoding Scheme:**
 
+The prefix-length encoding generalizes to **N bytes** by construction: the
+number of leading `1` bits in the first byte (followed by a terminating
+`0`) determines how many additional payload bytes follow. An N-byte varint
+carries `7*N` payload bits (`8 - N` bits in the first byte plus 8 bits per
+following byte). ZXC caps the format at 3 bytes because no legitimate
+value exceeds 21 bits (see below); longer prefixes (`1110xxxx`, `11110xxx`,
+...) are reserved for a future format version that would raise
+`ZXC_BLOCK_SIZE_MAX`.
+
+Encodings used:
+
 | Prefix (Binary) | Total Bytes | Data Bits (1st Byte) | Total Data Bits | Range (Value < X) |
 |-----------------|-------------|----------------------|-----------------|-------------------|
 | `0xxxxxxx`      | 1           | 7                    | 7               | 128               |
 | `10xxxxxx`      | 2           | 6                    | 14 (6+8)        | 16,384            |
-| `110xxxxx`      | 3           | 5                    | 21 (5+8+8)      | 2,097,152         |
-| `1110xxxx`      | 4           | 4                    | 28 (4+8+8+8)    | 268,435,456       |
-| `11110xxx`      | 5           | 3                    | 35 (3+8+8+8+8)  | 34,359,738,368    |
+| `110xxxxx`      | 3           | 5                    | 21 (5+8+8)      | 2,097,152 (2 MiB) |
+
+A varint encodes `(LL - MASK)` or `(ML - MASK)`, both bounded by
+`ZXC_BLOCK_SIZE_MAX = 2 MiB`. **All legitimate ZXC varints fit in at
+most 3 bytes.** Any prefix indicating a length >= 4 bytes (first byte
+`>= 0xE0`) is out of spec for v1: encoders must never emit such a varint,
+and conforming decoders reject it as corrupt input. This caps the varint
+surface to the format-defined block size limit and neutralizes
+integer-overflow attacks in downstream bounds arithmetic.
 
 **Example**: Encoding value `300` (binary: `100101100`):
 ```text

@@ -521,20 +521,16 @@ int test_block_api_boundary_sizes() {
 }
 
 /*
- * Regression test for blocks > 2 MiB.
+ * Regression test: the Block API enforces the format-level block size cap
+ * (ZXC_BLOCK_SIZE_MAX = 2 MiB).
  *
- * Before the varint extension, zxc_write_varint silently truncated LL/ML
- * values >= 2^21 (21 bits), corrupting the output for any block that
- * produced a literal run or match length exceeding 2 MiB. The encoder
- * now writes 4- and 5-byte varints (28/32 bits), matching the decoder
- * which already supported them.
- *
- * This test round-trips highly repetitive data in blocks of 3, 4 and 8 MiB.
- * The LZ77 path on such data produces match lengths close to block size,
- * reliably exercising the 4-byte varint branch.
+ * Inputs larger than ZXC_BLOCK_SIZE_MAX must be rejected upfront with
+ * ZXC_ERROR_BAD_BLOCK_SIZE; callers with bigger payloads must use the frame
+ * or streaming APIs which chunk transparently. The same cap bounds the
+ * varint value space, neutralizing wrap-around attacks downstream.
  */
 int test_block_api_large_block_varint() {
-    printf("=== TEST: Block API - Varint >21 bits (blocks > 2 MiB) ===\n");
+    printf("=== TEST: Block API - Reject blocks > ZXC_BLOCK_SIZE_MAX ===\n");
 
     const struct {
         size_t size;
@@ -551,7 +547,7 @@ int test_block_api_large_block_varint() {
     for (int i = 0; i < num_cases; i++) {
         const size_t sz = cases[i].size;
         uint8_t* src = malloc(sz);
-        const uint64_t bound = zxc_compress_block_bound(sz);
+        const uint64_t bound = zxc_compress_block_bound(ZXC_BLOCK_SIZE_MAX);
         uint8_t* compressed = bound ? malloc((size_t)bound) : NULL;
         uint8_t* decompressed = malloc(sz);
         zxc_cctx* cctx = zxc_create_cctx(NULL);
@@ -563,42 +559,38 @@ int test_block_api_large_block_varint() {
             goto per_case_cleanup;
         }
 
-        /* Repetitive pattern: after the initial ~400 byte literal run, the
-         * rest of the buffer matches, producing a match length close to sz
-         * (well above 2^21) triggering the 4-byte varint encoding path. */
         gen_lz_data(src, sz);
-
-        for (int lvl = 1; lvl <= 5; lvl++) {
-            zxc_compress_opts_t copts = {.level = lvl, .checksum_enabled = 1};
-            const int64_t csize = zxc_compress_block(cctx, src, sz, compressed,
-                                                     (size_t)bound, &copts);
-            if (csize <= 0) {
-                printf("  [FAIL] %s lvl=%d: compress returned %lld\n",
-                       cases[i].name, lvl, (long long)csize);
-                failures++;
-                continue;
-            }
-
-            zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
-            const int64_t dsize = zxc_decompress_block(dctx, compressed, (size_t)csize,
-                                                      decompressed, sz, &dopts);
-            if (dsize != (int64_t)sz) {
-                printf("  [FAIL] %s lvl=%d: decompress returned %lld (expected %zu)\n",
-                       cases[i].name, lvl, (long long)dsize, sz);
-                failures++;
-                continue;
-            }
-            if (memcmp(src, decompressed, sz) != 0) {
-                printf("  [FAIL] %s lvl=%d: content mismatch after roundtrip\n",
-                       cases[i].name, lvl);
-                failures++;
-                continue;
-            }
+        zxc_compress_opts_t copts = {.level = 1, .checksum_enabled = 1};
+        const int64_t csize =
+            zxc_compress_block(cctx, src, sz, compressed, (size_t)bound, &copts);
+        if (csize != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf("  [FAIL] %s compress: expected ZXC_ERROR_BAD_BLOCK_SIZE (%d), got %lld\n",
+                   cases[i].name, ZXC_ERROR_BAD_BLOCK_SIZE, (long long)csize);
+            failures++;
+            goto per_case_cleanup;
         }
 
-        if (!failures) {
-            printf("  [PASS] %s roundtrip OK across levels 1-5\n", cases[i].name);
+        zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
+        const int64_t dsize =
+            zxc_decompress_block(dctx, src, sz, decompressed, sz, &dopts);
+        if (dsize != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf("  [FAIL] %s decompress: expected ZXC_ERROR_BAD_BLOCK_SIZE (%d), got %lld\n",
+                   cases[i].name, ZXC_ERROR_BAD_BLOCK_SIZE, (long long)dsize);
+            failures++;
+            goto per_case_cleanup;
         }
+
+        const int64_t dssize =
+            zxc_decompress_block_safe(dctx, src, sz, decompressed, sz, &dopts);
+        if (dssize != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf("  [FAIL] %s decompress_safe: expected ZXC_ERROR_BAD_BLOCK_SIZE (%d), got %lld\n",
+                   cases[i].name, ZXC_ERROR_BAD_BLOCK_SIZE, (long long)dssize);
+            failures++;
+            goto per_case_cleanup;
+        }
+
+        printf("  [PASS] %s correctly rejected by compress, decompress, and decompress_safe\n",
+               cases[i].name);
 
     per_case_cleanup:
         free(src);
