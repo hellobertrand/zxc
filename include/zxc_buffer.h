@@ -212,8 +212,11 @@ typedef struct zxc_dctx_s zxc_dctx;
  * EOF block, or footer overhead.  Use this to size the destination
  * buffer for zxc_compress_block().
  *
- * @param[in] input_size Size of the uncompressed block in bytes.
- * @return Upper bound on compressed block size, or 0 on overflow.
+ * @param[in] input_size Size of the uncompressed block in bytes
+ *                       (must be <= @ref ZXC_BLOCK_SIZE_MAX).
+ * @return Upper bound on compressed block size, or 0 if @p input_size is
+ *         out of range for the Block API
+ *         (@p input_size > @ref ZXC_BLOCK_SIZE_MAX) or would overflow.
  */
 ZXC_EXPORT uint64_t zxc_compress_block_bound(size_t input_size);
 
@@ -230,9 +233,11 @@ ZXC_EXPORT uint64_t zxc_compress_block_bound(size_t input_size);
  * guaranteed to enable the fastest decode path without aliasing or
  * overrun checks tripping.
  *
- * @param[in] uncompressed_size Original uncompressed block size in bytes.
- * @return Minimum @c dst_capacity to pass to zxc_decompress_block(),
- *         or 0 if @p uncompressed_size would overflow.
+ * @param[in] uncompressed_size Original uncompressed block size in bytes
+ *                              (must be <= @ref ZXC_BLOCK_SIZE_MAX).
+ * @return Minimum @c dst_capacity to pass to zxc_decompress_block(), or 0 if
+ *         @p uncompressed_size is out of range for the Block API
+ *         (@p uncompressed_size > @ref ZXC_BLOCK_SIZE_MAX) or would overflow.
  */
 ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
 

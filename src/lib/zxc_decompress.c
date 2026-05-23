@@ -119,7 +119,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
         return (b0 & 0x1F) | ((uint32_t)p[1] << 5) | ((uint32_t)p[2] << 13);
     }
 
-    // 4- or 5-byte encoding: out-of-spec for the current format, reject.
+    // extra encoding: out-of-spec for the current format, reject.
     *ptr = end;
     return 0;
 }

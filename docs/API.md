@@ -391,7 +391,10 @@ Returns the maximum compressed size for a single block.
 Unlike `zxc_compress_bound()`, this does **not** include file header,
 EOF block, or footer overhead.
 
-**Returns**: upper bound in bytes, or `0` on overflow.
+`input_size` must be in `[0, ZXC_BLOCK_SIZE_MAX]` (the Block API limit).
+
+**Returns**: upper bound in bytes, or `0` if `input_size > ZXC_BLOCK_SIZE_MAX`
+or would overflow the computation.
 
 ### `zxc_decompress_block_bound`
 
@@ -409,8 +412,10 @@ Use this helper to size destination buffers for the fast path. For callers
 that genuinely cannot oversize their output buffer, use
 `zxc_decompress_block_safe()` instead.
 
-**Returns**: minimum `dst_capacity` in bytes, or `0` if `uncompressed_size`
-would overflow.
+`uncompressed_size` must be in `[0, ZXC_BLOCK_SIZE_MAX]` (the Block API limit).
+
+**Returns**: minimum `dst_capacity` in bytes, or `0` if
+`uncompressed_size > ZXC_BLOCK_SIZE_MAX` or would overflow the computation.
 
 ### `zxc_compress_block`
 

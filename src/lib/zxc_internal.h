@@ -332,6 +332,15 @@ extern "C" {
 /** @brief Binary size of a GHI block sub-header. */
 #define ZXC_GHI_HEADER_BINARY_SIZE 16
 
+/** @brief Worst-case format overhead inside a single block beyond the outer
+ *  8-byte block header and the optional 4-byte checksum.
+ *
+ *  Covers the inner GLO/GHI sub-header (16 B) plus four section descriptors
+ *  (4 x 8 = 32 B) = 48 B, with a 16 B safety margin for future format
+ *  evolution. Used by zxc_compress_block_bound() and zxc_compress_bound()
+ *  to size the destination buffer in the worst (incompressible) case. */
+#define ZXC_BLOCK_FORMAT_OVERHEAD 64
+
 /** @brief Binary size of a NUM chunk sub-frame header (nvals + bits + base + psize). */
 #define ZXC_NUM_CHUNK_HEADER_SIZE 16
 /** @brief Number of numeric values to decode in a single SIMD batch (NUM block). */
