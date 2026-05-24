@@ -94,12 +94,15 @@ typedef zxc_huf_pm_frame_t frame_t;
 static void pm_leaves_sort(pm_leaf_t* RESTRICT leaves, const int n) {
     enum { NB = 32 };
     int count[NB];
-    int offset[NB];
+    int offset[NB + 1]; /* +1 sentinel = n, avoids end-of-bucket branch. */
+    uint8_t bkt[ZXC_HUF_NUM_SYMBOLS];
     pm_leaf_t tmp[ZXC_HUF_NUM_SYMBOLS];
 
     ZXC_MEMSET(count, 0, sizeof(count));
     for (int i = 0; i < n; i++) {
-        count[zxc_log2_u32(leaves[i].w)]++;
+        const unsigned b = zxc_log2_u32(leaves[i].w);
+        bkt[i] = (uint8_t)b;
+        count[b]++;
     }
 
     int acc = 0;
@@ -107,17 +110,18 @@ static void pm_leaves_sort(pm_leaf_t* RESTRICT leaves, const int n) {
         offset[b] = acc;
         acc += count[b];
     }
+    offset[NB] = n;
 
     int pos[NB];
     ZXC_MEMCPY(pos, offset, sizeof(pos));
     for (int i = 0; i < n; i++) {
-        const unsigned b = zxc_log2_u32(leaves[i].w);
-        tmp[pos[b]++] = leaves[i];
+        tmp[pos[bkt[i]]++] = leaves[i];
     }
 
     for (int b = 0; b < NB; b++) {
+        if (count[b] < 2) continue;
         const int s = offset[b];
-        const int e = (b + 1 < NB) ? offset[b + 1] : n;
+        const int e = offset[b + 1];
         for (int i = s + 1; i < e; i++) {
             const pm_leaf_t key = tmp[i];
             int j = i - 1;

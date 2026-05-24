@@ -84,12 +84,6 @@
 #define ZXC_FREE(ptr) free(ptr)
 #endif
 
-/** @def ZXC_QSORT
- *  @brief Generic in-place sort. Default: libc @c qsort. */
-#ifndef ZXC_QSORT
-#define ZXC_QSORT(base, nmemb, size, cmp) qsort(base, nmemb, size, cmp)
-#endif
-
 /** @} */ /* end of Heap Allocator Abstraction */
 
 /**

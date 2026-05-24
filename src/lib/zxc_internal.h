@@ -27,7 +27,7 @@
 #define ZXC_INTERNAL_H
 
 #include "zxc_deps.h" /* libc deps: <limits.h>, <stdint.h>, <stdlib.h>, <string.h>,
-                        and the ZXC_MALLOC / ZXC_ALIGNED_MALLOC / ZXC_QSORT macros.
+                        and the ZXC_MALLOC / ZXC_ALIGNED_MALLOC macros.
                         Vendor this file to retarget non-libc environments. */
 
 #include "../../include/zxc_buffer.h"
