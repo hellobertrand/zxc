@@ -79,21 +79,57 @@ typedef struct {
 typedef zxc_huf_pm_frame_t frame_t;
 
 /**
- * @brief qsort comparator for `pm_leaf_t` arrays.
+ * @brief Sort `pm_leaf_t` array by ascending weight, ties broken by ascending symbol.
  *
- * Orders leaves by ascending weight, breaking ties by ascending symbol value
- * so the resulting code-length assignment is deterministic across runs.
+ * Bucket sort on `floor(log2(weight))` (32 buckets), with insertion sort
+ * inside each bucket. Replaces a libc `qsort` call: the comparator's
+ * indirect call dominated, and frequency distributions cluster naturally
+ * across ~10-14 magnitude buckets, so intra-bucket lists stay short and
+ * insertion sort is branch-friendly. Deterministic tie-break on `sym` is
+ * applied inside the insertion sort.
  *
- * @param[in] a Pointer to a `pm_leaf_t` (cast from `const void*`).
- * @param[in] b Pointer to a `pm_leaf_t` (cast from `const void*`).
- * @return Negative / zero / positive per the `qsort` convention.
+ * Precondition: all weights are > 0 (zero-frequency symbols are filtered
+ * by the caller before this runs).
  */
-static int pm_leaf_cmp(const void* a, const void* b) {
-    const pm_leaf_t* const la = (const pm_leaf_t*)a;
-    const pm_leaf_t* const lb = (const pm_leaf_t*)b;
-    if (la->w < lb->w) return -1;
-    if (la->w > lb->w) return 1;
-    return la->sym - lb->sym;
+static void pm_leaves_sort(pm_leaf_t* RESTRICT leaves, const int n) {
+    enum { NB = 32 };
+    int count[NB];
+    int offset[NB];
+    pm_leaf_t tmp[ZXC_HUF_NUM_SYMBOLS];
+
+    ZXC_MEMSET(count, 0, sizeof(count));
+    for (int i = 0; i < n; i++) {
+        count[zxc_log2_u32(leaves[i].w)]++;
+    }
+
+    int acc = 0;
+    for (int b = 0; b < NB; b++) {
+        offset[b] = acc;
+        acc += count[b];
+    }
+
+    int pos[NB];
+    ZXC_MEMCPY(pos, offset, sizeof(pos));
+    for (int i = 0; i < n; i++) {
+        const unsigned b = zxc_log2_u32(leaves[i].w);
+        tmp[pos[b]++] = leaves[i];
+    }
+
+    for (int b = 0; b < NB; b++) {
+        const int s = offset[b];
+        const int e = (b + 1 < NB) ? offset[b + 1] : n;
+        for (int i = s + 1; i < e; i++) {
+            const pm_leaf_t key = tmp[i];
+            int j = i - 1;
+            while (j >= s && (tmp[j].w > key.w || (tmp[j].w == key.w && tmp[j].sym > key.sym))) {
+                tmp[j + 1] = tmp[j];
+                j--;
+            }
+            tmp[j + 1] = key;
+        }
+    }
+
+    ZXC_MEMCPY(leaves, tmp, (size_t)n * sizeof(pm_leaf_t));
 }
 
 /**
@@ -132,7 +168,7 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         return ZXC_OK;
     }
 
-    ZXC_QSORT(leaves, (size_t)n, sizeof(pm_leaf_t), pm_leaf_cmp);
+    pm_leaves_sort(leaves, n);
 
     /* n <= 256 <= 2^ZXC_HUF_MAX_CODE_LEN, so length-limit is always feasible. */
     const int max_per_level = 2 * n;
