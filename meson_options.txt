@@ -1,2 +1,0 @@
-option('disable_simd', type : 'boolean', value : false,
-       description : 'Disable hand-written SIMD paths (AVX2/AVX512/NEON)')

@@ -51,15 +51,13 @@ variant_sources = ['src/lib/zxc_compress.c',
 
 variant_sets = [['_default', []]]
 
-if not get_option('disable_simd')
-  if host_cpu == 'x86_64'
-    variant_sets += [['_avx2',   ['-mavx2', '-mfma', '-mbmi', '-mbmi2', '-mlzcnt']]]
-    variant_sets += [['_avx512', ['-mavx512f', '-mavx512bw', '-mbmi', '-mbmi2', '-mlzcnt']]]
-  elif host_cpu == 'aarch64'
-    variant_sets += [['_neon', ['-march=armv8-a+simd']]]
-  elif host_cpu == 'arm'
-    variant_sets += [['_neon', ['-march=armv7-a', '-mfpu=neon']]]
-  endif
+if host_cpu == 'x86_64'
+  variant_sets += [['_avx2',   ['-mavx2', '-mfma', '-mbmi', '-mbmi2', '-mlzcnt']]]
+  variant_sets += [['_avx512', ['-mavx512f', '-mavx512bw', '-mbmi', '-mbmi2', '-mlzcnt']]]
+elif host_cpu == 'aarch64'
+  variant_sets += [['_neon', ['-march=armv8-a+simd']]]
+elif host_cpu == 'arm'
+  variant_sets += [['_neon', ['-march=armv7-a', '-mfpu=neon']]]
 endif
 
 variant_objects = []
