@@ -92,33 +92,35 @@ typedef zxc_huf_pm_frame_t frame_t;
  * by the caller before this runs).
  */
 static void pm_leaves_sort(pm_leaf_t* RESTRICT leaves, const int n) {
-    enum { NB = 32 };
-    int count[NB];
-    int offset[NB + 1]; /* +1 sentinel = n, avoids end-of-bucket branch. */
-    uint8_t bkt[ZXC_HUF_NUM_SYMBOLS];
+    /* One bucket per possible value of floor(log2(weight)) for a 32-bit
+     * weight, i.e. 32 buckets. */
+    enum { NUM_BUCKETS = 32 };
+    int count[NUM_BUCKETS];
+    int offset[NUM_BUCKETS + 1]; /* +1 sentinel = n, avoids end-of-bucket branch. */
+    uint8_t bucket_of[ZXC_HUF_NUM_SYMBOLS];
     pm_leaf_t tmp[ZXC_HUF_NUM_SYMBOLS];
 
     ZXC_MEMSET(count, 0, sizeof(count));
     for (int i = 0; i < n; i++) {
         const unsigned b = zxc_log2_u32(leaves[i].w);
-        bkt[i] = (uint8_t)b;
+        bucket_of[i] = (uint8_t)b;
         count[b]++;
     }
 
     int acc = 0;
-    for (int b = 0; b < NB; b++) {
+    for (int b = 0; b < NUM_BUCKETS; b++) {
         offset[b] = acc;
         acc += count[b];
     }
-    offset[NB] = n;
+    offset[NUM_BUCKETS] = n;
 
-    int pos[NB];
+    int pos[NUM_BUCKETS];
     ZXC_MEMCPY(pos, offset, sizeof(pos));
     for (int i = 0; i < n; i++) {
-        tmp[pos[bkt[i]]++] = leaves[i];
+        tmp[pos[bucket_of[i]]++] = leaves[i];
     }
 
-    for (int b = 0; b < NB; b++) {
+    for (int b = 0; b < NUM_BUCKETS; b++) {
         if (count[b] < 2) continue;
         const int s = offset[b];
         const int e = offset[b + 1];
