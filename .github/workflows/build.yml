@@ -169,6 +169,43 @@ jobs:
           name: zxc-${{ matrix.platform }}
           path: ${{ env.ARCHIVE }}
 
+  meson:
+    name: Meson ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            os: ubuntu-latest
+          - name: macOS ARM64
+            os: macos-26
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Meson and Ninja
+        run: pip3 install meson ninja
+
+      - name: Setup (static)
+        run: meson setup build-static -Ddefault_library=static
+
+      - name: Build (static)
+        run: meson compile -C build-static
+
+      - name: Test (static)
+        run: meson test -C build-static --print-errorlogs
+
+      - name: Setup (shared)
+        run: meson setup build-shared -Ddefault_library=shared
+
+      - name: Build (shared)
+        run: meson compile -C build-shared
+
+      - name: Test (shared)
+        run: meson test -C build-shared --print-errorlogs
+
   sbom:
     name: Generate SBOM
     if: startsWith(github.ref, 'refs/tags/')
