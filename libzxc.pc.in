@@ -5,6 +5,7 @@ includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 
 Name: libzxc
 Description: High-performance asymmetric lossless compression
+URL: https://github.com/hellobertrand/zxc
 License: BSD 3-Clause
 Version: @PROJECT_VERSION@
 Libs: -L${libdir} -lzxc
