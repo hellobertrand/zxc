@@ -145,10 +145,10 @@ install_headers(
 )
 
 # =============================================================================
-# CLI & tests (standalone only)
+# CLI (standalone only, off by default)
 # =============================================================================
 
-if not meson.is_subproject()
+if not meson.is_subproject() and get_option('build_cli')
   math_dep = cc.find_library('m', required : false)
 
   executable('zxc',
@@ -156,7 +156,13 @@ if not meson.is_subproject()
     dependencies : [libzxc_dep, math_dep],
     install : true,
   )
+endif
 
+# =============================================================================
+# Tests (standalone only)
+# =============================================================================
+
+if not meson.is_subproject()
   test_exe = executable('zxc_test',
     files(
       'tests/test_main.c',
