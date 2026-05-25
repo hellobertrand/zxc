@@ -308,7 +308,38 @@ brew install zxc
 
 The formula is maintained in [homebrew-core](https://formulae.brew.sh/formula/zxc).
 
-### Option 5: Building from Source
+### Option 5: Meson Subproject
+
+zxc ships a native `meson.build`, so any Meson project can pull it in as a
+subproject or via [WrapDB](https://mesonbuild.com/Wrapdb-projects.html).
+
+**1. Create `subprojects/zxc.wrap`:**
+```ini
+[wrap-git]
+url = https://github.com/hellobertrand/zxc.git
+revision = head
+depth = 1
+
+[provide]
+libzxc = libzxc_dep
+```
+
+**2. Use the dependency in your `meson.build`:**
+```meson
+zxc_dep = dependency('libzxc', fallback : ['zxc', 'libzxc_dep'])
+executable('myapp', 'main.c', dependencies : zxc_dep)
+```
+
+**3. Build:**
+```bash
+meson setup build
+meson compile -C build
+```
+
+When consumed as a subproject, only the library is built (CLI and tests are
+skipped automatically).
+
+### Option 6: Building from Source (CMake)
 
 **Requirements:** CMake (3.14+), C17 Compiler (Clang/GCC/MSVC).
 

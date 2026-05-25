@@ -81,3 +81,7 @@ searchdata.xml
 
 # Coverage
 build-cov/
+
+# Meson
+builddir*/
+subprojects/
