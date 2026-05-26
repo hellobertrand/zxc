@@ -489,6 +489,9 @@ if(ZXC_BUILD_TESTS)
     add_executable(zxc_conformance_test conformance/test_conformance.c)
     target_link_libraries(zxc_conformance_test PRIVATE zxc_lib)
     target_include_directories(zxc_conformance_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    if(ZXC_ENABLE_COVERAGE)
+        target_link_options(zxc_conformance_test PRIVATE --coverage)
+    endif()
 
     add_test(
         NAME conformance

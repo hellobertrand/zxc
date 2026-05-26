@@ -96,7 +96,7 @@ static int test_valid_vector(const char *zxc_path, const char *expected_path)
                 zxc_path, (unsigned long long)dec_sz, expected_sz);
         ok = 0;
     } else if (expected_sz == 0) {
-        /* Nothing to decompress — size match is sufficient. */
+        /* Nothing to decompress: size match is sufficient. */
     } else {
         uint8_t *output = malloc((size_t)dec_sz);
         if (!output) {
@@ -211,7 +211,7 @@ static int list_zxc_files(const char *dir, name_list_t *out)
 #else
     DIR *d = opendir(dir);
     if (!d) return -1;
-    struct dirent *ent;
+    const struct dirent *ent;
     while ((ent = readdir(d)) != NULL) {
         if (has_suffix(ent->d_name, ".zxc"))
             name_list_add(out, ent->d_name);
