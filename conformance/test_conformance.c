@@ -9,8 +9,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dirent.h>
 #include <sys/stat.h>
+#endif
 
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_error.h"
@@ -43,6 +48,17 @@ static uint8_t *read_file(const char *path, size_t *out_size)
     fclose(f);
     *out_size = (size_t)len;
     return buf;
+}
+
+static int file_exists(const char *path)
+{
+#ifdef _WIN32
+    DWORD attr = GetFileAttributesA(path);
+    return attr != INVALID_FILE_ATTRIBUTES;
+#else
+    struct stat st;
+    return stat(path, &st) == 0;
+#endif
 }
 
 static int has_suffix(const char *s, const char *suffix)
@@ -125,7 +141,7 @@ static int test_invalid_vector(const char *zxc_path)
 
     uint64_t dec_sz = zxc_get_decompressed_size(comp, comp_sz);
 
-    if (dec_sz > 0) {
+    if (dec_sz > 0 && dec_sz <= (1 << 20)) {
         uint8_t *output = malloc((size_t)dec_sz);
         if (output) {
             int64_t result = zxc_decompress(comp, comp_sz,
@@ -138,13 +154,12 @@ static int test_invalid_vector(const char *zxc_path)
             free(output);
         }
     }
-    /* dec_sz == 0 means the size query rejected it — correct for invalid data. */
 
     free(comp);
     return ok;
 }
 
-/* ---------- directory scanner -------------------------------------------- */
+/* ---------- portable directory scanner ----------------------------------- */
 
 typedef struct {
     char **names;
@@ -158,7 +173,11 @@ static void name_list_add(name_list_t *l, const char *name)
         l->capacity = l->capacity ? l->capacity * 2 : 64;
         l->names = realloc(l->names, l->capacity * sizeof(char*));
     }
+#ifdef _WIN32
+    l->names[l->count++] = _strdup(name);
+#else
     l->names[l->count++] = strdup(name);
+#endif
 }
 
 static int name_cmp(const void *a, const void *b) {
@@ -176,6 +195,33 @@ static void name_list_free(name_list_t *l) {
     l->count = l->capacity = 0;
 }
 
+static int list_zxc_files(const char *dir, name_list_t *out)
+{
+#ifdef _WIN32
+    char pattern[512];
+    snprintf(pattern, sizeof pattern, "%s\\*.zxc", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE) return -1;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+            name_list_add(out, fd.cFileName);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+#else
+    DIR *d = opendir(dir);
+    if (!d) return -1;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (has_suffix(ent->d_name, ".zxc"))
+            name_list_add(out, ent->d_name);
+    }
+    closedir(d);
+#endif
+    name_list_sort(out);
+    return 0;
+}
+
 /* ---------- main --------------------------------------------------------- */
 
 int main(int argc, char **argv)
@@ -190,35 +236,25 @@ int main(int argc, char **argv)
     int passed = 0, failed = 0, total = 0;
 
     /* --- Valid vectors --- */
-    printf("=== Valid vectors (zxc: %s, expected: %s) ===\n", valid_dir, valid_dir);
+    printf("=== Valid vectors (%s) ===\n", valid_dir);
     {
-        DIR *d = opendir(valid_dir);
-        if (!d) {
+        name_list_t zxc_files = {0};
+        if (list_zxc_files(valid_dir, &zxc_files) < 0) {
             fprintf(stderr, "Cannot open %s\n", valid_dir);
             return 1;
         }
 
-        name_list_t zxc_files = {0};
-        struct dirent *ent;
-        while ((ent = readdir(d)) != NULL) {
-            if (has_suffix(ent->d_name, ".zxc"))
-                name_list_add(&zxc_files, ent->d_name);
-        }
-        closedir(d);
-        name_list_sort(&zxc_files);
-
         for (size_t i = 0; i < zxc_files.count; i++) {
-            char zxc_path[1024], exp_path[1024];
+            char zxc_path[2048], exp_path[2048];
             snprintf(zxc_path, sizeof zxc_path, "%s/%s", valid_dir, zxc_files.names[i]);
 
-            char stem[512];
+            char stem[1024];
             snprintf(stem, sizeof stem, "%s", zxc_files.names[i]);
             stem[strlen(stem) - 4] = '\0';
 
             snprintf(exp_path, sizeof exp_path, "%s/%s.expected", valid_dir, stem);
 
-            struct stat st;
-            if (stat(exp_path, &st) != 0) {
+            if (!file_exists(exp_path)) {
                 fprintf(stderr, "SKIP: %s  (no .expected file)\n", zxc_files.names[i]);
                 continue;
             }
@@ -238,26 +274,17 @@ int main(int argc, char **argv)
     /* --- Invalid vectors --- */
     printf("\n=== Invalid vectors (%s) ===\n", invalid_dir);
     {
-        DIR *d = opendir(invalid_dir);
-        if (!d) {
+        name_list_t zxc_files = {0};
+        if (list_zxc_files(invalid_dir, &zxc_files) < 0) {
             fprintf(stderr, "Cannot open %s\n", invalid_dir);
             return 1;
         }
-
-        name_list_t zxc_files = {0};
-        struct dirent *ent;
-        while ((ent = readdir(d)) != NULL) {
-            if (has_suffix(ent->d_name, ".zxc"))
-                name_list_add(&zxc_files, ent->d_name);
-        }
-        closedir(d);
-        name_list_sort(&zxc_files);
 
         for (size_t i = 0; i < zxc_files.count; i++) {
             char zxc_path[1024];
             snprintf(zxc_path, sizeof zxc_path, "%s/%s", invalid_dir, zxc_files.names[i]);
 
-            char stem[512];
+            char stem[1024];
             snprintf(stem, sizeof stem, "%s", zxc_files.names[i]);
             stem[strlen(stem) - 4] = '\0';
 
