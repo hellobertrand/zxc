@@ -184,15 +184,21 @@ int test_buffer_error_codes() {
     }
     printf("  [PASS] zxc_compress NULL dst -> ZXC_ERROR_NULL_INPUT\n");
 
-    // 3. src_size == 0
+    // 3. src_size == 0 produces a valid empty frame (header + EOF + footer)
     uint8_t dummy[16];
+    uint8_t empty_dst[64];
     zxc_compress_opts_t _co32 = {.level = 3, .checksum_enabled = 0};
-    r = zxc_compress(dummy, 0, dummy, sizeof(dummy), &_co32);
-    if (r != ZXC_ERROR_NULL_INPUT) {
-        printf("  [FAIL] src_size==0: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
+    r = zxc_compress(NULL, 0, empty_dst, sizeof(empty_dst), &_co32);
+    if (r <= 0) {
+        printf("  [FAIL] src_size==0: expected valid frame, got %lld\n", (long long)r);
         return 0;
     }
-    printf("  [PASS] zxc_compress src_size==0 -> ZXC_ERROR_NULL_INPUT\n");
+    uint64_t orig = zxc_get_decompressed_size(empty_dst, (size_t)r);
+    if (orig != 0) {
+        printf("  [FAIL] src_size==0: decompressed size %llu != 0\n", (unsigned long long)orig);
+        return 0;
+    }
+    printf("  [PASS] zxc_compress src_size==0 -> valid empty frame (%lld bytes)\n", (long long)r);
 
     // 4. dst_capacity == 0
     zxc_compress_opts_t _co33 = {.level = 3, .checksum_enabled = 0};

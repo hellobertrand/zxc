@@ -470,7 +470,7 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
 // cppcheck-suppress unusedFunction
 int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTRICT dst,
                      const size_t dst_capacity, const zxc_compress_opts_t* opts) {
-    if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!dst || dst_capacity == 0 || (src_size > 0 && !src))) return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int seekable = opts ? opts->seekable : 0;
@@ -619,7 +619,15 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 // cppcheck-suppress unusedFunction
 int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RESTRICT dst,
                        const size_t dst_capacity, const zxc_decompress_opts_t* opts) {
-    if (UNLIKELY(!src || !dst || src_size < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!src || src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
+        return ZXC_ERROR_NULL_INPUT;
+
+    if (UNLIKELY(!dst || dst_capacity == 0)) {
+        /* dst=NULL / capacity=0 is allowed only for empty frames. */
+        if (dst_capacity != 0 || zxc_le32(src) != ZXC_MAGIC_WORD) return ZXC_ERROR_NULL_INPUT;
+        const uint8_t* footer = (const uint8_t*)src + src_size - ZXC_FILE_FOOTER_SIZE;
+        return (zxc_le64(footer) == 0) ? 0 : (int64_t)ZXC_ERROR_DST_TOO_SMALL;
+    }
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
 

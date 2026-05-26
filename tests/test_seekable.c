@@ -775,11 +775,16 @@ int test_seekable_empty_file() {
     uint8_t* dst = malloc(dst_cap);
     if (!dst) return 0;
 
-    /* Buffer API: NULL src with size 0 is rejected with ZXC_ERROR_NULL_INPUT */
+    /* Buffer API: NULL src with size 0 produces a valid empty frame */
     zxc_compress_opts_t opts = {.level = 3, .seekable = 1};
     const int64_t csize = zxc_compress(NULL, 0, dst, dst_cap, &opts);
-    if (csize >= 0) {
-        printf("Failed: expected NULL_INPUT rejection (got %lld)\n", (long long)csize);
+    if (csize <= 0) {
+        printf("Failed: expected valid empty frame (got %lld)\n", (long long)csize);
+        free(dst); return 0;
+    }
+    const uint64_t orig = zxc_get_decompressed_size(dst, (size_t)csize);
+    if (orig != 0) {
+        printf("Failed: empty frame size should be 0 (got %llu)\n", (unsigned long long)orig);
         free(dst); return 0;
     }
 
