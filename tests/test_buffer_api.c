@@ -184,15 +184,21 @@ int test_buffer_error_codes() {
     }
     printf("  [PASS] zxc_compress NULL dst -> ZXC_ERROR_NULL_INPUT\n");
 
-    // 3. src_size == 0
+    // 3. src_size == 0 produces a valid empty frame (header + EOF + footer)
     uint8_t dummy[16];
+    uint8_t empty_dst[64];
     zxc_compress_opts_t _co32 = {.level = 3, .checksum_enabled = 0};
-    r = zxc_compress(dummy, 0, dummy, sizeof(dummy), &_co32);
-    if (r != ZXC_ERROR_NULL_INPUT) {
-        printf("  [FAIL] src_size==0: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
+    r = zxc_compress(NULL, 0, empty_dst, sizeof(empty_dst), &_co32);
+    if (r <= 0) {
+        printf("  [FAIL] src_size==0: expected valid frame, got %lld\n", (long long)r);
         return 0;
     }
-    printf("  [PASS] zxc_compress src_size==0 -> ZXC_ERROR_NULL_INPUT\n");
+    uint64_t orig = zxc_get_decompressed_size(empty_dst, (size_t)r);
+    if (orig != 0) {
+        printf("  [FAIL] src_size==0: decompressed size %llu != 0\n", (unsigned long long)orig);
+        return 0;
+    }
+    printf("  [PASS] zxc_compress src_size==0 -> valid empty frame (%lld bytes)\n", (long long)r);
 
     // 4. dst_capacity == 0
     zxc_compress_opts_t _co33 = {.level = 3, .checksum_enabled = 0};
@@ -448,6 +454,78 @@ int test_buffer_error_codes() {
 
     free(test_src);
     free(comp_buf);
+    printf("PASS\n\n");
+    return 1;
+}
+
+// Tests the dst=NULL / dst_capacity=0 short-circuit in zxc_decompress:
+// allowed only when the compressed frame's stored size is 0.
+int test_decompress_empty_frame_null_dst() {
+    printf("=== TEST: Unit - Decompress empty frame with NULL/zero dst ===\n");
+
+    /* 1. Produce a valid empty frame via zxc_compress(NULL, 0, ...). */
+    uint8_t empty_frame[64];
+    int64_t comp_sz = zxc_compress(NULL, 0, empty_frame, sizeof(empty_frame), NULL);
+    if (comp_sz <= 0) {
+        printf("  [FAIL] empty compress: got %lld\n", (long long)comp_sz);
+        return 0;
+    }
+
+    /* 2. dst=NULL, dst_capacity=0 on empty frame -> 0 */
+    int64_t r = zxc_decompress(empty_frame, (size_t)comp_sz, NULL, 0, NULL);
+    if (r != 0) {
+        printf("  [FAIL] NULL dst + 0 cap on empty frame: expected 0, got %lld\n", (long long)r);
+        return 0;
+    }
+    printf("  [PASS] NULL dst + 0 cap on empty frame -> 0\n");
+
+    /* 3. dst=valid, dst_capacity=0 on empty frame -> 0 */
+    uint8_t dummy;
+    r = zxc_decompress(empty_frame, (size_t)comp_sz, &dummy, 0, NULL);
+    if (r != 0) {
+        printf("  [FAIL] valid dst + 0 cap on empty frame: expected 0, got %lld\n", (long long)r);
+        return 0;
+    }
+    printf("  [PASS] valid dst + 0 cap on empty frame -> 0\n");
+
+    /* 4. dst=NULL, dst_capacity=0 on non-empty frame -> ZXC_ERROR_DST_TOO_SMALL */
+    uint8_t payload[128] = "hello";
+    uint8_t non_empty_frame[256];
+    int64_t ne_sz = zxc_compress(payload, sizeof(payload), non_empty_frame,
+                                 sizeof(non_empty_frame), NULL);
+    if (ne_sz <= 0) {
+        printf("  [FAIL] non-empty compress: got %lld\n", (long long)ne_sz);
+        return 0;
+    }
+    r = zxc_decompress(non_empty_frame, (size_t)ne_sz, NULL, 0, NULL);
+    if (r != ZXC_ERROR_DST_TOO_SMALL) {
+        printf("  [FAIL] NULL dst + 0 cap on non-empty frame: expected %d, got %lld\n",
+               ZXC_ERROR_DST_TOO_SMALL, (long long)r);
+        return 0;
+    }
+    printf("  [PASS] NULL dst + 0 cap on non-empty frame -> DST_TOO_SMALL\n");
+
+    /* 5. dst=NULL, dst_capacity=0 on bad magic -> ZXC_ERROR_NULL_INPUT */
+    uint8_t bad_magic[64];
+    memcpy(bad_magic, empty_frame, (size_t)comp_sz);
+    bad_magic[0] ^= 0xFF;
+    r = zxc_decompress(bad_magic, (size_t)comp_sz, NULL, 0, NULL);
+    if (r != ZXC_ERROR_NULL_INPUT) {
+        printf("  [FAIL] NULL dst + 0 cap + bad magic: expected %d, got %lld\n",
+               ZXC_ERROR_NULL_INPUT, (long long)r);
+        return 0;
+    }
+    printf("  [PASS] NULL dst + 0 cap + bad magic -> NULL_INPUT\n");
+
+    /* 6. Caller bug: dst=NULL with non-zero capacity -> ZXC_ERROR_NULL_INPUT */
+    r = zxc_decompress(empty_frame, (size_t)comp_sz, NULL, 100, NULL);
+    if (r != ZXC_ERROR_NULL_INPUT) {
+        printf("  [FAIL] NULL dst + cap>0: expected %d, got %lld\n",
+               ZXC_ERROR_NULL_INPUT, (long long)r);
+        return 0;
+    }
+    printf("  [PASS] NULL dst + cap>0 -> NULL_INPUT\n");
+
     printf("PASS\n\n");
     return 1;
 }
