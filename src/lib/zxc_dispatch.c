@@ -619,12 +619,13 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 // cppcheck-suppress unusedFunction
 int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RESTRICT dst,
                        const size_t dst_capacity, const zxc_decompress_opts_t* opts) {
-    if (UNLIKELY(!src || src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
+    if (UNLIKELY(!src || src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE ||
+                 (!dst && dst_capacity != 0)))
         return ZXC_ERROR_NULL_INPUT;
 
     if (UNLIKELY(!dst || dst_capacity == 0)) {
-        /* dst=NULL / capacity=0 is allowed only for empty frames. */
-        if (dst_capacity != 0 || zxc_le32(src) != ZXC_MAGIC_WORD) return ZXC_ERROR_NULL_INPUT;
+        /* Empty-frame case (stored size == 0). */
+        if (zxc_le32(src) != ZXC_MAGIC_WORD) return ZXC_ERROR_NULL_INPUT;
         const uint8_t* footer = (const uint8_t*)src + src_size - ZXC_FILE_FOOTER_SIZE;
         return (zxc_le64(footer) == 0) ? 0 : (int64_t)ZXC_ERROR_DST_TOO_SMALL;
     }
