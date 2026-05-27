@@ -7,6 +7,7 @@ This document provides complete, working examples for using the ZXC compression 
 - [Stream API (Multi-Threaded)](#stream-api-multi-threaded)
 - [Reusable Context API](#reusable-context-api)
 - [Seekable Reader (Custom Storage Backend)](#seekable-reader-custom-storage-backend)
+- [Meson Integration](#meson-integration)
 - [Language Bindings](#language-bindings)
 
 ---
@@ -421,6 +422,46 @@ offset: an HTTP `Range:` GET (return `-1` on a non-`206` response), an S3
 plug-in. As long as `read_at` returns exactly the requested length (or a
 negative `zxc_error_t` code), the seekable API treats it as a transparent
 backend.
+
+---
+
+## Meson Integration
+
+zxc can be consumed as a Meson subproject. This is the recommended approach for
+Meson-based projects that want to vendor or pin a specific zxc version.
+
+**Step 1 — Create `subprojects/zxc.wrap`:**
+
+```ini
+[wrap-git]
+url = https://github.com/hellobertrand/zxc.git
+revision = head
+depth = 1
+
+[provide]
+libzxc = libzxc_dep
+```
+
+**Step 2 — Declare the dependency in your `meson.build`:**
+
+```meson
+project('my_project', 'c', default_options : ['c_std=c17'])
+
+zxc_dep = dependency('libzxc', fallback : ['zxc', 'libzxc_dep'])
+
+executable('my_app', 'main.c', dependencies : zxc_dep)
+```
+
+When `zxc` is used as a subproject, the CLI and test suite are automatically
+skipped. Only the library is built.
+
+**Step 3 — Build and run:**
+
+```bash
+meson setup build
+meson compile -C build
+./build/my_app
+```
 
 ---
 

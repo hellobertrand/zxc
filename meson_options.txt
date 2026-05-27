@@ -1,0 +1,2 @@
+option('build_cli', type : 'boolean', value : false,
+       description : 'Build the command-line interface')
