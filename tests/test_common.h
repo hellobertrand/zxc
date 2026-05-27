@@ -190,5 +190,7 @@ int test_dict_mismatch_error(void);
 int test_dict_required_error(void);
 int test_dict_no_dict_compat(void);
 int test_dict_stream_roundtrip(void);
+int test_dict_seekable_roundtrip(void);
+int test_dict_train_roundtrip(void);
 
 #endif /* ZXC_TEST_COMMON_H */

@@ -336,3 +336,154 @@ int test_dict_stream_roundtrip(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+int test_dict_train_roundtrip(void) {
+    printf("=== TEST: Dict - train then compress/decompress ===\n");
+
+    const char* json_samples[] = {
+        "{\"id\":1,\"name\":\"alice\",\"email\":\"alice@example.com\",\"active\":true}",
+        "{\"id\":2,\"name\":\"bob\",\"email\":\"bob@example.com\",\"active\":false}",
+        "{\"id\":3,\"name\":\"carol\",\"email\":\"carol@example.com\",\"active\":true}",
+        "{\"id\":4,\"name\":\"dave\",\"email\":\"dave@example.com\",\"active\":true}",
+        "{\"id\":5,\"name\":\"eve\",\"email\":\"eve@example.com\",\"active\":false}",
+        "{\"id\":6,\"name\":\"frank\",\"email\":\"frank@example.com\",\"active\":true}",
+        "{\"id\":7,\"name\":\"grace\",\"email\":\"grace@example.com\",\"active\":false}",
+        "{\"id\":8,\"name\":\"hank\",\"email\":\"hank@example.com\",\"active\":true}",
+    };
+    const size_t n_samples = sizeof(json_samples) / sizeof(json_samples[0]);
+    const void* sample_ptrs[8];
+    size_t sample_sizes[8];
+    for (size_t i = 0; i < n_samples; i++) {
+        sample_ptrs[i] = json_samples[i];
+        sample_sizes[i] = strlen(json_samples[i]);
+    }
+
+    uint8_t dict_buf[4096];
+    int64_t dict_sz =
+        zxc_train_dict(sample_ptrs, sample_sizes, n_samples, dict_buf, sizeof(dict_buf));
+    if (dict_sz <= 0) {
+        printf("  [FAIL] train_dict returned %lld\n", (long long)dict_sz);
+        return 0;
+    }
+    printf("  trained dict: %lld bytes\n", (long long)dict_sz);
+
+    const char* test_input =
+        "{\"id\":99,\"name\":\"zara\",\"email\":\"zara@example.com\",\"active\":true}";
+    const size_t src_size = strlen(test_input);
+
+    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    uint8_t* compressed = (uint8_t*)malloc(comp_bound);
+
+    zxc_compress_opts_t copts = {
+        .level = ZXC_LEVEL_DEFAULT,
+        .checksum_enabled = 1,
+        .dict = dict_buf,
+        .dict_size = (size_t)dict_sz,
+    };
+    int64_t comp_size = zxc_compress(test_input, src_size, compressed, comp_bound, &copts);
+    if (comp_size <= 0) {
+        printf("  [FAIL] compress returned %lld\n", (long long)comp_size);
+        free(compressed);
+        return 0;
+    }
+
+    zxc_compress_opts_t copts_nodict = {.level = ZXC_LEVEL_DEFAULT, .checksum_enabled = 1};
+    uint8_t* comp_nodict = (uint8_t*)malloc(comp_bound);
+    int64_t comp_nodict_sz =
+        zxc_compress(test_input, src_size, comp_nodict, comp_bound, &copts_nodict);
+    printf("  with dict: %lld bytes, without: %lld bytes (input: %zu)\n", (long long)comp_size,
+           (long long)comp_nodict_sz, src_size);
+    free(comp_nodict);
+
+    uint8_t decompressed[256];
+    zxc_decompress_opts_t dopts = {
+        .checksum_enabled = 1,
+        .dict = dict_buf,
+        .dict_size = (size_t)dict_sz,
+    };
+    int64_t dec_size = zxc_decompress(compressed, (size_t)comp_size, decompressed,
+                                      sizeof(decompressed), &dopts);
+    free(compressed);
+
+    if (dec_size != (int64_t)src_size || memcmp(test_input, decompressed, src_size) != 0) {
+        printf("  [FAIL] roundtrip mismatch\n");
+        return 0;
+    }
+
+    printf("PASS\n\n");
+    return 1;
+}
+
+int test_dict_seekable_roundtrip(void) {
+    printf("=== TEST: Dict - seekable API roundtrip ===\n");
+
+    const uint8_t dict_content[] =
+        "The quick brown fox jumps over the lazy dog. "
+        "Lorem ipsum dolor sit amet, consectetur adipiscing elit.";
+    const size_t dict_size = sizeof(dict_content) - 1;
+
+    const size_t src_size = 8192;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    gen_dict_friendly_data(src, src_size, dict_content, dict_size);
+
+    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    uint8_t* compressed = (uint8_t*)malloc(comp_bound);
+
+    zxc_compress_opts_t copts = {
+        .level = ZXC_LEVEL_DEFAULT,
+        .checksum_enabled = 1,
+        .seekable = 1,
+        .dict = dict_content,
+        .dict_size = dict_size,
+    };
+    int64_t comp_size = zxc_compress(src, src_size, compressed, comp_bound, &copts);
+    if (comp_size <= 0) {
+        printf("  [FAIL] compress returned %lld\n", (long long)comp_size);
+        free(src);
+        free(compressed);
+        return 0;
+    }
+
+    zxc_seekable* s = zxc_seekable_open(compressed, (size_t)comp_size);
+    if (!s) {
+        printf("  [FAIL] seekable_open returned NULL\n");
+        free(src);
+        free(compressed);
+        return 0;
+    }
+
+    int rc = zxc_seekable_set_dict(s, dict_content, dict_size);
+    if (rc != ZXC_OK) {
+        printf("  [FAIL] seekable_set_dict returned %d\n", rc);
+        zxc_seekable_free(s);
+        free(src);
+        free(compressed);
+        return 0;
+    }
+
+    uint8_t* decompressed = (uint8_t*)malloc(src_size);
+    int64_t dec_size = zxc_seekable_decompress_range(s, decompressed, src_size, 0, src_size);
+    if (dec_size != (int64_t)src_size) {
+        printf("  [FAIL] decompress_range returned %lld, expected %zu\n", (long long)dec_size,
+               src_size);
+        zxc_seekable_free(s);
+        free(src);
+        free(compressed);
+        free(decompressed);
+        return 0;
+    }
+
+    int ok = (memcmp(src, decompressed, src_size) == 0);
+    zxc_seekable_free(s);
+    free(decompressed);
+    free(src);
+    free(compressed);
+
+    if (!ok) {
+        printf("  [FAIL] content mismatch\n");
+        return 0;
+    }
+
+    printf("PASS\n\n");
+    return 1;
+}
