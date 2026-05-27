@@ -893,46 +893,18 @@ fi
 # 25. Dictionary Tests (-D)
 echo "Testing Dictionary (-D)..."
 
-# 25.1 Create a .zxd dictionary from repetitive content
-echo "  Creating test dictionary..."
-# Build a small helper to create a .zxd (uses the C API)
-DICT_HELPER="$TEST_DIR/make_dict"
-cat > "$TEST_DIR/make_dict.c" <<'DICTEOF'
-#include <stdio.h>
-#include <string.h>
-#include "zxc.h"
-#include "zxc_dict.h"
-int main(int argc, char** argv) {
-    const char* content =
-        "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
-        "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. "
-        "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.";
-    size_t sz = strlen(content);
-    uint8_t buf[1024];
-    int64_t w = zxc_dict_save(content, sz, buf, sizeof(buf));
-    if (w <= 0) return 1;
-    FILE* f = fopen(argv[1], "wb");
-    fwrite(buf, 1, (size_t)w, f);
-    fclose(f);
-    return 0;
-}
-DICTEOF
-
-# Compile helper (find include/lib relative to the binary)
-ZXC_DIR=$(dirname "$(dirname "$ZXC_BIN")")
-cc -O0 -I"${ZXC_DIR}/include" -o "$DICT_HELPER" "$TEST_DIR/make_dict.c" \
-   "${ZXC_DIR}/build/libzxc.a" -lpthread 2>/dev/null
-
-if [ ! -f "$DICT_HELPER" ]; then
-    echo "  [SKIP] Could not compile dict helper (missing dev headers)"
-else
-
+# 25.1 Train a dictionary using --train-dict
+echo "  Training dictionary from test data..."
+# Create a few sample files for training
+for i in 1 2 3 4 5; do
+    cp "$TEST_FILE" "$TEST_DIR/sample_${i}.txt"
+done
 DICT_FILE="$TEST_DIR/test.zxd"
-"$DICT_HELPER" "$DICT_FILE"
+"$ZXC_BIN" --train-dict "$DICT_FILE" "$TEST_DIR"/sample_*.txt 2>/dev/null
 if [ ! -f "$DICT_FILE" ]; then
-    log_fail "Dictionary creation failed"
+    log_fail "Dictionary training failed"
 fi
-log_pass "Dictionary .zxd created"
+log_pass "Dictionary trained via --train-dict"
 
 # 25.2 Round-trip with dictionary
 echo "  Testing dict round-trip..."
@@ -1024,8 +996,6 @@ if [ $RET -ne 0 ]; then
 else
     log_fail "Invalid dict file should be rejected"
 fi
-
-fi # end of dict helper check
 
 echo "All tests passed!"
 exit 0
