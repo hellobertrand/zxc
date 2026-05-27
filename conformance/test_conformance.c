@@ -92,7 +92,7 @@ static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
     HANDLE hf = FindFirstFileA(pattern, &fd);
     if (hf == INVALID_HANDLE_VALUE) return NULL;
     do {
-        char path[512];
+        char path[1024];
         snprintf(path, sizeof(path), "%s%s", dir, fd.cFileName);
         size_t sz = 0;
         uint8_t *buf = read_file(path, &sz);
@@ -111,7 +111,7 @@ static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
     const struct dirent *ent;
     while ((ent = readdir(dp)) != NULL) {
         if (!has_suffix(ent->d_name, ".zxd")) continue;
-        char path[512];
+        char path[1024];
         snprintf(path, sizeof(path), "%s%s", dir, ent->d_name);
         size_t sz = 0;
         uint8_t *buf = read_file(path, &sz);
