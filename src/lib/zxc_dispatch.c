@@ -515,8 +515,10 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     uint32_t global_hash = 0;
     zxc_cctx_t ctx;
 
+    const size_t eff_chunk =
+        dict_size > 0 ? zxc_block_size_ceil(dict_size + block_size) : block_size;
     // LCOV_EXCL_START
-    if (UNLIKELY(zxc_cctx_init(&ctx, block_size, 1, level, checksum_enabled) != ZXC_OK))
+    if (UNLIKELY(zxc_cctx_init(&ctx, eff_chunk, 1, level, checksum_enabled) != ZXC_OK))
         return ZXC_ERROR_MEMORY;
     // LCOV_EXCL_STOP
     ctx.dict_size = dict_size;
@@ -1145,8 +1147,13 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
         (opts && opts->block_size > 0) ? opts->block_size : cctx->stored_block_size;
     const size_t min_bs = zxc_block_size_ceil(src_size);
 
-    /* Always ensure internal buffers can hold src_size. */
-    const size_t effective_block_size = (block_size > min_bs) ? block_size : min_bs;
+    /* Always ensure internal buffers can hold src_size.
+     * When a dictionary is active, offset_bits must accommodate dict + block. */
+    const uint8_t* b_dict = opts ? (const uint8_t*)opts->dict : NULL;
+    const size_t b_dict_size = (opts && opts->dict) ? opts->dict_size : 0;
+    const size_t base_block_size = (block_size > min_bs) ? block_size : min_bs;
+    const size_t effective_block_size =
+        b_dict_size > 0 ? zxc_block_size_ceil(b_dict_size + base_block_size) : base_block_size;
 
     cctx->stored_level = level;
     cctx->stored_block_size = effective_block_size;
@@ -1172,17 +1179,15 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
         cctx->inner.checksum_enabled = checksum_enabled;
     }
 
-    const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
-    const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
-    cctx->inner.dict_size = dict_size;
+    cctx->inner.dict_size = b_dict_size;
 
     int res;
-    if (dict && dict_size > 0) {
-        uint8_t* combined = (uint8_t*)ZXC_MALLOC(dict_size + src_size);
+    if (b_dict && b_dict_size > 0) {
+        uint8_t* combined = (uint8_t*)ZXC_MALLOC(b_dict_size + src_size);
         if (UNLIKELY(!combined)) return ZXC_ERROR_MEMORY;
-        ZXC_MEMCPY(combined, dict, dict_size);
-        ZXC_MEMCPY(combined + dict_size, src, src_size);
-        res = zxc_compress_chunk_wrapper(&cctx->inner, combined, dict_size + src_size,
+        ZXC_MEMCPY(combined, b_dict, b_dict_size);
+        ZXC_MEMCPY(combined + b_dict_size, src, src_size);
+        res = zxc_compress_chunk_wrapper(&cctx->inner, combined, b_dict_size + src_size,
                                          (uint8_t*)dst, dst_capacity);
         ZXC_FREE(combined);
     } else {
