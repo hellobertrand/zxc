@@ -32,6 +32,7 @@
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
+#include "../../include/zxc_error.h"
 #include "../../include/zxc_seekable.h"
 #include "rapidhash.h"
 
@@ -334,8 +335,17 @@ extern "C" {
 
 /** @brief Bit flag in the Flags byte indicating checksum presence (bit 7). */
 #define ZXC_FILE_FLAG_HAS_CHECKSUM 0x80U
+/** @brief Bit flag in the Flags byte indicating a dictionary is required (bit 6). */
+#define ZXC_FILE_FLAG_HAS_DICTIONARY 0x40U
 /** @brief Mask for the checksum algorithm id (bits 0-3). */
 #define ZXC_FILE_CHECKSUM_ALGO_MASK 0x0FU
+
+/** @brief Magic word identifying ZXC dictionary files (.zxd). */
+#define ZXC_DICT_MAGIC 0x9CB0D1C7U
+/** @brief Current dictionary file format version. */
+#define ZXC_DICT_VERSION 1
+/** @brief Size of the .zxd file header in bytes. */
+#define ZXC_DICT_HEADER_SIZE 16
 
 /** @brief Block header size: Type(1)+Flags(1)+Reserved(1)+CRC(1)+CompSize(4). */
 #define ZXC_BLOCK_HEADER_SIZE 8
@@ -1592,6 +1602,7 @@ typedef struct {
     size_t opt_scratch_cap; /**< Current capacity of opt_scratch in bytes. */
     int checksum_enabled;   /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;  /**< Compression level. */
+    size_t dict_size;       /**< Dictionary prefill size (0 = no dictionary). */
 
     /* Block-size derived parameters (computed once at init). */
     size_t chunk_size;    /**< Effective block size in bytes. */
@@ -1749,12 +1760,13 @@ typedef struct {
  * @param[in]  dst_capacity  Total capacity of @p dst in bytes.
  * @param[in]  chunk_size    Block size to encode in the header.
  * @param[in]  has_checksum  Non-zero if the checksum bit must be set.
+ * @param[in]  dict_id       Dictionary ID (0 = no dictionary).
  *
  * @return Number of bytes written (@c ZXC_FILE_HEADER_SIZE) on success,
  *         or @c ZXC_ERROR_DST_TOO_SMALL if @p dst_capacity is insufficient.
  */
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, const size_t chunk_size,
-                          const int has_checksum);
+                          const int has_checksum, const uint32_t dict_id);
 
 /**
  * @brief Validates and reads the ZXC file header from @p src.
@@ -1768,13 +1780,15 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  *                               block size. May be @c NULL.
  * @param[out] out_has_checksum  Optional pointer that receives the checksum
  *                               flag. May be @c NULL.
+ * @param[out] out_dict_id       Optional pointer that receives the dictionary
+ *                               ID (0 if none). May be @c NULL.
  *
  * @return @c ZXC_OK on success, or a negative error code (e.g.
  *         @c ZXC_ERROR_SRC_TOO_SMALL, @c ZXC_ERROR_BAD_MAGIC,
  *         @c ZXC_ERROR_BAD_VERSION).
  */
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size, size_t* out_block_size,
-                         int* out_has_checksum);
+                         int* out_has_checksum, uint32_t* out_dict_id);
 
 /**
  * @brief Encodes a block header into @p dst.
