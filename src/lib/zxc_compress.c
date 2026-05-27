@@ -1350,7 +1350,22 @@ static void zxc_lz_seed_dict(const uint8_t* RESTRICT src, const size_t dict_size
 
     const int use_hash5 = (level >= 3);
     const size_t limit = dict_size - (ZXC_LZ_MIN_MATCH_LEN - 1);
-    for (size_t i = 0; i < limit; i++) {
+
+    /* Sparse seeding for the first half, dense for the second half.
+     * Positions near the end of the dict produce shorter offsets and are
+     * more likely to yield matches, so they deserve full coverage. */
+    const size_t half = limit / 2;
+    for (size_t i = 0; i < half; i += 4) {
+        const uint64_t val8 = zxc_le64(src + i);
+        const uint32_t h = zxc_hash_func(val8, use_hash5);
+        const uint32_t cur_pos = (uint32_t)i;
+        const uint8_t tag = (uint8_t)((uint32_t)val8 ^ ((uint32_t)val8 >> 16));
+
+        hash_table[h] = epoch_mark | cur_pos;
+        hash_tags[h] = tag;
+        chain_table[cur_pos & ZXC_LZ_WINDOW_MASK] = 0;
+    }
+    for (size_t i = half; i < limit; i++) {
         const uint64_t val8 = zxc_le64(src + i);
         const uint32_t h = zxc_hash_func(val8, use_hash5);
         const uint32_t cur_pos = (uint32_t)i;

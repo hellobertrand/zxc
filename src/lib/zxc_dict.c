@@ -56,8 +56,6 @@ int64_t zxc_dict_save(const void* content, const size_t content_size, void* buf,
     dst[5] = 0; /* flags: reserved */
     zxc_store_le16(dst + 6, (uint16_t)content_size);
     zxc_store_le32(dst + 8, zxc_dict_id(content, content_size));
-
-    /* CRC16 of header (same method as ZXC file header) with CRC field zeroed */
     zxc_store_le16(dst + 12, 0);
     zxc_store_le16(dst + 14, 0);
     const uint16_t crc = zxc_hash16(dst);
@@ -79,11 +77,10 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
     if (src[4] != ZXC_DICT_VERSION) return ZXC_ERROR_BAD_VERSION;
 
     const size_t content_size = zxc_le16(src + 6);
-    if (content_size == 0) return ZXC_ERROR_CORRUPT_DATA;
-    if (content_size > ZXC_DICT_SIZE_MAX) return ZXC_ERROR_DICT_TOO_LARGE;
-    if (buf_size < ZXC_DICT_HEADER_SIZE + content_size) return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(content_size == 0)) return ZXC_ERROR_CORRUPT_DATA;
+    if (UNLIKELY(content_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+    if (UNLIKELY(buf_size < ZXC_DICT_HEADER_SIZE + content_size)) return ZXC_ERROR_SRC_TOO_SMALL;
 
-    /* Verify header CRC16 (same method as ZXC file header) */
     uint8_t temp[ZXC_DICT_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, ZXC_DICT_HEADER_SIZE);
     zxc_store_le16(temp + 12, 0);
