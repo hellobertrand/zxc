@@ -1003,8 +1003,8 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
     void* ud = opts ? opts->user_data : NULL;
 
     return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled, 0,
-                                 (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, cb, ud,
-                                 dict, dict_size);
+                                 (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, cb, ud, dict,
+                                 dict_size);
 }
 
 int64_t zxc_stream_get_decompressed_size(FILE* f_in) {

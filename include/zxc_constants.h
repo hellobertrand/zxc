@@ -71,6 +71,8 @@
  */
 /** @brief Maximum dictionary content size in bytes (64 KB, bounded by LZ window). */
 #define ZXC_DICT_SIZE_MAX (1U << 16)
+/** @brief Size of the .zxd dictionary file header in bytes. */
+#define ZXC_DICT_HEADER_SIZE 16
 /** @} */ /* end of dictionary */
 
 /**

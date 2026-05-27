@@ -101,16 +101,148 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
 }
 
 /* -------------------------------------------------------------------------
- *  Dictionary training
+ *  Dictionary training: k-gram frequency selection
+ *
+ *  Algorithm:
+ *  1. Concatenate all samples into a corpus.
+ *  2. For each position in the corpus, hash the k-gram (k = MIN_MATCH_LEN)
+ *     and count occurrences in a fixed-size hash map.
+ *  3. Walk the corpus a second time: for each position, look up the k-gram
+ *     frequency and greedily select segments whose k-grams have the highest
+ *     frequency x length score.
+ *  4. The most frequent segments are placed at the END of the dictionary
+ *     so they produce shorter offsets (closer to the block start).
  * ------------------------------------------------------------------------- */
+
+#define ZXC_DICT_KGRAM_LEN ZXC_LZ_MIN_MATCH_LEN
+#define ZXC_DICT_HT_BITS 16
+#define ZXC_DICT_HT_SIZE (1U << ZXC_DICT_HT_BITS)
+#define ZXC_DICT_HT_MASK (ZXC_DICT_HT_SIZE - 1U)
+
+static uint32_t zxc_dict_hash(const uint8_t* p) {
+    uint32_t v = zxc_le32(p);
+    v ^= (uint32_t)p[4];
+    return (v * ZXC_LZ_HASH_PRIME1) >> (32 - ZXC_DICT_HT_BITS);
+}
+
+/**
+ * @brief Segment descriptor for dictionary training, scored by coverage.
+ */
+typedef struct {
+    uint32_t offset;
+    uint16_t length;
+    uint16_t score;
+} zxc_dict_seg_t;
+
+static int zxc_seg_cmp_desc(const void* a, const void* b) {
+    const zxc_dict_seg_t* sa = (const zxc_dict_seg_t*)a;
+    const zxc_dict_seg_t* sb = (const zxc_dict_seg_t*)b;
+    if (sa->score != sb->score) return (sa->score < sb->score) ? 1 : -1;
+    return 0;
+}
 
 int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
                        const size_t n_samples, void* dict_buf, const size_t dict_capacity) {
-    (void)samples;
-    (void)sample_sizes;
-    (void)n_samples;
-    (void)dict_buf;
-    (void)dict_capacity;
-    /* TODO: implement training algorithm */
-    return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!samples || !sample_sizes || n_samples == 0 || !dict_buf || dict_capacity == 0))
+        return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(dict_capacity > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+
+    /* Step 1: concatenate samples */
+    size_t corpus_size = 0;
+    for (size_t i = 0; i < n_samples; i++) corpus_size += sample_sizes[i];
+    if (UNLIKELY(corpus_size < ZXC_DICT_KGRAM_LEN)) return ZXC_ERROR_SRC_TOO_SMALL;
+
+    uint8_t* corpus = (uint8_t*)ZXC_MALLOC(corpus_size);
+    if (UNLIKELY(!corpus)) return ZXC_ERROR_MEMORY;
+    {
+        size_t pos = 0;
+        for (size_t i = 0; i < n_samples; i++) {
+            if (sample_sizes[i] > 0) ZXC_MEMCPY(corpus + pos, samples[i], sample_sizes[i]);
+            pos += sample_sizes[i];
+        }
+    }
+
+    /* Step 2: count k-gram frequencies */
+    uint16_t* freq = (uint16_t*)ZXC_MALLOC(ZXC_DICT_HT_SIZE * sizeof(uint16_t));
+    if (UNLIKELY(!freq)) {
+        ZXC_FREE(corpus);
+        return ZXC_ERROR_MEMORY;
+    }
+    ZXC_MEMSET(freq, 0, ZXC_DICT_HT_SIZE * sizeof(uint16_t));
+
+    const size_t kgram_limit = corpus_size - ZXC_DICT_KGRAM_LEN + 1;
+    for (size_t i = 0; i < kgram_limit; i++) {
+        const uint32_t h = zxc_dict_hash(corpus + i);
+        if (freq[h] < UINT16_MAX) freq[h]++;
+    }
+
+    /* Step 3: score segments: stride by k-gram length to avoid overlap,
+     * collect top-scoring segments. */
+    const size_t stride = ZXC_DICT_KGRAM_LEN;
+    const size_t max_segs = corpus_size / stride;
+    const size_t seg_alloc = (max_segs < 65536) ? max_segs : 65536;
+
+    zxc_dict_seg_t* segs = (zxc_dict_seg_t*)ZXC_MALLOC(seg_alloc * sizeof(zxc_dict_seg_t));
+    if (UNLIKELY(!segs)) {
+        ZXC_FREE(freq);
+        ZXC_FREE(corpus);
+        return ZXC_ERROR_MEMORY;
+    }
+
+    size_t n_segs = 0;
+    for (size_t i = 0; i + ZXC_DICT_KGRAM_LEN <= corpus_size && n_segs < seg_alloc; i += stride) {
+        const uint32_t h = zxc_dict_hash(corpus + i);
+        const uint16_t f = freq[h];
+        if (f < 2) continue;
+
+        /* Extend the segment as long as the next k-gram is also frequent. */
+        size_t end = i + ZXC_DICT_KGRAM_LEN;
+        while (end + ZXC_DICT_KGRAM_LEN <= corpus_size && end - i < 255) {
+            const uint16_t nf = freq[zxc_dict_hash(corpus + end)];
+            if (nf < 2) break;
+            end += ZXC_DICT_KGRAM_LEN;
+        }
+
+        segs[n_segs].offset = (uint32_t)i;
+        segs[n_segs].length = (uint16_t)(end - i);
+        segs[n_segs].score = f;
+        n_segs++;
+    }
+
+    ZXC_FREE(freq);
+
+    if (UNLIKELY(n_segs == 0)) {
+        /* No frequent patterns. Use tail of corpus as dict. */
+        const size_t copy = (corpus_size < dict_capacity) ? corpus_size : dict_capacity;
+        ZXC_MEMCPY(dict_buf, corpus + corpus_size - copy, copy);
+        ZXC_FREE(segs);
+        ZXC_FREE(corpus);
+        return (int64_t)copy;
+    }
+
+    /* Step 4: sort by score descending, fill dict from end (most frequent last
+     * = shortest offsets from block start). */
+    qsort(segs, n_segs, sizeof(zxc_dict_seg_t), zxc_seg_cmp_desc);
+
+    uint8_t* out = (uint8_t*)dict_buf;
+    size_t filled = 0;
+
+    for (size_t i = 0; i < n_segs && filled < dict_capacity; i++) {
+        size_t copy = segs[i].length;
+        if (copy > dict_capacity - filled) copy = dict_capacity - filled;
+        ZXC_MEMCPY(out + filled, corpus + segs[i].offset, copy);
+        filled += copy;
+    }
+
+    /* If we haven't filled the capacity, pad with tail of corpus. */
+    if (filled < dict_capacity) {
+        const size_t pad = dict_capacity - filled;
+        const size_t tail = (corpus_size > pad) ? pad : corpus_size;
+        ZXC_MEMCPY(out + filled, corpus + corpus_size - tail, tail);
+        filled += tail;
+    }
+
+    ZXC_FREE(segs);
+    ZXC_FREE(corpus);
+    return (int64_t)filled;
 }

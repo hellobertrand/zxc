@@ -1172,8 +1172,23 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
         cctx->inner.checksum_enabled = checksum_enabled;
     }
 
-    const int res = zxc_compress_chunk_wrapper(&cctx->inner, (const uint8_t*)src, src_size,
-                                               (uint8_t*)dst, dst_capacity);
+    const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
+    const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
+    cctx->inner.dict_size = dict_size;
+
+    int res;
+    if (dict && dict_size > 0) {
+        uint8_t* combined = (uint8_t*)ZXC_MALLOC(dict_size + src_size);
+        if (UNLIKELY(!combined)) return ZXC_ERROR_MEMORY;
+        ZXC_MEMCPY(combined, dict, dict_size);
+        ZXC_MEMCPY(combined + dict_size, src, src_size);
+        res = zxc_compress_chunk_wrapper(&cctx->inner, combined, dict_size + src_size,
+                                         (uint8_t*)dst, dst_capacity);
+        ZXC_FREE(combined);
+    } else {
+        res = zxc_compress_chunk_wrapper(&cctx->inner, (const uint8_t*)src, src_size, (uint8_t*)dst,
+                                         dst_capacity);
+    }
     if (UNLIKELY(res < 0)) return res;
     return (int64_t)res;
 }
@@ -1212,12 +1227,30 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 
     zxc_cctx_t* const ctx = &dctx->inner;
 
+    const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
+    const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
+    ctx->dict_size = dict_size;
+
     /* work_buf was pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD inside
      * the matching zxc_cctx_init call above. */
     const size_t work_sz = block_size + ZXC_DECOMPRESS_TAIL_PAD;
 
     int res;
-    if (LIKELY(dst_capacity >= work_sz)) {
+    if (dict && dict_size > 0) {
+        uint8_t* dec_buf = (uint8_t*)ZXC_MALLOC(dict_size + work_sz);
+        if (UNLIKELY(!dec_buf)) return ZXC_ERROR_MEMORY;
+        ZXC_MEMCPY(dec_buf, dict, dict_size);
+        res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, dec_buf + dict_size,
+                                           work_sz);
+        if (LIKELY(res > 0)) {
+            if (UNLIKELY((size_t)res > dst_capacity)) {
+                ZXC_FREE(dec_buf);
+                return ZXC_ERROR_DST_TOO_SMALL;
+            }
+            ZXC_MEMCPY(dst, dec_buf + dict_size, (size_t)res);
+        }
+        ZXC_FREE(dec_buf);
+    } else if (LIKELY(dst_capacity >= work_sz)) {
         res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
                                            dst_capacity);
     } else {

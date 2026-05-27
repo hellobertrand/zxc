@@ -229,6 +229,20 @@ ZXC_EXPORT int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst,
  */
 ZXC_EXPORT void zxc_seekable_free(zxc_seekable* s);
 
+/**
+ * @brief Attach a pre-trained dictionary to a seekable handle.
+ *
+ * The dictionary content is copied internally; the caller may free
+ * @p dict after this call returns. Must be called before any
+ * zxc_seekable_decompress_range() call.
+ *
+ * @param[in] s         Seekable handle.
+ * @param[in] dict      Dictionary content.
+ * @param[in] dict_size Size in bytes (max ZXC_DICT_SIZE_MAX).
+ * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
+ */
+ZXC_EXPORT int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, size_t dict_size);
+
 /* ========================================================================= */
 /*  Seek Table Writer (low-level)                                            */
 /* ========================================================================= */

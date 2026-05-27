@@ -22,6 +22,8 @@
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
+#include "../../include/zxc_dict.h"
+#include "../../include/zxc_error.h"
 #include "../../include/zxc_stream.h"
 
 #define ZXC_STDIO_BUFFER_SIZE (1024 * 1024)
@@ -351,17 +353,17 @@ enum { OPT_VERSION = 1000, OPT_HELP };
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
                                int checksum, int level, size_t block_size, int json_output,
-                               int seekable);
+                               int seekable, const void* dict, size_t dict_size);
 
 // Forward declaration for processing directory
 static int process_directory(const char* dir_path, zxc_mode_t mode, int num_threads, int keep_input,
                              int force, int to_stdout, int checksum, int level, size_t block_size,
-                             int json_output, int seekable);
+                             int json_output, int seekable, const void* dict, size_t dict_size);
 
 // OS-specific implementation of directory processing
 static int process_directory(const char* dir_path, zxc_mode_t mode, int num_threads, int keep_input,
                              int force, int to_stdout, int checksum, int level, size_t block_size,
-                             int json_output, int seekable) {
+                             int json_output, int seekable, const void* dict, size_t dict_size) {
     int overall_ret = 0;
 #ifdef _WIN32
     char search_path[MAX_PATH];
@@ -386,7 +388,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
                                              to_stdout, checksum, level, block_size, json_output,
-                                             seekable);
+                                             seekable, dict, dict_size);
         } else {
             // Check if it ends with .zxc to skip if compressing to avoid double compression
             if (mode == MODE_COMPRESS) {
@@ -398,7 +400,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             overall_ret |=
                 process_single_file(full_path, NULL, mode, num_threads, keep_input, force,
                                     to_stdout, checksum, level, block_size, json_output,
-                                    seekable);
+                                    seekable, dict, dict_size);
         }
     } while (FindNextFileA(hFind, &find_data) != 0);
 
@@ -435,7 +437,8 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             if (S_ISDIR(st.st_mode)) {
                 overall_ret |=
                     process_directory(full_path, mode, num_threads, keep_input, force, to_stdout,
-                                      checksum, level, block_size, json_output, seekable);
+                                      checksum, level, block_size, json_output, seekable,
+                                      dict, dict_size);
             } else if (S_ISREG(st.st_mode)) {
                 // Check if it ends with .zxc to skip if compressing to avoid double compression
                 if (mode == MODE_COMPRESS) {
@@ -448,7 +451,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                 overall_ret |=
                     process_single_file(full_path, NULL, mode, num_threads, keep_input, force,
                                         to_stdout, checksum, level, block_size, json_output,
-                                        seekable);
+                                        seekable, dict, dict_size);
             }
         }
         free(full_path);
@@ -479,6 +482,7 @@ void print_help(const char* app) {
         "  -T, --threads N   Number of threads (0=auto)\n"
         "  -C, --checksum    Enable checksum {default}\n"
         "  -N, --no-checksum Disable checksum\n"
+        "  -D, --dict FILE   Use pre-trained dictionary (.zxd) for compression/decompression\n"
         "  -S, --seekable    Append seek table for random-access decompression\n"
         "  -k, --keep        Keep input file\n"
         "  -f, --force       Force overwrite\n"
@@ -723,7 +727,7 @@ static int zxc_list_archive(const char* path, int json_output) {
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
                                int checksum_enabled, int level, size_t block_size,
-                               int json_output, int seekable) {
+                               int json_output, int seekable, const void* dict, size_t dict_size) {
     FILE* f_in = stdin;
     FILE* f_out = stdout;
     char resolved_in_path[4096] = {0};
@@ -912,6 +916,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .block_size = block_size,
             .checksum_enabled = checksum_enabled,
             .seekable = seekable,
+            .dict = dict,
+            .dict_size = dict_size,
             .progress_cb = show_progress ? cli_progress_callback : NULL,
             .user_data = &pctx,
         };
@@ -920,6 +926,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         zxc_decompress_opts_t dopts = {
             .n_threads = num_threads,
             .checksum_enabled = checksum_enabled,
+            .dict = dict,
+            .dict_size = dict_size,
             .progress_cb = show_progress ? cli_progress_callback : NULL,
             .user_data = &pctx,
         };
@@ -1019,8 +1027,10 @@ int main(int argc, char** argv) {
     int json_output = 0;
     size_t block_size = 0;
     int seekable = 0;
+    const char* dict_path = NULL;
 
-    static const struct option long_options[] = {{"compress", no_argument, 0, 'z'},
+    static const struct option long_options[] = {{"dict", required_argument, 0, 'D'},
+                                                 {"compress", no_argument, 0, 'z'},
                                                  {"decompress", no_argument, 0, 'd'},
                                                  {"list", no_argument, 0, 'l'},
                                                  {"test", no_argument, 0, 't'},
@@ -1045,7 +1055,7 @@ int main(int argc, char** argv) {
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
-    while ((opt = getopt_long(argc, argv, "123456b::B:cCdfhjklmrNqST:tvVz", long_options, NULL)) !=
+    while ((opt = getopt_long(argc, argv, "123456b::B:cCdD:fhjklmrNqST:tvVz", long_options, NULL)) !=
            -1) {
         switch (opt) {
             case 'z':
@@ -1129,6 +1139,9 @@ int main(int argc, char** argv) {
             case 'S':
                 seekable = 1;
                 break;
+            case 'D':
+                dict_path = optarg;
+                break;
             case 'r':
                 recursive_mode = 1;
                 multiple_mode = 1;  // Recursive implies multiple mode for files processing
@@ -1199,6 +1212,51 @@ int main(int argc, char** argv) {
 
     if (checksum == -1) {
         checksum = (mode == MODE_BENCHMARK) ? 0 : 1;
+    }
+
+    /* Load dictionary file (.zxd) if requested */
+    void* dict = NULL;
+    size_t dict_size = 0;
+    if (dict_path) {
+        FILE* f_dict = fopen(dict_path, "rb");
+        if (!f_dict) {
+            fprintf(stderr, "Error: cannot open dictionary '%s': %s\n", dict_path, strerror(errno));
+            return 1;
+        }
+        fseeko(f_dict, 0, SEEK_END);
+        const long long fsize = ftello(f_dict);
+        fseeko(f_dict, 0, SEEK_SET);
+        if (fsize <= 0 || (size_t)fsize > ZXC_DICT_SIZE_MAX + ZXC_DICT_HEADER_SIZE) {
+            fprintf(stderr, "Error: dictionary file '%s' has invalid size\n", dict_path);
+            fclose(f_dict);
+            return 1;
+        }
+        uint8_t* zxd_buf = (uint8_t*)malloc((size_t)fsize);
+        if (!zxd_buf || fread(zxd_buf, 1, (size_t)fsize, f_dict) != (size_t)fsize) {
+            fprintf(stderr, "Error: failed to read dictionary '%s'\n", dict_path);
+            free(zxd_buf);
+            fclose(f_dict);
+            return 1;
+        }
+        fclose(f_dict);
+
+        const void* content = NULL;
+        size_t content_size = 0;
+        const int rc = zxc_dict_load(zxd_buf, (size_t)fsize, &content, &content_size, NULL);
+        if (rc != ZXC_OK) {
+            fprintf(stderr, "Error: invalid dictionary '%s': %s\n", dict_path,
+                    zxc_error_name(rc));
+            free(zxd_buf);
+            return 1;
+        }
+        dict = malloc(content_size);
+        if (!dict) {
+            free(zxd_buf);
+            return 1;
+        }
+        memcpy(dict, content, content_size);
+        dict_size = content_size;
+        free(zxd_buf);
     }
 
     /*
@@ -1464,7 +1522,7 @@ int main(int argc, char** argv) {
             zxc_is_directory(current_arg)) {
             overall_ret |= process_directory(current_arg, mode, num_threads, keep_input, force,
                                              to_stdout, checksum, level, block_size, json_output,
-                                             seekable);
+                                             seekable, dict, dict_size);
         } else {
             const char* explicit_out_path = (!multiple_mode && optind + 1 < argc && current_arg &&
                                              strcmp(current_arg, "-") != 0 && !to_stdout)
@@ -1474,7 +1532,7 @@ int main(int argc, char** argv) {
             overall_ret |=
                 process_single_file(current_arg, explicit_out_path, mode, num_threads, keep_input,
                                     force, to_stdout, checksum, level, block_size, json_output,
-                                    seekable);
+                                    seekable, dict, dict_size);
         }
 
         if (!multiple_mode) {

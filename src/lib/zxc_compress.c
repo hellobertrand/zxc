@@ -2329,8 +2329,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 
     if (UNLIKELY(try_num)) {
         res = zxc_encode_block_num(ctx, block_data, block_sz, dst, dst_cap, &w);
-        if (res != ZXC_OK || w > (block_sz - (block_sz >> 2)))
-            try_num = 0;
+        if (res != ZXC_OK || w > (block_sz - (block_sz >> 2))) try_num = 0;
     }
 
     if (LIKELY(!try_num)) {

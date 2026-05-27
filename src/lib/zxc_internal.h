@@ -344,8 +344,6 @@ extern "C" {
 #define ZXC_DICT_MAGIC 0x9CB0D1C7U
 /** @brief Current dictionary file format version. */
 #define ZXC_DICT_VERSION 1
-/** @brief Size of the .zxd file header in bytes. */
-#define ZXC_DICT_HEADER_SIZE 16
 
 /** @brief Block header size: Type(1)+Flags(1)+Reserved(1)+CRC(1)+CompSize(4). */
 #define ZXC_BLOCK_HEADER_SIZE 8

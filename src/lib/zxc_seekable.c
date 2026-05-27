@@ -170,6 +170,11 @@ struct zxc_seekable_s {
     /* Reusable decompression context (single-threaded path only) */
     zxc_cctx_t dctx;
     int dctx_initialized;
+
+    /* Dictionary (owned copy, freed in zxc_seekable_free) */
+    uint8_t* dict;
+    size_t dict_size;
+    uint8_t* dict_work; /* [dict | decode_space] bounce buffer */
 };
 
 /**
@@ -510,6 +515,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         // LCOV_EXCL_STOP
         s->dctx_initialized = 1;
     }
+    s->dctx.dict_size = s->dict_size;
 
     /* work_buf is pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD by the
      * matching zxc_cctx_init above. */
@@ -540,9 +546,12 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
             // LCOV_EXCL_STOP
         }
 
-        /* Decompress the block */
-        const int dec_res = zxc_decompress_chunk_wrapper(&s->dctx, read_buf, (size_t)read_res,
-                                                         s->dctx.work_buf, work_sz);
+        /* Decompress the block: when a dictionary is active, decode into the
+         * dict_work bounce buffer (which has dict content prepended) so that
+         * match copies referencing dictionary bytes resolve naturally. */
+        uint8_t* dec_dst = s->dict_work ? s->dict_work + s->dict_size : s->dctx.work_buf;
+        const int dec_res =
+            zxc_decompress_chunk_wrapper(&s->dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
         if (UNLIKELY(dec_res < 0)) {
             // LCOV_EXCL_START
             ZXC_FREE(read_buf);
@@ -562,7 +571,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         const size_t avail = (size_t)dec_res - skip;
         const size_t copy = (avail < remaining) ? avail : remaining;
 
-        ZXC_MEMCPY(out, s->dctx.work_buf + skip, copy);
+        ZXC_MEMCPY(out, dec_dst + skip, copy);
         out += copy;
         remaining -= copy;
     }
@@ -809,10 +818,36 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
 void zxc_seekable_free(zxc_seekable* s) {
     if (!s) return;
     if (s->dctx_initialized) zxc_cctx_free(&s->dctx);
+    ZXC_FREE(s->dict);
+    ZXC_FREE(s->dict_work);
     ZXC_FREE(s->comp_sizes);
     ZXC_FREE(s->comp_offsets);
     ZXC_FREE(s->owned_reader_ctx);
     ZXC_FREE(s);
+}
+
+int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_size) {
+    if (UNLIKELY(!s || !dict || dict_size == 0)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+
+    ZXC_FREE(s->dict);
+    ZXC_FREE(s->dict_work);
+
+    s->dict = (uint8_t*)ZXC_MALLOC(dict_size);
+    if (UNLIKELY(!s->dict)) return ZXC_ERROR_MEMORY;
+    ZXC_MEMCPY(s->dict, dict, dict_size);
+    s->dict_size = dict_size;
+
+    const size_t work_sz = dict_size + (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
+    s->dict_work = (uint8_t*)ZXC_MALLOC(work_sz);
+    if (UNLIKELY(!s->dict_work)) {
+        ZXC_FREE(s->dict);
+        s->dict = NULL;
+        s->dict_size = 0;
+        return ZXC_ERROR_MEMORY;
+    }
+    ZXC_MEMCPY(s->dict_work, dict, dict_size);
+    return ZXC_OK;
 }
 
 void zxc_seekable_attach_owned_ctx(zxc_seekable* s, void* ctx) {
