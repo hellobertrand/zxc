@@ -29,6 +29,16 @@ from ._zxc import (
     pyzxc_dstream_in_size,
     pyzxc_dstream_out_size,
     pyzxc_dstream_free,
+    pyzxc_seekable_open,
+    pyzxc_seekable_open_reader,
+    pyzxc_seekable_num_blocks,
+    pyzxc_seekable_decompressed_size,
+    pyzxc_seekable_block_comp_size,
+    pyzxc_seekable_block_decomp_size,
+    pyzxc_seekable_decompress_range,
+    pyzxc_seekable_free,
+    pyzxc_seek_table_size,
+    pyzxc_write_seek_table,
     LEVEL_FASTEST,
     LEVEL_FAST,
     LEVEL_DEFAULT,
@@ -67,6 +77,11 @@ __all__ = [
     # Push streaming
     "CStream",
     "DStream",
+
+    # Seekable random-access decompression
+    "Seekable",
+    "seek_table_size",
+    "write_seek_table",
 
     # io.RawIOBase adapters
     "ZxcReader",
@@ -251,6 +266,104 @@ def stream_decompress(src, dst, n_threads=0, checksum=False) -> int:
         dst.flush()
 
     return pyzxc_stream_decompress(src, dst, n_threads, checksum)
+
+
+class Seekable:
+    """Random-access decompression of a seekable ZXC archive.
+
+    Opens a seekable archive (one created with ``seekable=True``) and lets
+    you decompress arbitrary byte ranges without reading the whole file.
+
+    Two construction modes:
+
+    **From bytes** (the buffer is copied internally)::
+
+        with zxc.Seekable(compressed_bytes) as s:
+            chunk = s.decompress_range(offset, length)
+
+    **From a reader object** with ``size`` (int) and
+    ``read_at(length, offset) -> bytes`` attributes::
+
+        class MyReader:
+            size = total_compressed_bytes
+            def read_at(self, length, offset):
+                ...  # return `length` bytes from `offset`
+
+        with zxc.Seekable(MyReader()) as s:
+            chunk = s.decompress_range(0, s.decompressed_size)
+    """
+
+    __slots__ = ("_handle",)
+
+    def __init__(self, source):
+        if isinstance(source, (bytes, bytearray, memoryview)):
+            self._handle = pyzxc_seekable_open(source)
+        elif hasattr(source, "size") and hasattr(source, "read_at"):
+            self._handle = pyzxc_seekable_open_reader(source)
+        else:
+            raise TypeError(
+                "expected bytes/bytearray/memoryview or an object with "
+                "'size' (int) and 'read_at(length, offset)' attributes"
+            )
+
+    @property
+    def num_blocks(self) -> int:
+        if self._handle is None:
+            raise ValueError("Seekable is closed")
+        return pyzxc_seekable_num_blocks(self._handle)
+
+    @property
+    def decompressed_size(self) -> int:
+        if self._handle is None:
+            raise ValueError("Seekable is closed")
+        return pyzxc_seekable_decompressed_size(self._handle)
+
+    def block_compressed_size(self, block_idx: int):
+        if self._handle is None:
+            raise ValueError("Seekable is closed")
+        return pyzxc_seekable_block_comp_size(self._handle, block_idx)
+
+    def block_decompressed_size(self, block_idx: int):
+        if self._handle is None:
+            raise ValueError("Seekable is closed")
+        return pyzxc_seekable_block_decomp_size(self._handle, block_idx)
+
+    def decompress_range(self, offset: int, length: int, *, n_threads: int = 0) -> bytes:
+        if self._handle is None:
+            raise ValueError("Seekable is closed")
+        return pyzxc_seekable_decompress_range(self._handle, offset, length, n_threads)
+
+    def close(self) -> None:
+        if self._handle is not None:
+            pyzxc_seekable_free(self._handle)
+            self._handle = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
+def seek_table_size(num_blocks: int) -> int:
+    """Return the encoded byte size of a seek table for *num_blocks* blocks."""
+    return pyzxc_seek_table_size(num_blocks)
+
+
+def write_seek_table(comp_sizes: list) -> bytes:
+    """Write a raw seek table from a list of per-block compressed sizes.
+
+    Low-level helper — most callers should simply pass ``seekable=True`` to
+    :func:`stream_compress` instead.
+    """
+    return pyzxc_write_seek_table(comp_sizes)
 
 
 class CStream:

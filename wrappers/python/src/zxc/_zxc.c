@@ -11,6 +11,7 @@
 #include <Python.h>
 
 #include "zxc.h"
+#include "zxc_seekable.h"
 #include "zxc_stream.h"
 
 #define Py_Return_Errno(err)     \
@@ -93,6 +94,17 @@ static PyObject* pyzxc_dstream_in_size(PyObject* self, PyObject* args);
 static PyObject* pyzxc_dstream_out_size(PyObject* self, PyObject* args);
 static PyObject* pyzxc_dstream_free(PyObject* self, PyObject* args);
 
+static PyObject* pyzxc_seekable_open(PyObject* self, PyObject* args);
+static PyObject* pyzxc_seekable_open_reader(PyObject* self, PyObject* args);
+static PyObject* pyzxc_seekable_num_blocks(PyObject* self, PyObject* args);
+static PyObject* pyzxc_seekable_decompressed_size(PyObject* self, PyObject* args);
+static PyObject* pyzxc_seekable_block_comp_size(PyObject* self, PyObject* args);
+static PyObject* pyzxc_seekable_block_decomp_size(PyObject* self, PyObject* args);
+static PyObject* pyzxc_seekable_decompress_range(PyObject* self, PyObject* args, PyObject* kwargs);
+static PyObject* pyzxc_seekable_free(PyObject* self, PyObject* args);
+static PyObject* pyzxc_seek_table_size(PyObject* self, PyObject* args);
+static PyObject* pyzxc_write_seek_table(PyObject* self, PyObject* args);
+
 // =============================================================================
 // Initialize python module
 // =============================================================================
@@ -150,6 +162,21 @@ static PyMethodDef zxc_methods[] = {
     {"pyzxc_dstream_in_size", (PyCFunction)pyzxc_dstream_in_size, METH_O, NULL},
     {"pyzxc_dstream_out_size", (PyCFunction)pyzxc_dstream_out_size, METH_O, NULL},
     {"pyzxc_dstream_free", (PyCFunction)pyzxc_dstream_free, METH_O, NULL},
+
+    /* Seekable random-access decompression API. */
+    {"pyzxc_seekable_open", (PyCFunction)pyzxc_seekable_open, METH_O, NULL},
+    {"pyzxc_seekable_open_reader", (PyCFunction)pyzxc_seekable_open_reader, METH_O, NULL},
+    {"pyzxc_seekable_num_blocks", (PyCFunction)pyzxc_seekable_num_blocks, METH_O, NULL},
+    {"pyzxc_seekable_decompressed_size", (PyCFunction)pyzxc_seekable_decompressed_size, METH_O, NULL},
+    {"pyzxc_seekable_block_comp_size", (PyCFunction)pyzxc_seekable_block_comp_size,
+     METH_VARARGS, NULL},
+    {"pyzxc_seekable_block_decomp_size", (PyCFunction)pyzxc_seekable_block_decomp_size,
+     METH_VARARGS, NULL},
+    {"pyzxc_seekable_decompress_range", (PyCFunction)pyzxc_seekable_decompress_range,
+     METH_VARARGS | METH_KEYWORDS, NULL},
+    {"pyzxc_seekable_free", (PyCFunction)pyzxc_seekable_free, METH_O, NULL},
+    {"pyzxc_seek_table_size", (PyCFunction)pyzxc_seek_table_size, METH_O, NULL},
+    {"pyzxc_write_seek_table", (PyCFunction)pyzxc_write_seek_table, METH_O, NULL},
 
     {NULL, NULL, 0, NULL}  // sentinel
 };
@@ -858,4 +885,319 @@ static PyObject* pyzxc_dstream_free(PyObject* self, PyObject* capsule) {
         h->ds = NULL;
     }
     Py_RETURN_NONE;
+}
+
+// =============================================================================
+// Seekable API (random-access decompression)
+// =============================================================================
+
+#define ZXC_SEEKABLE_CAPSULE "zxc_seekable"
+
+typedef struct {
+    zxc_seekable* s;
+    uint8_t* src_copy;    /* owned copy when opened from bytes */
+    PyObject* reader_obj; /* strong ref to the Python reader when using callback */
+} pyzxc_seekable_holder_t;
+
+static void seekable_capsule_destructor(PyObject* capsule) {
+    pyzxc_seekable_holder_t* h =
+        (pyzxc_seekable_holder_t*)PyCapsule_GetPointer(capsule, ZXC_SEEKABLE_CAPSULE);
+    if (h) {
+        if (h->s) zxc_seekable_free(h->s);
+        free(h->src_copy);
+        Py_XDECREF(h->reader_obj);
+        PyMem_Free(h);
+    }
+}
+
+static zxc_seekable* seekable_from_capsule(PyObject* capsule) {
+    pyzxc_seekable_holder_t* h =
+        (pyzxc_seekable_holder_t*)PyCapsule_GetPointer(capsule, ZXC_SEEKABLE_CAPSULE);
+    if (!h || !h->s) {
+        if (!PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "Seekable is closed or invalid");
+        return NULL;
+    }
+    return h->s;
+}
+
+static PyObject* pyzxc_seekable_open(PyObject* self, PyObject* arg) {
+    (void)self;
+    Py_buffer view;
+    if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
+
+    if (view.len == 0) {
+        PyBuffer_Release(&view);
+        Py_Return_Err(PyExc_ValueError, "seekable buffer must be non-empty");
+    }
+
+    uint8_t* copy = (uint8_t*)malloc((size_t)view.len);
+    if (!copy) {
+        PyBuffer_Release(&view);
+        return PyErr_NoMemory();
+    }
+    memcpy(copy, view.buf, (size_t)view.len);
+    size_t src_size = (size_t)view.len;
+    PyBuffer_Release(&view);
+
+    zxc_seekable* s = zxc_seekable_open(copy, src_size);
+    if (!s) {
+        free(copy);
+        Py_Return_Err(PyExc_RuntimeError, "zxc_seekable_open failed (not a valid seekable archive)");
+    }
+
+    pyzxc_seekable_holder_t* h = (pyzxc_seekable_holder_t*)PyMem_Malloc(sizeof(*h));
+    if (!h) {
+        zxc_seekable_free(s);
+        free(copy);
+        return PyErr_NoMemory();
+    }
+    h->s = s;
+    h->src_copy = copy;
+    h->reader_obj = NULL;
+
+    PyObject* cap = PyCapsule_New(h, ZXC_SEEKABLE_CAPSULE, seekable_capsule_destructor);
+    if (!cap) {
+        zxc_seekable_free(s);
+        free(copy);
+        PyMem_Free(h);
+        return NULL;
+    }
+    return cap;
+}
+
+/* C trampoline for the Python reader callback.  Called synchronously on the
+ * same thread that drives decompress_range, so the GIL must be held. */
+static int64_t seekable_read_at_trampoline(void* ctx, void* dst, size_t len, uint64_t offset) {
+    PyObject* reader = (PyObject*)ctx;
+    PyObject* result =
+        PyObject_CallMethod(reader, "read_at", "nK", (Py_ssize_t)len, (unsigned long long)offset);
+    if (!result) return ZXC_ERROR_IO;
+
+    Py_buffer view;
+    if (PyObject_GetBuffer(result, &view, PyBUF_SIMPLE) < 0) {
+        Py_DECREF(result);
+        PyErr_Clear();
+        return ZXC_ERROR_IO;
+    }
+    if ((size_t)view.len < len) {
+        PyBuffer_Release(&view);
+        Py_DECREF(result);
+        return ZXC_ERROR_IO;
+    }
+    memcpy(dst, view.buf, len);
+    PyBuffer_Release(&view);
+    Py_DECREF(result);
+    return (int64_t)len;
+}
+
+static PyObject* pyzxc_seekable_open_reader(PyObject* self, PyObject* arg) {
+    (void)self;
+    if (!PyObject_HasAttrString(arg, "size") || !PyObject_HasAttrString(arg, "read_at")) {
+        Py_Return_Err(PyExc_TypeError, "reader must have 'size' (int) and 'read_at' (callable)");
+    }
+
+    PyObject* size_obj = PyObject_GetAttrString(arg, "size");
+    if (!size_obj) return NULL;
+    long long sz = PyLong_AsLongLong(size_obj);
+    Py_DECREF(size_obj);
+    if (sz == -1 && PyErr_Occurred()) return NULL;
+    if (sz <= 0) Py_Return_Err(PyExc_ValueError, "reader.size must be > 0");
+
+    zxc_reader_t r;
+    r.read_at = seekable_read_at_trampoline;
+    r.ctx = arg;
+    r.size = (uint64_t)sz;
+
+    zxc_seekable* s = zxc_seekable_open_reader(&r);
+    if (!s) {
+        Py_Return_Err(PyExc_RuntimeError,
+                      "zxc_seekable_open_reader failed (not a valid seekable archive)");
+    }
+
+    pyzxc_seekable_holder_t* h = (pyzxc_seekable_holder_t*)PyMem_Malloc(sizeof(*h));
+    if (!h) {
+        zxc_seekable_free(s);
+        return PyErr_NoMemory();
+    }
+    h->s = s;
+    h->src_copy = NULL;
+    Py_INCREF(arg);
+    h->reader_obj = arg;
+
+    PyObject* cap = PyCapsule_New(h, ZXC_SEEKABLE_CAPSULE, seekable_capsule_destructor);
+    if (!cap) {
+        zxc_seekable_free(s);
+        Py_DECREF(arg);
+        PyMem_Free(h);
+        return NULL;
+    }
+    return cap;
+}
+
+static PyObject* pyzxc_seekable_num_blocks(PyObject* self, PyObject* capsule) {
+    (void)self;
+    zxc_seekable* s = seekable_from_capsule(capsule);
+    if (!s) return NULL;
+    return PyLong_FromUnsignedLong(zxc_seekable_get_num_blocks(s));
+}
+
+static PyObject* pyzxc_seekable_decompressed_size(PyObject* self, PyObject* capsule) {
+    (void)self;
+    zxc_seekable* s = seekable_from_capsule(capsule);
+    if (!s) return NULL;
+    return PyLong_FromUnsignedLongLong(zxc_seekable_get_decompressed_size(s));
+}
+
+static PyObject* pyzxc_seekable_block_comp_size(PyObject* self, PyObject* args) {
+    (void)self;
+    PyObject* capsule;
+    unsigned int idx;
+    if (!PyArg_ParseTuple(args, "OI", &capsule, &idx)) return NULL;
+
+    zxc_seekable* s = seekable_from_capsule(capsule);
+    if (!s) return NULL;
+
+    if (idx >= zxc_seekable_get_num_blocks(s)) Py_RETURN_NONE;
+    return PyLong_FromUnsignedLong(zxc_seekable_get_block_comp_size(s, idx));
+}
+
+static PyObject* pyzxc_seekable_block_decomp_size(PyObject* self, PyObject* args) {
+    (void)self;
+    PyObject* capsule;
+    unsigned int idx;
+    if (!PyArg_ParseTuple(args, "OI", &capsule, &idx)) return NULL;
+
+    zxc_seekable* s = seekable_from_capsule(capsule);
+    if (!s) return NULL;
+
+    if (idx >= zxc_seekable_get_num_blocks(s)) Py_RETURN_NONE;
+    return PyLong_FromUnsignedLong(zxc_seekable_get_block_decomp_size(s, idx));
+}
+
+static PyObject* pyzxc_seekable_decompress_range(PyObject* self, PyObject* args, PyObject* kwargs) {
+    (void)self;
+    PyObject* capsule;
+    unsigned long long offset;
+    Py_ssize_t length;
+    int n_threads = 0;
+
+    static char* kwlist[] = {"handle", "offset", "length", "n_threads", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OKn|i", kwlist, &capsule, &offset, &length,
+                                     &n_threads)) {
+        return NULL;
+    }
+
+    if (length < 0) Py_Return_Err(PyExc_ValueError, "length must be non-negative");
+
+    zxc_seekable* s = seekable_from_capsule(capsule);
+    if (!s) return NULL;
+
+    if (length == 0) return PyBytes_FromStringAndSize(NULL, 0);
+
+    PyObject* out = PyBytes_FromStringAndSize(NULL, length);
+    if (!out) return NULL;
+    char* dst = PyBytes_AS_STRING(out);
+
+    int64_t r;
+    pyzxc_seekable_holder_t* h =
+        (pyzxc_seekable_holder_t*)PyCapsule_GetPointer(capsule, ZXC_SEEKABLE_CAPSULE);
+    int has_reader = (h && h->reader_obj != NULL);
+
+    if (has_reader) {
+        /* Reader callback needs the GIL (Python callables). */
+        if (n_threads > 1) {
+            r = zxc_seekable_decompress_range_mt(s, dst, (size_t)length, (uint64_t)offset,
+                                                 (size_t)length, n_threads);
+        } else {
+            r = zxc_seekable_decompress_range(s, dst, (size_t)length, (uint64_t)offset,
+                                              (size_t)length);
+        }
+    } else {
+        Py_BEGIN_ALLOW_THREADS if (n_threads > 1) {
+            r = zxc_seekable_decompress_range_mt(s, dst, (size_t)length, (uint64_t)offset,
+                                                 (size_t)length, n_threads);
+        }
+        else {
+            r = zxc_seekable_decompress_range(s, dst, (size_t)length, (uint64_t)offset,
+                                              (size_t)length);
+        }
+        Py_END_ALLOW_THREADS
+    }
+
+    if (r < 0) {
+        Py_DECREF(out);
+        Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)r));
+    }
+
+    if (r != (int64_t)length) {
+        if (_PyBytes_Resize(&out, (Py_ssize_t)r) < 0) return NULL;
+    }
+    return out;
+}
+
+static PyObject* pyzxc_seekable_free(PyObject* self, PyObject* capsule) {
+    (void)self;
+    if (!PyCapsule_IsValid(capsule, ZXC_SEEKABLE_CAPSULE)) Py_RETURN_NONE;
+    pyzxc_seekable_holder_t* h =
+        (pyzxc_seekable_holder_t*)PyCapsule_GetPointer(capsule, ZXC_SEEKABLE_CAPSULE);
+    if (h && h->s) {
+        zxc_seekable_free(h->s);
+        h->s = NULL;
+    }
+    if (h && h->src_copy) {
+        free(h->src_copy);
+        h->src_copy = NULL;
+    }
+    if (h && h->reader_obj) {
+        Py_DECREF(h->reader_obj);
+        h->reader_obj = NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject* pyzxc_seek_table_size(PyObject* self, PyObject* arg) {
+    (void)self;
+    unsigned int num_blocks = (unsigned int)PyLong_AsUnsignedLong(arg);
+    if (num_blocks == (unsigned int)-1 && PyErr_Occurred()) return NULL;
+    return PyLong_FromSize_t(zxc_seek_table_size(num_blocks));
+}
+
+static PyObject* pyzxc_write_seek_table(PyObject* self, PyObject* arg) {
+    (void)self;
+    if (!PyList_Check(arg)) Py_Return_Err(PyExc_TypeError, "expected a list of integers");
+
+    Py_ssize_t n = PyList_GET_SIZE(arg);
+    if (n <= 0) Py_Return_Err(PyExc_ValueError, "comp_sizes must be non-empty");
+
+    uint32_t* sizes = (uint32_t*)PyMem_Malloc(sizeof(uint32_t) * (size_t)n);
+    if (!sizes) return PyErr_NoMemory();
+
+    for (Py_ssize_t i = 0; i < n; i++) {
+        unsigned long v = PyLong_AsUnsignedLong(PyList_GET_ITEM(arg, i));
+        if (v == (unsigned long)-1 && PyErr_Occurred()) {
+            PyMem_Free(sizes);
+            return NULL;
+        }
+        sizes[i] = (uint32_t)v;
+    }
+
+    size_t cap = zxc_seek_table_size((uint32_t)n);
+    PyObject* out = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)cap);
+    if (!out) {
+        PyMem_Free(sizes);
+        return NULL;
+    }
+
+    int64_t written =
+        zxc_write_seek_table((uint8_t*)PyBytes_AS_STRING(out), cap, sizes, (uint32_t)n);
+    PyMem_Free(sizes);
+
+    if (written < 0) {
+        Py_DECREF(out);
+        Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)written));
+    }
+    if ((size_t)written != cap) {
+        if (_PyBytes_Resize(&out, (Py_ssize_t)written) < 0) return NULL;
+    }
+    return out;
 }
