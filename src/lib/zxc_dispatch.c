@@ -567,7 +567,6 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled, did);
     // LCOV_EXCL_START
     if (UNLIKELY(h_val < 0)) {
-        ZXC_FREE(dict_input);
         zxc_cctx_free(&ctx);
         return h_val;
     }
@@ -590,7 +589,6 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         seek_comp = (uint32_t*)ZXC_MALLOC(seek_cap * sizeof(uint32_t));
         // LCOV_EXCL_START
         if (UNLIKELY(!seek_comp)) {
-            ZXC_FREE(dict_input);
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_MEMORY;
         }
@@ -761,7 +759,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         zxc_block_header_t bh;
         // Read the block header to determine the compressed size
         if (UNLIKELY(zxc_read_block_header(ip, rem_src, &bh) != ZXC_OK)) {
-            ZXC_FREE(dict_dec);
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_BAD_HEADER;
         }
@@ -772,7 +769,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             // even when a seek table is inserted between EOF block and footer.
             // LCOV_EXCL_START
             if (UNLIKELY(src_size < ZXC_FILE_FOOTER_SIZE)) {
-                ZXC_FREE(dict_dec);
                 zxc_cctx_free(&ctx);
                 return ZXC_ERROR_SRC_TOO_SMALL;
             }
@@ -782,7 +778,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             // Validate source size matches what we decompressed
             const uint64_t stored_size = zxc_le64(footer);
             if (UNLIKELY(stored_size != (uint64_t)(op - op_start))) {
-                ZXC_FREE(dict_dec);
                 zxc_cctx_free(&ctx);
                 return ZXC_ERROR_CORRUPT_DATA;
             }
@@ -791,7 +786,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             if (checksum_enabled && file_has_checksums) {
                 const uint32_t stored_hash = zxc_le32(footer + sizeof(uint64_t));
                 if (UNLIKELY(stored_hash != global_hash)) {
-                    ZXC_FREE(dict_dec);
                     zxc_cctx_free(&ctx);
                     return ZXC_ERROR_BAD_CHECKSUM;
                 }
