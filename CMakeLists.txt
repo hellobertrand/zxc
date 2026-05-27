@@ -421,6 +421,7 @@ if(ZXC_BUILD_TESTS)
         tests/test_seekable_mt.c
         tests/test_format.c
         tests/test_misc.c
+        tests/test_dict.c
     )
     
     # When building shared libraries, create a static version for tests
