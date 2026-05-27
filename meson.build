@@ -180,6 +180,7 @@ if not meson.is_subproject()
       'tests/test_seekable_mt.c',
       'tests/test_format.c',
       'tests/test_misc.c',
+      'tests/test_dict.c',
     ),
     include_directories : libzxc_includes,
     link_with : libzxc_static,
