@@ -611,13 +611,14 @@ Offset  Size  Field
 0x05    1     Flags (reserved, must be 0)
 0x06    2     Content size (u16 LE, max 65535)
 0x08    4     dict_id (u32 LE, hash of content)
-0x0C    4     Header CRC32 (computed with this field zeroed)
+0x0C    2     Header CRC16 (zxc_hash16, computed with bytes 0x0C-0x0F zeroed)
+0x0E    2     Reserved (0)
 0x10    N     Dictionary content (raw bytes)
 ```
 
 - **Magic Word**: `0x9CB0D1C7`. Allows immediate rejection of non-dictionary files.
 - **dict_id**: deterministic 32-bit hash (RapidHash-folded) of the content bytes. Must match the `dict_id` stored in any ZXC file header that references this dictionary.
-- **Header CRC32**: RapidHash-folded checksum of the 16-byte header with bytes `0x0C..0x0F` zeroed before hashing.
+- **Header CRC16**: `zxc_hash16` checksum of the 16-byte header with bytes `0x0C..0x0F` zeroed before hashing — same method as the ZXC file header.
 - **Content**: raw bytes that prefill the LZ77 window. Not compressed.
 
 ### 12.5 Dictionary training
