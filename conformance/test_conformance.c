@@ -108,7 +108,7 @@ static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
 #else
     DIR *dp = opendir(dir);
     if (!dp) return NULL;
-    struct dirent *ent;
+    const struct dirent *ent;
     while ((ent = readdir(dp)) != NULL) {
         if (!has_suffix(ent->d_name, ".zxd")) continue;
         char path[512];
