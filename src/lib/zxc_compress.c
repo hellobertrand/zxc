@@ -626,6 +626,7 @@ _finalize_match:
 static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
                                 size_t* RESTRICT out_sz) {
+    (void)ctx;
     if (UNLIKELY(src_sz % sizeof(uint32_t) != 0 || src_sz == 0 ||
                  dst_cap < ZXC_BLOCK_HEADER_SIZE + ZXC_NUM_HEADER_BINARY_SIZE))
         return ZXC_ERROR_DST_TOO_SMALL;
