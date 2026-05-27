@@ -458,6 +458,78 @@ int test_buffer_error_codes() {
     return 1;
 }
 
+// Tests the dst=NULL / dst_capacity=0 short-circuit in zxc_decompress:
+// allowed only when the compressed frame's stored size is 0.
+int test_decompress_empty_frame_null_dst() {
+    printf("=== TEST: Unit - Decompress empty frame with NULL/zero dst ===\n");
+
+    /* 1. Produce a valid empty frame via zxc_compress(NULL, 0, ...). */
+    uint8_t empty_frame[64];
+    int64_t comp_sz = zxc_compress(NULL, 0, empty_frame, sizeof(empty_frame), NULL);
+    if (comp_sz <= 0) {
+        printf("  [FAIL] empty compress: got %lld\n", (long long)comp_sz);
+        return 0;
+    }
+
+    /* 2. dst=NULL, dst_capacity=0 on empty frame -> 0 */
+    int64_t r = zxc_decompress(empty_frame, (size_t)comp_sz, NULL, 0, NULL);
+    if (r != 0) {
+        printf("  [FAIL] NULL dst + 0 cap on empty frame: expected 0, got %lld\n", (long long)r);
+        return 0;
+    }
+    printf("  [PASS] NULL dst + 0 cap on empty frame -> 0\n");
+
+    /* 3. dst=valid, dst_capacity=0 on empty frame -> 0 */
+    uint8_t dummy;
+    r = zxc_decompress(empty_frame, (size_t)comp_sz, &dummy, 0, NULL);
+    if (r != 0) {
+        printf("  [FAIL] valid dst + 0 cap on empty frame: expected 0, got %lld\n", (long long)r);
+        return 0;
+    }
+    printf("  [PASS] valid dst + 0 cap on empty frame -> 0\n");
+
+    /* 4. dst=NULL, dst_capacity=0 on non-empty frame -> ZXC_ERROR_DST_TOO_SMALL */
+    uint8_t payload[128] = "hello";
+    uint8_t non_empty_frame[256];
+    int64_t ne_sz = zxc_compress(payload, sizeof(payload), non_empty_frame,
+                                 sizeof(non_empty_frame), NULL);
+    if (ne_sz <= 0) {
+        printf("  [FAIL] non-empty compress: got %lld\n", (long long)ne_sz);
+        return 0;
+    }
+    r = zxc_decompress(non_empty_frame, (size_t)ne_sz, NULL, 0, NULL);
+    if (r != ZXC_ERROR_DST_TOO_SMALL) {
+        printf("  [FAIL] NULL dst + 0 cap on non-empty frame: expected %d, got %lld\n",
+               ZXC_ERROR_DST_TOO_SMALL, (long long)r);
+        return 0;
+    }
+    printf("  [PASS] NULL dst + 0 cap on non-empty frame -> DST_TOO_SMALL\n");
+
+    /* 5. dst=NULL, dst_capacity=0 on bad magic -> ZXC_ERROR_NULL_INPUT */
+    uint8_t bad_magic[64];
+    memcpy(bad_magic, empty_frame, (size_t)comp_sz);
+    bad_magic[0] ^= 0xFF;
+    r = zxc_decompress(bad_magic, (size_t)comp_sz, NULL, 0, NULL);
+    if (r != ZXC_ERROR_NULL_INPUT) {
+        printf("  [FAIL] NULL dst + 0 cap + bad magic: expected %d, got %lld\n",
+               ZXC_ERROR_NULL_INPUT, (long long)r);
+        return 0;
+    }
+    printf("  [PASS] NULL dst + 0 cap + bad magic -> NULL_INPUT\n");
+
+    /* 6. Caller bug: dst=NULL with non-zero capacity -> ZXC_ERROR_NULL_INPUT */
+    r = zxc_decompress(empty_frame, (size_t)comp_sz, NULL, 100, NULL);
+    if (r != ZXC_ERROR_NULL_INPUT) {
+        printf("  [FAIL] NULL dst + cap>0: expected %d, got %lld\n",
+               ZXC_ERROR_NULL_INPUT, (long long)r);
+        return 0;
+    }
+    printf("  [PASS] NULL dst + cap>0 -> NULL_INPUT\n");
+
+    printf("PASS\n\n");
+    return 1;
+}
+
 // Tests the buffer API scratch buffer (work_buf) used to safely absorb
 // zxc_copy32 wild-copy overshoot during decompression.
 int test_buffer_api_scratch_buf() {

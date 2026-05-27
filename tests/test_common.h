@@ -62,6 +62,7 @@ int test_buffer_error_codes(void);
 int test_get_decompressed_size(void);
 int test_decompress_fast_vs_safe_path(void);
 int test_max_compressed_size_logic(void);
+int test_decompress_empty_frame_null_dst(void);
 
 /* Block API */
 int test_block_api(void);

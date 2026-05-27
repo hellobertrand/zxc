@@ -625,7 +625,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
     if (UNLIKELY(!dst || dst_capacity == 0)) {
         /* Empty-frame case (stored size == 0). */
-        if (zxc_le32(src) != ZXC_MAGIC_WORD) return ZXC_ERROR_NULL_INPUT;
+        if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD)) return ZXC_ERROR_NULL_INPUT;
         const uint8_t* footer = (const uint8_t*)src + src_size - ZXC_FILE_FOOTER_SIZE;
         return (zxc_le64(footer) == 0) ? 0 : (int64_t)ZXC_ERROR_DST_TOO_SMALL;
     }
