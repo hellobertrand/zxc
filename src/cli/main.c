@@ -1371,7 +1371,16 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        FILE* out = fopen(train_dict_path, "wb");
+        FILE* out;
+#ifdef _WIN32
+        out = fopen(train_dict_path, "wb");
+#else
+        {
+            const int fd = open(train_dict_path, O_CREAT | O_WRONLY | O_TRUNC,
+                                S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+            out = (fd != -1) ? fdopen(fd, "wb") : NULL;
+        }
+#endif
         if (!out) {
             fprintf(stderr, "Error: cannot create '%s': %s\n", train_dict_path, strerror(errno));
             free(zxd);
