@@ -2315,14 +2315,17 @@ static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
 // cppcheck-suppress unusedFunction
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
+    const size_t dict_sz = ctx->dict_size;
+    const size_t block_sz = src_sz - dict_sz;
+    const uint8_t* block_data = chunk + dict_sz;
     size_t w = 0;
     int res = ZXC_OK;
-    int try_num = zxc_probe_is_numeric(chunk, src_sz);
+    int try_num = zxc_probe_is_numeric(block_data, block_sz);
 
     if (UNLIKELY(try_num)) {
-        res = zxc_encode_block_num(ctx, chunk, src_sz, dst, dst_cap, &w);
-        if (res != ZXC_OK || w > (src_sz - (src_sz >> 2)))  // w > 75% of src_sz
-            try_num = 0;  // NUM didn't compress well, try GLO/GHI instead
+        res = zxc_encode_block_num(ctx, block_data, block_sz, dst, dst_cap, &w);
+        if (res != ZXC_OK || w > (block_sz - (block_sz >> 2)))
+            try_num = 0;
     }
 
     if (LIKELY(!try_num)) {
@@ -2332,9 +2335,9 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
             res = zxc_encode_block_glo(ctx, chunk, src_sz, dst, dst_cap, &w);
     }
 
-    // Check expansion. W contains Header + Payload.
-    if (UNLIKELY(res != ZXC_OK || w >= src_sz)) {
-        res = zxc_encode_block_raw(chunk, src_sz, dst, dst_cap, &w);
+    // Check expansion against block data size (excluding dict prefix).
+    if (UNLIKELY(res != ZXC_OK || w >= block_sz)) {
+        res = zxc_encode_block_raw(block_data, block_sz, dst, dst_cap, &w);
         if (UNLIKELY(res != ZXC_OK)) return res;
     }
 

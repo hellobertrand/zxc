@@ -15,6 +15,7 @@
  * @ref zxc_decompress, @ref zxc_get_decompressed_size).
  */
 
+#include "../../include/zxc_dict.h"
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_seekable.h"
 #include "zxc_internal.h"
@@ -499,8 +500,13 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
+    const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
+    const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
 
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
+
+    const uint32_t did = (dict && dict_size > 0) ? zxc_dict_id(dict, dict_size) : 0;
 
     const uint8_t* ip = (const uint8_t*)src;
     uint8_t* op = (uint8_t*)dst;
@@ -513,9 +519,21 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (UNLIKELY(zxc_cctx_init(&ctx, block_size, 1, level, checksum_enabled) != ZXC_OK))
         return ZXC_ERROR_MEMORY;
     // LCOV_EXCL_STOP
+    ctx.dict_size = dict_size;
+
+    /* Dict input buffer: [dict_content | block_data] for the encoder. */
+    uint8_t* dict_input = NULL;
+    if (dict_size > 0) {
+        dict_input = (uint8_t*)ZXC_MALLOC(dict_size + block_size);
+        if (UNLIKELY(!dict_input)) {
+            zxc_cctx_free(&ctx);
+            return ZXC_ERROR_MEMORY;
+        }
+        ZXC_MEMCPY(dict_input, dict, dict_size);
+    }
 
     const int h_val =
-        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled, 0);
+        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled, did);
     // LCOV_EXCL_START
     if (UNLIKELY(h_val < 0)) {
         zxc_cctx_free(&ctx);
@@ -549,8 +567,15 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         const size_t chunk_len = (src_size - pos > block_size) ? block_size : (src_size - pos);
         const size_t rem_cap = (size_t)(op_end - op);
 
-        const int res = zxc_compress_chunk_wrapper(&ctx, ip + pos, chunk_len, op, rem_cap);
+        int res;
+        if (dict_input) {
+            ZXC_MEMCPY(dict_input + dict_size, ip + pos, chunk_len);
+            res = zxc_compress_chunk_wrapper(&ctx, dict_input, dict_size + chunk_len, op, rem_cap);
+        } else {
+            res = zxc_compress_chunk_wrapper(&ctx, ip + pos, chunk_len, op, rem_cap);
+        }
         if (UNLIKELY(res < 0)) {
+            ZXC_FREE(dict_input);
             ZXC_FREE(seek_comp);
             zxc_cctx_free(&ctx);
             return res;
@@ -572,6 +597,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
                 seek_cap = seek_cap * 2;
                 uint32_t* nc = (uint32_t*)ZXC_REALLOC(seek_comp, seek_cap * sizeof(uint32_t));
                 if (UNLIKELY(!nc)) {
+                    ZXC_FREE(dict_input);
                     ZXC_FREE(seek_comp);
                     zxc_cctx_free(&ctx);
                     return ZXC_ERROR_MEMORY;
@@ -587,6 +613,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         pos += chunk_len;
     }
 
+    ZXC_FREE(dict_input);
     zxc_cctx_free(&ctx);
 
     // Write EOF Block
@@ -653,6 +680,8 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
     }
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
+    const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
+    const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
 
     const uint8_t* ip = (const uint8_t*)src;
     const uint8_t* ip_end = ip + src_size;
@@ -663,20 +692,41 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
     zxc_cctx_t ctx;
 
     int file_has_checksums = 0;
-    // File header verification and context initialization
+    uint32_t header_dict_id = 0;
     if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
-                                      NULL) != ZXC_OK ||
+                                      &header_dict_id) != ZXC_OK ||
                  zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0,
                                file_has_checksums && checksum_enabled) != ZXC_OK)) {
         return ZXC_ERROR_BAD_HEADER;
     }
 
+    /* Dictionary validation */
+    if (header_dict_id != 0) {
+        if (!dict || dict_size == 0) {
+            zxc_cctx_free(&ctx);
+            return ZXC_ERROR_DICT_REQUIRED;
+        }
+        if (zxc_dict_id(dict, dict_size) != header_dict_id) {
+            zxc_cctx_free(&ctx);
+            return ZXC_ERROR_DICT_MISMATCH;
+        }
+    }
+    ctx.dict_size = dict_size;
+
     ip += ZXC_FILE_HEADER_SIZE;
 
-    // work_buf is sized to runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD
-    // inside zxc_cctx_init (mode == 0).  The threshold below must match so
-    // the fast-path / bounce decision uses the actual work_buf capacity.
     const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
+
+    /* Dict decode buffer: [dict_content | decode_space + PAD] */
+    uint8_t* dict_dec = NULL;
+    if (dict_size > 0) {
+        dict_dec = (uint8_t*)ZXC_MALLOC(dict_size + work_sz);
+        if (UNLIKELY(!dict_dec)) {
+            zxc_cctx_free(&ctx);
+            return ZXC_ERROR_MEMORY;
+        }
+        ZXC_MEMCPY(dict_dec, dict, dict_size);
+    }
 
     // Block decompression loop
     uint32_t global_hash = 0;
@@ -722,7 +772,19 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
         int res;
         const size_t rem_cap = (size_t)(op_end - op);
-        if (LIKELY(rem_cap >= work_sz)) {
+        if (dict_dec) {
+            /* Dict path: decode into bounce buffer with dict prefix so match
+             * copies that reference dict content resolve naturally. */
+            res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, dict_dec + dict_size, work_sz);
+            if (LIKELY(res > 0)) {
+                if (UNLIKELY((size_t)res > rem_cap)) {
+                    ZXC_FREE(dict_dec);
+                    zxc_cctx_free(&ctx);
+                    return ZXC_ERROR_DST_TOO_SMALL;
+                }
+                ZXC_MEMCPY(op, dict_dec + dict_size, (size_t)res);
+            }
+        } else if (LIKELY(rem_cap >= work_sz)) {
             // Fast path: decode directly into dst. Cap dst_cap to chunk_size + PAD
             res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op, work_sz);
         } else {
@@ -739,6 +801,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             }
         }
         if (UNLIKELY(res < 0)) {
+            ZXC_FREE(dict_dec);
             zxc_cctx_free(&ctx);
             return res;
         }
@@ -754,6 +817,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         op += res;
     }
 
+    ZXC_FREE(dict_dec);
     zxc_cctx_free(&ctx);
     return (int64_t)(op - op_start);
 }
