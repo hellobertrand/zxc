@@ -1386,6 +1386,7 @@ int main(int argc, char** argv) {
      * without disk I/O bottlenecks.
      */
     if (mode == MODE_BENCHMARK) {
+        free(dict);
         if (optind >= argc) {
             zxc_log("Benchmark requires input file.\n");
             return 1;
@@ -1586,6 +1587,7 @@ int main(int argc, char** argv) {
      * Displays archive information (compressed size, uncompressed size, ratio).
      */
     if (mode == MODE_LIST) {
+        free(dict);
         if (optind >= argc) {
             zxc_log("List mode requires input file.\n");
             return 1;
@@ -1611,6 +1613,7 @@ int main(int argc, char** argv) {
 
     if (multiple_mode && to_stdout) {
         zxc_log("Error: cannot write to stdout when using multiple files mode (-m).\n");
+        free(dict);
         return 1;
     }
 
@@ -1624,11 +1627,13 @@ int main(int argc, char** argv) {
     // If no files passed but we aren't using stdin, or mode expects files:
     if (optind >= argc && mode == MODE_INTEGRITY) {
         zxc_log("Test mode requires at least one input file.\n");
+        free(dict);
         return 1;
     }
 
     if (multiple_mode && optind >= argc) {
         zxc_log("Multiple files mode requires at least one input file.\n");
+        free(dict);
         return 1;
     }
 

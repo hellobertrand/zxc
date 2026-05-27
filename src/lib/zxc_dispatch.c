@@ -559,6 +559,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         seek_comp = (uint32_t*)ZXC_MALLOC(seek_cap * sizeof(uint32_t));
         // LCOV_EXCL_START
         if (UNLIKELY(!seek_comp)) {
+            ZXC_FREE(dict_input);
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_MEMORY;
         }
