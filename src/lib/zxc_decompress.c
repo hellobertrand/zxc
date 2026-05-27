@@ -792,7 +792,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
     // For 1-byte offsets (enc_off==1): validate until 256 bytes written (max 8-bit offset)
     // For 2-byte offsets (enc_off==0): validate until 65536 bytes written (max 16-bit offset)
     // After threshold, all offsets are guaranteed valid (can't exceed written bytes)
-    size_t written = 0;
+    // When a dictionary is active, dict_size bytes are logically "already written"
+    // (prepended by the caller), so the SAFE loop may be skipped entirely.
+    size_t written = ctx->dict_size;
 
     // --- SAFE Loop: offset validation until threshold (4x unroll) ---
     // For 1-byte offsets: bounds check until 256 bytes written
@@ -1463,7 +1465,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
     // For 1-byte offsets (enc_off==1): validate until 256 bytes written (max 8-bit offset)
     // For 2-byte offsets (enc_off==0): validate until 65536 bytes written (max 16-bit offset)
     // After threshold, all offsets are guaranteed valid (can't exceed written bytes)
-    size_t written = 0;
+    // When a dictionary is active, dict_size bytes are logically "already written"
+    // (prepended by the caller), so the SAFE loop may be skipped entirely.
+    size_t written = ctx->dict_size;
 
     // --- SAFE Loop: offset validation until threshold (4x unroll) ---
     // Since offset is 16-bit, threshold is 65536.
