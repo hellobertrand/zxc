@@ -65,6 +65,15 @@
 /** @} */ /* end of block_size */
 
 /**
+ * @defgroup dictionary Dictionary
+ * @brief Constants for pre-trained dictionary support.
+ * @{
+ */
+/** @brief Maximum dictionary content size in bytes (64 KB, bounded by LZ window). */
+#define ZXC_DICT_SIZE_MAX (1U << 16)
+/** @} */ /* end of dictionary */
+
+/**
  * @defgroup threading Threading Limits
  * @brief Bounds on thread-count parameters accepted by the streaming APIs.
  * @{
