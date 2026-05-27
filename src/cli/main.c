@@ -1237,7 +1237,12 @@ int main(int argc, char** argv) {
     void* dict = NULL;
     size_t dict_size = 0;
     if (dict_path) {
-        FILE* f_dict = fopen(dict_path, "rb");
+        char resolved_dict[4096];
+        if (zxc_validate_input_path(dict_path, resolved_dict, sizeof(resolved_dict)) != 0) {
+            fprintf(stderr, "Error: invalid dictionary path '%s': %s\n", dict_path, strerror(errno));
+            return 1;
+        }
+        FILE* f_dict = fopen(resolved_dict, "rb");
         if (!f_dict) {
             fprintf(stderr, "Error: cannot open dictionary '%s': %s\n", dict_path, strerror(errno));
             return 1;
@@ -1300,7 +1305,12 @@ int main(int argc, char** argv) {
         }
         int n_loaded = 0;
         for (int i = optind; i < argc; i++) {
-            FILE* sf = fopen(argv[i], "rb");
+            char resolved[4096];
+            if (zxc_validate_input_path(argv[i], resolved, sizeof(resolved)) != 0) {
+                fprintf(stderr, "Warning: invalid path '%s', skipping\n", argv[i]);
+                continue;
+            }
+            FILE* sf = fopen(resolved, "rb");
             if (!sf) {
                 fprintf(stderr, "Warning: cannot open '%s', skipping\n", argv[i]);
                 continue;
