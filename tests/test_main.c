@@ -125,6 +125,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_dict_large_dict_roundtrip),
     TEST_CASE(test_dict_seekable_roundtrip),
     TEST_CASE(test_dict_train_roundtrip),
+    TEST_CASE(test_dict_seekable_mt_roundtrip),
 
     /* --- Seekable (single-threaded) --- */
     TEST_CASE(test_seekable_table_sizes),

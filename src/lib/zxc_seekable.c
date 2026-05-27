@@ -647,13 +647,27 @@ static void* zxc_seek_mt_worker(void* arg) {
         return NULL;
     }
     // LCOV_EXCL_STOP
+    dctx.dict_size = s->dict_size;
     const size_t work_sz = (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
+
+    /* Thread-local dict bounce buffer: [dict_content | decode_space] */
+    uint8_t* dict_work = NULL;
+    if (s->dict_size > 0 && s->dict) {
+        dict_work = (uint8_t*)ZXC_MALLOC(s->dict_size + work_sz);
+        if (UNLIKELY(!dict_work)) {
+            zxc_cctx_free(&dctx);
+            job->result = ZXC_ERROR_MEMORY;
+            return NULL;
+        }
+        ZXC_MEMCPY(dict_work, s->dict, s->dict_size);
+    }
 
     /* Read compressed block */
     const uint32_t csz = s->comp_sizes[bi];
     uint8_t* const read_buf = (uint8_t*)ZXC_MALLOC(csz + ZXC_PAD_SIZE);
     // LCOV_EXCL_START
     if (UNLIKELY(!read_buf)) {
+        ZXC_FREE(dict_work);
         zxc_cctx_free(&dctx);
         job->result = ZXC_ERROR_MEMORY;
         return NULL;
@@ -664,24 +678,28 @@ static void* zxc_seek_mt_worker(void* arg) {
     // LCOV_EXCL_START
     if (UNLIKELY(read_res < 0)) {
         ZXC_FREE(read_buf);
+        ZXC_FREE(dict_work);
         zxc_cctx_free(&dctx);
         job->result = read_res;
         return NULL;
     }
     // LCOV_EXCL_STOP
 
-    /* Decompress */
+    /* Decompress — use dict bounce buffer when dictionary is active */
+    uint8_t* dec_dst = dict_work ? dict_work + s->dict_size : dctx.work_buf;
     const int dec_res =
-        zxc_decompress_chunk_wrapper(&dctx, read_buf, (size_t)read_res, dctx.work_buf, work_sz);
+        zxc_decompress_chunk_wrapper(&dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
     ZXC_FREE(read_buf);
 
     // LCOV_EXCL_START
     if (UNLIKELY(dec_res < 0)) {
+        ZXC_FREE(dict_work);
         zxc_cctx_free(&dctx);
         job->result = dec_res;
         return NULL;
     }
     if (UNLIKELY((size_t)dec_res < job->skip + job->copy_len)) {
+        ZXC_FREE(dict_work);
         zxc_cctx_free(&dctx);
         job->result = ZXC_ERROR_CORRUPT_DATA;
         return NULL;
@@ -689,8 +707,9 @@ static void* zxc_seek_mt_worker(void* arg) {
     // LCOV_EXCL_STOP
 
     /* Copy the requested portion directly into the caller's output buffer */
-    ZXC_MEMCPY(job->dst, dctx.work_buf + job->skip, job->copy_len);
+    ZXC_MEMCPY(job->dst, dec_dst + job->skip, job->copy_len);
 
+    ZXC_FREE(dict_work);
     zxc_cctx_free(&dctx);
     job->result = 0;
     return NULL;
