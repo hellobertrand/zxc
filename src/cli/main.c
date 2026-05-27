@@ -344,10 +344,11 @@ typedef enum {
     MODE_DECOMPRESS,
     MODE_BENCHMARK,
     MODE_INTEGRITY,
-    MODE_LIST
+    MODE_LIST,
+    MODE_TRAIN_DICT
 } zxc_mode_t;
 
-enum { OPT_VERSION = 1000, OPT_HELP };
+enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT };
 
 // Forward declaration for recursive mode
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
@@ -469,7 +470,8 @@ void print_help(const char* app) {
         "  -d, --decompress  Decompress FILE (or stdin -> stdout)\n"
         "  -l, --list        List archive information\n"
         "  -t, --test        Test compressed FILE integrity\n"
-        "  -b, --bench [N]   Benchmark in-memory (N=seconds, default 5)\n\n"
+        "  -b, --bench [N]   Benchmark in-memory (N=seconds, default 5)\n"
+        "  --train-dict FILE Train a dictionary from input files\n\n"
         "Batch Processing:\n"
         "  -m, --multiple    Multiple input files\n"
         "  -r, --recursive   Operate recursively on directories\n\n"
@@ -1039,8 +1041,10 @@ int main(int argc, char** argv) {
     size_t block_size = 0;
     int seekable = 0;
     const char* dict_path = NULL;
+    const char* train_dict_path = NULL;
 
-    static const struct option long_options[] = {{"dict", required_argument, 0, 'D'},
+    static const struct option long_options[] = {{"train-dict", required_argument, 0, OPT_TRAIN_DICT},
+                                                 {"dict", required_argument, 0, 'D'},
                                                  {"compress", no_argument, 0, 'z'},
                                                  {"decompress", no_argument, 0, 'd'},
                                                  {"list", no_argument, 0, 'l'},
@@ -1152,6 +1156,10 @@ int main(int argc, char** argv) {
                 break;
             case 'D':
                 dict_path = optarg;
+                break;
+            case OPT_TRAIN_DICT:
+                mode = MODE_TRAIN_DICT;
+                train_dict_path = optarg;
                 break;
             case 'r':
                 recursive_mode = 1;
@@ -1268,6 +1276,108 @@ int main(int argc, char** argv) {
         memcpy(dict, content, content_size);
         dict_size = content_size;
         free(zxd_buf);
+    }
+
+    /*
+     * Train Dictionary Mode
+     * Reads input files as samples, trains a dictionary, saves as .zxd.
+     */
+    if (mode == MODE_TRAIN_DICT) {
+        if (optind >= argc) {
+            fprintf(stderr, "Error: --train-dict requires input files as training samples.\n");
+            free(dict);
+            return 1;
+        }
+        const int n_files = argc - optind;
+        const void** samples = (const void**)malloc((size_t)n_files * sizeof(void*));
+        size_t* sample_sizes = (size_t*)malloc((size_t)n_files * sizeof(size_t));
+        if (!samples || !sample_sizes) {
+            fprintf(stderr, "Error: memory allocation failed\n");
+            free(samples);
+            free(sample_sizes);
+            free(dict);
+            return 1;
+        }
+        int n_loaded = 0;
+        for (int i = optind; i < argc; i++) {
+            FILE* sf = fopen(argv[i], "rb");
+            if (!sf) {
+                fprintf(stderr, "Warning: cannot open '%s', skipping\n", argv[i]);
+                continue;
+            }
+            fseeko(sf, 0, SEEK_END);
+            size_t sz = (size_t)ftello(sf);
+            fseeko(sf, 0, SEEK_SET);
+            if (sz == 0) { fclose(sf); continue; }
+            uint8_t* buf = (uint8_t*)malloc(sz);
+            if (!buf) { fclose(sf); continue; }
+            fread(buf, 1, sz, sf);
+            fclose(sf);
+            samples[n_loaded] = buf;
+            sample_sizes[n_loaded] = sz;
+            n_loaded++;
+        }
+        if (n_loaded == 0) {
+            fprintf(stderr, "Error: no valid samples loaded\n");
+            free(samples);
+            free(sample_sizes);
+            free(dict);
+            return 1;
+        }
+
+        size_t dict_cap = 32768;
+        if (block_size > 0 && block_size < dict_cap) dict_cap = block_size;
+        uint8_t* dict_buf = (uint8_t*)malloc(dict_cap);
+        if (!dict_buf) {
+            fprintf(stderr, "Error: memory allocation failed\n");
+            for (int i = 0; i < n_loaded; i++) free((void*)samples[i]);
+            free(samples);
+            free(sample_sizes);
+            free(dict);
+            return 1;
+        }
+
+        int64_t dict_sz = zxc_train_dict(samples, sample_sizes, (size_t)n_loaded,
+                                         dict_buf, dict_cap);
+        for (int i = 0; i < n_loaded; i++) free((void*)samples[i]);
+        free(samples);
+        free(sample_sizes);
+
+        if (dict_sz <= 0) {
+            fprintf(stderr, "Error: training failed: %s\n", zxc_error_name((int)dict_sz));
+            free(dict_buf);
+            free(dict);
+            return 1;
+        }
+
+        size_t zxd_bound = zxc_dict_save_bound((size_t)dict_sz);
+        uint8_t* zxd = (uint8_t*)malloc(zxd_bound);
+        int64_t zxd_sz = zxc_dict_save(dict_buf, (size_t)dict_sz, zxd, zxd_bound);
+        free(dict_buf);
+        if (zxd_sz <= 0) {
+            fprintf(stderr, "Error: dict save failed: %s\n", zxc_error_name((int)zxd_sz));
+            free(zxd);
+            free(dict);
+            return 1;
+        }
+
+        FILE* out = fopen(train_dict_path, "wb");
+        if (!out) {
+            fprintf(stderr, "Error: cannot create '%s': %s\n", train_dict_path, strerror(errno));
+            free(zxd);
+            free(dict);
+            return 1;
+        }
+        const uint32_t trained_id = zxc_dict_get_id(zxd, (size_t)zxd_sz);
+        fwrite(zxd, 1, (size_t)zxd_sz, out);
+        fclose(out);
+        free(zxd);
+
+        fprintf(stderr, "Trained dictionary: %lld bytes from %d samples -> %s (dict_id: 0x%08X)\n",
+                (long long)dict_sz, n_loaded, train_dict_path, trained_id);
+
+        free(dict);
+        return 0;
     }
 
     /*
