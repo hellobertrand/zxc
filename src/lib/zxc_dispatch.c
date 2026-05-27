@@ -552,6 +552,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (seekable) {
         const size_t block_count = src_size / block_size;
         if (UNLIKELY(block_count > (size_t)UINT32_MAX - 2)) {
+            ZXC_FREE(dict_input);
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_BAD_BLOCK_SIZE;
         }
