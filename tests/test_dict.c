@@ -337,6 +337,49 @@ int test_dict_stream_roundtrip(void) {
     return 1;
 }
 
+int test_dict_large_dict_roundtrip(void) {
+    printf("=== TEST: Dict - large dict (32KB) with small blocks (4KB) ===\n");
+
+    uint8_t* dict = (uint8_t*)malloc(32768);
+    for (size_t i = 0; i < 32768; i++) dict[i] = (uint8_t)(i * 7 + 13);
+    const size_t dict_size = 32768;
+
+    const size_t src_size = 4096;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    gen_dict_friendly_data(src, src_size, dict, dict_size);
+
+    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    uint8_t* compressed = (uint8_t*)malloc(comp_bound);
+    uint8_t* decompressed = (uint8_t*)malloc(src_size);
+
+    for (int level = 1; level <= 6; level++) {
+        zxc_compress_opts_t copts = {
+            .level = level, .checksum_enabled = 1, .dict = dict, .dict_size = dict_size,
+        };
+        int64_t comp_size = zxc_compress(src, src_size, compressed, comp_bound, &copts);
+        if (comp_size <= 0) {
+            printf("  [FAIL] level %d: compress returned %lld (%s)\n", level, (long long)comp_size,
+                   zxc_error_name((int)comp_size));
+            free(src); free(compressed); free(decompressed); free(dict);
+            return 0;
+        }
+        zxc_decompress_opts_t dopts = {.checksum_enabled = 1, .dict = dict, .dict_size = dict_size};
+        int64_t dec_size = zxc_decompress(compressed, (size_t)comp_size, decompressed, src_size,
+                                          &dopts);
+        if (dec_size != (int64_t)src_size || memcmp(src, decompressed, src_size) != 0) {
+            printf("  [FAIL] level %d: dec_size=%lld err=%s\n", level, (long long)dec_size,
+                   dec_size < 0 ? zxc_error_name((int)dec_size) : "content mismatch");
+            free(src); free(compressed); free(decompressed); free(dict);
+            return 0;
+        }
+        printf("  [PASS] level %d\n", level);
+    }
+
+    free(src); free(compressed); free(decompressed); free(dict);
+    printf("PASS\n\n");
+    return 1;
+}
+
 int test_dict_train_roundtrip(void) {
     printf("=== TEST: Dict - train then compress/decompress ===\n");
 

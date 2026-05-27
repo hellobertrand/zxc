@@ -373,7 +373,10 @@ static void* zxc_stream_worker(void* arg) {
                                 ? ctx->checksum_enabled
                                 : (ctx->file_has_checksum && ctx->checksum_enabled);
 
-    if (zxc_cctx_init(&cctx, ctx->chunk_size, ctx->compression_mode, ctx->compression_level,
+    const size_t eff_chunk = (ctx->dict_size > 0 && ctx->compression_mode == 1)
+                                 ? zxc_block_size_ceil(ctx->dict_size + ctx->chunk_size)
+                                 : ctx->chunk_size;
+    if (zxc_cctx_init(&cctx, eff_chunk, ctx->compression_mode, ctx->compression_level,
                       unified_chk) != ZXC_OK) {
         // LCOV_EXCL_START
         zxc_cctx_free(&cctx);
