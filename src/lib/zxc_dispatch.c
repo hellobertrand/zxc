@@ -515,7 +515,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     // LCOV_EXCL_STOP
 
     const int h_val =
-        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled);
+        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled, 0);
     // LCOV_EXCL_START
     if (UNLIKELY(h_val < 0)) {
         zxc_cctx_free(&ctx);
@@ -664,8 +664,8 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
     int file_has_checksums = 0;
     // File header verification and context initialization
-    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums) !=
-                     ZXC_OK ||
+    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
+                                      NULL) != ZXC_OK ||
                  zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0,
                                file_has_checksums && checksum_enabled) != ZXC_OK)) {
         return ZXC_ERROR_BAD_HEADER;
@@ -889,7 +889,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     uint32_t global_hash = 0;
 
     const int h_val =
-        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled);
+        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled, 0);
     if (UNLIKELY(h_val < 0)) return h_val;  // LCOV_EXCL_LINE
     op += h_val;
 
@@ -973,8 +973,8 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     int file_has_checksums = 0;
     uint32_t global_hash = 0;
 
-    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums) !=
-                 ZXC_OK))
+    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
+                                      NULL) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
 
     /* Static dctx: block_size is locked at workspace init; reject any

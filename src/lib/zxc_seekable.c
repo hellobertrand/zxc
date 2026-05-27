@@ -192,7 +192,8 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     /* Step 1: validate file header => block_size */
     size_t block_size_sz = 0;
     int file_has_chk = 0;
-    if (UNLIKELY(zxc_read_file_header(data, data_size, &block_size_sz, &file_has_chk) != ZXC_OK))
+    if (UNLIKELY(zxc_read_file_header(data, data_size, &block_size_sz, &file_has_chk, NULL) !=
+                 ZXC_OK))
         return NULL;
     const uint32_t block_size = (uint32_t)block_size_sz;
     if (UNLIKELY(block_size == 0)) return NULL;  // LCOV_EXCL_LINE
@@ -326,7 +327,7 @@ zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r) {
 
     size_t bs_sz = 0;
     int fhc = 0;
-    if (UNLIKELY(zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &bs_sz, &fhc) != ZXC_OK))
+    if (UNLIKELY(zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &bs_sz, &fhc, NULL) != ZXC_OK))
         return NULL;
     const uint32_t bs = (uint32_t)bs_sz;
     if (UNLIKELY(bs == 0)) return NULL;

@@ -63,6 +63,8 @@ typedef struct {
                           of 2, [4KB - 2MB]. */
     int checksum_enabled; /**< 1 to enable per-block and global checksums, 0 to disable. */
     int seekable;         /**< 1 to append a seek table for random-access decompression. */
+    const void* dict;     /**< Pre-trained dictionary content (NULL = none). */
+    size_t dict_size;     /**< Dictionary size in bytes (0 = none, max ZXC_DICT_SIZE_MAX). */
     zxc_progress_callback_t progress_cb; /**< Optional progress callback (NULL to disable). */
     void* user_data;                     /**< User context pointer passed to progress_cb. */
 } zxc_compress_opts_t;
@@ -80,6 +82,8 @@ typedef struct {
 typedef struct {
     int n_threads;        /**< Worker thread count (0 = auto-detect CPU cores). */
     int checksum_enabled; /**< 1 to verify per-block and global checksums, 0 to skip. */
+    const void* dict;     /**< Pre-trained dictionary content (NULL = none). */
+    size_t dict_size;     /**< Dictionary size in bytes (0 = none). */
     zxc_progress_callback_t progress_cb; /**< Optional progress callback (NULL to disable). */
     void* user_data;                     /**< User context pointer passed to progress_cb. */
 } zxc_decompress_opts_t;

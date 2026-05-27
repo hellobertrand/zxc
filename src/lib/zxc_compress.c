@@ -1072,19 +1072,26 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level);
     lzp_opt.use_lazy = 0;  // guard
 
+    /* When a dictionary is active, src = [dict | block_data]. DP arrays are
+     * indexed relative to the block start (position dict_sz in src). The
+     * variable src_base points to the first block byte for literal copies,
+     * while src remains the base for the match finder (absolute positions). */
+    const size_t dict_sz = ctx->dict_size;
+    const size_t block_sz = src_sz - dict_sz;
+    const uint8_t* const src_base = src + dict_sz;
     const uint8_t* const iend = src + src_sz;
 
     /* Block too small for any match: emit all as literals. */
-    if (UNLIKELY(src_sz < ZXC_LZ_SEARCH_MARGIN + 1)) {
-        if (src_sz > 0) ZXC_MEMCPY(literals, src, src_sz);
-        *lit_c_out = src_sz;
+    if (UNLIKELY(block_sz < ZXC_LZ_SEARCH_MARGIN + 1)) {
+        if (block_sz > 0) ZXC_MEMCPY(literals, src_base, block_sz);
+        *lit_c_out = block_sz;
         *seq_c_out = 0;
         *extras_sz_out = 0;
         *max_offset_out = 0;
         return 0;
     }
 
-    const size_t search_limit_pos = src_sz - ZXC_LZ_SEARCH_MARGIN;
+    const size_t search_limit_pos = block_sz - ZXC_LZ_SEARCH_MARGIN;
     const uint8_t* const search_limit = src + search_limit_pos;
 
     /* DP arrays carved from ctx->opt_scratch: a single allocation lazy-
@@ -1126,8 +1133,8 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
      * zxc_estimate_cctx_size(). */
     (void)needed;
 
-    /* Per-block literal cost: */
-    const uint32_t lit_cost = zxc_opt_estimate_lit_bits(src, src_sz, ctx->opt_scratch);
+    /* Per-block literal cost (sample only block data, not dict prefix): */
+    const uint32_t lit_cost = zxc_opt_estimate_lit_bits(src_base, block_sz, ctx->opt_scratch);
 
     uint32_t* const dp = (uint32_t*)ctx->opt_scratch;
     uint16_t* const parent_len = (uint16_t*)(ctx->opt_scratch + sz_dp);
@@ -1135,7 +1142,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     uint64_t* const match_end_bits = (uint64_t*)(ctx->opt_scratch + sz_dp + sz_pl + sz_po);
 
     dp[0] = 0;
-    ZXC_MEMSET(dp + 1, 0xFF, src_sz * sizeof(uint32_t));
+    ZXC_MEMSET(dp + 1, 0xFF, block_sz * sizeof(uint32_t));
     ZXC_MEMSET(parent_len, 0, sz_pl + sz_po + sz_bm);
 
     /* Forward DP: visit every position, update reachable successors.
@@ -1160,17 +1167,20 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
         /* Match transition: call find_best_match (no lazy, no backtrack via
          * anchor=ip). Iterate sub-lengths since any L <= max_L matches at the
-         * same offset and may end at a more useful DP position. */
-        const uint8_t* ip = src + p;
-        const zxc_match_t m = zxc_lz77_find_best_match(
-            src, ip, iend, search_limit, /*anchor=*/ip, hash_table, hash_tags, chain_table,
-            epoch_mark, offset_mask, level, lzp_opt, last_off);
+         * same offset and may end at a more useful DP position.
+         * ip uses absolute position (src + dict_sz + p) so match finder
+         * resolves dict references correctly via src as base. */
+        const uint8_t* ip = src_base + p;
+        const zxc_match_t m =
+            zxc_lz77_find_best_match(src, ip, iend, search_limit, /*anchor=*/ip, hash_table,
+                                     hash_tags, chain_table, epoch_mark, offset_mask, level,
+                                     lzp_opt, last_off);
 
         if (m.ref) {
             const uint32_t off = (uint32_t)(ip - m.ref);
             if (off > 0 && off <= ZXC_LZ_WINDOW_SIZE) {
                 last_off = off;
-                const size_t L_max_raw = (m.len > src_sz - p) ? (src_sz - p) : (size_t)m.len;
+                const size_t L_max_raw = (m.len > block_sz - p) ? (block_sz - p) : (size_t)m.len;
                 const size_t L_max = (L_max_raw > UINT16_MAX) ? UINT16_MAX : L_max_raw;
 
                 /* The L-iteration cost function is piecewise constant in
@@ -1229,7 +1239,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
     /* Tail (last ZXC_LZ_SEARCH_MARGIN bytes) can only be literals: the match finder
      * stops at search_limit so its 8-byte probe reads stay in bounds. */
-    for (size_t p = search_limit_pos; p < src_sz; p++) {
+    for (size_t p = search_limit_pos; p < block_sz; p++) {
         if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
         const uint32_t lit_next = dp[p] + lit_cost;
         if (lit_next < dp[p + 1]) {
@@ -1243,7 +1253,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
      * runs of unmarked positions and are reconstructed during forward emission
      * via lit_start tracking, so they need no backtrack storage. */
     {
-        size_t pos = src_sz;
+        size_t pos = block_sz;
         while (pos > 0) {
             const uint32_t L = parent_len[pos];
             if (L == 0) {
@@ -1275,7 +1285,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
             const size_t LL = match_start - lit_start;
             if (LL > 0) {
-                ZXC_MEMCPY(literals + lit_c, src + lit_start, LL);
+                ZXC_MEMCPY(literals + lit_c, src_base + lit_start, LL);
                 lit_c += LL;
             }
             const uint32_t ll = (uint32_t)LL;
@@ -1303,9 +1313,9 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     }
 
     /* Tail literals after the last match (or all literals if no match). */
-    if (lit_start < src_sz) {
-        const size_t tail = src_sz - lit_start;
-        ZXC_MEMCPY(literals + lit_c, src + lit_start, tail);
+    if (lit_start < block_sz) {
+        const size_t tail = block_sz - lit_start;
+        ZXC_MEMCPY(literals + lit_c, src_base + lit_start, tail);
         lit_c += tail;
     }
 
@@ -1314,6 +1324,49 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     *extras_sz_out = extras_sz;
     *max_offset_out = max_offset;
     return 0;
+}
+
+/**
+ * @brief Seeds the hash/chain tables from dictionary content prepended to @p src.
+ *
+ * When a dictionary is active, @p src is laid out as [dict_content | block_data].
+ * This function inserts hash entries for dictionary positions [0, dict_size) so
+ * the match finder can reference them during block encoding.
+ *
+ * @param[in]     src         Source buffer starting with dictionary content.
+ * @param[in]     dict_size   Size of the dictionary prefix in bytes.
+ * @param[in,out] hash_table  Hash table to seed with dictionary positions.
+ * @param[in,out] hash_tags   Tag table for fast match rejection.
+ * @param[in,out] chain_table Chain table for collision resolution.
+ * @param[in]     epoch_mark  Current epoch marker for hash table entries.
+ * @param[in]     offset_mask Position mask for epoch/offset encoding.
+ * @param[in]     level       Compression level (controls hash function variant).
+ */
+static void zxc_lz_seed_dict(const uint8_t* RESTRICT src, const size_t dict_size,
+                             uint32_t* RESTRICT hash_table, uint8_t* RESTRICT hash_tags,
+                             uint16_t* RESTRICT chain_table, const uint32_t epoch_mark,
+                             const uint32_t offset_mask, const int level) {
+    if (UNLIKELY(dict_size < ZXC_LZ_MIN_MATCH_LEN)) return;
+
+    const int use_hash5 = (level >= 3);
+    const size_t limit = dict_size - (ZXC_LZ_MIN_MATCH_LEN - 1);
+    for (size_t i = 0; i < limit; i++) {
+        const uint64_t val8 = zxc_le64(src + i);
+        const uint32_t h = zxc_hash_func(val8, use_hash5);
+        const uint32_t cur_pos = (uint32_t)i;
+        const uint8_t tag = (uint8_t)((uint32_t)val8 ^ ((uint32_t)val8 >> 16));
+
+        const uint32_t raw_head = hash_table[h];
+        const uint32_t prev_idx =
+            ((raw_head & ~offset_mask) == epoch_mark) ? (raw_head & offset_mask) : 0;
+
+        hash_table[h] = epoch_mark | cur_pos;
+        hash_tags[h] = tag;
+
+        const uint32_t dist = cur_pos - prev_idx;
+        const uint32_t valid = -((int32_t)((prev_idx != 0) & (dist < ZXC_LZ_WINDOW_SIZE)));
+        chain_table[cur_pos & ZXC_LZ_WINDOW_MASK] = (uint16_t)(dist & valid);
+    }
 }
 
 /**
@@ -1367,6 +1420,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
                                 size_t* RESTRICT out_sz) {
     const int level = ctx->compression_level;
+    const size_t dict_sz = ctx->dict_size;
 
     const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
 
@@ -1379,7 +1433,12 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const uint32_t offset_bits = ctx->offset_bits;
     const uint32_t offset_mask = ctx->offset_mask;
     const uint32_t epoch_mark = ctx->epoch << offset_bits;
-    const uint8_t *ip = src, *iend = src + src_sz, *anchor = ip,
+
+    if (dict_sz > 0)
+        zxc_lz_seed_dict(src, dict_sz, ctx->hash_table, ctx->hash_tags, ctx->chain_table,
+                         epoch_mark, offset_mask, level);
+
+    const uint8_t *ip = src + dict_sz, *iend = src + src_sz, *anchor = ip,
                   *search_limit = iend - ZXC_LZ_SEARCH_MARGIN;
 
     uint32_t* const hash_table = ctx->hash_table;
@@ -1983,6 +2042,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
                                 size_t* RESTRICT const out_sz) {
     const int level = ctx->compression_level;
+    const size_t dict_sz = ctx->dict_size;
 
     const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
 
@@ -1995,7 +2055,12 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const uint32_t offset_bits = ctx->offset_bits;
     const uint32_t offset_mask = ctx->offset_mask;
     const uint32_t epoch_mark = ctx->epoch << offset_bits;
-    const uint8_t *ip = src, *iend = src + src_sz, *anchor = ip,
+
+    if (dict_sz > 0)
+        zxc_lz_seed_dict(src, dict_sz, ctx->hash_table, ctx->hash_tags, ctx->chain_table,
+                         epoch_mark, offset_mask, level);
+
+    const uint8_t *ip = src + dict_sz, *iend = src + src_sz, *anchor = ip,
                   *search_limit = iend - ZXC_LZ_SEARCH_MARGIN;
 
     uint32_t* const hash_table = ctx->hash_table;

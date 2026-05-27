@@ -289,7 +289,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  *         or a negative @ref zxc_error_t code.
  */
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, const size_t chunk_size,
-                          const int has_checksum) {
+                          const int has_checksum, const uint32_t dict_id) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
 
     zxc_store_le32(dst, ZXC_MAGIC_WORD);
@@ -299,10 +299,13 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     dst[5] = (uint8_t)zxc_log2_u32((uint32_t)chunk_size);
 
     // Flags are at offset 6
-    dst[6] = has_checksum ? (ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_CHECKSUM_RAPIDHASH) : 0;
+    uint8_t flags = has_checksum ? (ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_CHECKSUM_RAPIDHASH) : 0;
+    if (dict_id != 0) flags |= ZXC_FILE_FLAG_HAS_DICTIONARY;
+    dst[6] = flags;
 
-    // Bytes 7-13: Reserved (must be 0, 7 bytes)
+    // Bytes 7-13: Reserved / dict_id
     ZXC_MEMSET(dst + 7, 0, 7);
+    if (dict_id != 0) zxc_store_le32(dst + 7, dict_id);
 
     // Bytes 14-15: CRC (16-bit)
     zxc_store_le16(dst + 14, 0);  // Zero out before hashing
@@ -325,7 +328,8 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
  */
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
-                         size_t* RESTRICT out_block_size, int* RESTRICT out_has_checksum) {
+                         size_t* RESTRICT out_block_size, int* RESTRICT out_has_checksum,
+                         uint32_t* RESTRICT out_dict_id) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
     if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
     if (UNLIKELY(src[4] != ZXC_FILE_FORMAT_VERSION)) return ZXC_ERROR_BAD_VERSION;
@@ -353,6 +357,7 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     }
     // Flags are at offset 6
     if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
+    if (out_dict_id) *out_dict_id = (src[6] & ZXC_FILE_FLAG_HAS_DICTIONARY) ? zxc_le32(src + 7) : 0;
 
     return ZXC_OK;
 }
@@ -801,6 +806,12 @@ const char* zxc_error_name(const int code) {
             return "ZXC_ERROR_BAD_BLOCK_TYPE";
         case ZXC_ERROR_BAD_BLOCK_SIZE:
             return "ZXC_ERROR_BAD_BLOCK_SIZE";
+        case ZXC_ERROR_DICT_REQUIRED:
+            return "ZXC_ERROR_DICT_REQUIRED";
+        case ZXC_ERROR_DICT_MISMATCH:
+            return "ZXC_ERROR_DICT_MISMATCH";
+        case ZXC_ERROR_DICT_TOO_LARGE:
+            return "ZXC_ERROR_DICT_TOO_LARGE";
         default:
             return "ZXC_UNKNOWN_ERROR";
     }
