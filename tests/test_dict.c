@@ -601,3 +601,84 @@ int test_dict_seekable_roundtrip(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+int test_dict_seekable_mt_roundtrip(void) {
+    printf("=== TEST: Dict - seekable MT roundtrip ===\n");
+
+    const uint8_t dict_content[] =
+        "The quick brown fox jumps over the lazy dog. "
+        "Lorem ipsum dolor sit amet, consectetur adipiscing elit.";
+    const size_t dict_size = sizeof(dict_content) - 1;
+
+    /* Use 32KB of data with 4KB blocks = 8 blocks, enough for MT */
+    const size_t src_size = 32768;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    gen_dict_friendly_data(src, src_size, dict_content, dict_size);
+
+    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    uint8_t* compressed = (uint8_t*)malloc(comp_bound);
+
+    zxc_compress_opts_t copts = {
+        .level = ZXC_LEVEL_DEFAULT,
+        .block_size = 4096,
+        .checksum_enabled = 1,
+        .seekable = 1,
+        .dict = dict_content,
+        .dict_size = dict_size,
+    };
+    int64_t comp_size = zxc_compress(src, src_size, compressed, comp_bound, &copts);
+    if (comp_size <= 0) {
+        printf("  [FAIL] compress returned %lld\n", (long long)comp_size);
+        free(src);
+        free(compressed);
+        return 0;
+    }
+
+    zxc_seekable* s = zxc_seekable_open(compressed, (size_t)comp_size);
+    if (!s) {
+        printf("  [FAIL] seekable_open returned NULL\n");
+        free(src);
+        free(compressed);
+        return 0;
+    }
+    zxc_seekable_set_dict(s, dict_content, dict_size);
+
+    /* Full range MT decompress */
+    uint8_t* decompressed = (uint8_t*)malloc(src_size);
+    int64_t dec_size = zxc_seekable_decompress_range_mt(s, decompressed, src_size, 0, src_size, 4);
+    if (dec_size != (int64_t)src_size) {
+        printf("  [FAIL] decompress_range_mt returned %lld (%s)\n", (long long)dec_size,
+               dec_size < 0 ? zxc_error_name((int)dec_size) : "size mismatch");
+        zxc_seekable_free(s);
+        free(src);
+        free(compressed);
+        free(decompressed);
+        return 0;
+    }
+
+    int ok = (memcmp(src, decompressed, src_size) == 0);
+    if (!ok) {
+        for (size_t i = 0; i < src_size; i++) {
+            if (src[i] != decompressed[i]) {
+                printf("  [FAIL] content mismatch at byte %zu\n", i);
+                break;
+            }
+        }
+    }
+
+    /* Also test a sub-range across block boundaries */
+    if (ok) {
+        int64_t sub = zxc_seekable_decompress_range_mt(s, decompressed, 8192, 4000, 8192, 4);
+        ok = (sub == 8192 && memcmp(src + 4000, decompressed, 8192) == 0);
+        if (!ok) printf("  [FAIL] sub-range MT mismatch\n");
+    }
+
+    zxc_seekable_free(s);
+    free(decompressed);
+    free(src);
+    free(compressed);
+
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}
