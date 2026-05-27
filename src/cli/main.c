@@ -1660,5 +1660,6 @@ int main(int argc, char** argv) {
             break;  // Standard mode only does the first argument as input
         }
     }
+    free(dict);
     return overall_ret;
 }
