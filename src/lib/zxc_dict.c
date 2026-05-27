@@ -101,7 +101,7 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
 }
 
 /* -------------------------------------------------------------------------
- *  Dictionary training (étape 9 — stub for now)
+ *  Dictionary training
  * ------------------------------------------------------------------------- */
 
 int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,

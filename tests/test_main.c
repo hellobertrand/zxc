@@ -113,6 +113,15 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_error_name),
     TEST_CASE(test_library_info_api),
 
+    /* --- Dictionary --- */
+    TEST_CASE(test_dict_zxd_roundtrip),
+    TEST_CASE(test_dict_id_deterministic),
+    TEST_CASE(test_dict_buffer_roundtrip),
+    TEST_CASE(test_dict_mismatch_error),
+    TEST_CASE(test_dict_required_error),
+    TEST_CASE(test_dict_no_dict_compat),
+    TEST_CASE(test_dict_stream_roundtrip),
+
     /* --- Seekable (single-threaded) --- */
     TEST_CASE(test_seekable_table_sizes),
     TEST_CASE(test_seekable_table_write),
