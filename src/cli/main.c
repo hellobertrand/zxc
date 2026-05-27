@@ -672,6 +672,9 @@ static int zxc_list_archive(const char* path, int json_output) {
                                      ((uint32_t)footer[10] << 16) | ((uint32_t)footer[11] << 24);
     const char* checksum_method = (stored_checksum != 0) ? "RapidHash" : "-";
 
+    // Dictionary ID (from header flag bit 6 + bytes 7-10)
+    const uint32_t dict_id = zxc_get_dict_id(header, ZXC_FILE_HEADER_SIZE);
+
     // Calculate ratio (uncompressed / compressed, e.g., 2.5 means 2.5x compression)
     const double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;
 
@@ -680,8 +683,13 @@ static int zxc_list_archive(const char* path, int json_output) {
     format_size_decimal((uint64_t)file_size, comp_str, sizeof(comp_str));
     format_size_decimal((uint64_t)uncompressed_size, uncomp_str, sizeof(uncomp_str));
 
+    char dict_id_str[16];
+    if (dict_id)
+        snprintf(dict_id_str, sizeof(dict_id_str), "0x%08X", dict_id);
+    else
+        snprintf(dict_id_str, sizeof(dict_id_str), "-");
+
     if (json_output) {
-        // JSON mode
         printf(
             "{\n"
             "  \"filename\": \"%s\",\n"
@@ -691,10 +699,12 @@ static int zxc_list_archive(const char* path, int json_output) {
             "  \"format_version\": %u,\n"
             "  \"block_size_kb\": %zu,\n"
             "  \"checksum_method\": \"%s\",\n"
-            "  \"checksum_value\": \"0x%08X\"\n"
+            "  \"checksum_value\": \"0x%08X\",\n"
+            "  \"dict_id\": %s%s%s\n"
             "}\n",
             path, (long long)file_size, (long long)uncompressed_size, ratio, format_version,
-            block_units * 4, (stored_checksum != 0) ? "RapidHash" : "none", stored_checksum);
+            block_units * 4, (stored_checksum != 0) ? "RapidHash" : "none", stored_checksum,
+            dict_id ? "\"" : "", dict_id ? dict_id_str : "null", dict_id ? "\"" : "");
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
         printf(
@@ -706,6 +716,7 @@ static int zxc_list_archive(const char* path, int json_output) {
             path, format_version, block_units, (stored_checksum != 0) ? "RapidHash" : "None");
 
         if (stored_checksum != 0) printf("Checksum Value:  0x%08X\n", stored_checksum);
+        if (dict_id) printf("Dictionary ID:   %s\n", dict_id_str);
 
         printf(
             "-----------------------\n"
@@ -715,10 +726,10 @@ static int zxc_list_archive(const char* path, int json_output) {
             comp_str, uncomp_str, ratio);
     } else {
         // Normal mode: table format
-        printf("\n  %12s   %12s   %5s   %-10s   %s\n", "Compressed", "Uncompressed", "Ratio",
-               "Checksum", "Filename");
-        printf("  %12s   %12s   %5.2f   %-10s   %s\n", comp_str, uncomp_str, ratio, checksum_method,
-               path);
+        printf("\n  %12s   %12s   %5s   %-10s   %-10s   %s\n", "Compressed", "Uncompressed",
+               "Ratio", "Checksum", "Dict ID", "Filename");
+        printf("  %12s   %12s   %5.2f   %-10s   %-10s   %s\n", comp_str, uncomp_str, ratio,
+               checksum_method, dict_id_str, path);
     }
 
     return 0;

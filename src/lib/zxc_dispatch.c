@@ -843,6 +843,16 @@ uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
     return zxc_le64(footer);
 }
 
+// cppcheck-suppress unusedFunction
+uint32_t zxc_get_dict_id(const void* src, const size_t src_size) {
+    if (UNLIKELY(!src || src_size < ZXC_FILE_HEADER_SIZE)) return 0;
+
+    const uint8_t* const p = (const uint8_t*)src;
+    if (UNLIKELY(zxc_le32(p) != ZXC_MAGIC_WORD)) return 0;
+
+    return (p[6] & ZXC_FILE_FLAG_HAS_DICTIONARY) ? zxc_le32(p + 7) : 0;
+}
+
 /*
  * ============================================================================
  * REUSABLE CONTEXT API (Opaque)

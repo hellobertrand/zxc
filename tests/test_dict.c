@@ -88,6 +88,77 @@ int test_dict_id_deterministic(void) {
     return 1;
 }
 
+int test_dict_get_id_apis(void) {
+    printf("=== TEST: Dict - zxc_get_dict_id / zxc_dict_get_id ===\n");
+
+    const uint8_t dict[] = "dictionary content for get_id test";
+    const size_t dict_size = sizeof(dict) - 1;
+    const uint32_t expected_id = zxc_dict_id(dict, dict_size);
+
+    /* Compress with dict and verify zxc_get_dict_id reads it back */
+    const uint8_t src[] = "some data to compress with dict for id test purposes";
+    const size_t src_size = sizeof(src) - 1;
+    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    uint8_t* compressed = (uint8_t*)malloc(comp_bound);
+
+    zxc_compress_opts_t copts = {.level = 1, .dict = dict, .dict_size = dict_size};
+    int64_t comp_size = zxc_compress(src, src_size, compressed, comp_bound, &copts);
+    if (comp_size <= 0) {
+        printf("  [FAIL] compress returned %lld\n", (long long)comp_size);
+        free(compressed);
+        return 0;
+    }
+
+    uint32_t got_id = zxc_get_dict_id(compressed, (size_t)comp_size);
+    if (got_id != expected_id) {
+        printf("  [FAIL] zxc_get_dict_id: got 0x%08X, expected 0x%08X\n", got_id, expected_id);
+        free(compressed);
+        return 0;
+    }
+    printf("  [PASS] zxc_get_dict_id returns 0x%08X\n", got_id);
+
+    /* Compress without dict: should return 0 */
+    zxc_compress_opts_t copts2 = {.level = 1};
+    int64_t comp2 = zxc_compress(src, src_size, compressed, comp_bound, &copts2);
+    if (comp2 > 0 && zxc_get_dict_id(compressed, (size_t)comp2) != 0) {
+        printf("  [FAIL] zxc_get_dict_id should return 0 for no-dict file\n");
+        free(compressed);
+        return 0;
+    }
+    printf("  [PASS] zxc_get_dict_id returns 0 for no-dict file\n");
+    free(compressed);
+
+    /* Save to .zxd and verify zxc_dict_get_id */
+    size_t zxd_bound = zxc_dict_save_bound(dict_size);
+    uint8_t* zxd = (uint8_t*)malloc(zxd_bound);
+    int64_t zxd_size = zxc_dict_save(dict, dict_size, zxd, zxd_bound);
+    if (zxd_size <= 0) {
+        printf("  [FAIL] zxc_dict_save returned %lld\n", (long long)zxd_size);
+        free(zxd);
+        return 0;
+    }
+
+    uint32_t zxd_id = zxc_dict_get_id(zxd, (size_t)zxd_size);
+    if (zxd_id != expected_id) {
+        printf("  [FAIL] zxc_dict_get_id: got 0x%08X, expected 0x%08X\n", zxd_id, expected_id);
+        free(zxd);
+        return 0;
+    }
+    printf("  [PASS] zxc_dict_get_id returns 0x%08X\n", zxd_id);
+
+    /* Invalid buffer should return 0 */
+    if (zxc_dict_get_id("bad", 3) != 0) {
+        printf("  [FAIL] zxc_dict_get_id should return 0 for invalid buffer\n");
+        free(zxd);
+        return 0;
+    }
+    printf("  [PASS] zxc_dict_get_id returns 0 for invalid buffer\n");
+
+    free(zxd);
+    printf("PASS\n\n");
+    return 1;
+}
+
 int test_dict_buffer_roundtrip(void) {
     printf("=== TEST: Dict - buffer API roundtrip (all levels) ===\n");
 
