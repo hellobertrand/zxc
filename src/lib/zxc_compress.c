@@ -278,47 +278,75 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                     goto _match_len_done;
                 }
             }
-#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
-            const uint8_t* limit_16 = iend - 16;
-            while (ip + mlen < limit_16) {
-                const uint8x16_t v_src = vld1q_u8(ip + mlen);
-                const uint8x16_t v_ref = vld1q_u8(ref + mlen);
-                const uint8x16_t v_cmp = vceqq_u8(v_src, v_ref);
-#if defined(ZXC_USE_NEON64)
-                /* Compress 128-bit byte-mask -> 64-bit nibble-mask via
-                 * SHRN: each 0x00/0xFF byte becomes a 0x0/0xF nibble. */
-                const uint64_t mask = vget_lane_u64(
-                    vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(v_cmp), 4)), 0);
-                if (LIKELY(mask == ~(uint64_t)0)) {
-                    mlen += 16;
-                } else {
-                    mlen += (uint32_t)(zxc_ctz64(~mask) >> 2);
-                    goto _match_len_done;
+#elif defined(ZXC_USE_NEON64)
+            {
+                const uint8_t* limit_32 = iend - 32;
+                while (ip + mlen < limit_32) {
+                    const uint8x16_t s0 = vld1q_u8(ip + mlen);
+                    const uint8x16_t r0 = vld1q_u8(ref + mlen);
+                    const uint8x16_t c0 = vceqq_u8(s0, r0);
+                    const uint64_t m0 = vget_lane_u64(
+                        vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(c0), 4)), 0);
+                    if (UNLIKELY(m0 != ~(uint64_t)0)) {
+                        mlen += (uint32_t)(zxc_ctz64(~m0) >> 2);
+                        goto _match_len_done;
+                    }
+                    const uint8x16_t s1 = vld1q_u8(ip + mlen + 16);
+                    const uint8x16_t r1 = vld1q_u8(ref + mlen + 16);
+                    const uint8x16_t c1 = vceqq_u8(s1, r1);
+                    const uint64_t m1 = vget_lane_u64(
+                        vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(c1), 4)), 0);
+                    if (UNLIKELY(m1 != ~(uint64_t)0)) {
+                        mlen += 16 + (uint32_t)(zxc_ctz64(~m1) >> 2);
+                        goto _match_len_done;
+                    }
+                    mlen += 32;
                 }
-#else
-                uint8x8_t p1 = vpmin_u8(vget_low_u8(v_cmp), vget_high_u8(v_cmp));
-                uint8x8_t p2 = vpmin_u8(p1, p1);
-                uint8x8_t p3 = vpmin_u8(p2, p2);
-                uint8x8_t p4 = vpmin_u8(p3, p3);
-                uint8_t min_val = vget_lane_u8(p4, 0);
-                if (min_val == 0xFF)
-                    mlen += 16;
-                else {
-                    uint8x16_t v_diff = vmvnq_u8(v_cmp);
-                    uint64_t lo = (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 0) |
-                                  ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 1) << 32);
-                    if (lo != 0)
-                        mlen += (zxc_ctz64(lo) >> 3);
-                    else
-                        mlen +=
-                            8 +
-                            (zxc_ctz64((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 2) |
-                                       ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 3)
-                                        << 32)) >>
-                             3);
-                    goto _match_len_done;
+                if (ip + mlen < iend - 16) {
+                    const uint8x16_t v_src = vld1q_u8(ip + mlen);
+                    const uint8x16_t v_ref = vld1q_u8(ref + mlen);
+                    const uint8x16_t v_cmp = vceqq_u8(v_src, v_ref);
+                    const uint64_t mask = vget_lane_u64(
+                        vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(v_cmp), 4)), 0);
+                    if (LIKELY(mask == ~(uint64_t)0))
+                        mlen += 16;
+                    else {
+                        mlen += (uint32_t)(zxc_ctz64(~mask) >> 2);
+                        goto _match_len_done;
+                    }
                 }
-#endif
+            }
+#elif defined(ZXC_USE_NEON32)
+            {
+                const uint8_t* limit_16 = iend - 16;
+                while (ip + mlen < limit_16) {
+                    const uint8x16_t v_src = vld1q_u8(ip + mlen);
+                    const uint8x16_t v_ref = vld1q_u8(ref + mlen);
+                    const uint8x16_t v_cmp = vceqq_u8(v_src, v_ref);
+                    uint8x8_t p1 = vpmin_u8(vget_low_u8(v_cmp), vget_high_u8(v_cmp));
+                    uint8x8_t p2 = vpmin_u8(p1, p1);
+                    uint8x8_t p3 = vpmin_u8(p2, p2);
+                    uint8x8_t p4 = vpmin_u8(p3, p3);
+                    uint8_t min_val = vget_lane_u8(p4, 0);
+                    if (min_val == 0xFF)
+                        mlen += 16;
+                    else {
+                        uint8x16_t v_diff = vmvnq_u8(v_cmp);
+                        uint64_t lo =
+                            (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 0) |
+                            ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 1) << 32);
+                        if (lo != 0)
+                            mlen += (zxc_ctz64(lo) >> 3);
+                        else
+                            mlen +=
+                                8 + (zxc_ctz64(
+                                         (uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 2) |
+                                         ((uint64_t)vgetq_lane_u32(vreinterpretq_u32_u8(v_diff), 3)
+                                          << 32)) >>
+                                     3);
+                        goto _match_len_done;
+                    }
+                }
             }
 #endif
             while (ip + mlen < limit_8) {
