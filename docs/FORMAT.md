@@ -63,9 +63,12 @@ Offset  Size  Field
   - Valid block sizes are powers of 2 in the range **4 KB – 2 MB**.
 - **Flags** (`u8`):
   - Bit 7 (`0x80`): `HAS_CHECKSUM`.
+  - Bit 6 (`0x40`): `HAS_DICTIONARY` — a pre-trained dictionary is required for decompression.
   - Bits 0..3: checksum algorithm id (`0` = RapidHash-based folding).
-  - Bits 4..6: reserved.
-- **Reserved**: 7 bytes set to zero.
+  - Bits 4..5: reserved.
+- **Reserved / Dictionary ID**: 7 bytes.
+  - When `HAS_DICTIONARY` is set: bytes `0x07..0x0A` contain a `dict_id` (`u32` LE), a 32-bit hash of the dictionary content. Bytes `0x0B..0x0D` remain zero.
+  - When `HAS_DICTIONARY` is clear: all 7 bytes are zero.
 - **Header CRC16** (`u16`): computed with `zxc_hash16` on the 16-byte header where bytes `0x0E..0x0F` are zeroed.
 
 ---
@@ -561,7 +564,72 @@ For decoders processing untrusted input (e.g. network data, user uploads):
 
 ---
 
-## 12. Summary of Useful Fixed Sizes
+## 12. Pre-Trained Dictionary Support
+
+### 12.1 Overview
+
+A pre-trained dictionary improves compression ratio on small, similar payloads
+(e.g. JSON API responses, game assets, structured logs) by prefilling the LZ77
+sliding window at the start of each block. The dictionary is an external file
+(`.zxd` format) referenced by a 32-bit ID in the ZXC file header.
+
+### 12.2 Mechanism
+
+The dictionary contains raw byte content (max 64 KB, bounded by the 64 KB LZ
+sliding window). At compression time, the dictionary is logically prepended to
+each block's input, seeding the hash tables so the match finder can reference
+dictionary content immediately. At decompression time, the dictionary is
+prepended to the output buffer so match copies that reference dictionary bytes
+resolve naturally via pointer arithmetic.
+
+Since each block is independent, the dictionary prefill happens per-block.
+This preserves O(1) seekable random-access: load the dictionary once, then
+decompress any block independently.
+
+### 12.3 File header encoding
+
+When `HAS_DICTIONARY` (flag bit 6) is set, the reserved bytes at offsets
+`0x07..0x0A` contain the `dict_id` (`u32` LE). A decoder **MUST**:
+1. Verify that a dictionary is provided (`ZXC_ERROR_DICT_REQUIRED` if not).
+2. Verify that `zxc_dict_id(dict, dict_size) == header.dict_id`
+   (`ZXC_ERROR_DICT_MISMATCH` if not).
+
+Older decoders that do not recognize the `HAS_DICTIONARY` flag will ignore it
+(per §10.3: reserved flag bits are ignored). However, blocks compressed with a
+dictionary contain match offsets that reference dictionary content; decoding
+without the dictionary produces corrupt output. Per-block and global checksums
+(when enabled) will detect this corruption.
+
+### 12.4 Dictionary file format (`.zxd`)
+
+Dictionaries are stored as standalone `.zxd` files with the following layout:
+
+```text
+Offset  Size  Field
+0x00    4     Magic Word (0x9CB0D1C7 LE)
+0x04    1     Dictionary format version (currently 1)
+0x05    1     Flags (reserved, must be 0)
+0x06    2     Content size (u16 LE, max 65535)
+0x08    4     dict_id (u32 LE, hash of content)
+0x0C    4     Header CRC32 (computed with this field zeroed)
+0x10    N     Dictionary content (raw bytes)
+```
+
+- **Magic Word**: `0x9CB0D1C7`. Allows immediate rejection of non-dictionary files.
+- **dict_id**: deterministic 32-bit hash (RapidHash-folded) of the content bytes. Must match the `dict_id` stored in any ZXC file header that references this dictionary.
+- **Header CRC32**: RapidHash-folded checksum of the 16-byte header with bytes `0x0C..0x0F` zeroed before hashing.
+- **Content**: raw bytes that prefill the LZ77 window. Not compressed.
+
+### 12.5 Dictionary training
+
+The `zxc_train_dict()` function analyzes a corpus of representative samples to
+select byte segments that maximize LZ77 match coverage. The most frequently
+matched segments are placed at the end of the dictionary so they produce the
+shortest offsets (closest to the block start in the virtual window).
+
+---
+
+## 13. Summary of Useful Fixed Sizes
 
 - File header: **16** bytes
 - Block header: **8** bytes
@@ -573,10 +641,11 @@ For decoders processing untrusted input (e.g. network data, user uploads):
 - GLO descriptors total: **32** bytes
 - GHI descriptors total: **24** bytes
 - File footer: **12** bytes
+- Dictionary file header (`.zxd`): **16** bytes
 
 ---
 
-## 13. Worked Example (Real Hexdump)
+## 14. Worked Example (Real Hexdump)
 
 This example was produced with the CLI from a 10-byte input (`Hello ZXC\n`) using:
 
@@ -586,7 +655,7 @@ zxc -z -C -1 sample.txt
 
 Generated archive size: **58 bytes**.
 
-### 13.1 Full hexdump
+### 14.1 Full hexdump
 
 ```text
 00000000: F5 2E B0 9C 05 13 80 00 00 00 00 00 00 00 B8 90
@@ -595,7 +664,7 @@ Generated archive size: **58 bytes**.
 00000030: 00 00 00 00 00 00 90 BB A1 75
 ```
 
-### 13.2 Byte-level decoding
+### 14.2 Byte-level decoding
 
 #### A) File Header (offset `0x00`, 16 bytes)
 
@@ -665,7 +734,7 @@ global0 = 0
 global1 = rotl1(global0) XOR block_crc = block_crc
 ```
 
-### 13.3 Structural view with absolute offsets
+### 14.3 Structural view with absolute offsets
 
 ```text
 0x00..0x0F  File Header (16)
@@ -676,7 +745,7 @@ global1 = rotl1(global0) XOR block_crc = block_crc
 0x2E..0x39  File Footer (12)
 ```
 
-### 13.4 Seekable Variant (with Seek Table)
+### 14.4 Seekable Variant (with Seek Table)
 
 Same 10-byte input (`Hello ZXC\n`), compressed with seekable mode enabled:
 

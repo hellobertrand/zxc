@@ -460,6 +460,56 @@ zxc_compress_opts_t opts = {
 
 ---
 
+## Dictionary Compression
+
+For workloads consisting of many **small, similar payloads** (< 64 KB each), a pre-trained dictionary dramatically improves compression ratio. The dictionary prefills the LZ77 sliding window at the start of each block, giving the match finder immediate access to representative patterns.
+
+**Typical use cases:** JSON API responses, small game assets, structured logs, key-value store records, RPC messages.
+
+### Training a dictionary
+
+```bash
+# Train a dictionary from a corpus of similar files
+zxc --train-dict corpus.zxd samples/*.json
+```
+
+```c
+// C API
+const void* samples[] = { buf1, buf2, buf3 };
+size_t sizes[] = { len1, len2, len3 };
+uint8_t dict[32768];
+int64_t dict_sz = zxc_train_dict(samples, sizes, 3, dict, sizeof(dict));
+```
+
+### Compressing with a dictionary
+
+```bash
+# CLI
+zxc -z -D corpus.zxd input.json
+zxc -d -D corpus.zxd input.json.zxc
+```
+
+```c
+// C API — compression
+zxc_compress_opts_t copts = {
+    .level = ZXC_LEVEL_DEFAULT,
+    .dict = dict_content,
+    .dict_size = dict_sz,
+};
+int64_t compressed_size = zxc_compress(src, src_size, dst, dst_cap, &copts);
+
+// C API — decompression (same dictionary required)
+zxc_decompress_opts_t dopts = {
+    .dict = dict_content,
+    .dict_size = dict_sz,
+};
+int64_t original_size = zxc_decompress(compressed, comp_size, out, out_cap, &dopts);
+```
+
+The dictionary is stored as an external `.zxd` file and referenced by a 32-bit ID in the ZXC file header. Decompressing without the matching dictionary returns `ZXC_ERROR_DICT_REQUIRED` or `ZXC_ERROR_DICT_MISMATCH`. See [FORMAT.md](docs/FORMAT.md) §12 for the full specification.
+
+---
+
 ## Usage
 
 ### 1. CLI
