@@ -32,7 +32,8 @@ uint32_t zxc_dict_id(const void* dict, const size_t dict_size) {
  *    0x05  1  Flags   (reserved, 0)
  *    0x06  2  Content size (u16 LE)
  *    0x08  4  dict_id (u32 LE)
- *    0x0C  4  Header CRC32 (rapidhash-folded, computed with this field zeroed)
+ *    0x0C  2  Header CRC16 (zxc_hash16, computed with bytes 0x0C-0x0F zeroed)
+ *    0x0E  2  Reserved (0)
  *    0x10  N  Content bytes
  * ------------------------------------------------------------------------- */
 
@@ -56,10 +57,11 @@ int64_t zxc_dict_save(const void* content, const size_t content_size, void* buf,
     zxc_store_le16(dst + 6, (uint16_t)content_size);
     zxc_store_le32(dst + 8, zxc_dict_id(content, content_size));
 
-    /* CRC32 of header with CRC field zeroed */
-    zxc_store_le32(dst + 12, 0);
-    const uint32_t crc = zxc_checksum(dst, ZXC_DICT_HEADER_SIZE, 0);
-    zxc_store_le32(dst + 12, crc);
+    /* CRC16 of header (same method as ZXC file header) with CRC field zeroed */
+    zxc_store_le16(dst + 12, 0);
+    zxc_store_le16(dst + 14, 0);
+    const uint16_t crc = zxc_hash16(dst);
+    zxc_store_le16(dst + 12, crc);
 
     ZXC_MEMCPY(dst + ZXC_DICT_HEADER_SIZE, content, content_size);
 
@@ -81,12 +83,13 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
     if (content_size > ZXC_DICT_SIZE_MAX) return ZXC_ERROR_DICT_TOO_LARGE;
     if (buf_size < ZXC_DICT_HEADER_SIZE + content_size) return ZXC_ERROR_SRC_TOO_SMALL;
 
-    /* Verify header CRC32 */
+    /* Verify header CRC16 (same method as ZXC file header) */
     uint8_t temp[ZXC_DICT_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, ZXC_DICT_HEADER_SIZE);
-    zxc_store_le32(temp + 12, 0);
-    const uint32_t expected_crc = zxc_checksum(temp, ZXC_DICT_HEADER_SIZE, 0);
-    if (UNLIKELY(zxc_le32(src + 12) != expected_crc)) return ZXC_ERROR_BAD_HEADER;
+    zxc_store_le16(temp + 12, 0);
+    zxc_store_le16(temp + 14, 0);
+    const uint16_t expected_crc = zxc_hash16(temp);
+    if (UNLIKELY(zxc_le16(src + 12) != expected_crc)) return ZXC_ERROR_BAD_HEADER;
 
     /* Verify dict_id matches content */
     const uint8_t* content = src + ZXC_DICT_HEADER_SIZE;
