@@ -116,6 +116,7 @@ static const test_entry_t g_tests[] = {
     /* --- Dictionary --- */
     TEST_CASE(test_dict_zxd_roundtrip),
     TEST_CASE(test_dict_id_deterministic),
+    TEST_CASE(test_dict_get_id_apis),
     TEST_CASE(test_dict_buffer_roundtrip),
     TEST_CASE(test_dict_mismatch_error),
     TEST_CASE(test_dict_required_error),

@@ -102,6 +102,18 @@ ZXC_EXPORT int64_t zxc_dict_save(const void* content, size_t content_size, void*
 ZXC_EXPORT size_t zxc_dict_save_bound(size_t content_size);
 
 /**
+ * @brief Returns the dictionary ID stored in a `.zxd` file buffer.
+ *
+ * Reads the dict_id field from the .zxd header without validating the full
+ * file. Returns 0 if the buffer is too small or the magic word doesn't match.
+ *
+ * @param[in] buf       Buffer containing the .zxd file.
+ * @param[in] buf_size  Size of @p buf in bytes.
+ * @return Dictionary ID, or 0 if the buffer is not a valid .zxd file.
+ */
+ZXC_EXPORT uint32_t zxc_dict_get_id(const void* buf, size_t buf_size);
+
+/**
  * @brief Train a dictionary from a corpus of samples.
  *
  * Analyzes the samples to select byte sequences that maximize LZ77 match

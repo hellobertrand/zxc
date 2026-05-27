@@ -37,6 +37,13 @@ uint32_t zxc_dict_id(const void* dict, const size_t dict_size) {
  *    0x10  N  Content bytes
  * ------------------------------------------------------------------------- */
 
+uint32_t zxc_dict_get_id(const void* buf, const size_t buf_size) {
+    if (UNLIKELY(!buf || buf_size < ZXC_DICT_HEADER_SIZE)) return 0;
+    const uint8_t* p = (const uint8_t*)buf;
+    if (UNLIKELY(zxc_le32(p) != ZXC_DICT_MAGIC)) return 0;
+    return zxc_le32(p + 8);
+}
+
 size_t zxc_dict_save_bound(const size_t content_size) {
     return ZXC_DICT_HEADER_SIZE + content_size;
 }

@@ -890,5 +890,142 @@ else
     log_fail "List command on seekable archive failed"
 fi
 
+# 25. Dictionary Tests (-D)
+echo "Testing Dictionary (-D)..."
+
+# 25.1 Create a .zxd dictionary from repetitive content
+echo "  Creating test dictionary..."
+# Build a small helper to create a .zxd (uses the C API)
+DICT_HELPER="$TEST_DIR/make_dict"
+cat > "$TEST_DIR/make_dict.c" <<'DICTEOF'
+#include <stdio.h>
+#include <string.h>
+#include "zxc.h"
+#include "zxc_dict.h"
+int main(int argc, char** argv) {
+    const char* content =
+        "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
+        "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. "
+        "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.";
+    size_t sz = strlen(content);
+    uint8_t buf[1024];
+    int64_t w = zxc_dict_save(content, sz, buf, sizeof(buf));
+    if (w <= 0) return 1;
+    FILE* f = fopen(argv[1], "wb");
+    fwrite(buf, 1, (size_t)w, f);
+    fclose(f);
+    return 0;
+}
+DICTEOF
+
+# Compile helper (find include/lib relative to the binary)
+ZXC_DIR=$(dirname "$(dirname "$ZXC_BIN")")
+cc -O0 -I"${ZXC_DIR}/include" -o "$DICT_HELPER" "$TEST_DIR/make_dict.c" \
+   "${ZXC_DIR}/build/libzxc.a" -lpthread 2>/dev/null
+
+if [ ! -f "$DICT_HELPER" ]; then
+    echo "  [SKIP] Could not compile dict helper (missing dev headers)"
+else
+
+DICT_FILE="$TEST_DIR/test.zxd"
+"$DICT_HELPER" "$DICT_FILE"
+if [ ! -f "$DICT_FILE" ]; then
+    log_fail "Dictionary creation failed"
+fi
+log_pass "Dictionary .zxd created"
+
+# 25.2 Round-trip with dictionary
+echo "  Testing dict round-trip..."
+"$ZXC_BIN" -3 -D "$DICT_FILE" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict.zxc"
+if [ ! -s "$TEST_DIR/test_dict.zxc" ]; then
+    log_fail "Dict compression failed"
+fi
+"$ZXC_BIN" -d -D "$DICT_FILE" -c "$TEST_DIR/test_dict.zxc" > "$TEST_DIR/test_dict.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/test_dict.dec"; then
+    log_pass "Dict round-trip (-D)"
+else
+    log_fail "Dict round-trip content mismatch"
+fi
+
+# 25.3 List shows dict_id
+echo "  Testing list with dict_id..."
+OUT=$("$ZXC_BIN" -l "$TEST_DIR/test_dict.zxc")
+if [[ "$OUT" == *"Dict ID"* ]] && [[ "$OUT" == *"0x"* ]]; then
+    log_pass "List shows dict_id"
+else
+    log_fail "List should show dict_id column with 0x value"
+fi
+
+# 25.4 List without dict shows dash
+echo "  Testing list without dict shows dash..."
+"$ZXC_BIN" -3 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_nodict2.zxc"
+OUT=$("$ZXC_BIN" -l "$TEST_DIR/test_nodict2.zxc")
+if [[ "$OUT" == *"Dict ID"* ]] && [[ "$OUT" == *" -  "* ]]; then
+    log_pass "List without dict shows dash"
+else
+    log_fail "List without dict should show dash in Dict ID column"
+fi
+
+# 25.5 JSON list shows dict_id field
+echo "  Testing JSON list with dict_id..."
+JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_DIR/test_dict.zxc")
+if [[ "$JSON_OUT" == *'"dict_id"'* ]] && [[ "$JSON_OUT" == *"0x"* ]]; then
+    log_pass "JSON list shows dict_id"
+else
+    log_fail "JSON list should contain dict_id field"
+fi
+
+# 25.6 Decompression without dict should fail
+echo "  Testing decompress without required dict..."
+set +e
+"$ZXC_BIN" -d -c "$TEST_DIR/test_dict.zxc" > /dev/null 2>&1
+RET=$?
+set -e
+if [ $RET -ne 0 ]; then
+    log_pass "Decompress without dict correctly fails"
+else
+    log_fail "Decompress without required dict should fail"
+fi
+
+# 25.7 Dict with seekable
+echo "  Testing dict + seekable (-D -S)..."
+"$ZXC_BIN" -3 -D "$DICT_FILE" -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict_seek.zxc"
+"$ZXC_BIN" -d -D "$DICT_FILE" -c "$TEST_DIR/test_dict_seek.zxc" > "$TEST_DIR/test_dict_seek.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/test_dict_seek.dec"; then
+    log_pass "Dict + seekable (-D -S)"
+else
+    log_fail "Dict + seekable round-trip failed"
+fi
+
+# 25.8 Dict with all levels
+echo "  Testing dict across all levels..."
+DICT_ALL_OK=1
+for LEVEL in 1 2 3 4 5 6; do
+    "$ZXC_BIN" -$LEVEL -D "$DICT_FILE" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict_lvl${LEVEL}.zxc"
+    "$ZXC_BIN" -d -D "$DICT_FILE" -c "$TEST_DIR/test_dict_lvl${LEVEL}.zxc" > "$TEST_DIR/test_dict_lvl${LEVEL}.dec"
+    if ! cmp -s "$TEST_FILE" "$TEST_DIR/test_dict_lvl${LEVEL}.dec"; then
+        DICT_ALL_OK=0
+        log_fail "Dict level $LEVEL round-trip failed"
+    fi
+done
+if [ "$DICT_ALL_OK" -eq 1 ]; then
+    log_pass "Dict across all levels (1-6)"
+fi
+
+# 25.9 Invalid dict file should fail
+echo "  Testing invalid dict file..."
+echo "not a valid dict" > "$TEST_DIR/bad.zxd"
+set +e
+"$ZXC_BIN" -3 -D "$TEST_DIR/bad.zxd" -c "$TEST_FILE_ARG" > /dev/null 2>&1
+RET=$?
+set -e
+if [ $RET -ne 0 ]; then
+    log_pass "Invalid dict file rejected"
+else
+    log_fail "Invalid dict file should be rejected"
+fi
+
+fi # end of dict helper check
+
 echo "All tests passed!"
 exit 0

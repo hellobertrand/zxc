@@ -167,6 +167,18 @@ ZXC_EXPORT int64_t zxc_decompress(const void* src, const size_t src_size, void* 
  */
 ZXC_EXPORT uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size);
 
+/**
+ * @brief Returns the dictionary ID stored in a ZXC compressed buffer.
+ *
+ * Reads the file header flag and dict_id field without decompressing.
+ * Returns 0 if the file does not require a dictionary or the buffer is invalid.
+ *
+ * @param[in] src       Pointer to the compressed data buffer.
+ * @param[in] src_size  Size of the compressed data in bytes.
+ * @return Dictionary ID, or 0 if no dictionary is required.
+ */
+ZXC_EXPORT uint32_t zxc_get_dict_id(const void* src, size_t src_size);
+
 /* ========================================================================= */
 /*  Block-Level API (no file framing)                                        */
 /* ========================================================================= */
