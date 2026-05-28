@@ -644,6 +644,13 @@ shortest offsets (closest to the block start in the virtual window).
 - File footer: **12** bytes
 - Dictionary file header (`.zxd`): **16** bytes
 
+**Magic words** — both are little-endian `u32` at offset `0x00` and deliberately share the `0x9CB0...` family prefix, so check the full value (or the file extension) to tell them apart:
+
+| File | Magic (value) | On-disk bytes (LE) |
+|------|---------------|--------------------|
+| ZXC archive (`.zxc`) | `0x9CB02EF5` | `F5 2E B0 9C` |
+| ZXC dictionary (`.zxd`) | `0x9CB0D1C7` | `C7 D1 B0 9C` |
+
 ---
 
 ## 14. Worked Example (Real Hexdump)
@@ -819,3 +826,47 @@ Seek table entry at `0x36`:
 ```
 
 > **Compatibility note**: The SEK block is inserted between the EOF block and the file footer. The footer always remains the **last 12 bytes of the file**, so decoders that locate the footer from the end of the file (e.g. `src + src_size - 12` for buffer APIs, or `fseek(END - 12)` for file APIs) work unchanged with seekable archives. However, **streaming decoders** that read the footer sequentially immediately after the EOF block must be updated to detect and skip the SEK block. In practice, all ZXC decoders since v0.9.0 handle both seekable and non-seekable archives transparently.
+
+---
+
+## 15. Worked Example: Dictionary File (`.zxd` Hexdump)
+
+A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size: **21 bytes** (16-byte header + 5-byte content). This is the on-disk form produced by `zxc_dict_save()` (see §12.4).
+
+### 15.1 Full hexdump
+
+```text
+00000000: C7 D1 B0 9C 01 00 05 00 17 0F 72 9A 4A D9 00 00
+00000010: 68 65 6C 6C 6F
+```
+
+### 15.2 Byte-level decoding
+
+#### A) Dictionary Header (offset `0x00`, 16 bytes)
+
+```text
+C7 D1 B0 9C | 01 | 00 | 05 00 | 17 0F 72 9A | 4A D9 | 00 00
+```
+
+- `C7 D1 B0 9C` -> magic word (LE) = `0x9CB0D1C7` (`.zxd` dictionary).
+- `01` -> dictionary format version 1.
+- `00` -> flags (reserved, must be 0).
+- `05 00` -> content size (LE) = `5` bytes.
+- `17 0F 72 9A` -> `dict_id` (LE) = `0x9A720F17`. Must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
+- `4A D9` -> header CRC16 (LE) = `0xD94A`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header).
+- `00 00` -> reserved.
+
+#### B) Dictionary Content (offset `0x10`, 5 bytes)
+
+```text
+68 65 6C 6C 6F
+```
+
+ASCII: `hello`. Raw bytes that prefill the LZ77 window — not compressed.
+
+### 15.3 Structural view with absolute offsets
+
+```text
+0x00..0x0F  Dictionary Header (16)
+0x10..0x14  Dictionary Content (5)
+```
