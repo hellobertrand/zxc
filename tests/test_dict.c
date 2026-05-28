@@ -226,6 +226,73 @@ int test_dict_buffer_roundtrip(void) {
     return 1;
 }
 
+int test_dict_block_roundtrip(void) {
+    printf("=== TEST: Dict - block API roundtrip (all levels) ===\n");
+
+    const uint8_t dict_content[] =
+        "The quick brown fox jumps over the lazy dog. "
+        "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
+        "Pack my box with five dozen liquor jugs.";
+    const size_t dict_size = sizeof(dict_content) - 1;
+
+    const size_t src_size = 4096;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    gen_dict_friendly_data(src, src_size, dict_content, dict_size);
+
+    const size_t comp_bound = (size_t)zxc_compress_block_bound(src_size);
+    uint8_t* compressed = (uint8_t*)malloc(comp_bound);
+    uint8_t* decompressed = (uint8_t*)malloc(src_size);
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_dctx* dctx = zxc_create_dctx();
+
+    int result = 0;
+    if (!src || !compressed || !decompressed || !cctx || !dctx) {
+        printf("  [FAIL] allocation failed\n");
+        goto cleanup;
+    }
+
+    for (int level = 1; level <= 6; level++) {
+        zxc_compress_opts_t copts = {
+            .level = level,
+            .checksum_enabled = 1,
+            .dict = dict_content,
+            .dict_size = dict_size,
+        };
+        int64_t comp_size =
+            zxc_compress_block(cctx, src, src_size, compressed, comp_bound, &copts);
+        if (comp_size <= 0) {
+            printf("  [FAIL] level %d: compress_block returned %lld\n", level,
+                   (long long)comp_size);
+            goto cleanup;
+        }
+
+        zxc_decompress_opts_t dopts = {
+            .checksum_enabled = 1,
+            .dict = dict_content,
+            .dict_size = dict_size,
+        };
+        int64_t dec_size = zxc_decompress_block(dctx, compressed, (size_t)comp_size, decompressed,
+                                                src_size, &dopts);
+        if (dec_size != (int64_t)src_size || memcmp(src, decompressed, src_size) != 0) {
+            printf("  [FAIL] level %d: block roundtrip mismatch (dec_size=%lld)\n", level,
+                   (long long)dec_size);
+            goto cleanup;
+        }
+        printf("  [PASS] level %d: %zu -> %lld bytes\n", level, src_size, (long long)comp_size);
+    }
+
+    result = 1;
+
+cleanup:
+    zxc_free_cctx(cctx); /* safe with NULL */
+    zxc_free_dctx(dctx); /* safe with NULL */
+    free(src);
+    free(compressed);
+    free(decompressed);
+    if (result) printf("PASS\n\n");
+    return result;
+}
+
 int test_dict_mismatch_error(void) {
     printf("=== TEST: Dict - dict_id mismatch error ===\n");
 
