@@ -151,7 +151,7 @@ static int zxc_seg_cmp_desc(const void* a, const void* b) {
 int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
                        const size_t n_samples, void* dict_buf, const size_t dict_capacity) {
     if (UNLIKELY(!samples || !sample_sizes || n_samples == 0 || !dict_buf || dict_capacity == 0))
-        return ZXC_ERROR_NULL_INPUT;
+        return ZXC_ERROR_NULL_INPUT;  // LCOV_EXCL_LINE
     if (UNLIKELY(dict_capacity > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
     /* Step 1: concatenate samples */
@@ -172,8 +172,10 @@ int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
     /* Step 2: count k-gram frequencies */
     uint16_t* freq = (uint16_t*)ZXC_MALLOC(ZXC_DICT_HT_SIZE * sizeof(uint16_t));
     if (UNLIKELY(!freq)) {
+        // LCOV_EXCL_START
         ZXC_FREE(corpus);
         return ZXC_ERROR_MEMORY;
+        // LCOV_EXCL_STOP
     }
     ZXC_MEMSET(freq, 0, ZXC_DICT_HT_SIZE * sizeof(uint16_t));
 
@@ -191,9 +193,11 @@ int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
 
     zxc_dict_seg_t* segs = (zxc_dict_seg_t*)ZXC_MALLOC(seg_alloc * sizeof(zxc_dict_seg_t));
     if (UNLIKELY(!segs)) {
+        // LCOV_EXCL_START
         ZXC_FREE(freq);
         ZXC_FREE(corpus);
         return ZXC_ERROR_MEMORY;
+        // LCOV_EXCL_STOP
     }
 
     size_t n_segs = 0;

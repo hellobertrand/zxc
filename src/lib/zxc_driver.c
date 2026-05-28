@@ -399,6 +399,7 @@ static void* zxc_stream_worker(void* arg) {
         const size_t alloc = dsz + ctx->chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
         dict_work = (uint8_t*)ZXC_MALLOC(alloc);
         if (UNLIKELY(!dict_work)) {
+            // LCOV_EXCL_START
             zxc_cctx_free(&cctx);
             pthread_mutex_lock(&ctx->lock);
             ctx->io_error = 1;
@@ -406,6 +407,7 @@ static void* zxc_stream_worker(void* arg) {
             pthread_cond_broadcast(&ctx->cond_reader);
             pthread_mutex_unlock(&ctx->lock);
             return NULL;
+            // LCOV_EXCL_STOP
         }
         ZXC_MEMCPY(dict_work, ctx->dict, dsz);
     }

@@ -528,8 +528,10 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (dict_size > 0) {
         dict_input = (uint8_t*)ZXC_MALLOC(dict_size + block_size);
         if (UNLIKELY(!dict_input)) {
+            // LCOV_EXCL_START
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_MEMORY;
+            // LCOV_EXCL_STOP
         }
         ZXC_MEMCPY(dict_input, dict, dict_size);
     }
@@ -552,9 +554,11 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (seekable) {
         const size_t block_count = src_size / block_size;
         if (UNLIKELY(block_count > (size_t)UINT32_MAX - 2)) {
+            // LCOV_EXCL_START
             ZXC_FREE(dict_input);
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_BAD_BLOCK_SIZE;
+            // LCOV_EXCL_STOP
         }
         seek_cap = (uint32_t)(block_count + 2);
         seek_comp = (uint32_t*)ZXC_MALLOC(seek_cap * sizeof(uint32_t));
@@ -727,8 +731,10 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
     if (dict_size > 0) {
         dict_dec = (uint8_t*)ZXC_MALLOC(dict_size + work_sz);
         if (UNLIKELY(!dict_dec)) {
+            // LCOV_EXCL_START
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_MEMORY;
+            // LCOV_EXCL_STOP
         }
         ZXC_MEMCPY(dict_dec, dict, dict_size);
     }
@@ -787,9 +793,11 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, dict_dec + dict_size, work_sz);
             if (LIKELY(res > 0)) {
                 if (UNLIKELY((size_t)res > rem_cap)) {
+                    // LCOV_EXCL_START
                     ZXC_FREE(dict_dec);
                     zxc_cctx_free(&ctx);
                     return ZXC_ERROR_DST_TOO_SMALL;
+                    // LCOV_EXCL_STOP
                 }
                 ZXC_MEMCPY(op, dict_dec + dict_size, (size_t)res);
             }

@@ -199,7 +199,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     int file_has_chk = 0;
     if (UNLIKELY(zxc_read_file_header(data, data_size, &block_size_sz, &file_has_chk, NULL) !=
                  ZXC_OK))
-        return NULL;
+        return NULL;  // LCOV_EXCL_LINE
     const uint32_t block_size = (uint32_t)block_size_sz;
     if (UNLIKELY(block_size == 0)) return NULL;  // LCOV_EXCL_LINE
 
@@ -333,7 +333,7 @@ zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r) {
     size_t bs_sz = 0;
     int fhc = 0;
     if (UNLIKELY(zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &bs_sz, &fhc, NULL) != ZXC_OK))
-        return NULL;
+        return NULL;  // LCOV_EXCL_LINE
     const uint32_t bs = (uint32_t)bs_sz;
     if (UNLIKELY(bs == 0)) return NULL;
 
@@ -655,9 +655,11 @@ static void* zxc_seek_mt_worker(void* arg) {
     if (s->dict_size > 0 && s->dict) {
         dict_work = (uint8_t*)ZXC_MALLOC(s->dict_size + work_sz);
         if (UNLIKELY(!dict_work)) {
+            // LCOV_EXCL_START
             zxc_cctx_free(&dctx);
             job->result = ZXC_ERROR_MEMORY;
             return NULL;
+            // LCOV_EXCL_STOP
         }
         ZXC_MEMCPY(dict_work, s->dict, s->dict_size);
     }
@@ -685,7 +687,7 @@ static void* zxc_seek_mt_worker(void* arg) {
     }
     // LCOV_EXCL_STOP
 
-    /* Decompress — use dict bounce buffer when dictionary is active */
+    /* Decompress: use dict bounce buffer when dictionary is active */
     uint8_t* dec_dst = dict_work ? dict_work + s->dict_size : dctx.work_buf;
     const int dec_res =
         zxc_decompress_chunk_wrapper(&dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
@@ -860,10 +862,12 @@ int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_s
     const size_t work_sz = dict_size + (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
     s->dict_work = (uint8_t*)ZXC_MALLOC(work_sz);
     if (UNLIKELY(!s->dict_work)) {
+        // LCOV_EXCL_START
         ZXC_FREE(s->dict);
         s->dict = NULL;
         s->dict_size = 0;
         return ZXC_ERROR_MEMORY;
+        // LCOV_EXCL_STOP
     }
     ZXC_MEMCPY(s->dict_work, dict, dict_size);
     return ZXC_OK;
