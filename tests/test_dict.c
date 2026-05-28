@@ -528,6 +528,50 @@ int test_dict_train_roundtrip(void) {
     return 1;
 }
 
+int test_dict_train_no_frequent_patterns(void) {
+    printf("=== TEST: Dict - train fallback when no frequent k-grams ===\n");
+
+    /* A strictly increasing byte sequence has all-distinct 5-grams, so no
+     * k-gram repeats and the trainer finds zero scorable segments. This forces
+     * the n_segs == 0 fallback: copy the tail of the corpus into the dict. */
+    uint8_t corpus[64];
+    for (size_t i = 0; i < sizeof(corpus); i++) corpus[i] = (uint8_t)i;
+
+    const void* sample_ptrs[1] = {corpus};
+    const size_t sample_sizes[1] = {sizeof(corpus)};
+
+    /* Case 1: capacity >= corpus_size -> copy == corpus_size, dict == whole corpus. */
+    uint8_t dict_big[256];
+    int64_t sz = zxc_train_dict(sample_ptrs, sample_sizes, 1, dict_big, sizeof(dict_big));
+    if (sz != (int64_t)sizeof(corpus)) {
+        printf("  [FAIL] expected %zu bytes (full corpus), got %lld\n", sizeof(corpus),
+               (long long)sz);
+        return 0;
+    }
+    if (memcmp(dict_big, corpus, sizeof(corpus)) != 0) {
+        printf("  [FAIL] dict content does not match corpus tail\n");
+        return 0;
+    }
+    printf("  [PASS] full-corpus fallback (%lld bytes)\n", (long long)sz);
+
+    /* Case 2: capacity < corpus_size -> copy == capacity, dict == last `cap` bytes. */
+    const size_t cap = 16;
+    uint8_t dict_small[16];
+    sz = zxc_train_dict(sample_ptrs, sample_sizes, 1, dict_small, cap);
+    if (sz != (int64_t)cap) {
+        printf("  [FAIL] expected %zu bytes (capped), got %lld\n", cap, (long long)sz);
+        return 0;
+    }
+    if (memcmp(dict_small, corpus + sizeof(corpus) - cap, cap) != 0) {
+        printf("  [FAIL] capped dict does not match corpus tail\n");
+        return 0;
+    }
+    printf("  [PASS] capped tail fallback (%lld bytes)\n", (long long)sz);
+
+    printf("PASS\n\n");
+    return 1;
+}
+
 int test_dict_seekable_roundtrip(void) {
     printf("=== TEST: Dict - seekable API roundtrip ===\n");
 
