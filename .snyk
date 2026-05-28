@@ -2,3 +2,4 @@
 exclude:
   code:
     - tests/**
+    - conformance/**
