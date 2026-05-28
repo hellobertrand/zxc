@@ -141,11 +141,70 @@ typedef struct {
     uint16_t score;
 } zxc_dict_seg_t;
 
-static int zxc_seg_cmp_desc(const void* a, const void* b) {
-    const zxc_dict_seg_t* sa = (const zxc_dict_seg_t*)a;
-    const zxc_dict_seg_t* sb = (const zxc_dict_seg_t*)b;
-    if (sa->score != sb->score) return (sa->score < sb->score) ? 1 : -1;
-    return 0;
+/**
+ * @brief Restore the min-heap property at @p root over the range @p a[0..n).
+ *
+ * Sinks @p a[root] down the binary heap (children at @c 2i+1 / @c 2i+2) until
+ * both children are @c >= it, comparing on @ref zxc_dict_seg_t::score. The loop
+ * is iterative (no recursion), so the call stack stays O(1) regardless of @p n.
+ *
+ * @param[in,out] a    Heap-ordered array; @p a[0..n) is treated as the heap.
+ * @param[in]     root Index of the element to sift down. Must be @c < n.
+ * @param[in]     n    Number of valid elements in the heap.
+ *
+ * @note Complexity O(log n).
+ */
+static void zxc_dict_sift_down(zxc_dict_seg_t* RESTRICT a, size_t root, const size_t n) {
+    for (;;) {
+        size_t child = 2 * root + 1;
+        if (child >= n) break;
+        if (child + 1 < n && a[child + 1].score < a[child].score) child++;
+        if (a[root].score <= a[child].score) break;
+        const zxc_dict_seg_t t = a[root];
+        a[root] = a[child];
+        a[child] = t;
+        root = child;
+    }
+}
+
+/**
+ * @brief Sort @p a[0..n) by @ref zxc_dict_seg_t::score in descending order.
+ *
+ * In-place heapsort: a min-heap is built over the whole array, then each
+ * extracted minimum is swapped to the shrinking tail. Because the smallest
+ * scores accumulate at the end, the array is left in descending order
+ * (largest score at index 0), as required by the dictionary fill step.
+ *
+ * Replaces a libc @c qsort call for two reasons:
+ *  - **Freestanding/kernel-safe**: no dependency on @c qsort and no indirect
+ *    comparator call (the @c score comparison is inlined in @ref
+ *    zxc_dict_sift_down).
+ *  - **Deterministic**: ordering is fixed by this code rather than by the
+ *    platform's @c qsort, which matters for reproducible dictionary output
+ *    across libc implementations.
+ *
+ * Equal scores keep an unspecified-but-deterministic relative order, matching
+ * the previous comparator that returned 0 on ties (heapsort is not stable).
+ *
+ * @param[in,out] a Array of @p n segments, sorted in place.
+ * @param[in]     n Number of segments. @c n < 2 is a no-op.
+ *
+ * @note Complexity O(n log n) worst case with no extra allocation. In practice
+ *       this matches or beats @c qsort on the sizes seen here (up to ~65536
+ *       segments): eliminating the per-comparison indirect call outweighs
+ *       heapsort's weaker cache locality. This is a cold path (dictionary
+ *       training), so absolute speed is not critical.
+ */
+static void zxc_dict_sort_segs_desc(zxc_dict_seg_t* RESTRICT a, const size_t n) {
+    if (UNLIKELY(n < 2)) return;
+    for (size_t i = n / 2; i-- > 0;) zxc_dict_sift_down(a, i, n);
+    for (size_t end = n; end > 1;) {
+        end--;
+        const zxc_dict_seg_t t = a[0];
+        a[0] = a[end];
+        a[end] = t;
+        zxc_dict_sift_down(a, 0, end);
+    }
 }
 
 int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
@@ -233,7 +292,7 @@ int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
 
     /* Step 4: sort by score descending, fill dict from end (most frequent last
      * = shortest offsets from block start). */
-    qsort(segs, n_segs, sizeof(zxc_dict_seg_t), zxc_seg_cmp_desc);
+    zxc_dict_sort_segs_desc(segs, n_segs);
 
     uint8_t* out = (uint8_t*)dict_buf;
     size_t filled = 0;
