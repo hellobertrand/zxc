@@ -121,11 +121,6 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
  *     so they produce shorter offsets (closer to the block start).
  * ------------------------------------------------------------------------- */
 
-#define ZXC_DICT_KGRAM_LEN ZXC_LZ_MIN_MATCH_LEN
-#define ZXC_DICT_HT_BITS 16
-#define ZXC_DICT_HT_SIZE (1U << ZXC_DICT_HT_BITS)
-#define ZXC_DICT_HT_MASK (ZXC_DICT_HT_SIZE - 1U)
-
 static uint32_t zxc_dict_hash(const uint8_t* p) {
     uint32_t v = zxc_le32(p);
     v ^= (uint32_t)p[4];

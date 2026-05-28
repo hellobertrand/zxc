@@ -344,6 +344,13 @@ extern "C" {
 #define ZXC_DICT_MAGIC 0x9CB0D1C7U
 /** @brief Current dictionary file format version. */
 #define ZXC_DICT_VERSION 1
+/** @brief K-gram length scanned by the dictionary trainer. Aligned on the LZ
+ *         minimum match length so trained patterns are matchable at encode time. */
+#define ZXC_DICT_KGRAM_LEN ZXC_LZ_MIN_MATCH_LEN
+/** @brief Address bits for the dictionary trainer's k-gram frequency table. */
+#define ZXC_DICT_HT_BITS 16
+/** @brief Number of buckets in the dictionary trainer's frequency table. */
+#define ZXC_DICT_HT_SIZE (1U << ZXC_DICT_HT_BITS)
 
 /** @brief Block header size: Type(1)+Flags(1)+Reserved(1)+CRC(1)+CompSize(4). */
 #define ZXC_BLOCK_HEADER_SIZE 8
