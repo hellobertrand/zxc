@@ -118,6 +118,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_dict_id_deterministic),
     TEST_CASE(test_dict_get_id_apis),
     TEST_CASE(test_dict_buffer_roundtrip),
+    TEST_CASE(test_dict_block_roundtrip),
     TEST_CASE(test_dict_mismatch_error),
     TEST_CASE(test_dict_required_error),
     TEST_CASE(test_dict_no_dict_compat),
