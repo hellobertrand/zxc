@@ -659,7 +659,7 @@ typedef enum {
  *      (= header size + comp_size + checksum size).
  * @var zxc_dstream_s::decoded
  *      Heap buffer holding the decoded output of one block (sized for the
- *      wild-copy fast path: @c block_size + @ref ZXC_PAD_SIZE).
+ *      wild-copy fast path: @c block_size + @ref ZXC_DECOMPRESS_TAIL_PAD).
  * @var zxc_dstream_s::decoded_cap
  *      Allocated capacity of @c decoded.
  * @var zxc_dstream_s::decoded_size
@@ -888,8 +888,9 @@ static int ds_drain_decoded(zxc_dstream* ds, zxc_outbuf_t* out, size_t* produced
  * Pulls the 16-byte file header into @c scratch, parses it via
  * @ref zxc_read_file_header, and lazily allocates the @c payload and
  * @c decoded buffers (sized from the negotiated @c block_size).  The
- * @c decoded buffer is over-allocated by @ref ZXC_PAD_SIZE bytes to absorb
- * wild-copy overflow from the inner decoder.  Initialises the underlying
+ * @c decoded buffer is over-allocated by @ref ZXC_DECOMPRESS_TAIL_PAD bytes to
+ * absorb wild-copy overflow and give the decoder's 4x ML bounds checks their
+ * required tail headroom.  Initialises the underlying
  * decompression context and transitions to @c DS_NEED_BLOCK_HEADER.
  *
  * @param[in,out] ds Decompression stream.
@@ -915,11 +916,7 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     ds->payload_cap = (size_t)pb;
     ds->payload = (uint8_t*)ZXC_MALLOC(ds->payload_cap);
 
-    /* Decoded buffer is sized for the wild-copy fast path: block_size +
-     * ZXC_PAD_SIZE; same pattern as the buffer API uses internally.  Real
-     * decoded payload lives in [0..decoded_size); the trailing PAD bytes
-     * hold wild-copy overflow we never emit. */
-    ds->decoded_cap = ds->block_size + ZXC_PAD_SIZE;
+    ds->decoded_cap = ds->block_size + ZXC_DECOMPRESS_TAIL_PAD;
     ds->decoded = (uint8_t*)ZXC_MALLOC(ds->decoded_cap);
     // LCOV_EXCL_START
     if (UNLIKELY(!ds->payload || !ds->decoded)) return ds_set_error(ds, ZXC_ERROR_MEMORY);
