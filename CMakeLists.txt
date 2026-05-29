@@ -497,6 +497,29 @@ if(ZXC_BUILD_TESTS)
         NAME conformance
         COMMAND zxc_conformance_test "${CMAKE_SOURCE_DIR}/conformance"
     )
+
+    # --- Golden-file format conformance --------------------------------------
+    # Parses the byte-frozen golden files and validates every on-disk field
+    # against docs/FORMAT.md. Needs the private header (static-inline hashes),
+    # hence the src/lib + rapidhash include paths.
+    add_executable(zxc_format_golden_test tests/format/test_golden.c)
+    target_link_libraries(zxc_format_golden_test PRIVATE zxc_lib)
+    target_include_directories(zxc_format_golden_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src/lib
+        ${RAPIDHASH_INCLUDE_DIR})
+    if(ZXC_ENABLE_COVERAGE)
+        target_link_options(zxc_format_golden_test PRIVATE --coverage)
+    endif()
+    add_test(
+        NAME format_golden
+        COMMAND zxc_format_golden_test "${CMAKE_SOURCE_DIR}/tests/format/golden"
+    )
+
+    # Maintainer-only regeneration tool (public API only; not a registered test).
+    add_executable(zxc_golden_gen tests/format/gen_golden.c)
+    target_link_libraries(zxc_golden_gen PRIVATE zxc_lib)
+    target_include_directories(zxc_golden_gen PRIVATE ${CMAKE_SOURCE_DIR}/include)
 endif()
 
 # =============================================================================
