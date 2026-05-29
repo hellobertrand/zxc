@@ -27,12 +27,34 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#ifdef _MSC_VER
+#include <io.h>
+#include <share.h>
+#endif
+
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_error.h"
 #include "golden_cases.h"
 
+/* Open a file for binary writing with owner-only permissions (0600), mirroring
+ * tests/test_common.c::create_restricted_file. Avoids fopen()'s world-writable
+ * 0666 default flagged by CodeQL. */
+static FILE *open_restricted_wb(const char *path) {
+#ifdef _MSC_VER
+    int fd = -1;
+    _sopen_s(&fd, path, _O_CREAT | _O_WRONLY | _O_TRUNC | _O_BINARY, _SH_DENYNO,
+             _S_IREAD | _S_IWRITE);
+    return fd >= 0 ? _fdopen(fd, "wb") : NULL;
+#else
+    const int fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR);
+    return fd >= 0 ? fdopen(fd, "wb") : NULL;
+#endif
+}
+
 static int write_file(const char *path, const uint8_t *data, size_t size) {
-    FILE *f = fopen(path, "wb");
+    FILE *f = open_restricted_wb(path);
     if (!f) {
         fprintf(stderr, "  cannot open %s for writing\n", path);
         return -1;
