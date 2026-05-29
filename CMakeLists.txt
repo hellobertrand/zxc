@@ -520,6 +520,10 @@ if(ZXC_BUILD_TESTS)
     add_executable(zxc_golden_gen tests/format/gen_golden.c)
     target_link_libraries(zxc_golden_gen PRIVATE zxc_lib)
     target_include_directories(zxc_golden_gen PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    if(ZXC_ENABLE_COVERAGE)
+        # Links the coverage-instrumented zxc_lib, so it needs the gcov runtime.
+        target_link_options(zxc_golden_gen PRIVATE --coverage)
+    endif()
 endif()
 
 # =============================================================================
