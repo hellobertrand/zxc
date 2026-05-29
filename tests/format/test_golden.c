@@ -9,19 +9,19 @@
  * Golden-file format conformance suite.
  *
  * Parses every byte-frozen golden/<name>.zxc and validates each field against
- * docs/FORMAT.md §3-§8:
+ * docs/FORMAT.md Sec 3-Sec 8:
  *
  *   - File header: magic, version, chunk-size code, flags, reserved bytes,
- *     and the 16-bit header CRC (zxc_hash16, §3 / §7.1).
+ *     and the 16-bit header CRC (zxc_hash16, Sec 3 / Sec 7.1).
  *   - Generic block container: type, flags, reserved, comp_size bounds and the
- *     8-bit header CRC (zxc_hash8, §4 / §7.1).
- *   - Every block type in §5: RAW, NUM (header + frame records), GLO and GHI
+ *     8-bit header CRC (zxc_hash8, Sec 4 / Sec 7.1).
+ *   - Every block type in Sec 5: RAW, NUM (header + frame records), GLO and GHI
  *     (header + section descriptors, incl. the Huffman literal section),
  *     EOF (zero comp_size) and the optional SEK seek table.
- *   - Optional per-block checksum over the compressed payload (§7.2).
- *   - The rolling global stream hash (§7.3) reconstructed from per-block
+ *   - Optional per-block checksum over the compressed payload (Sec 7.2).
+ *   - The rolling global stream hash (Sec 7.3) reconstructed from per-block
  *     checksums and matched against the footer.
- *   - The 12-byte file footer: original source size and global hash (§8).
+ *   - The 12-byte file footer: original source size and global hash (Sec 8).
  *
  * Each file is also round-tripped: decompressed and compared byte-for-byte
  * against its deterministically regenerated input (see golden_cases.h).
@@ -87,10 +87,10 @@ static uint8_t *read_file(const char *path, size_t *out_size) {
 }
 
 /* ------------------------------------------------------------------------- */
-/* Per-payload sub-header validation (FORMAT.md §5)                          */
+/* Per-payload sub-header validation (FORMAT.md Sec 5)                          */
 /* ------------------------------------------------------------------------- */
 
-/* §5.2 NUM: 16-byte header + repeated 16-byte frame records. */
+/* Sec 5.2 NUM: 16-byte header + repeated 16-byte frame records. */
 static int validate_num_payload(const char *ctx, const uint8_t *p, uint32_t comp) {
     CHECK(comp >= 16, "NUM payload too small for header (%u)", comp);
     uint64_t n_values = zxc_le64(p);
@@ -119,7 +119,7 @@ static int validate_num_payload(const char *ctx, const uint8_t *p, uint32_t comp
     return 1;
 }
 
-/* Shared validator for the GLO (§5.3) and GHI (§5.4) section model: a 16-byte
+/* Shared validator for the GLO (Sec 5.3) and GHI (Sec 5.4) section model: a 16-byte
  * header, then `n_sections` packed u64 descriptors (low32 = comp, high32 = raw),
  * then each section's bytes. The section sizes plus the headers must tile the
  * payload exactly. */
@@ -155,7 +155,7 @@ static int validate_lz_payload(const char *ctx, const uint8_t *p, uint32_t comp,
 
 static int validate_structure(const char *ctx, const golden_case_t *gc, const uint8_t *buf,
                               size_t size) {
-    /* ---- File header (§3) ---- */
+    /* ---- File header (Sec 3) ---- */
     CHECK(size >= ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE, "file too small (%zu)", size);
 
     CHECK(zxc_le32(buf) == ZXC_MAGIC_WORD, "bad magic 0x%08X", zxc_le32(buf));
@@ -174,7 +174,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
 
     for (int i = 7; i <= 13; i++) CHECK(buf[i] == 0, "header reserved byte 0x%02X nonzero", i);
 
-    /* §7.1 header CRC16: zxc_hash16 over the 16 header bytes with 0x0E..0x0F zeroed. */
+    /* Sec 7.1 header CRC16: zxc_hash16 over the 16 header bytes with 0x0E..0x0F zeroed. */
     {
         uint8_t tmp[ZXC_FILE_HEADER_SIZE];
         memcpy(tmp, buf, ZXC_FILE_HEADER_SIZE);
@@ -184,9 +184,9 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
         CHECK(got == want, "header CRC16 mismatch: got 0x%04X want 0x%04X", got, want);
     }
 
-    /* ---- Block stream (§4, §5) ---- */
+    /* ---- Block stream (Sec 4, Sec 5) ---- */
     size_t off = ZXC_FILE_HEADER_SIZE;
-    uint32_t rolling = 0;            /* §7.3 rolling global hash */
+    uint32_t rolling = 0;            /* Sec 7.3 rolling global hash */
     int data_blocks = 0;
     uint32_t block_phys[MAX_BLOCKS]; /* physical size of each data block incl. checksum */
 
@@ -198,7 +198,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
         uint8_t resv = bh[2];
         uint32_t comp = zxc_le32(bh + 3);
 
-        /* §7.1 block header CRC8: zxc_hash8 over the 8 header bytes with 0x07 zeroed. */
+        /* Sec 7.1 block header CRC8: zxc_hash8 over the 8 header bytes with 0x07 zeroed. */
         {
             uint8_t tmp[ZXC_BLOCK_HEADER_SIZE];
             memcpy(tmp, bh, ZXC_BLOCK_HEADER_SIZE);
@@ -240,7 +240,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
         off += phys;
 
         if (has_checksum) {
-            /* §7.2 per-block checksum over the compressed payload only. */
+            /* Sec 7.2 per-block checksum over the compressed payload only. */
             CHECK(off + ZXC_BLOCK_CHECKSUM_SIZE <= size, "missing block checksum at %zu", off);
             uint32_t stored = zxc_le32(buf + off);
             uint32_t calc = zxc_checksum(payload, comp, ZXC_CHECKSUM_RAPIDHASH);
@@ -258,7 +258,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
     CHECK(data_blocks >= gc->min_data_blocks, "got %d data blocks, expected >= %d", data_blocks,
           gc->min_data_blocks);
 
-    /* ---- Optional SEK block (§5.6), located after EOF, before footer ---- */
+    /* ---- Optional SEK block (Sec 5.6), located after EOF, before footer ---- */
     int seek_present = 0;
     if (off + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE <= size && buf[off] == GC_BLOCK_SEK) {
         const uint8_t *sh = buf + off;
@@ -283,7 +283,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
     CHECK(seek_present == gc->expect_seek, "SEK present=%d, expected %d", seek_present,
           gc->expect_seek);
 
-    /* ---- File footer (§8): the trailing 12 bytes, with nothing after it ---- */
+    /* ---- File footer (Sec 8): the trailing 12 bytes, with nothing after it ---- */
     CHECK(off + ZXC_FILE_FOOTER_SIZE == size, "footer not at end (off %zu, size %zu)", off, size);
     const uint8_t *footer = buf + size - ZXC_FILE_FOOTER_SIZE;
     uint64_t src_size = zxc_le64(footer);

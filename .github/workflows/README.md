@@ -51,6 +51,11 @@ Runs CodeQL security analysis to detect potential security vulnerabilities and c
 
 Builds `libzxc.so` with debug info, generates an ABI XML via [`abidw`](https://sourceware.org/libabigail/), and compares it against the committed baseline at [`docs/abi/libzxc-linux-x86_64.abi.xml`](../../docs/abi/libzxc-linux-x86_64.abi.xml) using `abidiff --no-added-syms`. Adding new symbols passes (MINOR bump); removing or changing existing symbols fails (MAJOR bump required + regenerate baseline). Run with `mode=regenerate` to produce a fresh baseline as a downloadable artifact.
 
+### golden.yml - Golden Format Stability
+**Triggers:** Push to main, pull requests, manual dispatch
+
+Freezes the ZXC on-disk wire format. Runs `sha256sum -c` against the committed manifest [`tests/format/golden.sha256`](../../tests/format/golden.sha256), so the job fails if a single byte of any golden conformance file under [`tests/format/golden/`](../../tests/format/golden/) changes. Also verifies the golden file set and the manifest stay in sync (no file added or removed without updating the manifest). Any intentional format change requires regenerating the corpus with `zxc_golden_gen` and refreshing the manifest in the same commit (see [`tests/format/README.md`](../../tests/format/README.md)). The field-level structural validation runs separately as the `format_golden` ctest in `build.yml`.
+
 ### scorecard.yml - OSSF Scorecard
 **Triggers:** Push to main, scheduled (weekly), manual dispatch
 

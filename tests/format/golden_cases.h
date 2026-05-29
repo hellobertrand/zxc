@@ -37,17 +37,17 @@
 
 #include "../../include/zxc_buffer.h"
 
-/* Block-type ids, mirrored from docs/FORMAT.md §4.1 so this header stays
+/* Block-type ids, mirrored from docs/FORMAT.md Sec 4.1 so this header stays
  * decoupled from the private src/lib/zxc_internal.h enum. */
-#define GC_BLOCK_RAW 0u
-#define GC_BLOCK_GLO 1u
-#define GC_BLOCK_NUM 2u
-#define GC_BLOCK_GHI 3u
-#define GC_BLOCK_SEK 254u
-#define GC_BLOCK_EOF 255u
+#define GC_BLOCK_RAW 0U
+#define GC_BLOCK_GLO 1U
+#define GC_BLOCK_NUM 2U
+#define GC_BLOCK_GHI 3U
+#define GC_BLOCK_SEK 254U
+#define GC_BLOCK_EOF 255U
 
 /* Sentinel for "do not assert a specific data-block type". */
-#define GC_ANY_TYPE 0xFEu
+#define GC_ANY_TYPE 0xFEU
 
 /* ------------------------------------------------------------------------- */
 /* Deterministic input generators                                            */
@@ -56,7 +56,7 @@
 /* Portable LCG (glibc rand() constants), kept local so output never depends on
  * the platform libc PRNG. */
 static uint32_t gc_lcg_next(uint32_t *s) {
-    *s = (*s * 1103515245u) + 12345u;
+    *s = (*s * 1103515245U) + 12345U;
     return *s;
 }
 
@@ -151,7 +151,7 @@ typedef struct {
     int expect_seek;                /* a SEK block must be present */
 } golden_case_t;
 
-/* The corpus. Each entry maps onto one or more sections of docs/FORMAT.md §5. */
+/* The corpus. Each entry maps onto one or more sections of docs/FORMAT.md Sec 5. */
 static const golden_case_t GOLDEN_CASES[] = {
     /* name           input              {level, blk,   csum, seek}                       data type      huf min seek */
     { "empty",        gc_make_empty,     { .level = 1 },                                  GC_ANY_TYPE,   0,  0, 0 },
