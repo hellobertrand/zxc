@@ -1,0 +1,47 @@
+name: Golden Format Stability
+
+# Fails if a single byte of any golden conformance file changes relative to the
+# committed manifest (tests/format/golden.sha256). The golden files freeze the
+# zxc wire format; any drift here is, by design, a deliberate format change that
+# must be made by regenerating the corpus and refreshing the manifest in the
+# same commit (see tests/format/README.md).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+
+jobs:
+  byte-stability:
+    name: Golden files - byte stability
+    runs-on: ubuntu-slim
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Verify golden manifest is complete
+        run: |
+          # Every golden/*.zxc must be listed in the manifest, and vice versa.
+          # This catches files added or removed without updating the manifest.
+          comm_in_dir=$(find tests/format/golden -maxdepth 1 -name '*.zxc' | sort)
+          comm_in_manifest=$(awk '{print $2}' tests/format/golden.sha256 | sort)
+          if ! diff <(printf '%s\n' "$comm_in_dir") <(printf '%s\n' "$comm_in_manifest"); then
+            echo "::error::Golden file set does not match tests/format/golden.sha256."
+            echo "Regenerate with zxc_golden_gen and refresh the manifest (see tests/format/README.md)."
+            exit 1
+          fi
+
+      - name: Verify golden bytes are unchanged
+        run: |
+          # sha256sum -c fails on any content mismatch, so a single changed byte in any golden file fails the job.
+          sha256sum -c tests/format/golden.sha256
