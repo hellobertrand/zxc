@@ -349,7 +349,8 @@ class Seekable:
         try:
             self.close()
         except Exception:
-            pass
+            # Destructors must not raise: this is best-effort cleanup only.
+            return
 
 
 def seek_table_size(num_blocks: int) -> int:
