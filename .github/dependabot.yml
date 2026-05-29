@@ -9,6 +9,10 @@ updates:
     directory: /wrappers/python
     schedule:
       interval: monthly
+  - package-ecosystem: pip
+    directory: /.github/requirements
+    schedule:
+      interval: monthly
   - package-ecosystem: cargo
     directory: /wrappers/rust
     schedule:
