@@ -4,7 +4,7 @@
 #  This source code is licensed under the BSD-style license found in the
 #  LICENSE file in the root directory of this source tree.
 
-FROM gcr.io/oss-fuzz-base/base-builder:v1@sha256:fd6ca3a7a6b8e1dcbdd4f03cfdc0fc2603c7a1097aed1d730de2ca4124e0a405
+FROM gcr.io/oss-fuzz-base/base-builder:v1@sha256:afa8f97dbfd3b2368c717c231f14e2299cb02fe928358184f942e0dd673d8838
 
 COPY . $SRC/zxc
 WORKDIR $SRC/zxc
