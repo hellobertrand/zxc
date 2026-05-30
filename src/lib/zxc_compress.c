@@ -159,6 +159,9 @@ typedef struct {
  * @param[in,out] chain_table Pointer to the chain table for collision handling.
  * @param[in] epoch_mark Current epoch marker for hash table invalidation.
  * @param[in] p LZ77 parameters controlling search depth, lazy matching, and stepping.
+ * @param[in] last_off Most recently accepted match offset, used as a repeat-offset
+ *            seed probed before the hash-chain walk. Pass 0 to disable (all callers
+ *            except the level-6 optimal parser do so).
  * @return zxc_match_t Structure containing the best match information
  *         (reference pointer, length of the match, and backtrack distance).
  */
@@ -166,7 +169,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* mflimit,
     const uint8_t* anchor, uint32_t* RESTRICT hash_table, uint8_t* RESTRICT hash_tags,
     uint16_t* RESTRICT chain_table, const uint32_t epoch_mark, const uint32_t offset_mask,
-    const int level, const zxc_lz77_params_t p) {
+    const int level, const zxc_lz77_params_t p, const uint32_t last_off) {
     const int use_hash5 = (level >= 3);
     // Track the best match found so far.
     //  ref is the pointer to the start of the match in the history buffer,
@@ -209,9 +212,36 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     const uint32_t valid_mask = -((int32_t)((match_idx != 0) & (dist < ZXC_LZ_WINDOW_SIZE)));
     chain_table[cur_pos & ZXC_LZ_WINDOW_MASK] = (uint16_t)(dist & valid_mask);
 
-    if (match_idx == 0) return best;
-
     int attempts = p.search_depth;
+
+    /* Repeat-offset seed (level-6 parser passes last_off; others pass 0).
+     * Probing the previous offset first often finds the longest match right
+     * away, speeding up the chain walk. It only raises best.len, never lowers
+     * it, so the result is unchanged - this is purely a speed optimization. */
+    if (last_off != 0U && last_off <= (uint32_t)ZXC_LZ_MAX_DIST && last_off <= cur_pos) {
+        const uint8_t* const rep_ref = src + (cur_pos - last_off);
+        if (zxc_le32(rep_ref) == cur_val) {
+            uint32_t mlen = sizeof(uint32_t);
+            const uint8_t* const limit_8 = iend - sizeof(uint64_t);
+            while (ip + mlen < limit_8) {
+                const uint64_t diff = zxc_le64(ip + mlen) ^ zxc_le64(rep_ref + mlen);
+                if (diff == 0) {
+                    mlen += sizeof(uint64_t);
+                } else {
+                    mlen += (uint32_t)(zxc_ctz64(diff) >> 3);
+                    goto _rep_done;
+                }
+            }
+            while (ip + mlen < iend && rep_ref[mlen] == ip[mlen]) mlen++;
+        _rep_done:;
+            best.len = mlen;
+            best.ref = rep_ref;
+            if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend))
+                goto _finalize_match;
+        }
+    }
+
+    if (match_idx == 0) goto _finalize_match;
 
     // Optimization: If head tag doesn't match, advance immediately without loading the first
     // mismatch.
@@ -226,9 +256,16 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         if (UNLIKELY(cur_pos - match_idx > ZXC_LZ_MAX_DIST)) break;
         const uint8_t* ref = src + match_idx;
 
+        // Load the next chain link early (before the compare) so its address
+        // resolves while we prefetch.
+        const uint16_t delta = chain_table[match_idx & ZXC_LZ_WINDOW_MASK];
+        const uint32_t next_idx = match_idx - delta;
+        ZXC_PREFETCH_READ(src + next_idx);
+
         const uint32_t ref_val = zxc_le32(ref);
         const int tag_match = (ref_val == cur_val);
-        // Simplified check: only tag match and next-byte match required
+        // Cheap gate: 4-byte tag match, then check the byte past the current
+        // best (the && skips that load unless the tag already matched).
         const int should_compare = tag_match && (ref[best.len] == ip[best.len]);
 
         if (should_compare) {
@@ -368,13 +405,10 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
             if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend)) break;
         }
 
-        const uint16_t delta = chain_table[match_idx & ZXC_LZ_WINDOW_MASK];
-        const uint32_t next_idx = match_idx - delta;
-        ZXC_PREFETCH_READ(src + next_idx);
-
         match_idx = (delta != 0) ? next_idx : 0;
     }
 
+_finalize_match:
     if (best.ref) {
         // Backtrack to extend match backwards
         const uint8_t* b_ip = ip;
@@ -979,6 +1013,8 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
      * already covers dp[p+1..p+L], and re-searching at every intra-match
      * position is what makes the parser quadratic on repetitive inputs. */
     size_t skip_until = 0;
+    /* Rolling repeat-offset seed for find_best_match */
+    uint32_t last_off = 0;
     for (size_t p = 0; p < mflimit_pos; p++) {
         if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
 
@@ -995,13 +1031,14 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
          * anchor=ip). Iterate sub-lengths since any L <= max_L matches at the
          * same offset and may end at a more useful DP position. */
         const uint8_t* ip = src + p;
-        const zxc_match_t m =
-            zxc_lz77_find_best_match(src, ip, iend, mflimit, /*anchor=*/ip, hash_table, hash_tags,
-                                     chain_table, epoch_mark, offset_mask, level, lzp_opt);
+        const zxc_match_t m = zxc_lz77_find_best_match(
+            src, ip, iend, mflimit, /*anchor=*/ip, hash_table, hash_tags, chain_table, epoch_mark,
+            offset_mask, level, lzp_opt, last_off);
 
         if (m.ref) {
             const uint32_t off = (uint32_t)(ip - m.ref);
             if (off > 0 && off <= ZXC_LZ_WINDOW_SIZE) {
+                last_off = off;
                 const size_t L_max_raw = (m.len > src_sz - p) ? (src_sz - p) : (size_t)m.len;
                 const size_t L_max = (L_max_raw > UINT16_MAX) ? UINT16_MAX : L_max_raw;
 
@@ -1250,7 +1287,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         const zxc_match_t m =
             zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, hash_tags,
-                                     chain_table, epoch_mark, offset_mask, level, lzp);
+                                     chain_table, epoch_mark, offset_mask, level, lzp,
+                                     /*last_off=*/0U);
 
         if (m.ref) {
             ip -= m.backtrack;
@@ -1828,7 +1866,8 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
         const zxc_match_t m =
             zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, hash_tags,
-                                     chain_table, epoch_mark, offset_mask, level, lzp);
+                                     chain_table, epoch_mark, offset_mask, level, lzp,
+                                     /*last_off=*/0U);
 
         if (m.ref) {
             ip -= m.backtrack;
