@@ -153,16 +153,16 @@ typedef struct {
 
 /* The corpus. Each entry maps onto one or more sections of docs/FORMAT.md Sec 5. */
 static const golden_case_t GOLDEN_CASES[] = {
-    /* name           input              {level, blk,   csum, seek}                       data type      huf min seek */
-    { "empty",        gc_make_empty,     { .level = 1 },                                  GC_ANY_TYPE,   0,  0, 0 },
-    { "raw",          gc_make_raw,       { .level = 1 },                                  GC_BLOCK_RAW,  0,  1, 0 },
-    { "ghi",          gc_make_text,      { .level = 1 },                                  GC_BLOCK_GHI,  0,  1, 0 },
-    { "glo",          gc_make_text,      { .level = 3 },                                  GC_BLOCK_GLO,  0,  1, 0 },
-    { "glo_huffman",  gc_make_huffman,   { .level = 6 },                                  GC_BLOCK_GLO,  1,  1, 0 },
-    { "num",          gc_make_num,       { .level = 3 },                                  GC_BLOCK_NUM,  0,  1, 0 },
-    { "checksum",     gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GLO,  0,  1, 0 },
-    { "multiblock",   gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GLO, 0, 5, 0 },
-    { "seekable",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GLO, 0, 5, 1 },
+    /* name                 input              {level, blk,   csum, seek}                       data type      huf min seek */
+    { "01_empty_eof_only",     gc_make_empty,     { .level = 1 },                                  GC_ANY_TYPE,   0,  0, 0 },
+    { "02_block_raw",          gc_make_raw,       { .level = 1 },                                  GC_BLOCK_RAW,  0,  1, 0 },
+    { "03_block_ghi",          gc_make_text,      { .level = 1 },                                  GC_BLOCK_GHI,  0,  1, 0 },
+    { "04_block_glo",          gc_make_text,      { .level = 3 },                                  GC_BLOCK_GLO,  0,  1, 0 },
+    { "05_block_glo_huffman",  gc_make_huffman,   { .level = 6 },                                  GC_BLOCK_GLO,  1,  1, 0 },
+    { "06_block_num",          gc_make_num,       { .level = 3 },                                  GC_BLOCK_NUM,  0,  1, 0 },
+    { "07_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GLO,  0,  1, 0 },
+    { "08_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GLO, 0, 5, 0 },
+    { "09_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GLO, 0, 5, 1 },
 };
 
 #define GOLDEN_CASE_COUNT (sizeof(GOLDEN_CASES) / sizeof(GOLDEN_CASES[0]))

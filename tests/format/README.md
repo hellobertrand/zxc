@@ -19,17 +19,17 @@ golden.sha256      Byte-stability manifest (sha256sum format)
 
 Each file maps onto sections of `docs/FORMAT.md §5` and the integrity fields:
 
-| File              | Exercises                                                        |
-|-------------------|-----------------------------------------------------------------|
-| `empty.zxc`       | EOF block only + footer (zero-length source)                    |
-| `raw.zxc`         | RAW block (incompressible input)                                |
-| `ghi.zxc`         | GHI block (level <= 2)                                           |
-| `glo.zxc`         | GLO block (level >= 3)                                           |
-| `glo_huffman.zxc` | GLO block with the Huffman literal section (`enc_lit == 2`, §5.3.1) |
-| `num.zxc`         | NUM block: header + frame records (§5.2)                        |
-| `checksum.zxc`    | Per-block checksum + non-zero global stream hash                |
-| `multiblock.zxc`  | Multiple data blocks → rolling global hash (§7.3)               |
-| `seekable.zxc`    | SEK seek-table block (§5.6)                                     |
+| File                       | Exercises                                                        |
+|----------------------------|-----------------------------------------------------------------|
+| `01_empty_eof_only.zxc`    | EOF block only + footer (zero-length source)                    |
+| `02_block_raw.zxc`         | RAW block (incompressible input)                                |
+| `03_block_ghi.zxc`         | GHI block (level <= 2)                                           |
+| `04_block_glo.zxc`         | GLO block (level >= 3)                                           |
+| `05_block_glo_huffman.zxc` | GLO block with the Huffman literal section (`enc_lit == 2`, §5.3.1) |
+| `06_block_num.zxc`         | NUM block: header + frame records (§5.2)                        |
+| `07_checksum_per_block.zxc`| Per-block checksum + non-zero global stream hash                |
+| `08_multiple_blocks.zxc`   | Multiple data blocks → rolling global hash (§7.3)               |
+| `09_seekable_table.zxc`    | SEK seek-table block (§5.6)                                     |
 
 ## What the validator checks
 
