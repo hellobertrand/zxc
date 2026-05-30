@@ -11,7 +11,7 @@
 //! to support runtime CPU feature detection and optimized code paths.
 //!
 //! On ARM64: Compiles `_default` and `_neon` variants
-//! On x86_64: Compiles `_default`, `_avx2`, and `_avx512` variants
+//! On x86_64: Compiles `_default`, `_sse2`, `_avx2`, and `_avx512` variants
 
 use std::env;
 use std::fs;
@@ -217,7 +217,7 @@ fn main() {
     if is_arm64 {
         core_build.flag_if_supported("-march=armv8-a+crc");
     } else if is_x86_64 {
-        core_build.flag_if_supported("-msse4.2");
+        core_build.flag_if_supported("-msse2");
         core_build.flag_if_supported("-mpclmul");
     }
 
@@ -271,6 +271,48 @@ fn main() {
         neon_decompress.compile("zxc_decompress_neon");
         neon_huffman.compile("zxc_huffman_neon");
     } else if is_x86_64 {
+        // SSE2 variant: the x86-64 baseline (also covers any i686 built with
+        // SSE2). Mirrors the _sse2 variant in CMakeLists.txt / meson.build.
+        let mut sse2_compress = cc::Build::new();
+        sse2_compress
+            .include(&include_dir)
+            .include(&src_lib)
+            .include(src_lib.join("vendors"))
+            .define("ZXC_STATIC_DEFINE", None)
+            .file(src_lib.join("zxc_compress.c"))
+            .define("ZXC_FUNCTION_SUFFIX", "_sse2")
+            .flag_if_supported("-msse2")
+            .opt_level(3)
+            .warnings(false);
+
+        let mut sse2_decompress = cc::Build::new();
+        sse2_decompress
+            .include(&include_dir)
+            .include(&src_lib)
+            .include(src_lib.join("vendors"))
+            .define("ZXC_STATIC_DEFINE", None)
+            .file(src_lib.join("zxc_decompress.c"))
+            .define("ZXC_FUNCTION_SUFFIX", "_sse2")
+            .flag_if_supported("-msse2")
+            .opt_level(3)
+            .warnings(false);
+
+        let mut sse2_huffman = cc::Build::new();
+        sse2_huffman
+            .include(&include_dir)
+            .include(&src_lib)
+            .include(src_lib.join("vendors"))
+            .define("ZXC_STATIC_DEFINE", None)
+            .file(src_lib.join("zxc_huffman.c"))
+            .define("ZXC_FUNCTION_SUFFIX", "_sse2")
+            .flag_if_supported("-msse2")
+            .opt_level(3)
+            .warnings(false);
+
+        sse2_compress.compile("zxc_compress_sse2");
+        sse2_decompress.compile("zxc_decompress_sse2");
+        sse2_huffman.compile("zxc_huffman_sse2");
+
         // AVX2 variant
         let mut avx2_compress = cc::Build::new();
         avx2_compress

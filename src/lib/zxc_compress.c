@@ -76,6 +76,66 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
 }
 #endif
 
+#if defined(ZXC_USE_SSE2)
+/**
+ * @brief SSE2 emulation of SSE4.1 @c _mm_max_epu32 (element-wise unsigned max).
+ *
+ * SSE2 has no unsigned 32-bit compare, so we map unsigned ordering to signed
+ * ordering by flipping the sign bit (XOR 0x80000000) before @c _mm_cmpgt_epi32,
+ * then select element-wise.
+ */
+// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
+static ZXC_ALWAYS_INLINE __m128i zxc_mm_max_epu32_sse2(__m128i a, __m128i b) {
+    const __m128i bias = _mm_set1_epi32((int)0x80000000);
+    const __m128i gt = _mm_cmpgt_epi32(_mm_xor_si128(a, bias), _mm_xor_si128(b, bias));
+    return _mm_or_si128(_mm_and_si128(gt, a), _mm_andnot_si128(gt, b));
+}
+
+/**
+ * @brief SSE2 emulation of SSE4.1 @c _mm_blendv_epi8.
+ *
+ * Selects bytes from @p b where the corresponding @p mask byte has its high bit
+ * set, else from @p a. In every call site the mask lanes are full-width compare
+ * results (all-ones or all-zero per element), so a plain bitwise select is exact.
+ */
+// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
+static ZXC_ALWAYS_INLINE __m128i zxc_mm_blendv_epi8_sse2(__m128i a, __m128i b, __m128i mask) {
+    return _mm_or_si128(_mm_and_si128(mask, b), _mm_andnot_si128(mask, a));
+}
+
+/**
+ * @brief SSE2 emulation of SSE4.1 @c _mm_packus_epi32 (saturating u32 -> u16).
+ *
+ * SSE2 only has signed @c _mm_packs_epi32 (saturates to int16). Bias each lane
+ * by -0x8000 so values in [0, 0xFFFF] land in the signed int16 range with no
+ * saturation, pack, then add 0x8000 back per 16-bit lane. Exact for inputs in
+ * [0, 0xFFFF] (all call sites pass match lengths < 2^16).
+ */
+// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
+static ZXC_ALWAYS_INLINE __m128i zxc_mm_packus_epi32_sse2(__m128i a, __m128i b) {
+    const __m128i bias32 = _mm_set1_epi32(0x8000);
+    const __m128i bias16 = _mm_set1_epi16((short)0x8000);
+    const __m128i pa = _mm_sub_epi32(a, bias32);
+    const __m128i pb = _mm_sub_epi32(b, bias32);
+    return _mm_add_epi16(_mm_packs_epi32(pa, pb), bias16);
+}
+
+/**
+ * @brief Horizontal maximum of four packed unsigned 32-bit integers (SSE2).
+ *
+ * @param[in] v The 128-bit vector containing 4 unsigned 32-bit integers.
+ * @return The maximum unsigned 32-bit integer found in the vector.
+ */
+// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
+static ZXC_ALWAYS_INLINE uint32_t zxc_mm_reduce_max_epu32(__m128i v) {
+    __m128i vshuf = _mm_shuffle_epi32(v, _MM_SHUFFLE(1, 0, 3, 2));  // Swap 64-bit halves
+    v = zxc_mm_max_epu32_sse2(v, vshuf);                            // Max of pairs
+    vshuf = _mm_shuffle_epi32(v, _MM_SHUFFLE(2, 3, 0, 1));          // Swap adjacent lanes
+    v = zxc_mm_max_epu32_sse2(v, vshuf);                            // Final max
+    return (uint32_t)_mm_cvtsi128_si32(v);                          // Extract scalar result
+}
+#endif
+
 /**
  * @brief Writes a Prefix Varint encoded value to a buffer.
  *
@@ -311,6 +371,22 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 if (mask == 0xFFFFFFFF)
                     mlen += 32;
                 else {
+                    mlen += zxc_ctz32(~mask);
+                    goto _match_len_done;
+                }
+            }
+#elif defined(ZXC_USE_SSE2)
+            const uint8_t* limit_16 = iend - 16;
+            while (ip + mlen < limit_16) {
+                const __m128i v_src = _mm_loadu_si128((const __m128i*)(ip + mlen));
+                const __m128i v_ref = _mm_loadu_si128((const __m128i*)(ref + mlen));
+                const __m128i v_cmp = _mm_cmpeq_epi8(v_src, v_ref);
+                const uint32_t mask = (uint32_t)_mm_movemask_epi8(v_cmp);
+                if (mask == 0xFFFFU)
+                    mlen += 16;
+                else {
+                    // mask != 0xFFFF => a differing byte exists in bits 0..15,
+                    // so the lowest set bit of ~mask lies in that range.
                     mlen += zxc_ctz32(~mask);
                     goto _match_len_done;
                 }
@@ -671,9 +747,35 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
             if (j > 0) prev = zxc_le32(in_ptr + (j - 1) * sizeof(uint32_t));
         }
+#elif defined(ZXC_USE_SSE2)
+        // SSE2 processes 128-bit vectors (4 uint32 integers)
+        if (frames >= 4) {
+            __m128i v_max_accum = _mm_setzero_si128();  // Initialize max accumulator to 0
+
+            for (; j < (frames & ~3); j += 4) {
+                if (UNLIKELY(i == 0 && j == 0)) goto _scalar;
+
+                // Load 4 consecutive integers and the same window offset by -1
+                const __m128i vc = _mm_loadu_si128((const __m128i*)(in_ptr + j * 4));
+                const __m128i vp = _mm_loadu_si128((const __m128i*)(in_ptr + j * 4 - 4));
+
+                const __m128i diff = _mm_sub_epi32(vc, vp);  // Compute deltas: curr - prev
+
+                // ZigZag encode: (diff << 1) ^ (diff >> 31)
+                const __m128i zigzag =
+                    _mm_xor_si128(_mm_slli_epi32(diff, 1), _mm_srai_epi32(diff, 31));
+                _mm_storeu_si128((__m128i*)&deltas[j], zigzag);  // Store results
+                // SSE2 has no unsigned max; use the SSE2 emulation.
+                v_max_accum = zxc_mm_max_epu32_sse2(v_max_accum, zigzag);  // Update max accumulator
+            }
+
+            max_d = zxc_mm_reduce_max_epu32(v_max_accum);  // Horizontal max reduction
+
+            if (j > 0) prev = zxc_le32(in_ptr + (j - 1) * sizeof(uint32_t));
+        }
 #endif
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512) || defined(ZXC_USE_NEON64) || \
-    defined(ZXC_USE_NEON32)
+    defined(ZXC_USE_NEON32) || defined(ZXC_USE_SSE2)
     _scalar:
 #endif
         for (; j < frames; j++) {
@@ -821,6 +923,34 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
             vst1_u16(&parent_len[p + L], vbsl_u16(v_mask16, v_L_u16, v_pl));
             const uint16x4_t v_po = vld1_u16(&parent_off[p + L]);
             vst1_u16(&parent_off[p + L], vbsl_u16(v_mask16, v_off, v_po));
+        }
+    }
+#elif defined(ZXC_USE_SSE2)
+    if (L + 4 <= L_end) {
+        const __m128i v_inc = _mm_setr_epi32(0, 1, 2, 3);
+        const __m128i v_nxt = _mm_set1_epi32((int)nxt);
+        const __m128i v_bias = _mm_set1_epi32((int)0x80000000);
+        const __m128i v_nxt_b = _mm_xor_si128(v_nxt, v_bias);
+        const __m128i v_off = _mm_set1_epi16((short)off_biased);
+        for (; L + 4 <= L_end; L += 4) {
+            const __m128i v_L_lanes = _mm_add_epi32(v_inc, _mm_set1_epi32((int)L));
+            const __m128i v_dp = _mm_loadu_si128((const __m128i*)&dp[p + L]);
+            /* Unsigned compare via sign-bit bias (SSE2 cmpgt is signed only):
+             *   (dp ^ 0x80000000) > (nxt ^ 0x80000000)  iff  dp > nxt. */
+            const __m128i v_dp_b = _mm_xor_si128(v_dp, v_bias);
+            const __m128i v_mask = _mm_cmpgt_epi32(v_dp_b, v_nxt_b);
+            const __m128i v_dp_new = zxc_mm_blendv_epi8_sse2(v_dp, v_nxt, v_mask);
+            _mm_storeu_si128((__m128i*)&dp[p + L], v_dp_new);
+            /* Narrow the 4x int32 mask / length lanes to 4x int16 (low 64 bits).
+             * packs: 0xFFFFFFFF -> 0xFFFF, 0 -> 0; packus (SSE2-emulated): u32->u16. */
+            const __m128i v_mask16 = _mm_packs_epi32(v_mask, v_mask);
+            const __m128i v_L_u16 = zxc_mm_packus_epi32_sse2(v_L_lanes, v_L_lanes);
+            __m128i v_pl = _mm_loadl_epi64((const __m128i*)&parent_len[p + L]);
+            v_pl = zxc_mm_blendv_epi8_sse2(v_pl, v_L_u16, v_mask16);
+            _mm_storel_epi64((__m128i*)&parent_len[p + L], v_pl);
+            __m128i v_po = _mm_loadl_epi64((const __m128i*)&parent_off[p + L]);
+            v_po = zxc_mm_blendv_epi8_sse2(v_po, v_off, v_mask16);
+            _mm_storel_epi64((__m128i*)&parent_off[p + L], v_po);
         }
     }
 #endif
@@ -1398,6 +1528,17 @@ parse_done:;
                 }
                 p += 32;
             }
+#elif defined(ZXC_USE_SSE2)
+            const __m128i vb = _mm_set1_epi8((char)b);
+            while (p <= p_end - 16) {
+                const __m128i v = _mm_loadu_si128((const __m128i*)p);
+                const uint32_t mask = (uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(v, vb));
+                if (mask != 0xFFFFU) {
+                    p += zxc_ctz32(~mask);
+                    goto _run_done;
+                }
+                p += 16;
+            }
 #elif defined(ZXC_USE_NEON64)
             const uint8x16_t vb = vdupq_n_u8(b);
             while (p <= p_end - 16) {
@@ -1446,7 +1587,7 @@ parse_done:;
             while (p < p_end && *p == b) p++;
 
 #if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || \
-    defined(ZXC_USE_NEON32)
+    defined(ZXC_USE_NEON32) || defined(ZXC_USE_SSE2)
         _run_done:;
 #endif
             const size_t run = (size_t)(p - run_start);
@@ -1496,6 +1637,22 @@ parse_done:;
                         goto _lit_done;
                     }
                     p += 32;
+                }
+#elif defined(ZXC_USE_SSE2)
+                while (p <= p_end_4 - 16) {
+                    __m128i v0 = _mm_loadu_si128((const __m128i*)p);
+                    __m128i v1 = _mm_loadu_si128((const __m128i*)(p + 1));
+                    __m128i v2 = _mm_loadu_si128((const __m128i*)(p + 2));
+                    __m128i v3 = _mm_loadu_si128((const __m128i*)(p + 3));
+                    __m128i vend = _mm_and_si128(
+                        _mm_cmpeq_epi8(v0, v1),
+                        _mm_and_si128(_mm_cmpeq_epi8(v1, v2), _mm_cmpeq_epi8(v2, v3)));
+                    uint32_t mask = (uint32_t)_mm_movemask_epi8(vend);
+                    if (mask != 0) {
+                        p += zxc_ctz32(mask);
+                        goto _lit_done;
+                    }
+                    p += 16;
                 }
 #elif defined(ZXC_USE_NEON64)
                 while (p <= p_end_4 - 16) {
@@ -1561,7 +1718,7 @@ parse_done:;
                 }
 
 #if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || \
-    defined(ZXC_USE_NEON32)
+    defined(ZXC_USE_NEON32) || defined(ZXC_USE_SSE2)
             _lit_done:;
 #endif
                 const size_t lit_run = (size_t)(p - lit_start);

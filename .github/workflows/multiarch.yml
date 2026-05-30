@@ -167,6 +167,12 @@ jobs:
             cross_prefix: x86_64-linux-gnu
             cmake_processor: x86_64
             qemu_binary: qemu-x86_64
+          - name: Linux amd64 (SSE2)
+            cross_pkg: gcc
+            cross_prefix: x86_64-linux-gnu
+            cmake_processor: x86_64
+            qemu_binary: qemu-x86_64
+            qemu_cpu: core2duo
           - name: Linux amd64 (AVX2)
             cross_pkg: gcc
             cross_prefix: x86_64-linux-gnu

@@ -65,6 +65,12 @@ int zxc_decompress_chunk_wrapper_safe_avx2(zxc_cctx_t* RESTRICT ctx, const uint8
 int zxc_decompress_chunk_wrapper_safe_avx512(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                              const size_t src_sz, uint8_t* RESTRICT dst,
                                              const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_sse2(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                      const size_t src_sz, uint8_t* RESTRICT dst,
+                                      const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_safe_sse2(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                           const size_t src_sz, uint8_t* RESTRICT dst,
+                                           const size_t dst_cap);
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
 int zxc_decompress_chunk_wrapper_neon(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
@@ -99,6 +105,9 @@ int zxc_compress_chunk_wrapper_avx2(zxc_cctx_t* RESTRICT ctx, const uint8_t* RES
 int zxc_compress_chunk_wrapper_avx512(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap);
+int zxc_compress_chunk_wrapper_sse2(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                    const size_t src_sz, uint8_t* RESTRICT dst,
+                                    const size_t dst_cap);
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
 int zxc_compress_chunk_wrapper_neon(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                     const size_t src_sz, uint8_t* RESTRICT dst,
@@ -119,7 +128,8 @@ typedef enum {
     ZXC_CPU_GENERIC = 0, /**< @brief Scalar-only fallback.   */
     ZXC_CPU_AVX2 = 1,    /**< @brief x86-64 AVX2 available.  */
     ZXC_CPU_AVX512 = 2,  /**< @brief x86-64 AVX-512F+BW available. */
-    ZXC_CPU_NEON = 3     /**< @brief ARM NEON available.      */
+    ZXC_CPU_NEON = 3,    /**< @brief ARM NEON available.      */
+    ZXC_CPU_SSE2 = 4     /**< @brief x86 SSE2 available (no AVX2); x86-64 baseline. */
 } zxc_cpu_feature_t;
 
 /**
@@ -140,15 +150,17 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 #if defined(__x86_64__) || defined(_M_X64)
 #if defined(_MSC_VER)
     // MSVC detection using __cpuid
-    // Function ID 1: EAX=1. ECX: Bit 28=AVX.
+    // Function ID 1: EAX=1. EDX: Bit 26=SSE2. ECX: Bit 28=AVX.
     // Function ID 7: EAX=7, ECX=0. EBX: Bit 5=AVX2, Bit 16=AVX512F, Bit 30=AVX512BW.
     int regs[4];
+    int sse2 = 0;
     int avx = 0;
     int avx2 = 0;
     int avx512 = 0;
 
     __cpuid(regs, 1);
-    if (regs[2] & (1 << 28)) avx = 1;
+    if (regs[3] & (1 << 26)) sse2 = 1;  // EDX bit 26 = SSE2
+    if (regs[2] & (1 << 28)) avx = 1;   // ECX bit 28 = AVX
 
     if (avx) {
         __cpuidex(regs, 7, 0);
@@ -160,6 +172,8 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
         features = ZXC_CPU_AVX512;
     } else if (avx2) {
         features = ZXC_CPU_AVX2;
+    } else if (sse2) {
+        features = ZXC_CPU_SSE2;
     }
 #else
     // GCC/Clang built-in detection
@@ -169,6 +183,8 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
         features = ZXC_CPU_AVX512;
     } else if (__builtin_cpu_supports("avx2")) {
         features = ZXC_CPU_AVX2;
+    } else if (__builtin_cpu_supports("sse2")) {
+        features = ZXC_CPU_SSE2;
     }
 #endif
 
@@ -238,6 +254,8 @@ static int zxc_decompress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t*
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_avx512;
     else if (cpu == ZXC_CPU_AVX2)
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_avx2;
+    else if (cpu == ZXC_CPU_SSE2)
+        zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_sse2;
     else
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
@@ -283,6 +301,8 @@ static int zxc_decompress_safe_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uin
         zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_avx512;
     else if (cpu == ZXC_CPU_AVX2)
         zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_avx2;
+    else if (cpu == ZXC_CPU_SSE2)
+        zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_sse2;
     else
         zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_default;
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
@@ -329,6 +349,8 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_avx512;
     else if (cpu == ZXC_CPU_AVX2)
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_avx2;
+    else if (cpu == ZXC_CPU_SSE2)
+        zxc_compress_ptr_local = zxc_compress_chunk_wrapper_sse2;
     else
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_default;
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
