@@ -1335,7 +1335,7 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        size_t dict_cap = 32768;
+        size_t dict_cap = ZXC_DICT_SIZE_MAX;
         if (block_size > 0 && block_size < dict_cap) dict_cap = block_size;
         uint8_t* dict_buf = (uint8_t*)malloc(dict_cap);
         if (!dict_buf) {

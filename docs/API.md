@@ -1300,7 +1300,7 @@ ZXC_EXPORT int64_t zxc_train_dict(
     const size_t*       sample_sizes,
     size_t              n_samples,
     void*               dict_buf,
-    size_t              dict_capacity    // max ZXC_DICT_SIZE_MAX (64 KB)
+    size_t              dict_capacity    // max ZXC_DICT_SIZE_MAX (64KB - 1)
 );
 ```
 
