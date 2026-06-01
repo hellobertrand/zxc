@@ -466,47 +466,38 @@ For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dict
 
 **Typical use cases:** JSON API responses, small game assets, structured logs, key-value store records, RPC messages, and any large but homogeneous corpus compressed in small blocks for random access (e.g. seekable archives).
 
-### Training a dictionary
+The dictionary is **embedded in the archive** — there is no separate dictionary file to manage or ship. Decompression reads it from the archive automatically; nothing extra is needed at decode time.
+
+### Auto-trained dictionary (CLI)
 
 ```bash
-# Train a dictionary from a corpus of similar files
-zxc --train-dict corpus.zxd samples/*.json
+# Train a dictionary from the input and embed it — zero configuration
+zxc -z -S -B 4K --auto-dict input.json
+zxc -d input.json.zxc            # no dictionary needed: it is in the archive
 ```
 
+### Embedding a dictionary via the C API
+
 ```c
-// C API
+// Train a dictionary from representative samples...
 const void* samples[] = { buf1, buf2, buf3 };
 size_t sizes[] = { len1, len2, len3 };
 uint8_t dict[32768];
 int64_t dict_sz = zxc_train_dict(samples, sizes, 3, dict, sizeof(dict));
-```
 
-### Compressing with a dictionary
-
-```bash
-# CLI
-zxc -z -D corpus.zxd input.json
-zxc -d -D corpus.zxd input.json.zxc
-```
-
-```c
-// C API — compression
+// ...then pass it to the compressor: it is embedded in the archive.
 zxc_compress_opts_t copts = {
     .level = ZXC_LEVEL_DEFAULT,
-    .dict = dict_content,
-    .dict_size = dict_sz,
+    .dict = dict,
+    .dict_size = (size_t)dict_sz,
 };
 int64_t compressed_size = zxc_compress(src, src_size, dst, dst_cap, &copts);
 
-// C API — decompression (same dictionary required)
-zxc_decompress_opts_t dopts = {
-    .dict = dict_content,
-    .dict_size = dict_sz,
-};
-int64_t original_size = zxc_decompress(compressed, comp_size, out, out_cap, &dopts);
+// Decompression needs no dictionary — it is read from the archive.
+int64_t original_size = zxc_decompress(compressed, comp_size, out, out_cap, NULL);
 ```
 
-The dictionary is stored as an external `.zxd` file and referenced by a 32-bit ID in the ZXC file header. Decompressing without the matching dictionary returns `ZXC_ERROR_DICT_REQUIRED` or `ZXC_ERROR_DICT_MISMATCH`. See [FORMAT.md](docs/FORMAT.md) §12 for the full specification.
+The dictionary is stored as a `ZXC_BLOCK_DICT` block right after the file header (flagged by `HAS_DICTIONARY`). A corrupted or mismatched embedded dictionary surfaces as `ZXC_ERROR_DICT_MISMATCH`. See [FORMAT.md](docs/FORMAT.md) §12 for the full specification.
 
 ---
 

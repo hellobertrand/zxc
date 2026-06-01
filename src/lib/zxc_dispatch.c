@@ -690,7 +690,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
-    const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
+    size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
 
     const uint8_t* ip = (const uint8_t*)src;
     const uint8_t* ip_end = ip + src_size;
@@ -709,20 +709,42 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         return ZXC_ERROR_BAD_HEADER;
     }
 
-    /* Dictionary validation */
+    ip += ZXC_FILE_HEADER_SIZE;
+
+    /* Dictionary handling. When the archive needs a dictionary it is normally
+     * embedded as a ZXC_BLOCK_DICT block right after the header; detect it by
+     * type and use it (skipping the block). Otherwise the caller must supply a
+     * matching in-memory dictionary. */
     if (header_dict_id != 0) {
-        if (!dict || dict_size == 0) {
-            zxc_cctx_free(&ctx);
-            return ZXC_ERROR_DICT_REQUIRED;
-        }
-        if (zxc_dict_id(dict, dict_size) != header_dict_id) {
-            zxc_cctx_free(&ctx);
-            return ZXC_ERROR_DICT_MISMATCH;
+        zxc_block_header_t dbh;
+        if ((size_t)(ip_end - ip) >= ZXC_BLOCK_HEADER_SIZE &&
+            zxc_read_block_header(ip, ZXC_BLOCK_HEADER_SIZE, &dbh) == ZXC_OK &&
+            dbh.block_type == ZXC_BLOCK_DICT) {
+            if (dbh.comp_size == 0 || dbh.comp_size > ZXC_DICT_SIZE_MAX ||
+                (size_t)(ip_end - ip) < ZXC_BLOCK_HEADER_SIZE + dbh.comp_size) {
+                zxc_cctx_free(&ctx);
+                return ZXC_ERROR_BAD_HEADER;
+            }
+            const uint8_t* edict = ip + ZXC_BLOCK_HEADER_SIZE;
+            if (zxc_dict_id(edict, dbh.comp_size) != header_dict_id) {
+                zxc_cctx_free(&ctx);
+                return ZXC_ERROR_DICT_MISMATCH;
+            }
+            dict = edict;
+            dict_size = dbh.comp_size;
+            ip += ZXC_BLOCK_HEADER_SIZE + dbh.comp_size; /* skip the embedded dict block */
+        } else {
+            if (!dict || dict_size == 0) {
+                zxc_cctx_free(&ctx);
+                return ZXC_ERROR_DICT_REQUIRED;
+            }
+            if (zxc_dict_id(dict, dict_size) != header_dict_id) {
+                zxc_cctx_free(&ctx);
+                return ZXC_ERROR_DICT_MISMATCH;
+            }
         }
     }
     ctx.dict_size = dict_size;
-
-    ip += ZXC_FILE_HEADER_SIZE;
 
     const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
 
@@ -1064,9 +1086,15 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     int file_has_checksums = 0;
     uint32_t global_hash = 0;
 
+    uint32_t header_dict_id = 0;
     if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
-                                      NULL) != ZXC_OK))
+                                      &header_dict_id) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
+
+    /* The static (malloc-free) decode path does not support dictionaries, which
+     * need a heap-allocated decode buffer. Reject such archives up front rather
+     * than misinterpreting the embedded dictionary block as data. */
+    if (UNLIKELY(header_dict_id != 0)) return ZXC_ERROR_DICT_REQUIRED;
 
     /* Static dctx: block_size is locked at workspace init; reject any
      * archive whose declared block_size would require a re-partition. */

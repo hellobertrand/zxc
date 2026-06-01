@@ -1290,7 +1290,7 @@ Returns the encoded byte size of a seek table for `num_blocks` blocks.
 
 ## 11b. Dictionary API
 
-Declared in `<zxc_dict.h>`. Provides dictionary training, serialization (`.zxd` format), and identification.
+Declared in `<zxc_dict.h>`. Provides dictionary training and identification. A trained dictionary is passed to the compressor (`zxc_compress_opts_t::dict`) and embedded in the archive; there is no standalone dictionary file format.
 
 ### `zxc_train_dict`
 
@@ -1312,38 +1312,7 @@ Trains a dictionary from a corpus of representative samples. Returns the size of
 ZXC_EXPORT uint32_t zxc_dict_id(const void* dict, size_t dict_size);
 ```
 
-Returns a deterministic 32-bit hash of the dictionary content. This ID is stored in the ZXC file header and verified at decompression time. Returns 0 for NULL/empty input.
-
-### `zxc_dict_save`
-
-```c
-ZXC_EXPORT int64_t zxc_dict_save(
-    const void* content, size_t content_size,
-    void* buf, size_t buf_capacity
-);
-```
-
-Serializes dictionary content to the `.zxd` file format. Use `zxc_dict_save_bound(content_size)` to compute the required buffer capacity.
-
-### `zxc_dict_load`
-
-```c
-ZXC_EXPORT int zxc_dict_load(
-    const void* buf, size_t buf_size,
-    const void** content_out, size_t* content_size_out,
-    uint32_t* dict_id_out        // may be NULL
-);
-```
-
-Validates and parses a `.zxd` file from memory. On success, `content_out` points into the input buffer (zero-copy). Returns `ZXC_OK` or a negative error code.
-
-### `zxc_dict_save_bound`
-
-```c
-ZXC_EXPORT size_t zxc_dict_save_bound(size_t content_size);
-```
-
-Returns the maximum `.zxd` file size for a given content size (`ZXC_DICT_HEADER_SIZE + content_size`).
+Returns a deterministic 32-bit hash of the dictionary content. This ID is stored in the ZXC file header and verified against the embedded dictionary at decompression time. Returns 0 for NULL/empty input.
 
 ### `zxc_seekable_set_dict`
 
@@ -1453,10 +1422,7 @@ The shared library exports **47 symbols** (verified with `nm -gU`):
 | 51 | `zxc_error_name` | Error | `zxc_error.h` |
 | 52 | `zxc_train_dict` | Dictionary | `zxc_dict.h` |
 | 53 | `zxc_dict_id` | Dictionary | `zxc_dict.h` |
-| 54 | `zxc_dict_save` | Dictionary | `zxc_dict.h` |
-| 55 | `zxc_dict_load` | Dictionary | `zxc_dict.h` |
-| 56 | `zxc_dict_save_bound` | Dictionary | `zxc_dict.h` |
-| 57 | `zxc_seekable_set_dict` | Seekable | `zxc_seekable.h` |
+| 54 | `zxc_seekable_set_dict` | Seekable | `zxc_seekable.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon`, `_avx2`, `_avx512`) are compiled with

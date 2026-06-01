@@ -890,36 +890,25 @@ else
     log_fail "List command on seekable archive failed"
 fi
 
-# 25. Dictionary Tests (-D)
-echo "Testing Dictionary (-D)..."
+# 25. Dictionary Tests (--auto-dict, embedded)
+echo "Testing Dictionary (--auto-dict)..."
 
-# 25.1 Train a dictionary using --train-dict
-echo "  Training dictionary from test data..."
-# Create a few sample files for training
-for i in 1 2 3 4 5; do
-    cp "$TEST_FILE" "$TEST_DIR/sample_${i}.txt"
-done
-DICT_FILE="$TEST_DIR/test.zxd"
-"$ZXC_BIN" --train-dict "$DICT_FILE" "$TEST_DIR"/sample_*.txt 2>/dev/null
-if [ ! -f "$DICT_FILE" ]; then
-    log_fail "Dictionary training failed"
-fi
-log_pass "Dictionary trained via --train-dict"
-
-# 25.2 Round-trip with dictionary
-echo "  Testing dict round-trip..."
-"$ZXC_BIN" -3 -D "$DICT_FILE" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict.zxc"
+# 25.1 Round-trip with an auto-trained, embedded dictionary.
+# The dictionary is trained from the input and stored in the archive; no
+# external dictionary file is needed at decompression.
+echo "  Testing auto-dict round-trip (small blocks)..."
+"$ZXC_BIN" -3 -B 4K --auto-dict -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict.zxc"
 if [ ! -s "$TEST_DIR/test_dict.zxc" ]; then
-    log_fail "Dict compression failed"
+    log_fail "Auto-dict compression failed"
 fi
-"$ZXC_BIN" -d -D "$DICT_FILE" -c "$TEST_DIR/test_dict.zxc" > "$TEST_DIR/test_dict.dec"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_dict.zxc" > "$TEST_DIR/test_dict.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/test_dict.dec"; then
-    log_pass "Dict round-trip (-D)"
+    log_pass "Auto-dict round-trip (no external dict at decode)"
 else
-    log_fail "Dict round-trip content mismatch"
+    log_fail "Auto-dict round-trip content mismatch"
 fi
 
-# 25.3 List shows dict_id
+# 25.2 List shows dict_id for an embedded-dict archive
 echo "  Testing list with dict_id..."
 OUT=$("$ZXC_BIN" -l "$TEST_DIR/test_dict.zxc")
 if [[ "$OUT" == *"Dict ID"* ]] && [[ "$OUT" == *"0x"* ]]; then
@@ -928,7 +917,7 @@ else
     log_fail "List should show dict_id column with 0x value"
 fi
 
-# 25.4 List without dict shows dash
+# 25.3 List without dict shows dash
 echo "  Testing list without dict shows dash..."
 "$ZXC_BIN" -3 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_nodict2.zxc"
 OUT=$("$ZXC_BIN" -l "$TEST_DIR/test_nodict2.zxc")
@@ -938,7 +927,7 @@ else
     log_fail "List without dict should show dash in Dict ID column"
 fi
 
-# 25.5 JSON list shows dict_id field
+# 25.4 JSON list shows dict_id field
 echo "  Testing JSON list with dict_id..."
 JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_DIR/test_dict.zxc")
 if [[ "$JSON_OUT" == *'"dict_id"'* ]] && [[ "$JSON_OUT" == *"0x"* ]]; then
@@ -947,54 +936,29 @@ else
     log_fail "JSON list should contain dict_id field"
 fi
 
-# 25.6 Decompression without dict should fail
-echo "  Testing decompress without required dict..."
-set +e
-"$ZXC_BIN" -d -c "$TEST_DIR/test_dict.zxc" > /dev/null 2>&1
-RET=$?
-set -e
-if [ $RET -ne 0 ]; then
-    log_pass "Decompress without dict correctly fails"
-else
-    log_fail "Decompress without required dict should fail"
-fi
-
-# 25.7 Dict with seekable
-echo "  Testing dict + seekable (-D -S)..."
-"$ZXC_BIN" -3 -D "$DICT_FILE" -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict_seek.zxc"
-"$ZXC_BIN" -d -D "$DICT_FILE" -c "$TEST_DIR/test_dict_seek.zxc" > "$TEST_DIR/test_dict_seek.dec"
+# 25.5 Auto-dict + seekable
+echo "  Testing auto-dict + seekable (--auto-dict -S)..."
+"$ZXC_BIN" -3 -B 4K --auto-dict -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict_seek.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/test_dict_seek.zxc" > "$TEST_DIR/test_dict_seek.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/test_dict_seek.dec"; then
-    log_pass "Dict + seekable (-D -S)"
+    log_pass "Auto-dict + seekable"
 else
-    log_fail "Dict + seekable round-trip failed"
+    log_fail "Auto-dict + seekable round-trip failed"
 fi
 
-# 25.8 Dict with all levels
-echo "  Testing dict across all levels..."
+# 25.6 Auto-dict across all levels
+echo "  Testing auto-dict across all levels..."
 DICT_ALL_OK=1
 for LEVEL in 1 2 3 4 5 6; do
-    "$ZXC_BIN" -$LEVEL -D "$DICT_FILE" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict_lvl${LEVEL}.zxc"
-    "$ZXC_BIN" -d -D "$DICT_FILE" -c "$TEST_DIR/test_dict_lvl${LEVEL}.zxc" > "$TEST_DIR/test_dict_lvl${LEVEL}.dec"
+    "$ZXC_BIN" -$LEVEL -B 4K --auto-dict -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict_lvl${LEVEL}.zxc"
+    "$ZXC_BIN" -d -c "$TEST_DIR/test_dict_lvl${LEVEL}.zxc" > "$TEST_DIR/test_dict_lvl${LEVEL}.dec"
     if ! cmp -s "$TEST_FILE" "$TEST_DIR/test_dict_lvl${LEVEL}.dec"; then
         DICT_ALL_OK=0
-        log_fail "Dict level $LEVEL round-trip failed"
+        log_fail "Auto-dict level $LEVEL round-trip failed"
     fi
 done
 if [ "$DICT_ALL_OK" -eq 1 ]; then
-    log_pass "Dict across all levels (1-6)"
-fi
-
-# 25.9 Invalid dict file should fail
-echo "  Testing invalid dict file..."
-echo "not a valid dict" > "$TEST_DIR/bad.zxd"
-set +e
-"$ZXC_BIN" -3 -D "$TEST_DIR/bad.zxd" -c "$TEST_FILE_ARG" > /dev/null 2>&1
-RET=$?
-set -e
-if [ $RET -ne 0 ]; then
-    log_pass "Invalid dict file rejected"
-else
-    log_fail "Invalid dict file should be rejected"
+    log_pass "Auto-dict across all levels (1-6)"
 fi
 
 echo "All tests passed!"
