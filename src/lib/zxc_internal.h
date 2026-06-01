@@ -349,6 +349,12 @@ extern "C" {
 #define ZXC_DICT_KGRAM_LEN ZXC_LZ_MIN_MATCH_LEN
 /** @brief Address bits for the dictionary trainer's k-gram frequency table. */
 #define ZXC_DICT_HT_BITS 16
+/** @brief Maximum number of candidate segments the dictionary trainer keeps. */
+#define ZXC_DICT_MAX_SEGMENTS (1U << 16)
+/** @brief Target number of sampled k-gram positions for the trainer's frequency
+ *  estimate. Bounds the count so 16-bit counters stay unsaturated on large
+ *  corpora; the trainer strides the corpus to hit roughly this many positions. */
+#define ZXC_DICT_FREQ_SAMPLE_TARGET (1U << 19)
 /** @brief Number of buckets in the dictionary trainer's frequency table. */
 #define ZXC_DICT_HT_SIZE (1U << ZXC_DICT_HT_BITS)
 
