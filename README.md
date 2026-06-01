@@ -462,9 +462,9 @@ zxc_compress_opts_t opts = {
 
 ## Dictionary Compression
 
-For workloads consisting of many **small, similar payloads** (< 64 KB each), a pre-trained dictionary dramatically improves compression ratio. The dictionary prefills the LZ77 sliding window at the start of each block, giving the match finder immediate access to representative patterns.
+For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dictionary dramatically improves compression ratio. Because the dictionary prefills the LZ77 sliding window at the *start of each block*, the benefit is per-block: a block only has its own preceding bytes as history, so the smaller the block, the more it leans on the dictionary for representative patterns. This applies whether the input is a single small payload or a large payload split into many small blocks — any time the block size is small enough that early bytes would otherwise lack history to match against.
 
-**Typical use cases:** JSON API responses, small game assets, structured logs, key-value store records, RPC messages.
+**Typical use cases:** JSON API responses, small game assets, structured logs, key-value store records, RPC messages, and any large but homogeneous corpus compressed in small blocks for random access (e.g. seekable archives).
 
 ### Training a dictionary
 
