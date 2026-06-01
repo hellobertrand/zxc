@@ -468,7 +468,7 @@ void print_help(const char* app) {
         "Standard Modes:\n"
         "  -z, --compress    Compress FILE {default}\n"
         "  -d, --decompress  Decompress FILE (or stdin -> stdout)\n"
-        "  -l, --list        List archive information\n"
+        "  -l, --list        List archive or dictionary info\n"
         "  -t, --test        Test compressed FILE integrity\n"
         "  -b, --bench [N]   Benchmark in-memory (N=seconds, default 5)\n"
         "  --train-dict FILE Train a dictionary from input files\n\n"
@@ -617,6 +617,37 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
  * @param[in] json_output If 1, output JSON format.
  * @return 0 on success, 1 on error.
  */
+// Report a .zxd dictionary file: its dict_id (to match against a .zxc's
+// "Dict ID") and content size. `buf` holds the whole .zxd file.
+static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, long long file_size,
+                         int json_output) {
+    const void* content = NULL;
+    size_t content_size = 0;
+    uint32_t id = 0;
+    const int rc = zxc_dict_load(buf, buf_size, &content, &content_size, &id);
+    if (rc != ZXC_OK) {
+        fprintf(stderr, "Error: invalid dictionary '%s': %s\n", path, zxc_error_name(rc));
+        return 1;
+    }
+    if (json_output) {
+        printf("{\n"
+               "  \"type\": \"dictionary\",\n"
+               "  \"filename\": \"%s\",\n"
+               "  \"dict_id\": \"0x%08X\",\n"
+               "  \"content_size_bytes\": %zu,\n"
+               "  \"file_size_bytes\": %lld\n"
+               "}\n",
+               path, id, content_size, file_size);
+    } else {
+        printf("\n  Dictionary file (.zxd)\n"
+               "  Dict ID:       0x%08X\n"
+               "  Content size:  %zu bytes\n"
+               "  File:          %s\n",
+               id, content_size, path);
+    }
+    return 0;
+}
+
 static int zxc_list_archive(const char* path, int json_output) {
     char resolved_path[4096];
     if (zxc_validate_input_path(path, resolved_path, sizeof(resolved_path)) != 0) {
@@ -637,6 +668,29 @@ static int zxc_list_archive(const char* path, int json_output) {
         return 1;
     }
     const long long file_size = ftello(f);
+
+    // A .zxd dictionary file has its own magic word; recognise it and report
+    // its dict_id (for matching against a .zxc's "Dict ID") instead of failing
+    // as a non-archive. The upper bound is the largest possible .zxd file.
+    if (file_size >= (long long)ZXC_DICT_HEADER_SIZE &&
+        file_size <= (long long)zxc_dict_save_bound(ZXC_DICT_SIZE_MAX)) {
+        uint8_t probe[ZXC_DICT_HEADER_SIZE];
+        if (fseeko(f, 0, SEEK_SET) == 0 &&
+            fread(probe, 1, ZXC_DICT_HEADER_SIZE, f) == ZXC_DICT_HEADER_SIZE &&
+            zxc_dict_get_id(probe, ZXC_DICT_HEADER_SIZE) != 0) {
+            uint8_t* dbuf = (uint8_t*)malloc((size_t)file_size);
+            int r = 1;
+            if (dbuf && fseeko(f, 0, SEEK_SET) == 0 &&
+                fread(dbuf, 1, (size_t)file_size, f) == (size_t)file_size)
+                r = zxc_list_dict(path, dbuf, (size_t)file_size, file_size, json_output);
+            else
+                fprintf(stderr, "Error: Cannot read '%s'\n", path);
+            free(dbuf);
+            fclose(f);
+            return r;
+        }
+        fseeko(f, 0, SEEK_SET);
+    }
 
     // Use public API to get decompressed size
     const int64_t uncompressed_size = zxc_stream_get_decompressed_size(f);
@@ -1014,7 +1068,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                         "  Reason: Integrity check failed (corrupted data or invalid checksum)\n");
             }
         } else {
-            zxc_log("Operation failed on %s.\n", in_path ? in_path : "<stdin>");
+            zxc_log("Error: %s: %s\n", in_path ? in_path : "<stdin>", zxc_error_name((int)bytes));
             if (created_out_file) unlink(resolved_out_path);
         }
         overall_ret = 1;
