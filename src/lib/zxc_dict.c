@@ -129,26 +129,34 @@ int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
         return ZXC_ERROR_NULL_INPUT;  // LCOV_EXCL_LINE
     if (UNLIKELY(dict_capacity > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
-    /* Step 1: concatenate samples */
+    /* Step 1: assemble the analysis corpus. The trainer only reads it, so a
+     * single sample is used in place (no copy) -- important since callers often
+     * pass one whole file, which can be hundreds of MB. Multiple samples are
+     * concatenated into an owned buffer (freed via corpus_owned at exit). */
     size_t corpus_size = 0;
     for (size_t i = 0; i < n_samples; i++) corpus_size += sample_sizes[i];
     if (UNLIKELY(corpus_size < ZXC_DICT_KGRAM_LEN)) return ZXC_ERROR_SRC_TOO_SMALL;
 
-    uint8_t* corpus = (uint8_t*)ZXC_MALLOC(corpus_size);
-    if (UNLIKELY(!corpus)) return ZXC_ERROR_MEMORY;
-    {
+    const uint8_t* corpus;
+    uint8_t* corpus_owned = NULL;
+    if (n_samples == 1) {
+        corpus = (const uint8_t*)samples[0];
+    } else {
+        corpus_owned = (uint8_t*)ZXC_MALLOC(corpus_size);
+        if (UNLIKELY(!corpus_owned)) return ZXC_ERROR_MEMORY;
         size_t pos = 0;
         for (size_t i = 0; i < n_samples; i++) {
-            if (sample_sizes[i] > 0) ZXC_MEMCPY(corpus + pos, samples[i], sample_sizes[i]);
+            if (sample_sizes[i] > 0) ZXC_MEMCPY(corpus_owned + pos, samples[i], sample_sizes[i]);
             pos += sample_sizes[i];
         }
+        corpus = corpus_owned;
     }
 
     /* Step 2: count k-gram frequencies */
     uint16_t* freq = (uint16_t*)ZXC_MALLOC(ZXC_DICT_HT_SIZE * sizeof(uint16_t));
     if (UNLIKELY(!freq)) {
         // LCOV_EXCL_START
-        ZXC_FREE(corpus);
+        ZXC_FREE(corpus_owned);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
@@ -180,7 +188,7 @@ int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
     if (UNLIKELY(!segs)) {
         // LCOV_EXCL_START
         ZXC_FREE(freq);
-        ZXC_FREE(corpus);
+        ZXC_FREE(corpus_owned);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
@@ -214,7 +222,7 @@ int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
         ZXC_MEMCPY(dict_buf, corpus + corpus_size - copy, copy);
         ZXC_FREE(freq);
         ZXC_FREE(segs);
-        ZXC_FREE(corpus);
+        ZXC_FREE(corpus_owned);
         return (int64_t)copy;
     }
 
@@ -278,6 +286,6 @@ int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
     }
 
     ZXC_FREE(segs);
-    ZXC_FREE(corpus);
+    ZXC_FREE(corpus_owned);
     return (int64_t)filled;
 }

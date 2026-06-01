@@ -737,9 +737,9 @@ static int zxc_list_archive(const char* path, int json_output) {
     return 0;
 }
 
-// --auto-dict: train a dictionary from (a bounded prefix of) the input file and
-// return it as a malloc'd buffer (caller frees), sized to the block size. The
-// trained dict is meant to be embedded in the archive. Returns NULL on failure.
+// --auto-dict: train a dictionary from the whole input file and return it as a
+// malloc'd buffer (caller frees), sized to the block size. The trained dict is
+// meant to be embedded in the archive. Returns NULL on failure.
 static void* cli_auto_train_dict(const char* path, size_t block_size, size_t* out_size) {
     *out_size = 0;
     FILE* f = fopen(path, "rb");
@@ -751,20 +751,22 @@ static void* cli_auto_train_dict(const char* path, size_t block_size, size_t* ou
         fclose(f);
         return NULL;
     }
-    /* Train on up to 16 MB of the input; the trainer samples across it. */
-    const size_t cap = (size_t)16u << 20;
-    const size_t corpus_sz = ((size_t)fsz < cap) ? (size_t)fsz : cap;
+    /* Train on the whole file as a single sample (same as the external
+     * --train-dict workflow used to). The trainer samples k-gram frequencies
+     * representatively across the corpus internally (see ZXC_DICT_FREQ_SAMPLE_
+     * TARGET), so the full input can be fed without analysing every byte. */
+    const size_t corpus_sz = (size_t)fsz;
     uint8_t* corpus = (uint8_t*)malloc(corpus_sz);
     if (!corpus) {
         fclose(f);
         return NULL;
     }
-    const size_t got = fread(corpus, 1, corpus_sz, f);
-    fclose(f);
-    if (got != corpus_sz) {
+    if (fread(corpus, 1, corpus_sz, f) != corpus_sz) {
         free(corpus);
+        fclose(f);
         return NULL;
     }
+    fclose(f);
     size_t dict_cap = ZXC_DICT_SIZE_MAX;
     if (block_size > 0 && block_size < dict_cap) dict_cap = block_size;
     uint8_t* dict = (uint8_t*)malloc(dict_cap);
