@@ -236,17 +236,27 @@ int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
     }
     ZXC_MEMSET(freq, 0, ZXC_DICT_HT_SIZE * sizeof(uint16_t));
 
+    /* Count k-gram frequencies on a representative sample of positions, not all
+     * of them: counting a large corpus in full saturates the 16-bit counters,
+     * so the segment-extension test never stops and segments balloon into
+     * filler. Sampling keeps counts unsaturated and spread across the corpus. */
     const size_t kgram_limit = corpus_size - ZXC_DICT_KGRAM_LEN + 1;
-    for (size_t i = 0; i < kgram_limit; i++) {
+    size_t freq_stride = kgram_limit / ZXC_DICT_FREQ_SAMPLE_TARGET;
+    if (freq_stride < 1) freq_stride = 1;
+    for (size_t i = 0; i < kgram_limit; i += freq_stride) {
         const uint32_t h = zxc_dict_hash(corpus + i);
         if (freq[h] < UINT16_MAX) freq[h]++;
     }
 
-    /* Step 3: build candidate segments. Stride by the k-gram length so
-     * candidate starts don't overlap; each segment is scored by its coverage. */
-    const size_t stride = ZXC_DICT_KGRAM_LEN;
-    const size_t max_segs = corpus_size / stride;
-    const size_t seg_alloc = (max_segs < 65536) ? max_segs : 65536;
+    /* Step 3: build candidate segments, each scored by its coverage. Spread the
+     * candidate starts across the whole corpus: a fixed k-gram stride exhausts
+     * the segment budget within the prefix, leaving a large input's later
+     * content unseen. Segments still extend k-gram by k-gram, so they stay
+     * contiguous. */
+    const size_t max_segs = corpus_size / ZXC_DICT_KGRAM_LEN;
+    const size_t seg_alloc = (max_segs < ZXC_DICT_MAX_SEGMENTS) ? max_segs : ZXC_DICT_MAX_SEGMENTS;
+    size_t stride = ZXC_DICT_KGRAM_LEN;
+    if (seg_alloc > 0 && corpus_size / seg_alloc > stride) stride = corpus_size / seg_alloc;
 
     zxc_dict_seg_t* segs = (zxc_dict_seg_t*)ZXC_MALLOC(seg_alloc * sizeof(zxc_dict_seg_t));
     if (UNLIKELY(!segs)) {
