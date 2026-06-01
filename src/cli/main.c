@@ -299,7 +299,7 @@ static int zxc_validate_output_path(const char* path, char* resolved_buffer, siz
 // CLI Logging Helpers
 static int g_quiet = 0;
 static int g_verbose = 0;
-static int g_auto_dict = 0; /* --auto-dict: train a dictionary from the input and embed it */
+static int g_auto_dict = 0;
 
 /**
  * @brief Standard logging function. Respects the global quiet flag.
@@ -968,7 +968,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                            .total_size = total_size};
 
     /* --auto-dict: train a dictionary from the input and embed it (compress
-     * only, and only for a real file — a pipe cannot be re-read to train). */
+     * only, and only for a real file: a pipe cannot be re-read to train). */
     const void* eff_dict = dict;
     size_t eff_dict_size = dict_size;
     void* auto_dict_buf = NULL;

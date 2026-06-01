@@ -83,7 +83,7 @@ int test_static_ctx_roundtrip_all_levels(void) {
         }
 
         /* Size + init the dctx workspace. */
-        const size_t dctx_ws_sz = zxc_static_dctx_workspace_size(block_size);
+        const size_t dctx_ws_sz = zxc_static_dctx_workspace_size(block_size, 0);
         if (dctx_ws_sz == 0) {
             printf("  [FAIL] level %d: dctx_ws_sz == 0\n", lvl);
             goto fail;
@@ -93,7 +93,7 @@ int test_static_ctx_roundtrip_all_levels(void) {
             printf("  [FAIL] level %d: aligned_alloc(dctx_ws)\n", lvl);
             goto fail;
         }
-        zxc_dctx* const dctx = zxc_init_static_dctx(dctx_ws, dctx_ws_sz, block_size);
+        zxc_dctx* const dctx = zxc_init_static_dctx(dctx_ws, dctx_ws_sz, block_size, 0);
         if (!dctx) {
             printf("  [FAIL] level %d: zxc_init_static_dctx returned NULL\n", lvl);
             test_aligned_free(dctx_ws);
@@ -135,7 +135,7 @@ int test_static_ctx_size_query(void) {
         printf("  [FAIL] cctx_size(0) should be 0\n");
         return 0;
     }
-    if (zxc_static_dctx_workspace_size(0) != 0) {
+    if (zxc_static_dctx_workspace_size(0, 0) != 0) {
         printf("  [FAIL] dctx_size(0) should be 0\n");
         return 0;
     }
@@ -269,7 +269,7 @@ int test_static_ctx_null_inputs(void) {
         printf("  [FAIL] init_static_cctx(NULL opts) should fail\n");
         return 0;
     }
-    if (zxc_init_static_dctx(NULL, 65536, 4096) != NULL) {
+    if (zxc_init_static_dctx(NULL, 65536, 4096, 0) != NULL) {
         printf("  [FAIL] init_static_dctx(NULL workspace) should fail\n");
         return 0;
     }

@@ -1053,6 +1053,12 @@ struct zxc_dctx_s {
     int owns_workspace;     /* 0 = library-allocated (free in zxc_free_dctx),
                                1 = caller-supplied static workspace (no-op free,
                                block_size pinned at init) */
+    /* Dictionary decode bounce buffer [dict | decode_space]. For a static dctx
+       this points into the caller's workspace (sized via max_dict_size at init).
+       For a dynamic dctx it is lazily heap-allocated on the first dict archive
+       and freed in zxc_free_dctx. NULL/0 until needed. */
+    uint8_t* dict_work;
+    size_t dict_work_cap;
 };
 
 zxc_dctx* zxc_create_dctx(void) {
@@ -1066,6 +1072,7 @@ void zxc_free_dctx(zxc_dctx* dctx) {
      * which we do not own. Free is a no-op; the caller owns the workspace. */
     if (dctx->owns_workspace) return;
     if (dctx->initialized) zxc_cctx_free(&dctx->inner);
+    ZXC_FREE(dctx->dict_work); /* lazily-allocated dict bounce buffer (dynamic dctx only) */
     ZXC_FREE(dctx);
 }
 
@@ -1090,11 +1097,6 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
                                       &header_dict_id) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
-
-    /* The static (malloc-free) decode path does not support dictionaries, which
-     * need a heap-allocated decode buffer. Reject such archives up front rather
-     * than misinterpreting the embedded dictionary block as data. */
-    if (UNLIKELY(header_dict_id != 0)) return ZXC_ERROR_DICT_REQUIRED;
 
     /* Static dctx: block_size is locked at workspace init; reject any
      * archive whose declared block_size would require a re-partition. */
@@ -1128,6 +1130,41 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
      * it stays in sync when chunk_size changes between calls. */
     const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
 
+    /* Dictionary: when present it is embedded as a ZXC_BLOCK_DICT block right
+     * after the header. Decode into a [dict | decode_space] bounce buffer so
+     * dict back-references resolve. The buffer is the caller's reserved
+     * workspace region (static dctx, sized via max_dict_size) or a buffer the
+     * dynamic dctx allocates once and keeps. */
+    size_t emb_dict_size = 0;
+    if (header_dict_id != 0) {
+        zxc_block_header_t dbh;
+        if ((size_t)(ip_end - ip) < ZXC_BLOCK_HEADER_SIZE ||
+            zxc_read_block_header(ip, ZXC_BLOCK_HEADER_SIZE, &dbh) != ZXC_OK ||
+            dbh.block_type != ZXC_BLOCK_DICT)
+            return ZXC_ERROR_DICT_REQUIRED; /* no embedded dictionary to decode with */
+        if (dbh.comp_size == 0 || dbh.comp_size > ZXC_DICT_SIZE_MAX ||
+            (size_t)(ip_end - ip) < ZXC_BLOCK_HEADER_SIZE + dbh.comp_size)
+            return ZXC_ERROR_BAD_HEADER;
+        const uint8_t* const edict = ip + ZXC_BLOCK_HEADER_SIZE;
+        if (zxc_dict_id(edict, dbh.comp_size) != header_dict_id) return ZXC_ERROR_DICT_MISMATCH;
+
+        const size_t need = (size_t)dbh.comp_size + work_sz;
+        if (dctx->dict_work_cap < need) {
+            /* Static workspace can't grow: the caller must reserve enough via
+             * max_dict_size. Dynamic dctx allocates (and keeps) the buffer. */
+            if (dctx->owns_workspace) return ZXC_ERROR_DICT_TOO_LARGE;
+            uint8_t* const nb = (uint8_t*)ZXC_MALLOC(need);
+            if (UNLIKELY(!nb)) return ZXC_ERROR_MEMORY;
+            ZXC_FREE(dctx->dict_work);
+            dctx->dict_work = nb;
+            dctx->dict_work_cap = need;
+        }
+        ZXC_MEMCPY(dctx->dict_work, edict, dbh.comp_size);
+        emb_dict_size = dbh.comp_size;
+        ip += ZXC_BLOCK_HEADER_SIZE + dbh.comp_size; /* skip the embedded dict block */
+    }
+    ctx->dict_size = emb_dict_size;
+
     while (ip < ip_end) {
         const size_t rem_src = (size_t)(ip_end - ip);
         zxc_block_header_t bh;
@@ -1151,7 +1188,16 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 
         const size_t rem_cap = (size_t)(op_end - op);
         int res;
-        if (LIKELY(rem_cap >= work_sz)) {
+        if (emb_dict_size > 0) {
+            // Dict path: decode into the [dict | decode_space] bounce buffer so
+            // match copies referencing dictionary bytes resolve, then copy out.
+            res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, dctx->dict_work + emb_dict_size,
+                                               work_sz);
+            if (LIKELY(res > 0)) {
+                if (UNLIKELY((size_t)res > rem_cap)) return ZXC_ERROR_DST_TOO_SMALL;
+                ZXC_MEMCPY(op, dctx->dict_work + emb_dict_size, (size_t)res);
+            }
+        } else if (LIKELY(rem_cap >= work_sz)) {
             // Fast path: decode directly into dst (enough padding for wild copies).
             res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, op, rem_cap);
         } else {
@@ -1427,21 +1473,33 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
     return cctx;
 }
 
-size_t zxc_static_dctx_workspace_size(const size_t block_size) {
+/* Bytes reserved for the dictionary decode bounce buffer when a static dctx is
+ * built to support embedded dictionaries up to `max_dict_size`. 0 disables it.
+ * Layout is [dict (<= max_dict_size) | decode_space (block + TAIL_PAD)]. */
+static size_t zxc_static_dctx_dict_region(const size_t block_size, const size_t max_dict_size) {
+    if (max_dict_size == 0) return 0;
+    return ZXC_ALIGN_CL(max_dict_size + block_size + ZXC_DECOMPRESS_TAIL_PAD);
+}
+
+size_t zxc_static_dctx_workspace_size(const size_t block_size, const size_t max_dict_size) {
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return 0;
+    if (UNLIKELY(max_dict_size > ZXC_DICT_SIZE_MAX)) return 0;
     const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 0, 0);
     if (UNLIKELY(inner_sz == 0)) return 0;
-    return ZXC_STATIC_DCTX_HDR_SIZE + inner_sz;
+    return ZXC_STATIC_DCTX_HDR_SIZE + inner_sz +
+           zxc_static_dctx_dict_region(block_size, max_dict_size);
 }
 
 zxc_dctx* zxc_init_static_dctx(void* RESTRICT workspace, const size_t workspace_size,
-                               const size_t block_size) {
+                               const size_t block_size, const size_t max_dict_size) {
     if (UNLIKELY(!workspace)) return NULL;
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return NULL;
+    if (UNLIKELY(max_dict_size > ZXC_DICT_SIZE_MAX)) return NULL;
 
     const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 0, 0);
     if (UNLIKELY(inner_sz == 0)) return NULL;
-    if (UNLIKELY(workspace_size < ZXC_STATIC_DCTX_HDR_SIZE + inner_sz)) return NULL;
+    const size_t dict_region = zxc_static_dctx_dict_region(block_size, max_dict_size);
+    if (UNLIKELY(workspace_size < ZXC_STATIC_DCTX_HDR_SIZE + inner_sz + dict_region)) return NULL;
 
     zxc_dctx* const dctx = (zxc_dctx*)workspace;
     ZXC_MEMSET(dctx, 0, sizeof(*dctx));
@@ -1453,6 +1511,10 @@ zxc_dctx* zxc_init_static_dctx(void* RESTRICT workspace, const size_t workspace_
                                             0) != ZXC_OK))
         return NULL;
 
+    if (dict_region > 0) {
+        dctx->dict_work = inner_ws + inner_sz;
+        dctx->dict_work_cap = dict_region;
+    }
     dctx->owns_workspace = 1;
     dctx->initialized = 1;
     dctx->last_block_size = block_size;

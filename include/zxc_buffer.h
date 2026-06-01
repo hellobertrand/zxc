@@ -573,11 +573,17 @@ ZXC_EXPORT zxc_cctx* zxc_init_static_cctx(void* workspace, const size_t workspac
  * the decoder cannot predict the per-block literal encoding until it sees
  * each block header.
  *
- * @param[in] block_size  Maximum block size the decoder will encounter
- *                        (must satisfy the regular block-size constraints).
- * @return Workspace size in bytes, or 0 if @p block_size is invalid.
+ * @param[in] block_size     Maximum block size the decoder will encounter
+ *                           (must satisfy the regular block-size constraints).
+ * @param[in] max_dict_size  Largest embedded dictionary the handle must be able
+ *                           to decode (0 = no dictionary support; archives that
+ *                           embed a dictionary are then rejected). When > 0, the
+ *                           workspace reserves room for a dictionary decode
+ *                           buffer; must be <= @ref ZXC_DICT_SIZE_MAX.
+ * @return Workspace size in bytes, or 0 if a parameter is invalid.
  */
-ZXC_EXPORT size_t zxc_static_dctx_workspace_size(const size_t block_size);
+ZXC_EXPORT size_t zxc_static_dctx_workspace_size(const size_t block_size,
+                                                 const size_t max_dict_size);
 
 /**
  * @brief Initialises a decompression context inside a caller-supplied
@@ -597,11 +603,17 @@ ZXC_EXPORT size_t zxc_static_dctx_workspace_size(const size_t block_size);
  * @param[in,out] workspace       Caller-allocated buffer, cache-line aligned.
  * @param[in]     workspace_size  Capacity of @p workspace in bytes.
  * @param[in]     block_size      Block size the decoder will accept.
+ * @param[in]     max_dict_size   Largest embedded dictionary to support (0 =
+ *                                none). Must match the value passed to
+ *                                @ref zxc_static_dctx_workspace_size and be
+ *                                <= @ref ZXC_DICT_SIZE_MAX. An archive whose
+ *                                embedded dictionary exceeds this returns
+ *                                @ref ZXC_ERROR_DICT_TOO_LARGE.
  * @return Handle pointing inside @p workspace on success, or @c NULL if
- *         the workspace is too small or @p block_size is invalid.
+ *         the workspace is too small or a parameter is invalid.
  */
 ZXC_EXPORT zxc_dctx* zxc_init_static_dctx(void* workspace, const size_t workspace_size,
-                                          const size_t block_size);
+                                          const size_t block_size, const size_t max_dict_size);
 
 /** @} */ /* end of static_context_api */
 /** @} */ /* end of context_api */
