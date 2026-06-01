@@ -279,3 +279,99 @@ int test_static_ctx_null_inputs(void) {
     printf("  [PASS] NULL inputs rejected; NULL free is idempotent\n");
     return 1;
 }
+
+int test_static_ctx_embedded_dict(void) {
+    printf("=== TEST: Static ctx - decode embedded dictionary ===\n");
+    const size_t bs = 65536;
+    static const uint8_t dict[] =
+        "The quick brown fox jumps over the lazy dog. keys: \"id\",\"name\",\"email\".";
+    const size_t dsz = sizeof(dict) - 1;
+    const size_t src_size = 200000;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    int ok = (src != NULL);
+    /* Dict-referencing data so the encoder actually emits matches into the dict. */
+    if (ok)
+        for (size_t i = 0; i < src_size; i++) src[i] = dict[i % dsz];
+
+    /* Build an embedded-dictionary archive with the stream compressor. */
+    FILE* fs = ok ? tmpfile() : NULL;
+    FILE* fc = ok ? tmpfile() : NULL;
+    uint8_t* comp = NULL;
+    long csz = 0;
+    if (!fs || !fc) ok = 0;
+    if (ok) {
+        fwrite(src, 1, src_size, fs);
+        rewind(fs);
+        zxc_compress_opts_t copts = {.level = ZXC_LEVEL_DEFAULT,
+                                     .block_size = bs,
+                                     .checksum_enabled = 1,
+                                     .dict = dict,
+                                     .dict_size = dsz};
+        if (zxc_stream_compress(fs, fc, &copts) <= 0) {
+            printf("  [FAIL] stream_compress\n");
+            ok = 0;
+        }
+    }
+    if (ok) {
+        fseek(fc, 0, SEEK_END);
+        csz = ftell(fc);
+        rewind(fc);
+        comp = (uint8_t*)malloc((size_t)csz);
+        ok = (comp && fread(comp, 1, (size_t)csz, fc) == (size_t)csz);
+    }
+    if (fs) fclose(fs);
+    if (fc) fclose(fc);
+    uint8_t* out = (uint8_t*)malloc(src_size);
+    if (!out) ok = 0;
+
+    /* (a) Dynamic dctx: lazily allocates the dict bounce buffer. */
+    if (ok) {
+        zxc_dctx* d = zxc_create_dctx();
+        int64_t r = zxc_decompress_dctx(d, comp, (size_t)csz, out, src_size, NULL);
+        if (r != (int64_t)src_size || memcmp(out, src, src_size) != 0) {
+            printf("  [FAIL] dynamic dctx embedded decode (r=%lld)\n", (long long)r);
+            ok = 0;
+        } else {
+            printf("  [PASS] dynamic dctx decodes embedded dict\n");
+        }
+        zxc_free_dctx(d);
+    }
+
+    /* (b) Static dctx sized for a dictionary. */
+    if (ok) {
+        const size_t ws_sz = zxc_static_dctx_workspace_size(bs, ZXC_DICT_SIZE_MAX);
+        void* ws = ws_sz ? test_aligned_alloc(64, ws_sz) : NULL;
+        zxc_dctx* d = ws ? zxc_init_static_dctx(ws, ws_sz, bs, ZXC_DICT_SIZE_MAX) : NULL;
+        int64_t r = d ? zxc_decompress_dctx(d, comp, (size_t)csz, out, src_size, NULL) : -1;
+        if (r != (int64_t)src_size || memcmp(out, src, src_size) != 0) {
+            printf("  [FAIL] static dctx (with dict room) decode (r=%lld)\n", (long long)r);
+            ok = 0;
+        } else {
+            printf("  [PASS] static dctx (max_dict_size) decodes embedded dict\n");
+        }
+        if (ws) test_aligned_free(ws);
+    }
+
+    /* (c) Static dctx WITHOUT dict room must reject cleanly, not corrupt. */
+    if (ok) {
+        const size_t ws_sz = zxc_static_dctx_workspace_size(bs, 0);
+        void* ws = ws_sz ? test_aligned_alloc(64, ws_sz) : NULL;
+        zxc_dctx* d = ws ? zxc_init_static_dctx(ws, ws_sz, bs, 0) : NULL;
+        int64_t r = d ? zxc_decompress_dctx(d, comp, (size_t)csz, out, src_size, NULL) : -999;
+        if (r != ZXC_ERROR_DICT_REQUIRED) {
+            printf("  [FAIL] static dctx (no dict room) should return DICT_REQUIRED, got %lld\n",
+                   (long long)r);
+            ok = 0;
+        } else {
+            printf("  [PASS] static dctx (no dict room) rejects cleanly\n");
+        }
+        if (ws) test_aligned_free(ws);
+    }
+
+    free(comp);
+    free(out);
+    free(src);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}

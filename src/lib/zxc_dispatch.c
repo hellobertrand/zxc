@@ -1150,9 +1150,11 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 
         const size_t need = (size_t)dbh.comp_size + work_sz;
         if (dctx->dict_work_cap < need) {
-            /* Static workspace can't grow: the caller must reserve enough via
-             * max_dict_size. Dynamic dctx allocates (and keeps) the buffer. */
-            if (dctx->owns_workspace) return ZXC_ERROR_DICT_TOO_LARGE;
+            /* A static workspace can't grow. Distinguish "dictionary support not
+             * enabled" (no region reserved) from "reserved region too small" for
+             * this archive's dictionary. */
+            if (dctx->owns_workspace)
+                return dctx->dict_work ? ZXC_ERROR_DICT_TOO_LARGE : ZXC_ERROR_DICT_REQUIRED;
             uint8_t* const nb = (uint8_t*)ZXC_MALLOC(need);
             if (UNLIKELY(!nb)) return ZXC_ERROR_MEMORY;
             ZXC_FREE(dctx->dict_work);

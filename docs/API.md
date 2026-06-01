@@ -680,7 +680,8 @@ is `NULL`.
 
 ```c
 ZXC_EXPORT size_t zxc_static_dctx_workspace_size(
-    const size_t block_size
+    const size_t block_size,
+    const size_t max_dict_size
 );
 ```
 
@@ -690,7 +691,12 @@ for the given `block_size`. Unlike the compression variant, this size is
 provisioned worst-case because the decoder cannot predict the per-block
 literal encoding (RAW / RLE / HUFFMAN) until it sees each block header.
 
-**Returns**: workspace size in bytes, or `0` if `block_size` is invalid.
+`max_dict_size` (0 = no dictionary support) reserves room for decoding archives
+that embed a dictionary up to that size (≤ `ZXC_DICT_SIZE_MAX`). With `0`, an
+archive that embeds a dictionary is rejected with `ZXC_ERROR_DICT_REQUIRED`
+(the malloc-free path cannot allocate a dictionary buffer on demand).
+
+**Returns**: workspace size in bytes, or `0` if a parameter is invalid.
 
 ### `zxc_init_static_dctx`
 
@@ -698,14 +704,17 @@ literal encoding (RAW / RLE / HUFFMAN) until it sees each block header.
 ZXC_EXPORT zxc_dctx* zxc_init_static_dctx(
     void*         workspace,
     const size_t  workspace_size,
-    const size_t  block_size
+    const size_t  block_size,
+    const size_t  max_dict_size
 );
 ```
 
 Initialises a decompression context inside a caller-supplied workspace.
 `block_size` is **pinned** at init time: feeding the returned handle an
 archive whose file header declares a different `block_size` returns
-`ZXC_ERROR_BAD_BLOCK_SIZE`.
+`ZXC_ERROR_BAD_BLOCK_SIZE`. `max_dict_size` must match the value passed to
+`zxc_static_dctx_workspace_size`; an archive whose embedded dictionary exceeds
+it returns `ZXC_ERROR_DICT_TOO_LARGE`.
 
 The returned handle points inside `workspace`; the workspace must remain
 valid for the lifetime of the handle. `zxc_free_dctx` is a no-op.
@@ -737,11 +746,11 @@ zxc_free_cctx(cctx);  /* no-op for static */
 free(cws);            /* caller owns the workspace */
 
 /* --- Decompression side --- */
-size_t dws_sz = zxc_static_dctx_workspace_size(BLOCK_SZ);
+size_t dws_sz = zxc_static_dctx_workspace_size(BLOCK_SZ, 0);
 void  *dws    = NULL;
 posix_memalign(&dws, 64, dws_sz);
 
-zxc_dctx *dctx = zxc_init_static_dctx(dws, dws_sz, BLOCK_SZ);
+zxc_dctx *dctx = zxc_init_static_dctx(dws, dws_sz, BLOCK_SZ, 0);
 zxc_decompress_dctx(dctx, in, in_sz, out, out_cap, NULL);
 zxc_free_dctx(dctx);  /* no-op */
 free(dws);
@@ -814,7 +823,7 @@ must know it *before* calling `init`. Four patterns cover every use case:
    archive at the cost of over-allocation (~4 MB dctx).
 
    ```c
-   size_t dws_sz = zxc_static_dctx_workspace_size(ZXC_BLOCK_SIZE_MAX);
+   size_t dws_sz = zxc_static_dctx_workspace_size(ZXC_BLOCK_SIZE_MAX, 0);
    ```
 
    If the workspace pool must stay tight and worst-case sizing is too
