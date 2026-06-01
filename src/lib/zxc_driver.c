@@ -628,10 +628,17 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 0) {
         // Decompression Mode: Read and validate file header
         uint8_t h[ZXC_FILE_HEADER_SIZE];
+        uint32_t header_dict_id = 0;
         if (UNLIKELY(fread(h, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE ||
                      zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz, &file_has_chk,
-                                          NULL) != ZXC_OK))
+                                          &header_dict_id) != ZXC_OK))
             return ZXC_ERROR_BAD_HEADER;
+
+        if (header_dict_id != 0) {
+            if (UNLIKELY(!dict || dict_size == 0)) return ZXC_ERROR_DICT_REQUIRED;
+            if (UNLIKELY(zxc_dict_id(dict, dict_size) != header_dict_id))
+                return ZXC_ERROR_DICT_MISMATCH;
+        }
     }
 
     int num_threads = (n_threads > 0) ? n_threads : (int)sysconf(_SC_NPROCESSORS_ONLN);

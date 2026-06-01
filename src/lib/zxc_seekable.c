@@ -29,6 +29,7 @@
 
 #include "../../include/zxc_seekable.h"
 
+#include "../../include/zxc_dict.h"
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
@@ -166,6 +167,7 @@ struct zxc_seekable_s {
      * fits in 21 bits. */
     uint32_t block_size;
     int file_has_checksums;
+    uint32_t expected_dict_id; /* dict_id from the file header; 0 = no dictionary */
 
     /* Reusable decompression context (single-threaded path only) */
     zxc_cctx_t dctx;
@@ -197,8 +199,9 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     /* Step 1: validate file header => block_size */
     size_t block_size_sz = 0;
     int file_has_chk = 0;
-    if (UNLIKELY(zxc_read_file_header(data, data_size, &block_size_sz, &file_has_chk, NULL) !=
-                 ZXC_OK))
+    uint32_t header_dict_id = 0;
+    if (UNLIKELY(zxc_read_file_header(data, data_size, &block_size_sz, &file_has_chk,
+                                      &header_dict_id) != ZXC_OK))
         return NULL;  // LCOV_EXCL_LINE
     const uint32_t block_size = (uint32_t)block_size_sz;
     if (UNLIKELY(block_size == 0)) return NULL;  // LCOV_EXCL_LINE
@@ -241,6 +244,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     s->num_blocks = num_blocks;
     s->block_size = block_size;
     s->file_has_checksums = file_has_chk;
+    s->expected_dict_id = header_dict_id;
     s->src = data;
     s->src_size = (uint64_t)data_size;
 
@@ -332,7 +336,9 @@ zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r) {
 
     size_t bs_sz = 0;
     int fhc = 0;
-    if (UNLIKELY(zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &bs_sz, &fhc, NULL) != ZXC_OK))
+    uint32_t header_dict_id = 0;
+    if (UNLIKELY(zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &bs_sz, &fhc,
+                                      &header_dict_id) != ZXC_OK))
         return NULL;  // LCOV_EXCL_LINE
     const uint32_t bs = (uint32_t)bs_sz;
     if (UNLIKELY(bs == 0)) return NULL;
@@ -394,6 +400,7 @@ zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r) {
     s->num_blocks = num_blocks;
     s->block_size = bs;
     s->file_has_checksums = fhc;
+    s->expected_dict_id = header_dict_id;
 
     s->comp_sizes = (uint32_t*)ZXC_CALLOC(num_blocks, sizeof(uint32_t));
     s->comp_offsets = (uint64_t*)ZXC_CALLOC((size_t)num_blocks + 1, sizeof(uint64_t));
@@ -502,10 +509,12 @@ static int zxc_seek_read_block(const zxc_seekable* s, const uint32_t block_idx, 
 
 int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t dst_capacity,
                                       const uint64_t offset, const size_t len) {
-    if (UNLIKELY(!s || !dst)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(len == 0)) return 0;
+    if (UNLIKELY(!s || !dst)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(dst_capacity < len)) return ZXC_ERROR_DST_TOO_SMALL;
     if (UNLIKELY(offset + len > s->total_decomp)) return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(s->expected_dict_id != 0 && (!s->dict || s->dict_size == 0)))
+        return ZXC_ERROR_DICT_REQUIRED;
 
     /* Initialize decompression context on first use */
     if (!s->dctx_initialized) {
@@ -719,10 +728,12 @@ static void* zxc_seek_mt_worker(void* arg) {
 
 int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_t dst_capacity,
                                          const uint64_t offset, const size_t len, int n_threads) {
-    if (UNLIKELY(!s || !dst)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(len == 0)) return 0;
+    if (UNLIKELY(!s || !dst)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(dst_capacity < len)) return ZXC_ERROR_DST_TOO_SMALL;
     if (UNLIKELY(offset + len > s->total_decomp)) return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(s->expected_dict_id != 0 && (!s->dict || s->dict_size == 0)))
+        return ZXC_ERROR_DICT_REQUIRED;
 
     /* Find block range - O(1) division */
     const uint32_t blk_start = zxc_seek_find_block(s->block_size, offset);
@@ -850,6 +861,8 @@ void zxc_seekable_free(zxc_seekable* s) {
 int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_size) {
     if (UNLIKELY(!s || !dict || dict_size == 0)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+    if (UNLIKELY(s->expected_dict_id != 0 && zxc_dict_id(dict, dict_size) != s->expected_dict_id))
+        return ZXC_ERROR_DICT_MISMATCH;
 
     ZXC_FREE(s->dict);
     ZXC_FREE(s->dict_work);

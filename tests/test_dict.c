@@ -793,3 +793,150 @@ int test_dict_seekable_mt_roundtrip(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+static const uint8_t k_dict_a[] =
+    "The quick brown fox jumps over the lazy dog. "
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit.";
+static const uint8_t k_dict_b[] =
+    "A completely unrelated dictionary payload hashing to a different dict_id value.";
+
+// Compress `src` with dict A to a tmpfile, then try to stream-decompress it with
+// `dec_dict` (NULL = none) and assert the decoder returns `want_err`.
+static int stream_dict_error_case(const char* label, const uint8_t* dec_dict, size_t dec_dict_size,
+                                  int64_t want_err) {
+    const size_t src_size = 8192;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    gen_dict_friendly_data(src, src_size, k_dict_a, sizeof(k_dict_a) - 1);
+
+    FILE* f_src = tmpfile();
+    FILE* f_comp = tmpfile();
+    FILE* f_dec = tmpfile();
+    int ok = 1;
+    if (!f_src || !f_comp || !f_dec) {
+        printf("  [FAIL] %s: tmpfile() failed\n", label);
+        ok = 0;
+    }
+
+    if (ok) {
+        fwrite(src, 1, src_size, f_src);
+        rewind(f_src);
+        zxc_compress_opts_t copts = {.level = ZXC_LEVEL_DEFAULT,
+                                     .checksum_enabled = 1,
+                                     .dict = k_dict_a,
+                                     .dict_size = sizeof(k_dict_a) - 1};
+        if (zxc_stream_compress(f_src, f_comp, &copts) <= 0) {
+            printf("  [FAIL] %s: stream_compress failed\n", label);
+            ok = 0;
+        }
+    }
+
+    if (ok) {
+        rewind(f_comp);
+        zxc_decompress_opts_t dopts = {
+            .checksum_enabled = 1, .dict = dec_dict, .dict_size = dec_dict_size};
+        int64_t rc = zxc_stream_decompress(f_comp, f_dec, &dopts);
+        if (rc != want_err) {
+            printf("  [FAIL] %s: expected %s, got %lld (%s)\n", label, zxc_error_name((int)want_err),
+                   (long long)rc, zxc_error_name((int)rc));
+            ok = 0;
+        }
+    }
+
+    if (f_src) fclose(f_src);
+    if (f_comp) fclose(f_comp);
+    if (f_dec) fclose(f_dec);
+    free(src);
+    return ok;
+}
+
+int test_dict_stream_dict_id_checks(void) {
+    printf("=== TEST: Dict - stream decode rejects missing/wrong dict ===\n");
+    int ok = stream_dict_error_case("missing dict", NULL, 0, ZXC_ERROR_DICT_REQUIRED);
+    ok &= stream_dict_error_case("wrong dict", k_dict_b, sizeof(k_dict_b) - 1,
+                                 ZXC_ERROR_DICT_MISMATCH);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}
+
+int test_dict_seekable_dict_id_checks(void) {
+    printf("=== TEST: Dict - seekable decode rejects missing/wrong dict ===\n");
+
+    const size_t src_size = 8192;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    gen_dict_friendly_data(src, src_size, k_dict_a, sizeof(k_dict_a) - 1);
+
+    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    uint8_t* compressed = (uint8_t*)malloc(comp_bound);
+    zxc_compress_opts_t copts = {.level = ZXC_LEVEL_DEFAULT,
+                                 .checksum_enabled = 1,
+                                 .seekable = 1,
+                                 .dict = k_dict_a,
+                                 .dict_size = sizeof(k_dict_a) - 1};
+    int64_t comp_size = zxc_compress(src, src_size, compressed, comp_bound, &copts);
+
+    uint8_t* out = (uint8_t*)malloc(src_size);
+    int ok = 1;
+
+    if (comp_size <= 0) {
+        printf("  [FAIL] seekable compress failed\n");
+        ok = 0;
+    }
+
+    // 1. Wrong dict via set_dict must be rejected up front.
+    if (ok) {
+        zxc_seekable* s = zxc_seekable_open(compressed, (size_t)comp_size);
+        if (!s) {
+            printf("  [FAIL] seekable_open returned NULL\n");
+            ok = 0;
+        } else {
+            int rc = zxc_seekable_set_dict(s, k_dict_b, sizeof(k_dict_b) - 1);
+            if (rc != ZXC_ERROR_DICT_MISMATCH) {
+                printf("  [FAIL] set_dict(wrong): expected DICT_MISMATCH, got %d (%s)\n", rc,
+                       zxc_error_name(rc));
+                ok = 0;
+            }
+            zxc_seekable_free(s);
+        }
+    }
+
+    // 2. Decoding without any dict must be rejected, not silently corrupt
+    //    (single-threaded and multi-threaded entry points).
+    if (ok) {
+        zxc_seekable* s = zxc_seekable_open(compressed, (size_t)comp_size);
+        if (!s) {
+            printf("  [FAIL] seekable_open returned NULL\n");
+            ok = 0;
+        } else {
+            int64_t st = zxc_seekable_decompress_range(s, out, src_size, 0, src_size);
+            int64_t mt = zxc_seekable_decompress_range_mt(s, out, src_size, 0, src_size, 4);
+            if (st != ZXC_ERROR_DICT_REQUIRED || mt != ZXC_ERROR_DICT_REQUIRED) {
+                printf("  [FAIL] no-dict decode: expected DICT_REQUIRED, got st=%lld mt=%lld\n",
+                       (long long)st, (long long)mt);
+                ok = 0;
+            }
+            zxc_seekable_free(s);
+        }
+    }
+
+    // 3. Correct dict still works (guard against over-rejection).
+    if (ok) {
+        zxc_seekable* s = zxc_seekable_open(compressed, (size_t)comp_size);
+        if (s && zxc_seekable_set_dict(s, k_dict_a, sizeof(k_dict_a) - 1) == ZXC_OK &&
+            zxc_seekable_decompress_range(s, out, src_size, 0, src_size) == (int64_t)src_size &&
+            memcmp(src, out, src_size) == 0) {
+            // expected
+        } else {
+            printf("  [FAIL] correct dict roundtrip regressed\n");
+            ok = 0;
+        }
+        zxc_seekable_free(s);
+    }
+
+    free(out);
+    free(src);
+    free(compressed);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}

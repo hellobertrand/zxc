@@ -197,5 +197,7 @@ int test_dict_seekable_roundtrip(void);
 int test_dict_train_roundtrip(void);
 int test_dict_train_no_frequent_patterns(void);
 int test_dict_seekable_mt_roundtrip(void);
+int test_dict_stream_dict_id_checks(void);
+int test_dict_seekable_dict_id_checks(void);
 
 #endif /* ZXC_TEST_COMMON_H */
