@@ -69,8 +69,12 @@
  * @brief Constants for pre-trained dictionary support.
  * @{
  */
-/** @brief Maximum dictionary content size in bytes (64 KB, bounded by LZ window). */
-#define ZXC_DICT_SIZE_MAX (1U << 16)
+/** @brief Maximum dictionary content size in bytes (64 KB - 1).
+ *
+ * Bounded to a 16-bit value (65535) by two constraints that both cap at the
+ * same number: the `.zxd` header stores the content size in a 16-bit field, and
+ * LZ77 match offsets are 16-bit (max distance 65535). */
+#define ZXC_DICT_SIZE_MAX ((1U << 16) - 1U)
 /** @brief Size of the .zxd dictionary file header in bytes. */
 #define ZXC_DICT_HEADER_SIZE 16
 /** @} */ /* end of dictionary */
