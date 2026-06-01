@@ -290,15 +290,16 @@ int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
         return (int64_t)copy;
     }
 
-    /* Step 4: sort by coverage descending, then greedily fill with overlap
-     * accounting. The frequency table is decremented as segments are placed so
-     * that already-covered patterns are not copied into the dictionary twice. */
+    /* Step 4: pick segments greedily in descending-coverage order, zeroing each
+     * pick's k-grams so overlapping patterns aren't copied twice. Picks are
+     * compacted in place into segs[0..n_sel); placement is step 5. */
     zxc_dict_sort_segs_desc(segs, n_segs);
 
     uint8_t* out = (uint8_t*)dict_buf;
-    size_t filled = 0;
+    size_t n_sel = 0;
+    size_t total = 0;
 
-    for (size_t i = 0; i < n_segs && filled < dict_capacity; i++) {
+    for (size_t i = 0; i < n_segs && total < dict_capacity; i++) {
         const size_t seg_off = segs[i].offset;
         const size_t seg_end = seg_off + segs[i].length;
 
@@ -310,24 +311,42 @@ int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
         if (cur * 2 < segs[i].score) continue;
 
         size_t copy = segs[i].length;
-        if (copy > dict_capacity - filled) copy = dict_capacity - filled;
-        ZXC_MEMCPY(out + filled, corpus + seg_off, copy);
-        filled += copy;
+        if (copy > dict_capacity - total) copy = dict_capacity - total;
 
         /* One copy in the dictionary serves all future matches: mark this
          * segment's k-grams as covered so later segments cover new ground. */
         for (size_t p = seg_off; p + ZXC_DICT_KGRAM_LEN <= seg_end; p += ZXC_DICT_KGRAM_LEN)
             freq[zxc_dict_hash(corpus + p)] = 0;
+
+        /* Record the pick (n_sel <= i, so this never clobbers an unread entry). */
+        segs[n_sel].offset = (uint32_t)seg_off;
+        segs[n_sel].length = (uint16_t)copy;
+        n_sel++;
+        total += copy;
     }
 
     ZXC_FREE(freq);
 
-    /* If we haven't filled the capacity, pad with tail of corpus. */
-    if (filled < dict_capacity) {
-        const size_t pad = dict_capacity - filled;
-        const size_t tail = (corpus_size > pad) ? pad : corpus_size;
-        ZXC_MEMCPY(out + filled, corpus + corpus_size - tail, tail);
-        filled += tail;
+    /* Step 5: emit picks in reverse order so the highest-coverage segment ends
+     * up at the END of the dict. The dict sits just before the data, so bytes
+     * nearer its end have the smallest match offset: cheapest to encode and the
+     * last to leave the 16-bit (65535) offset window.
+     *
+     * No padding: if the picks don't fill the capacity, the dict is just
+     * shorter. The old tail-padding only added low-value bytes that raised
+     * offsets for everything after them. */
+    size_t filled = 0;
+    for (size_t i = n_sel; i-- > 0;) {
+        ZXC_MEMCPY(out + filled, corpus + segs[i].offset, segs[i].length);
+        filled += segs[i].length;
+    }
+
+    /* Nothing selected (every segment subsumed by earlier picks): fall back to
+     * the corpus tail so the dict is never empty, like the n_segs == 0 path. */
+    if (UNLIKELY(filled == 0)) {
+        const size_t tail = (corpus_size < dict_capacity) ? corpus_size : dict_capacity;
+        ZXC_MEMCPY(out, corpus + corpus_size - tail, tail);
+        filled = tail;
     }
 
     ZXC_FREE(segs);
