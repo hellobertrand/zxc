@@ -8,6 +8,7 @@
 # Usage:
 #   make              Build the library + CLI (Release)
 #   make test         Build and run tests (parallel)
+#   make conformance  Build and run only the decoder conformance suite
 #   make format       Format source code with clang-format
 #   make format-check Check formatting (CI mode)
 #   make lint         Scan source files for non-ASCII characters (CI mirror)
@@ -22,7 +23,7 @@ CMAKE       ?= cmake
 CMAKE_EXTRA ?=
 JOBS        ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
-.PHONY: all test format format-check lint doc clean
+.PHONY: all test conformance format format-check lint doc clean
 
 # ── Build ────────────────────────────────────────────────────
 all:
@@ -34,6 +35,15 @@ test:
 	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Release -DZXC_BUILD_TESTS=ON $(CMAKE_EXTRA)
 	@$(CMAKE) --build $(BUILD) -j$(JOBS)
 	@cd $(BUILD) && ctest --output-on-failure -j$(JOBS)
+
+# ── Conformance ──────────────────────────────────────────────
+# Runs only the decoder conformance suite: the reference test
+# vectors under conformance/ (valid/ must decode byte-for-byte,
+# invalid/ must be rejected). Same test as `make test`, filtered.
+conformance:
+	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Release -DZXC_BUILD_TESTS=ON $(CMAKE_EXTRA)
+	@$(CMAKE) --build $(BUILD) -j$(JOBS) --target zxc_conformance_test
+	@cd $(BUILD) && ctest --output-on-failure -R '^conformance$$'
 
 # ── Formatting ───────────────────────────────────────────────
 format:
