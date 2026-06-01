@@ -18,7 +18,6 @@
 #endif
 
 #include "../include/zxc_buffer.h"
-#include "../include/zxc_dict.h"
 #include "../include/zxc_error.h"
 
 /* ---------- helpers ------------------------------------------------------ */
@@ -71,62 +70,6 @@ static int has_suffix(const char *s, const char *suffix)
 
 /* ---------- valid vector test -------------------------------------------- */
 
-/**
- * @brief Searches for a .zxd dictionary file in the same directory as @p zxc_path
- *        whose dict_id matches @p target_id. Returns the loaded content (caller frees).
- */
-static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
-                                 const void **content_out, size_t *content_size_out)
-{
-    /* Derive directory from zxc_path */
-    char dir[512];
-    strncpy(dir, zxc_path, sizeof(dir) - 1);
-    dir[sizeof(dir) - 1] = '\0';
-    char *sep = strrchr(dir, '/');
-    if (sep) *(sep + 1) = '\0'; else strcpy(dir, "./");
-
-#ifdef _WIN32
-    char pattern[512];
-    snprintf(pattern, sizeof(pattern), "%s*.zxd", dir);
-    WIN32_FIND_DATAA fd;
-    HANDLE hf = FindFirstFileA(pattern, &fd);
-    if (hf == INVALID_HANDLE_VALUE) return NULL;
-    do {
-        char path[1024];
-        snprintf(path, sizeof(path), "%s%s", dir, fd.cFileName);
-        size_t sz = 0;
-        uint8_t *buf = read_file(path, &sz);
-        if (buf && zxc_dict_get_id(buf, sz) == target_id) {
-            if (zxc_dict_load(buf, sz, content_out, content_size_out, NULL) == 0) {
-                FindClose(hf);
-                return buf;
-            }
-        }
-        free(buf);
-    } while (FindNextFileA(hf, &fd));
-    FindClose(hf);
-#else
-    DIR *dp = opendir(dir);
-    if (!dp) return NULL;
-    const struct dirent *ent;
-    while ((ent = readdir(dp)) != NULL) {
-        if (!has_suffix(ent->d_name, ".zxd")) continue;
-        char path[1024];
-        snprintf(path, sizeof(path), "%s%s", dir, ent->d_name);
-        size_t sz = 0;
-        uint8_t *buf = read_file(path, &sz);
-        if (buf && zxc_dict_get_id(buf, sz) == target_id) {
-            if (zxc_dict_load(buf, sz, content_out, content_size_out, NULL) == 0) {
-                closedir(dp);
-                return buf;
-            }
-        }
-        free(buf);
-    }
-    closedir(dp);
-#endif
-    return NULL;
-}
 
 static int test_valid_vector(const char *zxc_path, const char *expected_path)
 {
@@ -143,21 +86,6 @@ static int test_valid_vector(const char *zxc_path, const char *expected_path)
         fprintf(stderr, "FAIL: cannot read %s\n", expected_path);
         free(comp);
         return 0;
-    }
-
-    /* Auto-detect dictionary: if the archive has a dict_id, find the .zxd */
-    const void *dict = NULL;
-    size_t dict_size = 0;
-    uint8_t *dict_buf = NULL;
-    uint32_t did = zxc_get_dict_id(comp, comp_sz);
-    if (did != 0) {
-        dict_buf = find_dict_for_id(zxc_path, did, &dict, &dict_size);
-        if (!dict_buf) {
-            fprintf(stderr, "FAIL: %s  requires dict 0x%08X but no matching .zxd found\n",
-                    zxc_path, did);
-            free(comp); free(expected);
-            return 0;
-        }
     }
 
     int ok = 1;
@@ -177,7 +105,6 @@ static int test_valid_vector(const char *zxc_path, const char *expected_path)
             ok = 0;
         } else {
             zxc_decompress_opts_t dopts = {0};
-            if (dict) { dopts.dict = dict; dopts.dict_size = dict_size; }
             int64_t result = zxc_decompress(comp, comp_sz,
                                             output, (size_t)dec_sz, &dopts);
             if (result < 0) {
@@ -196,7 +123,6 @@ static int test_valid_vector(const char *zxc_path, const char *expected_path)
         }
     }
 
-    free(dict_buf);
     free(comp);
     free(expected);
     return ok;
