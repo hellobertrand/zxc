@@ -72,8 +72,19 @@ extern "C" {
  * may be defined:
  * - @c ZXC_USE_AVX512 - AVX-512F + AVX-512BW available.
  * - @c ZXC_USE_AVX2   - AVX2 available.
+ * - @c ZXC_USE_SSE2   - SSE2 (x86-64 baseline) available.
  * - @c ZXC_USE_NEON64 - AArch64 NEON available.
  * - @c ZXC_USE_NEON32 - ARMv7 NEON available.
+ *
+ * Note: @c -mavx2 / @c -mavx512f imply @c __SSE2__, so @c ZXC_USE_SSE2 is
+ * also defined in the AVX variants. The hand-written SIMD code paths therefore
+ * order their preprocessor branches AVX512 -> AVX2 -> SSE2 so the widest
+ * available path wins; the SSE2 branch is the active one only in the dedicated
+ * @c _sse2 variant (no AVX2/AVX512 flags). SSE2 is the x86-64 baseline, so this
+ * tier covers every 64-bit x86 CPU (and i686 with @c -msse2). The handful of
+ * operations that would otherwise require SSE4.1 (@c _mm_max_epu32,
+ * @c _mm_blendv_epi8, @c _mm_packus_epi32) or SSSE3 (@c _mm_shuffle_epi8) are
+ * emulated with pure SSE2 instruction sequences or fall back to scalar code.
  *
  * Define @c ZXC_DISABLE_SIMD to gate all hand-written SIMD paths (intrinsics,
  * inline assembly).  Compiler auto-vectorisation is unaffected.
@@ -91,6 +102,11 @@ extern "C" {
 #if defined(__AVX2__)
 #ifndef ZXC_USE_AVX2
 #define ZXC_USE_AVX2
+#endif
+#endif
+#if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
+#ifndef ZXC_USE_SSE2
+#define ZXC_USE_SSE2
 #endif
 #endif
 #elif (defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(_M_ARM64) || \
@@ -1008,8 +1024,8 @@ static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
  * @param[in] src Pointer to the source memory block.
  */
 static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
-#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
-    // AVX2/AVX512: Single 128-bit unaligned load/store
+#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512) || defined(ZXC_USE_SSE2)
+    // x86 SSE2/AVX2/AVX512: Single 128-bit unaligned load/store
     _mm_storeu_si128((__m128i*)dst, _mm_loadu_si128((const __m128i*)src));
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));
@@ -1030,6 +1046,11 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
     // AVX2/AVX512: Single 256-bit (32 byte) unaligned load/store
     _mm256_storeu_si256((__m256i*)dst, _mm256_loadu_si256((const __m256i*)src));
+#elif defined(ZXC_USE_SSE2)
+    // SSE2: Two 128-bit (16 byte) unaligned load/stores (no 256-bit regs)
+    _mm_storeu_si128((__m128i*)dst, _mm_loadu_si128((const __m128i*)src));
+    _mm_storeu_si128((__m128i*)((uint8_t*)dst + 16),
+                     _mm_loadu_si128((const __m128i*)((const uint8_t*)src + 16)));
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     // NEON: Two 128-bit (16 byte) unaligned load/stores
     vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));

@@ -200,6 +200,7 @@ static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
     _mm_storeu_si128((__m128i*)dst, _mm_shuffle_epi8(src_data, mask));
 
 #else
+    // SSE2-only tier and non-SIMD builds: scalar replicate (no PSHUFB).
     const uint8_t* src = dst - off;
     for (size_t i = 0; i < 16; i++) {
         dst[i] = src[i % off];
@@ -304,6 +305,24 @@ static ZXC_ALWAYS_INLINE __m512i zxc_mm512_prefix_sum_epi32(__m512i v) {
     v_l2 = _mm512_shuffle_epi32(v_l2, 0xFF);          // Broadcast last element of lane 2
     v = _mm512_mask_add_epi32(v, 0xF000, v, v_l2);    // Add to lane 3 only
 
+    return v;
+}
+#endif
+
+#if defined(ZXC_USE_SSE2)
+/**
+ * @brief Computes the prefix sum of a 128-bit vector of four 32-bit integers
+ *        using SSE2 byte-shift adds (the 128-bit analogue of the NEON helper).
+ *
+ * For input [a, b, c, d] the result is [a, a+b, a+b+c, a+b+c+d].
+ *
+ * @param[in] v Input vector of four 32-bit integers.
+ * @return Vector containing the prefix sums.
+ */
+// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
+static ZXC_ALWAYS_INLINE __m128i zxc_mm_prefix_sum_epi32(__m128i v) {
+    v = _mm_add_epi32(v, _mm_slli_si128(v, 4));  // [a, a+b, b+c, c+d]
+    v = _mm_add_epi32(v, _mm_slli_si128(v, 8));  // [a, a+b, a+b+c, a+b+c+d]
     return v;
 }
 #endif
@@ -441,6 +460,22 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 #if defined(ZXC_USE_NEON64)
             running_val = vgetq_lane_u32(v_run, 0);  // Extract once at the end of the batch
 #endif
+
+#elif defined(ZXC_USE_SSE2)
+            __m128i v_run = _mm_set1_epi32((int)running_val);  // Broadcast running total
+            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 4) {
+                __m128i v_deltas = _mm_load_si128((const __m128i*)&deltas[k]);  // Load 4 deltas
+
+                __m128i v_sum = zxc_mm_prefix_sum_epi32(v_deltas);  // Local prefix sums
+                v_sum = _mm_add_epi32(v_sum, v_run);                // Add base running total
+
+                _mm_storeu_si128((__m128i*)&batch_dst[k], v_sum);  // Store decoded values
+
+                // Broadcast 4th element (lane 3) to all lanes for the next iteration.
+                v_run = _mm_shuffle_epi32(v_sum, _MM_SHUFFLE(3, 3, 3, 3));
+            }
+            // Extract final running_val back to GPR for the scalar tail.
+            running_val = (uint32_t)_mm_cvtsi128_si32(v_run);
 
 #else
             for (int k = 0; k < ZXC_NUM_DEC_BATCH; k++) {

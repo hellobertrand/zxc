@@ -178,11 +178,15 @@ else()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
     message(STATUS "Building x86_64 AVX2 and AVX512 variants...")
     if(MSVC)
+        # SSE2 for MSVC: SSE2 is the x86-64 baseline
+        zxc_add_variant(_sse2 "/D__SSE2__")
         # AVX2 for MSVC (Enables AVX2/BMI1/BMI2 sets)
         zxc_add_variant(_avx2 "/arch:AVX2;/D__BMI__;/D__BMI2__;/D__LZCNT__")
         # AVX512 for MSVC (VS2019 16.10+ supports /arch:AVX512)
         zxc_add_variant(_avx512 "/arch:AVX512;/D__BMI__;/D__BMI2__;/D__LZCNT__")
     else()
+        # SSE2 for GCC/Clang (x86-64 baseline)
+        zxc_add_variant(_sse2 "-msse2")
         # AVX2 for GCC/Clang
         zxc_add_variant(_avx2 "-mavx2;-mfma;-mbmi;-mbmi2;-mlzcnt")
         # AVX512 for GCC/Clang
