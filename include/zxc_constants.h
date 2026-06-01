@@ -71,12 +71,9 @@
  */
 /** @brief Maximum dictionary content size in bytes (64 KB - 1).
  *
- * Bounded to a 16-bit value (65535) by two constraints that both cap at the
- * same number: the `.zxd` header stores the content size in a 16-bit field, and
- * LZ77 match offsets are 16-bit (max distance 65535). */
+ * Bounded to 65535 because LZ77 match offsets are 16-bit (max distance 65535):
+ * a dictionary byte farther back than that could never be referenced. */
 #define ZXC_DICT_SIZE_MAX ((1U << 16) - 1U)
-/** @brief Size of the .zxd dictionary file header in bytes. */
-#define ZXC_DICT_HEADER_SIZE 16
 /** @} */ /* end of dictionary */
 
 /**

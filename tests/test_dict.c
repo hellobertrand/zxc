@@ -21,49 +21,6 @@ static void gen_dict_friendly_data(uint8_t* buf, size_t size, const uint8_t* dic
     }
 }
 
-int test_dict_zxd_roundtrip(void) {
-    printf("=== TEST: Dict - .zxd save/load roundtrip ===\n");
-
-    const char* content = "hello dict content for testing zxd format!";
-    const size_t content_size = strlen(content);
-
-    size_t bound = zxc_dict_save_bound(content_size);
-    uint8_t* zxd = (uint8_t*)malloc(bound);
-    int64_t written = zxc_dict_save(content, content_size, zxd, bound);
-    if (written < 0) {
-        printf("  [FAIL] zxc_dict_save returned %lld\n", (long long)written);
-        free(zxd);
-        return 0;
-    }
-
-    const void* loaded_content = NULL;
-    size_t loaded_size = 0;
-    uint32_t loaded_id = 0;
-    int rc = zxc_dict_load(zxd, (size_t)written, &loaded_content, &loaded_size, &loaded_id);
-    if (rc != ZXC_OK) {
-        printf("  [FAIL] zxc_dict_load returned %d (%s)\n", rc, zxc_error_name(rc));
-        free(zxd);
-        return 0;
-    }
-
-    if (loaded_size != content_size || memcmp(loaded_content, content, content_size) != 0) {
-        printf("  [FAIL] content mismatch after load\n");
-        free(zxd);
-        return 0;
-    }
-
-    uint32_t expected_id = zxc_dict_id(content, content_size);
-    if (loaded_id != expected_id) {
-        printf("  [FAIL] dict_id mismatch: got %u, expected %u\n", loaded_id, expected_id);
-        free(zxd);
-        return 0;
-    }
-
-    free(zxd);
-    printf("PASS\n\n");
-    return 1;
-}
-
 int test_dict_id_deterministic(void) {
     printf("=== TEST: Dict - dict_id is deterministic ===\n");
 
@@ -89,7 +46,7 @@ int test_dict_id_deterministic(void) {
 }
 
 int test_dict_get_id_apis(void) {
-    printf("=== TEST: Dict - zxc_get_dict_id / zxc_dict_get_id ===\n");
+    printf("=== TEST: Dict - zxc_get_dict_id (archive header) ===\n");
 
     const uint8_t dict[] = "dictionary content for get_id test";
     const size_t dict_size = sizeof(dict) - 1;
@@ -128,33 +85,6 @@ int test_dict_get_id_apis(void) {
     printf("  [PASS] zxc_get_dict_id returns 0 for no-dict file\n");
     free(compressed);
 
-    /* Save to .zxd and verify zxc_dict_get_id */
-    size_t zxd_bound = zxc_dict_save_bound(dict_size);
-    uint8_t* zxd = (uint8_t*)malloc(zxd_bound);
-    int64_t zxd_size = zxc_dict_save(dict, dict_size, zxd, zxd_bound);
-    if (zxd_size <= 0) {
-        printf("  [FAIL] zxc_dict_save returned %lld\n", (long long)zxd_size);
-        free(zxd);
-        return 0;
-    }
-
-    uint32_t zxd_id = zxc_dict_get_id(zxd, (size_t)zxd_size);
-    if (zxd_id != expected_id) {
-        printf("  [FAIL] zxc_dict_get_id: got 0x%08X, expected 0x%08X\n", zxd_id, expected_id);
-        free(zxd);
-        return 0;
-    }
-    printf("  [PASS] zxc_dict_get_id returns 0x%08X\n", zxd_id);
-
-    /* Invalid buffer should return 0 */
-    if (zxc_dict_get_id("bad", 3) != 0) {
-        printf("  [FAIL] zxc_dict_get_id should return 0 for invalid buffer\n");
-        free(zxd);
-        return 0;
-    }
-    printf("  [PASS] zxc_dict_get_id returns 0 for invalid buffer\n");
-
-    free(zxd);
     printf("PASS\n\n");
     return 1;
 }
@@ -800,10 +730,11 @@ static const uint8_t k_dict_a[] =
 static const uint8_t k_dict_b[] =
     "A completely unrelated dictionary payload hashing to a different dict_id value.";
 
-// Compress `src` with dict A to a tmpfile, then try to stream-decompress it with
-// `dec_dict` (NULL = none) and assert the decoder returns `want_err`.
-static int stream_dict_error_case(const char* label, const uint8_t* dec_dict, size_t dec_dict_size,
-                                  int64_t want_err) {
+// A stream archive compressed with a dictionary embeds it, so it must
+// decompress correctly WITHOUT any external dictionary supplied at decode.
+int test_dict_stream_dict_id_checks(void) {
+    printf("=== TEST: Dict - stream embeds dict (decodes with no external dict) ===\n");
+
     const size_t src_size = 8192;
     uint8_t* src = (uint8_t*)malloc(src_size);
     gen_dict_friendly_data(src, src_size, k_dict_a, sizeof(k_dict_a) - 1);
@@ -811,11 +742,8 @@ static int stream_dict_error_case(const char* label, const uint8_t* dec_dict, si
     FILE* f_src = tmpfile();
     FILE* f_comp = tmpfile();
     FILE* f_dec = tmpfile();
-    int ok = 1;
-    if (!f_src || !f_comp || !f_dec) {
-        printf("  [FAIL] %s: tmpfile() failed\n", label);
-        ok = 0;
-    }
+    int ok = (f_src && f_comp && f_dec);
+    if (!ok) printf("  [FAIL] tmpfile() failed\n");
 
     if (ok) {
         fwrite(src, 1, src_size, f_src);
@@ -825,35 +753,35 @@ static int stream_dict_error_case(const char* label, const uint8_t* dec_dict, si
                                      .dict = k_dict_a,
                                      .dict_size = sizeof(k_dict_a) - 1};
         if (zxc_stream_compress(f_src, f_comp, &copts) <= 0) {
-            printf("  [FAIL] %s: stream_compress failed\n", label);
+            printf("  [FAIL] stream_compress failed\n");
             ok = 0;
         }
     }
 
     if (ok) {
         rewind(f_comp);
-        zxc_decompress_opts_t dopts = {
-            .checksum_enabled = 1, .dict = dec_dict, .dict_size = dec_dict_size};
+        /* No dict supplied: it must come from the embedded block. */
+        zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
         int64_t rc = zxc_stream_decompress(f_comp, f_dec, &dopts);
-        if (rc != want_err) {
-            printf("  [FAIL] %s: expected %s, got %lld (%s)\n", label, zxc_error_name((int)want_err),
-                   (long long)rc, zxc_error_name((int)rc));
+        if (rc != (int64_t)src_size) {
+            printf("  [FAIL] embedded decode returned %lld, expected %zu\n", (long long)rc,
+                   src_size);
             ok = 0;
         }
+    }
+
+    if (ok) {
+        rewind(f_dec);
+        uint8_t* got = (uint8_t*)malloc(src_size);
+        ok = (fread(got, 1, src_size, f_dec) == src_size && memcmp(got, src, src_size) == 0);
+        if (!ok) printf("  [FAIL] embedded roundtrip mismatch\n");
+        free(got);
     }
 
     if (f_src) fclose(f_src);
     if (f_comp) fclose(f_comp);
     if (f_dec) fclose(f_dec);
     free(src);
-    return ok;
-}
-
-int test_dict_stream_dict_id_checks(void) {
-    printf("=== TEST: Dict - stream decode rejects missing/wrong dict ===\n");
-    int ok = stream_dict_error_case("missing dict", NULL, 0, ZXC_ERROR_DICT_REQUIRED);
-    ok &= stream_dict_error_case("wrong dict", k_dict_b, sizeof(k_dict_b) - 1,
-                                 ZXC_ERROR_DICT_MISMATCH);
     if (!ok) return 0;
     printf("PASS\n\n");
     return 1;

@@ -179,6 +179,8 @@ struct zxc_seekable_s {
     uint8_t* dict_work; /* [dict | decode_space] bounce buffer */
 };
 
+static int zxc_seekable_install_dict(zxc_seekable* s, const void* dict, size_t dict_size);
+
 /**
  * @brief Parses the seek table from raw bytes at the end of the archive.
  *
@@ -259,11 +261,38 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     // LCOV_EXCL_STOP
     s->total_decomp = total_decomp;
 
+    /* A dictionary, when present, is embedded as a ZXC_BLOCK_DICT block right
+     * after the file header. Detect it by the block type (no dedicated flag):
+     * if the first block is a DICT block, load it and start the data blocks
+     * past it. Otherwise the dictionary must be supplied via
+     * zxc_seekable_set_dict (its id is already in expected_dict_id). */
+    uint64_t data_start = ZXC_FILE_HEADER_SIZE;
+    if (header_dict_id != 0 && data_size >= ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE) {
+        zxc_block_header_t dbh;
+        if (zxc_read_block_header(data + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &dbh) ==
+                ZXC_OK &&
+            dbh.block_type == ZXC_BLOCK_DICT) {
+            if (UNLIKELY(dbh.comp_size == 0 || dbh.comp_size > ZXC_DICT_SIZE_MAX ||
+                         (uint64_t)ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + dbh.comp_size >
+                             (uint64_t)data_size)) {
+                zxc_seekable_free(s);
+                return NULL;
+            }
+            const uint8_t* dcontent = data + ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE;
+            if (UNLIKELY(zxc_dict_id(dcontent, dbh.comp_size) != header_dict_id ||
+                         zxc_seekable_install_dict(s, dcontent, dbh.comp_size) != ZXC_OK)) {
+                zxc_seekable_free(s);
+                return NULL;
+            }
+            data_start = (uint64_t)ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + dbh.comp_size;
+        }
+    }
+
     /* Parse comp_sizes and build compressed prefix sums.
      * Validate each comp_size against data_size to prevent prefix-sum overflow
      * and out-of-bounds reads during decompression. */
     const uint8_t* ep = seek_block_start + ZXC_BLOCK_HEADER_SIZE;
-    uint64_t comp_acc = ZXC_FILE_HEADER_SIZE; /* blocks start after file header */
+    uint64_t comp_acc = data_start; /* data blocks start after header (+ embedded dict block) */
     for (uint32_t i = 0; i < num_blocks; i++) {
         s->comp_sizes[i] = zxc_le32(ep);
         ep += sizeof(uint32_t);
@@ -413,9 +442,43 @@ zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r) {
     }
     s->total_decomp = total_decomp;
 
+    /* Embedded dictionary (ZXC_BLOCK_DICT right after the header): read it via
+     * the reader, load it, and start the data blocks after it. */
+    uint64_t data_start = ZXC_FILE_HEADER_SIZE;
+    if (header_dict_id != 0) {
+        uint8_t dbh_buf[ZXC_BLOCK_HEADER_SIZE];
+        zxc_block_header_t dbh;
+        /* Embedded only if the first block is a DICT block (else external). */
+        if (r->read_at(r->ctx, dbh_buf, ZXC_BLOCK_HEADER_SIZE, ZXC_FILE_HEADER_SIZE) ==
+                (int64_t)ZXC_BLOCK_HEADER_SIZE &&
+            zxc_read_block_header(dbh_buf, ZXC_BLOCK_HEADER_SIZE, &dbh) == ZXC_OK &&
+            dbh.block_type == ZXC_BLOCK_DICT) {
+            if (UNLIKELY(dbh.comp_size == 0 || dbh.comp_size > ZXC_DICT_SIZE_MAX)) {
+                zxc_seekable_free(s);
+                return NULL;
+            }
+            uint8_t* dtmp = (uint8_t*)ZXC_MALLOC(dbh.comp_size);
+            if (UNLIKELY(!dtmp)) {
+                zxc_seekable_free(s);
+                return NULL;
+            }
+            if (UNLIKELY(r->read_at(r->ctx, dtmp, dbh.comp_size,
+                                    ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE) !=
+                             (int64_t)dbh.comp_size ||
+                         zxc_dict_id(dtmp, dbh.comp_size) != header_dict_id ||
+                         zxc_seekable_install_dict(s, dtmp, dbh.comp_size) != ZXC_OK)) {
+                ZXC_FREE(dtmp);
+                zxc_seekable_free(s);
+                return NULL;
+            }
+            ZXC_FREE(dtmp);
+            data_start = (uint64_t)ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + dbh.comp_size;
+        }
+    }
+
     /* Parse comp_sizes and build prefix sums; validate against archive size. */
     const uint8_t* ep = seek_buf + ZXC_BLOCK_HEADER_SIZE;
-    uint64_t comp_acc = ZXC_FILE_HEADER_SIZE;
+    uint64_t comp_acc = data_start;
     for (uint32_t i = 0; i < num_blocks; i++) {
         s->comp_sizes[i] = zxc_le32(ep);
         ep += sizeof(uint32_t);
@@ -858,14 +921,14 @@ void zxc_seekable_free(zxc_seekable* s) {
     ZXC_FREE(s);
 }
 
-int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_size) {
-    if (UNLIKELY(!s || !dict || dict_size == 0)) return ZXC_ERROR_NULL_INPUT;
-    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    if (UNLIKELY(s->expected_dict_id != 0 && zxc_dict_id(dict, dict_size) != s->expected_dict_id))
-        return ZXC_ERROR_DICT_MISMATCH;
-
+/* Install a dictionary into the handle: owned copy + [dict | decode] bounce
+ * buffer. No id validation (callers do it where needed). */
+static int zxc_seekable_install_dict(zxc_seekable* s, const void* dict, const size_t dict_size) {
     ZXC_FREE(s->dict);
     ZXC_FREE(s->dict_work);
+    s->dict = NULL;
+    s->dict_work = NULL;
+    s->dict_size = 0;
 
     s->dict = (uint8_t*)ZXC_MALLOC(dict_size);
     if (UNLIKELY(!s->dict)) return ZXC_ERROR_MEMORY;
@@ -884,6 +947,14 @@ int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_s
     }
     ZXC_MEMCPY(s->dict_work, dict, dict_size);
     return ZXC_OK;
+}
+
+int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_size) {
+    if (UNLIKELY(!s || !dict || dict_size == 0)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+    if (UNLIKELY(s->expected_dict_id != 0 && zxc_dict_id(dict, dict_size) != s->expected_dict_id))
+        return ZXC_ERROR_DICT_MISMATCH;
+    return zxc_seekable_install_dict(s, dict, dict_size);
 }
 
 void zxc_seekable_attach_owned_ctx(zxc_seekable* s, void* ctx) {

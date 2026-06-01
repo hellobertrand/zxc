@@ -183,7 +183,6 @@ int test_error_name(void);
 int test_library_info_api(void);
 
 /* Dictionary */
-int test_dict_zxd_roundtrip(void);
 int test_dict_id_deterministic(void);
 int test_dict_get_id_apis(void);
 int test_dict_buffer_roundtrip(void);

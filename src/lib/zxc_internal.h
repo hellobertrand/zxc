@@ -335,15 +335,13 @@ extern "C" {
 
 /** @brief Bit flag in the Flags byte indicating checksum presence (bit 7). */
 #define ZXC_FILE_FLAG_HAS_CHECKSUM 0x80U
-/** @brief Bit flag in the Flags byte indicating a dictionary is required (bit 6). */
+/** @brief Bit flag in the Flags byte indicating a dictionary is present (bit 6).
+ *  The dictionary is always embedded as a ZXC_BLOCK_DICT block right after the
+ *  file header, so the decoder reads it from the archive itself. */
 #define ZXC_FILE_FLAG_HAS_DICTIONARY 0x40U
 /** @brief Mask for the checksum algorithm id (bits 0-3). */
 #define ZXC_FILE_CHECKSUM_ALGO_MASK 0x0FU
 
-/** @brief Magic word identifying ZXC dictionary files (.zxd). */
-#define ZXC_DICT_MAGIC 0x9CB0D1C7U
-/** @brief Current dictionary file format version. */
-#define ZXC_DICT_VERSION 1
 /** @brief K-gram length scanned by the dictionary trainer. Aligned on the LZ
  *         minimum match length so trained patterns are matchable at encode time. */
 #define ZXC_DICT_KGRAM_LEN ZXC_LZ_MIN_MATCH_LEN
@@ -760,6 +758,9 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
  *   Uses Delta Encoding + ZigZag + Bitpacking.
  * - `ZXC_BLOCK_GHI` (3): General-purpose high-velocity mode using LZ77 with advanced
  * techniques (lazy matching, step skipping) for maximum ratio. Includes 3 sections descriptors.
+ * - `ZXC_BLOCK_DICT` (253): Embedded dictionary block. Contains the dictionary data
+ *   for the file, if present. Always placed immediately after the file header when the
+ *   dictionary flag is set.
  * - `ZXC_BLOCK_SEK` (254): Seek table block. Contains per-block compressed/decompressed sizes
  *   for random-access decompression. Placed between EOF block and file footer.
  * - `ZXC_BLOCK_EOF` (255): End of file marker.
@@ -769,6 +770,7 @@ typedef enum {
     ZXC_BLOCK_GLO = 1,
     ZXC_BLOCK_NUM = 2,
     ZXC_BLOCK_GHI = 3,
+    ZXC_BLOCK_DICT = 253,
     ZXC_BLOCK_SEK = 254,
     ZXC_BLOCK_EOF = 255
 } zxc_block_type_t;

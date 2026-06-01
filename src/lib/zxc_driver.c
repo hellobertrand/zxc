@@ -602,12 +602,13 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                                      const int checksum_enabled, const int seekable,
                                      zxc_chunk_processor_t func,
                                      zxc_progress_callback_t progress_cb, void* user_data,
-                                     const uint8_t* dict, const size_t dict_size) {
+                                     const uint8_t* dict, size_t dict_size) {
     zxc_stream_ctx_t ctx;
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
 
     size_t runtime_chunk_sz = (block_size > 0) ? block_size : ZXC_BLOCK_SIZE_DEFAULT;
     int file_has_chk = 0;
+    uint8_t* embedded_dict = NULL; /* heap copy of an embedded dictionary (decode); freed at exit */
 
     // Try to get input file size for progress tracking (compression mode only)
     // For decompression, the CLI precomputes the size and passes it via user_data
@@ -635,9 +636,28 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
             return ZXC_ERROR_BAD_HEADER;
 
         if (header_dict_id != 0) {
-            if (UNLIKELY(!dict || dict_size == 0)) return ZXC_ERROR_DICT_REQUIRED;
-            if (UNLIKELY(zxc_dict_id(dict, dict_size) != header_dict_id))
+            /* A dictionary is present: it is embedded as a ZXC_BLOCK_DICT block
+             * right after the header. Read it and use it (no external dict). The
+             * header is already consumed, so this works on pipes too. */
+            uint8_t dbh[ZXC_BLOCK_HEADER_SIZE];
+            zxc_block_header_t bh;
+            if (UNLIKELY(fread(dbh, 1, ZXC_BLOCK_HEADER_SIZE, f_in) != ZXC_BLOCK_HEADER_SIZE ||
+                         zxc_read_block_header(dbh, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK ||
+                         bh.block_type != ZXC_BLOCK_DICT || bh.comp_size == 0 ||
+                         bh.comp_size > ZXC_DICT_SIZE_MAX))
+                return ZXC_ERROR_BAD_HEADER;
+            embedded_dict = (uint8_t*)ZXC_MALLOC(bh.comp_size);
+            if (UNLIKELY(!embedded_dict)) return ZXC_ERROR_MEMORY;
+            if (UNLIKELY(fread(embedded_dict, 1, bh.comp_size, f_in) != bh.comp_size)) {
+                ZXC_FREE(embedded_dict);
+                return ZXC_ERROR_SRC_TOO_SMALL;
+            }
+            if (UNLIKELY(zxc_dict_id(embedded_dict, bh.comp_size) != header_dict_id)) {
+                ZXC_FREE(embedded_dict);
                 return ZXC_ERROR_DICT_MISMATCH;
+            }
+            dict = embedded_dict;
+            dict_size = bh.comp_size;
         }
     }
 
@@ -677,6 +697,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (UNLIKELY(!mem_block || per_job_sz > SIZE_MAX / ctx.ring_size)) {
         // LCOV_EXCL_START
         ZXC_ALIGNED_FREE(mem_block);
+        ZXC_FREE(embedded_dict);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
@@ -712,6 +733,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (UNLIKELY(!workers)) {
         // LCOV_EXCL_START
         ZXC_ALIGNED_FREE(mem_block);
+        ZXC_FREE(embedded_dict);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
@@ -728,6 +750,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         pthread_mutex_destroy(&ctx.lock);
         ZXC_FREE(workers);
         ZXC_ALIGNED_FREE(mem_block);
+        ZXC_FREE(embedded_dict);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
@@ -751,6 +774,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
             pthread_mutex_destroy(&ctx.lock);
             ZXC_FREE(workers);
             ZXC_ALIGNED_FREE(mem_block);
+            ZXC_FREE(embedded_dict);
             return ZXC_ERROR_MEMORY;
         }
         // LCOV_EXCL_STOP
@@ -762,8 +786,24 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                               (dict && dict_size) ? zxc_dict_id(dict, dict_size) : 0);
         if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
             ctx.io_error = 1;
-
         w_args.total_bytes = ZXC_FILE_HEADER_SIZE;
+
+        if (dict && dict_size) {
+            /* A dictionary is always embedded: store it as a ZXC_BLOCK_DICT block
+             * right after the header ([block header 8][raw dict content]). Data
+             * blocks follow, so the seekable reader offsets the first past it.
+             * The HAS_DICTIONARY header flag (set above via dict_id) marks it. */
+            uint8_t dbh[ZXC_BLOCK_HEADER_SIZE];
+            const zxc_block_header_t dh = {.block_type = ZXC_BLOCK_DICT,
+                                           .block_flags = 0,
+                                           .reserved = 0,
+                                           .comp_size = (uint32_t)dict_size};
+            zxc_write_block_header(dbh, ZXC_BLOCK_HEADER_SIZE, &dh);
+            if (UNLIKELY(fwrite(dbh, 1, ZXC_BLOCK_HEADER_SIZE, f_out) != ZXC_BLOCK_HEADER_SIZE ||
+                         fwrite(dict, 1, dict_size, f_out) != dict_size))
+                ctx.io_error = 1;
+            w_args.total_bytes += ZXC_BLOCK_HEADER_SIZE + dict_size;
+        }
     }
     pthread_t writer_th;
     if (UNLIKELY(pthread_create(&writer_th, NULL, zxc_async_writer, &w_args) != 0)) {
@@ -779,6 +819,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         pthread_mutex_destroy(&ctx.lock);
         ZXC_FREE(workers);
         ZXC_ALIGNED_FREE(mem_block);
+        ZXC_FREE(embedded_dict);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
@@ -977,6 +1018,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ZXC_FREE(w_args.seek_comp);
     ZXC_FREE(workers);
     ZXC_ALIGNED_FREE(mem_block);
+    ZXC_FREE(embedded_dict);
 
     if (UNLIKELY(ctx.io_error)) return ZXC_ERROR_IO;
 

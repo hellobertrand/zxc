@@ -299,6 +299,7 @@ static int zxc_validate_output_path(const char* path, char* resolved_buffer, siz
 // CLI Logging Helpers
 static int g_quiet = 0;
 static int g_verbose = 0;
+static int g_auto_dict = 0; /* --auto-dict: train a dictionary from the input and embed it */
 
 /**
  * @brief Standard logging function. Respects the global quiet flag.
@@ -344,11 +345,10 @@ typedef enum {
     MODE_DECOMPRESS,
     MODE_BENCHMARK,
     MODE_INTEGRITY,
-    MODE_LIST,
-    MODE_TRAIN_DICT
+    MODE_LIST
 } zxc_mode_t;
 
-enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT };
+enum { OPT_VERSION = 1000, OPT_HELP, OPT_AUTO_DICT };
 
 // Forward declaration for recursive mode
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
@@ -468,10 +468,10 @@ void print_help(const char* app) {
         "Standard Modes:\n"
         "  -z, --compress    Compress FILE {default}\n"
         "  -d, --decompress  Decompress FILE (or stdin -> stdout)\n"
-        "  -l, --list        List archive or dictionary info\n"
+        "  -l, --list        List archive info\n"
         "  -t, --test        Test compressed FILE integrity\n"
         "  -b, --bench [N]   Benchmark in-memory (N=seconds, default 5)\n"
-        "  --train-dict FILE Train a dictionary from input files\n\n"
+        "\n"
         "Batch Processing:\n"
         "  -m, --multiple    Multiple input files\n"
         "  -r, --recursive   Operate recursively on directories\n\n"
@@ -484,7 +484,7 @@ void print_help(const char* app) {
         "  -T, --threads N   Number of threads (0=auto)\n"
         "  -C, --checksum    Enable checksum {default}\n"
         "  -N, --no-checksum Disable checksum\n"
-        "  -D, --dict FILE   Use pre-trained dictionary (.zxd) for compression/decompression\n"
+        "  --auto-dict       Train a dictionary from the input and embed it (compression)\n"
         "  -S, --seekable    Append seek table for random-access decompression\n"
         "  -k, --keep        Keep input file\n"
         "  -f, --force       Force overwrite\n"
@@ -617,37 +617,6 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
  * @param[in] json_output If 1, output JSON format.
  * @return 0 on success, 1 on error.
  */
-// Report a .zxd dictionary file: its dict_id (to match against a .zxc's
-// "Dict ID") and content size. `buf` holds the whole .zxd file.
-static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, long long file_size,
-                         int json_output) {
-    const void* content = NULL;
-    size_t content_size = 0;
-    uint32_t id = 0;
-    const int rc = zxc_dict_load(buf, buf_size, &content, &content_size, &id);
-    if (rc != ZXC_OK) {
-        fprintf(stderr, "Error: invalid dictionary '%s': %s\n", path, zxc_error_name(rc));
-        return 1;
-    }
-    if (json_output) {
-        printf("{\n"
-               "  \"type\": \"dictionary\",\n"
-               "  \"filename\": \"%s\",\n"
-               "  \"dict_id\": \"0x%08X\",\n"
-               "  \"content_size_bytes\": %zu,\n"
-               "  \"file_size_bytes\": %lld\n"
-               "}\n",
-               path, id, content_size, file_size);
-    } else {
-        printf("\n  Dictionary file (.zxd)\n"
-               "  Dict ID:       0x%08X\n"
-               "  Content size:  %zu bytes\n"
-               "  File:          %s\n",
-               id, content_size, path);
-    }
-    return 0;
-}
-
 static int zxc_list_archive(const char* path, int json_output) {
     char resolved_path[4096];
     if (zxc_validate_input_path(path, resolved_path, sizeof(resolved_path)) != 0) {
@@ -668,29 +637,6 @@ static int zxc_list_archive(const char* path, int json_output) {
         return 1;
     }
     const long long file_size = ftello(f);
-
-    // A .zxd dictionary file has its own magic word; recognise it and report
-    // its dict_id (for matching against a .zxc's "Dict ID") instead of failing
-    // as a non-archive. The upper bound is the largest possible .zxd file.
-    if (file_size >= (long long)ZXC_DICT_HEADER_SIZE &&
-        file_size <= (long long)zxc_dict_save_bound(ZXC_DICT_SIZE_MAX)) {
-        uint8_t probe[ZXC_DICT_HEADER_SIZE];
-        if (fseeko(f, 0, SEEK_SET) == 0 &&
-            fread(probe, 1, ZXC_DICT_HEADER_SIZE, f) == ZXC_DICT_HEADER_SIZE &&
-            zxc_dict_get_id(probe, ZXC_DICT_HEADER_SIZE) != 0) {
-            uint8_t* dbuf = (uint8_t*)malloc((size_t)file_size);
-            int r = 1;
-            if (dbuf && fseeko(f, 0, SEEK_SET) == 0 &&
-                fread(dbuf, 1, (size_t)file_size, f) == (size_t)file_size)
-                r = zxc_list_dict(path, dbuf, (size_t)file_size, file_size, json_output);
-            else
-                fprintf(stderr, "Error: Cannot read '%s'\n", path);
-            free(dbuf);
-            fclose(f);
-            return r;
-        }
-        fseeko(f, 0, SEEK_SET);
-    }
 
     // Use public API to get decompressed size
     const int64_t uncompressed_size = zxc_stream_get_decompressed_size(f);
@@ -789,6 +735,53 @@ static int zxc_list_archive(const char* path, int json_output) {
     }
 
     return 0;
+}
+
+// --auto-dict: train a dictionary from (a bounded prefix of) the input file and
+// return it as a malloc'd buffer (caller frees), sized to the block size. The
+// trained dict is meant to be embedded in the archive. Returns NULL on failure.
+static void* cli_auto_train_dict(const char* path, size_t block_size, size_t* out_size) {
+    *out_size = 0;
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseeko(f, 0, SEEK_END);
+    const long long fsz = ftello(f);
+    fseeko(f, 0, SEEK_SET);
+    if (fsz <= 0) {
+        fclose(f);
+        return NULL;
+    }
+    /* Train on up to 16 MB of the input; the trainer samples across it. */
+    const size_t cap = (size_t)16u << 20;
+    const size_t corpus_sz = ((size_t)fsz < cap) ? (size_t)fsz : cap;
+    uint8_t* corpus = (uint8_t*)malloc(corpus_sz);
+    if (!corpus) {
+        fclose(f);
+        return NULL;
+    }
+    const size_t got = fread(corpus, 1, corpus_sz, f);
+    fclose(f);
+    if (got != corpus_sz) {
+        free(corpus);
+        return NULL;
+    }
+    size_t dict_cap = ZXC_DICT_SIZE_MAX;
+    if (block_size > 0 && block_size < dict_cap) dict_cap = block_size;
+    uint8_t* dict = (uint8_t*)malloc(dict_cap);
+    if (!dict) {
+        free(corpus);
+        return NULL;
+    }
+    const void* samples[1] = {corpus};
+    const size_t sizes[1] = {corpus_sz};
+    const int64_t dsz = zxc_train_dict(samples, sizes, 1, dict, dict_cap);
+    free(corpus);
+    if (dsz <= 0) {
+        free(dict);
+        return NULL;
+    }
+    *out_size = (size_t)dsz;
+    return dict;
 }
 
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
@@ -974,6 +967,22 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                            .operation = (mode == MODE_COMPRESS) ? "Compressing" : "Decompressing",
                            .total_size = total_size};
 
+    /* --auto-dict: train a dictionary from the input and embed it (compress
+     * only, and only for a real file — a pipe cannot be re-read to train). */
+    const void* eff_dict = dict;
+    size_t eff_dict_size = dict_size;
+    void* auto_dict_buf = NULL;
+    if (g_auto_dict && mode == MODE_COMPRESS && !use_stdin) {
+        auto_dict_buf = cli_auto_train_dict(resolved_in_path, block_size, &eff_dict_size);
+        if (auto_dict_buf) {
+            eff_dict = auto_dict_buf;
+            zxc_log_v("Auto-trained dictionary: %zu bytes (embedded)\n", eff_dict_size);
+        } else {
+            eff_dict_size = dict_size;
+            zxc_log("Warning: --auto-dict training failed; compressing without a dictionary\n");
+        }
+    }
+
     const double t0 = zxc_now();
     int64_t bytes;
     if (mode == MODE_COMPRESS) {
@@ -983,8 +992,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .block_size = block_size,
             .checksum_enabled = checksum_enabled,
             .seekable = seekable,
-            .dict = dict,
-            .dict_size = dict_size,
+            .dict = eff_dict,
+            .dict_size = eff_dict_size,
             .progress_cb = show_progress ? cli_progress_callback : NULL,
             .user_data = &pctx,
         };
@@ -1022,6 +1031,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
     free(b1);
     free(b2);
+    free(auto_dict_buf);
 
     if (bytes >= 0) {
         if (mode == MODE_INTEGRITY) {
@@ -1094,11 +1104,8 @@ int main(int argc, char** argv) {
     int json_output = 0;
     size_t block_size = 0;
     int seekable = 0;
-    const char* dict_path = NULL;
-    const char* train_dict_path = NULL;
 
-    static const struct option long_options[] = {{"train-dict", required_argument, 0, OPT_TRAIN_DICT},
-                                                 {"dict", required_argument, 0, 'D'},
+    static const struct option long_options[] = {
                                                  {"compress", no_argument, 0, 'z'},
                                                  {"decompress", no_argument, 0, 'd'},
                                                  {"list", no_argument, 0, 'l'},
@@ -1119,12 +1126,13 @@ int main(int argc, char** argv) {
                                                  {"recursive", no_argument, 0, 'r'},
                                                  {"block-size", required_argument, 0, 'B'},
                                                  {"seekable", no_argument, 0, 'S'},
+                                                 {"auto-dict", no_argument, 0, OPT_AUTO_DICT},
                                                  {0, 0, 0, 0}};
 
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
-    while ((opt = getopt_long(argc, argv, "123456b::B:cCdD:fhjklmrNqST:tvVz", long_options, NULL)) !=
+    while ((opt = getopt_long(argc, argv, "123456b::B:cCdfhjklmrNqST:tvVz", long_options, NULL)) !=
            -1) {
         switch (opt) {
             case 'z':
@@ -1208,12 +1216,8 @@ int main(int argc, char** argv) {
             case 'S':
                 seekable = 1;
                 break;
-            case 'D':
-                dict_path = optarg;
-                break;
-            case OPT_TRAIN_DICT:
-                mode = MODE_TRAIN_DICT;
-                train_dict_path = optarg;
+            case OPT_AUTO_DICT:
+                g_auto_dict = 1;
                 break;
             case 'r':
                 recursive_mode = 1;
@@ -1287,171 +1291,10 @@ int main(int argc, char** argv) {
         checksum = (mode == MODE_BENCHMARK) ? 0 : 1;
     }
 
-    /* Load dictionary file (.zxd) if requested */
+    /* Dictionaries are produced internally (--auto-dict) and embedded in the
+     * archive; the CLI never takes a dictionary as input. */
     void* dict = NULL;
     size_t dict_size = 0;
-    if (dict_path) {
-        char resolved_dict[4096];
-        if (zxc_validate_input_path(dict_path, resolved_dict, sizeof(resolved_dict)) != 0) {
-            fprintf(stderr, "Error: invalid dictionary path '%s': %s\n", dict_path, strerror(errno));
-            return 1;
-        }
-        FILE* f_dict = fopen(resolved_dict, "rb");
-        if (!f_dict) {
-            fprintf(stderr, "Error: cannot open dictionary '%s': %s\n", dict_path, strerror(errno));
-            return 1;
-        }
-        fseeko(f_dict, 0, SEEK_END);
-        const long long fsize = ftello(f_dict);
-        fseeko(f_dict, 0, SEEK_SET);
-        if (fsize <= 0 || (size_t)fsize > ZXC_DICT_SIZE_MAX + ZXC_DICT_HEADER_SIZE) {
-            fprintf(stderr, "Error: dictionary file '%s' has invalid size\n", dict_path);
-            fclose(f_dict);
-            return 1;
-        }
-        uint8_t* zxd_buf = (uint8_t*)malloc((size_t)fsize);
-        if (!zxd_buf || fread(zxd_buf, 1, (size_t)fsize, f_dict) != (size_t)fsize) {
-            fprintf(stderr, "Error: failed to read dictionary '%s'\n", dict_path);
-            free(zxd_buf);
-            fclose(f_dict);
-            return 1;
-        }
-        fclose(f_dict);
-
-        const void* content = NULL;
-        size_t content_size = 0;
-        const int rc = zxc_dict_load(zxd_buf, (size_t)fsize, &content, &content_size, NULL);
-        if (rc != ZXC_OK) {
-            fprintf(stderr, "Error: invalid dictionary '%s': %s\n", dict_path,
-                    zxc_error_name(rc));
-            free(zxd_buf);
-            return 1;
-        }
-        dict = malloc(content_size);
-        if (!dict) {
-            free(zxd_buf);
-            return 1;
-        }
-        memcpy(dict, content, content_size);
-        dict_size = content_size;
-        free(zxd_buf);
-    }
-
-    /*
-     * Train Dictionary Mode
-     * Reads input files as samples, trains a dictionary, saves as .zxd.
-     */
-    if (mode == MODE_TRAIN_DICT) {
-        if (optind >= argc) {
-            fprintf(stderr, "Error: --train-dict requires input files as training samples.\n");
-            free(dict);
-            return 1;
-        }
-        const int n_files = argc - optind;
-        const void** samples = (const void**)malloc((size_t)n_files * sizeof(void*));
-        size_t* sample_sizes = (size_t*)malloc((size_t)n_files * sizeof(size_t));
-        if (!samples || !sample_sizes) {
-            fprintf(stderr, "Error: memory allocation failed\n");
-            free(samples);
-            free(sample_sizes);
-            free(dict);
-            return 1;
-        }
-        int n_loaded = 0;
-        for (int i = optind; i < argc; i++) {
-            char resolved[4096];
-            if (zxc_validate_input_path(argv[i], resolved, sizeof(resolved)) != 0) {
-                fprintf(stderr, "Warning: invalid path '%s', skipping\n", argv[i]);
-                continue;
-            }
-            FILE* sf = fopen(resolved, "rb");
-            if (!sf) {
-                fprintf(stderr, "Warning: cannot open '%s', skipping\n", argv[i]);
-                continue;
-            }
-            fseeko(sf, 0, SEEK_END);
-            size_t sz = (size_t)ftello(sf);
-            fseeko(sf, 0, SEEK_SET);
-            if (sz == 0) { fclose(sf); continue; }
-            uint8_t* buf = (uint8_t*)malloc(sz);
-            if (!buf) { fclose(sf); continue; }
-            fread(buf, 1, sz, sf);
-            fclose(sf);
-            samples[n_loaded] = buf;
-            sample_sizes[n_loaded] = sz;
-            n_loaded++;
-        }
-        if (n_loaded == 0) {
-            fprintf(stderr, "Error: no valid samples loaded\n");
-            free(samples);
-            free(sample_sizes);
-            free(dict);
-            return 1;
-        }
-
-        size_t dict_cap = ZXC_DICT_SIZE_MAX;
-        if (block_size > 0 && block_size < dict_cap) dict_cap = block_size;
-        uint8_t* dict_buf = (uint8_t*)malloc(dict_cap);
-        if (!dict_buf) {
-            fprintf(stderr, "Error: memory allocation failed\n");
-            for (int i = 0; i < n_loaded; i++) free((void*)samples[i]);
-            free(samples);
-            free(sample_sizes);
-            free(dict);
-            return 1;
-        }
-
-        int64_t dict_sz = zxc_train_dict(samples, sample_sizes, (size_t)n_loaded,
-                                         dict_buf, dict_cap);
-        for (int i = 0; i < n_loaded; i++) free((void*)samples[i]);
-        free(samples);
-        free(sample_sizes);
-
-        if (dict_sz <= 0) {
-            fprintf(stderr, "Error: training failed: %s\n", zxc_error_name((int)dict_sz));
-            free(dict_buf);
-            free(dict);
-            return 1;
-        }
-
-        size_t zxd_bound = zxc_dict_save_bound((size_t)dict_sz);
-        uint8_t* zxd = (uint8_t*)malloc(zxd_bound);
-        int64_t zxd_sz = zxc_dict_save(dict_buf, (size_t)dict_sz, zxd, zxd_bound);
-        free(dict_buf);
-        if (zxd_sz <= 0) {
-            fprintf(stderr, "Error: dict save failed: %s\n", zxc_error_name((int)zxd_sz));
-            free(zxd);
-            free(dict);
-            return 1;
-        }
-
-        FILE* out;
-#ifdef _WIN32
-        out = fopen(train_dict_path, "wb");
-#else
-        {
-            const int fd = open(train_dict_path, O_CREAT | O_WRONLY | O_TRUNC,
-                                S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-            out = (fd != -1) ? fdopen(fd, "wb") : NULL;
-        }
-#endif
-        if (!out) {
-            fprintf(stderr, "Error: cannot create '%s': %s\n", train_dict_path, strerror(errno));
-            free(zxd);
-            free(dict);
-            return 1;
-        }
-        const uint32_t trained_id = zxc_dict_get_id(zxd, (size_t)zxd_sz);
-        fwrite(zxd, 1, (size_t)zxd_sz, out);
-        fclose(out);
-        free(zxd);
-
-        fprintf(stderr, "Trained dictionary: %lld bytes from %d samples -> %s (dict_id: 0x%08X)\n",
-                (long long)dict_sz, n_loaded, train_dict_path, trained_id);
-
-        free(dict);
-        return 0;
-    }
 
     /*
      * Benchmark Mode
