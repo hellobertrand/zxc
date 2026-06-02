@@ -518,29 +518,19 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     const size_t eff_chunk =
         dict_size > 0 ? zxc_block_size_ceil(dict_size + block_size) : block_size;
     // LCOV_EXCL_START
-    if (UNLIKELY(zxc_cctx_init(&ctx, eff_chunk, 1, level, checksum_enabled) != ZXC_OK))
+    if (UNLIKELY(zxc_cctx_init(&ctx, eff_chunk, 1, level, checksum_enabled, dict_size) != ZXC_OK))
         return ZXC_ERROR_MEMORY;
     // LCOV_EXCL_STOP
-    ctx.dict_size = dict_size;
 
-    /* Dict input buffer: [dict_content | block_data] for the encoder. */
-    uint8_t* dict_input = NULL;
-    if (dict_size > 0) {
-        dict_input = (uint8_t*)ZXC_MALLOC(dict_size + block_size);
-        if (UNLIKELY(!dict_input)) {
-            // LCOV_EXCL_START
-            zxc_cctx_free(&ctx);
-            return ZXC_ERROR_MEMORY;
-            // LCOV_EXCL_STOP
-        }
-        ZXC_MEMCPY(dict_input, dict, dict_size);
-    }
+    /* Dict input buffer: [dict_content | block_data] for the encoder, carved
+     * into the cctx workspace (NULL when no dictionary is active). */
+    uint8_t* const dict_input = ctx.dict_buffer;
+    if (dict_input) ZXC_MEMCPY(dict_input, dict, dict_size);
 
     const int h_val =
         zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled, did);
     // LCOV_EXCL_START
     if (UNLIKELY(h_val < 0)) {
-        ZXC_FREE(dict_input);
         zxc_cctx_free(&ctx);
         return h_val;
     }
@@ -555,7 +545,6 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         const size_t block_count = src_size / block_size;
         if (UNLIKELY(block_count > (size_t)UINT32_MAX - 2)) {
             // LCOV_EXCL_START
-            ZXC_FREE(dict_input);
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_BAD_BLOCK_SIZE;
             // LCOV_EXCL_STOP
@@ -564,7 +553,6 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         seek_comp = (uint32_t*)ZXC_MALLOC(seek_cap * sizeof(uint32_t));
         // LCOV_EXCL_START
         if (UNLIKELY(!seek_comp)) {
-            ZXC_FREE(dict_input);
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_MEMORY;
         }
@@ -584,7 +572,6 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
             res = zxc_compress_chunk_wrapper(&ctx, ip + pos, chunk_len, op, rem_cap);
         }
         if (UNLIKELY(res < 0)) {
-            ZXC_FREE(dict_input);
             ZXC_FREE(seek_comp);
             zxc_cctx_free(&ctx);
             return res;
@@ -606,7 +593,6 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
                 seek_cap = seek_cap * 2;
                 uint32_t* nc = (uint32_t*)ZXC_REALLOC(seek_comp, seek_cap * sizeof(uint32_t));
                 if (UNLIKELY(!nc)) {
-                    ZXC_FREE(dict_input);
                     ZXC_FREE(seek_comp);
                     zxc_cctx_free(&ctx);
                     return ZXC_ERROR_MEMORY;
@@ -622,7 +608,6 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         pos += chunk_len;
     }
 
-    ZXC_FREE(dict_input);
     zxc_cctx_free(&ctx);
 
     // Write EOF Block
@@ -705,7 +690,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
     if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
                                       &header_dict_id) != ZXC_OK ||
                  zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0,
-                               file_has_checksums && checksum_enabled) != ZXC_OK)) {
+                               file_has_checksums && checksum_enabled, dict_size) != ZXC_OK)) {
         return ZXC_ERROR_BAD_HEADER;
     }
 
@@ -720,24 +705,15 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             return ZXC_ERROR_DICT_MISMATCH;
         }
     }
-    ctx.dict_size = dict_size;
 
     ip += ZXC_FILE_HEADER_SIZE;
 
     const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
 
-    /* Dict decode buffer: [dict_content | decode_space + PAD] */
-    uint8_t* dict_dec = NULL;
-    if (dict_size > 0) {
-        dict_dec = (uint8_t*)ZXC_MALLOC(dict_size + work_sz);
-        if (UNLIKELY(!dict_dec)) {
-            // LCOV_EXCL_START
-            zxc_cctx_free(&ctx);
-            return ZXC_ERROR_MEMORY;
-            // LCOV_EXCL_STOP
-        }
-        ZXC_MEMCPY(dict_dec, dict, dict_size);
-    }
+    /* Dict decode buffer: [dict_content | decode_space + PAD], carved into the
+     * cctx workspace (NULL when no dictionary is active). */
+    uint8_t* const dict_dec = ctx.dict_buffer;
+    if (dict_dec) ZXC_MEMCPY(dict_dec, dict, dict_size);
 
     // Block decompression loop
     uint32_t global_hash = 0;
@@ -747,7 +723,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         zxc_block_header_t bh;
         // Read the block header to determine the compressed size
         if (UNLIKELY(zxc_read_block_header(ip, rem_src, &bh) != ZXC_OK)) {
-            ZXC_FREE(dict_dec);
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_BAD_HEADER;
         }
@@ -758,7 +733,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             // even when a seek table is inserted between EOF block and footer.
             // LCOV_EXCL_START
             if (UNLIKELY(src_size < ZXC_FILE_FOOTER_SIZE)) {
-                ZXC_FREE(dict_dec);
                 zxc_cctx_free(&ctx);
                 return ZXC_ERROR_SRC_TOO_SMALL;
             }
@@ -768,7 +742,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             // Validate source size matches what we decompressed
             const uint64_t stored_size = zxc_le64(footer);
             if (UNLIKELY(stored_size != (uint64_t)(op - op_start))) {
-                ZXC_FREE(dict_dec);
                 zxc_cctx_free(&ctx);
                 return ZXC_ERROR_CORRUPT_DATA;
             }
@@ -777,7 +750,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             if (checksum_enabled && file_has_checksums) {
                 const uint32_t stored_hash = zxc_le32(footer + sizeof(uint64_t));
                 if (UNLIKELY(stored_hash != global_hash)) {
-                    ZXC_FREE(dict_dec);
                     zxc_cctx_free(&ctx);
                     return ZXC_ERROR_BAD_CHECKSUM;
                 }
@@ -794,7 +766,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             if (LIKELY(res > 0)) {
                 if (UNLIKELY((size_t)res > rem_cap)) {
                     // LCOV_EXCL_START
-                    ZXC_FREE(dict_dec);
                     zxc_cctx_free(&ctx);
                     return ZXC_ERROR_DST_TOO_SMALL;
                     // LCOV_EXCL_STOP
@@ -818,7 +789,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             }
         }
         if (UNLIKELY(res < 0)) {
-            ZXC_FREE(dict_dec);
             zxc_cctx_free(&ctx);
             return res;
         }
@@ -834,7 +804,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         op += res;
     }
 
-    ZXC_FREE(dict_dec);
     zxc_cctx_free(&ctx);
     return (int64_t)(op - op_start);
 }
@@ -907,7 +876,7 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
         // LCOV_EXCL_START
         if (UNLIKELY(!zxc_validate_block_size(cctx->stored_block_size) ||
                      zxc_cctx_init(&cctx->inner, cctx->stored_block_size, 1, cctx->stored_level,
-                                   cctx->stored_checksum) != ZXC_OK)) {
+                                   cctx->stored_checksum, 0) != ZXC_OK)) {
             ZXC_FREE(cctx);
             return NULL;
         }
@@ -960,7 +929,8 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
             // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
-        if (UNLIKELY(zxc_cctx_init(&cctx->inner, block_size, 1, level, checksum_enabled) != ZXC_OK))
+        if (UNLIKELY(zxc_cctx_init(&cctx->inner, block_size, 1, level, checksum_enabled, 0) !=
+                     ZXC_OK))
             return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
         cctx->last_block_size = block_size;
@@ -1027,6 +997,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
 struct zxc_dctx_s {
     zxc_cctx_t inner;       /* reuses the same internal context type */
     size_t last_block_size; /* block size from last header parse */
+    size_t last_dict_size;  /* dict_size the inner buffer was carved for (drives re-init) */
     int initialized;        /* 1 if inner has live allocations */
     int owns_workspace;     /* 0 = library-allocated (free in zxc_free_dctx),
                                1 = caller-supplied static workspace (no-op free,
@@ -1073,8 +1044,10 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     if (UNLIKELY(dctx->owns_workspace && runtime_chunk_size != dctx->last_block_size))
         return ZXC_ERROR_BAD_BLOCK_SIZE;
 
-    /* Re-init only when block size changed. */
-    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != runtime_chunk_size)) {
+    /* Re-init when block size changed, or when a prior dict-using call (block
+     * API) left the inner context carrying a dict prefix. */
+    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != runtime_chunk_size ||
+                 dctx->last_dict_size != 0)) {
         if (dctx->initialized) {
             // LCOV_EXCL_START
             zxc_cctx_free(&dctx->inner);
@@ -1083,10 +1056,11 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
         }
         // LCOV_EXCL_START
         if (UNLIKELY(zxc_cctx_init(&dctx->inner, runtime_chunk_size, 0, 0,
-                                   file_has_checksums && checksum_enabled) != ZXC_OK))
+                                   file_has_checksums && checksum_enabled, 0) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
         dctx->last_block_size = runtime_chunk_size;
+        dctx->last_dict_size = 0;
         dctx->initialized = 1;
     } else {
         dctx->inner.checksum_enabled = file_has_checksums && checksum_enabled;
@@ -1193,8 +1167,8 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
             // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
-        if (UNLIKELY(zxc_cctx_init(&cctx->inner, effective_block_size, 1, level,
-                                   checksum_enabled) != ZXC_OK))
+        if (UNLIKELY(zxc_cctx_init(&cctx->inner, effective_block_size, 1, level, checksum_enabled,
+                                   b_dict_size) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
         cctx->last_block_size = effective_block_size;
@@ -1208,13 +1182,12 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
 
     int res;
     if (b_dict && b_dict_size > 0) {
-        uint8_t* combined = (uint8_t*)ZXC_MALLOC(b_dict_size + src_size);
-        if (UNLIKELY(!combined)) return ZXC_ERROR_MEMORY;
+        /* [dict | block] assembled in the cctx-owned dict_buffer */
+        uint8_t* const combined = cctx->inner.dict_buffer;
         ZXC_MEMCPY(combined, b_dict, b_dict_size);
         ZXC_MEMCPY(combined + b_dict_size, src, src_size);
         res = zxc_compress_chunk_wrapper(&cctx->inner, combined, b_dict_size + src_size,
                                          (uint8_t*)dst, dst_capacity);
-        ZXC_FREE(combined);
     } else {
         res = zxc_compress_chunk_wrapper(&cctx->inner, (const uint8_t*)src, src_size, (uint8_t*)dst,
                                          dst_capacity);
@@ -1238,27 +1211,30 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
 
-    /* Derive the block_size from dst_capacity (callers know the original size). */
+    const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
+    const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
+
+    /* Derive the block_size from dst_capacity (callers know the original size) */
     const size_t block_size = zxc_block_size_ceil(dst_capacity);
-    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != block_size)) {
+    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != block_size ||
+                 dctx->last_dict_size != dict_size)) {
         if (dctx->initialized) {
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
         }
         // LCOV_EXCL_START
-        if (UNLIKELY(zxc_cctx_init(&dctx->inner, block_size, 0, 0, checksum_enabled) != ZXC_OK))
+        if (UNLIKELY(zxc_cctx_init(&dctx->inner, block_size, 0, 0, checksum_enabled, dict_size) !=
+                     ZXC_OK))
             return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
         dctx->last_block_size = block_size;
+        dctx->last_dict_size = dict_size;
         dctx->initialized = 1;
     } else {
         dctx->inner.checksum_enabled = checksum_enabled;
     }
 
     zxc_cctx_t* const ctx = &dctx->inner;
-
-    const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
-    const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
     ctx->dict_size = dict_size;
 
     /* work_buf was pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD inside
@@ -1267,19 +1243,15 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 
     int res;
     if (dict && dict_size > 0) {
-        uint8_t* dec_buf = (uint8_t*)ZXC_MALLOC(dict_size + work_sz);
-        if (UNLIKELY(!dec_buf)) return ZXC_ERROR_MEMORY;
+        /* [dict | decode] assembled in the cctx-owned dict_buffer */
+        uint8_t* const dec_buf = ctx->dict_buffer;
         ZXC_MEMCPY(dec_buf, dict, dict_size);
         res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, dec_buf + dict_size,
                                            work_sz);
         if (LIKELY(res > 0)) {
-            if (UNLIKELY((size_t)res > dst_capacity)) {
-                ZXC_FREE(dec_buf);
-                return ZXC_ERROR_DST_TOO_SMALL;
-            }
+            if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
             ZXC_MEMCPY(dst, dec_buf + dict_size, (size_t)res);
         }
-        ZXC_FREE(dec_buf);
     } else if (LIKELY(dst_capacity >= work_sz)) {
         res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
                                            dst_capacity);
@@ -1322,20 +1294,23 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
     /* GLO/GHI: use the strict-tail decoder (no bounce buffer required). */
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const size_t block_size = zxc_block_size_ceil(dst_capacity);
-    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != block_size)) {
+    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != block_size ||
+                 dctx->last_dict_size != 0)) {
         if (dctx->initialized) {
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
         }
         // LCOV_EXCL_START
-        if (UNLIKELY(zxc_cctx_init(&dctx->inner, block_size, 0, 0, checksum_enabled) != ZXC_OK))
+        if (UNLIKELY(zxc_cctx_init(&dctx->inner, block_size, 0, 0, checksum_enabled, 0) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
         dctx->last_block_size = block_size;
+        dctx->last_dict_size = 0;
         dctx->initialized = 1;
     } else {
         dctx->inner.checksum_enabled = checksum_enabled;
     }
+    dctx->inner.dict_size = 0;
 
     const int res = zxc_decompress_chunk_wrapper_safe_public(&dctx->inner, (const uint8_t*)src,
                                                              src_size, (uint8_t*)dst, dst_capacity);
@@ -1362,7 +1337,7 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
 size_t zxc_static_cctx_workspace_size(const size_t block_size, const int level) {
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return 0;
     if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_DENSITY)) return 0;
-    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level);
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level, 0);
     if (UNLIKELY(inner_sz == 0)) return 0;
     return ZXC_STATIC_CCTX_HDR_SIZE + inner_sz;
 }
@@ -1378,7 +1353,7 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return NULL;
     if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_DENSITY)) return NULL;
 
-    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level);
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level, 0);
     if (UNLIKELY(inner_sz == 0)) return NULL;
     if (UNLIKELY(workspace_size < ZXC_STATIC_CCTX_HDR_SIZE + inner_sz)) return NULL;
 
@@ -1387,7 +1362,7 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
 
     uint8_t* const inner_ws = (uint8_t*)workspace + ZXC_STATIC_CCTX_HDR_SIZE;
     if (UNLIKELY(zxc_cctx_init_in_workspace(&cctx->inner, inner_ws, inner_sz, block_size, 1, level,
-                                            checksum_enabled) != ZXC_OK))
+                                            checksum_enabled, 0) != ZXC_OK))
         return NULL;
 
     cctx->owns_workspace = 1;
@@ -1401,7 +1376,7 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
 
 size_t zxc_static_dctx_workspace_size(const size_t block_size) {
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return 0;
-    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 0, 0);
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 0, 0, 0);
     if (UNLIKELY(inner_sz == 0)) return 0;
     return ZXC_STATIC_DCTX_HDR_SIZE + inner_sz;
 }
@@ -1411,7 +1386,7 @@ zxc_dctx* zxc_init_static_dctx(void* RESTRICT workspace, const size_t workspace_
     if (UNLIKELY(!workspace)) return NULL;
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return NULL;
 
-    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 0, 0);
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 0, 0, 0);
     if (UNLIKELY(inner_sz == 0)) return NULL;
     if (UNLIKELY(workspace_size < ZXC_STATIC_DCTX_HDR_SIZE + inner_sz)) return NULL;
 
@@ -1421,7 +1396,7 @@ zxc_dctx* zxc_init_static_dctx(void* RESTRICT workspace, const size_t workspace_
     uint8_t* const inner_ws = (uint8_t*)workspace + ZXC_STATIC_DCTX_HDR_SIZE;
     /* mode == 0 init: checksum_enabled is updated per-call from the file
      * header flags, so it does not need to be locked at workspace init. */
-    if (UNLIKELY(zxc_cctx_init_in_workspace(&dctx->inner, inner_ws, inner_sz, block_size, 0, 0,
+    if (UNLIKELY(zxc_cctx_init_in_workspace(&dctx->inner, inner_ws, inner_sz, block_size, 0, 0, 0,
                                             0) != ZXC_OK))
         return NULL;
 

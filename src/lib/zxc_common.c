@@ -73,16 +73,20 @@ typedef struct {
     size_t off_seq_union;
     size_t off_extras;
     size_t off_lit_cctx;
-    size_t off_opt; /* meaningful only when sz_opt > 0 (level >= 6). */
+    /* meaningful only when sz_opt > 0 (level >= ZXC_LEVEL_DENSITY). */
+    size_t off_opt;
+    /* both modes: [dict | data] concat scratch, present only when dict_size > 0. */
+    size_t off_dict;
     /* Sub-buffer sizes (re-used by the partitioning step + zero-init). */
     size_t sz_hash_pos;
     size_t sz_hash_tags;
     size_t sz_opt;
+    size_t sz_dict; /* 0 = no dictionary buffer. */
     size_t max_seq;
 } zxc_cctx_layout_t;
 
 static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int mode,
-                                             const int level) {
+                                             const int level, const size_t dict_size) {
     zxc_cctx_layout_t layout = {0};
 
     if (mode == 0) {
@@ -97,70 +101,80 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         layout.total += ZXC_ALIGN_CL(sz_work);
         layout.off_lit_dctx = layout.total;
         layout.total += ZXC_ALIGN_CL(sz_lit);
-        return layout;
+    } else {
+        /* Compress: 6 partitions + optional opt_scratch at level >= ZXC_LEVEL_DENSITY. */
+        const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
+        layout.max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
+        layout.sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
+        layout.sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint8_t);
+        const size_t sz_chain = ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t);
+        /* buf_sequences (GHI, level <= ZXC_LEVEL_FAST) aliases buf_offsets + buf_tokens (GLO,
+         * level >= ZXC_LEVEL_DEFAULT). Mutually exclusive per block; sized for the larger. */
+        const size_t sz_seq_union = layout.max_seq * sizeof(uint32_t);
+        const size_t vbyte_len = (offset_bits + 6) / 7;
+        const size_t sz_extras = layout.max_seq * 2 * vbyte_len;
+        const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
+
+        /* opt_scratch (level >= ZXC_LEVEL_DENSITY only): DP arrays for the optimal parser, also
+         * reused transiently as the package-merge scratch for the length-limited
+         * Huffman code-length builder. Sized to the larger of the two demands.
+         * The formula must stay in sync with zxc_estimate_cctx_size() and the
+         * consumer in zxc_compress.c. */
+        if (level >= ZXC_LEVEL_DENSITY) {
+            const size_t sz_dp = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t));
+            const size_t sz_pl = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
+            const size_t sz_po = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
+            const size_t n_bm_words = ZXC_BITMAP_WORDS(chunk_size + 1);
+            const size_t sz_bm = ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));
+            const size_t dp_needed = sz_dp + sz_pl + sz_po + sz_bm;
+            layout.sz_opt =
+                (dp_needed > ZXC_HUF_BUILD_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_BUILD_SCRATCH_SIZE;
+        }
+
+        layout.off_hash_pos = layout.total;
+        layout.total += ZXC_ALIGN_CL(layout.sz_hash_pos);
+        layout.off_hash_tags = layout.total;
+        layout.total += ZXC_ALIGN_CL(layout.sz_hash_tags);
+        layout.off_chain = layout.total;
+        layout.total += ZXC_ALIGN_CL(sz_chain);
+        layout.off_seq_union = layout.total;
+        layout.total += ZXC_ALIGN_CL(sz_seq_union);
+        layout.off_extras = layout.total;
+        layout.total += ZXC_ALIGN_CL(sz_extras);
+        layout.off_lit_cctx = layout.total;
+        layout.total += ZXC_ALIGN_CL(sz_lit);
+        /* opt_scratch is appended last so it is absent for levels 1..5 (zero
+         * waste on the common path) and only inflates the workspace at level 6. */
+        if (layout.sz_opt) {
+            layout.off_opt = layout.total;
+            layout.total += ZXC_ALIGN_CL(layout.sz_opt);
+        }
     }
 
-    /* Compress: 6 partitions + optional opt_scratch at level >= 6. */
-    const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
-    layout.max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
-    layout.sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
-    layout.sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint8_t);
-    const size_t sz_chain = ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t);
-    /* buf_sequences (GHI, level <= 2) aliases buf_offsets + buf_tokens (GLO,
-     * level >= 3). Mutually exclusive per block; sized for the larger. */
-    const size_t sz_seq_union = layout.max_seq * sizeof(uint32_t);
-    const size_t vbyte_len = (offset_bits + 6) / 7;
-    const size_t sz_extras = layout.max_seq * 2 * vbyte_len;
-    const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
-
-    /* opt_scratch (level >= 6 only): DP arrays for the optimal parser, also
-     * reused transiently as the package-merge scratch for the length-limited
-     * Huffman code-length builder. Sized to the larger of the two demands.
-     * The formula must stay in sync with zxc_estimate_cctx_size() and the
-     * consumer in zxc_compress.c. */
-    if (level >= ZXC_LEVEL_DENSITY) {
-        const size_t sz_dp = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t));
-        const size_t sz_pl = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
-        const size_t sz_po = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
-        const size_t n_bm_words = ZXC_BITMAP_WORDS(chunk_size + 1);
-        const size_t sz_bm = ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));
-        const size_t dp_needed = sz_dp + sz_pl + sz_po + sz_bm;
-        layout.sz_opt =
-            (dp_needed > ZXC_HUF_BUILD_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_BUILD_SCRATCH_SIZE;
-    }
-
-    layout.off_hash_pos = layout.total;
-    layout.total += ZXC_ALIGN_CL(layout.sz_hash_pos);
-    layout.off_hash_tags = layout.total;
-    layout.total += ZXC_ALIGN_CL(layout.sz_hash_tags);
-    layout.off_chain = layout.total;
-    layout.total += ZXC_ALIGN_CL(sz_chain);
-    layout.off_seq_union = layout.total;
-    layout.total += ZXC_ALIGN_CL(sz_seq_union);
-    layout.off_extras = layout.total;
-    layout.total += ZXC_ALIGN_CL(sz_extras);
-    layout.off_lit_cctx = layout.total;
-    layout.total += ZXC_ALIGN_CL(sz_lit);
-    /* opt_scratch is appended last so it is absent for levels 1..5 (zero
-     * waste on the common path) and only inflates the workspace at level 6. */
-    if (layout.sz_opt) {
-        layout.off_opt = layout.total;
-        layout.total += ZXC_ALIGN_CL(layout.sz_opt);
+    /* [dict | data] concat scratch (dict only). Compress chunk_size already
+     * spans [dict | block]; decompress prepends dict to a (chunk + PAD) region. */
+    if (dict_size > 0) {
+        layout.sz_dict = (mode == 1) ? (chunk_size + ZXC_DECOMPRESS_TAIL_PAD)
+                                     : (dict_size + chunk_size + ZXC_DECOMPRESS_TAIL_PAD);
+        layout.off_dict = layout.total;
+        layout.total += ZXC_ALIGN_CL(layout.sz_dict);
     }
     return layout;
 }
 
-size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, const int level) {
+size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, const int level,
+                                       const size_t dict_size) {
     if (UNLIKELY(chunk_size == 0)) return 0;
-    return compute_cctx_layout(chunk_size, mode, level).total;
+    return compute_cctx_layout(chunk_size, mode, level, dict_size).total;
 }
 
 int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspace,
                                const size_t workspace_size, const size_t chunk_size, const int mode,
-                               const int level, const int checksum_enabled) {
+                               const int level, const int checksum_enabled,
+                               const size_t dict_size) {
     if (UNLIKELY(!ctx || !workspace || chunk_size == 0)) return ZXC_ERROR_NULL_INPUT;
 
-    const zxc_cctx_layout_t layout = compute_cctx_layout(chunk_size, mode, level);
+    const zxc_cctx_layout_t layout = compute_cctx_layout(chunk_size, mode, level, dict_size);
     if (UNLIKELY(workspace_size < layout.total)) return ZXC_ERROR_DST_TOO_SMALL;
 
     ZXC_MEMSET(ctx, 0, sizeof(zxc_cctx_t));
@@ -175,6 +189,14 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
      * not try to free the caller's workspace.  Sub-buffer pointers carry the
      * partition; ownership is implicit (the caller owns @p workspace). */
     uint8_t* const mem = (uint8_t*)workspace;
+
+    /* Dictionary concat scratch (both modes); init owns dict_size now so callers
+     * no longer assign ctx->dict_size after init. */
+    ctx->dict_size = dict_size;
+    if (dict_size > 0) {
+        ctx->dict_buffer = mem + layout.off_dict;
+        ctx->dict_buffer_cap = layout.sz_dict;
+    }
 
     if (mode == 0) {
         ctx->work_buf = mem + layout.off_work;
@@ -218,15 +240,15 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
  * @return @ref ZXC_OK on success, @ref ZXC_ERROR_MEMORY on allocation failure.
  */
 int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int mode,
-                  const int level, const int checksum_enabled) {
-    const size_t total = zxc_cctx_compute_workspace_size(chunk_size, mode, level);
+                  const int level, const int checksum_enabled, const size_t dict_size) {
+    const size_t total = zxc_cctx_compute_workspace_size(chunk_size, mode, level, dict_size);
     if (UNLIKELY(total == 0)) return ZXC_ERROR_NULL_INPUT;
 
     uint8_t* const mem = (uint8_t*)ZXC_ALIGNED_MALLOC(total, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
 
-    const int rc =
-        zxc_cctx_init_in_workspace(ctx, mem, total, chunk_size, mode, level, checksum_enabled);
+    const int rc = zxc_cctx_init_in_workspace(ctx, mem, total, chunk_size, mode, level,
+                                              checksum_enabled, dict_size);
     if (UNLIKELY(rc != ZXC_OK)) {
         // LCOV_EXCL_START
         ZXC_ALIGNED_FREE(mem);
@@ -263,11 +285,14 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->literals = NULL;
     ctx->work_buf = NULL;
     ctx->opt_scratch = NULL;
+    ctx->dict_buffer = NULL;
 
     ctx->epoch = 0;
     ctx->lit_buffer_cap = 0;
     ctx->work_buf_cap = 0;
     ctx->opt_scratch_cap = 0;
+    ctx->dict_buffer_cap = 0;
+    ctx->dict_size = 0;
 }
 
 /*
@@ -758,7 +783,7 @@ uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
 uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
     if (UNLIKELY(src_size == 0)) return 0;
     const size_t chunk_size = zxc_block_size_ceil(src_size);
-    return (uint64_t)zxc_cctx_compute_workspace_size(chunk_size, 1, level);
+    return (uint64_t)zxc_cctx_compute_workspace_size(chunk_size, 1, level, 0);
 }
 
 /*

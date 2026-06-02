@@ -173,10 +173,9 @@ struct zxc_seekable_s {
     zxc_cctx_t dctx;
     int dctx_initialized;
 
-    /* Dictionary (owned copy, freed in zxc_seekable_free) */
+    /* Dictionary (owned copy, freed in zxc_seekable_free). */
     uint8_t* dict;
     size_t dict_size;
-    uint8_t* dict_work; /* [dict | decode_space] bounce buffer */
 };
 
 /**
@@ -519,10 +518,12 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     /* Initialize decompression context on first use */
     if (!s->dctx_initialized) {
         // LCOV_EXCL_START
-        if (UNLIKELY(zxc_cctx_init(&s->dctx, (size_t)s->block_size, 0, 0, 0) != ZXC_OK))
+        if (UNLIKELY(zxc_cctx_init(&s->dctx, (size_t)s->block_size, 0, 0, 0, s->dict_size) !=
+                     ZXC_OK))
             return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
         s->dctx_initialized = 1;
+        if (s->dict_size > 0) ZXC_MEMCPY(s->dctx.dict_buffer, s->dict, s->dict_size);
     }
     s->dctx.dict_size = s->dict_size;
 
@@ -556,9 +557,10 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         }
 
         /* Decompress the block: when a dictionary is active, decode into the
-         * dict_work bounce buffer (which has dict content prepended) so that
+         * cctx-owned dict_buffer (which has dict content prepended) so that
          * match copies referencing dictionary bytes resolve naturally. */
-        uint8_t* dec_dst = s->dict_work ? s->dict_work + s->dict_size : s->dctx.work_buf;
+        uint8_t* dec_dst =
+            s->dctx.dict_buffer ? s->dctx.dict_buffer + s->dict_size : s->dctx.work_buf;
         const int dec_res =
             zxc_decompress_chunk_wrapper(&s->dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
         if (UNLIKELY(dec_res < 0)) {
@@ -651,34 +653,21 @@ static void* zxc_seek_mt_worker(void* arg) {
     /* Thread-local decompression context (mode=0 for decompress-only) */
     zxc_cctx_t dctx;
     // LCOV_EXCL_START
-    if (UNLIKELY(zxc_cctx_init(&dctx, (size_t)s->block_size, 0, 0, 0) != ZXC_OK)) {
+    if (UNLIKELY(zxc_cctx_init(&dctx, (size_t)s->block_size, 0, 0, 0, s->dict_size) != ZXC_OK)) {
         job->result = ZXC_ERROR_MEMORY;
         return NULL;
     }
     // LCOV_EXCL_STOP
-    dctx.dict_size = s->dict_size;
     const size_t work_sz = (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
 
-    /* Thread-local dict bounce buffer: [dict_content | decode_space] */
-    uint8_t* dict_work = NULL;
-    if (s->dict_size > 0 && s->dict) {
-        dict_work = (uint8_t*)ZXC_MALLOC(s->dict_size + work_sz);
-        if (UNLIKELY(!dict_work)) {
-            // LCOV_EXCL_START
-            zxc_cctx_free(&dctx);
-            job->result = ZXC_ERROR_MEMORY;
-            return NULL;
-            // LCOV_EXCL_STOP
-        }
-        ZXC_MEMCPY(dict_work, s->dict, s->dict_size);
-    }
+    uint8_t* const dict_work = dctx.dict_buffer;
+    if (dict_work) ZXC_MEMCPY(dict_work, s->dict, s->dict_size);
 
     /* Read compressed block */
     const uint32_t csz = s->comp_sizes[bi];
     uint8_t* const read_buf = (uint8_t*)ZXC_MALLOC(csz + ZXC_PAD_SIZE);
     // LCOV_EXCL_START
     if (UNLIKELY(!read_buf)) {
-        ZXC_FREE(dict_work);
         zxc_cctx_free(&dctx);
         job->result = ZXC_ERROR_MEMORY;
         return NULL;
@@ -689,7 +678,6 @@ static void* zxc_seek_mt_worker(void* arg) {
     // LCOV_EXCL_START
     if (UNLIKELY(read_res < 0)) {
         ZXC_FREE(read_buf);
-        ZXC_FREE(dict_work);
         zxc_cctx_free(&dctx);
         job->result = read_res;
         return NULL;
@@ -704,13 +692,11 @@ static void* zxc_seek_mt_worker(void* arg) {
 
     // LCOV_EXCL_START
     if (UNLIKELY(dec_res < 0)) {
-        ZXC_FREE(dict_work);
         zxc_cctx_free(&dctx);
         job->result = dec_res;
         return NULL;
     }
     if (UNLIKELY((size_t)dec_res < job->skip + job->copy_len)) {
-        ZXC_FREE(dict_work);
         zxc_cctx_free(&dctx);
         job->result = ZXC_ERROR_CORRUPT_DATA;
         return NULL;
@@ -720,7 +706,6 @@ static void* zxc_seek_mt_worker(void* arg) {
     /* Copy the requested portion directly into the caller's output buffer */
     ZXC_MEMCPY(job->dst, dec_dst + job->skip, job->copy_len);
 
-    ZXC_FREE(dict_work);
     zxc_cctx_free(&dctx);
     job->result = 0;
     return NULL;
@@ -851,7 +836,6 @@ void zxc_seekable_free(zxc_seekable* s) {
     if (!s) return;
     if (s->dctx_initialized) zxc_cctx_free(&s->dctx);
     ZXC_FREE(s->dict);
-    ZXC_FREE(s->dict_work);
     ZXC_FREE(s->comp_sizes);
     ZXC_FREE(s->comp_offsets);
     ZXC_FREE(s->owned_reader_ctx);
@@ -865,24 +849,21 @@ int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_s
         return ZXC_ERROR_DICT_MISMATCH;
 
     ZXC_FREE(s->dict);
-    ZXC_FREE(s->dict_work);
+    s->dict = NULL;
+    s->dict_size = 0;
 
     s->dict = (uint8_t*)ZXC_MALLOC(dict_size);
     if (UNLIKELY(!s->dict)) return ZXC_ERROR_MEMORY;
     ZXC_MEMCPY(s->dict, dict, dict_size);
     s->dict_size = dict_size;
 
-    const size_t work_sz = dict_size + (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
-    s->dict_work = (uint8_t*)ZXC_MALLOC(work_sz);
-    if (UNLIKELY(!s->dict_work)) {
-        // LCOV_EXCL_START
-        ZXC_FREE(s->dict);
-        s->dict = NULL;
-        s->dict_size = 0;
-        return ZXC_ERROR_MEMORY;
-        // LCOV_EXCL_STOP
+    /* The [dict | decode] bounce buffer is carved into the dctx workspace.
+     * Drop any context built without it (or for a different dict size) so it is
+     * re-carved with the new dict on the next decompress. */
+    if (s->dctx_initialized) {
+        zxc_cctx_free(&s->dctx);
+        s->dctx_initialized = 0;
     }
-    ZXC_MEMCPY(s->dict_work, dict, dict_size);
     return ZXC_OK;
 }
 

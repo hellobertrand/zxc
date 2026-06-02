@@ -1614,6 +1614,9 @@ typedef struct {
     int checksum_enabled;   /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;  /**< Compression level. */
     size_t dict_size;       /**< Dictionary prefill size (0 = no dictionary). */
+    uint8_t* dict_buffer;   /**< [dict | data] concat scratch carved from memory_block
+                                 when dict_size > 0 (NULL otherwise). */
+    size_t dict_buffer_cap; /**< Capacity of dict_buffer in bytes (0 = none). */
 
     /* Block-size derived parameters (computed once at init). */
     size_t chunk_size;    /**< Effective block size in bytes. */
@@ -1633,12 +1636,15 @@ typedef struct {
  * @param[in]  mode              1 for compression, 0 for decompression.
  * @param[in]  level             Compression level (ignored when @p mode == 0).
  * @param[in]  checksum_enabled  Non-zero to enable checksum computation.
+ * @param[in]  dict_size         Dictionary prefill size; when > 0 an extra
+ *                               [dict | data] concat buffer is carved into the
+ *                               workspace and @c ctx->dict_buffer is set.
  *
  * @return @c ZXC_OK on success, or a negative @ref zxc_error_t code (notably
  *         @c ZXC_ERROR_MEMORY on allocation failure).
  */
 int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, const int level,
-                  const int checksum_enabled);
+                  const int checksum_enabled, const size_t dict_size);
 
 /**
  * @brief Returns the byte count that @ref zxc_cctx_init would allocate for
@@ -1651,9 +1657,12 @@ int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, cons
  *                        @ref zxc_validate_block_size).
  * @param[in] mode        1 = compression, 0 = decompression.
  * @param[in] level       Compression level (only consulted when @p mode == 1).
+ * @param[in] dict_size   Dictionary prefill size; when > 0 the figure includes
+ *                        the [dict | data] concat buffer.
  * @return Size in bytes, or 0 if the parameters are invalid.
  */
-size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, const int level);
+size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, const int level,
+                                       const size_t dict_size);
 
 /**
  * @brief Initialises a compression / decompression context inside a
@@ -1675,12 +1684,15 @@ size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, 
  * @param[in]  mode              1 = compression, 0 = decompression.
  * @param[in]  level             Compression level (ignored when @p mode == 0).
  * @param[in]  checksum_enabled  Non-zero to enable checksum computation.
+ * @param[in]  dict_size         Dictionary prefill size; when > 0 the workspace
+ *                               must include the [dict | data] concat buffer and
+ *                               @c ctx->dict_buffer is set into it.
  * @return @c ZXC_OK on success, @c ZXC_ERROR_DST_TOO_SMALL if the workspace
  *         is too small, or another negative @ref zxc_error_t.
  */
 int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspace,
                                const size_t workspace_size, const size_t chunk_size, const int mode,
-                               const int level, const int checksum_enabled);
+                               const int level, const int checksum_enabled, const size_t dict_size);
 
 /**
  * @brief Releases the internal buffers owned by a context.

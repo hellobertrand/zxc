@@ -376,8 +376,8 @@ static void* zxc_stream_worker(void* arg) {
     const size_t eff_chunk = (ctx->dict_size > 0 && ctx->compression_mode == 1)
                                  ? zxc_block_size_ceil(ctx->dict_size + ctx->chunk_size)
                                  : ctx->chunk_size;
-    if (zxc_cctx_init(&cctx, eff_chunk, ctx->compression_mode, ctx->compression_level,
-                      unified_chk) != ZXC_OK) {
+    if (zxc_cctx_init(&cctx, eff_chunk, ctx->compression_mode, ctx->compression_level, unified_chk,
+                      ctx->dict_size) != ZXC_OK) {
         // LCOV_EXCL_START
         zxc_cctx_free(&cctx);
         pthread_mutex_lock(&ctx->lock);
@@ -390,27 +390,11 @@ static void* zxc_stream_worker(void* arg) {
     }
 
     cctx.compression_level = ctx->compression_level;
-    cctx.dict_size = ctx->dict_size;
 
-    /* Per-worker dict buffer for assembling [dict | block_data]. */
+    /* Per-worker dict buffer for assembling [dict | block_data] */
     const size_t dsz = ctx->dict_size;
-    uint8_t* dict_work = NULL;
-    if (dsz > 0) {
-        const size_t alloc = dsz + ctx->chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
-        dict_work = (uint8_t*)ZXC_MALLOC(alloc);
-        if (UNLIKELY(!dict_work)) {
-            // LCOV_EXCL_START
-            zxc_cctx_free(&cctx);
-            pthread_mutex_lock(&ctx->lock);
-            ctx->io_error = 1;
-            pthread_cond_broadcast(&ctx->cond_writer);
-            pthread_cond_broadcast(&ctx->cond_reader);
-            pthread_mutex_unlock(&ctx->lock);
-            return NULL;
-            // LCOV_EXCL_STOP
-        }
-        ZXC_MEMCPY(dict_work, ctx->dict, dsz);
-    }
+    uint8_t* const dict_work = cctx.dict_buffer;
+    if (dict_work) ZXC_MEMCPY(dict_work, ctx->dict, dsz);
 
     while (1) {
         zxc_stream_job_t* job = NULL;
@@ -452,7 +436,6 @@ static void* zxc_stream_worker(void* arg) {
         }
         pthread_mutex_unlock(&ctx->lock);
     }
-    ZXC_FREE(dict_work);
     zxc_cctx_free(&cctx);
     return NULL;
 }

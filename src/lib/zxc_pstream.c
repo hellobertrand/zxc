@@ -922,7 +922,7 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     if (UNLIKELY(!ds->payload || !ds->decoded)) return ds_set_error(ds, ZXC_ERROR_MEMORY);
 
     if (UNLIKELY(zxc_cctx_init(&ds->inner, ds->block_size, 0, 0,
-                               ds->file_has_checksum && ds->opts.checksum_enabled) != ZXC_OK)) {
+                               ds->file_has_checksum && ds->opts.checksum_enabled, 0) != ZXC_OK)) {
         return ds_set_error(ds, ZXC_ERROR_MEMORY);
     }
     // LCOV_EXCL_STOP
