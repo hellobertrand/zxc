@@ -404,10 +404,10 @@ int test_decompress_block_bound() {
  * @brief Stress-test the block API with boundary sizes across all levels.
  *
  * Tests zxc_compress_block / zxc_decompress_block with input sizes carefully
- * chosen to land near internal buffer limits (mflimit, page boundaries).
+ * chosen to land near internal buffer limits (search_limit, page boundaries).
  *
  * This test covers:
- *   - Sizes near the LZ match-finder safety margin (12-20 bytes)
+ *   - Sizes near the LZ match-finder safety margin (8-20 bytes)
  *   - Odd sizes that stress alignment assumptions
  *   - Data patterns that trigger each block type encoder (GLO, GHI, NUM, RAW)
  *   - All compression levels
@@ -415,10 +415,10 @@ int test_decompress_block_bound() {
 int test_block_api_boundary_sizes() {
     printf("=== TEST: Block API - Boundary Sizes ===\n");
 
-    /* Edge-case sizes: near mflimit (iend-12), near page boundaries, odd,
+    /* Edge-case sizes: near search_limit (iend-8), near page boundaries, odd,
      * and large block sizes (128KB - 2MB) */
     const size_t sizes[] = {
-        13, 14, 15, 16, 17, 19, 20, 23, 24, 25,       /* Near mflimit margin */
+        8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 23, 24, 25, /* Near search_limit margin */
         31, 32, 33, 48, 63, 64, 65,                     /* Cache line edges */
         100, 127, 128, 129, 255, 256, 257,               /* Byte boundary edges */
         511, 512, 513, 1023, 1024, 1025,                 /* 1 KB edges */

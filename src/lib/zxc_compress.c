@@ -212,7 +212,7 @@ typedef struct {
  * @param[in] src Pointer to the start of the source buffer.
  * @param[in] ip Current input position pointer.
  * @param[in] iend Pointer to the end of the input buffer.
- * @param[in] mflimit Pointer to the match finding limit.
+ * @param[in] search_limit Pointer to the match finding limit.
  * @param[in] anchor Pointer to the current anchor position.
  * @param[in,out] hash_table Pointer to the position table for match finding.
  * @param[in,out] hash_tags Pointer to the tag table for fast rejection.
@@ -226,7 +226,7 @@ typedef struct {
  *         (reference pointer, length of the match, and backtrack distance).
  */
 static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
-    const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* mflimit,
+    const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* search_limit,
     const uint8_t* anchor, uint32_t* RESTRICT hash_table, uint8_t* RESTRICT hash_tags,
     uint16_t* RESTRICT chain_table, const uint32_t epoch_mark, const uint32_t offset_mask,
     const int level, const zxc_lz77_params_t p, const uint32_t last_off) {
@@ -498,7 +498,8 @@ _finalize_match:
         best.ref = b_ref;
     }
 
-    if (p.use_lazy && best.ref && best.len < (uint32_t)p.lazy_len_threshold && ip + 1 < mflimit) {
+    if (p.use_lazy && best.ref && best.len < (uint32_t)p.lazy_len_threshold &&
+        ip + 1 < search_limit) {
         // --- Lazy evaluation at ip+1 ---
         const uint64_t next_val8 = zxc_le64(ip + 1);
         const uint32_t next_val = (uint32_t)next_val8;
@@ -543,7 +544,7 @@ _finalize_match:
 
         // --- Lazy evaluation at ip+2 (computed in parallel, no dependency on lazy 1) ---
         uint32_t max_lazy3 = 0;
-        if (level >= ZXC_LEVEL_BALANCED && ip + 2 < mflimit) {
+        if (level >= ZXC_LEVEL_BALANCED && ip + 2 < search_limit) {
             const uint64_t val3_8 = zxc_le64(ip + 2);
             const uint32_t val3 = (uint32_t)val3_8;
             const uint32_t h3 = zxc_hash_func(val3_8, use_hash5);
@@ -1074,7 +1075,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     const uint8_t* const iend = src + src_sz;
 
     /* Block too small for any match: emit all as literals. */
-    if (UNLIKELY(src_sz < ZXC_LZ_TAIL_GUARD + 1)) {
+    if (UNLIKELY(src_sz < ZXC_LZ_SEARCH_MARGIN + 1)) {
         if (src_sz > 0) ZXC_MEMCPY(literals, src, src_sz);
         *lit_c_out = src_sz;
         *seq_c_out = 0;
@@ -1083,8 +1084,8 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         return 0;
     }
 
-    const size_t mflimit_pos = src_sz - ZXC_LZ_TAIL_GUARD;
-    const uint8_t* const mflimit = src + mflimit_pos;
+    const size_t search_limit_pos = src_sz - ZXC_LZ_SEARCH_MARGIN;
+    const uint8_t* const search_limit = src + search_limit_pos;
 
     /* DP arrays carved from ctx->opt_scratch: a single allocation lazy-
      * grown on the first level-6 call and reused across blocks. Each
@@ -1145,7 +1146,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     size_t skip_until = 0;
     /* Rolling repeat-offset seed for find_best_match */
     uint32_t last_off = 0;
-    for (size_t p = 0; p < mflimit_pos; p++) {
+    for (size_t p = 0; p < search_limit_pos; p++) {
         if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
 
         /* Literal transition. */
@@ -1162,8 +1163,8 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
          * same offset and may end at a more useful DP position. */
         const uint8_t* ip = src + p;
         const zxc_match_t m = zxc_lz77_find_best_match(
-            src, ip, iend, mflimit, /*anchor=*/ip, hash_table, hash_tags, chain_table, epoch_mark,
-            offset_mask, level, lzp_opt, last_off);
+            src, ip, iend, search_limit, /*anchor=*/ip, hash_table, hash_tags, chain_table,
+            epoch_mark, offset_mask, level, lzp_opt, last_off);
 
         if (m.ref) {
             const uint32_t off = (uint32_t)(ip - m.ref);
@@ -1226,9 +1227,9 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         }
     }
 
-    /* Tail (last ZXC_LZ_TAIL_GUARD bytes) can only be literals: the match finder
-     * stops at mflimit so its 8-byte probe reads stay in bounds. */
-    for (size_t p = mflimit_pos; p < src_sz; p++) {
+    /* Tail (last ZXC_LZ_SEARCH_MARGIN bytes) can only be literals: the match finder
+     * stops at search_limit so its 8-byte probe reads stay in bounds. */
+    for (size_t p = search_limit_pos; p < src_sz; p++) {
         if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
         const uint32_t lit_next = dp[p] + lit_cost;
         if (lit_next < dp[p + 1]) {
@@ -1378,7 +1379,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const uint32_t offset_bits = ctx->offset_bits;
     const uint32_t offset_mask = ctx->offset_mask;
     const uint32_t epoch_mark = ctx->epoch << offset_bits;
-    const uint8_t *ip = src, *iend = src + src_sz, *anchor = ip, *mflimit = iend - 12;
+    const uint8_t *ip = src, *iend = src + src_sz, *anchor = ip,
+                  *search_limit = iend - ZXC_LZ_SEARCH_MARGIN;
 
     uint32_t* const hash_table = ctx->hash_table;
     uint8_t* const hash_tags = ctx->hash_tags;
@@ -1403,10 +1405,10 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         goto parse_done;
     }
 
-    while (LIKELY(ip < mflimit)) {
+    while (LIKELY(ip < search_limit)) {
         const size_t dist = (size_t)(ip - anchor);
         size_t step = lzp.step_base + (dist >> lzp.step_shift);
-        if (UNLIKELY(ip + step >= mflimit)) step = 1;
+        if (UNLIKELY(ip + step >= search_limit)) step = 1;
 
         if (LIKELY(ip + step + sizeof(uint64_t) <= iend)) {
             const uint64_t v_next = zxc_le64(ip + step);
@@ -1417,7 +1419,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
 
         const zxc_match_t m =
-            zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, hash_tags,
+            zxc_lz77_find_best_match(src, ip, iend, search_limit, anchor, hash_table, hash_tags,
                                      chain_table, epoch_mark, offset_mask, level, lzp,
                                      /*last_off=*/0U);
 
@@ -1993,7 +1995,8 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const uint32_t offset_bits = ctx->offset_bits;
     const uint32_t offset_mask = ctx->offset_mask;
     const uint32_t epoch_mark = ctx->epoch << offset_bits;
-    const uint8_t *ip = src, *iend = src + src_sz, *anchor = ip, *mflimit = iend - 12;
+    const uint8_t *ip = src, *iend = src + src_sz, *anchor = ip,
+                  *search_limit = iend - ZXC_LZ_SEARCH_MARGIN;
 
     uint32_t* const hash_table = ctx->hash_table;
     uint8_t* const hash_tags = ctx->hash_tags;
@@ -2007,10 +2010,10 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     size_t lit_c = 0;
     uint16_t max_offset = 0;
 
-    while (LIKELY(ip < mflimit)) {
+    while (LIKELY(ip < search_limit)) {
         size_t dist = (size_t)(ip - anchor);
         size_t step = lzp.step_base + (dist >> lzp.step_shift);
-        if (UNLIKELY(ip + step >= mflimit)) step = 1;
+        if (UNLIKELY(ip + step >= search_limit)) step = 1;
 
         ZXC_PREFETCH_READ(ip + step * 4 + ZXC_CACHE_LINE_SIZE);
 
@@ -2023,7 +2026,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
 
         const zxc_match_t m =
-            zxc_lz77_find_best_match(src, ip, iend, mflimit, anchor, hash_table, hash_tags,
+            zxc_lz77_find_best_match(src, ip, iend, search_limit, anchor, hash_table, hash_tags,
                                      chain_table, epoch_mark, offset_mask, level, lzp,
                                      /*last_off=*/0U);
 

@@ -483,7 +483,7 @@ extern "C" {
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
 /** @brief Bytes at the block end where match search stops (left as literals).
  *  Equals the 8-byte word the finder reads at each probe, so @c ip+8<=iend. */
-#define ZXC_LZ_TAIL_GUARD (sizeof(uint64_t))
+#define ZXC_LZ_SEARCH_MARGIN (sizeof(uint64_t))
 /** @} */
 
 /** @name Optimal Parser Tuning (level >= 6)
