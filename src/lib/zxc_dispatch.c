@@ -711,11 +711,11 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
     /* Dictionary validation */
     if (header_dict_id != 0) {
-        if (!dict || dict_size == 0) {
+        if (UNLIKELY(!dict || dict_size == 0)) {
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_DICT_REQUIRED;
         }
-        if (zxc_dict_id(dict, dict_size) != header_dict_id) {
+        if (UNLIKELY(zxc_dict_id(dict, dict_size) != header_dict_id)) {
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_DICT_MISMATCH;
         }

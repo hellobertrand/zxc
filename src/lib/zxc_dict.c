@@ -79,8 +79,8 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
 
     const uint8_t* src = (const uint8_t*)buf;
 
-    if (zxc_le32(src) != ZXC_DICT_MAGIC) return ZXC_ERROR_BAD_MAGIC;
-    if (src[4] != ZXC_DICT_VERSION) return ZXC_ERROR_BAD_VERSION;
+    if (UNLIKELY(zxc_le32(src) != ZXC_DICT_MAGIC)) return ZXC_ERROR_BAD_MAGIC;
+    if (UNLIKELY(src[4] != ZXC_DICT_VERSION)) return ZXC_ERROR_BAD_VERSION;
 
     const size_t content_size = zxc_le16(src + 6);
     if (UNLIKELY(content_size == 0)) return ZXC_ERROR_CORRUPT_DATA;
@@ -132,9 +132,9 @@ static uint32_t zxc_dict_hash(const uint8_t* p) {
  * @brief Segment descriptor for dictionary training, scored by coverage.
  */
 typedef struct {
-    uint32_t offset;
-    uint16_t length;
-    uint32_t score; /**< Summed k-gram frequency (coverage) of the segment. */
+    uint32_t offset; /**< Offset of the segment in the corpus. */
+    uint16_t length; /**< Length of the segment. */
+    uint32_t score;  /**< Summed k-gram frequency (coverage) of the segment. */
 } zxc_dict_seg_t;
 
 /**
