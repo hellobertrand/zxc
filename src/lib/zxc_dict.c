@@ -48,7 +48,7 @@ size_t zxc_dict_save_bound(const size_t content_size) {
     return ZXC_DICT_HEADER_SIZE + content_size;
 }
 
-int64_t zxc_dict_save(const void* content, const size_t content_size, void* buf,
+int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size, void* RESTRICT buf,
                       const size_t buf_capacity) {
     if (UNLIKELY(!content || content_size == 0)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(content_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
@@ -205,8 +205,9 @@ static void zxc_dict_sort_segs_desc(zxc_dict_seg_t* RESTRICT a, const size_t n) 
     }
 }
 
-int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
-                       const size_t n_samples, void* dict_buf, const size_t dict_capacity) {
+int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRICT sample_sizes,
+                       const size_t n_samples, void* RESTRICT dict_buf,
+                       const size_t dict_capacity) {
     if (UNLIKELY(!samples || !sample_sizes || n_samples == 0 || !dict_buf || dict_capacity == 0))
         return ZXC_ERROR_NULL_INPUT;  // LCOV_EXCL_LINE
     if (UNLIKELY(dict_capacity > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
