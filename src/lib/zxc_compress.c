@@ -1074,7 +1074,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     const uint8_t* const iend = src + src_sz;
 
     /* Block too small for any match: emit all as literals. */
-    if (UNLIKELY(src_sz < 13)) {
+    if (UNLIKELY(src_sz < ZXC_LZ_TAIL_GUARD + 1)) {
         if (src_sz > 0) ZXC_MEMCPY(literals, src, src_sz);
         *lit_c_out = src_sz;
         *seq_c_out = 0;
@@ -1083,7 +1083,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         return 0;
     }
 
-    const size_t mflimit_pos = src_sz - 12;
+    const size_t mflimit_pos = src_sz - ZXC_LZ_TAIL_GUARD;
     const uint8_t* const mflimit = src + mflimit_pos;
 
     /* DP arrays carved from ctx->opt_scratch: a single allocation lazy-
@@ -1226,7 +1226,8 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         }
     }
 
-    /* Last 12 bytes can only be literals (matches must end before iend). */
+    /* Tail (last ZXC_LZ_TAIL_GUARD bytes) can only be literals: the match finder
+     * stops at mflimit so its 8-byte probe reads stay in bounds. */
     for (size_t p = mflimit_pos; p < src_sz; p++) {
         if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
         const uint32_t lit_next = dp[p] + lit_cost;
