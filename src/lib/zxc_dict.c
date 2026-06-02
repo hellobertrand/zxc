@@ -63,8 +63,7 @@ int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size, v
     dst[5] = 0; /* flags: reserved */
     zxc_store_le16(dst + 6, (uint16_t)content_size);
     zxc_store_le32(dst + 8, zxc_dict_id(content, content_size));
-    zxc_store_le16(dst + 12, 0);
-    zxc_store_le16(dst + 14, 0);
+    zxc_store_le32(dst + 12, 0); /* CRC16 (0x0C) + reserved (0x0E), zeroed before CRC */
     const uint16_t crc = zxc_hash16(dst);
     zxc_store_le16(dst + 12, crc);
 
@@ -90,8 +89,7 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
 
     uint8_t temp[ZXC_DICT_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, ZXC_DICT_HEADER_SIZE);
-    zxc_store_le16(temp + 12, 0);
-    zxc_store_le16(temp + 14, 0);
+    zxc_store_le32(temp + 12, 0); /* CRC16 (0x0C) + reserved (0x0E), zeroed before CRC */
     const uint16_t expected_crc = zxc_hash16(temp);
     if (UNLIKELY(zxc_le16(src + 12) != expected_crc)) return ZXC_ERROR_BAD_HEADER;
 
