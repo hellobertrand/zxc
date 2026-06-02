@@ -1,4 +1,4 @@
-# ZXC: High-Performance Asymmetric Lossless Compression
+# ZXC: Asymmetric Lossless Compression Built for Ultra-Fast Decode
 
 [![Build & Release](https://github.com/hellobertrand/zxc/actions/workflows/build.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/build.yml)
 [![Code Quality](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml)
@@ -22,7 +22,7 @@
 
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 
-**ZXC** is a high-performance, lossless, asymmetric compression library that trades compress speed for **maximum decode throughput**: ideal for Content Delivery, Embedded Systems, FOTA (Firmware Over-The-Air) updates, Game Assets, and App Bundles.
+**ZXC** is a lossless, **asymmetric** compression library built for ultra-fast decode: **40%+ faster decompression than LZ4 on ARM64, with better compression ratios**. It trades compression speed for **maximum decode throughput** — ideal for Content Delivery, Embedded Systems, FOTA (Firmware Over-The-Air) updates, Game Assets, and App Bundles.
 It follows a **"Write Once, Read Many"** *(WORM)* design: compression happens at build-time, decompression is hot-path at run-time.
 
 **ZXC runs on all major architectures** (x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER (ppc64el), s390x, i386) with hand-tuned SIMD paths (AVX2/AVX-512 on x86_64, NEON on ARMv8+). It shows especially strong gains on modern ARM cores (Apple Silicon, AWS Graviton, Google Axion) thanks to a bitstream layout tuned for their deep pipelines.
