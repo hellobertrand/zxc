@@ -947,10 +947,15 @@ else
     log_fail "JSON list should contain dict_id field"
 fi
 
-# 25.6 Decompression without dict should fail
+# 25.6 Decompression without a locatable dict should fail.
+# Isolate the archive in a directory with no sibling .zxd so the auto-lookup
+# finds nothing and the required-dict error path is exercised.
 echo "  Testing decompress without required dict..."
+NODICT_DIR="$TEST_DIR/nodict"
+mkdir -p "$NODICT_DIR"
+cp "$TEST_DIR/test_dict.zxc" "$NODICT_DIR/test_dict.zxc"
 set +e
-"$ZXC_BIN" -d -c "$TEST_DIR/test_dict.zxc" > /dev/null 2>&1
+"$ZXC_BIN" -d -c "$NODICT_DIR/test_dict.zxc" > /dev/null 2>&1
 RET=$?
 set -e
 if [ $RET -ne 0 ]; then
@@ -995,6 +1000,43 @@ if [ $RET -ne 0 ]; then
     log_pass "Invalid dict file rejected"
 else
     log_fail "Invalid dict file should be rejected"
+fi
+
+# 25.10 Train to a directory -> content-addressable <dict_id>.zxd
+echo "  Testing train-to-directory naming..."
+AUTO_DIR="$TEST_DIR/auto"
+mkdir -p "$AUTO_DIR"
+"$ZXC_BIN" --train-dict "$AUTO_DIR/" "$TEST_DIR"/sample_*.txt 2>/dev/null
+ZXD_NAME=$(ls "$AUTO_DIR" | grep -E '^[0-9a-f]{8}\.zxd$' || true)
+if [ -n "$ZXD_NAME" ]; then
+    log_pass "Train to directory names dict <dict_id>.zxd ($ZXD_NAME)"
+else
+    log_fail "Train to directory should create <dict_id>.zxd"
+fi
+
+# 25.11 Decompress auto-locates dict by dict_id (no -D)
+echo "  Testing decompress auto-lookup by dict_id..."
+"$ZXC_BIN" -3 -D "$AUTO_DIR/$ZXD_NAME" -B 4K -c -k "$TEST_FILE_ARG" > "$AUTO_DIR/payload.zxc"
+"$ZXC_BIN" -d -c "$AUTO_DIR/payload.zxc" > "$AUTO_DIR/payload.dec" 2>/dev/null
+if cmp -s "$TEST_FILE" "$AUTO_DIR/payload.dec"; then
+    log_pass "Decompress auto-locates dict by dict_id (no -D)"
+else
+    log_fail "Decompress auto-lookup failed to recreate original"
+fi
+
+# 25.12 Auto-lookup fails cleanly when no sibling dict is present
+echo "  Testing decompress auto-lookup with missing dict..."
+MISS_DIR="$TEST_DIR/miss"
+mkdir -p "$MISS_DIR"
+cp "$AUTO_DIR/payload.zxc" "$MISS_DIR/payload.zxc"
+set +e
+"$ZXC_BIN" -d -c "$MISS_DIR/payload.zxc" > /dev/null 2>&1
+RET=$?
+set -e
+if [ $RET -ne 0 ]; then
+    log_pass "Auto-lookup with missing dict correctly fails"
+else
+    log_fail "Decompress without locatable dict should fail"
 fi
 
 echo "All tests passed!"

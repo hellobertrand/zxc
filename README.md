@@ -471,6 +471,10 @@ For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dict
 ```bash
 # Train a dictionary from a corpus of similar files
 zxc --train-dict corpus.zxd samples/*.json
+
+# Or pass a directory: the dictionary is saved as <dict_id>.zxd inside it
+# (content-addressable name), e.g. dicts/bc46eec1.zxd
+zxc --train-dict dicts/ samples/*.json
 ```
 
 ```c
@@ -487,6 +491,11 @@ int64_t dict_sz = zxc_train_dict(samples, sizes, 3, dict, sizeof(dict));
 # CLI
 zxc -z -D corpus.zxd input.json
 zxc -d -D corpus.zxd input.json.zxc
+
+# On decompression, -D is optional: if the dictionary file is named
+# <dict_id>.zxd (the default when training to a directory), the CLI auto-locates
+# it in the archive's directory.
+zxc -d input.json.zxc          # finds bc46eec1.zxd next to the archive
 ```
 
 ```c
@@ -506,7 +515,7 @@ zxc_decompress_opts_t dopts = {
 int64_t original_size = zxc_decompress(compressed, comp_size, out, out_cap, &dopts);
 ```
 
-The dictionary is stored as an external `.zxd` file and referenced by a 32-bit ID in the ZXC file header. Decompressing without the matching dictionary returns `ZXC_ERROR_DICT_REQUIRED` or `ZXC_ERROR_DICT_MISMATCH`. See [FORMAT.md](docs/FORMAT.md) §12 for the full specification.
+The dictionary is stored as an external `.zxd` file and referenced by a 32-bit ID in the ZXC file header. Naming the file `<dict_id>.zxd` makes it **content-addressable**: on decompression, when `-D` is omitted, the CLI locates the matching `.zxd` by `dict_id` in the archive's directory (trying `<dict_id>.zxd` first, then scanning any `*.zxd`). Decompressing without a matching dictionary returns `ZXC_ERROR_DICT_REQUIRED` or `ZXC_ERROR_DICT_MISMATCH`. See [FORMAT.md](docs/FORMAT.md) §12 for the full specification.
 
 ---
 

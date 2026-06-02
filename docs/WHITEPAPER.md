@@ -41,7 +41,7 @@ The heart of ZXC is a heavily optimized LZ77 engine that adapts its behavior bas
 ### 4.2 Specialized SIMD Acceleration & Hardware Hashing
 ZXC leverages modern instruction sets to maximize throughput on both ARM and x86 architectures.
 * **ARM NEON Optimization**: Extensive usage of vld1q_u8 (vector load) and vceqq_u8 (parallel comparison) allows scanning data at wire speed, while vminvq_u8 provides fast rejection of non-matches.
-* **x86 Vectorization**: Maintains high performance on Intel/AMD platforms via dedicated AVX2 and AVX512 paths (falling back to SSE4.1 on older hardware), ensuring parity with ARM throughput.
+* **x86 Vectorization**: Maintains high performance on Intel/AMD platforms via dedicated AVX2 and AVX512 paths, falling back to a portable **SSE2** baseline — the x86-64 architectural guarantee, present on every 64-bit Intel/AMD CPU. The SSE2 tier emulates the few SSE4.1 operations it needs (e.g. unsigned 32-bit max, byte blend, saturating `u32`→`u16` pack), so no SSE4.x hardware is required. This ensures parity with ARM throughput across the full x86 range.
 * **High-Speed Integrity**: Block validation relies on **rapidhash**, a modern non-cryptographic hash algorithm that fully exploits hardware acceleration to verify data integrity without bottlenecking the decompression pipeline.
 
 ### 4.3 Entropy Coding & Bitpacking
@@ -126,8 +126,8 @@ The file begins with a **16-byte** header that identifies the format and specifi
 ```
   Offset:  0               4       5       6       7                       14      16
            +---------------+-------+-------+-------+-----------------------+-------+
-           | Magic Word    | Ver   | Chunk | Flags | Reserved              | CRC   |
-           | (4 bytes)     | (1B)  | (1B)  | (1B)  | (7 bytes, must be 0)  | (2B)  |
+           | Magic Word    | Ver   | Chunk | Flags | Reserved / Dict ID    | CRC   |
+           | (4 bytes)     | (1B)  | (1B)  | (1B)  | (7 bytes)             | (2B)  |
            +---------------+-------+-------+-------+-----------------------+-------+
 ```
 
@@ -140,9 +140,10 @@ The file begins with a **16-byte** header that identifies the format and specifi
   - Block sizes must be powers of 2.
 * **Flags (1 byte)**: Global configuration flags.
   - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream. Every block will carry a trailing 4-byte checksum, and the footer will contain a global checksum. If `0`, no checksums are present.
-  - **Bits 4-6**: Reserved.
+  - **Bit 6**: `HAS_DICTIONARY`. If `1`, the stream was compressed with a pre-trained dictionary and **requires** it for decompression; the reserved field carries the `dict_id` (see below and §5.11).
+  - **Bits 4-5**: Reserved.
   - **Bits 0-3**: Checksum Algorithm ID (e.g., `0` = RapidHash).
-* **Reserved (7 bytes)**: Reserved for future use (must be 0).
+* **Reserved / Dictionary ID (7 bytes)**: Zero when `HAS_DICTIONARY` is clear. When `HAS_DICTIONARY` is set, bytes `0x07..0x0A` hold the `dict_id` (`u32` LE, a 32-bit hash of the dictionary content); the remaining bytes `0x0B..0x0D` stay zero.
 * **CRC (2 bytes)**: 16-bit Header Checksum. Calculated on the 16-byte header (with CRC bytes set to 0) using `zxc_hash16`.
 
 ### 5.2 Block Header Structure
@@ -501,6 +502,20 @@ ZXC supports **O(1)** random-access decompression without decoding the entire st
 *   **Structure**: The seek table contains an array of 4-byte entries (compressed block size, LE uint32) for every block in the archive.
 *   **Performance**: Reading backward from the file footer instantly locates the seek table. Since blocks have a fixed power-of-2 size, the target block is found by a single division (`block_index = offset / block_size`), with no binary search required.
 *   **Use Cases**: This feature transforms ZXC from a sequential stream into a random-access volume format.
+
+### 5.11 Pre-Trained Dictionaries
+
+For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dictionary substantially improves the compression ratio. Because each block is encoded independently — a deliberate choice that preserves the O(1) seekable random access of §5.10 — a block only has its own preceding bytes as match history. The smaller the block, the less history it has, and the more it benefits from external priming.
+
+*   **Mechanism**: A dictionary is raw byte content (max 64 KB, bounded by the 64 KB LZ window). At compression, it is logically prepended to every block's input, seeding the hash tables so the match finder can reference dictionary content from the first byte. At decompression, it is prepended to the output buffer so match copies that point into dictionary bytes resolve naturally by pointer arithmetic. The prefill is **per-block**, so random access is preserved: load the dictionary once, then decode any block independently.
+
+*   **External, content-addressed model**: Dictionaries are **external** files (`.zxd`), referenced from the file header by a 32-bit `dict_id` — a hash of the dictionary content. This follows the industry-standard train-once / reuse-many model (the dictionary is amortized across many archives rather than duplicated inside each). The `dict_id` is **self-validating**: it identifies *which* dictionary is required and simultaneously detects an accidentally wrong one. A decoder **MUST** reject decompression when the required dictionary is absent (`ZXC_ERROR_DICT_REQUIRED`) or when `zxc_dict_id(dict) != header.dict_id` (`ZXC_ERROR_DICT_MISMATCH`). The per-block and global checksums of §5.9 are a second line of defense: a wrong dictionary yields wrong output that fails the checksum (when enabled).
+
+*   **`.zxd` file format**: A standalone dictionary file has a 16-byte header (magic `0x9CB0D1C7`, version, content size, `dict_id`, header CRC16) followed by the raw content bytes. The `.zxd` extension is cosmetic — files are identified by their magic word, not their name.
+
+*   **Training**: `zxc_train_dict()` analyzes a corpus of representative samples and selects the byte segments that maximize LZ77 match coverage, placing the most frequently matched segments at the **end** of the dictionary so they produce the shortest (most efficient) offsets in the virtual window.
+
+*   **Content-addressable naming**: Naming a dictionary `<dict_id>.zxd` (lowercase 8-digit hex) makes it content-addressable: a decoder can locate the right dictionary by `dict_id` from the archive's directory without it being named explicitly. This is a tooling convention only and does not affect bytes on the wire.
 
 ## 6. System Architecture (Threading)
 
@@ -936,6 +951,9 @@ ZXC is designed to adapt to various deployment scenarios by selecting the approp
 
 *   **Data Archival (Levels 5-6)**:
     A high-efficiency alternative for cold storage, providing better compression ratios than LZ4 and significantly faster retrieval speeds than Zstd. **Level 6** (DENSITY) matches LZ4-HC's ratio while keeping ZXC's decode advantage: ideal for write-once / read-many archives where compression time is amortized over many reads.
+
+*   **Small & Homogeneous Payloads — Pre-Trained Dictionaries (§5.11)**:
+    An orthogonal lever, combinable with any level. Where data is compressed in **small blocks** (4 KB–128 KB) — JSON API responses, RPC messages, key-value records, structured logs, small game assets, or any large homogeneous corpus split for seekable random access — a pre-trained dictionary primes the LZ77 window per block and recovers the ratio that small blocks would otherwise lose. The external, content-addressed model (`.zxd` + `dict_id`) fits the **train-once / reuse-many** deployment pattern: a single dictionary is built offline on the build pipeline and amortized across millions of independently decodable payloads — no per-archive storage overhead, and O(1) seekable access preserved.
 
 ## 9. Conclusion
 

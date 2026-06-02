@@ -24,7 +24,10 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : Decompress FILE.
 
 **-l**, **--list**
-: List archive information, including compressed size, uncompressed size, compression ratio, and checksum method.
+: List archive information, including compressed size, uncompressed size, compression ratio, checksum method, and dictionary ID (if any). Also accepts a `.zxd` dictionary file, in which case it prints the dictionary's `dict_id`.
+
+**--train-dict** *PATH*
+: Train a dictionary from the input files given as training samples and write it to *PATH*. If *PATH* is a directory (or ends with a path separator), the dictionary is saved inside it under its content-addressable name `<dict_id>.zxd`; otherwise *PATH* is used verbatim. See **DICTIONARIES**.
 
 **-t**, **--test**
 : Test the integrity of a compressed FILE. It decodes the file and verifies its checksum (if present) without writing any output.
@@ -59,6 +62,9 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **-N**, **--no-checksum**
 : Explicitly disable checksum generation.
 
+**-D**, **--dict** *FILE*
+: Use a pre-trained dictionary (`.zxd`) for compression or decompression. On compression, the archive records the dictionary's `dict_id` in its header. On decompression, **-D** is optional: when omitted, **zxc** auto-locates the matching dictionary by `dict_id` next to the archive (see **DICTIONARIES**). An explicitly supplied dictionary always takes precedence.
+
 **-S**, **--seekable**
 : Append a seek table to the archive during compression. This transforms the file into a random-access format (Seekable Archive), allowing the decoder to instantly locate and decompress specific blocks in `O(1)` time without reading the entire file. Ideal for compressed filesystems, game assets, and log analysis.
 
@@ -87,6 +93,16 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 
 **-h**, **--help**
 : Display a help message and exit.
+
+## DICTIONARIES
+
+For workloads compressed in small blocks (4K–128K), a pre-trained dictionary can dramatically improve the compression ratio. The dictionary prefills the LZ77 window at the start of every block, so the benefit is per-block: the smaller the block, the more it relies on the dictionary for early matches.
+
+Dictionaries are external `.zxd` files referenced from the archive header by a 32-bit `dict_id` (a hash of the dictionary content). The `.zxd` extension is cosmetic; a `.zxd` file is identified by its magic word, not its name.
+
+The recommended filename is the dictionary's content-addressable name, `<dict_id>.zxd` (lowercase 8-digit hex), which **zxc** produces automatically when **--train-dict** targets a directory. Naming a dictionary this way enables auto-lookup on decompression: when **-D** is omitted and the archive requires a dictionary, **zxc** searches the archive's own directory, first for the exact name `<dict_id>.zxd` and then for any `*.zxd` whose `dict_id` matches. Auto-lookup is skipped for non-seekable input (such as a pipe); in that case the dictionary must be supplied with **-D**.
+
+If no matching dictionary can be found (or supplied), decompression fails with a dictionary-required error rather than producing corrupt output.
 
 ## EXAMPLES
 
@@ -122,6 +138,15 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 
 **Run a benchmark for 10 seconds:**
   zxc -b 10 data.txt
+
+**Train a dictionary into a directory (saved as `<dict_id>.zxd`):**
+  zxc --train-dict dicts/ samples/*.json
+
+**Compress with a dictionary using small blocks:**
+  zxc -B 4K -D dicts/bc46eec1.zxd input.json
+
+**Decompress, auto-locating the dictionary by ID (no -D):**
+  zxc -d input.json.zxc
 
 ## AUTHORS
 Written by Bertrand Lebonnois & contributors.
