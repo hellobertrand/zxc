@@ -5,7 +5,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "zxc-compress"
 dynamic = ["version"]  
-description = "ZXC: Package for high-performance, lossless, asymmetric compressions"
+description = "ZXC: Package for high-performance asymmetric lossless compression built for ultra-fast decode"
 readme = "README.md"
 license = "BSD-3-Clause"
 

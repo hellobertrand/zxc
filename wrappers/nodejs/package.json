@@ -1,7 +1,7 @@
 {
   "name": "zxc-compress",
   "version": "0.11.0",
-  "description": "ZXC: High-performance lossless asymmetric compression for Node.js",
+  "description": "ZXC: High-performance asymmetric lossless compression built for ultra-fast decode - Node.js native addon",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "files": [

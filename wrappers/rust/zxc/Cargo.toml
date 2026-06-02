@@ -1,6 +1,6 @@
 [package]
 name = "zxc-compress"
-description = "Safe Rust bindings to the ZXC compression library"
+description = "ZXC: Package for high-performance asymmetric lossless compression built for ultra-fast decode"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
