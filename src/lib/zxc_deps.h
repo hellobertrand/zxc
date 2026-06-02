@@ -20,7 +20,7 @@
  * expands the macros to their libc equivalents.
  *
  * Per-symbol @c -D overrides are also accepted (each macro is guarded by
- * @c #ifndef), so vendoring is optional for ad-hoc consumers.
+ * an @c ifndef), so vendoring is optional for ad-hoc consumers.
  */
 
 #ifndef ZXC_DEPS_H

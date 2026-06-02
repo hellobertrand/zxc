@@ -386,7 +386,7 @@ extern "C" {
  *  The seek table is optional (opt-in at compression time) and allows
  *  random-access decompression by recording per-block compressed and
  *  decompressed sizes.  It uses a standard ZXC block header with
- *  @c block_type = @ref ZXC_BLOCK_SEK.
+ *  @c block_type = @c ZXC_BLOCK_SEK.
  *
  *  Detection from the end of the file: the reader derives @c num_blocks
  *  from the file footer (total decompressed size) and file header (block size).
@@ -578,19 +578,23 @@ extern "C" {
  *         @c ZXC_HUF_BATCH iterations before re-checking the bound. */
 #define ZXC_HUF_SAFE_MARGIN ((size_t)(2 * ZXC_HUF_BATCH))
 
-/* Boundary package-merge work item. Each level holds at most
- * `2 * ZXC_HUF_NUM_SYMBOLS` of these; exposed so callers can size
- * pre-allocated scratch via ::ZXC_HUF_BUILD_SCRATCH_SIZE. */
+/**
+ * @brief Boundary package-merge work item.
+ *
+ * Each level holds at most `2 * ZXC_HUF_NUM_SYMBOLS` of these; exposed so
+ * callers can size pre-allocated scratch via ::ZXC_HUF_BUILD_SCRATCH_SIZE.
+ */
 typedef struct {
-    uint32_t weight;
-    int16_t left, right;
-    int16_t sym;
+    uint32_t weight; /**< Accumulated weight (summed frequency) of the package. */
+    int16_t left;    /**< Left child index, or -1 for a leaf. */
+    int16_t right;   /**< Right child index, or -1 for a leaf. */
+    int16_t sym;     /**< Symbol index for a leaf, or -1 for an internal node. */
 } zxc_huf_pm_item_t;
 
-/* Trace-back stack frame for the package-merge code-length recovery. */
+/** @brief Trace-back stack frame for the package-merge code-length recovery. */
 typedef struct {
-    int8_t lvl;
-    int16_t idx;
+    int8_t lvl;  /**< Package-merge level being traced back. */
+    int16_t idx; /**< Item index within that level. */
 } zxc_huf_pm_frame_t;
 
 /** @brief Per-level item bound: at most leaves + paired packages from the
@@ -628,6 +632,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_log2_u32(const uint32_t v) {
 /**
  * @brief Branchless bit_ceil: smallest power of two >= v, clamped to ZXC_BLOCK_SIZE_MIN.
  * @param[in] v Input size (must be > 0).
+ * @return Smallest power of two >= @p v, clamped up to @ref ZXC_BLOCK_SIZE_MIN.
  */
 static ZXC_ALWAYS_INLINE size_t zxc_block_size_ceil(const size_t v) {
     uint64_t x = (uint64_t)v - 1;

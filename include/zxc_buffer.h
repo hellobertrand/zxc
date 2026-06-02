@@ -202,7 +202,9 @@ ZXC_EXPORT uint64_t zxc_get_decompressed_size(const void* src, const size_t src_
  */
 
 /* Forward declarations for context types (defined below). */
+/** @brief Opaque reusable compression context (see @ref zxc_create_cctx). */
 typedef struct zxc_cctx_s zxc_cctx;
+/** @brief Opaque reusable decompression context (see @ref zxc_create_dctx). */
 typedef struct zxc_dctx_s zxc_dctx;
 
 /**
