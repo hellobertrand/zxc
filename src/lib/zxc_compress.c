@@ -1172,10 +1172,9 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
          * ip uses absolute position (src + dict_sz + p) so match finder
          * resolves dict references correctly via src as base. */
         const uint8_t* ip = src_base + p;
-        const zxc_match_t m =
-            zxc_lz77_find_best_match(src, ip, iend, search_limit, /*anchor=*/ip, hash_table,
-                                     hash_tags, chain_table, epoch_mark, offset_mask, level,
-                                     lzp_opt, last_off);
+        const zxc_match_t m = zxc_lz77_find_best_match(
+            src, ip, iend, search_limit, /*anchor=*/ip, hash_table, hash_tags, chain_table,
+            epoch_mark, offset_mask, level, lzp_opt, last_off);
 
         if (m.ref) {
             const uint32_t off = (uint32_t)(ip - m.ref);

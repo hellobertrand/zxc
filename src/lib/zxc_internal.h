@@ -348,15 +348,15 @@ extern "C" {
  *         minimum match length so trained patterns are matchable at encode time. */
 #define ZXC_DICT_KGRAM_LEN ZXC_LZ_MIN_MATCH_LEN
 /** @brief Address bits for the dictionary trainer's k-gram frequency table. */
-#define ZXC_DICT_HT_BITS 16
+#define ZXC_DICT_HASH_BITS 16
 /** @brief Maximum number of candidate segments the dictionary trainer keeps. */
 #define ZXC_DICT_MAX_SEGMENTS (1U << 16)
 /** @brief Target number of sampled k-gram positions for the trainer's frequency
  *  estimate. Bounds the count so 16-bit counters stay unsaturated on large
  *  corpora; the trainer strides the corpus to hit roughly this many positions. */
-#define ZXC_DICT_FREQ_SAMPLE_TARGET (1U << 19)
+#define ZXC_DICT_SAMPLE_TARGET (1U << 19)
 /** @brief Number of buckets in the dictionary trainer's frequency table. */
-#define ZXC_DICT_HT_SIZE (1U << ZXC_DICT_HT_BITS)
+#define ZXC_DICT_HASH_SIZE (1U << ZXC_DICT_HASH_BITS)
 
 /** @brief Block header size: Type(1)+Flags(1)+Reserved(1)+CRC(1)+CompSize(4). */
 #define ZXC_BLOCK_HEADER_SIZE 8

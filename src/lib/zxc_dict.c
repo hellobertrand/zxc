@@ -125,7 +125,7 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
 static uint32_t zxc_dict_hash(const uint8_t* p) {
     uint32_t v = zxc_le32(p);
     v ^= (uint32_t)p[4];
-    return (v * ZXC_LZ_HASH_PRIME1) >> (32 - ZXC_DICT_HT_BITS);
+    return (v * ZXC_LZ_HASH_PRIME1) >> (32 - ZXC_DICT_HASH_BITS);
 }
 
 /**
@@ -226,21 +226,21 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
     }
 
     /* Step 2: count k-gram frequencies */
-    uint16_t* freq = (uint16_t*)ZXC_MALLOC(ZXC_DICT_HT_SIZE * sizeof(uint16_t));
+    uint16_t* freq = (uint16_t*)ZXC_MALLOC(ZXC_DICT_HASH_SIZE * sizeof(uint16_t));
     if (UNLIKELY(!freq)) {
         // LCOV_EXCL_START
         ZXC_FREE(corpus);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
-    ZXC_MEMSET(freq, 0, ZXC_DICT_HT_SIZE * sizeof(uint16_t));
+    ZXC_MEMSET(freq, 0, ZXC_DICT_HASH_SIZE * sizeof(uint16_t));
 
     /* Count k-gram frequencies on a representative sample of positions, not all
      * of them: counting a large corpus in full saturates the 16-bit counters,
      * so the segment-extension test never stops and segments balloon into
      * filler. Sampling keeps counts unsaturated and spread across the corpus. */
     const size_t kgram_limit = corpus_size - ZXC_DICT_KGRAM_LEN + 1;
-    size_t freq_stride = kgram_limit / ZXC_DICT_FREQ_SAMPLE_TARGET;
+    size_t freq_stride = kgram_limit / ZXC_DICT_SAMPLE_TARGET;
     if (freq_stride < 1) freq_stride = 1;
     for (size_t i = 0; i < kgram_limit; i += freq_stride) {
         const uint32_t h = zxc_dict_hash(corpus + i);
