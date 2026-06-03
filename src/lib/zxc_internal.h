@@ -1235,9 +1235,14 @@ static ZXC_ALWAYS_INLINE int64_t zxc_zigzag_decode64(const uint64_t n) {
  * @return The 1-based index of the highest set bit, or 0 if @p n is 0.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_highbit64(const uint64_t n) {
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_ARM64))
     unsigned long index;
     return (n == 0) ? 0 : (_BitScanReverse64(&index, n) ? (uint8_t)(index + 1) : 0);
+#elif defined(_MSC_VER)
+    // 32-bit MSVC: _BitScanReverse64 is unavailable; scan the high dword then the low.
+    unsigned long index;
+    if (_BitScanReverse(&index, (uint32_t)(n >> 32))) return (uint8_t)(index + 33);
+    return _BitScanReverse(&index, (uint32_t)n) ? (uint8_t)(index + 1) : 0;
 #else
     return (n == 0) ? 0 : (uint8_t)(64 - __builtin_clzll(n));
 #endif
