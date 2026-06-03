@@ -97,7 +97,11 @@ static int validate_num_payload(const char *ctx, const uint8_t *p, uint32_t comp
     uint16_t frame_size = zxc_le16(p + 8);
     CHECK(frame_size == ZXC_NUM_FRAME_SIZE, "NUM frame_size = %u, expected %u", frame_size,
           (unsigned)ZXC_NUM_FRAME_SIZE);
-    for (int i = 0; i < 6; i++)
+    /* Byte 10 is the element-width code (0=32-bit legacy, 1=64-bit, 2=16-bit);
+     * byte 11 and bytes 12-15 remain reserved-zero. */
+    CHECK(p[10] == ZXC_NUM_WIDTH_32 || p[10] == ZXC_NUM_WIDTH_64 || p[10] == ZXC_NUM_WIDTH_16,
+          "NUM element_width code invalid (%u)", p[10]);
+    for (int i = 1; i < 6; i++)
         CHECK(p[10 + i] == 0, "NUM header reserved byte %d nonzero", i);
 
     /* Walk frame records and confirm they tile the payload exactly and that the

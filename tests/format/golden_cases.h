@@ -128,6 +128,35 @@ static size_t gc_make_num(uint8_t **out) {
     return n;
 }
 
+/* Monotonic 16-bit integer array with small deltas -> NUM block (width 16). */
+static size_t gc_make_num16(uint8_t **out) {
+    const size_t count = 4096;
+    const size_t n = count * sizeof(uint16_t);
+    uint8_t *b = (uint8_t *)malloc(n);
+    uint16_t v = 3000;
+    for (size_t i = 0; i < count; i++) {
+        v = (uint16_t)(v + (uint16_t)(i % 5)); /* small, low-bit deltas */
+        b[i * 2 + 0] = (uint8_t)(v);
+        b[i * 2 + 1] = (uint8_t)(v >> 8);
+    }
+    *out = b;
+    return n;
+}
+
+/* Monotonic 64-bit timestamp array with small deltas -> NUM block (width 64). */
+static size_t gc_make_num64(uint8_t **out) {
+    const size_t count = 2048;
+    const size_t n = count * sizeof(uint64_t);
+    uint8_t *b = (uint8_t *)malloc(n);
+    uint64_t v = 1700000000000000000ULL; /* ~2023 in nanoseconds */
+    for (size_t i = 0; i < count; i++) {
+        v += 1000000ULL + (uint64_t)(i % 11); /* ~1 ms cadence + tiny jitter */
+        for (int k = 0; k < 8; k++) b[i * 8 + k] = (uint8_t)(v >> (8 * k));
+    }
+    *out = b;
+    return n;
+}
+
 /* Several block_size-worth of text -> multiple data blocks in one archive. */
 static size_t gc_make_multiblock(uint8_t **out) {
     const size_t n = 5 * 4096 + 777; /* 5 full 4 KB blocks + a short tail */
@@ -163,6 +192,8 @@ static const golden_case_t GOLDEN_CASES[] = {
     { "07_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GLO,  0,  1, 0 },
     { "08_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GLO, 0, 5, 0 },
     { "09_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GLO, 0, 5, 1 },
+    { "10_block_num16",        gc_make_num16,     { .level = 3 },                                  GC_BLOCK_NUM,  0,  1, 0 },
+    { "11_block_num64",        gc_make_num64,     { .level = 3 },                                  GC_BLOCK_NUM,  0,  1, 0 },
 };
 
 #define GOLDEN_CASE_COUNT (sizeof(GOLDEN_CASES) / sizeof(GOLDEN_CASES[0]))
