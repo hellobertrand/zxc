@@ -366,10 +366,11 @@ extern "C" {
 #define ZXC_NUM_FRAME_SIZE 128
 
 /** @brief NUM element-width code, stored in NUM header byte 10. The element
- *  size is derived by formula: bits = (code + 1) * 32, i.e. bytes = (code+1)*4.
- *  Code 0 = 32-bit; 1 = 64-bit. */
-#define ZXC_NUM_WIDTH_32 0U /* (0+1)*32 = 32-bit */
-#define ZXC_NUM_WIDTH_64 1U /* (1+1)*32 = 64-bit */
+ *  size is derived by formula: bits = (code + 1) * 32, i.e. bytes = (code+1)*4 */
+/** @brief NUM element-width code for 32-bit integers. */
+#define ZXC_NUM_WIDTH_32 0U
+/** @brief NUM element-width code for 64-bit integers. */
+#define ZXC_NUM_WIDTH_64 1U
 
 /** @brief Binary size of a section descriptor (comp_size + raw_size). */
 #define ZXC_SECTION_DESC_BINARY_SIZE 8
@@ -1182,7 +1183,7 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_highbit32(const uint32_t n) {
  * @param[in] n The signed 32-bit integer to encode.
  * @return The ZigZag encoded unsigned 32-bit integer.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_zigzag_encode(const int32_t n) {
+static ZXC_ALWAYS_INLINE uint32_t zxc_zigzag_encode32(const int32_t n) {
     return ((uint32_t)n << 1) ^ (uint32_t)(-(int32_t)((uint32_t)n >> 31));
 }
 
@@ -1207,7 +1208,7 @@ static ZXC_ALWAYS_INLINE int32_t zxc_zigzag_decode(const uint32_t n) {
 /**
  * @brief ZigZag encode a signed 64-bit integer.
  *
- * 64-bit analogue of @ref zxc_zigzag_encode, used by the NUM 64-bit path. ZigZag
+ * 64-bit analogue of @ref zxc_zigzag_encode32, used by the NUM 64-bit path. ZigZag
  * is a bijection int64<->uint64, so the result always fits in 64 bits (no 65-bit
  * case): the widened NUM path needs at most 64 bits per packed value.
  */

@@ -781,7 +781,7 @@ static int zxc_encode_block_num32(const zxc_cctx_t* RESTRICT ctx, const uint8_t*
 #endif
         for (; j < frames; j++) {
             const uint32_t v = zxc_le32(in_ptr + j * sizeof(uint32_t));
-            const uint32_t diff = zxc_zigzag_encode((int32_t)(v - prev));
+            const uint32_t diff = zxc_zigzag_encode32((int32_t)(v - prev));
             deltas[j] = diff;
             if (diff > max_d) max_d = diff;
             prev = v;
@@ -2300,7 +2300,7 @@ static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
         for (size_t i = 1; i < region_count; i++) {
             const uint32_t curr = zxc_le32(p);
             const int32_t diff = (int32_t)(curr - prev);
-            const uint32_t zigzag = zxc_zigzag_encode(diff);
+            const uint32_t zigzag = zxc_zigzag_encode32(diff);
 
             max_zigzag = zigzag > max_zigzag ? zigzag : max_zigzag;
             small_count += (uint32_t)(zigzag < 256);
@@ -2333,7 +2333,7 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_load_uw(const uint8_t* RESTRICT p, const s
 
 /** @brief ZigZag-encode the w-wide wrapped difference @p d, returned as uint64. */
 static ZXC_ALWAYS_INLINE uint64_t zxc_zigzag_uw(const uint64_t d, const size_t w) {
-    return (w == sizeof(uint32_t)) ? (uint64_t)zxc_zigzag_encode((int32_t)(uint32_t)d)
+    return (w == sizeof(uint32_t)) ? (uint64_t)zxc_zigzag_encode32((int32_t)(uint32_t)d)
                                    : zxc_zigzag_encode64((int64_t)d);
 }
 
