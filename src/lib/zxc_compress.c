@@ -2294,8 +2294,8 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_zigzag_uw(const uint64_t d, const size_t w
  * Mirrors NUM's real algorithm: each 128-value frame is packed at the bit width
  * of its largest ZigZag delta, plus a fixed per-frame header. The mean frame
  * bit width is measured over @ref ZXC_EST_NUM_FRAMES whole frames sampled across
- * the block (whole frames so the per-frame maximum — driven by outliers — is
- * captured), then scaled to the full value count. Integer-only.
+ * the block (whole frames so the per-frame maximum is captured),
+ * then scaled to the full value count. Integer-only.
  *
  * @param[in] src  Block data.
  * @param[in] size Block size in bytes.
@@ -2341,7 +2341,7 @@ static uint64_t zxc_est_num_bits(const uint8_t* RESTRICT src, const size_t size,
  * Returns @c size * H0 bits, where H0 is the Shannon entropy of a strided byte
  * sample (computed via the deterministic integer @ref zxc_log2_q16). This is an
  * information-theoretic order-0 bound: it ignores LZ matches, so it overestimates
- * LZ on repetitive data — but H0 is low exactly when LZ wins, so the comparison
+ * LZ on repetitive data: but H0 is low exactly when LZ wins, so the comparison
  * direction against the NUM estimate stays correct. Integer-only.
  *
  * @param[in] src  Block data.
@@ -2373,24 +2373,32 @@ static uint64_t zxc_est_lz_bits(const uint8_t* RESTRICT src, const size_t size) 
 }
 
 /**
- * @brief Chooses the block codec for @p src by a mathematical cost model.
+ * @brief Chooses the block codec for @p src by a mathematical cost model with a
+ *        confidence band.
  *
- * Estimates the compressed size of three candidates — NUM-32, NUM-64 and the
- * LZ fallback — and returns the element width of the cheapest NUM candidate
- * (4 or 8), or 0 to use LZ (GLO/GHI). The NUM candidates are gated on the block
- * being a whole multiple of the width.
+ * Estimates the compressed size of the best NUM candidate (NUM-32 / NUM-64) and
+ * of the LZ fallback, then classifies the block into one of three regimes using
+ * the confidence margin @ref ZXC_EST_MARGIN_SHIFT (`m = 1/2^shift`):
  *
- * Because the LZ estimate (order-0 entropy) ignores LZ matches and therefore
- * *over*-estimates real LZ on match-favourable data, NUM is only selected when
- * it beats the LZ estimate by a confidence margin (@ref ZXC_EST_MARGIN_SHIFT):
- * `Ĉ_NUM + Ĉ_NUM/2^shift < Ĉ_LZ`. This keeps the clear NUM wins (whose estimate
- * is far below LZ) while deferring borderline blocks to LZ, where it usually wins.
+ * - **Confident NUM**: use NUM.
+ * - **Confident LZ**: use LZ.
+ * - **Ambiguous**: the estimates are too close to trust, the LZ
+ *   estimate (order-0 entropy) is blind to matches and the NUM estimate is
+ *   near-exact, so neither bound is reliable here. The caller resolves it by
+ *   encoding both and keeping the smaller (@p out_ambiguous is set).
  *
- * @param[in] src  Block data.
- * @param[in] size Block size in bytes.
- * @return 4 (NUM-32), 8 (NUM-64), or 0 (LZ fallback).
+ * Clear blocks (the vast majority) are decided from the estimate alone with no
+ * extra work; only the narrow ambiguous band pays a second encode.
+ *
+ * @param[in]  src           Block data.
+ * @param[in]  size          Block size in bytes.
+ * @param[out] out_ambiguous Set to 1 when the caller must encode both the
+ *                           returned NUM width and LZ, and keep the smaller.
+ * @return Candidate NUM width: 4, 8, or 0 (LZ; @p out_ambiguous is 0).
  */
-static int zxc_select_block_codec(const uint8_t* RESTRICT src, const size_t size) {
+static int zxc_select_block_codec(const uint8_t* RESTRICT src, const size_t size,
+                                  int* RESTRICT out_ambiguous) {
+    *out_ambiguous = 0;
     const uint64_t est_lz = zxc_est_lz_bits(src, size);
 
     uint64_t best_num = UINT64_MAX;
@@ -2409,11 +2417,13 @@ static int zxc_select_block_codec(const uint8_t* RESTRICT src, const size_t size
             num_w = (int)sizeof(uint64_t);
         }
     }
+    if (num_w == 0) return 0; /* no NUM candidate (size/alignment) -> LZ */
 
-    /* NUM only if it beats LZ by the confidence margin (offsets H0's match-blind
-     * over-estimate of LZ); otherwise fall back to LZ. */
-    if (num_w && best_num + (best_num >> ZXC_EST_MARGIN_SHIFT) < est_lz) return num_w;
-    return 0;
+    if (best_num + (best_num >> ZXC_EST_MARGIN_SHIFT) < est_lz) return num_w; /* confident NUM */
+    if (est_lz + (est_lz >> ZXC_EST_MARGIN_SHIFT) < best_num) return 0;       /* confident LZ */
+
+    *out_ambiguous = 1; /* within the band: caller measures both */
+    return num_w;
 }
 
 // cppcheck-suppress unusedFunction
@@ -2422,25 +2432,43 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     size_t w = 0;
     int res = ZXC_OK;
 
-    /* Estimate NUM-32 / NUM-64 / LZ costs and pick the cheapest: 4, 8, or 0. */
-    const int num_width = zxc_select_block_codec(chunk, src_sz);
-    int try_num = (num_width != 0);
+    /* Cost model decides NUM-32 / NUM-64 / LZ. Clear cases use the estimate
+     * directly; ambiguous blocks encode both NUM and LZ and keep the smaller. */
+    int ambiguous = 0;
+    const int num_width = zxc_select_block_codec(chunk, src_sz, &ambiguous);
+    int did_num = 0;
 
-    if (UNLIKELY(try_num)) {
-        if (num_width == (int)sizeof(uint64_t))
-            res = zxc_encode_block_num64(ctx, chunk, src_sz, dst, dst_cap, &w);
-        else
-            res = zxc_encode_block_num32(ctx, chunk, src_sz, dst, dst_cap, &w);
-
-        if (res != ZXC_OK || w > (src_sz - (src_sz >> 2)))  // w > 75% of src_sz
-            try_num = 0;  // NUM didn't compress well, try GLO/GHI instead
+    if (UNLIKELY(num_width != 0 && !ambiguous)) {
+        /* Confident NUM: encode it directly. */
+        res = (num_width == (int)sizeof(uint64_t))
+                  ? zxc_encode_block_num64(ctx, chunk, src_sz, dst, dst_cap, &w)
+                  : zxc_encode_block_num32(ctx, chunk, src_sz, dst, dst_cap, &w);
+        did_num = (res == ZXC_OK && w <= (src_sz - (src_sz >> 2)));  // w <= 75% of src_sz
+        if (!did_num) res = ZXC_OK;  // NUM failed/expanded -> fall back to LZ
     }
 
-    if (LIKELY(!try_num)) {
+    if (LIKELY(!did_num)) {
+        /* LZ baseline (also the ambiguous baseline). */
         if (ctx->compression_level <= 2)
             res = zxc_encode_block_ghi(ctx, chunk, src_sz, dst, dst_cap, &w);
         else
             res = zxc_encode_block_glo(ctx, chunk, src_sz, dst, dst_cap, &w);
+
+        /* Ambiguous: also encode the NUM candidate into the now-free literals
+         * scratch and keep it if it is actually smaller than LZ. */
+        if (UNLIKELY(ambiguous) && num_width != 0 && res == ZXC_OK) {
+            size_t num_w = 0;
+            uint8_t* const scratch = ctx->literals;
+            const size_t scap = ctx->chunk_size + ZXC_PAD_SIZE;
+            const int nres =
+                (num_width == (int)sizeof(uint64_t))
+                    ? zxc_encode_block_num64(ctx, chunk, src_sz, scratch, scap, &num_w)
+                    : zxc_encode_block_num32(ctx, chunk, src_sz, scratch, scap, &num_w);
+            if (nres == ZXC_OK && num_w < w) {
+                ZXC_MEMCPY(dst, scratch, num_w);
+                w = num_w;
+            }
+        }
     }
 
     // Check expansion. W contains Header + Payload.

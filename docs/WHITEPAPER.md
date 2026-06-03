@@ -512,16 +512,27 @@ This is the information-theoretic order-0 bound; it ignores LZ matches, so it is
 loose for repetitive data, but `H₀` is low precisely when LZ wins, so the
 *ordering* against the NUM estimate stays meaningful.
 
-**Decision:** `argmin(Ĉ_NUM(4) [B%4=0], Ĉ_NUM(8) [B%8=0], Ĉ_LZ)`, ties favouring LZ.
+**Decision — a confidence band.** The NUM estimate is near-exact (it replays the
+real packing), but the LZ estimate is only approximate: order-0 entropy *over*-
+estimates LZ on match-favourable data (it ignores matches) and *under*-estimates
+it on very low-entropy data (real Huffman has a ≥1-bit/symbol floor plus token
+overhead). A single comparison would therefore mis-pick near the crossover. So
+the cheapest NUM candidate `Ĉ_NUM` is compared to `Ĉ_LZ` with a margin
+`m = 1/2^`@ref ZXC_EST_MARGIN_SHIFT (25 %):
 
-The NUM estimate is near-exact (it replays the real packing); the LZ estimate is
-necessarily approximate. On clearly-structured data (timestamps, IDs, run-heavy
-columns, text) the gap between candidates is large and the choice is robust. The
-residual error is confined to *borderline low-cardinality integer* columns, where
-NUM and LZ land within ~10 % of each other and accurate LZ sizing would require
-modelling both Huffman's ≥1-bit floor and match savings — i.e. running LZ. There
-the model may give up a few percent on a block; the slow-compress/fast-decompress
-design tolerates this in exchange for a heuristic-free, deterministic selector.
+- **`Ĉ_NUM·(1+m) < Ĉ_LZ`** → confident NUM → encode NUM only.
+- **`Ĉ_LZ·(1+m) < Ĉ_NUM`** → confident LZ → encode LZ only.
+- **otherwise (within the band)** → the estimates are too close to trust →
+  encode **both** the NUM candidate and LZ and keep the smaller.
+
+The vast majority of blocks fall in a confident regime and are decided from the
+estimate alone, with no extra work. Only the narrow ambiguous band pays a second
+encode — and because NUM never uses the literal-staging buffer, the NUM trial is
+written into that buffer (free once LZ has produced its block) with no extra
+allocation. This keeps the selector deterministic and heuristic-light while
+guaranteeing the borderline blocks (low-cardinality integers, mixed binary) get
+whichever codec is genuinely smaller. The margin and the band do not affect the
+on-disk format — selection is an encoder-only decision.
 
 ### 5.9 Data Integrity
 Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.
