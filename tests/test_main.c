@@ -102,7 +102,8 @@ static const test_entry_t g_tests[] = {
 
     /* --- Format (on-disk) --- */
     TEST_CASE(test_bit_reader),
-    TEST_CASE(test_bitpack),
+    TEST_CASE(test_bitpack32),
+    TEST_CASE(test_bitpack64),
     TEST_CASE(test_huffman_codec),
     TEST_CASE(test_eof_block_structure),
     TEST_CASE(test_header_checksum),

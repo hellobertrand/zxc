@@ -62,7 +62,7 @@ int test_bit_reader() {
 /*
  * Test for zxc_bitpack_stream32
  */
-int test_bitpack() {
+int test_bitpack32() {
     printf("=== TEST: Unit - Bit Packing (zxc_bitpack_stream32) ===\n");
 
     const uint32_t src[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
@@ -83,6 +83,87 @@ int test_bitpack() {
     if (len != 4) return 0;
     if (zxc_le32(dst) != 0x12345678) return 0;
     printf("  [PASS] Bitpack 32 bits\n");
+
+    printf("PASS\n\n");
+    return 1;
+}
+
+/* LSB-first reference reader: extract `bits` bits starting at *bitpos. Bytes
+ * ascending, low bit first, exactly matching zxc_bitpack_stream64's layout. */
+static uint64_t bp64_ref_read(const uint8_t* buf, size_t* bitpos, unsigned bits) {
+    uint64_t v = 0;
+    for (unsigned k = 0; k < bits; k++) {
+        const size_t bp = *bitpos + k;
+        v |= (uint64_t)((buf[bp >> 3] >> (bp & 7)) & 1u) << k;
+    }
+    *bitpos += bits;
+    return v;
+}
+
+/*
+ * Test for zxc_bitpack_stream64 (the NUM 64-bit packer).
+ */
+int test_bitpack64() {
+    printf("=== TEST: Unit - Bit Packing 64 (zxc_bitpack_stream64) ===\n");
+
+    uint8_t dst[64];
+
+    // Overflow masking: values are 0xFFFF.. but only 4 bits kept -> 0xF each.
+    const uint64_t src4[4] = {~0ULL, ~0ULL, ~0ULL, ~0ULL};
+    int len = zxc_bitpack_stream64(src4, 4, dst, sizeof(dst), 4);
+    if (len != 2) return 0;
+    if (dst[0] != 0xFF || dst[1] != 0xFF) return 0;
+    printf("  [PASS] Bitpack overflow masking\n");
+
+    // bits == 0: no payload bytes, returns 0.
+    len = zxc_bitpack_stream64(src4, 4, dst, sizeof(dst), 0);
+    if (len != 0) return 0;
+    printf("  [PASS] Bitpack 0 bits\n");
+
+    // bits == 64: full width, no masking, little-endian passthrough.
+    const uint64_t src64[1] = {0x123456789ABCDEF0ULL};
+    len = zxc_bitpack_stream64(src64, 1, dst, sizeof(dst), 64);
+    if (len != 8) return 0;
+    if (zxc_le64(dst) != 0x123456789ABCDEF0ULL) return 0;
+    printf("  [PASS] Bitpack 64 bits\n");
+
+    // Round-trip across widths and non-byte-aligned offsets. Widths > 32 plus a
+    // running bit offset exercise the high-spill path (dst[bi + 8]).
+    static const unsigned widths[] = {1, 7, 8, 9, 13, 17, 31, 32, 33, 48, 57, 63, 64};
+    const size_t count = 37;
+    uint64_t in[37];
+    uint8_t big[64 * 8 + 16];
+    for (size_t wi = 0; wi < sizeof(widths) / sizeof(widths[0]); wi++) {
+        const unsigned bits = widths[wi];
+        const uint64_t mask = (bits >= 64) ? ~0ULL : ((1ULL << bits) - 1);
+        uint32_t s = 0xC0FFEEu + (uint32_t)bits;  // deterministic, width-dependent
+        for (size_t i = 0; i < count; i++) {
+            s = s * 1103515245u + 12345u;
+            uint64_t v = ((uint64_t)s << 32) ^ (s * 2654435761u);
+            in[i] = v;  // full 64-bit; packer masks internally
+        }
+        const int wbytes = zxc_bitpack_stream64(in, count, big, sizeof(big), (uint8_t)bits);
+        const size_t expect = ((count * (size_t)bits) + 7) / 8;
+        if (wbytes != (int)expect) {
+            printf("  [FAIL] width %u: len %d != %zu\n", bits, wbytes, expect);
+            return 0;
+        }
+        size_t bitpos = 0;
+        for (size_t i = 0; i < count; i++) {
+            const uint64_t got = bp64_ref_read(big, &bitpos, bits);
+            if (got != (in[i] & mask)) {
+                printf("  [FAIL] width %u idx %zu: got %llx want %llx\n", bits, i,
+                       (unsigned long long)got, (unsigned long long)(in[i] & mask));
+                return 0;
+            }
+        }
+    }
+    printf("  [PASS] Round-trip over %zu widths x %zu values\n",
+           sizeof(widths) / sizeof(widths[0]), count);
+
+    // Capacity guard: dst too small must be rejected, not overrun.
+    if (zxc_bitpack_stream64(src64, 1, dst, 4, 64) != ZXC_ERROR_DST_TOO_SMALL) return 0;
+    printf("  [PASS] DST_TOO_SMALL guard\n");
 
     printf("PASS\n\n");
     return 1;
