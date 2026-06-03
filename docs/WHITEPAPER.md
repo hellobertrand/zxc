@@ -180,16 +180,20 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 **NUM Header (16 bytes):**
 
 ```
-  Offset:  0                               8       10                      16
-          +-------------------------------+-------+-------------------------+
-          | N Values                      | Frame | Reserved                |
-          | (8 bytes)                     | (2B)  | (6 bytes)               |
-          +-------------------------------+-------+-------------------------+
+  Offset:  0                               8       10  11                  16
+          +-------------------------------+-------+---+---------------------+
+          | N Values                      | Frame | W | Reserved            |
+          | (8 bytes)                     | (2B)  |(1)| (5 bytes)           |
+          +-------------------------------+-------+---+---------------------+
 ```
 
-* **N Values**: Total count of integers encoded in the block.
+* **N Values**: Total count of integers encoded in the block, at the element width.
 * **Frame**: Processing window size (currently always 128).
-* **Reserved**: Padding for alignment.
+* **W (`element_width`)**: `0` = 32-bit, `1` = 64-bit, `2` = 16-bit. Code `0` is
+  the original encoding, so 32-bit blocks are byte-identical to prior versions;
+  the wider/narrower widths were added by claiming this formerly-reserved byte,
+  with no format-version bump.
+* **Reserved**: Padding for alignment (must be zero).
 
 ### 5.4 Specific Header: GLO (Generic Low)
 (Present immediately after the Block Header)
@@ -463,18 +467,32 @@ This format prioritizes decompression throughput over compression ratio. It uses
 4.  **Wild Copy**: Same 32-byte SIMD copies as GLO, with special handling for overlapping matches (offset < 32).
 
 #### Type 2: NUM (Numeric)
-Triggered when data is detected as a dense array of 32-bit integers.
+Triggered when data is detected as a dense array of fixed-width integers. The
+probe picks the **element width** — 16, 32, or 64-bit — that minimises the
+estimated packed size, and records it in the header (`element_width`). The same
+delta/zigzag/bitpack pipeline runs at the chosen width:
 
-**Encoding Process**:
-1.  **Vectorized Delta**: Computes `delta[i] = val[i] - val[i-1]` using SIMD integers (AVX2/NEON).
-2.  **ZigZag Transform**: Maps signed deltas to unsigned space: `(d << 1) ^ (d >> 31)`.
-3.  **Bit Analysis**: Determines the maximum number of bits `B` needed to represent the deltas in a 128-value frame.
+* **16-bit** — audio (PCM), sensor/IoT samples, 16-bit imagery; deltas pack in ≤16 bits.
+* **32-bit** — the original path: row IDs, counters, offsets, inverted indexes.
+* **64-bit** — nanosecond timestamps, 64-bit IDs (Snowflake), large file offsets, fixed-point amounts.
+
+The probe is conservative: it keeps the legacy 32-bit decision authoritative, so
+32-bit blocks are emitted byte-for-byte as before, and only considers 16/64-bit
+for data the 32-bit detector rejects (choosing the width with the lowest
+estimated bits-per-byte). For an N-byte-wide integer column, reading it at the
+wrong width yields large, incompressible deltas, so the estimate naturally
+separates the cases.
+
+**Encoding Process** (at the selected width `w`):
+1.  **Vectorized Delta**: Computes `delta[i] = val[i] - val[i-1]`. SIMD is used where it pays: AVX2/NEON for 32-bit, NEON for 16-bit. The 64-bit path is scalar — measured SIMD gains were neutral-to-negative there (only two 64-bit lanes per vector, no horizontal-max instruction, and the bit-packing dominates), and the scalar loop already runs at 15-19 GB/s.
+2.  **ZigZag Transform**: Maps signed deltas to unsigned space (`(d << 1) ^ (d >> (w-1))`). ZigZag is a bijection at every width, so the result never exceeds `w` bits.
+3.  **Bit Analysis**: Determines the maximum number of bits `B ∈ [0, w]` needed to represent the deltas in a 128-value frame.
 4.  **Bit-Packing**: Packs 128 integers into `128 * B` bits.
 
 **Decoding Process**:
-1.  **Bit-Unpacking**: Unpacks bitstreams back into integers.
+1.  **Bit-Unpacking**: Unpacks bitstreams back into integers. The 64-bit reader extracts a value in two ≤32-bit steps (the accumulator is 64 bits wide, so a single 64-bit read cannot be guaranteed without undefined behaviour).
 2.  **ZigZag Decode**: Reverses the mapping.
-3.  **Integration**: Computes the prefix sum (cumulative addition) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
+3.  **Integration**: Computes the prefix sum (cumulative addition, modulo 2^w) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
 
 ### 5.9 Data Integrity
 Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.
