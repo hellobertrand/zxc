@@ -375,6 +375,12 @@ extern "C" {
 #define ZXC_EST_NUM_FRAMES 16
 /** @brief Target byte-sample size for the order-0 entropy estimate (LZ cost). */
 #define ZXC_EST_ENTROPY_SAMPLE 8192
+/** @brief Confidence-margin shift for the block-type cost estimate: NUM is
+ *  chosen only if its estimate plus 1/2^shift (here 1/4 = 25%) is still below
+ *  the LZ estimate. Offsets the order-0 entropy's blindness to LZ matches
+ *  (which make real LZ smaller than the H0 bound), preventing NUM mis-picks on
+ *  LZ-favourable blocks. */
+#define ZXC_EST_MARGIN_SHIFT 2
 
 /** @brief Binary size of a section descriptor (comp_size + raw_size). */
 #define ZXC_SECTION_DESC_BINARY_SIZE 8

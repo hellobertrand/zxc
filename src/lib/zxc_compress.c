@@ -2376,33 +2376,44 @@ static uint64_t zxc_est_lz_bits(const uint8_t* RESTRICT src, const size_t size) 
  * @brief Chooses the block codec for @p src by a mathematical cost model.
  *
  * Estimates the compressed size of three candidates — NUM-32, NUM-64 and the
- * LZ fallback — and returns the element width of the smallest, or 0 to use LZ
- * (GLO/GHI). Purely size-driven (no tuned thresholds); ties favour LZ. The NUM
- * candidates are gated on the block being a whole multiple of the width.
+ * LZ fallback — and returns the element width of the cheapest NUM candidate
+ * (4 or 8), or 0 to use LZ (GLO/GHI). The NUM candidates are gated on the block
+ * being a whole multiple of the width.
+ *
+ * Because the LZ estimate (order-0 entropy) ignores LZ matches and therefore
+ * *over*-estimates real LZ on match-favourable data, NUM is only selected when
+ * it beats the LZ estimate by a confidence margin (@ref ZXC_EST_MARGIN_SHIFT):
+ * `Ĉ_NUM + Ĉ_NUM/2^shift < Ĉ_LZ`. This keeps the clear NUM wins (whose estimate
+ * is far below LZ) while deferring borderline blocks to LZ, where it usually wins.
  *
  * @param[in] src  Block data.
  * @param[in] size Block size in bytes.
  * @return 4 (NUM-32), 8 (NUM-64), or 0 (LZ fallback).
  */
 static int zxc_select_block_codec(const uint8_t* RESTRICT src, const size_t size) {
-    uint64_t best = zxc_est_lz_bits(src, size);
-    int best_w = 0;
+    const uint64_t est_lz = zxc_est_lz_bits(src, size);
 
+    uint64_t best_num = UINT64_MAX;
+    int num_w = 0;
     if (size % sizeof(uint32_t) == 0 && size >= 4 * sizeof(uint32_t)) {
         const uint64_t e = zxc_est_num_bits(src, size, sizeof(uint32_t));
-        if (e < best) {
-            best = e;
-            best_w = (int)sizeof(uint32_t);
+        if (e < best_num) {
+            best_num = e;
+            num_w = (int)sizeof(uint32_t);
         }
     }
     if (size % sizeof(uint64_t) == 0 && size >= 4 * sizeof(uint64_t)) {
         const uint64_t e = zxc_est_num_bits(src, size, sizeof(uint64_t));
-        if (e < best) {
-            best = e;
-            best_w = (int)sizeof(uint64_t);
+        if (e < best_num) {
+            best_num = e;
+            num_w = (int)sizeof(uint64_t);
         }
     }
-    return best_w;
+
+    /* NUM only if it beats LZ by the confidence margin (offsets H0's match-blind
+     * over-estimate of LZ); otherwise fall back to LZ. */
+    if (num_w && best_num + (best_num >> ZXC_EST_MARGIN_SHIFT) < est_lz) return num_w;
+    return 0;
 }
 
 // cppcheck-suppress unusedFunction
