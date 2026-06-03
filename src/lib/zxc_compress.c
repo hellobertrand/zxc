@@ -801,7 +801,7 @@ static int zxc_encode_block_num32(const zxc_cctx_t* RESTRICT ctx, const uint8_t*
         p_curr += ZXC_NUM_CHUNK_HEADER_SIZE;
         rem -= ZXC_NUM_CHUNK_HEADER_SIZE;
 
-        const int pb = zxc_bitpack_stream_32(deltas, frames, p_curr, rem, bits);
+        const int pb = zxc_bitpack_stream32(deltas, frames, p_curr, rem, bits);
         if (UNLIKELY(pb < 0)) return pb;
         p_curr += pb;
         rem -= pb;
@@ -822,8 +822,14 @@ static int zxc_encode_block_num32(const zxc_cctx_t* RESTRICT ctx, const uint8_t*
  * 64-bit analogue of @ref zxc_encode_block_num32. A 64-bit zigzag delta needs at
  * most 64 bits (ZigZag is a bijection int64<->uint64), so no value ever exceeds
  * the packer's range. The width code ZXC_NUM_WIDTH_64 is stored in NUM header
- * byte 10. Scalar; SIMD comes in a later phase. @p src_sz must be a non-zero
- * multiple of 8.
+ * byte 10. Scalar (64-bit SIMD measured no gain).
+ *
+ * @param[in] src Pointer to the source buffer containing raw 64-bit integer data.
+ * @param[in] src_sz Size of the source buffer in bytes. Must be a non-zero multiple of 8.
+ * @param[out] dst Pointer to the destination buffer where compressed data will be written.
+ * @param[in] dst_cap Capacity of the destination buffer in bytes.
+ * @param[out] out_sz Pointer to a variable receiving the total compressed output size.
+ * @return ZXC_OK on success, or a negative zxc_error_t code (e.g. ZXC_ERROR_DST_TOO_SMALL).
  */
 static int zxc_encode_block_num64(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                   const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
@@ -876,7 +882,7 @@ static int zxc_encode_block_num64(const zxc_cctx_t* RESTRICT ctx, const uint8_t*
         p_curr += ZXC_NUM_CHUNK_HEADER_SIZE;
         rem -= ZXC_NUM_CHUNK_HEADER_SIZE;
 
-        const int pb = zxc_bitpack_stream_64(deltas, frames, p_curr, rem, bits);
+        const int pb = zxc_bitpack_stream64(deltas, frames, p_curr, rem, bits);
         if (UNLIKELY(pb < 0)) return pb;
         p_curr += pb;
         rem -= pb;
@@ -2326,12 +2332,24 @@ static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
     return 0;
 }
 
-/** @brief Load @p w (4/8) little-endian bytes as a zero-extended uint64. */
+/**
+ * @brief Load @p w (4 or 8) little-endian bytes as a zero-extended uint64.
+ *
+ * @param[in] p Pointer to the little-endian element.
+ * @param[in] w Element width in bytes (4 or 8).
+ * @return The element value zero-extended to 64 bits.
+ */
 static ZXC_ALWAYS_INLINE uint64_t zxc_load_uw(const uint8_t* RESTRICT p, const size_t w) {
     return (w == sizeof(uint32_t)) ? (uint64_t)zxc_le32(p) : zxc_le64(p);
 }
 
-/** @brief ZigZag-encode the w-wide wrapped difference @p d, returned as uint64. */
+/**
+ * @brief ZigZag-encode the @p w-wide wrapped difference @p d.
+ *
+ * @param[in] d The wrapped difference (curr - prev), interpreted at width @p w.
+ * @param[in] w Element width in bytes (4 or 8).
+ * @return The ZigZag-encoded value, zero-extended to 64 bits.
+ */
 static ZXC_ALWAYS_INLINE uint64_t zxc_zigzag_uw(const uint64_t d, const size_t w) {
     return (w == sizeof(uint32_t)) ? (uint64_t)zxc_zigzag_encode32((int32_t)(uint32_t)d)
                                    : zxc_zigzag_encode64((int64_t)d);
@@ -2345,6 +2363,10 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_zigzag_uw(const uint64_t d, const size_t w
  * samples two regions, computes ZigZag deltas at stride @p w, and applies
  * width-relative thresholds (most deltas fitting in half the element width).
  *
+ * @param[in]  src      Block data.
+ * @param[in]  size     Block size in bytes (must be a multiple of @p w).
+ * @param[in]  w        Candidate element width in bytes (4 or 8).
+ * @param[out] bits_out Receives the worst-case bit width over the sample (when viable).
  * @return 1 if viable (sets @p bits_out), 0 otherwise.
  */
 static int zxc_probe_width_viable(const uint8_t* RESTRICT src, const size_t size, const size_t w,
@@ -2401,6 +2423,10 @@ static int zxc_probe_width_viable(const uint8_t* RESTRICT src, const size_t size
  * the byte-stream is identical to prior versions. Only when it rejects does this
  * consider a 64-bit interpretation (data the 32-bit path would have sent to
  * GLO/GHI), accepting it when the run-heavy / bit-width checks find it viable.
+ *
+ * @param[in] src  Block data.
+ * @param[in] size Block size in bytes.
+ * @return Element width in bytes to use (4 or 8), or 0 if NUM is not selected.
  */
 static int zxc_probe_numeric_width(const uint8_t* RESTRICT src, const size_t size) {
     if (zxc_probe_is_numeric(src, size)) return (int)sizeof(uint32_t);

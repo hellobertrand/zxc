@@ -365,8 +365,7 @@ extern "C" {
  * block). */
 #define ZXC_NUM_FRAME_SIZE 128
 
-/** @brief NUM element-width code, stored in NUM header byte 10. The element
- *  size is derived by formula: bits = (code + 1) * 32, i.e. bytes = (code+1)*4 */
+/* NUM element-width code (NUM header byte 10) */
 /** @brief NUM element-width code for 32-bit integers. */
 #define ZXC_NUM_WIDTH_32 0U
 /** @brief NUM element-width code for 64-bit integers. */
@@ -1211,18 +1210,29 @@ static ZXC_ALWAYS_INLINE int32_t zxc_zigzag_decode(const uint32_t n) {
  * 64-bit analogue of @ref zxc_zigzag_encode32, used by the NUM 64-bit path. ZigZag
  * is a bijection int64<->uint64, so the result always fits in 64 bits (no 65-bit
  * case): the widened NUM path needs at most 64 bits per packed value.
+ *
+ * @param[in] n The signed 64-bit integer to encode.
+ * @return The ZigZag-encoded unsigned 64-bit integer.
  */
 static ZXC_ALWAYS_INLINE uint64_t zxc_zigzag_encode64(const int64_t n) {
     return ((uint64_t)n << 1) ^ (uint64_t)(-(int64_t)((uint64_t)n >> 63));
 }
 
-/** @brief ZigZag decode to a signed 64-bit integer (inverse of @ref zxc_zigzag_encode64). */
+/**
+ * @brief ZigZag decode to a signed 64-bit integer (inverse of @ref zxc_zigzag_encode64).
+ *
+ * @param[in] n The unsigned 64-bit ZigZag value to decode.
+ * @return The decoded signed 64-bit integer.
+ */
 static ZXC_ALWAYS_INLINE int64_t zxc_zigzag_decode64(const uint64_t n) {
     return (int64_t)(n >> 1) ^ -(int64_t)(n & 1);
 }
 
 /**
- * @brief Index of the highest set bit (1-based) in a 64-bit integer; 0 if n==0.
+ * @brief Index of the highest set bit (1-based) in a 64-bit integer.
+ *
+ * @param[in] n The 64-bit unsigned integer to analyze.
+ * @return The 1-based index of the highest set bit, or 0 if @p n is 0.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_highbit64(const uint64_t n) {
 #ifdef _MSC_VER
@@ -1418,19 +1428,24 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const
  * @return int The number of bytes written to the destination buffer, or a negative
  * error code on failure.
  */
-int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
+int zxc_bitpack_stream32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
                           const size_t dst_cap, const uint8_t bits);
 
 /**
  * @brief Bit-packs a stream of 64-bit integers (0-64 bits per value).
  *
- * 64-bit analogue of @ref zxc_bitpack_stream_32, used by the NUM 64-bit path. A
+ * 64-bit analogue of @ref zxc_bitpack_stream32, used by the NUM 64-bit path. A
  * value may straddle up to 9 destination bytes, so the caller must provide
  * @p dst_cap >= ceil(count*bits/8) + sizeof(uint64_t).
  *
- * @return Number of bytes written, or a negative error code.
+ * @param[in]  src     Source array of 64-bit integers.
+ * @param[in]  count   Number of values to pack.
+ * @param[out] dst     Destination byte buffer.
+ * @param[in]  dst_cap Capacity of @p dst in bytes.
+ * @param[in]  bits    Number of bits per value (0-64).
+ * @return Number of bytes written, or a negative @ref zxc_error_t code.
  */
-int zxc_bitpack_stream_64(const uint64_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
+int zxc_bitpack_stream64(const uint64_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
                           const size_t dst_cap, const uint8_t bits);
 
 /**

@@ -632,7 +632,7 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  * @param[in]  bits    Number of bits per value (0-32).
  * @return Number of bytes written on success, or a negative @ref zxc_error_t code.
  */
-int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
+int zxc_bitpack_stream32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
                           const size_t dst_cap, const uint8_t bits) {
     const size_t out_bytes = ((count * bits) + CHAR_BIT - 1) / CHAR_BIT;
 
@@ -670,7 +670,7 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint
     return (int)out_bytes;
 }
 
-int zxc_bitpack_stream_64(const uint64_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
+int zxc_bitpack_stream64(const uint64_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
                           const size_t dst_cap, const uint8_t bits) {
     const size_t out_bytes = ((count * (size_t)bits) + CHAR_BIT - 1) / CHAR_BIT;
 

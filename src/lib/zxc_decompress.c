@@ -72,6 +72,10 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* RESTRICT
  * bytes, so a single 64-bit read cannot be guaranteed. This reads in two
  * <=32-bit steps (each preceded by its own ensure), avoiding the 1ULL<<64 UB.
  * Used by the NUM 64-bit decode path.
+ *
+ * @param[in,out] br Bit reader to consume from.
+ * @param[in]     n  Number of bits to consume (0-64).
+ * @return The consumed bits as a 64-bit value.
  */
 static ZXC_ALWAYS_INLINE uint64_t zxc_br_consume64(zxc_bit_reader_t* RESTRICT br, const uint8_t n) {
     if (n == 0) return 0;
@@ -539,7 +543,14 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
  *
  * Scalar inverse of @ref zxc_encode_block_num64: unpack each ZigZag delta (<=64
  * bits, via @ref zxc_br_consume64), reverse ZigZag, and reconstruct values by
- * running sum in 64-bit modular arithmetic. SIMD comes in a later phase.
+ * running sum in 64-bit modular arithmetic.
+ *
+ * @param[in]  src          NUM payload (header + frame records).
+ * @param[in]  src_size     Size of @p src in bytes.
+ * @param[out] dst          Destination buffer for the reconstructed values.
+ * @param[in]  dst_capacity Capacity of @p dst in bytes.
+ * @param[in]  n_values     Number of 64-bit values to decode (from the NUM header).
+ * @return Number of bytes written, or a negative @ref zxc_error_t code.
  */
 static int zxc_decode_block_num64(const uint8_t* RESTRICT src, const size_t src_size,
                                   uint8_t* RESTRICT dst, const size_t dst_capacity,
