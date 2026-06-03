@@ -2288,142 +2288,97 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_zigzag_uw(const uint64_t d, const size_t w
 }
 
 /**
- * @brief Estimates the compressed size, in bits, of encoding @p src as a NUM
- *        block of element width @p w (4 or 8 bytes).
+ * @brief Conservative numeric detector: is @p src confidently a width-@p w
+ *        integer sequence with small first-order deltas?
  *
- * Mirrors NUM's real algorithm: each 128-value frame is packed at the bit width
- * of its largest ZigZag delta, plus a fixed per-frame header. The mean frame
- * bit width is measured over @ref ZXC_EST_NUM_FRAMES whole frames sampled across
- * the block (whole frames so the per-frame maximum is captured),
- * then scaled to the full value count. Integer-only.
+ * This is a *detector*, not a ratio comparator. It fires only when the data
+ * clearly fits NUM's delta model: i.e. the ZigZag deltas are small, so the
+ * resulting NUM block packs few bits per value and therefore stays fast to
+ * decode. Blocks with large deltas (dense binary, mantissas) are rejected and
+ * left to LZ; those are exactly the NUM blocks that would decode slowly, so
+ * keeping NUM bounded to small-delta data preserves decompression speed.
  *
- * @param[in] src  Block data.
- * @param[in] size Block size in bytes.
- * @param[in] w    Element width in bytes (4 or 8).
- * @return Estimated size in bits, or UINT64_MAX if the block holds < 2 values.
- */
-static uint64_t zxc_est_num_bits(const uint8_t* RESTRICT src, const size_t size, const size_t w) {
-    const size_t n = size / w;
-    if (n < 2) return UINT64_MAX;
-
-    const size_t F = ZXC_NUM_FRAME_SIZE;
-    const size_t n_frames = (n + F - 1) / F;
-    const size_t k = (n_frames < ZXC_EST_NUM_FRAMES) ? n_frames : ZXC_EST_NUM_FRAMES;
-
-    uint64_t sum_bits = 0;
-    size_t sampled = 0;
-    for (size_t s = 0; s < k; s++) {
-        const size_t fidx = (k > 1) ? (s * (n_frames - 1)) / (k - 1) : 0;
-        const size_t start = fidx * F;
-        const size_t cnt = (n - start < F) ? (n - start) : F;
-        uint64_t prev = (start == 0) ? 0 : zxc_load_uw(src + (start - 1) * w, w);
-        uint64_t max_zz = 0;
-        for (size_t j = 0; j < cnt; j++) {
-            const uint64_t v = zxc_load_uw(src + (start + j) * w, w);
-            const uint64_t zz = zxc_zigzag_uw(v - prev, w);
-            if (zz > max_zz) max_zz = zz;
-            prev = v;
-        }
-        sum_bits +=
-            (w == sizeof(uint64_t)) ? zxc_highbit64(max_zz) : zxc_highbit32((uint32_t)max_zz);
-        sampled++;
-    }
-    if (sampled == 0) return UINT64_MAX;
-
-    const uint64_t hdr_bits = (uint64_t)n_frames * (ZXC_NUM_CHUNK_HEADER_SIZE * CHAR_BIT);
-    const uint64_t payload_bits = ((uint64_t)n * sum_bits) / sampled; /* n * mean(bits/value) */
-    return hdr_bits + payload_bits;
-}
-
-/**
- * @brief Estimates the LZ (GLO/GHI) cost of @p src as its order-0 byte entropy.
+ * The thresholds are width-relative: a delta is "fitting" when it needs at most
+ * `w*8/2` bits, and the block qualifies when the largest delta needs at most
+ * `w*8/2` bits, or at most `w*8*5/8` bits with >=85% of deltas fitting, or when
+ * >=90% of deltas fit. For @p w == 4 this is byte-for-byte the historical
+ * 32-bit probe (thresholds 16 / 20 bits, 256 / 65536), so the 32-bit decision
+ * and thus the NUM-32 output is unchanged.
  *
- * Returns @c size * H0 bits, where H0 is the Shannon entropy of a strided byte
- * sample (computed via the deterministic integer @ref zxc_log2_q16). This is an
- * information-theoretic order-0 bound: it ignores LZ matches, so it overestimates
- * LZ on repetitive data: but H0 is low exactly when LZ wins, so the comparison
- * direction against the NUM estimate stays correct. Integer-only.
+ * Two regions (start and middle) are sampled so a locally-numeric block is not
+ * misjudged by its head alone. Integer-only and deterministic across ISAs.
  *
  * @param[in] src  Block data.
  * @param[in] size Block size in bytes.
- * @return Estimated size in bits.
+ * @param[in] w    Candidate element width in bytes (4 or 8).
+ * @return 1 if the block is confidently numeric at width @p w, else 0.
  */
-static uint64_t zxc_est_lz_bits(const uint8_t* RESTRICT src, const size_t size) {
-    if (size == 0) return 0;
+static int zxc_probe_numeric_w(const uint8_t* RESTRICT src, const size_t size, const size_t w) {
+    if (UNLIKELY(size % w != 0 || size < (4 * w))) return 0;
 
-    uint32_t hist[256];
-    ZXC_MEMSET(hist, 0, sizeof(hist));
-    const size_t step = (size > ZXC_EST_ENTROPY_SAMPLE) ? (size / ZXC_EST_ENTROPY_SAMPLE) : 1;
-    size_t nsamp = 0;
-    for (size_t i = 0; i < size; i += step) {
-        hist[src[i]]++;
-        nsamp++;
+    const size_t total_vals = size / w;
+    const size_t sample_len = 16;
+
+    // Sample 2 contiguous regions: start and middle of the block.
+    const size_t offsets[2] = {0, (total_vals / 2) & ~(size_t)3};
+    const size_t n_regions = (total_vals > sample_len * 2) ? 2 : 1;
+
+    const unsigned width_bits = (unsigned)(w * CHAR_BIT);  // 32 or 64
+    const unsigned half_bits = width_bits / 2;             // 16 or 32 ("fitting" delta)
+    const unsigned hi_bits = (width_bits * 5) / 8;         // 20 or 40 (relaxed max)
+
+    uint64_t max_zigzag = 0;
+    size_t fit_count = 0;  // deltas needing <= half_bits bits
+    size_t total_sampled = 0;
+
+    for (size_t r = 0; r < n_regions; r++) {
+        const uint8_t* p = src + offsets[r] * w;
+        const size_t region_count =
+            ((total_vals - offsets[r]) < sample_len) ? (total_vals - offsets[r]) : sample_len;
+        uint64_t prev = zxc_load_uw(p, w);
+        p += w;
+
+        for (size_t i = 1; i < region_count; i++) {
+            const uint64_t curr = zxc_load_uw(p, w);
+            const uint64_t zigzag = zxc_zigzag_uw(curr - prev, w);
+
+            if (zigzag > max_zigzag) max_zigzag = zigzag;
+            fit_count += (size_t)(zxc_highbit64(zigzag) <= half_bits);
+
+            prev = curr;
+            p += w;
+        }
+        total_sampled += region_count - 1;
     }
-    if (nsamp == 0) return 0;
+    if (total_sampled == 0) return 0;
 
-    /* H0 = log2(nsamp) - (1/nsamp) * sum(c_i * log2(c_i)), in Q16 bits/byte. */
-    const uint32_t log2_n = zxc_log2_q16(nsamp);
-    uint64_t weighted = 0;
-    for (int i = 0; i < 256; i++)
-        if (hist[i]) weighted += (uint64_t)hist[i] * zxc_log2_q16(hist[i]);
-    const uint32_t mean_log = (uint32_t)(weighted / nsamp);
-    const uint32_t h0_q16 = (log2_n > mean_log) ? (log2_n - mean_log) : 0;
+    const unsigned bits_needed = zxc_highbit64(max_zigzag);
 
-    return ((uint64_t)size * h0_q16) >> 16; /* size bytes * H0 bits/byte */
+    if (bits_needed <= half_bits) return 1;
+    if (bits_needed <= hi_bits && fit_count >= (total_sampled * 85) / 100) return 1;
+    if (fit_count >= (total_sampled * 90) / 100) return 1;
+
+    return 0;
 }
 
 /**
- * @brief Chooses the block codec for @p src by a mathematical cost model with a
- *        confidence band.
+ * @brief Selects the NUM element width for @p src, or LZ, by conservative
+ *        numeric detection.
  *
- * Estimates the compressed size of the best NUM candidate (NUM-32 / NUM-64) and
- * of the LZ fallback, then classifies the block into one of three regimes using
- * the confidence margin @ref ZXC_EST_MARGIN_SHIFT (`m = 1/2^shift`):
+ * Probes the 32-bit interpretation first (authoritative, byte-identical to the
+ * legacy probe) and falls back to 64-bit only when 32-bit does not fit: a
+ * genuine 64-bit sequence has huge deltas read as i32, so 32-bit naturally
+ * rejects it. NUM is chosen only when the data is confidently numeric, never on
+ * an estimated ratio, so marginal slow-to-decode NUM blocks are never produced.
  *
- * - **Confident NUM**: use NUM.
- * - **Confident LZ**: use LZ.
- * - **Ambiguous**: the estimates are too close to trust, the LZ
- *   estimate (order-0 entropy) is blind to matches and the NUM estimate is
- *   near-exact, so neither bound is reliable here. The caller resolves it by
- *   encoding both and keeping the smaller (@p out_ambiguous is set).
- *
- * Clear blocks (the vast majority) are decided from the estimate alone with no
- * extra work; only the narrow ambiguous band pays a second encode.
- *
- * @param[in]  src           Block data.
- * @param[in]  size          Block size in bytes.
- * @param[out] out_ambiguous Set to 1 when the caller must encode both the
- *                           returned NUM width and LZ, and keep the smaller.
- * @return Candidate NUM width: 4, 8, or 0 (LZ; @p out_ambiguous is 0).
+ * @param[in] src  Block data.
+ * @param[in] size Block size in bytes.
+ * @return NUM element width in bytes (4 or 8), or 0 for the LZ path.
  */
-static int zxc_select_block_codec(const uint8_t* RESTRICT src, const size_t size,
-                                  int* RESTRICT out_ambiguous) {
-    *out_ambiguous = 0;
-    const uint64_t est_lz = zxc_est_lz_bits(src, size);
-
-    uint64_t best_num = UINT64_MAX;
-    int num_w = 0;
-    if (size % sizeof(uint32_t) == 0 && size >= 4 * sizeof(uint32_t)) {
-        const uint64_t e = zxc_est_num_bits(src, size, sizeof(uint32_t));
-        if (e < best_num) {
-            best_num = e;
-            num_w = (int)sizeof(uint32_t);
-        }
-    }
-    if (size % sizeof(uint64_t) == 0 && size >= 4 * sizeof(uint64_t)) {
-        const uint64_t e = zxc_est_num_bits(src, size, sizeof(uint64_t));
-        if (e < best_num) {
-            best_num = e;
-            num_w = (int)sizeof(uint64_t);
-        }
-    }
-    if (num_w == 0) return 0; /* no NUM candidate (size/alignment) -> LZ */
-
-    if (best_num + (best_num >> ZXC_EST_MARGIN_SHIFT) < est_lz) return num_w; /* confident NUM */
-    if (est_lz + (est_lz >> ZXC_EST_MARGIN_SHIFT) < best_num) return 0;       /* confident LZ */
-
-    *out_ambiguous = 1; /* within the band: caller measures both */
-    return num_w;
+static int zxc_select_block_codec(const uint8_t* RESTRICT src, const size_t size) {
+    if (zxc_probe_numeric_w(src, size, sizeof(uint32_t))) return (int)sizeof(uint32_t);
+    if (zxc_probe_numeric_w(src, size, sizeof(uint64_t))) return (int)sizeof(uint64_t);
+    return 0;
 }
 
 // cppcheck-suppress unusedFunction
@@ -2432,14 +2387,13 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     size_t w = 0;
     int res = ZXC_OK;
 
-    /* Cost model decides NUM-32 / NUM-64 / LZ. Clear cases use the estimate
-     * directly; ambiguous blocks encode both NUM and LZ and keep the smaller. */
-    int ambiguous = 0;
-    const int num_width = zxc_select_block_codec(chunk, src_sz, &ambiguous);
+    /* Conservative numeric detection picks NUM-32 / NUM-64 only when the data
+     * is clearly a small-delta integer sequence (fast to decode); everything
+     * else takes the LZ path. */
+    const int num_width = zxc_select_block_codec(chunk, src_sz);
     int did_num = 0;
 
-    if (UNLIKELY(num_width != 0 && !ambiguous)) {
-        /* Confident NUM: encode it directly. */
+    if (UNLIKELY(num_width != 0)) {
         res = (num_width == (int)sizeof(uint64_t))
                   ? zxc_encode_block_num64(ctx, chunk, src_sz, dst, dst_cap, &w)
                   : zxc_encode_block_num32(ctx, chunk, src_sz, dst, dst_cap, &w);
@@ -2448,27 +2402,10 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     }
 
     if (LIKELY(!did_num)) {
-        /* LZ baseline (also the ambiguous baseline). */
         if (ctx->compression_level <= 2)
             res = zxc_encode_block_ghi(ctx, chunk, src_sz, dst, dst_cap, &w);
         else
             res = zxc_encode_block_glo(ctx, chunk, src_sz, dst, dst_cap, &w);
-
-        /* Ambiguous: also encode the NUM candidate into the now-free literals
-         * scratch and keep it if it is actually smaller than LZ. */
-        if (UNLIKELY(ambiguous) && num_width != 0 && res == ZXC_OK) {
-            size_t num_w = 0;
-            uint8_t* const scratch = ctx->literals;
-            const size_t scap = ctx->chunk_size + ZXC_PAD_SIZE;
-            const int nres =
-                (num_width == (int)sizeof(uint64_t))
-                    ? zxc_encode_block_num64(ctx, chunk, src_sz, scratch, scap, &num_w)
-                    : zxc_encode_block_num32(ctx, chunk, src_sz, scratch, scap, &num_w);
-            if (nres == ZXC_OK && num_w < w) {
-                ZXC_MEMCPY(dst, scratch, num_w);
-                w = num_w;
-            }
-        }
     }
 
     // Check expansion. W contains Header + Payload.

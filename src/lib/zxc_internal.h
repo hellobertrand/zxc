@@ -371,17 +371,6 @@ extern "C" {
 /** @brief NUM element-width code for 64-bit integers. */
 #define ZXC_NUM_WIDTH_64 1U
 
-/** @brief Number of whole frames sampled by the NUM block-type cost estimator. */
-#define ZXC_EST_NUM_FRAMES 16
-/** @brief Target byte-sample size for the order-0 entropy estimate (LZ cost). */
-#define ZXC_EST_ENTROPY_SAMPLE 8192
-/** @brief Confidence-margin shift for the block-type cost estimate: NUM is
- *  chosen only if its estimate plus 1/2^shift (here 1/4 = 25%) is still below
- *  the LZ estimate. Offsets the order-0 entropy's blindness to LZ matches
- *  (which make real LZ smaller than the H0 bound), preventing NUM mis-picks on
- *  LZ-favourable blocks. */
-#define ZXC_EST_MARGIN_SHIFT 2
-
 /** @brief Binary size of a section descriptor (comp_size + raw_size). */
 #define ZXC_SECTION_DESC_BINARY_SIZE 8
 /** @brief 32-bit mask for extracting sizes from a section descriptor. */
@@ -647,36 +636,6 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_log2_u32(const uint32_t v) {
 #else
     return (v == 0) ? 0 : (uint32_t)(31 - __builtin_clz(v));
 #endif
-}
-
-/**
- * @brief Fixed-point base-2 logarithm in Q16 (returns log2(x) * 2^16).
- *
- * Integer-only and fully deterministic across platforms/compilers (no floating
- * point), so it is safe to drive encoder block-type decisions whose output must
- * stay bit-reproducible. A 17-entry mantissa table is linearly interpolated with
- * the next 16 mantissa bits; absolute error is below 1e-3 bits.
- *
- * @param[in] x Value whose logarithm is taken; values <= 1 return 0.
- * @return log2(@p x) scaled by 2^16 (Q16 fixed point).
- */
-static ZXC_ALWAYS_INLINE uint32_t zxc_log2_q16(const uint64_t x) {
-    /* tbl[i] = round(log2(1 + i/16) * 65536), i = 0..16. */
-    static const uint32_t tbl[17] = {0,     5732,  11136, 16248, 21098, 25711, 30110, 34313, 38336,
-                                     42196, 45904, 49472, 52910, 56228, 59433, 62533, 65536};
-    if (x <= 1) return 0;
-#ifdef _MSC_VER
-    unsigned long bsr;
-    _BitScanReverse64(&bsr, x);
-    const uint32_t k = (uint32_t)bsr;
-#else
-    const uint32_t k = (uint32_t)(63 - __builtin_clzll(x));
-#endif
-    const uint64_t norm = x << (63 - k); /* leading 1 placed at bit 63 */
-    const uint32_t idx = (uint32_t)((norm >> 59) & 0xFU);
-    const uint32_t rem = (uint32_t)((norm >> 43) & 0xFFFFU);
-    const uint32_t frac = tbl[idx] + (uint32_t)(((uint64_t)(tbl[idx + 1] - tbl[idx]) * rem) >> 16);
-    return (k << 16) + frac;
 }
 
 /**

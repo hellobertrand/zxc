@@ -465,7 +465,7 @@ This format prioritizes decompression throughput over compression ratio. It uses
 
 #### Type 2: NUM (Numeric)
 Encodes a dense array of fixed-width integers; the **element width** (32 or 64-bit)
-is chosen by the cost model of [§5.8.1](#581-block-type-selection-cost-model) and
+is chosen by the numeric detector of [§5.8.1](#581-block-type-selection) and
 recorded in the header (`element_width`). The same delta/zigzag/bitpack pipeline
 runs at the chosen width:
 
@@ -483,56 +483,44 @@ runs at the chosen width:
 2.  **ZigZag Decode**: Reverses the mapping.
 3.  **Integration**: Computes the prefix sum (cumulative addition, modulo 2^w) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
 
-#### 5.8.1 Block-Type Selection (cost model)
+#### 5.8.1 Block-Type Selection
 
-The encoder does **not** use tuned heuristics to decide between NUM-32, NUM-64 and
-the LZ fallback (GLO/GHI). Instead it computes a closed-form estimate of the
-compressed size of each candidate and picks the smallest. Everything is integer
-arithmetic (a fixed-point `log2`), so the decision — and thus the output — is
-bit-reproducible across platforms and compilers.
+The encoder chooses NUM only when a block is **confidently a small-delta integer
+sequence** — a *detector*, not a ratio comparator. This is deliberate: NUM is the
+right block precisely when its delta model fits, and that same condition keeps it
+**fast to decode**. A NUM block packs `b = ⌈log2(max_zigzag_delta + 1)⌉` bits per
+value, so its decode cost scales with `b`. By gating NUM on small deltas (small
+`b`), the codec never produces the wide-`b` NUM blocks that would decode slowly —
+dense binary, float mantissas, high-entropy data all stay on the LZ path. The
+detector is integer-only and deterministic across platforms, so the decision —
+and thus the output — is bit-reproducible.
 
-**NUM-w estimate** mirrors the codec exactly. Each 128-value frame is packed at
-`b = ⌈log2(max_zigzag_delta + 1)⌉` bits/value plus a 16-byte header. The mean
-frame bit width `b̄` is measured over a set of *whole* frames sampled across the
-block (whole frames so the per-frame maximum — set by outliers — is captured),
-then extrapolated:
+**Detection (per candidate width `w`).** Two short regions (the start and the
+middle of the block) are sampled, their first-order ZigZag deltas computed, and
+the block qualifies as numeric at width `w` when — with `W = 8w` bits — any of:
 
-```
-Ĉ_NUM(w) = N_frames · 128  +  n_values · b̄          (bits)
-```
+- the largest delta needs ≤ `W/2` bits (`16` for w=4, `32` for w=8), **or**
+- it needs ≤ `5W/8` bits (`20` / `40`) **and** ≥ 85 % of deltas fit in `W/2` bits, **or**
+- ≥ 90 % of deltas fit in `W/2` bits.
 
-**LZ estimate** is the order-0 byte entropy `H₀ = −Σ pᵢ log₂ pᵢ` of a strided
-sample, scaled to the block:
+**Width choice.** The 32-bit interpretation is probed first and is authoritative;
+64-bit is tried only if 32-bit does not qualify. A genuine 64-bit sequence read
+as `i32` has wildly alternating deltas (the high and low halves interleave), so
+32-bit naturally rejects it and 64-bit catches it. For `w = 4` the test is
+byte-for-byte the historical 32-bit probe (thresholds `16`/`20` bits, `256`/`65536`),
+so NUM-32 output — and every existing 32-bit golden file — is unchanged.
 
-```
-Ĉ_LZ = B · H₀                                        (bits)
-```
+If neither width qualifies the block takes the LZ path (GLO at level ≥ 3, GHI at
+level ≤ 2). A NUM block that nonetheless expands past 75 % of the input falls back
+to LZ, and any block that still expands past the input is stored RAW. The
+selection is an encoder-only decision and does not affect the on-disk format.
 
-This is the information-theoretic order-0 bound; it ignores LZ matches, so it is
-loose for repetitive data, but `H₀` is low precisely when LZ wins, so the
-*ordering* against the NUM estimate stays meaningful.
-
-**Decision — a confidence band.** The NUM estimate is near-exact (it replays the
-real packing), but the LZ estimate is only approximate: order-0 entropy *over*-
-estimates LZ on match-favourable data (it ignores matches) and *under*-estimates
-it on very low-entropy data (real Huffman has a ≥1-bit/symbol floor plus token
-overhead). A single comparison would therefore mis-pick near the crossover. So
-the cheapest NUM candidate `Ĉ_NUM` is compared to `Ĉ_LZ` with a margin
-`m = 1/2^`@ref ZXC_EST_MARGIN_SHIFT (25 %):
-
-- **`Ĉ_NUM·(1+m) < Ĉ_LZ`** → confident NUM → encode NUM only.
-- **`Ĉ_LZ·(1+m) < Ĉ_NUM`** → confident LZ → encode LZ only.
-- **otherwise (within the band)** → the estimates are too close to trust →
-  encode **both** the NUM candidate and LZ and keep the smaller.
-
-The vast majority of blocks fall in a confident regime and are decided from the
-estimate alone, with no extra work. Only the narrow ambiguous band pays a second
-encode — and because NUM never uses the literal-staging buffer, the NUM trial is
-written into that buffer (free once LZ has produced its block) with no extra
-allocation. This keeps the selector deterministic and heuristic-light while
-guaranteeing the borderline blocks (low-cardinality integers, mixed binary) get
-whichever codec is genuinely smaller. The margin and the band do not affect the
-on-disk format — selection is an encoder-only decision.
+> **Design note — ratio vs. decode speed.** A pure cost model would also pick NUM
+> on blocks where it is *marginally* smaller than LZ (low-cardinality integer
+> columns, mixed binary). Those NUM blocks compress slightly better but decode
+> noticeably slower than the LZ they replace — the wrong trade for a
+> decompression-first codec. The conservative detector intentionally leaves those
+> blocks on LZ and keeps NUM for the cases where it wins on both axes.
 
 ### 5.9 Data Integrity
 Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.
