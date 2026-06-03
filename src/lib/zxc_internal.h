@@ -365,10 +365,11 @@ extern "C" {
  * block). */
 #define ZXC_NUM_FRAME_SIZE 128
 
-/** @brief NUM element-width codes, stored in NUM header byte 10. */
-#define ZXC_NUM_WIDTH_16 2U
-#define ZXC_NUM_WIDTH_32 0U /* legacy */
-#define ZXC_NUM_WIDTH_64 1U
+/** @brief NUM element-width code, stored in NUM header byte 10. The element
+ *  size is derived by formula: bits = (code + 1) * 32, i.e. bytes = (code+1)*4.
+ *  Code 0 = 32-bit; 1 = 64-bit. */
+#define ZXC_NUM_WIDTH_32 0U /* (0+1)*32 = 32-bit */
+#define ZXC_NUM_WIDTH_64 1U /* (1+1)*32 = 64-bit */
 
 /** @brief Binary size of a section descriptor (comp_size + raw_size). */
 #define ZXC_SECTION_DESC_BINARY_SIZE 8
@@ -1201,21 +1202,6 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_zigzag_encode(const int32_t n) {
  */
 static ZXC_ALWAYS_INLINE int32_t zxc_zigzag_decode(const uint32_t n) {
     return (int32_t)(n >> 1) ^ -(int32_t)(n & 1);
-}
-
-/**
- * @brief ZigZag encode a signed 16-bit integer (max output 65535 = 16 bits).
- *
- * 16-bit analogue of @ref zxc_zigzag_encode, used by the NUM 16-bit path. The
- * result fits in 16 bits, so the existing 32-bit bit-packer/reader handle it.
- */
-static ZXC_ALWAYS_INLINE uint16_t zxc_zigzag_encode16(const int16_t n) {
-    return (uint16_t)(((uint16_t)n << 1) ^ (uint16_t)(-(int16_t)((uint16_t)n >> 15)));
-}
-
-/** @brief ZigZag decode to a signed 16-bit integer (inverse of @ref zxc_zigzag_encode16). */
-static ZXC_ALWAYS_INLINE int16_t zxc_zigzag_decode16(const uint16_t n) {
-    return (int16_t)((uint16_t)(n >> 1) ^ (uint16_t)(-(int16_t)(n & 1)));
 }
 
 /**

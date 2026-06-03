@@ -470,8 +470,7 @@ int zxc_read_num_header(const uint8_t* RESTRICT src, const size_t src_size,
     nh->n_values = zxc_le64(src);
     nh->frame_size = zxc_le16(src + 8);
     nh->element_width = src[10];
-    if (UNLIKELY(nh->element_width != ZXC_NUM_WIDTH_32 && nh->element_width != ZXC_NUM_WIDTH_64 &&
-                 nh->element_width != ZXC_NUM_WIDTH_16))
+    if (UNLIKELY(nh->element_width != ZXC_NUM_WIDTH_32 && nh->element_width != ZXC_NUM_WIDTH_64))
         return ZXC_ERROR_CORRUPT_DATA;
 
     return ZXC_OK;

@@ -259,24 +259,6 @@ static ZXC_ALWAYS_INLINE uint32x4_t zxc_neon_prefix_sum_u32(uint32x4_t v) {
 
     return v;
 }
-
-/**
- * @brief Prefix sum of eight 16-bit lanes (Hillis-Steele, modular in 2^16).
- *
- * [a,b,c,d,e,f,g,h] -> [a, a+b, ..., a+..+h]. Used by the NUM 16-bit decode to
- * reconstruct values from deltas; wrap-around in 16 bits is the intended
- * behaviour (matches the scalar running-sum).
- */
-static ZXC_ALWAYS_INLINE uint16x8_t zxc_neon_prefix_sum_u16(uint16x8_t v) {
-    const uint8x16_t zero = vdupq_n_u8(0);
-    // Shift right by 1 element (2 bytes): [0,a,b,c,d,e,f,g]
-    v = vaddq_u16(v, vreinterpretq_u16_u8(vextq_u8(zero, vreinterpretq_u8_u16(v), 14)));
-    // Shift right by 2 elements (4 bytes)
-    v = vaddq_u16(v, vreinterpretq_u16_u8(vextq_u8(zero, vreinterpretq_u8_u16(v), 12)));
-    // Shift right by 4 elements (8 bytes)
-    v = vaddq_u16(v, vreinterpretq_u16_u8(vextq_u8(zero, vreinterpretq_u8_u16(v), 8)));
-    return v;
-}
 #endif
 
 #if defined(ZXC_USE_AVX2)
@@ -395,9 +377,6 @@ static ZXC_ALWAYS_INLINE __m128i zxc_mm_prefix_sum_epi32(__m128i v) {
  *         or a negative zxc_error_t code if an error occurs (e.g., buffer overflow, invalid header,
  *         or malformed compressed stream).
  */
-static int zxc_decode_block_num16(const uint8_t* RESTRICT src, const size_t src_size,
-                                  uint8_t* RESTRICT dst, const size_t dst_capacity,
-                                  uint64_t n_values);
 static int zxc_decode_block_num64(const uint8_t* RESTRICT src, const size_t src_size,
                                   uint8_t* RESTRICT dst, const size_t dst_capacity,
                                   uint64_t n_values);
@@ -407,8 +386,6 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
     zxc_num_header_t nh;
     if (UNLIKELY(zxc_read_num_header(src, src_size, &nh) != ZXC_OK)) return ZXC_ERROR_BAD_HEADER;
 
-    if (nh.element_width == ZXC_NUM_WIDTH_16)
-        return zxc_decode_block_num16(src, src_size, dst, dst_capacity, nh.n_values);
     if (nh.element_width == ZXC_NUM_WIDTH_64)
         return zxc_decode_block_num64(src, src_size, dst, dst_capacity, nh.n_values);
     /* ZXC_NUM_WIDTH_32 falls through to the legacy path below. */
@@ -549,92 +526,6 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
             running_val += delta;
             zxc_store_le32(d_ptr, running_val);
             d_ptr += sizeof(uint32_t);
-        }
-
-        offset += psize;
-        vals_remaining -= nvals;
-    }
-    return (int)(d_ptr - dst);
-}
-
-/**
- * @brief Decodes a NUM block of 16-bit integers (width code ZXC_NUM_WIDTH_16).
- *
- * Scalar inverse of @ref zxc_encode_block_num16: unpack each ZigZag delta (<=16
- * bits, via the 32-bit bit reader), reverse ZigZag, and reconstruct values by
- * running sum in 16-bit modular arithmetic. SIMD comes in a later phase.
- */
-static int zxc_decode_block_num16(const uint8_t* RESTRICT src, const size_t src_size,
-                                  uint8_t* RESTRICT dst, const size_t dst_capacity,
-                                  uint64_t n_values) {
-    size_t offset = ZXC_NUM_HEADER_BINARY_SIZE;
-    uint8_t* d_ptr = dst;
-    const uint8_t* const d_end = dst + dst_capacity;
-    uint64_t vals_remaining = n_values;
-    uint16_t running_val = 0;
-
-#if defined(ZXC_USE_NEON64)
-    ZXC_ALIGN(ZXC_CACHE_LINE_SIZE)
-    uint16_t deltas[ZXC_NUM_DEC_BATCH];
-#endif
-
-    while (vals_remaining > 0) {
-        if (UNLIKELY(offset > src_size - ZXC_NUM_CHUNK_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
-
-        const uint16_t nvals = zxc_le16(src + offset);
-        const uint16_t bits = zxc_le16(src + offset + 2);
-        const uint32_t psize = zxc_le32(src + offset + 12);
-        offset += ZXC_NUM_CHUNK_HEADER_SIZE;
-
-        if (UNLIKELY(nvals > vals_remaining || psize > src_size - offset ||
-                     d_ptr + (size_t)nvals * sizeof(uint16_t) > d_end ||
-                     bits > (sizeof(uint16_t) * CHAR_BIT)))
-            return ZXC_ERROR_CORRUPT_DATA;
-
-        zxc_bit_reader_t br;
-        zxc_br_init(&br, src + offset, psize);
-        size_t i = 0;
-
-#if defined(ZXC_USE_NEON64)
-        /* Unpack + ZigZag-decode into deltas[], then prefix-sum 8 lanes at a time
-         * carrying running_val across batches (16-bit modular arithmetic). */
-        for (; i + ZXC_NUM_DEC_BATCH <= nvals; i += ZXC_NUM_DEC_BATCH) {
-            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 4) {
-                zxc_br_ensure(&br, bits);
-                deltas[k + 0] =
-                    (uint16_t)zxc_zigzag_decode16((uint16_t)zxc_br_consume_fast(&br, (uint8_t)bits));
-                zxc_br_ensure(&br, bits);
-                deltas[k + 1] =
-                    (uint16_t)zxc_zigzag_decode16((uint16_t)zxc_br_consume_fast(&br, (uint8_t)bits));
-                zxc_br_ensure(&br, bits);
-                deltas[k + 2] =
-                    (uint16_t)zxc_zigzag_decode16((uint16_t)zxc_br_consume_fast(&br, (uint8_t)bits));
-                zxc_br_ensure(&br, bits);
-                deltas[k + 3] =
-                    (uint16_t)zxc_zigzag_decode16((uint16_t)zxc_br_consume_fast(&br, (uint8_t)bits));
-            }
-
-            uint16_t* batch_dst = (uint16_t*)d_ptr;
-            uint16x8_t v_run = vdupq_n_u16(running_val);
-            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 8) {
-                const uint16x8_t v_d = vld1q_u16(&deltas[k]);
-                uint16x8_t v_sum = zxc_neon_prefix_sum_u16(v_d);
-                v_sum = vaddq_u16(v_sum, v_run);
-                vst1q_u16(&batch_dst[k], v_sum);
-                v_run = vdupq_laneq_u16(v_sum, 7);  // broadcast last element
-            }
-            running_val = vgetq_lane_u16(v_run, 0);
-            d_ptr += ZXC_NUM_DEC_BATCH * sizeof(uint16_t);
-        }
-#endif
-
-        for (; i < nvals; i++) {
-            zxc_br_ensure(&br, bits);
-            const int16_t delta =
-                zxc_zigzag_decode16((uint16_t)zxc_br_consume_fast(&br, (uint8_t)bits));
-            running_val = (uint16_t)(running_val + (uint16_t)delta);
-            zxc_store_le16(d_ptr, running_val);
-            d_ptr += sizeof(uint16_t);
         }
 
         offset += psize;
