@@ -633,7 +633,7 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  * @return Number of bytes written on success, or a negative @ref zxc_error_t code.
  */
 int zxc_bitpack_stream32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
-                          const size_t dst_cap, const uint8_t bits) {
+                         const size_t dst_cap, const uint8_t bits) {
     const size_t out_bytes = ((count * bits) + CHAR_BIT - 1) / CHAR_BIT;
 
     // +4 bytes: packing may write past out_bytes when the last value straddles a byte boundary.
@@ -671,7 +671,7 @@ int zxc_bitpack_stream32(const uint32_t* RESTRICT src, const size_t count, uint8
 }
 
 int zxc_bitpack_stream64(const uint64_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
-                          const size_t dst_cap, const uint8_t bits) {
+                         const size_t dst_cap, const uint8_t bits) {
     const size_t out_bytes = ((count * (size_t)bits) + CHAR_BIT - 1) / CHAR_BIT;
 
     // +8 bytes: a value shifted by up to 7 bits straddles up to 9 destination

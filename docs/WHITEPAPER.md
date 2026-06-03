@@ -464,9 +464,10 @@ This format prioritizes decompression throughput over compression ratio. It uses
 4.  **Wild Copy**: Same 32-byte SIMD copies as GLO, with special handling for overlapping matches (offset < 32).
 
 #### Type 2: NUM (Numeric)
-Triggered when data is detected as a dense array of fixed-width integers. The
-probe picks the **element width** — 32 or 64-bit — and records it in the header
-(`element_width`). The same delta/zigzag/bitpack pipeline runs at the chosen width:
+Encodes a dense array of fixed-width integers; the **element width** (32 or 64-bit)
+is chosen by the cost model of [§5.8.1](#581-block-type-selection-cost-model) and
+recorded in the header (`element_width`). The same delta/zigzag/bitpack pipeline
+runs at the chosen width:
 
 * **32-bit** — row IDs, counters, offsets, inverted indexes.
 * **64-bit** — nanosecond timestamps, 64-bit IDs, large file offsets, fixed-point amounts.
@@ -481,6 +482,46 @@ probe picks the **element width** — 32 or 64-bit — and records it in the hea
 1.  **Bit-Unpacking**: Unpacks bitstreams back into integers. The 64-bit reader extracts a value in two ≤32-bit steps (the accumulator is 64 bits wide, so a single 64-bit read cannot be guaranteed without undefined behaviour).
 2.  **ZigZag Decode**: Reverses the mapping.
 3.  **Integration**: Computes the prefix sum (cumulative addition, modulo 2^w) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
+
+#### 5.8.1 Block-Type Selection (cost model)
+
+The encoder does **not** use tuned heuristics to decide between NUM-32, NUM-64 and
+the LZ fallback (GLO/GHI). Instead it computes a closed-form estimate of the
+compressed size of each candidate and picks the smallest. Everything is integer
+arithmetic (a fixed-point `log2`), so the decision — and thus the output — is
+bit-reproducible across platforms and compilers.
+
+**NUM-w estimate** mirrors the codec exactly. Each 128-value frame is packed at
+`b = ⌈log2(max_zigzag_delta + 1)⌉` bits/value plus a 16-byte header. The mean
+frame bit width `b̄` is measured over a set of *whole* frames sampled across the
+block (whole frames so the per-frame maximum — set by outliers — is captured),
+then extrapolated:
+
+```
+Ĉ_NUM(w) = N_frames · 128  +  n_values · b̄          (bits)
+```
+
+**LZ estimate** is the order-0 byte entropy `H₀ = −Σ pᵢ log₂ pᵢ` of a strided
+sample, scaled to the block:
+
+```
+Ĉ_LZ = B · H₀                                        (bits)
+```
+
+This is the information-theoretic order-0 bound; it ignores LZ matches, so it is
+loose for repetitive data, but `H₀` is low precisely when LZ wins, so the
+*ordering* against the NUM estimate stays meaningful.
+
+**Decision:** `argmin(Ĉ_NUM(4) [B%4=0], Ĉ_NUM(8) [B%8=0], Ĉ_LZ)`, ties favouring LZ.
+
+The NUM estimate is near-exact (it replays the real packing); the LZ estimate is
+necessarily approximate. On clearly-structured data (timestamps, IDs, run-heavy
+columns, text) the gap between candidates is large and the choice is robust. The
+residual error is confined to *borderline low-cardinality integer* columns, where
+NUM and LZ land within ~10 % of each other and accurate LZ sizing would require
+modelling both Huffman's ≥1-bit floor and match savings — i.e. running LZ. There
+the model may give up a few percent on a block; the slow-compress/fast-decompress
+design tolerates this in exchange for a heuristic-free, deterministic selector.
 
 ### 5.9 Data Integrity
 Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.

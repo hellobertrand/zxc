@@ -2265,74 +2265,6 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
 }
 
 /**
- * @brief Checks if the given byte array represents a numeric value.
- *
- * This function examines the provided buffer to determine if it contains
- * only numeric characters (e.g., ASCII digits '0'-'9').
- *
- * Improved heuristic:
- * 1. Must be aligned to 4 bytes.
- * 2. Samples the first 128 integers (more accurate).
- * 3. Calculates bit width of deltas (fewer bits = better for NUM).
- * 4. Estimates compression ratio: if NUM would save >20% vs raw, use it.
- *
- * @param[in] src Pointer to the input byte array to be checked.
- * @param[in] size The number of bytes in the input array.
- * @return int Returns 1 if the array is numeric, 0 otherwise.
- */
-static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
-    if (UNLIKELY(size % sizeof(uint32_t) != 0 || size < (4 * sizeof(uint32_t)))) return 0;
-
-    const size_t total_vals = size / sizeof(uint32_t);
-    const size_t sample_len = 16;
-
-    // Sample 2 contiguous regions: start and middle of the block.
-    // Each region computes its own deltas independently.
-    const size_t offsets[2] = {0, (total_vals / 2) & ~(size_t)3};  // Align to uint32_t boundary
-    const size_t n_regions = (total_vals > sample_len * 2) ? 2 : 1;
-
-    uint32_t max_zigzag = 0;
-    uint32_t small_count = 0;   // Deltas < 256 (8 bits)
-    uint32_t medium_count = 0;  // Deltas < 65536 (16 bits)
-    size_t total_sampled = 0;
-
-    for (size_t r = 0; r < n_regions; r++) {
-        const uint8_t* p = src + offsets[r] * sizeof(uint32_t);
-        const size_t region_count =
-            ((total_vals - offsets[r]) < sample_len) ? (total_vals - offsets[r]) : sample_len;
-        uint32_t prev = zxc_le32(p);
-        p += sizeof(uint32_t);
-
-        for (size_t i = 1; i < region_count; i++) {
-            const uint32_t curr = zxc_le32(p);
-            const int32_t diff = (int32_t)(curr - prev);
-            const uint32_t zigzag = zxc_zigzag_encode32(diff);
-
-            max_zigzag = zigzag > max_zigzag ? zigzag : max_zigzag;
-            small_count += (uint32_t)(zigzag < 256);
-            medium_count += (uint32_t)(zigzag >= 256) & (uint32_t)(zigzag < 65536);
-
-            prev = curr;
-            p += sizeof(uint32_t);
-        }
-        total_sampled += region_count - 1;
-    }
-
-    const uint32_t bits_needed = zxc_highbit32(max_zigzag);
-
-    // Estimate compression ratio:
-    // NUM uses ~bits_needed per value, Raw uses 32 bits per value
-    // Worth it if bits_needed <= 20 (saves >37.5%)
-    if (bits_needed <= 16) return 1;
-    if (bits_needed <= 20 && (small_count + medium_count) >= (total_sampled * 85) / 100) return 1;
-
-    // Fallback: if 90% of deltas are small, still use NUM
-    if ((small_count + medium_count) >= (total_sampled * 90) / 100) return 1;
-
-    return 0;
-}
-
-/**
  * @brief Load @p w (4 or 8) little-endian bytes as a zero-extended uint64.
  *
  * @param[in] p Pointer to the little-endian element.
@@ -2356,87 +2288,121 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_zigzag_uw(const uint64_t d, const size_t w
 }
 
 /**
- * @brief Estimates whether NUM at element width @p w (bytes) is viable on @p src,
- *        and reports the worst-case bit width over the sample.
+ * @brief Estimates the compressed size, in bits, of encoding @p src as a NUM
+ *        block of element width @p w (4 or 8 bytes).
  *
- * Width-parametric analogue of @ref zxc_probe_is_numeric's delta analysis: it
- * samples two regions, computes ZigZag deltas at stride @p w, and applies
- * width-relative thresholds (most deltas fitting in half the element width).
- *
- * @param[in]  src      Block data.
- * @param[in]  size     Block size in bytes (must be a multiple of @p w).
- * @param[in]  w        Candidate element width in bytes (4 or 8).
- * @param[out] bits_out Receives the worst-case bit width over the sample (when viable).
- * @return 1 if viable (sets @p bits_out), 0 otherwise.
- */
-static int zxc_probe_width_viable(const uint8_t* RESTRICT src, const size_t size, const size_t w,
-                                  uint8_t* RESTRICT bits_out) {
-    const size_t W = w * CHAR_BIT;
-    const size_t total_vals = size / w;
-    const size_t sample_len = 16;
-    const size_t offsets[2] = {0, (total_vals / 2) & ~(size_t)3};
-    const size_t n_regions = (total_vals > sample_len * 2) ? 2 : 1;
-    const uint8_t half = (uint8_t)(W / 2);
-
-    uint64_t max_zz = 0;
-    size_t half_count = 0, zero_count = 0, sampled = 0;
-
-    for (size_t r = 0; r < n_regions; r++) {
-        const uint8_t* p = src + offsets[r] * w;
-        const size_t region_count =
-            ((total_vals - offsets[r]) < sample_len) ? (total_vals - offsets[r]) : sample_len;
-        uint64_t prev = zxc_load_uw(p, w);
-        p += w;
-        for (size_t i = 1; i < region_count; i++) {
-            const uint64_t curr = zxc_load_uw(p, w);
-            const uint64_t zz = zxc_zigzag_uw(curr - prev, w);
-            if (zz > max_zz) max_zz = zz;
-            if (zxc_highbit64(zz) <= half) half_count++;
-            if (curr == prev) zero_count++;  // identical consecutive value (a run)
-            sampled++;
-            prev = curr;
-            p += w;
-        }
-    }
-    if (sampled == 0) return 0;
-    if (zero_count * 2 >= sampled) return 0;
-
-    const uint8_t bits_w = zxc_highbit64(max_zz);
-    int viable = 0;
-    if (bits_w <= half)
-        viable = 1;
-    else if (bits_w <= (W * 5) / 8 && half_count * 100 >= sampled * 85)
-        viable = 1;
-    else if (half_count * 100 >= sampled * 90)
-        viable = 1;
-
-    if (!viable) return 0;
-    *bits_out = bits_w;
-    return 1;
-}
-
-/**
- * @brief Selects the NUM element width for a block: 0 (not NUM), 4 (32-bit), or
- *        8 (64-bit) bytes.
- *
- * The legacy 32-bit probe is authoritative: when it accepts, width 4 is used so
- * the byte-stream is identical to prior versions. Only when it rejects does this
- * consider a 64-bit interpretation (data the 32-bit path would have sent to
- * GLO/GHI), accepting it when the run-heavy / bit-width checks find it viable.
+ * Mirrors NUM's real algorithm: each 128-value frame is packed at the bit width
+ * of its largest ZigZag delta, plus a fixed per-frame header. The mean frame
+ * bit width is measured over @ref ZXC_EST_NUM_FRAMES whole frames sampled across
+ * the block (whole frames so the per-frame maximum — driven by outliers — is
+ * captured), then scaled to the full value count. Integer-only.
  *
  * @param[in] src  Block data.
  * @param[in] size Block size in bytes.
- * @return Element width in bytes to use (4 or 8), or 0 if NUM is not selected.
+ * @param[in] w    Element width in bytes (4 or 8).
+ * @return Estimated size in bits, or UINT64_MAX if the block holds < 2 values.
  */
-static int zxc_probe_numeric_width(const uint8_t* RESTRICT src, const size_t size) {
-    if (zxc_probe_is_numeric(src, size)) return (int)sizeof(uint32_t);
+static uint64_t zxc_est_num_bits(const uint8_t* RESTRICT src, const size_t size, const size_t w) {
+    const size_t n = size / w;
+    if (n < 2) return UINT64_MAX;
 
-    uint8_t bits_w = 0;
-    if (size % sizeof(uint64_t) == 0 && size >= sizeof(uint64_t) * 4 &&
-        zxc_probe_width_viable(src, size, sizeof(uint64_t), &bits_w))
-        return (int)sizeof(uint64_t);
+    const size_t F = ZXC_NUM_FRAME_SIZE;
+    const size_t n_frames = (n + F - 1) / F;
+    const size_t k = (n_frames < ZXC_EST_NUM_FRAMES) ? n_frames : ZXC_EST_NUM_FRAMES;
 
-    return 0;
+    uint64_t sum_bits = 0;
+    size_t sampled = 0;
+    for (size_t s = 0; s < k; s++) {
+        const size_t fidx = (k > 1) ? (s * (n_frames - 1)) / (k - 1) : 0;
+        const size_t start = fidx * F;
+        const size_t cnt = (n - start < F) ? (n - start) : F;
+        uint64_t prev = (start == 0) ? 0 : zxc_load_uw(src + (start - 1) * w, w);
+        uint64_t max_zz = 0;
+        for (size_t j = 0; j < cnt; j++) {
+            const uint64_t v = zxc_load_uw(src + (start + j) * w, w);
+            const uint64_t zz = zxc_zigzag_uw(v - prev, w);
+            if (zz > max_zz) max_zz = zz;
+            prev = v;
+        }
+        sum_bits +=
+            (w == sizeof(uint64_t)) ? zxc_highbit64(max_zz) : zxc_highbit32((uint32_t)max_zz);
+        sampled++;
+    }
+    if (sampled == 0) return UINT64_MAX;
+
+    const uint64_t hdr_bits = (uint64_t)n_frames * (ZXC_NUM_CHUNK_HEADER_SIZE * CHAR_BIT);
+    const uint64_t payload_bits = ((uint64_t)n * sum_bits) / sampled; /* n * mean(bits/value) */
+    return hdr_bits + payload_bits;
+}
+
+/**
+ * @brief Estimates the LZ (GLO/GHI) cost of @p src as its order-0 byte entropy.
+ *
+ * Returns @c size * H0 bits, where H0 is the Shannon entropy of a strided byte
+ * sample (computed via the deterministic integer @ref zxc_log2_q16). This is an
+ * information-theoretic order-0 bound: it ignores LZ matches, so it overestimates
+ * LZ on repetitive data — but H0 is low exactly when LZ wins, so the comparison
+ * direction against the NUM estimate stays correct. Integer-only.
+ *
+ * @param[in] src  Block data.
+ * @param[in] size Block size in bytes.
+ * @return Estimated size in bits.
+ */
+static uint64_t zxc_est_lz_bits(const uint8_t* RESTRICT src, const size_t size) {
+    if (size == 0) return 0;
+
+    uint32_t hist[256];
+    ZXC_MEMSET(hist, 0, sizeof(hist));
+    const size_t step = (size > ZXC_EST_ENTROPY_SAMPLE) ? (size / ZXC_EST_ENTROPY_SAMPLE) : 1;
+    size_t nsamp = 0;
+    for (size_t i = 0; i < size; i += step) {
+        hist[src[i]]++;
+        nsamp++;
+    }
+    if (nsamp == 0) return 0;
+
+    /* H0 = log2(nsamp) - (1/nsamp) * sum(c_i * log2(c_i)), in Q16 bits/byte. */
+    const uint32_t log2_n = zxc_log2_q16(nsamp);
+    uint64_t weighted = 0;
+    for (int i = 0; i < 256; i++)
+        if (hist[i]) weighted += (uint64_t)hist[i] * zxc_log2_q16(hist[i]);
+    const uint32_t mean_log = (uint32_t)(weighted / nsamp);
+    const uint32_t h0_q16 = (log2_n > mean_log) ? (log2_n - mean_log) : 0;
+
+    return ((uint64_t)size * h0_q16) >> 16; /* size bytes * H0 bits/byte */
+}
+
+/**
+ * @brief Chooses the block codec for @p src by a mathematical cost model.
+ *
+ * Estimates the compressed size of three candidates — NUM-32, NUM-64 and the
+ * LZ fallback — and returns the element width of the smallest, or 0 to use LZ
+ * (GLO/GHI). Purely size-driven (no tuned thresholds); ties favour LZ. The NUM
+ * candidates are gated on the block being a whole multiple of the width.
+ *
+ * @param[in] src  Block data.
+ * @param[in] size Block size in bytes.
+ * @return 4 (NUM-32), 8 (NUM-64), or 0 (LZ fallback).
+ */
+static int zxc_select_block_codec(const uint8_t* RESTRICT src, const size_t size) {
+    uint64_t best = zxc_est_lz_bits(src, size);
+    int best_w = 0;
+
+    if (size % sizeof(uint32_t) == 0 && size >= 4 * sizeof(uint32_t)) {
+        const uint64_t e = zxc_est_num_bits(src, size, sizeof(uint32_t));
+        if (e < best) {
+            best = e;
+            best_w = (int)sizeof(uint32_t);
+        }
+    }
+    if (size % sizeof(uint64_t) == 0 && size >= 4 * sizeof(uint64_t)) {
+        const uint64_t e = zxc_est_num_bits(src, size, sizeof(uint64_t));
+        if (e < best) {
+            best = e;
+            best_w = (int)sizeof(uint64_t);
+        }
+    }
+    return best_w;
 }
 
 // cppcheck-suppress unusedFunction
@@ -2445,9 +2411,8 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     size_t w = 0;
     int res = ZXC_OK;
 
-    /* Select the NUM element width: 4 (legacy 32-bit, byte-identical) or 8
-     * (64-bit); 0 means NUM is not a good fit (fall through to GLO/GHI). */
-    const int num_width = zxc_probe_numeric_width(chunk, src_sz);
+    /* Estimate NUM-32 / NUM-64 / LZ costs and pick the cheapest: 4, 8, or 0. */
+    const int num_width = zxc_select_block_codec(chunk, src_sz);
     int try_num = (num_width != 0);
 
     if (UNLIKELY(try_num)) {
