@@ -125,10 +125,10 @@ No internal sub-header.
 ## 5.2 NUM block (`type=2`)
 
 Used for numeric data (fixed-width integer streams), delta/zigzag + bitpacking.
-The element width is **16, 32, or 64-bit**, selected per block and recorded in
-the header (`element_width`, see below). A single delta uses at most as many
-bits as the element width (ZigZag is a bijection at each width), so 16-bit
-values pack with ≤16 bits, 64-bit with ≤64 bits.
+The element width is **32 or 64-bit**, selected per block and recorded in the
+header (`element_width`, see below). A single delta uses at most as many bits as
+the element width (ZigZag is a bijection), so 32-bit values pack with ≤32 bits
+and 64-bit with ≤64 bits.
 
 ### NUM payload layout
 
@@ -152,16 +152,14 @@ values pack with ≤16 bits, 64-bit with ≤64 bits.
 Offset  Size  Field
 0x00    8     n_values (u64)
 0x08    2     frame_size (u16, currently 128)
-0x0A    1     element_width (0 = 32-bit, 1 = 64-bit, 2 = 16-bit)
+0x0A    1     element_width (0 = 32-bit, 1 = 64-bit)
 0x0B    5     reserved
 ```
 
+- **`element_width`** is a width *code*, not a byte count. So `0` = 32-bit,
+  `1` = 64-bit. A decoder **MUST** reject any other code with `ZXC_ERROR_CORRUPT_DATA`.
 - **`n_values`** counts elements at the encoded width (e.g. for a 64-bit block
   it is the number of 64-bit integers, and the decoded size is `n_values × 8`).
-- **`element_width`** code `0` is the original 32-bit format: encoders writing
-  32-bit blocks set this byte to `0`, so v5 32-bit archives are byte-identical
-  across versions. Codes `1`/`2` were added additively without a format-version
-  bump. A decoder **MUST** reject an unrecognised code with `ZXC_ERROR_CORRUPT_DATA`.
 
 ### NUM frame record (repeated)
 
@@ -503,7 +501,7 @@ A conforming decoder **MUST** reject any file whose version it does not support.
 |---|---|---|
 | New block type added | **No bump** (forward-compatible) | Adding a hypothetical `GLR` block type |
 | New flag bit defined | **No bump** (forward-compatible) | Using a reserved flag bit |
-| Reserved field assigned meaning | **No bump** (additive) | NUM `element_width` (16/64-bit) in former reserved byte `0x0A`, with code `0` preserving the 32-bit encoding |
+| Reserved field assigned meaning | **No bump** (additive) | NUM `element_width` (64-bit) in former reserved byte `0x0A`, with code `0` preserving the 32-bit encoding |
 | Existing block encoding changed | **Major bump** | Changing GLO token layout |
 | Header/footer layout changed | **Major bump** | Resizing the file header |
 | Checksum algorithm changed | **Major bump** | Replacing RapidHash with Komihash |
