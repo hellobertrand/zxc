@@ -448,7 +448,8 @@ int zxc_write_num_header(uint8_t* RESTRICT dst, const size_t rem,
 
     zxc_store_le64(dst, nh->n_values);
     zxc_store_le16(dst + 8, nh->frame_size);
-    zxc_store_le16(dst + 10, 0);
+    dst[10] = nh->element_width;
+    dst[11] = 0;
     zxc_store_le32(dst + 12, 0);
 
     return ZXC_NUM_HEADER_BINARY_SIZE;
@@ -468,6 +469,10 @@ int zxc_read_num_header(const uint8_t* RESTRICT src, const size_t src_size,
 
     nh->n_values = zxc_le64(src);
     nh->frame_size = zxc_le16(src + 8);
+    nh->element_width = src[10];
+    if (UNLIKELY(nh->element_width != ZXC_NUM_WIDTH_32 && nh->element_width != ZXC_NUM_WIDTH_64 &&
+                 nh->element_width != ZXC_NUM_WIDTH_16))
+        return ZXC_ERROR_CORRUPT_DATA;
 
     return ZXC_OK;
 }
@@ -661,6 +666,43 @@ int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint
             dst[byte_idx + 3] |= (uint8_t)(v >> (3 * CHAR_BIT));
         if (bits + (bit_pos % CHAR_BIT) > 4 * CHAR_BIT)
             dst[byte_idx + 4] |= (uint8_t)(v >> (4 * CHAR_BIT));
+        bit_pos += bits;
+    }
+    return (int)out_bytes;
+}
+
+int zxc_bitpack_stream_64(const uint64_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
+                          const size_t dst_cap, const uint8_t bits) {
+    const size_t out_bytes = ((count * (size_t)bits) + CHAR_BIT - 1) / CHAR_BIT;
+
+    // +8 bytes: a value shifted by up to 7 bits straddles up to 9 destination
+    // bytes (ceil((64+7)/8)), so the last write can reach byte_idx + 8.
+    const size_t safe_bytes = out_bytes + sizeof(uint64_t);
+    if (UNLIKELY(dst_cap < safe_bytes)) return ZXC_ERROR_DST_TOO_SMALL;
+
+    ZXC_MEMSET(dst, 0, safe_bytes);
+    if (bits == 0) return 0;
+
+    const uint64_t val_mask = (bits >= sizeof(uint64_t) * CHAR_BIT) ? ~0ULL : ((1ULL << bits) - 1);
+
+    size_t bit_pos = 0;
+    for (size_t i = 0; i < count; i++) {
+        const uint64_t mv = src[i] & val_mask;
+        const int sh = (int)(bit_pos & (CHAR_BIT - 1));
+        const size_t bi = bit_pos >> 3;
+        const uint64_t lo = mv << sh;  // bits that land in dst[bi..bi+7]
+        const uint64_t hi = sh ? (mv >> (CHAR_BIT * sizeof(uint64_t) - sh)) : 0;  // spill into bi+8
+        const int span = sh + bits;  // total bit span, up to 71
+
+        dst[bi] |= (uint8_t)lo;
+        if (span > 1 * CHAR_BIT) dst[bi + 1] |= (uint8_t)(lo >> (1 * CHAR_BIT));
+        if (span > 2 * CHAR_BIT) dst[bi + 2] |= (uint8_t)(lo >> (2 * CHAR_BIT));
+        if (span > 3 * CHAR_BIT) dst[bi + 3] |= (uint8_t)(lo >> (3 * CHAR_BIT));
+        if (span > 4 * CHAR_BIT) dst[bi + 4] |= (uint8_t)(lo >> (4 * CHAR_BIT));
+        if (span > 5 * CHAR_BIT) dst[bi + 5] |= (uint8_t)(lo >> (5 * CHAR_BIT));
+        if (span > 6 * CHAR_BIT) dst[bi + 6] |= (uint8_t)(lo >> (6 * CHAR_BIT));
+        if (span > 7 * CHAR_BIT) dst[bi + 7] |= (uint8_t)(lo >> (7 * CHAR_BIT));
+        if (span > 8 * CHAR_BIT) dst[bi + 8] |= (uint8_t)hi;
         bit_pos += bits;
     }
     return (int)out_bytes;

@@ -624,7 +624,7 @@ _finalize_match:
  * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if an
  * error occurs (e.g., invalid input size, destination buffer too small).
  */
-static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+static int zxc_encode_block_num32(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
                                 size_t* RESTRICT out_sz) {
     if (UNLIKELY(src_sz % sizeof(uint32_t) != 0 || src_sz == 0 ||
@@ -812,6 +812,181 @@ static int zxc_encode_block_num(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     if (UNLIKELY(hw < 0)) return hw;
 
     // Checksum will be appended by the wrapper
+    *out_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
+    return ZXC_OK;
+}
+
+/**
+ * @brief Encodes a block of 16-bit integers (delta + zigzag + bitpack).
+ *
+ * 16-bit analogue of @ref zxc_encode_block_num32. A 16-bit zigzag delta fits in
+ * 16 bits, so the existing 32-bit bit-packer is reused (deltas widened to u32).
+ * The width code ZXC_NUM_WIDTH_16 is stored in NUM header byte 10; the decoder
+ * dispatches on it. Scalar; SIMD comes in a later phase. @p src_sz must be a
+ * non-zero multiple of 2.
+ */
+static int zxc_encode_block_num16(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                  const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
+                                  size_t* RESTRICT out_sz) {
+    (void)ctx;
+    if (UNLIKELY(src_sz % sizeof(uint16_t) != 0 || src_sz == 0 ||
+                 dst_cap < ZXC_BLOCK_HEADER_SIZE + ZXC_NUM_HEADER_BINARY_SIZE))
+        return ZXC_ERROR_DST_TOO_SMALL;
+
+    const size_t count = src_sz / sizeof(uint16_t);
+
+    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_NUM};
+    uint8_t* p_curr = dst + ZXC_BLOCK_HEADER_SIZE;
+    size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
+    const zxc_num_header_t nh = {
+        .n_values = count, .frame_size = ZXC_NUM_FRAME_SIZE, .element_width = ZXC_NUM_WIDTH_16};
+
+    const int hs = zxc_write_num_header(p_curr, rem, &nh);
+    if (UNLIKELY(hs < 0)) return hs;
+    p_curr += hs;
+    rem -= hs;
+
+    uint32_t deltas[ZXC_NUM_FRAME_SIZE];
+    const uint8_t* in_ptr = src;
+    uint16_t prev = 0;
+
+    for (size_t i = 0; i < count; i += ZXC_NUM_FRAME_SIZE) {
+        const size_t frames = (count - i < ZXC_NUM_FRAME_SIZE) ? (count - i) : ZXC_NUM_FRAME_SIZE;
+        const uint16_t base = prev;
+        uint32_t max_d = 0;
+        size_t j = 0;
+
+#if defined(ZXC_USE_NEON64)
+        /* For frames after the first, in[j-1] is always in-bounds (it is the
+         * previous frame's tail at in_ptr[-1]), so the whole frame vectorizes.
+         * The first frame stays scalar (its element 0 uses the prev=0 sentinel,
+         * with no in[-1] to load). SIMD produces the same deltas/max as scalar. */
+        if (i != 0) {
+            uint16x8_t v_max = vdupq_n_u16(0);
+            for (; j + 8 <= frames; j += 8) {
+                const uint16x8_t vc = vld1q_u16((const uint16_t*)(in_ptr + j * sizeof(uint16_t)));
+                const uint16x8_t vp =
+                    vld1q_u16((const uint16_t*)(in_ptr + j * sizeof(uint16_t) - sizeof(uint16_t)));
+                const uint16x8_t diff = vsubq_u16(vc, vp);
+                /* ZigZag: (diff << 1) ^ (diff >>arith 15) */
+                const uint16x8_t zz = veorq_u16(
+                    vshlq_n_u16(diff, 1),
+                    vreinterpretq_u16_s16(vshrq_n_s16(vreinterpretq_s16_u16(diff), 15)));
+                v_max = vmaxq_u16(v_max, zz);
+                vst1q_u32(&deltas[j], vmovl_u16(vget_low_u16(zz)));
+                vst1q_u32(&deltas[j + 4], vmovl_u16(vget_high_u16(zz)));
+            }
+            const uint16_t m = vmaxvq_u16(v_max);
+            if ((uint32_t)m > max_d) max_d = m;
+            if (j > 0) prev = zxc_le16(in_ptr + (j - 1) * sizeof(uint16_t));
+        }
+#endif
+
+        for (; j < frames; j++) {
+            const uint16_t v = zxc_le16(in_ptr + j * sizeof(uint16_t));
+            const uint16_t zz = zxc_zigzag_encode16((int16_t)(uint16_t)(v - prev));
+            deltas[j] = zz;
+            if (zz > max_d) max_d = zz;
+            prev = v;
+        }
+        in_ptr += frames * sizeof(uint16_t);
+
+        const uint8_t bits = zxc_highbit32(max_d);
+        const size_t packed = ((frames * bits) + CHAR_BIT - 1) / CHAR_BIT;
+        if (UNLIKELY(rem < ZXC_NUM_CHUNK_HEADER_SIZE + packed + sizeof(uint32_t)))
+            return ZXC_ERROR_DST_TOO_SMALL;
+
+        zxc_store_le16(p_curr, (uint16_t)frames);
+        zxc_store_le16(p_curr + 2, bits);
+        zxc_store_le64(p_curr + 4, (uint64_t)base);
+        zxc_store_le32(p_curr + 12, (uint32_t)packed);
+        p_curr += ZXC_NUM_CHUNK_HEADER_SIZE;
+        rem -= ZXC_NUM_CHUNK_HEADER_SIZE;
+
+        const int pb = zxc_bitpack_stream_32(deltas, frames, p_curr, rem, bits);
+        if (UNLIKELY(pb < 0)) return pb;
+        p_curr += pb;
+        rem -= pb;
+    }
+
+    bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
+    const int hw = zxc_write_block_header(dst, dst_cap, &bh);
+    if (UNLIKELY(hw < 0)) return hw;
+
+    *out_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
+    return ZXC_OK;
+}
+
+/**
+ * @brief Encodes a block of 64-bit integers (delta + zigzag + bitpack).
+ *
+ * 64-bit analogue of @ref zxc_encode_block_num32. A 64-bit zigzag delta needs at
+ * most 64 bits (ZigZag is a bijection int64<->uint64), so no value ever exceeds
+ * the packer's range. The width code ZXC_NUM_WIDTH_64 is stored in NUM header
+ * byte 10. Scalar; SIMD comes in a later phase. @p src_sz must be a non-zero
+ * multiple of 8.
+ */
+static int zxc_encode_block_num64(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                  const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
+                                  size_t* RESTRICT out_sz) {
+    (void)ctx;
+    if (UNLIKELY(src_sz % sizeof(uint64_t) != 0 || src_sz == 0 ||
+                 dst_cap < ZXC_BLOCK_HEADER_SIZE + ZXC_NUM_HEADER_BINARY_SIZE))
+        return ZXC_ERROR_DST_TOO_SMALL;
+
+    const size_t count = src_sz / sizeof(uint64_t);
+
+    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_NUM};
+    uint8_t* p_curr = dst + ZXC_BLOCK_HEADER_SIZE;
+    size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
+    const zxc_num_header_t nh = {
+        .n_values = count, .frame_size = ZXC_NUM_FRAME_SIZE, .element_width = ZXC_NUM_WIDTH_64};
+
+    const int hs = zxc_write_num_header(p_curr, rem, &nh);
+    if (UNLIKELY(hs < 0)) return hs;
+    p_curr += hs;
+    rem -= hs;
+
+    uint64_t deltas[ZXC_NUM_FRAME_SIZE];
+    const uint8_t* in_ptr = src;
+    uint64_t prev = 0;
+
+    for (size_t i = 0; i < count; i += ZXC_NUM_FRAME_SIZE) {
+        const size_t frames = (count - i < ZXC_NUM_FRAME_SIZE) ? (count - i) : ZXC_NUM_FRAME_SIZE;
+        const uint64_t base = prev;
+        uint64_t max_d = 0;
+
+        for (size_t j = 0; j < frames; j++) {
+            const uint64_t v = zxc_le64(in_ptr + j * sizeof(uint64_t));
+            const uint64_t zz = zxc_zigzag_encode64((int64_t)(v - prev));
+            deltas[j] = zz;
+            if (zz > max_d) max_d = zz;
+            prev = v;
+        }
+        in_ptr += frames * sizeof(uint64_t);
+
+        const uint8_t bits = zxc_highbit64(max_d);
+        const size_t packed = ((frames * bits) + CHAR_BIT - 1) / CHAR_BIT;
+        if (UNLIKELY(rem < ZXC_NUM_CHUNK_HEADER_SIZE + packed + sizeof(uint64_t)))
+            return ZXC_ERROR_DST_TOO_SMALL;
+
+        zxc_store_le16(p_curr, (uint16_t)frames);
+        zxc_store_le16(p_curr + 2, bits);
+        zxc_store_le64(p_curr + 4, (uint64_t)base);
+        zxc_store_le32(p_curr + 12, (uint32_t)packed);
+        p_curr += ZXC_NUM_CHUNK_HEADER_SIZE;
+        rem -= ZXC_NUM_CHUNK_HEADER_SIZE;
+
+        const int pb = zxc_bitpack_stream_64(deltas, frames, p_curr, rem, bits);
+        if (UNLIKELY(pb < 0)) return pb;
+        p_curr += pb;
+        rem -= pb;
+    }
+
+    bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
+    const int hw = zxc_write_block_header(dst, dst_cap, &bh);
+    if (UNLIKELY(hw < 0)) return hw;
+
     *out_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
     return ZXC_OK;
 }
@@ -2252,15 +2427,125 @@ static int zxc_probe_is_numeric(const uint8_t* src, const size_t size) {
     return 0;
 }
 
+/** @brief Load @p w (2/4/8) little-endian bytes as a zero-extended uint64. */
+static ZXC_ALWAYS_INLINE uint64_t zxc_load_uw(const uint8_t* RESTRICT p, const size_t w) {
+    return (w == sizeof(uint16_t))   ? (uint64_t)zxc_le16(p)
+           : (w == sizeof(uint32_t)) ? (uint64_t)zxc_le32(p)
+                                     : zxc_le64(p);
+}
+
+/** @brief ZigZag-encode the w-wide wrapped difference @p d, returned as uint64. */
+static ZXC_ALWAYS_INLINE uint64_t zxc_zigzag_uw(const uint64_t d, const size_t w) {
+    if (w == sizeof(uint16_t)) return (uint64_t)zxc_zigzag_encode16((int16_t)(uint16_t)d);
+    if (w == sizeof(uint32_t)) return (uint64_t)zxc_zigzag_encode((int32_t)(uint32_t)d);
+    return zxc_zigzag_encode64((int64_t)d);
+}
+
+/**
+ * @brief Estimates whether NUM at element width @p w (bytes) is viable on @p src,
+ *        and reports the worst-case bit width over the sample.
+ *
+ * Width-parametric analogue of @ref zxc_probe_is_numeric's delta analysis: it
+ * samples two regions, computes ZigZag deltas at stride @p w, and applies
+ * width-relative thresholds (most deltas fitting in half the element width).
+ *
+ * @return 1 if viable (sets @p bits_out), 0 otherwise.
+ */
+static int zxc_probe_width_viable(const uint8_t* RESTRICT src, const size_t size, const size_t w,
+                                  uint8_t* RESTRICT bits_out) {
+    const size_t W = w * CHAR_BIT;
+    const size_t total_vals = size / w;
+    const size_t sample_len = 16;
+    const size_t offsets[2] = {0, (total_vals / 2) & ~(size_t)3};
+    const size_t n_regions = (total_vals > sample_len * 2) ? 2 : 1;
+    const uint8_t half = (uint8_t)(W / 2);
+
+    uint64_t max_zz = 0;
+    size_t half_count = 0, zero_count = 0, sampled = 0;
+
+    for (size_t r = 0; r < n_regions; r++) {
+        const uint8_t* p = src + offsets[r] * w;
+        const size_t region_count =
+            ((total_vals - offsets[r]) < sample_len) ? (total_vals - offsets[r]) : sample_len;
+        uint64_t prev = zxc_load_uw(p, w);
+        p += w;
+        for (size_t i = 1; i < region_count; i++) {
+            const uint64_t curr = zxc_load_uw(p, w);
+            const uint64_t zz = zxc_zigzag_uw(curr - prev, w);
+            if (zz > max_zz) max_zz = zz;
+            if (zxc_highbit64(zz) <= half) half_count++;
+            if (curr == prev) zero_count++;  // identical consecutive value (a run)
+            sampled++;
+            prev = curr;
+            p += w;
+        }
+    }
+    if (sampled == 0) return 0;
+    if (zero_count * 2 >= sampled) return 0;
+
+    const uint8_t bits_w = zxc_highbit64(max_zz);
+    int viable = 0;
+    if (bits_w <= half)
+        viable = 1;
+    else if (bits_w <= (W * 5) / 8 && half_count * 100 >= sampled * 85)
+        viable = 1;
+    else if (half_count * 100 >= sampled * 90)
+        viable = 1;
+
+    if (!viable) return 0;
+    *bits_out = bits_w;
+    return 1;
+}
+
+/**
+ * @brief Selects the NUM element width for a block: 0 (not NUM), or 4/8/2 bytes.
+ *
+ * The legacy 32-bit probe is authoritative: when it accepts, width 4 is used so
+ * the byte-stream is identical to prior versions. Only when it rejects does this
+ * consider 64- and 16-bit interpretations (data the 32-bit path would have sent
+ * to GLO/GHI), choosing the viable width with the lowest estimated bits-per-byte.
+ */
+static int zxc_probe_numeric_width(const uint8_t* RESTRICT src, const size_t size) {
+    if (zxc_probe_is_numeric(src, size)) return (int)sizeof(uint32_t);
+
+    int best_w = 0;
+    uint8_t best_bits = 0;
+    static const size_t cands[2] = {sizeof(uint64_t), sizeof(uint16_t)};
+    for (int k = 0; k < 2; k++) {
+        const size_t w = cands[k];
+        if (size % w != 0 || size < w * 4) continue;
+        uint8_t bits_w = 0;
+        if (!zxc_probe_width_viable(src, size, w, &bits_w)) continue;
+        /* Compare bits-per-byte = bits_w/w; lower is better. Cross-multiply to
+         * stay in integer arithmetic. */
+        if (best_w == 0 ||
+            (uint32_t)bits_w * (uint32_t)best_w < (uint32_t)best_bits * (uint32_t)w) {
+            best_w = (int)w;
+            best_bits = bits_w;
+        }
+    }
+    return best_w;
+}
+
 // cppcheck-suppress unusedFunction
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
     size_t w = 0;
     int res = ZXC_OK;
-    int try_num = zxc_probe_is_numeric(chunk, src_sz);
+
+    /* Select the NUM element width: 4 (legacy 32-bit, byte-identical), 8, or 2;
+     * 0 means NUM is not a good fit (fall through to GLO/GHI). */
+    const int num_width = zxc_probe_numeric_width(chunk, src_sz);
+    int try_num = (num_width != 0);
 
     if (UNLIKELY(try_num)) {
-        res = zxc_encode_block_num(ctx, chunk, src_sz, dst, dst_cap, &w);
+        if (num_width == (int)sizeof(uint64_t))
+            res = zxc_encode_block_num64(ctx, chunk, src_sz, dst, dst_cap, &w);
+        else if (num_width == (int)sizeof(uint16_t))
+            res = zxc_encode_block_num16(ctx, chunk, src_sz, dst, dst_cap, &w);
+        else
+            res = zxc_encode_block_num32(ctx, chunk, src_sz, dst, dst_cap, &w);
+
         if (res != ZXC_OK || w > (src_sz - (src_sz >> 2)))  // w > 75% of src_sz
             try_num = 0;  // NUM didn't compress well, try GLO/GHI instead
     }

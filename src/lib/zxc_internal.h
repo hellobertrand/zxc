@@ -365,6 +365,11 @@ extern "C" {
  * block). */
 #define ZXC_NUM_FRAME_SIZE 128
 
+/** @brief NUM element-width codes, stored in NUM header byte 10. */
+#define ZXC_NUM_WIDTH_16 2U
+#define ZXC_NUM_WIDTH_32 0U /* legacy */
+#define ZXC_NUM_WIDTH_64 1U
+
 /** @brief Binary size of a section descriptor (comp_size + raw_size). */
 #define ZXC_SECTION_DESC_BINARY_SIZE 8
 /** @brief 32-bit mask for extracting sizes from a section descriptor. */
@@ -828,10 +833,13 @@ typedef struct {
  * The total number of numeric values encoded in the block.
  * @var zxc_num_header_t::frame_size
  * The size of the frame used for processing.
+ * @var zxc_num_header_t::element_width
+ * The width of each numeric element encoded as a code (0 for 32-bit, 1 for 64-bit, 2 for 16-bit).
  */
 typedef struct {
     uint64_t n_values;
     uint16_t frame_size;
+    uint8_t element_width;
 } zxc_num_header_t;
 
 /**
@@ -1196,6 +1204,49 @@ static ZXC_ALWAYS_INLINE int32_t zxc_zigzag_decode(const uint32_t n) {
 }
 
 /**
+ * @brief ZigZag encode a signed 16-bit integer (max output 65535 = 16 bits).
+ *
+ * 16-bit analogue of @ref zxc_zigzag_encode, used by the NUM 16-bit path. The
+ * result fits in 16 bits, so the existing 32-bit bit-packer/reader handle it.
+ */
+static ZXC_ALWAYS_INLINE uint16_t zxc_zigzag_encode16(const int16_t n) {
+    return (uint16_t)(((uint16_t)n << 1) ^ (uint16_t)(-(int16_t)((uint16_t)n >> 15)));
+}
+
+/** @brief ZigZag decode to a signed 16-bit integer (inverse of @ref zxc_zigzag_encode16). */
+static ZXC_ALWAYS_INLINE int16_t zxc_zigzag_decode16(const uint16_t n) {
+    return (int16_t)((uint16_t)(n >> 1) ^ (uint16_t)(-(int16_t)(n & 1)));
+}
+
+/**
+ * @brief ZigZag encode a signed 64-bit integer.
+ *
+ * 64-bit analogue of @ref zxc_zigzag_encode, used by the NUM 64-bit path. ZigZag
+ * is a bijection int64<->uint64, so the result always fits in 64 bits (no 65-bit
+ * case): the widened NUM path needs at most 64 bits per packed value.
+ */
+static ZXC_ALWAYS_INLINE uint64_t zxc_zigzag_encode64(const int64_t n) {
+    return ((uint64_t)n << 1) ^ (uint64_t)(-(int64_t)((uint64_t)n >> 63));
+}
+
+/** @brief ZigZag decode to a signed 64-bit integer (inverse of @ref zxc_zigzag_encode64). */
+static ZXC_ALWAYS_INLINE int64_t zxc_zigzag_decode64(const uint64_t n) {
+    return (int64_t)(n >> 1) ^ -(int64_t)(n & 1);
+}
+
+/**
+ * @brief Index of the highest set bit (1-based) in a 64-bit integer; 0 if n==0.
+ */
+static ZXC_ALWAYS_INLINE uint8_t zxc_highbit64(const uint64_t n) {
+#ifdef _MSC_VER
+    unsigned long index;
+    return (n == 0) ? 0 : (_BitScanReverse64(&index, n) ? (uint8_t)(index + 1) : 0);
+#else
+    return (n == 0) ? 0 : (uint8_t)(64 - __builtin_clzll(n));
+#endif
+}
+
+/**
  * @brief Allocates aligned memory in a cross-platform manner.
  *
  * This function provides a unified interface for allocating memory with a specific
@@ -1381,6 +1432,18 @@ static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const
  * error code on failure.
  */
 int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
+                          const size_t dst_cap, const uint8_t bits);
+
+/**
+ * @brief Bit-packs a stream of 64-bit integers (0-64 bits per value).
+ *
+ * 64-bit analogue of @ref zxc_bitpack_stream_32, used by the NUM 64-bit path. A
+ * value may straddle up to 9 destination bytes, so the caller must provide
+ * @p dst_cap >= ceil(count*bits/8) + sizeof(uint64_t).
+ *
+ * @return Number of bytes written, or a negative error code.
+ */
+int zxc_bitpack_stream_64(const uint64_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
                           const size_t dst_cap, const uint8_t bits);
 
 /**
