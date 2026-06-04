@@ -165,32 +165,17 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 
 **Note**: The Checksum (if enabled in File Header) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the compressed payload**.
 
-* **Type**: Block encoding type (0=RAW, 1=GLO, 2=NUM, 3=GHI, 255=EOF).
+* **Type**: Block encoding type (0=RAW, 1=GLO, 2=reserved, 3=GHI, 255=EOF).
 * **Flags**: Not used for now.
 * **Rsrvd**: Reserved for future use (must be 0).
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
 * **CRC**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with CRC byte set to 0) using `zxc_hash8`.
 
-> **Note**: The decompressed size is not stored in the block header. It is derived from internal Section Descriptors within the compressed payload (for GLO/GHI blocks), from the NUM header (for NUM blocks), or equals `Comp Size` (for RAW blocks).
+> **Note**: The decompressed size is not stored in the block header. It is derived from internal Section Descriptors within the compressed payload (for GLO/GHI blocks), or equals `Comp Size` (for RAW blocks).
 
 > **Note**: While the format is designed for threaded execution, a single-threaded API is also available for constrained environments or simple integration cases.
 
-### 5.3 Specific Header: NUM (Numeric)
-(Present immediately after the Block Header)
-
-**NUM Header (16 bytes):**
-
-```
-  Offset:  0                               8       10                      16
-          +-------------------------------+-------+-------------------------+
-          | N Values                      | Frame | Reserved                |
-          | (8 bytes)                     | (2B)  | (6 bytes)               |
-          +-------------------------------+-------+-------------------------+
-```
-
-* **N Values**: Total count of integers encoded in the block.
-* **Frame**: Processing window size (currently always 128).
-* **Reserved**: Padding for alignment.
+> **Note**: Block type `2` is **reserved** (formerly NUM, a numeric delta/bitpack codec removed before v1). The decoder rejects it; the value is kept free for a future block type.
 
 ### 5.4 Specific Header: GLO (Generic Low)
 (Present immediately after the Block Header)
@@ -463,19 +448,12 @@ This format prioritizes decompression throughput over compression ratio. It uses
 3.  **Offset Validation Threshold**: For the first 256 (8-bit mode) or 65536 (16-bit mode) bytes, offsets are validated against written bytes. After this threshold, all offsets are guaranteed valid.
 4.  **Wild Copy**: Same 32-byte SIMD copies as GLO, with special handling for overlapping matches (offset < 32).
 
-#### Type 2: NUM (Numeric)
-Triggered when data is detected as a dense array of 32-bit integers.
-
-**Encoding Process**:
-1.  **Vectorized Delta**: Computes `delta[i] = val[i] - val[i-1]` using SIMD integers (AVX2/NEON).
-2.  **ZigZag Transform**: Maps signed deltas to unsigned space: `(d << 1) ^ (d >> 31)`.
-3.  **Bit Analysis**: Determines the maximum number of bits `B` needed to represent the deltas in a 128-value frame.
-4.  **Bit-Packing**: Packs 128 integers into `128 * B` bits.
-
-**Decoding Process**:
-1.  **Bit-Unpacking**: Unpacks bitstreams back into integers.
-2.  **ZigZag Decode**: Reverses the mapping.
-3.  **Integration**: Computes the prefix sum (cumulative addition) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
+#### Type 2: Reserved (formerly NUM)
+Block type `2` is reserved. It previously held a NUM codec (delta + ZigZag +
+per-frame bit-packing of 32-bit integer arrays), removed before v1.
+Numeric/columnar data is better handled by an external transform (delta,
+byte-shuffle) feeding the LZ codec, where the caller declares the element type
+rather than the codec guessing it. The decoder rejects type `2`.
 
 ### 5.9 Data Integrity
 Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.

@@ -7,8 +7,8 @@
 
 /**
  * @file zxc_decompress.c
- * @brief Block-level decompression: NUM / GLO / GHI / RAW decoding with
- *        SIMD-accelerated prefix-sum, bit-unpacking, and overlapping copies.
+ * @brief Block-level decompression: GLO / GHI / RAW decoding with
+ *        SIMD-accelerated bit-unpacking and overlapping copies.
  *
  * Like @ref zxc_compress.c, this file is compiled multiple times with
  * @c ZXC_FUNCTION_SUFFIX to produce per-ISA variants.
@@ -327,215 +327,12 @@ static ZXC_ALWAYS_INLINE __m128i zxc_mm_prefix_sum_epi32(__m128i v) {
 }
 #endif
 
-/**
- * @brief Decodes a block of numerical data compressed with the ZXC format.
- *
- * This function reads a compressed numerical block from the source buffer,
- * parses the header to determine the number of values and encoding parameters,
- * and then decompresses the data into the destination buffer.
- *
- * **Algorithm Details:**
- * 1. **Header Parsing:** Reads the `zxc_num_header_t` to get the count of
- * values.
- * 2. **Bit Unpacking:** For each chunk of values, it initializes a bit reader.
- *    - **Unrolling:** The main loop is unrolled 4x to minimize branch overhead
- *      and maximize instruction throughput.
- * 3. **ZigZag Decoding:** Converts the unsigned unpacked value back to a signed
- * delta using `(n >> 1) ^ -(n & 1)`.
- * 4. **Delta Reconstruction:** Adds the signed delta to a `running_val`
- * accumulator to recover the original integer sequence.
- *
- * @param[in] src Pointer to the source buffer containing compressed data.
- * @param[in] src_size Size of the source buffer in bytes.
- * @param[out] dst Pointer to the destination buffer where decompressed data will be
- * written.
- * @param[in] dst_capacity Maximum capacity of the destination buffer in bytes.
- *
- * @return The number of bytes written to the destination buffer on success,
- *         or a negative zxc_error_t code if an error occurs (e.g., buffer overflow, invalid header,
- *         or malformed compressed stream).
- */
-static ZXC_NOINLINE int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_size,
-                                             uint8_t* RESTRICT dst, const size_t dst_capacity) {
-    zxc_num_header_t nh;
-    if (UNLIKELY(zxc_read_num_header(src, src_size, &nh) != ZXC_OK)) return ZXC_ERROR_BAD_HEADER;
-
-    size_t offset = ZXC_NUM_HEADER_BINARY_SIZE;
-    uint8_t* d_ptr = dst;
-    const uint8_t* const d_end = dst + dst_capacity;
-    uint64_t vals_remaining = nh.n_values;
-    uint32_t running_val = 0;
-
-    ZXC_ALIGN(ZXC_CACHE_LINE_SIZE)
-    uint32_t deltas[ZXC_NUM_DEC_BATCH];
-
-    while (vals_remaining > 0) {
-        if (UNLIKELY(offset > src_size - ZXC_NUM_CHUNK_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
-
-        const uint16_t nvals = zxc_le16(src + offset);
-        const uint16_t bits = zxc_le16(src + offset + 2);
-        const uint32_t psize = zxc_le32(src + offset + 12);  // padding + nvals + bits
-        offset += ZXC_NUM_CHUNK_HEADER_SIZE;
-
-        if (UNLIKELY(nvals > vals_remaining || psize > src_size - offset ||
-                     d_ptr + (size_t)nvals * sizeof(uint32_t) > d_end ||
-                     bits > (sizeof(uint32_t) * CHAR_BIT)))
-            return ZXC_ERROR_CORRUPT_DATA;
-
-        zxc_bit_reader_t br;
-        zxc_br_init(&br, src + offset, psize);
-        size_t i = 0;
-
-        for (; i + ZXC_NUM_DEC_BATCH <= nvals; i += ZXC_NUM_DEC_BATCH) {
-            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 4) {
-                zxc_br_ensure(&br, bits);
-                deltas[k + 0] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-                zxc_br_ensure(&br, bits);
-                deltas[k + 1] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-                zxc_br_ensure(&br, bits);
-                deltas[k + 2] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-                zxc_br_ensure(&br, bits);
-                deltas[k + 3] = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-            }
-
-            uint32_t* batch_dst = (uint32_t*)d_ptr;
-
-#if defined(ZXC_USE_AVX512)
-            __m512i v_run = _mm512_set1_epi32(running_val);  // Broadcast initial running total
-            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 16) {
-                __m512i v_deltas = _mm512_load_si512((void*)&deltas[k]);  // Load 16 deltas
-
-                __m512i v_sum = zxc_mm512_prefix_sum_epi32(v_deltas);  // Compute local prefix sums
-                v_sum = _mm512_add_epi32(v_sum, v_run);                // Add base running total
-
-                _mm512_storeu_si512((void*)&batch_dst[k],
-                                    v_sum);  // Store decoded values
-
-                // Broadcast 15th element of v_sum to v_run directly within ZMM registers
-                // 1. Align upper 128-bit lane down to all lanes
-                __m512i v_last128 = _mm512_shuffle_i32x4(v_sum, v_sum, 0xFF);
-                // 2. Broadcast the 3rd element of those lanes
-                v_run = _mm512_shuffle_epi32(v_last128, 0xFF);
-            }
-            // Extract final running_val back to GPR for scalar fallback
-            running_val = (uint32_t)_mm_cvtsi128_si32(_mm512_castsi512_si128(v_run));
-
-#elif defined(ZXC_USE_AVX2)
-            __m256i v_run = _mm256_set1_epi32(running_val);  // Broadcast initial running total
-            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 8) {
-                __m256i v_deltas = _mm256_load_si256((const __m256i*)&deltas[k]);  // Load 8 deltas
-
-                __m256i v_sum = zxc_mm256_prefix_sum_epi32(v_deltas);  // Compute local prefix sums
-                v_sum = _mm256_add_epi32(v_sum, v_run);                // Add base
-
-                _mm256_storeu_si256((__m256i*)&batch_dst[k],
-                                    v_sum);  // Store decoded values
-
-                // Compute v_run directly from vector register without memory readback
-                // Duplicate upper 128-bits into both lanes
-                __m256i last_val = _mm256_permute2x128_si256(v_sum, v_sum, 0x11);
-                // Broadcast 4th element to all elements
-                v_run = _mm256_shuffle_epi32(last_val, 0xFF);
-            }
-            // Extract final running_val back to GPR for scalar fallback
-            running_val = (uint32_t)_mm_cvtsi128_si32(_mm256_castsi256_si128(v_run));
-
-#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
-            uint32x4_t v_run = vdupq_n_u32(running_val);  // Broadcast running total
-            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 4) {
-                uint32x4_t v_deltas = vld1q_u32(&deltas[k]);  // Load 4 deltas
-
-                uint32x4_t v_sum = zxc_neon_prefix_sum_u32(v_deltas);  // Compute local prefix sums
-                v_sum = vaddq_u32(v_sum, v_run);                       // Add base
-
-                vst1q_u32(&batch_dst[k], v_sum);  // Store decoded values
-
-#if defined(ZXC_USE_NEON64)
-                v_run = vdupq_laneq_u32(v_sum, 3);  // Update vector directly (no GPR transit)
-#else
-                running_val = vgetq_lane_u32(v_sum, 3);  // Extract last element
-                v_run = vdupq_n_u32(running_val);        // Update vector for next iter
-#endif
-            }
-#if defined(ZXC_USE_NEON64)
-            running_val = vgetq_lane_u32(v_run, 0);  // Extract once at the end of the batch
-#endif
-
-#elif defined(ZXC_USE_SSE2)
-            __m128i v_run = _mm_set1_epi32((int)running_val);  // Broadcast running total
-            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k += 4) {
-                __m128i v_deltas = _mm_load_si128((const __m128i*)&deltas[k]);  // Load 4 deltas
-
-                __m128i v_sum = zxc_mm_prefix_sum_epi32(v_deltas);  // Local prefix sums
-                v_sum = _mm_add_epi32(v_sum, v_run);                // Add base running total
-
-                _mm_storeu_si128((__m128i*)&batch_dst[k], v_sum);  // Store decoded values
-
-                // Broadcast 4th element (lane 3) to all lanes for the next iteration.
-                v_run = _mm_shuffle_epi32(v_sum, _MM_SHUFFLE(3, 3, 3, 3));
-            }
-            // Extract final running_val back to GPR for the scalar tail.
-            running_val = (uint32_t)_mm_cvtsi128_si32(v_run);
-
-#else
-            for (int k = 0; k < ZXC_NUM_DEC_BATCH; k++) {
-                running_val += deltas[k];
-#ifdef ZXC_BIG_ENDIAN
-                zxc_store_le32(&batch_dst[k], running_val);
-#else
-                batch_dst[k] = running_val;
-#endif
-            }
-#endif
-            d_ptr += ZXC_NUM_DEC_BATCH * sizeof(uint32_t);
-        }
-
-        for (; i < nvals; i++) {
-            zxc_br_ensure(&br, bits);
-            const uint32_t delta = zxc_zigzag_decode(zxc_br_consume_fast(&br, (uint8_t)bits));
-            running_val += delta;
-            zxc_store_le32(d_ptr, running_val);
-            d_ptr += sizeof(uint32_t);
-        }
-
-        offset += psize;
-        vals_remaining -= nvals;
-    }
-    return (int)(d_ptr - dst);
-}
-
-/**
- * @brief Copies @p ll literal bytes from @p src to @p dst using 32-byte wild copies.
- *
- * Writes in @ref ZXC_PAD_SIZE-byte chunks and may **overshoot** by up to
- * @ref ZXC_PAD_SIZE - 1 bytes past @p ll; the caller must guarantee @p dst has at
- * least @ref ZXC_PAD_SIZE bytes of writable headroom (the unrolled loops and the
- * trailing-literal margins ensure this). Pointers are taken by value and the
- * caller advances its own cursors by @p ll, keeping them in registers on the hot
- * path.
- *
- * @param[out] dst Output cursor. Must not overlap @p src and must have
- *                 @ref ZXC_PAD_SIZE bytes of overshoot headroom.
- * @param[in]  src Literal-stream source. Must not overlap @p dst (RESTRICT).
- * @param[in]  ll  Number of literal bytes to copy.
- */
-static ZXC_ALWAYS_INLINE void zxc_decode_copy_literals(uint8_t* RESTRICT dst,
-                                                       const uint8_t* RESTRICT src,
-                                                       const uint64_t ll) {
-    zxc_copy32(dst, src);
-    if (UNLIKELY(ll > ZXC_PAD_SIZE)) {
-        dst += ZXC_PAD_SIZE;
-        src += ZXC_PAD_SIZE;
-        size_t rem = ll - ZXC_PAD_SIZE;
-        while (rem > ZXC_PAD_SIZE) {
-            zxc_copy32(dst, src);
-            dst += ZXC_PAD_SIZE;
-            src += ZXC_PAD_SIZE;
-            rem -= ZXC_PAD_SIZE;
-        }
-        zxc_copy32(dst, src);
-    }
-}
+/* ==========================================================================
+ * Shared decode macros for the GLO and GHI decoders (fast + safe variants).
+ * Defined at file scope to avoid four identical copies inside each function.
+ * They reference the local names l_ptr, d_ptr, written that every call site
+ * has in scope. #undef-ed at the end of the last consumer.
+ * ========================================================================== */
 
 /**
  * @brief Copies an @p ml-byte LZ match from @c d_ptr-off to @p d_ptr, handling overlap.
@@ -2153,9 +1950,6 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
             ZXC_MEMCPY(dst, data, comp_sz);
             decoded_sz = (int)comp_sz;
             break;
-        case ZXC_BLOCK_NUM:
-            decoded_sz = zxc_decode_block_num(data, comp_sz, dst, dst_cap);
-            break;
         case ZXC_BLOCK_EOF:
             // EOF should be handled by the dispatcher, not here
             return ZXC_ERROR_CORRUPT_DATA;
@@ -2213,8 +2007,6 @@ int zxc_decompress_chunk_wrapper_safe(const zxc_cctx_t* RESTRICT ctx, const uint
             if (UNLIKELY(comp_sz > dst_cap)) return ZXC_ERROR_DST_TOO_SMALL;
             ZXC_MEMCPY(dst, data, comp_sz);
             return (int)comp_sz;
-        case ZXC_BLOCK_NUM:
-            return zxc_decode_block_num(data, comp_sz, dst, dst_cap);
         case ZXC_BLOCK_EOF:
             return ZXC_ERROR_CORRUPT_DATA;
         default:

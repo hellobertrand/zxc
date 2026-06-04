@@ -91,7 +91,7 @@ Offset  Size  Field
 - **Block Type**:
   - `0` = RAW
   - `1` = GLO
-  - `2` = NUM
+  - `2` = reserved (formerly NUM; see [§5.2](#52-reserved-type2))
   - `3` = GHI
   - `254` = SEK
   - `255` = EOF
@@ -125,49 +125,14 @@ No internal sub-header.
 
 ---
 
-## 5.2 NUM block (`type=2`)
+## 5.2 Reserved (`type=2`)
 
-Used for numeric data (32-bit integer stream), delta/zigzag + bitpacking.
-
-### NUM payload layout
-
-```text
-+--------------------------+
-| NUM Header (16 bytes)    |
-+--------------------------+
-| Frame #0 header (16B)    |
-| Frame #0 packed bits     |
-+--------------------------+
-| Frame #1 header (16B)    |
-| Frame #1 packed bits     |
-+--------------------------+
-| ...                      |
-+--------------------------+
-```
-
-### NUM Header (16 bytes)
-
-```text
-Offset  Size  Field
-0x00    8     n_values (u64)
-0x08    2     frame_size (u16, currently 128)
-0x0A    6     reserved
-```
-
-### NUM frame record (repeated)
-
-```text
-Offset  Size  Field
-0x00    2     nvals in frame (u16)
-0x02    2     bits per value (u16)
-0x04    8     base/running seed (u64)
-0x0C    4     packed_size in bytes (u32)
-0x10    ...   packed delta bitstream
-```
-
-Notes:
-- Values are reconstructed by bit-unpacking, zigzag decode, then prefix accumulation.
-- `packed_size` bytes immediately follow each 16-byte frame header.
+Block type `2` is **reserved**. It was formerly **NUM** (a delta/ZigZag/bit-packed
+codec for 32-bit integer arrays), removed before v1 because the gains did not
+justify its decode-speed cost and selection complexity (numeric/columnar data is
+better served by an external transform feeding the LZ codec). The encoder never
+emits type `2`, and a conforming decoder **MUST** reject it with
+`ZXC_ERROR_BAD_BLOCK_TYPE`. The value is left free for a future block type.
 
 ---
 
@@ -499,7 +464,7 @@ A conforming decoder **MUST** reject any file whose version it does not support.
 ### 10.3 Compatibility rules
 
 - **Backward compatibility**: a decoder supporting version *N* **MUST** decode all files produced by encoders of version *N*. It **MAY** also accept earlier versions.
-- **Forward compatibility**: a decoder encountering an **unknown block type** (not RAW, GLO, NUM, GHI, or EOF) **SHOULD** skip it using `comp_size` to advance past its payload (and optional checksum), rather than rejecting the file outright. This allows older decoders to partially process files from newer encoders that introduce additive block types.
+- **Forward compatibility**: a decoder encountering an **unknown block type** (not RAW, GLO, GHI, or EOF) **SHOULD** skip it using `comp_size` to advance past its payload (and optional checksum), rather than rejecting the file outright. This allows older decoders to partially process files from newer encoders that introduce additive block types. (Type `2` is reserved (formerly NUM); the current decoder rejects it — see [§5.2](#52-reserved-type2).)
 - **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. Decoders **MUST** ignore reserved fields (not reject non-zero values), unless a future version assigns them meaning.
 
 ### 10.4 Minimum conforming decoder
@@ -512,7 +477,7 @@ A minimal conforming decoder for version 5 **MUST** support:
 - **EOF** block (type 255) - stream termination.
 - File footer validation (source size check).
 
-Support for **NUM** (type 2) and checksum verification is **RECOMMENDED** but not strictly required for a minimal implementation.
+Support for checksum verification is **RECOMMENDED** but not strictly required for a minimal implementation.
 
 ---
 
@@ -655,7 +620,6 @@ as follows:
 - File header: **16** bytes
 - Block header: **8** bytes
 - Block checksum (optional): **4** bytes
-- NUM header: **16** bytes
 - GLO header: **16** bytes
 - GHI header: **16** bytes
 - Section descriptor: **8** bytes

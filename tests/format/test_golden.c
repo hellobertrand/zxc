@@ -15,9 +15,9 @@
  *     and the 16-bit header CRC (zxc_hash16, Sec 3 / Sec 7.1).
  *   - Generic block container: type, flags, reserved, comp_size bounds and the
  *     8-bit header CRC (zxc_hash8, Sec 4 / Sec 7.1).
- *   - Every block type in Sec 5: RAW, NUM (header + frame records), GLO and GHI
- *     (header + section descriptors, incl. the Huffman literal section),
- *     EOF (zero comp_size) and the optional SEK seek table.
+ *   - Every block type in Sec 5: RAW, GLO and GHI (header + section descriptors,
+ *     incl. the Huffman literal section), EOF (zero comp_size) and the optional
+ *     SEK seek table. (Type 2 is reserved/removed.)
  *   - Optional per-block checksum over the compressed payload (Sec 7.2).
  *   - The rolling global stream hash (Sec 7.3) reconstructed from per-block
  *     checksums and matched against the footer.
@@ -89,35 +89,6 @@ static uint8_t *read_file(const char *path, size_t *out_size) {
 /* ------------------------------------------------------------------------- */
 /* Per-payload sub-header validation (FORMAT.md Sec 5)                          */
 /* ------------------------------------------------------------------------- */
-
-/* Sec 5.2 NUM: 16-byte header + repeated 16-byte frame records. */
-static int validate_num_payload(const char *ctx, const uint8_t *p, uint32_t comp) {
-    CHECK(comp >= 16, "NUM payload too small for header (%u)", comp);
-    uint64_t n_values = zxc_le64(p);
-    uint16_t frame_size = zxc_le16(p + 8);
-    CHECK(frame_size == ZXC_NUM_FRAME_SIZE, "NUM frame_size = %u, expected %u", frame_size,
-          (unsigned)ZXC_NUM_FRAME_SIZE);
-    for (int i = 0; i < 6; i++)
-        CHECK(p[10 + i] == 0, "NUM header reserved byte %d nonzero", i);
-
-    /* Walk frame records and confirm they tile the payload exactly and that the
-     * per-frame value counts sum to n_values. */
-    uint32_t off = 16;
-    uint64_t seen = 0;
-    while (off < comp) {
-        CHECK(off + 16 <= comp, "NUM frame header overruns payload at %u", off);
-        uint16_t nvals = zxc_le16(p + off);
-        uint32_t packed = zxc_le32(p + off + 12);
-        CHECK((uint64_t)off + 16 + packed <= comp, "NUM frame packed bits overrun (%u + %u)", off,
-              packed);
-        seen += nvals;
-        off += 16 + packed;
-    }
-    CHECK(off == comp, "NUM frames do not tile payload (end %u != %u)", off, comp);
-    CHECK(seen == n_values, "NUM frame value count %llu != header n_values %llu",
-          (unsigned long long)seen, (unsigned long long)n_values);
-    return 1;
-}
 
 /* Shared validator for the GLO (Sec 5.3) and GHI (Sec 5.4) section model: a 16-byte
  * header, then `n_sections` packed u64 descriptors (low32 = comp, high32 = raw),
@@ -216,9 +187,8 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
             break;
         }
 
-        /* Data block (RAW/GLO/NUM/GHI). */
-        CHECK(type == GC_BLOCK_RAW || type == GC_BLOCK_GLO || type == GC_BLOCK_NUM ||
-                  type == GC_BLOCK_GHI,
+        /* Data block (RAW/GLO/GHI). Type 2 (formerly NUM) is reserved/removed. */
+        CHECK(type == GC_BLOCK_RAW || type == GC_BLOCK_GLO || type == GC_BLOCK_GHI,
               "unexpected block type %u at %zu", type, off);
         if (gc->expect_data_type != GC_ANY_TYPE)
             CHECK(type == gc->expect_data_type, "block type %u, expected %u at %zu", type,
@@ -228,9 +198,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
         const uint8_t *payload = bh + ZXC_BLOCK_HEADER_SIZE;
         CHECK(off + ZXC_BLOCK_HEADER_SIZE + comp <= size, "payload overruns file at %zu", off);
 
-        if (type == GC_BLOCK_NUM) {
-            if (!validate_num_payload(ctx, payload, comp)) return 0;
-        } else if (type == GC_BLOCK_GLO) {
+        if (type == GC_BLOCK_GLO) {
             if (!validate_lz_payload(ctx, payload, comp, 4, gc->expect_huffman_literals)) return 0;
         } else if (type == GC_BLOCK_GHI) {
             if (!validate_lz_payload(ctx, payload, comp, 3, 0)) return 0;

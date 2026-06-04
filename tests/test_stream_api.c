@@ -845,10 +845,10 @@ int test_stream_engine_errors() {
 RT_WRAPPER(test_roundtrip_raw_random,   "RAW Block (Random Data)",        gen_random_data,    RT_BUF, 3, 0)
 RT_WRAPPER(test_roundtrip_ghi_text,     "GHI Block (Text Pattern)",       gen_lz_data,        RT_BUF, 2, 0)
 RT_WRAPPER(test_roundtrip_glo_text,     "GLO Block (Text Pattern)",       gen_lz_data,        RT_BUF, 4, 0)
-RT_WRAPPER(test_roundtrip_num_seq,      "NUM Block (Integer Sequence)",   gen_num_data,       RT_BUF, 3, 0)
-RT_WRAPPER(test_roundtrip_num_zero,     "NUM Block (Zero Deltas)",        gen_num_data_zero,  RT_BUF, 3, 0)
-RT_WRAPPER(test_roundtrip_num_small,    "NUM Block (Small Deltas)",       gen_num_data_small, RT_BUF, 3, 0)
-RT_WRAPPER(test_roundtrip_num_large,    "NUM Block (Large Deltas)",       gen_num_data_large, RT_BUF, 3, 0)
+RT_WRAPPER(test_roundtrip_num_seq,      "Numeric data (integer sequence)", gen_num_data,       RT_BUF, 3, 0)
+RT_WRAPPER(test_roundtrip_num_zero,     "Numeric data (zero deltas)",      gen_num_data_zero,  RT_BUF, 3, 0)
+RT_WRAPPER(test_roundtrip_num_small,    "Numeric data (small deltas)",     gen_num_data_small, RT_BUF, 3, 0)
+RT_WRAPPER(test_roundtrip_num_large,    "Numeric data (large deltas)",     gen_num_data_large, RT_BUF, 3, 0)
 
 /* Size edge cases */
 RT_WRAPPER(test_roundtrip_small_50,     "Small Input (50 bytes)",         gen_random_data, 50,  3, 0)
@@ -856,7 +856,7 @@ RT_WRAPPER(test_roundtrip_empty,        "Empty Input (0 bytes)",          gen_ra
 RT_WRAPPER(test_roundtrip_1byte,        "1-byte Input",                   gen_random_data, 1,   3, 0)
 RT_WRAPPER(test_roundtrip_1byte_crc,    "1-byte Input (with checksum)",   gen_random_data, 1,   3, 1)
 RT_WRAPPER(test_roundtrip_large_15mb_lz,  "Large File (15MB Multi-Block)",     gen_lz_data,  RT_LARGE, 3, 1)
-RT_WRAPPER(test_roundtrip_large_15mb_num, "Large File NUM (15MB Multi-Block)", gen_num_data, RT_LARGE, 3, 1)
+RT_WRAPPER(test_roundtrip_large_15mb_num, "Large numeric file (15MB Multi-Block)", gen_num_data, RT_LARGE, 3, 1)
 
 /* Checksum coverage */
 RT_WRAPPER(test_roundtrip_checksum_off, "Checksum Disabled",              gen_lz_data, RT_BUF, 3,  0)

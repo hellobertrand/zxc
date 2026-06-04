@@ -26,10 +26,9 @@ Each file maps onto sections of `docs/FORMAT.md §5` and the integrity fields:
 | `03_block_ghi.zxc`         | GHI block (level <= 2)                                           |
 | `04_block_glo.zxc`         | GLO block (level >= 3)                                           |
 | `05_block_glo_huffman.zxc` | GLO block with the Huffman literal section (`enc_lit == 2`, §5.3.1) |
-| `06_block_num.zxc`         | NUM block: header + frame records (§5.2)                        |
-| `07_checksum_per_block.zxc`| Per-block checksum + non-zero global stream hash                |
-| `08_multiple_blocks.zxc`   | Multiple data blocks → rolling global hash (§7.3)               |
-| `09_seekable_table.zxc`    | SEK seek-table block (§5.6)                                     |
+| `06_checksum_per_block.zxc`| Per-block checksum + non-zero global stream hash                |
+| `07_multiple_blocks.zxc`   | Multiple data blocks → rolling global hash (§7.3)               |
+| `08_seekable_table.zxc`    | SEK seek-table block (§5.6)                                     |
 
 ## What the validator checks
 
@@ -40,9 +39,9 @@ For every file, `test_golden.c` walks the bytes and verifies, against
   bytes, and the 16-bit header CRC (`zxc_hash16`).
 - **Each block header (§4):** type, flags, reserved byte, `comp_size` bounds,
   and the 8-bit header CRC (`zxc_hash8`).
-- **Every payload type (§5):** RAW; NUM header + frame records (counts must tile
-  the payload and sum to `n_values`); GLO/GHI header + section descriptors
-  (sizes must tile the payload); the Huffman literal section flag.
+- **Every payload type (§5):** RAW; GLO/GHI header + section descriptors
+  (sizes must tile the payload); the Huffman literal section flag. (Block type 2
+  is reserved/removed, so no NUM payload is validated.)
 - **EOF block (§5.5):** `comp_size == 0`.
 - **Optional SEK block (§5.6):** type, CRC8, `comp_size == n_blocks * 4`, and
   each entry equal to the physical size of its data block.

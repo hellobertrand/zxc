@@ -59,34 +59,6 @@ int test_bit_reader() {
     return 1;
 }
 
-/*
- * Test for zxc_bitpack_stream_32
- */
-int test_bitpack() {
-    printf("=== TEST: Unit - Bit Packing (zxc_bitpack_stream_32) ===\n");
-
-    const uint32_t src[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
-    uint8_t dst[16];
-
-    // Pack 4 values with 4 bits each.
-    // Input is 0xFFFFFFFF, but should be masked to 0xF (1111).
-    // Result should be 2 bytes: 0xFF, 0xFF
-    int len = zxc_bitpack_stream_32(src, 4, dst, 16, 4);
-
-    if (len != 2) return 0;
-    if (dst[0] != 0xFF || dst[1] != 0xFF) return 0;
-    printf("  [PASS] Bitpack overflow masking\n");
-
-    // Edge case: bits = 32
-    const uint32_t src32[1] = {0x12345678};
-    len = zxc_bitpack_stream_32(src32, 1, dst, 16, 32);
-    if (len != 4) return 0;
-    if (zxc_le32(dst) != 0x12345678) return 0;
-    printf("  [PASS] Bitpack 32 bits\n");
-
-    printf("PASS\n\n");
-    return 1;
-}
 
 /* Round-trip the Huffman codec over a few representative literal distributions. */
 static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t n) {
