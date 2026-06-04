@@ -503,6 +503,17 @@ the block qualifies as numeric at width `w` when — with `W = 8w` bits — any 
 - it needs ≤ `5W/8` bits (`20` / `40`) **and** ≥ 85 % of deltas fit in `W/2` bits, **or**
 - ≥ 90 % of deltas fit in `W/2` bits.
 
+**RLE/LZ guard.** NUM packs every value of a 128-frame at that frame's widest
+delta, so a near-constant column whose *rare* changes are wide (e.g. a mostly-fixed
+float whose occasional change is a full-width bit-pattern delta) blows up under
+NUM yet collapses under LZ/RLE. A block is therefore rejected when a whole-block
+stride sample finds it both **highly repetitive** (≥ `ZXC_NUM_MAX_REPEAT_PCT`,
+82 %, of consecutive values equal) **and** its non-equal changes are **wide**
+(widest needs > `W/2` bits). Both conditions are required: repetition alone would
+wrongly reject low-cardinality integer columns, whose small deltas pack tightly
+and where NUM still beats LZ. The whole-block sample is used because the 30-value
+detection window is too small to see a rare wide jump (it often reads all-equal).
+
 **Width choice.** The 32-bit interpretation is probed first and is authoritative;
 64-bit is tried only if 32-bit does not qualify. A genuine 64-bit sequence read
 as `i32` has wildly alternating deltas (the high and low halves interleave), so

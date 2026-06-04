@@ -2306,7 +2306,10 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_zigzag_uw(const uint64_t d, const size_t w
  * and thus the NUM-32 output is unchanged.
  *
  * Two regions (start and middle) are sampled so a locally-numeric block is not
- * misjudged by its head alone. Integer-only and deterministic across ISAs.
+ * misjudged by its head alone. A highly-repetitive block (mostly equal
+ * consecutive values, > @ref ZXC_NUM_MAX_REPEAT_PCT) is rejected even when its
+ * deltas are small, since LZ/RLE compresses and decodes such data better than a
+ * NUM frame. Integer-only and deterministic across ISAs.
  *
  * @param[in] src  Block data.
  * @param[in] size Block size in bytes.
@@ -2351,6 +2354,30 @@ static int zxc_probe_numeric_w(const uint8_t* RESTRICT src, const size_t size, c
         total_sampled += region_count - 1;
     }
     if (total_sampled == 0) return 0;
+
+    // Defer to LZ when the block is mostly-constant AND its rare changes are
+    // wide: NUM packs a whole 128-frame at the frame's widest delta, so one big
+    // jump inflates 128 values. Both conditions are needed: repetition alone
+    // would wrongly reject low-cardinality integer columns (small deltas, NUM
+    // wins). Sampled across the whole block (the 30-value window misses rare jumps).
+    const size_t stride =
+        (total_vals >= ZXC_NUM_REPEAT_SAMPLES) ? (total_vals / ZXC_NUM_REPEAT_SAMPLES) : 1;
+    size_t reps = 0, pairs = 0;
+    uint64_t change_max = 0;  // widest zigzag delta among non-equal pairs
+    for (size_t k = stride; k < total_vals; k += stride) {
+        const uint64_t a = zxc_load_uw(src + k * w, w);
+        const uint64_t b = zxc_load_uw(src + (k - 1) * w, w);
+        pairs++;
+        if (a == b)
+            reps++;
+        else {
+            const uint64_t zz = zxc_zigzag_uw(a - b, w);
+            if (zz > change_max) change_max = zz;
+        }
+    }
+    if (pairs && reps * 100 >= pairs * ZXC_NUM_MAX_REPEAT_PCT &&
+        zxc_highbit64(change_max) > half_bits)
+        return 0;
 
     const unsigned bits_needed = zxc_highbit64(max_zigzag);
 

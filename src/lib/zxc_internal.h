@@ -371,6 +371,13 @@ extern "C" {
 /** @brief NUM element-width code for 64-bit integers. */
 #define ZXC_NUM_WIDTH_64 1U
 
+/** @brief Number of stride samples taken across a block to estimate its
+ *  repeat (equal-consecutive-value) fraction in the NUM detector. */
+#define ZXC_NUM_REPEAT_SAMPLES 256
+/** @brief Repeat fraction (percent) above which a block is treated as RLE/LZ
+ *  territory by the NUM detector */
+#define ZXC_NUM_MAX_REPEAT_PCT 80
+
 /** @brief Binary size of a section descriptor (comp_size + raw_size). */
 #define ZXC_SECTION_DESC_BINARY_SIZE 8
 /** @brief 32-bit mask for extracting sizes from a section descriptor. */
