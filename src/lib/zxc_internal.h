@@ -317,8 +317,9 @@ extern "C" {
 
 /** @brief Magic word identifying ZXC files (little-endian 0x9CB02EF5). */
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
-/** @brief Current on-disk file format version. */
-#define ZXC_FILE_FORMAT_VERSION 5
+/** @brief Current on-disk file format version. The decoder accepts only this
+ *  version; Older versions are rejected with ZXC_ERROR_BAD_VERSION. */
+#define ZXC_FILE_FORMAT_VERSION 6
 
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
@@ -769,10 +770,7 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
  * entropy) or when compression would expand the data size.
  * - `ZXC_BLOCK_GLO` (1): General-purpose compression (LZ77 + Bitpacking). This
  * is the default for most data (text, binaries, JSON, etc.). Includes 4 sections descriptors.
- * - (2): Reserved. Formerly NUM (delta/zigzag/bitpack numeric blocks), removed
- *   before v1. The decoder rejects type 2 with ZXC_ERROR_BAD_BLOCK_TYPE; the
- *   value is left free for a future block type.
- * - `ZXC_BLOCK_GHI` (3): General-purpose high-velocity mode using LZ77 with advanced
+ * - `ZXC_BLOCK_GHI` (2): General-purpose high-velocity mode using LZ77 with advanced
  * techniques (lazy matching, step skipping) for maximum ratio. Includes 3 sections descriptors.
  * - `ZXC_BLOCK_SEK` (254): Seek table block. Contains per-block compressed/decompressed sizes
  *   for random-access decompression. Placed between EOF block and file footer.
@@ -781,8 +779,7 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
 typedef enum {
     ZXC_BLOCK_RAW = 0,
     ZXC_BLOCK_GLO = 1,
-    /* 2 reserved (formerly NUM) */
-    ZXC_BLOCK_GHI = 3,
+    ZXC_BLOCK_GHI = 2,
     ZXC_BLOCK_SEK = 254,
     ZXC_BLOCK_EOF = 255
 } zxc_block_type_t;

@@ -41,8 +41,7 @@
  * decoupled from the private src/lib/zxc_internal.h enum. */
 #define GC_BLOCK_RAW 0U
 #define GC_BLOCK_GLO 1U
-/* 2 reserved (formerly NUM) */
-#define GC_BLOCK_GHI 3U
+#define GC_BLOCK_GHI 2U
 #define GC_BLOCK_SEK 254U
 #define GC_BLOCK_EOF 255U
 

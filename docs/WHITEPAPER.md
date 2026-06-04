@@ -132,7 +132,7 @@ The file begins with a **16-byte** header that identifies the format and specifi
 ```
 
 * **Magic Word (4 bytes)**: `0x9 0xCB 0x02E 0xF5`.
-* **Version (1 byte)**: Current version is `5`.
+* **Version (1 byte)**: Current version is `6`.
 * **Chunk Size Code (1 byte)**: Defines the processing block size using **exponent encoding**:
   - If the value is in `[12, 21]`: block size = `2^value` bytes (4 KB to 2 MB).
     - `12` = 4 KB, `13` = 8 KB, `14` = 16 KB, `15` = 32 KB, `16` = 64 KB, `17` = 128 KB, `18` = 256 KB, `19` = 512 KB (default), `20` = 1 MB, `21` = 2 MB.
@@ -165,7 +165,7 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 
 **Note**: The Checksum (if enabled in File Header) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the compressed payload**.
 
-* **Type**: Block encoding type (0=RAW, 1=GLO, 2=reserved, 3=GHI, 255=EOF).
+* **Type**: Block encoding type (0=RAW, 1=GLO, 2=GHI, 255=EOF).
 * **Flags**: Not used for now.
 * **Rsrvd**: Reserved for future use (must be 0).
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
@@ -175,9 +175,7 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 
 > **Note**: While the format is designed for threaded execution, a single-threaded API is also available for constrained environments or simple integration cases.
 
-> **Note**: Block type `2` is **reserved** (formerly NUM, a numeric delta/bitpack codec removed before v1). The decoder rejects it; the value is kept free for a future block type.
-
-### 5.4 Specific Header: GLO (Generic Low)
+### 5.3 Specific Header: GLO (Generic Low)
 (Present immediately after the Block Header)
 
 **GLO Header (16 bytes):**
@@ -257,7 +255,7 @@ Currently, the **Literals** section uses different sizes when RLE compression is
 > **Design Note**: This format is designed for future extensibility. The dual-size architecture allows adding entropy coding (FSE/ANS) or bitpacking to any stream without breaking backward compatibility.
 
 
-### 5.5 Specific Header: GHI (Generic High)
+### 5.4 Specific Header: GHI (Generic High)
 (Present immediately after the Block Header)
 
 The **GHI** (Generic High-Velocity) block format is optimized for maximum decompression speed. It uses a **packed 32-bit sequence** format that allows 4-byte aligned reads, reducing memory access latency and enabling efficient SIMD processing.
@@ -354,7 +352,7 @@ GHI Block Data Layout:
 > **Design Rationale**: The 32-bit packed format eliminates pointer chasing between token and offset streams. By reading a single aligned word per sequence, the decoder achieves better cache utilization and enables aggressive loop unrolling (4x) for maximum throughput on modern CPUs.
 
 
-### 5.6 Specific Header: EOF (End of File)
+### 5.5 Specific Header: EOF (End of File)
 (Block Type 255)
 
 The **EOF** block marks the end of the ZXC stream. It ensures that the decompressor knows exactly when to stop processing, allowing for robust stream termination even when file size metadata is unavailable or when concatenating streams.
@@ -366,7 +364,7 @@ The **EOF** block marks the end of the ZXC stream. It ensures that the decompres
 *   **CRC**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with CRC byte set to 0) using `zxc_hash8`.
 
 
-### 5.7 File Footer
+### 5.6 File Footer
 (Present immediately after the EOF Block)
 
 A mandatory **12-byte footer** closes the stream, providing total source size information and the global checksum.
@@ -386,7 +384,7 @@ A mandatory **12-byte footer** closes the stream, providing total source size in
     *   **Algorithm**: `Rotation + XOR`.
     *   For each block with a checksum: `global_hash = (global_hash << 1) | (global_hash >> 31); global_hash ^= block_hash;`
 
-### 5.8 Block Encoding & Processing Algorithms
+### 5.7 Block Encoding & Processing Algorithms
 
 The efficiency of ZXC relies on specialized algorithmic pipelines for each block type.
 
@@ -424,7 +422,7 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Matches*: Copied using 16-byte stores. Overlapping matches (e.g., repeating pattern "ABC" for 100 bytes) are handled naturally by the CPU's store forwarding or by specific overlapped-copy primitives.
     *   **Safety**: A "Safe Zone" at the end of the buffer forces a switch to a cautious byte-by-byte loop, allowing the main loop to run without bounds checks.
 
-#### Type 3: GHI (High-Velocity)
+#### Type 2: GHI (High-Velocity)
 This format prioritizes decompression throughput over compression ratio. It uses a **unified sequence stream**:
 
 **Encoding Process**:
@@ -448,14 +446,7 @@ This format prioritizes decompression throughput over compression ratio. It uses
 3.  **Offset Validation Threshold**: For the first 256 (8-bit mode) or 65536 (16-bit mode) bytes, offsets are validated against written bytes. After this threshold, all offsets are guaranteed valid.
 4.  **Wild Copy**: Same 32-byte SIMD copies as GLO, with special handling for overlapping matches (offset < 32).
 
-#### Type 2: Reserved (formerly NUM)
-Block type `2` is reserved. It previously held a NUM codec (delta + ZigZag +
-per-frame bit-packing of 32-bit integer arrays), removed before v1.
-Numeric/columnar data is better handled by an external transform (delta,
-byte-shuffle) feeding the LZ codec, where the caller declares the element type
-rather than the codec guessing it. The decoder rejects type `2`.
-
-### 5.9 Data Integrity
+### 5.8 Data Integrity
 Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.
 
 #### Post-Compression Verification
@@ -474,7 +465,7 @@ ZXC supports multiple integrity verification algorithms (though currently standa
 #### Credit
 The default `rapidhash` algorithm is based on wyhash and was developed by Nicolas De Carli. It is designed to fully exploit hardware performance while maintaining top-tier mathematical distribution qualities.
 
-### 5.10 Seekable Archives (Random Access)
+### 5.9 Seekable Archives (Random Access)
 ZXC supports **O(1)** random-access decompression without decoding the entire stream. This is achieved by appending an optional **Seek Table** (a `SEK` block) at the end of the archive, immediately before the file footer.
 
 *   **Structure**: The seek table contains an array of 4-byte entries (compressed block size, LE uint32) for every block in the archive.

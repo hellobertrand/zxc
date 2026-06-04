@@ -1,10 +1,10 @@
 # ZXC Compressed File Format (Technical Specification)
 
-**Date**: May 2026
-**Format Version**: 5
+**Date**: June 2026
+**Format Version**: 6
 
 This document describes the on-disk binary format of a ZXC compressed file.
-It formalizes the current reference implementation of format version **5**.
+It formalizes the current reference implementation of format version **6**.
 
 ## 1. Conventions
 
@@ -54,7 +54,7 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): currently `5`.
+- **Format Version** (`u8`): currently `6`.
 - **Chunk Size Code** (`u8`):
   - If the value is in the range `[12, 21]`, it is an **exponent**: `block_size = 2^code`.
     - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
@@ -91,8 +91,7 @@ Offset  Size  Field
 - **Block Type**:
   - `0` = RAW
   - `1` = GLO
-  - `2` = reserved (formerly NUM; see [§5.2](#52-reserved-type2))
-  - `3` = GHI
+  - `2` = GHI
   - `254` = SEK
   - `255` = EOF
 - **Block Flags**: currently not used by implementation (written as `0`).
@@ -125,18 +124,7 @@ No internal sub-header.
 
 ---
 
-## 5.2 Reserved (`type=2`)
-
-Block type `2` is **reserved**. It was formerly **NUM** (a delta/ZigZag/bit-packed
-codec for 32-bit integer arrays), removed before v1 because the gains did not
-justify its decode-speed cost and selection complexity (numeric/columnar data is
-better served by an external transform feeding the LZ codec). The encoder never
-emits type `2`, and a conforming decoder **MUST** reject it with
-`ZXC_ERROR_BAD_BLOCK_TYPE`. The value is left free for a future block type.
-
----
-
-## 5.3 GLO block (`type=1`)
+## 5.2 GLO block (`type=1`)
 
 General LZ-style format with separated streams.
 
@@ -188,7 +176,7 @@ Section order:
 - **Literals stream**:
   - raw literal bytes if `enc_lit=0`, or
   - RLE tokenized if `enc_lit=1`, or
-  - Huffman-coded if `enc_lit=2` (see [§ 5.3.1 Huffman literal section](#531-huffman-literal-section)).
+  - Huffman-coded if `enc_lit=2` (see [§ 5.2.1 Huffman literal section](#521-huffman-literal-section)).
 - **Tokens stream**:
   - one byte per sequence: `(LL << 4) | ML`.
   - `LL` and `ML` are 4-bit fields.
@@ -202,7 +190,7 @@ Section order:
     - if `ML == 15`, read varint and add to ML
   - actual match length is `ML + 5` (minimum match = 5).
 
-### 5.3.1 Huffman literal section
+### 5.2.1 Huffman literal section
 
 Selected by the encoder only at compression level ≥ 6, only when at least
 `ZXC_HUF_MIN_LITERALS = 1024` literals are present, and only when the Huffman
@@ -233,7 +221,7 @@ encoded into its own bit-stream so that 4 decoders can run in parallel.
 
 The decoder reconstructs the canonical code table from the 128-byte length
 header, validates the Kraft equality, and decodes each sub-stream into its
-output region. See [WHITEPAPER §5.8](WHITEPAPER.md) for the multi-symbol
+output region. See [WHITEPAPER §5.7](WHITEPAPER.md) for the multi-symbol
 2048-entry lookup table strategy used on the decode hot path.
 
 Decoder validation requirements:
@@ -246,7 +234,7 @@ Decoder validation requirements:
 
 ---
 
-## 5.4 GHI block (`type=3`)
+## 5.3 GHI block (`type=2`)
 
 High-throughput LZ format with packed 32-bit sequences.
 
@@ -308,7 +296,7 @@ Overflow rules:
 
 ---
 
-## 5.5 EOF block (`type=255`)
+## 5.4 EOF block (`type=255`)
 
 EOF marks end of block stream.
 
@@ -322,7 +310,7 @@ Immediately after EOF block header comes the Optional SEK block, followed by the
 
 ---
 
-## 5.6 SEK block (`type=254`)
+## 5.5 SEK block (`type=254`)
 
 The **Seek Table** block is an optional block appended between the EOF block and the File Footer. It provides `O(1)` random-access capabilities by recording the compressed size of every block in the archive. Decompressed sizes and block indices are derived from the file header's `block_size` (all blocks are `block_size` except the last, which may be smaller).
 
@@ -463,17 +451,17 @@ A conforming decoder **MUST** reject any file whose version it does not support.
 
 ### 10.3 Compatibility rules
 
-- **Backward compatibility**: a decoder supporting version *N* **MUST** decode all files produced by encoders of version *N*. It **MAY** also accept earlier versions.
-- **Forward compatibility**: a decoder encountering an **unknown block type** (not RAW, GLO, GHI, or EOF) **SHOULD** skip it using `comp_size` to advance past its payload (and optional checksum), rather than rejecting the file outright. This allows older decoders to partially process files from newer encoders that introduce additive block types. (Type `2` is reserved (formerly NUM); the current decoder rejects it — see [§5.2](#52-reserved-type2).)
+- **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version with `ZXC_ERROR_BAD_VERSION`. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
+- **Forward compatibility**: a decoder encountering an **unknown block type** (not RAW, GLO, GHI, or EOF) **SHOULD** skip it using `comp_size` to advance past its payload (and optional checksum), rather than rejecting the file outright. This allows older decoders to partially process files from newer encoders that introduce additive block types.
 - **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. Decoders **MUST** ignore reserved fields (not reject non-zero values), unless a future version assigns them meaning.
 
 ### 10.4 Minimum conforming decoder
 
-A minimal conforming decoder for version 5 **MUST** support:
+A minimal conforming decoder for version 6 **MUST** support:
 - File header parsing and CRC16 validation.
 - **RAW** blocks (type 0) - passthrough copy.
 - **GLO** blocks (type 1) - full LZ decode with extras varint.
-- **GHI** blocks (type 3) - full LZ decode with extras varint.
+- **GHI** blocks (type 2) - full LZ decode with extras varint.
 - **EOF** block (type 255) - stream termination.
 - File footer validation (source size check).
 
@@ -661,11 +649,11 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 05 | 13 | 80 | 00 00 00 00 00 00 00 | B8 90
+F5 2E B0 9C | 06 | 13 | 80 | 00 00 00 00 00 00 00 | FD 3B
 ```
 
 - `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
-- `05` -> format version 5.
+- `06` -> format version 6.
 - `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
 - `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.

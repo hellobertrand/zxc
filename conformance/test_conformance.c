@@ -220,8 +220,12 @@ static int test_invalid_vector(const char *zxc_path)
     if (dec_sz > 0 && dec_sz <= (1 << 20)) {
         uint8_t *output = malloc((size_t)dec_sz);
         if (output) {
+            /* Verify with checksum enabled so checksum/payload-corruption
+             * vectors are caught (verification needs both the file flag and
+             * this opt; see zxc_decompress_block in zxc_dispatch.c). */
+            const zxc_decompress_opts_t io = {.checksum_enabled = 1};
             int64_t result = zxc_decompress(comp, comp_sz,
-                                            output, (size_t)dec_sz, NULL);
+                                            output, (size_t)dec_sz, &io);
             if (result >= 0) {
                 fprintf(stderr, "FAIL: %s  should be rejected but decoded %lld bytes\n",
                         zxc_path, (long long)result);

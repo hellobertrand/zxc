@@ -90,7 +90,7 @@ static uint8_t *read_file(const char *path, size_t *out_size) {
 /* Per-payload sub-header validation (FORMAT.md Sec 5)                          */
 /* ------------------------------------------------------------------------- */
 
-/* Shared validator for the GLO (Sec 5.3) and GHI (Sec 5.4) section model: a 16-byte
+/* Shared validator for the GLO (Sec 5.2) and GHI (Sec 5.3) section model: a 16-byte
  * header, then `n_sections` packed u64 descriptors (low32 = comp, high32 = raw),
  * then each section's bytes. The section sizes plus the headers must tile the
  * payload exactly. */
@@ -187,7 +187,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
             break;
         }
 
-        /* Data block (RAW/GLO/GHI). Type 2 (formerly NUM) is reserved/removed. */
+        /* Data block (RAW/GLO/GHI). */
         CHECK(type == GC_BLOCK_RAW || type == GC_BLOCK_GLO || type == GC_BLOCK_GHI,
               "unexpected block type %u at %zu", type, off);
         if (gc->expect_data_type != GC_ANY_TYPE)
@@ -226,7 +226,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
     CHECK(data_blocks >= gc->min_data_blocks, "got %d data blocks, expected >= %d", data_blocks,
           gc->min_data_blocks);
 
-    /* ---- Optional SEK block (Sec 5.6), located after EOF, before footer ---- */
+    /* ---- Optional SEK block (Sec 5.5), located after EOF, before footer ---- */
     int seek_present = 0;
     if (off + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE <= size && buf[off] == GC_BLOCK_SEK) {
         const uint8_t *sh = buf + off;
