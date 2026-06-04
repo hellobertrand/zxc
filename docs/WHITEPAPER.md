@@ -479,7 +479,7 @@ runs at the chosen width:
 4.  **Bit-Packing**: Packs 128 integers into `128 * B` bits.
 
 **Decoding Process**:
-1.  **Bit-Unpacking**: Unpacks bitstreams back into integers. The 64-bit reader extracts a value in two ≤32-bit steps (the accumulator is 64 bits wide, so a single 64-bit read cannot be guaranteed without undefined behaviour).
+1.  **Bit-Unpacking**: Unpacks bitstreams back into integers. The 64-bit reader extracts a value in two ≤32-bit steps.
 2.  **ZigZag Decode**: Reverses the mapping.
 3.  **Integration**: Computes the prefix sum (cumulative addition, modulo 2^w) to restore original values. *Note: ZXC utilizes a 4x unrolled loop here to pipeline the dependency chain.*
 
@@ -506,21 +506,12 @@ the block qualifies as numeric at width `w` when — with `W = 8w` bits — any 
 **Width choice.** The 32-bit interpretation is probed first and is authoritative;
 64-bit is tried only if 32-bit does not qualify. A genuine 64-bit sequence read
 as `i32` has wildly alternating deltas (the high and low halves interleave), so
-32-bit naturally rejects it and 64-bit catches it. For `w = 4` the test is
-byte-for-byte the historical 32-bit probe (thresholds `16`/`20` bits, `256`/`65536`),
-so NUM-32 output — and every existing 32-bit golden file — is unchanged.
+32-bit naturally rejects it and 64-bit catches it.
 
 If neither width qualifies the block takes the LZ path (GLO at level ≥ 3, GHI at
 level ≤ 2). A NUM block that nonetheless expands past 75 % of the input falls back
 to LZ, and any block that still expands past the input is stored RAW. The
 selection is an encoder-only decision and does not affect the on-disk format.
-
-> **Design note — ratio vs. decode speed.** A pure cost model would also pick NUM
-> on blocks where it is *marginally* smaller than LZ (low-cardinality integer
-> columns, mixed binary). Those NUM blocks compress slightly better but decode
-> noticeably slower than the LZ they replace — the wrong trade for a
-> decompression-first codec. The conservative detector intentionally leaves those
-> blocks on LZ and keeps NUM for the cases where it wins on both axes.
 
 ### 5.9 Data Integrity
 Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.
