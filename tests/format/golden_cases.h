@@ -133,7 +133,7 @@ static size_t gc_make_num64(uint8_t **out) {
     const size_t count = 2048;
     const size_t n = count * sizeof(uint64_t);
     uint8_t *b = (uint8_t *)malloc(n);
-    uint64_t v = 1700000000000000000ULL; /* ~2023 in nanoseconds */
+    uint64_t v = 1780000000000000000ULL; /* ~2026 in nanoseconds */
     for (size_t i = 0; i < count; i++) {
         v += 1000000ULL + (uint64_t)(i % 11); /* ~1 ms cadence + tiny jitter */
         for (int k = 0; k < 8; k++) b[i * 8 + k] = (uint8_t)(v >> (8 * k));

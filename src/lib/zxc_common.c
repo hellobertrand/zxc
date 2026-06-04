@@ -691,17 +691,9 @@ int zxc_bitpack_stream64(const uint64_t* RESTRICT src, const size_t count, uint8
         const size_t bi = bit_pos >> 3;
         const uint64_t lo = mv << sh;  // bits that land in dst[bi..bi+7]
         const uint64_t hi = sh ? (mv >> (CHAR_BIT * sizeof(uint64_t) - sh)) : 0;  // spill into bi+8
-        const int span = sh + bits;  // total bit span, up to 71
 
-        dst[bi] |= (uint8_t)lo;
-        if (span > 1 * CHAR_BIT) dst[bi + 1] |= (uint8_t)(lo >> (1 * CHAR_BIT));
-        if (span > 2 * CHAR_BIT) dst[bi + 2] |= (uint8_t)(lo >> (2 * CHAR_BIT));
-        if (span > 3 * CHAR_BIT) dst[bi + 3] |= (uint8_t)(lo >> (3 * CHAR_BIT));
-        if (span > 4 * CHAR_BIT) dst[bi + 4] |= (uint8_t)(lo >> (4 * CHAR_BIT));
-        if (span > 5 * CHAR_BIT) dst[bi + 5] |= (uint8_t)(lo >> (5 * CHAR_BIT));
-        if (span > 6 * CHAR_BIT) dst[bi + 6] |= (uint8_t)(lo >> (6 * CHAR_BIT));
-        if (span > 7 * CHAR_BIT) dst[bi + 7] |= (uint8_t)(lo >> (7 * CHAR_BIT));
-        if (span > 8 * CHAR_BIT) dst[bi + 8] |= (uint8_t)hi;
+        zxc_store_le64(dst + bi, zxc_le64(dst + bi) | lo);
+        dst[bi + 8] |= (uint8_t)hi;
         bit_pos += bits;
     }
     return (int)out_bytes;
