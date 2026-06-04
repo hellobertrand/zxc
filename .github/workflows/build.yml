@@ -193,7 +193,7 @@ jobs:
             -e "s|@VERSION@|${VERSION}|g" \
             -e "s|@COMMIT@|${COMMIT}|g" \
             -e "s|@CREATED@|${CREATED}|g" \
-            SBOM.spdx.json.in > "$SBOM_FILE"
+            sbom.spdx.json.in > "$SBOM_FILE"
           # Validate JSON syntax
           jq empty "$SBOM_FILE"
 
