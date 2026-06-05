@@ -59,6 +59,7 @@ pub fn compress(data: &[u8], level: Level, checksum: Option<bool>) -> Result<Vec
         level,
         checksum: checksum.unwrap_or(false),
         seekable: false,
+        dict: None,
     };
     compress_with_options(data, &opts)
 }
@@ -101,10 +102,16 @@ unsafe fn impl_compress(
     options: &CompressOptions,
 ) -> Result<usize> {
     let written = unsafe {
+        let (dict_ptr, dict_size) = match &options.dict {
+            Some(d) if !d.is_empty() => (d.as_ptr() as *const c_void, d.len()),
+            _ => (std::ptr::null(), 0),
+        };
         let copts = zxc_sys::zxc_compress_opts_t {
             level: options.level as i32,
             checksum_enabled: options.checksum as i32,
             seekable: options.seekable as i32,
+            dict: dict_ptr,
+            dict_size,
             ..Default::default()
         };
         zxc_sys::zxc_compress(
@@ -236,8 +243,14 @@ unsafe fn impl_decompress(
     options: &DecompressOptions,
 ) -> Result<usize> {
     let written = unsafe {
+        let (dict_ptr, dict_size) = match &options.dict {
+            Some(d) if !d.is_empty() => (d.as_ptr() as *const c_void, d.len()),
+            _ => (std::ptr::null(), 0),
+        };
         let dopts = zxc_sys::zxc_decompress_opts_t {
             checksum_enabled: if options.verify_checksum { 1 } else { 0 },
+            dict: dict_ptr,
+            dict_size,
             ..Default::default()
         };
         zxc_sys::zxc_decompress(

@@ -343,9 +343,11 @@ mod tests {
             level: Level::Default,
             checksum: true,
             seekable: false,
+            ..Default::default()
         };
         let dopts = DecompressOptions {
             verify_checksum: true,
+            ..Default::default()
         };
         let out = pstream_roundtrip(&data, Some(&copts), Some(&dopts));
         assert_eq!(out, data);

@@ -372,6 +372,7 @@ mod tests {
         };
         let dopts = DecompressOptions {
             verify_checksum: true,
+            ..Default::default()
         };
         let mut enc = Encoder::with_options(Vec::new(), Some(&copts)).unwrap();
         enc.write_all(&data).unwrap();

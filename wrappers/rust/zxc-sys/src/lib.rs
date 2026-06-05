@@ -146,6 +146,16 @@ pub const ZXC_ERROR_BAD_BLOCK_TYPE: i32 = -13;
 pub const ZXC_ERROR_BAD_BLOCK_SIZE: i32 = -14;
 
 // =============================================================================
+// Dictionary Constants
+// =============================================================================
+
+/// Maximum dictionary content size in bytes (65535).
+pub const ZXC_DICT_SIZE_MAX: usize = (1usize << 16) - 1;
+
+/// Fixed size of the `.zxd` file header in bytes.
+pub const ZXC_DICT_HEADER_SIZE: usize = 16;
+
+// =============================================================================
 // Options Structs (mirroring C API)
 // =============================================================================
 
@@ -163,6 +173,10 @@ pub struct zxc_compress_opts_t {
     pub checksum_enabled: c_int,
     /// 1 to append a seek table for random-access decompression, 0 to disable.
     pub seekable: c_int,
+    /// Pre-trained dictionary content (NULL = none).
+    pub dict: *const c_void,
+    /// Dictionary size in bytes (0 = none, max [`ZXC_DICT_SIZE_MAX`]).
+    pub dict_size: usize,
     /// Progress callback (NULL to disable).
     pub progress_cb: *const c_void,
     /// User context pointer passed to progress_cb.
@@ -177,6 +191,8 @@ impl Default for zxc_compress_opts_t {
             block_size: 0,
             checksum_enabled: 0,
             seekable: 0,
+            dict: std::ptr::null(),
+            dict_size: 0,
             progress_cb: std::ptr::null(),
             user_data: std::ptr::null_mut(),
         }
@@ -191,6 +207,10 @@ pub struct zxc_decompress_opts_t {
     pub n_threads: c_int,
     /// 1 to verify per-block and global checksums, 0 to skip.
     pub checksum_enabled: c_int,
+    /// Pre-trained dictionary content (NULL = none).
+    pub dict: *const c_void,
+    /// Dictionary size in bytes (0 = none).
+    pub dict_size: usize,
     /// Progress callback (NULL to disable).
     pub progress_cb: *const c_void,
     /// User context pointer passed to progress_cb.
@@ -202,6 +222,8 @@ impl Default for zxc_decompress_opts_t {
         Self {
             n_threads: 0,
             checksum_enabled: 0,
+            dict: std::ptr::null(),
+            dict_size: 0,
             progress_cb: std::ptr::null(),
             user_data: std::ptr::null_mut(),
         }
@@ -311,6 +333,94 @@ unsafe extern "C" {
     /// A constant string such as "ZXC_OK" or "ZXC_ERROR_MEMORY".
     /// Returns "ZXC_UNKNOWN_ERROR" for unrecognized codes.
     pub fn zxc_error_name(code: c_int) -> *const std::os::raw::c_char;
+
+    /// Returns the dictionary ID a ZXC compressed buffer requires.
+    ///
+    /// Reads the file header without decompressing. Returns 0 if the file
+    /// does not require a dictionary or the buffer is invalid.
+    ///
+    /// # Safety
+    /// - `src` must be a valid pointer to `src_size` bytes.
+    pub fn zxc_get_dict_id(src: *const c_void, src_size: usize) -> u32;
+}
+
+// =============================================================================
+// Dictionary API
+// =============================================================================
+
+unsafe extern "C" {
+    /// Trains a dictionary from a corpus of samples.
+    ///
+    /// # Safety
+    /// - `samples` must point to `n_samples` valid pointers, each valid for
+    ///   the corresponding `sample_sizes` entry.
+    /// - `sample_sizes` must point to `n_samples` entries.
+    /// - `dict_buf` must be valid for writes up to `dict_capacity` bytes.
+    ///
+    /// # Returns
+    /// Size of the trained dictionary (>0), or a negative `zxc_error_t` code.
+    pub fn zxc_train_dict(
+        samples: *const *const c_void,
+        sample_sizes: *const usize,
+        n_samples: usize,
+        dict_buf: *mut c_void,
+        dict_capacity: usize,
+    ) -> i64;
+
+    /// Computes the dictionary ID for raw dictionary content.
+    ///
+    /// # Safety
+    /// - `dict` must be a valid pointer to `dict_size` bytes.
+    ///
+    /// Returns 0 if `dict` is NULL or `dict_size` is 0.
+    pub fn zxc_dict_id(dict: *const c_void, dict_size: usize) -> u32;
+
+    /// Returns the dictionary ID stored in a `.zxd` file buffer.
+    ///
+    /// # Safety
+    /// - `buf` must be a valid pointer to `buf_size` bytes.
+    ///
+    /// Returns 0 if the buffer is not a valid `.zxd` file.
+    pub fn zxc_dict_get_id(buf: *const c_void, buf_size: usize) -> u32;
+
+    /// Returns the maximum `.zxd` file size for a given content size
+    /// (= 16 + `content_size`).
+    pub fn zxc_dict_save_bound(content_size: usize) -> usize;
+
+    /// Serializes dictionary content to the `.zxd` file format.
+    ///
+    /// # Safety
+    /// - `content` must be valid for `content_size` bytes.
+    /// - `buf` must be valid for writes up to `buf_capacity` bytes.
+    ///
+    /// # Returns
+    /// Bytes written (>0), or a negative `zxc_error_t` code.
+    pub fn zxc_dict_save(
+        content: *const c_void,
+        content_size: usize,
+        buf: *mut c_void,
+        buf_capacity: usize,
+    ) -> i64;
+
+    /// Loads and validates a `.zxd` dictionary file from a memory buffer.
+    ///
+    /// On success, `content_out` points INTO `buf` (zero-copy); the caller
+    /// must keep `buf` alive while the content pointer is in use.
+    ///
+    /// # Safety
+    /// - `buf` must be valid for `buf_size` bytes.
+    /// - `content_out` and `content_size_out` must be valid pointers.
+    /// - `dict_id_out` may be NULL.
+    ///
+    /// # Returns
+    /// `ZXC_OK` (0) on success, or a negative `zxc_error_t` code.
+    pub fn zxc_dict_load(
+        buf: *const c_void,
+        buf_size: usize,
+        content_out: *mut *const c_void,
+        content_size_out: *mut usize,
+        dict_id_out: *mut u32,
+    ) -> c_int;
 }
 
 // =============================================================================
@@ -584,6 +694,20 @@ unsafe extern "C" {
     ///
     /// Returns NULL on any open-time error.
     pub fn zxc_seekable_open_reader(r: *const zxc_reader_t) -> *mut zxc_seekable;
+
+    /// Attaches a dictionary to a seekable handle. The dictionary content
+    /// must remain valid for the lifetime of the handle (or until replaced).
+    ///
+    /// # Safety
+    /// - `s` must be a valid handle from [`zxc_seekable_open`] etc.
+    /// - `dict` must be valid for `dict_size` bytes (or NULL with 0).
+    ///
+    /// Returns `ZXC_OK` (0) on success, or a negative `zxc_error_t` code.
+    pub fn zxc_seekable_set_dict(
+        s: *mut zxc_seekable,
+        dict: *const c_void,
+        dict_size: usize,
+    ) -> c_int;
 
     /// Returns the total number of data blocks in the archive (excluding EOF).
     pub fn zxc_seekable_get_num_blocks(s: *const zxc_seekable) -> u32;
