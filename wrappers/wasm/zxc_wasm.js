@@ -214,9 +214,6 @@ export default async function createZXC(moduleOverrides, factory) {
         Module.HEAPU8.set(data, srcPtr);
 
         const origSize = _get_decompressed_size(srcPtr, data.length);
-        // origSize === 0 may be a valid empty-payload archive or invalid input;
-        // keep dst non-null (malloc(1)) and let the C decoder validate below
-        // (it returns 0 for a valid empty archive, or a negative error code).
         const dstPtr = _malloc(origSize || 1);
         const optsPtr = _writeDecompressOpts(checksum);
 
@@ -324,8 +321,6 @@ export default async function createZXC(moduleOverrides, factory) {
                 const srcPtr = _malloc(data.length);
                 Module.HEAPU8.set(data, srcPtr);
                 const origSize = _get_decompressed_size(srcPtr, data.length);
-                // origSize === 0 may be a valid empty-payload archive; keep dst
-                // non-null and let the C decoder validate (returns 0 if valid).
                 const dstPtr = _malloc(origSize || 1);
                 try {
                     const result = _decompress_dctx(dctx, srcPtr, data.length, dstPtr, origSize, 0);

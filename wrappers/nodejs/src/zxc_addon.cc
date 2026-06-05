@@ -46,8 +46,7 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
 
     Napi::Buffer<uint8_t> src_buf = info[0].As<Napi::Buffer<uint8_t>>();
     size_t src_size = src_buf.Length();
-    // An empty buffer's Data() may be null; pass a valid non-null pointer (the C
-    // side reads 0 bytes) so empty input yields a minimal 36-byte frame.
+    
     static const uint8_t kEmptySrc = 0;
     const void* src = src_size > 0 ? static_cast<const void*>(src_buf.Data()) : &kEmptySrc;
 
@@ -117,8 +116,7 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
     }
 
     Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, decompress_size);
-    // A 0-length buffer's Data() may be null; keep dst non-null for the empty
-    // case (the decoder writes 0 bytes for a valid empty-payload archive).
+    
     static uint8_t kEmptyDst = 0;
     void* dst = decompress_size > 0 ? static_cast<void*>(dst_buf.Data()) : static_cast<void*>(&kEmptyDst);
 

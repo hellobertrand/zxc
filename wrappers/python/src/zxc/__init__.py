@@ -183,8 +183,6 @@ def decompress(data, decompress_size=None, checksum=False) -> bytes:
     Returns:
         Decompressed bytes.
     """
-    # An empty-payload archive validly reports size 0; the C decoder is the
-    # authority and returns a negative error code on genuinely invalid input.
     if decompress_size is None:
         decompress_size = get_decompressed_size(data)
 

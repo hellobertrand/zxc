@@ -146,8 +146,6 @@ function decompress(data, options = {}) {
 
     const checksum = options.checksum !== undefined ? options.checksum : false;
 
-    // An empty-payload archive validly reports size 0; the native decoder is
-    // the authority and throws on genuinely invalid input.
     let size = options.size;
     if (size === undefined) {
         size = getDecompressedSize(data);
