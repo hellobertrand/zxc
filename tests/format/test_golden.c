@@ -134,7 +134,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
           (unsigned)ZXC_FILE_FORMAT_VERSION);
 
     uint8_t code = buf[5];
-    CHECK((code >= 12 && code <= 21) || code == 64, "invalid chunk-size code %u", code);
+    CHECK(code >= 12 && code <= 21, "invalid chunk-size code %u", code);
 
     uint8_t flags = buf[6];
     int has_checksum = (flags & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;

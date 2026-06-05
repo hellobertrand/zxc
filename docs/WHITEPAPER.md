@@ -134,10 +134,9 @@ The file begins with a **16-byte** header that identifies the format and specifi
 * **Magic Word (4 bytes)**: `0x9 0xCB 0x02E 0xF5`.
 * **Version (1 byte)**: Current version is `6`.
 * **Chunk Size Code (1 byte)**: Defines the processing block size using **exponent encoding**:
-  - If the value is in `[12, 21]`: block size = `2^value` bytes (4 KB to 2 MB).
+  - The value is in `[12, 21]`: block size = `2^value` bytes (4 KB to 2 MB).
     - `12` = 4 KB, `13` = 8 KB, `14` = 16 KB, `15` = 32 KB, `16` = 64 KB, `17` = 128 KB, `18` = 256 KB, `19` = 512 KB (default), `20` = 1 MB, `21` = 2 MB.
-  - Legacy value `64` is accepted for backward compatibility (maps to 256 KB).
-  - Block sizes must be powers of 2.
+  - All other values are rejected; block sizes are powers of 2.
 * **Flags (1 byte)**: Global configuration flags.
   - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream. Every block will carry a trailing 4-byte checksum, and the footer will contain a global checksum. If `0`, no checksums are present.
   - **Bit 6**: `HAS_DICTIONARY`. If `1`, the stream was compressed with a pre-trained dictionary and **requires** it for decompression; the reserved field carries the `dict_id` (see below and §5.11).

@@ -395,64 +395,51 @@ int test_global_checksum_order() {
     return 1;
 }
 
-int test_legacy_header() {
-    printf("=== TEST: Legacy header (chunk_size_code=64) ===\n");
-
-    // Build a valid file header with legacy chunk_size_code = 64 (= 256 KB)
+/* Builds a header with the given chunk-size code, fixes the CRC16, and returns
+ * zxc_read_file_header's verdict (block_size out via *bs). */
+static int chunk_code_verdict(uint8_t code, size_t *bs) {
     uint8_t hdr[ZXC_FILE_HEADER_SIZE];
     memset(hdr, 0, sizeof(hdr));
-
-    // Magic word (LE)
-    hdr[0] = 0xF5;
-    hdr[1] = 0x2E;
-    hdr[2] = 0xB0;
-    hdr[3] = 0x9C;
-    // Version
-    hdr[4] = ZXC_FILE_FORMAT_VERSION;
-    // Legacy chunk size code
-    hdr[5] = 64;
-    // Flags: no checksum
-    hdr[6] = 0;
-
-    // Compute CRC16 (bytes 14-15 zeroed, then hash)
-    hdr[14] = 0;
-    hdr[15] = 0;
-    uint16_t crc = zxc_hash16(hdr);
+    hdr[0] = 0xF5; hdr[1] = 0x2E; hdr[2] = 0xB0; hdr[3] = 0x9C;  // magic (LE)
+    hdr[4] = ZXC_FILE_FORMAT_VERSION;                            // version
+    hdr[5] = code;                                              // chunk-size code
+    hdr[6] = 0;                                                 // flags: no checksum
+    uint16_t crc = zxc_hash16(hdr);                            // bytes 14-15 already 0
     hdr[14] = (uint8_t)(crc & 0xFF);
     hdr[15] = (uint8_t)(crc >> 8);
-
-    size_t block_size = 0;
     int has_checksum = -1;
-    int rc = zxc_read_file_header(hdr, sizeof(hdr), &block_size, &has_checksum, NULL);
+    *bs = 0;
+    return zxc_read_file_header(hdr, sizeof(hdr), bs, &has_checksum, NULL);
+}
 
-    if (rc != ZXC_OK) {
-        printf("  [FAIL] zxc_read_file_header returned %d (%s)\n", rc, zxc_error_name(rc));
+int test_chunk_size_code() {
+    printf("=== TEST: Chunk-size code validation ===\n");
+
+    size_t bs = 0;
+
+    // Valid exponent code 19 -> 512 KB.
+    int rc = chunk_code_verdict(19, &bs);
+    if (rc != ZXC_OK || bs != 512 * 1024) {
+        printf("  [FAIL] code 19: rc=%d (%s), block_size=%zu\n", rc, zxc_error_name(rc), bs);
         return 0;
     }
-    if (block_size != 256 * 1024) {
-        printf("  [FAIL] block_size = %zu, expected %d\n", block_size, 256 * 1024);
-        return 0;
-    }
-    if (has_checksum != 0) {
-        printf("  [FAIL] has_checksum = %d, expected 0\n", has_checksum);
-        return 0;
-    }
-    printf("  [PASS] Legacy code 64 -> block_size = 256 KB\n");
+    printf("  [PASS] Code 19 -> 512 KB\n");
 
-    // Verify that invalid codes are rejected
-    hdr[5] = 99;  // Not a valid exponent nor legacy value
-    hdr[14] = 0;
-    hdr[15] = 0;
-    crc = zxc_hash16(hdr);
-    hdr[14] = (uint8_t)(crc & 0xFF);
-    hdr[15] = (uint8_t)(crc >> 8);
-
-    rc = zxc_read_file_header(hdr, sizeof(hdr), &block_size, &has_checksum, NULL);
+    // Legacy code 64 was accepted in v5 (mapped to 256 KB) but is removed in v6.
+    rc = chunk_code_verdict(64, &bs);
     if (rc != ZXC_ERROR_BAD_BLOCK_SIZE) {
-        printf("  [FAIL] invalid code 99: expected %d, got %d\n", ZXC_ERROR_BAD_BLOCK_SIZE, rc);
+        printf("  [FAIL] legacy code 64: expected %d, got %d\n", ZXC_ERROR_BAD_BLOCK_SIZE, rc);
         return 0;
     }
-    printf("  [PASS] Invalid code 99 -> ZXC_ERROR_BAD_BLOCK_SIZE\n");
+    printf("  [PASS] Legacy code 64 rejected (ZXC_ERROR_BAD_BLOCK_SIZE)\n");
+
+    // Out-of-range code 99 -> rejected.
+    rc = chunk_code_verdict(99, &bs);
+    if (rc != ZXC_ERROR_BAD_BLOCK_SIZE) {
+        printf("  [FAIL] code 99: expected %d, got %d\n", ZXC_ERROR_BAD_BLOCK_SIZE, rc);
+        return 0;
+    }
+    printf("  [PASS] Code 99 rejected\n");
 
     printf("PASS\n\n");
     return 1;

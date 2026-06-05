@@ -368,17 +368,10 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
 
     if (out_block_size) {
         const uint8_t code = src[5];
-        size_t block_size;
-        if (LIKELY(code >= ZXC_BLOCK_SIZE_MIN_LOG2 && code <= ZXC_BLOCK_SIZE_MAX_LOG2)) {
-            // Exponent encoding: block_size = 2^code  (4 KB - 2 MB)
-            block_size = (size_t)1U << code;
-        } else if (code == 64) {
-            // Legacy: hardcoded 256 KB default
-            block_size = 256 * 1024;
-        } else {
+        if (UNLIKELY(code < ZXC_BLOCK_SIZE_MIN_LOG2 || code > ZXC_BLOCK_SIZE_MAX_LOG2))
             return ZXC_ERROR_BAD_BLOCK_SIZE;
-        }
-        *out_block_size = block_size;
+        // Exponent encoding: block_size = 2^code  (4 KB - 2 MB)
+        *out_block_size = (size_t)1U << code;
     }
     // Flags are at offset 6
     if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;

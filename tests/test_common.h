@@ -175,7 +175,7 @@ int test_huffman_codec(void);
 int test_eof_block_structure(void);
 int test_header_checksum(void);
 int test_global_checksum_order(void);
-int test_legacy_header(void);
+int test_chunk_size_code(void);
 
 /* Misc */
 int test_error_name(void);

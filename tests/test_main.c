@@ -106,7 +106,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_eof_block_structure),
     TEST_CASE(test_header_checksum),
     TEST_CASE(test_global_checksum_order),
-    TEST_CASE(test_legacy_header),
+    TEST_CASE(test_chunk_size_code),
 
     /* --- Misc --- */
     TEST_CASE(test_error_name),

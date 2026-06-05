@@ -56,9 +56,8 @@ Offset  Size  Field
 - **Magic Word** (`u32`): `0x9CB02EF5`.
 - **Format Version** (`u8`): currently `6`.
 - **Chunk Size Code** (`u8`):
-  - If the value is in the range `[12, 21]`, it is an **exponent**: `block_size = 2^code`.
+  - The value is an **exponent** in the range `[12, 21]`: `block_size = 2^code`.
     - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
-  - The legacy value `64` (from older encoders) is accepted and maps to 256 KB.
   - All other values are rejected (`ZXC_ERROR_BAD_BLOCK_SIZE`).
   - Valid block sizes are powers of 2 in the range **4 KB – 2 MB**.
 - **Flags** (`u8`):
@@ -481,7 +480,7 @@ The recommended behavior for each class is specified below.
 | **Bad magic** | File header, offset 0x00 | Reject immediately. Not a ZXC file. |
 | **Unsupported version** | File header, offset 0x04 | Reject immediately. Version not supported. |
 | **Header CRC16 mismatch** | File header, offset 0x0E | Reject. Header is corrupt or truncated. |
-| **Invalid chunk size code** | File header, offset 0x05 | Reject. Code outside valid range `[12..21]` and not legacy `64`. |
+| **Invalid chunk size code** | File header, offset 0x05 | Reject. Code outside the valid range `[12..21]`. |
 | **Block header CRC8 mismatch** | Block header, offset 0x07 | Reject block. Stream is corrupt. |
 | **Unknown block type** | Block header, offset 0x00 | Skip block using `comp_size` (see §10.3), or reject. |
 | **Block payload truncated** | During `fread` of `comp_size` bytes | Reject. Unexpected end of stream. |
