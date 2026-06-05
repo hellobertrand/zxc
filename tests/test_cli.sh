@@ -314,7 +314,7 @@ fi
 
 # Verbose list mode
 OUT=$("$ZXC_BIN" -l -v "$TEST_FILE_XC_ARG")
-if [[ "$OUT" == *"Block Format:"* ]] && [[ "$OUT" == *"Block Units:"* ]] && [[ "$OUT" == *"Checksum Method:"* ]]; then
+if [[ "$OUT" == *"Block Format:"* ]] && [[ "$OUT" == *"Block Size:"* ]] && [[ "$OUT" == *"Checksum Method:"* ]]; then
     log_pass "List command verbose output"
 else
     log_fail "List command verbose output failed"

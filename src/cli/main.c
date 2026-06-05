@@ -713,7 +713,17 @@ static int zxc_list_archive(const char* path, int json_output) {
 
     // Extract header fields
     const uint8_t format_version = header[4];
-    const size_t block_units = header[5] ? header[5] : 64;  // Default 64 units = 256KB
+    // Block size is stored at offset 5 as a log2 exponent (codes 12..21 = 2^code,
+    // i.e. 4 KB..2 MB); the legacy value 64 means 256 KB. Convert to KB.
+    const uint8_t chunk_code = header[5];
+    size_t block_size_kb;
+    if (chunk_code >= ZXC_BLOCK_SIZE_MIN_LOG2 && chunk_code <= ZXC_BLOCK_SIZE_MAX_LOG2) {
+        block_size_kb = ((size_t)1U << chunk_code) / 1024;
+    } else if (chunk_code == 64) {
+        block_size_kb = 256;  // legacy default
+    } else {
+        block_size_kb = 0;  // unknown / unsupported code
+    }
 
     // Read footer for checksum info
     uint8_t footer[ZXC_FILE_FOOTER_SIZE];
@@ -761,7 +771,7 @@ static int zxc_list_archive(const char* path, int json_output) {
             "  \"dict_id\": %s%s%s\n"
             "}\n",
             path, (long long)file_size, (long long)uncompressed_size, ratio, format_version,
-            block_units * 4, (stored_checksum != 0) ? "RapidHash" : "none", stored_checksum,
+            block_size_kb, (stored_checksum != 0) ? "RapidHash" : "none", stored_checksum,
             dict_id ? "\"" : "", dict_id ? dict_id_str : "null", dict_id ? "\"" : "");
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
@@ -769,9 +779,9 @@ static int zxc_list_archive(const char* path, int json_output) {
             "\nFile: %s\n"
             "-----------------------\n"
             "Block Format: %u\n"
-            "Block Units:  %zu (x 4KB)\n"
+            "Block Size:   %zu KB\n"
             "Checksum Method: %s\n",
-            path, format_version, block_units, (stored_checksum != 0) ? "RapidHash" : "None");
+            path, format_version, block_size_kb, (stored_checksum != 0) ? "RapidHash" : "None");
 
         if (stored_checksum != 0) printf("Checksum Value:  0x%08X\n", stored_checksum);
         if (dict_id) printf("Dictionary ID:   %s\n", dict_id_str);
