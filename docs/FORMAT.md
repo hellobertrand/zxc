@@ -611,8 +611,8 @@ Offset  Size  Field
 0x05    1     Flags (reserved, must be 0)
 0x06    2     Content size (u16 LE, max 65535)
 0x08    4     dict_id (u32 LE, hash of content)
-0x0C    2     Header CRC16 (zxc_hash16, computed with bytes 0x0C-0x0F zeroed)
-0x0E    2     Reserved (0)
+0x0C    2     Reserved (0)
+0x0E    2     Header CRC16 (zxc_hash16, computed with bytes 0x0C-0x0F zeroed)
 0x10    N     Dictionary content (raw bytes)
 ```
 
@@ -855,7 +855,7 @@ A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size
 ### 15.1 Full hexdump
 
 ```text
-00000000: C7 D1 B0 9C 01 00 05 00 17 0F 72 9A 4A D9 00 00
+00000000: C7 D1 B0 9C 01 00 05 00 17 0F 72 9A 00 00 4A D9
 00000010: 68 65 6C 6C 6F
 ```
 
@@ -864,7 +864,7 @@ A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size
 #### A) Dictionary Header (offset `0x00`, 16 bytes)
 
 ```text
-C7 D1 B0 9C | 01 | 00 | 05 00 | 17 0F 72 9A | 4A D9 | 00 00
+C7 D1 B0 9C | 01 | 00 | 05 00 | 17 0F 72 9A | 00 00 | 4A D9
 ```
 
 - `C7 D1 B0 9C` -> magic word (LE) = `0x9CB0D1C7` (`.zxd` dictionary).
@@ -872,8 +872,8 @@ C7 D1 B0 9C | 01 | 00 | 05 00 | 17 0F 72 9A | 4A D9 | 00 00
 - `00` -> flags (reserved, must be 0).
 - `05 00` -> content size (LE) = `5` bytes.
 - `17 0F 72 9A` -> `dict_id` (LE) = `0x9A720F17`. Must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
-- `4A D9` -> header CRC16 (LE) = `0xD94A`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header).
 - `00 00` -> reserved.
+- `4A D9` -> header CRC16 (LE) = `0xD94A`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the CRC is the last 2 bytes of the header).
 
 #### B) Dictionary Content (offset `0x10`, 5 bytes)
 
