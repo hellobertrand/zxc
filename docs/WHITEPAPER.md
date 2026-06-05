@@ -515,7 +515,7 @@ For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dict
 
 *   **Training**: `zxc_train_dict()` analyzes a corpus of representative samples and selects the byte segments that maximize LZ77 match coverage, placing the most frequently matched segments at the **end** of the dictionary so they produce the shortest (most efficient) offsets in the virtual window.
 
-*   **Content-addressable naming**: Naming a dictionary `<dict_id>.zxd` (lowercase 8-digit hex) makes it content-addressable: a decoder can locate the right dictionary by `dict_id` from the archive's directory without it being named explicitly. This is a tooling convention only and does not affect bytes on the wire.
+*   **Naming**: training to a directory writes `dictionary_<dict_id>.zxd` (the `dict_id` is the lowercase 8-digit hex stored in the archive header). The dictionary must be supplied explicitly with `-D` to decompress; the `dict_id` lets the decoder verify the supplied dictionary matches (`ZXC_ERROR_DICT_MISMATCH` otherwise). This naming is a tooling convention and does not affect bytes on the wire.
 
 ## 6. System Architecture (Threading)
 

@@ -339,110 +339,6 @@ static int zxc_is_directory(const char* path) {
 }
 #endif
 
-/*
- * Load a .zxd file, validate it, verify its dict_id matches target_id, and
- * return a malloc'd copy of its dictionary content (caller frees). NULL on any
- * failure. Used by the decompress auto-lookup to resolve a dictionary by id.
- */
-static void* cli_load_dict_content(const char* path, uint32_t target_id, size_t* out_size) {
-    FILE* f = fopen(path, "rb");
-    if (!f) return NULL;
-    fseeko(f, 0, SEEK_END);
-    const long long fsize = ftello(f);
-    fseeko(f, 0, SEEK_SET);
-    if (fsize <= 0 || (size_t)fsize > ZXC_DICT_SIZE_MAX + ZXC_DICT_HEADER_SIZE) {
-        fclose(f);
-        return NULL;
-    }
-    uint8_t* zxd_buf = (uint8_t*)malloc((size_t)fsize);
-    if (!zxd_buf || fread(zxd_buf, 1, (size_t)fsize, f) != (size_t)fsize) {
-        free(zxd_buf);
-        fclose(f);
-        return NULL;
-    }
-    fclose(f);
-    if (zxc_dict_get_id(zxd_buf, (size_t)fsize) != target_id) {
-        free(zxd_buf);
-        return NULL;
-    }
-    const void* content = NULL;
-    size_t content_size = 0;
-    if (zxc_dict_load(zxd_buf, (size_t)fsize, &content, &content_size, NULL) != ZXC_OK) {
-        free(zxd_buf);
-        return NULL;
-    }
-    void* out = malloc(content_size);
-    if (!out) {
-        free(zxd_buf);
-        return NULL;
-    }
-    memcpy(out, content, content_size);
-    free(zxd_buf);
-    *out_size = content_size;
-    return out;
-}
-
-/*
- * Find a .zxd whose dict_id == target_id in the same directory as archive_path.
- * Tries the content-addressable name {id:08x}.zxd first, then scans for any
- * *.zxd. Returns malloc'd dictionary content (caller frees) and sets *out_size;
- * NULL if none matched.
- */
-static void* cli_find_dict_by_id(const char* archive_path, uint32_t target_id, size_t* out_size) {
-    char dir[4096];
-    snprintf(dir, sizeof(dir), "%s", archive_path);
-    char* sep = strrchr(dir, '/');
-#ifdef _WIN32
-    if (!sep) sep = strrchr(dir, '\\');
-#endif
-    if (sep)
-        *(sep + 1) = '\0';
-    else
-        snprintf(dir, sizeof(dir), "./");
-
-    /* Fast path: exact content-addressable filename, no directory scan. */
-    char direct[4096];
-    snprintf(direct, sizeof(direct), "%s%08x.zxd", dir, target_id);
-    void* content = cli_load_dict_content(direct, target_id, out_size);
-    if (content) return content;
-
-    /* Fallback: scan the directory for any *.zxd matching the id. */
-#ifdef _WIN32
-    char pattern[4096];
-    snprintf(pattern, sizeof(pattern), "%s*.zxd", dir);
-    WIN32_FIND_DATAA fd;
-    HANDLE hf = FindFirstFileA(pattern, &fd);
-    if (hf == INVALID_HANDLE_VALUE) return NULL;
-    do {
-        char path[4096];
-        snprintf(path, sizeof(path), "%s%s", dir, fd.cFileName);
-        content = cli_load_dict_content(path, target_id, out_size);
-        if (content) {
-            FindClose(hf);
-            return content;
-        }
-    } while (FindNextFileA(hf, &fd));
-    FindClose(hf);
-#else
-    DIR* dp = opendir(dir);
-    if (!dp) return NULL;
-    const struct dirent* ent;
-    while ((ent = readdir(dp)) != NULL) {
-        const size_t nlen = strlen(ent->d_name);
-        if (nlen < 4 || strcmp(ent->d_name + nlen - 4, ".zxd") != 0) continue;
-        char path[4096];
-        snprintf(path, sizeof(path), "%s%s", dir, ent->d_name);
-        content = cli_load_dict_content(path, target_id, out_size);
-        if (content) {
-            closedir(dp);
-            return content;
-        }
-    }
-    closedir(dp);
-#endif
-    return NULL;
-}
-
 typedef enum {
     MODE_COMPRESS,
     MODE_DECOMPRESS,
@@ -576,7 +472,7 @@ void print_help(const char* app) {
         "  -t, --test        Test compressed FILE integrity\n"
         "  -b, --bench [N]   Benchmark in-memory (N=seconds, default 5)\n"
         "  --train-dict PATH Train a dictionary from input files. PATH may be a\n"
-        "                    directory (saved as <dict_id>.zxd inside it) or a file\n\n"
+        "                    directory (saved as dictionary_<dict_id>.zxd inside it) or a file\n\n"
         "Batch Processing:\n"
         "  -m, --multiple    Multiple input files\n"
         "  -r, --recursive   Operate recursively on directories\n\n"
@@ -589,8 +485,8 @@ void print_help(const char* app) {
         "  -T, --threads N   Number of threads (0=auto)\n"
         "  -C, --checksum    Enable checksum {default}\n"
         "  -N, --no-checksum Disable checksum\n"
-        "  -D, --dict FILE   Use pre-trained dictionary (.zxd). On decompression, if\n"
-        "                    omitted, <dict_id>.zxd is auto-located next to the archive\n"
+        "  -D, --dict FILE   Use pre-trained dictionary (.zxd). Required to decompress\n"
+        "                    an archive that was compressed with a dictionary\n"
         "  -S, --seekable    Append seek table for random-access decompression\n"
         "  -k, --keep        Keep input file\n"
         "  -f, --force       Force overwrite\n"
@@ -1080,37 +976,6 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                            .operation = (mode == MODE_COMPRESS) ? "Compressing" : "Decompressing",
                            .total_size = total_size};
 
-    /*
-     * Decompress auto-lookup: when no dictionary was supplied via -D and the
-     * archive references one (dict_id != 0), resolve it by id from a sibling
-     * .zxd in the input's directory. Only possible for a real (seekable) file;
-     * stdin is skipped. An explicit -D dictionary always takes precedence.
-     */
-    const void* eff_dict = dict;
-    size_t eff_dict_size = dict_size;
-    void* auto_dict = NULL;
-    if (mode != MODE_COMPRESS && dict == NULL && !use_stdin) {
-        uint8_t hdr[ZXC_FILE_HEADER_SIZE];
-        const size_t got = fread(hdr, 1, sizeof(hdr), f_in);
-        fseeko(f_in, 0, SEEK_SET);
-        const uint32_t need_id = (got == sizeof(hdr)) ? zxc_get_dict_id(hdr, sizeof(hdr)) : 0;
-        if (need_id != 0) {
-            size_t auto_size = 0;
-            auto_dict = cli_find_dict_by_id(resolved_in_path, need_id, &auto_size);
-            if (auto_dict) {
-                eff_dict = auto_dict;
-                eff_dict_size = auto_size;
-                zxc_log_v("Using dictionary 0x%08X (%zu bytes) found next to %s\n", need_id,
-                          auto_size, in_path ? in_path : resolved_in_path);
-            } else {
-                fprintf(stderr,
-                        "Warning: archive requires dictionary 0x%08X; no matching .zxd found "
-                        "in its directory (use -D to supply one)\n",
-                        need_id);
-            }
-        }
-    }
-
     const double t0 = zxc_now();
     int64_t bytes;
     if (mode == MODE_COMPRESS) {
@@ -1130,8 +995,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         zxc_decompress_opts_t dopts = {
             .n_threads = num_threads,
             .checksum_enabled = checksum_enabled,
-            .dict = eff_dict,
-            .dict_size = eff_dict_size,
+            .dict = dict,
+            .dict_size = dict_size,
             .progress_cb = show_progress ? cli_progress_callback : NULL,
             .user_data = &pctx,
         };
@@ -1211,7 +1076,6 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         overall_ret = 1;
     }
 
-    free(auto_dict);
     return overall_ret;
 }
 
@@ -1579,7 +1443,7 @@ int main(int argc, char** argv) {
         if (is_dir_target) {
             const int has_sep = tdp_len > 0 && (train_dict_path[tdp_len - 1] == '/' ||
                                                 train_dict_path[tdp_len - 1] == '\\');
-            snprintf(final_path, sizeof(final_path), "%s%s%08x.zxd", train_dict_path,
+            snprintf(final_path, sizeof(final_path), "%s%sdictionary_%08x.zxd", train_dict_path,
                      has_sep ? "" : "/", trained_id);
         } else {
             snprintf(final_path, sizeof(final_path), "%s", train_dict_path);

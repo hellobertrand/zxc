@@ -628,23 +628,24 @@ select byte segments that maximize LZ77 match coverage. The most frequently
 matched segments are placed at the end of the dictionary so they produce the
 shortest offsets (closest to the block start in the virtual window).
 
-### 12.6 Naming and lookup convention (content-addressable)
+### 12.6 Naming convention
 
 The `.zxd` extension is cosmetic — files are identified by the magic word at
-offset `0x00`, never by extension. The recommended filename is the lowercase
-8-digit hex of the `dict_id`: `<dict_id>.zxd` (e.g. `bc46eec1.zxd`). This makes
-dictionaries **content-addressable** and lets a decoder resolve the right one
-from the archive's `dict_id` without it being named on the command line.
+offset `0x00`, never by extension. This is a tooling convention, not a format
+requirement; it does not affect bytes on the wire. The reference CLI applies it
+as follows:
 
-This is a tooling convention, not a format requirement; it does not affect bytes
-on the wire. The reference CLI applies it as follows:
-
-- `zxc --train-dict <dir>/` writes the trained dictionary as `<dir>/<dict_id>.zxd`.
-- On decompression, when no dictionary is supplied explicitly and the archive's
-  header has a non-zero `dict_id`, the CLI looks in the archive's directory for a
-  matching dictionary: first the exact name `<dict_id>.zxd`, then any `*.zxd`
-  whose `dict_id` matches. An explicitly supplied dictionary always takes
-  precedence. (Lookup is skipped for non-seekable input such as a pipe.)
+- `zxc --train-dict <dir>/` writes the trained dictionary as
+  `<dir>/dictionary_<dict_id>.zxd`, where `<dict_id>` is the lowercase 8-digit
+  hex of the dictionary id (e.g. `dictionary_bc46eec1.zxd`). Embedding the id
+  keeps the name unique per dictionary and easy to match against the `Dict ID`
+  reported by `zxc -l`.
+- On **decompression**, a dictionary is **not** auto-located: an archive that
+  was compressed with a dictionary must be decompressed by passing that
+  dictionary explicitly with `-D`. Without it, decompression fails with
+  `ZXC_ERROR_DICT_REQUIRED` (the `dict_id` in the header is still verified
+  against the supplied dictionary, yielding `ZXC_ERROR_DICT_MISMATCH` on a
+  mismatch).
 
 ---
 
