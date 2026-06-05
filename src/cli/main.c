@@ -1064,20 +1064,23 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             unlink(resolved_in_path);
     } else {
         if (mode == MODE_INTEGRITY) {
+            const int err_code = (int)bytes;
+            const char* reason = zxc_error_name(err_code);
+            const int needs_dict =
+                (err_code == ZXC_ERROR_DICT_REQUIRED || err_code == ZXC_ERROR_DICT_MISMATCH);
             if (json_output) {
                 printf(
                     "{\n"
                     "  \"filename\": \"%s\",\n"
                     "  \"status\": \"failed\",\n"
-                    "  \"error\": \"Integrity check failed (corrupted data or invalid checksum)\"\n"
+                    "  \"error\": \"%s\"\n"
                     "}\n",
-                    in_path ? in_path : "<stdin>");
+                    in_path ? in_path : "<stdin>", reason);
             } else {
-                fprintf(stderr, "%s: FAILED\n", in_path ? in_path : "<stdin>");
-                if (g_verbose)
-                    fprintf(
-                        stderr,
-                        "  Reason: Integrity check failed (corrupted data or invalid checksum)\n");
+                fprintf(stderr, "%s: FAILED (%s)\n", in_path ? in_path : "<stdin>", reason);
+                if (needs_dict)
+                    fprintf(stderr,
+                            "  This archive was compressed with a dictionary; pass it with -D.\n");
             }
         } else {
             zxc_log("Error: %s: %s\n", in_path ? in_path : "<stdin>", zxc_error_name((int)bytes));
