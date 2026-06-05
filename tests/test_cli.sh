@@ -949,11 +949,8 @@ fi
 
 # 25.6 Decompressing a dict archive without -D must fail (the dictionary is mandatory).
 echo "  Testing decompress without required dict..."
-NODICT_DIR="$TEST_DIR/nodict"
-mkdir -p "$NODICT_DIR"
-cp "$TEST_DIR/test_dict.zxc" "$NODICT_DIR/test_dict.zxc"
 set +e
-"$ZXC_BIN" -d -c "$NODICT_DIR/test_dict.zxc" > /dev/null 2>&1
+"$ZXC_BIN" -d -c "$TEST_DIR/test_dict.zxc" > /dev/null 2>&1
 RET=$?
 set -e
 if [ $RET -ne 0 ]; then
