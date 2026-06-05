@@ -8,6 +8,8 @@ SPDX-License-Identifier: BSD-3-Clause
 package zxc
 
 /*
+#include <stdlib.h>
+#include <string.h>
 #include "zxc.h"
 */
 import "C"
@@ -15,6 +17,38 @@ import (
 	"runtime"
 	"unsafe"
 )
+
+// cDictCopy copies a dictionary into C-owned memory and points opts at it.
+// The push streams retain the dict pointer for their whole lifetime, so it
+// must reference native (not Go) memory. Returns the C buffer to free later,
+// or nil when no dictionary is configured.
+func cCompressDictCopy(copts *C.zxc_compress_opts_t, o options) unsafe.Pointer {
+	if len(o.dict) == 0 {
+		return nil
+	}
+	buf := C.malloc(C.size_t(len(o.dict)))
+	if buf == nil {
+		return nil
+	}
+	C.memcpy(buf, unsafe.Pointer(&o.dict[0]), C.size_t(len(o.dict)))
+	copts.dict = buf
+	copts.dict_size = C.size_t(len(o.dict))
+	return buf
+}
+
+func cDecompressDictCopy(dopts *C.zxc_decompress_opts_t, o options) unsafe.Pointer {
+	if len(o.dict) == 0 {
+		return nil
+	}
+	buf := C.malloc(C.size_t(len(o.dict)))
+	if buf == nil {
+		return nil
+	}
+	C.memcpy(buf, unsafe.Pointer(&o.dict[0]), C.size_t(len(o.dict)))
+	dopts.dict = buf
+	dopts.dict_size = C.size_t(len(o.dict))
+	return buf
+}
 
 // ============================================================================
 // Push Streaming API (single-threaded, caller-driven)
@@ -27,12 +61,13 @@ import (
 //
 // CStream is not safe for concurrent use; one goroutine per stream.
 type CStream struct {
-	ptr *C.zxc_cstream
+	ptr  *C.zxc_cstream
+	dbuf unsafe.Pointer // C-owned dictionary copy retained for the stream's life
 }
 
 // NewCStream creates a push compression stream.
 //
-// Honoured options: [WithLevel], [WithChecksum]. [WithThreads] and
+// Honoured options: [WithLevel], [WithChecksum], [WithDict]. [WithThreads] and
 // [WithSeekable] are ignored (the push API is single-threaded and never
 // emits a seek table).
 func NewCStream(opts ...Option) (*CStream, error) {
@@ -42,11 +77,18 @@ func NewCStream(opts ...Option) (*CStream, error) {
 	if o.checksum {
 		copts.checksum_enabled = 1
 	}
-	ptr := C.zxc_cstream_create(&copts)
-	if ptr == nil {
+	dbuf := cCompressDictCopy(&copts, o)
+	if dbuf == nil && len(o.dict) > 0 {
 		return nil, ErrMemory
 	}
-	return &CStream{ptr: ptr}, nil
+	ptr := C.zxc_cstream_create(&copts)
+	if ptr == nil {
+		if dbuf != nil {
+			C.free(dbuf)
+		}
+		return nil, ErrMemory
+	}
+	return &CStream{ptr: ptr, dbuf: dbuf}, nil
 }
 
 // Close releases the stream and all internal buffers. Safe to call multiple
@@ -57,6 +99,10 @@ func (c *CStream) Close() error {
 	}
 	C.zxc_cstream_free(c.ptr)
 	c.ptr = nil
+	if c.dbuf != nil {
+		C.free(c.dbuf)
+		c.dbuf = nil
+	}
 	return nil
 }
 
@@ -149,23 +195,31 @@ func (c *CStream) End(out []byte) (produced int, pending int64, err error) {
 // DStream is a push-based, single-threaded decompression stream — the Go
 // counterpart of the C [zxc_dstream].
 type DStream struct {
-	ptr *C.zxc_dstream
+	ptr  *C.zxc_dstream
+	dbuf unsafe.Pointer // C-owned dictionary copy retained for the stream's life
 }
 
 // NewDStream creates a push decompression stream.
 //
-// Honoured options: [WithChecksum]. [WithThreads] is ignored.
+// Honoured options: [WithChecksum], [WithDict]. [WithThreads] is ignored.
 func NewDStream(opts ...Option) (*DStream, error) {
 	o := applyOptions(opts)
 	var dopts C.zxc_decompress_opts_t
 	if o.checksum {
 		dopts.checksum_enabled = 1
 	}
-	ptr := C.zxc_dstream_create(&dopts)
-	if ptr == nil {
+	dbuf := cDecompressDictCopy(&dopts, o)
+	if dbuf == nil && len(o.dict) > 0 {
 		return nil, ErrMemory
 	}
-	return &DStream{ptr: ptr}, nil
+	ptr := C.zxc_dstream_create(&dopts)
+	if ptr == nil {
+		if dbuf != nil {
+			C.free(dbuf)
+		}
+		return nil, ErrMemory
+	}
+	return &DStream{ptr: ptr, dbuf: dbuf}, nil
 }
 
 // Close releases the stream and all internal buffers. Safe to call multiple
@@ -176,6 +230,10 @@ func (d *DStream) Close() error {
 	}
 	C.zxc_dstream_free(d.ptr)
 	d.ptr = nil
+	if d.dbuf != nil {
+		C.free(d.dbuf)
+		d.dbuf = nil
+	}
 	return nil
 }
 

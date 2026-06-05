@@ -208,6 +208,7 @@ type options struct {
 	checksum bool
 	seekable bool
 	threads  int
+	dict     []byte
 }
 
 func defaultOptions() options {
@@ -240,6 +241,17 @@ func WithThreads(n int) Option {
 // WithSeekable enables seek table generation for random-access decompression.
 func WithSeekable(enabled bool) Option {
 	return func(o *options) { o.seekable = enabled }
+}
+
+// WithDict sets a pre-trained dictionary used for compression or
+// decompression. The same dictionary content must be supplied to both
+// Compress and Decompress (the dictionary ID stored in the archive header is
+// validated against it). An empty slice clears the dictionary.
+//
+// Train a dictionary with [TrainDict] or load one from a .zxd file with
+// [DictLoad]. The content size must not exceed [DictSizeMax].
+func WithDict(dict []byte) Option {
+	return func(o *options) { o.dict = dict }
 }
 
 func applyOptions(opts []Option) options {

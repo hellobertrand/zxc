@@ -15,6 +15,7 @@ import "C"
 import (
 	"fmt"
 	"os"
+	"runtime"
 )
 
 // ============================================================================
@@ -67,6 +68,9 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 	if o.seekable {
 		copts.seekable = 1
 	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	setCompressDict(&copts, o, &pinner)
 
 	result := C.zxc_stream_compress(cIn, cOut, &copts)
 	if result < 0 {
@@ -135,6 +139,9 @@ func DecompressFile(input, output string, opts ...Option) (int64, error) {
 	if o.checksum {
 		dopts.checksum_enabled = 1
 	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	setDecompressDict(&dopts, o, &pinner)
 
 	result := C.zxc_stream_decompress(cIn, cOut, &dopts)
 	if result < 0 {
