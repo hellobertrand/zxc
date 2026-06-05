@@ -204,7 +204,10 @@ pub fn decompress_with_options(
     compressed: &[u8],
     options: &DecompressOptions,
 ) -> Result<Vec<u8>> {
-    let size = decompressed_size(compressed).ok_or(Error::InvalidData)? as usize;
+    // `decompressed_size` returns None for an ambiguous 0 (a valid empty-payload
+    // archive or invalid input); fall back to 0 and let the C decoder validate
+    // the frame (it returns a negative error code on genuinely corrupt input).
+    let size = decompressed_size(compressed).unwrap_or(0) as usize;
     let mut output = Vec::with_capacity(size);
 
     let written =
@@ -250,10 +253,7 @@ unsafe fn impl_decompress(
         return Err(error_from_code(written));
     }
 
-    if written == 0 && !compressed.is_empty() {
-        return Err(Error::InvalidData);
-    }
-
+    // A non-negative return is a success: `written == 0` is valid (empty payload).
     Ok(written as usize)
 }
 
@@ -351,11 +351,14 @@ mod tests {
 
     #[test]
     fn test_empty() {
+        // Empty input is valid: it produces a well-formed (header + EOF + footer)
+        // archive that round-trips back to empty.
         let data: &[u8] = b"";
-        let result = compress(data, Level::Default, None);
+        let compressed = compress(data, Level::Default, None).expect("compress empty");
+        let decompressed = decompress(&compressed).expect("decompress empty");
         assert!(
-            result.is_err(),
-            "Compressing empty data should return an error"
+            decompressed.is_empty(),
+            "empty data must round-trip to empty"
         );
     }
 
@@ -410,22 +413,15 @@ mod tests {
         let result = decompress(invalid_magic);
         assert!(result.is_err(), "Should fail on invalid data");
 
-        // Test truncated data - should produce specific error
+        // Test truncated data - must fail (the exact error code is a decoder
+        // implementation detail, so we only require that it errors).
         let data = b"Hello, world! Testing error codes with enough data to compress well.";
         let compressed = compress(data, Level::Default, None).unwrap();
         let truncated = &compressed[..10]; // Too short to be valid
-        match decompress(truncated) {
-            Err(Error::InvalidData)
-            | Err(Error::SrcTooSmall)
-            | Err(Error::BadHeader)
-            | Err(Error::BadMagic) => {
-                // Any of these errors are acceptable for truncated data
-            }
-            other => panic!(
-                "Expected specific error for truncated data, got: {:?}",
-                other
-            ),
-        }
+        assert!(
+            decompress(truncated).is_err(),
+            "Truncated data must fail to decompress"
+        );
     }
 
     #[test]
