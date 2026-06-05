@@ -659,7 +659,9 @@ Community-maintained bindings:
 
 ## Format & Conformance
 
-The ZXC on-disk wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format version 5), so any third party can build an independent, interoperable decoder.
+The ZXC on-disk wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format version 6), so any third party can build an independent, interoperable decoder.
+
+> **Upgrading from a v5 build?** Format v6 is a deliberate break with v5 and v6 tools reject v5 archives. See [`docs/MIGRATION.md`](docs/MIGRATION.md) to convert existing archives.
 
 Two complementary, byte-frozen suites guard that format:
 
