@@ -154,8 +154,6 @@ def compress(data, level = LEVEL_DEFAULT, checksum = False) -> bytes:
     Note:
         This function operates entirely in-memory. For streaming files, use `stream_compress`.
     """
-    if len(data) == 0 and not checksum:
-        return data
     return pyzxc_compress(data, level, checksum)
 
 
@@ -185,15 +183,10 @@ def decompress(data, decompress_size=None, checksum=False) -> bytes:
     Returns:
         Decompressed bytes.
     """
-    if len(data) == 0 and not checksum:
-        return data
-
+    # An empty-payload archive validly reports size 0; the C decoder is the
+    # authority and returns a negative error code on genuinely invalid input.
     if decompress_size is None:
         decompress_size = get_decompressed_size(data)
-        if decompress_size == 0:
-            raise ValueError(
-                "Invalid ZXC header or data too short to determine size"
-            )
 
     return pyzxc_decompress(data, decompress_size, checksum)
 
