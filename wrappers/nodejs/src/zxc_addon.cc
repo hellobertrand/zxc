@@ -45,8 +45,10 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     }
 
     Napi::Buffer<uint8_t> src_buf = info[0].As<Napi::Buffer<uint8_t>>();
-    const void* src = src_buf.Data();
     size_t src_size = src_buf.Length();
+    
+    static const uint8_t kEmptySrc = 0;
+    const void* src = src_size > 0 ? static_cast<const void*>(src_buf.Data()) : &kEmptySrc;
 
     int level = ZXC_LEVEL_DEFAULT;
     if (info.Length() >= 2 && info[1].IsNumber()) {
@@ -61,11 +63,6 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     int seekable = 0;
     if (info.Length() >= 4 && info[3].IsBoolean()) {
         seekable = info[3].As<Napi::Boolean>().Value() ? 1 : 0;
-    }
-
-    // Handle empty input
-    if (src_size == 0 && !checksum) {
-        return Napi::Buffer<uint8_t>::New(env, 0);
     }
 
     uint64_t bound = zxc_compress_bound(src_size);
@@ -119,11 +116,14 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
     }
 
     Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, decompress_size);
+    
+    static uint8_t kEmptyDst = 0;
+    void* dst = decompress_size > 0 ? static_cast<void*>(dst_buf.Data()) : static_cast<void*>(&kEmptyDst);
 
     zxc_decompress_opts_t dopts = {0};
     dopts.checksum_enabled = checksum;
 
-    int64_t nwritten = zxc_decompress(src, src_size, dst_buf.Data(), decompress_size, &dopts);
+    int64_t nwritten = zxc_decompress(src, src_size, dst, decompress_size, &dopts);
 
     if (nwritten < 0) {
         int err_code = static_cast<int>(nwritten);

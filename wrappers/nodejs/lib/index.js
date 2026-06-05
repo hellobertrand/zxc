@@ -113,10 +113,6 @@ function compress(data, options = {}) {
     const checksum = options.checksum !== undefined ? options.checksum : false;
     const seekable = options.seekable !== undefined ? options.seekable : false;
 
-    if (data.length === 0 && !checksum) {
-        return Buffer.alloc(0);
-    }
-
     return native.compress(data, level, checksum, seekable);
 }
 
@@ -150,16 +146,9 @@ function decompress(data, options = {}) {
 
     const checksum = options.checksum !== undefined ? options.checksum : false;
 
-    if (data.length === 0 && !checksum) {
-        return Buffer.alloc(0);
-    }
-
     let size = options.size;
     if (size === undefined) {
         size = getDecompressedSize(data);
-        if (size === 0) {
-            throw new Error('Invalid ZXC header or data too short to determine size');
-        }
     }
 
     return native.decompress(data, size, checksum);

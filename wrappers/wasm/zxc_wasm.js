@@ -214,12 +214,7 @@ export default async function createZXC(moduleOverrides, factory) {
         Module.HEAPU8.set(data, srcPtr);
 
         const origSize = _get_decompressed_size(srcPtr, data.length);
-        if (origSize === 0) {
-            _free(srcPtr);
-            throw new Error('ZXC: cannot read decompressed size (invalid archive?)');
-        }
-
-        const dstPtr = _malloc(origSize);
+        const dstPtr = _malloc(origSize || 1);
         const optsPtr = _writeDecompressOpts(checksum);
 
         try {
@@ -326,11 +321,7 @@ export default async function createZXC(moduleOverrides, factory) {
                 const srcPtr = _malloc(data.length);
                 Module.HEAPU8.set(data, srcPtr);
                 const origSize = _get_decompressed_size(srcPtr, data.length);
-                if (origSize === 0) {
-                    _free(srcPtr);
-                    throw new Error('ZXC: cannot read decompressed size');
-                }
-                const dstPtr = _malloc(origSize);
+                const dstPtr = _malloc(origSize || 1);
                 try {
                     const result = _decompress_dctx(dctx, srcPtr, data.length, dstPtr, origSize, 0);
                     if (result < 0) {
