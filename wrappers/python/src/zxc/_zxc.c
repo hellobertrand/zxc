@@ -80,6 +80,14 @@ static PyObject* pyzxc_max_level(PyObject* self, PyObject* args);
 static PyObject* pyzxc_default_level(PyObject* self, PyObject* args);
 static PyObject* pyzxc_version_string(PyObject* self, PyObject* args);
 
+static PyObject* pyzxc_train_dict(PyObject* self, PyObject* args, PyObject* kwargs);
+static PyObject* pyzxc_dict_id(PyObject* self, PyObject* arg);
+static PyObject* pyzxc_get_dict_id(PyObject* self, PyObject* arg);
+static PyObject* pyzxc_dict_get_id(PyObject* self, PyObject* arg);
+static PyObject* pyzxc_dict_save(PyObject* self, PyObject* arg);
+static PyObject* pyzxc_dict_load(PyObject* self, PyObject* arg);
+static PyObject* pyzxc_seekable_set_dict(PyObject* self, PyObject* args);
+
 static PyObject* pyzxc_cstream_create(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_cstream_compress(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_cstream_end(PyObject* self, PyObject* args, PyObject* kwargs);
@@ -146,6 +154,14 @@ static PyMethodDef zxc_methods[] = {
     {"pyzxc_default_level", (PyCFunction)pyzxc_default_level, METH_NOARGS, NULL},
     {"pyzxc_version_string", (PyCFunction)pyzxc_version_string, METH_NOARGS, NULL},
 
+    /* Dictionary API. */
+    {"pyzxc_train_dict", (PyCFunction)pyzxc_train_dict, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"pyzxc_dict_id", (PyCFunction)pyzxc_dict_id, METH_O, NULL},
+    {"pyzxc_get_dict_id", (PyCFunction)pyzxc_get_dict_id, METH_O, NULL},
+    {"pyzxc_dict_get_id", (PyCFunction)pyzxc_dict_get_id, METH_O, NULL},
+    {"pyzxc_dict_save", (PyCFunction)pyzxc_dict_save, METH_O, NULL},
+    {"pyzxc_dict_load", (PyCFunction)pyzxc_dict_load, METH_O, NULL},
+
     /* Push streaming API (single-threaded, caller-driven). */
     {"pyzxc_cstream_create", (PyCFunction)pyzxc_cstream_create, METH_VARARGS | METH_KEYWORDS, NULL},
     {"pyzxc_cstream_compress", (PyCFunction)pyzxc_cstream_compress, METH_VARARGS | METH_KEYWORDS,
@@ -175,6 +191,7 @@ static PyMethodDef zxc_methods[] = {
     {"pyzxc_seekable_decompress_range", (PyCFunction)pyzxc_seekable_decompress_range,
      METH_VARARGS | METH_KEYWORDS, NULL},
     {"pyzxc_seekable_free", (PyCFunction)pyzxc_seekable_free, METH_O, NULL},
+    {"pyzxc_seekable_set_dict", (PyCFunction)pyzxc_seekable_set_dict, METH_VARARGS, NULL},
     {"pyzxc_seek_table_size", (PyCFunction)pyzxc_seek_table_size, METH_O, NULL},
     {"pyzxc_write_seek_table", (PyCFunction)pyzxc_write_seek_table, METH_O, NULL},
 
@@ -221,10 +238,14 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
     Py_buffer view;
     int level = ZXC_LEVEL_DEFAULT;
     int checksum = 0;
+    Py_buffer dict_view = {0};
+    PyObject* dict_obj = NULL;
+    int have_dict = 0;
 
-    static char* kwlist[] = {"data", "level", "checksum", NULL};
+    static char* kwlist[] = {"data", "level", "checksum", "dict", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y*|ip", kwlist, &view, &level, &checksum)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y*|ipO", kwlist, &view, &level, &checksum,
+                                     &dict_obj)) {
         return NULL;
     }
 
@@ -234,6 +255,14 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
         return NULL;
     }
 
+    if (dict_obj && dict_obj != Py_None) {
+        if (PyObject_GetBuffer(dict_obj, &dict_view, PyBUF_SIMPLE) < 0) {
+            PyBuffer_Release(&view);
+            return NULL;
+        }
+        have_dict = 1;
+    }
+
     size_t src_size = (size_t)view.len;
 
     uint64_t bound = zxc_compress_bound(src_size);
@@ -241,6 +270,7 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
     PyObject* out = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)bound);
     if (!out) {
         PyBuffer_Release(&view);
+        if (have_dict) PyBuffer_Release(&dict_view);
         return NULL;
     }
 
@@ -250,6 +280,10 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
     zxc_compress_opts_t copts = {0};
     copts.level = level;
     copts.checksum_enabled = checksum;
+    if (have_dict) {
+        copts.dict = dict_view.buf;
+        copts.dict_size = (size_t)dict_view.len;
+    }
 
     Py_BEGIN_ALLOW_THREADS nwritten = zxc_compress(view.buf,  // Source buffer
                                                    src_size,  // Source size
@@ -260,6 +294,7 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
     Py_END_ALLOW_THREADS
 
         PyBuffer_Release(&view);
+    if (have_dict) PyBuffer_Release(&dict_view);
 
     if (nwritten < 0) {
         Py_DECREF(out);
@@ -294,12 +329,15 @@ static PyObject* pyzxc_get_decompressed_size(PyObject* self, PyObject* args, PyO
 static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwargs) {
     Py_buffer view;
     int checksum = 0;
+    Py_buffer dict_view = {0};
+    PyObject* dict_obj = NULL;
+    int have_dict = 0;
 
     Py_ssize_t decompress_size;
-    static char* kwlist[] = {"data", "decompress_size", "checksum", NULL};
+    static char* kwlist[] = {"data", "decompress_size", "checksum", "dict", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y*n|p", kwlist, &view, &decompress_size,
-                                     &checksum)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y*n|pO", kwlist, &view, &decompress_size,
+                                     &checksum, &dict_obj)) {
         return NULL;
     }
 
@@ -309,11 +347,20 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
         return NULL;
     }
 
+    if (dict_obj && dict_obj != Py_None) {
+        if (PyObject_GetBuffer(dict_obj, &dict_view, PyBUF_SIMPLE) < 0) {
+            PyBuffer_Release(&view);
+            return NULL;
+        }
+        have_dict = 1;
+    }
+
     size_t src_size = (size_t)view.len;
 
     PyObject* out = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)decompress_size);
     if (!out) {
         PyBuffer_Release(&view);
+        if (have_dict) PyBuffer_Release(&dict_view);
         return NULL;
     }
 
@@ -322,6 +369,10 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
 
     zxc_decompress_opts_t dopts = {0};
     dopts.checksum_enabled = checksum;
+    if (have_dict) {
+        dopts.dict = dict_view.buf;
+        dopts.dict_size = (size_t)dict_view.len;
+    }
 
     Py_BEGIN_ALLOW_THREADS nwritten = zxc_decompress(view.buf,         // Source buffer
                                                      src_size,         // Source size
@@ -332,6 +383,7 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
     Py_END_ALLOW_THREADS
 
         PyBuffer_Release(&view);
+    if (have_dict) PyBuffer_Release(&dict_view);
 
     if (nwritten < 0) {
         Py_DECREF(out);
@@ -347,27 +399,40 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
     int level = ZXC_LEVEL_DEFAULT;
     int checksum = 0;
     int seekable = 0;
+    Py_buffer dict_view = {0};
+    PyObject* dict_obj = NULL;
+    int have_dict = 0;
 
-    static char* kwlist[] = {"src", "dst", "n_threads", "level", "checksum", "seekable", NULL};
+    static char* kwlist[] = {"src",      "dst",  "n_threads", "level",
+                             "checksum", "seekable", "dict",  NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|iipp", kwlist, &src, &dst, &nthreads, &level,
-                                     &checksum, &seekable)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|iippO", kwlist, &src, &dst, &nthreads, &level,
+                                     &checksum, &seekable, &dict_obj)) {
         return NULL;
+    }
+
+    if (dict_obj && dict_obj != Py_None) {
+        if (PyObject_GetBuffer(dict_obj, &dict_view, PyBUF_SIMPLE) < 0) return NULL;
+        have_dict = 1;
     }
 
     int src_fd = PyObject_AsFileDescriptor(src);
     int dst_fd = PyObject_AsFileDescriptor(dst);
 
-    if (src_fd == -1 || dst_fd == -1)
+    if (src_fd == -1 || dst_fd == -1) {
+        if (have_dict) PyBuffer_Release(&dict_view);
         Py_Return_Err(PyExc_RuntimeError, "couldn't get file descriptor");
+    }
 
     int src_dup = zxc_dup(src_fd);
     if (src_dup == -1) {
+        if (have_dict) PyBuffer_Release(&dict_view);
         Py_Return_Errno(PyExc_OSError);
     }
     int dst_dup = zxc_dup(dst_fd);
     if (dst_dup == -1) {
         zxc_close(src_dup);
+        if (have_dict) PyBuffer_Release(&dict_view);
         Py_Return_Errno(PyExc_OSError);
     }
 
@@ -375,6 +440,7 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
     if (!fsrc) {
         zxc_close(src_dup);
         zxc_close(dst_dup);
+        if (have_dict) PyBuffer_Release(&dict_view);
         Py_Return_Errno(PyExc_OSError);
     }
 
@@ -382,6 +448,7 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
     if (!fdst) {
         fclose(fsrc);
         zxc_close(dst_dup);
+        if (have_dict) PyBuffer_Release(&dict_view);
         Py_Return_Errno(PyExc_OSError);
     }
 
@@ -392,12 +459,17 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
     scopts.level = level;
     scopts.checksum_enabled = checksum;
     scopts.seekable = seekable;
+    if (have_dict) {
+        scopts.dict = dict_view.buf;
+        scopts.dict_size = (size_t)dict_view.len;
+    }
 
     Py_BEGIN_ALLOW_THREADS nwritten = zxc_stream_compress(fsrc, fdst, &scopts);
     Py_END_ALLOW_THREADS
 
         fclose(fdst);
     fclose(fsrc);
+    if (have_dict) PyBuffer_Release(&dict_view);
 
     if (nwritten < 0) Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)nwritten));
 
@@ -490,6 +562,179 @@ static PyObject* pyzxc_version_string(PyObject* self, PyObject* args) {
     (void)args;
     const char* const v = zxc_version_string();
     return PyUnicode_FromString(v ? v : "");
+}
+
+// =============================================================================
+// Dictionary API
+// =============================================================================
+
+/* Train a dictionary from a sequence of sample byte buffers. */
+static PyObject* pyzxc_train_dict(PyObject* self, PyObject* args, PyObject* kwargs) {
+    (void)self;
+    PyObject* samples_obj;
+    Py_ssize_t max_size = ZXC_DICT_SIZE_MAX;
+
+    static char* kwlist[] = {"samples", "max_size", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|n", kwlist, &samples_obj, &max_size)) {
+        return NULL;
+    }
+
+    if (max_size <= 0 || max_size > ZXC_DICT_SIZE_MAX) {
+        Py_Return_Err(PyExc_ValueError, "max_size must be in (0, ZXC_DICT_SIZE_MAX]");
+    }
+
+    PyObject* seq = PySequence_Fast(samples_obj, "samples must be a sequence of bytes-like objects");
+    if (!seq) return NULL;
+
+    Py_ssize_t n = PySequence_Fast_GET_SIZE(seq);
+    if (n <= 0) {
+        Py_DECREF(seq);
+        Py_Return_Err(PyExc_ValueError, "samples must be non-empty");
+    }
+
+    const void** ptrs = (const void**)PyMem_Malloc(sizeof(void*) * (size_t)n);
+    size_t* sizes = (size_t*)PyMem_Malloc(sizeof(size_t) * (size_t)n);
+    Py_buffer* views = (Py_buffer*)PyMem_Malloc(sizeof(Py_buffer) * (size_t)n);
+    if (!ptrs || !sizes || !views) {
+        PyMem_Free(ptrs);
+        PyMem_Free(sizes);
+        PyMem_Free(views);
+        Py_DECREF(seq);
+        return PyErr_NoMemory();
+    }
+
+    Py_ssize_t acquired = 0;
+    for (; acquired < n; acquired++) {
+        PyObject* item = PySequence_Fast_GET_ITEM(seq, acquired);
+        if (PyObject_GetBuffer(item, &views[acquired], PyBUF_SIMPLE) < 0) {
+            break;
+        }
+        ptrs[acquired] = views[acquired].buf;
+        sizes[acquired] = (size_t)views[acquired].len;
+    }
+
+    if (acquired != n) {
+        for (Py_ssize_t i = 0; i < acquired; i++) PyBuffer_Release(&views[i]);
+        PyMem_Free(ptrs);
+        PyMem_Free(sizes);
+        PyMem_Free(views);
+        Py_DECREF(seq);
+        return NULL;
+    }
+
+    void* dict_buf = malloc((size_t)max_size);
+    if (!dict_buf) {
+        for (Py_ssize_t i = 0; i < n; i++) PyBuffer_Release(&views[i]);
+        PyMem_Free(ptrs);
+        PyMem_Free(sizes);
+        PyMem_Free(views);
+        Py_DECREF(seq);
+        return PyErr_NoMemory();
+    }
+
+    int64_t dict_size;
+    Py_BEGIN_ALLOW_THREADS dict_size =
+        zxc_train_dict(ptrs, sizes, (size_t)n, dict_buf, (size_t)max_size);
+    Py_END_ALLOW_THREADS
+
+        for (Py_ssize_t i = 0; i < n; i++) PyBuffer_Release(&views[i]);
+    PyMem_Free(ptrs);
+    PyMem_Free(sizes);
+    PyMem_Free(views);
+    Py_DECREF(seq);
+
+    if (dict_size < 0) {
+        free(dict_buf);
+        Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)dict_size));
+    }
+
+    PyObject* out = PyBytes_FromStringAndSize((const char*)dict_buf, (Py_ssize_t)dict_size);
+    free(dict_buf);
+    return out;
+}
+
+/* Dictionary ID from raw dictionary content. */
+static PyObject* pyzxc_dict_id(PyObject* self, PyObject* arg) {
+    (void)self;
+    Py_buffer view;
+    if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
+    uint32_t id = zxc_dict_id(view.buf, (size_t)view.len);
+    PyBuffer_Release(&view);
+    return PyLong_FromUnsignedLong(id);
+}
+
+/* Dictionary ID required by a .zxc archive (0 if none). */
+static PyObject* pyzxc_get_dict_id(PyObject* self, PyObject* arg) {
+    (void)self;
+    Py_buffer view;
+    if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
+    uint32_t id = zxc_get_dict_id(view.buf, (size_t)view.len);
+    PyBuffer_Release(&view);
+    return PyLong_FromUnsignedLong(id);
+}
+
+/* Dictionary ID stored in a .zxd file (0 if not a valid .zxd). */
+static PyObject* pyzxc_dict_get_id(PyObject* self, PyObject* arg) {
+    (void)self;
+    Py_buffer view;
+    if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
+    uint32_t id = zxc_dict_get_id(view.buf, (size_t)view.len);
+    PyBuffer_Release(&view);
+    return PyLong_FromUnsignedLong(id);
+}
+
+/* Serialize dictionary content into the .zxd file format. */
+static PyObject* pyzxc_dict_save(PyObject* self, PyObject* arg) {
+    (void)self;
+    Py_buffer view;
+    if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
+
+    size_t bound = zxc_dict_save_bound((size_t)view.len);
+    PyObject* out = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)bound);
+    if (!out) {
+        PyBuffer_Release(&view);
+        return NULL;
+    }
+
+    int64_t written =
+        zxc_dict_save(view.buf, (size_t)view.len, PyBytes_AS_STRING(out), bound);
+    PyBuffer_Release(&view);
+
+    if (written < 0) {
+        Py_DECREF(out);
+        Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)written));
+    }
+    if ((size_t)written != bound) {
+        if (_PyBytes_Resize(&out, (Py_ssize_t)written) < 0) return NULL;
+    }
+    return out;
+}
+
+/* Parse a .zxd file; returns (content_bytes, dict_id). Content is copied out
+ * because zxc_dict_load returns a pointer INTO the input buffer. */
+static PyObject* pyzxc_dict_load(PyObject* self, PyObject* arg) {
+    (void)self;
+    Py_buffer view;
+    if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
+
+    const void* content = NULL;
+    size_t content_size = 0;
+    uint32_t dict_id = 0;
+
+    int rc = zxc_dict_load(view.buf, (size_t)view.len, &content, &content_size, &dict_id);
+    if (rc != 0) {
+        PyBuffer_Release(&view);
+        Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
+    }
+
+    /* Copy content out before releasing the input buffer (zero-copy pointer). */
+    PyObject* content_obj =
+        PyBytes_FromStringAndSize((const char*)content, (Py_ssize_t)content_size);
+    PyBuffer_Release(&view);
+    if (!content_obj) return NULL;
+
+    /* 'N' steals the reference to content_obj (consumed even on failure). */
+    return Py_BuildValue("(Nk)", content_obj, (unsigned long)dict_id);
 }
 
 // =============================================================================
@@ -1152,6 +1397,25 @@ static PyObject* pyzxc_seekable_free(PyObject* self, PyObject* capsule) {
         Py_DECREF(h->reader_obj);
         h->reader_obj = NULL;
     }
+    Py_RETURN_NONE;
+}
+
+static PyObject* pyzxc_seekable_set_dict(PyObject* self, PyObject* args) {
+    (void)self;
+    PyObject* capsule;
+    Py_buffer view;
+    if (!PyArg_ParseTuple(args, "Oy*", &capsule, &view)) return NULL;
+
+    zxc_seekable* s = seekable_from_capsule(capsule);
+    if (!s) {
+        PyBuffer_Release(&view);
+        return NULL;
+    }
+
+    int rc = zxc_seekable_set_dict(s, view.buf, (size_t)view.len);
+    PyBuffer_Release(&view);
+
+    if (rc != 0) Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
     Py_RETURN_NONE;
 }
 
