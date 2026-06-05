@@ -54,6 +54,8 @@ export interface CompressOptions {
     checksum?: boolean;
     /** Enable seek table for random-access decompression. Defaults to false. */
     seekable?: boolean;
+    /** Pre-trained dictionary content (raw bytes). Defaults to none. */
+    dict?: Buffer | Uint8Array;
 }
 
 export interface DecompressOptions {
@@ -61,6 +63,8 @@ export interface DecompressOptions {
     size?: number;
     /** Enable checksum verification. Defaults to false. */
     checksum?: boolean;
+    /** Pre-trained dictionary content (raw bytes). Required when the archive references a dictionary. */
+    dict?: Buffer | Uint8Array;
 }
 
 /**
@@ -89,6 +93,47 @@ export function decompress(data: Buffer, options?: DecompressOptions): Buffer;
  * Returns a human-readable name for a given error code.
  */
 export function errorName(code: number): string;
+
+// ---------- Pre-trained dictionary support ----------
+
+/** Result of {@link dictLoad}. */
+export interface LoadedDict {
+    /** Raw dictionary content bytes. */
+    content: Buffer;
+    /** 32-bit dictionary ID. */
+    id: number;
+}
+
+/**
+ * Train a pre-trained dictionary from a corpus of sample buffers.
+ * Improves compression ratio on small, similar payloads.
+ *
+ * @param samples - Non-empty array of representative sample buffers.
+ * @param maxSize - Maximum dictionary content size in bytes (defaults to 65535).
+ * @returns Raw dictionary content suitable for `CompressOptions.dict`.
+ */
+export function trainDict(samples: Array<Buffer | Uint8Array>, maxSize?: number): Buffer;
+
+/** Compute the deterministic 32-bit dictionary ID for raw dictionary content. */
+export function dictId(content: Buffer): number;
+
+/**
+ * Returns the dictionary ID referenced by a `.zxc` archive header, or 0 if the
+ * archive does not require a dictionary.
+ */
+export function getDictId(archive: Buffer): number;
+
+/**
+ * Returns the dictionary ID stored in a `.zxd` dictionary file, or 0 if the
+ * buffer is not a valid `.zxd` file.
+ */
+export function dictGetId(zxd: Buffer): number;
+
+/** Serialize raw dictionary content into the `.zxd` file format. */
+export function dictSave(content: Buffer): Buffer;
+
+/** Load and validate a `.zxd` dictionary file. */
+export function dictLoad(zxd: Buffer): LoadedDict;
 
 /** Returns the minimum supported compression level (currently 1). */
 export function minLevel(): number;
@@ -252,6 +297,12 @@ export class Seekable {
      * requested range are read.
      */
     decompressRange(offset: number, length: number): Buffer;
+    /**
+     * Attach a pre-trained dictionary to this handle. Must be called before
+     * any `decompressRange` call when the archive was compressed with a
+     * dictionary. The content is copied internally.
+     */
+    setDict(dict: Buffer | Uint8Array): void;
     /** Release native resources. Idempotent. */
     close(): void;
 }
