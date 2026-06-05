@@ -29,10 +29,6 @@ func CompressBound(inputSize int) uint64 {
 //
 //	out, err := zxc.Compress(data, zxc.WithLevel(zxc.LevelCompact))
 func Compress(data []byte, opts ...Option) ([]byte, error) {
-	if len(data) == 0 {
-		return nil, ErrSrcTooSmall
-	}
-
 	o := applyOptions(opts)
 	bound := CompressBound(len(data))
 	dst := make([]byte, bound)
@@ -43,8 +39,16 @@ func Compress(data []byte, opts ...Option) ([]byte, error) {
 		copts.checksum_enabled = 1
 	}
 
+	// &data[0] panics on an empty slice; pass a valid non-nil pointer instead
+	// (the C side reads 0 bytes) so empty input yields a minimal 36-byte frame.
+	var dummy [1]byte
+	srcPtr := unsafe.Pointer(&dummy[0])
+	if len(data) > 0 {
+		srcPtr = unsafe.Pointer(&data[0])
+	}
+
 	written := C.zxc_compress(
-		unsafe.Pointer(&data[0]),
+		srcPtr,
 		C.size_t(len(data)),
 		unsafe.Pointer(&dst[0]),
 		C.size_t(bound),
@@ -127,22 +131,39 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 		return nil, ErrInvalidData
 	}
 
-	size, err := DecompressedSize(data)
-	if err != nil {
-		return nil, err
-	}
-	if size == 0 {
-		return []byte{}, nil
-	}
-
 	o := applyOptions(opts)
-	dst := make([]byte, size)
-
 	var dopts C.zxc_decompress_opts_t
 	if o.checksum {
 		dopts.checksum_enabled = 1
 	}
 
+	size := uint64(C.zxc_get_decompressed_size(
+		unsafe.Pointer(&data[0]),
+		C.size_t(len(data)),
+	))
+
+	if size == 0 {
+		// Either a valid empty-payload archive or invalid input. Let the C
+		// decoder decide: it returns 0 for a valid empty archive, or a negative
+		// error code for invalid input. Decode into a zero-length buffer.
+		var dummy [1]byte
+		written := C.zxc_decompress(
+			unsafe.Pointer(&data[0]),
+			C.size_t(len(data)),
+			unsafe.Pointer(&dummy[0]),
+			C.size_t(0),
+			&dopts,
+		)
+		if written < 0 {
+			return nil, errorFromCode(written)
+		}
+		if written != 0 {
+			return nil, ErrInvalidData
+		}
+		return []byte{}, nil
+	}
+
+	dst := make([]byte, size)
 	written := C.zxc_decompress(
 		unsafe.Pointer(&data[0]),
 		C.size_t(len(data)),

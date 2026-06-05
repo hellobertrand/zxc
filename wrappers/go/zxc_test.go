@@ -117,14 +117,23 @@ func TestInvalidData(t *testing.T) {
 }
 
 func TestEmptyInput(t *testing.T) {
-	_, err := Compress(nil)
-	if err == nil {
-		t.Fatal("expected error on nil input")
-	}
-
-	_, err = Compress([]byte{})
-	if err == nil {
-		t.Fatal("expected error on empty input")
+	// Empty input produces a valid minimal frame (header + EOF + footer) that
+	// round-trips back to empty.
+	for _, in := range [][]byte{nil, {}} {
+		compressed, err := Compress(in)
+		if err != nil {
+			t.Fatalf("Compress(empty) error: %v", err)
+		}
+		if len(compressed) == 0 {
+			t.Fatal("Compress(empty) should produce a non-empty frame")
+		}
+		out, err := Decompress(compressed)
+		if err != nil {
+			t.Fatalf("Decompress(empty frame) error: %v", err)
+		}
+		if len(out) != 0 {
+			t.Fatalf("empty must round-trip to empty, got %d bytes", len(out))
+		}
 	}
 }
 
