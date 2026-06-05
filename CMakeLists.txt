@@ -686,6 +686,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_seekable_get_decompressed_size"
         "_zxc_seekable_get_block_comp_size"
         "_zxc_seekable_get_block_decomp_size"
+        "_zxc_seekable_set_dict"
+        # Dictionary API
+        "_zxc_train_dict"
+        "_zxc_dict_id"
+        "_zxc_get_dict_id"
+        "_zxc_dict_get_id"
+        "_zxc_dict_save"
+        "_zxc_dict_save_bound"
+        "_zxc_dict_load"
         # i32-offset shim for seekable_decompress_range (see wasm_entry.c);
         # avoids the i64 offset arg which cwrap cannot pass without BigInt.
         "_zxcw_seekable_decompress_range"

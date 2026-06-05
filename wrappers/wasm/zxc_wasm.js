@@ -89,6 +89,25 @@ export default async function createZXC(moduleOverrides, factory) {
     const _seek_table_size  = Module.cwrap('zxc_seek_table_size', 'number', ['number']);
     const _write_seek_table = Module.cwrap('zxc_write_seek_table', 'number',
         ['number', 'number', 'number', 'number']);
+    const _seekable_set_dict = Module.cwrap('zxc_seekable_set_dict', 'number',
+        ['number', 'number', 'number']);
+
+    // Dictionary API. zxc_train_dict / zxc_dict_save / zxc_dict_load return
+    // int64_t; on wasm32 cwrap('number') reads the low 32 bits, which is
+    // sufficient since results are bounded by ZXC_DICT_SIZE_MAX (65535) and
+    // pointers are 32-bit.
+    const _train_dict      = Module.cwrap('zxc_train_dict', 'number',
+        ['number', 'number', 'number', 'number', 'number']);
+    const _dict_id         = Module.cwrap('zxc_dict_id', 'number', ['number', 'number']);
+    const _get_dict_id     = Module.cwrap('zxc_get_dict_id', 'number', ['number', 'number']);
+    const _dict_get_id     = Module.cwrap('zxc_dict_get_id', 'number', ['number', 'number']);
+    const _dict_save       = Module.cwrap('zxc_dict_save', 'number',
+        ['number', 'number', 'number', 'number']);
+    const _dict_save_bound = Module.cwrap('zxc_dict_save_bound', 'number', ['number']);
+    const _dict_load       = Module.cwrap('zxc_dict_load', 'number',
+        ['number', 'number', 'number', 'number', 'number']);
+
+    const ZXC_DICT_SIZE_MAX = 65535;
 
     const _version_string = Module.cwrap('zxc_version_string', 'string', []);
     const _error_name     = Module.cwrap('zxc_error_name', 'string', ['number']);
@@ -100,17 +119,20 @@ export default async function createZXC(moduleOverrides, factory) {
     const _free   = Module._free;
 
     // --- Options struct layout -----------------------------------------------
-    // zxc_compress_opts_t (WASM32 layout):
-    //   int n_threads (4)  | int level (4)  | size_t block_size (4 in wasm32)
-    //   int checksum_enabled (4) | int seekable (4)
-    //   ptr progress_cb (4) | ptr user_data (4)
-    // Total: 28 bytes in WASM32
-    const COMPRESS_OPTS_SIZE = 28;
+    // zxc_compress_opts_t (WASM32 layout, all fields 4-byte aligned):
+    //   int n_threads (off 0)  | int level (4)  | size_t block_size (8)
+    //   int checksum_enabled (12) | int seekable (16)
+    //   const void* dict (20) | size_t dict_size (24)
+    //   ptr progress_cb (28) | ptr user_data (32)
+    // Total: 36 bytes in WASM32
+    const COMPRESS_OPTS_SIZE = 36;
 
     // zxc_decompress_opts_t:
-    //   int n_threads (4) | int checksum_enabled (4) | ptr progress_cb (4) | ptr user_data (4)
-    // Total: 16 bytes in WASM32
-    const DECOMPRESS_OPTS_SIZE = 16;
+    //   int n_threads (0) | int checksum_enabled (4)
+    //   const void* dict (8) | size_t dict_size (12)
+    //   ptr progress_cb (16) | ptr user_data (20)
+    // Total: 24 bytes in WASM32
+    const DECOMPRESS_OPTS_SIZE = 24;
 
     // zxc_inbuf_t / zxc_outbuf_t (WASM32 layout):
     //   ptr src/dst (4) | size_t size (4) | size_t pos (4)
@@ -121,7 +143,7 @@ export default async function createZXC(moduleOverrides, factory) {
      * Write a zxc_compress_opts_t struct into WASM memory.
      * @returns {number} Pointer to the struct (caller must free).
      */
-    function _writeCompressOpts(level, checksum, seekable) {
+    function _writeCompressOpts(level, checksum, seekable, dictPtr, dictSize) {
         const ptr = _malloc(COMPRESS_OPTS_SIZE);
         // Zero-fill first
         for (let i = 0; i < COMPRESS_OPTS_SIZE; i++) {
@@ -137,7 +159,10 @@ export default async function createZXC(moduleOverrides, factory) {
         Module.HEAP32[(ptr >> 2) + 3] = checksum ? 1 : 0;
         // seekable (offset 16)
         Module.HEAP32[(ptr >> 2) + 4] = seekable ? 1 : 0;
-        // progress_cb = NULL (offset 20), user_data = NULL (offset 24)
+        // dict (offset 20), dict_size (offset 24)
+        Module.HEAPU32[(ptr >> 2) + 5] = dictPtr || 0;
+        Module.HEAPU32[(ptr >> 2) + 6] = dictSize || 0;
+        // progress_cb = NULL (offset 28), user_data = NULL (offset 32)
         return ptr;
     }
 
@@ -145,7 +170,7 @@ export default async function createZXC(moduleOverrides, factory) {
      * Write a zxc_decompress_opts_t struct into WASM memory.
      * @returns {number} Pointer to the struct (caller must free).
      */
-    function _writeDecompressOpts(checksum) {
+    function _writeDecompressOpts(checksum, dictPtr, dictSize) {
         const ptr = _malloc(DECOMPRESS_OPTS_SIZE);
         for (let i = 0; i < DECOMPRESS_OPTS_SIZE; i++) {
             Module.HEAPU8[ptr + i] = 0;
@@ -154,7 +179,10 @@ export default async function createZXC(moduleOverrides, factory) {
         Module.HEAP32[(ptr >> 2) + 0] = 0;
         // checksum_enabled (offset 4)
         Module.HEAP32[(ptr >> 2) + 1] = checksum ? 1 : 0;
-        // progress_cb = NULL (offset 8), user_data = NULL (offset 12)
+        // dict (offset 8), dict_size (offset 12)
+        Module.HEAPU32[(ptr >> 2) + 2] = dictPtr || 0;
+        Module.HEAPU32[(ptr >> 2) + 3] = dictSize || 0;
+        // progress_cb = NULL (offset 16), user_data = NULL (offset 20)
         return ptr;
     }
 
@@ -168,6 +196,7 @@ export default async function createZXC(moduleOverrides, factory) {
      * @param {number} [opts.level=3] - Compression level (1-6).
      * @param {boolean} [opts.checksum=false] - Enable checksums.
      * @param {boolean} [opts.seekable=false] - Append seek table for random-access.
+     * @param {Uint8Array} [opts.dict] - Pre-trained dictionary content.
      * @returns {Uint8Array} Compressed data.
      * @throws {Error} On compression failure.
      */
@@ -175,13 +204,17 @@ export default async function createZXC(moduleOverrides, factory) {
         const level    = (opts && opts.level)    || _default_level();
         const checksum = (opts && opts.checksum) || false;
         const seekable = (opts && opts.seekable) || false;
+        const dict     = (opts && opts.dict)     || null;
 
         const bound = _compress_bound(data.length);
         if (bound === 0) throw new Error('ZXC: compress_bound returned 0');
 
         const srcPtr = _malloc(data.length);
         const dstPtr = _malloc(bound);
-        const optsPtr = _writeCompressOpts(level, checksum, seekable);
+        const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
+        if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
+        const optsPtr = _writeCompressOpts(level, checksum, seekable,
+            dictPtr, dict ? dict.length : 0);
 
         try {
             Module.HEAPU8.set(data, srcPtr);
@@ -194,6 +227,7 @@ export default async function createZXC(moduleOverrides, factory) {
             _free(srcPtr);
             _free(dstPtr);
             _free(optsPtr);
+            if (dictPtr) _free(dictPtr);
         }
     }
 
@@ -203,11 +237,13 @@ export default async function createZXC(moduleOverrides, factory) {
      * @param {Uint8Array} data - Compressed data.
      * @param {object} [opts] - Options.
      * @param {boolean} [opts.checksum=false] - Verify checksums.
+     * @param {Uint8Array} [opts.dict] - Pre-trained dictionary content.
      * @returns {Uint8Array} Decompressed data.
      * @throws {Error} On decompression failure.
      */
     function decompress(data, opts) {
         const checksum = (opts && opts.checksum) || false;
+        const dict     = (opts && opts.dict)     || null;
 
         // Read decompressed size from footer
         const srcPtr = _malloc(data.length);
@@ -215,7 +251,9 @@ export default async function createZXC(moduleOverrides, factory) {
 
         const origSize = _get_decompressed_size(srcPtr, data.length);
         const dstPtr = _malloc(origSize || 1);
-        const optsPtr = _writeDecompressOpts(checksum);
+        const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
+        if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
+        const optsPtr = _writeDecompressOpts(checksum, dictPtr, dict ? dict.length : 0);
 
         try {
             const result = _decompress(srcPtr, data.length, dstPtr, origSize, optsPtr);
@@ -227,6 +265,7 @@ export default async function createZXC(moduleOverrides, factory) {
             _free(srcPtr);
             _free(dstPtr);
             _free(optsPtr);
+            if (dictPtr) _free(dictPtr);
         }
     }
 
@@ -577,6 +616,27 @@ export default async function createZXC(moduleOverrides, factory) {
                 if (idx < 0 || idx >= _seekable_num_blocks(handle)) return null;
                 return _seekable_block_decomp_size(handle, idx);
             },
+            /**
+             * Attach a pre-trained dictionary to this seekable handle.
+             * Must be called before any decompressRange() call.
+             * @param {Uint8Array} dict - Dictionary content.
+             */
+            setDict(dict) {
+                if (!dict || dict.length === 0) {
+                    throw new Error('ZXC: setDict requires a non-empty dictionary');
+                }
+                const dictPtr = _malloc(dict.length);
+                if (!dictPtr) throw new Error('ZXC: malloc failed for dictionary');
+                try {
+                    Module.HEAPU8.set(dict, dictPtr);
+                    const r = _seekable_set_dict(handle, dictPtr, dict.length);
+                    if (r < 0) {
+                        throw new Error(`ZXC seekable set_dict error: ${_error_name(r)} (${r})`);
+                    }
+                } finally {
+                    _free(dictPtr);
+                }
+            },
             decompressRange(offset, length) {
                 if (length < 0) throw new Error('ZXC: length must be non-negative');
                 if (length === 0) return new Uint8Array(0);
@@ -647,6 +707,152 @@ export default async function createZXC(moduleOverrides, factory) {
         } finally {
             _free(dstPtr);
             _free(csPtr);
+        }
+    }
+
+    // --- Dictionary API ------------------------------------------------------
+
+    /**
+     * Train a dictionary from a corpus of samples.
+     *
+     * @param {Uint8Array[]} samples - Array of sample buffers (similar payloads).
+     * @param {number} [maxSize=65535] - Maximum dictionary size in bytes
+     *        (capped at ZXC_DICT_SIZE_MAX).
+     * @returns {Uint8Array} Raw trained dictionary content.
+     * @throws {Error} On training failure.
+     */
+    function trainDict(samples, maxSize = ZXC_DICT_SIZE_MAX) {
+        if (!samples || samples.length === 0) {
+            throw new Error('ZXC: trainDict requires at least one sample');
+        }
+        const cap = Math.min(maxSize >>> 0, ZXC_DICT_SIZE_MAX);
+        const n = samples.length;
+
+        // Heap arrays: pointers (4 bytes each) + sizes (size_t = 4 bytes on wasm32).
+        const ptrsPtr  = _malloc(n * 4);
+        const sizesPtr = _malloc(n * 4);
+        const samplePtrs = [];
+        const dictPtr = _malloc(cap);
+
+        try {
+            for (let i = 0; i < n; i++) {
+                const s = samples[i];
+                const sp = s.length > 0 ? _malloc(s.length) : _malloc(1);
+                if (s.length > 0) Module.HEAPU8.set(s, sp);
+                samplePtrs.push(sp);
+                Module.HEAPU32[(ptrsPtr >> 2) + i] = sp;
+                Module.HEAPU32[(sizesPtr >> 2) + i] = s.length;
+            }
+            const r = _train_dict(ptrsPtr, sizesPtr, n, dictPtr, cap);
+            if (r < 0) {
+                throw new Error(`ZXC train_dict error: ${_error_name(r)} (${r})`);
+            }
+            return new Uint8Array(Module.HEAPU8.buffer, dictPtr, r).slice();
+        } finally {
+            for (const sp of samplePtrs) _free(sp);
+            _free(ptrsPtr);
+            _free(sizesPtr);
+            _free(dictPtr);
+        }
+    }
+
+    /* Shared helper: copy a Uint8Array into the heap and call an id getter. */
+    function _callIdOnBuffer(fn, data) {
+        if (!data || data.length === 0) return 0;
+        const ptr = _malloc(data.length);
+        try {
+            Module.HEAPU8.set(data, ptr);
+            return fn(ptr, data.length) >>> 0;
+        } finally {
+            _free(ptr);
+        }
+    }
+
+    /**
+     * Compute the 32-bit dictionary ID for raw dictionary content.
+     * @param {Uint8Array} content
+     * @returns {number} Unsigned 32-bit ID (0 if empty).
+     */
+    function dictId(content) {
+        return _callIdOnBuffer(_dict_id, content);
+    }
+
+    /**
+     * Read the dictionary ID referenced by a compressed `.zxc` archive.
+     * @param {Uint8Array} archive
+     * @returns {number} Unsigned 32-bit ID (0 if no dictionary required).
+     */
+    function getDictId(archive) {
+        return _callIdOnBuffer(_get_dict_id, archive);
+    }
+
+    /**
+     * Read the dictionary ID stored in a serialized `.zxd` file buffer.
+     * @param {Uint8Array} zxd
+     * @returns {number} Unsigned 32-bit ID (0 if not a valid .zxd).
+     */
+    function dictGetId(zxd) {
+        return _callIdOnBuffer(_dict_get_id, zxd);
+    }
+
+    /**
+     * Serialize raw dictionary content to the `.zxd` file format.
+     * @param {Uint8Array} content - Raw dictionary content.
+     * @returns {Uint8Array} The encoded `.zxd` file.
+     * @throws {Error} On failure.
+     */
+    function dictSave(content) {
+        if (!content || content.length === 0) {
+            throw new Error('ZXC: dictSave requires non-empty content');
+        }
+        const cap = _dict_save_bound(content.length);
+        const contentPtr = _malloc(content.length);
+        const bufPtr = _malloc(cap);
+        try {
+            Module.HEAPU8.set(content, contentPtr);
+            const r = _dict_save(contentPtr, content.length, bufPtr, cap);
+            if (r < 0) {
+                throw new Error(`ZXC dict_save error: ${_error_name(r)} (${r})`);
+            }
+            return new Uint8Array(Module.HEAPU8.buffer, bufPtr, r).slice();
+        } finally {
+            _free(contentPtr);
+            _free(bufPtr);
+        }
+    }
+
+    /**
+     * Load and validate a `.zxd` file buffer.
+     * @param {Uint8Array} zxd - The `.zxd` file bytes.
+     * @returns {{ content: Uint8Array, id: number }}
+     * @throws {Error} On invalid input.
+     */
+    function dictLoad(zxd) {
+        if (!zxd || zxd.length === 0) {
+            throw new Error('ZXC: dictLoad requires a non-empty buffer');
+        }
+        const bufPtr = _malloc(zxd.length);
+        // out params: content ptr (4), content size (4), dict id (4)
+        const contentOutPtr = _malloc(4);
+        const sizeOutPtr    = _malloc(4);
+        const idOutPtr      = _malloc(4);
+        try {
+            Module.HEAPU8.set(zxd, bufPtr);
+            const r = _dict_load(bufPtr, zxd.length, contentOutPtr, sizeOutPtr, idOutPtr);
+            if (r < 0) {
+                throw new Error(`ZXC dict_load error: ${_error_name(r)} (${r})`);
+            }
+            const contentPtr  = Module.HEAPU32[contentOutPtr >> 2];
+            const contentSize = Module.HEAPU32[sizeOutPtr >> 2];
+            const id          = Module.HEAPU32[idOutPtr >> 2] >>> 0;
+            // content points into bufPtr (zero-copy); copy out before freeing.
+            const content = new Uint8Array(Module.HEAPU8.buffer, contentPtr, contentSize).slice();
+            return { content, id };
+        } finally {
+            _free(bufPtr);
+            _free(contentOutPtr);
+            _free(sizeOutPtr);
+            _free(idOutPtr);
         }
     }
 
@@ -755,6 +961,14 @@ export default async function createZXC(moduleOverrides, factory) {
         seekTableSize,
         writeSeekTable,
         detectZxc,
+
+        // Dictionary API
+        trainDict,
+        dictId,
+        getDictId,
+        dictGetId,
+        dictSave,
+        dictLoad,
 
         /** Library version string (e.g. "0.11.0"). */
         version: _version_string(),
