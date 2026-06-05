@@ -608,7 +608,7 @@ Dictionaries are stored as standalone `.zxd` files with the following layout:
 Offset  Size  Field
 0x00    4     Magic Word (0x9CB0D1C7 LE)
 0x04    1     Dictionary format version (currently 1)
-0x05    1     Flags (reserved, must be 0)
+0x05    1     Flags (bits 0..3: checksum algorithm id; bits 4..7 reserved)
 0x06    2     Content size (u16 LE, max 65535)
 0x08    4     dict_id (u32 LE, hash of content)
 0x0C    2     Reserved (0)
@@ -617,6 +617,7 @@ Offset  Size  Field
 ```
 
 - **Magic Word**: `0x9CB0D1C7`. Allows immediate rejection of non-dictionary files.
+- **Flags**: bits `0..3` carry the checksum algorithm id (`0` = RapidHash-based folding), matching the ZXC file header flags; bits `4..7` are reserved (must be 0).
 - **dict_id**: deterministic 32-bit hash (RapidHash-folded) of the content bytes. Must match the `dict_id` stored in any ZXC file header that references this dictionary.
 - **Header CRC16**: `zxc_hash16` checksum of the 16-byte header with bytes `0x0C..0x0F` zeroed before hashing — same method as the ZXC file header.
 - **Content**: raw bytes that prefill the LZ77 window. Not compressed.
@@ -869,7 +870,7 @@ C7 D1 B0 9C | 01 | 00 | 05 00 | 17 0F 72 9A | 00 00 | 4A D9
 
 - `C7 D1 B0 9C` -> magic word (LE) = `0x9CB0D1C7` (`.zxd` dictionary).
 - `01` -> dictionary format version 1.
-- `00` -> flags (reserved, must be 0).
+- `00` -> flags (bits 0..3 = checksum algorithm id `0` = RapidHash; bits 4..7 reserved).
 - `05 00` -> content size (LE) = `5` bytes.
 - `17 0F 72 9A` -> `dict_id` (LE) = `0x9A720F17`. Must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
 - `00 00` -> reserved.

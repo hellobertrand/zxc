@@ -29,7 +29,7 @@ uint32_t zxc_dict_id(const void* dict, const size_t dict_size) {
  *  Layout (ZXC_DICT_HEADER_SIZE = 16 bytes + content):
  *    0x00  4  Magic   (0x9CB0D1C7 LE)
  *    0x04  1  Version (1)
- *    0x05  1  Flags   (reserved, 0)
+ *    0x05  1  Flags   (bits 0-3: checksum algo id, 0=RapidHash; bits 4-7 reserved)
  *    0x06  2  Content size (u16 LE)
  *    0x08  4  dict_id (u32 LE)
  *    0x0C  2  Reserved (0)
