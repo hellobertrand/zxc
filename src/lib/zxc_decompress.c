@@ -621,7 +621,7 @@ static ZXC_NOINLINE int zxc_decode_block_num(const uint8_t* RESTRICT src, const 
  * only one branch survives per wrapper, yielding codegen equivalent to the
  * hand-written pair.
  */
-static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
+static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
                                                        const size_t src_size, uint8_t* RESTRICT dst,
                                                        const size_t dst_capacity, const int safe,
@@ -1414,7 +1414,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
  * are duplicated verbatim inside @c if(safe)/else branches so that each
  * variant keeps its own single-assignment @c const save pointers.
  */
-static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
+static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
                                                        const size_t src_size, uint8_t* RESTRICT dst,
                                                        const size_t dst_capacity, const int safe) {
@@ -2032,22 +2032,22 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
 
 // Per-format decoders stay out-of-line so the chunk dispatchers keep only the
 // used decoder hot in I-cache. One call per block: negligible.
-static ZXC_NOINLINE int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                             const size_t src_size, uint8_t* RESTRICT dst,
-                                             const size_t dst_capacity) {
+static ZXC_NOINLINE int zxc_decode_block_ghi(const zxc_cctx_t* RESTRICT ctx,
+                                             const uint8_t* RESTRICT src, const size_t src_size,
+                                             uint8_t* RESTRICT dst, const size_t dst_capacity) {
     return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 0);
 }
 
 // GLO is specialized on dict presence. NOINLINE keeps the two bodies separate,
 // so the cold dict body never loads in I-cache on a no-dict stream.
-static ZXC_NOINLINE int zxc_decode_block_glo_nodict(zxc_cctx_t* RESTRICT ctx,
+static ZXC_NOINLINE int zxc_decode_block_glo_nodict(const zxc_cctx_t* RESTRICT ctx,
                                                     const uint8_t* RESTRICT src,
                                                     const size_t src_size, uint8_t* RESTRICT dst,
                                                     const size_t dst_capacity) {
     return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 0);
 }
 
-static ZXC_NOINLINE int zxc_decode_block_glo_dict(zxc_cctx_t* RESTRICT ctx,
+static ZXC_NOINLINE int zxc_decode_block_glo_dict(const zxc_cctx_t* RESTRICT ctx,
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
                                                   const size_t dst_capacity) {
@@ -2055,21 +2055,21 @@ static ZXC_NOINLINE int zxc_decode_block_glo_dict(zxc_cctx_t* RESTRICT ctx,
 }
 
 // Tiny dispatcher: one branch, inlinable; heavy bodies stay out-of-line.
-static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+static int zxc_decode_block_glo(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_size, uint8_t* RESTRICT dst,
                                 const size_t dst_capacity) {
     return ctx->dict_size ? zxc_decode_block_glo_dict(ctx, src, src_size, dst, dst_capacity)
                           : zxc_decode_block_glo_nodict(ctx, src, src_size, dst, dst_capacity);
 }
 
-static ZXC_NOINLINE int zxc_decode_block_glo_safe(zxc_cctx_t* RESTRICT ctx,
+static ZXC_NOINLINE int zxc_decode_block_glo_safe(const zxc_cctx_t* RESTRICT ctx,
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
                                                   const size_t dst_capacity) {
     return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 1, 1);
 }
 
-static ZXC_NOINLINE int zxc_decode_block_ghi_safe(zxc_cctx_t* RESTRICT ctx,
+static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx,
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
                                                   const size_t dst_capacity) {
