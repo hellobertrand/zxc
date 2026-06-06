@@ -187,6 +187,11 @@ extern "C" {
  */
 #define ZXC_ALWAYS_INLINE inline __attribute__((always_inline))
 
+/** @def ZXC_NOINLINE
+ * @brief Prevents a function from being inlined into its callers.
+ */
+#define ZXC_NOINLINE __attribute__((noinline))
+
 #elif defined(_MSC_VER)
 #include <intrin.h>
 #if defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64)
@@ -214,6 +219,11 @@ extern "C" {
  * @brief Forces a function to be inlined at all optimization levels (MSVC).
  */
 #define ZXC_ALWAYS_INLINE __forceinline
+
+/** @def ZXC_NOINLINE
+ * @brief Prevents a function from being inlined into its callers (MSVC).
+ */
+#define ZXC_NOINLINE __declspec(noinline)
 #pragma intrinsic(_BitScanReverse)
 #else
 #define LIKELY(x) (x)
@@ -228,6 +238,11 @@ extern "C" {
  * @brief Forces a function to be inlined (fallback for non-GCC/Clang/MSVC compilers).
  */
 #define ZXC_ALWAYS_INLINE inline
+
+/** @def ZXC_NOINLINE
+ * @brief Prevents inlining (best-effort no-op fallback for unknown compilers).
+ */
+#define ZXC_NOINLINE
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #include <stdalign.h>

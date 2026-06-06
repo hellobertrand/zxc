@@ -70,14 +70,12 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_br_consume_fast(zxc_bit_reader_t* RESTRICT
  *
  * This function decodes a 32-bit unsigned integer encoded in Prefix Varint format
  * from the provided byte stream. Unary prefix bits in the first byte determine
- * the total length (1-5 bytes).
+ * the total length (1-3 bytes).
  *
  * Format:
  * - 1 byte  (0xxxxxxx):  7-bit payload (val < 2^7  = 128)
  * - 2 bytes (10xxxxxx): 14-bit payload (val < 2^14 = 16384)
  * - 3 bytes (110xxxxx): 21-bit payload (val < 2^21 = 2097152)
- * - 4 bytes (1110xxxx): 28-bit payload (val < 2^28 = 268435456)
- * - 5 bytes (11110xxx): 32-bit payload (full uint32_t range)
  *
  * @param[in,out] ptr Pointer to a pointer to the current position in the stream.
  * @param[in] end Pointer to the end of the readable stream (for bounds checking).
@@ -355,8 +353,8 @@ static ZXC_ALWAYS_INLINE __m128i zxc_mm_prefix_sum_epi32(__m128i v) {
  *         or a negative zxc_error_t code if an error occurs (e.g., buffer overflow, invalid header,
  *         or malformed compressed stream).
  */
-static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_size,
-                                uint8_t* RESTRICT dst, const size_t dst_capacity) {
+static ZXC_NOINLINE int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_size,
+                                             uint8_t* RESTRICT dst, const size_t dst_capacity) {
     zxc_num_header_t nh;
     if (UNLIKELY(zxc_read_num_header(src, src_size, &nh) != ZXC_OK)) return ZXC_ERROR_BAD_HEADER;
 
@@ -626,8 +624,13 @@ static int zxc_decode_block_num(const uint8_t* RESTRICT src, const size_t src_si
 static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
                                                        const size_t src_size, uint8_t* RESTRICT dst,
-                                                       const size_t dst_capacity, const int safe) {
+                                                       const size_t dst_capacity, const int safe,
+                                                       const int has_dict) {
     zxc_gnr_header_t gh;
+
+    /* Constant 0 when !has_dict, so `written` starts at 0 and `dst - dict_size`
+     * folds to `dst` -- pre-dict codegen on the hot path. */
+    const size_t dict_size = has_dict ? ctx->dict_size : 0;
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS];
 
     if (UNLIKELY(zxc_read_glo_header_and_desc(src, src_size, &gh, desc) != ZXC_OK))
@@ -794,7 +797,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
     // After threshold, all offsets are guaranteed valid (can't exceed written bytes)
     // When a dictionary is active, dict_size bytes are logically "already written"
     // (prepended by the caller), so the SAFE loop may be skipped entirely.
-    size_t written = ctx->dict_size;
+    size_t written = dict_size;
 
     // --- SAFE Loop: offset validation until threshold (4x unroll) ---
     // For 1-byte offsets: bounds check until 256 bytes written
@@ -1365,7 +1368,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(zxc_cctx_t* RESTRICT ctx,
         d_ptr += ll;
 
         const uint8_t* match_src = d_ptr - offset;
-        if (UNLIKELY(match_src < dst - ctx->dict_size)) return ZXC_ERROR_BAD_OFFSET;
+        if (UNLIKELY(match_src < dst - dict_size)) return ZXC_ERROR_BAD_OFFSET;
 
         if (offset < ml) {
             for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
@@ -1415,7 +1418,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
                                                        const size_t src_size, uint8_t* RESTRICT dst,
                                                        const size_t dst_capacity, const int safe) {
-    (void)ctx;
     zxc_gnr_header_t gh;
     zxc_section_desc_t desc[ZXC_GHI_SECTIONS];
 
@@ -2028,27 +2030,49 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(zxc_cctx_t* RESTRICT ctx,
     return (int)(d_ptr - dst);
 }
 
-static int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                const size_t src_size, uint8_t* RESTRICT dst,
-                                const size_t dst_capacity) {
+// Per-format decoders stay out-of-line so the chunk dispatchers keep only the
+// used decoder hot in I-cache. One call per block: negligible.
+static ZXC_NOINLINE int zxc_decode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                             const size_t src_size, uint8_t* RESTRICT dst,
+                                             const size_t dst_capacity) {
     return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 0);
 }
 
+// GLO is specialized on dict presence. NOINLINE keeps the two bodies separate,
+// so the cold dict body never loads in I-cache on a no-dict stream.
+static ZXC_NOINLINE int zxc_decode_block_glo_nodict(zxc_cctx_t* RESTRICT ctx,
+                                                    const uint8_t* RESTRICT src,
+                                                    const size_t src_size, uint8_t* RESTRICT dst,
+                                                    const size_t dst_capacity) {
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 0);
+}
+
+static ZXC_NOINLINE int zxc_decode_block_glo_dict(zxc_cctx_t* RESTRICT ctx,
+                                                  const uint8_t* RESTRICT src,
+                                                  const size_t src_size, uint8_t* RESTRICT dst,
+                                                  const size_t dst_capacity) {
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 1);
+}
+
+// Tiny dispatcher: one branch, inlinable; heavy bodies stay out-of-line.
 static int zxc_decode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_size, uint8_t* RESTRICT dst,
                                 const size_t dst_capacity) {
-    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0);
+    return ctx->dict_size ? zxc_decode_block_glo_dict(ctx, src, src_size, dst, dst_capacity)
+                          : zxc_decode_block_glo_nodict(ctx, src, src_size, dst, dst_capacity);
 }
 
-static int zxc_decode_block_glo_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                     const size_t src_size, uint8_t* RESTRICT dst,
-                                     const size_t dst_capacity) {
-    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 1);
+static ZXC_NOINLINE int zxc_decode_block_glo_safe(zxc_cctx_t* RESTRICT ctx,
+                                                  const uint8_t* RESTRICT src,
+                                                  const size_t src_size, uint8_t* RESTRICT dst,
+                                                  const size_t dst_capacity) {
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 1, 1);
 }
 
-static int zxc_decode_block_ghi_safe(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                     const size_t src_size, uint8_t* RESTRICT dst,
-                                     const size_t dst_capacity) {
+static ZXC_NOINLINE int zxc_decode_block_ghi_safe(zxc_cctx_t* RESTRICT ctx,
+                                                  const uint8_t* RESTRICT src,
+                                                  const size_t src_size, uint8_t* RESTRICT dst,
+                                                  const size_t dst_capacity) {
     return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 1);
 }
 
