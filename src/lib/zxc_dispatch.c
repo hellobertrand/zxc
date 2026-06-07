@@ -1271,10 +1271,8 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 /**
  * @brief Safe-variant block decompressor: accepts dst_capacity == uncompressed_size.
  *
- * Router: NUM/RAW blocks (which never wild-write past dst_capacity) are
- * forwarded to the existing fast path. GLO/GHI blocks use the strict safe
- * decoder, avoiding the bounce buffer and the +ZXC_DECOMPRESS_TAIL_PAD
- * requirement of @ref zxc_decompress_block.
+ * Dict inputs and NUM/RAW blocks route to @ref zxc_decompress_block; plain GLO/GHI
+ * use the strict safe decoder (no bounce buffer, no +ZXC_DECOMPRESS_TAIL_PAD).
  */
 int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
                                   void* RESTRICT dst, const size_t dst_capacity,
@@ -1284,6 +1282,11 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
 
     /* Strict-tail variant: dst_capacity matches the exact uncompressed size */
     if (UNLIKELY(dst_capacity > ZXC_BLOCK_SIZE_MAX)) return ZXC_ERROR_BAD_BLOCK_SIZE;
+
+    /* A dict needs the [dict|payload] bounce; route to the bounce-capable path. */
+    if (opts && opts->dict && opts->dict_size > 0) {
+        return zxc_decompress_block(dctx, src, src_size, dst, dst_capacity, opts);
+    }
 
     const uint8_t type = ((const uint8_t*)src)[0];
     /* NUM/RAW never wild-write past dst_capacity: route to the existing fast API. */

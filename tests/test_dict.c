@@ -293,6 +293,82 @@ cleanup:
     return result;
 }
 
+/* zxc_decompress_block_safe (exact-fit dst) must honor opts->dict; it used to
+ * ignore it (BAD_OFFSET on dict back-refs). Real shuffled-pattern dict matches. */
+int test_dict_block_safe_roundtrip(void) {
+    printf("=== TEST: Dict - block_safe (strict-tail) with real dict back-refs ===\n");
+
+    enum { NPAT = 256, PLEN = 40 };
+    const size_t dict_size = (size_t)NPAT * PLEN;
+    uint8_t* dict = (uint8_t*)malloc(dict_size);
+    for (int i = 0; i < NPAT; i++) {
+        uint32_t x = (uint32_t)i * 2654435761u;
+        for (int j = 0; j < PLEN; j++) {
+            x = x * 1103515245u + 12345u;
+            dict[(size_t)i * PLEN + j] = (uint8_t)(x >> 16);
+        }
+    }
+    int order[NPAT];
+    for (int i = 0; i < NPAT; i++) order[i] = i;
+    uint32_t s = 777u;
+    for (int i = NPAT - 1; i > 0; i--) {
+        s = s * 1103515245u + 12345u;
+        int j = (int)(s % (uint32_t)(i + 1));
+        int tmp = order[i];
+        order[i] = order[j];
+        order[j] = tmp;
+    }
+    const size_t src_size = (size_t)NPAT * (PLEN + 1);
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    for (int k = 0; k < NPAT; k++) {
+        memcpy(src + (size_t)k * (PLEN + 1), dict + (size_t)order[k] * PLEN, PLEN);
+        src[(size_t)k * (PLEN + 1) + PLEN] = (uint8_t)k;
+    }
+
+    const size_t comp_bound = (size_t)zxc_compress_block_bound(src_size);
+    uint8_t* compressed = (uint8_t*)malloc(comp_bound);
+    uint8_t* decompressed = (uint8_t*)malloc(src_size);
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_dctx* dctx = zxc_create_dctx();
+
+    int result = 0;
+    if (!dict || !src || !compressed || !decompressed || !cctx || !dctx) {
+        printf("  [FAIL] allocation failed\n");
+        goto cleanup;
+    }
+
+    for (int level = 1; level <= 6; level++) {
+        zxc_compress_opts_t copts = {.level = level, .dict = dict, .dict_size = dict_size};
+        int64_t comp_size = zxc_compress_block(cctx, src, src_size, compressed, comp_bound, &copts);
+        if (comp_size <= 0) {
+            printf("  [FAIL] level %d: compress_block returned %lld (%s)\n", level,
+                   (long long)comp_size, zxc_error_name((int)comp_size));
+            goto cleanup;
+        }
+        /* Strict-tail decode: EXACT dst_capacity == src_size, WITH the dict. */
+        zxc_decompress_opts_t dopts = {.dict = dict, .dict_size = dict_size};
+        int64_t dec_size = zxc_decompress_block_safe(dctx, compressed, (size_t)comp_size,
+                                                     decompressed, src_size, &dopts);
+        if (dec_size != (int64_t)src_size || memcmp(src, decompressed, src_size) != 0) {
+            printf("  [FAIL] level %d: dec_size=%lld err=%s\n", level, (long long)dec_size,
+                   dec_size < 0 ? zxc_error_name((int)dec_size) : "content mismatch");
+            goto cleanup;
+        }
+        printf("  [PASS] level %d (%lld -> %zu)\n", level, (long long)comp_size, src_size);
+    }
+    result = 1;
+
+cleanup:
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    free(dict);
+    free(src);
+    free(compressed);
+    free(decompressed);
+    if (result) printf("PASS\n\n");
+    return result;
+}
+
 int test_dict_mismatch_error(void) {
     printf("=== TEST: Dict - dict_id mismatch error ===\n");
 

@@ -188,6 +188,7 @@ int test_dict_id_deterministic(void);
 int test_dict_get_id_apis(void);
 int test_dict_buffer_roundtrip(void);
 int test_dict_block_roundtrip(void);
+int test_dict_block_safe_roundtrip(void);
 int test_dict_mismatch_error(void);
 int test_dict_required_error(void);
 int test_dict_no_dict_compat(void);

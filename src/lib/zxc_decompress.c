@@ -1417,8 +1417,12 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
 static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
                                                        const size_t src_size, uint8_t* RESTRICT dst,
-                                                       const size_t dst_capacity, const int safe) {
+                                                       const size_t dst_capacity, const int safe,
+                                                       const int has_dict) {
     zxc_gnr_header_t gh;
+
+    /* 0 when !has_dict (safe path) -> folds `written`/`dst - dict_size`. */
+    const size_t dict_size = has_dict ? ctx->dict_size : 0;
     zxc_section_desc_t desc[ZXC_GHI_SECTIONS];
 
     if (UNLIKELY(zxc_read_ghi_header_and_desc(src, src_size, &gh, desc) != ZXC_OK))
@@ -1469,7 +1473,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     // After threshold, all offsets are guaranteed valid (can't exceed written bytes)
     // When a dictionary is active, dict_size bytes are logically "already written"
     // (prepended by the caller), so the SAFE loop may be skipped entirely.
-    size_t written = ctx->dict_size;
+    size_t written = dict_size;
 
     // --- SAFE Loop: offset validation until threshold (4x unroll) ---
     // Since offset is 16-bit, threshold is 65536.
@@ -2006,7 +2010,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
         d_ptr += ll;
 
         const uint8_t* match_src = d_ptr - offset;
-        if (UNLIKELY(match_src < dst - ctx->dict_size)) return ZXC_ERROR_BAD_OFFSET;
+        if (UNLIKELY(match_src < dst - dict_size)) return ZXC_ERROR_BAD_OFFSET;
 
         if (offset < ml) {
             for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
@@ -2035,7 +2039,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
 static ZXC_NOINLINE int zxc_decode_block_ghi(const zxc_cctx_t* RESTRICT ctx,
                                              const uint8_t* RESTRICT src, const size_t src_size,
                                              uint8_t* RESTRICT dst, const size_t dst_capacity) {
-    return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 0);
+    return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 0, 1);
 }
 
 // GLO is specialized on dict presence. NOINLINE keeps the two bodies separate,
@@ -2062,18 +2066,21 @@ static int zxc_decode_block_glo(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                           : zxc_decode_block_glo_nodict(ctx, src, src_size, dst, dst_capacity);
 }
 
+// Safe path never carries a dict (block_safe routes dict to the bounce path), so
+// has_dict=0 folds the dead dict_size handling.
 static ZXC_NOINLINE int zxc_decode_block_glo_safe(const zxc_cctx_t* RESTRICT ctx,
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
                                                   const size_t dst_capacity) {
-    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 1, 1);
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 1, 0);
 }
 
+// Strict-tail safe path never carries a dict (see zxc_decode_block_glo_safe).
 static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx,
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
                                                   const size_t dst_capacity) {
-    return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 1);
+    return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 1, 0);
 }
 
 #undef DECODE_SEQ_FAST
