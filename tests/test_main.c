@@ -124,6 +124,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_dict_no_dict_compat),
     TEST_CASE(test_dict_stream_roundtrip),
     TEST_CASE(test_dict_large_dict_roundtrip),
+    TEST_CASE(test_dict_safe_loop_backref),
     TEST_CASE(test_dict_seekable_roundtrip),
     TEST_CASE(test_dict_train_roundtrip),
     TEST_CASE(test_dict_train_no_frequent_patterns),

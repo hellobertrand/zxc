@@ -518,6 +518,85 @@ int test_dict_large_dict_roundtrip(void) {
     return 1;
 }
 
+/*
+ * Regression test for the GLO SAFE-loop dictionary back-reference path.
+ *
+ * The other dict roundtrip tests use gen_dict_friendly_data(), which scatters
+ * dict-derived BYTES but never forms long matches, so the decoder never emits a
+ * dictionary back-reference. This test forges many small *matches* into the dict
+ * (distinct 40-byte patterns in shuffled order, each separated by a literal so
+ * they don't merge). Dict (10KB) + payload (10KB) stay under 64KB, so every
+ * sequence is validated by the SAFE 4x loop's `off > written` check -- which is
+ * only correct because `written` is seeded with dict_size. If that seeding were
+ * dropped (written = 0), these dict back-refs would be wrongly rejected
+ * (BAD_OFFSET). See project_dict_written_floor.
+ */
+int test_dict_safe_loop_backref(void) {
+    printf("=== TEST: Dict - many small back-refs in the SAFE 4x loop ===\n");
+
+    enum { NPAT = 256, PLEN = 40 };
+    const size_t dict_size = (size_t)NPAT * PLEN;
+    uint8_t* dict = (uint8_t*)malloc(dict_size);
+    for (int i = 0; i < NPAT; i++) {
+        uint32_t x = (uint32_t)i * 2654435761u;
+        for (int j = 0; j < PLEN; j++) {
+            x = x * 1103515245u + 12345u;
+            dict[(size_t)i * PLEN + j] = (uint8_t)(x >> 16);
+        }
+    }
+
+    int order[NPAT];
+    for (int i = 0; i < NPAT; i++) order[i] = i;
+    uint32_t s = 12345u;
+    for (int i = NPAT - 1; i > 0; i--) {
+        s = s * 1103515245u + 12345u;
+        int j = (int)(s % (uint32_t)(i + 1));
+        int tmp = order[i];
+        order[i] = order[j];
+        order[j] = tmp;
+    }
+
+    const size_t src_size = (size_t)NPAT * (PLEN + 1);
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    for (int k = 0; k < NPAT; k++) {
+        memcpy(src + (size_t)k * (PLEN + 1), dict + (size_t)order[k] * PLEN, PLEN);
+        src[(size_t)k * (PLEN + 1) + PLEN] = (uint8_t)k;  // literal separator (anti-merge)
+    }
+
+    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    uint8_t* compressed = (uint8_t*)malloc(comp_bound);
+    uint8_t* decompressed = (uint8_t*)malloc(src_size);
+
+    int ok = 1;
+    for (int level = 1; level <= 6 && ok; level++) {
+        zxc_compress_opts_t copts = {.level = level, .dict = dict, .dict_size = dict_size};
+        int64_t comp_size = zxc_compress(src, src_size, compressed, comp_bound, &copts);
+        if (comp_size <= 0) {
+            printf("  [FAIL] level %d: compress returned %lld (%s)\n", level, (long long)comp_size,
+                   zxc_error_name((int)comp_size));
+            ok = 0;
+            break;
+        }
+        zxc_decompress_opts_t dopts = {.dict = dict, .dict_size = dict_size};
+        int64_t dec_size =
+            zxc_decompress(compressed, (size_t)comp_size, decompressed, src_size, &dopts);
+        if (dec_size != (int64_t)src_size || memcmp(src, decompressed, src_size) != 0) {
+            printf("  [FAIL] level %d: dec_size=%lld err=%s\n", level, (long long)dec_size,
+                   dec_size < 0 ? zxc_error_name((int)dec_size) : "content mismatch");
+            ok = 0;
+            break;
+        }
+        printf("  [PASS] level %d (%lld -> %zu)\n", level, (long long)comp_size, src_size);
+    }
+
+    free(src);
+    free(compressed);
+    free(decompressed);
+    free(dict);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
 int test_dict_train_roundtrip(void) {
     printf("=== TEST: Dict - train then compress/decompress ===\n");
 
