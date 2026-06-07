@@ -25,6 +25,8 @@
 #define ZXC_CAT_IMPL(x, y) x##y
 #define ZXC_CAT(x, y) ZXC_CAT_IMPL(x, y)
 #define zxc_decompress_chunk_wrapper ZXC_CAT(zxc_decompress_chunk_wrapper, ZXC_FUNCTION_SUFFIX)
+#define zxc_decompress_chunk_wrapper_dict \
+    ZXC_CAT(zxc_decompress_chunk_wrapper_dict, ZXC_FUNCTION_SUFFIX)
 #define zxc_decompress_chunk_wrapper_safe \
     ZXC_CAT(zxc_decompress_chunk_wrapper_safe, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_decode_section ZXC_CAT(zxc_huf_decode_section, ZXC_FUNCTION_SUFFIX)
@@ -2058,23 +2060,22 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     return (int)(d_ptr - dst);
 }
 
-// Per-format decoders stay out-of-line so the chunk dispatchers keep only the
-// used decoder hot in I-cache. One call per block: negligible.
-static ZXC_NOINLINE int zxc_decode_block_ghi(const zxc_cctx_t* RESTRICT ctx,
-                                             const uint8_t* RESTRICT src, const size_t src_size,
-                                             uint8_t* RESTRICT dst, const size_t dst_capacity) {
-    return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 0, 1);
-}
-
-// GLO is specialized on dict presence. NOINLINE keeps the two bodies separate,
-// so the cold dict body never loads in I-cache on a no-dict stream.
-static ZXC_NOINLINE int zxc_decode_block_glo_nodict(const zxc_cctx_t* RESTRICT ctx,
-                                                    const uint8_t* RESTRICT src,
-                                                    const size_t src_size, uint8_t* RESTRICT dst,
-                                                    const size_t dst_capacity) {
+// No-dict decoders: plain (inlinable) so the no-dict chunk wrapper inlines them
+// exactly like main. has_dict=0 folds the dict_size handling away.
+static int zxc_decode_block_glo(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                const size_t src_size, uint8_t* RESTRICT dst,
+                                const size_t dst_capacity) {
     return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 0);
 }
 
+static int zxc_decode_block_ghi(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                const size_t src_size, uint8_t* RESTRICT dst,
+                                const size_t dst_capacity) {
+    return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 0, 0);
+}
+
+// Dict decoders: NOINLINE, only reached on the cold dict path (chunk_wrapper_dict),
+// so they never load into I-cache on a no-dict stream.
 static ZXC_NOINLINE int zxc_decode_block_glo_dict(const zxc_cctx_t* RESTRICT ctx,
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
@@ -2082,12 +2083,11 @@ static ZXC_NOINLINE int zxc_decode_block_glo_dict(const zxc_cctx_t* RESTRICT ctx
     return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 1);
 }
 
-// Tiny dispatcher: one branch, inlinable; heavy bodies stay out-of-line.
-static int zxc_decode_block_glo(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                const size_t src_size, uint8_t* RESTRICT dst,
-                                const size_t dst_capacity) {
-    return ctx->dict_size ? zxc_decode_block_glo_dict(ctx, src, src_size, dst, dst_capacity)
-                          : zxc_decode_block_glo_nodict(ctx, src, src_size, dst, dst_capacity);
+static ZXC_NOINLINE int zxc_decode_block_ghi_dict(const zxc_cctx_t* RESTRICT ctx,
+                                                  const uint8_t* RESTRICT src,
+                                                  const size_t src_size, uint8_t* RESTRICT dst,
+                                                  const size_t dst_capacity) {
+    return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 0, 1);
 }
 
 // Safe path never carries a dict (block_safe routes dict to the bounce path), so
@@ -2110,9 +2110,13 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
 #undef DECODE_SEQ_FAST
 #undef DECODE_SEQ_SAFE
 
-// cppcheck-suppress unusedFunction
-int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
+/* Shared chunk-decode body. @p has_dict is a compile-time constant: the no-dict
+ * instantiation folds the GLO/GHI selection to the plain (inlinable) decoders, so
+ * zxc_decompress_chunk_wrapper carries no dict code and matches main; the dict
+ * instantiation calls the NOINLINE _dict decoders. */
+static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
+    const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src, const size_t src_sz,
+    uint8_t* RESTRICT dst, const size_t dst_cap, const int has_dict) {
     if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
 
     const uint8_t type = src[0];
@@ -2136,10 +2140,12 @@ int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* 
 
     switch (type) {
         case ZXC_BLOCK_GLO:
-            decoded_sz = zxc_decode_block_glo(ctx, data, comp_sz, dst, dst_cap);
+            decoded_sz = has_dict ? zxc_decode_block_glo_dict(ctx, data, comp_sz, dst, dst_cap)
+                                  : zxc_decode_block_glo(ctx, data, comp_sz, dst, dst_cap);
             break;
         case ZXC_BLOCK_GHI:
-            decoded_sz = zxc_decode_block_ghi(ctx, data, comp_sz, dst, dst_cap);
+            decoded_sz = has_dict ? zxc_decode_block_ghi_dict(ctx, data, comp_sz, dst, dst_cap)
+                                  : zxc_decode_block_ghi(ctx, data, comp_sz, dst, dst_cap);
             break;
         case ZXC_BLOCK_RAW:
             // For RAW blocks, comp_sz == raw_sz (uncompressed data stored as-is)
@@ -2158,6 +2164,22 @@ int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* 
     }
 
     return decoded_sz;
+}
+
+// No-dict chunk decoder: inlines the plain GLO/GHI decoders -> identical to main.
+// cppcheck-suppress unusedFunction
+int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
+    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, 0);
+}
+
+// Dict chunk decoder: calls the NOINLINE _dict decoders. Slower (dict back-refs read
+// the prepended dict); only used when ctx->dict_size != 0.
+// cppcheck-suppress unusedFunction
+int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                      const size_t src_sz, uint8_t* RESTRICT dst,
+                                      const size_t dst_cap) {
+    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, 1);
 }
 
 // cppcheck-suppress unusedFunction

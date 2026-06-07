@@ -48,6 +48,9 @@
 int zxc_decompress_chunk_wrapper_default(const zxc_cctx_t* RESTRICT ctx,
                                          const uint8_t* RESTRICT src, const size_t src_sz,
                                          uint8_t* RESTRICT dst, const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_dict_default(const zxc_cctx_t* RESTRICT ctx,
+                                              const uint8_t* RESTRICT src, const size_t src_sz,
+                                              uint8_t* RESTRICT dst, const size_t dst_cap);
 int zxc_decompress_chunk_wrapper_safe_default(const zxc_cctx_t* RESTRICT ctx,
                                               const uint8_t* RESTRICT src, const size_t src_sz,
                                               uint8_t* RESTRICT dst, const size_t dst_cap);
@@ -57,9 +60,15 @@ int zxc_decompress_chunk_wrapper_safe_default(const zxc_cctx_t* RESTRICT ctx,
 int zxc_decompress_chunk_wrapper_avx2(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_dict_avx2(const zxc_cctx_t* RESTRICT ctx,
+                                           const uint8_t* RESTRICT src, const size_t src_sz,
+                                           uint8_t* RESTRICT dst, const size_t dst_cap);
 int zxc_decompress_chunk_wrapper_avx512(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                         const size_t src_sz, uint8_t* RESTRICT dst,
                                         const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_dict_avx512(const zxc_cctx_t* RESTRICT ctx,
+                                             const uint8_t* RESTRICT src, const size_t src_sz,
+                                             uint8_t* RESTRICT dst, const size_t dst_cap);
 int zxc_decompress_chunk_wrapper_safe_avx2(const zxc_cctx_t* RESTRICT ctx,
                                            const uint8_t* RESTRICT src, const size_t src_sz,
                                            uint8_t* RESTRICT dst, const size_t dst_cap);
@@ -69,6 +78,9 @@ int zxc_decompress_chunk_wrapper_safe_avx512(const zxc_cctx_t* RESTRICT ctx,
 int zxc_decompress_chunk_wrapper_sse2(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_dict_sse2(const zxc_cctx_t* RESTRICT ctx,
+                                           const uint8_t* RESTRICT src, const size_t src_sz,
+                                           uint8_t* RESTRICT dst, const size_t dst_cap);
 int zxc_decompress_chunk_wrapper_safe_sse2(const zxc_cctx_t* RESTRICT ctx,
                                            const uint8_t* RESTRICT src, const size_t src_sz,
                                            uint8_t* RESTRICT dst, const size_t dst_cap);
@@ -76,6 +88,9 @@ int zxc_decompress_chunk_wrapper_safe_sse2(const zxc_cctx_t* RESTRICT ctx,
 int zxc_decompress_chunk_wrapper_neon(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_dict_neon(const zxc_cctx_t* RESTRICT ctx,
+                                           const uint8_t* RESTRICT src, const size_t src_sz,
+                                           uint8_t* RESTRICT dst, const size_t dst_cap);
 int zxc_decompress_chunk_wrapper_safe_neon(const zxc_cctx_t* RESTRICT ctx,
                                            const uint8_t* RESTRICT src, const size_t src_sz,
                                            uint8_t* RESTRICT dst, const size_t dst_cap);
@@ -231,6 +246,8 @@ typedef int (*zxc_compress_func_t)(zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT
 
 /** @brief Lazily-resolved pointer to the best decompression variant. */
 static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_ptr = (zxc_decompress_func_t)0;
+/** @brief Lazily-resolved pointer to the best dict-decompression variant. */
+static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_dict_ptr = (zxc_decompress_func_t)0;
 /** @brief Lazily-resolved pointer to the best safe-decompression variant. */
 static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_safe_ptr = (zxc_decompress_func_t)0;
 /** @brief Lazily-resolved pointer to the best compression variant. */
@@ -248,38 +265,53 @@ static int zxc_decompress_dispatch_init(const zxc_cctx_t* RESTRICT ctx, const ui
                                         const size_t dst_cap) {
     const zxc_cpu_feature_t cpu = zxc_detect_cpu_features();
     zxc_decompress_func_t zxc_decompress_ptr_local = NULL;
+    zxc_decompress_func_t zxc_decompress_dict_ptr_local = NULL;
 
 #ifndef ZXC_ONLY_DEFAULT
 #if defined(__x86_64__) || defined(_M_X64)
-    if (cpu == ZXC_CPU_AVX512)
+    if (cpu == ZXC_CPU_AVX512) {
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_avx512;
-    else if (cpu == ZXC_CPU_AVX2)
+        zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_avx512;
+    } else if (cpu == ZXC_CPU_AVX2) {
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_avx2;
-    else if (cpu == ZXC_CPU_SSE2)
+        zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_avx2;
+    } else if (cpu == ZXC_CPU_SSE2) {
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_sse2;
-    else
+        zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_sse2;
+    } else {
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
+        zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_default;
+    }
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
     // cppcheck-suppress knownConditionTrueFalse
-    if (cpu == ZXC_CPU_NEON)
+    if (cpu == ZXC_CPU_NEON) {
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_neon;
-    else
+        zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_neon;
+    } else {
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
+        zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_default;
+    }
 #else
     (void)cpu;
     zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
+    zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_default;
 #endif
 #else
     (void)cpu;
     zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
+    zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_default;
 #endif
 
 #if ZXC_USE_C11_ATOMICS
     atomic_store_explicit(&zxc_decompress_ptr, zxc_decompress_ptr_local, memory_order_release);
+    atomic_store_explicit(&zxc_decompress_dict_ptr, zxc_decompress_dict_ptr_local,
+                          memory_order_release);
 #else
     zxc_decompress_ptr = zxc_decompress_ptr_local;
+    zxc_decompress_dict_ptr = zxc_decompress_dict_ptr_local;
 #endif
-    return zxc_decompress_ptr_local(ctx, src, src_sz, dst, dst_cap);
+    return (ctx->dict_size ? zxc_decompress_dict_ptr_local : zxc_decompress_ptr_local)(
+        ctx, src, src_sz, dst, dst_cap);
 }
 // LCOV_EXCL_STOP
 
@@ -390,11 +422,15 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  */
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                  const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
+    /* dict_size is constant for a stream; this per-block branch (outside the decode
+     * loop) routes to the dict variant only when a dictionary is active, so the
+     * no-dict path runs the dict-free chunk wrapper (identical codegen to main). */
 #if ZXC_USE_C11_ATOMICS
-    const zxc_decompress_func_t func =
-        atomic_load_explicit(&zxc_decompress_ptr, memory_order_acquire);
+    const zxc_decompress_func_t func = atomic_load_explicit(
+        ctx->dict_size ? &zxc_decompress_dict_ptr : &zxc_decompress_ptr, memory_order_acquire);
 #else
-    const zxc_decompress_func_t func = zxc_decompress_ptr;
+    const zxc_decompress_func_t func =
+        ctx->dict_size ? zxc_decompress_dict_ptr : zxc_decompress_ptr;
 #endif
     if (UNLIKELY(!func)) return zxc_decompress_dispatch_init(ctx, src, src_sz, dst, dst_cap);
     return func(ctx, src, src_sz, dst, dst_cap);
