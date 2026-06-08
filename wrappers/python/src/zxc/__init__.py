@@ -17,6 +17,13 @@ from ._zxc import (
     pyzxc_max_level,
     pyzxc_default_level,
     pyzxc_version_string,
+    pyzxc_train_dict,
+    pyzxc_dict_id,
+    pyzxc_get_dict_id,
+    pyzxc_dict_get_id,
+    pyzxc_dict_save,
+    pyzxc_dict_load,
+    pyzxc_seekable_set_dict,
     pyzxc_cstream_create,
     pyzxc_cstream_compress,
     pyzxc_cstream_end,
@@ -73,6 +80,14 @@ __all__ = [
     "stream_compress",
     "stream_decompress",
     "get_decompressed_size",
+
+    # Dictionary
+    "train_dict",
+    "dict_id",
+    "get_dict_id",
+    "dict_get_id",
+    "dict_save",
+    "dict_load",
 
     # Push streaming
     "CStream",
@@ -140,21 +155,71 @@ def library_version() -> str:
     return pyzxc_version_string()
 
 
-def compress(data, level = LEVEL_DEFAULT, checksum = False) -> bytes:
+def train_dict(samples, max_size: int = 65535) -> bytes:
+    """Train a dictionary from a corpus of sample buffers.
+
+    Args:
+        samples: A sequence (list/tuple) of bytes-like objects to train from.
+        max_size: Maximum dictionary size in bytes (<= 65535).
+
+    Returns:
+        Raw dictionary content bytes, suitable for ``compress(..., dict=...)``
+        or serialization with :func:`dict_save`.
+    """
+    return pyzxc_train_dict(samples, max_size)
+
+
+def dict_id(content: bytes) -> int:
+    """Return the 32-bit dictionary ID for raw dictionary *content*.
+
+    Returns 0 if *content* is empty.
+    """
+    return pyzxc_dict_id(content)
+
+
+def get_dict_id(archive: bytes) -> int:
+    """Return the dictionary ID a ``.zxc`` *archive* requires (0 if none).
+
+    Only the first 16 bytes of the archive are needed.
+    """
+    return pyzxc_get_dict_id(archive)
+
+
+def dict_get_id(zxd: bytes) -> int:
+    """Return the dictionary ID stored in a ``.zxd`` file (0 if not valid)."""
+    return pyzxc_dict_get_id(zxd)
+
+
+def dict_save(content: bytes) -> bytes:
+    """Serialize raw dictionary *content* into ``.zxd`` file bytes."""
+    return pyzxc_dict_save(content)
+
+
+def dict_load(zxd: bytes):
+    """Parse a ``.zxd`` file and return ``(content, dict_id)``.
+
+    The returned content is an owned copy of the dictionary bytes.
+    """
+    return pyzxc_dict_load(zxd)
+
+
+def compress(data, level = LEVEL_DEFAULT, checksum = False, dict = None) -> bytes:
     """Compress a bytes object.
 
     Args:
         data: Bytes-like object to compress.
         level: Compression level. Use constants like LEVEL_FASTEST, LEVEL_DEFAULT, etc.
         checksum: If True, append a checksum for integrity verification.
+        dict: Optional pre-trained dictionary content (bytes) to prime the
+            compressor. Must be passed (matching by ID) to `decompress`.
 
     Returns:
         Compressed bytes.
-    
+
     Note:
         This function operates entirely in-memory. For streaming files, use `stream_compress`.
     """
-    return pyzxc_compress(data, level, checksum)
+    return pyzxc_compress(data, level, checksum, dict)
 
 
 def get_decompressed_size(data: bytes) -> int:
@@ -172,13 +237,16 @@ def get_decompressed_size(data: bytes) -> int:
     return pyzxc_get_decompressed_size(data)
 
 
-def decompress(data, decompress_size=None, checksum=False) -> bytes:
+def decompress(data, decompress_size=None, checksum=False, dict=None) -> bytes:
     """Decompress a bytes object.
 
     Args:
         data: Compressed bytes.
         decompress_size: Expected size. If None, read from header (slower/safer).
         checksum: If True, verify the checksum appended during compression.
+        dict: Pre-trained dictionary content (bytes) required if the archive
+            was compressed with one. Must match the dictionary ID stored in
+            the archive header.
 
     Returns:
         Decompressed bytes.
@@ -186,9 +254,9 @@ def decompress(data, decompress_size=None, checksum=False) -> bytes:
     if decompress_size is None:
         decompress_size = get_decompressed_size(data)
 
-    return pyzxc_decompress(data, decompress_size, checksum)
+    return pyzxc_decompress(data, decompress_size, checksum, dict)
 
-def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False, seekable=False) -> int:
+def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False, seekable=False, dict=None) -> int:
     """Compress data from src to dst (file-like objects).
 
     Args:
@@ -198,6 +266,8 @@ def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False, 
         level: Compression level. Use constants like LEVEL_FASTEST, LEVEL_DEFAULT, etc.
         checksum: If True, append a checksum for integrity verification.
         seekable: If True, append a seek table for random-access decompression.
+        dict: Optional pre-trained dictionary content (bytes). The archive
+            records its dictionary ID; decompression must supply the same dict.
 
     Returns:
         Number of bytes written to `dst`.
@@ -222,7 +292,7 @@ def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False, 
     if hasattr(dst, "flush"):
         dst.flush()
 
-    return pyzxc_stream_compress(src, dst, n_threads, level, checksum, seekable)
+    return pyzxc_stream_compress(src, dst, n_threads, level, checksum, seekable, dict)
 
 def stream_decompress(src, dst, n_threads=0, checksum=False) -> int:
     """Decompress data from src to dst (file-like objects).
@@ -318,6 +388,17 @@ class Seekable:
         if self._handle is None:
             raise ValueError("Seekable is closed")
         return pyzxc_seekable_block_decomp_size(self._handle, block_idx)
+
+    def set_dict(self, dict: bytes) -> None:
+        """Attach a pre-trained dictionary to this seekable handle.
+
+        Required before :meth:`decompress_range` when the archive was
+        compressed with a dictionary. The content is copied internally, so
+        *dict* may be freed after this call.
+        """
+        if self._handle is None:
+            raise ValueError("Seekable is closed")
+        pyzxc_seekable_set_dict(self._handle, dict)
 
     def decompress_range(self, offset: int, length: int, *, n_threads: int = 0) -> bytes:
         if self._handle is None:

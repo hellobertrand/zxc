@@ -199,6 +199,32 @@ impl Seekable {
         Some(sz)
     }
 
+    /// Attaches a pre-trained dictionary to this seekable handle.
+    ///
+    /// Required to decompress an archive that was produced with a
+    /// dictionary. Pass the same raw dictionary content used at compression
+    /// time. The content is copied internally by the library, so the slice
+    /// need not outlive the call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] if the dictionary is invalid or its ID does not
+    /// match the one the archive requires.
+    pub fn set_dict(&mut self, dict: &[u8]) -> Result<()> {
+        let rc = unsafe {
+            zxc_sys::zxc_seekable_set_dict(
+                self.inner.as_ptr(),
+                dict.as_ptr() as *const c_void,
+                dict.len(),
+            )
+        };
+        if rc < 0 {
+            Err(error_from_code(rc as i64))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Decompresses `len` bytes starting at `offset` (in the original
     /// uncompressed byte stream) into `dst`.
     ///
@@ -361,6 +387,7 @@ mod tests {
             level: Level::Default,
             checksum: true,
             seekable: true,
+            ..Default::default()
         };
         compress_with_options(data, &opts).expect("compression failed")
     }
@@ -481,6 +508,60 @@ mod tests {
         // check the Err path).
         let r = VecReader::new(vec![0u8; 64]);
         assert!(Seekable::open_reader(r).is_err());
+    }
+
+    #[test]
+    fn set_dict_range_roundtrip() {
+        use crate::{train_dict, ZXC_DICT_SIZE_MAX};
+
+        // Train a dictionary from repetitive records, then build a seekable,
+        // dict-compressed archive over many such records.
+        let records: Vec<Vec<u8>> = (0..64)
+            .map(|i| {
+                format!("record#{i:04}:status=ok;region=eu-west;payload=AAAAAAAAAAAAAAAA;\n")
+                    .into_bytes()
+            })
+            .collect();
+        let refs: Vec<&[u8]> = records.iter().map(|r| r.as_slice()).collect();
+        let dict = train_dict(&refs, ZXC_DICT_SIZE_MAX).expect("train_dict failed");
+
+        let mut payload = Vec::new();
+        for _ in 0..512 {
+            for r in &records {
+                payload.extend_from_slice(r);
+            }
+        }
+
+        let opts = CompressOptions {
+            level: Level::Default,
+            checksum: true,
+            seekable: true,
+            dict: Some(dict.clone()),
+        };
+        let archive = compress_with_options(&payload, &opts).expect("compression failed");
+
+        let mut s = Seekable::from_bytes(archive).expect("open failed");
+        s.set_dict(&dict).expect("set_dict failed");
+
+        assert_eq!(s.decompressed_size(), payload.len() as u64);
+
+        // Full-range roundtrip.
+        let mut out = vec![0u8; payload.len()];
+        let n = s
+            .decompress_range(&mut out, 0, payload.len())
+            .expect("full range failed");
+        assert_eq!(n, payload.len());
+        assert_eq!(out, payload);
+
+        // Sub-range roundtrip.
+        let start = 5000usize;
+        let len = 8192usize;
+        let mut out = vec![0u8; len];
+        let n = s
+            .decompress_range(&mut out, start as u64, len)
+            .expect("sub range failed");
+        assert_eq!(n, len);
+        assert_eq!(out, payload[start..start + len]);
     }
 
     #[test]

@@ -126,6 +126,13 @@ pub struct CompressOptions {
 
     /// Enable seek table for random-access decompression (default: `false`)
     pub seekable: bool,
+
+    /// Pre-trained dictionary content (default: `None`).
+    ///
+    /// Set to the raw dictionary content bytes (as returned by
+    /// [`train_dict`] or [`dict_load`]). The decoder must be given the same
+    /// dictionary to decompress the resulting archive.
+    pub dict: Option<Vec<u8>>,
 }
 
 impl Default for CompressOptions {
@@ -134,6 +141,7 @@ impl Default for CompressOptions {
             level: Level::Default,
             checksum: true,
             seekable: false,
+            dict: None,
         }
     }
 }
@@ -158,6 +166,12 @@ impl CompressOptions {
         self.seekable = true;
         self
     }
+
+    /// Attach a pre-trained dictionary (raw content bytes).
+    pub fn with_dict(mut self, dict: impl Into<Vec<u8>>) -> Self {
+        self.dict = Some(dict.into());
+        self
+    }
 }
 
 // =============================================================================
@@ -169,6 +183,12 @@ impl CompressOptions {
 pub struct DecompressOptions {
     /// Verify checksum during decompression (default: `true`)
     pub verify_checksum: bool,
+
+    /// Pre-trained dictionary content (default: `None`).
+    ///
+    /// Must match the dictionary used at compression time. Required to
+    /// decompress an archive that was produced with a dictionary.
+    pub dict: Option<Vec<u8>>,
 }
 
 impl DecompressOptions {
@@ -176,7 +196,14 @@ impl DecompressOptions {
     pub fn skip_checksum() -> Self {
         Self {
             verify_checksum: false,
+            dict: None,
         }
+    }
+
+    /// Attach a pre-trained dictionary (raw content bytes).
+    pub fn with_dict(mut self, dict: impl Into<Vec<u8>>) -> Self {
+        self.dict = Some(dict.into());
+        self
     }
 }
 
@@ -185,12 +212,16 @@ impl DecompressOptions {
 // =============================================================================
 
 mod ctx;
+mod dict;
 mod error;
 mod file;
 mod oneshot;
 mod pstream;
 pub mod seekable;
 mod stdio;
+
+pub use dict::{dict_get_id, dict_id, dict_load, dict_save, get_dict_id, train_dict};
+pub use zxc_sys::ZXC_DICT_SIZE_MAX;
 
 pub use error::{Error, Result};
 pub use oneshot::{

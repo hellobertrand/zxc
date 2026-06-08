@@ -95,6 +95,98 @@ function compressBound(inputSize) {
 }
 
 /**
+ * Normalize an optional dictionary value into a Buffer (or undefined).
+ * Accepts a Buffer or Uint8Array; rejects other truthy types.
+ * @param {Buffer|Uint8Array|undefined|null} dict
+ * @returns {Buffer|undefined}
+ */
+function toDictBuffer(dict) {
+    if (dict === undefined || dict === null) return undefined;
+    if (Buffer.isBuffer(dict)) return dict;
+    if (dict instanceof Uint8Array) return Buffer.from(dict.buffer, dict.byteOffset, dict.byteLength);
+    throw new TypeError('dict must be a Buffer or Uint8Array');
+}
+
+/**
+ * Train a pre-trained dictionary from a corpus of sample Buffers.
+ *
+ * @param {Array<Buffer|Uint8Array>} samples - Non-empty array of sample buffers.
+ * @param {number} [maxSize=65535] - Maximum dictionary content size in bytes.
+ * @returns {Buffer} Raw dictionary content suitable for `options.dict`.
+ */
+function trainDict(samples, maxSize = native.DICT_SIZE_MAX) {
+    if (!Array.isArray(samples) || samples.length === 0) {
+        throw new TypeError('samples must be a non-empty array of Buffers');
+    }
+    const bufs = samples.map((s) => {
+        if (Buffer.isBuffer(s)) return s;
+        if (s instanceof Uint8Array) return Buffer.from(s.buffer, s.byteOffset, s.byteLength);
+        throw new TypeError('samples entries must be Buffers or Uint8Arrays');
+    });
+    return native.trainDict(bufs, maxSize);
+}
+
+/**
+ * Compute the 32-bit dictionary ID for raw dictionary content.
+ * @param {Buffer} content
+ * @returns {number}
+ */
+function dictId(content) {
+    if (!Buffer.isBuffer(content)) {
+        throw new TypeError('content must be a Buffer');
+    }
+    return native.dictId(content);
+}
+
+/**
+ * Returns the dictionary ID referenced by a `.zxc` archive, or 0 if none.
+ * @param {Buffer} archive
+ * @returns {number}
+ */
+function getDictId(archive) {
+    if (!Buffer.isBuffer(archive)) {
+        throw new TypeError('archive must be a Buffer');
+    }
+    return native.getDictId(archive);
+}
+
+/**
+ * Returns the dictionary ID stored in a `.zxd` dictionary file, or 0 if invalid.
+ * @param {Buffer} zxd
+ * @returns {number}
+ */
+function dictGetId(zxd) {
+    if (!Buffer.isBuffer(zxd)) {
+        throw new TypeError('zxd must be a Buffer');
+    }
+    return native.dictGetId(zxd);
+}
+
+/**
+ * Serialize raw dictionary content into the `.zxd` file format.
+ * @param {Buffer} content
+ * @returns {Buffer} The encoded `.zxd` file.
+ */
+function dictSave(content) {
+    if (!Buffer.isBuffer(content)) {
+        throw new TypeError('content must be a Buffer');
+    }
+    return native.dictSave(content);
+}
+
+/**
+ * Load and validate a `.zxd` dictionary file.
+ * @param {Buffer} zxd
+ * @returns {{ content: Buffer, id: number }}
+ */
+function dictLoad(zxd) {
+    if (!Buffer.isBuffer(zxd)) {
+        throw new TypeError('zxd must be a Buffer');
+    }
+    return native.dictLoad(zxd);
+}
+
+/**
  * Compress a Buffer using the ZXC algorithm.
  *
  * @param {Buffer} data - Buffer to compress.
@@ -102,6 +194,7 @@ function compressBound(inputSize) {
  * @param {number} [options.level=LEVEL_DEFAULT] - Compression level (1-6).
  * @param {boolean} [options.checksum=false] - Enable checksum verification.
  * @param {boolean} [options.seekable=false] - Enable seek table for random-access decompression.
+ * @param {Buffer|Uint8Array} [options.dict] - Pre-trained dictionary content (raw bytes).
  * @returns {Buffer} Compressed data.
  */
 function compress(data, options = {}) {
@@ -112,8 +205,9 @@ function compress(data, options = {}) {
     const level = options.level !== undefined ? options.level : LEVEL_DEFAULT;
     const checksum = options.checksum !== undefined ? options.checksum : false;
     const seekable = options.seekable !== undefined ? options.seekable : false;
+    const dict = toDictBuffer(options.dict);
 
-    return native.compress(data, level, checksum, seekable);
+    return native.compress(data, level, checksum, seekable, dict);
 }
 
 /**
@@ -137,6 +231,7 @@ function getDecompressedSize(data) {
  * @param {object} [options] - Decompression options.
  * @param {number} [options.size] - Expected decompressed size. If omitted, read from header.
  * @param {boolean} [options.checksum=false] - Enable checksum verification.
+ * @param {Buffer|Uint8Array} [options.dict] - Pre-trained dictionary content (raw bytes).
  * @returns {Buffer} Decompressed data.
  */
 function decompress(data, options = {}) {
@@ -145,13 +240,14 @@ function decompress(data, options = {}) {
     }
 
     const checksum = options.checksum !== undefined ? options.checksum : false;
+    const dict = toDictBuffer(options.dict);
 
     let size = options.size;
     if (size === undefined) {
         size = getDecompressedSize(data);
     }
 
-    return native.decompress(data, size, checksum);
+    return native.decompress(data, size, checksum, dict);
 }
 
 /**
@@ -390,6 +486,14 @@ module.exports = {
     decompress,
     compressBound,
     getDecompressedSize,
+
+    // Dictionary API
+    trainDict,
+    dictId,
+    getDictId,
+    dictGetId,
+    dictSave,
+    dictLoad,
 
     // Push streaming classes
     CStream,

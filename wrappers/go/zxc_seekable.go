@@ -53,6 +53,7 @@ type Seekable struct {
 	ptr     *C.zxc_seekable
 	file    *C.FILE        // set when opened via Open
 	cbuf    unsafe.Pointer // C-owned copy of source bytes (OpenBytes)
+	dbuf    unsafe.Pointer // C-owned copy of the dictionary content (SetDict)
 	rhandle cgo.Handle     // valid when opened via OpenReader; zero otherwise
 	hasRH   bool           // true when rhandle is set (cgo.Handle 0 is itself valid)
 }
@@ -178,6 +179,10 @@ func (s *Seekable) Close() error {
 		C.free(s.cbuf)
 		s.cbuf = nil
 	}
+	if s.dbuf != nil {
+		C.free(s.dbuf)
+		s.dbuf = nil
+	}
 	if s.hasRH {
 		s.rhandle.Delete()
 		s.hasRH = false
@@ -255,6 +260,44 @@ func (s *Seekable) DecompressRange(dst []byte, offset uint64, length int) (int, 
 		return 0, errorFromCode(res)
 	}
 	return int(res), nil
+}
+
+// SetDict attaches a pre-trained dictionary to the seekable handle so that
+// subsequent [Seekable.DecompressRange] calls can decode blocks that were
+// compressed with that dictionary. It must be called before decoding any
+// range from a dictionary-compressed archive.
+//
+// The dictionary content must match the one used at compression time; its ID
+// is validated against the archive header. The content is copied into native
+// memory and released by [Seekable.Close]. Passing an empty slice is an error.
+func (s *Seekable) SetDict(dict []byte) error {
+	if s == nil || s.ptr == nil {
+		return ErrNullInput
+	}
+	if len(dict) == 0 {
+		return ErrSrcTooSmall
+	}
+
+	// Copy the dictionary into C-owned memory: the library keeps the pointer
+	// for the lifetime of the handle, so it must not reference a Go slice.
+	buf := C.malloc(C.size_t(len(dict)))
+	if buf == nil {
+		return ErrMemory
+	}
+	C.memcpy(buf, unsafe.Pointer(&dict[0]), C.size_t(len(dict)))
+
+	rc := C.zxc_seekable_set_dict(s.ptr, buf, C.size_t(len(dict)))
+	if rc < 0 {
+		C.free(buf)
+		return errorFromCode(C.int64_t(rc))
+	}
+
+	// Replace any previously-set dictionary buffer.
+	if s.dbuf != nil {
+		C.free(s.dbuf)
+	}
+	s.dbuf = buf
+	return nil
 }
 
 // ============================================================================

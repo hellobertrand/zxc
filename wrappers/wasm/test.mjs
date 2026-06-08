@@ -416,6 +416,83 @@ async function main() {
         assert(table.length === tableSize, `writeSeekTable bytes=${table.length} (expected ${tableSize})`);
     }
 
+    // --- 11. Dictionary API ----------------------------------------------
+    console.log('\n11. Dictionary API');
+    {
+        const { default: createZXC } = await import('./zxc_wasm.js');
+        const zxc = await createZXC({}, ZXCModule);
+
+        // Build a corpus of similar JSON-like samples so training has shared
+        // structure to extract.
+        const samples = [];
+        for (let k = 0; k < 16; k++) {
+            const s = `{"id":${k},"type":"event","payload":{"user":"alice","action":"login","region":"eu-west"}}`;
+            samples.push(new TextEncoder().encode(s));
+        }
+
+        const dict = zxc.trainDict(samples);
+        assert(dict instanceof Uint8Array && dict.length > 0,
+            `trainDict produced ${dict.length}-byte dictionary`);
+
+        // Compress a fresh similar payload with the dict, decompress with it.
+        const payload = new TextEncoder().encode(
+            '{"id":999,"type":"event","payload":{"user":"alice","action":"login","region":"eu-west"}}');
+        const compressed = zxc.compress(payload, { dict });
+        assert(compressed.length > 0, `dict-compressed to ${compressed.length} bytes`);
+
+        const decoded = zxc.decompress(compressed, { dict });
+        assert(arraysEqual(decoded, payload), 'dict compress/decompress byte-exact roundtrip');
+
+        // Decompressing a dict archive WITHOUT the dict must fail.
+        let threwNoDict = false;
+        try {
+            zxc.decompress(compressed);
+        } catch (_) {
+            threwNoDict = true;
+        }
+        assert(threwNoDict, 'decompress of dict archive without dict throws');
+
+        // ID consistency: dictId(content) == getDictId(archive) == dictGetId(.zxd).
+        const idContent = zxc.dictId(dict);
+        const idArchive = zxc.getDictId(compressed);
+        assert(idContent !== 0, `dictId(content)=${idContent}`);
+        assert(idContent === idArchive,
+            `dictId == getDictId(archive) (${idContent} == ${idArchive})`);
+
+        // dictSave -> dictGetId / dictLoad roundtrip.
+        const zxd = zxc.dictSave(dict);
+        assert(zxd instanceof Uint8Array && zxd.length > dict.length,
+            `dictSave produced ${zxd.length}-byte .zxd`);
+        const idZxd = zxc.dictGetId(zxd);
+        assert(idContent === idZxd,
+            `dictId == dictGetId(dictSave(content)) (${idContent} == ${idZxd})`);
+
+        const loaded = zxc.dictLoad(zxd);
+        assert(loaded.id === idContent, `dictLoad id matches (${loaded.id})`);
+        assert(arraysEqual(loaded.content, dict), 'dictSave -> dictLoad content roundtrip');
+
+        // Seekable + setDict + range roundtrip on a dict-compressed archive.
+        const bigPayload = new Uint8Array(48 * 1024);
+        {
+            const unit = new TextEncoder().encode(
+                '{"user":"alice","action":"login","region":"eu-west"}');
+            for (let i = 0; i < bigPayload.length; i++) bigPayload[i] = unit[i % unit.length];
+        }
+        const seekArchive = zxc.compress(bigPayload, { dict, seekable: true });
+        const s = zxc.createSeekable(seekArchive);
+        try {
+            s.setDict(dict);
+            const full = s.decompressRange(0, bigPayload.length);
+            assert(arraysEqual(full, bigPayload), 'seekable+dict full-range byte-exact');
+            const off = 4096, len = 8192;
+            const mid = s.decompressRange(off, len);
+            assert(arraysEqual(mid, bigPayload.subarray(off, off + len)),
+                'seekable+dict mid-range byte-exact');
+        } finally {
+            s.free();
+        }
+    }
+
     // --- Summary ---
     console.log(`\n${'='.repeat(40)}`);
     console.log(`Results: ${passed} passed, ${failed} failed`);

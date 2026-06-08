@@ -11,7 +11,10 @@ package zxc
 #include "zxc.h"
 */
 import "C"
-import "unsafe"
+import (
+	"runtime"
+	"unsafe"
+)
 
 // ============================================================================
 // Buffer API
@@ -38,6 +41,9 @@ func Compress(data []byte, opts ...Option) ([]byte, error) {
 	if o.checksum {
 		copts.checksum_enabled = 1
 	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	setCompressDict(&copts, o, &pinner)
 
 	// &data[0] panics on an empty slice; pass a valid non-nil pointer instead
 	// (the C side reads 0 bytes) so empty input yields a minimal 36-byte frame.
@@ -82,6 +88,9 @@ func CompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 	if o.checksum {
 		copts.checksum_enabled = 1
 	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	setCompressDict(&copts, o, &pinner)
 
 	written := C.zxc_compress(
 		unsafe.Pointer(&data[0]),
@@ -136,6 +145,9 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 	if o.checksum {
 		dopts.checksum_enabled = 1
 	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	setDecompressDict(&dopts, o, &pinner)
 
 	size := uint64(C.zxc_get_decompressed_size(
 		unsafe.Pointer(&data[0]),
@@ -198,6 +210,9 @@ func DecompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 	if o.checksum {
 		dopts.checksum_enabled = 1
 	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	setDecompressDict(&dopts, o, &pinner)
 
 	written := C.zxc_decompress(
 		unsafe.Pointer(&data[0]),

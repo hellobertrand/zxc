@@ -33,7 +33,8 @@ static Napi::Value CompressBound(const Napi::CallbackInfo& info) {
 }
 
 // =============================================================================
-// compress(buffer: Buffer, level?: number, checksum?: boolean, seekable?: boolean): Buffer
+// compress(buffer: Buffer, level?: number, checksum?: boolean, seekable?: boolean,
+//          dict?: Buffer): Buffer
 // =============================================================================
 static Napi::Value Compress(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
@@ -65,6 +66,16 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
         seekable = info[3].As<Napi::Boolean>().Value() ? 1 : 0;
     }
 
+    const void* dict = nullptr;
+    size_t dict_size = 0;
+    if (info.Length() >= 5 && info[4].IsBuffer()) {
+        Napi::Buffer<uint8_t> dict_buf = info[4].As<Napi::Buffer<uint8_t>>();
+        if (dict_buf.Length() > 0) {
+            dict = dict_buf.Data();
+            dict_size = dict_buf.Length();
+        }
+    }
+
     uint64_t bound = zxc_compress_bound(src_size);
     Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, static_cast<size_t>(bound));
 
@@ -72,6 +83,8 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     opts.level = level;
     opts.checksum_enabled = checksum;
     opts.seekable = seekable;
+    opts.dict = dict;
+    opts.dict_size = dict_size;
 
     int64_t nwritten =
         zxc_compress(src, src_size, dst_buf.Data(), static_cast<size_t>(bound), &opts);
@@ -94,7 +107,8 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
 }
 
 // =============================================================================
-// decompress(buffer: Buffer, decompressSize: number, checksum?: boolean): Buffer
+// decompress(buffer: Buffer, decompressSize: number, checksum?: boolean,
+//            dict?: Buffer): Buffer
 // =============================================================================
 static Napi::Value Decompress(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
@@ -115,13 +129,25 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
         checksum = info[2].As<Napi::Boolean>().Value() ? 1 : 0;
     }
 
+    const void* dict = nullptr;
+    size_t dict_size = 0;
+    if (info.Length() >= 4 && info[3].IsBuffer()) {
+        Napi::Buffer<uint8_t> dict_buf = info[3].As<Napi::Buffer<uint8_t>>();
+        if (dict_buf.Length() > 0) {
+            dict = dict_buf.Data();
+            dict_size = dict_buf.Length();
+        }
+    }
+
     Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, decompress_size);
-    
+
     static uint8_t kEmptyDst = 0;
     void* dst = decompress_size > 0 ? static_cast<void*>(dst_buf.Data()) : static_cast<void*>(&kEmptyDst);
 
     zxc_decompress_opts_t dopts = {0};
     dopts.checksum_enabled = checksum;
+    dopts.dict = dict;
+    dopts.dict_size = dict_size;
 
     int64_t nwritten = zxc_decompress(src, src_size, dst, decompress_size, &dopts);
 
@@ -152,6 +178,134 @@ static Napi::Value GetDecompressedSize(const Napi::CallbackInfo& info) {
     uint64_t size = zxc_get_decompressed_size(src_buf.Data(), src_buf.Length());
 
     return Napi::Number::New(env, static_cast<double>(size));
+}
+
+// =============================================================================
+// Dictionary API
+// =============================================================================
+
+static Napi::Value ThrowZxcError(Napi::Env env, int code);
+
+// trainDict(samples: Buffer[], maxSize?: number): Buffer
+static Napi::Value TrainDict(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsArray()) {
+        Napi::TypeError::New(env, "Expected an array of Buffers (samples)")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    Napi::Array arr = info[0].As<Napi::Array>();
+    uint32_t n = arr.Length();
+    if (n == 0) {
+        Napi::TypeError::New(env, "samples must be a non-empty array")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    std::vector<const void*> samples(n);
+    std::vector<size_t> sizes(n);
+    for (uint32_t i = 0; i < n; ++i) {
+        Napi::Value v = arr.Get(i);
+        if (!v.IsBuffer()) {
+            Napi::TypeError::New(env, "samples entries must be Buffers")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        Napi::Buffer<uint8_t> b = v.As<Napi::Buffer<uint8_t>>();
+        samples[i] = b.Data();
+        sizes[i] = b.Length();
+    }
+
+    size_t capacity = ZXC_DICT_SIZE_MAX;
+    if (info.Length() >= 2 && info[1].IsNumber()) {
+        int64_t requested = info[1].As<Napi::Number>().Int64Value();
+        if (requested > 0 && static_cast<size_t>(requested) < capacity) {
+            capacity = static_cast<size_t>(requested);
+        }
+    }
+
+    std::vector<uint8_t> dict_buf(capacity);
+    int64_t r = zxc_train_dict(samples.data(), sizes.data(), n, dict_buf.data(), capacity);
+    if (r < 0) {
+        return ThrowZxcError(env, static_cast<int>(r));
+    }
+    return Napi::Buffer<uint8_t>::Copy(env, dict_buf.data(), static_cast<size_t>(r));
+}
+
+// dictId(content: Buffer): number
+static Napi::Value DictId(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsBuffer()) {
+        Napi::TypeError::New(env, "Expected a Buffer (content)").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
+    uint32_t id = zxc_dict_id(b.Data(), b.Length());
+    return Napi::Number::New(env, static_cast<double>(id));
+}
+
+// getDictId(archive: Buffer): number  (from .zxc)
+static Napi::Value GetDictId(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsBuffer()) {
+        Napi::TypeError::New(env, "Expected a Buffer (archive)").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
+    uint32_t id = zxc_get_dict_id(b.Data(), b.Length());
+    return Napi::Number::New(env, static_cast<double>(id));
+}
+
+// dictGetId(zxd: Buffer): number  (from .zxd)
+static Napi::Value DictGetId(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsBuffer()) {
+        Napi::TypeError::New(env, "Expected a Buffer (.zxd)").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
+    uint32_t id = zxc_dict_get_id(b.Data(), b.Length());
+    return Napi::Number::New(env, static_cast<double>(id));
+}
+
+// dictSave(content: Buffer): Buffer  (.zxd)
+static Napi::Value DictSave(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsBuffer()) {
+        Napi::TypeError::New(env, "Expected a Buffer (content)").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
+    size_t cap = zxc_dict_save_bound(b.Length());
+    std::vector<uint8_t> out(cap);
+    int64_t r = zxc_dict_save(b.Data(), b.Length(), out.data(), cap);
+    if (r < 0) {
+        return ThrowZxcError(env, static_cast<int>(r));
+    }
+    return Napi::Buffer<uint8_t>::Copy(env, out.data(), static_cast<size_t>(r));
+}
+
+// dictLoad(zxd: Buffer): { content: Buffer, id: number }
+static Napi::Value DictLoad(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsBuffer()) {
+        Napi::TypeError::New(env, "Expected a Buffer (.zxd)").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
+    const void* content = nullptr;
+    size_t content_size = 0;
+    uint32_t dict_id = 0;
+    int r = zxc_dict_load(b.Data(), b.Length(), &content, &content_size, &dict_id);
+    if (r < 0) {
+        return ThrowZxcError(env, r);
+    }
+    // content points INTO b's data (zero-copy); copy into a new Buffer.
+    Napi::Object result = Napi::Object::New(env);
+    result.Set("content", Napi::Buffer<uint8_t>::Copy(
+                              env, static_cast<const uint8_t*>(content), content_size));
+    result.Set("id", Napi::Number::New(env, static_cast<double>(dict_id)));
+    return result;
 }
 
 // =============================================================================
@@ -480,6 +634,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
                 InstanceMethod("blockCompressedSize", &SeekableWrap::BlockCompressedSize),
                 InstanceMethod("blockDecompressedSize", &SeekableWrap::BlockDecompressedSize),
                 InstanceMethod("decompressRange", &SeekableWrap::DecompressRange),
+                InstanceMethod("setDict", &SeekableWrap::SetDict),
                 InstanceMethod("close", &SeekableWrap::Close),
             });
     }
@@ -657,6 +812,21 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         return Napi::Buffer<uint8_t>::Copy(env, out.Data(), static_cast<size_t>(r));
     }
 
+    Napi::Value SetDict(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+        if (!requireOpen(env)) return env.Undefined();
+        if (info.Length() < 1 || !info[0].IsBuffer()) {
+            Napi::TypeError::New(env, "Expected a Buffer (dict)").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        Napi::Buffer<uint8_t> dict_buf = info[0].As<Napi::Buffer<uint8_t>>();
+        int r = zxc_seekable_set_dict(s_, dict_buf.Data(), dict_buf.Length());
+        if (r < 0) {
+            return ThrowZxcError(env, r);
+        }
+        return env.Undefined();
+    }
+
     Napi::Value Close(const Napi::CallbackInfo& info) {
         if (s_) {
             zxc_seekable_free(s_);
@@ -729,6 +899,15 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("getDecompressedSize",
                 Napi::Function::New(env, GetDecompressedSize, "getDecompressedSize"));
     exports.Set("errorName", Napi::Function::New(env, ErrorName, "errorName"));
+
+    // Dictionary API
+    exports.Set("trainDict", Napi::Function::New(env, TrainDict, "trainDict"));
+    exports.Set("dictId", Napi::Function::New(env, DictId, "dictId"));
+    exports.Set("getDictId", Napi::Function::New(env, GetDictId, "getDictId"));
+    exports.Set("dictGetId", Napi::Function::New(env, DictGetId, "dictGetId"));
+    exports.Set("dictSave", Napi::Function::New(env, DictSave, "dictSave"));
+    exports.Set("dictLoad", Napi::Function::New(env, DictLoad, "dictLoad"));
+    exports.Set("DICT_SIZE_MAX", Napi::Number::New(env, ZXC_DICT_SIZE_MAX));
 
     // Library info helpers
     exports.Set("minLevel", Napi::Function::New(env, MinLevel, "minLevel"));
