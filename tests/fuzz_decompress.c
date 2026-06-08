@@ -5,6 +5,23 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file fuzz_decompress.c
+ * @brief Fuzzer for the one-shot decompressor on untrusted input.
+ *
+ * The decoder is the security-critical surface: it parses attacker-controlled
+ * frames, so it must never crash, over-read, or over-write regardless of how
+ * malformed the input is. This is a one-way target -- the fuzzer bytes are fed
+ * straight to zxc_decompress() with no preceding compression step.
+ *
+ * Strategy: query zxc_get_decompressed_size() to size the output buffer when
+ * the header advertises a plausible length (clamped to the static cap), then
+ * call zxc_decompress() on the raw bytes. Correctness is enforced by the
+ * sanitizers (ASan/UBSan) catching any out-of-bounds access; truncated,
+ * corrupt, and adversarial frames are all expected to return an error rather
+ * than misbehave.
+ */
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
