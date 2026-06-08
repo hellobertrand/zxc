@@ -335,6 +335,39 @@ static ZXC_ALWAYS_INLINE __m128i zxc_mm_prefix_sum_epi32(__m128i v) {
  * ========================================================================== */
 
 /**
+ * @brief Copies @p ll literal bytes from @p src to @p dst using 32-byte wild copies.
+ *
+ * Writes in @ref ZXC_PAD_SIZE-byte chunks and may **overshoot** by up to
+ * @ref ZXC_PAD_SIZE - 1 bytes past @p ll; the caller must guarantee @p dst has at
+ * least @ref ZXC_PAD_SIZE bytes of writable headroom (the unrolled loops and the
+ * trailing-literal margins ensure this). Pointers are taken by value and the
+ * caller advances its own cursors by @p ll, keeping them in registers on the hot
+ * path.
+ *
+ * @param[out] dst Output cursor. Must not overlap @p src and must have
+ *                 @ref ZXC_PAD_SIZE bytes of overshoot headroom.
+ * @param[in]  src Literal-stream source. Must not overlap @p dst (RESTRICT).
+ * @param[in]  ll  Number of literal bytes to copy.
+ */
+static ZXC_ALWAYS_INLINE void zxc_decode_copy_literals(uint8_t* RESTRICT dst,
+                                                       const uint8_t* RESTRICT src,
+                                                       const uint64_t ll) {
+    zxc_copy32(dst, src);
+    if (UNLIKELY(ll > ZXC_PAD_SIZE)) {
+        dst += ZXC_PAD_SIZE;
+        src += ZXC_PAD_SIZE;
+        size_t rem = ll - ZXC_PAD_SIZE;
+        while (rem > ZXC_PAD_SIZE) {
+            zxc_copy32(dst, src);
+            dst += ZXC_PAD_SIZE;
+            src += ZXC_PAD_SIZE;
+            rem -= ZXC_PAD_SIZE;
+        }
+        zxc_copy32(dst, src);
+    }
+}
+
+/**
  * @brief Copies an @p ml-byte LZ match from @c d_ptr-off to @p d_ptr, handling overlap.
  *
  * The source @c d_ptr-off may overlap the destination (the LZ repeat case), so the
