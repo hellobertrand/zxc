@@ -42,7 +42,7 @@ jobs:
       fail-fast: false
       matrix:
         sanitizer: [address, undefined]
-        fuzzer: [decompress, roundtrip, seekable, pstream]
+        fuzzer: [decompress, roundtrip, seekable, pstream, dict]
 
     steps:
     - name: Checkout Repository
@@ -132,7 +132,7 @@ jobs:
           CFLAGS="-g -O1 -fprofile-instr-generate -fcoverage-mapping"
           DEFS="-DZXC_FUNCTION_SUFFIX=_default -DZXC_ONLY_DEFAULT"
           INCLUDES="-I include -I src/lib/vendors"
-          SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_huffman.c src/lib/zxc_seekable.c src/lib/zxc_pstream.c"
+          SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_dict.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_huffman.c src/lib/zxc_seekable.c src/lib/zxc_pstream.c"
 
           clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_roundtrip.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_roundtrip
@@ -145,6 +145,9 @@ jobs:
 
           clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_pstream.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_pstream
+
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_dict.c \
+            -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_dict
 
       - name: Replay Corpora
         run: |

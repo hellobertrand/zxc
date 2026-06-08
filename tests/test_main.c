@@ -113,6 +113,26 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_error_name),
     TEST_CASE(test_library_info_api),
 
+    /* --- Dictionary --- */
+    TEST_CASE(test_dict_zxd_roundtrip),
+    TEST_CASE(test_dict_id_deterministic),
+    TEST_CASE(test_dict_get_id_apis),
+    TEST_CASE(test_dict_buffer_roundtrip),
+    TEST_CASE(test_dict_block_roundtrip),
+    TEST_CASE(test_dict_block_safe_roundtrip),
+    TEST_CASE(test_dict_mismatch_error),
+    TEST_CASE(test_dict_required_error),
+    TEST_CASE(test_dict_no_dict_compat),
+    TEST_CASE(test_dict_stream_roundtrip),
+    TEST_CASE(test_dict_large_dict_roundtrip),
+    TEST_CASE(test_dict_safe_loop_backref),
+    TEST_CASE(test_dict_seekable_roundtrip),
+    TEST_CASE(test_dict_train_roundtrip),
+    TEST_CASE(test_dict_train_no_frequent_patterns),
+    TEST_CASE(test_dict_seekable_mt_roundtrip),
+    TEST_CASE(test_dict_stream_dict_id_checks),
+    TEST_CASE(test_dict_seekable_dict_id_checks),
+
     /* --- Seekable (single-threaded) --- */
     TEST_CASE(test_seekable_table_sizes),
     TEST_CASE(test_seekable_table_write),

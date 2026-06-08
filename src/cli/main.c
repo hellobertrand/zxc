@@ -22,6 +22,8 @@
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
+#include "../../include/zxc_dict.h"
+#include "../../include/zxc_error.h"
 #include "../../include/zxc_stream.h"
 
 #define ZXC_STDIO_BUFFER_SIZE (1024 * 1024)
@@ -342,26 +344,27 @@ typedef enum {
     MODE_DECOMPRESS,
     MODE_BENCHMARK,
     MODE_INTEGRITY,
-    MODE_LIST
+    MODE_LIST,
+    MODE_TRAIN_DICT
 } zxc_mode_t;
 
-enum { OPT_VERSION = 1000, OPT_HELP };
+enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT };
 
 // Forward declaration for recursive mode
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
                                int checksum, int level, size_t block_size, int json_output,
-                               int seekable);
+                               int seekable, const void* dict, size_t dict_size);
 
 // Forward declaration for processing directory
 static int process_directory(const char* dir_path, zxc_mode_t mode, int num_threads, int keep_input,
                              int force, int to_stdout, int checksum, int level, size_t block_size,
-                             int json_output, int seekable);
+                             int json_output, int seekable, const void* dict, size_t dict_size);
 
 // OS-specific implementation of directory processing
 static int process_directory(const char* dir_path, zxc_mode_t mode, int num_threads, int keep_input,
                              int force, int to_stdout, int checksum, int level, size_t block_size,
-                             int json_output, int seekable) {
+                             int json_output, int seekable, const void* dict, size_t dict_size) {
     int overall_ret = 0;
 #ifdef _WIN32
     char search_path[MAX_PATH];
@@ -386,7 +389,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
                                              to_stdout, checksum, level, block_size, json_output,
-                                             seekable);
+                                             seekable, dict, dict_size);
         } else {
             // Check if it ends with .zxc to skip if compressing to avoid double compression
             if (mode == MODE_COMPRESS) {
@@ -398,7 +401,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             overall_ret |=
                 process_single_file(full_path, NULL, mode, num_threads, keep_input, force,
                                     to_stdout, checksum, level, block_size, json_output,
-                                    seekable);
+                                    seekable, dict, dict_size);
         }
     } while (FindNextFileA(hFind, &find_data) != 0);
 
@@ -435,7 +438,8 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             if (S_ISDIR(st.st_mode)) {
                 overall_ret |=
                     process_directory(full_path, mode, num_threads, keep_input, force, to_stdout,
-                                      checksum, level, block_size, json_output, seekable);
+                                      checksum, level, block_size, json_output, seekable,
+                                      dict, dict_size);
             } else if (S_ISREG(st.st_mode)) {
                 // Check if it ends with .zxc to skip if compressing to avoid double compression
                 if (mode == MODE_COMPRESS) {
@@ -448,7 +452,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                 overall_ret |=
                     process_single_file(full_path, NULL, mode, num_threads, keep_input, force,
                                         to_stdout, checksum, level, block_size, json_output,
-                                        seekable);
+                                        seekable, dict, dict_size);
             }
         }
         free(full_path);
@@ -464,9 +468,11 @@ void print_help(const char* app) {
         "Standard Modes:\n"
         "  -z, --compress    Compress FILE {default}\n"
         "  -d, --decompress  Decompress FILE (or stdin -> stdout)\n"
-        "  -l, --list        List archive information\n"
+        "  -l, --list        List archive or dictionary info\n"
         "  -t, --test        Test compressed FILE integrity\n"
-        "  -b, --bench [N]   Benchmark in-memory (N=seconds, default 5)\n\n"
+        "  -b, --bench [N]   Benchmark in-memory (N=seconds, default 5)\n"
+        "  --train-dict PATH Train a dictionary from input files. PATH may be a\n"
+        "                    directory (saved as dictionary_<dict_id>.zxd inside it) or a file\n\n"
         "Batch Processing:\n"
         "  -m, --multiple    Multiple input files\n"
         "  -r, --recursive   Operate recursively on directories\n\n"
@@ -479,6 +485,8 @@ void print_help(const char* app) {
         "  -T, --threads N   Number of threads (0=auto)\n"
         "  -C, --checksum    Enable checksum {default}\n"
         "  -N, --no-checksum Disable checksum\n"
+        "  -D, --dict FILE   Use pre-trained dictionary (.zxd). Required to decompress\n"
+        "                    an archive that was compressed with a dictionary\n"
         "  -S, --seekable    Append seek table for random-access decompression\n"
         "  -k, --keep        Keep input file\n"
         "  -f, --force       Force overwrite\n"
@@ -611,6 +619,37 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
  * @param[in] json_output If 1, output JSON format.
  * @return 0 on success, 1 on error.
  */
+// Report a .zxd dictionary file: its dict_id (to match against a .zxc's
+// "Dict ID") and content size. `buf` holds the whole .zxd file.
+static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, long long file_size,
+                         int json_output) {
+    const void* content = NULL;
+    size_t content_size = 0;
+    uint32_t id = 0;
+    const int rc = zxc_dict_load(buf, buf_size, &content, &content_size, &id);
+    if (rc != ZXC_OK) {
+        fprintf(stderr, "Error: invalid dictionary '%s': %s\n", path, zxc_error_name(rc));
+        return 1;
+    }
+    if (json_output) {
+        printf("{\n"
+               "  \"type\": \"dictionary\",\n"
+               "  \"filename\": \"%s\",\n"
+               "  \"dict_id\": \"0x%08X\",\n"
+               "  \"content_size_bytes\": %zu,\n"
+               "  \"file_size_bytes\": %lld\n"
+               "}\n",
+               path, id, content_size, file_size);
+    } else {
+        printf("\n  Dictionary file (.zxd)\n"
+               "  Dict ID:       0x%08X\n"
+               "  Content size:  %zu bytes\n"
+               "  File:          %s\n",
+               id, content_size, path);
+    }
+    return 0;
+}
+
 static int zxc_list_archive(const char* path, int json_output) {
     char resolved_path[4096];
     if (zxc_validate_input_path(path, resolved_path, sizeof(resolved_path)) != 0) {
@@ -632,6 +671,29 @@ static int zxc_list_archive(const char* path, int json_output) {
     }
     const long long file_size = ftello(f);
 
+    // A .zxd dictionary file has its own magic word; recognise it and report
+    // its dict_id (for matching against a .zxc's "Dict ID") instead of failing
+    // as a non-archive. The upper bound is the largest possible .zxd file.
+    if (file_size >= (long long)ZXC_DICT_HEADER_SIZE &&
+        file_size <= (long long)zxc_dict_save_bound(ZXC_DICT_SIZE_MAX)) {
+        uint8_t probe[ZXC_DICT_HEADER_SIZE];
+        if (fseeko(f, 0, SEEK_SET) == 0 &&
+            fread(probe, 1, ZXC_DICT_HEADER_SIZE, f) == ZXC_DICT_HEADER_SIZE &&
+            zxc_dict_get_id(probe, ZXC_DICT_HEADER_SIZE) != 0) {
+            uint8_t* dbuf = (uint8_t*)malloc((size_t)file_size);
+            int r = 1;
+            if (dbuf && fseeko(f, 0, SEEK_SET) == 0 &&
+                fread(dbuf, 1, (size_t)file_size, f) == (size_t)file_size)
+                r = zxc_list_dict(path, dbuf, (size_t)file_size, file_size, json_output);
+            else
+                fprintf(stderr, "Error: Cannot read '%s'\n", path);
+            free(dbuf);
+            fclose(f);
+            return r;
+        }
+        fseeko(f, 0, SEEK_SET);
+    }
+
     // Use public API to get decompressed size
     const int64_t uncompressed_size = zxc_stream_get_decompressed_size(f);
     if (uncompressed_size < 0) {
@@ -651,7 +713,17 @@ static int zxc_list_archive(const char* path, int json_output) {
 
     // Extract header fields
     const uint8_t format_version = header[4];
-    const size_t block_units = header[5] ? header[5] : 64;  // Default 64 units = 256KB
+    // Block size is stored at offset 5 as a log2 exponent (codes 12..21 = 2^code,
+    // i.e. 4 KB..2 MB); the legacy value 64 means 256 KB. Convert to KB.
+    const uint8_t chunk_code = header[5];
+    size_t block_size_kb;
+    if (chunk_code >= ZXC_BLOCK_SIZE_MIN_LOG2 && chunk_code <= ZXC_BLOCK_SIZE_MAX_LOG2) {
+        block_size_kb = ((size_t)1U << chunk_code) / 1024;
+    } else if (chunk_code == 64) {
+        block_size_kb = 256;  // legacy default
+    } else {
+        block_size_kb = 0;  // unknown / unsupported code
+    }
 
     // Read footer for checksum info
     uint8_t footer[ZXC_FILE_FOOTER_SIZE];
@@ -668,6 +740,9 @@ static int zxc_list_archive(const char* path, int json_output) {
                                      ((uint32_t)footer[10] << 16) | ((uint32_t)footer[11] << 24);
     const char* checksum_method = (stored_checksum != 0) ? "RapidHash" : "-";
 
+    // Dictionary ID (from header flag bit 6 + bytes 7-10)
+    const uint32_t dict_id = zxc_get_dict_id(header, ZXC_FILE_HEADER_SIZE);
+
     // Calculate ratio (uncompressed / compressed, e.g., 2.5 means 2.5x compression)
     const double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;
 
@@ -676,8 +751,13 @@ static int zxc_list_archive(const char* path, int json_output) {
     format_size_decimal((uint64_t)file_size, comp_str, sizeof(comp_str));
     format_size_decimal((uint64_t)uncompressed_size, uncomp_str, sizeof(uncomp_str));
 
+    char dict_id_str[16];
+    if (dict_id)
+        snprintf(dict_id_str, sizeof(dict_id_str), "0x%08X", dict_id);
+    else
+        snprintf(dict_id_str, sizeof(dict_id_str), "-");
+
     if (json_output) {
-        // JSON mode
         printf(
             "{\n"
             "  \"filename\": \"%s\",\n"
@@ -687,21 +767,24 @@ static int zxc_list_archive(const char* path, int json_output) {
             "  \"format_version\": %u,\n"
             "  \"block_size_kb\": %zu,\n"
             "  \"checksum_method\": \"%s\",\n"
-            "  \"checksum_value\": \"0x%08X\"\n"
+            "  \"checksum_value\": \"0x%08X\",\n"
+            "  \"dict_id\": %s%s%s\n"
             "}\n",
             path, (long long)file_size, (long long)uncompressed_size, ratio, format_version,
-            block_units * 4, (stored_checksum != 0) ? "RapidHash" : "none", stored_checksum);
+            block_size_kb, (stored_checksum != 0) ? "RapidHash" : "none", stored_checksum,
+            dict_id ? "\"" : "", dict_id ? dict_id_str : "null", dict_id ? "\"" : "");
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
         printf(
             "\nFile: %s\n"
             "-----------------------\n"
             "Block Format: %u\n"
-            "Block Units:  %zu (x 4KB)\n"
+            "Block Size:   %zu KB\n"
             "Checksum Method: %s\n",
-            path, format_version, block_units, (stored_checksum != 0) ? "RapidHash" : "None");
+            path, format_version, block_size_kb, (stored_checksum != 0) ? "RapidHash" : "None");
 
         if (stored_checksum != 0) printf("Checksum Value:  0x%08X\n", stored_checksum);
+        if (dict_id) printf("Dictionary ID:   %s\n", dict_id_str);
 
         printf(
             "-----------------------\n"
@@ -711,10 +794,10 @@ static int zxc_list_archive(const char* path, int json_output) {
             comp_str, uncomp_str, ratio);
     } else {
         // Normal mode: table format
-        printf("\n  %12s   %12s   %5s   %-10s   %s\n", "Compressed", "Uncompressed", "Ratio",
-               "Checksum", "Filename");
-        printf("  %12s   %12s   %5.2f   %-10s   %s\n", comp_str, uncomp_str, ratio, checksum_method,
-               path);
+        printf("\n  %12s   %12s   %5s   %-10s   %-10s   %s\n", "Compressed", "Uncompressed",
+               "Ratio", "Checksum", "Dict ID", "Filename");
+        printf("  %12s   %12s   %5.2f   %-10s   %-10s   %s\n", comp_str, uncomp_str, ratio,
+               checksum_method, dict_id_str, path);
     }
 
     return 0;
@@ -723,7 +806,7 @@ static int zxc_list_archive(const char* path, int json_output) {
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
                                int checksum_enabled, int level, size_t block_size,
-                               int json_output, int seekable) {
+                               int json_output, int seekable, const void* dict, size_t dict_size) {
     FILE* f_in = stdin;
     FILE* f_out = stdout;
     char resolved_in_path[4096] = {0};
@@ -912,6 +995,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .block_size = block_size,
             .checksum_enabled = checksum_enabled,
             .seekable = seekable,
+            .dict = dict,
+            .dict_size = dict_size,
             .progress_cb = show_progress ? cli_progress_callback : NULL,
             .user_data = &pctx,
         };
@@ -920,6 +1005,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         zxc_decompress_opts_t dopts = {
             .n_threads = num_threads,
             .checksum_enabled = checksum_enabled,
+            .dict = dict,
+            .dict_size = dict_size,
             .progress_cb = show_progress ? cli_progress_callback : NULL,
             .user_data = &pctx,
         };
@@ -977,23 +1064,26 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             unlink(resolved_in_path);
     } else {
         if (mode == MODE_INTEGRITY) {
+            const int err_code = (int)bytes;
+            const char* reason = zxc_error_name(err_code);
+            const int needs_dict =
+                (err_code == ZXC_ERROR_DICT_REQUIRED || err_code == ZXC_ERROR_DICT_MISMATCH);
             if (json_output) {
                 printf(
                     "{\n"
                     "  \"filename\": \"%s\",\n"
                     "  \"status\": \"failed\",\n"
-                    "  \"error\": \"Integrity check failed (corrupted data or invalid checksum)\"\n"
+                    "  \"error\": \"%s\"\n"
                     "}\n",
-                    in_path ? in_path : "<stdin>");
+                    in_path ? in_path : "<stdin>", reason);
             } else {
-                fprintf(stderr, "%s: FAILED\n", in_path ? in_path : "<stdin>");
-                if (g_verbose)
-                    fprintf(
-                        stderr,
-                        "  Reason: Integrity check failed (corrupted data or invalid checksum)\n");
+                fprintf(stderr, "%s: FAILED (%s)\n", in_path ? in_path : "<stdin>", reason);
+                if (needs_dict)
+                    fprintf(stderr,
+                            "  This archive was compressed with a dictionary; pass it with -D.\n");
             }
         } else {
-            zxc_log("Operation failed on %s.\n", in_path ? in_path : "<stdin>");
+            zxc_log("Error: %s: %s\n", in_path ? in_path : "<stdin>", zxc_error_name((int)bytes));
             if (created_out_file) unlink(resolved_out_path);
         }
         overall_ret = 1;
@@ -1019,8 +1109,12 @@ int main(int argc, char** argv) {
     int json_output = 0;
     size_t block_size = 0;
     int seekable = 0;
+    const char* dict_path = NULL;
+    const char* train_dict_path = NULL;
 
-    static const struct option long_options[] = {{"compress", no_argument, 0, 'z'},
+    static const struct option long_options[] = {{"train-dict", required_argument, 0, OPT_TRAIN_DICT},
+                                                 {"dict", required_argument, 0, 'D'},
+                                                 {"compress", no_argument, 0, 'z'},
                                                  {"decompress", no_argument, 0, 'd'},
                                                  {"list", no_argument, 0, 'l'},
                                                  {"test", no_argument, 0, 't'},
@@ -1045,7 +1139,7 @@ int main(int argc, char** argv) {
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
-    while ((opt = getopt_long(argc, argv, "123456b::B:cCdfhjklmrNqST:tvVz", long_options, NULL)) !=
+    while ((opt = getopt_long(argc, argv, "123456b::B:cCdD:fhjklmrNqST:tvVz", long_options, NULL)) !=
            -1) {
         switch (opt) {
             case 'z':
@@ -1129,6 +1223,13 @@ int main(int argc, char** argv) {
             case 'S':
                 seekable = 1;
                 break;
+            case 'D':
+                dict_path = optarg;
+                break;
+            case OPT_TRAIN_DICT:
+                mode = MODE_TRAIN_DICT;
+                train_dict_path = optarg;
+                break;
             case 'r':
                 recursive_mode = 1;
                 multiple_mode = 1;  // Recursive implies multiple mode for files processing
@@ -1201,12 +1302,200 @@ int main(int argc, char** argv) {
         checksum = (mode == MODE_BENCHMARK) ? 0 : 1;
     }
 
+    /* Load dictionary file (.zxd) if requested */
+    void* dict = NULL;
+    size_t dict_size = 0;
+    if (dict_path) {
+        char resolved_dict[4096];
+        if (zxc_validate_input_path(dict_path, resolved_dict, sizeof(resolved_dict)) != 0) {
+            fprintf(stderr, "Error: invalid dictionary path '%s': %s\n", dict_path, strerror(errno));
+            return 1;
+        }
+        FILE* f_dict = fopen(resolved_dict, "rb");
+        if (!f_dict) {
+            fprintf(stderr, "Error: cannot open dictionary '%s': %s\n", dict_path, strerror(errno));
+            return 1;
+        }
+        fseeko(f_dict, 0, SEEK_END);
+        const long long fsize = ftello(f_dict);
+        fseeko(f_dict, 0, SEEK_SET);
+        if (fsize <= 0 || (size_t)fsize > ZXC_DICT_SIZE_MAX + ZXC_DICT_HEADER_SIZE) {
+            fprintf(stderr, "Error: dictionary file '%s' has invalid size\n", dict_path);
+            fclose(f_dict);
+            return 1;
+        }
+        uint8_t* zxd_buf = (uint8_t*)malloc((size_t)fsize);
+        if (!zxd_buf || fread(zxd_buf, 1, (size_t)fsize, f_dict) != (size_t)fsize) {
+            fprintf(stderr, "Error: failed to read dictionary '%s'\n", dict_path);
+            free(zxd_buf);
+            fclose(f_dict);
+            return 1;
+        }
+        fclose(f_dict);
+
+        const void* content = NULL;
+        size_t content_size = 0;
+        const int rc = zxc_dict_load(zxd_buf, (size_t)fsize, &content, &content_size, NULL);
+        if (rc != ZXC_OK) {
+            fprintf(stderr, "Error: invalid dictionary '%s': %s\n", dict_path,
+                    zxc_error_name(rc));
+            free(zxd_buf);
+            return 1;
+        }
+        dict = malloc(content_size);
+        if (!dict) {
+            free(zxd_buf);
+            return 1;
+        }
+        memcpy(dict, content, content_size);
+        dict_size = content_size;
+        free(zxd_buf);
+    }
+
+    /*
+     * Train Dictionary Mode
+     * Reads input files as samples, trains a dictionary, saves as .zxd.
+     */
+    if (mode == MODE_TRAIN_DICT) {
+        if (optind >= argc) {
+            fprintf(stderr, "Error: --train-dict requires input files as training samples.\n");
+            free(dict);
+            return 1;
+        }
+        const int n_files = argc - optind;
+        const void** samples = (const void**)malloc((size_t)n_files * sizeof(void*));
+        size_t* sample_sizes = (size_t*)malloc((size_t)n_files * sizeof(size_t));
+        if (!samples || !sample_sizes) {
+            fprintf(stderr, "Error: memory allocation failed\n");
+            free(samples);
+            free(sample_sizes);
+            free(dict);
+            return 1;
+        }
+        int n_loaded = 0;
+        for (int i = optind; i < argc; i++) {
+            char resolved[4096];
+            if (zxc_validate_input_path(argv[i], resolved, sizeof(resolved)) != 0) {
+                fprintf(stderr, "Warning: invalid path '%s', skipping\n", argv[i]);
+                continue;
+            }
+            FILE* sf = fopen(resolved, "rb");
+            if (!sf) {
+                fprintf(stderr, "Warning: cannot open '%s', skipping\n", argv[i]);
+                continue;
+            }
+            fseeko(sf, 0, SEEK_END);
+            size_t sz = (size_t)ftello(sf);
+            fseeko(sf, 0, SEEK_SET);
+            if (sz == 0) { fclose(sf); continue; }
+            uint8_t* buf = (uint8_t*)malloc(sz);
+            if (!buf) { fclose(sf); continue; }
+            fread(buf, 1, sz, sf);
+            fclose(sf);
+            samples[n_loaded] = buf;
+            sample_sizes[n_loaded] = sz;
+            n_loaded++;
+        }
+        if (n_loaded == 0) {
+            fprintf(stderr, "Error: no valid samples loaded\n");
+            free(samples);
+            free(sample_sizes);
+            free(dict);
+            return 1;
+        }
+
+        size_t dict_cap = ZXC_DICT_SIZE_MAX;
+        if (block_size > 0 && block_size < dict_cap) dict_cap = block_size;
+        uint8_t* dict_buf = (uint8_t*)malloc(dict_cap);
+        if (!dict_buf) {
+            fprintf(stderr, "Error: memory allocation failed\n");
+            for (int i = 0; i < n_loaded; i++) free((void*)samples[i]);
+            free(samples);
+            free(sample_sizes);
+            free(dict);
+            return 1;
+        }
+
+        int64_t dict_sz = zxc_train_dict(samples, sample_sizes, (size_t)n_loaded,
+                                         dict_buf, dict_cap);
+        for (int i = 0; i < n_loaded; i++) free((void*)samples[i]);
+        free(samples);
+        free(sample_sizes);
+
+        if (dict_sz <= 0) {
+            fprintf(stderr, "Error: training failed: %s\n", zxc_error_name((int)dict_sz));
+            free(dict_buf);
+            free(dict);
+            return 1;
+        }
+
+        size_t zxd_bound = zxc_dict_save_bound((size_t)dict_sz);
+        uint8_t* zxd = (uint8_t*)malloc(zxd_bound);
+        int64_t zxd_sz = zxc_dict_save(dict_buf, (size_t)dict_sz, zxd, zxd_bound);
+        free(dict_buf);
+        if (zxd_sz <= 0) {
+            fprintf(stderr, "Error: dict save failed: %s\n", zxc_error_name((int)zxd_sz));
+            free(zxd);
+            free(dict);
+            return 1;
+        }
+
+        /*
+         * Resolve the output path. If train_dict_path names a directory (or ends
+         * with a separator), use the content-addressable name {dict_id:08x}.zxd
+         * inside it; otherwise write to train_dict_path verbatim. The id must be
+         * computed before opening the file so it can name it.
+         */
+        const uint32_t trained_id = zxc_dict_get_id(zxd, (size_t)zxd_sz);
+        char final_path[4096];
+        const size_t tdp_len = strlen(train_dict_path);
+        const int is_dir_target =
+            zxc_is_directory(train_dict_path) ||
+            (tdp_len > 0 && (train_dict_path[tdp_len - 1] == '/' ||
+                             train_dict_path[tdp_len - 1] == '\\'));
+        if (is_dir_target) {
+            const int has_sep = tdp_len > 0 && (train_dict_path[tdp_len - 1] == '/' ||
+                                                train_dict_path[tdp_len - 1] == '\\');
+            snprintf(final_path, sizeof(final_path), "%s%sdictionary_%08x.zxd", train_dict_path,
+                     has_sep ? "" : "/", trained_id);
+        } else {
+            snprintf(final_path, sizeof(final_path), "%s", train_dict_path);
+        }
+
+        FILE* out;
+#ifdef _WIN32
+        out = fopen(final_path, "wb");
+#else
+        {
+            const int fd = open(final_path, O_CREAT | O_WRONLY | O_TRUNC,
+                                S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+            out = (fd != -1) ? fdopen(fd, "wb") : NULL;
+        }
+#endif
+        if (!out) {
+            fprintf(stderr, "Error: cannot create '%s': %s\n", final_path, strerror(errno));
+            free(zxd);
+            free(dict);
+            return 1;
+        }
+        fwrite(zxd, 1, (size_t)zxd_sz, out);
+        fclose(out);
+        free(zxd);
+
+        fprintf(stderr, "Trained dictionary: %lld bytes from %d samples -> %s (dict_id: 0x%08X)\n",
+                (long long)dict_sz, n_loaded, final_path, trained_id);
+
+        free(dict);
+        return 0;
+    }
+
     /*
      * Benchmark Mode
      * Loads the entire input file into RAM to measure raw algorithm throughput
      * without disk I/O bottlenecks.
      */
     if (mode == MODE_BENCHMARK) {
+        free(dict);
         if (optind >= argc) {
             zxc_log("Benchmark requires input file.\n");
             return 1;
@@ -1407,6 +1696,7 @@ int main(int argc, char** argv) {
      * Displays archive information (compressed size, uncompressed size, ratio).
      */
     if (mode == MODE_LIST) {
+        free(dict);
         if (optind >= argc) {
             zxc_log("List mode requires input file.\n");
             return 1;
@@ -1432,6 +1722,7 @@ int main(int argc, char** argv) {
 
     if (multiple_mode && to_stdout) {
         zxc_log("Error: cannot write to stdout when using multiple files mode (-m).\n");
+        free(dict);
         return 1;
     }
 
@@ -1445,11 +1736,13 @@ int main(int argc, char** argv) {
     // If no files passed but we aren't using stdin, or mode expects files:
     if (optind >= argc && mode == MODE_INTEGRITY) {
         zxc_log("Test mode requires at least one input file.\n");
+        free(dict);
         return 1;
     }
 
     if (multiple_mode && optind >= argc) {
         zxc_log("Multiple files mode requires at least one input file.\n");
+        free(dict);
         return 1;
     }
 
@@ -1464,7 +1757,7 @@ int main(int argc, char** argv) {
             zxc_is_directory(current_arg)) {
             overall_ret |= process_directory(current_arg, mode, num_threads, keep_input, force,
                                              to_stdout, checksum, level, block_size, json_output,
-                                             seekable);
+                                             seekable, dict, dict_size);
         } else {
             const char* explicit_out_path = (!multiple_mode && optind + 1 < argc && current_arg &&
                                              strcmp(current_arg, "-") != 0 && !to_stdout)
@@ -1474,12 +1767,13 @@ int main(int argc, char** argv) {
             overall_ret |=
                 process_single_file(current_arg, explicit_out_path, mode, num_threads, keep_input,
                                     force, to_stdout, checksum, level, block_size, json_output,
-                                    seekable);
+                                    seekable, dict, dict_size);
         }
 
         if (!multiple_mode) {
             break;  // Standard mode only does the first argument as input
         }
     }
+    free(dict);
     return overall_ret;
 }

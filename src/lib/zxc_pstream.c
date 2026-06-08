@@ -291,7 +291,7 @@ zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
  */
 static int cs_stage_file_header(zxc_cstream* cs) {
     const int w = zxc_write_file_header(cs->pending, cs->pending_cap, cs->block_size,
-                                        cs->opts.checksum_enabled);
+                                        cs->opts.checksum_enabled, 0);
     if (UNLIKELY(w < 0)) return w;  // LCOV_EXCL_LINE
     cs->pending_len = (size_t)w;
     cs->pending_pos = 0;
@@ -903,7 +903,7 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
 
     size_t bs = 0;
     int has_csum = 0;
-    const int rc = zxc_read_file_header(ds->scratch, ds->scratch_used, &bs, &has_csum);
+    const int rc = zxc_read_file_header(ds->scratch, ds->scratch_used, &bs, &has_csum, NULL);
     if (UNLIKELY(rc != ZXC_OK)) return ds_set_error(ds, rc);  // LCOV_EXCL_LINE
     ds->block_size = bs;
     ds->file_has_checksum = has_csum;
@@ -922,7 +922,7 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     if (UNLIKELY(!ds->payload || !ds->decoded)) return ds_set_error(ds, ZXC_ERROR_MEMORY);
 
     if (UNLIKELY(zxc_cctx_init(&ds->inner, ds->block_size, 0, 0,
-                               ds->file_has_checksum && ds->opts.checksum_enabled) != ZXC_OK)) {
+                               ds->file_has_checksum && ds->opts.checksum_enabled, 0) != ZXC_OK)) {
         return ds_set_error(ds, ZXC_ERROR_MEMORY);
     }
     // LCOV_EXCL_STOP

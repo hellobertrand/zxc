@@ -81,6 +81,7 @@ endforeach
 
 libzxc_sources = files(
   'src/lib/zxc_common.c',
+  'src/lib/zxc_dict.c',
   'src/lib/zxc_driver.c',
   'src/lib/zxc_dispatch.c',
   'src/lib/zxc_pstream.c',
@@ -137,6 +138,7 @@ install_headers(
   'include/zxc.h',
   'include/zxc_buffer.h',
   'include/zxc_constants.h',
+  'include/zxc_dict.h',
   'include/zxc_error.h',
   'include/zxc_export.h',
   'include/zxc_opts.h',
@@ -178,6 +180,7 @@ if not meson.is_subproject()
       'tests/test_seekable_mt.c',
       'tests/test_format.c',
       'tests/test_misc.c',
+      'tests/test_dict.c',
     ),
     include_directories : libzxc_includes,
     link_with : libzxc_static,

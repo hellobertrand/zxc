@@ -32,6 +32,7 @@
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
+#include "../../include/zxc_error.h"
 #include "../../include/zxc_seekable.h"
 #include "rapidhash.h"
 
@@ -186,6 +187,11 @@ extern "C" {
  */
 #define ZXC_ALWAYS_INLINE inline __attribute__((always_inline))
 
+/** @def ZXC_NOINLINE
+ * @brief Prevents a function from being inlined into its callers.
+ */
+#define ZXC_NOINLINE __attribute__((noinline))
+
 #elif defined(_MSC_VER)
 #include <intrin.h>
 #if defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64)
@@ -213,6 +219,11 @@ extern "C" {
  * @brief Forces a function to be inlined at all optimization levels (MSVC).
  */
 #define ZXC_ALWAYS_INLINE __forceinline
+
+/** @def ZXC_NOINLINE
+ * @brief Prevents a function from being inlined into its callers (MSVC).
+ */
+#define ZXC_NOINLINE __declspec(noinline)
 #pragma intrinsic(_BitScanReverse)
 #else
 #define LIKELY(x) (x)
@@ -227,6 +238,11 @@ extern "C" {
  * @brief Forces a function to be inlined (fallback for non-GCC/Clang/MSVC compilers).
  */
 #define ZXC_ALWAYS_INLINE inline
+
+/** @def ZXC_NOINLINE
+ * @brief Prevents inlining (best-effort no-op fallback for unknown compilers).
+ */
+#define ZXC_NOINLINE
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #include <stdalign.h>
@@ -334,8 +350,28 @@ extern "C" {
 
 /** @brief Bit flag in the Flags byte indicating checksum presence (bit 7). */
 #define ZXC_FILE_FLAG_HAS_CHECKSUM 0x80U
+/** @brief Bit flag in the Flags byte indicating a dictionary is required (bit 6). */
+#define ZXC_FILE_FLAG_HAS_DICTIONARY 0x40U
 /** @brief Mask for the checksum algorithm id (bits 0-3). */
 #define ZXC_FILE_CHECKSUM_ALGO_MASK 0x0FU
+
+/** @brief Magic word identifying ZXC dictionary files (.zxd). */
+#define ZXC_DICT_MAGIC 0x9CB0D1C7U
+/** @brief Current dictionary file format version. */
+#define ZXC_DICT_VERSION 1
+/** @brief K-gram length scanned by the dictionary trainer. Aligned on the LZ
+ *         minimum match length so trained patterns are matchable at encode time. */
+#define ZXC_DICT_KGRAM_LEN ZXC_LZ_MIN_MATCH_LEN
+/** @brief Address bits for the dictionary trainer's k-gram frequency table. */
+#define ZXC_DICT_HASH_BITS 16
+/** @brief Maximum number of candidate segments the dictionary trainer keeps. */
+#define ZXC_DICT_MAX_SEGMENTS (1U << 16)
+/** @brief Target number of sampled k-gram positions for the trainer's frequency
+ *  estimate. Bounds the count so 16-bit counters stay unsaturated on large
+ *  corpora; the trainer strides the corpus to hit roughly this many positions. */
+#define ZXC_DICT_SAMPLE_TARGET (1U << 19)
+/** @brief Number of buckets in the dictionary trainer's frequency table. */
+#define ZXC_DICT_HASH_SIZE (1U << ZXC_DICT_HASH_BITS)
 
 /** @brief Block header size: Type(1)+Flags(1)+Reserved(1)+CRC(1)+CompSize(4). */
 #define ZXC_BLOCK_HEADER_SIZE 8
@@ -1592,6 +1628,10 @@ typedef struct {
     size_t opt_scratch_cap; /**< Current capacity of opt_scratch in bytes. */
     int checksum_enabled;   /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;  /**< Compression level. */
+    size_t dict_size;       /**< Dictionary prefill size (0 = no dictionary). */
+    uint8_t* dict_buffer;   /**< [dict | data] concat scratch carved from memory_block
+                                 when dict_size > 0 (NULL otherwise). */
+    size_t dict_buffer_cap; /**< Capacity of dict_buffer in bytes (0 = none). */
 
     /* Block-size derived parameters (computed once at init). */
     size_t chunk_size;    /**< Effective block size in bytes. */
@@ -1611,12 +1651,15 @@ typedef struct {
  * @param[in]  mode              1 for compression, 0 for decompression.
  * @param[in]  level             Compression level (ignored when @p mode == 0).
  * @param[in]  checksum_enabled  Non-zero to enable checksum computation.
+ * @param[in]  dict_size         Dictionary prefill size; when > 0 an extra
+ *                               [dict | data] concat buffer is carved into the
+ *                               workspace and @c ctx->dict_buffer is set.
  *
  * @return @c ZXC_OK on success, or a negative @ref zxc_error_t code (notably
  *         @c ZXC_ERROR_MEMORY on allocation failure).
  */
 int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, const int level,
-                  const int checksum_enabled);
+                  const int checksum_enabled, const size_t dict_size);
 
 /**
  * @brief Returns the byte count that @ref zxc_cctx_init would allocate for
@@ -1629,9 +1672,12 @@ int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, cons
  *                        @ref zxc_validate_block_size).
  * @param[in] mode        1 = compression, 0 = decompression.
  * @param[in] level       Compression level (only consulted when @p mode == 1).
+ * @param[in] dict_size   Dictionary prefill size; when > 0 the figure includes
+ *                        the [dict | data] concat buffer.
  * @return Size in bytes, or 0 if the parameters are invalid.
  */
-size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, const int level);
+size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, const int level,
+                                       const size_t dict_size);
 
 /**
  * @brief Initialises a compression / decompression context inside a
@@ -1653,12 +1699,15 @@ size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, 
  * @param[in]  mode              1 = compression, 0 = decompression.
  * @param[in]  level             Compression level (ignored when @p mode == 0).
  * @param[in]  checksum_enabled  Non-zero to enable checksum computation.
+ * @param[in]  dict_size         Dictionary prefill size; when > 0 the workspace
+ *                               must include the [dict | data] concat buffer and
+ *                               @c ctx->dict_buffer is set into it.
  * @return @c ZXC_OK on success, @c ZXC_ERROR_DST_TOO_SMALL if the workspace
  *         is too small, or another negative @ref zxc_error_t.
  */
 int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspace,
                                const size_t workspace_size, const size_t chunk_size, const int mode,
-                               const int level, const int checksum_enabled);
+                               const int level, const int checksum_enabled, const size_t dict_size);
 
 /**
  * @brief Releases the internal buffers owned by a context.
@@ -1690,8 +1739,11 @@ void zxc_cctx_free(zxc_cctx_t* ctx);
  *                Specific error codes depend on the underlying ZXC
  * implementation.
  */
-int zxc_decompress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                  const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                      const size_t src_sz, uint8_t* RESTRICT dst,
+                                      const size_t dst_cap);
 
 /**
  * @brief Wraps the internal chunk compression logic.
@@ -1749,12 +1801,13 @@ typedef struct {
  * @param[in]  dst_capacity  Total capacity of @p dst in bytes.
  * @param[in]  chunk_size    Block size to encode in the header.
  * @param[in]  has_checksum  Non-zero if the checksum bit must be set.
+ * @param[in]  dict_id       Dictionary ID (0 = no dictionary).
  *
  * @return Number of bytes written (@c ZXC_FILE_HEADER_SIZE) on success,
  *         or @c ZXC_ERROR_DST_TOO_SMALL if @p dst_capacity is insufficient.
  */
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, const size_t chunk_size,
-                          const int has_checksum);
+                          const int has_checksum, const uint32_t dict_id);
 
 /**
  * @brief Validates and reads the ZXC file header from @p src.
@@ -1768,13 +1821,15 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  *                               block size. May be @c NULL.
  * @param[out] out_has_checksum  Optional pointer that receives the checksum
  *                               flag. May be @c NULL.
+ * @param[out] out_dict_id       Optional pointer that receives the dictionary
+ *                               ID (0 if none). May be @c NULL.
  *
  * @return @c ZXC_OK on success, or a negative error code (e.g.
  *         @c ZXC_ERROR_SRC_TOO_SMALL, @c ZXC_ERROR_BAD_MAGIC,
  *         @c ZXC_ERROR_BAD_VERSION).
  */
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size, size_t* out_block_size,
-                         int* out_has_checksum);
+                         int* out_has_checksum, uint32_t* out_dict_id);
 
 /**
  * @brief Encodes a block header into @p dst.

@@ -32,6 +32,7 @@
 #include <stdio.h>
 
 #include "../../include/zxc_buffer.h"
+#include "../../include/zxc_dict.h"
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_seekable.h"
 #include "../../include/zxc_stream.h"
@@ -288,6 +289,8 @@ typedef struct {
     zxc_progress_callback_t progress_cb;
     void* progress_user_data;
     uint64_t total_input_bytes;
+    const uint8_t* dict;
+    size_t dict_size;
 } zxc_stream_ctx_t;
 
 /**
@@ -370,8 +373,11 @@ static void* zxc_stream_worker(void* arg) {
                                 ? ctx->checksum_enabled
                                 : (ctx->file_has_checksum && ctx->checksum_enabled);
 
-    if (zxc_cctx_init(&cctx, ctx->chunk_size, ctx->compression_mode, ctx->compression_level,
-                      unified_chk) != ZXC_OK) {
+    const size_t eff_chunk = (ctx->dict_size > 0 && ctx->compression_mode == 1)
+                                 ? zxc_block_size_ceil(ctx->dict_size + ctx->chunk_size)
+                                 : ctx->chunk_size;
+    if (zxc_cctx_init(&cctx, eff_chunk, ctx->compression_mode, ctx->compression_level, unified_chk,
+                      ctx->dict_size) != ZXC_OK) {
         // LCOV_EXCL_START
         zxc_cctx_free(&cctx);
         pthread_mutex_lock(&ctx->lock);
@@ -384,6 +390,11 @@ static void* zxc_stream_worker(void* arg) {
     }
 
     cctx.compression_level = ctx->compression_level;
+
+    /* Per-worker dict buffer for assembling [dict | block_data] */
+    const size_t dsz = ctx->dict_size;
+    uint8_t* const dict_work = cctx.dict_buffer;
+    if (dict_work) ZXC_MEMCPY(dict_work, ctx->dict, dsz);
 
     while (1) {
         zxc_stream_job_t* job = NULL;
@@ -401,7 +412,17 @@ static void* zxc_stream_worker(void* arg) {
         job = &ctx->jobs[jid];
         pthread_mutex_unlock(&ctx->lock);
 
-        const int res = ctx->processor(&cctx, job->in_buf, job->in_sz, job->out_buf, job->out_cap);
+        int res;
+        if (dict_work && ctx->compression_mode == 1) {
+            ZXC_MEMCPY(dict_work + dsz, job->in_buf, job->in_sz);
+            res = ctx->processor(&cctx, dict_work, dsz + job->in_sz, job->out_buf, job->out_cap);
+        } else if (dict_work && ctx->compression_mode == 0) {
+            res = ctx->processor(&cctx, job->in_buf, job->in_sz, dict_work + dsz,
+                                 ctx->chunk_size + ZXC_DECOMPRESS_TAIL_PAD);
+            if (LIKELY(res > 0)) ZXC_MEMCPY(job->out_buf, dict_work + dsz, (size_t)res);
+        } else {
+            res = ctx->processor(&cctx, job->in_buf, job->in_sz, job->out_buf, job->out_cap);
+        }
 
         pthread_mutex_lock(&ctx->lock);
         job->result_sz = UNLIKELY(res < 0) ? 0 : (size_t)res;
@@ -563,7 +584,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                                      const int level, const size_t block_size,
                                      const int checksum_enabled, const int seekable,
                                      zxc_chunk_processor_t func,
-                                     zxc_progress_callback_t progress_cb, void* user_data) {
+                                     zxc_progress_callback_t progress_cb, void* user_data,
+                                     const uint8_t* dict, const size_t dict_size) {
     zxc_stream_ctx_t ctx;
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
 
@@ -589,10 +611,17 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 0) {
         // Decompression Mode: Read and validate file header
         uint8_t h[ZXC_FILE_HEADER_SIZE];
+        uint32_t header_dict_id = 0;
         if (UNLIKELY(fread(h, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE ||
-                     zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz,
-                                          &file_has_chk) != ZXC_OK))
+                     zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz, &file_has_chk,
+                                          &header_dict_id) != ZXC_OK))
             return ZXC_ERROR_BAD_HEADER;
+
+        if (header_dict_id != 0) {
+            if (UNLIKELY(!dict || dict_size == 0)) return ZXC_ERROR_DICT_REQUIRED;
+            if (UNLIKELY(zxc_dict_id(dict, dict_size) != header_dict_id))
+                return ZXC_ERROR_DICT_MISMATCH;
+        }
     }
 
     int num_threads = (n_threads > 0) ? n_threads : (int)sysconf(_SC_NPROCESSORS_ONLN);
@@ -611,6 +640,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ctx.progress_cb = progress_cb;
     ctx.progress_user_data = user_data;
     ctx.total_input_bytes = total_file_size;
+    ctx.dict = dict;
+    ctx.dict_size = dict_size;
 
     uint32_t d_global_hash = 0;
 
@@ -710,7 +741,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     if (mode == 1 && f_out) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
-        zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE, runtime_chunk_sz, checksum_enabled);
+        zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE, runtime_chunk_sz, checksum_enabled,
+                              (dict && dict_size) ? zxc_dict_id(dict, dict_size) : 0);
         if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
             ctx.io_error = 1;
 
@@ -943,13 +975,16 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
+    const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
+    const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
     zxc_progress_callback_t cb = opts ? opts->progress_cb : NULL;
     void* ud = opts ? opts->user_data : NULL;
 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
     return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, block_size, checksum_enabled,
-                                 seekable, zxc_compress_chunk_wrapper, cb, ud);
+                                 seekable, zxc_compress_chunk_wrapper, cb, ud, dict, dict_size);
 }
 
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts_t* opts) {
@@ -957,11 +992,14 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
 
     const int n_threads = opts ? opts->n_threads : 0;
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
+    const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
+    const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
     zxc_progress_callback_t cb = opts ? opts->progress_cb : NULL;
     void* ud = opts ? opts->user_data : NULL;
 
     return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled, 0,
-                                 (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, cb, ud);
+                                 (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, cb, ud, dict,
+                                 dict_size);
 }
 
 int64_t zxc_stream_get_decompressed_size(FILE* f_in) {

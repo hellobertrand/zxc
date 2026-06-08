@@ -460,6 +460,60 @@ zxc_compress_opts_t opts = {
 
 ---
 
+## Dictionary Compression
+
+For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dictionary dramatically improves compression ratio. Because the dictionary prefills the LZ77 sliding window at the *start of each block*, the benefit is per-block: a block only has its own preceding bytes as history, so the smaller the block, the more it leans on the dictionary for representative patterns. This applies whether the input is a single small payload or a large payload split into many small blocks — any time the block size is small enough that early bytes would otherwise lack history to match against.
+
+**Typical use cases:** JSON API responses, small game assets, structured logs, key-value store records, RPC messages, and any large but homogeneous corpus compressed in small blocks for random access (e.g. seekable archives).
+
+### Training a dictionary
+
+```bash
+# Train a dictionary from a corpus of similar files
+zxc --train-dict corpus.zxd samples/*.json
+
+# Or pass a directory: the dictionary is saved as dictionary_<dict_id>.zxd inside it
+# (the dict_id embeds in the name), e.g. dicts/dictionary_bc46eec1.zxd
+zxc --train-dict dicts/ samples/*.json
+```
+
+```c
+// C API
+const void* samples[] = { buf1, buf2, buf3 };
+size_t sizes[] = { len1, len2, len3 };
+uint8_t dict[32768];
+int64_t dict_sz = zxc_train_dict(samples, sizes, 3, dict, sizeof(dict));
+```
+
+### Compressing with a dictionary
+
+```bash
+# CLI — the same dictionary is required to decompress (pass it with -D)
+zxc -z -D corpus.zxd input.json
+zxc -d -D corpus.zxd input.json.zxc
+```
+
+```c
+// C API — compression
+zxc_compress_opts_t copts = {
+    .level = ZXC_LEVEL_DEFAULT,
+    .dict = dict_content,
+    .dict_size = dict_sz,
+};
+int64_t compressed_size = zxc_compress(src, src_size, dst, dst_cap, &copts);
+
+// C API — decompression (same dictionary required)
+zxc_decompress_opts_t dopts = {
+    .dict = dict_content,
+    .dict_size = dict_sz,
+};
+int64_t original_size = zxc_decompress(compressed, comp_size, out, out_cap, &dopts);
+```
+
+The dictionary is stored as an external `.zxd` file and referenced by a 32-bit ID (`dict_id`) in the ZXC file header. The **same dictionary is required to decompress** and must be supplied explicitly with `-D` — there is no auto-lookup. Decompressing an archive that needs a dictionary without supplying one returns `ZXC_ERROR_DICT_REQUIRED`; supplying the wrong one returns `ZXC_ERROR_DICT_MISMATCH`. Training to a directory names the file `dictionary_<dict_id>.zxd`. See [FORMAT.md](docs/FORMAT.md) §12 for the full specification.
+
+---
+
 ## Usage
 
 ### 1. CLI

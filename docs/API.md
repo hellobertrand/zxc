@@ -28,6 +28,7 @@ For the on-disk binary format see [`FORMAT.md`](FORMAT.md).
 - [10. Streaming API](#10-streaming-api)
 - [10b. Push Streaming API](#10b-push-streaming-api)
 - [11. Seekable API](#11-seekable-api)
+- [11b. Dictionary API](#11b-dictionary-api)
 - [12. Error Handling](#12-error-handling)
 - [13. Thread Safety](#13-thread-safety)
 - [14. Exported Symbols Summary](#14-exported-symbols-summary)
@@ -40,7 +41,9 @@ For the on-disk binary format see [`FORMAT.md`](FORMAT.md).
 zxc.h                  <- freestanding umbrella (no <stdio.h>; kernel-safe)
 ├── zxc_buffer.h       <- Buffer API + Reusable Context API
 │   └── zxc_export.h   <- visibility macros
-├── zxc_constants.h    <- version macros, compression levels, block sizes
+├── zxc_constants.h    <- version macros, compression levels, block sizes, dict sizes
+├── zxc_dict.h         <- Dictionary training, save/load, identification
+│   └── zxc_export.h
 ├── zxc_error.h        <- error codes + zxc_error_name()
 │   └── zxc_export.h
 ├── zxc_opts.h         <- compression / decompression options structs
@@ -204,7 +207,10 @@ typedef enum {
     ZXC_ERROR_IO            = -11,  // file read/write/seek failure
     ZXC_ERROR_NULL_INPUT    = -12,  // required pointer is NULL
     ZXC_ERROR_BAD_BLOCK_TYPE = -13, // unknown block type
-    ZXC_ERROR_BAD_BLOCK_SIZE = -14  // invalid block size
+    ZXC_ERROR_BAD_BLOCK_SIZE = -14, // invalid block size
+    ZXC_ERROR_DICT_REQUIRED  = -15, // file requires a dictionary but none provided
+    ZXC_ERROR_DICT_MISMATCH  = -16, // provided dictionary ID does not match header
+    ZXC_ERROR_DICT_TOO_LARGE = -17  // dictionary exceeds ZXC_DICT_SIZE_MAX
 } zxc_error_t;
 ```
 
@@ -225,6 +231,8 @@ typedef struct {
     size_t block_size;        // Block size in bytes (0 = 512 KB default).
     int    checksum_enabled;  // 1 = enable checksums, 0 = disable.
     int    seekable;          // 1 = append seek table for random access.
+    const void* dict;         // Pre-trained dictionary content (NULL = none).
+    size_t dict_size;         // Dictionary size in bytes (0 = none, max 64 KB).
     zxc_progress_callback_t progress_cb;  // Optional callback (NULL to disable).
     void*  user_data;                     // Passed through to progress_cb.
 } zxc_compress_opts_t;
@@ -236,6 +244,8 @@ typedef struct {
 typedef struct {
     int    n_threads;         // Worker thread count (0 = auto-detect).
     int    checksum_enabled;  // 1 = verify checksums, 0 = skip.
+    const void* dict;         // Pre-trained dictionary content (NULL = none).
+    size_t dict_size;         // Dictionary size in bytes (0 = none).
     zxc_progress_callback_t progress_cb;  // Optional callback.
     void*  user_data;                     // Passed through to progress_cb.
 } zxc_decompress_opts_t;
@@ -1278,6 +1288,73 @@ Returns the encoded byte size of a seek table for `num_blocks` blocks.
 
 ---
 
+## 11b. Dictionary API
+
+Declared in `<zxc_dict.h>`. Provides dictionary training, serialization (`.zxd` format), and identification.
+
+### `zxc_train_dict`
+
+```c
+ZXC_EXPORT int64_t zxc_train_dict(
+    const void* const* samples,
+    const size_t*       sample_sizes,
+    size_t              n_samples,
+    void*               dict_buf,
+    size_t              dict_capacity    // max ZXC_DICT_SIZE_MAX (64KB - 1)
+);
+```
+
+Trains a dictionary from a corpus of representative samples. Returns the size of the trained dictionary, or a negative `zxc_error_t` code.
+
+### `zxc_dict_id`
+
+```c
+ZXC_EXPORT uint32_t zxc_dict_id(const void* dict, size_t dict_size);
+```
+
+Returns a deterministic 32-bit hash of the dictionary content. This ID is stored in the ZXC file header and verified at decompression time. Returns 0 for NULL/empty input.
+
+### `zxc_dict_save`
+
+```c
+ZXC_EXPORT int64_t zxc_dict_save(
+    const void* content, size_t content_size,
+    void* buf, size_t buf_capacity
+);
+```
+
+Serializes dictionary content to the `.zxd` file format. Use `zxc_dict_save_bound(content_size)` to compute the required buffer capacity.
+
+### `zxc_dict_load`
+
+```c
+ZXC_EXPORT int zxc_dict_load(
+    const void* buf, size_t buf_size,
+    const void** content_out, size_t* content_size_out,
+    uint32_t* dict_id_out        // may be NULL
+);
+```
+
+Validates and parses a `.zxd` file from memory. On success, `content_out` points into the input buffer (zero-copy). Returns `ZXC_OK` or a negative error code.
+
+### `zxc_dict_save_bound`
+
+```c
+ZXC_EXPORT size_t zxc_dict_save_bound(size_t content_size);
+```
+
+Returns the maximum `.zxd` file size for a given content size (`ZXC_DICT_HEADER_SIZE + content_size`).
+
+### `zxc_seekable_set_dict`
+
+```c
+ZXC_EXPORT int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, size_t dict_size);
+```
+
+Attaches a dictionary to a seekable handle for random-access decompression. The content is copied internally. Must be called before any `zxc_seekable_decompress_range()` call.
+
+---
+
 ## 12. Error Handling
 
 ### `zxc_error_name`
@@ -1374,6 +1451,12 @@ The shared library exports **47 symbols** (verified with `nm -gU`):
 | 49 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
 | 50 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
 | 51 | `zxc_error_name` | Error | `zxc_error.h` |
+| 52 | `zxc_train_dict` | Dictionary | `zxc_dict.h` |
+| 53 | `zxc_dict_id` | Dictionary | `zxc_dict.h` |
+| 54 | `zxc_dict_save` | Dictionary | `zxc_dict.h` |
+| 55 | `zxc_dict_load` | Dictionary | `zxc_dict.h` |
+| 56 | `zxc_dict_save_bound` | Dictionary | `zxc_dict.h` |
+| 57 | `zxc_seekable_set_dict` | Seekable | `zxc_seekable.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon`, `_avx2`, `_avx512`) are compiled with

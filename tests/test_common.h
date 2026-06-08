@@ -182,4 +182,24 @@ int test_legacy_header(void);
 int test_error_name(void);
 int test_library_info_api(void);
 
+/* Dictionary */
+int test_dict_zxd_roundtrip(void);
+int test_dict_id_deterministic(void);
+int test_dict_get_id_apis(void);
+int test_dict_buffer_roundtrip(void);
+int test_dict_block_roundtrip(void);
+int test_dict_block_safe_roundtrip(void);
+int test_dict_mismatch_error(void);
+int test_dict_required_error(void);
+int test_dict_no_dict_compat(void);
+int test_dict_stream_roundtrip(void);
+int test_dict_large_dict_roundtrip(void);
+int test_dict_safe_loop_backref(void);
+int test_dict_seekable_roundtrip(void);
+int test_dict_train_roundtrip(void);
+int test_dict_train_no_frequent_patterns(void);
+int test_dict_seekable_mt_roundtrip(void);
+int test_dict_stream_dict_id_checks(void);
+int test_dict_seekable_dict_id_checks(void);
+
 #endif /* ZXC_TEST_COMMON_H */
