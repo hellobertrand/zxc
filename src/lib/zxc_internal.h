@@ -1267,54 +1267,6 @@ static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* RESTRICT br,
 }
 
 /**
- * @brief Ensures that the bit reader buffer contains at least the specified
- * number of bits.
- *
- * This function checks if the internal buffer of the bit reader has enough bits
- * available to satisfy a subsequent read operation of `needed` bits. If not, it
- * refills the buffer from the source.
- *
- * @param[in,out] br Pointer to the bit reader context.
- * @param[in] needed The number of bits required to be available in the buffer.
- */
-static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const int needed) {
-    if (UNLIKELY(br->bits < needed)) {
-        const int safe_bits = (br->bits < 0) ? 0 : br->bits;
-        br->bits = safe_bits;
-
-        // Mask out garbage bits (retain only valid existing bits)
-#if !defined(ZXC_DISABLE_SIMD) && defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
-        br->accum = _bzhi_u64(br->accum, safe_bits);
-#else
-        br->accum &= (safe_bits < 64) ? ((1ULL << safe_bits) - 1) : ~0ULL;
-#endif
-
-        // Calculate how many bytes we can read
-        // We want to fill up to the accumulation capability (64 bits for uint64_t)
-        // Bytes needed = (capacity_bits - safe_bits) / 8
-        const int bytes_needed = ((int)(sizeof(uint64_t) * CHAR_BIT) - safe_bits) / CHAR_BIT;
-
-        // Bounds check: zxc_le64 always reads 8 bytes, so we need at least 8
-        const size_t bytes_left = (size_t)(br->end - br->ptr);
-        if (UNLIKELY(bytes_left < sizeof(uint64_t))) {
-            // Partial read (slow path / end of stream)
-            const size_t to_read =
-                (bytes_left < (size_t)bytes_needed) ? bytes_left : (size_t)bytes_needed;
-            const uint64_t raw = zxc_le_partial(br->ptr, to_read);
-            br->accum |= (safe_bits < 64) ? (raw << safe_bits) : 0;
-            br->ptr += to_read;
-            br->bits = safe_bits + (int)to_read * CHAR_BIT;
-        } else {
-            // Fast path: full 8-byte read is safe
-            const uint64_t raw = zxc_le64(br->ptr);
-            br->accum |= (safe_bits < 64) ? (raw << safe_bits) : 0;
-            br->ptr += bytes_needed;
-            br->bits = safe_bits + bytes_needed * CHAR_BIT;
-        }
-    }
-}
-
-/**
  * @brief Writes a generic header and section descriptors to a destination
  * buffer.
  *

@@ -8,10 +8,10 @@
 #include "test_common.h"
 
 /*
- * Test for zxc_br_init and zxc_br_ensure
+ * Test for zxc_br_init
  */
 int test_bit_reader() {
-    printf("=== TEST: Unit - Bit Reader (zxc_br_init / zxc_br_ensure) ===\n");
+    printf("=== TEST: Unit - Bit Reader (zxc_br_init) ===\n");
 
     // Case 1: Normal initialization
     uint8_t buffer[16];
@@ -33,27 +33,6 @@ int test_bit_reader() {
     if (br.accum != expected_accum) return 0;
     if (br.ptr != small_buffer + 4) return 0;
     printf("  [PASS] Small buffer init\n");
-
-    // Case 3: zxc_br_ensure (Normal refill)
-    zxc_br_init(&br, buffer, 16);
-    br.bits = 10;     // Simulate consumption
-    br.accum >>= 54;  // Simulate shift
-
-    zxc_br_ensure(&br, 32);
-    // Should have refilled
-    if (br.bits < 32) return 0;
-    printf("  [PASS] Ensure normal refill\n");
-
-    // Case 4: zxc_br_ensure (End of stream)
-    // Init with full buffer but advanced pointer near end
-    zxc_br_init(&br, buffer, 16);
-    br.ptr = buffer + 16;  // At end
-    br.bits = 0;
-
-    // Try to ensure bits, should not read past end
-    zxc_br_ensure(&br, 10);
-    // The key is it didn't crash.
-    printf("  [PASS] Ensure EOF safety\n");
 
     printf("PASS\n\n");
     return 1;
