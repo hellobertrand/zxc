@@ -440,19 +440,25 @@ A conforming decoder **MUST** reject any file whose version it does not support.
 
 ### 10.2 Version bump criteria
 
+ZXC has **no forward compatibility**: the set of block types and the meaning of
+every field are fixed per format version. Any change a decoder must understand —
+adding a block type, assigning meaning to a reserved field/flag bit, changing an
+encoding, layout, or the checksum algorithm — requires a **version bump**.
+
 | Change class | Version action | Example |
 |---|---|---|
-| New block type added | **No bump** (forward-compatible) | Adding a hypothetical `GLR` block type |
-| New flag bit defined | **No bump** (forward-compatible) | Using a reserved flag bit |
-| Existing block encoding changed | **Major bump** | Changing GLO token layout |
-| Header/footer layout changed | **Major bump** | Resizing the file header |
-| Checksum algorithm changed | **Major bump** | Replacing RapidHash with Komihash |
+| New block type added | **Version bump** (decoders reject unknown types) | Adding a hypothetical `GLR` block type |
+| Reserved field/flag bit assigned meaning | **Version bump** | Defining a reserved flag bit |
+| Existing block encoding changed | **Version bump** | Changing GLO token layout |
+| Header/footer layout changed | **Version bump** | Resizing the file header |
+| Checksum algorithm changed | **Version bump** | Replacing RapidHash with Komihash |
 
 ### 10.3 Compatibility rules
 
 - **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version with `ZXC_ERROR_BAD_VERSION`. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
-- **Forward compatibility**: a decoder encountering an **unknown block type** (not RAW, GLO, GHI, or EOF) **SHOULD** skip it using `comp_size` to advance past its payload (and optional checksum), rather than rejecting the file outright. This allows older decoders to partially process files from newer encoders that introduce additive block types.
-- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. Decoders **MUST** ignore reserved fields (not reject non-zero values), unless a future version assigns them meaning.
+- **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version (`ZXC_ERROR_BAD_BLOCK_TYPE`). The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
+- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header CRC, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension.
+- **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values (`ZXC_ERROR_BAD_HEADER`).
 
 ### 10.4 Minimum conforming decoder
 
