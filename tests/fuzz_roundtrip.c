@@ -5,6 +5,22 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+/**
+ * @file fuzz_roundtrip.c
+ * @brief Fuzzer for the one-shot compress -> decompress roundtrip.
+ *
+ * Asserts the core invariant of a lossless codec: decompressing what the
+ * compressor produced must reproduce the original bytes exactly. The fuzzer
+ * data is the payload to compress (never untrusted decoder input -- that is
+ * fuzz_decompress.c's job), so this target hunts for encoder/decoder
+ * mismatches rather than malformed-frame handling.
+ *
+ * Strategy: derive the compression level from the first byte so libFuzzer
+ * explores every level, compress the fuzzed bytes, then decompress into an
+ * exact-size buffer and assert a bit-exact roundtrip. Buffers are reused
+ * across iterations to keep allocator pressure low.
+ */
+
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
