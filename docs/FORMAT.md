@@ -63,7 +63,8 @@ block-oriented, seekable, integrity-checked compression container
 targeting high decompression throughput and kernel-space integration.
 It defines a fixed-size file header, an extensible block container,
 four payload encodings (RAW, GLO, GHI, NUM), an optional seek table,
-and a fixed-size file footer.
+and a fixed-size file footer. It also defines an OPTIONAL pre-trained
+dictionary mechanism together with its companion file format.
 
 The format described in this document corresponds to wire-format
 version 5 of the reference implementation and is intended to be
@@ -175,7 +176,7 @@ The File Header is 16 bytes long and is laid out as follows:
  0x04    1     Format Version
  0x05    1     Chunk Size Code
  0x06    1     Flags
- 0x07    7     Reserved
+ 0x07    7     Reserved / Dictionary ID
  0x0E    2     Header CRC16
 ~~~
 
@@ -201,15 +202,22 @@ Chunk Size Code (u8):
 
 Flags (u8):
 : Bit 7 (0x80) is HAS_CHECKSUM. When set, each non-EOF block
-  carries a trailing 4-byte checksum ({{per-block-checksum}}). Bits
-  0..3 encode the checksum algorithm identifier; value 0 denotes a
-  32-bit folding of the RapidHash function {{RAPIDHASH}}, and other
-  values are RESERVED. Bits 4..6 are RESERVED; encoders MUST set
-  them to zero and decoders MUST ignore them.
+  carries a trailing 4-byte checksum ({{per-block-checksum}}). Bit 6
+  (0x40) is HAS_DICTIONARY; when set, the archive was compressed
+  against a pre-trained dictionary ({{dictionary}}) and the Reserved
+  field carries that dictionary's identifier. Bits 0..3 encode the
+  checksum algorithm identifier; value 0 denotes a 32-bit folding of
+  the RapidHash function {{RAPIDHASH}}, and other values are
+  RESERVED. Bits 4..5 are RESERVED; encoders MUST set them to zero
+  and decoders MUST ignore them.
 
-Reserved:
-: 7 bytes. Encoders MUST set these bytes to zero. Decoders MUST
-  ignore their content.
+Reserved / Dictionary ID:
+: 7 bytes. When HAS_DICTIONARY is clear, all seven bytes are
+  RESERVED: encoders MUST set them to zero and decoders MUST ignore
+  their content. When HAS_DICTIONARY is set, the four bytes at
+  offsets 0x07..0x0A carry the dict_id as a u32 in little-endian
+  order ({{dictionary-header-encoding}}) and the three bytes at
+  offsets 0x0B..0x0D MUST be zero.
 
 Header CRC16 (u16):
 : A 16-bit hash computed by zxc_hash16 over the 16-byte header with
@@ -662,13 +670,161 @@ global_hash:
 : The rolling global hash defined in {{checksums}}, or zero when
   HAS_CHECKSUM = 0.
 
+# Pre-Trained Dictionary Support {#dictionary}
+
+ZXC defines an OPTIONAL pre-trained dictionary mechanism that
+improves the compression ratio of small, mutually similar payloads
+(for example JSON API responses, game assets, or structured log
+records) by prefilling the LZ77 sliding window at the start of each
+block.
+
+A dictionary is a standalone file, conventionally carrying the .zxd
+extension ({{zxd-format}}), referenced from a ZXC archive by a
+32-bit identifier stored in the File Header
+({{dictionary-header-encoding}}). Dictionary support is purely
+additive: an archive compressed without a dictionary is bit-identical
+to one produced by an encoder that has no dictionary support, and a
+decoder that does not recognise the HAS_DICTIONARY flag is governed
+by {{compatibility-rules}}.
+
+## Mechanism
+
+A dictionary contains raw byte content of at most 65535 bytes,
+bounded by the 64 KiB LZ77 sliding window. At compression time the
+dictionary is logically prepended to each block's input, seeding the
+match finder so that it MAY reference dictionary content from the
+first byte of the block. At decompression time the dictionary is
+prepended to the output buffer, so that match copies referencing
+dictionary bytes resolve by ordinary pointer arithmetic.
+
+Because every block is independently decodable, the dictionary
+prefill is applied per block. This preserves the constant-time
+random access property of {{sek-block}}: a decoder loads the
+dictionary once and then decodes any block in isolation.
+
+## File Header Encoding {#dictionary-header-encoding}
+
+When the HAS_DICTIONARY flag (Flags bit 6, 0x40; see
+{{file-header}}) is set, the four reserved bytes at offsets
+0x07..0x0A of the File Header carry the dict_id as a u32 in
+little-endian order, and the remaining reserved bytes at offsets
+0x0B..0x0D are zero.
+
+A decoder processing an archive whose File Header has HAS_DICTIONARY
+set MUST:
+
+1. Verify that a dictionary has been supplied by the caller. If not,
+   it MUST reject the archive (dictionary required; see
+   {{error-handling}}).
+2. Verify that the identifier of the supplied dictionary equals the
+   dict_id in the File Header. If not, it MUST reject the archive
+   (dictionary mismatch).
+
+A decoder that does not recognise the HAS_DICTIONARY flag ignores it
+per {{compatibility-rules}}. However, blocks compressed against a
+dictionary contain match offsets that reference dictionary content,
+so decoding them without the dictionary produces incorrect output.
+When the per-block and global checksums ({{checksums}}) are enabled
+they will detect this divergence; an encoder that uses a dictionary
+SHOULD therefore also enable checksums.
+
+## Dictionary File Format {#zxd-format}
+
+A dictionary is stored as a standalone file consisting of a 16-byte
+header followed by the raw dictionary content:
+
+~~~
+ Offset  Size  Field
+ 0x00    4     Magic
+ 0x04    1     Dictionary Format Version
+ 0x05    1     Flags
+ 0x06    2     Content Size
+ 0x08    4     dict_id
+ 0x0C    2     Reserved
+ 0x0E    2     Header CRC16
+ 0x10    N     Dictionary Content
+~~~
+
+Magic (u32):
+: MUST be 0x9CB0D1C7. Stored little-endian, the on-disk byte
+  sequence is C7 D1 B0 9C. It shares the 0x9CB0 family prefix with
+  the ZXC archive magic ({{file-header}}); an implementation MUST
+  compare the full 32-bit value to distinguish the two file types.
+
+Dictionary Format Version (u8):
+: The dictionary file format version. This document specifies
+  version 1.
+
+Flags (u8):
+: Bits 0..3 encode the checksum algorithm identifier, matching the
+  Flags field of the ZXC File Header; value 0 denotes the
+  RapidHash-based folding {{RAPIDHASH}}. Bits 4..7 are RESERVED;
+  encoders MUST set them to zero.
+
+Content Size (u16):
+: The length in bytes of the dictionary content that follows the
+  header. MUST be in the range \[1, 65535\].
+
+dict_id (u32):
+: A deterministic 32-bit identifier computed as a folding of the
+  RapidHash function {{RAPIDHASH}} over the content bytes. It MUST
+  equal the dict_id stored in the File Header of any ZXC archive
+  compressed with this dictionary.
+
+Reserved:
+: 2 bytes. Encoders MUST set these to zero.
+
+Header CRC16 (u16):
+: A 16-bit hash computed by zxc_hash16 over the 16-byte header with
+  the four bytes at offsets 0x0C..0x0F treated as zero during
+  hashing, mirroring the File Header checksum of {{file-header}}.
+
+Dictionary Content:
+: Content Size raw bytes that prefill the LZ77 window. The content
+  is not compressed.
+
+A dictionary whose content size exceeds 65535 bytes cannot be
+represented by this format and MUST be rejected when the dictionary
+is loaded.
+
+## Dictionary Training
+
+A dictionary is produced by analysing a corpus of representative
+samples and selecting byte segments that maximise LZ77 match
+coverage. The reference implementation places the most frequently
+matched segments at the end of the dictionary, so that they yield
+the shortest match offsets (closest to the start of the block in the
+virtual window). The training procedure is an encoder concern and
+does not affect the on-disk format; any file that satisfies
+{{zxd-format}} is a conforming dictionary.
+
+## Naming and Lookup Conventions
+
+The .zxd extension is a tooling convention only. A dictionary file
+is identified by its magic word at offset 0x00, never by its
+extension, and the extension does not affect any bytes on the wire.
+The reference CLI applies the following conventions:
+
+- Training writes the dictionary as dictionary_<dict_id>.zxd, where
+  <dict_id> is the lowercase eight-digit hexadecimal form of the
+  identifier. Embedding the identifier in the file name keeps it
+  unique per dictionary and easy to match against the value reported
+  by archive-inspection tooling.
+- A dictionary is never located automatically at decompression time.
+  An archive compressed with a dictionary MUST be decompressed by
+  supplying that dictionary explicitly. Absent it, decompression
+  fails because a dictionary is required; supplied with the wrong
+  dictionary, it fails because the dict_id does not match.
+
 # Decoder Operation
 
 A conforming decoder SHOULD process a ZXC stream according to the
 following procedure:
 
 1. Read the 16-byte File Header. Validate the Magic, Format
-   Version, Chunk Size Code, and Header CRC16.
+   Version, Chunk Size Code, and Header CRC16. If the HAS_DICTIONARY
+   flag is set, validate the supplied dictionary against the dict_id
+   ({{dictionary-header-encoding}}).
 2. Loop over blocks:
 
    a. Read the 8-byte block header. Validate the Header CRC8.
@@ -767,6 +923,8 @@ all errors in the table are fatal by default.
 | Decompressed output exceeds chunk size | During LZ decode            | Reject. Corrupt or malicious payload.           |
 | Match offset out of bounds             | During LZ copy              | Reject. Offset references data before output.   |
 | Varint exceeds L_MAX (3 bytes in v1)   | Extras stream               | Reject. See {{varint-cap-v1}}. Overflow or corrupt extras data.|
+| Dictionary required but not supplied   | File header offset 0x06     | Reject. HAS_DICTIONARY set; see {{dictionary-header-encoding}}. |
+| Dictionary ID mismatch                 | File header offset 0x07     | Reject. Supplied dictionary does not match the header dict_id.  |
 
 ## Severity Levels
 
@@ -914,6 +1072,43 @@ comp_size = 4 (one 4-byte entry) and CRC8 = 0xD2. The single entry
 The File Footer remains the last 12 bytes of the file, so a decoder
 locating the footer from the end of the file requires no
 modification to support seekable archives.
+
+## Dictionary File
+
+This subsection illustrates a minimal dictionary file
+({{zxd-format}}) whose content is the five ASCII bytes "hello". The
+total file size is 21 bytes: a 16-byte header and 5 bytes of
+content.
+
+~~~
+00000000: C7 D1 B0 9C 01 00 05 00 17 0F 72 9A 00 00 4A D9
+00000010: 68 65 6C 6C 6F
+~~~
+
+Dictionary header (offset 0x00, 16 bytes):
+
+~~~
+C7 D1 B0 9C | 01 | 00 | 05 00 | 17 0F 72 9A | 00 00 | 4A D9
+~~~
+
+- C7 D1 B0 9C decodes to Magic = 0x9CB0D1C7.
+- 01 means Dictionary Format Version 1.
+- 00 means Flags = 0 (checksum algorithm id 0, no reserved bits set).
+- 05 00 is Content Size = 5.
+- 17 0F 72 9A is dict_id = 0x9A720F17. This value matches the
+  dict_id stored in the File Header of any archive compressed with
+  this dictionary.
+- 00 00 are the two RESERVED bytes.
+- 4A D9 is the Header CRC16, computed over the 16-byte header with
+  bytes 0x0C..0x0F treated as zero.
+
+Dictionary content (offset 0x10, 5 bytes):
+
+~~~
+68 65 6C 6C 6F   (ASCII "hello")
+~~~
+
+These raw bytes prefill the LZ77 window; they are not compressed.
 
 # Security Considerations
 
