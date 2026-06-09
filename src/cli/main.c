@@ -1340,6 +1340,14 @@ int main(int argc, char** argv) {
             free(zxd_buf);
             return 1;
         }
+        /* content_size is a file-derived length; zxc_dict_load already
+         * validates it, but re-check the untrusted size at the alloc/copy
+         * boundary so the bound governing memcpy is explicit at the sink. */
+        if (content_size == 0 || content_size > ZXC_DICT_SIZE_MAX) {
+            fprintf(stderr, "Error: invalid dictionary '%s'\n", dict_path);
+            free(zxd_buf);
+            return 1;
+        }
         dict = malloc(content_size);
         if (!dict) {
             free(zxd_buf);
