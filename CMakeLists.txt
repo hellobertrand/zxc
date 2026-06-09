@@ -144,6 +144,8 @@ macro(zxc_add_variant suffix flags)
     foreach(_src compress decompress huffman)
         add_library(zxc_${_src}${suffix} OBJECT src/lib/zxc_${_src}.c)
         target_compile_options(zxc_${_src}${suffix} PRIVATE ${flags})
+        # MSVC C4244: block-bounded uint64->size_t narrowing, lossless (clean on GCC/Clang).
+        target_compile_options(zxc_${_src}${suffix} PRIVATE $<$<C_COMPILER_ID:MSVC>:/wd4244>)
         target_compile_definitions(zxc_${_src}${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix})
         # For static builds, define ZXC_STATIC_DEFINE
         if(NOT BUILD_SHARED_LIBS)
@@ -306,7 +308,8 @@ if(NOT MSVC)
         target_link_options(zxc_lib PRIVATE -Wl,--gc-sections)
     endif()
 else()
-    target_compile_options(zxc_lib PRIVATE $<$<CONFIG:Release>:/O2> /W3)
+    # /wd4244: same block-bounded uint64->size_t narrowing as the variants.
+    target_compile_options(zxc_lib PRIVATE $<$<CONFIG:Release>:/O2> /W3 /wd4244)
     target_compile_definitions(zxc_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
