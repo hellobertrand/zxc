@@ -594,7 +594,7 @@ offset `0x00`, never by extension. This is a tooling convention, not a format
 requirement; it does not affect bytes on the wire. The reference CLI applies it
 as follows:
 
-- `zxc --train-dict <dir>/` writes the trained dictionary as
+- `zxc --train <dir>/` writes the trained dictionary as
   `<dir>/dictionary_<dict_id>.zxd`, where `<dict_id>` is the lowercase 8-digit
   hex of the dictionary id (e.g. `dictionary_bc46eec1.zxd`). Embedding the id
   keeps the name unique per dictionary and easy to match against the `Dict ID`

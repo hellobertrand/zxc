@@ -470,11 +470,11 @@ For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dict
 
 ```bash
 # Train a dictionary from a corpus of similar files
-zxc --train-dict corpus.zxd samples/*.json
+zxc --train corpus.zxd samples/*.json
 
 # Or pass a directory: the dictionary is saved as dictionary_<dict_id>.zxd inside it
 # (the dict_id embeds in the name), e.g. dicts/dictionary_bc46eec1.zxd
-zxc --train-dict dicts/ samples/*.json
+zxc --train dicts/ samples/*.json
 ```
 
 ```c

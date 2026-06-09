@@ -30,7 +30,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **-l**, **--list**
 : List archive information, including compressed size, uncompressed size, compression ratio, checksum method, and dictionary ID (if any). Also accepts a `.zxd` dictionary file, in which case it prints the dictionary's `dict_id`.
 
-**--train-dict** *PATH*
+**--train** *PATH*
 : Train a dictionary from the input files given as training samples and write it to *PATH*. If *PATH* is a directory (or ends with a path separator), the dictionary is saved inside it as `dictionary_<dict_id>.zxd`; otherwise *PATH* is used verbatim. See **DICTIONARIES**.
 
 **-t**, **--test**
@@ -104,7 +104,7 @@ For workloads compressed in small blocks (4K–128K), a pre-trained dictionary c
 
 Dictionaries are external `.zxd` files referenced from the archive header by a 32-bit `dict_id` (a hash of the dictionary content). The `.zxd` extension is cosmetic; a `.zxd` file is identified by its magic word, not its name.
 
-When **--train-dict** targets a directory, **zxc** names the file `dictionary_<dict_id>.zxd` (the `dict_id` is the lowercase 8-digit hex reported by `zxc -l`). On decompression the dictionary is **not** auto-located: an archive compressed with a dictionary must be decompressed by supplying that dictionary with **-D**, otherwise decompression fails with a dictionary-required error.
+When **--train** targets a directory, **zxc** names the file `dictionary_<dict_id>.zxd` (the `dict_id` is the lowercase 8-digit hex reported by `zxc -l`). On decompression the dictionary is **not** auto-located: an archive compressed with a dictionary must be decompressed by supplying that dictionary with **-D**, otherwise decompression fails with a dictionary-required error.
 
 If no matching dictionary can be found (or supplied), decompression fails with a dictionary-required error rather than producing corrupt output.
 
@@ -147,7 +147,7 @@ If no matching dictionary can be found (or supplied), decompression fails with a
   zxc -b 10 data.txt
 
 **Train a dictionary into a directory (saved as `dictionary_<dict_id>.zxd`):**
-  zxc --train-dict dicts/ samples/*.json
+  zxc --train dicts/ samples/*.json
 
 **Compress with a dictionary using small blocks:**
   zxc -B 4K -D dicts/dictionary_bc46eec1.zxd input.json

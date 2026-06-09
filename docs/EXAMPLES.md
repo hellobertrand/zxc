@@ -546,7 +546,7 @@ How it ties together:
 
 ```sh
 # Train from a corpus directory -> writes dictionary_<dict_id>.zxd in it.
-zxc --train-dict ./corpus/
+zxc --train ./corpus/
 
 # Compress / decompress with the dictionary (required at both ends).
 zxc -D dictionary_1a2b3c4d.zxd -z record.json

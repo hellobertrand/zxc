@@ -893,18 +893,18 @@ fi
 # 25. Dictionary Tests (-D)
 echo "Testing Dictionary (-D)..."
 
-# 25.1 Train a dictionary using --train-dict
+# 25.1 Train a dictionary using --train
 echo "  Training dictionary from test data..."
 # Create a few sample files for training
 for i in 1 2 3 4 5; do
     cp "$TEST_FILE" "$TEST_DIR/sample_${i}.txt"
 done
 DICT_FILE="$TEST_DIR/test.zxd"
-"$ZXC_BIN" --train-dict "$DICT_FILE" "$TEST_DIR"/sample_*.txt 2>/dev/null
+"$ZXC_BIN" --train "$DICT_FILE" "$TEST_DIR"/sample_*.txt 2>/dev/null
 if [ ! -f "$DICT_FILE" ]; then
     log_fail "Dictionary training failed"
 fi
-log_pass "Dictionary trained via --train-dict"
+log_pass "Dictionary trained via --train"
 
 # 25.2 Round-trip with dictionary
 echo "  Testing dict round-trip..."
@@ -1001,7 +1001,7 @@ fi
 echo "  Testing train-to-directory naming..."
 AUTO_DIR="$TEST_DIR/auto"
 mkdir -p "$AUTO_DIR"
-"$ZXC_BIN" --train-dict "$AUTO_DIR/" "$TEST_DIR"/sample_*.txt 2>/dev/null
+"$ZXC_BIN" --train "$AUTO_DIR/" "$TEST_DIR"/sample_*.txt 2>/dev/null
 ZXD_NAME=$(ls "$AUTO_DIR" | grep -E '^dictionary_[0-9a-f]{8}\.zxd$' || true)
 if [ -n "$ZXD_NAME" ]; then
     log_pass "Train to directory names dict dictionary_<dict_id>.zxd ($ZXD_NAME)"

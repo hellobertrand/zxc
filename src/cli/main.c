@@ -476,7 +476,7 @@ void print_help(const char* app) {
         "  -l, --list        List archive or dictionary info\n"
         "  -t, --test        Test compressed FILE integrity\n"
         "  -b, --bench [N]   Benchmark in-memory (N=seconds, default 5)\n"
-        "  --train-dict PATH Train a dictionary from input files. PATH may be a\n"
+        "  --train PATH      Train a dictionary from input files. PATH may be a\n"
         "                    directory (saved as dictionary_<dict_id>.zxd inside it) or a file\n\n"
         "Batch Processing:\n"
         "  -m, --multiple    Multiple input files\n"
@@ -1129,7 +1129,7 @@ int main(int argc, char** argv) {
     const char* dict_path = NULL;
     const char* train_dict_path = NULL;
 
-    static const struct option long_options[] = {{"train-dict", required_argument, 0, OPT_TRAIN_DICT},
+    static const struct option long_options[] = {{"train", required_argument, 0, OPT_TRAIN_DICT},
                                                  {"dict", required_argument, 0, 'D'},
                                                  {"compress", no_argument, 0, 'z'},
                                                  {"decompress", no_argument, 0, 'd'},
@@ -1383,7 +1383,7 @@ int main(int argc, char** argv) {
      */
     if (mode == MODE_TRAIN_DICT) {
         if (optind >= argc) {
-            fprintf(stderr, "Error: --train-dict requires input files as training samples.\n");
+            fprintf(stderr, "Error: --train requires input files as training samples.\n");
             free(dict);
             return 1;
         }
