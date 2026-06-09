@@ -155,8 +155,11 @@ If no matching dictionary can be found (or supplied), decompression fails with a
 **Decompress (the dictionary is required, pass it with -D):**
   zxc -d -D dicts/dictionary_bc46eec1.zxd input.json.zxc
 
+## BUGS
+Report bugs at <https://github.com/hellobertrand/zxc/issues>.
+
 ## AUTHORS
-Written by Bertrand Lebonnois & contributors.
+Bertrand Lebonnois
 
 ## LICENSE
 BSD 3-Clause License.
