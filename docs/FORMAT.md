@@ -62,12 +62,12 @@ This document describes the ZXC compressed data format. ZXC is a
 block-oriented, seekable, integrity-checked compression container
 targeting high decompression throughput and kernel-space integration.
 It defines a fixed-size file header, an extensible block container,
-four payload encodings (RAW, GLO, GHI, NUM), an optional seek table,
+three payload encodings (RAW, GLO, GHI), an optional seek table,
 and a fixed-size file footer. It also defines an OPTIONAL pre-trained
 dictionary mechanism together with its companion file format.
 
 The format described in this document corresponds to wire-format
-version 5 of the reference implementation and is intended to be
+version 6 of the reference implementation and is intended to be
 published as Version 1.0 of the ZXC specification.
 
 --- middle
@@ -92,11 +92,10 @@ decodable blocks of a fixed maximum decompressed size, terminated by
 a distinguished end-of-stream block and followed by a small footer
 carrying the original source size and a global integrity hash.
 
-Four payload encodings are defined: RAW (uncompressed), GLO
+Three payload encodings are defined: RAW (uncompressed), GLO
 (general-purpose LZ with separated streams and optional Huffman
-coding of literals), GHI (high-throughput LZ with packed 32-bit
-sequence words), and NUM (specialised encoding for 32-bit integer
-streams using delta-zigzag bitpacking).
+coding of literals), and GHI (high-throughput LZ with packed 32-bit
+sequence words).
 
 This document specifies the on-disk binary format only. It does not
 mandate any particular encoder strategy. Any byte sequence that
@@ -187,18 +186,16 @@ Magic (u32):
   sequence is F5 2E B0 9C.
 
 Format Version (u8):
-: The wire-format version. This document specifies version 5. A
+: The wire-format version. This document specifies version 6. A
   conforming decoder MUST reject any file whose Format Version it
-  does not support.
+  does not support, with the ZXC_ERROR_BAD_VERSION condition.
 
 Chunk Size Code (u8):
 : Values in the range \[12, 21\] are interpreted as exponents, where
   block_size = 2^code. This yields valid block sizes from 4 KiB
   (code 12) to 2 MiB (code 21). The default block size in the
-  reference implementation is 512 KiB (code 19). The value 64 is
-  RESERVED for backward compatibility with legacy encoders and maps
-  to 256 KiB; new encoders SHOULD NOT emit this value. All other
-  values MUST be rejected.
+  reference implementation is 512 KiB (code 19). All other values
+  MUST be rejected.
 
 Flags (u8):
 : Bit 7 (0x80) is HAS_CHECKSUM. When set, each non-EOF block
@@ -244,16 +241,14 @@ The following Block Type values are assigned by this document:
 |------:|----------|--------------------|
 |   0   | RAW      | {{raw-block}}      |
 |   1   | GLO      | {{glo-block}}      |
-|   2   | NUM      | {{num-block}}      |
-|   3   | GHI      | {{ghi-block}}      |
+|   2   | GHI      | {{ghi-block}}      |
 |  254  | SEK      | {{sek-block}}      |
 |  255  | EOF      | {{eof-block}}      |
 
-All other values are unassigned. An unassigned block type MAY be
-introduced by a future minor revision of this format without bumping
-the Format Version field, provided that a conforming decoder of the
-present version can skip the block using comp_size. See
-{{versioning}}.
+All other values are unassigned. The block-type set is fixed for a
+given Format Version: a decoder MUST reject any block whose type is
+not defined for the version it implements, rather than skipping it.
+Introducing a new block type is a version bump. See {{versioning}}.
 
 ## Block Header Semantics
 
@@ -406,54 +401,7 @@ code-length header:
 A violation of any of the above MUST be reported as a corrupt-data
 error.
 
-# NUM Block (Type 2) {#num-block}
-
-The NUM block is a specialised encoding for streams of 32-bit
-integers using delta encoding, zigzag mapping, and bitpacking.
-
-## NUM Payload Layout
-
-~~~
-+--------------------------+
-| NUM Header (16 bytes)    |
-+--------------------------+
-| Frame #0 Header (16 B)   |
-| Frame #0 Packed Bits     |
-| Frame #1 Header (16 B)   |
-| Frame #1 Packed Bits     |
-| ...                      |
-+--------------------------+
-~~~
-
-## NUM Header
-
-~~~
- Offset  Size  Field
- 0x00    8     n_values   (u64)
- 0x08    2     frame_size (u16, currently 128)
- 0x0A    6     RESERVED
-~~~
-
-## NUM Frame Record
-
-~~~
- Offset  Size  Field
- 0x00    2     nvals          (u16)
- 0x02    2     bits_per_value (u16)
- 0x04    8     base_seed      (u64)
- 0x0C    4     packed_size    (u32, in bytes)
- 0x10    var   Packed delta bit-stream (packed_size bytes)
-~~~
-
-Values are reconstructed by bit-unpacking the delta stream, applying
-the zigzag-inverse mapping, and accumulating from base_seed by
-prefix sum.
-
-Support for NUM blocks by a decoder is RECOMMENDED but not REQUIRED
-for a minimal conforming implementation; see
-{{minimum-conforming-decoder}}.
-
-# GHI Block (Type 3) {#ghi-block}
+# GHI Block (Type 2) {#ghi-block}
 
 The GHI block ("high-throughput LZ") is an alternate compressed
 encoding optimised for raw decompression speed. It uses packed
@@ -834,7 +782,7 @@ following procedure:
       verify it against the payload; update the rolling global
       hash.
    e. Decode the payload according to the Block Type
-      ({{raw-block}}, {{glo-block}}, {{num-block}}, {{ghi-block}}).
+      ({{raw-block}}, {{glo-block}}, {{ghi-block}}).
 
 3. If a SEK block is present, the decoder MAY validate or skip it.
 4. Read the 12-byte File Footer. Verify that the produced output
@@ -850,54 +798,62 @@ steps above fail.
 ## Format Version Field
 
 The Format Version is a single byte at offset 0x04 of the File
-Header. A conforming decoder MUST reject any file whose Format
-Version it does not support, with the sole exception described in
-{{compatibility-rules}}.
+Header. A conforming decoder accepts only the version it implements
+and MUST reject any other version with the ZXC_ERROR_BAD_VERSION
+condition. Because block-type numbering and payload layouts may
+change between versions, a decoder MUST NOT attempt to interpret an
+archive whose version byte it does not recognise.
 
 ## Version Bump Criteria
 
-| Change class                    | Action     | Example                          |
-|---------------------------------|------------|----------------------------------|
-| New block type added            | No bump    | Adding a hypothetical GLR block  |
-| New flag bit defined            | No bump    | Using a reserved flag bit        |
-| Existing block encoding changed | Major bump | Changing GLO token layout        |
-| Header or footer layout changed | Major bump | Resizing the File Header         |
-| Checksum algorithm changed      | Major bump | Replacing RapidHash              |
+Any change a decoder must understand in order to parse an archive
+correctly requires a version bump:
+
+| Change class                             | Action       | Example                         |
+|------------------------------------------|--------------|---------------------------------|
+| New block type added                     | Version bump | Adding a hypothetical GLR block |
+| Reserved field or flag bit given meaning | Version bump | Defining a reserved flag bit    |
+| Existing block encoding changed          | Version bump | Changing GLO token layout       |
+| Header or footer layout changed          | Version bump | Resizing the File Header        |
+| Checksum algorithm changed               | Version bump | Replacing RapidHash             |
 
 ## Compatibility Rules {#compatibility-rules}
 
-Backward compatibility:
-: A decoder supporting Format Version N MUST decode all files
-  produced by encoders at the same version. It MAY also accept
-  earlier versions.
+Version compatibility:
+: A decoder accepts only the Format Version it implements and MUST
+  reject any other version with ZXC_ERROR_BAD_VERSION. Because
+  block-type numbering and payload formats may change between
+  versions, a decoder MUST NOT attempt to interpret an archive whose
+  version byte it does not recognise.
 
-Forward compatibility:
-: A decoder encountering an unknown Block Type (not RAW, GLO, NUM,
-  GHI, SEK, or EOF) SHOULD skip the block using comp_size and the
-  optional trailing checksum, rather than rejecting the file
-  outright. This allows decoders to partially process files from
-  newer encoders that introduce additive block types.
+Unknown block types:
+: A decoder MUST reject any block whose type is not defined for its
+  Format Version, with the ZXC_ERROR_BAD_BLOCK_TYPE condition. The
+  block-type set is fixed per version; introducing a new type is a
+  version bump. Decoders MUST NOT skip unknown blocks: silently
+  advancing past unrecognised data is unsafe.
 
 Reserved fields:
 : All reserved bytes and flag bits MUST be written as zero by
-  encoders. Decoders MUST NOT reject a file solely because a
-  reserved field is non-zero, unless a future revision of this
-  document assigns the field a meaning.
+  encoders. The decoder tolerates (ignores) non-zero reserved
+  values, which are covered by the header CRC; assigning a reserved
+  field any meaning is a version bump, never a same-version
+  extension.
 
 ## Minimum Conforming Decoder {#minimum-conforming-decoder}
 
-A minimum conforming decoder for Format Version 5 MUST support:
+A minimum conforming decoder for Format Version 6 MUST support:
 
 - File header parsing and CRC16 validation.
 - RAW blocks (type 0): passthrough copy.
 - GLO blocks (type 1): full LZ decoding with extras varints.
-- GHI blocks (type 3): full LZ decoding with extras varints.
+- GHI blocks (type 2): full LZ decoding with extras varints.
 - EOF block (type 255): stream termination.
 - File footer validation (source size check).
 
-Support for NUM blocks (type 2), Huffman-coded literals
-({{huffman-literal-section}}), and per-block checksum verification
-({{per-block-checksum}}) is RECOMMENDED but not REQUIRED.
+Support for Huffman-coded literals ({{huffman-literal-section}}) and
+per-block checksum verification ({{per-block-checksum}}) is
+RECOMMENDED but not REQUIRED.
 
 # Error Handling {#error-handling}
 
@@ -912,9 +868,9 @@ all errors in the table are fatal by default.
 | Bad magic                              | File header offset 0x00     | Reject immediately. Not a ZXC file.             |
 | Unsupported version                    | File header offset 0x04     | Reject immediately.                             |
 | Header CRC16 mismatch                  | File header offset 0x0E     | Reject. Header is corrupt or truncated.         |
-| Invalid chunk size code                | File header offset 0x05     | Reject. Code outside \[12..21\] and not legacy 64.|
+| Invalid chunk size code                | File header offset 0x05     | Reject. Code outside the valid range \[12..21\].  |
 | Block header CRC8 mismatch             | Block header offset 0x07    | Reject block. Stream is corrupt.                |
-| Unknown block type                     | Block header offset 0x00    | Skip block per {{compatibility-rules}}, or reject.|
+| Unknown block type                     | Block header offset 0x00    | Reject (ZXC_ERROR_BAD_BLOCK_TYPE). Type not defined for this version.|
 | Block payload truncated                | During payload read         | Reject. Unexpected end of stream.               |
 | Block checksum mismatch                | Trailing 4-byte checksum    | Reject block. Payload is corrupt.               |
 | EOF block with non-zero comp_size      | EOF block header            | Reject. Malformed EOF marker.                   |
@@ -978,7 +934,7 @@ The resulting archive is 58 bytes.
 ## Hexdump
 
 ~~~
-00000000: F5 2E B0 9C 05 13 80 00 00 00 00 00 00 00 B8 90
+00000000: F5 2E B0 9C 06 13 80 00 00 00 00 00 00 00 FD 3B
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
@@ -987,15 +943,15 @@ The resulting archive is 58 bytes.
 ## File Header (offset 0x00, 16 bytes)
 
 ~~~
-F5 2E B0 9C | 05 | 13 | 80 | 00 00 00 00 00 00 00 | B8 90
+F5 2E B0 9C | 06 | 13 | 80 | 00 00 00 00 00 00 00 | FD 3B
 ~~~
 
 - F5 2E B0 9C decodes to Magic = 0x9CB02EF5.
-- 05 means Format Version 5.
+- 06 means Format Version 6.
 - 13 means Chunk Size Code 19 (2^19 = 524288 bytes = 512 KiB).
 - 80 means HAS_CHECKSUM = 1, algorithm id 0.
 - Seven RESERVED zero bytes.
-- B8 90 is the Header CRC16.
+- FD 3B is the Header CRC16.
 
 ## Data Block 0 (RAW, offset 0x10)
 
@@ -1056,7 +1012,7 @@ The same input compressed with the seek table enabled (zxc -z -C -1
 -S sample.txt) yields a 70-byte archive:
 
 ~~~
-00000000: F5 2E B0 9C 05 13 80 00 00 00 00 00 00 00 B8 90
+00000000: F5 2E B0 9C 06 13 80 00 00 00 00 00 00 00 FD 3B
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
 00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00
@@ -1239,9 +1195,8 @@ with the following initial assignments:
 |-----------:|------------|------------------|
 | 0          | RAW        | {{raw-block}}    |
 | 1          | GLO        | {{glo-block}}    |
-| 2          | NUM        | {{num-block}}    |
-| 3          | GHI        | {{ghi-block}}    |
-| 4..253     | Unassigned | -                |
+| 2          | GHI        | {{ghi-block}}    |
+| 3..253     | Unassigned | -                |
 | 254        | SEK        | {{sek-block}}    |
 | 255        | EOF        | {{eof-block}}    |
 
