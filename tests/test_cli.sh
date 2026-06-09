@@ -1029,5 +1029,42 @@ else
     log_fail "Decompress with -D failed to recreate original"
 fi
 
+# 26. unzxc Alias (argv[0]-based mode detection)
+echo "Testing unzxc alias..."
+
+# "unzxc" is a symlink to zxc that defaults to decompression (like unzstd /
+# gunzip). Create a local symlink to the binary under test and exercise it.
+# Symlinks are POSIX-only; skip gracefully where they are unsupported.
+ZXC_ABS=$(cd "$(dirname "$ZXC_BIN")" && pwd)/$(basename "$ZXC_BIN")
+UNZXC_BIN="$TEST_DIR/unzxc"
+
+if ln -sf "$ZXC_ABS" "$UNZXC_BIN" 2>/dev/null && [ -L "$UNZXC_BIN" ]; then
+    # A known archive to decode through the alias.
+    "$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/alias.zxc"
+
+    # 26.1 unzxc with no mode flag must decompress (equivalent to zxc -d).
+    if "$UNZXC_BIN" -c "$TEST_DIR/alias.zxc" > "$TEST_DIR/alias.dec" 2>/dev/null \
+       && cmp -s "$TEST_FILE" "$TEST_DIR/alias.dec"; then
+        log_pass "unzxc defaults to decompression"
+    else
+        log_fail "unzxc should decompress by default (like zxc -d)"
+    fi
+
+    # 26.2 An explicit -z on the unzxc-named binary overrides back to compression.
+    # If the override were broken, unzxc would try to *decode* the plaintext input
+    # and fail, so the round-trip below would not match.
+    set +e
+    "$UNZXC_BIN" -z -c "$TEST_FILE_ARG" > "$TEST_DIR/alias_z.zxc" 2>/dev/null
+    "$ZXC_BIN" -d -c "$TEST_DIR/alias_z.zxc" > "$TEST_DIR/alias_z.dec" 2>/dev/null
+    set -e
+    if cmp -s "$TEST_FILE" "$TEST_DIR/alias_z.dec"; then
+        log_pass "unzxc -z overrides back to compression"
+    else
+        log_fail "unzxc -z should compress (explicit flag must win)"
+    fi
+else
+    echo "  [SKIP] symlinks unsupported here, skipping unzxc alias test"
+fi
+
 echo "All tests passed!"
 exit 0

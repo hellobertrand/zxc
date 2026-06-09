@@ -6,6 +6,10 @@
 ## SYNOPSIS
 **zxc** [*OPTIONS*] [*INPUT-FILE*] [*OUTPUT-FILE*]
 
+**unzxc** [*OPTIONS*] [*INPUT-FILE*] [*OUTPUT-FILE*]
+
+**unzxc** is equivalent to **zxc -d**.
+
 ## DESCRIPTION
 **zxc** is a command-line interface for the ZXC compression library, a high-performance lossless compression algorithm optimized for maximum decompression throughput.
 
@@ -21,7 +25,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : Compress FILE. This is the default mode if no mode is specified.
 
 **-d**, **--decompress**
-: Decompress FILE.
+: Decompress FILE. This is the default mode when **zxc** is invoked under the name **unzxc** (typically an installed symlink), mirroring **unzstd**(1) and **gunzip**(1). An explicit mode flag still takes precedence.
 
 **-l**, **--list**
 : List archive information, including compressed size, uncompressed size, compression ratio, checksum method, and dictionary ID (if any). Also accepts a `.zxd` dictionary file, in which case it prints the dictionary's `dict_id`.
@@ -114,6 +118,9 @@ If no matching dictionary can be found (or supplied), decompression fails with a
 
 **Decompress a file:**
   zxc -d data.txt.zxc
+
+**Decompress a file using the unzxc alias:**
+  unzxc data.txt.zxc
 
 **Compress multiple files independently:**
   zxc -m file1.txt file2.txt file3.txt

@@ -1101,6 +1101,21 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
  */
 int main(int argc, char** argv) {
     zxc_mode_t mode = MODE_COMPRESS;
+
+    /* When invoked as "unzxc" (typically a symlink to zxc), default to
+     * decompression -- like unzstd / gunzip. An explicit -z/-d/-l/-t/-b below
+     * still overrides this default. */
+    {
+        const char* prog = (argc > 0 && argv[0]) ? argv[0] : "zxc";
+        const char* slash = strrchr(prog, '/');
+#ifdef _WIN32
+        const char* bslash = strrchr(prog, '\\');
+        if (bslash && (!slash || bslash > slash)) slash = bslash;
+#endif
+        const char* base = slash ? slash + 1 : prog;
+        if (strstr(base, "unzxc")) mode = MODE_DECOMPRESS;
+    }
+
     int num_threads = 0;
     int keep_input = 0;
     int force = 0;

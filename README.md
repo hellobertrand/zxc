@@ -539,6 +539,9 @@ zxc input_file
 # Decompression
 zxc -d compressed_file output_file
 
+# When installed, "unzxc" is an alias for "zxc -d" (like unzstd / gunzip)
+unzxc compressed_file output_file
+
 # Benchmark Mode (Testing speed on your machine)
 zxc -b input_file
 ```
