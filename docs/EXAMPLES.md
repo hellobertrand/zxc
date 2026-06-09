@@ -8,6 +8,7 @@ This document provides complete, working examples for using the ZXC compression 
 - [Reusable Context API](#reusable-context-api)
 - [Seekable Reader (Custom Storage Backend)](#seekable-reader-custom-storage-backend)
 - [Compressing Numeric Data (Pre-Filters)](#compressing-numeric-data-pre-filters)
+- [Using a Pre-Trained Dictionary](#using-a-pre-trained-dictionary)
 - [Meson Integration](#meson-integration)
 - [Language Bindings](#language-bindings)
 
@@ -518,6 +519,111 @@ int main(void) {
 > used, so it can run the matching inverse after `zxc_decompress`. Apply the
 > filter only to genuinely numeric, type-known data; on arbitrary bytes it will
 > not help (and may hurt).
+
+---
+
+## Using a Pre-Trained Dictionary
+
+For corpora of **small, similar payloads** (JSON records, log lines, RPC
+messages, small files), a pre-trained dictionary substantially improves the
+ratio. The dictionary is logically **prepended to the LZ window** at the start of
+each block, so even the first bytes of a tiny payload can match against it.
+
+How it ties together:
+
+- A dictionary is up to **64 KB** of content. You can **train** one from samples
+  (`zxc_train_dict`) or use any raw bytes.
+- It is identified by a **`dict_id`** (a hash of its content). Serialize it to a
+  `.zxd` file (`zxc_dict_save`) to distribute it.
+- A dictionary-compressed archive records `HAS_DICTIONARY` + the `dict_id` in its
+  header, but **not the dictionary itself** — you must provide the same
+  dictionary to decompress. A decoder reads the required id with
+  `zxc_get_dict_id()`.
+- The biggest gains are on **small blocks** (4–128 KB). On large blocks the data
+  builds its own match history, so a dictionary helps little.
+
+### CLI quickstart
+
+```sh
+# Train from a corpus directory -> writes dictionary_<dict_id>.zxd in it.
+zxc --train-dict ./corpus/
+
+# Compress / decompress with the dictionary (required at both ends).
+zxc -D dictionary_1a2b3c4d.zxd -z record.json
+zxc -D dictionary_1a2b3c4d.zxd -d record.json.zxc -o record.json
+```
+
+### C API
+
+```c
+#include "zxc.h"
+#include "zxc_dict.h"   // training, save/load, identification
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+int main(void) {
+    /* 1. Train a dictionary from representative samples (or use any raw bytes). */
+    const char *s0 = "{\"event\":\"login\",\"user_id\":1001,\"ok\":true}";
+    const char *s1 = "{\"event\":\"logout\",\"user_id\":1002,\"ok\":true}";
+    const void  *samples[] = { s0, s1 };
+    const size_t sizes[]   = { strlen(s0), strlen(s1) };
+
+    uint8_t dict[4096];
+    int64_t dict_size = zxc_train_dict(samples, sizes, 2, dict, sizeof dict);
+    if (dict_size < 0) { fprintf(stderr, "train failed\n"); return 1; }
+
+    /* 2. Serialize to a .zxd for distribution (carries the dict_id). */
+    size_t   zbnd     = zxc_dict_save_bound((size_t)dict_size);
+    uint8_t *zxd      = malloc(zbnd);
+    int64_t  zxd_size = zxc_dict_save(dict, (size_t)dict_size, zxd, zbnd);
+    uint32_t dict_id  = zxc_dict_get_id(zxd, (size_t)zxd_size);
+    /* ... write zxd[0..zxd_size) to "samples.zxd" and ship it to decoders ... */
+
+    /* 3. Compress WITH the dictionary. */
+    const char *msg  = "{\"event\":\"login\",\"user_id\":2003,\"ok\":true}";
+    size_t      n    = strlen(msg) + 1;
+    size_t      cap  = (size_t)zxc_compress_bound(n);
+    uint8_t    *comp = malloc(cap);
+
+    zxc_compress_opts_t copts = { .level = 3, .dict = dict, .dict_size = (size_t)dict_size };
+    int64_t csize = zxc_compress(msg, n, comp, cap, &copts);
+    if (csize < 0) { fprintf(stderr, "compress failed\n"); return 1; }
+
+    /* The archive header now carries HAS_DICTIONARY + dict_id; a decoder reads
+     * which dictionary it needs with zxc_get_dict_id(comp, csize). */
+
+    /* 4. Decompress WITH the dictionary (load its content from the .zxd). */
+    const void *content; size_t content_size; uint32_t id;
+    zxc_dict_load(zxd, (size_t)zxd_size, &content, &content_size, &id);
+
+    uint8_t *out = malloc(n);
+    zxc_decompress_opts_t dopts = { .dict = content, .dict_size = content_size };
+    int64_t dsize = zxc_decompress(comp, (size_t)csize, out, n, &dopts);
+    if (dsize != (int64_t)n || memcmp(msg, out, n) != 0) {
+        fprintf(stderr, "round-trip failed\n");
+        return 1;
+    }
+
+    free(zxd); free(comp); free(out);
+    return 0;
+}
+```
+
+### Error contract
+
+Decoding a dictionary archive enforces that the right dictionary is supplied:
+
+| Situation | Result |
+|---|---|
+| No dictionary supplied (`opts == NULL` or `dict == NULL`) | `ZXC_ERROR_DICT_REQUIRED` |
+| Wrong dictionary (`dict_id` mismatch) | `ZXC_ERROR_DICT_MISMATCH` |
+| Dictionary larger than `ZXC_DICT_SIZE_MAX` (64 KB) | `ZXC_ERROR_DICT_TOO_LARGE` |
+
+So a decoder can read `zxc_get_dict_id()` first, fetch the matching `.zxd`, and
+pass its loaded content via `zxc_decompress_opts_t::dict`. See `docs/FORMAT.md`
+§12 for the on-disk dictionary format and §3.1 for the header fields.
 
 ---
 
