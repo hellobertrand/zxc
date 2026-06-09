@@ -533,8 +533,8 @@ int test_dict_stream_roundtrip(void) {
 
     rewind(f_dec);
     uint8_t* result = (uint8_t*)malloc(src_size);
-    fread(result, 1, src_size, f_dec);
-    int ok = (memcmp(src, result, src_size) == 0);
+    const size_t rd = fread(result, 1, src_size, f_dec);
+    int ok = (rd == src_size && memcmp(src, result, src_size) == 0);
 
     fclose(f_src);
     fclose(f_comp);
