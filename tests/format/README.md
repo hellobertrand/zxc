@@ -1,7 +1,7 @@
 # Golden-File Format Conformance Suite
 
 Byte-frozen reference archives that pin the **ZXC on-disk wire format**
-(`docs/FORMAT.md`, format version 5). Unlike `conformance/`, which checks that a
+(`docs/FORMAT.md`, format version 6). Unlike `conformance/`, which checks that a
 decoder produces the right *output*, this suite asserts the exact *bytes* and
 *structure* of compressed files, field by field.
 
@@ -25,11 +25,10 @@ Each file maps onto sections of `docs/FORMAT.md §5` and the integrity fields:
 | `02_block_raw.zxc`         | RAW block (incompressible input)                                |
 | `03_block_ghi.zxc`         | GHI block (level <= 2)                                           |
 | `04_block_glo.zxc`         | GLO block (level >= 3)                                           |
-| `05_block_glo_huffman.zxc` | GLO block with the Huffman literal section (`enc_lit == 2`, §5.3.1) |
-| `06_block_num.zxc`         | NUM block: header + frame records (§5.2)                        |
-| `07_checksum_per_block.zxc`| Per-block checksum + non-zero global stream hash                |
-| `08_multiple_blocks.zxc`   | Multiple data blocks → rolling global hash (§7.3)               |
-| `09_seekable_table.zxc`    | SEK seek-table block (§5.6)                                     |
+| `05_block_glo_huffman.zxc` | GLO block with the Huffman literal section (`enc_lit == 2`, §5.2.1) |
+| `06_checksum_per_block.zxc`| Per-block checksum + non-zero global stream hash                |
+| `07_multiple_blocks.zxc`   | Multiple data blocks → rolling global hash (§7.3)               |
+| `08_seekable_table.zxc`    | SEK seek-table block (§5.5)                                     |
 
 ## What the validator checks
 
@@ -40,11 +39,10 @@ For every file, `test_golden.c` walks the bytes and verifies, against
   bytes, and the 16-bit header CRC (`zxc_hash16`).
 - **Each block header (§4):** type, flags, reserved byte, `comp_size` bounds,
   and the 8-bit header CRC (`zxc_hash8`).
-- **Every payload type (§5):** RAW; NUM header + frame records (counts must tile
-  the payload and sum to `n_values`); GLO/GHI header + section descriptors
+- **Every payload type (§5):** RAW; GLO/GHI header + section descriptors
   (sizes must tile the payload); the Huffman literal section flag.
-- **EOF block (§5.5):** `comp_size == 0`.
-- **Optional SEK block (§5.6):** type, CRC8, `comp_size == n_blocks * 4`, and
+- **EOF block (§5.4):** `comp_size == 0`.
+- **Optional SEK block (§5.5):** type, CRC8, `comp_size == n_blocks * 4`, and
   each entry equal to the physical size of its data block.
 - **Per-block checksum (§7.2):** recomputed (`zxc_checksum`) over the compressed
   payload and matched against the trailing 4 bytes.

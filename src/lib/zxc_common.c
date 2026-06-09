@@ -7,7 +7,7 @@
 
 /*
  * @file zxc_common.c
- * @brief Shared library utilities: context management, header I/O, bitpacking,
+ * @brief Shared library utilities: context management, header I/O,
  *        compress-bound calculation, and error-code name lookup.
  *
  * This translation unit contains the functions shared by both the buffer and
@@ -368,17 +368,10 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
 
     if (out_block_size) {
         const uint8_t code = src[5];
-        size_t block_size;
-        if (LIKELY(code >= ZXC_BLOCK_SIZE_MIN_LOG2 && code <= ZXC_BLOCK_SIZE_MAX_LOG2)) {
-            // Exponent encoding: block_size = 2^code  (4 KB - 2 MB)
-            block_size = (size_t)1U << code;
-        } else if (code == 64) {
-            // Legacy: hardcoded 256 KB default
-            block_size = 256 * 1024;
-        } else {
+        if (UNLIKELY(code < ZXC_BLOCK_SIZE_MIN_LOG2 || code > ZXC_BLOCK_SIZE_MAX_LOG2))
             return ZXC_ERROR_BAD_BLOCK_SIZE;
-        }
-        *out_block_size = block_size;
+        // Exponent encoding: block_size = 2^code  (4 KB - 2 MB)
+        *out_block_size = (size_t)1U << code;
     }
     // Flags are at offset 6
     if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
@@ -462,44 +455,6 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     }
 
     return ZXC_FILE_FOOTER_SIZE;
-}
-
-/*
- * @brief Serialises a NUM block header (16 bytes).
- *
- * @param[out] dst Destination buffer (>= @ref ZXC_NUM_HEADER_BINARY_SIZE bytes).
- * @param[in]  rem Remaining capacity of @p dst.
- * @param[in]  nh  Populated NUM header descriptor.
- * @return Number of bytes written on success, or a negative @ref zxc_error_t code.
- */
-int zxc_write_num_header(uint8_t* RESTRICT dst, const size_t rem,
-                         const zxc_num_header_t* RESTRICT nh) {
-    if (UNLIKELY(rem < ZXC_NUM_HEADER_BINARY_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
-
-    zxc_store_le64(dst, nh->n_values);
-    zxc_store_le16(dst + 8, nh->frame_size);
-    zxc_store_le16(dst + 10, 0);
-    zxc_store_le32(dst + 12, 0);
-
-    return ZXC_NUM_HEADER_BINARY_SIZE;
-}
-
-/*
- * @brief Parses a NUM block header from @p src.
- *
- * @param[in]  src      Source buffer (>= @ref ZXC_NUM_HEADER_BINARY_SIZE bytes).
- * @param[in]  src_size Size of @p src.
- * @param[out] nh       Receives the decoded NUM header fields.
- * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
- */
-int zxc_read_num_header(const uint8_t* RESTRICT src, const size_t src_size,
-                        zxc_num_header_t* RESTRICT nh) {
-    if (UNLIKELY(src_size < ZXC_NUM_HEADER_BINARY_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
-
-    nh->n_values = zxc_le64(src);
-    nh->frame_size = zxc_le16(src + 8);
-
-    return ZXC_OK;
 }
 
 /*
@@ -638,62 +593,6 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
         p += ZXC_SECTION_DESC_BINARY_SIZE;
     }
     return ZXC_OK;
-}
-
-/*
- * ============================================================================
- * BITPACKING UTILITIES
- * ============================================================================
- */
-
-/*
- * @brief Bit-packs an array of 32-bit values into a compact byte stream.
- *
- * Each value is masked to @p bits width and packed contiguously.
- *
- * @param[in]  src     Source array of 32-bit integers.
- * @param[in]  count   Number of values to pack.
- * @param[out] dst     Destination byte buffer.
- * @param[in]  dst_cap Capacity of @p dst.
- * @param[in]  bits    Number of bits per value (0-32).
- * @return Number of bytes written on success, or a negative @ref zxc_error_t code.
- */
-int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
-                          const size_t dst_cap, const uint8_t bits) {
-    const size_t out_bytes = ((count * bits) + CHAR_BIT - 1) / CHAR_BIT;
-
-    // +4 bytes: packing may write past out_bytes when the last value straddles a byte boundary.
-    const size_t safe_bytes = out_bytes + sizeof(uint32_t);
-    if (UNLIKELY(dst_cap < safe_bytes)) return ZXC_ERROR_DST_TOO_SMALL;
-
-    size_t bit_pos = 0;
-    ZXC_MEMSET(dst, 0, safe_bytes);
-
-    // Create a mask for the input bits to prevent overflow
-    // If bits is 32, the shift (1ULL << 32) is undefined behavior on 32-bit types,
-    // but here we use uint64_t. (1ULL << 32) is fine on 64-bit.
-    // However, if bits=64 (unlikely for a 32-bit packer), it would be an issue.
-    // For 0 < bits <= 32:
-    const uint64_t val_mask =
-        (bits == sizeof(uint32_t) * CHAR_BIT) ? UINT32_MAX : ((1ULL << bits) - 1);
-
-    for (size_t i = 0; i < count; i++) {
-        // Mask the input value to ensure we don't write garbage
-        const uint64_t v = ((uint64_t)src[i] & val_mask) << (bit_pos % CHAR_BIT);
-
-        const size_t byte_idx = bit_pos / CHAR_BIT;
-        dst[byte_idx] |= (uint8_t)v;
-        if (bits + (bit_pos % CHAR_BIT) > 1 * CHAR_BIT)
-            dst[byte_idx + 1] |= (uint8_t)(v >> (1 * CHAR_BIT));
-        if (bits + (bit_pos % CHAR_BIT) > 2 * CHAR_BIT)
-            dst[byte_idx + 2] |= (uint8_t)(v >> (2 * CHAR_BIT));
-        if (bits + (bit_pos % CHAR_BIT) > 3 * CHAR_BIT)
-            dst[byte_idx + 3] |= (uint8_t)(v >> (3 * CHAR_BIT));
-        if (bits + (bit_pos % CHAR_BIT) > 4 * CHAR_BIT)
-            dst[byte_idx + 4] |= (uint8_t)(v >> (4 * CHAR_BIT));
-        bit_pos += bits;
-    }
-    return (int)out_bytes;
 }
 
 /*

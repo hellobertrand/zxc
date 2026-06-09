@@ -325,7 +325,7 @@ ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t 
  * because it avoids the wild-copy overshoot that the fast decoder relies on.
  * Output is bit-identical to zxc_decompress_block().
  *
- * NUM and RAW blocks transparently forward to zxc_decompress_block(); only
+ * RAW blocks transparently forward to zxc_decompress_block(); only
  * GLO/GHI use the strict-tail decoder path.
  *
  * Strict-tail variant: @p dst_capacity is the exact uncompressed size with

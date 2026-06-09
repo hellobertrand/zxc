@@ -409,7 +409,7 @@ int test_decompress_block_bound() {
  * This test covers:
  *   - Sizes near the LZ match-finder safety margin (8-20 bytes)
  *   - Odd sizes that stress alignment assumptions
- *   - Data patterns that trigger each block type encoder (GLO, GHI, NUM, RAW)
+ *   - Data patterns that trigger each block type encoder (GLO, GHI, RAW)
  *   - All compression levels
  */
 int test_block_api_boundary_sizes() {
@@ -442,7 +442,7 @@ int test_block_api_boundary_sizes() {
     } patterns[] = {
         {"LZ (GLO/GHI)", gen_lz_data},
         {"Random (RAW)", gen_random_data},
-        {"Numeric (NUM)", gen_num_data},
+        {"Numeric (integers)", gen_num_data},
     };
     const int num_patterns = (int)(sizeof(patterns) / sizeof(patterns[0]));
 
@@ -470,7 +470,8 @@ int test_block_api_boundary_sizes() {
         for (int lvl = 1; lvl <= 5; lvl++) {
             for (int s = 0; s < num_sizes; s++) {
                 const size_t sz = sizes[s];
-                /* NUM encoder needs size >= 16 && multiple of 4 */
+                /* gen_num_data fills whole 4-byte integers; skip tiny/unaligned
+                 * sizes so the buffer is fully initialized before round-trip. */
                 if (p == 2 && (sz < 16 || sz % 4 != 0)) continue;
 
                 zxc_compress_opts_t copts = {.level = lvl, .checksum_enabled = 0};

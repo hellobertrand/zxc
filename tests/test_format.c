@@ -8,10 +8,10 @@
 #include "test_common.h"
 
 /*
- * Test for zxc_br_init and zxc_br_ensure
+ * Test for zxc_br_init
  */
 int test_bit_reader() {
-    printf("=== TEST: Unit - Bit Reader (zxc_br_init / zxc_br_ensure) ===\n");
+    printf("=== TEST: Unit - Bit Reader (zxc_br_init) ===\n");
 
     // Case 1: Normal initialization
     uint8_t buffer[16];
@@ -34,59 +34,10 @@ int test_bit_reader() {
     if (br.ptr != small_buffer + 4) return 0;
     printf("  [PASS] Small buffer init\n");
 
-    // Case 3: zxc_br_ensure (Normal refill)
-    zxc_br_init(&br, buffer, 16);
-    br.bits = 10;     // Simulate consumption
-    br.accum >>= 54;  // Simulate shift
-
-    zxc_br_ensure(&br, 32);
-    // Should have refilled
-    if (br.bits < 32) return 0;
-    printf("  [PASS] Ensure normal refill\n");
-
-    // Case 4: zxc_br_ensure (End of stream)
-    // Init with full buffer but advanced pointer near end
-    zxc_br_init(&br, buffer, 16);
-    br.ptr = buffer + 16;  // At end
-    br.bits = 0;
-
-    // Try to ensure bits, should not read past end
-    zxc_br_ensure(&br, 10);
-    // The key is it didn't crash.
-    printf("  [PASS] Ensure EOF safety\n");
-
     printf("PASS\n\n");
     return 1;
 }
 
-/*
- * Test for zxc_bitpack_stream_32
- */
-int test_bitpack() {
-    printf("=== TEST: Unit - Bit Packing (zxc_bitpack_stream_32) ===\n");
-
-    const uint32_t src[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
-    uint8_t dst[16];
-
-    // Pack 4 values with 4 bits each.
-    // Input is 0xFFFFFFFF, but should be masked to 0xF (1111).
-    // Result should be 2 bytes: 0xFF, 0xFF
-    int len = zxc_bitpack_stream_32(src, 4, dst, 16, 4);
-
-    if (len != 2) return 0;
-    if (dst[0] != 0xFF || dst[1] != 0xFF) return 0;
-    printf("  [PASS] Bitpack overflow masking\n");
-
-    // Edge case: bits = 32
-    const uint32_t src32[1] = {0x12345678};
-    len = zxc_bitpack_stream_32(src32, 1, dst, 16, 32);
-    if (len != 4) return 0;
-    if (zxc_le32(dst) != 0x12345678) return 0;
-    printf("  [PASS] Bitpack 32 bits\n");
-
-    printf("PASS\n\n");
-    return 1;
-}
 
 /* Round-trip the Huffman codec over a few representative literal distributions. */
 static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t n) {
@@ -423,64 +374,51 @@ int test_global_checksum_order() {
     return 1;
 }
 
-int test_legacy_header() {
-    printf("=== TEST: Legacy header (chunk_size_code=64) ===\n");
-
-    // Build a valid file header with legacy chunk_size_code = 64 (= 256 KB)
+/* Builds a header with the given chunk-size code, fixes the CRC16, and returns
+ * zxc_read_file_header's verdict (block_size out via *bs). */
+static int chunk_code_verdict(uint8_t code, size_t *bs) {
     uint8_t hdr[ZXC_FILE_HEADER_SIZE];
     memset(hdr, 0, sizeof(hdr));
-
-    // Magic word (LE)
-    hdr[0] = 0xF5;
-    hdr[1] = 0x2E;
-    hdr[2] = 0xB0;
-    hdr[3] = 0x9C;
-    // Version
-    hdr[4] = ZXC_FILE_FORMAT_VERSION;
-    // Legacy chunk size code
-    hdr[5] = 64;
-    // Flags: no checksum
-    hdr[6] = 0;
-
-    // Compute CRC16 (bytes 14-15 zeroed, then hash)
-    hdr[14] = 0;
-    hdr[15] = 0;
-    uint16_t crc = zxc_hash16(hdr);
+    hdr[0] = 0xF5; hdr[1] = 0x2E; hdr[2] = 0xB0; hdr[3] = 0x9C;  // magic (LE)
+    hdr[4] = ZXC_FILE_FORMAT_VERSION;                            // version
+    hdr[5] = code;                                              // chunk-size code
+    hdr[6] = 0;                                                 // flags: no checksum
+    uint16_t crc = zxc_hash16(hdr);                            // bytes 14-15 already 0
     hdr[14] = (uint8_t)(crc & 0xFF);
     hdr[15] = (uint8_t)(crc >> 8);
-
-    size_t block_size = 0;
     int has_checksum = -1;
-    int rc = zxc_read_file_header(hdr, sizeof(hdr), &block_size, &has_checksum, NULL);
+    *bs = 0;
+    return zxc_read_file_header(hdr, sizeof(hdr), bs, &has_checksum, NULL);
+}
 
-    if (rc != ZXC_OK) {
-        printf("  [FAIL] zxc_read_file_header returned %d (%s)\n", rc, zxc_error_name(rc));
+int test_chunk_size_code() {
+    printf("=== TEST: Chunk-size code validation ===\n");
+
+    size_t bs = 0;
+
+    // Valid exponent code 19 -> 512 KB.
+    int rc = chunk_code_verdict(19, &bs);
+    if (rc != ZXC_OK || bs != 512 * 1024) {
+        printf("  [FAIL] code 19: rc=%d (%s), block_size=%zu\n", rc, zxc_error_name(rc), bs);
         return 0;
     }
-    if (block_size != 256 * 1024) {
-        printf("  [FAIL] block_size = %zu, expected %d\n", block_size, 256 * 1024);
-        return 0;
-    }
-    if (has_checksum != 0) {
-        printf("  [FAIL] has_checksum = %d, expected 0\n", has_checksum);
-        return 0;
-    }
-    printf("  [PASS] Legacy code 64 -> block_size = 256 KB\n");
+    printf("  [PASS] Code 19 -> 512 KB\n");
 
-    // Verify that invalid codes are rejected
-    hdr[5] = 99;  // Not a valid exponent nor legacy value
-    hdr[14] = 0;
-    hdr[15] = 0;
-    crc = zxc_hash16(hdr);
-    hdr[14] = (uint8_t)(crc & 0xFF);
-    hdr[15] = (uint8_t)(crc >> 8);
-
-    rc = zxc_read_file_header(hdr, sizeof(hdr), &block_size, &has_checksum, NULL);
+    // Legacy code 64 was accepted in v5 (mapped to 256 KB) but is removed in v6.
+    rc = chunk_code_verdict(64, &bs);
     if (rc != ZXC_ERROR_BAD_BLOCK_SIZE) {
-        printf("  [FAIL] invalid code 99: expected %d, got %d\n", ZXC_ERROR_BAD_BLOCK_SIZE, rc);
+        printf("  [FAIL] legacy code 64: expected %d, got %d\n", ZXC_ERROR_BAD_BLOCK_SIZE, rc);
         return 0;
     }
-    printf("  [PASS] Invalid code 99 -> ZXC_ERROR_BAD_BLOCK_SIZE\n");
+    printf("  [PASS] Legacy code 64 rejected (ZXC_ERROR_BAD_BLOCK_SIZE)\n");
+
+    // Out-of-range code 99 -> rejected.
+    rc = chunk_code_verdict(99, &bs);
+    if (rc != ZXC_ERROR_BAD_BLOCK_SIZE) {
+        printf("  [FAIL] code 99: expected %d, got %d\n", ZXC_ERROR_BAD_BLOCK_SIZE, rc);
+        return 0;
+    }
+    printf("  [PASS] Code 99 rejected\n");
 
     printf("PASS\n\n");
     return 1;

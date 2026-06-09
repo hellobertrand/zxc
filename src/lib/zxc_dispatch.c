@@ -1307,7 +1307,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 /**
  * @brief Safe-variant block decompressor: accepts dst_capacity == uncompressed_size.
  *
- * Dict inputs and NUM/RAW blocks route to @ref zxc_decompress_block; plain GLO/GHI
+ * Dict inputs and RAW blocks route to @ref zxc_decompress_block; plain GLO/GHI
  * use the strict safe decoder (no bounce buffer, no +ZXC_DECOMPRESS_TAIL_PAD).
  */
 int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
@@ -1325,8 +1325,8 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
     }
 
     const uint8_t type = ((const uint8_t*)src)[0];
-    /* NUM/RAW never wild-write past dst_capacity: route to the existing fast API. */
-    if (type == ZXC_BLOCK_NUM || type == ZXC_BLOCK_RAW) {
+    /* RAW never wild-writes past dst_capacity: route to the existing fast API. */
+    if (type == ZXC_BLOCK_RAW) {
         return zxc_decompress_block(dctx, src, src_size, dst, dst_capacity, opts);
     }
 

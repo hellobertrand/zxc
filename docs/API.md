@@ -492,7 +492,7 @@ Strict-sized variant of `zxc_decompress_block()`. Accepts
 for integrations whose output buffer cannot be oversized (page-aligned
 decoding into mapped pages, fixed-size slots in a columnar layout, etc.).
 
-Output is **bit-identical** to `zxc_decompress_block()`. NUM and RAW blocks
+Output is **bit-identical** to `zxc_decompress_block()`. RAW blocks
 transparently forward to the fast path; only GLO/GHI blocks use the
 strict-tail decoder, which is slightly slower than the wild-copy fast path
 (see the performance table in `EXAMPLES.md`).
@@ -796,9 +796,7 @@ must know it *before* calling `init`. Four patterns cover every use case:
    const uint8_t code = hdr[5];
    size_t block_size;
    if (code >= ZXC_BLOCK_SIZE_MIN_LOG2 && code <= ZXC_BLOCK_SIZE_MAX_LOG2)
-       block_size = (size_t)1U << code;       /* current encoders: 4 KB..2 MB */
-   else if (code == 64)
-       block_size = 256U * 1024U;             /* legacy encoder: 256 KB */
+       block_size = (size_t)1U << code;       /* 4 KB..2 MB */
    else
        /* invalid archive */;
    ```

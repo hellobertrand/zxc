@@ -16,7 +16,7 @@
  * - Endianness detection and byte-swap helpers.
  * - File-format constants (magic word, header sizes, block sizes, ...).
  * - Inline helpers for hashing, endian-safe loads/stores, bit manipulation,
- *   ZigZag encoding, aligned allocation, and bitstream reading.
+ *   aligned allocation, and bitstream reading.
  * - Internal function prototypes for chunk-level compression/decompression.
  *
  * @warning Do not include this header from user code; use the public headers
@@ -317,8 +317,9 @@ extern "C" {
 
 /** @brief Magic word identifying ZXC files (little-endian 0x9CB02EF5). */
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
-/** @brief Current on-disk file format version. */
-#define ZXC_FILE_FORMAT_VERSION 5
+/** @brief Current on-disk file format version. The decoder accepts only this
+ *  version; Older versions are rejected with ZXC_ERROR_BAD_VERSION. */
+#define ZXC_FILE_FORMAT_VERSION 6
 
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
@@ -377,8 +378,6 @@ extern "C" {
 #define ZXC_BLOCK_HEADER_SIZE 8
 /** @brief Size of the per-block checksum field in bytes. */
 #define ZXC_BLOCK_CHECKSUM_SIZE 4
-/** @brief Binary size of a NUM block sub-header. */
-#define ZXC_NUM_HEADER_BINARY_SIZE 16
 /** @brief Binary size of a GLO block sub-header. */
 #define ZXC_GLO_HEADER_BINARY_SIZE 16
 /** @brief Binary size of a GHI block sub-header. */
@@ -392,14 +391,6 @@ extern "C" {
  *  evolution. Used by zxc_compress_block_bound() and zxc_compress_bound()
  *  to size the destination buffer in the worst (incompressible) case. */
 #define ZXC_BLOCK_FORMAT_OVERHEAD 64
-
-/** @brief Binary size of a NUM chunk sub-frame header (nvals + bits + base + psize). */
-#define ZXC_NUM_CHUNK_HEADER_SIZE 16
-/** @brief Number of numeric values to decode in a single SIMD batch (NUM block). */
-#define ZXC_NUM_DEC_BATCH 32
-/** @brief Maximum number of frames that can be processed in a single compression operation (NUM
- * block). */
-#define ZXC_NUM_FRAME_SIZE 128
 
 /** @brief Binary size of a section descriptor (comp_size + raw_size). */
 #define ZXC_SECTION_DESC_BINARY_SIZE 8
@@ -779,9 +770,7 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
  * entropy) or when compression would expand the data size.
  * - `ZXC_BLOCK_GLO` (1): General-purpose compression (LZ77 + Bitpacking). This
  * is the default for most data (text, binaries, JSON, etc.). Includes 4 sections descriptors.
- * - `ZXC_BLOCK_NUM` (2): Specialized compression for arrays of 32-bit integers.
- *   Uses Delta Encoding + ZigZag + Bitpacking.
- * - `ZXC_BLOCK_GHI` (3): General-purpose high-velocity mode using LZ77 with advanced
+ * - `ZXC_BLOCK_GHI` (2): General-purpose high-velocity mode using LZ77 with advanced
  * techniques (lazy matching, step skipping) for maximum ratio. Includes 3 sections descriptors.
  * - `ZXC_BLOCK_SEK` (254): Seek table block. Contains per-block compressed/decompressed sizes
  *   for random-access decompression. Placed between EOF block and file footer.
@@ -790,8 +779,7 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
 typedef enum {
     ZXC_BLOCK_RAW = 0,
     ZXC_BLOCK_GLO = 1,
-    ZXC_BLOCK_NUM = 2,
-    ZXC_BLOCK_GHI = 3,
+    ZXC_BLOCK_GHI = 2,
     ZXC_BLOCK_SEK = 254,
     ZXC_BLOCK_EOF = 255
 } zxc_block_type_t;
@@ -853,22 +841,6 @@ typedef struct {
 typedef struct {
     uint64_t sizes; /**< Packed sizes: compressed size (low 32 bits) | raw size (high 32 bits). */
 } zxc_section_desc_t;
-
-/**
- * @struct zxc_num_header_t
- * @brief Header specific to Numeric compression blocks.
- *
- * This header follows the main block header when the block type is NUM.
- *
- * @var zxc_num_header_t::n_values
- * The total number of numeric values encoded in the block.
- * @var zxc_num_header_t::frame_size
- * The size of the frame used for processing.
- */
-typedef struct {
-    uint64_t n_values;
-    uint16_t frame_size;
-} zxc_num_header_t;
 
 /**
  * @struct zxc_bit_reader_t
@@ -1173,65 +1145,6 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(const uint64_t x) {
 }
 
 /**
- * @brief Calculates the index of the highest set bit (most significant bit) in a 32-bit integer.
- *
- * This function determines the position of the most significant bit that is set to 1.
- *
- * @param[in] n The 32-bit unsigned integer to analyze.
- * @return The 0-based index of the highest set bit. If n is 0, the behavior is undefined.
- */
-static ZXC_ALWAYS_INLINE uint8_t zxc_highbit32(const uint32_t n) {
-#ifdef _MSC_VER
-    unsigned long index;
-    return (n == 0) ? 0 : (_BitScanReverse(&index, n) ? (uint8_t)(index + 1) : 0);
-#else
-    return (n == 0) ? 0 : (32 - __builtin_clz(n));
-#endif
-}
-
-/**
- * @brief Encodes a signed 32-bit integer using ZigZag encoding.
- *
- * ZigZag encoding maps signed integers to unsigned integers so that numbers with a small
- * absolute value (for instance, -1) have a small variant encoded value too. It does this
- * by "zig-zagging" back and forth through the positive and negative integers:
- *
- *  0 => 0
- * -1 => 1
- *  1 => 2
- * -2 => 3
- *  2 => 4
- *
- * This is particularly useful for variable-length encoding (varint) of signed integers,
- * as standard varint encoding is inefficient for negative numbers (which are interpreted
- * as very large unsigned integers).
- *
- * @param[in] n The signed 32-bit integer to encode.
- * @return The ZigZag encoded unsigned 32-bit integer.
- */
-static ZXC_ALWAYS_INLINE uint32_t zxc_zigzag_encode(const int32_t n) {
-    return ((uint32_t)n << 1) ^ (uint32_t)(-(int32_t)((uint32_t)n >> 31));
-}
-
-/**
- * @brief Decodes a 32-bit unsigned integer using ZigZag decoding.
- *
- * ZigZag encoding maps signed integers to unsigned integers so that numbers with a small
- * absolute value (for instance, -1) have a small variant encoded value too. It does this
- * by "zig-zagging" back and forth through the positive and negative integers:
- * 0 => 0, -1 => 1, 1 => 2, -2 => 3, 2 => 4, etc.
- *
- * This function reverses that process, converting the unsigned representation back into
- * the original signed 32-bit integer.
- *
- * @param[in] n The unsigned 32-bit integer to decode.
- * @return The decoded signed 32-bit integer.
- */
-static ZXC_ALWAYS_INLINE int32_t zxc_zigzag_decode(const uint32_t n) {
-    return (int32_t)(n >> 1) ^ -(int32_t)(n & 1);
-}
-
-/**
  * @brief Allocates aligned memory in a cross-platform manner.
  *
  * This function provides a unified interface for allocating memory with a specific
@@ -1352,100 +1265,6 @@ static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* RESTRICT br,
         br->bits = sizeof(uint64_t) * CHAR_BIT;
     }
 }
-
-/**
- * @brief Ensures that the bit reader buffer contains at least the specified
- * number of bits.
- *
- * This function checks if the internal buffer of the bit reader has enough bits
- * available to satisfy a subsequent read operation of `needed` bits. If not, it
- * refills the buffer from the source.
- *
- * @param[in,out] br Pointer to the bit reader context.
- * @param[in] needed The number of bits required to be available in the buffer.
- */
-static ZXC_ALWAYS_INLINE void zxc_br_ensure(zxc_bit_reader_t* RESTRICT br, const int needed) {
-    if (UNLIKELY(br->bits < needed)) {
-        const int safe_bits = (br->bits < 0) ? 0 : br->bits;
-        br->bits = safe_bits;
-
-        // Mask out garbage bits (retain only valid existing bits)
-#if !defined(ZXC_DISABLE_SIMD) && defined(__BMI2__) && (defined(__x86_64__) || defined(_M_X64))
-        br->accum = _bzhi_u64(br->accum, safe_bits);
-#else
-        br->accum &= (safe_bits < 64) ? ((1ULL << safe_bits) - 1) : ~0ULL;
-#endif
-
-        // Calculate how many bytes we can read
-        // We want to fill up to the accumulation capability (64 bits for uint64_t)
-        // Bytes needed = (capacity_bits - safe_bits) / 8
-        const int bytes_needed = ((int)(sizeof(uint64_t) * CHAR_BIT) - safe_bits) / CHAR_BIT;
-
-        // Bounds check: zxc_le64 always reads 8 bytes, so we need at least 8
-        const size_t bytes_left = (size_t)(br->end - br->ptr);
-        if (UNLIKELY(bytes_left < sizeof(uint64_t))) {
-            // Partial read (slow path / end of stream)
-            const size_t to_read =
-                (bytes_left < (size_t)bytes_needed) ? bytes_left : (size_t)bytes_needed;
-            const uint64_t raw = zxc_le_partial(br->ptr, to_read);
-            br->accum |= (safe_bits < 64) ? (raw << safe_bits) : 0;
-            br->ptr += to_read;
-            br->bits = safe_bits + (int)to_read * CHAR_BIT;
-        } else {
-            // Fast path: full 8-byte read is safe
-            const uint64_t raw = zxc_le64(br->ptr);
-            br->accum |= (safe_bits < 64) ? (raw << safe_bits) : 0;
-            br->ptr += bytes_needed;
-            br->bits = safe_bits + bytes_needed * CHAR_BIT;
-        }
-    }
-}
-
-/**
- * @brief Bit-packs a stream of 32-bit integers into a destination buffer.
- *
- * Compresses an array of 32-bit integers by packing them using a specified
- * number of bits per integer.
- *
- * @param[in] src Pointer to the source array of 32-bit integers.
- * @param[in] count The number of integers to pack.
- * @param[out] dst Pointer to the destination buffer where packed data will be
- * written.
- * @param[in] dst_cap The capacity of the destination buffer in bytes.
- * @param[in] bits The number of bits to use for each integer during packing.
- * @return int The number of bytes written to the destination buffer, or a negative
- * error code on failure.
- */
-int zxc_bitpack_stream_32(const uint32_t* RESTRICT src, const size_t count, uint8_t* RESTRICT dst,
-                          const size_t dst_cap, const uint8_t bits);
-
-/**
- * @brief Writes a numeric header structure to a destination buffer.
- *
- * Serializes the `zxc_num_header_t` structure into the output stream.
- *
- * @param[out] dst Pointer to the destination buffer.
- * @param[in] rem The remaining space in the destination buffer.
- * @param[in] nh Pointer to the numeric header structure to write.
- * @return int The number of bytes written, or a negative error code if the buffer
- * is too small.
- */
-int zxc_write_num_header(uint8_t* RESTRICT dst, const size_t rem,
-                         const zxc_num_header_t* RESTRICT nh);
-
-/**
- * @brief Reads a numeric header structure from a source buffer.
- *
- * Deserializes data from the input stream into a `zxc_num_header_t` structure.
- *
- * @param[in] src Pointer to the source buffer.
- * @param[in] src_size The size of the source buffer available for reading.
- * @param[out] nh Pointer to the numeric header structure to populate.
- * @return int The number of bytes read from the source, or a negative error code on
- * failure.
- */
-int zxc_read_num_header(const uint8_t* RESTRICT src, const size_t src_size,
-                        zxc_num_header_t* RESTRICT nh);
 
 /**
  * @brief Writes a generic header and section descriptors to a destination

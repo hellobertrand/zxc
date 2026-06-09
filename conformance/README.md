@@ -56,7 +56,6 @@ echo "Passed: $pass  Failed: $fail"
 | Basic                | 5     | Empty, 1 byte, all 256 values, all-zeros         |
 | Text                 | 3     | Compressible text with and without checksum       |
 | Random               | 3     | Incompressible data (stored as raw blocks)        |
-| Numeric (BLOCK_NUM)  | 5     | 32-bit integer arrays: sequential, zero/small/large deltas |
 | Match patterns       | 3     | Long matches, short matches, max offset distance  |
 | Compression levels   | 6     | Same input compressed at levels 1 through 6       |
 | Block size variants  | 2     | 4 KB and 2 MB block sizes                        |

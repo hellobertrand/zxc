@@ -37,7 +37,7 @@ void gen_lz_data(uint8_t* const buf, const size_t size) {
     for (size_t i = 0; i < size; i++) buf[i] = pattern[i % pat_len];
 }
 
-// Generates a regular numeric sequence (To force NUM)
+// Generates a regular numeric sequence (integer-pattern round-trip input)
 void gen_num_data(uint8_t* const buf, const size_t size) {
     // Fill with 32-bit integers
     uint32_t* const ptr = (uint32_t*)buf;
@@ -45,7 +45,7 @@ void gen_num_data(uint8_t* const buf, const size_t size) {
     uint32_t val = 0;
     for (size_t i = 0; i < count; i++) {
         // Arithmetic sequence: 0, 100, 200...
-        // Deltas are constant (100), perfect for NUM
+        // Deltas are constant (100): a smooth, highly compressible integer sequence
         ptr[i] = val;
         val += 100;
     }
@@ -101,8 +101,6 @@ void gen_binary_data(uint8_t* const buf, const size_t size) {
 // This creates short repeating patterns with matches very close to each other
 void gen_small_offset_data(uint8_t* const buf, const size_t size) {
     // Create short repeating patterns with very short distances.
-    // Uses a 5-byte period (not aligned to uint32_t) to avoid being
-    // classified as NUM data by zxc_probe_is_numeric().
     // LZ will match at offset=5 (< 255), exercising 8-bit offset encoding.
     const uint8_t pattern[] = "ABCDE";
     for (size_t i = 0; i < size; i++) {

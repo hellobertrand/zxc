@@ -1,10 +1,10 @@
 # ZXC Compressed File Format (Technical Specification)
 
-**Date**: May 2026
-**Format Version**: 5
+**Date**: June 2026
+**Format Version**: 6
 
 This document describes the on-disk binary format of a ZXC compressed file.
-It formalizes the current reference implementation of format version **5**.
+It formalizes the current reference implementation of format version **6**.
 
 ## 1. Conventions
 
@@ -54,11 +54,10 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): currently `5`.
+- **Format Version** (`u8`): currently `6`.
 - **Chunk Size Code** (`u8`):
-  - If the value is in the range `[12, 21]`, it is an **exponent**: `block_size = 2^code`.
+  - The value is an **exponent** in the range `[12, 21]`: `block_size = 2^code`.
     - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
-  - The legacy value `64` (from older encoders) is accepted and maps to 256 KB.
   - All other values are rejected (`ZXC_ERROR_BAD_BLOCK_SIZE`).
   - Valid block sizes are powers of 2 in the range **4 KB – 2 MB**.
 - **Flags** (`u8`):
@@ -91,8 +90,7 @@ Offset  Size  Field
 - **Block Type**:
   - `0` = RAW
   - `1` = GLO
-  - `2` = NUM
-  - `3` = GHI
+  - `2` = GHI
   - `254` = SEK
   - `255` = EOF
 - **Block Flags**: currently not used by implementation (written as `0`).
@@ -125,53 +123,7 @@ No internal sub-header.
 
 ---
 
-## 5.2 NUM block (`type=2`)
-
-Used for numeric data (32-bit integer stream), delta/zigzag + bitpacking.
-
-### NUM payload layout
-
-```text
-+--------------------------+
-| NUM Header (16 bytes)    |
-+--------------------------+
-| Frame #0 header (16B)    |
-| Frame #0 packed bits     |
-+--------------------------+
-| Frame #1 header (16B)    |
-| Frame #1 packed bits     |
-+--------------------------+
-| ...                      |
-+--------------------------+
-```
-
-### NUM Header (16 bytes)
-
-```text
-Offset  Size  Field
-0x00    8     n_values (u64)
-0x08    2     frame_size (u16, currently 128)
-0x0A    6     reserved
-```
-
-### NUM frame record (repeated)
-
-```text
-Offset  Size  Field
-0x00    2     nvals in frame (u16)
-0x02    2     bits per value (u16)
-0x04    8     base/running seed (u64)
-0x0C    4     packed_size in bytes (u32)
-0x10    ...   packed delta bitstream
-```
-
-Notes:
-- Values are reconstructed by bit-unpacking, zigzag decode, then prefix accumulation.
-- `packed_size` bytes immediately follow each 16-byte frame header.
-
----
-
-## 5.3 GLO block (`type=1`)
+## 5.2 GLO block (`type=1`)
 
 General LZ-style format with separated streams.
 
@@ -223,7 +175,7 @@ Section order:
 - **Literals stream**:
   - raw literal bytes if `enc_lit=0`, or
   - RLE tokenized if `enc_lit=1`, or
-  - Huffman-coded if `enc_lit=2` (see [§ 5.3.1 Huffman literal section](#531-huffman-literal-section)).
+  - Huffman-coded if `enc_lit=2` (see [§ 5.2.1 Huffman literal section](#521-huffman-literal-section)).
 - **Tokens stream**:
   - one byte per sequence: `(LL << 4) | ML`.
   - `LL` and `ML` are 4-bit fields.
@@ -237,7 +189,7 @@ Section order:
     - if `ML == 15`, read varint and add to ML
   - actual match length is `ML + 5` (minimum match = 5).
 
-### 5.3.1 Huffman literal section
+### 5.2.1 Huffman literal section
 
 Selected by the encoder only at compression level ≥ 6, only when at least
 `ZXC_HUF_MIN_LITERALS = 1024` literals are present, and only when the Huffman
@@ -268,7 +220,7 @@ encoded into its own bit-stream so that 4 decoders can run in parallel.
 
 The decoder reconstructs the canonical code table from the 128-byte length
 header, validates the Kraft equality, and decodes each sub-stream into its
-output region. See [WHITEPAPER §5.8](WHITEPAPER.md) for the multi-symbol
+output region. See [WHITEPAPER §5.7](WHITEPAPER.md) for the multi-symbol
 2048-entry lookup table strategy used on the decode hot path.
 
 Decoder validation requirements:
@@ -281,7 +233,7 @@ Decoder validation requirements:
 
 ---
 
-## 5.4 GHI block (`type=3`)
+## 5.3 GHI block (`type=2`)
 
 High-throughput LZ format with packed 32-bit sequences.
 
@@ -343,7 +295,7 @@ Overflow rules:
 
 ---
 
-## 5.5 EOF block (`type=255`)
+## 5.4 EOF block (`type=255`)
 
 EOF marks end of block stream.
 
@@ -357,7 +309,7 @@ Immediately after EOF block header comes the Optional SEK block, followed by the
 
 ---
 
-## 5.6 SEK block (`type=254`)
+## 5.5 SEK block (`type=254`)
 
 The **Seek Table** block is an optional block appended between the EOF block and the File Footer. It provides `O(1)` random-access capabilities by recording the compressed size of every block in the archive. Decompressed sizes and block indices are derived from the file header's `block_size` (all blocks are `block_size` except the last, which may be smaller).
 
@@ -488,31 +440,37 @@ A conforming decoder **MUST** reject any file whose version it does not support.
 
 ### 10.2 Version bump criteria
 
+ZXC has **no forward compatibility**: the set of block types and the meaning of
+every field are fixed per format version. Any change a decoder must understand —
+adding a block type, assigning meaning to a reserved field/flag bit, changing an
+encoding, layout, or the checksum algorithm — requires a **version bump**.
+
 | Change class | Version action | Example |
 |---|---|---|
-| New block type added | **No bump** (forward-compatible) | Adding a hypothetical `GLR` block type |
-| New flag bit defined | **No bump** (forward-compatible) | Using a reserved flag bit |
-| Existing block encoding changed | **Major bump** | Changing GLO token layout |
-| Header/footer layout changed | **Major bump** | Resizing the file header |
-| Checksum algorithm changed | **Major bump** | Replacing RapidHash with Komihash |
+| New block type added | **Version bump** (decoders reject unknown types) | Adding a hypothetical `GLR` block type |
+| Reserved field/flag bit assigned meaning | **Version bump** | Defining a reserved flag bit |
+| Existing block encoding changed | **Version bump** | Changing GLO token layout |
+| Header/footer layout changed | **Version bump** | Resizing the file header |
+| Checksum algorithm changed | **Version bump** | Replacing RapidHash with Komihash |
 
 ### 10.3 Compatibility rules
 
-- **Backward compatibility**: a decoder supporting version *N* **MUST** decode all files produced by encoders of version *N*. It **MAY** also accept earlier versions.
-- **Forward compatibility**: a decoder encountering an **unknown block type** (not RAW, GLO, NUM, GHI, or EOF) **SHOULD** skip it using `comp_size` to advance past its payload (and optional checksum), rather than rejecting the file outright. This allows older decoders to partially process files from newer encoders that introduce additive block types.
-- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. Decoders **MUST** ignore reserved fields (not reject non-zero values), unless a future version assigns them meaning.
+- **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version with `ZXC_ERROR_BAD_VERSION`. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
+- **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version (`ZXC_ERROR_BAD_BLOCK_TYPE`). The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
+- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header CRC, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension.
+- **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values (`ZXC_ERROR_BAD_HEADER`).
 
 ### 10.4 Minimum conforming decoder
 
-A minimal conforming decoder for version 5 **MUST** support:
+A minimal conforming decoder for version 6 **MUST** support:
 - File header parsing and CRC16 validation.
 - **RAW** blocks (type 0) - passthrough copy.
 - **GLO** blocks (type 1) - full LZ decode with extras varint.
-- **GHI** blocks (type 3) - full LZ decode with extras varint.
+- **GHI** blocks (type 2) - full LZ decode with extras varint.
 - **EOF** block (type 255) - stream termination.
 - File footer validation (source size check).
 
-Support for **NUM** (type 2) and checksum verification is **RECOMMENDED** but not strictly required for a minimal implementation.
+Support for checksum verification is **RECOMMENDED** but not strictly required for a minimal implementation.
 
 ---
 
@@ -528,7 +486,7 @@ The recommended behavior for each class is specified below.
 | **Bad magic** | File header, offset 0x00 | Reject immediately. Not a ZXC file. |
 | **Unsupported version** | File header, offset 0x04 | Reject immediately. Version not supported. |
 | **Header CRC16 mismatch** | File header, offset 0x0E | Reject. Header is corrupt or truncated. |
-| **Invalid chunk size code** | File header, offset 0x05 | Reject. Code outside valid range `[12..21]` and not legacy `64`. |
+| **Invalid chunk size code** | File header, offset 0x05 | Reject. Code outside the valid range `[12..21]`. |
 | **Block header CRC8 mismatch** | Block header, offset 0x07 | Reject block. Stream is corrupt. |
 | **Unknown block type** | Block header, offset 0x00 | Skip block using `comp_size` (see §10.3), or reject. |
 | **Block payload truncated** | During `fread` of `comp_size` bytes | Reject. Unexpected end of stream. |
@@ -655,7 +613,6 @@ as follows:
 - File header: **16** bytes
 - Block header: **8** bytes
 - Block checksum (optional): **4** bytes
-- NUM header: **16** bytes
 - GLO header: **16** bytes
 - GHI header: **16** bytes
 - Section descriptor: **8** bytes
@@ -697,11 +654,11 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 05 | 13 | 80 | 00 00 00 00 00 00 00 | B8 90
+F5 2E B0 9C | 06 | 13 | 80 | 00 00 00 00 00 00 00 | FD 3B
 ```
 
 - `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
-- `05` -> format version 5.
+- `06` -> format version 6.
 - `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
 - `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.

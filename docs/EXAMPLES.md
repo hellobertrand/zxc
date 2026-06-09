@@ -7,6 +7,7 @@ This document provides complete, working examples for using the ZXC compression 
 - [Stream API (Multi-Threaded)](#stream-api-multi-threaded)
 - [Reusable Context API](#reusable-context-api)
 - [Seekable Reader (Custom Storage Backend)](#seekable-reader-custom-storage-backend)
+- [Compressing Numeric Data (Pre-Filters)](#compressing-numeric-data-pre-filters)
 - [Meson Integration](#meson-integration)
 - [Language Bindings](#language-bindings)
 
@@ -422,6 +423,101 @@ offset: an HTTP `Range:` GET (return `-1` on a non-`206` response), an S3
 plug-in. As long as `read_at` returns exactly the requested length (or a
 negative `zxc_error_t` code), the seekable API treats it as a transparent
 backend.
+
+---
+
+## Compressing Numeric Data (Pre-Filters)
+
+ZXC is a **pure LZ byte codec**: it compresses by finding repeated byte sequences
+and entropy-coding the residue. Arrays of numbers (timestamps, IDs, counters,
+sensor readings, floats) carry a lot of redundancy — but it lives in their
+*numeric* structure (smooth progression, shared magnitude), which is invisible at
+the byte level, so a raw `zxc_compress` often barely compresses them.
+
+The fix is a **reversible pre-filter**: a cheap, lossless transform applied
+**before** compression and inverted **after** decompression. It does not compress
+anything itself — it re-expresses the numeric structure as byte-level redundancy
+that ZXC can then exploit:
+
+```
+compress :  data -> [filter] -> zxc_compress  -> archive
+decompress: archive -> zxc_decompress -> [inverse filter] -> data
+```
+
+ZXC keeps the filter **out of the format on purpose**: the codec
+stays pure, and *you* own the transform — including remembering which one you
+applied, in your own schema/metadata, so you can invert it. The two most useful
+filters are **delta** (correlated sequences) and **byte-shuffle** (wide values
+whose high bytes are similar, e.g. floats).
+
+```c
+#include "zxc.h"
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* --- Delta: each element becomes its difference from the previous one.
+ *     Great for monotonic / smooth sequences (timestamps, IDs, counters). --- */
+static void delta_encode_i64(int64_t *a, size_t n) {
+    for (size_t i = n; i-- > 1;) a[i] -= a[i - 1];     /* back to front */
+}
+static void delta_decode_i64(int64_t *a, size_t n) {
+    for (size_t i = 1; i < n; i++) a[i] += a[i - 1];   /* prefix sum */
+}
+
+/* --- Byte-shuffle: group byte k of every element together, plane by plane.
+ *     Great for float/double columns: similar sign/exponent bytes become
+ *     contiguous runs. src and dst must not overlap; w = element size. --- */
+static void shuffle_encode(const uint8_t *src, uint8_t *dst, size_t n, size_t w) {
+    for (size_t b = 0; b < w; b++)
+        for (size_t i = 0; i < n; i++) dst[b * n + i] = src[i * w + b];
+}
+static void shuffle_decode(const uint8_t *src, uint8_t *dst, size_t n, size_t w) {
+    for (size_t b = 0; b < w; b++)
+        for (size_t i = 0; i < n; i++) dst[i * w + b] = src[b * n + i];
+}
+
+int main(void) {
+    /* A column of ~1 ms timestamps: huge values, tiny differences. */
+    const size_t n = 100000;
+    int64_t *ts = malloc(n * sizeof *ts);
+    int64_t t = 1700000000000000LL;
+    for (size_t i = 0; i < n; i++) { t += 1000000 + (int64_t)(i % 7); ts[i] = t; }
+
+    const size_t raw = n * sizeof *ts;
+    size_t cap = (size_t)zxc_compress_bound(raw);
+    void *comp = malloc(cap);
+    zxc_compress_opts_t opts = { .level = 3 };
+
+    /* 1. Filter, then compress. */
+    delta_encode_i64(ts, n);                       /* numeric struct -> small repeated deltas */
+    int64_t csize = zxc_compress(ts, raw, comp, cap, &opts);
+
+    /* 2. Decompress, then invert the filter. */
+    int64_t *out = malloc(raw);
+    zxc_decompress(comp, (size_t)csize, out, raw, NULL);
+    delta_decode_i64(out, n);                      /* exact original timestamps restored */
+
+    free(ts); free(comp); free(out);
+    return 0;
+}
+```
+
+**Choosing a filter (you must record this choice yourself):**
+
+| Data | Filter | Inverse |
+|---|---|---|
+| Monotonic / correlated integers (timestamps, IDs, counters) | `delta` | prefix sum |
+| Fixed-cadence series (drifting stride) | `delta` twice (delta-of-delta) | prefix sum twice |
+| Float/double columns, wide integers | `shuffle` (byte transpose) | un-shuffle |
+| Floats varying slightly between samples | XOR with previous | XOR again |
+
+> **The archive does not record the filter.** ZXC stores only the compressed
+> bytes; it has no idea a filter was applied. Your application is responsible for
+> remembering — in its own schema or metadata — which filter and `elem_size` it
+> used, so it can run the matching inverse after `zxc_decompress`. Apply the
+> filter only to genuinely numeric, type-known data; on arbitrary bytes it will
+> not help (and may hurt).
 
 ---
 

@@ -41,8 +41,7 @@
  * decoupled from the private src/lib/zxc_internal.h enum. */
 #define GC_BLOCK_RAW 0U
 #define GC_BLOCK_GLO 1U
-#define GC_BLOCK_NUM 2U
-#define GC_BLOCK_GHI 3U
+#define GC_BLOCK_GHI 2U
 #define GC_BLOCK_SEK 254U
 #define GC_BLOCK_EOF 255U
 
@@ -111,23 +110,6 @@ static size_t gc_make_huffman(uint8_t **out) {
     return n;
 }
 
-/* Monotonic 32-bit integer array with small deltas -> NUM block. */
-static size_t gc_make_num(uint8_t **out) {
-    const size_t count = 4096;
-    const size_t n = count * sizeof(uint32_t);
-    uint8_t *b = (uint8_t *)malloc(n);
-    uint32_t v = 1000;
-    for (size_t i = 0; i < count; i++) {
-        v += (uint32_t)(i % 7);  /* small, low-bit deltas */
-        b[i * 4 + 0] = (uint8_t)(v);
-        b[i * 4 + 1] = (uint8_t)(v >> 8);
-        b[i * 4 + 2] = (uint8_t)(v >> 16);
-        b[i * 4 + 3] = (uint8_t)(v >> 24);
-    }
-    *out = b;
-    return n;
-}
-
 /* Several block_size-worth of text -> multiple data blocks in one archive. */
 static size_t gc_make_multiblock(uint8_t **out) {
     const size_t n = 5 * 4096 + 777; /* 5 full 4 KB blocks + a short tail */
@@ -159,10 +141,9 @@ static const golden_case_t GOLDEN_CASES[] = {
     { "03_block_ghi",          gc_make_text,      { .level = 1 },                                  GC_BLOCK_GHI,  0,  1, 0 },
     { "04_block_glo",          gc_make_text,      { .level = 3 },                                  GC_BLOCK_GLO,  0,  1, 0 },
     { "05_block_glo_huffman",  gc_make_huffman,   { .level = 6 },                                  GC_BLOCK_GLO,  1,  1, 0 },
-    { "06_block_num",          gc_make_num,       { .level = 3 },                                  GC_BLOCK_NUM,  0,  1, 0 },
-    { "07_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GLO,  0,  1, 0 },
-    { "08_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GLO, 0, 5, 0 },
-    { "09_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GLO, 0, 5, 1 },
+    { "06_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GLO,  0,  1, 0 },
+    { "07_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GLO, 0, 5, 0 },
+    { "08_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GLO, 0, 5, 1 },
 };
 
 #define GOLDEN_CASE_COUNT (sizeof(GOLDEN_CASES) / sizeof(GOLDEN_CASES[0]))
