@@ -469,6 +469,9 @@ if(ZXC_BUILD_TESTS)
     target_compile_options(zxc_test PRIVATE
         $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>
     )
+    # Propagate definitions
+    target_compile_definitions(zxc_test PRIVATE
+        $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>)
     
     # Coverage flags for Tests
     if(ZXC_ENABLE_COVERAGE)
@@ -497,6 +500,8 @@ if(ZXC_BUILD_TESTS)
     add_executable(zxc_conformance_test conformance/test_conformance.c)
     target_link_libraries(zxc_conformance_test PRIVATE zxc_lib)
     target_include_directories(zxc_conformance_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    target_compile_definitions(zxc_conformance_test PRIVATE
+        $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>)
     if(ZXC_ENABLE_COVERAGE)
         target_link_options(zxc_conformance_test PRIVATE --coverage)
     endif()
@@ -516,6 +521,8 @@ if(ZXC_BUILD_TESTS)
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src/lib
         ${RAPIDHASH_INCLUDE_DIR})
+    target_compile_definitions(zxc_format_golden_test PRIVATE
+        $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>)
     if(ZXC_ENABLE_COVERAGE)
         target_link_options(zxc_format_golden_test PRIVATE --coverage)
     endif()
@@ -528,6 +535,8 @@ if(ZXC_BUILD_TESTS)
     add_executable(zxc_golden_gen tests/format/gen_golden.c)
     target_link_libraries(zxc_golden_gen PRIVATE zxc_lib)
     target_include_directories(zxc_golden_gen PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    target_compile_definitions(zxc_golden_gen PRIVATE
+        $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>)
     if(ZXC_ENABLE_COVERAGE)
         # Links the coverage-instrumented zxc_lib, so it needs the gcov runtime.
         target_link_options(zxc_golden_gen PRIVATE --coverage)
