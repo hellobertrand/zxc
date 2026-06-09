@@ -1,12 +1,10 @@
 # zxc(1)
 
 ## NAME
-**zxc** - High-performance asymmetric lossless compression
+**zxc** - zxc, unzxc - Compress or decompress .zxc files
 
 ## SYNOPSIS
 **zxc** [*OPTIONS*] [*INPUT-FILE*] [*OUTPUT-FILE*]
-
-**unzxc** [*OPTIONS*] [*INPUT-FILE*] [*OUTPUT-FILE*]
 
 **unzxc** is equivalent to **zxc -d**.
 
@@ -25,7 +23,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : Compress FILE. This is the default mode if no mode is specified.
 
 **-d**, **--decompress**
-: Decompress FILE. This is the default mode when **zxc** is invoked under the name **unzxc** (typically an installed symlink), mirroring **unzstd**(1) and **gunzip**(1). An explicit mode flag still takes precedence.
+: Decompress FILE. This is the default mode when **zxc** is invoked under the name **unzxc** (typically an installed symlink). An explicit mode flag still takes precedence.
 
 **-l**, **--list**
 : List archive information, including compressed size, uncompressed size, compression ratio, checksum method, and dictionary ID (if any). Also accepts a `.zxd` dictionary file, in which case it prints the dictionary's `dict_id`.
