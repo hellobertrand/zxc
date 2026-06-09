@@ -643,12 +643,12 @@ static PyObject* pyzxc_train_dict(PyObject* self, PyObject* args, PyObject* kwar
     PyMem_Free(views);
     Py_DECREF(seq);
 
+    PyObject* out = NULL;
     if (dict_size < 0) {
-        free(dict_buf);
-        Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)dict_size));
+        PyErr_SetString(PyExc_RuntimeError, zxc_error_name((int)dict_size));
+    } else {
+        out = PyBytes_FromStringAndSize((const char*)dict_buf, (Py_ssize_t)dict_size);
     }
-
-    PyObject* out = PyBytes_FromStringAndSize((const char*)dict_buf, (Py_ssize_t)dict_size);
     free(dict_buf);
     return out;
 }
