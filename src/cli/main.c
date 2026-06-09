@@ -714,13 +714,11 @@ static int zxc_list_archive(const char* path, int json_output) {
     // Extract header fields
     const uint8_t format_version = header[4];
     // Block size is stored at offset 5 as a log2 exponent (codes 12..21 = 2^code,
-    // i.e. 4 KB..2 MB); the legacy value 64 means 256 KB. Convert to KB.
+    // i.e. 4 KB..2 MB). Convert to KB.
     const uint8_t chunk_code = header[5];
     size_t block_size_kb;
     if (chunk_code >= ZXC_BLOCK_SIZE_MIN_LOG2 && chunk_code <= ZXC_BLOCK_SIZE_MAX_LOG2) {
         block_size_kb = ((size_t)1U << chunk_code) / 1024;
-    } else if (chunk_code == 64) {
-        block_size_kb = 256;  // legacy default
     } else {
         block_size_kb = 0;  // unknown / unsupported code
     }
@@ -1390,8 +1388,13 @@ int main(int argc, char** argv) {
             if (sz == 0) { fclose(sf); continue; }
             uint8_t* buf = (uint8_t*)malloc(sz);
             if (!buf) { fclose(sf); continue; }
-            fread(buf, 1, sz, sf);
+            const size_t rd = fread(buf, 1, sz, sf);
             fclose(sf);
+            if (rd != sz) {
+                fprintf(stderr, "Warning: short read on '%s', skipping\n", resolved);
+                free(buf);
+                continue;
+            }
             samples[n_loaded] = buf;
             sample_sizes[n_loaded] = sz;
             n_loaded++;
@@ -1611,7 +1614,13 @@ int main(int argc, char** argv) {
 
 #ifdef _WIN32
         rewind(fm_out);
-        fread(c_dat, 1, (size_t)c_sz, fm_out);
+        if (fread(c_dat, 1, (size_t)c_sz, fm_out) != (size_t)c_sz) {
+            fclose(fm_in);
+            fclose(fm_out);
+            fm_in = NULL;
+            fm_out = NULL;
+            goto bench_cleanup;
+        }
         fclose(fm_in);
         fclose(fm_out);
 #else

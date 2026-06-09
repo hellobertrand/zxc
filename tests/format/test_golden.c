@@ -138,12 +138,21 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
 
     uint8_t flags = buf[6];
     int has_checksum = (flags & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
+    int has_dict = (flags & ZXC_FILE_FLAG_HAS_DICTIONARY) ? 1 : 0;
+    const int want_dict = (gc->opts.dict != NULL && gc->opts.dict_size > 0);
     CHECK((flags & 0x0Fu) == 0, "checksum algo id %u, expected 0", flags & 0x0Fu);
-    CHECK((flags & 0x70u) == 0, "reserved flag bits set (0x%02X)", flags);
+    CHECK((flags & 0x30u) == 0, "reserved flag bits set (0x%02X)", flags);  /* bit 6 = HAS_DICTIONARY */
     CHECK(has_checksum == gc->opts.checksum_enabled, "HAS_CHECKSUM=%d, expected %d", has_checksum,
           gc->opts.checksum_enabled);
+    CHECK(has_dict == want_dict, "HAS_DICTIONARY=%d, expected %d", has_dict, want_dict);
 
-    for (int i = 7; i <= 13; i++) CHECK(buf[i] == 0, "header reserved byte 0x%02X nonzero", i);
+    if (want_dict) {
+        /* bytes 0x07..0x0A = dict_id (non-zero); 0x0B..0x0D reserved (zero). */
+        CHECK(zxc_le32(buf + 7) != 0, "dict_id is zero on a dictionary archive");
+        for (int i = 11; i <= 13; i++) CHECK(buf[i] == 0, "header reserved byte 0x%02X nonzero", i);
+    } else {
+        for (int i = 7; i <= 13; i++) CHECK(buf[i] == 0, "header reserved byte 0x%02X nonzero", i);
+    }
 
     /* Sec 7.1 header CRC16: zxc_hash16 over the 16 header bytes with 0x0E..0x0F zeroed. */
     {
@@ -284,7 +293,11 @@ static int validate_roundtrip(const char *ctx, const golden_case_t *gc, const ui
     int ok = 1;
     if (in_size > 0) {
         uint8_t *out = (uint8_t *)malloc(in_size);
-        int64_t r = zxc_decompress(buf, size, out, in_size, NULL);
+        /* Dictionary cases must be decoded with their dictionary. */
+        zxc_decompress_opts_t dopts = {0};
+        dopts.dict = gc->opts.dict;
+        dopts.dict_size = gc->opts.dict_size;
+        int64_t r = zxc_decompress(buf, size, out, in_size, &dopts);
         if (r < 0) {
             fprintf(stderr, "    FAIL [%s]: decompress -> %s\n", ctx, zxc_error_name((int)r));
             ok = 0;

@@ -80,10 +80,12 @@ static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
 {
     /* Derive directory from zxc_path */
     char dir[512];
-    strncpy(dir, zxc_path, sizeof(dir) - 1);
-    dir[sizeof(dir) - 1] = '\0';
+    size_t plen = strlen(zxc_path);
+    if (plen >= sizeof(dir)) plen = sizeof(dir) - 1;
+    memcpy(dir, zxc_path, plen);
+    dir[plen] = '\0';
     char *sep = strrchr(dir, '/');
-    if (sep) *(sep + 1) = '\0'; else strcpy(dir, "./");
+    if (sep) *(sep + 1) = '\0'; else snprintf(dir, sizeof(dir), "./");
 
 #ifdef _WIN32
     char pattern[512];

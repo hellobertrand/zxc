@@ -78,20 +78,6 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
 
 #if defined(ZXC_USE_SSE2)
 /**
- * @brief SSE2 emulation of SSE4.1 @c _mm_max_epu32 (element-wise unsigned max).
- *
- * SSE2 has no unsigned 32-bit compare, so we map unsigned ordering to signed
- * ordering by flipping the sign bit (XOR 0x80000000) before @c _mm_cmpgt_epi32,
- * then select element-wise.
- */
-// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
-static ZXC_ALWAYS_INLINE __m128i zxc_mm_max_epu32_sse2(__m128i a, __m128i b) {
-    const __m128i bias = _mm_set1_epi32((int)0x80000000);
-    const __m128i gt = _mm_cmpgt_epi32(_mm_xor_si128(a, bias), _mm_xor_si128(b, bias));
-    return _mm_or_si128(_mm_and_si128(gt, a), _mm_andnot_si128(gt, b));
-}
-
-/**
  * @brief SSE2 emulation of SSE4.1 @c _mm_blendv_epi8.
  *
  * Selects bytes from @p b where the corresponding @p mask byte has its high bit
@@ -118,21 +104,6 @@ static ZXC_ALWAYS_INLINE __m128i zxc_mm_packus_epi32_sse2(__m128i a, __m128i b) 
     const __m128i pa = _mm_sub_epi32(a, bias32);
     const __m128i pb = _mm_sub_epi32(b, bias32);
     return _mm_add_epi16(_mm_packs_epi32(pa, pb), bias16);
-}
-
-/**
- * @brief Horizontal maximum of four packed unsigned 32-bit integers (SSE2).
- *
- * @param[in] v The 128-bit vector containing 4 unsigned 32-bit integers.
- * @return The maximum unsigned 32-bit integer found in the vector.
- */
-// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
-static ZXC_ALWAYS_INLINE uint32_t zxc_mm_reduce_max_epu32(__m128i v) {
-    __m128i vshuf = _mm_shuffle_epi32(v, _MM_SHUFFLE(1, 0, 3, 2));  // Swap 64-bit halves
-    v = zxc_mm_max_epu32_sse2(v, vshuf);                            // Max of pairs
-    vshuf = _mm_shuffle_epi32(v, _MM_SHUFFLE(2, 3, 0, 1));          // Swap adjacent lanes
-    v = zxc_mm_max_epu32_sse2(v, vshuf);                            // Final max
-    return (uint32_t)_mm_cvtsi128_si32(v);                          // Extract scalar result
 }
 #endif
 

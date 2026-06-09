@@ -364,7 +364,11 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     // Zero out CRC bytes (14-15) before hash check
     temp[14] = 0;
     temp[15] = 0;
-    if (UNLIKELY(zxc_le16(src + 14) != zxc_hash16(temp))) return ZXC_ERROR_BAD_HEADER;
+    // Header CRC16 (integrity), then the checksum-algorithm id in flags bits 0-3
+    // (only 0 = RapidHash is defined). CRC is checked first via short-circuit.
+    if (UNLIKELY(zxc_le16(src + 14) != zxc_hash16(temp) ||
+                 (src[6] & 0x0FU) != ZXC_CHECKSUM_RAPIDHASH))
+        return ZXC_ERROR_BAD_HEADER;
 
     if (out_block_size) {
         const uint8_t code = src[5];

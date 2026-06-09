@@ -29,14 +29,18 @@ Each file maps onto sections of `docs/FORMAT.md §5` and the integrity fields:
 | `06_checksum_per_block.zxc`| Per-block checksum + non-zero global stream hash                |
 | `07_multiple_blocks.zxc`   | Multiple data blocks → rolling global hash (§7.3)               |
 | `08_seekable_table.zxc`    | SEK seek-table block (§5.5)                                     |
+| `09_block_dict.zxc`        | Dictionary archive: `HAS_DICTIONARY` flag + `dict_id` in the header (§3.1) |
+| `10_glo_offset16.zxc`      | GLO block with 16-bit offsets (`enc_off == 0`, large-distance matches) |
+| `11_glo_rle.zxc`           | GLO block with RLE literal encoding (`enc_lit == 1`)            |
 
 ## What the validator checks
 
 For every file, `test_golden.c` walks the bytes and verifies, against
 `docs/FORMAT.md`:
 
-- **File header (§3):** magic, version, chunk-size code, flags, the 7 reserved
-  bytes, and the 16-bit header CRC (`zxc_hash16`).
+- **File header (§3):** magic, version, chunk-size code, flags (incl.
+  `HAS_CHECKSUM` / `HAS_DICTIONARY`), the reserved bytes — or the `dict_id` when
+  a dictionary is used — and the 16-bit header CRC (`zxc_hash16`).
 - **Each block header (§4):** type, flags, reserved byte, `comp_size` bounds,
   and the 8-bit header CRC (`zxc_hash8`).
 - **Every payload type (§5):** RAW; GLO/GHI header + section descriptors

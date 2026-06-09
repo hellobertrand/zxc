@@ -119,6 +119,58 @@ static size_t gc_make_multiblock(uint8_t **out) {
     return n;
 }
 
+/* A pseudo-random 1 KB block repeated -> matches at distance 1024 (> 256),
+ * forcing 16-bit offsets (enc_off == 0). The other GLO/GHI cases use small
+ * offsets (enc_off == 1), so this freezes the 16-bit offset path. */
+static size_t gc_make_offset16(uint8_t **out) {
+    const size_t period = 1024;
+    const size_t n = 8 * period;
+    uint8_t *b = (uint8_t *)malloc(n);
+    uint32_t s = 0x5EED1234u;
+    for (size_t i = 0; i < period; i++) b[i] = (uint8_t)(gc_lcg_next(&s) >> 24);
+    for (size_t i = period; i < n; i++) b[i] = b[i % period];
+    *out = b;
+    return n;
+}
+
+/* A varying byte followed by a 4-byte run of one value, repeated. The runs are
+ * shorter than the LZ minimum match, so they survive LZ as literals; RLE then
+ * beats raw literals and the GLO block uses RLE literal encoding (enc_lit == 1).
+ * The other GLO cases use raw (0) or Huffman (2) literals. */
+static size_t gc_make_rle_literals(uint8_t **out) {
+    const size_t n = 16384;
+    uint8_t *b = (uint8_t *)malloc(n);
+    uint32_t s = 0x1357BD13u;
+    for (size_t i = 0; i < n; i += 5) {
+        b[i] = (uint8_t)(gc_lcg_next(&s) >> 24);
+        for (size_t k = 1; k < 5 && i + k < n; k++) b[i + k] = 0xAA;
+    }
+    *out = b;
+    return n;
+}
+
+/* Fixed dictionary content -> stable dict_id. Used by the dictionary golden
+ * case to freeze the dict-compressed wire format (HAS_DICTIONARY flag + dict_id
+ * in the file header). */
+static const uint8_t gc_dict_content[] =
+    "GET /api/v1/users/ HTTP/1.1\r\nHost: api.example.com\r\n"
+    "Accept: application/json\r\nUser-Agent: zxc-client\r\n";
+#define GC_DICT_SIZE (sizeof(gc_dict_content) - 1) /* exclude the trailing NUL */
+
+/* Payload that reuses the dictionary's phrases, so the block is encoded against
+ * the dictionary (the file header then carries HAS_DICTIONARY + dict_id). */
+static size_t gc_make_dict_payload(uint8_t **out) {
+    const size_t n = 4096;
+    uint8_t *b = (uint8_t *)malloc(n);
+    static const char req[] =
+        "GET /api/v1/users/4242/profile HTTP/1.1\r\nHost: api.example.com\r\n"
+        "Accept: application/json\r\nUser-Agent: zxc-client\r\n\r\n";
+    const size_t plen = sizeof(req) - 1;
+    for (size_t i = 0; i < n; i++) b[i] = (uint8_t)req[i % plen];
+    *out = b;
+    return n;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Case table                                                                */
 /* ------------------------------------------------------------------------- */
@@ -144,6 +196,9 @@ static const golden_case_t GOLDEN_CASES[] = {
     { "06_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GLO,  0,  1, 0 },
     { "07_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GLO, 0, 5, 0 },
     { "08_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GLO, 0, 5, 1 },
+    { "09_block_dict",         gc_make_dict_payload, { .level = 3, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE }, GC_BLOCK_GLO, 0, 1, 0 },
+    { "10_glo_offset16",       gc_make_offset16,  { .level = 3 },                                  GC_BLOCK_GLO,  0,  1, 0 },
+    { "11_glo_rle",            gc_make_rle_literals, { .level = 3 },                                GC_BLOCK_GLO,  0,  1, 0 },
 };
 
 #define GOLDEN_CASE_COUNT (sizeof(GOLDEN_CASES) / sizeof(GOLDEN_CASES[0]))

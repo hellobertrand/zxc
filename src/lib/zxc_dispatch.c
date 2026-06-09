@@ -765,6 +765,11 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
         // Handle EOF block separately (not a real chunk to decompress)
         if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
+            // EOF carries no payload; a non-zero comp_size is a malformed header.
+            if (UNLIKELY(bh.comp_size != 0)) {
+                zxc_cctx_free(&ctx);
+                return ZXC_ERROR_BAD_HEADER;
+            }
             // Footer is always the last ZXC_FILE_FOOTER_SIZE bytes of the source,
             // even when a seek table is inserted between EOF block and footer.
             // LCOV_EXCL_START
@@ -1117,6 +1122,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
             return ZXC_ERROR_BAD_HEADER;
 
         if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
+            if (UNLIKELY(bh.comp_size != 0)) return ZXC_ERROR_BAD_HEADER;
             if (UNLIKELY(rem_src < ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
                 return ZXC_ERROR_SRC_TOO_SMALL;
 
