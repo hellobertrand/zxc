@@ -132,48 +132,144 @@ static const ZXC_ALIGN(16) uint8_t zxc_overlap_masks[16][16] = {
 #endif
 
 /**
- * @brief Copies 16 bytes from an overlapping source to the destination.
+ * @brief Per-offset store stride for periodic overlap runs: the largest
+ *        multiple of @c off that fits in 16 bytes, i.e. `16 - (16 % off)`.
  *
- * This function is designed to handle memory copies where the source and
- * destination regions might overlap, specifically copying 16 bytes from
- * `dst - off` to `dst`. It is typically used in decompression routines
- * (like LZ77) where repeating a previous sequence is required.
- *
- * Handles NEON64, NEON32, SSSE3/AVX2 and generic scalar fallback.
- *
- * @param[out] dst Pointer to the destination buffer where bytes will be written.
- * @param[in]  off The offset backwards from the destination pointer to read from.
- *                 (i.e., source address is `dst - off`).
+ * Advancing the output cursor by a multiple of @c off keeps the 16-byte
+ * pattern vector phase-aligned, so the run is emitted with pure stores of a
+ * single register. Entries 0 and 1 are unused (RLE handled separately).
  */
-// codeql[cpp/unused-static-function] : False positive, used in DECODE_SEQ_SAFE/FAST macros
-static ZXC_ALWAYS_INLINE void zxc_copy_overlap16(uint8_t* dst, uint32_t off) {
-    // off is always >= ZXC_LZ_OFFSET_BIAS by design (offset bias encoding: stored +
-    // ZXC_LZ_OFFSET_BIAS)
+static const uint8_t zxc_overlap_strides[16] = {16, 16, 16, 15, 16, 15, 12, 14,
+                                                16, 9,  10, 11, 12, 13, 14, 15};
+
+/**
+ * @brief Copies an @p ml-byte LZ run whose pattern repeats with period @p off (2..15).
+ *
+ * Builds the 16-byte periodic pattern `out[i] = dst[-off + (i % off)]` once
+ * (one shuffle on NEON/SSSE3, a wrap-counter byte loop on the SSE2/scalar
+ * tier), then emits 16-byte stores advancing by @ref zxc_overlap_strides so
+ * the pattern never needs re-shuffling. May overshoot up to 15 bytes past
+ * @p ml; the caller must guarantee @ref ZXC_PAD_SIZE bytes of headroom.
+ *
+ * @param[out] dst Output cursor; the run source is `dst - off`.
+ * @param[in]  off Back-reference distance, in [2, 15].
+ * @param[in]  ml  Run length in bytes (>= 1).
+ */
+// codeql[cpp/unused-static-function] : False positive
+static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run(uint8_t* dst, const uint32_t off,
+                                                          const uint64_t ml) {
+    const size_t stride = zxc_overlap_strides[off];
+    size_t copied = 0;
 #if defined(ZXC_USE_NEON64)
-    uint8x16_t mask = vld1q_u8(zxc_overlap_masks[off]);
-    uint8x16_t src_data = vld1q_u8(dst - off);
-    vst1q_u8(dst, vqtbl1q_u8(src_data, mask));
+    const uint8x16_t mask = vld1q_u8(zxc_overlap_masks[off]);
+    const uint8x16_t pat = vqtbl1q_u8(vld1q_u8(dst - off), mask);
+    do {
+        vst1q_u8(dst + copied, pat);
+        copied += stride;
+    } while (copied < ml);
 
 #elif defined(ZXC_USE_NEON32)
     uint8x8x2_t src_tbl;
     src_tbl.val[0] = vld1_u8(dst - off);
     src_tbl.val[1] = vld1_u8(dst - off + 8);
-    uint8x8_t mask_lo = vld1_u8(zxc_overlap_masks[off]);
-    uint8x8_t mask_hi = vld1_u8(zxc_overlap_masks[off] + 8);
-    vst1_u8(dst, vtbl2_u8(src_tbl, mask_lo));
-    vst1_u8(dst + 8, vtbl2_u8(src_tbl, mask_hi));
+    const uint8x8_t pat_lo = vtbl2_u8(src_tbl, vld1_u8(zxc_overlap_masks[off]));
+    const uint8x8_t pat_hi = vtbl2_u8(src_tbl, vld1_u8(zxc_overlap_masks[off] + 8));
+    do {
+        vst1_u8(dst + copied, pat_lo);
+        vst1_u8(dst + copied + 8, pat_hi);
+        copied += stride;
+    } while (copied < ml);
 
 #elif defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
-    __m128i mask = _mm_load_si128((const __m128i*)zxc_overlap_masks[off]);
-    __m128i src_data = _mm_loadu_si128((const __m128i*)(dst - off));
-    _mm_storeu_si128((__m128i*)dst, _mm_shuffle_epi8(src_data, mask));
+    const __m128i mask = _mm_load_si128((const __m128i*)zxc_overlap_masks[off]);
+    const __m128i src_data = _mm_loadu_si128((const __m128i*)(dst - off));
+    const __m128i pat = _mm_shuffle_epi8(src_data, mask);
+    do {
+        _mm_storeu_si128((__m128i*)(dst + copied), pat);
+        copied += stride;
+    } while (copied < ml);
 
 #else
-    // SSE2-only tier and non-SIMD builds: scalar replicate (no PSHUFB).
+    // SSE2-only tier and non-SIMD builds: no PSHUFB, build the pattern with a
+    // wrap counter (no per-byte modulo), then store it via zxc_copy16.
     const uint8_t* src = dst - off;
+    uint8_t pat[16];
+    uint32_t k = 0;
     for (size_t i = 0; i < 16; i++) {
-        dst[i] = src[i % off];
+        pat[i] = src[k];
+        if (++k == off) k = 0;
     }
+    do {
+        zxc_copy16(dst + copied, pat);
+        copied += stride;
+    } while (copied < ml);
+#endif
+}
+
+/**
+ * @brief Fills an @p ml-byte single-byte run (LZ offset == 1) with wild stores.
+ *
+ * Splats @p byte into a vector register and emits @ref ZXC_PAD_SIZE-byte
+ * chunks, avoiding a libc memset call on the typically short runs of the hot
+ * path. Like the other run copiers it may **overshoot** up to
+ * @ref ZXC_PAD_SIZE - 1 bytes past @p ml; the caller must guarantee
+ * @ref ZXC_PAD_SIZE bytes of headroom. Falls back to @ref ZXC_MEMSET on
+ * non-SIMD builds.
+ *
+ * @param[out] dst  Output cursor.
+ * @param[in]  byte Byte value to replicate.
+ * @param[in]  ml   Run length in bytes (>= 1).
+ */
+// codeql[cpp/unused-static-function] : False positive, used in DECODE_SEQ_SAFE/FAST macros
+static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t byte,
+                                                  const uint64_t ml) {
+#if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
+    const __m256i v = _mm256_set1_epi8((char)byte);
+    _mm256_storeu_si256((__m256i*)dst, v);
+    if (UNLIKELY(ml > ZXC_PAD_SIZE)) {
+        uint8_t* out = dst + ZXC_PAD_SIZE;
+        size_t rem = ml - ZXC_PAD_SIZE;
+        while (rem > ZXC_PAD_SIZE) {
+            _mm256_storeu_si256((__m256i*)out, v);
+            out += ZXC_PAD_SIZE;
+            rem -= ZXC_PAD_SIZE;
+        }
+        _mm256_storeu_si256((__m256i*)out, v);
+    }
+#elif defined(ZXC_USE_SSE2)
+    const __m128i v = _mm_set1_epi8((char)byte);
+    _mm_storeu_si128((__m128i*)dst, v);
+    _mm_storeu_si128((__m128i*)(dst + 16), v);
+    if (UNLIKELY(ml > ZXC_PAD_SIZE)) {
+        uint8_t* out = dst + ZXC_PAD_SIZE;
+        size_t rem = ml - ZXC_PAD_SIZE;
+        while (rem > ZXC_PAD_SIZE) {
+            _mm_storeu_si128((__m128i*)out, v);
+            _mm_storeu_si128((__m128i*)(out + 16), v);
+            out += ZXC_PAD_SIZE;
+            rem -= ZXC_PAD_SIZE;
+        }
+        _mm_storeu_si128((__m128i*)out, v);
+        _mm_storeu_si128((__m128i*)(out + 16), v);
+    }
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
+    const uint8x16_t v = vdupq_n_u8(byte);
+    vst1q_u8(dst, v);
+    vst1q_u8(dst + 16, v);
+    if (UNLIKELY(ml > ZXC_PAD_SIZE)) {
+        uint8_t* out = dst + ZXC_PAD_SIZE;
+        size_t rem = ml - ZXC_PAD_SIZE;
+        while (rem > ZXC_PAD_SIZE) {
+            vst1q_u8(out, v);
+            vst1q_u8(out + 16, v);
+            out += ZXC_PAD_SIZE;
+            rem -= ZXC_PAD_SIZE;
+        }
+        vst1q_u8(out, v);
+        vst1q_u8(out + 16, v);
+    }
+#else
+    ZXC_MEMSET(dst, byte, ml);
 #endif
 }
 
@@ -224,7 +320,7 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_literals(uint8_t* RESTRICT dst,
  * copy strategy is chosen by back-reference distance:
  *  - @p off >= @ref ZXC_PAD_SIZE      : 32-byte wild copies (no overlap within a chunk);
  *  - @p off >= @ref ZXC_PAD_SIZE / 2  : 16-byte wild copies;
- *  - @p off == 1                      : single-byte run via @ref ZXC_MEMSET;
+ *  - @p off == 1                      : single-byte run via @ref zxc_decode_fill_run;
  *  - otherwise (2..15)                : pattern-replicating overlap copy.
  *
  * Like @ref zxc_decode_copy_literals it may **overshoot** up to @ref ZXC_PAD_SIZE - 1
@@ -268,13 +364,9 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
             zxc_copy16(out, ref);
         }
     } else if (off == 1) {
-        ZXC_MEMSET(d_ptr, match_src[0], ml);
+        zxc_decode_fill_run(d_ptr, match_src[0], ml);
     } else {
-        size_t copied = 0;
-        while (copied < ml) {
-            zxc_copy_overlap16(d_ptr + copied, off);
-            copied += (ZXC_PAD_SIZE / 2);
-        }
+        zxc_decode_copy_overlap_run(d_ptr, off, ml);
     }
 }
 
@@ -1037,32 +1129,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             if (UNLIKELY(written < bounds_threshold && offset > written))
                 return ZXC_ERROR_BAD_OFFSET;
 
-            const uint8_t* match_src = d_ptr - offset;
-            if (LIKELY(offset >= ZXC_PAD_SIZE)) {
-                zxc_copy32(d_ptr, match_src);
-                if (UNLIKELY(ml > ZXC_PAD_SIZE)) {
-                    uint8_t* out = d_ptr + ZXC_PAD_SIZE;
-                    const uint8_t* ref = match_src + ZXC_PAD_SIZE;
-                    size_t rem = ml - ZXC_PAD_SIZE;
-                    while (rem > ZXC_PAD_SIZE) {
-                        zxc_copy32(out, ref);
-                        out += ZXC_PAD_SIZE;
-                        ref += ZXC_PAD_SIZE;
-                        rem -= ZXC_PAD_SIZE;
-                    }
-                    zxc_copy32(out, ref);
-                }
-                d_ptr += ml;
-                written += ml;
-            } else if (offset == 1) {
-                ZXC_MEMSET(d_ptr, match_src[0], ml);
-                d_ptr += ml;
-                written += ml;
-            } else {
-                for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
-                d_ptr += ml;
-                written += ml;
-            }
+            /* The loop entry check guarantees ll + ml + ZXC_PAD_SIZE bytes of
+             * headroom, so the wild-copy ladder (incl. overlap/fill runs) is safe. */
+            zxc_decode_copy_match(d_ptr, offset, ml);
+            d_ptr += ml;
+            written += ml;
         }
         n_seq--;
     }
@@ -1681,32 +1752,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
             if (UNLIKELY(written < bounds_threshold && offset > written))
                 return ZXC_ERROR_BAD_OFFSET;
 
-            const uint8_t* match_src = d_ptr - offset;
-            if (LIKELY(offset >= ZXC_PAD_SIZE)) {
-                zxc_copy32(d_ptr, match_src);
-                if (UNLIKELY(ml > ZXC_PAD_SIZE)) {
-                    uint8_t* out = d_ptr + ZXC_PAD_SIZE;
-                    const uint8_t* ref = match_src + ZXC_PAD_SIZE;
-                    size_t rem = ml - ZXC_PAD_SIZE;
-                    while (rem > ZXC_PAD_SIZE) {
-                        zxc_copy32(out, ref);
-                        out += ZXC_PAD_SIZE;
-                        ref += ZXC_PAD_SIZE;
-                        rem -= ZXC_PAD_SIZE;
-                    }
-                    zxc_copy32(out, ref);
-                }
-                d_ptr += ml;
-                written += ml;
-            } else if (offset == 1) {
-                ZXC_MEMSET(d_ptr, match_src[0], ml);
-                d_ptr += ml;
-                written += ml;
-            } else {
-                for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
-                d_ptr += ml;
-                written += ml;
-            }
+            /* The loop entry check guarantees ll + ml + ZXC_PAD_SIZE bytes of
+             * headroom, so the wild-copy ladder (incl. overlap/fill runs) is safe. */
+            zxc_decode_copy_match(d_ptr, offset, ml);
+            d_ptr += ml;
+            written += ml;
         }
         n_seq--;
     }
