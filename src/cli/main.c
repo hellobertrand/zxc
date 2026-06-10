@@ -1776,13 +1776,14 @@ int main(int argc, char** argv) {
                                              to_stdout, checksum, level, block_size, json_output,
                                              seekable, dict, dict_size);
         } else {
-            // -o takes precedence over a positional OUTPUT-FILE (single-file mode only).
-            const char* explicit_out_path =
-                (output_path && !multiple_mode && !to_stdout) ? output_path
-                : (!multiple_mode && optind + 1 < argc && current_arg &&
-                   strcmp(current_arg, "-") != 0 && !to_stdout)
-                    ? argv[start_optind + 1]
-                    : NULL;
+            // -o takes precedence over a positional OUTPUT-FILE.
+            const char* explicit_out_path = NULL;
+            if (!multiple_mode && !to_stdout) {
+                if (output_path)
+                    explicit_out_path = output_path;
+                else if (optind + 1 < argc && current_arg && strcmp(current_arg, "-") != 0)
+                    explicit_out_path = argv[start_optind + 1];
+            }
 
             overall_ret |=
                 process_single_file(current_arg, explicit_out_path, mode, num_threads, keep_input,
