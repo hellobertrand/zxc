@@ -545,8 +545,9 @@ How it ties together:
 ### CLI quickstart
 
 ```sh
-# Train from a corpus directory -> writes dictionary_<dict_id>.zxd in it.
-zxc --train-dict ./corpus/
+# Train from a corpus of files -> writes dictionary_<dict_id>.zxd in the
+# current directory (use -o DIR/ or -o FILE to choose the destination).
+zxc --train ./corpus/*
 
 # Compress / decompress with the dictionary (required at both ends).
 zxc -D dictionary_1a2b3c4d.zxd -z record.json

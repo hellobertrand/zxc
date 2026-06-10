@@ -574,6 +574,14 @@ if(ZXC_BUILD_CLI)
     install(TARGETS zxc
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
+    # "unzxc" alias: a symlink to zxc that defaults to decompression. 
+    # Symbolic links are POSIX-only; skipped on Windows.
+    if(NOT WIN32)
+        install(CODE "
+            execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
+                zxc \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/unzxc\")
+        ")
+    endif()
 endif()
 
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc

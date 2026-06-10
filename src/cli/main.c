@@ -28,24 +28,6 @@
 
 #define ZXC_STDIO_BUFFER_SIZE (1024 * 1024)
 
-#if defined(_WIN32)
-#define ZXC_OS "windows"
-#elif defined(__APPLE__)
-#define ZXC_OS "darwin"
-#elif defined(__linux__)
-#define ZXC_OS "linux"
-#else
-#define ZXC_OS "unknown"
-#endif
-
-#if defined(__x86_64__) || defined(_M_AMD64)
-#define ZXC_ARCH "x86_64"
-#elif defined(__aarch64__) || defined(_M_ARM64)
-#define ZXC_ARCH "arm64"
-#else
-#define ZXC_ARCH "unknown"
-#endif
-
 #ifdef _WIN32
 // Windows Implementation
 #include <direct.h>
@@ -166,7 +148,6 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -476,8 +457,8 @@ void print_help(const char* app) {
         "  -l, --list        List archive or dictionary info\n"
         "  -t, --test        Test compressed FILE integrity\n"
         "  -b, --bench [N]   Benchmark in-memory (N=seconds, default 5)\n"
-        "  --train-dict PATH Train a dictionary from input files. PATH may be a\n"
-        "                    directory (saved as dictionary_<dict_id>.zxd inside it) or a file\n\n"
+        "  --train           Train a dictionary from input FILEs (training samples).\n"
+        "                    Output via -o (default: ./dictionary_<dict_id>.zxd)\n\n"
         "Batch Processing:\n"
         "  -m, --multiple    Multiple input files\n"
         "  -r, --recursive   Operate recursively on directories\n\n"
@@ -493,6 +474,8 @@ void print_help(const char* app) {
         "  -D, --dict FILE   Use pre-trained dictionary (.zxd). Required to decompress\n"
         "                    an archive that was compressed with a dictionary\n"
         "  -S, --seekable    Append seek table for random-access decompression\n"
+        "  -o, --output FILE Write output to FILE (else derived from input;\n"
+        "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
         "  -k, --keep        Keep input file\n"
         "  -f, --force       Force overwrite\n"
         "  -c, --stdout      Write to stdout\n"
@@ -502,19 +485,8 @@ void print_help(const char* app) {
 }
 
 void print_version(void) {
-    char sys_info[256];
-#ifdef _WIN32
-    snprintf(sys_info, sizeof(sys_info), "%s-%s", ZXC_ARCH, ZXC_OS);
-#else
-    struct utsname buffer;
-    if (uname(&buffer) == 0)
-        snprintf(sys_info, sizeof(sys_info), "%s-%s-%s", ZXC_ARCH, ZXC_OS, buffer.release);
-    else
-        snprintf(sys_info, sizeof(sys_info), "%s-%s", ZXC_ARCH, ZXC_OS);
-
-#endif
-    printf("zxc v%s (%s) by Bertrand Lebonnois & al.\nBSD 3-Clause License\n", ZXC_LIB_VERSION_STR,
-           sys_info);
+    printf("ZXC CLI (%zu-bit) v%s, by Bertrand Lebonnois\nBSD 3-Clause License\n",
+           sizeof(void*) * CHAR_BIT, ZXC_LIB_VERSION_STR);
 }
 
 /**
@@ -1062,7 +1034,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         } else {
             zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
         }
-        if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY)
+        if (!use_stdin && !use_stdout && !keep_input && !out_path_override &&
+            mode != MODE_INTEGRITY)
             unlink(resolved_in_path);
     } else {
         if (mode == MODE_INTEGRITY) {
@@ -1101,6 +1074,21 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
  */
 int main(int argc, char** argv) {
     zxc_mode_t mode = MODE_COMPRESS;
+
+    /* When invoked as "unzxc" (typically a symlink to zxc), default to
+     * decompression -- like unzstd / gunzip. An explicit -z/-d/-l/-t/-b below
+     * still overrides this default. */
+    {
+        const char* prog = (argc > 0 && argv[0]) ? argv[0] : "zxc";
+        const char* slash = strrchr(prog, '/');
+#ifdef _WIN32
+        const char* bslash = strrchr(prog, '\\');
+        if (bslash && (!slash || bslash > slash)) slash = bslash;
+#endif
+        const char* base = slash ? slash + 1 : prog;
+        if (strstr(base, "unzxc")) mode = MODE_DECOMPRESS;
+    }
+
     int num_threads = 0;
     int keep_input = 0;
     int force = 0;
@@ -1112,9 +1100,10 @@ int main(int argc, char** argv) {
     size_t block_size = 0;
     int seekable = 0;
     const char* dict_path = NULL;
-    const char* train_dict_path = NULL;
+    const char* output_path = NULL;
 
-    static const struct option long_options[] = {{"train-dict", required_argument, 0, OPT_TRAIN_DICT},
+    static const struct option long_options[] = {{"train", no_argument, 0, OPT_TRAIN_DICT},
+                                                 {"output", required_argument, 0, 'o'},
                                                  {"dict", required_argument, 0, 'D'},
                                                  {"compress", no_argument, 0, 'z'},
                                                  {"decompress", no_argument, 0, 'd'},
@@ -1141,7 +1130,7 @@ int main(int argc, char** argv) {
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
-    while ((opt = getopt_long(argc, argv, "123456b::B:cCdD:fhjklmrNqST:tvVz", long_options, NULL)) !=
+    while ((opt = getopt_long(argc, argv, "123456b::B:cCdD:fho:jklmrNqST:tvVz", long_options, NULL)) !=
            -1) {
         switch (opt) {
             case 'z':
@@ -1230,7 +1219,9 @@ int main(int argc, char** argv) {
                 break;
             case OPT_TRAIN_DICT:
                 mode = MODE_TRAIN_DICT;
-                train_dict_path = optarg;
+                break;
+            case 'o':
+                output_path = optarg;
                 break;
             case 'r':
                 recursive_mode = 1;
@@ -1368,7 +1359,7 @@ int main(int argc, char** argv) {
      */
     if (mode == MODE_TRAIN_DICT) {
         if (optind >= argc) {
-            fprintf(stderr, "Error: --train-dict requires input files as training samples.\n");
+            fprintf(stderr, "Error: --train requires input files as training samples.\n");
             free(dict);
             return 1;
         }
@@ -1456,25 +1447,30 @@ int main(int argc, char** argv) {
         }
 
         /*
-         * Resolve the output path. If train_dict_path names a directory (or ends
-         * with a separator), use the content-addressable name {dict_id:08x}.zxd
-         * inside it; otherwise write to train_dict_path verbatim. The id must be
+         * Resolve the output path (from -o, optional). With no -o, write the
+         * content-addressable name dictionary_{dict_id:08x}.zxd in the current
+         * directory. If -o names a directory (or ends with a separator), use that
+         * name inside it; otherwise write to the -o path verbatim. The id must be
          * computed before opening the file so it can name it.
          */
         const uint32_t trained_id = zxc_dict_get_id(zxd, (size_t)zxd_sz);
         char final_path[4096];
-        const size_t tdp_len = strlen(train_dict_path);
-        const int is_dir_target =
-            zxc_is_directory(train_dict_path) ||
-            (tdp_len > 0 && (train_dict_path[tdp_len - 1] == '/' ||
-                             train_dict_path[tdp_len - 1] == '\\'));
-        if (is_dir_target) {
-            const int has_sep = tdp_len > 0 && (train_dict_path[tdp_len - 1] == '/' ||
-                                                train_dict_path[tdp_len - 1] == '\\');
-            snprintf(final_path, sizeof(final_path), "%s%sdictionary_%08x.zxd", train_dict_path,
-                     has_sep ? "" : "/", trained_id);
+        if (!output_path) {
+            snprintf(final_path, sizeof(final_path), "dictionary_%08x.zxd", trained_id);
         } else {
-            snprintf(final_path, sizeof(final_path), "%s", train_dict_path);
+            const size_t op_len = strlen(output_path);
+            const int is_dir_target =
+                zxc_is_directory(output_path) ||
+                (op_len > 0 &&
+                 (output_path[op_len - 1] == '/' || output_path[op_len - 1] == '\\'));
+            if (is_dir_target) {
+                const int has_sep = op_len > 0 && (output_path[op_len - 1] == '/' ||
+                                                   output_path[op_len - 1] == '\\');
+                snprintf(final_path, sizeof(final_path), "%s%sdictionary_%08x.zxd", output_path,
+                         has_sep ? "" : "/", trained_id);
+            } else {
+                snprintf(final_path, sizeof(final_path), "%s", output_path);
+            }
         }
 
         FILE* out;
@@ -1780,10 +1776,14 @@ int main(int argc, char** argv) {
                                              to_stdout, checksum, level, block_size, json_output,
                                              seekable, dict, dict_size);
         } else {
-            const char* explicit_out_path = (!multiple_mode && optind + 1 < argc && current_arg &&
-                                             strcmp(current_arg, "-") != 0 && !to_stdout)
-                                                ? argv[start_optind + 1]
-                                                : NULL;
+            // -o takes precedence over a positional OUTPUT-FILE.
+            const char* explicit_out_path = NULL;
+            if (!multiple_mode && !to_stdout) {
+                if (output_path)
+                    explicit_out_path = output_path;
+                else if (optind + 1 < argc && current_arg && strcmp(current_arg, "-") != 0)
+                    explicit_out_path = argv[start_optind + 1];
+            }
 
             overall_ret |=
                 process_single_file(current_arg, explicit_out_path, mode, num_threads, keep_input,

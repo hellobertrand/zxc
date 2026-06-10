@@ -220,7 +220,7 @@ fi
 # 7. Version
 echo "Testing Version..."
 OUT_VER=$("$ZXC_BIN" -V)
-if [[ "$OUT_VER" == *"zxc"* ]]; then
+if [[ "$OUT_VER" == *"ZXC CLI"* && "$OUT_VER" =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
     log_pass "Version flag"
 else
     log_fail "Version flag failed"
@@ -893,18 +893,18 @@ fi
 # 25. Dictionary Tests (-D)
 echo "Testing Dictionary (-D)..."
 
-# 25.1 Train a dictionary using --train-dict
+# 25.1 Train a dictionary using --train
 echo "  Training dictionary from test data..."
 # Create a few sample files for training
 for i in 1 2 3 4 5; do
     cp "$TEST_FILE" "$TEST_DIR/sample_${i}.txt"
 done
 DICT_FILE="$TEST_DIR/test.zxd"
-"$ZXC_BIN" --train-dict "$DICT_FILE" "$TEST_DIR"/sample_*.txt 2>/dev/null
+"$ZXC_BIN" --train -o "$DICT_FILE" "$TEST_DIR"/sample_*.txt 2>/dev/null
 if [ ! -f "$DICT_FILE" ]; then
     log_fail "Dictionary training failed"
 fi
-log_pass "Dictionary trained via --train-dict"
+log_pass "Dictionary trained via --train"
 
 # 25.2 Round-trip with dictionary
 echo "  Testing dict round-trip..."
@@ -1001,7 +1001,7 @@ fi
 echo "  Testing train-to-directory naming..."
 AUTO_DIR="$TEST_DIR/auto"
 mkdir -p "$AUTO_DIR"
-"$ZXC_BIN" --train-dict "$AUTO_DIR/" "$TEST_DIR"/sample_*.txt 2>/dev/null
+"$ZXC_BIN" --train -o "$AUTO_DIR/" "$TEST_DIR"/sample_*.txt 2>/dev/null
 ZXD_NAME=$(ls "$AUTO_DIR" | grep -E '^dictionary_[0-9a-f]{8}\.zxd$' || true)
 if [ -n "$ZXD_NAME" ]; then
     log_pass "Train to directory names dict dictionary_<dict_id>.zxd ($ZXD_NAME)"
@@ -1027,6 +1027,43 @@ if cmp -s "$TEST_FILE" "$AUTO_DIR/payload.dec"; then
     log_pass "Decompress with -D succeeds"
 else
     log_fail "Decompress with -D failed to recreate original"
+fi
+
+# 26. unzxc Alias (argv[0]-based mode detection)
+echo "Testing unzxc alias..."
+
+# "unzxc" is a symlink to zxc that defaults to decompression (like unzstd /
+# gunzip). Create a local symlink to the binary under test and exercise it.
+# Symlinks are POSIX-only; skip gracefully where they are unsupported.
+ZXC_ABS=$(cd "$(dirname "$ZXC_BIN")" && pwd)/$(basename "$ZXC_BIN")
+UNZXC_BIN="$TEST_DIR/unzxc"
+
+if ln -sf "$ZXC_ABS" "$UNZXC_BIN" 2>/dev/null && [ -L "$UNZXC_BIN" ]; then
+    # A known archive to decode through the alias.
+    "$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/alias.zxc"
+
+    # 26.1 unzxc with no mode flag must decompress (equivalent to zxc -d).
+    if "$UNZXC_BIN" -c "$TEST_DIR/alias.zxc" > "$TEST_DIR/alias.dec" 2>/dev/null \
+       && cmp -s "$TEST_FILE" "$TEST_DIR/alias.dec"; then
+        log_pass "unzxc defaults to decompression"
+    else
+        log_fail "unzxc should decompress by default (like zxc -d)"
+    fi
+
+    # 26.2 An explicit -z on the unzxc-named binary overrides back to compression.
+    # If the override were broken, unzxc would try to *decode* the plaintext input
+    # and fail, so the round-trip below would not match.
+    set +e
+    "$UNZXC_BIN" -z -c "$TEST_FILE_ARG" > "$TEST_DIR/alias_z.zxc" 2>/dev/null
+    "$ZXC_BIN" -d -c "$TEST_DIR/alias_z.zxc" > "$TEST_DIR/alias_z.dec" 2>/dev/null
+    set -e
+    if cmp -s "$TEST_FILE" "$TEST_DIR/alias_z.dec"; then
+        log_pass "unzxc -z overrides back to compression"
+    else
+        log_fail "unzxc -z should compress (explicit flag must win)"
+    fi
+else
+    echo "  [SKIP] symlinks unsupported here, skipping unzxc alias test"
 fi
 
 echo "All tests passed!"

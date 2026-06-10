@@ -594,11 +594,12 @@ offset `0x00`, never by extension. This is a tooling convention, not a format
 requirement; it does not affect bytes on the wire. The reference CLI applies it
 as follows:
 
-- `zxc --train-dict <dir>/` writes the trained dictionary as
+- `zxc --train -o <dir>/ <files>` writes the trained dictionary as
   `<dir>/dictionary_<dict_id>.zxd`, where `<dict_id>` is the lowercase 8-digit
   hex of the dictionary id (e.g. `dictionary_bc46eec1.zxd`). Embedding the id
   keeps the name unique per dictionary and easy to match against the `Dict ID`
-  reported by `zxc -l`.
+  reported by `zxc -l`. With no `-o`, the file is written to the current
+  directory; with `-o <file>` it is written there verbatim.
 - On **decompression**, a dictionary is **not** auto-located: an archive that
   was compressed with a dictionary must be decompressed by passing that
   dictionary explicitly with `-D`. Without it, decompression fails with

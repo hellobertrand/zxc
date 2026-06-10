@@ -1,10 +1,12 @@
 # zxc(1)
 
 ## NAME
-**zxc** - High-performance asymmetric lossless compression
+**zxc**, **unzxc** - Compress or decompress .zxc files
 
 ## SYNOPSIS
 **zxc** [*OPTIONS*] [*INPUT-FILE*] [*OUTPUT-FILE*]
+
+**unzxc** is equivalent to **zxc -d**.
 
 ## DESCRIPTION
 **zxc** is a command-line interface for the ZXC compression library, a high-performance lossless compression algorithm optimized for maximum decompression throughput.
@@ -21,13 +23,13 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : Compress FILE. This is the default mode if no mode is specified.
 
 **-d**, **--decompress**
-: Decompress FILE.
+: Decompress FILE. This is the default mode when **zxc** is invoked under the name **unzxc** (typically an installed symlink). An explicit mode flag still takes precedence.
 
 **-l**, **--list**
 : List archive information, including compressed size, uncompressed size, compression ratio, checksum method, and dictionary ID (if any). Also accepts a `.zxd` dictionary file, in which case it prints the dictionary's `dict_id`.
 
-**--train-dict** *PATH*
-: Train a dictionary from the input files given as training samples and write it to *PATH*. If *PATH* is a directory (or ends with a path separator), the dictionary is saved inside it as `dictionary_<dict_id>.zxd`; otherwise *PATH* is used verbatim. See **DICTIONARIES**.
+**--train**
+: Train a dictionary from the input *FILE*s given as training samples. The output path is set with **-o** (see **--output**); when **-o** is omitted, the dictionary is written to `dictionary_<dict_id>.zxd` in the current directory. See **DICTIONARIES**.
 
 **-t**, **--test**
 : Test the integrity of a compressed FILE. It decodes the file and verifies its checksum (if present) without writing any output.
@@ -65,11 +67,14 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **-D**, **--dict** *FILE*
 : Use a pre-trained dictionary (`.zxd`) for compression or decompression. On compression, the archive records the dictionary's `dict_id` in its header. On decompression, **-D** is **required** for any archive that was compressed with a dictionary — there is no auto-lookup; without it, decompression fails with a dictionary-required error (see **DICTIONARIES**).
 
+**-o**, **--output** *FILE*
+: Write output to *FILE*. For compression/decompression this overrides the positional *OUTPUT-FILE* (single-file mode only); when omitted the output name is derived from the input. For **--train** it sets the dictionary path: if *FILE* is a directory (or ends with a path separator) the dictionary is saved inside it as `dictionary_<dict_id>.zxd`, otherwise *FILE* is used verbatim; when omitted the dictionary is written to `dictionary_<dict_id>.zxd` in the current directory.
+
 **-S**, **--seekable**
 : Append a seek table to the archive during compression. This transforms the file into a random-access format (Seekable Archive), allowing the decoder to instantly locate and decompress specific blocks in `O(1)` time without reading the entire file. Ideal for compressed filesystems, game assets, and log analysis.
 
 **-k**, **--keep**
-: Keep the input file after compression or decompression. (Currently, the input file is preserved by default, but this flag ensures compatibility with future changes).
+: Keep the input file after an in-place compression or decompression. By default the input is removed **only** when its output name is auto-derived (e.g. `file` → `file.zxc`). When the output is named explicitly — with **-o** or a positional *OUTPUT-FILE* — the input is always kept, so this flag is only needed for the in-place case.
 
 **-f**, **--force**
 : Force overwrite of the *OUTPUT-FILE* if it already exists.
@@ -100,7 +105,7 @@ For workloads compressed in small blocks (4K–128K), a pre-trained dictionary c
 
 Dictionaries are external `.zxd` files referenced from the archive header by a 32-bit `dict_id` (a hash of the dictionary content). The `.zxd` extension is cosmetic; a `.zxd` file is identified by its magic word, not its name.
 
-When **--train-dict** targets a directory, **zxc** names the file `dictionary_<dict_id>.zxd` (the `dict_id` is the lowercase 8-digit hex reported by `zxc -l`). On decompression the dictionary is **not** auto-located: an archive compressed with a dictionary must be decompressed by supplying that dictionary with **-D**, otherwise decompression fails with a dictionary-required error.
+When **--train**'s **-o** targets a directory (or is omitted, defaulting to the current directory), **zxc** names the file `dictionary_<dict_id>.zxd` (the `dict_id` is the lowercase 8-digit hex reported by `zxc -l`). On decompression the dictionary is **not** auto-located: an archive compressed with a dictionary must be decompressed by supplying that dictionary with **-D**, otherwise decompression fails with a dictionary-required error.
 
 If no matching dictionary can be found (or supplied), decompression fails with a dictionary-required error rather than producing corrupt output.
 
@@ -114,6 +119,9 @@ If no matching dictionary can be found (or supplied), decompression fails with a
 
 **Decompress a file:**
   zxc -d data.txt.zxc
+
+**Decompress a file using the unzxc alias:**
+  unzxc data.txt.zxc
 
 **Compress multiple files independently:**
   zxc -m file1.txt file2.txt file3.txt
@@ -140,7 +148,7 @@ If no matching dictionary can be found (or supplied), decompression fails with a
   zxc -b 10 data.txt
 
 **Train a dictionary into a directory (saved as `dictionary_<dict_id>.zxd`):**
-  zxc --train-dict dicts/ samples/*.json
+  zxc --train -o dicts/ samples/*.json
 
 **Compress with a dictionary using small blocks:**
   zxc -B 4K -D dicts/dictionary_bc46eec1.zxd input.json
@@ -148,8 +156,11 @@ If no matching dictionary can be found (or supplied), decompression fails with a
 **Decompress (the dictionary is required, pass it with -D):**
   zxc -d -D dicts/dictionary_bc46eec1.zxd input.json.zxc
 
+## BUGS
+Report bugs at <https://github.com/hellobertrand/zxc/issues>.
+
 ## AUTHORS
-Written by Bertrand Lebonnois & contributors.
+Bertrand Lebonnois
 
 ## LICENSE
 BSD 3-Clause License.
