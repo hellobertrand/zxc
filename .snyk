@@ -1,4 +1,13 @@
 # Snyk (https://snyk.io) policy file
+ignore:
+  # CWE-23 false positive — CLI tool, path is user intent
+  cpp/PT:
+    - 'src/cli/main.c':
+        reason: >-
+          CLI arg path traversal is intended behavior; input is canonicalized
+          (realpath/_fullpath), restricted to regular files, and bounded to the
+          invoking user's own privileges. CWE-23.
+        expires: 2027-06-09T00:00:00.000Z
 exclude:
   code:
     - tests/**

@@ -189,6 +189,11 @@ static double zxc_now(void) {
  * @param[out] resolved_buffer Buffer to store resolved path (needs sufficient size).
  * @param[in] buffer_size Size of the resolved_buffer.
  * @return 0 on success, -1 on error.
+ *
+ * Security note (CWE-23): paths come from the CLI at the user's own privileges,
+ * not from archive content, so traversal is intended (suppressed in .snyk).
+ * True only while the format stores no path; an archive mode restoring embedded paths
+ * would be a real zip slip risk: re-evaluate the ignore then.
  */
 static int zxc_validate_input_path(const char* path, char* resolved_buffer, size_t buffer_size) {
 #ifdef _WIN32
@@ -917,8 +922,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         zxc_log(
             "Refusing to write compressed data to terminal.\n"
             "For help, type: zxc -h\n");
-        if (f_in) fclose(f_in);
-        if (f_out) fclose(f_out);
+        if (!use_stdin) fclose(f_in);
         return 1;
     }
 
@@ -1023,7 +1027,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     else
         setvbuf(stdin, NULL, _IONBF, 0);
 
-    if (f_out && f_out != stdout)
+    if (created_out_file)
         fclose(f_out);
     else if (use_stdout) {
         fflush(stdout);
@@ -1337,6 +1341,14 @@ int main(int argc, char** argv) {
         if (rc != ZXC_OK) {
             fprintf(stderr, "Error: invalid dictionary '%s': %s\n", dict_path,
                     zxc_error_name(rc));
+            free(zxd_buf);
+            return 1;
+        }
+        /* content_size is a file-derived length; zxc_dict_load already
+         * validates it, but re-check the untrusted size at the alloc/copy
+         * boundary so the bound governing memcpy is explicit at the sink. */
+        if (content_size == 0 || content_size > ZXC_DICT_SIZE_MAX) {
+            fprintf(stderr, "Error: invalid dictionary '%s'\n", dict_path);
             free(zxd_buf);
             return 1;
         }

@@ -88,7 +88,7 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
     if (UNLIKELY(buf_size < ZXC_DICT_HEADER_SIZE + content_size)) return ZXC_ERROR_SRC_TOO_SMALL;
 
     uint8_t temp[ZXC_DICT_HEADER_SIZE];
-    ZXC_MEMCPY(temp, src, ZXC_DICT_HEADER_SIZE);
+    ZXC_MEMCPY(temp, src, sizeof(temp));
     zxc_store_le32(temp + 12, 0); /* reserved (0x0C) + CRC16 (0x0E), zeroed before CRC */
     const uint16_t expected_crc = zxc_hash16(temp);
     if (UNLIKELY(zxc_le16(src + 14) != expected_crc)) return ZXC_ERROR_BAD_HEADER;
