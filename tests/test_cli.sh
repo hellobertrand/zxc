@@ -220,7 +220,7 @@ fi
 # 7. Version
 echo "Testing Version..."
 OUT_VER=$("$ZXC_BIN" -V)
-if [[ "$OUT_VER" == *"zxc"* ]]; then
+if [[ "$OUT_VER" == *"ZXC CLI"* && "$OUT_VER" =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
     log_pass "Version flag"
 else
     log_fail "Version flag failed"
