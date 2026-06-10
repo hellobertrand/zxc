@@ -189,6 +189,11 @@ static double zxc_now(void) {
  * @param[out] resolved_buffer Buffer to store resolved path (needs sufficient size).
  * @param[in] buffer_size Size of the resolved_buffer.
  * @return 0 on success, -1 on error.
+ *
+ * Security note (CWE-23): paths come from the CLI at the user's own privileges,
+ * not from archive content, so traversal is intended (suppressed in .snyk).
+ * True only while the format stores no path; an archive mode restoring embedded paths
+ * would be a real zip slip risk: re-evaluate the ignore then.
  */
 static int zxc_validate_input_path(const char* path, char* resolved_buffer, size_t buffer_size) {
 #ifdef _WIN32
