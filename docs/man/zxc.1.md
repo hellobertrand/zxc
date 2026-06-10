@@ -74,7 +74,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : Append a seek table to the archive during compression. This transforms the file into a random-access format (Seekable Archive), allowing the decoder to instantly locate and decompress specific blocks in `O(1)` time without reading the entire file. Ideal for compressed filesystems, game assets, and log analysis.
 
 **-k**, **--keep**
-: Keep the input file after compression or decompression. (Currently, the input file is preserved by default, but this flag ensures compatibility with future changes).
+: Keep the input file after an in-place compression or decompression. By default the input is removed **only** when its output name is auto-derived (e.g. `file` → `file.zxc`). When the output is named explicitly — with **-o** or a positional *OUTPUT-FILE* — the input is always kept, so this flag is only needed for the in-place case.
 
 **-f**, **--force**
 : Force overwrite of the *OUTPUT-FILE* if it already exists.

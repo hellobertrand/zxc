@@ -1034,7 +1034,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         } else {
             zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
         }
-        if (!use_stdin && !use_stdout && !keep_input && mode != MODE_INTEGRITY)
+        if (!use_stdin && !use_stdout && !keep_input && !out_path_override &&
+            mode != MODE_INTEGRITY)
             unlink(resolved_in_path);
     } else {
         if (mode == MODE_INTEGRITY) {
