@@ -900,7 +900,7 @@ for i in 1 2 3 4 5; do
     cp "$TEST_FILE" "$TEST_DIR/sample_${i}.txt"
 done
 DICT_FILE="$TEST_DIR/test.zxd"
-"$ZXC_BIN" --train "$DICT_FILE" "$TEST_DIR"/sample_*.txt 2>/dev/null
+"$ZXC_BIN" --train -o "$DICT_FILE" "$TEST_DIR"/sample_*.txt 2>/dev/null
 if [ ! -f "$DICT_FILE" ]; then
     log_fail "Dictionary training failed"
 fi
@@ -1001,7 +1001,7 @@ fi
 echo "  Testing train-to-directory naming..."
 AUTO_DIR="$TEST_DIR/auto"
 mkdir -p "$AUTO_DIR"
-"$ZXC_BIN" --train "$AUTO_DIR/" "$TEST_DIR"/sample_*.txt 2>/dev/null
+"$ZXC_BIN" --train -o "$AUTO_DIR/" "$TEST_DIR"/sample_*.txt 2>/dev/null
 ZXD_NAME=$(ls "$AUTO_DIR" | grep -E '^dictionary_[0-9a-f]{8}\.zxd$' || true)
 if [ -n "$ZXD_NAME" ]; then
     log_pass "Train to directory names dict dictionary_<dict_id>.zxd ($ZXD_NAME)"

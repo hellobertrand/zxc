@@ -28,8 +28,8 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **-l**, **--list**
 : List archive information, including compressed size, uncompressed size, compression ratio, checksum method, and dictionary ID (if any). Also accepts a `.zxd` dictionary file, in which case it prints the dictionary's `dict_id`.
 
-**--train** *PATH*
-: Train a dictionary from the input files given as training samples and write it to *PATH*. If *PATH* is a directory (or ends with a path separator), the dictionary is saved inside it as `dictionary_<dict_id>.zxd`; otherwise *PATH* is used verbatim. See **DICTIONARIES**.
+**--train**
+: Train a dictionary from the input *FILE*s given as training samples. The output path is set with **-o** (see **--output**); when **-o** is omitted, the dictionary is written to `dictionary_<dict_id>.zxd` in the current directory. See **DICTIONARIES**.
 
 **-t**, **--test**
 : Test the integrity of a compressed FILE. It decodes the file and verifies its checksum (if present) without writing any output.
@@ -67,6 +67,9 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **-D**, **--dict** *FILE*
 : Use a pre-trained dictionary (`.zxd`) for compression or decompression. On compression, the archive records the dictionary's `dict_id` in its header. On decompression, **-D** is **required** for any archive that was compressed with a dictionary — there is no auto-lookup; without it, decompression fails with a dictionary-required error (see **DICTIONARIES**).
 
+**-o**, **--output** *FILE*
+: Write output to *FILE*. For compression/decompression this overrides the positional *OUTPUT-FILE* (single-file mode only); when omitted the output name is derived from the input. For **--train** it sets the dictionary path: if *FILE* is a directory (or ends with a path separator) the dictionary is saved inside it as `dictionary_<dict_id>.zxd`, otherwise *FILE* is used verbatim; when omitted the dictionary is written to `dictionary_<dict_id>.zxd` in the current directory.
+
 **-S**, **--seekable**
 : Append a seek table to the archive during compression. This transforms the file into a random-access format (Seekable Archive), allowing the decoder to instantly locate and decompress specific blocks in `O(1)` time without reading the entire file. Ideal for compressed filesystems, game assets, and log analysis.
 
@@ -102,7 +105,7 @@ For workloads compressed in small blocks (4K–128K), a pre-trained dictionary c
 
 Dictionaries are external `.zxd` files referenced from the archive header by a 32-bit `dict_id` (a hash of the dictionary content). The `.zxd` extension is cosmetic; a `.zxd` file is identified by its magic word, not its name.
 
-When **--train** targets a directory, **zxc** names the file `dictionary_<dict_id>.zxd` (the `dict_id` is the lowercase 8-digit hex reported by `zxc -l`). On decompression the dictionary is **not** auto-located: an archive compressed with a dictionary must be decompressed by supplying that dictionary with **-D**, otherwise decompression fails with a dictionary-required error.
+When **--train**'s **-o** targets a directory (or is omitted, defaulting to the current directory), **zxc** names the file `dictionary_<dict_id>.zxd` (the `dict_id` is the lowercase 8-digit hex reported by `zxc -l`). On decompression the dictionary is **not** auto-located: an archive compressed with a dictionary must be decompressed by supplying that dictionary with **-D**, otherwise decompression fails with a dictionary-required error.
 
 If no matching dictionary can be found (or supplied), decompression fails with a dictionary-required error rather than producing corrupt output.
 
@@ -145,7 +148,7 @@ If no matching dictionary can be found (or supplied), decompression fails with a
   zxc -b 10 data.txt
 
 **Train a dictionary into a directory (saved as `dictionary_<dict_id>.zxd`):**
-  zxc --train dicts/ samples/*.json
+  zxc --train -o dicts/ samples/*.json
 
 **Compress with a dictionary using small blocks:**
   zxc -B 4K -D dicts/dictionary_bc46eec1.zxd input.json

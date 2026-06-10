@@ -457,8 +457,8 @@ void print_help(const char* app) {
         "  -l, --list        List archive or dictionary info\n"
         "  -t, --test        Test compressed FILE integrity\n"
         "  -b, --bench [N]   Benchmark in-memory (N=seconds, default 5)\n"
-        "  --train PATH      Train a dictionary from input files. PATH may be a\n"
-        "                    directory (saved as dictionary_<dict_id>.zxd inside it) or a file\n\n"
+        "  --train           Train a dictionary from input FILEs (training samples).\n"
+        "                    Output via -o (default: ./dictionary_<dict_id>.zxd)\n\n"
         "Batch Processing:\n"
         "  -m, --multiple    Multiple input files\n"
         "  -r, --recursive   Operate recursively on directories\n\n"
@@ -474,6 +474,8 @@ void print_help(const char* app) {
         "  -D, --dict FILE   Use pre-trained dictionary (.zxd). Required to decompress\n"
         "                    an archive that was compressed with a dictionary\n"
         "  -S, --seekable    Append seek table for random-access decompression\n"
+        "  -o, --output FILE Write output to FILE (else derived from input;\n"
+        "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
         "  -k, --keep        Keep input file\n"
         "  -f, --force       Force overwrite\n"
         "  -c, --stdout      Write to stdout\n"
@@ -1097,9 +1099,10 @@ int main(int argc, char** argv) {
     size_t block_size = 0;
     int seekable = 0;
     const char* dict_path = NULL;
-    const char* train_dict_path = NULL;
+    const char* output_path = NULL;
 
-    static const struct option long_options[] = {{"train", required_argument, 0, OPT_TRAIN_DICT},
+    static const struct option long_options[] = {{"train", no_argument, 0, OPT_TRAIN_DICT},
+                                                 {"output", required_argument, 0, 'o'},
                                                  {"dict", required_argument, 0, 'D'},
                                                  {"compress", no_argument, 0, 'z'},
                                                  {"decompress", no_argument, 0, 'd'},
@@ -1126,7 +1129,7 @@ int main(int argc, char** argv) {
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
-    while ((opt = getopt_long(argc, argv, "123456b::B:cCdD:fhjklmrNqST:tvVz", long_options, NULL)) !=
+    while ((opt = getopt_long(argc, argv, "123456b::B:cCdD:fho:jklmrNqST:tvVz", long_options, NULL)) !=
            -1) {
         switch (opt) {
             case 'z':
@@ -1215,7 +1218,9 @@ int main(int argc, char** argv) {
                 break;
             case OPT_TRAIN_DICT:
                 mode = MODE_TRAIN_DICT;
-                train_dict_path = optarg;
+                break;
+            case 'o':
+                output_path = optarg;
                 break;
             case 'r':
                 recursive_mode = 1;
@@ -1441,25 +1446,30 @@ int main(int argc, char** argv) {
         }
 
         /*
-         * Resolve the output path. If train_dict_path names a directory (or ends
-         * with a separator), use the content-addressable name {dict_id:08x}.zxd
-         * inside it; otherwise write to train_dict_path verbatim. The id must be
+         * Resolve the output path (from -o, optional). With no -o, write the
+         * content-addressable name dictionary_{dict_id:08x}.zxd in the current
+         * directory. If -o names a directory (or ends with a separator), use that
+         * name inside it; otherwise write to the -o path verbatim. The id must be
          * computed before opening the file so it can name it.
          */
         const uint32_t trained_id = zxc_dict_get_id(zxd, (size_t)zxd_sz);
         char final_path[4096];
-        const size_t tdp_len = strlen(train_dict_path);
-        const int is_dir_target =
-            zxc_is_directory(train_dict_path) ||
-            (tdp_len > 0 && (train_dict_path[tdp_len - 1] == '/' ||
-                             train_dict_path[tdp_len - 1] == '\\'));
-        if (is_dir_target) {
-            const int has_sep = tdp_len > 0 && (train_dict_path[tdp_len - 1] == '/' ||
-                                                train_dict_path[tdp_len - 1] == '\\');
-            snprintf(final_path, sizeof(final_path), "%s%sdictionary_%08x.zxd", train_dict_path,
-                     has_sep ? "" : "/", trained_id);
+        if (!output_path) {
+            snprintf(final_path, sizeof(final_path), "dictionary_%08x.zxd", trained_id);
         } else {
-            snprintf(final_path, sizeof(final_path), "%s", train_dict_path);
+            const size_t op_len = strlen(output_path);
+            const int is_dir_target =
+                zxc_is_directory(output_path) ||
+                (op_len > 0 &&
+                 (output_path[op_len - 1] == '/' || output_path[op_len - 1] == '\\'));
+            if (is_dir_target) {
+                const int has_sep = op_len > 0 && (output_path[op_len - 1] == '/' ||
+                                                   output_path[op_len - 1] == '\\');
+                snprintf(final_path, sizeof(final_path), "%s%sdictionary_%08x.zxd", output_path,
+                         has_sep ? "" : "/", trained_id);
+            } else {
+                snprintf(final_path, sizeof(final_path), "%s", output_path);
+            }
         }
 
         FILE* out;
@@ -1765,10 +1775,13 @@ int main(int argc, char** argv) {
                                              to_stdout, checksum, level, block_size, json_output,
                                              seekable, dict, dict_size);
         } else {
-            const char* explicit_out_path = (!multiple_mode && optind + 1 < argc && current_arg &&
-                                             strcmp(current_arg, "-") != 0 && !to_stdout)
-                                                ? argv[start_optind + 1]
-                                                : NULL;
+            // -o takes precedence over a positional OUTPUT-FILE (single-file mode only).
+            const char* explicit_out_path =
+                (output_path && !multiple_mode && !to_stdout) ? output_path
+                : (!multiple_mode && optind + 1 < argc && current_arg &&
+                   strcmp(current_arg, "-") != 0 && !to_stdout)
+                    ? argv[start_optind + 1]
+                    : NULL;
 
             overall_ret |=
                 process_single_file(current_arg, explicit_out_path, mode, num_threads, keep_input,
