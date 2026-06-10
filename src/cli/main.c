@@ -28,24 +28,6 @@
 
 #define ZXC_STDIO_BUFFER_SIZE (1024 * 1024)
 
-#if defined(_WIN32)
-#define ZXC_OS "windows"
-#elif defined(__APPLE__)
-#define ZXC_OS "darwin"
-#elif defined(__linux__)
-#define ZXC_OS "linux"
-#else
-#define ZXC_OS "unknown"
-#endif
-
-#if defined(__x86_64__) || defined(_M_AMD64)
-#define ZXC_ARCH "x86_64"
-#elif defined(__aarch64__) || defined(_M_ARM64)
-#define ZXC_ARCH "arm64"
-#else
-#define ZXC_ARCH "unknown"
-#endif
-
 #ifdef _WIN32
 // Windows Implementation
 #include <direct.h>
@@ -166,7 +148,6 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -502,19 +483,8 @@ void print_help(const char* app) {
 }
 
 void print_version(void) {
-    char sys_info[256];
-#ifdef _WIN32
-    snprintf(sys_info, sizeof(sys_info), "%s-%s", ZXC_ARCH, ZXC_OS);
-#else
-    struct utsname buffer;
-    if (uname(&buffer) == 0)
-        snprintf(sys_info, sizeof(sys_info), "%s-%s-%s", ZXC_ARCH, ZXC_OS, buffer.release);
-    else
-        snprintf(sys_info, sizeof(sys_info), "%s-%s", ZXC_ARCH, ZXC_OS);
-
-#endif
-    printf("zxc v%s (%s) by Bertrand Lebonnois\nBSD 3-Clause License\n", ZXC_LIB_VERSION_STR,
-           sys_info);
+    printf("ZXC CLI (%zu-bit) v%s, by Bertrand Lebonnois\nBSD 3-Clause License\n",
+           sizeof(void*) * CHAR_BIT, ZXC_LIB_VERSION_STR);
 }
 
 /**
