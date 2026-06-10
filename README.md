@@ -469,12 +469,16 @@ For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dict
 ### Training a dictionary
 
 ```bash
-# Train a dictionary from a corpus of similar files
-zxc --train corpus.zxd samples/*.json
+# Train a dictionary from a corpus of similar files.
+# Without -o the dictionary is written as ./dictionary_<dict_id>.zxd.
+zxc --train samples/*.json
 
-# Or pass a directory: the dictionary is saved as dictionary_<dict_id>.zxd inside it
-# (the dict_id embeds in the name), e.g. dicts/dictionary_bc46eec1.zxd
-zxc --train dicts/ samples/*.json
+# Choose the output file explicitly with -o:
+zxc --train -o corpus.zxd samples/*.json
+
+# Or point -o at a directory: the dictionary is saved as dictionary_<dict_id>.zxd
+# inside it (the dict_id embeds in the name), e.g. dicts/dictionary_bc46eec1.zxd
+zxc --train -o dicts/ samples/*.json
 ```
 
 ```c
@@ -539,7 +543,7 @@ zxc input_file
 # Decompression
 zxc -d compressed_file output_file
 
-# When installed, "unzxc" is an alias for "zxc -d" (like unzstd / gunzip)
+# When installed, "unzxc" is an alias for "zxc -d"
 unzxc compressed_file output_file
 
 # Benchmark Mode (Testing speed on your machine)
