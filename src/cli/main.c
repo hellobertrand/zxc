@@ -917,8 +917,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         zxc_log(
             "Refusing to write compressed data to terminal.\n"
             "For help, type: zxc -h\n");
-        if (f_in) fclose(f_in);
-        if (f_out) fclose(f_out);
+        if (!use_stdin) fclose(f_in);
         return 1;
     }
 
