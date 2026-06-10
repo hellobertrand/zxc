@@ -1023,7 +1023,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     else
         setvbuf(stdin, NULL, _IONBF, 0);
 
-    if (f_out && f_out != stdout)
+    if (created_out_file)
         fclose(f_out);
     else if (use_stdout) {
         fflush(stdout);
