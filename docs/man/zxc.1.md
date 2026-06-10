@@ -1,7 +1,7 @@
 # zxc(1)
 
 ## NAME
-**zxc** - zxc, unzxc - Compress or decompress .zxc files
+**zxc**, **unzxc** - Compress or decompress .zxc files
 
 ## SYNOPSIS
 **zxc** [*OPTIONS*] [*INPUT-FILE*] [*OUTPUT-FILE*]
