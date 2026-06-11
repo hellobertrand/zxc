@@ -112,7 +112,8 @@ int zxc_huf_encode_section_default(const uint8_t* RESTRICT literals, const size_
                                    const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
                                    const size_t dst_cap);
 int zxc_huf_decode_section_default(const uint8_t* RESTRICT payload, const size_t payload_size,
-                                   uint8_t* RESTRICT dst, const size_t n_literals);
+                                   uint8_t* RESTRICT dst, const size_t n_literals,
+                                   zxc_huf_dec_cache_t* const cache);
 
 #if defined(__x86_64__) || defined(_M_X64)
 int zxc_compress_chunk_wrapper_avx2(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
@@ -500,8 +501,9 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_lite
 }
 
 int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
-                           uint8_t* RESTRICT dst, const size_t n_literals) {
-    return zxc_huf_decode_section_default(payload, payload_size, dst, n_literals);
+                           uint8_t* RESTRICT dst, const size_t n_literals,
+                           zxc_huf_dec_cache_t* const cache) {
+    return zxc_huf_decode_section_default(payload, payload_size, dst, n_literals, cache);
 }
 
 /*

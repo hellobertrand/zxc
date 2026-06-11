@@ -176,6 +176,11 @@ extern "C" {
  */
 #define ZXC_MEMSET(dst, val, n) __builtin_memset(dst, val, n)
 
+/** @def ZXC_MEMCMP
+ * @brief Optimized memory compare using compiler built-in.
+ */
+#define ZXC_MEMCMP(a, b, n) __builtin_memcmp(a, b, n)
+
 /** @def ZXC_ALIGN
  * @brief Specifies memory alignment for a variable or structure.
  * @param x Alignment boundary in bytes (must be a power of 2).
@@ -208,6 +213,7 @@ extern "C" {
 #pragma intrinsic(memcpy, memset)
 #define ZXC_MEMCPY(dst, src, n) memcpy(dst, src, n)
 #define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
+#define ZXC_MEMCMP(a, b, n) memcmp(a, b, n)
 
 /** @def ZXC_ALIGN
  * @brief Specifies memory alignment for a variable or structure (MSVC).
@@ -233,6 +239,7 @@ extern "C" {
 #define ZXC_PREFETCH_WRITE(ptr)
 #define ZXC_MEMCPY(dst, src, n) memcpy(dst, src, n)
 #define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
+#define ZXC_MEMCMP(a, b, n) memcmp(a, b, n)
 
 /** @def ZXC_ALWAYS_INLINE
  * @brief Forces a function to be inlined (fallback for non-GCC/Clang/MSVC compilers).
@@ -607,6 +614,42 @@ extern "C" {
  *         each iteration speculatively writes 2 bytes per stream and runs
  *         @c ZXC_HUF_BATCH iterations before re-checking the bound. */
 #define ZXC_HUF_SAFE_MARGIN ((size_t)(2 * ZXC_HUF_BATCH))
+
+/**
+ * @brief Multi-symbol decoder lookup table entry. Bit layout:
+ *   bits  0..7   sym1       - first decoded symbol
+ *   bits  8..15  sym2       - second decoded symbol (junk if n_extra == 0)
+ *   bits 16..19  len1       - bit length of sym1's code (1..8)
+ *   bits 20..23  len_total  - total bits consumed (1..11)
+ *   bit  24      n_extra    - 0 if 1 symbol, 1 if 2 symbols decoded
+ *
+ * Single-symbol path (tail) reads sym1 + len1; multi-symbol path (hot
+ * batched loop) reads sym1, sym2 (always written, possibly overwritten
+ * next iter), len_total, n_extra.
+ */
+typedef struct {
+    uint32_t entry;
+} zxc_huf_dec_entry_t;
+
+/**
+ * @brief Per-context cache of the last built Huffman decode table.
+ *
+ * The decode table is a pure function of the packed code-lengths header
+ * (@ref ZXC_HUF_LENGTHS_HEADER_SIZE bytes) that opens every Huffman literal
+ * section. When consecutive sections carry a byte-identical header (common on
+ * homogeneous data), the table rebuild can be skipped entirely. Carved from
+ * the decompression-context workspace; @c valid starts at 0 (workspace memory
+ * is not zeroed).
+ */
+typedef struct {
+    /** Cached decode table (see @ref ZXC_HUF_TABLE_SIZE). Cache-line aligned
+     *  like the stack table it replaces (the LUT is hammered every symbol). */
+    ZXC_ALIGN(ZXC_CACHE_LINE_SIZE) zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE];
+    /** Packed code-lengths header the cached table was built from. */
+    uint8_t lengths_hdr[ZXC_HUF_LENGTHS_HEADER_SIZE];
+    /** 1 when @c table/@c lengths_hdr hold a successfully built entry. */
+    uint32_t valid;
+} zxc_huf_dec_cache_t;
 
 /**
  * @brief Boundary package-merge work item.
@@ -1386,10 +1429,14 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_lite
  * @param[in]  payload_size Total payload length in bytes.
  * @param[out] dst          Destination buffer (must not alias @p payload).
  * @param[in]  n_literals   Expected number of decoded bytes.
+ * @param[in,out] cache     Optional decode-table cache (may be NULL): reused
+ *                          when the section's code-lengths header matches the
+ *                          cached one, refreshed otherwise.
  * @return `ZXC_OK` on success, negative `zxc_error_t` code on failure.
  */
 int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
-                           uint8_t* RESTRICT dst, const size_t n_literals);
+                           uint8_t* RESTRICT dst, const size_t n_literals,
+                           zxc_huf_dec_cache_t* const cache);
 
 /* ---------------------------------------------------------------------------
  * Compression / decompression context.
@@ -1436,21 +1483,23 @@ typedef struct {
     uint8_t* literals;       /**< Buffer for literal bytes. */
 
     /* Cold zone: configuration / scratch / resizeable. */
-    uint8_t* lit_buffer;    /**< Scratch buffer for literals (RLE / Huffman). */
-    size_t lit_buffer_cap;  /**< Current capacity of the scratch buffer. */
-    uint8_t* work_buf;      /**< Padded scratch buffer for buffer-API decompression. */
-    size_t work_buf_cap;    /**< Capacity of the work buffer. */
-    uint8_t* opt_scratch;   /**< Optimal-parser DP scratch (level >= 6 only,
-                                 lazy-allocated, packs dp/parent_len/parent_off/actions).
-                                 Also reused as transient scratch for the
-                                 length-limited Huffman code-length builder. */
-    size_t opt_scratch_cap; /**< Current capacity of opt_scratch in bytes. */
-    int checksum_enabled;   /**< 1 if checksum calculation/verification is enabled. */
-    int compression_level;  /**< Compression level. */
-    size_t dict_size;       /**< Dictionary prefill size (0 = no dictionary). */
-    uint8_t* dict_buffer;   /**< [dict | data] concat scratch carved from memory_block
-                                 when dict_size > 0 (NULL otherwise). */
-    size_t dict_buffer_cap; /**< Capacity of dict_buffer in bytes (0 = none). */
+    uint8_t* lit_buffer;                /**< Scratch buffer for literals (RLE / Huffman). */
+    size_t lit_buffer_cap;              /**< Current capacity of the scratch buffer. */
+    zxc_huf_dec_cache_t* huf_dec_cache; /**< Huffman decode-table cache
+                                 (decompress mode only, NULL otherwise). */
+    uint8_t* work_buf;                  /**< Padded scratch buffer for buffer-API decompression. */
+    size_t work_buf_cap;                /**< Capacity of the work buffer. */
+    uint8_t* opt_scratch;               /**< Optimal-parser DP scratch (level >= 6 only,
+                                             lazy-allocated, packs dp/parent_len/parent_off/actions).
+                                             Also reused as transient scratch for the
+                                             length-limited Huffman code-length builder. */
+    size_t opt_scratch_cap;             /**< Current capacity of opt_scratch in bytes. */
+    int checksum_enabled;               /**< 1 if checksum calculation/verification is enabled. */
+    int compression_level;              /**< Compression level. */
+    size_t dict_size;                   /**< Dictionary prefill size (0 = no dictionary). */
+    uint8_t* dict_buffer;               /**< [dict | data] concat scratch carved from memory_block
+                                             when dict_size > 0 (NULL otherwise). */
+    size_t dict_buffer_cap;             /**< Capacity of dict_buffer in bytes (0 = none). */
 
     /* Block-size derived parameters (computed once at init). */
     size_t chunk_size;    /**< Effective block size in bytes. */

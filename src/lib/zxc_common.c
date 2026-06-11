@@ -66,6 +66,7 @@ typedef struct {
     /* mode == 0 (decompress) */
     size_t off_work;
     size_t off_lit_dctx;
+    size_t off_huf_cache;
     /* mode == 1 (compress) */
     size_t off_hash_pos;
     size_t off_hash_tags;
@@ -101,6 +102,10 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         layout.total += ZXC_ALIGN_CL(sz_work);
         layout.off_lit_dctx = layout.total;
         layout.total += ZXC_ALIGN_CL(sz_lit);
+        /* Huffman decode-table cache: skips the per-section table rebuild
+         * when consecutive blocks share an identical code-lengths header. */
+        layout.off_huf_cache = layout.total;
+        layout.total += ZXC_ALIGN_CL(sizeof(zxc_huf_dec_cache_t));
     } else {
         /* Compress: 6 partitions + optional opt_scratch at level >= ZXC_LEVEL_DENSITY. */
         const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
@@ -203,6 +208,10 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
         ctx->work_buf_cap = chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
         ctx->lit_buffer = mem + layout.off_lit_dctx;
         ctx->lit_buffer_cap = chunk_size + ZXC_PAD_SIZE;
+        /* The workspace is caller-supplied on the static path and never
+         * zeroed: the cache must be marked empty explicitly. */
+        ctx->huf_dec_cache = (zxc_huf_dec_cache_t*)(mem + layout.off_huf_cache);
+        ctx->huf_dec_cache->valid = 0;
         return ZXC_OK;
     }
 
@@ -275,6 +284,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     }
 
     ctx->lit_buffer = NULL;
+    ctx->huf_dec_cache = NULL;
     ctx->hash_table = NULL;
     ctx->hash_tags = NULL;
     ctx->chain_table = NULL;

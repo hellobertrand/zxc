@@ -77,7 +77,7 @@ static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t
         return 0;
     }
 
-    const int rc = zxc_huf_decode_section(enc, (size_t)written, dec, n);
+    const int rc = zxc_huf_decode_section(enc, (size_t)written, dec, n, NULL);
     if (rc != ZXC_OK) {
         free(enc);
         free(dec);

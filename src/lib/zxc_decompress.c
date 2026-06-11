@@ -366,8 +366,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             /* lit_buffer is pre-allocated to chunk_size + ZXC_PAD_SIZE by
              * zxc_cctx_init (mode == 0). */
             if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) return ZXC_ERROR_CORRUPT_DATA;
-            const int rc =
-                zxc_huf_decode_section(p_curr, lit_stream_size, ctx->lit_buffer, required_size);
+            const int rc = zxc_huf_decode_section(p_curr, lit_stream_size, ctx->lit_buffer,
+                                                  required_size, ctx->huf_dec_cache);
             if (UNLIKELY(rc != ZXC_OK)) return rc;
             l_ptr = ctx->lit_buffer;
             l_end = ctx->lit_buffer + required_size;

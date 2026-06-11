@@ -39,20 +39,10 @@
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
-/* 2048-entry multi-symbol decoder lookup table entry. Bit layout:
- *   bits  0..7   sym1       - first decoded symbol
- *   bits  8..15  sym2       - second decoded symbol (junk if n_extra == 0)
- *   bits 16..19  len1       - bit length of sym1's code (1..8)
- *   bits 20..23  len_total  - total bits consumed (1..11)
- *   bit  24      n_extra    - 0 if 1 symbol, 1 if 2 symbols decoded
- *
- * Single-symbol path (tail) reads sym1 + len1; multi-symbol path (hot
- * batched loop) reads sym1, sym2 (always written, possibly overwritten
- * next iter), len_total, n_extra. */
-typedef struct {
-    uint32_t entry;
-} zxc_huf_dec_entry_t;
-
+/* The 2048-entry multi-symbol decoder lookup table entry type
+ * (zxc_huf_dec_entry_t) lives in zxc_internal.h so the per-context decode
+ * table cache (zxc_huf_dec_cache_t) can embed the table. Bit layout recap:
+ * sym1(0..7) | sym2(8..15) | len1(16..19) | len_total(20..23) | n_extra(24). */
 #define ZXC_HUF_ENTRY(sym1, sym2, len1, len_total, n_extra)                  \
     ((uint32_t)(sym1) | ((uint32_t)(sym2) << 8) | ((uint32_t)(len1) << 16) | \
      ((uint32_t)(len_total) << 20) | ((uint32_t)(n_extra) << 24))
@@ -668,25 +658,39 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
  * @copydoc zxc_huf_decode_section
  */
 int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
-                           uint8_t* RESTRICT dst, const size_t n_literals) {
+                           uint8_t* RESTRICT dst, const size_t n_literals,
+                           zxc_huf_dec_cache_t* const cache) {
     if (UNLIKELY(payload_size < ZXC_HUF_HEADER_SIZE || n_literals == 0))
         return ZXC_ERROR_CORRUPT_DATA;
 
-    /* 1. Parse length header. */
-    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-    {
-        const int rc = unpack_lengths_header(payload, code_len);
-        if (UNLIKELY(rc != ZXC_OK)) return rc;
-    }
-
-    /* 2. Build the 2048-entry multi-symbol decode table. Cache-line
-     * aligned: the LUT spans 128 lines (8 KB / 64 B) and is hammered every
-     * symbol, landing it on a 64-byte boundary avoids any cross-line
-     * load split on the per-iteration entry fetch. */
-    ZXC_ALIGN(ZXC_CACHE_LINE_SIZE) zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE];
-    {
-        const int rc = build_decode_table(code_len, table);
-        if (UNLIKELY(rc != ZXC_OK)) return rc;
+    /* 1+2. Resolve the 2048-entry multi-symbol decode table. The table is a
+     * pure function of the packed code-lengths header, so when @p cache holds
+     * a table built from a byte-identical header (common across consecutive
+     * blocks of homogeneous data), header parsing and the table build are
+     * skipped entirely. Cache-line aligned either way: the LUT spans 128
+     * lines (8 KB / 64 B) and is hammered every symbol, landing it on a
+     * 64-byte boundary avoids any cross-line load split on the per-iteration
+     * entry fetch. */
+    ZXC_ALIGN(ZXC_CACHE_LINE_SIZE) zxc_huf_dec_entry_t local_table[ZXC_HUF_TABLE_SIZE];
+    const zxc_huf_dec_entry_t* RESTRICT table;
+    if (cache != NULL && cache->valid &&
+        ZXC_MEMCMP(cache->lengths_hdr, payload, ZXC_HUF_LENGTHS_HEADER_SIZE) == 0) {
+        table = cache->table;
+    } else {
+        uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+        zxc_huf_dec_entry_t* const build_dst = (cache != NULL) ? cache->table : local_table;
+        int rc = unpack_lengths_header(payload, code_len);
+        if (LIKELY(rc == ZXC_OK)) rc = build_decode_table(code_len, build_dst);
+        if (UNLIKELY(rc != ZXC_OK)) {
+            /* A failed build leaves a partially written table behind. */
+            if (cache != NULL) cache->valid = 0;
+            return rc;
+        }
+        if (cache != NULL) {
+            ZXC_MEMCPY(cache->lengths_hdr, payload, ZXC_HUF_LENGTHS_HEADER_SIZE);
+            cache->valid = 1;
+        }
+        table = build_dst;
     }
 
     /* 3. Parse sub-stream sizes. */
