@@ -203,19 +203,26 @@ impl Seekable {
     ///
     /// Required to decompress an archive that was produced with a
     /// dictionary. Pass the same raw dictionary content used at compression
-    /// time. The content is copied internally by the library, so the slice
-    /// need not outlive the call.
+    /// time, plus its shared literal Huffman table (128 bytes) when the
+    /// archive was compressed with one — the archive's dict_id binds the
+    /// (dict, table) pair. Both are copied internally by the library, so the
+    /// slices need not outlive the call.
     ///
     /// # Errors
     ///
     /// Returns an [`Error`] if the dictionary is invalid or its ID does not
     /// match the one the archive requires.
-    pub fn set_dict(&mut self, dict: &[u8]) -> Result<()> {
+    pub fn set_dict(&mut self, dict: &[u8], dict_huf: Option<&[u8]>) -> Result<()> {
+        let huf_ptr = match dict_huf {
+            Some(h) if !h.is_empty() => h.as_ptr() as *const c_void,
+            _ => std::ptr::null(),
+        };
         let rc = unsafe {
             zxc_sys::zxc_seekable_set_dict(
                 self.inner.as_ptr(),
                 dict.as_ptr() as *const c_void,
                 dict.len(),
+                huf_ptr,
             )
         };
         if rc < 0 {
@@ -537,11 +544,12 @@ mod tests {
             checksum: true,
             seekable: true,
             dict: Some(dict.clone()),
+            dict_huf: None,
         };
         let archive = compress_with_options(&payload, &opts).expect("compression failed");
 
         let mut s = Seekable::from_bytes(archive).expect("open failed");
-        s.set_dict(&dict).expect("set_dict failed");
+        s.set_dict(&dict, None).expect("set_dict failed");
 
         assert_eq!(s.decompressed_size(), payload.len() as u64);
 

@@ -60,6 +60,7 @@ pub fn compress(data: &[u8], level: Level, checksum: Option<bool>) -> Result<Vec
         checksum: checksum.unwrap_or(false),
         seekable: false,
         dict: None,
+        dict_huf: None,
     };
     compress_with_options(data, &opts)
 }
@@ -106,12 +107,17 @@ unsafe fn impl_compress(
             Some(d) if !d.is_empty() => (d.as_ptr() as *const c_void, d.len()),
             _ => (std::ptr::null(), 0),
         };
+        let dict_huf_ptr = match &options.dict_huf {
+            Some(h) if !h.is_empty() => h.as_ptr() as *const c_void,
+            _ => std::ptr::null(),
+        };
         let copts = zxc_sys::zxc_compress_opts_t {
             level: options.level as i32,
             checksum_enabled: options.checksum as i32,
             seekable: options.seekable as i32,
             dict: dict_ptr,
             dict_size,
+            dict_huf: dict_huf_ptr,
             ..Default::default()
         };
         zxc_sys::zxc_compress(
@@ -247,10 +253,15 @@ unsafe fn impl_decompress(
             Some(d) if !d.is_empty() => (d.as_ptr() as *const c_void, d.len()),
             _ => (std::ptr::null(), 0),
         };
+        let dict_huf_ptr = match &options.dict_huf {
+            Some(h) if !h.is_empty() => h.as_ptr() as *const c_void,
+            _ => std::ptr::null(),
+        };
         let dopts = zxc_sys::zxc_decompress_opts_t {
             checksum_enabled: if options.verify_checksum { 1 } else { 0 },
             dict: dict_ptr,
             dict_size,
+            dict_huf: dict_huf_ptr,
             ..Default::default()
         };
         zxc_sys::zxc_decompress(

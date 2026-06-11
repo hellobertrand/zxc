@@ -155,6 +155,10 @@ pub const ZXC_DICT_SIZE_MAX: usize = (1usize << 16) - 1;
 /// Fixed size of the `.zxd` file header in bytes.
 pub const ZXC_DICT_HEADER_SIZE: usize = 16;
 
+/// Size in bytes of the shared literal Huffman table carried by a `.zxd` file
+/// (packed 4-bit code lengths for 256 symbols).
+pub const ZXC_DICT_HUF_TABLE_SIZE: usize = 128;
+
 // =============================================================================
 // Options Structs (mirroring C API)
 // =============================================================================
@@ -177,6 +181,9 @@ pub struct zxc_compress_opts_t {
     pub dict: *const c_void,
     /// Dictionary size in bytes (0 = none, max [`ZXC_DICT_SIZE_MAX`]).
     pub dict_size: usize,
+    /// Shared literal Huffman table: 128-byte packed code-lengths header
+    /// (NULL = none; ignored without dict).
+    pub dict_huf: *const c_void,
     /// Progress callback (NULL to disable).
     pub progress_cb: *const c_void,
     /// User context pointer passed to progress_cb.
@@ -193,6 +200,7 @@ impl Default for zxc_compress_opts_t {
             seekable: 0,
             dict: std::ptr::null(),
             dict_size: 0,
+            dict_huf: std::ptr::null(),
             progress_cb: std::ptr::null(),
             user_data: std::ptr::null_mut(),
         }
@@ -211,6 +219,9 @@ pub struct zxc_decompress_opts_t {
     pub dict: *const c_void,
     /// Dictionary size in bytes (0 = none).
     pub dict_size: usize,
+    /// Shared literal Huffman table: 128-byte packed code-lengths header
+    /// (NULL = none; ignored without dict).
+    pub dict_huf: *const c_void,
     /// Progress callback (NULL to disable).
     pub progress_cb: *const c_void,
     /// User context pointer passed to progress_cb.
@@ -224,6 +235,7 @@ impl Default for zxc_decompress_opts_t {
             checksum_enabled: 0,
             dict: std::ptr::null(),
             dict_size: 0,
+            dict_huf: std::ptr::null(),
             progress_cb: std::ptr::null(),
             user_data: std::ptr::null_mut(),
         }
@@ -383,14 +395,35 @@ unsafe extern "C" {
     /// Returns 0 if the buffer is not a valid `.zxd` file.
     pub fn zxc_dict_get_id(buf: *const c_void, buf_size: usize) -> u32;
 
-    /// Returns the maximum `.zxd` file size for a given content size
-    /// (= 16 + `content_size`).
+    /// Returns the `.zxd` file size for a given content size
+    /// (= 16 + `content_size` + 128 for the shared Huffman table).
     pub fn zxc_dict_save_bound(content_size: usize) -> usize;
 
-    /// Serializes dictionary content to the `.zxd` file format.
+    /// Trains the shared literal Huffman table for an already-trained dictionary.
+    ///
+    /// # Safety
+    /// - `samples`/`sample_sizes` as in [`zxc_train_dict`].
+    /// - `dict` must be valid for `dict_size` bytes.
+    /// - `huf_lengths_out` must be valid for writes of 128 bytes
+    ///   (`ZXC_DICT_HUF_TABLE_SIZE`).
+    ///
+    /// # Returns
+    /// `ZXC_OK` (0) on success, or a negative `zxc_error_t` code.
+    pub fn zxc_train_dict_huf(
+        samples: *const *const c_void,
+        sample_sizes: *const usize,
+        n_samples: usize,
+        dict: *const c_void,
+        dict_size: usize,
+        huf_lengths_out: *mut u8,
+    ) -> c_int;
+
+    /// Serializes dictionary content plus its shared Huffman table to the
+    /// `.zxd` file format. The table is mandatory.
     ///
     /// # Safety
     /// - `content` must be valid for `content_size` bytes.
+    /// - `huf_lengths` must be valid for 128 bytes (`ZXC_DICT_HUF_TABLE_SIZE`).
     /// - `buf` must be valid for writes up to `buf_capacity` bytes.
     ///
     /// # Returns
@@ -398,9 +431,18 @@ unsafe extern "C" {
     pub fn zxc_dict_save(
         content: *const c_void,
         content_size: usize,
+        huf_lengths: *const c_void,
         buf: *mut c_void,
         buf_capacity: usize,
     ) -> i64;
+
+    /// Returns a pointer to the 128-byte shared Huffman table inside a `.zxd`
+    /// buffer (zero-copy; aims into `buf`), or NULL if `buf` is not a valid
+    /// `.zxd` file.
+    ///
+    /// # Safety
+    /// - `buf` must be valid for `buf_size` bytes.
+    pub fn zxc_dict_huf(buf: *const c_void, buf_size: usize) -> *const c_void;
 
     /// Loads and validates a `.zxd` dictionary file from a memory buffer.
     ///
@@ -701,12 +743,15 @@ unsafe extern "C" {
     /// # Safety
     /// - `s` must be a valid handle from [`zxc_seekable_open`] etc.
     /// - `dict` must be valid for `dict_size` bytes (or NULL with 0).
+    /// - `dict_huf` must be NULL or valid for 128 bytes
+    ///   (`ZXC_DICT_HUF_TABLE_SIZE`).
     ///
     /// Returns `ZXC_OK` (0) on success, or a negative `zxc_error_t` code.
     pub fn zxc_seekable_set_dict(
         s: *mut zxc_seekable,
         dict: *const c_void,
         dict_size: usize,
+        dict_huf: *const c_void,
     ) -> c_int;
 
     /// Returns the total number of data blocks in the archive (excluding EOF).

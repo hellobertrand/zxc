@@ -45,7 +45,7 @@
 
 use std::ffi::c_void;
 
-pub use zxc_sys::ZXC_DICT_SIZE_MAX;
+pub use zxc_sys::{ZXC_DICT_HUF_TABLE_SIZE, ZXC_DICT_SIZE_MAX};
 
 use crate::error::error_from_code;
 use crate::{Error, Result};
@@ -111,19 +111,60 @@ pub fn dict_get_id(zxd: &[u8]) -> u32 {
     unsafe { zxc_sys::zxc_dict_get_id(zxd.as_ptr() as *const c_void, zxd.len()) }
 }
 
-/// Serializes raw dictionary content to the `.zxd` file format.
+/// Trains the shared literal Huffman table for an already-trained dictionary.
+///
+/// Compresses the samples with `dict` and derives canonical Huffman code
+/// lengths from the real post-LZ literal distribution. The returned 128-byte
+/// packed table is required by [`dict_save`] and can be attached to
+/// [`CompressOptions::with_dict_huf`](crate::CompressOptions::with_dict_huf) /
+/// [`DecompressOptions::with_dict_huf`](crate::DecompressOptions::with_dict_huf).
 ///
 /// # Errors
 ///
-/// Returns an [`Error`] if the content exceeds [`ZXC_DICT_SIZE_MAX`] or
-/// serialization otherwise fails.
-pub fn dict_save(content: &[u8]) -> Result<Vec<u8>> {
+/// Returns an [`Error`] if training fails (e.g. no usable samples).
+pub fn train_dict_huf(samples: &[&[u8]], dict: &[u8]) -> Result<[u8; ZXC_DICT_HUF_TABLE_SIZE]> {
+    let ptrs: Vec<*const c_void> = samples.iter().map(|s| s.as_ptr() as *const c_void).collect();
+    let sizes: Vec<usize> = samples.iter().map(|s| s.len()).collect();
+
+    let mut huf = [0u8; ZXC_DICT_HUF_TABLE_SIZE];
+    let rc = unsafe {
+        zxc_sys::zxc_train_dict_huf(
+            ptrs.as_ptr(),
+            sizes.as_ptr(),
+            samples.len(),
+            dict.as_ptr() as *const c_void,
+            dict.len(),
+            huf.as_mut_ptr(),
+        )
+    };
+    if rc != zxc_sys::ZXC_OK {
+        return Err(error_from_code(rc as i64));
+    }
+    Ok(huf)
+}
+
+/// Serializes dictionary content and its shared Huffman table to the `.zxd`
+/// file format.
+///
+/// `huf_lengths` is the mandatory 128-byte packed table from
+/// [`train_dict_huf`]. The stored dict_id covers both content and table.
+///
+/// # Errors
+///
+/// Returns an [`Error`] if `huf_lengths` is not exactly
+/// [`ZXC_DICT_HUF_TABLE_SIZE`] bytes, if the content exceeds
+/// [`ZXC_DICT_SIZE_MAX`], or if serialization otherwise fails.
+pub fn dict_save(content: &[u8], huf_lengths: &[u8]) -> Result<Vec<u8>> {
+    if huf_lengths.len() != ZXC_DICT_HUF_TABLE_SIZE {
+        return Err(Error::InvalidData);
+    }
     let bound = unsafe { zxc_sys::zxc_dict_save_bound(content.len()) };
     let mut buf = vec![0u8; bound];
     let written = unsafe {
         zxc_sys::zxc_dict_save(
             content.as_ptr() as *const c_void,
             content.len(),
+            huf_lengths.as_ptr() as *const c_void,
             buf.as_mut_ptr() as *mut c_void,
             buf.len(),
         )
@@ -133,6 +174,21 @@ pub fn dict_save(content: &[u8]) -> Result<Vec<u8>> {
     }
     buf.truncate(written as usize);
     Ok(buf)
+}
+
+/// Returns an owned copy of the shared Huffman table stored in a `.zxd`
+/// buffer, or `None` if the buffer is not a valid `.zxd` file.
+pub fn dict_huf(zxd: &[u8]) -> Option<[u8; ZXC_DICT_HUF_TABLE_SIZE]> {
+    let p = unsafe { zxc_sys::zxc_dict_huf(zxd.as_ptr() as *const c_void, zxd.len()) };
+    if p.is_null() {
+        return None;
+    }
+    let mut huf = [0u8; ZXC_DICT_HUF_TABLE_SIZE];
+    // The pointer aims into `zxd` (zero-copy); copy out for an owned result.
+    huf.copy_from_slice(unsafe {
+        std::slice::from_raw_parts(p as *const u8, ZXC_DICT_HUF_TABLE_SIZE)
+    });
+    Some(huf)
 }
 
 /// Parses a `.zxd` file buffer, returning owned dictionary content and its ID.
@@ -214,6 +270,7 @@ mod tests {
         let dopts = DecompressOptions {
             verify_checksum: true,
             dict: Some(dict),
+            dict_huf: None,
         };
         let restored = decompress_with_options(&archive, &dopts).expect("decompress with dict");
         assert_eq!(restored, sample);
@@ -243,22 +300,36 @@ mod tests {
 
         let id_content = dict_id(&dict);
         let id_archive = get_dict_id(&archive);
-        let zxd = dict_save(&dict).expect("dict_save failed");
-        let id_zxd = dict_get_id(&zxd);
 
         assert_ne!(id_content, 0, "dict id must be non-zero");
         assert_eq!(id_content, id_archive, "content id == archive id");
-        assert_eq!(id_content, id_zxd, "content id == .zxd id");
+
+        /* The .zxd id binds (content, table): it differs from the content id. */
+        let corpus = sample_corpus();
+        let refs: Vec<&[u8]> = corpus.iter().map(|s| s.as_slice()).collect();
+        let huf = train_dict_huf(&refs, &dict).expect("train_dict_huf failed");
+        let zxd = dict_save(&dict, &huf).expect("dict_save failed");
+        let id_zxd = dict_get_id(&zxd);
+        assert_ne!(id_zxd, 0, ".zxd id must be non-zero");
+        assert_ne!(id_content, id_zxd, ".zxd id covers the table");
     }
 
     #[test]
     fn save_load_roundtrip() {
         let dict = trained();
-        let zxd = dict_save(&dict).expect("dict_save failed");
+        let corpus = sample_corpus();
+        let refs: Vec<&[u8]> = corpus.iter().map(|s| s.as_slice()).collect();
+        let huf = train_dict_huf(&refs, &dict).expect("train_dict_huf failed");
+        let zxd = dict_save(&dict, &huf).expect("dict_save failed");
 
         let (content, id) = dict_load(&zxd).expect("dict_load failed");
         assert_eq!(content, dict, "loaded content must equal original");
-        assert_eq!(id, dict_id(&dict), "loaded id must match content id");
+        assert_eq!(id, dict_get_id(&zxd), "loaded id must match stored id");
+        assert_eq!(
+            dict_huf(&zxd).expect("table must be present"),
+            huf,
+            "loaded table must equal original"
+        );
     }
 
     #[test]
