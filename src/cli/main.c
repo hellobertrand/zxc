@@ -606,7 +606,7 @@ static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, 
     const void* content = NULL;
     size_t content_size = 0;
     uint32_t id = 0;
-    const int rc = zxc_dict_load(buf, buf_size, &content, &content_size, &id);
+    const int rc = zxc_dict_load(buf, buf_size, &content, &content_size, NULL, &id);
     if (rc != ZXC_OK) {
         fprintf(stderr, "Error: invalid dictionary '%s': %s\n", path, zxc_error_name(rc));
         return 1;
@@ -1317,7 +1317,8 @@ int main(int argc, char** argv) {
         fseeko(f_dict, 0, SEEK_END);
         const long long fsize = ftello(f_dict);
         fseeko(f_dict, 0, SEEK_SET);
-        if (fsize <= 0 || (size_t)fsize > ZXC_DICT_SIZE_MAX + ZXC_DICT_HEADER_SIZE) {
+        if (fsize <= 0 ||
+            (size_t)fsize > ZXC_DICT_SIZE_MAX + ZXC_DICT_HEADER_SIZE + ZXC_DICT_HUF_TABLE_SIZE) {
             fprintf(stderr, "Error: dictionary file '%s' has invalid size\n", dict_path);
             fclose(f_dict);
             return 1;
@@ -1333,7 +1334,8 @@ int main(int argc, char** argv) {
 
         const void* content = NULL;
         size_t content_size = 0;
-        const int rc = zxc_dict_load(zxd_buf, (size_t)fsize, &content, &content_size, NULL);
+        const void* huf = NULL;
+        const int rc = zxc_dict_load(zxd_buf, (size_t)fsize, &content, &content_size, &huf, NULL);
         if (rc != ZXC_OK) {
             fprintf(stderr, "Error: invalid dictionary '%s': %s\n", dict_path,
                     zxc_error_name(rc));
@@ -1356,8 +1358,8 @@ int main(int argc, char** argv) {
         memcpy(dict, content, content_size);
         dict_size = content_size;
 
-        /* Shared literal Huffman table (optional, zero-copy into zxd_buf). */
-        const void* huf = zxc_dict_huf(zxd_buf, (size_t)fsize);
+        /* Shared literal Huffman table (zero-copy into zxd_buf; .zxd always
+         * carries one, so huf is non-NULL after a successful load). */
         if (huf) {
             g_dict_huf = malloc(ZXC_DICT_HUF_TABLE_SIZE);
             if (!g_dict_huf) {
