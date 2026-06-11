@@ -572,9 +572,9 @@ When `HAS_DICTIONARY` (flag bit 6) is set, the reserved bytes at offsets
 1. Verify that a dictionary is provided (`ZXC_ERROR_DICT_REQUIRED` if not).
 2. Verify that the dictionary id matches `header.dict_id`
    (`ZXC_ERROR_DICT_MISMATCH` if not). For a raw in-memory dictionary without
-   a shared table, the id is `zxc_dict_id(dict, dict_size)`. When a shared
+   a shared table, the id is `zxc_dict_id(dict, dict_size, NULL)`. When a shared
    literal table is attached, the id also binds the table:
-   `id = checksum(LE32(zxc_dict_id(content)) || table_128_bytes)`.
+   `id = checksum(LE32(content_id) || table_128_bytes)` (i.e. `zxc_dict_id(content, size, table)`).
 
 Older decoders that do not recognize the `HAS_DICTIONARY` flag will ignore it
 (per §10.3: reserved flag bits are ignored). However, blocks compressed with a
@@ -606,7 +606,7 @@ Offset  Size  Field
 - **Flags**: bits `0..3` carry the checksum algorithm id (`0` = RapidHash-based folding), matching the ZXC file header flags; bits `4..7` are reserved (must be 0).
 - **Shared literal Huffman table**: code lengths for the `enc_lit=3` literal
   sections (§ 5.2.2), trained on the corpus' post-LZ literal distribution.
-- **dict_id**: `checksum(LE32(zxc_dict_id(content)) || table_128_bytes)` —
+- **dict_id**: `checksum(LE32(content_id) || table_128_bytes)` —
   binds the exact (content, table) pair. Must match the `dict_id` stored in
   any ZXC file header that references this dictionary.
 - **Header CRC16**: `zxc_hash16` checksum of the 16-byte header with bytes `0x0C..0x0F` zeroed before hashing — same method as the ZXC file header.

@@ -264,7 +264,7 @@ static Napi::Value DictId(const Napi::CallbackInfo& info) {
         return env.Undefined();
     }
     Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
-    uint32_t id = zxc_dict_id(b.Data(), b.Length());
+    uint32_t id = zxc_dict_id(b.Data(), b.Length(), nullptr);
     return Napi::Number::New(env, static_cast<double>(id));
 }
 

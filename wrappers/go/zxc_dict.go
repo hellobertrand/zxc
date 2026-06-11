@@ -142,7 +142,7 @@ func DictID(content []byte) uint32 {
 	if len(content) == 0 {
 		return 0
 	}
-	return uint32(C.zxc_dict_id(unsafe.Pointer(&content[0]), C.size_t(len(content))))
+	return uint32(C.zxc_dict_id(unsafe.Pointer(&content[0]), C.size_t(len(content)), nil))
 }
 
 // GetDictID returns the dictionary ID recorded in a compressed .zxc archive

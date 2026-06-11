@@ -623,7 +623,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
         if (header_dict_id != 0) {
             if (UNLIKELY(!dict || dict_size == 0)) return ZXC_ERROR_DICT_REQUIRED;
-            if (UNLIKELY(zxc_dict_id_ex(dict, dict_size, dict_huf) != header_dict_id))
+            if (UNLIKELY(zxc_dict_id(dict, dict_size, dict_huf) != header_dict_id))
                 return ZXC_ERROR_DICT_MISMATCH;
         }
     }
@@ -747,7 +747,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 1 && f_out) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
         zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE, runtime_chunk_sz, checksum_enabled,
-                              (dict && dict_size) ? zxc_dict_id_ex(dict, dict_size, dict_huf) : 0);
+                              (dict && dict_size) ? zxc_dict_id(dict, dict_size, dict_huf) : 0);
         if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
             ctx.io_error = 1;
 

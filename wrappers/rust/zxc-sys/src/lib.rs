@@ -390,13 +390,15 @@ unsafe extern "C" {
         dict_capacity: usize,
     ) -> i64;
 
-    /// Computes the dictionary ID for raw dictionary content.
+    /// Computes the dictionary ID: content-only when `huf_lengths` is null,
+    /// else binding the (content, table) pair.
     ///
     /// # Safety
     /// - `dict` must be a valid pointer to `dict_size` bytes.
+    /// - `huf_lengths` must be null or valid for 128 bytes (`ZXC_HUF_TABLE_SIZE`).
     ///
     /// Returns 0 if `dict` is NULL or `dict_size` is 0.
-    pub fn zxc_dict_id(dict: *const c_void, dict_size: usize) -> u32;
+    pub fn zxc_dict_id(dict: *const c_void, dict_size: usize, huf_lengths: *const c_void) -> u32;
 
     /// Returns the dictionary ID stored in a `.zxd` file buffer.
     ///

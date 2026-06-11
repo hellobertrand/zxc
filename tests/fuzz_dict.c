@@ -57,14 +57,16 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     {
         const void* content = NULL;
         size_t content_size = 0;
+        const void* huf = NULL;
         uint32_t id = 0;
-        const int rc = zxc_dict_load(data, size, &content, &content_size, NULL, &id);
+        const int rc = zxc_dict_load(data, size, &content, &content_size, &huf, &id);
         if (rc == ZXC_OK) {
             assert(content != NULL);
             assert(content_size > 0 && content_size <= ZXC_DICT_SIZE_MAX);
-            /* A validated header round-trips through both ID accessors. */
+            /* A validated header round-trips through both ID accessors; the
+             * stored id binds the (content, table) pair. */
             assert(zxc_dict_get_id(data, size) == id);
-            assert(zxc_dict_id(content, content_size) == id);
+            assert(zxc_dict_id(content, content_size, huf) == id);
         }
         (void)zxc_dict_get_id(data, size);
     }

@@ -1571,18 +1571,6 @@ int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, cons
 int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT lengths);
 
 /**
- * @brief Dictionary ID covering content and, when present, the shared Huffman
- *        lengths table.
- *
- * Without a table this equals @ref zxc_dict_id (back-compatible). With one,
- * the ID also binds the table: id = checksum(LE32(zxc_dict_id(content)) ||
- * lengths), so an archive compressed with a table-carrying dictionary can
- * only be decoded with that exact (content, table) pair.
- */
-uint32_t zxc_dict_id_ex(const void* RESTRICT content, const size_t content_size,
-                        const uint8_t* RESTRICT huf_lengths);
-
-/**
  * @brief Returns the byte count that @ref zxc_cctx_init would allocate for
  *        the given parameters.
  *

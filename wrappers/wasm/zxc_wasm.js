@@ -98,7 +98,8 @@ export default async function createZXC(moduleOverrides, factory) {
     // pointers are 32-bit.
     const _train_dict      = Module.cwrap('zxc_train_dict', 'number',
         ['number', 'number', 'number', 'number', 'number']);
-    const _dict_id         = Module.cwrap('zxc_dict_id', 'number', ['number', 'number']);
+    const _dict_id         = Module.cwrap('zxc_dict_id', 'number',
+        ['number', 'number', 'number']);
     const _get_dict_id     = Module.cwrap('zxc_get_dict_id', 'number', ['number', 'number']);
     const _dict_get_id     = Module.cwrap('zxc_dict_get_id', 'number', ['number', 'number']);
     const _dict_save       = Module.cwrap('zxc_dict_save', 'number',
@@ -831,7 +832,8 @@ export default async function createZXC(moduleOverrides, factory) {
      * @returns {number} Unsigned 32-bit ID (0 if empty).
      */
     function dictId(content) {
-        return _callIdOnBuffer(_dict_id, content);
+        // Third arg: NULL huf table -> content-only id.
+        return _callIdOnBuffer((ptr, len) => _dict_id(ptr, len, 0), content);
     }
 
     /**

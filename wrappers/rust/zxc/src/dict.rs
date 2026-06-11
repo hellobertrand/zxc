@@ -93,7 +93,13 @@ pub fn train_dict(samples: &[&[u8]], max_size: usize) -> Result<Vec<u8>> {
 ///
 /// Returns 0 for empty content.
 pub fn dict_id(content: &[u8]) -> u32 {
-    unsafe { zxc_sys::zxc_dict_id(content.as_ptr() as *const c_void, content.len()) }
+    unsafe {
+        zxc_sys::zxc_dict_id(
+            content.as_ptr() as *const c_void,
+            content.len(),
+            std::ptr::null(),
+        )
+    }
 }
 
 /// Returns the dictionary ID a ZXC `.zxc` archive requires.

@@ -860,7 +860,7 @@ int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_s
     if (UNLIKELY(!s || !dict || dict_size == 0)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     if (UNLIKELY(s->expected_dict_id != 0 &&
-                 zxc_dict_id_ex(dict, dict_size, (const uint8_t*)dict_huf) != s->expected_dict_id))
+                 zxc_dict_id(dict, dict_size, (const uint8_t*)dict_huf) != s->expected_dict_id))
         return ZXC_ERROR_DICT_MISMATCH;
 
     ZXC_FREE(s->dict);

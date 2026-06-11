@@ -1347,15 +1347,15 @@ Trains the **shared literal Huffman table** for an already-trained dictionary. I
 ### `zxc_dict_id`
 
 ```c
-ZXC_EXPORT uint32_t zxc_dict_id(const void* dict, size_t dict_size);
+ZXC_EXPORT uint32_t zxc_dict_id(const void* dict, size_t dict_size, const void* huf_lengths);
 ```
 
-Returns a deterministic 32-bit hash of the dictionary content. Returns 0 for NULL/empty input.
-
-> Note: the id recorded in a `.zxd` file and in an archive header binds the
-> **(content, table)** pair, not the content alone — see `zxc_dict_get_id()` /
-> `zxc_dict_load()` for the value actually stored. `zxc_dict_id()` exposes the
-> content-only hash (used internally as one input to the pair binding).
+Returns the deterministic 32-bit dictionary ID. With `huf_lengths` NULL it
+hashes the raw content only — the id of an in-memory content-only dictionary
+(buffer API). With a 128-byte table it binds the **(content, table)** pair:
+`checksum(LE32(content_id) || table)` — the value recorded in `.zxd` files and
+in archive headers when a shared table is attached. Returns 0 for NULL/empty
+content.
 
 ### `zxc_dict_save`
 

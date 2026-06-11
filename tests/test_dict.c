@@ -72,7 +72,7 @@ int test_dict_zxd_roundtrip(void) {
     /* The id covers (content, table): nonzero, matches the stored header id,
      * and differs from the content-only id. */
     if (loaded_id == 0 || loaded_id != zxc_dict_get_id(zxd, (size_t)written) ||
-        loaded_id == zxc_dict_id(content, content_size)) {
+        loaded_id == zxc_dict_id(content, content_size, NULL)) {
         printf("  [FAIL] dict_id binding incorrect: got %u\n", loaded_id);
         free(zxd);
         return 0;
@@ -99,15 +99,15 @@ int test_dict_id_deterministic(void) {
     const char* data = "some repeatable dictionary content";
     size_t size = strlen(data);
 
-    uint32_t id1 = zxc_dict_id(data, size);
-    uint32_t id2 = zxc_dict_id(data, size);
+    uint32_t id1 = zxc_dict_id(data, size, NULL);
+    uint32_t id2 = zxc_dict_id(data, size, NULL);
 
     if (id1 != id2 || id1 == 0) {
         printf("  [FAIL] dict_id not deterministic or zero: %u vs %u\n", id1, id2);
         return 0;
     }
 
-    uint32_t id_null = zxc_dict_id(NULL, 0);
+    uint32_t id_null = zxc_dict_id(NULL, 0, NULL);
     if (id_null != 0) {
         printf("  [FAIL] dict_id(NULL, 0) should be 0, got %u\n", id_null);
         return 0;
@@ -122,7 +122,7 @@ int test_dict_get_id_apis(void) {
 
     const uint8_t dict[] = "dictionary content for get_id test";
     const size_t dict_size = sizeof(dict) - 1;
-    const uint32_t expected_id = zxc_dict_id(dict, dict_size);
+    const uint32_t expected_id = zxc_dict_id(dict, dict_size, NULL);
 
     /* Compress with dict and verify zxc_get_dict_id reads it back */
     const uint8_t src[] = "some data to compress with dict for id test purposes";
@@ -1227,7 +1227,7 @@ int test_dict_huf_zxd_roundtrip(void) {
             break;
         }
         /* The id must bind the table: different from the content-only id. */
-        if (id == zxc_dict_id(dict_buf, (size_t)dsz)) {
+        if (id == zxc_dict_id(dict_buf, (size_t)dsz, NULL)) {
             printf("  [FAIL] dict_id does not cover the table\n");
             break;
         }

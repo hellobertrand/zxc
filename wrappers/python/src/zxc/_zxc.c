@@ -798,7 +798,7 @@ static PyObject* pyzxc_dict_id(PyObject* self, PyObject* arg) {
     (void)self;
     Py_buffer view;
     if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
-    uint32_t id = zxc_dict_id(view.buf, (size_t)view.len);
+    uint32_t id = zxc_dict_id(view.buf, (size_t)view.len, NULL);
     PyBuffer_Release(&view);
     return PyLong_FromUnsignedLong(id);
 }

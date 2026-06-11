@@ -577,7 +577,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
-    const uint32_t did = (dict && dict_size > 0) ? zxc_dict_id_ex(dict, dict_size, dict_huf) : 0;
+    const uint32_t did = (dict && dict_size > 0) ? zxc_dict_id(dict, dict_size, dict_huf) : 0;
 
     const uint8_t* ip = (const uint8_t*)src;
     uint8_t* op = (uint8_t*)dst;
@@ -776,7 +776,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_DICT_REQUIRED;
         }
-        if (UNLIKELY(zxc_dict_id_ex(dict, dict_size, dict_huf) != header_dict_id)) {
+        if (UNLIKELY(zxc_dict_id(dict, dict_size, dict_huf) != header_dict_id)) {
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_DICT_MISMATCH;
         }

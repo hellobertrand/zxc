@@ -58,17 +58,22 @@ extern "C" {
  */
 
 /**
- * @brief Compute the dictionary ID for the given content.
+ * @brief Compute the dictionary ID for the given content and optional table.
  *
- * The ID is a deterministic 32-bit hash of the raw dictionary content.
- * It is stored in the ZXC file header so the decoder can verify that
- * the correct dictionary is provided at decompression time.
+ * The ID is a deterministic 32-bit hash stored in the ZXC file header so the
+ * decoder can verify that the correct dictionary is provided at decompression
+ * time. With @p huf_lengths NULL it hashes the raw content only (the in-memory
+ * content-only dictionary of the buffer API). With a table it binds the
+ * (content, table) pair: `checksum(LE32(content_id) || table)` -- the value
+ * stored in `.zxd` files and in archives compressed with a shared table.
  *
- * @param[in] dict      Pointer to dictionary content.
- * @param[in] dict_size Size in bytes.
+ * @param[in] dict        Pointer to dictionary content.
+ * @param[in] dict_size   Size in bytes.
+ * @param[in] huf_lengths Shared literal Huffman table (@ref ZXC_HUF_TABLE_SIZE
+ *                        bytes), or NULL for a content-only ID.
  * @return 32-bit dictionary ID. Returns 0 if @p dict is NULL or @p dict_size is 0.
  */
-ZXC_EXPORT uint32_t zxc_dict_id(const void* dict, size_t dict_size);
+ZXC_EXPORT uint32_t zxc_dict_id(const void* dict, size_t dict_size, const void* huf_lengths);
 
 /**
  * @brief Load and validate a `.zxd` dictionary file from a memory buffer.
