@@ -191,11 +191,14 @@ static size_t gc_make_huffman_dict_payload(uint8_t **out) {
     size_t n = 0;
     while (n + 160 < cap) {
         char line[192];
+        const uint32_t user_id = gc_lcg_next(&st) % 100000U;
+        const uint32_t session = gc_lcg_next(&st);
+        const uint32_t page = gc_lcg_next(&st) % 64U;
         int len = snprintf(line, sizeof line,
                            "GET /api/v1/users/%u/profile?session=%08x&page=%u HTTP/1.1\r\n"
                            "Host: api.example.com\r\nAccept: application/json\r\n"
                            "User-Agent: zxc-client\r\n\r\n",
-                           gc_lcg_next(&st) % 100000u, gc_lcg_next(&st), gc_lcg_next(&st) % 64u);
+                           user_id, session, page);
         memcpy(b + n, line, (size_t)len);
         n += (size_t)len;
     }
@@ -203,10 +206,7 @@ static size_t gc_make_huffman_dict_payload(uint8_t **out) {
     return n;
 }
 
-/* Shared dictionary Huffman table for the enc_lit == 3 golden case. Trained
- * once, deterministically (the trainer has no randomness or time inputs), from
- * the same fixed dictionary + payload pair used by the case -- both the
- * generator and the validator resolve the exact same 128 bytes. */
+/* Shared dictionary Huffman table for the enc_lit == 3 golden case */
 static const uint8_t *gc_dict_huf_table(void) {
     static uint8_t huf[128];
     static int init = 0;
