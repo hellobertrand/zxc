@@ -285,6 +285,9 @@ static int zxc_validate_output_path(const char* path, char* resolved_buffer, siz
 // CLI Logging Helpers
 static int g_quiet = 0;
 static int g_verbose = 0;
+/* Shared literal Huffman table from the -D .zxd file (malloc'd copy), passed
+ * through the compress/decompress opts. NULL when the dict carries none. */
+static void* g_dict_huf = NULL;
 
 /**
  * @brief Standard logging function. Respects the global quiet flag.
@@ -608,21 +611,24 @@ static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, 
         fprintf(stderr, "Error: invalid dictionary '%s': %s\n", path, zxc_error_name(rc));
         return 1;
     }
+    const int has_huf = zxc_dict_huf(buf, buf_size) != NULL;
     if (json_output) {
         printf("{\n"
                "  \"type\": \"dictionary\",\n"
                "  \"filename\": \"%s\",\n"
                "  \"dict_id\": \"0x%08X\",\n"
                "  \"content_size_bytes\": %zu,\n"
+               "  \"literal_table\": %s,\n"
                "  \"file_size_bytes\": %lld\n"
                "}\n",
-               path, id, content_size, file_size);
+               path, id, content_size, has_huf ? "true" : "false", file_size);
     } else {
         printf("\n  Dictionary file (.zxd)\n"
                "  Dict ID:       0x%08X\n"
                "  Content size:  %zu bytes\n"
+               "  Literal table: %s\n"
                "  File:          %s\n",
-               id, content_size, path);
+               id, content_size, has_huf ? "yes" : "no", path);
     }
     return 0;
 }
@@ -971,6 +977,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .seekable = seekable,
             .dict = dict,
             .dict_size = dict_size,
+            .dict_huf = g_dict_huf,
             .progress_cb = show_progress ? cli_progress_callback : NULL,
             .user_data = &pctx,
         };
@@ -981,6 +988,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .checksum_enabled = checksum_enabled,
             .dict = dict,
             .dict_size = dict_size,
+            .dict_huf = g_dict_huf,
             .progress_cb = show_progress ? cli_progress_callback : NULL,
             .user_data = &pctx,
         };
@@ -1350,6 +1358,18 @@ int main(int argc, char** argv) {
         }
         memcpy(dict, content, content_size);
         dict_size = content_size;
+
+        /* Shared literal Huffman table (optional, zero-copy into zxd_buf). */
+        const void* huf = zxc_dict_huf(zxd_buf, (size_t)fsize);
+        if (huf) {
+            g_dict_huf = malloc(ZXC_DICT_HUF_TABLE_SIZE);
+            if (!g_dict_huf) {
+                free(dict);
+                free(zxd_buf);
+                return 1;
+            }
+            memcpy(g_dict_huf, huf, ZXC_DICT_HUF_TABLE_SIZE);
+        }
         free(zxd_buf);
     }
 
@@ -1424,6 +1444,23 @@ int main(int argc, char** argv) {
 
         int64_t dict_sz = zxc_train_dict(samples, sample_sizes, (size_t)n_loaded,
                                          dict_buf, dict_cap);
+
+        /* Train the shared literal Huffman table on the same samples (needs
+         * the trained dict for the post-LZ literal distribution). Failure is
+         * non-fatal: fall back to a table-less .zxd. */
+        uint8_t huf_lengths[ZXC_DICT_HUF_TABLE_SIZE];
+        int has_huf = 0;
+        if (dict_sz > 0) {
+            const int hrc = zxc_train_dict_huf(samples, sample_sizes, (size_t)n_loaded, dict_buf,
+                                               (size_t)dict_sz, huf_lengths);
+            if (hrc == ZXC_OK) {
+                has_huf = 1;
+            } else {
+                fprintf(stderr, "Warning: literal table training failed (%s), saving without it\n",
+                        zxc_error_name(hrc));
+            }
+        }
+
         for (int i = 0; i < n_loaded; i++) free((void*)samples[i]);
         free(samples);
         free(sample_sizes);
@@ -1437,7 +1474,8 @@ int main(int argc, char** argv) {
 
         size_t zxd_bound = zxc_dict_save_bound((size_t)dict_sz);
         uint8_t* zxd = (uint8_t*)malloc(zxd_bound);
-        int64_t zxd_sz = zxc_dict_save(dict_buf, (size_t)dict_sz, zxd, zxd_bound);
+        int64_t zxd_sz = zxc_dict_save2(dict_buf, (size_t)dict_sz, has_huf ? huf_lengths : NULL,
+                                        zxd, zxd_bound);
         free(dict_buf);
         if (zxd_sz <= 0) {
             fprintf(stderr, "Error: dict save failed: %s\n", zxc_error_name((int)zxd_sz));
@@ -1570,7 +1608,10 @@ int main(int argc, char** argv) {
             zxc_compress_opts_t bench_copts = {.n_threads = num_threads,
                                                .level = level,
                                                .block_size = block_size,
-                                               .checksum_enabled = checksum};
+                                               .checksum_enabled = checksum,
+                                               .dict = dict,
+                                               .dict_size = dict_size,
+                                               .dict_huf = g_dict_huf};
             zxc_stream_compress(fm, NULL, &bench_copts);
             const double dt = zxc_now() - t0;
             if (dt < best_compress) best_compress = dt;
@@ -1610,7 +1651,10 @@ int main(int argc, char** argv) {
         zxc_compress_opts_t bench_copts2 = {.n_threads = num_threads,
                                             .level = level,
                                             .block_size = block_size,
-                                            .checksum_enabled = checksum};
+                                            .checksum_enabled = checksum,
+                                            .dict = dict,
+                                            .dict_size = dict_size,
+                                            .dict_huf = g_dict_huf};
         const int64_t c_sz = zxc_stream_compress(fm_in, fm_out, &bench_copts2);
         if (c_sz < 0) {
             fclose(fm_in);
@@ -1654,7 +1698,10 @@ int main(int argc, char** argv) {
             rewind(fc);
             const double t0 = zxc_now();
             zxc_decompress_opts_t bench_dopts = {.n_threads = num_threads,
-                                                 .checksum_enabled = checksum};
+                                                 .checksum_enabled = checksum,
+                                                 .dict = dict,
+                                                 .dict_size = dict_size,
+                                                 .dict_huf = g_dict_huf};
             zxc_stream_decompress(fc, NULL, &bench_dopts);
             const double dt = zxc_now() - t0;
             if (dt < best_decompress) best_decompress = dt;

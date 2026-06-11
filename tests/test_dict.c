@@ -1095,3 +1095,199 @@ int test_dict_seekable_dict_id_checks(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+/* ---------------------------------------------------------------------------
+ * Shared literal Huffman table (dict_huf)
+ * ------------------------------------------------------------------------- */
+
+/* Deterministic structured-text generator (LCG): dict-trainable patterns with
+ * a skewed literal distribution so the shared table has something to win on. */
+static uint32_t huf_lcg(uint32_t* s) {
+    *s = *s * 1664525u + 1013904223u;
+    return *s >> 16;
+}
+
+static size_t gen_structured_sample(uint8_t* buf, size_t cap, uint32_t seed) {
+    static const char* actions[] = {"login", "logout", "refresh", "checkout"};
+    static const char* services[] = {"auth-svc", "billing-svc", "gateway"};
+    uint32_t s = seed;
+    size_t n = 0;
+    while (n + 96 < cap) {
+        n += (size_t)snprintf((char*)buf + n, cap - n,
+                              "ts=2026-06-10T12:%02u:%02u service=%s action=%s user=%u "
+                              "latency_ms=%u status=%u\n",
+                              huf_lcg(&s) % 60, huf_lcg(&s) % 60, services[huf_lcg(&s) % 3],
+                              actions[huf_lcg(&s) % 4], huf_lcg(&s) % 100000, huf_lcg(&s) % 2000,
+                              (huf_lcg(&s) % 5) ? 200u : 500u);
+    }
+    return n;
+}
+
+int test_dict_huf_zxd_roundtrip(void) {
+    printf("=== TEST: Dict - .zxd with shared Huffman table (save2/load/accessor) ===\n");
+
+    enum { NS = 6, SCAP = 16384 };
+    uint8_t* bufs[NS];
+    const void* samples[NS];
+    size_t sizes[NS];
+    for (int i = 0; i < NS; i++) {
+        bufs[i] = (uint8_t*)malloc(SCAP);
+        sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x1000u + (uint32_t)i);
+        samples[i] = bufs[i];
+    }
+
+    int ok = 0;
+    uint8_t dict_buf[8192];
+    uint8_t huf[ZXC_DICT_HUF_TABLE_SIZE];
+    uint8_t* zxd = NULL;
+    do {
+        const int64_t dsz = zxc_train_dict(samples, sizes, NS, dict_buf, sizeof(dict_buf));
+        if (dsz <= 0) {
+            printf("  [FAIL] train_dict: %lld\n", (long long)dsz);
+            break;
+        }
+        const int hrc = zxc_train_dict_huf(samples, sizes, NS, dict_buf, (size_t)dsz, huf);
+        if (hrc != ZXC_OK) {
+            printf("  [FAIL] train_dict_huf: %s\n", zxc_error_name(hrc));
+            break;
+        }
+
+        const size_t bound = zxc_dict_save_bound((size_t)dsz);
+        zxd = (uint8_t*)malloc(bound);
+        const int64_t zsz = zxc_dict_save2(dict_buf, (size_t)dsz, huf, zxd, bound);
+        if (zsz <= 0) {
+            printf("  [FAIL] dict_save2: %lld\n", (long long)zsz);
+            break;
+        }
+
+        /* Accessor returns the exact table; load validates the covering id. */
+        const void* huf_loaded = zxc_dict_huf(zxd, (size_t)zsz);
+        if (!huf_loaded || memcmp(huf_loaded, huf, ZXC_DICT_HUF_TABLE_SIZE) != 0) {
+            printf("  [FAIL] zxc_dict_huf accessor mismatch\n");
+            break;
+        }
+        const void* content = NULL;
+        size_t csz = 0;
+        uint32_t id = 0;
+        if (zxc_dict_load(zxd, (size_t)zsz, &content, &csz, &id) != ZXC_OK ||
+            csz != (size_t)dsz || memcmp(content, dict_buf, csz) != 0) {
+            printf("  [FAIL] load of table-carrying .zxd\n");
+            break;
+        }
+        /* The id must bind the table: different from the content-only id. */
+        if (id == zxc_dict_id(dict_buf, (size_t)dsz)) {
+            printf("  [FAIL] dict_id does not cover the table\n");
+            break;
+        }
+        /* Table-less save keeps the legacy id and exposes no table. */
+        uint8_t* zxd2 = (uint8_t*)malloc(bound);
+        const int64_t z2 = zxc_dict_save(dict_buf, (size_t)dsz, zxd2, bound);
+        const int legacy_ok =
+            z2 > 0 && zxc_dict_huf(zxd2, (size_t)z2) == NULL &&
+            zxc_dict_get_id(zxd2, (size_t)z2) == zxc_dict_id(dict_buf, (size_t)dsz);
+        free(zxd2);
+        if (!legacy_ok) {
+            printf("  [FAIL] table-less save regressed\n");
+            break;
+        }
+
+        /* Corrupting the stored table must break the covering id. */
+        zxd[zsz - 1] ^= 0xA5;
+        if (zxc_dict_load(zxd, (size_t)zsz, &content, &csz, &id) != ZXC_ERROR_BAD_CHECKSUM) {
+            printf("  [FAIL] corrupted table not rejected\n");
+            break;
+        }
+        ok = 1;
+    } while (0);
+
+    free(zxd);
+    for (int i = 0; i < NS; i++) free(bufs[i]);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}
+
+int test_dict_huf_table_roundtrip(void) {
+    printf("=== TEST: Dict - shared-table compression roundtrip + id binding ===\n");
+
+    enum { NS = 6, SCAP = 16384, HCAP = 32768 };
+    uint8_t* bufs[NS];
+    const void* samples[NS];
+    size_t sizes[NS];
+    for (int i = 0; i < NS; i++) {
+        bufs[i] = (uint8_t*)malloc(SCAP);
+        sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x2000u + (uint32_t)i);
+        samples[i] = bufs[i];
+    }
+    uint8_t* heldout = (uint8_t*)malloc(HCAP);
+    const size_t hsz = gen_structured_sample(heldout, HCAP, 0xBEEFu);
+
+    int ok = 0;
+    uint8_t dict_buf[8192];
+    uint8_t huf[ZXC_DICT_HUF_TABLE_SIZE];
+    uint8_t *c1 = NULL, *c2 = NULL, *out = NULL;
+    do {
+        const int64_t dsz = zxc_train_dict(samples, sizes, NS, dict_buf, sizeof(dict_buf));
+        if (dsz <= 0 ||
+            zxc_train_dict_huf(samples, sizes, NS, dict_buf, (size_t)dsz, huf) != ZXC_OK) {
+            printf("  [FAIL] training\n");
+            break;
+        }
+
+        const size_t cap = (size_t)zxc_compress_bound(hsz);
+        c1 = (uint8_t*)malloc(cap);
+        c2 = (uint8_t*)malloc(cap);
+        out = (uint8_t*)malloc(hsz + 64);
+
+        zxc_compress_opts_t o1 = {
+            .level = 6, .block_size = 4096, .dict = dict_buf, .dict_size = (size_t)dsz};
+        zxc_compress_opts_t o2 = {.level = 6,
+                                  .block_size = 4096,
+                                  .dict = dict_buf,
+                                  .dict_size = (size_t)dsz,
+                                  .dict_huf = huf};
+        const int64_t s1 = zxc_compress(heldout, hsz, c1, cap, &o1);
+        const int64_t s2 = zxc_compress(heldout, hsz, c2, cap, &o2);
+        if (s1 <= 0 || s2 <= 0) {
+            printf("  [FAIL] compress: %lld / %lld\n", (long long)s1, (long long)s2);
+            break;
+        }
+        /* Exact size accounting makes the shared table a strict improvement
+         * on this skewed corpus; never larger by construction. */
+        if (s2 > s1) {
+            printf("  [FAIL] shared table grew the archive: %lld > %lld\n", (long long)s2,
+                   (long long)s1);
+            break;
+        }
+
+        zxc_decompress_opts_t d2 = {
+            .dict = dict_buf, .dict_size = (size_t)dsz, .dict_huf = huf};
+        const int64_t r2 = zxc_decompress(c2, (size_t)s2, out, hsz + 64, &d2);
+        if (r2 != (int64_t)hsz || memcmp(out, heldout, hsz) != 0) {
+            printf("  [FAIL] roundtrip with table: %lld\n", (long long)r2);
+            break;
+        }
+
+        /* id binding, both directions: table archive without the table, and
+         * table-less archive with it, must both be rejected as MISMATCH. */
+        zxc_decompress_opts_t d_no = {.dict = dict_buf, .dict_size = (size_t)dsz};
+        if (zxc_decompress(c2, (size_t)s2, out, hsz + 64, &d_no) != ZXC_ERROR_DICT_MISMATCH) {
+            printf("  [FAIL] table archive accepted without table\n");
+            break;
+        }
+        if (zxc_decompress(c1, (size_t)s1, out, hsz + 64, &d2) != ZXC_ERROR_DICT_MISMATCH) {
+            printf("  [FAIL] table-less archive accepted with table\n");
+            break;
+        }
+        ok = 1;
+    } while (0);
+
+    free(c1);
+    free(c2);
+    free(out);
+    free(heldout);
+    for (int i = 0; i < NS; i++) free(bufs[i]);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}

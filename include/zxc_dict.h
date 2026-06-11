@@ -131,6 +131,61 @@ ZXC_EXPORT uint32_t zxc_dict_get_id(const void* buf, size_t buf_size);
 ZXC_EXPORT int64_t zxc_train_dict(const void* const* samples, const size_t* sample_sizes,
                                   size_t n_samples, void* dict_buf, size_t dict_capacity);
 
+/**
+ * @brief Train the shared literal Huffman table for an already-trained dictionary.
+ *
+ * Compresses the samples with @p dict and builds canonical Huffman code
+ * lengths from the real post-LZ literal distribution. The resulting 128-byte
+ * packed table can be embedded in a `.zxd` file via zxc_dict_save2() and
+ * passed to the compressor/decompressor via the `dict_huf` option field.
+ * Blocks whose literals compress better with the shared table skip their
+ * per-block 128-byte table header, which is decisive at small block sizes.
+ *
+ * @param[in]  samples         Array of pointers to sample buffers (typically
+ *                             the same corpus used for zxc_train_dict()).
+ * @param[in]  sample_sizes    Array of sample sizes in bytes.
+ * @param[in]  n_samples       Number of samples.
+ * @param[in]  dict            Trained dictionary content.
+ * @param[in]  dict_size       Dictionary content size in bytes.
+ * @param[out] huf_lengths_out Receives the 128-byte packed code-lengths table.
+ * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
+ */
+ZXC_EXPORT int zxc_train_dict_huf(const void* const* samples, const size_t* sample_sizes,
+                                  size_t n_samples, const void* dict, size_t dict_size,
+                                  uint8_t* huf_lengths_out);
+
+/**
+ * @brief Serialize dictionary content plus an optional shared Huffman table
+ *        to the `.zxd` file format.
+ *
+ * Like zxc_dict_save() but appends the 128-byte packed code-lengths table
+ * (from zxc_train_dict_huf()) after the content and sets the corresponding
+ * header flag. The stored dict_id then covers both content and table, so
+ * archives compressed with this dictionary are bound to the exact pair.
+ *
+ * @param[in]  content       Raw dictionary content.
+ * @param[in]  content_size  Size of @p content in bytes (max ZXC_DICT_SIZE_MAX).
+ * @param[in]  huf_lengths   128-byte packed Huffman code lengths, or NULL.
+ * @param[out] buf           Output buffer for the .zxd file.
+ * @param[in]  buf_capacity  Capacity of @p buf (see zxc_dict_save_bound()).
+ * @return Number of bytes written on success, or a negative @ref zxc_error_t code.
+ */
+ZXC_EXPORT int64_t zxc_dict_save2(const void* content, size_t content_size, const void* huf_lengths,
+                                  void* buf, size_t buf_capacity);
+
+/**
+ * @brief Returns a pointer to the shared Huffman table inside a `.zxd` buffer.
+ *
+ * Zero-copy accessor: the returned pointer aims into @p buf and is valid as
+ * long as @p buf is. Returns NULL if the buffer is not a valid `.zxd` file or
+ * carries no table.
+ *
+ * @param[in] buf       Buffer containing the .zxd file.
+ * @param[in] buf_size  Size of @p buf in bytes.
+ * @return Pointer to the 128-byte packed code-lengths table, or NULL.
+ */
+ZXC_EXPORT const void* zxc_dict_huf(const void* buf, size_t buf_size);
+
 /** @} */ /* end of dict */
 
 #ifdef __cplusplus

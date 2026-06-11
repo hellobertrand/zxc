@@ -28,6 +28,8 @@
 #define zxc_compress_chunk_wrapper ZXC_CAT(zxc_compress_chunk_wrapper, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_build_code_lengths ZXC_CAT(zxc_huf_build_code_lengths, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_encode_section ZXC_CAT(zxc_huf_encode_section, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_encode_section_dict ZXC_CAT(zxc_huf_encode_section_dict, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_unpack_lengths ZXC_CAT(zxc_huf_unpack_lengths, ZXC_FUNCTION_SUFFIX)
 #endif
 
 #include "../../include/zxc_error.h"
@@ -1315,6 +1317,12 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     }
 
 parse_done:;
+    /* Dictionary-table trainer hook: accumulate the REAL post-LZ literal
+     * frequencies (see zxc_train_dict_huf). Cold path, NULL outside training. */
+    if (UNLIKELY(ctx->lit_freq_acc != NULL)) {
+        for (size_t i = 0; i < lit_c; i++) ctx->lit_freq_acc[literals[i]]++;
+    }
+
     // --- RLE ANALYSIS ---
     size_t rle_size = 0;
     int enc_lit = ZXC_SECTION_ENCODING_RAW;
@@ -1613,6 +1621,49 @@ parse_done:;
         }
     }
 
+    /* Shared dictionary table candidate (level >= 6, dict with table attached):
+     * same bitstream as HUFFMAN but no 128-byte lengths header, so it stays
+     * viable on literal sections far below ZXC_HUF_MIN_LITERALS. Exact size
+     * accounting; invalid (a literal byte without a code) drops the candidate. */
+    size_t huf_dict_total_size = SIZE_MAX;
+    uint8_t dict_code_len[ZXC_HUF_NUM_SYMBOLS];
+    if (level >= ZXC_LEVEL_DENSITY && ctx->dict_huf_lengths != NULL && lit_c > 0 &&
+        zxc_huf_unpack_lengths(ctx->dict_huf_lengths, dict_code_len) == ZXC_OK) {
+        const size_t Q = (lit_c + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
+        size_t streams_bytes = 0;
+        int valid = 1;
+        for (int s = 0; s < ZXC_HUF_NUM_STREAMS && valid; s++) {
+            size_t start = (size_t)s * Q;
+            size_t stop = start + Q;
+            if (start > lit_c) start = lit_c;
+            if (stop > lit_c) stop = lit_c;
+            uint64_t bits = 0;
+            for (size_t i = start; i < stop; i++) {
+                const int len = dict_code_len[literals[i]];
+                if (UNLIKELY(len == 0)) {
+                    valid = 0;
+                    break;
+                }
+                bits += (uint64_t)len;
+            }
+            streams_bytes += (size_t)((bits + 7) / 8);
+        }
+        if (valid) {
+            huf_dict_total_size = (size_t)ZXC_HUF_STREAM_SIZES_HEADER_SIZE + streams_bytes;
+            if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) {
+                /* Both candidates are Huffman bitstreams: pick the smaller. */
+                if (huf_dict_total_size < huf_total_size)
+                    enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
+            } else {
+                const size_t baseline =
+                    (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : (size_t)lit_c;
+                /* Same 3% (1/32) margin as the other encoding switches. */
+                if (huf_dict_total_size < baseline - (baseline >> 5))
+                    enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
+            }
+        }
+    }
+
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GLO};
     uint8_t* const p = dst + ZXC_BLOCK_HEADER_SIZE;
     size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
@@ -1631,7 +1682,9 @@ parse_done:;
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS] = {0};
     const size_t lit_section_size = (enc_lit == ZXC_SECTION_ENCODING_RLE)       ? rle_size
                                     : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) ? huf_total_size
-                                                                                : (size_t)lit_c;
+                                    : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT)
+                                        ? huf_dict_total_size
+                                        : (size_t)lit_c;
     desc[0].sizes = (uint64_t)lit_section_size | ((uint64_t)lit_c << 32);
     desc[1].sizes = (uint64_t)seq_c | ((uint64_t)seq_c << 32);
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
@@ -1656,6 +1709,12 @@ parse_done:;
             zxc_huf_encode_section(literals, (size_t)lit_c, huf_code_len, p_curr, rem);
         if (UNLIKELY(written < 0)) return written;
         if (UNLIKELY((size_t)written != huf_total_size)) return ZXC_ERROR_DST_TOO_SMALL;
+        p_curr += written;
+    } else if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT) {
+        const int written =
+            zxc_huf_encode_section_dict(literals, (size_t)lit_c, dict_code_len, p_curr, rem);
+        if (UNLIKELY(written < 0)) return written;
+        if (UNLIKELY((size_t)written != huf_dict_total_size)) return ZXC_ERROR_DST_TOO_SMALL;
         p_curr += written;
     } else if (enc_lit == ZXC_SECTION_ENCODING_RLE) {
         // Write RLE - optimized single-pass encoding
