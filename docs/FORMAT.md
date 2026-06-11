@@ -841,13 +841,21 @@ Seek table entry at `0x36`:
 
 ## 15. Worked Example: Dictionary File (`.zxd` Hexdump)
 
-A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size: **21 bytes** (16-byte header + 5-byte content). This is the on-disk form produced by `zxc_dict_save()` (see §12.4).
+A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size: **149 bytes** (16-byte header + 5-byte content + 128-byte shared Huffman table). This is the on-disk form produced by `zxc_dict_save()` (see §12.4); the table is always present.
 
 ### 15.1 Full hexdump
 
 ```text
-00000000: C7 D1 B0 9C 01 00 05 00 17 0F 72 9A 00 00 4A D9
-00000010: 68 65 6C 6C 6F
+00000000: C7 D1 B0 9C 01 00 05 00 23 58 DF 6F 00 00 63 65
+00000010: 68 65 6C 6C 6F 00 00 00 00 00 00 00 00 00 00 00
+00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000040: 00 00 00 00 00 00 00 20 00 02 00 02 20 00 00 00
+00000050: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000060: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000070: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000080: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000090: 00 00 00 00 00
 ```
 
 ### 15.2 Byte-level decoding
@@ -862,9 +870,9 @@ C7 D1 B0 9C | 01 | 00 | 05 00 | 17 0F 72 9A | 00 00 | 4A D9
 - `01` -> dictionary format version 1.
 - `00` -> flags (bits 0..3 = checksum algorithm id `0` = RapidHash; bits 4..7 reserved).
 - `05 00` -> content size (LE) = `5` bytes.
-- `17 0F 72 9A` -> `dict_id` (LE) = `0x9A720F17`. Must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
+- `23 58 DF 6F` -> `dict_id` (LE) = `0x6FDF5823`. Binds the **(content, table)** pair (see §12.4) and must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
 - `00 00` -> reserved.
-- `4A D9` -> header CRC16 (LE) = `0xD94A`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the CRC is the last 2 bytes of the header).
+- `63 65` -> header CRC16 (LE) = `0x6563`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the CRC is the last 2 bytes of the header).
 
 #### B) Dictionary Content (offset `0x10`, 5 bytes)
 
@@ -874,9 +882,18 @@ C7 D1 B0 9C | 01 | 00 | 05 00 | 17 0F 72 9A | 00 00 | 4A D9
 
 ASCII: `hello`. Raw bytes that prefill the LZ77 window — not compressed.
 
+#### C) Shared Huffman Table (offset `0x15`, 128 bytes)
+
+```text
+... 20 00 02 00 02 20 ...   (remaining bytes 0x00)
+```
+
+256 × 4-bit code lengths, packed two-per-byte (low nibble first), for the shared literal table (§5.2.2). Symbols absent from the training distribution have length `0`; here only the four bytes of `hello` carry codes (e.g. the nibble at table index `'e'`=0x65 gives length `2`), so all other entries are zero.
+
 ### 15.3 Structural view with absolute offsets
 
 ```text
 0x00..0x0F  Dictionary Header (16)
 0x10..0x14  Dictionary Content (5)
+0x15..0x94  Shared Huffman Table (128)
 ```
