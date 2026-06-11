@@ -73,10 +73,12 @@ static int has_suffix(const char *s, const char *suffix)
 
 /**
  * @brief Searches for a .zxd dictionary file in the same directory as @p zxc_path
- *        whose dict_id matches @p target_id. Returns the loaded content (caller frees).
+ *        whose dict_id matches @p target_id. Returns the loaded content (caller frees)
+ *        and, via @p huf_out, the shared literal Huffman table carried by the .zxd.
  */
 static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
-                                 const void **content_out, size_t *content_size_out)
+                                 const void **content_out, size_t *content_size_out,
+                                 const void **huf_out)
 {
     /* Derive directory from zxc_path */
     char dir[512];
@@ -100,6 +102,7 @@ static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
         uint8_t *buf = read_file(path, &sz);
         if (buf && zxc_dict_get_id(buf, sz) == target_id) {
             if (zxc_dict_load(buf, sz, content_out, content_size_out, NULL) == 0) {
+                *huf_out = zxc_dict_huf(buf, sz);
                 FindClose(hf);
                 return buf;
             }
@@ -119,6 +122,7 @@ static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
         uint8_t *buf = read_file(path, &sz);
         if (buf && zxc_dict_get_id(buf, sz) == target_id) {
             if (zxc_dict_load(buf, sz, content_out, content_size_out, NULL) == 0) {
+                *huf_out = zxc_dict_huf(buf, sz);
                 closedir(dp);
                 return buf;
             }
@@ -150,10 +154,11 @@ static int test_valid_vector(const char *zxc_path, const char *expected_path)
     /* Auto-detect dictionary: if the archive has a dict_id, find the .zxd */
     const void *dict = NULL;
     size_t dict_size = 0;
+    const void *dict_huf = NULL;
     uint8_t *dict_buf = NULL;
     uint32_t did = zxc_get_dict_id(comp, comp_sz);
     if (did != 0) {
-        dict_buf = find_dict_for_id(zxc_path, did, &dict, &dict_size);
+        dict_buf = find_dict_for_id(zxc_path, did, &dict, &dict_size, &dict_huf);
         if (!dict_buf) {
             fprintf(stderr, "FAIL: %s  requires dict 0x%08X but no matching .zxd found\n",
                     zxc_path, did);
@@ -179,7 +184,7 @@ static int test_valid_vector(const char *zxc_path, const char *expected_path)
             ok = 0;
         } else {
             zxc_decompress_opts_t dopts = {0};
-            if (dict) { dopts.dict = dict; dopts.dict_size = dict_size; }
+            if (dict) { dopts.dict = dict; dopts.dict_size = dict_size; dopts.dict_huf = dict_huf; }
             int64_t result = zxc_decompress(comp, comp_sz,
                                             output, (size_t)dec_sz, &dopts);
             if (result < 0) {
