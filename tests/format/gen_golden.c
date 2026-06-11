@@ -90,6 +90,7 @@ int main(int argc, char **argv) {
         }
 
         zxc_compress_opts_t opts = gc->opts;
+        if (gc->use_dict_huf) opts.dict_huf = gc_dict_huf_table();
         int64_t csize = zxc_compress(input, in_size, out, cap, &opts);
         if (csize <= 0) {
             fprintf(stderr, "  FAIL: compress(%s) -> %s\n", gc->name,

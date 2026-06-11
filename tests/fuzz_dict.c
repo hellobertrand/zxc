@@ -58,7 +58,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         const void* content = NULL;
         size_t content_size = 0;
         uint32_t id = 0;
-        const int rc = zxc_dict_load(data, size, &content, &content_size, &id);
+        const int rc = zxc_dict_load(data, size, &content, &content_size, NULL, &id);
         if (rc == ZXC_OK) {
             assert(content != NULL);
             assert(content_size > 0 && content_size <= ZXC_DICT_SIZE_MAX);
@@ -108,39 +108,48 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (dict_sz <= 0) return 0; /* corpus too small / no patterns: nothing to serialize */
     assert((size_t)dict_sz <= dict_cap);
 
+    /* The .zxd format requires the shared literal table; train it on the same
+     * samples (it needs the trained content for the post-LZ literal stats). */
+    uint8_t huf[ZXC_DICT_HUF_TABLE_SIZE];
+    if (zxc_train_dict_huf(samples, sample_sizes, n_samples, dict_buf, (size_t)dict_sz, huf) !=
+        ZXC_OK)
+        return 0;
+
     /* ------------------------------------------------------------------ */
     /* Phase 2: .zxd save / load roundtrip + corruption.                  */
     /* ------------------------------------------------------------------ */
     const size_t zxd_bound = zxc_dict_save_bound((size_t)dict_sz);
     if (!zxd_buf) {
-        zxd_buf = (uint8_t*)malloc(ZXC_DICT_HEADER_SIZE + ZXC_DICT_SIZE_MAX);
+        zxd_buf = (uint8_t*)malloc(ZXC_DICT_HEADER_SIZE + ZXC_DICT_SIZE_MAX + ZXC_DICT_HUF_TABLE_SIZE);
         if (!zxd_buf) return 0;
     }
 
-    const int64_t zxd_sz = zxc_dict_save(dict_buf, (size_t)dict_sz, zxd_buf, zxd_bound);
+    const int64_t zxd_sz = zxc_dict_save(dict_buf, (size_t)dict_sz, huf, zxd_buf, zxd_bound);
     assert(zxd_sz == (int64_t)zxd_bound);
 
     {
         const void* lc = NULL;
         size_t lcs = 0;
+        const void* lh = NULL;
         uint32_t lid = 0;
-        const int rc = zxc_dict_load(zxd_buf, (size_t)zxd_sz, &lc, &lcs, &lid);
+        const int rc = zxc_dict_load(zxd_buf, (size_t)zxd_sz, &lc, &lcs, &lh, &lid);
         assert(rc == ZXC_OK);
         assert(lcs == (size_t)dict_sz);
         assert(memcmp(lc, dict_buf, (size_t)dict_sz) == 0);
-        assert(lid == zxc_dict_id(dict_buf, (size_t)dict_sz));
+        assert(lh != NULL && memcmp(lh, huf, ZXC_DICT_HUF_TABLE_SIZE) == 0);
+        /* The stored id binds the (content, table) pair, not the content alone. */
         assert(zxc_dict_get_id(zxd_buf, (size_t)zxd_sz) == lid);
     }
 
     /* DST_TOO_SMALL: any capacity below the full file must be rejected. */
     {
         const size_t small_cap = corrupt_pos % (size_t)zxd_sz; /* in [0, zxd_sz) */
-        const int64_t r = zxc_dict_save(dict_buf, (size_t)dict_sz, zxd_buf, small_cap);
+        const int64_t r = zxc_dict_save(dict_buf, (size_t)dict_sz, huf, zxd_buf, small_cap);
         assert(r < 0);
     }
 
     /* Re-save (the DST_TOO_SMALL attempt left zxd_buf untouched, but be safe). */
-    assert(zxc_dict_save(dict_buf, (size_t)dict_sz, zxd_buf, zxd_bound) == (int64_t)zxd_sz);
+    assert(zxc_dict_save(dict_buf, (size_t)dict_sz, huf, zxd_buf, zxd_bound) == (int64_t)zxd_sz);
 
     /* Flip one byte and re-load: must not crash. A surviving ZXC_OK can only
      * come from a reserved-byte flip (offsets 12-13, zeroed before the CRC),
@@ -153,7 +162,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         const void* cc = NULL;
         size_t ccs = 0;
         uint32_t cid = 0;
-        const int rc = zxc_dict_load(zxd_buf, (size_t)zxd_sz, &cc, &ccs, &cid);
+        const int rc = zxc_dict_load(zxd_buf, (size_t)zxd_sz, &cc, &ccs, NULL, &cid);
         if (rc == ZXC_OK) {
             assert(ccs == (size_t)dict_sz);
             assert(memcmp(cc, dict_buf, (size_t)dict_sz) == 0);

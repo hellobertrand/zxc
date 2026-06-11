@@ -101,8 +101,7 @@ static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
         size_t sz = 0;
         uint8_t *buf = read_file(path, &sz);
         if (buf && zxc_dict_get_id(buf, sz) == target_id) {
-            if (zxc_dict_load(buf, sz, content_out, content_size_out, NULL) == 0) {
-                *huf_out = zxc_dict_huf(buf, sz);
+            if (zxc_dict_load(buf, sz, content_out, content_size_out, huf_out, NULL) == 0) {
                 FindClose(hf);
                 return buf;
             }
@@ -121,8 +120,7 @@ static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
         size_t sz = 0;
         uint8_t *buf = read_file(path, &sz);
         if (buf && zxc_dict_get_id(buf, sz) == target_id) {
-            if (zxc_dict_load(buf, sz, content_out, content_size_out, NULL) == 0) {
-                *huf_out = zxc_dict_huf(buf, sz);
+            if (zxc_dict_load(buf, sz, content_out, content_size_out, huf_out, NULL) == 0) {
                 closedir(dp);
                 return buf;
             }

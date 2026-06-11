@@ -53,8 +53,10 @@ int test_dict_zxd_roundtrip(void) {
 
     const void* loaded_content = NULL;
     size_t loaded_size = 0;
+    const void* loaded_huf = NULL;
     uint32_t loaded_id = 0;
-    int rc = zxc_dict_load(zxd, (size_t)written, &loaded_content, &loaded_size, &loaded_id);
+    int rc = zxc_dict_load(zxd, (size_t)written, &loaded_content, &loaded_size, &loaded_huf,
+                           &loaded_id);
     if (rc != ZXC_OK) {
         printf("  [FAIL] zxc_dict_load returned %d (%s)\n", rc, zxc_error_name(rc));
         free(zxd);
@@ -76,10 +78,12 @@ int test_dict_zxd_roundtrip(void) {
         return 0;
     }
 
-    /* The table accessor must return the exact bytes we stored. */
-    const void* huf_loaded = zxc_dict_huf(zxd, (size_t)written);
-    if (!huf_loaded || memcmp(huf_loaded, huf, ZXC_DICT_HUF_TABLE_SIZE) != 0) {
-        printf("  [FAIL] zxc_dict_huf accessor mismatch\n");
+    /* The folded load and the standalone accessor must both return the exact
+     * table bytes we stored, and agree with each other. */
+    const void* huf_acc = zxc_dict_huf(zxd, (size_t)written);
+    if (!loaded_huf || loaded_huf != huf_acc ||
+        memcmp(loaded_huf, huf, ZXC_DICT_HUF_TABLE_SIZE) != 0) {
+        printf("  [FAIL] dict_load table out-param / zxc_dict_huf mismatch\n");
         free(zxd);
         return 0;
     }
@@ -169,7 +173,8 @@ int test_dict_get_id_apis(void) {
     size_t lcs = 0;
     uint32_t loaded_id = 0;
     uint32_t zxd_id = zxc_dict_get_id(zxd, (size_t)zxd_size);
-    if (zxd_id == 0 || zxc_dict_load(zxd, (size_t)zxd_size, &lc, &lcs, &loaded_id) != ZXC_OK ||
+    if (zxd_id == 0 ||
+        zxc_dict_load(zxd, (size_t)zxd_size, &lc, &lcs, NULL, &loaded_id) != ZXC_OK ||
         loaded_id != zxd_id) {
         printf("  [FAIL] zxc_dict_get_id: got 0x%08X, load id 0x%08X\n", zxd_id, loaded_id);
         free(zxd);
@@ -1155,7 +1160,7 @@ static size_t gen_structured_sample(uint8_t* buf, size_t cap, uint32_t seed) {
 }
 
 int test_dict_huf_zxd_roundtrip(void) {
-    printf("=== TEST: Dict - .zxd shared Huffman table (save/load/accessor) ===\n");
+    printf("=== TEST: Dict - .zxd create (one-call == primitives) / load / corruption ===\n");
 
     enum { NS = 6, SCAP = 16384 };
     uint8_t* bufs[NS];
@@ -1168,11 +1173,15 @@ int test_dict_huf_zxd_roundtrip(void) {
     }
 
     int ok = 0;
-    uint8_t dict_buf[8192];
     uint8_t huf[ZXC_DICT_HUF_TABLE_SIZE];
+    /* Same capacity as zxc_dict_train uses internally, so the primitive path
+     * trains identical content and the byte-identity comparison is exact. */
+    uint8_t* dict_buf = (uint8_t*)malloc(ZXC_DICT_SIZE_MAX);
     uint8_t* zxd = NULL;
+    uint8_t* zxd_one = NULL;
     do {
-        const int64_t dsz = zxc_train_dict(samples, sizes, NS, dict_buf, sizeof(dict_buf));
+        /* Primitive 3-step pipeline. */
+        const int64_t dsz = zxc_train_dict(samples, sizes, NS, dict_buf, ZXC_DICT_SIZE_MAX);
         if (dsz <= 0) {
             printf("  [FAIL] train_dict: %lld\n", (long long)dsz);
             break;
@@ -1182,7 +1191,6 @@ int test_dict_huf_zxd_roundtrip(void) {
             printf("  [FAIL] train_dict_huf: %s\n", zxc_error_name(hrc));
             break;
         }
-
         const size_t bound = zxc_dict_save_bound((size_t)dsz);
         zxd = (uint8_t*)malloc(bound);
         const int64_t zsz = zxc_dict_save(dict_buf, (size_t)dsz, huf, zxd, bound);
@@ -1191,18 +1199,31 @@ int test_dict_huf_zxd_roundtrip(void) {
             break;
         }
 
-        /* Accessor returns the exact table; load validates the covering id. */
-        const void* huf_loaded = zxc_dict_huf(zxd, (size_t)zsz);
-        if (!huf_loaded || memcmp(huf_loaded, huf, ZXC_DICT_HUF_TABLE_SIZE) != 0) {
-            printf("  [FAIL] zxc_dict_huf accessor mismatch\n");
+        /* One-call creator must produce byte-identical .zxd output (the
+         * trainers are deterministic). */
+        const size_t one_bound = zxc_dict_save_bound(ZXC_DICT_SIZE_MAX);
+        zxd_one = (uint8_t*)malloc(one_bound);
+        const int64_t one_sz = zxc_dict_train(samples, sizes, NS, zxd_one, one_bound);
+        if (one_sz != zsz || memcmp(zxd_one, zxd, (size_t)zsz) != 0) {
+            printf("  [FAIL] zxc_dict_train (%lld B) != 3-step pipeline (%lld B)\n",
+                   (long long)one_sz, (long long)zsz);
             break;
         }
+
+        /* Folded load yields content + table + id in one call; the table must
+         * match both the trained bytes and the standalone accessor. */
         const void* content = NULL;
         size_t csz = 0;
+        const void* table = NULL;
         uint32_t id = 0;
-        if (zxc_dict_load(zxd, (size_t)zsz, &content, &csz, &id) != ZXC_OK ||
+        if (zxc_dict_load(zxd, (size_t)zsz, &content, &csz, &table, &id) != ZXC_OK ||
             csz != (size_t)dsz || memcmp(content, dict_buf, csz) != 0) {
             printf("  [FAIL] load of table-carrying .zxd\n");
+            break;
+        }
+        if (!table || table != zxc_dict_huf(zxd, (size_t)zsz) ||
+            memcmp(table, huf, ZXC_DICT_HUF_TABLE_SIZE) != 0) {
+            printf("  [FAIL] dict_load table out-param / zxc_dict_huf mismatch\n");
             break;
         }
         /* The id must bind the table: different from the content-only id. */
@@ -1221,7 +1242,7 @@ int test_dict_huf_zxd_roundtrip(void) {
 
         /* Corrupting the stored table must break the covering id. */
         zxd[zsz - 1] ^= 0xA5;
-        if (zxc_dict_load(zxd, (size_t)zsz, &content, &csz, &id) != ZXC_ERROR_BAD_CHECKSUM) {
+        if (zxc_dict_load(zxd, (size_t)zsz, &content, &csz, NULL, &id) != ZXC_ERROR_BAD_CHECKSUM) {
             printf("  [FAIL] corrupted table not rejected\n");
             break;
         }
@@ -1229,6 +1250,8 @@ int test_dict_huf_zxd_roundtrip(void) {
     } while (0);
 
     free(zxd);
+    free(zxd_one);
+    free(dict_buf);
     for (int i = 0; i < NS; i++) free(bufs[i]);
     if (!ok) return 0;
     printf("PASS\n\n");
