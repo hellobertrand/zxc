@@ -93,7 +93,7 @@ int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size,
 }
 
 int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_out,
-                  size_t* content_size_out, uint32_t* dict_id_out) {
+                  size_t* content_size_out, const void** huf_out, uint32_t* dict_id_out) {
     if (UNLIKELY(!buf || !content_out || !content_size_out)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(buf_size < ZXC_DICT_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
 
@@ -123,6 +123,7 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
 
     *content_out = content;
     *content_size_out = content_size;
+    if (huf_out) *huf_out = huf;
     if (dict_id_out) *dict_id_out = id;
 
     return ZXC_OK;
@@ -416,6 +417,10 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
 /** Training block size for the shared-table literal statistics. */
 #define ZXC_DICT_HUF_TRAIN_BLOCK 4096U
 
+/** Cap on the corpus bytes compressed by the literal-table trainer: the
+ *  histogram converges early, so past it slices are strided evenly instead. */
+#define ZXC_DICT_HUF_SAMPLE_BUDGET (8U << 20)
+
 /* The public table-size constant must match the internal packed-header size. */
 _Static_assert(ZXC_DICT_HUF_TABLE_SIZE == ZXC_HUF_LENGTHS_HEADER_SIZE,
                "ZXC_DICT_HUF_TABLE_SIZE / ZXC_HUF_LENGTHS_HEADER_SIZE mismatch");
@@ -450,13 +455,24 @@ int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRI
     uint8_t* const work = cctx.dict_buffer;
     ZXC_MEMCPY(work, dict, dict_size);
 
+    /* Slice stride: process every slice while the corpus fits the budget,
+     * else 1 slice out of `stride` spread evenly across all samples. */
+    size_t corpus_total = 0;
+    for (size_t s = 0; s < n_samples; s++) corpus_total += sample_sizes[s];
+    const size_t stride =
+        (corpus_total > ZXC_DICT_HUF_SAMPLE_BUDGET)
+            ? (corpus_total + ZXC_DICT_HUF_SAMPLE_BUDGET - 1) / ZXC_DICT_HUF_SAMPLE_BUDGET
+            : 1;
+
     int rc = ZXC_OK;
+    size_t slice_idx = 0;
     for (size_t s = 0; s < n_samples && rc == ZXC_OK; s++) {
         const uint8_t* sample = (const uint8_t*)samples[s];
         const size_t sample_size = sample_sizes[s];
         if (!sample || sample_size == 0) continue;
 
-        for (size_t off = 0; off < sample_size; off += ZXC_DICT_HUF_TRAIN_BLOCK) {
+        for (size_t off = 0; off < sample_size; off += ZXC_DICT_HUF_TRAIN_BLOCK, slice_idx++) {
+            if (slice_idx % stride != 0) continue;
             const size_t slice = (sample_size - off < ZXC_DICT_HUF_TRAIN_BLOCK)
                                      ? (sample_size - off)
                                      : ZXC_DICT_HUF_TRAIN_BLOCK;
@@ -484,4 +500,44 @@ int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRI
     ZXC_FREE(out_scratch);
     zxc_cctx_free(&cctx);
     return rc;
+}
+
+/* -------------------------------------------------------------------------
+ *  All-in-one convenience: samples -> ready-to-write .zxd bytes
+ * ------------------------------------------------------------------------- */
+
+int64_t zxc_dict_train(const void* const* RESTRICT samples, const size_t* RESTRICT sample_sizes,
+                       const size_t n_samples, void* RESTRICT zxd_buf, const size_t zxd_capacity) {
+    if (UNLIKELY(!samples || !sample_sizes || n_samples == 0 || !zxd_buf || zxd_capacity == 0))
+        return ZXC_ERROR_NULL_INPUT;
+
+    /* Train the content into a temporary buffer (max-content sized), then the
+     * shared table from that content, then serialize both into zxd_buf. The
+     * two-phase training is a real data dependency (the table needs the trained
+     * content to histogram post-LZ literals); this hides it behind one call. */
+    uint8_t* content = (uint8_t*)ZXC_MALLOC(ZXC_DICT_SIZE_MAX);
+    if (UNLIKELY(!content)) return ZXC_ERROR_MEMORY;
+
+    int64_t out;
+    const int64_t content_size =
+        zxc_train_dict(samples, sample_sizes, n_samples, content, ZXC_DICT_SIZE_MAX);
+    if (UNLIKELY(content_size <= 0)) {
+        out = (content_size < 0) ? content_size : ZXC_ERROR_SRC_TOO_SMALL;
+        goto done;
+    }
+
+    {
+        uint8_t huf[ZXC_HUF_LENGTHS_HEADER_SIZE];
+        const int hrc = zxc_train_dict_huf(samples, sample_sizes, n_samples, content,
+                                           (size_t)content_size, huf);
+        if (UNLIKELY(hrc != ZXC_OK)) {
+            out = hrc;
+            goto done;
+        }
+        out = zxc_dict_save(content, (size_t)content_size, huf, zxd_buf, zxd_capacity);
+    }
+
+done:
+    ZXC_FREE(content);
+    return out;
 }

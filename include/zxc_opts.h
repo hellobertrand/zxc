@@ -25,6 +25,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "zxc_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -94,6 +96,22 @@ typedef struct {
     zxc_progress_callback_t progress_cb; /**< Optional progress callback (NULL to disable). */
     void* user_data;                     /**< User context pointer passed to progress_cb. */
 } zxc_decompress_opts_t;
+
+/**
+ * @brief Returns `sizeof(zxc_compress_opts_t)` as compiled into the library.
+ *
+ * Layout guard for bindings that mirror the options structs by hand (raw FFI
+ * declarations, byte-offset serialization) instead of compiling against this
+ * header: comparing the mirrored size against this value at load time turns a
+ * silent layout drift (undefined behaviour) into an immediate, explicit error.
+ */
+ZXC_EXPORT size_t zxc_compress_opts_size(void);
+
+/**
+ * @brief Returns `sizeof(zxc_decompress_opts_t)` as compiled into the library.
+ * @see zxc_compress_opts_size
+ */
+ZXC_EXPORT size_t zxc_decompress_opts_size(void);
 
 #ifdef __cplusplus
 }

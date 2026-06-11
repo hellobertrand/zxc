@@ -57,6 +57,16 @@ void zxc_aligned_free(void* ptr) {
 }
 
 /*
+ * @copydoc zxc_compress_opts_size
+ */
+size_t zxc_compress_opts_size(void) { return sizeof(zxc_compress_opts_t); }
+
+/*
+ * @copydoc zxc_decompress_opts_size
+ */
+size_t zxc_decompress_opts_size(void) { return sizeof(zxc_decompress_opts_t); }
+
+/*
  * Layout of the persistent buffer carved by every cctx/dctx init: both modes
  * (compress, decompress) compute the same offset table, used by the workspace
  * sizer and the in-place init.

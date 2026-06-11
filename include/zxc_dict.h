@@ -73,18 +73,23 @@ ZXC_EXPORT uint32_t zxc_dict_id(const void* dict, size_t dict_size);
 /**
  * @brief Load and validate a `.zxd` dictionary file from a memory buffer.
  *
- * On success, @p content_out points into the input buffer (zero-copy).
- * The caller must keep @p buf alive while the content pointer is in use.
+ * On success, @p content_out and @p huf_out (when non-NULL) point into the
+ * input buffer (zero-copy); the caller must keep @p buf alive while they are in
+ * use. A single call yields everything needed to (de)compress with the
+ * dictionary, pass @p content_out / @p huf_out straight to the @c dict /
+ * @c dict_huf option fields.
  *
  * @param[in]  buf              Buffer containing the .zxd file.
  * @param[in]  buf_size         Size of @p buf in bytes.
  * @param[out] content_out      Receives a pointer to the dictionary content.
  * @param[out] content_size_out Receives the content size in bytes.
+ * @param[out] huf_out          Receives a pointer to the 128-byte shared Huffman
+ *                              table (may be NULL if not needed).
  * @param[out] dict_id_out      Receives the dictionary ID (may be NULL).
  * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
  */
 ZXC_EXPORT int zxc_dict_load(const void* buf, size_t buf_size, const void** content_out,
-                             size_t* content_size_out, uint32_t* dict_id_out);
+                             size_t* content_size_out, const void** huf_out, uint32_t* dict_id_out);
 
 /**
  * @brief Serialize dictionary content and its shared Huffman table to the
@@ -165,6 +170,29 @@ ZXC_EXPORT int64_t zxc_train_dict(const void* const* samples, const size_t* samp
 ZXC_EXPORT int zxc_train_dict_huf(const void* const* samples, const size_t* sample_sizes,
                                   size_t n_samples, const void* dict, size_t dict_size,
                                   uint8_t* huf_lengths_out);
+
+/**
+ * @brief One-call dictionary creation: train content + shared table, serialize
+ *        to ready-to-write `.zxd` bytes.
+ *
+ * Convenience over the train/train-table/save sequence: it runs
+ * zxc_train_dict() then zxc_train_dict_huf() (which depends on the trained
+ * content) then zxc_dict_save(), writing a complete `.zxd` into @p zxd_buf.
+ * Use zxc_dict_save_bound(ZXC_DICT_SIZE_MAX) for a safe @p zxd_capacity, or
+ * size to the dictionary you expect. The lower-level primitives remain
+ * available for advanced use (raw content-only dictionaries, retraining only
+ * the table, or supplying externally-sourced content).
+ *
+ * @param[in]  samples       Array of pointers to sample buffers.
+ * @param[in]  sample_sizes  Array of sample sizes in bytes.
+ * @param[in]  n_samples     Number of samples.
+ * @param[out] zxd_buf       Output buffer for the `.zxd` file.
+ * @param[in]  zxd_capacity  Capacity of @p zxd_buf.
+ * @return Number of `.zxd` bytes written on success, or a negative
+ *         @ref zxc_error_t code.
+ */
+ZXC_EXPORT int64_t zxc_dict_train(const void* const* samples, const size_t* sample_sizes,
+                                  size_t n_samples, void* zxd_buf, size_t zxd_capacity);
 
 /**
  * @brief Returns a pointer to the shared Huffman table inside a `.zxd` buffer.
