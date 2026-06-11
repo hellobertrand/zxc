@@ -42,20 +42,17 @@ uint32_t zxc_dict_id_ex(const void* RESTRICT content, const size_t content_size,
 /* -------------------------------------------------------------------------
  *  .zxd format: save / load / bound
  *
- *  Layout (ZXC_DICT_HEADER_SIZE = 16 bytes + content [+ Huffman table]):
+ *  Layout (ZXC_DICT_HEADER_SIZE = 16 bytes + content + Huffman table):
  *    0x00  4  Magic   (0x9CB0D1C7 LE)
  *    0x04  1  Version (1)
- *    0x05  1  Flags   (bits 0-3: checksum algo id, 0=RapidHash;
- *                      bit 4: ZXC_DICT_FLAG_HUF, a 128-byte packed Huffman
- *                      code-lengths table follows the content;
- *                      bits 5-7 reserved)
+ *    0x05  1  Flags   (bits 0-3: checksum algo id, 0=RapidHash; bits 4-7 reserved)
  *    0x06  2  Content size (u16 LE)
- *    0x08  4  dict_id (u32 LE; covers content AND, when present, the Huffman
- *                      table -- see zxc_dict_id_ex)
+ *    0x08  4  dict_id (u32 LE; covers content AND the Huffman table --
+ *                      see zxc_dict_id_ex)
  *    0x0C  2  Reserved (0)
  *    0x0E  2  Header CRC16 (zxc_hash16, computed with bytes 0x0C-0x0F zeroed)
  *    0x10  N  Content bytes
- *    +N    128 Packed Huffman code lengths (only when ZXC_DICT_FLAG_HUF set)
+ *    +N    128 Packed Huffman code lengths (always present)
  * ------------------------------------------------------------------------- */
 
 uint32_t zxc_dict_get_id(const void* buf, const size_t buf_size) {
@@ -69,21 +66,20 @@ size_t zxc_dict_save_bound(const size_t content_size) {
     return ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_LENGTHS_HEADER_SIZE;
 }
 
-int64_t zxc_dict_save2(const void* RESTRICT content, const size_t content_size,
-                       const void* RESTRICT huf_lengths, void* RESTRICT buf,
-                       const size_t buf_capacity) {
-    if (UNLIKELY(!content || content_size == 0)) return ZXC_ERROR_NULL_INPUT;
+int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size,
+                      const void* RESTRICT huf_lengths, void* RESTRICT buf,
+                      const size_t buf_capacity) {
+    if (UNLIKELY(!content || content_size == 0 || !huf_lengths)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(content_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
-    const size_t total = ZXC_DICT_HEADER_SIZE + content_size +
-                         (huf_lengths ? (size_t)ZXC_HUF_LENGTHS_HEADER_SIZE : 0);
+    const size_t total = ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_LENGTHS_HEADER_SIZE;
     if (UNLIKELY(buf_capacity < total)) return ZXC_ERROR_DST_TOO_SMALL;
 
     uint8_t* dst = (uint8_t*)buf;
 
     zxc_store_le32(dst + 0, ZXC_DICT_MAGIC);
     dst[4] = ZXC_DICT_VERSION;
-    dst[5] = huf_lengths ? (uint8_t)ZXC_DICT_FLAG_HUF : 0;
+    dst[5] = 0; /* flags: reserved */
     zxc_store_le16(dst + 6, (uint16_t)content_size);
     zxc_store_le32(dst + 8, zxc_dict_id_ex(content, content_size, (const uint8_t*)huf_lengths));
     zxc_store_le32(dst + 12, 0); /* reserved (0x0C) + CRC16 (0x0E), zeroed before CRC */
@@ -91,16 +87,9 @@ int64_t zxc_dict_save2(const void* RESTRICT content, const size_t content_size,
     zxc_store_le16(dst + 14, crc);
 
     ZXC_MEMCPY(dst + ZXC_DICT_HEADER_SIZE, content, content_size);
-    if (huf_lengths)
-        ZXC_MEMCPY(dst + ZXC_DICT_HEADER_SIZE + content_size, huf_lengths,
-                   ZXC_HUF_LENGTHS_HEADER_SIZE);
+    ZXC_MEMCPY(dst + ZXC_DICT_HEADER_SIZE + content_size, huf_lengths, ZXC_HUF_LENGTHS_HEADER_SIZE);
 
     return (int64_t)total;
-}
-
-int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size, void* RESTRICT buf,
-                      const size_t buf_capacity) {
-    return zxc_dict_save2(content, content_size, NULL, buf, buf_capacity);
 }
 
 int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_out,
@@ -116,7 +105,8 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
     const size_t content_size = zxc_le16(src + 6);
     if (UNLIKELY(content_size == 0)) return ZXC_ERROR_CORRUPT_DATA;
     if (UNLIKELY(content_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    if (UNLIKELY(buf_size < ZXC_DICT_HEADER_SIZE + content_size)) return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(buf_size < ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_LENGTHS_HEADER_SIZE))
+        return ZXC_ERROR_SRC_TOO_SMALL;
 
     uint8_t temp[ZXC_DICT_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, sizeof(temp));
@@ -125,16 +115,9 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
     if (UNLIKELY(zxc_le16(src + 14) != expected_crc)) return ZXC_ERROR_BAD_HEADER;
 
     const uint8_t* content = src + ZXC_DICT_HEADER_SIZE;
+    const uint8_t* huf = content + content_size;
 
-    /* Optional shared Huffman table after the content. */
-    const uint8_t* huf = NULL;
-    if (src[5] & ZXC_DICT_FLAG_HUF) {
-        if (UNLIKELY(buf_size < ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_LENGTHS_HEADER_SIZE))
-            return ZXC_ERROR_SRC_TOO_SMALL;
-        huf = content + content_size;
-    }
-
-    /* Verify dict_id matches content (and table, when present). */
+    /* Verify dict_id matches the (content, table) pair. */
     const uint32_t id = zxc_dict_id_ex(content, content_size, huf);
     if (UNLIKELY(zxc_le32(src + 8) != id)) return ZXC_ERROR_BAD_CHECKSUM;
 
@@ -150,7 +133,6 @@ const void* zxc_dict_huf(const void* buf, const size_t buf_size) {
     const uint8_t* src = (const uint8_t*)buf;
     if (UNLIKELY(zxc_le32(src) != ZXC_DICT_MAGIC)) return NULL;
     if (UNLIKELY(src[4] != ZXC_DICT_VERSION)) return NULL;
-    if (!(src[5] & ZXC_DICT_FLAG_HUF)) return NULL;
     const size_t content_size = zxc_le16(src + 6);
     if (UNLIKELY(content_size == 0 ||
                  buf_size < ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_LENGTHS_HEADER_SIZE))

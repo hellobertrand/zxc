@@ -9,6 +9,18 @@
 
 #include "../include/zxc_dict.h"
 
+/* Build a valid 128-byte packed lengths table from arbitrary content bytes
+ * (the .zxd format requires one). */
+static void build_test_huf_lengths(const void* data, size_t n,
+                                   uint8_t out[ZXC_DICT_HUF_TABLE_SIZE]) {
+    uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
+    const uint8_t* p = (const uint8_t*)data;
+    for (size_t i = 0; i < n; i++) freq[p[i]]++;
+    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+    zxc_huf_build_code_lengths(freq, code_len, NULL);
+    zxc_huf_pack_lengths(code_len, out);
+}
+
 static void gen_dict_friendly_data(uint8_t* buf, size_t size, const uint8_t* dict,
                                    size_t dict_size) {
     for (size_t i = 0; i < size; i++) {
@@ -27,9 +39,12 @@ int test_dict_zxd_roundtrip(void) {
     const char* content = "hello dict content for testing zxd format!";
     const size_t content_size = strlen(content);
 
+    uint8_t huf[ZXC_DICT_HUF_TABLE_SIZE];
+    build_test_huf_lengths(content, content_size, huf);
+
     size_t bound = zxc_dict_save_bound(content_size);
     uint8_t* zxd = (uint8_t*)malloc(bound);
-    int64_t written = zxc_dict_save(content, content_size, zxd, bound);
+    int64_t written = zxc_dict_save(content, content_size, huf, zxd, bound);
     if (written < 0) {
         printf("  [FAIL] zxc_dict_save returned %lld\n", (long long)written);
         free(zxd);
@@ -52,9 +67,19 @@ int test_dict_zxd_roundtrip(void) {
         return 0;
     }
 
-    uint32_t expected_id = zxc_dict_id(content, content_size);
-    if (loaded_id != expected_id) {
-        printf("  [FAIL] dict_id mismatch: got %u, expected %u\n", loaded_id, expected_id);
+    /* The id covers (content, table): nonzero, matches the stored header id,
+     * and differs from the content-only id. */
+    if (loaded_id == 0 || loaded_id != zxc_dict_get_id(zxd, (size_t)written) ||
+        loaded_id == zxc_dict_id(content, content_size)) {
+        printf("  [FAIL] dict_id binding incorrect: got %u\n", loaded_id);
+        free(zxd);
+        return 0;
+    }
+
+    /* The table accessor must return the exact bytes we stored. */
+    const void* huf_loaded = zxc_dict_huf(zxd, (size_t)written);
+    if (!huf_loaded || memcmp(huf_loaded, huf, ZXC_DICT_HUF_TABLE_SIZE) != 0) {
+        printf("  [FAIL] zxc_dict_huf accessor mismatch\n");
         free(zxd);
         return 0;
     }
@@ -128,19 +153,25 @@ int test_dict_get_id_apis(void) {
     printf("  [PASS] zxc_get_dict_id returns 0 for no-dict file\n");
     free(compressed);
 
-    /* Save to .zxd and verify zxc_dict_get_id */
+    /* Save to .zxd and verify zxc_dict_get_id matches what load reports */
+    uint8_t huf[ZXC_DICT_HUF_TABLE_SIZE];
+    build_test_huf_lengths(dict, dict_size, huf);
     size_t zxd_bound = zxc_dict_save_bound(dict_size);
     uint8_t* zxd = (uint8_t*)malloc(zxd_bound);
-    int64_t zxd_size = zxc_dict_save(dict, dict_size, zxd, zxd_bound);
+    int64_t zxd_size = zxc_dict_save(dict, dict_size, huf, zxd, zxd_bound);
     if (zxd_size <= 0) {
         printf("  [FAIL] zxc_dict_save returned %lld\n", (long long)zxd_size);
         free(zxd);
         return 0;
     }
 
+    const void* lc = NULL;
+    size_t lcs = 0;
+    uint32_t loaded_id = 0;
     uint32_t zxd_id = zxc_dict_get_id(zxd, (size_t)zxd_size);
-    if (zxd_id != expected_id) {
-        printf("  [FAIL] zxc_dict_get_id: got 0x%08X, expected 0x%08X\n", zxd_id, expected_id);
+    if (zxd_id == 0 || zxc_dict_load(zxd, (size_t)zxd_size, &lc, &lcs, &loaded_id) != ZXC_OK ||
+        loaded_id != zxd_id) {
+        printf("  [FAIL] zxc_dict_get_id: got 0x%08X, load id 0x%08X\n", zxd_id, loaded_id);
         free(zxd);
         return 0;
     }
@@ -832,7 +863,7 @@ int test_dict_seekable_roundtrip(void) {
         return 0;
     }
 
-    int rc = zxc_seekable_set_dict(s, dict_content, dict_size);
+    int rc = zxc_seekable_set_dict(s, dict_content, dict_size, NULL);
     if (rc != ZXC_OK) {
         printf("  [FAIL] seekable_set_dict returned %d\n", rc);
         zxc_seekable_free(s);
@@ -907,7 +938,7 @@ int test_dict_seekable_mt_roundtrip(void) {
         free(compressed);
         return 0;
     }
-    zxc_seekable_set_dict(s, dict_content, dict_size);
+    zxc_seekable_set_dict(s, dict_content, dict_size, NULL);
 
     /* Full range MT decompress */
     uint8_t* decompressed = (uint8_t*)malloc(src_size);
@@ -1045,7 +1076,7 @@ int test_dict_seekable_dict_id_checks(void) {
             printf("  [FAIL] seekable_open returned NULL\n");
             ok = 0;
         } else {
-            int rc = zxc_seekable_set_dict(s, k_dict_b, sizeof(k_dict_b) - 1);
+            int rc = zxc_seekable_set_dict(s, k_dict_b, sizeof(k_dict_b) - 1, NULL);
             if (rc != ZXC_ERROR_DICT_MISMATCH) {
                 printf("  [FAIL] set_dict(wrong): expected DICT_MISMATCH, got %d (%s)\n", rc,
                        zxc_error_name(rc));
@@ -1077,7 +1108,7 @@ int test_dict_seekable_dict_id_checks(void) {
     // 3. Correct dict still works (guard against over-rejection).
     if (ok) {
         zxc_seekable* s = zxc_seekable_open(compressed, (size_t)comp_size);
-        if (s && zxc_seekable_set_dict(s, k_dict_a, sizeof(k_dict_a) - 1) == ZXC_OK &&
+        if (s && zxc_seekable_set_dict(s, k_dict_a, sizeof(k_dict_a) - 1, NULL) == ZXC_OK &&
             zxc_seekable_decompress_range(s, out, src_size, 0, src_size) == (int64_t)src_size &&
             memcmp(src, out, src_size) == 0) {
             // expected
@@ -1124,7 +1155,7 @@ static size_t gen_structured_sample(uint8_t* buf, size_t cap, uint32_t seed) {
 }
 
 int test_dict_huf_zxd_roundtrip(void) {
-    printf("=== TEST: Dict - .zxd with shared Huffman table (save2/load/accessor) ===\n");
+    printf("=== TEST: Dict - .zxd shared Huffman table (save/load/accessor) ===\n");
 
     enum { NS = 6, SCAP = 16384 };
     uint8_t* bufs[NS];
@@ -1154,9 +1185,9 @@ int test_dict_huf_zxd_roundtrip(void) {
 
         const size_t bound = zxc_dict_save_bound((size_t)dsz);
         zxd = (uint8_t*)malloc(bound);
-        const int64_t zsz = zxc_dict_save2(dict_buf, (size_t)dsz, huf, zxd, bound);
+        const int64_t zsz = zxc_dict_save(dict_buf, (size_t)dsz, huf, zxd, bound);
         if (zsz <= 0) {
-            printf("  [FAIL] dict_save2: %lld\n", (long long)zsz);
+            printf("  [FAIL] dict_save: %lld\n", (long long)zsz);
             break;
         }
 
@@ -1179,15 +1210,12 @@ int test_dict_huf_zxd_roundtrip(void) {
             printf("  [FAIL] dict_id does not cover the table\n");
             break;
         }
-        /* Table-less save keeps the legacy id and exposes no table. */
+        /* The format requires the table: NULL lengths must be refused. */
         uint8_t* zxd2 = (uint8_t*)malloc(bound);
-        const int64_t z2 = zxc_dict_save(dict_buf, (size_t)dsz, zxd2, bound);
-        const int legacy_ok =
-            z2 > 0 && zxc_dict_huf(zxd2, (size_t)z2) == NULL &&
-            zxc_dict_get_id(zxd2, (size_t)z2) == zxc_dict_id(dict_buf, (size_t)dsz);
+        const int64_t z2 = zxc_dict_save(dict_buf, (size_t)dsz, NULL, zxd2, bound);
         free(zxd2);
-        if (!legacy_ok) {
-            printf("  [FAIL] table-less save regressed\n");
+        if (z2 != ZXC_ERROR_NULL_INPUT) {
+            printf("  [FAIL] table-less save accepted: %lld\n", (long long)z2);
             break;
         }
 

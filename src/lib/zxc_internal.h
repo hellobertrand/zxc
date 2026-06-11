@@ -358,11 +358,10 @@ extern "C" {
 
 /** @brief Magic word identifying ZXC dictionary files (.zxd). */
 #define ZXC_DICT_MAGIC 0x9CB0D1C7U
-/** @brief Current dictionary file format version. */
+/** @brief Current dictionary file format version. A 128-byte packed Huffman
+ *         code-lengths table (shared literal table) always follows the
+ *         dictionary content. */
 #define ZXC_DICT_VERSION 1
-/** @brief .zxd flags bit 4: a 128-byte packed Huffman code-lengths table
- *         (shared literal table) follows the dictionary content. */
-#define ZXC_DICT_FLAG_HUF 0x10U
 /** @brief K-gram length scanned by the dictionary trainer. Aligned on the LZ
  *         minimum match length so trained patterns are matchable at encode time. */
 #define ZXC_DICT_KGRAM_LEN ZXC_LZ_MIN_MATCH_LEN

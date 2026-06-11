@@ -611,24 +611,21 @@ static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, 
         fprintf(stderr, "Error: invalid dictionary '%s': %s\n", path, zxc_error_name(rc));
         return 1;
     }
-    const int has_huf = zxc_dict_huf(buf, buf_size) != NULL;
     if (json_output) {
         printf("{\n"
                "  \"type\": \"dictionary\",\n"
                "  \"filename\": \"%s\",\n"
                "  \"dict_id\": \"0x%08X\",\n"
                "  \"content_size_bytes\": %zu,\n"
-               "  \"literal_table\": %s,\n"
                "  \"file_size_bytes\": %lld\n"
                "}\n",
-               path, id, content_size, has_huf ? "true" : "false", file_size);
+               path, id, content_size, file_size);
     } else {
         printf("\n  Dictionary file (.zxd)\n"
                "  Dict ID:       0x%08X\n"
                "  Content size:  %zu bytes\n"
-               "  Literal table: %s\n"
                "  File:          %s\n",
-               id, content_size, has_huf ? "yes" : "no", path);
+               id, content_size, path);
     }
     return 0;
 }
@@ -1446,19 +1443,13 @@ int main(int argc, char** argv) {
                                          dict_buf, dict_cap);
 
         /* Train the shared literal Huffman table on the same samples (needs
-         * the trained dict for the post-LZ literal distribution). Failure is
-         * non-fatal: fall back to a table-less .zxd. */
+         * the trained dict for the post-LZ literal distribution). The .zxd
+         * format always carries the table, so a failure here is fatal. */
         uint8_t huf_lengths[ZXC_DICT_HUF_TABLE_SIZE];
-        int has_huf = 0;
+        int huf_rc = ZXC_ERROR_NULL_INPUT;
         if (dict_sz > 0) {
-            const int hrc = zxc_train_dict_huf(samples, sample_sizes, (size_t)n_loaded, dict_buf,
-                                               (size_t)dict_sz, huf_lengths);
-            if (hrc == ZXC_OK) {
-                has_huf = 1;
-            } else {
-                fprintf(stderr, "Warning: literal table training failed (%s), saving without it\n",
-                        zxc_error_name(hrc));
-            }
+            huf_rc = zxc_train_dict_huf(samples, sample_sizes, (size_t)n_loaded, dict_buf,
+                                        (size_t)dict_sz, huf_lengths);
         }
 
         for (int i = 0; i < n_loaded; i++) free((void*)samples[i]);
@@ -1471,11 +1462,16 @@ int main(int argc, char** argv) {
             free(dict);
             return 1;
         }
+        if (huf_rc != ZXC_OK) {
+            fprintf(stderr, "Error: literal table training failed: %s\n", zxc_error_name(huf_rc));
+            free(dict_buf);
+            free(dict);
+            return 1;
+        }
 
         size_t zxd_bound = zxc_dict_save_bound((size_t)dict_sz);
         uint8_t* zxd = (uint8_t*)malloc(zxd_bound);
-        int64_t zxd_sz = zxc_dict_save2(dict_buf, (size_t)dict_sz, has_huf ? huf_lengths : NULL,
-                                        zxd, zxd_bound);
+        int64_t zxd_sz = zxc_dict_save(dict_buf, (size_t)dict_sz, huf_lengths, zxd, zxd_bound);
         free(dict_buf);
         if (zxd_sz <= 0) {
             fprintf(stderr, "Error: dict save failed: %s\n", zxc_error_name((int)zxd_sz));
