@@ -77,10 +77,11 @@
 #define ZXC_DICT_SIZE_MAX ((1U << 16) - 1U)
 /** @brief Size of the .zxd dictionary file header in bytes. */
 #define ZXC_DICT_HEADER_SIZE 16
-/** @brief Size in bytes of the shared literal Huffman table carried by a .zxd
- *         file (packed 4-bit code lengths for 256 symbols). See
+/** @brief Size in bytes of a packed literal Huffman code-lengths table
+ *         (256 symbols, 4 bits each): the shared table carried by a .zxd
+ *         file and, internally, the per-block lengths header. See
  *         zxc_train_dict_huf() / zxc_dict_huf(). */
-#define ZXC_DICT_HUF_TABLE_SIZE 128
+#define ZXC_HUF_TABLE_SIZE 128
 /** @} */ /* end of dictionary */
 
 /**

@@ -1338,7 +1338,7 @@ ZXC_EXPORT int zxc_train_dict_huf(
     size_t              n_samples,
     const void*         dict,        // content from zxc_train_dict
     size_t              dict_size,
-    uint8_t*            huf_lengths_out  // ZXC_DICT_HUF_TABLE_SIZE (128) bytes
+    uint8_t*            huf_lengths_out  // ZXC_HUF_TABLE_SIZE (128) bytes
 );
 ```
 
@@ -1398,7 +1398,7 @@ Returns a zero-copy pointer to the 128-byte shared Huffman table inside a `.zxd`
 ZXC_EXPORT size_t zxc_dict_save_bound(size_t content_size);
 ```
 
-Returns the `.zxd` file size for a given content size (`ZXC_DICT_HEADER_SIZE + content_size + ZXC_DICT_HUF_TABLE_SIZE`).
+Returns the `.zxd` file size for a given content size (`ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_TABLE_SIZE`).
 
 ### `zxc_seekable_set_dict`
 

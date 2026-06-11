@@ -106,19 +106,32 @@ func TestDictIDConsistency(t *testing.T) {
 		t.Fatalf("GetDictID(archive) = %d, want %d", archiveID, contentID)
 	}
 
-	zxd, err := DictSave(dict)
+	huf, err := TrainDictHuf(dictSamples(), dict)
+	if err != nil {
+		t.Fatalf("TrainDictHuf: %v", err)
+	}
+	zxd, err := DictSave(dict, huf)
 	if err != nil {
 		t.Fatalf("DictSave: %v", err)
 	}
-	if zxdID := DictGetID(zxd); zxdID != contentID {
-		t.Fatalf("DictGetID(.zxd) = %d, want %d", zxdID, contentID)
+	// The .zxd id binds (content, table): non-zero and distinct from the
+	// content-only id.
+	if zxdID := DictGetID(zxd); zxdID == 0 || zxdID == contentID {
+		t.Fatalf("DictGetID(.zxd) = %d, want non-zero and != content id %d", zxdID, contentID)
+	}
+	if got := DictHuf(zxd); !bytes.Equal(got, huf) {
+		t.Fatalf("DictHuf(.zxd) mismatch")
 	}
 }
 
 func TestDictSaveLoadRoundtrip(t *testing.T) {
 	dict := trainTestDict(t)
 
-	zxd, err := DictSave(dict)
+	huf, err := TrainDictHuf(dictSamples(), dict)
+	if err != nil {
+		t.Fatalf("TrainDictHuf: %v", err)
+	}
+	zxd, err := DictSave(dict, huf)
 	if err != nil {
 		t.Fatalf("DictSave: %v", err)
 	}
@@ -130,8 +143,8 @@ func TestDictSaveLoadRoundtrip(t *testing.T) {
 	if !bytes.Equal(content, dict) {
 		t.Fatalf("DictLoad content mismatch (len got %d want %d)", len(content), len(dict))
 	}
-	if id != DictID(dict) {
-		t.Fatalf("DictLoad id = %d, want %d", id, DictID(dict))
+	if id != DictGetID(zxd) {
+		t.Fatalf("DictLoad id = %d, want %d", id, DictGetID(zxd))
 	}
 }
 
@@ -171,7 +184,7 @@ func TestSeekableSetDictRange(t *testing.T) {
 	}
 	defer s.Close()
 
-	if err := s.SetDict(dict); err != nil {
+	if err := s.SetDict(dict, nil); err != nil {
 		t.Fatalf("SetDict: %v", err)
 	}
 
@@ -188,5 +201,45 @@ func TestSeekableSetDictRange(t *testing.T) {
 	}
 	if !bytes.Equal(dst, payload[offset:offset+length]) {
 		t.Fatalf("DecompressRange content mismatch")
+	}
+}
+
+func TestDictionaryObjectRoundtrip(t *testing.T) {
+	d, err := TrainDictionary(dictSamples())
+	if err != nil {
+		t.Fatalf("TrainDictionary: %v", err)
+	}
+	if len(d.Content()) == 0 || len(d.Huf()) != HufTableSize || d.ID() == 0 {
+		t.Fatalf("Dictionary fields: content=%d huf=%d id=%d", len(d.Content()), len(d.Huf()), d.ID())
+	}
+
+	// Save/Load preserves the bundle and the pair-binding id.
+	zxd, err := d.Save()
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	d2, err := LoadDictionary(zxd)
+	if err != nil {
+		t.Fatalf("LoadDictionary: %v", err)
+	}
+	if !bytes.Equal(d.Content(), d2.Content()) || !bytes.Equal(d.Huf(), d2.Huf()) || d.ID() != d2.ID() {
+		t.Fatalf("Save/Load bundle mismatch")
+	}
+	if DictGetID(zxd) != d.ID() {
+		t.Fatalf("DictGetID(.zxd) = %d, want %d", DictGetID(zxd), d.ID())
+	}
+
+	// One-call attach round-trip + id binding negative.
+	payload := dictSamples()[2]
+	comp, err := Compress(payload, WithLevel(LevelDensity), WithDictionary(d))
+	if err != nil {
+		t.Fatalf("Compress(WithDictionary): %v", err)
+	}
+	out, err := Decompress(comp, WithDictionary(d))
+	if err != nil || !bytes.Equal(out, payload) {
+		t.Fatalf("Decompress(WithDictionary): %v", err)
+	}
+	if _, err := Decompress(comp, WithDict(d.Content())); err == nil {
+		t.Fatalf("content-only decode of a pair-bound archive should fail")
 	}
 }

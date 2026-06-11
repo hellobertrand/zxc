@@ -177,7 +177,7 @@ struct zxc_seekable_s {
     uint8_t* dict;
     size_t dict_size;
     /* Shared literal Huffman table (owned copy; meaningful when has_dict_huf). */
-    uint8_t dict_huf[ZXC_HUF_LENGTHS_HEADER_SIZE];
+    uint8_t dict_huf[ZXC_HUF_TABLE_SIZE];
     int has_dict_huf;
 };
 
@@ -873,7 +873,7 @@ int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_s
     ZXC_MEMCPY(s->dict, dict, dict_size);
     s->dict_size = dict_size;
     if (dict_huf) {
-        ZXC_MEMCPY(s->dict_huf, dict_huf, ZXC_HUF_LENGTHS_HEADER_SIZE);
+        ZXC_MEMCPY(s->dict_huf, dict_huf, ZXC_HUF_TABLE_SIZE);
         s->has_dict_huf = 1;
     }
 

@@ -23,6 +23,9 @@ from ._zxc import (
     pyzxc_dict_get_id,
     pyzxc_dict_save,
     pyzxc_dict_load,
+    pyzxc_train_dict_huf,
+    pyzxc_dict_huf,
+    pyzxc_dict_train,
     pyzxc_seekable_set_dict,
     pyzxc_cstream_create,
     pyzxc_cstream_compress,
@@ -88,6 +91,9 @@ __all__ = [
     "dict_get_id",
     "dict_save",
     "dict_load",
+    "train_dict_huf",
+    "dict_huf",
+    "Dictionary",
 
     # Push streaming
     "CStream",
@@ -190,20 +196,93 @@ def dict_get_id(zxd: bytes) -> int:
     return pyzxc_dict_get_id(zxd)
 
 
-def dict_save(content: bytes) -> bytes:
-    """Serialize raw dictionary *content* into ``.zxd`` file bytes."""
-    return pyzxc_dict_save(content)
+def dict_save(content: bytes, huf_lengths: bytes) -> bytes:
+    """Serialize dictionary *content* and its shared literal Huffman table
+    (128 bytes, from :func:`train_dict_huf`) into ``.zxd`` file bytes.
+
+    The stored dictionary ID covers both content and table.
+    """
+    return pyzxc_dict_save(content, huf_lengths)
+
+
+def train_dict_huf(samples, dict: bytes) -> bytes:
+    """Train the shared literal Huffman table for an already-trained *dict*.
+
+    Compresses *samples* with the dictionary and derives canonical code
+    lengths from the real post-LZ literal distribution. Returns the 128-byte
+    packed table required by :func:`dict_save` and usable as the ``dict_huf``
+    argument of :func:`compress` / :func:`decompress`.
+    """
+    return pyzxc_train_dict_huf(samples, dict)
+
+
+def dict_huf(zxd: bytes):
+    """Return the 128-byte shared Huffman table stored in a ``.zxd`` file,
+    or ``None`` if the buffer is not a valid ``.zxd`` file."""
+    return pyzxc_dict_huf(zxd)
 
 
 def dict_load(zxd: bytes):
     """Parse a ``.zxd`` file and return ``(content, dict_id)``.
 
-    The returned content is an owned copy of the dictionary bytes.
+    The returned content is an owned copy of the dictionary bytes. Prefer
+    :class:`Dictionary` (``Dictionary.load(zxd)``) for the full
+    (content, table, id) bundle.
     """
-    return pyzxc_dict_load(zxd)
+    content, _huf, dict_id = pyzxc_dict_load(zxd)
+    return content, dict_id
 
 
-def compress(data, level = LEVEL_DEFAULT, checksum = False, dict = None) -> bytes:
+class Dictionary:
+    """A trained dictionary: LZ-window content plus its shared literal Huffman
+    table, bundled so callers never juggle the pair by hand.
+
+    Create with :meth:`Dictionary.train` (from samples) or
+    :meth:`Dictionary.load` (from ``.zxd`` bytes), then pass the instance as
+    the ``dict`` argument of :func:`compress` / :func:`decompress` /
+    :func:`stream_compress` or :meth:`Seekable.set_dict`.
+    """
+
+    __slots__ = ("content", "huf", "id")
+
+    def __init__(self, content: bytes, huf: bytes, id: int):
+        if len(huf) != 128:
+            raise ValueError("huf must be exactly 128 bytes")
+        self.content = content
+        self.huf = huf
+        self.id = id
+
+    @classmethod
+    def train(cls, samples) -> "Dictionary":
+        """Train a complete dictionary (content + shared table) from samples."""
+        return cls.load(pyzxc_dict_train(samples))
+
+    @classmethod
+    def load(cls, zxd: bytes) -> "Dictionary":
+        """Parse ``.zxd`` bytes into a Dictionary (owned copies)."""
+        content, huf, dict_id = pyzxc_dict_load(zxd)
+        return cls(content, huf, dict_id)
+
+    def save(self) -> bytes:
+        """Serialize back to ``.zxd`` file bytes."""
+        return dict_save(self.content, self.huf)
+
+    def __eq__(self, other):
+        return (isinstance(other, Dictionary) and self.content == other.content
+                and self.huf == other.huf)
+
+    def __repr__(self):
+        return f"Dictionary(id=0x{self.id:08X}, content={len(self.content)} bytes)"
+
+
+def _split_dict_arg(dict, dict_huf):
+    """Accept either a Dictionary or raw (content, table) pieces."""
+    if isinstance(dict, Dictionary):
+        return dict.content, dict.huf
+    return dict, dict_huf
+
+
+def compress(data, level = LEVEL_DEFAULT, checksum = False, dict = None, dict_huf = None) -> bytes:
     """Compress a bytes object.
 
     Args:
@@ -212,6 +291,9 @@ def compress(data, level = LEVEL_DEFAULT, checksum = False, dict = None) -> byte
         checksum: If True, append a checksum for integrity verification.
         dict: Optional pre-trained dictionary content (bytes) to prime the
             compressor. Must be passed (matching by ID) to `decompress`.
+        dict_huf: Optional shared literal Huffman table (128 bytes, from
+            `train_dict_huf` or `dict_huf`). Ignored without `dict`; becomes
+            part of the archive's dictionary binding.
 
     Returns:
         Compressed bytes.
@@ -219,7 +301,8 @@ def compress(data, level = LEVEL_DEFAULT, checksum = False, dict = None) -> byte
     Note:
         This function operates entirely in-memory. For streaming files, use `stream_compress`.
     """
-    return pyzxc_compress(data, level, checksum, dict)
+    dict, dict_huf = _split_dict_arg(dict, dict_huf)
+    return pyzxc_compress(data, level, checksum, dict, dict_huf)
 
 
 def get_decompressed_size(data: bytes) -> int:
@@ -237,7 +320,7 @@ def get_decompressed_size(data: bytes) -> int:
     return pyzxc_get_decompressed_size(data)
 
 
-def decompress(data, decompress_size=None, checksum=False, dict=None) -> bytes:
+def decompress(data, decompress_size=None, checksum=False, dict=None, dict_huf=None) -> bytes:
     """Decompress a bytes object.
 
     Args:
@@ -247,6 +330,8 @@ def decompress(data, decompress_size=None, checksum=False, dict=None) -> bytes:
         dict: Pre-trained dictionary content (bytes) required if the archive
             was compressed with one. Must match the dictionary ID stored in
             the archive header.
+        dict_huf: Shared literal Huffman table (128 bytes) when the archive
+            was compressed with one (the dictionary ID binds the pair).
 
     Returns:
         Decompressed bytes.
@@ -254,9 +339,10 @@ def decompress(data, decompress_size=None, checksum=False, dict=None) -> bytes:
     if decompress_size is None:
         decompress_size = get_decompressed_size(data)
 
-    return pyzxc_decompress(data, decompress_size, checksum, dict)
+    dict, dict_huf = _split_dict_arg(dict, dict_huf)
+    return pyzxc_decompress(data, decompress_size, checksum, dict, dict_huf)
 
-def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False, seekable=False, dict=None) -> int:
+def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False, seekable=False, dict=None, dict_huf=None) -> int:
     """Compress data from src to dst (file-like objects).
 
     Args:
@@ -292,7 +378,8 @@ def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False, 
     if hasattr(dst, "flush"):
         dst.flush()
 
-    return pyzxc_stream_compress(src, dst, n_threads, level, checksum, seekable, dict)
+    dict, dict_huf = _split_dict_arg(dict, dict_huf)
+    return pyzxc_stream_compress(src, dst, n_threads, level, checksum, seekable, dict, dict_huf)
 
 def stream_decompress(src, dst, n_threads=0, checksum=False) -> int:
     """Decompress data from src to dst (file-like objects).
@@ -389,7 +476,7 @@ class Seekable:
             raise ValueError("Seekable is closed")
         return pyzxc_seekable_block_decomp_size(self._handle, block_idx)
 
-    def set_dict(self, dict: bytes) -> None:
+    def set_dict(self, dict: bytes, dict_huf: bytes | None = None) -> None:
         """Attach a pre-trained dictionary to this seekable handle.
 
         Required before :meth:`decompress_range` when the archive was
@@ -398,7 +485,8 @@ class Seekable:
         """
         if self._handle is None:
             raise ValueError("Seekable is closed")
-        pyzxc_seekable_set_dict(self._handle, dict)
+        dict, dict_huf = _split_dict_arg(dict, dict_huf)
+        pyzxc_seekable_set_dict(self._handle, dict, dict_huf)
 
     def decompress_range(self, offset: int, length: int, *, n_threads: int = 0) -> bytes:
         if self._handle is None:

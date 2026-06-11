@@ -186,6 +186,13 @@ impl CompressOptions {
         self.dict_huf = Some(huf.into());
         self
     }
+
+    /// Attach a [`Dictionary`] (content + shared table) in one call.
+    pub fn with_dictionary(mut self, dictionary: &Dictionary) -> Self {
+        self.dict = Some(dictionary.content().to_vec());
+        self.dict_huf = Some(dictionary.huf().to_vec());
+        self
+    }
 }
 
 // =============================================================================
@@ -231,6 +238,13 @@ impl DecompressOptions {
         self.dict_huf = Some(huf.into());
         self
     }
+
+    /// Attach a [`Dictionary`] (content + shared table) in one call.
+    pub fn with_dictionary(mut self, dictionary: &Dictionary) -> Self {
+        self.dict = Some(dictionary.content().to_vec());
+        self.dict_huf = Some(dictionary.huf().to_vec());
+        self
+    }
 }
 
 // =============================================================================
@@ -248,8 +262,9 @@ mod stdio;
 
 pub use dict::{
     dict_get_id, dict_huf, dict_id, dict_load, dict_save, get_dict_id, train_dict, train_dict_huf,
+    Dictionary,
 };
-pub use zxc_sys::{ZXC_DICT_HUF_TABLE_SIZE, ZXC_DICT_SIZE_MAX};
+pub use zxc_sys::{ZXC_HUF_TABLE_SIZE, ZXC_DICT_SIZE_MAX};
 
 pub use error::{Error, Result};
 pub use oneshot::{

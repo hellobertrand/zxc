@@ -547,8 +547,10 @@ extern "C" {
  *         (active at compression level >= 6).
  *
  *  On-disk section payload layout:
- *  - @c ZXC_HUF_LENGTHS_HEADER_SIZE bytes: @c ZXC_HUF_NUM_SYMBOLS code lengths
- *    packed two per byte (4 bits each).
+ *  - @c ZXC_HUF_TABLE_SIZE bytes: @c ZXC_HUF_NUM_SYMBOLS code lengths
+ *    packed two per byte (4 bits each). The same packed table is used as the
+ *    per-block lengths header (enc_lit=2) and as the shared table carried by
+ *    a .zxd dictionary (enc_lit=3) -- hence the public constant.
  *  - @c ZXC_HUF_STREAM_SIZES_HEADER_SIZE bytes: the first
  *    `ZXC_HUF_NUM_STREAMS - 1` sub-stream sizes as little-endian @c uint16_t;
  *    the last sub-stream size is derived from the enclosing section length.
@@ -556,7 +558,7 @@ extern "C" {
  *    each covering an equal share of the literal indices (the last absorbs
  *    the remainder).
  *
- *  The decoder uses a single lookup table of @c ZXC_HUF_TABLE_SIZE entries
+ *  The decoder uses a single lookup table of @c ZXC_HUF_DEC_TABLE_SIZE entries
  *  (width @c ZXC_HUF_LOOKUP_BITS) that yields 1 or 2 symbols per lookup,
  *  feeding a `ZXC_HUF_NUM_STREAMS`-way interleaved hot loop.
  *  @{ */
@@ -567,19 +569,17 @@ extern "C" {
  *         1 or 2 symbols. */
 #define ZXC_HUF_LOOKUP_BITS 11
 /** @brief Number of entries in the multi-symbol decoder lookup table. */
-#define ZXC_HUF_TABLE_SIZE (1U << ZXC_HUF_LOOKUP_BITS)
+#define ZXC_HUF_DEC_TABLE_SIZE (1U << ZXC_HUF_LOOKUP_BITS)
 /** @brief Alphabet size: one entry per possible byte value. */
 #define ZXC_HUF_NUM_SYMBOLS 256
 /** @brief Interleaved bit-stream count for parallel decoding. */
 #define ZXC_HUF_NUM_STREAMS 4
-/** @brief Packed 4-bit code-lengths header size: two lengths per byte. */
-#define ZXC_HUF_LENGTHS_HEADER_SIZE (ZXC_HUF_NUM_SYMBOLS / 2)
 /** @brief Sub-stream sizes header: `(ZXC_HUF_NUM_STREAMS - 1)` little-endian
  *         @c uint16_t values; the last sub-stream size is derived from the
  *         enclosing section length. */
 #define ZXC_HUF_STREAM_SIZES_HEADER_SIZE ((int)((ZXC_HUF_NUM_STREAMS - 1) * sizeof(uint16_t)))
-/** @brief Total Huffman header size: lengths + sub-stream sizes. */
-#define ZXC_HUF_HEADER_SIZE (ZXC_HUF_LENGTHS_HEADER_SIZE + ZXC_HUF_STREAM_SIZES_HEADER_SIZE)
+/** @brief Total Huffman header size: packed code lengths + sub-stream sizes. */
+#define ZXC_HUF_HEADER_SIZE (ZXC_HUF_TABLE_SIZE + ZXC_HUF_STREAM_SIZES_HEADER_SIZE)
 /** @brief Absolute floor below which Huffman cannot beat RAW even with
  *         zero-entropy literals after the 3 % savings margin. Above this
  *         floor, the precise size accounting at the call site decides per
@@ -604,7 +604,7 @@ extern "C" {
  *         >= 56 bits before the next batch. */
 #define ZXC_HUF_BATCH_BITS (ZXC_HUF_BATCH * ZXC_HUF_LOOKUP_BITS)
 /** @brief Mask for indexing into the multi-symbol decoder lookup table. */
-#define ZXC_HUF_TBL_MASK ((uint64_t)(ZXC_HUF_TABLE_SIZE - 1))
+#define ZXC_HUF_TBL_MASK ((uint64_t)(ZXC_HUF_DEC_TABLE_SIZE - 1))
 /** @brief Per-stream output headroom required to enter the batched fast loop:
  *         each iteration speculatively writes 2 bytes per stream and runs
  *         @c ZXC_HUF_BATCH iterations before re-checking the bound. */
@@ -1434,7 +1434,7 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n
  * @param[in]  payload_size Total payload length in bytes.
  * @param[out] dst          Destination buffer (must not alias @p payload).
  * @param[in]  n_literals   Expected number of decoded bytes.
- * @param[in]  table        Prebuilt @ref ZXC_HUF_TABLE_SIZE-entry decode table.
+ * @param[in]  table        Prebuilt @ref ZXC_HUF_DEC_TABLE_SIZE-entry decode table.
  * @return `ZXC_OK` on success, negative `zxc_error_t` code on failure.
  */
 int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
@@ -1442,7 +1442,7 @@ int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t pa
                                 const zxc_huf_dec_entry_t* RESTRICT table);
 
 /**
- * @brief Build the @ref ZXC_HUF_TABLE_SIZE-entry decode table from per-symbol
+ * @brief Build the @ref ZXC_HUF_DEC_TABLE_SIZE-entry decode table from per-symbol
  *        code lengths. Validates Kraft equality.
  * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` on invalid lengths.
  */

@@ -12,7 +12,7 @@
 /* Build a valid 128-byte packed lengths table from arbitrary content bytes
  * (the .zxd format requires one). */
 static void build_test_huf_lengths(const void* data, size_t n,
-                                   uint8_t out[ZXC_DICT_HUF_TABLE_SIZE]) {
+                                   uint8_t out[ZXC_HUF_TABLE_SIZE]) {
     uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
     const uint8_t* p = (const uint8_t*)data;
     for (size_t i = 0; i < n; i++) freq[p[i]]++;
@@ -39,7 +39,7 @@ int test_dict_zxd_roundtrip(void) {
     const char* content = "hello dict content for testing zxd format!";
     const size_t content_size = strlen(content);
 
-    uint8_t huf[ZXC_DICT_HUF_TABLE_SIZE];
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
     build_test_huf_lengths(content, content_size, huf);
 
     size_t bound = zxc_dict_save_bound(content_size);
@@ -82,7 +82,7 @@ int test_dict_zxd_roundtrip(void) {
      * table bytes we stored, and agree with each other. */
     const void* huf_acc = zxc_dict_huf(zxd, (size_t)written);
     if (!loaded_huf || loaded_huf != huf_acc ||
-        memcmp(loaded_huf, huf, ZXC_DICT_HUF_TABLE_SIZE) != 0) {
+        memcmp(loaded_huf, huf, ZXC_HUF_TABLE_SIZE) != 0) {
         printf("  [FAIL] dict_load table out-param / zxc_dict_huf mismatch\n");
         free(zxd);
         return 0;
@@ -158,7 +158,7 @@ int test_dict_get_id_apis(void) {
     free(compressed);
 
     /* Save to .zxd and verify zxc_dict_get_id matches what load reports */
-    uint8_t huf[ZXC_DICT_HUF_TABLE_SIZE];
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
     build_test_huf_lengths(dict, dict_size, huf);
     size_t zxd_bound = zxc_dict_save_bound(dict_size);
     uint8_t* zxd = (uint8_t*)malloc(zxd_bound);
@@ -1173,7 +1173,7 @@ int test_dict_huf_zxd_roundtrip(void) {
     }
 
     int ok = 0;
-    uint8_t huf[ZXC_DICT_HUF_TABLE_SIZE];
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
     /* Same capacity as zxc_dict_train uses internally, so the primitive path
      * trains identical content and the byte-identity comparison is exact. */
     uint8_t* dict_buf = (uint8_t*)malloc(ZXC_DICT_SIZE_MAX);
@@ -1222,7 +1222,7 @@ int test_dict_huf_zxd_roundtrip(void) {
             break;
         }
         if (!table || table != zxc_dict_huf(zxd, (size_t)zsz) ||
-            memcmp(table, huf, ZXC_DICT_HUF_TABLE_SIZE) != 0) {
+            memcmp(table, huf, ZXC_HUF_TABLE_SIZE) != 0) {
             printf("  [FAIL] dict_load table out-param / zxc_dict_huf mismatch\n");
             break;
         }
@@ -1275,7 +1275,7 @@ int test_dict_huf_table_roundtrip(void) {
 
     int ok = 0;
     uint8_t dict_buf[8192];
-    uint8_t huf[ZXC_DICT_HUF_TABLE_SIZE];
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
     uint8_t *c1 = NULL, *c2 = NULL, *out = NULL;
     do {
         const int64_t dsz = zxc_train_dict(samples, sizes, NS, dict_buf, sizeof(dict_buf));

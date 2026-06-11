@@ -359,7 +359,7 @@ static void build_canonical_codes(const uint8_t* RESTRICT code_len, uint32_t* RE
  * `ZXC_HUF_MAX_CODE_LEN` (<= 15) before calling.
  *
  * @param[in]  code_len Per-symbol code lengths (length `ZXC_HUF_NUM_SYMBOLS`).
- * @param[out] out      Output header buffer of `ZXC_HUF_LENGTHS_HEADER_SIZE` bytes.
+ * @param[out] out      Output header buffer of `ZXC_HUF_TABLE_SIZE` bytes.
  */
 static void pack_lengths_header(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out) {
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i += 2) {
@@ -376,7 +376,7 @@ static void pack_lengths_header(const uint8_t* RESTRICT code_len, uint8_t* RESTR
  * no length exceeds `ZXC_HUF_MAX_CODE_LEN`, and at least one symbol is
  * present.
  *
- * @param[in]  in       Input header buffer of `ZXC_HUF_LENGTHS_HEADER_SIZE` bytes.
+ * @param[in]  in       Input header buffer of `ZXC_HUF_TABLE_SIZE` bytes.
  * @param[out] code_len Output code-length array of length `ZXC_HUF_NUM_SYMBOLS`.
  * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` if a length is too
  *         large or the table is empty.
@@ -552,10 +552,9 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_lite
 
     /* Pack the 128-byte length header, then the streams after it. */
     pack_lengths_header(code_len, dst);
-    const int rc =
-        zxc_huf_encode_streams(literals, n_literals, code_len, dst + ZXC_HUF_LENGTHS_HEADER_SIZE,
-                               dst_cap - ZXC_HUF_LENGTHS_HEADER_SIZE);
-    return (rc < 0) ? rc : rc + ZXC_HUF_LENGTHS_HEADER_SIZE;
+    const int rc = zxc_huf_encode_streams(literals, n_literals, code_len, dst + ZXC_HUF_TABLE_SIZE,
+                                          dst_cap - ZXC_HUF_TABLE_SIZE);
+    return (rc < 0) ? rc : rc + ZXC_HUF_TABLE_SIZE;
 }
 
 /**
@@ -662,7 +661,7 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
     }
 
     /* Build the multi-symbol table. */
-    for (uint32_t p = 0; p < ZXC_HUF_TABLE_SIZE; p++) {
+    for (uint32_t p = 0; p < ZXC_HUF_DEC_TABLE_SIZE; p++) {
         const uint16_t e1 = ss[p & ZXC_HUF_SS_MASK];
         const uint8_t sym1 = (uint8_t)e1;
         const int len1 = e1 >> 8;
@@ -881,16 +880,15 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
      * aligned: the LUT spans 128 lines (8 KB / 64 B) and is hammered every
      * symbol, landing it on a 64-byte boundary avoids any cross-line
      * load split on the per-iteration entry fetch. */
-    ZXC_ALIGN(ZXC_CACHE_LINE_SIZE) zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE];
+    ZXC_ALIGN(ZXC_CACHE_LINE_SIZE) zxc_huf_dec_entry_t table[ZXC_HUF_DEC_TABLE_SIZE];
     {
         const int rc = build_decode_table(code_len, table);
         if (UNLIKELY(rc != ZXC_OK)) return rc;
     }
 
     /* 3. Decode the 4 interleaved sub-streams. */
-    return zxc_huf_decode_streams(payload + ZXC_HUF_LENGTHS_HEADER_SIZE,
-                                  payload_size - ZXC_HUF_LENGTHS_HEADER_SIZE, dst, n_literals,
-                                  table);
+    return zxc_huf_decode_streams(payload + ZXC_HUF_TABLE_SIZE, payload_size - ZXC_HUF_TABLE_SIZE,
+                                  dst, n_literals, table);
 }
 
 /**

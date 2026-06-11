@@ -25,6 +25,10 @@ import (
 // DictSizeMax is the maximum dictionary content size in bytes (65535).
 const DictSizeMax = int(C.ZXC_DICT_SIZE_MAX)
 
+// HufTableSize is the size in bytes of the shared literal Huffman table
+// carried by a .zxd file (packed 4-bit code lengths for 256 symbols).
+const HufTableSize = int(C.ZXC_HUF_TABLE_SIZE)
+
 // setCompressDict points copts at the dictionary content from o when one is
 // configured. The dict byte is pinned for the duration of the C call so that
 // the Go pointer stored inside the (Go-allocated) opts struct satisfies the
@@ -37,6 +41,10 @@ func setCompressDict(copts *C.zxc_compress_opts_t, o options, pinner *runtime.Pi
 	pinner.Pin(&o.dict[0])
 	copts.dict = unsafe.Pointer(&o.dict[0])
 	copts.dict_size = C.size_t(len(o.dict))
+	if len(o.dictHuf) > 0 {
+		pinner.Pin(&o.dictHuf[0])
+		copts.dict_huf = unsafe.Pointer(&o.dictHuf[0])
+	}
 }
 
 // setDecompressDict mirrors setCompressDict for decompression options.
@@ -47,6 +55,10 @@ func setDecompressDict(dopts *C.zxc_decompress_opts_t, o options, pinner *runtim
 	pinner.Pin(&o.dict[0])
 	dopts.dict = unsafe.Pointer(&o.dict[0])
 	dopts.dict_size = C.size_t(len(o.dict))
+	if len(o.dictHuf) > 0 {
+		pinner.Pin(&o.dictHuf[0])
+		dopts.dict_huf = unsafe.Pointer(&o.dictHuf[0])
+	}
 }
 
 // TrainDict trains a dictionary from a corpus of samples.
@@ -152,16 +164,22 @@ func DictGetID(zxd []byte) uint32 {
 	return uint32(C.zxc_dict_get_id(unsafe.Pointer(&zxd[0]), C.size_t(len(zxd))))
 }
 
-// DictSave serializes raw dictionary content into the .zxd file format.
-func DictSave(content []byte) ([]byte, error) {
+// DictSave serializes dictionary content and its shared literal Huffman
+// table ([HufTableSize] bytes, from [TrainDictHuf]) into the .zxd file
+// format. The stored dictionary ID covers both content and table.
+func DictSave(content, hufLengths []byte) ([]byte, error) {
 	if len(content) == 0 {
 		return nil, ErrSrcTooSmall
+	}
+	if len(hufLengths) != HufTableSize {
+		return nil, ErrInvalidData
 	}
 	bound := uint64(C.zxc_dict_save_bound(C.size_t(len(content))))
 	buf := make([]byte, bound)
 	n := C.zxc_dict_save(
 		unsafe.Pointer(&content[0]),
 		C.size_t(len(content)),
+		unsafe.Pointer(&hufLengths[0]),
 		unsafe.Pointer(&buf[0]),
 		C.size_t(bound),
 	)
@@ -171,27 +189,203 @@ func DictSave(content []byte) ([]byte, error) {
 	return buf[:int(n)], nil
 }
 
-// DictLoad validates a .zxd file buffer and returns a copy of its dictionary
-// content along with the dictionary ID.
-func DictLoad(zxd []byte) (content []byte, id uint32, err error) {
+// TrainDictHuf trains the shared literal Huffman table for an
+// already-trained dictionary (see [TrainDict]). It compresses the samples
+// with the dictionary and derives canonical code lengths from the real
+// post-LZ literal distribution. The returned [HufTableSize]-byte table is
+// required by [DictSave] and can be attached with [WithDictHuf].
+func TrainDictHuf(samples [][]byte, dict []byte) ([]byte, error) {
+	if len(samples) == 0 || len(dict) == 0 {
+		return nil, ErrSrcTooSmall
+	}
+
+	n := len(samples)
+	cptrs := C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(uintptr(0))))
+	if cptrs == nil {
+		return nil, ErrMemory
+	}
+	defer C.free(cptrs)
+	csizes := C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.size_t(0))))
+	if csizes == nil {
+		return nil, ErrMemory
+	}
+	defer C.free(csizes)
+
+	ptrSlice := unsafe.Slice((*unsafe.Pointer)(cptrs), n)
+	sizeSlice := unsafe.Slice((*C.size_t)(csizes), n)
+	defer func() {
+		for _, p := range ptrSlice {
+			if p != nil {
+				C.free(p)
+			}
+		}
+	}()
+
+	for i, s := range samples {
+		sizeSlice[i] = C.size_t(len(s))
+		if len(s) == 0 {
+			ptrSlice[i] = C.malloc(1)
+			continue
+		}
+		buf := C.malloc(C.size_t(len(s)))
+		if buf == nil {
+			return nil, ErrMemory
+		}
+		C.memcpy(buf, unsafe.Pointer(&s[0]), C.size_t(len(s)))
+		ptrSlice[i] = buf
+	}
+
+	huf := make([]byte, HufTableSize)
+	rc := C.zxc_train_dict_huf(
+		(*unsafe.Pointer)(cptrs),
+		(*C.size_t)(csizes),
+		C.size_t(n),
+		unsafe.Pointer(&dict[0]),
+		C.size_t(len(dict)),
+		(*C.uint8_t)(unsafe.Pointer(&huf[0])),
+	)
+	if rc != C.ZXC_OK {
+		return nil, errorFromCode(C.int64_t(rc))
+	}
+	return huf, nil
+}
+
+// DictHuf returns a copy of the shared literal Huffman table stored in a
+// .zxd file buffer, or nil if the buffer is not a valid .zxd file.
+func DictHuf(zxd []byte) []byte {
 	if len(zxd) == 0 {
-		return nil, 0, ErrSrcTooSmall
+		return nil
+	}
+	p := C.zxc_dict_huf(unsafe.Pointer(&zxd[0]), C.size_t(len(zxd)))
+	if p == nil {
+		return nil
+	}
+	return C.GoBytes(p, C.int(HufTableSize))
+}
+
+// DictLoad validates a .zxd file buffer and returns a copy of its dictionary
+// content along with the dictionary ID. Prefer [LoadDictionary] for the full
+// (content, table, id) bundle.
+func DictLoad(zxd []byte) (content []byte, id uint32, err error) {
+	d, err := LoadDictionary(zxd)
+	if err != nil {
+		return nil, 0, err
+	}
+	return d.Content(), d.ID(), nil
+}
+
+// Dictionary bundles a trained dictionary's LZ-window content and its shared
+// literal Huffman table, so callers never juggle the pair by hand.
+//
+// Create one with [TrainDictionary] (from samples) or [LoadDictionary] (from
+// .zxd bytes); attach it with [WithDictionary] or [Seekable.SetDictionary].
+type Dictionary struct {
+	content []byte
+	huf     []byte // HufTableSize bytes
+	id      uint32
+}
+
+// TrainDictionary trains a complete dictionary (content + shared table) from
+// a corpus of samples in one call.
+func TrainDictionary(samples [][]byte) (*Dictionary, error) {
+	if len(samples) == 0 {
+		return nil, ErrSrcTooSmall
+	}
+
+	n := len(samples)
+	cptrs := C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(uintptr(0))))
+	if cptrs == nil {
+		return nil, ErrMemory
+	}
+	defer C.free(cptrs)
+	csizes := C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.size_t(0))))
+	if csizes == nil {
+		return nil, ErrMemory
+	}
+	defer C.free(csizes)
+
+	ptrSlice := unsafe.Slice((*unsafe.Pointer)(cptrs), n)
+	sizeSlice := unsafe.Slice((*C.size_t)(csizes), n)
+	defer func() {
+		for _, p := range ptrSlice {
+			if p != nil {
+				C.free(p)
+			}
+		}
+	}()
+
+	for i, s := range samples {
+		sizeSlice[i] = C.size_t(len(s))
+		if len(s) == 0 {
+			ptrSlice[i] = C.malloc(1)
+			continue
+		}
+		buf := C.malloc(C.size_t(len(s)))
+		if buf == nil {
+			return nil, ErrMemory
+		}
+		C.memcpy(buf, unsafe.Pointer(&s[0]), C.size_t(len(s)))
+		ptrSlice[i] = buf
+	}
+
+	cap := uint64(C.zxc_dict_save_bound(C.size_t(DictSizeMax)))
+	zxd := make([]byte, cap)
+	written := C.zxc_dict_train(
+		(*unsafe.Pointer)(cptrs),
+		(*C.size_t)(csizes),
+		C.size_t(n),
+		unsafe.Pointer(&zxd[0]),
+		C.size_t(cap),
+	)
+	if written <= 0 {
+		if written < 0 {
+			return nil, errorFromCode(written)
+		}
+		return nil, ErrInvalidData
+	}
+	return LoadDictionary(zxd[:int(written)])
+}
+
+// LoadDictionary parses .zxd bytes into an owned Dictionary.
+func LoadDictionary(zxd []byte) (*Dictionary, error) {
+	if len(zxd) == 0 {
+		return nil, ErrSrcTooSmall
 	}
 	var contentPtr unsafe.Pointer
 	var contentSize C.size_t
+	var hufPtr unsafe.Pointer
 	var dictID C.uint32_t
 	rc := C.zxc_dict_load(
 		unsafe.Pointer(&zxd[0]),
 		C.size_t(len(zxd)),
 		&contentPtr,
 		&contentSize,
+		&hufPtr,
 		&dictID,
 	)
 	if rc < 0 {
-		return nil, 0, errorFromCode(C.int64_t(rc))
+		return nil, errorFromCode(C.int64_t(rc))
 	}
-	// contentPtr points into zxd (zero-copy); copy into Go-owned memory before
-	// returning so the result is independent of the input buffer's lifetime.
-	out := C.GoBytes(contentPtr, C.int(contentSize))
-	return out, uint32(dictID), nil
+	// The pointers alias into zxd (zero-copy); copy into Go-owned memory so
+	// the result is independent of the input buffer's lifetime.
+	return &Dictionary{
+		content: C.GoBytes(contentPtr, C.int(contentSize)),
+		huf:     C.GoBytes(hufPtr, C.int(HufTableSize)),
+		id:      uint32(dictID),
+	}, nil
 }
+
+// Save serializes the dictionary back to .zxd file bytes.
+func (d *Dictionary) Save() ([]byte, error) {
+	return DictSave(d.content, d.huf)
+}
+
+// ID returns the dictionary ID binding the (content, table) pair, as recorded
+// in .zxd files and archive headers.
+func (d *Dictionary) ID() uint32 { return d.id }
+
+// Content returns the raw LZ-window content bytes.
+func (d *Dictionary) Content() []byte { return d.content }
+
+// Huf returns the 128-byte shared literal Huffman table.
+func (d *Dictionary) Huf() []byte { return d.huf }

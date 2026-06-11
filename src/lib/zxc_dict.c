@@ -33,9 +33,9 @@ uint32_t zxc_dict_id_ex(const void* RESTRICT content, const size_t content_size,
     if (huf_lengths == NULL) return base;
     /* Bind the table without hashing content twice: id over
      * [LE32(content id) || packed lengths]. */
-    uint8_t buf[4 + ZXC_HUF_LENGTHS_HEADER_SIZE];
+    uint8_t buf[4 + ZXC_HUF_TABLE_SIZE];
     zxc_store_le32(buf, base);
-    ZXC_MEMCPY(buf + 4, huf_lengths, ZXC_HUF_LENGTHS_HEADER_SIZE);
+    ZXC_MEMCPY(buf + 4, huf_lengths, ZXC_HUF_TABLE_SIZE);
     return zxc_checksum(buf, sizeof(buf), 0);
 }
 
@@ -63,7 +63,7 @@ uint32_t zxc_dict_get_id(const void* buf, const size_t buf_size) {
 }
 
 size_t zxc_dict_save_bound(const size_t content_size) {
-    return ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_LENGTHS_HEADER_SIZE;
+    return ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_TABLE_SIZE;
 }
 
 int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size,
@@ -72,7 +72,7 @@ int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size,
     if (UNLIKELY(!content || content_size == 0 || !huf_lengths)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(content_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
-    const size_t total = ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_LENGTHS_HEADER_SIZE;
+    const size_t total = ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_TABLE_SIZE;
     if (UNLIKELY(buf_capacity < total)) return ZXC_ERROR_DST_TOO_SMALL;
 
     uint8_t* dst = (uint8_t*)buf;
@@ -87,7 +87,7 @@ int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size,
     zxc_store_le16(dst + 14, crc);
 
     ZXC_MEMCPY(dst + ZXC_DICT_HEADER_SIZE, content, content_size);
-    ZXC_MEMCPY(dst + ZXC_DICT_HEADER_SIZE + content_size, huf_lengths, ZXC_HUF_LENGTHS_HEADER_SIZE);
+    ZXC_MEMCPY(dst + ZXC_DICT_HEADER_SIZE + content_size, huf_lengths, ZXC_HUF_TABLE_SIZE);
 
     return (int64_t)total;
 }
@@ -105,7 +105,7 @@ int zxc_dict_load(const void* buf, const size_t buf_size, const void** content_o
     const size_t content_size = zxc_le16(src + 6);
     if (UNLIKELY(content_size == 0)) return ZXC_ERROR_CORRUPT_DATA;
     if (UNLIKELY(content_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    if (UNLIKELY(buf_size < ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_LENGTHS_HEADER_SIZE))
+    if (UNLIKELY(buf_size < ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_TABLE_SIZE))
         return ZXC_ERROR_SRC_TOO_SMALL;
 
     uint8_t temp[ZXC_DICT_HEADER_SIZE];
@@ -136,7 +136,7 @@ const void* zxc_dict_huf(const void* buf, const size_t buf_size) {
     if (UNLIKELY(src[4] != ZXC_DICT_VERSION)) return NULL;
     const size_t content_size = zxc_le16(src + 6);
     if (UNLIKELY(content_size == 0 ||
-                 buf_size < ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_LENGTHS_HEADER_SIZE))
+                 buf_size < ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_TABLE_SIZE))
         return NULL;
     return src + ZXC_DICT_HEADER_SIZE + content_size;
 }
@@ -421,10 +421,6 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
  *  histogram converges early, so past it slices are strided evenly instead. */
 #define ZXC_DICT_HUF_SAMPLE_BUDGET (8U << 20)
 
-/* The public table-size constant must match the internal packed-header size. */
-_Static_assert(ZXC_DICT_HUF_TABLE_SIZE == ZXC_HUF_LENGTHS_HEADER_SIZE,
-               "ZXC_DICT_HUF_TABLE_SIZE / ZXC_HUF_LENGTHS_HEADER_SIZE mismatch");
-
 int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRICT sample_sizes,
                        const size_t n_samples, const void* RESTRICT dict, const size_t dict_size,
                        uint8_t* RESTRICT huf_lengths_out) {
@@ -527,7 +523,7 @@ int64_t zxc_dict_train(const void* const* RESTRICT samples, const size_t* RESTRI
     }
 
     {
-        uint8_t huf[ZXC_HUF_LENGTHS_HEADER_SIZE];
+        uint8_t huf[ZXC_HUF_TABLE_SIZE];
         const int hrc = zxc_train_dict_huf(samples, sample_sizes, n_samples, content,
                                            (size_t)content_size, huf);
         if (UNLIKELY(hrc != ZXC_OK)) {

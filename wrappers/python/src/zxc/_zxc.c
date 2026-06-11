@@ -84,7 +84,10 @@ static PyObject* pyzxc_train_dict(PyObject* self, PyObject* args, PyObject* kwar
 static PyObject* pyzxc_dict_id(PyObject* self, PyObject* arg);
 static PyObject* pyzxc_get_dict_id(PyObject* self, PyObject* arg);
 static PyObject* pyzxc_dict_get_id(PyObject* self, PyObject* arg);
-static PyObject* pyzxc_dict_save(PyObject* self, PyObject* arg);
+static PyObject* pyzxc_dict_save(PyObject* self, PyObject* args);
+static PyObject* pyzxc_train_dict_huf(PyObject* self, PyObject* args, PyObject* kwargs);
+static PyObject* pyzxc_dict_huf(PyObject* self, PyObject* arg);
+static PyObject* pyzxc_dict_train(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_dict_load(PyObject* self, PyObject* arg);
 static PyObject* pyzxc_seekable_set_dict(PyObject* self, PyObject* args);
 
@@ -159,7 +162,10 @@ static PyMethodDef zxc_methods[] = {
     {"pyzxc_dict_id", (PyCFunction)pyzxc_dict_id, METH_O, NULL},
     {"pyzxc_get_dict_id", (PyCFunction)pyzxc_get_dict_id, METH_O, NULL},
     {"pyzxc_dict_get_id", (PyCFunction)pyzxc_dict_get_id, METH_O, NULL},
-    {"pyzxc_dict_save", (PyCFunction)pyzxc_dict_save, METH_O, NULL},
+    {"pyzxc_dict_save", (PyCFunction)pyzxc_dict_save, METH_VARARGS, NULL},
+    {"pyzxc_train_dict_huf", (PyCFunction)pyzxc_train_dict_huf, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"pyzxc_dict_huf", (PyCFunction)pyzxc_dict_huf, METH_O, NULL},
+    {"pyzxc_dict_train", (PyCFunction)pyzxc_dict_train, METH_VARARGS | METH_KEYWORDS, NULL},
     {"pyzxc_dict_load", (PyCFunction)pyzxc_dict_load, METH_O, NULL},
 
     /* Push streaming API (single-threaded, caller-driven). */
@@ -241,11 +247,14 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
     Py_buffer dict_view = {0};
     PyObject* dict_obj = NULL;
     int have_dict = 0;
+    PyObject* dict_huf_obj = NULL;
+    uint8_t huf_local[ZXC_HUF_TABLE_SIZE];
+    const void* dict_huf = NULL;
 
-    static char* kwlist[] = {"data", "level", "checksum", "dict", NULL};
+    static char* kwlist[] = {"data", "level", "checksum", "dict", "dict_huf", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y*|ipO", kwlist, &view, &level, &checksum,
-                                     &dict_obj)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y*|ipOO", kwlist, &view, &level, &checksum,
+                                     &dict_obj, &dict_huf_obj)) {
         return NULL;
     }
 
@@ -261,6 +270,25 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
             return NULL;
         }
         have_dict = 1;
+    }
+
+    if (dict_huf_obj && dict_huf_obj != Py_None) {
+        Py_buffer hv;
+        if (PyObject_GetBuffer(dict_huf_obj, &hv, PyBUF_SIMPLE) < 0) {
+            PyBuffer_Release(&view);
+            if (have_dict) PyBuffer_Release(&dict_view);
+            return NULL;
+        }
+        if (hv.len != ZXC_HUF_TABLE_SIZE) {
+            PyBuffer_Release(&hv);
+            PyBuffer_Release(&view);
+            if (have_dict) PyBuffer_Release(&dict_view);
+            PyErr_SetString(PyExc_ValueError, "dict_huf must be exactly 128 bytes");
+            return NULL;
+        }
+        memcpy(huf_local, hv.buf, ZXC_HUF_TABLE_SIZE);
+        PyBuffer_Release(&hv);
+        dict_huf = huf_local;
     }
 
     size_t src_size = (size_t)view.len;
@@ -283,6 +311,7 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
     if (have_dict) {
         copts.dict = dict_view.buf;
         copts.dict_size = (size_t)dict_view.len;
+        copts.dict_huf = dict_huf;
     }
 
     Py_BEGIN_ALLOW_THREADS nwritten = zxc_compress(view.buf,  // Source buffer
@@ -334,10 +363,13 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
     int have_dict = 0;
 
     Py_ssize_t decompress_size;
-    static char* kwlist[] = {"data", "decompress_size", "checksum", "dict", NULL};
+    PyObject* dict_huf_obj = NULL;
+    uint8_t huf_local[ZXC_HUF_TABLE_SIZE];
+    const void* dict_huf = NULL;
+    static char* kwlist[] = {"data", "decompress_size", "checksum", "dict", "dict_huf", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y*n|pO", kwlist, &view, &decompress_size,
-                                     &checksum, &dict_obj)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y*n|pOO", kwlist, &view, &decompress_size,
+                                     &checksum, &dict_obj, &dict_huf_obj)) {
         return NULL;
     }
 
@@ -353,6 +385,25 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
             return NULL;
         }
         have_dict = 1;
+    }
+
+    if (dict_huf_obj && dict_huf_obj != Py_None) {
+        Py_buffer hv;
+        if (PyObject_GetBuffer(dict_huf_obj, &hv, PyBUF_SIMPLE) < 0) {
+            PyBuffer_Release(&view);
+            if (have_dict) PyBuffer_Release(&dict_view);
+            return NULL;
+        }
+        if (hv.len != ZXC_HUF_TABLE_SIZE) {
+            PyBuffer_Release(&hv);
+            PyBuffer_Release(&view);
+            if (have_dict) PyBuffer_Release(&dict_view);
+            PyErr_SetString(PyExc_ValueError, "dict_huf must be exactly 128 bytes");
+            return NULL;
+        }
+        memcpy(huf_local, hv.buf, ZXC_HUF_TABLE_SIZE);
+        PyBuffer_Release(&hv);
+        dict_huf = huf_local;
     }
 
     size_t src_size = (size_t)view.len;
@@ -372,6 +423,7 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
     if (have_dict) {
         dopts.dict = dict_view.buf;
         dopts.dict_size = (size_t)dict_view.len;
+        dopts.dict_huf = dict_huf;
     }
 
     Py_BEGIN_ALLOW_THREADS nwritten = zxc_decompress(view.buf,         // Source buffer
@@ -403,17 +455,37 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
     PyObject* dict_obj = NULL;
     int have_dict = 0;
 
-    static char* kwlist[] = {"src",      "dst",  "n_threads", "level",
-                             "checksum", "seekable", "dict",  NULL};
+    static char* kwlist[] = {"src",      "dst",      "n_threads", "level",
+                             "checksum", "seekable", "dict",      "dict_huf", NULL};
+    PyObject* dict_huf_obj = NULL;
+    uint8_t huf_local[ZXC_HUF_TABLE_SIZE];
+    const void* dict_huf = NULL;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|iippO", kwlist, &src, &dst, &nthreads, &level,
-                                     &checksum, &seekable, &dict_obj)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|iippOO", kwlist, &src, &dst, &nthreads,
+                                     &level, &checksum, &seekable, &dict_obj, &dict_huf_obj)) {
         return NULL;
     }
 
     if (dict_obj && dict_obj != Py_None) {
         if (PyObject_GetBuffer(dict_obj, &dict_view, PyBUF_SIMPLE) < 0) return NULL;
         have_dict = 1;
+    }
+
+    if (dict_huf_obj && dict_huf_obj != Py_None) {
+        Py_buffer hv;
+        if (PyObject_GetBuffer(dict_huf_obj, &hv, PyBUF_SIMPLE) < 0) {
+            if (have_dict) PyBuffer_Release(&dict_view);
+            return NULL;
+        }
+        if (hv.len != ZXC_HUF_TABLE_SIZE) {
+            PyBuffer_Release(&hv);
+            if (have_dict) PyBuffer_Release(&dict_view);
+            PyErr_SetString(PyExc_ValueError, "dict_huf must be exactly 128 bytes");
+            return NULL;
+        }
+        memcpy(huf_local, hv.buf, ZXC_HUF_TABLE_SIZE);
+        PyBuffer_Release(&hv);
+        dict_huf = huf_local;
     }
 
     int src_fd = PyObject_AsFileDescriptor(src);
@@ -462,6 +534,7 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
     if (have_dict) {
         scopts.dict = dict_view.buf;
         scopts.dict_size = (size_t)dict_view.len;
+        scopts.dict_huf = dict_huf;
     }
 
     Py_BEGIN_ALLOW_THREADS nwritten = zxc_stream_compress(fsrc, fdst, &scopts);
@@ -653,6 +726,73 @@ static PyObject* pyzxc_train_dict(PyObject* self, PyObject* args, PyObject* kwar
     return out;
 }
 
+
+/* Train the shared literal Huffman table for an already-trained dictionary. */
+static PyObject* pyzxc_train_dict_huf(PyObject* self, PyObject* args, PyObject* kwargs) {
+    (void)self;
+    PyObject* samples_obj;
+    Py_buffer dict_view;
+
+    static char* kwlist[] = {"samples", "dict", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Oy*", kwlist, &samples_obj, &dict_view)) {
+        return NULL;
+    }
+
+    PyObject* seq = PySequence_Fast(samples_obj, "samples must be a sequence of bytes-like objects");
+    if (!seq) {
+        PyBuffer_Release(&dict_view);
+        return NULL;
+    }
+
+    Py_ssize_t n = PySequence_Fast_GET_SIZE(seq);
+    if (n <= 0) {
+        Py_DECREF(seq);
+        PyBuffer_Release(&dict_view);
+        Py_Return_Err(PyExc_ValueError, "samples must be non-empty");
+    }
+
+    const void** ptrs = (const void**)PyMem_Malloc(sizeof(void*) * (size_t)n);
+    size_t* sizes = (size_t*)PyMem_Malloc(sizeof(size_t) * (size_t)n);
+    Py_buffer* views = (Py_buffer*)PyMem_Malloc(sizeof(Py_buffer) * (size_t)n);
+    if (!ptrs || !sizes || !views) {
+        PyMem_Free(ptrs);
+        PyMem_Free(sizes);
+        PyMem_Free(views);
+        Py_DECREF(seq);
+        PyBuffer_Release(&dict_view);
+        return PyErr_NoMemory();
+    }
+
+    Py_ssize_t acquired = 0;
+    for (; acquired < n; acquired++) {
+        PyObject* item = PySequence_Fast_GET_ITEM(seq, acquired);
+        if (PyObject_GetBuffer(item, &views[acquired], PyBUF_SIMPLE) < 0) {
+            break;
+        }
+        ptrs[acquired] = views[acquired].buf;
+        sizes[acquired] = (size_t)views[acquired].len;
+    }
+
+    int rc = ZXC_ERROR_NULL_INPUT;
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
+    if (acquired == n) {
+        Py_BEGIN_ALLOW_THREADS rc =
+            zxc_train_dict_huf(ptrs, sizes, (size_t)n, dict_view.buf, (size_t)dict_view.len, huf);
+        Py_END_ALLOW_THREADS
+    }
+
+    for (Py_ssize_t i = 0; i < acquired; i++) PyBuffer_Release(&views[i]);
+    PyMem_Free(ptrs);
+    PyMem_Free(sizes);
+    PyMem_Free(views);
+    Py_DECREF(seq);
+    PyBuffer_Release(&dict_view);
+
+    if (acquired != n) return NULL;
+    if (rc != ZXC_OK) Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
+    return PyBytes_FromStringAndSize((const char*)huf, ZXC_HUF_TABLE_SIZE);
+}
+
 /* Dictionary ID from raw dictionary content. */
 static PyObject* pyzxc_dict_id(PyObject* self, PyObject* arg) {
     (void)self;
@@ -683,22 +823,31 @@ static PyObject* pyzxc_dict_get_id(PyObject* self, PyObject* arg) {
     return PyLong_FromUnsignedLong(id);
 }
 
-/* Serialize dictionary content into the .zxd file format. */
-static PyObject* pyzxc_dict_save(PyObject* self, PyObject* arg) {
+/* Serialize dictionary content + shared Huffman table into the .zxd format. */
+static PyObject* pyzxc_dict_save(PyObject* self, PyObject* args) {
     (void)self;
     Py_buffer view;
-    if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
+    Py_buffer huf_view;
+    if (!PyArg_ParseTuple(args, "y*y*", &view, &huf_view)) return NULL;
+    if (huf_view.len != ZXC_HUF_TABLE_SIZE) {
+        PyBuffer_Release(&view);
+        PyBuffer_Release(&huf_view);
+        PyErr_SetString(PyExc_ValueError, "huf_lengths must be exactly 128 bytes");
+        return NULL;
+    }
 
     size_t bound = zxc_dict_save_bound((size_t)view.len);
     PyObject* out = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)bound);
     if (!out) {
         PyBuffer_Release(&view);
+        PyBuffer_Release(&huf_view);
         return NULL;
     }
 
-    int64_t written =
-        zxc_dict_save(view.buf, (size_t)view.len, PyBytes_AS_STRING(out), bound);
+    int64_t written = zxc_dict_save(view.buf, (size_t)view.len, huf_view.buf,
+                                    PyBytes_AS_STRING(out), bound);
     PyBuffer_Release(&view);
+    PyBuffer_Release(&huf_view);
 
     if (written < 0) {
         Py_DECREF(out);
@@ -719,22 +868,109 @@ static PyObject* pyzxc_dict_load(PyObject* self, PyObject* arg) {
 
     const void* content = NULL;
     size_t content_size = 0;
+    const void* huf = NULL;
     uint32_t dict_id = 0;
 
-    int rc = zxc_dict_load(view.buf, (size_t)view.len, &content, &content_size, &dict_id);
+    int rc = zxc_dict_load(view.buf, (size_t)view.len, &content, &content_size, &huf, &dict_id);
     if (rc != 0) {
         PyBuffer_Release(&view);
         Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
     }
 
-    /* Copy content out before releasing the input buffer (zero-copy pointer). */
+    /* Copy out before releasing the input buffer (zero-copy pointers). */
     PyObject* content_obj =
         PyBytes_FromStringAndSize((const char*)content, (Py_ssize_t)content_size);
+    PyObject* huf_obj =
+        PyBytes_FromStringAndSize((const char*)huf, (Py_ssize_t)ZXC_HUF_TABLE_SIZE);
     PyBuffer_Release(&view);
-    if (!content_obj) return NULL;
+    if (!content_obj || !huf_obj) {
+        Py_XDECREF(content_obj);
+        Py_XDECREF(huf_obj);
+        return NULL;
+    }
 
-    /* 'N' steals the reference to content_obj (consumed even on failure). */
-    return Py_BuildValue("(Nk)", content_obj, (unsigned long)dict_id);
+    /* 'N' steals the references (consumed even on failure). */
+    return Py_BuildValue("(NNk)", content_obj, huf_obj, (unsigned long)dict_id);
+}
+
+/* One-call dictionary creation: samples -> .zxd bytes. */
+static PyObject* pyzxc_dict_train(PyObject* self, PyObject* args, PyObject* kwargs) {
+    (void)self;
+    PyObject* samples_obj;
+
+    static char* kwlist[] = {"samples", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O", kwlist, &samples_obj)) {
+        return NULL;
+    }
+
+    PyObject* seq = PySequence_Fast(samples_obj, "samples must be a sequence of bytes-like objects");
+    if (!seq) return NULL;
+
+    Py_ssize_t n = PySequence_Fast_GET_SIZE(seq);
+    if (n <= 0) {
+        Py_DECREF(seq);
+        Py_Return_Err(PyExc_ValueError, "samples must be non-empty");
+    }
+
+    const void** ptrs = (const void**)PyMem_Malloc(sizeof(void*) * (size_t)n);
+    size_t* sizes = (size_t*)PyMem_Malloc(sizeof(size_t) * (size_t)n);
+    Py_buffer* views = (Py_buffer*)PyMem_Malloc(sizeof(Py_buffer) * (size_t)n);
+    const size_t zxd_cap = zxc_dict_save_bound(ZXC_DICT_SIZE_MAX);
+    uint8_t* zxd = (uint8_t*)PyMem_Malloc(zxd_cap);
+    if (!ptrs || !sizes || !views || !zxd) {
+        PyMem_Free(ptrs);
+        PyMem_Free(sizes);
+        PyMem_Free(views);
+        PyMem_Free(zxd);
+        Py_DECREF(seq);
+        return PyErr_NoMemory();
+    }
+
+    Py_ssize_t acquired = 0;
+    for (; acquired < n; acquired++) {
+        PyObject* item = PySequence_Fast_GET_ITEM(seq, acquired);
+        if (PyObject_GetBuffer(item, &views[acquired], PyBUF_SIMPLE) < 0) {
+            break;
+        }
+        ptrs[acquired] = views[acquired].buf;
+        sizes[acquired] = (size_t)views[acquired].len;
+    }
+
+    int64_t zxd_sz = ZXC_ERROR_NULL_INPUT;
+    if (acquired == n) {
+        Py_BEGIN_ALLOW_THREADS zxd_sz = zxc_dict_train(ptrs, sizes, (size_t)n, zxd, zxd_cap);
+        Py_END_ALLOW_THREADS
+    }
+
+    for (Py_ssize_t i = 0; i < acquired; i++) PyBuffer_Release(&views[i]);
+    PyMem_Free(ptrs);
+    PyMem_Free(sizes);
+    PyMem_Free(views);
+    Py_DECREF(seq);
+
+    PyObject* out = NULL;
+    if (acquired != n) {
+        /* GetBuffer already set the exception. */
+    } else if (zxd_sz <= 0) {
+        PyErr_SetString(PyExc_RuntimeError, zxc_error_name((int)zxd_sz));
+    } else {
+        out = PyBytes_FromStringAndSize((const char*)zxd, (Py_ssize_t)zxd_sz);
+    }
+    PyMem_Free(zxd);
+    return out;
+}
+
+
+/* Shared Huffman table stored in a .zxd buffer, or None when invalid. */
+static PyObject* pyzxc_dict_huf(PyObject* self, PyObject* arg) {
+    (void)self;
+    Py_buffer view;
+    if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
+    const void* huf = zxc_dict_huf(view.buf, (size_t)view.len);
+    PyObject* out = huf ? PyBytes_FromStringAndSize((const char*)huf, ZXC_HUF_TABLE_SIZE)
+                        : (Py_INCREF(Py_None), Py_None);
+    PyBuffer_Release(&view);
+    return out;
 }
 
 // =============================================================================
@@ -1404,7 +1640,8 @@ static PyObject* pyzxc_seekable_set_dict(PyObject* self, PyObject* args) {
     (void)self;
     PyObject* capsule;
     Py_buffer view;
-    if (!PyArg_ParseTuple(args, "Oy*", &capsule, &view)) return NULL;
+    PyObject* dict_huf_obj = NULL;
+    if (!PyArg_ParseTuple(args, "Oy*|O", &capsule, &view, &dict_huf_obj)) return NULL;
 
     zxc_seekable* s = seekable_from_capsule(capsule);
     if (!s) {
@@ -1412,7 +1649,26 @@ static PyObject* pyzxc_seekable_set_dict(PyObject* self, PyObject* args) {
         return NULL;
     }
 
-    int rc = zxc_seekable_set_dict(s, view.buf, (size_t)view.len);
+    uint8_t huf_local[ZXC_HUF_TABLE_SIZE];
+    const void* dict_huf = NULL;
+    if (dict_huf_obj && dict_huf_obj != Py_None) {
+        Py_buffer hv;
+        if (PyObject_GetBuffer(dict_huf_obj, &hv, PyBUF_SIMPLE) < 0) {
+            PyBuffer_Release(&view);
+            return NULL;
+        }
+        if (hv.len != ZXC_HUF_TABLE_SIZE) {
+            PyBuffer_Release(&hv);
+            PyBuffer_Release(&view);
+            PyErr_SetString(PyExc_ValueError, "dict_huf must be exactly 128 bytes");
+            return NULL;
+        }
+        memcpy(huf_local, hv.buf, ZXC_HUF_TABLE_SIZE);
+        PyBuffer_Release(&hv);
+        dict_huf = huf_local;
+    }
+
+    int rc = zxc_seekable_set_dict(s, view.buf, (size_t)view.len, dict_huf);
     PyBuffer_Release(&view);
 
     if (rc != 0) Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));

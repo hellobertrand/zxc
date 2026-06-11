@@ -459,17 +459,50 @@ async function main() {
         assert(idContent === idArchive,
             `dictId == getDictId(archive) (${idContent} == ${idArchive})`);
 
-        // dictSave -> dictGetId / dictLoad roundtrip.
-        const zxd = zxc.dictSave(dict);
+        // trainDictHuf -> dictSave -> dictGetId / dictLoad / dictHuf roundtrip.
+        const huf = zxc.trainDictHuf(samples, dict);
+        assert(huf instanceof Uint8Array && huf.length === 128,
+            `trainDictHuf produced ${huf.length}-byte table`);
+        const zxd = zxc.dictSave(dict, huf);
         assert(zxd instanceof Uint8Array && zxd.length > dict.length,
             `dictSave produced ${zxd.length}-byte .zxd`);
         const idZxd = zxc.dictGetId(zxd);
-        assert(idContent === idZxd,
-            `dictId == dictGetId(dictSave(content)) (${idContent} == ${idZxd})`);
+        // The .zxd id binds (content, table): non-zero, distinct from the
+        // content-only id.
+        assert(idZxd !== 0 && idZxd !== idContent,
+            `dictGetId(.zxd) binds the table (${idZxd} != ${idContent})`);
+        assert(arraysEqual(zxc.dictHuf(zxd), huf), 'dictHuf(.zxd) returns the stored table');
 
         const loaded = zxc.dictLoad(zxd);
-        assert(loaded.id === idContent, `dictLoad id matches (${loaded.id})`);
+        assert(loaded.id === idZxd, `dictLoad id matches (${loaded.id})`);
         assert(arraysEqual(loaded.content, dict), 'dictSave -> dictLoad content roundtrip');
+        assert(arraysEqual(loaded.huf, huf), 'dictLoad returns the stored huf table');
+
+        // dictTrain one-call creator: byte-identical to the 3-step sequence.
+        const zxdOneCall = zxc.dictTrain(samples);
+        assert(arraysEqual(zxdOneCall, zxd), 'dictTrain == trainDict+trainDictHuf+dictSave');
+
+        // Dictionary object: train / save / load roundtrip, options routing.
+        const d = zxc.Dictionary.train(samples);
+        assert(arraysEqual(d.content, dict) && arraysEqual(d.huf, huf) && d.id === idZxd,
+            'Dictionary.train carries (content, huf, id)');
+        const dReloaded = zxc.Dictionary.load(d.save());
+        assert(arraysEqual(dReloaded.content, d.content) && arraysEqual(dReloaded.huf, d.huf)
+            && dReloaded.id === d.id, 'Dictionary save/load roundtrip');
+        const cObj = zxc.compress(payload, { dict: d });
+        assert(arraysEqual(zxc.decompress(cObj, { dict: d }), payload),
+            'compress/decompress with {dict: Dictionary} roundtrip');
+        let objRejected = false;
+        try { zxc.decompress(cObj, { dict: d.content }); } catch (e) { objRejected = true; }
+        assert(objRejected, 'Dictionary archive rejects content-only decode (id binding)');
+
+        // dictHuf round through compress/decompress (id binding both ways).
+        const cHuf = zxc.compress(payload, { dict, dictHuf: huf });
+        assert(arraysEqual(zxc.decompress(cHuf, { dict, dictHuf: huf }), payload),
+            'compress/decompress with dictHuf roundtrip');
+        let rejected = false;
+        try { zxc.decompress(cHuf, { dict }); } catch (e) { rejected = true; }
+        assert(rejected, 'decompress without dictHuf is rejected (id binding)');
 
         // Seekable + setDict + range roundtrip on a dict-compressed archive.
         const bigPayload = new Uint8Array(48 * 1024);

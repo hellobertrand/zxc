@@ -45,7 +45,7 @@
 
 use std::ffi::c_void;
 
-pub use zxc_sys::{ZXC_DICT_HUF_TABLE_SIZE, ZXC_DICT_SIZE_MAX};
+pub use zxc_sys::{ZXC_HUF_TABLE_SIZE, ZXC_DICT_SIZE_MAX};
 
 use crate::error::error_from_code;
 use crate::{Error, Result};
@@ -122,11 +122,11 @@ pub fn dict_get_id(zxd: &[u8]) -> u32 {
 /// # Errors
 ///
 /// Returns an [`Error`] if training fails (e.g. no usable samples).
-pub fn train_dict_huf(samples: &[&[u8]], dict: &[u8]) -> Result<[u8; ZXC_DICT_HUF_TABLE_SIZE]> {
+pub fn train_dict_huf(samples: &[&[u8]], dict: &[u8]) -> Result<[u8; ZXC_HUF_TABLE_SIZE]> {
     let ptrs: Vec<*const c_void> = samples.iter().map(|s| s.as_ptr() as *const c_void).collect();
     let sizes: Vec<usize> = samples.iter().map(|s| s.len()).collect();
 
-    let mut huf = [0u8; ZXC_DICT_HUF_TABLE_SIZE];
+    let mut huf = [0u8; ZXC_HUF_TABLE_SIZE];
     let rc = unsafe {
         zxc_sys::zxc_train_dict_huf(
             ptrs.as_ptr(),
@@ -152,10 +152,10 @@ pub fn train_dict_huf(samples: &[&[u8]], dict: &[u8]) -> Result<[u8; ZXC_DICT_HU
 /// # Errors
 ///
 /// Returns an [`Error`] if `huf_lengths` is not exactly
-/// [`ZXC_DICT_HUF_TABLE_SIZE`] bytes, if the content exceeds
+/// [`ZXC_HUF_TABLE_SIZE`] bytes, if the content exceeds
 /// [`ZXC_DICT_SIZE_MAX`], or if serialization otherwise fails.
 pub fn dict_save(content: &[u8], huf_lengths: &[u8]) -> Result<Vec<u8>> {
-    if huf_lengths.len() != ZXC_DICT_HUF_TABLE_SIZE {
+    if huf_lengths.len() != ZXC_HUF_TABLE_SIZE {
         return Err(Error::InvalidData);
     }
     let bound = unsafe { zxc_sys::zxc_dict_save_bound(content.len()) };
@@ -178,54 +178,130 @@ pub fn dict_save(content: &[u8], huf_lengths: &[u8]) -> Result<Vec<u8>> {
 
 /// Returns an owned copy of the shared Huffman table stored in a `.zxd`
 /// buffer, or `None` if the buffer is not a valid `.zxd` file.
-pub fn dict_huf(zxd: &[u8]) -> Option<[u8; ZXC_DICT_HUF_TABLE_SIZE]> {
+pub fn dict_huf(zxd: &[u8]) -> Option<[u8; ZXC_HUF_TABLE_SIZE]> {
     let p = unsafe { zxc_sys::zxc_dict_huf(zxd.as_ptr() as *const c_void, zxd.len()) };
     if p.is_null() {
         return None;
     }
-    let mut huf = [0u8; ZXC_DICT_HUF_TABLE_SIZE];
+    let mut huf = [0u8; ZXC_HUF_TABLE_SIZE];
     // The pointer aims into `zxd` (zero-copy); copy out for an owned result.
     huf.copy_from_slice(unsafe {
-        std::slice::from_raw_parts(p as *const u8, ZXC_DICT_HUF_TABLE_SIZE)
+        std::slice::from_raw_parts(p as *const u8, ZXC_HUF_TABLE_SIZE)
     });
     Some(huf)
 }
 
 /// Parses a `.zxd` file buffer, returning owned dictionary content and its ID.
 ///
-/// The C API hands back a pointer into the input buffer (zero-copy); this
+/// The C API hands back pointers into the input buffer (zero-copy); this
 /// wrapper copies the content into an owned [`Vec`] so the returned data is
-/// independent of the input.
+/// independent of the input. Prefer [`Dictionary::load`] for the full
+/// (content, table, id) bundle.
 ///
 /// # Errors
 ///
 /// Returns an [`Error`] if the buffer is not a valid `.zxd` file.
 pub fn dict_load(zxd: &[u8]) -> Result<(Vec<u8>, u32)> {
-    let mut content_ptr: *const c_void = std::ptr::null();
-    let mut content_size: usize = 0;
-    let mut id: u32 = 0;
+    let d = Dictionary::load(zxd)?;
+    Ok((d.content, d.id))
+}
 
-    let rc = unsafe {
-        zxc_sys::zxc_dict_load(
-            zxd.as_ptr() as *const c_void,
-            zxd.len(),
-            &mut content_ptr,
-            &mut content_size,
-            &mut id,
-        )
-    };
-    if rc != zxc_sys::ZXC_OK {
-        return Err(error_from_code(rc as i64));
+/// A trained dictionary: the LZ-window content and its shared literal Huffman
+/// table, bundled as one object so callers never juggle the pair by hand.
+///
+/// Create one with [`Dictionary::train`] (from samples) or
+/// [`Dictionary::load`] (from `.zxd` bytes); attach it with
+/// [`CompressOptions::with_dictionary`](crate::CompressOptions::with_dictionary) /
+/// [`DecompressOptions::with_dictionary`](crate::DecompressOptions::with_dictionary).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dictionary {
+    content: Vec<u8>,
+    huf: [u8; ZXC_HUF_TABLE_SIZE],
+    id: u32,
+}
+
+impl Dictionary {
+    /// Trains a complete dictionary (content + shared table) from samples.
+    pub fn train(samples: &[&[u8]]) -> Result<Self> {
+        let ptrs: Vec<*const c_void> =
+            samples.iter().map(|s| s.as_ptr() as *const c_void).collect();
+        let sizes: Vec<usize> = samples.iter().map(|s| s.len()).collect();
+
+        let cap = unsafe { zxc_sys::zxc_dict_save_bound(ZXC_DICT_SIZE_MAX) };
+        let mut zxd = vec![0u8; cap];
+        let written = unsafe {
+            zxc_sys::zxc_dict_train(
+                ptrs.as_ptr(),
+                sizes.as_ptr(),
+                samples.len(),
+                zxd.as_mut_ptr() as *mut c_void,
+                zxd.len(),
+            )
+        };
+        if written <= 0 {
+            return Err(if written < 0 { error_from_code(written) } else { Error::InvalidData });
+        }
+        zxd.truncate(written as usize);
+        Self::load(&zxd)
     }
 
-    // The content pointer aliases into `zxd` (zero-copy); copy it out into an
-    // owned buffer so the caller does not depend on `zxd` staying alive.
-    let content = if content_ptr.is_null() || content_size == 0 {
-        Vec::new()
-    } else {
-        unsafe { std::slice::from_raw_parts(content_ptr as *const u8, content_size).to_vec() }
-    };
-    Ok((content, id))
+    /// Parses `.zxd` bytes into an owned dictionary.
+    pub fn load(zxd: &[u8]) -> Result<Self> {
+        let mut content_ptr: *const c_void = std::ptr::null();
+        let mut content_size: usize = 0;
+        let mut huf_ptr: *const c_void = std::ptr::null();
+        let mut id: u32 = 0;
+
+        let rc = unsafe {
+            zxc_sys::zxc_dict_load(
+                zxd.as_ptr() as *const c_void,
+                zxd.len(),
+                &mut content_ptr,
+                &mut content_size,
+                &mut huf_ptr,
+                &mut id,
+            )
+        };
+        if rc != zxc_sys::ZXC_OK {
+            return Err(error_from_code(rc as i64));
+        }
+
+        // The pointers alias into `zxd` (zero-copy); copy out into owned
+        // buffers so the result does not depend on `zxd` staying alive.
+        let content = if content_ptr.is_null() || content_size == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(content_ptr as *const u8, content_size).to_vec() }
+        };
+        let mut huf = [0u8; ZXC_HUF_TABLE_SIZE];
+        if !huf_ptr.is_null() {
+            huf.copy_from_slice(unsafe {
+                std::slice::from_raw_parts(huf_ptr as *const u8, ZXC_HUF_TABLE_SIZE)
+            });
+        }
+        Ok(Self { content, huf, id })
+    }
+
+    /// Serializes this dictionary back to `.zxd` bytes.
+    pub fn save(&self) -> Result<Vec<u8>> {
+        dict_save(&self.content, &self.huf)
+    }
+
+    /// The dictionary ID binding the (content, table) pair, as recorded in
+    /// `.zxd` files and archive headers.
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+
+    /// The raw LZ-window content bytes.
+    pub fn content(&self) -> &[u8] {
+        &self.content
+    }
+
+    /// The 128-byte shared literal Huffman table.
+    pub fn huf(&self) -> &[u8; ZXC_HUF_TABLE_SIZE] {
+        &self.huf
+    }
 }
 
 #[cfg(test)]
@@ -336,5 +412,33 @@ mod tests {
     fn load_rejects_garbage() {
         let garbage = vec![0u8; 64];
         assert!(dict_load(&garbage).is_err());
+    }
+
+    #[test]
+    fn dictionary_object_roundtrip() {
+        let corpus = sample_corpus();
+        let refs: Vec<&[u8]> = corpus.iter().map(|s| s.as_slice()).collect();
+
+        // One-call train, save/load, and the bundle matches the primitives.
+        let d = Dictionary::train(&refs).expect("Dictionary::train failed");
+        assert!(!d.content().is_empty());
+        assert_ne!(d.id(), 0);
+        let zxd = d.save().expect("save failed");
+        let d2 = Dictionary::load(&zxd).expect("Dictionary::load failed");
+        assert_eq!(d, d2);
+        assert_eq!(d.id(), dict_get_id(&zxd));
+
+        // Options take the bundle in one call; round-trip + id binding.
+        let sample = corpus[3].clone();
+        let copts = crate::CompressOptions::with_level(crate::Level::Density)
+            .with_dictionary(&d);
+        let archive = compress_with_options(&sample, &copts).expect("compress");
+        let dopts = DecompressOptions::default().with_dictionary(&d);
+        let restored = decompress_with_options(&archive, &dopts).expect("decompress");
+        assert_eq!(restored, sample);
+
+        // Without the table (content only), the id no longer matches.
+        let bare = DecompressOptions::default().with_dict(d.content().to_vec());
+        assert!(decompress_with_options(&archive, &bare).is_err());
     }
 }

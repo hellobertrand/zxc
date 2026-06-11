@@ -209,6 +209,7 @@ type options struct {
 	seekable bool
 	threads  int
 	dict     []byte
+	dictHuf  []byte
 }
 
 func defaultOptions() options {
@@ -252,6 +253,22 @@ func WithSeekable(enabled bool) Option {
 // [DictLoad]. The content size must not exceed [DictSizeMax].
 func WithDict(dict []byte) Option {
 	return func(o *options) { o.dict = dict }
+}
+
+// WithDictionary attaches a [Dictionary] (content + shared table) in one call.
+func WithDictionary(d *Dictionary) Option {
+	return func(o *options) {
+		o.dict = d.Content()
+		o.dictHuf = d.Huf()
+	}
+}
+
+// WithDictHuf sets the dictionary's shared literal Huffman table
+// ([HufTableSize] bytes, from [TrainDictHuf] or [DictHuf]). It is ignored
+// without [WithDict]. The archive's dictionary ID binds the (dict, table)
+// pair, so the same table must be supplied at decompression time.
+func WithDictHuf(huf []byte) Option {
+	return func(o *options) { o.dictHuf = huf }
 }
 
 func applyOptions(opts []Option) options {

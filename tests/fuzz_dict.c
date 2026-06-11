@@ -110,7 +110,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     /* The .zxd format requires the shared literal table; train it on the same
      * samples (it needs the trained content for the post-LZ literal stats). */
-    uint8_t huf[ZXC_DICT_HUF_TABLE_SIZE];
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
     if (zxc_train_dict_huf(samples, sample_sizes, n_samples, dict_buf, (size_t)dict_sz, huf) !=
         ZXC_OK)
         return 0;
@@ -120,7 +120,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* ------------------------------------------------------------------ */
     const size_t zxd_bound = zxc_dict_save_bound((size_t)dict_sz);
     if (!zxd_buf) {
-        zxd_buf = (uint8_t*)malloc(ZXC_DICT_HEADER_SIZE + ZXC_DICT_SIZE_MAX + ZXC_DICT_HUF_TABLE_SIZE);
+        zxd_buf = (uint8_t*)malloc(ZXC_DICT_HEADER_SIZE + ZXC_DICT_SIZE_MAX + ZXC_HUF_TABLE_SIZE);
         if (!zxd_buf) return 0;
     }
 
@@ -136,7 +136,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         assert(rc == ZXC_OK);
         assert(lcs == (size_t)dict_sz);
         assert(memcmp(lc, dict_buf, (size_t)dict_sz) == 0);
-        assert(lh != NULL && memcmp(lh, huf, ZXC_DICT_HUF_TABLE_SIZE) == 0);
+        assert(lh != NULL && memcmp(lh, huf, ZXC_HUF_TABLE_SIZE) == 0);
         /* The stored id binds the (content, table) pair, not the content alone. */
         assert(zxc_dict_get_id(zxd_buf, (size_t)zxd_sz) == lid);
     }

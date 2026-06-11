@@ -117,7 +117,7 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
          * zxc_cctx_attach_dict_huf, read by HUFFMAN_DICT literal sections. */
         if (dict_size > 0) {
             layout.off_huf_dict = layout.total;
-            layout.total += ZXC_ALIGN_CL(ZXC_HUF_TABLE_SIZE * sizeof(zxc_huf_dec_entry_t));
+            layout.total += ZXC_ALIGN_CL(ZXC_HUF_DEC_TABLE_SIZE * sizeof(zxc_huf_dec_entry_t));
         }
     } else {
         /* Compress: 6 partitions + optional opt_scratch at level >= ZXC_LEVEL_DENSITY. */

@@ -18,21 +18,27 @@ import (
 	"unsafe"
 )
 
-// cDictCopy copies a dictionary into C-owned memory and points opts at it.
-// The push streams retain the dict pointer for their whole lifetime, so it
-// must reference native (not Go) memory. Returns the C buffer to free later,
-// or nil when no dictionary is configured.
+// cDictCopy copies a dictionary (and its optional shared Huffman table) into
+// a single C-owned allocation laid out as [dict | huf] and points opts at it.
+// The push streams retain the pointers for their whole lifetime, so they must
+// reference native (not Go) memory. Returns the C buffer to free later, or
+// nil when no dictionary is configured.
 func cCompressDictCopy(copts *C.zxc_compress_opts_t, o options) unsafe.Pointer {
 	if len(o.dict) == 0 {
 		return nil
 	}
-	buf := C.malloc(C.size_t(len(o.dict)))
+	buf := C.malloc(C.size_t(len(o.dict) + len(o.dictHuf)))
 	if buf == nil {
 		return nil
 	}
 	C.memcpy(buf, unsafe.Pointer(&o.dict[0]), C.size_t(len(o.dict)))
 	copts.dict = buf
 	copts.dict_size = C.size_t(len(o.dict))
+	if len(o.dictHuf) > 0 {
+		hufDst := unsafe.Add(buf, len(o.dict))
+		C.memcpy(hufDst, unsafe.Pointer(&o.dictHuf[0]), C.size_t(len(o.dictHuf)))
+		copts.dict_huf = hufDst
+	}
 	return buf
 }
 
@@ -40,13 +46,18 @@ func cDecompressDictCopy(dopts *C.zxc_decompress_opts_t, o options) unsafe.Point
 	if len(o.dict) == 0 {
 		return nil
 	}
-	buf := C.malloc(C.size_t(len(o.dict)))
+	buf := C.malloc(C.size_t(len(o.dict) + len(o.dictHuf)))
 	if buf == nil {
 		return nil
 	}
 	C.memcpy(buf, unsafe.Pointer(&o.dict[0]), C.size_t(len(o.dict)))
 	dopts.dict = buf
 	dopts.dict_size = C.size_t(len(o.dict))
+	if len(o.dictHuf) > 0 {
+		hufDst := unsafe.Add(buf, len(o.dict))
+		C.memcpy(hufDst, unsafe.Pointer(&o.dictHuf[0]), C.size_t(len(o.dictHuf)))
+		dopts.dict_huf = hufDst
+	}
 	return buf
 }
 

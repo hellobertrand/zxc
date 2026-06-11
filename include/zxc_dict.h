@@ -25,7 +25,7 @@
  * int64_t dict_sz = zxc_train_dict(samples, sizes, n, dict_buf, 32768);
  *
  * // Train the shared literal Huffman table on the same corpus
- * uint8_t huf[ZXC_DICT_HUF_TABLE_SIZE];
+ * uint8_t huf[ZXC_HUF_TABLE_SIZE];
  * zxc_train_dict_huf(samples, sizes, n, dict_buf, dict_sz, huf);
  *
  * // Save to .zxd file (content + table)

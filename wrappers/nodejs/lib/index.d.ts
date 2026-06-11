@@ -54,8 +54,13 @@ export interface CompressOptions {
     checksum?: boolean;
     /** Enable seek table for random-access decompression. Defaults to false. */
     seekable?: boolean;
-    /** Pre-trained dictionary content (raw bytes). Defaults to none. */
-    dict?: Buffer | Uint8Array;
+    /** Pre-trained dictionary: a {@link Dictionary} instance, or raw content
+     *  bytes. Defaults to none. */
+    dict?: Dictionary | Buffer | Uint8Array;
+    /** Shared literal Huffman table (128 bytes, from {@link trainDictHuf} or
+     *  {@link dictHuf}). Ignored without `dict`, and ignored when `dict` is a
+     *  {@link Dictionary} (which carries its own table). */
+    dictHuf?: Buffer | Uint8Array;
 }
 
 export interface DecompressOptions {
@@ -63,8 +68,13 @@ export interface DecompressOptions {
     size?: number;
     /** Enable checksum verification. Defaults to false. */
     checksum?: boolean;
-    /** Pre-trained dictionary content (raw bytes). Required when the archive references a dictionary. */
-    dict?: Buffer | Uint8Array;
+    /** Pre-trained dictionary: a {@link Dictionary} instance, or raw content
+     *  bytes. Required when the archive references a dictionary. */
+    dict?: Dictionary | Buffer | Uint8Array;
+    /** Shared literal Huffman table (128 bytes) when the archive was compressed
+     *  with one (the dictionary ID binds the pair). Ignored when `dict` is a
+     *  {@link Dictionary}. */
+    dictHuf?: Buffer | Uint8Array;
 }
 
 /**
@@ -100,7 +110,30 @@ export function errorName(code: number): string;
 export interface LoadedDict {
     /** Raw dictionary content bytes. */
     content: Buffer;
-    /** 32-bit dictionary ID. */
+    /** 128-byte shared literal Huffman table. */
+    huf: Buffer;
+    /** 32-bit dictionary ID (binds the (content, table) pair). */
+    id: number;
+}
+
+/**
+ * A trained dictionary: LZ-window content plus its shared literal Huffman
+ * table, bundled as one object. Pass an instance as `options.dict` to
+ * {@link compress} / {@link decompress}, or to `Seekable#setDict`.
+ */
+export class Dictionary {
+    constructor(content: Buffer, huf: Buffer, id: number);
+    /** Train a complete dictionary (content + shared table) from samples. */
+    static train(samples: Array<Buffer | Uint8Array>): Dictionary;
+    /** Parse `.zxd` bytes into a Dictionary (owned copies). */
+    static load(zxd: Buffer): Dictionary;
+    /** Serialize back to `.zxd` file bytes. */
+    save(): Buffer;
+    /** Raw LZ-window content bytes. */
+    content: Buffer;
+    /** 128-byte shared literal Huffman table. */
+    huf: Buffer;
+    /** Dictionary ID binding the (content, table) pair. */
     id: number;
 }
 
@@ -129,8 +162,25 @@ export function getDictId(archive: Buffer): number;
  */
 export function dictGetId(zxd: Buffer): number;
 
-/** Serialize raw dictionary content into the `.zxd` file format. */
-export function dictSave(content: Buffer): Buffer;
+/**
+ * Serialize dictionary content and its shared literal Huffman table
+ * (128 bytes, from {@link trainDictHuf}) into the `.zxd` file format.
+ * The stored dictionary ID covers both content and table.
+ */
+export function dictSave(content: Buffer, hufLengths: Buffer): Buffer;
+
+/**
+ * Train the shared literal Huffman table for an already-trained dictionary.
+ * Returns the 128-byte packed table required by {@link dictSave} and usable
+ * as `CompressOptions.dictHuf` / `DecompressOptions.dictHuf`.
+ */
+export function trainDictHuf(samples: Array<Buffer | Uint8Array>, dict: Buffer): Buffer;
+
+/**
+ * Return the 128-byte shared Huffman table stored in a `.zxd` file, or `null`
+ * if the buffer is not a valid `.zxd` file.
+ */
+export function dictHuf(zxd: Buffer): Buffer | null;
 
 /** Load and validate a `.zxd` dictionary file. */
 export function dictLoad(zxd: Buffer): LoadedDict;
@@ -302,7 +352,7 @@ export class Seekable {
      * any `decompressRange` call when the archive was compressed with a
      * dictionary. The content is copied internally.
      */
-    setDict(dict: Buffer | Uint8Array): void;
+    setDict(dict: Buffer | Uint8Array, dictHuf?: Buffer | Uint8Array): void;
     /** Release native resources. Idempotent. */
     close(): void;
 }

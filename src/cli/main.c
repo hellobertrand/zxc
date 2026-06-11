@@ -1318,7 +1318,7 @@ int main(int argc, char** argv) {
         const long long fsize = ftello(f_dict);
         fseeko(f_dict, 0, SEEK_SET);
         if (fsize <= 0 ||
-            (size_t)fsize > ZXC_DICT_SIZE_MAX + ZXC_DICT_HEADER_SIZE + ZXC_DICT_HUF_TABLE_SIZE) {
+            (size_t)fsize > ZXC_DICT_SIZE_MAX + ZXC_DICT_HEADER_SIZE + ZXC_HUF_TABLE_SIZE) {
             fprintf(stderr, "Error: dictionary file '%s' has invalid size\n", dict_path);
             fclose(f_dict);
             return 1;
@@ -1361,13 +1361,13 @@ int main(int argc, char** argv) {
         /* Shared literal Huffman table (zero-copy into zxd_buf; .zxd always
          * carries one, so huf is non-NULL after a successful load). */
         if (huf) {
-            g_dict_huf = malloc(ZXC_DICT_HUF_TABLE_SIZE);
+            g_dict_huf = malloc(ZXC_HUF_TABLE_SIZE);
             if (!g_dict_huf) {
                 free(dict);
                 free(zxd_buf);
                 return 1;
             }
-            memcpy(g_dict_huf, huf, ZXC_DICT_HUF_TABLE_SIZE);
+            memcpy(g_dict_huf, huf, ZXC_HUF_TABLE_SIZE);
         }
         free(zxd_buf);
     }
@@ -1447,7 +1447,7 @@ int main(int argc, char** argv) {
         /* Train the shared literal Huffman table on the same samples (needs
          * the trained dict for the post-LZ literal distribution). The .zxd
          * format always carries the table, so a failure here is fatal. */
-        uint8_t huf_lengths[ZXC_DICT_HUF_TABLE_SIZE];
+        uint8_t huf_lengths[ZXC_HUF_TABLE_SIZE];
         int huf_rc = ZXC_ERROR_NULL_INPUT;
         if (dict_sz > 0) {
             huf_rc = zxc_train_dict_huf(samples, sample_sizes, (size_t)n_loaded, dict_buf,

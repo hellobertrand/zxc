@@ -76,6 +76,17 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
         }
     }
 
+    const void* dict_huf = nullptr;
+    if (info.Length() >= 6 && info[5].IsBuffer()) {
+        Napi::Buffer<uint8_t> huf_buf = info[5].As<Napi::Buffer<uint8_t>>();
+        if (huf_buf.Length() != ZXC_HUF_TABLE_SIZE) {
+            Napi::TypeError::New(env, "dictHuf must be exactly 128 bytes")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        dict_huf = huf_buf.Data();
+    }
+
     uint64_t bound = zxc_compress_bound(src_size);
     Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, static_cast<size_t>(bound));
 
@@ -85,6 +96,7 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     opts.seekable = seekable;
     opts.dict = dict;
     opts.dict_size = dict_size;
+    opts.dict_huf = dict_huf;
 
     int64_t nwritten =
         zxc_compress(src, src_size, dst_buf.Data(), static_cast<size_t>(bound), &opts);
@@ -139,6 +151,17 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
         }
     }
 
+    const void* dict_huf = nullptr;
+    if (info.Length() >= 5 && info[4].IsBuffer()) {
+        Napi::Buffer<uint8_t> huf_buf = info[4].As<Napi::Buffer<uint8_t>>();
+        if (huf_buf.Length() != ZXC_HUF_TABLE_SIZE) {
+            Napi::TypeError::New(env, "dictHuf must be exactly 128 bytes")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        dict_huf = huf_buf.Data();
+    }
+
     Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, decompress_size);
 
     static uint8_t kEmptyDst = 0;
@@ -148,6 +171,7 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
     dopts.checksum_enabled = checksum;
     dopts.dict = dict;
     dopts.dict_size = dict_size;
+    dopts.dict_huf = dict_huf;
 
     int64_t nwritten = zxc_decompress(src, src_size, dst, decompress_size, &dopts);
 
@@ -268,24 +292,84 @@ static Napi::Value DictGetId(const Napi::CallbackInfo& info) {
     return Napi::Number::New(env, static_cast<double>(id));
 }
 
-// dictSave(content: Buffer): Buffer  (.zxd)
+// dictSave(content: Buffer, hufLengths: Buffer): Buffer  (.zxd)
 static Napi::Value DictSave(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
-    if (info.Length() < 1 || !info[0].IsBuffer()) {
-        Napi::TypeError::New(env, "Expected a Buffer (content)").ThrowAsJavaScriptException();
+    if (info.Length() < 2 || !info[0].IsBuffer() || !info[1].IsBuffer()) {
+        Napi::TypeError::New(env, "Expected (content: Buffer, hufLengths: Buffer)")
+            .ThrowAsJavaScriptException();
         return env.Undefined();
     }
     Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
+    Napi::Buffer<uint8_t> huf = info[1].As<Napi::Buffer<uint8_t>>();
+    if (huf.Length() != ZXC_HUF_TABLE_SIZE) {
+        Napi::TypeError::New(env, "hufLengths must be exactly 128 bytes")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
     size_t cap = zxc_dict_save_bound(b.Length());
     std::vector<uint8_t> out(cap);
-    int64_t r = zxc_dict_save(b.Data(), b.Length(), out.data(), cap);
+    int64_t r = zxc_dict_save(b.Data(), b.Length(), huf.Data(), out.data(), cap);
     if (r < 0) {
         return ThrowZxcError(env, static_cast<int>(r));
     }
     return Napi::Buffer<uint8_t>::Copy(env, out.data(), static_cast<size_t>(r));
 }
 
-// dictLoad(zxd: Buffer): { content: Buffer, id: number }
+// trainDictHuf(samples: Buffer[], dict: Buffer): Buffer (128 bytes)
+static Napi::Value TrainDictHuf(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 2 || !info[0].IsArray() || !info[1].IsBuffer()) {
+        Napi::TypeError::New(env, "Expected (samples: Buffer[], dict: Buffer)")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    Napi::Array arr = info[0].As<Napi::Array>();
+    uint32_t n = arr.Length();
+    if (n == 0) {
+        Napi::TypeError::New(env, "samples must be a non-empty array")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    std::vector<const void*> samples(n);
+    std::vector<size_t> sizes(n);
+    for (uint32_t i = 0; i < n; ++i) {
+        Napi::Value v = arr.Get(i);
+        if (!v.IsBuffer()) {
+            Napi::TypeError::New(env, "samples entries must be Buffers")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        Napi::Buffer<uint8_t> b = v.As<Napi::Buffer<uint8_t>>();
+        samples[i] = b.Data();
+        sizes[i] = b.Length();
+    }
+
+    Napi::Buffer<uint8_t> dict = info[1].As<Napi::Buffer<uint8_t>>();
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
+    int r = zxc_train_dict_huf(samples.data(), sizes.data(), n, dict.Data(), dict.Length(), huf);
+    if (r < 0) {
+        return ThrowZxcError(env, r);
+    }
+    return Napi::Buffer<uint8_t>::Copy(env, huf, ZXC_HUF_TABLE_SIZE);
+}
+
+// dictHuf(zxd: Buffer): Buffer | null  (128-byte shared Huffman table)
+static Napi::Value DictHuf(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsBuffer()) {
+        Napi::TypeError::New(env, "Expected a Buffer (.zxd)").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
+    const void* huf = zxc_dict_huf(b.Data(), b.Length());
+    if (!huf) return env.Null();
+    return Napi::Buffer<uint8_t>::Copy(env, static_cast<const uint8_t*>(huf),
+                                       ZXC_HUF_TABLE_SIZE);
+}
+
+// dictLoad(zxd: Buffer): { content: Buffer, huf: Buffer, id: number }
 static Napi::Value DictLoad(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
     if (info.Length() < 1 || !info[0].IsBuffer()) {
@@ -295,17 +379,59 @@ static Napi::Value DictLoad(const Napi::CallbackInfo& info) {
     Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
     const void* content = nullptr;
     size_t content_size = 0;
+    const void* huf = nullptr;
     uint32_t dict_id = 0;
-    int r = zxc_dict_load(b.Data(), b.Length(), &content, &content_size, &dict_id);
+    int r = zxc_dict_load(b.Data(), b.Length(), &content, &content_size, &huf, &dict_id);
     if (r < 0) {
         return ThrowZxcError(env, r);
     }
-    // content points INTO b's data (zero-copy); copy into a new Buffer.
+    // content/huf point INTO b's data (zero-copy); copy into new Buffers.
     Napi::Object result = Napi::Object::New(env);
     result.Set("content", Napi::Buffer<uint8_t>::Copy(
                               env, static_cast<const uint8_t*>(content), content_size));
+    result.Set("huf", Napi::Buffer<uint8_t>::Copy(env, static_cast<const uint8_t*>(huf),
+                                                  ZXC_HUF_TABLE_SIZE));
     result.Set("id", Napi::Number::New(env, static_cast<double>(dict_id)));
     return result;
+}
+
+// dictTrain(samples: Buffer[]): Buffer  (one-call .zxd creation)
+static Napi::Value DictTrain(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsArray()) {
+        Napi::TypeError::New(env, "Expected an array of Buffers (samples)")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    Napi::Array arr = info[0].As<Napi::Array>();
+    uint32_t n = arr.Length();
+    if (n == 0) {
+        Napi::TypeError::New(env, "samples must be a non-empty array")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    std::vector<const void*> samples(n);
+    std::vector<size_t> sizes(n);
+    for (uint32_t i = 0; i < n; ++i) {
+        Napi::Value v = arr.Get(i);
+        if (!v.IsBuffer()) {
+            Napi::TypeError::New(env, "samples entries must be Buffers")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        Napi::Buffer<uint8_t> b = v.As<Napi::Buffer<uint8_t>>();
+        samples[i] = b.Data();
+        sizes[i] = b.Length();
+    }
+
+    const size_t cap = zxc_dict_save_bound(ZXC_DICT_SIZE_MAX);
+    std::vector<uint8_t> zxd(cap);
+    int64_t r = zxc_dict_train(samples.data(), sizes.data(), n, zxd.data(), cap);
+    if (r <= 0) {
+        return ThrowZxcError(env, static_cast<int>(r));
+    }
+    return Napi::Buffer<uint8_t>::Copy(env, zxd.data(), static_cast<size_t>(r));
 }
 
 // =============================================================================
@@ -820,7 +946,17 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
             return env.Undefined();
         }
         Napi::Buffer<uint8_t> dict_buf = info[0].As<Napi::Buffer<uint8_t>>();
-        int r = zxc_seekable_set_dict(s_, dict_buf.Data(), dict_buf.Length());
+        const void* dict_huf = nullptr;
+        if (info.Length() >= 2 && info[1].IsBuffer()) {
+            Napi::Buffer<uint8_t> huf_buf = info[1].As<Napi::Buffer<uint8_t>>();
+            if (huf_buf.Length() != ZXC_HUF_TABLE_SIZE) {
+                Napi::TypeError::New(env, "dictHuf must be exactly 128 bytes")
+                    .ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
+            dict_huf = huf_buf.Data();
+        }
+        int r = zxc_seekable_set_dict(s_, dict_buf.Data(), dict_buf.Length(), dict_huf);
         if (r < 0) {
             return ThrowZxcError(env, r);
         }
@@ -906,7 +1042,10 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("getDictId", Napi::Function::New(env, GetDictId, "getDictId"));
     exports.Set("dictGetId", Napi::Function::New(env, DictGetId, "dictGetId"));
     exports.Set("dictSave", Napi::Function::New(env, DictSave, "dictSave"));
+    exports.Set("trainDictHuf", Napi::Function::New(env, TrainDictHuf, "trainDictHuf"));
+    exports.Set("dictHuf", Napi::Function::New(env, DictHuf, "dictHuf"));
     exports.Set("dictLoad", Napi::Function::New(env, DictLoad, "dictLoad"));
+    exports.Set("dictTrain", Napi::Function::New(env, DictTrain, "dictTrain"));
     exports.Set("DICT_SIZE_MAX", Napi::Number::New(env, ZXC_DICT_SIZE_MAX));
 
     // Library info helpers
