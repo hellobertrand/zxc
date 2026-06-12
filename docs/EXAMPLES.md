@@ -531,16 +531,25 @@ each block, so even the first bytes of a tiny payload can match against it.
 
 How it ties together:
 
-- A dictionary is up to **64 KB** of content. You can **train** one from samples
-  (`zxc_train_dict`) or use any raw bytes.
-- It is identified by a **`dict_id`** (a hash of its content). Serialize it to a
-  `.zxd` file (`zxc_dict_save`) to distribute it.
+- A dictionary is up to **64 KB** of content plus a **shared literal Huffman
+  table** (128 bytes, derived from the real post-LZ literal distribution). A
+  `.zxd` file always carries both. `zxc_dict_train()` builds the whole thing
+  from samples in one call; `zxc_dict_load()` unpacks it in one call.
+- It is identified by a **`dict_id`** that binds the **(content, table)** pair,
+  stored in the `.zxd` file and in every archive compressed with it.
 - A dictionary-compressed archive records `HAS_DICTIONARY` + the `dict_id` in its
   header, but **not the dictionary itself** — you must provide the same
-  dictionary to decompress. A decoder reads the required id with
-  `zxc_get_dict_id()`.
-- The biggest gains are on **small blocks** (4–128 KB). On large blocks the data
-  builds its own match history, so a dictionary helps little.
+  dictionary (content **and** table) to decompress. A decoder reads the required
+  id with `zxc_get_dict_id()`.
+- The biggest gains are on **small blocks** (4–128 KB): at level 6 the shared
+  table lets literal sections skip their 128-byte per-block Huffman header, and
+  the decoder builds the table once instead of once per block. On large blocks
+  the data builds its own match history, so a dictionary helps little.
+- **Raw content-only dictionaries** are still possible via the library API
+  (pass `dict`/`dict_size` with `dict_huf = NULL`) for ad-hoc priming where a
+  trained table adds nothing (binary data, levels 1–5). Such archives never use
+  the shared-table literal encoding. The `.zxd` *file* format always includes
+  the table.
 
 ### CLI quickstart
 
@@ -565,51 +574,65 @@ zxc -D dictionary_1a2b3c4d.zxd -d record.json.zxc -o record.json
 #include <string.h>
 
 int main(void) {
-    /* 1. Train a dictionary from representative samples (or use any raw bytes). */
+    /* 1. Build a dictionary from representative samples: produces the
+     *    complete .zxd bytes (trains content + shared table, serializes). */
     const char *s0 = "{\"event\":\"login\",\"user_id\":1001,\"ok\":true}";
     const char *s1 = "{\"event\":\"logout\",\"user_id\":1002,\"ok\":true}";
     const void  *samples[] = { s0, s1 };
     const size_t sizes[]   = { strlen(s0), strlen(s1) };
 
-    uint8_t dict[4096];
-    int64_t dict_size = zxc_train_dict(samples, sizes, 2, dict, sizeof dict);
-    if (dict_size < 0) { fprintf(stderr, "train failed\n"); return 1; }
-
-    /* 2. Serialize to a .zxd for distribution (carries the dict_id). */
-    size_t   zbnd     = zxc_dict_save_bound((size_t)dict_size);
+    size_t   zbnd     = zxc_dict_save_bound(ZXC_DICT_SIZE_MAX);   /* always-safe upper bound */
     uint8_t *zxd      = malloc(zbnd);
-    int64_t  zxd_size = zxc_dict_save(dict, (size_t)dict_size, zxd, zbnd);
-    uint32_t dict_id  = zxc_dict_get_id(zxd, (size_t)zxd_size);
+    int64_t  zxd_size = zxc_dict_train(samples, sizes, 2, zxd, zbnd);
+    if (zxd_size < 0) { fprintf(stderr, "dict train failed\n"); return 1; }
     /* ... write zxd[0..zxd_size) to "samples.zxd" and ship it to decoders ... */
 
-    /* 3. Compress WITH the dictionary. */
+    /* 2. Unpack the .zxd: content + table + id (zero-copy). */
+    const void *content, *table; size_t content_size; uint32_t dict_id;
+    zxc_dict_load(zxd, (size_t)zxd_size, &content, &content_size, &table, &dict_id);
+
+    /* 3. Compress WITH the dictionary (level 6 to engage the shared table). */
     const char *msg  = "{\"event\":\"login\",\"user_id\":2003,\"ok\":true}";
     size_t      n    = strlen(msg) + 1;
     size_t      cap  = (size_t)zxc_compress_bound(n);
     uint8_t    *comp = malloc(cap);
 
-    zxc_compress_opts_t copts = { .level = 3, .dict = dict, .dict_size = (size_t)dict_size };
+    zxc_compress_opts_t copts = { .level = 6, .dict = content,
+                                  .dict_size = content_size, .dict_huf = table };
     int64_t csize = zxc_compress(msg, n, comp, cap, &copts);
     if (csize < 0) { fprintf(stderr, "compress failed\n"); return 1; }
 
     /* The archive header now carries HAS_DICTIONARY + dict_id; a decoder reads
      * which dictionary it needs with zxc_get_dict_id(comp, csize). */
 
-    /* 4. Decompress WITH the dictionary (load its content from the .zxd). */
-    const void *content; size_t content_size; uint32_t id;
-    zxc_dict_load(zxd, (size_t)zxd_size, &content, &content_size, &id);
-
+    /* 4. Decompress WITH the same dictionary (content + table). */
     uint8_t *out = malloc(n);
-    zxc_decompress_opts_t dopts = { .dict = content, .dict_size = content_size };
+    zxc_decompress_opts_t dopts = { .dict = content, .dict_size = content_size,
+                                    .dict_huf = table };
     int64_t dsize = zxc_decompress(comp, (size_t)csize, out, n, &dopts);
     if (dsize != (int64_t)n || memcmp(msg, out, n) != 0) {
         fprintf(stderr, "round-trip failed\n");
         return 1;
     }
 
-    free(zxd); free(comp); free(out);
+    free(zxd); free(comp); free(out);  /* content/table point INTO zxd; freed last */
     return 0;
 }
+```
+
+> The `content` and `table` pointers returned by `zxc_dict_load()` aim **into**
+> `zxd` (zero-copy), so keep `zxd` alive until you're done compressing or
+> decompressing. The lower-level primitives (`zxc_train_dict` +
+> `zxc_train_dict_huf` + `zxc_dict_save`, and `zxc_dict_huf`) remain available
+> for advanced use — e.g. a **raw content-only dictionary** with no table
+> (`dict` set, `dict_huf = NULL`) for ad-hoc window priming where a trained
+> table adds nothing.
+
+```c
+// (the primitives, for reference — zxc_dict_train above wraps the first three)
+// int64_t cs = zxc_train_dict(samples, sizes, n, content_buf, cap);
+// zxc_train_dict_huf(samples, sizes, n, content_buf, cs, huf /*128 bytes*/);
+// int64_t zs = zxc_dict_save(content_buf, cs, huf, zxd_buf, zbnd);
 ```
 
 ### Error contract
@@ -619,12 +642,16 @@ Decoding a dictionary archive enforces that the right dictionary is supplied:
 | Situation | Result |
 |---|---|
 | No dictionary supplied (`opts == NULL` or `dict == NULL`) | `ZXC_ERROR_DICT_REQUIRED` |
-| Wrong dictionary (`dict_id` mismatch) | `ZXC_ERROR_DICT_MISMATCH` |
+| Wrong dictionary, or table missing/mismatched (`dict_id` mismatch) | `ZXC_ERROR_DICT_MISMATCH` |
 | Dictionary larger than `ZXC_DICT_SIZE_MAX` (64 KB) | `ZXC_ERROR_DICT_TOO_LARGE` |
 
-So a decoder can read `zxc_get_dict_id()` first, fetch the matching `.zxd`, and
-pass its loaded content via `zxc_decompress_opts_t::dict`. See `docs/FORMAT.md`
-§12 for the on-disk dictionary format and §3.1 for the header fields.
+Because the `dict_id` binds the **(content, table)** pair, decoding an
+archive that was compressed with a table requires passing that same table via
+`dict_huf` — omitting it (or supplying a different one) fails the id check with
+`ZXC_ERROR_DICT_MISMATCH`. So a decoder reads `zxc_get_dict_id()` first, fetches
+the matching `.zxd`, and passes its loaded `content` + `zxc_dict_huf()` table
+via `zxc_decompress_opts_t`. See `docs/FORMAT.md` §12 for the on-disk
+dictionary format and §3.1 for the header fields.
 
 ---
 

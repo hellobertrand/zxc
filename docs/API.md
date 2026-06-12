@@ -233,6 +233,8 @@ typedef struct {
     int    seekable;          // 1 = append seek table for random access.
     const void* dict;         // Pre-trained dictionary content (NULL = none).
     size_t dict_size;         // Dictionary size in bytes (0 = none, max 64 KB).
+    const void* dict_huf;     // Shared literal Huffman table, 128 bytes
+                              // (NULL = none; ignored without dict).
     zxc_progress_callback_t progress_cb;  // Optional callback (NULL to disable).
     void*  user_data;                     // Passed through to progress_cb.
 } zxc_compress_opts_t;
@@ -246,6 +248,9 @@ typedef struct {
     int    checksum_enabled;  // 1 = verify checksums, 0 = skip.
     const void* dict;         // Pre-trained dictionary content (NULL = none).
     size_t dict_size;         // Dictionary size in bytes (0 = none).
+    const void* dict_huf;     // Shared literal Huffman table, 128 bytes,
+                              // matching the one used at compression time
+                              // (NULL = none; ignored without dict).
     zxc_progress_callback_t progress_cb;  // Optional callback.
     void*  user_data;                     // Passed through to progress_cb.
 } zxc_decompress_opts_t;
@@ -1290,6 +1295,26 @@ Returns the encoded byte size of a seek table for `num_blocks` blocks.
 
 Declared in `<zxc_dict.h>`. Provides dictionary training, serialization (`.zxd` format), and identification.
 
+> **The simple path**: most callers only need two functions — `zxc_dict_train()`
+> to build a `.zxd` from samples, and `zxc_dict_load()` to unpack one for
+> (de)compression. The remaining functions are the lower-level primitives those
+> two are built from, exposed for advanced use (raw content-only dictionaries,
+> retraining only the table, supplying externally-sourced content).
+
+### `zxc_dict_train`
+
+```c
+ZXC_EXPORT int64_t zxc_dict_train(
+    const void* const* samples,
+    const size_t*       sample_sizes,
+    size_t              n_samples,
+    void*               zxd_buf,        // receives the .zxd bytes
+    size_t              zxd_capacity    // zxc_dict_save_bound(ZXC_DICT_SIZE_MAX) is always safe
+);
+```
+
+**One-call dictionary creation.** Trains the content, trains the shared literal Huffman table from it, and serializes both into ready-to-write `.zxd` bytes. Hides the (otherwise sequential) train-content → train-table → save pipeline. Returns the number of `.zxd` bytes written, or a negative `zxc_error_t` code.
+
 ### `zxc_train_dict`
 
 ```c
@@ -1304,24 +1329,45 @@ ZXC_EXPORT int64_t zxc_train_dict(
 
 Trains a dictionary from a corpus of representative samples. Returns the size of the trained dictionary, or a negative `zxc_error_t` code.
 
+### `zxc_train_dict_huf`
+
+```c
+ZXC_EXPORT int zxc_train_dict_huf(
+    const void* const* samples,
+    const size_t*       sample_sizes,
+    size_t              n_samples,
+    const void*         dict,        // content from zxc_train_dict
+    size_t              dict_size,
+    uint8_t*            huf_lengths_out  // ZXC_HUF_TABLE_SIZE (128) bytes
+);
+```
+
+Trains the **shared literal Huffman table** for an already-trained dictionary. It compresses the samples with `dict` and derives canonical code lengths from the real post-LZ literal distribution. The 128-byte table is required by `zxc_dict_save()` and can be attached at (de)compression time via the `dict_huf` option field. Returns `ZXC_OK` or a negative error code.
+
 ### `zxc_dict_id`
 
 ```c
-ZXC_EXPORT uint32_t zxc_dict_id(const void* dict, size_t dict_size);
+ZXC_EXPORT uint32_t zxc_dict_id(const void* dict, size_t dict_size, const void* huf_lengths);
 ```
 
-Returns a deterministic 32-bit hash of the dictionary content. This ID is stored in the ZXC file header and verified at decompression time. Returns 0 for NULL/empty input.
+Returns the deterministic 32-bit dictionary ID. With `huf_lengths` NULL it
+hashes the raw content only — the id of an in-memory content-only dictionary
+(buffer API). With a 128-byte table it binds the **(content, table)** pair:
+`hash(table, seed = hash(content))` — the value recorded in `.zxd` files and
+in archive headers when a shared table is attached. Returns 0 for NULL/empty
+content.
 
 ### `zxc_dict_save`
 
 ```c
 ZXC_EXPORT int64_t zxc_dict_save(
     const void* content, size_t content_size,
+    const void* huf_lengths,    // 128-byte table from zxc_train_dict_huf (required)
     void* buf, size_t buf_capacity
 );
 ```
 
-Serializes dictionary content to the `.zxd` file format. Use `zxc_dict_save_bound(content_size)` to compute the required buffer capacity.
+Serializes dictionary content **and its shared Huffman table** to the `.zxd` file format. The table is mandatory (pass the 128 bytes from `zxc_train_dict_huf()`); the stored `dict_id` covers both. Use `zxc_dict_save_bound(content_size)` to size `buf`.
 
 ### `zxc_dict_load`
 
@@ -1329,11 +1375,22 @@ Serializes dictionary content to the `.zxd` file format. Use `zxc_dict_save_boun
 ZXC_EXPORT int zxc_dict_load(
     const void* buf, size_t buf_size,
     const void** content_out, size_t* content_size_out,
+    const void** huf_out,        // 128-byte shared table; may be NULL
     uint32_t* dict_id_out        // may be NULL
 );
 ```
 
-Validates and parses a `.zxd` file from memory. On success, `content_out` points into the input buffer (zero-copy). Returns `ZXC_OK` or a negative error code.
+Validates and parses a `.zxd` file from memory in **one call**. On success, `content_out` and `huf_out` (when non-NULL) both point into the input buffer (zero-copy) — pass them straight to `dict` / `dict_huf` in the options. Returns `ZXC_OK` or a negative error code.
+
+### `zxc_dict_huf`
+
+```c
+ZXC_EXPORT const void* zxc_dict_huf(const void* buf, size_t buf_size);
+```
+
+Standalone accessor for the 128-byte shared table inside a `.zxd` buffer (zero-copy), or NULL if invalid. Equivalent to the `huf_out` of `zxc_dict_load()`; use it when you only need the table.
+
+Returns a zero-copy pointer to the 128-byte shared Huffman table inside a `.zxd` buffer (valid as long as `buf` is), or NULL if `buf` is not a valid `.zxd` file. Pass this to `zxc_compress_opts_t::dict_huf` / `zxc_decompress_opts_t::dict_huf`.
 
 ### `zxc_dict_save_bound`
 
@@ -1341,15 +1398,18 @@ Validates and parses a `.zxd` file from memory. On success, `content_out` points
 ZXC_EXPORT size_t zxc_dict_save_bound(size_t content_size);
 ```
 
-Returns the maximum `.zxd` file size for a given content size (`ZXC_DICT_HEADER_SIZE + content_size`).
+Returns the `.zxd` file size for a given content size (`ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_TABLE_SIZE`).
 
 ### `zxc_seekable_set_dict`
 
 ```c
-ZXC_EXPORT int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, size_t dict_size);
+ZXC_EXPORT int zxc_seekable_set_dict(
+    zxc_seekable* s, const void* dict, size_t dict_size,
+    const void* dict_huf         // 128-byte table, or NULL
+);
 ```
 
-Attaches a dictionary to a seekable handle for random-access decompression. The content is copied internally. Must be called before any `zxc_seekable_decompress_range()` call.
+Attaches a dictionary to a seekable handle for random-access decompression. Pass the shared table as `dict_huf` (the archive's `dict_id` binds the pair); pass NULL for a raw content-only dictionary. Both buffers are copied internally. Must be called before any `zxc_seekable_decompress_range()` call.
 
 ---
 
@@ -1449,12 +1509,16 @@ The shared library exports **47 symbols** (verified with `nm -gU`):
 | 49 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
 | 50 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
 | 51 | `zxc_error_name` | Error | `zxc_error.h` |
-| 52 | `zxc_train_dict` | Dictionary | `zxc_dict.h` |
-| 53 | `zxc_dict_id` | Dictionary | `zxc_dict.h` |
-| 54 | `zxc_dict_save` | Dictionary | `zxc_dict.h` |
-| 55 | `zxc_dict_load` | Dictionary | `zxc_dict.h` |
-| 56 | `zxc_dict_save_bound` | Dictionary | `zxc_dict.h` |
-| 57 | `zxc_seekable_set_dict` | Seekable | `zxc_seekable.h` |
+| 52 | `zxc_dict_train` | Dictionary | `zxc_dict.h` |
+| 53 | `zxc_train_dict` | Dictionary | `zxc_dict.h` |
+| 54 | `zxc_train_dict_huf` | Dictionary | `zxc_dict.h` |
+| 55 | `zxc_dict_id` | Dictionary | `zxc_dict.h` |
+| 56 | `zxc_dict_save` | Dictionary | `zxc_dict.h` |
+| 57 | `zxc_dict_load` | Dictionary | `zxc_dict.h` |
+| 58 | `zxc_dict_huf` | Dictionary | `zxc_dict.h` |
+| 59 | `zxc_dict_get_id` | Dictionary | `zxc_dict.h` |
+| 60 | `zxc_dict_save_bound` | Dictionary | `zxc_dict.h` |
+| 61 | `zxc_seekable_set_dict` | Seekable | `zxc_seekable.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon`, `_avx2`, `_avx512`) are compiled with

@@ -34,25 +34,20 @@
 #define zxc_huf_build_code_lengths ZXC_CAT(zxc_huf_build_code_lengths, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_encode_section ZXC_CAT(zxc_huf_encode_section, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_decode_section ZXC_CAT(zxc_huf_decode_section, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_encode_section_dict ZXC_CAT(zxc_huf_encode_section_dict, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_decode_section_dict ZXC_CAT(zxc_huf_decode_section_dict, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_build_dec_table ZXC_CAT(zxc_huf_build_dec_table, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_pack_lengths ZXC_CAT(zxc_huf_pack_lengths, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_unpack_lengths ZXC_CAT(zxc_huf_unpack_lengths, ZXC_FUNCTION_SUFFIX)
 #endif
 
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
-/* 2048-entry multi-symbol decoder lookup table entry. Bit layout:
- *   bits  0..7   sym1       - first decoded symbol
- *   bits  8..15  sym2       - second decoded symbol (junk if n_extra == 0)
- *   bits 16..19  len1       - bit length of sym1's code (1..8)
- *   bits 20..23  len_total  - total bits consumed (1..11)
- *   bit  24      n_extra    - 0 if 1 symbol, 1 if 2 symbols decoded
- *
- * Single-symbol path (tail) reads sym1 + len1; multi-symbol path (hot
- * batched loop) reads sym1, sym2 (always written, possibly overwritten
- * next iter), len_total, n_extra. */
-typedef struct {
-    uint32_t entry;
-} zxc_huf_dec_entry_t;
-
+/* The decoder lookup table entry type (zxc_huf_dec_entry_t) lives in
+ * zxc_internal.h so the compression context can carry a prebuilt table for
+ * the shared dictionary literal table. Bit layout recap:
+ * sym1(0..7) | sym2(8..15) | len1(16..19) | len_total(20..23) | n_extra(24). */
 #define ZXC_HUF_ENTRY(sym1, sym2, len1, len_total, n_extra)                  \
     ((uint32_t)(sym1) | ((uint32_t)(sym2) << 8) | ((uint32_t)(len1) << 16) | \
      ((uint32_t)(len_total) << 20) | ((uint32_t)(n_extra) << 24))
@@ -364,7 +359,7 @@ static void build_canonical_codes(const uint8_t* RESTRICT code_len, uint32_t* RE
  * `ZXC_HUF_MAX_CODE_LEN` (<= 15) before calling.
  *
  * @param[in]  code_len Per-symbol code lengths (length `ZXC_HUF_NUM_SYMBOLS`).
- * @param[out] out      Output header buffer of `ZXC_HUF_LENGTHS_HEADER_SIZE` bytes.
+ * @param[out] out      Output header buffer of `ZXC_HUF_TABLE_SIZE` bytes.
  */
 static void pack_lengths_header(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out) {
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i += 2) {
@@ -381,7 +376,7 @@ static void pack_lengths_header(const uint8_t* RESTRICT code_len, uint8_t* RESTR
  * no length exceeds `ZXC_HUF_MAX_CODE_LEN`, and at least one symbol is
  * present.
  *
- * @param[in]  in       Input header buffer of `ZXC_HUF_LENGTHS_HEADER_SIZE` bytes.
+ * @param[in]  in       Input header buffer of `ZXC_HUF_TABLE_SIZE` bytes.
  * @param[out] code_len Output code-length array of length `ZXC_HUF_NUM_SYMBOLS`.
  * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` if a length is too
  *         large or the table is empty.
@@ -489,23 +484,26 @@ static ZXC_ALWAYS_INLINE int bw_finish(bit_writer_t* RESTRICT bw) {
  * =========================================================================*/
 
 /**
- * @copydoc zxc_huf_encode_section
+ * @brief Shared encoder body: 6-byte sub-stream sizes header + 4 interleaved
+ *        sub-streams, written at @p dst. The 128-byte lengths header, when
+ *        wanted, is the caller's business (see the two public wrappers).
+ *
+ * @return Bytes written (>= ZXC_HUF_STREAM_SIZES_HEADER_SIZE) on success,
+ *         negative `zxc_error_t` code on failure.
  */
-int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
-                           const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
-                           const size_t dst_cap) {
+static int zxc_huf_encode_streams(const uint8_t* RESTRICT literals, const size_t n_literals,
+                                  const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
+                                  const size_t dst_cap) {
     if (UNLIKELY(n_literals == 0)) return ZXC_ERROR_CORRUPT_DATA;
-    if (UNLIKELY(dst_cap < ZXC_HUF_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
+    if (UNLIKELY(dst_cap < (size_t)ZXC_HUF_STREAM_SIZES_HEADER_SIZE))
+        return ZXC_ERROR_DST_TOO_SMALL;
 
-    /* 1. Pack the 128-byte length header. */
-    pack_lengths_header(code_len, dst);
-
-    /* 2. Build canonical codes (LSB-first via bit-reversal). */
+    /* 1. Build canonical codes (LSB-first via bit-reversal). */
     uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
     build_canonical_codes(code_len, codes);
 
-    /* 3. Reserve 6 bytes for sub-stream sizes; encode 4 sub-streams after them. */
-    uint8_t* const sizes_hdr = dst + ZXC_HUF_LENGTHS_HEADER_SIZE;
+    /* 2. Reserve 6 bytes for sub-stream sizes; encode 4 sub-streams after them. */
+    uint8_t* const sizes_hdr = dst;
     uint8_t* const stream_base = sizes_hdr + ZXC_HUF_STREAM_SIZES_HEADER_SIZE;
     const uint8_t* const stream_end = dst + dst_cap;
 
@@ -534,13 +532,38 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_lite
         p = bw.ptr;
     }
 
-    /* 4. Persist the 3 explicit sub-stream sizes (s4 is implied). */
+    /* 3. Persist the 3 explicit sub-stream sizes (s4 is implied). */
     for (int s = 0; s < ZXC_HUF_NUM_STREAMS - 1; s++) {
         if (UNLIKELY(s_sizes[s] > 0xFFFFu)) return ZXC_ERROR_DST_TOO_SMALL;
         zxc_store_le16(sizes_hdr + 2 * s, (uint16_t)s_sizes[s]);
     }
 
     return (int)(p - dst);
+}
+
+/**
+ * @copydoc zxc_huf_encode_section
+ */
+int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
+                           const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
+                           const size_t dst_cap) {
+    if (UNLIKELY(n_literals == 0)) return ZXC_ERROR_CORRUPT_DATA;
+    if (UNLIKELY(dst_cap < ZXC_HUF_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
+
+    /* Pack the 128-byte length header, then the streams after it. */
+    pack_lengths_header(code_len, dst);
+    const int rc = zxc_huf_encode_streams(literals, n_literals, code_len, dst + ZXC_HUF_TABLE_SIZE,
+                                          dst_cap - ZXC_HUF_TABLE_SIZE);
+    return (rc < 0) ? rc : rc + ZXC_HUF_TABLE_SIZE;
+}
+
+/**
+ * @copydoc zxc_huf_encode_section_dict
+ */
+int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n_literals,
+                                const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
+                                const size_t dst_cap) {
+    return zxc_huf_encode_streams(literals, n_literals, code_len, dst, dst_cap);
 }
 
 /* ===========================================================================
@@ -638,7 +661,7 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
     }
 
     /* Build the multi-symbol table. */
-    for (uint32_t p = 0; p < ZXC_HUF_TABLE_SIZE; p++) {
+    for (uint32_t p = 0; p < ZXC_HUF_DEC_TABLE_SIZE; p++) {
         const uint16_t e1 = ss[p & ZXC_HUF_SS_MASK];
         const uint8_t sym1 = (uint8_t)e1;
         const int len1 = e1 >> 8;
@@ -665,42 +688,29 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
 }
 
 /**
- * @copydoc zxc_huf_decode_section
+ * @brief Shared decoder body: parses the 6-byte sub-stream sizes header at
+ *        @p payload and runs the 4-way interleaved decode with @p table.
+ *        The 128-byte lengths header, when present, has already been consumed
+ *        by the caller (see the two public wrappers).
  */
-int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
-                           uint8_t* RESTRICT dst, const size_t n_literals) {
-    if (UNLIKELY(payload_size < ZXC_HUF_HEADER_SIZE || n_literals == 0))
+static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t payload_size,
+                                  uint8_t* RESTRICT dst, const size_t n_literals,
+                                  const zxc_huf_dec_entry_t* RESTRICT table) {
+    if (UNLIKELY(payload_size < (size_t)ZXC_HUF_STREAM_SIZES_HEADER_SIZE || n_literals == 0))
         return ZXC_ERROR_CORRUPT_DATA;
 
-    /* 1. Parse length header. */
-    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-    {
-        const int rc = unpack_lengths_header(payload, code_len);
-        if (UNLIKELY(rc != ZXC_OK)) return rc;
-    }
-
-    /* 2. Build the 2048-entry multi-symbol decode table. Cache-line
-     * aligned: the LUT spans 128 lines (8 KB / 64 B) and is hammered every
-     * symbol, landing it on a 64-byte boundary avoids any cross-line
-     * load split on the per-iteration entry fetch. */
-    ZXC_ALIGN(ZXC_CACHE_LINE_SIZE) zxc_huf_dec_entry_t table[ZXC_HUF_TABLE_SIZE];
-    {
-        const int rc = build_decode_table(code_len, table);
-        if (UNLIKELY(rc != ZXC_OK)) return rc;
-    }
-
-    /* 3. Parse sub-stream sizes. */
-    const uint8_t* const sizes_hdr = payload + ZXC_HUF_LENGTHS_HEADER_SIZE;
+    /* 1. Parse sub-stream sizes. */
+    const uint8_t* const sizes_hdr = payload;
     const uint16_t s1 = zxc_le16(sizes_hdr + 0);
     const uint16_t s2 = zxc_le16(sizes_hdr + 2);
     const uint16_t s3 = zxc_le16(sizes_hdr + 4);
 
-    const size_t streams_total = payload_size - ZXC_HUF_HEADER_SIZE;
+    const size_t streams_total = payload_size - ZXC_HUF_STREAM_SIZES_HEADER_SIZE;
     const size_t s123 = (size_t)s1 + (size_t)s2 + (size_t)s3;
     if (UNLIKELY(s123 > streams_total)) return ZXC_ERROR_CORRUPT_DATA;
     const size_t s4 = streams_total - s123;
 
-    const uint8_t* const stream_base = payload + ZXC_HUF_HEADER_SIZE;
+    const uint8_t* const stream_base = payload + ZXC_HUF_STREAM_SIZES_HEADER_SIZE;
     const size_t off[ZXC_HUF_NUM_STREAMS] = {0, s1, (size_t)s1 + s2, s123};
     const size_t sz[ZXC_HUF_NUM_STREAMS] = {s1, s2, s3, s4};
 
@@ -849,4 +859,65 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
 #undef DECODE_ONE
 #undef REFILL
     return ZXC_OK;
+}
+
+/**
+ * @copydoc zxc_huf_decode_section
+ */
+int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
+                           uint8_t* RESTRICT dst, const size_t n_literals) {
+    if (UNLIKELY(payload_size < ZXC_HUF_HEADER_SIZE || n_literals == 0))
+        return ZXC_ERROR_CORRUPT_DATA;
+
+    /* 1. Parse length header. */
+    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+    {
+        const int rc = unpack_lengths_header(payload, code_len);
+        if (UNLIKELY(rc != ZXC_OK)) return rc;
+    }
+
+    /* 2. Build the 2048-entry multi-symbol decode table. Cache-line
+     * aligned: the LUT spans 128 lines (8 KB / 64 B) and is hammered every
+     * symbol, landing it on a 64-byte boundary avoids any cross-line
+     * load split on the per-iteration entry fetch. */
+    ZXC_ALIGN(ZXC_CACHE_LINE_SIZE) zxc_huf_dec_entry_t table[ZXC_HUF_DEC_TABLE_SIZE];
+    {
+        const int rc = build_decode_table(code_len, table);
+        if (UNLIKELY(rc != ZXC_OK)) return rc;
+    }
+
+    /* 3. Decode the 4 interleaved sub-streams. */
+    return zxc_huf_decode_streams(payload + ZXC_HUF_TABLE_SIZE, payload_size - ZXC_HUF_TABLE_SIZE,
+                                  dst, n_literals, table);
+}
+
+/**
+ * @copydoc zxc_huf_decode_section_dict
+ */
+int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
+                                uint8_t* RESTRICT dst, const size_t n_literals,
+                                const zxc_huf_dec_entry_t* RESTRICT table) {
+    if (UNLIKELY(table == NULL)) return ZXC_ERROR_CORRUPT_DATA;
+    return zxc_huf_decode_streams(payload, payload_size, dst, n_literals, table);
+}
+
+/**
+ * @copydoc zxc_huf_build_dec_table
+ */
+int zxc_huf_build_dec_table(const uint8_t* RESTRICT code_len, zxc_huf_dec_entry_t* RESTRICT table) {
+    return build_decode_table(code_len, table);
+}
+
+/**
+ * @copydoc zxc_huf_pack_lengths
+ */
+void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out) {
+    pack_lengths_header(code_len, out);
+}
+
+/**
+ * @copydoc zxc_huf_unpack_lengths
+ */
+int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len) {
+    return unpack_lengths_header(in, code_len);
 }

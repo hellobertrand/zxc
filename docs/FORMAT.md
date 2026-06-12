@@ -151,7 +151,7 @@ General LZ-style format with separated streams.
 Offset  Size  Field
 0x00    4     n_sequences (u32)
 0x04    4     n_literals (u32)
-0x08    1     enc_lit   (0=RAW, 1=RLE, 2=HUFFMAN)
+0x08    1     enc_lit   (0=RAW, 1=RLE, 2=HUFFMAN, 3=HUFFMAN_DICT)
 0x09    1     enc_litlen (reserved)
 0x0A    1     enc_mlen   (reserved)
 0x0B    1     enc_off    (0=16-bit offsets, 1=8-bit offsets)
@@ -175,7 +175,10 @@ Section order:
 - **Literals stream**:
   - raw literal bytes if `enc_lit=0`, or
   - RLE tokenized if `enc_lit=1`, or
-  - Huffman-coded if `enc_lit=2` (see [§ 5.2.1 Huffman literal section](#521-huffman-literal-section)).
+  - Huffman-coded if `enc_lit=2` (see [§ 5.2.1 Huffman literal section](#521-huffman-literal-section)), or
+  - Huffman-coded with the dictionary's shared table if `enc_lit=3`
+    (see [§ 5.2.2 Shared-table Huffman literal section](#522-shared-table-huffman-literal-section);
+    dictionary-compressed archives only).
 - **Tokens stream**:
   - one byte per sequence: `(LL << 4) | ML`.
   - `LL` and `ML` are 4-bit fields.
@@ -230,6 +233,24 @@ Decoder validation requirements:
   except for the single-present-symbol degenerate case where exactly one
   symbol has `code_len = 1` and the Kraft sum is `2^7`.
 - A failure on any of the above results in `ZXC_ERROR_CORRUPT_DATA`.
+
+### 5.2.2 Shared-table Huffman literal section
+
+`enc_lit=3` is only valid in archives compressed with a dictionary
+(`HAS_DICTIONARY` set). The bit-stream layout is identical to § 5.2.1 except
+that the **128-byte code-length header is omitted**: the code lengths come from
+the shared literal table carried by the `.zxd` dictionary (see § 12.4). The
+section payload therefore starts directly at the 6-byte sub-stream sizes
+header, and `s4 = total_payload_size - 6 - s1 - s2 - s3`.
+
+The shared table is trained on the corpus' post-LZ literal distribution and
+covers only the symbols seen in training; the encoder falls back to a
+per-block table (`enc_lit=2`) or RAW/RLE for any block containing a literal
+byte without a code. Decoders build the decode table once per context from the
+dictionary's table (same validation rules as § 5.2.1) and **MUST** reject
+`enc_lit=3` sections with `ZXC_ERROR_DICT_REQUIRED` when no dictionary table
+is attached. The archive's `dict_id` binds the (content, table) pair, so a
+matching table is guaranteed present whenever the dictionary check passed.
 
 ---
 
@@ -549,8 +570,11 @@ decompress any block independently.
 When `HAS_DICTIONARY` (flag bit 6) is set, the reserved bytes at offsets
 `0x07..0x0A` contain the `dict_id` (`u32` LE). A decoder **MUST**:
 1. Verify that a dictionary is provided (`ZXC_ERROR_DICT_REQUIRED` if not).
-2. Verify that `zxc_dict_id(dict, dict_size) == header.dict_id`
-   (`ZXC_ERROR_DICT_MISMATCH` if not).
+2. Verify that the dictionary id matches `header.dict_id`
+   (`ZXC_ERROR_DICT_MISMATCH` if not). For a raw in-memory dictionary without
+   a shared table, the id is `zxc_dict_id(dict, dict_size, NULL)`. When a shared
+   literal table is attached, the id also binds the table:
+   `id = fold32(hash(table_128_bytes, seed = hash(content)))` (i.e. `zxc_dict_id(content, size, table)`).
 
 Older decoders that do not recognize the `HAS_DICTIONARY` flag will ignore it
 (per §10.3: reserved flag bits are ignored). However, blocks compressed with a
@@ -568,15 +592,23 @@ Offset  Size  Field
 0x04    1     Dictionary format version (currently 1)
 0x05    1     Flags (bits 0..3: checksum algorithm id; bits 4..7 reserved)
 0x06    2     Content size (u16 LE, max 65535)
-0x08    4     dict_id (u32 LE, hash of content)
+0x08    4     dict_id (u32 LE, binds content AND shared table, see below)
 0x0C    2     Reserved (0)
 0x0E    2     Header CRC16 (zxc_hash16, computed with bytes 0x0C-0x0F zeroed)
 0x10    N     Dictionary content (raw bytes)
+0x10+N  128   Shared literal Huffman table (256 × 4-bit packed code lengths,
+              same layout as the § 5.2.1 code-length header; always present)
 ```
 
 - **Magic Word**: `0x9CB0D1C7`. Allows immediate rejection of non-dictionary files.
+- **Version**: `1`. Decoders reject any other version with
+  `ZXC_ERROR_BAD_VERSION`.
 - **Flags**: bits `0..3` carry the checksum algorithm id (`0` = RapidHash-based folding), matching the ZXC file header flags; bits `4..7` are reserved (must be 0).
-- **dict_id**: deterministic 32-bit hash (RapidHash-folded) of the content bytes. Must match the `dict_id` stored in any ZXC file header that references this dictionary.
+- **Shared literal Huffman table**: code lengths for the `enc_lit=3` literal
+  sections (§ 5.2.2), trained on the corpus' post-LZ literal distribution.
+- **dict_id**: `fold32(hash(table_128_bytes, seed = hash(content)))` —
+  binds the exact (content, table) pair. Must match the `dict_id` stored in
+  any ZXC file header that references this dictionary.
 - **Header CRC16**: `zxc_hash16` checksum of the 16-byte header with bytes `0x0C..0x0F` zeroed before hashing — same method as the ZXC file header.
 - **Content**: raw bytes that prefill the LZ77 window. Not compressed.
 
@@ -809,13 +841,21 @@ Seek table entry at `0x36`:
 
 ## 15. Worked Example: Dictionary File (`.zxd` Hexdump)
 
-A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size: **21 bytes** (16-byte header + 5-byte content). This is the on-disk form produced by `zxc_dict_save()` (see §12.4).
+A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size: **149 bytes** (16-byte header + 5-byte content + 128-byte shared Huffman table). This is the on-disk form produced by `zxc_dict_save()` (see §12.4); the table is always present.
 
 ### 15.1 Full hexdump
 
 ```text
-00000000: C7 D1 B0 9C 01 00 05 00 17 0F 72 9A 00 00 4A D9
-00000010: 68 65 6C 6C 6F
+00000000: C7 D1 B0 9C 01 00 05 00 23 58 DF 6F 00 00 63 65
+00000010: 68 65 6C 6C 6F 00 00 00 00 00 00 00 00 00 00 00
+00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000040: 00 00 00 00 00 00 00 20 00 02 00 02 20 00 00 00
+00000050: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000060: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000070: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000080: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000090: 00 00 00 00 00
 ```
 
 ### 15.2 Byte-level decoding
@@ -830,9 +870,9 @@ C7 D1 B0 9C | 01 | 00 | 05 00 | 17 0F 72 9A | 00 00 | 4A D9
 - `01` -> dictionary format version 1.
 - `00` -> flags (bits 0..3 = checksum algorithm id `0` = RapidHash; bits 4..7 reserved).
 - `05 00` -> content size (LE) = `5` bytes.
-- `17 0F 72 9A` -> `dict_id` (LE) = `0x9A720F17`. Must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
+- `23 58 DF 6F` -> `dict_id` (LE) = `0x6FDF5823`. Binds the **(content, table)** pair (see §12.4) and must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
 - `00 00` -> reserved.
-- `4A D9` -> header CRC16 (LE) = `0xD94A`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the CRC is the last 2 bytes of the header).
+- `63 65` -> header CRC16 (LE) = `0x6563`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the CRC is the last 2 bytes of the header).
 
 #### B) Dictionary Content (offset `0x10`, 5 bytes)
 
@@ -842,9 +882,18 @@ C7 D1 B0 9C | 01 | 00 | 05 00 | 17 0F 72 9A | 00 00 | 4A D9
 
 ASCII: `hello`. Raw bytes that prefill the LZ77 window — not compressed.
 
+#### C) Shared Huffman Table (offset `0x15`, 128 bytes)
+
+```text
+... 20 00 02 00 02 20 ...   (remaining bytes 0x00)
+```
+
+256 × 4-bit code lengths, packed two-per-byte (low nibble first), for the shared literal table (§5.2.2). Symbols absent from the training distribution have length `0`; here only the four bytes of `hello` carry codes (e.g. the nibble at table index `'e'`=0x65 gives length `2`), so all other entries are zero.
+
 ### 15.3 Structural view with absolute offsets
 
 ```text
 0x00..0x0F  Dictionary Header (16)
 0x10..0x14  Dictionary Content (5)
+0x15..0x94  Shared Huffman Table (128)
 ```

@@ -29,9 +29,10 @@ Each file maps onto sections of `docs/FORMAT.md §5` and the integrity fields:
 | `06_checksum_per_block.zxc`| Per-block checksum + non-zero global stream hash                |
 | `07_multiple_blocks.zxc`   | Multiple data blocks → rolling global hash (§7.3)               |
 | `08_seekable_table.zxc`    | SEK seek-table block (§5.5)                                     |
-| `09_block_dict.zxc`        | Dictionary archive: `HAS_DICTIONARY` flag + `dict_id` in the header (§3.1) |
+| `09_block_dict.zxc`        | Raw in-memory dictionary (no shared table): `HAS_DICTIONARY` flag + content-only `dict_id` (§3.1, §12.3) |
 | `10_glo_offset16.zxc`      | GLO block with 16-bit offsets (`enc_off == 0`, large-distance matches) |
 | `11_glo_rle.zxc`           | GLO block with RLE literal encoding (`enc_lit == 1`)            |
+| `12_glo_huffman_dict.zxc`  | Dictionary archive with the shared-table Huffman literal section (`enc_lit == 3`, §5.2.2) |
 
 ## What the validator checks
 

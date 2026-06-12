@@ -30,6 +30,7 @@
 #define zxc_decompress_chunk_wrapper_safe \
     ZXC_CAT(zxc_decompress_chunk_wrapper_safe, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_decode_section ZXC_CAT(zxc_huf_decode_section, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_decode_section_dict ZXC_CAT(zxc_huf_decode_section_dict, ZXC_FUNCTION_SUFFIX)
 #endif
 
 #include "../../include/zxc_error.h"
@@ -368,6 +369,29 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) return ZXC_ERROR_CORRUPT_DATA;
             const int rc =
                 zxc_huf_decode_section(p_curr, lit_stream_size, ctx->lit_buffer, required_size);
+            if (UNLIKELY(rc != ZXC_OK)) return rc;
+            l_ptr = ctx->lit_buffer;
+            l_end = ctx->lit_buffer + required_size;
+        }
+    } else if (gh.enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT) {
+        /* Shared dictionary table: no inline lengths header; the prebuilt
+         * decode table was attached to the context with the dictionary. */
+        const size_t required_size = (size_t)(desc[0].sizes >> 32);
+        if (UNLIKELY(lit_stream_size > (size_t)(src + src_size - p_curr)))
+            return ZXC_ERROR_CORRUPT_DATA;
+        if (required_size == 0) {
+            l_ptr = p_curr;
+            l_end = p_curr;
+        } else {
+            if (UNLIKELY(ctx->dict_huf_table == NULL)) return ZXC_ERROR_DICT_REQUIRED;
+            if (UNLIKELY(required_size > dst_capacity || required_size > SIZE_MAX - ZXC_PAD_SIZE))
+                return ZXC_ERROR_DST_TOO_SMALL;
+            const size_t alloc_size = required_size + ZXC_PAD_SIZE;
+            /* lit_buffer is pre-allocated to chunk_size + ZXC_PAD_SIZE by
+             * zxc_cctx_init (mode == 0). */
+            if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) return ZXC_ERROR_CORRUPT_DATA;
+            const int rc = zxc_huf_decode_section_dict(p_curr, lit_stream_size, ctx->lit_buffer,
+                                                       required_size, ctx->dict_huf_table);
             if (UNLIKELY(rc != ZXC_OK)) return rc;
             l_ptr = ctx->lit_buffer;
             l_end = ctx->lit_buffer + required_size;

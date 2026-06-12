@@ -291,6 +291,8 @@ typedef struct {
     uint64_t total_input_bytes;
     const uint8_t* dict;
     size_t dict_size;
+    const uint8_t* dict_huf; /**< Shared dictionary literal table (128-byte packed
+                                  code-lengths header), NULL when absent. */
 } zxc_stream_ctx_t;
 
 /**
@@ -376,8 +378,9 @@ static void* zxc_stream_worker(void* arg) {
     const size_t eff_chunk = (ctx->dict_size > 0 && ctx->compression_mode == 1)
                                  ? zxc_block_size_ceil(ctx->dict_size + ctx->chunk_size)
                                  : ctx->chunk_size;
-    if (zxc_cctx_init(&cctx, eff_chunk, ctx->compression_mode, ctx->compression_level, unified_chk,
-                      ctx->dict_size) != ZXC_OK) {
+    if (UNLIKELY(zxc_cctx_init(&cctx, eff_chunk, ctx->compression_mode, ctx->compression_level,
+                               unified_chk, ctx->dict_size) != ZXC_OK ||
+                 zxc_cctx_attach_dict_huf(&cctx, ctx->dict_huf) != ZXC_OK)) {
         // LCOV_EXCL_START
         zxc_cctx_free(&cctx);
         pthread_mutex_lock(&ctx->lock);
@@ -585,7 +588,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                                      const int checksum_enabled, const int seekable,
                                      zxc_chunk_processor_t func,
                                      zxc_progress_callback_t progress_cb, void* user_data,
-                                     const uint8_t* dict, const size_t dict_size) {
+                                     const uint8_t* dict, const size_t dict_size,
+                                     const uint8_t* dict_huf) {
     zxc_stream_ctx_t ctx;
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
 
@@ -619,7 +623,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
         if (header_dict_id != 0) {
             if (UNLIKELY(!dict || dict_size == 0)) return ZXC_ERROR_DICT_REQUIRED;
-            if (UNLIKELY(zxc_dict_id(dict, dict_size) != header_dict_id))
+            if (UNLIKELY(zxc_dict_id(dict, dict_size, dict_huf) != header_dict_id))
                 return ZXC_ERROR_DICT_MISMATCH;
         }
     }
@@ -642,6 +646,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ctx.total_input_bytes = total_file_size;
     ctx.dict = dict;
     ctx.dict_size = dict_size;
+    ctx.dict_huf = dict_huf;
 
     uint32_t d_global_hash = 0;
 
@@ -742,7 +747,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 1 && f_out) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
         zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE, runtime_chunk_sz, checksum_enabled,
-                              (dict && dict_size) ? zxc_dict_id(dict, dict_size) : 0);
+                              (dict && dict_size) ? zxc_dict_id(dict, dict_size, dict_huf) : 0);
         if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
             ctx.io_error = 1;
 
@@ -983,8 +988,10 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
+    const uint8_t* dict_huf = (opts && opts->dict) ? (const uint8_t*)opts->dict_huf : NULL;
     return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, block_size, checksum_enabled,
-                                 seekable, zxc_compress_chunk_wrapper, cb, ud, dict, dict_size);
+                                 seekable, zxc_compress_chunk_wrapper, cb, ud, dict, dict_size,
+                                 dict_huf);
 }
 
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts_t* opts) {
@@ -997,9 +1004,10 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
     zxc_progress_callback_t cb = opts ? opts->progress_cb : NULL;
     void* ud = opts ? opts->user_data : NULL;
 
+    const uint8_t* dict_huf = (opts && opts->dict) ? (const uint8_t*)opts->dict_huf : NULL;
     return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled, 0,
                                  (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, cb, ud, dict,
-                                 dict_size);
+                                 dict_size, dict_huf);
 }
 
 int64_t zxc_stream_get_decompressed_size(FILE* f_in) {

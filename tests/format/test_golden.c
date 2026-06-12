@@ -95,17 +95,18 @@ static uint8_t *read_file(const char *path, size_t *out_size) {
  * then each section's bytes. The section sizes plus the headers must tile the
  * payload exactly. */
 static int validate_lz_payload(const char *ctx, const uint8_t *p, uint32_t comp, int n_sections,
-                               int expect_huffman) {
+                               int expect_enc_lit) {
     uint32_t fixed = 16 + (uint32_t)n_sections * 8;
     CHECK(comp >= fixed, "LZ payload too small for header+descriptors (%u < %u)", comp, fixed);
 
     uint8_t enc_lit = p[8];
     uint8_t enc_off = p[11];
-    CHECK(enc_lit <= 2, "enc_lit = %u out of range", enc_lit);
+    CHECK(enc_lit <= 3, "enc_lit = %u out of range", enc_lit);
     CHECK(enc_off <= 1, "enc_off = %u out of range", enc_off);
     CHECK(zxc_le32(p + 12) == 0, "LZ header reserved u32 nonzero");
-    if (expect_huffman)
-        CHECK(enc_lit == 2, "expected Huffman literals (enc_lit==2), got %u", enc_lit);
+    if (expect_enc_lit >= 0)
+        CHECK(enc_lit == (uint8_t)expect_enc_lit, "expected enc_lit == %d, got %u", expect_enc_lit,
+              enc_lit);
 
     uint64_t sect_total = 0;
     for (int i = 0; i < n_sections; i++) {
@@ -208,9 +209,9 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
         CHECK(off + ZXC_BLOCK_HEADER_SIZE + comp <= size, "payload overruns file at %zu", off);
 
         if (type == GC_BLOCK_GLO) {
-            if (!validate_lz_payload(ctx, payload, comp, 4, gc->expect_huffman_literals)) return 0;
+            if (!validate_lz_payload(ctx, payload, comp, 4, gc->expect_enc_lit)) return 0;
         } else if (type == GC_BLOCK_GHI) {
-            if (!validate_lz_payload(ctx, payload, comp, 3, 0)) return 0;
+            if (!validate_lz_payload(ctx, payload, comp, 3, -1)) return 0;
         }
 
         size_t phys = ZXC_BLOCK_HEADER_SIZE + comp;
@@ -293,10 +294,12 @@ static int validate_roundtrip(const char *ctx, const golden_case_t *gc, const ui
     int ok = 1;
     if (in_size > 0) {
         uint8_t *out = (uint8_t *)malloc(in_size);
-        /* Dictionary cases must be decoded with their dictionary. */
+        /* Dictionary cases must be decoded with their dictionary (and, for the
+         * shared-table case, its Huffman table -- dict_id binds the pair). */
         zxc_decompress_opts_t dopts = {0};
         dopts.dict = gc->opts.dict;
         dopts.dict_size = gc->opts.dict_size;
+        if (gc->use_dict_huf) dopts.dict_huf = gc_dict_huf_table();
         int64_t r = zxc_decompress(buf, size, out, in_size, &dopts);
         if (r < 0) {
             fprintf(stderr, "    FAIL [%s]: decompress -> %s\n", ctx, zxc_error_name((int)r));

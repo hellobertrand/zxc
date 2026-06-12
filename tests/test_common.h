@@ -172,6 +172,7 @@ int test_seekable_mt_full_file(void);
 /* Format (on-disk) */
 int test_bit_reader(void);
 int test_huffman_codec(void);
+int test_huffman_codec_dict(void);
 int test_eof_block_structure(void);
 int test_header_checksum(void);
 int test_global_checksum_order(void);
@@ -200,5 +201,7 @@ int test_dict_train_no_frequent_patterns(void);
 int test_dict_seekable_mt_roundtrip(void);
 int test_dict_stream_dict_id_checks(void);
 int test_dict_seekable_dict_id_checks(void);
+int test_dict_huf_zxd_roundtrip(void);
+int test_dict_huf_table_roundtrip(void);
 
 #endif /* ZXC_TEST_COMMON_H */

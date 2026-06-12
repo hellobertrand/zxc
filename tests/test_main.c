@@ -103,6 +103,7 @@ static const test_entry_t g_tests[] = {
     /* --- Format (on-disk) --- */
     TEST_CASE(test_bit_reader),
     TEST_CASE(test_huffman_codec),
+    TEST_CASE(test_huffman_codec_dict),
     TEST_CASE(test_eof_block_structure),
     TEST_CASE(test_header_checksum),
     TEST_CASE(test_global_checksum_order),
@@ -131,6 +132,8 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_dict_seekable_mt_roundtrip),
     TEST_CASE(test_dict_stream_dict_id_checks),
     TEST_CASE(test_dict_seekable_dict_id_checks),
+    TEST_CASE(test_dict_huf_zxd_roundtrip),
+    TEST_CASE(test_dict_huf_table_roundtrip),
 
     /* --- Seekable (single-threaded) --- */
     TEST_CASE(test_seekable_table_sizes),
