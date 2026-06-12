@@ -133,6 +133,13 @@ pub struct CompressOptions {
     /// [`train_dict`] or [`dict_load`]). The decoder must be given the same
     /// dictionary to decompress the resulting archive.
     pub dict: Option<Vec<u8>>,
+
+    /// Shared literal Huffman table (default: `None`; ignored without `dict`).
+    ///
+    /// The 128-byte packed code-lengths table from [`train_dict_huf`] or
+    /// [`dict_huf`]. Becomes part of the archive's dictionary binding: the
+    /// decoder must be given the same (dict, table) pair.
+    pub dict_huf: Option<Vec<u8>>,
 }
 
 impl Default for CompressOptions {
@@ -142,6 +149,7 @@ impl Default for CompressOptions {
             checksum: true,
             seekable: false,
             dict: None,
+            dict_huf: None,
         }
     }
 }
@@ -172,6 +180,19 @@ impl CompressOptions {
         self.dict = Some(dict.into());
         self
     }
+
+    /// Attach the dictionary's shared literal Huffman table (128 bytes).
+    pub fn with_dict_huf(mut self, huf: impl Into<Vec<u8>>) -> Self {
+        self.dict_huf = Some(huf.into());
+        self
+    }
+
+    /// Attach a [`Dictionary`] (content + shared table) in one call.
+    pub fn with_dictionary(mut self, dictionary: &Dictionary) -> Self {
+        self.dict = Some(dictionary.content().to_vec());
+        self.dict_huf = Some(dictionary.huf().to_vec());
+        self
+    }
 }
 
 // =============================================================================
@@ -189,6 +210,12 @@ pub struct DecompressOptions {
     /// Must match the dictionary used at compression time. Required to
     /// decompress an archive that was produced with a dictionary.
     pub dict: Option<Vec<u8>>,
+
+    /// Shared literal Huffman table (default: `None`; ignored without `dict`).
+    ///
+    /// Must match the table used at compression time (the archive's dict_id
+    /// binds the (dict, table) pair).
+    pub dict_huf: Option<Vec<u8>>,
 }
 
 impl DecompressOptions {
@@ -196,13 +223,26 @@ impl DecompressOptions {
     pub fn skip_checksum() -> Self {
         Self {
             verify_checksum: false,
-            dict: None,
+            ..Default::default()
         }
     }
 
     /// Attach a pre-trained dictionary (raw content bytes).
     pub fn with_dict(mut self, dict: impl Into<Vec<u8>>) -> Self {
         self.dict = Some(dict.into());
+        self
+    }
+
+    /// Attach the dictionary's shared literal Huffman table (128 bytes).
+    pub fn with_dict_huf(mut self, huf: impl Into<Vec<u8>>) -> Self {
+        self.dict_huf = Some(huf.into());
+        self
+    }
+
+    /// Attach a [`Dictionary`] (content + shared table) in one call.
+    pub fn with_dictionary(mut self, dictionary: &Dictionary) -> Self {
+        self.dict = Some(dictionary.content().to_vec());
+        self.dict_huf = Some(dictionary.huf().to_vec());
         self
     }
 }
@@ -220,8 +260,11 @@ mod pstream;
 pub mod seekable;
 mod stdio;
 
-pub use dict::{dict_get_id, dict_id, dict_load, dict_save, get_dict_id, train_dict};
-pub use zxc_sys::ZXC_DICT_SIZE_MAX;
+pub use dict::{
+    dict_get_id, dict_huf, dict_id, dict_load, dict_save, get_dict_id, train_dict, train_dict_huf,
+    Dictionary,
+};
+pub use zxc_sys::{ZXC_HUF_TABLE_SIZE, ZXC_DICT_SIZE_MAX};
 
 pub use error::{Error, Result};
 pub use oneshot::{

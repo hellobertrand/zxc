@@ -113,6 +113,16 @@ int zxc_huf_encode_section_default(const uint8_t* RESTRICT literals, const size_
                                    const size_t dst_cap);
 int zxc_huf_decode_section_default(const uint8_t* RESTRICT payload, const size_t payload_size,
                                    uint8_t* RESTRICT dst, const size_t n_literals);
+int zxc_huf_encode_section_dict_default(const uint8_t* RESTRICT literals, const size_t n_literals,
+                                        const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
+                                        const size_t dst_cap);
+int zxc_huf_decode_section_dict_default(const uint8_t* RESTRICT payload, const size_t payload_size,
+                                        uint8_t* RESTRICT dst, const size_t n_literals,
+                                        const zxc_huf_dec_entry_t* RESTRICT table);
+int zxc_huf_build_dec_table_default(const uint8_t* RESTRICT code_len,
+                                    zxc_huf_dec_entry_t* RESTRICT table);
+void zxc_huf_pack_lengths_default(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out);
+int zxc_huf_unpack_lengths_default(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len);
 
 #if defined(__x86_64__) || defined(_M_X64)
 int zxc_compress_chunk_wrapper_avx2(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
@@ -504,6 +514,30 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
     return zxc_huf_decode_section_default(payload, payload_size, dst, n_literals);
 }
 
+int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n_literals,
+                                const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
+                                const size_t dst_cap) {
+    return zxc_huf_encode_section_dict_default(literals, n_literals, code_len, dst, dst_cap);
+}
+
+int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
+                                uint8_t* RESTRICT dst, const size_t n_literals,
+                                const zxc_huf_dec_entry_t* RESTRICT table) {
+    return zxc_huf_decode_section_dict_default(payload, payload_size, dst, n_literals, table);
+}
+
+int zxc_huf_build_dec_table(const uint8_t* RESTRICT code_len, zxc_huf_dec_entry_t* RESTRICT table) {
+    return zxc_huf_build_dec_table_default(code_len, table);
+}
+
+void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out) {
+    zxc_huf_pack_lengths_default(code_len, out);
+}
+
+int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len) {
+    return zxc_huf_unpack_lengths_default(in, code_len);
+}
+
 /*
  * ============================================================================
  * PUBLIC UTILITY API
@@ -538,11 +572,12 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
+    const uint8_t* dict_huf = (opts && opts->dict) ? (const uint8_t*)opts->dict_huf : NULL;
 
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
-    const uint32_t did = (dict && dict_size > 0) ? zxc_dict_id(dict, dict_size) : 0;
+    const uint32_t did = (dict && dict_size > 0) ? zxc_dict_id(dict, dict_size, dict_huf) : 0;
 
     const uint8_t* ip = (const uint8_t*)src;
     uint8_t* op = (uint8_t*)dst;
@@ -557,6 +592,12 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (UNLIKELY(zxc_cctx_init(&ctx, eff_chunk, 1, level, checksum_enabled, dict_size) != ZXC_OK))
         return ZXC_ERROR_MEMORY;
     // LCOV_EXCL_STOP
+    if (UNLIKELY(zxc_cctx_attach_dict_huf(&ctx, dict_huf) != ZXC_OK)) {
+        // LCOV_EXCL_START
+        zxc_cctx_free(&ctx);
+        return ZXC_ERROR_CORRUPT_DATA;
+        // LCOV_EXCL_STOP
+    }
 
     /* Dict input buffer: [dict_content | block_data] for the encoder, carved
      * into the cctx workspace (NULL when no dictionary is active). */
@@ -712,6 +753,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
+    const uint8_t* dict_huf = (opts && opts->dict) ? (const uint8_t*)opts->dict_huf : NULL;
 
     const uint8_t* ip = (const uint8_t*)src;
     const uint8_t* ip_end = ip + src_size;
@@ -736,10 +778,16 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_DICT_REQUIRED;
         }
-        if (UNLIKELY(zxc_dict_id(dict, dict_size) != header_dict_id)) {
+        if (UNLIKELY(zxc_dict_id(dict, dict_size, dict_huf) != header_dict_id)) {
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_DICT_MISMATCH;
         }
+    }
+    if (UNLIKELY(zxc_cctx_attach_dict_huf(&ctx, dict_huf) != ZXC_OK)) {
+        // LCOV_EXCL_START
+        zxc_cctx_free(&ctx);
+        return ZXC_ERROR_CORRUPT_DATA;
+        // LCOV_EXCL_STOP
     }
 
     ip += ZXC_FILE_HEADER_SIZE;

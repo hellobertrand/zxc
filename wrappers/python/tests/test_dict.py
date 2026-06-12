@@ -99,12 +99,17 @@ class TestDictId:
     def test_ids_agree_across_surfaces(self, trained_dict):
         payload = make_payload()
         arch = zxc.compress(payload, dict=trained_dict)
-        zxd = zxc.dict_save(trained_dict)
+        huf = zxc.train_dict_huf(make_samples(), trained_dict)
+        zxd = zxc.dict_save(trained_dict, huf)
 
         cid = zxc.dict_id(trained_dict)
         assert cid != 0
         assert zxc.get_dict_id(arch) == cid
-        assert zxc.dict_get_id(zxd) == cid
+        # The .zxd id binds (content, table): non-zero and distinct from the
+        # content-only id.
+        assert zxc.dict_get_id(zxd) != 0
+        assert zxc.dict_get_id(zxd) != cid
+        assert zxc.dict_huf(zxd) == huf
 
     def test_id_from_first_16_bytes(self, trained_dict):
         payload = make_payload()
@@ -125,16 +130,18 @@ class TestDictId:
 
 class TestSaveLoad:
     def test_save_load_roundtrip(self, trained_dict):
-        zxd = zxc.dict_save(trained_dict)
+        huf = zxc.train_dict_huf(make_samples(), trained_dict)
+        zxd = zxc.dict_save(trained_dict, huf)
         assert isinstance(zxd, bytes)
-        assert len(zxd) == 16 + len(trained_dict)  # zxc_dict_save_bound
+        assert len(zxd) == 16 + len(trained_dict) + 128  # zxc_dict_save_bound
 
         content, dict_id = zxc.dict_load(zxd)
         assert content == trained_dict
-        assert dict_id == zxc.dict_id(trained_dict)
+        assert dict_id == zxc.dict_get_id(zxd)
 
     def test_loaded_content_compresses(self, trained_dict):
-        zxd = zxc.dict_save(trained_dict)
+        huf = zxc.train_dict_huf(make_samples(), trained_dict)
+        zxd = zxc.dict_save(trained_dict, huf)
         content, _ = zxc.dict_load(zxd)
         payload = make_payload()
         arch = zxc.compress(payload, dict=content)

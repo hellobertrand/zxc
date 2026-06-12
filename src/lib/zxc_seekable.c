@@ -176,6 +176,9 @@ struct zxc_seekable_s {
     /* Dictionary (owned copy, freed in zxc_seekable_free). */
     uint8_t* dict;
     size_t dict_size;
+    /* Shared literal Huffman table (owned copy; meaningful when has_dict_huf). */
+    uint8_t dict_huf[ZXC_HUF_TABLE_SIZE];
+    int has_dict_huf;
 };
 
 /**
@@ -522,6 +525,13 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
                      ZXC_OK))
             return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
+        if (UNLIKELY(zxc_cctx_attach_dict_huf(&s->dctx, s->has_dict_huf ? s->dict_huf : NULL) !=
+                     ZXC_OK)) {
+            // LCOV_EXCL_START
+            zxc_cctx_free(&s->dctx);
+            return ZXC_ERROR_CORRUPT_DATA;
+            // LCOV_EXCL_STOP
+        }
         s->dctx_initialized = 1;
         if (s->dict_size > 0) ZXC_MEMCPY(s->dctx.dict_buffer, s->dict, s->dict_size);
     }
@@ -658,6 +668,13 @@ static void* zxc_seek_mt_worker(void* arg) {
         return NULL;
     }
     // LCOV_EXCL_STOP
+    if (UNLIKELY(zxc_cctx_attach_dict_huf(&dctx, s->has_dict_huf ? s->dict_huf : NULL) != ZXC_OK)) {
+        // LCOV_EXCL_START
+        zxc_cctx_free(&dctx);
+        job->result = ZXC_ERROR_CORRUPT_DATA;
+        return NULL;
+        // LCOV_EXCL_STOP
+    }
     const size_t work_sz = (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
 
     uint8_t* const dict_work = dctx.dict_buffer;
@@ -842,20 +859,27 @@ void zxc_seekable_free(zxc_seekable* s) {
     ZXC_FREE(s);
 }
 
-int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_size) {
+int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_size,
+                          const void* dict_huf) {
     if (UNLIKELY(!s || !dict || dict_size == 0)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    if (UNLIKELY(s->expected_dict_id != 0 && zxc_dict_id(dict, dict_size) != s->expected_dict_id))
+    if (UNLIKELY(s->expected_dict_id != 0 &&
+                 zxc_dict_id(dict, dict_size, (const uint8_t*)dict_huf) != s->expected_dict_id))
         return ZXC_ERROR_DICT_MISMATCH;
 
     ZXC_FREE(s->dict);
     s->dict = NULL;
     s->dict_size = 0;
+    s->has_dict_huf = 0;
 
     s->dict = (uint8_t*)ZXC_MALLOC(dict_size);
     if (UNLIKELY(!s->dict)) return ZXC_ERROR_MEMORY;
     ZXC_MEMCPY(s->dict, dict, dict_size);
     s->dict_size = dict_size;
+    if (dict_huf) {
+        ZXC_MEMCPY(s->dict_huf, dict_huf, ZXC_HUF_TABLE_SIZE);
+        s->has_dict_huf = 1;
+    }
 
     /* The [dict | decode] bounce buffer is carved into the dctx workspace.
      * Drop any context built without it (or for a different dict size) so it is

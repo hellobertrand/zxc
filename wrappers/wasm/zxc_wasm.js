@@ -90,7 +90,7 @@ export default async function createZXC(moduleOverrides, factory) {
     const _write_seek_table = Module.cwrap('zxc_write_seek_table', 'number',
         ['number', 'number', 'number', 'number']);
     const _seekable_set_dict = Module.cwrap('zxc_seekable_set_dict', 'number',
-        ['number', 'number', 'number']);
+        ['number', 'number', 'number', 'number']);
 
     // Dictionary API. zxc_train_dict / zxc_dict_save / zxc_dict_load return
     // int64_t; on wasm32 cwrap('number') reads the low 32 bits, which is
@@ -98,16 +98,23 @@ export default async function createZXC(moduleOverrides, factory) {
     // pointers are 32-bit.
     const _train_dict      = Module.cwrap('zxc_train_dict', 'number',
         ['number', 'number', 'number', 'number', 'number']);
-    const _dict_id         = Module.cwrap('zxc_dict_id', 'number', ['number', 'number']);
+    const _dict_id         = Module.cwrap('zxc_dict_id', 'number',
+        ['number', 'number', 'number']);
     const _get_dict_id     = Module.cwrap('zxc_get_dict_id', 'number', ['number', 'number']);
     const _dict_get_id     = Module.cwrap('zxc_dict_get_id', 'number', ['number', 'number']);
     const _dict_save       = Module.cwrap('zxc_dict_save', 'number',
-        ['number', 'number', 'number', 'number']);
+        ['number', 'number', 'number', 'number', 'number']);
+    const _train_dict_huf  = Module.cwrap('zxc_train_dict_huf', 'number',
+        ['number', 'number', 'number', 'number', 'number', 'number']);
+    const _dict_huf        = Module.cwrap('zxc_dict_huf', 'number', ['number', 'number']);
     const _dict_save_bound = Module.cwrap('zxc_dict_save_bound', 'number', ['number']);
     const _dict_load       = Module.cwrap('zxc_dict_load', 'number',
+        ['number', 'number', 'number', 'number', 'number', 'number']);
+    const _dict_train      = Module.cwrap('zxc_dict_train', 'number',
         ['number', 'number', 'number', 'number', 'number']);
 
     const ZXC_DICT_SIZE_MAX = 65535;
+    const ZXC_HUF_TABLE_SIZE = 128;
 
     const _version_string = Module.cwrap('zxc_version_string', 'string', []);
     const _error_name     = Module.cwrap('zxc_error_name', 'string', ['number']);
@@ -122,17 +129,35 @@ export default async function createZXC(moduleOverrides, factory) {
     // zxc_compress_opts_t (WASM32 layout, all fields 4-byte aligned):
     //   int n_threads (off 0)  | int level (4)  | size_t block_size (8)
     //   int checksum_enabled (12) | int seekable (16)
-    //   const void* dict (20) | size_t dict_size (24)
-    //   ptr progress_cb (28) | ptr user_data (32)
-    // Total: 36 bytes in WASM32
-    const COMPRESS_OPTS_SIZE = 36;
+    //   const void* dict (20) | size_t dict_size (24) | const void* dict_huf (28)
+    //   ptr progress_cb (32) | ptr user_data (36)
+    // Total: 40 bytes in WASM32
+    const COMPRESS_OPTS_SIZE = 40;
 
     // zxc_decompress_opts_t:
     //   int n_threads (0) | int checksum_enabled (4)
-    //   const void* dict (8) | size_t dict_size (12)
-    //   ptr progress_cb (16) | ptr user_data (20)
-    // Total: 24 bytes in WASM32
-    const DECOMPRESS_OPTS_SIZE = 24;
+    //   const void* dict (8) | size_t dict_size (12) | const void* dict_huf (16)
+    //   ptr progress_cb (20) | ptr user_data (24)
+    // Total: 28 bytes in WASM32
+    const DECOMPRESS_OPTS_SIZE = 28;
+
+    // Layout guard: the offsets above are hand-mirrored from zxc_opts.h. The
+    // library exports its compiled sizeof()s; a mismatch means the C structs
+    // changed without this file being updated -- fail loudly at load time
+    // instead of silently reading fields at wrong offsets.
+    {
+        const _copts_size = Module.cwrap('zxc_compress_opts_size', 'number', []);
+        const _dopts_size = Module.cwrap('zxc_decompress_opts_size', 'number', []);
+        const cSize = _copts_size();
+        const dSize = _dopts_size();
+        if (cSize !== COMPRESS_OPTS_SIZE || dSize !== DECOMPRESS_OPTS_SIZE) {
+            throw new Error(
+                `ZXC: options struct layout drift detected -- ` +
+                `zxc_compress_opts_t is ${cSize} bytes (wrapper assumes ${COMPRESS_OPTS_SIZE}), ` +
+                `zxc_decompress_opts_t is ${dSize} bytes (wrapper assumes ${DECOMPRESS_OPTS_SIZE}). ` +
+                `Update the struct layout section of zxc_wasm.js.`);
+        }
+    }
 
     // zxc_inbuf_t / zxc_outbuf_t (WASM32 layout):
     //   ptr src/dst (4) | size_t size (4) | size_t pos (4)
@@ -143,7 +168,7 @@ export default async function createZXC(moduleOverrides, factory) {
      * Write a zxc_compress_opts_t struct into WASM memory.
      * @returns {number} Pointer to the struct (caller must free).
      */
-    function _writeCompressOpts(level, checksum, seekable, dictPtr, dictSize) {
+    function _writeCompressOpts(level, checksum, seekable, dictPtr, dictSize, dictHufPtr) {
         const ptr = _malloc(COMPRESS_OPTS_SIZE);
         // Zero-fill first
         for (let i = 0; i < COMPRESS_OPTS_SIZE; i++) {
@@ -159,10 +184,11 @@ export default async function createZXC(moduleOverrides, factory) {
         Module.HEAP32[(ptr >> 2) + 3] = checksum ? 1 : 0;
         // seekable (offset 16)
         Module.HEAP32[(ptr >> 2) + 4] = seekable ? 1 : 0;
-        // dict (offset 20), dict_size (offset 24)
+        // dict (offset 20), dict_size (offset 24), dict_huf (offset 28)
         Module.HEAPU32[(ptr >> 2) + 5] = dictPtr || 0;
         Module.HEAPU32[(ptr >> 2) + 6] = dictSize || 0;
-        // progress_cb = NULL (offset 28), user_data = NULL (offset 32)
+        Module.HEAPU32[(ptr >> 2) + 7] = dictHufPtr || 0;
+        // progress_cb = NULL (offset 32), user_data = NULL (offset 36)
         return ptr;
     }
 
@@ -170,7 +196,7 @@ export default async function createZXC(moduleOverrides, factory) {
      * Write a zxc_decompress_opts_t struct into WASM memory.
      * @returns {number} Pointer to the struct (caller must free).
      */
-    function _writeDecompressOpts(checksum, dictPtr, dictSize) {
+    function _writeDecompressOpts(checksum, dictPtr, dictSize, dictHufPtr) {
         const ptr = _malloc(DECOMPRESS_OPTS_SIZE);
         for (let i = 0; i < DECOMPRESS_OPTS_SIZE; i++) {
             Module.HEAPU8[ptr + i] = 0;
@@ -179,14 +205,31 @@ export default async function createZXC(moduleOverrides, factory) {
         Module.HEAP32[(ptr >> 2) + 0] = 0;
         // checksum_enabled (offset 4)
         Module.HEAP32[(ptr >> 2) + 1] = checksum ? 1 : 0;
-        // dict (offset 8), dict_size (offset 12)
+        // dict (offset 8), dict_size (offset 12), dict_huf (offset 16)
         Module.HEAPU32[(ptr >> 2) + 2] = dictPtr || 0;
         Module.HEAPU32[(ptr >> 2) + 3] = dictSize || 0;
-        // progress_cb = NULL (offset 16), user_data = NULL (offset 20)
+        Module.HEAPU32[(ptr >> 2) + 4] = dictHufPtr || 0;
+        // progress_cb = NULL (offset 20), user_data = NULL (offset 24)
         return ptr;
     }
 
     // --- Public API ----------------------------------------------------------
+
+    /**
+     * Accept a {@link Dictionary} or raw `(dict, dictHuf)` pieces in options.
+     * @returns {{dict: Uint8Array|null, dictHuf: Uint8Array|null}}
+     */
+    function _splitDictOption(opts) {
+        const d = (opts && opts.dict) || null;
+        if (d instanceof Dictionary) {
+            return { dict: d.content, dictHuf: d.huf };
+        }
+        const dictHuf = (opts && opts.dictHuf) || null;
+        if (dictHuf && dictHuf.length !== ZXC_HUF_TABLE_SIZE) {
+            throw new Error('ZXC: dictHuf must be exactly 128 bytes');
+        }
+        return { dict: d, dictHuf };
+    }
 
     /**
      * Compress a Uint8Array.
@@ -196,7 +239,11 @@ export default async function createZXC(moduleOverrides, factory) {
      * @param {number} [opts.level=3] - Compression level (1-6).
      * @param {boolean} [opts.checksum=false] - Enable checksums.
      * @param {boolean} [opts.seekable=false] - Append seek table for random-access.
-     * @param {Uint8Array} [opts.dict] - Pre-trained dictionary content.
+     * @param {Dictionary|Uint8Array} [opts.dict] - A {@link Dictionary}, or raw
+     *   pre-trained dictionary content.
+     * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table
+     *   (128 bytes, from {@link trainDictHuf} or {@link dictHuf}); ignored
+     *   without `opts.dict`, redundant with a {@link Dictionary}.
      * @returns {Uint8Array} Compressed data.
      * @throws {Error} On compression failure.
      */
@@ -204,7 +251,7 @@ export default async function createZXC(moduleOverrides, factory) {
         const level    = (opts && opts.level)    || _default_level();
         const checksum = (opts && opts.checksum) || false;
         const seekable = (opts && opts.seekable) || false;
-        const dict     = (opts && opts.dict)     || null;
+        const { dict, dictHuf } = _splitDictOption(opts);
 
         const bound = _compress_bound(data.length);
         if (bound === 0) throw new Error('ZXC: compress_bound returned 0');
@@ -213,8 +260,10 @@ export default async function createZXC(moduleOverrides, factory) {
         const dstPtr = _malloc(bound);
         const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
         if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
+        const dictHufPtr = dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
+        if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
         const optsPtr = _writeCompressOpts(level, checksum, seekable,
-            dictPtr, dict ? dict.length : 0);
+            dictPtr, dict ? dict.length : 0, dictHufPtr);
 
         try {
             Module.HEAPU8.set(data, srcPtr);
@@ -228,6 +277,7 @@ export default async function createZXC(moduleOverrides, factory) {
             _free(dstPtr);
             _free(optsPtr);
             if (dictPtr) _free(dictPtr);
+            if (dictHufPtr) _free(dictHufPtr);
         }
     }
 
@@ -237,13 +287,17 @@ export default async function createZXC(moduleOverrides, factory) {
      * @param {Uint8Array} data - Compressed data.
      * @param {object} [opts] - Options.
      * @param {boolean} [opts.checksum=false] - Verify checksums.
-     * @param {Uint8Array} [opts.dict] - Pre-trained dictionary content.
+     * @param {Dictionary|Uint8Array} [opts.dict] - A {@link Dictionary}, or raw
+     *   pre-trained dictionary content.
+     * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table
+     *   (128 bytes) when the archive was compressed with one; redundant with a
+     *   {@link Dictionary}.
      * @returns {Uint8Array} Decompressed data.
      * @throws {Error} On decompression failure.
      */
     function decompress(data, opts) {
         const checksum = (opts && opts.checksum) || false;
-        const dict     = (opts && opts.dict)     || null;
+        const { dict, dictHuf } = _splitDictOption(opts);
 
         // Read decompressed size from footer
         const srcPtr = _malloc(data.length);
@@ -253,7 +307,10 @@ export default async function createZXC(moduleOverrides, factory) {
         const dstPtr = _malloc(origSize || 1);
         const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
         if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
-        const optsPtr = _writeDecompressOpts(checksum, dictPtr, dict ? dict.length : 0);
+        const dictHufPtr = dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
+        if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
+        const optsPtr = _writeDecompressOpts(checksum, dictPtr, dict ? dict.length : 0,
+            dictHufPtr);
 
         try {
             const result = _decompress(srcPtr, data.length, dstPtr, origSize, optsPtr);
@@ -266,6 +323,7 @@ export default async function createZXC(moduleOverrides, factory) {
             _free(dstPtr);
             _free(optsPtr);
             if (dictPtr) _free(dictPtr);
+            if (dictHufPtr) _free(dictHufPtr);
         }
     }
 
@@ -774,7 +832,8 @@ export default async function createZXC(moduleOverrides, factory) {
      * @returns {number} Unsigned 32-bit ID (0 if empty).
      */
     function dictId(content) {
-        return _callIdOnBuffer(_dict_id, content);
+        // Third arg: NULL huf table -> content-only id.
+        return _callIdOnBuffer((ptr, len) => _dict_id(ptr, len, 0), content);
     }
 
     /**
@@ -796,27 +855,100 @@ export default async function createZXC(moduleOverrides, factory) {
     }
 
     /**
-     * Serialize raw dictionary content to the `.zxd` file format.
+     * Serialize dictionary content and its shared literal Huffman table
+     * (128 bytes, from {@link trainDictHuf}) to the `.zxd` file format.
+     * The stored dictionary ID covers both content and table.
      * @param {Uint8Array} content - Raw dictionary content.
+     * @param {Uint8Array} hufLengths - 128-byte packed code-lengths table.
      * @returns {Uint8Array} The encoded `.zxd` file.
      * @throws {Error} On failure.
      */
-    function dictSave(content) {
+    function dictSave(content, hufLengths) {
         if (!content || content.length === 0) {
             throw new Error('ZXC: dictSave requires non-empty content');
         }
+        if (!hufLengths || hufLengths.length !== ZXC_HUF_TABLE_SIZE) {
+            throw new Error('ZXC: dictSave requires a 128-byte hufLengths table');
+        }
         const cap = _dict_save_bound(content.length);
         const contentPtr = _malloc(content.length);
+        const hufPtr = _malloc(ZXC_HUF_TABLE_SIZE);
         const bufPtr = _malloc(cap);
         try {
             Module.HEAPU8.set(content, contentPtr);
-            const r = _dict_save(contentPtr, content.length, bufPtr, cap);
+            Module.HEAPU8.set(hufLengths, hufPtr);
+            const r = _dict_save(contentPtr, content.length, hufPtr, bufPtr, cap);
             if (r < 0) {
                 throw new Error(`ZXC dict_save error: ${_error_name(r)} (${r})`);
             }
             return new Uint8Array(Module.HEAPU8.buffer, bufPtr, r).slice();
         } finally {
             _free(contentPtr);
+            _free(hufPtr);
+            _free(bufPtr);
+        }
+    }
+
+    /**
+     * Train the shared literal Huffman table for an already-trained
+     * dictionary (see {@link trainDict}).
+     * @param {Uint8Array[]} samples - Training corpus.
+     * @param {Uint8Array} dict - Trained dictionary content.
+     * @returns {Uint8Array} 128-byte packed table for {@link dictSave} /
+     *   `opts.dictHuf`.
+     * @throws {Error} On failure.
+     */
+    function trainDictHuf(samples, dict) {
+        if (!samples || samples.length === 0) {
+            throw new Error('ZXC: trainDictHuf requires at least one sample');
+        }
+        if (!dict || dict.length === 0) {
+            throw new Error('ZXC: trainDictHuf requires a non-empty dictionary');
+        }
+        const n = samples.length;
+        const ptrsPtr  = _malloc(n * 4);
+        const sizesPtr = _malloc(n * 4);
+        const samplePtrs = [];
+        const dictPtr = _malloc(dict.length);
+        const hufPtr = _malloc(ZXC_HUF_TABLE_SIZE);
+        try {
+            for (let i = 0; i < n; i++) {
+                const sp = _malloc(samples[i].length || 1);
+                samplePtrs.push(sp);
+                if (samples[i].length > 0) Module.HEAPU8.set(samples[i], sp);
+                Module.HEAPU32[(ptrsPtr >> 2) + i]  = sp;
+                Module.HEAPU32[(sizesPtr >> 2) + i] = samples[i].length;
+            }
+            Module.HEAPU8.set(dict, dictPtr);
+            const r = _train_dict_huf(ptrsPtr, sizesPtr, n, dictPtr, dict.length, hufPtr);
+            if (r < 0) {
+                throw new Error(`ZXC train_dict_huf error: ${_error_name(r)} (${r})`);
+            }
+            return new Uint8Array(Module.HEAPU8.buffer, hufPtr, ZXC_HUF_TABLE_SIZE).slice();
+        } finally {
+            for (const sp of samplePtrs) _free(sp);
+            _free(ptrsPtr);
+            _free(sizesPtr);
+            _free(dictPtr);
+            _free(hufPtr);
+        }
+    }
+
+    /**
+     * Return the 128-byte shared Huffman table stored in a `.zxd` file, or
+     * `null` if the buffer is not a valid `.zxd` file.
+     * @param {Uint8Array} zxd - The `.zxd` file bytes.
+     * @returns {Uint8Array | null}
+     */
+    function dictHuf(zxd) {
+        if (!zxd || zxd.length === 0) return null;
+        const bufPtr = _malloc(zxd.length);
+        try {
+            Module.HEAPU8.set(zxd, bufPtr);
+            const p = _dict_huf(bufPtr, zxd.length);
+            if (!p) return null;
+            return new Uint8Array(Module.HEAPU8.buffer, p, ZXC_HUF_TABLE_SIZE).slice();
+        } finally {
             _free(bufPtr);
         }
     }
@@ -824,7 +956,7 @@ export default async function createZXC(moduleOverrides, factory) {
     /**
      * Load and validate a `.zxd` file buffer.
      * @param {Uint8Array} zxd - The `.zxd` file bytes.
-     * @returns {{ content: Uint8Array, id: number }}
+     * @returns {{ content: Uint8Array, huf: Uint8Array, id: number }}
      * @throws {Error} On invalid input.
      */
     function dictLoad(zxd) {
@@ -832,27 +964,122 @@ export default async function createZXC(moduleOverrides, factory) {
             throw new Error('ZXC: dictLoad requires a non-empty buffer');
         }
         const bufPtr = _malloc(zxd.length);
-        // out params: content ptr (4), content size (4), dict id (4)
+        // out params: content ptr (4), content size (4), huf ptr (4), dict id (4)
         const contentOutPtr = _malloc(4);
         const sizeOutPtr    = _malloc(4);
+        const hufOutPtr     = _malloc(4);
         const idOutPtr      = _malloc(4);
         try {
             Module.HEAPU8.set(zxd, bufPtr);
-            const r = _dict_load(bufPtr, zxd.length, contentOutPtr, sizeOutPtr, idOutPtr);
+            const r = _dict_load(bufPtr, zxd.length, contentOutPtr, sizeOutPtr,
+                hufOutPtr, idOutPtr);
             if (r < 0) {
                 throw new Error(`ZXC dict_load error: ${_error_name(r)} (${r})`);
             }
             const contentPtr  = Module.HEAPU32[contentOutPtr >> 2];
             const contentSize = Module.HEAPU32[sizeOutPtr >> 2];
+            const hufPtr      = Module.HEAPU32[hufOutPtr >> 2];
             const id          = Module.HEAPU32[idOutPtr >> 2] >>> 0;
-            // content points into bufPtr (zero-copy); copy out before freeing.
+            // content/huf point into bufPtr (zero-copy); copy out before freeing.
             const content = new Uint8Array(Module.HEAPU8.buffer, contentPtr, contentSize).slice();
-            return { content, id };
+            const huf = new Uint8Array(Module.HEAPU8.buffer, hufPtr,
+                ZXC_HUF_TABLE_SIZE).slice();
+            return { content, huf, id };
         } finally {
             _free(bufPtr);
             _free(contentOutPtr);
             _free(sizeOutPtr);
+            _free(hufOutPtr);
             _free(idOutPtr);
+        }
+    }
+
+    /**
+     * Train a complete dictionary (content + shared Huffman table) and
+     * serialize it to `.zxd` bytes in one call. One-call equivalent of
+     * {@link trainDict} + {@link trainDictHuf} + {@link dictSave}.
+     * @param {Uint8Array[]} samples - Training corpus.
+     * @returns {Uint8Array} The encoded `.zxd` file.
+     * @throws {Error} On failure.
+     */
+    function dictTrain(samples) {
+        if (!samples || samples.length === 0) {
+            throw new Error('ZXC: dictTrain requires at least one sample');
+        }
+        const n = samples.length;
+        const ptrsPtr  = _malloc(n * 4);
+        const sizesPtr = _malloc(n * 4);
+        const samplePtrs = [];
+        const cap = _dict_save_bound(ZXC_DICT_SIZE_MAX);
+        const zxdPtr = _malloc(cap);
+        try {
+            for (let i = 0; i < n; i++) {
+                const s = samples[i];
+                const sp = _malloc(s.length || 1);
+                if (s.length > 0) Module.HEAPU8.set(s, sp);
+                samplePtrs.push(sp);
+                Module.HEAPU32[(ptrsPtr >> 2) + i]  = sp;
+                Module.HEAPU32[(sizesPtr >> 2) + i] = s.length;
+            }
+            const r = _dict_train(ptrsPtr, sizesPtr, n, zxdPtr, cap);
+            if (r < 0) {
+                throw new Error(`ZXC dict_train error: ${_error_name(r)} (${r})`);
+            }
+            return new Uint8Array(Module.HEAPU8.buffer, zxdPtr, r).slice();
+        } finally {
+            for (const sp of samplePtrs) _free(sp);
+            _free(ptrsPtr);
+            _free(sizesPtr);
+            _free(zxdPtr);
+        }
+    }
+
+    /**
+     * A trained dictionary: content bytes, its shared literal Huffman table
+     * and the ID binding the pair. Pass an instance as `opts.dict` to
+     * `compress` / `decompress` instead of juggling `dict` + `dictHuf`.
+     */
+    class Dictionary {
+        /**
+         * @param {Uint8Array} content - Raw LZ-window content bytes.
+         * @param {Uint8Array} huf - 128-byte shared literal Huffman table.
+         * @param {number} id - Dictionary ID binding the (content, table) pair.
+         */
+        constructor(content, huf, id) {
+            if (!content || !huf || huf.length !== ZXC_HUF_TABLE_SIZE) {
+                throw new Error(
+                    'ZXC: Dictionary requires (content, 128-byte huf table)');
+            }
+            this.content = content;
+            this.huf = huf;
+            this.id = id >>> 0;
+        }
+
+        /**
+         * Train a complete dictionary (content + shared table) from samples.
+         * @param {Uint8Array[]} samples
+         * @returns {Dictionary}
+         */
+        static train(samples) {
+            return Dictionary.load(dictTrain(samples));
+        }
+
+        /**
+         * Parse `.zxd` bytes into a Dictionary (owned copies).
+         * @param {Uint8Array} zxd
+         * @returns {Dictionary}
+         */
+        static load(zxd) {
+            const { content, huf, id } = dictLoad(zxd);
+            return new Dictionary(content, huf, id);
+        }
+
+        /**
+         * Serialize back to `.zxd` file bytes.
+         * @returns {Uint8Array}
+         */
+        save() {
+            return dictSave(this.content, this.huf);
         }
     }
 
@@ -963,12 +1190,16 @@ export default async function createZXC(moduleOverrides, factory) {
         detectZxc,
 
         // Dictionary API
+        Dictionary,
+        dictTrain,
         trainDict,
+        trainDictHuf,
         dictId,
         getDictId,
         dictGetId,
         dictSave,
         dictLoad,
+        dictHuf,
 
         /** Library version string (e.g. "0.11.0"). */
         version: _version_string(),

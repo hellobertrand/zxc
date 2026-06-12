@@ -88,36 +88,72 @@ describe('dictionary compress/decompress roundtrip', () => {
 
 describe('dictionary id consistency', () => {
     const dict = zxc.trainDict(buildSamples(8));
+    const huf = zxc.trainDictHuf(buildSamples(8), dict);
 
-    test('dictId(content) === getDictId(archive) === dictGetId(dictSave(content))', () => {
+    test('dictId(content) === getDictId(archive); .zxd id binds the table', () => {
         const original = Buffer.from('the quick brown fox jumps over the lazy dog'.repeat(4));
         const compressed = zxc.compress(original, { dict });
-        const zxd = zxc.dictSave(dict);
+        const zxd = zxc.dictSave(dict, huf);
 
         const idContent = zxc.dictId(dict);
         const idArchive = zxc.getDictId(compressed);
         const idZxd = zxc.dictGetId(zxd);
 
         expect(idContent).toBe(idArchive);
-        expect(idContent).toBe(idZxd);
+        // The .zxd id covers (content, table): non-zero, distinct from the
+        // content-only id.
+        expect(idZxd).not.toBe(0);
+        expect(idZxd).not.toBe(idContent);
+        expect(zxc.dictHuf(zxd)).toEqual(huf);
     });
 });
 
 describe('dictSave / dictLoad', () => {
     const dict = zxc.trainDict(buildSamples(8));
+    const huf = zxc.trainDictHuf(buildSamples(8), dict);
 
     test('roundtrips content and id', () => {
-        const zxd = zxc.dictSave(dict);
+        const zxd = zxc.dictSave(dict, huf);
         expect(Buffer.isBuffer(zxd)).toBe(true);
         expect(zxd.length).toBeGreaterThan(dict.length);
 
         const loaded = zxc.dictLoad(zxd);
         expect(loaded.content).toEqual(dict);
-        expect(loaded.id).toBe(zxc.dictId(dict));
+        expect(loaded.id).toBe(zxc.dictGetId(zxd));
     });
 
     test('dictLoad rejects garbage', () => {
         expect(() => zxc.dictLoad(Buffer.from('not a zxd file at all'))).toThrow();
+    });
+});
+
+describe('Dictionary object', () => {
+    test('train / save / load roundtrip and compress with {dict: Dictionary}', () => {
+        const d = zxc.Dictionary.train(buildSamples(8));
+        expect(Buffer.isBuffer(d.content)).toBe(true);
+        expect(d.content.length).toBeGreaterThan(0);
+        expect(d.huf.length).toBe(128);
+        expect(d.id).not.toBe(0);
+
+        // save() -> load() preserves the (content, table, id) triple.
+        const reloaded = zxc.Dictionary.load(d.save());
+        expect(reloaded.content).toEqual(d.content);
+        expect(reloaded.huf).toEqual(d.huf);
+        expect(reloaded.id).toBe(d.id);
+
+        // One-call train matches the primitive 2-step training.
+        expect(d.content).toEqual(zxc.trainDict(buildSamples(8)));
+        expect(d.huf).toEqual(zxc.trainDictHuf(buildSamples(8), d.content));
+
+        const original = Buffer.from(
+            'the quick brown fox jumps over the lazy dog #obj'.repeat(4),
+        );
+        const compressed = zxc.compress(original, { dict: d });
+        expect(zxc.decompress(compressed, { dict: d })).toEqual(original);
+
+        // The archive id binds (content, table): decoding with the raw
+        // content but no table is rejected.
+        expect(() => zxc.decompress(compressed, { dict: d.content })).toThrow();
     });
 });
 

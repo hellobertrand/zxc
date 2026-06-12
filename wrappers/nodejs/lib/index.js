@@ -163,21 +163,134 @@ function dictGetId(zxd) {
 }
 
 /**
- * Serialize raw dictionary content into the `.zxd` file format.
+ * Serialize dictionary content and its shared literal Huffman table
+ * (128 bytes, from {@link trainDictHuf}) into the `.zxd` file format.
+ * The stored dictionary ID covers both content and table.
  * @param {Buffer} content
+ * @param {Buffer} hufLengths - 128-byte packed code-lengths table.
  * @returns {Buffer} The encoded `.zxd` file.
  */
-function dictSave(content) {
-    if (!Buffer.isBuffer(content)) {
-        throw new TypeError('content must be a Buffer');
+function dictSave(content, hufLengths) {
+    if (!Buffer.isBuffer(content) || !Buffer.isBuffer(hufLengths)) {
+        throw new TypeError('content and hufLengths must be Buffers');
     }
-    return native.dictSave(content);
+    return native.dictSave(content, hufLengths);
+}
+
+/**
+ * Train the shared literal Huffman table for an already-trained dictionary.
+ * Compresses the samples with the dictionary and derives canonical code
+ * lengths from the real post-LZ literal distribution.
+ * @param {Buffer[]} samples - Training corpus (typically the same as {@link trainDict}).
+ * @param {Buffer} dict - Trained dictionary content.
+ * @returns {Buffer} 128-byte packed table for {@link dictSave} / `options.dictHuf`.
+ */
+function trainDictHuf(samples, dict) {
+    if (!Array.isArray(samples)) {
+        throw new TypeError('samples must be an array of Buffers');
+    }
+    if (!Buffer.isBuffer(dict)) {
+        throw new TypeError('dict must be a Buffer');
+    }
+    const bufs = samples.map((s, i) => {
+        if (Buffer.isBuffer(s)) return s;
+        if (s instanceof Uint8Array) return Buffer.from(s.buffer, s.byteOffset, s.byteLength);
+        throw new TypeError(`samples[${i}] must be a Buffer or Uint8Array`);
+    });
+    return native.trainDictHuf(bufs, dict);
+}
+
+/**
+ * Return the 128-byte shared Huffman table stored in a `.zxd` file,
+ * or `null` if the buffer is not a valid `.zxd` file.
+ * @param {Buffer} zxd
+ * @returns {Buffer | null}
+ */
+function dictHuf(zxd) {
+    if (!Buffer.isBuffer(zxd)) {
+        throw new TypeError('zxd must be a Buffer');
+    }
+    return native.dictHuf(zxd);
+}
+
+/**
+ * A trained dictionary: LZ-window content plus its shared literal Huffman
+ * table, bundled so callers never juggle the pair by hand.
+ *
+ * Create with {@link Dictionary.train} (from samples) or
+ * {@link Dictionary.load} (from `.zxd` bytes), then pass the instance as
+ * `options.dict` to {@link compress} / {@link decompress}, or to
+ * `Seekable#setDict`.
+ */
+class Dictionary {
+    /**
+     * @param {Buffer} content - Raw LZ-window content bytes.
+     * @param {Buffer} huf - 128-byte shared literal Huffman table.
+     * @param {number} id - Dictionary ID binding the (content, table) pair.
+     */
+    constructor(content, huf, id) {
+        if (!Buffer.isBuffer(content) || !Buffer.isBuffer(huf) || huf.length !== 128) {
+            throw new TypeError('Dictionary requires (content: Buffer, huf: 128-byte Buffer)');
+        }
+        this.content = content;
+        this.huf = huf;
+        this.id = id >>> 0;
+    }
+
+    /**
+     * Train a complete dictionary (content + shared table) from samples.
+     * @param {Array<Buffer|Uint8Array>} samples
+     * @returns {Dictionary}
+     */
+    static train(samples) {
+        if (!Array.isArray(samples)) {
+            throw new TypeError('samples must be an array of Buffers');
+        }
+        const bufs = samples.map((s, i) => {
+            if (Buffer.isBuffer(s)) return s;
+            if (s instanceof Uint8Array) return Buffer.from(s.buffer, s.byteOffset, s.byteLength);
+            throw new TypeError(`samples[${i}] must be a Buffer or Uint8Array`);
+        });
+        return Dictionary.load(native.dictTrain(bufs));
+    }
+
+    /**
+     * Parse `.zxd` bytes into a Dictionary (owned copies).
+     * @param {Buffer} zxd
+     * @returns {Dictionary}
+     */
+    static load(zxd) {
+        if (!Buffer.isBuffer(zxd)) {
+            throw new TypeError('zxd must be a Buffer');
+        }
+        const { content, huf, id } = native.dictLoad(zxd);
+        return new Dictionary(content, huf, id);
+    }
+
+    /**
+     * Serialize back to `.zxd` file bytes.
+     * @returns {Buffer}
+     */
+    save() {
+        return native.dictSave(this.content, this.huf);
+    }
+}
+
+/**
+ * Accept a Dictionary or raw (dict, dictHuf) pieces in options.
+ * @returns {{dict: Buffer|undefined, dictHuf: Buffer|undefined}}
+ */
+function _splitDictOption(options) {
+    if (options.dict instanceof Dictionary) {
+        return { dict: options.dict.content, dictHuf: options.dict.huf };
+    }
+    return { dict: toDictBuffer(options.dict), dictHuf: toDictBuffer(options.dictHuf) };
 }
 
 /**
  * Load and validate a `.zxd` dictionary file.
  * @param {Buffer} zxd
- * @returns {{ content: Buffer, id: number }}
+ * @returns {{ content: Buffer, huf: Buffer, id: number }}
  */
 function dictLoad(zxd) {
     if (!Buffer.isBuffer(zxd)) {
@@ -205,9 +318,9 @@ function compress(data, options = {}) {
     const level = options.level !== undefined ? options.level : LEVEL_DEFAULT;
     const checksum = options.checksum !== undefined ? options.checksum : false;
     const seekable = options.seekable !== undefined ? options.seekable : false;
-    const dict = toDictBuffer(options.dict);
+    const { dict, dictHuf } = _splitDictOption(options);
 
-    return native.compress(data, level, checksum, seekable, dict);
+    return native.compress(data, level, checksum, seekable, dict, dictHuf);
 }
 
 /**
@@ -240,14 +353,14 @@ function decompress(data, options = {}) {
     }
 
     const checksum = options.checksum !== undefined ? options.checksum : false;
-    const dict = toDictBuffer(options.dict);
+    const { dict, dictHuf } = _splitDictOption(options);
 
     let size = options.size;
     if (size === undefined) {
         size = getDecompressedSize(data);
     }
 
-    return native.decompress(data, size, checksum, dict);
+    return native.decompress(data, size, checksum, dict, dictHuf);
 }
 
 /**
@@ -494,6 +607,9 @@ module.exports = {
     dictGetId,
     dictSave,
     dictLoad,
+    trainDictHuf,
+    dictHuf,
+    Dictionary,
 
     // Push streaming classes
     CStream,

@@ -57,6 +57,16 @@ void zxc_aligned_free(void* ptr) {
 }
 
 /*
+ * @copydoc zxc_compress_opts_size
+ */
+size_t zxc_compress_opts_size(void) { return sizeof(zxc_compress_opts_t); }
+
+/*
+ * @copydoc zxc_decompress_opts_size
+ */
+size_t zxc_decompress_opts_size(void) { return sizeof(zxc_decompress_opts_t); }
+
+/*
  * Layout of the persistent buffer carved by every cctx/dctx init: both modes
  * (compress, decompress) compute the same offset table, used by the workspace
  * sizer and the in-place init.
@@ -66,6 +76,8 @@ typedef struct {
     /* mode == 0 (decompress) */
     size_t off_work;
     size_t off_lit_dctx;
+    /* mode == 0 with dict only: prebuilt shared-dictionary Huffman decode table. */
+    size_t off_huf_dict;
     /* mode == 1 (compress) */
     size_t off_hash_pos;
     size_t off_hash_tags;
@@ -101,6 +113,12 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         layout.total += ZXC_ALIGN_CL(sz_work);
         layout.off_lit_dctx = layout.total;
         layout.total += ZXC_ALIGN_CL(sz_lit);
+        /* Shared-dictionary Huffman decode table: built once per context by
+         * zxc_cctx_attach_dict_huf, read by HUFFMAN_DICT literal sections. */
+        if (dict_size > 0) {
+            layout.off_huf_dict = layout.total;
+            layout.total += ZXC_ALIGN_CL(ZXC_HUF_DEC_TABLE_SIZE * sizeof(zxc_huf_dec_entry_t));
+        }
     } else {
         /* Compress: 6 partitions + optional opt_scratch at level >= ZXC_LEVEL_DENSITY. */
         const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
@@ -203,6 +221,7 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
         ctx->work_buf_cap = chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
         ctx->lit_buffer = mem + layout.off_lit_dctx;
         ctx->lit_buffer_cap = chunk_size + ZXC_PAD_SIZE;
+        if (dict_size > 0) ctx->dict_huf_table = (zxc_huf_dec_entry_t*)(mem + layout.off_huf_dict);
         return ZXC_OK;
     }
 
@@ -293,6 +312,24 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->opt_scratch_cap = 0;
     ctx->dict_buffer_cap = 0;
     ctx->dict_size = 0;
+    ctx->dict_huf_lengths = NULL;
+    ctx->dict_huf_table = NULL;
+    ctx->lit_freq_acc = NULL;
+}
+
+/*
+ * @copydoc zxc_cctx_attach_dict_huf
+ */
+int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT lengths) {
+    if (UNLIKELY(!ctx)) return ZXC_ERROR_NULL_INPUT;
+    ctx->dict_huf_lengths = lengths;
+    if (lengths == NULL || ctx->dict_huf_table == NULL) return ZXC_OK;
+
+    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+    int rc = zxc_huf_unpack_lengths(lengths, code_len);
+    if (LIKELY(rc == ZXC_OK)) rc = zxc_huf_build_dec_table(code_len, ctx->dict_huf_table);
+    if (UNLIKELY(rc != ZXC_OK)) ctx->dict_huf_table = NULL; /* invalid table: refuse decode */
+    return rc;
 }
 
 /*
