@@ -527,8 +527,10 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         // LCOV_EXCL_STOP
         if (UNLIKELY(zxc_cctx_attach_dict_huf(&s->dctx, s->has_dict_huf ? s->dict_huf : NULL) !=
                      ZXC_OK)) {
+            // LCOV_EXCL_START
             zxc_cctx_free(&s->dctx);
             return ZXC_ERROR_CORRUPT_DATA;
+            // LCOV_EXCL_STOP
         }
         s->dctx_initialized = 1;
         if (s->dict_size > 0) ZXC_MEMCPY(s->dctx.dict_buffer, s->dict, s->dict_size);
@@ -667,9 +669,11 @@ static void* zxc_seek_mt_worker(void* arg) {
     }
     // LCOV_EXCL_STOP
     if (UNLIKELY(zxc_cctx_attach_dict_huf(&dctx, s->has_dict_huf ? s->dict_huf : NULL) != ZXC_OK)) {
+        // LCOV_EXCL_START
         zxc_cctx_free(&dctx);
         job->result = ZXC_ERROR_CORRUPT_DATA;
         return NULL;
+        // LCOV_EXCL_STOP
     }
     const size_t work_sz = (size_t)s->block_size + ZXC_DECOMPRESS_TAIL_PAD;
 

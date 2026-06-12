@@ -147,6 +147,152 @@ int test_huffman_codec() {
     return 1;
 }
 
+/* Round-trip the shared-table (dictionary) Huffman section codec: encode with
+ * external code lengths and NO 128-byte header, decode through a prebuilt
+ * table -- the enc_lit == 3 wire path (FORMAT.md Sec 5.2.2). */
+static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, size_t n) {
+    uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
+    for (size_t i = 0; i < n; i++) freq[literals[i]]++;
+
+    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+    if (zxc_huf_build_code_lengths(freq, code_len, NULL) != ZXC_OK) {
+        printf("Failed [%s]: build_code_lengths\n", label);
+        return 0;
+    }
+
+    /* Round the lengths through the 128-byte packed form, as a .zxd does. */
+    uint8_t packed[ZXC_HUF_TABLE_SIZE];
+    uint8_t unpacked[ZXC_HUF_NUM_SYMBOLS];
+    zxc_huf_pack_lengths(code_len, packed);
+    if (zxc_huf_unpack_lengths(packed, unpacked) != ZXC_OK ||
+        memcmp(code_len, unpacked, sizeof(code_len)) != 0) {
+        printf("Failed [%s]: pack/unpack lengths roundtrip\n", label);
+        return 0;
+    }
+
+    zxc_huf_dec_entry_t* table =
+        (zxc_huf_dec_entry_t*)malloc(ZXC_HUF_DEC_TABLE_SIZE * sizeof(zxc_huf_dec_entry_t));
+    const size_t cap = ZXC_HUF_HEADER_SIZE + n + 64;
+    uint8_t* enc = (uint8_t*)malloc(cap);
+    uint8_t* enc_blk = (uint8_t*)malloc(cap);
+    uint8_t* dec = (uint8_t*)malloc(n);
+    if (!table || !enc || !enc_blk || !dec) {
+        printf("Failed [%s]: alloc\n", label);
+        goto fail;
+    }
+    if (zxc_huf_build_dec_table(code_len, table) != ZXC_OK) {
+        printf("Failed [%s]: build_dec_table\n", label);
+        goto fail;
+    }
+
+    const int written = zxc_huf_encode_section_dict(literals, n, code_len, enc, cap);
+    if (written < 0) {
+        printf("Failed [%s]: encode_section_dict -> %d\n", label, written);
+        goto fail;
+    }
+
+    /* Same lengths, same bitstreams: the dict section must be exactly the
+     * per-block section minus its 128-byte lengths header. */
+    const int written_blk = zxc_huf_encode_section(literals, n, code_len, enc_blk, cap);
+    if (written_blk != written + (int)ZXC_HUF_TABLE_SIZE ||
+        memcmp(enc, enc_blk + ZXC_HUF_TABLE_SIZE, (size_t)written) != 0) {
+        printf("Failed [%s]: dict section != per-block section minus header\n", label);
+        goto fail;
+    }
+
+    if (zxc_huf_decode_section_dict(enc, (size_t)written, dec, n, table) != ZXC_OK ||
+        memcmp(literals, dec, n) != 0) {
+        printf("Failed [%s]: decode_section_dict roundtrip mismatch\n", label);
+        goto fail;
+    }
+
+    /* Error paths: NULL table, truncated payload, undersized dst_cap. */
+    if (zxc_huf_decode_section_dict(enc, (size_t)written, dec, n, NULL) != ZXC_ERROR_CORRUPT_DATA) {
+        printf("Failed [%s]: NULL table not rejected\n", label);
+        goto fail;
+    }
+    if (zxc_huf_decode_section_dict(enc, (size_t)ZXC_HUF_STREAM_SIZES_HEADER_SIZE - 1, dec, n,
+                                    table) == ZXC_OK) {
+        printf("Failed [%s]: truncated payload accepted\n", label);
+        goto fail;
+    }
+    if (zxc_huf_encode_section_dict(literals, n, code_len, enc, 4) != ZXC_ERROR_DST_TOO_SMALL) {
+        printf("Failed [%s]: undersized dst_cap not rejected\n", label);
+        goto fail;
+    }
+
+    free(table);
+    free(enc);
+    free(enc_blk);
+    free(dec);
+    printf("  [PASS] %s (n=%zu, encoded=%d B, header saved=%d B)\n", label, n, written,
+           (int)ZXC_HUF_TABLE_SIZE);
+    return 1;
+
+fail:
+    free(table);
+    free(enc);
+    free(enc_blk);
+    free(dec);
+    return 0;
+}
+
+int test_huffman_codec_dict() {
+    printf("=== TEST: Unit - Huffman Codec, shared dictionary table (enc_lit == 3) ===\n");
+
+    const size_t N = 8192;
+    uint8_t* buf = (uint8_t*)malloc(N);
+    if (!buf) return 0;
+
+    /* Skewed text-like distribution: the shared-table sweet spot. */
+    for (size_t i = 0; i < N; i++) buf[i] = (rand() % 10 == 0) ? (uint8_t)(rand() & 0x7F) : 'A';
+    if (!huf_dict_roundtrip_case("Skewed (90% 'A')", buf, N)) {
+        free(buf);
+        return 0;
+    }
+
+    /* Two-symbol alphabet: ~1 bit/symbol, headerless gain is maximal. */
+    for (size_t i = 0; i < N; i++) buf[i] = (rand() & 1) ? 'X' : 'Y';
+    if (!huf_dict_roundtrip_case("Two-symbol alphabet", buf, N)) {
+        free(buf);
+        return 0;
+    }
+
+    /* Small block: where the 128-byte header would dominate per-block cost. */
+    for (size_t i = 0; i < ZXC_HUF_MIN_LITERALS; i++)
+        buf[i] = (rand() % 4 == 0) ? (uint8_t)('a' + (rand() % 26)) : 'k';
+    if (!huf_dict_roundtrip_case("Small block at threshold", buf, ZXC_HUF_MIN_LITERALS)) {
+        free(buf);
+        return 0;
+    }
+
+    /* A literal with NO code in the shared table must be refused by the
+     * encoder (the validity check that triggers the per-block fallback). */
+    {
+        uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
+        for (size_t i = 0; i < 256; i++) buf[i] = (rand() & 1) ? 'X' : 'Y';
+        for (size_t i = 0; i < 256; i++) freq[buf[i]]++;
+        uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+        if (zxc_huf_build_code_lengths(freq, code_len, NULL) != ZXC_OK) {
+            free(buf);
+            return 0;
+        }
+        buf[100] = '!'; /* unseen in training: no code assigned */
+        uint8_t enc[512];
+        if (zxc_huf_encode_section_dict(buf, 256, code_len, enc, sizeof(enc)) !=
+            ZXC_ERROR_CORRUPT_DATA) {
+            printf("Failed: code-less literal not rejected by encode_section_dict\n");
+            free(buf);
+            return 0;
+        }
+        printf("  [PASS] code-less literal rejected (per-block fallback trigger)\n");
+    }
+
+    free(buf);
+    printf("PASS\n\n");
+    return 1;
+}
+
 // Checks that the EOF block is correctly appended
 int test_eof_block_structure() {
     printf("=== TEST: Unit - EOF Block Structure ===\n");

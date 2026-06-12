@@ -172,6 +172,7 @@ int test_seekable_mt_full_file(void);
 /* Format (on-disk) */
 int test_bit_reader(void);
 int test_huffman_codec(void);
+int test_huffman_codec_dict(void);
 int test_eof_block_structure(void);
 int test_header_checksum(void);
 int test_global_checksum_order(void);

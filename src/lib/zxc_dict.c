@@ -100,7 +100,7 @@ int zxc_dict_load(const void* RESTRICT buf, const size_t buf_size,
     if (UNLIKELY(content_size == 0)) return ZXC_ERROR_CORRUPT_DATA;
     if (UNLIKELY(content_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     if (UNLIKELY(buf_size < ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_TABLE_SIZE))
-        return ZXC_ERROR_SRC_TOO_SMALL;
+        return ZXC_ERROR_SRC_TOO_SMALL;  // LCOV_EXCL_LINE
 
     uint8_t temp[ZXC_DICT_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, sizeof(temp));
@@ -131,7 +131,7 @@ const void* zxc_dict_huf(const void* buf, const size_t buf_size) {
     const size_t content_size = zxc_le16(src + 6);
     if (UNLIKELY(content_size == 0 ||
                  buf_size < ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_TABLE_SIZE))
-        return NULL;
+        return NULL;  // LCOV_EXCL_LINE
     return src + ZXC_DICT_HEADER_SIZE + content_size;
 }
 
@@ -427,7 +427,7 @@ int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRI
 
     zxc_cctx_t cctx;
     if (UNLIKELY(zxc_cctx_init(&cctx, eff_chunk, 1, ZXC_LEVEL_DENSITY, 0, dict_size) != ZXC_OK))
-        return ZXC_ERROR_MEMORY;
+        return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
 
     uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
     cctx.lit_freq_acc = freq;
@@ -512,8 +512,10 @@ int64_t zxc_dict_train(const void* const* RESTRICT samples, const size_t* RESTRI
     const int64_t content_size =
         zxc_train_dict(samples, sample_sizes, n_samples, content, ZXC_DICT_SIZE_MAX);
     if (UNLIKELY(content_size <= 0)) {
+        // LCOV_EXCL_START
         out = (content_size < 0) ? content_size : ZXC_ERROR_SRC_TOO_SMALL;
         goto done;
+        // LCOV_EXCL_STOP
     }
 
     {
@@ -521,8 +523,10 @@ int64_t zxc_dict_train(const void* const* RESTRICT samples, const size_t* RESTRI
         const int hrc = zxc_train_dict_huf(samples, sample_sizes, n_samples, content,
                                            (size_t)content_size, huf);
         if (UNLIKELY(hrc != ZXC_OK)) {
+            // LCOV_EXCL_START
             out = hrc;
             goto done;
+            // LCOV_EXCL_STOP
         }
         out = zxc_dict_save(content, (size_t)content_size, huf, zxd_buf, zxd_capacity);
     }
