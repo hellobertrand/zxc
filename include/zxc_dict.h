@@ -64,7 +64,7 @@ extern "C" {
  * decoder can verify that the correct dictionary is provided at decompression
  * time. With @p huf_lengths NULL it hashes the raw content only (the in-memory
  * content-only dictionary of the buffer API). With a table it binds the
- * (content, table) pair: `checksum(LE32(content_id) || table)` -- the value
+ * (content, table) pair: `hash(table, seed = hash(content))` -- the value
  * stored in `.zxd` files and in archives compressed with a shared table.
  *
  * @param[in] dict        Pointer to dictionary content.

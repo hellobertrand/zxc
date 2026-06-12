@@ -22,14 +22,12 @@
 uint32_t zxc_dict_id(const void* RESTRICT dict, const size_t dict_size,
                      const void* RESTRICT huf_lengths) {
     if (UNLIKELY(!dict || dict_size == 0)) return 0;
+    /* One logical hash over the real bytes only: the content checksum seeds
+     * the table checksum (content and table are not contiguous at the API
+     * level, so chaining avoids both a concat copy and a synthetic buffer). */
     const uint32_t base = zxc_checksum(dict, dict_size, 0);
     if (huf_lengths == NULL) return base;
-    /* Bind the table without hashing content twice: id over
-     * [LE32(content id) || packed lengths]. */
-    uint8_t buf[4 + ZXC_HUF_TABLE_SIZE];
-    zxc_store_le32(buf, base);
-    ZXC_MEMCPY(buf + 4, huf_lengths, ZXC_HUF_TABLE_SIZE);
-    return zxc_checksum(buf, sizeof(buf), 0);
+    return zxc_checksum_seed(huf_lengths, ZXC_HUF_TABLE_SIZE, base, 0);
 }
 
 /* -------------------------------------------------------------------------
@@ -407,13 +405,6 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
  *  block regime is where the shared table pays (per-block table headers are
  *  unaffordable there) and literal density is highest.
  * ------------------------------------------------------------------------- */
-
-/** Training block size for the shared-table literal statistics. */
-#define ZXC_DICT_HUF_TRAIN_BLOCK 4096U
-
-/** Cap on the corpus bytes compressed by the literal-table trainer: the
- *  histogram converges early, so past it slices are strided evenly instead. */
-#define ZXC_DICT_HUF_SAMPLE_BUDGET (8U << 20)
 
 int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRICT sample_sizes,
                        const size_t n_samples, const void* RESTRICT dict, const size_t dict_size,

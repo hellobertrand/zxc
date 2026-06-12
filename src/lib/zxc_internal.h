@@ -375,6 +375,11 @@ extern "C" {
 #define ZXC_DICT_SAMPLE_TARGET (1U << 19)
 /** @brief Number of buckets in the dictionary trainer's frequency table. */
 #define ZXC_DICT_HASH_SIZE (1U << ZXC_DICT_HASH_BITS)
+/** @brief Training block size for the shared-table literal statistics. */
+#define ZXC_DICT_HUF_TRAIN_BLOCK 4096U
+/** @brief Cap on the corpus bytes compressed by the literal-table trainer: the
+ *         histogram converges early, so past it slices are strided evenly instead. */
+#define ZXC_DICT_HUF_SAMPLE_BUDGET (8U << 20)
 
 /** @brief Block header size: Type(1)+Flags(1)+Reserved(1)+CRC(1)+CompSize(4). */
 #define ZXC_BLOCK_HEADER_SIZE 8
@@ -1216,6 +1221,25 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const
                                                const uint8_t hash_method) {
     (void)hash_method; /* single algorithm for now; extend when adding more */
     const uint64_t hash = rapidhash(input, len);
+
+    return (uint32_t)(hash ^ (hash >> (sizeof(uint32_t) * CHAR_BIT)));
+}
+
+/**
+ * @brief Seeded variant of @ref zxc_checksum, for chaining a hash over
+ *        non-contiguous buffers: `zxc_checksum_seed(b, bn, zxc_checksum(a, an, m), m)`
+ *        hashes each byte once without a concat copy.
+ * @param[in] input Pointer to the data buffer.
+ * @param[in] len Length of the data in bytes.
+ * @param[in] seed Previous 32-bit checksum to chain from.
+ * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_RAPIDHASH).
+ * @return The calculated 32-bit hash value.
+ */
+static ZXC_ALWAYS_INLINE uint32_t zxc_checksum_seed(const void* RESTRICT input, const size_t len,
+                                                    const uint32_t seed,
+                                                    const uint8_t hash_method) {
+    (void)hash_method; /* single algorithm for now; extend when adding more */
+    const uint64_t hash = rapidhash_withSeed(input, len, seed);
 
     return (uint32_t)(hash ^ (hash >> (sizeof(uint32_t) * CHAR_BIT)));
 }

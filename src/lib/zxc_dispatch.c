@@ -593,8 +593,10 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         return ZXC_ERROR_MEMORY;
     // LCOV_EXCL_STOP
     if (UNLIKELY(zxc_cctx_attach_dict_huf(&ctx, dict_huf) != ZXC_OK)) {
+        // LCOV_EXCL_START
         zxc_cctx_free(&ctx);
         return ZXC_ERROR_CORRUPT_DATA;
+        // LCOV_EXCL_STOP
     }
 
     /* Dict input buffer: [dict_content | block_data] for the encoder, carved
@@ -782,8 +784,10 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         }
     }
     if (UNLIKELY(zxc_cctx_attach_dict_huf(&ctx, dict_huf) != ZXC_OK)) {
+        // LCOV_EXCL_START
         zxc_cctx_free(&ctx);
         return ZXC_ERROR_CORRUPT_DATA;
+        // LCOV_EXCL_STOP
     }
 
     ip += ZXC_FILE_HEADER_SIZE;

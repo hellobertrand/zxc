@@ -1353,7 +1353,7 @@ ZXC_EXPORT uint32_t zxc_dict_id(const void* dict, size_t dict_size, const void* 
 Returns the deterministic 32-bit dictionary ID. With `huf_lengths` NULL it
 hashes the raw content only — the id of an in-memory content-only dictionary
 (buffer API). With a 128-byte table it binds the **(content, table)** pair:
-`checksum(LE32(content_id) || table)` — the value recorded in `.zxd` files and
+`hash(table, seed = hash(content))` — the value recorded in `.zxd` files and
 in archive headers when a shared table is attached. Returns 0 for NULL/empty
 content.
 
