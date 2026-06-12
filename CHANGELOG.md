@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.12.0] - 2026-06-12
+api: Implements shared dictionary Huffman table (#275)
+api: Enhances format validation (#271)
+api: Overhauls dictionary fuzzer for robust testing (#270)
+api: Adds comprehensive dictionary API to all wrappers (#269)
+api: Introduces pre-trained dictionary compression (#261)
+api: bump node-addon-api from 8.7.0 to 8.8.0 in /wrappers/nodejs (#253)
+api: Adds conformance test suite and improves empty frame handling (#246)
+api: Harden decompressor buffer bounds checks (#229)
+api: Introduces static context API for caller-managed workspaces (#242)
+api: Adds custom reader interface for seekable archives (#240)
+api: wrappers: Adds seekable random-access decompression API (#224)
+api: Internalizes Sans-IO API and frame primitives (#225)
+perf: Optimize LZ run decoding for short offsets (#276)
+perf: Add make target to run decoder conformance suite
+perf: Improve Huffman leaf sorting with bucket sort (#244)
+cli: Adds `unzxc` alias and renames dictionary training option (#272)
+cli: Remove Snyk policy ignore
+cli: Addresses Snyk scan findings and improves robustness (#273)
+cli: Adds native Meson build system support (#245)
+build: Add GCC 15 and 16 to CI multi-compiler matrix (#274)
+build: Update LZbench branch for benchmark workflow
+build: Enables empty data compression/decompression (#265)
+build: Update package descriptions
+build: Introduce dedicated SSE2 SIMD optimization path for x86-64 (#259)
+build: tests: Enforces golden file format stability (#256)
+build: bump vitest from 4.1.6 to 4.1.7 in /wrappers/nodejs (#254)
+build: Restrict SBOM generation to tag pushes
+build: Add qemu cpu targeting for simd dispatch coverage (#238)
+build: Bump cibuildwheel from 3.3.1 to 3.4.1 in /wrappers/python (#233)
+build: Bump vitest from 4.1.5 to 4.1.6 in /wrappers/nodejs (#234)
+build: Use upstream LZbench for benchmarks
+build: Add automated ABI stability check workflow (#222)
+build: Generates SBOM for GitHub releases (#226)
+build: Automate CHANGELOG generation for releases (#220)
+build: Standardizes release artifact structure and naming (#223)
+build: Pins Python wrapper build dependencies (#221)
+build: Pin Python wrapper dependencies with hashes (#219)
+build: Strengthens CI/CD security and reliability (#218)
+build: Updates Node.js and Rust wrapper CI & scope heavy workflows to source paths (#217)
+portability: Abstracts memory and sorting for portability (#228)
+doc: Enhance API documentation with full Doxygen comments (#280)
+doc: Removes NUM block type and advances format to v6 (#264)
+doc: Enhance README with specific decode performance claims
+doc: Include README and add brief descriptions to Doxygen output
+doc: Add format conformance and stability overview to README
+doc: Add OpenSSF Scorecard badge to README
+misc: Update CHANGELOG
+misc: bump version to v0.12.0
+misc: Update ABI dump with new static context and seekable reader APIs
+misc: Support empty shared Huffman tables (#279)
+misc: Update Codecov action to v7 (#267)
+misc: Update Ubuntu version badge to 26.10
+misc: Rename SBOM template to lowercase
+misc: Define LZ77 search limit as symbolic constant (#262)
+misc: bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#260)
+misc: Accelerate LZ77 match finding with repeat offset seed @L6 (#257)
+misc: bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#255)
+misc: Add seekable random-access decompression to Python (#250)
+misc: bump github/codeql-action from 4.35.5 to 4.36.0 (#252)
+misc: Pin Meson and Ninja dependencies with hashes (#204) (#251)
+misc: Adjust decompressor output buffer tail padding (#249)
+misc: exclude conformance directory from Snyk Code scanning
+misc: Move Doxyfile to docs directory (#243)
+misc: Bump actions/attest-build-provenance from 3.0.0 to 4.1.0 (#232)
+misc: Bump codecov/codecov-action from 6.0.0 to 6.0.1 (#231)
+misc: Update ClusterFuzzLite base image and enable Dependabot (#230)
+
 ## [0.11.0] - 2026-05-13
 api: Increases default block size to 512 KB (#216)
 api: Introduces Level 6 compression with Huffman literals (#208)
