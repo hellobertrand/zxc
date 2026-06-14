@@ -1342,3 +1342,109 @@ int test_dict_huf_table_roundtrip(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+/* A degenerate training corpus (a single repeated byte, a zero-filled region)
+ * is matched in full against the trained dict, so there are no post-LZ literals
+ * to histogram. Training must emit a legitimately empty (all-zero) shared table
+ * rather than failing, and that .zxd must remain usable for a compress/
+ * decompress roundtrip (the empty table is treated as "no shared table"). */
+int test_dict_huf_degenerate_corpus(void) {
+    printf("=== TEST: Dict - degenerate corpus -> empty shared table ===\n");
+
+    enum { SAMPLE_SIZE = 4096 };
+    const uint8_t fills[2] = {(uint8_t)'A', 0x00};
+
+    uint8_t* sample = (uint8_t*)malloc(SAMPLE_SIZE);
+    uint8_t* comp = NULL;
+    uint8_t* out = NULL;
+    int ok = 1;
+
+    for (size_t f = 0; f < sizeof(fills) && ok; f++) {
+        memset(sample, fills[f], SAMPLE_SIZE);
+        const void* samples[1] = {sample};
+        const size_t sizes[1] = {SAMPLE_SIZE};
+
+        uint8_t dict_buf[8192];
+        uint8_t huf[ZXC_HUF_TABLE_SIZE];
+
+        ok = 0;
+        do {
+            const int64_t dsz = zxc_train_dict(samples, sizes, 1, dict_buf, sizeof(dict_buf));
+            if (dsz <= 0) {
+                printf("  [FAIL] fill 0x%02X: train_dict: %lld\n", fills[f], (long long)dsz);
+                break;
+            }
+            /* Previously returned ZXC_ERROR_CORRUPT_DATA on an empty histogram. */
+            const int hrc = zxc_train_dict_huf(samples, sizes, 1, dict_buf, (size_t)dsz, huf);
+            if (hrc != ZXC_OK) {
+                printf("  [FAIL] fill 0x%02X: train_dict_huf on empty histogram: %s\n", fills[f],
+                       zxc_error_name(hrc));
+                break;
+            }
+            /* It must be the empty (all-zero) table, not a built code. */
+            int empty = 1;
+            for (int i = 0; i < ZXC_HUF_TABLE_SIZE; i++) {
+                if (huf[i]) {
+                    empty = 0;
+                    break;
+                }
+            }
+            if (!empty) {
+                printf("  [FAIL] fill 0x%02X: expected an all-zero shared table\n", fills[f]);
+                break;
+            }
+
+            /* The empty-table .zxd must serialize and load cleanly. */
+            const size_t bound = zxc_dict_save_bound((size_t)dsz);
+            uint8_t* zxd = (uint8_t*)malloc(bound);
+            const int64_t zsz = zxc_dict_save(dict_buf, (size_t)dsz, huf, zxd, bound);
+            const void* content = NULL;
+            size_t csz = 0;
+            const void* table = NULL;
+            uint32_t id = 0;
+            const int lrc = (zsz > 0) ? zxc_dict_load(zxd, (size_t)zsz, &content, &csz, &table, &id)
+                                      : (int)zsz;
+            free(zxd);
+            if (zsz <= 0 || lrc != ZXC_OK) {
+                printf("  [FAIL] fill 0x%02X: empty-table .zxd save=%lld load=%d\n", fills[f],
+                       (long long)zsz, lrc);
+                break;
+            }
+
+            /* Volet 2: the empty table must be usable end-to-end. */
+            const size_t cap = (size_t)zxc_compress_bound(SAMPLE_SIZE);
+            comp = (uint8_t*)malloc(cap);
+            out = (uint8_t*)malloc(SAMPLE_SIZE + 64);
+            zxc_compress_opts_t co = {.level = 6,
+                                      .block_size = 4096,
+                                      .dict = dict_buf,
+                                      .dict_size = (size_t)dsz,
+                                      .dict_huf = huf};
+            const int64_t csize = zxc_compress(sample, SAMPLE_SIZE, comp, cap, &co);
+            if (csize <= 0) {
+                printf("  [FAIL] fill 0x%02X: compress with empty-table dict: %lld\n", fills[f],
+                       (long long)csize);
+                break;
+            }
+            zxc_decompress_opts_t deo = {
+                .dict = dict_buf, .dict_size = (size_t)dsz, .dict_huf = huf};
+            const int64_t dsize = zxc_decompress(comp, (size_t)csize, out, SAMPLE_SIZE + 64, &deo);
+            if (dsize != (int64_t)SAMPLE_SIZE || memcmp(out, sample, SAMPLE_SIZE) != 0) {
+                printf("  [FAIL] fill 0x%02X: roundtrip with empty-table dict: %lld\n", fills[f],
+                       (long long)dsize);
+                break;
+            }
+            ok = 1;
+        } while (0);
+
+        free(comp);
+        comp = NULL;
+        free(out);
+        out = NULL;
+    }
+
+    free(sample);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}

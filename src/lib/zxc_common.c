@@ -325,6 +325,20 @@ int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT l
     ctx->dict_huf_lengths = lengths;
     if (lengths == NULL || ctx->dict_huf_table == NULL) return ZXC_OK;
 
+    /* Empty (all-zero) table from a low-entropy corpus: treat it as "no shared table". */
+    int empty = 1;
+    for (size_t i = 0; i < ZXC_HUF_TABLE_SIZE; i++) {
+        if (lengths[i]) {
+            empty = 0;
+            break;
+        }
+    }
+    if (empty) {
+        ctx->dict_huf_lengths = NULL;
+        ctx->dict_huf_table = NULL;
+        return ZXC_OK;
+    }
+
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
     int rc = zxc_huf_unpack_lengths(lengths, code_len);
     if (LIKELY(rc == ZXC_OK)) rc = zxc_huf_build_dec_table(code_len, ctx->dict_huf_table);
