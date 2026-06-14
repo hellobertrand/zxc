@@ -203,5 +203,6 @@ int test_dict_stream_dict_id_checks(void);
 int test_dict_seekable_dict_id_checks(void);
 int test_dict_huf_zxd_roundtrip(void);
 int test_dict_huf_table_roundtrip(void);
+int test_dict_huf_degenerate_corpus(void);
 
 #endif /* ZXC_TEST_COMMON_H */

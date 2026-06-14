@@ -468,14 +468,25 @@ int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRI
     }
 
     if (rc == ZXC_OK) {
-        /* No coverage smoothing: with ZXC_HUF_MAX_CODE_LEN == 8, a code over
-         * all 256 symbols can only be the degenerate all-8-bit code (Kraft
-         * equality), which compresses nothing. Symbols unseen in training stay
-         * code-less; blocks containing one fall back to their per-block table
-         * at compression time (the encoder's validity check). */
-        uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-        rc = zxc_huf_build_code_lengths(freq, code_len, NULL);
-        if (rc == ZXC_OK) zxc_huf_pack_lengths(code_len, huf_lengths_out);
+        /* A low-entropy corpus leaves no post-LZ literals: an empty histogram,
+         * not corrupt input. Detect that on the histogram itself (OR-reduce) and
+         * emit an empty all-zero table -- every block then falls back to its
+         * per-block table. Inferring "empty" from a build error code instead
+         * would risk masking a genuine failure. */
+        uint32_t any = 0;
+        for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) any |= freq[i];
+        if (any == 0) {
+            ZXC_MEMSET(huf_lengths_out, 0, ZXC_HUF_TABLE_SIZE);
+        } else {
+            /* No coverage smoothing: with ZXC_HUF_MAX_CODE_LEN == 8, a code over
+             * all 256 symbols can only be the degenerate all-8-bit code (Kraft
+             * equality), which compresses nothing. Symbols unseen in training
+             * stay code-less; blocks containing one fall back to their per-block
+             * table at compression time (the encoder's validity check). */
+            uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+            rc = zxc_huf_build_code_lengths(freq, code_len, NULL);
+            if (rc == ZXC_OK) zxc_huf_pack_lengths(code_len, huf_lengths_out);
+        }
     }
 
     ZXC_FREE(out_scratch);

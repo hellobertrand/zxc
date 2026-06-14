@@ -134,6 +134,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_dict_seekable_dict_id_checks),
     TEST_CASE(test_dict_huf_zxd_roundtrip),
     TEST_CASE(test_dict_huf_table_roundtrip),
+    TEST_CASE(test_dict_huf_degenerate_corpus),
 
     /* --- Seekable (single-threaded) --- */
     TEST_CASE(test_seekable_table_sizes),
