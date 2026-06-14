@@ -524,7 +524,7 @@ Benchmarks were conducted using `lzbench` (by inikep) with a **block size of 256
 * **Target 1 (Client):** Apple M2 / macOS 26 (Clang 21)
 * **Target 2 (Cloud):** Google Axion / Linux (GCC 14)
 * **Target 3 (Build):** AMD EPYC 9B45 / Linux (GCC 14)
-* **Target 4 (Production):** AMD EPYC 7763 / Linux (GCC 14)
+* **Target 4 (Production):** AMD EPYC 7B13 / Linux (GCC 14)
 
 **Figure A**: Pareto Frontier — Decompression Speed vs. Compressed Size (across 4 CPUs)
 
@@ -600,16 +600,16 @@ Benchmarks were conducted using `lzbench` (by inikep) with a **block size of 256
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.12.0 -1** | **2.13x** | **129.22** |
-| **zxc 0.12.0 -2** | **1.77x** | **112.64** |
-| **zxc 0.12.0 -3** | **1.24x** | **96.20** |
-| **zxc 0.12.0 -4** | **1.18x** | **89.60** |
-| **zxc 0.12.0 -5** | **1.10x** | **84.59** |
+| **zxc 0.12.0 -1** | **2.19x** | **129.22** |
+| **zxc 0.12.0 -2** | **1.82x** | **112.64** |
+| **zxc 0.12.0 -3** | **1.25x** | **96.20** |
+| **zxc 0.12.0 -4** | **1.19x** | **89.60** |
+| **zxc 0.12.0 -5** | **1.11x** | **84.59** |
 | **zxc 0.12.0 -6** | **0.99x** | **76.21** |
 | lz4 1.10.0 --fast -17 | 1.16x | 130.58 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -9 | 0.90x | 77.20 |
-| lzav 5.7 -1 | 0.65x | 83.91 |
+| lzav 5.7 -1 | 0.64x | 83.91 |
 | snappy 1.2.2 | 0.54x | 100.53 |
 | zstd 1.5.7 --fast --1 | 0.54x | 86.16 |
 | zstd 1.5.7 -1 | 0.39x | 72.55 |
@@ -620,20 +620,20 @@ Benchmarks were conducted using `lzbench` (by inikep) with a **block size of 256
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
 | memcpy                  | 0.108       | 1.00x (baseline)      |
-| **zxc 0.12.0 -1**       | **0.287**   | **2.7x**              |
-| **zxc 0.12.0 -2**       | **0.346**   | **3.2x**              |
-| **zxc 0.12.0 -3**       | **0.491**   | **4.6x**              |
-| **zxc 0.12.0 -4**       | **0.517**   | **4.8x**              |
-| **zxc 0.12.0 -5**       | **0.555**   | **5.2x**              |
-| **zxc 0.12.0 -6**       | **0.618**   | **5.7x**              |
-| lz4 1.10.0              | 0.610       | 5.7x                  |
-| lz4 1.10.0 --fast -17   | 0.525       | 4.9x                  |
-| lz4hc 1.10.0 -9         | 0.676       | 6.3x                  |
-| lzav 5.7 -1             | 0.943       | 8.8x                  |
-| zstd 1.5.7 -1           | 1.581       | 14.7x                 |
-| zstd 1.5.7 --fast --1   | 1.133       | 10.5x                 |
-| snappy 1.2.2            | 1.124       | 10.4x                 |
-| zlib 1.3.1 -1           | 6.667       | 61.9x                 |
+| **zxc 0.12.0 -1**       | **0.280**   | **2.6x**              |
+| **zxc 0.12.0 -2**       | **0.337**   | **3.1x**              |
+| **zxc 0.12.0 -3**       | **0.489**   | **4.5x**              |
+| **zxc 0.12.0 -4**       | **0.513**   | **4.7x**              |
+| **zxc 0.12.0 -5**       | **0.550**   | **5.1x**              |
+| **zxc 0.12.0 -6**       | **0.620**   | **5.7x**              |
+| lz4 1.10.0              | 0.612       | 5.7x                  |
+| lz4 1.10.0 --fast -17   | 0.529       | 4.9x                  |
+| lz4hc 1.10.0 -9         | 0.679       | 6.3x                  |
+| lzav 5.7 -1             | 0.957       | 8.9x                  |
+| zstd 1.5.7 -1           | 1.586       | 14.7x                 |
+| zstd 1.5.7 --fast --1   | 1.138       | 10.5x                 |
+| snappy 1.2.2            | 1.125       | 10.4x                 |
+| zlib 1.3.1 -1           | 6.684       | 61.8x                 |
 
 *Lower is better. Calculated using Neoverse-V2 base frequency (2.6 GHz). Formula: `Cycles/Byte = 2600 / Decompression Speed (MB/s)`.*
 
@@ -643,100 +643,100 @@ This metric expresses how much *original* data is delivered per unit of compress
 
 | Compressor | Decode (MB/s) | Ratio (%) | Effective (MB/s) | vs LZ4 |
 | :--- | ---: | ---: | ---: | ---: |
-| **zxc 0.12.0 -1** | 9 067 | 61.50 | **14 744** | **1.65x** |
-| **zxc 0.12.0 -2** | 7 524 | 53.61 | **14 035** | **1.57x** |
-| **zxc 0.12.0 -3** | 5 297 | 45.79 | **11 569** | **1.29x** |
-| **zxc 0.12.0 -4** | 5 025 | 42.65 | **11 782** | **1.32x** |
-| **zxc 0.12.0 -5** | 4 685 | 40.27 | **11 634** | **1.30x** |
-| **zxc 0.12.0 -6** | 4 205 | 36.28 | **11 591** | **1.30x** |
-| lz4 1.10.0 (Ref) | 4 259 | 47.60 | 8 948 | 1.00x |
-| lz4 1.10.0 --fast -17 | 4 951 | 62.15 | 7 966 | 0.89x |
-| lz4hc 1.10.0 -9 | 3 849 | 36.75 | 10 473 | 1.17x |
-| lzav 5.7 -1 | 2 757 | 39.94 | 6 903 | 0.77x |
-| snappy 1.2.2 | 2 313 | 47.85 | 4 834 | 0.54x |
-| zstd 1.5.7 --fast --1 | 2 295 | 41.01 | 5 596 | 0.63x |
-| zstd 1.5.7 -1 | 1 645 | 34.53 | 4 764 | 0.53x |
-| zlib 1.3.1 -1 | 390 | 36.45 | 1 070 | 0.12x |
+| **zxc 0.12.0 -1** | 9 295 | 61.50 | **15 114** | **1.69x** |
+| **zxc 0.12.0 -2** | 7 719 | 53.61 | **14 398** | **1.61x** |
+| **zxc 0.12.0 -3** | 5 321 | 45.79 | **11 620** | **1.30x** |
+| **zxc 0.12.0 -4** | 5 066 | 42.65 | **11 878** | **1.33x** |
+| **zxc 0.12.0 -5** | 4 728 | 40.27 | **11 741** | **1.31x** |
+| **zxc 0.12.0 -6** | 4 191 | 36.27 | **11 556** | **1.29x** |
+| lz4 1.10.0 (Ref) | 4 251 | 47.60 | 8 932 | 1.00x |
+| lz4 1.10.0 --fast -17 | 4 912 | 62.15 | 7 904 | 0.88x |
+| lz4hc 1.10.0 -9 | 3 827 | 36.75 | 10 414 | 1.17x |
+| lzav 5.7 -1 | 2 718 | 39.94 | 6 805 | 0.76x |
+| snappy 1.2.2 | 2 312 | 47.85 | 4 832 | 0.54x |
+| zstd 1.5.7 --fast --1 | 2 285 | 41.01 | 5 572 | 0.62x |
+| zstd 1.5.7 -1 | 1 639 | 34.53 | 4 747 | 0.53x |
+| zlib 1.3.1 -1 | 389 | 36.45 | 1 067 | 0.12x |
 
 *Higher is better. Captures how much *original* data is delivered per unit of compressed input bandwidth. Formula: `Effective (MB/s) = Decompression Speed × 100 / Compression Ratio (%)`.*
 
-*Reading: at ZXC -6, every MB/s of compressed input yields **11 591 MB/s** of original output — **1.11x** more effective bandwidth than `lz4hc -9` at equivalent ratio (36.28 vs 36.75), and **1.30x** more than LZ4 default. ZXC's full level range stays above 1.29x LZ4 across all levels.*
+*Reading: at ZXC -6, every MB/s of compressed input yields **11 556 MB/s** of original output — **1.11x** more effective bandwidth than `lz4hc -9` at equivalent ratio (36.27 vs 36.75), and **1.29x** more than LZ4 default. ZXC's full level range stays above 1.29x LZ4 across all levels.*
 
 
 ### 7.3 Build Server Summary (x86_64 / AMD EPYC 9B45, Zen 5)
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 0.12.0 -1** | **2.16x** | **129.22** |
-| **zxc 0.12.0 -2** | **1.91x** | **112.64** |
-| **zxc 0.12.0 -3** | **1.19x** | **96.20** |
-| **zxc 0.12.0 -4** | **1.11x** | **89.60** |
-| **zxc 0.12.0 -5** | **1.05x** | **84.59** |
-| **zxc 0.12.0 -6** | **0.94x** | **76.21** |
-| lz4 1.10.0 --fast -17 | 1.06x | 130.58 |
+| **zxc 0.12.0 -1** | **2.17x** | **129.22** |
+| **zxc 0.12.0 -2** | **1.93x** | **112.64** |
+| **zxc 0.12.0 -3** | **1.20x** | **96.20** |
+| **zxc 0.12.0 -4** | **1.14x** | **89.60** |
+| **zxc 0.12.0 -5** | **1.07x** | **84.59** |
+| **zxc 0.12.0 -6** | **0.95x** | **76.21** |
+| lz4 1.10.0 --fast -17 | 1.05x | 130.58 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
-| lz4hc 1.10.0 -9 | 0.97x | 77.20 |
-| lzav 5.7 -1 | 0.72x | 83.91 |
-| snappy 1.2.2 | 0.42x | 100.63 |
+| lz4hc 1.10.0 -9 | 0.96x | 77.20 |
+| lzav 5.7 -1 | 0.71x | 83.91 |
+| snappy 1.2.2 | 0.41x | 100.63 |
 | zstd 1.5.7 --fast --1 | 0.48x | 86.16 |
 | zstd 1.5.7 -1 | 0.37x | 72.55 |
 | zlib 1.3.1 -1 | 0.08x | 76.58 |
 
-**Decompression Efficiency (Cycles per Byte @ 2.1 GHz)**
+**Decompression Efficiency (Cycles per Byte @ 2.7 GHz)**
 
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
-| memcpy                  | 0.090       | 1.00x (baseline)      |
-| **zxc 0.12.0 -1**       | **0.194**   | **2.1x**              |
-| **zxc 0.12.0 -2**       | **0.219**   | **2.4x**              |
-| **zxc 0.12.0 -3**       | **0.353**   | **3.9x**              |
-| **zxc 0.12.0 -4**       | **0.376**   | **4.2x**              |
-| **zxc 0.12.0 -5**       | **0.399**   | **4.4x**              |
-| **zxc 0.12.0 -6**       | **0.447**   | **5.0x**              |
-| lz4 1.10.0              | 0.419       | 4.6x                  |
-| lz4 1.10.0 --fast -17   | 0.396       | 4.4x                  |
-| lz4hc 1.10.0 -9         | 0.434       | 4.8x                  |
-| lzav 5.7 -1             | 0.579       | 6.4x                  |
-| zstd 1.5.7 -1           | 1.124       | 12.5x                 |
-| zstd 1.5.7 --fast --1   | 0.872       | 9.7x                  |
-| snappy 1.2.2            | 0.992       | 11.0x                 |
-| zlib 1.3.1 -1           | 5.426       | 60.2x                 |
+| memcpy                  | 0.105       | 1.00x (baseline)      |
+| **zxc 0.12.0 -1**       | **0.248**   | **2.4x**              |
+| **zxc 0.12.0 -2**       | **0.278**   | **2.6x**              |
+| **zxc 0.12.0 -3**       | **0.447**   | **4.2x**              |
+| **zxc 0.12.0 -4**       | **0.472**   | **4.5x**              |
+| **zxc 0.12.0 -5**       | **0.500**   | **4.7x**              |
+| **zxc 0.12.0 -6**       | **0.567**   | **5.4x**              |
+| lz4 1.10.0              | 0.537       | 5.1x                  |
+| lz4 1.10.0 --fast -17   | 0.509       | 4.8x                  |
+| lz4hc 1.10.0 -9         | 0.558       | 5.3x                  |
+| lzav 5.7 -1             | 0.755       | 7.2x                  |
+| zstd 1.5.7 -1           | 1.437       | 13.6x                 |
+| zstd 1.5.7 --fast --1   | 1.113       | 10.6x                 |
+| snappy 1.2.2            | 1.295       | 12.3x                 |
+| zlib 1.3.1 -1           | 6.888       | 65.4x                 |
 
-*Lower is better. Calculated using AMD EPYC 9B45 base frequency (2.1 GHz). Formula: `Cycles/Byte = 2100 / Decompression Speed (MB/s)`.*
+*Lower is better. Calculated using AMD EPYC 9B45 base frequency (2.7 GHz). Formula: `Cycles/Byte = 2700 / Decompression Speed (MB/s)`.*
 
 **Effective Throughput (Ratio-normalized decode)**
 
 | Compressor | Decode (MB/s) | Ratio (%) | Effective (MB/s) | vs LZ4 |
 | :--- | ---: | ---: | ---: | ---: |
-| **zxc 0.12.0 -1** | 10 844 | 61.50 | **17 633** | **1.67x** |
-| **zxc 0.12.0 -2** | 9 597 | 53.61 | **17 902** | **1.70x** |
-| **zxc 0.12.0 -3** | 5 955 | 45.79 | **13 005** | **1.23x** |
-| **zxc 0.12.0 -4** | 5 589 | 42.65 | **13 104** | **1.24x** |
-| **zxc 0.12.0 -5** | 5 259 | 40.27 | **13 059** | **1.24x** |
-| **zxc 0.12.0 -6** | 4 695 | 36.28 | **12 941** | **1.23x** |
-| lz4 1.10.0 (Ref) | 5 013 | 47.60 | 10 532 | 1.00x |
-| lz4 1.10.0 --fast -17 | 5 301 | 62.15 | 8 530 | 0.81x |
-| lz4hc 1.10.0 -9 | 4 841 | 36.75 | 13 173 | 1.25x |
-| lzav 5.7 -1 | 3 628 | 39.94 | 9 083 | 0.86x |
-| snappy 1.2.2 | 2 118 | 47.89 | 4 423 | 0.42x |
-| zstd 1.5.7 --fast --1 | 2 407 | 41.01 | 5 870 | 0.56x |
-| zstd 1.5.7 -1 | 1 868 | 34.53 | 5 410 | 0.51x |
-| zlib 1.3.1 -1 | 387 | 36.45 | 1 062 | 0.10x |
+| **zxc 0.12.0 -1** | 10 907 | 61.50 | **17 734** | **1.68x** |
+| **zxc 0.12.0 -2** | 9 725 | 53.61 | **18 140** | **1.72x** |
+| **zxc 0.12.0 -3** | 6 040 | 45.79 | **13 190** | **1.25x** |
+| **zxc 0.12.0 -4** | 5 724 | 42.65 | **13 421** | **1.27x** |
+| **zxc 0.12.0 -5** | 5 405 | 40.27 | **13 423** | **1.27x** |
+| **zxc 0.12.0 -6** | 4 764 | 36.27 | **13 134** | **1.24x** |
+| lz4 1.10.0 (Ref) | 5 028 | 47.60 | 10 563 | 1.00x |
+| lz4 1.10.0 --fast -17 | 5 302 | 62.15 | 8 531 | 0.81x |
+| lz4hc 1.10.0 -9 | 4 843 | 36.75 | 13 178 | 1.25x |
+| lzav 5.7 -1 | 3 574 | 39.94 | 8 948 | 0.85x |
+| snappy 1.2.2 | 2 085 | 47.89 | 4 354 | 0.41x |
+| zstd 1.5.7 --fast --1 | 2 425 | 41.01 | 5 913 | 0.56x |
+| zstd 1.5.7 -1 | 1 879 | 34.53 | 5 442 | 0.52x |
+| zlib 1.3.1 -1 | 392 | 36.45 | 1 075 | 0.10x |
 
 *Higher is better. Captures how much *original* data is delivered per unit of compressed input bandwidth. Formula: `Effective (MB/s) = Decompression Speed × 100 / Compression Ratio (%)`.*
 
-*Reading: on EPYC 9B45, ZXC's full level range delivers between 1.23x and 1.70x LZ4 effective bandwidth. Note that on this x86_64 platform `lz4hc -9` (1.25x) edges out ZXC -6 (1.23x) on this metric — lz4hc's decode (4 841 MB/s) runs ~3% faster than ZXC -6 (4 695 MB/s) here, while ZXC -6 keeps the ratio advantage (36.28 vs 36.75). The two are practically tied on this platform.*
+*Reading: on EPYC 9B45, ZXC's full level range delivers between 1.24x and 1.72x LZ4 effective bandwidth. Note that on this x86_64 platform `lz4hc -9` (1.25x) edges out ZXC -6 (1.24x) on this metric — lz4hc's decode (4 843 MB/s) runs ~2% faster than ZXC -6 (4 764 MB/s) here, while ZXC -6 keeps the ratio advantage (36.27 vs 36.75). The two are practically tied on this platform.*
 
 
-### 7.4 Production Server Summary (x86_64 / AMD EPYC 7763, Zen 3)
+### 7.4 Production Server Summary (x86_64 / AMD EPYC 7B13, Zen 3)
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
 | **zxc 0.12.0 -1** | **2.00x** | **129.22** |
-| **zxc 0.12.0 -2** | **1.67x** | **112.64** |
+| **zxc 0.12.0 -2** | **1.66x** | **112.64** |
 | **zxc 0.12.0 -3** | **1.11x** | **96.20** |
 | **zxc 0.12.0 -4** | **1.06x** | **89.60** |
-| **zxc 0.12.0 -5** | **1.02x** | **84.59** |
+| **zxc 0.12.0 -5** | **1.03x** | **84.59** |
 | **zxc 0.12.0 -6** | **0.90x** | **76.21** |
 | lz4 1.10.0 --fast -17 | 1.15x | 130.58 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
@@ -747,50 +747,50 @@ This metric expresses how much *original* data is delivered per unit of compress
 | zstd 1.5.7 -1 | 0.34x | 72.55 |
 | zlib 1.3.1 -1 | 0.09x | 76.58 |
 
-**Decompression Efficiency (Cycles per Byte @ 2.45 GHz)**
+**Decompression Efficiency (Cycles per Byte @ 3.05 GHz)**
 
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
-| memcpy                  | 0.106       | 1.00x (baseline)      |
-| **zxc 0.12.0 -1**       | **0.346**   | **3.3x**              |
-| **zxc 0.12.0 -2**       | **0.415**   | **3.9x**              |
-| **zxc 0.12.0 -3**       | **0.625**   | **5.9x**              |
-| **zxc 0.12.0 -4**       | **0.649**   | **6.1x**              |
-| **zxc 0.12.0 -5**       | **0.676**   | **6.4x**              |
-| **zxc 0.12.0 -6**       | **0.767**   | **7.2x**              |
-| lz4 1.10.0              | 0.691       | 6.5x                  |
-| lz4 1.10.0 --fast -17   | 0.599       | 5.6x                  |
-| lz4hc 1.10.0 -9         | 0.720       | 6.8x                  |
-| lzav 5.7 -1             | 0.939       | 8.9x                  |
-| zstd 1.5.7 -1           | 2.007       | 18.9x                 |
-| zstd 1.5.7 --fast --1   | 1.507       | 14.2x                 |
-| snappy 1.2.2            | 1.540       | 14.5x                 |
-| zlib 1.3.1 -1           | 7.470       | 70.4x                 |
+| memcpy                  | 0.126       | 1.00x (baseline)      |
+| **zxc 0.12.0 -1**       | **0.391**   | **3.1x**              |
+| **zxc 0.12.0 -2**       | **0.471**   | **3.7x**              |
+| **zxc 0.12.0 -3**       | **0.708**   | **5.6x**              |
+| **zxc 0.12.0 -4**       | **0.738**   | **5.8x**              |
+| **zxc 0.12.0 -5**       | **0.764**   | **6.1x**              |
+| **zxc 0.12.0 -6**       | **0.869**   | **6.9x**              |
+| lz4 1.10.0              | 0.784       | 6.2x                  |
+| lz4 1.10.0 --fast -17   | 0.679       | 5.4x                  |
+| lz4hc 1.10.0 -9         | 0.817       | 6.5x                  |
+| lzav 5.7 -1             | 1.057       | 8.4x                  |
+| zstd 1.5.7 -1           | 2.273       | 18.0x                 |
+| zstd 1.5.7 --fast --1   | 1.705       | 13.5x                 |
+| snappy 1.2.2            | 1.754       | 13.9x                 |
+| zlib 1.3.1 -1           | 8.496       | 67.3x                 |
 
-*Lower is better. Calculated using AMD EPYC 7763 base frequency (2.45 GHz). Formula: `Cycles/Byte = 2450 / Decompression Speed (MB/s)`.*
+*Lower is better. Calculated using AMD EPYC 7B13 frequency (3.05 GHz). Formula: `Cycles/Byte = 3050 / Decompression Speed (MB/s)`.*
 
 **Effective Throughput (Ratio-normalized decode)**
 
 | Compressor | Decode (MB/s) | Ratio (%) | Effective (MB/s) | vs LZ4 |
 | :--- | ---: | ---: | ---: | ---: |
-| **zxc 0.12.0 -1** |  7 077 | 61.50 | **11 507** | **1.54x** |
-| **zxc 0.12.0 -2** |  5 907 | 53.61 | **11 018** | **1.48x** |
-| **zxc 0.12.0 -3** |  3 922 | 45.79 |  **8 565** | **1.15x** |
-| **zxc 0.12.0 -4** |  3 775 | 42.65 |  **8 851** | **1.19x** |
-| **zxc 0.12.0 -5** |  3 624 | 40.27 |  **8 999** | **1.21x** |
-| **zxc 0.12.0 -6** |  3 196 | 36.28 |  **8 809** | **1.18x** |
-| lz4 1.10.0 (Ref) | 3 546 | 47.60 | 7 450 | 1.00x |
-| lz4 1.10.0 --fast -17 | 4 092 | 62.15 | 6 584 | 0.88x |
-| lz4hc 1.10.0 -9 | 3 401 | 36.75 | 9 254 | 1.24x |
-| lzav 5.7 -1 | 2 609 | 39.94 | 6 532 | 0.88x |
-| snappy 1.2.2 | 1 591 | 47.89 | 3 322 | 0.45x |
-| zstd 1.5.7 --fast --1 | 1 626 | 41.01 | 3 965 | 0.53x |
-| zstd 1.5.7 -1 | 1 221 | 34.53 | 3 536 | 0.47x |
-| zlib 1.3.1 -1 | 328 | 36.45 | 900 | 0.12x |
+| **zxc 0.12.0 -1** |  7 796 | 61.50 | **12 676** | **1.55x** |
+| **zxc 0.12.0 -2** |  6 477 | 53.61 | **12 082** | **1.48x** |
+| **zxc 0.12.0 -3** |  4 308 | 45.79 |  **9 408** | **1.15x** |
+| **zxc 0.12.0 -4** |  4 133 | 42.65 |  **9 691** | **1.19x** |
+| **zxc 0.12.0 -5** |  3 992 | 40.27 |  **9 913** | **1.21x** |
+| **zxc 0.12.0 -6** |  3 508 | 36.27 |  **9 673** | **1.18x** |
+| lz4 1.10.0 (Ref) | 3 891 | 47.60 | 8 174 | 1.00x |
+| lz4 1.10.0 --fast -17 | 4 491 | 62.15 | 7 227 | 0.88x |
+| lz4hc 1.10.0 -9 | 3 732 | 36.75 | 10 155 | 1.24x |
+| lzav 5.7 -1 | 2 886 | 39.94 | 7 226 | 0.88x |
+| snappy 1.2.2 | 1 739 | 47.89 | 3 631 | 0.44x |
+| zstd 1.5.7 --fast --1 | 1 789 | 41.01 | 4 362 | 0.53x |
+| zstd 1.5.7 -1 | 1 342 | 34.53 | 3 887 | 0.48x |
+| zlib 1.3.1 -1 | 359 | 36.45 | 985 | 0.12x |
 
 *Higher is better. Captures how much *original* data is delivered per unit of compressed input bandwidth. Formula: `Effective (MB/s) = Decompression Speed × 100 / Compression Ratio (%)`.*
 
-*Reading: on EPYC 7763 (Zen 3), ZXC's full level range delivers between 1.15x and 1.54x LZ4 effective bandwidth. Like on EPYC 9B45, `lz4hc -9` (1.24x) slightly edges out ZXC -6 (1.18x) at the densest level on this older Zen 3 microarchitecture — its decoder is ~6% faster while the ratio gap stays minimal. ZXC's lead is preserved on the speed-oriented levels (-1 to -2) where the bitstream layout amortizes well over the EPYC 7763 pipeline.*
+*Reading: on EPYC 7B13 (Zen 3), ZXC's full level range delivers between 1.15x and 1.55x LZ4 effective bandwidth. Like on EPYC 9B45, `lz4hc -9` (1.24x) slightly edges out ZXC -6 (1.18x) at the densest level on this older Zen 3 microarchitecture — its decoder is ~6% faster while the ratio gap stays minimal. ZXC's lead is preserved on the speed-oriented levels (-1 to -2) where the bitstream layout amortizes well over the EPYC 7B13 pipeline.*
 
 
 ### 7.5 Benchmarks Results
@@ -831,77 +831,77 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clan
 
 #### 7.5.2 ARM64 Architecture (Google Axion Neoverse-V2)
 
-Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Debian GNU/Linux 12 (bookworm). The reference hardware is a Google Neoverse-V2 processor (ARM64).
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on 64-bit Linux. The reference hardware is a Google Neoverse-V2 processor (ARM64).
 
 **All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.**
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 24179 MB/s | 24134 MB/s |   211947520 |100.00 | 1 files|
-| **zxc 0.12.0 -1**           |   868 MB/s |  **9067 MB/s** |   130356444 | **61.50** | 1 files|
-| **zxc 0.12.0 -2**           |   586 MB/s |  **7524 MB/s** |   113634139 | **53.61** | 1 files|
-| **zxc 0.12.0 -3**           |   238 MB/s |  **5297 MB/s** |    97051816 | **45.79** | 1 files|
-| **zxc 0.12.0 -4**           |   165 MB/s |  **5025 MB/s** |    90393215 | **42.65** | 1 files|
-| **zxc 0.12.0 -5**           |  96.9 MB/s |  **4685 MB/s** |    85341643 | **40.27** | 1 files|
-| **zxc 0.12.0 -6**           |  11.0 MB/s |  **4205 MB/s** |    76888252 | **36.28** | 1 files|
-| lz4 1.10.0              |   732 MB/s |  4259 MB/s |   100880800 | 47.60 | 1 files|
-| lz4 1.10.0 --fast -17   |  1280 MB/s |  4951 MB/s |   131732802 | 62.15 | 1 files|
-| lz4hc 1.10.0 -9         |  43.4 MB/s |  3849 MB/s |    77884448 | 36.75 | 1 files|
-| lzav 5.7 -1             |   562 MB/s |  2757 MB/s |    84644732 | 39.94 | 1 files|
-| snappy 1.2.2            |   757 MB/s |  2313 MB/s |   101415443 | 47.85 | 1 files|
-| zstd 1.5.7 --fast --1   |   607 MB/s |  2295 MB/s |    86916294 | 41.01 | 1 files|
-| zstd 1.5.7 -1           |   525 MB/s |  1645 MB/s |    73193704 | 34.53 | 1 files|
-| zlib 1.3.1 -1           |   115 MB/s |   390 MB/s |    77259029 | 36.45 | 1 files|
+| memcpy                  | 24656 MB/s | 24056 MB/s |   211947520 |100.00 | 1 files|
+| **zxc 0.12.0 -1**           |   872 MB/s |  **9295 MB/s** |   130356147 | **61.50** | 1 files|
+| **zxc 0.12.0 -2**           |   589 MB/s |  **7719 MB/s** |   113633866 | **53.61** | 1 files|
+| **zxc 0.12.0 -3**           |   246 MB/s |  **5321 MB/s** |    97051444 | **45.79** | 1 files|
+| **zxc 0.12.0 -4**           |   170 MB/s |  **5066 MB/s** |    90392857 | **42.65** | 1 files|
+| **zxc 0.12.0 -5**           |  99.7 MB/s |  **4728 MB/s** |    85341256 | **40.27** | 1 files|
+| **zxc 0.12.0 -6**           |  11.8 MB/s |  **4191 MB/s** |    76882010 | **36.27** | 1 files|
+| lz4 1.10.0              |   728 MB/s |  4251 MB/s |   100880800 | 47.60 | 1 files|
+| lz4 1.10.0 --fast -17   |  1273 MB/s |  4912 MB/s |   131732802 | 62.15 | 1 files|
+| lz4hc 1.10.0 -9         |  21.3 MB/s |  3827 MB/s |    77884448 | 36.75 | 1 files|
+| lzav 5.7 -1             |   540 MB/s |  2718 MB/s |    84644732 | 39.94 | 1 files|
+| snappy 1.2.2            |   753 MB/s |  2312 MB/s |   101415443 | 47.85 | 1 files|
+| zstd 1.5.7 --fast --1   |   604 MB/s |  2285 MB/s |    86916294 | 41.01 | 1 files|
+| zstd 1.5.7 -1           |   522 MB/s |  1639 MB/s |    73193704 | 34.53 | 1 files|
+| zlib 1.3.1 -1           |   115 MB/s |   389 MB/s |    77259029 | 36.45 | 1 files|
 
 
 #### 7.5.3 x86_64 Architecture (AMD EPYC 9B45)
 
-Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Ubuntu 24.04. The reference hardware is an AMD EPYC 9B45 processor (x86_64).
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on 64-bit Linux. The reference hardware is an AMD EPYC 9B45 processor (x86_64).
 
 **All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.**
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 23351 MB/s | 23292 MB/s |   211947520 |100.00 | 1 files|
-| **zxc 0.12.0 -1**           |   859 MB/s | **10844 MB/s** |   130356444 | **61.50** | 1 files|
-| **zxc 0.12.0 -2**           |   584 MB/s |  **9597 MB/s** |   113634139 | **53.61** | 1 files|
-| **zxc 0.12.0 -3**           |   238 MB/s |  **5955 MB/s** |    97051816 | **45.79** | 1 files|
-| **zxc 0.12.0 -4**           |   163 MB/s |  **5589 MB/s** |    90393215 | **42.65** | 1 files|
-| **zxc 0.12.0 -5**           |  97.0 MB/s |  **5259 MB/s** |    85341643 | **40.27** | 1 files|
-| **zxc 0.12.0 -6**           |  11.7 MB/s |  **4695 MB/s** |    76888252 | **36.28** | 1 files|
-| lz4 1.10.0              |   767 MB/s |  5013 MB/s |   100880800 | 47.60 | 1 files|
-| lz4 1.10.0 --fast -17   |  1280 MB/s |  5301 MB/s |   131732802 | 62.15 | 1 files|
-| lz4hc 1.10.0 -9         |  45.0 MB/s |  4841 MB/s |    77884448 | 36.75 | 1 files|
-| lzav 5.7 -1             |   600 MB/s |  3628 MB/s |    84644732 | 39.94 | 1 files|
-| snappy 1.2.2            |   768 MB/s |  2118 MB/s |   101512076 | 47.89 | 1 files|
-| zstd 1.5.7 --fast --1   |   656 MB/s |  2407 MB/s |    86916294 | 41.01 | 1 files|
-| zstd 1.5.7 -1           |   597 MB/s |  1868 MB/s |    73193704 | 34.53 | 1 files|
-| zlib 1.3.1 -1           |   133 MB/s |   387 MB/s |    77259029 | 36.45 | 1 files|
+| memcpy                  | 25130 MB/s | 25640 MB/s |   211947520 |100.00 | 1 files|
+| **zxc 0.12.0 -1**           |   868 MB/s | **10907 MB/s** |   130356147 | **61.50** | 1 files|
+| **zxc 0.12.0 -2**           |   589 MB/s |  **9725 MB/s** |   113633866 | **53.61** | 1 files|
+| **zxc 0.12.0 -3**           |   243 MB/s |  **6040 MB/s** |    97051444 | **45.79** | 1 files|
+| **zxc 0.12.0 -4**           |   167 MB/s |  **5724 MB/s** |    90392857 | **42.65** | 1 files|
+| **zxc 0.12.0 -5**           |  99.8 MB/s |  **5405 MB/s** |    85341256 | **40.27** | 1 files|
+| **zxc 0.12.0 -6**           |  12.7 MB/s |  **4764 MB/s** |    76882010 | **36.27** | 1 files|
+| lz4 1.10.0              |   771 MB/s |  5028 MB/s |   100880800 | 47.60 | 1 files|
+| lz4 1.10.0 --fast -17   |  1290 MB/s |  5302 MB/s |   131732802 | 62.15 | 1 files|
+| lz4hc 1.10.0 -9         |  45.3 MB/s |  4843 MB/s |    77884448 | 36.75 | 1 files|
+| lzav 5.7 -1             |   606 MB/s |  3574 MB/s |    84644732 | 39.94 | 1 files|
+| snappy 1.2.2            |   772 MB/s |  2085 MB/s |   101512076 | 47.89 | 1 files|
+| zstd 1.5.7 --fast --1   |   328 MB/s |  2425 MB/s |    86916294 | 41.01 | 1 files|
+| zstd 1.5.7 -1           |   600 MB/s |  1879 MB/s |    73193704 | 34.53 | 1 files|
+| zlib 1.3.1 -1           |   136 MB/s |   392 MB/s |    77259029 | 36.45 | 1 files|
 
 
-#### 7.5.4 x86_64 Architecture (AMD EPYC 7763, Zen 3)
+#### 7.5.4 x86_64 Architecture (AMD EPYC 7B13, Zen 3)
 
-Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.2.0 using *MOREFLAGS="-march=native"* on Linux 64-bits Ubuntu 24.04. The reference hardware is an AMD EPYC 7763 64-Core processor (x86_64, Zen 3, 2.45 GHz).
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on 64-bit Linux. The reference hardware is an AMD EPYC 7B13 64-Core processor (x86_64, Zen 3, 3.05 GHz).
 
 **All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.**
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 23023 MB/s | 23087 MB/s |   211947520 |100.00 | 1 files|
-| **zxc 0.12.0 -1**           |   640 MB/s |  **7077 MB/s** |   130356444 | **61.50** | 1 files|
-| **zxc 0.12.0 -2**           |   431 MB/s |  **5907 MB/s** |   113634139 | **53.61** | 1 files|
-| **zxc 0.12.0 -3**           |   185 MB/s |  **3922 MB/s** |    97051816 | **45.79** | 1 files|
-| **zxc 0.12.0 -4**           |   128 MB/s |  **3775 MB/s** |    90393215 | **42.65** | 1 files|
-| **zxc 0.12.0 -5**           |  76.5 MB/s |  **3624 MB/s** |    85341643 | **40.27** | 1 files|
-| **zxc 0.12.0 -6**           |  8.85 MB/s |  **3196 MB/s** |    76888252 | **36.28** | 1 files|
-| lz4 1.10.0              |   580 MB/s |  3546 MB/s |   100880800 | 47.60 | 1 files|
-| lz4 1.10.0 --fast -17   |  1015 MB/s |  4092 MB/s |   131732802 | 62.15 | 1 files|
-| lz4hc 1.10.0 -9         |  33.8 MB/s |  3401 MB/s |    77884448 | 36.75 | 1 files|
-| lzav 5.7 -1             |   407 MB/s |  2609 MB/s |    84644732 | 39.94 | 1 files|
-| snappy 1.2.2            |   612 MB/s |  1591 MB/s |   101512076 | 47.89 | 1 files|
-| zstd 1.5.7 --fast --1   |   443 MB/s |  1626 MB/s |    86916294 | 41.01 | 1 files|
-| zstd 1.5.7 -1           |   400 MB/s |  1221 MB/s |    73193704 | 34.53 | 1 files|
-| zlib 1.3.1 -1           |  98.1 MB/s |   328 MB/s |    77259029 | 36.45 | 1 files|
+| memcpy                  | 24142 MB/s | 24155 MB/s |   211947520 |100.00 | 1 files|
+| **zxc 0.12.0 -1**           |   724 MB/s |  **7796 MB/s** |   130356147 | **61.50** | 1 files|
+| **zxc 0.12.0 -2**           |   486 MB/s |  **6477 MB/s** |   113633866 | **53.61** | 1 files|
+| **zxc 0.12.0 -3**           |   205 MB/s |  **4308 MB/s** |    97051444 | **45.79** | 1 files|
+| **zxc 0.12.0 -4**           |   143 MB/s |  **4133 MB/s** |    90392857 | **42.65** | 1 files|
+| **zxc 0.12.0 -5**           |  85.8 MB/s |  **3992 MB/s** |    85341256 | **40.27** | 1 files|
+| **zxc 0.12.0 -6**           |  10.6 MB/s |  **3508 MB/s** |    76882010 | **36.27** | 1 files|
+| lz4 1.10.0              |   640 MB/s |  3891 MB/s |   100880800 | 47.60 | 1 files|
+| lz4 1.10.0 --fast -17   |  1111 MB/s |  4491 MB/s |   131732802 | 62.15 | 1 files|
+| lz4hc 1.10.0 -9         |  37.1 MB/s |  3732 MB/s |    77884448 | 36.75 | 1 files|
+| lzav 5.7 -1             |   443 MB/s |  2886 MB/s |    84644732 | 39.94 | 1 files|
+| snappy 1.2.2            |   665 MB/s |  1739 MB/s |   101512076 | 47.89 | 1 files|
+| zstd 1.5.7 --fast --1   |   488 MB/s |  1789 MB/s |    86916294 | 41.01 | 1 files|
+| zstd 1.5.7 -1           |   443 MB/s |  1342 MB/s |    73193704 | 34.53 | 1 files|
+| zlib 1.3.1 -1           |   106 MB/s |   359 MB/s |    77259029 | 36.45 | 1 files|
 
 
 ### 7.6 Memory Usage per Compression Context
