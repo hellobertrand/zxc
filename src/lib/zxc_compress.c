@@ -85,6 +85,11 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
  * Selects bytes from @p b where the corresponding @p mask byte has its high bit
  * set, else from @p a. In every call site the mask lanes are full-width compare
  * results (all-ones or all-zero per element), so a plain bitwise select is exact.
+ *
+ * @param[in] a     Lanes chosen where @p mask is clear.
+ * @param[in] b     Lanes chosen where @p mask is set.
+ * @param[in] mask  Per-byte selector (a full-width compare result).
+ * @return The blended 128-bit vector.
  */
 // codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
 static ZXC_ALWAYS_INLINE __m128i zxc_mm_blendv_epi8_sse2(__m128i a, __m128i b, __m128i mask) {
@@ -98,6 +103,10 @@ static ZXC_ALWAYS_INLINE __m128i zxc_mm_blendv_epi8_sse2(__m128i a, __m128i b, _
  * by -0x8000 so values in [0, 0xFFFF] land in the signed int16 range with no
  * saturation, pack, then add 0x8000 back per 16-bit lane. Exact for inputs in
  * [0, 0xFFFF] (all call sites pass match lengths < 2^16).
+ *
+ * @param[in] a  Four u32 lanes forming the low half of the result.
+ * @param[in] b  Four u32 lanes forming the high half of the result.
+ * @return The eight u16 lanes packed from @p a then @p b.
  */
 // codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
 static ZXC_ALWAYS_INLINE __m128i zxc_mm_packus_epi32_sse2(__m128i a, __m128i b) {
@@ -191,6 +200,8 @@ typedef struct {
  * @param[in,out] hash_tags Pointer to the tag table for fast rejection.
  * @param[in,out] chain_table Pointer to the chain table for collision handling.
  * @param[in] epoch_mark Current epoch marker for hash table invalidation.
+ * @param[in] offset_mask Mask isolating the position bits in chain/table entries.
+ * @param[in] level Compression level (selects search depth and matcher behaviour).
  * @param[in] p LZ77 parameters controlling search depth, lazy matching, and stepping.
  * @param[in] last_off Most recently accepted match offset, used as a repeat-offset
  *            seed probed before the hash-chain walk. Pass 0 to disable (all callers
@@ -808,6 +819,7 @@ static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const siz
  * @param[out] extras_sz_out    Number of bytes written into @p buf_extras.
  * @param[out] max_offset_out   Largest biased offset emitted (used by the caller
  *                              to choose 1-byte vs 2-byte offset encoding).
+ * @return @c ZXC_OK on success, or a negative @ref zxc_error_t.
  */
 static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint32_t* RESTRICT hash_table,
@@ -2069,6 +2081,21 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
     return ZXC_OK;
 }
 
+/**
+ * @brief Compresses one chunk into a single ZXC block (the compression hot path).
+ *
+ * Selects the GHI encoder at level <= 2, otherwise GLO; falls back to a RAW
+ * block when the coded form would not shrink the data. When @c ctx->dict_size
+ * is > 0, @p chunk is the [dict | block] concat and only the block tail counts
+ * toward the expansion check. Appends the per-block checksum when enabled.
+ *
+ * @param[in,out] ctx     Compression context (level, dict_size, checksum, buffers).
+ * @param[in]     chunk   Source bytes ([dict | block] when a dictionary is active).
+ * @param[in]     src_sz  Length of @p chunk in bytes (includes any dict prefix).
+ * @param[out]    dst     Destination block buffer.
+ * @param[in]     dst_cap Capacity of @p dst in bytes.
+ * @return Compressed block size in bytes on success, or a negative @ref zxc_error_t.
+ */
 // cppcheck-suppress unusedFunction
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {

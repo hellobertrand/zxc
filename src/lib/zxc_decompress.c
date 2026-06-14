@@ -302,30 +302,24 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
     } while (0)
 
 /**
- * @brief Decodes a General Low (GLO) format compressed block.
+ * @brief Unified GLO (General Low) block decoder body, shared by the fast, safe
+ *        and dictionary variants.
  *
- * This function handles the decoding of a compressed block formatted with the
- * internal GLO structure. The decompressed size is derived from Section
- * Descriptors within the compressed payload.
+ * Decodes a block in the internal GLO format; the decompressed size is derived
+ * from the Section Descriptors in the payload. @p safe and @p has_dict must be
+ * compile-time constants (0 or 1): the 4x-unrolled loops are duplicated inside
+ * @c if(safe)/else branches so each variant keeps single-assignment @c const
+ * save pointers, and after constant propagation only one branch survives per
+ * wrapper (codegen equivalent to a hand-written pair).
  *
- * @param[in,out] ctx Pointer to the compression context (`zxc_cctx_t`) containing
- * @param[in] src Pointer to the source buffer containing compressed data.
- * @param[in] src_size Size of the source buffer in bytes.
- * @param[out] dst Pointer to the destination buffer for decompressed data.
- * @param[in] dst_capacity Maximum capacity of the destination buffer.
- *
- * @return The number of bytes written to the destination buffer on success, or
- * a negative zxc_error_t code on failure (e.g., invalid header, buffer overflow, or corrupted
- * data).
- */
-/**
- * @brief Unified GLO decoder body shared by the fast and safe variants.
- *
- * @p safe must be a compile-time constant (0 or 1). The two 4x-unrolled loops
- * are duplicated verbatim inside @c if(safe)/else branches so each variant
- * keeps single-assignment @c const save pointers. After constant propagation
- * only one branch survives per wrapper, yielding codegen equivalent to the
- * hand-written pair.
+ * @param[in,out] ctx          Decompression context (dict buffer, tables).
+ * @param[in]     src          Compressed block payload.
+ * @param[in]     src_size     Size of @p src in bytes.
+ * @param[out]    dst          Destination buffer for decoded bytes.
+ * @param[in]     dst_capacity Capacity of @p dst in bytes.
+ * @param[in]     safe         Compile-time flag: 1 = strict bounds-checked loop.
+ * @param[in]     has_dict     Compile-time flag: 1 = resolve matches against a dict prefix.
+ * @return Bytes written to @p dst on success, or a negative @ref zxc_error_t.
  */
 static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
@@ -1122,26 +1116,24 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
 }
 
 /**
- * @brief Decodes a GHI (General High) format compressed block.
+ * @brief Unified GHI (General High) block decoder body, shared by the fast, safe
+ *        and dictionary variants.
  *
- * This function handles the decoding of a compressed block formatted with the
- * internal GHI structure. The decompressed size is derived from Section
- * Descriptors within the compressed payload.
+ * Decodes a block in the internal GHI format; the decompressed size is derived
+ * from the Section Descriptors in the payload. @p safe and @p has_dict must be
+ * compile-time constants (0 or 1): the 4x-unrolled loops are duplicated inside
+ * @c if(safe)/else branches so each variant keeps single-assignment @c const
+ * save pointers, and after constant propagation only one branch survives per
+ * wrapper.
  *
- * @param[in] ctx Pointer to the decompression context (unused in current implementation).
- * @param[in] src Pointer to the source buffer containing compressed data.
- * @param[in] src_size Size of the source buffer in bytes.
- * @param[out] dst Pointer to the destination buffer for decompressed data.
- * @param[in] dst_capacity Capacity of the destination buffer in bytes.
- * @return int Returns the number of bytes written on success, or a negative zxc_error_t code on
- * failure.
- */
-/**
- * @brief Unified GHI decoder body shared by the fast and safe variants.
- *
- * @p safe must be a compile-time constant (0 or 1). The two 4x-unrolled loops
- * are duplicated verbatim inside @c if(safe)/else branches so that each
- * variant keeps its own single-assignment @c const save pointers.
+ * @param[in,out] ctx          Decompression context (dict buffer, tables).
+ * @param[in]     src          Compressed block payload.
+ * @param[in]     src_size     Size of @p src in bytes.
+ * @param[out]    dst          Destination buffer for decoded bytes.
+ * @param[in]     dst_capacity Capacity of @p dst in bytes.
+ * @param[in]     safe         Compile-time flag: 1 = strict bounds-checked loop.
+ * @param[in]     has_dict     Compile-time flag: 1 = resolve matches against a dict prefix.
+ * @return Bytes written to @p dst on success, or a negative @ref zxc_error_t.
  */
 static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
@@ -1763,22 +1755,57 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     return (int)(d_ptr - dst);
 }
 
-// No-dict decoders: plain (inlinable) so the no-dict chunk wrapper inlines them
-// exactly like main. has_dict=0 folds the dict_size handling away.
+/**
+ * @brief Decode a no-dict GLO block (plain, inlinable path).
+ *
+ * Wrapper over @ref zxc_decode_block_glo_impl with @c safe=0, @c has_dict=0, so
+ * the no-dict chunk wrapper inlines it exactly like the dict-free build.
+ *
+ * @param[in,out] ctx          Decompression context.
+ * @param[in]     src          Compressed GLO block payload.
+ * @param[in]     src_size     Size of @p src in bytes.
+ * @param[out]    dst          Destination buffer.
+ * @param[in]     dst_capacity Capacity of @p dst in bytes.
+ * @return Bytes written on success, or a negative @ref zxc_error_t.
+ */
 static int zxc_decode_block_glo(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_size, uint8_t* RESTRICT dst,
                                 const size_t dst_capacity) {
     return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 0);
 }
 
+/**
+ * @brief Decode a no-dict GHI block (plain, inlinable path).
+ *
+ * Wrapper over @ref zxc_decode_block_ghi_impl with @c safe=0, @c has_dict=0.
+ *
+ * @param[in,out] ctx          Decompression context.
+ * @param[in]     src          Compressed GHI block payload.
+ * @param[in]     src_size     Size of @p src in bytes.
+ * @param[out]    dst          Destination buffer.
+ * @param[in]     dst_capacity Capacity of @p dst in bytes.
+ * @return Bytes written on success, or a negative @ref zxc_error_t.
+ */
 static int zxc_decode_block_ghi(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_size, uint8_t* RESTRICT dst,
                                 const size_t dst_capacity) {
     return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 0, 0);
 }
 
-// Dict decoders: NOINLINE, only reached on the cold dict path (chunk_wrapper_dict),
-// so they never load into I-cache on a no-dict stream.
+/**
+ * @brief Decode a GLO block against a dictionary prefix (cold path).
+ *
+ * Wrapper over @ref zxc_decode_block_glo_impl with @c safe=0, @c has_dict=1.
+ * NOINLINE: only reached on the cold dict path (@ref zxc_decompress_chunk_wrapper_dict),
+ * so it never loads into I-cache on a no-dict stream.
+ *
+ * @param[in,out] ctx          Decompression context (dict prefix in its buffer).
+ * @param[in]     src          Compressed GLO block payload.
+ * @param[in]     src_size     Size of @p src in bytes.
+ * @param[out]    dst          Destination buffer.
+ * @param[in]     dst_capacity Capacity of @p dst in bytes.
+ * @return Bytes written on success, or a negative @ref zxc_error_t.
+ */
 static ZXC_NOINLINE int zxc_decode_block_glo_dict(const zxc_cctx_t* RESTRICT ctx,
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
@@ -1786,6 +1813,19 @@ static ZXC_NOINLINE int zxc_decode_block_glo_dict(const zxc_cctx_t* RESTRICT ctx
     return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 1);
 }
 
+/**
+ * @brief Decode a GHI block against a dictionary prefix (cold path).
+ *
+ * Wrapper over @ref zxc_decode_block_ghi_impl with @c safe=0, @c has_dict=1
+ * (NOINLINE; see @ref zxc_decode_block_glo_dict).
+ *
+ * @param[in,out] ctx          Decompression context (dict prefix in its buffer).
+ * @param[in]     src          Compressed GHI block payload.
+ * @param[in]     src_size     Size of @p src in bytes.
+ * @param[out]    dst          Destination buffer.
+ * @param[in]     dst_capacity Capacity of @p dst in bytes.
+ * @return Bytes written on success, or a negative @ref zxc_error_t.
+ */
 static ZXC_NOINLINE int zxc_decode_block_ghi_dict(const zxc_cctx_t* RESTRICT ctx,
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
@@ -1793,8 +1833,20 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_dict(const zxc_cctx_t* RESTRICT ctx
     return zxc_decode_block_ghi_impl(ctx, src, src_size, dst, dst_capacity, 0, 1);
 }
 
-// Safe path never carries a dict (block_safe routes dict to the bounce path), so
-// has_dict=0 folds the dead dict_size handling.
+/**
+ * @brief Decode a GLO block with the strict-tail safe loop (no wild copies).
+ *
+ * Wrapper over @ref zxc_decode_block_glo_impl with @c safe=1, @c has_dict=0.
+ * The safe path never carries a dict (block_safe routes dict inputs to the
+ * bounce path), so @c has_dict=0 folds the dead dict handling.
+ *
+ * @param[in,out] ctx          Decompression context.
+ * @param[in]     src          Compressed GLO block payload.
+ * @param[in]     src_size     Size of @p src in bytes.
+ * @param[out]    dst          Destination buffer (capacity == exact decoded size).
+ * @param[in]     dst_capacity Capacity of @p dst in bytes.
+ * @return Bytes written on success, or a negative @ref zxc_error_t.
+ */
 static ZXC_NOINLINE int zxc_decode_block_glo_safe(const zxc_cctx_t* RESTRICT ctx,
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
@@ -1802,7 +1854,20 @@ static ZXC_NOINLINE int zxc_decode_block_glo_safe(const zxc_cctx_t* RESTRICT ctx
     return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 1, 0);
 }
 
-// Strict-tail safe path never carries a dict (see zxc_decode_block_glo_safe).
+/**
+ * @brief Decode a GHI block with the strict-tail safe loop (no wild copies).
+ *
+ * Wrapper over @ref zxc_decode_block_ghi_impl with @c safe=1, @c has_dict=0
+ * (the strict-tail safe path never carries a dict; see
+ * @ref zxc_decode_block_glo_safe).
+ *
+ * @param[in,out] ctx          Decompression context.
+ * @param[in]     src          Compressed GHI block payload.
+ * @param[in]     src_size     Size of @p src in bytes.
+ * @param[out]    dst          Destination buffer (capacity == exact decoded size).
+ * @param[in]     dst_capacity Capacity of @p dst in bytes.
+ * @return Bytes written on success, or a negative @ref zxc_error_t.
+ */
 static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx,
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
@@ -1813,10 +1878,23 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
 #undef DECODE_SEQ_FAST
 #undef DECODE_SEQ_SAFE
 
-/* Shared chunk-decode body. @p has_dict is a compile-time constant: the no-dict
- * instantiation folds the GLO/GHI selection to the plain (inlinable) decoders, so
- * zxc_decompress_chunk_wrapper carries no dict code and matches main; the dict
- * instantiation calls the NOINLINE _dict decoders. */
+/**
+ * @brief Shared chunk-decode body: validates the block header, verifies the
+ *        optional checksum, then dispatches on block type.
+ *
+ * @p has_dict is a compile-time constant: the no-dict instantiation folds the
+ * GLO/GHI selection to the plain (inlinable) decoders, so
+ * @ref zxc_decompress_chunk_wrapper carries no dict code and matches the
+ * dict-free build; the dict instantiation calls the NOINLINE @c _dict decoders.
+ *
+ * @param[in,out] ctx       Decompression context.
+ * @param[in]     src       Compressed block (header + payload + optional checksum).
+ * @param[in]     src_sz    Size of @p src in bytes.
+ * @param[out]    dst       Destination buffer for the decoded block.
+ * @param[in]     dst_cap   Capacity of @p dst in bytes.
+ * @param[in]     has_dict  Compile-time flag: 1 = dictionary-aware decoders.
+ * @return Bytes written on success, or a negative @ref zxc_error_t.
+ */
 static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
     const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src, const size_t src_sz,
     uint8_t* RESTRICT dst, const size_t dst_cap, const int has_dict) {
@@ -1866,15 +1944,39 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
     return decoded_sz;
 }
 
-// No-dict chunk decoder: inlines the plain GLO/GHI decoders -> identical to main.
+/**
+ * @brief Public no-dict chunk decoder (decompression hot path).
+ *
+ * Inlines the plain GLO/GHI decoders via @ref zxc_decompress_chunk_wrapper_body
+ * with @c has_dict=0, so it carries no dict code and matches the dict-free build.
+ *
+ * @param[in,out] ctx     Decompression context.
+ * @param[in]     src     Compressed block bytes.
+ * @param[in]     src_sz  Size of @p src in bytes.
+ * @param[out]    dst     Destination buffer for the decoded block.
+ * @param[in]     dst_cap Capacity of @p dst in bytes.
+ * @return Bytes written on success, or a negative @ref zxc_error_t.
+ */
 // cppcheck-suppress unusedFunction
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                  const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
     return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, 0);
 }
 
-// Dict chunk decoder: calls the NOINLINE _dict decoders. Slower (dict back-refs read
-// the prepended dict); only used when ctx->dict_size != 0.
+/**
+ * @brief Public dictionary chunk decoder.
+ *
+ * Routes through @ref zxc_decompress_chunk_wrapper_body with @c has_dict=1,
+ * which calls the NOINLINE @c _dict decoders (slower: dict back-refs read the
+ * prepended dictionary). Used only when @c ctx->dict_size != 0.
+ *
+ * @param[in,out] ctx     Decompression context (dict prefix in its buffer).
+ * @param[in]     src     Compressed block bytes.
+ * @param[in]     src_sz  Size of @p src in bytes.
+ * @param[out]    dst     Destination buffer for the decoded block.
+ * @param[in]     dst_cap Capacity of @p dst in bytes.
+ * @return Bytes written on success, or a negative @ref zxc_error_t.
+ */
 // cppcheck-suppress unusedFunction
 int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
@@ -1882,6 +1984,21 @@ int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint
     return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, 1);
 }
 
+/**
+ * @brief Public strict-tail safe chunk decoder (dst_cap == exact decoded size).
+ *
+ * Validates the block header and optional checksum, then decodes via the
+ * @c _safe decoders (no bounce buffer, no tail padding); RAW blocks are copied
+ * directly. Dict inputs are not handled here (the caller routes them to the
+ * bounce-capable path).
+ *
+ * @param[in,out] ctx     Decompression context.
+ * @param[in]     src     Compressed block bytes.
+ * @param[in]     src_sz  Size of @p src in bytes.
+ * @param[out]    dst     Destination buffer (capacity == exact decoded size).
+ * @param[in]     dst_cap Capacity of @p dst in bytes.
+ * @return Bytes written on success, or a negative @ref zxc_error_t.
+ */
 // cppcheck-suppress unusedFunction
 int zxc_decompress_chunk_wrapper_safe(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,

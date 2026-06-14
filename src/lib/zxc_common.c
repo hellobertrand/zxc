@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-/*
+/**
  * @file zxc_common.c
  * @brief Shared library utilities: context management, header I/O,
  *        compress-bound calculation, and error-code name lookup.
@@ -24,7 +24,7 @@
  * ============================================================================
  */
 
-/*
+/**
  * @brief Allocates memory aligned to the specified boundary.
  *
  * Uses `_aligned_malloc` on Windows and `posix_memalign` elsewhere.
@@ -43,7 +43,7 @@ void* zxc_aligned_malloc(const size_t size, const size_t alignment) {
 #endif
 }
 
-/*
+/**
  * @brief Frees memory previously allocated by zxc_aligned_malloc().
  *
  * @param[in] ptr Pointer returned by zxc_aligned_malloc() (may be @c NULL).
@@ -56,13 +56,23 @@ void zxc_aligned_free(void* ptr) {
 #endif
 }
 
-/*
- * @copydoc zxc_compress_opts_size
+/**
+ * @brief Returns @c sizeof(zxc_compress_opts_t) for ABI-safe allocation.
+ *
+ * Public API; see @c zxc_buffer.h. Lets callers (other languages, or a
+ * different library version) size the options struct without knowing its layout.
+ *
+ * @return Size of @ref zxc_compress_opts_t in bytes.
  */
 size_t zxc_compress_opts_size(void) { return sizeof(zxc_compress_opts_t); }
 
-/*
- * @copydoc zxc_decompress_opts_size
+/**
+ * @brief Returns @c sizeof(zxc_decompress_opts_t) for ABI-safe allocation.
+ *
+ * Public API; see @c zxc_buffer.h. Lets callers (other languages, or a
+ * different library version) size the options struct without knowing its layout.
+ *
+ * @return Size of @ref zxc_decompress_opts_t in bytes.
  */
 size_t zxc_decompress_opts_size(void) { return sizeof(zxc_decompress_opts_t); }
 
@@ -97,6 +107,32 @@ typedef struct {
     size_t max_seq;
 } zxc_cctx_layout_t;
 
+/**
+ * @brief Computes the single-allocation memory layout for a compression /
+ *        decompression context.
+ *
+ * Walks the same partition order used by @ref zxc_cctx_init_in_workspace and
+ * records each sub-buffer's offset plus the running @c total, so the sizing
+ * query and the partitioning step share one source of truth and can never
+ * disagree.
+ *
+ * Decompress (@p mode == 0) reserves @c work_buf and @c lit_buffer (both padded
+ * for wild-copy overshoot) and, when @p dict_size > 0, the shared-dictionary
+ * Huffman decode table. Compress (@p mode == 1) reserves the LZ match-finder
+ * tables (hash positions, tags, chain), the sequence / extras / literal buffers
+ * and - only at @c level >= ZXC_LEVEL_DENSITY - the optimal-parser scratch. A
+ * @p dict_size > 0 appends the [dict | data] concat scratch in both modes.
+ *
+ * Every offset is cache-line aligned via @c ZXC_ALIGN_CL.
+ *
+ * @param[in] chunk_size  Block size in bytes.
+ * @param[in] mode        1 = compression, 0 = decompression.
+ * @param[in] level       Compression level (only consulted when @p mode == 1).
+ * @param[in] dict_size   Dictionary prefill size; when > 0 the layout includes
+ *                        the [dict | data] concat buffer (and, on decompress,
+ *                        the dictionary Huffman decode table).
+ * @return Fully populated layout; @c .total is the required workspace size.
+ */
 static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int mode,
                                              const int level, const size_t dict_size) {
     zxc_cctx_layout_t layout = {0};
@@ -180,12 +216,44 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
     return layout;
 }
 
+/**
+ * @brief Returns the workspace byte count required for the given parameters.
+ *
+ * Public contract documented at the declaration in @c zxc_internal.h. Thin
+ * wrapper that returns @c compute_cctx_layout(...).total, or 0 when
+ * @p chunk_size is 0.
+ *
+ * @param[in] chunk_size  Block size in bytes.
+ * @param[in] mode        1 = compression, 0 = decompression.
+ * @param[in] level       Compression level (only consulted when @p mode == 1).
+ * @param[in] dict_size   Dictionary prefill size; > 0 includes the concat buffer.
+ * @return Workspace size in bytes, or 0 if @p chunk_size is 0.
+ */
 size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, const int level,
                                        const size_t dict_size) {
     if (UNLIKELY(chunk_size == 0)) return 0;
     return compute_cctx_layout(chunk_size, mode, level, dict_size).total;
 }
 
+/**
+ * @brief Partitions a caller-supplied workspace into a ready-to-use context.
+ *
+ * Public contract (alignment, lifetime, return codes) documented at the
+ * declaration in @c zxc_internal.h. Computes the layout via
+ * @ref compute_cctx_layout, rejects an undersized @p workspace, then carves the
+ * sub-buffers out of it. @c ctx->memory_block stays NULL so @ref zxc_cctx_free
+ * leaves the caller-owned workspace untouched.
+ *
+ * @param[out] ctx               Context to initialise.
+ * @param[in]  workspace         Caller-allocated, cache-line-aligned buffer.
+ * @param[in]  workspace_size    Capacity of @p workspace in bytes.
+ * @param[in]  chunk_size        Block size in bytes.
+ * @param[in]  mode              1 = compression, 0 = decompression.
+ * @param[in]  level             Compression level (ignored when @p mode == 0).
+ * @param[in]  checksum_enabled  Non-zero to enable checksum computation.
+ * @param[in]  dict_size         Dictionary prefill size; > 0 carves the concat buffer.
+ * @return @ref ZXC_OK, @ref ZXC_ERROR_NULL_INPUT, or @ref ZXC_ERROR_DST_TOO_SMALL.
+ */
 int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspace,
                                const size_t workspace_size, const size_t chunk_size, const int mode,
                                const int level, const int checksum_enabled,
@@ -246,7 +314,7 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
     return ZXC_OK;
 }
 
-/*
+/**
  * @brief Initialises a compression / decompression context, allocating the
  *        persistent buffer with @c ZXC_ALIGNED_MALLOC.
  *
@@ -256,6 +324,12 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
  * release it.  The static-cctx public API (see @c zxc_buffer.h) bypasses
  * this wrapper and partitions a caller-supplied workspace directly.
  *
+ * @param[out] ctx               Context to initialise.
+ * @param[in]  chunk_size        Block size in bytes.
+ * @param[in]  mode              1 = compression, 0 = decompression.
+ * @param[in]  level             Compression level (ignored when @p mode == 0).
+ * @param[in]  checksum_enabled  Non-zero to enable checksum computation.
+ * @param[in]  dict_size         Dictionary prefill size.
  * @return @ref ZXC_OK on success, @ref ZXC_ERROR_MEMORY on allocation failure.
  */
 int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int mode,
@@ -279,7 +353,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     return ZXC_OK;
 }
 
-/*
+/**
  * @brief Releases all resources owned by a compression context.
  *
  * After this call every pointer inside @p ctx is @c NULL and the context
@@ -317,8 +391,18 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->lit_freq_acc = NULL;
 }
 
-/*
- * @copydoc zxc_cctx_attach_dict_huf
+/**
+ * @brief Attach the shared dictionary literal Huffman table to a context.
+ *
+ * Stores @p lengths (128-byte packed code-lengths header, caller-owned, must
+ * outlive the context) and, on decompression contexts created with
+ * @c dict_size > 0, builds the decode table once into the workspace-carved
+ * @c dict_huf_table. A NULL @p lengths is a no-op.
+ *
+ * @param[in,out] ctx      Initialised context to attach the table to.
+ * @param[in]     lengths  128-byte packed code lengths, or NULL for a no-op.
+ * @return @ref ZXC_OK on success, @ref ZXC_ERROR_CORRUPT_DATA if @p lengths is
+ *         structurally invalid (bad nibble, Kraft inequality).
  */
 int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT lengths) {
     if (UNLIKELY(!ctx)) return ZXC_ERROR_NULL_INPUT;
@@ -352,7 +436,7 @@ int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT l
  * ============================================================================
  */
 
-/*
+/**
  * @brief Serialises a ZXC file header into @p dst.
  *
  * Layout (16 bytes): Magic (4) | Version (1) | Chunk (1) | Flags (1) |
@@ -360,7 +444,10 @@ int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT l
  *
  * @param[out] dst          Destination buffer (>= @ref ZXC_FILE_HEADER_SIZE bytes).
  * @param[in]  dst_capacity Capacity of @p dst.
+ * @param[in]  chunk_size   Block size (stored as its log2 exponent).
  * @param[in]  has_checksum Non-zero to set the checksum flag.
+ * @param[in]  dict_id      Dictionary id; when non-zero, sets the dictionary flag
+ *                          and is stored in the header.
  * @return Number of bytes written (@ref ZXC_FILE_HEADER_SIZE) on success,
  *         or a negative @ref zxc_error_t code.
  */
@@ -391,7 +478,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     return ZXC_FILE_HEADER_SIZE;
 }
 
-/*
+/**
  * @brief Parses and validates a ZXC file header from @p src.
  *
  * Checks the magic word, format version, and CRC-16.
@@ -400,6 +487,8 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  * @param[in]  src_size         Size of @p src.
  * @param[out] out_block_size   Receives the decoded block size (may be @c NULL).
  * @param[out] out_has_checksum Receives 1 if checksums are present, 0 otherwise
+ *                              (may be @c NULL).
+ * @param[out] out_dict_id      Receives the dictionary id, or 0 if none
  *                              (may be @c NULL).
  * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
  */
@@ -435,7 +524,7 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     return ZXC_OK;
 }
 
-/*
+/**
  * @brief Serialises a block header (8 bytes) into @p dst.
  *
  * @param[out] dst          Destination buffer (>= @ref ZXC_BLOCK_HEADER_SIZE bytes).
@@ -458,7 +547,7 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     return ZXC_BLOCK_HEADER_SIZE;
 }
 
-/*
+/**
  * @brief Parses and validates a block header from @p src.
  *
  * Validates the 8-bit CRC embedded in the header.
@@ -486,7 +575,7 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
     return ZXC_OK;
 }
 
-/*
+/**
  * @brief Writes the 12-byte file footer (source size + global checksum).
  *
  * @param[out] dst              Destination buffer (>= @ref ZXC_FILE_FOOTER_SIZE bytes).
@@ -512,7 +601,7 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     return ZXC_FILE_FOOTER_SIZE;
 }
 
-/*
+/**
  * @brief Serialises a GLO block header followed by its section descriptors.
  *
  * @param[out] dst  Destination buffer.
@@ -548,7 +637,7 @@ int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
     return (int)needed;
 }
 
-/*
+/**
  * @brief Parses a GLO block header and its section descriptors from @p src.
  *
  * @param[in]  src  Source buffer.
@@ -581,7 +670,7 @@ int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
     return ZXC_OK;
 }
 
-/*
+/**
  * @brief Serialises a GHI block header followed by its section descriptors.
  *
  * @param[out] dst  Destination buffer.
@@ -617,7 +706,7 @@ int zxc_write_ghi_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
     return (int)needed;
 }
 
-/*
+/**
  * @brief Parses a GHI block header and its section descriptors from @p src.
  *
  * @param[in]  src  Source buffer.
@@ -655,7 +744,7 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  * COMPRESS BOUND CALCULATION
  * ============================================================================
  */
-/*
+/**
  * @brief Returns the maximum compressed size for a given input size.
  *
  * The result accounts for the file header, per-block headers, block
@@ -682,7 +771,7 @@ uint64_t zxc_compress_bound(const size_t input_size) {
            ZXC_FILE_FOOTER_SIZE;
 }
 
-/*
+/**
  * @brief Returns the maximum compressed size for a single block (no file framing).
  *
  * @param[in] input_size Uncompressed block size in bytes
@@ -704,7 +793,7 @@ uint64_t zxc_compress_block_bound(const size_t input_size) {
            ZXC_BLOCK_CHECKSUM_SIZE;
 }
 
-/*
+/**
  * @brief Returns the minimum dst_capacity required by zxc_decompress_block().
  *
  * The decoder uses speculative wild-copy writes on its fast path.
@@ -714,13 +803,17 @@ uint64_t zxc_compress_block_bound(const size_t input_size) {
  *
  * Returns 0 if @p uncompressed_size exceeds ZXC_BLOCK_SIZE_MAX (the Block API
  * limit), or if the arithmetic would overflow.
+ *
+ * @param[in] uncompressed_size  Exact decompressed size of the block.
+ * @return Minimum @c dst_capacity in bytes, or 0 if @p uncompressed_size exceeds
+ *         @c ZXC_BLOCK_SIZE_MAX.
  */
 uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
     if (UNLIKELY(uncompressed_size > ZXC_BLOCK_SIZE_MAX)) return 0;
     return (uint64_t)uncompressed_size + ZXC_DECOMPRESS_TAIL_PAD;
 }
 
-/*
+/**
  * @brief Estimates the total buffer bytes allocated inside a cctx for a block.
  *
  * Thin wrapper around @ref zxc_cctx_compute_workspace_size for @c mode == 1
@@ -733,6 +826,10 @@ uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
  * (@c opt_scratch, ~8.125 bytes per chunk_size byte) used by the optimal
  * parser and reused as transient package-merge scratch for the Huffman
  * code-length builder.
+ *
+ * @param[in] src_size  Input size; rounded up to a valid block size.
+ * @param[in] level     Compression level (>= 6 includes the optimal-parser scratch).
+ * @return Estimated context buffer size in bytes, or 0 if @p src_size is 0.
  */
 uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
     if (UNLIKELY(src_size == 0)) return 0;
@@ -746,7 +843,7 @@ uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
  * ============================================================================
  */
 
-/*
+/**
  * @brief Returns a human-readable string for the given error code.
  *
  * @param[in] code An error code from @ref zxc_error_t (or @ref ZXC_OK).
@@ -802,7 +899,7 @@ const char* zxc_error_name(const int code) {
  * ============================================================================
  */
 
-/*
+/**
  * @brief Returns the minimum supported compression level.
  *
  * Returns the value of ZXC_LEVEL_FASTEST (currently 1).
@@ -811,21 +908,21 @@ const char* zxc_error_name(const int code) {
  */
 int zxc_min_level(void) { return ZXC_LEVEL_FASTEST; }
 
-/*
+/**
  * @brief Returns the maximum supported compression level.
  *
  * Returns the value of ZXC_LEVEL_DENSITY (currently 6).
  */
 int zxc_max_level(void) { return ZXC_LEVEL_DENSITY; }
 
-/*
+/**
  * @brief Returns the default compression level.
  *
  * Returns the value of ZXC_LEVEL_DEFAULT (currently 3).
  */
 int zxc_default_level(void) { return ZXC_LEVEL_DEFAULT; }
 
-/*
+/**
  * @brief Returns the human-readable library version string.
  *
  * The returned pointer is a compile-time constant and must not be freed.

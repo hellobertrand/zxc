@@ -85,6 +85,10 @@ typedef zxc_huf_pm_frame_t frame_t;
  *
  * Precondition: all weights are > 0 (zero-frequency symbols are filtered
  * by the caller before this runs).
+ *
+ * @param[in,out] leaves  Leaf array, sorted in place (ascending weight, then
+ *                        ascending @c sym on ties).
+ * @param[in]     n       Number of leaves; @c n < 2 is effectively a no-op.
  */
 static void pm_leaves_sort(pm_leaf_t* RESTRICT leaves, const int n) {
     /* One bucket per possible value of floor(log2(weight)) for a 32-bit
@@ -488,6 +492,11 @@ static ZXC_ALWAYS_INLINE int bw_finish(bit_writer_t* RESTRICT bw) {
  *        sub-streams, written at @p dst. The 128-byte lengths header, when
  *        wanted, is the caller's business (see the two public wrappers).
  *
+ * @param[in]  literals    Source literal bytes (must not alias @p dst).
+ * @param[in]  n_literals  Number of source bytes (must be > 0).
+ * @param[in]  code_len    Per-symbol code lengths for the canonical codes.
+ * @param[out] dst         Destination for the sizes header + sub-streams.
+ * @param[in]  dst_cap     Capacity of @p dst in bytes.
  * @return Bytes written (>= ZXC_HUF_STREAM_SIZES_HEADER_SIZE) on success,
  *         negative `zxc_error_t` code on failure.
  */
@@ -542,7 +551,18 @@ static int zxc_huf_encode_streams(const uint8_t* RESTRICT literals, const size_t
 }
 
 /**
- * @copydoc zxc_huf_encode_section
+ * @brief Encode the literal stream into a full Huffman section payload.
+ *
+ * Packs the 128-byte lengths header, then delegates to
+ * @ref zxc_huf_encode_streams for the 6-byte sub-stream sizes and the 4
+ * interleaved LSB-first bit-streams.
+ *
+ * @param[in]  literals    Source literal bytes (must not alias @p dst).
+ * @param[in]  n_literals  Number of source bytes (must be > 0).
+ * @param[in]  code_len    Per-symbol code lengths (see @ref zxc_huf_build_code_lengths).
+ * @param[out] dst         Destination buffer for the section payload.
+ * @param[in]  dst_cap     Capacity of @p dst in bytes.
+ * @return Total bytes written on success, negative `zxc_error_t` on failure.
  */
 int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
                            const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
@@ -558,7 +578,19 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_lite
 }
 
 /**
- * @copydoc zxc_huf_encode_section_dict
+ * @brief Encode a literal section using supplied code lengths, WITHOUT the
+ *        128-byte lengths header (shared dictionary table).
+ *
+ * Emits only the 6-byte sub-stream sizes header + 4 sub-streams (a thin pass
+ * through @ref zxc_huf_encode_streams); the lengths live in the dictionary.
+ *
+ * @param[in]  literals    Source literal bytes (must not alias @p dst).
+ * @param[in]  n_literals  Number of source bytes (must be > 0).
+ * @param[in]  code_len    Per-symbol code lengths from the shared dict table.
+ * @param[out] dst         Destination buffer for the section payload.
+ * @param[in]  dst_cap     Capacity of @p dst in bytes.
+ * @return Bytes written on success, negative `zxc_error_t` on failure
+ *         (incl. `ZXC_ERROR_CORRUPT_DATA` if a literal has no code).
  */
 int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n_literals,
                                 const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
@@ -692,6 +724,13 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
  *        @p payload and runs the 4-way interleaved decode with @p table.
  *        The 128-byte lengths header, when present, has already been consumed
  *        by the caller (see the two public wrappers).
+ *
+ * @param[in]  payload       Sizes header followed by the 4 sub-streams.
+ * @param[in]  payload_size  Size of @p payload in bytes.
+ * @param[out] dst           Destination for the decoded literals.
+ * @param[in]  n_literals    Number of literals to decode (must be > 0).
+ * @param[in]  table         Multi-symbol decode table built for this section.
+ * @return @c ZXC_OK on success, @c ZXC_ERROR_CORRUPT_DATA on a malformed stream.
  */
 static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t payload_size,
                                   uint8_t* RESTRICT dst, const size_t n_literals,
@@ -862,7 +901,16 @@ static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t 
 }
 
 /**
- * @copydoc zxc_huf_decode_section
+ * @brief Decode a full Huffman literal section payload.
+ *
+ * Unpacks the 128-byte lengths header, builds the multi-symbol decode table,
+ * then runs the 4-way interleaved decode, writing exactly @p n_literals bytes.
+ *
+ * @param[in]  payload       Section payload (lengths header + sizes + 4 sub-streams).
+ * @param[in]  payload_size  Total payload length in bytes.
+ * @param[out] dst           Destination buffer (must not alias @p payload).
+ * @param[in]  n_literals    Expected number of decoded bytes.
+ * @return `ZXC_OK` on success, negative `zxc_error_t` on failure.
  */
 int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
                            uint8_t* RESTRICT dst, const size_t n_literals) {
@@ -892,7 +940,16 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
 }
 
 /**
- * @copydoc zxc_huf_decode_section_dict
+ * @brief Decode a literal section that carries no lengths header, using a
+ *        prebuilt decode table (shared dictionary table).
+ *
+ * @param[in]  payload       Section payload (6-byte sizes header + 4 sub-streams).
+ * @param[in]  payload_size  Total payload length in bytes.
+ * @param[out] dst           Destination buffer (must not alias @p payload).
+ * @param[in]  n_literals    Expected number of decoded bytes.
+ * @param[in]  table         Prebuilt @ref ZXC_HUF_DEC_TABLE_SIZE-entry decode table.
+ * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` if @p table is NULL or
+ *         the stream is malformed.
  */
 int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
                                 uint8_t* RESTRICT dst, const size_t n_literals,
@@ -902,21 +959,35 @@ int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t pa
 }
 
 /**
- * @copydoc zxc_huf_build_dec_table
+ * @brief Build the @ref ZXC_HUF_DEC_TABLE_SIZE-entry decode table from
+ *        per-symbol code lengths. Validates Kraft equality.
+ *
+ * Public wrapper around @ref build_decode_table.
+ *
+ * @param[in]  code_len  Per-symbol code lengths.
+ * @param[out] table     Destination decode table (caller-aligned).
+ * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` on invalid lengths.
  */
 int zxc_huf_build_dec_table(const uint8_t* RESTRICT code_len, zxc_huf_dec_entry_t* RESTRICT table) {
     return build_decode_table(code_len, table);
 }
 
 /**
- * @copydoc zxc_huf_pack_lengths
+ * @brief Pack per-symbol code lengths into the 128-byte (4-bit nibble) header.
+ *
+ * @param[in]  code_len  Per-symbol code lengths (one byte each).
+ * @param[out] out       Destination 128-byte packed header.
  */
 void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out) {
     pack_lengths_header(code_len, out);
 }
 
 /**
- * @copydoc zxc_huf_unpack_lengths
+ * @brief Unpack and structurally validate a 128-byte packed lengths header.
+ *
+ * @param[in]  in        128-byte packed lengths header.
+ * @param[out] code_len  Destination per-symbol code lengths.
+ * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` on invalid lengths.
  */
 int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len) {
     return unpack_lengths_header(in, code_len);

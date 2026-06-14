@@ -19,6 +19,19 @@
  *  Dictionary ID
  * ------------------------------------------------------------------------- */
 
+/**
+ * @brief Computes the dictionary identifier for @p dict (and optional table).
+ *
+ * Public API; see @c zxc_dict.h. One logical checksum over the content bytes,
+ * optionally chained with the packed Huffman lengths so a single id covers
+ * both. Stored in the archive header and re-checked on decode.
+ *
+ * @param[in] dict         Dictionary content bytes.
+ * @param[in] dict_size    Content length in bytes.
+ * @param[in] huf_lengths  Optional packed Huffman lengths (@c ZXC_HUF_TABLE_SIZE
+ *                         bytes), or NULL to hash the content alone.
+ * @return The 32-bit dictionary id, or 0 if @p dict is NULL or empty.
+ */
 uint32_t zxc_dict_id(const void* RESTRICT dict, const size_t dict_size,
                      const void* RESTRICT huf_lengths) {
     if (UNLIKELY(!dict || dict_size == 0)) return 0;
@@ -46,6 +59,16 @@ uint32_t zxc_dict_id(const void* RESTRICT dict, const size_t dict_size,
  *    +N    128 Packed Huffman code lengths (always present)
  * ------------------------------------------------------------------------- */
 
+/**
+ * @brief Extracts the stored @c dict_id from a serialized .zxd buffer.
+ *
+ * Public API; see @c zxc_dict.h. Validates the magic, then reads the id field
+ * straight from the header without recomputing it.
+ *
+ * @param[in] buf       Serialized .zxd bytes.
+ * @param[in] buf_size  Size of @p buf in bytes.
+ * @return The stored dictionary id, or 0 if @p buf is too small or not a .zxd.
+ */
 uint32_t zxc_dict_get_id(const void* buf, const size_t buf_size) {
     if (UNLIKELY(!buf || buf_size < ZXC_DICT_HEADER_SIZE)) return 0;
     const uint8_t* p = (const uint8_t*)buf;
@@ -53,10 +76,35 @@ uint32_t zxc_dict_get_id(const void* buf, const size_t buf_size) {
     return zxc_le32(p + 8);
 }
 
+/**
+ * @brief Worst-case .zxd byte size for a dictionary of @p content_size bytes.
+ *
+ * Public API; see @c zxc_dict.h. Use it to size the buffer passed to
+ * @ref zxc_dict_save.
+ *
+ * @param[in] content_size  Dictionary content length in bytes.
+ * @return Required buffer size: header + content + Huffman table.
+ */
 size_t zxc_dict_save_bound(const size_t content_size) {
     return ZXC_DICT_HEADER_SIZE + content_size + ZXC_HUF_TABLE_SIZE;
 }
 
+/**
+ * @brief Serializes dictionary content + Huffman table into the .zxd format.
+ *
+ * Public API; full contract in @c zxc_dict.h. Writes the 16-byte header (magic,
+ * version, sizes, dict_id, header CRC), then the content bytes, then the packed
+ * Huffman lengths. See the on-disk layout note above.
+ *
+ * @param[in]  content       Dictionary content bytes.
+ * @param[in]  content_size  Content length (<= @c ZXC_DICT_SIZE_MAX).
+ * @param[in]  huf_lengths   Packed Huffman lengths (@c ZXC_HUF_TABLE_SIZE bytes).
+ * @param[out] buf           Destination .zxd buffer.
+ * @param[in]  buf_capacity  Capacity of @p buf (>= @ref zxc_dict_save_bound).
+ * @return Bytes written on success, or a negative @ref zxc_error_t
+ *         (@ref ZXC_ERROR_NULL_INPUT, @ref ZXC_ERROR_DICT_TOO_LARGE,
+ *         @ref ZXC_ERROR_DST_TOO_SMALL).
+ */
 int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size,
                       const void* RESTRICT huf_lengths, void* RESTRICT buf,
                       const size_t buf_capacity) {
@@ -83,6 +131,23 @@ int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size,
     return (int64_t)total;
 }
 
+/**
+ * @brief Parses a .zxd buffer, returning in-buffer views of content and table.
+ *
+ * Public API; full contract in @c zxc_dict.h. Validates magic, version, header
+ * CRC and dict_id, then points the out-params at the content and Huffman table
+ * inside @p buf (no copy). The returned pointers alias @p buf and stay valid
+ * only while it does.
+ *
+ * @param[in]  buf               Serialized .zxd bytes.
+ * @param[in]  buf_size          Size of @p buf in bytes.
+ * @param[out] content_out       Receives a pointer to the content bytes.
+ * @param[out] content_size_out  Receives the content length.
+ * @param[out] huf_out           Receives a pointer to the Huffman table (optional).
+ * @param[out] dict_id_out       Receives the validated dict_id (optional).
+ * @return @ref ZXC_OK, or a negative @ref zxc_error_t (bad magic / version /
+ *         header / checksum, or too small).
+ */
 int zxc_dict_load(const void* RESTRICT buf, const size_t buf_size,
                   const void** RESTRICT content_out, size_t* RESTRICT content_size_out,
                   const void** RESTRICT huf_out, uint32_t* RESTRICT dict_id_out) {
@@ -121,6 +186,18 @@ int zxc_dict_load(const void* RESTRICT buf, const size_t buf_size,
     return ZXC_OK;
 }
 
+/**
+ * @brief Returns a pointer to the packed Huffman table inside a .zxd buffer.
+ *
+ * Public API; see @c zxc_dict.h. Lightweight accessor (checks magic, version
+ * and sizes) that locates the table without the full validation of
+ * @ref zxc_dict_load. The returned pointer aliases @p buf.
+ *
+ * @param[in] buf       Serialized .zxd bytes.
+ * @param[in] buf_size  Size of @p buf in bytes.
+ * @return Pointer to the @c ZXC_HUF_TABLE_SIZE-byte table, or NULL if @p buf is
+ *         too small or not a valid .zxd.
+ */
 const void* zxc_dict_huf(const void* buf, const size_t buf_size) {
     if (UNLIKELY(!buf || buf_size < ZXC_DICT_HEADER_SIZE)) return NULL;
     const uint8_t* src = (const uint8_t*)buf;
@@ -150,6 +227,15 @@ const void* zxc_dict_huf(const void* buf, const size_t buf_size) {
  *     skipped, so capacity goes to NEW patterns instead of redundant copies.
  * ------------------------------------------------------------------------- */
 
+/**
+ * @brief Hashes the k-gram at @p p into a frequency-table bucket index.
+ *
+ * Training-internal: a multiplicative hash of the @c ZXC_DICT_KGRAM_LEN-byte
+ * k-gram, folded down to @c ZXC_DICT_HASH_BITS.
+ *
+ * @param[in] p  Pointer to at least @c ZXC_DICT_KGRAM_LEN readable bytes.
+ * @return Bucket index in [0, @c ZXC_DICT_HASH_SIZE).
+ */
 static uint32_t zxc_dict_hash(const uint8_t* p) {
     uint32_t v = zxc_le32(p);
     v ^= (uint32_t)p[4];
@@ -231,6 +317,23 @@ static void zxc_dict_sort_segs_desc(zxc_dict_seg_t* RESTRICT a, const size_t n) 
     }
 }
 
+/**
+ * @brief Trains a raw dictionary from sample buffers by k-gram coverage.
+ *
+ * Public API; full contract in @c zxc_dict.h, algorithm in the note above.
+ * Concatenates the samples, counts sampled k-gram frequencies, builds
+ * coverage-scored candidate segments, then greedily fills @p dict_buf in
+ * descending coverage while zeroing each pick's k-grams (so overlapping
+ * patterns aren't copied twice). Picks are emitted in reverse so the
+ * highest-coverage bytes land at the dict's end (smallest match offsets).
+ *
+ * @param[in]  samples        Array of @p n_samples sample buffers.
+ * @param[in]  sample_sizes   Array of @p n_samples sample lengths.
+ * @param[in]  n_samples      Number of samples.
+ * @param[out] dict_buf       Destination for the trained content.
+ * @param[in]  dict_capacity  Capacity of @p dict_buf (<= @c ZXC_DICT_SIZE_MAX).
+ * @return Trained content length in bytes, or a negative @ref zxc_error_t.
+ */
 int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRICT sample_sizes,
                        const size_t n_samples, void* RESTRICT dict_buf,
                        const size_t dict_capacity) {
@@ -406,6 +509,23 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
  *  unaffordable there) and literal density is highest.
  * ------------------------------------------------------------------------- */
 
+/**
+ * @brief Trains the shared literal Huffman table for a dictionary (Tier-2).
+ *
+ * Public API; see @c zxc_dict.h and the algorithm note above. Compresses the
+ * samples with @p dict at @c ZXC_LEVEL_DENSITY, accumulating the frequencies of
+ * the REAL post-LZ literals (raw bytes are a poor proxy), then builds and packs
+ * length-limited code lengths. Samples are sliced into
+ * @c ZXC_DICT_HUF_TRAIN_BLOCK blocks, sub-sampled to a fixed budget.
+ *
+ * @param[in]  samples          Array of @p n_samples sample buffers.
+ * @param[in]  sample_sizes     Array of @p n_samples sample lengths.
+ * @param[in]  n_samples        Number of samples.
+ * @param[in]  dict             Trained dictionary content.
+ * @param[in]  dict_size        Dictionary length (<= @c ZXC_DICT_SIZE_MAX).
+ * @param[out] huf_lengths_out  Receives the @c ZXC_HUF_TABLE_SIZE packed lengths.
+ * @return @ref ZXC_OK, or a negative @ref zxc_error_t.
+ */
 int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRICT sample_sizes,
                        const size_t n_samples, const void* RESTRICT dict, const size_t dict_size,
                        uint8_t* RESTRICT huf_lengths_out) {
@@ -498,6 +618,21 @@ int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRI
  *  All-in-one convenience: samples -> ready-to-write .zxd bytes
  * ------------------------------------------------------------------------- */
 
+/**
+ * @brief One-shot training: sample buffers in, ready-to-write .zxd bytes out.
+ *
+ * Public API; see @c zxc_dict.h. Convenience wrapper that trains the content
+ * (@ref zxc_train_dict), then the shared Huffman table from that content
+ * (@ref zxc_train_dict_huf), then serializes both via @ref zxc_dict_save. The
+ * two phases are a real data dependency, hidden behind one call.
+ *
+ * @param[in]  samples       Array of @p n_samples sample buffers.
+ * @param[in]  sample_sizes  Array of @p n_samples sample lengths.
+ * @param[in]  n_samples     Number of samples.
+ * @param[out] zxd_buf       Destination .zxd buffer.
+ * @param[in]  zxd_capacity  Capacity of @p zxd_buf in bytes.
+ * @return Bytes written to @p zxd_buf, or a negative @ref zxc_error_t.
+ */
 int64_t zxc_dict_train(const void* const* RESTRICT samples, const size_t* RESTRICT sample_sizes,
                        const size_t n_samples, void* RESTRICT zxd_buf, const size_t zxd_capacity) {
     if (UNLIKELY(!samples || !sample_sizes || n_samples == 0 || !zxd_buf || zxd_capacity == 0))

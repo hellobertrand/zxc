@@ -57,7 +57,10 @@
 #define fseeko _fseeki64
 #define ftello _ftelli64
 
-// Simple sysconf emulation to get core count
+/**
+ * @brief Returns the logical-processor count (backs the @c sysconf shim below).
+ * @return Number of processors reported by @c GetSystemInfo.
+ */
 static int zxc_get_num_procs(void) {
     SYSTEM_INFO sysinfo;
     GetSystemInfo(&sysinfo);
@@ -79,11 +82,26 @@ typedef HANDLE pthread_t;
 #define pthread_cond_signal(c) WakeConditionVariable(c)
 #define pthread_cond_broadcast(c) WakeAllConditionVariable(c)
 
+/**
+ * @brief Trampoline payload bridging the POSIX @c void*(*)(void*) worker
+ *        signature to the @c _beginthreadex entry point.
+ *
+ * Heap-allocated by the @c pthread_create shim and freed by
+ * @ref zxc_win_thread_entry once the captured worker has started.
+ */
 typedef struct {
-    void* (*func)(void*);
-    void* arg;
+    void* (*func)(void*); /* worker to invoke */
+    void* arg;            /* argument forwarded to @c func */
 } zxc_win_thread_arg_t;
 
+/**
+ * @brief @c _beginthreadex entry point: unpacks the trampoline payload, frees
+ *        it, then runs the captured POSIX-style worker.
+ *
+ * @param[in] p  Heap @ref zxc_win_thread_arg_t handed over by the creator;
+ *               ownership transfers to this function.
+ * @return Always 0 (the worker's @c void* result is discarded, as on POSIX).
+ */
 static unsigned __stdcall zxc_win_thread_entry(void* p) {
     zxc_win_thread_arg_t* a = (zxc_win_thread_arg_t*)p;
     void* (*f)(void*) = a->func;
@@ -93,6 +111,16 @@ static unsigned __stdcall zxc_win_thread_entry(void* p) {
     return 0;
 }
 
+/**
+ * @brief @c pthread_create shim: spawns @p start_routine(@p arg) via
+ *        @c _beginthreadex, matching the POSIX prototype.
+ *
+ * @param[out] thread        Receives the thread handle on success.
+ * @param[in]  attr          Unused (POSIX attribute object); ignored.
+ * @param[in]  start_routine Worker to run on the new thread.
+ * @param[in]  arg           Opaque argument forwarded to @p start_routine.
+ * @return 0 on success, @ref ZXC_ERROR_MEMORY on allocation or spawn failure.
+ */
 static int pthread_create(pthread_t* thread, const void* attr, void* (*start_routine)(void*),
                           void* arg) {
     (void)attr;
@@ -109,6 +137,14 @@ static int pthread_create(pthread_t* thread, const void* attr, void* (*start_rou
     return 0;
 }
 
+/**
+ * @brief @c pthread_join shim: blocks until @p thread finishes, then closes its
+ *        handle.
+ *
+ * @param[in] thread  Handle from a successful @c pthread_create.
+ * @param[in] retval  Unused (POSIX exit-value out-param); ignored.
+ * @return Always 0.
+ */
 static int pthread_join(pthread_t thread, void** retval) {
     (void)retval;
     WaitForSingleObject(thread, INFINITE);
@@ -568,20 +604,23 @@ static void* zxc_async_writer(void* arg) {
  * directly into `in_buf`, and the writer writes directly from `out_buf`,
  * minimizing memory copies.
  *
- * @param[in] f_in      Pointer to the input file stream (source).
- * @param[out] f_out     Pointer to the output file stream (destination).
- * @param[in] n_threads Number of worker threads to spawn. If set to 0 or less, the
- * function automatically detects the number of online processors.
- * @param[in] mode      Operation mode: 1 for compression, 0 for decompression.
- * @param[in] level     Compression level to be applied (relevant for compression
- * mode).
- * @param[in] checksum_enabled  Flag indicating whether to enable checksum
- * generation/verification.
- * @param[in] func      Function pointer to the chunk processor (compression or
- * decompression logic).
- *
- * @return The total number of bytes written to the output stream on success, or
- * -1 if an initialization or I/O error occurred.
+ * @param[in]  f_in             Input file stream (source).
+ * @param[out] f_out            Output file stream (destination).
+ * @param[in]  n_threads        Worker thread count; 0 or less auto-detects the
+ *                              number of online processors.
+ * @param[in]  mode             1 for compression, 0 for decompression.
+ * @param[in]  level            Compression level (compression mode only).
+ * @param[in]  block_size       Block size in bytes (compression mode).
+ * @param[in]  checksum_enabled Non-zero to generate / verify checksums.
+ * @param[in]  seekable         Non-zero to emit a seek table (compression mode).
+ * @param[in]  func             Chunk processor (compression or decompression).
+ * @param[in]  progress_cb      Optional progress callback, or NULL.
+ * @param[in]  user_data        Opaque pointer passed to @p progress_cb.
+ * @param[in]  dict             Optional dictionary content, or NULL.
+ * @param[in]  dict_size        Dictionary length in bytes (0 if none).
+ * @param[in]  dict_huf         Optional shared literal Huffman table, or NULL.
+ * @return Total bytes written to the output on success, or a negative
+ *         @ref zxc_error_t code.
  */
 static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_threads, const int mode,
                                      const int level, const size_t block_size,
@@ -971,6 +1010,19 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     return w_args.total_bytes;
 }
 
+/**
+ * @brief Compresses a @c FILE* stream to another @c FILE* stream.
+ *
+ * Public API; full contract in @c zxc_stream.h. Resolves the options (threads,
+ * level, block size, checksums, seekable, dictionary) with their defaults, then
+ * drives @ref zxc_stream_engine_run in compression mode with the
+ * compress chunk processor.
+ *
+ * @param[in]  f_in   Input stream (must be non-NULL).
+ * @param[out] f_out  Output stream (NULL performs a dry run / size estimate).
+ * @param[in]  opts   Compression options, or NULL for all defaults.
+ * @return Total bytes written on success, or a negative @ref zxc_error_t.
+ */
 int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* opts) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
 
@@ -994,6 +1046,19 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
                                  dict_huf);
 }
 
+/**
+ * @brief Decompresses a @c FILE* stream to another @c FILE* stream.
+ *
+ * Public API; full contract in @c zxc_stream.h. Resolves the options (threads,
+ * checksums, dictionary), then drives @ref zxc_stream_engine_run in
+ * decompression mode with the decompress chunk processor. The block size and
+ * level are recovered from the archive header, not from @p opts.
+ *
+ * @param[in]  f_in   Input (compressed) stream (must be non-NULL).
+ * @param[out] f_out  Output (decompressed) stream.
+ * @param[in]  opts   Decompression options, or NULL for all defaults.
+ * @return Total bytes written on success, or a negative @ref zxc_error_t.
+ */
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
 
@@ -1010,6 +1075,18 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
                                  dict_size, dict_huf);
 }
 
+/**
+ * @brief Reads the total decompressed size from an archive's footer.
+ *
+ * Public API; see @c zxc_stream.h. Validates the file magic, reads the 64-bit
+ * decompressed-size field from the footer, and restores the caller's original
+ * stream position before returning. Does not decompress any data.
+ *
+ * @param[in] f_in  Compressed stream (must be non-NULL and seekable).
+ * @return Decompressed size in bytes, or a negative @ref zxc_error_t
+ *         (@ref ZXC_ERROR_BAD_MAGIC, @ref ZXC_ERROR_SRC_TOO_SMALL,
+ *         @ref ZXC_ERROR_IO).
+ */
 int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
 
@@ -1059,11 +1136,24 @@ int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
  */
 
 #if defined(_WIN32)
+/** @brief Reader context for the Win32 @c FILE* adapter (OS file handle + size). */
 typedef struct {
-    HANDLE handle;
-    uint64_t size;
+    HANDLE handle; /* OS handle from _get_osfhandle(_fileno(f)) */
+    uint64_t size; /* total file size in bytes */
 } zxc_stdio_ctx_t;
 
+/**
+ * @brief Thread-safe positioned read backing the seekable @c FILE* reader.
+ *
+ * Win32 implementation: a positioned @c ReadFile via @c OVERLAPPED, so
+ * concurrent worker threads never race on a shared file cursor.
+ *
+ * @param[in]  vctx    @ref zxc_stdio_ctx_t carrying the file handle.
+ * @param[out] dst     Destination buffer (at least @p len bytes).
+ * @param[in]  len     Number of bytes to read.
+ * @param[in]  offset  Absolute byte offset to read from.
+ * @return @p len on a full read, otherwise @ref ZXC_ERROR_IO.
+ */
 // LCOV_EXCL_START - Windows I/O path, not reachable on POSIX CI
 static int64_t zxc_stdio_read_at(void* vctx, void* dst, size_t len, uint64_t offset) {
     zxc_stdio_ctx_t* const ctx = (zxc_stdio_ctx_t*)vctx;
@@ -1078,11 +1168,24 @@ static int64_t zxc_stdio_read_at(void* vctx, void* dst, size_t len, uint64_t off
 // LCOV_EXCL_STOP
 
 #else  /* POSIX */
+/** @brief Reader context for the POSIX @c FILE* adapter (file descriptor + size). */
 typedef struct {
-    int fd;
-    uint64_t size;
+    int fd;        /* descriptor from fileno(f) */
+    uint64_t size; /* total file size in bytes */
 } zxc_stdio_ctx_t;
 
+/**
+ * @brief Thread-safe positioned read backing the seekable @c FILE* reader.
+ *
+ * POSIX implementation: a single @c pread, which carries its own offset and so
+ * is safe to call concurrently from multiple worker threads on one descriptor.
+ *
+ * @param[in]  vctx    @ref zxc_stdio_ctx_t carrying the file descriptor.
+ * @param[out] dst     Destination buffer (at least @p len bytes).
+ * @param[in]  len     Number of bytes to read.
+ * @param[in]  offset  Absolute byte offset to read from.
+ * @return @p len on a full read, otherwise @ref ZXC_ERROR_IO.
+ */
 static int64_t zxc_stdio_read_at(void* vctx, void* dst, size_t len, uint64_t offset) {
     zxc_stdio_ctx_t* const ctx = (zxc_stdio_ctx_t*)vctx;
     const ssize_t r = pread(ctx->fd, dst, len, (off_t)offset);
@@ -1090,6 +1193,20 @@ static int64_t zxc_stdio_read_at(void* vctx, void* dst, size_t len, uint64_t off
 }
 #endif /* _WIN32 */
 
+/**
+ * @brief Opens a seekable archive backed by an open @c FILE*.
+ *
+ * Public API; full contract in @c zxc_stream.h. Snapshots and restores the
+ * file position, measures the file, wraps it in a thread-safe positioned
+ * reader (@c pread on POSIX, @c ReadFile + @c OVERLAPPED on Windows), and
+ * delegates to @ref zxc_seekable_open_reader. The reader context is heap-owned
+ * and handed to the returned handle via @ref zxc_seekable_attach_owned_ctx, so
+ * @ref zxc_seekable_free releases it.
+ *
+ * @param[in] f  Open, seekable file handle.
+ * @return A handle to release with @ref zxc_seekable_free, or NULL on bad input,
+ *         an I/O error, or a missing / malformed seek table.
+ */
 zxc_seekable* zxc_seekable_open_file(FILE* f) {
     if (UNLIKELY(!f)) return NULL;
 
