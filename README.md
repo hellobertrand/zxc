@@ -225,10 +225,13 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
     **Linux:**
     *   `zxc-<version>-linux-arm64.tar.gz` (NEON optimizations included).
     *   `zxc-<version>-linux-x86_64.tar.gz` (Runtime dispatch for AVX2/AVX512).
+    *   `zxc-<version>-linux-x86.tar.gz` (32-bit x86, SSE2/scalar fallback — legacy hosts).
+    *   `zxc-<version>-linux-armhf.tar.gz` (32-bit ARMv7, NEON optimizations included).
 
     **Windows:**
     *   `zxc-<version>-windows-x86_64.zip` (Runtime dispatch for AVX2/AVX512).
     *   `zxc-<version>-windows-arm64.zip` (NEON optimizations included).
+    *   `zxc-<version>-windows-x86.zip` (32-bit x86, SSE2/scalar fallback — Windows 7+ / legacy CPUs).
 
 3.  Verify, then extract. Every archive is signed via SLSA build provenance; the SHA-256 of each asset is also shown directly on the GitHub release page:
     ```bash

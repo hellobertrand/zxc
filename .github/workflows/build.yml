@@ -53,6 +53,29 @@ jobs:
             artifact_name: zxc.exe
             platform: windows-arm64
             cmake_flags: "-A ARM64 -DZXC_NATIVE_ARCH=OFF"
+          # 32-bit legacy targets; configs mirror multiarch.yml.
+          - name: Linux x86 (32-bit)
+            os: ubuntu-latest
+            artifact_name: zxc
+            platform: linux-x86
+            cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
+            arch_flags: "-m32"
+            install_pkg: "gcc-multilib g++-multilib"
+            legacy_32bit: true
+          - name: Linux ARM (32-bit)
+            os: ubuntu-latest
+            artifact_name: zxc
+            platform: linux-armhf
+            cmake_flags: "-DZXC_NATIVE_ARCH=OFF -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=arm -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++ -DCMAKE_STRIP=/usr/bin/arm-linux-gnueabihf-strip"
+            install_pkg: "gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf qemu-user-static"
+            strip_tool: "arm-linux-gnueabihf-strip"
+            qemu_ld_prefix: "/usr/arm-linux-gnueabihf"
+            legacy_32bit: true
+          - name: Windows x86 (32-bit)
+            os: windows-latest
+            artifact_name: zxc.exe
+            platform: windows-x86
+            cmake_flags: "-A Win32 -DZXC_NATIVE_ARCH=OFF"
 
 
     steps:
@@ -60,7 +83,8 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Select Latest Compiler (Linux)
-        if: runner.os == 'Linux'
+        # 32-bit/cross targets keep the default/cross gcc (matches multiarch.yml).
+        if: runner.os == 'Linux' && !matrix.legacy_32bit
         run: |
           echo "CC=gcc-14" >> $GITHUB_ENV
           echo "CXX=g++-14" >> $GITHUB_ENV
@@ -72,13 +96,30 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.4.app
           clang --version
 
+      - name: Install 32-bit / cross toolchain (Linux)
+        if: matrix.install_pkg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.install_pkg }}
+
+      - name: Set 32-bit arch flags (Linux)
+        if: matrix.arch_flags
+        run: |
+          echo "CFLAGS=${{ matrix.arch_flags }}" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=${{ matrix.arch_flags }}" >> "$GITHUB_ENV"
+
+      # Run cross-built test binaries under QEMU user-mode (binfmt via qemu-user-static).
+      - name: Enable foreign-arch test emulation (QEMU)
+        if: matrix.qemu_ld_prefix
+        run: echo "QEMU_LD_PREFIX=${{ matrix.qemu_ld_prefix }}" >> "$GITHUB_ENV"
+
       - name: Configure CMake
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }}
 
       - name: Build 
         run: cmake --build build --config Release --parallel
 
-      - name: Test (native)
+      - name: Test (ctest)
         working-directory: build
         run: ctest -C Release --output-on-failure
 
@@ -117,9 +158,10 @@ jobs:
           # Install to staging directory using CMake (Standard way for all OS)
           cmake --install build --prefix "release_staging/${ARCHIVE_BASE}" --config Release
 
-          # Strip binary on Unix-like systems only (installed to bin/)
+          # Strip on Unix only; cross builds (armhf) need their matching strip tool.
           if [[ "${{ runner.os }}" != "Windows" ]]; then
-            strip "release_staging/${ARCHIVE_BASE}/bin/${{ matrix.artifact_name }}"
+            STRIP_TOOL="${{ matrix.strip_tool }}"
+            "${STRIP_TOOL:-strip}" "release_staging/${ARCHIVE_BASE}/bin/${{ matrix.artifact_name }}"
           fi
 
           cp LICENSE "release_staging/${ARCHIVE_BASE}/LICENSE.txt"
