@@ -29,8 +29,10 @@
 #endif
 
 #if defined(_MSC_VER)
-#include <immintrin.h>  // _xgetbv
 #include <intrin.h>
+#if defined(_M_X64)
+#include <immintrin.h>  // _xgetbv (x86-specific header; x64 AVX state check)
+#endif
 #endif
 
 #if defined(__linux__) && (defined(__arm__) || defined(_M_ARM))
