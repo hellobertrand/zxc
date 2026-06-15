@@ -520,11 +520,11 @@ ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-co
 ## 7. Performance Analysis (Benchmarks)
 
 **Methodology:**
-Benchmarks were conducted using `lzbench` (by inikep) with a **block size of 256 KB**, checksums disabled, single-threaded execution, on the standard Silesia Corpus ([silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), 202 MB).
+Benchmarks were conducted using `lzbench` (by inikep) with a **block size of 256 KB**, checksums disabled, single-threaded execution, on the standard Silesia Corpus ([silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), 202 MB). The three Google Cloud instances run with **1 thread per core** (SMT disabled on the x86 C4D and C2D instances).
 * **Target 1 (Client):** Apple M2 / macOS 26 (Clang 21)
-* **Target 2 (Cloud):** Google Axion / Linux (GCC 14)
-* **Target 3 (Build):** AMD EPYC 9B45 / Linux (GCC 14)
-* **Target 4 (Production):** AMD EPYC 7B13 / Linux (GCC 14)
+* **Target 2 (Cloud):** Google Axion — Google Cloud C4A / Linux (GCC 14)
+* **Target 3 (Build):** AMD EPYC 9B45 — Google Cloud C4D / Linux (GCC 14)
+* **Target 4 (Production):** AMD EPYC 7B13 — Google Cloud C2D / Linux (GCC 14)
 
 **Figure A**: Pareto Frontier — Decompression Speed vs. Compressed Size (across 4 CPUs)
 
@@ -682,27 +682,27 @@ This metric expresses how much *original* data is delivered per unit of compress
 | zstd 1.5.7 -1 | 0.37x | 72.55 |
 | zlib 1.3.1 -1 | 0.08x | 76.58 |
 
-**Decompression Efficiency (Cycles per Byte @ 2.7 GHz)**
+**Decompression Efficiency (Cycles per Byte @ 2.1 GHz)**
 
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
-| memcpy                  | 0.105       | 1.00x (baseline)      |
-| **zxc 0.12.0 -1**       | **0.248**   | **2.4x**              |
-| **zxc 0.12.0 -2**       | **0.278**   | **2.6x**              |
-| **zxc 0.12.0 -3**       | **0.447**   | **4.2x**              |
-| **zxc 0.12.0 -4**       | **0.472**   | **4.5x**              |
-| **zxc 0.12.0 -5**       | **0.500**   | **4.7x**              |
-| **zxc 0.12.0 -6**       | **0.567**   | **5.4x**              |
-| lz4 1.10.0              | 0.537       | 5.1x                  |
-| lz4 1.10.0 --fast -17   | 0.509       | 4.8x                  |
-| lz4hc 1.10.0 -9         | 0.558       | 5.3x                  |
-| lzav 5.7 -1             | 0.755       | 7.2x                  |
-| zstd 1.5.7 -1           | 1.437       | 13.6x                 |
-| zstd 1.5.7 --fast --1   | 1.113       | 10.6x                 |
-| snappy 1.2.2            | 1.295       | 12.3x                 |
-| zlib 1.3.1 -1           | 6.888       | 65.4x                 |
+| memcpy                  | 0.082       | 1.00x (baseline)      |
+| **zxc 0.12.0 -1**       | **0.193**   | **2.4x**              |
+| **zxc 0.12.0 -2**       | **0.216**   | **2.6x**              |
+| **zxc 0.12.0 -3**       | **0.348**   | **4.2x**              |
+| **zxc 0.12.0 -4**       | **0.367**   | **4.5x**              |
+| **zxc 0.12.0 -5**       | **0.389**   | **4.7x**              |
+| **zxc 0.12.0 -6**       | **0.441**   | **5.4x**              |
+| lz4 1.10.0              | 0.418       | 5.1x                  |
+| lz4 1.10.0 --fast -17   | 0.396       | 4.8x                  |
+| lz4hc 1.10.0 -9         | 0.434       | 5.3x                  |
+| lzav 5.7 -1             | 0.588       | 7.2x                  |
+| zstd 1.5.7 -1           | 1.118       | 13.6x                 |
+| zstd 1.5.7 --fast --1   | 0.866       | 10.6x                 |
+| snappy 1.2.2            | 1.007       | 12.3x                 |
+| zlib 1.3.1 -1           | 5.357       | 65.4x                 |
 
-*Lower is better. Calculated using AMD EPYC 9B45 base frequency (2.7 GHz). Formula: `Cycles/Byte = 2700 / Decompression Speed (MB/s)`.*
+*Lower is better. Calculated using AMD EPYC 9B45 base frequency (2.1 GHz). Formula: `Cycles/Byte = 2100 / Decompression Speed (MB/s)`.*
 
 **Effective Throughput (Ratio-normalized decode)**
 
@@ -747,27 +747,27 @@ This metric expresses how much *original* data is delivered per unit of compress
 | zstd 1.5.7 -1 | 0.34x | 72.55 |
 | zlib 1.3.1 -1 | 0.09x | 76.58 |
 
-**Decompression Efficiency (Cycles per Byte @ 3.05 GHz)**
+**Decompression Efficiency (Cycles per Byte @ 2.2 GHz)**
 
 | Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
-| memcpy                  | 0.126       | 1.00x (baseline)      |
-| **zxc 0.12.0 -1**       | **0.391**   | **3.1x**              |
-| **zxc 0.12.0 -2**       | **0.471**   | **3.7x**              |
-| **zxc 0.12.0 -3**       | **0.708**   | **5.6x**              |
-| **zxc 0.12.0 -4**       | **0.738**   | **5.8x**              |
-| **zxc 0.12.0 -5**       | **0.764**   | **6.1x**              |
-| **zxc 0.12.0 -6**       | **0.869**   | **6.9x**              |
-| lz4 1.10.0              | 0.784       | 6.2x                  |
-| lz4 1.10.0 --fast -17   | 0.679       | 5.4x                  |
-| lz4hc 1.10.0 -9         | 0.817       | 6.5x                  |
-| lzav 5.7 -1             | 1.057       | 8.4x                  |
-| zstd 1.5.7 -1           | 2.273       | 18.0x                 |
-| zstd 1.5.7 --fast --1   | 1.705       | 13.5x                 |
-| snappy 1.2.2            | 1.754       | 13.9x                 |
-| zlib 1.3.1 -1           | 8.496       | 67.3x                 |
+| memcpy                  | 0.091       | 1.00x (baseline)      |
+| **zxc 0.12.0 -1**       | **0.282**   | **3.1x**              |
+| **zxc 0.12.0 -2**       | **0.340**   | **3.7x**              |
+| **zxc 0.12.0 -3**       | **0.511**   | **5.6x**              |
+| **zxc 0.12.0 -4**       | **0.532**   | **5.8x**              |
+| **zxc 0.12.0 -5**       | **0.551**   | **6.1x**              |
+| **zxc 0.12.0 -6**       | **0.627**   | **6.9x**              |
+| lz4 1.10.0              | 0.565       | 6.2x                  |
+| lz4 1.10.0 --fast -17   | 0.490       | 5.4x                  |
+| lz4hc 1.10.0 -9         | 0.589       | 6.5x                  |
+| lzav 5.7 -1             | 0.762       | 8.4x                  |
+| zstd 1.5.7 -1           | 1.639       | 18.0x                 |
+| zstd 1.5.7 --fast --1   | 1.230       | 13.5x                 |
+| snappy 1.2.2            | 1.265       | 13.9x                 |
+| zlib 1.3.1 -1           | 6.128       | 67.3x                 |
 
-*Lower is better. Calculated using AMD EPYC 7B13 frequency (3.05 GHz). Formula: `Cycles/Byte = 3050 / Decompression Speed (MB/s)`.*
+*Lower is better. Calculated using AMD EPYC 7B13 base frequency (2.2 GHz). Formula: `Cycles/Byte = 2200 / Decompression Speed (MB/s)`.*
 
 **Effective Throughput (Ratio-normalized decode)**
 
@@ -831,7 +831,7 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clan
 
 #### 7.5.2 ARM64 Architecture (Google Axion Neoverse-V2)
 
-Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on 64-bit Linux. The reference hardware is a Google Neoverse-V2 processor (ARM64).
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on 64-bit Linux. The reference hardware is a Google Axion (Neoverse-V2) processor on a **Google Cloud C4A** instance (ARM64, 1 thread per core).
 
 **All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.**
 
@@ -856,7 +856,7 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
 #### 7.5.3 x86_64 Architecture (AMD EPYC 9B45)
 
-Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on 64-bit Linux. The reference hardware is an AMD EPYC 9B45 processor (x86_64).
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on 64-bit Linux. The reference hardware is an AMD EPYC 9B45 processor on a **Google Cloud C4D** instance (x86_64, Zen 5, 2.1 GHz, SMT disabled — 1 thread per core).
 
 **All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.**
 
@@ -881,7 +881,7 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
 #### 7.5.4 x86_64 Architecture (AMD EPYC 7B13, Zen 3)
 
-Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on 64-bit Linux. The reference hardware is an AMD EPYC 7B13 64-Core processor (x86_64, Zen 3, 3.05 GHz).
+Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on 64-bit Linux. The reference hardware is an AMD EPYC 7B13 64-Core processor on a **Google Cloud C2D** instance (x86_64, Zen 3, 2.2 GHz, SMT disabled — 1 thread per core).
 
 **All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.**
 
