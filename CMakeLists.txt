@@ -352,7 +352,12 @@ if(ZXC_BUILD_CLI)
     if(UNIX)
         target_link_libraries(zxc PRIVATE m)
     endif()
-    
+
+    # Native command-line wildcard expansion on Windows: cmd/PowerShell don't glob
+    if(MSVC)
+        target_link_options(zxc PRIVATE setargv.obj)
+    endif()
+
     # Propagate compile options and definitions
     target_compile_options(zxc PRIVATE
         $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>

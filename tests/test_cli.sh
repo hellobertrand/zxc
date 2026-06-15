@@ -1066,5 +1066,49 @@ else
     echo "  [SKIP] symlinks unsupported here, skipping unzxc alias test"
 fi
 
+# 27. Multiple input files (-m) and native Windows wildcard expansion (setargv.obj)
+echo "Testing multiple-file mode (-m) and wildcard expansion..."
+
+MGLOB_DIR="$TEST_DIR/mglob"
+mkdir -p "$MGLOB_DIR"
+for n in 1 2 3; do
+    printf 'multi-file payload %s — lorem ipsum dolor sit amet\n' "$n" > "$MGLOB_DIR/part_${n}.txt"
+done
+
+# 27.1 Cross-platform: the shell expands the glob; -m must compress every file to
+#      <name>.zxc (keeping inputs with -k). Then verify one round-trip is valid.
+"$ZXC_BIN" -k -m "$MGLOB_DIR"/part_*.txt >/dev/null 2>&1 || true
+if [ -f "$MGLOB_DIR/part_1.txt.zxc" ] && [ -f "$MGLOB_DIR/part_2.txt.zxc" ] \
+   && [ -f "$MGLOB_DIR/part_3.txt.zxc" ]; then
+    if "$ZXC_BIN" -d -c "$MGLOB_DIR/part_2.txt.zxc" 2>/dev/null | cmp -s - "$MGLOB_DIR/part_2.txt"; then
+        log_pass "multiple-file mode (-m) compresses every file"
+    else
+        log_fail "-m produced a .zxc that does not round-trip"
+    fi
+else
+    log_fail "-m did not produce a .zxc for every input file"
+fi
+
+# 27.2 Native Windows wildcard expansion (setargv.obj): cmd/PowerShell don't glob,
+#      so the binary must. Pass a *quoted* pattern so the shell does NOT expand it —
+#      only the linked setargv.obj should. POSIX programs don't self-glob, so this
+#      sub-check is Windows-only (skipped elsewhere, like the unzxc symlink test).
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*)
+        ZXC_ABS_G=$(cd "$(dirname "$ZXC_BIN")" && pwd)/$(basename "$ZXC_BIN")
+        rm -f "$MGLOB_DIR"/*.zxc
+        ( cd "$MGLOB_DIR" && "$ZXC_ABS_G" -k -m 'part_*.txt' >/dev/null 2>&1 ) || true
+        if [ -f "$MGLOB_DIR/part_1.txt.zxc" ] && [ -f "$MGLOB_DIR/part_2.txt.zxc" ] \
+           && [ -f "$MGLOB_DIR/part_3.txt.zxc" ]; then
+            log_pass "native Windows wildcard expansion (setargv.obj)"
+        else
+            log_fail "literal 'part_*.txt' was not expanded by the binary (setargv.obj missing?)"
+        fi
+        ;;
+    *)
+        echo "  [SKIP] native wildcard expansion is Windows-only (POSIX shells glob themselves)"
+        ;;
+esac
+
 echo "All tests passed!"
 exit 0
