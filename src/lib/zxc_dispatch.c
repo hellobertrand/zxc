@@ -30,6 +30,9 @@
 
 #if defined(_MSC_VER)
 #include <intrin.h>
+#if defined(_M_X64)
+#include <immintrin.h>  // _xgetbv (x86-specific header; x64 AVX state check)
+#endif
 #endif
 
 #if defined(__linux__) && (defined(__arm__) || defined(_M_ARM))
@@ -175,23 +178,23 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 
 #if defined(__x86_64__) || defined(_M_X64)
 #if defined(_MSC_VER)
-    // MSVC detection using __cpuid
-    // Function ID 1: EAX=1. EDX: Bit 26=SSE2. ECX: Bit 28=AVX.
-    // Function ID 7: EAX=7, ECX=0. EBX: Bit 5=AVX2, Bit 16=AVX512F, Bit 30=AVX512BW.
+    // AVX2/AVX512 need OS-enabled YMM/ZMM state: gate on OSXSAVE + XGETBV/XCR0,
+    // not CPUID alone (else a VEX/EVEX op faults #UD when the OS hasn't enabled it).
     int regs[4];
     int sse2 = 0;
-    int avx = 0;
     int avx2 = 0;
     int avx512 = 0;
 
     __cpuid(regs, 1);
-    if (regs[3] & (1 << 26)) sse2 = 1;  // EDX bit 26 = SSE2
-    if (regs[2] & (1 << 28)) avx = 1;   // ECX bit 28 = AVX
-
-    if (avx) {
-        __cpuidex(regs, 7, 0);
-        if (regs[1] & (1 << 5)) avx2 = 1;
-        if ((regs[1] & (1 << 16)) && (regs[1] & (1 << 30))) avx512 = 1;
+    if (regs[3] & (1 << 26)) sse2 = 1;  // SSE2
+    if (regs[2] & (1 << 27)) {          // OSXSAVE
+        const unsigned long long xcr0 = _xgetbv(0);
+        if ((xcr0 & 0x6) == 0x6) {  // SSE+YMM enabled
+            __cpuidex(regs, 7, 0);
+            if (regs[1] & (1 << 5)) avx2 = 1;
+            // AVX512 also needs XCR0[5..7] (opmask/ZMM)
+            if ((regs[1] & (1 << 16)) && (regs[1] & (1 << 30)) && (xcr0 & 0xE0) == 0xE0) avx512 = 1;
+        }
     }
 
     if (avx512) {
