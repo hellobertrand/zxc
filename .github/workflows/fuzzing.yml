@@ -14,7 +14,7 @@ on:
       fuzz_seconds:
         description: 'Duration (seconds)'
         required: true
-        default: '3600'
+        default: '7200'
   pull_request:
     branches: [ main ]
     paths:
@@ -30,27 +30,22 @@ permissions:
 
 jobs:
   fuzzing:
-    name: Run Fuzzing (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
+    name: Run Fuzzing (${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
     concurrency:
-      group: ${{ github.workflow }}-${{ matrix.fuzzer }}-${{ matrix.sanitizer }}-${{ github.event.pull_request.number || github.ref }}
+      group: ${{ github.workflow }}-${{ matrix.sanitizer }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
         sanitizer: [address, undefined]
-        fuzzer: [decompress, roundtrip, seekable, pstream, dict]
 
     steps:
     - name: Checkout Repository
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-    - name: Configure Fuzzer Target
-      run: |
-        sed -i '2i export FUZZER_TARGET="${{ matrix.fuzzer }}"' .clusterfuzzlite/build.sh
 
     # TODO: Remove this step once ClusterFuzzLite updates to support Docker 29+
     - name: Downgrade Docker (Temporary Workaround)
@@ -65,7 +60,7 @@ jobs:
         sudo systemctl restart docker
         docker version
 
-    - name: Build Fuzzers (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
+    - name: Build Fuzzers (${{ matrix.sanitizer }})
       id: build
       uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
       with:
@@ -73,13 +68,13 @@ jobs:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         sanitizer: ${{ matrix.sanitizer }}
 
-    - name: Run Fuzzers (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
+    - name: Run Fuzzers (${{ matrix.sanitizer }})
       id: run
       uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         mode: ${{ github.event_name == 'pull_request' && 'code-change' || inputs.mode || 'batch' }}
-        fuzz-seconds: ${{ github.event_name == 'pull_request' && 120 || inputs.fuzz_seconds || 3600 }}
+        fuzz-seconds: ${{ github.event_name == 'pull_request' && 300 || inputs.fuzz_seconds || 7200 }}
         sanitizer: ${{ matrix.sanitizer }}
         output-sarif: true
         storage-repo: https://${{ secrets.CFLITE_CORPUS_TOKEN }}@github.com/hellobertrand/zxc-fuzz-corpus.git
@@ -90,7 +85,7 @@ jobs:
       uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
       with:
         sarif_file: .
-        category: clusterfuzzlite-${{ matrix.fuzzer }}-${{ matrix.sanitizer }}
+        category: clusterfuzzlite-${{ matrix.sanitizer }}
 
   tsan:
     name: Thread Sanitizer
@@ -125,6 +120,7 @@ jobs:
           echo "decompress inputs: $(find corpus/corpus/zxc_fuzzer_decompress -type f | wc -l)"
           echo "seekable inputs: $(find corpus/corpus/zxc_fuzzer_seekable -type f | wc -l)"
           echo "pstream inputs: $(find corpus/corpus/zxc_fuzzer_pstream -type f | wc -l)"
+          echo "dict inputs: $(find corpus/corpus/zxc_fuzzer_dict -type f | wc -l)"
 
       - name: Build Coverage Harnesses
         run: |
@@ -163,6 +159,10 @@ jobs:
             LLVM_PROFILE_FILE="build-cov/pstream.profraw" \
               build-cov/fuzz_pstream corpus/corpus/zxc_fuzzer_pstream/ -runs=0 2>&1 | tail -1
           fi
+          if [ -d corpus/corpus/zxc_fuzzer_dict ]; then
+            LLVM_PROFILE_FILE="build-cov/dict.profraw" \
+              build-cov/fuzz_dict corpus/corpus/zxc_fuzzer_dict/ -runs=0 2>&1 | tail -1
+          fi
 
       - name: Generate Coverage Report
         run: |
@@ -170,6 +170,7 @@ jobs:
             build-cov/roundtrip.profraw build-cov/decompress.profraw \
             $([ -f build-cov/seekable.profraw ] && echo build-cov/seekable.profraw) \
             $([ -f build-cov/pstream.profraw ] && echo build-cov/pstream.profraw) \
+            $([ -f build-cov/dict.profraw ] && echo build-cov/dict.profraw) \
             -o build-cov/fuzz.profdata
 
           echo "=== COVERAGE SUMMARY ==="
@@ -177,6 +178,7 @@ jobs:
             build-cov/fuzz_roundtrip -object build-cov/fuzz_decompress \
             $([ -f build-cov/fuzz_seekable ] && echo "-object build-cov/fuzz_seekable") \
             $([ -f build-cov/fuzz_pstream ] && echo "-object build-cov/fuzz_pstream") \
+            $([ -f build-cov/fuzz_dict ] && echo "-object build-cov/fuzz_dict") \
             -instr-profile=build-cov/fuzz.profdata \
             --ignore-filename-regex='(vendors/|tests/|fuzz_|zxc_driver)'
 
@@ -184,6 +186,7 @@ jobs:
             build-cov/fuzz_roundtrip -object build-cov/fuzz_decompress \
             $([ -f build-cov/fuzz_seekable ] && echo "-object build-cov/fuzz_seekable") \
             $([ -f build-cov/fuzz_pstream ] && echo "-object build-cov/fuzz_pstream") \
+            $([ -f build-cov/fuzz_dict ] && echo "-object build-cov/fuzz_dict") \
             -instr-profile=build-cov/fuzz.profdata \
             --ignore-filename-regex='(vendors/|tests/|fuzz_|zxc_driver)' \
             --format=html -output-dir=build-cov/coverage_html
