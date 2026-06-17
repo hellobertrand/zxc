@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.12.0] - 2026-06-12
+## [0.12.0] - 2026-06-18
 api: Implements shared dictionary Huffman table (#275)
 api: Enhances format validation (#271)
 api: Overhauls dictionary fuzzer for robust testing (#270)
@@ -16,10 +16,14 @@ api: Internalizes Sans-IO API and frame primitives (#225)
 perf: Optimize LZ run decoding for short offsets (#276)
 perf: Add make target to run decoder conformance suite
 perf: Improve Huffman leaf sorting with bucket sort (#244)
+cli: enable native wildcard expansion for CLI on Windows (#284)
 cli: Adds `unzxc` alias and renames dictionary training option (#272)
 cli: Remove Snyk policy ignore
 cli: Addresses Snyk scan findings and improves robustness (#273)
 cli: Adds native Meson build system support (#245)
+build: consolidate ClusterFuzzLite fuzzer builds and runs (#287)
+build: bump tar from 7.5.13 to 7.5.16 in /wrappers/nodejs (#286)
+build: bump vite from 8.0.14 to 8.0.16 in /wrappers/nodejs (#285)
 build: Add GCC 15 and 16 to CI multi-compiler matrix (#274)
 build: Update LZbench branch for benchmark workflow
 build: Enables empty data compression/decompression (#265)
@@ -47,10 +51,8 @@ doc: Enhance README with specific decode performance claims
 doc: Include README and add brief descriptions to Doxygen output
 doc: Add format conformance and stability overview to README
 doc: Add OpenSSF Scorecard badge to README
-misc: Update CHANGELOG
-misc: bump version to v0.12.0
-misc: Update ABI dump with new static context and seekable reader APIs
-misc: Support empty shared Huffman tables (#279)
+misc: Gate AVX2/AVX512 detection on OS-enabled YMM/ZMM state (#283)
+misc: Support empty shared Huffman tables (#278) (#279)
 misc: Update Codecov action to v7 (#267)
 misc: Update Ubuntu version badge to 26.10
 misc: Rename SBOM template to lowercase
