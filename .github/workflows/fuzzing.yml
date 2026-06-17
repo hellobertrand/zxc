@@ -120,6 +120,7 @@ jobs:
           echo "decompress inputs: $(find corpus/corpus/zxc_fuzzer_decompress -type f | wc -l)"
           echo "seekable inputs: $(find corpus/corpus/zxc_fuzzer_seekable -type f | wc -l)"
           echo "pstream inputs: $(find corpus/corpus/zxc_fuzzer_pstream -type f | wc -l)"
+          echo "dict inputs: $(find corpus/corpus/zxc_fuzzer_dict -type f | wc -l)"
 
       - name: Build Coverage Harnesses
         run: |
@@ -158,6 +159,10 @@ jobs:
             LLVM_PROFILE_FILE="build-cov/pstream.profraw" \
               build-cov/fuzz_pstream corpus/corpus/zxc_fuzzer_pstream/ -runs=0 2>&1 | tail -1
           fi
+          if [ -d corpus/corpus/zxc_fuzzer_dict ]; then
+            LLVM_PROFILE_FILE="build-cov/dict.profraw" \
+              build-cov/fuzz_dict corpus/corpus/zxc_fuzzer_dict/ -runs=0 2>&1 | tail -1
+          fi
 
       - name: Generate Coverage Report
         run: |
@@ -165,6 +170,7 @@ jobs:
             build-cov/roundtrip.profraw build-cov/decompress.profraw \
             $([ -f build-cov/seekable.profraw ] && echo build-cov/seekable.profraw) \
             $([ -f build-cov/pstream.profraw ] && echo build-cov/pstream.profraw) \
+            $([ -f build-cov/dict.profraw ] && echo build-cov/dict.profraw) \
             -o build-cov/fuzz.profdata
 
           echo "=== COVERAGE SUMMARY ==="
@@ -172,6 +178,7 @@ jobs:
             build-cov/fuzz_roundtrip -object build-cov/fuzz_decompress \
             $([ -f build-cov/fuzz_seekable ] && echo "-object build-cov/fuzz_seekable") \
             $([ -f build-cov/fuzz_pstream ] && echo "-object build-cov/fuzz_pstream") \
+            $([ -f build-cov/fuzz_dict ] && echo "-object build-cov/fuzz_dict") \
             -instr-profile=build-cov/fuzz.profdata \
             --ignore-filename-regex='(vendors/|tests/|fuzz_|zxc_driver)'
 
@@ -179,6 +186,7 @@ jobs:
             build-cov/fuzz_roundtrip -object build-cov/fuzz_decompress \
             $([ -f build-cov/fuzz_seekable ] && echo "-object build-cov/fuzz_seekable") \
             $([ -f build-cov/fuzz_pstream ] && echo "-object build-cov/fuzz_pstream") \
+            $([ -f build-cov/fuzz_dict ] && echo "-object build-cov/fuzz_dict") \
             -instr-profile=build-cov/fuzz.profdata \
             --ignore-filename-regex='(vendors/|tests/|fuzz_|zxc_driver)' \
             --format=html -output-dir=build-cov/coverage_html
