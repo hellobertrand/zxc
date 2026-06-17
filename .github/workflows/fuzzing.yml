@@ -14,7 +14,7 @@ on:
       fuzz_seconds:
         description: 'Duration (seconds)'
         required: true
-        default: '3600'
+        default: '7200'
   pull_request:
     branches: [ main ]
     paths:
@@ -30,27 +30,22 @@ permissions:
 
 jobs:
   fuzzing:
-    name: Run Fuzzing (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
+    name: Run Fuzzing (${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
     concurrency:
-      group: ${{ github.workflow }}-${{ matrix.fuzzer }}-${{ matrix.sanitizer }}-${{ github.event.pull_request.number || github.ref }}
+      group: ${{ github.workflow }}-${{ matrix.sanitizer }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
         sanitizer: [address, undefined]
-        fuzzer: [decompress, roundtrip, seekable, pstream, dict]
 
     steps:
     - name: Checkout Repository
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-    - name: Configure Fuzzer Target
-      run: |
-        sed -i '2i export FUZZER_TARGET="${{ matrix.fuzzer }}"' .clusterfuzzlite/build.sh
 
     # TODO: Remove this step once ClusterFuzzLite updates to support Docker 29+
     - name: Downgrade Docker (Temporary Workaround)
@@ -65,7 +60,7 @@ jobs:
         sudo systemctl restart docker
         docker version
 
-    - name: Build Fuzzers (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
+    - name: Build Fuzzers (${{ matrix.sanitizer }})
       id: build
       uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
       with:
@@ -73,13 +68,13 @@ jobs:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         sanitizer: ${{ matrix.sanitizer }}
 
-    - name: Run Fuzzers (${{ matrix.fuzzer }} - ${{ matrix.sanitizer }})
+    - name: Run Fuzzers (${{ matrix.sanitizer }})
       id: run
       uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         mode: ${{ github.event_name == 'pull_request' && 'code-change' || inputs.mode || 'batch' }}
-        fuzz-seconds: ${{ github.event_name == 'pull_request' && 120 || inputs.fuzz_seconds || 3600 }}
+        fuzz-seconds: ${{ github.event_name == 'pull_request' && 300 || inputs.fuzz_seconds || 7200 }}
         sanitizer: ${{ matrix.sanitizer }}
         output-sarif: true
         storage-repo: https://${{ secrets.CFLITE_CORPUS_TOKEN }}@github.com/hellobertrand/zxc-fuzz-corpus.git
@@ -90,7 +85,7 @@ jobs:
       uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
       with:
         sarif_file: .
-        category: clusterfuzzlite-${{ matrix.fuzzer }}-${{ matrix.sanitizer }}
+        category: clusterfuzzlite-${{ matrix.sanitizer }}
 
   tsan:
     name: Thread Sanitizer
