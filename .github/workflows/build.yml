@@ -6,6 +6,8 @@ on:
     branches: [ main ]
     tags:
       - 'v*'
+  release:
+    types: [ published ]
   pull_request:
     branches: [ main ]
 
