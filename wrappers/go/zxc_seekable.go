@@ -140,25 +140,10 @@ func OpenReader(r io.ReaderAt, size int64) (*Seekable, error) {
 	return &Seekable{ptr: ptr, rhandle: h, hasRH: true}, nil
 }
 
-// zxcGoSeekableReadAt is the C->Go trampoline invoked by the library for
-// every positional read against a user-supplied io.ReaderAt. It must not
-// panic across the FFI boundary; any error is mapped to ZXC_ERROR_IO.
-//
-//export zxcGoSeekableReadAt
-func zxcGoSeekableReadAt(ctx unsafe.Pointer, dst unsafe.Pointer, length C.size_t, offset C.uint64_t) C.int64_t {
-	h := cgo.Handle(uintptr(ctx))
-	reader, ok := h.Value().(io.ReaderAt)
-	if !ok || dst == nil {
-		return C.int64_t(C.ZXC_ERROR_IO)
-	}
-	// Map the C-owned destination region as a Go slice without copying.
-	buf := unsafe.Slice((*byte)(dst), int(length))
-	n, err := reader.ReadAt(buf, int64(offset))
-	if err != nil || n != int(length) {
-		return C.int64_t(C.ZXC_ERROR_IO)
-	}
-	return C.int64_t(length)
-}
+// The C->Go read trampoline (zxcGoSeekableReadAt) lives in
+// zxc_seekable_export.go; see the comment there for why it is kept out of this
+// file's preamble. The forward declaration above (in the cgo preamble) is what
+// lets zxcGoOpenReader take its address.
 
 // Close releases the native resources associated with the handle. Safe to
 // call multiple times; subsequent calls are no-ops.
