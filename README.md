@@ -1,4 +1,4 @@
-# ZXC: Asymmetric Lossless Compression Built for Ultra-Fast Decode
+# ZXC - Asymmetric Lossless Compression Built for Ultra-Fast Decode
 
 [![Build & Release](https://github.com/hellobertrand/zxc/actions/workflows/build.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/build.yml)
 [![Code Quality](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml)
@@ -9,49 +9,42 @@
 [![Code Security](https://github.com/hellobertrand/zxc/actions/workflows/security.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/security.yml)
 [![Code Coverage](https://codecov.io/github/hellobertrand/zxc/branch/main/graph/badge.svg?token=LHA03HOA1X)](https://codecov.io/github/hellobertrand/zxc)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/hellobertrand/zxc/badge)](https://scorecard.dev/viewer/?uri=github.com/hellobertrand/zxc)
-
-[![ConanCenter](https://repology.org/badge/version-for-repo/conancenter/zxc.svg)](https://repology.org/project/zxc/versions)
-[![Vcpkg](https://repology.org/badge/version-for-repo/vcpkg/zxc.svg)](https://repology.org/project/zxc/versions)
-[![Homebrew](https://repology.org/badge/version-for-repo/homebrew/zxc.svg)](https://repology.org/project/zxc/versions)
-[![Debian 14](https://repology.org/badge/version-for-repo/debian_14/zxc.svg)](https://repology.org/project/zxc/versions)
-[![Ubuntu 26.10](https://repology.org/badge/version-for-repo/ubuntu_26_10/zxc.svg)](https://repology.org/project/zxc/versions)
-
-[![Crates.io](https://img.shields.io/crates/v/zxc-compress)](https://crates.io/crates/zxc-compress)
-[![PyPi](https://img.shields.io/pypi/v/zxc-compress)](https://pypi.org/project/zxc-compress)
-[![npm](https://img.shields.io/npm/v/zxc-compress)](https://www.npmjs.com/package/zxc-compress)
-
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 
-**ZXC** is a lossless, **asymmetric** compression library built for ultra-fast decode: **40%+ faster decompression than LZ4 on ARM64, with better compression ratios**. It trades compression speed for **maximum decode throughput** — ideal for Content Delivery, Embedded Systems, FOTA (Firmware Over-The-Air) updates, Game Assets, and App Bundles.
-It follows a **"Write Once, Read Many"** *(WORM)* design: compression happens at build-time, decompression is hot-path at run-time.
-
-**ZXC runs on all major architectures** (x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER (ppc64el), s390x, i386) with hand-tuned SIMD paths (SSE2/AVX2/AVX-512 on x86_64, NEON on ARMv8+). It shows especially strong gains on modern ARM cores (Apple Silicon, AWS Graviton, Google Axion) thanks to a bitstream layout tuned for their deep pipelines.
+ZXC is a lossless compression **C library** (with official Rust, Python, Node.js, and Go bindings). It trades compression speed for maximum decode throughput — the appropriate trade-off whenever data is **compressed once and read many times**: content delivery, embedded systems, FOTA (Firmware Over-The-Air) updates, game assets, and app bundles. It runs on all major architectures (`x86_64`, `ARM64`, `ARMv7`, `ARMv6`, `RISC-V`, `POWER`, `s390x`, `i386`) with hand-tuned SIMD paths, and shows particularly strong gains on modern ARM cores (Apple Silicon, AWS Graviton, Google Axion) thanks to a bitstream layout tuned for their deep pipelines.
 
 ## TL;DR
 
-- **What:** A C library for lossless compression, optimized for **maximum decompression speed**.
-- **Key Result:** Up to **>40% faster** decompression than LZ4 on Apple Silicon, **>20% faster** on Google Axion (ARM64), **>10% faster** on x86_64 (AMD EPYC), **all with better compression ratios**. Cross-platform by design, with particularly strong results on ARMv8+.
-- **Use Cases:** Game assets, firmware, app bundles, anything *compressed once, decompressed millions of times*.
-- **Seekable:** Built-in seek table for **O(1) random-access** decompression, load any block without scanning the entire file.
-- **Install:** `conan install --requires="zxc/[*]"` · `vcpkg install zxc` · `brew install zxc` · `pip install zxc-compress` · `cargo add zxc-compress` · `npm i zxc-compress`
-- **Quality:** Fuzzed (5B+ iterations to date), sanitized, formally tested, thread-safe API. BSD-3-Clause.
+- **Faster decode than LZ4, at a smaller size.** 10–47% faster decode at the default level (best on ARM64), rising to up to 2.3× in the speed-optimized tier, always at an equal-or-better compression ratio. See the [benchmarks](#benchmarks).
+- **Independently verified.** Merged into [lzbench](https://github.com/inikep/lzbench) (@inikep) and [TurboBench](https://github.com/powturbo/TurboBench) (@powturbo); every benchmark below is reproducible against 70+ codecs.
+- **Cross-platform.** x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER (ppc64el), s390x, i386, with hand-tuned SIMD (SSE2/AVX2/AVX-512 on x86, NEON on ARMv8+).
+- **Built for "Write Once, Read Many."** Compress once at build time, decompress millions of times at run time.
+- **Production-grade.** 5B+ fuzzing iterations, ASan/UBSan/Valgrind-clean, SLSA-signed releases, thread-safe API, BSD-3-Clause.
+- **Seekable.** Built-in seek table for O(1) random-access decompression.
+- **Broadly packaged.** Conan, vcpkg, Homebrew, and Rust/Python/Node packages.
 
-> **Independently Verified:** ZXC has been officially merged into both major open-source compression benchmark suites:
->
-> - **[lzbench](https://github.com/inikep/lzbench)** (master branch, by @inikep)
-> - **[TurboBench](https://github.com/powturbo/TurboBench)** (master branch, by @powturbo)
->
-> You can reproduce these results independently using either industry-standard benchmark, alongside 70+ other codecs.
+## Quick start
 
+```bash
+# Install (pick your package manager)
+brew install zxc
+conan install --requires="zxc/[*]"     # or: vcpkg install zxc
 
-## ZXC Design Philosophy
+# Compress once, decompress fast
+zxc -5 assets.tar assets.tar.zxc
+zxc -d assets.tar.zxc assets.tar
+```
 
-Traditional codecs force a trade-off between **symmetric speed** (LZ4) and **archival density** (Zstd). **ZXC takes a third path: Asymmetric Efficiency.**
+> **Independently verified:** ZXC is merged into both major open-source compression benchmark suites — [lzbench](https://github.com/inikep/lzbench) (master, by @inikep) and [TurboBench](https://github.com/powturbo/TurboBench) (master, by @powturbo). Every number in this README is reproducible with either tool, alongside 70+ other codecs.
 
-The encoder performs heavy analysis upfront: match selection, optimal parsing, statistics tuning, to produce a bitstream structured for the instruction pipelining and branch prediction of modern CPUs (particularly ARMv8). Complexity is **offloaded from the decoder to the encoder**, which is exactly the trade-off WORM workloads want.
+## Design Philosophy: Asymmetric Efficiency
 
-*   **Build Time:** You generally compress only once (on CI/CD).
-*   **Run Time:** You decompress millions of times (on every user's device). **ZXC respects this asymmetry.**
+Traditional codecs force a trade-off between **symmetric speed** (LZ4) and **archival density** (Zstd). **ZXC takes a third path: asymmetric efficiency.**
+
+The encoder does the heavy lifting upfront — match selection, optimal parsing, statistics tuning — to emit a bitstream structured for the instruction pipelining and branch prediction of modern CPUs (particularly ARMv8). Complexity is **offloaded from the decoder to the encoder**, which is exactly the trade-off WORM workloads want.
+
+*   **Build time:** you compress only once (on CI/CD).
+*   **Run time:** you decompress millions of times (on every user's device). **ZXC respects this asymmetry.**
 
 [👉 **Read the Technical Whitepaper**](docs/WHITEPAPER.md)
 
@@ -213,6 +206,18 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 ---
 
 ## Installation
+
+ZXC is packaged across major ecosystems and kept current by their maintainers:
+
+[![ConanCenter](https://repology.org/badge/version-for-repo/conancenter/zxc.svg)](https://repology.org/project/zxc/versions)
+[![Vcpkg](https://repology.org/badge/version-for-repo/vcpkg/zxc.svg)](https://repology.org/project/zxc/versions)
+[![Homebrew](https://repology.org/badge/version-for-repo/homebrew/zxc.svg)](https://repology.org/project/zxc/versions)
+[![Debian 14](https://repology.org/badge/version-for-repo/debian_14/zxc.svg)](https://repology.org/project/zxc/versions)
+[![Ubuntu 26.10](https://repology.org/badge/version-for-repo/ubuntu_26_10/zxc.svg)](https://repology.org/project/zxc/versions)
+
+[![Crates.io](https://img.shields.io/crates/v/zxc-compress)](https://crates.io/crates/zxc-compress)
+[![PyPi](https://img.shields.io/pypi/v/zxc-compress)](https://pypi.org/project/zxc-compress)
+[![npm](https://img.shields.io/npm/v/zxc-compress)](https://www.npmjs.com/package/zxc-compress)
 
 ### Option 1: Download Release (GitHub)
 
