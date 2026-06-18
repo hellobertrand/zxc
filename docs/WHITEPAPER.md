@@ -520,7 +520,7 @@ ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-co
 ## 7. Performance Analysis (Benchmarks)
 
 **Methodology:**
-Benchmarks were conducted using `lzbench` (by inikep) with a **block size of 256 KB**, checksums disabled, single-threaded execution, on the standard Silesia Corpus ([silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), 202 MB). The three Google Cloud instances run with **1 thread per core** (SMT disabled on the x86 C4D and C2D instances).
+Benchmarks were conducted using `lzbench` (by inikep) with default block size of 512 KB, checksums disabled, single-threaded execution, on the standard Silesia Corpus ([silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), 202 MB). The three Google Cloud instances run with **1 thread per core** (SMT disabled on the x86 C4D and C2D instances).
 * **Target 1 (Client):** Apple M2 / macOS 26 (Clang 21)
 * **Target 2 (Cloud):** Google Axion — Google Cloud C4A / Linux (GCC 14)
 * **Target 3 (Build):** AMD EPYC 9B45 — Google Cloud C4D / Linux (GCC 14)
