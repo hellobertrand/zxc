@@ -242,3 +242,38 @@ jobs:
             release/*.spdx.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  hashes:
+    name: Compute release artifact hashes
+    needs: [build-and-test, sbom]
+    runs-on: ubuntu-slim
+    if: startsWith(github.ref, 'refs/tags/')
+    outputs:
+      digests: ${{ steps.hash.outputs.digests }}
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate subject digests (base64 sha256sum)
+        id: hash
+        working-directory: artifacts
+        run: |
+          ls -la
+          echo "digests=$(sha256sum *.tar.gz *.zip *.spdx.json | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+  provenance:
+    name: SLSA provenance
+    needs: [hashes, release]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      actions: read     # read the workflow run to assemble provenance
+      id-token: write   # keyless signing via Sigstore / OIDC
+      contents: write   # attach multiple.intoto.jsonl to the release
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.hashes.outputs.digests }}
+      upload-assets: true
+      upload-tag-name: ${{ github.ref_name }}
