@@ -361,25 +361,30 @@ jobs:
           done
 
   # ===========================================================================
-  # Tier 4: FreeBSD (native build + test in a VM, no native BSD runners exist)
+  # Tier 4: Alternate libc / OS (native build + test)
   # ===========================================================================
-  build-bsd:
-    name: "BSD: ${{ matrix.name }}"
+  build-tier4:
+    name: "Tier 4: ${{ matrix.name }}"
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: FreeBSD 14.3
+          - name: FreeBSD
+            kind: bsd
             os: freebsd
             version: "14.3"
             install: sudo pkg install -y cmake ninja
+          - name: Alpine (musl)
+            kind: musl
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Build & Test (Static & Shared) on ${{ matrix.name }}
+      # FreeBSD: build & test inside a VM.
+      - name: Build & Test (Static & Shared) — FreeBSD VM
+        if: matrix.kind == 'bsd'
         uses: cross-platform-actions/action@951f2f3aac1c695838eabd36b2750f6b2708c263 # v1.2.0
         with:
           operating_system: ${{ matrix.os }}
@@ -416,3 +421,35 @@ jobs:
                 echo ">>> Completed Build: $LIB_TYPE"
                 echo ""
             done
+
+      # musl: build & test inside an Alpine container.
+      - name: Build & Test (Static & Shared) — Alpine musl
+        if: matrix.kind == 'musl'
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/src" -w /src alpine:latest sh -euc '
+            apk add --no-cache build-base cmake
+            echo "=== Toolchain ==="
+            cc --version
+            cmake --version
+
+            for LIB_TYPE in STATIC SHARED; do
+                echo ">>> Starting Build: $LIB_TYPE"
+                BUILD_DIR="build_$LIB_TYPE"
+
+                SHARED_FLAG=OFF
+                if [ "$LIB_TYPE" = SHARED ]; then SHARED_FLAG=ON; fi
+
+                cmake -S . -B "$BUILD_DIR" \
+                    -DCMAKE_BUILD_TYPE=Release \
+                    -DZXC_NATIVE_ARCH=OFF \
+                    -DBUILD_SHARED_LIBS="$SHARED_FLAG"
+
+                cmake --build "$BUILD_DIR" --parallel
+
+                echo "Running Tests for $LIB_TYPE..."
+                ctest --test-dir "$BUILD_DIR" --output-on-failure
+
+                echo ">>> Completed Build: $LIB_TYPE"
+                echo ""
+            done
+          '
