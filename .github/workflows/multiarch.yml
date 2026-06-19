@@ -359,3 +359,60 @@ jobs:
               echo ">>> Completed Build: $LIB_TYPE"
               echo ""
           done
+
+  # ===========================================================================
+  # Tier 4: FreeBSD (native build + test in a VM, no native BSD runners exist)
+  # ===========================================================================
+  build-bsd:
+    name: "BSD: ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: FreeBSD 14.3
+            os: freebsd
+            version: "14.3"
+            install: sudo pkg install -y cmake ninja
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build & Test (Static & Shared) on ${{ matrix.name }}
+        uses: cross-platform-actions/action@951f2f3aac1c695838eabd36b2750f6b2708c263 # v1.2.0
+        with:
+          operating_system: ${{ matrix.os }}
+          architecture: x86-64
+          version: ${{ matrix.version }}
+          memory: 5G
+          cpu_count: 4
+          # POSIX sh (no bash in BSD base); LTO off to keep VM build times sane.
+          run: |
+            set -e
+            ${{ matrix.install }}
+            echo "=== Toolchain ==="
+            cc --version 2>/dev/null || true
+            cmake --version
+
+            for LIB_TYPE in STATIC SHARED; do
+                echo ">>> Starting Build: $LIB_TYPE"
+                BUILD_DIR="build_$LIB_TYPE"
+
+                SHARED_FLAG=OFF
+                if [ "$LIB_TYPE" = SHARED ]; then SHARED_FLAG=ON; fi
+
+                cmake -S . -B "$BUILD_DIR" -G Ninja \
+                    -DCMAKE_BUILD_TYPE=Release \
+                    -DZXC_NATIVE_ARCH=OFF \
+                    -DZXC_ENABLE_LTO=OFF \
+                    -DBUILD_SHARED_LIBS="$SHARED_FLAG"
+
+                cmake --build "$BUILD_DIR" --parallel
+
+                echo "Running Tests for $LIB_TYPE..."
+                ctest --test-dir "$BUILD_DIR" --output-on-failure
+
+                echo ">>> Completed Build: $LIB_TYPE"
+                echo ""
+            done
