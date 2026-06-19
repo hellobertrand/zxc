@@ -383,13 +383,6 @@ jobs:
             arch: x86-64
             version: "14.3"
             install: sudo pkg install -y cmake ninja
-          - name: FreeBSD ARM64
-            kind: bsd
-            runner: ubuntu-latest
-            os: freebsd
-            arch: arm64
-            version: "14.3"
-            install: sudo pkg install -y cmake ninja
 
     steps:
       - name: Checkout Repository
@@ -427,8 +420,8 @@ jobs:
             done
           '
 
-      # FreeBSD: build & test inside a VM.
-      - name: Configure, Build & Test on FreeBSD (Static & Shared)
+      # FreeBSD: boot the VM, then build & test inside it via the cpa.sh shell
+      - name: Start FreeBSD VM
         if: matrix.kind == 'bsd'
         uses: cross-platform-actions/action@951f2f3aac1c695838eabd36b2750f6b2708c263 # v1.2.0
         with:
@@ -437,32 +430,36 @@ jobs:
           version: ${{ matrix.version }}
           memory: 5G
           cpu_count: 4
-          # POSIX sh (no bash in BSD base); LTO off to keep VM build times sane.
-          run: |
-            set -e
-            ${{ matrix.install }}
-            echo "=== Toolchain ==="
-            cc --version 2>/dev/null || true
-            cmake --version
 
-            for LIB_TYPE in STATIC SHARED; do
-                echo ">>> Starting Build: $LIB_TYPE"
-                BUILD_DIR="build_$LIB_TYPE"
+      # Runs inside the VM
+      - name: Configure, Build & Test on FreeBSD (Static & Shared)
+        if: matrix.kind == 'bsd'
+        shell: cpa.sh {0}
+        run: |
+          set -e
+          ${{ matrix.install }}
+          echo "=== Toolchain ==="
+          cc --version 2>/dev/null || true
+          cmake --version
 
-                SHARED_FLAG=OFF
-                if [ "$LIB_TYPE" = SHARED ]; then SHARED_FLAG=ON; fi
+          for LIB_TYPE in STATIC SHARED; do
+              echo ">>> Starting Build: $LIB_TYPE"
+              BUILD_DIR="build_$LIB_TYPE"
 
-                cmake -S . -B "$BUILD_DIR" -G Ninja \
-                    -DCMAKE_BUILD_TYPE=Release \
-                    -DZXC_NATIVE_ARCH=OFF \
-                    -DZXC_ENABLE_LTO=OFF \
-                    -DBUILD_SHARED_LIBS="$SHARED_FLAG"
+              SHARED_FLAG=OFF
+              if [ "$LIB_TYPE" = SHARED ]; then SHARED_FLAG=ON; fi
 
-                cmake --build "$BUILD_DIR" --parallel
+              cmake -S . -B "$BUILD_DIR" -G Ninja \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DZXC_ENABLE_LTO=OFF \
+                  -DBUILD_SHARED_LIBS="$SHARED_FLAG"
 
-                echo "Running Tests for $LIB_TYPE..."
-                ctest --test-dir "$BUILD_DIR" --output-on-failure
+              cmake --build "$BUILD_DIR" --parallel
 
-                echo ">>> Completed Build: $LIB_TYPE"
-                echo ""
-            done
+              echo "Running Tests for $LIB_TYPE..."
+              ctest --test-dir "$BUILD_DIR" --output-on-failure
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
