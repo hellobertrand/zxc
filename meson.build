@@ -4,9 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 project('zxc', 'c',
-  version : run_command('python3', '-c',
-    'import re; h=open("include/zxc_constants.h").read(); print(".".join(re.findall(r"ZXC_VERSION_(?:MAJOR|MINOR|PATCH)\s+(\d+)",h)))',
-    check : true).stdout().strip(),
+  version : '0.12.0',
   license : 'BSD-3-Clause',
   default_options : ['c_std=c17', 'buildtype=release', 'warning_level=2'],
   meson_version : '>= 0.60.0',
@@ -15,9 +13,8 @@ project('zxc', 'c',
 cc = meson.get_compiler('c')
 host_cpu = host_machine.cpu_family()
 
-zxc_soversion = run_command('python3', '-c',
-  'import re; print(re.search(r"set\\(ZXC_SOVERSION\\s+(\\d+)\\)", open("CMakeLists.txt").read()).group(1))',
-  check : true).stdout().strip()
+# Keep in sync with ZXC_SOVERSION in CMakeLists.txt (bumps only on an ABI break).
+zxc_soversion = '4'
 
 # =============================================================================
 # Platform defines
