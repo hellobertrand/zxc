@@ -1,0 +1,129 @@
+name: OS & libc Compatibility
+
+# Portability across the OS / libc axis (orthogonal to multiarch.yml, which
+# covers CPU architectures on glibc Linux):
+#   - musl libc (Alpine): catches non-glibc bugs the rest of CI can't see
+#     (e.g. the 128 KB default thread stack vs glibc's 8 MB). Native on both
+#     x86_64 and ARM64 runners via an Alpine container.
+#   - FreeBSD: non-glibc / clang-default portability canary, and the BSD that
+#     matters for packaging (ports, TrueNAS/ZFS, pfSense). Built in a VM via
+#     cross-platform-actions (no native BSD runners exist); x86_64 only, as
+#     FreeBSD arm64 would be QEMU-emulated and slow.
+# Both run the full STATIC+SHARED ctest suite and exercise runtime SIMD
+# dispatch (ZXC_NATIVE_ARCH=OFF).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+
+jobs:
+  build-compat:
+    name: "${{ matrix.name }}"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64 (Alpine musl)
+            kind: musl
+            runner: ubuntu-latest
+          - name: Linux ARM64 (Alpine musl)
+            kind: musl
+            runner: ubuntu-24.04-arm
+          - name: FreeBSD x86_64
+            kind: bsd
+            runner: ubuntu-latest
+            os: freebsd
+            arch: x86-64
+            version: "14.3"
+            install: sudo pkg install -y cmake ninja
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # musl: build & test inside an Alpine container.
+      - name: Configure, Build & Test under musl (Static & Shared)
+        if: matrix.kind == 'musl'
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/src" -w /src alpine:latest sh -euc '
+            apk add --no-cache build-base cmake
+            echo "=== Toolchain ==="
+            cc --version
+            cmake --version
+
+            for LIB_TYPE in STATIC SHARED; do
+                echo ">>> Starting Build: $LIB_TYPE"
+                BUILD_DIR="build_$LIB_TYPE"
+
+                SHARED_FLAG=OFF
+                if [ "$LIB_TYPE" = SHARED ]; then SHARED_FLAG=ON; fi
+
+                cmake -S . -B "$BUILD_DIR" \
+                    -DCMAKE_BUILD_TYPE=Release \
+                    -DZXC_NATIVE_ARCH=OFF \
+                    -DBUILD_SHARED_LIBS="$SHARED_FLAG"
+
+                cmake --build "$BUILD_DIR" --parallel
+
+                echo "Running Tests for $LIB_TYPE..."
+                ctest --test-dir "$BUILD_DIR" --output-on-failure
+
+                echo ">>> Completed Build: $LIB_TYPE"
+                echo ""
+            done
+          '
+
+      # FreeBSD: boot the VM, then build & test inside it via the cpa.sh shell
+      - name: Start FreeBSD VM
+        if: matrix.kind == 'bsd'
+        uses: cross-platform-actions/action@951f2f3aac1c695838eabd36b2750f6b2708c263 # v1.2.0
+        with:
+          operating_system: ${{ matrix.os }}
+          architecture: ${{ matrix.arch }}
+          version: ${{ matrix.version }}
+          memory: 5G
+          cpu_count: 4
+
+      # Runs inside the VM
+      - name: Configure, Build & Test on FreeBSD (Static & Shared)
+        if: matrix.kind == 'bsd'
+        shell: cpa.sh {0}
+        run: |
+          set -e
+          ${{ matrix.install }}
+          echo "=== Toolchain ==="
+          cc --version 2>/dev/null || true
+          cmake --version
+
+          for LIB_TYPE in STATIC SHARED; do
+              echo ">>> Starting Build: $LIB_TYPE"
+              BUILD_DIR="build_$LIB_TYPE"
+
+              SHARED_FLAG=OFF
+              if [ "$LIB_TYPE" = SHARED ]; then SHARED_FLAG=ON; fi
+
+              cmake -S . -B "$BUILD_DIR" -G Ninja \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DZXC_ENABLE_LTO=OFF \
+                  -DBUILD_SHARED_LIBS="$SHARED_FLAG"
+
+              cmake --build "$BUILD_DIR" --parallel
+
+              echo "Running Tests for $LIB_TYPE..."
+              ctest --test-dir "$BUILD_DIR" --output-on-failure
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
