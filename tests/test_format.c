@@ -107,21 +107,21 @@ int test_huffman_codec() {
     if (!buf) return 0;
 
     /* Case 1: heavily skewed (90% one byte, 10% noise). */
-    for (size_t i = 0; i < N; i++) buf[i] = (rand() % 10 == 0) ? (uint8_t)(rand() & 0xFF) : 'A';
+    for (size_t i = 0; i < N; i++) buf[i] = (zxc_test_rand() % 10 == 0) ? (uint8_t)(zxc_test_rand() & 0xFF) : 'A';
     if (!huf_roundtrip_case("Skewed (90% 'A')", buf, N)) {
         free(buf);
         return 0;
     }
 
     /* Case 2: uniform random - Huffman should be near no-op (~1 byte/sym). */
-    for (size_t i = 0; i < N; i++) buf[i] = (uint8_t)(rand() & 0xFF);
+    for (size_t i = 0; i < N; i++) buf[i] = (uint8_t)(zxc_test_rand() & 0xFF);
     if (!huf_roundtrip_case("Uniform random", buf, N)) {
         free(buf);
         return 0;
     }
 
     /* Case 3: two-symbol alphabet - best case, ~1 bit/symbol. */
-    for (size_t i = 0; i < N; i++) buf[i] = (rand() & 1) ? 'X' : 'Y';
+    for (size_t i = 0; i < N; i++) buf[i] = (zxc_test_rand() & 1) ? 'X' : 'Y';
     if (!huf_roundtrip_case("Two-symbol alphabet", buf, N)) {
         free(buf);
         return 0;
@@ -136,7 +136,7 @@ int test_huffman_codec() {
 
     /* Case 5: small block (just above the min-literals threshold). */
     for (size_t i = 0; i < ZXC_HUF_MIN_LITERALS; i++)
-        buf[i] = (rand() % 4 == 0) ? (uint8_t)(rand() & 0xFF) : 'k';
+        buf[i] = (zxc_test_rand() % 4 == 0) ? (uint8_t)(zxc_test_rand() & 0xFF) : 'k';
     if (!huf_roundtrip_case("Small block at threshold", buf, ZXC_HUF_MIN_LITERALS)) {
         free(buf);
         return 0;
@@ -245,14 +245,14 @@ int test_huffman_codec_dict() {
     if (!buf) return 0;
 
     /* Skewed text-like distribution: the shared-table sweet spot. */
-    for (size_t i = 0; i < N; i++) buf[i] = (rand() % 10 == 0) ? (uint8_t)(rand() & 0x7F) : 'A';
+    for (size_t i = 0; i < N; i++) buf[i] = (zxc_test_rand() % 10 == 0) ? (uint8_t)(zxc_test_rand() & 0x7F) : 'A';
     if (!huf_dict_roundtrip_case("Skewed (90% 'A')", buf, N)) {
         free(buf);
         return 0;
     }
 
     /* Two-symbol alphabet: ~1 bit/symbol, headerless gain is maximal. */
-    for (size_t i = 0; i < N; i++) buf[i] = (rand() & 1) ? 'X' : 'Y';
+    for (size_t i = 0; i < N; i++) buf[i] = (zxc_test_rand() & 1) ? 'X' : 'Y';
     if (!huf_dict_roundtrip_case("Two-symbol alphabet", buf, N)) {
         free(buf);
         return 0;
@@ -260,7 +260,7 @@ int test_huffman_codec_dict() {
 
     /* Small block: where the 128-byte header would dominate per-block cost. */
     for (size_t i = 0; i < ZXC_HUF_MIN_LITERALS; i++)
-        buf[i] = (rand() % 4 == 0) ? (uint8_t)('a' + (rand() % 26)) : 'k';
+        buf[i] = (zxc_test_rand() % 4 == 0) ? (uint8_t)('a' + (zxc_test_rand() % 26)) : 'k';
     if (!huf_dict_roundtrip_case("Small block at threshold", buf, ZXC_HUF_MIN_LITERALS)) {
         free(buf);
         return 0;
@@ -270,7 +270,7 @@ int test_huffman_codec_dict() {
      * encoder (the validity check that triggers the per-block fallback). */
     {
         uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
-        for (size_t i = 0; i < 256; i++) buf[i] = (rand() & 1) ? 'X' : 'Y';
+        for (size_t i = 0; i < 256; i++) buf[i] = (zxc_test_rand() & 1) ? 'X' : 'Y';
         for (size_t i = 0; i < 256; i++) freq[buf[i]]++;
         uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
         if (zxc_huf_build_code_lengths(freq, code_len, NULL) != ZXC_OK) {

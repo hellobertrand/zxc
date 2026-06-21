@@ -11,7 +11,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #ifdef _MSC_VER
@@ -34,6 +33,13 @@
 /* Creates a temporary file with restricted permissions (0600).
  * Returns a FILE* opened for writing, or NULL on failure. */
 FILE* create_restricted_file(const char* path);
+
+/* --- Deterministic PRNG ------------------------------------------------- */
+
+/* Test-only pseudorandom generator (splitmix64). Used purely to synthesize
+ * test payloads. */
+void zxc_test_srand(uint64_t seed);
+uint32_t zxc_test_rand(void);
 
 /* --- Data generators ---------------------------------------------------- */
 

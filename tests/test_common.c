@@ -7,6 +7,19 @@
 
 #include "test_common.h"
 
+/* Deterministic, platform-independent test PRNG (splitmix64) */
+static uint64_t zxc_test_rng_state = 0x9E3779B97F4A7C15ULL;
+
+void zxc_test_srand(uint64_t seed) { zxc_test_rng_state = seed; }
+
+uint32_t zxc_test_rand(void) {
+    uint64_t z = (zxc_test_rng_state += 0x9E3779B97F4A7C15ULL);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    z = z ^ (z >> 31);
+    return (uint32_t)(z >> 32);
+}
+
 FILE* create_restricted_file(const char* path) {
 #ifdef _MSC_VER
     int fd = -1;
@@ -20,7 +33,7 @@ FILE* create_restricted_file(const char* path) {
 
 // Generates a buffer of random data (To force RAW)
 void gen_random_data(uint8_t* const buf, const size_t size) {
-    for (size_t i = 0; i < size; i++) buf[i] = rand() & 0xFF;
+    for (size_t i = 0; i < size; i++) buf[i] = zxc_test_rand() & 0xFF;
 }
 
 // Generates repetitive data (To force GLO/GHI/LZ)
