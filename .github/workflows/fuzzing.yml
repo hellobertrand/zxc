@@ -112,9 +112,11 @@ jobs:
           sudo apt-get install -y -qq llvm
 
       - name: Clone Fuzz Corpus
+        env:
+          CORPUS_TOKEN: ${{ secrets.CFLITE_CORPUS_TOKEN }}
         run: |
           git clone --depth=1 \
-            https://${{ secrets.CFLITE_CORPUS_TOKEN }}@github.com/hellobertrand/zxc-fuzz-corpus.git \
+            "https://${CORPUS_TOKEN}@github.com/hellobertrand/zxc-fuzz-corpus.git" \
             corpus
           echo "roundtrip inputs: $(find corpus/corpus/zxc_fuzzer_roundtrip -type f | wc -l)"
           echo "decompress inputs: $(find corpus/corpus/zxc_fuzzer_decompress -type f | wc -l)"
