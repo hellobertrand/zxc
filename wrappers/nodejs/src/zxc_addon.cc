@@ -506,7 +506,7 @@ class CStreamWrap : public Napi::ObjectWrap<CStreamWrap> {
                            });
     }
 
-    CStreamWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<CStreamWrap>(info) {
+    explicit CStreamWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<CStreamWrap>(info) {
         Napi::Env env = info.Env();
         zxc_compress_opts_t opts = {0};
         opts.level = ZXC_LEVEL_DEFAULT;
@@ -641,7 +641,7 @@ class DStreamWrap : public Napi::ObjectWrap<DStreamWrap> {
                            });
     }
 
-    DStreamWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<DStreamWrap>(info) {
+    explicit DStreamWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<DStreamWrap>(info) {
         Napi::Env env = info.Env();
         zxc_decompress_opts_t opts = {0};
         if (info.Length() >= 1 && info[0].IsObject()) {
@@ -767,7 +767,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
             });
     }
 
-    SeekableWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<SeekableWrap>(info) {
+    explicit SeekableWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<SeekableWrap>(info) {
         Napi::Env env = info.Env();
         if (info.Length() < 1) {
             Napi::TypeError::New(env, "Expected a Buffer or { size, readAt } object")
