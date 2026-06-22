@@ -7,6 +7,7 @@
 
 #include <napi.h>
 
+#include <array>
 #include <cstring>
 #include <vector>
 
@@ -102,7 +103,7 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
         zxc_compress(src, src_size, dst_buf.Data(), static_cast<size_t>(bound), &opts);
 
     if (nwritten < 0) {
-        int err_code = static_cast<int>(nwritten);
+        auto err_code = static_cast<int>(nwritten);
         Napi::Error err = Napi::Error::New(env, zxc_error_name(err_code));
         err.Set("code", Napi::Number::New(env, err_code));
         err.ThrowAsJavaScriptException();
@@ -176,7 +177,7 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
     int64_t nwritten = zxc_decompress(src, src_size, dst, decompress_size, &dopts);
 
     if (nwritten < 0) {
-        int err_code = static_cast<int>(nwritten);
+        auto err_code = static_cast<int>(nwritten);
         Napi::Error err = Napi::Error::New(env, zxc_error_name(err_code));
         err.Set("code", Napi::Number::New(env, err_code));
         err.ThrowAsJavaScriptException();
@@ -347,12 +348,13 @@ static Napi::Value TrainDictHuf(const Napi::CallbackInfo& info) {
     }
 
     Napi::Buffer<uint8_t> dict = info[1].As<Napi::Buffer<uint8_t>>();
-    uint8_t huf[ZXC_HUF_TABLE_SIZE];
-    int r = zxc_train_dict_huf(samples.data(), sizes.data(), n, dict.Data(), dict.Length(), huf);
+    std::array<uint8_t, ZXC_HUF_TABLE_SIZE> huf;
+    int r = zxc_train_dict_huf(samples.data(), sizes.data(), n, dict.Data(), dict.Length(),
+                               huf.data());
     if (r < 0) {
         return ThrowZxcError(env, r);
     }
-    return Napi::Buffer<uint8_t>::Copy(env, huf, ZXC_HUF_TABLE_SIZE);
+    return Napi::Buffer<uint8_t>::Copy(env, huf.data(), huf.size());
 }
 
 // dictHuf(zxd: Buffer): Buffer | null  (128-byte shared Huffman table)
@@ -849,7 +851,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
     // as ZXC_ERROR_IO so it doesn't unwind through C.
     static int64_t ReadAtTrampoline(void* ctx, void* dst, size_t len, uint64_t offset) {
         constexpr int64_t kZxcErrorIo = -11;
-        SeekableWrap* self = static_cast<SeekableWrap*>(ctx);
+        auto* self = static_cast<SeekableWrap*>(ctx);
         if (!self || self->read_at_ref_.IsEmpty()) return kZxcErrorIo;
         Napi::Env env = self->env_;
         Napi::HandleScope scope(env);
