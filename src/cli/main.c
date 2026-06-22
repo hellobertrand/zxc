@@ -984,7 +984,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .dict = dict,
             .dict_size = dict_size,
             .dict_huf = g_dict_huf,
-            .progress_cb = show_progress ? cli_progress_callback : NULL,
+            .progress_cb = show_progress ? &cli_progress_callback : NULL,
             .user_data = &pctx,
         };
         bytes = zxc_stream_compress(f_in, f_out, &copts);
@@ -995,7 +995,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .dict = dict,
             .dict_size = dict_size,
             .dict_huf = g_dict_huf,
-            .progress_cb = show_progress ? cli_progress_callback : NULL,
+            .progress_cb = show_progress ? &cli_progress_callback : NULL,
             .user_data = &pctx,
         };
         bytes = zxc_stream_decompress(f_in, f_out, &dopts);
@@ -1392,7 +1392,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         const int n_files = argc - optind;
-        const void** samples = (const void**)malloc((size_t)n_files * sizeof(void*));
+        void** samples = (void**)malloc((size_t)n_files * sizeof(void*));
         size_t* sample_sizes = (size_t*)malloc((size_t)n_files * sizeof(size_t));
         if (!samples || !sample_sizes) {
             fprintf(stderr, "Error: memory allocation failed\n");
@@ -1449,15 +1449,15 @@ int main(int argc, char** argv) {
         uint8_t* dict_buf = (uint8_t*)malloc(dict_cap);
         if (!dict_buf) {
             fprintf(stderr, "Error: memory allocation failed\n");
-            for (int i = 0; i < n_loaded; i++) free((void*)samples[i]);
+            for (int i = 0; i < n_loaded; i++) free(samples[i]);
             free(samples);
             free(sample_sizes);
             free(dict);
             return 1;
         }
 
-        int64_t dict_sz =
-            zxc_train_dict(samples, sample_sizes, (size_t)n_loaded, dict_buf, dict_cap);
+        int64_t dict_sz = zxc_train_dict((const void* const*)samples, sample_sizes,
+                                         (size_t)n_loaded, dict_buf, dict_cap);
 
         /* Train the shared literal Huffman table on the same samples (needs
          * the trained dict for the post-LZ literal distribution). The .zxd
@@ -1465,11 +1465,11 @@ int main(int argc, char** argv) {
         uint8_t huf_lengths[ZXC_HUF_TABLE_SIZE];
         int huf_rc = ZXC_ERROR_NULL_INPUT;
         if (dict_sz > 0) {
-            huf_rc = zxc_train_dict_huf(samples, sample_sizes, (size_t)n_loaded, dict_buf,
-                                        (size_t)dict_sz, huf_lengths);
+            huf_rc = zxc_train_dict_huf((const void* const*)samples, sample_sizes, (size_t)n_loaded,
+                                        dict_buf, (size_t)dict_sz, huf_lengths);
         }
 
-        for (int i = 0; i < n_loaded; i++) free((void*)samples[i]);
+        for (int i = 0; i < n_loaded; i++) free(samples[i]);
         free(samples);
         free(sample_sizes);
 
