@@ -77,6 +77,7 @@ int optopt = 0;
  */
 static int getopt_long(int argc, char* const argv[], const char* optstring,
                        const struct option* longopts, int* longindex) {
+    (void)longindex;
     if (optind >= argc) return -1;
     char* curr = argv[optind];
     if (curr[0] == '-' && curr[1] == '-') {
@@ -532,6 +533,7 @@ typedef struct {
  */
 static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total,
                                   const void* user_data) {
+    (void)bytes_total; /* required by zxc_progress_callback_t */
     const progress_ctx_t* pctx = (const progress_ctx_t*)user_data;
 
     if (!pctx) return;
@@ -930,12 +932,10 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         if (mode == MODE_COMPRESS) {
             // Compression: get input file size
             const long long saved_pos = ftello(f_in);
-            if (saved_pos >= 0) {
-                if (fseeko(f_in, 0, SEEK_END) == 0) {
-                    const long long size = ftello(f_in);
-                    if (size > 0) total_size = (uint64_t)size;
-                    fseeko(f_in, saved_pos, SEEK_SET);
-                }
+            if (saved_pos >= 0 && fseeko(f_in, 0, SEEK_END) == 0) {
+                const long long size = ftello(f_in);
+                if (size > 0) total_size = (uint64_t)size;
+                fseeko(f_in, saved_pos, SEEK_SET);
             }
         } else {
             // Decompression: get decompressed size from footer (BEFORE starting decompression)
