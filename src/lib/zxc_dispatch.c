@@ -832,7 +832,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         const size_t st_cap = (size_t)(op_end - op);
         const int64_t st_val = zxc_write_seek_table(op, st_cap, seek_comp, seek_count);
         ZXC_FREE(seek_comp);
-        if (UNLIKELY(st_val < 0)) return (int64_t)st_val;  // LCOV_EXCL_LINE
+        if (UNLIKELY(st_val < 0)) return st_val;  // LCOV_EXCL_LINE
         op += st_val;
     } else {
         ZXC_FREE(seek_comp);
