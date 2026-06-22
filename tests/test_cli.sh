@@ -53,7 +53,7 @@ cleanup() {
 trap cleanup EXIT
 
 # 0. Check binary
-if [ ! -f "$ZXC_BIN" ]; then
+if [[ ! -f "$ZXC_BIN" ]]; then
     log_fail "Binary not found at $ZXC_BIN. Please build the project first."
 fi
 echo "Using binary: $ZXC_BIN"
@@ -79,8 +79,8 @@ wait_for_file() {
     local retries=10
     local count=0
     # On Windows, file locking can cause race conditions immediately after creation.
-    while [ $count -lt $retries ]; do
-        if [ -f "$file" ]; then
+    while [[ $count -lt $retries ]]; do
+        if [[ -f "$file" ]]; then
              # Try to read a byte to ensure it's not exclusively locked
              if head -c 1 "$file" >/dev/null 2>&1; then
                  return 0
@@ -154,12 +154,12 @@ fi
 echo "Testing Piping..."
 rm -f "$PIPE_XC" "$PIPE_DEC"
 cat "$TEST_FILE" | "$ZXC_BIN" > "$PIPE_XC"
-if [ ! -s "$PIPE_XC" ]; then
+if [[ ! -s "$PIPE_XC" ]]; then
     log_fail "Piping compression failed (empty output)"
 fi
 
 cat "$PIPE_XC" | "$ZXC_BIN" -d > "$PIPE_DEC"
-if [ ! -s "$PIPE_DEC" ]; then
+if [[ ! -s "$PIPE_DEC" ]]; then
     log_fail "Piping decompression failed (empty output)"
 fi
 
@@ -173,7 +173,7 @@ fi
 echo "Testing Flags..."
 # Level
 "$ZXC_BIN" -1 -k -f "$TEST_FILE_ARG"
-if [ ! -f "$TEST_FILE_XC_BASH" ]; then log_fail "Level 1 flag failed"; fi
+if [[ ! -f "$TEST_FILE_XC_BASH" ]]; then log_fail "Level 1 flag failed"; fi
 log_pass "Flag -1"
 
 # Force Overwrite (-f)
@@ -183,14 +183,14 @@ set +e
 "$ZXC_BIN" -z -k "$TEST_FILE_ARG" > /dev/null 2>&1
 RET=$?
 set -e
-if [ $RET -eq 0 ]; then
+if [[ $RET -eq 0 ]]; then
      log_fail "Should have failed to overwrite without -f"
 else
      log_pass "Overwrite protection verified"
 fi
 
 "$ZXC_BIN" -z -k -f "$TEST_FILE_ARG"
-if [ $? -eq 0 ]; then
+if [[ $? -eq 0 ]]; then
    log_pass "Force overwrite (-f)"
 else
    log_fail "Force overwrite failed"
@@ -199,7 +199,7 @@ fi
 # 5. Benchmark
 echo "Testing Benchmark..."
 "$ZXC_BIN" -b1 "$TEST_FILE_ARG" > /dev/null
-if [ $? -eq 0 ]; then
+if [[ $? -eq 0 ]]; then
     log_pass "Benchmark mode"
 else
     log_fail "Benchmark mode failed"
@@ -211,7 +211,7 @@ set +e
 "$ZXC_BIN" "nonexistent_file" > /dev/null 2>&1
 RET=$?
 set -e
-if [ $RET -ne 0 ]; then
+if [[ $RET -ne 0 ]]; then
     log_pass "Missing file error handled"
 else
     log_fail "Missing file should return error"
@@ -229,17 +229,17 @@ fi
 # 8. Checksum
 echo "Testing Checksum..."
 "$ZXC_BIN" -C -k -f "$TEST_FILE_ARG"
-if [ ! -f "$TEST_FILE_XC_BASH" ]; then log_fail "Checksum compression failed"; fi
+if [[ ! -f "$TEST_FILE_XC_BASH" ]]; then log_fail "Checksum compression failed"; fi
 rm -f "$TEST_FILE"
 "$ZXC_BIN" -d "$TEST_FILE_XC_ARG"
-if [ ! -f "$TEST_FILE" ]; then log_fail "Checksum decompression failed"; fi
+if [[ ! -f "$TEST_FILE" ]]; then log_fail "Checksum decompression failed"; fi
 log_pass "Checksum enabled (-C)"
 
 "$ZXC_BIN" -N -k -f "$TEST_FILE_ARG"
-if [ ! -f "$TEST_FILE_XC_BASH" ]; then log_fail "No-Checksum compression failed"; fi
+if [[ ! -f "$TEST_FILE_XC_BASH" ]]; then log_fail "No-Checksum compression failed"; fi
 rm -f "$TEST_FILE"
 "$ZXC_BIN" -d "$TEST_FILE_XC_ARG"
-if [ ! -f "$TEST_FILE" ]; then log_fail "No-Checksum decompression failed"; fi
+if [[ ! -f "$TEST_FILE" ]]; then log_fail "No-Checksum decompression failed"; fi
 log_pass "Checksum disabled (-N)"
 
 # 9. Integrity Test (-t)
@@ -270,7 +270,7 @@ set +e
 OUT=$("$ZXC_BIN" -t "$TEST_FILE_XC_ARG" 2>&1)
 RET=$?
 set -e
-if [ $RET -ne 0 ] && [[ "$OUT" == *": FAILED"* ]]; then
+if [[ $RET -ne 0 ]] && [[ "$OUT" == *": FAILED"* ]]; then
     log_pass "Integrity check correctly failed on corrupt file"
 else
     log_fail "Integrity check PASSED on corrupt file (False Negative)"
@@ -289,14 +289,14 @@ set +e
 OUT=$("$ZXC_BIN" -t "$TEST_FILE_XC_ARG" 2>&1)
 RET=$?
 set -e
-if [ $RET -ne 0 ] && [[ "$OUT" == *": FAILED"* ]]; then
+if [[ $RET -ne 0 ]] && [[ "$OUT" == *": FAILED"* ]]; then
     log_pass "Integrity check correctly failed on corrupt Global Checksum"
 else
     log_fail "Integrity check PASSED on corrupt Global Checksum (False Negative)"
 fi
 
 # Ensure no output file is created
-if [ -f "${TEST_FILE}.zxc.zxc" ] || [ -f "${TEST_FILE}.zxc.dec" ]; then
+if [[ -f "${TEST_FILE}.zxc.zxc" ]] || [[ -f "${TEST_FILE}.zxc.dec" ]]; then
     log_fail "Integrity check created output file unexpectedly"
 fi
 
@@ -325,7 +325,7 @@ set +e
 "$ZXC_BIN" -l "nonexistent_file" > /dev/null 2>&1
 RET=$?
 set -e
-if [ $RET -ne 0 ]; then
+if [[ $RET -ne 0 ]]; then
     log_pass "List command error handling"
 else
     log_fail "List command should fail on nonexistent file"
@@ -335,7 +335,7 @@ fi
 echo "Testing All Compression Levels..."
 for LEVEL in 1 2 3 4 5 6; do
     "$ZXC_BIN" -$LEVEL -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_lvl${LEVEL}.zxc"
-    if [ ! -f "$TEST_DIR/test_lvl${LEVEL}.zxc" ]; then
+    if [[ ! -f "$TEST_DIR/test_lvl${LEVEL}.zxc" ]]; then
         log_fail "Compression level $LEVEL failed"
     fi
     
@@ -356,7 +356,7 @@ echo "Testing Different Data Types..."
 echo "  Testing repetitive data..."
 yes "Lorem ipsum dolor sit amet" | head -n 1000 > "$TEST_DIR/test_repetitive.txt"
 "$ZXC_BIN" -3 -k "$TEST_DIR/test_repetitive.txt"
-if [ ! -f "$TEST_DIR/test_repetitive.txt.zxc" ]; then
+if [[ ! -f "$TEST_DIR/test_repetitive.txt.zxc" ]]; then
     log_fail "Repetitive data compression failed"
 fi
 "$ZXC_BIN" -d -c "$TEST_DIR/test_repetitive.txt.zxc" > "$TEST_DIR/test_repetitive.dec"
@@ -373,7 +373,7 @@ fi
 echo "  Testing binary zeros..."
 dd if=/dev/zero bs=1024 count=100 of="$TEST_DIR/test_zeros.bin" 2>/dev/null
 "$ZXC_BIN" -3 -k "$TEST_DIR/test_zeros.bin"
-if [ ! -f "$TEST_DIR/test_zeros.bin.zxc" ]; then
+if [[ ! -f "$TEST_DIR/test_zeros.bin.zxc" ]]; then
     log_fail "Binary zeros compression failed"
 fi
 "$ZXC_BIN" -d -c "$TEST_DIR/test_zeros.bin.zxc" > "$TEST_DIR/test_zeros.dec"
@@ -390,7 +390,7 @@ fi
 echo "  Testing random data (incompressible)..."
 dd if=/dev/urandom bs=1024 count=100 of="$TEST_DIR/test_random.bin" 2>/dev/null
 "$ZXC_BIN" -3 -k "$TEST_DIR/test_random.bin"
-if [ ! -f "$TEST_DIR/test_random.bin.zxc" ]; then
+if [[ ! -f "$TEST_DIR/test_random.bin.zxc" ]]; then
     log_fail "Random data compression failed"
 fi
 "$ZXC_BIN" -d -c "$TEST_DIR/test_random.bin.zxc" > "$TEST_DIR/test_random.dec"
@@ -398,7 +398,7 @@ if cmp -s "$TEST_DIR/test_random.bin" "$TEST_DIR/test_random.dec"; then
     SIZE_ORIG=$(wc -c < "$TEST_DIR/test_random.bin" | tr -d ' ')
     SIZE_COMP=$(wc -c < "$TEST_DIR/test_random.bin.zxc" | tr -d ' ')
     # Random data should expand slightly (RAW blocks + headers)
-    if [ $SIZE_COMP -le $((SIZE_ORIG + 200)) ]; then
+    if [[ $SIZE_COMP -le $((SIZE_ORIG + 200)) ]]; then
         log_pass "Random data (RAW blocks, minimal expansion)"
     else
         log_fail "Random data expanded too much"
@@ -435,11 +435,11 @@ fi
 echo "Testing Empty File..."
 touch "$TEST_DIR/test_empty.txt"
 "$ZXC_BIN" -3 -k "$TEST_DIR/test_empty.txt"
-if [ ! -f "$TEST_DIR/test_empty.txt.zxc" ]; then
+if [[ ! -f "$TEST_DIR/test_empty.txt.zxc" ]]; then
     log_fail "Empty file compression failed"
 fi
 "$ZXC_BIN" -d -c "$TEST_DIR/test_empty.txt.zxc" > "$TEST_DIR/test_empty.dec"
-if [ ! -s "$TEST_DIR/test_empty.dec" ]; then
+if [[ ! -s "$TEST_DIR/test_empty.dec" ]]; then
     log_pass "Empty file round-trip"
 else
     log_fail "Empty file produced non-empty output"
@@ -448,7 +448,7 @@ fi
 # 17. Stdin Detection (No -c flag needed for compression)
 echo "Testing Stdin Auto-Detection..."
 cat "$TEST_FILE" | "$ZXC_BIN" > "$TEST_DIR/test_stdin_auto.zxc" 2>/dev/null
-if [ -s "$TEST_DIR/test_stdin_auto.zxc" ]; then
+if [[ -s "$TEST_DIR/test_stdin_auto.zxc" ]]; then
     "$ZXC_BIN" -d -c "$TEST_DIR/test_stdin_auto.zxc" > "$TEST_DIR/test_stdin_auto.dec"
     if cmp -s "$TEST_FILE" "$TEST_DIR/test_stdin_auto.dec"; then
         log_pass "Stdin auto-detection (compression)"
@@ -463,7 +463,7 @@ fi
 echo "Testing Keep Source (-k)..."
 cp "$TEST_FILE" "$TEST_DIR/test_keep.txt"
 "$ZXC_BIN" -k "$TEST_DIR/test_keep.txt"
-if [ -f "$TEST_DIR/test_keep.txt" ] && [ -f "$TEST_DIR/test_keep.txt.zxc" ]; then
+if [[ -f "$TEST_DIR/test_keep.txt" ]] && [[ -f "$TEST_DIR/test_keep.txt.zxc" ]]; then
     log_pass "Keep source file (-k)"
 else
     log_fail "Keep source file failed (source was deleted)"
@@ -475,7 +475,7 @@ echo "Testing Multi-Threading..."
 # 19.1 Single Thread (baseline)
 echo "  Testing single thread (-T1)..."
 "$ZXC_BIN" -3 -T1 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_T1.zxc"
-if [ ! -f "$TEST_DIR/test_T1.zxc" ]; then
+if [[ ! -f "$TEST_DIR/test_T1.zxc" ]]; then
     log_fail "Single thread compression failed"
 fi
 "$ZXC_BIN" -d -c "$TEST_DIR/test_T1.zxc" > "$TEST_DIR/test_T1.dec"
@@ -489,7 +489,7 @@ fi
 # 19.2 Multi-Thread (2 threads)
 echo "  Testing 2 threads (-T2)..."
 "$ZXC_BIN" -3 -T2 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_T2.zxc"
-if [ ! -f "$TEST_DIR/test_T2.zxc" ]; then
+if [[ ! -f "$TEST_DIR/test_T2.zxc" ]]; then
     log_fail "2-thread compression failed"
 fi
 "$ZXC_BIN" -d -c "$TEST_DIR/test_T2.zxc" > "$TEST_DIR/test_T2.dec"
@@ -503,7 +503,7 @@ fi
 # 19.3 Multi-Thread (all threads)
 echo "  Testing all threads (-T0)..."
 "$ZXC_BIN" -3 -T0 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_T0.zxc"
-if [ ! -f "$TEST_DIR/test_T0.zxc" ]; then
+if [[ ! -f "$TEST_DIR/test_T0.zxc" ]]; then
     log_fail "all-thread compression failed"
 fi
 "$ZXC_BIN" -d -c "$TEST_DIR/test_T0.zxc" > "$TEST_DIR/test_T0.dec"
@@ -614,7 +614,7 @@ set +e
 JSON_OUT=$("$ZXC_BIN" -t -j "$TEST_FILE_XC_ARG" 2>&1)
 RET=$?
 set -e
-if [ $RET -ne 0 ] && \
+if [[ $RET -ne 0 ]] && \
    [[ "$JSON_OUT" == *'"filename"'* ]] && \
    [[ "$JSON_OUT" == *'"status": "failed"'* ]] && \
    [[ "$JSON_OUT" == *'"error"'* ]]; then
@@ -646,7 +646,7 @@ cp "$TEST_FILE" "$TEST_DIR/multi1.txt"
 cp "$TEST_FILE" "$TEST_DIR/multi2.txt"
 "$ZXC_BIN" -m -3 "$TEST_DIR/multi1.txt" "$TEST_DIR/multi2.txt"
 
-if [ -f "$TEST_DIR/multi1.txt.zxc" ] && [ -f "$TEST_DIR/multi2.txt.zxc" ]; then
+if [[ -f "$TEST_DIR/multi1.txt.zxc" ]] && [[ -f "$TEST_DIR/multi2.txt.zxc" ]]; then
     log_pass "Compress multiple files (-m)"
 else
     log_fail "Compress multiple files failed"
@@ -669,7 +669,7 @@ set +e
 "$ZXC_BIN" -m -c "$TEST_DIR/multi1.txt" "$TEST_DIR/multi2.txt" > /dev/null 2>&1
 RET=$?
 set -e
-if [ $RET -ne 0 ]; then
+if [[ $RET -ne 0 ]]; then
     log_pass "Stdout rejected with multiple mode"
 else
     log_fail "Stdout should be rejected with multiple mode"
@@ -689,9 +689,9 @@ cp "$TEST_FILE" "$TEST_DIR/rec_test/subdir2/fileC.txt"
 echo "  Testing compress recursive directory..."
 "$ZXC_BIN" -r -3 "$TEST_DIR/rec_test"
 
-if [ -f "$TEST_DIR/rec_test/fileA.txt.zxc" ] && \
-   [ -f "$TEST_DIR/rec_test/subdir1/fileB.txt.zxc" ] && \
-   [ -f "$TEST_DIR/rec_test/subdir2/fileC.txt.zxc" ]; then
+if [[ -f "$TEST_DIR/rec_test/fileA.txt.zxc" ]] && \
+   [[ -f "$TEST_DIR/rec_test/subdir1/fileB.txt.zxc" ]] && \
+   [[ -f "$TEST_DIR/rec_test/subdir2/fileC.txt.zxc" ]]; then
     log_pass "Compress recursive directory (-r)"
 else
     log_fail "Compress recursive directory failed"
@@ -717,7 +717,7 @@ echo "Testing Block Size (-B)..."
 for BS in 4K 64K 512K 1M; do
     echo "  Testing block size -B $BS..."
     "$ZXC_BIN" -3 -B "$BS" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_${BS}.zxc"
-    if [ ! -s "$TEST_DIR/test_bs_${BS}.zxc" ]; then
+    if [[ ! -s "$TEST_DIR/test_bs_${BS}.zxc" ]]; then
         log_fail "Block size $BS compression produced empty output"
     fi
     "$ZXC_BIN" -d -c "$TEST_DIR/test_bs_${BS}.zxc" > "$TEST_DIR/test_bs_${BS}.dec"
@@ -753,7 +753,7 @@ set +e
 "$ZXC_BIN" -3 -B 100K "$TEST_FILE_ARG" > /dev/null 2>&1
 RET=$?
 set -e
-if [ $RET -ne 0 ]; then
+if [[ $RET -ne 0 ]]; then
     log_pass "Invalid block size rejected (100K)"
 else
     log_fail "Invalid block size should be rejected (100K is not power of 2)"
@@ -764,7 +764,7 @@ set +e
 "$ZXC_BIN" -3 -B 2K "$TEST_FILE_ARG" > /dev/null 2>&1
 RET=$?
 set -e
-if [ $RET -ne 0 ]; then
+if [[ $RET -ne 0 ]]; then
     log_pass "Block size too small rejected (2K)"
 else
     log_fail "Block size 2K should be rejected (min is 4K)"
@@ -775,7 +775,7 @@ set +e
 "$ZXC_BIN" -3 -B 4M "$TEST_FILE_ARG" > /dev/null 2>&1
 RET=$?
 set -e
-if [ $RET -ne 0 ]; then
+if [[ $RET -ne 0 ]]; then
     log_pass "Block size too large rejected (4M)"
 else
     log_fail "Block size 4M should be rejected (max is 2M)"
@@ -788,7 +788,7 @@ echo "Testing Seekable Format (-S)..."
 echo "  Testing basic seekable round-trip..."
 rm -f "$TEST_FILE_XC_ARG" "$TEST_FILE_DEC_BASH"
 "$ZXC_BIN" -S -c "$TEST_FILE_ARG" > "$TEST_FILE_XC_ARG"
-if [ ! -s "$TEST_FILE_XC_ARG" ]; then
+if [[ ! -s "$TEST_FILE_XC_ARG" ]]; then
     log_fail "Seekable compression failed"
 fi
 "$ZXC_BIN" -d -c "$TEST_FILE_XC_ARG" > "$TEST_FILE_DEC_BASH"
@@ -804,7 +804,7 @@ echo "  Testing seekable overhead..."
 "$ZXC_BIN" -3 -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable.zxc"
 SIZE_NORMAL=$(wc -c < "$TEST_DIR/normal.zxc" | tr -d ' ')
 SIZE_SEEKABLE=$(wc -c < "$TEST_DIR/seekable.zxc" | tr -d ' ')
-if [ "$SIZE_SEEKABLE" -gt "$SIZE_NORMAL" ]; then
+if [[ "$SIZE_SEEKABLE" -gt "$SIZE_NORMAL" ]]; then
     OVERHEAD=$((SIZE_SEEKABLE - SIZE_NORMAL))
     log_pass "Seekable overhead verified (+${OVERHEAD} bytes)"
 else
@@ -818,7 +818,7 @@ echo "  Testing seekable with small blocks (-B 4K)..."
 if cmp -s "$TEST_FILE" "$TEST_DIR/seekable_4k.dec"; then
     SIZE_4K=$(wc -c < "$TEST_DIR/seekable_4k.zxc" | tr -d ' ')
     # With 4K blocks, overhead should be larger than with default 256K blocks
-    if [ "$SIZE_4K" -gt "$SIZE_SEEKABLE" ]; then
+    if [[ "$SIZE_4K" -gt "$SIZE_SEEKABLE" ]]; then
         log_pass "Seekable small blocks (-B 4K, Size: $SIZE_4K, more entries)"
     else
         log_pass "Seekable small blocks (-B 4K, Size: $SIZE_4K)"
@@ -858,7 +858,7 @@ for LEVEL in 1 2 3 4 5 6; do
         log_fail "Seekable level $LEVEL round-trip failed"
     fi
 done
-if [ "$SEEK_ALL_OK" -eq 1 ]; then
+if [[ "$SEEK_ALL_OK" -eq 1 ]]; then
     log_pass "Seekable across all levels (1-5)"
 fi
 # 24.7 Seekable pipe round-trip (no fseeko - validates SEK skip on stdin)
@@ -901,7 +901,7 @@ for i in 1 2 3 4 5; do
 done
 DICT_FILE="$TEST_DIR/test.zxd"
 "$ZXC_BIN" --train -o "$DICT_FILE" "$TEST_DIR"/sample_*.txt 2>/dev/null
-if [ ! -f "$DICT_FILE" ]; then
+if [[ ! -f "$DICT_FILE" ]]; then
     log_fail "Dictionary training failed"
 fi
 log_pass "Dictionary trained via --train"
@@ -909,7 +909,7 @@ log_pass "Dictionary trained via --train"
 # 25.2 Round-trip with dictionary
 echo "  Testing dict round-trip..."
 "$ZXC_BIN" -3 -D "$DICT_FILE" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict.zxc"
-if [ ! -s "$TEST_DIR/test_dict.zxc" ]; then
+if [[ ! -s "$TEST_DIR/test_dict.zxc" ]]; then
     log_fail "Dict compression failed"
 fi
 "$ZXC_BIN" -d -D "$DICT_FILE" -c "$TEST_DIR/test_dict.zxc" > "$TEST_DIR/test_dict.dec"
@@ -953,7 +953,7 @@ set +e
 "$ZXC_BIN" -d -c "$TEST_DIR/test_dict.zxc" > /dev/null 2>&1
 RET=$?
 set -e
-if [ $RET -ne 0 ]; then
+if [[ $RET -ne 0 ]]; then
     log_pass "Decompress without -D correctly fails"
 else
     log_fail "Decompress of a dict archive without -D should fail"
@@ -980,7 +980,7 @@ for LEVEL in 1 2 3 4 5 6; do
         log_fail "Dict level $LEVEL round-trip failed"
     fi
 done
-if [ "$DICT_ALL_OK" -eq 1 ]; then
+if [[ "$DICT_ALL_OK" -eq 1 ]]; then
     log_pass "Dict across all levels (1-6)"
 fi
 
@@ -991,7 +991,7 @@ set +e
 "$ZXC_BIN" -3 -D "$TEST_DIR/bad.zxd" -c "$TEST_FILE_ARG" > /dev/null 2>&1
 RET=$?
 set -e
-if [ $RET -ne 0 ]; then
+if [[ $RET -ne 0 ]]; then
     log_pass "Invalid dict file rejected"
 else
     log_fail "Invalid dict file should be rejected"
@@ -1003,7 +1003,7 @@ AUTO_DIR="$TEST_DIR/auto"
 mkdir -p "$AUTO_DIR"
 "$ZXC_BIN" --train -o "$AUTO_DIR/" "$TEST_DIR"/sample_*.txt 2>/dev/null
 ZXD_NAME=$(ls "$AUTO_DIR" | grep -E '^dictionary_[0-9a-f]{8}\.zxd$' || true)
-if [ -n "$ZXD_NAME" ]; then
+if [[ -n "$ZXD_NAME" ]]; then
     log_pass "Train to directory names dict dictionary_<dict_id>.zxd ($ZXD_NAME)"
 else
     log_fail "Train to directory should create dictionary_<dict_id>.zxd"
@@ -1017,7 +1017,7 @@ set +e
 "$ZXC_BIN" -d -c "$AUTO_DIR/payload.zxc" > /dev/null 2>&1   # .zxd present, but no -D
 RET=$?
 set -e
-if [ $RET -ne 0 ]; then
+if [[ $RET -ne 0 ]]; then
     log_pass "Decompress without -D fails even with .zxd present (no auto-lookup)"
 else
     log_fail "Decompress without -D should fail (auto-lookup must be removed)"
@@ -1038,7 +1038,7 @@ echo "Testing unzxc alias..."
 ZXC_ABS=$(cd "$(dirname "$ZXC_BIN")" && pwd)/$(basename "$ZXC_BIN")
 UNZXC_BIN="$TEST_DIR/unzxc"
 
-if ln -sf "$ZXC_ABS" "$UNZXC_BIN" 2>/dev/null && [ -L "$UNZXC_BIN" ]; then
+if ln -sf "$ZXC_ABS" "$UNZXC_BIN" 2>/dev/null && [[ -L "$UNZXC_BIN" ]]; then
     # A known archive to decode through the alias.
     "$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/alias.zxc"
 
@@ -1078,8 +1078,8 @@ done
 # 27.1 Cross-platform: the shell expands the glob; -m must compress every file to
 #      <name>.zxc (keeping inputs with -k). Then verify one round-trip is valid.
 "$ZXC_BIN" -k -m "$MGLOB_DIR"/part_*.txt >/dev/null 2>&1 || true
-if [ -f "$MGLOB_DIR/part_1.txt.zxc" ] && [ -f "$MGLOB_DIR/part_2.txt.zxc" ] \
-   && [ -f "$MGLOB_DIR/part_3.txt.zxc" ]; then
+if [[ -f "$MGLOB_DIR/part_1.txt.zxc" ]] && [[ -f "$MGLOB_DIR/part_2.txt.zxc" ]] \
+   && [[ -f "$MGLOB_DIR/part_3.txt.zxc" ]]; then
     if "$ZXC_BIN" -d -c "$MGLOB_DIR/part_2.txt.zxc" 2>/dev/null | cmp -s - "$MGLOB_DIR/part_2.txt"; then
         log_pass "multiple-file mode (-m) compresses every file"
     else
@@ -1098,8 +1098,8 @@ case "$(uname -s 2>/dev/null)" in
         ZXC_ABS_G=$(cd "$(dirname "$ZXC_BIN")" && pwd)/$(basename "$ZXC_BIN")
         rm -f "$MGLOB_DIR"/*.zxc
         ( cd "$MGLOB_DIR" && "$ZXC_ABS_G" -k -m 'part_*.txt' >/dev/null 2>&1 ) || true
-        if [ -f "$MGLOB_DIR/part_1.txt.zxc" ] && [ -f "$MGLOB_DIR/part_2.txt.zxc" ] \
-           && [ -f "$MGLOB_DIR/part_3.txt.zxc" ]; then
+        if [[ -f "$MGLOB_DIR/part_1.txt.zxc" ]] && [[ -f "$MGLOB_DIR/part_2.txt.zxc" ]] \
+           && [[ -f "$MGLOB_DIR/part_3.txt.zxc" ]]; then
             log_pass "native Windows wildcard expansion (setargv.obj)"
         else
             log_fail "literal 'part_*.txt' was not expanded by the binary (setargv.obj missing?)"
