@@ -2,11 +2,6 @@ name: Generate CHANGELOG
 
 on:
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Version tag for the latest section (e.g. v0.12.0). Leave empty to label "Unreleased".'
-        required: false
-        type: string
   push:
     branches:
       - 'bump/**'
@@ -34,11 +29,7 @@ jobs:
         id: ver
         shell: bash
         run: |
-          INPUT_TAG="${{ inputs.tag }}"
-          if [[ -n "$INPUT_TAG" ]]; then
-            echo "tag_arg=--tag $INPUT_TAG" >> "$GITHUB_OUTPUT"
-            echo "Using dispatch input tag: $INPUT_TAG"
-          elif [[ "${GITHUB_REF}" =~ ^refs/heads/(bump|release)/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+          if [[ "${GITHUB_REF}" =~ ^refs/heads/(bump|release)/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
             DETECTED="${BASH_REMATCH[2]}"
             echo "tag_arg=--tag $DETECTED" >> "$GITHUB_OUTPUT"
             echo "Detected tag from branch name: $DETECTED"

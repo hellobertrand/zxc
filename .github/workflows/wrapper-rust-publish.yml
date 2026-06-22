@@ -76,10 +76,11 @@ jobs:
           cache-workspaces: "wrappers/rust -> target"
 
       - name: Verify Version Matches Release Tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          RELEASE_VERSION="${{ github.event.release.tag_name }}"
           # Remove 'v' prefix if present
-          RELEASE_VERSION="${RELEASE_VERSION#v}"
+          RELEASE_VERSION="${RELEASE_TAG#v}"
           
           CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
           
@@ -90,10 +91,9 @@ jobs:
           
           echo "Version matches: $RELEASE_VERSION"
 
-      - name: Authenticate with crates.io
-        run: cargo login ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
       - name: Publish zxc-compress-sys (FFI bindings)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           cd zxc-sys
           cargo publish
@@ -104,6 +104,8 @@ jobs:
         run: sleep 30
 
       - name: Publish zxc-compress (safe wrapper)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           cd zxc
           cargo publish

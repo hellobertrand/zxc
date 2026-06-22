@@ -6,7 +6,9 @@
 
 FROM gcr.io/oss-fuzz-base/base-builder:v1@sha256:7b8357d631519f5b1ecb06eff2d7bb7985ba7b512a52688b46214142e1c22ed4
 
-COPY . $SRC/zxc
-WORKDIR $SRC/zxc
-
+COPY src $SRC/zxc/src
+COPY include $SRC/zxc/include
+COPY tests $SRC/zxc/tests
 COPY .clusterfuzzlite/build.sh $SRC/build.sh
+
+WORKDIR $SRC/zxc

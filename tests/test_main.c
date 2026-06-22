@@ -180,7 +180,7 @@ static void print_usage(const char* argv0) {
 }
 
 int main(int argc, char** argv) {
-    srand(42);  // Fixed seed for reproducibility
+    zxc_test_srand(42);  // Fixed seed; deterministic across platforms (see test_common.h)
 
     const char* filter = NULL;
     int exact = 0;
