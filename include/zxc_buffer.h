@@ -127,6 +127,8 @@ ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
  * @param[in] opts         Compression options (NULL uses all defaults).
  *                         Only @c level, @c block_size, and @c checksum are used.
  *
+ * @note @p src and @p dst must not overlap (same contract as memcpy).
+ *
  * @return The number of bytes written to dst (>0 on success),
  *         or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) on failure.
  */
@@ -146,6 +148,8 @@ ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* ds
  * @param[in] dst_capacity  Capacity of the destination buffer.
  * @param[in] opts          Decompression options (NULL uses all defaults).
  *                          Only @c checksum is used.
+ *
+ * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
  * @return The number of bytes written to dst (>0 on success),
  *         or a negative zxc_error_t code (e.g., ZXC_ERROR_CORRUPT_DATA) on failure.
@@ -277,6 +281,8 @@ ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
  *                             Only @c level, @c block_size, and
  *                             @c checksum_enabled are used.
  *
+ * @note @p src and @p dst must not overlap (same contract as memcpy).
+ *
  * @return Compressed block size in bytes (> 0) on success,
  *         or a negative @ref zxc_error_t code on failure.
  *         Returns @ref ZXC_ERROR_BAD_BLOCK_SIZE if
@@ -305,6 +311,8 @@ ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t sr
  * @param[in]     opts         Decompression options (NULL for defaults).
  *                             Only @c checksum_enabled is used.
  *
+ * @note @p src and @p dst must not overlap (same contract as memcpy).
+ *
  * @return Decompressed size in bytes (> 0) on success,
  *         or a negative @ref zxc_error_t code on failure.
  *         Returns @ref ZXC_ERROR_BAD_BLOCK_SIZE if @p dst_capacity exceeds
@@ -319,7 +327,9 @@ ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t 
  * Identical semantics to zxc_decompress_block() but accepts
  * @p dst_capacity == @c uncompressed_size (no trailing @c ZXC_DECOMPRESS_TAIL_PAD
  * required). Intended for integrations whose destination buffer cannot be
- * oversized (for example, in-place page-aligned decoding).
+ * oversized (for example, decoding into an exactly-sized, page-aligned
+ * region). Here "in-place" means a tightly-sized destination, not an
+ * overlapping @p src / @p dst (see @note below).
  *
  * This path is slightly slower than zxc_decompress_block() on the same input
  * because it avoids the wild-copy overshoot that the fast decoder relies on.
@@ -343,6 +353,8 @@ ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t 
  *                             margin is required).
  * @param[in]     opts         Decompression options (NULL for defaults).
  *                             Only @c checksum_enabled is used.
+ *
+ * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
  * @return Decompressed size in bytes (> 0) on success,
  *         or a negative @ref zxc_error_t code on failure.
@@ -437,6 +449,8 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  * @param[in]     opts         Compression options, or NULL to reuse
  *                             settings from create / last call.
  *
+ * @note @p src and @p dst must not overlap (same contract as memcpy).
+ *
  * @return Compressed size in bytes (> 0) on success,
  *         or a negative @ref zxc_error_t code on failure.
  */
@@ -472,6 +486,8 @@ ZXC_EXPORT void zxc_free_dctx(zxc_dctx* dctx);
  * @param[out]    dst          Destination buffer.
  * @param[in]     dst_capacity Capacity of the destination buffer.
  * @param[in]     opts         Decompression options (NULL for defaults).
+ *
+ * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
  * @return Decompressed size in bytes (> 0) on success,
  *         or a negative @ref zxc_error_t code on failure.
