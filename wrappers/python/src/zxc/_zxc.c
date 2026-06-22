@@ -241,6 +241,7 @@ PyMODINIT_FUNC PyInit__zxc(void) {
 // =============================================================================
 
 static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs) {
+    (void)self;
     Py_buffer view;
     int level = ZXC_LEVEL_DEFAULT;
     int checksum = 0;
@@ -342,6 +343,8 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
 }
 
 static PyObject* pyzxc_get_decompressed_size(PyObject* self, PyObject* args, PyObject* kwargs) {
+    (void)self;
+    (void)kwargs;
     Py_buffer view;
 
     if (!PyArg_ParseTuple(args, "y*", &view)) {
@@ -356,6 +359,7 @@ static PyObject* pyzxc_get_decompressed_size(PyObject* self, PyObject* args, PyO
 }
 
 static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwargs) {
+    (void)self;
     Py_buffer view;
     int checksum = 0;
     Py_buffer dict_view = {0};
@@ -446,6 +450,7 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
 }
 
 static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject* kwargs) {
+    (void)self;
     PyObject *src, *dst;
     int nthreads = 0;
     int level = ZXC_LEVEL_DEFAULT;
@@ -550,6 +555,7 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
 }
 
 static PyObject* pyzxc_stream_decompress(PyObject* self, PyObject* args, PyObject* kwargs) {
+    (void)self;
     PyObject *src, *dst;
     int nthreads = 0;
     int checksum = 0;
@@ -1610,9 +1616,7 @@ static PyObject* pyzxc_seekable_decompress_range(PyObject* self, PyObject* args,
         Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)r));
     }
 
-    if (r != (int64_t)length) {
-        if (_PyBytes_Resize(&out, (Py_ssize_t)r) < 0) return NULL;
-    }
+    if (r != (int64_t)length && _PyBytes_Resize(&out, (Py_ssize_t)r) < 0) return NULL;
     return out;
 }
 
@@ -1716,8 +1720,6 @@ static PyObject* pyzxc_write_seek_table(PyObject* self, PyObject* arg) {
         Py_DECREF(out);
         Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)written));
     }
-    if ((size_t)written != cap) {
-        if (_PyBytes_Resize(&out, (Py_ssize_t)written) < 0) return NULL;
-    }
+    if ((size_t)written != cap && _PyBytes_Resize(&out, (Py_ssize_t)written) < 0) return NULL;
     return out;
 }
