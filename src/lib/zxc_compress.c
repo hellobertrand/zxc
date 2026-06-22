@@ -1623,8 +1623,7 @@ parse_done:;
                 streams_bytes += (size_t)((bits + 7) / 8);
             }
             huf_total_size = ZXC_HUF_HEADER_SIZE + streams_bytes;
-            const size_t baseline =
-                (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : (size_t)lit_c;
+            const size_t baseline = (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : lit_c;
             /* Threshold: 3% savings (1/32) over the chosen RAW/RLE baseline.
              * Same heuristic as the RAW/RLE switch above. */
             if (huf_total_size < baseline - (baseline >> 5)) {
@@ -1667,8 +1666,7 @@ parse_done:;
                 if (huf_dict_total_size < huf_total_size)
                     enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
             } else {
-                const size_t baseline =
-                    (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : (size_t)lit_c;
+                const size_t baseline = (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : lit_c;
                 /* Same 3% (1/32) margin as the other encoding switches. */
                 if (huf_dict_total_size < baseline - (baseline >> 5))
                     enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
@@ -1696,7 +1694,7 @@ parse_done:;
                                     : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) ? huf_total_size
                                     : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT)
                                         ? huf_dict_total_size
-                                        : (size_t)lit_c;
+                                        : lit_c;
     desc[0].sizes = (uint64_t)lit_section_size | ((uint64_t)lit_c << 32);
     desc[1].sizes = (uint64_t)seq_c | ((uint64_t)seq_c << 32);
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
@@ -1717,14 +1715,13 @@ parse_done:;
     if (UNLIKELY(rem < sz_lit)) return ZXC_ERROR_DST_TOO_SMALL;
 
     if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) {
-        const int written =
-            zxc_huf_encode_section(literals, (size_t)lit_c, huf_code_len, p_curr, rem);
+        const int written = zxc_huf_encode_section(literals, lit_c, huf_code_len, p_curr, rem);
         if (UNLIKELY(written < 0)) return written;
         if (UNLIKELY((size_t)written != huf_total_size)) return ZXC_ERROR_DST_TOO_SMALL;
         p_curr += written;
     } else if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT) {
         const int written =
-            zxc_huf_encode_section_dict(literals, (size_t)lit_c, dict_code_len, p_curr, rem);
+            zxc_huf_encode_section_dict(literals, lit_c, dict_code_len, p_curr, rem);
         if (UNLIKELY(written < 0)) return written;
         if (UNLIKELY((size_t)written != huf_dict_total_size)) return ZXC_ERROR_DST_TOO_SMALL;
         p_curr += written;

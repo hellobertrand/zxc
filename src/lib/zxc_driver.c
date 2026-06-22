@@ -641,12 +641,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 1 && progress_cb) {
         // LCOV_EXCL_START
         const long long saved_pos = ftello(f_in);
-        if (saved_pos >= 0) {
-            if (fseeko(f_in, 0, SEEK_END) == 0) {
-                const long long size = ftello(f_in);
-                if (size > 0) total_file_size = (uint64_t)size;
-                fseeko(f_in, saved_pos, SEEK_SET);
-            }
+        if (saved_pos >= 0 && fseeko(f_in, 0, SEEK_END) == 0) {
+            const long long size = ftello(f_in);
+            if (size > 0) total_file_size = (uint64_t)size;
+            fseeko(f_in, saved_pos, SEEK_SET);
         }
         // LCOV_EXCL_STOP
     }
@@ -690,12 +688,11 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     uint32_t d_global_hash = 0;
 
     const uint64_t max_out = zxc_compress_bound(runtime_chunk_sz);
-    const size_t raw_alloc_in = (size_t)(((mode) ? runtime_chunk_sz : max_out) + ZXC_PAD_SIZE);
+    const size_t raw_alloc_in = (size_t)((mode ? runtime_chunk_sz : max_out) + ZXC_PAD_SIZE);
     const size_t alloc_in = (raw_alloc_in + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
 
     const size_t raw_alloc_out =
-        (size_t)((mode) ? (max_out + ZXC_PAD_SIZE)
-                        : (runtime_chunk_sz + ZXC_DECOMPRESS_TAIL_PAD + ZXC_PAD_SIZE));
+        (size_t)((mode ? max_out : runtime_chunk_sz + ZXC_DECOMPRESS_TAIL_PAD) + ZXC_PAD_SIZE);
     const size_t alloc_out = (raw_alloc_out + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
 
     const size_t per_job_sz = sizeof(zxc_stream_job_t) + sizeof(int) + alloc_in + alloc_out;
