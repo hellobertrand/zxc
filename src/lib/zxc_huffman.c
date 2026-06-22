@@ -527,7 +527,7 @@ static int zxc_huf_encode_streams(const uint8_t* RESTRICT literals, const size_t
         size_t stop = start + Q;
         if (stop > n_literals) stop = n_literals;
 
-        uint8_t* const stream_start = p;
+        const uint8_t* const stream_start = p;
         bw_init(&bw, p, (size_t)(stream_end - p));
         for (size_t i = start; i < stop; i++) {
             const uint8_t sym = literals[i];
