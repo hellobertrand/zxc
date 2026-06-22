@@ -266,7 +266,7 @@ static void name_list_add(name_list_t *l, const char *name)
 }
 
 static int name_cmp(const void *a, const void *b) {
-    return strcmp(*(const char**)a, *(const char**)b);
+    return strcmp(*(const char * const *)a, *(const char * const *)b);
 }
 
 static void name_list_sort(name_list_t *l) {
