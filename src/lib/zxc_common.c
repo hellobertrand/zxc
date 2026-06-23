@@ -294,13 +294,13 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
     }
 
     ctx->hash_table = (uint32_t*)(mem + layout.off_hash_pos);
-    ctx->hash_tags = (uint8_t*)(mem + layout.off_hash_tags);
+    ctx->hash_tags = mem + layout.off_hash_tags;
     ctx->chain_table = (uint16_t*)(mem + layout.off_chain);
     ctx->buf_sequences = (uint32_t*)(mem + layout.off_seq_union);
     ctx->buf_offsets = (uint16_t*)(mem + layout.off_seq_union);
-    ctx->buf_tokens = (uint8_t*)(mem + layout.off_seq_union) + layout.max_seq * sizeof(uint16_t);
-    ctx->buf_extras = (uint8_t*)(mem + layout.off_extras);
-    ctx->literals = (uint8_t*)(mem + layout.off_lit_cctx);
+    ctx->buf_tokens = mem + layout.off_seq_union + layout.max_seq * sizeof(uint16_t);
+    ctx->buf_extras = mem + layout.off_extras;
+    ctx->literals = mem + layout.off_lit_cctx;
     if (layout.sz_opt) {
         ctx->opt_scratch = mem + layout.off_opt;
         ctx->opt_scratch_cap = layout.sz_opt;
