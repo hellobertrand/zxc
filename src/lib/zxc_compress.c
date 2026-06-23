@@ -1262,7 +1262,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         if (m.ref) {
             ip -= m.backtrack;
             const uint32_t ll = (uint32_t)(ip - anchor);
-            const uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
+            const uint32_t ml = m.len - ZXC_LZ_MIN_MATCH_LEN;
             const uint32_t off = (uint32_t)(ip - m.ref);
 
             if (ll > 0) {
@@ -1934,7 +1934,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         if (m.ref) {
             ip -= m.backtrack;
             const uint32_t ll = (uint32_t)(ip - anchor);
-            const uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
+            const uint32_t ml = m.len - ZXC_LZ_MIN_MATCH_LEN;
             const uint32_t off = (uint32_t)(ip - m.ref);
 
             if (ll > 0) {
