@@ -11,7 +11,9 @@ package zxc
 #include "zxc.h"
 */
 import "C"
-import "unsafe"
+import (
+	"unsafe"
+)
 
 // ============================================================================
 // Block API (single block, no file framing)
