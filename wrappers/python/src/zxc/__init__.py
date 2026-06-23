@@ -454,26 +454,26 @@ class Seekable:
                 "'size' (int) and 'read_at(length, offset)' attributes"
             )
 
-    @property
-    def num_blocks(self) -> int:
+    def _ensure_open(self) -> None:
         if self._handle is None:
             raise ValueError("Seekable is closed")
+
+    @property
+    def num_blocks(self) -> int:
+        self._ensure_open()
         return pyzxc_seekable_num_blocks(self._handle)
 
     @property
     def decompressed_size(self) -> int:
-        if self._handle is None:
-            raise ValueError("Seekable is closed")
+        self._ensure_open()
         return pyzxc_seekable_decompressed_size(self._handle)
 
     def block_compressed_size(self, block_idx: int):
-        if self._handle is None:
-            raise ValueError("Seekable is closed")
+        self._ensure_open()
         return pyzxc_seekable_block_comp_size(self._handle, block_idx)
 
     def block_decompressed_size(self, block_idx: int):
-        if self._handle is None:
-            raise ValueError("Seekable is closed")
+        self._ensure_open()
         return pyzxc_seekable_block_decomp_size(self._handle, block_idx)
 
     def set_dict(self, dict: bytes, dict_huf: bytes | None = None) -> None:
@@ -483,14 +483,12 @@ class Seekable:
         compressed with a dictionary. The content is copied internally, so
         *dict* may be freed after this call.
         """
-        if self._handle is None:
-            raise ValueError("Seekable is closed")
+        self._ensure_open()
         dict, dict_huf = _split_dict_arg(dict, dict_huf)
         pyzxc_seekable_set_dict(self._handle, dict, dict_huf)
 
     def decompress_range(self, offset: int, length: int, *, n_threads: int = 0) -> bytes:
-        if self._handle is None:
-            raise ValueError("Seekable is closed")
+        self._ensure_open()
         return pyzxc_seekable_decompress_range(self._handle, offset, length, n_threads)
 
     def close(self) -> None:

@@ -634,6 +634,8 @@ if(CLANG_FORMAT)
         "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/*.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/cli/*.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/cli/*.h"
     )
     # Exclude vendored third-party code
     list(FILTER ZXC_FORMAT_SOURCES EXCLUDE REGEX ".*/vendors/.*")
@@ -641,14 +643,14 @@ if(CLANG_FORMAT)
     add_custom_target(format
         COMMAND ${CLANG_FORMAT} --style=file -i ${ZXC_FORMAT_SOURCES}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Formatting ${CMAKE_CURRENT_SOURCE_DIR}/include and src/lib with clang-format"
+        COMMENT "Formatting include/, src/lib/ and src/cli/ with clang-format"
         VERBATIM
     )
 
     add_custom_target(format-check
         COMMAND ${CLANG_FORMAT} --style=file --dry-run --Werror ${ZXC_FORMAT_SOURCES}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Checking formatting of include/ and src/lib/"
+        COMMENT "Checking formatting of include/, src/lib/ and src/cli/"
         VERBATIM
     )
 else()

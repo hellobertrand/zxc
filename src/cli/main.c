@@ -290,9 +290,18 @@ static int g_verbose = 0;
  * through the compress/decompress opts. NULL when the dict carries none. */
 static void* g_dict_huf = NULL;
 
+/* Enables printf-style format/argument checking by the compiler on GCC/Clang
+ * (catches format-vs-argument mismatches at every call site); no-op on MSVC. */
+#if defined(__GNUC__) || defined(__clang__)
+#define ZXC_PRINTF_FORMAT(fmt_idx, args_idx) __attribute__((format(printf, fmt_idx, args_idx)))
+#else
+#define ZXC_PRINTF_FORMAT(fmt_idx, args_idx)
+#endif
+
 /**
  * @brief Standard logging function. Respects the global quiet flag.
  */
+static void zxc_log(const char* fmt, ...) ZXC_PRINTF_FORMAT(1, 2);
 static void zxc_log(const char* fmt, ...) {
     if (g_quiet) return;
     va_list args;
@@ -305,6 +314,7 @@ static void zxc_log(const char* fmt, ...) {
  * @brief Verbose logging function. Only prints if verbose is enabled and quiet
  * is disabled.
  */
+static void zxc_log_v(const char* fmt, ...) ZXC_PRINTF_FORMAT(1, 2);
 static void zxc_log_v(const char* fmt, ...) {
     if (!g_verbose || g_quiet) return;
     va_list args;
@@ -388,10 +398,9 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                     continue;  // Skip already compressed files in recursive compression
                 }
             }
-            overall_ret |=
-                process_single_file(full_path, NULL, mode, num_threads, keep_input, force,
-                                    to_stdout, checksum, level, block_size, json_output,
-                                    seekable, dict, dict_size);
+            overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
+                                               force, to_stdout, checksum, level, block_size,
+                                               json_output, seekable, dict, dict_size);
         }
     } while (FindNextFileA(hFind, &find_data) != 0);
 
@@ -426,10 +435,9 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         struct stat st;
         if (stat(full_path, &st) == 0) {
             if (S_ISDIR(st.st_mode)) {
-                overall_ret |=
-                    process_directory(full_path, mode, num_threads, keep_input, force, to_stdout,
-                                      checksum, level, block_size, json_output, seekable,
-                                      dict, dict_size);
+                overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
+                                                 to_stdout, checksum, level, block_size,
+                                                 json_output, seekable, dict, dict_size);
             } else if (S_ISREG(st.st_mode)) {
                 // Check if it ends with .zxc to skip if compressing to avoid double compression
                 if (mode == MODE_COMPRESS) {
@@ -439,10 +447,9 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                         continue;  // Skip already compressed files in recursive compression
                     }
                 }
-                overall_ret |=
-                    process_single_file(full_path, NULL, mode, num_threads, keep_input, force,
-                                        to_stdout, checksum, level, block_size, json_output,
-                                        seekable, dict, dict_size);
+                overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
+                                                   force, to_stdout, checksum, level, block_size,
+                                                   json_output, seekable, dict, dict_size);
             }
         }
         free(full_path);
@@ -614,20 +621,22 @@ static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, 
         return 1;
     }
     if (json_output) {
-        printf("{\n"
-               "  \"type\": \"dictionary\",\n"
-               "  \"filename\": \"%s\",\n"
-               "  \"dict_id\": \"0x%08X\",\n"
-               "  \"content_size_bytes\": %zu,\n"
-               "  \"file_size_bytes\": %lld\n"
-               "}\n",
-               path, id, content_size, file_size);
+        printf(
+            "{\n"
+            "  \"type\": \"dictionary\",\n"
+            "  \"filename\": \"%s\",\n"
+            "  \"dict_id\": \"0x%08X\",\n"
+            "  \"content_size_bytes\": %zu,\n"
+            "  \"file_size_bytes\": %lld\n"
+            "}\n",
+            path, id, content_size, file_size);
     } else {
-        printf("\n  Dictionary file (.zxd)\n"
-               "  Dict ID:       0x%08X\n"
-               "  Content size:  %zu bytes\n"
-               "  File:          %s\n",
-               id, content_size, path);
+        printf(
+            "\n  Dictionary file (.zxd)\n"
+            "  Dict ID:       0x%08X\n"
+            "  Content size:  %zu bytes\n"
+            "  File:          %s\n",
+            id, content_size, path);
     }
     return 0;
 }
@@ -785,8 +794,8 @@ static int zxc_list_archive(const char* path, int json_output) {
 
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
-                               int checksum_enabled, int level, size_t block_size,
-                               int json_output, int seekable, const void* dict, size_t dict_size) {
+                               int checksum_enabled, int level, size_t block_size, int json_output,
+                               int seekable, const void* dict, size_t dict_size) {
     FILE* f_in = stdin;
     FILE* f_out = stdout;
     char resolved_in_path[4096] = {0};
@@ -975,7 +984,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .dict = dict,
             .dict_size = dict_size,
             .dict_huf = g_dict_huf,
-            .progress_cb = show_progress ? cli_progress_callback : NULL,
+            .progress_cb = show_progress ? &cli_progress_callback : NULL,
             .user_data = &pctx,
         };
         bytes = zxc_stream_compress(f_in, f_out, &copts);
@@ -986,7 +995,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .dict = dict,
             .dict_size = dict_size,
             .dict_huf = g_dict_huf,
-            .progress_cb = show_progress ? cli_progress_callback : NULL,
+            .progress_cb = show_progress ? &cli_progress_callback : NULL,
             .user_data = &pctx,
         };
         bytes = zxc_stream_decompress(f_in, f_out, &dopts);
@@ -1135,8 +1144,8 @@ int main(int argc, char** argv) {
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
-    while ((opt = getopt_long(argc, argv, "123456b::B:cCdD:fho:jklmrNqST:tvVz", long_options, NULL)) !=
-           -1) {
+    while ((opt = getopt_long(argc, argv, "123456b::B:cCdD:fho:jklmrNqST:tvVz", long_options,
+                              NULL)) != -1) {
         switch (opt) {
             case 'z':
                 mode = MODE_COMPRESS;
@@ -1306,7 +1315,8 @@ int main(int argc, char** argv) {
     if (dict_path) {
         char resolved_dict[4096];
         if (zxc_validate_input_path(dict_path, resolved_dict, sizeof(resolved_dict)) != 0) {
-            fprintf(stderr, "Error: invalid dictionary path '%s': %s\n", dict_path, strerror(errno));
+            fprintf(stderr, "Error: invalid dictionary path '%s': %s\n", dict_path,
+                    strerror(errno));
             return 1;
         }
         FILE* f_dict = fopen(resolved_dict, "rb");
@@ -1337,8 +1347,7 @@ int main(int argc, char** argv) {
         const void* huf = NULL;
         const int rc = zxc_dict_load(zxd_buf, (size_t)fsize, &content, &content_size, &huf, NULL);
         if (rc != ZXC_OK) {
-            fprintf(stderr, "Error: invalid dictionary '%s': %s\n", dict_path,
-                    zxc_error_name(rc));
+            fprintf(stderr, "Error: invalid dictionary '%s': %s\n", dict_path, zxc_error_name(rc));
             free(zxd_buf);
             return 1;
         }
@@ -1383,7 +1392,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         const int n_files = argc - optind;
-        const void** samples = (const void**)malloc((size_t)n_files * sizeof(void*));
+        void** samples = (void**)malloc((size_t)n_files * sizeof(void*));
         size_t* sample_sizes = (size_t*)malloc((size_t)n_files * sizeof(size_t));
         if (!samples || !sample_sizes) {
             fprintf(stderr, "Error: memory allocation failed\n");
@@ -1407,9 +1416,15 @@ int main(int argc, char** argv) {
             fseeko(sf, 0, SEEK_END);
             size_t sz = (size_t)ftello(sf);
             fseeko(sf, 0, SEEK_SET);
-            if (sz == 0) { fclose(sf); continue; }
+            if (sz == 0) {
+                fclose(sf);
+                continue;
+            }
             uint8_t* buf = (uint8_t*)malloc(sz);
-            if (!buf) { fclose(sf); continue; }
+            if (!buf) {
+                fclose(sf);
+                continue;
+            }
             const size_t rd = fread(buf, 1, sz, sf);
             fclose(sf);
             if (rd != sz) {
@@ -1434,15 +1449,15 @@ int main(int argc, char** argv) {
         uint8_t* dict_buf = (uint8_t*)malloc(dict_cap);
         if (!dict_buf) {
             fprintf(stderr, "Error: memory allocation failed\n");
-            for (int i = 0; i < n_loaded; i++) free((void*)samples[i]);
+            for (int i = 0; i < n_loaded; i++) free(samples[i]);
             free(samples);
             free(sample_sizes);
             free(dict);
             return 1;
         }
 
-        int64_t dict_sz = zxc_train_dict(samples, sample_sizes, (size_t)n_loaded,
-                                         dict_buf, dict_cap);
+        int64_t dict_sz = zxc_train_dict((const void* const*)samples, sample_sizes,
+                                         (size_t)n_loaded, dict_buf, dict_cap);
 
         /* Train the shared literal Huffman table on the same samples (needs
          * the trained dict for the post-LZ literal distribution). The .zxd
@@ -1450,11 +1465,11 @@ int main(int argc, char** argv) {
         uint8_t huf_lengths[ZXC_HUF_TABLE_SIZE];
         int huf_rc = ZXC_ERROR_NULL_INPUT;
         if (dict_sz > 0) {
-            huf_rc = zxc_train_dict_huf(samples, sample_sizes, (size_t)n_loaded, dict_buf,
-                                        (size_t)dict_sz, huf_lengths);
+            huf_rc = zxc_train_dict_huf((const void* const*)samples, sample_sizes, (size_t)n_loaded,
+                                        dict_buf, (size_t)dict_sz, huf_lengths);
         }
 
-        for (int i = 0; i < n_loaded; i++) free((void*)samples[i]);
+        for (int i = 0; i < n_loaded; i++) free(samples[i]);
         free(samples);
         free(sample_sizes);
 
@@ -1497,8 +1512,7 @@ int main(int argc, char** argv) {
             const size_t op_len = strlen(output_path);
             const int is_dir_target =
                 zxc_is_directory(output_path) ||
-                (op_len > 0 &&
-                 (output_path[op_len - 1] == '/' || output_path[op_len - 1] == '\\'));
+                (op_len > 0 && (output_path[op_len - 1] == '/' || output_path[op_len - 1] == '\\'));
             if (is_dir_target) {
                 const int has_sep = op_len > 0 && (output_path[op_len - 1] == '/' ||
                                                    output_path[op_len - 1] == '\\');
@@ -1830,10 +1844,9 @@ int main(int argc, char** argv) {
                     explicit_out_path = argv[start_optind + 1];
             }
 
-            overall_ret |=
-                process_single_file(current_arg, explicit_out_path, mode, num_threads, keep_input,
-                                    force, to_stdout, checksum, level, block_size, json_output,
-                                    seekable, dict, dict_size);
+            overall_ret |= process_single_file(current_arg, explicit_out_path, mode, num_threads,
+                                               keep_input, force, to_stdout, checksum, level,
+                                               block_size, json_output, seekable, dict, dict_size);
         }
 
         if (!multiple_mode) {
