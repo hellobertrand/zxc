@@ -216,9 +216,11 @@ typedef enum { JOB_STATUS_FREE, JOB_STATUS_FILLED, JOB_STATUS_PROCESSED } job_st
  */
 typedef struct {
     uint8_t* in_buf;
-    size_t in_cap, in_sz;
+    size_t in_cap;
+    size_t in_sz;
     uint8_t* out_buf;
-    size_t out_cap, result_sz;
+    size_t out_cap;
+    size_t result_sz;
     int job_id;
     ZXC_ATOMIC job_status_t status;  // Atomic for lock-free status updates
     char pad[ZXC_CACHE_LINE_SIZE];   // Prevent False Sharing
@@ -310,9 +312,13 @@ typedef struct {
     zxc_stream_job_t* jobs;
     size_t ring_size;
     int* worker_queue;
-    int wq_head, wq_tail, wq_count;
+    int wq_head;
+    int wq_tail;
+    int wq_count;
     pthread_mutex_t lock;
-    pthread_cond_t cond_reader, cond_worker, cond_writer;
+    pthread_cond_t cond_reader;
+    pthread_cond_t cond_worker;
+    pthread_cond_t cond_writer;
     int shutdown_workers;
     int compression_mode;
     ZXC_ATOMIC int io_error;

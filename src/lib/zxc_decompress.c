@@ -743,8 +743,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             uint32_t tokens = zxc_le32(t_ptr);
             t_ptr += sizeof(uint32_t);
 
-            uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS,
-                     off3 = ZXC_LZ_OFFSET_BIAS, off4 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off1 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off2 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off3 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off4 = ZXC_LZ_OFFSET_BIAS;
+
             if (gh.enc_off == 1) {
                 // Read 4 x 1-byte offsets
                 uint32_t offsets = zxc_le32(o_ptr);
@@ -853,8 +856,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             uint32_t tokens = zxc_le32(t_ptr);
             t_ptr += sizeof(uint32_t);
 
-            uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS,
-                     off3 = ZXC_LZ_OFFSET_BIAS, off4 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off1 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off2 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off3 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off4 = ZXC_LZ_OFFSET_BIAS;
+
             if (gh.enc_off == 1) {
                 uint32_t offsets = zxc_le32(o_ptr);
                 o_ptr += sizeof(uint32_t);
@@ -962,8 +968,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             uint32_t tokens = zxc_le32(t_ptr);
             t_ptr += sizeof(uint32_t);
 
-            uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS,
-                     off3 = ZXC_LZ_OFFSET_BIAS, off4 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off1 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off2 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off3 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off4 = ZXC_LZ_OFFSET_BIAS;
             if (gh.enc_off == 1) {
                 // Read 4 x 1-byte offsets
                 uint32_t offsets = zxc_le32(o_ptr);
