@@ -296,8 +296,8 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         attempts--;
     }
 
-    while (match_idx > 0 && attempts-- >= 0) {
-        if (UNLIKELY(cur_pos - match_idx > ZXC_LZ_MAX_DIST)) break;
+    while (match_idx > 0) {
+        if (UNLIKELY(attempts-- < 0 || cur_pos - match_idx > ZXC_LZ_MAX_DIST)) break;
         const uint8_t* ref = src + match_idx;
 
         // Load the next chain link early (before the compare) so its address
@@ -498,8 +498,9 @@ _finalize_match:
         int lazy_att = p.lazy_attempts;
         int is_lazy_first = 1;
 
-        while (next_idx > 0 && lazy_att-- > 0) {
-            if (UNLIKELY((uint32_t)(ip + 1 - src) - next_idx > ZXC_LZ_MAX_DIST)) break;
+        while (next_idx > 0) {
+            if (UNLIKELY(lazy_att-- <= 0 || (uint32_t)(ip + 1 - src) - next_idx > ZXC_LZ_MAX_DIST))
+                break;
             const uint8_t* ref2 = src + next_idx;
 
             if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
@@ -540,8 +541,9 @@ _finalize_match:
 
             int is_first3 = 1;
             lazy_att = p.lazy_attempts;
-            while (idx3 > 0 && lazy_att-- > 0) {
-                if (UNLIKELY((uint32_t)(ip + 2 - src) - idx3 > ZXC_LZ_MAX_DIST)) break;
+            while (idx3 > 0) {
+                if (UNLIKELY(lazy_att-- <= 0 || (uint32_t)(ip + 2 - src) - idx3 > ZXC_LZ_MAX_DIST))
+                    break;
 
                 const uint8_t* ref3 = src + idx3;
                 if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
