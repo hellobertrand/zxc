@@ -228,7 +228,9 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     for (int k = 1; k < ZXC_HUF_MAX_CODE_LEN; k++) {
         const int prev = counts[k - 1];
         const int packs = prev / 2;
-        int li = 0, pi = 0, n_lvl = 0;
+        int li = 0;
+        int pi = 0;
+        int n_lvl = 0;
         while (li < n || pi < packs) {
             const uint32_t wl = (li < n) ? leaves[li].w : UINT32_MAX;
             const uint32_t wp =
@@ -797,9 +799,18 @@ static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t 
 
     /* Hoist all four bit-reader hot fields into locals. They live in
      * registers for the full duration of the batched loop. */
-    uint64_t a0 = br[0].accum, a1 = br[1].accum, a2 = br[2].accum, a3 = br[3].accum;
-    int bb0 = br[0].bits, bb1 = br[1].bits, bb2 = br[2].bits, bb3 = br[3].bits;
-    const uint8_t *p0 = br[0].ptr, *p1 = br[1].ptr, *p2 = br[2].ptr, *p3 = br[3].ptr;
+    uint64_t a0 = br[0].accum;
+    uint64_t a1 = br[1].accum;
+    uint64_t a2 = br[2].accum;
+    uint64_t a3 = br[3].accum;
+    int bb0 = br[0].bits;
+    int bb1 = br[1].bits;
+    int bb2 = br[2].bits;
+    int bb3 = br[3].bits;
+    const uint8_t* p0 = br[0].ptr;
+    const uint8_t* p1 = br[1].ptr;
+    const uint8_t* p2 = br[2].ptr;
+    const uint8_t* p3 = br[3].ptr;
     const uint8_t* const e0 = br[0].end;
     const uint8_t* const e1 = br[1].end;
     const uint8_t* const e2 = br[2].end;
@@ -864,7 +875,10 @@ static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t 
         REFILL(a2, bb2, p2, e2);
         REFILL(a3, bb3, p3, e3);
 
-        int sl0 = 0, sl1 = 0, sl2 = 0, sl3 = 0;
+        int sl0 = 0;
+        int sl1 = 0;
+        int sl2 = 0;
+        int sl3 = 0;
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();

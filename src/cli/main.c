@@ -76,7 +76,7 @@ int optopt = 0;
  * Handles long options (--option) and short options (-o).
  */
 static int getopt_long(int argc, char* const argv[], const char* optstring,
-                       const struct option* longopts, int* longindex) {
+                       const struct option* longopts, const int* longindex) {
     (void)longindex;
     if (optind >= argc) return -1;
     char* curr = argv[optind];
@@ -578,7 +578,8 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
         }
         fprintf(stderr, "] %d%% | ", percent);
 
-        char proc_str[32], total_str[32];
+        char proc_str[32];
+        char total_str[32];
         format_size_decimal(bytes_processed, proc_str, sizeof(proc_str));
         format_size_decimal(total, total_str, sizeof(total_str));
         fprintf(stderr, "%s/%s | %.1f MB/s", proc_str, total_str, speed_mbps);
@@ -736,11 +737,13 @@ static int zxc_list_archive(const char* path, int json_output) {
     const double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;
 
     // Format sizes
-    char comp_str[32], uncomp_str[32];
+    char comp_str[32];
+    char uncomp_str[32];
+    char dict_id_str[16];
+
     format_size_decimal((uint64_t)file_size, comp_str, sizeof(comp_str));
     format_size_decimal((uint64_t)uncompressed_size, uncomp_str, sizeof(uncomp_str));
 
-    char dict_id_str[16];
     if (dict_id)
         snprintf(dict_id_str, sizeof(dict_id_str), "0x%08X", dict_id);
     else
@@ -759,9 +762,9 @@ static int zxc_list_archive(const char* path, int json_output) {
             "  \"checksum_value\": \"0x%08X\",\n"
             "  \"dict_id\": %s%s%s\n"
             "}\n",
-            path, (long long)file_size, (long long)uncompressed_size, ratio, format_version,
-            block_size_kb, (stored_checksum != 0) ? "RapidHash" : "none", stored_checksum,
-            dict_id ? "\"" : "", dict_id ? dict_id_str : "null", dict_id ? "\"" : "");
+            path, file_size, (long long)uncompressed_size, ratio, format_version, block_size_kb,
+            (stored_checksum != 0) ? "RapidHash" : "none", stored_checksum, dict_id ? "\"" : "",
+            dict_id ? dict_id_str : "null", dict_id ? "\"" : "");
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
         printf(
@@ -801,9 +804,9 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     char resolved_in_path[4096] = {0};
     char out_path[4096] = {0};
     char resolved_out_path[4096] = {0};
-    int use_stdin = 1, use_stdout = 0;
+    int use_stdin = 1;
+    int use_stdout = 0;
     int created_out_file = 0;
-
     int overall_ret = 0;
 
     if (in_path && strcmp(in_path, "-") != 0) {
@@ -957,13 +960,12 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     }
 
     // Set large buffers for I/O performance (AFTER file size detection)
-    char *b1 = malloc(ZXC_STDIO_BUFFER_SIZE), *b2 = malloc(ZXC_STDIO_BUFFER_SIZE);
+    char* b1 = malloc(ZXC_STDIO_BUFFER_SIZE);
+    char* b2 = malloc(ZXC_STDIO_BUFFER_SIZE);
     if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
     if (f_out && b2) setvbuf(f_out, b2, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
 
-    if (in_path && !g_quiet) {
-        zxc_log_v("Processing %s... (Compression Level %d)\n", in_path, level);
-    }
+    if (in_path && !g_quiet) zxc_log_v("Processing %s... (Compression Level %d)\n", in_path, level);
     if (g_verbose) zxc_log("Checksum: %s\n", checksum_enabled ? "enabled" : "disabled");
     if (g_verbose && seekable) zxc_log("Seekable: enabled\n");
 

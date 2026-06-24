@@ -451,7 +451,8 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
 
 static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject* kwargs) {
     (void)self;
-    PyObject *src, *dst;
+    PyObject *src;
+    PyObject *dst;
     int nthreads = 0;
     int level = ZXC_LEVEL_DEFAULT;
     int checksum = 0;
@@ -556,7 +557,8 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
 
 static PyObject* pyzxc_stream_decompress(PyObject* self, PyObject* args, PyObject* kwargs) {
     (void)self;
-    PyObject *src, *dst;
+    PyObject *src;
+    PyObject *dst;
     int nthreads = 0;
     int checksum = 0;
 

@@ -743,8 +743,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             uint32_t tokens = zxc_le32(t_ptr);
             t_ptr += sizeof(uint32_t);
 
-            uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS,
-                     off3 = ZXC_LZ_OFFSET_BIAS, off4 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off1 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off2 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off3 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off4 = ZXC_LZ_OFFSET_BIAS;
+
             if (gh.enc_off == 1) {
                 // Read 4 x 1-byte offsets
                 uint32_t offsets = zxc_le32(o_ptr);
@@ -853,8 +856,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             uint32_t tokens = zxc_le32(t_ptr);
             t_ptr += sizeof(uint32_t);
 
-            uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS,
-                     off3 = ZXC_LZ_OFFSET_BIAS, off4 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off1 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off2 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off3 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off4 = ZXC_LZ_OFFSET_BIAS;
+
             if (gh.enc_off == 1) {
                 uint32_t offsets = zxc_le32(o_ptr);
                 o_ptr += sizeof(uint32_t);
@@ -962,8 +968,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             uint32_t tokens = zxc_le32(t_ptr);
             t_ptr += sizeof(uint32_t);
 
-            uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS,
-                     off3 = ZXC_LZ_OFFSET_BIAS, off4 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off1 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off2 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off3 = ZXC_LZ_OFFSET_BIAS;
+            uint32_t off4 = ZXC_LZ_OFFSET_BIAS;
             if (gh.enc_off == 1) {
                 // Read 4 x 1-byte offsets
                 uint32_t offsets = zxc_le32(o_ptr);
@@ -1467,14 +1475,14 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
         uint32_t seq = zxc_le32(seq_ptr);
         seq_ptr += sizeof(uint32_t);
 
-        uint64_t ll = (uint32_t)(seq >> 24);
+        uint64_t ll = seq >> 24;
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) ll += zxc_read_varint(&extras_ptr, extras_end);
 
-        uint32_t m_bits = (uint32_t)((seq >> 16) & 0xFF);
+        uint32_t m_bits = (seq >> 16) & 0xFF;
         uint64_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_varint(&extras_ptr, extras_end);
 
-        uint32_t offset = (uint32_t)(seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+        uint32_t offset = (seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
 
         // Strict bounds check: sequence must fit, AND wild copies must not overshoot
         // Check both destination (d_ptr) and source literal stream (l_ptr)
@@ -1702,7 +1710,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
         const uint32_t seq = zxc_le32(seq_ptr);
         seq_ptr += sizeof(uint32_t);
 
-        uint64_t ll = (uint32_t)(seq >> 24);
+        uint64_t ll = seq >> 24;
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) {
             ll += zxc_read_varint(&extras_ptr, extras_end);
             if (UNLIKELY(l_ptr + ll > l_end)) {
@@ -1712,7 +1720,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
             }
         }
 
-        uint32_t m_bits = (uint32_t)((seq >> 16) & 0xFF);
+        uint32_t m_bits = (seq >> 16) & 0xFF;
         uint64_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_varint(&extras_ptr, extras_end);
 
@@ -1724,7 +1732,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
             extras_ptr = ext_save;
             break;
         }
-        uint32_t offset = (uint32_t)(seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+        uint32_t offset = (seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
 
         {
             const uint8_t* src_lit = l_ptr;
@@ -1766,13 +1774,13 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
         uint32_t seq = zxc_le32(seq_ptr);
         seq_ptr += sizeof(uint32_t);
 
-        uint64_t ll = (uint32_t)(seq >> 24);
+        uint64_t ll = seq >> 24;
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) ll += zxc_read_varint(&extras_ptr, extras_end);
 
-        uint32_t m_bits = (uint32_t)((seq >> 16) & 0xFF);
+        uint32_t m_bits = (seq >> 16) & 0xFF;
         uint64_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_varint(&extras_ptr, extras_end);
-        uint32_t offset = (uint32_t)(seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+        uint32_t offset = (seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
 
         if (UNLIKELY(ll + ml > (size_t)(d_end - d_ptr) || l_ptr + ll > l_end))
             return ZXC_ERROR_OVERFLOW;

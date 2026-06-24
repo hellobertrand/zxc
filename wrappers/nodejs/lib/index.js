@@ -315,9 +315,9 @@ function compress(data, options = {}) {
         throw new TypeError('data must be a Buffer');
     }
 
-    const level = options.level !== undefined ? options.level : LEVEL_DEFAULT;
-    const checksum = options.checksum !== undefined ? options.checksum : false;
-    const seekable = options.seekable !== undefined ? options.seekable : false;
+    const level = options.level ?? LEVEL_DEFAULT;
+    const checksum = options.checksum ?? false;
+    const seekable = options.seekable ?? false;
     const { dict, dictHuf } = _splitDictOption(options);
 
     return native.compress(data, level, checksum, seekable, dict, dictHuf);
@@ -352,7 +352,7 @@ function decompress(data, options = {}) {
         throw new TypeError('data must be a Buffer');
     }
 
-    const checksum = options.checksum !== undefined ? options.checksum : false;
+    const checksum = options.checksum ?? false;
     const { dict, dictHuf } = _splitDictOption(options);
 
     let size = options.size;
@@ -480,9 +480,9 @@ class CompressStream extends Transform {
         const { level, checksum, blockSize, ...transformOpts } = options;
         super(transformOpts);
         this._cs = new CStream({
-            ...(level !== undefined ? { level } : {}),
-            ...(checksum !== undefined ? { checksum } : {}),
-            ...(blockSize !== undefined ? { blockSize } : {}),
+            ...(level === undefined ? {} : { level }),
+            ...(checksum === undefined ? {} : { checksum }),
+            ...(blockSize === undefined ? {} : { blockSize }),
         });
     }
 
@@ -511,7 +511,7 @@ class CompressStream extends Transform {
     }
 
     _destroy(err, callback) {
-        try { this._cs.close(); } catch (_) { /* idempotent */ }
+        this._cs.close();
         callback(err);
     }
 }
@@ -536,7 +536,7 @@ class DecompressStream extends Transform {
         const { checksum, ...transformOpts } = options;
         super(transformOpts);
         this._ds = new DStream({
-            ...(checksum !== undefined ? { checksum } : {}),
+            ...(checksum === undefined ? {} : { checksum }),
         });
     }
 
@@ -570,7 +570,7 @@ class DecompressStream extends Transform {
     }
 
     _destroy(err, callback) {
-        try { this._ds.close(); } catch (_) { /* idempotent */ }
+        this._ds.close();
         callback(err);
     }
 }

@@ -1213,8 +1213,10 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         zxc_lz_seed_dict(src, dict_sz, ctx->hash_table, ctx->hash_tags, ctx->chain_table,
                          epoch_mark, offset_mask, level);
 
-    const uint8_t *ip = src + dict_sz, *iend = src + src_sz, *anchor = ip,
-                  *search_limit = iend - ZXC_LZ_SEARCH_MARGIN;
+    const uint8_t* ip = src + dict_sz;
+    const uint8_t* iend = src + src_sz;
+    const uint8_t* anchor = ip;
+    const uint8_t* search_limit = iend - ZXC_LZ_SEARCH_MARGIN;
 
     uint32_t* const hash_table = ctx->hash_table;
     uint8_t* const hash_tags = ctx->hash_tags;
@@ -1260,7 +1262,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         if (m.ref) {
             ip -= m.backtrack;
             const uint32_t ll = (uint32_t)(ip - anchor);
-            const uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
+            const uint32_t ml = m.len - ZXC_LZ_MIN_MATCH_LEN;
             const uint32_t off = (uint32_t)(ip - m.ref);
 
             if (ll > 0) {
@@ -1609,7 +1611,10 @@ parse_done:;
                 size_t stop = start + Q;
                 if (start > lit_c) start = lit_c;
                 if (stop > lit_c) stop = lit_c;
-                uint64_t b0 = 0, b1 = 0, b2 = 0, b3 = 0;
+                uint64_t b0 = 0;
+                uint64_t b1 = 0;
+                uint64_t b2 = 0;
+                uint64_t b3 = 0;
                 size_t i = start;
 
                 for (; i + 4 <= stop; i += 4) {
@@ -1889,8 +1894,10 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         zxc_lz_seed_dict(src, dict_sz, ctx->hash_table, ctx->hash_tags, ctx->chain_table,
                          epoch_mark, offset_mask, level);
 
-    const uint8_t *ip = src + dict_sz, *iend = src + src_sz, *anchor = ip,
-                  *search_limit = iend - ZXC_LZ_SEARCH_MARGIN;
+    const uint8_t* ip = src + dict_sz;
+    const uint8_t* iend = src + src_sz;
+    const uint8_t* anchor = ip;
+    const uint8_t* search_limit = iend - ZXC_LZ_SEARCH_MARGIN;
 
     uint32_t* const hash_table = ctx->hash_table;
     uint8_t* const hash_tags = ctx->hash_tags;
@@ -1927,7 +1934,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         if (m.ref) {
             ip -= m.backtrack;
             const uint32_t ll = (uint32_t)(ip - anchor);
-            const uint32_t ml = (uint32_t)(m.len - ZXC_LZ_MIN_MATCH_LEN);
+            const uint32_t ml = m.len - ZXC_LZ_MIN_MATCH_LEN;
             const uint32_t off = (uint32_t)(ip - m.ref);
 
             if (ll > 0) {
