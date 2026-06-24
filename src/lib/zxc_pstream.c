@@ -636,8 +636,8 @@ typedef enum {
  * @var zxc_dstream_s::file_has_checksum
  *      File-level checksum flag declared by the file header.
  * @var zxc_dstream_s::scratch
- *      Generic accumulator for fixed-size frames; sized for the largest
- *      (file header = 16 bytes).
+ *      Generic 32-byte accumulator for fixed-size frames (file header, block
+ *      header, footer); comfortably holds the largest (16-byte file header).
  * @var zxc_dstream_s::scratch_used
  *      Number of bytes currently held in @c scratch.
  * @var zxc_dstream_s::scratch_need

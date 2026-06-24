@@ -2050,17 +2050,15 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
  * @brief Encodes a raw data block (uncompressed).
  *
  * This function prepares and writes a "RAW" type block into the destination
- * buffer. It handles the block header, copying of source data, and optionally
- * the calculation and storage of a checksum.
+ * buffer. It handles the block header and copying of source data; any checksum
+ * is appended separately by the wrapper.
  *
  * @param[in] src Pointer to the source data to encode.
  * @param[in] src_sz Size of the source data in bytes.
  * @param[out] dst Pointer to the destination buffer.
  * @param[in] dst_cap Maximum capacity of the destination buffer.
  * @param[out] out_sz Pointer to a variable receiving the total written size
- * (header
- * + data + checksum).
- * @param[in] chk Boolean flag: if non-zero, a checksum is calculated and added.
+ * (header + data).
  *
  * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if the
  * destination buffer capacity is insufficient.
