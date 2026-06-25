@@ -18,13 +18,13 @@
  * // Compress
  * size_t bound = zxc_compress_bound(src_size);
  * void *dst    = malloc(bound);
- * zxc_compress_opts_t opts = { .level = ZXC_LEVEL_DEFAULT, .checksum = 1 };
+ * zxc_compress_opts_t opts = { .level = ZXC_LEVEL_DEFAULT, .checksum_enabled = 1 };
  * int64_t csize = zxc_compress(src, src_size, dst, bound, &opts);
  *
  * // Decompress
  * uint64_t orig = zxc_get_decompressed_size(dst, csize);
  * void *out     = malloc(orig);
- * zxc_decompress_opts_t dopts = { .checksum = 1 };
+ * zxc_decompress_opts_t dopts = { .checksum_enabled = 1 };
  * int64_t dsize = zxc_decompress(dst, csize, out, orig, &dopts);
  * @endcode
  *
@@ -86,7 +86,7 @@ ZXC_EXPORT int zxc_default_level(void);
  * @brief Returns the human-readable library version string.
  *
  * The returned pointer is a compile-time constant and must not be freed.
- * Example: "0.9.1".
+ * Format: "MAJOR.MINOR.PATCH" (e.g. "0.12.0").
  *
  * @return Null-terminated version string.
  */
@@ -125,7 +125,8 @@ ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
  * @param[out] dst          Pointer to the destination buffer.
  * @param[in] dst_capacity Maximum capacity of the destination buffer.
  * @param[in] opts         Compression options (NULL uses all defaults).
- *                         Only @c level, @c block_size, and @c checksum are used.
+ *                         @c n_threads and the progress callback are ignored
+ *                         (this call is single-threaded and blocking).
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
@@ -147,7 +148,8 @@ ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* ds
  * @param[out] dst          Pointer to the destination buffer.
  * @param[in] dst_capacity  Capacity of the destination buffer.
  * @param[in] opts          Decompression options (NULL uses all defaults).
- *                          Only @c checksum is used.
+ *                          @c n_threads and the progress callback are ignored
+ *                          (this call is single-threaded and blocking).
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *

@@ -35,7 +35,7 @@
 /** @endcond */
 
 /**
- * @brief Human-readable version string (e.g. "0.7.2").
+ * @brief Human-readable version string in "MAJOR.MINOR.PATCH" form (e.g. "0.12.0").
  */
 #define ZXC_LIB_VERSION_STR    \
     ZXC_STR(ZXC_VERSION_MAJOR) \
@@ -89,8 +89,8 @@
  * @brief Bounds on thread-count parameters accepted by the streaming APIs.
  * @{
  */
-/** @brief Maximum value accepted for `num_threads` in `zxc_stream_compress`
- *  / `zxc_stream_decompress`. Passing a higher value returns `ZXC_ERROR_INVALID_OPTION`. */
+/** @brief Maximum value accepted for `n_threads` in `zxc_stream_compress`
+ *  / `zxc_stream_decompress`. Higher values are clamped to `ZXC_MAX_THREADS`. */
 #define ZXC_MAX_THREADS 512
 /** @} */ /* end of threading */
 

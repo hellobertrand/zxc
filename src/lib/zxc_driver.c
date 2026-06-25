@@ -210,9 +210,9 @@ typedef enum { JOB_STATUS_FREE, JOB_STATUS_FILLED, JOB_STATUS_PROCESSED } job_st
  * @var zxc_stream_job_t::status
  *      The current state of this job (Free, Filled, or Processed).
  * @var zxc_stream_job_t::pad
- *      Padding bytes to ensure the structure size aligns with typical cache
- * lines (64 bytes), minimizing cache contention between threads accessing
- * adjacent jobs.
+ *      Padding bytes to ensure the structure size aligns with the cache line
+ * size (@c ZXC_CACHE_LINE_SIZE), minimizing cache contention between threads
+ * accessing adjacent jobs.
  */
 typedef struct {
     uint8_t* in_buf;
@@ -307,6 +307,14 @@ typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
  *    User data pointer to be passed to the progress callback function.
  * @var zxc_stream_ctx_t::total_input_bytes
  *     Total size of the input data in bytes, used for progress tracking.
+ * @var zxc_stream_ctx_t::dict
+ *     Pointer to the optional dictionary buffer used to prime
+ *     compression/decompression, NULL when no dictionary is in use.
+ * @var zxc_stream_ctx_t::dict_size
+ *     Size of the dictionary in bytes, 0 when no dictionary is in use.
+ * @var zxc_stream_ctx_t::dict_huf
+ *     Shared dictionary literal Huffman table (128-byte packed code-lengths
+ *     header), NULL when absent.
  */
 typedef struct {
     zxc_stream_job_t* jobs;

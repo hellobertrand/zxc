@@ -683,8 +683,8 @@ int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_le
  * @param[in]  src_size         Size of @p src in bytes.
  * @param[out] dst              Destination buffer (use zxc_compress_bound() to size).
  * @param[in]  dst_capacity     Capacity of @p dst.
- * @param[in]  level            Compression level (1-5).
- * @param[in]  checksum_enabled Non-zero to enable per-block and global checksums.
+ * @param[in]  opts             Compression options (level, block size, checksum,
+ *                              dictionary, seekable, threads), or NULL for defaults.
  * @return Total compressed size in bytes, or a negative @ref zxc_error_t code.
  */
 // cppcheck-suppress unusedFunction
@@ -860,7 +860,8 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
  * @param[in]  src_size         Size of @p src in bytes.
  * @param[out] dst              Destination buffer for decompressed data.
  * @param[in]  dst_capacity     Capacity of @p dst.
- * @param[in]  checksum_enabled Non-zero to verify per-block and global checksums.
+ * @param[in]  opts             Decompression options (checksum verification,
+ *                              dictionary, threads), or NULL for defaults.
  * @return Total decompressed size in bytes, or a negative @ref zxc_error_t code.
  */
 // cppcheck-suppress unusedFunction
