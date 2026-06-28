@@ -846,22 +846,22 @@ static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t 
         const uint32_t _e1 = table[a1 & ZXC_HUF_TBL_MASK].entry; \
         const uint32_t _e2 = table[a2 & ZXC_HUF_TBL_MASK].entry; \
         const uint32_t _e3 = table[a3 & ZXC_HUF_TBL_MASK].entry; \
-        zxc_store_le16(d0, (uint16_t)_e0);                       \
-        zxc_store_le16(d1, (uint16_t)_e1);                       \
-        zxc_store_le16(d2, (uint16_t)_e2);                       \
-        zxc_store_le16(d3, (uint16_t)_e3);                       \
         const int _t0 = (int)(_e0 >> 28);                        \
         const int _t1 = (int)(_e1 >> 28);                        \
         const int _t2 = (int)(_e2 >> 28);                        \
         const int _t3 = (int)(_e3 >> 28);                        \
-        d0 += 1 + (int)((_e0 >> 24) & 1);                        \
-        d1 += 1 + (int)((_e1 >> 24) & 1);                        \
-        d2 += 1 + (int)((_e2 >> 24) & 1);                        \
-        d3 += 1 + (int)((_e3 >> 24) & 1);                        \
         a0 >>= _t0;                                              \
         a1 >>= _t1;                                              \
         a2 >>= _t2;                                              \
         a3 >>= _t3;                                              \
+        zxc_store_le16(d0, (uint16_t)_e0);                       \
+        zxc_store_le16(d1, (uint16_t)_e1);                       \
+        zxc_store_le16(d2, (uint16_t)_e2);                       \
+        zxc_store_le16(d3, (uint16_t)_e3);                       \
+        d0 += 1 + (int)((_e0 >> 24) & 1);                        \
+        d1 += 1 + (int)((_e1 >> 24) & 1);                        \
+        d2 += 1 + (int)((_e2 >> 24) & 1);                        \
+        d3 += 1 + (int)((_e3 >> 24) & 1);                        \
         sl0 += _t0;                                              \
         sl1 += _t1;                                              \
         sl2 += _t2;                                              \
