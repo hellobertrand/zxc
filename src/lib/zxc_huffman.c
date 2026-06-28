@@ -412,12 +412,21 @@ static int unpack_lengths_header(const uint8_t* RESTRICT in, uint8_t* RESTRICT c
  * Bit writer (LSB-first)
  * =========================================================================*/
 
+/**
+ * @brief LSB-first bit writer over a caller-owned output buffer.
+ *
+ * Codes are appended at the LSB end of @c accum (see ::bw_put) and flushed to
+ * @c ptr one full byte at a time. A mid-stream overrun is not fatal: @c err
+ * latches so callers check for failure once via ::bw_finish instead of after
+ * every write.
+ */
 typedef struct {
-    uint8_t* ptr;
-    uint8_t* end;
-    uint64_t accum;
-    int bits;
-    int err;
+    uint8_t* ptr;   /**< Next byte to write; advances as full bytes are flushed. */
+    uint8_t* end;   /**< One past the last writable byte of the buffer. */
+    uint64_t accum; /**< LSB-first accumulator of bits not yet flushed. */
+    int bits;       /**< Count of valid low bits currently held in @c accum. */
+    int err;        /**< Sticky overrun flag; ::bw_finish maps it to
+                     *   @c ZXC_ERROR_DST_TOO_SMALL. */
 } bit_writer_t;
 
 /**

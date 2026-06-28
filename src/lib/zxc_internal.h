@@ -589,7 +589,6 @@ extern "C" {
 #define ZXC_RLE_MARGIN_SHIFT 5
 /** @brief Huffman margin shift: controls the threshold for choosing Huffman over RAW/RLE. */
 #define ZXC_HUF_MARGIN_SHIFT 5
-/** @} */
 /** @brief Absolute floor below which Huffman cannot beat RAW even with
  *         zero-entropy literals after the @ref ZXC_HUF_MARGIN_SHIFT margin.
  *         Above this floor the precise size accounting at the call site decides
@@ -619,6 +618,7 @@ extern "C" {
  *         each iteration speculatively writes 2 bytes per stream and runs
  *         @c ZXC_HUF_BATCH iterations before re-checking the bound. */
 #define ZXC_HUF_SAFE_MARGIN ((size_t)(2 * ZXC_HUF_BATCH))
+/** @} */
 
 /**
  * @brief Multi-symbol decoder lookup table entry. Bit layout:
