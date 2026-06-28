@@ -1575,8 +1575,8 @@ parse_done:;
             }
         }
 
-        // Threshold: ~3% savings using integer math (97% ~= 1 - 1/32)
-        if (rle_size < lit_c - (lit_c >> 5)) enc_lit = ZXC_SECTION_ENCODING_RLE;
+        // RLE chosen over RAW only if it saves >= 1/2^ZXC_RLE_MARGIN_SHIFT.
+        if (rle_size < lit_c - (lit_c >> ZXC_RLE_MARGIN_SHIFT)) enc_lit = ZXC_SECTION_ENCODING_RLE;
     }
 
     /* Level >= 6: also evaluate Huffman as a 3rd literal-encoding candidate.
@@ -1631,11 +1631,10 @@ parse_done:;
             }
             huf_total_size = ZXC_HUF_HEADER_SIZE + streams_bytes;
             const size_t baseline = (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : lit_c;
-            /* Threshold: 3% savings (1/32) over the chosen RAW/RLE baseline.
-             * Same heuristic as the RAW/RLE switch above. */
-            if (huf_total_size < baseline - (baseline >> 5)) {
+            /* Huffman chosen over the RAW/RLE baseline only if it saves >=
+             * 1/2^ZXC_HUF_MARGIN_SHIFT. */
+            if (huf_total_size < baseline - (baseline >> ZXC_HUF_MARGIN_SHIFT))
                 enc_lit = ZXC_SECTION_ENCODING_HUFFMAN;
-            }
         }
     }
 
@@ -1674,8 +1673,8 @@ parse_done:;
                     enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
             } else {
                 const size_t baseline = (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : lit_c;
-                /* Same 3% (1/32) margin as the other encoding switches. */
-                if (huf_dict_total_size < baseline - (baseline >> 5))
+                /* Same ZXC_HUF_MARGIN_SHIFT margin as the other encoding switches. */
+                if (huf_dict_total_size < baseline - (baseline >> ZXC_HUF_MARGIN_SHIFT))
                     enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
             }
         }

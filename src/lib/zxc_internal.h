@@ -585,20 +585,25 @@ extern "C" {
 #define ZXC_HUF_STREAM_SIZES_HEADER_SIZE ((int)((ZXC_HUF_NUM_STREAMS - 1) * sizeof(uint16_t)))
 /** @brief Total Huffman header size: packed code lengths + sub-stream sizes. */
 #define ZXC_HUF_HEADER_SIZE (ZXC_HUF_TABLE_SIZE + ZXC_HUF_STREAM_SIZES_HEADER_SIZE)
+/** @brief RLE margin shift: controls the threshold for choosing RLE over RAW. */
+#define ZXC_RLE_MARGIN_SHIFT 5
+/** @brief Huffman margin shift: controls the threshold for choosing Huffman over RAW/RLE. */
+#define ZXC_HUF_MARGIN_SHIFT 5
+/** @} */
 /** @brief Absolute floor below which Huffman cannot beat RAW even with
- *         zero-entropy literals after the 3 % savings margin. Above this
- *         floor, the precise size accounting at the call site decides per
- *         block, so the threshold is corpus-agnostic.
+ *         zero-entropy literals after the @ref ZXC_HUF_MARGIN_SHIFT margin.
+ *         Above this floor the precise size accounting at the call site decides
+ *         per block, so the threshold is corpus-agnostic.
  *
- *         Derivation: the call site requires `huf_total < baseline * 31/32`
- *         (3 % margin = `baseline >> 5`). At zero-entropy literals the
- *         payload vanishes and `huf_total = HEADER`, giving
- *         `N > HEADER x 32/31`. The `+30` is the standard ceiling-division
- *         offset (`b - 1` with `b = 31`). Constants:
- *           - 32 = inverse of the 3 % margin (`1/32`)
- *           - 31 = `32 - 1`, the fraction kept after the margin
- *           - 30 = `31 - 1`, ceiling-division rounding offset */
-#define ZXC_HUF_MIN_LITERALS ((ZXC_HUF_HEADER_SIZE * 32 + 30) / 31)
+ *         Derivation: the call site requires `huf_total < baseline * (M-1)/M`
+ *         with `M = 1 << ZXC_HUF_MARGIN_SHIFT` (the inverse margin, 32 at SHIFT
+ *         5). At zero-entropy literals the payload vanishes and
+ *         `huf_total = HEADER`, giving `N > HEADER * M/(M-1)`; the `+ (M-2)` is
+ *         the ceiling-division offset (`b - 1` with `b = M - 1`). Tracks
+ *         ZXC_HUF_MARGIN_SHIFT automatically if it is retuned. */
+#define ZXC_HUF_MIN_LITERALS                                                                   \
+    ((ZXC_HUF_HEADER_SIZE * (1 << ZXC_HUF_MARGIN_SHIFT) + ((1 << ZXC_HUF_MARGIN_SHIFT) - 2)) / \
+     ((1 << ZXC_HUF_MARGIN_SHIFT) - 1))
 /** @brief Width of the decoder bit accumulator, in bits
  *         (`sizeof(uint64_t) * CHAR_BIT`). */
 #define ZXC_HUF_ACCUM_BITS 64
