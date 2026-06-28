@@ -847,8 +847,7 @@ static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t 
 
     /* Decode one 11-bit window per stream. Always writes 2 bytes per stream
      * (sym1 + spec sym2); advances d_s by 1 + n_extra; advances accum by
-     * len_total. Per-stream length accumulators sl0..sl3 collect consumed
-     * bits across the batch and are folded into bb_s once at end of batch. */
+     * len_total. */
 #define DECODE_ONE()                                             \
     do {                                                         \
         const uint32_t _e0 = table[a0 & ZXC_HUF_TBL_MASK].entry; \
@@ -871,10 +870,10 @@ static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t 
         d1 += 1 + (int)((_e1 >> 24) & 1);                        \
         d2 += 1 + (int)((_e2 >> 24) & 1);                        \
         d3 += 1 + (int)((_e3 >> 24) & 1);                        \
-        sl0 += _t0;                                              \
-        sl1 += _t1;                                              \
-        sl2 += _t2;                                              \
-        sl3 += _t3;                                              \
+        bb0 -= _t0;                                              \
+        bb1 -= _t1;                                              \
+        bb2 -= _t2;                                              \
+        bb3 -= _t3;                                              \
     } while (0)
 
     while ((size_t)(dend0 - d0) >= ZXC_HUF_SAFE_MARGIN &&
@@ -886,19 +885,11 @@ static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t 
         REFILL(a2, bb2, p2, e2);
         REFILL(a3, bb3, p3, e3);
 
-        int sl0 = 0;
-        int sl1 = 0;
-        int sl2 = 0;
-        int sl3 = 0;
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();
-        bb0 -= sl0;
-        bb1 -= sl1;
-        bb2 -= sl2;
-        bb3 -= sl3;
     }
 
     /* Per-stream scalar tail (<= ZXC_HUF_SAFE_MARGIN - 1 = 9 symbols per
