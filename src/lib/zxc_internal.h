@@ -591,15 +591,9 @@ extern "C" {
 #define ZXC_HUF_MARGIN_SHIFT 5
 /** @brief Absolute floor below which Huffman cannot beat RAW even with
  *         zero-entropy literals after the @ref ZXC_HUF_MARGIN_SHIFT margin.
- *         Above this floor the precise size accounting at the call site decides
- *         per block, so the threshold is corpus-agnostic.
  *
  *         Derivation: the call site requires `huf_total < baseline * (M-1)/M`
- *         with `M = 1 << ZXC_HUF_MARGIN_SHIFT` (the inverse margin, 32 at SHIFT
- *         5). At zero-entropy literals the payload vanishes and
- *         `huf_total = HEADER`, giving `N > HEADER * M/(M-1)`; the `+ (M-2)` is
- *         the ceiling-division offset (`b - 1` with `b = M - 1`). Tracks
- *         ZXC_HUF_MARGIN_SHIFT automatically if it is retuned. */
+ *         with `M = 1 << ZXC_HUF_MARGIN_SHIFT`. */
 #define ZXC_HUF_MIN_LITERALS                                                                   \
     ((ZXC_HUF_HEADER_SIZE * (1 << ZXC_HUF_MARGIN_SHIFT) + ((1 << ZXC_HUF_MARGIN_SHIFT) - 2)) / \
      ((1 << ZXC_HUF_MARGIN_SHIFT) - 1))
@@ -618,6 +612,13 @@ extern "C" {
  *         each iteration speculatively writes 2 bytes per stream and runs
  *         @c ZXC_HUF_BATCH iterations before re-checking the bound. */
 #define ZXC_HUF_SAFE_MARGIN ((size_t)(2 * ZXC_HUF_BATCH))
+/** @brief Decode-table index: the low @ref ZXC_HUF_LOOKUP_BITS of the bit
+ *         accumulator. */
+#if defined(__BMI2__) && !defined(ZXC_DISABLE_SIMD)
+#define ZXC_HUF_LUT_IDX(a) ((size_t)_bzhi_u64((uint64_t)(a), ZXC_HUF_LOOKUP_BITS))
+#else
+#define ZXC_HUF_LUT_IDX(a) ((size_t)((a) & ZXC_HUF_TBL_MASK))
+#endif
 /** @} */
 
 /**
@@ -627,13 +628,6 @@ extern "C" {
  *   bits 16..19  len1       - bit length of sym1's code (1..8)
  *   bit  24      n_extra    - 0 if 1 symbol, 1 if 2 symbols decoded
  *   bits 28..31  len_total  - total bits consumed (1..11)
- *
- * len_total occupies the top nibble so the hot decode loop reads the
- * per-symbol shift amount as `entry >> 28` (no mask), trimming one ALU uop
- * from the load -> shift-amount -> accumulator-shift critical recurrence.
- *
- * Lives here (not in zxc_huffman.c) so a prebuilt table can be carried by the
- * compression context for the shared dictionary literal table.
  */
 typedef struct {
     uint32_t entry;
