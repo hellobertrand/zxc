@@ -620,8 +620,12 @@ extern "C" {
  *   bits  0..7   sym1       - first decoded symbol
  *   bits  8..15  sym2       - second decoded symbol (junk if n_extra == 0)
  *   bits 16..19  len1       - bit length of sym1's code (1..8)
- *   bits 20..23  len_total  - total bits consumed (1..11)
  *   bit  24      n_extra    - 0 if 1 symbol, 1 if 2 symbols decoded
+ *   bits 28..31  len_total  - total bits consumed (1..11)
+ *
+ * len_total occupies the top nibble so the hot decode loop reads the
+ * per-symbol shift amount as `entry >> 28` (no mask), trimming one ALU uop
+ * from the load -> shift-amount -> accumulator-shift critical recurrence.
  *
  * Lives here (not in zxc_huffman.c) so a prebuilt table can be carried by the
  * compression context for the shared dictionary literal table.
