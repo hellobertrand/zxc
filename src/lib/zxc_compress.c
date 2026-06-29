@@ -1682,6 +1682,34 @@ parse_done:;
         }
     }
 
+    /* Level-7 (ULTRA): Huffman-code the token byte stream, reusing the literal
+     * codec (tokens are a <=256-symbol byte alphabet). Same size-vs-RAW margin
+     * as literals; the decoder selects the path from gh.enc_litlen. opt_scratch
+     * is free here (the parse and literal code-length build are done). */
+    uint8_t tok_code_len[ZXC_HUF_NUM_SYMBOLS];
+    uint8_t enc_tok = ZXC_SECTION_ENCODING_RAW;
+    size_t tok_huf_size = 0;
+    if (level >= ZXC_LEVEL_ULTRA && seq_c >= ZXC_HUF_MIN_LITERALS) {
+        uint32_t tfreq[ZXC_HUF_NUM_SYMBOLS] = {0};
+        for (uint32_t i = 0; i < seq_c; i++) tfreq[buf_tokens[i]]++;
+        if (zxc_huf_build_code_lengths(tfreq, tok_code_len, ctx->opt_scratch) == ZXC_OK) {
+            const size_t Q = (seq_c + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
+            size_t streams_bytes = 0;
+            for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
+                size_t start = (size_t)s * Q;
+                size_t stop = start + Q;
+                if (start > seq_c) start = seq_c;
+                if (stop > seq_c) stop = seq_c;
+                uint64_t bits = 0;
+                for (size_t i = start; i < stop; i++) bits += tok_code_len[buf_tokens[i]];
+                streams_bytes += (size_t)((bits + 7) / 8);
+            }
+            tok_huf_size = ZXC_HUF_HEADER_SIZE + streams_bytes;
+            if (tok_huf_size < (size_t)seq_c - ((size_t)seq_c >> ZXC_HUF_MARGIN_SHIFT))
+                enc_tok = ZXC_SECTION_ENCODING_HUFFMAN;
+        }
+    }
+
     zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GLO};
     uint8_t* const p = dst + ZXC_BLOCK_HEADER_SIZE;
     size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
@@ -1693,7 +1721,7 @@ parse_done:;
     const zxc_gnr_header_t gh = {.n_sequences = seq_c,
                                  .n_literals = (uint32_t)lit_c,
                                  .enc_lit = enc_lit,
-                                 .enc_litlen = 0,
+                                 .enc_litlen = enc_tok,
                                  .enc_mlen = 0,
                                  .enc_off = (uint8_t)use_8bit_off};
 
@@ -1704,7 +1732,8 @@ parse_done:;
                                         ? huf_dict_total_size
                                         : lit_c;
     desc[0].sizes = (uint64_t)lit_section_size | ((uint64_t)lit_c << 32);
-    desc[1].sizes = (uint64_t)seq_c | ((uint64_t)seq_c << 32);
+    const size_t tok_section_size = (enc_tok == ZXC_SECTION_ENCODING_HUFFMAN) ? tok_huf_size : seq_c;
+    desc[1].sizes = (uint64_t)tok_section_size | ((uint64_t)seq_c << 32);
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
     desc[3].sizes = (uint64_t)extras_sz | ((uint64_t)extras_sz << 32);
 
@@ -1795,8 +1824,15 @@ parse_done:;
 
     if (UNLIKELY(rem < sz_tok)) return ZXC_ERROR_DST_TOO_SMALL;
 
-    ZXC_MEMCPY(p_curr, buf_tokens, seq_c);
-    p_curr += seq_c;
+    if (enc_tok == ZXC_SECTION_ENCODING_HUFFMAN) {
+        const int written = zxc_huf_encode_section(buf_tokens, seq_c, tok_code_len, p_curr, rem);
+        if (UNLIKELY(written < 0)) return written;
+        if (UNLIKELY((size_t)written != tok_huf_size)) return ZXC_ERROR_DST_TOO_SMALL;
+        p_curr += written;
+    } else {
+        ZXC_MEMCPY(p_curr, buf_tokens, seq_c);
+        p_curr += seq_c;
+    }
     rem -= sz_tok;
 
     if (UNLIKELY(rem < sz_off)) return ZXC_ERROR_DST_TOO_SMALL;

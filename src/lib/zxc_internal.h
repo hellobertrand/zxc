@@ -1535,6 +1535,9 @@ typedef struct {
     size_t lit_buffer_cap;               /**< Current capacity of the scratch buffer. */
     uint8_t* work_buf;                   /**< Padded scratch buffer for buffer-API decompression. */
     size_t work_buf_cap;                 /**< Capacity of the work buffer. */
+    uint8_t* tok_buffer;                 /**< Decode scratch for a Huffman-coded GLO token
+                                              section (enc_litlen == HUFFMAN); NULL on compress. */
+    size_t tok_buffer_cap;               /**< Capacity of tok_buffer in bytes. */
     uint8_t* opt_scratch;                /**< Optimal-parser DP scratch (level >= 6 only,
                                               lazy-allocated, packs dp/parent_len/parent_off/actions).
                                               Also reused as transient scratch for the
