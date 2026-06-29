@@ -86,6 +86,9 @@ typedef struct {
     /* mode == 0 (decompress) */
     size_t off_work;
     size_t off_lit_dctx;
+    /* mode == 0: scratch for a Huffman-coded GLO token section (enc_litlen == HUFFMAN). */
+    size_t off_tok_dctx;
+    size_t sz_tok_dctx;
     /* mode == 0 with dict only: prebuilt shared-dictionary Huffman decode table. */
     size_t off_huf_dict;
     /* mode == 1 (compress) */
@@ -149,6 +152,13 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         layout.total += ZXC_ALIGN_CL(sz_work);
         layout.off_lit_dctx = layout.total;
         layout.total += ZXC_ALIGN_CL(sz_lit);
+        /* Token-section decode scratch (level-7 GLO blocks Huffman-code the token
+         * stream). Sized to the worst-case sequence count + wild-read pad, matching
+         * the compressor's max_seq bound. Provisioned regardless of level since the
+         * decoder cannot predict per-block enc_litlen. */
+        layout.sz_tok_dctx = (chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16) + ZXC_PAD_SIZE;
+        layout.off_tok_dctx = layout.total;
+        layout.total += ZXC_ALIGN_CL(layout.sz_tok_dctx);
         /* Shared-dictionary Huffman decode table: built once per context by
          * zxc_cctx_attach_dict_huf, read by HUFFMAN_DICT literal sections. */
         if (dict_size > 0) {
@@ -289,6 +299,8 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
         ctx->work_buf_cap = chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
         ctx->lit_buffer = mem + layout.off_lit_dctx;
         ctx->lit_buffer_cap = chunk_size + ZXC_PAD_SIZE;
+        ctx->tok_buffer = mem + layout.off_tok_dctx;
+        ctx->tok_buffer_cap = layout.sz_tok_dctx;
         if (dict_size > 0) ctx->dict_huf_table = (zxc_huf_dec_entry_t*)(mem + layout.off_huf_dict);
         return ZXC_OK;
     }
@@ -377,6 +389,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->buf_extras = NULL;
     ctx->literals = NULL;
     ctx->work_buf = NULL;
+    ctx->tok_buffer = NULL;
     ctx->opt_scratch = NULL;
     ctx->dict_buffer = NULL;
 
@@ -913,7 +926,7 @@ int zxc_min_level(void) { return ZXC_LEVEL_FASTEST; }
  *
  * Returns the value of ZXC_LEVEL_DENSITY (currently 6).
  */
-int zxc_max_level(void) { return ZXC_LEVEL_DENSITY; }
+int zxc_max_level(void) { return ZXC_LEVEL_ULTRA; }
 
 /**
  * @brief Returns the default compression level.

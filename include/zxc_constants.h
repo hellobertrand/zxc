@@ -127,7 +127,8 @@ typedef enum {
     ZXC_LEVEL_DEFAULT = 3,  /**< Recommended: ratio > LZ4, decode speed > LZ4. */
     ZXC_LEVEL_BALANCED = 4, /**< Good ratio, good decode speed. */
     ZXC_LEVEL_COMPACT = 5,  /**< High density. Best for storage/firmware/assets. */
-    ZXC_LEVEL_DENSITY = 6   /**< Maximum density: Huffman-coded literals on top of COMPACT. */
+    ZXC_LEVEL_DENSITY = 6,  /**< Maximum density: Huffman-coded literals on top of COMPACT. */
+    ZXC_LEVEL_ULTRA = 7     /**< DENSITY + Huffman-coded sequence tokens (slower decode). */
 } zxc_compression_level_t;
 
 /** @} */ /* end of levels */

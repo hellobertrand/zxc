@@ -1711,7 +1711,7 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
  */
 size_t zxc_static_cctx_workspace_size(const size_t block_size, const int level) {
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return 0;
-    if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_DENSITY)) return 0;
+    if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_ULTRA)) return 0;
     const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level, 0);
     if (UNLIKELY(inner_sz == 0)) return 0;
     return ZXC_STATIC_CCTX_HDR_SIZE + inner_sz;
@@ -1741,7 +1741,7 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
     const int checksum_enabled = opts->checksum_enabled;
 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return NULL;
-    if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_DENSITY)) return NULL;
+    if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_ULTRA)) return NULL;
 
     const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level, 0);
     if (UNLIKELY(inner_sz == 0)) return NULL;

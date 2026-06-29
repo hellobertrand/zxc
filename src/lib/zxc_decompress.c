@@ -574,16 +574,29 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     const uint64_t expected_off_size =
         (gh.enc_off == 1) ? (uint64_t)gh.n_sequences : (uint64_t)gh.n_sequences * 2;
 
-    const uint8_t* t_ptr = p_curr;
-    const uint8_t* o_ptr = t_ptr + sz_tokens;
+    /* Offsets/extras follow the on-disk token SECTION; sz_tokens is its size
+     * (== n_sequences when RAW, the Huffman payload size when enc_litlen set). */
+    const uint8_t* o_ptr = p_curr + sz_tokens;
     const uint8_t* e_ptr = o_ptr + sz_offsets;
     const uint8_t* const e_end = e_ptr + sz_extras;  // For vbyte overflow detection
 
-    // Validate streams don't overflow source buffer +
-    // Validate stream sizes match sequence count (early rejection of malformed data)
-    if (UNLIKELY((e_end != src + src_size) || sz_tokens < gh.n_sequences ||
-                 (uint64_t)sz_offsets < expected_off_size))
+    // Validate streams don't overflow source buffer + match sequence count.
+    if (UNLIKELY((e_end != src + src_size) || (uint64_t)sz_offsets < expected_off_size))
         return ZXC_ERROR_CORRUPT_DATA;
+
+    /* Token stream: RAW in place, or (level-7) Huffman-decoded into tok_buffer.
+     * Either way t_ptr exposes n_sequences raw token bytes to the loops below. */
+    const uint8_t* t_ptr;
+    if (gh.enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN) {
+        const size_t n_tok = gh.n_sequences;
+        if (UNLIKELY(n_tok + ZXC_PAD_SIZE > ctx->tok_buffer_cap)) return ZXC_ERROR_CORRUPT_DATA;
+        const int rc = zxc_huf_decode_section(p_curr, sz_tokens, ctx->tok_buffer, n_tok);
+        if (UNLIKELY(rc != ZXC_OK)) return rc;
+        t_ptr = ctx->tok_buffer;
+    } else {
+        if (UNLIKELY(sz_tokens < gh.n_sequences)) return ZXC_ERROR_CORRUPT_DATA;
+        t_ptr = p_curr;
+    }
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;

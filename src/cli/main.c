@@ -1146,7 +1146,7 @@ int main(int argc, char** argv) {
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
-    while ((opt = getopt_long(argc, argv, "123456b::B:cCdD:fho:jklmrNqST:tvVz", long_options,
+    while ((opt = getopt_long(argc, argv, "1234567b::B:cCdD:fho:jklmrNqST:tvVz", long_options,
                               NULL)) != -1) {
         switch (opt) {
             case 'z':
@@ -1191,6 +1191,9 @@ int main(int argc, char** argv) {
                 break;
             case '6':
                 level = 6;
+                break;
+            case '7':
+                level = 7;
                 break;
             case 'T':
                 num_threads = atoi(optarg);
