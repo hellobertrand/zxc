@@ -615,7 +615,7 @@ extern "C" {
 /** @brief Decode-table index: the low @ref ZXC_HUF_LOOKUP_BITS of the bit
  *         accumulator. */
 #if defined(__BMI2__) && !defined(ZXC_DISABLE_SIMD)
-#define ZXC_HUF_LUT_IDX(a) ((size_t)_bzhi_u64((uint64_t)(a), ZXC_HUF_LOOKUP_BITS))
+#define ZXC_HUF_LUT_IDX(a) ((size_t)_bzhi_u32((uint32_t)(a), ZXC_HUF_LOOKUP_BITS))
 #else
 #define ZXC_HUF_LUT_IDX(a) ((size_t)((a) & ZXC_HUF_TBL_MASK))
 #endif
