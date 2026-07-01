@@ -111,7 +111,11 @@
  * @brief Predefined compression levels for the ZXC library.
  *
  * Higher levels trade encoding speed for better compression ratio.
- * All levels produce data that can be decompressed at the same speed.
+ * Levels 1-6 decode at essentially the same speed. Level 7 (ULTRA) adds
+ * Huffman-coded literals and sequence tokens. Level 8 (LDM) layers
+ * long-distance matching on top of level 7: blocks that carry far matches
+ * decode slightly slower (extra cache misses on the far copies), still far
+ * above the entropy codecs; blocks without far matches decode like level 7.
  * @{
  */
 
@@ -128,7 +132,9 @@ typedef enum {
     ZXC_LEVEL_BALANCED = 4, /**< Balanced trade-off between ratio and decode speed. */
     ZXC_LEVEL_COMPACT = 5,  /**< Denser encoding. Best for storage, firmware, and assets. */
     ZXC_LEVEL_DENSITY = 6,  /**< Higher density: adds Huffman-coded literals on top of COMPACT. */
-    ZXC_LEVEL_ULTRA = 7     /**< Maximum density: Huffman-coded literals and sequence tokens. */
+    ZXC_LEVEL_ULTRA = 7,    /**< Very high density: Huffman-coded literals and sequence tokens. */
+    ZXC_LEVEL_LDM = 8       /**< Maximum density: level 7 plus long-distance matching (far
+                                 matches >= 64 KB; blocks with far matches decode slightly slower). */
 } zxc_compression_level_t;
 
 /** @} */ /* end of levels */

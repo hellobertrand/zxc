@@ -887,6 +887,15 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     ZXC_MEMSET(dp + 1, 0xFF, block_sz * sizeof(uint32_t));
     ZXC_MEMSET(match_end_bits, 0, sz_bm);
 
+    /* Level 8 (LDM): long-distance matcher. The far hash and the split-plane
+     * high-byte arrays are only touched when `ldm` is set, so levels 1..7 keep
+     * their exact behavior and byte-identical output. */
+    const int ldm = (level >= ZXC_LEVEL_LDM);
+    uint32_t* const ldm_table = ldm ? ctx->ldm_table : NULL;
+    uint8_t* const parent_off_hi = ldm ? ctx->parent_off_hi : NULL;
+    uint8_t* const buf_offset_hi = ldm ? ctx->buf_offset_hi : NULL;
+    if (ldm) ZXC_MEMSET(parent_off_hi, 0, (block_sz + 1) * sizeof(uint8_t));
+
     /* Forward DP: visit every position, update reachable successors.
      * `skip_until` skips find_best_match at positions strictly inside the
      * last long match, the DP transition from the start of the match
@@ -935,45 +944,133 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                  * and stays scalar. */
                 const uint16_t off_biased = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
                 const size_t L_max_plus = L_max + 1;
-                size_t L = ZXC_LZ_MIN_MATCH_LEN;
 
-                /* 1. Cheap range. */
-                {
-                    const size_t L_cheap_end = ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK;
-                    const size_t L_end = (L_max_plus < L_cheap_end) ? L_max_plus : L_cheap_end;
-                    const uint32_t nxt = dp[p] + ZXC_OPT_MATCH_COST_BASE;
-                    L = zxc_opt_dp_update_const_cost(dp, parent_len, parent_off, p, L, L_end, nxt,
-                                                     off_biased);
-                }
-
-                /* 2. First varint level (1-byte extension). */
-                if (L < L_max_plus) {
-                    const size_t L_v1_end = ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK + 128;
-                    const size_t L_end = (L_max_plus < L_v1_end) ? L_max_plus : L_v1_end;
-                    const uint32_t nxt = dp[p] + ZXC_OPT_MATCH_COST_BASE + CHAR_BIT;
-                    L = zxc_opt_dp_update_const_cost(dp, parent_len, parent_off, p, L, L_end, nxt,
-                                                     off_biased);
-                }
-
-                /* 3. Higher varint levels: variable cost, kept scalar.
-                 * Reached only by L >= ML_MASK + 128 + MIN_MATCH, so the
-                 * v >= ML_MASK guard from the original loop is implied. */
-                for (; L < L_max_plus; L++) {
-                    uint32_t cost = ZXC_OPT_MATCH_COST_BASE;
-                    uint32_t v = (uint32_t)(L - ZXC_LZ_MIN_MATCH_LEN) - ZXC_TOKEN_ML_MASK;
-                    cost += CHAR_BIT;
-                    while (v >= 128) {
-                        v >>= 7;
-                        cost += CHAR_BIT;
+                if (ldm) {
+                    /* Level 7: scalar relaxation that also clears the split-plane
+                     * high byte, so parent_off_hi always reflects the winning
+                     * transition (a near match has no high bits). */
+                    for (size_t L = ZXC_LZ_MIN_MATCH_LEN; L < L_max_plus; L++) {
+                        uint32_t cost = ZXC_OPT_MATCH_COST_BASE;
+                        const uint32_t mlv = (uint32_t)(L - ZXC_LZ_MIN_MATCH_LEN);
+                        if (mlv >= ZXC_TOKEN_ML_MASK) {
+                            uint32_t v = mlv - ZXC_TOKEN_ML_MASK;
+                            cost += CHAR_BIT;
+                            while (v >= 128) {
+                                v >>= 7;
+                                cost += CHAR_BIT;
+                            }
+                        }
+                        const uint32_t nxt = dp[p] + cost;
+                        if (nxt < dp[p + L]) {
+                            dp[p + L] = nxt;
+                            parent_len[p + L] = (uint16_t)L;
+                            parent_off[p + L] = off_biased;
+                            parent_off_hi[p + L] = 0;
+                        }
                     }
-                    const uint32_t nxt = dp[p] + cost;
-                    if (nxt < dp[p + L]) {
-                        dp[p + L] = nxt;
-                        parent_len[p + L] = (uint16_t)L;
-                        parent_off[p + L] = off_biased;
+                } else {
+                    size_t L = ZXC_LZ_MIN_MATCH_LEN;
+
+                    /* 1. Cheap range. */
+                    {
+                        const size_t L_cheap_end = ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK;
+                        const size_t L_end = (L_max_plus < L_cheap_end) ? L_max_plus : L_cheap_end;
+                        const uint32_t nxt = dp[p] + ZXC_OPT_MATCH_COST_BASE;
+                        L = zxc_opt_dp_update_const_cost(dp, parent_len, parent_off, p, L, L_end, nxt,
+                                                         off_biased);
+                    }
+
+                    /* 2. First varint level (1-byte extension). */
+                    if (L < L_max_plus) {
+                        const size_t L_v1_end = ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK + 128;
+                        const size_t L_end = (L_max_plus < L_v1_end) ? L_max_plus : L_v1_end;
+                        const uint32_t nxt = dp[p] + ZXC_OPT_MATCH_COST_BASE + CHAR_BIT;
+                        L = zxc_opt_dp_update_const_cost(dp, parent_len, parent_off, p, L, L_end, nxt,
+                                                         off_biased);
+                    }
+
+                    /* 3. Higher varint levels: variable cost, kept scalar.
+                     * Reached only by L >= ML_MASK + 128 + MIN_MATCH, so the
+                     * v >= ML_MASK guard from the original loop is implied. */
+                    for (; L < L_max_plus; L++) {
+                        uint32_t cost = ZXC_OPT_MATCH_COST_BASE;
+                        uint32_t v = (uint32_t)(L - ZXC_LZ_MIN_MATCH_LEN) - ZXC_TOKEN_ML_MASK;
+                        cost += CHAR_BIT;
+                        while (v >= 128) {
+                            v >>= 7;
+                            cost += CHAR_BIT;
+                        }
+                        const uint32_t nxt = dp[p] + cost;
+                        if (nxt < dp[p + L]) {
+                            dp[p + L] = nxt;
+                            parent_len[p + L] = (uint16_t)L;
+                            parent_off[p + L] = off_biased;
+                        }
                     }
                 }
                 if (UNLIKELY(L_max >= ZXC_OPT_LONG_MATCH_SKIP)) skip_until = p + L_max - 1;
+            }
+        }
+
+        /* Level 7 far (long-distance) probe: a single-entry 8-byte hash reaching
+         * the whole block. Adds far-match candidates (distance >= 64 KB) to the
+         * DP; the split-plane high byte of the biased offset rides in
+         * parent_off_hi. The near path above is untouched. */
+        if (ldm) {
+            const uint32_t cur_pos = (uint32_t)(ip - src);
+            const uint64_t v8 = zxc_le64(ip);
+            const uint32_t hh = (uint32_t)((v8 * ZXC_LZ_HASH_PRIME2) >> (64 - ZXC_LDM_HASH_BITS));
+            const uint32_t raw = ldm_table[hh];
+            ldm_table[hh] = epoch_mark | cur_pos; /* insert after query */
+            if ((raw & ~offset_mask) == epoch_mark) {
+                const uint32_t cand = raw & offset_mask;
+                const uint32_t dist = cur_pos - cand;
+                if (dist >= ZXC_LDM_MIN_DIST && cand < cur_pos) {
+                    const uint8_t* const refp = src + cand;
+                    if (zxc_le64(refp) == v8) {
+                        uint32_t flen = (uint32_t)sizeof(uint64_t);
+                        const uint8_t* const limit8 = iend - sizeof(uint64_t);
+                        int ext_done = 0;
+                        while (ip + flen < limit8) {
+                            const uint64_t d = zxc_le64(ip + flen) ^ zxc_le64(refp + flen);
+                            if (d != 0) {
+                                flen += (uint32_t)(zxc_ctz64(d) >> 3);
+                                ext_done = 1;
+                                break;
+                            }
+                            flen += (uint32_t)sizeof(uint64_t);
+                        }
+                        if (!ext_done)
+                            while (ip + flen < iend && refp[flen] == ip[flen]) flen++;
+                        size_t fmax = block_sz - p;
+                        if (flen > fmax) flen = (uint32_t)fmax;
+                        if (flen > UINT16_MAX) flen = UINT16_MAX;
+                        if (flen >= ZXC_LDM_MIN_MATCH) {
+                            const uint32_t fbiased = dist - ZXC_LZ_OFFSET_BIAS;
+                            const uint16_t flo = (uint16_t)(fbiased & 0xFFFFu);
+                            const uint8_t fhi = (uint8_t)((fbiased >> 16) & 0xFFu);
+                            for (size_t L = ZXC_LDM_MIN_MATCH; L <= flen; L++) {
+                                uint32_t cost = ZXC_OPT_FAR_MATCH_COST_BASE;
+                                const uint32_t mlv = (uint32_t)(L - ZXC_LZ_MIN_MATCH_LEN);
+                                if (mlv >= ZXC_TOKEN_ML_MASK) {
+                                    uint32_t v = mlv - ZXC_TOKEN_ML_MASK;
+                                    cost += CHAR_BIT;
+                                    while (v >= 128) {
+                                        v >>= 7;
+                                        cost += CHAR_BIT;
+                                    }
+                                }
+                                const uint32_t nxt = dp[p] + cost;
+                                if (nxt < dp[p + L]) {
+                                    dp[p + L] = nxt;
+                                    parent_len[p + L] = (uint16_t)L;
+                                    parent_off[p + L] = flo;
+                                    parent_off_hi[p + L] = fhi;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1035,6 +1132,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
             const uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
             buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
             buf_offsets[seq_c] = off_biased;
+            if (ldm) buf_offset_hi[seq_c] = parent_off_hi[pos];
             if (off_biased > max_offset) max_offset = off_biased;
 
             if (UNLIKELY(ll >= ZXC_TOKEN_LL_MASK)) {
@@ -1184,6 +1282,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {
         ZXC_MEMSET(ctx->hash_table, 0, ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
         ZXC_MEMSET(ctx->hash_tags, 0, ZXC_LZ_HASH_SIZE * sizeof(uint8_t));
+        if (ctx->ldm_table)
+            ZXC_MEMSET(ctx->ldm_table, 0, ZXC_LDM_HASH_SIZE * sizeof(uint32_t));
         ctx->epoch = 1;
     }
     const uint32_t offset_bits = ctx->offset_bits;
@@ -1683,15 +1783,25 @@ parse_done:;
     uint8_t* const p = dst + ZXC_BLOCK_HEADER_SIZE;
     size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
 
-    // Decide offset encoding mode: 1-byte if all offsets <= 255
-    const int use_8bit_off = (max_offset <= 255) ? 1 : 0;
+    /* Level 8 (LDM): count far matches (non-zero high-offset bytes) to gate
+     * the split-plane appendix. Zero for levels 1..7 (buf_offset_hi is NULL). */
+    uint32_t n_far = 0;
+    if (level >= ZXC_LEVEL_LDM && ctx->buf_offset_hi) {
+        const uint8_t* const hi = ctx->buf_offset_hi;
+        for (uint32_t i = 0; i < seq_c; i++) n_far += (hi[i] != 0);
+    }
+
+    /* Decide offset encoding mode: 1-byte if all offsets <= 255. Far matches
+     * force the full 16-bit low plane (their high bits live in the appendix),
+     * so this is provably identical to level 6 whenever n_far == 0. */
+    const int use_8bit_off = (max_offset <= 255 && n_far == 0) ? 1 : 0;
     const size_t off_stream_size = use_8bit_off ? seq_c : (seq_c * 2);
 
     const zxc_gnr_header_t gh = {.n_sequences = seq_c,
                                  .n_literals = (uint32_t)lit_c,
                                  .enc_lit = enc_lit,
                                  .enc_litlen = enc_tok,
-                                 .enc_mlen = 0,
+                                 .enc_mlen = (uint8_t)(n_far > 0 ? 1 : 0),
                                  .enc_off = (uint8_t)use_8bit_off};
 
     zxc_section_desc_t desc[ZXC_GLO_SECTIONS] = {0};
@@ -1845,6 +1955,35 @@ parse_done:;
 
     ZXC_MEMCPY(p_curr, buf_extras, extras_sz);
     p_curr += extras_sz;
+    rem -= sz_ext;
+
+    /* Level 7 split-plane high offsets: sparse appendix, present only when the
+     * block has far matches (gh.enc_mlen == 1). Layout (all little-endian
+     * varints, cost proportional to n_far, not to seq_c):
+     *   varint n_far
+     *   n_far x { varint gap-from-previous-far-index, uint8 high offset byte }
+     * The decoder reads n_far, then reconstructs each far sequence index from
+     * the running gap. ZXC_GLO_SECTIONS stays 4 (this rides after extras). */
+    if (n_far > 0) {
+        const uint8_t* const hi = ctx->buf_offset_hi;
+        /* Upper bound: n_far header + per far match (<=5 byte varint gap + 1
+         * byte high). Gaps and n_far are < seq_c < block size, so they fit. */
+        const size_t max_appendix = 5u + (size_t)n_far * 6u;
+        if (UNLIKELY(rem < max_appendix)) return ZXC_ERROR_DST_TOO_SMALL;
+        size_t n = zxc_write_varint(p_curr, n_far);
+        if (UNLIKELY(n == 0)) return ZXC_ERROR_OVERFLOW;
+        p_curr += n;
+        size_t prev = 0;
+        for (uint32_t i = 0; i < seq_c; i++) {
+            if (hi[i] != 0) {
+                const size_t d = zxc_write_varint(p_curr, (uint32_t)((size_t)i - prev));
+                if (UNLIKELY(d == 0)) return ZXC_ERROR_OVERFLOW;
+                p_curr += d;
+                *p_curr++ = hi[i];
+                prev = (size_t)i + 1u;
+            }
+        }
+    }
 
     bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
@@ -1896,6 +2035,8 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {
         ZXC_MEMSET(ctx->hash_table, 0, ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
         ZXC_MEMSET(ctx->hash_tags, 0, ZXC_LZ_HASH_SIZE * sizeof(uint8_t));
+        if (ctx->ldm_table)
+            ZXC_MEMSET(ctx->ldm_table, 0, ZXC_LDM_HASH_SIZE * sizeof(uint32_t));
         ctx->epoch = 1;
     }
     const uint32_t offset_bits = ctx->offset_bits;

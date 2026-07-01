@@ -532,6 +532,24 @@ extern "C" {
 #define ZXC_LZ_SEARCH_MARGIN (sizeof(uint64_t))
 /** @} */
 
+/** @name Long-Distance Matching (level 7 / ULTRA)
+ *  @brief A second, sparse match finder reaching the whole block (up to block
+ *         size), beyond the near finder's 64 KB window. Single-entry
+ *         epoch-tagged hash; far matches carry split-plane offsets (low 16 bits
+ *         in the existing offset stream, high bits in a sparse per-block plane).
+ *  @{ */
+/** @brief log2 of the LDM hash table size (single-entry buckets, no chain). */
+#define ZXC_LDM_HASH_BITS 18
+/** @brief Number of LDM hash buckets (1 MiB table at 4 bytes/entry, fixed). */
+#define ZXC_LDM_HASH_SIZE (1U << ZXC_LDM_HASH_BITS)
+/** @brief Minimum length for an accepted far (LDM) match; must clear the
+ *         split-plane offset overhead so the DP only elects worthwhile matches. */
+#define ZXC_LDM_MIN_MATCH 16U
+/** @brief Minimum distance for a far match: exactly the distances the near
+ *         hash-chain finder cannot reach (>= the 64 KB window). */
+#define ZXC_LDM_MIN_DIST ((uint32_t)ZXC_LZ_WINDOW_SIZE)
+/** @} */
+
 /** @name Optimal Parser Tuning (level >= 6)
  *  @brief Static prices and complexity guards used by the level-6 optimal
  *         LZ77 parser DP.
@@ -539,6 +557,12 @@ extern "C" {
 /** @brief Static price (bits) of a match token before varint extras: 1 byte
  *         token + 2 byte offset. */
 #define ZXC_OPT_MATCH_COST_BASE ((uint32_t)(3U * CHAR_BIT))
+/** @brief Static price (bits) of a far (LDM) match: 1 byte token + 2 byte low
+ *         offset + 1 byte high offset + ~2 byte amortized split-plane index
+ *         (delta-varint) in the far appendix. Priced ~3 bytes above a near match
+ *         so the DP only elects a far match when its length clearly pays for the
+ *         full split-plane overhead. */
+#define ZXC_OPT_FAR_MATCH_COST_BASE ((uint32_t)(5U * CHAR_BIT))
 /** @brief Threshold above which `find_best_match` is skipped at intra-match
  *         positions, keeping the parser O(N) on highly repetitive data. */
 #define ZXC_OPT_LONG_MATCH_SKIP ((size_t)256)
@@ -738,13 +762,13 @@ static inline int zxc_ss_prem_huf_q8(const int level) {
 
 /** @brief Clamps a resolved compression level to the supported ceiling.
  *
- *         Out-of-range levels above ::ZXC_LEVEL_ULTRA are silently clamped
+ *         Out-of-range levels above ::ZXC_LEVEL_LDM are silently clamped
  *         (never rejected) at every compress entry point, so `level = 99`
- *         behaves as ULTRA across the buffer, context, block and stream APIs
+ *         behaves as LDM across the buffer, context, block and stream APIs
  *         and every language binding inherits the same policy. Levels <= 0
  *         select the caller's default before this is applied. */
 static inline int zxc_level_clamp(const int level) {
-    return (level > ZXC_LEVEL_ULTRA) ? ZXC_LEVEL_ULTRA : level;
+    return (level > ZXC_LEVEL_LDM) ? ZXC_LEVEL_LDM : level;
 }
 
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below
@@ -1574,13 +1598,17 @@ typedef struct {
     uint32_t* hash_table;  /**< Hash table for LZ77 match positions (epoch|pos). */
     uint8_t* hash_tags;    /**< Split tag table for fast match rejection (8-bit tags). */
     uint16_t* chain_table; /**< Chain table for collision resolution. */
+    uint32_t* ldm_table;   /**< Level 7 (ULTRA): single-entry long-range hash
+                                (epoch|pos), NULL below level 7. */
     void* memory_block;    /**< Single allocation block owner. */
     uint32_t epoch;        /**< Current epoch for lazy hash table invalidation. */
 
     /* Warm zone: sequential access per sequence. */
     uint32_t* buf_sequences; /**< Buffer for sequence records (packed: LL(8)|ML(8)|Offset(16)). */
     uint8_t* buf_tokens;     /**< Buffer for token sequences. */
-    uint16_t* buf_offsets;   /**< Buffer for offsets. */
+    uint16_t* buf_offsets;   /**< Buffer for offsets (low 16 bits of biased offset). */
+    uint8_t* buf_offset_hi;  /**< Level 7 (ULTRA): high byte of the biased offset,
+                                  parallel to buf_offsets (0 = near). NULL below level 7. */
     uint8_t* buf_extras;     /**< Buffer for extra lengths (vbytes for LL/ML). */
     uint8_t* literals;       /**< Buffer for literal bytes. */
 
@@ -1605,6 +1633,8 @@ typedef struct {
                                          Also reused as transient scratch for the
                                          length-limited Huffman code-length builder. */
     size_t opt_scratch_cap;         /**< Current capacity of opt_scratch in bytes. */
+    uint8_t* parent_off_hi;         /**< Level 8 (LDM): DP high-offset byte parallel to
+                                         parent_off (0 = near). NULL below level 8. */
     int checksum_enabled;           /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;          /**< Compression level. */
     size_t dict_size;               /**< Dictionary prefill size (0 = no dictionary). */

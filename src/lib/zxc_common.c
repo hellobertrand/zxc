@@ -101,6 +101,11 @@ typedef struct {
     size_t off_lit_cctx;
     /* meaningful only when sz_opt > 0 (level >= ZXC_LEVEL_DENSITY). */
     size_t off_opt;
+    /* level >= ZXC_LEVEL_ULTRA only: long-distance matcher + split-plane scratch. */
+    size_t off_ldm;
+    size_t off_parent_hi;
+    size_t off_off_hi;
+    size_t sz_ldm; /* 0 below level 7 (used to zero-init ldm_table). */
     /* both modes: [dict | data] concat scratch, present only when dict_size > 0. */
     size_t off_dict;
     /* both modes: dict Huffman tree-at-attach state, present only when dict_size > 0. */
@@ -197,6 +202,13 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
             layout.off_pivco_dctx = layout.total;
             layout.total += ZXC_ALIGN_CL(layout.sz_pivco_dctx);
         }
+        /* Level 8 (LDM) far offsets: per-sequence high-byte scratch, materialized
+         * from the far appendix during decode. Provisioned regardless of archive
+         * version (the decoder cannot know until it reads each block header);
+         * unused for non-far blocks. */
+        layout.max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
+        layout.off_off_hi = layout.total;
+        layout.total += ZXC_ALIGN_CL(layout.max_seq * sizeof(uint8_t));
     } else {
         /* Compress: 6 partitions + optional opt_scratch at level >= ZXC_LEVEL_DENSITY. */
         const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
@@ -244,6 +256,17 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         if (layout.sz_opt) {
             layout.off_opt = layout.total;
             layout.total += ZXC_ALIGN_CL(layout.sz_opt);
+        }
+        /* Level 8 (LDM): long-distance matcher table + split-plane scratch,
+         * all gated so levels 1..7 keep a byte-identical layout. */
+        if (level >= ZXC_LEVEL_LDM) {
+            layout.sz_ldm = ZXC_LDM_HASH_SIZE * sizeof(uint32_t);
+            layout.off_ldm = layout.total;
+            layout.total += ZXC_ALIGN_CL(layout.sz_ldm);
+            layout.off_parent_hi = layout.total;
+            layout.total += ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint8_t));
+            layout.off_off_hi = layout.total;
+            layout.total += ZXC_ALIGN_CL(layout.max_seq * sizeof(uint8_t));
         }
     }
 
@@ -341,6 +364,9 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
             ctx->pivco_scratch = mem + layout.off_pivco_dctx;
             ctx->pivco_scratch_cap = layout.sz_pivco_dctx;
         }
+        /* Level 8 (LDM): decode-side far high-byte scratch (buf_offset_hi slot),
+         * materialized per-sequence from the far appendix. */
+        ctx->buf_offset_hi = mem + layout.off_off_hi;
         return ZXC_OK;
     }
 
@@ -356,12 +382,18 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
         ctx->opt_scratch = mem + layout.off_opt;
         ctx->opt_scratch_cap = layout.sz_opt;
     }
+    if (level >= ZXC_LEVEL_LDM) {
+        ctx->ldm_table = (uint32_t*)(mem + layout.off_ldm);
+        ctx->parent_off_hi = mem + layout.off_parent_hi;
+        ctx->buf_offset_hi = mem + layout.off_off_hi;
+    }
 
     ctx->compression_level = level;
     ctx->epoch = 1;
 
     ZXC_MEMSET(ctx->hash_table, 0, layout.sz_hash_pos);
     ZXC_MEMSET(ctx->hash_tags, 0, layout.sz_hash_tags);
+    if (ctx->ldm_table) ZXC_MEMSET(ctx->ldm_table, 0, layout.sz_ldm);
     return ZXC_OK;
 }
 
@@ -460,15 +492,18 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->hash_table = NULL;
     ctx->hash_tags = NULL;
     ctx->chain_table = NULL;
+    ctx->ldm_table = NULL;
     ctx->buf_sequences = NULL;
     ctx->buf_tokens = NULL;
     ctx->buf_offsets = NULL;
+    ctx->buf_offset_hi = NULL;
     ctx->buf_extras = NULL;
     ctx->literals = NULL;
     ctx->work_buf = NULL;
     ctx->tok_buffer = NULL;
     ctx->pivco_scratch = NULL;
     ctx->opt_scratch = NULL;
+    ctx->parent_off_hi = NULL;
     ctx->dict_buffer = NULL;
     ctx->dict_huf = NULL;
 
@@ -1005,9 +1040,9 @@ int zxc_min_level(void) { return ZXC_LEVEL_FASTEST; }
 /**
  * @brief Returns the maximum supported compression level.
  *
- * Returns the value of ZXC_LEVEL_ULTRA (currently 7).
+ * Returns the value of ZXC_LEVEL_LDM (currently 8).
  */
-int zxc_max_level(void) { return ZXC_LEVEL_ULTRA; }
+int zxc_max_level(void) { return ZXC_LEVEL_LDM; }
 
 /**
  * @brief Returns the default compression level.

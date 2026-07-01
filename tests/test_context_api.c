@@ -139,27 +139,29 @@ int test_cctx_level_raise_reinit() {
     }
     printf("  [PASS] level 3 -> 6 raise through the block API\n");
 
-    /* 3. Out-of-range levels are silently clamped to ULTRA: level 99 must
-     * produce the exact archive level 7 produces, on every entry point. */
-    zxc_compress_opts_t lvl7 = {.level = ZXC_LEVEL_ULTRA, .checksum_enabled = 0};
+    /* 3. Out-of-range levels are silently clamped to the max level (LDM):
+     * level 99 must produce the exact archive level 8 produces, on every entry
+     * point. This also raises the level-6 cctx above into the LDM tier, which
+     * must re-init to carry the long-distance-matcher scratch. */
+    zxc_compress_opts_t lvlmax = {.level = ZXC_LEVEL_LDM, .checksum_enabled = 0};
     zxc_compress_opts_t lvl99 = {.level = 99, .checksum_enabled = 0};
-    uint8_t* comp7 = malloc(comp_cap);
-    if (!comp7) goto fail;
-    const int64_t c7 = zxc_compress(src, src_sz, comp7, comp_cap, &lvl7);
+    uint8_t* compmax = malloc(comp_cap);
+    if (!compmax) goto fail;
+    const int64_t cmax = zxc_compress(src, src_sz, compmax, comp_cap, &lvlmax);
     const int64_t c99 = zxc_compress(src, src_sz, comp, comp_cap, &lvl99);
-    if (c7 <= 0 || c99 != c7 || memcmp(comp, comp7, (size_t)c7) != 0) {
-        printf("  [FAIL] zxc_compress(level=99) must clamp to ULTRA (c7=%lld c99=%lld)\n",
-               (long long)c7, (long long)c99);
-        free(comp7);
+    if (cmax <= 0 || c99 != cmax || memcmp(comp, compmax, (size_t)cmax) != 0) {
+        printf("  [FAIL] zxc_compress(level=99) must clamp to LDM (cmax=%lld c99=%lld)\n",
+               (long long)cmax, (long long)c99);
+        free(compmax);
         goto fail;
     }
-    free(comp7);
-    if (zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &lvl99) != c7) {
-        printf("  [FAIL] zxc_compress_cctx(level=99) must clamp to ULTRA\n");
+    free(compmax);
+    if (zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &lvl99) != cmax) {
+        printf("  [FAIL] zxc_compress_cctx(level=99) must clamp to LDM\n");
         goto fail;
     }
     if (zxc_compress_block(cctx, src, src_sz, comp, comp_cap, &lvl99) <= 0) {
-        printf("  [FAIL] zxc_compress_block(level=99) must clamp to ULTRA\n");
+        printf("  [FAIL] zxc_compress_block(level=99) must clamp to LDM\n");
         goto fail;
     }
     zxc_cctx* cctx99 = zxc_create_cctx(&lvl99);
@@ -168,7 +170,7 @@ int test_cctx_level_raise_reinit() {
         goto fail;
     }
     zxc_free_cctx(cctx99);
-    printf("  [PASS] level 99 silently clamped to ULTRA across entry points\n");
+    printf("  [PASS] level 99 silently clamped to LDM across entry points\n");
 
     zxc_free_cctx(cctx);
     zxc_free_dctx(dctx);

@@ -694,12 +694,51 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     /* Offsets/extras follow the on-disk token SECTION; sz_tokens is its size
      * (== n_sequences when RAW, the Huffman payload size when enc_litlen set). */
     const uint8_t* o_ptr = p_curr + sz_tokens;
+    const uint8_t* const o_start = o_ptr;  /* base for the level-8 (LDM) far high-byte index */
     const uint8_t* e_ptr = o_ptr + sz_offsets;
     const uint8_t* const e_end = e_ptr + sz_extras;  // For vbyte overflow detection
+    const uint8_t* const block_end = src + src_size;
 
-    // Validate streams don't overflow source buffer + match sequence count.
-    if (UNLIKELY((e_end != src + src_size) || (uint64_t)sz_offsets < expected_off_size))
+    /* Level 7: gh.enc_mlen == 1 marks a split-plane far appendix riding after
+     * the extras section (self-describing). Far blocks always use 16-bit
+     * offsets (enc_off == 0); their high bytes are resolved below. */
+    const int has_far = (gh.enc_mlen != 0);
+
+    /* Offset stream must match the sequence count. Token size (per encoding),
+     * the extras tail, and the far appendix are bounds-checked below via the
+     * has_far / non-far split. */
+    if (UNLIKELY((uint64_t)sz_offsets < expected_off_size))
         return ZXC_ERROR_CORRUPT_DATA;
+    if (!has_far) {
+        // No far plane: extras must end exactly at the block boundary.
+        if (UNLIKELY(e_end != block_end)) return ZXC_ERROR_CORRUPT_DATA;
+    } else {
+        // Far plane occupies [e_end, block_end); offsets must be 16-bit.
+        if (UNLIKELY(e_end > block_end || gh.enc_off != 0)) return ZXC_ERROR_CORRUPT_DATA;
+    }
+
+    /* Resolve the far high-offset plane into a per-sequence array (0 = near).
+     * Appendix layout: varint n_far, then n_far x { varint gap, uint8 high }. */
+    const uint8_t* hi_arr = NULL;
+    if (has_far) {
+        const size_t max_seq = ctx->chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
+        if (UNLIKELY(gh.n_sequences > max_seq)) return ZXC_ERROR_CORRUPT_DATA;
+        uint8_t* const harr = ctx->buf_offset_hi;
+        ZXC_MEMSET(harr, 0, gh.n_sequences);
+        const uint8_t* ap = e_end;
+        const uint32_t n_far = zxc_read_varint(&ap, block_end);
+        size_t base = 0;
+        for (uint32_t k = 0; k < n_far; k++) {
+            const uint32_t gap = zxc_read_varint(&ap, block_end);
+            const size_t fi = base + gap;
+            if (UNLIKELY(fi >= gh.n_sequences || ap >= block_end))
+                return ZXC_ERROR_CORRUPT_DATA;
+            harr[fi] = *ap++;
+            base = fi + 1;
+        }
+        if (UNLIKELY(ap != block_end)) return ZXC_ERROR_CORRUPT_DATA;
+        hi_arr = harr;
+    }
 
     const uint8_t* RESTRICT t_ptr;
     if (!tok_entropy) {
@@ -745,7 +784,14 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     // --- SAFE Loop: offset validation until threshold (4x unroll) ---
     // For 1-byte offsets: bounds check until 256 bytes written
     // For 2-byte offsets: bounds check until 65536 bytes written
-    const size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
+    // Far (level 7) offsets can reach the whole block. For the untrusted (safe)
+    // decoder, the offset-validating SAFE loop must cover every sequence, so the
+    // threshold is raised to the block size. The trusted (fast) decoder needs no
+    // such validation: a valid far match always has off <= written by
+    // construction, so it keeps the normal threshold and uses the FAST loop.
+    const size_t bounds_threshold = (has_far && safe)
+                                        ? ctx->chunk_size
+                                        : ((gh.enc_off == 1) ? (1U << 8) : (1U << 16));
 
     if (safe) {
         /* SAFE variant: save per-batch state so overflow can rollback. */
@@ -776,6 +822,13 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
                 off2 += (uint32_t)((offsets >> 16) & 0xFFFF);
                 off3 += (uint32_t)((offsets >> 32) & 0xFFFF);
                 off4 += (uint32_t)((offsets >> 48) & 0xFFFF);
+                if (has_far) {
+                    const size_t si = ((size_t)(o_ptr - o_start) >> 1) - 4;
+                    off1 += (uint32_t)hi_arr[si + 0] << 16;
+                    off2 += (uint32_t)hi_arr[si + 1] << 16;
+                    off3 += (uint32_t)hi_arr[si + 2] << 16;
+                    off4 += (uint32_t)hi_arr[si + 3] << 16;
+                }
             }
 
             uint64_t ll1 = (tokens & 0x0F0) >> 4;
@@ -892,6 +945,13 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
                 off2 += (uint32_t)((offsets >> 16) & 0xFFFF);
                 off3 += (uint32_t)((offsets >> 32) & 0xFFFF);
                 off4 += (uint32_t)((offsets >> 48) & 0xFFFF);
+                if (has_far) {
+                    const size_t si = ((size_t)(o_ptr - o_start) >> 1) - 4;
+                    off1 += (uint32_t)hi_arr[si + 0] << 16;
+                    off2 += (uint32_t)hi_arr[si + 1] << 16;
+                    off3 += (uint32_t)hi_arr[si + 2] << 16;
+                    off4 += (uint32_t)hi_arr[si + 3] << 16;
+                }
             }
 
             uint64_t ll1 = (tokens & 0x0F0) >> 4;
@@ -1003,6 +1063,13 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
                 off2 += (uint32_t)((offsets >> 16) & 0xFFFF);
                 off3 += (uint32_t)((offsets >> 32) & 0xFFFF);
                 off4 += (uint32_t)((offsets >> 48) & 0xFFFF);
+                if (has_far) {
+                    const size_t si = ((size_t)(o_ptr - o_start) >> 1) - 4;
+                    off1 += (uint32_t)hi_arr[si + 0] << 16;
+                    off2 += (uint32_t)hi_arr[si + 1] << 16;
+                    off3 += (uint32_t)hi_arr[si + 2] << 16;
+                    off4 += (uint32_t)hi_arr[si + 3] << 16;
+                }
             }
 
             uint64_t ll1 = (tokens & 0x0F0) >> 4;
@@ -1116,6 +1183,13 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
                 off2 += (uint32_t)((offsets >> 16) & 0xFFFF);
                 off3 += (uint32_t)((offsets >> 32) & 0xFFFF);
                 off4 += (uint32_t)((offsets >> 48) & 0xFFFF);
+                if (has_far) {
+                    const size_t si = ((size_t)(o_ptr - o_start) >> 1) - 4;
+                    off1 += (uint32_t)hi_arr[si + 0] << 16;
+                    off2 += (uint32_t)hi_arr[si + 1] << 16;
+                    off3 += (uint32_t)hi_arr[si + 2] << 16;
+                    off4 += (uint32_t)hi_arr[si + 3] << 16;
+                }
             }
 
             uint64_t ll1 = (tokens & 0x0F0) >> 4;
@@ -1217,6 +1291,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             offset += zxc_le16(o_ptr);  // 2-byte offset (biased)
             o_ptr += sizeof(uint16_t);
         }
+        if (has_far) offset += (uint32_t)hi_arr[((size_t)(o_ptr - o_start) >> 1) - 1] << 16;
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {
             ll += zxc_read_varint(&e_ptr, e_end);
@@ -1286,6 +1361,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             offset += zxc_le16(o_ptr);  // 2-byte offset (biased)
             o_ptr += sizeof(uint16_t);
         }
+        if (has_far) offset += (uint32_t)hi_arr[((size_t)(o_ptr - o_start) >> 1) - 1] << 16;
 
         if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) ll += zxc_read_varint(&e_ptr, e_end);
         if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) ml += zxc_read_varint(&e_ptr, e_end);

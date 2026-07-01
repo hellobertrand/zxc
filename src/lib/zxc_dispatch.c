@@ -1301,6 +1301,8 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         return ZXC_ERROR_BAD_BLOCK_SIZE;
     if (UNLIKELY(cctx->owns_workspace && level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))
         return ZXC_ERROR_BAD_LEVEL;
+    if (UNLIKELY(cctx->owns_workspace && level >= ZXC_LEVEL_LDM && !cctx->inner.ldm_table))
+        return ZXC_ERROR_BAD_LEVEL;
 
     cctx->stored_level = level;
     cctx->stored_block_size = block_size;
@@ -1311,7 +1313,8 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
      * opt_scratch region that inits at level < ZXC_LEVEL_DENSITY do not
      * allocate (using it NULL would crash). */
     if (UNLIKELY(!cctx->initialized || cctx->last_block_size != block_size ||
-                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))) {
+                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
+                 (level >= ZXC_LEVEL_LDM && !cctx->inner.ldm_table))) {
         if (cctx->initialized) {
             // LCOV_EXCL_START
             zxc_cctx_free(&cctx->inner);
@@ -1616,6 +1619,8 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
         return ZXC_ERROR_BAD_BLOCK_SIZE;
     if (UNLIKELY(cctx->owns_workspace && level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))
         return ZXC_ERROR_BAD_LEVEL;
+    if (UNLIKELY(cctx->owns_workspace && level >= ZXC_LEVEL_LDM && !cctx->inner.ldm_table))
+        return ZXC_ERROR_BAD_LEVEL;
 
     cctx->stored_level = level;
     cctx->stored_block_size = effective_block_size;
@@ -1625,7 +1630,8 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
      * the optimal-parser tier requires the opt_scratch region that inits at
      * level < ZXC_LEVEL_DENSITY do not allocate (using it NULL would crash). */
     if (UNLIKELY(!cctx->initialized || cctx->last_block_size != effective_block_size ||
-                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))) {
+                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
+                 (level >= ZXC_LEVEL_LDM && !cctx->inner.ldm_table))) {
         if (cctx->initialized) {
             // LCOV_EXCL_START
             zxc_cctx_free(&cctx->inner);
@@ -1844,7 +1850,7 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
  */
 size_t zxc_static_cctx_workspace_size(const size_t block_size, const int level) {
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return 0;
-    if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_ULTRA)) return 0;
+    if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_LDM)) return 0;
     const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level, 0);
     if (UNLIKELY(inner_sz == 0)) return 0;
     return ZXC_STATIC_CCTX_HDR_SIZE + inner_sz;
@@ -1874,7 +1880,7 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
     const int checksum_enabled = opts->checksum_enabled;
 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return NULL;
-    if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_ULTRA)) return NULL;
+    if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_LDM)) return NULL;
 
     const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level, 0);
     if (UNLIKELY(inner_sz == 0)) return NULL;
