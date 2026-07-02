@@ -17,7 +17,7 @@ static void build_test_huf_lengths(const void* data, size_t n,
     const uint8_t* p = (const uint8_t*)data;
     for (size_t i = 0; i < n; i++) freq[p[i]]++;
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-    zxc_huf_build_code_lengths(freq, code_len, NULL);
+    zxc_huf_build_code_lengths(freq, code_len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY);
     zxc_huf_pack_lengths(code_len, out);
 }
 

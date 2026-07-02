@@ -58,6 +58,7 @@ echo "Passed: $pass  Failed: $fail"
 | Random               | 3     | Incompressible data (stored as raw blocks)        |
 | Match patterns       | 3     | Long matches, short matches, max offset distance  |
 | Compression levels   | 6     | Same input compressed at levels 1 through 6       |
+| Level 7              | 1     | Level-7 literals with 9-11-bit Huffman codes      |
 | Block size variants  | 2     | 4 KB and 2 MB block sizes                        |
 | Checksum             | 3     | Per-block and global checksum enabled             |
 | Multi-block          | 2     | 16 blocks per file (4 KB block size)             |
