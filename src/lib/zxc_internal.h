@@ -585,20 +585,18 @@ extern "C" {
 #define ZXC_HUF_STREAM_SIZES_HEADER_SIZE ((int)((ZXC_HUF_NUM_STREAMS - 1) * sizeof(uint16_t)))
 /** @brief Total Huffman header size: packed code lengths + sub-stream sizes. */
 #define ZXC_HUF_HEADER_SIZE (ZXC_HUF_TABLE_SIZE + ZXC_HUF_STREAM_SIZES_HEADER_SIZE)
+/** @brief RLE margin shift: controls the threshold for choosing RLE over RAW. */
+#define ZXC_RLE_MARGIN_SHIFT 5
+/** @brief Huffman margin shift: controls the threshold for choosing Huffman over RAW/RLE. */
+#define ZXC_HUF_MARGIN_SHIFT 5
 /** @brief Absolute floor below which Huffman cannot beat RAW even with
- *         zero-entropy literals after the 3 % savings margin. Above this
- *         floor, the precise size accounting at the call site decides per
- *         block, so the threshold is corpus-agnostic.
+ *         zero-entropy literals after the @ref ZXC_HUF_MARGIN_SHIFT margin.
  *
- *         Derivation: the call site requires `huf_total < baseline * 31/32`
- *         (3 % margin = `baseline >> 5`). At zero-entropy literals the
- *         payload vanishes and `huf_total = HEADER`, giving
- *         `N > HEADER x 32/31`. The `+30` is the standard ceiling-division
- *         offset (`b - 1` with `b = 31`). Constants:
- *           - 32 = inverse of the 3 % margin (`1/32`)
- *           - 31 = `32 - 1`, the fraction kept after the margin
- *           - 30 = `31 - 1`, ceiling-division rounding offset */
-#define ZXC_HUF_MIN_LITERALS ((ZXC_HUF_HEADER_SIZE * 32 + 30) / 31)
+ *         Derivation: the call site requires `huf_total < baseline * (M-1)/M`
+ *         with `M = 1 << ZXC_HUF_MARGIN_SHIFT`. */
+#define ZXC_HUF_MIN_LITERALS                                                                   \
+    ((ZXC_HUF_HEADER_SIZE * (1 << ZXC_HUF_MARGIN_SHIFT) + ((1 << ZXC_HUF_MARGIN_SHIFT) - 2)) / \
+     ((1 << ZXC_HUF_MARGIN_SHIFT) - 1))
 /** @brief Width of the decoder bit accumulator, in bits
  *         (`sizeof(uint64_t) * CHAR_BIT`). */
 #define ZXC_HUF_ACCUM_BITS 64
@@ -614,17 +612,22 @@ extern "C" {
  *         each iteration speculatively writes 2 bytes per stream and runs
  *         @c ZXC_HUF_BATCH iterations before re-checking the bound. */
 #define ZXC_HUF_SAFE_MARGIN ((size_t)(2 * ZXC_HUF_BATCH))
+/** @brief Decode-table index: the low @ref ZXC_HUF_LOOKUP_BITS of the bit
+ *         accumulator. */
+#if defined(__BMI2__) && !defined(ZXC_DISABLE_SIMD)
+#define ZXC_HUF_LUT_IDX(a) ((size_t)_bzhi_u32((uint32_t)(a), ZXC_HUF_LOOKUP_BITS))
+#else
+#define ZXC_HUF_LUT_IDX(a) ((size_t)((a) & ZXC_HUF_TBL_MASK))
+#endif
+/** @} */
 
 /**
  * @brief Multi-symbol decoder lookup table entry. Bit layout:
  *   bits  0..7   sym1       - first decoded symbol
  *   bits  8..15  sym2       - second decoded symbol (junk if n_extra == 0)
  *   bits 16..19  len1       - bit length of sym1's code (1..8)
- *   bits 20..23  len_total  - total bits consumed (1..11)
  *   bit  24      n_extra    - 0 if 1 symbol, 1 if 2 symbols decoded
- *
- * Lives here (not in zxc_huffman.c) so a prebuilt table can be carried by the
- * compression context for the shared dictionary literal table.
+ *   bits 28..31  len_total  - total bits consumed (1..11)
  */
 typedef struct {
     uint32_t entry;

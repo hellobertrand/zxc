@@ -47,10 +47,10 @@
 /* The decoder lookup table entry type (zxc_huf_dec_entry_t) lives in
  * zxc_internal.h so the compression context can carry a prebuilt table for
  * the shared dictionary literal table. Bit layout recap:
- * sym1(0..7) | sym2(8..15) | len1(16..19) | len_total(20..23) | n_extra(24). */
+ * sym1(0..7) | sym2(8..15) | len1(16..19) | n_extra(24) | len_total(28..31). */
 #define ZXC_HUF_ENTRY(sym1, sym2, len1, len_total, n_extra)                  \
     ((uint32_t)(sym1) | ((uint32_t)(sym2) << 8) | ((uint32_t)(len1) << 16) | \
-     ((uint32_t)(len_total) << 20) | ((uint32_t)(n_extra) << 24))
+     ((uint32_t)(n_extra) << 24) | ((uint32_t)(len_total) << 28))
 
 /* ===========================================================================
  * Length-limited Huffman: boundary package-merge
@@ -401,8 +401,7 @@ static int unpack_lengths_header(const uint8_t* RESTRICT in, uint8_t* RESTRICT c
         if (lo) n_present++;
         if (hi) n_present++;
     }
-    if (UNLIKELY(max_len > ZXC_HUF_MAX_CODE_LEN)) return ZXC_ERROR_CORRUPT_DATA;
-    if (UNLIKELY(n_present == 0)) return ZXC_ERROR_CORRUPT_DATA;
+    if (UNLIKELY(max_len > ZXC_HUF_MAX_CODE_LEN || n_present == 0)) return ZXC_ERROR_CORRUPT_DATA;
     return ZXC_OK;
 }
 
@@ -410,12 +409,21 @@ static int unpack_lengths_header(const uint8_t* RESTRICT in, uint8_t* RESTRICT c
  * Bit writer (LSB-first)
  * =========================================================================*/
 
+/**
+ * @brief LSB-first bit writer over a caller-owned output buffer.
+ *
+ * Codes are appended at the LSB end of @c accum (see ::bw_put) and flushed to
+ * @c ptr one full byte at a time. A mid-stream overrun is not fatal: @c err
+ * latches so callers check for failure once via ::bw_finish instead of after
+ * every write.
+ */
 typedef struct {
-    uint8_t* ptr;
-    uint8_t* end;
-    uint64_t accum;
-    int bits;
-    int err;
+    uint8_t* ptr;   /**< Next byte to write; advances as full bytes are flushed. */
+    uint8_t* end;   /**< One past the last writable byte of the buffer. */
+    uint64_t accum; /**< LSB-first accumulator of bits not yet flushed. */
+    int bits;       /**< Count of valid low bits currently held in @c accum. */
+    int err;        /**< Sticky overrun flag; ::bw_finish maps it to
+                     *   @c ZXC_ERROR_DST_TOO_SMALL. */
 } bit_writer_t;
 
 /**
@@ -836,34 +844,33 @@ static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t 
 
     /* Decode one 11-bit window per stream. Always writes 2 bytes per stream
      * (sym1 + spec sym2); advances d_s by 1 + n_extra; advances accum by
-     * len_total. Per-stream length accumulators sl0..sl3 collect consumed
-     * bits across the batch and are folded into bb_s once at end of batch. */
-#define DECODE_ONE()                                             \
-    do {                                                         \
-        const uint32_t _e0 = table[a0 & ZXC_HUF_TBL_MASK].entry; \
-        const uint32_t _e1 = table[a1 & ZXC_HUF_TBL_MASK].entry; \
-        const uint32_t _e2 = table[a2 & ZXC_HUF_TBL_MASK].entry; \
-        const uint32_t _e3 = table[a3 & ZXC_HUF_TBL_MASK].entry; \
-        zxc_store_le16(d0, (uint16_t)_e0);                       \
-        zxc_store_le16(d1, (uint16_t)_e1);                       \
-        zxc_store_le16(d2, (uint16_t)_e2);                       \
-        zxc_store_le16(d3, (uint16_t)_e3);                       \
-        const int _t0 = (int)((_e0 >> 20) & 0xF);                \
-        const int _t1 = (int)((_e1 >> 20) & 0xF);                \
-        const int _t2 = (int)((_e2 >> 20) & 0xF);                \
-        const int _t3 = (int)((_e3 >> 20) & 0xF);                \
-        d0 += 1 + (int)((_e0 >> 24) & 1);                        \
-        d1 += 1 + (int)((_e1 >> 24) & 1);                        \
-        d2 += 1 + (int)((_e2 >> 24) & 1);                        \
-        d3 += 1 + (int)((_e3 >> 24) & 1);                        \
-        a0 >>= _t0;                                              \
-        a1 >>= _t1;                                              \
-        a2 >>= _t2;                                              \
-        a3 >>= _t3;                                              \
-        sl0 += _t0;                                              \
-        sl1 += _t1;                                              \
-        sl2 += _t2;                                              \
-        sl3 += _t3;                                              \
+     * len_total. */
+#define DECODE_ONE()                                           \
+    do {                                                       \
+        const uint32_t _e0 = table[ZXC_HUF_LUT_IDX(a0)].entry; \
+        const uint32_t _e1 = table[ZXC_HUF_LUT_IDX(a1)].entry; \
+        const uint32_t _e2 = table[ZXC_HUF_LUT_IDX(a2)].entry; \
+        const uint32_t _e3 = table[ZXC_HUF_LUT_IDX(a3)].entry; \
+        const int _t0 = (int)(_e0 >> 28);                      \
+        const int _t1 = (int)(_e1 >> 28);                      \
+        const int _t2 = (int)(_e2 >> 28);                      \
+        const int _t3 = (int)(_e3 >> 28);                      \
+        a0 >>= _t0;                                            \
+        a1 >>= _t1;                                            \
+        a2 >>= _t2;                                            \
+        a3 >>= _t3;                                            \
+        zxc_store_le16(d0, (uint16_t)_e0);                     \
+        zxc_store_le16(d1, (uint16_t)_e1);                     \
+        zxc_store_le16(d2, (uint16_t)_e2);                     \
+        zxc_store_le16(d3, (uint16_t)_e3);                     \
+        d0 += 1 + (int)((_e0 >> 24) & 1);                      \
+        d1 += 1 + (int)((_e1 >> 24) & 1);                      \
+        d2 += 1 + (int)((_e2 >> 24) & 1);                      \
+        d3 += 1 + (int)((_e3 >> 24) & 1);                      \
+        bb0 -= _t0;                                            \
+        bb1 -= _t1;                                            \
+        bb2 -= _t2;                                            \
+        bb3 -= _t3;                                            \
     } while (0)
 
     while ((size_t)(dend0 - d0) >= ZXC_HUF_SAFE_MARGIN &&
@@ -875,32 +882,24 @@ static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t 
         REFILL(a2, bb2, p2, e2);
         REFILL(a3, bb3, p3, e3);
 
-        int sl0 = 0;
-        int sl1 = 0;
-        int sl2 = 0;
-        int sl3 = 0;
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();
         DECODE_ONE();
-        bb0 -= sl0;
-        bb1 -= sl1;
-        bb2 -= sl2;
-        bb3 -= sl3;
     }
 
     /* Per-stream scalar tail (<= ZXC_HUF_SAFE_MARGIN - 1 = 9 symbols per
      * stream). Single-symbol decode using the same 2048-entry table,
      * we read sym1 + len1 only and advance by 1 byte, no spec write. */
-#define TAIL_ONE(accum, nbits, src, src_end, dst)                    \
-    do {                                                             \
-        REFILL(accum, nbits, src, src_end);                          \
-        const uint32_t _e = table[(accum) & ZXC_HUF_TBL_MASK].entry; \
-        *(dst)++ = (uint8_t)_e;                                      \
-        const int _l1 = (int)((_e >> 16) & 0xF);                     \
-        (accum) >>= _l1;                                             \
-        (nbits) -= _l1;                                              \
+#define TAIL_ONE(accum, nbits, src, src_end, dst)                \
+    do {                                                         \
+        REFILL(accum, nbits, src, src_end);                      \
+        const uint32_t _e = table[ZXC_HUF_LUT_IDX(accum)].entry; \
+        *(dst)++ = (uint8_t)_e;                                  \
+        const int _l1 = (int)((_e >> 16) & 0xF);                 \
+        (accum) >>= _l1;                                         \
+        (nbits) -= _l1;                                          \
     } while (0)
 
     while (d0 < dend0) TAIL_ONE(a0, bb0, p0, e0, d0);
