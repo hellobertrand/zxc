@@ -8,9 +8,9 @@
 
 /**
  * @file zxc_huffman.c
- * @brief Canonical, length-limited (ZXC_HUF_MAX_CODE_LEN) Huffman codec for the GLO literal
+ * @brief Canonical, length-limited (ZXC_HUF_MAX_CODE_LEN_ULTRA) Huffman codec for the GLO literal
  *
- * Canonical, length-limited (ZXC_HUF_MAX_CODE_LEN) Huffman codec for the GLO literal
+ * Canonical, length-limited (ZXC_HUF_MAX_CODE_LEN_ULTRA) Huffman codec for the GLO literal
  * stream at compression level >= 6. Codes are emitted LSB-first; the
  * decoder uses a 2048-entry multi-symbol lookup table (11-bit lookup,
  * 1 or 2 symbols per lookup depending on the cumulative code length)
@@ -57,10 +57,10 @@
  * ===========================================================================
  *
  * Builds optimal length-limited Huffman code lengths (max length
- * ZXC_HUF_MAX_CODE_LEN) on 256-symbol alphabets. Package-merge is run for
- * ZXC_HUF_MAX_CODE_LEN levels; each level holds up to 2N items (leaves +
+ * ZXC_HUF_MAX_CODE_LEN_ULTRA) on 256-symbol alphabets. Package-merge is run for
+ * ZXC_HUF_MAX_CODE_LEN_ULTRA levels; each level holds up to 2N items (leaves +
  * paired packages). Selection of the cheapest 2N - 2 items at level
- * ZXC_HUF_MAX_CODE_LEN gives the appearance count of each leaf, which is
+ * ZXC_HUF_MAX_CODE_LEN_ULTRA gives the appearance count of each leaf, which is
  * its code length.
  */
 
@@ -140,9 +140,9 @@ static void pm_leaves_sort(pm_leaf_t* RESTRICT leaves, const int n) {
 /**
  * @brief Build length-limited canonical Huffman code lengths.
  *
- * Runs the boundary package-merge algorithm capped at `ZXC_HUF_MAX_CODE_LEN`.
+ * Runs the boundary package-merge algorithm capped at `ZXC_HUF_MAX_CODE_LEN_ULTRA`.
  * Symbols with `freq[i] == 0` get `code_len[i] == 0`; every other symbol
- * receives a length in `[1, ZXC_HUF_MAX_CODE_LEN]`. The single-present-symbol
+ * receives a length in `[1, ZXC_HUF_MAX_CODE_LEN_ULTRA]`. The single-present-symbol
  * case is handled as a degenerate code of length 1.
  *
  * @param[in]  freq     Frequency table indexed by symbol (0..255).
@@ -155,7 +155,7 @@ static void pm_leaves_sort(pm_leaf_t* RESTRICT leaves, const int n) {
  *         on failure.
  */
 int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
-                               void* RESTRICT scratch) {
+                               void* RESTRICT scratch, const int max_code_len) {
     ZXC_MEMSET(code_len, 0, ZXC_HUF_NUM_SYMBOLS);
 
     pm_leaf_t leaves[ZXC_HUF_NUM_SYMBOLS];
@@ -175,7 +175,8 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
 
     pm_leaves_sort(leaves, n);
 
-    /* n <= 256 <= 2^ZXC_HUF_MAX_CODE_LEN, so length-limit is always feasible. */
+    /* Callers pass max_code_len >= 8, and n <= 256 <= 2^max_code_len, so the
+     * length limit is always feasible (a full 8-bit code covers all 256 symbols). */
     const int max_per_level = 2 * n;
 
     /* Working buffers: either carve from caller-provided scratch (sized for
@@ -189,19 +190,20 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     if (scratch) {
         uint8_t* p = (uint8_t*)scratch;
         items = (pm_item_t*)p;
-        p += (size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)ZXC_HUF_PM_LEVEL_BOUND * sizeof(pm_item_t);
+        p +=
+            (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * (size_t)ZXC_HUF_PM_LEVEL_BOUND * sizeof(pm_item_t);
         p = (uint8_t*)(((uintptr_t)p + 7u) & ~(uintptr_t)7u);
         counts = (int*)p;
-        ZXC_MEMSET(counts, 0, (size_t)ZXC_HUF_MAX_CODE_LEN * sizeof(int));
-        p += (size_t)ZXC_HUF_MAX_CODE_LEN * sizeof(int);
+        ZXC_MEMSET(counts, 0, (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * sizeof(int));
+        p += (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * sizeof(int);
         p = (uint8_t*)(((uintptr_t)p + 7u) & ~(uintptr_t)7u);
         stack = (frame_t*)p;
     } else {
-        owned_items = (pm_item_t*)ZXC_MALLOC((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)max_per_level *
-                                             sizeof(pm_item_t));
-        owned_counts = (int*)ZXC_CALLOC((size_t)ZXC_HUF_MAX_CODE_LEN, sizeof(int));
-        owned_stack = (frame_t*)ZXC_MALLOC((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)max_per_level *
-                                           sizeof(frame_t));
+        owned_items = (pm_item_t*)ZXC_MALLOC((size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA *
+                                             (size_t)max_per_level * sizeof(pm_item_t));
+        owned_counts = (int*)ZXC_CALLOC((size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA, sizeof(int));
+        owned_stack = (frame_t*)ZXC_MALLOC((size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA *
+                                           (size_t)max_per_level * sizeof(frame_t));
         if (UNLIKELY(!owned_items || !owned_counts || !owned_stack)) {
             ZXC_FREE(owned_items);
             ZXC_FREE(owned_counts);
@@ -223,9 +225,9 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     }
     counts[0] = n;
 
-    /* Levels 1..ZXC_HUF_MAX_CODE_LEN-1: merge sorted leaves with sorted packages from the previous
+    /* Levels 1..max_code_len-1: merge sorted leaves with sorted packages from the previous
      * level. */
-    for (int k = 1; k < ZXC_HUF_MAX_CODE_LEN; k++) {
+    for (int k = 1; k < max_code_len; k++) {
         const int prev = counts[k - 1];
         const int packs = prev / 2;
         int li = 0;
@@ -255,17 +257,17 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         counts[k] = n_lvl;
     }
 
-    /* Step 3: take first 2n-2 items at level ZXC_HUF_MAX_CODE_LEN-1; trace back, counting leaf
+    /* Step 3: take first 2n-2 items at level max_code_len-1; trace back, counting leaf
      * appearances. */
     int n_take = 2 * n - 2;
-    if (n_take > counts[ZXC_HUF_MAX_CODE_LEN - 1]) n_take = counts[ZXC_HUF_MAX_CODE_LEN - 1];
+    if (n_take > counts[max_code_len - 1]) n_take = counts[max_code_len - 1];
 
-    /* Worst case stack depth: (ZXC_HUF_MAX_CODE_LEN * n_take) frames; bounded by
-     * ZXC_HUF_MAX_CODE_LEN * 2n. `stack` was set up earlier from scratch (or
-     * the local malloc fallback). */
+    /* Worst case stack depth: (max_code_len * n_take) frames; bounded by
+     * max_code_len * 2n <= ZXC_HUF_MAX_CODE_LEN_ULTRA * 2n. `stack` was set up earlier from
+     * scratch (or the local malloc fallback), sized for the ceiling. */
     int sp = 0;
     for (int i = 0; i < n_take; i++) {
-        stack[sp].lvl = (int8_t)(ZXC_HUF_MAX_CODE_LEN - 1);
+        stack[sp].lvl = (int8_t)(max_code_len - 1);
         stack[sp].idx = (int16_t)i;
         sp++;
     }
@@ -328,15 +330,15 @@ static uint32_t reverse_bits(uint32_t v, const int n) {
  * @param[out] codes    Per-symbol LSB-first canonical codes.
  */
 static void build_canonical_codes(const uint8_t* RESTRICT code_len, uint32_t* RESTRICT codes) {
-    uint32_t bl_count[ZXC_HUF_MAX_CODE_LEN + 1] = {0};
+    uint32_t bl_count[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1] = {0};
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
         bl_count[code_len[i]]++;
     }
     bl_count[0] = 0;
 
-    uint32_t next_code[ZXC_HUF_MAX_CODE_LEN + 2] = {0};
+    uint32_t next_code[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2] = {0};
     uint32_t code = 0;
-    for (int k = 1; k <= ZXC_HUF_MAX_CODE_LEN + 1; k++) {
+    for (int k = 1; k <= ZXC_HUF_MAX_CODE_LEN_ULTRA + 1; k++) {
         code = (code + bl_count[k - 1]) << 1;
         next_code[k] = code;
     }
@@ -362,7 +364,7 @@ static void build_canonical_codes(const uint8_t* RESTRICT code_len, uint32_t* RE
  * The packing is little-endian within each byte: low nibble holds
  * `code_len[2*i]`, high nibble holds `code_len[2*i + 1]`. The function
  * silently truncates any length > 15; callers must enforce the cap of
- * `ZXC_HUF_MAX_CODE_LEN` (<= 15) before calling.
+ * `ZXC_HUF_MAX_CODE_LEN_ULTRA` (<= 15) before calling.
  *
  * @param[in]  code_len Per-symbol code lengths (length `ZXC_HUF_NUM_SYMBOLS`).
  * @param[out] out      Output header buffer of `ZXC_HUF_TABLE_SIZE` bytes.
@@ -379,7 +381,7 @@ static void pack_lengths_header(const uint8_t* RESTRICT code_len, uint8_t* RESTR
  * @brief Decode the 128-byte length header back into 256 code lengths.
  *
  * Inverts ::pack_lengths_header and validates the two structural invariants:
- * no length exceeds `ZXC_HUF_MAX_CODE_LEN`, and at least one symbol is
+ * no length exceeds `ZXC_HUF_MAX_CODE_LEN_ULTRA`, and at least one symbol is
  * present.
  *
  * @param[in]  in       Input header buffer of `ZXC_HUF_TABLE_SIZE` bytes.
@@ -401,7 +403,8 @@ static int unpack_lengths_header(const uint8_t* RESTRICT in, uint8_t* RESTRICT c
         if (lo) n_present++;
         if (hi) n_present++;
     }
-    if (UNLIKELY(max_len > ZXC_HUF_MAX_CODE_LEN || n_present == 0)) return ZXC_ERROR_CORRUPT_DATA;
+    if (UNLIKELY(max_len > ZXC_HUF_MAX_CODE_LEN_ULTRA || n_present == 0))
+        return ZXC_ERROR_CORRUPT_DATA;
     return ZXC_OK;
 }
 
@@ -452,7 +455,7 @@ static ZXC_ALWAYS_INLINE void bw_init(bit_writer_t* RESTRICT bw, uint8_t* RESTRI
  *
  * @param[in,out] bw   Writer state.
  * @param[in]     code Code bits to emit (the low @p len bits matter).
- * @param[in]     len  Number of bits to emit (1..ZXC_HUF_MAX_CODE_LEN).
+ * @param[in]     len  Number of bits to emit (1..ZXC_HUF_MAX_CODE_LEN_ULTRA).
  */
 static ZXC_ALWAYS_INLINE void bw_put(bit_writer_t* RESTRICT bw, const uint32_t code,
                                      const int len) {
@@ -615,12 +618,12 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n
 /**
  * @brief Build the 2048-entry multi-symbol decoder lookup table.
  *
- * Strategy: build a temporary 256-entry single-symbol (8-bit) table, then
- * use it to populate the 2048-entry (11-bit) multi-symbol table. For each
- * 11-bit prefix p:
- *   1. (sym1, len1) = ss[p & 0xFF]   -- always valid, 1 <= len1 <= 8.
- *   2. rem = 11 - len1 E [3, 10] bits remain after consuming the first code.
- *   3. (sym2_cand, len2_cand) = ss[(p >> len1) & 0xFF]. If len2_cand <= rem,
+ * Strategy: build a temporary single-symbol table (ZXC_HUF_SS_SIZE entries,
+ * ZXC_HUF_MAX_CODE_LEN_ULTRA-bit index), then use it to populate the 2048-entry
+ * (11-bit) multi-symbol table. For each 11-bit prefix p:
+ *   1. (sym1, len1) = ss[p & ZXC_HUF_SS_MASK] -- always valid, 1 <= len1 <= 11.
+ *   2. rem = 11 - len1 E [0, 10] bits remain after consuming the first code.
+ *   3. (sym2_cand, len2_cand) = ss[(p >> len1) & ZXC_HUF_SS_MASK]. If len2_cand <= rem,
  *      both codes fit in 11 bits -> encode 2-symbol entry. Otherwise the
  *      second code's bit window extends past the lookup width -> keep only
  *      the first symbol and let the next iteration handle the rest.
@@ -633,45 +636,46 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n
  */
 static int build_decode_table(const uint8_t* RESTRICT code_len,
                               zxc_huf_dec_entry_t* RESTRICT table) {
-    uint32_t bl_count[ZXC_HUF_MAX_CODE_LEN + 1] = {0};
+    uint32_t bl_count[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1] = {0};
     int n_present = 0;
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
         const uint8_t l = code_len[i];
-        if (UNLIKELY(l > ZXC_HUF_MAX_CODE_LEN)) return ZXC_ERROR_CORRUPT_DATA;
+        if (UNLIKELY(l > ZXC_HUF_MAX_CODE_LEN_ULTRA)) return ZXC_ERROR_CORRUPT_DATA;
         bl_count[l]++;
         if (l) n_present++;
     }
     if (UNLIKELY(n_present == 0)) return ZXC_ERROR_CORRUPT_DATA;
     bl_count[0] = 0;
 
-    /* Validate Kraft equality on the ZXC_HUF_MAX_CODE_LEN axis. */
+    /* Validate Kraft equality on the ZXC_HUF_MAX_CODE_LEN_ULTRA axis. */
     {
         uint64_t kraft = 0;
-        for (int k = 1; k <= ZXC_HUF_MAX_CODE_LEN; k++) {
-            kraft += (uint64_t)bl_count[k] << (ZXC_HUF_MAX_CODE_LEN - k);
+        for (int k = 1; k <= ZXC_HUF_MAX_CODE_LEN_ULTRA; k++) {
+            kraft += (uint64_t)bl_count[k] << (ZXC_HUF_MAX_CODE_LEN_ULTRA - k);
         }
         /* Degenerate: single symbol with length 1 (Kraft sum =
-         * 2^(ZXC_HUF_MAX_CODE_LEN-1)). Otherwise: full Kraft equality
-         * on the ZXC_HUF_MAX_CODE_LEN axis. */
-        const int kraft_ok = (n_present == 1) ? (bl_count[1] == 1)
-                                              : (kraft == ((uint64_t)1 << ZXC_HUF_MAX_CODE_LEN));
+         * 2^(ZXC_HUF_MAX_CODE_LEN_ULTRA-1)). Otherwise: full Kraft equality
+         * on the ZXC_HUF_MAX_CODE_LEN_ULTRA axis. */
+        const int kraft_ok = (n_present == 1)
+                                 ? (bl_count[1] == 1)
+                                 : (kraft == ((uint64_t)1 << ZXC_HUF_MAX_CODE_LEN_ULTRA));
         if (UNLIKELY(!kraft_ok)) return ZXC_ERROR_CORRUPT_DATA;
     }
 
-    uint32_t next_code[ZXC_HUF_MAX_CODE_LEN + 2] = {0};
+    uint32_t next_code[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2] = {0};
     {
         uint32_t code = 0;
-        for (int k = 1; k <= ZXC_HUF_MAX_CODE_LEN + 1; k++) {
+        for (int k = 1; k <= ZXC_HUF_MAX_CODE_LEN_ULTRA + 1; k++) {
             code = (code + bl_count[k - 1]) << 1;
             next_code[k] = code;
         }
     }
 
-    /* Single-symbol intermediate (ZXC_HUF_MAX_CODE_LEN-bit lookup). Layout:
+    /* Single-symbol intermediate (ZXC_HUF_MAX_CODE_LEN_ULTRA-bit lookup). Layout:
      * low byte = sym, high byte = len. Filled by replicating each canonical
-     * code across all ZXC_HUF_MAX_CODE_LEN-bit windows that share its low
+     * code across all ZXC_HUF_MAX_CODE_LEN_ULTRA-bit windows that share its low
      * `len` bits. */
-#define ZXC_HUF_SS_SIZE (1u << ZXC_HUF_MAX_CODE_LEN)
+#define ZXC_HUF_SS_SIZE (1u << ZXC_HUF_MAX_CODE_LEN_ULTRA)
 #define ZXC_HUF_SS_MASK ((uint32_t)(ZXC_HUF_SS_SIZE - 1))
     uint16_t ss[ZXC_HUF_SS_SIZE] = {0};
 
@@ -687,7 +691,7 @@ static int build_decode_table(const uint8_t* RESTRICT code_len,
         }
     }
 
-    /* Single-symbol degenerate (Kraft sum = 2^(ZXC_HUF_MAX_CODE_LEN-1)): replicate the one
+    /* Single-symbol degenerate (Kraft sum = 2^(ZXC_HUF_MAX_CODE_LEN_ULTRA-1)): replicate the one
      * valid entry across every slot. */
     if (UNLIKELY(n_present == 1)) {
         uint16_t valid = 0;

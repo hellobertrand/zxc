@@ -567,14 +567,30 @@ extern "C" {
  *  (width @c ZXC_HUF_LOOKUP_BITS) that yields 1 or 2 symbols per lookup,
  *  feeding a `ZXC_HUF_NUM_STREAMS`-way interleaved hot loop.
  *  @{ */
-/** @brief Maximum code length, in bits. Capped well below the package-merge
- *         algorithmic ceiling (14) to keep the decoder LUT small. */
-#define ZXC_HUF_MAX_CODE_LEN 8
+/** @brief Maximum Huffman code length, in bits: the absolute ceiling the decoder
+ *         LUT and on-wire validation support. Equal to ::ZXC_HUF_LOOKUP_BITS so a
+ *         single code can exactly fill one lookup window; it must never exceed it
+ *         (a longer code would underflow the bit reader's refill). The encoder
+ *         caps codes per level via ::zxc_huf_enc_max_code_len. */
+#define ZXC_HUF_MAX_CODE_LEN_ULTRA 11
+/** @brief Encoder code-length cap for levels up to ::ZXC_LEVEL_DENSITY (below
+ *         ::ZXC_LEVEL_ULTRA): 8 bits keeps multi-symbol decode dense and fast. */
+#define ZXC_HUF_MAX_CODE_LEN_DENSITY 8
 /** @brief Decoder LUT width: each lookup consumes this many bits and yields
  *         1 or 2 symbols. */
 #define ZXC_HUF_LOOKUP_BITS 11
+_Static_assert(ZXC_HUF_MAX_CODE_LEN_ULTRA <= ZXC_HUF_LOOKUP_BITS,
+               "a Huffman code longer than the lookup window underflows the bit reader");
 /** @brief Number of entries in the multi-symbol decoder lookup table. */
 #define ZXC_HUF_DEC_TABLE_SIZE (1U << ZXC_HUF_LOOKUP_BITS)
+/** @brief Encoder Huffman code-length cap for a compression @p level: levels below
+ *         ::ZXC_LEVEL_ULTRA use ::ZXC_HUF_MAX_CODE_LEN_DENSITY, ::ZXC_LEVEL_ULTRA uses
+ *         the full ::ZXC_HUF_MAX_CODE_LEN_ULTRA ceiling (denser codes, slower decode).
+ *         Applies to both literal and token Huffman; the decoder always supports the
+ *         ceiling, so lower-level streams decode unchanged. */
+static inline int zxc_huf_enc_max_code_len(const int level) {
+    return (level >= ZXC_LEVEL_ULTRA) ? ZXC_HUF_MAX_CODE_LEN_ULTRA : ZXC_HUF_MAX_CODE_LEN_DENSITY;
+}
 /** @brief Alphabet size: one entry per possible byte value. */
 #define ZXC_HUF_NUM_SYMBOLS 256
 /** @brief Interleaved bit-stream count for parallel decoding. */
@@ -660,10 +676,12 @@ typedef struct {
  *         Carved by the function into items / counts / stack regions; sized
  *         for the worst-case alphabet (n = `ZXC_HUF_NUM_SYMBOLS`). Includes
  *         a small alignment slack between regions. */
-#define ZXC_HUF_BUILD_SCRATCH_SIZE                                                               \
-    ((size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)ZXC_HUF_PM_LEVEL_BOUND * sizeof(zxc_huf_pm_item_t) + \
-     8U + (size_t)ZXC_HUF_MAX_CODE_LEN * sizeof(int) + 8U +                                      \
-     (size_t)ZXC_HUF_MAX_CODE_LEN * (size_t)ZXC_HUF_PM_LEVEL_BOUND * sizeof(zxc_huf_pm_frame_t))
+#define ZXC_HUF_BUILD_SCRATCH_SIZE                                         \
+    ((size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * (size_t)ZXC_HUF_PM_LEVEL_BOUND * \
+         sizeof(zxc_huf_pm_item_t) +                                       \
+     8U + (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * sizeof(int) + 8U +          \
+     (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * (size_t)ZXC_HUF_PM_LEVEL_BOUND * \
+         sizeof(zxc_huf_pm_frame_t))
 /** @} */
 
 /** @name Block Size Helpers
@@ -770,16 +788,17 @@ typedef struct {
  * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
-    if (level >= ZXC_LEVEL_DENSITY) return (zxc_lz77_params_t){64, 256, 0, 0, 0, 1, 8};
+    if (level >= ZXC_LEVEL_ULTRA) return (zxc_lz77_params_t){256, 256, 0, 0, 0, 1, 8};
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
     // step_shift
-    static const zxc_lz77_params_t table[6] = {
-        {3, 16, 0, 0, 0, 4, 4},      // fallback
-        {3, 16, 0, 0, 0, 4, 4},      // level 1
-        {3, 18, 0, 0, 0, 3, 6},      // level 2
-        {3, 16, 1, 4, 128, 1, 4},    // level 3
-        {3, 18, 1, 4, 128, 1, 5},    // level 4
-        {64, 256, 1, 16, 128, 1, 8}  // level 5
+    static const zxc_lz77_params_t table[7] = {
+        {3, 16, 0, 0, 0, 4, 4},       // fallback
+        {3, 16, 0, 0, 0, 4, 4},       // level 1
+        {3, 18, 0, 0, 0, 3, 6},       // level 2
+        {3, 16, 1, 4, 128, 1, 4},     // level 3
+        {3, 18, 1, 4, 128, 1, 5},     // level 4
+        {64, 256, 1, 16, 128, 1, 8},  // level 5
+        {64, 256, 0, 0, 0, 1, 8}      // level 6
     };
     return table[level < ZXC_LEVEL_FASTEST ? ZXC_LEVEL_FASTEST : level];
 }
@@ -1386,7 +1405,7 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  * Huffman codec for the GLO literal stream (level >= 6).
  *
  * On-disk layout, decoder geometry and tunables: see
- * @ref ZXC_HUF_MAX_CODE_LEN and the surrounding "Huffman Codec Constants"
+ * @ref ZXC_HUF_MAX_CODE_LEN_ULTRA and the surrounding "Huffman Codec Constants"
  * group above.
  * ============================================================================
  */
@@ -1394,9 +1413,9 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
 /**
  * @brief Build length-limited canonical Huffman code lengths from a frequency table.
  *
- * Uses the boundary package-merge algorithm capped at `ZXC_HUF_MAX_CODE_LEN`.
+ * Uses the boundary package-merge algorithm capped at `ZXC_HUF_MAX_CODE_LEN_ULTRA`.
  * Symbols with `freq[i] == 0` get `code_len[i] == 0`; others receive a value
- * in `[1, ZXC_HUF_MAX_CODE_LEN]`.
+ * in `[1, ZXC_HUF_MAX_CODE_LEN_ULTRA]`.
  *
  * @param[in]  freq     Frequency table of length `ZXC_HUF_NUM_SYMBOLS`.
  * @param[out] code_len Output code-length array of length `ZXC_HUF_NUM_SYMBOLS`.
@@ -1404,10 +1423,13 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  *                      ::ZXC_HUF_BUILD_SCRATCH_SIZE bytes. If `NULL`, the
  *                      function allocates its own working memory and frees
  *                      it before returning.
+ * @param[in]  max_code_len Code-length ceiling in `[1, ZXC_HUF_MAX_CODE_LEN_ULTRA]`;
+ *                      package-merge is run for this many levels (see
+ *                      ::zxc_huf_enc_max_code_len for the per-level value).
  * @return `ZXC_OK` on success, negative `zxc_error_t` code on failure.
  */
 int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
-                               void* RESTRICT scratch);
+                               void* RESTRICT scratch, int max_code_len);
 
 /**
  * @brief Encode the literal stream into a Huffman section payload.

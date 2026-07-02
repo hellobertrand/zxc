@@ -762,7 +762,9 @@ static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const siz
     }
 
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-    if (UNLIKELY(zxc_huf_build_code_lengths(hist, code_len, scratch) != ZXC_OK)) return CHAR_BIT;
+    if (UNLIKELY(zxc_huf_build_code_lengths(hist, code_len, scratch,
+                                            ZXC_HUF_MAX_CODE_LEN_DENSITY) != ZXC_OK))
+        return CHAR_BIT;
 
     /* Sample-weighted sum of code lengths == predicted total Huffman bits
      * for the sample. Divide by sample count for bits/byte, rounded up
@@ -1605,7 +1607,8 @@ parse_done:;
             freq[k] = freq0[k] + freq1[k] + freq2[k] + freq3[k];
         }
 
-        if (zxc_huf_build_code_lengths(freq, huf_code_len, ctx->opt_scratch) == ZXC_OK) {
+        if (zxc_huf_build_code_lengths(freq, huf_code_len, ctx->opt_scratch,
+                                       zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
             const size_t Q = (lit_c + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
             size_t streams_bytes = 0;
             for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
@@ -1692,7 +1695,8 @@ parse_done:;
     if (level >= ZXC_LEVEL_ULTRA && seq_c >= ZXC_HUF_MIN_LITERALS) {
         uint32_t tfreq[ZXC_HUF_NUM_SYMBOLS] = {0};
         for (uint32_t i = 0; i < seq_c; i++) tfreq[buf_tokens[i]]++;
-        if (zxc_huf_build_code_lengths(tfreq, tok_code_len, ctx->opt_scratch) == ZXC_OK) {
+        if (zxc_huf_build_code_lengths(tfreq, tok_code_len, ctx->opt_scratch,
+                                       zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
             const size_t Q = (seq_c + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
             size_t streams_bytes = 0;
             for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
@@ -1732,7 +1736,8 @@ parse_done:;
                                         ? huf_dict_total_size
                                         : lit_c;
     desc[0].sizes = (uint64_t)lit_section_size | ((uint64_t)lit_c << 32);
-    const size_t tok_section_size = (enc_tok == ZXC_SECTION_ENCODING_HUFFMAN) ? tok_huf_size : seq_c;
+    const size_t tok_section_size =
+        (enc_tok == ZXC_SECTION_ENCODING_HUFFMAN) ? tok_huf_size : seq_c;
     desc[1].sizes = (uint64_t)tok_section_size | ((uint64_t)seq_c << 32);
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
     desc[3].sizes = (uint64_t)extras_sz | ((uint64_t)extras_sz << 32);
