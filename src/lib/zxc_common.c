@@ -510,7 +510,8 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
                          uint32_t* RESTRICT out_dict_id) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
     if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
-    if (UNLIKELY(src[4] != ZXC_FILE_FORMAT_VERSION)) return ZXC_ERROR_BAD_VERSION;
+    if (UNLIKELY(src[4] < ZXC_FILE_FORMAT_VERSION_MIN || src[4] > ZXC_FILE_FORMAT_VERSION))
+        return ZXC_ERROR_BAD_VERSION;
 
     uint8_t temp[ZXC_FILE_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, ZXC_FILE_HEADER_SIZE);

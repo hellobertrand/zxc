@@ -131,7 +131,8 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
     CHECK(size >= ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE, "file too small (%zu)", size);
 
     CHECK(zxc_le32(buf) == ZXC_MAGIC_WORD, "bad magic 0x%08X", zxc_le32(buf));
-    CHECK(buf[4] == ZXC_FILE_FORMAT_VERSION, "version %u != %u", buf[4],
+    CHECK(buf[4] >= ZXC_FILE_FORMAT_VERSION_MIN && buf[4] <= ZXC_FILE_FORMAT_VERSION,
+          "version %u not in [%u,%u]", buf[4], (unsigned)ZXC_FILE_FORMAT_VERSION_MIN,
           (unsigned)ZXC_FILE_FORMAT_VERSION);
 
     uint8_t code = buf[5];
