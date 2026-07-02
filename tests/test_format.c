@@ -45,15 +45,15 @@ static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t
     for (size_t i = 0; i < n; i++) freq[literals[i]]++;
 
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-    if (zxc_huf_build_code_lengths(freq, code_len, NULL) != ZXC_OK) {
+    if (zxc_huf_build_code_lengths(freq, code_len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) != ZXC_OK) {
         printf("Failed [%s]: build_code_lengths\n", label);
         return 0;
     }
     /* Validate the lengths-limit invariant. */
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
-        if (code_len[i] > ZXC_HUF_MAX_CODE_LEN) {
+        if (code_len[i] > ZXC_HUF_MAX_CODE_LEN_ULTRA) {
             printf("Failed [%s]: code_len[%d] = %d > %d\n", label, i, code_len[i],
-                   ZXC_HUF_MAX_CODE_LEN);
+                   ZXC_HUF_MAX_CODE_LEN_ULTRA);
             return 0;
         }
     }
@@ -155,7 +155,7 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
     for (size_t i = 0; i < n; i++) freq[literals[i]]++;
 
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-    if (zxc_huf_build_code_lengths(freq, code_len, NULL) != ZXC_OK) {
+    if (zxc_huf_build_code_lengths(freq, code_len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) != ZXC_OK) {
         printf("Failed [%s]: build_code_lengths\n", label);
         return 0;
     }
@@ -273,7 +273,7 @@ int test_huffman_codec_dict() {
         for (size_t i = 0; i < 256; i++) buf[i] = (zxc_test_rand() & 1) ? 'X' : 'Y';
         for (size_t i = 0; i < 256; i++) freq[buf[i]]++;
         uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-        if (zxc_huf_build_code_lengths(freq, code_len, NULL) != ZXC_OK) {
+        if (zxc_huf_build_code_lengths(freq, code_len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) != ZXC_OK) {
             free(buf);
             return 0;
         }
