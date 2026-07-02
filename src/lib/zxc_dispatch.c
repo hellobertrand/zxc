@@ -110,7 +110,7 @@ int zxc_compress_chunk_wrapper_default(zxc_cctx_t* RESTRICT ctx, const uint8_t* 
 // symbol at compile time (zero dispatch overhead in the hot path); the thin
 // wrappers below expose the un-suffixed names for tests and external callers.
 int zxc_huf_build_code_lengths_default(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
-                                       void* RESTRICT scratch);
+                                       void* RESTRICT scratch, int max_code_len);
 int zxc_huf_encode_section_default(const uint8_t* RESTRICT literals, const size_t n_literals,
                                    const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
                                    const size_t dst_cap);
@@ -546,8 +546,8 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
  * @return `ZXC_OK` on success, negative `zxc_error_t` on failure.
  */
 int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
-                               void* RESTRICT scratch) {
-    return zxc_huf_build_code_lengths_default(freq, code_len, scratch);
+                               void* RESTRICT scratch, const int max_code_len) {
+    return zxc_huf_build_code_lengths_default(freq, code_len, scratch, max_code_len);
 }
 
 /**
