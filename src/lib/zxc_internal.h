@@ -317,9 +317,14 @@ extern "C" {
 
 /** @brief Magic word identifying ZXC files (little-endian 0x9CB02EF5). */
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
-/** @brief Current on-disk file format version. The decoder accepts only this
- *  version; Older versions are rejected with ZXC_ERROR_BAD_VERSION. */
-#define ZXC_FILE_FORMAT_VERSION 6
+/** @brief Current on-disk file format version written by the encoder. */
+#define ZXC_FILE_FORMAT_VERSION 7
+/** @brief Oldest on-disk file format version the decoder still reads. Versions in
+ *  [ZXC_FILE_FORMAT_VERSION_MIN, ZXC_FILE_FORMAT_VERSION] are accepted; all others
+ *  are rejected with ZXC_ERROR_BAD_VERSION. v7 relaxed the Huffman code-length
+ *  limit from 8 to 11 bits (level 7 / ULTRA) and adds Huffman-coded tokens; v6
+ *  archives (code_len <= 8, no token Huffman) stay decodable. */
+#define ZXC_FILE_FORMAT_VERSION_MIN 6
 
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32

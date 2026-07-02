@@ -1,10 +1,13 @@
 # ZXC Compressed File Format (Technical Specification)
 
 **Date**: June 2026
-**Format Version**: 6
+**Format Version**: 7 (decoders also accept version 6)
 
 This document describes the on-disk binary format of a ZXC compressed file.
-It formalizes the current reference implementation of format version **6**.
+It formalizes the current reference implementation of format version **7**.
+Version 7 relaxed the literal/token Huffman code-length limit from 8 to 11 bits
+(level 7 / ULTRA) and adds Huffman-coded tokens; version 6 archives (code lengths
+`≤ 8`, no token Huffman) remain decodable. Version-specific rules are flagged inline.
 
 ## 1. Conventions
 
@@ -54,7 +57,8 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): currently `6`.
+- **Format Version** (`u8`): encoders write `7`. Decoders accept `6` and `7`
+  and reject any other value (`ZXC_ERROR_BAD_VERSION`).
 - **Chunk Size Code** (`u8`):
   - The value is an **exponent** in the range `[12, 21]`: `block_size = 2^code`.
     - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
@@ -216,7 +220,10 @@ Offset  Size  Field
         var   Stream 3 bit-stream (s4 bytes)
 ```
 
-Codes are canonical, length-limited at `L = 8`, emitted **LSB-first**.
+Codes are canonical, emitted **LSB-first**, and length-limited at `L` bits:
+`L = 8` in v6 archives; `L = 11` in v7 (level 7 / ULTRA may emit codes up to 11
+bits — levels ≤ 6 and all v6 archives never exceed 8). Lengths are still stored
+in the 4-bit nibbles of the 128-byte header, which already hold values 0–15.
 The `n_literals` value from the GLO header is split into 4 contiguous regions
 of size `Q = ceil(n_literals / 4)` (the last region may be shorter), each
 encoded into its own bit-stream so that 4 decoders can run in parallel.
@@ -226,12 +233,13 @@ header, validates the Kraft equality, and decodes each sub-stream into its
 output region. See [WHITEPAPER §5.7](WHITEPAPER.md) for the multi-symbol
 2048-entry lookup table strategy used on the decode hot path.
 
-Decoder validation requirements:
-- Every code length must satisfy `code_len[i] ≤ 8`.
+Decoder validation requirements (a v7 decoder validates on the `L = 11` axis,
+which also accepts every v6 code table because v6 lengths never exceed 8):
+- Every code length must satisfy `code_len[i] ≤ L` (`L = 11` for v7, `≤ 8` for v6).
 - At least one symbol must be present (`code_len[i] != 0` for some `i`).
-- The Kraft sum `Σ 2^(8 − code_len[i])` over present symbols must equal `2^8`,
+- The Kraft sum `Σ 2^(L − code_len[i])` over present symbols must equal `2^L`,
   except for the single-present-symbol degenerate case where exactly one
-  symbol has `code_len = 1` and the Kraft sum is `2^7`.
+  symbol has `code_len = 1` and the Kraft sum is `2^(L − 1)`.
 - A failure on any of the above results in `ZXC_ERROR_CORRUPT_DATA`.
 
 ### 5.2.2 Shared-table Huffman literal section
@@ -474,19 +482,27 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 | Header/footer layout changed | **Version bump** | Resizing the file header |
 | Checksum algorithm changed | **Version bump** | Replacing RapidHash with Komihash |
 
+**Version history.** Version **7** (current) is such a bump: it relaxed the
+literal/token Huffman code-length limit from 8 to 11 bits (level 7 / ULTRA) and
+adds Huffman-coded tokens — both are changed GLO encodings. Encoders write `7`
+for every level; v6 archives (code lengths `≤ 8`, no token Huffman) remain
+decodable, so the code-length nibble storage and every other field are unchanged.
+
 ### 10.3 Compatibility rules
 
-- **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version with `ZXC_ERROR_BAD_VERSION`. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
+- **Version compatibility**: a decoder accepts the set of format versions it implements — the reference decoder accepts **6 and 7** — and **MUST** reject any other version with `ZXC_ERROR_BAD_VERSION`. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise. Within the accepted set it applies the rules for the archive's declared version (e.g. the Huffman code-length limit is 8 for v6, 11 for v7 — see §5.2.1).
 - **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version (`ZXC_ERROR_BAD_BLOCK_TYPE`). The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
 - **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header CRC, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension.
 - **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values (`ZXC_ERROR_BAD_HEADER`).
 
 ### 10.4 Minimum conforming decoder
 
-A minimal conforming decoder for version 6 **MUST** support:
-- File header parsing and CRC16 validation.
+A minimal conforming decoder for versions 6 and 7 **MUST** support:
+- File header parsing and CRC16 validation (accepting version 6 or 7).
 - **RAW** blocks (type 0) - passthrough copy.
-- **GLO** blocks (type 1) - full LZ decode with extras varint.
+- **GLO** blocks (type 1) - full LZ decode with extras varint. For v7, the literal
+  and token Huffman code lengths may reach 11 bits (§5.2.1); a v7 decoder that
+  caps at 8 would wrongly reject valid level-7 archives.
 - **GHI** blocks (type 2) - full LZ decode with extras varint.
 - **EOF** block (type 255) - stream termination.
 - File footer validation (source size check).
@@ -676,7 +692,7 @@ Generated archive size: **58 bytes**.
 ### 14.1 Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 05 13 80 00 00 00 00 00 00 00 B8 90
+00000000: F5 2E B0 9C 07 13 80 00 00 00 00 00 00 00 3E 5D
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
@@ -687,15 +703,15 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 06 | 13 | 80 | 00 00 00 00 00 00 00 | FD 3B
+F5 2E B0 9C | 07 | 13 | 80 | 00 00 00 00 00 00 00 | 3E 5D
 ```
 
 - `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
-- `06` -> format version 6.
+- `07` -> format version 7.
 - `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
 - `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `B8 90` -> header CRC16.
+- `3E 5D` -> header CRC16 (LE value `0x5D3E`).
 
 #### B) Data Block #0 (RAW)
 
@@ -776,7 +792,7 @@ Generated archive size: **70 bytes** (12 bytes larger than the non-seekable vari
 #### Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 05 13 80 00 00 00 00 00 00 00 B8 90
+00000000: F5 2E B0 9C 07 13 80 00 00 00 00 00 00 00 3E 5D
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
 00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00
