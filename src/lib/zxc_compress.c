@@ -1577,8 +1577,14 @@ parse_done:;
             }
         }
 
-        // RLE chosen over RAW only if it saves >= 1/2^ZXC_RLE_MARGIN_SHIFT.
-        if (rle_size < lit_c - (lit_c >> ZXC_RLE_MARGIN_SHIFT)) enc_lit = ZXC_SECTION_ENCODING_RLE;
+        /* RLE over RAW: legacy fixed margin below ULTRA; space-speed J
+         * comparison at ULTRA (see ZXC_SS_TAX in zxc_internal.h). */
+        if (level >= ZXC_LEVEL_ULTRA) {
+            if (rle_size + ZXC_SS_TAX(lit_c, ZXC_SS_PREM_RLE_Q8) < lit_c)
+                enc_lit = ZXC_SECTION_ENCODING_RLE;
+        } else if (rle_size < lit_c - (lit_c >> ZXC_RLE_MARGIN_SHIFT)) {
+            enc_lit = ZXC_SECTION_ENCODING_RLE;
+        }
     }
 
     /* Level >= 6: also evaluate Huffman as a 3rd literal-encoding candidate.
@@ -1611,6 +1617,7 @@ parse_done:;
                                        zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
             const size_t Q = (lit_c + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
             size_t streams_bytes = 0;
+            int huf_fits = 1; /* the first NS-1 stream sizes are stored as u16 */
             for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
                 size_t start = (size_t)s * Q;
                 size_t stop = start + Q;
@@ -1630,14 +1637,32 @@ parse_done:;
                 }
                 uint64_t bits = b0 + b1 + b2 + b3;
                 for (; i < stop; i++) bits += huf_code_len[literals[i]];
-                streams_bytes += (size_t)((bits + 7) / 8);
+                const size_t sb = (size_t)((bits + 7) / 8);
+                if (s < ZXC_HUF_NUM_STREAMS - 1 && sb > 0xFFFFu) huf_fits = 0;
+                streams_bytes += sb;
             }
+            /* A candidate whose stored stream sizes overflow the u16 header
+             * cannot be encoded (zxc_huf_encode_streams would fail and the
+             * whole block would fall back to a RAW block, far bigger than a
+             * raw literal section) -- drop it from the selection. */
+            if (!huf_fits) goto huf_lit_done;
             huf_total_size = ZXC_HUF_HEADER_SIZE + streams_bytes;
-            const size_t baseline = (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : lit_c;
-            /* Huffman chosen over the RAW/RLE baseline only if it saves >=
-             * 1/2^ZXC_HUF_MARGIN_SHIFT. */
-            if (huf_total_size < baseline - (baseline >> ZXC_HUF_MARGIN_SHIFT))
-                enc_lit = ZXC_SECTION_ENCODING_HUFFMAN;
+            if (level >= ZXC_LEVEL_ULTRA) {
+                /* Space-speed: Huffman must beat the current winner's J,
+                 * paying its own decode tax over the copy path. */
+                const size_t best_j = (enc_lit == ZXC_SECTION_ENCODING_RLE)
+                                          ? rle_size + ZXC_SS_TAX(lit_c, ZXC_SS_PREM_RLE_Q8)
+                                          : lit_c;
+                if (huf_total_size + ZXC_SS_TAX(lit_c, ZXC_SS_PREM_HUF_Q8) < best_j)
+                    enc_lit = ZXC_SECTION_ENCODING_HUFFMAN;
+            } else {
+                const size_t baseline = (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : lit_c;
+                /* Huffman chosen over the RAW/RLE baseline only if it saves >=
+                 * 1/2^ZXC_HUF_MARGIN_SHIFT. */
+                if (huf_total_size < baseline - (baseline >> ZXC_HUF_MARGIN_SHIFT))
+                    enc_lit = ZXC_SECTION_ENCODING_HUFFMAN;
+            }
+        huf_lit_done:;
         }
     }
 
@@ -1666,22 +1691,35 @@ parse_done:;
                 }
                 bits += (uint64_t)len;
             }
-            streams_bytes += (size_t)((bits + 7) / 8);
+            const size_t sb = (size_t)((bits + 7) / 8);
+            if (s < ZXC_HUF_NUM_STREAMS - 1 && sb > 0xFFFFu) valid = 0; /* u16 header */
+            streams_bytes += sb;
         }
         if (valid) {
             huf_dict_total_size = (size_t)ZXC_HUF_STREAM_SIZES_HEADER_SIZE + streams_bytes;
 
             /* Choose dict-Huffman if it beats the current encoding. Against
              * block-Huffman it only needs to be smaller (both decode at the same
-             * speed); against RAW/RLE it must also clear the savings margin,
-             * since Huffman is slower to decode than a raw/RLE copy. */
-            const size_t baseline = (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) ? huf_total_size
-                                    : (enc_lit == ZXC_SECTION_ENCODING_RLE)   ? rle_size
-                                                                              : lit_c;
-            const size_t threshold = (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN)
-                                         ? baseline
-                                         : baseline - (baseline >> ZXC_HUF_MARGIN_SHIFT);
-            if (huf_dict_total_size < threshold) enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
+             * speed - at ULTRA their equal taxes cancel); against RAW/RLE it must
+             * also clear the margin (< ULTRA) or its decode tax (ULTRA), since
+             * Huffman is slower to decode than a raw/RLE copy. */
+            if (level >= ZXC_LEVEL_ULTRA) {
+                size_t best_j = lit_c;
+                if (enc_lit == ZXC_SECTION_ENCODING_RLE)
+                    best_j = rle_size + ZXC_SS_TAX(lit_c, ZXC_SS_PREM_RLE_Q8);
+                else if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN)
+                    best_j = huf_total_size + ZXC_SS_TAX(lit_c, ZXC_SS_PREM_HUF_Q8);
+                if (huf_dict_total_size + ZXC_SS_TAX(lit_c, ZXC_SS_PREM_HUF_Q8) < best_j)
+                    enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
+            } else {
+                const size_t baseline = (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) ? huf_total_size
+                                        : (enc_lit == ZXC_SECTION_ENCODING_RLE)   ? rle_size
+                                                                                  : lit_c;
+                const size_t threshold = (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN)
+                                             ? baseline
+                                             : baseline - (baseline >> ZXC_HUF_MARGIN_SHIFT);
+                if (huf_dict_total_size < threshold) enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
+            }
         }
     }
 
@@ -1699,6 +1737,7 @@ parse_done:;
                                        zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
             const size_t Q = (seq_c + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
             size_t streams_bytes = 0;
+            int tok_fits = 1;
             for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
                 size_t start = (size_t)s * Q;
                 size_t stop = start + Q;
@@ -1706,10 +1745,16 @@ parse_done:;
                 if (stop > seq_c) stop = seq_c;
                 uint64_t bits = 0;
                 for (size_t i = start; i < stop; i++) bits += tok_code_len[buf_tokens[i]];
-                streams_bytes += (size_t)((bits + 7) / 8);
+                const size_t sb = (size_t)((bits + 7) / 8);
+                if (s < ZXC_HUF_NUM_STREAMS - 1 && sb > 0xFFFFu) tok_fits = 0; /* u16 header */
+                streams_bytes += sb;
             }
             tok_huf_size = ZXC_HUF_HEADER_SIZE + streams_bytes;
-            if (tok_huf_size < (size_t)seq_c - ((size_t)seq_c >> ZXC_HUF_MARGIN_SHIFT))
+            if (!tok_fits) tok_huf_size = SIZE_MAX;
+            /* Space-speed J comparison (this path is ULTRA-only): the Huffman
+             * token section pays the same decode tax as Huffman literals. */
+            if (tok_huf_size != SIZE_MAX &&
+                tok_huf_size + ZXC_SS_TAX((size_t)seq_c, ZXC_SS_PREM_HUF_Q8) < (size_t)seq_c)
                 enc_tok = ZXC_SECTION_ENCODING_HUFFMAN;
         }
     }
