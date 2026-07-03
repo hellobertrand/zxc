@@ -598,10 +598,36 @@ extern "C" {
 #define ZXC_HUF_STREAM_SIZES_HEADER_SIZE ((int)((ZXC_HUF_NUM_STREAMS - 1) * sizeof(uint16_t)))
 /** @brief Total Huffman header size: packed code lengths + sub-stream sizes. */
 #define ZXC_HUF_HEADER_SIZE (ZXC_HUF_TABLE_SIZE + ZXC_HUF_STREAM_SIZES_HEADER_SIZE)
-/** @brief RLE margin shift: controls the threshold for choosing RLE over RAW. */
+/** @brief RLE margin shift: controls the threshold for choosing RLE over RAW
+ *         (levels < ::ZXC_LEVEL_ULTRA; ULTRA uses the space-speed tax below). */
 #define ZXC_RLE_MARGIN_SHIFT 5
-/** @brief Huffman margin shift: controls the threshold for choosing Huffman over RAW/RLE. */
+/** @brief Huffman margin shift: controls the threshold for choosing Huffman over
+ *         RAW/RLE (levels < ::ZXC_LEVEL_ULTRA; ULTRA uses the space-speed tax below). */
 #define ZXC_HUF_MARGIN_SHIFT 5
+
+/** @name Space-speed section selection (ZXC_LEVEL_ULTRA)
+ *
+ *  At ULTRA, each candidate section encoding is priced with a Lagrangian cost
+ *  `J = compressed_size + decode_tax` and the minimum-J candidate wins
+ *  (Kraken-style `J = R + lambda*D` with a linear per-byte decode-time model).
+ *  The tax charges the DECODE time a candidate adds over the RAW copy path,
+ *  expressed in bytes: `tax = (n_decoded_bytes * PREM) >> 8`.
+ *
+ *  - `PREM_HUF = 4` (= 1/64, 1.56% of the decoded bytes): the Huffman section
+ *    decoder runs ~15x slower than a raw copy (~0.5 ns/B premium at ~2 vs
+ *    ~30 GB/s), so this exchange rate accepts ~1 byte of size for ~30 ns of
+ *    decode time. Validated on silesia: vs the legacy 3.1% margin it gains
+ *    ~0.8 pt of ratio for ~3% decode.
+ *  - `PREM_RLE = 1` (= 0.39%): RLE decode is nearly copy-speed; only a token
+ *    tax to break ties toward RAW.
+ *
+ *  Levels < ULTRA keep the legacy fixed margins above so their output stays
+ *  byte-stable. @{ */
+#define ZXC_SS_PREM_RLE_Q8 1
+#define ZXC_SS_PREM_HUF_Q8 4
+/** @brief Decode tax of a candidate: `n` decoded bytes at premium `prem` (Q8). */
+#define ZXC_SS_TAX(n, prem_q8) (((size_t)(n) * (size_t)(prem_q8)) >> 8)
+/** @} */
 /** @brief Absolute floor below which Huffman cannot beat RAW even with
  *         zero-entropy literals after the @ref ZXC_HUF_MARGIN_SHIFT margin.
  *
