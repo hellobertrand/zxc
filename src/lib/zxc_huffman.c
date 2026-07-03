@@ -752,103 +752,89 @@ static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t 
     if (UNLIKELY(payload_size < (size_t)ZXC_HUF_STREAM_SIZES_HEADER_SIZE || n_literals == 0))
         return ZXC_ERROR_CORRUPT_DATA;
 
-    /* 1. Parse sub-stream sizes. */
-    const uint8_t* const sizes_hdr = payload;
-    const uint16_t s1 = zxc_le16(sizes_hdr + 0);
-    const uint16_t s2 = zxc_le16(sizes_hdr + 2);
-    const uint16_t s3 = zxc_le16(sizes_hdr + 4);
-
-    const size_t streams_total = payload_size - ZXC_HUF_STREAM_SIZES_HEADER_SIZE;
-    const size_t s123 = (size_t)s1 + (size_t)s2 + (size_t)s3;
+    /* Parse the 3 leading sub-stream sizes; the 4th is the remainder. */
+    const size_t s1 = zxc_le16(payload + 0);
+    const size_t s2 = zxc_le16(payload + 2);
+    const size_t s3 = zxc_le16(payload + 4);
+    const size_t streams_total = payload_size - (size_t)ZXC_HUF_STREAM_SIZES_HEADER_SIZE;
+    const size_t s123 = s1 + s2 + s3;
     if (UNLIKELY(s123 > streams_total)) return ZXC_ERROR_CORRUPT_DATA;
     const size_t s4 = streams_total - s123;
 
-    const uint8_t* const stream_base = payload + ZXC_HUF_STREAM_SIZES_HEADER_SIZE;
-    const size_t off[ZXC_HUF_NUM_STREAMS] = {0, s1, (size_t)s1 + s2, s123};
-    const size_t sz[ZXC_HUF_NUM_STREAMS] = {s1, s2, s3, s4};
+    const uint8_t* const base = payload + ZXC_HUF_STREAM_SIZES_HEADER_SIZE;
 
-    /* 4. Initialise 4 bit readers. */
-    zxc_bit_reader_t br[ZXC_HUF_NUM_STREAMS];
-    for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
-        zxc_br_init(&br[s], stream_base + off[s], sz[s]);
-    }
+    /* Slim per-stream hot state -- 3 values instead of the classic 6:
+     *   aN   decode accumulator (LSB-first bit window);
+     *   bpN  absolute bit pointer, (address * 8) + bit: replaces (ptr, nbits);
+     *   dN   output cursor.
+     * A refill is a fresh 8-byte load at bp>>3 shifted by bp&7 in [0,7]: it
+     * does not depend on the previous accumulator (no OR-in carry chain, and
+     * the shift count can never go negative). Guards live outside the hot
+     * loop: each outer iteration computes how many batches are safe on both
+     * the output side (dst headroom) and the input side (the 8-byte refill
+     * load must stay inside the payload), then runs them guard-free. */
+    const uint64_t base_bp = (uint64_t)(uintptr_t)base << 3;
+    uint64_t bp0 = base_bp;
+    uint64_t bp1 = base_bp + (s1 << 3);
+    uint64_t bp2 = base_bp + ((s1 + s2) << 3);
+    uint64_t bp3 = base_bp + (s123 << 3);
+    uint64_t a0 = 0, a1 = 0, a2 = 0, a3 = 0;
 
-    /* 5. 4-way interleaved multi-symbol decode. Each sub-stream owns a
-     * contiguous slice of dst: stream s covers literal indices
-     * [s*Q, min((s+1)*Q, N)). With Q = ceil(N/4) the first 3 streams have
-     * exactly Q symbols and stream 3 has `N - 3Q` symbols. */
+    /* Each sub-stream owns a contiguous dst slice: stream s covers literal
+     * indices [s*Q, min((s+1)*Q, N)) with Q = ceil(N/4). */
     const size_t Q = (n_literals + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
-    size_t s_count[ZXC_HUF_NUM_STREAMS];
-    uint8_t* s_dst[ZXC_HUF_NUM_STREAMS];
-    for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
-        size_t start = (size_t)s * Q;
-        size_t stop = start + Q;
-        if (start > n_literals) start = n_literals;
-        if (stop > n_literals) stop = n_literals;
-        s_count[s] = stop - start;
-        s_dst[s] = dst + start;
-    }
+    const size_t c1 = (Q < n_literals) ? Q : n_literals;
+    const size_t c2 = (2 * Q < n_literals) ? 2 * Q : n_literals;
+    const size_t c3 = (3 * Q < n_literals) ? 3 * Q : n_literals;
+    uint8_t* d0 = dst;
+    uint8_t* d1 = dst + c1;
+    uint8_t* d2 = dst + c2;
+    uint8_t* d3 = dst + c3;
+    const uint8_t* const dend0 = dst + c1;
+    const uint8_t* const dend1 = dst + c2;
+    const uint8_t* const dend2 = dst + c3;
+    const uint8_t* const dend3 = dst + n_literals;
 
-    /* Batched multi-symbol decode. Each ZXC_HUF_BATCH iterations consume
-     * <= ZXC_HUF_BATCH_BITS bits per stream, fitting under the 57-bit cap
-     * an 8-byte refill can guarantee.
-     *
-     * Each iter speculatively writes 2 bytes per stream and advances by 1
-     * or 2. If only 1 symbol was decoded, the spec byte is overwritten by
-     * the next iter, except at end-of-stream where it would corrupt the
-     * adjacent stream. The batched loop therefore requires
-     * ZXC_HUF_SAFE_MARGIN bytes of headroom per stream. */
+    /* Streams other than the last may over-read into the following stream's
+     * bytes near their end -- harmless: those bits are only ever consumed on
+     * corrupt input, output stays bounded by dend, and the block checksum
+     * catches the garbage. Memory safety only requires the 8-byte refill load
+     * to stay inside the payload (bp <= bp_load_max). */
+    if (streams_total >= sizeof(uint64_t)) {
+        const uint64_t bp_load_max =
+            ((uint64_t)(uintptr_t)(base + streams_total - sizeof(uint64_t))) << 3;
+        for (;;) {
+            /* Output budget: a batch advances a stream by at most 2*BATCH. */
+            size_t min_out = (size_t)(dend0 - d0);
+            size_t r = (size_t)(dend1 - d1);
+            if (r < min_out) min_out = r;
+            r = (size_t)(dend2 - d2);
+            if (r < min_out) min_out = r;
+            r = (size_t)(dend3 - d3);
+            if (r < min_out) min_out = r;
+            if (min_out < ZXC_HUF_SAFE_MARGIN) break;
 
-    uint8_t* d0 = s_dst[0];
-    uint8_t* d1 = s_dst[1];
-    uint8_t* d2 = s_dst[2];
-    uint8_t* d3 = s_dst[3];
+            /* Input budget: a batch consumes at most ZXC_HUF_BATCH_BITS bits
+             * per stream, refilled once at batch start. */
+            if (UNLIKELY(bp0 > bp_load_max || bp1 > bp_load_max || bp2 > bp_load_max ||
+                         bp3 > bp_load_max))
+                break; /* a refill would read past the payload */
+            uint64_t min_in = bp_load_max - bp0;
+            uint64_t rin = bp_load_max - bp1;
+            if (rin < min_in) min_in = rin;
+            rin = bp_load_max - bp2;
+            if (rin < min_in) min_in = rin;
+            rin = bp_load_max - bp3;
+            if (rin < min_in) min_in = rin;
 
-    const uint8_t* const dend0 = s_dst[0] + s_count[0];
-    const uint8_t* const dend1 = s_dst[1] + s_count[1];
-    const uint8_t* const dend2 = s_dst[2] + s_count[2];
-    const uint8_t* const dend3 = s_dst[3] + s_count[3];
+            size_t nb = 1 + (min_out - ZXC_HUF_SAFE_MARGIN) / (2 * ZXC_HUF_BATCH);
+            const size_t nb_in = (size_t)(min_in / ZXC_HUF_BATCH_BITS) + 1;
+            if (nb_in < nb) nb = nb_in;
 
-    /* Hoist all four bit-reader hot fields into locals. They live in
-     * registers for the full duration of the batched loop. */
-    uint64_t a0 = br[0].accum;
-    uint64_t a1 = br[1].accum;
-    uint64_t a2 = br[2].accum;
-    uint64_t a3 = br[3].accum;
-    int bb0 = br[0].bits;
-    int bb1 = br[1].bits;
-    int bb2 = br[2].bits;
-    int bb3 = br[3].bits;
-    const uint8_t* p0 = br[0].ptr;
-    const uint8_t* p1 = br[1].ptr;
-    const uint8_t* p2 = br[2].ptr;
-    const uint8_t* p3 = br[3].ptr;
-    const uint8_t* const e0 = br[0].end;
-    const uint8_t* const e1 = br[1].end;
-    const uint8_t* const e2 = br[2].end;
-    const uint8_t* const e3 = br[3].end;
-
-    /* Refill the bit accumulator with up to (ZXC_HUF_ACCUM_BITS - nbits) more
-     * bits read from src. Fast path reads 8 bytes at once (LE u64 load); slow
-     * path reads byte-by-byte while at least one byte of free room remains. */
-#define REFILL(accum, nbits, src, src_end)                                                   \
-    do {                                                                                     \
-        if (LIKELY((nbits) < ZXC_HUF_BATCH_BITS && (src) + sizeof(uint64_t) <= (src_end))) { \
-            (accum) |= zxc_le64(src) << (nbits);                                             \
-            const int _n = (ZXC_HUF_ACCUM_BITS - (nbits)) / CHAR_BIT;                        \
-            (src) += _n;                                                                     \
-            (nbits) += _n * CHAR_BIT;                                                        \
-        } else {                                                                             \
-            while ((nbits) <= ZXC_HUF_ACCUM_BITS - CHAR_BIT && (src) < (src_end)) {          \
-                (accum) |= ((uint64_t)*(src)++) << (nbits);                                  \
-                (nbits) += CHAR_BIT;                                                         \
-            }                                                                                \
-        }                                                                                    \
-    } while (0)
-
-    /* Decode one 11-bit window per stream. Always writes 2 bytes per stream
-     * (sym1 + spec sym2); advances d_s by 1 + n_extra; advances accum by
-     * len_total. */
+/* Decode one lookup per stream, phased (all loads, then advances, then
+ * stores) so the 4 independent LUT loads issue together and overlap. Each
+ * lookup speculatively writes 2 bytes and advances 1-2; ZXC_HUF_SAFE_MARGIN
+ * headroom keeps the spec write inside the stream's slice. */
 #define DECODE_ONE()                                           \
     do {                                                       \
         const uint32_t _e0 = table[ZXC_HUF_LUT_IDX(a0)].entry; \
@@ -863,6 +849,10 @@ static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t 
         a1 >>= _t1;                                            \
         a2 >>= _t2;                                            \
         a3 >>= _t3;                                            \
+        bp0 += (uint64_t)_t0;                                  \
+        bp1 += (uint64_t)_t1;                                  \
+        bp2 += (uint64_t)_t2;                                  \
+        bp3 += (uint64_t)_t3;                                  \
         zxc_store_le16(d0, (uint16_t)_e0);                     \
         zxc_store_le16(d1, (uint16_t)_e1);                     \
         zxc_store_le16(d2, (uint16_t)_e2);                     \
@@ -871,49 +861,56 @@ static int zxc_huf_decode_streams(const uint8_t* RESTRICT payload, const size_t 
         d1 += 1 + (int)((_e1 >> 24) & 1);                      \
         d2 += 1 + (int)((_e2 >> 24) & 1);                      \
         d3 += 1 + (int)((_e3 >> 24) & 1);                      \
-        bb0 -= _t0;                                            \
-        bb1 -= _t1;                                            \
-        bb2 -= _t2;                                            \
-        bb3 -= _t3;                                            \
     } while (0)
 
-    while ((size_t)(dend0 - d0) >= ZXC_HUF_SAFE_MARGIN &&
-           (size_t)(dend1 - d1) >= ZXC_HUF_SAFE_MARGIN &&
-           (size_t)(dend2 - d2) >= ZXC_HUF_SAFE_MARGIN &&
-           (size_t)(dend3 - d3) >= ZXC_HUF_SAFE_MARGIN) {
-        REFILL(a0, bb0, p0, e0);
-        REFILL(a1, bb1, p1, e1);
-        REFILL(a2, bb2, p2, e2);
-        REFILL(a3, bb3, p3, e3);
+            while (nb--) {
+                a0 = zxc_le64((const uint8_t*)(uintptr_t)(bp0 >> 3)) >> ((unsigned)bp0 & 7u);
+                a1 = zxc_le64((const uint8_t*)(uintptr_t)(bp1 >> 3)) >> ((unsigned)bp1 & 7u);
+                a2 = zxc_le64((const uint8_t*)(uintptr_t)(bp2 >> 3)) >> ((unsigned)bp2 & 7u);
+                a3 = zxc_le64((const uint8_t*)(uintptr_t)(bp3 >> 3)) >> ((unsigned)bp3 & 7u);
 
-        DECODE_ONE();
-        DECODE_ONE();
-        DECODE_ONE();
-        DECODE_ONE();
-        DECODE_ONE();
+                DECODE_ONE();
+                DECODE_ONE();
+                DECODE_ONE();
+                DECODE_ONE();
+                DECODE_ONE();
+            }
+        }
+#undef DECODE_ONE
     }
 
-    /* Per-stream scalar tail (<= ZXC_HUF_SAFE_MARGIN - 1 = 9 symbols per
-     * stream). Single-symbol decode using the same 2048-entry table,
-     * we read sym1 + len1 only and advance by 1 byte, no spec write. */
-#define TAIL_ONE(accum, nbits, src, src_end, dst)                \
-    do {                                                         \
-        REFILL(accum, nbits, src, src_end);                      \
-        const uint32_t _e = table[ZXC_HUF_LUT_IDX(accum)].entry; \
-        *(dst)++ = (uint8_t)_e;                                  \
-        const int _l1 = (int)((_e >> 16) & 0xF);                 \
-        (accum) >>= _l1;                                         \
-        (nbits) -= _l1;                                          \
+/* Scalar per-stream tail (cold): single-symbol decode with byte-exact refills
+ * bounded by the stream's logical end; no speculative write. */
+#define TAIL_STREAM(bp, d, dend, logical_end)                               \
+    do {                                                                    \
+        const uint8_t* _p = (const uint8_t*)(uintptr_t)((bp) >> 3);         \
+        const uint8_t* const _pend = (logical_end);                         \
+        int _drop = (int)((bp) & 7u);                                       \
+        uint64_t _acc = 0;                                                  \
+        int _nbits = 0;                                                     \
+        while ((d) < (dend)) {                                              \
+            while (_nbits <= ZXC_HUF_ACCUM_BITS - CHAR_BIT && _p < _pend) { \
+                _acc |= ((uint64_t)*_p++) << _nbits;                        \
+                _nbits += CHAR_BIT;                                         \
+            }                                                               \
+            if (_drop) { /* initial mid-byte bit offset, applied once */    \
+                _acc >>= _drop;                                             \
+                _nbits -= _drop;                                            \
+                _drop = 0;                                                  \
+            }                                                               \
+            const uint32_t _e = table[ZXC_HUF_LUT_IDX(_acc)].entry;         \
+            *(d)++ = (uint8_t)_e;                                           \
+            const int _l1 = (int)((_e >> 16) & 0xF);                        \
+            _acc >>= _l1;                                                   \
+            _nbits -= _l1;                                                  \
+        }                                                                   \
     } while (0)
 
-    while (d0 < dend0) TAIL_ONE(a0, bb0, p0, e0, d0);
-    while (d1 < dend1) TAIL_ONE(a1, bb1, p1, e1, d1);
-    while (d2 < dend2) TAIL_ONE(a2, bb2, p2, e2, d2);
-    while (d3 < dend3) TAIL_ONE(a3, bb3, p3, e3, d3);
-
-#undef TAIL_ONE
-#undef DECODE_ONE
-#undef REFILL
+    TAIL_STREAM(bp0, d0, dend0, base + s1);
+    TAIL_STREAM(bp1, d1, dend1, base + s1 + s2);
+    TAIL_STREAM(bp2, d2, dend2, base + s123);
+    TAIL_STREAM(bp3, d3, dend3, base + s123 + s4);
+#undef TAIL_STREAM
     return ZXC_OK;
 }
 

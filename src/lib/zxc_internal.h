@@ -582,20 +582,12 @@ extern "C" {
  *         ::ZXC_LEVEL_ULTRA): 8 bits keeps multi-symbol decode dense and fast. */
 #define ZXC_HUF_MAX_CODE_LEN_DENSITY 8
 /** @brief Decoder LUT width: each lookup consumes this many bits and yields
- *         1 or 2 symbols. */
+ *         1 or 2 symbols.
+ *         Must be >= ::ZXC_HUF_MAX_CODE_LEN_ULTRA so a single code can fit in
+ *         one lookup window. */
 #define ZXC_HUF_LOOKUP_BITS 11
-_Static_assert(ZXC_HUF_MAX_CODE_LEN_ULTRA <= ZXC_HUF_LOOKUP_BITS,
-               "a Huffman code longer than the lookup window underflows the bit reader");
 /** @brief Number of entries in the multi-symbol decoder lookup table. */
 #define ZXC_HUF_DEC_TABLE_SIZE (1U << ZXC_HUF_LOOKUP_BITS)
-/** @brief Encoder Huffman code-length cap for a compression @p level: levels below
- *         ::ZXC_LEVEL_ULTRA use ::ZXC_HUF_MAX_CODE_LEN_DENSITY, ::ZXC_LEVEL_ULTRA uses
- *         the full ::ZXC_HUF_MAX_CODE_LEN_ULTRA ceiling (denser codes, slower decode).
- *         Applies to both literal and token Huffman; the decoder always supports the
- *         ceiling, so lower-level streams decode unchanged. */
-static inline int zxc_huf_enc_max_code_len(const int level) {
-    return (level >= ZXC_LEVEL_ULTRA) ? ZXC_HUF_MAX_CODE_LEN_ULTRA : ZXC_HUF_MAX_CODE_LEN_DENSITY;
-}
 /** @brief Alphabet size: one entry per possible byte value. */
 #define ZXC_HUF_NUM_SYMBOLS 256
 /** @brief Interleaved bit-stream count for parallel decoding. */
@@ -641,6 +633,15 @@ static inline int zxc_huf_enc_max_code_len(const int level) {
 #define ZXC_HUF_LUT_IDX(a) ((size_t)((a) & ZXC_HUF_TBL_MASK))
 #endif
 /** @} */
+
+/** @brief Encoder Huffman code-length cap for a compression @p level: levels below
+ *         ::ZXC_LEVEL_ULTRA use ::ZXC_HUF_MAX_CODE_LEN_DENSITY, ::ZXC_LEVEL_ULTRA uses
+ *         the full ::ZXC_HUF_MAX_CODE_LEN_ULTRA ceiling (denser codes, slower decode).
+ *         Applies to both literal and token Huffman; the decoder always supports the
+ *         ceiling, so lower-level streams decode unchanged. */
+static inline int zxc_huf_enc_max_code_len(const int level) {
+    return (level >= ZXC_LEVEL_ULTRA) ? ZXC_HUF_MAX_CODE_LEN_ULTRA : ZXC_HUF_MAX_CODE_LEN_DENSITY;
+}
 
 /**
  * @brief Multi-symbol decoder lookup table entry. Bit layout:
@@ -793,7 +794,7 @@ typedef struct {
  * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
-    if (level >= ZXC_LEVEL_ULTRA) return (zxc_lz77_params_t){256, 256, 0, 0, 0, 1, 8};
+    if (level >= ZXC_LEVEL_ULTRA) return (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8};
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
     // step_shift
     static const zxc_lz77_params_t table[7] = {
