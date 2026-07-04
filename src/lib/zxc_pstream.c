@@ -684,7 +684,6 @@ struct zxc_dstream_s {
     int inner_initialized;
     size_t block_size;
     int file_has_checksum;
-    uint8_t format_version; /**< archive header version byte (v6/v7 enc semantics) */
 
     uint8_t scratch[32];
     size_t scratch_used;
@@ -903,7 +902,6 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     if (UNLIKELY(rc != ZXC_OK)) return ds_set_error(ds, rc);  // LCOV_EXCL_LINE
     ds->block_size = bs;
     ds->file_has_checksum = has_csum;
-    ds->format_version = ds->scratch[4];
 
     /* Allocate payload + decoded buffers now that block_size is known. */
     const uint64_t pb = zxc_compress_block_bound(ds->block_size);
@@ -922,7 +920,6 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
                                ds->file_has_checksum && ds->opts.checksum_enabled, 0) != ZXC_OK)) {
         return ds_set_error(ds, ZXC_ERROR_MEMORY);
     }
-    ds->inner.format_version = ds->format_version;
     // LCOV_EXCL_STOP
     ds->inner_initialized = 1;
 

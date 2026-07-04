@@ -684,7 +684,7 @@ Community-maintained bindings:
 
 The ZXC on-disk wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format version 7), so any third party can build an independent, interoperable decoder.
 
-> **Upgrading?** The current format is **v7** (it relaxed the Huffman code-length limit from 8 to 11 bits at level 7 and adds Huffman-coded tokens). v7 tools read **both v6 and v7** archives — no conversion needed. The earlier v5→v6 change was a deliberate break; v6+ tools reject v5 archives (see [`docs/MIGRATION.md`](docs/MIGRATION.md)).
+> **Upgrading?** The current format is **v7** — PivCo entropy sections (faster decode), Huffman-coded tokens and 11-bit codes at level 7. Like the v5→v6 change, this is a deliberate clean break: v7 tools reject v6 archives (see [`docs/MIGRATION.md`](docs/MIGRATION.md) to convert).
 
 Two complementary, byte-frozen suites guard that format:
 

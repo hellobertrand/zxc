@@ -1,7 +1,7 @@
 # ZXC Compressed File Format (Technical Specification)
 
 **Date**: June 2026
-**Format Version**: 7 (decoders also accept version 6)
+**Format Version**: 7
 
 This document describes the on-disk binary format of a ZXC compressed file.
 It formalizes the current reference implementation of format version **7**.
@@ -57,8 +57,8 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): encoders write `7`. Decoders accept `6` and `7`
-  and reject any other value (`ZXC_ERROR_BAD_VERSION`).
+- **Format Version** (`u8`): `7`. Any other value is rejected
+  (`ZXC_ERROR_BAD_VERSION`); v7 is a clean break with v6, like v6 was with v5.
 - **Chunk Size Code** (`u8`):
   - The value is an **exponent** in the range `[12, 21]`: `block_size = 2^code`.
     - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.

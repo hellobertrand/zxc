@@ -324,7 +324,7 @@ extern "C" {
  *  are rejected with ZXC_ERROR_BAD_VERSION. v7 relaxed the Huffman code-length
  *  limit from 8 to 11 bits (level 7 / ULTRA) and adds Huffman-coded tokens; v6
  *  archives (code_len <= 8, no token Huffman) stay decodable. */
-#define ZXC_FILE_FORMAT_VERSION_MIN 6
+#define ZXC_FILE_FORMAT_VERSION_MIN 7
 
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
@@ -568,12 +568,12 @@ extern "C" {
  *    each covering an equal share of the literal indices (the last absorbs
  *    the remainder).
  *
- *  The decoder uses a single lookup table of @c ZXC_HUF_DEC_TABLE_SIZE entries
- *  (width @c ZXC_HUF_LOOKUP_BITS) that yields 1 or 2 symbols per lookup,
+ *  Sections use the PivCo layout: level-ordered branch bits decoded by
+ *  data-parallel merges (see zxc_huffman.c).
  *  feeding a `ZXC_HUF_NUM_STREAMS`-way interleaved hot loop.
  *  @{ */
 /** @brief Maximum Huffman code length, in bits: the absolute ceiling the decoder
- *         LUT and on-wire validation support. Equal to ::ZXC_HUF_LOOKUP_BITS so a
+ *         on-wire validation supports.
  *         single code can exactly fill one lookup window; it must never exceed it
  *         (a longer code would underflow the bit reader's refill). The encoder
  *         caps codes per level via ::zxc_huf_enc_max_code_len. */
@@ -581,23 +581,10 @@ extern "C" {
 /** @brief Encoder code-length cap for levels up to ::ZXC_LEVEL_DENSITY (below
  *         ::ZXC_LEVEL_ULTRA): 8 bits keeps multi-symbol decode dense and fast. */
 #define ZXC_HUF_MAX_CODE_LEN_DENSITY 8
-/** @brief Decoder LUT width: each lookup consumes this many bits and yields
- *         1 or 2 symbols.
- *         Must be >= ::ZXC_HUF_MAX_CODE_LEN_ULTRA so a single code can fit in
- *         one lookup window. */
-#define ZXC_HUF_LOOKUP_BITS 11
-/** @brief Number of entries in the multi-symbol decoder lookup table. */
-#define ZXC_HUF_DEC_TABLE_SIZE (1U << ZXC_HUF_LOOKUP_BITS)
 /** @brief Alphabet size: one entry per possible byte value. */
 #define ZXC_HUF_NUM_SYMBOLS 256
 /** @brief Interleaved bit-stream count for parallel decoding. */
 #define ZXC_HUF_NUM_STREAMS 4
-/** @brief Sub-stream sizes header: `(ZXC_HUF_NUM_STREAMS - 1)` little-endian
- *         @c uint16_t values; the last sub-stream size is derived from the
- *         enclosing section length. */
-#define ZXC_HUF_STREAM_SIZES_HEADER_SIZE ((int)((ZXC_HUF_NUM_STREAMS - 1) * sizeof(uint16_t)))
-/** @brief Total Huffman header size: packed code lengths + sub-stream sizes. */
-#define ZXC_HUF_HEADER_SIZE (ZXC_HUF_TABLE_SIZE + ZXC_HUF_STREAM_SIZES_HEADER_SIZE)
 /** @brief RLE margin shift: controls the threshold for choosing RLE over RAW
  *         (levels < ::ZXC_LEVEL_ULTRA; ULTRA uses the space-speed tax below). */
 #define ZXC_RLE_MARGIN_SHIFT 5
@@ -645,31 +632,10 @@ static inline int zxc_ss_prem_huf_q8(const int level) {
  *
  *         Derivation: the call site requires `huf_total < baseline * (M-1)/M`
  *         with `M = 1 << ZXC_HUF_MARGIN_SHIFT`. */
-#define ZXC_HUF_MIN_LITERALS                                                                   \
-    ((ZXC_HUF_HEADER_SIZE * (1 << ZXC_HUF_MARGIN_SHIFT) + ((1 << ZXC_HUF_MARGIN_SHIFT) - 2)) / \
+#define ZXC_HUF_MIN_LITERALS                                                                 \
+    (((ZXC_HUF_TABLE_SIZE + 6) /* historical margin floor */ * (1 << ZXC_HUF_MARGIN_SHIFT) + \
+      ((1 << ZXC_HUF_MARGIN_SHIFT) - 2)) /                                                   \
      ((1 << ZXC_HUF_MARGIN_SHIFT) - 1))
-/** @brief Width of the decoder bit accumulator, in bits
- *         (`sizeof(uint64_t) * CHAR_BIT`). */
-#define ZXC_HUF_ACCUM_BITS 64
-/** @brief Decoder batch size: lookups per stream between two refills. */
-#define ZXC_HUF_BATCH 5
-/** @brief Worst-case bits consumed per stream per batch. Must stay <= 57 so
- *         that an 8-byte refill always brings the bit accumulator back to
- *         >= 56 bits before the next batch. */
-#define ZXC_HUF_BATCH_BITS (ZXC_HUF_BATCH * ZXC_HUF_LOOKUP_BITS)
-/** @brief Mask for indexing into the multi-symbol decoder lookup table. */
-#define ZXC_HUF_TBL_MASK ((uint64_t)(ZXC_HUF_DEC_TABLE_SIZE - 1))
-/** @brief Per-stream output headroom required to enter the batched fast loop:
- *         each iteration speculatively writes 2 bytes per stream and runs
- *         @c ZXC_HUF_BATCH iterations before re-checking the bound. */
-#define ZXC_HUF_SAFE_MARGIN ((size_t)(2 * ZXC_HUF_BATCH))
-/** @brief Decode-table index: the low @ref ZXC_HUF_LOOKUP_BITS of the bit
- *         accumulator. */
-#if defined(__BMI2__) && !defined(ZXC_DISABLE_SIMD)
-#define ZXC_HUF_LUT_IDX(a) ((size_t)_bzhi_u32((uint32_t)(a), ZXC_HUF_LOOKUP_BITS))
-#else
-#define ZXC_HUF_LUT_IDX(a) ((size_t)((a) & ZXC_HUF_TBL_MASK))
-#endif
 /** @} */
 
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below
@@ -680,18 +646,6 @@ static inline int zxc_ss_prem_huf_q8(const int level) {
 static inline int zxc_huf_enc_max_code_len(const int level) {
     return (level >= ZXC_LEVEL_ULTRA) ? ZXC_HUF_MAX_CODE_LEN_ULTRA : ZXC_HUF_MAX_CODE_LEN_DENSITY;
 }
-
-/**
- * @brief Multi-symbol decoder lookup table entry. Bit layout:
- *   bits  0..7   sym1       - first decoded symbol
- *   bits  8..15  sym2       - second decoded symbol (junk if n_extra == 0)
- *   bits 16..19  len1       - bit length of sym1's code (1..8)
- *   bit  24      n_extra    - 0 if 1 symbol, 1 if 2 symbols decoded
- *   bits 28..31  len_total  - total bits consumed (1..11)
- */
-typedef struct {
-    uint32_t entry;
-} zxc_huf_dec_entry_t;
 
 /**
  * @brief Boundary package-merge work item.
@@ -941,21 +895,6 @@ typedef struct {
 typedef struct {
     uint64_t sizes; /**< Packed sizes: compressed size (low 32 bits) | raw size (high 32 bits). */
 } zxc_section_desc_t;
-
-/**
- * @struct zxc_bit_reader_t
- * @brief Internal bit reader structure for ZXC compression/decompression.
- *
- * This structure maintains the state of the bit stream reading operation.
- * It buffers bits from the input byte stream into an accumulator to allow
- * reading variable-length bit sequences.
- */
-typedef struct {
-    const uint8_t* ptr; /**< Pointer to the current position in the input byte stream. */
-    const uint8_t* end; /**< Pointer to the end of the input byte stream. */
-    uint64_t accum;     /**< Bit accumulator holding buffered bits (64-bit buffer). */
-    int bits;           /**< Number of valid bits currently in the accumulator. */
-} zxc_bit_reader_t;
 
 /**
  * ============================================================================
@@ -1360,32 +1299,6 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_le_partial(const uint8_t* p, size_t n) {
 }
 
 /**
- * @brief Initializes a bit reader structure.
- *
- * Sets up the internal state of the bit reader to read from the specified
- * source buffer.
- *
- * @param[out] br Pointer to the bit reader structure to initialize.
- * @param[in] src Pointer to the source buffer containing the data to read.
- * @param[in] size The size of the source buffer in bytes.
- */
-static ZXC_ALWAYS_INLINE void zxc_br_init(zxc_bit_reader_t* RESTRICT br,
-                                          const uint8_t* RESTRICT src, const size_t size) {
-    br->ptr = src;
-    br->end = src + size;
-    // Safety check: ensure we have at least 8 bytes to fill the accumulator
-    if (UNLIKELY(size < sizeof(uint64_t))) {
-        br->accum = zxc_le_partial(src, size);
-        br->ptr += size;
-        br->bits = (int)(size * CHAR_BIT);
-    } else {
-        br->accum = zxc_le64(br->ptr);
-        br->ptr += sizeof(uint64_t);
-        br->bits = sizeof(uint64_t) * CHAR_BIT;
-    }
-}
-
-/**
  * @brief Writes a generic header and section descriptors to a destination
  * buffer.
  *
@@ -1480,72 +1393,6 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  */
 int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
                                void* RESTRICT scratch, int max_code_len);
-
-/**
- * @brief Encode the literal stream into a Huffman section payload.
- *
- * Writes the 128-byte length header, the 6-byte sub-stream size table and
- * the 4 concatenated LSB-first bit-streams.
- *
- * @param[in]  literals   Source literal bytes (must not alias `dst`).
- * @param[in]  n_literals Number of source bytes.
- * @param[in]  code_len   Per-symbol code lengths produced by
- *                        ::zxc_huf_build_code_lengths.
- * @param[out] dst        Destination buffer for the section payload.
- * @param[in]  dst_cap    Capacity of @p dst in bytes.
- * @return Total bytes written on success, negative `zxc_error_t` code on failure.
- */
-int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
-                           const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
-                           const size_t dst_cap);
-
-/**
- * @brief Decode a Huffman literal section payload of `payload_size` bytes.
- *
- * Writes exactly `n_literals` decoded bytes into @p dst.
- *
- * @param[in]  payload      Section payload (header + 4 sub-streams).
- * @param[in]  payload_size Total payload length in bytes.
- * @param[out] dst          Destination buffer (must not alias @p payload).
- * @param[in]  n_literals   Expected number of decoded bytes.
- * @return `ZXC_OK` on success, negative `zxc_error_t` code on failure.
- */
-int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
-                           uint8_t* RESTRICT dst, const size_t n_literals);
-
-/**
- * @brief Encode a Huffman literal section using externally supplied code
- *        lengths, WITHOUT the 128-byte lengths header (shared dictionary
- *        table). Output: 6-byte sub-stream sizes header + 4 sub-streams.
- *
- * @return Bytes written on success, negative `zxc_error_t` code on failure
- *         (including `ZXC_ERROR_CORRUPT_DATA` if a literal has no code).
- */
-int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n_literals,
-                                const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
-                                const size_t dst_cap);
-
-/**
- * @brief Decode a Huffman literal section that carries no lengths header,
- *        using a prebuilt decode table (shared dictionary table).
- *
- * @param[in]  payload      Section payload (6-byte sizes header + 4 sub-streams).
- * @param[in]  payload_size Total payload length in bytes.
- * @param[out] dst          Destination buffer (must not alias @p payload).
- * @param[in]  n_literals   Expected number of decoded bytes.
- * @param[in]  table        Prebuilt @ref ZXC_HUF_DEC_TABLE_SIZE-entry decode table.
- * @return `ZXC_OK` on success, negative `zxc_error_t` code on failure.
- */
-int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
-                                uint8_t* RESTRICT dst, const size_t n_literals,
-                                const zxc_huf_dec_entry_t* RESTRICT table);
-
-/**
- * @brief Build the @ref ZXC_HUF_DEC_TABLE_SIZE-entry decode table from per-symbol
- *        code lengths. Validates Kraft equality.
- * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` on invalid lengths.
- */
-int zxc_huf_build_dec_table(const uint8_t* RESTRICT code_len, zxc_huf_dec_entry_t* RESTRICT table);
 
 /**
  * @brief Pack per-symbol code lengths into the 128-byte (4-bit nibble) header.
@@ -1644,37 +1491,32 @@ typedef struct {
     uint8_t* literals;       /**< Buffer for literal bytes. */
 
     /* Cold zone: configuration / scratch / resizeable. */
-    uint8_t* lit_buffer;                 /**< Scratch buffer for literals (RLE / Huffman). */
-    size_t lit_buffer_cap;               /**< Current capacity of the scratch buffer. */
-    uint8_t* work_buf;                   /**< Padded scratch buffer for buffer-API decompression. */
-    size_t work_buf_cap;                 /**< Capacity of the work buffer. */
-    uint8_t* tok_buffer;                 /**< Decode scratch for a Huffman-coded GLO token
-                                              section (enc_litlen == HUFFMAN); NULL on compress. */
-    size_t tok_buffer_cap;               /**< Capacity of tok_buffer in bytes. */
-    uint8_t* pivco_scratch;              /**< Level ping-pong scratch for PivCo decode. */
-    size_t pivco_scratch_cap;            /**< Capacity of pivco_scratch in bytes. */
-    uint8_t format_version;              /**< Archive format version being decoded (0 = v6
-                                          *   semantics; set from the file header byte). */
-    uint8_t* opt_scratch;                /**< Optimal-parser DP scratch (level >= 6 only,
-                                              lazy-allocated, packs dp/parent_len/parent_off/actions).
-                                              Also reused as transient scratch for the
-                                              length-limited Huffman code-length builder. */
-    size_t opt_scratch_cap;              /**< Current capacity of opt_scratch in bytes. */
-    int checksum_enabled;                /**< 1 if checksum calculation/verification is enabled. */
-    int compression_level;               /**< Compression level. */
-    size_t dict_size;                    /**< Dictionary prefill size (0 = no dictionary). */
-    uint8_t* dict_buffer;                /**< [dict | data] concat scratch carved from memory_block
-                                              when dict_size > 0 (NULL otherwise). */
-    size_t dict_buffer_cap;              /**< Capacity of dict_buffer in bytes (0 = none). */
-    const uint8_t* dict_huf_lengths;     /**< Shared dictionary literal table: 128-byte
-                                     packed code-lengths header (NULL = none). Set via
-                                     zxc_cctx_attach_dict_huf; caller-owned memory. */
-    zxc_huf_dec_entry_t* dict_huf_table; /**< Decode table built once from
-                                 dict_huf_lengths; carved from memory_block when
-                                 mode == 0 and dict_size > 0 (NULL otherwise). */
-    uint32_t* lit_freq_acc;              /**< Trainer hook: when non-NULL, the GLO encoder
-                                              accumulates post-LZ literal byte frequencies here
-                                              (256 entries). NULL outside dictionary training. */
+    uint8_t* lit_buffer;             /**< Scratch buffer for literals (RLE / Huffman). */
+    size_t lit_buffer_cap;           /**< Current capacity of the scratch buffer. */
+    uint8_t* work_buf;               /**< Padded scratch buffer for buffer-API decompression. */
+    size_t work_buf_cap;             /**< Capacity of the work buffer. */
+    uint8_t* tok_buffer;             /**< Decode scratch for a Huffman-coded GLO token
+                                          section (enc_litlen == HUFFMAN); NULL on compress. */
+    size_t tok_buffer_cap;           /**< Capacity of tok_buffer in bytes. */
+    uint8_t* pivco_scratch;          /**< Level ping-pong scratch for PivCo decode. */
+    size_t pivco_scratch_cap;        /**< Capacity of pivco_scratch in bytes. */
+    uint8_t* opt_scratch;            /**< Optimal-parser DP scratch (level >= 6 only,
+                                          lazy-allocated, packs dp/parent_len/parent_off/actions).
+                                          Also reused as transient scratch for the
+                                          length-limited Huffman code-length builder. */
+    size_t opt_scratch_cap;          /**< Current capacity of opt_scratch in bytes. */
+    int checksum_enabled;            /**< 1 if checksum calculation/verification is enabled. */
+    int compression_level;           /**< Compression level. */
+    size_t dict_size;                /**< Dictionary prefill size (0 = no dictionary). */
+    uint8_t* dict_buffer;            /**< [dict | data] concat scratch carved from memory_block
+                                          when dict_size > 0 (NULL otherwise). */
+    size_t dict_buffer_cap;          /**< Capacity of dict_buffer in bytes (0 = none). */
+    const uint8_t* dict_huf_lengths; /**< Shared dictionary literal table: 128-byte
+                                          packed code-lengths header (NULL = none). Set via
+                                          zxc_cctx_attach_dict_huf; caller-owned memory. */
+    uint32_t* lit_freq_acc;          /**< Trainer hook: when non-NULL, the GLO encoder
+                                          accumulates post-LZ literal byte frequencies here
+                                          (256 entries). NULL outside dictionary training. */
 
     /* Block-size derived parameters (computed once at init). */
     size_t chunk_size;    /**< Effective block size in bytes. */
@@ -1710,7 +1552,7 @@ int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, cons
  * Stores @p lengths (128-byte packed code-lengths header, caller-owned, must
  * outlive the context's use) and, on decompression contexts created with
  * @c dict_size > 0, builds the decode table once into the workspace-carved
- * @c dict_huf_table. A NULL @p lengths is a no-op.
+ * validated packed lengths. A NULL @p lengths is a no-op.
  *
  * @return @ref ZXC_OK on success, @ref ZXC_ERROR_CORRUPT_DATA if the lengths
  *         header is structurally invalid (bad nibble, Kraft inequality).
