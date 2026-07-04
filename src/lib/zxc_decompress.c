@@ -452,8 +452,15 @@ static ZXC_NOINLINE __attribute__((cold)) int zxc_decode_tok_pivco(zxc_cctx_t* R
 
 static ZXC_NOINLINE int zxc_decode_block_glo_entropy(const zxc_cctx_t* RESTRICT ctx,
                                                      const uint8_t* RESTRICT src, size_t src_size,
-                                                     uint8_t* RESTRICT dst, size_t dst_capacity,
-                                                     int safe, int has_dict);
+                                                     uint8_t* RESTRICT dst, size_t dst_capacity);
+static ZXC_NOINLINE int zxc_decode_block_glo_entropy_dict(const zxc_cctx_t* RESTRICT ctx,
+                                                          const uint8_t* RESTRICT src,
+                                                          size_t src_size, uint8_t* RESTRICT dst,
+                                                          size_t dst_capacity);
+static ZXC_NOINLINE int zxc_decode_block_glo_entropy_safe(const zxc_cctx_t* RESTRICT ctx,
+                                                          const uint8_t* RESTRICT src,
+                                                          size_t src_size, uint8_t* RESTRICT dst,
+                                                          size_t dst_capacity);
 
 static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
@@ -469,6 +476,18 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
 
     if (UNLIKELY(zxc_read_glo_header_and_desc(src, src_size, &gh, desc) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
+
+    /* Entropy-coded tokens (level 7): tail-call the dedicated instantiation
+     * BEFORE any section work (it restarts from the header, so only the
+     * header parse above is duplicated). Constant flags per instantiation:
+     * exactly one call survives; the RAW-token fast path below keeps t_ptr on
+     * a single provenance (a joined pointer cost ~4% at levels 3-5). */
+    if (!tok_entropy && UNLIKELY(gh.enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN)) {
+        if (safe) return zxc_decode_block_glo_entropy_safe(ctx, src, src_size, dst, dst_capacity);
+        if (has_dict)
+            return zxc_decode_block_glo_entropy_dict(ctx, src, src_size, dst, dst_capacity);
+        return zxc_decode_block_glo_entropy(ctx, src, src_size, dst, dst_capacity);
+    }
 
     const uint8_t* p_data =
         src + ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
@@ -623,9 +642,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
      * RAW path (bisected to the token-entropy commit). */
     const uint8_t* RESTRICT t_ptr;
     if (!tok_entropy) {
-        if (UNLIKELY(gh.enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN))
-            return zxc_decode_block_glo_entropy(ctx, src, src_size, dst, dst_capacity, safe,
-                                                has_dict);
+        /* enc_litlen == 2 was re-routed right after the header parse. */
         if (UNLIKELY(sz_tokens < gh.n_sequences)) return ZXC_ERROR_CORRUPT_DATA;
         t_ptr = p_curr;
     } else {
@@ -1872,9 +1889,24 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
 static ZXC_NOINLINE int zxc_decode_block_glo_entropy(const zxc_cctx_t* RESTRICT ctx,
                                                      const uint8_t* RESTRICT src,
                                                      const size_t src_size, uint8_t* RESTRICT dst,
-                                                     const size_t dst_capacity, const int safe,
-                                                     const int has_dict) {
-    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, safe, has_dict, 1);
+                                                     const size_t dst_capacity) {
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 0, 1);
+}
+
+static ZXC_NOINLINE int zxc_decode_block_glo_entropy_dict(const zxc_cctx_t* RESTRICT ctx,
+                                                          const uint8_t* RESTRICT src,
+                                                          const size_t src_size,
+                                                          uint8_t* RESTRICT dst,
+                                                          const size_t dst_capacity) {
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 1, 1);
+}
+
+static ZXC_NOINLINE int zxc_decode_block_glo_entropy_safe(const zxc_cctx_t* RESTRICT ctx,
+                                                          const uint8_t* RESTRICT src,
+                                                          const size_t src_size,
+                                                          uint8_t* RESTRICT dst,
+                                                          const size_t dst_capacity) {
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 1, 0, 1);
 }
 
 /**
