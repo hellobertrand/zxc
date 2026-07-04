@@ -771,10 +771,9 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         tb.val[0] = vld1q_u8(L + lp);
         tb.val[1] = vld1q_u8(R + rp);
         const int pc0 = zxc_pivco_popcnt32(b0);
-        const int8x8_t ia = vld1_s8(zxc_pivco_idxa[b0]);
-        const int8x8_t ib = vadd_s8(vld1_s8(zxc_pivco_idxb[b1]), vdup_n_s8((int8_t)pc0));
-        const uint8x16_t ix = vreinterpretq_u8_s8(vabsq_s8(vcombine_s8(ia, ib)));
-        vst1q_u8(out + i, vqtbl2q_u8(tb, ix));
+        const uint8x8_t ia = vld1_u8(zxc_pivco_idxa_u8[b0]);
+        const uint8x8_t ib = vld1_u8(zxc_pivco_idxb_pre[pc0][b1]);
+        vst1q_u8(out + i, vqtbl2q_u8(tb, vcombine_u8(ia, ib)));
         const int pc = pc0 + zxc_pivco_popcnt32(b1);
         rp += (size_t)pc;
         lp += (size_t)(16 - pc);
@@ -826,16 +825,14 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         const __m128i vrA = _mm_loadu_si128((const __m128i*)(const void*)(R + rp));
         const __m128i vlB = _mm_loadu_si128((const __m128i*)(const void*)(L + lpB));
         const __m128i vrB = _mm_loadu_si128((const __m128i*)(const void*)(R + rpB));
-        const __m128i iaA = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa[cb[0]]);
+        const __m128i iaA = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[cb[0]]);
         const __m128i ibA =
-            _mm_add_epi8(_mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb[cb[1]]),
-                         _mm_set1_epi8((char)pcA0));
-        const __m128i iaB = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa[cb[2]]);
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pcA0][cb[1]]);
+        const __m128i iaB = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[cb[2]]);
         const __m128i ibB =
-            _mm_add_epi8(_mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb[cb[3]]),
-                         _mm_set1_epi8((char)pcB0));
-        const __m128i ixA = _mm_abs_epi8(_mm_unpacklo_epi64(iaA, ibA));
-        const __m128i ixB = _mm_abs_epi8(_mm_unpacklo_epi64(iaB, ibB));
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pcB0][cb[3]]);
+        const __m128i ixA = _mm_unpacklo_epi64(iaA, ibA);
+        const __m128i ixB = _mm_unpacklo_epi64(iaB, ibB);
         const __m128i selA =
             _mm_or_si128(_mm_shuffle_epi8(vlA, _mm_add_epi8(ixA, _mm_set1_epi8(0x70))),
                          _mm_shuffle_epi8(vrA, _mm_sub_epi8(ixA, _mm_set1_epi8(16))));
@@ -854,10 +851,10 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         const __m128i vl = _mm_loadu_si128((const __m128i*)(const void*)(L + lp));
         const __m128i vr = _mm_loadu_si128((const __m128i*)(const void*)(R + rp));
         const int pc0 = zxc_pivco_popcnt32(b0);
-        const __m128i ia = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa[b0]);
-        const __m128i ib0 = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb[b1]);
-        const __m128i ib = _mm_add_epi8(ib0, _mm_set1_epi8((char)pc0));
-        const __m128i ix = _mm_abs_epi8(_mm_unpacklo_epi64(ia, ib));
+        const __m128i ia = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[b0]);
+        const __m128i ib =
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pc0][b1]);
+        const __m128i ix = _mm_unpacklo_epi64(ia, ib);
         const __m128i sell = _mm_shuffle_epi8(vl, _mm_add_epi8(ix, _mm_set1_epi8(0x70)));
         const __m128i selr = _mm_shuffle_epi8(vr, _mm_sub_epi8(ix, _mm_set1_epi8(16)));
         _mm_storeu_si128((__m128i*)(void*)(out + i), _mm_or_si128(sell, selr));
@@ -952,6 +949,34 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             const __m128i hi = _mm_and_si128(_mm_srli_epi16(rep, 4), _mm_set1_epi8(0x0F));
             const __m128i lo = _mm_and_si128(rep, vmask);
             const __m128i codes = _mm_blendv_epi8(lo, hi, vodd);
+            _mm_storeu_si128((__m128i*)(void*)(out + i), _mm_shuffle_epi8(vc2s, codes));
+            i += 16;
+        }
+    } else if (D == 2) {
+        /* 16 codes from 4 bytes. SSE lacks per-lane byte shifts, so shift via a
+         * per-lane multiply: (b << (6 - 2j)) >> 6 keeps bits [2j+1:2j]. Bytes
+         * are spread to u16 lanes, multiplied by {64,16,4,1}, shifted, then the
+         * two halves are packed back to 16 code bytes. */
+        uint8_t c2s16[16];
+        for (int k = 0; k < 16; k++) c2s16[k] = c2s[k & 3];
+        const __m128i vc2s = _mm_loadu_si128((const __m128i*)(const void*)c2s16);
+        const __m128i vspreadA =
+            _mm_setr_epi8(0, (char)0x80, 0, (char)0x80, 0, (char)0x80, 0, (char)0x80, 1, (char)0x80,
+                          1, (char)0x80, 1, (char)0x80, 1, (char)0x80);
+        const __m128i vspreadB =
+            _mm_setr_epi8(2, (char)0x80, 2, (char)0x80, 2, (char)0x80, 2, (char)0x80, 3, (char)0x80,
+                          3, (char)0x80, 3, (char)0x80, 3, (char)0x80);
+        const __m128i vmul = _mm_setr_epi16(64, 16, 4, 1, 64, 16, 4, 1);
+        while (i + 16 <= n) {
+            const __m128i raw = _mm_cvtsi32_si128(
+                (int)((uint32_t)bits[(i * 2) >> 3] | ((uint32_t)bits[((i * 2) >> 3) + 1] << 8) |
+                      ((uint32_t)bits[((i * 2) >> 3) + 2] << 16) |
+                      ((uint32_t)bits[((i * 2) >> 3) + 3] << 24)));
+            const __m128i a16 =
+                _mm_srli_epi16(_mm_mullo_epi16(_mm_shuffle_epi8(raw, vspreadA), vmul), 6);
+            const __m128i b16 =
+                _mm_srli_epi16(_mm_mullo_epi16(_mm_shuffle_epi8(raw, vspreadB), vmul), 6);
+            const __m128i codes = _mm_and_si128(_mm_packus_epi16(a16, b16), _mm_set1_epi8(3));
             _mm_storeu_si128((__m128i*)(void*)(out + i), _mm_shuffle_epi8(vc2s, codes));
             i += 16;
         }
