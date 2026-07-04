@@ -333,6 +333,7 @@ typedef struct {
     zxc_chunk_processor_t processor;
     int write_idx;
     int compression_level;
+    uint8_t format_version; /**< decode: archive header version byte */
     size_t chunk_size;
     int checksum_enabled;
     int file_has_checksum;
@@ -443,6 +444,7 @@ static void* zxc_stream_worker(void* arg) {
     }
 
     cctx.compression_level = ctx->compression_level;
+    cctx.format_version = ctx->format_version;
 
     /* Per-worker dict buffer for assembling [dict | block_data] */
     const size_t dsz = ctx->dict_size;
@@ -671,6 +673,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                      zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz, &file_has_chk,
                                           &header_dict_id) != ZXC_OK))
             return ZXC_ERROR_BAD_HEADER;
+        ctx.format_version = h[4]; /* v6/v7 wire meaning of enc 2/3 */
 
         if (header_dict_id != 0) {
             if (UNLIKELY(!dict || dict_size == 0)) return ZXC_ERROR_DICT_REQUIRED;

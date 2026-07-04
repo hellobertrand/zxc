@@ -155,7 +155,8 @@ General LZ-style format with separated streams.
 Offset  Size  Field
 0x00    4     n_sequences (u32)
 0x04    4     n_literals (u32)
-0x08    1     enc_lit   (0=RAW, 1=RLE, 2=HUFFMAN, 3=HUFFMAN_DICT)
+0x08    1     enc_lit   (0=RAW, 1=RLE, 2=Huffman: v6 classic / v7 PivCo,
+                         3=dict Huffman: v6 classic / v7 PivCo)
 0x09    1     enc_litlen (reserved)
 0x0A    1     enc_mlen   (reserved)
 0x0B    1     enc_off    (0=16-bit offsets, 1=8-bit offsets)
@@ -180,7 +181,10 @@ Section order:
   - raw literal bytes if `enc_lit=0`, or
   - RLE tokenized if `enc_lit=1`, or
   - Huffman-coded if `enc_lit=2` (see [§ 5.2.1 Huffman literal section](#521-huffman-literal-section)), or
-  - Huffman-coded with the dictionary's shared table if `enc_lit=3`
+  - Huffman-coded with the dictionary's shared table if `enc_lit=3`.
+  In **v7 archives**, values 2/3 carry the PivCo layout instead of the classic
+  4-stream layout (see [§ 5.2.3 PivCo literal section](#523-pivco-literal-section));
+  the classic layouts of § 5.2.1 / § 5.2.2 apply to **v6 archives** only.
     (see [§ 5.2.2 Shared-table Huffman literal section](#522-shared-table-huffman-literal-section);
     dictionary-compressed archives only).
 - **Tokens stream**:
@@ -261,6 +265,40 @@ is attached. The archive's `dict_id` binds the (content, table) pair, so a
 matching table is guaranteed present whenever the dictionary check passed.
 
 ---
+
+### 5.2.3 PivCo literal section
+
+In **v7 archives**, `enc_lit=2` carries the same canonical-Huffman code bits as
+the v6 layout of § 5.2.1, in the
+same 128-byte packed code-length header, but reordered by TREE LEVEL so decoding
+runs data-parallel list merges instead of a serial bit chain:
+
+```text
+Offset  Size  Field
+0x00    128   256 x 4-bit code lengths, packed two-per-byte (low nibble first).
+0x80    var   For every INTERNAL node of the canonical code tree, in BFS order
+              (parents before children, left before right): one branch bit per
+              symbol routed through that node, in sequence order, LSB-first
+              within bytes, each node's run padded to a byte boundary.
+              A 0 bit routes the symbol to the left child, 1 to the right.
+```
+
+The canonical tree is derived from the code lengths exactly as in § 5.2.1
+(MSB-first canonical assignment, symbols ordered by (length, symbol)). There is
+no sub-stream size header: the root handles `n_literals` symbols, and the
+popcount of any node's bits equals its right child's symbol count, so every
+node's bit-run length is derived while walking the BFS order once. The u16
+sub-stream size limit of § 5.2.1 therefore does not apply.
+
+Decoder validation requirements:
+- The code lengths must satisfy the same rules as § 5.2.1.
+- Every node's bit run must lie within the section payload.
+- A popcount that routes symbols to an absent child is a corruption error.
+
+In v7 archives, `enc_lit=3` is the shared-dictionary variant: same payload, no
+inline lengths header (code lengths come from the dictionary table, as in
+§ 5.2.2). The level-7 token section reuses this exact layout (`enc_litlen=2`)
+over the token byte alphabet.
 
 ## 5.3 GHI block (`type=2`)
 

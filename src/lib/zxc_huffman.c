@@ -39,6 +39,11 @@
 #define zxc_huf_build_dec_table ZXC_CAT(zxc_huf_build_dec_table, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_pack_lengths ZXC_CAT(zxc_huf_pack_lengths, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_unpack_lengths ZXC_CAT(zxc_huf_unpack_lengths, ZXC_FUNCTION_SUFFIX)
+#define zxc_pivco_calc_size ZXC_CAT(zxc_pivco_calc_size, ZXC_FUNCTION_SUFFIX)
+#define zxc_pivco_encode_section ZXC_CAT(zxc_pivco_encode_section, ZXC_FUNCTION_SUFFIX)
+#define zxc_pivco_encode_section_dict ZXC_CAT(zxc_pivco_encode_section_dict, ZXC_FUNCTION_SUFFIX)
+#define zxc_pivco_decode_section ZXC_CAT(zxc_pivco_decode_section, ZXC_FUNCTION_SUFFIX)
+#define zxc_pivco_decode_section_dict ZXC_CAT(zxc_pivco_decode_section_dict, ZXC_FUNCTION_SUFFIX)
 #endif
 
 #include "../../include/zxc_error.h"
@@ -1005,4 +1010,774 @@ void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT ou
  */
 int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len) {
     return unpack_lengths_header(in, code_len);
+}
+
+/* ===========================================================================
+ * PivCo-Huffman section codec (v7+ sections, enc 4/5)
+ * ===========================================================================
+ *
+ * Layout: [128-byte packed code lengths (literal sections only)] then, for
+ * every INTERNAL node of the canonical code tree in BFS order, that node's
+ * branch bits: one bit per symbol routed through the node, in sequence order,
+ * LSB-first within bytes, each node padded to a byte boundary. A 0 bit routes
+ * the symbol to the left child, 1 to the right.
+ *
+ * The decoder recovers each node's symbol count for free: the root handles
+ * n symbols, and popcounting a node's bits yields its right child's count.
+ * Reconstruction runs bottom-up, one level at a time: leaves are runs of a
+ * single symbol; an internal node MERGES its two children's sequences under
+ * the control of its bits. Merges are branch-free shuffles (16 outputs per
+ * step on NEON via a two-register TBL), which is what makes this layout
+ * decode faster than the serial bit-chain of the classic 4-stream layout on
+ * any target with a 16-byte shuffle.
+ *
+ * Level buffers ping-pong between `scratch` (odd depths) and `dst` (even
+ * depths, final output at depth 0), so one n-sized scratch suffices. Both
+ * buffers need read slack past `n` (speculative 16-byte kernel loads):
+ * ZXC_PAD_SIZE on dst (already true for lit/token buffers), and
+ * ZXC_PIVCO_SCRATCH_PAD on scratch.
+ */
+
+#include "zxc_pivco_tables.h"
+
+#define ZXC_PIVCO_MAX_NODES (2 * ZXC_HUF_NUM_SYMBOLS - 1)
+
+typedef struct {
+    int16_t child[2]; /* node index, -1 = absent */
+    int16_t sym;      /* >= 0: leaf symbol; -1: internal */
+} zxc_pivco_node_t;
+
+typedef struct {
+    zxc_pivco_node_t nd[ZXC_PIVCO_MAX_NODES];
+    int16_t bfs[ZXC_PIVCO_MAX_NODES]; /* node ids in BFS (== wire) order */
+    int16_t lvl_start[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2];
+    int n_nodes;
+    int max_depth;
+    /* Flat-subtree fast path: flat_d[nid] = D (>= 2) when nid roots a MAXIMAL
+     * complete subtree whose leaves all sit exactly D levels below it; such a
+     * node's wire run is its symbols' packed D-bit residual codes instead of
+     * D levels of partition bitmaps (same bit count, decode = unpack+lookup).
+     * covered[nid] = 1 for every strict descendant of a flat root: those nodes
+     * do not exist on the wire nor in the level buffers. Both sides derive
+     * this from the code lengths alone, so nothing is signalled. */
+    uint8_t flat_d[ZXC_PIVCO_MAX_NODES];
+    uint8_t covered[ZXC_PIVCO_MAX_NODES];
+} zxc_pivco_tree_t;
+
+static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt32(uint32_t v) {
+#if defined(_MSC_VER) && !defined(__clang__)
+    return (int)__popcnt(v);
+#else
+    return __builtin_popcount(v);
+#endif
+}
+
+static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt64(uint64_t v) {
+#if defined(_MSC_VER) && !defined(__clang__)
+    return (int)__popcnt64(v);
+#else
+    return __builtin_popcountll(v);
+#endif
+}
+
+/**
+ * @brief Build the canonical code tree (and codes) from per-symbol lengths.
+ *
+ * Canonical MSB-first assignment: symbols sorted by (length, symbol) receive
+ * sequential codes. Insertion collisions or code-space overflow (malformed
+ * lengths on the decode path) fail with a nonzero return.
+ *
+ * @param[in]  code_len Per-symbol code lengths (0 = absent).
+ * @param[out] t        Tree + BFS ordering, fully initialised on success.
+ * @param[out] codes    Optional per-symbol canonical codes (encoder only).
+ * @return 0 on success, -1 on malformed lengths.
+ */
+static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree_t* RESTRICT t,
+                                uint32_t* RESTRICT codes) {
+    uint32_t bl_count[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1] = {0};
+    int n_present = 0;
+    for (int s = 0; s < ZXC_HUF_NUM_SYMBOLS; s++) {
+        const int l = code_len[s];
+        if (l == 0) continue;
+        if (UNLIKELY(l > ZXC_HUF_MAX_CODE_LEN_ULTRA)) return -1;
+        bl_count[l]++;
+        n_present++;
+    }
+    if (UNLIKELY(n_present == 0)) return -1;
+
+    uint32_t next_code[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2] = {0};
+    uint32_t code = 0;
+    for (int l = 1; l <= ZXC_HUF_MAX_CODE_LEN_ULTRA; l++) {
+        code = (code + bl_count[l - 1]) << 1;
+        next_code[l] = code;
+    }
+
+    t->n_nodes = 1; /* root */
+    t->nd[0].child[0] = t->nd[0].child[1] = -1;
+    t->nd[0].sym = -1;
+    int max_depth = 0;
+
+    for (int s = 0; s < ZXC_HUF_NUM_SYMBOLS; s++) {
+        const int l = code_len[s];
+        if (l == 0) continue;
+        const uint32_t c = next_code[l]++;
+        if (UNLIKELY(c >> l)) return -1; /* code space overflow */
+        if (codes) codes[s] = c;
+        int cur = 0;
+        for (int d = l - 1; d >= 0; d--) {
+            if (UNLIKELY(t->nd[cur].sym >= 0)) return -1; /* prefix collision */
+            const int bit = (int)((c >> d) & 1u);
+            int nxt = t->nd[cur].child[bit];
+            if (nxt < 0) {
+                if (UNLIKELY(t->n_nodes >= ZXC_PIVCO_MAX_NODES)) return -1;
+                nxt = t->n_nodes++;
+                t->nd[nxt].child[0] = t->nd[nxt].child[1] = -1;
+                t->nd[nxt].sym = -1;
+                t->nd[cur].child[bit] = (int16_t)nxt;
+            }
+            cur = nxt;
+        }
+        if (UNLIKELY(t->nd[cur].child[0] >= 0 || t->nd[cur].child[1] >= 0)) return -1;
+        t->nd[cur].sym = (int16_t)s;
+        if (l > max_depth) max_depth = l;
+    }
+    t->max_depth = max_depth;
+
+    /* BFS order (parents before children, left before right): this is both
+     * the wire order of the node bit runs and the property that makes each
+     * parent's children CONTIGUOUS in the next level's sequence buffer. */
+    int head = 0, tail = 0;
+    t->bfs[tail++] = 0;
+    int depth_end = 1; /* index in bfs where the current depth ends */
+    int depth = 0;
+    t->lvl_start[0] = 0;
+    while (head < tail) {
+        if (head == depth_end) {
+            depth++;
+            t->lvl_start[depth] = (int16_t)head;
+            depth_end = tail;
+        }
+        const int nid = t->bfs[head++];
+        for (int b = 0; b < 2; b++) {
+            const int ch = t->nd[nid].child[b];
+            if (ch >= 0) t->bfs[tail++] = (int16_t)ch;
+        }
+    }
+    for (int d = depth + 1; d <= max_depth + 1; d++) t->lvl_start[d] = (int16_t)tail;
+
+    /* Flat-subtree detection: min/max leaf depth per node in one reverse-BFS
+     * sweep, then maximality by masking descendants of the first flat node on
+     * each root-to-leaf path. */
+    {
+        int8_t mn[ZXC_PIVCO_MAX_NODES];
+        int8_t mx[ZXC_PIVCO_MAX_NODES];
+        for (int i = t->n_nodes - 1; i >= 0; i--) {
+            const int nid = t->bfs[i];
+            const zxc_pivco_node_t* nd = &t->nd[nid];
+            if (nd->sym >= 0) {
+                mn[nid] = mx[nid] = 0;
+            } else if (nd->child[0] >= 0 && nd->child[1] >= 0) {
+                const int a = mn[nd->child[0]], b = mn[nd->child[1]];
+                const int c = mx[nd->child[0]], d2 = mx[nd->child[1]];
+                mn[nid] = (int8_t)(1 + (a < b ? a : b));
+                mx[nid] = (int8_t)(1 + (c > d2 ? c : d2));
+            } else { /* single-child (degenerate) : never flat */
+                mn[nid] = 0;
+                mx[nid] = (int8_t)ZXC_HUF_MAX_CODE_LEN_ULTRA;
+            }
+        }
+        for (int i = 0; i < t->n_nodes; i++) {
+            const int nid = t->bfs[i];
+            t->flat_d[nid] = 0;
+            if (i == 0) t->covered[nid] = 0; /* root */
+            /* Flat only where it beats the merge cascade (FORMAT RULE, both
+             * sides): D = 2/4 have single-TBL SIMD unpackers; D >= 7 replaces
+             * enough merge levels that even the scalar unpacker wins. D = 3/5/6
+             * stay on the (SIMD) merge path. */
+            if (!t->covered[nid] && t->nd[nid].sym < 0 && mn[nid] == mx[nid] &&
+                (mn[nid] == 2 || mn[nid] == 4 || mn[nid] >= 7))
+                t->flat_d[nid] = (uint8_t)mn[nid];
+            const int ch0 = t->nd[nid].child[0];
+            const int ch1 = t->nd[nid].child[1];
+            const uint8_t cov = (uint8_t)(t->covered[nid] || t->flat_d[nid]);
+            if (ch0 >= 0) t->covered[ch0] = cov;
+            if (ch1 >= 0) t->covered[ch1] = cov;
+        }
+    }
+    return 0;
+}
+
+/**
+ * @brief Per-node symbol counts from the histogram (encoder / size estimate).
+ *
+ * Leaf count = freq[sym]; internal count = sum of children, computed in one
+ * reverse-BFS sweep (children precede their parent in that direction).
+ */
+static void zxc_pivco_counts(const zxc_pivco_tree_t* RESTRICT t, const uint32_t* RESTRICT freq,
+                             uint32_t* RESTRICT count) {
+    for (int i = t->n_nodes - 1; i >= 0; i--) {
+        const int nid = t->bfs[i];
+        const zxc_pivco_node_t* nd = &t->nd[nid];
+        if (nd->sym >= 0) {
+            count[nid] = freq[nd->sym];
+        } else {
+            const uint32_t c0 = nd->child[0] >= 0 ? count[nd->child[0]] : 0;
+            const uint32_t c1 = nd->child[1] >= 0 ? count[nd->child[1]] : 0;
+            count[nid] = c0 + c1;
+        }
+    }
+}
+
+size_t zxc_pivco_calc_size(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                           const int with_header) {
+    zxc_pivco_tree_t t;
+    if (UNLIKELY(zxc_pivco_tree_build(code_len, &t, NULL) != 0)) return SIZE_MAX;
+    uint32_t count[ZXC_PIVCO_MAX_NODES];
+    zxc_pivco_counts(&t, freq, count);
+    size_t total = with_header ? (size_t)ZXC_HUF_TABLE_SIZE : 0;
+    for (int i = 0; i < t.n_nodes; i++) {
+        const int nid = t.bfs[i];
+        if (t.covered[nid] || t.nd[nid].sym >= 0) continue;
+        total += t.flat_d[nid] ? ((size_t)count[nid] * t.flat_d[nid] + 7) / 8
+                               : ((size_t)count[nid] + 7) / 8;
+    }
+    return total;
+}
+
+/**
+ * @brief Shared PivCo section encoder body.
+ *
+ * Walks each input symbol root-to-leaf once, appending its branch bit to the
+ * per-node write cursor; node bit runs land in BFS order, byte-aligned.
+ */
+static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t n_literals,
+                                 const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                                 uint8_t* RESTRICT dst, const size_t dst_cap,
+                                 const int with_header) {
+    if (UNLIKELY(n_literals == 0)) return ZXC_ERROR_CORRUPT_DATA;
+    zxc_pivco_tree_t t;
+    uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
+    if (UNLIKELY(zxc_pivco_tree_build(code_len, &t, codes) != 0)) return ZXC_ERROR_CORRUPT_DATA;
+
+    uint32_t count[ZXC_PIVCO_MAX_NODES];
+    zxc_pivco_counts(&t, freq, count);
+
+    /* Byte offsets of every wire-visible internal node's run, in BFS order:
+     * bitmap runs (1 bit/symbol) or, for flat roots, packed code runs
+     * (flat_d bits/symbol). Covered nodes have no run. */
+    uint32_t bit_off[ZXC_PIVCO_MAX_NODES];
+    size_t payload = 0;
+    for (int i = 0; i < t.n_nodes; i++) {
+        const int nid = t.bfs[i];
+        if (t.covered[nid] || t.nd[nid].sym >= 0) continue;
+        bit_off[nid] = (uint32_t)payload;
+        payload += t.flat_d[nid] ? ((size_t)count[nid] * t.flat_d[nid] + 7) / 8
+                                 : ((size_t)count[nid] + 7) / 8;
+    }
+    const size_t hdr = with_header ? (size_t)ZXC_HUF_TABLE_SIZE : 0;
+    /* +2: the packed-code emitter uses a 3-byte read-modify-write that may
+     * touch up to 2 bytes past the payload end. */
+    if (UNLIKELY(hdr + payload + 2 > dst_cap)) return ZXC_ERROR_DST_TOO_SMALL;
+
+    if (with_header) zxc_huf_pack_lengths(code_len, dst);
+    uint8_t* const out = dst + hdr;
+    ZXC_MEMSET(out, 0, payload + 2);
+
+    /* Per-node bit cursors; emit MSB-first code bits while descending. At a
+     * flat root, emit the symbol's packed D-bit residual (bit j = branch at
+     * subtree level j) in one shot and stop descending. */
+    uint32_t wpos[ZXC_PIVCO_MAX_NODES];
+    ZXC_MEMSET(wpos, 0, (size_t)t.n_nodes * sizeof(uint32_t));
+    for (size_t i = 0; i < n_literals; i++) {
+        const uint8_t s = literals[i];
+        const uint32_t c = codes[s];
+        int cur = 0;
+        for (int d = code_len[s] - 1; d >= 0; d--) {
+            const int fd = t.flat_d[cur];
+            if (fd) {
+                /* residual = low fd bits of the canonical code, bit-reversed
+                 * so that packed bit j is the branch taken at level j. */
+                uint32_t r = 0;
+                for (int j = 0; j < fd; j++) r |= ((c >> (fd - 1 - j)) & 1u) << j;
+                const uint32_t p = wpos[cur];
+                wpos[cur] += (uint32_t)fd;
+                uint8_t* q = out + bit_off[cur] + (p >> 3);
+                const uint32_t sh = p & 7u;
+                uint32_t w = (uint32_t)q[0] | ((uint32_t)q[1] << 8) | ((uint32_t)q[2] << 16);
+                w |= r << sh; /* fd <= 11, sh <= 7 -> fits 24 bits */
+                q[0] = (uint8_t)w;
+                q[1] = (uint8_t)(w >> 8);
+                q[2] = (uint8_t)(w >> 16);
+                break;
+            }
+            const uint32_t bit = (c >> d) & 1u;
+            const uint32_t p = wpos[cur]++;
+            out[bit_off[cur] + (p >> 3)] |= (uint8_t)(bit << (p & 7));
+            cur = t.nd[cur].child[bit];
+        }
+    }
+    return (int)(hdr + payload);
+}
+
+int zxc_pivco_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
+                             const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                             uint8_t* RESTRICT dst, const size_t dst_cap) {
+    return zxc_pivco_encode_core(literals, n_literals, freq, code_len, dst, dst_cap, 1);
+}
+
+int zxc_pivco_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n_literals,
+                                  const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                                  uint8_t* RESTRICT dst, const size_t dst_cap) {
+    return zxc_pivco_encode_core(literals, n_literals, freq, code_len, dst, dst_cap, 0);
+}
+
+/**
+ * @brief Merge two adjacent child sequences under control bits.
+ *
+ * src[0..nl) is the left sequence, src[nl..nl+nr) the right one (children are
+ * contiguous by construction). Control bits are LSB-first; bit 0 takes the
+ * next left element, bit 1 the next right one. Speculative 16-byte loads read
+ * up to 15 bytes past each cursor: callers guarantee read slack after the
+ * level buffers. Writes stay within out[0..nl+nr).
+ */
+static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8_t* RESTRICT src,
+                                              const size_t nl, const size_t nr,
+                                              const uint8_t* RESTRICT bits) {
+    const uint8_t* L = src;
+    const uint8_t* R = src + nl;
+    const size_t n = nl + nr;
+    size_t i = 0, lp = 0, rp = 0;
+#if defined(ZXC_USE_NEON64)
+    /* 16 outputs per step: two-register TBL over {L[0..15], R[0..15]} with the
+     * signed-index tables (see zxc_pivco_tables.h). */
+    while (i + 16 <= n) {
+        const uint8_t b0 = bits[i >> 3];
+        const uint8_t b1 = bits[(i >> 3) + 1];
+        uint8x16x2_t tb;
+        tb.val[0] = vld1q_u8(L + lp);
+        tb.val[1] = vld1q_u8(R + rp);
+        const int pc0 = zxc_pivco_popcnt32(b0);
+        const int8x8_t ia = vld1_s8(zxc_pivco_idxa[b0]);
+        const int8x8_t ib = vadd_s8(vld1_s8(zxc_pivco_idxb[b1]), vdup_n_s8((int8_t)pc0));
+        const uint8x16_t ix = vreinterpretq_u8_s8(vabsq_s8(vcombine_s8(ia, ib)));
+        vst1q_u8(out + i, vqtbl2q_u8(tb, ix));
+        const int pc = pc0 + zxc_pivco_popcnt32(b1);
+        rp += (size_t)pc;
+        lp += (size_t)(16 - pc);
+        i += 16;
+    }
+#else /* x86 tiers */
+#if defined(ZXC_USE_AVX512) && defined(__AVX512VBMI2__)
+    /* 64 outputs per step: the merge IS a pair of byte expands. Bytes of L
+     * fill the 0-bit lanes of the control word, bytes of R the 1-bit lanes
+     * (merge-masked into the first result). Masked loads keep the speculative
+     * reads fault-safe without extra buffer slack. */
+    while (i + 64 <= n) {
+        uint64_t ctrl;
+        ZXC_MEMCPY(&ctrl, bits + (i >> 3), 8);
+        const int pc = zxc_pivco_popcnt64(ctrl);
+        const __mmask64 lmask = (pc == 0) ? ~(__mmask64)0 : (((__mmask64)1 << (64 - pc)) - 1u);
+        const __mmask64 rmask = (pc == 64) ? ~(__mmask64)0 : (((__mmask64)1 << pc) - 1u);
+        const __m512i vl = _mm512_maskz_loadu_epi8(lmask, (const void*)(L + lp));
+        const __m512i vr = _mm512_maskz_loadu_epi8(rmask, (const void*)(R + rp));
+        const __m512i outl = _mm512_maskz_expand_epi8((__mmask64)~ctrl, vl);
+        const __m512i outv = _mm512_mask_expand_epi8(outl, (__mmask64)ctrl, vr);
+        _mm512_storeu_si512((void*)(out + i), outv);
+        rp += (size_t)pc;
+        lp += (size_t)(64 - pc);
+        i += 64;
+    }
+#endif
+#if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
+    (defined(ZXC_USE_SSE2) && defined(__SSSE3__))
+    /* 16 outputs per step, SSSE3 two-register shuffle emulation: after the
+     * signed-index + popcount-adjust + pabsb step (same tables as NEON), an
+     * index ix selects L[ix] when ix < 16 and R[ix - 16] otherwise:
+     *   pshufb(L, ix + 0x70): lanes with ix >= 16 overflow past 0x80 (zeroed),
+     *                         lanes with ix < 16 keep bit 7 clear (selected);
+     *   pshufb(R, ix - 16):   lanes with ix < 16 wrap to >= 0xF0 (zeroed).
+     * OR-ing both shuffles yields the merged bytes. The 32-output loop is the
+     * same step unrolled twice: the second step's cursors derive from the first's
+     * popcounts alone, so both table-selects run independently (this ILP, not
+     * wider vectors, is where 256-bit targets gain). */
+    while (i + 32 <= n) {
+        const uint8_t* cb = bits + (i >> 3);
+        const int pcA0 = zxc_pivco_popcnt32(cb[0]);
+        const int pcA = pcA0 + zxc_pivco_popcnt32(cb[1]);
+        const int pcB0 = zxc_pivco_popcnt32(cb[2]);
+        const int pcB = pcB0 + zxc_pivco_popcnt32(cb[3]);
+        const size_t lpB = lp + (size_t)(16 - pcA);
+        const size_t rpB = rp + (size_t)pcA;
+        const __m128i vlA = _mm_loadu_si128((const __m128i*)(const void*)(L + lp));
+        const __m128i vrA = _mm_loadu_si128((const __m128i*)(const void*)(R + rp));
+        const __m128i vlB = _mm_loadu_si128((const __m128i*)(const void*)(L + lpB));
+        const __m128i vrB = _mm_loadu_si128((const __m128i*)(const void*)(R + rpB));
+        const __m128i iaA = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa[cb[0]]);
+        const __m128i ibA =
+            _mm_add_epi8(_mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb[cb[1]]),
+                         _mm_set1_epi8((char)pcA0));
+        const __m128i iaB = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa[cb[2]]);
+        const __m128i ibB =
+            _mm_add_epi8(_mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb[cb[3]]),
+                         _mm_set1_epi8((char)pcB0));
+        const __m128i ixA = _mm_abs_epi8(_mm_unpacklo_epi64(iaA, ibA));
+        const __m128i ixB = _mm_abs_epi8(_mm_unpacklo_epi64(iaB, ibB));
+        const __m128i selA =
+            _mm_or_si128(_mm_shuffle_epi8(vlA, _mm_add_epi8(ixA, _mm_set1_epi8(0x70))),
+                         _mm_shuffle_epi8(vrA, _mm_sub_epi8(ixA, _mm_set1_epi8(16))));
+        const __m128i selB =
+            _mm_or_si128(_mm_shuffle_epi8(vlB, _mm_add_epi8(ixB, _mm_set1_epi8(0x70))),
+                         _mm_shuffle_epi8(vrB, _mm_sub_epi8(ixB, _mm_set1_epi8(16))));
+        _mm_storeu_si128((__m128i*)(void*)(out + i), selA);
+        _mm_storeu_si128((__m128i*)(void*)(out + i + 16), selB);
+        lp = lpB + (size_t)(16 - pcB);
+        rp = rpB + (size_t)pcB;
+        i += 32;
+    }
+    while (i + 16 <= n) {
+        const uint8_t b0 = bits[i >> 3];
+        const uint8_t b1 = bits[(i >> 3) + 1];
+        const __m128i vl = _mm_loadu_si128((const __m128i*)(const void*)(L + lp));
+        const __m128i vr = _mm_loadu_si128((const __m128i*)(const void*)(R + rp));
+        const int pc0 = zxc_pivco_popcnt32(b0);
+        const __m128i ia = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa[b0]);
+        const __m128i ib0 = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb[b1]);
+        const __m128i ib = _mm_add_epi8(ib0, _mm_set1_epi8((char)pc0));
+        const __m128i ix = _mm_abs_epi8(_mm_unpacklo_epi64(ia, ib));
+        const __m128i sell = _mm_shuffle_epi8(vl, _mm_add_epi8(ix, _mm_set1_epi8(0x70)));
+        const __m128i selr = _mm_shuffle_epi8(vr, _mm_sub_epi8(ix, _mm_set1_epi8(16)));
+        _mm_storeu_si128((__m128i*)(void*)(out + i), _mm_or_si128(sell, selr));
+        const int pc = pc0 + zxc_pivco_popcnt32(b1);
+        rp += (size_t)pc;
+        lp += (size_t)(16 - pc);
+        i += 16;
+    }
+#endif
+#endif /* x86 tiers */
+    /* Portable 8-output path (plain byte selects from a 16-byte scratch). */
+    while (i + 8 <= n) {
+        const uint8_t b = bits[i >> 3];
+        uint8_t comb[16];
+        ZXC_MEMCPY(comb, L + lp, 8);
+        ZXC_MEMCPY(comb + 8, R + rp, 8);
+        const uint8_t* ix = zxc_pivco_idx8[b];
+        for (int j = 0; j < 8; j++) out[i + (size_t)j] = comb[ix[j]];
+        const int pc = zxc_pivco_popcnt32(b);
+        rp += (size_t)pc;
+        lp += (size_t)(8 - pc);
+        i += 8;
+    }
+    while (i < n) {
+        const int bit = (bits[i >> 3] >> (i & 7)) & 1;
+        out[i++] = bit ? R[rp++] : L[lp++];
+    }
+}
+
+/**
+ * @brief Decode a flat subtree's packed D-bit code run into symbols.
+ *
+ * codes are packed LSB-first, D in [2, ZXC_HUF_MAX_CODE_LEN_ULTRA]; c2s maps
+ * a packed path to its leaf symbol. SIMD paths cover the frequent D = 2 / 4
+ * (in-register unpack + single 16-byte table lookup); the scalar bit-reader
+ * handles every D.
+ */
+static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const int D,
+                                  const uint8_t* RESTRICT bits, const uint8_t* RESTRICT c2s) {
+    size_t i = 0;
+#if defined(ZXC_USE_NEON64)
+    if (D == 4) {
+        const uint8x16_t vc2s = vld1q_u8(c2s); /* 16 entries */
+        static const uint8_t rep2[16] = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7};
+        static const int8_t sh4[16] = {0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4};
+        const uint8x16_t vrep = vld1q_u8(rep2);
+        const int8x16_t vsh = vld1q_s8(sh4);
+        const uint8x16_t vmask = vdupq_n_u8(0x0F);
+        while (i + 16 <= n) {
+            uint8x16_t raw = vdupq_n_u8(0);
+            raw = vreinterpretq_u8_u64(
+                vsetq_lane_u64(*(const uint64_t*)(const void*)(bits + ((i * 4) >> 3)),
+                               vreinterpretq_u64_u8(raw), 0));
+            const uint8x16_t rep = vqtbl1q_u8(raw, vrep);
+            const uint8x16_t codes = vandq_u8(vshlq_u8(rep, vsh), vmask);
+            vst1q_u8(out + i, vqtbl1q_u8(vc2s, codes));
+            i += 16;
+        }
+    } else if (D == 2) {
+        uint8_t c2s16[16];
+        for (int k = 0; k < 16; k++) c2s16[k] = c2s[k & 3];
+        const uint8x16_t vc2s = vld1q_u8(c2s16);
+        static const uint8_t rep4[16] = {0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3};
+        static const int8_t sh2[16] = {0, -2, -4, -6, 0, -2, -4, -6, 0, -2, -4, -6, 0, -2, -4, -6};
+        const uint8x16_t vrep = vld1q_u8(rep4);
+        const int8x16_t vsh = vld1q_s8(sh2);
+        const uint8x16_t vmask = vdupq_n_u8(0x03);
+        while (i + 16 <= n) {
+            uint8x16_t raw = vdupq_n_u8(0);
+            raw = vreinterpretq_u8_u32(
+                vsetq_lane_u32(*(const uint32_t*)(const void*)(bits + ((i * 2) >> 3)),
+                               vreinterpretq_u32_u8(raw), 0));
+            const uint8x16_t rep = vqtbl1q_u8(raw, vrep);
+            const uint8x16_t codes = vandq_u8(vshlq_u8(rep, vsh), vmask);
+            vst1q_u8(out + i, vqtbl1q_u8(vc2s, codes));
+            i += 16;
+        }
+    }
+#elif defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
+    (defined(ZXC_USE_SSE2) && defined(__SSSE3__))
+    if (D == 4) {
+        const __m128i vc2s = _mm_loadu_si128((const __m128i*)(const void*)c2s);
+        const __m128i vrep = _mm_setr_epi8(0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7);
+        const __m128i vmask = _mm_set1_epi8(0x0F);
+        /* even lanes keep low nibble, odd lanes take the high nibble: shift the
+         * replicated bytes right by 4 via a 16-bit shift + odd-lane select. */
+        const __m128i vodd = _mm_set1_epi16(0x0F00 - 0x0F00 + (short)0xFF00);
+        while (i + 16 <= n) {
+            const __m128i raw =
+                _mm_loadl_epi64((const __m128i*)(const void*)(bits + ((i * 4) >> 3)));
+            const __m128i rep = _mm_shuffle_epi8(raw, vrep);
+            const __m128i hi = _mm_and_si128(_mm_srli_epi16(rep, 4), _mm_set1_epi8(0x0F));
+            const __m128i lo = _mm_and_si128(rep, vmask);
+            const __m128i codes = _mm_blendv_epi8(lo, hi, vodd);
+            _mm_storeu_si128((__m128i*)(void*)(out + i), _mm_shuffle_epi8(vc2s, codes));
+            i += 16;
+        }
+    }
+#endif
+    /* Generic scalar bit-reader (any D). */
+    {
+        uint64_t bitpos = i * (uint64_t)D;
+        const uint32_t m = (1u << D) - 1u;
+        while (i < n) {
+            const size_t byte = (size_t)(bitpos >> 3);
+            uint32_t w = bits[byte];
+            w |= (uint32_t)bits[byte + 1] << 8;
+            if (D > 8) w |= (uint32_t)bits[byte + 2] << 16;
+            out[i++] = c2s[(w >> (bitpos & 7u)) & m];
+            bitpos += (uint64_t)D;
+        }
+    }
+}
+
+/**
+ * @brief Direct emission for a node whose two children are BOTH leaves.
+ *
+ * out[k] = bit_k ? sym1 : sym0, i.e. sym0 ^ (delta & mask(bit_k)). Skips
+ * materialising the two child runs entirely (idea from the PivCo reference
+ * implementation: sequential stores + bit-test/XOR-blend beat a table merge
+ * of two constant runs by 2-3x).
+ */
+static ZXC_ALWAYS_INLINE void zxc_pivco_emit_leaf_pair(uint8_t* RESTRICT out, const size_t n,
+                                                       const uint8_t sym0, const uint8_t sym1,
+                                                       const uint8_t* RESTRICT bits) {
+    const uint8_t delta = (uint8_t)(sym0 ^ sym1);
+    size_t i = 0;
+#if defined(ZXC_USE_NEON64)
+    const uint8x16_t vsym0 = vdupq_n_u8(sym0);
+    const uint8x16_t vdelta = vdupq_n_u8(delta);
+    static const uint8_t rep_idx[16] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1};
+    static const uint8_t bit_sel[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+    const uint8x16_t vrep = vld1q_u8(rep_idx);
+    const uint8x16_t vsel = vld1q_u8(bit_sel);
+    while (i + 16 <= n) {
+        uint8x16_t ctrl = vdupq_n_u8(0);
+        ctrl = vsetq_lane_u8(bits[i >> 3], ctrl, 0);
+        ctrl = vsetq_lane_u8(bits[(i >> 3) + 1], ctrl, 1);
+        const uint8x16_t rep = vqtbl1q_u8(ctrl, vrep);
+        const uint8x16_t mask = vtstq_u8(rep, vsel);
+        vst1q_u8(out + i, veorq_u8(vsym0, vandq_u8(vdelta, mask)));
+        i += 16;
+    }
+#elif defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
+    (defined(ZXC_USE_SSE2) && defined(__SSSE3__))
+    const __m128i vsym0 = _mm_set1_epi8((char)sym0);
+    const __m128i vdelta = _mm_set1_epi8((char)delta);
+    const __m128i vrep = _mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1);
+    const __m128i vsel =
+        _mm_setr_epi8(1, 2, 4, 8, 16, 32, 64, (char)128, 1, 2, 4, 8, 16, 32, 64, (char)128);
+    while (i + 16 <= n) {
+        const __m128i ctrl = _mm_cvtsi32_si128(bits[i >> 3] | ((int)bits[(i >> 3) + 1] << 8));
+        const __m128i rep = _mm_shuffle_epi8(ctrl, vrep);
+        /* lanes where the selected bit is set -> 0xFF */
+        const __m128i mask = _mm_cmpeq_epi8(_mm_and_si128(rep, vsel), vsel);
+        _mm_storeu_si128((__m128i*)(void*)(out + i),
+                         _mm_xor_si128(vsym0, _mm_and_si128(vdelta, mask)));
+        i += 16;
+    }
+#endif
+    while (i < n) {
+        const int bit = (bits[i >> 3] >> (i & 7)) & 1;
+        out[i++] = bit ? sym1 : sym0;
+    }
+}
+
+/**
+ * @brief Shared PivCo section decoder body (code lengths already unpacked).
+ *
+ * Pass 1 (sizing) walks the wire's BFS order once: each internal node's bit
+ * run is located, bounds-checked and popcounted, which yields both children's
+ * symbol counts. Pass 2 rebuilds sequences bottom-up, one level at a time,
+ * ping-ponging between dst (even depths, depth 0 = final output) and scratch
+ * (odd depths); a level's writes never alias its reads.
+ */
+static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t payload_size,
+                                 uint8_t* RESTRICT dst, const size_t n,
+                                 const uint8_t* RESTRICT code_len, uint8_t* RESTRICT scratch) {
+    if (UNLIKELY(n == 0)) return ZXC_ERROR_CORRUPT_DATA;
+    zxc_pivco_tree_t t;
+    if (UNLIKELY(zxc_pivco_tree_build(code_len, &t, NULL) != 0)) return ZXC_ERROR_CORRUPT_DATA;
+
+    /* Pass 1: node counts + bit-run pointers, straight from the wire order. */
+    uint32_t count[ZXC_PIVCO_MAX_NODES];
+    const uint8_t* bit_ptr[ZXC_PIVCO_MAX_NODES];
+    count[0] = (uint32_t)n;
+    const uint8_t* p = payload;
+    const uint8_t* const pend = payload + payload_size;
+    for (int i = 0; i < t.n_nodes; i++) {
+        const int nid = t.bfs[i];
+        const zxc_pivco_node_t* nd = &t.nd[nid];
+        if (t.covered[nid] || nd->sym >= 0) continue;
+        const uint32_t c = count[nid];
+        if (t.flat_d[nid]) {
+            /* Packed-code run: no partition below, nothing to popcount. */
+            const size_t fbytes = ((size_t)c * t.flat_d[nid] + 7) / 8;
+            if (UNLIKELY((size_t)(pend - p) < fbytes)) return ZXC_ERROR_CORRUPT_DATA;
+            bit_ptr[nid] = p;
+            p += fbytes;
+            continue;
+        }
+        const size_t nbytes = ((size_t)c + 7) / 8;
+        if (UNLIKELY((size_t)(pend - p) < nbytes)) return ZXC_ERROR_CORRUPT_DATA;
+        bit_ptr[nid] = p;
+        /* popcount of the c valid bits = right child's count */
+        uint32_t ones = 0;
+        size_t k = 0;
+        for (; k + 8 <= nbytes; k += 8) {
+            uint64_t w;
+            ZXC_MEMCPY(&w, p + k, 8);
+            ones += (uint32_t)zxc_pivco_popcnt64(w);
+        }
+        for (; k < nbytes; k++) {
+            uint8_t last = p[k];
+            if (k == nbytes - 1 && (c & 7u)) last &= (uint8_t)((1u << (c & 7u)) - 1u);
+            ones += (uint32_t)zxc_pivco_popcnt32(last);
+        }
+        p += nbytes;
+        if (UNLIKELY(ones > c)) return ZXC_ERROR_CORRUPT_DATA;
+        const int ch0 = nd->child[0];
+        const int ch1 = nd->child[1];
+        if (ch1 >= 0)
+            count[ch1] = ones;
+        else if (UNLIKELY(ones != 0))
+            return ZXC_ERROR_CORRUPT_DATA;
+        if (ch0 >= 0)
+            count[ch0] = c - ones;
+        else if (UNLIKELY(c - ones != 0))
+            return ZXC_ERROR_CORRUPT_DATA;
+    }
+
+    /* Per-level sequence offsets (BFS order => children contiguous). */
+    uint32_t seq_off[ZXC_PIVCO_MAX_NODES];
+    for (int d = 0; d <= t.max_depth; d++) {
+        uint32_t off = 0;
+        for (int i = t.lvl_start[d]; i < t.lvl_start[d + 1]; i++) {
+            const int nid = t.bfs[i];
+            if (t.covered[nid]) continue; /* not materialised anywhere */
+            seq_off[nid] = off;
+            off += count[nid];
+        }
+    }
+
+    /* Leaf-pair parents emit both runs directly from their bits (XOR-blend),
+     * so their children never need materialising: flag them for skipping. */
+    uint8_t skip[ZXC_PIVCO_MAX_NODES];
+    ZXC_MEMSET(skip, 0, (size_t)t.n_nodes);
+    for (int i = 0; i < t.n_nodes; i++) {
+        const zxc_pivco_node_t* nd = &t.nd[t.bfs[i]];
+        if (nd->sym >= 0) continue;
+        const int ch0 = nd->child[0];
+        const int ch1 = nd->child[1];
+        if (ch0 >= 0 && ch1 >= 0 && t.nd[ch0].sym >= 0 && t.nd[ch1].sym >= 0) {
+            skip[ch0] = 1;
+            skip[ch1] = 1;
+        }
+    }
+
+    /* Pass 2: bottom-up level reconstruction. */
+    for (int d = t.max_depth; d >= 0; d--) {
+        uint8_t* const buf_d = (d & 1) ? scratch : dst;
+        uint8_t* const buf_c = (d & 1) ? dst : scratch; /* children live at d+1 */
+        for (int i = t.lvl_start[d]; i < t.lvl_start[d + 1]; i++) {
+            const int nid = t.bfs[i];
+            if (t.covered[nid]) continue; /* lives inside a flat root's run */
+            const zxc_pivco_node_t* nd = &t.nd[nid];
+            const uint32_t c = count[nid];
+            if (c == 0 || skip[nid]) continue;
+            if (nd->sym >= 0) {
+                ZXC_MEMSET(buf_d + seq_off[nid], (uint8_t)nd->sym, c);
+            } else if (t.flat_d[nid]) {
+                /* Build the packed-path -> symbol table (complete subtree of
+                 * depth D: 2^D leaves), then unpack the code run directly. */
+                const int D = t.flat_d[nid];
+                uint8_t c2s[1u << ZXC_HUF_MAX_CODE_LEN_ULTRA];
+                int16_t stk_n[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
+                uint16_t stk_p[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
+                uint8_t stk_l[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
+                int sp = 0;
+                stk_n[0] = (int16_t)nid;
+                stk_p[0] = 0;
+                stk_l[0] = 0;
+                while (sp >= 0) {
+                    const int cn = stk_n[sp];
+                    const uint32_t cp = stk_p[sp];
+                    const int cl = stk_l[sp];
+                    sp--;
+                    if (t.nd[cn].sym >= 0) {
+                        c2s[cp] = (uint8_t)t.nd[cn].sym;
+                        continue;
+                    }
+                    sp++;
+                    stk_n[sp] = t.nd[cn].child[0];
+                    stk_p[sp] = (uint16_t)cp;
+                    stk_l[sp] = (uint8_t)(cl + 1);
+                    sp++;
+                    stk_n[sp] = t.nd[cn].child[1];
+                    stk_p[sp] = (uint16_t)(cp | (1u << cl));
+                    stk_l[sp] = (uint8_t)(cl + 1);
+                }
+                zxc_pivco_unpack_flat(buf_d + seq_off[nid], c, D, bit_ptr[nid], c2s);
+            } else {
+                const int ch0 = nd->child[0];
+                const int ch1 = nd->child[1];
+                if (ch0 >= 0 && ch1 >= 0 && t.nd[ch0].sym >= 0 && t.nd[ch1].sym >= 0) {
+                    zxc_pivco_emit_leaf_pair(buf_d + seq_off[nid], c, (uint8_t)t.nd[ch0].sym,
+                                             (uint8_t)t.nd[ch1].sym, bit_ptr[nid]);
+                    continue;
+                }
+                const uint32_t nl = ch0 >= 0 ? count[ch0] : 0;
+                const uint32_t src_off = ch0 >= 0 ? seq_off[ch0] : seq_off[nd->child[1]];
+                zxc_pivco_merge(buf_d + seq_off[nid], buf_c + src_off, nl, c - nl, bit_ptr[nid]);
+            }
+        }
+    }
+    return ZXC_OK;
+}
+
+int zxc_pivco_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
+                             uint8_t* RESTRICT dst, const size_t n, uint8_t* RESTRICT scratch) {
+    if (UNLIKELY(payload_size < (size_t)ZXC_HUF_TABLE_SIZE)) return ZXC_ERROR_CORRUPT_DATA;
+    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+    const int rc = zxc_huf_unpack_lengths(payload, code_len);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    return zxc_pivco_decode_core(payload + ZXC_HUF_TABLE_SIZE, payload_size - ZXC_HUF_TABLE_SIZE,
+                                 dst, n, code_len, scratch);
+}
+
+int zxc_pivco_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
+                                  uint8_t* RESTRICT dst, const size_t n,
+                                  const uint8_t* RESTRICT packed_lengths,
+                                  uint8_t* RESTRICT scratch) {
+    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+    const int rc = zxc_huf_unpack_lengths(packed_lengths, code_len);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    return zxc_pivco_decode_core(payload, payload_size, dst, n, code_len, scratch);
 }
