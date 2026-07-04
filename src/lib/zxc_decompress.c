@@ -413,6 +413,43 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
  * @param[in]     has_dict     Compile-time flag: 1 = resolve matches against a dict prefix.
  * @return Bytes written to @p dst on success, or a negative @ref zxc_error_t.
  */
+/* PivCo section decodes are outlined COLD: they run once per SECTION (a call
+ * is noise there), and keeping their bodies out of the sequence-decode
+ * monolith preserves its i-cache footprint for levels 1-5, whose blocks never
+ * take these branches (the inline branches grew the primary GLO wrapper by
+ * ~520 B at the token-entropy commit and cost ~3-5% at levels 3-5). */
+static ZXC_NOINLINE __attribute__((cold)) int zxc_decode_lit_pivco(zxc_cctx_t* RESTRICT ctx,
+                                                                   const uint8_t* RESTRICT payload,
+                                                                   const size_t psize,
+                                                                   const size_t required_size) {
+    if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE ||
+                 ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
+        return ZXC_ERROR_CORRUPT_DATA;
+    return zxc_pivco_decode_section(payload, psize, ctx->lit_buffer, required_size,
+                                    ctx->pivco_scratch);
+}
+
+static ZXC_NOINLINE __attribute__((cold)) int zxc_decode_lit_pivco_dict(
+    zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT payload, const size_t psize,
+    const size_t required_size) {
+    if (UNLIKELY(ctx->dict_huf_lengths == NULL)) return ZXC_ERROR_DICT_REQUIRED;
+    if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE ||
+                 ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
+        return ZXC_ERROR_CORRUPT_DATA;
+    return zxc_pivco_decode_section_dict(payload, psize, ctx->lit_buffer, required_size,
+                                         ctx->dict_huf_lengths, ctx->pivco_scratch);
+}
+
+static ZXC_NOINLINE __attribute__((cold)) int zxc_decode_tok_pivco(zxc_cctx_t* RESTRICT ctx,
+                                                                   const uint8_t* RESTRICT payload,
+                                                                   const size_t psize,
+                                                                   const size_t n_tok) {
+    if (UNLIKELY(n_tok + ZXC_PAD_SIZE > ctx->tok_buffer_cap ||
+                 n_tok + ZXC_PIVCO_SCRATCH_PAD > ctx->pivco_scratch_cap))
+        return ZXC_ERROR_CORRUPT_DATA;
+    return zxc_pivco_decode_section(payload, psize, ctx->tok_buffer, n_tok, ctx->pivco_scratch);
+}
+
 static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
                                                        const size_t src_size, uint8_t* RESTRICT dst,
@@ -450,14 +487,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
         } else {
             if (UNLIKELY(required_size > dst_capacity || required_size > SIZE_MAX - ZXC_PAD_SIZE))
                 return ZXC_ERROR_DST_TOO_SMALL;
-            /* lit_buffer is pre-allocated to chunk_size + ZXC_PAD_SIZE by
-             * zxc_cctx_init (mode == 0). */
-            if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE))
-                return ZXC_ERROR_CORRUPT_DATA;
-            if (UNLIKELY(ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
-                return ZXC_ERROR_CORRUPT_DATA;
-            const int rc = zxc_pivco_decode_section(p_curr, lit_stream_size, ctx->lit_buffer,
-                                                    required_size, ctx->pivco_scratch);
+            const int rc = zxc_decode_lit_pivco(ctx, p_curr, lit_stream_size, required_size);
             if (UNLIKELY(rc != ZXC_OK)) return rc;
             l_ptr = ctx->lit_buffer;
             l_end = ctx->lit_buffer + required_size;
@@ -474,16 +504,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
         } else {
             if (UNLIKELY(required_size > dst_capacity || required_size > SIZE_MAX - ZXC_PAD_SIZE))
                 return ZXC_ERROR_DST_TOO_SMALL;
-            const size_t alloc_size = required_size + ZXC_PAD_SIZE;
-            /* lit_buffer is pre-allocated to chunk_size + ZXC_PAD_SIZE by
-             * zxc_cctx_init (mode == 0). */
-            if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) return ZXC_ERROR_CORRUPT_DATA;
-            if (UNLIKELY(ctx->dict_huf_lengths == NULL)) return ZXC_ERROR_DICT_REQUIRED;
-            if (UNLIKELY(ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
-                return ZXC_ERROR_CORRUPT_DATA;
-            const int rc = zxc_pivco_decode_section_dict(p_curr, lit_stream_size, ctx->lit_buffer,
-                                                         required_size, ctx->dict_huf_lengths,
-                                                         ctx->pivco_scratch);
+            const int rc = zxc_decode_lit_pivco_dict(ctx, p_curr, lit_stream_size, required_size);
             if (UNLIKELY(rc != ZXC_OK)) return rc;
             l_ptr = ctx->lit_buffer;
             l_end = ctx->lit_buffer + required_size;
@@ -598,12 +619,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     const uint8_t* RESTRICT t_ptr = p_curr;
     if (UNLIKELY(gh.enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN)) {
         /* Wire value 2: PivCo layout. */
-        const size_t n_tok = gh.n_sequences;
-        if (UNLIKELY(n_tok + ZXC_PAD_SIZE > ctx->tok_buffer_cap)) return ZXC_ERROR_CORRUPT_DATA;
-        if (UNLIKELY(n_tok + ZXC_PIVCO_SCRATCH_PAD > ctx->pivco_scratch_cap))
-            return ZXC_ERROR_CORRUPT_DATA;
-        const int rc =
-            zxc_pivco_decode_section(p_curr, sz_tokens, ctx->tok_buffer, n_tok, ctx->pivco_scratch);
+        const int rc = zxc_decode_tok_pivco(ctx, p_curr, sz_tokens, gh.n_sequences);
         if (UNLIKELY(rc != ZXC_OK)) return rc;
         t_ptr = ctx->tok_buffer;
     } else if (UNLIKELY(sz_tokens < gh.n_sequences)) {
