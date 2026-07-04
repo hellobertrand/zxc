@@ -7,36 +7,6 @@
 
 #include "test_common.h"
 
-/*
- * Test for zxc_br_init
- */
-int test_bit_reader() {
-    printf("=== TEST: Unit - Bit Reader (zxc_br_init) ===\n");
-
-    // Case 1: Normal initialization
-    uint8_t buffer[16];
-    for (int i = 0; i < 16; i++) buffer[i] = (uint8_t)i;
-    zxc_bit_reader_t br;
-    zxc_br_init(&br, buffer, 16);
-
-    if (br.bits != 64) return 0;
-    if (br.ptr != buffer + 8) return 0;
-    if (br.accum != zxc_le64(buffer)) return 0;
-    printf("  [PASS] Normal init\n");
-
-    // Case 2: Small buffer initialization (should not crash)
-    uint8_t small_buffer[4] = {0xAA, 0xBB, 0xCC, 0xDD};
-    zxc_br_init(&br, small_buffer, 4);
-    // Should have read 4 bytes safely (in LE order, matching zxc_le_partial)
-    uint64_t expected_accum = (uint64_t)small_buffer[0] | ((uint64_t)small_buffer[1] << 8) |
-                              ((uint64_t)small_buffer[2] << 16) | ((uint64_t)small_buffer[3] << 24);
-    if (br.accum != expected_accum) return 0;
-    if (br.ptr != small_buffer + 4) return 0;
-    printf("  [PASS] Small buffer init\n");
-
-    printf("PASS\n\n");
-    return 1;
-}
 
 
 /* Round-trip the Huffman codec over a few representative literal distributions. */
@@ -58,29 +28,33 @@ static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t
         }
     }
 
-    /* Worst-case payload size: 134-byte header + n bytes (RAW upper bound). */
-    const size_t cap = ZXC_HUF_HEADER_SIZE + n + 64;
+    /* Worst-case payload size: 128-byte header + packed codes + per-node pad. */
+    const size_t cap = ZXC_HUF_TABLE_SIZE + 2 * n + 4096;
     uint8_t* enc = (uint8_t*)malloc(cap);
-    uint8_t* dec = (uint8_t*)malloc(n);
-    if (!enc || !dec) {
+    uint8_t* dec = (uint8_t*)malloc(n + ZXC_PAD_SIZE);
+    uint8_t* scr = (uint8_t*)malloc(n + ZXC_PIVCO_SCRATCH_PAD);
+    if (!enc || !dec || !scr) {
         free(enc);
         free(dec);
+        free(scr);
         printf("Failed [%s]: alloc\n", label);
         return 0;
     }
 
-    const int written = zxc_huf_encode_section(literals, n, code_len, enc, cap);
+    const int written = zxc_pivco_encode_section(literals, n, freq, code_len, enc, cap);
     if (written < 0) {
         free(enc);
         free(dec);
+        free(scr);
         printf("Failed [%s]: encode_section -> %d\n", label, written);
         return 0;
     }
 
-    const int rc = zxc_huf_decode_section(enc, (size_t)written, dec, n);
+    const int rc = zxc_pivco_decode_section(enc, (size_t)written, dec, n, scr);
     if (rc != ZXC_OK) {
         free(enc);
         free(dec);
+        free(scr);
         printf("Failed [%s]: decode_section -> %d\n", label, rc);
         return 0;
     }
@@ -88,12 +62,14 @@ static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t
     if (memcmp(literals, dec, n) != 0) {
         free(enc);
         free(dec);
+        free(scr);
         printf("Failed [%s]: roundtrip mismatch\n", label);
         return 0;
     }
 
     free(enc);
     free(dec);
+    free(scr);
     printf("  [PASS] %s (n=%zu, encoded=%d B, ratio=%.1f%%)\n", label, n, written,
            100.0 * (double)written / (double)n);
     return 1;
@@ -170,22 +146,17 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
         return 0;
     }
 
-    zxc_huf_dec_entry_t* table =
-        (zxc_huf_dec_entry_t*)malloc(ZXC_HUF_DEC_TABLE_SIZE * sizeof(zxc_huf_dec_entry_t));
-    const size_t cap = ZXC_HUF_HEADER_SIZE + n + 64;
+    const size_t cap = ZXC_HUF_TABLE_SIZE + 2 * n + 4096;
     uint8_t* enc = (uint8_t*)malloc(cap);
     uint8_t* enc_blk = (uint8_t*)malloc(cap);
-    uint8_t* dec = (uint8_t*)malloc(n);
-    if (!table || !enc || !enc_blk || !dec) {
+    uint8_t* dec = (uint8_t*)malloc(n + ZXC_PAD_SIZE);
+    uint8_t* scr = (uint8_t*)malloc(n + ZXC_PIVCO_SCRATCH_PAD);
+    if (!enc || !enc_blk || !dec || !scr) {
         printf("Failed [%s]: alloc\n", label);
         goto fail;
     }
-    if (zxc_huf_build_dec_table(code_len, table) != ZXC_OK) {
-        printf("Failed [%s]: build_dec_table\n", label);
-        goto fail;
-    }
 
-    const int written = zxc_huf_encode_section_dict(literals, n, code_len, enc, cap);
+    const int written = zxc_pivco_encode_section_dict(literals, n, freq, code_len, enc, cap);
     if (written < 0) {
         printf("Failed [%s]: encode_section_dict -> %d\n", label, written);
         goto fail;
@@ -193,47 +164,43 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
 
     /* Same lengths, same bitstreams: the dict section must be exactly the
      * per-block section minus its 128-byte lengths header. */
-    const int written_blk = zxc_huf_encode_section(literals, n, code_len, enc_blk, cap);
+    const int written_blk = zxc_pivco_encode_section(literals, n, freq, code_len, enc_blk, cap);
     if (written_blk != written + (int)ZXC_HUF_TABLE_SIZE ||
         memcmp(enc, enc_blk + ZXC_HUF_TABLE_SIZE, (size_t)written) != 0) {
         printf("Failed [%s]: dict section != per-block section minus header\n", label);
         goto fail;
     }
 
-    if (zxc_huf_decode_section_dict(enc, (size_t)written, dec, n, table) != ZXC_OK ||
+    if (zxc_pivco_decode_section_dict(enc, (size_t)written, dec, n, packed, scr) != ZXC_OK ||
         memcmp(literals, dec, n) != 0) {
         printf("Failed [%s]: decode_section_dict roundtrip mismatch\n", label);
         goto fail;
     }
 
-    /* Error paths: NULL table, truncated payload, undersized dst_cap. */
-    if (zxc_huf_decode_section_dict(enc, (size_t)written, dec, n, NULL) != ZXC_ERROR_CORRUPT_DATA) {
-        printf("Failed [%s]: NULL table not rejected\n", label);
-        goto fail;
-    }
-    if (zxc_huf_decode_section_dict(enc, (size_t)ZXC_HUF_STREAM_SIZES_HEADER_SIZE - 1, dec, n,
-                                    table) == ZXC_OK) {
+    /* Error paths: truncated payload, undersized dst_cap. */
+    if (zxc_pivco_decode_section_dict(enc, 0, dec, n, packed, scr) == ZXC_OK) {
         printf("Failed [%s]: truncated payload accepted\n", label);
         goto fail;
     }
-    if (zxc_huf_encode_section_dict(literals, n, code_len, enc, 4) != ZXC_ERROR_DST_TOO_SMALL) {
+    if (zxc_pivco_encode_section_dict(literals, n, freq, code_len, enc, 4) !=
+        ZXC_ERROR_DST_TOO_SMALL) {
         printf("Failed [%s]: undersized dst_cap not rejected\n", label);
         goto fail;
     }
 
-    free(table);
     free(enc);
     free(enc_blk);
     free(dec);
+    free(scr);
     printf("  [PASS] %s (n=%zu, encoded=%d B, header saved=%d B)\n", label, n, written,
            (int)ZXC_HUF_TABLE_SIZE);
     return 1;
 
 fail:
-    free(table);
     free(enc);
     free(enc_blk);
     free(dec);
+    free(scr);
     return 0;
 }
 
@@ -278,8 +245,9 @@ int test_huffman_codec_dict() {
             return 0;
         }
         buf[100] = '!'; /* unseen in training: no code assigned */
-        uint8_t enc[512];
-        if (zxc_huf_encode_section_dict(buf, 256, code_len, enc, sizeof(enc)) !=
+        freq['!']++;    /* keep the histogram in sync with the mutated buffer */
+        uint8_t enc[1024];
+        if (zxc_pivco_encode_section_dict(buf, 256, freq, code_len, enc, sizeof(enc)) !=
             ZXC_ERROR_CORRUPT_DATA) {
             printf("Failed: code-less literal not rejected by encode_section_dict\n");
             free(buf);

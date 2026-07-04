@@ -101,7 +101,6 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_pstream_compress_drain_block_resume),
 
     /* --- Format (on-disk) --- */
-    TEST_CASE(test_bit_reader),
     TEST_CASE(test_huffman_codec),
     TEST_CASE(test_huffman_codec_dict),
     TEST_CASE(test_eof_block_structure),

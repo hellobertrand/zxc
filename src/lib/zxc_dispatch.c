@@ -119,19 +119,14 @@ int zxc_pivco_encode_section_default(const uint8_t* RESTRICT literals, size_t n_
                                      size_t dst_cap);
 int zxc_pivco_decode_section_default(const uint8_t* RESTRICT payload, size_t payload_size,
                                      uint8_t* RESTRICT dst, size_t n, uint8_t* RESTRICT scratch);
-int zxc_huf_encode_section_default(const uint8_t* RESTRICT literals, const size_t n_literals,
-                                   const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
-                                   const size_t dst_cap);
-int zxc_huf_decode_section_default(const uint8_t* RESTRICT payload, const size_t payload_size,
-                                   uint8_t* RESTRICT dst, const size_t n_literals);
-int zxc_huf_encode_section_dict_default(const uint8_t* RESTRICT literals, const size_t n_literals,
-                                        const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
-                                        const size_t dst_cap);
-int zxc_huf_decode_section_dict_default(const uint8_t* RESTRICT payload, const size_t payload_size,
-                                        uint8_t* RESTRICT dst, const size_t n_literals,
-                                        const zxc_huf_dec_entry_t* RESTRICT table);
-int zxc_huf_build_dec_table_default(const uint8_t* RESTRICT code_len,
-                                    zxc_huf_dec_entry_t* RESTRICT table);
+int zxc_pivco_encode_section_dict_default(const uint8_t* RESTRICT literals, size_t n_literals,
+                                          const uint32_t* RESTRICT freq,
+                                          const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
+                                          size_t dst_cap);
+int zxc_pivco_decode_section_dict_default(const uint8_t* RESTRICT payload, size_t payload_size,
+                                          uint8_t* RESTRICT dst, size_t n,
+                                          const uint8_t* RESTRICT packed_lengths,
+                                          uint8_t* RESTRICT scratch);
 void zxc_huf_pack_lengths_default(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out);
 int zxc_huf_unpack_lengths_default(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len);
 
@@ -578,92 +573,19 @@ int zxc_pivco_decode_section(const uint8_t* RESTRICT payload, const size_t paylo
     return zxc_pivco_decode_section_default(payload, payload_size, dst, n, scratch);
 }
 
-/**
- * @brief Encode a full Huffman literal section (lengths header + streams).
- *
- * Un-suffixed entry forwarding to @ref zxc_huf_encode_section_default; full
- * contract in @c zxc_internal.h.
- *
- * @param[in]  literals    Source literal bytes.
- * @param[in]  n_literals  Number of source bytes.
- * @param[in]  code_len    Per-symbol code lengths.
- * @param[out] dst         Destination section buffer.
- * @param[in]  dst_cap     Capacity of @p dst in bytes.
- * @return Bytes written on success, negative `zxc_error_t` on failure.
- */
-int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
-                           const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
-                           const size_t dst_cap) {
-    return zxc_huf_encode_section_default(literals, n_literals, code_len, dst, dst_cap);
+int zxc_pivco_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n_literals,
+                                  const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                                  uint8_t* RESTRICT dst, const size_t dst_cap) {
+    return zxc_pivco_encode_section_dict_default(literals, n_literals, freq, code_len, dst,
+                                                 dst_cap);
 }
 
-/**
- * @brief Decode a full Huffman literal section.
- *
- * Un-suffixed entry forwarding to @ref zxc_huf_decode_section_default; full
- * contract in @c zxc_internal.h.
- *
- * @param[in]  payload       Section payload.
- * @param[in]  payload_size  Payload length in bytes.
- * @param[out] dst           Destination buffer.
- * @param[in]  n_literals    Expected number of decoded bytes.
- * @return `ZXC_OK` on success, negative `zxc_error_t` on failure.
- */
-int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
-                           uint8_t* RESTRICT dst, const size_t n_literals) {
-    return zxc_huf_decode_section_default(payload, payload_size, dst, n_literals);
-}
-
-/**
- * @brief Encode a Huffman literal section without lengths header (shared dict table).
- *
- * Un-suffixed entry forwarding to @ref zxc_huf_encode_section_dict_default; full
- * contract in @c zxc_internal.h.
- *
- * @param[in]  literals    Source literal bytes.
- * @param[in]  n_literals  Number of source bytes.
- * @param[in]  code_len    Per-symbol code lengths (from the shared dict table).
- * @param[out] dst         Destination section buffer.
- * @param[in]  dst_cap     Capacity of @p dst in bytes.
- * @return Bytes written on success, negative `zxc_error_t` on failure.
- */
-int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n_literals,
-                                const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
-                                const size_t dst_cap) {
-    return zxc_huf_encode_section_dict_default(literals, n_literals, code_len, dst, dst_cap);
-}
-
-/**
- * @brief Decode a Huffman literal section using a prebuilt shared-dict table.
- *
- * Un-suffixed entry forwarding to @ref zxc_huf_decode_section_dict_default; full
- * contract in @c zxc_internal.h.
- *
- * @param[in]  payload       Section payload.
- * @param[in]  payload_size  Payload length in bytes.
- * @param[out] dst           Destination buffer.
- * @param[in]  n_literals    Expected number of decoded bytes.
- * @param[in]  table         Prebuilt shared-dict decode table.
- * @return `ZXC_OK` on success, negative `zxc_error_t` on failure.
- */
-int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
-                                uint8_t* RESTRICT dst, const size_t n_literals,
-                                const zxc_huf_dec_entry_t* RESTRICT table) {
-    return zxc_huf_decode_section_dict_default(payload, payload_size, dst, n_literals, table);
-}
-
-/**
- * @brief Build the multi-symbol Huffman decode table from code lengths.
- *
- * Un-suffixed entry forwarding to @ref zxc_huf_build_dec_table_default; full
- * contract in @c zxc_internal.h.
- *
- * @param[in]  code_len  Per-symbol code lengths.
- * @param[out] table     Destination decode table.
- * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` on invalid lengths.
- */
-int zxc_huf_build_dec_table(const uint8_t* RESTRICT code_len, zxc_huf_dec_entry_t* RESTRICT table) {
-    return zxc_huf_build_dec_table_default(code_len, table);
+int zxc_pivco_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
+                                  uint8_t* RESTRICT dst, const size_t n,
+                                  const uint8_t* RESTRICT packed_lengths,
+                                  uint8_t* RESTRICT scratch) {
+    return zxc_pivco_decode_section_dict_default(payload, payload_size, dst, n, packed_lengths,
+                                                 scratch);
 }
 
 /**
@@ -927,7 +849,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
                                file_has_checksums && checksum_enabled, dict_size) != ZXC_OK)) {
         return ZXC_ERROR_BAD_HEADER;
     }
-    ctx.format_version = ip[4]; /* selects the v6/v7 wire meaning of enc 2/3 */
 
     /* Dictionary validation */
     if (header_dict_id != 0) {
@@ -1381,7 +1302,6 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
                                       NULL) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
-    dctx->inner.format_version = ip[4]; /* v6/v7 wire meaning of enc 2/3 */
 
     /* Static dctx: block_size is locked at workspace init; reject any
      * archive whose declared block_size would require a re-partition. */
