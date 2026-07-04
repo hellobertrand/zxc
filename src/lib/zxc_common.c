@@ -89,6 +89,9 @@ typedef struct {
     /* mode == 0: scratch for a Huffman-coded GLO token section (enc_litlen == HUFFMAN). */
     size_t off_tok_dctx;
     size_t sz_tok_dctx;
+    /* mode == 0: PivCo decode level scratch (one chunk-sized ping-pong buffer). */
+    size_t off_pivco_dctx;
+    size_t sz_pivco_dctx;
     /* mode == 0 with dict only: prebuilt shared-dictionary Huffman decode table. */
     size_t off_huf_dict;
     /* mode == 1 (compress) */
@@ -159,6 +162,12 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         layout.sz_tok_dctx = (chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16) + ZXC_PAD_SIZE;
         layout.off_tok_dctx = layout.total;
         layout.total += ZXC_ALIGN_CL(layout.sz_tok_dctx);
+        /* PivCo (enc 4/5) decode scratch: odd tree levels ping-pong through this
+         * buffer while even levels use the destination. Sized for the largest
+         * section a block can carry (chunk_size literals). */
+        layout.sz_pivco_dctx = chunk_size + ZXC_PIVCO_SCRATCH_PAD;
+        layout.off_pivco_dctx = layout.total;
+        layout.total += ZXC_ALIGN_CL(layout.sz_pivco_dctx);
         /* Shared-dictionary Huffman decode table: built once per context by
          * zxc_cctx_attach_dict_huf, read by HUFFMAN_DICT literal sections. */
         if (dict_size > 0) {
@@ -301,6 +310,12 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
         ctx->lit_buffer_cap = chunk_size + ZXC_PAD_SIZE;
         ctx->tok_buffer = mem + layout.off_tok_dctx;
         ctx->tok_buffer_cap = layout.sz_tok_dctx;
+        ctx->pivco_scratch = mem + layout.off_pivco_dctx;
+        ctx->pivco_scratch_cap = layout.sz_pivco_dctx;
+        /* Native semantics by default (block-level APIs have no file header);
+         * the file/stream/seekable entry points overwrite this with the
+         * archive's actual header version byte. */
+        ctx->format_version = ZXC_FILE_FORMAT_VERSION;
         if (dict_size > 0) ctx->dict_huf_table = (zxc_huf_dec_entry_t*)(mem + layout.off_huf_dict);
         return ZXC_OK;
     }

@@ -246,6 +246,7 @@ struct zxc_seekable_s {
 
     /* Reusable decompression context (single-threaded path only) */
     zxc_cctx_t dctx;
+    uint8_t format_version; /**< archive header version byte (v6/v7 enc semantics) */
     int dctx_initialized;
 
     /* Dictionary (owned copy, freed in zxc_seekable_free). */
@@ -285,6 +286,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
     if (UNLIKELY(zxc_read_file_header(data, data_size, &block_size_sz, &file_has_chk,
                                       &header_dict_id) != ZXC_OK))
         return NULL;  // LCOV_EXCL_LINE
+    const uint8_t hdr_version = data[4];
     const uint32_t block_size = (uint32_t)block_size_sz;
     if (UNLIKELY(block_size == 0)) return NULL;  // LCOV_EXCL_LINE
 
@@ -325,6 +327,7 @@ static zxc_seekable* zxc_seekable_parse(const uint8_t* data, const size_t data_s
 
     s->num_blocks = num_blocks;
     s->block_size = block_size;
+    s->format_version = hdr_version;
     s->file_has_checksums = file_has_chk;
     s->expected_dict_id = header_dict_id;
     s->src = data;
@@ -446,6 +449,7 @@ zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r) {
     if (UNLIKELY(zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &bs_sz, &fhc,
                                       &header_dict_id) != ZXC_OK))
         return NULL;  // LCOV_EXCL_LINE
+    const uint8_t hdr_version = header[4];
     const uint32_t bs = (uint32_t)bs_sz;
     if (UNLIKELY(bs == 0)) return NULL;
 
@@ -505,6 +509,7 @@ zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r) {
     s->src_size = r->size;
     s->num_blocks = num_blocks;
     s->block_size = bs;
+    s->format_version = hdr_version;
     s->file_has_checksums = fhc;
     s->expected_dict_id = header_dict_id;
 
@@ -704,6 +709,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
                      ZXC_OK))
             return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
+        s->dctx.format_version = s->format_version;
         if (UNLIKELY(zxc_cctx_attach_dict_huf(&s->dctx, s->has_dict_huf ? s->dict_huf : NULL) !=
                      ZXC_OK)) {
             // LCOV_EXCL_START
@@ -863,6 +869,7 @@ static void* zxc_seek_mt_worker(void* arg) {
         job->result = ZXC_ERROR_MEMORY;
         return NULL;
     }
+    dctx.format_version = s->format_version;
     // LCOV_EXCL_STOP
     if (UNLIKELY(zxc_cctx_attach_dict_huf(&dctx, s->has_dict_huf ? s->dict_huf : NULL) != ZXC_OK)) {
         // LCOV_EXCL_START

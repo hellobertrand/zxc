@@ -623,10 +623,22 @@ extern "C" {
  *
  *  Levels < ULTRA keep the legacy fixed margins above so their output stays
  *  byte-stable. @{ */
-#define ZXC_SS_PREM_RLE_Q8 1
-#define ZXC_SS_PREM_HUF_Q8 4
 /** @brief Decode tax of a candidate: `n` decoded bytes at premium `prem` (Q8). */
 #define ZXC_SS_TAX(n, prem_q8) (((size_t)(n) * (size_t)(prem_q8)) >> 8)
+/** @brief RLE decode premium. Below ULTRA, 8 (= 1/32 = 3.125%) reproduces the
+ *  historical `>> ZXC_RLE_MARGIN_SHIFT` margin EXACTLY for RLE-vs-RAW, keeping
+ *  levels 1-6 selection stable; at ULTRA the physical premium applies (RLE
+ *  decodes at near copy speed). */
+static inline int zxc_ss_prem_rle_q8(const int level) {
+    return (level >= ZXC_LEVEL_ULTRA) ? 1 : (256 >> ZXC_RLE_MARGIN_SHIFT);
+}
+/** @brief Huffman/PivCo decode premium: the level's lambda folded with the
+ *  entropy decoder's cost over the copy path. 8 (3.125%) below ULTRA matches
+ *  the historical margin against a RAW baseline; 4 (1.56%) at ULTRA trades
+ *  more decode time for ratio (validated on silesia). */
+static inline int zxc_ss_prem_huf_q8(const int level) {
+    return (level >= ZXC_LEVEL_ULTRA) ? 4 : (256 >> ZXC_HUF_MARGIN_SHIFT);
+}
 /** @} */
 /** @brief Absolute floor below which Huffman cannot beat RAW even with
  *         zero-entropy literals after the @ref ZXC_HUF_MARGIN_SHIFT margin.
@@ -880,8 +892,14 @@ typedef enum {
 typedef enum {
     ZXC_SECTION_ENCODING_RAW = 0,
     ZXC_SECTION_ENCODING_RLE = 1,
-    ZXC_SECTION_ENCODING_HUFFMAN = 2,
-    ZXC_SECTION_ENCODING_HUFFMAN_DICT = 3
+    /* Values 2/3 are VERSION-DEPENDENT on the wire: in v6 archives they mean
+     * the classic 4-stream Huffman layout; in v7+ they mean the PivCo layout
+     * (same code bits reordered by tree level, decoded by data-parallel list
+     * merges). Both spellings are provided for readable call sites. */
+    ZXC_SECTION_ENCODING_HUFFMAN = 2,      /* v6 wire meaning of value 2 */
+    ZXC_SECTION_ENCODING_HUFFMAN_DICT = 3, /* v6 wire meaning of value 3 */
+    ZXC_SECTION_ENCODING_PIVCO = 2,        /* v7 wire meaning of value 2 */
+    ZXC_SECTION_ENCODING_PIVCO_DICT = 3    /* v7 wire meaning of value 3 */
 } zxc_section_encoding_t;
 
 /**
@@ -1540,6 +1558,47 @@ void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT ou
  */
 int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len);
 
+/* --------------------------------------------------------------------------
+ * PivCo-Huffman section codec (v7+, enc 4/5)
+ *
+ * Same code bits as canonical Huffman for the same lengths, reordered by tree
+ * LEVEL: the payload is, for each internal node in BFS order, that node's
+ * branch bits (one bit per symbol routed through it, LSB-first, each node
+ * byte-aligned). No sub-stream size header: the decoder derives every node's
+ * size by popcounting its parent's bits, so the u16 stream-size limit of the
+ * classic layout does not apply. Decoding is bottom-up level merges
+ * (shuffle-parallel, no gather).
+ * -------------------------------------------------------------------------- */
+
+/** @brief Extra scratch slack required past `n` by the PivCo decoder. */
+#define ZXC_PIVCO_SCRATCH_PAD 32
+
+/** @brief Exact encoded size (bytes) of a PivCo section for this histogram and
+ *  code lengths; includes the 128-byte lengths header when @p with_header. */
+size_t zxc_pivco_calc_size(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                           int with_header);
+
+/** @brief Encode a PivCo literal section (128-byte lengths header + payload). */
+int zxc_pivco_encode_section(const uint8_t* RESTRICT literals, size_t n_literals,
+                             const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                             uint8_t* RESTRICT dst, size_t dst_cap);
+
+/** @brief Encode a PivCo section against shared-dictionary code lengths (no header). */
+int zxc_pivco_encode_section_dict(const uint8_t* RESTRICT literals, size_t n_literals,
+                                  const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                                  uint8_t* RESTRICT dst, size_t dst_cap);
+
+/** @brief Decode a PivCo literal section into @p dst (exactly @p n bytes).
+ *  @p dst needs ZXC_PAD_SIZE slack, @p scratch at least n + ZXC_PIVCO_SCRATCH_PAD. */
+int zxc_pivco_decode_section(const uint8_t* RESTRICT payload, size_t payload_size,
+                             uint8_t* RESTRICT dst, size_t n, uint8_t* RESTRICT scratch);
+
+/** @brief Decode a PivCo dict section (code lengths from @p packed_lengths). */
+int zxc_pivco_decode_section_dict(const uint8_t* RESTRICT payload, size_t payload_size,
+                                  uint8_t* RESTRICT dst, size_t n,
+                                  const uint8_t* RESTRICT packed_lengths,
+                                  uint8_t* RESTRICT scratch);
+
 /* ---------------------------------------------------------------------------
  * Compression / decompression context.
  *
@@ -1592,6 +1651,10 @@ typedef struct {
     uint8_t* tok_buffer;                 /**< Decode scratch for a Huffman-coded GLO token
                                               section (enc_litlen == HUFFMAN); NULL on compress. */
     size_t tok_buffer_cap;               /**< Capacity of tok_buffer in bytes. */
+    uint8_t* pivco_scratch;              /**< Level ping-pong scratch for PivCo decode. */
+    size_t pivco_scratch_cap;            /**< Capacity of pivco_scratch in bytes. */
+    uint8_t format_version;              /**< Archive format version being decoded (0 = v6
+                                          *   semantics; set from the file header byte). */
     uint8_t* opt_scratch;                /**< Optimal-parser DP scratch (level >= 6 only,
                                               lazy-allocated, packs dp/parent_len/parent_off/actions).
                                               Also reused as transient scratch for the

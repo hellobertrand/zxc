@@ -111,6 +111,14 @@ int zxc_compress_chunk_wrapper_default(zxc_cctx_t* RESTRICT ctx, const uint8_t* 
 // wrappers below expose the un-suffixed names for tests and external callers.
 int zxc_huf_build_code_lengths_default(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
                                        void* RESTRICT scratch, int max_code_len);
+size_t zxc_pivco_calc_size_default(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                                   int with_header);
+int zxc_pivco_encode_section_default(const uint8_t* RESTRICT literals, size_t n_literals,
+                                     const uint32_t* RESTRICT freq,
+                                     const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
+                                     size_t dst_cap);
+int zxc_pivco_decode_section_default(const uint8_t* RESTRICT payload, size_t payload_size,
+                                     uint8_t* RESTRICT dst, size_t n, uint8_t* RESTRICT scratch);
 int zxc_huf_encode_section_default(const uint8_t* RESTRICT literals, const size_t n_literals,
                                    const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
                                    const size_t dst_cap);
@@ -193,7 +201,9 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
             __cpuidex(regs, 7, 0);
             if (regs[1] & (1 << 5)) avx2 = 1;
             // AVX512 also needs XCR0[5..7] (opmask/ZMM)
-            if ((regs[1] & (1 << 16)) && (regs[1] & (1 << 30)) && (xcr0 & 0xE0) == 0xE0) avx512 = 1;
+            if ((regs[1] & (1 << 16)) && (regs[1] & (1 << 30)) && (regs[2] & (1 << 6)) &&
+                (xcr0 & 0xE0) == 0xE0)
+                avx512 = 1; /* AVX512 tier = F+BW+VBMI2 (variant built with -mavx512vbmi2) */
         }
     }
 
@@ -208,7 +218,8 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
     // GCC/Clang built-in detection
     __builtin_cpu_init();
 
-    if (__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw")) {
+    if (__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
+        __builtin_cpu_supports("avx512vbmi2")) {
         features = ZXC_CPU_AVX512;
     } else if (__builtin_cpu_supports("avx2")) {
         features = ZXC_CPU_AVX2;
@@ -548,6 +559,23 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
                                void* RESTRICT scratch, const int max_code_len) {
     return zxc_huf_build_code_lengths_default(freq, code_len, scratch, max_code_len);
+}
+
+/** @brief Un-suffixed forwarders for the PivCo section codec (tests, tools). */
+size_t zxc_pivco_calc_size(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                           const int with_header) {
+    return zxc_pivco_calc_size_default(freq, code_len, with_header);
+}
+
+int zxc_pivco_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
+                             const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                             uint8_t* RESTRICT dst, const size_t dst_cap) {
+    return zxc_pivco_encode_section_default(literals, n_literals, freq, code_len, dst, dst_cap);
+}
+
+int zxc_pivco_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
+                             uint8_t* RESTRICT dst, const size_t n, uint8_t* RESTRICT scratch) {
+    return zxc_pivco_decode_section_default(payload, payload_size, dst, n, scratch);
 }
 
 /**
@@ -899,6 +927,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
                                file_has_checksums && checksum_enabled, dict_size) != ZXC_OK)) {
         return ZXC_ERROR_BAD_HEADER;
     }
+    ctx.format_version = ip[4]; /* selects the v6/v7 wire meaning of enc 2/3 */
 
     /* Dictionary validation */
     if (header_dict_id != 0) {
@@ -1352,6 +1381,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
                                       NULL) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
+    dctx->inner.format_version = ip[4]; /* v6/v7 wire meaning of enc 2/3 */
 
     /* Static dctx: block_size is locked at workspace init; reject any
      * archive whose declared block_size would require a re-partition. */

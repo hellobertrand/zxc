@@ -192,7 +192,8 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
         # AVX2 for GCC/Clang
         zxc_add_variant(_avx2 "-mavx2;-mfma;-mbmi;-mbmi2;-mlzcnt")
         # AVX512 for GCC/Clang
-        zxc_add_variant(_avx512 "-mavx512f;-mavx512bw;-mbmi;-mbmi2;-mlzcnt")
+        zxc_add_variant(_avx512
+                        "-mavx512f;-mavx512bw;-mavx512vbmi;-mavx512vbmi2;-mbmi;-mbmi2;-mlzcnt")
     endif()
 
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
