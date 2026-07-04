@@ -590,10 +590,13 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     if (UNLIKELY((e_end != src + src_size) || (uint64_t)sz_offsets < expected_off_size))
         return ZXC_ERROR_CORRUPT_DATA;
 
-    /* Token stream: RAW in place, or (level-7) Huffman-decoded into tok_buffer.
-     * Either way t_ptr exposes n_sequences raw token bytes to the loops below. */
-    const uint8_t* t_ptr;
-    if (gh.enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN) {
+    /* Token stream: RAW in place, or (level-7) PivCo-decoded into tok_buffer.
+     * Either way t_ptr exposes n_sequences raw token bytes to the loops below.
+     * Declared RESTRICT and initialised to the in-place stream so the common
+     * (RAW) case keeps the pre-token-Huffman aliasing guarantees in the hot
+     * sequence loop; the entropy branch is per-block and placed out of line. */
+    const uint8_t* RESTRICT t_ptr = p_curr;
+    if (UNLIKELY(gh.enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN)) {
         /* Wire value 2: PivCo layout. */
         const size_t n_tok = gh.n_sequences;
         if (UNLIKELY(n_tok + ZXC_PAD_SIZE > ctx->tok_buffer_cap)) return ZXC_ERROR_CORRUPT_DATA;
@@ -603,9 +606,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             zxc_pivco_decode_section(p_curr, sz_tokens, ctx->tok_buffer, n_tok, ctx->pivco_scratch);
         if (UNLIKELY(rc != ZXC_OK)) return rc;
         t_ptr = ctx->tok_buffer;
-    } else {
-        if (UNLIKELY(sz_tokens < gh.n_sequences)) return ZXC_ERROR_CORRUPT_DATA;
-        t_ptr = p_curr;
+    } else if (UNLIKELY(sz_tokens < gh.n_sequences)) {
+        return ZXC_ERROR_CORRUPT_DATA;
     }
 
     uint8_t* d_ptr = dst;
