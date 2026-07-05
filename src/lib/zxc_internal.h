@@ -192,6 +192,14 @@ extern "C" {
  */
 #define ZXC_NOINLINE __attribute__((noinline))
 
+/** @def ZXC_COLD
+ * @brief Marks a function as rarely executed: optimized for size and placed
+ *        in a cold text section, away from the hot paths' i-cache footprint.
+ *        No MSVC equivalent -- expands to nothing there (noinline still keeps
+ *        the body out of the caller).
+ */
+#define ZXC_COLD __attribute__((cold))
+
 #elif defined(_MSC_VER)
 #include <intrin.h>
 #if defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64)
@@ -224,6 +232,8 @@ extern "C" {
  * @brief Prevents a function from being inlined into its callers (MSVC).
  */
 #define ZXC_NOINLINE __declspec(noinline)
+/** @copydoc ZXC_COLD */
+#define ZXC_COLD
 #pragma intrinsic(_BitScanReverse)
 #else
 #define LIKELY(x) (x)
@@ -243,6 +253,7 @@ extern "C" {
  * @brief Prevents inlining (best-effort no-op fallback for unknown compilers).
  */
 #define ZXC_NOINLINE
+#define ZXC_COLD
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #include <stdalign.h>
@@ -317,14 +328,9 @@ extern "C" {
 
 /** @brief Magic word identifying ZXC files (little-endian 0x9CB02EF5). */
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
-/** @brief Current on-disk file format version written by the encoder. */
+/** @brief Current on-disk file format version. The decoder accepts only this
+ *  version; Older versions are rejected with ZXC_ERROR_BAD_VERSION. */
 #define ZXC_FILE_FORMAT_VERSION 7
-/** @brief Oldest on-disk file format version the decoder still reads. Versions in
- *  [ZXC_FILE_FORMAT_VERSION_MIN, ZXC_FILE_FORMAT_VERSION] are accepted; all others
- *  are rejected with ZXC_ERROR_BAD_VERSION. v7 relaxed the Huffman code-length
- *  limit from 8 to 11 bits (level 7 / ULTRA) and adds Huffman-coded tokens; v6
- *  archives (code_len <= 8, no token Huffman) stay decodable. */
-#define ZXC_FILE_FORMAT_VERSION_MIN 7
 
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
@@ -553,63 +559,59 @@ extern "C" {
 /** @} */
 
 /** @name Huffman Codec Constants
- *  @brief Length-limited canonical Huffman codec for the GLO literal stream
- *         (active at compression level >= 6).
+ *  @brief Length-limited canonical Huffman codec for GLO literal sections
+ *         (level >= 6) and level-7 token sections, in the PivCo layout.
  *
- *  On-disk section payload layout:
+ *  On-disk section payload layout (FORMAT.md section 5.2.1):
  *  - @c ZXC_HUF_TABLE_SIZE bytes: @c ZXC_HUF_NUM_SYMBOLS code lengths
  *    packed two per byte (4 bits each). The same packed table is used as the
  *    per-block lengths header (enc_lit=2) and as the shared table carried by
- *    a .zxd dictionary (enc_lit=3) -- hence the public constant.
- *  - @c ZXC_HUF_STREAM_SIZES_HEADER_SIZE bytes: the first
- *    `ZXC_HUF_NUM_STREAMS - 1` sub-stream sizes as little-endian @c uint16_t;
- *    the last sub-stream size is derived from the enclosing section length.
- *  - Payload: @c ZXC_HUF_NUM_STREAMS concatenated LSB-first bit-streams,
- *    each covering an equal share of the literal indices (the last absorbs
- *    the remainder).
- *
- *  Sections use the PivCo layout: level-ordered branch bits decoded by
- *  data-parallel merges (see zxc_huffman.c).
- *  feeding a `ZXC_HUF_NUM_STREAMS`-way interleaved hot loop.
+ *    a .zxd dictionary (enc_lit=3, header omitted) -- hence the public
+ *    constant.
+ *  - Node runs: for every emitting node of the canonical code tree in BFS
+ *    order, its branch bits (or packed D-bit residuals for flat subtree
+ *    roots), LSB-first, each run padded to a byte boundary. All run sizes
+ *    are derived (root count + popcounts), never stored.
  *  @{ */
-/** @brief Maximum Huffman code length, in bits: the absolute ceiling the decoder
- *         on-wire validation supports.
- *         single code can exactly fill one lookup window; it must never exceed it
- *         (a longer code would underflow the bit reader's refill). The encoder
- *         caps codes per level via ::zxc_huf_enc_max_code_len. */
+/** @brief Maximum Huffman code length, in bits: the ceiling the decoder's
+ *         on-wire validation accepts (and the level-7 encoder cap). Bounds
+ *         the tree depth, hence the merge-level count and every stack array
+ *         sized off the code length. The encoder caps codes per level via
+ *         ::zxc_huf_enc_max_code_len. */
 #define ZXC_HUF_MAX_CODE_LEN_ULTRA 11
 /** @brief Encoder code-length cap for levels up to ::ZXC_LEVEL_DENSITY (below
- *         ::ZXC_LEVEL_ULTRA): 8 bits keeps multi-symbol decode dense and fast. */
+ *         ::ZXC_LEVEL_ULTRA): shallow 8-bit trees decode fastest (fewer merge
+ *         levels, denser flat subtrees) -- this cap is the de-facto speed
+ *         governor of level 6. */
 #define ZXC_HUF_MAX_CODE_LEN_DENSITY 8
 /** @brief Alphabet size: one entry per possible byte value. */
 #define ZXC_HUF_NUM_SYMBOLS 256
-/** @brief Interleaved bit-stream count for parallel decoding. */
-#define ZXC_HUF_NUM_STREAMS 4
-/** @brief RLE margin shift: controls the threshold for choosing RLE over RAW
- *         (levels < ::ZXC_LEVEL_ULTRA; ULTRA uses the space-speed tax below). */
+/** @brief RLE margin shift: source of the legacy below-ULTRA premium used by
+ *         ::zxc_ss_prem_rle_q8 (256 >> shift reproduces the historical
+ *         RLE-vs-RAW margin exactly). */
 #define ZXC_RLE_MARGIN_SHIFT 5
-/** @brief Huffman margin shift: controls the threshold for choosing Huffman over
- *         RAW/RLE (levels < ::ZXC_LEVEL_ULTRA; ULTRA uses the space-speed tax below). */
+/** @brief Huffman margin shift: source of the legacy below-ULTRA premium used
+ *         by ::zxc_ss_prem_huf_q8, and of the ::ZXC_HUF_MIN_LITERALS floor. */
 #define ZXC_HUF_MARGIN_SHIFT 5
 
-/** @name Space-speed section selection (ZXC_LEVEL_ULTRA)
+/** @name Space-speed section selection
  *
- *  At ULTRA, each candidate section encoding is priced with a Lagrangian cost
- *  `J = compressed_size + decode_tax` and the minimum-J candidate wins
- *  (Kraken-style `J = R + lambda*D` with a linear per-byte decode-time model).
- *  The tax charges the DECODE time a candidate adds over the RAW copy path,
- *  expressed in bytes: `tax = (n_decoded_bytes * PREM) >> 8`.
+ *  Section encodings are selected at EVERY level by pricing each candidate
+ *  with a Lagrangian cost `J = compressed_size + decode_tax` and taking the
+ *  minimum (Kraken-style `J = R + lambda*D` with a linear per-byte
+ *  decode-time model). The tax charges the DECODE time a candidate adds over
+ *  the RAW copy path, expressed in bytes:
+ *  `tax = (n_decoded_bytes * PREM) >> 8`. Only the premium is per-level:
  *
- *  - `PREM_HUF = 4` (= 1/64, 1.56% of the decoded bytes): the Huffman section
- *    decoder runs ~15x slower than a raw copy (~0.5 ns/B premium at ~2 vs
- *    ~30 GB/s), so this exchange rate accepts ~1 byte of size for ~30 ns of
- *    decode time. Validated on silesia: vs the legacy 3.1% margin it gains
- *    ~0.8 pt of ratio for ~3% decode.
- *  - `PREM_RLE = 1` (= 0.39%): RLE decode is nearly copy-speed; only a token
- *    tax to break ties toward RAW.
- *
- *  Levels < ULTRA keep the legacy fixed margins above so their output stays
- *  byte-stable. @{ */
+ *  - Below ULTRA, the premiums reproduce the historical fixed margins
+ *    EXACTLY (8 = 3.125% = the old `>> 5` margins), keeping levels 1-6
+ *    output byte-stable.
+ *  - At ULTRA the physical premiums apply: `PREM_HUF = 4` (1.56% -- the
+ *    entropy decoder costs ~0.5 ns/B over a raw copy, so ~1 byte of size
+ *    buys ~30 ns of decode; validated on silesia: ~0.8 pt of ratio for ~3%
+ *    decode vs the legacy margin) and `PREM_RLE = 1` (0.39%: RLE decodes at
+ *    near copy speed, only a token tax to break ties toward RAW).
+ *  @{ */
 /** @brief Decode tax of a candidate: `n` decoded bytes at premium `prem` (Q8). */
 #define ZXC_SS_TAX(n, prem_q8) (((size_t)(n) * (size_t)(prem_q8)) >> 8)
 /** @brief RLE decode premium. Below ULTRA, 8 (= 1/32 = 3.125%) reproduces the
@@ -617,14 +619,14 @@ extern "C" {
  *  levels 1-6 selection stable; at ULTRA the physical premium applies (RLE
  *  decodes at near copy speed). */
 static inline int zxc_ss_prem_rle_q8(const int level) {
-    return (level >= ZXC_LEVEL_ULTRA) ? 1 : (256 >> ZXC_RLE_MARGIN_SHIFT);
+    return (level >= ZXC_LEVEL_DENSITY) ? 1 : (256 >> ZXC_RLE_MARGIN_SHIFT);
 }
 /** @brief Huffman/PivCo decode premium: the level's lambda folded with the
  *  entropy decoder's cost over the copy path. 8 (3.125%) below ULTRA matches
  *  the historical margin against a RAW baseline; 4 (1.56%) at ULTRA trades
  *  more decode time for ratio (validated on silesia). */
 static inline int zxc_ss_prem_huf_q8(const int level) {
-    return (level >= ZXC_LEVEL_ULTRA) ? 4 : (256 >> ZXC_HUF_MARGIN_SHIFT);
+    return (level >= ZXC_LEVEL_DENSITY) ? 4 : (256 >> ZXC_HUF_MARGIN_SHIFT);
 }
 /** @} */
 /** @brief Absolute floor below which Huffman cannot beat RAW even with
@@ -834,11 +836,12 @@ typedef enum {
  * or offsets) are stored within a block.
  * - `ZXC_SECTION_ENCODING_RAW`: Data is stored uncompressed.
  * - `ZXC_SECTION_ENCODING_RLE`: Run-Length Encoding.
- * - `ZXC_SECTION_ENCODING_HUFFMAN`: Canonical Huffman, 4-way interleaved
- *   sub-streams, max 8-bit codes, LSB-first. Only valid for the literal
- *   stream (`enc_lit`) of GLO blocks. Produced exclusively at level >= 6.
- * - `ZXC_SECTION_ENCODING_HUFFMAN_DICT`: same bitstream layout as HUFFMAN but
- *   the 128-byte code-lengths header is omitted: codes come from the shared
+ * - `ZXC_SECTION_ENCODING_HUFFMAN`: canonical Huffman in the PivCo layout
+ *   (level-ordered branch runs, max 11-bit codes -- FORMAT.md section 5.2.1).
+ *   Valid for the literal stream (`enc_lit`, level >= 6) and the token
+ *   stream (`enc_litlen`, level 7) of GLO blocks.
+ * - `ZXC_SECTION_ENCODING_HUFFMAN_DICT`: same payload as HUFFMAN but the
+ *   128-byte code-lengths header is omitted: codes come from the shared
  *   table carried by the dictionary (.zxd). Only valid for `enc_lit` of GLO
  *   blocks in dictionary-compressed archives; requires the same dictionary
  *   (content + table, bound by dict_id) at decode time.
@@ -846,14 +849,8 @@ typedef enum {
 typedef enum {
     ZXC_SECTION_ENCODING_RAW = 0,
     ZXC_SECTION_ENCODING_RLE = 1,
-    /* Values 2/3 are VERSION-DEPENDENT on the wire: in v6 archives they mean
-     * the classic 4-stream Huffman layout; in v7+ they mean the PivCo layout
-     * (same code bits reordered by tree level, decoded by data-parallel list
-     * merges). Both spellings are provided for readable call sites. */
-    ZXC_SECTION_ENCODING_HUFFMAN = 2,      /* v6 wire meaning of value 2 */
-    ZXC_SECTION_ENCODING_HUFFMAN_DICT = 3, /* v6 wire meaning of value 3 */
-    ZXC_SECTION_ENCODING_PIVCO = 2,        /* v7 wire meaning of value 2 */
-    ZXC_SECTION_ENCODING_PIVCO_DICT = 3    /* v7 wire meaning of value 3 */
+    ZXC_SECTION_ENCODING_HUFFMAN = 2,
+    ZXC_SECTION_ENCODING_HUFFMAN_DICT = 3
 } zxc_section_encoding_t;
 
 /**
@@ -1406,15 +1403,14 @@ void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT ou
 int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len);
 
 /* --------------------------------------------------------------------------
- * PivCo-Huffman section codec (v7+, enc 4/5)
+ * PivCo-Huffman section codec (enc 2/3)
  *
  * Same code bits as canonical Huffman for the same lengths, reordered by tree
  * LEVEL: the payload is, for each internal node in BFS order, that node's
  * branch bits (one bit per symbol routed through it, LSB-first, each node
- * byte-aligned). No sub-stream size header: the decoder derives every node's
- * size by popcounting its parent's bits, so the u16 stream-size limit of the
- * classic layout does not apply. Decoding is bottom-up level merges
- * (shuffle-parallel, no gather).
+ * byte-aligned). No size fields anywhere: the decoder derives every node's
+ * run length from the root count and popcounts. Decoding is bottom-up level
+ * merges (shuffle-parallel, no gather).
  * -------------------------------------------------------------------------- */
 
 /** @brief Extra scratch slack required past `n` by the PivCo decoder. */
@@ -1422,29 +1418,28 @@ int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_le
 
 /** @brief Exact encoded size (bytes) of a PivCo section for this histogram and
  *  code lengths; includes the 128-byte lengths header when @p with_header. */
-size_t zxc_pivco_calc_size(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
-                           int with_header);
+size_t zxc_huf_calc_size(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                         int with_header);
 
 /** @brief Encode a PivCo literal section (128-byte lengths header + payload). */
-int zxc_pivco_encode_section(const uint8_t* RESTRICT literals, size_t n_literals,
-                             const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
-                             uint8_t* RESTRICT dst, size_t dst_cap);
+int zxc_huf_encode_section(const uint8_t* RESTRICT literals, size_t n_literals,
+                           const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                           uint8_t* RESTRICT dst, size_t dst_cap);
 
 /** @brief Encode a PivCo section against shared-dictionary code lengths (no header). */
-int zxc_pivco_encode_section_dict(const uint8_t* RESTRICT literals, size_t n_literals,
-                                  const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
-                                  uint8_t* RESTRICT dst, size_t dst_cap);
+int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, size_t n_literals,
+                                const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                                uint8_t* RESTRICT dst, size_t dst_cap);
 
 /** @brief Decode a PivCo literal section into @p dst (exactly @p n bytes).
  *  @p dst needs ZXC_PAD_SIZE slack, @p scratch at least n + ZXC_PIVCO_SCRATCH_PAD. */
-int zxc_pivco_decode_section(const uint8_t* RESTRICT payload, size_t payload_size,
-                             uint8_t* RESTRICT dst, size_t n, uint8_t* RESTRICT scratch);
+int zxc_huf_decode_section(const uint8_t* RESTRICT payload, size_t payload_size,
+                           uint8_t* RESTRICT dst, size_t n, uint8_t* RESTRICT scratch);
 
 /** @brief Decode a PivCo dict section (code lengths from @p packed_lengths). */
-int zxc_pivco_decode_section_dict(const uint8_t* RESTRICT payload, size_t payload_size,
-                                  uint8_t* RESTRICT dst, size_t n,
-                                  const uint8_t* RESTRICT packed_lengths,
-                                  uint8_t* RESTRICT scratch);
+int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, size_t payload_size,
+                                uint8_t* RESTRICT dst, size_t n,
+                                const uint8_t* RESTRICT packed_lengths, uint8_t* RESTRICT scratch);
 
 /* ---------------------------------------------------------------------------
  * Compression / decompression context.

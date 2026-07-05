@@ -111,22 +111,21 @@ int zxc_compress_chunk_wrapper_default(zxc_cctx_t* RESTRICT ctx, const uint8_t* 
 // wrappers below expose the un-suffixed names for tests and external callers.
 int zxc_huf_build_code_lengths_default(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
                                        void* RESTRICT scratch, int max_code_len);
-size_t zxc_pivco_calc_size_default(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
-                                   int with_header);
-int zxc_pivco_encode_section_default(const uint8_t* RESTRICT literals, size_t n_literals,
-                                     const uint32_t* RESTRICT freq,
-                                     const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
-                                     size_t dst_cap);
-int zxc_pivco_decode_section_default(const uint8_t* RESTRICT payload, size_t payload_size,
-                                     uint8_t* RESTRICT dst, size_t n, uint8_t* RESTRICT scratch);
-int zxc_pivco_encode_section_dict_default(const uint8_t* RESTRICT literals, size_t n_literals,
-                                          const uint32_t* RESTRICT freq,
-                                          const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
-                                          size_t dst_cap);
-int zxc_pivco_decode_section_dict_default(const uint8_t* RESTRICT payload, size_t payload_size,
-                                          uint8_t* RESTRICT dst, size_t n,
-                                          const uint8_t* RESTRICT packed_lengths,
-                                          uint8_t* RESTRICT scratch);
+size_t zxc_huf_calc_size_default(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                                 int with_header);
+int zxc_huf_encode_section_default(const uint8_t* RESTRICT literals, size_t n_literals,
+                                   const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                                   uint8_t* RESTRICT dst, size_t dst_cap);
+int zxc_huf_decode_section_default(const uint8_t* RESTRICT payload, size_t payload_size,
+                                   uint8_t* RESTRICT dst, size_t n, uint8_t* RESTRICT scratch);
+int zxc_huf_encode_section_dict_default(const uint8_t* RESTRICT literals, size_t n_literals,
+                                        const uint32_t* RESTRICT freq,
+                                        const uint8_t* RESTRICT code_len, uint8_t* RESTRICT dst,
+                                        size_t dst_cap);
+int zxc_huf_decode_section_dict_default(const uint8_t* RESTRICT payload, size_t payload_size,
+                                        uint8_t* RESTRICT dst, size_t n,
+                                        const uint8_t* RESTRICT packed_lengths,
+                                        uint8_t* RESTRICT scratch);
 void zxc_huf_pack_lengths_default(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out);
 int zxc_huf_unpack_lengths_default(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len);
 
@@ -557,35 +556,33 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
 }
 
 /** @brief Un-suffixed forwarders for the PivCo section codec (tests, tools). */
-size_t zxc_pivco_calc_size(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
-                           const int with_header) {
-    return zxc_pivco_calc_size_default(freq, code_len, with_header);
+size_t zxc_huf_calc_size(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                         const int with_header) {
+    return zxc_huf_calc_size_default(freq, code_len, with_header);
 }
 
-int zxc_pivco_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
-                             const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
-                             uint8_t* RESTRICT dst, const size_t dst_cap) {
-    return zxc_pivco_encode_section_default(literals, n_literals, freq, code_len, dst, dst_cap);
+int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
+                           const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                           uint8_t* RESTRICT dst, const size_t dst_cap) {
+    return zxc_huf_encode_section_default(literals, n_literals, freq, code_len, dst, dst_cap);
 }
 
-int zxc_pivco_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
-                             uint8_t* RESTRICT dst, const size_t n, uint8_t* RESTRICT scratch) {
-    return zxc_pivco_decode_section_default(payload, payload_size, dst, n, scratch);
+int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
+                           uint8_t* RESTRICT dst, const size_t n, uint8_t* RESTRICT scratch) {
+    return zxc_huf_decode_section_default(payload, payload_size, dst, n, scratch);
 }
 
-int zxc_pivco_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n_literals,
-                                  const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
-                                  uint8_t* RESTRICT dst, const size_t dst_cap) {
-    return zxc_pivco_encode_section_dict_default(literals, n_literals, freq, code_len, dst,
-                                                 dst_cap);
+int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n_literals,
+                                const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                                uint8_t* RESTRICT dst, const size_t dst_cap) {
+    return zxc_huf_encode_section_dict_default(literals, n_literals, freq, code_len, dst, dst_cap);
 }
 
-int zxc_pivco_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
-                                  uint8_t* RESTRICT dst, const size_t n,
-                                  const uint8_t* RESTRICT packed_lengths,
-                                  uint8_t* RESTRICT scratch) {
-    return zxc_pivco_decode_section_dict_default(payload, payload_size, dst, n, packed_lengths,
-                                                 scratch);
+int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
+                                uint8_t* RESTRICT dst, const size_t n,
+                                const uint8_t* RESTRICT packed_lengths, uint8_t* RESTRICT scratch) {
+    return zxc_huf_decode_section_dict_default(payload, payload_size, dst, n, packed_lengths,
+                                               scratch);
 }
 
 /**

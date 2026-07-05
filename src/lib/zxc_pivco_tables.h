@@ -7,7 +7,7 @@
 
 /**
  * @file zxc_pivco_tables.h
- * @brief Shuffle-index tables for the PivCo merge kernels (declarations).
+ * @brief Shuffle-index tables for the PivCo merge routines (declarations).
  *
  * The definitions live in zxc_pivco_tables.c, compiled ONCE outside the
  * per-architecture function-multiversioning variants: the tables are pure
@@ -19,14 +19,14 @@
  * R lanes 16..31):
  *
  *  - zxc_pivco_idxa_u8[b][j]: FINAL lane for output j of the first half of a
- *    16-output merge step. Also serves the portable 8-output kernel (a
+ *    16-output merge step. Also serves the portable 8-output merge routine (a
  *    24-byte scratch with R copied at offset 16).
  *
  *  - zxc_pivco_idxb_pre[pc0][b][j]: FINAL lane for output 8+j, pre-offset for
  *    pc0 = popcount(first control byte): L entries already skip the
  *    (8 - pc0) left elements consumed by the first half, R entries the pc0
- *    right ones. Indexing the row by pc0 replaces the historical
- *    broadcast-add + abs fixup with a single table load.
+ *    right ones. Indexing the row by pc0 folds this fixup into a single
+ *    table load.
  */
 
 #ifndef ZXC_PIVCO_TABLES_H
