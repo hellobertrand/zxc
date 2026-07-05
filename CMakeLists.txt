@@ -217,6 +217,7 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set(ZXC_CORE_SOURCES
         src/lib/zxc_common.c
+        src/lib/zxc_pivco_tables.c
         src/lib/zxc_dict.c
         src/lib/zxc_dispatch.c
         src/lib/zxc_pstream.c
@@ -225,6 +226,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
 else()
     set(ZXC_CORE_SOURCES
         src/lib/zxc_common.c
+        src/lib/zxc_pivco_tables.c
         src/lib/zxc_dict.c
         src/lib/zxc_driver.c
         src/lib/zxc_dispatch.c
@@ -441,6 +443,7 @@ if(ZXC_BUILD_TESTS)
         # and is already pulled in via ${ZXC_VARIANT_OBJECTS} below.
         add_library(zxc_lib_static STATIC
             src/lib/zxc_common.c
+        src/lib/zxc_pivco_tables.c
             src/lib/zxc_dict.c
             src/lib/zxc_driver.c
             src/lib/zxc_dispatch.c

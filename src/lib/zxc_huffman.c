@@ -865,13 +865,15 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
     }
 #endif
 #endif /* x86 tiers */
-    /* Portable 8-output path (plain byte selects from a 16-byte scratch). */
+    /* Portable 8-output path: byte selects from a 24-byte scratch laid out
+     * as the low half of the 32-lane view the shared index tables assume
+     * (L at offset 0, R at offset 16). */
     while (i + 8 <= n) {
         const uint8_t b = bits[i >> 3];
-        uint8_t comb[16];
+        uint8_t comb[24];
         ZXC_MEMCPY(comb, L + lp, 8);
-        ZXC_MEMCPY(comb + 8, R + rp, 8);
-        const uint8_t* ix = zxc_pivco_idx8[b];
+        ZXC_MEMCPY(comb + 16, R + rp, 8);
+        const uint8_t* ix = zxc_pivco_idxa_u8[b];
         for (int j = 0; j < 8; j++) out[i + (size_t)j] = comb[ix[j]];
         const int pc = zxc_pivco_popcnt32(b);
         rp += (size_t)pc;
