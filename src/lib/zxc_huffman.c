@@ -8,21 +8,34 @@
 
 /**
  * @file zxc_huffman.c
- * @brief Canonical, length-limited (ZXC_HUF_MAX_CODE_LEN_ULTRA) Huffman codec for the GLO literal
+ * @brief Canonical, length-limited Huffman codec in the PivCo layout (GLO
+ *        entropy sections, wire values enc 2/3).
  *
- * Canonical, length-limited (ZXC_HUF_MAX_CODE_LEN_ULTRA) Huffman codec for the GLO literal
- * stream at compression level >= 6. Codes are emitted LSB-first; the
- * decoder uses a 2048-entry multi-symbol lookup table (11-bit lookup,
- * 1 or 2 symbols per lookup depending on the cumulative code length)
- * and a 4-way interleaved hot loop. Public declarations live in
- * zxc_internal.h; the rest is private to this translation unit.
+ * Covers the whole entropy pipeline for GLO literal sections (level >= 6)
+ * and level-7 token sections:
+ *  - boundary package-merge -> optimal length-limited code lengths
+ *    (<= ZXC_HUF_MAX_CODE_LEN_DENSITY at level 6, <= _ULTRA at level 7);
+ *  - 128-byte packed lengths header (4-bit nibbles) pack/unpack + validation;
+ *  - exact section sizing for the encoder's space-speed selection
+ *    (zxc_huf_calc_size returns SIZE_MAX for unencodable candidates);
+ *  - PivCo section encode/decode: the code is classical canonical Huffman,
+ *    only the bit LAYOUT differs -- bits are grouped by tree level into
+ *    per-node branch runs (see the section banner below and FORMAT.md
+ *    section 5.2.1), so decoding runs data-parallel list merges
+ *    (NEON TBL / SSSE3 pshufb / AVX-512-VBMI2 vpexpandb kernels, plus flat
+ *    subtree unpacking and a leaf-pair fast path) instead of a serial
+ *    bit chain.
+ *
+ * Public declarations live in zxc_internal.h; the shuffle-index tables live
+ * in zxc_pivco_tables.c (single TU, shared by all variants); the rest is
+ * private to this translation unit.
  */
 
 /*
  * Function Multi-Versioning Support
  * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2, _neon), rename the public
  * entry points so each variant TU produces its own copy under a unique symbol
- * (e.g. zxc_pivco_decode_section_avx2). The runtime dispatcher in
+ * (e.g. zxc_huf_decode_section_avx2). The runtime dispatcher in
  * zxc_compress.c / zxc_decompress.c routes to the matching variant.
  *
  * The defines sit before zxc_internal.h so the header's prototypes are
@@ -34,11 +47,11 @@
 #define zxc_huf_build_code_lengths ZXC_CAT(zxc_huf_build_code_lengths, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_pack_lengths ZXC_CAT(zxc_huf_pack_lengths, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_unpack_lengths ZXC_CAT(zxc_huf_unpack_lengths, ZXC_FUNCTION_SUFFIX)
-#define zxc_pivco_calc_size ZXC_CAT(zxc_pivco_calc_size, ZXC_FUNCTION_SUFFIX)
-#define zxc_pivco_encode_section ZXC_CAT(zxc_pivco_encode_section, ZXC_FUNCTION_SUFFIX)
-#define zxc_pivco_encode_section_dict ZXC_CAT(zxc_pivco_encode_section_dict, ZXC_FUNCTION_SUFFIX)
-#define zxc_pivco_decode_section ZXC_CAT(zxc_pivco_decode_section, ZXC_FUNCTION_SUFFIX)
-#define zxc_pivco_decode_section_dict ZXC_CAT(zxc_pivco_decode_section_dict, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_calc_size ZXC_CAT(zxc_huf_calc_size, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_encode_section ZXC_CAT(zxc_huf_encode_section, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_encode_section_dict ZXC_CAT(zxc_huf_encode_section_dict, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_decode_section ZXC_CAT(zxc_huf_decode_section, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_decode_section_dict ZXC_CAT(zxc_huf_decode_section_dict, ZXC_FUNCTION_SUFFIX)
 #endif
 
 #include "../../include/zxc_error.h"
@@ -184,11 +197,11 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         items = (pm_item_t*)p;
         p +=
             (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * (size_t)ZXC_HUF_PM_LEVEL_BOUND * sizeof(pm_item_t);
-        p = (uint8_t*)(((uintptr_t)p + 7u) & ~(uintptr_t)7u);
+        p = (uint8_t*)(((uintptr_t)p + 7U) & ~(uintptr_t)7U);
         counts = (int*)p;
         ZXC_MEMSET(counts, 0, (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * sizeof(int));
         p += (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * sizeof(int);
-        p = (uint8_t*)(((uintptr_t)p + 7u) & ~(uintptr_t)7u);
+        p = (uint8_t*)(((uintptr_t)p + 7U) & ~(uintptr_t)7U);
         stack = (frame_t*)p;
     } else {
         owned_items = (pm_item_t*)ZXC_MALLOC((size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA *
@@ -288,70 +301,11 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
 }
 
 /* ===========================================================================
- * Canonical code construction (LSB-first by bit-reversing canonical MSB codes)
- * =========================================================================*/
-
-/**
- * @brief Reverse the low @p n bits of @p v.
- *
- * Used to convert MSB-first canonical Huffman codes (the natural form
- * produced by the canonical-code construction) into LSB-first codes that
- * can be packed into the bit writer with a single shift-or.
- *
- * @param[in] v Value whose low @p n bits will be reversed.
- * @param[in] n Number of significant bits in @p v (1..32).
- * @return The bit-reversed value, with bits above position @p n set to 0.
- */
-static uint32_t reverse_bits(uint32_t v, const int n) {
-    uint32_t r = 0;
-    for (int i = 0; i < n; i++) {
-        r = (r << 1) | (v & 1u);
-        v >>= 1;
-    }
-    return r;
-}
-
-/**
- * @brief Build the canonical LSB-first Huffman codes for a length table.
- *
- * Generates MSB-first canonical codes following RFC 1951 3.2.2, then
- * bit-reverses each so the encoder can emit them with a plain
- * `accum |= code << bits` step. Absent symbols (length 0) receive code 0.
- *
- * @param[in]  code_len Per-symbol code lengths.
- * @param[out] codes    Per-symbol LSB-first canonical codes.
- */
-static void build_canonical_codes(const uint8_t* RESTRICT code_len, uint32_t* RESTRICT codes) {
-    uint32_t bl_count[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1] = {0};
-    for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
-        bl_count[code_len[i]]++;
-    }
-    bl_count[0] = 0;
-
-    uint32_t next_code[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2] = {0};
-    uint32_t code = 0;
-    for (int k = 1; k <= ZXC_HUF_MAX_CODE_LEN_ULTRA + 1; k++) {
-        code = (code + bl_count[k - 1]) << 1;
-        next_code[k] = code;
-    }
-
-    for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i++) {
-        const int l = code_len[i];
-        if (l == 0) {
-            codes[i] = 0;
-        } else {
-            const uint32_t msb_code = next_code[l]++;
-            codes[i] = reverse_bits(msb_code, l);
-        }
-    }
-}
-
-/* ===========================================================================
  * 128-byte length header: 256 x 4-bit lengths, low nibble first.
  * =========================================================================*/
 
 /**
- * @brief Pack 256 4-bit code lengths into the 128-byte section header.
+ * @brief Pack per-symbol code lengths into the 128-byte (4-bit nibble) header.
  *
  * The packing is little-endian within each byte: low nibble holds
  * `code_len[2*i]`, high nibble holds `code_len[2*i + 1]`. The function
@@ -361,7 +315,7 @@ static void build_canonical_codes(const uint8_t* RESTRICT code_len, uint32_t* RE
  * @param[in]  code_len Per-symbol code lengths (length `ZXC_HUF_NUM_SYMBOLS`).
  * @param[out] out      Output header buffer of `ZXC_HUF_TABLE_SIZE` bytes.
  */
-static void pack_lengths_header(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out) {
+void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out) {
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i += 2) {
         const uint8_t lo = code_len[i] & 0x0F;
         const uint8_t hi = code_len[i + 1] & 0x0F;
@@ -370,18 +324,18 @@ static void pack_lengths_header(const uint8_t* RESTRICT code_len, uint8_t* RESTR
 }
 
 /**
- * @brief Decode the 128-byte length header back into 256 code lengths.
+ * @brief Unpack and structurally validate a 128-byte packed lengths header.
  *
- * Inverts ::pack_lengths_header and validates the two structural invariants:
+ * Inverts ::zxc_huf_pack_lengths and validates the two structural invariants:
  * no length exceeds `ZXC_HUF_MAX_CODE_LEN_ULTRA`, and at least one symbol is
- * present.
+ * present. (Kraft consistency is checked later by the tree build.)
  *
- * @param[in]  in       Input header buffer of `ZXC_HUF_TABLE_SIZE` bytes.
+ * @param[in]  in       128-byte packed lengths header.
  * @param[out] code_len Output code-length array of length `ZXC_HUF_NUM_SYMBOLS`.
  * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` if a length is too
  *         large or the table is empty.
  */
-static int unpack_lengths_header(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len) {
+int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len) {
     int max_len = 0;
     int n_present = 0;
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i += 2) {
@@ -400,43 +354,24 @@ static int unpack_lengths_header(const uint8_t* RESTRICT in, uint8_t* RESTRICT c
     return ZXC_OK;
 }
 
-/**
- * @brief Pack per-symbol code lengths into the 128-byte (4-bit nibble) header.
- *
- * @param[in]  code_len  Per-symbol code lengths (one byte each).
- * @param[out] out       Destination 128-byte packed header.
- */
-void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out) {
-    pack_lengths_header(code_len, out);
-}
-
-/**
- * @brief Unpack and structurally validate a 128-byte packed lengths header.
- *
- * @param[in]  in        128-byte packed lengths header.
- * @param[out] code_len  Destination per-symbol code lengths.
- * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` on invalid lengths.
- */
-int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len) {
-    return unpack_lengths_header(in, code_len);
-}
-
 /* ===========================================================================
- * PivCo-Huffman section codec (v7+ sections, enc 4/5)
+ * PivCo-Huffman section codec (enc 2/3)
  * ===========================================================================
  *
  * Layout: [128-byte packed code lengths (literal sections only)] then, for
- * every INTERNAL node of the canonical code tree in BFS order, that node's
- * branch bits: one bit per symbol routed through the node, in sequence order,
- * LSB-first within bytes, each node padded to a byte boundary. A 0 bit routes
- * the symbol to the left child, 1 to the right.
+ * every EMITTING node of the canonical code tree in BFS order, that node's
+ * run: one branch bit per symbol routed through the node (0 = left child,
+ * 1 = right), in sequence order -- or, for flat subtree roots, D packed bits
+ * per symbol (bit j = branch at relative depth j). Runs are LSB-first within
+ * bytes and byte-padded; descendants of a flat root emit nothing.
  *
  * The decoder recovers each node's symbol count for free: the root handles
  * n symbols, and popcounting a node's bits yields its right child's count.
  * Reconstruction runs bottom-up, one level at a time: leaves are runs of a
  * single symbol; an internal node MERGES its two children's sequences under
  * the control of its bits. Merges are branch-free shuffles (16 outputs per
- * step on NEON via a two-register TBL), which is what makes this layout
+ * step on AArch64 via a two-register TBL, 8 on ARMv7 via VTBL4, 64 on
+ * AVX-512-VBMI2 via vpexpandb), which is what makes this layout
  * decode faster than the serial bit-chain of the classic 4-stream layout on
  * any target with a 16-byte shuffle.
  *
@@ -473,7 +408,7 @@ typedef struct {
     uint8_t covered[ZXC_PIVCO_MAX_NODES];
 } zxc_pivco_tree_t;
 
-static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt32(uint32_t v) {
+static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt32(const uint32_t v) {
 #if defined(_MSC_VER) && !defined(__clang__)
     return (int)__popcnt(v);
 #else
@@ -481,7 +416,7 @@ static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt32(uint32_t v) {
 #endif
 }
 
-static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt64(uint64_t v) {
+static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt64(const uint64_t v) {
 #if defined(_MSC_VER) && !defined(__clang__)
     return (int)__popcnt64(v);
 #else
@@ -535,7 +470,7 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
         int cur = 0;
         for (int d = l - 1; d >= 0; d--) {
             if (UNLIKELY(t->nd[cur].sym >= 0)) return -1; /* prefix collision */
-            const int bit = (int)((c >> d) & 1u);
+            const int bit = (int)((c >> d) & 1U);
             int nxt = t->nd[cur].child[bit];
             if (nxt < 0) {
                 if (UNLIKELY(t->n_nodes >= ZXC_PIVCO_MAX_NODES)) return -1;
@@ -637,8 +572,14 @@ static void zxc_pivco_counts(const zxc_pivco_tree_t* RESTRICT t, const uint32_t*
     }
 }
 
-size_t zxc_pivco_calc_size(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
-                           const int with_header) {
+size_t zxc_huf_calc_size(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                         const int with_header) {
+    /* Encodability is part of the estimate: a histogram symbol without a
+     * code (dict table not covering this block) has no leaf, so the counts
+     * below would silently ignore it and undercount. Such a candidate cannot
+     * be emitted -- report it as unencodable instead. */
+    for (int k = 0; k < ZXC_HUF_NUM_SYMBOLS; k++)
+        if (UNLIKELY(freq[k] != 0 && code_len[k] == 0)) return SIZE_MAX;
     zxc_pivco_tree_t t;
     if (UNLIKELY(zxc_pivco_tree_build(code_len, &t, NULL) != 0)) return SIZE_MAX;
     uint32_t count[ZXC_PIVCO_MAX_NODES];
@@ -712,11 +653,11 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
                 /* residual = low fd bits of the canonical code, bit-reversed
                  * so that packed bit j is the branch taken at level j. */
                 uint32_t r = 0;
-                for (int j = 0; j < fd; j++) r |= ((c >> (fd - 1 - j)) & 1u) << j;
+                for (int j = 0; j < fd; j++) r |= ((c >> (fd - 1 - j)) & 1U) << j;
                 const uint32_t p = wpos[cur];
                 wpos[cur] += (uint32_t)fd;
                 uint8_t* q = out + bit_off[cur] + (p >> 3);
-                const uint32_t sh = p & 7u;
+                const uint32_t sh = p & 7U;
                 uint32_t w = (uint32_t)q[0] | ((uint32_t)q[1] << 8) | ((uint32_t)q[2] << 16);
                 w |= r << sh; /* fd <= 11, sh <= 7 -> fits 24 bits */
                 q[0] = (uint8_t)w;
@@ -724,7 +665,7 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
                 q[2] = (uint8_t)(w >> 16);
                 break;
             }
-            const uint32_t bit = (c >> d) & 1u;
+            const uint32_t bit = (c >> d) & 1U;
             const uint32_t p = wpos[cur]++;
             out[bit_off[cur] + (p >> 3)] |= (uint8_t)(bit << (p & 7));
             cur = t.nd[cur].child[bit];
@@ -733,15 +674,39 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
     return (int)(hdr + payload);
 }
 
-int zxc_pivco_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
-                             const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
-                             uint8_t* RESTRICT dst, const size_t dst_cap) {
+/**
+ * @brief Encode a literal/token section (PivCo layout, inline lengths header).
+ *
+ * Emits the 128-byte packed code-length header followed by the per-node
+ * branch runs. The caller supplies the histogram and code lengths it already
+ * built for the selection step.
+ *
+ * @param[in]  literals   Symbols to encode (n_literals bytes).
+ * @param[in]  n_literals Symbol count (> 0).
+ * @param[in]  freq       Symbol histogram of @p literals.
+ * @param[in]  code_len   Per-symbol code lengths (every symbol with
+ *                        freq != 0 must have a code).
+ * @param[out] dst        Destination buffer.
+ * @param[in]  dst_cap    Destination capacity in bytes.
+ * @return Encoded size in bytes, or a negative ZXC_ERROR_* value
+ *         (ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_CORRUPT_DATA).
+ */
+int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_literals,
+                           const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                           uint8_t* RESTRICT dst, const size_t dst_cap) {
     return zxc_pivco_encode_core(literals, n_literals, freq, code_len, dst, dst_cap, 1);
 }
 
-int zxc_pivco_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n_literals,
-                                  const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
-                                  uint8_t* RESTRICT dst, const size_t dst_cap) {
+/**
+ * @brief Encode a literal section against a shared dictionary table.
+ *
+ * Same payload as @ref zxc_huf_encode_section with the 128-byte lengths
+ * header omitted: @p code_len comes from the dictionary's shared literal
+ * table (wire value enc_lit = 3).
+ */
+int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n_literals,
+                                const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                                uint8_t* RESTRICT dst, const size_t dst_cap) {
     return zxc_pivco_encode_core(literals, n_literals, freq, code_len, dst, dst_cap, 0);
 }
 
@@ -789,8 +754,8 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         uint64_t ctrl;
         ZXC_MEMCPY(&ctrl, bits + (i >> 3), 8);
         const int pc = zxc_pivco_popcnt64(ctrl);
-        const __mmask64 lmask = (pc == 0) ? ~(__mmask64)0 : (((__mmask64)1 << (64 - pc)) - 1u);
-        const __mmask64 rmask = (pc == 64) ? ~(__mmask64)0 : (((__mmask64)1 << pc) - 1u);
+        const __mmask64 lmask = (pc == 0) ? ~(__mmask64)0 : (((__mmask64)1 << (64 - pc)) - 1U);
+        const __mmask64 rmask = (pc == 64) ? ~(__mmask64)0 : (((__mmask64)1 << pc) - 1U);
         const __m512i vl = _mm512_maskz_loadu_epi8(lmask, (const void*)(L + lp));
         const __m512i vr = _mm512_maskz_loadu_epi8(rmask, (const void*)(R + rp));
         const __m512i outl = _mm512_maskz_expand_epi8((__mmask64)~ctrl, vl);
@@ -862,6 +827,24 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         rp += (size_t)pc;
         lp += (size_t)(16 - pc);
         i += 16;
+    }
+#elif defined(ZXC_USE_NEON32)
+    /* 8 outputs per step: four-register VTBL over {L[0..7], -, R[0..7], -}.
+     * The shared index tables address a 32-lane view (L lanes 0..15, R lanes
+     * 16..31); an 8-output step only ever references lanes 0..7 and 16..23,
+     * so the two unused d-registers stay undefined-but-harmless zeros. */
+    while (i + 8 <= n) {
+        const uint8_t b = bits[i >> 3];
+        uint8x8x4_t tb;
+        tb.val[0] = vld1_u8(L + lp);
+        tb.val[1] = vdup_n_u8(0);
+        tb.val[2] = vld1_u8(R + rp);
+        tb.val[3] = vdup_n_u8(0);
+        vst1_u8(out + i, vtbl4_u8(tb, vld1_u8(zxc_pivco_idxa_u8[b])));
+        const int pc = zxc_pivco_popcnt32(b);
+        rp += (size_t)pc;
+        lp += (size_t)(8 - pc);
+        i += 8;
     }
 #endif
 #endif /* x86 tiers */
@@ -935,6 +918,46 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             i += 16;
         }
     }
+#elif defined(ZXC_USE_NEON32)
+    /* d-register mirrors of the AArch64 kernels: 8 codes per step, c2s lookup
+     * via VTBL (16-entry table = two d-registers). */
+    if (D == 4) {
+        uint8x8x2_t vc2s;
+        vc2s.val[0] = vld1_u8(c2s);
+        vc2s.val[1] = vld1_u8(c2s + 8);
+        static const uint8_t rep2[8] = {0, 0, 1, 1, 2, 2, 3, 3};
+        static const int8_t sh4[8] = {0, -4, 0, -4, 0, -4, 0, -4};
+        const uint8x8_t vrep = vld1_u8(rep2);
+        const int8x8_t vsh = vld1_s8(sh4);
+        const uint8x8_t vmask = vdup_n_u8(0x0F);
+        while (i + 8 <= n) {
+            uint32_t w;
+            ZXC_MEMCPY(&w, bits + ((i * 4) >> 3), 4);
+            const uint8x8_t raw = vreinterpret_u8_u32(vdup_n_u32(w));
+            const uint8x8_t rep = vtbl1_u8(raw, vrep);
+            const uint8x8_t codes = vand_u8(vshl_u8(rep, vsh), vmask);
+            vst1_u8(out + i, vtbl2_u8(vc2s, codes));
+            i += 8;
+        }
+    } else if (D == 2) {
+        uint8_t c2s8[8];
+        for (int k = 0; k < 8; k++) c2s8[k] = c2s[k & 3];
+        const uint8x8_t vc2s = vld1_u8(c2s8);
+        static const uint8_t rep4[8] = {0, 0, 0, 0, 1, 1, 1, 1};
+        static const int8_t sh2[8] = {0, -2, -4, -6, 0, -2, -4, -6};
+        const uint8x8_t vrep = vld1_u8(rep4);
+        const int8x8_t vsh = vld1_s8(sh2);
+        const uint8x8_t vmask = vdup_n_u8(0x03);
+        while (i + 8 <= n) {
+            const uint16_t w = (uint16_t)((uint16_t)bits[(i * 2) >> 3] |
+                                          ((uint16_t)bits[((i * 2) >> 3) + 1] << 8));
+            const uint8x8_t raw = vreinterpret_u8_u16(vdup_n_u16(w));
+            const uint8x8_t rep = vtbl1_u8(raw, vrep);
+            const uint8x8_t codes = vand_u8(vshl_u8(rep, vsh), vmask);
+            vst1_u8(out + i, vtbl1_u8(vc2s, codes));
+            i += 8;
+        }
+    }
 #elif defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
     (defined(ZXC_USE_SSE2) && defined(__SSSE3__))
     if (D == 4) {
@@ -987,13 +1010,14 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
     /* Generic scalar bit-reader (any D). */
     {
         uint64_t bitpos = i * (uint64_t)D;
-        const uint32_t m = (1u << D) - 1u;
+        const uint32_t m = (1U << D) - 1U;
+        const size_t fbytes = (size_t)(((uint64_t)n * (uint64_t)D + 7U) >> 3);
         while (i < n) {
             const size_t byte = (size_t)(bitpos >> 3);
             uint32_t w = bits[byte];
-            w |= (uint32_t)bits[byte + 1] << 8;
-            if (D > 8) w |= (uint32_t)bits[byte + 2] << 16;
-            out[i++] = c2s[(w >> (bitpos & 7u)) & m];
+            if (byte + 1 < fbytes) w |= (uint32_t)bits[byte + 1] << 8;
+            if (D > 8 && byte + 2 < fbytes) w |= (uint32_t)bits[byte + 2] << 16;
+            out[i++] = c2s[(w >> (bitpos & 7U)) & m];
             bitpos += (uint64_t)D;
         }
     }
@@ -1027,6 +1051,16 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_emit_leaf_pair(uint8_t* RESTRICT out, co
         const uint8x16_t mask = vtstq_u8(rep, vsel);
         vst1q_u8(out + i, veorq_u8(vsym0, vandq_u8(vdelta, mask)));
         i += 16;
+    }
+#elif defined(ZXC_USE_NEON32)
+    const uint8x8_t vsym0 = vdup_n_u8(sym0);
+    const uint8x8_t vdelta = vdup_n_u8(delta);
+    static const uint8_t bit_sel8[8] = {1, 2, 4, 8, 16, 32, 64, 128};
+    const uint8x8_t vsel = vld1_u8(bit_sel8);
+    while (i + 8 <= n) {
+        const uint8x8_t mask = vtst_u8(vdup_n_u8(bits[i >> 3]), vsel);
+        vst1_u8(out + i, veor_u8(vsym0, vand_u8(vdelta, mask)));
+        i += 8;
     }
 #elif defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
     (defined(ZXC_USE_SSE2) && defined(__SSSE3__))
@@ -1099,7 +1133,7 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
         }
         for (; k < nbytes; k++) {
             uint8_t last = p[k];
-            if (k == nbytes - 1 && (c & 7u)) last &= (uint8_t)((1u << (c & 7u)) - 1u);
+            if (k == nbytes - 1 && (c & 7U)) last &= (uint8_t)((1U << (c & 7U)) - 1U);
             ones += (uint32_t)zxc_pivco_popcnt32(last);
         }
         p += nbytes;
@@ -1159,7 +1193,7 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
                 /* Build the packed-path -> symbol table (complete subtree of
                  * depth D: 2^D leaves), then unpack the code run directly. */
                 const int D = t.flat_d[nid];
-                uint8_t c2s[1u << ZXC_HUF_MAX_CODE_LEN_ULTRA];
+                uint8_t c2s[1U << ZXC_HUF_MAX_CODE_LEN_ULTRA];
                 int16_t stk_n[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
                 uint16_t stk_p[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
                 uint8_t stk_l[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
@@ -1182,7 +1216,7 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
                     stk_l[sp] = (uint8_t)(cl + 1);
                     sp++;
                     stk_n[sp] = t.nd[cn].child[1];
-                    stk_p[sp] = (uint16_t)(cp | (1u << cl));
+                    stk_p[sp] = (uint16_t)(cp | (1U << cl));
                     stk_l[sp] = (uint8_t)(cl + 1);
                 }
                 zxc_pivco_unpack_flat(buf_d + seq_off[nid], c, D, bit_ptr[nid], c2s);
@@ -1203,8 +1237,23 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
     return ZXC_OK;
 }
 
-int zxc_pivco_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
-                             uint8_t* RESTRICT dst, const size_t n, uint8_t* RESTRICT scratch) {
+/**
+ * @brief Decode a literal/token section (PivCo layout, inline lengths header).
+ *
+ * Unpacks and validates the 128-byte code-length header, then runs the
+ * bottom-up merge decoder.
+ *
+ * @param[in]  payload      Section bytes (header + node runs).
+ * @param[in]  payload_size Section size in bytes.
+ * @param[out] dst          Receives the @p n decoded symbols; needs
+ *                          ZXC_PAD_SIZE bytes of write slack past @p n.
+ * @param[in]  n            Expected symbol count.
+ * @param[in]  scratch      Level ping-pong buffer with at least
+ *                          n + ZXC_PIVCO_SCRATCH_PAD bytes.
+ * @return ZXC_OK or ZXC_ERROR_CORRUPT_DATA.
+ */
+int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
+                           uint8_t* RESTRICT dst, const size_t n, uint8_t* RESTRICT scratch) {
     if (UNLIKELY(payload_size < (size_t)ZXC_HUF_TABLE_SIZE)) return ZXC_ERROR_CORRUPT_DATA;
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
     const int rc = zxc_huf_unpack_lengths(payload, code_len);
@@ -1213,10 +1262,16 @@ int zxc_pivco_decode_section(const uint8_t* RESTRICT payload, const size_t paylo
                                  dst, n, code_len, scratch);
 }
 
-int zxc_pivco_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
-                                  uint8_t* RESTRICT dst, const size_t n,
-                                  const uint8_t* RESTRICT packed_lengths,
-                                  uint8_t* RESTRICT scratch) {
+/**
+ * @brief Decode a shared-dictionary literal section (no inline header).
+ *
+ * Same as @ref zxc_huf_decode_section, but the code lengths come from
+ * @p packed_lengths (the dictionary's 128-byte shared literal table,
+ * validated once at attach time; wire value enc_lit = 3).
+ */
+int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
+                                uint8_t* RESTRICT dst, const size_t n,
+                                const uint8_t* RESTRICT packed_lengths, uint8_t* RESTRICT scratch) {
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
     const int rc = zxc_huf_unpack_lengths(packed_lengths, code_len);
     if (UNLIKELY(rc != ZXC_OK)) return rc;

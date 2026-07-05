@@ -41,7 +41,7 @@ static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t
         return 0;
     }
 
-    const int written = zxc_pivco_encode_section(literals, n, freq, code_len, enc, cap);
+    const int written = zxc_huf_encode_section(literals, n, freq, code_len, enc, cap);
     if (written < 0) {
         free(enc);
         free(dec);
@@ -50,7 +50,7 @@ static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t
         return 0;
     }
 
-    const int rc = zxc_pivco_decode_section(enc, (size_t)written, dec, n, scr);
+    const int rc = zxc_huf_decode_section(enc, (size_t)written, dec, n, scr);
     if (rc != ZXC_OK) {
         free(enc);
         free(dec);
@@ -156,7 +156,7 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
         goto fail;
     }
 
-    const int written = zxc_pivco_encode_section_dict(literals, n, freq, code_len, enc, cap);
+    const int written = zxc_huf_encode_section_dict(literals, n, freq, code_len, enc, cap);
     if (written < 0) {
         printf("Failed [%s]: encode_section_dict -> %d\n", label, written);
         goto fail;
@@ -164,25 +164,25 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
 
     /* Same lengths, same bitstreams: the dict section must be exactly the
      * per-block section minus its 128-byte lengths header. */
-    const int written_blk = zxc_pivco_encode_section(literals, n, freq, code_len, enc_blk, cap);
+    const int written_blk = zxc_huf_encode_section(literals, n, freq, code_len, enc_blk, cap);
     if (written_blk != written + (int)ZXC_HUF_TABLE_SIZE ||
         memcmp(enc, enc_blk + ZXC_HUF_TABLE_SIZE, (size_t)written) != 0) {
         printf("Failed [%s]: dict section != per-block section minus header\n", label);
         goto fail;
     }
 
-    if (zxc_pivco_decode_section_dict(enc, (size_t)written, dec, n, packed, scr) != ZXC_OK ||
+    if (zxc_huf_decode_section_dict(enc, (size_t)written, dec, n, packed, scr) != ZXC_OK ||
         memcmp(literals, dec, n) != 0) {
         printf("Failed [%s]: decode_section_dict roundtrip mismatch\n", label);
         goto fail;
     }
 
     /* Error paths: truncated payload, undersized dst_cap. */
-    if (zxc_pivco_decode_section_dict(enc, 0, dec, n, packed, scr) == ZXC_OK) {
+    if (zxc_huf_decode_section_dict(enc, 0, dec, n, packed, scr) == ZXC_OK) {
         printf("Failed [%s]: truncated payload accepted\n", label);
         goto fail;
     }
-    if (zxc_pivco_encode_section_dict(literals, n, freq, code_len, enc, 4) !=
+    if (zxc_huf_encode_section_dict(literals, n, freq, code_len, enc, 4) !=
         ZXC_ERROR_DST_TOO_SMALL) {
         printf("Failed [%s]: undersized dst_cap not rejected\n", label);
         goto fail;
@@ -247,7 +247,7 @@ int test_huffman_codec_dict() {
         buf[100] = '!'; /* unseen in training: no code assigned */
         freq['!']++;    /* keep the histogram in sync with the mutated buffer */
         uint8_t enc[1024];
-        if (zxc_pivco_encode_section_dict(buf, 256, freq, code_len, enc, sizeof(enc)) !=
+        if (zxc_huf_encode_section_dict(buf, 256, freq, code_len, enc, sizeof(enc)) !=
             ZXC_ERROR_CORRUPT_DATA) {
             printf("Failed: code-less literal not rejected by encode_section_dict\n");
             free(buf);

@@ -120,9 +120,9 @@ typedef struct {
  * query and the partitioning step share one source of truth and can never
  * disagree.
  *
- * Decompress (@p mode == 0) reserves @c work_buf and @c lit_buffer (both padded
- * for wild-copy overshoot) and, when @p dict_size > 0, the shared-dictionary
- * Huffman decode table. Compress (@p mode == 1) reserves the LZ match-finder
+ * Decompress (@p mode == 0) reserves @c work_buf, @c lit_buffer (both padded
+ * for wild-copy overshoot) and the token / PivCo decode scratch buffers.
+ * Compress (@p mode == 1) reserves the LZ match-finder
  * tables (hash positions, tags, chain), the sequence / extras / literal buffers
  * and - only at @c level >= ZXC_LEVEL_DENSITY - the optimal-parser scratch. A
  * @p dict_size > 0 appends the [dict | data] concat scratch in both modes.
@@ -133,8 +133,7 @@ typedef struct {
  * @param[in] mode        1 = compression, 0 = decompression.
  * @param[in] level       Compression level (only consulted when @p mode == 1).
  * @param[in] dict_size   Dictionary prefill size; when > 0 the layout includes
- *                        the [dict | data] concat buffer (and, on decompress,
- *                        the dictionary Huffman decode table).
+ *                        the [dict | data] concat buffer.
  * @return Fully populated layout; @c .total is the required workspace size.
  */
 static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int mode,
@@ -160,14 +159,12 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         layout.sz_tok_dctx = (chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16) + ZXC_PAD_SIZE;
         layout.off_tok_dctx = layout.total;
         layout.total += ZXC_ALIGN_CL(layout.sz_tok_dctx);
-        /* PivCo (enc 4/5) decode scratch: odd tree levels ping-pong through this
+        /* PivCo (enc 2/3) decode scratch: odd tree levels ping-pong through this
          * buffer while even levels use the destination. Sized for the largest
          * section a block can carry (chunk_size literals). */
         layout.sz_pivco_dctx = chunk_size + ZXC_PIVCO_SCRATCH_PAD;
         layout.off_pivco_dctx = layout.total;
         layout.total += ZXC_ALIGN_CL(layout.sz_pivco_dctx);
-        /* Shared-dictionary Huffman decode table: built once per context by
-         * zxc_cctx_attach_dict_huf, read by HUFFMAN_DICT literal sections. */
     } else {
         /* Compress: 6 partitions + optional opt_scratch at level >= ZXC_LEVEL_DENSITY. */
         const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
@@ -511,8 +508,7 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
                          uint32_t* RESTRICT out_dict_id) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
     if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
-    if (UNLIKELY(src[4] < ZXC_FILE_FORMAT_VERSION_MIN || src[4] > ZXC_FILE_FORMAT_VERSION))
-        return ZXC_ERROR_BAD_VERSION;
+    if (UNLIKELY(src[4] != ZXC_FILE_FORMAT_VERSION)) return ZXC_ERROR_BAD_VERSION;
 
     uint8_t temp[ZXC_FILE_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, ZXC_FILE_HEADER_SIZE);

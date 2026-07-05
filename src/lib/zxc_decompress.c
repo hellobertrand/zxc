@@ -29,8 +29,8 @@
     ZXC_CAT(zxc_decompress_chunk_wrapper_dict, ZXC_FUNCTION_SUFFIX)
 #define zxc_decompress_chunk_wrapper_safe \
     ZXC_CAT(zxc_decompress_chunk_wrapper_safe, ZXC_FUNCTION_SUFFIX)
-#define zxc_pivco_decode_section ZXC_CAT(zxc_pivco_decode_section, ZXC_FUNCTION_SUFFIX)
-#define zxc_pivco_decode_section_dict ZXC_CAT(zxc_pivco_decode_section_dict, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_decode_section ZXC_CAT(zxc_huf_decode_section, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_decode_section_dict ZXC_CAT(zxc_huf_decode_section_dict, ZXC_FUNCTION_SUFFIX)
 #endif
 
 #include "../../include/zxc_error.h"
@@ -393,61 +393,41 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
         d_ptr += ml;                                \
     } while (0)
 
-/**
- * @brief Unified GLO (General Low) block decoder body, shared by the fast, safe
- *        and dictionary variants.
- *
- * Decodes a block in the internal GLO format; the decompressed size is derived
- * from the Section Descriptors in the payload. @p safe and @p has_dict must be
- * compile-time constants (0 or 1): the 4x-unrolled loops are duplicated inside
- * @c if(safe)/else branches so each variant keeps single-assignment @c const
- * save pointers, and after constant propagation only one branch survives per
- * wrapper (codegen equivalent to a hand-written pair).
- *
- * @param[in,out] ctx          Decompression context (dict buffer, tables).
- * @param[in]     src          Compressed block payload.
- * @param[in]     src_size     Size of @p src in bytes.
- * @param[out]    dst          Destination buffer for decoded bytes.
- * @param[in]     dst_capacity Capacity of @p dst in bytes.
- * @param[in]     safe         Compile-time flag: 1 = strict bounds-checked loop.
- * @param[in]     has_dict     Compile-time flag: 1 = resolve matches against a dict prefix.
- * @return Bytes written to @p dst on success, or a negative @ref zxc_error_t.
- */
 /* PivCo section decodes are outlined COLD: they run once per SECTION (a call
  * is noise there), and keeping their bodies out of the sequence-decode
  * monolith preserves its i-cache footprint for levels 1-5, whose blocks never
  * take these branches (the inline branches grew the primary GLO wrapper by
  * ~520 B at the token-entropy commit and cost ~3-5% at levels 3-5). */
-static ZXC_NOINLINE __attribute__((cold)) int zxc_decode_lit_pivco(zxc_cctx_t* RESTRICT ctx,
-                                                                   const uint8_t* RESTRICT payload,
-                                                                   const size_t psize,
-                                                                   const size_t required_size) {
+static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco(const zxc_cctx_t* RESTRICT ctx,
+                                                      const uint8_t* RESTRICT payload,
+                                                      const size_t psize,
+                                                      const size_t required_size) {
     if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE ||
                  ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
         return ZXC_ERROR_CORRUPT_DATA;
-    return zxc_pivco_decode_section(payload, psize, ctx->lit_buffer, required_size,
-                                    ctx->pivco_scratch);
+    return zxc_huf_decode_section(payload, psize, ctx->lit_buffer, required_size,
+                                  ctx->pivco_scratch);
 }
 
-static ZXC_NOINLINE __attribute__((cold)) int zxc_decode_lit_pivco_dict(
-    zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT payload, const size_t psize,
-    const size_t required_size) {
+static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco_dict(const zxc_cctx_t* RESTRICT ctx,
+                                                           const uint8_t* RESTRICT payload,
+                                                           const size_t psize,
+                                                           const size_t required_size) {
     if (UNLIKELY(ctx->dict_huf_lengths == NULL)) return ZXC_ERROR_DICT_REQUIRED;
     if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE ||
                  ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
         return ZXC_ERROR_CORRUPT_DATA;
-    return zxc_pivco_decode_section_dict(payload, psize, ctx->lit_buffer, required_size,
-                                         ctx->dict_huf_lengths, ctx->pivco_scratch);
+    return zxc_huf_decode_section_dict(payload, psize, ctx->lit_buffer, required_size,
+                                       ctx->dict_huf_lengths, ctx->pivco_scratch);
 }
 
-static ZXC_NOINLINE __attribute__((cold)) int zxc_decode_tok_pivco(zxc_cctx_t* RESTRICT ctx,
-                                                                   const uint8_t* RESTRICT payload,
-                                                                   const size_t psize,
-                                                                   const size_t n_tok) {
+static ZXC_NOINLINE ZXC_COLD int zxc_decode_tok_pivco(const zxc_cctx_t* RESTRICT ctx,
+                                                      const uint8_t* RESTRICT payload,
+                                                      const size_t psize, const size_t n_tok) {
     if (UNLIKELY(n_tok + ZXC_PAD_SIZE > ctx->tok_buffer_cap ||
                  n_tok + ZXC_PIVCO_SCRATCH_PAD > ctx->pivco_scratch_cap))
         return ZXC_ERROR_CORRUPT_DATA;
-    return zxc_pivco_decode_section(payload, psize, ctx->tok_buffer, n_tok, ctx->pivco_scratch);
+    return zxc_huf_decode_section(payload, psize, ctx->tok_buffer, n_tok, ctx->pivco_scratch);
 }
 
 static ZXC_NOINLINE int zxc_decode_block_glo_entropy(const zxc_cctx_t* RESTRICT ctx,
@@ -462,6 +442,34 @@ static ZXC_NOINLINE int zxc_decode_block_glo_entropy_safe(const zxc_cctx_t* REST
                                                           size_t src_size, uint8_t* RESTRICT dst,
                                                           size_t dst_capacity);
 
+/**
+ * @brief Unified GLO (General Low) block decoder body, shared by the fast,
+ *        safe, dictionary and entropy-token variants.
+ *
+ * Decodes a block in the internal GLO format; the decompressed size is derived
+ * from the Section Descriptors in the payload. @p safe, @p has_dict and
+ * @p tok_entropy must be compile-time constants (0 or 1): the 4x-unrolled
+ * loops are duplicated inside @c if(safe)/else branches so each variant keeps
+ * single-assignment @c const save pointers, and after constant propagation
+ * only one branch survives per wrapper (codegen equivalent to a hand-written
+ * pair).
+ *
+ * The @p tok_entropy dimension keeps the token pointer on a SINGLE provenance
+ * per instantiation (in-place @c src tokens vs @c ctx->tok_buffer): the
+ * tok_entropy=0 instantiations tail-call their entropy twin right after the
+ * header parse when they meet enc_litlen == 2.
+ *
+ * @param[in,out] ctx          Decompression context (dict buffer, scratch).
+ * @param[in]     src          Compressed block payload.
+ * @param[in]     src_size     Size of @p src in bytes.
+ * @param[out]    dst          Destination buffer for decoded bytes.
+ * @param[in]     dst_capacity Capacity of @p dst in bytes.
+ * @param[in]     safe         Compile-time flag: 1 = strict bounds-checked loop.
+ * @param[in]     has_dict     Compile-time flag: 1 = resolve matches against a dict prefix.
+ * @param[in]     tok_entropy  Compile-time flag: 1 = tokens are a PivCo section
+ *                             decoded into @c ctx->tok_buffer (level 7).
+ * @return Bytes written to @p dst on success, or a negative @ref zxc_error_t.
+ */
 static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
                                                        const size_t src_size, uint8_t* RESTRICT dst,
@@ -635,11 +643,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     if (UNLIKELY((e_end != src + src_size) || (uint64_t)sz_offsets < expected_off_size))
         return ZXC_ERROR_CORRUPT_DATA;
 
-    /* Tokens: the in-place (RAW) and entropy-coded (level-7) cases are
-     * SEPARATE instantiations of this function, so t_ptr keeps a single
-     * provenance in the sequence loops below. A joined pointer
-     * (p_curr vs tok_buffer) was measured to cost ~4% at levels 3-5 on the
-     * RAW path (bisected to the token-entropy commit). */
     const uint8_t* RESTRICT t_ptr;
     if (!tok_entropy) {
         /* enc_litlen == 2 was re-routed right after the header parse. */
