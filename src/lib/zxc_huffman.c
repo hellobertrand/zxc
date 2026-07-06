@@ -56,6 +56,7 @@
 
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
+#include "zxc_pivco_tables.h"
 
 /* ===========================================================================
  * Length-limited Huffman: boundary package-merge
@@ -382,8 +383,6 @@ int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_le
  * ZXC_PIVCO_SCRATCH_PAD on scratch.
  */
 
-#include "zxc_pivco_tables.h"
-
 #define ZXC_PIVCO_MAX_NODES (2 * ZXC_HUF_NUM_SYMBOLS - 1)
 
 typedef struct {
@@ -464,7 +463,8 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
     }
 
     t->n_nodes = 1; /* root */
-    t->nd[0].child[0] = t->nd[0].child[1] = -1;
+    t->nd[0].child[0] = -1;
+    t->nd[0].child[1] = -1;
     t->nd[0].sym = -1;
     int max_depth = 0;
 
@@ -482,7 +482,8 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
             if (nxt < 0) {
                 if (UNLIKELY(t->n_nodes >= ZXC_PIVCO_MAX_NODES)) return -1;
                 nxt = t->n_nodes++;
-                t->nd[nxt].child[0] = t->nd[nxt].child[1] = -1;
+                t->nd[nxt].child[0] = -1;
+                t->nd[nxt].child[1] = -1;
                 t->nd[nxt].sym = -1;
                 t->nd[cur].child[bit] = (int16_t)nxt;
             }
@@ -497,7 +498,8 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
     /* BFS order (parents before children, left before right): this is both
      * the wire order of the node bit runs and the property that makes each
      * parent's children CONTIGUOUS in the next level's sequence buffer. */
-    int head = 0, tail = 0;
+    int head = 0;
+    int tail = 0;
     t->bfs[tail++] = 0;
     int depth_end = 1; /* index in bfs where the current depth ends */
     int depth = 0;
@@ -526,10 +528,13 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
             const int nid = t->bfs[i];
             const zxc_pivco_node_t* nd = &t->nd[nid];
             if (nd->sym >= 0) {
-                mn[nid] = mx[nid] = 0;
+                mn[nid] = 0;
+                mx[nid] = 0;
             } else if (nd->child[0] >= 0 && nd->child[1] >= 0) {
-                const int a = mn[nd->child[0]], b = mn[nd->child[1]];
-                const int c = mx[nd->child[0]], d2 = mx[nd->child[1]];
+                const int a = mn[nd->child[0]];
+                const int b = mn[nd->child[1]];
+                const int c = mx[nd->child[0]];
+                const int d2 = mx[nd->child[1]];
                 mn[nid] = (int8_t)(1 + (a < b ? a : b));
                 mx[nid] = (int8_t)(1 + (c > d2 ? c : d2));
             } else { /* single-child (degenerate) : never flat */
@@ -732,7 +737,9 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
     const uint8_t* L = src;
     const uint8_t* R = src + nl;
     const size_t n = nl + nr;
-    size_t i = 0, lp = 0, rp = 0;
+    size_t i = 0;
+    size_t lp = 0;
+    size_t rp = 0;
 #if defined(ZXC_USE_NEON64)
     /* 16 outputs per step: two-register TBL over {L[0..15], R[0..15]} with the
      * signed-index tables (see zxc_pivco_tables.h). */
