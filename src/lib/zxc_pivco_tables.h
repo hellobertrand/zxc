@@ -34,7 +34,13 @@
 
 #include <stdint.h>
 
-extern const uint8_t zxc_pivco_idxa_u8[256][8];
-extern const uint8_t zxc_pivco_idxb_pre[9][256][8];
+#if defined(__GNUC__) || defined(__clang__)
+#define ZXC_HIDDEN __attribute__((visibility("hidden")))
+#else
+#define ZXC_HIDDEN
+#endif
+
+extern ZXC_HIDDEN const uint8_t zxc_pivco_idxa_u8[256][8];
+extern ZXC_HIDDEN const uint8_t zxc_pivco_idxb_pre[9][256][8];
 
 #endif /* ZXC_PIVCO_TABLES_H */
