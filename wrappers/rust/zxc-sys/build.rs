@@ -167,6 +167,7 @@ fn main() {
         .include(src_lib.join("vendors"))
         .define("ZXC_STATIC_DEFINE", None)
         .file(src_lib.join("zxc_common.c"))
+        .file(src_lib.join("zxc_pivco_tables.c"))
         .file(src_lib.join("zxc_dict.c"))
         .file(src_lib.join("zxc_dispatch.c"))
         .file(src_lib.join("zxc_driver.c"))
