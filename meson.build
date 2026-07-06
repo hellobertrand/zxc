@@ -78,6 +78,7 @@ endforeach
 
 libzxc_sources = files(
   'src/lib/zxc_common.c',
+  'src/lib/zxc_pivco_tables.c',
   'src/lib/zxc_dict.c',
   'src/lib/zxc_driver.c',
   'src/lib/zxc_dispatch.c',
