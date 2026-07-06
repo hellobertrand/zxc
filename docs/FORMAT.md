@@ -151,10 +151,9 @@ General LZ-style format with separated streams.
 Offset  Size  Field
 0x00    4     n_sequences (u32)
 0x04    4     n_literals (u32)
-0x08    1     enc_lit   (0=RAW, 1=RLE, 2=PivCo Huffman,
-                         3=PivCo Huffman with dictionary table)
-0x09    1     enc_litlen (reserved)
-0x0A    1     enc_mlen   (reserved)
+0x08    1     enc_lit    (0=RAW, 1=RLE, 2=HUFFMAN, 3=HUFFMAN_DICT)
+0x09    1     enc_litlen (0=RAW tokens, 2=HUFFMAN tokens; level 7 only)
+0x0A    1     enc_mlen   (reserved; match lengths share the token byte)
 0x0B    1     enc_off    (0=16-bit offsets, 1=8-bit offsets)
 0x0C    4     reserved
 ```
@@ -182,8 +181,13 @@ Section order:
     `enc_lit=3` (dictionary-compressed archives only; same section layout,
     no inline lengths header).
 - **Tokens stream**:
-  - one byte per sequence: `(LL << 4) | ML`.
-  - `LL` and `ML` are 4-bit fields.
+  - one byte per sequence: `(LL << 4) | ML`, `LL` and `ML` being 4-bit fields.
+  - if `enc_litlen=0` (all levels ≤ 6), these `n_sequences` bytes are stored
+    verbatim and the Tokens section's compressed size equals `n_sequences`.
+  - if `enc_litlen=2` (level 7 only), the token bytes are PivCo Huffman-coded
+    over the token alphabet using the exact § 5.2.1 layout (inline 128-byte
+    lengths header included); the section's compressed size is the encoded
+    payload size and the decoder expands it back to `n_sequences` bytes.
 - **Offsets stream**:
   - `n_sequences × 1` byte if `enc_off=1`, else `n_sequences × 2` bytes LE.
   - Values are **biased**: stored value = `actual_offset - 1`. Decoder adds `+ 1`.
