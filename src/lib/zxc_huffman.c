@@ -1110,9 +1110,11 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_emit_leaf_pair(uint8_t* RESTRICT out, co
 static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t payload_size,
                                  uint8_t* RESTRICT dst, const size_t n,
                                  const uint8_t* RESTRICT code_len, uint8_t* RESTRICT scratch) {
-    if (UNLIKELY(n == 0)) return ZXC_ERROR_CORRUPT_DATA;
     zxc_pivco_tree_t t;
-    if (UNLIKELY(zxc_pivco_tree_build(code_len, &t, NULL) != 0)) return ZXC_ERROR_CORRUPT_DATA;
+
+    if (UNLIKELY(n == 0 || zxc_pivco_tree_build(code_len, &t, NULL) != 0))
+        return ZXC_ERROR_CORRUPT_DATA;
+    if (UNLIKELY(t.n_nodes < 1 || t.n_nodes > ZXC_PIVCO_MAX_NODES)) return ZXC_ERROR_CORRUPT_DATA;
 
     /* Pass 1: node counts + bit-run pointers, straight from the wire order. */
     uint32_t count[ZXC_PIVCO_MAX_NODES];
@@ -1178,7 +1180,7 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
     /* Leaf-pair parents emit both runs directly from their bits (XOR-blend),
      * so their children never need materialising: flag them for skipping. */
     uint8_t skip[ZXC_PIVCO_MAX_NODES];
-    ZXC_MEMSET(skip, 0, (size_t)t.n_nodes);
+    ZXC_MEMSET(skip, 0, sizeof(skip));
     for (int i = 0; i < t.n_nodes; i++) {
         const zxc_pivco_node_t* nd = &t.nd[t.bfs[i]];
         if (nd->sym >= 0) continue;
