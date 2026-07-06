@@ -1009,9 +1009,9 @@ size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
                  ZXC_OK))
         return 0;
     const uint64_t d = zxc_le64((const uint8_t*)src + src_size - ZXC_FILE_FOOTER_SIZE);
-    const uint64_t need = d + (uint64_t)chunk_size + (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
-    if (UNLIKELY(need > SIZE_MAX)) return 0;
-    return (size_t)need;
+    const uint64_t margin = (uint64_t)chunk_size + (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
+    if (UNLIKELY(d > (uint64_t)SIZE_MAX - margin)) return 0;
+    return (size_t)(d + margin);
 }
 
 /**
@@ -1049,8 +1049,9 @@ int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const
     if (UNLIKELY(zxc_read_file_header(comp, comp_size, &chunk_size, &has_cs, &did) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
     const uint64_t d = zxc_le64(comp + comp_size - ZXC_FILE_FOOTER_SIZE);
-    const uint64_t need = d + (uint64_t)chunk_size + (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
-    if (UNLIKELY(need > (uint64_t)buffer_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
+    const uint64_t margin = (uint64_t)chunk_size + (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
+    if (UNLIKELY(d > (uint64_t)buffer_capacity || (uint64_t)buffer_capacity - d < margin))
+        return ZXC_ERROR_DST_TOO_SMALL;
     return zxc_decompress_frame(comp, comp_size, buf, buffer_capacity, opts);
 }
 
