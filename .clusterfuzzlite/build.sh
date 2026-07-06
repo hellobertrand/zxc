@@ -8,7 +8,7 @@
 
 FUZZERS="decompress roundtrip seekable pstream dict"
 
-LIB_SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_dict.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_huffman.c src/lib/zxc_seekable.c src/lib/zxc_pstream.c"
+LIB_SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_dict.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_huffman.c src/lib/zxc_pivco_tables.c src/lib/zxc_pstream.c src/lib/zxc_seekable.c"
 
 for fuzzer in $FUZZERS; do
     $CC $CFLAGS -I include \
