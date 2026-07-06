@@ -49,18 +49,16 @@ ZXC leverages modern instruction sets to maximize throughput on both ARM and x86
 ### 4.3 Entropy Coding & Bitpacking
 *   **RLE (Run-Length Encoding)**: Automatically detects runs of identical bytes.
 *   **Prefix Varint Encoding**: Variable-length integer encoding (similar to LEB128 but prefix-based) for overflow values.
-*   **PivCo Canonical Huffman (Literals level ≥ 6, tokens level 7)**: Length-limited canonical Huffman code (max code length **8 bits** at level 6, **11 bits** at level 7 / ULTRA) over the literal byte distribution — and, at level 7, over the sequence-token distribution. The *code* is classical Huffman; the *wire layout* is PivCo (format v7): code bits are transposed by tree level into per-node branch bitmaps, so the decoder runs data-parallel list merges (byte shuffles) instead of a serial bit chain. See the dedicated section below.
+*   **Canonical Huffman (Literals level ≥ 6, tokens level 7)**: Length-limited canonical Huffman code (max code length **8 bits** at level 6, **11 bits** at level 7 / ULTRA) over the literal byte distribution — and, at level 7, over the sequence-token distribution. The *code* is classical Huffman; only the *wire layout* is new — PivCo (format v7) transposes the code bits by tree level into per-node branch bitmaps, so the decoder runs data-parallel list merges (byte shuffles) instead of a serial bit chain. See the dedicated section below.
 *   **Bit-Packing**: Compressed sequences are packed into dedicated streams using minimal bit widths.
 
-#### PivCo: level-ordered Huffman decoding
+#### Huffman decoding with the PivCo level-ordered layout
 
 Entropy decoding is the hot path of the high-compression levels, and classical
 Huffman decoding is a *serial bit chain*: each codeword's length must be known
-before the next codeword's position is. Interleaving N independent streams (the
-classic remedy, used by ZXC until format v6) caps the parallelism at N and
+before the next codeword's position is. Interleaving N independent streams caps the parallelism at N and
 still executes a load-shift-mask dependency chain per symbol. Format v7
-replaces the layout with **PivCo** (level-ordered Huffman, after
-[Giesen 2026](https://fgiesen.wordpress.com/2026/06/21/pivco-huffman-merge-operations/)):
+replaces the layout with **Pivoted Coding Huffman** (level-ordered Huffman):
 
 *   **Same code, transposed layout**: The canonical code, the 128-byte packed
     code-length header and the compressed size (to within per-node byte
@@ -76,7 +74,7 @@ replaces the layout with **PivCo** (level-ordered Huffman, after
     per-symbol dependency chain; throughput scales with SIMD width.
 *   **Flat-subtree fast path (format rule)**: perfect subtrees whose leaves
     all sit at relative depth `D ∈ {2, 4, ≥ 7}` skip the per-level bitmaps and
-    store packed `D`-bit residual codes instead (FORMAT.md § 5.2.3). Dense
+    store packed `D`-bit residual codes instead (FORMAT.md § 5.2.1). Dense
     tree regions — the common case for 8-bit-capped level-6 tables — then
     decode by direct table unpacking instead of `D` merge rounds.
 *   **Leaf-pair kernel**: two-leaf nodes decode via an XOR/blend on the bitmap
@@ -92,10 +90,9 @@ The scalar fallback (no SIMD) is ~4x slower than the SIMD kernels; embedded
 targets typically stay on levels 1-5, which carry no entropy sections.
 
 **Selection — space-speed Lagrangian.** Section encodings are chosen by
-pricing every candidate (RAW, RLE, PivCo, shared-table PivCo) with
+pricing every candidate (RAW, RLE, Huffman, shared-table Huffman) with
 `J = compressed_size + premium(level) * decoded_bytes` and taking the minimum
-— a Lagrangian trade of bytes saved against decode time, in the spirit of
-Oodle Kraken's space-speed optimization. Below ULTRA the premium reproduces
+— a Lagrangian trade of bytes saved against decode time. Below ULTRA the premium reproduces
 the historical conservative margin (~3 %); at level 7 it is lowered (~1.6 %
 for entropy, ~0.4 % for RLE) so the encoder buys more ratio with decode
 cycles, which is exactly the level-7 contract.
@@ -447,8 +444,8 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Extras Buffer*: Overflow values for lengths >= 15 (Prefix Varint encoded).
     *   *Offset Mode Selection*: The encoder tracks the maximum offset across all sequences. If all offsets are ≤ 255, the 8-bit mode (`enc_off=1`) is selected, saving 1 byte per sequence compared to 16-bit mode.
 4.  **RLE Pass**: The literals buffer is scanned for run-length encoding opportunities (runs of identical bytes). If beneficial (>10% gain), it is compressed in place.
-5.  **Entropy Pass** (level ≥ 6, ≥ 1024 literals): A length-limited canonical Huffman code (`L = 8` at level 6, `L = 11` at level 7) is fitted to the literal byte distribution and emitted in the PivCo level-ordered layout (§4.3, FORMAT.md §5.2.3). At level 7 the same treatment is applied to the sequence-token stream (`enc_litlen = 2`). Candidates are selected by the space-speed Lagrangian `J = size + premium(level) × decoded_bytes`.
-    *   **Shared-Table Candidate** (dictionary archives only): when the dictionary carries a shared literal table (§5.10), a second entropy candidate is sized with the dictionary's code lengths and **no inline 128-byte lengths header**. The Lagrangian picks the minimum-J of {RAW, RLE, per-block PivCo, shared-table PivCo} (`enc_lit = 3` for the latter), so the choice is never a regression. Because the shared table only covers symbols seen in training, a block containing an uncovered literal byte automatically falls back to its per-block table. The 128-byte header amortization makes `enc_lit = 3` viable on literal sections far below the 1024-literal threshold of the per-block table — precisely the small-block regime dictionaries target.
+5.  **Entropy Pass** (level ≥ 6, ≥ 1024 literals): A length-limited canonical Huffman code (`L = 8` at level 6, `L = 11` at level 7) is fitted to the literal byte distribution and emitted in the PivCo level-ordered layout (§4.3, FORMAT.md §5.2.1). At level 7 the same treatment is applied to the sequence-token stream (`enc_litlen = 2`). Candidates are selected by the space-speed Lagrangian `J = size + premium(level) × decoded_bytes`.
+    *   **Shared-Table Candidate** (dictionary archives only): when the dictionary carries a shared literal table (§5.10), a second entropy candidate is sized with the dictionary's code lengths and **no inline 128-byte lengths header**. The Lagrangian picks the minimum-J of {RAW, RLE, per-block Huffman, shared-table Huffman} (`enc_lit = 3` for the latter), so the choice is never a regression. Because the shared table only covers symbols seen in training, a block containing an uncovered literal byte automatically falls back to its per-block table. The 128-byte header amortization makes `enc_lit = 3` viable on literal sections far below the 1024-literal threshold of the per-block table — precisely the small-block regime dictionaries target.
 6.  **Final Serialization**: All buffers are concatenated into the payload, preceded by section descriptors.
 
 **Decoding Process**:
@@ -458,7 +455,7 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   `enc_lit = 1` (RLE): single pass that expands runs and copies literal chunks.
     *   `enc_lit = 2` (PIVCO): the section's per-node branch bitmaps are decoded bottom-up by SIMD list merges (shuffle-based, no gather — §4.3), with direct unpacking of flat subtrees and an XOR/blend kernel for leaf pairs. ~1.3 cycles/symbol on Apple Silicon.
     *   `enc_lit = 3` (PIVCO_DICT): same decode, but the code lengths come from the dictionary's shared literal table (validated once at attach time) instead of an inline 128-byte header. The header amortization makes entropy coding viable on literal sections far below the per-block threshold — precisely the small-block regime dictionaries target.
-3.  **Token Decompression** (level 7 only): when `enc_litlen = 2`, the token stream is PivCo-decoded into a scratch buffer through a dedicated specialization of the block decoder, so the common RAW-token path keeps its exact code shape (a hot pointer with a single provenance).
+3.  **Token Decompression** (level 7 only): when `enc_litlen = 2`, the token stream is Huffman-decoded (PivCo layout) into a scratch buffer through a dedicated specialization of the block decoder, so the common RAW-token path keeps its exact code shape (a hot pointer with a single provenance).
 4.  **Vertical Execution**: The main loop reads from all three streams simultaneously.
 5.  **Wild Copy**:
     *   *Literals*: Copied using unaligned 16-byte SIMD loads/stores (`vld1/vst1` on ARM).
@@ -968,8 +965,8 @@ ZXC is designed to adapt to various deployment scenarios by selecting the approp
 *   **Data Archival (Levels 5-6)**:
     A high-efficiency alternative for cold storage, providing better compression ratios than LZ4 and significantly faster retrieval speeds than Zstd. **Level 6** (DENSITY) beats LZ4-HC on both axes — better ratio (36.27 vs 36.75 on silesia) *and* faster decode on every measured platform (+31 % on Apple Silicon, parity-to-+5 % on Zen 3/Zen 4): ideal for write-once / read-many archives where compression time is amortized over many reads.
 
-*   **Maximum Density (Level 7 / ULTRA)**:
-    Deep parse (search depth 128), 11-bit entropy codes and PivCo-coded sequence tokens. On silesia it lands at **33.01 %** — a better ratio than `zstd -1` (34.53 %) — while decoding at **1.8-2.1x** zstd -1's speed (3.7 GB/s on Apple M2). It occupies the historical gap between the LZ4 family and Zstd: choose it when storage or bandwidth dominates but decompression must stay in the multi-GB/s class.
+*   **Maximum Density (Level 7)**:
+    Deep parse (search depth 128), 11-bit entropy codes and Huffman-coded sequence tokens. On silesia it lands at **33.01 %** — a better ratio than `zstd -1` (34.53 %) — while decoding at **1.8-2.1x** zstd -1's speed (3.7 GB/s on Apple M2). It occupies the historical gap between the LZ4 family and Zstd: choose it when storage or bandwidth dominates but decompression must stay in the multi-GB/s class.
 
 *   **Small & Homogeneous Payloads — Pre-Trained Dictionaries (§5.10)**:
     An orthogonal lever, combinable with any level. Where data is compressed in **small blocks** (4 KB–128 KB) — JSON API responses, RPC messages, key-value records, structured logs, small game assets, or any large homogeneous corpus split for seekable random access — a pre-trained dictionary primes the LZ77 window per block and recovers the ratio that small blocks would otherwise lose. The external, content-addressed model (`.zxd` + `dict_id`) fits the **train-once / reuse-many** deployment pattern: a single dictionary is built offline on the build pipeline and amortized across millions of independently decodable payloads — no per-archive storage overhead, and O(1) seekable access preserved.
