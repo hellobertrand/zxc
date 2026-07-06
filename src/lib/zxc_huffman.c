@@ -1186,7 +1186,7 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
     /* Pass 2: bottom-up level reconstruction. */
     for (int d = t.max_depth; d >= 0; d--) {
         uint8_t* const buf_d = (d & 1) ? scratch : dst;
-        uint8_t* const buf_c = (d & 1) ? dst : scratch; /* children live at d+1 */
+        const uint8_t* const buf_c = (d & 1) ? dst : scratch; /* children at d+1 (read-only) */
         for (int i = t.lvl_start[d]; i < t.lvl_start[d + 1]; i++) {
             const int nid = t.bfs[i];
             if (t.covered[nid]) continue; /* lives inside a flat root's run */
