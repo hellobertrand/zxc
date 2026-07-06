@@ -409,18 +409,25 @@ typedef struct {
 } zxc_pivco_tree_t;
 
 static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt32(const uint32_t v) {
-#if defined(_MSC_VER) && !defined(__clang__)
-    return (int)__popcnt(v);
-#else
+#if defined(__GNUC__) || defined(__clang__)
     return __builtin_popcount(v);
+#else
+    /* Portable SWAR popcount for MSVC (real cl.exe): its __popcnt intrinsic is
+     * x86-only (absent on ARM64, and __popcnt64 absent on 32-bit x86) and would
+     * emit the POPCNT instruction even in the SSE2/scalar variants meant for
+     * pre-POPCNT CPUs. clang-cl takes the __builtin branch above. */
+    uint32_t x = v - ((v >> 1) & 0x55555555u);
+    x = (x & 0x33333333u) + ((x >> 2) & 0x33333333u);
+    x = (x + (x >> 4)) & 0x0F0F0F0Fu;
+    return (int)((x * 0x01010101u) >> 24);
 #endif
 }
 
 static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt64(const uint64_t v) {
-#if defined(_MSC_VER) && !defined(__clang__)
-    return (int)__popcnt64(v);
-#else
+#if defined(__GNUC__) || defined(__clang__)
     return __builtin_popcountll(v);
+#else
+    return zxc_pivco_popcnt32((uint32_t)v) + zxc_pivco_popcnt32((uint32_t)(v >> 32));
 #endif
 }
 
@@ -1034,11 +1041,10 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
 static ZXC_ALWAYS_INLINE void zxc_pivco_emit_leaf_pair(uint8_t* RESTRICT out, const size_t n,
                                                        const uint8_t sym0, const uint8_t sym1,
                                                        const uint8_t* RESTRICT bits) {
-    const uint8_t delta = (uint8_t)(sym0 ^ sym1);
     size_t i = 0;
 #if defined(ZXC_USE_NEON64)
     const uint8x16_t vsym0 = vdupq_n_u8(sym0);
-    const uint8x16_t vdelta = vdupq_n_u8(delta);
+    const uint8x16_t vdelta = vdupq_n_u8((uint8_t)(sym0 ^ sym1));
     static const uint8_t rep_idx[16] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1};
     static const uint8_t bit_sel[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
     const uint8x16_t vrep = vld1q_u8(rep_idx);
@@ -1054,7 +1060,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_emit_leaf_pair(uint8_t* RESTRICT out, co
     }
 #elif defined(ZXC_USE_NEON32)
     const uint8x8_t vsym0 = vdup_n_u8(sym0);
-    const uint8x8_t vdelta = vdup_n_u8(delta);
+    const uint8x8_t vdelta = vdup_n_u8((uint8_t)(sym0 ^ sym1));
     static const uint8_t bit_sel8[8] = {1, 2, 4, 8, 16, 32, 64, 128};
     const uint8x8_t vsel = vld1_u8(bit_sel8);
     while (i + 8 <= n) {
@@ -1065,7 +1071,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_emit_leaf_pair(uint8_t* RESTRICT out, co
 #elif defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
     (defined(ZXC_USE_SSE2) && defined(__SSSE3__))
     const __m128i vsym0 = _mm_set1_epi8((char)sym0);
-    const __m128i vdelta = _mm_set1_epi8((char)delta);
+    const __m128i vdelta = _mm_set1_epi8((char)(uint8_t)(sym0 ^ sym1));
     const __m128i vrep = _mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1);
     const __m128i vsel =
         _mm_setr_epi8(1, 2, 4, 8, 16, 32, 64, (char)128, 1, 2, 4, 8, 16, 32, 64, (char)128);
