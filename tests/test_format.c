@@ -50,6 +50,17 @@ static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t
         return 0;
     }
 
+    /* The Lagrangian selector prices candidates with zxc_huf_calc_size; it must
+     * predict the EXACT encoded size (with the 128-byte lengths header). */
+    const size_t est = zxc_huf_calc_size(freq, code_len, 1);
+    if (est != (size_t)written) {
+        free(enc);
+        free(dec);
+        free(scr);
+        printf("Failed [%s]: calc_size %zu != encoded %d\n", label, est, written);
+        return 0;
+    }
+
     const int rc = zxc_huf_decode_section(enc, (size_t)written, dec, n, scr);
     if (rc != ZXC_OK) {
         free(enc);
@@ -159,6 +170,12 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
     const int written = zxc_huf_encode_section_dict(literals, n, freq, code_len, enc, cap);
     if (written < 0) {
         printf("Failed [%s]: encode_section_dict -> %d\n", label, written);
+        goto fail;
+    }
+
+    /* Header-less variant of the size estimator (with_header = 0) must match. */
+    if (zxc_huf_calc_size(freq, code_len, 0) != (size_t)written) {
+        printf("Failed [%s]: dict calc_size != encoded\n", label);
         goto fail;
     }
 
