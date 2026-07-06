@@ -797,6 +797,14 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     return (int64_t)(op - op_start);
 }
 
+/* Shared frame decode body used by both zxc_decompress (non-overlapping
+ * src/dst) and zxc_decompress_inplace (single overlapping buffer). No RESTRICT
+ * between src and dst so the overlapping case is well-defined; each per-block
+ * decode still gets disjoint compressed/output regions (guaranteed by the
+ * in-place margin) and its wrapper keeps its own RESTRICT. */
+static int64_t zxc_decompress_frame(const uint8_t* src, size_t src_size, uint8_t* dst,
+                                    size_t dst_capacity, const zxc_decompress_opts_t* opts);
+
 /**
  * @brief Decompresses an entire buffer in one call.
  *
@@ -825,14 +833,19 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
         return (zxc_le64(footer) == 0) ? 0 : (int64_t)ZXC_ERROR_DST_TOO_SMALL;
     }
 
+    return zxc_decompress_frame((const uint8_t*)src, src_size, (uint8_t*)dst, dst_capacity, opts);
+}
+
+static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, uint8_t* dst,
+                                    const size_t dst_capacity, const zxc_decompress_opts_t* opts) {
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
     const uint8_t* dict_huf = (opts && opts->dict) ? (const uint8_t*)opts->dict_huf : NULL;
 
-    const uint8_t* ip = (const uint8_t*)src;
+    const uint8_t* ip = src;
     const uint8_t* ip_end = ip + src_size;
-    uint8_t* op = (uint8_t*)dst;
+    uint8_t* op = dst;
     const uint8_t* op_start = op;
     const uint8_t* op_end = op + dst_capacity;
     size_t runtime_chunk_size = 0;
@@ -970,6 +983,75 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
     zxc_cctx_free(&ctx);
     return (int64_t)(op - op_start);
+}
+
+/**
+ * @brief Minimum single-buffer size for a safe in-place decode of @p src.
+ *
+ * Reads the archive header (block size) and footer (decompressed size) without
+ * decoding, and returns `decompressed_size + one_block + wild_copy_tail`. A
+ * buffer of at least this size lets @ref zxc_decompress_inplace decode with the
+ * compressed data placed flush-right, the write cursor never overtaking the
+ * read cursor.
+ *
+ * @param[in] src      Compressed archive (only header + footer are read).
+ * @param[in] src_size Size of the archive in bytes.
+ * @return Required buffer size in bytes, or 0 if @p src is not a valid archive.
+ */
+// cppcheck-suppress unusedFunction
+size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
+    if (UNLIKELY(!src || src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE)) return 0;
+    if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD)) return 0;
+    size_t chunk_size = 0;
+    int has_cs = 0;
+    uint32_t did = 0;
+    if (UNLIKELY(zxc_read_file_header((const uint8_t*)src, src_size, &chunk_size, &has_cs, &did) !=
+                 ZXC_OK))
+        return 0;
+    const uint64_t d = zxc_le64((const uint8_t*)src + src_size - ZXC_FILE_FOOTER_SIZE);
+    const uint64_t need = d + (uint64_t)chunk_size + (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
+    if (UNLIKELY(need > SIZE_MAX)) return 0;
+    return (size_t)need;
+}
+
+/**
+ * @brief Decompresses in place, inside a single caller-owned buffer.
+ *
+ * The compressed archive of @p comp_size bytes must sit **flush-right** in
+ * @p buffer, i.e. at `buffer + buffer_capacity - comp_size`. Decoding runs
+ * left-to-right into `buffer[0..]`; because ZXC never expands a block and the
+ * buffer carries a one-block + wild-copy margin (see
+ * @ref zxc_decompress_inplace_bound), the write cursor provably never overtakes
+ * the read cursor, so a single allocation replaces the usual input+output pair.
+ * Dictionary archives are supported (they decode through the context's own
+ * bounce buffer, which does not alias @p buffer).
+ *
+ * @param[in,out] buffer           Single work buffer holding the flush-right
+ *                                 archive; receives the decompressed output.
+ * @param[in]     buffer_capacity  Total size of @p buffer in bytes.
+ * @param[in]     comp_size        Size of the compressed archive in bytes.
+ * @param[in]     opts             Decompression options, or NULL for defaults.
+ * @return Decompressed size in bytes, or a negative @ref zxc_error_t code
+ *         (`ZXC_ERROR_DST_TOO_SMALL` if the buffer lacks the safety margin).
+ */
+// cppcheck-suppress unusedFunction
+int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const size_t comp_size,
+                               const zxc_decompress_opts_t* opts) {
+    if (UNLIKELY(!buffer || comp_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE ||
+                 comp_size > buffer_capacity))
+        return ZXC_ERROR_NULL_INPUT;
+    uint8_t* const buf = (uint8_t*)buffer;
+    const uint8_t* const comp = buf + (buffer_capacity - comp_size); /* flush-right */
+    if (UNLIKELY(zxc_le32(comp) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_HEADER;
+    size_t chunk_size = 0;
+    int has_cs = 0;
+    uint32_t did = 0;
+    if (UNLIKELY(zxc_read_file_header(comp, comp_size, &chunk_size, &has_cs, &did) != ZXC_OK))
+        return ZXC_ERROR_BAD_HEADER;
+    const uint64_t d = zxc_le64(comp + comp_size - ZXC_FILE_FOOTER_SIZE);
+    const uint64_t need = d + (uint64_t)chunk_size + (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
+    if (UNLIKELY(need > (uint64_t)buffer_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
+    return zxc_decompress_frame(comp, comp_size, buf, buffer_capacity, opts);
 }
 
 /**
