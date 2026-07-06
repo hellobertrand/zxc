@@ -175,16 +175,16 @@ Section order:
 - **Literals stream**:
   - raw literal bytes if `enc_lit=0`, or
   - RLE tokenized if `enc_lit=1`, or
-  - PivCo Huffman-coded if `enc_lit=2`
-    (see [§ 5.2.1 PivCo literal section](#521-pivco-literal-section)), or
-  - PivCo Huffman-coded with the dictionary's shared code lengths if
+  - Huffman-coded if `enc_lit=2`
+    (see [§ 5.2.1 Huffman literal section](#521-huffman-literal-section)), or
+  - Huffman-coded with the dictionary's shared code lengths if
     `enc_lit=3` (dictionary-compressed archives only; same section layout,
     no inline lengths header).
 - **Tokens stream**:
   - one byte per sequence: `(LL << 4) | ML`, `LL` and `ML` being 4-bit fields.
   - if `enc_litlen=0` (all levels ≤ 6), these `n_sequences` bytes are stored
     verbatim and the Tokens section's compressed size equals `n_sequences`.
-  - if `enc_litlen=2` (level 7 only), the token bytes are PivCo Huffman-coded
+  - if `enc_litlen=2` (level 7 only), the token bytes are Huffman-coded
     over the token alphabet using the exact § 5.2.1 layout (inline 128-byte
     lengths header included); the section's compressed size is the encoded
     payload size and the decoder expands it back to `n_sequences` bytes.
@@ -198,13 +198,16 @@ Section order:
     - if `ML == 15`, read varint and add to ML
   - actual match length is `ML + 5` (minimum match = 5).
 
-### 5.2.1 PivCo literal section
+### 5.2.1 Huffman literal section
 
-`enc_lit=2` carries a length-limited canonical Huffman code over the literal
-bytes in the **PivCo layout** (level-ordered Huffman, after
+`enc_lit=2` carries a length-limited **canonical Huffman code** over the
+literal bytes. The bits are placed on the wire with the **PivCo layout**
+(level-ordered Huffman, after
 [Giesen 2026](https://fgiesen.wordpress.com/2026/06/21/pivco-huffman-merge-operations/)):
-the code bits are grouped by TREE LEVEL rather than by symbol, so decoding
-runs data-parallel list merges instead of a serial bit chain.
+the encoding is ordinary Huffman — same code lengths, same code bits, same
+size — and PivCo only reorders those bits, grouping them by TREE LEVEL rather
+than by symbol so decoding runs data-parallel list merges instead of a serial
+bit chain.
 
 ```text
 Offset  Size  Field
@@ -254,7 +257,7 @@ BFS order once.
 
 Selection is an encoder policy, not a format rule: the reference encoder
 requires level ≥ 6 and at least 1024 literals, prices every candidate
-(RAW/RLE/PivCo/dict-PivCo) as
+(RAW / RLE / Huffman / shared-table Huffman) as
 `J = size + premium(level) * n_decoded_bytes`, and picks the minimum — a
 space-speed Lagrangian with a per-level decode-time premium.
 
@@ -268,11 +271,12 @@ Decoder validation requirements:
 - A popcount that routes symbols to an absent child is a corruption error.
 - A failure on any of the above results in `ZXC_ERROR_CORRUPT_DATA`.
 
-### 5.2.2 Shared-table PivCo literal section
+### 5.2.2 Shared-table Huffman literal section
 
 `enc_lit=3` is only valid in archives compressed with a dictionary
-(`HAS_DICTIONARY` set): the payload is identical to § 5.2.1 with the 128-byte
-lengths header **omitted** — the code lengths come from the shared literal
+(`HAS_DICTIONARY` set): the payload is the same Huffman/PivCo section as
+§ 5.2.1 with the 128-byte lengths header **omitted** — the code lengths come
+from the shared literal
 table carried by the `.zxd` dictionary (see § 12.4), validated once when the
 dictionary is attached (same rules as § 5.2.1). Decoders **MUST** reject
 `enc_lit=3` sections with `ZXC_ERROR_DICT_REQUIRED` when no dictionary table
@@ -507,29 +511,20 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 | Header/footer layout changed | **Version bump** | Resizing the file header |
 | Checksum algorithm changed | **Version bump** | Replacing RapidHash with Komihash |
 
-**Version history.** Version **7** (current) is such a bump: entropy-coded
-sections switched from the classic 4-stream layout to the PivCo layout
-(§ 5.2.1), the literal/token Huffman code-length limit was relaxed from 8 to
-11 bits (level 7 / ULTRA), and tokens may be Huffman-coded — all changed GLO
-encodings. Like the v5→v6 change, v7 is a deliberate clean break: v7 tools
-write `7` for every level and **reject v6 archives** (see
-[`MIGRATION.md`](MIGRATION.md) to convert).
-
 ### 10.3 Compatibility rules
 
-- **Version compatibility**: a decoder accepts the set of format versions it implements — the reference decoder accepts **7 only** — and **MUST** reject any other version with `ZXC_ERROR_BAD_VERSION`. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
+- **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version with `ZXC_ERROR_BAD_VERSION`. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
 - **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version (`ZXC_ERROR_BAD_BLOCK_TYPE`). The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
 - **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header CRC, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension.
 - **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values (`ZXC_ERROR_BAD_HEADER`).
 
 ### 10.4 Minimum conforming decoder
 
-A minimal conforming v7 decoder **MUST** support:
-- File header parsing and CRC16 validation (accepting version 7 only).
+A minimal conforming decoder for version 7 **MUST** support:
+- File header parsing and CRC16 validation
 - **RAW** blocks (type 0) - passthrough copy.
-- **GLO** blocks (type 1) - full LZ decode with extras varint, including PivCo
-  entropy sections (§5.2.1) with code lengths up to 11 bits; a decoder that
-  caps at 8 would wrongly reject valid level-7 archives.
+- **GLO** blocks (type 1) - full LZ decode with extras varint, including Huffman
+  entropy sections (§5.2.1, PivCo layout) with code lengths up to 11 bits.
 - **GHI** blocks (type 2) - full LZ decode with extras varint.
 - **EOF** block (type 255) - stream termination.
 - File footer validation (source size check).
