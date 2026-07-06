@@ -369,8 +369,57 @@ ZXC_EXPORT int64_t zxc_decompress(
 ```
 
 Decompresses `src` into `dst`. Only `checksum_enabled` is used.
+`src` and `dst` must not overlap (same contract as `memcpy`); for overlapping
+single-buffer decode, use `zxc_decompress_inplace` below.
 
 **Returns**: decompressed size (> 0) on success, or negative `zxc_error_t`.
+
+### `zxc_decompress_inplace_bound`
+
+```c
+ZXC_EXPORT size_t zxc_decompress_inplace_bound(
+    const void* src,
+    size_t      src_size
+);
+```
+
+Reads `src`'s header and footer (no decoding) and returns the single-buffer
+size `zxc_decompress_inplace` needs: `decompressed_size` plus a one-block +
+wild-copy safety margin (`block_size + ZXC_DECOMPRESS_TAIL_PAD`).
+
+**Returns**: required buffer size, or `0` if `src` is not a valid archive.
+
+### `zxc_decompress_inplace`
+
+```c
+ZXC_EXPORT int64_t zxc_decompress_inplace(
+    void*                        buffer,
+    size_t                       buffer_capacity,
+    size_t                       comp_size,
+    const zxc_decompress_opts_t* opts     // NULL = defaults
+);
+```
+
+Decompresses **in place** inside a single caller-owned buffer, replacing the
+usual input + output pair with one allocation — decisive for memory-constrained
+targets (embedded, FOTA, firmware). The compressed archive must sit
+**flush-right** in `buffer` (its last `comp_size` bytes); decoding runs
+left-to-right into `buffer[0..]`. Because ZXC never expands a block, the write
+cursor provably never overtakes the flush-right read cursor once
+`buffer_capacity >= zxc_decompress_inplace_bound(...)`. Dictionary archives are
+supported. An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`,
+never corruption.
+
+```c
+size_t need = zxc_decompress_inplace_bound(archive, archive_size);
+uint8_t* buf = malloc(need);
+memcpy(buf + (need - archive_size), archive, archive_size);   // flush-right
+int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);
+// buf[0 .. n) now holds the decompressed data
+```
+
+**Returns**: decompressed size (> 0), `0` for an empty frame, or negative
+`zxc_error_t`.
 
 ### `zxc_get_decompressed_size`
 

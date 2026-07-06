@@ -477,6 +477,23 @@ zxc_compress_opts_t opts = {
 
 ---
 
+## In-Place Decompression
+
+When the whole archive already lives in RAM (a firmware image, a game asset, a FOTA payload), ZXC can decompress **inside a single buffer** — no separate output allocation. You place the compressed archive flush-right in a buffer, and ZXC decodes left-to-right into the same memory. Because a ZXC block never expands, the write cursor provably never overtakes the read cursor given a one-block safety margin, so peak memory drops from *compressed + decompressed* to roughly *decompressed* alone.
+
+```c
+// One allocation instead of two.
+size_t need = zxc_decompress_inplace_bound(archive, archive_size);   // reads header+footer
+uint8_t* buf = malloc(need);
+memcpy(buf + (need - archive_size), archive, archive_size);          // archive flush-right
+int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);   // decode into buf[0..]
+// buf[0 .. n) now holds the decompressed data
+```
+
+The required margin is one block plus the wild-copy tail (`block_size + ~2 KB`) — about **1 %** overhead on a large archive. An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`, never silent corruption. This is a library/API capability (like LZ4's and Zstd's in-place modes): it targets embedded/firmware integrators, not the file→file CLI, whose streaming decode is already memory-bounded.
+
+---
+
 ## Dictionary Compression
 
 For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dictionary dramatically improves compression ratio. Because the dictionary prefills the LZ77 sliding window at the *start of each block*, the benefit is per-block: a block only has its own preceding bytes as history, so the smaller the block, the more it leans on the dictionary for representative patterns. This applies whether the input is a single small payload or a large payload split into many small blocks — any time the block size is small enough that early bytes would otherwise lack history to match against.
