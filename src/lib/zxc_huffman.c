@@ -546,12 +546,10 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
             const int nid = t->bfs[i];
             t->flat_d[nid] = 0;
             if (i == 0) t->covered[nid] = 0; /* root */
-            /* Flat only where it beats the merge cascade (FORMAT RULE, both
-             * sides): D = 2/4 have single-TBL SIMD unpackers; D >= 7 replaces
-             * enough merge levels that even the scalar unpacker wins. D = 3/5/6
-             * stay on the (SIMD) merge path. */
-            if (!t->covered[nid] && t->nd[nid].sym < 0 && mn[nid] == mx[nid] &&
-                (mn[nid] == 2 || mn[nid] == 4 || mn[nid] >= 7))
+            /* Any complete subtree unpacks flat, beating the merge cascade
+             * (FORMAT RULE, both sides): D = 2-6 have SIMD unpackers, D >= 7 the
+             * scalar one. (D = 1 is a leaf pair, handled on the merge path.) */
+            if (!t->covered[nid] && t->nd[nid].sym < 0 && mn[nid] == mx[nid] && mn[nid] >= 2)
                 t->flat_d[nid] = (uint8_t)mn[nid];
             const int ch0 = t->nd[nid].child[0];
             const int ch1 = t->nd[nid].child[1];
@@ -731,13 +729,6 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n
  * up to 15 bytes past each cursor: callers guarantee read slack after the
  * level buffers. Writes stay within out[0..nl+nr).
  */
-/* A/B knob for the AVX2/AVX512 merge: 1 = pack the two 16-output steps into a
- * 256-bit ymm (fewer shuffles/stores); 0 = keep the 2x 128-bit xmm path.
- * Default on; build with -DZXC_PIVCO_MERGE_YMM=0 to compare on real x86. */
-#ifndef ZXC_PIVCO_MERGE_YMM
-#define ZXC_PIVCO_MERGE_YMM 1
-#endif
-
 static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8_t* RESTRICT src,
                                               const size_t nl, const size_t nr,
                                               const uint8_t* RESTRICT bits) {
@@ -789,50 +780,8 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
 #endif
 #if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
     (defined(ZXC_USE_SSE2) && defined(__SSSE3__))
-    /* 16 outputs per step, SSSE3 two-register shuffle emulation: after the
-     * signed-index + popcount-adjust + pabsb step (same tables as NEON), an
-     * index ix selects L[ix] when ix < 16 and R[ix - 16] otherwise:
-     *   pshufb(L, ix + 0x70): lanes with ix >= 16 overflow past 0x80 (zeroed),
-     *                         lanes with ix < 16 keep bit 7 clear (selected);
-     *   pshufb(R, ix - 16):   lanes with ix < 16 wrap to >= 0xF0 (zeroed).
-     * OR-ing both shuffles yields the merged bytes. The 32-output loop is the
-     * same step unrolled twice: the second step's cursors derive from the first's
-     * popcounts alone, so both table-selects run independently. */
-#if (defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)) && ZXC_PIVCO_MERGE_YMM
-    /* 256-bit: pack the two independent 16-output steps into the two 128-bit
-     * lanes of a ymm (vpshufb is per-lane), so one vpshufb pair + one store
-     * emits 32 outputs where the 128-bit path needs four pshufb and two stores.
-     * The +0x70/-16 lane-zeroing is per-lane, so the result is byte-identical. */
-    while (i + 32 <= n) {
-        const uint8_t* cb = bits + (i >> 3);
-        const int pcA0 = zxc_pivco_popcnt32(cb[0]);
-        const int pcA = pcA0 + zxc_pivco_popcnt32(cb[1]);
-        const int pcB0 = zxc_pivco_popcnt32(cb[2]);
-        const int pcB = pcB0 + zxc_pivco_popcnt32(cb[3]);
-        const size_t lpB = lp + (size_t)(16 - pcA);
-        const size_t rpB = rp + (size_t)pcA;
-        const __m256i vL = _mm256_inserti128_si256(
-            _mm256_castsi128_si256(_mm_loadu_si128((const __m128i*)(const void*)(L + lp))),
-            _mm_loadu_si128((const __m128i*)(const void*)(L + lpB)), 1);
-        const __m256i vR = _mm256_inserti128_si256(
-            _mm256_castsi128_si256(_mm_loadu_si128((const __m128i*)(const void*)(R + rp))),
-            _mm_loadu_si128((const __m128i*)(const void*)(R + rpB)), 1);
-        const __m128i ixA = _mm_unpacklo_epi64(
-            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[cb[0]]),
-            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pcA0][cb[1]]));
-        const __m128i ixB = _mm_unpacklo_epi64(
-            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[cb[2]]),
-            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pcB0][cb[3]]));
-        const __m256i ix = _mm256_inserti128_si256(_mm256_castsi128_si256(ixA), ixB, 1);
-        const __m256i sel =
-            _mm256_or_si256(_mm256_shuffle_epi8(vL, _mm256_add_epi8(ix, _mm256_set1_epi8(0x70))),
-                            _mm256_shuffle_epi8(vR, _mm256_sub_epi8(ix, _mm256_set1_epi8(16))));
-        _mm256_storeu_si256((__m256i*)(void*)(out + i), sel);
-        lp = lpB + (size_t)(16 - pcB);
-        rp = rpB + (size_t)pcB;
-        i += 32;
-    }
-#else
+    /* 16 outputs/step: pshufb(L, ix+0x70) | pshufb(R, ix-16) selects L[ix] or
+     * R[ix-16] (out-of-range lanes zero out); 32/step unrolls it twice. */
     while (i + 32 <= n) {
         const uint8_t* cb = bits + (i >> 3);
         const int pcA0 = zxc_pivco_popcnt32(cb[0]);
@@ -865,7 +814,6 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         rp = rpB + (size_t)pcB;
         i += 32;
     }
-#endif
     while (i + 16 <= n) {
         const uint8_t b0 = bits[i >> 3];
         const uint8_t b1 = bits[(i >> 3) + 1];
@@ -973,6 +921,94 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             vst1q_u8(out + i, vqtbl1q_u8(vc2s, codes));
             i += 16;
         }
+    } else if (D == 3) {
+        /* Odd D straddle bytes: build a 16-bit window {byte_j,byte_j+1} per lane
+         * (byte_j = Di>>3), right-shift by Di&7, mask D bits. 16/step, two u16x8
+         * halves sharing the shift vector. D=3: 6 source bytes. */
+        uint8_t c2s16[16];
+        for (int k = 0; k < 16; k++) c2s16[k] = c2s[k & 7];
+        const uint8x16_t vc2s = vld1q_u8(c2s16); /* 8 entries, padded to 16 */
+        static const uint8_t idxA[16] = {0, 1, 0, 1, 0, 1, 1, 2, 1, 2, 1, 2, 2, 3, 2, 3};
+        static const uint8_t idxB[16] = {3, 4, 3, 4, 3, 4, 4, 5, 4, 5, 4, 5, 5, 6, 5, 6};
+        static const int16_t sh8[8] = {0, -3, -6, -1, -4, -7, -2, -5};
+        const uint8x16_t vidxA = vld1q_u8(idxA);
+        const uint8x16_t vidxB = vld1q_u8(idxB);
+        const int16x8_t vsh = vld1q_s16(sh8);
+        const uint16x8_t vmask = vdupq_n_u16(0x07);
+        while (i + 16 <= n) {
+            const size_t off = (i * 3) >> 3;
+            uint32_t w0;
+            uint16_t w1;
+            ZXC_MEMCPY(&w0, bits + off, 4);
+            ZXC_MEMCPY(&w1, bits + off + 4, 2); /* exactly 6 bytes read */
+            uint8x16_t raw = vdupq_n_u8(0);
+            raw = vreinterpretq_u8_u32(vsetq_lane_u32(w0, vreinterpretq_u32_u8(raw), 0));
+            raw = vreinterpretq_u8_u16(vsetq_lane_u16(w1, vreinterpretq_u16_u8(raw), 2));
+            const uint16x8_t winA = vreinterpretq_u16_u8(vqtbl1q_u8(raw, vidxA));
+            const uint16x8_t winB = vreinterpretq_u16_u8(vqtbl1q_u8(raw, vidxB));
+            const uint8x8_t cA = vmovn_u16(vandq_u16(vshlq_u16(winA, vsh), vmask));
+            const uint8x8_t cB = vmovn_u16(vandq_u16(vshlq_u16(winB, vsh), vmask));
+            vst1q_u8(out + i, vqtbl1q_u8(vc2s, vcombine_u8(cA, cB)));
+            i += 16;
+        }
+    } else if (D == 5) {
+        /* Same window scheme as D=3; c2s has 32 entries (vqtbl2q). 10 bytes. */
+        uint8x16x2_t vc2s;
+        vc2s.val[0] = vld1q_u8(c2s);
+        vc2s.val[1] = vld1q_u8(c2s + 16);
+        static const uint8_t idxA[16] = {0, 1, 0, 1, 1, 2, 1, 2, 2, 3, 3, 4, 3, 4, 4, 5};
+        static const uint8_t idxB[16] = {5, 6, 5, 6, 6, 7, 6, 7, 7, 8, 8, 9, 8, 9, 9, 10};
+        static const int16_t sh8[8] = {0, -5, -2, -7, -4, -1, -6, -3};
+        const uint8x16_t vidxA = vld1q_u8(idxA);
+        const uint8x16_t vidxB = vld1q_u8(idxB);
+        const int16x8_t vsh = vld1q_s16(sh8);
+        const uint16x8_t vmask = vdupq_n_u16(0x1F);
+        while (i + 16 <= n) {
+            const size_t off = (i * 5) >> 3;
+            uint64_t w0;
+            uint16_t w1;
+            ZXC_MEMCPY(&w0, bits + off, 8);
+            ZXC_MEMCPY(&w1, bits + off + 8, 2);
+            uint8x16_t raw = vdupq_n_u8(0);
+            raw = vreinterpretq_u8_u64(vsetq_lane_u64(w0, vreinterpretq_u64_u8(raw), 0));
+            raw = vreinterpretq_u8_u16(vsetq_lane_u16(w1, vreinterpretq_u16_u8(raw), 4));
+            const uint16x8_t winA = vreinterpretq_u16_u8(vqtbl1q_u8(raw, vidxA));
+            const uint16x8_t winB = vreinterpretq_u16_u8(vqtbl1q_u8(raw, vidxB));
+            const uint8x8_t cA = vmovn_u16(vandq_u16(vshlq_u16(winA, vsh), vmask));
+            const uint8x8_t cB = vmovn_u16(vandq_u16(vshlq_u16(winB, vsh), vmask));
+            vst1q_u8(out + i, vqtbl2q_u8(vc2s, vcombine_u8(cA, cB)));
+            i += 16;
+        }
+    } else if (D == 6) {
+        /* Same window scheme as D=3; c2s has 64 entries (vqtbl4q). 12 bytes. */
+        uint8x16x4_t vc2s;
+        vc2s.val[0] = vld1q_u8(c2s);
+        vc2s.val[1] = vld1q_u8(c2s + 16);
+        vc2s.val[2] = vld1q_u8(c2s + 32);
+        vc2s.val[3] = vld1q_u8(c2s + 48);
+        static const uint8_t idxA[16] = {0, 1, 0, 1, 1, 2, 2, 3, 3, 4, 3, 4, 4, 5, 5, 6};
+        static const uint8_t idxB[16] = {6, 7, 6, 7, 7, 8, 8, 9, 9, 10, 9, 10, 10, 11, 11, 12};
+        static const int16_t sh8[8] = {0, -6, -4, -2, 0, -6, -4, -2};
+        const uint8x16_t vidxA = vld1q_u8(idxA);
+        const uint8x16_t vidxB = vld1q_u8(idxB);
+        const int16x8_t vsh = vld1q_s16(sh8);
+        const uint16x8_t vmask = vdupq_n_u16(0x3F);
+        while (i + 16 <= n) {
+            const size_t off = (i * 6) >> 3;
+            uint64_t w0;
+            uint32_t w1;
+            ZXC_MEMCPY(&w0, bits + off, 8);
+            ZXC_MEMCPY(&w1, bits + off + 8, 4);
+            uint8x16_t raw = vdupq_n_u8(0);
+            raw = vreinterpretq_u8_u64(vsetq_lane_u64(w0, vreinterpretq_u64_u8(raw), 0));
+            raw = vreinterpretq_u8_u32(vsetq_lane_u32(w1, vreinterpretq_u32_u8(raw), 2));
+            const uint16x8_t winA = vreinterpretq_u16_u8(vqtbl1q_u8(raw, vidxA));
+            const uint16x8_t winB = vreinterpretq_u16_u8(vqtbl1q_u8(raw, vidxB));
+            const uint8x8_t cA = vmovn_u16(vandq_u16(vshlq_u16(winA, vsh), vmask));
+            const uint8x8_t cB = vmovn_u16(vandq_u16(vshlq_u16(winB, vsh), vmask));
+            vst1q_u8(out + i, vqtbl4q_u8(vc2s, vcombine_u8(cA, cB)));
+            i += 16;
+        }
     }
 #elif defined(ZXC_USE_NEON32)
     /* d-register mirrors of the AArch64 kernels: 8 codes per step, c2s lookup
@@ -1011,6 +1047,89 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             const uint8x8_t rep = vtbl1_u8(raw, vrep);
             const uint8x8_t codes = vand_u8(vshl_u8(rep, vsh), vmask);
             vst1_u8(out + i, vtbl1_u8(vc2s, codes));
+            i += 8;
+        }
+    } else if (D == 3) {
+        /* 8 codes/step. 3-bit codes straddle bytes, so build a 16-bit window
+         * {byte_j, byte_j+1} per lane (byte_j = 3i>>3) via two VTBLs, then
+         * extract bits [s,s+3) by multiply-by-2^(13-s) + >>13 (no per-lane u16
+         * variable shift on ARMv7); s_j = 3j&7. 8 codes fit in 3 source bytes. */
+        const uint8x8_t vc2s = vld1_u8(c2s); /* 8 entries (2^3) */
+        static const uint8_t idxlo[8] = {0, 1, 0, 1, 0, 1, 1, 2};
+        static const uint8_t idxhi[8] = {1, 2, 1, 2, 2, 3, 2, 3};
+        static const uint16_t mul8[8] = {8192, 1024, 128, 4096, 512, 64, 2048, 256};
+        const uint8x8_t vidxlo = vld1_u8(idxlo);
+        const uint8x8_t vidxhi = vld1_u8(idxhi);
+        const uint16x8_t vmul = vld1q_u16(mul8);
+        const uint16x8_t vmask = vdupq_n_u16(0x07);
+        while (i + 8 <= n) {
+            const size_t off = (i * 3) >> 3;
+            const uint32_t w = (uint32_t)bits[off] | ((uint32_t)bits[off + 1] << 8) |
+                               ((uint32_t)bits[off + 2] << 16); /* exactly 3 bytes */
+            const uint8x8_t raw = vreinterpret_u8_u32(vdup_n_u32(w));
+            const uint8x8_t wlo = vtbl1_u8(raw, vidxlo);
+            const uint8x8_t whi = vtbl1_u8(raw, vidxhi);
+            const uint16x8_t win = vreinterpretq_u16_u8(vcombine_u8(wlo, whi));
+            const uint16x8_t codes16 = vandq_u16(vshrq_n_u16(vmulq_u16(win, vmul), 13), vmask);
+            vst1_u8(out + i, vtbl1_u8(vc2s, vmovn_u16(codes16)));
+            i += 8;
+        }
+    } else if (D == 5) {
+        /* Same window scheme as D=3; c2s has 32 entries (VTBL4). 5 source bytes. */
+        uint8x8x4_t vc2s;
+        vc2s.val[0] = vld1_u8(c2s);
+        vc2s.val[1] = vld1_u8(c2s + 8);
+        vc2s.val[2] = vld1_u8(c2s + 16);
+        vc2s.val[3] = vld1_u8(c2s + 24);
+        static const uint8_t idxlo[8] = {0, 1, 0, 1, 1, 2, 1, 2};
+        static const uint8_t idxhi[8] = {2, 3, 3, 4, 3, 4, 4, 5};
+        static const uint16_t mul8[8] = {2048, 64, 512, 16, 128, 1024, 32, 256};
+        const uint8x8_t vidxlo = vld1_u8(idxlo);
+        const uint8x8_t vidxhi = vld1_u8(idxhi);
+        const uint16x8_t vmul = vld1q_u16(mul8);
+        const uint16x8_t vmask = vdupq_n_u16(0x1F);
+        while (i + 8 <= n) {
+            uint64_t w = 0;
+            ZXC_MEMCPY(&w, bits + ((i * 5) >> 3), 5);
+            const uint8x8_t raw = vcreate_u8(w);
+            const uint16x8_t win =
+                vreinterpretq_u16_u8(vcombine_u8(vtbl1_u8(raw, vidxlo), vtbl1_u8(raw, vidxhi)));
+            const uint8x8_t codes =
+                vmovn_u16(vandq_u16(vshrq_n_u16(vmulq_u16(win, vmul), 11), vmask));
+            vst1_u8(out + i, vtbl4_u8(vc2s, codes));
+            i += 8;
+        }
+    } else if (D == 6) {
+        /* Same window scheme; c2s has 64 entries: two VTBL4 halves, select by
+         * code bit 5. 6 source bytes. */
+        uint8x8x4_t lo, hi;
+        lo.val[0] = vld1_u8(c2s);
+        lo.val[1] = vld1_u8(c2s + 8);
+        lo.val[2] = vld1_u8(c2s + 16);
+        lo.val[3] = vld1_u8(c2s + 24);
+        hi.val[0] = vld1_u8(c2s + 32);
+        hi.val[1] = vld1_u8(c2s + 40);
+        hi.val[2] = vld1_u8(c2s + 48);
+        hi.val[3] = vld1_u8(c2s + 56);
+        static const uint8_t idxlo[8] = {0, 1, 0, 1, 1, 2, 2, 3};
+        static const uint8_t idxhi[8] = {3, 4, 3, 4, 4, 5, 5, 6};
+        static const uint16_t mul8[8] = {1024, 16, 64, 256, 1024, 16, 64, 256};
+        const uint8x8_t vidxlo = vld1_u8(idxlo);
+        const uint8x8_t vidxhi = vld1_u8(idxhi);
+        const uint16x8_t vmul = vld1q_u16(mul8);
+        const uint16x8_t vmask = vdupq_n_u16(0x3F);
+        while (i + 8 <= n) {
+            uint64_t w = 0;
+            ZXC_MEMCPY(&w, bits + ((i * 6) >> 3), 6);
+            const uint8x8_t raw = vcreate_u8(w);
+            const uint16x8_t win =
+                vreinterpretq_u16_u8(vcombine_u8(vtbl1_u8(raw, vidxlo), vtbl1_u8(raw, vidxhi)));
+            const uint8x8_t codes =
+                vmovn_u16(vandq_u16(vshrq_n_u16(vmulq_u16(win, vmul), 10), vmask));
+            const uint8x8_t sel =
+                vbsl_u8(vcge_u8(codes, vdup_n_u8(32)), vtbl4_u8(hi, vsub_u8(codes, vdup_n_u8(32))),
+                        vtbl4_u8(lo, codes));
+            vst1_u8(out + i, sel);
             i += 8;
         }
     }
@@ -1059,6 +1178,84 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
                 _mm_srli_epi16(_mm_mullo_epi16(_mm_shuffle_epi8(raw, vspreadB), vmul), 6);
             const __m128i codes = _mm_and_si128(_mm_packus_epi16(a16, b16), _mm_set1_epi8(3));
             _mm_storeu_si128((__m128i*)(void*)(out + i), _mm_shuffle_epi8(vc2s, codes));
+            i += 16;
+        }
+    } else if (D == 3) {
+        /* 16-bit window {byte_j,byte_j+1} per lane (byte_j = Di>>3); SSE has no
+         * per-lane u16 shift, so extract bits [s,s+D) of window w by w*2^(16-D-s)
+         * (field lands in the top D bits) then >>(16-D); s_j = Dj&7. D=3: 6 bytes. */
+        uint8_t c2s16[16];
+        for (int k = 0; k < 16; k++) c2s16[k] = c2s[k & 7];
+        const __m128i vc2s = _mm_loadu_si128((const __m128i*)(const void*)c2s16);
+        const __m128i shufA = _mm_setr_epi8(0, 1, 0, 1, 0, 1, 1, 2, 1, 2, 1, 2, 2, 3, 2, 3);
+        const __m128i shufB = _mm_setr_epi8(3, 4, 3, 4, 3, 4, 4, 5, 4, 5, 4, 5, 5, 6, 5, 6);
+        const __m128i vmul = _mm_setr_epi16(8192, 1024, 128, 4096, 512, 64, 2048, 256);
+        while (i + 16 <= n) {
+            const size_t off = (i * 3) >> 3;
+            uint32_t w0;
+            uint16_t w1;
+            ZXC_MEMCPY(&w0, bits + off, 4);
+            ZXC_MEMCPY(&w1, bits + off + 4, 2); /* exactly 6 bytes read */
+            const __m128i raw = _mm_insert_epi16(_mm_cvtsi32_si128((int)w0), w1, 2);
+            const __m128i cA =
+                _mm_srli_epi16(_mm_mullo_epi16(_mm_shuffle_epi8(raw, shufA), vmul), 13);
+            const __m128i cB =
+                _mm_srli_epi16(_mm_mullo_epi16(_mm_shuffle_epi8(raw, shufB), vmul), 13);
+            const __m128i codes = _mm_and_si128(_mm_packus_epi16(cA, cB), _mm_set1_epi8(7));
+            _mm_storeu_si128((__m128i*)(void*)(out + i), _mm_shuffle_epi8(vc2s, codes));
+            i += 16;
+        }
+    } else if (D == 5) {
+        /* c2s has 32 entries: pshufb does 16, so select lo/hi by code bit 4. */
+        const __m128i vlo = _mm_loadu_si128((const __m128i*)(const void*)c2s);
+        const __m128i vhi = _mm_loadu_si128((const __m128i*)(const void*)(c2s + 16));
+        const __m128i shufA = _mm_setr_epi8(0, 1, 0, 1, 1, 2, 1, 2, 2, 3, 3, 4, 3, 4, 4, 5);
+        const __m128i shufB = _mm_setr_epi8(5, 6, 5, 6, 6, 7, 6, 7, 7, 8, 8, 9, 8, 9, 9, 10);
+        const __m128i vmul = _mm_setr_epi16(2048, 64, 512, 16, 128, 1024, 32, 256);
+        while (i + 16 <= n) {
+            const size_t off = (i * 5) >> 3;
+            uint16_t w1;
+            ZXC_MEMCPY(&w1, bits + off + 8, 2); /* 10 source bytes */
+            const __m128i raw =
+                _mm_insert_epi16(_mm_loadl_epi64((const __m128i*)(const void*)(bits + off)), w1, 4);
+            const __m128i cA =
+                _mm_srli_epi16(_mm_mullo_epi16(_mm_shuffle_epi8(raw, shufA), vmul), 11);
+            const __m128i cB =
+                _mm_srli_epi16(_mm_mullo_epi16(_mm_shuffle_epi8(raw, shufB), vmul), 11);
+            const __m128i codes = _mm_and_si128(_mm_packus_epi16(cA, cB), _mm_set1_epi8(0x1F));
+            const __m128i sel =
+                _mm_blendv_epi8(_mm_shuffle_epi8(vlo, codes), _mm_shuffle_epi8(vhi, codes),
+                                _mm_slli_epi16(codes, 3));
+            _mm_storeu_si128((__m128i*)(void*)(out + i), sel);
+            i += 16;
+        }
+    } else if (D == 6) {
+        /* c2s has 64 entries: 4 pshufb sub-tables, select by code bits 4-5. */
+        const __m128i t0 = _mm_loadu_si128((const __m128i*)(const void*)c2s);
+        const __m128i t1 = _mm_loadu_si128((const __m128i*)(const void*)(c2s + 16));
+        const __m128i t2 = _mm_loadu_si128((const __m128i*)(const void*)(c2s + 32));
+        const __m128i t3 = _mm_loadu_si128((const __m128i*)(const void*)(c2s + 48));
+        const __m128i shufA = _mm_setr_epi8(0, 1, 0, 1, 1, 2, 2, 3, 3, 4, 3, 4, 4, 5, 5, 6);
+        const __m128i shufB = _mm_setr_epi8(6, 7, 6, 7, 7, 8, 8, 9, 9, 10, 9, 10, 10, 11, 11, 12);
+        const __m128i vmul = _mm_setr_epi16(1024, 16, 64, 256, 1024, 16, 64, 256);
+        while (i + 16 <= n) {
+            const size_t off = (i * 6) >> 3;
+            uint32_t w1;
+            ZXC_MEMCPY(&w1, bits + off + 8, 4); /* 12 source bytes */
+            const __m128i raw = _mm_insert_epi32(
+                _mm_loadl_epi64((const __m128i*)(const void*)(bits + off)), (int)w1, 2);
+            const __m128i cA =
+                _mm_srli_epi16(_mm_mullo_epi16(_mm_shuffle_epi8(raw, shufA), vmul), 10);
+            const __m128i cB =
+                _mm_srli_epi16(_mm_mullo_epi16(_mm_shuffle_epi8(raw, shufB), vmul), 10);
+            const __m128i codes = _mm_and_si128(_mm_packus_epi16(cA, cB), _mm_set1_epi8(0x3F));
+            const __m128i m4 = _mm_slli_epi16(codes, 3);
+            const __m128i lo =
+                _mm_blendv_epi8(_mm_shuffle_epi8(t0, codes), _mm_shuffle_epi8(t1, codes), m4);
+            const __m128i hi =
+                _mm_blendv_epi8(_mm_shuffle_epi8(t2, codes), _mm_shuffle_epi8(t3, codes), m4);
+            _mm_storeu_si128((__m128i*)(void*)(out + i),
+                             _mm_blendv_epi8(lo, hi, _mm_slli_epi16(codes, 2)));
             i += 16;
         }
     }
