@@ -78,7 +78,7 @@ class TestDecompressRange:
 
     def test_all_levels(self, tmp_path):
         payload = build_payload(32 * 1024)
-        for level in range(zxc.LEVEL_FASTEST, zxc.LEVEL_DENSITY + 1):
+        for level in range(zxc.LEVEL_FASTEST, zxc.LEVEL_ULTRA + 1):
             compressed = build_seekable_archive_stream(payload, tmp_path, level=level)
             with zxc.Seekable(compressed) as s:
                 assert s.decompress_range(0, len(payload)) == payload

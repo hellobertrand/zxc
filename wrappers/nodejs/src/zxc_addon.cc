@@ -1072,6 +1072,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("LEVEL_BALANCED", Napi::Number::New(env, ZXC_LEVEL_BALANCED));
     exports.Set("LEVEL_COMPACT", Napi::Number::New(env, ZXC_LEVEL_COMPACT));
     exports.Set("LEVEL_DENSITY", Napi::Number::New(env, ZXC_LEVEL_DENSITY));
+    exports.Set("LEVEL_ULTRA", Napi::Number::New(env, ZXC_LEVEL_ULTRA));
 
     // Error constants
     exports.Set("ERROR_MEMORY", Napi::Number::New(env, ZXC_ERROR_MEMORY));

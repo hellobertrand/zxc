@@ -50,7 +50,7 @@ Compress a Buffer.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `data` | `Buffer` | - | Input data |
-| `options.level` | `number` | `LEVEL_DEFAULT` | Compression level (1–5) |
+| `options.level` | `number` | `LEVEL_DEFAULT` | Compression level (1–7) |
 | `options.checksum` | `boolean` | `false` | Enable checksum |
 
 Returns: `Buffer` - compressed data.

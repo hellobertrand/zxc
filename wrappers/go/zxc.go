@@ -67,16 +67,19 @@ const (
 	// (level 5).
 	LevelCompact Level = C.ZXC_LEVEL_COMPACT
 
-	// LevelDensity provides maximum density: Huffman-coded literals on top
-	// of LevelCompact plus a price-based optimal LZ77 parser. Slowest
-	// compression, best ratio (level 6).
+	// LevelDensity provides high density: Huffman-coded literals on top
+	// of LevelCompact plus a price-based optimal LZ77 parser (level 6).
 	LevelDensity Level = C.ZXC_LEVEL_DENSITY
+
+	// LevelUltra provides maximum density: Huffman-coded literals and sequence
+	// tokens with a deep parse. Slowest compression, best ratio (level 7).
+	LevelUltra Level = C.ZXC_LEVEL_ULTRA
 )
 
 // AllLevels returns all available compression levels from fastest to most
 // compact.
 func AllLevels() []Level {
-	return []Level{LevelFastest, LevelFast, LevelDefault, LevelBalanced, LevelCompact, LevelDensity}
+	return []Level{LevelFastest, LevelFast, LevelDefault, LevelBalanced, LevelCompact, LevelDensity, LevelUltra}
 }
 
 // ============================================================================
@@ -119,7 +122,7 @@ func MinLevel() int {
 	return int(C.zxc_min_level())
 }
 
-// MaxLevel returns the maximum supported compression level (currently 6).
+// MaxLevel returns the maximum supported compression level (currently 7).
 func MaxLevel() int {
 	return int(C.zxc_max_level())
 }

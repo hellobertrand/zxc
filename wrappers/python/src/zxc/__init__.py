@@ -55,6 +55,7 @@ from ._zxc import (
     LEVEL_BALANCED,
     LEVEL_COMPACT,
     LEVEL_DENSITY,
+    LEVEL_ULTRA,
     ERROR_MEMORY,
     ERROR_DST_TOO_SMALL,
     ERROR_SRC_TOO_SMALL,
@@ -122,6 +123,7 @@ __all__ = [
     "LEVEL_BALANCED",
     "LEVEL_COMPACT",
     "LEVEL_DENSITY",
+    "LEVEL_ULTRA",
 
     # Error Constants
     "ERROR_MEMORY",
@@ -146,7 +148,7 @@ def min_level() -> int:
 
 
 def max_level() -> int:
-    """Return the maximum supported compression level (currently 5)."""
+    """Return the maximum supported compression level (currently 7)."""
     return pyzxc_max_level()
 
 

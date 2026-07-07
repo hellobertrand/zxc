@@ -92,9 +92,13 @@ pub const ZXC_LEVEL_BALANCED: i32 = parse_i32(env!("ZXC_LEVEL_BALANCED"));
 /// High density. Best for storage/firmware/assets.
 pub const ZXC_LEVEL_COMPACT: i32 = parse_i32(env!("ZXC_LEVEL_COMPACT"));
 
-/// Maximum density: Huffman-coded literals on top of COMPACT,
-/// price-based optimal LZ77 parser. Slowest compression, best ratio.
+/// High density: Huffman-coded literals on top of COMPACT,
+/// price-based optimal LZ77 parser.
 pub const ZXC_LEVEL_DENSITY: i32 = parse_i32(env!("ZXC_LEVEL_DENSITY"));
+
+/// Maximum density: Huffman-coded literals *and* sequence tokens, deep parse.
+/// Slowest compression, best ratio (level 7 / ULTRA).
+pub const ZXC_LEVEL_ULTRA: i32 = parse_i32(env!("ZXC_LEVEL_ULTRA"));
 
 // =============================================================================
 // Error Codes
@@ -169,7 +173,7 @@ pub const ZXC_HUF_TABLE_SIZE: usize = 128;
 pub struct zxc_compress_opts_t {
     /// Worker thread count (0 = auto-detect CPU cores).
     pub n_threads: c_int,
-    /// Compression level 1-6 (0 = default).
+    /// Compression level 1-7 (0 = default).
     pub level: c_int,
     /// Block size in bytes (0 = default 512 KB). Must be power of 2, 4 KB – 2 MB.
     pub block_size: usize,
@@ -266,7 +270,7 @@ unsafe extern "C" {
     /// Returns the minimum supported compression level (currently 1).
     pub fn zxc_min_level() -> c_int;
 
-    /// Returns the maximum supported compression level (currently 5).
+    /// Returns the maximum supported compression level (currently 7).
     pub fn zxc_max_level() -> c_int;
 
     /// Returns the default compression level (currently 3).
@@ -646,7 +650,7 @@ unsafe extern "C" {
     /// * `f_in` - Input file stream
     /// * `f_out` - Output file stream  
     /// * `n_threads` - Number of worker threads (0 = auto-detect CPU cores)
-    /// * `level` - Compression level (1-6)
+    /// * `level` - Compression level (1-7)
     /// * `checksum_enabled` - If non-zero, enables checksum verification
     ///
     /// # Returns
@@ -1085,6 +1089,7 @@ mod tests {
             ZXC_LEVEL_BALANCED,
             ZXC_LEVEL_COMPACT,
             ZXC_LEVEL_DENSITY,
+            ZXC_LEVEL_ULTRA,
         ] {
             unsafe {
                 let bound = zxc_compress_bound(input.len()) as usize;

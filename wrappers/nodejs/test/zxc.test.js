@@ -23,7 +23,7 @@ describe('compress/decompress roundtrip', () => {
 
     for (const { name, data } of testCases) {
         test(`roundtrip: ${name}`, () => {
-            for (let level = zxc.LEVEL_FASTEST; level <= zxc.LEVEL_DENSITY; level++) {
+            for (let level = zxc.LEVEL_FASTEST; level <= zxc.LEVEL_ULTRA; level++) {
                 const compressed = zxc.compress(data, { level });
                 const size = zxc.getDecompressedSize(compressed);
                 const decompressed = zxc.decompress(compressed, { size });
@@ -122,6 +122,7 @@ describe('constants', () => {
         expect(zxc.LEVEL_BALANCED).toBe(4);
         expect(zxc.LEVEL_COMPACT).toBe(5);
         expect(zxc.LEVEL_DENSITY).toBe(6);
+        expect(zxc.LEVEL_ULTRA).toBe(7);
     });
 });
 

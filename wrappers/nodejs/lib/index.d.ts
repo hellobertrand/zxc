@@ -15,8 +15,10 @@ export const LEVEL_DEFAULT: number;
 export const LEVEL_BALANCED: number;
 /** High density. Best for storage/firmware/assets. */
 export const LEVEL_COMPACT: number;
-/** Maximum density: Huffman-coded literals on top of COMPACT. */
+/** High density: Huffman-coded literals on top of COMPACT. */
 export const LEVEL_DENSITY: number;
+/** Maximum density: Huffman-coded literals and sequence tokens (level 7 / ULTRA). */
+export const LEVEL_ULTRA: number;
 
 /** Memory allocation failure. */
 export const ERROR_MEMORY: number;
@@ -48,7 +50,7 @@ export const ERROR_BAD_BLOCK_TYPE: number;
 export const ERROR_BAD_BLOCK_SIZE: number;
 
 export interface CompressOptions {
-    /** Compression level (1-6). Defaults to LEVEL_DEFAULT. */
+    /** Compression level (1-7). Defaults to LEVEL_DEFAULT. */
     level?: number;
     /** Enable checksum verification. Defaults to false. */
     checksum?: boolean;
@@ -188,7 +190,7 @@ export function dictLoad(zxd: Buffer): LoadedDict;
 /** Returns the minimum supported compression level (currently 1). */
 export function minLevel(): number;
 
-/** Returns the maximum supported compression level (currently 6). */
+/** Returns the maximum supported compression level (currently 7). */
 export function maxLevel(): number;
 
 /** Returns the default compression level (currently 3). */
@@ -201,7 +203,7 @@ export function defaultLevel(): number;
 export function libraryVersion(): string;
 
 export interface CStreamOptions {
-    /** Compression level (1-6). Defaults to LEVEL_DEFAULT. */
+    /** Compression level (1-7). Defaults to LEVEL_DEFAULT. */
     level?: number;
     /** Enable per-block and global checksums. Defaults to false. */
     checksum?: boolean;

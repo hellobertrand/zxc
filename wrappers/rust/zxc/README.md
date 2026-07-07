@@ -35,12 +35,13 @@ fn main() -> Result<(), zxc::Error> {
 | `Level::Default` | ★★★☆☆ | ★★★★☆ | General purpose |
 | `Level::Balanced` | ★★☆☆☆ | ★★★★☆ | Archives |
 | `Level::Compact` | ★☆☆☆☆ | ★★★★★ | Storage, firmware |
-| `Level::Density` | ★☆☆☆☆ | ★★★★★ | Maximum density (Huffman literals + optimal parser) |
+| `Level::Density` | ★☆☆☆☆ | ★★★★★ | High density (Huffman literals + optimal parser) |
+| `Level::Ultra` | ★☆☆☆☆ | ★★★★★ | Maximum density (Huffman literals + tokens, deep parse) |
 
 ## Features
 
 - **Fast decompression**: Optimized for read-heavy workloads
-- **5 compression levels**: Trade off speed vs ratio
+- **7 compression levels**: Trade off speed vs ratio
 - **Optional checksums**: Disabled by default for maximum performance, enable for data integrity
 - **File streaming**: Multi-threaded compression/decompression for large files
 - **Zero-allocation API**: `compress_to` and `decompress_to` for buffer reuse

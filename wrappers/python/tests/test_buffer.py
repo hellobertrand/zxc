@@ -54,8 +54,8 @@ def test_compress_corruption(data, corrupt_func, exc):
 )
 
 def test_compress_roundtrip(data):
-    # test all compression levels (1..LEVEL_DENSITY)
-    for level in range(zxc.LEVEL_FASTEST, zxc.LEVEL_DENSITY + 1):
+    # test all compression levels (1..LEVEL_ULTRA)
+    for level in range(zxc.LEVEL_FASTEST, zxc.LEVEL_ULTRA + 1):
         compressed = zxc.compress(data, level)
 
         out_size = zxc.get_decompressed_size(compressed)

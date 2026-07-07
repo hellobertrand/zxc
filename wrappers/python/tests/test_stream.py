@@ -107,7 +107,7 @@ def test_stream_roundtrip(tmp_path, data):
 
     src_file_path.write_bytes(data)
 
-    for level in range(zxc.LEVEL_FASTEST, zxc.LEVEL_DENSITY + 1):
+    for level in range(zxc.LEVEL_FASTEST, zxc.LEVEL_ULTRA + 1):
         with open(src_file_path, "rb") as src, \
             open(compressed_file_path, "wb") as compressed:
             zxc.stream_compress(src, compressed, level=level)
