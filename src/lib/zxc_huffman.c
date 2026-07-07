@@ -731,6 +731,13 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n
  * up to 15 bytes past each cursor: callers guarantee read slack after the
  * level buffers. Writes stay within out[0..nl+nr).
  */
+/* A/B knob for the AVX2/AVX512 merge: 1 = pack the two 16-output steps into a
+ * 256-bit ymm (fewer shuffles/stores); 0 = keep the 2x 128-bit xmm path.
+ * Default on; build with -DZXC_PIVCO_MERGE_YMM=0 to compare on real x86. */
+#ifndef ZXC_PIVCO_MERGE_YMM
+#define ZXC_PIVCO_MERGE_YMM 1
+#endif
+
 static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8_t* RESTRICT src,
                                               const size_t nl, const size_t nr,
                                               const uint8_t* RESTRICT bits) {
@@ -790,8 +797,42 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
      *   pshufb(R, ix - 16):   lanes with ix < 16 wrap to >= 0xF0 (zeroed).
      * OR-ing both shuffles yields the merged bytes. The 32-output loop is the
      * same step unrolled twice: the second step's cursors derive from the first's
-     * popcounts alone, so both table-selects run independently (this ILP, not
-     * wider vectors, is where 256-bit targets gain). */
+     * popcounts alone, so both table-selects run independently. */
+#if (defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)) && ZXC_PIVCO_MERGE_YMM
+    /* 256-bit: pack the two independent 16-output steps into the two 128-bit
+     * lanes of a ymm (vpshufb is per-lane), so one vpshufb pair + one store
+     * emits 32 outputs where the 128-bit path needs four pshufb and two stores.
+     * The +0x70/-16 lane-zeroing is per-lane, so the result is byte-identical. */
+    while (i + 32 <= n) {
+        const uint8_t* cb = bits + (i >> 3);
+        const int pcA0 = zxc_pivco_popcnt32(cb[0]);
+        const int pcA = pcA0 + zxc_pivco_popcnt32(cb[1]);
+        const int pcB0 = zxc_pivco_popcnt32(cb[2]);
+        const int pcB = pcB0 + zxc_pivco_popcnt32(cb[3]);
+        const size_t lpB = lp + (size_t)(16 - pcA);
+        const size_t rpB = rp + (size_t)pcA;
+        const __m256i vL = _mm256_inserti128_si256(
+            _mm256_castsi128_si256(_mm_loadu_si128((const __m128i*)(const void*)(L + lp))),
+            _mm_loadu_si128((const __m128i*)(const void*)(L + lpB)), 1);
+        const __m256i vR = _mm256_inserti128_si256(
+            _mm256_castsi128_si256(_mm_loadu_si128((const __m128i*)(const void*)(R + rp))),
+            _mm_loadu_si128((const __m128i*)(const void*)(R + rpB)), 1);
+        const __m128i ixA = _mm_unpacklo_epi64(
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[cb[0]]),
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pcA0][cb[1]]));
+        const __m128i ixB = _mm_unpacklo_epi64(
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[cb[2]]),
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pcB0][cb[3]]));
+        const __m256i ix = _mm256_inserti128_si256(_mm256_castsi128_si256(ixA), ixB, 1);
+        const __m256i sel =
+            _mm256_or_si256(_mm256_shuffle_epi8(vL, _mm256_add_epi8(ix, _mm256_set1_epi8(0x70))),
+                            _mm256_shuffle_epi8(vR, _mm256_sub_epi8(ix, _mm256_set1_epi8(16))));
+        _mm256_storeu_si256((__m256i*)(void*)(out + i), sel);
+        lp = lpB + (size_t)(16 - pcB);
+        rp = rpB + (size_t)pcB;
+        i += 32;
+    }
+#else
     while (i + 32 <= n) {
         const uint8_t* cb = bits + (i >> 3);
         const int pcA0 = zxc_pivco_popcnt32(cb[0]);
@@ -824,6 +865,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         rp = rpB + (size_t)pcB;
         i += 32;
     }
+#endif
     while (i + 16 <= n) {
         const uint8_t b0 = bits[i >> 3];
         const uint8_t b1 = bits[(i >> 3) + 1];
