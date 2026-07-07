@@ -914,7 +914,7 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
                 return ZXC_ERROR_SRC_TOO_SMALL;
             }
             // LCOV_EXCL_STOP
-            const uint8_t* const footer = (const uint8_t*)src + src_size - ZXC_FILE_FOOTER_SIZE;
+            const uint8_t* const footer = src + src_size - ZXC_FILE_FOOTER_SIZE;
 
             // Validate source size matches what we decompressed
             const uint64_t stored_size = zxc_le64(footer);

@@ -411,14 +411,11 @@ static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt32(const uint32_t v) {
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_popcount(v);
 #else
-    /* Portable SWAR popcount for MSVC (real cl.exe): its __popcnt intrinsic is
-     * x86-only (absent on ARM64, and __popcnt64 absent on 32-bit x86) and would
-     * emit the POPCNT instruction even in the SSE2/scalar variants meant for
-     * pre-POPCNT CPUs. clang-cl takes the __builtin branch above. */
-    uint32_t x = v - ((v >> 1) & 0x55555555u);
-    x = (x & 0x33333333u) + ((x >> 2) & 0x33333333u);
-    x = (x + (x >> 4)) & 0x0F0F0F0Fu;
-    return (int)((x * 0x01010101u) >> 24);
+    /* Portable SWAR popcount for MSVC */
+    uint32_t x = v - ((v >> 1) & 0x55555555U);
+    x = (x & 0x33333333U) + ((x >> 2) & 0x33333333U);
+    x = (x + (x >> 4)) & 0x0F0F0F0FU;
+    return (int)((x * 0x01010101U) >> 24);
 #endif
 }
 
