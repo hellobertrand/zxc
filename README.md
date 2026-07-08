@@ -345,7 +345,17 @@ meson compile -C build
 When consumed as a subproject, only the library is built (CLI and tests are
 skipped automatically).
 
-### Option 6: Building from Source (CMake)
+### Option 6: 
+
+**Requirements:** Windows 10 1709 (or later)
+
+Use winget to install the zxc CLI: 
+
+```ps1
+winget install hellobertrand.zxc
+```
+
+### Option 7: Building from Source (CMake)
 
 **Requirements:** CMake (3.14+), C17 Compiler (Clang/GCC/MSVC).
 
