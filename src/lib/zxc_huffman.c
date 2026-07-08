@@ -892,8 +892,7 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
         while (i + 16 <= n) {
             uint8x16_t raw = vdupq_n_u8(0);
             raw = vreinterpretq_u8_u64(
-                vsetq_lane_u64(*(const uint64_t*)(const void*)(bits + ((i * 4) >> 3)),
-                               vreinterpretq_u64_u8(raw), 0));
+                vsetq_lane_u64(zxc_le64(bits + ((i * 4) >> 3)), vreinterpretq_u64_u8(raw), 0));
             const uint8x16_t rep = vqtbl1q_u8(raw, vrep);
             const uint8x16_t codes = vandq_u8(vshlq_u8(rep, vsh), vmask);
             vst1q_u8(out + i, vqtbl1q_u8(vc2s, codes));
@@ -911,8 +910,7 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
         while (i + 16 <= n) {
             uint8x16_t raw = vdupq_n_u8(0);
             raw = vreinterpretq_u8_u32(
-                vsetq_lane_u32(*(const uint32_t*)(const void*)(bits + ((i * 2) >> 3)),
-                               vreinterpretq_u32_u8(raw), 0));
+                vsetq_lane_u32(zxc_le32(bits + ((i * 2) >> 3)), vreinterpretq_u32_u8(raw), 0));
             const uint8x16_t rep = vqtbl1q_u8(raw, vrep);
             const uint8x16_t codes = vandq_u8(vshlq_u8(rep, vsh), vmask);
             vst1q_u8(out + i, vqtbl1q_u8(vc2s, codes));
