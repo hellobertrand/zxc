@@ -386,8 +386,8 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
  * @param[in]     off       Back-reference distance, @c >= 1.
  * @param[in]     ml        Match length in bytes.
  */
-static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8_t* match_src,
-                                                          const size_t off, const size_t ml) {
+static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8_t* match_src,
+                                                     const size_t off, const size_t ml) {
     if (off >= ml) {
         ZXC_MEMCPY(d_ptr, match_src, ml);
     } else if (ml < 16) {
