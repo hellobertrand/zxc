@@ -22,7 +22,7 @@ ZXC is a lossless compression **C library** (with official Rust, Python, Node.js
 - **Built for "Write Once, Read Many."** Compress once at build time, decompress millions of times at run time.
 - **Production-grade.** 5B+ fuzzing iterations, ASan/UBSan/Valgrind-clean, SLSA-signed releases, thread-safe API, BSD-3-Clause.
 - **Seekable.** Built-in seek table for O(1) random-access decompression.
-- **Broadly packaged.** Conan, vcpkg, Homebrew, and Rust/Python/Node packages.
+- **Broadly packaged.** Conan, vcpkg, Homebrew, Winget and Rust/Python/Node packages.
 
 ## Quick start
 
