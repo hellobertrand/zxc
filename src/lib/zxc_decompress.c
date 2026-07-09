@@ -370,6 +370,39 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
     }
 }
 
+/**
+ * @brief Exact-size match copy for the tail loops (no overshoot headroom).
+ *
+ * The tail/remaining-sequence loops validate against @c d_end exactly, so the
+ * wild-copy ladder above (which overshoots up to @ref ZXC_PAD_SIZE) is off
+ * limits there. For overlapping matches this expands the run by doubling:
+ * every ZXC_MEMCPY source range ends at or before its destination start, and
+ * nothing is written past @c d_ptr+ml. Since each copied prefix length is a
+ * multiple of @p off, the result is byte-identical to the naive per-byte
+ * copy, in O(log(ml/off)) calls instead of O(ml) iterations.
+ *
+ * @param[in,out] d_ptr     Output cursor (match source is @c d_ptr-off).
+ * @param[in]     match_src Match source, equal to @c d_ptr-off.
+ * @param[in]     off       Back-reference distance, @c >= 1.
+ * @param[in]     ml        Match length in bytes.
+ */
+static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8_t* match_src,
+                                                          const size_t off, const size_t ml) {
+    if (off >= ml) {
+        ZXC_MEMCPY(d_ptr, match_src, ml);
+    } else if (ml < 16) {
+        for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
+    } else {
+        size_t n = off;
+        ZXC_MEMCPY(d_ptr, match_src, n);
+        while (n <= ml - n) {
+            ZXC_MEMCPY(d_ptr + n, d_ptr, n);
+            n <<= 1;
+        }
+        ZXC_MEMCPY(d_ptr + n, d_ptr, ml - n);
+    }
+}
+
 // SAFE version: validates offset against written bytes
 #define DECODE_SEQ_SAFE(ll, ml, off)                              \
     do {                                                          \
@@ -1242,11 +1275,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
         const uint8_t* match_src = d_ptr - offset;
         if (UNLIKELY(match_src < dst - dict_size)) return ZXC_ERROR_BAD_OFFSET;
 
-        if (offset < ml) {
-            for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
-        } else {
-            ZXC_MEMCPY(d_ptr, match_src, ml);
-        }
+        zxc_decode_copy_match_exact(d_ptr, match_src, offset, ml);
         d_ptr += ml;
         n_seq--;
     }
@@ -1568,11 +1597,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
             if (UNLIKELY(offset > written || d_ptr + ml > d_end)) return ZXC_ERROR_BAD_OFFSET;
             const uint8_t* match_src = d_ptr - offset;
 
-            if (offset < ml) {
-                for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
-            } else {
-                ZXC_MEMCPY(d_ptr, match_src, ml);
-            }
+            zxc_decode_copy_match_exact(d_ptr, match_src, offset, ml);
             d_ptr += ml;
             written += ml;
         } else {
@@ -1861,11 +1886,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
         const uint8_t* match_src = d_ptr - offset;
         if (UNLIKELY(match_src < dst - dict_size)) return ZXC_ERROR_BAD_OFFSET;
 
-        if (offset < ml) {
-            for (size_t i = 0; i < ml; i++) d_ptr[i] = match_src[i];
-        } else {
-            ZXC_MEMCPY(d_ptr, match_src, ml);
-        }
+        zxc_decode_copy_match_exact(d_ptr, match_src, offset, ml);
         d_ptr += ml;
         n_seq--;
     }
