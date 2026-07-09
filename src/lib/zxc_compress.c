@@ -909,7 +909,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
     dp[0] = 0;
     ZXC_MEMSET(dp + 1, 0xFF, block_sz * sizeof(uint32_t));
-    ZXC_MEMSET(parent_len, 0, sz_pl + sz_po + sz_bm);
+    ZXC_MEMSET(match_end_bits, 0, sz_bm);
 
     /* Forward DP: visit every position, update reachable successors.
      * `skip_until` skips find_best_match at positions strictly inside the
