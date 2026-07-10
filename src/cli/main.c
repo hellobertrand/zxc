@@ -15,6 +15,7 @@
  */
 
 #include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,20 +74,31 @@ int optopt = 0;
 
 /**
  * @brief Minimal implementation of getopt_long for Windows.
- * Handles long options (--option) and short options (-o).
+ * Handles long options (--option[=value]), grouped short options (-dcf),
+ * attached or separate option arguments (-T4 / -T 4), the "--" end-of-options
+ * marker, and a bare "-" left as a positional argument.
  */
 static int getopt_long(int argc, char* const argv[], const char* optstring,
                        const struct option* longopts, const int* longindex) {
     (void)longindex;
+    static int shortpos = 0;  // >0: position within a grouped short-option argv element
+
+    optarg = NULL;
     if (optind >= argc) return -1;
-    char* curr = argv[optind];
-    if (curr[0] == '-' && curr[1] == '-') {
-        char* name_end = strchr(curr + 2, '=');
-        const size_t name_len = name_end ? (size_t)(name_end - (curr + 2)) : strlen(curr + 2);
-        const struct option* p = longopts;
-        while (p && p->name) {
-            const size_t opt_len = strlen(p->name);
-            if (name_len == opt_len && strncmp(curr + 2, p->name, name_len) == 0) {
+    char* const curr = argv[optind];
+
+    if (shortpos == 0) {
+        if (curr[0] != '-' || curr[1] == '\0') return -1;  // positional (including "-")
+        if (curr[1] == '-') {
+            if (curr[2] == '\0') {  // "--": end of options
+                optind++;
+                return -1;
+            }
+            char* const name_end = strchr(curr + 2, '=');
+            const size_t name_len = name_end ? (size_t)(name_end - (curr + 2)) : strlen(curr + 2);
+            for (const struct option* p = longopts; p && p->name; p++) {
+                if (name_len != strlen(p->name) || strncmp(curr + 2, p->name, name_len) != 0)
+                    continue;
                 optind++;
                 if (p->has_arg == required_argument) {
                     if (name_end)
@@ -95,11 +107,8 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
                         optarg = argv[optind++];
                     else
                         return '?';
-                } else if (p->has_arg == optional_argument) {
-                    if (name_end)
-                        optarg = name_end + 1;
-                    else
-                        optarg = NULL;
+                } else if (p->has_arg == optional_argument && name_end) {
+                    optarg = name_end + 1;
                 }
                 if (p->flag) {
                     *p->flag = p->val;
@@ -107,36 +116,50 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
                 }
                 return p->val;
             }
-            p++;
+            optind++;
+            return '?';
+        }
+        shortpos = 1;
+    }
+
+    const char c = curr[shortpos];
+    const char* const os = (c != ':') ? strchr(optstring, c) : NULL;
+    if (!os) {
+        optopt = c;
+        if (curr[shortpos + 1] != '\0') {
+            shortpos++;
+        } else {
+            shortpos = 0;
+            optind++;
         }
         return '?';
     }
-    if (curr[0] == '-') {
-        char c = curr[1];
+    if (os[1] == ':') {
+        // Option takes an argument: the rest of this element, or (if required)
+        // the next argv element. Optional (::) never consumes a separate element.
+        char* const attached = (curr[shortpos + 1] != '\0') ? curr + shortpos + 1 : NULL;
+        shortpos = 0;
         optind++;
-        const char* os = strchr(optstring, c);
-        if (!os) return '?';
-
-        if (os[1] == ':') {
-            if (os[2] == ':') {
-                // Optional argument (::)
-                if (curr[2] != '\0')
-                    optarg = curr + 2;
-                else
-                    optarg = NULL;
+        if (attached) {
+            optarg = attached;
+        } else if (os[2] != ':') {
+            if (optind < argc) {
+                optarg = argv[optind++];
             } else {
-                // Required argument (:)
-                if (curr[2] != '\0')
-                    optarg = curr + 2;
-                else if (optind < argc)
-                    optarg = argv[optind++];
-                else
-                    return '?';
+                optopt = c;
+                return '?';
             }
         }
         return c;
     }
-    return -1;
+    // Flag option: continue within the cluster if more characters follow
+    if (curr[shortpos + 1] != '\0') {
+        shortpos++;
+    } else {
+        shortpos = 0;
+        optind++;
+    }
+    return c;
 }
 #else
 // POSIX / Linux / macOS Implementation
@@ -286,6 +309,10 @@ static int zxc_validate_output_path(const char* path, char* resolved_buffer, siz
 // CLI Logging Helpers
 static int g_quiet = 0;
 static int g_verbose = 0;
+/* Progress display policy (--progress): auto = tty-only heuristic, always =
+ * force (one line per update off-tty), never = disable. -q suppresses all. */
+enum { ZXC_PROGRESS_AUTO = 0, ZXC_PROGRESS_ALWAYS, ZXC_PROGRESS_NEVER };
+static int g_progress_mode = ZXC_PROGRESS_AUTO;
 /* Shared literal Huffman table from the -D .zxd file (malloc'd copy), passed
  * through the compress/decompress opts. NULL when the dict carries none. */
 static void* g_dict_huf = NULL;
@@ -348,7 +375,7 @@ typedef enum {
     MODE_TRAIN_DICT
 } zxc_mode_t;
 
-enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT };
+enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS };
 
 // Forward declaration for recursive mode
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
@@ -492,7 +519,8 @@ void print_help(const char* app) {
         "  -c, --stdout      Write to stdout\n"
         "  -v, --verbose     Verbose mode\n"
         "  -q, --quiet       Quiet mode\n"
-        "  -j, --json        JSON output (benchmark mode)\n");
+        "  -j, --json        JSON output (benchmark mode)\n"
+        "  --progress MODE   Progress display: auto, always, never {auto}\n");
 }
 
 void print_version(void) {
@@ -526,70 +554,114 @@ static void format_size_decimal(uint64_t bytes, char* buf, size_t buf_size) {
  */
 typedef struct {
     double start_time;
-    const char* operation;  // "Compressing" or "Decompressing"
+    const char* operation;  // "Compressing", "Decompressing" or "Testing"
     uint64_t total_size;    // Pre-determined total size (0 if unknown)
+    int to_tty;             // stderr is a terminal: rewrite in place; else one line per update
+    double last_draw;       // Timestamp of the last repaint (0 = nothing drawn yet)
+    size_t last_len;        // Visible length of the last in-place line (for erasing)
 } progress_ctx_t;
+
+/**
+ * @brief Erases an in-place progress line without ANSI escapes.
+ *
+ * Plain "\r" + spaces works on every terminal, including legacy Windows
+ * consoles where "\033[K" prints garbage unless VT processing is enabled.
+ */
+static void zxc_progress_clear(size_t len) {
+    fprintf(stderr, "\r%*s\r", (int)len, "");
+    fflush(stderr);
+}
 
 /**
  * @brief Progress callback for CLI progress bar.
  *
- * Displays a real-time progress bar during compression/decompression.
- * Shows percentage, processed/total size, and throughput speed.
+ * The library fires this once per block -- at multi-GB/s rates that is far
+ * more often than a terminal can display, so frames are throttled (100 ms on
+ * a tty, 1 s otherwise) and each frame is emitted as a single write (stderr
+ * is unbuffered: per-character output would be one syscall per character).
  *
- * Format: [==========>     ] 45% | 4.5 GB/10.0 GB | 156 MB/s
+ * Format: Compressing [=====>     ] 45% | 4.5 GB/10.0 GB | 156.0 MB/s | ETA 0:35
  */
 static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total,
                                   const void* user_data) {
     (void)bytes_total; /* required by zxc_progress_callback_t */
-    const progress_ctx_t* pctx = (const progress_ctx_t*)user_data;
+    progress_ctx_t* const pctx = (progress_ctx_t*)user_data;
 
     if (!pctx) return;
 
+    const double now = zxc_now();
+    const double interval = pctx->to_tty ? 0.1 : 1.0;
+    if (pctx->last_draw != 0.0 && now - pctx->last_draw < interval) return;
+    pctx->last_draw = now;
+
     // Use pre-determined total size from context (not the parameter)
     const uint64_t total = pctx->total_size;
-
-    const double now = zxc_now();
     const double elapsed = now - pctx->start_time;
 
-    // Calculate throughput speed
+    // Cumulative throughput
     double speed_mbps = 0.0;
     if (elapsed > 0.1)  // Avoid division by zero for very fast operations
         speed_mbps = (double)bytes_processed / (1000.0 * 1000.0) / elapsed;
 
-    // Clear line and move cursor to beginning
-    fprintf(stderr, "\r\033[K");
+    char proc_str[32];
+    format_size_decimal(bytes_processed, proc_str, sizeof(proc_str));
 
+    char text[160];
+    int n;
     if (total > 0) {
-        // Known size: show percentage bar
+        // Known size: percentage bar
         int percent = (int)((bytes_processed * 100) / total);
         if (percent > 100) percent = 100;
 
-        const int bar_width = 20;
-        int filled = (percent * bar_width) / 100;
+        enum { BAR_WIDTH = 20 };
+        char bar[BAR_WIDTH + 1];
+        const int filled = (percent * BAR_WIDTH) / 100;
+        for (int i = 0; i < BAR_WIDTH; i++) bar[i] = (i < filled) ? '=' : (i == filled) ? '>' : ' ';
+        bar[BAR_WIDTH] = '\0';
 
-        fprintf(stderr, "%s [", pctx->operation);
-        for (int i = 0; i < bar_width; i++) {
-            if (i < filled)
-                fprintf(stderr, "=");
-            else if (i == filled)
-                fprintf(stderr, ">");
+        // Estimated time to completion, from the cumulative throughput
+        char eta[24] = "";
+        if (speed_mbps > 0.0 && total > bytes_processed) {
+            const long secs = (long)((double)(total - bytes_processed) / (speed_mbps * 1e6));
+            if (secs >= 3600)
+                snprintf(eta, sizeof(eta), " | ETA %ld:%02ld:%02ld", secs / 3600, (secs / 60) % 60,
+                         secs % 60);
             else
-                fprintf(stderr, " ");
+                snprintf(eta, sizeof(eta), " | ETA %ld:%02ld", secs / 60, secs % 60);
         }
-        fprintf(stderr, "] %d%% | ", percent);
 
-        char proc_str[32];
         char total_str[32];
-        format_size_decimal(bytes_processed, proc_str, sizeof(proc_str));
         format_size_decimal(total, total_str, sizeof(total_str));
-        fprintf(stderr, "%s/%s | %.1f MB/s", proc_str, total_str, speed_mbps);
+        n = snprintf(text, sizeof(text), "%s [%s] %d%% | %s/%s | %.1f MB/s%s", pctx->operation, bar,
+                     percent, proc_str, total_str, speed_mbps, eta);
     } else {
         // Unknown size (stdin): just show bytes processed
-        char proc_str[32];
-        format_size_decimal(bytes_processed, proc_str, sizeof(proc_str));
-        fprintf(stderr, "%s [Processing...] %s | %.1f MB/s", pctx->operation, proc_str, speed_mbps);
+        n = snprintf(text, sizeof(text), "%s %s | %.1f MB/s", pctx->operation, proc_str,
+                     speed_mbps);
     }
+    if (n < 0) return;
+    const size_t tlen = ((size_t)n < sizeof(text)) ? (size_t)n : sizeof(text) - 1;
 
+    char frame[352];
+    size_t flen = 0;
+    if (pctx->to_tty) {
+        frame[flen++] = '\r';
+        memcpy(frame + flen, text, tlen);
+        flen += tlen;
+        // Pad with spaces to erase any residue from a longer previous line
+        size_t visible = tlen;
+        while (visible < pctx->last_len && flen < sizeof(frame)) {
+            frame[flen++] = ' ';
+            visible++;
+        }
+        pctx->last_len = tlen;
+    } else {
+        // Off-tty (--progress=always): plain newline-terminated updates
+        memcpy(frame, text, tlen);
+        flen = tlen;
+        frame[flen++] = '\n';
+    }
+    fwrite(frame, 1, flen, stderr);
     fflush(stderr);
 }
 
@@ -832,19 +904,31 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         f_out = NULL;
     } else if (to_stdout) {
         use_stdout = 1;
+    } else if (out_path_override) {
+        // Explicit -o / positional output: honored for file and stdin input alike
+        const int n = snprintf(out_path, sizeof(out_path), "%s", out_path_override);
+        if (n < 0 || (size_t)n >= sizeof(out_path)) {
+            zxc_log("Error: Output path too long\n");
+            if (!use_stdin) fclose(f_in);
+            return 1;
+        }
+        use_stdout = 0;
     } else if (!use_stdin) {
-        // Auto-generate output filename if input is a file and no output specified
-        if (out_path_override) {
-            snprintf(out_path, sizeof(out_path), "%s", out_path_override);
-        } else if (mode == MODE_COMPRESS) {
-            snprintf(out_path, sizeof(out_path), "%s.zxc", in_path);
+        // Auto-generate output filename from the input filename
+        if (mode == MODE_COMPRESS) {
+            const int n = snprintf(out_path, sizeof(out_path), "%s.zxc", in_path);
+            if (n < 0 || (size_t)n >= sizeof(out_path)) {
+                zxc_log("Error: Output path too long\n");
+                fclose(f_in);
+                return 1;
+            }
         } else {
             const size_t len = strlen(in_path);
             if (len > 4 && !strcmp(in_path + len - 4, ".zxc")) {
                 const size_t base_len = len - 4;
                 if (base_len >= sizeof(out_path)) {
                     zxc_log("Error: Output path too long\n");
-                    if (f_in) fclose(f_in);
+                    fclose(f_in);
                     return 1;
                 }
                 memcpy(out_path, in_path, base_len);
@@ -852,32 +936,31 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             } else {
                 zxc_log("Error: Cannot determine output filename: '%s' does not end with .zxc\n",
                         in_path);
-                if (f_in) fclose(f_in);
+                fclose(f_in);
                 return 1;
             }
         }
-        use_stdout = 0;
-    }
-
-    // Safety check: prevent overwriting input file
-    if (mode != MODE_INTEGRITY && !use_stdin && !use_stdout &&
-        strcmp(in_path ? in_path : "", out_path) == 0) {
-        zxc_log("Error: Input and output filenames are identical for '%s'.\n", in_path);
-        if (f_in) fclose(f_in);
-        return 1;
     }
 
     // Open output file if not writing to stdout
     if (!use_stdout && mode != MODE_INTEGRITY) {
         if (zxc_validate_output_path(out_path, resolved_out_path, sizeof(resolved_out_path)) != 0) {
             zxc_log("Error: Invalid output path '%s': %s\n", out_path, strerror(errno));
-            if (f_in) fclose(f_in);
+            if (!use_stdin) fclose(f_in);
+            return 1;
+        }
+
+        // Safety check on resolved paths: opening the output with O_TRUNC would
+        // destroy the input if both names refer to the same file
+        if (!use_stdin && strcmp(resolved_in_path, resolved_out_path) == 0) {
+            zxc_log("Error: Input and output files are identical for '%s'.\n", in_path);
+            fclose(f_in);
             return 1;
         }
 
         if (!force && access(resolved_out_path, F_OK) == 0) {
             zxc_log("Output exists. Use -f to overwrite '%s'.\n", resolved_out_path);
-            fclose(f_in);
+            if (!use_stdin) fclose(f_in);
             return 1;
         }
 
@@ -889,7 +972,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                             S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         if (fd == -1) {
             zxc_log("Error creating output %s: %s\n", resolved_out_path, strerror(errno));
-            fclose(f_in);
+            if (!use_stdin) fclose(f_in);
             return 1;
         }
         f_out = fdopen(fd, "wb");
@@ -897,7 +980,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
         if (!f_out) {
             zxc_log("Error open output %s: %s\n", resolved_out_path, strerror(errno));
-            if (f_in) fclose(f_in);
+            if (!use_stdin) fclose(f_in);
 #ifndef _WIN32
             if (fd != -1) close(fd);
 #endif
@@ -938,25 +1021,30 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     // to avoid buffer inconsistency issues when reading the footer
     int show_progress = 0;
     uint64_t total_size = 0;
+    const int stderr_tty = isatty(fileno(stderr)) != 0;
 
-    if (!g_quiet && !use_stdout && !use_stdin && isatty(fileno(stderr))) {
-        // Get file size based on mode
-        if (mode == MODE_COMPRESS) {
-            // Compression: get input file size
-            const long long saved_pos = ftello(f_in);
-            if (saved_pos >= 0 && fseeko(f_in, 0, SEEK_END) == 0) {
-                const long long size = ftello(f_in);
-                if (size > 0) total_size = (uint64_t)size;
-                fseeko(f_in, saved_pos, SEEK_SET);
+    if (!g_quiet && g_progress_mode != ZXC_PROGRESS_NEVER &&
+        (g_progress_mode == ZXC_PROGRESS_ALWAYS || (!use_stdout && !use_stdin && stderr_tty))) {
+        // Get the total size based on mode (only knowable for seekable file input)
+        if (!use_stdin) {
+            if (mode == MODE_COMPRESS) {
+                // Compression: get input file size
+                const long long saved_pos = ftello(f_in);
+                if (saved_pos >= 0 && fseeko(f_in, 0, SEEK_END) == 0) {
+                    const long long size = ftello(f_in);
+                    if (size > 0) total_size = (uint64_t)size;
+                    fseeko(f_in, saved_pos, SEEK_SET);
+                }
+            } else {
+                // Decompression: get decompressed size from footer (BEFORE starting decompression)
+                const int64_t decomp_size = zxc_stream_get_decompressed_size(f_in);
+                if (decomp_size > 0) total_size = (uint64_t)decomp_size;
             }
-        } else {
-            // Decompression: get decompressed size from footer (BEFORE starting decompression)
-            const int64_t decomp_size = zxc_stream_get_decompressed_size(f_in);
-            if (decomp_size > 0) total_size = (uint64_t)decomp_size;
         }
 
-        // Only show progress for files > 1MB
-        if (total_size > ZXC_STDIO_BUFFER_SIZE) show_progress = 1;
+        // auto: only show progress for files > 1MB; always: unconditionally
+        if (g_progress_mode == ZXC_PROGRESS_ALWAYS || total_size > ZXC_STDIO_BUFFER_SIZE)
+            show_progress = 1;
     }
 
     // Set large buffers for I/O performance (AFTER file size detection)
@@ -971,8 +1059,13 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
     // Prepare progress context
     progress_ctx_t pctx = {.start_time = zxc_now(),
-                           .operation = (mode == MODE_COMPRESS) ? "Compressing" : "Decompressing",
-                           .total_size = total_size};
+                           .operation = (mode == MODE_COMPRESS)    ? "Compressing"
+                                        : (mode == MODE_INTEGRITY) ? "Testing"
+                                                                   : "Decompressing",
+                           .total_size = total_size,
+                           .to_tty = stderr_tty,
+                           .last_draw = 0.0,
+                           .last_len = 0};
 
     const double t0 = zxc_now();
     int64_t bytes;
@@ -1004,26 +1097,33 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     }
     const double dt = zxc_now() - t0;
 
-    // Clear progress line on completion
-    if (show_progress) {
-        fprintf(stderr, "\r\033[K");
-        fflush(stderr);
-    }
+    // Clear the in-place progress line on completion (off-tty lines end in '\n')
+    if (show_progress && pctx.to_tty) zxc_progress_clear(pctx.last_len);
 
     if (!use_stdin)
         fclose(f_in);
     else
         setvbuf(stdin, NULL, _IONBF, 0);
 
-    if (created_out_file)
-        fclose(f_out);
-    else if (use_stdout) {
-        fflush(stdout);
+    // stdio defers write errors to flush/close: a failure here means the
+    // output is truncated even though the codec reported success
+    int write_error = 0;
+    if (created_out_file) {
+        write_error = (fclose(f_out) != 0);
+    } else if (use_stdout) {
+        write_error = (fflush(stdout) != 0);
         setvbuf(stdout, NULL, _IONBF, 0);
     }
 
     free(b1);
     free(b2);
+
+    if (bytes >= 0 && write_error) {
+        zxc_log("Error: %s: write failed: %s\n", created_out_file ? resolved_out_path : "<stdout>",
+                strerror(errno));
+        if (created_out_file) unlink(resolved_out_path);
+        return 1;
+    }
 
     if (bytes >= 0) {
         if (mode == MODE_INTEGRITY) {
@@ -1119,6 +1219,7 @@ int main(int argc, char** argv) {
     const char* output_path = NULL;
 
     static const struct option long_options[] = {{"train", no_argument, 0, OPT_TRAIN_DICT},
+                                                 {"progress", required_argument, 0, OPT_PROGRESS},
                                                  {"output", required_argument, 0, 'o'},
                                                  {"dict", required_argument, 0, 'D'},
                                                  {"compress", no_argument, 0, 'z'},
@@ -1161,19 +1262,28 @@ int main(int argc, char** argv) {
             case 't':
                 mode = MODE_INTEGRITY;
                 break;
-            case 'b':
+            case 'b': {
                 mode = MODE_BENCHMARK;
                 const char* bench_arg = optarg;
-                if (!bench_arg && optind < argc && argv[optind][0] >= '1' && argv[optind][0] <= '9')
-                    bench_arg = argv[optind++];
+                if (!bench_arg && optind < argc && argv[optind][0] >= '1' &&
+                    argv[optind][0] <= '9') {
+                    // Consume the next argument as a duration only if it is all
+                    // digits, so a filename like "5samples.bin" is left alone
+                    const char* p = argv[optind] + 1;
+                    while (*p >= '0' && *p <= '9') p++;
+                    if (*p == '\0') bench_arg = argv[optind++];
+                }
                 if (bench_arg) {
-                    bench_seconds = atoi(bench_arg);
-                    if (bench_seconds < 1 || bench_seconds > 3600) {
+                    char* end = NULL;
+                    const long secs = strtol(bench_arg, &end, 10);
+                    if (end == bench_arg || *end != '\0' || secs < 1 || secs > 3600) {
                         fprintf(stderr, "Error: duration must be between 1 and 3600 seconds\n");
                         return 1;
                     }
+                    bench_seconds = (int)secs;
                 }
                 break;
+            }
             case '1':
                 level = 1;
                 break;
@@ -1195,14 +1305,17 @@ int main(int argc, char** argv) {
             case '7':
                 level = 7;
                 break;
-            case 'T':
-                num_threads = atoi(optarg);
-                if (num_threads < 0 || num_threads > ZXC_MAX_THREADS) {
+            case 'T': {
+                char* end = NULL;
+                const long threads = strtol(optarg, &end, 10);
+                if (end == optarg || *end != '\0' || threads < 0 || threads > ZXC_MAX_THREADS) {
                     fprintf(stderr, "Error: num_threads must be between 0 and %d\n",
                             ZXC_MAX_THREADS);
                     return 1;
                 }
+                num_threads = (int)threads;
                 break;
+            }
             case 'k':
                 keep_input = 1;
                 break;
@@ -1239,6 +1352,18 @@ int main(int argc, char** argv) {
             case OPT_TRAIN_DICT:
                 mode = MODE_TRAIN_DICT;
                 break;
+            case OPT_PROGRESS:
+                if (strcmp(optarg, "auto") == 0)
+                    g_progress_mode = ZXC_PROGRESS_AUTO;
+                else if (strcmp(optarg, "always") == 0)
+                    g_progress_mode = ZXC_PROGRESS_ALWAYS;
+                else if (strcmp(optarg, "never") == 0)
+                    g_progress_mode = ZXC_PROGRESS_NEVER;
+                else {
+                    fprintf(stderr, "Error: --progress must be 'auto', 'always' or 'never'\n");
+                    return 1;
+                }
+                break;
             case 'o':
                 output_path = optarg;
                 break;
@@ -1249,31 +1374,29 @@ int main(int argc, char** argv) {
             case 'B': {
                 char* end = NULL;
                 const long long bs_val = strtoll(optarg, &end, 10);
-                if (bs_val <= 0 || end == optarg) {
-                    fprintf(stderr,
-                            "Error: block-size must be a power of 2 between 4K and 2M\n"
-                            "  Examples: -B 4K, -B 128K, -B 1M, -B 2M\n");
-                    return 1;
-                }
                 long long multiplier = 1;
-                if (end && (*end == 'k' || *end == 'K')) {
+                if (*end == 'k' || *end == 'K') {
                     multiplier = 1024;
                     end++;
                     if (*end == 'b' || *end == 'B') end++;  // optional "B" in "KB"
-                } else if (end && (*end == 'm' || *end == 'M')) {
+                } else if (*end == 'm' || *end == 'M') {
                     multiplier = 1024 * 1024;
                     end++;
                     if (*end == 'b' || *end == 'B') end++;  // optional "B" in "MB"
                 }
-                const long long bs_bytes = bs_val * multiplier;
-                const size_t bs = (size_t)bs_bytes;
-                if (bs < ZXC_BLOCK_SIZE_MIN || bs > ZXC_BLOCK_SIZE_MAX || (bs & (bs - 1)) != 0) {
+                // Bound the value before multiplying to avoid signed overflow
+                const long long bs =
+                    (bs_val > 0 && bs_val <= (long long)ZXC_BLOCK_SIZE_MAX / multiplier)
+                        ? bs_val * multiplier
+                        : 0;
+                if (end == optarg || *end != '\0' || bs < ZXC_BLOCK_SIZE_MIN ||
+                    (bs & (bs - 1)) != 0) {
                     fprintf(stderr,
                             "Error: block-size must be a power of 2 between 4K and 2M\n"
                             "  Examples: -B 4K, -B 128K, -B 1M, -B 2M\n");
                     return 1;
                 }
-                block_size = bs;
+                block_size = (size_t)bs;
                 break;
             }
             case '?':
@@ -1491,9 +1614,16 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        size_t zxd_bound = zxc_dict_save_bound((size_t)dict_sz);
+        const size_t zxd_bound = zxc_dict_save_bound((size_t)dict_sz);
         uint8_t* zxd = (uint8_t*)malloc(zxd_bound);
-        int64_t zxd_sz = zxc_dict_save(dict_buf, (size_t)dict_sz, huf_lengths, zxd, zxd_bound);
+        if (!zxd) {
+            fprintf(stderr, "Error: memory allocation failed\n");
+            free(dict_buf);
+            free(dict);
+            return 1;
+        }
+        const int64_t zxd_sz =
+            zxc_dict_save(dict_buf, (size_t)dict_sz, huf_lengths, zxd, zxd_bound);
         free(dict_buf);
         if (zxd_sz <= 0) {
             fprintf(stderr, "Error: dict save failed: %s\n", zxc_error_name((int)zxd_sz));
@@ -1544,9 +1674,15 @@ int main(int argc, char** argv) {
             free(dict);
             return 1;
         }
-        fwrite(zxd, 1, (size_t)zxd_sz, out);
-        fclose(out);
+        const size_t nwritten = fwrite(zxd, 1, (size_t)zxd_sz, out);
+        const int close_rc = fclose(out);
         free(zxd);
+        if (nwritten != (size_t)zxd_sz || close_rc != 0) {
+            fprintf(stderr, "Error: failed to write '%s': %s\n", final_path, strerror(errno));
+            unlink(final_path);
+            free(dict);
+            return 1;
+        }
 
         fprintf(stderr, "Trained dictionary: %lld bytes from %d samples -> %s (dict_id: 0x%08X)\n",
                 (long long)dict_sz, n_loaded, final_path, trained_id);
@@ -1561,9 +1697,9 @@ int main(int argc, char** argv) {
      * without disk I/O bottlenecks.
      */
     if (mode == MODE_BENCHMARK) {
-        free(dict);
         if (optind >= argc) {
             zxc_log("Benchmark requires input file.\n");
+            free(dict);
             return 1;
         }
         const char* in_path = argv[optind];
@@ -1575,12 +1711,22 @@ int main(int argc, char** argv) {
         char resolved_path[4096];
         if (zxc_validate_input_path(in_path, resolved_path, sizeof(resolved_path)) != 0) {
             zxc_log("Error: Invalid input file '%s': %s\n", in_path, strerror(errno));
+            free(dict);
             return 1;
         }
-        if (num_threads < 0 || num_threads > ZXC_MAX_THREADS) {
-            zxc_log("Error: num_threads must be between 0 and %d\n", ZXC_MAX_THREADS);
-            return 1;
-        }
+
+        const zxc_compress_opts_t bench_copts = {.n_threads = num_threads,
+                                                 .level = level,
+                                                 .block_size = block_size,
+                                                 .checksum_enabled = checksum,
+                                                 .dict = dict,
+                                                 .dict_size = dict_size,
+                                                 .dict_huf = g_dict_huf};
+        const zxc_decompress_opts_t bench_dopts = {.n_threads = num_threads,
+                                                   .checksum_enabled = checksum,
+                                                   .dict = dict,
+                                                   .dict_size = dict_size,
+                                                   .dict_huf = g_dict_huf};
 
         FILE* f_in = fopen(resolved_path, "rb");
         if (!f_in) goto bench_cleanup;
@@ -1622,13 +1768,6 @@ int main(int argc, char** argv) {
         while (zxc_now() < compress_deadline) {
             rewind(fm);
             const double t0 = zxc_now();
-            zxc_compress_opts_t bench_copts = {.n_threads = num_threads,
-                                               .level = level,
-                                               .block_size = block_size,
-                                               .checksum_enabled = checksum,
-                                               .dict = dict,
-                                               .dict_size = dict_size,
-                                               .dict_huf = g_dict_huf};
             zxc_stream_compress(fm, NULL, &bench_copts);
             const double dt = zxc_now() - t0;
             if (dt < best_compress) best_compress = dt;
@@ -1637,7 +1776,7 @@ int main(int argc, char** argv) {
                 fprintf(stderr, "\rCompressing... %d iters (%.1fs)", compress_iters,
                         zxc_now() - compress_start);
         }
-        if (!json_output && !g_quiet) fprintf(stderr, "\r\033[K");
+        if (!json_output && !g_quiet) zxc_progress_clear(64);
         fclose(fm);
         fm = NULL;
 
@@ -1665,14 +1804,7 @@ int main(int argc, char** argv) {
         }
 #endif
 
-        zxc_compress_opts_t bench_copts2 = {.n_threads = num_threads,
-                                            .level = level,
-                                            .block_size = block_size,
-                                            .checksum_enabled = checksum,
-                                            .dict = dict,
-                                            .dict_size = dict_size,
-                                            .dict_huf = g_dict_huf};
-        const int64_t c_sz = zxc_stream_compress(fm_in, fm_out, &bench_copts2);
+        const int64_t c_sz = zxc_stream_compress(fm_in, fm_out, &bench_copts);
         if (c_sz < 0) {
             fclose(fm_in);
             fclose(fm_out);
@@ -1714,11 +1846,6 @@ int main(int argc, char** argv) {
         while (zxc_now() < decompress_deadline) {
             rewind(fc);
             const double t0 = zxc_now();
-            zxc_decompress_opts_t bench_dopts = {.n_threads = num_threads,
-                                                 .checksum_enabled = checksum,
-                                                 .dict = dict,
-                                                 .dict_size = dict_size,
-                                                 .dict_huf = g_dict_huf};
             zxc_stream_decompress(fc, NULL, &bench_dopts);
             const double dt = zxc_now() - t0;
             if (dt < best_decompress) best_decompress = dt;
@@ -1727,7 +1854,7 @@ int main(int argc, char** argv) {
                 fprintf(stderr, "\rDecompressing... %d iters (%.1fs)", decompress_iters,
                         zxc_now() - decompress_start);
         }
-        if (!json_output && !g_quiet) fprintf(stderr, "\r\033[K");
+        if (!json_output && !g_quiet) zxc_progress_clear(64);
         fclose(fc);
 
         const double compress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_compress;
@@ -1769,6 +1896,7 @@ int main(int argc, char** argv) {
         if (f_in) fclose(f_in);
         free(ram);
         free(c_dat);
+        free(dict);
         return ret;
     }
 
@@ -1788,7 +1916,13 @@ int main(int argc, char** argv) {
         if (json_output && num_files > 1) printf("[\n");
 
         for (int i = optind; i < argc; i++) {
-            ret |= zxc_list_archive(argv[i], json_output);
+            const int r = zxc_list_archive(argv[i], json_output);
+            // Keep the JSON array well-formed: a failed entry prints nothing,
+            // so emit an error object in its place
+            if (r != 0 && json_output)
+                printf("{\n  \"filename\": \"%s\",\n  \"error\": \"cannot list file\"\n}\n",
+                       argv[i]);
+            ret |= r;
             if (json_output && num_files > 1 && i < argc - 1) {
                 printf(",\n");
             }
@@ -1803,6 +1937,12 @@ int main(int argc, char** argv) {
 
     if (multiple_mode && to_stdout) {
         zxc_log("Error: cannot write to stdout when using multiple files mode (-m).\n");
+        free(dict);
+        return 1;
+    }
+
+    if (multiple_mode && output_path) {
+        zxc_log("Error: cannot use -o with multiple files mode (-m/-r).\n");
         free(dict);
         return 1;
     }
