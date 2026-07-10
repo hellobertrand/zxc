@@ -1658,9 +1658,7 @@ parse_done:;
      * viable on literal sections far below ZXC_HUF_MIN_LITERALS. Exact size
      * accounting; invalid (a literal byte without a code) drops the candidate. */
     size_t huf_dict_total_size = SIZE_MAX;
-    uint8_t dict_code_len[ZXC_HUF_NUM_SYMBOLS];
-    if (level >= ZXC_LEVEL_DENSITY && ctx->dict_huf_lengths != NULL && lit_c > 0 &&
-        zxc_huf_unpack_lengths(ctx->dict_huf_lengths, dict_code_len) == ZXC_OK) {
+    if (level >= ZXC_LEVEL_DENSITY && ctx->dict_huf_tree_ok && lit_c > 0) {
         /* The dict candidate runs on sections too small for the per-block
          * table, so the histogram may not have been built above. */
         if (huf_total_size == SIZE_MAX) {
@@ -1669,7 +1667,8 @@ parse_done:;
         }
         /* zxc_huf_calc_size returns SIZE_MAX for unencodable candidates
          * (a literal byte without a code in the shared table). */
-        huf_dict_total_size = zxc_huf_calc_size(lit_freq, dict_code_len, 0);
+        huf_dict_total_size =
+            zxc_huf_calc_size_dict(lit_freq, ctx->dict_huf_code_len, &ctx->dict_huf_tree);
         if (huf_dict_total_size != SIZE_MAX) {
             /* Same J rule against the running winner: vs the per-block Huffman
              * candidate the equal entropy taxes cancel (pure size comparison),
@@ -1754,7 +1753,8 @@ parse_done:;
         p_curr += written;
     } else if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT) {
         const int written =
-            zxc_huf_encode_section_dict(literals, lit_c, lit_freq, dict_code_len, p_curr, rem);
+            zxc_huf_encode_section_dict(literals, lit_c, lit_freq, ctx->dict_huf_code_len,
+                                        &ctx->dict_huf_tree, ctx->dict_huf_codes, p_curr, rem);
         if (UNLIKELY(written < 0)) return written;
         if (UNLIKELY((size_t)written != huf_dict_total_size)) return ZXC_ERROR_DST_TOO_SMALL;
         p_curr += written;

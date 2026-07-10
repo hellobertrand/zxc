@@ -446,12 +446,12 @@ static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco_dict(const zxc_cctx_t* RES
                                                            const uint8_t* RESTRICT payload,
                                                            const size_t psize,
                                                            const size_t required_size) {
-    if (UNLIKELY(ctx->dict_huf_lengths == NULL)) return ZXC_ERROR_DICT_REQUIRED;
+    if (UNLIKELY(!ctx->dict_huf_tree_ok)) return ZXC_ERROR_DICT_REQUIRED;
     if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE ||
                  ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
         return ZXC_ERROR_CORRUPT_DATA;
     return zxc_huf_decode_section_dict(payload, psize, ctx->lit_buffer, required_size,
-                                       ctx->dict_huf_lengths, ctx->pivco_scratch);
+                                       &ctx->dict_huf_tree, ctx->pivco_scratch);
 }
 
 static ZXC_NOINLINE ZXC_COLD int zxc_decode_tok_pivco(const zxc_cctx_t* RESTRICT ctx,

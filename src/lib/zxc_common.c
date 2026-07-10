@@ -404,6 +404,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->dict_buffer_cap = 0;
     ctx->dict_size = 0;
     ctx->dict_huf_lengths = NULL;
+    ctx->dict_huf_tree_ok = 0;
     ctx->lit_freq_acc = NULL;
 }
 
@@ -422,6 +423,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
 int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT lengths) {
     if (UNLIKELY(!ctx)) return ZXC_ERROR_NULL_INPUT;
     ctx->dict_huf_lengths = lengths;
+    ctx->dict_huf_tree_ok = 0;
     if (lengths == NULL) return ZXC_OK;
 
     /* Empty (all-zero) table from a low-entropy corpus: treat it as "no shared table". */
@@ -437,10 +439,17 @@ int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT l
         return ZXC_OK;
     }
 
-    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-    const int rc = zxc_huf_unpack_lengths(lengths, code_len);
-    if (UNLIKELY(rc != ZXC_OK)) ctx->dict_huf_lengths = NULL;
-    return rc;
+    /* Tree-at-attach: unpack + build the PivCo tree and codes ONCE here; the
+     * per-block encode/estimate/decode paths reuse them via the context. */
+    const int rc = zxc_huf_dict_tree_build(lengths, &ctx->dict_huf_tree, ctx->dict_huf_codes,
+                                           ctx->dict_huf_code_len);
+    if (UNLIKELY(rc != ZXC_OK)) {
+        ctx->dict_huf_lengths = NULL;
+        ctx->dict_huf_tree_ok = 0;
+        return rc;
+    }
+    ctx->dict_huf_tree_ok = 1;
+    return ZXC_OK;
 }
 
 /*
