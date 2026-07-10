@@ -67,7 +67,7 @@ ZXC_EXPORT int zxc_min_level(void);
 /**
  * @brief Returns the maximum supported compression level.
  *
- * Currently returns @ref ZXC_LEVEL_DENSITY (6).
+ * Currently returns @ref ZXC_LEVEL_ULTRA (7).
  *
  * @return Maximum compression level value.
  */
@@ -421,8 +421,8 @@ ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, co
  * Intended for integrators that need an accurate memory-budget figure.
  *
  * @param[in] src_size Uncompressed block size in bytes.
- * @param[in] level    Compression level (1..6). Levels <= 5 share the same
- *                     persistent cctx footprint; level 6 adds the optimal-
+ * @param[in] level    Compression level (1..7). Levels <= 5 share the same
+ *                     persistent cctx footprint; levels >= 6 add the optimal-
  *                     parser scratch.
  * @return Estimated peak cctx memory usage in bytes, or 0 if @p src_size is 0.
  */
@@ -587,7 +587,7 @@ ZXC_EXPORT int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* src, size_t s
  * @param[in] block_size  Block size in bytes (must satisfy the regular
  *                        block-size constraints: power of two in
  *                        [@ref ZXC_BLOCK_SIZE_MIN, @ref ZXC_BLOCK_SIZE_MAX]).
- * @param[in] level       Compression level (1..6); higher levels at
+ * @param[in] level       Compression level (1..7); levels at or above
  *                        @ref ZXC_LEVEL_DENSITY add the optimal-parser
  *                        scratch (~8.125 x block_size).
  * @return Workspace size in bytes, or 0 if either argument is invalid.

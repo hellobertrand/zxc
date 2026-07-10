@@ -1543,8 +1543,11 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     cctx->stored_block_size = effective_block_size;
     cctx->stored_checksum = checksum_enabled;
 
-    /* Re-init only when block_size changed. */
-    if (UNLIKELY(!cctx->initialized || cctx->last_block_size != effective_block_size)) {
+    /* Re-init when block_size changed, or when a per-call level raise into
+     * the optimal-parser tier requires the opt_scratch region that inits at
+     * level < ZXC_LEVEL_DENSITY do not allocate (using it NULL would crash). */
+    if (UNLIKELY(!cctx->initialized || cctx->last_block_size != effective_block_size ||
+                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))) {
         if (cctx->initialized) {
             // LCOV_EXCL_START
             zxc_cctx_free(&cctx->inner);
