@@ -603,30 +603,52 @@ extern "C" {
  *  the RAW copy path, expressed in bytes:
  *  `tax = (n_decoded_bytes * PREM) >> 8`. Only the premium is per-level:
  *
- *  - Below ULTRA, the premiums reproduce the historical fixed margins
- *    EXACTLY (8 = 3.125% = the old `>> 5` margins), keeping levels 1-6
- *    output byte-stable.
- *  - At ULTRA the physical premiums apply: `PREM_HUF = 4` (1.56% -- the
- *    entropy decoder costs ~0.5 ns/B over a raw copy, so ~1 byte of size
- *    buys ~30 ns of decode; validated on silesia: ~0.8 pt of ratio for ~3%
- *    decode vs the legacy margin) and `PREM_RLE = 1` (0.39%: RLE decodes at
- *    near copy speed, only a token tax to break ties toward RAW).
+ *  - Below DENSITY, the premiums reproduce the historical fixed margins
+ *    EXACTLY (8 = 3.125% = the old `>> 5` margins), keeping the sub-DENSITY
+ *    levels (1-5) output byte-stable.
+ *  - At DENSITY and above the physical premiums apply: `PREM_HUF = 4` (1.56%
+ *    -- the entropy decoder costs ~0.5 ns/B over a raw copy, so ~1 byte of
+ *    size buys ~30 ns of decode; validated on silesia: ~0.8 pt of ratio for
+ *    ~3% decode vs the legacy margin) and `PREM_RLE = 1` (0.39%: RLE decodes
+ *    at near copy speed, only a token tax to break ties toward RAW).
  *  @{ */
 /** @brief Decode tax of a candidate: `n` decoded bytes at premium `prem` (Q8). */
 #define ZXC_SS_TAX(n, prem_q8) (((size_t)(n) * (size_t)(prem_q8)) >> 8)
-/** @brief RLE decode premium. Below ULTRA, 8 (= 1/32 = 3.125%) reproduces the
- *  historical `>> ZXC_RLE_MARGIN_SHIFT` margin EXACTLY for RLE-vs-RAW, keeping
- *  levels 1-6 selection stable; at ULTRA the physical premium applies (RLE
- *  decodes at near copy speed). */
+/**
+ * @brief Per-level RLE-vs-RAW decode premium (Q8) for the space-speed selector.
+ *
+ * Feeds @ref ZXC_SS_TAX, which charges an RLE candidate `n * premium >> 8`
+ * decode-tax bytes over the RAW copy path. Below @ref ZXC_LEVEL_DENSITY the
+ * premium is `256 >> ZXC_RLE_MARGIN_SHIFT` (8 = 3.125%), reproducing the
+ * historical RLE-vs-RAW margin exactly so those levels keep byte-stable
+ * selection. At @ref ZXC_LEVEL_DENSITY and above the physical premium 1 (0.39%)
+ * applies: RLE decodes at near copy speed, so it needs only a token tax to break
+ * ties toward RAW.
+ *
+ * @param[in] level Compression level.
+ * @return Decode premium in Q8 (RLE decode-tax bytes per 256 decoded bytes).
+ */
 static inline int zxc_ss_prem_rle_q8(const int level) {
-    return (level >= ZXC_LEVEL_ULTRA) ? 1 : (256 >> ZXC_RLE_MARGIN_SHIFT);
+    return (level >= ZXC_LEVEL_DENSITY) ? 1 : (256 >> ZXC_RLE_MARGIN_SHIFT);
 }
-/** @brief Huffman/PivCo decode premium: the level's lambda folded with the
- *  entropy decoder's cost over the copy path. 8 (3.125%) below ULTRA matches
- *  the historical margin against a RAW baseline; 4 (1.56%) at ULTRA trades
- *  more decode time for ratio (validated on silesia). */
+/**
+ * @brief Per-level Huffman/PivCo-vs-RAW decode premium (Q8) for the space-speed
+ *        selector.
+ *
+ * Feeds @ref ZXC_SS_TAX, which charges a Huffman literal (or token) candidate
+ * `n * premium >> 8` decode-tax bytes over the RAW copy path, the level's
+ * lambda folded with the entropy decoder's cost. Below @ref ZXC_LEVEL_DENSITY
+ * the premium is `256 >> ZXC_HUF_MARGIN_SHIFT` (8 = 3.125%), matching the
+ * historical Huffman margin against a RAW baseline. At @ref ZXC_LEVEL_DENSITY
+ * and above the physical premium 4 (1.56%) applies, trading more decode time for
+ * ratio (the entropy decoder costs ~0.5 ns/B over a raw copy; validated on
+ * silesia).
+ *
+ * @param[in] level Compression level.
+ * @return Decode premium in Q8 (Huffman decode-tax bytes per 256 decoded bytes).
+ */
 static inline int zxc_ss_prem_huf_q8(const int level) {
-    return (level >= ZXC_LEVEL_ULTRA) ? 4 : (256 >> ZXC_HUF_MARGIN_SHIFT);
+    return (level >= ZXC_LEVEL_DENSITY) ? 4 : (256 >> ZXC_HUF_MARGIN_SHIFT);
 }
 /** @} */
 /** @brief Absolute floor below which Huffman cannot beat RAW even with

@@ -452,17 +452,11 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
     }
     if (UNLIKELY(n_present == 0)) return -1;
 
-    /* Kraft completeness: a canonical code with >= 2 symbols must fill the code
-     * space exactly (sum 2^-len == 1). Per-symbol `c >> l` (below) catches
-     * OVER-subscription; this rejects UNDER-subscription — incomplete headers the
-     * merge/flat decode would otherwise accept as bounded garbage (the v6 decoder
-     * rejected them). The lone single-present-symbol case is a deliberate
-     * degenerate length-1 code (Kraft 0.5), so it is exempt. */
     if (n_present >= 2) {
         uint32_t kraft = 0;
         for (int l = 1; l <= ZXC_HUF_MAX_CODE_LEN_ULTRA; l++)
             kraft += bl_count[l] << (ZXC_HUF_MAX_CODE_LEN_ULTRA - l);
-        if (UNLIKELY(kraft != (1u << ZXC_HUF_MAX_CODE_LEN_ULTRA))) return -1;
+        if (UNLIKELY(kraft != (1U << ZXC_HUF_MAX_CODE_LEN_ULTRA))) return -1;
     }
 
     uint32_t next_code[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2] = {0};
@@ -592,11 +586,28 @@ static void zxc_pivco_counts(const zxc_pivco_tree_t* RESTRICT t, const uint32_t*
     }
 }
 
-/** @brief Wire byte size of one PivCo node's run: `count` packed flat_d-bit codes
- *  (complete/flat subtree) or `count` partition bits (merge node). THE wire
- *  run-boundary rule — shared by the estimator, the encoder, and the decoder's
- *  pass-1 pointer walk so the three cannot drift (encoder asserts written ==
- *  estimate; decoder walks runs by the same arithmetic). */
+/**
+ * @brief Byte size of one PivCo node's on-wire bit run.
+ *
+ * A wire-visible node emits one of two run kinds, both bit-packed then rounded
+ * up to whole bytes:
+ * - @b Flat root (@p flat_d > 0): a complete subtree of depth @p flat_d, storing
+ *   @p count packed codes of @p flat_d bits each: `ceil(count * flat_d / 8)`.
+ * - @b Merge node (@p flat_d == 0): one partition bit per symbol routed through
+ *   the node: `ceil(count / 8)`.
+ *
+ * This is THE wire run-boundary rule. It is the single definition shared by the
+ * size estimator (@ref zxc_huf_calc_size), the encoder (zxc_pivco_encode_core),
+ * and the decoder's pass-1 pointer walk (zxc_pivco_decode_core), so the three
+ * cannot drift: the encoder asserts bytes-written == estimate, and the decoder
+ * advances from run to run by this exact arithmetic.
+ *
+ * @param[in] count  Number of symbols the node covers (packed codes if flat,
+ *                    else partition bits).
+ * @param[in] flat_d Flat-subtree depth (bits per packed code), or 0 for a merge
+ *                    node.
+ * @return Byte length of the node's run (0 when @p count is 0).
+ */
 static ZXC_ALWAYS_INLINE size_t zxc_pivco_run_bytes(const uint32_t count, const uint8_t flat_d) {
     return flat_d ? ((size_t)count * flat_d + 7) / 8 : ((size_t)count + 7) / 8;
 }
@@ -1392,7 +1403,7 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
         if (UNLIKELY((size_t)(pend - p) < nbytes)) return ZXC_ERROR_CORRUPT_DATA;
         bit_ptr[nid] = p;
         /* popcount of the c valid bits = right child's count. Count all but the
-         * last byte fast, then the last byte with its padding masked off — the
+         * last byte fast, then the last byte with its padding masked off: the
          * 8-byte loop must not swallow the final byte unmasked when nbytes % 8 == 0
          * (else set padding bits inflate `ones` past the true child count). */
         uint32_t ones = 0;

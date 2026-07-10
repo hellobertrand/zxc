@@ -994,7 +994,7 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
  * hold for every block k. Worst case is incompressible input (all RAW blocks,
  * `c_j = o_j + H`): the compressed stream then runs `nblocks * H` longer than
  * the output, squeezing the gap most at the first block, so the margin must
- * carry the FULL accumulated per-block overhead — not just one block. Hence
+ * carry the full accumulated per-block overhead, not just one block. Hence
  * `chunk_size` (largest single block) + `nblocks * H` (H = block header +
  * optional per-block checksum) + footer + wild-copy tail.
  */
