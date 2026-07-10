@@ -74,7 +74,7 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
 static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_stream_decompress(PyObject* self, PyObject* args, PyObject* kwargs);
-static PyObject* pyzxc_get_decompressed_size(PyObject* self, PyObject* args, PyObject* kwargs);
+static PyObject* pyzxc_get_decompressed_size(PyObject* self, PyObject* arg);
 static PyObject* pyzxc_min_level(PyObject* self, PyObject* args);
 static PyObject* pyzxc_max_level(PyObject* self, PyObject* args);
 static PyObject* pyzxc_default_level(PyObject* self, PyObject* args);
@@ -150,8 +150,7 @@ static PyMethodDef zxc_methods[] = {
      NULL},
     {"pyzxc_stream_decompress", (PyCFunction)pyzxc_stream_decompress, METH_VARARGS | METH_KEYWORDS,
      NULL},
-    {"pyzxc_get_decompressed_size", (PyCFunction)pyzxc_get_decompressed_size,
-     METH_VARARGS | METH_KEYWORDS, NULL},
+    {"pyzxc_get_decompressed_size", (PyCFunction)pyzxc_get_decompressed_size, METH_O, NULL},
     {"pyzxc_min_level", (PyCFunction)pyzxc_min_level, METH_NOARGS, NULL},
     {"pyzxc_max_level", (PyCFunction)pyzxc_max_level, METH_NOARGS, NULL},
     {"pyzxc_default_level", (PyCFunction)pyzxc_default_level, METH_NOARGS, NULL},
@@ -348,16 +347,13 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
     return out;
 }
 
-static PyObject* pyzxc_get_decompressed_size(PyObject* self, PyObject* args, PyObject* kwargs) {
+static PyObject* pyzxc_get_decompressed_size(PyObject* self, PyObject* arg) {
     (void)self;
-    (void)kwargs;
     Py_buffer view;
 
-    if (!PyArg_ParseTuple(args, "y*", &view)) {
-        return NULL;
-    }
+    if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
 
-    uint64_t n = zxc_get_decompressed_size(view.buf, view.len);
+    uint64_t n = zxc_get_decompressed_size(view.buf, (size_t)view.len);
 
     PyBuffer_Release(&view);
 
@@ -1421,7 +1417,10 @@ static PyObject* pyzxc_dstream_free(PyObject* self, PyObject* capsule) {
 
 typedef struct {
     zxc_seekable* s;
-    uint8_t* src_copy;    /* owned copy when opened from bytes */
+    Py_buffer src_view;   /* held view on the source when opened from bytes:
+                             pins the exporter for the handle's lifetime so no
+                             copy of the archive is needed */
+    int has_view;         /* 1 when src_view must be released */
     PyObject* reader_obj; /* strong ref to the Python reader when using callback */
     /* First exception raised by the reader callback, stashed under the GIL by
      * the trampoline (which may run on a library worker thread) and re-raised
@@ -1458,7 +1457,7 @@ static void seekable_capsule_destructor(PyObject* capsule) {
         (pyzxc_seekable_holder_t*)PyCapsule_GetPointer(capsule, ZXC_SEEKABLE_CAPSULE);
     if (h) {
         if (h->s) zxc_seekable_free(h->s);
-        free(h->src_copy);
+        if (h->has_view) PyBuffer_Release(&h->src_view);
         Py_XDECREF(h->reader_obj);
         Py_XDECREF(h->exc_type);
         Py_XDECREF(h->exc_value);
@@ -1487,29 +1486,27 @@ static PyObject* pyzxc_seekable_open(PyObject* self, PyObject* arg) {
         Py_Return_Err(PyExc_ValueError, "seekable buffer must be non-empty");
     }
 
-    uint8_t* copy = (uint8_t*)malloc((size_t)view.len);
-    if (!copy) {
-        PyBuffer_Release(&view);
-        return PyErr_NoMemory();
-    }
-    memcpy(copy, view.buf, (size_t)view.len);
-    size_t src_size = (size_t)view.len;
-    PyBuffer_Release(&view);
+    /* The view pins the exporter (and, for a bytearray, blocks resizing)
+     * for the handle's lifetime, so the library can reference the caller's
+     * buffer directly — no copy of the archive. */
+    zxc_seekable* s;
+    Py_BEGIN_ALLOW_THREADS s = zxc_seekable_open(view.buf, (size_t)view.len);
+    Py_END_ALLOW_THREADS
 
-    zxc_seekable* s = zxc_seekable_open(copy, src_size);
     if (!s) {
-        free(copy);
+        PyBuffer_Release(&view);
         Py_Return_Err(PyExc_RuntimeError, "zxc_seekable_open failed (not a valid seekable archive)");
     }
 
     pyzxc_seekable_holder_t* h = (pyzxc_seekable_holder_t*)PyMem_Malloc(sizeof(*h));
     if (!h) {
         zxc_seekable_free(s);
-        free(copy);
+        PyBuffer_Release(&view);
         return PyErr_NoMemory();
     }
     h->s = s;
-    h->src_copy = copy;
+    h->src_view = view;
+    h->has_view = 1;
     h->reader_obj = NULL;
     h->exc_type = NULL;
     h->exc_value = NULL;
@@ -1518,7 +1515,7 @@ static PyObject* pyzxc_seekable_open(PyObject* self, PyObject* arg) {
     PyObject* cap = PyCapsule_New(h, ZXC_SEEKABLE_CAPSULE, seekable_capsule_destructor);
     if (!cap) {
         zxc_seekable_free(s);
-        free(copy);
+        PyBuffer_Release(&h->src_view);
         PyMem_Free(h);
         return NULL;
     }
@@ -1581,7 +1578,7 @@ static PyObject* pyzxc_seekable_open_reader(PyObject* self, PyObject* arg) {
     pyzxc_seekable_holder_t* h = (pyzxc_seekable_holder_t*)PyMem_Malloc(sizeof(*h));
     if (!h) return PyErr_NoMemory();
     h->s = NULL;
-    h->src_copy = NULL;
+    h->has_view = 0;
     Py_INCREF(arg);
     h->reader_obj = arg;
     h->exc_type = NULL;
@@ -1725,9 +1722,9 @@ static PyObject* pyzxc_seekable_free(PyObject* self, PyObject* capsule) {
         zxc_seekable_free(h->s);
         h->s = NULL;
     }
-    if (h && h->src_copy) {
-        free(h->src_copy);
-        h->src_copy = NULL;
+    if (h && h->has_view) {
+        PyBuffer_Release(&h->src_view);
+        h->has_view = 0;
     }
     if (h && h->reader_obj) {
         Py_DECREF(h->reader_obj);

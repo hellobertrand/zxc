@@ -289,8 +289,9 @@ pub use oneshot::{
 };
 pub use ctx::{compress_block_bound, decompress_block_bound, Cctx, Dctx};
 pub use file::{
-    compress_file, decompress_file, file_decompressed_size, StreamCompressOptions,
-    StreamDecompressOptions, StreamError, StreamResult,
+    compress_file, compress_file_with_options, decompress_file, decompress_file_with_options,
+    file_decompressed_size, StreamCompressOptions, StreamDecompressOptions, StreamError,
+    StreamResult,
 };
 pub use pstream::{CStream, CStreamProgress, DStream, DStreamProgress};
 pub use seekable::{seek_table_size, write_seek_table, Seekable};

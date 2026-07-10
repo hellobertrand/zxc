@@ -437,7 +437,9 @@ class Seekable:
 
     Two construction modes:
 
-    **From bytes** (the buffer is copied internally)::
+    **From bytes** (zero-copy: the buffer is pinned, not copied — do not
+    mutate it while the handle is open; a ``bytearray`` source cannot be
+    resized until :meth:`close`)::
 
         with zxc.Seekable(compressed_bytes) as s:
             chunk = s.decompress_range(offset, length)
@@ -740,7 +742,6 @@ class ZxcReader(_io.RawIOBase):
             buffer_size = self._ds.in_size
         self._bufsize = buffer_size
         self._pending = b""    # decompressed bytes not yet returned
-        self._inbuf = b""      # compressed bytes pulled from src, not yet fed
         self._eof_src = False  # True once src.read() returned empty bytes
 
     def readable(self) -> bool:
@@ -756,7 +757,8 @@ class ZxcReader(_io.RawIOBase):
         while not self._pending:
             if self._ds.finished:
                 return 0
-            if not self._inbuf and not self._eof_src:
+            inbuf = b""
+            if not self._eof_src:
                 chunk = self._src.read(self._bufsize)
                 if chunk is None:
                     # Non-blocking source with no data available right now
@@ -766,10 +768,9 @@ class ZxcReader(_io.RawIOBase):
                 if not chunk:
                     self._eof_src = True
                 else:
-                    self._inbuf = chunk
+                    inbuf = chunk
 
-            produced = self._ds.decompress(self._inbuf)
-            self._inbuf = b""
+            produced = self._ds.decompress(inbuf)
             if produced:
                 self._pending = produced
                 break
@@ -828,7 +829,12 @@ class ZxcWriter(_io.RawIOBase):
         mv = memoryview(b)
         if mv.nbytes == 0:
             return 0
-        chunk = self._cs.compress(bytes(mv))
+        # The C layer accepts any C-contiguous buffer directly and copies it
+        # into its block accumulator, so no intermediate bytes() copy is
+        # needed here.
+        if not mv.c_contiguous:
+            mv = memoryview(bytes(mv))
+        chunk = self._cs.compress(mv)
         if chunk:
             self._dst.write(chunk)
         return mv.nbytes

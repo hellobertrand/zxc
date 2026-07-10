@@ -689,7 +689,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_compress"
         "_zxc_decompress"
         "_zxc_compress_bound"
-        "_zxc_compress_block_bound"
         "_zxc_get_decompressed_size"
         "_zxc_decompress_inplace"
         "_zxc_decompress_inplace_bound"
@@ -758,7 +757,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     )
     target_link_options(zxc_wasm PRIVATE
         "-sEXPORTED_FUNCTIONS=[${ZXC_WASM_EXPORTS_STR}]"
-        "-sEXPORTED_RUNTIME_METHODS=[ccall,cwrap,getValue,setValue,UTF8ToString,getTempRet0,HEAPU8,HEAP32,HEAPU32]"
+        "-sEXPORTED_RUNTIME_METHODS=[ccall,cwrap,UTF8ToString,getTempRet0,HEAPU8,HEAP32,HEAPU32]"
         "-sMODULARIZE=1"
         # ES6 output: the npm package is "type": "module", so a CJS zxc.js
         # would expose no factory through `import` (broken default loading

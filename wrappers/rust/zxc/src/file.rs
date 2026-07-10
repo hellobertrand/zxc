@@ -305,11 +305,42 @@ pub fn compress_file<P: AsRef<Path>>(
     threads: Option<usize>,
     checksum: Option<bool>,
 ) -> StreamResult<u64> {
+    compress_file_with_options(
+        input,
+        output,
+        &StreamCompressOptions {
+            level,
+            threads,
+            checksum: checksum.unwrap_or(false),
+            seekable: false,
+        },
+    )
+}
+
+/// Compresses a file using multi-threaded streaming, honouring `opts`.
+///
+/// Unlike [`compress_file`], this exposes every [`StreamCompressOptions`]
+/// field — including `seekable`, which appends a seek table for
+/// random-access decompression via [`crate::seekable::Seekable`].
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use zxc::{compress_file_with_options, Level, StreamCompressOptions};
+///
+/// let opts = StreamCompressOptions::with_level(Level::Compact)
+///     .threads(4)
+///     .with_seekable();
+/// let bytes = compress_file_with_options("input.bin", "output.zxc", &opts)?;
+/// # Ok::<(), zxc::StreamError>(())
+/// ```
+pub fn compress_file_with_options<P: AsRef<Path>>(
+    input: P,
+    output: P,
+    opts: &StreamCompressOptions,
+) -> StreamResult<u64> {
     let f_in = File::open(input)?;
     let f_out = File::create(output)?;
-
-    let n_threads = threads.unwrap_or(0) as i32;
-    let checksum_enabled = if checksum.unwrap_or(false) { 1 } else { 0 };
 
     unsafe {
         let c_in = file_to_c_file_read(&f_in);
@@ -331,9 +362,10 @@ pub fn compress_file<P: AsRef<Path>>(
             c_in,
             c_out,
             &zxc_sys::zxc_compress_opts_t {
-                n_threads,
-                level: level as i32,
-                checksum_enabled,
+                n_threads: opts.threads.unwrap_or(0) as i32,
+                level: opts.level as i32,
+                checksum_enabled: opts.checksum as i32,
+                seekable: opts.seekable as i32,
                 ..Default::default()
             },
         );
@@ -367,11 +399,41 @@ pub fn decompress_file<P: AsRef<Path>>(
     output: P,
     threads: Option<usize>,
 ) -> StreamResult<u64> {
+    decompress_file_with_options(
+        input,
+        output,
+        &StreamDecompressOptions {
+            threads,
+            verify_checksum: true,
+        },
+    )
+}
+
+/// Decompresses a file using multi-threaded streaming, honouring `opts`.
+///
+/// Unlike [`decompress_file`], this exposes every
+/// [`StreamDecompressOptions`] field — including `verify_checksum`, which
+/// can be disabled to skip integrity verification.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use zxc::{decompress_file_with_options, StreamDecompressOptions};
+///
+/// let opts = StreamDecompressOptions::default().skip_checksum();
+/// let bytes = decompress_file_with_options("compressed.zxc", "output.bin", &opts)?;
+/// # Ok::<(), zxc::StreamError>(())
+/// ```
+pub fn decompress_file_with_options<P: AsRef<Path>>(
+    input: P,
+    output: P,
+    opts: &StreamDecompressOptions,
+) -> StreamResult<u64> {
     let f_in = File::open(input)?;
     let f_out = File::create(output)?;
 
-    let n_threads = threads.unwrap_or(0) as i32;
-    let checksum_enabled = 1; // Default to verify
+    let n_threads = opts.threads.unwrap_or(0) as i32;
+    let checksum_enabled = opts.verify_checksum as i32;
 
     unsafe {
         let c_in = file_to_c_file_read(&f_in);

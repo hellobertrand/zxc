@@ -191,16 +191,11 @@ export default async function createZXC(moduleOverrides, factory) {
      */
     function _writeCompressOpts(level, checksum, seekable, dictPtr, dictSize, dictHufPtr) {
         const ptr = _malloc(COMPRESS_OPTS_SIZE);
-        // Zero-fill first
-        for (let i = 0; i < COMPRESS_OPTS_SIZE; i++) {
-            Module.HEAPU8[ptr + i] = 0;
-        }
-        // n_threads = 0 (offset 0)
-        Module.HEAP32[(ptr >> 2) + 0] = 0;
+        // Zero-fill covers n_threads (0), block_size (8, default),
+        // progress_cb (32) and user_data (36).
+        Module.HEAPU8.fill(0, ptr, ptr + COMPRESS_OPTS_SIZE);
         // level (offset 4)
         Module.HEAP32[(ptr >> 2) + 1] = level;
-        // block_size = 0 (default, offset 8)
-        Module.HEAPU32[(ptr >> 2) + 2] = 0;
         // checksum_enabled (offset 12)
         Module.HEAP32[(ptr >> 2) + 3] = checksum ? 1 : 0;
         // seekable (offset 16)
@@ -209,7 +204,6 @@ export default async function createZXC(moduleOverrides, factory) {
         Module.HEAPU32[(ptr >> 2) + 5] = dictPtr || 0;
         Module.HEAPU32[(ptr >> 2) + 6] = dictSize || 0;
         Module.HEAPU32[(ptr >> 2) + 7] = dictHufPtr || 0;
-        // progress_cb = NULL (offset 32), user_data = NULL (offset 36)
         return ptr;
     }
 
@@ -219,18 +213,14 @@ export default async function createZXC(moduleOverrides, factory) {
      */
     function _writeDecompressOpts(checksum, dictPtr, dictSize, dictHufPtr) {
         const ptr = _malloc(DECOMPRESS_OPTS_SIZE);
-        for (let i = 0; i < DECOMPRESS_OPTS_SIZE; i++) {
-            Module.HEAPU8[ptr + i] = 0;
-        }
-        // n_threads = 0 (offset 0)
-        Module.HEAP32[(ptr >> 2) + 0] = 0;
+        // Zero-fill covers n_threads (0), progress_cb (20) and user_data (24).
+        Module.HEAPU8.fill(0, ptr, ptr + DECOMPRESS_OPTS_SIZE);
         // checksum_enabled (offset 4)
         Module.HEAP32[(ptr >> 2) + 1] = checksum ? 1 : 0;
         // dict (offset 8), dict_size (offset 12), dict_huf (offset 16)
         Module.HEAPU32[(ptr >> 2) + 2] = dictPtr || 0;
         Module.HEAPU32[(ptr >> 2) + 3] = dictSize || 0;
         Module.HEAPU32[(ptr >> 2) + 4] = dictHufPtr || 0;
-        // progress_cb = NULL (offset 20), user_data = NULL (offset 24)
         return ptr;
     }
 
@@ -546,7 +536,9 @@ export default async function createZXC(moduleOverrides, factory) {
                 }
                 if (r === 0 && _readPos(inDescPtr) === srcLen) break;
             }
-            return _concatChunks(chunks, total);
+            // Single chunk is the common case (stageCap holds a full block):
+            // skip the concat copy.
+            return chunks.length === 1 ? chunks[0] : _concatChunks(chunks, total);
         }
 
         function drainEnd() {
@@ -565,7 +557,7 @@ export default async function createZXC(moduleOverrides, factory) {
                 }
                 if (r === 0) break;
             }
-            return _concatChunks(chunks, total);
+            return chunks.length === 1 ? chunks[0] : _concatChunks(chunks, total);
         }
 
         return {
@@ -648,7 +640,7 @@ export default async function createZXC(moduleOverrides, factory) {
                             exhausted = true;
                         }
                     }
-                    return _concatChunks(chunks, total);
+                    return chunks.length === 1 ? chunks[0] : _concatChunks(chunks, total);
                 } finally {
                     if (srcPtr) _free(srcPtr);
                 }

@@ -9,7 +9,6 @@ package zxc
 
 /*
 #include <stdlib.h>
-#include <string.h>
 #include "zxc.h"
 */
 import "C"
@@ -73,6 +72,34 @@ func setDecompressDict(dopts *C.zxc_decompress_opts_t, o options, pinner *runtim
 	return nil
 }
 
+// pinSamples builds C-allocated pointer/size arrays that reference the
+// sample buffers directly: each sample is pinned via pinner, which makes it
+// legal (Go >= 1.21) to store its address in C memory for the duration of
+// the call — training never copies the corpus. Empty samples point at a
+// pinned placeholder byte so the C side never sees NULL. The returned
+// arrays must be freed with C.free; the pins are released by the caller's
+// pinner.Unpin.
+func pinSamples(samples [][]byte, pinner *runtime.Pinner) (cptrs, csizes unsafe.Pointer) {
+	n := len(samples)
+	cptrs = C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(uintptr(0))))
+	csizes = C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.size_t(0))))
+	ptrSlice := unsafe.Slice((*unsafe.Pointer)(cptrs), n)
+	sizeSlice := unsafe.Slice((*C.size_t)(csizes), n)
+
+	placeholder := new(byte)
+	pinner.Pin(placeholder)
+	for i, s := range samples {
+		sizeSlice[i] = C.size_t(len(s))
+		if len(s) == 0 {
+			ptrSlice[i] = unsafe.Pointer(placeholder)
+			continue
+		}
+		pinner.Pin(&s[0])
+		ptrSlice[i] = unsafe.Pointer(&s[0])
+	}
+	return cptrs, csizes
+}
+
 // TrainDict trains a dictionary from a corpus of samples.
 //
 // It analyses the samples to select byte sequences that maximise LZ77 match
@@ -89,53 +116,17 @@ func TrainDict(samples [][]byte, maxSize int) ([]byte, error) {
 		maxSize = DictSizeMax
 	}
 
-	// cgo forbids passing a Go pointer to memory that itself contains Go
-	// pointers, so the sample buffers, the pointer array, and the size array
-	// are all built in C-allocated memory. Each sample is copied into C memory
-	// for the duration of the call.
-	n := len(samples)
-	cptrs := C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(uintptr(0))))
-	if cptrs == nil {
-		return nil, ErrMemory
-	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	cptrs, csizes := pinSamples(samples, &pinner)
 	defer C.free(cptrs)
-	csizes := C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.size_t(0))))
-	if csizes == nil {
-		return nil, ErrMemory
-	}
 	defer C.free(csizes)
-
-	ptrSlice := unsafe.Slice((*unsafe.Pointer)(cptrs), n)
-	sizeSlice := unsafe.Slice((*C.size_t)(csizes), n)
-	// Free each copied sample buffer on return.
-	defer func() {
-		for _, p := range ptrSlice {
-			if p != nil {
-				C.free(p)
-			}
-		}
-	}()
-
-	for i, s := range samples {
-		sizeSlice[i] = C.size_t(len(s))
-		if len(s) == 0 {
-			// Allocate a 1-byte placeholder so the pointer is non-NULL.
-			ptrSlice[i] = C.malloc(1)
-			continue
-		}
-		buf := C.malloc(C.size_t(len(s)))
-		if buf == nil {
-			return nil, ErrMemory
-		}
-		C.memcpy(buf, unsafe.Pointer(&s[0]), C.size_t(len(s)))
-		ptrSlice[i] = buf
-	}
 
 	dict := make([]byte, DictSizeMax)
 	written := C.zxc_train_dict(
 		(*unsafe.Pointer)(cptrs),
 		(*C.size_t)(csizes),
-		C.size_t(n),
+		C.size_t(len(samples)),
 		unsafe.Pointer(&dict[0]),
 		C.size_t(maxSize),
 	)
@@ -211,47 +202,17 @@ func TrainDictHuf(samples [][]byte, dict []byte) ([]byte, error) {
 		return nil, ErrSrcTooSmall
 	}
 
-	n := len(samples)
-	cptrs := C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(uintptr(0))))
-	if cptrs == nil {
-		return nil, ErrMemory
-	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	cptrs, csizes := pinSamples(samples, &pinner)
 	defer C.free(cptrs)
-	csizes := C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.size_t(0))))
-	if csizes == nil {
-		return nil, ErrMemory
-	}
 	defer C.free(csizes)
-
-	ptrSlice := unsafe.Slice((*unsafe.Pointer)(cptrs), n)
-	sizeSlice := unsafe.Slice((*C.size_t)(csizes), n)
-	defer func() {
-		for _, p := range ptrSlice {
-			if p != nil {
-				C.free(p)
-			}
-		}
-	}()
-
-	for i, s := range samples {
-		sizeSlice[i] = C.size_t(len(s))
-		if len(s) == 0 {
-			ptrSlice[i] = C.malloc(1)
-			continue
-		}
-		buf := C.malloc(C.size_t(len(s)))
-		if buf == nil {
-			return nil, ErrMemory
-		}
-		C.memcpy(buf, unsafe.Pointer(&s[0]), C.size_t(len(s)))
-		ptrSlice[i] = buf
-	}
 
 	huf := make([]byte, HufTableSize)
 	rc := C.zxc_train_dict_huf(
 		(*unsafe.Pointer)(cptrs),
 		(*C.size_t)(csizes),
-		C.size_t(n),
+		C.size_t(len(samples)),
 		unsafe.Pointer(&dict[0]),
 		C.size_t(len(dict)),
 		(*C.uint8_t)(unsafe.Pointer(&huf[0])),
@@ -304,48 +265,18 @@ func TrainDictionary(samples [][]byte) (*Dictionary, error) {
 		return nil, ErrSrcTooSmall
 	}
 
-	n := len(samples)
-	cptrs := C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(uintptr(0))))
-	if cptrs == nil {
-		return nil, ErrMemory
-	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	cptrs, csizes := pinSamples(samples, &pinner)
 	defer C.free(cptrs)
-	csizes := C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.size_t(0))))
-	if csizes == nil {
-		return nil, ErrMemory
-	}
 	defer C.free(csizes)
-
-	ptrSlice := unsafe.Slice((*unsafe.Pointer)(cptrs), n)
-	sizeSlice := unsafe.Slice((*C.size_t)(csizes), n)
-	defer func() {
-		for _, p := range ptrSlice {
-			if p != nil {
-				C.free(p)
-			}
-		}
-	}()
-
-	for i, s := range samples {
-		sizeSlice[i] = C.size_t(len(s))
-		if len(s) == 0 {
-			ptrSlice[i] = C.malloc(1)
-			continue
-		}
-		buf := C.malloc(C.size_t(len(s)))
-		if buf == nil {
-			return nil, ErrMemory
-		}
-		C.memcpy(buf, unsafe.Pointer(&s[0]), C.size_t(len(s)))
-		ptrSlice[i] = buf
-	}
 
 	cap := uint64(C.zxc_dict_save_bound(C.size_t(DictSizeMax)))
 	zxd := make([]byte, cap)
 	written := C.zxc_dict_train(
 		(*unsafe.Pointer)(cptrs),
 		(*C.size_t)(csizes),
-		C.size_t(n),
+		C.size_t(len(samples)),
 		unsafe.Pointer(&zxd[0]),
 		C.size_t(cap),
 	)

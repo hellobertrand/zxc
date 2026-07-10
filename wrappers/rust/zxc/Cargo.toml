@@ -24,8 +24,5 @@ windows-sys = { version = "0.61.2", features = [
   "Win32_System_Threading",
 ] }
 
-[dev-dependencies]
-rand = "0.10"
-
 [features]
 default = []

@@ -347,6 +347,34 @@ unsafe extern "C" {
     /// Original uncompressed size in bytes, or 0 if invalid.
     pub fn zxc_get_decompressed_size(src: *const c_void, src_size: usize) -> u64;
 
+    /// Returns the minimum single-buffer size for an in-place decompression.
+    ///
+    /// Reads `src`'s header and footer (no decoding) and returns the buffer
+    /// size `zxc_decompress_inplace` needs: decompressed size plus a
+    /// one-block and wild-copy safety margin.
+    ///
+    /// # Returns
+    ///
+    /// Required buffer size in bytes, or 0 if `src` is not a valid archive.
+    pub fn zxc_decompress_inplace_bound(src: *const c_void, src_size: usize) -> usize;
+
+    /// Decompresses in place inside a single caller-owned buffer.
+    ///
+    /// The compressed archive must sit flush-right in `buffer` (its last
+    /// `comp_size` bytes); decoding runs left-to-right into `buffer[0..]`.
+    /// `buffer_capacity` must be at least `zxc_decompress_inplace_bound`.
+    ///
+    /// # Returns
+    ///
+    /// Decompressed size (>0), 0 for an empty frame, or a negative error
+    /// code (`ZXC_ERROR_DST_TOO_SMALL` if the margin is missing).
+    pub fn zxc_decompress_inplace(
+        buffer: *mut c_void,
+        buffer_capacity: usize,
+        comp_size: usize,
+        opts: *const zxc_decompress_opts_t,
+    ) -> i64;
+
     /// Returns a human-readable name for the given error code.
     ///
     /// # Arguments
@@ -636,6 +664,49 @@ unsafe extern "C" {
         dst_capacity: usize,
         opts: *const zxc_decompress_opts_t,
     ) -> i64;
+
+    /// Returns the exact byte count required by a static compression
+    /// workspace for the given `block_size` and `level`.
+    ///
+    /// # Returns
+    ///
+    /// Workspace size in bytes, or 0 if either argument is invalid.
+    pub fn zxc_static_cctx_workspace_size(block_size: usize, level: c_int) -> usize;
+
+    /// Initialises a compression context inside a caller-supplied workspace
+    /// (no heap allocation).
+    ///
+    /// # Safety
+    /// - `workspace` must be cache-line (64-byte) aligned, at least
+    ///   `zxc_static_cctx_workspace_size` bytes, and outlive the handle.
+    /// - `opts` must be non-null with `block_size` and `level` set.
+    /// - `zxc_free_cctx` is a no-op on the returned handle.
+    pub fn zxc_init_static_cctx(
+        workspace: *mut c_void,
+        workspace_size: usize,
+        opts: *const zxc_compress_opts_t,
+    ) -> *mut zxc_cctx;
+
+    /// Returns the exact byte count required by a static decompression
+    /// workspace for the given `block_size`.
+    ///
+    /// # Returns
+    ///
+    /// Workspace size in bytes, or 0 if `block_size` is invalid.
+    pub fn zxc_static_dctx_workspace_size(block_size: usize) -> usize;
+
+    /// Initialises a decompression context inside a caller-supplied
+    /// workspace (no heap allocation).
+    ///
+    /// # Safety
+    /// - `workspace` must be cache-line (64-byte) aligned, at least
+    ///   `zxc_static_dctx_workspace_size` bytes, and outlive the handle.
+    /// - `zxc_free_dctx` is a no-op on the returned handle.
+    pub fn zxc_init_static_dctx(
+        workspace: *mut c_void,
+        workspace_size: usize,
+        block_size: usize,
+    ) -> *mut zxc_dctx;
 }
 
 // =============================================================================

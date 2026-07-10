@@ -110,6 +110,8 @@ func (c *Cctx) Close() error {
 //
 // Per-call [WithLevel] / [WithChecksum] override the values given to
 // [NewCctx]; when omitted, the creation-time settings apply.
+// [WithDict]/[WithDictHuf] are not wired to the block API and are ignored;
+// use the buffer API ([Compress]/[Decompress]) for dictionary compression.
 func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	if c == nil || c.ptr == nil {
 		return 0, ErrNullInput
