@@ -205,7 +205,7 @@ impl CompressOptions {
 // =============================================================================
 
 /// Options for decompression operations.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct DecompressOptions {
     /// Verify checksum during decompression (default: `true`)
     pub verify_checksum: bool,
@@ -221,6 +221,16 @@ pub struct DecompressOptions {
     /// Must match the table used at compression time (the archive's dict_id
     /// binds the (dict, table) pair).
     pub dict_huf: Option<Vec<u8>>,
+}
+
+impl Default for DecompressOptions {
+    fn default() -> Self {
+        Self {
+            verify_checksum: true,
+            dict: None,
+            dict_huf: None,
+        }
+    }
 }
 
 impl DecompressOptions {

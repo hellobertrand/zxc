@@ -57,7 +57,7 @@ use zxc::{compress_to, decompress_to, compress_bound, CompressOptions, Decompres
 let data = b"Hello, world!";
 
 // Compression
-let mut output = vec![0u8; compress_bound(data.len())];
+let mut output = vec![0u8; compress_bound(data.len()) as usize];
 let size = compress_to(data, &mut output, &CompressOptions::default())?;
 output.truncate(size);
 
@@ -83,7 +83,7 @@ let decompressed = decompress_with_options(&compressed, &DecompressOptions::skip
 use zxc::decompressed_size;
 
 if let Some(size) = decompressed_size(&compressed) {
-    let mut buffer = vec![0u8; size];
+    let mut buffer = vec![0u8; size as usize];
     // ...
 }
 ```

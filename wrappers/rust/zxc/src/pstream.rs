@@ -86,7 +86,20 @@ impl CStream {
     ///
     /// `opts.seekable` is ignored (the push API is single-threaded and does
     /// not emit a seek table). Pass `None` for all defaults.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unsupported`] when `opts.dict` or `opts.dict_huf`
+    /// is set: the push-stream format carries no dictionary ID, so
+    /// dictionary compression would produce undecodable archives.
     pub fn new(opts: Option<&CompressOptions>) -> Result<Self> {
+        if let Some(o) = opts {
+            if o.dict.is_some() || o.dict_huf.is_some() {
+                return Err(Error::Unsupported(
+                    "dictionaries are not supported by the push streaming API",
+                ));
+            }
+        }
         let c_opts = opts.map(|o| zxc_sys::zxc_compress_opts_t {
             level: o.level as i32,
             checksum_enabled: o.checksum as i32,
@@ -205,7 +218,20 @@ unsafe impl Send for DStream {}
 
 impl DStream {
     /// Creates a new push decompression stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unsupported`] when `opts.dict` or `opts.dict_huf`
+    /// is set: the push-stream decoder has no dictionary support (see
+    /// [`CStream::new`]).
     pub fn new(opts: Option<&DecompressOptions>) -> Result<Self> {
+        if let Some(o) = opts {
+            if o.dict.is_some() || o.dict_huf.is_some() {
+                return Err(Error::Unsupported(
+                    "dictionaries are not supported by the push streaming API",
+                ));
+            }
+        }
         let c_opts = opts.map(|o| zxc_sys::zxc_decompress_opts_t {
             checksum_enabled: o.verify_checksum as i32,
             ..Default::default()

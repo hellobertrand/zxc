@@ -70,12 +70,21 @@ impl StreamCompressOptions {
 }
 
 /// Options for streaming decompression operations.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct StreamDecompressOptions {
     /// Number of worker threads (default: `None` = auto-detect CPU cores)
     pub threads: Option<usize>,
     /// Verify checksum during decompression (default: `true`)
     pub verify_checksum: bool,
+}
+
+impl Default for StreamDecompressOptions {
+    fn default() -> Self {
+        Self {
+            threads: None,
+            verify_checksum: true,
+        }
+    }
 }
 
 impl StreamDecompressOptions {
@@ -427,6 +436,10 @@ pub fn file_decompressed_size<P: AsRef<Path>>(path: P) -> StreamResult<u64> {
         }
 
         let result = zxc_sys::zxc_stream_get_decompressed_size(c_file);
+
+        // The FILE* owns a dup'd fd; it must be closed here or every call
+        // leaks one file descriptor.
+        libc::fclose(c_file);
 
         if result < 0 {
             Err(StreamError::InvalidFile)

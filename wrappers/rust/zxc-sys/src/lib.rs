@@ -149,6 +149,15 @@ pub const ZXC_ERROR_BAD_BLOCK_TYPE: i32 = -13;
 /// Invalid block size
 pub const ZXC_ERROR_BAD_BLOCK_SIZE: i32 = -14;
 
+/// File requires a dictionary but none was provided
+pub const ZXC_ERROR_DICT_REQUIRED: i32 = -15;
+
+/// Provided dictionary ID does not match the file header
+pub const ZXC_ERROR_DICT_MISMATCH: i32 = -16;
+
+/// Dictionary exceeds maximum allowed size
+pub const ZXC_ERROR_DICT_TOO_LARGE: i32 = -17;
+
 // =============================================================================
 // Dictionary Constants
 // =============================================================================
