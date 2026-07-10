@@ -33,57 +33,45 @@ static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t
     uint8_t* enc = (uint8_t*)malloc(cap);
     uint8_t* dec = (uint8_t*)malloc(n + ZXC_PAD_SIZE);
     uint8_t* scr = (uint8_t*)malloc(n + ZXC_PIVCO_SCRATCH_PAD);
+    int ok = 0;
     if (!enc || !dec || !scr) {
-        free(enc);
-        free(dec);
-        free(scr);
         printf("Failed [%s]: alloc\n", label);
-        return 0;
+        goto done;
     }
 
     const int written = zxc_huf_encode_section(literals, n, freq, code_len, enc, cap);
     if (written < 0) {
-        free(enc);
-        free(dec);
-        free(scr);
         printf("Failed [%s]: encode_section -> %d\n", label, written);
-        return 0;
+        goto done;
     }
 
     /* The Lagrangian selector prices candidates with zxc_huf_calc_size; it must
      * predict the EXACT encoded size (with the 128-byte lengths header). */
     const size_t est = zxc_huf_calc_size(freq, code_len, 1);
     if (est != (size_t)written) {
-        free(enc);
-        free(dec);
-        free(scr);
         printf("Failed [%s]: calc_size %zu != encoded %d\n", label, est, written);
-        return 0;
+        goto done;
     }
 
     const int rc = zxc_huf_decode_section(enc, (size_t)written, dec, n, scr);
     if (rc != ZXC_OK) {
-        free(enc);
-        free(dec);
-        free(scr);
         printf("Failed [%s]: decode_section -> %d\n", label, rc);
-        return 0;
+        goto done;
     }
 
     if (memcmp(literals, dec, n) != 0) {
-        free(enc);
-        free(dec);
-        free(scr);
         printf("Failed [%s]: roundtrip mismatch\n", label);
-        return 0;
+        goto done;
     }
 
+    printf("  [PASS] %s (n=%zu, encoded=%d B, ratio=%.1f%%)\n", label, n, written,
+           100.0 * (double)written / (double)n);
+    ok = 1;
+done:
     free(enc);
     free(dec);
     free(scr);
-    printf("  [PASS] %s (n=%zu, encoded=%d B, ratio=%.1f%%)\n", label, n, written,
-           100.0 * (double)written / (double)n);
-    return 1;
+    return ok;
 }
 
 int test_huffman_codec() {

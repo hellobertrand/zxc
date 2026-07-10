@@ -76,7 +76,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* ------------------------------------------------------------------ */
     if (size < FUZZ_DICT_CTRL) return 0;
 
-    const int level = (int)(data[0] % 6) + 1;
+    const int level = (int)(data[0] % (unsigned)zxc_max_level()) + 1;
     const size_t n_samples = (size_t)(data[1] % FUZZ_DICT_MAX_SAMPLES) + 1;
     size_t dict_cap = (size_t)(data[2] | (data[3] << 8));
     const size_t corrupt_pos = (size_t)(data[4] | (data[5] << 8));
