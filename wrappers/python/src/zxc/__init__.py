@@ -5,6 +5,8 @@ Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
 SPDX-License-Identifier: BSD-3-Clause
 """
 
+from __future__ import annotations
+
 import io as _io
 
 from ._zxc import (
@@ -70,6 +72,9 @@ from ._zxc import (
     ERROR_NULL_INPUT,
     ERROR_BAD_BLOCK_TYPE,
     ERROR_BAD_BLOCK_SIZE,
+    ERROR_DICT_REQUIRED,
+    ERROR_DICT_MISMATCH,
+    ERROR_DICT_TOO_LARGE,
 )
 
 try:
@@ -140,6 +145,9 @@ __all__ = [
     "ERROR_NULL_INPUT",
     "ERROR_BAD_BLOCK_TYPE",
     "ERROR_BAD_BLOCK_SIZE",
+    "ERROR_DICT_REQUIRED",
+    "ERROR_DICT_MISMATCH",
+    "ERROR_DICT_TOO_LARGE",
 ]
 
 def min_level() -> int:
@@ -327,7 +335,7 @@ def decompress(data, decompress_size=None, checksum=False, dict=None, dict_huf=N
 
     Args:
         data: Compressed bytes.
-        decompress_size: Expected size. If None, read from header (slower/safer).
+        decompress_size: Expected size. If None, read from the archive footer.
         checksum: If True, verify the checksum appended during compression.
         dict: Pre-trained dictionary content (bytes) required if the archive
             was compressed with one. Must match the dictionary ID stored in
@@ -356,6 +364,9 @@ def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False, 
         seekable: If True, append a seek table for random-access decompression.
         dict: Optional pre-trained dictionary content (bytes). The archive
             records its dictionary ID; decompression must supply the same dict.
+        dict_huf: Optional shared literal Huffman table (128 bytes) trained
+            alongside the dictionary; ignored without `dict`. The dictionary
+            ID binds the (dict, table) pair.
 
     Returns:
         Number of bytes written to `dst`.
@@ -735,7 +746,7 @@ class ZxcReader(_io.RawIOBase):
     def readable(self) -> bool:
         return True
 
-    def readinto(self, b) -> int:
+    def readinto(self, b) -> int | None:
         if self.closed:
             raise ValueError("I/O operation on closed reader")
         n_out = len(b)
@@ -747,6 +758,11 @@ class ZxcReader(_io.RawIOBase):
                 return 0
             if not self._inbuf and not self._eof_src:
                 chunk = self._src.read(self._bufsize)
+                if chunk is None:
+                    # Non-blocking source with no data available right now
+                    # (RawIOBase semantics) — not EOF; propagate the "would
+                    # block" condition to the caller.
+                    return None
                 if not chunk:
                     self._eof_src = True
                 else:

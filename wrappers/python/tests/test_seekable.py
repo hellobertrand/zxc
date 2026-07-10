@@ -146,7 +146,9 @@ class TestSeekableReader:
             assert chunk == payload[2048:2048 + 1024]
             assert calls[0] - before == 1
 
-    def test_reader_exception_maps_to_error(self, tmp_path):
+    def test_reader_exception_propagates(self, tmp_path):
+        # The reader's own exception (with its message) must reach the caller,
+        # not be shadowed by a generic RuntimeError.
         payload = build_payload(128 * 1024)
         compressed = build_seekable_archive_stream(payload, tmp_path)
         attempted = [0]
@@ -161,8 +163,26 @@ class TestSeekableReader:
                 return compressed[offset:offset + length]
 
         with zxc.Seekable(BadReader()) as s:
-            with pytest.raises(RuntimeError):
+            with pytest.raises(IOError, match="boom"):
                 s.decompress_range(0, len(payload))
+
+    def test_reader_multithreaded_decode(self, tmp_path):
+        # Regression: multi-threaded decode with a Python reader used to
+        # invoke the callback from library worker threads without the GIL,
+        # corrupting the interpreter.
+        payload = build_payload(2 * 1024 * 1024)
+        compressed = build_seekable_archive_stream(payload, tmp_path)
+
+        class Reader:
+            size = len(compressed)
+
+            def read_at(self, length, offset):
+                return compressed[offset:offset + length]
+
+        with zxc.Seekable(Reader()) as s:
+            assert s.num_blocks >= 2
+            out = s.decompress_range(0, len(payload), n_threads=4)
+            assert out == payload
 
     def test_rejects_missing_attrs(self):
         with pytest.raises(TypeError):
