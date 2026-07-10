@@ -1053,7 +1053,11 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
     if (f_out && b2) setvbuf(f_out, b2, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
 
-    if (in_path && !g_quiet) zxc_log_v("Processing %s... (Compression Level %d)\n", in_path, level);
+    if (mode == MODE_COMPRESS)
+        zxc_log_v("Processing %s... (Compression Level %d)\n", in_path ? in_path : "<stdin>",
+                  level);
+    else
+        zxc_log_v("Processing %s...\n", in_path ? in_path : "<stdin>");
     if (g_verbose) zxc_log("Checksum: %s\n", checksum_enabled ? "enabled" : "disabled");
     if (g_verbose && seekable) zxc_log("Seekable: enabled\n");
 
