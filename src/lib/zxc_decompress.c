@@ -1884,10 +1884,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
 }
 
 /**
- * Cold specialization for GLO blocks whose token stream is entropy-coded
- * (enc_litlen == 2, level 7): a separate instantiation so the RAW-token fast
- * path keeps its pre-entropy code shape. safe/has_dict stay runtime here (a
- * per-block dispatch, negligible on this path).
+ * Cold specializations for entropy-coded GLO tokens (level 7). Each wrapper fixes
+ * tok_entropy=1 plus one (safe, has_dict) combo as compile-time constants, so the
+ * inlined impl is fully specialized and the RAW-token fast path stays untouched.
  */
 static ZXC_NOINLINE int zxc_decode_block_glo_entropy(const zxc_cctx_t* RESTRICT ctx,
                                                      const uint8_t* RESTRICT src,

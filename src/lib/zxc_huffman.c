@@ -452,6 +452,19 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
     }
     if (UNLIKELY(n_present == 0)) return -1;
 
+    /* Kraft completeness: a canonical code with >= 2 symbols must fill the code
+     * space exactly (sum 2^-len == 1). Per-symbol `c >> l` (below) catches
+     * OVER-subscription; this rejects UNDER-subscription — incomplete headers the
+     * merge/flat decode would otherwise accept as bounded garbage (the v6 decoder
+     * rejected them). The lone single-present-symbol case is a deliberate
+     * degenerate length-1 code (Kraft 0.5), so it is exempt. */
+    if (n_present >= 2) {
+        uint32_t kraft = 0;
+        for (int l = 1; l <= ZXC_HUF_MAX_CODE_LEN_ULTRA; l++)
+            kraft += bl_count[l] << (ZXC_HUF_MAX_CODE_LEN_ULTRA - l);
+        if (UNLIKELY(kraft != (1u << ZXC_HUF_MAX_CODE_LEN_ULTRA))) return -1;
+    }
+
     uint32_t next_code[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2] = {0};
     uint32_t code = 0;
     for (int l = 1; l <= ZXC_HUF_MAX_CODE_LEN_ULTRA; l++) {
@@ -579,6 +592,15 @@ static void zxc_pivco_counts(const zxc_pivco_tree_t* RESTRICT t, const uint32_t*
     }
 }
 
+/** @brief Wire byte size of one PivCo node's run: `count` packed flat_d-bit codes
+ *  (complete/flat subtree) or `count` partition bits (merge node). THE wire
+ *  run-boundary rule — shared by the estimator, the encoder, and the decoder's
+ *  pass-1 pointer walk so the three cannot drift (encoder asserts written ==
+ *  estimate; decoder walks runs by the same arithmetic). */
+static ZXC_ALWAYS_INLINE size_t zxc_pivco_run_bytes(const uint32_t count, const uint8_t flat_d) {
+    return flat_d ? ((size_t)count * flat_d + 7) / 8 : ((size_t)count + 7) / 8;
+}
+
 size_t zxc_huf_calc_size(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
                          const int with_header) {
     /* Encodability is part of the estimate: a histogram symbol without a
@@ -595,8 +617,7 @@ size_t zxc_huf_calc_size(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT 
     for (int i = 0; i < t.n_nodes; i++) {
         const int nid = t.bfs[i];
         if (t.covered[nid] || t.nd[nid].sym >= 0) continue;
-        total += t.flat_d[nid] ? ((size_t)count[nid] * t.flat_d[nid] + 7) / 8
-                               : ((size_t)count[nid] + 7) / 8;
+        total += zxc_pivco_run_bytes(count[nid], t.flat_d[nid]);
     }
     return total;
 }
@@ -633,8 +654,7 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
         const int nid = t.bfs[i];
         if (t.covered[nid] || t.nd[nid].sym >= 0) continue;
         bit_off[nid] = (uint32_t)payload;
-        payload += t.flat_d[nid] ? ((size_t)count[nid] * t.flat_d[nid] + 7) / 8
-                                 : ((size_t)count[nid] + 7) / 8;
+        payload += zxc_pivco_run_bytes(count[nid], t.flat_d[nid]);
     }
     const size_t hdr = with_header ? (size_t)ZXC_HUF_TABLE_SIZE : 0;
     /* +2: the packed-code emitter uses a 3-byte read-modify-write that may
@@ -1128,8 +1148,12 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             i += 8;
         }
     }
+/* D=4/5/6 use _mm_blendv_epi8 / _mm_insert_epi32 (SSE4.1), so this block requires
+ * SSE4.1, not merely SSSE3. In the current matrix it only compiles under
+ * AVX2/AVX-512 (both imply SSE4.1); a hypothetical SSSE3-only tier falls through
+ * to the scalar unpacker below rather than failing to compile. */
 #elif defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
-    (defined(ZXC_USE_SSE2) && defined(__SSSE3__))
+    (defined(ZXC_USE_SSE2) && defined(__SSE4_1__))
     if (D == 4) {
         const __m128i vc2s = _mm_loadu_si128((const __m128i*)(const void*)c2s);
         const __m128i vrep = _mm_setr_epi8(0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7);
@@ -1348,7 +1372,6 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
 
     if (UNLIKELY(n == 0 || zxc_pivco_tree_build(code_len, &t, NULL) != 0))
         return ZXC_ERROR_CORRUPT_DATA;
-    if (UNLIKELY(t.n_nodes < 1 || t.n_nodes > ZXC_PIVCO_MAX_NODES)) return ZXC_ERROR_CORRUPT_DATA;
 
     /* Pass 1: node counts + bit-run pointers, straight from the wire order. */
     uint32_t count[ZXC_PIVCO_MAX_NODES];
@@ -1363,26 +1386,31 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
         const uint32_t c = count[nid];
         if (t.flat_d[nid]) {
             /* Packed-code run: no partition below, nothing to popcount. */
-            const size_t fbytes = ((size_t)c * t.flat_d[nid] + 7) / 8;
+            const size_t fbytes = zxc_pivco_run_bytes(c, t.flat_d[nid]);
             if (UNLIKELY((size_t)(pend - p) < fbytes)) return ZXC_ERROR_CORRUPT_DATA;
             bit_ptr[nid] = p;
             p += fbytes;
             continue;
         }
-        const size_t nbytes = ((size_t)c + 7) / 8;
+        const size_t nbytes = zxc_pivco_run_bytes(c, 0); /* merge node: c partition bits */
         if (UNLIKELY((size_t)(pend - p) < nbytes)) return ZXC_ERROR_CORRUPT_DATA;
         bit_ptr[nid] = p;
-        /* popcount of the c valid bits = right child's count */
+        /* popcount of the c valid bits = right child's count. Count all but the
+         * last byte fast, then the last byte with its padding masked off — the
+         * 8-byte loop must not swallow the final byte unmasked when nbytes % 8 == 0
+         * (else set padding bits inflate `ones` past the true child count). */
         uint32_t ones = 0;
-        size_t k = 0;
-        for (; k + 8 <= nbytes; k += 8) {
-            uint64_t w;
-            ZXC_MEMCPY(&w, p + k, 8);
-            ones += (uint32_t)zxc_pivco_popcnt64(w);
-        }
-        for (; k < nbytes; k++) {
-            uint8_t last = p[k];
-            if (k == nbytes - 1 && (c & 7U)) last &= (uint8_t)((1U << (c & 7U)) - 1U);
+        if (nbytes) {
+            const size_t full = nbytes - 1;
+            size_t k = 0;
+            for (; k + 8 <= full; k += 8) {
+                uint64_t w;
+                ZXC_MEMCPY(&w, p + k, 8);
+                ones += (uint32_t)zxc_pivco_popcnt64(w);
+            }
+            for (; k < full; k++) ones += (uint32_t)zxc_pivco_popcnt32(p[k]);
+            uint8_t last = p[full];
+            if (c & 7U) last &= (uint8_t)((1U << (c & 7U)) - 1U);
             ones += (uint32_t)zxc_pivco_popcnt32(last);
         }
         p += nbytes;

@@ -51,7 +51,7 @@ variant_sets = [['_default', []]]
 if host_cpu == 'x86_64'
   variant_sets += [['_sse2',   ['-msse2']]]
   variant_sets += [['_avx2',   ['-mavx2', '-mfma', '-mbmi', '-mbmi2', '-mlzcnt']]]
-  variant_sets += [['_avx512', ['-mavx512f', '-mavx512bw', '-mbmi', '-mbmi2', '-mlzcnt']]]
+  variant_sets += [['_avx512', ['-mavx512f', '-mavx512bw', '-mavx512vbmi', '-mavx512vbmi2', '-mbmi', '-mbmi2', '-mlzcnt']]]
 elif host_cpu == 'aarch64'
   variant_sets += [['_neon', ['-march=armv8-a+simd']]]
 elif host_cpu == 'arm'

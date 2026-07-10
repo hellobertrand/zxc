@@ -391,12 +391,15 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->literals = NULL;
     ctx->work_buf = NULL;
     ctx->tok_buffer = NULL;
+    ctx->pivco_scratch = NULL;
     ctx->opt_scratch = NULL;
     ctx->dict_buffer = NULL;
 
     ctx->epoch = 0;
     ctx->lit_buffer_cap = 0;
     ctx->work_buf_cap = 0;
+    ctx->tok_buffer_cap = 0;
+    ctx->pivco_scratch_cap = 0;
     ctx->opt_scratch_cap = 0;
     ctx->dict_buffer_cap = 0;
     ctx->dict_size = 0;
@@ -407,10 +410,9 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
 /**
  * @brief Attach the shared dictionary literal Huffman table to a context.
  *
- * Stores @p lengths (128-byte packed code-lengths header, caller-owned, must
- * outlive the context) and, on decompression contexts created with
- * @c dict_size > 0, builds the decode table once into the workspace-carved
- * validated packed lengths. A NULL @p lengths is a no-op.
+ * Validates the 128-byte packed code-lengths header and stores the pointer
+ * (caller-owned, must outlive the context); the tree is (re)built from these
+ * lengths at decode/estimate time, not here. A NULL @p lengths is a no-op.
  *
  * @param[in,out] ctx      Initialised context to attach the table to.
  * @param[in]     lengths  128-byte packed code lengths, or NULL for a no-op.
@@ -922,7 +924,7 @@ int zxc_min_level(void) { return ZXC_LEVEL_FASTEST; }
 /**
  * @brief Returns the maximum supported compression level.
  *
- * Returns the value of ZXC_LEVEL_DENSITY (currently 6).
+ * Returns the value of ZXC_LEVEL_ULTRA (currently 7).
  */
 int zxc_max_level(void) { return ZXC_LEVEL_ULTRA; }
 

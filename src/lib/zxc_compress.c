@@ -1345,6 +1345,7 @@ parse_done:;
     // --- RLE ANALYSIS ---
     size_t rle_size = 0;
     int enc_lit = ZXC_SECTION_ENCODING_RAW;
+    size_t best_j = lit_c;
 
     if (lit_c > 0) {
         const uint8_t* p = literals;
@@ -1580,8 +1581,11 @@ parse_done:;
 
         /* RLE over RAW: space-speed J comparison. The per-level premium
          * reproduces the historical margin exactly below ULTRA. */
-        if (rle_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_rle_q8(level)) < lit_c)
+        const size_t rle_j = rle_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_rle_q8(level));
+        if (rle_j < best_j) {
             enc_lit = ZXC_SECTION_ENCODING_RLE;
+            best_j = rle_j;
+        }
     }
 
     /* Level >= 6: also evaluate Huffman as a 3rd literal-encoding candidate.
@@ -1615,15 +1619,15 @@ parse_done:;
         if (zxc_huf_build_code_lengths(freq, huf_code_len, ctx->opt_scratch,
                                        zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
             huf_total_size = zxc_huf_calc_size(freq, huf_code_len, 1);
-            if (huf_total_size == SIZE_MAX) goto huf_lit_done;
-            /* Space-speed: the entropy candidate must beat the current
-             * winner's J, paying its own decode tax over the copy path. */
-            const size_t best_j = (enc_lit == ZXC_SECTION_ENCODING_RLE)
-                                      ? rle_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_rle_q8(level))
-                                      : lit_c;
-            if (huf_total_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_huf_q8(level)) < best_j)
-                enc_lit = ZXC_SECTION_ENCODING_HUFFMAN;
-        huf_lit_done:;
+            /* Space-speed: the entropy candidate must beat the current winner's
+             * J, paying its own decode tax over the copy path. */
+            if (huf_total_size != SIZE_MAX) {
+                const size_t huf_j = huf_total_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_huf_q8(level));
+                if (huf_j < best_j) {
+                    enc_lit = ZXC_SECTION_ENCODING_HUFFMAN;
+                    best_j = huf_j;
+                }
+            }
         }
     }
 
@@ -1645,16 +1649,15 @@ parse_done:;
          * (a literal byte without a code in the shared table). */
         huf_dict_total_size = zxc_huf_calc_size(lit_freq, dict_code_len, 0);
         if (huf_dict_total_size != SIZE_MAX) {
-            /* Same J rule: equal entropy taxes cancel against the per-block
-             * Huffman candidate (pure size comparison), while RAW/RLE
-             * baselines keep their decode-tax edge. */
-            size_t best_j = lit_c;
-            if (enc_lit == ZXC_SECTION_ENCODING_RLE)
-                best_j = rle_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_rle_q8(level));
-            else if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN)
-                best_j = huf_total_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_huf_q8(level));
-            if (huf_dict_total_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_huf_q8(level)) < best_j)
+            /* Same J rule against the running winner: vs the per-block Huffman
+             * candidate the equal entropy taxes cancel (pure size comparison),
+             * while RAW/RLE baselines keep their decode-tax edge. */
+            const size_t huf_dict_j =
+                huf_dict_total_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_huf_q8(level));
+            if (huf_dict_j < best_j) {
                 enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
+                best_j = huf_dict_j;
+            }
         }
     }
 
@@ -1666,8 +1669,9 @@ parse_done:;
     uint8_t tok_code_len[ZXC_HUF_NUM_SYMBOLS];
     uint8_t enc_tok = ZXC_SECTION_ENCODING_RAW;
     size_t tok_huf_size = 0;
-    uint32_t tfreq[ZXC_HUF_NUM_SYMBOLS] = {0};
+    uint32_t tfreq[ZXC_HUF_NUM_SYMBOLS];
     if (level >= ZXC_LEVEL_ULTRA && seq_c >= ZXC_HUF_MIN_LITERALS) {
+        ZXC_MEMSET(tfreq, 0, sizeof(tfreq)); /* only the ULTRA path reads tfreq */
         for (uint32_t i = 0; i < seq_c; i++) tfreq[buf_tokens[i]]++;
         if (zxc_huf_build_code_lengths(tfreq, tok_code_len, ctx->opt_scratch,
                                        zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
