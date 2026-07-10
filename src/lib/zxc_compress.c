@@ -1654,10 +1654,8 @@ parse_done:;
              * while RAW/RLE baselines keep their decode-tax edge. */
             const size_t huf_dict_j =
                 huf_dict_total_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_huf_q8(level));
-            if (huf_dict_j < best_j) {
-                enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
-                best_j = huf_dict_j;
-            }
+            /* Last candidate: no need to keep best_j updated past this point. */
+            if (huf_dict_j < best_j) enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
         }
     }
 
