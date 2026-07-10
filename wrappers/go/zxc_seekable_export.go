@@ -15,6 +15,7 @@ package zxc
 import "C"
 
 import (
+	"errors"
 	"io"
 	"runtime/cgo"
 	"unsafe"
@@ -44,7 +45,9 @@ func zxcGoSeekableReadAt(ctx unsafe.Pointer, dst unsafe.Pointer, length C.size_t
 	// Map the C-owned destination region as a Go slice without copying.
 	buf := unsafe.Slice((*byte)(dst), int(length))
 	n, err := reader.ReadAt(buf, int64(offset))
-	if err != nil || n != int(length) {
+	// io.ReaderAt explicitly allows (n == len(buf), io.EOF) when the read
+	// ends exactly at EOF — which the footer and seek-table reads always do.
+	if n != int(length) || (err != nil && !errors.Is(err, io.EOF)) {
 		return C.int64_t(C.ZXC_ERROR_IO)
 	}
 	return C.int64_t(length)

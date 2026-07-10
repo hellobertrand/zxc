@@ -12,6 +12,7 @@ package zxc
 */
 import "C"
 import (
+	"math"
 	"runtime"
 	"unsafe"
 )
@@ -43,7 +44,9 @@ func Compress(data []byte, opts ...Option) ([]byte, error) {
 	}
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	setCompressDict(&copts, o, &pinner)
+	if err := setCompressDict(&copts, o, &pinner); err != nil {
+		return nil, err
+	}
 
 	// &data[0] panics on an empty slice; pass a valid non-nil pointer instead
 	// (the C side reads 0 bytes) so empty input yields a minimal 36-byte frame.
@@ -90,7 +93,9 @@ func CompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 	}
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	setCompressDict(&copts, o, &pinner)
+	if err := setCompressDict(&copts, o, &pinner); err != nil {
+		return 0, err
+	}
 
 	written := C.zxc_compress(
 		unsafe.Pointer(&data[0]),
@@ -147,12 +152,23 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 	}
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	setDecompressDict(&dopts, o, &pinner)
+	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
+		return nil, err
+	}
 
 	size := uint64(C.zxc_get_decompressed_size(
 		unsafe.Pointer(&data[0]),
 		C.size_t(len(data)),
 	))
+
+	// The size comes from the (untrusted) footer with no plausibility check in
+	// C. Reject values that cannot be allocated or that exceed the format's
+	// maximum expansion (a block header is 8 bytes and decodes to at most
+	// ZXC_BLOCK_SIZE_MAX bytes) instead of panicking in make().
+	const maxRatio = uint64(C.ZXC_BLOCK_SIZE_MAX) / 8
+	if size > math.MaxInt || size/maxRatio > uint64(len(data)) {
+		return nil, ErrInvalidData
+	}
 
 	if size == 0 {
 		// Either a valid empty-payload archive or invalid input. Let the C
@@ -212,7 +228,9 @@ func DecompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 	}
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	setDecompressDict(&dopts, o, &pinner)
+	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
+		return 0, err
+	}
 
 	written := C.zxc_decompress(
 		unsafe.Pointer(&data[0]),

@@ -162,7 +162,19 @@ var (
 	ErrNullInput    = &Error{Code: int(C.ZXC_ERROR_NULL_INPUT), Name: "null input pointer"}
 	ErrBadBlockType = &Error{Code: int(C.ZXC_ERROR_BAD_BLOCK_TYPE), Name: "unknown block type"}
 	ErrBadBlockSize = &Error{Code: int(C.ZXC_ERROR_BAD_BLOCK_SIZE), Name: "invalid block size"}
+	ErrDictRequired = &Error{Code: int(C.ZXC_ERROR_DICT_REQUIRED), Name: "archive requires a dictionary"}
+	ErrDictMismatch = &Error{Code: int(C.ZXC_ERROR_DICT_MISMATCH), Name: "dictionary ID mismatch"}
+	ErrDictTooLarge = &Error{Code: int(C.ZXC_ERROR_DICT_TOO_LARGE), Name: "dictionary exceeds maximum size"}
 	ErrInvalidData  = errors.New("zxc: invalid compressed data")
+
+	// ErrBadHufTable is returned when a shared literal Huffman table does not
+	// have the required [HufTableSize] length.
+	ErrBadHufTable = errors.New("zxc: shared Huffman table must be HufTableSize bytes")
+
+	// ErrDictUnsupported is returned by the push streaming API when dictionary
+	// options are supplied: the push-stream format carries no dictionary ID, so
+	// dictionary compression would produce undecodable archives.
+	ErrDictUnsupported = errors.New("zxc: dictionaries are not supported by the push streaming API")
 )
 
 // errorFromCode converts a negative C error code to a Go error.
@@ -196,6 +208,12 @@ func errorFromCode(code C.int64_t) error {
 		return ErrBadBlockType
 	case int(C.ZXC_ERROR_BAD_BLOCK_SIZE):
 		return ErrBadBlockSize
+	case int(C.ZXC_ERROR_DICT_REQUIRED):
+		return ErrDictRequired
+	case int(C.ZXC_ERROR_DICT_MISMATCH):
+		return ErrDictMismatch
+	case int(C.ZXC_ERROR_DICT_TOO_LARGE):
+		return ErrDictTooLarge
 	default:
 		return fmt.Errorf("zxc: unknown error (code %d)", int(code))
 	}
@@ -213,6 +231,12 @@ type options struct {
 	threads  int
 	dict     []byte
 	dictHuf  []byte
+
+	// levelSet / checksumSet record whether the caller supplied the option
+	// explicitly, so per-call options can fall back to context-creation values
+	// instead of silently overriding them with defaults (see Cctx).
+	levelSet    bool
+	checksumSet bool
 }
 
 func defaultOptions() options {
@@ -228,12 +252,18 @@ type Option func(*options)
 
 // WithLevel sets the compression level.
 func WithLevel(l Level) Option {
-	return func(o *options) { o.level = l }
+	return func(o *options) {
+		o.level = l
+		o.levelSet = true
+	}
 }
 
 // WithChecksum enables checksum computation and verification.
 func WithChecksum(enabled bool) Option {
-	return func(o *options) { o.checksum = enabled }
+	return func(o *options) {
+		o.checksum = enabled
+		o.checksumSet = true
+	}
 }
 
 // WithThreads sets the number of worker threads for streaming operations.

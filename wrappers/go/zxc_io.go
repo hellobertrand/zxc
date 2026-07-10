@@ -101,11 +101,13 @@ func (w *Writer) Write(p []byte) (int, error) {
 		total += consumed
 		p = p[consumed:]
 
-		// If the encoder made no input progress, drain pending output and
-		// retry — this guarantees forward progress even when the caller
-		// supplies a smaller-than-recommended output buffer.
+		// Defensive: the encoder reported no input progress, no output and
+		// nothing pending while input remains. This should be unreachable
+		// with a healthy stream; returning nil here would silently drop the
+		// rest of p, violating the io.Writer contract.
 		if consumed == 0 && produced == 0 && pending == 0 {
-			break
+			w.err = io.ErrShortWrite
+			return total, io.ErrShortWrite
 		}
 	}
 	return total, nil

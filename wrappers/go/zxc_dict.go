@@ -34,31 +34,43 @@ const HufTableSize = int(C.ZXC_HUF_TABLE_SIZE)
 // the Go pointer stored inside the (Go-allocated) opts struct satisfies the
 // cgo pointer-passing rules; callers must keep pinner alive until the C call
 // returns.
-func setCompressDict(copts *C.zxc_compress_opts_t, o options, pinner *runtime.Pinner) {
+//
+// The shared Huffman table length is validated here: the C library reads a
+// fixed ZXC_HUF_TABLE_SIZE bytes from dict_huf, so a shorter slice would be
+// read out of bounds.
+func setCompressDict(copts *C.zxc_compress_opts_t, o options, pinner *runtime.Pinner) error {
 	if len(o.dict) == 0 {
-		return
+		return nil
 	}
 	pinner.Pin(&o.dict[0])
 	copts.dict = unsafe.Pointer(&o.dict[0])
 	copts.dict_size = C.size_t(len(o.dict))
 	if len(o.dictHuf) > 0 {
+		if len(o.dictHuf) != HufTableSize {
+			return ErrBadHufTable
+		}
 		pinner.Pin(&o.dictHuf[0])
 		copts.dict_huf = unsafe.Pointer(&o.dictHuf[0])
 	}
+	return nil
 }
 
 // setDecompressDict mirrors setCompressDict for decompression options.
-func setDecompressDict(dopts *C.zxc_decompress_opts_t, o options, pinner *runtime.Pinner) {
+func setDecompressDict(dopts *C.zxc_decompress_opts_t, o options, pinner *runtime.Pinner) error {
 	if len(o.dict) == 0 {
-		return
+		return nil
 	}
 	pinner.Pin(&o.dict[0])
 	dopts.dict = unsafe.Pointer(&o.dict[0])
 	dopts.dict_size = C.size_t(len(o.dict))
 	if len(o.dictHuf) > 0 {
+		if len(o.dictHuf) != HufTableSize {
+			return ErrBadHufTable
+		}
 		pinner.Pin(&o.dictHuf[0])
 		dopts.dict_huf = unsafe.Pointer(&o.dictHuf[0])
 	}
+	return nil
 }
 
 // TrainDict trains a dictionary from a corpus of samples.

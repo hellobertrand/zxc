@@ -269,6 +269,10 @@ func (s *Seekable) SetDict(dict, hufLengths []byte) error {
 	if len(dict) == 0 {
 		return ErrSrcTooSmall
 	}
+	if len(hufLengths) > 0 && len(hufLengths) != HufTableSize {
+		// The C library reads a fixed ZXC_HUF_TABLE_SIZE bytes from the table.
+		return ErrBadHufTable
+	}
 
 	// Copy the buffers into C-owned memory for the duration of the call (the
 	// library makes its own internal copies; the cgo pointer-passing rules

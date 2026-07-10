@@ -29,7 +29,7 @@ func CompressBlockBound(inputSize int) uint64 {
 }
 
 // DecompressBlockBound returns the minimum destination buffer size required
-// by [Cctx.DecompressBlock] for a block of uncompressedSize bytes.
+// by [Dctx.DecompressBlock] for a block of uncompressedSize bytes.
 //
 // The fast decoder uses speculative wild-copy writes and needs a small tail
 // pad beyond the declared uncompressed size. Callers that cannot oversize
@@ -65,13 +65,18 @@ func EstimateCctxSize(srcSize, level int) uint64 {
 // [NewCctx] and always defer a call to Close to release the native memory.
 type Cctx struct {
 	ptr *C.zxc_cctx
+
+	// Creation-time settings, used as the fallback for CompressBlock calls
+	// that do not override them explicitly.
+	level    Level
+	checksum bool
 }
 
 // NewCctx creates a new compression context.
 //
-// Options [WithLevel], [WithChecksum] and [WithBlockSize] are supported at
-// creation time to pre-allocate internal buffers; otherwise allocation is
-// deferred to the first call to [Cctx.CompressBlock].
+// Options [WithLevel] and [WithChecksum] are supported at creation time and
+// become the defaults for every [Cctx.CompressBlock] call that does not
+// override them per call.
 func NewCctx(opts ...Option) (*Cctx, error) {
 	o := applyOptions(opts)
 	var copts C.zxc_compress_opts_t
@@ -85,7 +90,7 @@ func NewCctx(opts ...Option) (*Cctx, error) {
 	if ptr == nil {
 		return nil, ErrMemory
 	}
-	return &Cctx{ptr: ptr}, nil
+	return &Cctx{ptr: ptr, level: o.level, checksum: o.checksum}, nil
 }
 
 // Close releases the native resources held by the context. Safe to call
@@ -102,6 +107,9 @@ func (c *Cctx) Close() error {
 // CompressBlock compresses a single block using the context. Output format
 // is [block_header(8B) + payload (+ optional checksum 4B)]. Use
 // [CompressBlockBound] to size dst.
+//
+// Per-call [WithLevel] / [WithChecksum] override the values given to
+// [NewCctx]; when omitted, the creation-time settings apply.
 func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	if c == nil || c.ptr == nil {
 		return 0, ErrNullInput
@@ -113,7 +121,16 @@ func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 		return 0, ErrDstTooSmall
 	}
 
+	// Merge per-call options over the creation-time settings: the C side
+	// always receives a non-NULL opts struct, so its own stored-level
+	// fallback never triggers and the merge must happen here.
 	o := applyOptions(opts)
+	if !o.levelSet {
+		o.level = c.level
+	}
+	if !o.checksumSet {
+		o.checksum = c.checksum
+	}
 	var copts C.zxc_compress_opts_t
 	copts.level = C.int(o.level)
 	if o.checksum {
