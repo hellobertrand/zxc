@@ -35,7 +35,20 @@ export function detectZxc(buf) {
  * @returns {Promise<ZXC>} Resolved API object.
  */
 export default async function createZXC(moduleOverrides, factory) {
-    const ZXCModule = factory || (await import('./zxc.js')).default;
+    let ZXCModule = factory;
+    if (!ZXCModule) {
+        ZXCModule = (await import('./zxc.js')).default;
+        if (typeof ZXCModule !== 'function') {
+            try {
+                const { createRequire } = await import('node:module');
+                ZXCModule = createRequire(import.meta.url)('./zxc.js');
+            } catch (_) {
+                throw new Error(
+                    'ZXC: could not load ./zxc.js as a module factory; ' +
+                    'pass the Emscripten factory explicitly: createZXC({}, factory)');
+            }
+        }
+    }
     const Module = await ZXCModule(moduleOverrides || {});
 
     // --- Wrap C functions via cwrap ------------------------------------------
@@ -124,6 +137,14 @@ export default async function createZXC(moduleOverrides, factory) {
 
     const _malloc = Module._malloc;
     const _free   = Module._free;
+
+    const _getTempRet0 =
+        typeof Module.getTempRet0 === 'function' ? Module.getTempRet0 : null;
+    function _u64(low) {
+        const lo = low >>> 0;
+        const hi = _getTempRet0 ? (_getTempRet0() >>> 0) : 0;
+        return hi * 0x100000000 + lo;
+    }
 
     // --- Options struct layout -----------------------------------------------
     // zxc_compress_opts_t (WASM32 layout, all fields 4-byte aligned):
@@ -236,7 +257,7 @@ export default async function createZXC(moduleOverrides, factory) {
      *
      * @param {Uint8Array} data - Input data to compress.
      * @param {object} [opts] - Options.
-     * @param {number} [opts.level=3] - Compression level (1-6).
+     * @param {number} [opts.level=3] - Compression level (1-7).
      * @param {boolean} [opts.checksum=false] - Enable checksums.
      * @param {boolean} [opts.seekable=false] - Append seek table for random-access.
      * @param {Dictionary|Uint8Array} [opts.dict] - A {@link Dictionary}, or raw
@@ -303,7 +324,14 @@ export default async function createZXC(moduleOverrides, factory) {
         const srcPtr = _malloc(data.length);
         Module.HEAPU8.set(data, srcPtr);
 
-        const origSize = _get_decompressed_size(srcPtr, data.length);
+        const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
+        if (origSize > 0x7FFFFFFF) {
+            // A wasm32 heap cannot address it; fail clearly instead of
+            // aborting inside malloc.
+            _free(srcPtr);
+            throw new Error(
+                `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`);
+        }
         const dstPtr = _malloc(origSize || 1);
         const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
         if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
@@ -343,10 +371,12 @@ export default async function createZXC(moduleOverrides, factory) {
      */
     function getDecompressedSize(data) {
         const ptr = _malloc(data.length);
-        Module.HEAPU8.set(data, ptr);
-        const size = _get_decompressed_size(ptr, data.length);
-        _free(ptr);
-        return size;
+        try {
+            Module.HEAPU8.set(data, ptr);
+            return _u64(_get_decompressed_size(ptr, data.length));
+        } finally {
+            _free(ptr);
+        }
     }
 
     /**
@@ -364,7 +394,7 @@ export default async function createZXC(moduleOverrides, factory) {
         const seekable = (opts && opts.seekable) || false;
 
         const optsPtr = _writeCompressOpts(level, checksum, seekable);
-        const cctx = _create_cctx(optsPtr);
+        let cctx = _create_cctx(optsPtr);
         _free(optsPtr);
 
         if (cctx === 0) throw new Error('ZXC: failed to create compression context');
@@ -391,9 +421,11 @@ export default async function createZXC(moduleOverrides, factory) {
                     _free(dstPtr);
                 }
             },
-            /** Free the context and release WASM memory. */
+            /** Free the context and release WASM memory. Idempotent. */
             free() {
+                if (!cctx) return;
                 _free_cctx(cctx);
+                cctx = 0;
             }
         };
     }
@@ -405,7 +437,7 @@ export default async function createZXC(moduleOverrides, factory) {
      * @returns {{ decompress: Function, free: Function }}
      */
     function createDecompressContext() {
-        const dctx = _create_dctx();
+        let dctx = _create_dctx();
         if (dctx === 0) throw new Error('ZXC: failed to create decompression context');
 
         return {
@@ -417,7 +449,12 @@ export default async function createZXC(moduleOverrides, factory) {
             decompress(data) {
                 const srcPtr = _malloc(data.length);
                 Module.HEAPU8.set(data, srcPtr);
-                const origSize = _get_decompressed_size(srcPtr, data.length);
+                const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
+                if (origSize > 0x7FFFFFFF) {
+                    _free(srcPtr);
+                    throw new Error(
+                        `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`);
+                }
                 const dstPtr = _malloc(origSize || 1);
                 try {
                     const result = _decompress_dctx(dctx, srcPtr, data.length, dstPtr, origSize, 0);
@@ -430,9 +467,11 @@ export default async function createZXC(moduleOverrides, factory) {
                     _free(dstPtr);
                 }
             },
-            /** Free the context and release WASM memory. */
+            /** Free the context and release WASM memory. Idempotent. */
             free() {
+                if (!dctx) return;
                 _free_dctx(dctx);
+                dctx = 0;
             }
         };
     }
@@ -478,7 +517,7 @@ export default async function createZXC(moduleOverrides, factory) {
         const checksum = (opts && opts.checksum) || false;
 
         const optsPtr = _writeCompressOpts(level, checksum, false);
-        const cs = _cstream_create(optsPtr);
+        let cs = _cstream_create(optsPtr);
         _free(optsPtr);
         if (cs === 0) throw new Error('ZXC: failed to create cstream');
 
@@ -545,12 +584,14 @@ export default async function createZXC(moduleOverrides, factory) {
             end() {
                 return drainEnd();
             },
-            /** Free the stream and its scratch buffers. */
+            /** Free the stream and its scratch buffers. Idempotent. */
             free() {
+                if (!cs) return;
                 _cstream_free(cs);
                 _free(inDescPtr);
                 _free(outDescPtr);
                 _free(stagePtr);
+                cs = 0;
             },
             inSize()  { return _cstream_in_size(cs); },
             outSize() { return _cstream_out_size(cs); }
@@ -566,7 +607,7 @@ export default async function createZXC(moduleOverrides, factory) {
     function createDStream(opts) {
         const checksum = (opts && opts.checksum) || false;
         const optsPtr  = _writeDecompressOpts(checksum);
-        const ds = _dstream_create(optsPtr);
+        let ds = _dstream_create(optsPtr);
         _free(optsPtr);
         if (ds === 0) throw new Error('ZXC: failed to create dstream');
 
@@ -614,11 +655,14 @@ export default async function createZXC(moduleOverrides, factory) {
             },
             /** True iff the file footer has been consumed and validated. */
             finished() { return _dstream_finished(ds) !== 0; },
+            /** Free the stream and its scratch buffers. Idempotent. */
             free() {
+                if (!ds) return;
                 _dstream_free(ds);
                 _free(inDescPtr);
                 _free(outDescPtr);
                 _free(stagePtr);
+                ds = 0;
             },
             inSize()  { return _dstream_in_size(ds); },
             outSize() { return _dstream_out_size(ds); }
@@ -657,7 +701,7 @@ export default async function createZXC(moduleOverrides, factory) {
         if (!srcPtr) throw new Error('ZXC: malloc failed for seekable buffer');
         Module.HEAPU8.set(data, srcPtr);
 
-        const handle = _seekable_open(srcPtr, srcLen);
+        let handle = _seekable_open(srcPtr, srcLen);
         if (handle === 0) {
             _free(srcPtr);
             throw new Error('ZXC: invalid seekable archive');
@@ -665,7 +709,7 @@ export default async function createZXC(moduleOverrides, factory) {
 
         return {
             numBlocks() { return _seekable_num_blocks(handle); },
-            decompressedSize() { return _seekable_decompressed_size(handle); },
+            decompressedSize() { return _u64(_seekable_decompressed_size(handle)); },
             blockCompressedSize(idx) {
                 if (idx < 0 || idx >= _seekable_num_blocks(handle)) return null;
                 return _seekable_block_comp_size(handle, idx);
@@ -677,26 +721,51 @@ export default async function createZXC(moduleOverrides, factory) {
             /**
              * Attach a pre-trained dictionary to this seekable handle.
              * Must be called before any decompressRange() call.
-             * @param {Uint8Array} dict - Dictionary content.
+             *
+             * When the archive was compressed with a shared literal Huffman
+             * table (or with a {@link Dictionary}), the same table must be
+             * supplied: the archive's dict_id binds the (content, table)
+             * pair, so content alone would be rejected with DICT_MISMATCH.
+             *
+             * @param {Dictionary|Uint8Array} dict - A {@link Dictionary}, or
+             *        raw dictionary content.
+             * @param {Uint8Array} [dictHuf] - Shared literal Huffman table
+             *        (128 bytes); redundant when `dict` is a {@link Dictionary}.
              */
-            setDict(dict) {
+            setDict(dict, dictHuf) {
+                if (dict instanceof Dictionary) {
+                    dictHuf = dict.huf;
+                    dict = dict.content;
+                }
                 if (!dict || dict.length === 0) {
                     throw new Error('ZXC: setDict requires a non-empty dictionary');
                 }
+                if (dictHuf && dictHuf.length !== ZXC_HUF_TABLE_SIZE) {
+                    throw new Error('ZXC: dictHuf must be exactly 128 bytes');
+                }
                 const dictPtr = _malloc(dict.length);
                 if (!dictPtr) throw new Error('ZXC: malloc failed for dictionary');
+                const hufPtr = dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
                 try {
                     Module.HEAPU8.set(dict, dictPtr);
-                    const r = _seekable_set_dict(handle, dictPtr, dict.length);
+                    if (hufPtr) Module.HEAPU8.set(dictHuf, hufPtr);
+                    const r = _seekable_set_dict(handle, dictPtr, dict.length, hufPtr);
                     if (r < 0) {
                         throw new Error(`ZXC seekable set_dict error: ${_error_name(r)} (${r})`);
                     }
                 } finally {
                     _free(dictPtr);
+                    if (hufPtr) _free(hufPtr);
                 }
             },
             decompressRange(offset, length) {
                 if (length < 0) throw new Error('ZXC: length must be non-negative');
+                // The wasm shim carries the offset as a uint32 (no BigInt);
+                // values outside [0, 2^32-1] would silently wrap and return
+                // data from the wrong position.
+                if (!Number.isInteger(offset) || offset < 0 || offset > 0xFFFFFFFF) {
+                    throw new Error('ZXC: offset must be an integer in [0, 2^32-1]');
+                }
                 if (length === 0) return new Uint8Array(0);
                 const dstPtr = _malloc(length);
                 if (!dstPtr) throw new Error('ZXC: malloc failed for output buffer');
@@ -710,9 +779,12 @@ export default async function createZXC(moduleOverrides, factory) {
                     _free(dstPtr);
                 }
             },
+            /** Release the native handle and the WASM-side copy. Idempotent. */
             free() {
+                if (!handle) return;
                 _seekable_free(handle);
                 _free(srcPtr);
+                handle = 0;
             },
         };
     }
@@ -1126,6 +1198,11 @@ export default async function createZXC(moduleOverrides, factory) {
                     try { cs.free(); } catch (_) { /* idempotent */ }
                 }
             },
+            // Reader cancelled / writable aborted: flush() never runs, so the
+            // wasm stream context and staging buffers must be freed here.
+            cancel() {
+                try { cs.free(); } catch (_) { /* idempotent */ }
+            },
         });
     }
 
@@ -1168,6 +1245,11 @@ export default async function createZXC(moduleOverrides, factory) {
                 } finally {
                     try { ds.free(); } catch (_) { /* idempotent */ }
                 }
+            },
+            // Reader cancelled / writable aborted: flush() never runs, so the
+            // wasm stream context and staging buffers must be freed here.
+            cancel() {
+                try { ds.free(); } catch (_) { /* idempotent */ }
             },
         });
     }

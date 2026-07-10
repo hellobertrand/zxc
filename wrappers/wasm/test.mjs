@@ -11,9 +11,8 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-import { createRequire } from 'module';
 import { join, dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Resolve BUILD_DIR relative to CWD (not the test file location)
@@ -21,9 +20,8 @@ const buildDir = process.env.BUILD_DIR
     ? resolve(process.cwd(), process.env.BUILD_DIR)
     : join(__dirname, '..', '..', 'build-wasm');
 
-// Emscripten generates a CJS module; use createRequire to load it.
-const require = createRequire(import.meta.url);
-const ZXCModule = require(join(buildDir, 'zxc.js'));
+// The module is built with -sEXPORT_ES6=1; import it as ESM.
+const ZXCModule = (await import(pathToFileURL(join(buildDir, 'zxc.js')))).default;
 
 let passed = 0;
 let failed = 0;
@@ -73,7 +71,7 @@ async function main() {
     const version = _version_string();
     assert(typeof version === 'string' && version.length > 0, `Version: ${version}`);
     assert(_min_level() === 1, `Min level: ${_min_level()}`);
-    assert(_max_level() === 6, `Max level: ${_max_level()}`);
+    assert(_max_level() === 7, `Max level: ${_max_level()}`);
     assert(_default_level() === 3, `Default level: ${_default_level()}`);
 
     // --- 3. Compress bound ---
@@ -130,27 +128,29 @@ async function main() {
         }
         const bound = _compress_bound(input.length);
 
-        for (let level = 1; level <= 6; level++) {
+        for (let level = 1; level <= 7; level++) {
             const srcPtr = Module._malloc(input.length);
             const dstPtr = Module._malloc(bound);
             Module.HEAPU8.set(input, srcPtr);
 
-            // Build opts struct: {n_threads=0, level, block_size=0, checksum=1, seekable=0, ...}
-            const optsPtr = Module._malloc(28);
-            for (let i = 0; i < 28; i++) Module.HEAPU8[optsPtr + i] = 0;
+            // Build opts struct (full 40-byte zxc_compress_opts_t so the
+            // dict/progress fields the library reads are zeroed, not heap
+            // garbage): {n_threads=0, level, block_size=0, checksum=1, ...}
+            const optsPtr = Module._malloc(40);
+            for (let i = 0; i < 40; i++) Module.HEAPU8[optsPtr + i] = 0;
             Module.HEAP32[(optsPtr >> 2) + 1] = level;  // level
             Module.HEAP32[(optsPtr >> 2) + 3] = 1;      // checksum_enabled
 
             const csize = _compress(srcPtr, input.length, dstPtr, bound, optsPtr);
             assert(csize > 0, `Level ${level}: compressed to ${csize} bytes`);
 
-            // Decompress with checksum verification
+            // Decompress with checksum verification (28-byte zxc_decompress_opts_t)
             const compressed = new Uint8Array(Module.HEAPU8.buffer, dstPtr, csize).slice();
             const csrcPtr = Module._malloc(compressed.length);
             Module.HEAPU8.set(compressed, csrcPtr);
 
-            const dOptsPtr = Module._malloc(16);
-            for (let i = 0; i < 16; i++) Module.HEAPU8[dOptsPtr + i] = 0;
+            const dOptsPtr = Module._malloc(28);
+            for (let i = 0; i < 28; i++) Module.HEAPU8[dOptsPtr + i] = 0;
             Module.HEAP32[(dOptsPtr >> 2) + 1] = 1; // checksum_enabled
 
             const outPtr = Module._malloc(input.length);
@@ -523,6 +523,25 @@ async function main() {
                 'seekable+dict mid-range byte-exact');
         } finally {
             s.free();
+            s.free(); // idempotent: second call must be a no-op
+        }
+
+        // Seekable + Dictionary (content + huf table): regression for setDict
+        // dropping the table argument, which made every (dict, huf)-bound
+        // archive fail range decode with DICT_MISMATCH.
+        const seekArchiveHuf = zxc.compress(bigPayload, { dict: d, seekable: true });
+        const sh = zxc.createSeekable(seekArchiveHuf);
+        try {
+            sh.setDict(d);
+            const full = sh.decompressRange(0, bigPayload.length);
+            assert(arraysEqual(full, bigPayload),
+                'seekable+Dictionary(huf) full-range byte-exact');
+            let hufRejected = false;
+            try { sh.setDict(d.content); } catch (e) { hufRejected = true; }
+            assert(hufRejected,
+                'seekable setDict(content-only) rejected on a Dictionary archive');
+        } finally {
+            sh.free();
         }
     }
 
