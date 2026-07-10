@@ -1148,10 +1148,6 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             i += 8;
         }
     }
-/* D=4/5/6 use _mm_blendv_epi8 / _mm_insert_epi32 (SSE4.1), so this block requires
- * SSE4.1, not merely SSSE3. In the current matrix it only compiles under
- * AVX2/AVX-512 (both imply SSE4.1); a hypothetical SSSE3-only tier falls through
- * to the scalar unpacker below rather than failing to compile. */
 #elif defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
     (defined(ZXC_USE_SSE2) && defined(__SSE4_1__))
     if (D == 4) {
