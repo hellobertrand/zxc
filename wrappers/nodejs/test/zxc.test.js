@@ -42,6 +42,17 @@ describe('compress/decompress roundtrip', () => {
         expect(decompressed.length).toBe(data.length);
         expect(Buffer.compare(decompressed, data)).toBe(0);
     });
+
+    test('oversized size hint returns exactly the real payload', () => {
+        // Regression: the full hint-sized buffer used to be returned, with an
+        // uninitialized (allocUnsafe) tail past the real decompressed size.
+        const data = Buffer.from('oversized hint test'.repeat(50));
+        const compressed = zxc.compress(data);
+        const decompressed = zxc.decompress(compressed, { size: data.length + 4096 });
+
+        expect(decompressed.length).toBe(data.length);
+        expect(Buffer.compare(decompressed, data)).toBe(0);
+    });
 });
 
 // =============================================================================

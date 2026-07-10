@@ -34,6 +34,9 @@ const ERROR_IO             = native.ERROR_IO;
 const ERROR_NULL_INPUT     = native.ERROR_NULL_INPUT;
 const ERROR_BAD_BLOCK_TYPE = native.ERROR_BAD_BLOCK_TYPE;
 const ERROR_BAD_BLOCK_SIZE = native.ERROR_BAD_BLOCK_SIZE;
+const ERROR_DICT_REQUIRED  = native.ERROR_DICT_REQUIRED;
+const ERROR_DICT_MISMATCH  = native.ERROR_DICT_MISMATCH;
+const ERROR_DICT_TOO_LARGE = native.ERROR_DICT_TOO_LARGE;
 
 /**
  * Returns the minimum supported compression level (currently 1).
@@ -659,4 +662,7 @@ module.exports = {
     ERROR_NULL_INPUT,
     ERROR_BAD_BLOCK_TYPE,
     ERROR_BAD_BLOCK_SIZE,
+    ERROR_DICT_REQUIRED,
+    ERROR_DICT_MISMATCH,
+    ERROR_DICT_TOO_LARGE,
 };

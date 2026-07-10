@@ -110,11 +110,6 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
         return env.Undefined();
     }
 
-    if (nwritten == 0) {
-        Napi::Error::New(env, "Input is too small to be compressed").ThrowAsJavaScriptException();
-        return env.Undefined();
-    }
-
     // Return a slice of the buffer with the actual size
     return Napi::Buffer<uint8_t>::Copy(env, dst_buf.Data(), static_cast<size_t>(nwritten));
 }
@@ -184,7 +179,12 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
         return env.Undefined();
     }
 
-    return dst_buf;
+    // decompress_size is an upper bound from the caller: when fewer bytes
+    // were written, slice to the actual size — napi buffers are allocated
+    // uninitialized, so returning the full-length buffer would expose stale
+    // heap contents past nwritten.
+    if (static_cast<size_t>(nwritten) == decompress_size) return dst_buf;
+    return Napi::Buffer<uint8_t>::Copy(env, dst_buf.Data(), static_cast<size_t>(nwritten));
 }
 
 // =============================================================================
@@ -843,29 +843,37 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
     // reader mode.
     Napi::FunctionReference read_at_ref_;
     Napi::Env env_{nullptr};
+    // True while a native call that may re-enter JS (via ReadAtTrampoline)
+    // is on the stack. Guards close()/decompressRange() against reentrant
+    // calls from the readAt callback, which would free or corrupt the
+    // handle the C library is still using.
+    bool in_native_call_ = false;
 
     // C trampoline invoked by the library for every positional read against
     // a user-supplied JS `readAt`. Always called on the V8 main thread —
     // never use this binding with the multi-threaded decompress_range_mt
-    // entry point. Any exception thrown from JS is swallowed and surfaced
-    // as ZXC_ERROR_IO so it doesn't unwind through C.
+    // entry point. The whole body is guarded: any C++ exception (from the
+    // JS callback, buffer allocation, or env teardown) is swallowed and
+    // surfaced as ZXC_ERROR_IO so it never unwinds through the C frames.
     static int64_t ReadAtTrampoline(void* ctx, void* dst, size_t len, uint64_t offset) {
-        constexpr int64_t kZxcErrorIo = -11;
         auto* self = static_cast<SeekableWrap*>(ctx);
-        if (!self || self->read_at_ref_.IsEmpty()) return kZxcErrorIo;
-        Napi::Env env = self->env_;
-        Napi::HandleScope scope(env);
-        // Allocate a fresh JS Buffer of `len` bytes for the callback to fill,
-        // then memcpy back into `dst`. This avoids exposing the C-side
-        // pointer to JS lifetime hazards.
-        Napi::Buffer<uint8_t> jsbuf = Napi::Buffer<uint8_t>::New(env, len);
+        if (!self || self->read_at_ref_.IsEmpty()) return ZXC_ERROR_IO;
         try {
+            Napi::Env env = self->env_;
+            Napi::HandleScope scope(env);
+            // Allocate a fresh JS Buffer of `len` bytes for the callback to
+            // fill, then memcpy back into `dst`. This avoids exposing the
+            // C-side pointer to JS lifetime hazards.
+            Napi::Buffer<uint8_t> jsbuf = Napi::Buffer<uint8_t>::New(env, len);
             self->read_at_ref_.Call({jsbuf, Napi::Number::New(env, static_cast<double>(offset))});
-        } catch (const Napi::Error&) {
-            return kZxcErrorIo;
+            // The callback may have detached/transferred the ArrayBuffer,
+            // in which case Data() is null.
+            if (!jsbuf.Data()) return ZXC_ERROR_IO;
+            std::memcpy(dst, jsbuf.Data(), len);
+            return static_cast<int64_t>(len);
+        } catch (...) {
+            return ZXC_ERROR_IO;
         }
-        std::memcpy(dst, jsbuf.Data(), len);
-        return static_cast<int64_t>(len);
     }
 
     bool requireOpen(Napi::Env env) {
@@ -928,15 +936,25 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
                 .ThrowAsJavaScriptException();
             return env.Undefined();
         }
+        if (in_native_call_) {
+            Napi::Error::New(env, "reentrant decompressRange from readAt callback")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
         Napi::Buffer<uint8_t> out =
             Napi::Buffer<uint8_t>::New(env, static_cast<size_t>(length));
         if (length == 0) return out;
 
+        in_native_call_ = true;
         int64_t r = zxc_seekable_decompress_range(s_, out.Data(), static_cast<size_t>(length),
                                                   offset, static_cast<size_t>(length));
+        in_native_call_ = false;
         if (r < 0) {
             return ThrowZxcError(env, static_cast<int>(r));
         }
+        // On success the library fills the whole range; slice defensively if
+        // fewer bytes were produced (napi buffers are uninitialized).
+        if (r == length) return out;
         return Napi::Buffer<uint8_t>::Copy(env, out.Data(), static_cast<size_t>(r));
     }
 
@@ -966,6 +984,11 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
     }
 
     Napi::Value Close(const Napi::CallbackInfo& info) {
+        if (in_native_call_) {
+            Napi::Error::New(info.Env(), "cannot close Seekable from inside its readAt callback")
+                .ThrowAsJavaScriptException();
+            return info.Env().Undefined();
+        }
         if (s_) {
             zxc_seekable_free(s_);
             s_ = nullptr;
@@ -1089,6 +1112,9 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("ERROR_NULL_INPUT", Napi::Number::New(env, ZXC_ERROR_NULL_INPUT));
     exports.Set("ERROR_BAD_BLOCK_TYPE", Napi::Number::New(env, ZXC_ERROR_BAD_BLOCK_TYPE));
     exports.Set("ERROR_BAD_BLOCK_SIZE", Napi::Number::New(env, ZXC_ERROR_BAD_BLOCK_SIZE));
+    exports.Set("ERROR_DICT_REQUIRED", Napi::Number::New(env, ZXC_ERROR_DICT_REQUIRED));
+    exports.Set("ERROR_DICT_MISMATCH", Napi::Number::New(env, ZXC_ERROR_DICT_MISMATCH));
+    exports.Set("ERROR_DICT_TOO_LARGE", Napi::Number::New(env, ZXC_ERROR_DICT_TOO_LARGE));
 
     return exports;
 }
