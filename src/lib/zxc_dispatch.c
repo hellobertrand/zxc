@@ -986,11 +986,33 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
 }
 
 /**
+ * @brief Single source of truth for the in-place safety margin (bytes over the
+ *        decompressed size @p d).
+ *
+ * The write cursor sweeps [0, d) while the read cursor starts flush-right; the
+ * no-overtake invariant `sum_{j<=k} o_j + PAD <= F + 16 + sum_{j<k} c_j` must
+ * hold for every block k. Worst case is incompressible input (all RAW blocks,
+ * `c_j = o_j + H`): the compressed stream then runs `nblocks * H` longer than
+ * the output, squeezing the gap most at the first block, so the margin must
+ * carry the FULL accumulated per-block overhead — not just one block. Hence
+ * `chunk_size` (largest single block) + `nblocks * H` (H = block header +
+ * optional per-block checksum) + footer + wild-copy tail.
+ */
+static uint64_t zxc_inplace_margin(const uint64_t d, const size_t chunk_size, const int has_cs) {
+    const uint64_t nblocks = chunk_size ? (d + (uint64_t)chunk_size - 1) / (uint64_t)chunk_size : 0;
+    const uint64_t per_block =
+        (uint64_t)ZXC_BLOCK_HEADER_SIZE + (has_cs ? (uint64_t)ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    return (uint64_t)chunk_size + nblocks * per_block + (uint64_t)ZXC_FILE_FOOTER_SIZE +
+           (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
+}
+
+/**
  * @brief Minimum single-buffer size for a safe in-place decode of @p src.
  *
  * Reads the archive header (block size) and footer (decompressed size) without
- * decoding, and returns `decompressed_size + one_block + wild_copy_tail`. A
- * buffer of at least this size lets @ref zxc_decompress_inplace decode with the
+ * decoding, and returns `decompressed_size + zxc_inplace_margin(...)` (one
+ * block + accumulated per-block overhead + footer + wild-copy tail). A buffer
+ * of at least this size lets @ref zxc_decompress_inplace decode with the
  * compressed data placed flush-right, the write cursor never overtaking the
  * read cursor.
  *
@@ -1009,8 +1031,8 @@ size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
                  ZXC_OK))
         return 0;
     const uint64_t d = zxc_le64((const uint8_t*)src + src_size - ZXC_FILE_FOOTER_SIZE);
-    const uint64_t margin = (uint64_t)chunk_size + (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
-    if (UNLIKELY(d > (uint64_t)SIZE_MAX - margin)) return 0;
+    const uint64_t margin = zxc_inplace_margin(d, chunk_size, has_cs);
+    if (UNLIKELY(margin > (uint64_t)SIZE_MAX || d > (uint64_t)SIZE_MAX - margin)) return 0;
     return (size_t)(d + margin);
 }
 
@@ -1049,7 +1071,7 @@ int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const
     if (UNLIKELY(zxc_read_file_header(comp, comp_size, &chunk_size, &has_cs, &did) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
     const uint64_t d = zxc_le64(comp + comp_size - ZXC_FILE_FOOTER_SIZE);
-    const uint64_t margin = (uint64_t)chunk_size + (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
+    const uint64_t margin = zxc_inplace_margin(d, chunk_size, has_cs);
     if (UNLIKELY(d > (uint64_t)buffer_capacity || (uint64_t)buffer_capacity - d < margin))
         return ZXC_ERROR_DST_TOO_SMALL;
     return zxc_decompress_frame(comp, comp_size, buf, buffer_capacity, opts);

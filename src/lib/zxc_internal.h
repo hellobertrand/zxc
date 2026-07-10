@@ -619,14 +619,14 @@ extern "C" {
  *  levels 1-6 selection stable; at ULTRA the physical premium applies (RLE
  *  decodes at near copy speed). */
 static inline int zxc_ss_prem_rle_q8(const int level) {
-    return (level >= ZXC_LEVEL_DENSITY) ? 1 : (256 >> ZXC_RLE_MARGIN_SHIFT);
+    return (level >= ZXC_LEVEL_ULTRA) ? 1 : (256 >> ZXC_RLE_MARGIN_SHIFT);
 }
 /** @brief Huffman/PivCo decode premium: the level's lambda folded with the
  *  entropy decoder's cost over the copy path. 8 (3.125%) below ULTRA matches
  *  the historical margin against a RAW baseline; 4 (1.56%) at ULTRA trades
  *  more decode time for ratio (validated on silesia). */
 static inline int zxc_ss_prem_huf_q8(const int level) {
-    return (level >= ZXC_LEVEL_DENSITY) ? 4 : (256 >> ZXC_HUF_MARGIN_SHIFT);
+    return (level >= ZXC_LEVEL_ULTRA) ? 4 : (256 >> ZXC_HUF_MARGIN_SHIFT);
 }
 /** @} */
 /** @brief Absolute floor below which Huffman cannot beat RAW even with
@@ -1271,31 +1271,6 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
 }
 
 /**
- * @brief Loads up to 7 bytes from memory in little-endian order into a uint64_t.
- *
- * This is used for partial reads at stream boundaries where fewer than 8 bytes
- * remain. Unlike ZXC_MEMCPY into a uint64_t (which is endian-dependent), this
- * function always produces a value with byte 0 in the least-significant bits.
- *
- * @param[in] p Pointer to the source bytes.
- * @param[in] n Number of bytes to read (must be < 8).
- * @return The loaded value in native host order, with bytes arranged as if
- *         read from a little-endian stream.
- */
-static ZXC_ALWAYS_INLINE uint64_t zxc_le_partial(const uint8_t* p, size_t n) {
-#ifdef ZXC_BIG_ENDIAN
-    uint64_t v = 0;
-    for (size_t i = 0; i < n; i++) v |= (uint64_t)p[i] << (i * CHAR_BIT);
-    return v;
-#else
-    uint64_t v = 0;
-    n = n > sizeof(v) ? sizeof(v) : n;
-    ZXC_MEMCPY(&v, p, n);
-    return v;
-#endif
-}
-
-/**
  * @brief Writes a generic header and section descriptors to a destination
  * buffer.
  *
@@ -1544,10 +1519,9 @@ int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, cons
 /**
  * @brief Attach the shared dictionary literal table to an initialised context.
  *
- * Stores @p lengths (128-byte packed code-lengths header, caller-owned, must
- * outlive the context's use) and, on decompression contexts created with
- * @c dict_size > 0, builds the decode table once into the workspace-carved
- * validated packed lengths. A NULL @p lengths is a no-op.
+ * Validates the 128-byte packed code-lengths header and stores the pointer
+ * (caller-owned, must outlive the context's use); the tree is (re)built from
+ * these lengths at decode/estimate time, not here. A NULL @p lengths is a no-op.
  *
  * @return @ref ZXC_OK on success, @ref ZXC_ERROR_CORRUPT_DATA if the lengths
  *         header is structurally invalid (bad nibble, Kraft inequality).
