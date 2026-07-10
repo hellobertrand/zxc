@@ -64,11 +64,13 @@ cat > "$TEST_FILE" <<EOF
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
 Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur? Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur?
 EOF
-# Duplicate content to make it slightly larger
-for i in {1..1000}; do
-    cat "$TEST_FILE" >> "${TEST_FILE}.tmp"
+# Duplicate content
+for i in {1..9}; do
+    cat "$TEST_FILE" "$TEST_FILE" > "${TEST_FILE}.tmp"
+    mv "${TEST_FILE}.tmp" "$TEST_FILE"
 done
-mv "${TEST_FILE}.tmp" "$TEST_FILE"
+# Pristine copy: sections that consume or delete TEST_FILE restore it from here
+cp "$TEST_FILE" "${TEST_FILE}.orig"
 
 FILE_SIZE=$(wc -c < "$TEST_FILE" | tr -d ' ')
 echo "Test file generated: $TEST_FILE ($FILE_SIZE bytes)"
@@ -134,15 +136,8 @@ fi
 
 mv "$TEST_FILE" "$TEST_FILE_DEC_BASH"
 
-# Re-generate source for valid comparison
-cat > "$TEST_FILE" <<EOF
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur? Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur?
-EOF
-for i in {1..1000}; do
-    cat "$TEST_FILE" >> "${TEST_FILE}.tmp"
-done
-mv "${TEST_FILE}.tmp" "$TEST_FILE"
+# Restore source from the pristine copy for a valid comparison
+cp "${TEST_FILE}.orig" "$TEST_FILE"
 
 if cmp -s "$TEST_FILE" "$TEST_FILE_DEC_BASH"; then
     log_pass "Basic Round-Trip"
@@ -333,7 +328,7 @@ fi
 
 # 12. Compression Levels (All)
 echo "Testing All Compression Levels..."
-for LEVEL in 1 2 3 4 5 6; do
+for LEVEL in 1 2 3 4 5 6 7; do
     "$ZXC_BIN" -$LEVEL -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_lvl${LEVEL}.zxc"
     if [[ ! -f "$TEST_DIR/test_lvl${LEVEL}.zxc" ]]; then
         log_fail "Compression level $LEVEL failed"
@@ -850,7 +845,7 @@ fi
 # 24.6 Seekable across all levels
 echo "  Testing seekable across all levels..."
 SEEK_ALL_OK=1
-for LEVEL in 1 2 3 4 5 6; do
+for LEVEL in 1 2 3 4 5 6 7; do
     "$ZXC_BIN" -$LEVEL -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_lvl${LEVEL}.zxc"
     "$ZXC_BIN" -d -c "$TEST_DIR/seekable_lvl${LEVEL}.zxc" > "$TEST_DIR/seekable_lvl${LEVEL}.dec"
     if ! cmp -s "$TEST_FILE" "$TEST_DIR/seekable_lvl${LEVEL}.dec"; then
@@ -859,7 +854,7 @@ for LEVEL in 1 2 3 4 5 6; do
     fi
 done
 if [[ "$SEEK_ALL_OK" -eq 1 ]]; then
-    log_pass "Seekable across all levels (1-5)"
+    log_pass "Seekable across all levels (1-7)"
 fi
 # 24.7 Seekable pipe round-trip (no fseeko - validates SEK skip on stdin)
 echo "  Testing seekable pipe round-trip..."
@@ -972,7 +967,7 @@ fi
 # 25.8 Dict with all levels
 echo "  Testing dict across all levels..."
 DICT_ALL_OK=1
-for LEVEL in 1 2 3 4 5 6; do
+for LEVEL in 1 2 3 4 5 6 7; do
     "$ZXC_BIN" -$LEVEL -D "$DICT_FILE" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict_lvl${LEVEL}.zxc"
     "$ZXC_BIN" -d -D "$DICT_FILE" -c "$TEST_DIR/test_dict_lvl${LEVEL}.zxc" > "$TEST_DIR/test_dict_lvl${LEVEL}.dec"
     if ! cmp -s "$TEST_FILE" "$TEST_DIR/test_dict_lvl${LEVEL}.dec"; then
@@ -981,7 +976,7 @@ for LEVEL in 1 2 3 4 5 6; do
     fi
 done
 if [[ "$DICT_ALL_OK" -eq 1 ]]; then
-    log_pass "Dict across all levels (1-6)"
+    log_pass "Dict across all levels (1-7)"
 fi
 
 # 25.9 Invalid dict file should fail
@@ -1109,6 +1104,282 @@ case "$(uname -s 2>/dev/null)" in
         echo "  [SKIP] native wildcard expansion is Windows-only (POSIX shells glob themselves)"
         ;;
 esac
+
+# 28. Output Option (-o / --output / positional OUTPUT-FILE)
+echo "Testing Output Option (-o)..."
+
+# 28.1 -o on compression: output goes to the named file and the input is KEPT
+#      (auto-deletion only applies when the output name is auto-derived)
+cp "$TEST_FILE" "$TEST_DIR/o_src.txt"
+"$ZXC_BIN" -f -o "$TEST_DIR/o_out.zxc" "$TEST_DIR/o_src.txt"
+if [[ -s "$TEST_DIR/o_out.zxc" ]] && [[ -f "$TEST_DIR/o_src.txt" ]]; then
+    "$ZXC_BIN" -d -c "$TEST_DIR/o_out.zxc" > "$TEST_DIR/o_out.dec"
+    if cmp -s "$TEST_FILE" "$TEST_DIR/o_out.dec"; then
+        log_pass "Compress with -o (named output, input kept)"
+    else
+        log_fail "Compress with -o round-trip mismatch"
+    fi
+else
+    log_fail "Compress with -o failed (missing output or input was deleted)"
+fi
+
+# 28.2 -o on decompression
+"$ZXC_BIN" -d -f -o "$TEST_DIR/o_dec.txt" "$TEST_DIR/o_out.zxc"
+if cmp -s "$TEST_FILE" "$TEST_DIR/o_dec.txt"; then
+    log_pass "Decompress with -o"
+else
+    log_fail "Decompress with -o failed"
+fi
+
+# 28.3 Positional OUTPUT-FILE (zxc -d INPUT OUTPUT)
+"$ZXC_BIN" -d -f "$TEST_DIR/o_out.zxc" "$TEST_DIR/o_pos.txt"
+if cmp -s "$TEST_FILE" "$TEST_DIR/o_pos.txt"; then
+    log_pass "Positional OUTPUT-FILE"
+else
+    log_fail "Positional OUTPUT-FILE failed"
+fi
+
+# 28.4 -o with stdin input, both directions
+#      (regression: -o used to be silently ignored when reading from stdin)
+"$ZXC_BIN" -f -o "$TEST_DIR/o_stdin.zxc" < "$TEST_FILE"
+if [[ ! -s "$TEST_DIR/o_stdin.zxc" ]]; then
+    log_fail "Compress from stdin with -o produced no output"
+fi
+"$ZXC_BIN" -d -f -o "$TEST_DIR/o_stdin.dec" < "$TEST_DIR/o_stdin.zxc"
+if cmp -s "$TEST_FILE" "$TEST_DIR/o_stdin.dec"; then
+    log_pass "stdin + -o (compress and decompress)"
+else
+    log_fail "stdin + -o round-trip mismatch"
+fi
+
+# 28.5 Identical input/output must be rejected with the input left intact,
+#      even when spelled differently (regression: raw string comparison let
+#      './file' alias 'file' and O_TRUNC destroyed the input)
+cp "$TEST_DIR/o_out.zxc" "$TEST_DIR/ident.zxc"
+SZ_BEFORE=$(wc -c < "$TEST_DIR/ident.zxc" | tr -d ' ')
+set +e
+"$ZXC_BIN" -d -f -o "$TEST_DIR/./ident.zxc" "$TEST_DIR/ident.zxc" > /dev/null 2>&1
+RET=$?
+set -e
+SZ_AFTER=$(wc -c < "$TEST_DIR/ident.zxc" | tr -d ' ')
+if [[ $RET -ne 0 ]] && [[ "$SZ_BEFORE" == "$SZ_AFTER" ]]; then
+    log_pass "Identical input/output rejected, input intact"
+else
+    log_fail "Identical input/output should be rejected without touching the input"
+fi
+
+# 28.6 -o combined with -m must be rejected
+set +e
+"$ZXC_BIN" -m -f -o "$TEST_DIR/x.zxc" "$TEST_DIR/multi1.txt" "$TEST_DIR/multi2.txt" > /dev/null 2>&1
+RET=$?
+set -e
+if [[ $RET -ne 0 ]]; then
+    log_pass "-o rejected with multiple mode (-m)"
+else
+    log_fail "-o with -m should be rejected"
+fi
+
+# 29. Default Input Deletion (gzip-like behavior)
+echo "Testing Default Input Deletion..."
+cp "$TEST_FILE" "$TEST_DIR/del_me.txt"
+"$ZXC_BIN" -f "$TEST_DIR/del_me.txt"
+if [[ ! -f "$TEST_DIR/del_me.txt" ]] && [[ -f "$TEST_DIR/del_me.txt.zxc" ]]; then
+    log_pass "Compression deletes input by default"
+else
+    log_fail "Compression without -k should delete the input"
+fi
+"$ZXC_BIN" -d -f "$TEST_DIR/del_me.txt.zxc"
+if [[ -f "$TEST_DIR/del_me.txt" ]] && [[ ! -f "$TEST_DIR/del_me.txt.zxc" ]] \
+   && cmp -s "$TEST_FILE" "$TEST_DIR/del_me.txt"; then
+    log_pass "Decompression deletes archive by default"
+else
+    log_fail "Decompression without -k should delete the archive and restore the file"
+fi
+
+# 30. Long Options and Option Parsing
+echo "Testing Long Options and Parsing..."
+
+# 30.1 Long-option round-trip (--compress/--decompress/--keep/--force/--stdout)
+"$ZXC_BIN" --compress --keep --force --stdout "$TEST_FILE_ARG" > "$TEST_DIR/long.zxc"
+"$ZXC_BIN" --decompress --stdout "$TEST_DIR/long.zxc" > "$TEST_DIR/long.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/long.dec"; then
+    log_pass "Long options round-trip (--compress/--decompress)"
+else
+    log_fail "Long options round-trip failed"
+fi
+
+# 30.2 Long options with values: separate (--threads 2) and '=' (--block-size=64K)
+"$ZXC_BIN" --threads 2 --block-size=64K --keep --force --stdout "$TEST_FILE_ARG" > "$TEST_DIR/long2.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/long2.zxc" > "$TEST_DIR/long2.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/long2.dec"; then
+    log_pass "Long options with values (--threads N, --block-size=64K)"
+else
+    log_fail "Long options with values failed"
+fi
+
+# 30.3 --list / --test / --version / --help / -h
+OUT_L=$("$ZXC_BIN" --list "$TEST_DIR/long.zxc")
+OUT_T=$("$ZXC_BIN" --test "$TEST_DIR/long.zxc")
+OUT_V=$("$ZXC_BIN" --version)
+OUT_H=$("$ZXC_BIN" --help)
+OUT_H2=$("$ZXC_BIN" -h)
+if [[ "$OUT_L" == *"Compressed"* ]] && [[ "$OUT_T" == *": OK"* ]] \
+   && [[ "$OUT_V" == *"ZXC CLI"* ]] && [[ "$OUT_H" == *"Usage:"* ]] \
+   && [[ "$OUT_H2" == *"Usage:"* ]]; then
+    log_pass "Long mode options (--list/--test/--version/--help)"
+else
+    log_fail "Long mode options failed"
+fi
+
+# 30.4 Grouped short flags (-zkf)
+cp "$TEST_FILE" "$TEST_DIR/group.txt"
+"$ZXC_BIN" -zkf "$TEST_DIR/group.txt"
+if [[ -f "$TEST_DIR/group.txt" ]] && [[ -f "$TEST_DIR/group.txt.zxc" ]]; then
+    log_pass "Grouped short flags (-zkf)"
+else
+    log_fail "Grouped short flags failed (-zkf should behave like -z -k -f)"
+fi
+
+# 30.5 "--" end-of-options marker with a dash-prefixed filename
+echo "dash-file payload" > "$TEST_DIR/-dash.txt"
+ZXC_ABS_P=$(cd "$(dirname "$ZXC_BIN")" && pwd)/$(basename "$ZXC_BIN")
+( cd "$TEST_DIR" && "$ZXC_ABS_P" -z -k -f -- "-dash.txt" ) 2>/dev/null || true
+if [[ -f "$TEST_DIR/-dash.txt.zxc" ]]; then
+    log_pass "'--' end-of-options marker"
+else
+    log_fail "'--' should stop option parsing (dash-prefixed file)"
+fi
+
+# 30.6 "-" as explicit stdin marker
+"$ZXC_BIN" -d -c - < "$TEST_DIR/long.zxc" > "$TEST_DIR/dash_stdin.dec"
+if cmp -s "$TEST_FILE" "$TEST_DIR/dash_stdin.dec"; then
+    log_pass "'-' explicit stdin marker"
+else
+    log_fail "'-' stdin marker failed"
+fi
+
+# 30.7 Invalid option values must be rejected
+#      (regressions: trailing junk accepted, signed overflow, atoi fallback to 0)
+set +e
+"$ZXC_BIN" -T abc "$TEST_FILE_ARG" > /dev/null 2>&1; RET_T=$?
+"$ZXC_BIN" -B 4Kxyz "$TEST_FILE_ARG" > /dev/null 2>&1; RET_B1=$?
+"$ZXC_BIN" -B 9223372036854775807K "$TEST_FILE_ARG" > /dev/null 2>&1; RET_B2=$?
+set -e
+if [[ $RET_T -ne 0 ]] && [[ $RET_B1 -ne 0 ]] && [[ $RET_B2 -ne 0 ]]; then
+    log_pass "Invalid option values rejected (-T abc, -B 4Kxyz, -B overflow)"
+else
+    log_fail "Invalid option values should be rejected"
+fi
+
+# 30.8 -b must not swallow a digit-leading filename as the duration
+set +e
+ERR_B=$("$ZXC_BIN" -b 5nonexistent.bin 2>&1)
+RET=$?
+set -e
+if [[ $RET -ne 0 ]] && [[ "$ERR_B" == *"Invalid input file"* ]]; then
+    log_pass "-b leaves digit-leading filenames alone"
+else
+    log_fail "-b consumed a digit-leading filename as duration"
+fi
+
+# 31. JSON List Robustness
+#     (regression: a failed entry printed nothing, leaving stray commas in the array)
+echo "Testing JSON list with a failing entry..."
+set +e
+JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_DIR/long.zxc" "$TEST_DIR/does_not_exist.zxc" "$TEST_DIR/long2.zxc" 2>/dev/null)
+RET=$?
+set -e
+if [[ $RET -ne 0 ]] && [[ "$JSON_OUT" == "["* ]] && [[ "$JSON_OUT" == *"]" ]] \
+   && [[ "$JSON_OUT" == *'"error"'* ]]; then
+    log_pass "JSON list stays an array when one entry fails (exit code still non-zero)"
+else
+    log_fail "JSON list with a failing entry produced malformed output or wrong exit code"
+fi
+if command -v jq &> /dev/null; then
+    if echo "$JSON_OUT" | jq . > /dev/null 2>&1; then
+        log_pass "JSON list with failing entry is valid JSON (verified with jq)"
+    else
+        log_fail "JSON list with failing entry is not valid JSON"
+    fi
+fi
+
+# 32. Benchmark with Dictionary
+#     (regression: the dictionary was freed before the benchmark used it)
+echo "Testing benchmark with dictionary (-b -D)..."
+set +e
+"$ZXC_BIN" -q -b1 -D "$DICT_FILE" "$TEST_FILE_ARG" > /dev/null 2>&1
+RET=$?
+set -e
+if [[ $RET -eq 0 ]]; then
+    log_pass "Benchmark with dictionary (-b1 -D)"
+else
+    log_fail "Benchmark with dictionary failed"
+fi
+
+# 33. Deferred Write Error (Linux-only: /dev/full reports ENOSPC on flush)
+#     (regression: fclose/fflush failures were ignored, truncated output
+#      was reported as success and the input file deleted)
+if [[ -w /dev/full ]]; then
+    set +e
+    "$ZXC_BIN" -c -k -f "$TEST_FILE_ARG" > /dev/full 2>/dev/null
+    RET=$?
+    set -e
+    if [[ $RET -ne 0 ]]; then
+        log_pass "Deferred write error detected (full device)"
+    else
+        log_fail "Write to full device should fail"
+    fi
+else
+    echo "  [SKIP] /dev/full not available (Linux-only)"
+fi
+
+# 34. Progress Display (--progress)
+echo "Testing Progress Display (--progress)..."
+
+# 34.1 --progress=always emits updates on a non-tty stderr (file input, known size)
+"$ZXC_BIN" --progress=always -f -k -c "$TEST_FILE_ARG" > /dev/null 2> "$TEST_DIR/prog1.err"
+if grep -q "Compressing \[" "$TEST_DIR/prog1.err" && grep -q "MB/s" "$TEST_DIR/prog1.err"; then
+    log_pass "--progress=always emits updates off-tty"
+else
+    log_fail "--progress=always should emit progress lines on stderr"
+fi
+
+# 34.2 --progress=always with stdin input (unknown total size)
+"$ZXC_BIN" --progress=always -f -o "$TEST_DIR/prog_stdin.zxc" < "$TEST_FILE" 2> "$TEST_DIR/prog2.err"
+if grep -q "Compressing" "$TEST_DIR/prog2.err"; then
+    log_pass "--progress=always works with stdin (unknown size)"
+else
+    log_fail "--progress=always with stdin should report bytes processed"
+fi
+
+# 34.3 --progress=never and auto off-tty stay silent
+"$ZXC_BIN" --progress=never -f -k -c "$TEST_FILE_ARG" > /dev/null 2> "$TEST_DIR/prog3.err"
+"$ZXC_BIN" -f -k -c "$TEST_FILE_ARG" > /dev/null 2> "$TEST_DIR/prog4.err"
+if [[ ! -s "$TEST_DIR/prog3.err" ]] && [[ ! -s "$TEST_DIR/prog4.err" ]]; then
+    log_pass "--progress=never and auto off-tty are silent"
+else
+    log_fail "No progress output expected (never / auto off-tty)"
+fi
+
+# 34.4 Invalid --progress value rejected
+set +e
+"$ZXC_BIN" --progress=bogus "$TEST_FILE_ARG" > /dev/null 2>&1
+RET=$?
+set -e
+if [[ $RET -ne 0 ]]; then
+    log_pass "--progress rejects invalid values"
+else
+    log_fail "--progress must reject invalid values"
+fi
+
+# 34.5 -t with --progress=always labels the operation "Testing"
+"$ZXC_BIN" -z -k -f "$TEST_FILE_ARG"
+"$ZXC_BIN" -t --progress=always "$TEST_FILE_XC_ARG" > /dev/null 2> "$TEST_DIR/prog5.err"
+if grep -q "Testing" "$TEST_DIR/prog5.err"; then
+    log_pass "-t progress labeled 'Testing'"
+else
+    log_fail "-t progress should be labeled 'Testing'"
+fi
 
 echo "All tests passed!"
 exit 0
