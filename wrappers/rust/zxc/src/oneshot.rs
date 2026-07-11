@@ -331,9 +331,9 @@ pub fn min_level() -> i32 {
     unsafe { zxc_sys::zxc_min_level() }
 }
 
-/// Returns the maximum supported compression level (currently `5`).
+/// Returns the maximum supported compression level (currently `7`).
 ///
-/// Equivalent to [`Level::Compact`] as an integer.
+/// Equivalent to [`Level::Ultra`] as an integer.
 pub fn max_level() -> i32 {
     unsafe { zxc_sys::zxc_max_level() }
 }

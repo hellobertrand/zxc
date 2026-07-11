@@ -231,8 +231,9 @@ static int cs_drain_pending(zxc_cstream* cs, zxc_outbuf_t* out) {
  * Copies @p opts into the new context, applying defaults for any zero-valued
  * field (@c level -> @ref ZXC_LEVEL_DEFAULT, @c block_size ->
  * @ref ZXC_BLOCK_SIZE_DEFAULT).  Forces single-threaded operation
- * (@c n_threads = 0), disables progress callbacks and seekable framing
- * (those modes belong to the @c FILE*-based pipeline).  Pre-sizes the
+ * (@c n_threads = 0), disables progress callbacks, seekable framing and
+ * dictionary options (those modes belong to the @c FILE*-based pipeline;
+ * the push-stream format carries no dict_id).  Pre-sizes the
  * @c pending buffer so that the file header / footer paths never need a
  * realloc.
  *
@@ -252,6 +253,9 @@ zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
     cs->opts.progress_cb = NULL;
     cs->opts.user_data = NULL;
     cs->opts.seekable = 0;
+    cs->opts.dict = NULL;
+    cs->opts.dict_size = 0;
+    cs->opts.dict_huf = NULL;
     cs->block_size = cs->opts.block_size;
 
     cs->cctx = zxc_create_cctx(&cs->opts);

@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 extern "C" {
@@ -89,7 +90,16 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     }
 
     uint64_t bound = zxc_compress_bound(src_size);
-    Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, static_cast<size_t>(bound));
+    // Uninitialised native scratch instead of a bound-size JS Buffer: the
+    // bound is >= src_size, and a JS allocation of that size would be
+    // registered as external GC memory only to be discarded after the
+    // copy-slice below.
+    std::unique_ptr<uint8_t[]> dst(new (std::nothrow) uint8_t[static_cast<size_t>(bound)]);
+    if (!dst) {
+        Napi::Error::New(env, "zxc: allocation failed for compression scratch")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
 
     zxc_compress_opts_t opts = {0};
     opts.level = level;
@@ -99,8 +109,7 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     opts.dict_size = dict_size;
     opts.dict_huf = dict_huf;
 
-    int64_t nwritten =
-        zxc_compress(src, src_size, dst_buf.Data(), static_cast<size_t>(bound), &opts);
+    int64_t nwritten = zxc_compress(src, src_size, dst.get(), static_cast<size_t>(bound), &opts);
 
     if (nwritten < 0) {
         auto err_code = static_cast<int>(nwritten);
@@ -110,13 +119,8 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
         return env.Undefined();
     }
 
-    if (nwritten == 0) {
-        Napi::Error::New(env, "Input is too small to be compressed").ThrowAsJavaScriptException();
-        return env.Undefined();
-    }
-
     // Return a slice of the buffer with the actual size
-    return Napi::Buffer<uint8_t>::Copy(env, dst_buf.Data(), static_cast<size_t>(nwritten));
+    return Napi::Buffer<uint8_t>::Copy(env, dst.get(), static_cast<size_t>(nwritten));
 }
 
 // =============================================================================
@@ -184,7 +188,12 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
         return env.Undefined();
     }
 
-    return dst_buf;
+    // decompress_size is an upper bound from the caller: when fewer bytes
+    // were written, slice to the actual size; napi buffers are allocated
+    // uninitialized, so returning the full-length buffer would expose stale
+    // heap contents past nwritten.
+    if (static_cast<size_t>(nwritten) == decompress_size) return dst_buf;
+    return Napi::Buffer<uint8_t>::Copy(env, dst_buf.Data(), static_cast<size_t>(nwritten));
 }
 
 // =============================================================================
@@ -537,6 +546,10 @@ class CStreamWrap : public Napi::ObjectWrap<CStreamWrap> {
 
    private:
     zxc_cstream* cs_ = nullptr;
+    // Reusable staging buffer: sized on first use and kept across calls, so
+    // the malloc + value-initialising memset of a full block (~512 KB) is
+    // paid once per stream instead of once per streamed chunk.
+    std::vector<uint8_t> stage_;
 
     bool requireOpen(Napi::Env env) {
         if (!cs_) {
@@ -550,46 +563,44 @@ class CStreamWrap : public Napi::ObjectWrap<CStreamWrap> {
      * caller-supplied `step` decides whether one iteration of
      * zxc_cstream_compress / _end has fully drained. */
     Napi::Value DrainCompress(Napi::Env env, const uint8_t* src, size_t srcLen) {
-        std::vector<uint8_t> out;
         size_t cap = zxc_cstream_out_size(cs_);
         if (cap < 4096) cap = 4096;
-        out.resize(cap);
+        if (stage_.size() < cap) stage_.resize(cap);
         size_t out_len = 0;
 
         zxc_inbuf_t in = {src, srcLen, 0};
         for (;;) {
             size_t want = zxc_cstream_out_size(cs_);
             if (want < 4096) want = 4096;
-            if (out.size() - out_len < want) {
-                if (!GrowOutput(env, out, out_len, want)) return env.Undefined();
+            if (stage_.size() - out_len < want) {
+                if (!GrowOutput(env, stage_, out_len, want)) return env.Undefined();
             }
-            zxc_outbuf_t obuf = {out.data() + out_len, out.size() - out_len, 0};
+            zxc_outbuf_t obuf = {stage_.data() + out_len, stage_.size() - out_len, 0};
             int64_t r = zxc_cstream_compress(cs_, &obuf, &in);
             out_len += obuf.pos;
             if (r < 0) return ThrowZxcError(env, static_cast<int>(r));
             if (r == 0 && in.pos == in.size) break;
         }
-        return Napi::Buffer<uint8_t>::Copy(env, out.data(), out_len);
+        return Napi::Buffer<uint8_t>::Copy(env, stage_.data(), out_len);
     }
 
     Napi::Value DrainEnd(Napi::Env env) {
-        std::vector<uint8_t> out;
         size_t cap = zxc_cstream_out_size(cs_);
         if (cap < 4096) cap = 4096;
-        out.resize(cap);
+        if (stage_.size() < cap) stage_.resize(cap);
         size_t out_len = 0;
 
         for (;;) {
-            if (out.size() - out_len < 4096) {
-                if (!GrowOutput(env, out, out_len, 4096)) return env.Undefined();
+            if (stage_.size() - out_len < 4096) {
+                if (!GrowOutput(env, stage_, out_len, 4096)) return env.Undefined();
             }
-            zxc_outbuf_t obuf = {out.data() + out_len, out.size() - out_len, 0};
+            zxc_outbuf_t obuf = {stage_.data() + out_len, stage_.size() - out_len, 0};
             int64_t r = zxc_cstream_end(cs_, &obuf);
             out_len += obuf.pos;
             if (r < 0) return ThrowZxcError(env, static_cast<int>(r));
             if (r == 0) break;
         }
-        return Napi::Buffer<uint8_t>::Copy(env, out.data(), out_len);
+        return Napi::Buffer<uint8_t>::Copy(env, stage_.data(), out_len);
     }
 
     Napi::Value Compress(const Napi::CallbackInfo& info) {
@@ -614,6 +625,9 @@ class CStreamWrap : public Napi::ObjectWrap<CStreamWrap> {
             zxc_cstream_free(cs_);
             cs_ = nullptr;
         }
+        // Release the staging memory too; the JS wrapper object may outlive
+        // the stream by a long time.
+        std::vector<uint8_t>().swap(stage_);
         return info.Env().Undefined();
     }
 
@@ -662,6 +676,8 @@ class DStreamWrap : public Napi::ObjectWrap<DStreamWrap> {
 
    private:
     zxc_dstream* ds_ = nullptr;
+    // Reusable staging buffer; see CStreamWrap::stage_.
+    std::vector<uint8_t> stage_;
 
     bool requireOpen(Napi::Env env) {
         if (!ds_) {
@@ -680,20 +696,19 @@ class DStreamWrap : public Napi::ObjectWrap<DStreamWrap> {
         }
         Napi::Buffer<uint8_t> buf = info[0].As<Napi::Buffer<uint8_t>>();
 
-        std::vector<uint8_t> out;
         size_t cap = zxc_dstream_out_size(ds_);
         if (cap < 4096) cap = 4096;
-        out.resize(cap);
+        if (stage_.size() < cap) stage_.resize(cap);
         size_t out_len = 0;
 
         zxc_inbuf_t in = {buf.Data(), buf.Length(), 0};
         for (;;) {
             size_t want = zxc_dstream_out_size(ds_);
             if (want < 4096) want = 4096;
-            if (out.size() - out_len < want) {
-                if (!GrowOutput(env, out, out_len, want)) return env.Undefined();
+            if (stage_.size() - out_len < want) {
+                if (!GrowOutput(env, stage_, out_len, want)) return env.Undefined();
             }
-            zxc_outbuf_t obuf = {out.data() + out_len, out.size() - out_len, 0};
+            zxc_outbuf_t obuf = {stage_.data() + out_len, stage_.size() - out_len, 0};
             zxc_inbuf_t empty_in = {nullptr, 0, 0};
             zxc_inbuf_t* cur_in = (in.pos < in.size) ? &in : &empty_in;
             const size_t before_in = cur_in->pos;
@@ -705,7 +720,7 @@ class DStreamWrap : public Napi::ObjectWrap<DStreamWrap> {
              * no progress was made (no input consumed AND no output produced). */
             if (cur_in->pos == before_in && obuf.pos == before_out) break;
         }
-        return Napi::Buffer<uint8_t>::Copy(env, out.data(), out_len);
+        return Napi::Buffer<uint8_t>::Copy(env, stage_.data(), out_len);
     }
 
     Napi::Value Finished(const Napi::CallbackInfo& info) {
@@ -717,6 +732,7 @@ class DStreamWrap : public Napi::ObjectWrap<DStreamWrap> {
             zxc_dstream_free(ds_);
             ds_ = nullptr;
         }
+        std::vector<uint8_t>().swap(stage_);
         return info.Env().Undefined();
     }
 
@@ -776,7 +792,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         }
 
         // Reader-callback form: { size: number, readAt: (buf, offset) => void }.
-        // Single-threaded only — the JS callback is invoked synchronously on
+        // Single-threaded only: the JS callback is invoked synchronously on
         // the calling thread.
         if (info[0].IsObject() && !info[0].IsBuffer()) {
             Napi::Object opts = info[0].As<Napi::Object>();
@@ -843,29 +859,37 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
     // reader mode.
     Napi::FunctionReference read_at_ref_;
     Napi::Env env_{nullptr};
+    // True while a native call that may re-enter JS (via ReadAtTrampoline)
+    // is on the stack. Guards close()/decompressRange() against reentrant
+    // calls from the readAt callback, which would free or corrupt the
+    // handle the C library is still using.
+    bool in_native_call_ = false;
 
     // C trampoline invoked by the library for every positional read against
-    // a user-supplied JS `readAt`. Always called on the V8 main thread —
+    // a user-supplied JS `readAt`. Always called on the V8 main thread,
     // never use this binding with the multi-threaded decompress_range_mt
-    // entry point. Any exception thrown from JS is swallowed and surfaced
-    // as ZXC_ERROR_IO so it doesn't unwind through C.
+    // entry point. The whole body is guarded: any C++ exception (from the
+    // JS callback, buffer allocation, or env teardown) is swallowed and
+    // surfaced as ZXC_ERROR_IO so it never unwinds through the C frames.
     static int64_t ReadAtTrampoline(void* ctx, void* dst, size_t len, uint64_t offset) {
-        constexpr int64_t kZxcErrorIo = -11;
         auto* self = static_cast<SeekableWrap*>(ctx);
-        if (!self || self->read_at_ref_.IsEmpty()) return kZxcErrorIo;
-        Napi::Env env = self->env_;
-        Napi::HandleScope scope(env);
-        // Allocate a fresh JS Buffer of `len` bytes for the callback to fill,
-        // then memcpy back into `dst`. This avoids exposing the C-side
-        // pointer to JS lifetime hazards.
-        Napi::Buffer<uint8_t> jsbuf = Napi::Buffer<uint8_t>::New(env, len);
+        if (!self || self->read_at_ref_.IsEmpty()) return ZXC_ERROR_IO;
         try {
+            Napi::Env env = self->env_;
+            Napi::HandleScope scope(env);
+            // Allocate a fresh JS Buffer of `len` bytes for the callback to
+            // fill, then memcpy back into `dst`. This avoids exposing the
+            // C-side pointer to JS lifetime hazards.
+            Napi::Buffer<uint8_t> jsbuf = Napi::Buffer<uint8_t>::New(env, len);
             self->read_at_ref_.Call({jsbuf, Napi::Number::New(env, static_cast<double>(offset))});
-        } catch (const Napi::Error&) {
-            return kZxcErrorIo;
+            // The callback may have detached/transferred the ArrayBuffer,
+            // in which case Data() is null.
+            if (!jsbuf.Data()) return ZXC_ERROR_IO;
+            std::memcpy(dst, jsbuf.Data(), len);
+            return static_cast<int64_t>(len);
+        } catch (const std::exception&) {
+            return ZXC_ERROR_IO;
         }
-        std::memcpy(dst, jsbuf.Data(), len);
-        return static_cast<int64_t>(len);
     }
 
     bool requireOpen(Napi::Env env) {
@@ -928,15 +952,25 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
                 .ThrowAsJavaScriptException();
             return env.Undefined();
         }
+        if (in_native_call_) {
+            Napi::Error::New(env, "reentrant decompressRange from readAt callback")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
         Napi::Buffer<uint8_t> out =
             Napi::Buffer<uint8_t>::New(env, static_cast<size_t>(length));
         if (length == 0) return out;
 
+        in_native_call_ = true;
         int64_t r = zxc_seekable_decompress_range(s_, out.Data(), static_cast<size_t>(length),
                                                   offset, static_cast<size_t>(length));
+        in_native_call_ = false;
         if (r < 0) {
             return ThrowZxcError(env, static_cast<int>(r));
         }
+        // On success the library fills the whole range; slice defensively if
+        // fewer bytes were produced (napi buffers are uninitialized).
+        if (r == length) return out;
         return Napi::Buffer<uint8_t>::Copy(env, out.Data(), static_cast<size_t>(r));
     }
 
@@ -966,6 +1000,11 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
     }
 
     Napi::Value Close(const Napi::CallbackInfo& info) {
+        if (in_native_call_) {
+            Napi::Error::New(info.Env(), "cannot close Seekable from inside its readAt callback")
+                .ThrowAsJavaScriptException();
+            return info.Env().Undefined();
+        }
         if (s_) {
             zxc_seekable_free(s_);
             s_ = nullptr;
@@ -989,7 +1028,7 @@ static Napi::Value SeekTableSize(const Napi::CallbackInfo& info) {
 }
 
 // =============================================================================
-// writeSeekTable(compSizes: number[] | Uint32Array): Buffer
+// writeSeekTable(compSizes: number[]): Buffer
 // =============================================================================
 static Napi::Value WriteSeekTable(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
@@ -1023,6 +1062,9 @@ static Napi::Value WriteSeekTable(const Napi::CallbackInfo& info) {
     if (r < 0) {
         return ThrowZxcError(env, static_cast<int>(r));
     }
+    // On success the table fills the buffer exactly; slice only if it ever
+    // came back shorter (napi buffers are uninitialized past r).
+    if (static_cast<size_t>(r) == sz) return out;
     return Napi::Buffer<uint8_t>::Copy(env, out.Data(), static_cast<size_t>(r));
 }
 
@@ -1072,6 +1114,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("LEVEL_BALANCED", Napi::Number::New(env, ZXC_LEVEL_BALANCED));
     exports.Set("LEVEL_COMPACT", Napi::Number::New(env, ZXC_LEVEL_COMPACT));
     exports.Set("LEVEL_DENSITY", Napi::Number::New(env, ZXC_LEVEL_DENSITY));
+    exports.Set("LEVEL_ULTRA", Napi::Number::New(env, ZXC_LEVEL_ULTRA));
 
     // Error constants
     exports.Set("ERROR_MEMORY", Napi::Number::New(env, ZXC_ERROR_MEMORY));
@@ -1088,6 +1131,9 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("ERROR_NULL_INPUT", Napi::Number::New(env, ZXC_ERROR_NULL_INPUT));
     exports.Set("ERROR_BAD_BLOCK_TYPE", Napi::Number::New(env, ZXC_ERROR_BAD_BLOCK_TYPE));
     exports.Set("ERROR_BAD_BLOCK_SIZE", Napi::Number::New(env, ZXC_ERROR_BAD_BLOCK_SIZE));
+    exports.Set("ERROR_DICT_REQUIRED", Napi::Number::New(env, ZXC_ERROR_DICT_REQUIRED));
+    exports.Set("ERROR_DICT_MISMATCH", Napi::Number::New(env, ZXC_ERROR_DICT_MISMATCH));
+    exports.Set("ERROR_DICT_TOO_LARGE", Napi::Number::New(env, ZXC_ERROR_DICT_TOO_LARGE));
 
     return exports;
 }

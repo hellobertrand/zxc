@@ -57,7 +57,12 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer C.fclose(cOut)
+	outClosed := false
+	defer func() {
+		if !outClosed {
+			C.fclose(cOut)
+		}
+	}()
 
 	var copts C.zxc_compress_opts_t
 	copts.n_threads = C.int(o.threads)
@@ -70,11 +75,22 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 	}
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	setCompressDict(&copts, o, &pinner)
+	if err := setCompressDict(&copts, o, &pinner); err != nil {
+		return 0, err
+	}
 
 	result := C.zxc_stream_compress(cIn, cOut, &copts)
+
+	// fclose flushes the last stdio buffer of compressed output; a failure
+	// here (ENOSPC, EIO) means the archive tail never reached the OS, so it
+	// must be reported instead of being swallowed by a deferred close.
+	outClosed = true
+	closeRC := C.fclose(cOut)
 	if result < 0 {
 		return 0, errorFromCode(result)
+	}
+	if closeRC != 0 {
+		return 0, ErrIO
 	}
 	return int64(result), nil
 }
@@ -132,7 +148,12 @@ func DecompressFile(input, output string, opts ...Option) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer C.fclose(cOut)
+	outClosed := false
+	defer func() {
+		if !outClosed {
+			C.fclose(cOut)
+		}
+	}()
 
 	var dopts C.zxc_decompress_opts_t
 	dopts.n_threads = C.int(o.threads)
@@ -141,11 +162,20 @@ func DecompressFile(input, output string, opts ...Option) (int64, error) {
 	}
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	setDecompressDict(&dopts, o, &pinner)
+	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
+		return 0, err
+	}
 
 	result := C.zxc_stream_decompress(cIn, cOut, &dopts)
+
+	// See CompressFile: the fclose flush result is part of the success path.
+	outClosed = true
+	closeRC := C.fclose(cOut)
 	if result < 0 {
 		return 0, errorFromCode(result)
+	}
+	if closeRC != 0 {
+		return 0, ErrIO
 	}
 	return int64(result), nil
 }

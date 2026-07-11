@@ -13,6 +13,27 @@ LEVEL_FAST: int
 LEVEL_DEFAULT: int
 LEVEL_BALANCED: int
 LEVEL_COMPACT: int
+LEVEL_DENSITY: int
+LEVEL_ULTRA: int
+
+# ---------- error codes ----------
+ERROR_MEMORY: int
+ERROR_DST_TOO_SMALL: int
+ERROR_SRC_TOO_SMALL: int
+ERROR_BAD_MAGIC: int
+ERROR_BAD_VERSION: int
+ERROR_BAD_HEADER: int
+ERROR_BAD_CHECKSUM: int
+ERROR_CORRUPT_DATA: int
+ERROR_BAD_OFFSET: int
+ERROR_OVERFLOW: int
+ERROR_IO: int
+ERROR_NULL_INPUT: int
+ERROR_BAD_BLOCK_TYPE: int
+ERROR_BAD_BLOCK_SIZE: int
+ERROR_DICT_REQUIRED: int
+ERROR_DICT_MISMATCH: int
+ERROR_DICT_TOO_LARGE: int
 
 # ---------- types ----------
 class FileLike(Protocol):
@@ -152,7 +173,7 @@ class ZxcReader(_io.RawIOBase):
         buffer_size: int = 0,
     ) -> None: ...
     def readable(self) -> bool: ...
-    def readinto(self, b: bytearray) -> int: ...
+    def readinto(self, b: bytearray) -> Optional[int]: ...
     def close(self) -> None: ...
 
 class ZxcWriter(_io.RawIOBase):

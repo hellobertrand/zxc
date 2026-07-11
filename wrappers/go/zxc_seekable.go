@@ -10,7 +10,6 @@ package zxc
 /*
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
 #include "zxc_seekable.h"
 #include "zxc_stream.h"
@@ -34,6 +33,7 @@ import "C"
 
 import (
 	"io"
+	"runtime"
 	"runtime/cgo"
 	"unsafe"
 )
@@ -51,11 +51,11 @@ import (
 // from more than one goroutine concurrently.
 type Seekable struct {
 	ptr     *C.zxc_seekable
-	file    *C.FILE        // set when opened via Open
-	cbuf    unsafe.Pointer // C-owned copy of source bytes (OpenBytes)
-	dbuf    unsafe.Pointer // C-owned copy of the dictionary content (SetDict)
-	rhandle cgo.Handle     // valid when opened via OpenReader; zero otherwise
-	hasRH   bool           // true when rhandle is set (cgo.Handle 0 is itself valid)
+	file    *C.FILE // set when opened via Open
+	srcData []byte  // in-memory source (OpenBytes); pinned for the handle's life
+	pinner  runtime.Pinner
+	rhandle cgo.Handle // valid when opened via OpenReader; zero otherwise
+	hasRH   bool       // true when rhandle is set (cgo.Handle 0 is itself valid)
 }
 
 // Open opens a seekable archive from a file path.
@@ -88,26 +88,27 @@ func Open(path string) (*Seekable, error) {
 // OpenBytes opens a seekable archive from an in-memory buffer.
 //
 // The library requires the source buffer to remain valid for the lifetime
-// of the handle. To satisfy CGO pointer rules and avoid keeping a Go slice
-// pinned, OpenBytes copies the buffer into C-allocated memory. The copy is
-// freed by [Seekable.Close].
+// of the handle, so data is pinned (not copied) until [Seekable.Close] —
+// opening a large archive costs no extra memory. The caller must not
+// modify data while the handle is open.
 func OpenBytes(data []byte) (*Seekable, error) {
 	if len(data) == 0 {
 		return nil, ErrSrcTooSmall
 	}
 
-	cbuf := C.malloc(C.size_t(len(data)))
-	if cbuf == nil {
-		return nil, ErrMemory
-	}
-	C.memcpy(cbuf, unsafe.Pointer(&data[0]), C.size_t(len(data)))
+	// Pinning makes it legal for C to retain the pointer beyond the call
+	// (cgo pointer rules, Go >= 1.21) and keeps the backing array alive.
+	s := &Seekable{}
+	s.pinner.Pin(&data[0])
 
-	ptr := C.zxc_seekable_open(cbuf, C.size_t(len(data)))
+	ptr := C.zxc_seekable_open(unsafe.Pointer(&data[0]), C.size_t(len(data)))
 	if ptr == nil {
-		C.free(cbuf)
+		s.pinner.Unpin()
 		return nil, ErrInvalidData
 	}
-	return &Seekable{ptr: ptr, cbuf: cbuf}, nil
+	s.ptr = ptr
+	s.srcData = data
+	return s, nil
 }
 
 // OpenReader opens a seekable archive backed by a user-supplied
@@ -160,13 +161,9 @@ func (s *Seekable) Close() error {
 		C.fclose(s.file)
 		s.file = nil
 	}
-	if s.cbuf != nil {
-		C.free(s.cbuf)
-		s.cbuf = nil
-	}
-	if s.dbuf != nil {
-		C.free(s.dbuf)
-		s.dbuf = nil
+	if s.srcData != nil {
+		s.pinner.Unpin()
+		s.srcData = nil
 	}
 	if s.hasRH {
 		s.rhandle.Delete()
@@ -269,32 +266,22 @@ func (s *Seekable) SetDict(dict, hufLengths []byte) error {
 	if len(dict) == 0 {
 		return ErrSrcTooSmall
 	}
-
-	// Copy the buffers into C-owned memory for the duration of the call (the
-	// library makes its own internal copies; the cgo pointer-passing rules
-	// just forbid handing it Go memory containing Go pointers via the handle).
-	buf := C.malloc(C.size_t(len(dict) + len(hufLengths)))
-	if buf == nil {
-		return ErrMemory
+	if len(hufLengths) > 0 && len(hufLengths) != HufTableSize {
+		// The C library reads a fixed ZXC_HUF_TABLE_SIZE bytes from the table.
+		return ErrBadHufTable
 	}
-	C.memcpy(buf, unsafe.Pointer(&dict[0]), C.size_t(len(dict)))
+
+	// The library copies both buffers internally, so the Go pointers only
+	// need to stay valid for the duration of the call — passing them as
+	// direct call arguments satisfies the cgo pointer rules with no copy.
 	var huf unsafe.Pointer
 	if len(hufLengths) > 0 {
-		huf = unsafe.Add(buf, len(dict))
-		C.memcpy(huf, unsafe.Pointer(&hufLengths[0]), C.size_t(len(hufLengths)))
+		huf = unsafe.Pointer(&hufLengths[0])
 	}
-
-	rc := C.zxc_seekable_set_dict(s.ptr, buf, C.size_t(len(dict)), huf)
+	rc := C.zxc_seekable_set_dict(s.ptr, unsafe.Pointer(&dict[0]), C.size_t(len(dict)), huf)
 	if rc < 0 {
-		C.free(buf)
 		return errorFromCode(C.int64_t(rc))
 	}
-
-	// Replace any previously-set dictionary buffer.
-	if s.dbuf != nil {
-		C.free(s.dbuf)
-	}
-	s.dbuf = buf
 	return nil
 }
 

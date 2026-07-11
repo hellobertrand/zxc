@@ -60,6 +60,9 @@ pub struct Seekable {
 // SAFETY: the underlying handle is opaque and the library guarantees
 // per-handle thread affinity. `Send` is safe (move the handle to another
 // thread is fine); `Sync` is not (no concurrent calls on the same handle).
+// The reader stored behind `reader_ctx` is `Send` by construction:
+// `open_reader` requires `R: Send`, so moving the handle (and invoking
+// `read_at` from the destination thread) cannot race thread-bound state.
 unsafe impl Send for Seekable {}
 
 impl Seekable {
@@ -125,7 +128,7 @@ impl Seekable {
     ///
     /// Returns [`Error::InvalidData`] if the archive is not a valid
     /// seekable ZXC archive, or if any of the open-time reads fail.
-    pub fn open_reader<R: ReadAt + 'static>(reader: R) -> Result<Self> {
+    pub fn open_reader<R: ReadAt + Send + 'static>(reader: R) -> Result<Self> {
         // Heap-allocate the trait object so its address is stable across
         // the FFI boundary. The outer Box gives us a thin pointer to pass
         // as the C `ctx`.

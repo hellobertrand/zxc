@@ -6,7 +6,7 @@ High-performance lossless compression for the browser and Node.js via WebAssembl
 
 - **Buffer API**: Compress and decompress `Uint8Array` buffers
 - **Reusable Contexts**: Amortise allocation overhead across multiple operations
-- **All Levels**: Compression levels 1–5
+- **All Levels**: Compression levels 1–7
 - **Checksum Support**: Optional integrity verification
 - **Tiny Footprint**: ~60 KB `.wasm` file (scalar build, no SIMD)
 
@@ -51,7 +51,7 @@ Initialise the WASM module. Returns a frozen API object.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `level` | `number` | `3` | Compression level (1–5) |
+| `level` | `number` | `3` | Compression level (1–7) |
 | `checksum` | `boolean` | `false` | Enable integrity checksums |
 
 ### `zxc.decompress(data, opts?) -> Uint8Array`

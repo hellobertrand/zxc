@@ -23,7 +23,7 @@ describe('compress/decompress roundtrip', () => {
 
     for (const { name, data } of testCases) {
         test(`roundtrip: ${name}`, () => {
-            for (let level = zxc.LEVEL_FASTEST; level <= zxc.LEVEL_DENSITY; level++) {
+            for (let level = zxc.LEVEL_FASTEST; level <= zxc.LEVEL_ULTRA; level++) {
                 const compressed = zxc.compress(data, { level });
                 const size = zxc.getDecompressedSize(compressed);
                 const decompressed = zxc.decompress(compressed, { size });
@@ -38,6 +38,17 @@ describe('compress/decompress roundtrip', () => {
         const data = Buffer.from('auto size detection test'.repeat(100));
         const compressed = zxc.compress(data);
         const decompressed = zxc.decompress(compressed);
+
+        expect(decompressed.length).toBe(data.length);
+        expect(Buffer.compare(decompressed, data)).toBe(0);
+    });
+
+    test('oversized size hint returns exactly the real payload', () => {
+        // Regression: the full hint-sized buffer used to be returned, with an
+        // uninitialized (allocUnsafe) tail past the real decompressed size.
+        const data = Buffer.from('oversized hint test'.repeat(50));
+        const compressed = zxc.compress(data);
+        const decompressed = zxc.decompress(compressed, { size: data.length + 4096 });
 
         expect(decompressed.length).toBe(data.length);
         expect(Buffer.compare(decompressed, data)).toBe(0);
@@ -122,6 +133,7 @@ describe('constants', () => {
         expect(zxc.LEVEL_BALANCED).toBe(4);
         expect(zxc.LEVEL_COMPACT).toBe(5);
         expect(zxc.LEVEL_DENSITY).toBe(6);
+        expect(zxc.LEVEL_ULTRA).toBe(7);
     });
 });
 

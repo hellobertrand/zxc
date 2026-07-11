@@ -17,6 +17,7 @@ const LEVEL_DEFAULT  = native.LEVEL_DEFAULT;
 const LEVEL_BALANCED = native.LEVEL_BALANCED;
 const LEVEL_COMPACT  = native.LEVEL_COMPACT;
 const LEVEL_DENSITY  = native.LEVEL_DENSITY;
+const LEVEL_ULTRA    = native.LEVEL_ULTRA;
 
 // Re-export error constants
 const ERROR_MEMORY         = native.ERROR_MEMORY;
@@ -33,6 +34,9 @@ const ERROR_IO             = native.ERROR_IO;
 const ERROR_NULL_INPUT     = native.ERROR_NULL_INPUT;
 const ERROR_BAD_BLOCK_TYPE = native.ERROR_BAD_BLOCK_TYPE;
 const ERROR_BAD_BLOCK_SIZE = native.ERROR_BAD_BLOCK_SIZE;
+const ERROR_DICT_REQUIRED  = native.ERROR_DICT_REQUIRED;
+const ERROR_DICT_MISMATCH  = native.ERROR_DICT_MISMATCH;
+const ERROR_DICT_TOO_LARGE = native.ERROR_DICT_TOO_LARGE;
 
 /**
  * Returns the minimum supported compression level (currently 1).
@@ -43,7 +47,7 @@ function minLevel() {
 }
 
 /**
- * Returns the maximum supported compression level (currently 6).
+ * Returns the maximum supported compression level (currently 7).
  * @returns {number}
  */
 function maxLevel() {
@@ -304,7 +308,7 @@ function dictLoad(zxd) {
  *
  * @param {Buffer} data - Buffer to compress.
  * @param {object} [options] - Compression options.
- * @param {number} [options.level=LEVEL_DEFAULT] - Compression level (1-6).
+ * @param {number} [options.level=LEVEL_DEFAULT] - Compression level (1-7).
  * @param {boolean} [options.checksum=false] - Enable checksum verification.
  * @param {boolean} [options.seekable=false] - Enable seek table for random-access decompression.
  * @param {Buffer|Uint8Array} [options.dict] - Pre-trained dictionary content (raw bytes).
@@ -640,6 +644,7 @@ module.exports = {
     LEVEL_BALANCED,
     LEVEL_COMPACT,
     LEVEL_DENSITY,
+    LEVEL_ULTRA,
 
     // Error handling
     errorName,
@@ -657,4 +662,7 @@ module.exports = {
     ERROR_NULL_INPUT,
     ERROR_BAD_BLOCK_TYPE,
     ERROR_BAD_BLOCK_SIZE,
+    ERROR_DICT_REQUIRED,
+    ERROR_DICT_MISMATCH,
+    ERROR_DICT_TOO_LARGE,
 };

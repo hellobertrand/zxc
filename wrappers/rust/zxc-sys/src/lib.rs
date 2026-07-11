@@ -92,9 +92,13 @@ pub const ZXC_LEVEL_BALANCED: i32 = parse_i32(env!("ZXC_LEVEL_BALANCED"));
 /// High density. Best for storage/firmware/assets.
 pub const ZXC_LEVEL_COMPACT: i32 = parse_i32(env!("ZXC_LEVEL_COMPACT"));
 
-/// Maximum density: Huffman-coded literals on top of COMPACT,
-/// price-based optimal LZ77 parser. Slowest compression, best ratio.
+/// High density: Huffman-coded literals on top of COMPACT,
+/// price-based optimal LZ77 parser.
 pub const ZXC_LEVEL_DENSITY: i32 = parse_i32(env!("ZXC_LEVEL_DENSITY"));
+
+/// Maximum density: Huffman-coded literals *and* sequence tokens, deep parse.
+/// Slowest compression, best ratio (level 7 / ULTRA).
+pub const ZXC_LEVEL_ULTRA: i32 = parse_i32(env!("ZXC_LEVEL_ULTRA"));
 
 // =============================================================================
 // Error Codes
@@ -145,6 +149,15 @@ pub const ZXC_ERROR_BAD_BLOCK_TYPE: i32 = -13;
 /// Invalid block size
 pub const ZXC_ERROR_BAD_BLOCK_SIZE: i32 = -14;
 
+/// File requires a dictionary but none was provided
+pub const ZXC_ERROR_DICT_REQUIRED: i32 = -15;
+
+/// Provided dictionary ID does not match the file header
+pub const ZXC_ERROR_DICT_MISMATCH: i32 = -16;
+
+/// Dictionary exceeds maximum allowed size
+pub const ZXC_ERROR_DICT_TOO_LARGE: i32 = -17;
+
 // =============================================================================
 // Dictionary Constants
 // =============================================================================
@@ -169,7 +182,7 @@ pub const ZXC_HUF_TABLE_SIZE: usize = 128;
 pub struct zxc_compress_opts_t {
     /// Worker thread count (0 = auto-detect CPU cores).
     pub n_threads: c_int,
-    /// Compression level 1-6 (0 = default).
+    /// Compression level 1-7 (0 = default).
     pub level: c_int,
     /// Block size in bytes (0 = default 512 KB). Must be power of 2, 4 KB – 2 MB.
     pub block_size: usize,
@@ -266,7 +279,7 @@ unsafe extern "C" {
     /// Returns the minimum supported compression level (currently 1).
     pub fn zxc_min_level() -> c_int;
 
-    /// Returns the maximum supported compression level (currently 5).
+    /// Returns the maximum supported compression level (currently 7).
     pub fn zxc_max_level() -> c_int;
 
     /// Returns the default compression level (currently 3).
@@ -333,6 +346,34 @@ unsafe extern "C" {
     ///
     /// Original uncompressed size in bytes, or 0 if invalid.
     pub fn zxc_get_decompressed_size(src: *const c_void, src_size: usize) -> u64;
+
+    /// Returns the minimum single-buffer size for an in-place decompression.
+    ///
+    /// Reads `src`'s header and footer (no decoding) and returns the buffer
+    /// size `zxc_decompress_inplace` needs: decompressed size plus a
+    /// one-block and wild-copy safety margin.
+    ///
+    /// # Returns
+    ///
+    /// Required buffer size in bytes, or 0 if `src` is not a valid archive.
+    pub fn zxc_decompress_inplace_bound(src: *const c_void, src_size: usize) -> usize;
+
+    /// Decompresses in place inside a single caller-owned buffer.
+    ///
+    /// The compressed archive must sit flush-right in `buffer` (its last
+    /// `comp_size` bytes); decoding runs left-to-right into `buffer[0..]`.
+    /// `buffer_capacity` must be at least `zxc_decompress_inplace_bound`.
+    ///
+    /// # Returns
+    ///
+    /// Decompressed size (>0), 0 for an empty frame, or a negative error
+    /// code (`ZXC_ERROR_DST_TOO_SMALL` if the margin is missing).
+    pub fn zxc_decompress_inplace(
+        buffer: *mut c_void,
+        buffer_capacity: usize,
+        comp_size: usize,
+        opts: *const zxc_decompress_opts_t,
+    ) -> i64;
 
     /// Returns a human-readable name for the given error code.
     ///
@@ -623,6 +664,49 @@ unsafe extern "C" {
         dst_capacity: usize,
         opts: *const zxc_decompress_opts_t,
     ) -> i64;
+
+    /// Returns the exact byte count required by a static compression
+    /// workspace for the given `block_size` and `level`.
+    ///
+    /// # Returns
+    ///
+    /// Workspace size in bytes, or 0 if either argument is invalid.
+    pub fn zxc_static_cctx_workspace_size(block_size: usize, level: c_int) -> usize;
+
+    /// Initialises a compression context inside a caller-supplied workspace
+    /// (no heap allocation).
+    ///
+    /// # Safety
+    /// - `workspace` must be cache-line (64-byte) aligned, at least
+    ///   `zxc_static_cctx_workspace_size` bytes, and outlive the handle.
+    /// - `opts` must be non-null with `block_size` and `level` set.
+    /// - `zxc_free_cctx` is a no-op on the returned handle.
+    pub fn zxc_init_static_cctx(
+        workspace: *mut c_void,
+        workspace_size: usize,
+        opts: *const zxc_compress_opts_t,
+    ) -> *mut zxc_cctx;
+
+    /// Returns the exact byte count required by a static decompression
+    /// workspace for the given `block_size`.
+    ///
+    /// # Returns
+    ///
+    /// Workspace size in bytes, or 0 if `block_size` is invalid.
+    pub fn zxc_static_dctx_workspace_size(block_size: usize) -> usize;
+
+    /// Initialises a decompression context inside a caller-supplied
+    /// workspace (no heap allocation).
+    ///
+    /// # Safety
+    /// - `workspace` must be cache-line (64-byte) aligned, at least
+    ///   `zxc_static_dctx_workspace_size` bytes, and outlive the handle.
+    /// - `zxc_free_dctx` is a no-op on the returned handle.
+    pub fn zxc_init_static_dctx(
+        workspace: *mut c_void,
+        workspace_size: usize,
+        block_size: usize,
+    ) -> *mut zxc_dctx;
 }
 
 // =============================================================================
@@ -646,7 +730,7 @@ unsafe extern "C" {
     /// * `f_in` - Input file stream
     /// * `f_out` - Output file stream  
     /// * `n_threads` - Number of worker threads (0 = auto-detect CPU cores)
-    /// * `level` - Compression level (1-6)
+    /// * `level` - Compression level (1-7)
     /// * `checksum_enabled` - If non-zero, enables checksum verification
     ///
     /// # Returns
@@ -1085,6 +1169,7 @@ mod tests {
             ZXC_LEVEL_BALANCED,
             ZXC_LEVEL_COMPACT,
             ZXC_LEVEL_DENSITY,
+            ZXC_LEVEL_ULTRA,
         ] {
             unsafe {
                 let bound = zxc_compress_bound(input.len()) as usize;

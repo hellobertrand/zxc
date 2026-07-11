@@ -5,6 +5,8 @@ Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
 SPDX-License-Identifier: BSD-3-Clause
 """
 
+from __future__ import annotations
+
 import io as _io
 
 from ._zxc import (
@@ -55,6 +57,7 @@ from ._zxc import (
     LEVEL_BALANCED,
     LEVEL_COMPACT,
     LEVEL_DENSITY,
+    LEVEL_ULTRA,
     ERROR_MEMORY,
     ERROR_DST_TOO_SMALL,
     ERROR_SRC_TOO_SMALL,
@@ -69,6 +72,9 @@ from ._zxc import (
     ERROR_NULL_INPUT,
     ERROR_BAD_BLOCK_TYPE,
     ERROR_BAD_BLOCK_SIZE,
+    ERROR_DICT_REQUIRED,
+    ERROR_DICT_MISMATCH,
+    ERROR_DICT_TOO_LARGE,
 )
 
 try:
@@ -122,6 +128,7 @@ __all__ = [
     "LEVEL_BALANCED",
     "LEVEL_COMPACT",
     "LEVEL_DENSITY",
+    "LEVEL_ULTRA",
 
     # Error Constants
     "ERROR_MEMORY",
@@ -138,6 +145,9 @@ __all__ = [
     "ERROR_NULL_INPUT",
     "ERROR_BAD_BLOCK_TYPE",
     "ERROR_BAD_BLOCK_SIZE",
+    "ERROR_DICT_REQUIRED",
+    "ERROR_DICT_MISMATCH",
+    "ERROR_DICT_TOO_LARGE",
 ]
 
 def min_level() -> int:
@@ -146,7 +156,7 @@ def min_level() -> int:
 
 
 def max_level() -> int:
-    """Return the maximum supported compression level (currently 5)."""
+    """Return the maximum supported compression level (currently 7)."""
     return pyzxc_max_level()
 
 
@@ -325,7 +335,7 @@ def decompress(data, decompress_size=None, checksum=False, dict=None, dict_huf=N
 
     Args:
         data: Compressed bytes.
-        decompress_size: Expected size. If None, read from header (slower/safer).
+        decompress_size: Expected size. If None, read from the archive footer.
         checksum: If True, verify the checksum appended during compression.
         dict: Pre-trained dictionary content (bytes) required if the archive
             was compressed with one. Must match the dictionary ID stored in
@@ -354,6 +364,9 @@ def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False, 
         seekable: If True, append a seek table for random-access decompression.
         dict: Optional pre-trained dictionary content (bytes). The archive
             records its dictionary ID; decompression must supply the same dict.
+        dict_huf: Optional shared literal Huffman table (128 bytes) trained
+            alongside the dictionary; ignored without `dict`. The dictionary
+            ID binds the (dict, table) pair.
 
     Returns:
         Number of bytes written to `dst`.
@@ -424,7 +437,9 @@ class Seekable:
 
     Two construction modes:
 
-    **From bytes** (the buffer is copied internally)::
+    **From bytes** (zero-copy: the buffer is pinned, not copied — do not
+    mutate it while the handle is open; a ``bytearray`` source cannot be
+    resized until :meth:`close`)::
 
         with zxc.Seekable(compressed_bytes) as s:
             chunk = s.decompress_range(offset, length)
@@ -727,13 +742,12 @@ class ZxcReader(_io.RawIOBase):
             buffer_size = self._ds.in_size
         self._bufsize = buffer_size
         self._pending = b""    # decompressed bytes not yet returned
-        self._inbuf = b""      # compressed bytes pulled from src, not yet fed
         self._eof_src = False  # True once src.read() returned empty bytes
 
     def readable(self) -> bool:
         return True
 
-    def readinto(self, b) -> int:
+    def readinto(self, b) -> int | None:
         if self.closed:
             raise ValueError("I/O operation on closed reader")
         n_out = len(b)
@@ -743,15 +757,20 @@ class ZxcReader(_io.RawIOBase):
         while not self._pending:
             if self._ds.finished:
                 return 0
-            if not self._inbuf and not self._eof_src:
+            inbuf = b""
+            if not self._eof_src:
                 chunk = self._src.read(self._bufsize)
+                if chunk is None:
+                    # Non-blocking source with no data available right now
+                    # (RawIOBase semantics) — not EOF; propagate the "would
+                    # block" condition to the caller.
+                    return None
                 if not chunk:
                     self._eof_src = True
                 else:
-                    self._inbuf = chunk
+                    inbuf = chunk
 
-            produced = self._ds.decompress(self._inbuf)
-            self._inbuf = b""
+            produced = self._ds.decompress(inbuf)
             if produced:
                 self._pending = produced
                 break
@@ -810,7 +829,12 @@ class ZxcWriter(_io.RawIOBase):
         mv = memoryview(b)
         if mv.nbytes == 0:
             return 0
-        chunk = self._cs.compress(bytes(mv))
+        # The C layer accepts any C-contiguous buffer directly and copies it
+        # into its block accumulator, so no intermediate bytes() copy is
+        # needed here.
+        if not mv.c_contiguous:
+            mv = memoryview(bytes(mv))
+        chunk = self._cs.compress(mv)
         if chunk:
             self._dst.write(chunk)
         return mv.nbytes
