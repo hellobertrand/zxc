@@ -189,7 +189,7 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
     }
 
     // decompress_size is an upper bound from the caller: when fewer bytes
-    // were written, slice to the actual size — napi buffers are allocated
+    // were written, slice to the actual size; napi buffers are allocated
     // uninitialized, so returning the full-length buffer would expose stale
     // heap contents past nwritten.
     if (static_cast<size_t>(nwritten) == decompress_size) return dst_buf;
@@ -792,7 +792,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         }
 
         // Reader-callback form: { size: number, readAt: (buf, offset) => void }.
-        // Single-threaded only — the JS callback is invoked synchronously on
+        // Single-threaded only: the JS callback is invoked synchronously on
         // the calling thread.
         if (info[0].IsObject() && !info[0].IsBuffer()) {
             Napi::Object opts = info[0].As<Napi::Object>();
@@ -866,7 +866,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
     bool in_native_call_ = false;
 
     // C trampoline invoked by the library for every positional read against
-    // a user-supplied JS `readAt`. Always called on the V8 main thread —
+    // a user-supplied JS `readAt`. Always called on the V8 main thread,
     // never use this binding with the multi-threaded decompress_range_mt
     // entry point. The whole body is guarded: any C++ exception (from the
     // JS callback, buffer allocation, or env teardown) is swallowed and
@@ -887,7 +887,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
             if (!jsbuf.Data()) return ZXC_ERROR_IO;
             std::memcpy(dst, jsbuf.Data(), len);
             return static_cast<int64_t>(len);
-        } catch (...) {
+        } catch (const std::exception&) {
             return ZXC_ERROR_IO;
         }
     }

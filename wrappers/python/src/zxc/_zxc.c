@@ -347,7 +347,7 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
     return out;
 }
 
-static PyObject* pyzxc_get_decompressed_size(PyObject* self, PyObject* arg) {
+static PyObject* pyzxc_get_decompressed_size(const PyObject* self, PyObject* arg) {
     (void)self;
     Py_buffer view;
 
@@ -1070,7 +1070,7 @@ static PyObject* pyzxc_cstream_create(PyObject* self, PyObject* args, PyObject* 
         return NULL;
     }
     /* 0 = library default; otherwise must be a power of two in
-     * [ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX] — zxc_cstream_create returns
+     * [ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX]. zxc_cstream_create returns
      * NULL for invalid values, which must not surface as MemoryError. */
     if (block_size != 0 &&
         (block_size < (Py_ssize_t)ZXC_BLOCK_SIZE_MIN || block_size > (Py_ssize_t)ZXC_BLOCK_SIZE_MAX ||
@@ -1488,7 +1488,7 @@ static PyObject* pyzxc_seekable_open(PyObject* self, PyObject* arg) {
 
     /* The view pins the exporter (and, for a bytearray, blocks resizing)
      * for the handle's lifetime, so the library can reference the caller's
-     * buffer directly — no copy of the archive. */
+     * buffer directly: no copy of the archive. */
     zxc_seekable* s;
     Py_BEGIN_ALLOW_THREADS s = zxc_seekable_open(view.buf, (size_t)view.len);
     Py_END_ALLOW_THREADS
