@@ -403,7 +403,6 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->opt_scratch_cap = 0;
     ctx->dict_buffer_cap = 0;
     ctx->dict_size = 0;
-    ctx->dict_huf_lengths = NULL;
     ctx->dict_huf_tree_ok = 0;
     ctx->lit_freq_acc = NULL;
 }
@@ -411,9 +410,10 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
 /**
  * @brief Attach the shared dictionary literal Huffman table to a context.
  *
- * Validates the 128-byte packed code-lengths header and stores the pointer
- * (caller-owned, must outlive the context); the tree is (re)built from these
- * lengths at decode/estimate time, not here. A NULL @p lengths is a no-op.
+ * Validates the 128-byte packed code-lengths header and builds the dictionary's
+ * PivCo tree, canonical codes and code lengths ONCE into the context
+ * (tree-at-attach); per-block encode/estimate/decode reuse them. @p lengths need
+ * only be valid during this call (the tree is a copy). A NULL @p lengths is a no-op.
  *
  * @param[in,out] ctx      Initialised context to attach the table to.
  * @param[in]     lengths  128-byte packed code lengths, or NULL for a no-op.
@@ -422,7 +422,6 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  */
 int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT lengths) {
     if (UNLIKELY(!ctx)) return ZXC_ERROR_NULL_INPUT;
-    ctx->dict_huf_lengths = lengths;
     ctx->dict_huf_tree_ok = 0;
     if (lengths == NULL) return ZXC_OK;
 
@@ -434,20 +433,13 @@ int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT l
             break;
         }
     }
-    if (empty) {
-        ctx->dict_huf_lengths = NULL;
-        return ZXC_OK;
-    }
+    if (empty) return ZXC_OK; /* tree_ok stays 0: treated as "no shared table" */
 
     /* Tree-at-attach: unpack + build the PivCo tree and codes ONCE here; the
      * per-block encode/estimate/decode paths reuse them via the context. */
     const int rc = zxc_huf_dict_tree_build(lengths, &ctx->dict_huf_tree, ctx->dict_huf_codes,
                                            ctx->dict_huf_code_len);
-    if (UNLIKELY(rc != ZXC_OK)) {
-        ctx->dict_huf_lengths = NULL;
-        ctx->dict_huf_tree_ok = 0;
-        return rc;
-    }
+    if (UNLIKELY(rc != ZXC_OK)) return rc; /* tree_ok already 0 */
     ctx->dict_huf_tree_ok = 1;
     return ZXC_OK;
 }

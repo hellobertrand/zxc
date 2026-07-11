@@ -1529,32 +1529,30 @@ typedef struct {
     uint8_t* literals;       /**< Buffer for literal bytes. */
 
     /* Cold zone: configuration / scratch / resizeable. */
-    uint8_t* lit_buffer;             /**< Scratch buffer for literals (RLE / Huffman). */
-    size_t lit_buffer_cap;           /**< Current capacity of the scratch buffer. */
-    uint8_t* work_buf;               /**< Padded scratch buffer for buffer-API decompression. */
-    size_t work_buf_cap;             /**< Capacity of the work buffer. */
-    uint8_t* tok_buffer;             /**< Decode scratch for a Huffman-coded GLO token
-                                          section (enc_litlen == HUFFMAN); NULL on compress. */
-    size_t tok_buffer_cap;           /**< Capacity of tok_buffer in bytes. */
-    uint8_t* pivco_scratch;          /**< Level ping-pong scratch for PivCo decode. */
-    size_t pivco_scratch_cap;        /**< Capacity of pivco_scratch in bytes. */
-    uint8_t* opt_scratch;            /**< Optimal-parser DP scratch (level >= 6 only,
-                                          lazy-allocated, packs dp/parent_len/parent_off/actions).
-                                          Also reused as transient scratch for the
-                                          length-limited Huffman code-length builder. */
-    size_t opt_scratch_cap;          /**< Current capacity of opt_scratch in bytes. */
-    int checksum_enabled;            /**< 1 if checksum calculation/verification is enabled. */
-    int compression_level;           /**< Compression level. */
-    size_t dict_size;                /**< Dictionary prefill size (0 = no dictionary). */
-    uint8_t* dict_buffer;            /**< [dict | data] concat scratch carved from memory_block
-                                          when dict_size > 0 (NULL otherwise). */
-    size_t dict_buffer_cap;          /**< Capacity of dict_buffer in bytes (0 = none). */
-    const uint8_t* dict_huf_lengths; /**< Shared dictionary literal table: 128-byte
-                                          packed code-lengths header (NULL = none). Set via
-                                          zxc_cctx_attach_dict_huf; caller-owned memory. */
-    zxc_pivco_tree_t dict_huf_tree;  /**< Tree-at-attach: PivCo tree prebuilt from
-                                          dict_huf_lengths (valid iff dict_huf_tree_ok),
-                                          so per-block decode/estimate skip the rebuild. */
+    uint8_t* lit_buffer;            /**< Scratch buffer for literals (RLE / Huffman). */
+    size_t lit_buffer_cap;          /**< Current capacity of the scratch buffer. */
+    uint8_t* work_buf;              /**< Padded scratch buffer for buffer-API decompression. */
+    size_t work_buf_cap;            /**< Capacity of the work buffer. */
+    uint8_t* tok_buffer;            /**< Decode scratch for a Huffman-coded GLO token
+                                         section (enc_litlen == HUFFMAN); NULL on compress. */
+    size_t tok_buffer_cap;          /**< Capacity of tok_buffer in bytes. */
+    uint8_t* pivco_scratch;         /**< Level ping-pong scratch for PivCo decode. */
+    size_t pivco_scratch_cap;       /**< Capacity of pivco_scratch in bytes. */
+    uint8_t* opt_scratch;           /**< Optimal-parser DP scratch (level >= 6 only,
+                                         lazy-allocated, packs dp/parent_len/parent_off/actions).
+                                         Also reused as transient scratch for the
+                                         length-limited Huffman code-length builder. */
+    size_t opt_scratch_cap;         /**< Current capacity of opt_scratch in bytes. */
+    int checksum_enabled;           /**< 1 if checksum calculation/verification is enabled. */
+    int compression_level;          /**< Compression level. */
+    size_t dict_size;               /**< Dictionary prefill size (0 = no dictionary). */
+    uint8_t* dict_buffer;           /**< [dict | data] concat scratch carved from memory_block
+                                         when dict_size > 0 (NULL otherwise). */
+    size_t dict_buffer_cap;         /**< Capacity of dict_buffer in bytes (0 = none). */
+    zxc_pivco_tree_t dict_huf_tree; /**< Tree-at-attach: PivCo tree prebuilt from the
+                                         dictionary's 128-byte shared literal table by
+                                         zxc_cctx_attach_dict_huf (valid iff dict_huf_tree_ok),
+                                         so per-block decode/estimate skip the rebuild. */
     uint32_t dict_huf_codes[ZXC_HUF_NUM_SYMBOLS];   /**< Canonical codes of the dict table
                                           (encoder side), built with the tree at attach. */
     uint8_t dict_huf_code_len[ZXC_HUF_NUM_SYMBOLS]; /**< Unpacked dict code lengths (attach). */
