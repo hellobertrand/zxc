@@ -909,7 +909,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
     dp[0] = 0;
     ZXC_MEMSET(dp + 1, 0xFF, block_sz * sizeof(uint32_t));
-    ZXC_MEMSET(parent_len, 0, sz_pl + sz_po + sz_bm);
+    ZXC_MEMSET(match_end_bits, 0, sz_bm);
 
     /* Forward DP: visit every position, update reachable successors.
      * `skip_until` skips find_best_match at positions strictly inside the
@@ -1462,78 +1462,100 @@ parse_done:;
                 while (p <= p_end_4 - 64) {
                     const __m512i v0 = _mm512_loadu_si512((const void*)p);
                     const __m512i v1 = _mm512_loadu_si512((const void*)(p + 1));
-                    const __m512i v2 = _mm512_loadu_si512((const void*)(p + 2));
-                    const __m512i v3 = _mm512_loadu_si512((const void*)(p + 3));
-                    const __mmask64 mask = _mm512_cmpeq_epi8_mask(v0, v1) &
-                                           _mm512_cmpeq_epi8_mask(v1, v2) &
-                                           _mm512_cmpeq_epi8_mask(v2, v3);
-                    if (mask != 0) {
-                        p += (size_t)zxc_ctz64(mask);
-                        goto _lit_done;
+                    const uint64_t m = (uint64_t)_mm512_cmpeq_epi8_mask(v0, v1);
+                    const uint64_t mask = m & (m >> 1) & (m >> 2);
+                    if (LIKELY(mask == 0)) {
+                        p += 62;
+                        continue;
                     }
-                    p += 64;
+                    const unsigned rpos = (unsigned)zxc_ctz64(mask);
+                    const unsigned rpairs = (unsigned)zxc_ctz64(~(m >> rpos));
+                    if (UNLIKELY(rpos + rpairs >= 64)) {
+                        p += rpos;
+                        goto _lit_done; /* run may extend past the window */
+                    }
+                    const size_t seg = (size_t)(p + rpos - lit_start);
+                    rle_size += seg + ((seg + 127) >> 7);
+                    rle_size += 2; /* run in [4,63]: full_chunks=0, rem>=4 */
+                    p += rpos + rpairs + 1;
+                    lit_start = p;
                 }
 #elif defined(ZXC_USE_AVX2)
                 while (p <= p_end_4 - 32) {
                     __m256i v0 = _mm256_loadu_si256((const __m256i*)p);
                     __m256i v1 = _mm256_loadu_si256((const __m256i*)(p + 1));
-                    __m256i v2 = _mm256_loadu_si256((const __m256i*)(p + 2));
-                    __m256i v3 = _mm256_loadu_si256((const __m256i*)(p + 3));
-                    __m256i vend = _mm256_and_si256(
-                        _mm256_cmpeq_epi8(v0, v1),
-                        _mm256_and_si256(_mm256_cmpeq_epi8(v1, v2), _mm256_cmpeq_epi8(v2, v3)));
-                    uint32_t mask = (uint32_t)_mm256_movemask_epi8(vend);
-                    if (mask != 0) {
-                        p += zxc_ctz32(mask);
-                        goto _lit_done;
+                    const uint32_t m = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v0, v1));
+                    const uint32_t mask = m & (m >> 1) & (m >> 2);
+                    if (LIKELY(mask == 0)) {
+                        p += 30;
+                        continue;
                     }
-                    p += 32;
+                    const unsigned rpos = zxc_ctz32(mask);
+                    const unsigned rpairs = zxc_ctz32(~(m >> rpos));
+                    if (UNLIKELY(rpos + rpairs >= 32)) {
+                        p += rpos;
+                        goto _lit_done; /* run may extend past the window */
+                    }
+                    const size_t seg = (size_t)(p + rpos - lit_start);
+                    rle_size += seg + ((seg + 127) >> 7);
+                    rle_size += 2; /* run in [4,31]: full_chunks=0, rem>=4 */
+                    p += rpos + rpairs + 1;
+                    lit_start = p;
                 }
 #elif defined(ZXC_USE_SSE2)
                 while (p <= p_end_4 - 16) {
                     __m128i v0 = _mm_loadu_si128((const __m128i*)p);
                     __m128i v1 = _mm_loadu_si128((const __m128i*)(p + 1));
-                    __m128i v2 = _mm_loadu_si128((const __m128i*)(p + 2));
-                    __m128i v3 = _mm_loadu_si128((const __m128i*)(p + 3));
-                    __m128i vend = _mm_and_si128(
-                        _mm_cmpeq_epi8(v0, v1),
-                        _mm_and_si128(_mm_cmpeq_epi8(v1, v2), _mm_cmpeq_epi8(v2, v3)));
-                    uint32_t mask = (uint32_t)_mm_movemask_epi8(vend);
-                    if (mask != 0) {
-                        p += zxc_ctz32(mask);
-                        goto _lit_done;
+                    const uint32_t m = (uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(v0, v1));
+                    const uint32_t mask = m & (m >> 1) & (m >> 2);
+                    if (LIKELY(mask == 0)) {
+                        p += 14;
+                        continue;
                     }
-                    p += 16;
+                    const unsigned rpos = zxc_ctz32(mask);
+                    const unsigned rpairs = zxc_ctz32(~(m >> rpos));
+                    if (UNLIKELY(rpos + rpairs >= 16)) {
+                        p += rpos;
+                        goto _lit_done; /* run may extend past the window */
+                    }
+                    const size_t seg = (size_t)(p + rpos - lit_start);
+                    rle_size += seg + ((seg + 127) >> 7);
+                    rle_size += 2; /* run in [4,16]: full_chunks=0, rem>=4 */
+                    p += rpos + rpairs + 1;
+                    lit_start = p;
                 }
 #elif defined(ZXC_USE_NEON64)
                 while (p <= p_end_4 - 16) {
                     uint8x16_t v0 = vld1q_u8(p);
                     uint8x16_t v1 = vld1q_u8(p + 1);
-                    uint8x16_t v2 = vld1q_u8(p + 2);
-                    uint8x16_t v3 = vld1q_u8(p + 3);
-                    uint8x16_t eq =
-                        vandq_u8(vceqq_u8(v0, v1), vandq_u8(vceqq_u8(v1, v2), vceqq_u8(v2, v3)));
-                    /* Dual of the run scan: searching for the FIRST set
-                     * nibble (a position where 4 consecutive bytes match).
-                     * mask == 0 means no break found in this 16-byte
-                     * window. Same SHRN compression as elsewhere. */
-                    const uint64_t mask = vget_lane_u64(
+                    const uint8x16_t eq = vceqq_u8(v0, v1);
+                    const uint64_t m = vget_lane_u64(
                         vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
+                    const uint64_t mask = m & (m >> 4) & (m >> 8);
                     if (LIKELY(mask == 0)) {
-                        p += 16;
-                    } else {
-                        p += (size_t)(zxc_ctz64(mask) >> 2);
-                        goto _lit_done;
+                        p += 14;
+                        continue;
                     }
+                    const unsigned rpos = (unsigned)(zxc_ctz64(mask) >> 2);
+                    const unsigned rpairs = (unsigned)(zxc_ctz64(~(m >> (rpos * 4))) >> 2);
+                    if (UNLIKELY(rpos + rpairs >= 16)) {
+                        p += rpos;
+                        goto _lit_done; /* run may extend past the window */
+                    }
+                    const size_t seg = (size_t)(p + rpos - lit_start);
+                    rle_size += seg + ((seg + 127) >> 7);
+                    rle_size += 2; /* run in [4,16]: full_chunks=0, rem>=4 */
+                    p += rpos + rpairs + 1;
+                    lit_start = p;
                 }
 #elif defined(ZXC_USE_NEON32)
                 while (p <= p_end_4 - 16) {
                     uint8x16_t v0 = vld1q_u8(p);
                     uint8x16_t v1 = vld1q_u8(p + 1);
-                    uint8x16_t v2 = vld1q_u8(p + 2);
-                    uint8x16_t v3 = vld1q_u8(p + 3);
-                    uint8x16_t eq =
-                        vandq_u8(vceqq_u8(v0, v1), vandq_u8(vceqq_u8(v1, v2), vceqq_u8(v2, v3)));
+                    const uint8x16_t pe = vceqq_u8(v0, v1);
+                    const uint8x16_t zv = vdupq_n_u8(0);
+                    const uint8x16_t eq =
+                        vandq_u8(pe, vandq_u8(vextq_u8(pe, zv, 1), vextq_u8(pe, zv, 2)));
 
                     uint32x4_t eq32 = vreinterpretq_u32_u8(eq);
                     uint32_t l0 = vgetq_lane_u32(eq32, 0);
@@ -1553,7 +1575,7 @@ parse_done:;
                         p += 8 + (zxc_ctz64(hi) >> 3);
                         goto _lit_done;
                     }
-                    p += 16;
+                    p += 14;
                 }
 #endif
                 while (p < p_end_4) {

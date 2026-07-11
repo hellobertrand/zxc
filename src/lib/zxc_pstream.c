@@ -159,21 +159,25 @@ static int cs_set_error(zxc_cstream* cs, const int code) {
 }
 
 /**
- * @brief Compresses one full or partial accumulated block.
+ * @brief Compresses one block from @p src into @c cs->pending.
  *
- * Compresses the contents of @c cs->in_block into @c cs->pending, growing
- * the latter to @ref zxc_compress_block_bound if needed, and updates
- * bookkeeping (@c total_in, @c global_hash, @c in_used reset to 0).  When
- * file-level checksums are enabled, folds the block trailer into the
- * rolling @c global_hash.
+ * Grows @c pending to @ref zxc_compress_block_bound if needed and updates
+ * bookkeeping (@c total_in, @c global_hash).  When file-level checksums are
+ * enabled, folds the block trailer into the rolling @c global_hash.
+ * @p src is either the @c in_block accumulator (via
+ * @ref cs_compress_one_block) or the caller's input buffer directly (the
+ * full-block fast path in @ref zxc_cstream_compress, which skips the
+ * staging memcpy).
  *
- * @pre @c cs->in_used > 0.
+ * @pre @c len > 0.
  *
- * @param[in,out] cs Compression stream.
+ * @param[in,out] cs  Compression stream.
+ * @param[in]     src Block bytes to compress (only [src, src+len) is read).
+ * @param[in]     len Block length in bytes.
  * @return @ref ZXC_OK on success, negative @ref zxc_error_t on failure.
  */
-static int cs_compress_one_block(zxc_cstream* cs) {
-    const uint64_t bound = zxc_compress_block_bound(cs->in_used);
+static int cs_compress_block_from(zxc_cstream* cs, const uint8_t* RESTRICT src, const size_t len) {
+    const uint64_t bound = zxc_compress_block_bound(len);
     // LCOV_EXCL_START
     if (UNLIKELY(bound == 0 || bound > SIZE_MAX)) return ZXC_ERROR_OVERFLOW;
     if (UNLIKELY(bound > cs->pending_cap)) {
@@ -183,14 +187,13 @@ static int cs_compress_one_block(zxc_cstream* cs) {
         cs->pending_cap = (size_t)bound;
     }
     // LCOV_EXCL_STOP
-    const int64_t csize = zxc_compress_block(cs->cctx, cs->in_block, cs->in_used, cs->pending,
-                                             cs->pending_cap, &cs->opts);
+    const int64_t csize =
+        zxc_compress_block(cs->cctx, src, len, cs->pending, cs->pending_cap, &cs->opts);
     if (UNLIKELY(csize < 0)) return (int)csize;  // LCOV_EXCL_LINE
 
     cs->pending_len = (size_t)csize;
     cs->pending_pos = 0;
-    cs->total_in += cs->in_used;
-    cs->in_used = 0;
+    cs->total_in += len;
 
     /* If checksums are on, the block trailer is the last ZXC_BLOCK_CHECKSUM_SIZE
      * bytes of pending; fold it into the rolling global hash. */
@@ -199,6 +202,25 @@ static int cs_compress_one_block(zxc_cstream* cs) {
         cs->global_hash = zxc_hash_combine_rotate(cs->global_hash, bh);
     }
     return ZXC_OK;
+}
+
+/**
+ * @brief Compresses the accumulated (full or partial) block.
+ *
+ * Convenience wrapper around @ref cs_compress_block_from for the staging
+ * path: compresses @c cs->in_block[0..in_used) into @c cs->pending and, on
+ * success, resets @c in_used to 0 so the accumulator is ready for the next
+ * block.  On failure the accumulator is left untouched.
+ *
+ * @pre @c cs->in_used > 0.
+ *
+ * @param[in,out] cs Compression stream.
+ * @return @ref ZXC_OK on success, negative @ref zxc_error_t on failure.
+ */
+static int cs_compress_one_block(zxc_cstream* cs) {
+    const int rc = cs_compress_block_from(cs, cs->in_block, cs->in_used);
+    if (LIKELY(rc == ZXC_OK)) cs->in_used = 0;
+    return rc;
 }
 
 /**
@@ -445,6 +467,15 @@ int64_t zxc_cstream_compress(zxc_cstream* cs, zxc_outbuf_t* out, zxc_inbuf_t* in
 
             case CS_ACCUMULATE: {
                 const size_t avail_in = in->size - in->pos;
+                if (cs->in_used == 0 && avail_in >= cs->block_size) {
+                    const int rc = cs_compress_block_from(cs, (const uint8_t*)in->src + in->pos,
+                                                          cs->block_size);
+                    if (UNLIKELY(rc < 0)) return cs_set_error(cs, rc);  // LCOV_EXCL_LINE
+                    in->pos += cs->block_size;
+                    cs->state = CS_DRAIN_BLOCK;
+                    break;
+                }
+
                 const size_t room = cs->block_size - cs->in_used;
                 const size_t n = avail_in < room ? avail_in : room;
                 if (n) {
@@ -1045,11 +1076,11 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             }
 
             case DS_DECODE_BLOCK: {
+                const int direct = (out->size - out->pos) >= ds->decoded_cap;
+                uint8_t* const ddst = direct ? (uint8_t*)out->dst + out->pos : ds->decoded;
                 const int dsz = zxc_decompress_chunk_wrapper(
-                    &ds->inner, ds->payload, ds->payload_used, ds->decoded, ds->decoded_cap);
+                    &ds->inner, ds->payload, ds->payload_used, ddst, ds->decoded_cap);
                 if (UNLIKELY(dsz < 0)) return ds_set_error(ds, dsz);
-                ds->decoded_size = (size_t)dsz;
-                ds->decoded_pos = 0;
 
                 /* If file-level checksum verification is enabled, fold this
                  * block's trailer into the rolling global hash (last
@@ -1060,6 +1091,21 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                         zxc_le32(ds->payload + ds->payload_used - ZXC_BLOCK_CHECKSUM_SIZE);
                     ds->global_hash = zxc_hash_combine_rotate(ds->global_hash, bh);
                 }
+
+                if (direct) {
+                    out->pos += (size_t)dsz;
+                    produced += (size_t)dsz;
+                    ds->total_out += (size_t)dsz;
+                    ds->decoded_size = 0;
+                    ds->decoded_pos = 0;
+                    ds->state = DS_NEED_BLOCK_HEADER;
+                    ds->scratch_used = 0;
+                    ds->scratch_need = ZXC_BLOCK_HEADER_SIZE;
+                    break;
+                }
+
+                ds->decoded_size = (size_t)dsz;
+                ds->decoded_pos = 0;
                 ds->state = DS_EMIT_DECODED;
                 break;
             }
