@@ -759,9 +759,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sEXPORTED_FUNCTIONS=[${ZXC_WASM_EXPORTS_STR}]"
         "-sEXPORTED_RUNTIME_METHODS=[ccall,cwrap,UTF8ToString,getTempRet0,HEAPU8,HEAP32,HEAPU32]"
         "-sMODULARIZE=1"
-        # ES6 output: the npm package is "type": "module", so a CJS zxc.js
-        # would expose no factory through `import` (broken default loading
-        # path of createZXC()).
         "-sEXPORT_ES6=1"
         "-sEXPORT_NAME=ZXCModule"
         "-sALLOW_MEMORY_GROWTH=1"

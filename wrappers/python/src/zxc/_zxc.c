@@ -347,7 +347,7 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
     return out;
 }
 
-static PyObject* pyzxc_get_decompressed_size(const PyObject* self, PyObject* arg) {
+static PyObject* pyzxc_get_decompressed_size(PyObject* self, PyObject* arg) {
     (void)self;
     Py_buffer view;
 
