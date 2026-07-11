@@ -147,7 +147,7 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
 
     /* Tree-at-attach: prebuild the shared table's tree/codes once, as
      * zxc_cctx_attach_dict_huf does; the dict codec entry points take it. */
-    static zxc_pivco_tree_t tree;
+    zxc_pivco_tree_t tree;
     uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
     uint8_t tree_len[ZXC_HUF_NUM_SYMBOLS];
     if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len) != ZXC_OK ||
@@ -264,7 +264,7 @@ int test_huffman_codec_dict() {
         buf[100] = '!'; /* unseen in training: no code assigned */
         freq['!']++;    /* keep the histogram in sync with the mutated buffer */
         uint8_t enc[1024];
-        static zxc_pivco_tree_t tree;
+        zxc_pivco_tree_t tree;
         uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
         uint8_t packed[ZXC_HUF_TABLE_SIZE];
         uint8_t tree_len[ZXC_HUF_NUM_SYMBOLS];
