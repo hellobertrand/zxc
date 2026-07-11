@@ -585,7 +585,7 @@ static void zxc_progress_clear(size_t len) {
 static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total,
                                   const void* user_data) {
     (void)bytes_total; /* required by zxc_progress_callback_t */
-    progress_ctx_t* const pctx = (progress_ctx_t*)user_data;
+    progress_ctx_t* const pctx = (progress_ctx_t*)(uintptr_t)user_data;
 
     if (!pctx) return;
 
@@ -616,7 +616,14 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
         enum { BAR_WIDTH = 20 };
         char bar[BAR_WIDTH + 1];
         const int filled = (percent * BAR_WIDTH) / 100;
-        for (int i = 0; i < BAR_WIDTH; i++) bar[i] = (i < filled) ? '=' : (i == filled) ? '>' : ' ';
+        for (int i = 0; i < BAR_WIDTH; i++) {
+            if (i < filled)
+                bar[i] = '=';
+            else if (i == filled)
+                bar[i] = '>';
+            else
+                bar[i] = ' ';
+        }
         bar[BAR_WIDTH] = '\0';
 
         // Estimated time to completion, from the cumulative throughput
@@ -1357,11 +1364,11 @@ int main(int argc, char** argv) {
                 mode = MODE_TRAIN_DICT;
                 break;
             case OPT_PROGRESS:
-                if (strcmp(optarg, "auto") == 0)
+                if (optarg != NULL && strcmp(optarg, "auto") == 0)
                     g_progress_mode = ZXC_PROGRESS_AUTO;
-                else if (strcmp(optarg, "always") == 0)
+                else if (optarg != NULL && strcmp(optarg, "always") == 0)
                     g_progress_mode = ZXC_PROGRESS_ALWAYS;
-                else if (strcmp(optarg, "never") == 0)
+                else if (optarg != NULL && strcmp(optarg, "never") == 0)
                     g_progress_mode = ZXC_PROGRESS_NEVER;
                 else {
                     fprintf(stderr, "Error: --progress must be 'auto', 'always' or 'never'\n");
