@@ -92,6 +92,9 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **-j**, **--json**
 : Output results in JSON format. This is particularly useful for scripting, benchmarking, and the `--list` mode.
 
+**--progress** *MODE*
+: Control the progress display: **auto** (default) shows a progress bar on the standard error stream when it is a terminal and the file is larger than 1 MB; **always** forces progress reporting even when standard error is not a terminal (updates are then printed one per line, at most once per second) or when the size is unknown (stdin input); **never** disables it. **-q** suppresses progress regardless of this option.
+
 ## SPECIAL OPTIONS
 
 **-V**, **--version**
