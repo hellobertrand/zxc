@@ -1,10 +1,10 @@
 # ZXC Compressed File Format (Technical Specification)
 
 **Date**: June 2026
-**Format Version**: 6
+**Format Version**: 7
 
 This document describes the on-disk binary format of a ZXC compressed file.
-It formalizes the current reference implementation of format version **6**.
+It formalizes the current reference implementation of format version **7**.
 
 ## 1. Conventions
 
@@ -54,7 +54,7 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): currently `6`.
+- **Format Version** (`u8`): `7`. Any other value is rejected (`ZXC_ERROR_BAD_VERSION`);
 - **Chunk Size Code** (`u8`):
   - The value is an **exponent** in the range `[12, 21]`: `block_size = 2^code`.
     - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
@@ -151,9 +151,9 @@ General LZ-style format with separated streams.
 Offset  Size  Field
 0x00    4     n_sequences (u32)
 0x04    4     n_literals (u32)
-0x08    1     enc_lit   (0=RAW, 1=RLE, 2=HUFFMAN, 3=HUFFMAN_DICT)
-0x09    1     enc_litlen (reserved)
-0x0A    1     enc_mlen   (reserved)
+0x08    1     enc_lit    (0=RAW, 1=RLE, 2=HUFFMAN, 3=HUFFMAN_DICT)
+0x09    1     enc_litlen (0=RAW tokens, 2=HUFFMAN tokens; level 7 only)
+0x0A    1     enc_mlen   (reserved; match lengths share the token byte)
 0x0B    1     enc_off    (0=16-bit offsets, 1=8-bit offsets)
 0x0C    4     reserved
 ```
@@ -175,13 +175,19 @@ Section order:
 - **Literals stream**:
   - raw literal bytes if `enc_lit=0`, or
   - RLE tokenized if `enc_lit=1`, or
-  - Huffman-coded if `enc_lit=2` (see [§ 5.2.1 Huffman literal section](#521-huffman-literal-section)), or
-  - Huffman-coded with the dictionary's shared table if `enc_lit=3`
-    (see [§ 5.2.2 Shared-table Huffman literal section](#522-shared-table-huffman-literal-section);
-    dictionary-compressed archives only).
+  - Huffman-coded if `enc_lit=2`
+    (see [§ 5.2.1 Huffman literal section](#521-huffman-literal-section)), or
+  - Huffman-coded with the dictionary's shared code lengths if
+    `enc_lit=3` (dictionary-compressed archives only; same section layout,
+    no inline lengths header).
 - **Tokens stream**:
-  - one byte per sequence: `(LL << 4) | ML`.
-  - `LL` and `ML` are 4-bit fields.
+  - one byte per sequence: `(LL << 4) | ML`, `LL` and `ML` being 4-bit fields.
+  - if `enc_litlen=0` (all levels ≤ 6), these `n_sequences` bytes are stored
+    verbatim and the Tokens section's compressed size equals `n_sequences`.
+  - if `enc_litlen=2` (level 7 only), the token bytes are Huffman-coded
+    over the token alphabet using the exact § 5.2.1 layout (inline 128-byte
+    lengths header included); the section's compressed size is the encoded
+    payload size and the decoder expands it back to `n_sequences` bytes.
 - **Offsets stream**:
   - `n_sequences × 1` byte if `enc_off=1`, else `n_sequences × 2` bytes LE.
   - Values are **biased**: stored value = `actual_offset - 1`. Decoder adds `+ 1`.
@@ -194,65 +200,96 @@ Section order:
 
 ### 5.2.1 Huffman literal section
 
-Selected by the encoder only at compression level ≥ 6, only when at least
-`ZXC_HUF_MIN_LITERALS = 1024` literals are present, and only when the Huffman
-payload is at least ~3 % smaller than the corresponding RAW or RLE encoding of
-the same literals. Any block where the heuristic does not pick HUFFMAN keeps
-`enc_lit ∈ {0, 1}`.
-
-The Huffman literal section payload is structured as follows:
+`enc_lit=2` carries a length-limited **canonical Huffman code** over the
+literal bytes. The bits are placed on the wire with the **PivCo layout**
+(level-ordered Huffman, after
+[Giesen 2026](https://fgiesen.wordpress.com/2026/06/21/pivco-huffman-merge-operations/)):
+the encoding is ordinary Huffman — same code lengths, same code bits, same
+size — and PivCo only reorders those bits, grouping them by TREE LEVEL rather
+than by symbol so decoding runs data-parallel list merges instead of a serial
+bit chain.
 
 ```text
 Offset  Size  Field
-0x00    128   Code-length header
-              256 × 4-bit code lengths, packed two-per-byte (low nibble first).
-              code_len[i] ∈ [0, 8] (0 means symbol absent).
-0x80    6     Sub-stream sizes
-              s1, s2, s3 as little-endian u16 (size of streams 0, 1, 2 in bytes).
-              The size of stream 3 is implied: s4 = total_payload_size - 134 - s1 - s2 - s3.
-0x86    var   Stream 0 bit-stream (s1 bytes, LSB-first)
-        var   Stream 1 bit-stream (s2 bytes)
-        var   Stream 2 bit-stream (s3 bytes)
-        var   Stream 3 bit-stream (s4 bytes)
+0x00    128   256 x 4-bit code lengths, packed two-per-byte (low nibble first).
+              code_len[i] in [0, 11] (0 means symbol absent).
+0x80    var   One run per EMITTING node of the canonical code tree, in BFS
+              order (parents before children, left before right). Runs are
+              LSB-first within bytes and each run is padded to a byte
+              boundary. Emitting nodes and run contents are defined below.
 ```
 
-Codes are canonical, length-limited at `L = 8`, emitted **LSB-first**.
-The `n_literals` value from the GLO header is split into 4 contiguous regions
-of size `Q = ceil(n_literals / 4)` (the last region may be shorter), each
-encoded into its own bit-stream so that 4 decoders can run in parallel.
+**Canonical code.** Codes are length-limited at `L = 11` bits (levels ≤ 6
+never emit codes longer than 8; level 7 / ULTRA may emit up to 11). Symbols
+are ordered by `(code_len, symbol)` and assigned consecutive code values in
+that order, starting at 0 and left-shifting when the length increases — the
+standard canonical construction. The **code tree** is the binary trie of
+these codewords read MSB-first: at depth `d`, a codeword's bit `code_len-1-d`
+selects the left (0) or right (1) child. The Kraft equality (validated below)
+makes this trie complete: every internal node has exactly two children.
 
-The decoder reconstructs the canonical code table from the 128-byte length
-header, validates the Kraft equality, and decodes each sub-stream into its
-output region. See [WHITEPAPER §5.7](WHITEPAPER.md) for the multi-symbol
-2048-entry lookup table strategy used on the decode hot path.
+**Emitting nodes and flat subtrees.** Both sides derive, from the code
+lengths alone, the set of *flat roots*: an internal node is a flat root iff
+
+1. it is not itself inside another flat subtree (BFS order resolves this:
+   parents are classified first), and
+2. every leaf below it sits at the same relative depth `D`, and
+3. `D == 2`, `D == 4`, or `D >= 7`.
+
+(Completeness of the trie makes condition 2 imply a perfect binary subtree of
+`2^D` leaves. The depth set {2, 4, ≥7} is a fixed format rule: those are the
+shapes where direct code unpacking beats the level-merge cascade in the
+reference decoder.)
+
+Every internal node that is neither a flat root nor a descendant of one is a
+**bitmap node**: its run holds one branch bit per symbol routed through it,
+in symbol-sequence order (0 = left child, 1 = right child). A **flat root**'s
+run instead holds `D` packed bits per symbol routed through it, in symbol
+sequence order: bit `j` (bit 0 first) is the branch taken at relative depth
+`j` below the flat root. Strict descendants of a flat root emit **no run at
+all** — they are skipped in the BFS enumeration.
+
+**Derived sizes.** There is no stored size field of any kind: the root
+handles `n_literals` symbols, the popcount of a bitmap node's bits equals its
+right child's symbol count, and a flat root consuming `c` symbols occupies
+exactly `ceil(c*D/8)` bytes, so every run length is derived while walking the
+BFS order once.
+
+Selection is an encoder policy, not a format rule: the reference encoder
+requires level ≥ 6 and at least 1024 literals, prices every candidate
+(RAW / RLE / Huffman / shared-table Huffman) as
+`J = size + premium(level) * n_decoded_bytes`, and picks the minimum — a
+space-speed Lagrangian with a per-level decode-time premium.
 
 Decoder validation requirements:
-- Every code length must satisfy `code_len[i] ≤ 8`.
+- Every code length must satisfy `code_len[i] ≤ 11`.
 - At least one symbol must be present (`code_len[i] != 0` for some `i`).
-- The Kraft sum `Σ 2^(8 − code_len[i])` over present symbols must equal `2^8`,
-  except for the single-present-symbol degenerate case where exactly one
-  symbol has `code_len = 1` and the Kraft sum is `2^7`.
+- The Kraft sum `Σ 2^(11 − code_len[i])` over present symbols must equal
+  `2^11`, except for the single-present-symbol degenerate case where exactly
+  one symbol has `code_len = 1` and the Kraft sum is `2^10`.
+- Every node's run (bitmap or flat) must lie within the section payload.
+- A popcount that routes symbols to an absent child is a corruption error.
 - A failure on any of the above results in `ZXC_ERROR_CORRUPT_DATA`.
 
 ### 5.2.2 Shared-table Huffman literal section
 
 `enc_lit=3` is only valid in archives compressed with a dictionary
-(`HAS_DICTIONARY` set). The bit-stream layout is identical to § 5.2.1 except
-that the **128-byte code-length header is omitted**: the code lengths come from
-the shared literal table carried by the `.zxd` dictionary (see § 12.4). The
-section payload therefore starts directly at the 6-byte sub-stream sizes
-header, and `s4 = total_payload_size - 6 - s1 - s2 - s3`.
-
-The shared table is trained on the corpus' post-LZ literal distribution and
-covers only the symbols seen in training; the encoder falls back to a
-per-block table (`enc_lit=2`) or RAW/RLE for any block containing a literal
-byte without a code. Decoders build the decode table once per context from the
-dictionary's table (same validation rules as § 5.2.1) and **MUST** reject
+(`HAS_DICTIONARY` set): the payload is the same Huffman/PivCo section as
+§ 5.2.1 with the 128-byte lengths header **omitted** — the code lengths come
+from the shared literal
+table carried by the `.zxd` dictionary (see § 12.4), validated once when the
+dictionary is attached (same rules as § 5.2.1). Decoders **MUST** reject
 `enc_lit=3` sections with `ZXC_ERROR_DICT_REQUIRED` when no dictionary table
 is attached. The archive's `dict_id` binds the (content, table) pair, so a
 matching table is guaranteed present whenever the dictionary check passed.
 
----
+The shared table is trained on the corpus' post-LZ literal distribution and
+covers only the symbols seen in training; the encoder falls back to a
+per-block table (`enc_lit=2`) or RAW/RLE for any block containing a literal
+byte without a code.
+
+The level-7 token section reuses the § 5.2.1 layout (`enc_litlen=2`, with the
+inline lengths header) over the token byte alphabet.
 
 ## 5.3 GHI block (`type=2`)
 
@@ -483,10 +520,11 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 
 ### 10.4 Minimum conforming decoder
 
-A minimal conforming decoder for version 6 **MUST** support:
-- File header parsing and CRC16 validation.
+A minimal conforming decoder for version 7 **MUST** support:
+- File header parsing and CRC16 validation
 - **RAW** blocks (type 0) - passthrough copy.
-- **GLO** blocks (type 1) - full LZ decode with extras varint.
+- **GLO** blocks (type 1) - full LZ decode with extras varint, including Huffman
+  entropy sections (§5.2.1, PivCo layout) with code lengths up to 11 bits.
 - **GHI** blocks (type 2) - full LZ decode with extras varint.
 - **EOF** block (type 255) - stream termination.
 - File footer validation (source size check).
@@ -676,7 +714,7 @@ Generated archive size: **58 bytes**.
 ### 14.1 Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 05 13 80 00 00 00 00 00 00 00 B8 90
+00000000: F5 2E B0 9C 07 13 80 00 00 00 00 00 00 00 3E 5D
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
@@ -687,15 +725,15 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 06 | 13 | 80 | 00 00 00 00 00 00 00 | FD 3B
+F5 2E B0 9C | 07 | 13 | 80 | 00 00 00 00 00 00 00 | 3E 5D
 ```
 
 - `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
-- `06` -> format version 6.
+- `07` -> format version 7.
 - `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
 - `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `B8 90` -> header CRC16.
+- `3E 5D` -> header CRC16 (LE value `0x5D3E`).
 
 #### B) Data Block #0 (RAW)
 
@@ -776,7 +814,7 @@ Generated archive size: **70 bytes** (12 bytes larger than the non-seekable vari
 #### Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 05 13 80 00 00 00 00 00 00 00 B8 90
+00000000: F5 2E B0 9C 07 13 80 00 00 00 00 00 00 00 3E 5D
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
 00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00

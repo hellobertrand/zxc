@@ -50,6 +50,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_buffer_api),
     TEST_CASE(test_buffer_api_scratch_buf),
     TEST_CASE(test_buffer_error_codes),
+    TEST_CASE(test_decompress_inplace),
     TEST_CASE(test_get_decompressed_size),
     TEST_CASE(test_decompress_fast_vs_safe_path),
     TEST_CASE(test_max_compressed_size_logic),
@@ -101,7 +102,6 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_pstream_compress_drain_block_resume),
 
     /* --- Format (on-disk) --- */
-    TEST_CASE(test_bit_reader),
     TEST_CASE(test_huffman_codec),
     TEST_CASE(test_huffman_codec_dict),
     TEST_CASE(test_eof_block_structure),

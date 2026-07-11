@@ -160,6 +160,45 @@ ZXC_EXPORT int64_t zxc_decompress(const void* src, const size_t src_size, void* 
                                   const size_t dst_capacity, const zxc_decompress_opts_t* opts);
 
 /**
+ * @brief Minimum single-buffer size for an in-place decompression.
+ *
+ * Reads @p src's header and footer (no decoding) and returns the buffer size
+ * @ref zxc_decompress_inplace needs: `decompressed_size` plus a one-block and
+ * wild-copy safety margin. Allocate a buffer of this size, place the
+ * `comp_size`-byte archive flush-right in it, then call
+ * @ref zxc_decompress_inplace.
+ *
+ * @param[in] src       Compressed archive (only header + footer are read).
+ * @param[in] src_size  Size of the archive in bytes.
+ * @return Required buffer size in bytes, or 0 if @p src is not a valid archive.
+ */
+ZXC_EXPORT size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size);
+
+/**
+ * @brief Decompresses in place inside a single caller-owned buffer.
+ *
+ * The compressed archive must sit **flush-right** in @p buffer (its last
+ * @p comp_size bytes). Decoding runs left-to-right into `buffer[0..]`; the
+ * write cursor provably never overtakes the flush-right read cursor as long as
+ * @p buffer_capacity is at least @ref zxc_decompress_inplace_bound. This
+ * replaces the usual separate input and output buffers with one allocation:
+ * decisive for memory-constrained targets (embedded, FOTA, firmware).
+ *
+ * @note @p buffer is both input and output; on success its first @c N bytes
+ *       hold the decompressed data (@c N = the return value).
+ *
+ * @param[in,out] buffer          Single work buffer with the flush-right archive.
+ * @param[in]     buffer_capacity Total size of @p buffer in bytes.
+ * @param[in]     comp_size       Size of the compressed archive in bytes.
+ * @param[in]     opts            Decompression options, or NULL for defaults.
+ * @return Decompressed size (>0), 0 for an empty frame, or a negative
+ *         @ref zxc_error_t (`ZXC_ERROR_DST_TOO_SMALL` if the margin is missing).
+ */
+ZXC_EXPORT int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity,
+                                          const size_t comp_size,
+                                          const zxc_decompress_opts_t* opts);
+
+/**
  * @brief Returns the decompressed size stored in a ZXC compressed buffer.
  *
  * This function reads the file footer to extract the original uncompressed size

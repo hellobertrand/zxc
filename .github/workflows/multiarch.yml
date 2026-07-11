@@ -211,6 +211,7 @@ jobs:
             cross_prefix: arm-linux-gnueabihf
             cmake_processor: arm
             qemu_binary: qemu-arm
+            qemu_cpu: cortex-a15
           - name: Linux ppc64el
             cross_pkg: gcc-powerpc64le-linux-gnu
             cross_prefix: powerpc64le-linux-gnu
@@ -285,6 +286,12 @@ jobs:
 
               echo "Running Tests for $LIB_TYPE via QEMU..."
               ${{ matrix.qemu_binary }} $QEMU_CPU_ARG -L $SYSROOT ./$BUILD_DIR/zxc_test
+
+              echo "Running conformance + golden vectors for $LIB_TYPE via QEMU..."
+              ${{ matrix.qemu_binary }} $QEMU_CPU_ARG -L $SYSROOT \
+                  ./$BUILD_DIR/zxc_conformance_test ./conformance
+              ${{ matrix.qemu_binary }} $QEMU_CPU_ARG -L $SYSROOT \
+                  ./$BUILD_DIR/zxc_format_golden_test ./tests/format/golden
 
               echo ">>> Completed Build: $LIB_TYPE"
               echo ""

@@ -448,7 +448,8 @@ cmake --build build --parallel
 *   **Level 1, 2 (Fast):** Optimized for real-time assets (Gaming, UI).
 *   **Level 3, 4 (Balanced):** A strong middle-ground offering efficient compression speed and a ratio superior to LZ4.
 *   **Level 5 (Compact):** A good choice for Embedded and Firmware. Better compression than LZ4 and significantly faster decoding than Zstd.
-*   **Level 6 (Max):** Highest ratio tier, matching LZ4-HC while keeping ZXC's decode advantage. Best for Archival and write-once / read-many workloads where compression time is amortized over many reads.
+*   **Level 6 (Max):** Beats LZ4-HC on both axes — better ratio *and* faster decode — while staying in the multi-GB/s decode class. Best for Archival and write-once / read-many workloads where compression time is amortized over many reads.
+*   **Level 7 (Ultra):** Maximum density. Deep parse plus Huffman-coded literals *and* tokens (11-bit codes) push the ratio past `zstd -1` while decoding several times faster than it. Choose it when storage or bandwidth dominates but decode must remain fast; compression is the slowest tier.
 
 ## Block Size Tuning
 
@@ -473,6 +474,23 @@ zxc_compress_opts_t opts = {
 ```
 
 **Guideline:** Stick with 512 KB (default) for bulk compression pipelines, CI/CD asset packaging, and high-throughput servers. Use 256 KB (`-B 256K`) for streaming, embedded, or memory-constrained environments.
+
+---
+
+## In-Place Decompression
+
+When the whole archive already lives in RAM (a firmware image, a game asset, a FOTA payload), ZXC can decompress **inside a single buffer** — no separate output allocation. You place the compressed archive flush-right in a buffer, and ZXC decodes left-to-right into the same memory. Because a ZXC block never expands, the write cursor provably never overtakes the read cursor given a one-block safety margin, so peak memory drops from *compressed + decompressed* to roughly *decompressed* alone.
+
+```c
+// One allocation instead of two.
+size_t need = zxc_decompress_inplace_bound(archive, archive_size);   // reads header+footer
+uint8_t* buf = malloc(need);
+memcpy(buf + (need - archive_size), archive, archive_size);          // archive flush-right
+int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);   // decode into buf[0..]
+// buf[0 .. n) now holds the decompressed data
+```
+
+The required margin is one block plus the wild-copy tail (`block_size + ~2 KB`) — about **1 %** overhead on a large archive. An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`, never silent corruption. This is a library/API capability (like LZ4's and Zstd's in-place modes): it targets embedded/firmware integrators, not the file→file CLI, whose streaming decode is already memory-bounded.
 
 ---
 
@@ -682,9 +700,9 @@ Community-maintained bindings:
 
 ## Format & Conformance
 
-The ZXC on-disk wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format version 6), so any third party can build an independent, interoperable decoder.
+The ZXC on-disk wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format version 7), so any third party can build an independent, interoperable decoder.
 
-> **Upgrading from a v5 build?** Format v6 is a deliberate break with v5 and v6 tools reject v5 archives. See [`docs/MIGRATION.md`](docs/MIGRATION.md) to convert existing archives.
+> **Upgrading?** The current format is **v7** — Huffman entropy sections in the new PivCo layout (faster SIMD-merge decode), Huffman-coded tokens and 11-bit codes at level 7. Like the v5→v6 change, this is a deliberate clean break: v7 tools reject v6 archives (see [`docs/MIGRATION.md`](docs/MIGRATION.md) to convert).
 
 Two complementary, byte-frozen suites guard that format:
 

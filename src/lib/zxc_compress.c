@@ -27,9 +27,10 @@
 #define ZXC_CAT(x, y) ZXC_CAT_IMPL(x, y)
 #define zxc_compress_chunk_wrapper ZXC_CAT(zxc_compress_chunk_wrapper, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_build_code_lengths ZXC_CAT(zxc_huf_build_code_lengths, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_unpack_lengths ZXC_CAT(zxc_huf_unpack_lengths, ZXC_FUNCTION_SUFFIX)
+#define zxc_huf_calc_size ZXC_CAT(zxc_huf_calc_size, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_encode_section ZXC_CAT(zxc_huf_encode_section, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_encode_section_dict ZXC_CAT(zxc_huf_encode_section_dict, ZXC_FUNCTION_SUFFIX)
-#define zxc_huf_unpack_lengths ZXC_CAT(zxc_huf_unpack_lengths, ZXC_FUNCTION_SUFFIX)
 #endif
 
 #include "../../include/zxc_error.h"
@@ -762,7 +763,9 @@ static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const siz
     }
 
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-    if (UNLIKELY(zxc_huf_build_code_lengths(hist, code_len, scratch) != ZXC_OK)) return CHAR_BIT;
+    if (UNLIKELY(zxc_huf_build_code_lengths(hist, code_len, scratch,
+                                            ZXC_HUF_MAX_CODE_LEN_DENSITY) != ZXC_OK))
+        return CHAR_BIT;
 
     /* Sample-weighted sum of code lengths == predicted total Huffman bits
      * for the sample. Divide by sample count for bits/byte, rounded up
@@ -1342,6 +1345,7 @@ parse_done:;
     // --- RLE ANALYSIS ---
     size_t rle_size = 0;
     int enc_lit = ZXC_SECTION_ENCODING_RAW;
+    size_t best_j = lit_c;
 
     if (lit_c > 0) {
         const uint8_t* p = literals;
@@ -1575,16 +1579,23 @@ parse_done:;
             }
         }
 
-        // RLE chosen over RAW only if it saves >= 1/2^ZXC_RLE_MARGIN_SHIFT.
-        if (rle_size < lit_c - (lit_c >> ZXC_RLE_MARGIN_SHIFT)) enc_lit = ZXC_SECTION_ENCODING_RLE;
+        /* RLE over RAW: space-speed J comparison. The per-level premium
+         * reproduces the historical margin exactly below ULTRA. */
+        const size_t rle_j = rle_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_rle_q8(level));
+        if (rle_j < best_j) {
+            enc_lit = ZXC_SECTION_ENCODING_RLE;
+            best_j = rle_j;
+        }
     }
 
     /* Level >= 6: also evaluate Huffman as a 3rd literal-encoding candidate.
      * Build a histogram and length-limited canonical code lengths, compute the
-     * exact byte size of the 4-way interleaved bitstream + 134-byte header,
-     * and switch to HUFFMAN if it beats the current choice by >= 3%. */
+     * exact PivCo section size (128-byte header + derived node runs), and
+     * switch to HUFFMAN if its J (size + decode tax) beats the current
+     * winner's. */
     uint8_t huf_code_len[ZXC_HUF_NUM_SYMBOLS];
     size_t huf_total_size = SIZE_MAX;
+    uint32_t lit_freq[ZXC_HUF_NUM_SYMBOLS]; /* valid iff huf_total_size != SIZE_MAX */
     if (level >= ZXC_LEVEL_DENSITY && lit_c >= ZXC_HUF_MIN_LITERALS) {
         uint32_t freq0[ZXC_HUF_NUM_SYMBOLS] = {0};
         uint32_t freq1[ZXC_HUF_NUM_SYMBOLS] = {0};
@@ -1600,41 +1611,23 @@ parse_done:;
             }
             for (; i < lit_c; i++) freq0[literals[i]]++;
         }
-        uint32_t freq[ZXC_HUF_NUM_SYMBOLS];
+        uint32_t* const freq = lit_freq;
         for (int k = 0; k < ZXC_HUF_NUM_SYMBOLS; k++) {
             freq[k] = freq0[k] + freq1[k] + freq2[k] + freq3[k];
         }
 
-        if (zxc_huf_build_code_lengths(freq, huf_code_len, ctx->opt_scratch) == ZXC_OK) {
-            const size_t Q = (lit_c + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
-            size_t streams_bytes = 0;
-            for (int s = 0; s < ZXC_HUF_NUM_STREAMS; s++) {
-                size_t start = (size_t)s * Q;
-                size_t stop = start + Q;
-                if (start > lit_c) start = lit_c;
-                if (stop > lit_c) stop = lit_c;
-                uint64_t b0 = 0;
-                uint64_t b1 = 0;
-                uint64_t b2 = 0;
-                uint64_t b3 = 0;
-                size_t i = start;
-
-                for (; i + 4 <= stop; i += 4) {
-                    b0 += huf_code_len[literals[i + 0]];
-                    b1 += huf_code_len[literals[i + 1]];
-                    b2 += huf_code_len[literals[i + 2]];
-                    b3 += huf_code_len[literals[i + 3]];
+        if (zxc_huf_build_code_lengths(freq, huf_code_len, ctx->opt_scratch,
+                                       zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
+            huf_total_size = zxc_huf_calc_size(freq, huf_code_len, 1);
+            /* Space-speed: the entropy candidate must beat the current winner's
+             * J, paying its own decode tax over the copy path. */
+            if (huf_total_size != SIZE_MAX) {
+                const size_t huf_j = huf_total_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_huf_q8(level));
+                if (huf_j < best_j) {
+                    enc_lit = ZXC_SECTION_ENCODING_HUFFMAN;
+                    best_j = huf_j;
                 }
-                uint64_t bits = b0 + b1 + b2 + b3;
-                for (; i < stop; i++) bits += huf_code_len[literals[i]];
-                streams_bytes += (size_t)((bits + 7) / 8);
             }
-            huf_total_size = ZXC_HUF_HEADER_SIZE + streams_bytes;
-            const size_t baseline = (enc_lit == ZXC_SECTION_ENCODING_RLE) ? rle_size : lit_c;
-            /* Huffman chosen over the RAW/RLE baseline only if it saves >=
-             * 1/2^ZXC_HUF_MARGIN_SHIFT. */
-            if (huf_total_size < baseline - (baseline >> ZXC_HUF_MARGIN_SHIFT))
-                enc_lit = ZXC_SECTION_ENCODING_HUFFMAN;
         }
     }
 
@@ -1646,39 +1639,46 @@ parse_done:;
     uint8_t dict_code_len[ZXC_HUF_NUM_SYMBOLS];
     if (level >= ZXC_LEVEL_DENSITY && ctx->dict_huf_lengths != NULL && lit_c > 0 &&
         zxc_huf_unpack_lengths(ctx->dict_huf_lengths, dict_code_len) == ZXC_OK) {
-        const size_t Q = (lit_c + ZXC_HUF_NUM_STREAMS - 1) / ZXC_HUF_NUM_STREAMS;
-        size_t streams_bytes = 0;
-        int valid = 1;
-        for (int s = 0; s < ZXC_HUF_NUM_STREAMS && valid; s++) {
-            size_t start = (size_t)s * Q;
-            size_t stop = start + Q;
-            if (start > lit_c) start = lit_c;
-            if (stop > lit_c) stop = lit_c;
-            uint64_t bits = 0;
-            for (size_t i = start; i < stop; i++) {
-                const int len = dict_code_len[literals[i]];
-                if (UNLIKELY(len == 0)) {
-                    valid = 0;
-                    break;
-                }
-                bits += (uint64_t)len;
-            }
-            streams_bytes += (size_t)((bits + 7) / 8);
+        /* The dict candidate runs on sections too small for the per-block
+         * table, so the histogram may not have been built above. */
+        if (huf_total_size == SIZE_MAX) {
+            ZXC_MEMSET(lit_freq, 0, sizeof(uint32_t) * ZXC_HUF_NUM_SYMBOLS);
+            for (size_t i = 0; i < lit_c; i++) lit_freq[literals[i]]++;
         }
-        if (valid) {
-            huf_dict_total_size = (size_t)ZXC_HUF_STREAM_SIZES_HEADER_SIZE + streams_bytes;
+        /* zxc_huf_calc_size returns SIZE_MAX for unencodable candidates
+         * (a literal byte without a code in the shared table). */
+        huf_dict_total_size = zxc_huf_calc_size(lit_freq, dict_code_len, 0);
+        if (huf_dict_total_size != SIZE_MAX) {
+            /* Same J rule against the running winner: vs the per-block Huffman
+             * candidate the equal entropy taxes cancel (pure size comparison),
+             * while RAW/RLE baselines keep their decode-tax edge. */
+            const size_t huf_dict_j =
+                huf_dict_total_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_huf_q8(level));
+            /* Last candidate: no need to keep best_j updated past this point. */
+            if (huf_dict_j < best_j) enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
+        }
+    }
 
-            /* Choose dict-Huffman if it beats the current encoding. Against
-             * block-Huffman it only needs to be smaller (both decode at the same
-             * speed); against RAW/RLE it must also clear the savings margin,
-             * since Huffman is slower to decode than a raw/RLE copy. */
-            const size_t baseline = (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) ? huf_total_size
-                                    : (enc_lit == ZXC_SECTION_ENCODING_RLE)   ? rle_size
-                                                                              : lit_c;
-            const size_t threshold = (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN)
-                                         ? baseline
-                                         : baseline - (baseline >> ZXC_HUF_MARGIN_SHIFT);
-            if (huf_dict_total_size < threshold) enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
+    /* Level-7 (ULTRA): Huffman-code the token byte stream, reusing the literal
+     * codec (tokens are a <=256-symbol byte alphabet). Same J rule as literals
+     * (entropy tax vs the RAW copy); the decoder selects the path from
+     * gh.enc_litlen. opt_scratch
+     * is free here (the parse and literal code-length build are done). */
+    uint8_t tok_code_len[ZXC_HUF_NUM_SYMBOLS];
+    uint8_t enc_tok = ZXC_SECTION_ENCODING_RAW;
+    size_t tok_huf_size = 0;
+    uint32_t tfreq[ZXC_HUF_NUM_SYMBOLS];
+    if (level >= ZXC_LEVEL_ULTRA && seq_c >= ZXC_HUF_MIN_LITERALS) {
+        ZXC_MEMSET(tfreq, 0, sizeof(tfreq)); /* only the ULTRA path reads tfreq */
+        for (uint32_t i = 0; i < seq_c; i++) tfreq[buf_tokens[i]]++;
+        if (zxc_huf_build_code_lengths(tfreq, tok_code_len, ctx->opt_scratch,
+                                       zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
+            tok_huf_size = zxc_huf_calc_size(tfreq, tok_code_len, 1);
+            /* Space-speed J comparison (this path is ULTRA-only): the PivCo
+             * token section pays the same decode tax as PivCo literals. */
+            if (tok_huf_size != SIZE_MAX &&
+                tok_huf_size + ZXC_SS_TAX((size_t)seq_c, zxc_ss_prem_huf_q8(level)) < (size_t)seq_c)
+                enc_tok = ZXC_SECTION_ENCODING_HUFFMAN;
         }
     }
 
@@ -1693,7 +1693,7 @@ parse_done:;
     const zxc_gnr_header_t gh = {.n_sequences = seq_c,
                                  .n_literals = (uint32_t)lit_c,
                                  .enc_lit = enc_lit,
-                                 .enc_litlen = 0,
+                                 .enc_litlen = enc_tok,
                                  .enc_mlen = 0,
                                  .enc_off = (uint8_t)use_8bit_off};
 
@@ -1704,7 +1704,9 @@ parse_done:;
                                         ? huf_dict_total_size
                                         : lit_c;
     desc[0].sizes = (uint64_t)lit_section_size | ((uint64_t)lit_c << 32);
-    desc[1].sizes = (uint64_t)seq_c | ((uint64_t)seq_c << 32);
+    const size_t tok_section_size =
+        (enc_tok == ZXC_SECTION_ENCODING_HUFFMAN) ? tok_huf_size : seq_c;
+    desc[1].sizes = (uint64_t)tok_section_size | ((uint64_t)seq_c << 32);
     desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
     desc[3].sizes = (uint64_t)extras_sz | ((uint64_t)extras_sz << 32);
 
@@ -1723,13 +1725,14 @@ parse_done:;
     if (UNLIKELY(rem < sz_lit)) return ZXC_ERROR_DST_TOO_SMALL;
 
     if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) {
-        const int written = zxc_huf_encode_section(literals, lit_c, huf_code_len, p_curr, rem);
+        const int written =
+            zxc_huf_encode_section(literals, lit_c, lit_freq, huf_code_len, p_curr, rem);
         if (UNLIKELY(written < 0)) return written;
         if (UNLIKELY((size_t)written != huf_total_size)) return ZXC_ERROR_DST_TOO_SMALL;
         p_curr += written;
     } else if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT) {
         const int written =
-            zxc_huf_encode_section_dict(literals, lit_c, dict_code_len, p_curr, rem);
+            zxc_huf_encode_section_dict(literals, lit_c, lit_freq, dict_code_len, p_curr, rem);
         if (UNLIKELY(written < 0)) return written;
         if (UNLIKELY((size_t)written != huf_dict_total_size)) return ZXC_ERROR_DST_TOO_SMALL;
         p_curr += written;
@@ -1795,8 +1798,16 @@ parse_done:;
 
     if (UNLIKELY(rem < sz_tok)) return ZXC_ERROR_DST_TOO_SMALL;
 
-    ZXC_MEMCPY(p_curr, buf_tokens, seq_c);
-    p_curr += seq_c;
+    if (enc_tok == ZXC_SECTION_ENCODING_HUFFMAN) {
+        const int written =
+            zxc_huf_encode_section(buf_tokens, seq_c, tfreq, tok_code_len, p_curr, rem);
+        if (UNLIKELY(written < 0)) return written;
+        if (UNLIKELY((size_t)written != tok_huf_size)) return ZXC_ERROR_DST_TOO_SMALL;
+        p_curr += written;
+    } else {
+        ZXC_MEMCPY(p_curr, buf_tokens, seq_c);
+        p_curr += seq_c;
+    }
     rem -= sz_tok;
 
     if (UNLIKELY(rem < sz_off)) return ZXC_ERROR_DST_TOO_SMALL;

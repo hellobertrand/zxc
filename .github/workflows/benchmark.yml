@@ -46,7 +46,8 @@ jobs:
 
       - name: Clone LZbench
         run: |
-          git clone --depth 1 https://github.com/inikep/lzbench "${LZBENCH_DIR}"
+          # git clone --depth 1 https://github.com/inikep/lzbench "${LZBENCH_DIR}"
+          git clone -b zxc-0.12.1 https://github.com/hellobertrand/lzbench "${LZBENCH_DIR}"
 
       - name: Copy Lib ZXC
         run: |
@@ -104,7 +105,7 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             CODECS="memcpy/zxc/lz4"
           else
-            CODECS="memcpy/zxc/lz4/lz4fast,17/lz4hc,9/lzav,1/snappy/zstd_fast,-1/zstd,1/zlib,1"
+            CODECS="memcpy/zxc/lz4/lz4fast,17/lz4hc,9/lzav,1/snappy/zstd_fast,-1/zstd,1,3/zlib,1"
           fi
       
           ./lzbench -e"${CODECS}" -j -t8,8 -o1 "../${SILESIA_TAR}" > ../benchmark.md

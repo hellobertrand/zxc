@@ -802,3 +802,101 @@ int test_decompress_fast_vs_safe_path() {
     printf("PASS\n\n");
     return 1;
 }
+
+/* In-place decompression: compressed placed flush-right in one buffer, decoded
+ * left-to-right into the same buffer. Covers a compressible input, a
+ * high-entropy input whose flush-right archive OVERLAPS the output region
+ * (the core in-place invariant), and the too-small-buffer rejection. */
+static int inplace_case(const char* label, const uint8_t* orig, size_t n, int level,
+                        int checksum) {
+    const size_t cbound = (size_t)zxc_compress_bound(n);
+    uint8_t* comp = (uint8_t*)malloc(cbound);
+    if (!comp) return 0;
+    zxc_compress_opts_t co = {.level = level, .checksum_enabled = checksum};
+    const int64_t c = zxc_compress(orig, n, comp, cbound, &co);
+    if (c <= 0) {
+        printf("Failed [%s]: compress -> %lld\n", label, (long long)c);
+        free(comp);
+        return 0;
+    }
+    const size_t csz = (size_t)c;
+
+    const size_t need = zxc_decompress_inplace_bound(comp, csz);
+    if (need == 0 || need < n) {
+        printf("Failed [%s]: bound %zu\n", label, need);
+        free(comp);
+        return 0;
+    }
+    uint8_t* buf = (uint8_t*)malloc(need);
+    if (!buf) {
+        free(comp);
+        return 0;
+    }
+    memset(buf, 0xCC, need);
+    memcpy(buf + (need - csz), comp, csz); /* flush-right */
+
+    zxc_decompress_opts_t dop = {.checksum_enabled = checksum};
+    const int64_t d = zxc_decompress_inplace(buf, need, csz, &dop);
+    if (d < 0 || (size_t)d != n || memcmp(buf, orig, n) != 0) {
+        printf("Failed [%s]: inplace ret=%lld want=%zu%s\n", label, (long long)d, n,
+               (d == (int64_t)n) ? " (MISMATCH)" : "");
+        free(comp);
+        free(buf);
+        return 0;
+    }
+
+    /* one byte short of the required margin must be rejected, never corrupt. */
+    const size_t tight = need - 1;
+    if (tight >= csz) {
+        uint8_t* b2 = (uint8_t*)malloc(tight);
+        if (b2) {
+            memcpy(b2 + (tight - csz), comp, csz);
+            const int64_t r = zxc_decompress_inplace(b2, tight, csz, &dop);
+            if (r != ZXC_ERROR_DST_TOO_SMALL) {
+                printf("Failed [%s]: undersized buffer not rejected (%lld)\n", label, (long long)r);
+                free(b2);
+                free(comp);
+                free(buf);
+                return 0;
+            }
+            free(b2);
+        }
+    }
+    const size_t comp_start = need - csz;
+    printf("  [PASS] %s (n=%zu, comp=%zu, comp@%zu %s)\n", label, n, csz, comp_start,
+           comp_start < n ? "OVERLAPS output" : "in margin");
+    free(comp);
+    free(buf);
+    return 1;
+}
+
+int test_decompress_inplace(void) {
+    printf("=== TEST: Unit - In-place decompression (single buffer) ===\n");
+    const size_t N = 2 * 1024 * 1024;
+    uint8_t* a = (uint8_t*)malloc(N);
+    if (!a) return 0;
+    int ok = 1;
+
+    gen_lz_data(a, N);
+    ok &= inplace_case("compressible L3", a, N, 3, 1);
+    ok &= inplace_case("compressible L6", a, N, 6, 0);
+
+    /* high-entropy: comp_size ~ N so the flush-right archive sits INSIDE the
+     * output region -> the write cursor sweeps through the compressed bytes. */
+    gen_random_data(a, N);
+    ok &= inplace_case("random L1 (overlap)", a, N, 1, 0);
+    ok &= inplace_case("random L7 (overlap)", a, N, 7, 1);
+
+    /* bound on garbage must be 0. */
+    uint8_t junk[64];
+    memset(junk, 0x5A, sizeof(junk));
+    if (zxc_decompress_inplace_bound(junk, sizeof(junk)) != 0) {
+        printf("Failed: bound on garbage != 0\n");
+        ok = 0;
+    }
+
+    free(a);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}

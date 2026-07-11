@@ -111,6 +111,23 @@ static size_t gc_make_huffman(uint8_t **out) {
     return n;
 }
 
+/* Wide, heavily-skewed literal alphabet (~220 symbols, long thin tail) via an
+ * integer-only fourth-power curve. At level 7 the rarest symbols get 9-11-bit
+ * Huffman codes, exercising the 11-bit path the DENSITY cap (<= 8 bits) can't. */
+static size_t gc_make_huffman_wide(uint8_t **out) {
+    const size_t n = 16384;
+    uint8_t *b = (uint8_t *)malloc(n);
+    uint32_t s = 0x0C0FFEE1u;
+    for (size_t i = 0; i < n; i++) {
+        const uint64_t u = (gc_lcg_next(&s) >> 16) & 0xFFFFu; /* uniform 0..65535 */
+        const uint64_t u2 = (u * u) >> 16;                    /* skewed toward 0 */
+        const uint64_t u4 = (u2 * u2) >> 16;                  /* skewed harder */
+        b[i] = (uint8_t)((u4 * 220u) >> 16);                  /* 0..219, heavy head */
+    }
+    *out = b;
+    return n;
+}
+
 /* Several block_size-worth of text -> multiple data blocks in one archive. */
 static size_t gc_make_multiblock(uint8_t **out) {
     const size_t n = 5 * 4096 + 777; /* 5 full 4 KB blocks + a short tail */
@@ -259,6 +276,7 @@ static const golden_case_t GOLDEN_CASES[] = {
     { "11_glo_rle",            gc_make_rle_literals, { .level = 3 },                                GC_BLOCK_GLO,  1,  1, 0, 0 },
     { "12_glo_huffman_dict",   gc_make_huffman_dict_payload,
       { .level = 6, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE },                          GC_BLOCK_GLO,  3,  1, 0, 1 },
+    { "13_glo_huffman_wide",   gc_make_huffman_wide, { .level = 7 /* ULTRA */ },                    GC_BLOCK_GLO,  2,  1, 0, 0 },
 };
 
 #define GOLDEN_CASE_COUNT (sizeof(GOLDEN_CASES) / sizeof(GOLDEN_CASES[0]))

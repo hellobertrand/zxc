@@ -477,7 +477,7 @@ void print_help(const char* app) {
         "  -V, --version     Show version information\n"
         "  -h, --help        Show this help message\n\n"
         "Options:\n"
-        "  -1..-6            Compression level {3}\n"
+        "  -1..-7            Compression level {3}\n"
         "  -B, --block-size  Block size: 4K..2M, power of 2 {512K}\n"
         "  -T, --threads N   Number of threads (0=auto)\n"
         "  -C, --checksum    Enable checksum {default}\n"
@@ -1146,7 +1146,7 @@ int main(int argc, char** argv) {
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
-    while ((opt = getopt_long(argc, argv, "123456b::B:cCdD:fho:jklmrNqST:tvVz", long_options,
+    while ((opt = getopt_long(argc, argv, "1234567b::B:cCdD:fho:jklmrNqST:tvVz", long_options,
                               NULL)) != -1) {
         switch (opt) {
             case 'z':
@@ -1191,6 +1191,9 @@ int main(int argc, char** argv) {
                 break;
             case '6':
                 level = 6;
+                break;
+            case '7':
+                level = 7;
                 break;
             case 'T':
                 num_threads = atoi(optarg);

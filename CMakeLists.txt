@@ -192,7 +192,8 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
         # AVX2 for GCC/Clang
         zxc_add_variant(_avx2 "-mavx2;-mfma;-mbmi;-mbmi2;-mlzcnt")
         # AVX512 for GCC/Clang
-        zxc_add_variant(_avx512 "-mavx512f;-mavx512bw;-mbmi;-mbmi2;-mlzcnt")
+        zxc_add_variant(_avx512
+                        "-mavx512f;-mavx512bw;-mavx512vbmi;-mavx512vbmi2;-mbmi;-mbmi2;-mlzcnt")
     endif()
 
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
@@ -216,6 +217,7 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set(ZXC_CORE_SOURCES
         src/lib/zxc_common.c
+        src/lib/zxc_pivco_tables.c
         src/lib/zxc_dict.c
         src/lib/zxc_dispatch.c
         src/lib/zxc_pstream.c
@@ -224,6 +226,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
 else()
     set(ZXC_CORE_SOURCES
         src/lib/zxc_common.c
+        src/lib/zxc_pivco_tables.c
         src/lib/zxc_dict.c
         src/lib/zxc_driver.c
         src/lib/zxc_dispatch.c
@@ -440,6 +443,7 @@ if(ZXC_BUILD_TESTS)
         # and is already pulled in via ${ZXC_VARIANT_OBJECTS} below.
         add_library(zxc_lib_static STATIC
             src/lib/zxc_common.c
+        src/lib/zxc_pivco_tables.c
             src/lib/zxc_dict.c
             src/lib/zxc_driver.c
             src/lib/zxc_dispatch.c
@@ -687,6 +691,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_compress_bound"
         "_zxc_compress_block_bound"
         "_zxc_get_decompressed_size"
+        "_zxc_decompress_inplace"
+        "_zxc_decompress_inplace_bound"
         "_zxc_create_cctx"
         "_zxc_free_cctx"
         "_zxc_compress_cctx"

@@ -1,6 +1,6 @@
 # ZXC: High-Performance Asymmetric Lossless Compression
 
-**Version**: 0.12.0
+**Version**: 0.13.0
 **Date**: June 2026
 **Author**: Bertrand Lebonnois
 
@@ -49,20 +49,53 @@ ZXC leverages modern instruction sets to maximize throughput on both ARM and x86
 ### 4.3 Entropy Coding & Bitpacking
 *   **RLE (Run-Length Encoding)**: Automatically detects runs of identical bytes.
 *   **Prefix Varint Encoding**: Variable-length integer encoding (similar to LEB128 but prefix-based) for overflow values.
-*   **Canonical Huffman (Literals, level ≥ 6)**: Length-limited (`L = 8`) canonical Huffman code over the literal byte distribution, split into 4 LSB-first interleaved bit-streams. Decoded via a cache-line-aligned 2048-entry lookup table (11-bit window) that returns **1 or 2 symbols per access** depending on whether the next two codes fit the window. On typical literal distributions ~50–70 % of lookups yield 2 symbols, pushing effective throughput above one symbol per memory access.
+*   **Canonical Huffman (Literals level ≥ 6, tokens level 7)**: Length-limited canonical Huffman code (max code length **8 bits** at level 6, **11 bits** at level 7 / ULTRA) over the literal byte distribution — and, at level 7, over the sequence-token distribution. The *code* is classical Huffman; only the *wire layout* is new — PivCo (format v7) transposes the code bits by tree level into per-node branch bitmaps, so the decoder runs data-parallel list merges (byte shuffles) instead of a serial bit chain. See the dedicated section below.
 *   **Bit-Packing**: Compressed sequences are packed into dedicated streams using minimal bit widths.
 
-#### Multi-Symbol Huffman LUT
+#### Huffman decoding with the PivCo level-ordered layout
 
-The Huffman decoder is the hot path for high-compression levels, so ZXC trades a larger table for fewer lookups. The classical trade-off is between table size (cache footprint) and the number of symbols decoded per memory access. ZXC's design:
+Entropy decoding is the hot path of the high-compression levels, and classical
+Huffman decoding is a *serial bit chain*: each codeword's length must be known
+before the next codeword's position is. Interleaving N independent streams caps the parallelism at N and
+still executes a load-shift-mask dependency chain per symbol. Format v7
+replaces the layout with **Pivoted Coding Huffman** (level-ordered Huffman):
 
-*   **Length limit `L = 8`**: With a maximum codeword length of 8 bits, the longest *pair* of codes never exceeds 16 bits, which keeps the multi-symbol lookup tractable.
-*   **11-bit window**: The LUT is indexed by 11 bits read ahead from the stream. Each entry stores either a single symbol (when the first code is ≥ 4 bits and the cumulative length of the *first two codes* would exceed 11 bits) or a pair of symbols (when both fit). This single branch (fits-in-window?) is resolved by a precomputed flag in the LUT entry, no per-lookup re-decoding.
-*   **2048-entry, cache-aligned**: 2048 × 4-byte entries = 8 KB, aligned on a cache line. Easily fits L1d on every target CPU.
-*   **4 parallel bit-streams**: Literals are interleaved across 4 LSB-first streams so each decoder consumes independent bits, breaking the serial dependency that limits classical Huffman to one symbol per cycle.
-*   **Scalar tail**: A small per-stream scalar epilogue (≤ 9 symbols) handles the trailing bytes safely without speculative writes past the destination buffer.
+*   **Same code, transposed layout**: The canonical code, the 128-byte packed
+    code-length header and the compressed size (to within per-node byte
+    padding) are unchanged from classic Huffman. Only the *order* of the bits
+    on the wire changes: instead of symbol-after-symbol, the section stores,
+    for every internal node of the code tree in BFS order, one branch bit per
+    symbol routed through that node.
+*   **Decoding = list merges, no gather**: The decoder rebuilds each tree
+    level bottom-up: a node's bitmap says how to interleave its two children's
+    symbol lists, which is a data-parallel *merge* — implemented with byte
+    shuffles (`TBL` on NEON, `pshufb` on SSSE3/AVX2, `vpexpandb` on
+    AVX-512-VBMI2, a 2-instruction merge). No gather instructions, no
+    per-symbol dependency chain; throughput scales with SIMD width.
+*   **Flat-subtree fast path (format rule)**: perfect subtrees whose leaves
+    all sit at relative depth `D ∈ {2, 4, ≥ 7}` skip the per-level bitmaps and
+    store packed `D`-bit residual codes instead (FORMAT.md § 5.2.1). Dense
+    tree regions — the common case for 8-bit-capped level-6 tables — then
+    decode by direct table unpacking instead of `D` merge rounds.
+*   **Leaf-pair kernel**: two-leaf nodes decode via an XOR/blend on the bitmap
+    (`out = sym0 ^ (delta & bitmask)`) without materializing index lists.
+*   **No stream-size header**: the popcount of a node's bitmap *is* its right
+    child's element count, so sub-stream sizes are derived, not stored — this
+    also removes the v6 u16 sub-stream size limit.
 
-Selection is conservative: `enc_lit = 2` (Huffman) is chosen only if the Huffman section is at least ~3 % smaller than the RAW or RLE baseline, avoiding setup overhead on near-uniform literal distributions where the entropy savings would not justify the decoder cost.
+Measured on the real post-LZ literal sections of silesia.tar (level 7, Apple
+M3): **1.3 cycles/symbol, ~3.1 GB/s single-threaded — +77 % over the tuned
+4-stream classic decoder** it replaced, at byte-identical compression ratio.
+The scalar fallback (no SIMD) is ~4x slower than the SIMD kernels; embedded
+targets typically stay on levels 1-5, which carry no entropy sections.
+
+**Selection — space-speed Lagrangian.** Section encodings are chosen by
+pricing every candidate (RAW, RLE, Huffman, shared-table Huffman) with
+`J = compressed_size + premium(level) * decoded_bytes` and taking the minimum
+— a Lagrangian trade of bytes saved against decode time. Below ULTRA the premium reproduces
+the historical conservative margin (~3 %); at level 7 it is lowered (~1.6 %
+for entropy, ~0.4 % for RLE) so the encoder buys more ratio with decode
+cycles, which is exactly the level-7 contract.
 
 #### Prefix Varint Format
 
@@ -411,8 +444,8 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Extras Buffer*: Overflow values for lengths >= 15 (Prefix Varint encoded).
     *   *Offset Mode Selection*: The encoder tracks the maximum offset across all sequences. If all offsets are ≤ 255, the 8-bit mode (`enc_off=1`) is selected, saving 1 byte per sequence compared to 16-bit mode.
 4.  **RLE Pass**: The literals buffer is scanned for run-length encoding opportunities (runs of identical bytes). If beneficial (>10% gain), it is compressed in place.
-5.  **Huffman Pass** (level ≥ 6 only, ≥ 1024 literals only): A length-limited canonical Huffman code (`L = 8`) is fitted to the literal byte distribution and the literals are split into 4 LSB-first interleaved bit-streams. The encoding is selected (`enc_lit = 2`) only if it is at least ~3 % smaller than the chosen RAW or RLE baseline.
-    *   **Shared-Table Candidate** (dictionary archives only): when the dictionary carries a shared literal table (§5.10), a second Huffman candidate is sized with the dictionary's code lengths and **no per-block table header** (6 bytes of sub-stream sizes instead of 134). Exact byte accounting picks the smallest of {RAW, RLE, per-block Huffman, shared-table Huffman} (`enc_lit = 3` for the latter), so the choice is never a regression. Because the shared table only covers symbols seen in training, a block containing an uncovered literal byte automatically falls back to its per-block table. The 128-byte header amortization makes `enc_lit = 3` viable on literal sections far below the 1024-literal threshold of the per-block table — precisely the small-block regime dictionaries target.
+5.  **Entropy Pass** (level ≥ 6, ≥ 1024 literals): A length-limited canonical Huffman code (`L = 8` at level 6, `L = 11` at level 7) is fitted to the literal byte distribution and emitted in the PivCo level-ordered layout (§4.3, FORMAT.md §5.2.1). At level 7 the same treatment is applied to the sequence-token stream (`enc_litlen = 2`). Candidates are selected by the space-speed Lagrangian `J = size + premium(level) × decoded_bytes`.
+    *   **Shared-Table Candidate** (dictionary archives only): when the dictionary carries a shared literal table (§5.10), a second entropy candidate is sized with the dictionary's code lengths and **no inline 128-byte lengths header**. The Lagrangian picks the minimum-J of {RAW, RLE, per-block Huffman, shared-table Huffman} (`enc_lit = 3` for the latter), so the choice is never a regression. Because the shared table only covers symbols seen in training, a block containing an uncovered literal byte automatically falls back to its per-block table. The 128-byte header amortization makes `enc_lit = 3` viable on literal sections far below the 1024-literal threshold of the per-block table — precisely the small-block regime dictionaries target.
 6.  **Final Serialization**: All buffers are concatenated into the payload, preceded by section descriptors.
 
 **Decoding Process**:
@@ -420,10 +453,11 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
 2.  **Literal Decompression**:
     *   `enc_lit = 0` (RAW): zero-copy view into the source buffer.
     *   `enc_lit = 1` (RLE): single pass that expands runs and copies literal chunks.
-    *   `enc_lit = 2` (HUFFMAN): canonical Huffman section decoded by 4 parallel decoders sharing a cache-line-aligned 2048-entry lookup table (11-bit window). Each lookup returns 1 or 2 symbols depending on whether the cumulative length of the next two codes fits in the 11-bit window — on typical literal distributions ~50–70 % of lookups yield 2 symbols, raising effective throughput well above one symbol per memory access. A small per-stream scalar tail (≤ 9 symbols) handles the trailing bytes safely without speculative writes.
-    *   `enc_lit = 3` (HUFFMAN_DICT): same 4-way decode loop, but the 2048-entry lookup table is **built once per context** from the dictionary's shared table when the dictionary is attached — instead of being unpacked and rebuilt for every block. At small block sizes this per-block rebuild dominates the decode cost, so the shared table compounds the ratio gain with a substantial decode speedup; both effects shrink as blocks grow and vanish where the per-block table wins on its own.
-3.  **Vertical Execution**: The main loop reads from all three streams simultaneously.
-4.  **Wild Copy**:
+    *   `enc_lit = 2` (PIVCO): the section's per-node branch bitmaps are decoded bottom-up by SIMD list merges (shuffle-based, no gather — §4.3), with direct unpacking of flat subtrees and an XOR/blend kernel for leaf pairs. ~1.3 cycles/symbol on Apple Silicon.
+    *   `enc_lit = 3` (PIVCO_DICT): same decode, but the code lengths come from the dictionary's shared literal table (validated once at attach time) instead of an inline 128-byte header. The header amortization makes entropy coding viable on literal sections far below the per-block threshold — precisely the small-block regime dictionaries target.
+3.  **Token Decompression** (level 7 only): when `enc_litlen = 2`, the token stream is Huffman-decoded (PivCo layout) into a scratch buffer through a dedicated specialization of the block decoder, so the common RAW-token path keeps its exact code shape (a hot pointer with a single provenance).
+4.  **Vertical Execution**: The main loop reads from all three streams simultaneously.
+5.  **Wild Copy**:
     *   *Literals*: Copied using unaligned 16-byte SIMD loads/stores (`vld1/vst1` on ARM).
     *   *Matches*: Copied using 16-byte stores. Overlapping matches (e.g., repeating pattern "ABC" for 100 bytes) are handled naturally by the CPU's store forwarding or by specific overlapped-copy primitives.
     *   **Safety**: A "Safe Zone" at the end of the buffer forces a switch to a cautious byte-by-byte loop, allowing the main loop to run without bounds checks.
@@ -486,7 +520,7 @@ For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dict
 
 *   **External, content-addressed model**: Dictionaries are **external** files (`.zxd`), referenced from the file header by a 32-bit `dict_id`. This follows the industry-standard train-once / reuse-many model (the dictionary is amortized across many archives rather than duplicated inside each). The `dict_id` is **self-validating**: it identifies *which* dictionary is required and simultaneously detects an accidentally wrong one. A decoder **MUST** reject decompression when the required dictionary is absent (`ZXC_ERROR_DICT_REQUIRED`) or when the supplied dictionary's id does not match `header.dict_id` (`ZXC_ERROR_DICT_MISMATCH`). The per-block and global checksums of §5.9 are a second line of defense: a wrong dictionary yields wrong output that fails the checksum (when enabled).
 
-*   **Shared literal Huffman table**: Beyond LZ priming, a dictionary carries a **shared canonical Huffman table** for the literal stream (128 bytes of packed code lengths, trained on the corpus' *post-LZ* literal distribution). Blocks whose literals compress better with this table use `enc_lit = 3` (§5.7) and skip the 134-byte per-block table header entirely — decisive at small block sizes, where the header never amortizes. The decoder builds its lookup table **once per context** instead of once per block, which also removes the dominant per-block decode cost in the small-block regime. The result is a simultaneous ratio *and* decode-speed improvement on homogeneous corpora at small block sizes, tapering to neutral as blocks grow and per-block tables win on their own. The selection is by exact byte accounting, so the shared table is never a regression.
+*   **Shared literal Huffman table**: Beyond LZ priming, a dictionary carries a **shared canonical Huffman table** for the literal stream (128 bytes of packed code lengths, trained on the corpus' *post-LZ* literal distribution). Blocks whose literals compress better with this table use `enc_lit = 3` (§5.7) and skip the 128-byte per-block lengths header entirely — decisive at small block sizes, where the header never amortizes. The code lengths are validated **once per context** when the dictionary is attached, instead of being parsed per block. The result is a simultaneous ratio *and* decode-speed improvement on homogeneous corpora at small block sizes, tapering to neutral as blocks grow and per-block tables win on their own. The selection is by exact byte accounting, so the shared table is never a regression.
 
 *   **Two binding flavours**: the `dict_id` binds exactly what the encoder used. A **raw in-memory dictionary** (library API, content bytes only, no table) yields `dict_id = checksum(content)`; such archives never contain `enc_lit = 3` blocks. A **table-carrying dictionary** (the `.zxd` path) yields `dict_id = checksum(LE32(checksum(content)) || table)`, binding the exact (content, table) pair. There is no flag on the wire: the decoder simply computes the id for the pair it was given and matches it against the header.
 
@@ -916,7 +950,13 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
 > **Guideline:** Default 512 KB block keeps cctx under 6 MB even at the densest level (-6) — well within reach for typical server / desktop pipelines. For streaming, embedded, or memory-constrained environments, use `-B 256K` (or smaller) and stick to levels -1 to -5. Level -6 is best reserved for offline encoding pipelines where ratio matters and per-thread RAM is plentiful.
 
+### 7.7 In-Place Decompression
 
+For integrators that hold the whole archive in RAM — firmware unpackers, game asset loaders, FOTA payloads — ZXC decompresses **inside a single buffer**, removing the second (output) allocation entirely. The compressed archive is placed **flush-right** in a buffer of size `zxc_decompress_inplace_bound(...)`, and `zxc_decompress_inplace()` decodes left-to-right into the same memory.
+
+The safety argument is exact. Decompression consumes `c` compressed bytes and produces `d ≥ c` decompressed bytes (a ZXC block never expands — it falls back to a RAW block otherwise), so the gap between the flush-right read cursor and the left-to-right write cursor shrinks *monotonically* and reaches its minimum only at the very end. Per block, safety requires `output_through_k + wild_copy_pad ≤ compressed_start_of_block_k`, which holds for every block once the buffer carries a margin of one block plus the decoder's wild-copy tail (`block_size + ZXC_DECOMPRESS_TAIL_PAD`). The bound is derived from the archive header (block size) and footer (decompressed size) without decoding; an undersized buffer is rejected (`ZXC_ERROR_DST_TOO_SMALL`), never allowed to corrupt.
+
+Peak decode memory therefore drops from *compressed + decompressed* to *decompressed + ~1 %*. This mirrors the in-place decode modes of LZ4 (`LZ4_DECOMPRESS_INPLACE_MARGIN`) and Zstd (decompression margin) — a library capability for embedded integration, orthogonal to the streaming CLI, whose block-at-a-time decode is already memory-bounded. Dictionary archives are supported (they resolve through the context's own bounce buffer, which does not alias the in-place buffer).
 
 ## 8. Strategic Implementation
 
@@ -929,7 +969,10 @@ ZXC is designed to adapt to various deployment scenarios by selecting the approp
     The sweet spot for maximizing storage density on limited flash memory (e.g., Kernel, Initramfs) while ensuring rapid "instant-on" (XIP-like) boot performance.
 
 *   **Data Archival (Levels 5-6)**:
-    A high-efficiency alternative for cold storage, providing better compression ratios than LZ4 and significantly faster retrieval speeds than Zstd. **Level 6** (DENSITY) matches LZ4-HC's ratio while keeping ZXC's decode advantage: ideal for write-once / read-many archives where compression time is amortized over many reads.
+    A high-efficiency alternative for cold storage, providing better compression ratios than LZ4 and significantly faster retrieval speeds than Zstd. **Level 6** (DENSITY) beats LZ4-HC on both axes — better ratio (36.27 vs 36.75 on silesia) *and* faster decode on every measured platform (+31 % on Apple Silicon, parity-to-+5 % on Zen 3/Zen 4): ideal for write-once / read-many archives where compression time is amortized over many reads.
+
+*   **Maximum Density (Level 7)**:
+    Deep parse (search depth 128), 11-bit entropy codes and Huffman-coded sequence tokens. On silesia it lands at **33.01 %** — a better ratio than `zstd -1` (34.53 %) — while decoding at **1.8-2.1x** zstd -1's speed (3.7 GB/s on Apple M2). It occupies the historical gap between the LZ4 family and Zstd: choose it when storage or bandwidth dominates but decompression must stay in the multi-GB/s class.
 
 *   **Small & Homogeneous Payloads — Pre-Trained Dictionaries (§5.10)**:
     An orthogonal lever, combinable with any level. Where data is compressed in **small blocks** (4 KB–128 KB) — JSON API responses, RPC messages, key-value records, structured logs, small game assets, or any large homogeneous corpus split for seekable random access — a pre-trained dictionary primes the LZ77 window per block and recovers the ratio that small blocks would otherwise lose. The external, content-addressed model (`.zxd` + `dict_id`) fits the **train-once / reuse-many** deployment pattern: a single dictionary is built offline on the build pipeline and amortized across millions of independently decodable payloads — no per-archive storage overhead, and O(1) seekable access preserved.

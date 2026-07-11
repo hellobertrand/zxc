@@ -393,31 +393,88 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
         d_ptr += ml;                                \
     } while (0)
 
+/* PivCo section decodes are outlined COLD: they run once per SECTION (a call
+ * is noise there), and keeping their bodies out of the sequence-decode
+ * monolith preserves its i-cache footprint for levels 1-5, whose blocks never
+ * take these branches (the inline branches grew the primary GLO wrapper by
+ * ~520 B at the token-entropy commit and cost ~3-5% at levels 3-5). */
+static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco(const zxc_cctx_t* RESTRICT ctx,
+                                                      const uint8_t* RESTRICT payload,
+                                                      const size_t psize,
+                                                      const size_t required_size) {
+    if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE ||
+                 ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
+        return ZXC_ERROR_CORRUPT_DATA;
+    return zxc_huf_decode_section(payload, psize, ctx->lit_buffer, required_size,
+                                  ctx->pivco_scratch);
+}
+
+static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco_dict(const zxc_cctx_t* RESTRICT ctx,
+                                                           const uint8_t* RESTRICT payload,
+                                                           const size_t psize,
+                                                           const size_t required_size) {
+    if (UNLIKELY(ctx->dict_huf_lengths == NULL)) return ZXC_ERROR_DICT_REQUIRED;
+    if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE ||
+                 ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
+        return ZXC_ERROR_CORRUPT_DATA;
+    return zxc_huf_decode_section_dict(payload, psize, ctx->lit_buffer, required_size,
+                                       ctx->dict_huf_lengths, ctx->pivco_scratch);
+}
+
+static ZXC_NOINLINE ZXC_COLD int zxc_decode_tok_pivco(const zxc_cctx_t* RESTRICT ctx,
+                                                      const uint8_t* RESTRICT payload,
+                                                      const size_t psize, const size_t n_tok) {
+    if (UNLIKELY(n_tok + ZXC_PAD_SIZE > ctx->tok_buffer_cap ||
+                 n_tok + ZXC_PIVCO_SCRATCH_PAD > ctx->pivco_scratch_cap))
+        return ZXC_ERROR_CORRUPT_DATA;
+    return zxc_huf_decode_section(payload, psize, ctx->tok_buffer, n_tok, ctx->pivco_scratch);
+}
+
+static ZXC_NOINLINE int zxc_decode_block_glo_entropy(const zxc_cctx_t* RESTRICT ctx,
+                                                     const uint8_t* RESTRICT src, size_t src_size,
+                                                     uint8_t* RESTRICT dst, size_t dst_capacity);
+static ZXC_NOINLINE int zxc_decode_block_glo_entropy_dict(const zxc_cctx_t* RESTRICT ctx,
+                                                          const uint8_t* RESTRICT src,
+                                                          size_t src_size, uint8_t* RESTRICT dst,
+                                                          size_t dst_capacity);
+static ZXC_NOINLINE int zxc_decode_block_glo_entropy_safe(const zxc_cctx_t* RESTRICT ctx,
+                                                          const uint8_t* RESTRICT src,
+                                                          size_t src_size, uint8_t* RESTRICT dst,
+                                                          size_t dst_capacity);
+
 /**
- * @brief Unified GLO (General Low) block decoder body, shared by the fast, safe
- *        and dictionary variants.
+ * @brief Unified GLO (General Low) block decoder body, shared by the fast,
+ *        safe, dictionary and entropy-token variants.
  *
  * Decodes a block in the internal GLO format; the decompressed size is derived
- * from the Section Descriptors in the payload. @p safe and @p has_dict must be
- * compile-time constants (0 or 1): the 4x-unrolled loops are duplicated inside
- * @c if(safe)/else branches so each variant keeps single-assignment @c const
- * save pointers, and after constant propagation only one branch survives per
- * wrapper (codegen equivalent to a hand-written pair).
+ * from the Section Descriptors in the payload. @p safe, @p has_dict and
+ * @p tok_entropy must be compile-time constants (0 or 1): the 4x-unrolled
+ * loops are duplicated inside @c if(safe)/else branches so each variant keeps
+ * single-assignment @c const save pointers, and after constant propagation
+ * only one branch survives per wrapper (codegen equivalent to a hand-written
+ * pair).
  *
- * @param[in,out] ctx          Decompression context (dict buffer, tables).
+ * The @p tok_entropy dimension keeps the token pointer on a SINGLE provenance
+ * per instantiation (in-place @c src tokens vs @c ctx->tok_buffer): the
+ * tok_entropy=0 instantiations tail-call their entropy twin right after the
+ * header parse when they meet enc_litlen == 2.
+ *
+ * @param[in,out] ctx          Decompression context (dict buffer, scratch).
  * @param[in]     src          Compressed block payload.
  * @param[in]     src_size     Size of @p src in bytes.
  * @param[out]    dst          Destination buffer for decoded bytes.
  * @param[in]     dst_capacity Capacity of @p dst in bytes.
  * @param[in]     safe         Compile-time flag: 1 = strict bounds-checked loop.
  * @param[in]     has_dict     Compile-time flag: 1 = resolve matches against a dict prefix.
+ * @param[in]     tok_entropy  Compile-time flag: 1 = tokens are a PivCo section
+ *                             decoded into @c ctx->tok_buffer (level 7).
  * @return Bytes written to @p dst on success, or a negative @ref zxc_error_t.
  */
 static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
                                                        const size_t src_size, uint8_t* RESTRICT dst,
                                                        const size_t dst_capacity, const int safe,
-                                                       const int has_dict) {
+                                                       const int has_dict, const int tok_entropy) {
     zxc_gnr_header_t gh;
 
     /* Constant 0 when !has_dict, so `written` starts at 0 and `dst - dict_size`
@@ -427,6 +484,18 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
 
     if (UNLIKELY(zxc_read_glo_header_and_desc(src, src_size, &gh, desc) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
+
+    /* Entropy-coded tokens (level 7): tail-call the dedicated instantiation
+     * BEFORE any section work (it restarts from the header, so only the
+     * header parse above is duplicated). Constant flags per instantiation:
+     * exactly one call survives; the RAW-token fast path below keeps t_ptr on
+     * a single provenance (a joined pointer cost ~4% at levels 3-5). */
+    if (!tok_entropy && UNLIKELY(gh.enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN)) {
+        if (safe) return zxc_decode_block_glo_entropy_safe(ctx, src, src_size, dst, dst_capacity);
+        if (has_dict)
+            return zxc_decode_block_glo_entropy_dict(ctx, src, src_size, dst, dst_capacity);
+        return zxc_decode_block_glo_entropy(ctx, src, src_size, dst, dst_capacity);
+    }
 
     const uint8_t* p_data =
         src + ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
@@ -440,6 +509,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     size_t lit_stream_size = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
 
     if (gh.enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) {
+        /* Wire value 2: PivCo layout. */
         const size_t required_size = (size_t)(desc[0].sizes >> 32);
         if (UNLIKELY(lit_stream_size > (size_t)(src + src_size - p_curr)))
             return ZXC_ERROR_CORRUPT_DATA;
@@ -449,12 +519,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
         } else {
             if (UNLIKELY(required_size > dst_capacity || required_size > SIZE_MAX - ZXC_PAD_SIZE))
                 return ZXC_ERROR_DST_TOO_SMALL;
-            const size_t alloc_size = required_size + ZXC_PAD_SIZE;
-            /* lit_buffer is pre-allocated to chunk_size + ZXC_PAD_SIZE by
-             * zxc_cctx_init (mode == 0). */
-            if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) return ZXC_ERROR_CORRUPT_DATA;
-            const int rc =
-                zxc_huf_decode_section(p_curr, lit_stream_size, ctx->lit_buffer, required_size);
+            const int rc = zxc_decode_lit_pivco(ctx, p_curr, lit_stream_size, required_size);
             if (UNLIKELY(rc != ZXC_OK)) return rc;
             l_ptr = ctx->lit_buffer;
             l_end = ctx->lit_buffer + required_size;
@@ -469,15 +534,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             l_ptr = p_curr;
             l_end = p_curr;
         } else {
-            if (UNLIKELY(ctx->dict_huf_table == NULL)) return ZXC_ERROR_DICT_REQUIRED;
             if (UNLIKELY(required_size > dst_capacity || required_size > SIZE_MAX - ZXC_PAD_SIZE))
                 return ZXC_ERROR_DST_TOO_SMALL;
-            const size_t alloc_size = required_size + ZXC_PAD_SIZE;
-            /* lit_buffer is pre-allocated to chunk_size + ZXC_PAD_SIZE by
-             * zxc_cctx_init (mode == 0). */
-            if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) return ZXC_ERROR_CORRUPT_DATA;
-            const int rc = zxc_huf_decode_section_dict(p_curr, lit_stream_size, ctx->lit_buffer,
-                                                       required_size, ctx->dict_huf_table);
+            const int rc = zxc_decode_lit_pivco_dict(ctx, p_curr, lit_stream_size, required_size);
             if (UNLIKELY(rc != ZXC_OK)) return rc;
             l_ptr = ctx->lit_buffer;
             l_end = ctx->lit_buffer + required_size;
@@ -574,16 +633,27 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     const uint64_t expected_off_size =
         (gh.enc_off == 1) ? (uint64_t)gh.n_sequences : (uint64_t)gh.n_sequences * 2;
 
-    const uint8_t* t_ptr = p_curr;
-    const uint8_t* o_ptr = t_ptr + sz_tokens;
+    /* Offsets/extras follow the on-disk token SECTION; sz_tokens is its size
+     * (== n_sequences when RAW, the Huffman payload size when enc_litlen set). */
+    const uint8_t* o_ptr = p_curr + sz_tokens;
     const uint8_t* e_ptr = o_ptr + sz_offsets;
     const uint8_t* const e_end = e_ptr + sz_extras;  // For vbyte overflow detection
 
-    // Validate streams don't overflow source buffer +
-    // Validate stream sizes match sequence count (early rejection of malformed data)
-    if (UNLIKELY((e_end != src + src_size) || sz_tokens < gh.n_sequences ||
-                 (uint64_t)sz_offsets < expected_off_size))
+    // Validate streams don't overflow source buffer + match sequence count.
+    if (UNLIKELY((e_end != src + src_size) || (uint64_t)sz_offsets < expected_off_size))
         return ZXC_ERROR_CORRUPT_DATA;
+
+    const uint8_t* RESTRICT t_ptr;
+    if (!tok_entropy) {
+        /* enc_litlen == 2 was re-routed right after the header parse. */
+        if (UNLIKELY(sz_tokens < gh.n_sequences)) return ZXC_ERROR_CORRUPT_DATA;
+        t_ptr = p_curr;
+    } else {
+        if (UNLIKELY(gh.enc_litlen != ZXC_SECTION_ENCODING_HUFFMAN)) return ZXC_ERROR_CORRUPT_DATA;
+        const int rc = zxc_decode_tok_pivco(ctx, p_curr, sz_tokens, gh.n_sequences);
+        if (UNLIKELY(rc != ZXC_OK)) return rc;
+        t_ptr = ctx->tok_buffer;
+    }
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
@@ -1814,6 +1884,34 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
 }
 
 /**
+ * Cold specializations for entropy-coded GLO tokens (level 7). Each wrapper fixes
+ * tok_entropy=1 plus one (safe, has_dict) combo as compile-time constants, so the
+ * inlined impl is fully specialized and the RAW-token fast path stays untouched.
+ */
+static ZXC_NOINLINE int zxc_decode_block_glo_entropy(const zxc_cctx_t* RESTRICT ctx,
+                                                     const uint8_t* RESTRICT src,
+                                                     const size_t src_size, uint8_t* RESTRICT dst,
+                                                     const size_t dst_capacity) {
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 0, 1);
+}
+
+static ZXC_NOINLINE int zxc_decode_block_glo_entropy_dict(const zxc_cctx_t* RESTRICT ctx,
+                                                          const uint8_t* RESTRICT src,
+                                                          const size_t src_size,
+                                                          uint8_t* RESTRICT dst,
+                                                          const size_t dst_capacity) {
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 1, 1);
+}
+
+static ZXC_NOINLINE int zxc_decode_block_glo_entropy_safe(const zxc_cctx_t* RESTRICT ctx,
+                                                          const uint8_t* RESTRICT src,
+                                                          const size_t src_size,
+                                                          uint8_t* RESTRICT dst,
+                                                          const size_t dst_capacity) {
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 1, 0, 1);
+}
+
+/**
  * @brief Decode a no-dict GLO block (plain, inlinable path).
  *
  * Wrapper over @ref zxc_decode_block_glo_impl with @c safe=0, @c has_dict=0, so
@@ -1829,7 +1927,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
 static int zxc_decode_block_glo(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_size, uint8_t* RESTRICT dst,
                                 const size_t dst_capacity) {
-    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 0);
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 0, 0);
 }
 
 /**
@@ -1868,7 +1966,7 @@ static ZXC_NOINLINE int zxc_decode_block_glo_dict(const zxc_cctx_t* RESTRICT ctx
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
                                                   const size_t dst_capacity) {
-    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 1);
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 0, 1, 0);
 }
 
 /**
@@ -1909,7 +2007,7 @@ static ZXC_NOINLINE int zxc_decode_block_glo_safe(const zxc_cctx_t* RESTRICT ctx
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
                                                   const size_t dst_capacity) {
-    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 1, 0);
+    return zxc_decode_block_glo_impl(ctx, src, src_size, dst, dst_capacity, 1, 0, 0);
 }
 
 /**
