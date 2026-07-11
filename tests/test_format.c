@@ -145,6 +145,17 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
         return 0;
     }
 
+    /* Tree-at-attach: prebuild the shared table's tree/codes once, as
+     * zxc_cctx_attach_dict_huf does; the dict codec entry points take it. */
+    zxc_pivco_tree_t tree;
+    uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
+    uint8_t tree_len[ZXC_HUF_NUM_SYMBOLS];
+    if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len) != ZXC_OK ||
+        memcmp(tree_len, code_len, sizeof(tree_len)) != 0) {
+        printf("Failed [%s]: dict_tree_build\n", label);
+        return 0;
+    }
+
     const size_t cap = ZXC_HUF_TABLE_SIZE + 2 * n + 4096;
     uint8_t* enc = (uint8_t*)malloc(cap);
     uint8_t* enc_blk = (uint8_t*)malloc(cap);
@@ -155,7 +166,8 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
         goto fail;
     }
 
-    const int written = zxc_huf_encode_section_dict(literals, n, freq, code_len, enc, cap);
+    const int written =
+        zxc_huf_encode_section_dict(literals, n, freq, code_len, &tree, codes, enc, cap);
     if (written < 0) {
         printf("Failed [%s]: encode_section_dict -> %d\n", label, written);
         goto fail;
@@ -176,18 +188,18 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
         goto fail;
     }
 
-    if (zxc_huf_decode_section_dict(enc, (size_t)written, dec, n, packed, scr) != ZXC_OK ||
+    if (zxc_huf_decode_section_dict(enc, (size_t)written, dec, n, &tree, scr) != ZXC_OK ||
         memcmp(literals, dec, n) != 0) {
         printf("Failed [%s]: decode_section_dict roundtrip mismatch\n", label);
         goto fail;
     }
 
     /* Error paths: truncated payload, undersized dst_cap. */
-    if (zxc_huf_decode_section_dict(enc, 0, dec, n, packed, scr) == ZXC_OK) {
+    if (zxc_huf_decode_section_dict(enc, 0, dec, n, &tree, scr) == ZXC_OK) {
         printf("Failed [%s]: truncated payload accepted\n", label);
         goto fail;
     }
-    if (zxc_huf_encode_section_dict(literals, n, freq, code_len, enc, 4) !=
+    if (zxc_huf_encode_section_dict(literals, n, freq, code_len, &tree, codes, enc, 4) !=
         ZXC_ERROR_DST_TOO_SMALL) {
         printf("Failed [%s]: undersized dst_cap not rejected\n", label);
         goto fail;
@@ -252,8 +264,18 @@ int test_huffman_codec_dict() {
         buf[100] = '!'; /* unseen in training: no code assigned */
         freq['!']++;    /* keep the histogram in sync with the mutated buffer */
         uint8_t enc[1024];
-        if (zxc_huf_encode_section_dict(buf, 256, freq, code_len, enc, sizeof(enc)) !=
-            ZXC_ERROR_CORRUPT_DATA) {
+        zxc_pivco_tree_t tree;
+        uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
+        uint8_t packed[ZXC_HUF_TABLE_SIZE];
+        uint8_t tree_len[ZXC_HUF_NUM_SYMBOLS];
+        zxc_huf_pack_lengths(code_len, packed);
+        if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len) != ZXC_OK) {
+            printf("Failed: dict_tree_build (code-less literal case)\n");
+            free(buf);
+            return 0;
+        }
+        if (zxc_huf_encode_section_dict(buf, 256, freq, code_len, &tree, codes, enc,
+                                        sizeof(enc)) != ZXC_ERROR_CORRUPT_DATA) {
             printf("Failed: code-less literal not rejected by encode_section_dict\n");
             free(buf);
             return 0;

@@ -103,6 +103,8 @@ typedef struct {
     size_t off_opt;
     /* both modes: [dict | data] concat scratch, present only when dict_size > 0. */
     size_t off_dict;
+    /* both modes: dict Huffman tree-at-attach state, present only when dict_size > 0. */
+    size_t off_dict_huf;
     /* Sub-buffer sizes (re-used by the partitioning step + zero-init). */
     size_t sz_hash_pos;
     size_t sz_hash_tags;
@@ -222,6 +224,8 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
                                      : (dict_size + chunk_size + ZXC_DECOMPRESS_TAIL_PAD);
         layout.off_dict = layout.total;
         layout.total += ZXC_ALIGN_CL(layout.sz_dict);
+        layout.off_dict_huf = layout.total;
+        layout.total += ZXC_ALIGN_CL(sizeof(zxc_dict_huf_state_t));
     }
     return layout;
 }
@@ -292,6 +296,7 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
     if (dict_size > 0) {
         ctx->dict_buffer = mem + layout.off_dict;
         ctx->dict_buffer_cap = layout.sz_dict;
+        ctx->dict_huf = (zxc_dict_huf_state_t*)(void*)(mem + layout.off_dict_huf);
     }
 
     if (mode == 0) {
@@ -394,6 +399,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->pivco_scratch = NULL;
     ctx->opt_scratch = NULL;
     ctx->dict_buffer = NULL;
+    ctx->dict_huf = NULL;
 
     ctx->epoch = 0;
     ctx->lit_buffer_cap = 0;
@@ -403,16 +409,17 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->opt_scratch_cap = 0;
     ctx->dict_buffer_cap = 0;
     ctx->dict_size = 0;
-    ctx->dict_huf_lengths = NULL;
+    ctx->dict_huf_tree_ok = 0;
     ctx->lit_freq_acc = NULL;
 }
 
 /**
  * @brief Attach the shared dictionary literal Huffman table to a context.
  *
- * Validates the 128-byte packed code-lengths header and stores the pointer
- * (caller-owned, must outlive the context); the tree is (re)built from these
- * lengths at decode/estimate time, not here. A NULL @p lengths is a no-op.
+ * Validates the 128-byte packed code-lengths header and builds the dictionary's
+ * PivCo tree, canonical codes and code lengths ONCE into the context
+ * (tree-at-attach); per-block encode/estimate/decode reuse them. @p lengths need
+ * only be valid during this call (the tree is a copy). A NULL @p lengths is a no-op.
  *
  * @param[in,out] ctx      Initialised context to attach the table to.
  * @param[in]     lengths  128-byte packed code lengths, or NULL for a no-op.
@@ -421,7 +428,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
  */
 int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT lengths) {
     if (UNLIKELY(!ctx)) return ZXC_ERROR_NULL_INPUT;
-    ctx->dict_huf_lengths = lengths;
+    ctx->dict_huf_tree_ok = 0;
     if (lengths == NULL) return ZXC_OK;
 
     /* Empty (all-zero) table from a low-entropy corpus: treat it as "no shared table". */
@@ -432,15 +439,15 @@ int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT l
             break;
         }
     }
-    if (empty) {
-        ctx->dict_huf_lengths = NULL;
-        return ZXC_OK;
-    }
+    if (UNLIKELY(empty || ctx->dict_huf == NULL)) return ZXC_OK;
 
-    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-    const int rc = zxc_huf_unpack_lengths(lengths, code_len);
-    if (UNLIKELY(rc != ZXC_OK)) ctx->dict_huf_lengths = NULL;
-    return rc;
+    /* Tree-at-attach: unpack + build the PivCo tree and codes once here; the
+     * per-block encode/estimate/decode paths reuse them via the context. */
+    const int rc = zxc_huf_dict_tree_build(lengths, &ctx->dict_huf->tree, ctx->dict_huf->codes,
+                                           ctx->dict_huf->code_len);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    ctx->dict_huf_tree_ok = 1;
+    return ZXC_OK;
 }
 
 /*

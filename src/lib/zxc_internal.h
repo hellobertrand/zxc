@@ -586,6 +586,55 @@ extern "C" {
 #define ZXC_HUF_MAX_CODE_LEN_DENSITY 8
 /** @brief Alphabet size: one entry per possible byte value. */
 #define ZXC_HUF_NUM_SYMBOLS 256
+
+/** @brief Upper bound on PivCo tree nodes (full binary tree over the alphabet). */
+#define ZXC_PIVCO_MAX_NODES (2 * ZXC_HUF_NUM_SYMBOLS - 1)
+
+/** @brief One PivCo Huffman tree node. */
+typedef struct {
+    int16_t child[2]; /* node index, -1 = absent */
+    int16_t sym;      /* >= 0: leaf symbol; -1: internal */
+} zxc_pivco_node_t;
+
+/**
+ * @brief Canonical Huffman tree in PivCo (level-ordered) form.
+ *
+ * Derived deterministically from the 128-byte packed code lengths by
+ * zxc_huf_dict_tree_build / the section decoders; pure value type (index-based,
+ * no internal pointers), safe to copy or embed. Embedded in ::zxc_cctx_t so a
+ * dictionary's shared table is built ONCE at attach instead of per block.
+ */
+typedef struct {
+    zxc_pivco_node_t nd[ZXC_PIVCO_MAX_NODES];
+    int16_t bfs[ZXC_PIVCO_MAX_NODES]; /* node ids in BFS (== wire) order */
+    int16_t lvl_start[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2];
+    int n_nodes;
+    int max_depth;
+    /* Flat-subtree fast path: flat_d[nid] = D (>= 2) when nid roots a MAXIMAL
+     * complete subtree whose leaves all sit exactly D levels below it; such a
+     * node's wire run is its symbols' packed D-bit residual codes instead of
+     * D levels of partition bitmaps (same bit count, decode = unpack+lookup).
+     * covered[nid] = 1 for every strict descendant of a flat root: those nodes
+     * do not exist on the wire nor in the level buffers. Both sides derive
+     * this from the code lengths alone, so nothing is signalled. */
+    uint8_t flat_d[ZXC_PIVCO_MAX_NODES];
+    uint8_t covered[ZXC_PIVCO_MAX_NODES];
+} zxc_pivco_tree_t;
+
+/**
+ * @brief Frame-constant dictionary Huffman state, prebuilt once at attach.
+ *
+ * Bundles everything the per-block dict paths reuse: the PivCo @c tree (decoder
+ * + estimator), and the canonical @c codes / @c code_len (encoder). Carved from
+ * the context workspace only when @c dict_size > 0, so no-dict contexts pay
+ * nothing for it. Built by @ref zxc_huf_dict_tree_build via
+ * @c zxc_cctx_attach_dict_huf.
+ */
+typedef struct {
+    zxc_pivco_tree_t tree;                 /**< PivCo tree from the shared literal table. */
+    uint32_t codes[ZXC_HUF_NUM_SYMBOLS];   /**< Canonical codes (encoder side). */
+    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS]; /**< Unpacked code lengths. */
+} zxc_dict_huf_state_t;
 /** @brief RLE margin shift: source of the legacy below-ULTRA premium used by
  *         ::zxc_ss_prem_rle_q8 (256 >> shift reproduces the historical
  *         RLE-vs-RAW margin exactly). */
@@ -1423,20 +1472,32 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, size_t n_literals,
                            const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
                            uint8_t* RESTRICT dst, size_t dst_cap);
 
-/** @brief Encode a PivCo section against shared-dictionary code lengths (no header). */
+/** @brief Unpack a dict table's 128-byte packed lengths and prebuild its PivCo
+ *  tree, canonical codes and code lengths (tree-at-attach). All three outputs
+ *  are frame-constant; per-block encode/estimate/decode then skip the rebuild. */
+int zxc_huf_dict_tree_build(const uint8_t* RESTRICT packed_lengths, zxc_pivco_tree_t* RESTRICT tree,
+                            uint32_t* RESTRICT codes, uint8_t* RESTRICT code_len);
+
+/** @brief zxc_huf_calc_size for a dict section: prebuilt @p tree, no header. */
+size_t zxc_huf_calc_size_dict(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                              const zxc_pivco_tree_t* RESTRICT tree);
+
+/** @brief Encode a PivCo section against a prebuilt dict tree/codes (no header). */
 int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, size_t n_literals,
                                 const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
-                                uint8_t* RESTRICT dst, size_t dst_cap);
+                                const zxc_pivco_tree_t* RESTRICT tree,
+                                const uint32_t* RESTRICT codes, uint8_t* RESTRICT dst,
+                                size_t dst_cap);
 
 /** @brief Decode a PivCo literal section into @p dst (exactly @p n bytes).
  *  @p dst needs ZXC_PAD_SIZE slack, @p scratch at least n + ZXC_PIVCO_SCRATCH_PAD. */
 int zxc_huf_decode_section(const uint8_t* RESTRICT payload, size_t payload_size,
                            uint8_t* RESTRICT dst, size_t n, uint8_t* RESTRICT scratch);
 
-/** @brief Decode a PivCo dict section (code lengths from @p packed_lengths). */
+/** @brief Decode a PivCo dict section against a prebuilt dict @p tree. */
 int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, size_t payload_size,
                                 uint8_t* RESTRICT dst, size_t n,
-                                const uint8_t* RESTRICT packed_lengths, uint8_t* RESTRICT scratch);
+                                const zxc_pivco_tree_t* RESTRICT tree, uint8_t* RESTRICT scratch);
 
 /* ---------------------------------------------------------------------------
  * Compression / decompression context.
@@ -1483,32 +1544,34 @@ typedef struct {
     uint8_t* literals;       /**< Buffer for literal bytes. */
 
     /* Cold zone: configuration / scratch / resizeable. */
-    uint8_t* lit_buffer;             /**< Scratch buffer for literals (RLE / Huffman). */
-    size_t lit_buffer_cap;           /**< Current capacity of the scratch buffer. */
-    uint8_t* work_buf;               /**< Padded scratch buffer for buffer-API decompression. */
-    size_t work_buf_cap;             /**< Capacity of the work buffer. */
-    uint8_t* tok_buffer;             /**< Decode scratch for a Huffman-coded GLO token
-                                          section (enc_litlen == HUFFMAN); NULL on compress. */
-    size_t tok_buffer_cap;           /**< Capacity of tok_buffer in bytes. */
-    uint8_t* pivco_scratch;          /**< Level ping-pong scratch for PivCo decode. */
-    size_t pivco_scratch_cap;        /**< Capacity of pivco_scratch in bytes. */
-    uint8_t* opt_scratch;            /**< Optimal-parser DP scratch (level >= 6 only,
-                                          lazy-allocated, packs dp/parent_len/parent_off/actions).
-                                          Also reused as transient scratch for the
-                                          length-limited Huffman code-length builder. */
-    size_t opt_scratch_cap;          /**< Current capacity of opt_scratch in bytes. */
-    int checksum_enabled;            /**< 1 if checksum calculation/verification is enabled. */
-    int compression_level;           /**< Compression level. */
-    size_t dict_size;                /**< Dictionary prefill size (0 = no dictionary). */
-    uint8_t* dict_buffer;            /**< [dict | data] concat scratch carved from memory_block
-                                          when dict_size > 0 (NULL otherwise). */
-    size_t dict_buffer_cap;          /**< Capacity of dict_buffer in bytes (0 = none). */
-    const uint8_t* dict_huf_lengths; /**< Shared dictionary literal table: 128-byte
-                                          packed code-lengths header (NULL = none). Set via
-                                          zxc_cctx_attach_dict_huf; caller-owned memory. */
-    uint32_t* lit_freq_acc;          /**< Trainer hook: when non-NULL, the GLO encoder
-                                          accumulates post-LZ literal byte frequencies here
-                                          (256 entries). NULL outside dictionary training. */
+    uint8_t* lit_buffer;            /**< Scratch buffer for literals (RLE / Huffman). */
+    size_t lit_buffer_cap;          /**< Current capacity of the scratch buffer. */
+    uint8_t* work_buf;              /**< Padded scratch buffer for buffer-API decompression. */
+    size_t work_buf_cap;            /**< Capacity of the work buffer. */
+    uint8_t* tok_buffer;            /**< Decode scratch for a Huffman-coded GLO token
+                                         section (enc_litlen == HUFFMAN); NULL on compress. */
+    size_t tok_buffer_cap;          /**< Capacity of tok_buffer in bytes. */
+    uint8_t* pivco_scratch;         /**< Level ping-pong scratch for PivCo decode. */
+    size_t pivco_scratch_cap;       /**< Capacity of pivco_scratch in bytes. */
+    uint8_t* opt_scratch;           /**< Optimal-parser DP scratch (level >= 6 only,
+                                         lazy-allocated, packs dp/parent_len/parent_off/actions).
+                                         Also reused as transient scratch for the
+                                         length-limited Huffman code-length builder. */
+    size_t opt_scratch_cap;         /**< Current capacity of opt_scratch in bytes. */
+    int checksum_enabled;           /**< 1 if checksum calculation/verification is enabled. */
+    int compression_level;          /**< Compression level. */
+    size_t dict_size;               /**< Dictionary prefill size (0 = no dictionary). */
+    uint8_t* dict_buffer;           /**< [dict | data] concat scratch carved from memory_block
+                                         when dict_size > 0 (NULL otherwise). */
+    size_t dict_buffer_cap;         /**< Capacity of dict_buffer in bytes (0 = none). */
+    zxc_dict_huf_state_t* dict_huf; /**< Tree-at-attach state (PivCo tree + codes + code
+                                         lengths), carved from the workspace only when
+                                         dict_size > 0 (NULL otherwise); built once by
+                                         zxc_cctx_attach_dict_huf. Valid iff dict_huf_tree_ok. */
+    int dict_huf_tree_ok;           /**< 1 when *dict_huf is built and valid. */
+    uint32_t* lit_freq_acc;         /**< Trainer hook: when non-NULL, the GLO encoder
+                                         accumulates post-LZ literal byte frequencies here
+                                         (256 entries). NULL outside dictionary training. */
 
     /* Block-size derived parameters (computed once at init). */
     size_t chunk_size;    /**< Effective block size in bytes. */
