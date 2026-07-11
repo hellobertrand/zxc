@@ -1319,7 +1319,9 @@ fi
 # 33. Deferred Write Error (Linux-only: /dev/full reports ENOSPC on flush)
 #     (regression: fclose/fflush failures were ignored, truncated output
 #      was reported as success and the input file deleted)
-if [[ -w /dev/full ]]; then
+#     Cygwin/MSYS also expose /dev/full, but a NATIVE Windows child does not
+#     inherit its ENOSPC semantics (writes succeed), so require real Linux.
+if [[ "$(uname -s 2>/dev/null)" == "Linux" ]] && [[ -w /dev/full ]]; then
     set +e
     "$ZXC_BIN" -c -k -f "$TEST_FILE_ARG" > /dev/full 2>/dev/null
     RET=$?
@@ -1330,7 +1332,7 @@ if [[ -w /dev/full ]]; then
         log_fail "Write to full device should fail"
     fi
 else
-    echo "  [SKIP] /dev/full not available (Linux-only)"
+    echo "  [SKIP] deferred write-error check requires Linux /dev/full"
 fi
 
 # 34. Progress Display (--progress)
