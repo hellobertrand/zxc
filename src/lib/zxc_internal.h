@@ -620,6 +620,21 @@ typedef struct {
     uint8_t flat_d[ZXC_PIVCO_MAX_NODES];
     uint8_t covered[ZXC_PIVCO_MAX_NODES];
 } zxc_pivco_tree_t;
+
+/**
+ * @brief Frame-constant dictionary Huffman state, prebuilt once at attach.
+ *
+ * Bundles everything the per-block dict paths reuse: the PivCo @c tree (decoder
+ * + estimator), and the canonical @c codes / @c code_len (encoder). Carved from
+ * the context workspace only when @c dict_size > 0, so no-dict contexts pay
+ * nothing for it. Built by @ref zxc_huf_dict_tree_build via
+ * @c zxc_cctx_attach_dict_huf.
+ */
+typedef struct {
+    zxc_pivco_tree_t tree;                 /**< PivCo tree from the shared literal table. */
+    uint32_t codes[ZXC_HUF_NUM_SYMBOLS];   /**< Canonical codes (encoder side). */
+    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS]; /**< Unpacked code lengths. */
+} zxc_dict_huf_state_t;
 /** @brief RLE margin shift: source of the legacy below-ULTRA premium used by
  *         ::zxc_ss_prem_rle_q8 (256 >> shift reproduces the historical
  *         RLE-vs-RAW margin exactly). */
@@ -1549,17 +1564,14 @@ typedef struct {
     uint8_t* dict_buffer;           /**< [dict | data] concat scratch carved from memory_block
                                          when dict_size > 0 (NULL otherwise). */
     size_t dict_buffer_cap;         /**< Capacity of dict_buffer in bytes (0 = none). */
-    zxc_pivco_tree_t dict_huf_tree; /**< Tree-at-attach: PivCo tree prebuilt from the
-                                         dictionary's 128-byte shared literal table by
-                                         zxc_cctx_attach_dict_huf (valid iff dict_huf_tree_ok),
-                                         so per-block decode/estimate skip the rebuild. */
-    uint32_t dict_huf_codes[ZXC_HUF_NUM_SYMBOLS];   /**< Canonical codes of the dict table
-                                          (encoder side), built with the tree at attach. */
-    uint8_t dict_huf_code_len[ZXC_HUF_NUM_SYMBOLS]; /**< Unpacked dict code lengths (attach). */
-    int dict_huf_tree_ok;                           /**< 1 when the three fields above are valid. */
-    uint32_t* lit_freq_acc; /**< Trainer hook: when non-NULL, the GLO encoder
-                                 accumulates post-LZ literal byte frequencies here
-                                 (256 entries). NULL outside dictionary training. */
+    zxc_dict_huf_state_t* dict_huf; /**< Tree-at-attach state (PivCo tree + codes + code
+                                         lengths), carved from the workspace only when
+                                         dict_size > 0 (NULL otherwise); built once by
+                                         zxc_cctx_attach_dict_huf. Valid iff dict_huf_tree_ok. */
+    int dict_huf_tree_ok;           /**< 1 when *dict_huf is built and valid. */
+    uint32_t* lit_freq_acc;         /**< Trainer hook: when non-NULL, the GLO encoder
+                                         accumulates post-LZ literal byte frequencies here
+                                         (256 entries). NULL outside dictionary training. */
 
     /* Block-size derived parameters (computed once at init). */
     size_t chunk_size;    /**< Effective block size in bytes. */

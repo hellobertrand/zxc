@@ -1669,7 +1669,7 @@ parse_done:;
         /* zxc_huf_calc_size returns SIZE_MAX for unencodable candidates
          * (a literal byte without a code in the shared table). */
         huf_dict_total_size =
-            zxc_huf_calc_size_dict(lit_freq, ctx->dict_huf_code_len, &ctx->dict_huf_tree);
+            zxc_huf_calc_size_dict(lit_freq, ctx->dict_huf->code_len, &ctx->dict_huf->tree);
         if (huf_dict_total_size != SIZE_MAX) {
             /* Same J rule against the running winner: vs the per-block Huffman
              * candidate the equal entropy taxes cancel (pure size comparison),
@@ -1754,8 +1754,8 @@ parse_done:;
         p_curr += written;
     } else if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT) {
         const int written =
-            zxc_huf_encode_section_dict(literals, lit_c, lit_freq, ctx->dict_huf_code_len,
-                                        &ctx->dict_huf_tree, ctx->dict_huf_codes, p_curr, rem);
+            zxc_huf_encode_section_dict(literals, lit_c, lit_freq, ctx->dict_huf->code_len,
+                                        &ctx->dict_huf->tree, ctx->dict_huf->codes, p_curr, rem);
         if (UNLIKELY(written < 0)) return written;
         if (UNLIKELY((size_t)written != huf_dict_total_size)) return ZXC_ERROR_DST_TOO_SMALL;
         p_curr += written;
