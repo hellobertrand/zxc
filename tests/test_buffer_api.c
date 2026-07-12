@@ -153,6 +153,23 @@ int test_get_decompressed_size() {
     }
     printf("  [PASS] Invalid magic word\n");
 
+    // 4. Forged footer: an implausible size (far beyond what the archive's
+    //    block count could decode to) must return 0, not drive a huge
+    //    allocation in callers that size buffers from this value.
+    uint8_t* forged = malloc((size_t)comp_size);
+    memcpy(forged, compressed, (size_t)comp_size);
+    uint8_t* footer_size = forged + comp_size - ZXC_FILE_FOOTER_SIZE;
+    for (int i = 0; i < 8; i++) footer_size[i] = 0xFF; // size = 2^64 - 1
+    if (zxc_get_decompressed_size(forged, (size_t)comp_size) != 0) {
+        printf("Failed: Should return 0 for a forged (implausible) footer size\n");
+        free(forged);
+        free(src);
+        free(compressed);
+        return 0;
+    }
+    free(forged);
+    printf("  [PASS] Forged footer size rejected\n");
+
     printf("PASS\n\n");
     free(src);
     free(compressed);

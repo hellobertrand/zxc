@@ -435,6 +435,12 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
         for (int l = 1; l <= ZXC_HUF_MAX_CODE_LEN_ULTRA; l++)
             kraft += bl_count[l] << (ZXC_HUF_MAX_CODE_LEN_ULTRA - l);
         if (UNLIKELY(kraft != (1U << ZXC_HUF_MAX_CODE_LEN_ULTRA))) return -1;
+    } else {
+        /* Degenerate single-symbol table: the format requires the lone symbol
+         * to have code length exactly 1 (FORMAT.md, decoder validation
+         * requirements); the encoder never emits anything else. Reject longer
+         * unary chains. */
+        if (UNLIKELY(bl_count[1] != 1)) return -1;
     }
 
     uint32_t next_code[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2] = {0};
@@ -592,32 +598,24 @@ static ZXC_ALWAYS_INLINE size_t zxc_pivco_run_bytes(const uint32_t count, const 
 
 size_t zxc_huf_calc_size(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
                          const int with_header) {
+    zxc_pivco_tree_t t;
+    if (UNLIKELY(zxc_pivco_tree_build(code_len, &t, NULL) != 0)) return SIZE_MAX;
+    const size_t body = zxc_huf_calc_size_dict(freq, code_len, &t);
+    if (UNLIKELY(body == SIZE_MAX)) return SIZE_MAX;
+    return body + (with_header ? (size_t)ZXC_HUF_TABLE_SIZE : 0);
+}
+
+/**
+ * @brief Sizing core shared with zxc_huf_calc_size: exact payload size of one
+ *        PivCo section for a prebuilt tree (tree-at-attach dict sections call
+ *        it directly; they carry no inline lengths header).
+ */
+size_t zxc_huf_calc_size_dict(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
+                              const zxc_pivco_tree_t* RESTRICT tree) {
     /* Encodability is part of the estimate: a histogram symbol without a
      * code (dict table not covering this block) has no leaf, so the counts
      * below would silently ignore it and undercount. Such a candidate cannot
      * be emitted -- report it as unencodable instead. */
-    for (int k = 0; k < ZXC_HUF_NUM_SYMBOLS; k++)
-        if (UNLIKELY(freq[k] != 0 && code_len[k] == 0)) return SIZE_MAX;
-    zxc_pivco_tree_t t;
-    if (UNLIKELY(zxc_pivco_tree_build(code_len, &t, NULL) != 0)) return SIZE_MAX;
-    uint32_t count[ZXC_PIVCO_MAX_NODES];
-    zxc_pivco_counts(&t, freq, count);
-    size_t total = with_header ? (size_t)ZXC_HUF_TABLE_SIZE : 0;
-    for (int i = 0; i < t.n_nodes; i++) {
-        const int nid = t.bfs[i];
-        if (t.covered[nid] || t.nd[nid].sym >= 0) continue;
-        total += zxc_pivco_run_bytes(count[nid], t.flat_d[nid]);
-    }
-    return total;
-}
-
-/**
- * @brief zxc_huf_calc_size for a dict section: same exact-size rule, but the
- *        tree comes prebuilt from the context (tree-at-attach) and the section
- *        has no inline lengths header.
- */
-size_t zxc_huf_calc_size_dict(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
-                              const zxc_pivco_tree_t* RESTRICT tree) {
     for (int k = 0; k < ZXC_HUF_NUM_SYMBOLS; k++)
         if (UNLIKELY(freq[k] != 0 && code_len[k] == 0)) return SIZE_MAX;
     uint32_t count[ZXC_PIVCO_MAX_NODES];
@@ -752,18 +750,80 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n
 }
 
 /**
+ * @brief Precompute the topology-derived decoder tables for @p t.
+ *
+ * Mirrors exactly what zxc_pivco_decode_core builds inline for per-section
+ * trees: the leaf-pair skip flags, and each flat root's packed-code -> symbol
+ * table (bit j of the code = branch taken at subtree level j). Both depend
+ * only on the tree, so a frame-constant (dictionary) tree computes them once
+ * here instead of once per decoded section.
+ */
+static void zxc_pivco_decode_aux_build(const zxc_pivco_tree_t* RESTRICT t,
+                                       zxc_pivco_decode_aux_t* RESTRICT aux) {
+    ZXC_MEMSET(aux->skip, 0, sizeof(aux->skip));
+    for (int i = 0; i < t->n_nodes; i++) {
+        const zxc_pivco_node_t* nd = &t->nd[t->bfs[i]];
+        if (nd->sym >= 0) continue;
+        const int ch0 = nd->child[0];
+        const int ch1 = nd->child[1];
+        if (ch0 >= 0 && ch1 >= 0 && t->nd[ch0].sym >= 0 && t->nd[ch1].sym >= 0) {
+            aux->skip[ch0] = 1;
+            aux->skip[ch1] = 1;
+        }
+    }
+
+    /* Flat subtrees have disjoint leaves, so the concatenated tables fit in
+     * ZXC_HUF_NUM_SYMBOLS pool entries (see zxc_pivco_decode_aux_t). */
+    uint32_t pool_off = 0;
+    for (int i = 0; i < t->n_nodes; i++) {
+        const int nid = t->bfs[i];
+        if (t->covered[nid] || !t->flat_d[nid]) continue;
+        aux->c2s_off[nid] = (uint16_t)pool_off;
+        uint8_t* const c2s = aux->c2s_pool + pool_off;
+        pool_off += 1U << t->flat_d[nid];
+        int16_t stk_n[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
+        uint16_t stk_p[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
+        uint8_t stk_l[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
+        int sp = 0;
+        stk_n[0] = (int16_t)nid;
+        stk_p[0] = 0;
+        stk_l[0] = 0;
+        while (sp >= 0) {
+            const int cn = stk_n[sp];
+            const uint32_t cp = stk_p[sp];
+            const int cl = stk_l[sp];
+            sp--;
+            if (t->nd[cn].sym >= 0) {
+                c2s[cp] = (uint8_t)t->nd[cn].sym;
+                continue;
+            }
+            sp++;
+            stk_n[sp] = t->nd[cn].child[0];
+            stk_p[sp] = (uint16_t)cp;
+            stk_l[sp] = (uint8_t)(cl + 1);
+            sp++;
+            stk_n[sp] = t->nd[cn].child[1];
+            stk_p[sp] = (uint16_t)(cp | (1U << cl));
+            stk_l[sp] = (uint8_t)(cl + 1);
+        }
+    }
+}
+
+/**
  * @brief Prebuild a dict table's decode/encode state (tree-at-attach).
  *
- * Unpacks the 128-byte packed lengths and builds the PivCo tree and canonical
- * codes once; the outputs are frame-constant, so per-block encode, estimate and
- * decode reuse them instead of rebuilding (the pre-v7 cached-decode-table form,
- * restored for the PivCo layout).
+ * Unpacks the 128-byte packed lengths and builds the PivCo tree, canonical
+ * codes and decoder tables once; the outputs are frame-constant, so per-block
+ * encode, estimate and decode reuse them instead of rebuilding (the pre-v7
+ * cached-decode-table form, restored for the PivCo layout).
  */
 int zxc_huf_dict_tree_build(const uint8_t* RESTRICT packed_lengths, zxc_pivco_tree_t* RESTRICT tree,
-                            uint32_t* RESTRICT codes, uint8_t* RESTRICT code_len) {
+                            uint32_t* RESTRICT codes, uint8_t* RESTRICT code_len,
+                            zxc_pivco_decode_aux_t* RESTRICT aux) {
     const int rc = zxc_huf_unpack_lengths(packed_lengths, code_len);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     if (UNLIKELY(zxc_pivco_tree_build(code_len, tree, codes) != 0)) return ZXC_ERROR_CORRUPT_DATA;
+    zxc_pivco_decode_aux_build(tree, aux);
     return ZXC_OK;
 }
 
@@ -1390,10 +1450,16 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_emit_leaf_pair(uint8_t* RESTRICT out, co
  * symbol counts. Pass 2 rebuilds sequences bottom-up, one level at a time,
  * ping-ponging between dst (even depths, depth 0 = final output) and scratch
  * (odd depths); a level's writes never alias its reads.
+ *
+ * @p aux carries the topology-derived tables (leaf-pair skip flags, flat-root
+ * c2s) precomputed at attach for a frame-constant dictionary tree; NULL for
+ * per-section trees, which rebuild them inline below.
  */
 static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t payload_size,
                                  uint8_t* RESTRICT dst, const size_t n,
-                                 const zxc_pivco_tree_t* RESTRICT t, uint8_t* RESTRICT scratch) {
+                                 const zxc_pivco_tree_t* RESTRICT t,
+                                 const zxc_pivco_decode_aux_t* RESTRICT aux,
+                                 uint8_t* RESTRICT scratch) {
     if (UNLIKELY(n == 0)) return ZXC_ERROR_CORRUPT_DATA;
 
     /* Pass 1: node counts + bit-run pointers, straight from the wire order. */
@@ -1463,18 +1529,25 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
     }
 
     /* Leaf-pair parents emit both runs directly from their bits (XOR-blend),
-     * so their children never need materialising: flag them for skipping. */
-    uint8_t skip[ZXC_PIVCO_MAX_NODES];
-    ZXC_MEMSET(skip, 0, sizeof(skip));
-    for (int i = 0; i < t->n_nodes; i++) {
-        const zxc_pivco_node_t* nd = &t->nd[t->bfs[i]];
-        if (nd->sym >= 0) continue;
-        const int ch0 = nd->child[0];
-        const int ch1 = nd->child[1];
-        if (ch0 >= 0 && ch1 >= 0 && t->nd[ch0].sym >= 0 && t->nd[ch1].sym >= 0) {
-            skip[ch0] = 1;
-            skip[ch1] = 1;
+     * so their children never need materialising: flag them for skipping.
+     * A dictionary tree carries these flags precomputed in aux. */
+    uint8_t skip_local[ZXC_PIVCO_MAX_NODES];
+    const uint8_t* skip;
+    if (aux) {
+        skip = aux->skip;
+    } else {
+        ZXC_MEMSET(skip_local, 0, sizeof(skip_local));
+        for (int i = 0; i < t->n_nodes; i++) {
+            const zxc_pivco_node_t* nd = &t->nd[t->bfs[i]];
+            if (nd->sym >= 0) continue;
+            const int ch0 = nd->child[0];
+            const int ch1 = nd->child[1];
+            if (ch0 >= 0 && ch1 >= 0 && t->nd[ch0].sym >= 0 && t->nd[ch1].sym >= 0) {
+                skip_local[ch0] = 1;
+                skip_local[ch1] = 1;
+            }
         }
+        skip = skip_local;
     }
 
     /* Pass 2: bottom-up level reconstruction. */
@@ -1490,34 +1563,41 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
             if (nd->sym >= 0) {
                 ZXC_MEMSET(buf_d + seq_off[nid], (uint8_t)nd->sym, c);
             } else if (t->flat_d[nid]) {
-                /* Build the packed-path -> symbol table (complete subtree of
-                 * depth D: 2^D leaves), then unpack the code run directly. */
+                /* Packed-path -> symbol table (complete subtree of depth D:
+                 * 2^D leaves): precomputed at attach for a dictionary tree,
+                 * else built here, then unpack the code run directly. */
                 const int D = t->flat_d[nid];
-                uint8_t c2s[1U << ZXC_HUF_MAX_CODE_LEN_ULTRA];
-                int16_t stk_n[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
-                uint16_t stk_p[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
-                uint8_t stk_l[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
-                int sp = 0;
-                stk_n[0] = (int16_t)nid;
-                stk_p[0] = 0;
-                stk_l[0] = 0;
-                while (sp >= 0) {
-                    const int cn = stk_n[sp];
-                    const uint32_t cp = stk_p[sp];
-                    const int cl = stk_l[sp];
-                    sp--;
-                    if (t->nd[cn].sym >= 0) {
-                        c2s[cp] = (uint8_t)t->nd[cn].sym;
-                        continue;
+                uint8_t c2s_local[1U << ZXC_HUF_MAX_CODE_LEN_ULTRA];
+                const uint8_t* c2s;
+                if (aux) {
+                    c2s = aux->c2s_pool + aux->c2s_off[nid];
+                } else {
+                    int16_t stk_n[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
+                    uint16_t stk_p[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
+                    uint8_t stk_l[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
+                    int sp = 0;
+                    stk_n[0] = (int16_t)nid;
+                    stk_p[0] = 0;
+                    stk_l[0] = 0;
+                    while (sp >= 0) {
+                        const int cn = stk_n[sp];
+                        const uint32_t cp = stk_p[sp];
+                        const int cl = stk_l[sp];
+                        sp--;
+                        if (t->nd[cn].sym >= 0) {
+                            c2s_local[cp] = (uint8_t)t->nd[cn].sym;
+                            continue;
+                        }
+                        sp++;
+                        stk_n[sp] = t->nd[cn].child[0];
+                        stk_p[sp] = (uint16_t)cp;
+                        stk_l[sp] = (uint8_t)(cl + 1);
+                        sp++;
+                        stk_n[sp] = t->nd[cn].child[1];
+                        stk_p[sp] = (uint16_t)(cp | (1U << cl));
+                        stk_l[sp] = (uint8_t)(cl + 1);
                     }
-                    sp++;
-                    stk_n[sp] = t->nd[cn].child[0];
-                    stk_p[sp] = (uint16_t)cp;
-                    stk_l[sp] = (uint8_t)(cl + 1);
-                    sp++;
-                    stk_n[sp] = t->nd[cn].child[1];
-                    stk_p[sp] = (uint16_t)(cp | (1U << cl));
-                    stk_l[sp] = (uint8_t)(cl + 1);
+                    c2s = c2s_local;
                 }
                 zxc_pivco_unpack_flat(buf_d + seq_off[nid], c, D, bit_ptr[nid], c2s);
             } else {
@@ -1561,18 +1641,21 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload
     zxc_pivco_tree_t t;
     if (UNLIKELY(zxc_pivco_tree_build(code_len, &t, NULL) != 0)) return ZXC_ERROR_CORRUPT_DATA;
     return zxc_pivco_decode_core(payload + ZXC_HUF_TABLE_SIZE, payload_size - ZXC_HUF_TABLE_SIZE,
-                                 dst, n, &t, scratch);
+                                 dst, n, &t, NULL, scratch);
 }
 
 /**
  * @brief Decode a shared-dictionary literal section (no inline header).
  *
  * Same as @ref zxc_huf_decode_section, but against the dictionary's PivCo
- * @p tree, prebuilt ONCE at attach time by @ref zxc_huf_dict_tree_build
- * (wire value enc_lit = 3) -- no per-block unpack or tree rebuild.
+ * @p tree and decoder tables @p aux, prebuilt ONCE at attach time by
+ * @ref zxc_huf_dict_tree_build (wire value enc_lit = 3) -- no per-block
+ * unpack, tree rebuild, or c2s/skip rebuild.
  */
 int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
                                 uint8_t* RESTRICT dst, const size_t n,
-                                const zxc_pivco_tree_t* RESTRICT tree, uint8_t* RESTRICT scratch) {
-    return zxc_pivco_decode_core(payload, payload_size, dst, n, tree, scratch);
+                                const zxc_pivco_tree_t* RESTRICT tree,
+                                const zxc_pivco_decode_aux_t* RESTRICT aux,
+                                uint8_t* RESTRICT scratch) {
+    return zxc_pivco_decode_core(payload, payload_size, dst, n, tree, aux, scratch);
 }

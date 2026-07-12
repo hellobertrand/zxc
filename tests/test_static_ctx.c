@@ -255,6 +255,86 @@ int test_static_ctx_block_size_locked(void) {
     return 1;
 }
 
+/* Regression: a static cctx carved below ZXC_LEVEL_DENSITY has no opt_scratch
+ * and its workspace cannot grow. A per-call raise into the optimal-parser tier
+ * must be rejected with ZXC_ERROR_BAD_LEVEL - before the fix it silently
+ * heap-allocated a replacement workspace (violating the no-allocation
+ * contract) and leaked it, or crashed on the NULL scratch via the frame API. */
+int test_static_ctx_level_raise_rejected(void) {
+    printf("=== TEST: Static Context API - level raise rejected ===\n");
+
+    const size_t pinned_bs = 64 * 1024;
+    const size_t ws_sz = zxc_static_cctx_workspace_size(pinned_bs, ZXC_LEVEL_DEFAULT);
+    void* const ws = test_aligned_alloc(64, ws_sz);
+    if (!ws) {
+        printf("  [FAIL] aligned_alloc\n");
+        return 0;
+    }
+
+    zxc_compress_opts_t opts = {.level = ZXC_LEVEL_DEFAULT, .block_size = pinned_bs};
+    zxc_cctx* const cctx = zxc_init_static_cctx(ws, ws_sz, &opts);
+    if (!cctx) {
+        printf("  [FAIL] init_static_cctx\n");
+        test_aligned_free(ws);
+        return 0;
+    }
+
+    uint8_t src[256] = {0};
+    uint8_t dst[1024];
+
+    /* Frame API: raise to 7 must fail cleanly. */
+    zxc_compress_opts_t raise = {.level = ZXC_LEVEL_ULTRA, .block_size = pinned_bs};
+    const int64_t rc = zxc_compress_cctx(cctx, src, sizeof(src), dst, sizeof(dst), &raise);
+    if (rc != ZXC_ERROR_BAD_LEVEL) {
+        printf("  [FAIL] frame raise: expected ZXC_ERROR_BAD_LEVEL, got %lld\n", (long long)rc);
+        goto fail;
+    }
+
+    /* Block API: raise to 6 must fail cleanly too. */
+    zxc_compress_opts_t raise6 = {.level = ZXC_LEVEL_DENSITY, .block_size = pinned_bs};
+    const int64_t rc2 = zxc_compress_block(cctx, src, sizeof(src), dst, sizeof(dst), &raise6);
+    if (rc2 != ZXC_ERROR_BAD_LEVEL) {
+        printf("  [FAIL] block raise: expected ZXC_ERROR_BAD_LEVEL, got %lld\n", (long long)rc2);
+        goto fail;
+    }
+
+    /* The context is still usable at its pinned level afterwards. */
+    const int64_t rc3 = zxc_compress_cctx(cctx, src, sizeof(src), dst, sizeof(dst), NULL);
+    if (rc3 <= 0) {
+        printf("  [FAIL] pinned-level compress after rejection returned %lld\n", (long long)rc3);
+        goto fail;
+    }
+
+    /* A static workspace carved AT the dense tier accepts its own level. */
+    {
+        const size_t ws7_sz = zxc_static_cctx_workspace_size(pinned_bs, ZXC_LEVEL_ULTRA);
+        void* const ws7 = test_aligned_alloc(64, ws7_sz);
+        if (!ws7) {
+            printf("  [FAIL] aligned_alloc (level 7 ws)\n");
+            goto fail;
+        }
+        zxc_compress_opts_t opts7 = {.level = ZXC_LEVEL_ULTRA, .block_size = pinned_bs};
+        zxc_cctx* const cctx7 = zxc_init_static_cctx(ws7, ws7_sz, &opts7);
+        if (!cctx7 ||
+            zxc_compress_cctx(cctx7, src, sizeof(src), dst, sizeof(dst), &opts7) <= 0) {
+            printf("  [FAIL] level-7 static cctx should compress at level 7\n");
+            test_aligned_free(ws7);
+            goto fail;
+        }
+        test_aligned_free(ws7);
+    }
+
+    zxc_free_cctx(cctx);
+    test_aligned_free(ws);
+    printf("  [PASS] dense-tier raise rejected, pinned level still works\n");
+    return 1;
+
+fail:
+    zxc_free_cctx(cctx);
+    test_aligned_free(ws);
+    return 0;
+}
+
 /* Verify NULL inputs are gracefully rejected. */
 int test_static_ctx_null_inputs(void) {
     printf("=== TEST: Static Context API - NULL inputs ===\n");

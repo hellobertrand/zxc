@@ -73,7 +73,7 @@ replaces the layout with **Pivoted Coding Huffman** (level-ordered Huffman):
     AVX-512-VBMI2, a 2-instruction merge). No gather instructions, no
     per-symbol dependency chain; throughput scales with SIMD width.
 *   **Flat-subtree fast path (format rule)**: perfect subtrees whose leaves
-    all sit at relative depth `D ∈ {2, 4, ≥ 7}` skip the per-level bitmaps and
+    all sit at the same relative depth `D ≥ 2` skip the per-level bitmaps and
     store packed `D`-bit residual codes instead (FORMAT.md § 5.2.1). Dense
     tree regions — the common case for 8-bit-capped level-6 tables — then
     decode by direct table unpacking instead of `D` merge rounds.
@@ -954,7 +954,7 @@ Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with GCC 
 
 For integrators that hold the whole archive in RAM — firmware unpackers, game asset loaders, FOTA payloads — ZXC decompresses **inside a single buffer**, removing the second (output) allocation entirely. The compressed archive is placed **flush-right** in a buffer of size `zxc_decompress_inplace_bound(...)`, and `zxc_decompress_inplace()` decodes left-to-right into the same memory.
 
-The safety argument is exact. Decompression consumes `c` compressed bytes and produces `d ≥ c` decompressed bytes (a ZXC block never expands — it falls back to a RAW block otherwise), so the gap between the flush-right read cursor and the left-to-right write cursor shrinks *monotonically* and reaches its minimum only at the very end. Per block, safety requires `output_through_k + wild_copy_pad ≤ compressed_start_of_block_k`, which holds for every block once the buffer carries a margin of one block plus the decoder's wild-copy tail (`block_size + ZXC_DECOMPRESS_TAIL_PAD`). The bound is derived from the archive header (block size) and footer (decompressed size) without decoding; an undersized buffer is rejected (`ZXC_ERROR_DST_TOO_SMALL`), never allowed to corrupt.
+The safety argument is exact. Decompression consumes `c` compressed bytes and produces `d ≥ c` decompressed bytes per block payload (a ZXC block never expands — it falls back to a RAW block otherwise), but each block also carries its framing (header + optional checksum), so on incompressible input the compressed stream runs `nblocks × framing` bytes longer than the output. Per block, safety requires `output_through_k + wild_copy_pad ≤ compressed_start_of_block_k`, which holds for every block once the buffer carries a margin of one block plus the accumulated per-block framing plus the decoder's wild-copy tail (`block_size + nblocks × (header + optional checksum) + footer + ZXC_DECOMPRESS_TAIL_PAD`). The bound is derived from the archive header (block size) and footer (decompressed size) without decoding; an undersized buffer is rejected (`ZXC_ERROR_DST_TOO_SMALL`), never allowed to corrupt.
 
 Peak decode memory therefore drops from *compressed + decompressed* to *decompressed + ~1 %*. This mirrors the in-place decode modes of LZ4 (`LZ4_DECOMPRESS_INPLACE_MARGIN`) and Zstd (decompression margin) — a library capability for embedded integration, orthogonal to the streaming CLI, whose block-at-a-time decode is already memory-bounded. Dictionary archives are supported (they resolve through the context's own bounce buffer, which does not alias the in-place buffer).
 

@@ -145,12 +145,14 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
         return 0;
     }
 
-    /* Tree-at-attach: prebuild the shared table's tree/codes once, as
-     * zxc_cctx_attach_dict_huf does; the dict codec entry points take it. */
+    /* Tree-at-attach: prebuild the shared table's tree/codes/decoder tables
+     * once, as zxc_cctx_attach_dict_huf does; the dict codec entry points
+     * take them. */
     zxc_pivco_tree_t tree;
+    zxc_pivco_decode_aux_t aux;
     uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
     uint8_t tree_len[ZXC_HUF_NUM_SYMBOLS];
-    if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len) != ZXC_OK ||
+    if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len, &aux) != ZXC_OK ||
         memcmp(tree_len, code_len, sizeof(tree_len)) != 0) {
         printf("Failed [%s]: dict_tree_build\n", label);
         return 0;
@@ -188,14 +190,14 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
         goto fail;
     }
 
-    if (zxc_huf_decode_section_dict(enc, (size_t)written, dec, n, &tree, scr) != ZXC_OK ||
+    if (zxc_huf_decode_section_dict(enc, (size_t)written, dec, n, &tree, &aux, scr) != ZXC_OK ||
         memcmp(literals, dec, n) != 0) {
         printf("Failed [%s]: decode_section_dict roundtrip mismatch\n", label);
         goto fail;
     }
 
     /* Error paths: truncated payload, undersized dst_cap. */
-    if (zxc_huf_decode_section_dict(enc, 0, dec, n, &tree, scr) == ZXC_OK) {
+    if (zxc_huf_decode_section_dict(enc, 0, dec, n, &tree, &aux, scr) == ZXC_OK) {
         printf("Failed [%s]: truncated payload accepted\n", label);
         goto fail;
     }
@@ -265,11 +267,12 @@ int test_huffman_codec_dict() {
         freq['!']++;    /* keep the histogram in sync with the mutated buffer */
         uint8_t enc[1024];
         zxc_pivco_tree_t tree;
+        zxc_pivco_decode_aux_t aux;
         uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
         uint8_t packed[ZXC_HUF_TABLE_SIZE];
         uint8_t tree_len[ZXC_HUF_NUM_SYMBOLS];
         zxc_huf_pack_lengths(code_len, packed);
-        if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len) != ZXC_OK) {
+        if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len, &aux) != ZXC_OK) {
             printf("Failed: dict_tree_build (code-less literal case)\n");
             free(buf);
             return 0;
@@ -284,6 +287,46 @@ int test_huffman_codec_dict() {
     }
 
     free(buf);
+    printf("PASS\n\n");
+    return 1;
+}
+
+/* Regression: a degenerate single-symbol table must carry code_len == 1
+ * (FORMAT.md, decoder validation requirements). The v6 decoder rejected a
+ * lone symbol with a longer length; the v7 rewrite briefly accepted it. */
+int test_huffman_single_symbol_validation() {
+    printf("=== TEST: Unit - Huffman single-symbol table validation ===\n");
+
+    zxc_pivco_tree_t tree;
+    zxc_pivco_decode_aux_t aux;
+    uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
+    uint8_t tree_len[ZXC_HUF_NUM_SYMBOLS];
+    uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+    uint8_t packed[ZXC_HUF_TABLE_SIZE];
+
+    /* Lone symbol with code length 1: the only legal degenerate form. */
+    memset(code_len, 0, sizeof(code_len));
+    code_len['A'] = 1;
+    zxc_huf_pack_lengths(code_len, packed);
+    if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len, &aux) != ZXC_OK) {
+        printf("Failed: single symbol with code_len=1 must be accepted\n");
+        return 0;
+    }
+    printf("  [PASS] single symbol, code_len=1 accepted\n");
+
+    /* Lone symbol with any longer length is declared corrupt by the format. */
+    for (int len = 2; len <= ZXC_HUF_MAX_CODE_LEN_ULTRA; len++) {
+        memset(code_len, 0, sizeof(code_len));
+        code_len['A'] = (uint8_t)len;
+        zxc_huf_pack_lengths(code_len, packed);
+        if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len, &aux) !=
+            ZXC_ERROR_CORRUPT_DATA) {
+            printf("Failed: single symbol with code_len=%d must be rejected\n", len);
+            return 0;
+        }
+    }
+    printf("  [PASS] single symbol, code_len 2..%d rejected\n", ZXC_HUF_MAX_CODE_LEN_ULTRA);
+
     printf("PASS\n\n");
     return 1;
 }

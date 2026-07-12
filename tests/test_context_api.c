@@ -86,6 +86,96 @@ fail:
     return 0;
 }
 
+/* Regression: a cctx created below ZXC_LEVEL_DENSITY has no opt_scratch; a
+ * per-call level raise into the optimal-parser tier must re-init the inner
+ * buffers instead of dereferencing the NULL scratch (crash before the fix).
+ * Also covers the new out-of-range level validation (ZXC_ERROR_BAD_LEVEL). */
+int test_cctx_level_raise_reinit() {
+    printf("=== TEST: Opaque Context API - level raise re-init + level validation ===\n");
+
+    const size_t src_sz = 8192;
+    uint8_t* src = malloc(src_sz);
+    const size_t comp_cap = (size_t)zxc_compress_bound(src_sz);
+    uint8_t* comp = malloc(comp_cap);
+    uint8_t* dec = malloc(src_sz);
+    zxc_cctx* cctx = NULL;
+    zxc_dctx* dctx = NULL;
+    if (!src || !comp || !dec) goto fail;
+    gen_lz_data(src, src_sz);
+
+    /* 1. Eager init at level 3 (no opt_scratch), then raise to 7 in place. */
+    zxc_compress_opts_t create_opts = {.level = 3, .checksum_enabled = 0};
+    cctx = zxc_create_cctx(&create_opts);
+    dctx = zxc_create_dctx();
+    if (!cctx || !dctx) {
+        printf("  [FAIL] create returned NULL\n");
+        goto fail;
+    }
+    zxc_compress_opts_t raise = {.level = ZXC_LEVEL_ULTRA, .checksum_enabled = 0};
+    const int64_t csz = zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &raise);
+    if (csz <= 0) {
+        printf("  [FAIL] level-7 raise on level-3 cctx returned %lld\n", (long long)csz);
+        goto fail;
+    }
+    const int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, src_sz, NULL);
+    if (dsz != (int64_t)src_sz || memcmp(src, dec, src_sz) != 0) {
+        printf("  [FAIL] roundtrip after level raise (dsz=%lld)\n", (long long)dsz);
+        goto fail;
+    }
+    printf("  [PASS] level 3 -> 7 raise re-inits and roundtrips\n");
+
+    /* 2. Same raise through the block API on a fresh low-level cctx. */
+    zxc_free_cctx(cctx);
+    cctx = zxc_create_cctx(&create_opts);
+    if (!cctx) {
+        printf("  [FAIL] re-create returned NULL\n");
+        goto fail;
+    }
+    zxc_compress_opts_t raise6 = {.level = ZXC_LEVEL_DENSITY, .checksum_enabled = 0};
+    const int64_t bsz = zxc_compress_block(cctx, src, src_sz, comp, comp_cap, &raise6);
+    if (bsz <= 0) {
+        printf("  [FAIL] level-6 block raise returned %lld\n", (long long)bsz);
+        goto fail;
+    }
+    printf("  [PASS] level 3 -> 6 raise through the block API\n");
+
+    /* 3. Out-of-range levels are rejected, not silently clamped to ULTRA. */
+    zxc_compress_opts_t bad = {.level = 99, .checksum_enabled = 0};
+    if (zxc_compress(src, src_sz, comp, comp_cap, &bad) != ZXC_ERROR_BAD_LEVEL) {
+        printf("  [FAIL] zxc_compress(level=99) must return ZXC_ERROR_BAD_LEVEL\n");
+        goto fail;
+    }
+    if (zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &bad) != ZXC_ERROR_BAD_LEVEL) {
+        printf("  [FAIL] zxc_compress_cctx(level=99) must return ZXC_ERROR_BAD_LEVEL\n");
+        goto fail;
+    }
+    if (zxc_compress_block(cctx, src, src_sz, comp, comp_cap, &bad) != ZXC_ERROR_BAD_LEVEL) {
+        printf("  [FAIL] zxc_compress_block(level=99) must return ZXC_ERROR_BAD_LEVEL\n");
+        goto fail;
+    }
+    if (zxc_create_cctx(&bad) != NULL) {
+        printf("  [FAIL] zxc_create_cctx(level=99) must return NULL\n");
+        goto fail;
+    }
+    printf("  [PASS] level 99 rejected across entry points\n");
+
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    free(src);
+    free(comp);
+    free(dec);
+    printf("PASS\n\n");
+    return 1;
+
+fail:
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    free(src);
+    free(comp);
+    free(dec);
+    return 0;
+}
+
 int test_estimate_cctx_size() {
     printf("=== TEST: Unit - zxc_estimate_cctx_size ===\n");
 

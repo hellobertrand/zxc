@@ -142,6 +142,12 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
                                              const int level, const size_t dict_size) {
     zxc_cctx_layout_t layout = {0};
 
+    /* Worst-case sequence count for one block. Shared by the compressor's
+     * buffer sizing and the decoder's token scratch: the decode side must
+     * accept exactly what the compress side can emit, so both derive from
+     * this single expression. */
+    const size_t max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
+
     if (mode == 0) {
         /* Decompress: work_buf + lit_buffer, both padded for wild-copy
          * overshoot and sized worst-case (chunk_size + ZXC_DECOMPRESS_TAIL_PAD).
@@ -158,7 +164,7 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
          * stream). Sized to the worst-case sequence count + wild-read pad, matching
          * the compressor's max_seq bound. Provisioned regardless of level since the
          * decoder cannot predict per-block enc_litlen. */
-        layout.sz_tok_dctx = (chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16) + ZXC_PAD_SIZE;
+        layout.sz_tok_dctx = max_seq + ZXC_PAD_SIZE;
         layout.off_tok_dctx = layout.total;
         layout.total += ZXC_ALIGN_CL(layout.sz_tok_dctx);
         /* PivCo (enc 2/3) decode scratch: odd tree levels ping-pong through this
@@ -170,7 +176,7 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
     } else {
         /* Compress: 6 partitions + optional opt_scratch at level >= ZXC_LEVEL_DENSITY. */
         const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
-        layout.max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
+        layout.max_seq = max_seq;
         layout.sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
         layout.sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint8_t);
         const size_t sz_chain = ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t);
@@ -441,10 +447,11 @@ int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT l
     }
     if (UNLIKELY(empty || ctx->dict_huf == NULL)) return ZXC_OK;
 
-    /* Tree-at-attach: unpack + build the PivCo tree and codes once here; the
-     * per-block encode/estimate/decode paths reuse them via the context. */
+    /* Tree-at-attach: unpack + build the PivCo tree, codes and decoder tables
+     * once here; the per-block encode/estimate/decode paths reuse them via
+     * the context. */
     const int rc = zxc_huf_dict_tree_build(lengths, &ctx->dict_huf->tree, ctx->dict_huf->codes,
-                                           ctx->dict_huf->code_len);
+                                           ctx->dict_huf->code_len, &ctx->dict_huf->dec);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     ctx->dict_huf_tree_ok = 1;
     return ZXC_OK;
@@ -908,6 +915,8 @@ const char* zxc_error_name(const int code) {
             return "ZXC_ERROR_DICT_MISMATCH";
         case ZXC_ERROR_DICT_TOO_LARGE:
             return "ZXC_ERROR_DICT_TOO_LARGE";
+        case ZXC_ERROR_BAD_LEVEL:
+            return "ZXC_ERROR_BAD_LEVEL";
         default:
             return "ZXC_UNKNOWN_ERROR";
     }

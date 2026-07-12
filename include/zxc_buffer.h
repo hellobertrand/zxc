@@ -131,7 +131,9 @@ ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
  * @return The number of bytes written to dst (>0 on success),
- *         or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) on failure.
+ *         or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL,
+ *         or ZXC_ERROR_BAD_LEVEL for a level above @ref ZXC_LEVEL_ULTRA)
+ *         on failure.
  */
 ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* dst,
                                 const size_t dst_capacity, const zxc_compress_opts_t* opts);
@@ -204,11 +206,17 @@ ZXC_EXPORT int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capa
  * This function reads the file footer to extract the original uncompressed size
  * without performing any decompression. Useful for allocating output buffers.
  *
+ * The footer is untrusted input: the value is checked for plausibility against
+ * the archive size (each block costs at least a block header and decodes to at
+ * most one block), so a forged footer claiming an absurd size returns 0 rather
+ * than driving an oversized allocation.
+ *
  * @param[in] src       Pointer to the compressed data buffer.
  * @param[in] src_size  Size of the compressed data in bytes.
  *
- * @return The original uncompressed size in bytes, or 0 if the buffer is invalid
- *         or too small to contain a valid ZXC archive.
+ * @return The original uncompressed size in bytes, or 0 if the buffer is invalid,
+ *         too small to contain a valid ZXC archive, or carries an implausible
+ *         footer value.
  */
 ZXC_EXPORT uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size);
 
@@ -327,7 +335,10 @@ ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
  * @return Compressed block size in bytes (> 0) on success,
  *         or a negative @ref zxc_error_t code on failure.
  *         Returns @ref ZXC_ERROR_BAD_BLOCK_SIZE if
- *         @p src_size > @ref ZXC_BLOCK_SIZE_MAX.
+ *         @p src_size > @ref ZXC_BLOCK_SIZE_MAX, and
+ *         @ref ZXC_ERROR_BAD_LEVEL for a level above @ref ZXC_LEVEL_ULTRA
+ *         (or, on a static context, a level raise the workspace cannot
+ *         accommodate).
  */
 ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t src_size, void* dst,
                                       size_t dst_capacity, const zxc_compress_opts_t* opts);
@@ -458,7 +469,9 @@ ZXC_EXPORT uint64_t zxc_estimate_cctx_size(size_t src_size, int level);
  * The returned context must be freed with zxc_free_cctx().
  *
  * @param[in] opts  Compression options for eager init, or NULL for lazy init.
- * @return Pointer to the new context, or @c NULL on allocation failure.
+ * @return Pointer to the new context, or @c NULL on allocation failure or
+ *         invalid options (block size not a power of two in range, or level
+ *         above @ref ZXC_LEVEL_ULTRA).
  */
 ZXC_EXPORT zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts);
 
@@ -476,7 +489,11 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  *
  * Identical to zxc_compress() but reuses the internal buffers from @p cctx,
  * avoiding per-call malloc/free overhead.  The context automatically
- * re-initializes when block_size or level changes between calls.
+ * re-initializes when block_size changes between calls, or when a level
+ * raise into @ref ZXC_LEVEL_DENSITY requires the optimal-parser scratch
+ * that lower-level inits do not allocate.  On a static (caller-workspace)
+ * context such a raise is rejected with @ref ZXC_ERROR_BAD_LEVEL instead,
+ * since the workspace cannot grow.
  *
  * Options are **sticky**: settings passed via @p opts are remembered and
  * reused on subsequent calls where @p opts is NULL.  The initial sticky
@@ -610,7 +627,10 @@ ZXC_EXPORT size_t zxc_static_cctx_workspace_size(const size_t block_size, const 
  * pass options requesting a different @c block_size return
  * @ref ZXC_ERROR_BAD_BLOCK_SIZE without re-initialising.  A different
  * @c level / @c checksum_enabled is honoured per-call without
- * re-partitioning.
+ * re-partitioning, except a raise into @ref ZXC_LEVEL_DENSITY on a
+ * workspace carved below it: that would require the optimal-parser
+ * scratch the workspace does not carry, so the call returns
+ * @ref ZXC_ERROR_BAD_LEVEL.
  *
  * @param[in,out] workspace       Caller-allocated buffer, cache-line aligned.
  * @param[in]     workspace_size  Capacity of @p workspace in bytes.
