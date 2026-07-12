@@ -672,7 +672,10 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
 
     /* Per-node bit cursors; emit MSB-first code bits while descending. At a
      * flat root, emit the symbol's packed D-bit residual (bit j = branch at
-     * subtree level j) in one shot and stop descending. */
+     * subtree level j) in one shot and stop descending.
+     * Batching the per-bit RMW (read-modify-write) brings nothing:
+     * per-node accumulators would still touch memory once per bit, and flat
+     * roots already absorb the dense levels in one shot. */
     uint32_t wpos[ZXC_PIVCO_MAX_NODES];
     ZXC_MEMSET(wpos, 0, (size_t)t->n_nodes * sizeof(uint32_t));
     for (size_t i = 0; i < n_literals; i++) {

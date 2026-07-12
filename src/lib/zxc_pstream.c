@@ -252,32 +252,41 @@ static int cs_drain_pending(zxc_cstream* cs, zxc_outbuf_t* out) {
  *
  * Copies @p opts into the new context, applying defaults for any zero-valued
  * field (@c level -> @ref ZXC_LEVEL_DEFAULT, @c block_size ->
- * @ref ZXC_BLOCK_SIZE_DEFAULT).  Forces single-threaded operation
- * (@c n_threads = 0), disables progress callbacks, seekable framing and
- * dictionary options (those modes belong to the @c FILE*-based pipeline;
- * the push-stream format carries no dict_id).  Pre-sizes the
+ * @ref ZXC_BLOCK_SIZE_DEFAULT; levels above @ref ZXC_LEVEL_ULTRA are
+ * clamped).  Forces single-threaded operation (@c n_threads = 0) and
+ * disables progress callbacks and seekable framing (those modes belong to
+ * the @c FILE*-based pipeline).  Dictionary options are REJECTED (the
+ * push-stream format carries no dict_id, so a dictionary would produce
+ * undecodable archives): passing any of @c dict / @c dict_size / @c dict_huf
+ * returns @c NULL rather than silently dropping them.  Pre-sizes the
  * @c pending buffer so that the file header / footer paths never need a
  * realloc.
  *
  * @param[in] opts Compression options, or @c NULL for full defaults.
  * @return New stream owned by the caller, or @c NULL on allocation
- *         failure / invalid option values.
+ *         failure / invalid option values (including dictionary options).
  */
 zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
     zxc_cstream* cs = (zxc_cstream*)ZXC_CALLOC(1, sizeof(*cs));
     if (UNLIKELY(!cs)) return NULL;  // LCOV_EXCL_LINE
 
     if (opts) cs->opts = *opts;
+
+    /* The push-stream format carries no dict_id, so a dictionary here would
+     * produce archives that decode wrong (or not at all) elsewhere. */
+    if (UNLIKELY(cs->opts.dict || cs->opts.dict_size || cs->opts.dict_huf)) {
+        ZXC_FREE(cs);
+        return NULL;
+    }
+
     if (cs->opts.level == 0) cs->opts.level = ZXC_LEVEL_DEFAULT;
+    cs->opts.level = zxc_level_clamp(cs->opts.level);
     if (cs->opts.block_size == 0) cs->opts.block_size = ZXC_BLOCK_SIZE_DEFAULT;
     /* n_threads is ignored on this single-threaded path. */
     cs->opts.n_threads = 0;
     cs->opts.progress_cb = NULL;
     cs->opts.user_data = NULL;
     cs->opts.seekable = 0;
-    cs->opts.dict = NULL;
-    cs->opts.dict_size = 0;
-    cs->opts.dict_huf = NULL;
     cs->block_size = cs->opts.block_size;
 
     cs->cctx = zxc_create_cctx(&cs->opts);
@@ -824,6 +833,10 @@ zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts) {
     zxc_dstream* ds = (zxc_dstream*)ZXC_CALLOC(1, sizeof(*ds));
     if (UNLIKELY(!ds)) return NULL;  // LCOV_EXCL_LINE
     if (opts) ds->opts = *opts;
+    if (UNLIKELY(ds->opts.dict || ds->opts.dict_size || ds->opts.dict_huf)) {
+        ZXC_FREE(ds);
+        return NULL;
+    }
     ds->opts.n_threads = 0;
     ds->opts.progress_cb = NULL;
     ds->opts.user_data = NULL;

@@ -210,7 +210,10 @@ typedef enum {
     ZXC_ERROR_BAD_BLOCK_SIZE = -14, // invalid block size
     ZXC_ERROR_DICT_REQUIRED  = -15, // file requires a dictionary but none provided
     ZXC_ERROR_DICT_MISMATCH  = -16, // provided dictionary ID does not match header
-    ZXC_ERROR_DICT_TOO_LARGE = -17  // dictionary exceeds ZXC_DICT_SIZE_MAX
+    ZXC_ERROR_DICT_TOO_LARGE = -17, // dictionary exceeds ZXC_DICT_SIZE_MAX
+    ZXC_ERROR_BAD_LEVEL      = -18  // level unsupported by this context's workspace
+                                    // (static context dense-tier raise; out-of-range
+                                    // levels are otherwise silently clamped)
 } zxc_error_t;
 ```
 
@@ -956,6 +959,10 @@ typedef struct {
 
 The library reads `[src+pos .. src+size)` and writes `[dst+pos .. dst+size)`,
 advancing `pos` by what it consumed/produced.  Buffers are caller-owned.
+The whole `[dst+pos .. dst+size)` window is writable scratch: with enough
+remaining capacity the decoder decodes blocks straight into it with
+speculative (wild-copy) stores, so bytes beyond the final `pos` are
+unspecified — never keep live data inside the declared capacity.
 
 ### Compression
 

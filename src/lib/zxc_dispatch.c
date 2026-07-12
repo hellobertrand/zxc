@@ -666,7 +666,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int seekable = opts ? opts->seekable : 0;
-    const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
+    const int level = zxc_level_clamp((opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT);
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
@@ -675,7 +675,6 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
-    if (UNLIKELY(level > ZXC_LEVEL_ULTRA)) return ZXC_ERROR_BAD_LEVEL;
 
     const uint32_t did = (dict && dict_size > 0) ? zxc_dict_id(dict, dict_size, dict_huf) : 0;
 
@@ -1226,15 +1225,11 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
     if (UNLIKELY(!cctx)) return NULL;  // LCOV_EXCL_LINE
 
     /* Resolve and store sticky defaults. */
-    cctx->stored_level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
+    cctx->stored_level =
+        zxc_level_clamp((opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT);
     cctx->stored_block_size =
         (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
     cctx->stored_checksum = opts ? opts->checksum_enabled : 0;
-
-    if (UNLIKELY(cctx->stored_level > ZXC_LEVEL_ULTRA)) {
-        ZXC_FREE(cctx);
-        return NULL;
-    }
 
     if (opts) {
         // LCOV_EXCL_START
@@ -1294,12 +1289,11 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : cctx->stored_checksum;
-    const int level = (opts && opts->level > 0) ? opts->level : cctx->stored_level;
+    const int level = zxc_level_clamp((opts && opts->level > 0) ? opts->level : cctx->stored_level);
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : cctx->stored_block_size;
 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
-    if (UNLIKELY(level > ZXC_LEVEL_ULTRA)) return ZXC_ERROR_BAD_LEVEL;
 
     /* Static cctx: block_size is locked at workspace init.  Reject any opts
      * that would force a re-partition, since the workspace cannot grow.
@@ -1601,7 +1595,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     if (UNLIKELY(src_size > ZXC_BLOCK_SIZE_MAX)) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : cctx->stored_checksum;
-    const int level = (opts && opts->level > 0) ? opts->level : cctx->stored_level;
+    const int level = zxc_level_clamp((opts && opts->level > 0) ? opts->level : cctx->stored_level);
     /* For block API, block_size == src_size (the caller compresses one block at a time). */
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : cctx->stored_block_size;
@@ -1614,8 +1608,6 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     const size_t base_block_size = (block_size > min_bs) ? block_size : min_bs;
     const size_t effective_block_size =
         b_dict_size > 0 ? zxc_block_size_ceil(b_dict_size + base_block_size) : base_block_size;
-
-    if (UNLIKELY(level > ZXC_LEVEL_ULTRA)) return ZXC_ERROR_BAD_LEVEL;
 
     /* Static cctx: the workspace cannot grow, so reject any request that
      * would force a re-partition - a different effective block size, or a
@@ -1896,7 +1888,7 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
 
     uint8_t* const inner_ws = (uint8_t*)workspace + ZXC_STATIC_CCTX_HDR_SIZE;
     if (UNLIKELY(zxc_cctx_init_in_workspace(&cctx->inner, inner_ws, inner_sz, block_size, 1, level,
-                                            checksum_enabled, 0) != ZXC_OK))
+                                            checksum_enabled, 0, 0) != ZXC_OK))
         return NULL;
 
     cctx->owns_workspace = 1;
@@ -1955,7 +1947,7 @@ zxc_dctx* zxc_init_static_dctx(void* RESTRICT workspace, const size_t workspace_
     /* mode == 0 init: checksum_enabled is updated per-call from the file
      * header flags, so it does not need to be locked at workspace init. */
     if (UNLIKELY(zxc_cctx_init_in_workspace(&dctx->inner, inner_ws, inner_sz, block_size, 0, 0, 0,
-                                            0) != ZXC_OK))
+                                            0, 0) != ZXC_OK))
         return NULL;
 
     dctx->owns_workspace = 1;

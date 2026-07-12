@@ -300,6 +300,7 @@ def compress(data, level = LEVEL_DEFAULT, checksum = False, dict = None, dict_hu
     Args:
         data: Bytes-like object to compress.
         level: Compression level. Use constants like LEVEL_FASTEST, LEVEL_DEFAULT, etc.
+            Values above LEVEL_ULTRA are silently clamped; values <= 0 select the default.
         checksum: If True, append a checksum for integrity verification.
         dict: Optional pre-trained dictionary content (bytes) to prime the
             compressor. Must be passed (matching by ID) to `decompress`.

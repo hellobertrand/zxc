@@ -735,6 +735,17 @@ static inline int zxc_ss_prem_huf_q8(const int level) {
 #define ZXC_HUF_MIN_LITERALS 139
 /** @} */
 
+/** @brief Clamps a resolved compression level to the supported ceiling.
+ *
+ *         Out-of-range levels above ::ZXC_LEVEL_ULTRA are silently clamped
+ *         (never rejected) at every compress entry point, so `level = 99`
+ *         behaves as ULTRA across the buffer, context, block and stream APIs
+ *         and every language binding inherits the same policy. Levels <= 0
+ *         select the caller's default before this is applied. */
+static inline int zxc_level_clamp(const int level) {
+    return (level > ZXC_LEVEL_ULTRA) ? ZXC_LEVEL_ULTRA : level;
+}
+
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below
  *         ::ZXC_LEVEL_ULTRA use ::ZXC_HUF_MAX_CODE_LEN_DENSITY, ::ZXC_LEVEL_ULTRA uses
  *         the full ::ZXC_HUF_MAX_CODE_LEN_ULTRA ceiling (denser codes, slower decode).
@@ -1578,10 +1589,16 @@ typedef struct {
     uint8_t* work_buf;              /**< Padded scratch buffer for buffer-API decompression. */
     size_t work_buf_cap;            /**< Capacity of the work buffer. */
     uint8_t* tok_buffer;            /**< Decode scratch for a Huffman-coded GLO token
-                                         section (enc_litlen == HUFFMAN); NULL on compress. */
+                                         section (enc_litlen == HUFFMAN); NULL on compress.
+                                         Heap decode contexts defer it (with pivco_scratch)
+                                         to the first entropy section, see entropy_block. */
     size_t tok_buffer_cap;          /**< Capacity of tok_buffer in bytes. */
     uint8_t* pivco_scratch;         /**< Level ping-pong scratch for PivCo decode. */
     size_t pivco_scratch_cap;       /**< Capacity of pivco_scratch in bytes. */
+    void* entropy_block;            /**< Lazy allocation backing tok_buffer + pivco_scratch
+                                         (heap decode contexts, first entropy block only).
+                                         NULL on compress contexts and static workspaces.
+                                         Freed by zxc_cctx_free. */
     uint8_t* opt_scratch;           /**< Optimal-parser DP scratch (level >= 6 only,
                                          lazy-allocated, packs dp/parent_len/parent_off/actions).
                                          Also reused as transient scratch for the
@@ -1685,12 +1702,31 @@ size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, 
  * @param[in]  dict_size         Dictionary prefill size; when > 0 the workspace
  *                               must include the [dict | data] concat buffer and
  *                               @c ctx->dict_buffer is set into it.
+ * @param[in]  defer_entropy_scratch  Non-zero (heap decode contexts only) to
+ *                               leave the tok/PivCo decode scratch out of the
+ *                               partition; it is then lazily allocated by
+ *                               @ref zxc_cctx_alloc_entropy_scratch on the
+ *                               first entropy section. Static workspaces must
+ *                               pass 0 (no-allocation contract).
  * @return @c ZXC_OK on success, @c ZXC_ERROR_DST_TOO_SMALL if the workspace
  *         is too small, or another negative @ref zxc_error_t.
  */
 int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspace,
                                const size_t workspace_size, const size_t chunk_size, const int mode,
-                               const int level, const int checksum_enabled, const size_t dict_size);
+                               const int level, const int checksum_enabled, const size_t dict_size,
+                               const int defer_entropy_scratch);
+
+/**
+ * @brief Lazily allocates the decode-side entropy scratch (tok_buffer +
+ *        pivco_scratch) for a heap context initialised with deferral.
+ *
+ * No-op when the scratch is already present (static workspaces pre-carve it;
+ * subsequent entropy blocks reuse the first allocation). The block is owned
+ * by the context (@c entropy_block) and released by @ref zxc_cctx_free.
+ *
+ * @return @ref ZXC_OK, or @ref ZXC_ERROR_MEMORY on allocation failure.
+ */
+int zxc_cctx_alloc_entropy_scratch(zxc_cctx_t* ctx);
 
 /**
  * @brief Releases the internal buffers owned by a context.

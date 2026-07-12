@@ -395,6 +395,22 @@ int test_pstream_invalid_args(void) {
     if (zxc_dstream_in_size(NULL) != 0) return 0;
     if (zxc_dstream_out_size(NULL) != 0) return 0;
 
+    /* Dictionary options are rejected at create time (the push-stream format
+     * carries no dict_id): a dictionary must never be silently dropped. */
+    {
+        static const uint8_t d[4] = {1, 2, 3, 4};
+        zxc_compress_opts_t copts = {.level = 3, .dict = d, .dict_size = sizeof(d)};
+        if (zxc_cstream_create(&copts) != NULL) {
+            printf("  [FAIL] cstream_create must reject dict opts\n");
+            return 0;
+        }
+        zxc_decompress_opts_t dopts_dict = {.dict = d, .dict_size = sizeof(d)};
+        if (zxc_dstream_create(&dopts_dict) != NULL) {
+            printf("  [FAIL] dstream_create must reject dict opts\n");
+            return 0;
+        }
+    }
+
     /* Malformed descriptors must be rejected before any helper does an
      * unchecked memcpy() that could underflow size_t arithmetic or
      * dereference NULL. */

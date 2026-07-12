@@ -129,11 +129,11 @@ ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
  *                         (this call is single-threaded and blocking).
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
+ * @note Levels above @ref ZXC_LEVEL_ULTRA are silently clamped to
+ *       @ref ZXC_LEVEL_ULTRA; levels <= 0 select @ref ZXC_LEVEL_DEFAULT.
  *
  * @return The number of bytes written to dst (>0 on success),
- *         or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL,
- *         or ZXC_ERROR_BAD_LEVEL for a level above @ref ZXC_LEVEL_ULTRA)
- *         on failure.
+ *         or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) on failure.
  */
 ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* dst,
                                 const size_t dst_capacity, const zxc_compress_opts_t* opts);
@@ -336,9 +336,9 @@ ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
  *         or a negative @ref zxc_error_t code on failure.
  *         Returns @ref ZXC_ERROR_BAD_BLOCK_SIZE if
  *         @p src_size > @ref ZXC_BLOCK_SIZE_MAX, and
- *         @ref ZXC_ERROR_BAD_LEVEL for a level above @ref ZXC_LEVEL_ULTRA
- *         (or, on a static context, a level raise the workspace cannot
- *         accommodate).
+ *         @ref ZXC_ERROR_BAD_LEVEL on a static context for a level raise
+ *         the workspace cannot accommodate (levels above
+ *         @ref ZXC_LEVEL_ULTRA are otherwise silently clamped).
  */
 ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t src_size, void* dst,
                                       size_t dst_capacity, const zxc_compress_opts_t* opts);
@@ -468,10 +468,12 @@ ZXC_EXPORT uint64_t zxc_estimate_cctx_size(size_t src_size, int level);
  *
  * The returned context must be freed with zxc_free_cctx().
  *
+ * Levels above @ref ZXC_LEVEL_ULTRA are silently clamped to
+ * @ref ZXC_LEVEL_ULTRA.
+ *
  * @param[in] opts  Compression options for eager init, or NULL for lazy init.
- * @return Pointer to the new context, or @c NULL on allocation failure or
- *         invalid options (block size not a power of two in range, or level
- *         above @ref ZXC_LEVEL_ULTRA).
+ * @return Pointer to the new context, or @c NULL on allocation failure or an
+ *         invalid block size (not a power of two in range).
  */
 ZXC_EXPORT zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts);
 
@@ -497,7 +499,8 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  *
  * Options are **sticky**: settings passed via @p opts are remembered and
  * reused on subsequent calls where @p opts is NULL.  The initial sticky
- * values come from the @p opts passed to zxc_create_cctx().
+ * values come from the @p opts passed to zxc_create_cctx().  Levels above
+ * @ref ZXC_LEVEL_ULTRA are silently clamped.
  *
  * @param[in,out] cctx         Reusable compression context.
  * @param[in]     src          Source data.

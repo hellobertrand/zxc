@@ -66,16 +66,6 @@ static int grow_output(uint8_t** buf, size_t* cap, size_t out_len, size_t want) 
     return 0;
 }
 
-// Validates a compression level, raising ValueError when out of range.
-// Returns 0 on success, -1 with the exception set otherwise.
-static int validate_level(const int level) {
-    if (level < zxc_min_level() || level > zxc_max_level()) {
-        PyErr_Format(PyExc_ValueError, "level must be in [%d, %d], got %d", zxc_min_level(),
-                     zxc_max_level(), level);
-        return -1;
-    }
-    return 0;
-}
 
 // =============================================================================
 // Wrapper functions
@@ -280,10 +270,6 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
         return NULL;
     }
 
-    if (validate_level(level) < 0) {
-        PyBuffer_Release(&view);
-        return NULL;
-    }
 
     if (dict_obj && dict_obj != Py_None) {
         if (PyObject_GetBuffer(dict_obj, &dict_view, PyBUF_SIMPLE) < 0) {
@@ -495,8 +481,6 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
                                      &level, &checksum, &seekable, &dict_obj, &dict_huf_obj)) {
         return NULL;
     }
-
-    if (validate_level(level) < 0) return NULL;
 
     if (dict_obj && dict_obj != Py_None) {
         if (PyObject_GetBuffer(dict_obj, &dict_view, PyBUF_SIMPLE) < 0) return NULL;
@@ -1086,8 +1070,6 @@ static PyObject* pyzxc_cstream_create(PyObject* self, PyObject* args, PyObject* 
                      ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX, block_size);
         return NULL;
     }
-    if (validate_level(level) < 0) return NULL;
-
     zxc_compress_opts_t copts = {0};
     copts.level = level;
     copts.checksum_enabled = checksum;

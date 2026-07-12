@@ -139,25 +139,36 @@ int test_cctx_level_raise_reinit() {
     }
     printf("  [PASS] level 3 -> 6 raise through the block API\n");
 
-    /* 3. Out-of-range levels are rejected, not silently clamped to ULTRA. */
-    zxc_compress_opts_t bad = {.level = 99, .checksum_enabled = 0};
-    if (zxc_compress(src, src_sz, comp, comp_cap, &bad) != ZXC_ERROR_BAD_LEVEL) {
-        printf("  [FAIL] zxc_compress(level=99) must return ZXC_ERROR_BAD_LEVEL\n");
+    /* 3. Out-of-range levels are silently clamped to ULTRA: level 99 must
+     * produce the exact archive level 7 produces, on every entry point. */
+    zxc_compress_opts_t lvl7 = {.level = ZXC_LEVEL_ULTRA, .checksum_enabled = 0};
+    zxc_compress_opts_t lvl99 = {.level = 99, .checksum_enabled = 0};
+    uint8_t* comp7 = malloc(comp_cap);
+    if (!comp7) goto fail;
+    const int64_t c7 = zxc_compress(src, src_sz, comp7, comp_cap, &lvl7);
+    const int64_t c99 = zxc_compress(src, src_sz, comp, comp_cap, &lvl99);
+    if (c7 <= 0 || c99 != c7 || memcmp(comp, comp7, (size_t)c7) != 0) {
+        printf("  [FAIL] zxc_compress(level=99) must clamp to ULTRA (c7=%lld c99=%lld)\n",
+               (long long)c7, (long long)c99);
+        free(comp7);
         goto fail;
     }
-    if (zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &bad) != ZXC_ERROR_BAD_LEVEL) {
-        printf("  [FAIL] zxc_compress_cctx(level=99) must return ZXC_ERROR_BAD_LEVEL\n");
+    free(comp7);
+    if (zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &lvl99) != c7) {
+        printf("  [FAIL] zxc_compress_cctx(level=99) must clamp to ULTRA\n");
         goto fail;
     }
-    if (zxc_compress_block(cctx, src, src_sz, comp, comp_cap, &bad) != ZXC_ERROR_BAD_LEVEL) {
-        printf("  [FAIL] zxc_compress_block(level=99) must return ZXC_ERROR_BAD_LEVEL\n");
+    if (zxc_compress_block(cctx, src, src_sz, comp, comp_cap, &lvl99) <= 0) {
+        printf("  [FAIL] zxc_compress_block(level=99) must clamp to ULTRA\n");
         goto fail;
     }
-    if (zxc_create_cctx(&bad) != NULL) {
-        printf("  [FAIL] zxc_create_cctx(level=99) must return NULL\n");
+    zxc_cctx* cctx99 = zxc_create_cctx(&lvl99);
+    if (!cctx99) {
+        printf("  [FAIL] zxc_create_cctx(level=99) must clamp, not fail\n");
         goto fail;
     }
-    printf("  [PASS] level 99 rejected across entry points\n");
+    zxc_free_cctx(cctx99);
+    printf("  [PASS] level 99 silently clamped to ULTRA across entry points\n");
 
     zxc_free_cctx(cctx);
     zxc_free_dctx(dctx);
