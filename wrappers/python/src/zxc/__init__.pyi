@@ -34,6 +34,7 @@ ERROR_BAD_BLOCK_SIZE: int
 ERROR_DICT_REQUIRED: int
 ERROR_DICT_MISMATCH: int
 ERROR_DICT_TOO_LARGE: int
+ERROR_BAD_LEVEL: int
 
 # ---------- types ----------
 class FileLike(Protocol):

@@ -75,6 +75,7 @@ from ._zxc import (
     ERROR_DICT_REQUIRED,
     ERROR_DICT_MISMATCH,
     ERROR_DICT_TOO_LARGE,
+    ERROR_BAD_LEVEL,
 )
 
 try:
@@ -148,6 +149,7 @@ __all__ = [
     "ERROR_DICT_REQUIRED",
     "ERROR_DICT_MISMATCH",
     "ERROR_DICT_TOO_LARGE",
+    "ERROR_BAD_LEVEL",
 ]
 
 def min_level() -> int:

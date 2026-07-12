@@ -158,6 +158,9 @@ pub const ZXC_ERROR_DICT_MISMATCH: i32 = -16;
 /// Dictionary exceeds maximum allowed size
 pub const ZXC_ERROR_DICT_TOO_LARGE: i32 = -17;
 
+/// Compression level out of range, or not supported by this context's workspace
+pub const ZXC_ERROR_BAD_LEVEL: i32 = -18;
+
 // =============================================================================
 // Dictionary Constants
 // =============================================================================
