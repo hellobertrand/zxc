@@ -234,12 +234,13 @@ lengths alone, the set of *flat roots*: an internal node is a flat root iff
 1. it is not itself inside another flat subtree (BFS order resolves this:
    parents are classified first), and
 2. every leaf below it sits at the same relative depth `D`, and
-3. `D == 2`, `D == 4`, or `D >= 7`.
+3. `D >= 2`.
 
 (Completeness of the trie makes condition 2 imply a perfect binary subtree of
-`2^D` leaves. The depth set {2, 4, ≥7} is a fixed format rule: those are the
-shapes where direct code unpacking beats the level-merge cascade in the
-reference decoder.)
+`2^D` leaves. Every maximal complete subtree of depth `D >= 2` is a flat
+root — a fixed format rule. The reference decoder unpacks the packed codes
+directly, with SIMD kernels for `D` in 2..6 and a scalar table lookup for
+`D >= 7`, instead of running the level-merge cascade.)
 
 Every internal node that is neither a flat root nor a descendant of one is a
 **bitmap node**: its run holds one branch bit per symbol routed through it,

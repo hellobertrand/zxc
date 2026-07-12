@@ -66,6 +66,7 @@ static int grow_output(uint8_t** buf, size_t* cap, size_t out_len, size_t want) 
     return 0;
 }
 
+
 // =============================================================================
 // Wrapper functions
 // =============================================================================
@@ -235,6 +236,7 @@ PyMODINIT_FUNC PyInit__zxc(void) {
     PyModule_AddIntConstant(m, "ERROR_DICT_REQUIRED", ZXC_ERROR_DICT_REQUIRED);
     PyModule_AddIntConstant(m, "ERROR_DICT_MISMATCH", ZXC_ERROR_DICT_MISMATCH);
     PyModule_AddIntConstant(m, "ERROR_DICT_TOO_LARGE", ZXC_ERROR_DICT_TOO_LARGE);
+    PyModule_AddIntConstant(m, "ERROR_BAD_LEVEL", ZXC_ERROR_BAD_LEVEL);
 
     return m;
 }
@@ -268,12 +270,6 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
         return NULL;
     }
 
-    if (level < zxc_min_level() || level > zxc_max_level()) {
-        PyBuffer_Release(&view);
-        PyErr_Format(PyExc_ValueError, "level must be in [%d, %d], got %d", zxc_min_level(),
-                     zxc_max_level(), level);
-        return NULL;
-    }
 
     if (dict_obj && dict_obj != Py_None) {
         if (PyObject_GetBuffer(dict_obj, &dict_view, PyBUF_SIMPLE) < 0) {
@@ -483,12 +479,6 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
 
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|iippOO", kwlist, &src, &dst, &nthreads,
                                      &level, &checksum, &seekable, &dict_obj, &dict_huf_obj)) {
-        return NULL;
-    }
-
-    if (level < zxc_min_level() || level > zxc_max_level()) {
-        PyErr_Format(PyExc_ValueError, "level must be in [%d, %d], got %d", zxc_min_level(),
-                     zxc_max_level(), level);
         return NULL;
     }
 
@@ -1080,12 +1070,6 @@ static PyObject* pyzxc_cstream_create(PyObject* self, PyObject* args, PyObject* 
                      ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX, block_size);
         return NULL;
     }
-    if (level < zxc_min_level() || level > zxc_max_level()) {
-        PyErr_Format(PyExc_ValueError, "level must be in [%d, %d], got %d", zxc_min_level(),
-                     zxc_max_level(), level);
-        return NULL;
-    }
-
     zxc_compress_opts_t copts = {0};
     copts.level = level;
     copts.checksum_enabled = checksum;

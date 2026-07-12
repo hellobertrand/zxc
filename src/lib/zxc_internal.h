@@ -622,25 +622,46 @@ typedef struct {
 } zxc_pivco_tree_t;
 
 /**
+ * @brief Precomputed decode-side tables derived from a ::zxc_pivco_tree_t.
+ *
+ * Pure functions of the tree topology (no dependence on section data):
+ * @c skip flags the children of leaf-pair parents (emitted directly by the
+ * parent's XOR-blend, never materialised), and @c c2s_pool holds each flat
+ * root's packed-code -> symbol table at @c c2s_off[nid]. Flat subtrees have
+ * disjoint leaves, so the pool never exceeds ZXC_HUF_NUM_SYMBOLS entries; the
+ * +16 slack covers zxc_pivco_unpack_flat's SIMD table loads, which round a
+ * table up to 16 entries. Per-section trees rebuild these inline in
+ * zxc_pivco_decode_core; dictionary trees build them ONCE at attach so the
+ * small-block dict decode path stops repaying the DFS + fills per block.
+ */
+typedef struct {
+    uint8_t skip[ZXC_PIVCO_MAX_NODES];          /**< 1 = child of a leaf-pair parent. */
+    uint16_t c2s_off[ZXC_PIVCO_MAX_NODES];      /**< Flat roots: offset into c2s_pool. */
+    uint8_t c2s_pool[ZXC_HUF_NUM_SYMBOLS + 16]; /**< Concatenated c2s tables. */
+} zxc_pivco_decode_aux_t;
+
+/**
  * @brief Frame-constant dictionary Huffman state, prebuilt once at attach.
  *
  * Bundles everything the per-block dict paths reuse: the PivCo @c tree (decoder
- * + estimator), and the canonical @c codes / @c code_len (encoder). Carved from
- * the context workspace only when @c dict_size > 0, so no-dict contexts pay
- * nothing for it. Built by @ref zxc_huf_dict_tree_build via
- * @c zxc_cctx_attach_dict_huf.
+ * + estimator), the canonical @c codes / @c code_len (encoder), and the
+ * decode-side @c dec tables. Carved from the context workspace only when
+ * @c dict_size > 0, so no-dict contexts pay nothing for it. Built by
+ * @ref zxc_huf_dict_tree_build via @c zxc_cctx_attach_dict_huf.
  */
 typedef struct {
     zxc_pivco_tree_t tree;                 /**< PivCo tree from the shared literal table. */
     uint32_t codes[ZXC_HUF_NUM_SYMBOLS];   /**< Canonical codes (encoder side). */
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS]; /**< Unpacked code lengths. */
+    zxc_pivco_decode_aux_t dec;            /**< Precomputed decoder tables. */
 } zxc_dict_huf_state_t;
 /** @brief RLE margin shift: source of the legacy below-ULTRA premium used by
  *         ::zxc_ss_prem_rle_q8 (256 >> shift reproduces the historical
  *         RLE-vs-RAW margin exactly). */
 #define ZXC_RLE_MARGIN_SHIFT 5
 /** @brief Huffman margin shift: source of the legacy below-ULTRA premium used
- *         by ::zxc_ss_prem_huf_q8, and of the ::ZXC_HUF_MIN_LITERALS floor. */
+ *         by ::zxc_ss_prem_huf_q8 (the frozen ::ZXC_HUF_MIN_LITERALS floor was
+ *         also historically derived from it). */
 #define ZXC_HUF_MARGIN_SHIFT 5
 
 /** @name Space-speed section selection
@@ -700,16 +721,30 @@ static inline int zxc_ss_prem_huf_q8(const int level) {
     return (level >= ZXC_LEVEL_DENSITY) ? 4 : (256 >> ZXC_HUF_MARGIN_SHIFT);
 }
 /** @} */
-/** @brief Absolute floor below which Huffman cannot beat RAW even with
- *         zero-entropy literals after the @ref ZXC_HUF_MARGIN_SHIFT margin.
+/** @brief Absolute floor (in literals) below which a Huffman candidate is
+ *         never evaluated.
  *
- *         Derivation: the call site requires `huf_total < baseline * (M-1)/M`
- *         with `M = 1 << ZXC_HUF_MARGIN_SHIFT`. */
-#define ZXC_HUF_MIN_LITERALS                                                                 \
-    (((ZXC_HUF_TABLE_SIZE + 6) /* historical margin floor */ * (1 << ZXC_HUF_MARGIN_SHIFT) + \
-      ((1 << ZXC_HUF_MARGIN_SHIFT) - 2)) /                                                   \
-     ((1 << ZXC_HUF_MARGIN_SHIFT) - 1))
+ *         Frozen byte-stability threshold. The value was originally derived
+ *         from v6 wire geometry (128-byte lengths table + 6-byte sub-stream
+ *         sizes) under the pre-Lagrangian `huf_total < baseline * (M-1)/M`
+ *         call-site rule; neither input exists in v7 (sub-stream sizes are
+ *         derived, selection uses J = size + lambda * tax), but raising or
+ *         lowering the floor changes which blocks pick Huffman and therefore
+ *         the emitted archive bytes, so it stays frozen at the historical
+ *         value rather than being re-derived. */
+#define ZXC_HUF_MIN_LITERALS 139
 /** @} */
+
+/** @brief Clamps a resolved compression level to the supported ceiling.
+ *
+ *         Out-of-range levels above ::ZXC_LEVEL_ULTRA are silently clamped
+ *         (never rejected) at every compress entry point, so `level = 99`
+ *         behaves as ULTRA across the buffer, context, block and stream APIs
+ *         and every language binding inherits the same policy. Levels <= 0
+ *         select the caller's default before this is applied. */
+static inline int zxc_level_clamp(const int level) {
+    return (level > ZXC_LEVEL_ULTRA) ? ZXC_LEVEL_ULTRA : level;
+}
 
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below
  *         ::ZXC_LEVEL_ULTRA use ::ZXC_HUF_MAX_CODE_LEN_DENSITY, ::ZXC_LEVEL_ULTRA uses
@@ -1473,10 +1508,12 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, size_t n_literals,
                            uint8_t* RESTRICT dst, size_t dst_cap);
 
 /** @brief Unpack a dict table's 128-byte packed lengths and prebuild its PivCo
- *  tree, canonical codes and code lengths (tree-at-attach). All three outputs
- *  are frame-constant; per-block encode/estimate/decode then skip the rebuild. */
+ *  tree, canonical codes, code lengths and decoder tables (tree-at-attach).
+ *  All outputs are frame-constant; per-block encode/estimate/decode then skip
+ *  the rebuild. */
 int zxc_huf_dict_tree_build(const uint8_t* RESTRICT packed_lengths, zxc_pivco_tree_t* RESTRICT tree,
-                            uint32_t* RESTRICT codes, uint8_t* RESTRICT code_len);
+                            uint32_t* RESTRICT codes, uint8_t* RESTRICT code_len,
+                            zxc_pivco_decode_aux_t* RESTRICT aux);
 
 /** @brief zxc_huf_calc_size for a dict section: prebuilt @p tree, no header. */
 size_t zxc_huf_calc_size_dict(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
@@ -1494,10 +1531,13 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, size_t n_liter
 int zxc_huf_decode_section(const uint8_t* RESTRICT payload, size_t payload_size,
                            uint8_t* RESTRICT dst, size_t n, uint8_t* RESTRICT scratch);
 
-/** @brief Decode a PivCo dict section against a prebuilt dict @p tree. */
+/** @brief Decode a PivCo dict section against a prebuilt dict @p tree and its
+ *  attach-time decoder tables @p aux. */
 int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, size_t payload_size,
                                 uint8_t* RESTRICT dst, size_t n,
-                                const zxc_pivco_tree_t* RESTRICT tree, uint8_t* RESTRICT scratch);
+                                const zxc_pivco_tree_t* RESTRICT tree,
+                                const zxc_pivco_decode_aux_t* RESTRICT aux,
+                                uint8_t* RESTRICT scratch);
 
 /* ---------------------------------------------------------------------------
  * Compression / decompression context.
@@ -1549,10 +1589,16 @@ typedef struct {
     uint8_t* work_buf;              /**< Padded scratch buffer for buffer-API decompression. */
     size_t work_buf_cap;            /**< Capacity of the work buffer. */
     uint8_t* tok_buffer;            /**< Decode scratch for a Huffman-coded GLO token
-                                         section (enc_litlen == HUFFMAN); NULL on compress. */
+                                         section (enc_litlen == HUFFMAN); NULL on compress.
+                                         Heap decode contexts defer it (with pivco_scratch)
+                                         to the first entropy section, see entropy_block. */
     size_t tok_buffer_cap;          /**< Capacity of tok_buffer in bytes. */
     uint8_t* pivco_scratch;         /**< Level ping-pong scratch for PivCo decode. */
     size_t pivco_scratch_cap;       /**< Capacity of pivco_scratch in bytes. */
+    void* entropy_block;            /**< Lazy allocation backing tok_buffer + pivco_scratch
+                                         (heap decode contexts, first entropy block only).
+                                         NULL on compress contexts and static workspaces.
+                                         Freed by zxc_cctx_free. */
     uint8_t* opt_scratch;           /**< Optimal-parser DP scratch (level >= 6 only,
                                          lazy-allocated, packs dp/parent_len/parent_off/actions).
                                          Also reused as transient scratch for the
@@ -1604,9 +1650,11 @@ int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, cons
 /**
  * @brief Attach the shared dictionary literal table to an initialised context.
  *
- * Validates the 128-byte packed code-lengths header and stores the pointer
- * (caller-owned, must outlive the context's use); the tree is (re)built from
- * these lengths at decode/estimate time, not here. A NULL @p lengths is a no-op.
+ * Validates the 128-byte packed code-lengths header and builds the PivCo tree,
+ * canonical codes and decoder tables ONCE into the context (tree-at-attach);
+ * per-block encode/estimate/decode reuse them. @p lengths need only be valid
+ * during this call (everything is copied into the context workspace). A NULL
+ * @p lengths is a no-op.
  *
  * @return @ref ZXC_OK on success, @ref ZXC_ERROR_CORRUPT_DATA if the lengths
  *         header is structurally invalid (bad nibble, Kraft inequality).
@@ -1654,12 +1702,31 @@ size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, 
  * @param[in]  dict_size         Dictionary prefill size; when > 0 the workspace
  *                               must include the [dict | data] concat buffer and
  *                               @c ctx->dict_buffer is set into it.
+ * @param[in]  defer_entropy_scratch  Non-zero (heap decode contexts only) to
+ *                               leave the tok/PivCo decode scratch out of the
+ *                               partition; it is then lazily allocated by
+ *                               @ref zxc_cctx_alloc_entropy_scratch on the
+ *                               first entropy section. Static workspaces must
+ *                               pass 0 (no-allocation contract).
  * @return @c ZXC_OK on success, @c ZXC_ERROR_DST_TOO_SMALL if the workspace
  *         is too small, or another negative @ref zxc_error_t.
  */
 int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspace,
                                const size_t workspace_size, const size_t chunk_size, const int mode,
-                               const int level, const int checksum_enabled, const size_t dict_size);
+                               const int level, const int checksum_enabled, const size_t dict_size,
+                               const int defer_entropy_scratch);
+
+/**
+ * @brief Lazily allocates the decode-side entropy scratch (tok_buffer +
+ *        pivco_scratch) for a heap context initialised with deferral.
+ *
+ * No-op when the scratch is already present (static workspaces pre-carve it;
+ * subsequent entropy blocks reuse the first allocation). The block is owned
+ * by the context (@c entropy_block) and released by @ref zxc_cctx_free.
+ *
+ * @return @ref ZXC_OK, or @ref ZXC_ERROR_MEMORY on allocation failure.
+ */
+int zxc_cctx_alloc_entropy_scratch(zxc_cctx_t* ctx);
 
 /**
  * @brief Releases the internal buffers owned by a context.

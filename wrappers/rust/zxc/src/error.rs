@@ -9,10 +9,10 @@
 
 use zxc_sys::{
     ZXC_ERROR_BAD_BLOCK_SIZE, ZXC_ERROR_BAD_BLOCK_TYPE, ZXC_ERROR_BAD_CHECKSUM,
-    ZXC_ERROR_BAD_HEADER, ZXC_ERROR_BAD_MAGIC, ZXC_ERROR_BAD_OFFSET, ZXC_ERROR_BAD_VERSION,
-    ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_DICT_MISMATCH, ZXC_ERROR_DICT_REQUIRED,
-    ZXC_ERROR_DICT_TOO_LARGE, ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_IO, ZXC_ERROR_MEMORY,
-    ZXC_ERROR_NULL_INPUT, ZXC_ERROR_OVERFLOW, ZXC_ERROR_SRC_TOO_SMALL,
+    ZXC_ERROR_BAD_HEADER, ZXC_ERROR_BAD_LEVEL, ZXC_ERROR_BAD_MAGIC, ZXC_ERROR_BAD_OFFSET,
+    ZXC_ERROR_BAD_VERSION, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_DICT_MISMATCH,
+    ZXC_ERROR_DICT_REQUIRED, ZXC_ERROR_DICT_TOO_LARGE, ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_IO,
+    ZXC_ERROR_MEMORY, ZXC_ERROR_NULL_INPUT, ZXC_ERROR_OVERFLOW, ZXC_ERROR_SRC_TOO_SMALL,
 };
 
 /// Errors that can occur during ZXC operations.
@@ -86,6 +86,10 @@ pub enum Error {
     #[error("dictionary exceeds maximum allowed size")]
     DictTooLarge,
 
+    /// The compression level is out of range or unsupported by this context
+    #[error("compression level out of range")]
+    BadLevel,
+
     /// The requested options are not supported by this API
     #[error("unsupported option: {0}")]
     Unsupported(&'static str),
@@ -119,6 +123,7 @@ pub(crate) fn error_from_code(code: i64) -> Error {
         ZXC_ERROR_DICT_REQUIRED => Error::DictRequired,
         ZXC_ERROR_DICT_MISMATCH => Error::DictMismatch,
         ZXC_ERROR_DICT_TOO_LARGE => Error::DictTooLarge,
+        ZXC_ERROR_BAD_LEVEL => Error::BadLevel,
         _ => Error::Unknown(code as i32),
     }
 }

@@ -65,12 +65,14 @@ static const test_entry_t g_tests[] = {
 
     /* --- Context API --- */
     TEST_CASE(test_opaque_context_api),
+    TEST_CASE(test_cctx_level_raise_reinit),
     TEST_CASE(test_estimate_cctx_size),
 
     /* --- Static Context API --- */
     TEST_CASE(test_static_ctx_size_query),
     TEST_CASE(test_static_ctx_workspace_too_small),
     TEST_CASE(test_static_ctx_block_size_locked),
+    TEST_CASE(test_static_ctx_level_raise_rejected),
     TEST_CASE(test_static_ctx_null_inputs),
     TEST_CASE(test_static_ctx_roundtrip_all_levels),
 
@@ -104,6 +106,7 @@ static const test_entry_t g_tests[] = {
     /* --- Format (on-disk) --- */
     TEST_CASE(test_huffman_codec),
     TEST_CASE(test_huffman_codec_dict),
+    TEST_CASE(test_huffman_single_symbol_validation),
     TEST_CASE(test_eof_block_structure),
     TEST_CASE(test_header_checksum),
     TEST_CASE(test_global_checksum_order),

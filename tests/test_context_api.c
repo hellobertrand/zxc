@@ -86,6 +86,107 @@ fail:
     return 0;
 }
 
+/* Regression: a cctx created below ZXC_LEVEL_DENSITY has no opt_scratch; a
+ * per-call level raise into the optimal-parser tier must re-init the inner
+ * buffers instead of dereferencing the NULL scratch (crash before the fix).
+ * Also covers the new out-of-range level validation (ZXC_ERROR_BAD_LEVEL). */
+int test_cctx_level_raise_reinit() {
+    printf("=== TEST: Opaque Context API - level raise re-init + level validation ===\n");
+
+    const size_t src_sz = 8192;
+    uint8_t* src = malloc(src_sz);
+    const size_t comp_cap = (size_t)zxc_compress_bound(src_sz);
+    uint8_t* comp = malloc(comp_cap);
+    uint8_t* dec = malloc(src_sz);
+    zxc_cctx* cctx = NULL;
+    zxc_dctx* dctx = NULL;
+    if (!src || !comp || !dec) goto fail;
+    gen_lz_data(src, src_sz);
+
+    /* 1. Eager init at level 3 (no opt_scratch), then raise to 7 in place. */
+    zxc_compress_opts_t create_opts = {.level = 3, .checksum_enabled = 0};
+    cctx = zxc_create_cctx(&create_opts);
+    dctx = zxc_create_dctx();
+    if (!cctx || !dctx) {
+        printf("  [FAIL] create returned NULL\n");
+        goto fail;
+    }
+    zxc_compress_opts_t raise = {.level = ZXC_LEVEL_ULTRA, .checksum_enabled = 0};
+    const int64_t csz = zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &raise);
+    if (csz <= 0) {
+        printf("  [FAIL] level-7 raise on level-3 cctx returned %lld\n", (long long)csz);
+        goto fail;
+    }
+    const int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, src_sz, NULL);
+    if (dsz != (int64_t)src_sz || memcmp(src, dec, src_sz) != 0) {
+        printf("  [FAIL] roundtrip after level raise (dsz=%lld)\n", (long long)dsz);
+        goto fail;
+    }
+    printf("  [PASS] level 3 -> 7 raise re-inits and roundtrips\n");
+
+    /* 2. Same raise through the block API on a fresh low-level cctx. */
+    zxc_free_cctx(cctx);
+    cctx = zxc_create_cctx(&create_opts);
+    if (!cctx) {
+        printf("  [FAIL] re-create returned NULL\n");
+        goto fail;
+    }
+    zxc_compress_opts_t raise6 = {.level = ZXC_LEVEL_DENSITY, .checksum_enabled = 0};
+    const int64_t bsz = zxc_compress_block(cctx, src, src_sz, comp, comp_cap, &raise6);
+    if (bsz <= 0) {
+        printf("  [FAIL] level-6 block raise returned %lld\n", (long long)bsz);
+        goto fail;
+    }
+    printf("  [PASS] level 3 -> 6 raise through the block API\n");
+
+    /* 3. Out-of-range levels are silently clamped to ULTRA: level 99 must
+     * produce the exact archive level 7 produces, on every entry point. */
+    zxc_compress_opts_t lvl7 = {.level = ZXC_LEVEL_ULTRA, .checksum_enabled = 0};
+    zxc_compress_opts_t lvl99 = {.level = 99, .checksum_enabled = 0};
+    uint8_t* comp7 = malloc(comp_cap);
+    if (!comp7) goto fail;
+    const int64_t c7 = zxc_compress(src, src_sz, comp7, comp_cap, &lvl7);
+    const int64_t c99 = zxc_compress(src, src_sz, comp, comp_cap, &lvl99);
+    if (c7 <= 0 || c99 != c7 || memcmp(comp, comp7, (size_t)c7) != 0) {
+        printf("  [FAIL] zxc_compress(level=99) must clamp to ULTRA (c7=%lld c99=%lld)\n",
+               (long long)c7, (long long)c99);
+        free(comp7);
+        goto fail;
+    }
+    free(comp7);
+    if (zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &lvl99) != c7) {
+        printf("  [FAIL] zxc_compress_cctx(level=99) must clamp to ULTRA\n");
+        goto fail;
+    }
+    if (zxc_compress_block(cctx, src, src_sz, comp, comp_cap, &lvl99) <= 0) {
+        printf("  [FAIL] zxc_compress_block(level=99) must clamp to ULTRA\n");
+        goto fail;
+    }
+    zxc_cctx* cctx99 = zxc_create_cctx(&lvl99);
+    if (!cctx99) {
+        printf("  [FAIL] zxc_create_cctx(level=99) must clamp, not fail\n");
+        goto fail;
+    }
+    zxc_free_cctx(cctx99);
+    printf("  [PASS] level 99 silently clamped to ULTRA across entry points\n");
+
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    free(src);
+    free(comp);
+    free(dec);
+    printf("PASS\n\n");
+    return 1;
+
+fail:
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    free(src);
+    free(comp);
+    free(dec);
+    return 0;
+}
+
 int test_estimate_cctx_size() {
     printf("=== TEST: Unit - zxc_estimate_cctx_size ===\n");
 

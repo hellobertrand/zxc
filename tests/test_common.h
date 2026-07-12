@@ -80,6 +80,7 @@ int test_decompress_block_bound(void);
 
 /* Context API */
 int test_opaque_context_api(void);
+int test_cctx_level_raise_reinit(void);
 int test_estimate_cctx_size(void);
 
 /* Static Context API */
@@ -87,6 +88,7 @@ int test_static_ctx_roundtrip_all_levels(void);
 int test_static_ctx_size_query(void);
 int test_static_ctx_workspace_too_small(void);
 int test_static_ctx_block_size_locked(void);
+int test_static_ctx_level_raise_rejected(void);
 int test_static_ctx_null_inputs(void);
 
 /* Stream API */
@@ -179,6 +181,7 @@ int test_seekable_mt_full_file(void);
 /* Format (on-disk) */
 int test_huffman_codec(void);
 int test_huffman_codec_dict(void);
+int test_huffman_single_symbol_validation(void);
 int test_eof_block_structure(void);
 int test_header_checksum(void);
 int test_global_checksum_order(void);

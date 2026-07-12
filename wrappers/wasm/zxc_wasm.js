@@ -484,8 +484,12 @@ export default async function createZXC(moduleOverrides, factory) {
         return Module.HEAPU32[(bufPtr >> 2) + 2];
     }
 
-    /* Concatenate JS-side slices into a single Uint8Array. */
+    /* Concatenate JS-side slices into a single Uint8Array. A single chunk is
+     * the common case (the staging buffer holds a full block): return it
+     * as-is and skip the concat copy (chunks are already heap-independent
+     * .slice() copies). */
     function _concatChunks(chunks, totalLen) {
+        if (chunks.length === 1) return chunks[0];
         const out = new Uint8Array(totalLen);
         let off = 0;
         for (const c of chunks) {
@@ -536,9 +540,7 @@ export default async function createZXC(moduleOverrides, factory) {
                 }
                 if (r === 0 && _readPos(inDescPtr) === srcLen) break;
             }
-            // Single chunk is the common case (stageCap holds a full block):
-            // skip the concat copy.
-            return chunks.length === 1 ? chunks[0] : _concatChunks(chunks, total);
+            return _concatChunks(chunks, total);
         }
 
         function drainEnd() {
@@ -557,7 +559,7 @@ export default async function createZXC(moduleOverrides, factory) {
                 }
                 if (r === 0) break;
             }
-            return chunks.length === 1 ? chunks[0] : _concatChunks(chunks, total);
+            return _concatChunks(chunks, total);
         }
 
         return {
@@ -640,7 +642,7 @@ export default async function createZXC(moduleOverrides, factory) {
                             exhausted = true;
                         }
                     }
-                    return chunks.length === 1 ? chunks[0] : _concatChunks(chunks, total);
+                    return _concatChunks(chunks, total);
                 } finally {
                     if (srcPtr) _free(srcPtr);
                 }

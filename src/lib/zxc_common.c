@@ -138,9 +138,35 @@ typedef struct {
  *                        the [dict | data] concat buffer.
  * @return Fully populated layout; @c .total is the required workspace size.
  */
+/**
+ * @brief Worst-case sequence count for one block. Shared by the compressor's
+ *        buffer sizing and the decoder's token scratch: the decode side must
+ *        accept exactly what the compress side can emit, so both derive from
+ *        this single expression.
+ */
+static ZXC_ALWAYS_INLINE size_t zxc_cctx_max_seq(const size_t chunk_size) {
+    return chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
+}
+
+/**
+ * @brief Decode-side entropy scratch sizes for one block: token scratch
+ *        (worst-case sequence count + wild-read pad) and PivCo ping-pong
+ *        scratch. Single definition shared by the layout (full provisioning:
+ *        static workspaces) and the lazy heap allocator
+ *        (@ref zxc_cctx_alloc_entropy_scratch), so the two can never drift.
+ */
+static void zxc_dctx_entropy_sizes(const size_t chunk_size, size_t* RESTRICT sz_tok,
+                                   size_t* RESTRICT sz_pivco) {
+    *sz_tok = zxc_cctx_max_seq(chunk_size) + ZXC_PAD_SIZE;
+    *sz_pivco = chunk_size + ZXC_PIVCO_SCRATCH_PAD;
+}
+
 static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int mode,
-                                             const int level, const size_t dict_size) {
+                                             const int level, const size_t dict_size,
+                                             const int defer_entropy_scratch) {
     zxc_cctx_layout_t layout = {0};
+
+    const size_t max_seq = zxc_cctx_max_seq(chunk_size);
 
     if (mode == 0) {
         /* Decompress: work_buf + lit_buffer, both padded for wild-copy
@@ -154,23 +180,27 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         layout.total += ZXC_ALIGN_CL(sz_work);
         layout.off_lit_dctx = layout.total;
         layout.total += ZXC_ALIGN_CL(sz_lit);
-        /* Token-section decode scratch (level-7 GLO blocks Huffman-code the token
-         * stream). Sized to the worst-case sequence count + wild-read pad, matching
-         * the compressor's max_seq bound. Provisioned regardless of level since the
-         * decoder cannot predict per-block enc_litlen. */
-        layout.sz_tok_dctx = (chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16) + ZXC_PAD_SIZE;
-        layout.off_tok_dctx = layout.total;
-        layout.total += ZXC_ALIGN_CL(layout.sz_tok_dctx);
-        /* PivCo (enc 2/3) decode scratch: odd tree levels ping-pong through this
-         * buffer while even levels use the destination. Sized for the largest
-         * section a block can carry (chunk_size literals). */
-        layout.sz_pivco_dctx = chunk_size + ZXC_PIVCO_SCRATCH_PAD;
-        layout.off_pivco_dctx = layout.total;
-        layout.total += ZXC_ALIGN_CL(layout.sz_pivco_dctx);
+        /* Token-section decode scratch (level-7 GLO blocks Huffman-code the
+         * token stream) + PivCo ping-pong scratch. The decoder cannot predict
+         * per-block enc_lit/enc_litlen, so static workspaces provision both
+         * up front (no-alloc contract); heap contexts defer them to the first
+         * entropy section instead (~1.2 x chunk_size that L1-5 archives never
+         * pay), see zxc_cctx_alloc_entropy_scratch. */
+        if (!defer_entropy_scratch) {
+            size_t sz_tok = 0;
+            size_t sz_pivco = 0;
+            zxc_dctx_entropy_sizes(chunk_size, &sz_tok, &sz_pivco);
+            layout.sz_tok_dctx = sz_tok;
+            layout.off_tok_dctx = layout.total;
+            layout.total += ZXC_ALIGN_CL(layout.sz_tok_dctx);
+            layout.sz_pivco_dctx = sz_pivco;
+            layout.off_pivco_dctx = layout.total;
+            layout.total += ZXC_ALIGN_CL(layout.sz_pivco_dctx);
+        }
     } else {
         /* Compress: 6 partitions + optional opt_scratch at level >= ZXC_LEVEL_DENSITY. */
         const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
-        layout.max_seq = chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
+        layout.max_seq = max_seq;
         layout.sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
         layout.sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint8_t);
         const size_t sz_chain = ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t);
@@ -246,7 +276,7 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
 size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, const int level,
                                        const size_t dict_size) {
     if (UNLIKELY(chunk_size == 0)) return 0;
-    return compute_cctx_layout(chunk_size, mode, level, dict_size).total;
+    return compute_cctx_layout(chunk_size, mode, level, dict_size, 0).total;
 }
 
 /**
@@ -270,11 +300,12 @@ size_t zxc_cctx_compute_workspace_size(const size_t chunk_size, const int mode, 
  */
 int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspace,
                                const size_t workspace_size, const size_t chunk_size, const int mode,
-                               const int level, const int checksum_enabled,
-                               const size_t dict_size) {
+                               const int level, const int checksum_enabled, const size_t dict_size,
+                               const int defer_entropy_scratch) {
     if (UNLIKELY(!ctx || !workspace || chunk_size == 0)) return ZXC_ERROR_NULL_INPUT;
 
-    const zxc_cctx_layout_t layout = compute_cctx_layout(chunk_size, mode, level, dict_size);
+    const zxc_cctx_layout_t layout =
+        compute_cctx_layout(chunk_size, mode, level, dict_size, defer_entropy_scratch);
     if (UNLIKELY(workspace_size < layout.total)) return ZXC_ERROR_DST_TOO_SMALL;
 
     ZXC_MEMSET(ctx, 0, sizeof(zxc_cctx_t));
@@ -304,10 +335,12 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
         ctx->work_buf_cap = chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
         ctx->lit_buffer = mem + layout.off_lit_dctx;
         ctx->lit_buffer_cap = chunk_size + ZXC_PAD_SIZE;
-        ctx->tok_buffer = mem + layout.off_tok_dctx;
-        ctx->tok_buffer_cap = layout.sz_tok_dctx;
-        ctx->pivco_scratch = mem + layout.off_pivco_dctx;
-        ctx->pivco_scratch_cap = layout.sz_pivco_dctx;
+        if (layout.sz_pivco_dctx) {
+            ctx->tok_buffer = mem + layout.off_tok_dctx;
+            ctx->tok_buffer_cap = layout.sz_tok_dctx;
+            ctx->pivco_scratch = mem + layout.off_pivco_dctx;
+            ctx->pivco_scratch_cap = layout.sz_pivco_dctx;
+        }
         return ZXC_OK;
     }
 
@@ -352,14 +385,21 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
  */
 int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int mode,
                   const int level, const int checksum_enabled, const size_t dict_size) {
-    const size_t total = zxc_cctx_compute_workspace_size(chunk_size, mode, level, dict_size);
+    if (UNLIKELY(chunk_size == 0)) return ZXC_ERROR_NULL_INPUT;
+    /* Defer the decode-side entropy scratch allocation to the first entropy
+     * section (zxc_cctx_alloc_entropy_scratch) when the caller is a heap context.
+     * Static workspaces must provision it up front (no allocation is ever allowed
+     * later). */
+    const int defer_entropy = (mode == 0);
+    const size_t total =
+        compute_cctx_layout(chunk_size, mode, level, dict_size, defer_entropy).total;
     if (UNLIKELY(total == 0)) return ZXC_ERROR_NULL_INPUT;
 
     uint8_t* const mem = (uint8_t*)ZXC_ALIGNED_MALLOC(total, ZXC_CACHE_LINE_SIZE);
     if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;
 
     const int rc = zxc_cctx_init_in_workspace(ctx, mem, total, chunk_size, mode, level,
-                                              checksum_enabled, dict_size);
+                                              checksum_enabled, dict_size, defer_entropy);
     if (UNLIKELY(rc != ZXC_OK)) {
         // LCOV_EXCL_START
         ZXC_ALIGNED_FREE(mem);
@@ -368,6 +408,33 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     }
     /* Library-owned buffer: record the allocation so zxc_cctx_free frees it. */
     ctx->memory_block = mem;
+    return ZXC_OK;
+}
+
+/**
+ * @brief Lazily allocates the deferred decode-side entropy scratch.
+ *
+ * Public contract at the declaration in @c zxc_internal.h. One aligned block
+ * carries [tok_buffer | pivco_scratch], sized by @ref zxc_dctx_entropy_sizes
+ * (the same source the full-provision layout uses), owned by the context and
+ * released by @ref zxc_cctx_free.
+ */
+int zxc_cctx_alloc_entropy_scratch(zxc_cctx_t* ctx) {
+    if (LIKELY(ctx->pivco_scratch != NULL)) return ZXC_OK;
+
+    size_t sz_tok = 0;
+    size_t sz_pivco = 0;
+    zxc_dctx_entropy_sizes(ctx->chunk_size, &sz_tok, &sz_pivco);
+    const size_t total = ZXC_ALIGN_CL(sz_tok) + ZXC_ALIGN_CL(sz_pivco);
+
+    uint8_t* const mem = (uint8_t*)ZXC_ALIGNED_MALLOC(total, ZXC_CACHE_LINE_SIZE);
+    if (UNLIKELY(!mem)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
+
+    ctx->entropy_block = mem;
+    ctx->tok_buffer = mem;
+    ctx->tok_buffer_cap = sz_tok;
+    ctx->pivco_scratch = mem + ZXC_ALIGN_CL(sz_tok);
+    ctx->pivco_scratch_cap = sz_pivco;
     return ZXC_OK;
 }
 
@@ -383,6 +450,10 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     if (ctx->memory_block) {
         ZXC_ALIGNED_FREE(ctx->memory_block);
         ctx->memory_block = NULL;
+    }
+    if (ctx->entropy_block) {
+        ZXC_ALIGNED_FREE(ctx->entropy_block);
+        ctx->entropy_block = NULL;
     }
 
     ctx->lit_buffer = NULL;
@@ -441,10 +512,11 @@ int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT l
     }
     if (UNLIKELY(empty || ctx->dict_huf == NULL)) return ZXC_OK;
 
-    /* Tree-at-attach: unpack + build the PivCo tree and codes once here; the
-     * per-block encode/estimate/decode paths reuse them via the context. */
+    /* Tree-at-attach: unpack + build the PivCo tree, codes and decoder tables
+     * once here; the per-block encode/estimate/decode paths reuse them via
+     * the context. */
     const int rc = zxc_huf_dict_tree_build(lengths, &ctx->dict_huf->tree, ctx->dict_huf->codes,
-                                           ctx->dict_huf->code_len);
+                                           ctx->dict_huf->code_len, &ctx->dict_huf->dec);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     ctx->dict_huf_tree_ok = 1;
     return ZXC_OK;
@@ -908,6 +980,8 @@ const char* zxc_error_name(const int code) {
             return "ZXC_ERROR_DICT_MISMATCH";
         case ZXC_ERROR_DICT_TOO_LARGE:
             return "ZXC_ERROR_DICT_TOO_LARGE";
+        case ZXC_ERROR_BAD_LEVEL:
+            return "ZXC_ERROR_BAD_LEVEL";
         default:
             return "ZXC_UNKNOWN_ERROR";
     }

@@ -161,19 +161,19 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 		C.size_t(len(data)),
 	))
 
-	// The size comes from the (untrusted) footer with no plausibility check in
-	// C. Reject values that cannot be allocated or that exceed the format's
-	// maximum expansion (a block header is 8 bytes and decodes to at most
-	// ZXC_BLOCK_SIZE_MAX bytes) instead of panicking in make().
-	const maxRatio = uint64(C.ZXC_BLOCK_SIZE_MAX) / 8
-	if size > math.MaxInt || size/maxRatio > uint64(len(data)) {
+	// The footer value is plausibility-checked in C (a forged size returns 0);
+	// only guard what Go's make() cannot represent.
+	if size > math.MaxInt {
 		return nil, ErrInvalidData
 	}
 
 	if size == 0 {
-		// Either a valid empty-payload archive or invalid input. Let the C
-		// decoder decide: it returns 0 for a valid empty archive, or a negative
-		// error code for invalid input. Decode into a zero-length buffer.
+		// Either a valid empty-payload archive, or invalid input (bad header,
+		// or a footer whose size failed the C-side plausibility check). Let
+		// the C decoder decide: it returns 0 for a valid empty archive, or a
+		// negative error code otherwise. Decode into a zero-length buffer;
+		// DST_TOO_SMALL here can only mean the footer contradicts the payload
+		// (the caller supplied no buffer), so report it as invalid data.
 		var dummy [1]byte
 		written := C.zxc_decompress(
 			unsafe.Pointer(&data[0]),
@@ -183,6 +183,9 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 			&dopts,
 		)
 		if written < 0 {
+			if int(written) == int(C.ZXC_ERROR_DST_TOO_SMALL) {
+				return nil, ErrInvalidData
+			}
 			return nil, errorFromCode(written)
 		}
 		if written != 0 {

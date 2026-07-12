@@ -426,15 +426,35 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
         d_ptr += ml;                                \
     } while (0)
 
-/* PivCo section decodes are outlined COLD: they run once per SECTION (a call
- * is noise there), and keeping their bodies out of the sequence-decode
- * monolith preserves its i-cache footprint for levels 1-5, whose blocks never
- * take these branches (the inline branches grew the primary GLO wrapper by
- * ~520 B at the token-entropy commit and cost ~3-5% at levels 3-5). */
+/* The section decoders below are outlined COLD on purpose: they run once per
+ * section (a call is noise), and keeping them out of the hot sequence-decode
+ * loop protects its i-cache footprint - inlining them was measured at
+ * ~3-5% slower on levels 3-5, which never take these branches. */
+/**
+ * @brief Ensures the entropy decode scratch (tok_buffer + pivco_scratch) is
+ *        available before decoding an entropy section.
+ *
+ * Heap contexts defer this scratch to the first entropy section
+ * (@ref zxc_cctx_alloc_entropy_scratch allocates it once); static workspaces
+ * pre-carve it, making this a no-op. The const cast is sound: every context
+ * lives in writable memory (heap allocation or caller workspace) - the
+ * decode chain is const only because steady-state decoding never mutates
+ * the context.
+ *
+ * @param[in] ctx  Decompression context (mutated on the first entropy block).
+ * @return @ref ZXC_OK, or @ref ZXC_ERROR_MEMORY on allocation failure.
+ */
+static ZXC_NOINLINE ZXC_COLD int zxc_ensure_entropy_scratch(const zxc_cctx_t* RESTRICT ctx) {
+    if (LIKELY(ctx->pivco_scratch != NULL)) return ZXC_OK;
+    return zxc_cctx_alloc_entropy_scratch((zxc_cctx_t*)(uintptr_t)ctx);
+}
+
 static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco(const zxc_cctx_t* RESTRICT ctx,
                                                       const uint8_t* RESTRICT payload,
                                                       const size_t psize,
                                                       const size_t required_size) {
+    const int arc = zxc_ensure_entropy_scratch(ctx);
+    if (UNLIKELY(arc != ZXC_OK)) return arc;
     if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE ||
                  ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
         return ZXC_ERROR_CORRUPT_DATA;
@@ -447,16 +467,21 @@ static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco_dict(const zxc_cctx_t* RES
                                                            const size_t psize,
                                                            const size_t required_size) {
     if (UNLIKELY(!ctx->dict_huf_tree_ok)) return ZXC_ERROR_DICT_REQUIRED;
+    const int arc = zxc_ensure_entropy_scratch(ctx);
+    if (UNLIKELY(arc != ZXC_OK)) return arc;
     if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE ||
                  ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
         return ZXC_ERROR_CORRUPT_DATA;
     return zxc_huf_decode_section_dict(payload, psize, ctx->lit_buffer, required_size,
-                                       &ctx->dict_huf->tree, ctx->pivco_scratch);
+                                       &ctx->dict_huf->tree, &ctx->dict_huf->dec,
+                                       ctx->pivco_scratch);
 }
 
 static ZXC_NOINLINE ZXC_COLD int zxc_decode_tok_pivco(const zxc_cctx_t* RESTRICT ctx,
                                                       const uint8_t* RESTRICT payload,
                                                       const size_t psize, const size_t n_tok) {
+    const int arc = zxc_ensure_entropy_scratch(ctx);
+    if (UNLIKELY(arc != ZXC_OK)) return arc;
     if (UNLIKELY(n_tok + ZXC_PAD_SIZE > ctx->tok_buffer_cap ||
                  n_tok + ZXC_PIVCO_SCRATCH_PAD > ctx->pivco_scratch_cap))
         return ZXC_ERROR_CORRUPT_DATA;

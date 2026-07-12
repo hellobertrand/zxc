@@ -210,7 +210,10 @@ typedef enum {
     ZXC_ERROR_BAD_BLOCK_SIZE = -14, // invalid block size
     ZXC_ERROR_DICT_REQUIRED  = -15, // file requires a dictionary but none provided
     ZXC_ERROR_DICT_MISMATCH  = -16, // provided dictionary ID does not match header
-    ZXC_ERROR_DICT_TOO_LARGE = -17  // dictionary exceeds ZXC_DICT_SIZE_MAX
+    ZXC_ERROR_DICT_TOO_LARGE = -17, // dictionary exceeds ZXC_DICT_SIZE_MAX
+    ZXC_ERROR_BAD_LEVEL      = -18  // level unsupported by this context's workspace
+                                    // (static context dense-tier raise; out-of-range
+                                    // levels are otherwise silently clamped)
 } zxc_error_t;
 ```
 
@@ -384,8 +387,12 @@ ZXC_EXPORT size_t zxc_decompress_inplace_bound(
 ```
 
 Reads `src`'s header and footer (no decoding) and returns the single-buffer
-size `zxc_decompress_inplace` needs: `decompressed_size` plus a one-block +
-wild-copy safety margin (`block_size + ZXC_DECOMPRESS_TAIL_PAD`).
+size `zxc_decompress_inplace` needs: `decompressed_size` plus the safety
+margin `block_size + nblocks x (block header + per-block checksum, if any) +
+file footer + ZXC_DECOMPRESS_TAIL_PAD` — one block, the accumulated per-block
+framing overhead (incompressible blocks make the compressed stream run that
+much longer than the output), the footer, and the wild-copy tail. Always size
+the buffer with this function rather than re-deriving the formula.
 
 **Returns**: required buffer size, or `0` if `src` is not a valid archive.
 
@@ -952,6 +959,10 @@ typedef struct {
 
 The library reads `[src+pos .. src+size)` and writes `[dst+pos .. dst+size)`,
 advancing `pos` by what it consumed/produced.  Buffers are caller-owned.
+The whole `[dst+pos .. dst+size)` window is writable scratch: with enough
+remaining capacity the decoder decodes blocks straight into it with
+speculative (wild-copy) stores, so bytes beyond the final `pos` are
+unspecified — never keep live data inside the declared capacity.
 
 ### Compression
 
