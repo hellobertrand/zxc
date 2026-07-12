@@ -1072,7 +1072,8 @@ static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64
 // cppcheck-suppress unusedFunction
 size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
     if (UNLIKELY(!src || src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE)) return 0;
-    uint64_t d = 0, margin = 0;
+    uint64_t d = 0;
+    uint64_t margin = 0;
     if (UNLIKELY(zxc_inplace_probe((const uint8_t*)src, src_size, &d, &margin) != ZXC_OK)) return 0;
     if (UNLIKELY(margin > (uint64_t)SIZE_MAX || d > (uint64_t)SIZE_MAX - margin)) return 0;
     return (size_t)(d + margin);
@@ -1106,7 +1107,8 @@ int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const
         return ZXC_ERROR_NULL_INPUT;
     uint8_t* const buf = (uint8_t*)buffer;
     const uint8_t* const comp = buf + (buffer_capacity - comp_size); /* flush-right */
-    uint64_t d = 0, margin = 0;
+    uint64_t d = 0;
+    uint64_t margin = 0;
     if (UNLIKELY(zxc_inplace_probe(comp, comp_size, &d, &margin) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
     if (UNLIKELY(d > (uint64_t)buffer_capacity || (uint64_t)buffer_capacity - d < margin))

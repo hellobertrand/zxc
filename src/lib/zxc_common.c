@@ -187,7 +187,8 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
          * entropy section instead (~1.2 x chunk_size that L1-5 archives never
          * pay), see zxc_cctx_alloc_entropy_scratch. */
         if (!defer_entropy_scratch) {
-            size_t sz_tok = 0, sz_pivco = 0;
+            size_t sz_tok = 0;
+            size_t sz_pivco = 0;
             zxc_dctx_entropy_sizes(chunk_size, &sz_tok, &sz_pivco);
             layout.sz_tok_dctx = sz_tok;
             layout.off_tok_dctx = layout.total;
@@ -421,7 +422,8 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
 int zxc_cctx_alloc_entropy_scratch(zxc_cctx_t* ctx) {
     if (LIKELY(ctx->pivco_scratch != NULL)) return ZXC_OK;
 
-    size_t sz_tok = 0, sz_pivco = 0;
+    size_t sz_tok = 0;
+    size_t sz_pivco = 0;
     zxc_dctx_entropy_sizes(ctx->chunk_size, &sz_tok, &sz_pivco);
     const size_t total = ZXC_ALIGN_CL(sz_tok) + ZXC_ALIGN_CL(sz_pivco);
 
