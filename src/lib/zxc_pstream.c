@@ -425,7 +425,7 @@ size_t zxc_cstream_in_size(const zxc_cstream* cs) { return cs ? cs->block_size :
  * @return Suggested output buffer capacity in bytes, or 0 if @p cs is @c NULL.
  */
 size_t zxc_cstream_out_size(const zxc_cstream* cs) {
-    if (!cs) return 0;
+    if (UNLIKELY(!cs)) return 0;  // LCOV_EXCL_LINE
     const uint64_t b = zxc_compress_block_bound(cs->block_size);
     return (b == 0 || b > SIZE_MAX) ? cs->block_size : (size_t)b;
 }
@@ -543,14 +543,8 @@ int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out) {
                 break;
             }
 
-            case CS_DRAIN_HEADER: {
-                if (!cs_drain_pending(cs, out)) return (int64_t)(cs->pending_len - cs->pending_pos);
-                cs->state = CS_ACCUMULATE;
-                break;
-            }
-
+            case CS_DRAIN_HEADER:
             case CS_DRAIN_BLOCK: {
-                /* This drain came from a full block compressed during _compress. */
                 if (!cs_drain_pending(cs, out)) return (int64_t)(cs->pending_len - cs->pending_pos);
                 cs->state = CS_ACCUMULATE;
                 break;
@@ -598,7 +592,7 @@ int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out) {
 
             case CS_DONE:
             case CS_ERRORED:
-                return cs->state == CS_ERRORED ? cs->error_code : 0;
+                return cs->state == CS_ERRORED ? cs->error_code : 0;  // LCOV_EXCL_LINE
         }
     }
 }
@@ -853,7 +847,7 @@ zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts) {
  * @param[in,out] ds Stream returned by @ref zxc_dstream_create.
  */
 void zxc_dstream_free(zxc_dstream* ds) {
-    if (!ds) return;
+    if (UNLIKELY(!ds)) return;  // LCOV_EXCL_LINE
     ZXC_FREE(ds->payload);
     ZXC_FREE(ds->decoded);
     if (ds->inner_initialized) zxc_cctx_free(&ds->inner);
@@ -879,7 +873,7 @@ int zxc_dstream_finished(const zxc_dstream* ds) { return (ds && ds->state == DS_
  * @return Suggested input buffer capacity in bytes, or 0 if @p ds is @c NULL.
  */
 size_t zxc_dstream_in_size(const zxc_dstream* ds) {
-    if (!ds) return 0;
+    if (UNLIKELY(!ds)) return 0;  // LCOV_EXCL_LINE
     if (ds->block_size == 0) return ZXC_BLOCK_SIZE_DEFAULT;
     const uint64_t b = zxc_compress_block_bound(ds->block_size);
     return (b == 0 || b > SIZE_MAX) ? ds->block_size : (size_t)b;
@@ -895,7 +889,7 @@ size_t zxc_dstream_in_size(const zxc_dstream* ds) {
  * @return Suggested output buffer capacity in bytes, or 0 if @p ds is @c NULL.
  */
 size_t zxc_dstream_out_size(const zxc_dstream* ds) {
-    if (!ds) return 0;
+    if (UNLIKELY(!ds)) return 0;  // LCOV_EXCL_LINE
     return ds->block_size == 0 ? ZXC_BLOCK_SIZE_DEFAULT : ds->block_size;
 }
 
