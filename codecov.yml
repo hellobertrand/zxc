@@ -6,3 +6,4 @@ coverage:
 
 ignore:
   - "src/cli/**"
+  - "src/lib/vendors/**"
