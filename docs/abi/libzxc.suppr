@@ -1,0 +1,45 @@
+# libzxc — abidiff suppressions
+#
+# These four types are OPAQUE handles. The public headers (include/*.h) only
+# forward-declare them:
+#
+#     typedef struct zxc_cctx_s      zxc_cctx;      /* include/zxc_buffer.h   */
+#     typedef struct zxc_dctx_s      zxc_dctx;      /* include/zxc_buffer.h   */
+#     typedef struct zxc_dstream_s   zxc_dstream;   /* include/zxc_pstream.h  */
+#     typedef struct zxc_seekable_s  zxc_seekable;  /* include/zxc_seekable.h */
+#
+# The full struct bodies live in src/lib/*.c (and the non-installed
+# zxc_internal.h) — never in an installed header. Consumers only ever hold a
+# POINTER to them, obtained from zxc_create_*/…_create, or placed into a
+# caller-provided workspace whose required size is queried AT RUNTIME via
+# zxc_static_cctx_workspace_size() / zxc_static_dctx_workspace_size(). No public
+# header exposes their layout, passes them by value, or defines a compile-time
+# size constant.
+#
+# Therefore growing or reordering their members is ABI-backward-compatible: a
+# binary built against an older libzxc keeps working with a newer libzxc.so.4,
+# because the library itself allocates the (now larger) struct and reports its
+# size dynamically. abidiff flags these only because it walks the pointed-to
+# type in DWARF — a known false positive for the opaque-pointer (pimpl) pattern.
+#
+# A layout change to these types must NOT force a SOVERSION bump. A genuine ABI
+# break — one that DOES require bumping ZXC_SOVERSION and regenerating the
+# baseline — is a removed/renamed exported symbol, a changed public function
+# signature, or a layout change to a by-value/visible type (e.g. an *_opts_t
+# struct). Those are intentionally NOT suppressed here.
+
+[suppress_type]
+  type_kind = struct
+  name = zxc_cctx_s
+
+[suppress_type]
+  type_kind = struct
+  name = zxc_dctx_s
+
+[suppress_type]
+  type_kind = struct
+  name = zxc_dstream_s
+
+[suppress_type]
+  type_kind = struct
+  name = zxc_seekable_s
