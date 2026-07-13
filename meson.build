@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 project('zxc', 'c',
-  version : '0.12.0',
+  version : '0.13.0',
   license : 'BSD-3-Clause',
   default_options : ['c_std=c17', 'buildtype=release', 'warning_level=2'],
   meson_version : '>= 0.60.0',
