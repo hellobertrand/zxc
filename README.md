@@ -67,9 +67,9 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **12,890 MB/s** vs 5,620 MB/s **2.29x Faster** | **61.5** vs 62.2 **Smaller** (-0.7%) | **ZXC** leads in raw throughput. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **7,051 MB/s** vs 4,783 MB/s **1.47x Faster** | **45.8** vs 47.6 **Smaller** (-1.8%) | **ZXC** outperforms LZ4 in read speed and ratio. |
-| **3. Max Density** | **ZXC -6** vs *LZ4HC -9* | **5,622 MB/s** vs 4,508 MB/s **1.25x Faster** | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** beats LZ4HC on both decode speed and ratio. |
+| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **12,880 MB/s** vs 5,624 MB/s **2.29x Faster** | **61.5** vs 62.2 **Smaller** (-0.7%) | **ZXC** leads in raw throughput. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **7,063 MB/s** vs 4,784 MB/s **1.48x Faster** | **45.8** vs 47.6 **Smaller** (-1.8%) | **ZXC** outperforms LZ4 in read speed and ratio. |
+| **3. Max Density** | **ZXC -6** vs *LZ4HC -9* | **5,980 MB/s** vs 4,528 MB/s **1.32x Faster** | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** beats LZ4HC on both decode speed and ratio. |
 
 ### 2. Cloud Server: Google Axion (ARM Neoverse V2)
 *Scenario: High-throughput Microservices, ARM Cloud Instances.*
@@ -115,25 +115,27 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 ### Benchmark ARM64 (Apple Silicon M2)
 
-Benchmarks were conducted using lzbench 2.2.1 (from @inikep), compiled with Clang 21.0.0 using *MOREFLAGS="-march=native"* on macOS Tahoe 26.4 (Build 25E246). The reference hardware is an Apple M2 processor (ARM64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.
+Benchmarks were conducted using lzbench 2.3 (from @inikep), compiled with Clang 21.0.0 using *MOREFLAGS="-march=native"* on macOS Tahoe 26 (`macos-26-xlarge`). The reference hardware is an Apple M2 processor (ARM64). All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 52913 MB/s | 52862 MB/s |   211947520 |100.00 | 1 files|
-| **zxc 0.12.0 -1**           |   878 MB/s | **12890 MB/s** |   130356147 | **61.50** | 1 files|
-| **zxc 0.12.0 -2**           |   588 MB/s | **10676 MB/s** |   113633866 | **53.61** | 1 files|
-| **zxc 0.12.0 -3**           |   257 MB/s |  **7051 MB/s** |    97051444 | **45.79** | 1 files|
-| **zxc 0.12.0 -4**           |   176 MB/s |  **6686 MB/s** |    90392857 | **42.65** | 1 files|
-| **zxc 0.12.0 -5**           |   104 MB/s |  **6289 MB/s** |    85341256 | **40.27** | 1 files|
-| **zxc 0.12.0 -6**           |  12.7 MB/s |  **5622 MB/s** |    76882010 | **36.27** | 1 files|
-| lz4 1.10.0              |   815 MB/s |  4783 MB/s |   100880800 | 47.60 | 1 files|
-| lz4 1.10.0 --fast -17   |  1354 MB/s |  5620 MB/s |   131732802 | 62.15 | 1 files|
-| lz4hc 1.10.0 -9         |  48.4 MB/s |  4508 MB/s |    77884448 | 36.75 | 1 files|
-| lzav 5.7 -1             |   658 MB/s |  3869 MB/s |    84644732 | 39.94 | 1 files|
-| snappy 1.2.2            |   882 MB/s |  3264 MB/s |   101415443 | 47.85 | 1 files|
-| zstd 1.5.7 --fast --1   |   726 MB/s |  2541 MB/s |    86916294 | 41.01 | 1 files|
-| zstd 1.5.7 -1           |   647 MB/s |  1808 MB/s |    73193704 | 34.53 | 1 files|
-| zlib 1.3.1 -1           |   150 MB/s |   412 MB/s |    77259029 | 36.45 | 1 files|
+| memcpy                  | 52855 MB/s | 52878 MB/s |   211947520 |100.00 | 1 files|
+| **zxc 0.13.0 -1**           |   888 MB/s | **12880 MB/s** |   130356147 | **61.50** | 1 files|
+| **zxc 0.13.0 -2**           |   594 MB/s | **10683 MB/s** |   113633866 | **53.61** | 1 files|
+| **zxc 0.13.0 -3**           |   251 MB/s |  **7063 MB/s** |    97051444 | **45.79** | 1 files|
+| **zxc 0.13.0 -4**           |   173 MB/s |  **6696 MB/s** |    90392857 | **42.65** | 1 files|
+| **zxc 0.13.0 -5**           |   103 MB/s |  **6295 MB/s** |    85341256 | **40.27** | 1 files|
+| **zxc 0.13.0 -6**           |  12.4 MB/s |  **5980 MB/s** |    76877873 | **36.27** | 1 files|
+| **zxc 0.13.0 -7**           |  8.74 MB/s |  **3790 MB/s** |    69950212 | **33.00** | 1 files|
+| lz4 1.10.0              |   814 MB/s |  4784 MB/s |   100880800 | 47.60 | 1 files|
+| lz4 1.10.0 --fast -17   |  1354 MB/s |  5624 MB/s |   131732802 | 62.15 | 1 files|
+| lz4hc 1.10.0 -9         |  48.0 MB/s |  4528 MB/s |    77884448 | 36.75 | 1 files|
+| lzav 5.9 -1             |   674 MB/s |  3901 MB/s |    84644732 | 39.94 | 1 files|
+| snappy 1.2.2            |   883 MB/s |  3265 MB/s |   101415443 | 47.85 | 1 files|
+| zstd 1.5.7 --fast --1   |   725 MB/s |  2539 MB/s |    86916294 | 41.01 | 1 files|
+| zstd 1.5.7 -1           |   646 MB/s |  1809 MB/s |    73193704 | 34.53 | 1 files|
+| zstd 1.5.7 -3           |   394 MB/s |  1704 MB/s |    66133500 | 31.20 | 1 files|
+| zlib 1.3.2 -1           |   150 MB/s |   412 MB/s |    77259029 | 36.45 | 1 files|
 
 
 ### Benchmark ARM64 (Google Axion Neoverse-V2)
