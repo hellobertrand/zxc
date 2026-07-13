@@ -46,14 +46,21 @@ informative:
   RAPIDHASH:
     title: "RapidHash: a fast, high-quality non-cryptographic hash function"
     target: https://github.com/Nicoshev/rapidhash
-    date: false
-  PIVCO:
-    title: "PivCo: Huffman merge operations (level-ordered bit layout)"
-    target: https://fgiesen.wordpress.com/2026/06/21/pivco-huffman-merge-operations/
     author:
       -
-        ins: F. Giesen
-        name: Fabian Giesen
+        ins: N. De Carli
+        name: Nicolas De Carli
+    date: false
+  PIVCO:
+    title: "PivCo-Huffman"
+    target: https://marcinzukowski.github.io/pivco-huffman/paper-1.0/ph.html
+    author:
+      -
+        ins: M. Żukowski
+        name: Marcin Żukowski
+        asciiInitials: M.
+        asciiSurname: Zukowski
+        asciiFullname: Marcin Zukowski
     date: 2026
   ZXC-WP:
     title: "The ZXC Compressor: design and implementation notes"
