@@ -70,6 +70,7 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 | **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **12,880 MB/s** vs 5,624 MB/s **2.29x Faster** | **61.5** vs 62.2 **Smaller** (-0.7%) | **ZXC** leads in raw throughput. |
 | **2. Standard** | **ZXC -3** vs *LZ4 Default* | **7,063 MB/s** vs 4,784 MB/s **1.48x Faster** | **45.8** vs 47.6 **Smaller** (-1.8%) | **ZXC** outperforms LZ4 in read speed and ratio. |
 | **3. Max Density** | **ZXC -6** vs *LZ4HC -9* | **5,980 MB/s** vs 4,528 MB/s **1.32x Faster** | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** beats LZ4HC on both decode speed and ratio. |
+| **4. Ultra** | **ZXC -7** vs *zstd -1* | **3,790 MB/s** vs 1,809 MB/s **2.10x Faster** | **33.0** vs 34.5 **Smaller** (-1.5%) | **ZXC -7** bridges the gap between LZ4HC and `zstd -1` — smaller output, ~2.1x faster decode. |
 
 ### 2. Cloud Server: Google Axion (ARM Neoverse V2)
 *Scenario: High-throughput Microservices, ARM Cloud Instances.*
@@ -79,6 +80,7 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 | **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **9,383 MB/s** vs 4,947 MB/s **1.90x Faster** | **61.5** vs 62.2 **Smaller** (-0.7%) | **ZXC** leads in raw throughput. |
 | **2. Standard** | **ZXC -3** vs *LZ4 Default* | **5,377 MB/s** vs 4,263 MB/s **1.26x Faster** | **45.8** vs 47.6 **Smaller** (-1.8%) | **ZXC** outperforms LZ4 in read speed and ratio. |
 | **3. Max Density** | **ZXC -6** vs *LZ4HC -9* | **4,450 MB/s** vs 3,855 MB/s **1.15x Faster** | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** beats LZ4HC on both decode speed and ratio. |
+| **4. Ultra** | **ZXC -7** vs *zstd -1* | **2,843 MB/s** vs 1,644 MB/s **1.73x Faster** | **33.0** vs 34.5 **Smaller** (-1.5%) | **ZXC -7** bridges the gap between LZ4HC and `zstd -1` — smaller output, ~1.7x faster decode. |
 
 ### 3. Build Server: x86_64 (AMD EPYC 9B45 / Zen 5)
 *Scenario: CI/CD Pipelines compatibility.*
@@ -88,6 +90,7 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 | **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **11,032 MB/s** vs 5,293 MB/s **2.08x Faster** | **61.5** vs 62.2 **Smaller** (-0.7%) | **ZXC** achieves higher throughput. |
 | **2. Standard** | **ZXC -3** vs *LZ4 Default* | **6,096 MB/s** vs 5,029 MB/s **1.21x Faster** | **45.8** vs 47.6 **Smaller** (-1.8%) | **ZXC** offers improved speed and ratio. |
 | **3. Max Density** | **ZXC -6** vs *LZ4HC -9* | **5,389 MB/s** vs 4,844 MB/s **1.11x Faster** | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** now beats LZ4HC on both decode speed and ratio. |
+| **4. Ultra** | **ZXC -7** vs *zstd -1* | **3,742 MB/s** vs 1,888 MB/s **1.98x Faster** | **33.0** vs 34.5 **Smaller** (-1.5%) | **ZXC -7** bridges the gap between LZ4HC and `zstd -1` — smaller output, ~2x faster decode. |
 
 ### 4. Production Server: x86_64 (AMD EPYC 7B13 / Zen 3)
 *Scenario: Mainstream cloud workloads (AWS c6a, Azure HBv3, GCP n2d).*
@@ -97,6 +100,7 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 | **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **7,726 MB/s** vs 4,494 MB/s **1.72x Faster** | **61.5** vs 62.2 **Smaller** (-0.7%) | **ZXC** holds a strong lead on the legacy x86 pipeline. |
 | **2. Standard** | **ZXC -3** vs *LZ4 Default* | **4,250 MB/s** vs 3,891 MB/s **1.09x Faster** | **45.8** vs 47.6 **Smaller** (-1.8%) | **ZXC** delivers faster decode and smaller output. |
 | **3. Max Density** | **ZXC -6** vs *LZ4HC -9* | 3,695 MB/s vs **3,727 MB/s** (decode within 1%) | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** wins on ratio; decode trails `LZ4HC -9` by <1% on Zen 3. |
+| **4. Ultra** | **ZXC -7** vs *zstd -1* | **2,474 MB/s** vs 1,339 MB/s **1.85x Faster** | **33.0** vs 34.5 **Smaller** (-1.5%) | **ZXC -7** bridges the gap between LZ4HC and `zstd -1` — smaller output, ~1.8x faster decode. |
 
 *Decompression Speed: ZXC vs LZ4 family at equivalent ratio tiers, across 4 CPUs (Fast ≈ 62%, Default ≈ 47%, High ≈ 37%)*
 
