@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.13.0] - 2026-07-XX
+## [0.13.0] - 2026-07-14
 api: Refines code coverage reporting (#322)
 api: Adds Level 7 (Ultra) compression to wrappers (#317)
 api: ZXC format v7: PivCo Huffman, level 7 (ULTRA), space-speed selection, in-place decode (#315)

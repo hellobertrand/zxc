@@ -180,13 +180,15 @@ typedef enum {
     ZXC_LEVEL_DEFAULT  = 3,  // Recommended balance
     ZXC_LEVEL_BALANCED = 4,  // Higher ratio, good speed
     ZXC_LEVEL_COMPACT  = 5,  // High density
-    ZXC_LEVEL_DENSITY  = 6   // Maximum density: Huffman literals + optimal parser
+    ZXC_LEVEL_DENSITY  = 6,  // Higher density: adds PIVCO-Huffman-coded literals
+    ZXC_LEVEL_ULTRA    = 7   // Maximum density: PIVCO-Huffman literals + tokens
 } zxc_compression_level_t;
 ```
 
 Levels 1..5 produce data decompressible at essentially the **same speed**;
-level 6 adds a per-block Huffman decode step that costs ~10–20 % decode
-throughput compared to lower levels in exchange for the densest output.
+levels 6 and 7 add a per-block Huffman decode step — literals at level 6,
+literals *and* sequence tokens at level 7 — trading some decode throughput for
+denser output (level 7 is the densest and carries the largest decode cost).
 Pass `0` for level to use `ZXC_LEVEL_DEFAULT`.
 
 ### 5.4 Error Codes
@@ -230,7 +232,7 @@ All public functions that can fail return negative `zxc_error_t` values on error
 ```c
 typedef struct {
     int    n_threads;         // Worker thread count (0 = auto-detect).
-    int    level;             // Compression level 1–6 (0 = default).
+    int    level;             // Compression level 1–7 (0 = default).
     size_t block_size;        // Block size in bytes (0 = 512 KB default).
     int    checksum_enabled;  // 1 = enable checksums, 0 = disable.
     int    seekable;          // 1 = append seek table for random access.
@@ -312,8 +314,8 @@ equivalent to `ZXC_LEVEL_FASTEST`).
 ZXC_EXPORT int zxc_max_level(void);
 ```
 
-Returns the maximum supported compression level (currently `5`,
-equivalent to `ZXC_LEVEL_COMPACT`).
+Returns the maximum supported compression level (currently `7`,
+equivalent to `ZXC_LEVEL_ULTRA`).
 
 #### `zxc_default_level`
 
