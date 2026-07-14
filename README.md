@@ -235,7 +235,7 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
 ### Option 1: Download Release (GitHub)
 
 1.  Go to the [Releases page](https://github.com/hellobertrand/zxc/releases).
-2.  Download the archive matching your architecture (replace `<version>` with the release, e.g. `0.13.0`):
+2.  Download the archive matching your architecture (replace `<version>` with the release, e.g. `0.13.1`):
 
     **macOS:**
     *   `zxc-<version>-macos-arm64.tar.gz` (NEON optimizations included).

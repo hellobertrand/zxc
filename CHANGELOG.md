@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.13.1] - 2026-07-15
+api: Define zxc_lib_EXPORTS in Meson so the Windows DLL exports its API
+misc: Require Meson >= 0.63.0 so c_std applies in subproject builds
+doc: Update Option 6 to specify 'Winget' for installation
+
 ## [0.13.0] - 2026-07-14
 api: Refines code coverage reporting (#322)
 api: Adds Level 7 (Ultra) compression to wrappers (#317)
