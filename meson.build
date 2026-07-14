@@ -17,6 +17,13 @@ host_cpu = host_machine.cpu_family()
 zxc_soversion = '4'
 
 # =============================================================================
+# Windows DLL export control
+# =============================================================================
+
+building_static = get_option('default_library') == 'static'
+lib_export_args = building_static ? ['-DZXC_STATIC_DEFINE'] : ['-Dzxc_lib_EXPORTS']
+
+# =============================================================================
 # Platform defines
 # =============================================================================
 
@@ -64,7 +71,7 @@ foreach info : variant_sets
     obj = static_library(
       'zxc' + info[0] + '_' + src.underscorify(),
       src,
-      c_args : info[1] + ['-DZXC_FUNCTION_SUFFIX=' + info[0]],
+      c_args : info[1] + ['-DZXC_FUNCTION_SUFFIX=' + info[0]] + lib_export_args,
       include_directories : libzxc_includes,
       pic : true,
     )
@@ -91,6 +98,7 @@ thread_dep = dependency('threads')
 libzxc = library('zxc',
   libzxc_sources,
   objects : variant_objects,
+  c_args : lib_export_args,
   gnu_symbol_visibility : 'hidden',
   include_directories : libzxc_includes,
   dependencies : [thread_dep],
@@ -102,6 +110,7 @@ libzxc = library('zxc',
 libzxc_dep = declare_dependency(
   link_with : libzxc,
   include_directories : inc_public,
+  compile_args : building_static ? ['-DZXC_STATIC_DEFINE'] : [],
 )
 meson.override_dependency('libzxc', libzxc_dep)
 
@@ -113,6 +122,7 @@ else
   libzxc_static = static_library('zxc_static',
     libzxc_sources,
     objects : variant_objects,
+    c_args : ['-DZXC_STATIC_DEFINE'],
     include_directories : libzxc_includes,
     dependencies : [thread_dep],
     build_by_default : false,
@@ -180,6 +190,7 @@ if not meson.is_subproject()
       'tests/test_misc.c',
       'tests/test_dict.c',
     ),
+    c_args : ['-DZXC_STATIC_DEFINE'],
     include_directories : libzxc_includes,
     link_with : libzxc_static,
     dependencies : [thread_dep],
