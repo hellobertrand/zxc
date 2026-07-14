@@ -25,6 +25,7 @@ on:
       - 'src/lib/**'
       - 'include/**'
       - 'CMakeLists.txt'
+      - 'docs/abi/**'
 
 permissions:
   contents: read
@@ -109,10 +110,19 @@ jobs:
             exit 1
           fi
 
+          SUPPR=docs/abi/libzxc.suppr
+          if [ ! -f "$SUPPR" ]; then
+            echo "::error::Suppression file $SUPPR not found."
+            exit 1
+          fi
+
           # --no-added-syms: adding symbols is allowed (MINOR bump);
-          # removals/changes are reported as ABI breaks (MAJOR bump required).
+          #   removals/changes are reported as ABI breaks (MAJOR bump required).
+          # --suppressions: filters layout changes to the OPAQUE handle structs.
+          #   Consumers only ever hold pointers to these, so growing them is ABI-compatible.
+          #   See docs/abi/libzxc.suppr for the full rationale.
           set +e
-          abidiff --no-added-syms "$BASELINE" build/current.abi.xml | tee abi-report.txt
+          abidiff --no-added-syms --suppressions "$SUPPR" "$BASELINE" build/current.abi.xml | tee abi-report.txt
           STATUS=$?
           set -e
 

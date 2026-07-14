@@ -112,7 +112,7 @@ func VersionString() string {
 }
 
 // LibraryVersion returns the version string reported by the linked native
-// libzxc (e.g. "0.12.0").
+// libzxc (e.g. "0.13.0").
 func LibraryVersion() string {
 	return C.GoString(C.zxc_version_string())
 }

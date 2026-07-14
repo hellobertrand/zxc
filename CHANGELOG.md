@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.13.0] - 2026-07-14
+api: Refines code coverage reporting (#322)
+api: Adds Level 7 (Ultra) compression to wrappers (#317)
+api: ZXC format v7: PivCo Huffman, level 7 (ULTRA), space-speed selection, in-place decode (#315)
+api: bump node-addon-api from 8.8.0 to 8.9.0 in /wrappers/nodejs (#308)
+api: Refines documentation and API option descriptions (#299)
+api: Enhances code quality and analysis setup (#294)
+perf: Optimizes compression and decompression performance (#319)
+perf: Optimizes Huffman decoding and compression margins (#301)
+cli: Refines CLI with progress, robust parsing, and file I/O (#318)
+cli: Update README with zxc CLI installation option (#316)
+cli: Enhances code quality and robustness across components (#296)
+cli: Enhance README clarity and quick start
+build: Upgrades Python build deps and fixes Rust linker (#323)
+build: bump pytest from 9.0.3 to 9.1.1 in /wrappers/python (#310)
+build: bump setuptools-scm in /wrappers/python (#311)
+build: bump cibuildwheel from 3.4.1 to 4.1.0 in /wrappers/python (#309)
+build: bump vitest from 4.1.7 to 4.1.9 in /wrappers/nodejs (#307)
+build: Refines code style, type safety, and modernizes JS/Go wrappers (#297)
+build: Refines CI/CD workflows and test stability (#292)
+portability: Add OS and libc compatibility CI for musl Linux and FreeBSD (#291)
+doc: Refactor LZ77 search loop conditions (#298)
+doc: Update README badges
+misc: Ignore vendors code in coverage reports
+misc: Improves robustness and refines memory management (#321)
+misc: Update lzbench benchmark source to v0.13.0
+misc: Caches dict Huffman tree upon attach (#320)
+misc: bump actions/setup-python from 6.2.0 to 6.3.0 (#305)
+misc: bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#312)
+misc: bump msys2/setup-msys2 from 2.31.1 to 2.32.0 (#304)
+misc: bump actions-rust-lang/setup-rust-toolchain (#306)
+misc: bump actions/attest-build-provenance from 4.1.0 to 4.1.1 (#303)
+misc: bump softprops/action-gh-release from 3.0.0 to 3.0.1 (#302)
+misc: Refines code quality and addresses warnings (#295)
+misc: Update bash conditional expressions to '[[ ... ]]' (#293)
+misc: Statically define Meson project version and SOVERSION (#290)
+
 ## [0.12.0] - 2026-06-18
 api: Implements shared dictionary Huffman table (#275)
 api: Enhances format validation (#271)
