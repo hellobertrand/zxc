@@ -199,7 +199,6 @@ fn main() {
         .include(src_lib.join("vendors"))
         .define("ZXC_STATIC_DEFINE", None)
         .file(src_lib.join("zxc_common.c"))
-        .file(src_lib.join("zxc_pivco_tables.c"))
         .file(src_lib.join("zxc_dict.c"))
         .file(src_lib.join("zxc_dispatch.c"))
         .file(src_lib.join("zxc_driver.c"))
@@ -273,6 +272,19 @@ fn main() {
             ],
         );
     }
+
+    // PivCo tables: const data used only by the variant Huffman decoders, so it
+    // must link LAST (zxc_core doesn't reference it, or the linker drops it).
+    let mut pivco_tables = cc::Build::new();
+    pivco_tables
+        .include(&include_dir)
+        .include(&src_lib)
+        .include(src_lib.join("vendors"))
+        .define("ZXC_STATIC_DEFINE", None)
+        .file(src_lib.join("zxc_pivco_tables.c"))
+        .opt_level(3)
+        .warnings(false);
+    pivco_tables.compile("zxc_pivco_tables");
 
     // Threading support (not needed on Windows, which uses kernel32)
     if !target.contains("windows") {
