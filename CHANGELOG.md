@@ -13,6 +13,7 @@ cli: Refines CLI with progress, robust parsing, and file I/O (#318)
 cli: Update README with zxc CLI installation option (#316)
 cli: Enhances code quality and robustness across components (#296)
 cli: Enhance README clarity and quick start
+build: Upgrades Python build deps and fixes Rust linker (#323)
 build: bump pytest from 9.0.3 to 9.1.1 in /wrappers/python (#310)
 build: bump setuptools-scm in /wrappers/python (#311)
 build: bump cibuildwheel from 3.4.1 to 4.1.0 in /wrappers/python (#309)
