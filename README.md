@@ -357,7 +357,7 @@ meson compile -C build
 When consumed as a subproject, only the library is built (CLI and tests are
 skipped automatically).
 
-### Option 6: 
+### Option 6: Winget
 
 **Requirements:** Windows 10 1709 (or later)
 
