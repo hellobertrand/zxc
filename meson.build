@@ -7,7 +7,7 @@ project('zxc', 'c',
   version : '0.13.0',
   license : 'BSD-3-Clause',
   default_options : ['c_std=c17', 'buildtype=release', 'warning_level=2'],
-  meson_version : '>= 0.60.0',
+  meson_version : '>= 0.63.0',
 )
 
 cc = meson.get_compiler('c')
