@@ -1309,11 +1309,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     // Copy remaining literals from source stream (literal exhaustion)
     if (UNLIKELY(l_ptr > l_end)) return ZXC_ERROR_CORRUPT_DATA;
     const size_t remaining_literals = (size_t)(l_end - l_ptr);
-    if (remaining_literals > 0) {
-        if (UNLIKELY(d_ptr + remaining_literals > d_end)) return ZXC_ERROR_OVERFLOW;
-        ZXC_MEMCPY(d_ptr, l_ptr, remaining_literals);
-        d_ptr += remaining_literals;
-    }
+    if (UNLIKELY(remaining_literals > (size_t)(d_end - d_ptr))) return ZXC_ERROR_OVERFLOW;
+    ZXC_MEMCPY(d_ptr, l_ptr, remaining_literals);
+    d_ptr += remaining_literals;
 
     return (int)(d_ptr - dst);
 }
@@ -1920,11 +1918,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     // Copy remaining literals from source stream (literal exhaustion)
     if (UNLIKELY(l_ptr > l_end)) return ZXC_ERROR_CORRUPT_DATA;
     const size_t remaining_literals = (size_t)(l_end - l_ptr);
-    if (remaining_literals > 0) {
-        if (UNLIKELY(d_ptr + remaining_literals > d_end)) return ZXC_ERROR_OVERFLOW;
-        ZXC_MEMCPY(d_ptr, l_ptr, remaining_literals);
-        d_ptr += remaining_literals;
-    }
+    if (UNLIKELY(remaining_literals > (size_t)(d_end - d_ptr))) return ZXC_ERROR_OVERFLOW;
+    ZXC_MEMCPY(d_ptr, l_ptr, remaining_literals);
+    d_ptr += remaining_literals;
 
     return (int)(d_ptr - dst);
 }
