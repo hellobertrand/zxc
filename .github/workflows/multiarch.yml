@@ -162,24 +162,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux amd64 (SSE2)
-            cross_pkg: gcc
-            cross_prefix: x86_64-linux-gnu
-            cmake_processor: x86_64
-            qemu_binary: qemu-x86_64
-            qemu_cpu: core2duo
-          - name: Linux amd64 (AVX2)
-            cross_pkg: gcc
-            cross_prefix: x86_64-linux-gnu
-            cmake_processor: x86_64
-            qemu_binary: qemu-x86_64
-            qemu_cpu: Haswell-noTSX
-          - name: Linux amd64 (AVX-512)
-            cross_pkg: gcc
-            cross_prefix: x86_64-linux-gnu
-            cmake_processor: x86_64
-            qemu_binary: qemu-x86_64
-            qemu_cpu: Skylake-Server-noTSX-IBRS
           - name: Linux arm64
             cross_pkg: gcc-aarch64-linux-gnu
             cross_prefix: aarch64-linux-gnu
@@ -292,6 +274,87 @@ jobs:
                   ./$BUILD_DIR/zxc_conformance_test ./conformance
               ${{ matrix.qemu_binary }} $QEMU_CPU_ARG -L $SYSROOT \
                   ./$BUILD_DIR/zxc_format_golden_test ./tests/format/golden
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
+
+  # ===========================================================================
+  # Tier 2 (amd64 SIMD tiers): each x86 dispatch tier runs as its own parallel
+  # job under Intel SDE. SDE runs host-native x86 directly (faster than QEMU's
+  # TCG re-translation) and, unlike QEMU's TCG, can execute AVX-512. One native
+  # build per job carries all per-ISA variants; the emulated CPU model makes the
+  # runtime dispatcher select that job's tier:
+  #   -mrm  Merom (Core 2)  -> SSE2 tier    (== old core2duo)
+  #   -hsw  Haswell         -> AVX2 tier     (== old Haswell)
+  #   -icx  Ice Lake Server -> AVX-512 tier  (F+BW+VBMI2; VBMI2 is required by
+  #                            ZXC's AVX-512 gate, which Skylake-Server lacks)
+  # ===========================================================================
+  build-tier2-amd64-sde:
+    name: "Tier 2: Linux amd64 (${{ matrix.tier }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tier: SSE2
+            sde_chip: mrm
+          - tier: AVX2
+            sde_chip: hsw
+          - tier: AVX-512
+            sde_chip: icx
+    env:
+      # Pinned + checksum-verified (Intel requires a license acceptance to
+      # download; the tarball itself is served from downloadmirror.intel.com).
+      SDE_URL: "https://downloadmirror.intel.com/915934/sde-external-10.8.0-2026-03-15-lin.tar.xz"
+      SDE_SHA256: "50b320cd226acef7a491f5b321fc1be3c3c7984f9e27a456e64894b5b0979dd3"
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential
+
+      - name: Install Intel SDE (pinned + checksum-verified)
+        run: |
+          curl -fsSL -o sde.tar.xz "$SDE_URL"
+          echo "${SDE_SHA256}  sde.tar.xz" | sha256sum -c -
+          mkdir -p "$HOME/sde"
+          tar -xf sde.tar.xz -C "$HOME/sde" --strip-components=1
+          echo "$HOME/sde" >> "$GITHUB_PATH"
+
+      - name: Configure, Build & Test (Static & Shared) under SDE
+        shell: bash
+        run: |
+          # ZXC_NATIVE_ARCH=OFF keeps the core library at the x86-64 baseline so
+          # nothing outside the explicit per-ISA variants emits an instruction the
+          # emulated model lacks.
+          SDE="sde64 -${{ matrix.sde_chip }} --"
+          echo "Emulated CPU: Intel SDE -${{ matrix.sde_chip }} (${{ matrix.tier }} tier)"
+
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B "$BUILD_DIR" \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build "$BUILD_DIR" --config Release --parallel
+
+              # Shared build: let the loader find libzxc.so under the emulator.
+              export LD_LIBRARY_PATH="$PWD/$BUILD_DIR:${LD_LIBRARY_PATH:-}"
+
+              echo "Running Tests for $LIB_TYPE under Intel SDE (${{ matrix.tier }})..."
+              $SDE ./"$BUILD_DIR"/zxc_test
+              $SDE ./"$BUILD_DIR"/zxc_conformance_test ./conformance
+              $SDE ./"$BUILD_DIR"/zxc_format_golden_test ./tests/format/golden
 
               echo ">>> Completed Build: $LIB_TYPE"
               echo ""
