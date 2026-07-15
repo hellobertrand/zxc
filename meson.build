@@ -13,6 +13,14 @@ project('zxc', 'c',
 cc = meson.get_compiler('c')
 host_cpu = host_machine.cpu_family()
 
+msvc_syntax = cc.get_argument_syntax() == 'msvc'
+is_cl = cc.get_id() == 'msvc'
+
+# /wd4244: silence the block-bounded uint64->size_t narrowing that is lossless on
+# this codebase (only 32-bit MSVC targets warn; clean on GCC/Clang). Mirrors the
+# CMake build's per-target /wd4244.
+msvc_narrowing_args = msvc_syntax ? ['/wd4244'] : []
+
 # Keep in sync with ZXC_SOVERSION in CMakeLists.txt (bumps only on an ABI break).
 zxc_soversion = '4'
 
@@ -56,11 +64,20 @@ variant_sources = ['src/lib/zxc_compress.c',
 variant_sets = [['_default', []]]
 
 if host_cpu == 'x86_64'
-  variant_sets += [['_sse2',   ['-msse2']]]
-  variant_sets += [['_avx2',   ['-mavx2', '-mfma', '-mbmi', '-mbmi2', '-mlzcnt']]]
-  variant_sets += [['_avx512', ['-mavx512f', '-mavx512bw', '-mavx512vbmi', '-mavx512vbmi2', '-mbmi', '-mbmi2', '-mlzcnt']]]
+  if is_cl
+    # SSE2 is the x86-64 baseline; /arch:AVX2|AVX512 gate the wider paths. MSVC does
+    # not predefine __BMI__/__BMI2__/__LZCNT__ under /arch, so define them here.
+    variant_sets += [['_sse2',   ['/D__SSE2__']]]
+    variant_sets += [['_avx2',   ['/arch:AVX2', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__']]]
+    variant_sets += [['_avx512', ['/arch:AVX512', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__']]]
+  else
+    variant_sets += [['_sse2',   ['-msse2']]]
+    variant_sets += [['_avx2',   ['-mavx2', '-mfma', '-mbmi', '-mbmi2', '-mlzcnt']]]
+    variant_sets += [['_avx512', ['-mavx512f', '-mavx512bw', '-mavx512vbmi', '-mavx512vbmi2', '-mbmi', '-mbmi2', '-mlzcnt']]]
+  endif
 elif host_cpu == 'aarch64'
-  variant_sets += [['_neon', ['-march=armv8-a+simd']]]
+  # MSVC ARM64 implies NEON; passing -march=armv8-a+simd only warns D9002.
+  variant_sets += is_cl ? [['_neon', []]] : [['_neon', ['-march=armv8-a+simd']]]
 elif host_cpu == 'arm'
   variant_sets += [['_neon', ['-march=armv7-a', '-mfpu=neon']]]
 endif
@@ -71,7 +88,7 @@ foreach info : variant_sets
     obj = static_library(
       'zxc' + info[0] + '_' + src.underscorify(),
       src,
-      c_args : info[1] + ['-DZXC_FUNCTION_SUFFIX=' + info[0]] + lib_export_args,
+      c_args : info[1] + msvc_narrowing_args + ['-DZXC_FUNCTION_SUFFIX=' + info[0]] + lib_export_args,
       include_directories : libzxc_includes,
       pic : true,
     )
@@ -98,7 +115,7 @@ thread_dep = dependency('threads')
 libzxc = library('zxc',
   libzxc_sources,
   objects : variant_objects,
-  c_args : lib_export_args,
+  c_args : lib_export_args + msvc_narrowing_args,
   gnu_symbol_visibility : 'hidden',
   include_directories : libzxc_includes,
   dependencies : [thread_dep],
@@ -122,7 +139,7 @@ else
   libzxc_static = static_library('zxc_static',
     libzxc_sources,
     objects : variant_objects,
-    c_args : ['-DZXC_STATIC_DEFINE'],
+    c_args : ['-DZXC_STATIC_DEFINE'] + msvc_narrowing_args,
     include_directories : libzxc_includes,
     dependencies : [thread_dep],
     build_by_default : false,
