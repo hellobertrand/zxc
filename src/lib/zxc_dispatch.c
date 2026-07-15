@@ -129,10 +129,6 @@ int zxc_huf_decode_section_dict_default(const uint8_t* RESTRICT payload, size_t 
                                         const zxc_pivco_tree_t* RESTRICT tree,
                                         const zxc_pivco_decode_aux_t* RESTRICT aux,
                                         uint8_t* RESTRICT scratch);
-int zxc_huf_dict_tree_build_default(const uint8_t* RESTRICT packed_lengths,
-                                    zxc_pivco_tree_t* RESTRICT tree, uint32_t* RESTRICT codes,
-                                    uint8_t* RESTRICT code_len,
-                                    zxc_pivco_decode_aux_t* RESTRICT aux);
 size_t zxc_huf_calc_size_dict_default(const uint32_t* RESTRICT freq,
                                       const uint8_t* RESTRICT code_len,
                                       const zxc_pivco_tree_t* RESTRICT tree);
@@ -597,12 +593,6 @@ int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t pa
                                 const zxc_pivco_decode_aux_t* RESTRICT aux,
                                 uint8_t* RESTRICT scratch) {
     return zxc_huf_decode_section_dict_default(payload, payload_size, dst, n, tree, aux, scratch);
-}
-
-int zxc_huf_dict_tree_build(const uint8_t* RESTRICT packed_lengths, zxc_pivco_tree_t* RESTRICT tree,
-                            uint32_t* RESTRICT codes, uint8_t* RESTRICT code_len,
-                            zxc_pivco_decode_aux_t* RESTRICT aux) {
-    return zxc_huf_dict_tree_build_default(packed_lengths, tree, codes, code_len, aux);
 }
 
 size_t zxc_huf_calc_size_dict(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
