@@ -49,11 +49,24 @@
 #define zxc_huf_unpack_lengths ZXC_CAT(zxc_huf_unpack_lengths, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_calc_size ZXC_CAT(zxc_huf_calc_size, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_calc_size_dict ZXC_CAT(zxc_huf_calc_size_dict, ZXC_FUNCTION_SUFFIX)
-#define zxc_huf_dict_tree_build ZXC_CAT(zxc_huf_dict_tree_build, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_encode_section ZXC_CAT(zxc_huf_encode_section, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_encode_section_dict ZXC_CAT(zxc_huf_encode_section_dict, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_decode_section ZXC_CAT(zxc_huf_decode_section, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_decode_section_dict ZXC_CAT(zxc_huf_decode_section_dict, ZXC_FUNCTION_SUFFIX)
+#endif
+
+/* Mark the primary variant (only _default, or a no-suffix build) so ISA-
+ * independent cold code compiles once, not in every per-ISA copy. Keyed off the
+ * suffix value, so every build gets it with no extra flag. */
+#ifdef ZXC_FUNCTION_SUFFIX
+#define ZXC_PRIMARY__default 1
+#define ZXC_PRIMARY_CAT_(a, b) a##b
+#define ZXC_PRIMARY_CAT(a, b) ZXC_PRIMARY_CAT_(a, b)
+#if ZXC_PRIMARY_CAT(ZXC_PRIMARY_, ZXC_FUNCTION_SUFFIX)
+#define ZXC_VARIANT_PRIMARY 1
+#endif
+#else
+#define ZXC_VARIANT_PRIMARY 1
 #endif
 
 #include "../../include/zxc_error.h"
@@ -752,6 +765,9 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n
                                  0);
 }
 
+/* ISA-independent cold dict setup: emit once in the primary variant, not in
+ * every per-ISA copy (dead weight). zxc_pivco_tree_build stays per-variant. */
+#if defined(ZXC_VARIANT_PRIMARY)
 /**
  * @brief Precompute the topology-derived decoder tables for @p t.
  *
@@ -829,6 +845,7 @@ int zxc_huf_dict_tree_build(const uint8_t* RESTRICT packed_lengths, zxc_pivco_tr
     zxc_pivco_decode_aux_build(tree, aux);
     return ZXC_OK;
 }
+#endif /* ZXC_VARIANT_PRIMARY */
 
 /**
  * @brief Merge two adjacent child sequences under control bits.
