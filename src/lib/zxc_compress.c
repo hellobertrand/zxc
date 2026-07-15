@@ -55,31 +55,6 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int us
     }
 }
 
-#if defined(ZXC_USE_AVX2)
-/**
- * @brief Reduces a 256-bit integer vector to a single scalar by finding the maximum unsigned 32-bit
- * integer element.
- *
- * This function performs a horizontal reduction across the 8 packed 32-bit unsigned integers
- * in the source vector to determine the maximum value.
- *
- * @param[in] v The 256-bit vector containing 8 unsigned 32-bit integers.
- * @return The maximum unsigned 32-bit integer found in the vector.
- */
-// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_AVX2 is defined
-static ZXC_ALWAYS_INLINE uint32_t zxc_mm256_reduce_max_epu32(__m256i v) {
-    __m128i vlow = _mm256_castsi256_si128(v);        // Extract the lower 128 bits
-    __m128i vhigh = _mm256_extracti128_si256(v, 1);  // Extract the upper 128 bits
-    vlow = _mm_max_epu32(vlow, vhigh);               // Element-wise max of lower and upper halves
-    __m128i vshuf = _mm_shuffle_epi32(vlow, _MM_SHUFFLE(1, 0, 3, 2));  // Shuffle to swap pairs
-    vlow = _mm_max_epu32(vlow, vshuf);  // Max of original and swapped
-    vshuf =
-        _mm_shuffle_epi32(vlow, _MM_SHUFFLE(2, 3, 0, 1));  // Shuffle to bring remaining candidates
-    vlow = _mm_max_epu32(vlow, vshuf);                     // Final max comparison
-    return (uint32_t)_mm_cvtsi128_si32(vlow);              // Extract the scalar result
-}
-#endif
-
 #if defined(ZXC_USE_SSE2)
 /**
  * @brief SSE2 emulation of SSE4.1 @c _mm_blendv_epi8.
