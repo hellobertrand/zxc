@@ -174,12 +174,6 @@ jobs:
             cmake_processor: x86_64
             qemu_binary: qemu-x86_64
             qemu_cpu: Haswell-noTSX
-          - name: Linux amd64 (AVX-512)
-            cross_pkg: gcc
-            cross_prefix: x86_64-linux-gnu
-            cmake_processor: x86_64
-            qemu_binary: qemu-x86_64
-            qemu_cpu: Skylake-Server-noTSX-IBRS
           - name: Linux arm64
             cross_pkg: gcc-aarch64-linux-gnu
             cross_prefix: aarch64-linux-gnu
@@ -292,6 +286,77 @@ jobs:
                   ./$BUILD_DIR/zxc_conformance_test ./conformance
               ${{ matrix.qemu_binary }} $QEMU_CPU_ARG -L $SYSROOT \
                   ./$BUILD_DIR/zxc_format_golden_test ./tests/format/golden
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
+
+  # ===========================================================================
+  # Tier 2 (AVX-512): native x86-64 build exercised under Intel SDE.
+  # QEMU's TCG cannot execute AVX-512, so the AVX-512 dispatch tier is tested
+  # with Intel's Software Development Emulator instead. SDE presents a faithful
+  # Ice Lake CPUID (F+BW+VBMI2, OSXSAVE, ZMM state), so the runtime dispatcher
+  # actually selects and runs the AVX-512 variant.
+  # ===========================================================================
+  build-tier2-avx512-sde:
+    name: "Tier 2: Linux amd64 (AVX-512, Intel SDE)"
+    runs-on: ubuntu-latest
+    env:
+      # Pinned + checksum-verified (Intel requires a license acceptance to
+      # download; the tarball itself is served from downloadmirror.intel.com).
+      SDE_URL: "https://downloadmirror.intel.com/915934/sde-external-10.8.0-2026-03-15-lin.tar.xz"
+      SDE_SHA256: "50b320cd226acef7a491f5b321fc1be3c3c7984f9e27a456e64894b5b0979dd3"
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential
+
+      - name: Install Intel SDE (pinned + checksum-verified)
+        run: |
+          curl -fsSL -o sde.tar.xz "$SDE_URL"
+          echo "${SDE_SHA256}  sde.tar.xz" | sha256sum -c -
+          mkdir -p "$HOME/sde"
+          tar -xf sde.tar.xz -C "$HOME/sde" --strip-components=1
+          echo "$HOME/sde" >> "$GITHUB_PATH"
+
+      - name: Configure, Build & Test (Static & Shared) under SDE
+        shell: bash
+        run: |
+          # -icx = Ice Lake Server: AVX-512 F/BW/VBMI2, so the dispatcher picks
+          # the AVX-512 tier and the emulator really executes those instructions.
+          # ZXC_NATIVE_ARCH=OFF keeps the core library at the x86-64 baseline so
+          # nothing outside the explicit per-ISA variants emits an instruction the
+          # emulated model lacks.
+          SDE="sde64 -icx --"
+          echo "Using Intel SDE, emulated CPU model: Ice Lake Server (-icx)"
+
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B "$BUILD_DIR" \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build "$BUILD_DIR" --config Release --parallel
+
+              # Shared build: let the loader find libzxc.so under the emulator.
+              export LD_LIBRARY_PATH="$PWD/$BUILD_DIR:${LD_LIBRARY_PATH:-}"
+
+              echo "Running Tests for $LIB_TYPE under Intel SDE (Ice Lake / AVX-512)..."
+              $SDE ./"$BUILD_DIR"/zxc_test
+
+              echo "Running conformance + golden vectors for $LIB_TYPE under SDE..."
+              $SDE ./"$BUILD_DIR"/zxc_conformance_test ./conformance
+              $SDE ./"$BUILD_DIR"/zxc_format_golden_test ./tests/format/golden
 
               echo ">>> Completed Build: $LIB_TYPE"
               echo ""
