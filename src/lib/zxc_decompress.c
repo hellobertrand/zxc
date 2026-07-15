@@ -565,10 +565,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     uint8_t* rle_buf = NULL;
 
     size_t lit_stream_size = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
+    /* Decoded size of an encoded literal section (RAW ignores it). */
+    const size_t required_size = (size_t)(desc[0].sizes >> 32);
 
-    if (gh.enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) {
-        /* Wire value 2: PivCo layout. */
-        const size_t required_size = (size_t)(desc[0].sizes >> 32);
+    if (gh.enc_lit == ZXC_SECTION_ENCODING_HUFFMAN ||
+        gh.enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT) {
         if (UNLIKELY(lit_stream_size > (size_t)(src + src_size - p_curr)))
             return ZXC_ERROR_CORRUPT_DATA;
         if (required_size == 0) {
@@ -577,31 +578,15 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
         } else {
             if (UNLIKELY(required_size > dst_capacity || required_size > SIZE_MAX - ZXC_PAD_SIZE))
                 return ZXC_ERROR_DST_TOO_SMALL;
-            const int rc = zxc_decode_lit_pivco(ctx, p_curr, lit_stream_size, required_size);
-            if (UNLIKELY(rc != ZXC_OK)) return rc;
-            l_ptr = ctx->lit_buffer;
-            l_end = ctx->lit_buffer + required_size;
-        }
-    } else if (gh.enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT) {
-        /* Shared dictionary table: no inline lengths header; the prebuilt
-         * decode table was attached to the context with the dictionary. */
-        const size_t required_size = (size_t)(desc[0].sizes >> 32);
-        if (UNLIKELY(lit_stream_size > (size_t)(src + src_size - p_curr)))
-            return ZXC_ERROR_CORRUPT_DATA;
-        if (required_size == 0) {
-            l_ptr = p_curr;
-            l_end = p_curr;
-        } else {
-            if (UNLIKELY(required_size > dst_capacity || required_size > SIZE_MAX - ZXC_PAD_SIZE))
-                return ZXC_ERROR_DST_TOO_SMALL;
-            const int rc = zxc_decode_lit_pivco_dict(ctx, p_curr, lit_stream_size, required_size);
+            const int rc =
+                (gh.enc_lit == ZXC_SECTION_ENCODING_HUFFMAN)
+                    ? zxc_decode_lit_pivco(ctx, p_curr, lit_stream_size, required_size)
+                    : zxc_decode_lit_pivco_dict(ctx, p_curr, lit_stream_size, required_size);
             if (UNLIKELY(rc != ZXC_OK)) return rc;
             l_ptr = ctx->lit_buffer;
             l_end = ctx->lit_buffer + required_size;
         }
     } else if (gh.enc_lit == ZXC_SECTION_ENCODING_RLE) {
-        const size_t required_size = (size_t)(desc[0].sizes >> 32);
-
         if (required_size > 0) {
             if (UNLIKELY(required_size > dst_capacity || required_size > SIZE_MAX - ZXC_PAD_SIZE))
                 return ZXC_ERROR_DST_TOO_SMALL;
@@ -719,6 +704,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     // ll_max = 14, ml_max = 14 + 5 = 19, per-seq = 33, 4x = 132.
     // Add ZXC_PAD_SIZE (32) for the wild zxc_copy32 overshoot + 4 safety = 168.
     const uint8_t* const d_end_safe = d_end - (132 + ZXC_PAD_SIZE + 4);
+    const uint8_t* const d_end_safe_1x =
+        d_end - (ZXC_GLO_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE + 4);  // 69
 
     // Literal stream safe threshold for 4x-unrolled loops.
     // Without varint extension, max ll per sequence = ZXC_TOKEN_LL_MASK - 1 = 14.
@@ -1201,7 +1188,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     if (UNLIKELY(e_ptr > e_end)) return ZXC_ERROR_CORRUPT_DATA;
 
     // --- Remaining 1 sequence (Fast Path) ---
-    while (n_seq > 0 && d_ptr < d_end_safe && l_ptr < l_end_safe_1x) {
+    while (n_seq > 0 && d_ptr < d_end_safe_1x && l_ptr < l_end_safe_1x) {
         // Save pointers before reading (in case we need to fall back to Safe Path)
         const uint8_t* t_save = t_ptr;
         const uint8_t* o_save = o_ptr;
@@ -1239,26 +1226,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             break;
         }
 
-        {
-            const uint8_t* src_lit = l_ptr;
-            uint8_t* dst_lit = d_ptr;
-            zxc_copy32(dst_lit, src_lit);
-            if (UNLIKELY(ll > ZXC_PAD_SIZE)) {
-                dst_lit += ZXC_PAD_SIZE;
-                src_lit += ZXC_PAD_SIZE;
-                size_t rem = ll - ZXC_PAD_SIZE;
-                while (rem > ZXC_PAD_SIZE) {
-                    zxc_copy32(dst_lit, src_lit);
-                    dst_lit += ZXC_PAD_SIZE;
-                    src_lit += ZXC_PAD_SIZE;
-                    rem -= ZXC_PAD_SIZE;
-                }
-                zxc_copy32(dst_lit, src_lit);
-            }
-            l_ptr += ll;
-            d_ptr += ll;
-            written += ll;
-        }
+        zxc_decode_copy_literals(d_ptr, l_ptr, ll);
+        l_ptr += ll;
+        d_ptr += ll;
+        written += ll;
 
         {
             // Skip check if written >= bounds_threshold (256 for 8-bit, 65536 for 16-bit)
@@ -1852,26 +1823,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
         }
         uint32_t offset = (seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
 
-        {
-            const uint8_t* src_lit = l_ptr;
-            uint8_t* dst_lit = d_ptr;
-            zxc_copy32(dst_lit, src_lit);
-            if (UNLIKELY(ll > ZXC_PAD_SIZE)) {
-                dst_lit += ZXC_PAD_SIZE;
-                src_lit += ZXC_PAD_SIZE;
-                size_t rem = ll - ZXC_PAD_SIZE;
-                while (rem > ZXC_PAD_SIZE) {
-                    zxc_copy32(dst_lit, src_lit);
-                    dst_lit += ZXC_PAD_SIZE;
-                    src_lit += ZXC_PAD_SIZE;
-                    rem -= ZXC_PAD_SIZE;
-                }
-                zxc_copy32(dst_lit, src_lit);
-            }
-            l_ptr += ll;
-            d_ptr += ll;
-            written += ll;
-        }
+        zxc_decode_copy_literals(d_ptr, l_ptr, ll);
+        l_ptr += ll;
+        d_ptr += ll;
+        written += ll;
 
         {
             // Skip check if written >= bounds_threshold (256 for 8-bit, 65536 for 16-bit)
@@ -2080,10 +2035,11 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
  * @brief Shared chunk-decode body: validates the block header, verifies the
  *        optional checksum, then dispatches on block type.
  *
- * @p has_dict is a compile-time constant: the no-dict instantiation folds the
- * GLO/GHI selection to the plain (inlinable) decoders, so
+ * @p has_dict and @p safe are compile-time constants: the no-dict instantiation
+ * folds the GLO/GHI selection to the plain (inlinable) decoders, so
  * @ref zxc_decompress_chunk_wrapper carries no dict code and matches the
- * dict-free build; the dict instantiation calls the NOINLINE @c _dict decoders.
+ * dict-free build; the dict and safe instantiations call the NOINLINE @c _dict
+ * / @c _safe decoders (the strict-tail safe path never carries a dict).
  *
  * @param[in,out] ctx       Decompression context.
  * @param[in]     src       Compressed block (header + payload + optional checksum).
@@ -2091,11 +2047,12 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
  * @param[out]    dst       Destination buffer for the decoded block.
  * @param[in]     dst_cap   Capacity of @p dst in bytes.
  * @param[in]     has_dict  Compile-time flag: 1 = dictionary-aware decoders.
+ * @param[in]     safe      Compile-time flag: 1 = strict-tail safe decoders.
  * @return Bytes written on success, or a negative @ref zxc_error_t.
  */
 static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
     const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src, const size_t src_sz,
-    uint8_t* RESTRICT dst, const size_t dst_cap, const int has_dict) {
+    uint8_t* RESTRICT dst, const size_t dst_cap, const int has_dict, const int safe) {
     if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
 
     const uint8_t type = src[0];
@@ -2119,12 +2076,14 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
 
     switch (type) {
         case ZXC_BLOCK_GLO:
-            decoded_sz = has_dict ? zxc_decode_block_glo_dict(ctx, data, comp_sz, dst, dst_cap)
-                                  : zxc_decode_block_glo(ctx, data, comp_sz, dst, dst_cap);
+            decoded_sz = safe       ? zxc_decode_block_glo_safe(ctx, data, comp_sz, dst, dst_cap)
+                         : has_dict ? zxc_decode_block_glo_dict(ctx, data, comp_sz, dst, dst_cap)
+                                    : zxc_decode_block_glo(ctx, data, comp_sz, dst, dst_cap);
             break;
         case ZXC_BLOCK_GHI:
-            decoded_sz = has_dict ? zxc_decode_block_ghi_dict(ctx, data, comp_sz, dst, dst_cap)
-                                  : zxc_decode_block_ghi(ctx, data, comp_sz, dst, dst_cap);
+            decoded_sz = safe       ? zxc_decode_block_ghi_safe(ctx, data, comp_sz, dst, dst_cap)
+                         : has_dict ? zxc_decode_block_ghi_dict(ctx, data, comp_sz, dst, dst_cap)
+                                    : zxc_decode_block_ghi(ctx, data, comp_sz, dst, dst_cap);
             break;
         case ZXC_BLOCK_RAW:
             // For RAW blocks, comp_sz == raw_sz (uncompressed data stored as-is)
@@ -2158,7 +2117,7 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
 // cppcheck-suppress unusedFunction
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                  const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
-    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, 0);
+    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, 0, 0);
 }
 
 /**
@@ -2179,16 +2138,16 @@ int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* 
 int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap) {
-    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, 1);
+    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, 1, 0);
 }
 
 /**
  * @brief Public strict-tail safe chunk decoder (dst_cap == exact decoded size).
  *
- * Validates the block header and optional checksum, then decodes via the
- * @c _safe decoders (no bounce buffer, no tail padding); RAW blocks are copied
- * directly. Dict inputs are not handled here (the caller routes them to the
- * bounce-capable path).
+ * Routes through @ref zxc_decompress_chunk_wrapper_body with @c safe=1, which
+ * calls the NOINLINE @c _safe decoders (no bounce buffer, no tail padding);
+ * RAW blocks are copied directly. Dict inputs are not handled here (the
+ * caller routes them to the bounce-capable path).
  *
  * @param[in,out] ctx     Decompression context.
  * @param[in]     src     Compressed block bytes.
@@ -2201,36 +2160,5 @@ int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint
 int zxc_decompress_chunk_wrapper_safe(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap) {
-    if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
-
-    const uint8_t type = src[0];
-    const uint32_t comp_sz = zxc_le32(src + 3);
-    const int has_crc = ctx->checksum_enabled;
-
-    const size_t expected_sz =
-        (size_t)ZXC_BLOCK_HEADER_SIZE + comp_sz + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-    if (UNLIKELY(src_sz < expected_sz)) return ZXC_ERROR_SRC_TOO_SMALL;
-
-    const uint8_t* data = src + ZXC_BLOCK_HEADER_SIZE;
-
-    if (has_crc) {
-        const uint32_t stored = zxc_le32(data + comp_sz);
-        const uint32_t calc = zxc_checksum(data, comp_sz, ZXC_CHECKSUM_RAPIDHASH);
-        if (UNLIKELY(stored != calc)) return ZXC_ERROR_BAD_CHECKSUM;
-    }
-
-    switch (type) {
-        case ZXC_BLOCK_GLO:
-            return zxc_decode_block_glo_safe(ctx, data, comp_sz, dst, dst_cap);
-        case ZXC_BLOCK_GHI:
-            return zxc_decode_block_ghi_safe(ctx, data, comp_sz, dst, dst_cap);
-        case ZXC_BLOCK_RAW:
-            if (UNLIKELY(comp_sz > dst_cap)) return ZXC_ERROR_DST_TOO_SMALL;
-            ZXC_MEMCPY(dst, data, comp_sz);
-            return (int)comp_sz;
-        case ZXC_BLOCK_EOF:
-            return ZXC_ERROR_CORRUPT_DATA;
-        default:
-            return ZXC_ERROR_BAD_BLOCK_TYPE;
-    }
+    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, 0, 1);
 }
