@@ -170,45 +170,40 @@ endmacro()
 
 set(ZXC_VARIANT_OBJECTS "")
 
-# --- 1. Default Variant (Scalar/Baseline) ---
-zxc_add_variant(_default "")
+# --- 1. Default Variant (target baseline) ---
+# Scalar everywhere except AArch64, where __ARM_NEON is always defined
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64" AND NOT MSVC)
+    zxc_add_variant(_default "-march=armv8-a+simd")
+else()
+    zxc_add_variant(_default "")
+endif()
 
 # --- 2. Architecture Specific Variants (skipped in no-intrinsics mode) ---
 if(ZXC_DISABLE_SIMD)
     message(STATUS "ZXC_DISABLE_SIMD: Skipping SIMD variants (no explicit AVX/NEON code paths).")
 else()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
-    message(STATUS "Building x86_64 AVX2 and AVX512 variants...")
+    message(STATUS "Building x86_64 AVX2 and AVX512 variants (SSE2 tier = _default)...")
     if(MSVC)
-        # SSE2 for MSVC: SSE2 is the x86-64 baseline
-        zxc_add_variant(_sse2 "/D__SSE2__")
         # AVX2 for MSVC (Enables AVX2/BMI1/BMI2 sets)
         zxc_add_variant(_avx2 "/arch:AVX2;/D__BMI__;/D__BMI2__;/D__LZCNT__")
         # AVX512 for MSVC (VS2019 16.10+ supports /arch:AVX512)
         zxc_add_variant(_avx512 "/arch:AVX512;/D__BMI__;/D__BMI2__;/D__LZCNT__")
     else()
-        # SSE2 for GCC/Clang (x86-64 baseline)
-        zxc_add_variant(_sse2 "-msse2")
         # AVX2 for GCC/Clang
-        zxc_add_variant(_avx2 "-mavx2;-mfma;-mbmi;-mbmi2;-mlzcnt")
+        zxc_add_variant(_avx2 "-mavx2;-mbmi;-mbmi2;-mlzcnt")
         # AVX512 for GCC/Clang
         zxc_add_variant(_avx512
                         "-mavx512f;-mavx512bw;-mavx512vbmi;-mavx512vbmi2;-mbmi;-mbmi2;-mlzcnt")
     endif()
 
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
-    message(STATUS "Building AArch64 NEON variant...")
-    if(MSVC)
-        # MSVC for ARM64 implies NEON support by default.
-        zxc_add_variant(_neon "")
-    else()
-        # NEON is usually default on AArch64, but we add a specific variant for structure
-        zxc_add_variant(_neon "-march=armv8-a+simd")
-    endif()
+    # NEON tier = _default (mandatory on AArch64); nothing extra to compile.
+    message(STATUS "AArch64: NEON tier = _default variant.")
 
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
     message(STATUS "Building ARM NEON variant...")
-    zxc_add_variant(_neon "-march=armv7-a;-mfpu=neon")
+    zxc_add_variant(_neon32 "-march=armv7-a;-mfpu=neon")
 endif()
 endif()
 

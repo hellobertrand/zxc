@@ -61,25 +61,22 @@ variant_sources = ['src/lib/zxc_compress.c',
                    'src/lib/zxc_decompress.c',
                    'src/lib/zxc_huffman.c']
 
-variant_sets = [['_default', []]]
+# _default is scalar everywhere except AArch64, where __ARM_NEON is always defined
+default_args = (host_cpu == 'aarch64' and not is_cl) ? ['-march=armv8-a+simd'] : []
+variant_sets = [['_default', default_args]]
 
 if host_cpu == 'x86_64'
   if is_cl
-    # SSE2 is the x86-64 baseline; /arch:AVX2|AVX512 gate the wider paths. MSVC does
-    # not predefine __BMI__/__BMI2__/__LZCNT__ under /arch, so define them here.
-    variant_sets += [['_sse2',   ['/D__SSE2__']]]
+    # MSVC does not predefine __BMI__/__BMI2__/__LZCNT__ under /arch, define them here.
     variant_sets += [['_avx2',   ['/arch:AVX2', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__']]]
     variant_sets += [['_avx512', ['/arch:AVX512', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__']]]
   else
-    variant_sets += [['_sse2',   ['-msse2']]]
-    variant_sets += [['_avx2',   ['-mavx2', '-mfma', '-mbmi', '-mbmi2', '-mlzcnt']]]
+    variant_sets += [['_avx2',   ['-mavx2', '-mbmi', '-mbmi2', '-mlzcnt']]]
     variant_sets += [['_avx512', ['-mavx512f', '-mavx512bw', '-mavx512vbmi', '-mavx512vbmi2', '-mbmi', '-mbmi2', '-mlzcnt']]]
   endif
-elif host_cpu == 'aarch64'
-  # MSVC ARM64 implies NEON; passing -march=armv8-a+simd only warns D9002.
-  variant_sets += is_cl ? [['_neon', []]] : [['_neon', ['-march=armv8-a+simd']]]
 elif host_cpu == 'arm'
-  variant_sets += [['_neon', ['-march=armv7-a', '-mfpu=neon']]]
+  # _neon32: 32-bit ARM only (AArch64's NEON tier is _default).
+  variant_sets += [['_neon32', ['-march=armv7-a', '-mfpu=neon']]]
 endif
 
 variant_objects = []
