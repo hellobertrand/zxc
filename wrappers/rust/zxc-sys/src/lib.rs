@@ -1133,7 +1133,10 @@ mod tests {
             );
             assert!(compressed_size > 0, "Compression failed");
             // Highly repetitive data should compress significantly
-            assert!((compressed_size as usize) < input.len() / 2, "Data should compress well");
+            assert!(
+                (compressed_size as usize) < input.len() / 2,
+                "Data should compress well"
+            );
 
             // Get decompressed size
             let decompressed_size = zxc_get_decompressed_size(
@@ -1190,11 +1193,7 @@ mod tests {
                     compressed.len(),
                     &copts,
                 );
-                assert!(
-                    compressed_size > 0,
-                    "Compression failed at level {}",
-                    level
-                );
+                assert!(compressed_size > 0, "Compression failed at level {}", level);
             }
         }
     }

@@ -5,46 +5,46 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-'use strict';
+"use strict";
 
-const { Transform } = require('node:stream');
-const native = require('../build/Release/zxc_nodejs.node');
+const { Transform } = require("node:stream");
+const native = require("../build/Release/zxc_nodejs.node");
 
 // Re-export compression level constants
-const LEVEL_FASTEST  = native.LEVEL_FASTEST;
-const LEVEL_FAST     = native.LEVEL_FAST;
-const LEVEL_DEFAULT  = native.LEVEL_DEFAULT;
+const LEVEL_FASTEST = native.LEVEL_FASTEST;
+const LEVEL_FAST = native.LEVEL_FAST;
+const LEVEL_DEFAULT = native.LEVEL_DEFAULT;
 const LEVEL_BALANCED = native.LEVEL_BALANCED;
-const LEVEL_COMPACT  = native.LEVEL_COMPACT;
-const LEVEL_DENSITY  = native.LEVEL_DENSITY;
-const LEVEL_ULTRA    = native.LEVEL_ULTRA;
+const LEVEL_COMPACT = native.LEVEL_COMPACT;
+const LEVEL_DENSITY = native.LEVEL_DENSITY;
+const LEVEL_ULTRA = native.LEVEL_ULTRA;
 
 // Re-export error constants
-const ERROR_MEMORY         = native.ERROR_MEMORY;
-const ERROR_DST_TOO_SMALL  = native.ERROR_DST_TOO_SMALL;
-const ERROR_SRC_TOO_SMALL  = native.ERROR_SRC_TOO_SMALL;
-const ERROR_BAD_MAGIC      = native.ERROR_BAD_MAGIC;
-const ERROR_BAD_VERSION    = native.ERROR_BAD_VERSION;
-const ERROR_BAD_HEADER     = native.ERROR_BAD_HEADER;
-const ERROR_BAD_CHECKSUM   = native.ERROR_BAD_CHECKSUM;
-const ERROR_CORRUPT_DATA   = native.ERROR_CORRUPT_DATA;
-const ERROR_BAD_OFFSET     = native.ERROR_BAD_OFFSET;
-const ERROR_OVERFLOW       = native.ERROR_OVERFLOW;
-const ERROR_IO             = native.ERROR_IO;
-const ERROR_NULL_INPUT     = native.ERROR_NULL_INPUT;
+const ERROR_MEMORY = native.ERROR_MEMORY;
+const ERROR_DST_TOO_SMALL = native.ERROR_DST_TOO_SMALL;
+const ERROR_SRC_TOO_SMALL = native.ERROR_SRC_TOO_SMALL;
+const ERROR_BAD_MAGIC = native.ERROR_BAD_MAGIC;
+const ERROR_BAD_VERSION = native.ERROR_BAD_VERSION;
+const ERROR_BAD_HEADER = native.ERROR_BAD_HEADER;
+const ERROR_BAD_CHECKSUM = native.ERROR_BAD_CHECKSUM;
+const ERROR_CORRUPT_DATA = native.ERROR_CORRUPT_DATA;
+const ERROR_BAD_OFFSET = native.ERROR_BAD_OFFSET;
+const ERROR_OVERFLOW = native.ERROR_OVERFLOW;
+const ERROR_IO = native.ERROR_IO;
+const ERROR_NULL_INPUT = native.ERROR_NULL_INPUT;
 const ERROR_BAD_BLOCK_TYPE = native.ERROR_BAD_BLOCK_TYPE;
 const ERROR_BAD_BLOCK_SIZE = native.ERROR_BAD_BLOCK_SIZE;
-const ERROR_DICT_REQUIRED  = native.ERROR_DICT_REQUIRED;
-const ERROR_DICT_MISMATCH  = native.ERROR_DICT_MISMATCH;
+const ERROR_DICT_REQUIRED = native.ERROR_DICT_REQUIRED;
+const ERROR_DICT_MISMATCH = native.ERROR_DICT_MISMATCH;
 const ERROR_DICT_TOO_LARGE = native.ERROR_DICT_TOO_LARGE;
-const ERROR_BAD_LEVEL      = native.ERROR_BAD_LEVEL;
+const ERROR_BAD_LEVEL = native.ERROR_BAD_LEVEL;
 
 /**
  * Returns the minimum supported compression level (currently 1).
  * @returns {number}
  */
 function minLevel() {
-    return native.minLevel();
+  return native.minLevel();
 }
 
 /**
@@ -52,7 +52,7 @@ function minLevel() {
  * @returns {number}
  */
 function maxLevel() {
-    return native.maxLevel();
+  return native.maxLevel();
 }
 
 /**
@@ -60,7 +60,7 @@ function maxLevel() {
  * @returns {number}
  */
 function defaultLevel() {
-    return native.defaultLevel();
+  return native.defaultLevel();
 }
 
 /**
@@ -69,7 +69,7 @@ function defaultLevel() {
  * @returns {string}
  */
 function libraryVersion() {
-    return native.libraryVersion();
+  return native.libraryVersion();
 }
 
 /**
@@ -79,10 +79,10 @@ function libraryVersion() {
  * @returns {string} Error name (e.g., "ZXC_ERROR_DST_TOO_SMALL").
  */
 function errorName(code) {
-    if (typeof code !== 'number') {
-        throw new TypeError('code must be a number');
-    }
-    return native.errorName(code);
+  if (typeof code !== "number") {
+    throw new TypeError("code must be a number");
+  }
+  return native.errorName(code);
 }
 
 /**
@@ -93,10 +93,10 @@ function errorName(code) {
  * @returns {number} Maximum required buffer size in bytes.
  */
 function compressBound(inputSize) {
-    if (typeof inputSize !== 'number' || inputSize < 0) {
-        throw new TypeError('inputSize must be a non-negative number');
-    }
-    return native.compressBound(inputSize);
+  if (typeof inputSize !== "number" || inputSize < 0) {
+    throw new TypeError("inputSize must be a non-negative number");
+  }
+  return native.compressBound(inputSize);
 }
 
 /**
@@ -106,10 +106,11 @@ function compressBound(inputSize) {
  * @returns {Buffer|undefined}
  */
 function toDictBuffer(dict) {
-    if (dict === undefined || dict === null) return undefined;
-    if (Buffer.isBuffer(dict)) return dict;
-    if (dict instanceof Uint8Array) return Buffer.from(dict.buffer, dict.byteOffset, dict.byteLength);
-    throw new TypeError('dict must be a Buffer or Uint8Array');
+  if (dict === undefined || dict === null) return undefined;
+  if (Buffer.isBuffer(dict)) return dict;
+  if (dict instanceof Uint8Array)
+    return Buffer.from(dict.buffer, dict.byteOffset, dict.byteLength);
+  throw new TypeError("dict must be a Buffer or Uint8Array");
 }
 
 /**
@@ -120,15 +121,16 @@ function toDictBuffer(dict) {
  * @returns {Buffer} Raw dictionary content suitable for `options.dict`.
  */
 function trainDict(samples, maxSize = native.DICT_SIZE_MAX) {
-    if (!Array.isArray(samples) || samples.length === 0) {
-        throw new TypeError('samples must be a non-empty array of Buffers');
-    }
-    const bufs = samples.map((s) => {
-        if (Buffer.isBuffer(s)) return s;
-        if (s instanceof Uint8Array) return Buffer.from(s.buffer, s.byteOffset, s.byteLength);
-        throw new TypeError('samples entries must be Buffers or Uint8Arrays');
-    });
-    return native.trainDict(bufs, maxSize);
+  if (!Array.isArray(samples) || samples.length === 0) {
+    throw new TypeError("samples must be a non-empty array of Buffers");
+  }
+  const bufs = samples.map((s) => {
+    if (Buffer.isBuffer(s)) return s;
+    if (s instanceof Uint8Array)
+      return Buffer.from(s.buffer, s.byteOffset, s.byteLength);
+    throw new TypeError("samples entries must be Buffers or Uint8Arrays");
+  });
+  return native.trainDict(bufs, maxSize);
 }
 
 /**
@@ -137,10 +139,10 @@ function trainDict(samples, maxSize = native.DICT_SIZE_MAX) {
  * @returns {number}
  */
 function dictId(content) {
-    if (!Buffer.isBuffer(content)) {
-        throw new TypeError('content must be a Buffer');
-    }
-    return native.dictId(content);
+  if (!Buffer.isBuffer(content)) {
+    throw new TypeError("content must be a Buffer");
+  }
+  return native.dictId(content);
 }
 
 /**
@@ -149,10 +151,10 @@ function dictId(content) {
  * @returns {number}
  */
 function getDictId(archive) {
-    if (!Buffer.isBuffer(archive)) {
-        throw new TypeError('archive must be a Buffer');
-    }
-    return native.getDictId(archive);
+  if (!Buffer.isBuffer(archive)) {
+    throw new TypeError("archive must be a Buffer");
+  }
+  return native.getDictId(archive);
 }
 
 /**
@@ -161,10 +163,10 @@ function getDictId(archive) {
  * @returns {number}
  */
 function dictGetId(zxd) {
-    if (!Buffer.isBuffer(zxd)) {
-        throw new TypeError('zxd must be a Buffer');
-    }
-    return native.dictGetId(zxd);
+  if (!Buffer.isBuffer(zxd)) {
+    throw new TypeError("zxd must be a Buffer");
+  }
+  return native.dictGetId(zxd);
 }
 
 /**
@@ -176,10 +178,10 @@ function dictGetId(zxd) {
  * @returns {Buffer} The encoded `.zxd` file.
  */
 function dictSave(content, hufLengths) {
-    if (!Buffer.isBuffer(content) || !Buffer.isBuffer(hufLengths)) {
-        throw new TypeError('content and hufLengths must be Buffers');
-    }
-    return native.dictSave(content, hufLengths);
+  if (!Buffer.isBuffer(content) || !Buffer.isBuffer(hufLengths)) {
+    throw new TypeError("content and hufLengths must be Buffers");
+  }
+  return native.dictSave(content, hufLengths);
 }
 
 /**
@@ -191,18 +193,19 @@ function dictSave(content, hufLengths) {
  * @returns {Buffer} 128-byte packed table for {@link dictSave} / `options.dictHuf`.
  */
 function trainDictHuf(samples, dict) {
-    if (!Array.isArray(samples)) {
-        throw new TypeError('samples must be an array of Buffers');
-    }
-    if (!Buffer.isBuffer(dict)) {
-        throw new TypeError('dict must be a Buffer');
-    }
-    const bufs = samples.map((s, i) => {
-        if (Buffer.isBuffer(s)) return s;
-        if (s instanceof Uint8Array) return Buffer.from(s.buffer, s.byteOffset, s.byteLength);
-        throw new TypeError(`samples[${i}] must be a Buffer or Uint8Array`);
-    });
-    return native.trainDictHuf(bufs, dict);
+  if (!Array.isArray(samples)) {
+    throw new TypeError("samples must be an array of Buffers");
+  }
+  if (!Buffer.isBuffer(dict)) {
+    throw new TypeError("dict must be a Buffer");
+  }
+  const bufs = samples.map((s, i) => {
+    if (Buffer.isBuffer(s)) return s;
+    if (s instanceof Uint8Array)
+      return Buffer.from(s.buffer, s.byteOffset, s.byteLength);
+    throw new TypeError(`samples[${i}] must be a Buffer or Uint8Array`);
+  });
+  return native.trainDictHuf(bufs, dict);
 }
 
 /**
@@ -212,10 +215,10 @@ function trainDictHuf(samples, dict) {
  * @returns {Buffer | null}
  */
 function dictHuf(zxd) {
-    if (!Buffer.isBuffer(zxd)) {
-        throw new TypeError('zxd must be a Buffer');
-    }
-    return native.dictHuf(zxd);
+  if (!Buffer.isBuffer(zxd)) {
+    throw new TypeError("zxd must be a Buffer");
+  }
+  return native.dictHuf(zxd);
 }
 
 /**
@@ -228,57 +231,64 @@ function dictHuf(zxd) {
  * `Seekable#setDict`.
  */
 class Dictionary {
-    /**
-     * @param {Buffer} content - Raw LZ-window content bytes.
-     * @param {Buffer} huf - 128-byte shared literal Huffman table.
-     * @param {number} id - Dictionary ID binding the (content, table) pair.
-     */
-    constructor(content, huf, id) {
-        if (!Buffer.isBuffer(content) || !Buffer.isBuffer(huf) || huf.length !== 128) {
-            throw new TypeError('Dictionary requires (content: Buffer, huf: 128-byte Buffer)');
-        }
-        this.content = content;
-        this.huf = huf;
-        this.id = id >>> 0;
+  /**
+   * @param {Buffer} content - Raw LZ-window content bytes.
+   * @param {Buffer} huf - 128-byte shared literal Huffman table.
+   * @param {number} id - Dictionary ID binding the (content, table) pair.
+   */
+  constructor(content, huf, id) {
+    if (
+      !Buffer.isBuffer(content) ||
+      !Buffer.isBuffer(huf) ||
+      huf.length !== 128
+    ) {
+      throw new TypeError(
+        "Dictionary requires (content: Buffer, huf: 128-byte Buffer)",
+      );
     }
+    this.content = content;
+    this.huf = huf;
+    this.id = id >>> 0;
+  }
 
-    /**
-     * Train a complete dictionary (content + shared table) from samples.
-     * @param {Array<Buffer|Uint8Array>} samples
-     * @returns {Dictionary}
-     */
-    static train(samples) {
-        if (!Array.isArray(samples)) {
-            throw new TypeError('samples must be an array of Buffers');
-        }
-        const bufs = samples.map((s, i) => {
-            if (Buffer.isBuffer(s)) return s;
-            if (s instanceof Uint8Array) return Buffer.from(s.buffer, s.byteOffset, s.byteLength);
-            throw new TypeError(`samples[${i}] must be a Buffer or Uint8Array`);
-        });
-        return Dictionary.load(native.dictTrain(bufs));
+  /**
+   * Train a complete dictionary (content + shared table) from samples.
+   * @param {Array<Buffer|Uint8Array>} samples
+   * @returns {Dictionary}
+   */
+  static train(samples) {
+    if (!Array.isArray(samples)) {
+      throw new TypeError("samples must be an array of Buffers");
     }
+    const bufs = samples.map((s, i) => {
+      if (Buffer.isBuffer(s)) return s;
+      if (s instanceof Uint8Array)
+        return Buffer.from(s.buffer, s.byteOffset, s.byteLength);
+      throw new TypeError(`samples[${i}] must be a Buffer or Uint8Array`);
+    });
+    return Dictionary.load(native.dictTrain(bufs));
+  }
 
-    /**
-     * Parse `.zxd` bytes into a Dictionary (owned copies).
-     * @param {Buffer} zxd
-     * @returns {Dictionary}
-     */
-    static load(zxd) {
-        if (!Buffer.isBuffer(zxd)) {
-            throw new TypeError('zxd must be a Buffer');
-        }
-        const { content, huf, id } = native.dictLoad(zxd);
-        return new Dictionary(content, huf, id);
+  /**
+   * Parse `.zxd` bytes into a Dictionary (owned copies).
+   * @param {Buffer} zxd
+   * @returns {Dictionary}
+   */
+  static load(zxd) {
+    if (!Buffer.isBuffer(zxd)) {
+      throw new TypeError("zxd must be a Buffer");
     }
+    const { content, huf, id } = native.dictLoad(zxd);
+    return new Dictionary(content, huf, id);
+  }
 
-    /**
-     * Serialize back to `.zxd` file bytes.
-     * @returns {Buffer}
-     */
-    save() {
-        return native.dictSave(this.content, this.huf);
-    }
+  /**
+   * Serialize back to `.zxd` file bytes.
+   * @returns {Buffer}
+   */
+  save() {
+    return native.dictSave(this.content, this.huf);
+  }
 }
 
 /**
@@ -286,10 +296,13 @@ class Dictionary {
  * @returns {{dict: Buffer|undefined, dictHuf: Buffer|undefined}}
  */
 function _splitDictOption(options) {
-    if (options.dict instanceof Dictionary) {
-        return { dict: options.dict.content, dictHuf: options.dict.huf };
-    }
-    return { dict: toDictBuffer(options.dict), dictHuf: toDictBuffer(options.dictHuf) };
+  if (options.dict instanceof Dictionary) {
+    return { dict: options.dict.content, dictHuf: options.dict.huf };
+  }
+  return {
+    dict: toDictBuffer(options.dict),
+    dictHuf: toDictBuffer(options.dictHuf),
+  };
 }
 
 /**
@@ -298,10 +311,10 @@ function _splitDictOption(options) {
  * @returns {{ content: Buffer, huf: Buffer, id: number }}
  */
 function dictLoad(zxd) {
-    if (!Buffer.isBuffer(zxd)) {
-        throw new TypeError('zxd must be a Buffer');
-    }
-    return native.dictLoad(zxd);
+  if (!Buffer.isBuffer(zxd)) {
+    throw new TypeError("zxd must be a Buffer");
+  }
+  return native.dictLoad(zxd);
 }
 
 /**
@@ -316,16 +329,16 @@ function dictLoad(zxd) {
  * @returns {Buffer} Compressed data.
  */
 function compress(data, options = {}) {
-    if (!Buffer.isBuffer(data)) {
-        throw new TypeError('data must be a Buffer');
-    }
+  if (!Buffer.isBuffer(data)) {
+    throw new TypeError("data must be a Buffer");
+  }
 
-    const level = options.level ?? LEVEL_DEFAULT;
-    const checksum = options.checksum ?? false;
-    const seekable = options.seekable ?? false;
-    const { dict, dictHuf } = _splitDictOption(options);
+  const level = options.level ?? LEVEL_DEFAULT;
+  const checksum = options.checksum ?? false;
+  const seekable = options.seekable ?? false;
+  const { dict, dictHuf } = _splitDictOption(options);
 
-    return native.compress(data, level, checksum, seekable, dict, dictHuf);
+  return native.compress(data, level, checksum, seekable, dict, dictHuf);
 }
 
 /**
@@ -336,10 +349,10 @@ function compress(data, options = {}) {
  * @returns {number} Original uncompressed size in bytes, or 0 if invalid.
  */
 function getDecompressedSize(data) {
-    if (!Buffer.isBuffer(data)) {
-        throw new TypeError('data must be a Buffer');
-    }
-    return native.getDecompressedSize(data);
+  if (!Buffer.isBuffer(data)) {
+    throw new TypeError("data must be a Buffer");
+  }
+  return native.getDecompressedSize(data);
 }
 
 /**
@@ -353,19 +366,19 @@ function getDecompressedSize(data) {
  * @returns {Buffer} Decompressed data.
  */
 function decompress(data, options = {}) {
-    if (!Buffer.isBuffer(data)) {
-        throw new TypeError('data must be a Buffer');
-    }
+  if (!Buffer.isBuffer(data)) {
+    throw new TypeError("data must be a Buffer");
+  }
 
-    const checksum = options.checksum ?? false;
-    const { dict, dictHuf } = _splitDictOption(options);
+  const checksum = options.checksum ?? false;
+  const { dict, dictHuf } = _splitDictOption(options);
 
-    let size = options.size;
-    if (size === undefined) {
-        size = getDecompressedSize(data);
-    }
+  let size = options.size;
+  if (size === undefined) {
+    size = getDecompressedSize(data);
+  }
 
-    return native.decompress(data, size, checksum, dict, dictHuf);
+  return native.decompress(data, size, checksum, dict, dictHuf);
 }
 
 /**
@@ -423,10 +436,10 @@ const Seekable = native.Seekable;
  * @returns {number}
  */
 function seekTableSize(numBlocks) {
-    if (typeof numBlocks !== 'number' || numBlocks < 0) {
-        throw new TypeError('numBlocks must be a non-negative number');
-    }
-    return native.seekTableSize(numBlocks);
+  if (typeof numBlocks !== "number" || numBlocks < 0) {
+    throw new TypeError("numBlocks must be a non-negative number");
+  }
+  return native.seekTableSize(numBlocks);
 }
 
 /**
@@ -440,16 +453,15 @@ function seekTableSize(numBlocks) {
  * @returns {Buffer} The encoded seek table.
  */
 function writeSeekTable(compSizes) {
-    if (!Array.isArray(compSizes) || compSizes.length === 0) {
-        throw new TypeError('compSizes must be a non-empty array of numbers');
-    }
-    return native.writeSeekTable(compSizes);
+  if (!Array.isArray(compSizes) || compSizes.length === 0) {
+    throw new TypeError("compSizes must be a non-empty array of numbers");
+  }
+  return native.writeSeekTable(compSizes);
 }
 
 // =============================================================================
 // stream.Transform adapters over the push streaming API
 // =============================================================================
-
 
 /**
  * Returns true if `buf` starts with the ZXC file magic word.
@@ -459,13 +471,15 @@ function writeSeekTable(compSizes) {
  * not validate the rest of the header or the footer.
  *
  * Magic word identifying a ZXC file frame: little-endian 0x9CB02EF5.
- * 
+ *
  * @param {Buffer|Uint8Array} buf
  * @returns {boolean}
  */
 function detectZxc(buf) {
-    if (!buf || buf.length < 4) return false;
-    return buf[0] === 0xF5 && buf[1] === 0x2E && buf[2] === 0xB0 && buf[3] === 0x9C;
+  if (!buf || buf.length < 4) return false;
+  return (
+    buf[0] === 0xf5 && buf[1] === 0x2e && buf[2] === 0xb0 && buf[3] === 0x9c
+  );
 }
 
 /**
@@ -481,44 +495,43 @@ function detectZxc(buf) {
  *   );
  */
 class CompressStream extends Transform {
-    constructor(options = {}) {
-        const { level, checksum, blockSize, ...transformOpts } = options;
-        super(transformOpts);
-        this._cs = new CStream({
-            ...(level === undefined ? {} : { level }),
-            ...(checksum === undefined ? {} : { checksum }),
-            ...(blockSize === undefined ? {} : { blockSize }),
-        });
-    }
+  constructor(options = {}) {
+    const { level, checksum, blockSize, ...transformOpts } = options;
+    super(transformOpts);
+    this._cs = new CStream({
+      ...(level === undefined ? {} : { level }),
+      ...(checksum === undefined ? {} : { checksum }),
+      ...(blockSize === undefined ? {} : { blockSize }),
+    });
+  }
 
-    _transform(chunk, encoding, callback) {
-        try {
-            const buf = Buffer.isBuffer(chunk)
-                ? chunk
-                : Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8');
-            const out = this._cs.compress(buf);
-            if (out.length > 0) this.push(out);
-            callback();
-        } catch (err) {
-            callback(err);
-        }
+  _transform(chunk, encoding, callback) {
+    try {
+      const enc = typeof encoding === "string" ? encoding : "utf8";
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, enc);
+      const out = this._cs.compress(buf);
+      if (out.length > 0) this.push(out);
+      callback();
+    } catch (err) {
+      callback(err);
     }
+  }
 
-    _flush(callback) {
-        try {
-            const tail = this._cs.end();
-            if (tail.length > 0) this.push(tail);
-            this._cs.close();
-            callback();
-        } catch (err) {
-            callback(err);
-        }
+  _flush(callback) {
+    try {
+      const tail = this._cs.end();
+      if (tail.length > 0) this.push(tail);
+      this._cs.close();
+      callback();
+    } catch (err) {
+      callback(err);
     }
+  }
 
-    _destroy(err, callback) {
-        this._cs.close();
-        callback(err);
-    }
+  _destroy(err, callback) {
+    this._cs.close();
+    callback(err);
+  }
 }
 
 /**
@@ -537,47 +550,48 @@ class CompressStream extends Transform {
  *   );
  */
 class DecompressStream extends Transform {
-    constructor(options = {}) {
-        const { checksum, ...transformOpts } = options;
-        super(transformOpts);
-        this._ds = new DStream({
-            ...(checksum === undefined ? {} : { checksum }),
-        });
-    }
+  constructor(options = {}) {
+    const { checksum, ...transformOpts } = options;
+    super(transformOpts);
+    this._ds = new DStream({
+      ...(checksum === undefined ? {} : { checksum }),
+    });
+  }
 
-    _transform(chunk, encoding, callback) {
-        try {
-            const buf = Buffer.isBuffer(chunk)
-                ? chunk
-                : Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8');
-            const out = this._ds.decompress(buf);
-            if (out.length > 0) this.push(out);
-            callback();
-        } catch (err) {
-            callback(err);
-        }
+  _transform(chunk, encoding, callback) {
+    try {
+      const enc = typeof encoding === "string" ? encoding : "utf8";
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, enc);
+      const out = this._ds.decompress(buf);
+      if (out.length > 0) this.push(out);
+      callback();
+    } catch (err) {
+      callback(err);
     }
+  }
 
-    _flush(callback) {
-        try {
-            if (!this._ds.finished()) {
-                const err = new Error('zxc: input drained before footer (truncated frame)');
-                err.code = 'ZXC_TRUNCATED';
-                this._ds.close();
-                callback(err);
-                return;
-            }
-            this._ds.close();
-            callback();
-        } catch (err) {
-            callback(err);
-        }
-    }
-
-    _destroy(err, callback) {
+  _flush(callback) {
+    try {
+      if (!this._ds.finished()) {
+        const err = new Error(
+          "zxc: input drained before footer (truncated frame)",
+        );
+        err.code = "ZXC_TRUNCATED";
         this._ds.close();
         callback(err);
+        return;
+      }
+      this._ds.close();
+      callback();
+    } catch (err) {
+      callback(err);
     }
+  }
+
+  _destroy(err, callback) {
+    this._ds.close();
+    callback(err);
+  }
 }
 
 /**
@@ -586,7 +600,7 @@ class DecompressStream extends Transform {
  * @returns {CompressStream}
  */
 function createCompressStream(options) {
-    return new CompressStream(options);
+  return new CompressStream(options);
 }
 
 /**
@@ -595,76 +609,76 @@ function createCompressStream(options) {
  * @returns {DecompressStream}
  */
 function createDecompressStream(options) {
-    return new DecompressStream(options);
+  return new DecompressStream(options);
 }
 
 module.exports = {
-    // Functions
-    compress,
-    decompress,
-    compressBound,
-    getDecompressedSize,
+  // Functions
+  compress,
+  decompress,
+  compressBound,
+  getDecompressedSize,
 
-    // Dictionary API
-    trainDict,
-    dictId,
-    getDictId,
-    dictGetId,
-    dictSave,
-    dictLoad,
-    trainDictHuf,
-    dictHuf,
-    Dictionary,
+  // Dictionary API
+  trainDict,
+  dictId,
+  getDictId,
+  dictGetId,
+  dictSave,
+  dictLoad,
+  trainDictHuf,
+  dictHuf,
+  Dictionary,
 
-    // Push streaming classes
-    CStream,
-    DStream,
+  // Push streaming classes
+  CStream,
+  DStream,
 
-    // Seekable random-access decompression
-    Seekable,
-    seekTableSize,
-    writeSeekTable,
+  // Seekable random-access decompression
+  Seekable,
+  seekTableSize,
+  writeSeekTable,
 
-    // stream.Transform adapters
-    CompressStream,
-    DecompressStream,
-    createCompressStream,
-    createDecompressStream,
-    detectZxc,
+  // stream.Transform adapters
+  CompressStream,
+  DecompressStream,
+  createCompressStream,
+  createDecompressStream,
+  detectZxc,
 
-    // Library info helpers
-    minLevel,
-    maxLevel,
-    defaultLevel,
-    libraryVersion,
+  // Library info helpers
+  minLevel,
+  maxLevel,
+  defaultLevel,
+  libraryVersion,
 
-    // Constants
-    LEVEL_FASTEST,
-    LEVEL_FAST,
-    LEVEL_DEFAULT,
-    LEVEL_BALANCED,
-    LEVEL_COMPACT,
-    LEVEL_DENSITY,
-    LEVEL_ULTRA,
+  // Constants
+  LEVEL_FASTEST,
+  LEVEL_FAST,
+  LEVEL_DEFAULT,
+  LEVEL_BALANCED,
+  LEVEL_COMPACT,
+  LEVEL_DENSITY,
+  LEVEL_ULTRA,
 
-    // Error handling
-    errorName,
-    ERROR_MEMORY,
-    ERROR_DST_TOO_SMALL,
-    ERROR_SRC_TOO_SMALL,
-    ERROR_BAD_MAGIC,
-    ERROR_BAD_VERSION,
-    ERROR_BAD_HEADER,
-    ERROR_BAD_CHECKSUM,
-    ERROR_CORRUPT_DATA,
-    ERROR_BAD_OFFSET,
-    ERROR_OVERFLOW,
-    ERROR_IO,
-    ERROR_NULL_INPUT,
-    ERROR_BAD_BLOCK_TYPE,
-    ERROR_BAD_BLOCK_SIZE,
-    ERROR_DICT_REQUIRED,
-    ERROR_DICT_MISMATCH,
-    ERROR_DICT_TOO_LARGE,
-    ERROR_BAD_LEVEL,
+  // Error handling
+  errorName,
+  ERROR_MEMORY,
+  ERROR_DST_TOO_SMALL,
+  ERROR_SRC_TOO_SMALL,
+  ERROR_BAD_MAGIC,
+  ERROR_BAD_VERSION,
+  ERROR_BAD_HEADER,
+  ERROR_BAD_CHECKSUM,
+  ERROR_CORRUPT_DATA,
+  ERROR_BAD_OFFSET,
+  ERROR_OVERFLOW,
+  ERROR_IO,
+  ERROR_NULL_INPUT,
+  ERROR_BAD_BLOCK_TYPE,
+  ERROR_BAD_BLOCK_SIZE,
+  ERROR_DICT_REQUIRED,
+  ERROR_DICT_MISMATCH,
+  ERROR_DICT_TOO_LARGE,
+  ERROR_BAD_LEVEL,
 };

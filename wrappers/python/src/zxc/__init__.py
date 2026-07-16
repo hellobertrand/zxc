@@ -82,7 +82,7 @@ try:
     from ._version import __version__
 except ImportError:
     __version__ = "0.0.0-dev"
-    
+
 __all__ = [
     # Functions
     "compress",
@@ -90,7 +90,6 @@ __all__ = [
     "stream_compress",
     "stream_decompress",
     "get_decompressed_size",
-
     # Dictionary
     "train_dict",
     "dict_id",
@@ -101,27 +100,22 @@ __all__ = [
     "train_dict_huf",
     "dict_huf",
     "Dictionary",
-
     # Push streaming
     "CStream",
     "DStream",
-
     # Seekable random-access decompression
     "Seekable",
     "seek_table_size",
     "write_seek_table",
-
     # io.RawIOBase adapters
     "ZxcReader",
     "ZxcWriter",
     "detect_zxc",
-
     # Library info helpers
     "min_level",
     "max_level",
     "default_level",
     "library_version",
-
     # Constants
     "LEVEL_FASTEST",
     "LEVEL_FAST",
@@ -130,7 +124,6 @@ __all__ = [
     "LEVEL_COMPACT",
     "LEVEL_DENSITY",
     "LEVEL_ULTRA",
-
     # Error Constants
     "ERROR_MEMORY",
     "ERROR_DST_TOO_SMALL",
@@ -151,6 +144,7 @@ __all__ = [
     "ERROR_DICT_TOO_LARGE",
     "ERROR_BAD_LEVEL",
 ]
+
 
 def min_level() -> int:
     """Return the minimum supported compression level (currently 1)."""
@@ -280,8 +274,11 @@ class Dictionary:
         return dict_save(self.content, self.huf)
 
     def __eq__(self, other):
-        return (isinstance(other, Dictionary) and self.content == other.content
-                and self.huf == other.huf)
+        return (
+            isinstance(other, Dictionary)
+            and self.content == other.content
+            and self.huf == other.huf
+        )
 
     def __repr__(self):
         return f"Dictionary(id=0x{self.id:08X}, content={len(self.content)} bytes)"
@@ -294,7 +291,9 @@ def _split_dict_arg(dict, dict_huf):
     return dict, dict_huf
 
 
-def compress(data, level = LEVEL_DEFAULT, checksum = False, dict = None, dict_huf = None) -> bytes:
+def compress(
+    data, level=LEVEL_DEFAULT, checksum=False, dict=None, dict_huf=None
+) -> bytes:
     """Compress a bytes object.
 
     Args:
@@ -333,7 +332,9 @@ def get_decompressed_size(data: bytes) -> int:
     return pyzxc_get_decompressed_size(data)
 
 
-def decompress(data, decompress_size=None, checksum=False, dict=None, dict_huf=None) -> bytes:
+def decompress(
+    data, decompress_size=None, checksum=False, dict=None, dict_huf=None
+) -> bytes:
     """Decompress a bytes object.
 
     Args:
@@ -355,7 +356,17 @@ def decompress(data, decompress_size=None, checksum=False, dict=None, dict_huf=N
     dict, dict_huf = _split_dict_arg(dict, dict_huf)
     return pyzxc_decompress(data, decompress_size, checksum, dict, dict_huf)
 
-def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False, seekable=False, dict=None, dict_huf=None) -> int:
+
+def stream_compress(
+    src,
+    dst,
+    n_threads=0,
+    level=LEVEL_DEFAULT,
+    checksum=False,
+    seekable=False,
+    dict=None,
+    dict_huf=None,
+) -> int:
     """Compress data from src to dst (file-like objects).
 
     Args:
@@ -395,7 +406,10 @@ def stream_compress(src, dst, n_threads=0, level=LEVEL_DEFAULT, checksum=False, 
         dst.flush()
 
     dict, dict_huf = _split_dict_arg(dict, dict_huf)
-    return pyzxc_stream_compress(src, dst, n_threads, level, checksum, seekable, dict, dict_huf)
+    return pyzxc_stream_compress(
+        src, dst, n_threads, level, checksum, seekable, dict, dict_huf
+    )
+
 
 def stream_decompress(src, dst, n_threads=0, checksum=False) -> int:
     """Decompress data from src to dst (file-like objects).
@@ -505,7 +519,9 @@ class Seekable:
         dict, dict_huf = _split_dict_arg(dict, dict_huf)
         pyzxc_seekable_set_dict(self._handle, dict, dict_huf)
 
-    def decompress_range(self, offset: int, length: int, *, n_threads: int = 0) -> bytes:
+    def decompress_range(
+        self, offset: int, length: int, *, n_threads: int = 0
+    ) -> bytes:
         self._ensure_open()
         return pyzxc_seekable_decompress_range(self._handle, offset, length, n_threads)
 
@@ -573,7 +589,9 @@ class CStream:
 
     __slots__ = ("_handle",)
 
-    def __init__(self, level: int = LEVEL_DEFAULT, checksum: bool = False, block_size: int = 0):
+    def __init__(
+        self, level: int = LEVEL_DEFAULT, checksum: bool = False, block_size: int = 0
+    ):
         self._handle = pyzxc_cstream_create(level, checksum, block_size)
 
     def compress(self, data) -> bytes:
@@ -744,7 +762,7 @@ class ZxcReader(_io.RawIOBase):
         if buffer_size <= 0:
             buffer_size = self._ds.in_size
         self._bufsize = buffer_size
-        self._pending = b""    # decompressed bytes not yet returned
+        self._pending = b""  # decompressed bytes not yet returned
         self._eof_src = False  # True once src.read() returned empty bytes
 
     def readable(self) -> bool:

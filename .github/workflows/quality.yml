@@ -15,7 +15,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
-  format:
+  c-format:
     name: Code Quality - Clang-Format
     runs-on: ubuntu-latest
 
@@ -34,6 +34,76 @@ jobs:
         run: make format-check
         env:
           CLANG_FORMAT: clang-format-22
+
+  rust-format:
+    name: Code Quality - Rustfmt
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install rustfmt
+        run: rustup component add rustfmt
+
+      - name: Check Formatting
+        working-directory: wrappers/rust
+        run: cargo fmt --all --check
+
+  go-format:
+    name: Code Quality - Gofmt
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: stable
+
+      # gofmt -l lists offending files but still exits 0, so fail on any output.
+      - name: Check Formatting
+        run: |
+          unformatted=$(gofmt -l wrappers/go)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would reformat:"; echo "$unformatted"
+            exit 1
+          fi
+
+  python-format:
+    name: Code Quality - Black
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Pinned: an unpinned formatter turns CI red on the day it changes style.
+      - name: Install Black
+        run: pipx install black==26.5.1
+
+      - name: Check Formatting
+        run: black --check wrappers/python/src wrappers/python/tests
+
+  js-format:
+    name: Code Quality - Prettier
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Hand-written JS only: build-wasm/zxc.js is emscripten output, and the
+      # nodejs/wasm build/ and node_modules/ trees are not ours to format.
+      - name: Check Formatting
+        run: |
+          npx --yes prettier@3.9.5 --check \
+            "wrappers/nodejs/lib/*.js" \
+            "wrappers/nodejs/test/*.js" \
+            "wrappers/wasm/*.mjs" \
+            "wrappers/wasm/zxc_wasm.js"
 
   cppcheck:
     name: Code Quality - Cppcheck

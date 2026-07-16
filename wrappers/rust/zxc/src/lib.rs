@@ -47,14 +47,32 @@
 #![warn(rust_2018_idioms)]
 
 pub use zxc_sys::{
-    ZXC_LEVEL_BALANCED, ZXC_LEVEL_COMPACT, ZXC_LEVEL_DEFAULT, ZXC_LEVEL_DENSITY, ZXC_LEVEL_FAST,
-    ZXC_LEVEL_FASTEST, ZXC_LEVEL_ULTRA, ZXC_VERSION_MAJOR, ZXC_VERSION_MINOR, ZXC_VERSION_PATCH,
-    // Error codes
-    ZXC_OK, ZXC_ERROR_MEMORY, ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_SRC_TOO_SMALL,
-    ZXC_ERROR_BAD_MAGIC, ZXC_ERROR_BAD_VERSION, ZXC_ERROR_BAD_HEADER,
-    ZXC_ERROR_BAD_CHECKSUM, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_BAD_OFFSET,
-    ZXC_ERROR_OVERFLOW, ZXC_ERROR_IO, ZXC_ERROR_NULL_INPUT, ZXC_ERROR_BAD_BLOCK_TYPE,
     ZXC_ERROR_BAD_BLOCK_SIZE,
+    ZXC_ERROR_BAD_BLOCK_TYPE,
+    ZXC_ERROR_BAD_CHECKSUM,
+    ZXC_ERROR_BAD_HEADER,
+    ZXC_ERROR_BAD_MAGIC,
+    ZXC_ERROR_BAD_OFFSET,
+    ZXC_ERROR_BAD_VERSION,
+    ZXC_ERROR_CORRUPT_DATA,
+    ZXC_ERROR_DST_TOO_SMALL,
+    ZXC_ERROR_IO,
+    ZXC_ERROR_MEMORY,
+    ZXC_ERROR_NULL_INPUT,
+    ZXC_ERROR_OVERFLOW,
+    ZXC_ERROR_SRC_TOO_SMALL,
+    ZXC_LEVEL_BALANCED,
+    ZXC_LEVEL_COMPACT,
+    ZXC_LEVEL_DEFAULT,
+    ZXC_LEVEL_DENSITY,
+    ZXC_LEVEL_FAST,
+    ZXC_LEVEL_FASTEST,
+    ZXC_LEVEL_ULTRA,
+    // Error codes
+    ZXC_OK,
+    ZXC_VERSION_MAJOR,
+    ZXC_VERSION_MINOR,
+    ZXC_VERSION_PATCH,
 };
 
 // =============================================================================
@@ -276,23 +294,23 @@ pub mod seekable;
 mod stdio;
 
 pub use dict::{
-    dict_get_id, dict_huf, dict_id, dict_load, dict_save, get_dict_id, train_dict, train_dict_huf,
-    Dictionary,
+    Dictionary, dict_get_id, dict_huf, dict_id, dict_load, dict_save, get_dict_id, train_dict,
+    train_dict_huf,
 };
-pub use zxc_sys::{ZXC_HUF_TABLE_SIZE, ZXC_DICT_SIZE_MAX};
+pub use zxc_sys::{ZXC_DICT_SIZE_MAX, ZXC_HUF_TABLE_SIZE};
 
+pub use ctx::{Cctx, Dctx, compress_block_bound, decompress_block_bound};
 pub use error::{Error, Result};
+pub use file::{
+    StreamCompressOptions, StreamDecompressOptions, StreamError, StreamResult, compress_file,
+    compress_file_with_options, decompress_file, decompress_file_with_options,
+    file_decompressed_size,
+};
 pub use oneshot::{
     compress, compress_bound, compress_to, compress_with_options, decompress, decompress_to,
     decompress_with_options, decompressed_size, default_level, max_level, min_level,
     runtime_version, version, version_string,
 };
-pub use ctx::{compress_block_bound, decompress_block_bound, Cctx, Dctx};
-pub use file::{
-    compress_file, compress_file_with_options, decompress_file, decompress_file_with_options,
-    file_decompressed_size, StreamCompressOptions, StreamDecompressOptions, StreamError,
-    StreamResult,
-};
 pub use pstream::{CStream, CStreamProgress, DStream, DStreamProgress};
-pub use seekable::{seek_table_size, write_seek_table, Seekable};
-pub use stdio::{detect_zxc, Decoder, Encoder};
+pub use seekable::{Seekable, seek_table_size, write_seek_table};
+pub use stdio::{Decoder, Encoder, detect_zxc};

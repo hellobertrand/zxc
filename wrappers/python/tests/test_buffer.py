@@ -8,14 +8,17 @@ SPDX-License-Identifier: BSD-3-Clause
 import pytest
 import zxc
 
-@pytest.mark.parametrize("data", [
-    None,
-    "string",
-    123,
-    12.5,
-    object(),
-])
 
+@pytest.mark.parametrize(
+    "data",
+    [
+        None,
+        "string",
+        123,
+        12.5,
+        object(),
+    ],
+)
 def test_compress_invalid_type(data):
     with pytest.raises(TypeError):
         zxc.compress(data)
@@ -24,8 +27,8 @@ def test_compress_invalid_type(data):
 @pytest.mark.parametrize(
     "data,corrupt_func,exc",
     [
-        (b"hello world" * 10, lambda x: x[:-1] + b"\x01", RuntimeError),  
-        (b"a" * 10, lambda x: b"", RuntimeError),                     
+        (b"hello world" * 10, lambda x: x[:-1] + b"\x01", RuntimeError),
+        (b"a" * 10, lambda x: b"", RuntimeError),
     ],
     ids=["corrupted_data", "invalid_header"],
 )
@@ -40,10 +43,10 @@ def test_compress_corruption(data, corrupt_func, exc):
 @pytest.mark.parametrize(
     "data",
     [
-        b"hello world" * 10,   # default
-        b"a",                  # single byte 
+        b"hello world" * 10,  # default
+        b"a",  # single byte
         b"",
-        b"a" * 10_000_000,     # large data 
+        b"a" * 10_000_000,  # large data
     ],
     ids=[
         "normal_data",
@@ -52,7 +55,6 @@ def test_compress_corruption(data, corrupt_func, exc):
         "large_10mb",
     ],
 )
-
 def test_compress_roundtrip(data):
     # test all compression levels (1..LEVEL_ULTRA)
     for level in range(zxc.LEVEL_FASTEST, zxc.LEVEL_ULTRA + 1):
@@ -62,5 +64,3 @@ def test_compress_roundtrip(data):
         decompressed = zxc.decompress(compressed, out_size)
         assert len(data) == len(decompressed)
         assert data == decompressed
-    
-

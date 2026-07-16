@@ -39,11 +39,12 @@ ERROR_BAD_LEVEL: int
 # ---------- types ----------
 class FileLike(Protocol):
     """File-like object with a file descriptor.
-    
+
     Note:
         This excludes in-memory streams like io.BytesIO.
         Use real file objects or objects wrapping OS file descriptors.
     """
+
     def fileno(self) -> int: ...
     def readable(self) -> bool: ...
     def writable(self) -> bool: ...
@@ -54,17 +55,15 @@ def compress(
     level: int = LEVEL_DEFAULT,
     checksum: bool = False,
     dict: Optional[bytes] = None,
-    dict_huf: Optional[bytes] = None
+    dict_huf: Optional[bytes] = None,
 ) -> bytes: ...
-
 def decompress(
     data: bytes,
     decompress_size: Optional[int] = None,
     checksum: bool = False,
     dict: Optional[bytes] = None,
-    dict_huf: Optional[bytes] = None
+    dict_huf: Optional[bytes] = None,
 ) -> bytes: ...
-
 def stream_compress(
     src: FileLike,
     dst: FileLike,
@@ -73,16 +72,11 @@ def stream_compress(
     checksum: bool = False,
     seekable: bool = False,
     dict: Optional[bytes] = None,
-    dict_huf: Optional[bytes] = None
+    dict_huf: Optional[bytes] = None,
 ) -> int: ...
-
 def stream_decompress(
-    src: FileLike,
-    dst: FileLike,
-    n_threads: int = 0,
-    checksum: bool = False
+    src: FileLike, dst: FileLike, n_threads: int = 0, checksum: bool = False
 ) -> int: ...
-
 def get_decompressed_size(data: bytes) -> int: ...
 
 # ---------- pre-trained dictionaries ----------
@@ -114,6 +108,7 @@ def library_version() -> str: ...
 # ---------- seekable random-access decompression ----------
 class Seekable:
     """Random-access decompression of a seekable ZXC archive."""
+
     def __init__(self, source: bytes | bytearray | memoryview | object) -> None: ...
     @property
     def num_blocks(self) -> int: ...
@@ -122,7 +117,9 @@ class Seekable:
     def block_compressed_size(self, block_idx: int) -> Optional[int]: ...
     def block_decompressed_size(self, block_idx: int) -> Optional[int]: ...
     def set_dict(self, dict: bytes, dict_huf: Optional[bytes] = None) -> None: ...
-    def decompress_range(self, offset: int, length: int, *, n_threads: int = 0) -> bytes: ...
+    def decompress_range(
+        self, offset: int, length: int, *, n_threads: int = 0
+    ) -> bytes: ...
     def close(self) -> None: ...
     def __enter__(self) -> "Seekable": ...
     def __exit__(self, exc_type, exc, tb) -> bool: ...
@@ -133,7 +130,10 @@ def write_seek_table(comp_sizes: list[int]) -> bytes: ...
 # ---------- push streaming ----------
 class CStream:
     """Push-based, single-threaded compression stream."""
-    def __init__(self, level: int = LEVEL_DEFAULT, checksum: bool = False, block_size: int = 0) -> None: ...
+
+    def __init__(
+        self, level: int = LEVEL_DEFAULT, checksum: bool = False, block_size: int = 0
+    ) -> None: ...
     def compress(self, data: bytes) -> bytes: ...
     def end(self) -> bytes: ...
     @property
@@ -146,6 +146,7 @@ class CStream:
 
 class DStream:
     """Push-based, single-threaded decompression stream."""
+
     def __init__(self, checksum: bool = False) -> None: ...
     def decompress(self, data: bytes) -> bytes: ...
     @property
@@ -166,6 +167,7 @@ def detect_zxc(data: bytes) -> bool: ...
 
 class ZxcReader(_io.RawIOBase):
     """Decompresses a ZXC frame read from a binary file-like object."""
+
     def __init__(
         self,
         fileobj: IO[bytes],
@@ -179,6 +181,7 @@ class ZxcReader(_io.RawIOBase):
 
 class ZxcWriter(_io.RawIOBase):
     """Compresses bytes written to it into a binary file-like object."""
+
     def __init__(
         self,
         fileobj: IO[bytes],

@@ -138,6 +138,7 @@ def test_reader_underlying_not_closed():
 # detect_zxc
 # ---------------------------------------------------------------------------
 
+
 def test_detect_zxc_positive_compress():
     frame = zxc.compress(b"sniff me")
     assert zxc.detect_zxc(frame)
