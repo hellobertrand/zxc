@@ -1,4 +1,4 @@
-name: Test Go Package
+name: Wrapper Go
 
 on:
   workflow_dispatch:

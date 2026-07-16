@@ -63,7 +63,6 @@ jobs:
         with:
           go-version: stable
 
-      # gofmt -l lists offending files but still exits 0, so fail on any output.
       - name: Check Formatting
         run: |
           unformatted=$(gofmt -l wrappers/go)
@@ -80,7 +79,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      # Pinned: an unpinned formatter turns CI red on the day it changes style.
       - name: Install Black
         run: pipx install black==26.5.1
 
@@ -95,8 +93,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      # Hand-written JS only: build-wasm/zxc.js is emscripten output, and the
-      # nodejs/wasm build/ and node_modules/ trees are not ours to format.
       - name: Check Formatting
         run: |
           npx --yes prettier@3.9.5 --check \
