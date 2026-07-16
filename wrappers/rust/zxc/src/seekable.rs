@@ -31,7 +31,7 @@
 //! by this crate yet; the underlying `zxc_seekable_decompress_range_mt`
 //! symbol is reserved for a future addition.
 
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 use std::path::Path;
 use std::ptr::NonNull;
 
@@ -71,9 +71,7 @@ impl Seekable {
     /// The buffer is held alive for the lifetime of the returned handle.
     /// Use this when the archive is already in memory.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
-        let ptr = unsafe {
-            zxc_sys::zxc_seekable_open(data.as_ptr() as *const c_void, data.len())
-        };
+        let ptr = unsafe { zxc_sys::zxc_seekable_open(data.as_ptr() as *const c_void, data.len()) };
         let inner = NonNull::new(ptr).ok_or(Error::InvalidData)?;
         Ok(Self {
             inner,
@@ -183,9 +181,8 @@ impl Seekable {
         if block_idx >= self.num_blocks() {
             return None;
         }
-        let sz = unsafe {
-            zxc_sys::zxc_seekable_get_block_comp_size(self.inner.as_ptr(), block_idx)
-        };
+        let sz =
+            unsafe { zxc_sys::zxc_seekable_get_block_comp_size(self.inner.as_ptr(), block_idx) };
         Some(sz)
     }
 
@@ -196,9 +193,8 @@ impl Seekable {
         if block_idx >= self.num_blocks() {
             return None;
         }
-        let sz = unsafe {
-            zxc_sys::zxc_seekable_get_block_decomp_size(self.inner.as_ptr(), block_idx)
-        };
+        let sz =
+            unsafe { zxc_sys::zxc_seekable_get_block_decomp_size(self.inner.as_ptr(), block_idx) };
         Some(sz)
     }
 
@@ -240,12 +236,7 @@ impl Seekable {
     ///
     /// Only the blocks overlapping the requested range are read and
     /// decompressed. Returns the number of bytes actually written.
-    pub fn decompress_range(
-        &mut self,
-        dst: &mut [u8],
-        offset: u64,
-        len: usize,
-    ) -> Result<usize> {
+    pub fn decompress_range(&mut self, dst: &mut [u8], offset: u64, len: usize) -> Result<usize> {
         let res = unsafe {
             zxc_sys::zxc_seekable_decompress_range(
                 self.inner.as_ptr(),
@@ -390,7 +381,7 @@ fn path_to_cstring(path: &Path) -> Result<CString> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{compress_with_options, CompressOptions, Level};
+    use crate::{CompressOptions, Level, compress_with_options};
 
     fn build_archive(data: &[u8]) -> Vec<u8> {
         let opts = CompressOptions {
@@ -470,7 +461,10 @@ mod tests {
         fn read_at(&self, dst: &mut [u8], offset: u64) -> std::io::Result<()> {
             self.calls.set(self.calls.get() + 1);
             let off = offset as usize;
-            if off.checked_add(dst.len()).map_or(true, |end| end > self.data.len()) {
+            if off
+                .checked_add(dst.len())
+                .map_or(true, |end| end > self.data.len())
+            {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::UnexpectedEof,
                     "out of bounds",
@@ -522,7 +516,7 @@ mod tests {
 
     #[test]
     fn set_dict_range_roundtrip() {
-        use crate::{train_dict, ZXC_DICT_SIZE_MAX};
+        use crate::{ZXC_DICT_SIZE_MAX, train_dict};
 
         // Train a dictionary from repetitive records, then build a seekable,
         // dict-compressed archive over many such records.

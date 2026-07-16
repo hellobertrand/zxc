@@ -184,7 +184,7 @@ class TestSeekableDict:
             assert s.decompressed_size == len(payload)
             # mid-range slice
             chunk = s.decompress_range(500, 1234)
-            assert chunk == payload[500:500 + 1234]
+            assert chunk == payload[500 : 500 + 1234]
             # full range
             full = s.decompress_range(0, s.decompressed_size)
             assert full == payload

@@ -1,4 +1,4 @@
-name: Publish Node.js Package
+name: Wrapper Node.js
 
 on:
   workflow_dispatch:

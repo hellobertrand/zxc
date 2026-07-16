@@ -31,6 +31,7 @@ def build_seekable_archive_stream(payload, tmp_path, level=zxc.LEVEL_DEFAULT):
 # Queries
 # =========================================================================
 
+
 class TestSeekableQueries:
     def test_reports_size_and_blocks(self, tmp_path):
         payload = build_payload(64 * 1024)
@@ -54,6 +55,7 @@ class TestSeekableQueries:
 # decompress_range
 # =========================================================================
 
+
 class TestDecompressRange:
     def test_full_range_roundtrip(self, tmp_path):
         payload = build_payload(64 * 1024)
@@ -68,7 +70,7 @@ class TestDecompressRange:
         with zxc.Seekable(compressed) as s:
             off, length = 1024, 8192
             out = s.decompress_range(off, length)
-            assert out == payload[off:off + length]
+            assert out == payload[off : off + length]
 
     def test_zero_length(self, tmp_path):
         payload = build_payload(4096)
@@ -87,6 +89,7 @@ class TestDecompressRange:
 # =========================================================================
 # Error handling
 # =========================================================================
+
 
 class TestSeekableErrors:
     def test_garbage_buffer(self):
@@ -122,6 +125,7 @@ class TestSeekableErrors:
 # Reader callback
 # =========================================================================
 
+
 class TestSeekableReader:
     def test_roundtrip_via_reader(self, tmp_path):
         payload = build_payload(128 * 1024)
@@ -133,7 +137,7 @@ class TestSeekableReader:
 
             def read_at(self, length, offset):
                 calls[0] += 1
-                return compressed[offset:offset + length]
+                return compressed[offset : offset + length]
 
         with zxc.Seekable(Reader()) as s:
             assert calls[0] == 3  # header, footer, seek table
@@ -143,7 +147,7 @@ class TestSeekableReader:
 
             before = calls[0]
             chunk = s.decompress_range(2048, 1024)
-            assert chunk == payload[2048:2048 + 1024]
+            assert chunk == payload[2048 : 2048 + 1024]
             assert calls[0] - before == 1
 
     def test_reader_exception_propagates(self, tmp_path):
@@ -160,7 +164,7 @@ class TestSeekableReader:
                 attempted[0] += 1
                 if attempted[0] > 3:
                     raise IOError("boom")
-                return compressed[offset:offset + length]
+                return compressed[offset : offset + length]
 
         with zxc.Seekable(BadReader()) as s:
             with pytest.raises(IOError, match="boom"):
@@ -177,7 +181,7 @@ class TestSeekableReader:
             size = len(compressed)
 
             def read_at(self, length, offset):
-                return compressed[offset:offset + length]
+                return compressed[offset : offset + length]
 
         with zxc.Seekable(Reader()) as s:
             assert s.num_blocks >= 2
@@ -202,6 +206,7 @@ class TestSeekableReader:
 # =========================================================================
 # Low-level seek table helpers
 # =========================================================================
+
 
 class TestSeekTableHelpers:
     def test_roundtrip(self):

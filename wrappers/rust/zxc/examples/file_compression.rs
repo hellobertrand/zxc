@@ -48,7 +48,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get compressed file size
     let compressed_size = fs::metadata(compressed_path)?.len();
     let ratio = 100.0 * compressed_size as f64 / original_size as f64;
-    println!("  Compressed file size: {} bytes ({:.1}%)", compressed_size, ratio);
+    println!(
+        "  Compressed file size: {} bytes ({:.1}%)",
+        compressed_size, ratio
+    );
 
     // Query the decompressed size from the file
     let reported_size = zxc::file_decompressed_size(compressed_path)?;

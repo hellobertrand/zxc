@@ -9,13 +9,29 @@ import pytest
 import zxc
 import io
 
+
 @pytest.mark.parametrize(
     "src,dst,expected_error,match",
     [
-        ("not a file", io.BytesIO(), ValueError, "src and dst must be open file-like objects"),
-        (io.BytesIO(b"data"), "not a file", ValueError, "src and dst must be open file-like objects"),
+        (
+            "not a file",
+            io.BytesIO(),
+            ValueError,
+            "src and dst must be open file-like objects",
+        ),
+        (
+            io.BytesIO(b"data"),
+            "not a file",
+            ValueError,
+            "src and dst must be open file-like objects",
+        ),
         (io.BytesIO(b"data"), io.BytesIO(), ValueError, "Source file must be readable"),
-        (io.BytesIO(b"data"), io.BytesIO(), ValueError, "Destination file must be writable"),
+        (
+            io.BytesIO(b"data"),
+            io.BytesIO(),
+            ValueError,
+            "Destination file must be writable",
+        ),
         (None, None, None, "valid_file"),
     ],
     ids=[
@@ -24,7 +40,7 @@ import io
         "src_not_readable",
         "dst_not_writable",
         "valid_file",
-    ]
+    ],
 )
 def test_stream_invalid_src_dst(tmp_path, src, dst, expected_error, match):
     # Helper class to mock fileno behavior
@@ -89,17 +105,22 @@ def test_stream_compress_corruption(tmp_path, data, corrupt_func, exc):
     compressed_file_path.write_bytes(corrupted_bytes)
 
     with pytest.raises(exc):
-        with open(compressed_file_path, "rb") as src, open(decompressed_file_path, "wb") as dst:
+        with open(compressed_file_path, "rb") as src, open(
+            decompressed_file_path, "wb"
+        ) as dst:
             zxc.stream_decompress(src, dst, checksum=True)
 
 
-@pytest.mark.parametrize("data", [
-    b"hello world" * 10,   # normal
-    b"a",                  # single byte
-    b"",                   # empty
-    b"a" * 10_000_000,     # large
-], ids=["normal", "single_byte", "empty", "large_10mb"])
-
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"hello world" * 10,  # normal
+        b"a",  # single byte
+        b"",  # empty
+        b"a" * 10_000_000,  # large
+    ],
+    ids=["normal", "single_byte", "empty", "large_10mb"],
+)
 def test_stream_roundtrip(tmp_path, data):
     src_file_path = tmp_path / "src.txt"
     compressed_file_path = tmp_path / "compressed.zxc"
@@ -108,12 +129,14 @@ def test_stream_roundtrip(tmp_path, data):
     src_file_path.write_bytes(data)
 
     for level in range(zxc.LEVEL_FASTEST, zxc.LEVEL_ULTRA + 1):
-        with open(src_file_path, "rb") as src, \
-            open(compressed_file_path, "wb") as compressed:
+        with open(src_file_path, "rb") as src, open(
+            compressed_file_path, "wb"
+        ) as compressed:
             zxc.stream_compress(src, compressed, level=level)
 
-        with open(compressed_file_path, "rb") as compressed, \
-            open(decompressed_file_path, "wb") as decompressed:
+        with open(compressed_file_path, "rb") as compressed, open(
+            decompressed_file_path, "wb"
+        ) as decompressed:
             zxc.stream_decompress(compressed, decompressed)
 
         decompressed_data = decompressed_file_path.read_bytes()

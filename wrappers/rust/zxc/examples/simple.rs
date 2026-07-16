@@ -9,7 +9,7 @@
 //!
 //! Run with: `cargo run --example simple`
 
-use zxc::{compress, decompress, decompressed_size, version_string, Level};
+use zxc::{Level, compress, decompress, decompressed_size, version_string};
 
 fn main() -> Result<(), zxc::Error> {
     println!("ZXC Rust Wrapper v{}\n", version_string());

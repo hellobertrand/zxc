@@ -41,6 +41,8 @@ Executes fuzz testing using ClusterFuzzLite with multiple sanitizers (address, u
 
 Performs static analysis using Cppcheck and Clang Static Analyzer. Runs memory leak detection with Valgrind to ensure code quality and identify potential bugs.
 
+Also enforces formatting, one job per language, each running that ecosystem's canonical tool: `c-format` (clang-format, via `make format-check`), `rust-format` (`cargo fmt`), `go-format` (`gofmt`), `python-format` (`black`) and `nodejs-format` (`prettier`, covering both the Node.js and WASM wrappers). Formatter versions are pinned so a new release of one cannot turn CI red on a commit that touched nothing.
+
 ### security.yml - Code Security
 **Triggers:** Push to main, pull requests
 
@@ -73,27 +75,27 @@ Regenerates [`CHANGELOG.md`](../../CHANGELOG.md) with [`git-cliff`](https://git-
 
 ## Language Bindings
 
-### wrapper-rust-publish.yml - Publish Rust Crates
+### wrapper-rust.yml - Wrapper Rust
 **Triggers:** Release published, manual dispatch
 
 Tests and publishes Rust crates to crates.io. Verifies the version matches the release tag, runs tests across platforms, and publishes `zxc-compress-sys` (FFI bindings) followed by `zxc-compress` (safe wrapper).
 
-### wrapper-python-publish.yml - Publish Python Package
+### wrapper-python.yml - Wrapper Python
 **Triggers:** Release published, manual dispatch
 
 Builds platform-specific wheels using `cibuildwheel` for Linux (x86_64, ARM64), macOS (ARM64, Intel), and Windows (AMD64, ARM64). Tests wheels against Python 3.12-3.13, then publishes to PyPI via trusted publishing.
 
-### wrapper-wasm.yml - WASM Build & Test
+### wrapper-wasm.yml - Wrapper WASM
 **Triggers:** Release published, publish on main, manual dispatch
 
 Builds the WebAssembly target using Emscripten SDK. Compiles the library with SIMD disabled (scalar codepath) and no threading, then runs a Node.js roundtrip test suite covering all compression levels, reusable contexts, and error handling. Uploads `zxc.js` + `zxc.wasm` as build artifacts.
 
-### wrapper-nodejs-publish.yml - Publish Node.js Package
+### wrapper-nodejs.yml - Wrapper Node.js
 **Triggers:** Release published, manual dispatch
 
 Builds and publishes the Node.js package to npm. Handles the compilation of native bindings and ensures the package is correctly versioned and distributed.
 
-### wrapper-go-test.yml - Test Go Package
+### wrapper-go.yml - Wrapper Go
 **Triggers:** Release published, manual dispatch
 
 Runs comprehensive tests for the Go bindings across various platforms and architectures to ensure the Go package is stable and functional.

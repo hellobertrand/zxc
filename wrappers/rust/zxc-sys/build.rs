@@ -20,16 +20,15 @@ use std::path::{Path, PathBuf};
 /// Extract version constants from zxc_constants.h
 fn extract_version(include_dir: &Path) -> (u32, u32, u32) {
     let header_path = include_dir.join("zxc_constants.h");
-    let content = fs::read_to_string(&header_path)
-        .expect("Failed to read zxc_constants.h");
-    
+    let content = fs::read_to_string(&header_path).expect("Failed to read zxc_constants.h");
+
     let mut major = None;
     let mut minor = None;
     let mut patch = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
-        
+
         // Parse lines like: #define ZXC_VERSION_MAJOR 0
         if trimmed.starts_with("#define") {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
@@ -54,8 +53,7 @@ fn extract_version(include_dir: &Path) -> (u32, u32, u32) {
 /// Extract compression level constants from zxc_constants.h
 fn extract_compression_levels(include_dir: &Path) -> (i32, i32, i32, i32, i32, i32, i32) {
     let header_path = include_dir.join("zxc_constants.h");
-    let content = fs::read_to_string(&header_path)
-        .expect("Failed to read zxc_constants.h");
+    let content = fs::read_to_string(&header_path).expect("Failed to read zxc_constants.h");
 
     let mut fastest = None;
     let mut fast = None;
@@ -139,7 +137,9 @@ fn main() {
         (src_lib, include_dir)
     } else {
         // Try direct path from workspace root
-        let zxc_root = manifest_dir.join("../../..").canonicalize()
+        let zxc_root = manifest_dir
+            .join("../../..")
+            .canonicalize()
             .expect("Failed to find ZXC root directory");
         (zxc_root.join("src/lib"), zxc_root.join("include"))
     };

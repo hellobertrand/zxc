@@ -1,4 +1,4 @@
-name: Publish Python Package
+name: Wrapper Python
 
 on:
   workflow_dispatch:

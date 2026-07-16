@@ -319,8 +319,8 @@ fn map_err(e: Error) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compress;
     use crate::Level;
+    use crate::compress;
     use std::io::{Cursor, Read, Write};
 
     fn roundtrip(data: &[u8]) -> Vec<u8> {
@@ -342,7 +342,9 @@ mod tests {
 
     #[test]
     fn encoder_decoder_large_roundtrip() {
-        let data: Vec<u8> = (0..2 * 1024 * 1024).map(|i| ((i * 13) % 251) as u8).collect();
+        let data: Vec<u8> = (0..2 * 1024 * 1024)
+            .map(|i| ((i * 13) % 251) as u8)
+            .collect();
         assert_eq!(roundtrip(&data), data);
     }
 

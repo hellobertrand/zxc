@@ -19,10 +19,12 @@
  * @returns {boolean}
  */
 export function detectZxc(buf) {
-    if (!buf) return false;
-    const view = buf instanceof ArrayBuffer ? new Uint8Array(buf) : buf;
-    if (!view || view.length < 4) return false;
-    return view[0] === 0xF5 && view[1] === 0x2E && view[2] === 0xB0 && view[3] === 0x9C;
+  if (!buf) return false;
+  const view = buf instanceof ArrayBuffer ? new Uint8Array(buf) : buf;
+  if (!view || view.length < 4) return false;
+  return (
+    view[0] === 0xf5 && view[1] === 0x2e && view[2] === 0xb0 && view[3] === 0x9c
+  );
 }
 
 /**
@@ -35,1258 +37,1522 @@ export function detectZxc(buf) {
  * @returns {Promise<ZXC>} Resolved API object.
  */
 export default async function createZXC(moduleOverrides, factory) {
-    let ZXCModule = factory;
-    if (!ZXCModule) {
-        ZXCModule = (await import('./zxc.js')).default;
-        if (typeof ZXCModule !== 'function') {
-            try {
-                const { createRequire } = await import('node:module');
-                ZXCModule = createRequire(import.meta.url)('./zxc.js');
-            } catch (_) {
-                throw new Error(
-                    'ZXC: could not load ./zxc.js as a module factory; ' +
-                    'pass the Emscripten factory explicitly: createZXC({}, factory)');
-            }
-        }
+  let ZXCModule = factory;
+  if (!ZXCModule) {
+    ZXCModule = (await import("./zxc.js")).default;
+    if (typeof ZXCModule !== "function") {
+      try {
+        const { createRequire } = await import("node:module");
+        ZXCModule = createRequire(import.meta.url)("./zxc.js");
+      } catch (_) {
+        throw new Error(
+          "ZXC: could not load ./zxc.js as a module factory; " +
+            "pass the Emscripten factory explicitly: createZXC({}, factory)",
+        );
+      }
     }
-    const Module = await ZXCModule(moduleOverrides || {});
+  }
+  const Module = await ZXCModule(moduleOverrides || {});
 
-    // --- Wrap C functions via cwrap ------------------------------------------
-    const _compress = Module.cwrap('zxc_compress', 'number',
-        ['number', 'number', 'number', 'number', 'number']);
-    const _decompress = Module.cwrap('zxc_decompress', 'number',
-        ['number', 'number', 'number', 'number', 'number']);
-    const _compress_bound = Module.cwrap('zxc_compress_bound', 'number', ['number']);
-    const _get_decompressed_size = Module.cwrap('zxc_get_decompressed_size', 'number',
-        ['number', 'number']);
+  // --- Wrap C functions via cwrap ------------------------------------------
+  const _compress = Module.cwrap("zxc_compress", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
+  const _decompress = Module.cwrap("zxc_decompress", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
+  const _compress_bound = Module.cwrap("zxc_compress_bound", "number", [
+    "number",
+  ]);
+  const _get_decompressed_size = Module.cwrap(
+    "zxc_get_decompressed_size",
+    "number",
+    ["number", "number"],
+  );
 
-    const _create_cctx = Module.cwrap('zxc_create_cctx', 'number', ['number']);
-    const _free_cctx   = Module.cwrap('zxc_free_cctx', 'void', ['number']);
-    const _compress_cctx = Module.cwrap('zxc_compress_cctx', 'number',
-        ['number', 'number', 'number', 'number', 'number', 'number']);
+  const _create_cctx = Module.cwrap("zxc_create_cctx", "number", ["number"]);
+  const _free_cctx = Module.cwrap("zxc_free_cctx", "void", ["number"]);
+  const _compress_cctx = Module.cwrap("zxc_compress_cctx", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
 
-    const _create_dctx = Module.cwrap('zxc_create_dctx', 'number', []);
-    const _free_dctx   = Module.cwrap('zxc_free_dctx', 'void', ['number']);
-    const _decompress_dctx = Module.cwrap('zxc_decompress_dctx', 'number',
-        ['number', 'number', 'number', 'number', 'number', 'number']);
+  const _create_dctx = Module.cwrap("zxc_create_dctx", "number", []);
+  const _free_dctx = Module.cwrap("zxc_free_dctx", "void", ["number"]);
+  const _decompress_dctx = Module.cwrap("zxc_decompress_dctx", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
 
-    // Push streaming API
-    const _cstream_create   = Module.cwrap('zxc_cstream_create', 'number', ['number']);
-    const _cstream_free     = Module.cwrap('zxc_cstream_free', 'void', ['number']);
-    const _cstream_compress = Module.cwrap('zxc_cstream_compress', 'number',
-        ['number', 'number', 'number']);
-    const _cstream_end      = Module.cwrap('zxc_cstream_end', 'number', ['number', 'number']);
-    const _cstream_in_size  = Module.cwrap('zxc_cstream_in_size', 'number', ['number']);
-    const _cstream_out_size = Module.cwrap('zxc_cstream_out_size', 'number', ['number']);
+  // Push streaming API
+  const _cstream_create = Module.cwrap("zxc_cstream_create", "number", [
+    "number",
+  ]);
+  const _cstream_free = Module.cwrap("zxc_cstream_free", "void", ["number"]);
+  const _cstream_compress = Module.cwrap("zxc_cstream_compress", "number", [
+    "number",
+    "number",
+    "number",
+  ]);
+  const _cstream_end = Module.cwrap("zxc_cstream_end", "number", [
+    "number",
+    "number",
+  ]);
+  const _cstream_in_size = Module.cwrap("zxc_cstream_in_size", "number", [
+    "number",
+  ]);
+  const _cstream_out_size = Module.cwrap("zxc_cstream_out_size", "number", [
+    "number",
+  ]);
 
-    const _dstream_create     = Module.cwrap('zxc_dstream_create', 'number', ['number']);
-    const _dstream_free       = Module.cwrap('zxc_dstream_free', 'void', ['number']);
-    const _dstream_decompress = Module.cwrap('zxc_dstream_decompress', 'number',
-        ['number', 'number', 'number']);
-    const _dstream_finished   = Module.cwrap('zxc_dstream_finished', 'number', ['number']);
-    const _dstream_in_size    = Module.cwrap('zxc_dstream_in_size', 'number', ['number']);
-    const _dstream_out_size   = Module.cwrap('zxc_dstream_out_size', 'number', ['number']);
+  const _dstream_create = Module.cwrap("zxc_dstream_create", "number", [
+    "number",
+  ]);
+  const _dstream_free = Module.cwrap("zxc_dstream_free", "void", ["number"]);
+  const _dstream_decompress = Module.cwrap("zxc_dstream_decompress", "number", [
+    "number",
+    "number",
+    "number",
+  ]);
+  const _dstream_finished = Module.cwrap("zxc_dstream_finished", "number", [
+    "number",
+  ]);
+  const _dstream_in_size = Module.cwrap("zxc_dstream_in_size", "number", [
+    "number",
+  ]);
+  const _dstream_out_size = Module.cwrap("zxc_dstream_out_size", "number", [
+    "number",
+  ]);
 
-    // Seekable API (random-access decompression, single-threaded)
-    const _seekable_open      = Module.cwrap('zxc_seekable_open', 'number', ['number', 'number']);
-    const _seekable_free      = Module.cwrap('zxc_seekable_free', 'void', ['number']);
-    const _seekable_num_blocks         = Module.cwrap('zxc_seekable_get_num_blocks', 'number', ['number']);
-    const _seekable_decompressed_size  = Module.cwrap('zxc_seekable_get_decompressed_size', 'number', ['number']);
-    const _seekable_block_comp_size    = Module.cwrap('zxc_seekable_get_block_comp_size', 'number', ['number', 'number']);
-    const _seekable_block_decomp_size  = Module.cwrap('zxc_seekable_get_block_decomp_size', 'number', ['number', 'number']);
-    // Use the i32-offset shim from wasm_entry.c: cwrap cannot pass a uint64_t
-    // argument without -sWASM_BIGINT=1, and the wasm32 heap is itself bounded
-    // to 4 GiB, so a 32-bit offset is enough for any in-memory archive.
-    const _seekable_decompress_range   = Module.cwrap('zxcw_seekable_decompress_range', 'number',
-        ['number', 'number', 'number', 'number', 'number']);
-    const _seek_table_size  = Module.cwrap('zxc_seek_table_size', 'number', ['number']);
-    const _write_seek_table = Module.cwrap('zxc_write_seek_table', 'number',
-        ['number', 'number', 'number', 'number']);
-    const _seekable_set_dict = Module.cwrap('zxc_seekable_set_dict', 'number',
-        ['number', 'number', 'number', 'number']);
+  // Seekable API (random-access decompression, single-threaded)
+  const _seekable_open = Module.cwrap("zxc_seekable_open", "number", [
+    "number",
+    "number",
+  ]);
+  const _seekable_free = Module.cwrap("zxc_seekable_free", "void", ["number"]);
+  const _seekable_num_blocks = Module.cwrap(
+    "zxc_seekable_get_num_blocks",
+    "number",
+    ["number"],
+  );
+  const _seekable_decompressed_size = Module.cwrap(
+    "zxc_seekable_get_decompressed_size",
+    "number",
+    ["number"],
+  );
+  const _seekable_block_comp_size = Module.cwrap(
+    "zxc_seekable_get_block_comp_size",
+    "number",
+    ["number", "number"],
+  );
+  const _seekable_block_decomp_size = Module.cwrap(
+    "zxc_seekable_get_block_decomp_size",
+    "number",
+    ["number", "number"],
+  );
+  // Use the i32-offset shim from wasm_entry.c: cwrap cannot pass a uint64_t
+  // argument without -sWASM_BIGINT=1, and the wasm32 heap is itself bounded
+  // to 4 GiB, so a 32-bit offset is enough for any in-memory archive.
+  const _seekable_decompress_range = Module.cwrap(
+    "zxcw_seekable_decompress_range",
+    "number",
+    ["number", "number", "number", "number", "number"],
+  );
+  const _seek_table_size = Module.cwrap("zxc_seek_table_size", "number", [
+    "number",
+  ]);
+  const _write_seek_table = Module.cwrap("zxc_write_seek_table", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
+  const _seekable_set_dict = Module.cwrap("zxc_seekable_set_dict", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
 
-    // Dictionary API. zxc_train_dict / zxc_dict_save / zxc_dict_load return
-    // int64_t; on wasm32 cwrap('number') reads the low 32 bits, which is
-    // sufficient since results are bounded by ZXC_DICT_SIZE_MAX (65535) and
-    // pointers are 32-bit.
-    const _train_dict      = Module.cwrap('zxc_train_dict', 'number',
-        ['number', 'number', 'number', 'number', 'number']);
-    const _dict_id         = Module.cwrap('zxc_dict_id', 'number',
-        ['number', 'number', 'number']);
-    const _get_dict_id     = Module.cwrap('zxc_get_dict_id', 'number', ['number', 'number']);
-    const _dict_get_id     = Module.cwrap('zxc_dict_get_id', 'number', ['number', 'number']);
-    const _dict_save       = Module.cwrap('zxc_dict_save', 'number',
-        ['number', 'number', 'number', 'number', 'number']);
-    const _train_dict_huf  = Module.cwrap('zxc_train_dict_huf', 'number',
-        ['number', 'number', 'number', 'number', 'number', 'number']);
-    const _dict_huf        = Module.cwrap('zxc_dict_huf', 'number', ['number', 'number']);
-    const _dict_save_bound = Module.cwrap('zxc_dict_save_bound', 'number', ['number']);
-    const _dict_load       = Module.cwrap('zxc_dict_load', 'number',
-        ['number', 'number', 'number', 'number', 'number', 'number']);
-    const _dict_train      = Module.cwrap('zxc_dict_train', 'number',
-        ['number', 'number', 'number', 'number', 'number']);
+  // Dictionary API. zxc_train_dict / zxc_dict_save / zxc_dict_load return
+  // int64_t; on wasm32 cwrap('number') reads the low 32 bits, which is
+  // sufficient since results are bounded by ZXC_DICT_SIZE_MAX (65535) and
+  // pointers are 32-bit.
+  const _train_dict = Module.cwrap("zxc_train_dict", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
+  const _dict_id = Module.cwrap("zxc_dict_id", "number", [
+    "number",
+    "number",
+    "number",
+  ]);
+  const _get_dict_id = Module.cwrap("zxc_get_dict_id", "number", [
+    "number",
+    "number",
+  ]);
+  const _dict_get_id = Module.cwrap("zxc_dict_get_id", "number", [
+    "number",
+    "number",
+  ]);
+  const _dict_save = Module.cwrap("zxc_dict_save", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
+  const _train_dict_huf = Module.cwrap("zxc_train_dict_huf", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
+  const _dict_huf = Module.cwrap("zxc_dict_huf", "number", [
+    "number",
+    "number",
+  ]);
+  const _dict_save_bound = Module.cwrap("zxc_dict_save_bound", "number", [
+    "number",
+  ]);
+  const _dict_load = Module.cwrap("zxc_dict_load", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
+  const _dict_train = Module.cwrap("zxc_dict_train", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
 
-    const ZXC_DICT_SIZE_MAX = 65535;
-    const ZXC_HUF_TABLE_SIZE = 128;
+  const ZXC_DICT_SIZE_MAX = 65535;
+  const ZXC_HUF_TABLE_SIZE = 128;
 
-    const _version_string = Module.cwrap('zxc_version_string', 'string', []);
-    const _error_name     = Module.cwrap('zxc_error_name', 'string', ['number']);
-    const _min_level      = Module.cwrap('zxc_min_level', 'number', []);
-    const _max_level      = Module.cwrap('zxc_max_level', 'number', []);
-    const _default_level  = Module.cwrap('zxc_default_level', 'number', []);
+  const _version_string = Module.cwrap("zxc_version_string", "string", []);
+  const _error_name = Module.cwrap("zxc_error_name", "string", ["number"]);
+  const _min_level = Module.cwrap("zxc_min_level", "number", []);
+  const _max_level = Module.cwrap("zxc_max_level", "number", []);
+  const _default_level = Module.cwrap("zxc_default_level", "number", []);
 
-    const _malloc = Module._malloc;
-    const _free   = Module._free;
+  const _malloc = Module._malloc;
+  const _free = Module._free;
 
-    const _getTempRet0 =
-        typeof Module.getTempRet0 === 'function' ? Module.getTempRet0 : null;
-    function _u64(low) {
-        const lo = low >>> 0;
-        const hi = _getTempRet0 ? (_getTempRet0() >>> 0) : 0;
-        return hi * 0x100000000 + lo;
+  const _getTempRet0 =
+    typeof Module.getTempRet0 === "function" ? Module.getTempRet0 : null;
+  function _u64(low) {
+    const lo = low >>> 0;
+    const hi = _getTempRet0 ? _getTempRet0() >>> 0 : 0;
+    return hi * 0x100000000 + lo;
+  }
+
+  // --- Options struct layout -----------------------------------------------
+  // zxc_compress_opts_t (WASM32 layout, all fields 4-byte aligned):
+  //   int n_threads (off 0)  | int level (4)  | size_t block_size (8)
+  //   int checksum_enabled (12) | int seekable (16)
+  //   const void* dict (20) | size_t dict_size (24) | const void* dict_huf (28)
+  //   ptr progress_cb (32) | ptr user_data (36)
+  // Total: 40 bytes in WASM32
+  const COMPRESS_OPTS_SIZE = 40;
+
+  // zxc_decompress_opts_t:
+  //   int n_threads (0) | int checksum_enabled (4)
+  //   const void* dict (8) | size_t dict_size (12) | const void* dict_huf (16)
+  //   ptr progress_cb (20) | ptr user_data (24)
+  // Total: 28 bytes in WASM32
+  const DECOMPRESS_OPTS_SIZE = 28;
+
+  // Layout guard: the offsets above are hand-mirrored from zxc_opts.h. The
+  // library exports its compiled sizeof()s; a mismatch means the C structs
+  // changed without this file being updated -- fail loudly at load time
+  // instead of silently reading fields at wrong offsets.
+  {
+    const _copts_size = Module.cwrap("zxc_compress_opts_size", "number", []);
+    const _dopts_size = Module.cwrap("zxc_decompress_opts_size", "number", []);
+    const cSize = _copts_size();
+    const dSize = _dopts_size();
+    if (cSize !== COMPRESS_OPTS_SIZE || dSize !== DECOMPRESS_OPTS_SIZE) {
+      throw new Error(
+        `ZXC: options struct layout drift detected -- ` +
+          `zxc_compress_opts_t is ${cSize} bytes (wrapper assumes ${COMPRESS_OPTS_SIZE}), ` +
+          `zxc_decompress_opts_t is ${dSize} bytes (wrapper assumes ${DECOMPRESS_OPTS_SIZE}). ` +
+          `Update the struct layout section of zxc_wasm.js.`,
+      );
     }
+  }
 
-    // --- Options struct layout -----------------------------------------------
-    // zxc_compress_opts_t (WASM32 layout, all fields 4-byte aligned):
-    //   int n_threads (off 0)  | int level (4)  | size_t block_size (8)
-    //   int checksum_enabled (12) | int seekable (16)
-    //   const void* dict (20) | size_t dict_size (24) | const void* dict_huf (28)
-    //   ptr progress_cb (32) | ptr user_data (36)
-    // Total: 40 bytes in WASM32
-    const COMPRESS_OPTS_SIZE = 40;
+  // zxc_inbuf_t / zxc_outbuf_t (WASM32 layout):
+  //   ptr src/dst (4) | size_t size (4) | size_t pos (4)
+  // Total: 12 bytes in WASM32
+  const IO_BUF_SIZE = 12;
 
-    // zxc_decompress_opts_t:
-    //   int n_threads (0) | int checksum_enabled (4)
-    //   const void* dict (8) | size_t dict_size (12) | const void* dict_huf (16)
-    //   ptr progress_cb (20) | ptr user_data (24)
-    // Total: 28 bytes in WASM32
-    const DECOMPRESS_OPTS_SIZE = 28;
+  /**
+   * Write a zxc_compress_opts_t struct into WASM memory.
+   * @returns {number} Pointer to the struct (caller must free).
+   */
+  function _writeCompressOpts(
+    level,
+    checksum,
+    seekable,
+    dictPtr,
+    dictSize,
+    dictHufPtr,
+  ) {
+    const ptr = _malloc(COMPRESS_OPTS_SIZE);
+    // Zero-fill covers n_threads (0), block_size (8, default),
+    // progress_cb (32) and user_data (36).
+    Module.HEAPU8.fill(0, ptr, ptr + COMPRESS_OPTS_SIZE);
+    // level (offset 4)
+    Module.HEAP32[(ptr >> 2) + 1] = level;
+    // checksum_enabled (offset 12)
+    Module.HEAP32[(ptr >> 2) + 3] = checksum ? 1 : 0;
+    // seekable (offset 16)
+    Module.HEAP32[(ptr >> 2) + 4] = seekable ? 1 : 0;
+    // dict (offset 20), dict_size (offset 24), dict_huf (offset 28)
+    Module.HEAPU32[(ptr >> 2) + 5] = dictPtr || 0;
+    Module.HEAPU32[(ptr >> 2) + 6] = dictSize || 0;
+    Module.HEAPU32[(ptr >> 2) + 7] = dictHufPtr || 0;
+    return ptr;
+  }
 
-    // Layout guard: the offsets above are hand-mirrored from zxc_opts.h. The
-    // library exports its compiled sizeof()s; a mismatch means the C structs
-    // changed without this file being updated -- fail loudly at load time
-    // instead of silently reading fields at wrong offsets.
-    {
-        const _copts_size = Module.cwrap('zxc_compress_opts_size', 'number', []);
-        const _dopts_size = Module.cwrap('zxc_decompress_opts_size', 'number', []);
-        const cSize = _copts_size();
-        const dSize = _dopts_size();
-        if (cSize !== COMPRESS_OPTS_SIZE || dSize !== DECOMPRESS_OPTS_SIZE) {
-            throw new Error(
-                `ZXC: options struct layout drift detected -- ` +
-                `zxc_compress_opts_t is ${cSize} bytes (wrapper assumes ${COMPRESS_OPTS_SIZE}), ` +
-                `zxc_decompress_opts_t is ${dSize} bytes (wrapper assumes ${DECOMPRESS_OPTS_SIZE}). ` +
-                `Update the struct layout section of zxc_wasm.js.`);
-        }
+  /**
+   * Write a zxc_decompress_opts_t struct into WASM memory.
+   * @returns {number} Pointer to the struct (caller must free).
+   */
+  function _writeDecompressOpts(checksum, dictPtr, dictSize, dictHufPtr) {
+    const ptr = _malloc(DECOMPRESS_OPTS_SIZE);
+    // Zero-fill covers n_threads (0), progress_cb (20) and user_data (24).
+    Module.HEAPU8.fill(0, ptr, ptr + DECOMPRESS_OPTS_SIZE);
+    // checksum_enabled (offset 4)
+    Module.HEAP32[(ptr >> 2) + 1] = checksum ? 1 : 0;
+    // dict (offset 8), dict_size (offset 12), dict_huf (offset 16)
+    Module.HEAPU32[(ptr >> 2) + 2] = dictPtr || 0;
+    Module.HEAPU32[(ptr >> 2) + 3] = dictSize || 0;
+    Module.HEAPU32[(ptr >> 2) + 4] = dictHufPtr || 0;
+    return ptr;
+  }
+
+  // --- Public API ----------------------------------------------------------
+
+  /**
+   * Accept a {@link Dictionary} or raw `(dict, dictHuf)` pieces in options.
+   * @returns {{dict: Uint8Array|null, dictHuf: Uint8Array|null}}
+   */
+  function _splitDictOption(opts) {
+    const d = (opts && opts.dict) || null;
+    if (d instanceof Dictionary) {
+      return { dict: d.content, dictHuf: d.huf };
     }
-
-    // zxc_inbuf_t / zxc_outbuf_t (WASM32 layout):
-    //   ptr src/dst (4) | size_t size (4) | size_t pos (4)
-    // Total: 12 bytes in WASM32
-    const IO_BUF_SIZE = 12;
-
-    /**
-     * Write a zxc_compress_opts_t struct into WASM memory.
-     * @returns {number} Pointer to the struct (caller must free).
-     */
-    function _writeCompressOpts(level, checksum, seekable, dictPtr, dictSize, dictHufPtr) {
-        const ptr = _malloc(COMPRESS_OPTS_SIZE);
-        // Zero-fill covers n_threads (0), block_size (8, default),
-        // progress_cb (32) and user_data (36).
-        Module.HEAPU8.fill(0, ptr, ptr + COMPRESS_OPTS_SIZE);
-        // level (offset 4)
-        Module.HEAP32[(ptr >> 2) + 1] = level;
-        // checksum_enabled (offset 12)
-        Module.HEAP32[(ptr >> 2) + 3] = checksum ? 1 : 0;
-        // seekable (offset 16)
-        Module.HEAP32[(ptr >> 2) + 4] = seekable ? 1 : 0;
-        // dict (offset 20), dict_size (offset 24), dict_huf (offset 28)
-        Module.HEAPU32[(ptr >> 2) + 5] = dictPtr || 0;
-        Module.HEAPU32[(ptr >> 2) + 6] = dictSize || 0;
-        Module.HEAPU32[(ptr >> 2) + 7] = dictHufPtr || 0;
-        return ptr;
+    const dictHuf = (opts && opts.dictHuf) || null;
+    if (dictHuf && dictHuf.length !== ZXC_HUF_TABLE_SIZE) {
+      throw new Error("ZXC: dictHuf must be exactly 128 bytes");
     }
+    return { dict: d, dictHuf };
+  }
 
-    /**
-     * Write a zxc_decompress_opts_t struct into WASM memory.
-     * @returns {number} Pointer to the struct (caller must free).
-     */
-    function _writeDecompressOpts(checksum, dictPtr, dictSize, dictHufPtr) {
-        const ptr = _malloc(DECOMPRESS_OPTS_SIZE);
-        // Zero-fill covers n_threads (0), progress_cb (20) and user_data (24).
-        Module.HEAPU8.fill(0, ptr, ptr + DECOMPRESS_OPTS_SIZE);
-        // checksum_enabled (offset 4)
-        Module.HEAP32[(ptr >> 2) + 1] = checksum ? 1 : 0;
-        // dict (offset 8), dict_size (offset 12), dict_huf (offset 16)
-        Module.HEAPU32[(ptr >> 2) + 2] = dictPtr || 0;
-        Module.HEAPU32[(ptr >> 2) + 3] = dictSize || 0;
-        Module.HEAPU32[(ptr >> 2) + 4] = dictHufPtr || 0;
-        return ptr;
+  /**
+   * Compress a Uint8Array.
+   *
+   * @param {Uint8Array} data - Input data to compress.
+   * @param {object} [opts] - Options.
+   * @param {number} [opts.level=3] - Compression level (1-7).
+   * @param {boolean} [opts.checksum=false] - Enable checksums.
+   * @param {boolean} [opts.seekable=false] - Append seek table for random-access.
+   * @param {Dictionary|Uint8Array} [opts.dict] - A {@link Dictionary}, or raw
+   *   pre-trained dictionary content.
+   * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table
+   *   (128 bytes, from {@link trainDictHuf} or {@link dictHuf}); ignored
+   *   without `opts.dict`, redundant with a {@link Dictionary}.
+   * @returns {Uint8Array} Compressed data.
+   * @throws {Error} On compression failure.
+   */
+  function compress(data, opts) {
+    const level = (opts && opts.level) || _default_level();
+    const checksum = (opts && opts.checksum) || false;
+    const seekable = (opts && opts.seekable) || false;
+    const { dict, dictHuf } = _splitDictOption(opts);
+
+    const bound = _compress_bound(data.length);
+    if (bound === 0) throw new Error("ZXC: compress_bound returned 0");
+
+    const srcPtr = _malloc(data.length);
+    const dstPtr = _malloc(bound);
+    const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
+    if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
+    const dictHufPtr = dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
+    if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
+    const optsPtr = _writeCompressOpts(
+      level,
+      checksum,
+      seekable,
+      dictPtr,
+      dict ? dict.length : 0,
+      dictHufPtr,
+    );
+
+    try {
+      Module.HEAPU8.set(data, srcPtr);
+      const result = _compress(srcPtr, data.length, dstPtr, bound, optsPtr);
+      if (result < 0) {
+        throw new Error(
+          `ZXC compress error: ${_error_name(result)} (${result})`,
+        );
+      }
+      return new Uint8Array(Module.HEAPU8.buffer, dstPtr, result).slice();
+    } finally {
+      _free(srcPtr);
+      _free(dstPtr);
+      _free(optsPtr);
+      if (dictPtr) _free(dictPtr);
+      if (dictHufPtr) _free(dictHufPtr);
     }
+  }
 
-    // --- Public API ----------------------------------------------------------
+  /**
+   * Decompress a Uint8Array.
+   *
+   * @param {Uint8Array} data - Compressed data.
+   * @param {object} [opts] - Options.
+   * @param {boolean} [opts.checksum=false] - Verify checksums.
+   * @param {Dictionary|Uint8Array} [opts.dict] - A {@link Dictionary}, or raw
+   *   pre-trained dictionary content.
+   * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table
+   *   (128 bytes) when the archive was compressed with one; redundant with a
+   *   {@link Dictionary}.
+   * @returns {Uint8Array} Decompressed data.
+   * @throws {Error} On decompression failure.
+   */
+  function decompress(data, opts) {
+    const checksum = (opts && opts.checksum) || false;
+    const { dict, dictHuf } = _splitDictOption(opts);
 
-    /**
-     * Accept a {@link Dictionary} or raw `(dict, dictHuf)` pieces in options.
-     * @returns {{dict: Uint8Array|null, dictHuf: Uint8Array|null}}
-     */
-    function _splitDictOption(opts) {
-        const d = (opts && opts.dict) || null;
-        if (d instanceof Dictionary) {
-            return { dict: d.content, dictHuf: d.huf };
-        }
-        const dictHuf = (opts && opts.dictHuf) || null;
-        if (dictHuf && dictHuf.length !== ZXC_HUF_TABLE_SIZE) {
-            throw new Error('ZXC: dictHuf must be exactly 128 bytes');
-        }
-        return { dict: d, dictHuf };
+    // Read decompressed size from footer
+    const srcPtr = _malloc(data.length);
+    Module.HEAPU8.set(data, srcPtr);
+
+    const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
+    if (origSize > 0x7fffffff) {
+      // A wasm32 heap cannot address it; fail clearly instead of
+      // aborting inside malloc.
+      _free(srcPtr);
+      throw new Error(
+        `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
+      );
     }
+    const dstPtr = _malloc(origSize || 1);
+    const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
+    if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
+    const dictHufPtr = dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
+    if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
+    const optsPtr = _writeDecompressOpts(
+      checksum,
+      dictPtr,
+      dict ? dict.length : 0,
+      dictHufPtr,
+    );
 
-    /**
-     * Compress a Uint8Array.
-     *
-     * @param {Uint8Array} data - Input data to compress.
-     * @param {object} [opts] - Options.
-     * @param {number} [opts.level=3] - Compression level (1-7).
-     * @param {boolean} [opts.checksum=false] - Enable checksums.
-     * @param {boolean} [opts.seekable=false] - Append seek table for random-access.
-     * @param {Dictionary|Uint8Array} [opts.dict] - A {@link Dictionary}, or raw
-     *   pre-trained dictionary content.
-     * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table
-     *   (128 bytes, from {@link trainDictHuf} or {@link dictHuf}); ignored
-     *   without `opts.dict`, redundant with a {@link Dictionary}.
-     * @returns {Uint8Array} Compressed data.
-     * @throws {Error} On compression failure.
-     */
-    function compress(data, opts) {
-        const level    = (opts && opts.level)    || _default_level();
-        const checksum = (opts && opts.checksum) || false;
-        const seekable = (opts && opts.seekable) || false;
-        const { dict, dictHuf } = _splitDictOption(opts);
+    try {
+      const result = _decompress(
+        srcPtr,
+        data.length,
+        dstPtr,
+        origSize,
+        optsPtr,
+      );
+      if (result < 0) {
+        throw new Error(
+          `ZXC decompress error: ${_error_name(result)} (${result})`,
+        );
+      }
+      return new Uint8Array(Module.HEAPU8.buffer, dstPtr, result).slice();
+    } finally {
+      _free(srcPtr);
+      _free(dstPtr);
+      _free(optsPtr);
+      if (dictPtr) _free(dictPtr);
+      if (dictHufPtr) _free(dictHufPtr);
+    }
+  }
 
+  /**
+   * Returns the maximum compressed output size for a given input size.
+   * @param {number} inputSize
+   * @returns {number}
+   */
+  function compressBound(inputSize) {
+    return _compress_bound(inputSize);
+  }
+
+  /**
+   * Reads the decompressed size from a compressed buffer without decompressing.
+   * @param {Uint8Array} data - Compressed data.
+   * @returns {number} Original uncompressed size, or 0 if invalid.
+   */
+  function getDecompressedSize(data) {
+    const ptr = _malloc(data.length);
+    try {
+      Module.HEAPU8.set(data, ptr);
+      return _u64(_get_decompressed_size(ptr, data.length));
+    } finally {
+      _free(ptr);
+    }
+  }
+
+  /**
+   * Create a reusable compression context for high-frequency usage.
+   * Call .free() when done to release WASM memory.
+   *
+   * @param {object} [opts] - Default options.
+   * @param {number} [opts.level=3] - Default compression level.
+   * @param {boolean} [opts.checksum=false] - Default checksum setting.
+   * @returns {{ compress: Function, free: Function }}
+   */
+  function createCompressContext(opts) {
+    const level = (opts && opts.level) || _default_level();
+    const checksum = (opts && opts.checksum) || false;
+    const seekable = (opts && opts.seekable) || false;
+
+    const optsPtr = _writeCompressOpts(level, checksum, seekable);
+    let cctx = _create_cctx(optsPtr);
+    _free(optsPtr);
+
+    if (cctx === 0)
+      throw new Error("ZXC: failed to create compression context");
+
+    return {
+      /**
+       * Compress data using this reusable context.
+       * @param {Uint8Array} data
+       * @returns {Uint8Array}
+       */
+      compress(data) {
         const bound = _compress_bound(data.length);
-        if (bound === 0) throw new Error('ZXC: compress_bound returned 0');
-
         const srcPtr = _malloc(data.length);
         const dstPtr = _malloc(bound);
-        const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
-        if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
-        const dictHufPtr = dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
-        if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
-        const optsPtr = _writeCompressOpts(level, checksum, seekable,
-            dictPtr, dict ? dict.length : 0, dictHufPtr);
-
         try {
-            Module.HEAPU8.set(data, srcPtr);
-            const result = _compress(srcPtr, data.length, dstPtr, bound, optsPtr);
-            if (result < 0) {
-                throw new Error(`ZXC compress error: ${_error_name(result)} (${result})`);
-            }
-            return new Uint8Array(Module.HEAPU8.buffer, dstPtr, result).slice();
+          Module.HEAPU8.set(data, srcPtr);
+          const result = _compress_cctx(
+            cctx,
+            srcPtr,
+            data.length,
+            dstPtr,
+            bound,
+            0,
+          );
+          if (result < 0) {
+            throw new Error(
+              `ZXC cctx compress error: ${_error_name(result)} (${result})`,
+            );
+          }
+          return new Uint8Array(Module.HEAPU8.buffer, dstPtr, result).slice();
         } finally {
-            _free(srcPtr);
-            _free(dstPtr);
-            _free(optsPtr);
-            if (dictPtr) _free(dictPtr);
-            if (dictHufPtr) _free(dictHufPtr);
+          _free(srcPtr);
+          _free(dstPtr);
         }
-    }
+      },
+      /** Free the context and release WASM memory. Idempotent. */
+      free() {
+        if (!cctx) return;
+        _free_cctx(cctx);
+        cctx = 0;
+      },
+    };
+  }
 
-    /**
-     * Decompress a Uint8Array.
-     *
-     * @param {Uint8Array} data - Compressed data.
-     * @param {object} [opts] - Options.
-     * @param {boolean} [opts.checksum=false] - Verify checksums.
-     * @param {Dictionary|Uint8Array} [opts.dict] - A {@link Dictionary}, or raw
-     *   pre-trained dictionary content.
-     * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table
-     *   (128 bytes) when the archive was compressed with one; redundant with a
-     *   {@link Dictionary}.
-     * @returns {Uint8Array} Decompressed data.
-     * @throws {Error} On decompression failure.
-     */
-    function decompress(data, opts) {
-        const checksum = (opts && opts.checksum) || false;
-        const { dict, dictHuf } = _splitDictOption(opts);
+  /**
+   * Create a reusable decompression context for high-frequency usage.
+   * Call .free() when done to release WASM memory.
+   *
+   * @returns {{ decompress: Function, free: Function }}
+   */
+  function createDecompressContext() {
+    let dctx = _create_dctx();
+    if (dctx === 0)
+      throw new Error("ZXC: failed to create decompression context");
 
-        // Read decompressed size from footer
+    return {
+      /**
+       * Decompress data using this reusable context.
+       * @param {Uint8Array} data
+       * @returns {Uint8Array}
+       */
+      decompress(data) {
         const srcPtr = _malloc(data.length);
         Module.HEAPU8.set(data, srcPtr);
-
         const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
-        if (origSize > 0x7FFFFFFF) {
-            // A wasm32 heap cannot address it; fail clearly instead of
-            // aborting inside malloc.
-            _free(srcPtr);
-            throw new Error(
-                `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`);
+        if (origSize > 0x7fffffff) {
+          _free(srcPtr);
+          throw new Error(
+            `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
+          );
         }
         const dstPtr = _malloc(origSize || 1);
-        const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
-        if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
-        const dictHufPtr = dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
-        if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
-        const optsPtr = _writeDecompressOpts(checksum, dictPtr, dict ? dict.length : 0,
-            dictHufPtr);
-
         try {
-            const result = _decompress(srcPtr, data.length, dstPtr, origSize, optsPtr);
-            if (result < 0) {
-                throw new Error(`ZXC decompress error: ${_error_name(result)} (${result})`);
-            }
-            return new Uint8Array(Module.HEAPU8.buffer, dstPtr, result).slice();
+          const result = _decompress_dctx(
+            dctx,
+            srcPtr,
+            data.length,
+            dstPtr,
+            origSize,
+            0,
+          );
+          if (result < 0) {
+            throw new Error(
+              `ZXC dctx decompress error: ${_error_name(result)} (${result})`,
+            );
+          }
+          return new Uint8Array(Module.HEAPU8.buffer, dstPtr, result).slice();
         } finally {
-            _free(srcPtr);
-            _free(dstPtr);
-            _free(optsPtr);
-            if (dictPtr) _free(dictPtr);
-            if (dictHufPtr) _free(dictHufPtr);
+          _free(srcPtr);
+          _free(dstPtr);
         }
+      },
+      /** Free the context and release WASM memory. Idempotent. */
+      free() {
+        if (!dctx) return;
+        _free_dctx(dctx);
+        dctx = 0;
+      },
+    };
+  }
+
+  // --- Push streaming helpers ----------------------------------------------
+
+  /** Write a zxc_inbuf_t at `bufPtr` pointing to `srcPtr` (size bytes, pos=0). */
+  function _writeInbuf(bufPtr, srcPtr, size) {
+    Module.HEAP32[(bufPtr >> 2) + 0] = srcPtr;
+    Module.HEAPU32[(bufPtr >> 2) + 1] = size;
+    Module.HEAPU32[(bufPtr >> 2) + 2] = 0;
+  }
+  /** Write a zxc_outbuf_t at `bufPtr` pointing to `dstPtr` (size bytes, pos=0). */
+  function _writeOutbuf(bufPtr, dstPtr, size) {
+    Module.HEAP32[(bufPtr >> 2) + 0] = dstPtr;
+    Module.HEAPU32[(bufPtr >> 2) + 1] = size;
+    Module.HEAPU32[(bufPtr >> 2) + 2] = 0;
+  }
+  function _readPos(bufPtr) {
+    return Module.HEAPU32[(bufPtr >> 2) + 2];
+  }
+
+  /* Concatenate JS-side slices into a single Uint8Array. A single chunk is
+   * the common case (the staging buffer holds a full block): return it
+   * as-is and skip the concat copy (chunks are already heap-independent
+   * .slice() copies). */
+  function _concatChunks(chunks, totalLen) {
+    if (chunks.length === 1) return chunks[0];
+    const out = new Uint8Array(totalLen);
+    let off = 0;
+    for (const c of chunks) {
+      out.set(c, off);
+      off += c.length;
+    }
+    return out;
+  }
+
+  /**
+   * Create a push-based, single-threaded compression stream.
+   * @param {object} [opts]
+   * @param {number} [opts.level=3]
+   * @param {boolean} [opts.checksum=false]
+   * @returns {{ compress(Uint8Array): Uint8Array, end(): Uint8Array, free(): void, inSize(): number, outSize(): number }}
+   */
+  function createCStream(opts) {
+    const level = (opts && opts.level) || _default_level();
+    const checksum = (opts && opts.checksum) || false;
+
+    const optsPtr = _writeCompressOpts(level, checksum, false);
+    let cs = _cstream_create(optsPtr);
+    _free(optsPtr);
+    if (cs === 0) throw new Error("ZXC: failed to create cstream");
+
+    // Reusable scratch buffers in the WASM heap. The compress/end calls
+    // never reallocate, so these pointers stay valid for the stream's
+    // lifetime even if the heap grows (cwrap re-reads HEAPU8 internally).
+    const inDescPtr = _malloc(IO_BUF_SIZE);
+    const outDescPtr = _malloc(IO_BUF_SIZE);
+    const stageCap = Math.max(_cstream_out_size(cs), 64 * 1024);
+    const stagePtr = _malloc(stageCap);
+
+    function drainCompress(srcPtr, srcLen) {
+      const chunks = [];
+      let total = 0;
+      _writeInbuf(inDescPtr, srcPtr, srcLen);
+      for (;;) {
+        _writeOutbuf(outDescPtr, stagePtr, stageCap);
+        const r = _cstream_compress(cs, outDescPtr, inDescPtr);
+        if (r < 0) {
+          throw new Error(
+            `ZXC cstream compress error: ${_error_name(r)} (${r})`,
+          );
+        }
+        const produced = _readPos(outDescPtr);
+        if (produced > 0) {
+          chunks.push(
+            new Uint8Array(Module.HEAPU8.buffer, stagePtr, produced).slice(),
+          );
+          total += produced;
+        }
+        if (r === 0 && _readPos(inDescPtr) === srcLen) break;
+      }
+      return _concatChunks(chunks, total);
     }
 
-    /**
-     * Returns the maximum compressed output size for a given input size.
-     * @param {number} inputSize
-     * @returns {number}
-     */
-    function compressBound(inputSize) {
-        return _compress_bound(inputSize);
+    function drainEnd() {
+      const chunks = [];
+      let total = 0;
+      for (;;) {
+        _writeOutbuf(outDescPtr, stagePtr, stageCap);
+        const r = _cstream_end(cs, outDescPtr);
+        if (r < 0) {
+          throw new Error(`ZXC cstream end error: ${_error_name(r)} (${r})`);
+        }
+        const produced = _readPos(outDescPtr);
+        if (produced > 0) {
+          chunks.push(
+            new Uint8Array(Module.HEAPU8.buffer, stagePtr, produced).slice(),
+          );
+          total += produced;
+        }
+        if (r === 0) break;
+      }
+      return _concatChunks(chunks, total);
     }
 
-    /**
-     * Reads the decompressed size from a compressed buffer without decompressing.
-     * @param {Uint8Array} data - Compressed data.
-     * @returns {number} Original uncompressed size, or 0 if invalid.
-     */
-    function getDecompressedSize(data) {
-        const ptr = _malloc(data.length);
+    return {
+      /** Push input and return any compressed bytes produced. */
+      compress(data) {
+        if (data.length === 0) return drainCompress(stagePtr, 0);
+        const srcPtr = _malloc(data.length);
         try {
-            Module.HEAPU8.set(data, ptr);
-            return _u64(_get_decompressed_size(ptr, data.length));
+          Module.HEAPU8.set(data, srcPtr);
+          return drainCompress(srcPtr, data.length);
         } finally {
-            _free(ptr);
+          _free(srcPtr);
         }
-    }
+      },
+      /** Finalise: residual block + EOF + footer. */
+      end() {
+        return drainEnd();
+      },
+      /** Free the stream and its scratch buffers. Idempotent. */
+      free() {
+        if (!cs) return;
+        _cstream_free(cs);
+        _free(inDescPtr);
+        _free(outDescPtr);
+        _free(stagePtr);
+        cs = 0;
+      },
+      inSize() {
+        return _cstream_in_size(cs);
+      },
+      outSize() {
+        return _cstream_out_size(cs);
+      },
+    };
+  }
 
-    /**
-     * Create a reusable compression context for high-frequency usage.
-     * Call .free() when done to release WASM memory.
-     *
-     * @param {object} [opts] - Default options.
-     * @param {number} [opts.level=3] - Default compression level.
-     * @param {boolean} [opts.checksum=false] - Default checksum setting.
-     * @returns {{ compress: Function, free: Function }}
-     */
-    function createCompressContext(opts) {
-        const level    = (opts && opts.level)    || _default_level();
-        const checksum = (opts && opts.checksum) || false;
-        const seekable = (opts && opts.seekable) || false;
+  /**
+   * Create a push-based, single-threaded decompression stream.
+   * @param {object} [opts]
+   * @param {boolean} [opts.checksum=false]
+   * @returns {{ decompress(Uint8Array): Uint8Array, finished(): boolean, free(): void, inSize(): number, outSize(): number }}
+   */
+  function createDStream(opts) {
+    const checksum = (opts && opts.checksum) || false;
+    const optsPtr = _writeDecompressOpts(checksum);
+    let ds = _dstream_create(optsPtr);
+    _free(optsPtr);
+    if (ds === 0) throw new Error("ZXC: failed to create dstream");
 
-        const optsPtr = _writeCompressOpts(level, checksum, seekable);
-        let cctx = _create_cctx(optsPtr);
-        _free(optsPtr);
+    const inDescPtr = _malloc(IO_BUF_SIZE);
+    const outDescPtr = _malloc(IO_BUF_SIZE);
+    const stageCap = Math.max(_dstream_out_size(ds), 4096);
+    const stagePtr = _malloc(stageCap);
 
-        if (cctx === 0) throw new Error('ZXC: failed to create compression context');
-
-        return {
-            /**
-             * Compress data using this reusable context.
-             * @param {Uint8Array} data
-             * @returns {Uint8Array}
-             */
-            compress(data) {
-                const bound = _compress_bound(data.length);
-                const srcPtr = _malloc(data.length);
-                const dstPtr = _malloc(bound);
-                try {
-                    Module.HEAPU8.set(data, srcPtr);
-                    const result = _compress_cctx(cctx, srcPtr, data.length, dstPtr, bound, 0);
-                    if (result < 0) {
-                        throw new Error(`ZXC cctx compress error: ${_error_name(result)} (${result})`);
-                    }
-                    return new Uint8Array(Module.HEAPU8.buffer, dstPtr, result).slice();
-                } finally {
-                    _free(srcPtr);
-                    _free(dstPtr);
-                }
-            },
-            /** Free the context and release WASM memory. Idempotent. */
-            free() {
-                if (!cctx) return;
-                _free_cctx(cctx);
-                cctx = 0;
-            }
-        };
-    }
-
-    /**
-     * Create a reusable decompression context for high-frequency usage.
-     * Call .free() when done to release WASM memory.
-     *
-     * @returns {{ decompress: Function, free: Function }}
-     */
-    function createDecompressContext() {
-        let dctx = _create_dctx();
-        if (dctx === 0) throw new Error('ZXC: failed to create decompression context');
-
-        return {
-            /**
-             * Decompress data using this reusable context.
-             * @param {Uint8Array} data
-             * @returns {Uint8Array}
-             */
-            decompress(data) {
-                const srcPtr = _malloc(data.length);
-                Module.HEAPU8.set(data, srcPtr);
-                const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
-                if (origSize > 0x7FFFFFFF) {
-                    _free(srcPtr);
-                    throw new Error(
-                        `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`);
-                }
-                const dstPtr = _malloc(origSize || 1);
-                try {
-                    const result = _decompress_dctx(dctx, srcPtr, data.length, dstPtr, origSize, 0);
-                    if (result < 0) {
-                        throw new Error(`ZXC dctx decompress error: ${_error_name(result)} (${result})`);
-                    }
-                    return new Uint8Array(Module.HEAPU8.buffer, dstPtr, result).slice();
-                } finally {
-                    _free(srcPtr);
-                    _free(dstPtr);
-                }
-            },
-            /** Free the context and release WASM memory. Idempotent. */
-            free() {
-                if (!dctx) return;
-                _free_dctx(dctx);
-                dctx = 0;
-            }
-        };
-    }
-
-    // --- Push streaming helpers ----------------------------------------------
-
-    /** Write a zxc_inbuf_t at `bufPtr` pointing to `srcPtr` (size bytes, pos=0). */
-    function _writeInbuf(bufPtr, srcPtr, size) {
-        Module.HEAP32[(bufPtr >> 2) + 0] = srcPtr;
-        Module.HEAPU32[(bufPtr >> 2) + 1] = size;
-        Module.HEAPU32[(bufPtr >> 2) + 2] = 0;
-    }
-    /** Write a zxc_outbuf_t at `bufPtr` pointing to `dstPtr` (size bytes, pos=0). */
-    function _writeOutbuf(bufPtr, dstPtr, size) {
-        Module.HEAP32[(bufPtr >> 2) + 0] = dstPtr;
-        Module.HEAPU32[(bufPtr >> 2) + 1] = size;
-        Module.HEAPU32[(bufPtr >> 2) + 2] = 0;
-    }
-    function _readPos(bufPtr) {
-        return Module.HEAPU32[(bufPtr >> 2) + 2];
-    }
-
-    /* Concatenate JS-side slices into a single Uint8Array. A single chunk is
-     * the common case (the staging buffer holds a full block): return it
-     * as-is and skip the concat copy (chunks are already heap-independent
-     * .slice() copies). */
-    function _concatChunks(chunks, totalLen) {
-        if (chunks.length === 1) return chunks[0];
-        const out = new Uint8Array(totalLen);
-        let off = 0;
-        for (const c of chunks) {
-            out.set(c, off);
-            off += c.length;
-        }
-        return out;
-    }
-
-    /**
-     * Create a push-based, single-threaded compression stream.
-     * @param {object} [opts]
-     * @param {number} [opts.level=3]
-     * @param {boolean} [opts.checksum=false]
-     * @returns {{ compress(Uint8Array): Uint8Array, end(): Uint8Array, free(): void, inSize(): number, outSize(): number }}
-     */
-    function createCStream(opts) {
-        const level    = (opts && opts.level)    || _default_level();
-        const checksum = (opts && opts.checksum) || false;
-
-        const optsPtr = _writeCompressOpts(level, checksum, false);
-        let cs = _cstream_create(optsPtr);
-        _free(optsPtr);
-        if (cs === 0) throw new Error('ZXC: failed to create cstream');
-
-        // Reusable scratch buffers in the WASM heap. The compress/end calls
-        // never reallocate, so these pointers stay valid for the stream's
-        // lifetime even if the heap grows (cwrap re-reads HEAPU8 internally).
-        const inDescPtr  = _malloc(IO_BUF_SIZE);
-        const outDescPtr = _malloc(IO_BUF_SIZE);
-        const stageCap   = Math.max(_cstream_out_size(cs), 64 * 1024);
-        const stagePtr   = _malloc(stageCap);
-
-        function drainCompress(srcPtr, srcLen) {
-            const chunks = [];
-            let total = 0;
-            _writeInbuf(inDescPtr, srcPtr, srcLen);
-            for (;;) {
-                _writeOutbuf(outDescPtr, stagePtr, stageCap);
-                const r = _cstream_compress(cs, outDescPtr, inDescPtr);
-                if (r < 0) {
-                    throw new Error(`ZXC cstream compress error: ${_error_name(r)} (${r})`);
-                }
-                const produced = _readPos(outDescPtr);
-                if (produced > 0) {
-                    chunks.push(new Uint8Array(Module.HEAPU8.buffer, stagePtr, produced).slice());
-                    total += produced;
-                }
-                if (r === 0 && _readPos(inDescPtr) === srcLen) break;
-            }
-            return _concatChunks(chunks, total);
-        }
-
-        function drainEnd() {
-            const chunks = [];
-            let total = 0;
-            for (;;) {
-                _writeOutbuf(outDescPtr, stagePtr, stageCap);
-                const r = _cstream_end(cs, outDescPtr);
-                if (r < 0) {
-                    throw new Error(`ZXC cstream end error: ${_error_name(r)} (${r})`);
-                }
-                const produced = _readPos(outDescPtr);
-                if (produced > 0) {
-                    chunks.push(new Uint8Array(Module.HEAPU8.buffer, stagePtr, produced).slice());
-                    total += produced;
-                }
-                if (r === 0) break;
-            }
-            return _concatChunks(chunks, total);
-        }
-
-        return {
-            /** Push input and return any compressed bytes produced. */
-            compress(data) {
-                if (data.length === 0) return drainCompress(stagePtr, 0);
-                const srcPtr = _malloc(data.length);
-                try {
-                    Module.HEAPU8.set(data, srcPtr);
-                    return drainCompress(srcPtr, data.length);
-                } finally {
-                    _free(srcPtr);
-                }
-            },
-            /** Finalise: residual block + EOF + footer. */
-            end() {
-                return drainEnd();
-            },
-            /** Free the stream and its scratch buffers. Idempotent. */
-            free() {
-                if (!cs) return;
-                _cstream_free(cs);
-                _free(inDescPtr);
-                _free(outDescPtr);
-                _free(stagePtr);
-                cs = 0;
-            },
-            inSize()  { return _cstream_in_size(cs); },
-            outSize() { return _cstream_out_size(cs); }
-        };
-    }
-
-    /**
-     * Create a push-based, single-threaded decompression stream.
-     * @param {object} [opts]
-     * @param {boolean} [opts.checksum=false]
-     * @returns {{ decompress(Uint8Array): Uint8Array, finished(): boolean, free(): void, inSize(): number, outSize(): number }}
-     */
-    function createDStream(opts) {
-        const checksum = (opts && opts.checksum) || false;
-        const optsPtr  = _writeDecompressOpts(checksum);
-        let ds = _dstream_create(optsPtr);
-        _free(optsPtr);
-        if (ds === 0) throw new Error('ZXC: failed to create dstream');
-
-        const inDescPtr  = _malloc(IO_BUF_SIZE);
-        const outDescPtr = _malloc(IO_BUF_SIZE);
-        const stageCap   = Math.max(_dstream_out_size(ds), 4096);
-        const stagePtr   = _malloc(stageCap);
-
-        return {
-            /** Push compressed bytes; return any decompressed bytes produced. */
-            decompress(data) {
-                const srcPtr = data.length > 0 ? _malloc(data.length) : 0;
-                try {
-                    if (srcPtr) Module.HEAPU8.set(data, srcPtr);
-                    _writeInbuf(inDescPtr, srcPtr, data.length);
-
-                    const chunks = [];
-                    let total = 0;
-                    let exhausted = data.length === 0;
-                    for (;;) {
-                        const beforeIn = _readPos(inDescPtr);
-                        _writeOutbuf(outDescPtr, stagePtr, stageCap);
-                        const r = _dstream_decompress(ds, outDescPtr, inDescPtr);
-                        if (r < 0) {
-                            throw new Error(`ZXC dstream error: ${_error_name(r)} (${r})`);
-                        }
-                        const produced = _readPos(outDescPtr);
-                        if (produced > 0) {
-                            chunks.push(new Uint8Array(Module.HEAPU8.buffer, stagePtr, produced).slice());
-                            total += produced;
-                        }
-                        const afterIn = _readPos(inDescPtr);
-                        // Stop only when the call made no progress at all
-                        // (no input consumed AND no output produced).
-                        if (afterIn === beforeIn && produced === 0) break;
-                        if (!exhausted && afterIn === data.length) {
-                            _writeInbuf(inDescPtr, 0, 0);
-                            exhausted = true;
-                        }
-                    }
-                    return _concatChunks(chunks, total);
-                } finally {
-                    if (srcPtr) _free(srcPtr);
-                }
-            },
-            /** True iff the file footer has been consumed and validated. */
-            finished() { return _dstream_finished(ds) !== 0; },
-            /** Free the stream and its scratch buffers. Idempotent. */
-            free() {
-                if (!ds) return;
-                _dstream_free(ds);
-                _free(inDescPtr);
-                _free(outDescPtr);
-                _free(stagePtr);
-                ds = 0;
-            },
-            inSize()  { return _dstream_in_size(ds); },
-            outSize() { return _dstream_out_size(ds); }
-        };
-    }
-
-    // --- Seekable API --------------------------------------------------------
-
-    /**
-     * Open a seekable ZXC archive for random-access decompression.
-     *
-     * The compressed buffer is copied into the WASM heap and held alive
-     * for the lifetime of the handle. Call `.free()` to release both the
-     * native handle and the WASM-side copy.
-     *
-     * Throws on invalid archives (bad magic, truncated seek table, ...).
-     *
-     * @param {Uint8Array} data - Compressed buffer, ideally produced with
-     *        `{ seekable: true }` so it carries an embedded seek table.
-     * @returns {{
-     *   numBlocks(): number,
-     *   decompressedSize(): number,
-     *   blockCompressedSize(idx: number): (number | null),
-     *   blockDecompressedSize(idx: number): (number | null),
-     *   decompressRange(offset: number, length: number): Uint8Array,
-     *   free(): void
-     * }}
-     */
-    function createSeekable(data) {
-        if (!data || data.length === 0) {
-            throw new Error('ZXC: createSeekable requires a non-empty buffer');
-        }
-
-        const srcLen = data.length;
-        const srcPtr = _malloc(srcLen);
-        if (!srcPtr) throw new Error('ZXC: malloc failed for seekable buffer');
-        Module.HEAPU8.set(data, srcPtr);
-
-        let handle = _seekable_open(srcPtr, srcLen);
-        if (handle === 0) {
-            _free(srcPtr);
-            throw new Error('ZXC: invalid seekable archive');
-        }
-
-        return {
-            numBlocks() { return _seekable_num_blocks(handle); },
-            decompressedSize() { return _u64(_seekable_decompressed_size(handle)); },
-            blockCompressedSize(idx) {
-                if (idx < 0 || idx >= _seekable_num_blocks(handle)) return null;
-                return _seekable_block_comp_size(handle, idx);
-            },
-            blockDecompressedSize(idx) {
-                if (idx < 0 || idx >= _seekable_num_blocks(handle)) return null;
-                return _seekable_block_decomp_size(handle, idx);
-            },
-            /**
-             * Attach a pre-trained dictionary to this seekable handle.
-             * Must be called before any decompressRange() call.
-             *
-             * When the archive was compressed with a shared literal Huffman
-             * table (or with a {@link Dictionary}), the same table must be
-             * supplied: the archive's dict_id binds the (content, table)
-             * pair, so content alone would be rejected with DICT_MISMATCH.
-             *
-             * @param {Dictionary|Uint8Array} dict - A {@link Dictionary}, or
-             *        raw dictionary content.
-             * @param {Uint8Array} [dictHuf] - Shared literal Huffman table
-             *        (128 bytes); redundant when `dict` is a {@link Dictionary}.
-             */
-            setDict(dict, dictHuf) {
-                if (dict instanceof Dictionary) {
-                    dictHuf = dict.huf;
-                    dict = dict.content;
-                }
-                if (!dict || dict.length === 0) {
-                    throw new Error('ZXC: setDict requires a non-empty dictionary');
-                }
-                if (dictHuf && dictHuf.length !== ZXC_HUF_TABLE_SIZE) {
-                    throw new Error('ZXC: dictHuf must be exactly 128 bytes');
-                }
-                const dictPtr = _malloc(dict.length);
-                if (!dictPtr) throw new Error('ZXC: malloc failed for dictionary');
-                const hufPtr = dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
-                try {
-                    Module.HEAPU8.set(dict, dictPtr);
-                    if (hufPtr) Module.HEAPU8.set(dictHuf, hufPtr);
-                    const r = _seekable_set_dict(handle, dictPtr, dict.length, hufPtr);
-                    if (r < 0) {
-                        throw new Error(`ZXC seekable set_dict error: ${_error_name(r)} (${r})`);
-                    }
-                } finally {
-                    _free(dictPtr);
-                    if (hufPtr) _free(hufPtr);
-                }
-            },
-            decompressRange(offset, length) {
-                if (length < 0) throw new Error('ZXC: length must be non-negative');
-                // The wasm shim carries the offset as a uint32 (no BigInt);
-                // values outside [0, 2^32-1] would silently wrap and return
-                // data from the wrong position.
-                if (!Number.isInteger(offset) || offset < 0 || offset > 0xFFFFFFFF) {
-                    throw new Error('ZXC: offset must be an integer in [0, 2^32-1]');
-                }
-                if (length === 0) return new Uint8Array(0);
-                const dstPtr = _malloc(length);
-                if (!dstPtr) throw new Error('ZXC: malloc failed for output buffer');
-                try {
-                    const r = _seekable_decompress_range(handle, dstPtr, length, offset, length);
-                    if (r < 0) {
-                        throw new Error(`ZXC seekable decompress error: ${_error_name(r)} (${r})`);
-                    }
-                    return new Uint8Array(Module.HEAPU8.buffer, dstPtr, r).slice();
-                } finally {
-                    _free(dstPtr);
-                }
-            },
-            /** Release the native handle and the WASM-side copy. Idempotent. */
-            free() {
-                if (!handle) return;
-                _seekable_free(handle);
-                _free(srcPtr);
-                handle = 0;
-            },
-        };
-    }
-
-    /**
-     * Encoded byte size of a seek table covering `numBlocks` data blocks.
-     * Use this to size a destination buffer for [writeSeekTable].
-     * @param {number} numBlocks
-     * @returns {number}
-     */
-    function seekTableSize(numBlocks) {
-        return _seek_table_size(numBlocks >>> 0);
-    }
-
-    /**
-     * Low-level: write a seek table (header + entries) for the given
-     * per-block on-disk compressed sizes.
-     *
-     * Most callers do not need this directly; the buffer and streaming
-     * APIs emit a seek table when `seekable: true` is set.
-     *
-     * @param {ArrayLike<number>} compSizes - Per-block compressed sizes,
-     *        in order. Each entry is treated as an unsigned 32-bit value.
-     * @returns {Uint8Array} The encoded seek table.
-     */
-    function writeSeekTable(compSizes) {
-        if (!compSizes || compSizes.length === 0) {
-            throw new Error('ZXC: compSizes must be non-empty');
-        }
-        const numBlocks = compSizes.length;
-        const sz = _seek_table_size(numBlocks);
-        const dstPtr = _malloc(sz);
-        if (!dstPtr) throw new Error('ZXC: malloc failed for seek table');
-
-        const csPtr = _malloc(numBlocks * 4);
-        if (!csPtr) {
-            _free(dstPtr);
-            throw new Error('ZXC: malloc failed for compSizes scratch');
-        }
-
+    return {
+      /** Push compressed bytes; return any decompressed bytes produced. */
+      decompress(data) {
+        const srcPtr = data.length > 0 ? _malloc(data.length) : 0;
         try {
-            for (let i = 0; i < numBlocks; i++) {
-                Module.HEAPU32[(csPtr >> 2) + i] = compSizes[i] >>> 0;
-            }
-            const r = _write_seek_table(dstPtr, sz, csPtr, numBlocks);
+          if (srcPtr) Module.HEAPU8.set(data, srcPtr);
+          _writeInbuf(inDescPtr, srcPtr, data.length);
+
+          const chunks = [];
+          let total = 0;
+          let exhausted = data.length === 0;
+          for (;;) {
+            const beforeIn = _readPos(inDescPtr);
+            _writeOutbuf(outDescPtr, stagePtr, stageCap);
+            const r = _dstream_decompress(ds, outDescPtr, inDescPtr);
             if (r < 0) {
-                throw new Error(`ZXC write_seek_table error: ${_error_name(r)} (${r})`);
+              throw new Error(`ZXC dstream error: ${_error_name(r)} (${r})`);
             }
-            return new Uint8Array(Module.HEAPU8.buffer, dstPtr, r).slice();
-        } finally {
-            _free(dstPtr);
-            _free(csPtr);
-        }
-    }
-
-    // --- Dictionary API ------------------------------------------------------
-
-    /**
-     * Train a dictionary from a corpus of samples.
-     *
-     * @param {Uint8Array[]} samples - Array of sample buffers (similar payloads).
-     * @param {number} [maxSize=65535] - Maximum dictionary size in bytes
-     *        (capped at ZXC_DICT_SIZE_MAX).
-     * @returns {Uint8Array} Raw trained dictionary content.
-     * @throws {Error} On training failure.
-     */
-    function trainDict(samples, maxSize = ZXC_DICT_SIZE_MAX) {
-        if (!samples || samples.length === 0) {
-            throw new Error('ZXC: trainDict requires at least one sample');
-        }
-        const cap = Math.min(maxSize >>> 0, ZXC_DICT_SIZE_MAX);
-        const n = samples.length;
-
-        // Heap arrays: pointers (4 bytes each) + sizes (size_t = 4 bytes on wasm32).
-        const ptrsPtr  = _malloc(n * 4);
-        const sizesPtr = _malloc(n * 4);
-        const samplePtrs = [];
-        const dictPtr = _malloc(cap);
-
-        try {
-            for (let i = 0; i < n; i++) {
-                const s = samples[i];
-                const sp = s.length > 0 ? _malloc(s.length) : _malloc(1);
-                if (s.length > 0) Module.HEAPU8.set(s, sp);
-                samplePtrs.push(sp);
-                Module.HEAPU32[(ptrsPtr >> 2) + i] = sp;
-                Module.HEAPU32[(sizesPtr >> 2) + i] = s.length;
+            const produced = _readPos(outDescPtr);
+            if (produced > 0) {
+              chunks.push(
+                new Uint8Array(
+                  Module.HEAPU8.buffer,
+                  stagePtr,
+                  produced,
+                ).slice(),
+              );
+              total += produced;
             }
-            const r = _train_dict(ptrsPtr, sizesPtr, n, dictPtr, cap);
-            if (r < 0) {
-                throw new Error(`ZXC train_dict error: ${_error_name(r)} (${r})`);
+            const afterIn = _readPos(inDescPtr);
+            // Stop only when the call made no progress at all
+            // (no input consumed AND no output produced).
+            if (afterIn === beforeIn && produced === 0) break;
+            if (!exhausted && afterIn === data.length) {
+              _writeInbuf(inDescPtr, 0, 0);
+              exhausted = true;
             }
-            return new Uint8Array(Module.HEAPU8.buffer, dictPtr, r).slice();
+          }
+          return _concatChunks(chunks, total);
         } finally {
-            for (const sp of samplePtrs) _free(sp);
-            _free(ptrsPtr);
-            _free(sizesPtr);
-            _free(dictPtr);
+          if (srcPtr) _free(srcPtr);
         }
+      },
+      /** True iff the file footer has been consumed and validated. */
+      finished() {
+        return _dstream_finished(ds) !== 0;
+      },
+      /** Free the stream and its scratch buffers. Idempotent. */
+      free() {
+        if (!ds) return;
+        _dstream_free(ds);
+        _free(inDescPtr);
+        _free(outDescPtr);
+        _free(stagePtr);
+        ds = 0;
+      },
+      inSize() {
+        return _dstream_in_size(ds);
+      },
+      outSize() {
+        return _dstream_out_size(ds);
+      },
+    };
+  }
+
+  // --- Seekable API --------------------------------------------------------
+
+  /**
+   * Open a seekable ZXC archive for random-access decompression.
+   *
+   * The compressed buffer is copied into the WASM heap and held alive
+   * for the lifetime of the handle. Call `.free()` to release both the
+   * native handle and the WASM-side copy.
+   *
+   * Throws on invalid archives (bad magic, truncated seek table, ...).
+   *
+   * @param {Uint8Array} data - Compressed buffer, ideally produced with
+   *        `{ seekable: true }` so it carries an embedded seek table.
+   * @returns {{
+   *   numBlocks(): number,
+   *   decompressedSize(): number,
+   *   blockCompressedSize(idx: number): (number | null),
+   *   blockDecompressedSize(idx: number): (number | null),
+   *   decompressRange(offset: number, length: number): Uint8Array,
+   *   free(): void
+   * }}
+   */
+  function createSeekable(data) {
+    if (!data || data.length === 0) {
+      throw new Error("ZXC: createSeekable requires a non-empty buffer");
     }
 
-    /* Shared helper: copy a Uint8Array into the heap and call an id getter. */
-    function _callIdOnBuffer(fn, data) {
-        if (!data || data.length === 0) return 0;
-        const ptr = _malloc(data.length);
-        try {
-            Module.HEAPU8.set(data, ptr);
-            return fn(ptr, data.length) >>> 0;
-        } finally {
-            _free(ptr);
-        }
+    const srcLen = data.length;
+    const srcPtr = _malloc(srcLen);
+    if (!srcPtr) throw new Error("ZXC: malloc failed for seekable buffer");
+    Module.HEAPU8.set(data, srcPtr);
+
+    let handle = _seekable_open(srcPtr, srcLen);
+    if (handle === 0) {
+      _free(srcPtr);
+      throw new Error("ZXC: invalid seekable archive");
     }
 
-    /**
-     * Compute the 32-bit dictionary ID for raw dictionary content.
-     * @param {Uint8Array} content
-     * @returns {number} Unsigned 32-bit ID (0 if empty).
-     */
-    function dictId(content) {
-        // Third arg: NULL huf table -> content-only id.
-        return _callIdOnBuffer((ptr, len) => _dict_id(ptr, len, 0), content);
-    }
-
-    /**
-     * Read the dictionary ID referenced by a compressed `.zxc` archive.
-     * @param {Uint8Array} archive
-     * @returns {number} Unsigned 32-bit ID (0 if no dictionary required).
-     */
-    function getDictId(archive) {
-        return _callIdOnBuffer(_get_dict_id, archive);
-    }
-
-    /**
-     * Read the dictionary ID stored in a serialized `.zxd` file buffer.
-     * @param {Uint8Array} zxd
-     * @returns {number} Unsigned 32-bit ID (0 if not a valid .zxd).
-     */
-    function dictGetId(zxd) {
-        return _callIdOnBuffer(_dict_get_id, zxd);
-    }
-
-    /**
-     * Serialize dictionary content and its shared literal Huffman table
-     * (128 bytes, from {@link trainDictHuf}) to the `.zxd` file format.
-     * The stored dictionary ID covers both content and table.
-     * @param {Uint8Array} content - Raw dictionary content.
-     * @param {Uint8Array} hufLengths - 128-byte packed code-lengths table.
-     * @returns {Uint8Array} The encoded `.zxd` file.
-     * @throws {Error} On failure.
-     */
-    function dictSave(content, hufLengths) {
-        if (!content || content.length === 0) {
-            throw new Error('ZXC: dictSave requires non-empty content');
-        }
-        if (!hufLengths || hufLengths.length !== ZXC_HUF_TABLE_SIZE) {
-            throw new Error('ZXC: dictSave requires a 128-byte hufLengths table');
-        }
-        const cap = _dict_save_bound(content.length);
-        const contentPtr = _malloc(content.length);
-        const hufPtr = _malloc(ZXC_HUF_TABLE_SIZE);
-        const bufPtr = _malloc(cap);
-        try {
-            Module.HEAPU8.set(content, contentPtr);
-            Module.HEAPU8.set(hufLengths, hufPtr);
-            const r = _dict_save(contentPtr, content.length, hufPtr, bufPtr, cap);
-            if (r < 0) {
-                throw new Error(`ZXC dict_save error: ${_error_name(r)} (${r})`);
-            }
-            return new Uint8Array(Module.HEAPU8.buffer, bufPtr, r).slice();
-        } finally {
-            _free(contentPtr);
-            _free(hufPtr);
-            _free(bufPtr);
-        }
-    }
-
-    /**
-     * Train the shared literal Huffman table for an already-trained
-     * dictionary (see {@link trainDict}).
-     * @param {Uint8Array[]} samples - Training corpus.
-     * @param {Uint8Array} dict - Trained dictionary content.
-     * @returns {Uint8Array} 128-byte packed table for {@link dictSave} /
-     *   `opts.dictHuf`.
-     * @throws {Error} On failure.
-     */
-    function trainDictHuf(samples, dict) {
-        if (!samples || samples.length === 0) {
-            throw new Error('ZXC: trainDictHuf requires at least one sample');
+    return {
+      numBlocks() {
+        return _seekable_num_blocks(handle);
+      },
+      decompressedSize() {
+        return _u64(_seekable_decompressed_size(handle));
+      },
+      blockCompressedSize(idx) {
+        if (idx < 0 || idx >= _seekable_num_blocks(handle)) return null;
+        return _seekable_block_comp_size(handle, idx);
+      },
+      blockDecompressedSize(idx) {
+        if (idx < 0 || idx >= _seekable_num_blocks(handle)) return null;
+        return _seekable_block_decomp_size(handle, idx);
+      },
+      /**
+       * Attach a pre-trained dictionary to this seekable handle.
+       * Must be called before any decompressRange() call.
+       *
+       * When the archive was compressed with a shared literal Huffman
+       * table (or with a {@link Dictionary}), the same table must be
+       * supplied: the archive's dict_id binds the (content, table)
+       * pair, so content alone would be rejected with DICT_MISMATCH.
+       *
+       * @param {Dictionary|Uint8Array} dict - A {@link Dictionary}, or
+       *        raw dictionary content.
+       * @param {Uint8Array} [dictHuf] - Shared literal Huffman table
+       *        (128 bytes); redundant when `dict` is a {@link Dictionary}.
+       */
+      setDict(dict, dictHuf) {
+        if (dict instanceof Dictionary) {
+          dictHuf = dict.huf;
+          dict = dict.content;
         }
         if (!dict || dict.length === 0) {
-            throw new Error('ZXC: trainDictHuf requires a non-empty dictionary');
+          throw new Error("ZXC: setDict requires a non-empty dictionary");
         }
-        const n = samples.length;
-        const ptrsPtr  = _malloc(n * 4);
-        const sizesPtr = _malloc(n * 4);
-        const samplePtrs = [];
+        if (dictHuf && dictHuf.length !== ZXC_HUF_TABLE_SIZE) {
+          throw new Error("ZXC: dictHuf must be exactly 128 bytes");
+        }
         const dictPtr = _malloc(dict.length);
-        const hufPtr = _malloc(ZXC_HUF_TABLE_SIZE);
+        if (!dictPtr) throw new Error("ZXC: malloc failed for dictionary");
+        const hufPtr = dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
         try {
-            for (let i = 0; i < n; i++) {
-                const sp = _malloc(samples[i].length || 1);
-                samplePtrs.push(sp);
-                if (samples[i].length > 0) Module.HEAPU8.set(samples[i], sp);
-                Module.HEAPU32[(ptrsPtr >> 2) + i]  = sp;
-                Module.HEAPU32[(sizesPtr >> 2) + i] = samples[i].length;
-            }
-            Module.HEAPU8.set(dict, dictPtr);
-            const r = _train_dict_huf(ptrsPtr, sizesPtr, n, dictPtr, dict.length, hufPtr);
-            if (r < 0) {
-                throw new Error(`ZXC train_dict_huf error: ${_error_name(r)} (${r})`);
-            }
-            return new Uint8Array(Module.HEAPU8.buffer, hufPtr, ZXC_HUF_TABLE_SIZE).slice();
+          Module.HEAPU8.set(dict, dictPtr);
+          if (hufPtr) Module.HEAPU8.set(dictHuf, hufPtr);
+          const r = _seekable_set_dict(handle, dictPtr, dict.length, hufPtr);
+          if (r < 0) {
+            throw new Error(
+              `ZXC seekable set_dict error: ${_error_name(r)} (${r})`,
+            );
+          }
         } finally {
-            for (const sp of samplePtrs) _free(sp);
-            _free(ptrsPtr);
-            _free(sizesPtr);
-            _free(dictPtr);
-            _free(hufPtr);
+          _free(dictPtr);
+          if (hufPtr) _free(hufPtr);
         }
-    }
-
-    /**
-     * Return the 128-byte shared Huffman table stored in a `.zxd` file, or
-     * `null` if the buffer is not a valid `.zxd` file.
-     * @param {Uint8Array} zxd - The `.zxd` file bytes.
-     * @returns {Uint8Array | null}
-     */
-    function dictHuf(zxd) {
-        if (!zxd || zxd.length === 0) return null;
-        const bufPtr = _malloc(zxd.length);
+      },
+      decompressRange(offset, length) {
+        if (length < 0) throw new Error("ZXC: length must be non-negative");
+        // The wasm shim carries the offset as a uint32 (no BigInt);
+        // values outside [0, 2^32-1] would silently wrap and return
+        // data from the wrong position.
+        if (!Number.isInteger(offset) || offset < 0 || offset > 0xffffffff) {
+          throw new Error("ZXC: offset must be an integer in [0, 2^32-1]");
+        }
+        if (length === 0) return new Uint8Array(0);
+        const dstPtr = _malloc(length);
+        if (!dstPtr) throw new Error("ZXC: malloc failed for output buffer");
         try {
-            Module.HEAPU8.set(zxd, bufPtr);
-            const p = _dict_huf(bufPtr, zxd.length);
-            if (!p) return null;
-            return new Uint8Array(Module.HEAPU8.buffer, p, ZXC_HUF_TABLE_SIZE).slice();
+          const r = _seekable_decompress_range(
+            handle,
+            dstPtr,
+            length,
+            offset,
+            length,
+          );
+          if (r < 0) {
+            throw new Error(
+              `ZXC seekable decompress error: ${_error_name(r)} (${r})`,
+            );
+          }
+          return new Uint8Array(Module.HEAPU8.buffer, dstPtr, r).slice();
         } finally {
-            _free(bufPtr);
+          _free(dstPtr);
         }
+      },
+      /** Release the native handle and the WASM-side copy. Idempotent. */
+      free() {
+        if (!handle) return;
+        _seekable_free(handle);
+        _free(srcPtr);
+        handle = 0;
+      },
+    };
+  }
+
+  /**
+   * Encoded byte size of a seek table covering `numBlocks` data blocks.
+   * Use this to size a destination buffer for [writeSeekTable].
+   * @param {number} numBlocks
+   * @returns {number}
+   */
+  function seekTableSize(numBlocks) {
+    return _seek_table_size(numBlocks >>> 0);
+  }
+
+  /**
+   * Low-level: write a seek table (header + entries) for the given
+   * per-block on-disk compressed sizes.
+   *
+   * Most callers do not need this directly; the buffer and streaming
+   * APIs emit a seek table when `seekable: true` is set.
+   *
+   * @param {ArrayLike<number>} compSizes - Per-block compressed sizes,
+   *        in order. Each entry is treated as an unsigned 32-bit value.
+   * @returns {Uint8Array} The encoded seek table.
+   */
+  function writeSeekTable(compSizes) {
+    if (!compSizes || compSizes.length === 0) {
+      throw new Error("ZXC: compSizes must be non-empty");
+    }
+    const numBlocks = compSizes.length;
+    const sz = _seek_table_size(numBlocks);
+    const dstPtr = _malloc(sz);
+    if (!dstPtr) throw new Error("ZXC: malloc failed for seek table");
+
+    const csPtr = _malloc(numBlocks * 4);
+    if (!csPtr) {
+      _free(dstPtr);
+      throw new Error("ZXC: malloc failed for compSizes scratch");
+    }
+
+    try {
+      for (let i = 0; i < numBlocks; i++) {
+        Module.HEAPU32[(csPtr >> 2) + i] = compSizes[i] >>> 0;
+      }
+      const r = _write_seek_table(dstPtr, sz, csPtr, numBlocks);
+      if (r < 0) {
+        throw new Error(`ZXC write_seek_table error: ${_error_name(r)} (${r})`);
+      }
+      return new Uint8Array(Module.HEAPU8.buffer, dstPtr, r).slice();
+    } finally {
+      _free(dstPtr);
+      _free(csPtr);
+    }
+  }
+
+  // --- Dictionary API ------------------------------------------------------
+
+  /**
+   * Train a dictionary from a corpus of samples.
+   *
+   * @param {Uint8Array[]} samples - Array of sample buffers (similar payloads).
+   * @param {number} [maxSize=65535] - Maximum dictionary size in bytes
+   *        (capped at ZXC_DICT_SIZE_MAX).
+   * @returns {Uint8Array} Raw trained dictionary content.
+   * @throws {Error} On training failure.
+   */
+  function trainDict(samples, maxSize = ZXC_DICT_SIZE_MAX) {
+    if (!samples || samples.length === 0) {
+      throw new Error("ZXC: trainDict requires at least one sample");
+    }
+    const cap = Math.min(maxSize >>> 0, ZXC_DICT_SIZE_MAX);
+    const n = samples.length;
+
+    // Heap arrays: pointers (4 bytes each) + sizes (size_t = 4 bytes on wasm32).
+    const ptrsPtr = _malloc(n * 4);
+    const sizesPtr = _malloc(n * 4);
+    const samplePtrs = [];
+    const dictPtr = _malloc(cap);
+
+    try {
+      for (let i = 0; i < n; i++) {
+        const s = samples[i];
+        const sp = s.length > 0 ? _malloc(s.length) : _malloc(1);
+        if (s.length > 0) Module.HEAPU8.set(s, sp);
+        samplePtrs.push(sp);
+        Module.HEAPU32[(ptrsPtr >> 2) + i] = sp;
+        Module.HEAPU32[(sizesPtr >> 2) + i] = s.length;
+      }
+      const r = _train_dict(ptrsPtr, sizesPtr, n, dictPtr, cap);
+      if (r < 0) {
+        throw new Error(`ZXC train_dict error: ${_error_name(r)} (${r})`);
+      }
+      return new Uint8Array(Module.HEAPU8.buffer, dictPtr, r).slice();
+    } finally {
+      for (const sp of samplePtrs) _free(sp);
+      _free(ptrsPtr);
+      _free(sizesPtr);
+      _free(dictPtr);
+    }
+  }
+
+  /* Shared helper: copy a Uint8Array into the heap and call an id getter. */
+  function _callIdOnBuffer(fn, data) {
+    if (!data || data.length === 0) return 0;
+    const ptr = _malloc(data.length);
+    try {
+      Module.HEAPU8.set(data, ptr);
+      return fn(ptr, data.length) >>> 0;
+    } finally {
+      _free(ptr);
+    }
+  }
+
+  /**
+   * Compute the 32-bit dictionary ID for raw dictionary content.
+   * @param {Uint8Array} content
+   * @returns {number} Unsigned 32-bit ID (0 if empty).
+   */
+  function dictId(content) {
+    // Third arg: NULL huf table -> content-only id.
+    return _callIdOnBuffer((ptr, len) => _dict_id(ptr, len, 0), content);
+  }
+
+  /**
+   * Read the dictionary ID referenced by a compressed `.zxc` archive.
+   * @param {Uint8Array} archive
+   * @returns {number} Unsigned 32-bit ID (0 if no dictionary required).
+   */
+  function getDictId(archive) {
+    return _callIdOnBuffer(_get_dict_id, archive);
+  }
+
+  /**
+   * Read the dictionary ID stored in a serialized `.zxd` file buffer.
+   * @param {Uint8Array} zxd
+   * @returns {number} Unsigned 32-bit ID (0 if not a valid .zxd).
+   */
+  function dictGetId(zxd) {
+    return _callIdOnBuffer(_dict_get_id, zxd);
+  }
+
+  /**
+   * Serialize dictionary content and its shared literal Huffman table
+   * (128 bytes, from {@link trainDictHuf}) to the `.zxd` file format.
+   * The stored dictionary ID covers both content and table.
+   * @param {Uint8Array} content - Raw dictionary content.
+   * @param {Uint8Array} hufLengths - 128-byte packed code-lengths table.
+   * @returns {Uint8Array} The encoded `.zxd` file.
+   * @throws {Error} On failure.
+   */
+  function dictSave(content, hufLengths) {
+    if (!content || content.length === 0) {
+      throw new Error("ZXC: dictSave requires non-empty content");
+    }
+    if (!hufLengths || hufLengths.length !== ZXC_HUF_TABLE_SIZE) {
+      throw new Error("ZXC: dictSave requires a 128-byte hufLengths table");
+    }
+    const cap = _dict_save_bound(content.length);
+    const contentPtr = _malloc(content.length);
+    const hufPtr = _malloc(ZXC_HUF_TABLE_SIZE);
+    const bufPtr = _malloc(cap);
+    try {
+      Module.HEAPU8.set(content, contentPtr);
+      Module.HEAPU8.set(hufLengths, hufPtr);
+      const r = _dict_save(contentPtr, content.length, hufPtr, bufPtr, cap);
+      if (r < 0) {
+        throw new Error(`ZXC dict_save error: ${_error_name(r)} (${r})`);
+      }
+      return new Uint8Array(Module.HEAPU8.buffer, bufPtr, r).slice();
+    } finally {
+      _free(contentPtr);
+      _free(hufPtr);
+      _free(bufPtr);
+    }
+  }
+
+  /**
+   * Train the shared literal Huffman table for an already-trained
+   * dictionary (see {@link trainDict}).
+   * @param {Uint8Array[]} samples - Training corpus.
+   * @param {Uint8Array} dict - Trained dictionary content.
+   * @returns {Uint8Array} 128-byte packed table for {@link dictSave} /
+   *   `opts.dictHuf`.
+   * @throws {Error} On failure.
+   */
+  function trainDictHuf(samples, dict) {
+    if (!samples || samples.length === 0) {
+      throw new Error("ZXC: trainDictHuf requires at least one sample");
+    }
+    if (!dict || dict.length === 0) {
+      throw new Error("ZXC: trainDictHuf requires a non-empty dictionary");
+    }
+    const n = samples.length;
+    const ptrsPtr = _malloc(n * 4);
+    const sizesPtr = _malloc(n * 4);
+    const samplePtrs = [];
+    const dictPtr = _malloc(dict.length);
+    const hufPtr = _malloc(ZXC_HUF_TABLE_SIZE);
+    try {
+      for (let i = 0; i < n; i++) {
+        const sp = _malloc(samples[i].length || 1);
+        samplePtrs.push(sp);
+        if (samples[i].length > 0) Module.HEAPU8.set(samples[i], sp);
+        Module.HEAPU32[(ptrsPtr >> 2) + i] = sp;
+        Module.HEAPU32[(sizesPtr >> 2) + i] = samples[i].length;
+      }
+      Module.HEAPU8.set(dict, dictPtr);
+      const r = _train_dict_huf(
+        ptrsPtr,
+        sizesPtr,
+        n,
+        dictPtr,
+        dict.length,
+        hufPtr,
+      );
+      if (r < 0) {
+        throw new Error(`ZXC train_dict_huf error: ${_error_name(r)} (${r})`);
+      }
+      return new Uint8Array(
+        Module.HEAPU8.buffer,
+        hufPtr,
+        ZXC_HUF_TABLE_SIZE,
+      ).slice();
+    } finally {
+      for (const sp of samplePtrs) _free(sp);
+      _free(ptrsPtr);
+      _free(sizesPtr);
+      _free(dictPtr);
+      _free(hufPtr);
+    }
+  }
+
+  /**
+   * Return the 128-byte shared Huffman table stored in a `.zxd` file, or
+   * `null` if the buffer is not a valid `.zxd` file.
+   * @param {Uint8Array} zxd - The `.zxd` file bytes.
+   * @returns {Uint8Array | null}
+   */
+  function dictHuf(zxd) {
+    if (!zxd || zxd.length === 0) return null;
+    const bufPtr = _malloc(zxd.length);
+    try {
+      Module.HEAPU8.set(zxd, bufPtr);
+      const p = _dict_huf(bufPtr, zxd.length);
+      if (!p) return null;
+      return new Uint8Array(
+        Module.HEAPU8.buffer,
+        p,
+        ZXC_HUF_TABLE_SIZE,
+      ).slice();
+    } finally {
+      _free(bufPtr);
+    }
+  }
+
+  /**
+   * Load and validate a `.zxd` file buffer.
+   * @param {Uint8Array} zxd - The `.zxd` file bytes.
+   * @returns {{ content: Uint8Array, huf: Uint8Array, id: number }}
+   * @throws {Error} On invalid input.
+   */
+  function dictLoad(zxd) {
+    if (!zxd || zxd.length === 0) {
+      throw new Error("ZXC: dictLoad requires a non-empty buffer");
+    }
+    const bufPtr = _malloc(zxd.length);
+    // out params: content ptr (4), content size (4), huf ptr (4), dict id (4)
+    const contentOutPtr = _malloc(4);
+    const sizeOutPtr = _malloc(4);
+    const hufOutPtr = _malloc(4);
+    const idOutPtr = _malloc(4);
+    try {
+      Module.HEAPU8.set(zxd, bufPtr);
+      const r = _dict_load(
+        bufPtr,
+        zxd.length,
+        contentOutPtr,
+        sizeOutPtr,
+        hufOutPtr,
+        idOutPtr,
+      );
+      if (r < 0) {
+        throw new Error(`ZXC dict_load error: ${_error_name(r)} (${r})`);
+      }
+      const contentPtr = Module.HEAPU32[contentOutPtr >> 2];
+      const contentSize = Module.HEAPU32[sizeOutPtr >> 2];
+      const hufPtr = Module.HEAPU32[hufOutPtr >> 2];
+      const id = Module.HEAPU32[idOutPtr >> 2] >>> 0;
+      // content/huf point into bufPtr (zero-copy); copy out before freeing.
+      const content = new Uint8Array(
+        Module.HEAPU8.buffer,
+        contentPtr,
+        contentSize,
+      ).slice();
+      const huf = new Uint8Array(
+        Module.HEAPU8.buffer,
+        hufPtr,
+        ZXC_HUF_TABLE_SIZE,
+      ).slice();
+      return { content, huf, id };
+    } finally {
+      _free(bufPtr);
+      _free(contentOutPtr);
+      _free(sizeOutPtr);
+      _free(hufOutPtr);
+      _free(idOutPtr);
+    }
+  }
+
+  /**
+   * Train a complete dictionary (content + shared Huffman table) and
+   * serialize it to `.zxd` bytes in one call. One-call equivalent of
+   * {@link trainDict} + {@link trainDictHuf} + {@link dictSave}.
+   * @param {Uint8Array[]} samples - Training corpus.
+   * @returns {Uint8Array} The encoded `.zxd` file.
+   * @throws {Error} On failure.
+   */
+  function dictTrain(samples) {
+    if (!samples || samples.length === 0) {
+      throw new Error("ZXC: dictTrain requires at least one sample");
+    }
+    const n = samples.length;
+    const ptrsPtr = _malloc(n * 4);
+    const sizesPtr = _malloc(n * 4);
+    const samplePtrs = [];
+    const cap = _dict_save_bound(ZXC_DICT_SIZE_MAX);
+    const zxdPtr = _malloc(cap);
+    try {
+      for (let i = 0; i < n; i++) {
+        const s = samples[i];
+        const sp = _malloc(s.length || 1);
+        if (s.length > 0) Module.HEAPU8.set(s, sp);
+        samplePtrs.push(sp);
+        Module.HEAPU32[(ptrsPtr >> 2) + i] = sp;
+        Module.HEAPU32[(sizesPtr >> 2) + i] = s.length;
+      }
+      const r = _dict_train(ptrsPtr, sizesPtr, n, zxdPtr, cap);
+      if (r < 0) {
+        throw new Error(`ZXC dict_train error: ${_error_name(r)} (${r})`);
+      }
+      return new Uint8Array(Module.HEAPU8.buffer, zxdPtr, r).slice();
+    } finally {
+      for (const sp of samplePtrs) _free(sp);
+      _free(ptrsPtr);
+      _free(sizesPtr);
+      _free(zxdPtr);
+    }
+  }
+
+  /**
+   * A trained dictionary: content bytes, its shared literal Huffman table
+   * and the ID binding the pair. Pass an instance as `opts.dict` to
+   * `compress` / `decompress` instead of juggling `dict` + `dictHuf`.
+   */
+  class Dictionary {
+    /**
+     * @param {Uint8Array} content - Raw LZ-window content bytes.
+     * @param {Uint8Array} huf - 128-byte shared literal Huffman table.
+     * @param {number} id - Dictionary ID binding the (content, table) pair.
+     */
+    constructor(content, huf, id) {
+      if (!content || !huf || huf.length !== ZXC_HUF_TABLE_SIZE) {
+        throw new Error(
+          "ZXC: Dictionary requires (content, 128-byte huf table)",
+        );
+      }
+      this.content = content;
+      this.huf = huf;
+      this.id = id >>> 0;
     }
 
     /**
-     * Load and validate a `.zxd` file buffer.
-     * @param {Uint8Array} zxd - The `.zxd` file bytes.
-     * @returns {{ content: Uint8Array, huf: Uint8Array, id: number }}
-     * @throws {Error} On invalid input.
+     * Train a complete dictionary (content + shared table) from samples.
+     * @param {Uint8Array[]} samples
+     * @returns {Dictionary}
      */
-    function dictLoad(zxd) {
-        if (!zxd || zxd.length === 0) {
-            throw new Error('ZXC: dictLoad requires a non-empty buffer');
-        }
-        const bufPtr = _malloc(zxd.length);
-        // out params: content ptr (4), content size (4), huf ptr (4), dict id (4)
-        const contentOutPtr = _malloc(4);
-        const sizeOutPtr    = _malloc(4);
-        const hufOutPtr     = _malloc(4);
-        const idOutPtr      = _malloc(4);
+    static train(samples) {
+      return Dictionary.load(dictTrain(samples));
+    }
+
+    /**
+     * Parse `.zxd` bytes into a Dictionary (owned copies).
+     * @param {Uint8Array} zxd
+     * @returns {Dictionary}
+     */
+    static load(zxd) {
+      const { content, huf, id } = dictLoad(zxd);
+      return new Dictionary(content, huf, id);
+    }
+
+    /**
+     * Serialize back to `.zxd` file bytes.
+     * @returns {Uint8Array}
+     */
+    save() {
+      return dictSave(this.content, this.huf);
+    }
+  }
+
+  // --- WHATWG TransformStream adapters -------------------------------------
+  //
+  // Mirror of the wrappers shipped by the Go, Rust, Python and Node bindings:
+  // turn a CStream / DStream pair into a `TransformStream` so ZXC can be
+  // wired into fetch pipelines, Service Workers, Deno, Bun, Node ≥18 — any
+  // host that exposes the Streams API. Useful for OCI use cases such as
+  // streaming a compressed layer through `fetch().body.pipeThrough(...)`.
+
+  /**
+   * Returns a WHATWG TransformStream that compresses bytes through a ZXC
+   * frame. Pipe a ReadableStream<Uint8Array> through it to produce a
+   * compressed ReadableStream<Uint8Array>.
+   *
+   * @param {object} [opts]
+   * @param {number} [opts.level]
+   * @param {boolean} [opts.checksum]
+   * @returns {TransformStream<Uint8Array, Uint8Array>}
+   */
+  function createCompressTransformStream(opts) {
+    let cs;
+    return new TransformStream({
+      start() {
+        cs = createCStream(opts);
+      },
+      transform(chunk, controller) {
         try {
-            Module.HEAPU8.set(zxd, bufPtr);
-            const r = _dict_load(bufPtr, zxd.length, contentOutPtr, sizeOutPtr,
-                hufOutPtr, idOutPtr);
-            if (r < 0) {
-                throw new Error(`ZXC dict_load error: ${_error_name(r)} (${r})`);
-            }
-            const contentPtr  = Module.HEAPU32[contentOutPtr >> 2];
-            const contentSize = Module.HEAPU32[sizeOutPtr >> 2];
-            const hufPtr      = Module.HEAPU32[hufOutPtr >> 2];
-            const id          = Module.HEAPU32[idOutPtr >> 2] >>> 0;
-            // content/huf point into bufPtr (zero-copy); copy out before freeing.
-            const content = new Uint8Array(Module.HEAPU8.buffer, contentPtr, contentSize).slice();
-            const huf = new Uint8Array(Module.HEAPU8.buffer, hufPtr,
-                ZXC_HUF_TABLE_SIZE).slice();
-            return { content, huf, id };
-        } finally {
-            _free(bufPtr);
-            _free(contentOutPtr);
-            _free(sizeOutPtr);
-            _free(hufOutPtr);
-            _free(idOutPtr);
+          const out = cs.compress(chunk);
+          if (out.length > 0) controller.enqueue(out);
+        } catch (e) {
+          controller.error(e);
+          try {
+            cs.free();
+          } catch (_) {
+            /* idempotent */
+          }
         }
-    }
-
-    /**
-     * Train a complete dictionary (content + shared Huffman table) and
-     * serialize it to `.zxd` bytes in one call. One-call equivalent of
-     * {@link trainDict} + {@link trainDictHuf} + {@link dictSave}.
-     * @param {Uint8Array[]} samples - Training corpus.
-     * @returns {Uint8Array} The encoded `.zxd` file.
-     * @throws {Error} On failure.
-     */
-    function dictTrain(samples) {
-        if (!samples || samples.length === 0) {
-            throw new Error('ZXC: dictTrain requires at least one sample');
-        }
-        const n = samples.length;
-        const ptrsPtr  = _malloc(n * 4);
-        const sizesPtr = _malloc(n * 4);
-        const samplePtrs = [];
-        const cap = _dict_save_bound(ZXC_DICT_SIZE_MAX);
-        const zxdPtr = _malloc(cap);
+      },
+      flush(controller) {
         try {
-            for (let i = 0; i < n; i++) {
-                const s = samples[i];
-                const sp = _malloc(s.length || 1);
-                if (s.length > 0) Module.HEAPU8.set(s, sp);
-                samplePtrs.push(sp);
-                Module.HEAPU32[(ptrsPtr >> 2) + i]  = sp;
-                Module.HEAPU32[(sizesPtr >> 2) + i] = s.length;
-            }
-            const r = _dict_train(ptrsPtr, sizesPtr, n, zxdPtr, cap);
-            if (r < 0) {
-                throw new Error(`ZXC dict_train error: ${_error_name(r)} (${r})`);
-            }
-            return new Uint8Array(Module.HEAPU8.buffer, zxdPtr, r).slice();
+          const tail = cs.end();
+          if (tail.length > 0) controller.enqueue(tail);
+        } catch (e) {
+          controller.error(e);
         } finally {
-            for (const sp of samplePtrs) _free(sp);
-            _free(ptrsPtr);
-            _free(sizesPtr);
-            _free(zxdPtr);
+          try {
+            cs.free();
+          } catch (_) {
+            /* idempotent */
+          }
         }
-    }
-
-    /**
-     * A trained dictionary: content bytes, its shared literal Huffman table
-     * and the ID binding the pair. Pass an instance as `opts.dict` to
-     * `compress` / `decompress` instead of juggling `dict` + `dictHuf`.
-     */
-    class Dictionary {
-        /**
-         * @param {Uint8Array} content - Raw LZ-window content bytes.
-         * @param {Uint8Array} huf - 128-byte shared literal Huffman table.
-         * @param {number} id - Dictionary ID binding the (content, table) pair.
-         */
-        constructor(content, huf, id) {
-            if (!content || !huf || huf.length !== ZXC_HUF_TABLE_SIZE) {
-                throw new Error(
-                    'ZXC: Dictionary requires (content, 128-byte huf table)');
-            }
-            this.content = content;
-            this.huf = huf;
-            this.id = id >>> 0;
+      },
+      // Reader cancelled / writable aborted: flush() never runs, so the
+      // wasm stream context and staging buffers must be freed here.
+      cancel() {
+        try {
+          cs.free();
+        } catch (_) {
+          /* idempotent */
         }
-
-        /**
-         * Train a complete dictionary (content + shared table) from samples.
-         * @param {Uint8Array[]} samples
-         * @returns {Dictionary}
-         */
-        static train(samples) {
-            return Dictionary.load(dictTrain(samples));
-        }
-
-        /**
-         * Parse `.zxd` bytes into a Dictionary (owned copies).
-         * @param {Uint8Array} zxd
-         * @returns {Dictionary}
-         */
-        static load(zxd) {
-            const { content, huf, id } = dictLoad(zxd);
-            return new Dictionary(content, huf, id);
-        }
-
-        /**
-         * Serialize back to `.zxd` file bytes.
-         * @returns {Uint8Array}
-         */
-        save() {
-            return dictSave(this.content, this.huf);
-        }
-    }
-
-    // --- WHATWG TransformStream adapters -------------------------------------
-    //
-    // Mirror of the wrappers shipped by the Go, Rust, Python and Node bindings:
-    // turn a CStream / DStream pair into a `TransformStream` so ZXC can be
-    // wired into fetch pipelines, Service Workers, Deno, Bun, Node ≥18 — any
-    // host that exposes the Streams API. Useful for OCI use cases such as
-    // streaming a compressed layer through `fetch().body.pipeThrough(...)`.
-
-    /**
-     * Returns a WHATWG TransformStream that compresses bytes through a ZXC
-     * frame. Pipe a ReadableStream<Uint8Array> through it to produce a
-     * compressed ReadableStream<Uint8Array>.
-     *
-     * @param {object} [opts]
-     * @param {number} [opts.level]
-     * @param {boolean} [opts.checksum]
-     * @returns {TransformStream<Uint8Array, Uint8Array>}
-     */
-    function createCompressTransformStream(opts) {
-        let cs;
-        return new TransformStream({
-            start() {
-                cs = createCStream(opts);
-            },
-            transform(chunk, controller) {
-                try {
-                    const out = cs.compress(chunk);
-                    if (out.length > 0) controller.enqueue(out);
-                } catch (e) {
-                    controller.error(e);
-                    try { cs.free(); } catch (_) { /* idempotent */ }
-                }
-            },
-            flush(controller) {
-                try {
-                    const tail = cs.end();
-                    if (tail.length > 0) controller.enqueue(tail);
-                } catch (e) {
-                    controller.error(e);
-                } finally {
-                    try { cs.free(); } catch (_) { /* idempotent */ }
-                }
-            },
-            // Reader cancelled / writable aborted: flush() never runs, so the
-            // wasm stream context and staging buffers must be freed here.
-            cancel() {
-                try { cs.free(); } catch (_) { /* idempotent */ }
-            },
-        });
-    }
-
-    /**
-     * Returns a WHATWG TransformStream that decompresses a ZXC frame.
-     *
-     * Errors the stream with a `'ZXC_TRUNCATED'`-tagged Error if the input
-     * ends before the footer is reached.
-     *
-     * @param {object} [opts]
-     * @param {boolean} [opts.checksum]
-     * @returns {TransformStream<Uint8Array, Uint8Array>}
-     */
-    function createDecompressTransformStream(opts) {
-        let ds;
-        return new TransformStream({
-            start() {
-                ds = createDStream(opts);
-            },
-            transform(chunk, controller) {
-                try {
-                    const out = ds.decompress(chunk);
-                    if (out.length > 0) controller.enqueue(out);
-                } catch (e) {
-                    controller.error(e);
-                    try { ds.free(); } catch (_) { /* idempotent */ }
-                }
-            },
-            flush(controller) {
-                try {
-                    if (!ds.finished()) {
-                        const err = new Error(
-                            'ZXC: input drained before footer (truncated frame)');
-                        err.code = 'ZXC_TRUNCATED';
-                        controller.error(err);
-                        return;
-                    }
-                } catch (e) {
-                    controller.error(e);
-                } finally {
-                    try { ds.free(); } catch (_) { /* idempotent */ }
-                }
-            },
-            // Reader cancelled / writable aborted: flush() never runs, so the
-            // wasm stream context and staging buffers must be freed here.
-            cancel() {
-                try { ds.free(); } catch (_) { /* idempotent */ }
-            },
-        });
-    }
-
-    // --- Exposed API object --------------------------------------------------
-    return Object.freeze({
-        compress,
-        decompress,
-        compressBound,
-        getDecompressedSize,
-        createCompressContext,
-        createDecompressContext,
-        createCStream,
-        createDStream,
-        createCompressTransformStream,
-        createDecompressTransformStream,
-        createSeekable,
-        seekTableSize,
-        writeSeekTable,
-        detectZxc,
-
-        // Dictionary API
-        Dictionary,
-        dictTrain,
-        trainDict,
-        trainDictHuf,
-        dictId,
-        getDictId,
-        dictGetId,
-        dictSave,
-        dictLoad,
-        dictHuf,
-
-        /** Library version string (e.g. "0.13.1"). */
-        version: _version_string(),
-        /** Minimum compression level. */
-        minLevel: _min_level(),
-        /** Maximum compression level. */
-        maxLevel: _max_level(),
-        /** Default compression level. */
-        defaultLevel: _default_level(),
-
-        /** Raw Emscripten Module (for advanced use). */
-        _module: Module,
+      },
     });
+  }
+
+  /**
+   * Returns a WHATWG TransformStream that decompresses a ZXC frame.
+   *
+   * Errors the stream with a `'ZXC_TRUNCATED'`-tagged Error if the input
+   * ends before the footer is reached.
+   *
+   * @param {object} [opts]
+   * @param {boolean} [opts.checksum]
+   * @returns {TransformStream<Uint8Array, Uint8Array>}
+   */
+  function createDecompressTransformStream(opts) {
+    let ds;
+    return new TransformStream({
+      start() {
+        ds = createDStream(opts);
+      },
+      transform(chunk, controller) {
+        try {
+          const out = ds.decompress(chunk);
+          if (out.length > 0) controller.enqueue(out);
+        } catch (e) {
+          controller.error(e);
+          try {
+            ds.free();
+          } catch (_) {
+            /* idempotent */
+          }
+        }
+      },
+      flush(controller) {
+        try {
+          if (!ds.finished()) {
+            const err = new Error(
+              "ZXC: input drained before footer (truncated frame)",
+            );
+            err.code = "ZXC_TRUNCATED";
+            controller.error(err);
+            return;
+          }
+        } catch (e) {
+          controller.error(e);
+        } finally {
+          try {
+            ds.free();
+          } catch (_) {
+            /* idempotent */
+          }
+        }
+      },
+      // Reader cancelled / writable aborted: flush() never runs, so the
+      // wasm stream context and staging buffers must be freed here.
+      cancel() {
+        try {
+          ds.free();
+        } catch (_) {
+          /* idempotent */
+        }
+      },
+    });
+  }
+
+  // --- Exposed API object --------------------------------------------------
+  return Object.freeze({
+    compress,
+    decompress,
+    compressBound,
+    getDecompressedSize,
+    createCompressContext,
+    createDecompressContext,
+    createCStream,
+    createDStream,
+    createCompressTransformStream,
+    createDecompressTransformStream,
+    createSeekable,
+    seekTableSize,
+    writeSeekTable,
+    detectZxc,
+
+    // Dictionary API
+    Dictionary,
+    dictTrain,
+    trainDict,
+    trainDictHuf,
+    dictId,
+    getDictId,
+    dictGetId,
+    dictSave,
+    dictLoad,
+    dictHuf,
+
+    /** Library version string (e.g. "0.13.1"). */
+    version: _version_string(),
+    /** Minimum compression level. */
+    minLevel: _min_level(),
+    /** Maximum compression level. */
+    maxLevel: _max_level(),
+    /** Default compression level. */
+    defaultLevel: _default_level(),
+
+    /** Raw Emscripten Module (for advanced use). */
+    _module: Module,
+  });
 }

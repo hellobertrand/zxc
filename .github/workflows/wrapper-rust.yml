@@ -1,4 +1,4 @@
-name: Publish Rust Crates
+name: Wrapper Rust
 
 on:
   workflow_dispatch:

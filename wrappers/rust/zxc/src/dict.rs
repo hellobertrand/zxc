@@ -45,7 +45,7 @@
 
 use std::ffi::c_void;
 
-pub use zxc_sys::{ZXC_HUF_TABLE_SIZE, ZXC_DICT_SIZE_MAX};
+pub use zxc_sys::{ZXC_DICT_SIZE_MAX, ZXC_HUF_TABLE_SIZE};
 
 use crate::error::error_from_code;
 use crate::{Error, Result};
@@ -66,7 +66,10 @@ use crate::{Error, Result};
 pub fn train_dict(samples: &[&[u8]], max_size: usize) -> Result<Vec<u8>> {
     let cap = max_size.clamp(1, ZXC_DICT_SIZE_MAX);
 
-    let ptrs: Vec<*const c_void> = samples.iter().map(|s| s.as_ptr() as *const c_void).collect();
+    let ptrs: Vec<*const c_void> = samples
+        .iter()
+        .map(|s| s.as_ptr() as *const c_void)
+        .collect();
     let sizes: Vec<usize> = samples.iter().map(|s| s.len()).collect();
 
     let mut buf = vec![0u8; cap];
@@ -129,7 +132,10 @@ pub fn dict_get_id(zxd: &[u8]) -> u32 {
 ///
 /// Returns an [`Error`] if training fails (e.g. no usable samples).
 pub fn train_dict_huf(samples: &[&[u8]], dict: &[u8]) -> Result<[u8; ZXC_HUF_TABLE_SIZE]> {
-    let ptrs: Vec<*const c_void> = samples.iter().map(|s| s.as_ptr() as *const c_void).collect();
+    let ptrs: Vec<*const c_void> = samples
+        .iter()
+        .map(|s| s.as_ptr() as *const c_void)
+        .collect();
     let sizes: Vec<usize> = samples.iter().map(|s| s.len()).collect();
 
     let mut huf = [0u8; ZXC_HUF_TABLE_SIZE];
@@ -191,9 +197,7 @@ pub fn dict_huf(zxd: &[u8]) -> Option<[u8; ZXC_HUF_TABLE_SIZE]> {
     }
     let mut huf = [0u8; ZXC_HUF_TABLE_SIZE];
     // The pointer aims into `zxd` (zero-copy); copy out for an owned result.
-    huf.copy_from_slice(unsafe {
-        std::slice::from_raw_parts(p as *const u8, ZXC_HUF_TABLE_SIZE)
-    });
+    huf.copy_from_slice(unsafe { std::slice::from_raw_parts(p as *const u8, ZXC_HUF_TABLE_SIZE) });
     Some(huf)
 }
 
@@ -229,8 +233,10 @@ pub struct Dictionary {
 impl Dictionary {
     /// Trains a complete dictionary (content + shared table) from samples.
     pub fn train(samples: &[&[u8]]) -> Result<Self> {
-        let ptrs: Vec<*const c_void> =
-            samples.iter().map(|s| s.as_ptr() as *const c_void).collect();
+        let ptrs: Vec<*const c_void> = samples
+            .iter()
+            .map(|s| s.as_ptr() as *const c_void)
+            .collect();
         let sizes: Vec<usize> = samples.iter().map(|s| s.len()).collect();
 
         let cap = unsafe { zxc_sys::zxc_dict_save_bound(ZXC_DICT_SIZE_MAX) };
@@ -245,7 +251,11 @@ impl Dictionary {
             )
         };
         if written <= 0 {
-            return Err(if written < 0 { error_from_code(written) } else { Error::InvalidData });
+            return Err(if written < 0 {
+                error_from_code(written)
+            } else {
+                Error::InvalidData
+            });
         }
         zxd.truncate(written as usize);
         Self::load(&zxd)
@@ -314,7 +324,7 @@ impl Dictionary {
 mod tests {
     use super::*;
     use crate::{
-        compress_with_options, decompress_with_options, CompressOptions, DecompressOptions,
+        CompressOptions, DecompressOptions, compress_with_options, decompress_with_options,
     };
 
     fn sample_corpus() -> Vec<Vec<u8>> {
@@ -436,8 +446,7 @@ mod tests {
 
         // Options take the bundle in one call; round-trip + id binding.
         let sample = corpus[3].clone();
-        let copts = crate::CompressOptions::with_level(crate::Level::Density)
-            .with_dictionary(&d);
+        let copts = crate::CompressOptions::with_level(crate::Level::Density).with_dictionary(&d);
         let archive = compress_with_options(&sample, &copts).expect("compress");
         let dopts = DecompressOptions::default().with_dictionary(&d);
         let restored = decompress_with_options(&archive, &dopts).expect("decompress");
