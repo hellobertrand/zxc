@@ -482,14 +482,14 @@ async function main() {
     }).pipeThrough(zxc.createDecompressTransformStream());
 
     let didThrow = false;
-    let errorCode;
+    let errorCode = "";
     try {
       for await (const _ of truncSource) {
         /* drain */
       }
     } catch (e) {
       didThrow = true;
-      errorCode = e?.code;
+      errorCode = e?.code ?? "";
     }
     assert(didThrow, "truncated frame throws an error");
     assert(
