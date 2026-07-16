@@ -150,11 +150,11 @@ int zxc_compress_chunk_wrapper_neon32(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  * @brief Detected CPU SIMD capability level.
  */
 typedef enum {
-    ZXC_CPU_GENERIC = 0, /**< @brief Scalar-only fallback.   */
-    ZXC_CPU_AVX2 = 1,    /**< @brief x86-64 AVX2 available.  */
+    ZXC_CPU_GENERIC = 0, /**< @brief Scalar-only fallback. */
+    ZXC_CPU_AVX2 = 1,    /**< @brief x86-64 AVX2 available. */
     ZXC_CPU_AVX512 = 2,  /**< @brief x86-64 AVX-512F+BW available. */
-    ZXC_CPU_NEON = 3,    /**< @brief ARM NEON available.      */
-    ZXC_CPU_SSE2 = 4     /**< @brief x86 SSE2 available (no AVX2); x86-64 baseline. */
+    ZXC_CPU_NEON = 3,    /**< @brief ARM NEON available. */
+    ZXC_CPU_SSE2 = 4     /**< @brief x86 SSE2 available (x86-64 baseline) */
 } zxc_cpu_feature_t;
 
 /**
@@ -300,7 +300,6 @@ static int zxc_decompress_dispatch_init(const zxc_cctx_t* RESTRICT ctx, const ui
         zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_default;
     }
 #elif defined(__arm__) || defined(_M_ARM)
-    // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON) {
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_neon32;
         zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_neon32;
@@ -362,7 +361,6 @@ static int zxc_decompress_safe_dispatch_init(const zxc_cctx_t* RESTRICT ctx,
     else
         zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_default;
 #elif defined(__arm__) || defined(_M_ARM)
-    // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON)
         zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_neon32;
     else
@@ -416,7 +414,6 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     else
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_default;
 #elif defined(__arm__) || defined(_M_ARM)
-    // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON)
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_neon32;
     else

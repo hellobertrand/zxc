@@ -62,7 +62,7 @@ variant_sources = ['src/lib/zxc_compress.c',
                    'src/lib/zxc_huffman.c']
 
 # _default is scalar everywhere except AArch64, where __ARM_NEON is always defined
-default_args = (host_cpu == 'aarch64' and not is_cl) ? ['-march=armv8-a+simd'] : []
+default_args = (host_cpu == 'aarch64' and not msvc_syntax) ? ['-march=armv8-a'] : []
 variant_sets = [['_default', default_args]]
 
 if host_cpu == 'x86_64'

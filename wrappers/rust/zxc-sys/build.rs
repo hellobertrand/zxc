@@ -10,9 +10,12 @@
 //! This script compiles the ZXC C library with Function Multi-Versioning (FMV)
 //! to support runtime CPU feature detection and optimized code paths.
 //!
-//! On ARM64: Compiles `_default` only (NEON is the AArch64 baseline, so
-//!            `_default` already is the NEON build)
-//! On x86_64: Compiles `_default` (the SSE2 baseline), `_avx2` and `_avx512`
+//! On x86_64: `_default` (the SSE2 baseline), `_avx2` and `_avx512`
+//! On ARM64:  `_default` only - NEON is the AArch64 baseline, so `_default`
+//!            already is the NEON build
+//! On ARM32:  `_default`, plus `_neon32` on hard-float Linux/Android (NEON is
+//!            optional there and probed at run time via HWCAP)
+//! Elsewhere (i686, RISC-V, POWER, s390x, ...): `_default` only
 
 use std::env;
 use std::fs;
@@ -187,10 +190,19 @@ fn main() {
     );
 
     let target = env::var("TARGET").unwrap_or_default();
+    let is_msvc = target.contains("msvc");
     let is_arm64 = target.contains("aarch64") || target.contains("arm64");
-    let is_x86_64 = target.contains("x86_64") || target.contains("i686");
+    let is_x86_64 = target.contains("x86_64");
+    let is_x86_32 = target.contains("i686") || target.contains("i586");
     let is_arm32 = !is_arm64 && (target.starts_with("arm") || target.starts_with("thumb"));
-    let arm32_has_neon = is_arm32 && target.ends_with("hf");
+    let arm32_has_neon = is_arm32
+        && target.ends_with("hf")
+        && (target.contains("linux") || target.contains("android"));
+    let arm64_baseline: &[&str] = if is_arm64 && !is_msvc {
+        &["-march=armv8-a"]
+    } else {
+        &[]
+    };
 
     // =========================================================================
     // Core library files (common to all architectures)
@@ -215,8 +227,13 @@ fn main() {
     // Function Multi-Versioning: Compile variants with different suffixes
     // =========================================================================
 
-    if is_x86_64 {
+    // SSE2 is already the x86-64 baseline (no-op there) but not the i686 one,
+    // where the core does need it raised.
+    if is_x86_64 || is_x86_32 {
         core_build.flag_if_supported("-msse2");
+    }
+    for flag in arm64_baseline {
+        core_build.flag_if_supported(flag);
     }
     if is_arm32 && !arm32_has_neon {
         core_build.define("ZXC_ONLY_DEFAULT", None);
@@ -225,19 +242,13 @@ fn main() {
     core_build.compile("zxc_core");
 
     // --- Default variant (baseline, always compiled) ---
-    let default_flags: &[&str] = if is_arm64 && !target.contains("msvc") {
-        &["-march=armv8-a+simd"]
-    } else {
-        &[]
-    };
-    compile_variant(&include_dir, &src_lib, "_default", default_flags);
+    compile_variant(&include_dir, &src_lib, "_default", arm64_baseline);
 
     // --- Architecture-specific variants ---
     // The per-variant flags mirror zxc_add_variant() in CMakeLists.txt;
     // keep both in sync. MSVC ignores GCC-style -m flags silently, so it
     // needs its own /arch spellings plus the __BMI*__/__LZCNT__ macros the
     // sources test (cl.exe never defines them itself).
-    let is_msvc = target.contains("msvc");
     if arm32_has_neon {
         compile_variant(
             &include_dir,

@@ -170,10 +170,20 @@ endmacro()
 
 set(ZXC_VARIANT_OBJECTS "")
 
+# Target family, resolved once: the _default baseline below and the per-ISA
+# variants further down encode one decision each and must not drift apart.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
+    set(ZXC_ARCH_X86_64 TRUE)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+    set(ZXC_ARCH_AARCH64 TRUE)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
+    set(ZXC_ARCH_ARM32 TRUE)
+endif()
+
 # --- 1. Default Variant (target baseline) ---
 # Scalar everywhere except AArch64, where __ARM_NEON is always defined
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64" AND NOT MSVC)
-    zxc_add_variant(_default "-march=armv8-a+simd")
+if(ZXC_ARCH_AARCH64 AND NOT MSVC)
+    zxc_add_variant(_default "-march=armv8-a")
 else()
     zxc_add_variant(_default "")
 endif()
@@ -182,7 +192,7 @@ endif()
 if(ZXC_DISABLE_SIMD)
     message(STATUS "ZXC_DISABLE_SIMD: Skipping SIMD variants (no explicit AVX/NEON code paths).")
 else()
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
+if(ZXC_ARCH_X86_64)
     message(STATUS "Building x86_64 AVX2 and AVX512 variants (SSE2 tier = _default)...")
     if(MSVC)
         # AVX2 for MSVC (Enables AVX2/BMI1/BMI2 sets)
@@ -197,12 +207,12 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
                         "-mavx512f;-mavx512bw;-mavx512vbmi;-mavx512vbmi2;-mbmi;-mbmi2;-mlzcnt")
     endif()
 
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+elseif(ZXC_ARCH_AARCH64)
     # NEON tier = _default (mandatory on AArch64); nothing extra to compile.
     message(STATUS "AArch64: NEON tier = _default variant.")
 
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
-    message(STATUS "Building ARM NEON variant...")
+elseif(ZXC_ARCH_ARM32)
+    message(STATUS "Building 32-bit ARM _neon32 variant...")
     zxc_add_variant(_neon32 "-march=armv7-a;-mfpu=neon")
 endif()
 endif()
