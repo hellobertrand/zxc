@@ -665,6 +665,64 @@ typedef struct {
  *         also historically derived from it). */
 #define ZXC_HUF_MARGIN_SHIFT 5
 
+/** @name Encoder-side joint flat/length nudge (PivCo decode-speed shaping)
+ *
+ *  Package-merge minimizes section bits alone, but the PivCo decoder's cost
+ *  also depends on the SHAPE of the code-length histogram: the reconstruction
+ *  pass loop runs `max_depth + 1` times, and every maximal complete subtree
+ *  (all leaves exactly D levels below its root) collapses D merge levels into
+ *  a single unpack. ::zxc_huf_nudge_code_lengths reshapes freshly built
+ *  lengths toward power-of-two class counts and shallower caps, adopting a
+ *  candidate only when its modeled decode win clears the guard below at a
+ *  bounded ratio cost. Wire-compatible by construction: adjusted lengths stay
+ *  canonical, Kraft-exact and within the level cap, so any v7 decoder reads
+ *  the section unchanged (selection is encoder policy, FORMAT.md 5.2.1).
+ *  Idea from pivco-huffman issue #20 (dougallj). All knobs are
+ *  `#ifndef`-guarded so an A/B build can override them from CFLAGS.
+ *  @{ */
+/** @brief Master switch for the call sites; 0 restores archives byte-identical
+ *         to the unadjusted encoder (the functions still compile). */
+#ifndef ZXC_HUF_NUDGE
+#define ZXC_HUF_NUDGE 1
+#endif
+/** @brief Exchange rate (Q8 bits per modeled level-touch) in the candidate
+ *         cost `J = 256*bits + lambda*touches`; 26 ~= 0.10 bit per touch. */
+#ifndef ZXC_HUF_NUDGE_LAMBDA_Q8
+#define ZXC_HUF_NUDGE_LAMBDA_Q8 26
+#endif
+/** @brief Adoption guard, ratio side (permil): adopt only while
+ *         `bits' * 1000 <= bits0 * ZXC_HUF_NUDGE_BITS_PERMIL` (<= +1.5%). */
+#ifndef ZXC_HUF_NUDGE_BITS_PERMIL
+#define ZXC_HUF_NUDGE_BITS_PERMIL 1015
+#endif
+/** @brief Adoption guard, speed side (Q8): adopt only while
+ *         `touches' * 256 <= touches0 * ZXC_HUF_NUDGE_MERGE_Q8` (<= ~0.90x). */
+#ifndef ZXC_HUF_NUDGE_MERGE_Q8
+#define ZXC_HUF_NUDGE_MERGE_Q8 230
+#endif
+/** @brief Deepest flat-subtree depth with a SIMD unpacker (see
+ *         zxc_pivco_unpack_flat); deeper flat roots fall back to the scalar
+ *         bit-reader and must NOT be priced as free. */
+#define ZXC_HUF_NUDGE_FLAT_SIMD_MAX 6
+/** @brief Extra level-touches charged per occurrence under a flat root deeper
+ *         than ::ZXC_HUF_NUDGE_FLAT_SIMD_MAX (scalar bit-reader unpack path).
+ *         Measured on M2 silesia sections: the scalar unpack costs ~18 SIMD
+ *         touch-equivalents per occurrence even in its byte-aligned D = 8 best
+ *         case (a mispriced 2 let the walk collapse a 256-symbol section into
+ *         one all-8-bit flat root: modeled -30% touches, real -54% decode).
+ *         24 keeps low-mass deep-flat tails adoptable while making
+ *         all-the-mass deep flats impossible to justify. */
+#ifndef ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY
+#define ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY 24
+#endif
+/** @brief Fixed per-pass overhead (occurrence-equivalents) charged per merge
+ *         level, modeling the pass-loop and node-dispatch cost so shallower
+ *         trees also win on small sections. */
+#ifndef ZXC_HUF_NUDGE_LEVEL_COST
+#define ZXC_HUF_NUDGE_LEVEL_COST 64
+#endif
+/** @} */
+
 /** @name Space-speed section selection
  *
  *  Section encodings are selected at EVERY level by pricing each candidate
@@ -1472,6 +1530,43 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
  */
 int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
                                void* RESTRICT scratch, int max_code_len);
+
+/**
+ * @brief Optionally reshape freshly built code lengths for faster PivCo decode.
+ *
+ * Explores a small set of Kraft-exact alternatives to @p code_len (a greedy
+ * slot-ledger walk toward power-of-two class counts, plus package-merge
+ * rebuilds at reduced depth caps) and prices each against the modeled decode
+ * cost of zxc_pivco_decode_core. The cheapest candidate that clears the
+ * adoption guard (<= +::ZXC_HUF_NUDGE_BITS_PERMIL ratio cost AND
+ * <= ::ZXC_HUF_NUDGE_MERGE_Q8 modeled level-touches) replaces @p code_len;
+ * otherwise the array is left byte-for-byte untouched, so a rejected nudge
+ * emits an archive identical to the unadjusted encoder.
+ *
+ * Encoder policy only: any adopted output is canonical, Kraft-exact and capped
+ * at @p max_code_len, so the wire format and every deployed decoder are
+ * unaffected. Compiled once in the primary variant (ISA-independent decision
+ * code), guaranteeing cross-ISA identical archives.
+ *
+ * @param[in]     freq         Frequency table of length `ZXC_HUF_NUM_SYMBOLS`.
+ * @param[in,out] code_len     Lengths from ::zxc_huf_build_code_lengths.
+ * @param[in]     scratch      Optional ::ZXC_HUF_BUILD_SCRATCH_SIZE scratch for
+ *                             the reduced-cap rebuilds (NULL = allocate).
+ * @param[in]     max_code_len Cap the caller built with (level cap).
+ * @return 1 if @p code_len was adjusted, 0 if kept.
+ */
+int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
+                               void* RESTRICT scratch, int max_code_len);
+
+/**
+ * @brief Modeled (bits, level-touches) decode cost of one code-length vector.
+ *
+ * Introspection hook for the nudge's cost model (exact, canonical-order
+ * frequency weighting); the unit tests cross-check it against the real
+ * tree built by the decoder. @p code_len must be structurally valid.
+ */
+void zxc_huf_nudge_cost(const uint8_t* RESTRICT code_len, const uint32_t* RESTRICT freq,
+                        uint64_t* RESTRICT bits, uint64_t* RESTRICT touches);
 
 /**
  * @brief Pack per-symbol code lengths into the 128-byte (4-bit nibble) header.

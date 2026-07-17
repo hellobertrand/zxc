@@ -105,6 +105,7 @@ static const test_entry_t g_tests[] = {
 
     /* --- Format (on-disk) --- */
     TEST_CASE(test_huffman_codec),
+    TEST_CASE(test_huffman_nudge),
     TEST_CASE(test_huffman_codec_dict),
     TEST_CASE(test_huffman_single_symbol_validation),
     TEST_CASE(test_eof_block_structure),
