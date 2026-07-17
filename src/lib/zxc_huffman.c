@@ -337,9 +337,9 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
  * candidate histogram is priced without building a tree.
  *
  * Compiled once in the primary variant: this is ISA-independent cold encoder
- * policy, and a single copy guarantees cross-ISA identical archives. The
- * ZXC_HUF_NUDGE master switch gates the call sites only, so a switched-off
- * build still links the symbols (tests, A/B tooling).
+ * policy, and a single copy guarantees cross-ISA identical archives. For an
+ * A/B build without the nudge, override the guard from CFLAGS
+ * (-DZXC_HUF_NUDGE_MERGE_Q8=0 rejects every candidate).
  */
 #if defined(ZXC_VARIANT_PRIMARY)
 
@@ -563,6 +563,145 @@ static void zxc_huf_nudge_walk(const uint32_t* RESTRICT blc0, const uint64_t* RE
     }
 }
 
+/**
+ * @brief Exact rank-weighted J of one leaf run placed at coarse level @p lc.
+ *
+ * The DP prices in REAL units through a coarse lens: one coarse slot stands
+ * for a complete depth-@p g_log2 subtree of 2^g_log2 frequency-adjacent
+ * leaves, so a coarse buddy block of 2^d slots is a real block of depth
+ * d + g_log2 whose leaves have real length lc + g_log2. Because canonical
+ * codes fill the code space left to right, a ledger state with @p s open
+ * slots pins the run start at 2^lu - s * 2^(lu - lc): the cost of taking
+ * @p c slots here depends only on (lc, s, c, rank interval) -- which is what
+ * makes the level costs additive and the DP exact for this model.
+ */
+static uint64_t zxc_huf_nudge_dp_run_j(const int lu, const int lc, const int g_log2,
+                                       const uint32_t s, const uint32_t c,
+                                       const uint64_t* RESTRICT pfg, const uint32_t k) {
+    if (!c) return 0;
+    const int lr = lc + g_log2; /* real code length of these leaves */
+    const uint32_t w = 1U << (lu - lc);
+    const uint32_t S = (1U << lu) - s * w;
+    const uint32_t end = S + c * w;
+    const uint64_t bits = (uint64_t)lr * (pfg[k + c] - pfg[k]);
+    uint64_t touches = 0;
+    uint32_t x = S;
+    while (x < end) {
+        const uint32_t wx = x ? (x & (0U - x)) : (1U << lu);
+        const uint32_t wr = 1U << zxc_log2_u32(end - x);
+        const uint32_t W = wx < wr ? wx : wr;
+        const int d = (int)zxc_log2_u32(W >> (lu - lc)) + g_log2;
+        const uint32_t i0 = k + ((x - S) >> (lu - lc));
+        const uint64_t mass = pfg[i0 + (W >> (lu - lc))] - pfg[i0];
+        int t;
+        if (d == 0) {
+            t = lr + 1;
+        } else if (d == 1) {
+            t = lr;
+        } else {
+            t = (lr - d) + 1;
+            if (d > ZXC_HUF_NUDGE_FLAT_SIMD_MAX) t += ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY;
+        }
+        touches += mass * (uint64_t)t;
+        x += W;
+    }
+    return 256U * bits + (uint64_t)ZXC_HUF_NUDGE_LAMBDA_Q8 * touches;
+}
+
+/**
+ * @brief Slot-ledger dynamic program: optimal class counts for the model.
+ *
+ * States are (symbols placed, open slots) per level -- the (k, s) plane of
+ * pivco-huffman #20 -- relaxed level by level with the exact per-run cost
+ * above; a state with s == remaining symbols is a forced finishing level
+ * (continuing needs both c >= s and c <= s - 1). The finishing transition
+ * adds the pass-loop overhead for the resulting max depth. Backtracking the
+ * per-level arrival choices reconstructs the coarse class counts.
+ *
+ * Iteration order and strict-improvement relaxation are fixed, so the result
+ * is deterministic. Returns 0 on allocation failure or no feasible finish
+ * (callers then simply keep their other candidates).
+ */
+static int zxc_huf_nudge_dp_solve(const uint64_t* RESTRICT pfg, const int m, const int cap_c,
+                                  const int lu, const int g_log2, uint32_t* RESTRICT out_cblc) {
+    const size_t plane = (size_t)(m + 1) * (size_t)(m + 1);
+    uint64_t* jcur = (uint64_t*)ZXC_MALLOC(plane * sizeof(uint64_t));
+    uint64_t* jnxt = (uint64_t*)ZXC_MALLOC(plane * sizeof(uint64_t));
+    uint16_t* arrive = (uint16_t*)ZXC_MALLOC((size_t)(cap_c + 1) * plane * sizeof(uint16_t));
+    int ok = 0;
+    if (!jcur || !jnxt || !arrive) goto done;
+#define ZXC_NUDGE_DP_IDX(k, s) ((size_t)(k) * (size_t)(m + 1) + (size_t)(s))
+    for (size_t i = 0; i < plane; i++) jcur[i] = UINT64_MAX;
+    jcur[ZXC_NUDGE_DP_IDX(0, 2)] = 0;
+    uint64_t best_j = UINT64_MAX;
+    int best_l = 0;
+    int best_k = 0;
+    int best_s = 0;
+    for (int lc = 1; lc <= cap_c; lc++) {
+        for (size_t i = 0; i < plane; i++) jnxt[i] = UINT64_MAX;
+        for (int k = 0; k < m; k++) {
+            const uint32_t n_rem = (uint32_t)(m - k);
+            for (uint32_t s = 1; s <= n_rem; s++) {
+                const uint64_t j0 = jcur[ZXC_NUDGE_DP_IDX(k, s)];
+                if (j0 == UINT64_MAX) continue;
+                if (s == n_rem) {
+                    /* Forced finish: fill every slot, close the tree here. */
+                    const uint64_t j =
+                        j0 + zxc_huf_nudge_dp_run_j(lu, lc, g_log2, s, s, pfg, (uint32_t)k) +
+                        (uint64_t)ZXC_HUF_NUDGE_LAMBDA_Q8 * (uint64_t)ZXC_HUF_NUDGE_LEVEL_COST *
+                            (uint64_t)(lc + g_log2 + 1);
+                    if (j < best_j) {
+                        best_j = j;
+                        best_l = lc;
+                        best_k = k;
+                        best_s = (int)s;
+                    }
+                    continue;
+                }
+                if (lc == cap_c) continue; /* must finish at the cap */
+                const uint64_t mm = (uint64_t)1 << (cap_c - lc);
+                const uint32_t lo = (2 * s > n_rem) ? 2 * s - n_rem : 0;
+                uint32_t hi = s - 1;
+                const uint64_t cap_hi = ((uint64_t)s * mm - n_rem) / (mm - 1);
+                if (cap_hi < hi) hi = (uint32_t)cap_hi;
+                for (uint32_t c = lo; c <= hi; c++) {
+                    const uint64_t j =
+                        j0 + zxc_huf_nudge_dp_run_j(lu, lc, g_log2, s, c, pfg, (uint32_t)k);
+                    const size_t to = ZXC_NUDGE_DP_IDX(k + (int)c, 2 * (s - c));
+                    if (j < jnxt[to]) {
+                        jnxt[to] = j;
+                        arrive[(size_t)(lc + 1) * plane + to] = (uint16_t)c;
+                    }
+                }
+            }
+        }
+        uint64_t* tmp = jcur;
+        jcur = jnxt;
+        jnxt = tmp;
+    }
+    if (best_j == UINT64_MAX) goto done;
+    ZXC_MEMSET(out_cblc, 0, (ZXC_HUF_MAX_CODE_LEN_ULTRA + 1) * sizeof(uint32_t));
+    out_cblc[best_l] = (uint32_t)best_s;
+    {
+        int k = best_k;
+        int s = best_s;
+        for (int lc = best_l; lc > 1; lc--) {
+            const uint32_t c = arrive[(size_t)lc * plane + ZXC_NUDGE_DP_IDX(k, s)];
+            out_cblc[lc - 1] = c;
+            s = s / 2 + (int)c;
+            k -= (int)c;
+        }
+        if (k != 0 || s != 2) goto done; /* backtrack corruption: drop the candidate */
+    }
+    ok = 1;
+done:
+#undef ZXC_NUDGE_DP_IDX
+    ZXC_FREE(jcur);
+    ZXC_FREE(jnxt);
+    ZXC_FREE(arrive);
+    return ok;
+}
+
 /** @brief Assign a class-count multiset to symbols: frequency rank r takes the
  *         r-th shortest slot (rearrangement-optimal, deterministic). */
 static void zxc_huf_nudge_assign(const uint32_t* RESTRICT blc, const int16_t* RESTRICT sym_order,
@@ -622,8 +761,9 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     /* Candidates: the greedy ledger walk, then package-merge rebuilt at
      * reduced caps (optimal bits for a forced-shallower tree; the pass loop
      * runs max_depth + 1 times, so depth cuts attack the decoder's biggest
-     * fixed cost). Every candidate is a complete, Kraft-exact vector. */
-    uint8_t cand[3][ZXC_HUF_NUM_SYMBOLS];
+     * fixed cost), plus -- at DP efforts -- the slot-ledger dynamic program.
+     * Every candidate is a complete, Kraft-exact vector. */
+    uint8_t cand[4][ZXC_HUF_NUM_SYMBOLS];
     int n_cand = 0;
     {
         uint32_t blc_w[LU + 1];
@@ -645,6 +785,56 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         n_cand++;
     }
 
+    /* Slot-ledger DP candidate: optimal class counts under the rank-weighted
+     * model, solved on groups of 2^G frequency-adjacent symbols (G = 0 is
+     * exact for small alphabets; coarse tiers keep the plane cache-resident
+     * for larger ones, bounding the whole call to a few hundred us). When G
+     * does not divide n, the lightest group is padded with zero-freq "ghost"
+     * leaves carried by unused byte values -- wire-legal, their runs
+     * are empty, and the ratio cost of the burnt code space is priced by the
+     * evaluator like everything else. */
+    {
+        const int g_log2 = n <= 64 ? 0 : (n <= 128 ? 1 : 2);
+        const int g = 1 << g_log2;
+        const int m = (n + g - 1) / g;
+        const int cap_c = max_code_len - g_log2;
+        if (m >= 2 && cap_c >= 1 && cap_c <= LU && m <= (1 << cap_c)) {
+            uint64_t pfg[ZXC_HUF_NUM_SYMBOLS + 1];
+            for (int j2 = 0; j2 <= m; j2++) {
+                int r = j2 * g;
+                if (r > n) r = n;
+                pfg[j2] = pf_rank[r];
+            }
+            uint32_t cblc[LU + 1];
+            if (zxc_huf_nudge_dp_solve(pfg, m, cap_c, LU - g_log2, g_log2, cblc)) {
+                uint8_t* const cl = cand[n_cand];
+                ZXC_MEMSET(cl, 0, ZXC_HUF_NUM_SYMBOLS);
+                int r = 0;
+                int ghosts = 0;
+                uint8_t ghost_len = 0;
+                for (int lc = 1; lc <= cap_c; lc++) {
+                    for (uint32_t q = 0; q < cblc[lc]; q++) {
+                        for (int e = 0; e < g; e++, r++) {
+                            if (r < n) {
+                                cl[sym_order[r]] = (uint8_t)(lc + g_log2);
+                            } else {
+                                ghost_len = (uint8_t)(lc + g_log2);
+                                ghosts++;
+                            }
+                        }
+                    }
+                }
+                for (int s = 0; s < ZXC_HUF_NUM_SYMBOLS && ghosts; s++) {
+                    if (freq[s] == 0 && cl[s] == 0) {
+                        cl[s] = ghost_len;
+                        ghosts--;
+                    }
+                }
+                n_cand++;
+            }
+        }
+    }
+
     /* Guard + selection on exact costs: adopt the cheapest candidate clearing
      * both guard rails and strictly beating the baseline's J; otherwise leave
      * code_len byte-for-byte untouched (identical archive to the unadjusted
@@ -653,8 +843,18 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     uint64_t best_j = j0;
     int best = -1;
     for (int ci = 0; ci < n_cand; ci++) {
+        /* Every live symbol must keep a code; ghost-padded candidates carry
+         * MORE nonzero lengths than n, which is fine. */
+        int valid = 1;
+        for (int s = 0; s < ZXC_HUF_NUM_SYMBOLS; s++) {
+            if (freq[s] != 0 && cand[ci][s] == 0) {
+                valid = 0;
+                break;
+            }
+        }
+        if (!valid) continue;
         uint32_t blc[LU + 1];
-        if (zxc_huf_nudge_classes(cand[ci], blc) != n) continue;
+        (void)zxc_huf_nudge_classes(cand[ci], blc);
         zxc_huf_nudge_pf_canonical(cand[ci], freq, blc, pf);
         zxc_huf_nudge_cost_t c1;
         zxc_huf_nudge_eval(blc, pf, &c1);

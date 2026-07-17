@@ -678,13 +678,10 @@ typedef struct {
  *  canonical, Kraft-exact and within the level cap, so any v7 decoder reads
  *  the section unchanged (selection is encoder policy, FORMAT.md 5.2.1).
  *  Idea from pivco-huffman issue #20 (dougallj). All knobs are
- *  `#ifndef`-guarded so an A/B build can override them from CFLAGS.
+ *  `#ifndef`-guarded so an A/B build can override them from CFLAGS; in
+ *  particular `-DZXC_HUF_NUDGE_MERGE_Q8=0` makes the guard reject every
+ *  candidate, restoring archives byte-identical to the unadjusted encoder.
  *  @{ */
-/** @brief Master switch for the call sites; 0 restores archives byte-identical
- *         to the unadjusted encoder (the functions still compile). */
-#ifndef ZXC_HUF_NUDGE
-#define ZXC_HUF_NUDGE 1
-#endif
 /** @brief Exchange rate (Q8 bits per modeled level-touch) in the candidate
  *         cost `J = 256*bits + lambda*touches`; 26 ~= 0.10 bit per touch. */
 #ifndef ZXC_HUF_NUDGE_LAMBDA_Q8
@@ -1535,18 +1532,23 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
  * @brief Optionally reshape freshly built code lengths for faster PivCo decode.
  *
  * Explores a small set of Kraft-exact alternatives to @p code_len (a greedy
- * slot-ledger walk toward power-of-two class counts, plus package-merge
- * rebuilds at reduced depth caps) and prices each against the modeled decode
- * cost of zxc_pivco_decode_core. The cheapest candidate that clears the
- * adoption guard (<= +::ZXC_HUF_NUDGE_BITS_PERMIL ratio cost AND
+ * slot-ledger walk toward power-of-two class counts, package-merge rebuilds
+ * at reduced depth caps, and the slot-ledger dynamic program at a coarse
+ * granularity picked from the alphabet size) and prices each against the
+ * modeled decode cost of zxc_pivco_decode_core. The cheapest candidate that
+ * clears the adoption guard (<= +::ZXC_HUF_NUDGE_BITS_PERMIL ratio cost AND
  * <= ::ZXC_HUF_NUDGE_MERGE_Q8 modeled level-touches) replaces @p code_len;
  * otherwise the array is left byte-for-byte untouched, so a rejected nudge
- * emits an archive identical to the unadjusted encoder.
+ * emits an archive identical to the unadjusted encoder. Coarse-DP candidates
+ * may pad the tree with zero-frequency "ghost" leaves on unused byte values;
+ * the wire carries them as empty runs.
  *
  * Encoder policy only: any adopted output is canonical, Kraft-exact and capped
  * at @p max_code_len, so the wire format and every deployed decoder are
  * unaffected. Compiled once in the primary variant (ISA-independent decision
- * code), guaranteeing cross-ISA identical archives.
+ * code), guaranteeing cross-ISA identical archives. Cost is a few hundred
+ * microseconds per table at most (DP plane sizes are capped by the coarse
+ * granularity), which the ULTRA-only and trainer call sites absorb.
  *
  * @param[in]     freq         Frequency table of length `ZXC_HUF_NUM_SYMBOLS`.
  * @param[in,out] code_len     Lengths from ::zxc_huf_build_code_lengths.

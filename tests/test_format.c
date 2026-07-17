@@ -224,9 +224,11 @@ static int huf_nudge_case(const char* label, const uint8_t* literals, size_t n_l
             return 0;
         }
     } else {
-        /* Structural rails: cap respected, every live symbol keeps a code. */
+        /* Structural rails: cap respected, every live symbol keeps a code.
+         * (Coarse-DP candidates may add zero-freq ghost leaves, so a length
+         * on a freq == 0 symbol is legal; the reverse is not.) */
         for (int s = 0; s < ZXC_HUF_NUM_SYMBOLS; s++) {
-            if (nudged[s] > max_code_len || (freq[s] != 0) != (nudged[s] != 0)) {
+            if (nudged[s] > max_code_len || (freq[s] != 0 && nudged[s] == 0)) {
                 printf("Failed [%s]: adopted lengths invalid at sym %d (len=%d)\n", label, s,
                        nudged[s]);
                 return 0;
@@ -366,7 +368,8 @@ int test_huffman_nudge() {
     if (ok) printf("  [PASS] Degenerate n=1..3 untouched\n");
 
     /* Fuzz: random alphabets/frequencies; the cost model must match the real
-     * tree for every baseline AND every adopted vector, at both caps. */
+     * tree for every baseline AND every adopted vector, at both caps (large
+     * alphabets exercise the coarse-DP tiers and their ghost padding). */
     {
         int checked = 0;
         int adopted_cnt = 0;
