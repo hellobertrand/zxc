@@ -605,14 +605,12 @@ int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRI
              * table at compression time (the encoder's validity check). */
             uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
             rc = zxc_huf_build_code_lengths(freq, code_len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY);
-#if ZXC_HUF_NUDGE
             /* Dict tables serve the most literal-bound decode path (small
              * blocks, tree built once at attach), so the flat/length nudge
-             * pays off most here; training is offline, its cost is free. */
+             * pays off most here. */
             if (rc == ZXC_OK)
                 (void)zxc_huf_nudge_code_lengths(freq, code_len, NULL,
                                                  ZXC_HUF_MAX_CODE_LEN_DENSITY);
-#endif
             if (rc == ZXC_OK) zxc_huf_pack_lengths(code_len, huf_lengths_out);
         }
     }
