@@ -180,6 +180,7 @@ int test_seekable_mt_full_file(void);
 
 /* Format (on-disk) */
 int test_huffman_codec(void);
+int test_huffman_nudge(void);
 int test_huffman_codec_dict(void);
 int test_huffman_single_symbol_validation(void);
 int test_eof_block_structure(void);

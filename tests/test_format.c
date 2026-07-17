@@ -122,6 +122,289 @@ int test_huffman_codec() {
     return 1;
 }
 
+/* --------------------------------------------------------------------------
+ * Encoder-side flat/length nudge (zxc_huf_nudge_code_lengths)
+ * -------------------------------------------------------------------------- */
+
+/* Cross-check the nudge's buddy-decomposition cost model against the REAL
+ * tree the decoder builds: bits and modeled level-touches must match exactly,
+ * with the same flat/leaf-pair/deep-flat weighting as zxc_pivco_decode_core.
+ * This pins the "flat coverage from bl_count[] alone" math to the shipping
+ * flat detector (zxc_pivco_tree_build) for any valid length vector. */
+static int nudge_cost_matches_tree(const char* label, const uint8_t* code_len,
+                                   const uint32_t* freq) {
+    uint64_t bits = 0;
+    uint64_t touches = 0;
+    zxc_huf_nudge_cost(code_len, freq, &bits, &touches);
+
+    uint8_t packed[ZXC_HUF_TABLE_SIZE];
+    zxc_huf_pack_lengths(code_len, packed);
+    static zxc_pivco_tree_t tree;
+    static zxc_pivco_decode_aux_t aux;
+    static uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
+    uint8_t len2[ZXC_HUF_NUM_SYMBOLS];
+    if (zxc_huf_dict_tree_build(packed, &tree, codes, len2, &aux) != ZXC_OK) {
+        printf("Failed [%s]: reference tree build rejected the lengths\n", label);
+        return 0;
+    }
+
+    uint32_t count[ZXC_PIVCO_MAX_NODES];
+    for (int i = tree.n_nodes - 1; i >= 0; i--) {
+        const int nid = tree.bfs[i];
+        if (tree.nd[nid].sym >= 0) {
+            count[nid] = freq[tree.nd[nid].sym];
+        } else {
+            uint32_t c = 0;
+            if (tree.nd[nid].child[0] >= 0) c += count[tree.nd[nid].child[0]];
+            if (tree.nd[nid].child[1] >= 0) c += count[tree.nd[nid].child[1]];
+            count[nid] = c;
+        }
+    }
+
+    uint64_t rbits = 0;
+    for (int s = 0; s < ZXC_HUF_NUM_SYMBOLS; s++) rbits += (uint64_t)code_len[s] * freq[s];
+    uint64_t rtouches = 0;
+    for (int i = 0; i < tree.n_nodes; i++) {
+        const int nid = tree.bfs[i];
+        if (tree.covered[nid]) continue;
+        if (tree.nd[nid].sym >= 0) {
+            /* Lone leaf memset; leaf-pair children are emitted by the parent. */
+            if (!aux.skip[nid]) rtouches += count[nid];
+        } else if (tree.flat_d[nid]) {
+            uint64_t t = 1;
+            if (tree.flat_d[nid] > ZXC_HUF_NUDGE_FLAT_SIMD_MAX) t += ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY;
+            rtouches += (uint64_t)count[nid] * t;
+        } else {
+            rtouches += count[nid]; /* merge node (leaf-pair parents included) */
+        }
+    }
+    rtouches += (uint64_t)ZXC_HUF_NUDGE_LEVEL_COST * (uint64_t)(tree.max_depth + 1);
+
+    if (bits != rbits || touches != rtouches) {
+        printf("Failed [%s]: model (bits=%llu touches=%llu) != tree (bits=%llu touches=%llu)\n",
+               label, (unsigned long long)bits, (unsigned long long)touches,
+               (unsigned long long)rbits, (unsigned long long)rtouches);
+        return 0;
+    }
+    return 1;
+}
+
+/* Full nudge pipeline on one distribution and cap: build -> nudge -> validate
+ * structure, the calc_size == encode invariant, the decode roundtrip, the
+ * adoption guard arithmetic, determinism, and the cost model on both the
+ * baseline and the (possibly) adopted vector. */
+static int huf_nudge_case(const char* label, const uint8_t* literals, size_t n_lit,
+                          const int max_code_len) {
+    uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
+    for (size_t i = 0; i < n_lit; i++) freq[literals[i]]++;
+
+    uint8_t base_len[ZXC_HUF_NUM_SYMBOLS];
+    if (zxc_huf_build_code_lengths(freq, base_len, NULL, max_code_len) != ZXC_OK) {
+        printf("Failed [%s]: build_code_lengths\n", label);
+        return 0;
+    }
+    if (!nudge_cost_matches_tree(label, base_len, freq)) return 0;
+
+    uint8_t nudged[ZXC_HUF_NUM_SYMBOLS];
+    memcpy(nudged, base_len, sizeof(nudged));
+    const int adopted = zxc_huf_nudge_code_lengths(freq, nudged, NULL, max_code_len);
+
+    /* Determinism: a second independent run must reproduce the result. */
+    uint8_t nudged2[ZXC_HUF_NUM_SYMBOLS];
+    memcpy(nudged2, base_len, sizeof(nudged2));
+    const int adopted2 = zxc_huf_nudge_code_lengths(freq, nudged2, NULL, max_code_len);
+    if (adopted != adopted2 || memcmp(nudged, nudged2, sizeof(nudged)) != 0) {
+        printf("Failed [%s]: nudge is not deterministic\n", label);
+        return 0;
+    }
+
+    if (!adopted) {
+        if (memcmp(nudged, base_len, sizeof(nudged)) != 0) {
+            printf("Failed [%s]: rejected nudge modified the lengths\n", label);
+            return 0;
+        }
+    } else {
+        /* Structural rails: cap respected, every live symbol keeps a code. */
+        for (int s = 0; s < ZXC_HUF_NUM_SYMBOLS; s++) {
+            if (nudged[s] > max_code_len || (freq[s] != 0) != (nudged[s] != 0)) {
+                printf("Failed [%s]: adopted lengths invalid at sym %d (len=%d)\n", label, s,
+                       nudged[s]);
+                return 0;
+            }
+        }
+        /* The adoption guard must hold on the exact model costs. */
+        uint64_t b0, t0, b1, t1;
+        zxc_huf_nudge_cost(base_len, freq, &b0, &t0);
+        zxc_huf_nudge_cost(nudged, freq, &b1, &t1);
+        if (b1 * 1000 > b0 * ZXC_HUF_NUDGE_BITS_PERMIL || t1 * 256 > t0 * ZXC_HUF_NUDGE_MERGE_Q8) {
+            printf("Failed [%s]: adopted candidate violates the guard "
+                   "(bits %llu->%llu, touches %llu->%llu)\n",
+                   label, (unsigned long long)b0, (unsigned long long)b1, (unsigned long long)t0,
+                   (unsigned long long)t1);
+            return 0;
+        }
+        if (!nudge_cost_matches_tree(label, nudged, freq)) return 0;
+    }
+
+    /* Selector/encoder invariant + decode roundtrip on the final vector. */
+    const size_t cap = ZXC_HUF_TABLE_SIZE + 2 * n_lit + 4096;
+    uint8_t* enc = (uint8_t*)malloc(cap);
+    uint8_t* dec = (uint8_t*)malloc(n_lit + ZXC_PAD_SIZE);
+    uint8_t* scr = (uint8_t*)malloc(n_lit + ZXC_PIVCO_SCRATCH_PAD);
+    int ok = 0;
+    if (!enc || !dec || !scr) {
+        printf("Failed [%s]: alloc\n", label);
+        goto done;
+    }
+    {
+        const int written = zxc_huf_encode_section(literals, n_lit, freq, nudged, enc, cap);
+        if (written < 0) {
+            printf("Failed [%s]: encode_section -> %d\n", label, written);
+            goto done;
+        }
+        const size_t est = zxc_huf_calc_size(freq, nudged, 1);
+        if (est != (size_t)written) {
+            printf("Failed [%s]: calc_size %zu != encoded %d\n", label, est, written);
+            goto done;
+        }
+        if (zxc_huf_decode_section(enc, (size_t)written, dec, n_lit, scr) != ZXC_OK ||
+            memcmp(literals, dec, n_lit) != 0) {
+            printf("Failed [%s]: nudged roundtrip mismatch\n", label);
+            goto done;
+        }
+    }
+    printf("  [PASS] %s (cap=%d, %s)\n", label, max_code_len, adopted ? "adopted" : "kept");
+    ok = 1;
+done:
+    free(enc);
+    free(dec);
+    free(scr);
+    return ok;
+}
+
+int test_huffman_nudge() {
+    printf("=== TEST: Unit - Huffman flat/length nudge (model + guard + roundtrip) ===\n");
+
+    const size_t N = 16384;
+    uint8_t* buf = (uint8_t*)malloc(N);
+    if (!buf) return 0;
+    int ok = 1;
+
+    /* Geometric: deep 11-bit trees at ULTRA cap, the nudge's main target. */
+    for (size_t i = 0; i < N; i++) {
+        uint32_t r = zxc_test_rand();
+        int b = 0;
+        while (b < 17 && (r & 1)) {
+            b++;
+            r >>= 1;
+        }
+        buf[i] = (uint8_t)b;
+    }
+    ok &= huf_nudge_case("Geometric", buf, N, ZXC_HUF_MAX_CODE_LEN_ULTRA);
+    ok &= huf_nudge_case("Geometric cap8", buf, N, ZXC_HUF_MAX_CODE_LEN_DENSITY);
+
+    /* Zipf over the full alphabet: ragged class counts, boundary rounding. */
+    for (size_t i = 0; i < N; i++) {
+        const uint32_t r = zxc_test_rand() % 6000;
+        uint32_t s = 0;
+        uint32_t acc = 0;
+        while (s < 255) {
+            acc += 1000 / (s + 1);
+            if (r < acc) break;
+            s++;
+        }
+        buf[i] = (uint8_t)s;
+    }
+    ok &= huf_nudge_case("Zipf", buf, N, ZXC_HUF_MAX_CODE_LEN_ULTRA);
+    ok &= huf_nudge_case("Zipf cap8", buf, N, ZXC_HUF_MAX_CODE_LEN_DENSITY);
+
+    /* Text-like: few dozen symbols, mild skew (the common literal section). */
+    for (size_t i = 0; i < N; i++) {
+        const uint32_t r = zxc_test_rand();
+        buf[i] = (uint8_t)('a' + (((r & 0xFF) * ((r >> 8) & 0xFF)) >> 11));
+    }
+    ok &= huf_nudge_case("Text-like", buf, N, ZXC_HUF_MAX_CODE_LEN_ULTRA);
+
+    /* Uniform 256: already a single flat root; the nudge must keep baseline. */
+    for (size_t i = 0; i < N; i++) buf[i] = (uint8_t)(i & 0xFF);
+    {
+        uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
+        for (size_t i = 0; i < N; i++) freq[buf[i]]++;
+        uint8_t len[ZXC_HUF_NUM_SYMBOLS];
+        uint8_t kept[ZXC_HUF_NUM_SYMBOLS];
+        if (zxc_huf_build_code_lengths(freq, len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) != ZXC_OK) {
+            ok = 0;
+        } else {
+            memcpy(kept, len, sizeof(kept));
+            if (zxc_huf_nudge_code_lengths(freq, len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) != 0 ||
+                memcmp(kept, len, sizeof(kept)) != 0) {
+                printf("Failed [Uniform-256]: expected a no-op nudge\n");
+                ok = 0;
+            } else {
+                printf("  [PASS] Uniform-256 no-op\n");
+            }
+        }
+    }
+
+    /* Degenerate alphabets (n = 1, 2, 3): must never be touched. */
+    for (int nsym = 1; nsym <= 3; nsym++) {
+        uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
+        for (int s = 0; s < nsym; s++) freq[(uint8_t)('A' + s)] = (uint32_t)(100 * (s + 1));
+        uint8_t len[ZXC_HUF_NUM_SYMBOLS];
+        uint8_t kept[ZXC_HUF_NUM_SYMBOLS];
+        if (zxc_huf_build_code_lengths(freq, len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) != ZXC_OK) {
+            ok = 0;
+            continue;
+        }
+        memcpy(kept, len, sizeof(kept));
+        if (zxc_huf_nudge_code_lengths(freq, len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) != 0 ||
+            memcmp(kept, len, sizeof(kept)) != 0) {
+            printf("Failed [Degenerate n=%d]: expected untouched lengths\n", nsym);
+            ok = 0;
+        }
+    }
+    if (ok) printf("  [PASS] Degenerate n=1..3 untouched\n");
+
+    /* Fuzz: random alphabets/frequencies; the cost model must match the real
+     * tree for every baseline AND every adopted vector, at both caps. */
+    {
+        int checked = 0;
+        int adopted_cnt = 0;
+        for (int it = 0; it < 300 && ok; it++) {
+            uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
+            const int nsym = 4 + (int)(zxc_test_rand() % 253);
+            for (int s = 0; s < nsym; s++)
+                freq[(uint8_t)(zxc_test_rand() & 0xFF)] = 1 + (zxc_test_rand() & 0xFFFFF);
+            const int cap = (it & 1) ? ZXC_HUF_MAX_CODE_LEN_ULTRA : ZXC_HUF_MAX_CODE_LEN_DENSITY;
+            uint8_t len[ZXC_HUF_NUM_SYMBOLS];
+            if (zxc_huf_build_code_lengths(freq, len, NULL, cap) != ZXC_OK) {
+                ok = 0;
+                break;
+            }
+            if (!nudge_cost_matches_tree("Fuzz baseline", len, freq)) {
+                ok = 0;
+                break;
+            }
+            checked++;
+            if (zxc_huf_nudge_code_lengths(freq, len, NULL, cap)) {
+                adopted_cnt++;
+                if (!nudge_cost_matches_tree("Fuzz nudged", len, freq)) {
+                    ok = 0;
+                    break;
+                }
+            }
+        }
+        if (ok)
+            printf("  [PASS] Fuzz: %d histograms cross-checked, %d nudges adopted\n", checked,
+                   adopted_cnt);
+    }
+
+    free(buf);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}
+
 /* Round-trip the shared-table (dictionary) Huffman section codec: encode with
  * external code lengths and NO 128-byte header, decode through a prebuilt
  * table -- the enc_lit == 3 wire path (FORMAT.md Sec 5.2.2). */

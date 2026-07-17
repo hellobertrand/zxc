@@ -739,6 +739,10 @@ static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const siz
     }
 
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
+    /* No flat/length nudge here on purpose: these lengths only feed a
+     * bits/byte estimate into the parse DP and never reach the wire; nudging
+     * them would bias the parse toward worse ratio for zero decode benefit
+     * (the sections the parse produces get their own nudged tables). */
     if (UNLIKELY(zxc_huf_build_code_lengths(hist, code_len, scratch,
                                             ZXC_HUF_MAX_CODE_LEN_DENSITY) != ZXC_OK))
         return CHAR_BIT;
@@ -1616,6 +1620,13 @@ parse_done:;
 
         if (zxc_huf_build_code_lengths(freq, huf_code_len, ctx->opt_scratch,
                                        zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
+#if ZXC_HUF_NUDGE
+            /* Reshape toward flat-friendly class counts when the modeled
+             * decode win clears the adoption guard (encoder policy only; a
+             * rejected nudge leaves the lengths byte-for-byte untouched). */
+            (void)zxc_huf_nudge_code_lengths(freq, huf_code_len, ctx->opt_scratch,
+                                             zxc_huf_enc_max_code_len(level));
+#endif
             huf_total_size = zxc_huf_calc_size(freq, huf_code_len, 1);
             /* Space-speed: the entropy candidate must beat the current winner's
              * J, paying its own decode tax over the copy path. */
@@ -1670,6 +1681,11 @@ parse_done:;
         for (uint32_t i = 0; i < seq_c; i++) tfreq[buf_tokens[i]]++;
         if (zxc_huf_build_code_lengths(tfreq, tok_code_len, ctx->opt_scratch,
                                        zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
+#if ZXC_HUF_NUDGE
+            /* Same flat/length nudge as the literal section above. */
+            (void)zxc_huf_nudge_code_lengths(tfreq, tok_code_len, ctx->opt_scratch,
+                                             zxc_huf_enc_max_code_len(level));
+#endif
             tok_huf_size = zxc_huf_calc_size(tfreq, tok_code_len, 1);
             /* Space-speed J comparison (this path is ULTRA-only): the PivCo
              * token section pays the same decode tax as PivCo literals. */
