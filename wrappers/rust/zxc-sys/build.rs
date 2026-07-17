@@ -12,7 +12,7 @@
 //!
 //! On x86_64: Compiles `_default`, `_avx2`, and `_avx512` variants (SSE2 is
 //! the x86-64 baseline, already active in `_default`).
-//! On 32-bit ARM: `_default` and `_neon` (NEON is optional there; the
+//! On 32-bit ARM: `_default` and `_neon32` (NEON is optional there; the
 //! dispatcher probes it at runtime).
 //! Everywhere else (incl. AArch64, where NEON is baseline, and i686):
 //! `_default` only.
@@ -266,7 +266,7 @@ fn main() {
         compile_variant(
             &include_dir,
             &src_lib,
-            "_neon",
+            "_neon32",
             &["-march=armv7-a", "-mfpu=neon"],
         );
     }

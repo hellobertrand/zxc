@@ -33,7 +33,7 @@
 
 /*
  * Function Multi-Versioning Support
- * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2, _neon), rename the public
+ * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2, _neon32), rename the public
  * entry points so each variant TU produces its own copy under a unique symbol
  * (e.g. zxc_huf_decode_section_avx2). The runtime dispatcher in
  * zxc_compress.c / zxc_decompress.c routes to the matching variant.

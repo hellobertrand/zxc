@@ -85,15 +85,15 @@ int zxc_decompress_chunk_wrapper_safe_avx512(const zxc_cctx_t* RESTRICT ctx,
                                              const uint8_t* RESTRICT src, const size_t src_sz,
                                              uint8_t* RESTRICT dst, const size_t dst_cap);
 #elif defined(__arm__) || defined(_M_ARM)
-int zxc_decompress_chunk_wrapper_neon(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                      const size_t src_sz, uint8_t* RESTRICT dst,
-                                      const size_t dst_cap);
-int zxc_decompress_chunk_wrapper_dict_neon(const zxc_cctx_t* RESTRICT ctx,
-                                           const uint8_t* RESTRICT src, const size_t src_sz,
-                                           uint8_t* RESTRICT dst, const size_t dst_cap);
-int zxc_decompress_chunk_wrapper_safe_neon(const zxc_cctx_t* RESTRICT ctx,
-                                           const uint8_t* RESTRICT src, const size_t src_sz,
-                                           uint8_t* RESTRICT dst, const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_neon32(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                        const size_t src_sz, uint8_t* RESTRICT dst,
+                                        const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_dict_neon32(const zxc_cctx_t* RESTRICT ctx,
+                                             const uint8_t* RESTRICT src, const size_t src_sz,
+                                             uint8_t* RESTRICT dst, const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_safe_neon32(const zxc_cctx_t* RESTRICT ctx,
+                                             const uint8_t* RESTRICT src, const size_t src_sz,
+                                             uint8_t* RESTRICT dst, const size_t dst_cap);
 #endif
 #endif
 
@@ -140,9 +140,9 @@ int zxc_compress_chunk_wrapper_avx512(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap);
 #elif defined(__arm__) || defined(_M_ARM)
-int zxc_compress_chunk_wrapper_neon(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                    const size_t src_sz, uint8_t* RESTRICT dst,
-                                    const size_t dst_cap);
+int zxc_compress_chunk_wrapper_neon32(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                      const size_t src_sz, uint8_t* RESTRICT dst,
+                                      const size_t dst_cap);
 #endif
 
 /*
@@ -325,8 +325,8 @@ static int zxc_decompress_dispatch_init(const zxc_cctx_t* RESTRICT ctx, const ui
     // 32-bit ARM: the only arch with a real runtime NEON probe (getauxval).
     // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON) {
-        zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_neon;
-        zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_neon;
+        zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_neon32;
+        zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_neon32;
     } else {
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
         zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_default;
@@ -387,7 +387,7 @@ static int zxc_decompress_safe_dispatch_init(const zxc_cctx_t* RESTRICT ctx,
 #elif defined(__arm__) || defined(_M_ARM)
     // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON)
-        zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_neon;
+        zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_neon32;
     else
         zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_default;
 #else
@@ -441,7 +441,7 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 #elif defined(__arm__) || defined(_M_ARM)
     // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON)
-        zxc_compress_ptr_local = zxc_compress_chunk_wrapper_neon;
+        zxc_compress_ptr_local = zxc_compress_chunk_wrapper_neon32;
     else
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_default;
 #else
@@ -539,7 +539,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
  * ============================================================================
  * HUFFMAN TRAMPOLINES
  * ============================================================================
- * The Huffman codec is built per-variant (default / avx2 / avx512, plus neon
+ * The Huffman codec is built per-variant (default / avx2 / avx512, plus neon32
  * on 32-bit ARM)
  * alongside zxc_compress.c and zxc_decompress.c, so the LZ77 stages and the
  * Huffman stage in a given variant share the same ISA flags (e.g. -mbmi2 on

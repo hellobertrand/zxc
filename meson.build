@@ -75,7 +75,7 @@ if host_cpu == 'x86_64'
 elif host_cpu == 'arm'
   # 32-bit ARM only: NEON is optional there (runtime getauxval dispatch).
   # AArch64 needs no extra variant: NEON is baseline and lives in _default.
-  variant_sets += [['_neon', ['-march=armv7-a', '-mfpu=neon']]]
+  variant_sets += [['_neon32', ['-march=armv7-a', '-mfpu=neon']]]
 endif
 
 variant_objects = []

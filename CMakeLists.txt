@@ -198,8 +198,8 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
     message(STATUS "AArch64: NEON is baseline; no dedicated SIMD variant needed.")
 
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
-    message(STATUS "Building ARM NEON variant...")
-    zxc_add_variant(_neon "-march=armv7-a;-mfpu=neon")
+    message(STATUS "Building ARMv7 NEON32 variant...")
+    zxc_add_variant(_neon32 "-march=armv7-a;-mfpu=neon")
 endif()
 endif()
 
