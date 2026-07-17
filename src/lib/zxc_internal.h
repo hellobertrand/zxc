@@ -844,7 +844,6 @@ typedef struct {
      8U + (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * sizeof(int) + 8U +          \
      (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * (size_t)ZXC_HUF_PM_LEVEL_BOUND * \
          sizeof(zxc_huf_pm_frame_t))
-/** @} */
 
 /** @name Block Size Helpers
  *  @brief Runtime helpers for variable block sizes.
