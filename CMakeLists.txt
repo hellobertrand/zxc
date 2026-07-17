@@ -179,32 +179,23 @@ if(ZXC_DISABLE_SIMD)
 else()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
     message(STATUS "Building x86_64 AVX2 and AVX512 variants...")
+    # No _sse2 variant: SSE2 is the x86-64 baseline, so _default already
+    # compiles the SSE2 code paths (ZXC_USE_SSE2 in zxc_internal.h).
     if(MSVC)
-        # SSE2 for MSVC: SSE2 is the x86-64 baseline
-        zxc_add_variant(_sse2 "/D__SSE2__")
         # AVX2 for MSVC (Enables AVX2/BMI1/BMI2 sets)
         zxc_add_variant(_avx2 "/arch:AVX2;/D__BMI__;/D__BMI2__;/D__LZCNT__")
         # AVX512 for MSVC (VS2019 16.10+ supports /arch:AVX512)
         zxc_add_variant(_avx512 "/arch:AVX512;/D__BMI__;/D__BMI2__;/D__LZCNT__")
     else()
-        # SSE2 for GCC/Clang (x86-64 baseline)
-        zxc_add_variant(_sse2 "-msse2")
         # AVX2 for GCC/Clang
-        zxc_add_variant(_avx2 "-mavx2;-mfma;-mbmi;-mbmi2;-mlzcnt")
+        zxc_add_variant(_avx2 "-mavx2;-mbmi;-mbmi2;-mlzcnt")
         # AVX512 for GCC/Clang
         zxc_add_variant(_avx512
                         "-mavx512f;-mavx512bw;-mavx512vbmi;-mavx512vbmi2;-mbmi;-mbmi2;-mlzcnt")
     endif()
 
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
-    message(STATUS "Building AArch64 NEON variant...")
-    if(MSVC)
-        # MSVC for ARM64 implies NEON support by default.
-        zxc_add_variant(_neon "")
-    else()
-        # NEON is usually default on AArch64, but we add a specific variant for structure
-        zxc_add_variant(_neon "-march=armv8-a+simd")
-    endif()
+    message(STATUS "AArch64: NEON is baseline; no dedicated SIMD variant needed.")
 
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
     message(STATUS "Building ARM NEON variant...")

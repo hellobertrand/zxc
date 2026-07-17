@@ -285,10 +285,13 @@ jobs:
   # TCG re-translation) and, unlike QEMU's TCG, can execute AVX-512. One native
   # build per job carries all per-ISA variants; the emulated CPU model makes the
   # runtime dispatcher select that job's tier:
-  #   -mrm  Merom (Core 2)  -> SSE2 tier    (== old core2duo)
-  #   -hsw  Haswell         -> AVX2 tier     (== old Haswell)
-  #   -icx  Ice Lake Server -> AVX-512 tier  (F+BW+VBMI2; VBMI2 is required by
-  #                            ZXC's AVX-512 gate, which Skylake-Server lacks)
+  #   -mrm  Merom (Core 2)  -> SSE2 tier    (sub-AVX2 detection -> _default,
+  #                            which carries the SSE2 paths: x86-64 baseline)
+  #   -hsw  Haswell         -> AVX2 tier     (gate = AVX2+BMI1+BMI2+LZCNT,
+  #                            all present on Haswell; Merom has none)
+  #   -icx  Ice Lake Server -> AVX-512 tier  (F+BW+VBMI2 plus BMI1/BMI2/LZCNT;
+  #                            VBMI2 is required by ZXC's AVX-512 gate, which
+  #                            Skylake-Server lacks)
   # ===========================================================================
   build-tier2-amd64-sde:
     name: "Tier 2: Linux amd64 (${{ matrix.tier }})"

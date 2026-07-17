@@ -80,9 +80,10 @@ extern "C" {
  * Note: @c -mavx2 / @c -mavx512f imply @c __SSE2__, so @c ZXC_USE_SSE2 is
  * also defined in the AVX variants. The hand-written SIMD code paths therefore
  * order their preprocessor branches AVX512 -> AVX2 -> SSE2 so the widest
- * available path wins; the SSE2 branch is the active one only in the dedicated
- * @c _sse2 variant (no AVX2/AVX512 flags). SSE2 is the x86-64 baseline, so this
- * tier covers every 64-bit x86 CPU (and i686 with @c -msse2). The handful of
+ * available path wins; the SSE2 branch is the active one in the @c _default
+ * variant on x86-64 (no AVX2/AVX512 flags). SSE2 is the x86-64 baseline, so no
+ * dedicated @c _sse2 variant exists: @c _default covers every 64-bit x86 CPU
+ * (and i686 with @c -msse2). The handful of
  * operations that would otherwise require SSE4.1 (@c _mm_max_epu32,
  * @c _mm_blendv_epi8, @c _mm_packus_epi32) or SSSE3 (@c _mm_shuffle_epi8) are
  * emulated with pure SSE2 instruction sequences or fall back to scalar code.

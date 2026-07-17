@@ -27,6 +27,14 @@
 # baseline — is a removed/renamed exported symbol, a changed public function
 # signature, or a layout change to a by-value/visible type (e.g. an *_opts_t
 # struct). Those are intentionally NOT suppressed here.
+#
+# Internal FMV variant symbols (zxc_*_default / _neon / _avx2 / _avx512) are
+# NOT public API: they are declared only in the non-installed zxc_internal.h /
+# zxc_dispatch.c, compiled with -fvisibility=hidden for shared builds, and
+# never appear in the exported ELF symbol table. They can surface in the
+# baseline XML only as declaration-only DWARF records (no elf-symbol-id).
+# Adding or removing a variant is therefore NOT an ABI event and must not
+# force a SOVERSION bump — regenerate the baseline and move on.
 
 [suppress_type]
   type_kind = struct
