@@ -9,8 +9,10 @@
  * @file zxc_dispatch.c
  * @brief Runtime CPU feature detection and SIMD dispatch layer.
  *
- * Detects AVX2/AVX512/NEON at runtime and routes compress/decompress calls
- * to the best available implementation via lazy-initialised function pointers.
+ * Detects AVX2/AVX512 (x86-64) and NEON (32-bit ARM) at runtime and routes
+ * compress/decompress calls to the best available implementation via
+ * lazy-initialised function pointers. SSE2 on x86-64 and NEON on AArch64 are
+ * baseline ISA guarantees, so the _default variant already covers those tiers.
  * Also contains the public one-shot buffer API (@ref zxc_compress,
  * @ref zxc_decompress, @ref zxc_get_decompressed_size).
  */
@@ -33,6 +35,10 @@
 #if defined(_M_X64)
 #include <immintrin.h>  // _xgetbv (x86-specific header; x64 AVX state check)
 #endif
+#endif
+
+#if (defined(__x86_64__) || defined(_M_X64)) && !defined(_MSC_VER) && !defined(ZXC_ONLY_DEFAULT)
+#include <cpuid.h>  // __get_cpuid: LZCNT probe in zxc_detect_cpu_features
 #endif
 
 #if defined(__linux__) && (defined(__arm__) || defined(_M_ARM))
@@ -78,25 +84,16 @@ int zxc_decompress_chunk_wrapper_safe_avx2(const zxc_cctx_t* RESTRICT ctx,
 int zxc_decompress_chunk_wrapper_safe_avx512(const zxc_cctx_t* RESTRICT ctx,
                                              const uint8_t* RESTRICT src, const size_t src_sz,
                                              uint8_t* RESTRICT dst, const size_t dst_cap);
-int zxc_decompress_chunk_wrapper_sse2(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                      const size_t src_sz, uint8_t* RESTRICT dst,
-                                      const size_t dst_cap);
-int zxc_decompress_chunk_wrapper_dict_sse2(const zxc_cctx_t* RESTRICT ctx,
-                                           const uint8_t* RESTRICT src, const size_t src_sz,
-                                           uint8_t* RESTRICT dst, const size_t dst_cap);
-int zxc_decompress_chunk_wrapper_safe_sse2(const zxc_cctx_t* RESTRICT ctx,
-                                           const uint8_t* RESTRICT src, const size_t src_sz,
-                                           uint8_t* RESTRICT dst, const size_t dst_cap);
-#elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
-int zxc_decompress_chunk_wrapper_neon(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                      const size_t src_sz, uint8_t* RESTRICT dst,
-                                      const size_t dst_cap);
-int zxc_decompress_chunk_wrapper_dict_neon(const zxc_cctx_t* RESTRICT ctx,
-                                           const uint8_t* RESTRICT src, const size_t src_sz,
-                                           uint8_t* RESTRICT dst, const size_t dst_cap);
-int zxc_decompress_chunk_wrapper_safe_neon(const zxc_cctx_t* RESTRICT ctx,
-                                           const uint8_t* RESTRICT src, const size_t src_sz,
-                                           uint8_t* RESTRICT dst, const size_t dst_cap);
+#elif defined(__arm__) || defined(_M_ARM)
+int zxc_decompress_chunk_wrapper_neon32(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                        const size_t src_sz, uint8_t* RESTRICT dst,
+                                        const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_dict_neon32(const zxc_cctx_t* RESTRICT ctx,
+                                             const uint8_t* RESTRICT src, const size_t src_sz,
+                                             uint8_t* RESTRICT dst, const size_t dst_cap);
+int zxc_decompress_chunk_wrapper_safe_neon32(const zxc_cctx_t* RESTRICT ctx,
+                                             const uint8_t* RESTRICT src, const size_t src_sz,
+                                             uint8_t* RESTRICT dst, const size_t dst_cap);
 #endif
 #endif
 
@@ -142,13 +139,10 @@ int zxc_compress_chunk_wrapper_avx2(zxc_cctx_t* RESTRICT ctx, const uint8_t* RES
 int zxc_compress_chunk_wrapper_avx512(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap);
-int zxc_compress_chunk_wrapper_sse2(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                    const size_t src_sz, uint8_t* RESTRICT dst,
-                                    const size_t dst_cap);
-#elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
-int zxc_compress_chunk_wrapper_neon(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                    const size_t src_sz, uint8_t* RESTRICT dst,
-                                    const size_t dst_cap);
+#elif defined(__arm__) || defined(_M_ARM)
+int zxc_compress_chunk_wrapper_neon32(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                      const size_t src_sz, uint8_t* RESTRICT dst,
+                                      const size_t dst_cap);
 #endif
 
 /*
@@ -165,8 +159,10 @@ typedef enum {
     ZXC_CPU_GENERIC = 0, /**< @brief Scalar-only fallback.   */
     ZXC_CPU_AVX2 = 1,    /**< @brief x86-64 AVX2 available.  */
     ZXC_CPU_AVX512 = 2,  /**< @brief x86-64 AVX-512F+BW available. */
-    ZXC_CPU_NEON = 3,    /**< @brief ARM NEON available.      */
-    ZXC_CPU_SSE2 = 4     /**< @brief x86 SSE2 available (no AVX2); x86-64 baseline. */
+    ZXC_CPU_NEON = 3,    /**< @brief ARM NEON available (dedicated variant on 32-bit ARM only;
+                          *          AArch64 baseline, served by _default there). */
+    ZXC_CPU_SSE2 = 4     /**< @brief x86 SSE2 available (no AVX2); x86-64 baseline,
+                          *          served by _default (no dedicated variant). */
 } zxc_cpu_feature_t;
 
 /**
@@ -192,6 +188,7 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
     int sse2 = 0;
     int avx2 = 0;
     int avx512 = 0;
+    int bmi_lzcnt = 0;
 
     __cpuid(regs, 1);
     if (regs[3] & (1 << 26)) sse2 = 1;  // SSE2
@@ -199,17 +196,24 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
         const unsigned long long xcr0 = _xgetbv(0);
         if ((xcr0 & 0x6) == 0x6) {  // SSE+YMM enabled
             __cpuidex(regs, 7, 0);
+            const int bmi1 = (regs[1] >> 3) & 1;  // CPUID.7.0:EBX[3]
+            const int bmi2 = (regs[1] >> 8) & 1;  // CPUID.7.0:EBX[8]
             if (regs[1] & (1 << 5)) avx2 = 1;
             // AVX512 also needs XCR0[5..7] (opmask/ZMM)
             if ((regs[1] & (1 << 16)) && (regs[1] & (1 << 30)) && (regs[2] & (1 << 6)) &&
                 (xcr0 & 0xE0) == 0xE0)
                 avx512 = 1; /* AVX512 tier = F+BW+VBMI2 (variant built with -mavx512vbmi2) */
+            // The AVX2/AVX512 variants are compiled with BMI1/BMI2/LZCNT enabled,
+            // so both gates must prove those bits too. LZCNT (ABM) lives in
+            // CPUID.80000001H:ECX[5]; that leaf is architectural on x86-64.
+            __cpuid(regs, (int)0x80000001);
+            bmi_lzcnt = bmi1 && bmi2 && ((regs[2] >> 5) & 1);
         }
     }
 
-    if (avx512) {
+    if (avx512 && bmi_lzcnt) {
         features = ZXC_CPU_AVX512;
-    } else if (avx2) {
+    } else if (avx2 && bmi_lzcnt) {
         features = ZXC_CPU_AVX2;
     } else if (sse2) {
         features = ZXC_CPU_SSE2;
@@ -218,10 +222,16 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
     // GCC/Clang built-in detection
     __builtin_cpu_init();
 
-    if (__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
+    // The AVX2/AVX512 variants are compiled with -mbmi -mbmi2 -mlzcnt, so both
+    // gates must prove BMI1/BMI2/LZCNT too (mirrors the F+BW+VBMI2 rule below).
+    unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
+    const int lzcnt = __get_cpuid(0x80000001U, &eax, &ebx, &ecx, &edx) && ((ecx >> 5) & 1U);
+    const int bmi_lzcnt = lzcnt && __builtin_cpu_supports("bmi") && __builtin_cpu_supports("bmi2");
+
+    if (bmi_lzcnt && __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
         __builtin_cpu_supports("avx512vbmi2")) {
         features = ZXC_CPU_AVX512;
-    } else if (__builtin_cpu_supports("avx2")) {
+    } else if (bmi_lzcnt && __builtin_cpu_supports("avx2")) {
         features = ZXC_CPU_AVX2;
     } else if (__builtin_cpu_supports("sse2")) {
         features = ZXC_CPU_SSE2;
@@ -307,18 +317,16 @@ static int zxc_decompress_dispatch_init(const zxc_cctx_t* RESTRICT ctx, const ui
     } else if (cpu == ZXC_CPU_AVX2) {
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_avx2;
         zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_avx2;
-    } else if (cpu == ZXC_CPU_SSE2) {
-        zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_sse2;
-        zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_sse2;
     } else {
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
         zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_default;
     }
-#elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
+#elif defined(__arm__) || defined(_M_ARM)
+    // 32-bit ARM: the only arch with a real runtime NEON probe (getauxval).
     // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON) {
-        zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_neon;
-        zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_neon;
+        zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_neon32;
+        zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_neon32;
     } else {
         zxc_decompress_ptr_local = zxc_decompress_chunk_wrapper_default;
         zxc_decompress_dict_ptr_local = zxc_decompress_chunk_wrapper_dict_default;
@@ -374,14 +382,12 @@ static int zxc_decompress_safe_dispatch_init(const zxc_cctx_t* RESTRICT ctx,
         zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_avx512;
     else if (cpu == ZXC_CPU_AVX2)
         zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_avx2;
-    else if (cpu == ZXC_CPU_SSE2)
-        zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_sse2;
     else
         zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_default;
-#elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
+#elif defined(__arm__) || defined(_M_ARM)
     // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON)
-        zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_neon;
+        zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_neon32;
     else
         zxc_decompress_safe_ptr_local = zxc_decompress_chunk_wrapper_safe_default;
 #else
@@ -430,14 +436,12 @@ static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_avx512;
     else if (cpu == ZXC_CPU_AVX2)
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_avx2;
-    else if (cpu == ZXC_CPU_SSE2)
-        zxc_compress_ptr_local = zxc_compress_chunk_wrapper_sse2;
     else
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_default;
-#elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
+#elif defined(__arm__) || defined(_M_ARM)
     // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON)
-        zxc_compress_ptr_local = zxc_compress_chunk_wrapper_neon;
+        zxc_compress_ptr_local = zxc_compress_chunk_wrapper_neon32;
     else
         zxc_compress_ptr_local = zxc_compress_chunk_wrapper_default;
 #else
@@ -535,7 +539,8 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
  * ============================================================================
  * HUFFMAN TRAMPOLINES
  * ============================================================================
- * The Huffman codec is built per-variant (default / avx2 / avx512 / neon)
+ * The Huffman codec is built per-variant (default / avx2 / avx512, plus neon32
+ * on 32-bit ARM)
  * alongside zxc_compress.c and zxc_decompress.c, so the LZ77 stages and the
  * Huffman stage in a given variant share the same ISA flags (e.g. -mbmi2 on
  * the AVX2/AVX512 variants). The compress/decompress variant TUs resolve

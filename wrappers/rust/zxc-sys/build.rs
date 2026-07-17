@@ -10,8 +10,12 @@
 //! This script compiles the ZXC C library with Function Multi-Versioning (FMV)
 //! to support runtime CPU feature detection and optimized code paths.
 //!
-//! On ARM64: Compiles `_default` and `_neon` variants
-//! On x86_64: Compiles `_default`, `_sse2`, `_avx2`, and `_avx512` variants
+//! On x86_64: Compiles `_default`, `_avx2`, and `_avx512` variants (SSE2 is
+//! the x86-64 baseline, already active in `_default`).
+//! On 32-bit ARM: `_default` and `_neon32` (NEON is optional there; the
+//! dispatcher probes it at runtime).
+//! Everywhere else (incl. AArch64, where NEON is baseline, and i686):
+//! `_default` only.
 
 use std::env;
 use std::fs;
@@ -186,8 +190,9 @@ fn main() {
     );
 
     let target = env::var("TARGET").unwrap_or_default();
-    let is_arm64 = target.contains("aarch64") || target.contains("arm64");
-    let is_x86_64 = target.contains("x86_64") || target.contains("i686");
+    let is_x86_64 = target.contains("x86_64");
+    let is_arm32 = (target.starts_with("arm") && !target.starts_with("arm64"))
+        || target.starts_with("thumbv7");
 
     // =========================================================================
     // Core library files (common to all architectures)
@@ -208,19 +213,11 @@ fn main() {
         .warnings(false)
         .flag_if_supported("-pthread");
 
+    core_build.compile("zxc_core");
+
     // =========================================================================
     // Function Multi-Versioning: Compile variants with different suffixes
     // =========================================================================
-
-    // Add architecture-specific flags to core build BEFORE compiling
-    if is_arm64 {
-        core_build.flag_if_supported("-march=armv8-a+crc");
-    } else if is_x86_64 {
-        core_build.flag_if_supported("-msse2");
-        core_build.flag_if_supported("-mpclmul");
-    }
-
-    core_build.compile("zxc_core");
 
     // --- Default variant (baseline, always compiled) ---
     compile_variant(&include_dir, &src_lib, "_default", &[]);
@@ -231,10 +228,7 @@ fn main() {
     // needs its own /arch spellings plus the __BMI*__/__LZCNT__ macros the
     // sources test (cl.exe never defines them itself).
     let is_msvc = target.contains("msvc");
-    if is_arm64 {
-        compile_variant(&include_dir, &src_lib, "_neon", &["-march=armv8-a+simd"]);
-    } else if is_x86_64 && is_msvc {
-        compile_variant(&include_dir, &src_lib, "_sse2", &["/D__SSE2__"]);
+    if is_x86_64 && is_msvc {
         compile_variant(
             &include_dir,
             &src_lib,
@@ -248,14 +242,11 @@ fn main() {
             &["/arch:AVX512", "/D__BMI__", "/D__BMI2__", "/D__LZCNT__"],
         );
     } else if is_x86_64 {
-        // SSE2 variant: the x86-64 baseline (also covers any i686 built with
-        // SSE2).
-        compile_variant(&include_dir, &src_lib, "_sse2", &["-msse2"]);
         compile_variant(
             &include_dir,
             &src_lib,
             "_avx2",
-            &["-mavx2", "-mfma", "-mbmi", "-mbmi2", "-mlzcnt"],
+            &["-mavx2", "-mbmi", "-mbmi2", "-mlzcnt"],
         );
         compile_variant(
             &include_dir,
@@ -270,6 +261,13 @@ fn main() {
                 "-mbmi2",
                 "-mlzcnt",
             ],
+        );
+    } else if is_arm32 {
+        compile_variant(
+            &include_dir,
+            &src_lib,
+            "_neon32",
+            &["-march=armv7-a", "-mfpu=neon"],
         );
     }
 

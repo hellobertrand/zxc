@@ -17,7 +17,7 @@
 
 /*
  * Function Multi-Versioning Support
- * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2, _neon), rename the public
+ * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2, _neon32), rename the public
  * entry point AND the Huffman entry points consumed by this TU. The defines
  * sit before zxc_internal.h so that the prototypes the header declares are
  * also rewritten with the suffix, keeping callers and callees consistent.
