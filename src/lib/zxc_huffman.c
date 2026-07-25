@@ -692,8 +692,11 @@ static int zxc_huf_nudge_dp_solve(const uint64_t* RESTRICT pfg, const int m, con
 
     const size_t plane = (size_t)(m + 1) * (size_t)(m + 1);
     const size_t arrive_cnt = (size_t)(cap_c + 1) * plane;
-    uint64_t* pool =
-        (uint64_t*)ZXC_MALLOC(2 * plane * sizeof(uint64_t) + arrive_cnt * sizeof(uint16_t));
+    const size_t arrive_slots =
+        (arrive_cnt * sizeof(uint16_t) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
+    const size_t pool_slots = 2 * plane + arrive_slots;
+
+    uint64_t* pool = (uint64_t*)ZXC_MALLOC(pool_slots * sizeof(uint64_t));
     if (UNLIKELY(!pool)) return 0;
 
     uint64_t* jcur = pool;
@@ -713,7 +716,9 @@ static int zxc_huf_nudge_dp_solve(const uint64_t* RESTRICT pfg, const int m, con
         for (int k = 0; k < m; k++) {
             const uint32_t n_rem = (uint32_t)(m - k);
             for (uint32_t s = 1; s <= n_rem; s++) {
-                const uint64_t j0 = jcur[ZXC_NUDGE_DP_IDX(k, s)];
+                const size_t from = ZXC_NUDGE_DP_IDX(k, s);
+                if (UNLIKELY(from >= plane)) continue;
+                const uint64_t j0 = jcur[from];
                 if (j0 == UINT64_MAX) continue;
                 if (s == n_rem) {
                     /* Forced finish: fill every slot, close the tree here. */
@@ -739,9 +744,12 @@ static int zxc_huf_nudge_dp_solve(const uint64_t* RESTRICT pfg, const int m, con
                     const uint64_t j =
                         j0 + zxc_huf_nudge_dp_run_j(lu, lc, g_log2, s, c, pfg, (uint32_t)k);
                     const size_t to = ZXC_NUDGE_DP_IDX(k + (int)c, 2 * (s - c));
+                    const size_t arr = (size_t)(lc + 1) * plane + to;
+
+                    if (UNLIKELY(to >= plane || arr >= arrive_cnt)) continue;
                     if (j < jnxt[to]) {
                         jnxt[to] = j;
-                        arrive[(size_t)(lc + 1) * plane + to] = (uint16_t)c;
+                        arrive[arr] = (uint16_t)c;
                     }
                 }
             }
@@ -867,11 +875,13 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
             break;
         }
     }
-    for (int cut = 1; cut <= 2 && max_len0 - cut >= 2; cut++) {
-        const int cap2 = max_len0 - cut;
-        if (((uint32_t)1 << cap2) < (uint32_t)n) break;
-        if (zxc_huf_build_code_lengths(freq, cand[n_cand], scratch, cap2) != ZXC_OK) break;
-        n_cand++;
+    if (max_len0 >= 2) {
+        for (int cut = 1; cut <= 2; cut++) {
+            const int cap2 = max_len0 - cut;
+            if (cap2 < 2 || ((uint32_t)1 << cap2) < (uint32_t)n) break;
+            if (zxc_huf_build_code_lengths(freq, cand[n_cand], scratch, cap2) != ZXC_OK) break;
+            n_cand++;
+        }
     }
 
     /* Slot-ledger DP candidate: optimal class counts under the rank-weighted
