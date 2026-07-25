@@ -1,6 +1,6 @@
 # ZXC: High-Performance Asymmetric Lossless Compression
 
-**Version**: 0.13.0
+**Version**: 0.13.1
 **Date**: July 2026
 **Author**: Bertrand Lebonnois
 
@@ -588,7 +588,7 @@ Benchmarks were conducted using `lzbench` (by inikep) with default block size of
 
 **Decompression Efficiency (Cycles per Byte @ 3.5 GHz)**
 
-| Compressor.             | Cycles/Byte | Performance vs memcpy (*) |
+| Compressor              | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
 | memcpy                  | 0.066       | 1.00x (baseline)      |
 | **zxc 0.13.0 -1**       | **0.272**   | **4.1x**              |
