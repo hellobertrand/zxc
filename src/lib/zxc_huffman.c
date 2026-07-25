@@ -564,7 +564,7 @@ static void zxc_huf_nudge_walk(const uint32_t* RESTRICT blc0, const uint64_t* RE
                 const uint32_t want = s > shapes[k] ? s - shapes[k] : 0;
                 const uint32_t c = zxc_huf_nudge_clamp(want, s, n_rem, l, cap);
                 int dup = 0;
-                for (int p = 0; p < n_cand; p++) dup |= (cand[p].c == c && !cand[p].flat_d);
+                for (int p = 0; p < n_cand; p++) dup |= (cand[p].c == c);
                 if (!dup) {
                     cand[n_cand].c = c;
                     cand[n_cand++].flat_d = 0;
@@ -689,11 +689,14 @@ static uint64_t zxc_huf_nudge_dp_run_j(const int lu, const int lc, const int g_l
 static int zxc_huf_nudge_dp_solve(const uint64_t* RESTRICT pfg, const int m, const int cap_c,
                                   const int lu, const int g_log2, uint32_t* RESTRICT out_cblc) {
     const size_t plane = (size_t)(m + 1) * (size_t)(m + 1);
-    uint64_t* jcur = (uint64_t*)ZXC_MALLOC(plane * sizeof(uint64_t));
-    uint64_t* jnxt = (uint64_t*)ZXC_MALLOC(plane * sizeof(uint64_t));
-    uint16_t* arrive = (uint16_t*)ZXC_MALLOC((size_t)(cap_c + 1) * plane * sizeof(uint16_t));
+    const size_t arrive_cnt = (size_t)(cap_c + 1) * plane;
+    uint64_t* pool =
+        (uint64_t*)ZXC_MALLOC(2 * plane * sizeof(uint64_t) + arrive_cnt * sizeof(uint16_t));
+    if (!pool) return 0;
+    uint64_t* jcur = pool;
+    uint64_t* jnxt = pool + plane;
+    uint16_t* arrive = (uint16_t*)(pool + 2 * plane);
     int ok = 0;
-    if (!jcur || !jnxt || !arrive) goto done;
 #define ZXC_NUDGE_DP_IDX(k, s) ((size_t)(k) * (size_t)(m + 1) + (size_t)(s))
     for (size_t i = 0; i < plane; i++) jcur[i] = UINT64_MAX;
     jcur[ZXC_NUDGE_DP_IDX(0, 2)] = 0;
@@ -760,9 +763,7 @@ static int zxc_huf_nudge_dp_solve(const uint64_t* RESTRICT pfg, const int m, con
     ok = 1;
 done:
 #undef ZXC_NUDGE_DP_IDX
-    ZXC_FREE(jcur);
-    ZXC_FREE(jnxt);
-    ZXC_FREE(arrive);
+    ZXC_FREE(pool);
     return ok;
 }
 
@@ -882,7 +883,7 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         const int g = 1 << g_log2;
         const int m = (n + g - 1) / g;
         const int cap_c = max_code_len - g_log2;
-        if (m >= 2 && cap_c >= 1 && cap_c <= LU && m <= (1 << cap_c)) {
+        if (m >= 2 && cap_c >= 1 && m <= (1 << cap_c)) {
             uint64_t pfg[ZXC_HUF_NUM_SYMBOLS + 1];
             for (int j2 = 0; j2 <= m; j2++) {
                 int r = j2 * g;
