@@ -333,10 +333,10 @@ int test_huffman_nudge() {
         uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
         for (size_t i = 0; i < N; i++) freq[buf[i]]++;
         uint8_t len[ZXC_HUF_NUM_SYMBOLS];
-        uint8_t kept[ZXC_HUF_NUM_SYMBOLS];
         if (zxc_huf_build_code_lengths(freq, len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) != ZXC_OK) {
             ok = 0;
         } else {
+            uint8_t kept[ZXC_HUF_NUM_SYMBOLS];
             memcpy(kept, len, sizeof(kept));
             if (zxc_huf_nudge_code_lengths(freq, len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) != 0 ||
                 memcmp(kept, len, sizeof(kept)) != 0) {

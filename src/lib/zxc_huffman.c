@@ -863,9 +863,9 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
             break;
         }
     }
-    for (int cut = 1; cut <= 2; cut++) {
+    for (int cut = 1; cut <= 2 && max_len0 - cut >= 2; cut++) {
         const int cap2 = max_len0 - cut;
-        if (cap2 < 2 || ((uint32_t)1 << cap2) < (uint32_t)n) break;
+        if (((uint32_t)1 << cap2) < (uint32_t)n) break;
         if (zxc_huf_build_code_lengths(freq, cand[n_cand], scratch, cap2) != ZXC_OK) break;
         n_cand++;
     }
