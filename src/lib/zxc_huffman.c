@@ -688,15 +688,19 @@ static uint64_t zxc_huf_nudge_dp_run_j(const int lu, const int lc, const int g_l
  */
 static int zxc_huf_nudge_dp_solve(const uint64_t* RESTRICT pfg, const int m, const int cap_c,
                                   const int lu, const int g_log2, uint32_t* RESTRICT out_cblc) {
+    if (UNLIKELY(m < 2 || cap_c < 1)) return 0;
+
     const size_t plane = (size_t)(m + 1) * (size_t)(m + 1);
     const size_t arrive_cnt = (size_t)(cap_c + 1) * plane;
     uint64_t* pool =
         (uint64_t*)ZXC_MALLOC(2 * plane * sizeof(uint64_t) + arrive_cnt * sizeof(uint16_t));
-    if (!pool) return 0;
+    if (UNLIKELY(!pool)) return 0;
+
     uint64_t* jcur = pool;
     uint64_t* jnxt = pool + plane;
     uint16_t* arrive = (uint16_t*)(pool + 2 * plane);
     int ok = 0;
+
 #define ZXC_NUDGE_DP_IDX(k, s) ((size_t)(k) * (size_t)(m + 1) + (size_t)(s))
     for (size_t i = 0; i < plane; i++) jcur[i] = UINT64_MAX;
     jcur[ZXC_NUDGE_DP_IDX(0, 2)] = 0;
@@ -758,7 +762,7 @@ static int zxc_huf_nudge_dp_solve(const uint64_t* RESTRICT pfg, const int m, con
             s = s / 2 + (int)c;
             k -= (int)c;
         }
-        if (k != 0 || s != 2) goto done; /* backtrack corruption: drop the candidate */
+        if (UNLIKELY(k != 0 || s != 2)) goto done; /* backtrack corruption: drop candidate */
     }
     ok = 1;
 done:
