@@ -159,7 +159,7 @@ int test_get_decompressed_size() {
     uint8_t* forged = malloc((size_t)comp_size);
     memcpy(forged, compressed, (size_t)comp_size);
     uint8_t* footer_size = forged + comp_size - ZXC_FILE_FOOTER_SIZE;
-    for (int i = 0; i < 8; i++) footer_size[i] = 0xFF; // size = 2^64 - 1
+    for (int i = 0; i < 8; i++) footer_size[i] = 0xFF;  // size = 2^64 - 1
     if (zxc_get_decompressed_size(forged, (size_t)comp_size) != 0) {
         printf("Failed: Should return 0 for a forged (implausible) footer size\n");
         free(forged);
@@ -508,8 +508,8 @@ int test_decompress_empty_frame_null_dst() {
     /* 4. dst=NULL, dst_capacity=0 on non-empty frame -> ZXC_ERROR_DST_TOO_SMALL */
     uint8_t payload[128] = "hello";
     uint8_t non_empty_frame[256];
-    int64_t ne_sz = zxc_compress(payload, sizeof(payload), non_empty_frame,
-                                 sizeof(non_empty_frame), NULL);
+    int64_t ne_sz =
+        zxc_compress(payload, sizeof(payload), non_empty_frame, sizeof(non_empty_frame), NULL);
     if (ne_sz <= 0) {
         printf("  [FAIL] non-empty compress: got %lld\n", (long long)ne_sz);
         return 0;
@@ -537,8 +537,8 @@ int test_decompress_empty_frame_null_dst() {
     /* 6. Caller bug: dst=NULL with non-zero capacity -> ZXC_ERROR_NULL_INPUT */
     r = zxc_decompress(empty_frame, (size_t)comp_sz, NULL, 100, NULL);
     if (r != ZXC_ERROR_NULL_INPUT) {
-        printf("  [FAIL] NULL dst + cap>0: expected %d, got %lld\n",
-               ZXC_ERROR_NULL_INPUT, (long long)r);
+        printf("  [FAIL] NULL dst + cap>0: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
+               (long long)r);
         return 0;
     }
     printf("  [PASS] NULL dst + cap>0 -> NULL_INPUT\n");
@@ -824,12 +824,15 @@ int test_decompress_fast_vs_safe_path() {
  * left-to-right into the same buffer. Covers a compressible input, a
  * high-entropy input whose flush-right archive OVERLAPS the output region
  * (the core in-place invariant), and the too-small-buffer rejection. */
-static int inplace_case(const char* label, const uint8_t* orig, size_t n, int level,
-                        int checksum) {
+static int inplace_case(const char* label, const uint8_t* orig, size_t n, int level, int checksum,
+                        size_t block_size, int seekable) {
     const size_t cbound = (size_t)zxc_compress_bound(n);
     uint8_t* comp = (uint8_t*)malloc(cbound);
     if (!comp) return 0;
-    zxc_compress_opts_t co = {.level = level, .checksum_enabled = checksum};
+    zxc_compress_opts_t co = {.level = level,
+                              .checksum_enabled = checksum,
+                              .block_size = block_size,
+                              .seekable = seekable};
     const int64_t c = zxc_compress(orig, n, comp, cbound, &co);
     if (c <= 0) {
         printf("Failed [%s]: compress -> %lld\n", label, (long long)c);
@@ -839,8 +842,8 @@ static int inplace_case(const char* label, const uint8_t* orig, size_t n, int le
     const size_t csz = (size_t)c;
 
     const size_t need = zxc_decompress_inplace_bound(comp, csz);
-    if (need == 0 || need < n) {
-        printf("Failed [%s]: bound %zu\n", label, need);
+    if (need == 0 || need < n || need < csz) {
+        printf("Failed [%s]: bound %zu (n=%zu, comp=%zu)\n", label, need, n, csz);
         free(comp);
         return 0;
     }
@@ -895,14 +898,31 @@ int test_decompress_inplace(void) {
     int ok = 1;
 
     gen_lz_data(a, N);
-    ok &= inplace_case("compressible L3", a, N, 3, 1);
-    ok &= inplace_case("compressible L6", a, N, 6, 0);
+    ok &= inplace_case("compressible L3", a, N, 3, 1, 0, 0);
+    ok &= inplace_case("compressible L6", a, N, 6, 0, 0, 0);
 
     /* high-entropy: comp_size ~ N so the flush-right archive sits INSIDE the
      * output region -> the write cursor sweeps through the compressed bytes. */
     gen_random_data(a, N);
-    ok &= inplace_case("random L1 (overlap)", a, N, 1, 0);
-    ok &= inplace_case("random L7 (overlap)", a, N, 7, 1);
+    ok &= inplace_case("random L1 (overlap)", a, N, 1, 0, 0, 0);
+    ok &= inplace_case("random L7 (overlap)", a, N, 7, 1, 0, 0);
+
+    /* Seekable archives carry a seek table between the EOF block and the footer.
+     * Those bytes sit to the RIGHT of the read cursor, so they push the
+     * flush-right archive left, into the write cursor's path -- the margin has
+     * to reserve them. The biting shape is many small blocks (a large table)
+     * over incompressible data (no slack): the bound used to land below
+     * comp_size there, so the documented flush-right memcpy underflowed. */
+    free(a);
+    const size_t M = 8 * 1024 * 1024;
+    a = (uint8_t*)malloc(M);
+    if (!a) return 0;
+    gen_lz_data(a, M);
+    ok &= inplace_case("seekable text, 4K blocks", a, M, 3, 1, ZXC_BLOCK_SIZE_MIN, 1);
+    gen_random_data(a, M);
+    ok &= inplace_case("seekable random, 4K blocks", a, M, 1, 1, ZXC_BLOCK_SIZE_MIN, 1);
+    ok &= inplace_case("seekable random, 64K blocks", a, M, 1, 0, 64 * 1024, 1);
+    ok &= inplace_case("seekable random, default blocks", a, M, 3, 1, 0, 1);
 
     /* bound on garbage must be 0. */
     uint8_t junk[64];
