@@ -36,12 +36,15 @@
  *   trimmed back to the payload before the call returns.
  *
  * @par Platform support
- * POSIX (Linux, macOS, *BSD, illumos) is zero-copy as described. On Windows
- * the archive is copied once into the single region (the flush-right file view
- * requires placeholder mappings); the decode itself is still in-place and no
- * output allocation is made. Where the platform has no mapping support at all
- * (freestanding / Emscripten builds), every entry point returns
- * @ref ZXC_ERROR_UNSUPPORTED and @ref zxc_mmap_supported returns 0.
+ * POSIX (Linux, macOS, *BSD, illumos) is zero-copy as described, and so is
+ * Windows 10 1803 / Server 2019 and later, which reaches the same placement
+ * through placeholder mappings (@c VirtualAlloc2 + @c MapViewOfFile3, resolved
+ * at run time). Older Windows falls back to a single copy of the archive into
+ * the same one region: the decode is still in-place with no output allocation.
+ * @ref zxc_mmap_is_zerocopy reports which route a given result took. Where the
+ * platform has no mapping support at all (freestanding / Emscripten builds),
+ * every entry point returns @ref ZXC_ERROR_UNSUPPORTED and
+ * @ref zxc_mmap_supported returns 0.
  *
  * @see zxc_buffer.h for @ref zxc_decompress_inplace, the buffer-level primitive
  *      this API is built on.
@@ -91,6 +94,21 @@ typedef struct {
  *         return @ref ZXC_ERROR_UNSUPPORTED (freestanding / Emscripten).
  */
 ZXC_EXPORT int zxc_mmap_supported(void);
+
+/**
+ * @brief Reports whether @p map holds its bytes without a copy having been made.
+ *
+ * Always 1 for a successful mapping on POSIX and on Windows 10 1803+; 0 on older
+ * Windows, where @ref zxc_decompress_mmap copies the archive once into its
+ * single region (see @ref zxc_map_t and the platform notes above). Useful to log
+ * which route a deployment actually takes; the result of the call is identical
+ * either way.
+ *
+ * @param[in] map  A map filled by this API, or NULL.
+ * @return 1 when @p map is a live mapping that involved no copy, 0 otherwise
+ *         (including for NULL, a closed, or an empty map).
+ */
+ZXC_EXPORT int zxc_mmap_is_zerocopy(const zxc_map_t* map);
 
 /**
  * @brief Maps a file read-only, without decoding it.

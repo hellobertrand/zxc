@@ -506,9 +506,14 @@ bound while what the caller keeps is just the decompressed data.
 
 | Platform | Behaviour |
 |----------|-----------|
-| Linux, macOS, *BSD, illumos | Zero-copy as described above. |
-| Windows | Single region, but the archive is copied once into it (a file view cannot be placed inside a `VirtualAlloc` reservation without the Win10 placeholder APIs). The decode is still in-place with no output allocation. |
+| Linux, macOS, *BSD, illumos | Zero-copy as described above (`MAP_FIXED` over an anonymous reservation). |
+| Windows 10 1803 / Server 2019+ | Zero-copy: the same geometry via **placeholder mappings** — reserve `[0, region)` with `MEM_RESERVE_PLACEHOLDER`, split it at `off`, then replace the halves with committed private memory and a `PAGE_WRITECOPY` view of the archive. `VirtualAlloc2` / `MapViewOfFile3` are resolved at run time (no `onecore.lib` dependency, no minimum-version bump). |
+| Older Windows | Fallback: one reservation plus a single copy of the archive into the flush-right slot. Still one region, still no output allocation. |
 | Emscripten / freestanding | Every entry point returns `ZXC_ERROR_UNSUPPORTED`; `zxc_mmap_supported()` returns 0. |
+
+`zxc_mmap_is_zerocopy()` reports which route a given result took, so a
+deployment can log whether it gets the mapped or the copying path. The
+decompressed bytes are identical either way.
 
 ### `zxc_map_t`
 
@@ -536,6 +541,17 @@ ZXC_EXPORT int zxc_mmap_supported(void);
 
 **Returns**: `1` when the mapping entry points are functional, `0` when they all
 return `ZXC_ERROR_UNSUPPORTED`.
+
+### `zxc_mmap_is_zerocopy`
+
+```c
+ZXC_EXPORT int zxc_mmap_is_zerocopy(const zxc_map_t* map);
+```
+
+**Returns**: `1` when `map` is a live mapping that involved no copy of the file's
+bytes (always the case on POSIX and Windows 10 1803+), `0` otherwise — including
+for `NULL`, a closed or empty map, and the older-Windows fallback where
+`zxc_decompress_mmap` copies the archive once into its single region.
 
 ### `zxc_decompress_mmap` / `zxc_decompress_mmap_fd`
 
@@ -1672,7 +1688,7 @@ if (result < 0) {
 
 ## 14. Exported Symbols Summary
 
-The shared library exports **73 symbols** (verified with `nm -gU`):
+The shared library exports **74 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -1749,6 +1765,7 @@ The shared library exports **73 symbols** (verified with `nm -gU`):
 | 71 | `zxc_decompress_mmap` | Memory-Mapped | `zxc_mmap.h` |
 | 72 | `zxc_decompress_mmap_fd` | Memory-Mapped | `zxc_mmap.h` |
 | 73 | `zxc_mmap_close` | Memory-Mapped | `zxc_mmap.h` |
+| 74 | `zxc_mmap_is_zerocopy` | Memory-Mapped | `zxc_mmap.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon32`, `_avx2`, `_avx512`) are compiled with

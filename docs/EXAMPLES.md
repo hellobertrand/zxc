@@ -168,10 +168,12 @@ if (zxc_mmap_open("payload.zxc", &archive) == ZXC_OK) {
 }
 ```
 
-On Windows the archive is copied once into the single region (a file view cannot
-be placed inside a `VirtualAlloc` reservation without the Win10 placeholder
-APIs); the decode itself is still in-place. On targets without mapping at all
-every entry point returns `ZXC_ERROR_UNSUPPORTED`.
+Windows 10 1803 / Server 2019 and later get the very same zero-copy placement
+through placeholder mappings (`VirtualAlloc2` + `MapViewOfFile3`, resolved at
+run time); older Windows falls back to a single copy of the archive into the
+same one region. `zxc_mmap_is_zerocopy(&out)` tells you which route ran. On
+targets without mapping at all every entry point returns
+`ZXC_ERROR_UNSUPPORTED`.
 
 **Compilation:**
 ```bash

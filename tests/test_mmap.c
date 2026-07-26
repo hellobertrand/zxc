@@ -41,7 +41,7 @@ static int write_whole_file(const char* const path, const void* const data, cons
 /* A closed map must be inert: cleared fields, and a second close is a no-op. */
 static int check_closed(const char* const label, zxc_map_t* const m) {
     zxc_mmap_close(m);
-    if (m->data != NULL || m->size != 0) {
+    if (m->data != NULL || m->size != 0 || zxc_mmap_is_zerocopy(m)) {
         printf("Failed [%s]: close left data=%p size=%zu\n", label, (void*)m->data, m->size);
         return 0;
     }
@@ -79,6 +79,11 @@ static int mmap_case(const char* const label, const uint8_t* const orig, const s
     /* 1. Path API: one call, one mapping, no output allocation. */
     zxc_map_t m;
     const int64_t d = zxc_decompress_mmap(MMAP_RT_PATH, &m, &dop);
+    /* 1 everywhere but pre-1803 Windows, which copies the archive in. A loud
+     * marker: on a modern OS the copy route means the placement failed. */
+    const int zero_copy = zxc_mmap_is_zerocopy(&m);
+    if (d > 0 && !zero_copy)
+        printf("  [INFO] no zero-copy placement here: the archive was copied into the region\n");
     if (d < 0 || (size_t)d != n || m.size != n || !m.data || memcmp(m.data, orig, n) != 0) {
         printf("Failed [%s]: decompress_mmap ret=%lld want=%zu%s\n", label, (long long)d, n,
                (d == (int64_t)n) ? " (MISMATCH)" : "");
@@ -122,7 +127,8 @@ static int mmap_case(const char* const label, const uint8_t* const orig, const s
     zxc_map_t ma;
     const int rc = zxc_mmap_open_fd(zxc_test_fileno(f), &ma);
     fclose(f); /* the mapping outlives the descriptor */
-    if (rc != ZXC_OK || ma.size != csz || !ma.data || memcmp(ma.data, comp, csz) != 0) {
+    if (rc != ZXC_OK || ma.size != csz || !ma.data || !zxc_mmap_is_zerocopy(&ma) ||
+        memcmp(ma.data, comp, csz) != 0) {
         printf("Failed [%s]: mmap_open_fd rc=%d size=%zu want=%zu\n", label, rc, ma.size, csz);
         ok = 0;
     } else {
@@ -149,8 +155,9 @@ static int mmap_case(const char* const label, const uint8_t* const orig, const s
     remove(MMAP_RT_PATH);
     free(comp);
     if (ok)
-        printf("  [PASS] %s (n=%zu, comp=%zu, %s)\n", label, n, csz,
-               csz > n ? "archive spans the whole region" : "archive in margin");
+        printf("  [PASS] %s (n=%zu, comp=%zu, %s, %s)\n", label, n, csz,
+               csz > n ? "archive spans the whole region" : "archive in margin",
+               zero_copy ? "zero-copy" : "archive copied in");
     return ok;
 }
 
@@ -341,6 +348,11 @@ int test_mmap_errors(void) {
     /* A directory is not mappable. */
     if (zxc_mmap_open(".", &m) != ZXC_ERROR_IO) {
         printf("Failed: directory not rejected\n");
+        ok = 0;
+    }
+
+    if (zxc_mmap_is_zerocopy(NULL)) {
+        printf("Failed: is_zerocopy(NULL) != 0\n");
         ok = 0;
     }
 

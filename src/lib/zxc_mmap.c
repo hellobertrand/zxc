@@ -28,11 +28,15 @@
  * decoder writing over already-consumed compressed bytes is copy-on-write and
  * the archive on disk is never modified.
  *
- * @par Windows geometry (single region, one input copy)
- * @c MapViewOfFile cannot land inside a @c VirtualAlloc reservation without the
- * Win10 placeholder APIs, so the archive is copied once from a read-only view
- * into the same flush-right slot. The decode stays in-place and no output
- * allocation is made.
+ * @par Windows geometry (same, via placeholder mappings)
+ * @c MapViewOfFile cannot land inside a plain @c VirtualAlloc reservation, so
+ * the same placement is built from the Windows 10 1803 placeholder APIs: reserve
+ * `[0, region)` as a placeholder, split it at @c off, then replace the two
+ * halves with committed private memory and a @c PAGE_WRITECOPY view of the
+ * archive. @c VirtualAlloc2 / @c MapViewOfFile3 are resolved at run time, and
+ * anything older (or any file that cannot back a copy-on-write section) falls
+ * back to one reservation plus a single copy of the archive -- still one region,
+ * still no output allocation. @ref zxc_mmap_is_zerocopy tells the two apart.
  *
  * Platforms with no mapping at all (Emscripten, freestanding) compile to stubs
  * returning @ref ZXC_ERROR_UNSUPPORTED, keeping the ABI identical everywhere.
@@ -80,9 +84,10 @@
 
 /** @brief Release path a @ref zxc_map_t base address needs. */
 enum {
-    ZXC_MAP_KIND_NONE = 0,  /**< Nothing mapped. */
-    ZXC_MAP_KIND_VIEW = 1,  /**< Read-only file view (@ref zxc_mmap_open). */
-    ZXC_MAP_KIND_REGION = 2 /**< Decode region (@ref zxc_decompress_mmap). */
+    ZXC_MAP_KIND_NONE = 0,       /**< Nothing mapped. */
+    ZXC_MAP_KIND_VIEW = 1,       /**< Read-only file view (@ref zxc_mmap_open). */
+    ZXC_MAP_KIND_REGION = 2,     /**< Decode region, archive copied in (Win32 fallback). */
+    ZXC_MAP_KIND_PLACEHOLDER = 3 /**< Decode region with the archive mapped into it. */
 };
 
 /**
@@ -106,12 +111,22 @@ static size_t zxc_round_up_pow2(const size_t v, const size_t pow2) {
 /**
  * @brief Computes the single-region geometry for an in-place decode.
  *
+ * Two granularities, because the two ends answer to different rules: a file
+ * mapping must *start* on an allocation-granularity boundary (64 KiB on Windows,
+ * one page on POSIX), while the region it *spans* is page-granular. Sizing the
+ * archive slot to exactly `roundup(comp_size, page)` is what lets Windows
+ * replace that slot with a view of the archive, which insists the view and the
+ * placeholder it replaces cover the same range.
+ *
  * @param[in]  comp_size  Archive size in bytes.
  * @param[in]  need       @ref zxc_decompress_inplace_bound for that archive.
+ * @param[in]  off_gran   Mapping-start granularity (power of two, multiple of
+ *                        @p page).
  * @param[in]  page       Page size (power of two).
- * @param[out] off        Flush-right offset of the archive: page-aligned (so a
- *                        file mapping can start there) and >= @p need -
- *                        @p comp_size (so the in-place margin holds).
+ * @param[out] off        Flush-right offset of the archive: aligned to
+ *                        @p off_gran (so a file mapping can start there) and
+ *                        >= @p need - @p comp_size (so the in-place margin
+ *                        holds).
  * @param[out] capacity   Logical buffer capacity to hand
  *                        @ref zxc_decompress_inplace (@p off + @p comp_size).
  * @param[out] region     Total bytes to reserve: @p capacity rounded out to
@@ -120,11 +135,12 @@ static size_t zxc_round_up_pow2(const size_t v, const size_t pow2) {
  * @return @ref ZXC_OK, or @ref ZXC_ERROR_MEMORY if the geometry overflows
  *         @c size_t.
  */
-static int zxc_map_geometry(const size_t comp_size, const size_t need, const size_t page,
-                            size_t* const off, size_t* const capacity, size_t* const region) {
+static int zxc_map_geometry(const size_t comp_size, const size_t need, const size_t off_gran,
+                            const size_t page, size_t* const off, size_t* const capacity,
+                            size_t* const region) {
     const size_t gap = (need > comp_size) ? need - comp_size : 0;
-    if (UNLIKELY(gap > SIZE_MAX - (page - 1))) return ZXC_ERROR_MEMORY;
-    const size_t o = zxc_round_up_pow2(gap, page);
+    if (UNLIKELY(gap > SIZE_MAX - (off_gran - 1))) return ZXC_ERROR_MEMORY;
+    const size_t o = zxc_round_up_pow2(gap, off_gran);
 
     if (UNLIKELY(comp_size > SIZE_MAX - o)) return ZXC_ERROR_MEMORY;
     if (UNLIKELY(comp_size > SIZE_MAX - (page - 1))) return ZXC_ERROR_MEMORY;
@@ -173,10 +189,18 @@ static int zxc_desc_valid(const zxc_desc_t d) { return d >= 0; }
 /** @brief Closes a descriptor this TU opened; mappings outlive it. */
 static void zxc_desc_close(const zxc_desc_t d) { (void)close(d); }
 
-/** @brief Returns the platform page size (mapping granularity). */
-static size_t zxc_page_size(void) {
+/**
+ * @brief Reports the two granularities the geometry needs.
+ *
+ * On POSIX both are the page size: @c mmap accepts any page-aligned address.
+ *
+ * @param[out] off_gran  Granularity a file mapping must start on.
+ * @param[out] page      Page size.
+ */
+static void zxc_map_grains(size_t* const off_gran, size_t* const page) {
     const long ps = sysconf(_SC_PAGESIZE);
-    return (ps > 0) ? (size_t)ps : 4096u;
+    *page = (ps > 0) ? (size_t)ps : 4096U;
+    *off_gran = *page;
 }
 
 /**
@@ -236,9 +260,10 @@ static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
     (void)munmap(probe, comp_size);
     if (UNLIKELY(need == 0)) return ZXC_ERROR_BAD_HEADER;
 
-    const size_t page = zxc_page_size();
+    size_t off_gran = 0, page = 0;
+    zxc_map_grains(&off_gran, &page);
     size_t off = 0, capacity = 0, region = 0;
-    rc = zxc_map_geometry(comp_size, need, page, &off, &capacity, &region);
+    rc = zxc_map_geometry(comp_size, need, off_gran, page, &off, &capacity, &region);
     if (UNLIKELY(rc != ZXC_OK)) return rc;  // LCOV_EXCL_LINE
 
     uint8_t* const base =
@@ -283,6 +308,12 @@ static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
 /** @brief Backend of @ref zxc_mmap_close (one call covers both map kinds). */
 static void zxc_map_release(zxc_map_t* const m) { (void)munmap(m->map_base, m->map_size); }
 
+/** @brief Backend of @ref zxc_mmap_is_zerocopy: here every region is mapped. */
+static int zxc_map_zerocopy(const zxc_map_t* const m) {
+    (void)m;
+    return 1;
+}
+
 /*
  * ============================================================================
  * WIN32 BACKEND
@@ -315,11 +346,21 @@ static int zxc_desc_valid(const zxc_desc_t d) { return d != INVALID_HANDLE_VALUE
 /** @brief Closes a handle this TU opened; mappings outlive it. */
 static void zxc_desc_close(const zxc_desc_t d) { (void)CloseHandle(d); }
 
-/** @brief Returns the platform page size (VirtualFree decommit granularity). */
-static size_t zxc_page_size(void) {
+/**
+ * @brief Reports the two granularities the geometry needs.
+ *
+ * A file view must start on an *allocation*-granularity boundary (64 KiB), so
+ * that is what the flush-right offset is aligned to; the archive slot itself is
+ * sized in pages, which is the granularity a view and a @c MEM_DECOMMIT work at.
+ *
+ * @param[out] off_gran  Allocation granularity.
+ * @param[out] page      Page size.
+ */
+static void zxc_map_grains(size_t* const off_gran, size_t* const page) {
     SYSTEM_INFO si;
     GetSystemInfo(&si);
-    return si.dwPageSize ? (size_t)si.dwPageSize : 4096u;
+    *off_gran = si.dwAllocationGranularity ? (size_t)si.dwAllocationGranularity : 65536U;
+    *page = si.dwPageSize ? (size_t)si.dwPageSize : 4096U;
 }
 
 /**
@@ -351,6 +392,150 @@ static int zxc_win_view(const zxc_desc_t d, void** const view) {
     return ZXC_OK;
 }
 
+/*
+ * ----------------------------------------------------------------------------
+ * Placeholder mappings: the zero-copy flush-right placement
+ * ----------------------------------------------------------------------------
+ * MapViewOfFile cannot land inside a plain VirtualAlloc reservation, which is
+ * why the naive Win32 port has to copy the archive. The placeholder APIs
+ * (Windows 10 1803 / Server 2019) lift exactly that restriction: a reservation
+ * can be split into placeholders, and each placeholder replaced -- one by
+ * private memory, one by a file view -- giving the same geometry as the POSIX
+ * MAP_FIXED path with no copy at all.
+ */
+
+/* Flags defined locally so the file still builds against pre-1803 SDKs. */
+#ifndef MEM_RESERVE_PLACEHOLDER
+#define MEM_RESERVE_PLACEHOLDER 0x00040000
+#endif
+#ifndef MEM_REPLACE_PLACEHOLDER
+#define MEM_REPLACE_PLACEHOLDER 0x00004000
+#endif
+#ifndef MEM_PRESERVE_PLACEHOLDER
+#define MEM_PRESERVE_PLACEHOLDER 0x00000002
+#endif
+
+/* The MEM_EXTENDED_PARAMETER argument is always NULL here, so it is typed
+ * void* rather than pulling the struct in from a newer SDK. */
+typedef PVOID(WINAPI* zxc_virtual_alloc2_fn)(HANDLE, PVOID, SIZE_T, ULONG, ULONG, void*, ULONG);
+typedef PVOID(WINAPI* zxc_map_view_of_file3_fn)(HANDLE, HANDLE, PVOID, ULONG64, SIZE_T, ULONG,
+                                                ULONG, void*, ULONG);
+
+/** @brief The two placeholder entry points, resolved at run time. */
+typedef struct {
+    zxc_virtual_alloc2_fn alloc2;  /**< VirtualAlloc2 */
+    zxc_map_view_of_file3_fn map3; /**< MapViewOfFile3 */
+} zxc_win_ext_t;
+
+/**
+ * @brief Resolves @c VirtualAlloc2 / @c MapViewOfFile3 dynamically.
+ *
+ * Dynamic resolution (rather than linking @c onecore.lib) keeps a single binary
+ * running on Windows older than 1803, where the copy fallback takes over. The
+ * @c FARPROC values are copied instead of cast so no toolchain objects to the
+ * function-pointer conversion.
+ *
+ * @return @ref ZXC_OK, or @ref ZXC_ERROR_UNSUPPORTED when this Windows lacks
+ *         the placeholder APIs.
+ */
+static int zxc_win_ext_resolve(zxc_win_ext_t* const fns) {
+    fns->alloc2 = NULL;
+    fns->map3 = NULL;
+
+    HMODULE mod = GetModuleHandleW(L"kernelbase.dll");
+    if (!mod) mod = GetModuleHandleW(L"kernel32.dll");
+    if (!mod) return ZXC_ERROR_UNSUPPORTED;
+
+    const FARPROC p_alloc2 = GetProcAddress(mod, "VirtualAlloc2");
+    const FARPROC p_map3 = GetProcAddress(mod, "MapViewOfFile3");
+    if (!p_alloc2 || !p_map3) return ZXC_ERROR_UNSUPPORTED;
+
+    ZXC_MEMCPY(&fns->alloc2, &p_alloc2, sizeof(fns->alloc2));
+    ZXC_MEMCPY(&fns->map3, &p_map3, sizeof(fns->map3));
+    return ZXC_OK;
+}
+
+/**
+ * @brief Creates a copy-on-write section over the whole file.
+ *
+ * @c PAGE_WRITECOPY needs only @c GENERIC_READ on the file and makes the
+ * decoder's writes over consumed compressed bytes private, so the archive on
+ * disk is never modified. The size arguments are 0 on purpose: an explicit size
+ * beyond the file, with a write-capable protection, would *grow* the file.
+ */
+static int zxc_win_section_cow(const zxc_desc_t d, HANDLE* const section) {
+    HANDLE s = CreateFileMappingA(d, NULL, PAGE_WRITECOPY, 0, 0, NULL);
+    if (!s) return ZXC_ERROR_IO;
+    *section = s;
+    return ZXC_OK;
+}
+
+/**
+ * @brief Places the archive flush-right in a split placeholder reservation.
+ *
+ *   1. reserve `[0, region)` as one placeholder;
+ *   2. split it at @p off, leaving two independently replaceable placeholders;
+ *   3. replace `[0, off)` with committed private memory (the decode output);
+ *   4. replace `[off, region)` with a @c PAGE_WRITECOPY view of the archive.
+ *
+ * Every failure path leaves nothing allocated, so the caller can simply fall
+ * back to the copying route.
+ *
+ * @param[in]  section    Copy-on-write section over the archive.
+ * @param[in]  comp_size  Archive size in bytes (the view size).
+ * @param[in]  off        Flush-right offset, a multiple of the allocation
+ *                        granularity (see @ref zxc_map_grains).
+ * @param[in]  region     Total reservation size in bytes. `region - off` is
+ *                        exactly the page span of @p comp_size, which is what
+ *                        lets a view replace that placeholder.
+ * @param[out] out_base   Receives the reservation base on success.
+ * @param[out] out_view   Receives the mapped view address on success.
+ * @return @ref ZXC_OK, @ref ZXC_ERROR_UNSUPPORTED (no placeholder APIs, or this
+ *         file cannot back a copy-on-write view), or @ref ZXC_ERROR_MEMORY.
+ */
+static int zxc_win_place(const HANDLE section, const size_t comp_size, const size_t off,
+                         const size_t region, uint8_t** const out_base, void** const out_view) {
+    zxc_win_ext_t fns;
+    const int rc = zxc_win_ext_resolve(&fns);
+    if (rc != ZXC_OK) return rc;
+    /* The geometry always leaves room for the output ahead of the archive; bail
+     * out rather than split a placeholder at one of its own edges. */
+    if (off == 0 || off >= region) return ZXC_ERROR_UNSUPPORTED;
+
+    uint8_t* const base = (uint8_t*)fns.alloc2(
+        NULL, NULL, region, MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS, NULL, 0);
+    if (!base) return ZXC_ERROR_MEMORY;
+
+    /* Split, so the archive slot can be replaced by a view on its own. Both
+     * halves stay reserved (MEM_PRESERVE_PLACEHOLDER) and become independently
+     * replaceable and independently releasable. */
+    if (!VirtualFree(base, off, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) {
+        (void)VirtualFree(base, 0, MEM_RELEASE);
+        return ZXC_ERROR_UNSUPPORTED;
+    }
+
+    /* [0, off): committed private memory, the decoder's output. */
+    if (!fns.alloc2(NULL, base, off, MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER,
+                    PAGE_READWRITE, NULL, 0)) {
+        (void)VirtualFree(base, 0, MEM_RELEASE);
+        (void)VirtualFree(base + off, 0, MEM_RELEASE);
+        return ZXC_ERROR_MEMORY;
+    }
+
+    /* [off, region): the archive itself, faulted in from the page cache. */
+    void* const view = fns.map3(section, NULL, base + off, 0, comp_size, MEM_REPLACE_PLACEHOLDER,
+                                PAGE_WRITECOPY, NULL, 0);
+    if (!view) {
+        (void)VirtualFree(base, 0, MEM_RELEASE);
+        (void)VirtualFree(base + off, 0, MEM_RELEASE);
+        return ZXC_ERROR_UNSUPPORTED;
+    }
+
+    *out_base = base;
+    *out_view = view;
+    return ZXC_OK;
+}
+
 /** @brief Backend of @ref zxc_mmap_open: whole-file read-only view. */
 static int zxc_map_readonly(const zxc_desc_t d, zxc_map_t* const out) {
     size_t size = 0;
@@ -370,12 +555,13 @@ static int zxc_map_readonly(const zxc_desc_t d, zxc_map_t* const out) {
 }
 
 /**
- * @brief Backend of @ref zxc_decompress_mmap.
+ * @brief Backend of @ref zxc_decompress_mmap: place (or copy) the archive
+ *        flush-right in a single region, decode, trim.
  *
- * Same geometry as POSIX, but the archive is copied once from a read-only view
- * into the flush-right slot: a view cannot be placed inside a @c VirtualAlloc
- * reservation without the Win10-only placeholder APIs. Still a single region
- * and no output allocation.
+ * Prefers the placeholder placement (@ref zxc_win_place, zero-copy). Older
+ * Windows, or a file that cannot back a copy-on-write section, fall back to one
+ * reservation plus a single copy of the archive: still one region, still no
+ * output allocation. @ref zxc_mmap_is_zerocopy reports which route ran.
  */
 static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
                                   const zxc_decompress_opts_t* const opts) {
@@ -385,59 +571,97 @@ static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
     if (UNLIKELY(comp_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
         return ZXC_ERROR_SRC_TOO_SMALL;
 
-    void* view = NULL;
-    rc = zxc_win_view(d, &view);
+    /* Probe pass: the bound only reads the file header and footer, so a
+     * throw-away read-only view answers it without copying anything. */
+    void* probe = NULL;
+    rc = zxc_win_view(d, &probe);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    const size_t need = zxc_decompress_inplace_bound(probe, comp_size);
+    (void)UnmapViewOfFile(probe);
+    if (UNLIKELY(need == 0)) return ZXC_ERROR_BAD_HEADER;
+
+    size_t off_gran = 0, page = 0;
+    zxc_map_grains(&off_gran, &page);
+    size_t off = 0, capacity = 0, region = 0;
+    rc = zxc_map_geometry(comp_size, need, off_gran, page, &off, &capacity, &region);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
 
-    const size_t need = zxc_decompress_inplace_bound(view, comp_size);
-    if (UNLIKELY(need == 0)) {
-        (void)UnmapViewOfFile(view);
-        return ZXC_ERROR_BAD_HEADER;
+    uint8_t* base = NULL;
+    void* view = NULL;
+
+    /* 1. Zero-copy: a copy-on-write view of the archive, placed flush-right in
+     *    a split placeholder reservation. */
+    HANDLE section = NULL;
+    if (zxc_win_section_cow(d, &section) == ZXC_OK) {
+        if (zxc_win_place(section, comp_size, off, region, &base, &view) != ZXC_OK) {
+            base = NULL;
+            view = NULL;
+        }
+        /* A mapped view keeps the section alive on its own. */
+        (void)CloseHandle(section);
     }
 
-    const size_t page = zxc_page_size();
-    size_t off = 0, capacity = 0, region = 0;
-    rc = zxc_map_geometry(comp_size, need, page, &off, &capacity, &region);
-    if (UNLIKELY(rc != ZXC_OK)) {
-        (void)UnmapViewOfFile(view);
-        return rc;
+    /* 2. Fallback: one reservation and a single copy of the archive into it. */
+    if (!base) {
+        base = (uint8_t*)VirtualAlloc(NULL, region, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (UNLIKELY(!base)) return ZXC_ERROR_MEMORY;
+        void* src = NULL;
+        rc = zxc_win_view(d, &src);
+        if (UNLIKELY(rc != ZXC_OK)) {
+            (void)VirtualFree(base, 0, MEM_RELEASE);
+            return rc;
+        }
+        ZXC_MEMCPY(base + off, src, comp_size);
+        (void)UnmapViewOfFile(src);
     }
-
-    uint8_t* const base =
-        (uint8_t*)VirtualAlloc(NULL, region, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (UNLIKELY(!base)) {
-        (void)UnmapViewOfFile(view);
-        return ZXC_ERROR_MEMORY;
-    }
-    ZXC_MEMCPY(base + off, view, comp_size);
-    (void)UnmapViewOfFile(view);
+    const int placed = (view != NULL);
 
     const int64_t decoded = zxc_decompress_inplace(base, capacity, comp_size, opts);
     if (UNLIKELY(decoded <= 0)) {
+        /* Errors and the empty frame both leave nothing worth handing back. */
+        if (view) (void)UnmapViewOfFile(view);
         (void)VirtualFree(base, 0, MEM_RELEASE);
         return decoded;
     }
 
-    /* Trim: decommit the margin (the reservation itself can only be released
-     * whole, which zxc_mmap_close does). */
+    /* Trim: give back what the payload does not occupy. A view is released as a
+     * whole, so the archive slot can only go back when the payload ends before
+     * that slot begins; the private part is decommitted either way. */
     const size_t keep = zxc_round_up_pow2((size_t)decoded, page);
-    if (keep < region) (void)VirtualFree(base + keep, region - keep, MEM_DECOMMIT);
+    if (view) {
+        if (keep <= off) {
+            (void)UnmapViewOfFile(view);
+            view = NULL;
+            if (keep < off) (void)VirtualFree(base + keep, off - keep, MEM_DECOMMIT);
+        }
+    } else if (keep < region) {
+        (void)VirtualFree(base + keep, region - keep, MEM_DECOMMIT);
+    }
 
     out->data = base;
     out->size = (size_t)decoded;
     out->map_base = base;
     out->map_size = keep;
-    out->map_kind = ZXC_MAP_KIND_REGION;
+    out->map_handle = view; /* non-NULL: a view still to unmap on close */
+    out->map_kind = placed ? ZXC_MAP_KIND_PLACEHOLDER : ZXC_MAP_KIND_REGION;
     return decoded;
 }
 
 /** @brief Backend of @ref zxc_mmap_close: views unmap, reservations release. */
 static void zxc_map_release(zxc_map_t* const m) {
-    if (m->map_kind == ZXC_MAP_KIND_VIEW)
+    if (m->map_kind == ZXC_MAP_KIND_VIEW) {
         (void)UnmapViewOfFile(m->map_base);
-    else
-        (void)VirtualFree(m->map_base, 0, MEM_RELEASE);
+        return;
+    }
+    /* Decode region: an archive view may still sit at its far end, and the
+     * output part is a reservation of its own (a split placeholder replaced by
+     * private memory releases exactly like a plain VirtualAlloc). */
+    if (m->map_handle) (void)UnmapViewOfFile(m->map_handle);
+    (void)VirtualFree(m->map_base, 0, MEM_RELEASE);
 }
+
+/** @brief Backend of @ref zxc_mmap_is_zerocopy: only the copy route copies. */
+static int zxc_map_zerocopy(const zxc_map_t* const m) { return m->map_kind != ZXC_MAP_KIND_REGION; }
 // LCOV_EXCL_STOP
 
 #endif /* backend selection */
@@ -457,6 +681,18 @@ static void zxc_map_release(zxc_map_t* const m) {
  */
 // cppcheck-suppress unusedFunction
 int zxc_mmap_supported(void) { return 1; }
+
+/**
+ * @brief Reports whether @p map holds the archive without having copied it.
+ *
+ * Public API; full contract in @c zxc_mmap.h. Delegates to the backend, which
+ * knows which placement route produced the region.
+ */
+// cppcheck-suppress unusedFunction
+int zxc_mmap_is_zerocopy(const zxc_map_t* const map) {
+    if (!map || !map->data) return 0;
+    return zxc_map_zerocopy(map);
+}
 
 /**
  * @brief Maps a file read-only, without decoding it.
@@ -545,6 +781,13 @@ void zxc_mmap_close(zxc_map_t* const map) {
 /** @brief Reports whether this build can map files (it cannot). */
 // cppcheck-suppress unusedFunction
 int zxc_mmap_supported(void) { return 0; }
+
+/** @brief Nothing can be mapped on this target, so nothing is ever zero-copy. */
+// cppcheck-suppress unusedFunction
+int zxc_mmap_is_zerocopy(const zxc_map_t* map) {
+    (void)map;
+    return 0;
+}
 
 /** @brief Unsupported on this target; see @ref zxc_mmap_supported. */
 // cppcheck-suppress unusedFunction
