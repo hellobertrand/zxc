@@ -357,7 +357,35 @@ meson compile -C build
 When consumed as a subproject, only the library is built (CLI and tests are
 skipped automatically).
 
-### Option 6: Winget
+### Option 6: CMake Subproject (vendored)
+
+zxc can be vendored directly into a CMake build, either as a git submodule with
+`add_subdirectory()` or through `FetchContent`:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(zxc
+    GIT_REPOSITORY https://github.com/hellobertrand/zxc.git
+    GIT_TAG        v0.13.1
+)
+FetchContent_MakeAvailable(zxc)
+
+target_link_libraries(myapp PRIVATE zxc::zxc_lib)
+```
+
+`zxc::zxc_lib` is the same target name the installed package exports, so
+switching between a vendored copy and `find_package(zxc)` needs no other
+change.
+
+When zxc is not the top-level project it builds the library only: the CLI, the
+tests, `-march=native`, LTO and the install rules all default to off, so the
+embedding project keeps full control of its own compiler flags, CTest
+registration and install set. Any of them can still be turned back on
+explicitly (`-DZXC_BUILD_CLI=ON`, `-DZXC_NATIVE_ARCH=ON`, `-DZXC_INSTALL=ON`,
+...). `-march=native` is also ignored whenever CMake is cross-compiling, since
+it would encode the build host's ISA.
+
+### Option 7: Winget
 
 **Requirements:** Windows 10 1709 (or later)
 
@@ -367,7 +395,7 @@ Use winget to install the zxc CLI:
 winget install hellobertrand.zxc
 ```
 
-### Option 7: Building from Source (CMake)
+### Option 8: Building from Source (CMake)
 
 **Requirements:** CMake (3.14+), C17 Compiler (Clang/GCC/MSVC).
 

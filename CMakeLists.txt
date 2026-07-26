@@ -25,15 +25,31 @@ project(zxc
 # =============================================================================
 # Build Options
 # =============================================================================
+if(NOT DEFINED PROJECT_IS_TOP_LEVEL)
+    if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+        set(PROJECT_IS_TOP_LEVEL ON)
+    else()
+        set(PROJECT_IS_TOP_LEVEL OFF)
+    endif()
+endif()
+
 option(BUILD_SHARED_LIBS "Build shared libraries instead of static" OFF)
-option(ZXC_NATIVE_ARCH "Enable -march=native for maximum performance" ON)
-option(ZXC_ENABLE_LTO "Enable Interprocedural Optimization (LTO)" ON)
+option(ZXC_NATIVE_ARCH "Enable -march=native for maximum performance" ${PROJECT_IS_TOP_LEVEL})
+option(ZXC_ENABLE_LTO "Enable Interprocedural Optimization (LTO)" ${PROJECT_IS_TOP_LEVEL})
 set(ZXC_PGO_MODE "OFF" CACHE STRING "Profile-Guided Optimization mode (OFF/GENERATE/USE)")
 set_property(CACHE ZXC_PGO_MODE PROPERTY STRINGS OFF GENERATE USE)
-option(ZXC_BUILD_CLI "Build the command-line interface" ON)
-option(ZXC_BUILD_TESTS "Build unit tests" ON)
+option(ZXC_BUILD_CLI "Build the command-line interface" ${PROJECT_IS_TOP_LEVEL})
+option(ZXC_BUILD_TESTS "Build unit tests" ${PROJECT_IS_TOP_LEVEL})
+option(ZXC_INSTALL "Generate install rules (headers, pkg-config, CMake package)"
+       ${PROJECT_IS_TOP_LEVEL})
 option(ZXC_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 option(ZXC_DISABLE_SIMD "Disable explicit SIMD intrinsics (no AVX/NEON code paths)" OFF)
+
+if(ZXC_NATIVE_ARCH AND CMAKE_CROSSCOMPILING)
+    message(STATUS "zxc: cross-compiling - ignoring ZXC_NATIVE_ARCH (-march=native would "
+                   "encode the build host's ISA).")
+    set(ZXC_NATIVE_ARCH OFF)
+endif()
 
 # =============================================================================
 # Emscripten / WebAssembly overrides
@@ -231,6 +247,10 @@ add_library(zxc_lib
     ${ZXC_VARIANT_OBJECTS}
 )
 
+# Carries the same name as the target exported by the installed package, so a
+# vendored add_subdirectory() and a find_package(zxc) are interchangeable.
+add_library(zxc::zxc_lib ALIAS zxc_lib)
+
 # =============================================================================
 # ABI Versioning (Debian/Linux shared libraries)
 # =============================================================================
@@ -275,15 +295,15 @@ endif()
 if(NOT MSVC)
     target_compile_options(zxc_lib PRIVATE
         $<$<NOT:$<BOOL:${ZXC_ENABLE_COVERAGE}>>:-O3>
-        -Wall -Wextra 
-        -fomit-frame-pointer 
+        -Wall -Wextra
+        -fomit-frame-pointer
         -fstrict-aliasing
         # Native Arch
         $<$<BOOL:${ZXC_NATIVE_ARCH}>:-march=native>
         # Dead code elimination
         -ffunction-sections -fdata-sections
     )
-    
+
     # Profile-Guided Optimization
     zxc_apply_pgo(zxc_lib)
     if(ZXC_PGO_MODE STREQUAL "GENERATE")
@@ -408,7 +428,9 @@ endif()
 # Tests
 # =============================================================================
 if(ZXC_BUILD_TESTS)
-    enable_testing()
+    if(PROJECT_IS_TOP_LEVEL)
+        enable_testing()
+    endif()
     
     add_executable(zxc_test
         tests/test_main.c
@@ -549,71 +571,73 @@ endif()
 # =============================================================================
 # Installation
 # =============================================================================
-include(GNUInstallDirs)
+if(ZXC_INSTALL)
+    include(GNUInstallDirs)
 
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/libzxc.pc.in
-    ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
-    @ONLY
-)
-
-install(TARGETS zxc_lib
-    EXPORT zxc-targets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-
-install(DIRECTORY include/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    FILES_MATCHING PATTERN "*.h"
-)
-
-if(ZXC_BUILD_CLI)
-    install(TARGETS zxc
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/libzxc.pc.in
+        ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
+        @ONLY
     )
-    # "unzxc" alias: a symlink to zxc that defaults to decompression. 
-    # Symbolic links are POSIX-only; skipped on Windows.
-    if(NOT WIN32)
-        install(CODE "
-            execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
-                zxc \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/unzxc\")
-        ")
+
+    install(TARGETS zxc_lib
+        EXPORT zxc-targets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+
+    install(DIRECTORY include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.h"
+    )
+
+    if(ZXC_BUILD_CLI)
+        install(TARGETS zxc
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+        # "unzxc" alias: a symlink to zxc that defaults to decompression. 
+        # Symbolic links are POSIX-only; skipped on Windows.
+        if(NOT WIN32)
+            install(CODE "
+                execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
+                    zxc \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/unzxc\")
+            ")
+        endif()
     endif()
+
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+    )
+
+    # CMake package config files for find_package(zxc)
+    include(CMakePackageConfigHelpers)
+
+    install(EXPORT zxc-targets
+        FILE zxc-targets.cmake
+        NAMESPACE zxc::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
+    )
+
+    configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/zxcConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/zxcConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
+    )
+
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/zxcConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+    )
+
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/zxcConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/zxcConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
+    )
 endif()
-
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
-)
-
-# CMake package config files for find_package(zxc)
-include(CMakePackageConfigHelpers)
-
-install(EXPORT zxc-targets
-    FILE zxc-targets.cmake
-    NAMESPACE zxc::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
-)
-
-configure_package_config_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/zxcConfig.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfig.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
-)
-
-write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfigVersion.cmake
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
-
-install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfig.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfigVersion.cmake
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
-)
 
 # =============================================================================
 # Code Formatting (clang-format)
@@ -624,7 +648,7 @@ if(DEFINED ENV{CLANG_FORMAT})
 else()
     find_program(CLANG_FORMAT clang-format)
 endif()
-if(CLANG_FORMAT)
+if(CLANG_FORMAT AND PROJECT_IS_TOP_LEVEL)
     file(GLOB_RECURSE ZXC_FORMAT_SOURCES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/*.c"
@@ -648,7 +672,7 @@ if(CLANG_FORMAT)
         COMMENT "Checking formatting of include/, src/lib/ and src/cli/"
         VERBATIM
     )
-else()
+elseif(PROJECT_IS_TOP_LEVEL)
     message(STATUS "clang-format not found - format/format-check targets disabled")
 endif()
 
@@ -658,6 +682,11 @@ endif()
 message(STATUS "")
 message(STATUS "ZXC Configuration Summary:")
 message(STATUS "  Version:        ${PROJECT_VERSION}")
+if(PROJECT_IS_TOP_LEVEL)
+    message(STATUS "  Build Mode:     Standalone")
+else()
+    message(STATUS "  Build Mode:     Embedded (vendored in ${CMAKE_PROJECT_NAME})")
+endif()
 if(BUILD_SHARED_LIBS)
     message(STATUS "  Library Type:   Shared")
 else()
@@ -669,6 +698,7 @@ message(STATUS "  LTO Enabled:    ${ZXC_ENABLE_LTO}")
 message(STATUS "  PGO Mode:       ${ZXC_PGO_MODE}")
 message(STATUS "  Build CLI:      ${ZXC_BUILD_CLI}")
 message(STATUS "  Build Tests:    ${ZXC_BUILD_TESTS}")
+message(STATUS "  Install Rules:  ${ZXC_INSTALL}")
 message(STATUS "")
 
 # =============================================================================
@@ -768,8 +798,11 @@ endif()
 # =============================================================================
 # Documentation (Doxygen)
 # =============================================================================
-find_package(Doxygen)
-if(DOXYGEN_FOUND)
+# Maintainer tooling: a generic target name an embedding project may own too.
+if(PROJECT_IS_TOP_LEVEL)
+    find_package(Doxygen)
+endif()
+if(DOXYGEN_FOUND AND PROJECT_IS_TOP_LEVEL)
     # Generate the Doxyfile with the current project version
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
     
