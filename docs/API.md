@@ -391,10 +391,14 @@ ZXC_EXPORT size_t zxc_decompress_inplace_bound(
 Reads `src`'s header and footer (no decoding) and returns the single-buffer
 size `zxc_decompress_inplace` needs: `decompressed_size` plus the safety
 margin `block_size + nblocks x (block header + per-block checksum, if any) +
-file footer + ZXC_DECOMPRESS_TAIL_PAD` — one block, the accumulated per-block
-framing overhead (incompressible blocks make the compressed stream run that
-much longer than the output), the footer, and the wild-copy tail. Always size
-the buffer with this function rather than re-deriving the formula.
+EOF block + seek table + file footer + ZXC_DECOMPRESS_TAIL_PAD` — one block, the
+accumulated per-block framing overhead (incompressible blocks make the
+compressed stream run that much longer than the output), everything the encoder
+writes after the last data block, and the wild-copy tail. The trailing bytes
+matter because they sit to the *right* of the read cursor and so push the
+flush-right archive left, into the write cursor's path; no header flag announces
+a seek table, so its worst case (4 bytes per block) is always reserved. Always
+size the buffer with this function rather than re-deriving the formula.
 
 **Returns**: required buffer size, or `0` if `src` is not a valid archive.
 

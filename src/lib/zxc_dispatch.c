@@ -1006,23 +1006,41 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
 }
 
 /**
- * @brief Single source of truth for the in-place safety margin (bytes over the
- *        decompressed size @p d).
+ * @brief Bytes an in-place decode needs on top of the decompressed size.
  *
- * The write cursor sweeps [0, d) while the read cursor starts flush-right; the
- * no-overtake invariant `sum_{j<=k} o_j + PAD <= F + 16 + sum_{j<k} c_j` must
- * hold for every block k. Worst case is incompressible input (all RAW blocks,
- * `c_j = o_j + H`): the compressed stream then runs `nblocks * H` longer than
- * the output, squeezing the gap most at the first block, so the margin must
- * carry the full accumulated per-block overhead, not just one block. Hence
- * `chunk_size` (largest single block) + `nblocks * H` (H = block header +
- * optional per-block checksum) + footer + wild-copy tail.
+ * Flush-right placement puts block 0 at `capacity - comp_size`, so the read
+ * cursor before block k sits at `capacity - sum_{j>=k} (c_j + H) - trailing`,
+ * and the no-overtake invariant `sum_{j<=k} o_j + PAD <= R_k` requires
+ *
+ *     capacity >= max_k [ sum_{j<=k} o_j + sum_{j>=k} (c_j + H) ] + PAD + trailing
+ *
+ * Incompressible input (all RAW, `c_j = o_j`) maximises the bracket at
+ * `dsize + chunk_size + nblocks * H`: the margin carries the whole accumulated
+ * per-block overhead, not just one block's.
+ *
+ * `trailing` is everything written after the last data block: EOF header, footer
+ * and seek table. The latter is always reserved at its worst case (4 bytes per
+ * block, <= 0.1% of the payload) because no header flag announces one; omitting
+ * it used to push the bound *below* comp_size for a seekable archive of
+ * incompressible data in small blocks.
+ *
+ * @param[in] dsize      Decompressed size, in bytes.
+ * @param[in] chunk_size Block size from the file header (0 = no blocks).
+ * @param[in] has_cs     Non-zero if blocks carry checksums.
+ * @return Bytes to reserve beyond @p dsize.
  */
-static uint64_t zxc_inplace_margin(const uint64_t d, const size_t chunk_size, const int has_cs) {
-    const uint64_t nblocks = chunk_size ? (d + (uint64_t)chunk_size - 1) / (uint64_t)chunk_size : 0;
+static uint64_t zxc_inplace_margin(const uint64_t dsize, const size_t chunk_size,
+                                   const int has_cs) {
+    const uint64_t nblocks =
+        chunk_size ? (dsize + (uint64_t)chunk_size - 1) / (uint64_t)chunk_size : 0;
     const uint64_t per_block =
         (uint64_t)ZXC_BLOCK_HEADER_SIZE + (has_cs ? (uint64_t)ZXC_BLOCK_CHECKSUM_SIZE : 0);
-    return (uint64_t)chunk_size + nblocks * per_block + (uint64_t)ZXC_FILE_FOOTER_SIZE +
+    const uint64_t trailing =
+        (uint64_t)ZXC_BLOCK_HEADER_SIZE +  // EOF block header
+        ((uint64_t)ZXC_BLOCK_HEADER_SIZE +
+         nblocks * (uint64_t)ZXC_SEEK_ENTRY_SIZE) +  // Seek table (worst case)
+        (uint64_t)ZXC_FILE_FOOTER_SIZE;
+    return (uint64_t)chunk_size + nblocks * per_block + trailing +
            (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
 }
 
@@ -1035,9 +1053,14 @@ static uint64_t zxc_inplace_margin(const uint64_t d, const size_t chunk_size, co
  * and @ref zxc_decompress_inplace always agree on what a buffer of at least
  * the bound must satisfy.
  *
+ * @param[in]  comp      Compressed archive; only the header and footer are read.
+ * @param[in]  comp_size Size of the archive in bytes. The caller guarantees it
+ *                       covers at least the file header and footer.
+ * @param[out] dsize     Decompressed size read from the footer.
+ * @param[out] margin    In-place margin for @p dsize, from @ref zxc_inplace_margin.
  * @return ZXC_OK, or a negative @ref zxc_error_t on an invalid archive.
  */
-static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64_t* d,
+static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64_t* dsize,
                              uint64_t* margin) {
     if (UNLIKELY(zxc_le32(comp) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
     size_t chunk_size = 0;
@@ -1045,8 +1068,8 @@ static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64
     uint32_t did = 0;
     if (UNLIKELY(zxc_read_file_header(comp, comp_size, &chunk_size, &has_cs, &did) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
-    *d = zxc_le64(comp + comp_size - ZXC_FILE_FOOTER_SIZE);
-    *margin = zxc_inplace_margin(*d, chunk_size, has_cs);
+    *dsize = zxc_le64(comp + comp_size - ZXC_FILE_FOOTER_SIZE);
+    *margin = zxc_inplace_margin(*dsize, chunk_size, has_cs);
     return ZXC_OK;
 }
 
@@ -1067,11 +1090,12 @@ static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64
 // cppcheck-suppress unusedFunction
 size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
     if (UNLIKELY(!src || src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE)) return 0;
-    uint64_t d = 0;
+    uint64_t dsize = 0;
     uint64_t margin = 0;
-    if (UNLIKELY(zxc_inplace_probe((const uint8_t*)src, src_size, &d, &margin) != ZXC_OK)) return 0;
-    if (UNLIKELY(margin > (uint64_t)SIZE_MAX || d > (uint64_t)SIZE_MAX - margin)) return 0;
-    return (size_t)(d + margin);
+    if (UNLIKELY(zxc_inplace_probe((const uint8_t*)src, src_size, &dsize, &margin) != ZXC_OK))
+        return 0;
+    if (UNLIKELY(margin > (uint64_t)SIZE_MAX || dsize > (uint64_t)SIZE_MAX - margin)) return 0;
+    return (size_t)(dsize + margin);
 }
 
 /**
@@ -1102,11 +1126,11 @@ int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const
         return ZXC_ERROR_NULL_INPUT;
     uint8_t* const buf = (uint8_t*)buffer;
     const uint8_t* const comp = buf + (buffer_capacity - comp_size); /* flush-right */
-    uint64_t d = 0;
+    uint64_t dsize = 0;
     uint64_t margin = 0;
-    if (UNLIKELY(zxc_inplace_probe(comp, comp_size, &d, &margin) != ZXC_OK))
+    if (UNLIKELY(zxc_inplace_probe(comp, comp_size, &dsize, &margin) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
-    if (UNLIKELY(d > (uint64_t)buffer_capacity || (uint64_t)buffer_capacity - d < margin))
+    if (UNLIKELY(dsize > (uint64_t)buffer_capacity || (uint64_t)buffer_capacity - dsize < margin))
         return ZXC_ERROR_DST_TOO_SMALL;
     return zxc_decompress_frame(comp, comp_size, buf, buffer_capacity, opts);
 }
@@ -1138,18 +1162,18 @@ uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
     if (UNLIKELY(zxc_read_file_header(p, src_size, &chunk_size, &has_cs, &did) != ZXC_OK)) return 0;
 
     const uint8_t* const footer = p + src_size - ZXC_FILE_FOOTER_SIZE;
-    const uint64_t d = zxc_le64(footer);
+    const uint64_t dsize = zxc_le64(footer);
 
     /* Plausibility: an archive of src_size bytes cannot carry more blocks
      * than src_size / ZXC_BLOCK_HEADER_SIZE, and each block decodes to at
      * most chunk_size bytes. Division form keeps the compare overflow-free
-     * (the usual `(d + chunk - 1) / chunk` ceil would wrap for a forged d
-     * near UINT64_MAX). */
+     * (the usual `(dsize + chunk - 1) / chunk` ceil would wrap for a forged
+     * dsize near UINT64_MAX). */
     const uint64_t blocks_needed =
-        chunk_size ? d / (uint64_t)chunk_size + (d % (uint64_t)chunk_size != 0) : 0;
+        chunk_size ? dsize / (uint64_t)chunk_size + (dsize % (uint64_t)chunk_size != 0) : 0;
     if (UNLIKELY(blocks_needed > (uint64_t)(src_size / ZXC_BLOCK_HEADER_SIZE))) return 0;
 
-    return d;
+    return dsize;
 }
 
 /**
