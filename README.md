@@ -562,7 +562,9 @@ consume(out.data, out.size);                                  // writable, page-
 zxc_mmap_close(&out);
 ```
 
-Measured on a 56 MiB payload (Apple M2, warm page cache): decode throughput is on par with `read()` + `zxc_decompress`, while peak RSS drops **24 %** on compressible data and **49 %** on incompressible data (where the archive copy is as large as the payload). `zxc_mmap_open` additionally maps an archive read-only, so the ordinary buffer API can consume an on-disk archive with no input copy. On Windows the archive is copied once into the single region; on targets without mapping every entry point returns `ZXC_ERROR_UNSUPPORTED`.
+Measured on a 56 MiB payload (Apple M2, warm page cache): decode throughput is on par with `read()` + `zxc_decompress`, while peak RSS drops **24 %** on compressible data and **49 %** on incompressible data (where the archive copy is as large as the payload). `zxc_mmap_open` additionally maps an archive read-only, so the ordinary buffer API can consume an on-disk archive with no input copy.
+
+The placement is zero-copy on POSIX (`MAP_FIXED` over an anonymous reservation) and on Windows 10 1803 / Server 2019+ (placeholder mappings via `VirtualAlloc2` + `MapViewOfFile3`, resolved at run time); older Windows falls back to a single copy of the archive into the same one region, and `zxc_mmap_is_zerocopy()` reports which route ran. On targets without mapping every entry point returns `ZXC_ERROR_UNSUPPORTED`.
 
 ---
 
