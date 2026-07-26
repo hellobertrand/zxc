@@ -201,6 +201,11 @@ extern "C" {
  */
 #define ZXC_COLD __attribute__((cold))
 
+/** @def ZXC_MAYBE_UNUSED
+ * @brief Marks a definition that only some build variants reference.
+ */
+#define ZXC_MAYBE_UNUSED __attribute__((unused))
+
 #elif defined(_MSC_VER)
 #include <intrin.h>
 #if defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64)
@@ -235,6 +240,8 @@ extern "C" {
 #define ZXC_NOINLINE __declspec(noinline)
 /** @copydoc ZXC_COLD */
 #define ZXC_COLD
+/** @copydoc ZXC_MAYBE_UNUSED */
+#define ZXC_MAYBE_UNUSED
 #pragma intrinsic(_BitScanReverse)
 #else
 #define LIKELY(x) (x)
@@ -255,6 +262,8 @@ extern "C" {
  */
 #define ZXC_NOINLINE
 #define ZXC_COLD
+/** @copydoc ZXC_MAYBE_UNUSED */
+#define ZXC_MAYBE_UNUSED
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #include <stdalign.h>

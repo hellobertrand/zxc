@@ -69,7 +69,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int us
  * @return The blended 128-bit vector.
  */
 // codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
-static ZXC_ALWAYS_INLINE __m128i zxc_mm_blendv_epi8_sse2(__m128i a, __m128i b, __m128i mask) {
+static ZXC_MAYBE_UNUSED ZXC_ALWAYS_INLINE __m128i zxc_mm_blendv_epi8_sse2(__m128i a, __m128i b,
+                                                                          __m128i mask) {
     return _mm_or_si128(_mm_and_si128(mask, b), _mm_andnot_si128(mask, a));
 }
 
@@ -86,7 +87,7 @@ static ZXC_ALWAYS_INLINE __m128i zxc_mm_blendv_epi8_sse2(__m128i a, __m128i b, _
  * @return The eight u16 lanes packed from @p a then @p b.
  */
 // codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
-static ZXC_ALWAYS_INLINE __m128i zxc_mm_packus_epi32_sse2(__m128i a, __m128i b) {
+static ZXC_MAYBE_UNUSED ZXC_ALWAYS_INLINE __m128i zxc_mm_packus_epi32_sse2(__m128i a, __m128i b) {
     const __m128i bias32 = _mm_set1_epi32(0x8000);
     const __m128i bias16 = _mm_set1_epi16((short)0x8000);
     const __m128i pa = _mm_sub_epi32(a, bias32);
