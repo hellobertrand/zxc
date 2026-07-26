@@ -33,6 +33,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         src/lib/zxc_pivco_tables.c
         src/lib/zxc_dict.c
         src/lib/zxc_dispatch.c
+        src/lib/zxc_mmap.c
         src/lib/zxc_pstream.c
         src/lib/zxc_seekable.c
     )
@@ -43,6 +44,7 @@ else()
         src/lib/zxc_dict.c
         src/lib/zxc_driver.c
         src/lib/zxc_dispatch.c
+        src/lib/zxc_mmap.c
         src/lib/zxc_pstream.c
         src/lib/zxc_seekable.c
     )
