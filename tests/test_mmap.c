@@ -53,12 +53,16 @@ static int check_closed(const char* const label, zxc_map_t* const m) {
  * mapped path API, the mapped fd API, and a read-only mapping fed to
  * zxc_decompress. */
 static int mmap_case(const char* const label, const uint8_t* const orig, const size_t n,
-                     const int level, const int checksum) {
+                     const int level, const int checksum, const size_t block_size,
+                     const int seekable) {
     const size_t cbound = (size_t)zxc_compress_bound(n);
     uint8_t* const comp = (uint8_t*)malloc(cbound);
     if (!comp) return 0;
 
-    const zxc_compress_opts_t co = {.level = level, .checksum_enabled = checksum};
+    const zxc_compress_opts_t co = {.level = level,
+                                    .checksum_enabled = checksum,
+                                    .block_size = block_size,
+                                    .seekable = seekable};
     const int64_t c = zxc_compress(orig, n, comp, cbound, &co);
     if (c <= 0) {
         printf("Failed [%s]: compress -> %lld\n", label, (long long)c);
@@ -175,22 +179,34 @@ int test_mmap_roundtrip(void) {
     int ok = 1;
 
     gen_lz_data(a, N);
-    ok &= mmap_case("compressible L3", a, N, 3, 1);
-    ok &= mmap_case("compressible L6", a, N, 6, 0);
+    ok &= mmap_case("compressible L3", a, N, 3, 1, 0, 0);
+    ok &= mmap_case("compressible L6", a, N, 6, 0, 0, 0);
 
     /* High-entropy: comp_size ~ N, so the flush-right archive overlaps the
      * output region and the decoder writes over bytes it has already read. */
     gen_random_data(a, N);
-    ok &= mmap_case("random L1 (overlap)", a, N, 1, 0);
-    ok &= mmap_case("random L7 (overlap)", a, N, 7, 1);
+    ok &= mmap_case("random L1 (overlap)", a, N, 1, 0, 0, 0);
+    ok &= mmap_case("random L7 (overlap)", a, N, 7, 1, 0, 0);
 
     /* Multi-block, and a size that is not a page multiple. */
     gen_binary_data(a, N);
-    ok &= mmap_case("binary 1 MiB+1", a, 1024 * 1024 + 1, 3, 1);
-    ok &= mmap_case("binary 4 KiB-3", a, 4093, 3, 0);
-    ok &= mmap_case("tiny 1 byte", a, 1, 3, 1);
+    ok &= mmap_case("binary 1 MiB+1", a, 1024 * 1024 + 1, 3, 1, 0, 0);
+    ok &= mmap_case("binary 4 KiB-3", a, 4093, 3, 0, 0, 0);
+    ok &= mmap_case("tiny 1 byte", a, 1, 3, 1, 0, 0);
 
+    /* Seekable archives put a seek table between the EOF block and the footer;
+     * those bytes push the flush-right archive left, so the in-place bound has
+     * to reserve them (it did not, and the mapped path silently lost its
+     * margin). Worst shape: many small blocks over incompressible data. */
     free(a);
+    uint8_t* const b = (uint8_t*)malloc(8 * 1024 * 1024);
+    if (!b) return 0;
+    gen_random_data(b, 8 * 1024 * 1024);
+    ok &= mmap_case("seekable random, 4K blocks", b, 8 * 1024 * 1024, 1, 1, ZXC_BLOCK_SIZE_MIN, 1);
+    gen_lz_data(b, 8 * 1024 * 1024);
+    ok &= mmap_case("seekable text, 4K blocks", b, 8 * 1024 * 1024, 3, 1, ZXC_BLOCK_SIZE_MIN, 1);
+    free(b);
+
     if (!ok) return 0;
     printf("PASS\n\n");
     return 1;

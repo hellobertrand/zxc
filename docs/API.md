@@ -515,6 +515,31 @@ bound while what the caller keeps is just the decompressed data.
 deployment can log whether it gets the mapped or the copying path. The
 decompressed bytes are identical either way.
 
+### Seekable archives
+
+`zxc_decompress_mmap` decodes a seekable archive like any other — the seek table
+sits behind the EOF block and is skipped, and `zxc_decompress_inplace_bound`
+reserves room for it.
+
+For *random access* you want the [Seekable API](#11-seekable-api) instead, and
+`zxc_mmap_open` is a natural backend for it: a `read_at` that `memcpy`s out of
+the mapping needs no `read()` syscall per block and is reentrant, so it is legal
+on `zxc_seekable_decompress_range_mt` too.
+
+```c
+static int64_t map_read_at(void* ctx, void* dst, size_t len, uint64_t offset) {
+    const zxc_map_t* m = (const zxc_map_t*)ctx;
+    if (offset > m->size || len > m->size - offset) return ZXC_ERROR_IO;
+    memcpy(dst, (const unsigned char*)m->data + offset, len);
+    return (int64_t)len;
+}
+
+zxc_map_t m;
+zxc_mmap_open("archive.zxc", &m);
+const zxc_reader_t reader = { .read_at = map_read_at, .ctx = &m, .size = m.size };
+zxc_seekable* s = zxc_seekable_open_reader(&reader);   // free before zxc_mmap_close
+```
+
 ### `zxc_map_t`
 
 ```c
