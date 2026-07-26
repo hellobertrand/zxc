@@ -207,6 +207,7 @@ fn main() {
         .file(src_lib.join("zxc_dict.c"))
         .file(src_lib.join("zxc_dispatch.c"))
         .file(src_lib.join("zxc_driver.c"))
+        .file(src_lib.join("zxc_mmap.c"))
         .file(src_lib.join("zxc_seekable.c"))
         .file(src_lib.join("zxc_pstream.c"))
         .opt_level(3)

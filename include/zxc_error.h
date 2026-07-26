@@ -74,6 +74,9 @@ typedef enum {
     /* Parameter errors */
     ZXC_ERROR_BAD_LEVEL = -18, /**< Compression level not supported by this context's workspace. */
 
+    /* Platform errors */
+    ZXC_ERROR_UNSUPPORTED = -19, /**< Operation unavailable on this platform / build. */
+
 } zxc_error_t;
 
 /**
