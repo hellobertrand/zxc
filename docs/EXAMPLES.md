@@ -400,6 +400,10 @@ typedef struct {
 to use `zxc_seekable_decompress_range_mt()`. The single-threaded path makes no
 concurrent calls.
 
+`zxc_mmap_open()` ([Memory-Mapped API](#memory-mapped-zero-copy-decode)) gives
+you the same mapping portably (it also covers Windows), if you would rather not
+call `mmap()` yourself.
+
 The example below wires the reader to an `mmap()`'d archive file, then
 decompresses an arbitrary byte range — no `FILE*` is involved.
 
