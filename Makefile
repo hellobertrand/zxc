@@ -47,11 +47,11 @@ conformance:
 
 # ── Formatting ───────────────────────────────────────────────
 format:
-	@$(CMAKE) -S . -B $(BUILD)
+	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Release $(CMAKE_EXTRA)
 	@$(CMAKE) --build $(BUILD) --target format
 
 format-check:
-	@$(CMAKE) -S . -B $(BUILD)
+	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Release $(CMAKE_EXTRA)
 	@$(CMAKE) --build $(BUILD) --target format-check
 
 # ── Lint (mirrors .github/workflows/quality.yml) ─────────────
@@ -70,7 +70,7 @@ lint:
 
 # ── Documentation ────────────────────────────────────────────
 doc:
-	@$(CMAKE) -S . -B $(BUILD)
+	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Release $(CMAKE_EXTRA)
 	@$(CMAKE) --build $(BUILD) --target doc
 
 # ── Clean ────────────────────────────────────────────────────

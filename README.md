@@ -385,15 +385,15 @@ set. Any of them can still be turned back on explicitly (`-DZXC_BUILD_CLI=ON`,
 ignored whenever CMake is cross-compiling, since it would encode the build
 host's ISA.
 
-Compiler flags follow the same rule. Vendored, zxc adds only `-O3` (`/O2` on
-MSVC) to the flags it inherits from the parent: the warning level
-(`-Wall -Wextra`, `/W3`) and the code generation policy
+Compiler flags follow the same rule. Vendored, zxc adds nothing to what it
+inherits from the parent: the optimisation level comes from the build type, and
+the warning level (`-Wall -Wextra`, `/W3`) and code generation policy
 (`-fomit-frame-pointer`, `-fstrict-aliasing`, `-ffunction-sections`,
 `-fdata-sections` and the matching dead-strip link options) are the embedding
 project's to set. An embedder that builds with frame pointers for its profiler,
-its own aliasing rules or a quiet build log keeps them. `-O3` stays because the
-decoder's published throughput assumes it, and a parent whose build type is
-unset would otherwise ship an unoptimized zxc.
+its own aliasing rules or a quiet build log keeps them. A configure-time warning
+fires if neither a build type nor an optimisation flag is set, since zxc would
+then be built unoptimised.
 
 Third-party code is vendored, never probed: `rapidhash.h` comes from the copy in
 the tree unless `-DZXC_USE_SYSTEM_RAPIDHASH=ON` asks for a system one, so a
@@ -431,22 +431,22 @@ sudo cmake --install build
 
 #### CMake Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `BUILD_SHARED_LIBS` | OFF | Build shared libraries instead of static (`libzxc.so`, `libzxc.dylib`, `zxc.dll`) |
-| `ZXC_NATIVE_ARCH` | ON / OFF | Enable `-march=native` for maximum performance |
-| `ZXC_ENABLE_LTO` | ON / OFF | Enable Link-Time Optimization (LTO) |
-| `ZXC_PGO_MODE` | OFF | Profile-Guided Optimization mode (`OFF`, `GENERATE`, `USE`) |
-| `ZXC_BUILD_CLI` | ON / OFF | Build command-line interface |
-| `ZXC_BUILD_TESTS` | ON / OFF | Build unit tests |
-| `ZXC_INSTALL` | ON / OFF | Generate install rules (headers, pkg-config, CMake package) |
-| `ZXC_ENABLE_COVERAGE` | OFF | Enable code coverage generation (disables LTO/PGO) |
-| `ZXC_DISABLE_SIMD` | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON) |
-| `ZXC_USE_SYSTEM_RAPIDHASH` | OFF | Use a system-installed `rapidhash.h` instead of the vendored copy |
+| Option | Default (standalone) | Default (vendored) | Description |
+|--------|----------------------|--------------------|-------------|
+| `BUILD_SHARED_LIBS` | OFF | OFF | Build shared libraries instead of static (`libzxc.so`, `libzxc.dylib`, `zxc.dll`) |
+| `ZXC_NATIVE_ARCH` | ON | OFF | Enable `-march=native` for maximum performance |
+| `ZXC_ENABLE_LTO` | ON | OFF | Enable Link-Time Optimization (LTO) |
+| `ZXC_PGO_MODE` | OFF | OFF | Profile-Guided Optimization mode (`OFF`, `GENERATE`, `USE`) |
+| `ZXC_BUILD_CLI` | ON | OFF | Build command-line interface |
+| `ZXC_BUILD_TESTS` | ON | OFF | Build unit tests |
+| `ZXC_INSTALL` | ON | OFF | Generate install rules (headers, pkg-config, CMake package) |
+| `ZXC_ENABLE_COVERAGE` | OFF | OFF | Enable code coverage generation (disables LTO/PGO) |
+| `ZXC_DISABLE_SIMD` | OFF | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON) |
+| `ZXC_USE_SYSTEM_RAPIDHASH` | OFF | OFF | Use a system-installed `rapidhash.h` instead of the vendored copy |
 
-Options listed as `ON / OFF` default to ON for a standalone build and to OFF when
-zxc is vendored as a subproject, so an embedding project keeps control of its own
-compiler flags, test registration and install set.
+"Vendored" is a build where zxc is not the top-level project (`add_subdirectory()`,
+`FetchContent`): the embedding project then keeps control of its own compiler flags,
+test registration and install set.
 
 ```bash
 # Build shared library
