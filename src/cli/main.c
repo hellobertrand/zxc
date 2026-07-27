@@ -627,7 +627,7 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
         bar[BAR_WIDTH] = '\0';
 
         // Estimated time to completion, from the cumulative throughput
-        char eta[24] = "";
+        char eta[40] = "";
         if (speed_mbps > 0.0 && total > bytes_processed) {
             const long secs = (long)((double)(total - bytes_processed) / (speed_mbps * 1e6));
             if (secs >= 3600)
