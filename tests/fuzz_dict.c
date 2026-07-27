@@ -136,6 +136,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         uint32_t lid = 0;
         const int rc = zxc_dict_load(zxd_buf, (size_t)zxd_sz, &lc, &lcs, &lh, &lid);
         assert(rc == ZXC_OK);
+        (void)rc;
         assert(lcs == (size_t)dict_sz);
         assert(memcmp(lc, dict_buf, (size_t)dict_sz) == 0);
         assert(lh != NULL && memcmp(lh, huf, ZXC_HUF_TABLE_SIZE) == 0);
@@ -148,6 +149,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         const size_t small_cap = corrupt_pos % (size_t)zxd_sz; /* in [0, zxd_sz) */
         const int64_t r = zxc_dict_save(dict_buf, (size_t)dict_sz, huf, zxd_buf, small_cap);
         assert(r < 0);
+        (void)r;
     }
 
     /* Re-save (the DST_TOO_SMALL attempt left zxd_buf untouched, but be safe). */
