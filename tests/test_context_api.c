@@ -12,7 +12,7 @@ int test_opaque_context_api() {
 
     /* 1. NULL context -> ZXC_ERROR_NULL_INPUT */
     {
-        uint8_t d[64];
+        uint8_t d[64] = {0};
         zxc_compress_opts_t co = {.level = 3, .checksum_enabled = 0};
         if (zxc_compress_cctx(NULL, d, sizeof(d), d, sizeof(d), &co) != ZXC_ERROR_NULL_INPUT) {
             printf("  [FAIL] compress_cctx NULL ctx\n");

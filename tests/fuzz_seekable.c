@@ -113,6 +113,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         dec_result = zxc_seekable_decompress_range(s, decomp_buf, size, 0, size);
     }
     assert(dec_result == (int64_t)size);
+    (void)dec_result;
     assert(memcmp(data, decomp_buf, size) == 0);
 
     /* ------------------------------------------------------------------ */

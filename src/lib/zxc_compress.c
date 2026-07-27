@@ -55,7 +55,13 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int us
     }
 }
 
-#if defined(ZXC_USE_SSE2)
+/* SSE2 selected, not merely available: guards the two helpers below. */
+#if defined(ZXC_USE_SSE2) && !(defined(ZXC_USE_AVX512) && defined(__AVX512VL__)) && \
+    !defined(ZXC_USE_AVX2) && !defined(ZXC_USE_NEON64) && !defined(ZXC_USE_NEON32)
+#define ZXC_OPT_SSE2
+#endif
+
+#if defined(ZXC_OPT_SSE2)
 /**
  * @brief SSE2 emulation of SSE4.1 @c _mm_blendv_epi8.
  *
@@ -68,7 +74,6 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int us
  * @param[in] mask  Per-byte selector (a full-width compare result).
  * @return The blended 128-bit vector.
  */
-// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
 static ZXC_ALWAYS_INLINE __m128i zxc_mm_blendv_epi8_sse2(__m128i a, __m128i b, __m128i mask) {
     return _mm_or_si128(_mm_and_si128(mask, b), _mm_andnot_si128(mask, a));
 }
@@ -85,7 +90,6 @@ static ZXC_ALWAYS_INLINE __m128i zxc_mm_blendv_epi8_sse2(__m128i a, __m128i b, _
  * @param[in] b  Four u32 lanes forming the high half of the result.
  * @return The eight u16 lanes packed from @p a then @p b.
  */
-// codeql[cpp/unused-static-function] : Used conditionally when ZXC_USE_SSE2 is defined
 static ZXC_ALWAYS_INLINE __m128i zxc_mm_packus_epi32_sse2(__m128i a, __m128i b) {
     const __m128i bias32 = _mm_set1_epi32(0x8000);
     const __m128i bias16 = _mm_set1_epi16((short)0x8000);
@@ -665,7 +669,7 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
             vst1_u16(&parent_off[p + L], vbsl_u16(v_mask16, v_off, v_po));
         }
     }
-#elif defined(ZXC_USE_SSE2)
+#elif defined(ZXC_OPT_SSE2)
     if (L + 4 <= L_end) {
         const __m128i v_inc = _mm_setr_epi32(0, 1, 2, 3);
         const __m128i v_nxt = _mm_set1_epi32((int)nxt);
