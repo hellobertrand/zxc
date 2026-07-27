@@ -357,7 +357,49 @@ meson compile -C build
 When consumed as a subproject, only the library is built (CLI and tests are
 skipped automatically).
 
-### Option 6: Winget
+### Option 6: CMake Subproject (vendored)
+
+zxc can be vendored directly into a CMake build, either as a git submodule with
+`add_subdirectory()` or through `FetchContent`:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(zxc
+    GIT_REPOSITORY https://github.com/hellobertrand/zxc.git
+    GIT_TAG        v0.13.1
+)
+FetchContent_MakeAvailable(zxc)
+
+target_link_libraries(myapp PRIVATE zxc::zxc_lib)
+```
+
+`zxc::zxc_lib` is the same target name the installed package exports, so
+switching between a vendored copy and `find_package(zxc)` needs no other
+change.
+
+When zxc is not the top-level project it builds the library only: the CLI, the
+tests, `-march=native`, LTO and the install rules all default to off, so the
+embedding project keeps full control of its own CTest registration and install
+set. Any of them can still be turned back on explicitly (`-DZXC_BUILD_CLI=ON`,
+`-DZXC_NATIVE_ARCH=ON`, `-DZXC_INSTALL=ON`, ...). `-march=native` is also
+ignored whenever CMake is cross-compiling, since it would encode the build
+host's ISA.
+
+Compiler flags follow the same rule. Vendored, zxc adds nothing to what it
+inherits from the parent: the optimisation level comes from the build type, and
+the warning level (`-Wall -Wextra`, `/W3`) and code generation policy
+(`-fomit-frame-pointer`, `-fstrict-aliasing`, `-ffunction-sections`,
+`-fdata-sections` and the matching dead-strip link options) are the embedding
+project's to set. An embedder that builds with frame pointers for its profiler,
+its own aliasing rules or a quiet build log keeps them. A configure-time warning
+fires if neither a build type nor an optimisation flag is set, since zxc would
+then be built unoptimised.
+
+Third-party code is vendored, never probed: `rapidhash.h` comes from the copy in
+the tree unless `-DZXC_USE_SYSTEM_RAPIDHASH=ON` asks for a system one, so a
+build cannot silently pick up a header from the host.
+
+### Option 7: Winget
 
 **Requirements:** Windows 10 1709 (or later)
 
@@ -367,7 +409,7 @@ Use winget to install the zxc CLI:
 winget install hellobertrand.zxc
 ```
 
-### Option 7: Building from Source (CMake)
+### Option 8: Building from Source (CMake)
 
 **Requirements:** CMake (3.14+), C17 Compiler (Clang/GCC/MSVC).
 
@@ -389,16 +431,22 @@ sudo cmake --install build
 
 #### CMake Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `BUILD_SHARED_LIBS` | OFF | Build shared libraries instead of static (`libzxc.so`, `libzxc.dylib`, `zxc.dll`) |
-| `ZXC_NATIVE_ARCH` | ON | Enable `-march=native` for maximum performance |
-| `ZXC_ENABLE_LTO` | ON | Enable Link-Time Optimization (LTO) |
-| `ZXC_PGO_MODE` | OFF | Profile-Guided Optimization mode (`OFF`, `GENERATE`, `USE`) |
-| `ZXC_BUILD_CLI` | ON | Build command-line interface |
-| `ZXC_BUILD_TESTS` | ON | Build unit tests |
-| `ZXC_ENABLE_COVERAGE` | OFF | Enable code coverage generation (disables LTO/PGO) |
-| `ZXC_DISABLE_SIMD` | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON) |
+| Option | Default (standalone) | Default (vendored) | Description |
+|--------|----------------------|--------------------|-------------|
+| `BUILD_SHARED_LIBS` | OFF | OFF | Build shared libraries instead of static (`libzxc.so`, `libzxc.dylib`, `zxc.dll`) |
+| `ZXC_NATIVE_ARCH` | ON | OFF | Enable `-march=native` for maximum performance |
+| `ZXC_ENABLE_LTO` | ON | OFF | Enable Link-Time Optimization (LTO) |
+| `ZXC_PGO_MODE` | OFF | OFF | Profile-Guided Optimization mode (`OFF`, `GENERATE`, `USE`) |
+| `ZXC_BUILD_CLI` | ON | OFF | Build command-line interface |
+| `ZXC_BUILD_TESTS` | ON | OFF | Build unit tests |
+| `ZXC_INSTALL` | ON | OFF | Generate install rules (headers, pkg-config, CMake package) |
+| `ZXC_ENABLE_COVERAGE` | OFF | OFF | Enable code coverage generation (disables LTO/PGO) |
+| `ZXC_DISABLE_SIMD` | OFF | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON) |
+| `ZXC_USE_SYSTEM_RAPIDHASH` | OFF | OFF | Use a system-installed `rapidhash.h` instead of the vendored copy |
+
+"Vendored" is a build where zxc is not the top-level project (`add_subdirectory()`,
+`FetchContent`): the embedding project then keeps control of its own compiler flags,
+test registration and install set.
 
 ```bash
 # Build shared library

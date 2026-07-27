@@ -25,15 +25,56 @@ project(zxc
 # =============================================================================
 # Build Options
 # =============================================================================
+if(NOT DEFINED PROJECT_IS_TOP_LEVEL)
+    if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+        set(PROJECT_IS_TOP_LEVEL ON)
+    else()
+        set(PROJECT_IS_TOP_LEVEL OFF)
+    endif()
+endif()
+
 option(BUILD_SHARED_LIBS "Build shared libraries instead of static" OFF)
-option(ZXC_NATIVE_ARCH "Enable -march=native for maximum performance" ON)
-option(ZXC_ENABLE_LTO "Enable Interprocedural Optimization (LTO)" ON)
+option(ZXC_NATIVE_ARCH "Enable -march=native for maximum performance" ${PROJECT_IS_TOP_LEVEL})
+option(ZXC_ENABLE_LTO "Enable Interprocedural Optimization (LTO)" ${PROJECT_IS_TOP_LEVEL})
 set(ZXC_PGO_MODE "OFF" CACHE STRING "Profile-Guided Optimization mode (OFF/GENERATE/USE)")
 set_property(CACHE ZXC_PGO_MODE PROPERTY STRINGS OFF GENERATE USE)
-option(ZXC_BUILD_CLI "Build the command-line interface" ON)
-option(ZXC_BUILD_TESTS "Build unit tests" ON)
+option(ZXC_BUILD_CLI "Build the command-line interface" ${PROJECT_IS_TOP_LEVEL})
+option(ZXC_BUILD_TESTS "Build unit tests" ${PROJECT_IS_TOP_LEVEL})
+option(ZXC_INSTALL "Generate install rules (headers, pkg-config, CMake package)"
+       ${PROJECT_IS_TOP_LEVEL})
 option(ZXC_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 option(ZXC_DISABLE_SIMD "Disable explicit SIMD intrinsics (no AVX/NEON code paths)" OFF)
+option(ZXC_USE_SYSTEM_RAPIDHASH "Use a system-installed rapidhash.h instead of the vendored copy"
+       OFF)
+
+# =============================================================================
+# Target architecture
+# =============================================================================
+set(ZXC_TARGET_ARCHS "${CMAKE_SYSTEM_PROCESSOR}")
+if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+    set(ZXC_TARGET_ARCHS "${CMAKE_OSX_ARCHITECTURES}")
+endif()
+
+set(ZXC_TARGET_X86 OFF)
+set(ZXC_TARGET_AARCH64 OFF)
+set(ZXC_TARGET_ARM32 OFF)
+foreach(_arch IN LISTS ZXC_TARGET_ARCHS)
+    if(_arch MATCHES "amd64|x86_64|AMD64")
+        set(ZXC_TARGET_X86 ON)
+    elseif(_arch MATCHES "aarch64|arm64|ARM64")
+        # Must be tested before "^arm", which "arm64" matches too.
+        set(ZXC_TARGET_AARCH64 ON)
+    elseif(_arch MATCHES "^arm")
+        set(ZXC_TARGET_ARM32 ON)
+    endif()
+endforeach()
+
+if(ZXC_NATIVE_ARCH AND (CMAKE_CROSSCOMPILING OR
+                        NOT "${ZXC_TARGET_ARCHS}" STREQUAL "${CMAKE_SYSTEM_PROCESSOR}"))
+    message(STATUS "zxc: target (${ZXC_TARGET_ARCHS}) is not the build host "
+                   "(${CMAKE_SYSTEM_PROCESSOR}) - ignoring ZXC_NATIVE_ARCH.")
+    set(ZXC_NATIVE_ARCH OFF)
+endif()
 
 # =============================================================================
 # Emscripten / WebAssembly overrides
@@ -87,12 +128,15 @@ endif()
 # =============================================================================
 # Rapidhash: system-installed (e.g. vcpkg) or vendored fallback
 # =============================================================================
-find_path(RAPIDHASH_INCLUDE_DIR rapidhash.h)
-if(NOT RAPIDHASH_INCLUDE_DIR)
+if(ZXC_USE_SYSTEM_RAPIDHASH)
+    find_path(RAPIDHASH_INCLUDE_DIR rapidhash.h)
+    if(NOT RAPIDHASH_INCLUDE_DIR)
+        message(FATAL_ERROR "ZXC_USE_SYSTEM_RAPIDHASH is ON but rapidhash.h was not found.")
+    endif()
+    message(STATUS "Using system rapidhash from ${RAPIDHASH_INCLUDE_DIR}")
+else()
     set(RAPIDHASH_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/vendors")
     message(STATUS "Using vendored rapidhash from ${RAPIDHASH_INCLUDE_DIR}")
-else()
-    message(STATUS "Found system rapidhash in ${RAPIDHASH_INCLUDE_DIR}")
 endif()
 
 # =============================================================================
@@ -136,6 +180,22 @@ macro(zxc_apply_pgo target)
     endif()
 endmacro()
 
+# Warnings and PGO, for every zxc target. Defined once because each target used
+# to repeat its own list, and the variant objects ended up with no warnings at
+# all. Warning level is top-level only: an embedder sets its own.
+macro(zxc_apply_common_flags target)
+    if(MSVC)
+        # /wd4244: block-bounded uint64->size_t narrowing, lossless.
+        target_compile_options(${target} PRIVATE /wd4244)
+        if(PROJECT_IS_TOP_LEVEL)
+            target_compile_options(${target} PRIVATE /W3)
+        endif()
+    elseif(PROJECT_IS_TOP_LEVEL)
+        target_compile_options(${target} PRIVATE -Wall -Wextra)
+    endif()
+    zxc_apply_pgo(${target})
+endmacro()
+
 # Function Multi-Versioning Helper
 # Compiles compress/decompress/huffman with specific flags and suffix so the
 # runtime dispatcher can route to a BMI2/AVX2/AVX512/NEON-aware Huffman codec
@@ -143,9 +203,10 @@ endmacro()
 macro(zxc_add_variant suffix flags)
     foreach(_src compress decompress huffman)
         add_library(zxc_${_src}${suffix} OBJECT src/lib/zxc_${_src}.c)
+        # Common flags first: the ISA flags below must have the last word, since
+        # a later -march= would reset the feature set they select.
+        zxc_apply_common_flags(zxc_${_src}${suffix})
         target_compile_options(zxc_${_src}${suffix} PRIVATE ${flags})
-        # MSVC C4244: block-bounded uint64->size_t narrowing, lossless (clean on GCC/Clang).
-        target_compile_options(zxc_${_src}${suffix} PRIVATE $<$<C_COMPILER_ID:MSVC>:/wd4244>)
         target_compile_definitions(zxc_${_src}${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix})
         # For static builds, define ZXC_STATIC_DEFINE
         if(NOT BUILD_SHARED_LIBS)
@@ -161,8 +222,6 @@ macro(zxc_add_variant suffix flags)
         endif()
         # Inherit include directories
         target_include_directories(zxc_${_src}${suffix} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/lib ${RAPIDHASH_INCLUDE_DIR} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-        # Propagate PGO flags to variant objects
-        zxc_apply_pgo(zxc_${_src}${suffix})
 
         list(APPEND ZXC_VARIANT_OBJECTS $<TARGET_OBJECTS:zxc_${_src}${suffix}>)
     endforeach()
@@ -177,7 +236,9 @@ zxc_add_variant(_default "")
 if(ZXC_DISABLE_SIMD)
     message(STATUS "ZXC_DISABLE_SIMD: Skipping SIMD variants (no explicit AVX/NEON code paths).")
 else()
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
+# Driven by the target architectures, not the host: a universal build enables
+# several of these branches at once, so they are independent ifs.
+if(ZXC_TARGET_X86)
     message(STATUS "Building x86_64 AVX2 and AVX512 variants...")
     # No _sse2 variant: SSE2 is the x86-64 baseline, so _default already
     # compiles the SSE2 code paths (ZXC_USE_SSE2 in zxc_internal.h).
@@ -187,17 +248,25 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64|AMD64")
         # AVX512 for MSVC (VS2019 16.10+ supports /arch:AVX512)
         zxc_add_variant(_avx512 "/arch:AVX512;/D__BMI__;/D__BMI2__;/D__LZCNT__")
     else()
-        # AVX2 for GCC/Clang
-        zxc_add_variant(_avx2 "-mavx2;-mbmi;-mbmi2;-mlzcnt")
-        # AVX512 for GCC/Clang
-        zxc_add_variant(_avx512
-                        "-mavx512f;-mavx512bw;-mavx512vbmi;-mavx512vbmi2;-mbmi;-mbmi2;-mlzcnt")
+        set(ZXC_AVX2_FLAGS   -mavx2 -mbmi -mbmi2 -mlzcnt)
+        set(ZXC_AVX512_FLAGS -mavx512f -mavx512bw -mavx512vbmi -mavx512vbmi2 -mbmi -mbmi2 -mlzcnt)
+        if(APPLE AND ZXC_TARGET_AARCH64)
+            # Universal build: every variant is compiled for every slice, so the
+            # x86 flags must be confined to the x86 one. -Xarch_<arch> covers the
+            # single argument that follows it, hence one prefix per flag.
+            list(TRANSFORM ZXC_AVX2_FLAGS   PREPEND "-Xarch_x86_64;")
+            list(TRANSFORM ZXC_AVX512_FLAGS PREPEND "-Xarch_x86_64;")
+        endif()
+        zxc_add_variant(_avx2   "${ZXC_AVX2_FLAGS}")
+        zxc_add_variant(_avx512 "${ZXC_AVX512_FLAGS}")
     endif()
+endif()
 
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+if(ZXC_TARGET_AARCH64)
     message(STATUS "AArch64: NEON is baseline; no dedicated SIMD variant needed.")
+endif()
 
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
+if(ZXC_TARGET_ARM32)
     message(STATUS "Building ARMv7 NEON32 variant...")
     zxc_add_variant(_neon32 "-march=armv7-a;-mfpu=neon")
 endif()
@@ -230,6 +299,10 @@ add_library(zxc_lib
     ${ZXC_CORE_SOURCES}
     ${ZXC_VARIANT_OBJECTS}
 )
+
+# Carries the same name as the target exported by the installed package, so a
+# vendored add_subdirectory() and a find_package(zxc) are interchangeable.
+add_library(zxc::zxc_lib ALIAS zxc_lib)
 
 # =============================================================================
 # ABI Versioning (Debian/Linux shared libraries)
@@ -272,20 +345,27 @@ endif()
 # =============================================================================
 # Compiler-specific options (using generator expressions)
 # =============================================================================
+# The optimisation level comes from the build type, here as everywhere else.
+# Forcing -O3 would only have covered zxc_lib: the codec itself lives in the
+# variant objects, which never had it.
+get_property(ZXC_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT ZXC_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_C_FLAGS MATCHES "[-/]O")
+    message(WARNING "zxc: no CMAKE_BUILD_TYPE and no optimisation flag - the library will be "
+                    "built unoptimised. Set CMAKE_BUILD_TYPE=Release.")
+endif()
+
+zxc_apply_common_flags(zxc_lib)
+
 if(NOT MSVC)
-    target_compile_options(zxc_lib PRIVATE
-        $<$<NOT:$<BOOL:${ZXC_ENABLE_COVERAGE}>>:-O3>
-        -Wall -Wextra 
-        -fomit-frame-pointer 
-        -fstrict-aliasing
-        # Native Arch
-        $<$<BOOL:${ZXC_NATIVE_ARCH}>:-march=native>
-        # Dead code elimination
-        -ffunction-sections -fdata-sections
-    )
-    
-    # Profile-Guided Optimization
-    zxc_apply_pgo(zxc_lib)
+    target_compile_options(zxc_lib PRIVATE $<$<BOOL:${ZXC_NATIVE_ARCH}>:-march=native>)
+
+    # Code generation policy: the parent's business when vendored. Kept off the
+    # variant objects, whose emitted code must not move.
+    if(PROJECT_IS_TOP_LEVEL)
+        target_compile_options(zxc_lib PRIVATE
+            -fomit-frame-pointer -fstrict-aliasing -ffunction-sections -fdata-sections)
+    endif()
+
     if(ZXC_PGO_MODE STREQUAL "GENERATE")
         message(STATUS "PGO: Generating profile data to ${ZXC_PGO_DIR}")
     elseif(ZXC_PGO_MODE STREQUAL "USE")
@@ -295,15 +375,15 @@ if(NOT MSVC)
         message(STATUS "PGO: Using profile data from ${ZXC_PGO_DIR}")
     endif()
 
-    # Linker options for Dead Code Stripping
-    if(APPLE)
-        target_link_options(zxc_lib PRIVATE -Wl,-dead_strip)
-    else()
-        target_link_options(zxc_lib PRIVATE -Wl,--gc-sections)
+    # Linker options for Dead Code Stripping (pairs with -ffunction-sections)
+    if(PROJECT_IS_TOP_LEVEL)
+        if(APPLE)
+            target_link_options(zxc_lib PRIVATE -Wl,-dead_strip)
+        else()
+            target_link_options(zxc_lib PRIVATE -Wl,--gc-sections)
+        endif()
     endif()
 else()
-    # /wd4244: same block-bounded uint64->size_t narrowing as the variants.
-    target_compile_options(zxc_lib PRIVATE $<$<CONFIG:Release>:/O2> /W3 /wd4244)
     target_compile_definitions(zxc_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
@@ -352,10 +432,9 @@ if(ZXC_BUILD_CLI)
         target_link_options(zxc PRIVATE setargv.obj)
     endif()
 
-    # Propagate compile options and definitions
+    zxc_apply_common_flags(zxc)
     target_compile_options(zxc PRIVATE
-        $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>
-    )
+        $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>)
     target_compile_definitions(zxc PRIVATE
         $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
         $<$<NOT:$<C_COMPILER_ID:MSVC>>:_GNU_SOURCE>
@@ -378,9 +457,6 @@ if(ZXC_BUILD_CLI)
         endif()
     endif()
     
-    # Profile-Guided Optimization for CLI
-    zxc_apply_pgo(zxc)
-
     # Linker options for Dead Code Stripping
     if(NOT MSVC)
         if(APPLE)
@@ -408,7 +484,9 @@ endif()
 # Tests
 # =============================================================================
 if(ZXC_BUILD_TESTS)
-    enable_testing()
+    if(PROJECT_IS_TOP_LEVEL)
+        enable_testing()
+    endif()
     
     add_executable(zxc_test
         tests/test_main.c
@@ -453,11 +531,17 @@ if(ZXC_BUILD_TESTS)
                 ${RAPIDHASH_INCLUDE_DIR}
         )
         
-        # Apply same compiler settings as main library
-        target_compile_options(zxc_lib_static PRIVATE
-            $<TARGET_PROPERTY:zxc_lib,COMPILE_OPTIONS>
-        )
-        
+        # Same settings as the main library
+        zxc_apply_common_flags(zxc_lib_static)
+        if(NOT MSVC)
+            target_compile_options(zxc_lib_static PRIVATE
+                $<$<BOOL:${ZXC_NATIVE_ARCH}>:-march=native>)
+            if(PROJECT_IS_TOP_LEVEL)
+                target_compile_options(zxc_lib_static PRIVATE
+                    -fomit-frame-pointer -fstrict-aliasing -ffunction-sections -fdata-sections)
+            endif()
+        endif()
+
         target_compile_definitions(zxc_lib_static PUBLIC ZXC_STATIC_DEFINE)
         target_link_libraries(zxc_lib_static PRIVATE Threads::Threads)
         
@@ -468,10 +552,9 @@ if(ZXC_BUILD_TESTS)
         target_link_libraries(zxc_test PRIVATE zxc_lib)
     endif()
     
-    # Propagate compile options
+    zxc_apply_common_flags(zxc_test)
     target_compile_options(zxc_test PRIVATE
-        $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>
-    )
+        $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>)
     # Propagate definitions
     target_compile_definitions(zxc_test PRIVATE
         $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>)
@@ -482,9 +565,6 @@ if(ZXC_BUILD_TESTS)
             target_link_options(zxc_test PRIVATE --coverage)
         endif()
     endif()
-    
-    # Profile-Guided Optimization for tests
-    zxc_apply_pgo(zxc_test)
     
     target_include_directories(zxc_test PRIVATE src/lib ${RAPIDHASH_INCLUDE_DIR})
 
@@ -549,71 +629,73 @@ endif()
 # =============================================================================
 # Installation
 # =============================================================================
-include(GNUInstallDirs)
+if(ZXC_INSTALL)
+    include(GNUInstallDirs)
 
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/libzxc.pc.in
-    ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
-    @ONLY
-)
-
-install(TARGETS zxc_lib
-    EXPORT zxc-targets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-
-install(DIRECTORY include/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    FILES_MATCHING PATTERN "*.h"
-)
-
-if(ZXC_BUILD_CLI)
-    install(TARGETS zxc
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/libzxc.pc.in
+        ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
+        @ONLY
     )
-    # "unzxc" alias: a symlink to zxc that defaults to decompression. 
-    # Symbolic links are POSIX-only; skipped on Windows.
-    if(NOT WIN32)
-        install(CODE "
-            execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
-                zxc \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/unzxc\")
-        ")
+
+    install(TARGETS zxc_lib
+        EXPORT zxc-targets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+
+    install(DIRECTORY include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.h"
+    )
+
+    if(ZXC_BUILD_CLI)
+        install(TARGETS zxc
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+        # "unzxc" alias: a symlink to zxc that defaults to decompression. 
+        # Symbolic links are POSIX-only; skipped on Windows.
+        if(NOT WIN32)
+            install(CODE "
+                execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
+                    zxc \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/unzxc\")
+            ")
+        endif()
     endif()
+
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+    )
+
+    # CMake package config files for find_package(zxc)
+    include(CMakePackageConfigHelpers)
+
+    install(EXPORT zxc-targets
+        FILE zxc-targets.cmake
+        NAMESPACE zxc::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
+    )
+
+    configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/zxcConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/zxcConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
+    )
+
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/zxcConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+    )
+
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/zxcConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/zxcConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
+    )
 endif()
-
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
-)
-
-# CMake package config files for find_package(zxc)
-include(CMakePackageConfigHelpers)
-
-install(EXPORT zxc-targets
-    FILE zxc-targets.cmake
-    NAMESPACE zxc::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
-)
-
-configure_package_config_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/zxcConfig.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfig.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
-)
-
-write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfigVersion.cmake
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
-
-install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfig.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/zxcConfigVersion.cmake
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zxc
-)
 
 # =============================================================================
 # Code Formatting (clang-format)
@@ -624,7 +706,7 @@ if(DEFINED ENV{CLANG_FORMAT})
 else()
     find_program(CLANG_FORMAT clang-format)
 endif()
-if(CLANG_FORMAT)
+if(CLANG_FORMAT AND PROJECT_IS_TOP_LEVEL)
     file(GLOB_RECURSE ZXC_FORMAT_SOURCES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/*.c"
@@ -648,7 +730,7 @@ if(CLANG_FORMAT)
         COMMENT "Checking formatting of include/, src/lib/ and src/cli/"
         VERBATIM
     )
-else()
+elseif(PROJECT_IS_TOP_LEVEL)
     message(STATUS "clang-format not found - format/format-check targets disabled")
 endif()
 
@@ -658,6 +740,11 @@ endif()
 message(STATUS "")
 message(STATUS "ZXC Configuration Summary:")
 message(STATUS "  Version:        ${PROJECT_VERSION}")
+if(PROJECT_IS_TOP_LEVEL)
+    message(STATUS "  Build Mode:     Standalone")
+else()
+    message(STATUS "  Build Mode:     Embedded (vendored in ${CMAKE_PROJECT_NAME})")
+endif()
 if(BUILD_SHARED_LIBS)
     message(STATUS "  Library Type:   Shared")
 else()
@@ -669,6 +756,12 @@ message(STATUS "  LTO Enabled:    ${ZXC_ENABLE_LTO}")
 message(STATUS "  PGO Mode:       ${ZXC_PGO_MODE}")
 message(STATUS "  Build CLI:      ${ZXC_BUILD_CLI}")
 message(STATUS "  Build Tests:    ${ZXC_BUILD_TESTS}")
+message(STATUS "  Install Rules:  ${ZXC_INSTALL}")
+if(ZXC_USE_SYSTEM_RAPIDHASH)
+    message(STATUS "  Rapidhash:      system (${RAPIDHASH_INCLUDE_DIR})")
+else()
+    message(STATUS "  Rapidhash:      vendored")
+endif()
 message(STATUS "")
 
 # =============================================================================
@@ -768,8 +861,11 @@ endif()
 # =============================================================================
 # Documentation (Doxygen)
 # =============================================================================
-find_package(Doxygen)
-if(DOXYGEN_FOUND)
+# Maintainer tooling: a generic target name an embedding project may own too.
+if(PROJECT_IS_TOP_LEVEL)
+    find_package(Doxygen)
+endif()
+if(DOXYGEN_FOUND AND PROJECT_IS_TOP_LEVEL)
     # Generate the Doxyfile with the current project version
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
     
