@@ -1620,6 +1620,9 @@ parse_done:;
 
         if (zxc_huf_build_code_lengths(freq, huf_code_len, ctx->opt_scratch,
                                        zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
+            if (level >= ZXC_LEVEL_ULTRA)
+                (void)zxc_huf_nudge_code_lengths(freq, huf_code_len, ctx->opt_scratch,
+                                                 zxc_huf_enc_max_code_len(level));
             huf_total_size = zxc_huf_calc_size(freq, huf_code_len, 1);
             /* Space-speed: the entropy candidate must beat the current winner's
              * J, paying its own decode tax over the copy path. */
@@ -1674,6 +1677,8 @@ parse_done:;
         for (uint32_t i = 0; i < seq_c; i++) tfreq[buf_tokens[i]]++;
         if (zxc_huf_build_code_lengths(tfreq, tok_code_len, ctx->opt_scratch,
                                        zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
+            (void)zxc_huf_nudge_code_lengths(tfreq, tok_code_len, ctx->opt_scratch,
+                                             zxc_huf_enc_max_code_len(level));
             tok_huf_size = zxc_huf_calc_size(tfreq, tok_code_len, 1);
             /* Space-speed J comparison (this path is ULTRA-only): the PivCo
              * token section pays the same decode tax as PivCo literals. */
