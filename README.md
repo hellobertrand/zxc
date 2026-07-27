@@ -379,11 +379,25 @@ change.
 
 When zxc is not the top-level project it builds the library only: the CLI, the
 tests, `-march=native`, LTO and the install rules all default to off, so the
-embedding project keeps full control of its own compiler flags, CTest
-registration and install set. Any of them can still be turned back on
-explicitly (`-DZXC_BUILD_CLI=ON`, `-DZXC_NATIVE_ARCH=ON`, `-DZXC_INSTALL=ON`,
-...). `-march=native` is also ignored whenever CMake is cross-compiling, since
-it would encode the build host's ISA.
+embedding project keeps full control of its own CTest registration and install
+set. Any of them can still be turned back on explicitly (`-DZXC_BUILD_CLI=ON`,
+`-DZXC_NATIVE_ARCH=ON`, `-DZXC_INSTALL=ON`, ...). `-march=native` is also
+ignored whenever CMake is cross-compiling, since it would encode the build
+host's ISA.
+
+Compiler flags follow the same rule. Vendored, zxc adds only `-O3` (`/O2` on
+MSVC) to the flags it inherits from the parent: the warning level
+(`-Wall -Wextra`, `/W3`) and the code generation policy
+(`-fomit-frame-pointer`, `-fstrict-aliasing`, `-ffunction-sections`,
+`-fdata-sections` and the matching dead-strip link options) are the embedding
+project's to set. An embedder that builds with frame pointers for its profiler,
+its own aliasing rules or a quiet build log keeps them. `-O3` stays because the
+decoder's published throughput assumes it, and a parent whose build type is
+unset would otherwise ship an unoptimized zxc.
+
+Third-party code is vendored, never probed: `rapidhash.h` comes from the copy in
+the tree unless `-DZXC_USE_SYSTEM_RAPIDHASH=ON` asks for a system one, so a
+build cannot silently pick up a header from the host.
 
 ### Option 7: Winget
 
@@ -420,13 +434,19 @@ sudo cmake --install build
 | Option | Default | Description |
 |--------|---------|-------------|
 | `BUILD_SHARED_LIBS` | OFF | Build shared libraries instead of static (`libzxc.so`, `libzxc.dylib`, `zxc.dll`) |
-| `ZXC_NATIVE_ARCH` | ON | Enable `-march=native` for maximum performance |
-| `ZXC_ENABLE_LTO` | ON | Enable Link-Time Optimization (LTO) |
+| `ZXC_NATIVE_ARCH` | ON / OFF | Enable `-march=native` for maximum performance |
+| `ZXC_ENABLE_LTO` | ON / OFF | Enable Link-Time Optimization (LTO) |
 | `ZXC_PGO_MODE` | OFF | Profile-Guided Optimization mode (`OFF`, `GENERATE`, `USE`) |
-| `ZXC_BUILD_CLI` | ON | Build command-line interface |
-| `ZXC_BUILD_TESTS` | ON | Build unit tests |
+| `ZXC_BUILD_CLI` | ON / OFF | Build command-line interface |
+| `ZXC_BUILD_TESTS` | ON / OFF | Build unit tests |
+| `ZXC_INSTALL` | ON / OFF | Generate install rules (headers, pkg-config, CMake package) |
 | `ZXC_ENABLE_COVERAGE` | OFF | Enable code coverage generation (disables LTO/PGO) |
 | `ZXC_DISABLE_SIMD` | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON) |
+| `ZXC_USE_SYSTEM_RAPIDHASH` | OFF | Use a system-installed `rapidhash.h` instead of the vendored copy |
+
+Options listed as `ON / OFF` default to ON for a standalone build and to OFF when
+zxc is vendored as a subproject, so an embedding project keeps control of its own
+compiler flags, test registration and install set.
 
 ```bash
 # Build shared library

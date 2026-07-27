@@ -44,6 +44,8 @@ option(ZXC_INSTALL "Generate install rules (headers, pkg-config, CMake package)"
        ${PROJECT_IS_TOP_LEVEL})
 option(ZXC_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 option(ZXC_DISABLE_SIMD "Disable explicit SIMD intrinsics (no AVX/NEON code paths)" OFF)
+option(ZXC_USE_SYSTEM_RAPIDHASH "Use a system-installed rapidhash.h instead of the vendored copy"
+       OFF)
 
 if(ZXC_NATIVE_ARCH AND CMAKE_CROSSCOMPILING)
     message(STATUS "zxc: cross-compiling - ignoring ZXC_NATIVE_ARCH (-march=native would "
@@ -103,12 +105,15 @@ endif()
 # =============================================================================
 # Rapidhash: system-installed (e.g. vcpkg) or vendored fallback
 # =============================================================================
-find_path(RAPIDHASH_INCLUDE_DIR rapidhash.h)
-if(NOT RAPIDHASH_INCLUDE_DIR)
+if(ZXC_USE_SYSTEM_RAPIDHASH)
+    find_path(RAPIDHASH_INCLUDE_DIR rapidhash.h)
+    if(NOT RAPIDHASH_INCLUDE_DIR)
+        message(FATAL_ERROR "ZXC_USE_SYSTEM_RAPIDHASH is ON but rapidhash.h was not found.")
+    endif()
+    message(STATUS "Using system rapidhash from ${RAPIDHASH_INCLUDE_DIR}")
+else()
     set(RAPIDHASH_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/vendors")
     message(STATUS "Using vendored rapidhash from ${RAPIDHASH_INCLUDE_DIR}")
-else()
-    message(STATUS "Found system rapidhash in ${RAPIDHASH_INCLUDE_DIR}")
 endif()
 
 # =============================================================================
@@ -295,14 +300,19 @@ endif()
 if(NOT MSVC)
     target_compile_options(zxc_lib PRIVATE
         $<$<NOT:$<BOOL:${ZXC_ENABLE_COVERAGE}>>:-O3>
-        -Wall -Wextra
-        -fomit-frame-pointer
-        -fstrict-aliasing
         # Native Arch
         $<$<BOOL:${ZXC_NATIVE_ARCH}>:-march=native>
-        # Dead code elimination
-        -ffunction-sections -fdata-sections
     )
+
+    if(PROJECT_IS_TOP_LEVEL)
+        target_compile_options(zxc_lib PRIVATE
+            -Wall -Wextra
+            -fomit-frame-pointer
+            -fstrict-aliasing
+            # Dead code elimination
+            -ffunction-sections -fdata-sections
+        )
+    endif()
 
     # Profile-Guided Optimization
     zxc_apply_pgo(zxc_lib)
@@ -315,15 +325,20 @@ if(NOT MSVC)
         message(STATUS "PGO: Using profile data from ${ZXC_PGO_DIR}")
     endif()
 
-    # Linker options for Dead Code Stripping
-    if(APPLE)
-        target_link_options(zxc_lib PRIVATE -Wl,-dead_strip)
-    else()
-        target_link_options(zxc_lib PRIVATE -Wl,--gc-sections)
+    # Linker options for Dead Code Stripping (pairs with -ffunction-sections)
+    if(PROJECT_IS_TOP_LEVEL)
+        if(APPLE)
+            target_link_options(zxc_lib PRIVATE -Wl,-dead_strip)
+        else()
+            target_link_options(zxc_lib PRIVATE -Wl,--gc-sections)
+        endif()
     endif()
 else()
     # /wd4244: same block-bounded uint64->size_t narrowing as the variants.
-    target_compile_options(zxc_lib PRIVATE $<$<CONFIG:Release>:/O2> /W3 /wd4244)
+    target_compile_options(zxc_lib PRIVATE $<$<CONFIG:Release>:/O2> /wd4244)
+    if(PROJECT_IS_TOP_LEVEL)
+        target_compile_options(zxc_lib PRIVATE /W3)
+    endif()
     target_compile_definitions(zxc_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
@@ -699,6 +714,11 @@ message(STATUS "  PGO Mode:       ${ZXC_PGO_MODE}")
 message(STATUS "  Build CLI:      ${ZXC_BUILD_CLI}")
 message(STATUS "  Build Tests:    ${ZXC_BUILD_TESTS}")
 message(STATUS "  Install Rules:  ${ZXC_INSTALL}")
+if(ZXC_USE_SYSTEM_RAPIDHASH)
+    message(STATUS "  Rapidhash:      system (${RAPIDHASH_INCLUDE_DIR})")
+else()
+    message(STATUS "  Rapidhash:      vendored")
+endif()
 message(STATUS "")
 
 # =============================================================================
