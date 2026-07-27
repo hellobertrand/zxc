@@ -221,23 +221,23 @@ static int test_invalid_vector(const char *zxc_path)
     int ok = 1;
 
     uint64_t dec_sz = zxc_get_decompressed_size(comp, comp_sz);
+    const size_t scratch_cap = 1U << 20;
+    const size_t out_cap = (dec_sz > 0 && dec_sz <= scratch_cap)
+                               ? (size_t)dec_sz : scratch_cap;
 
-    if (dec_sz > 0 && dec_sz <= (1 << 20)) {
-        uint8_t *output = malloc((size_t)dec_sz);
-        if (output) {
-            /* Verify with checksum enabled so checksum/payload-corruption
-             * vectors are caught (verification needs both the file flag and
-             * this opt; see zxc_decompress_block in zxc_dispatch.c). */
-            const zxc_decompress_opts_t io = {.checksum_enabled = 1};
-            int64_t result = zxc_decompress(comp, comp_sz,
-                                            output, (size_t)dec_sz, &io);
-            if (result >= 0) {
-                fprintf(stderr, "FAIL: %s  should be rejected but decoded %lld bytes\n",
-                        zxc_path, (long long)result);
-                ok = 0;
-            }
-            free(output);
+    uint8_t *output = malloc(out_cap);
+    if (output) {
+        /* Verify with checksum enabled so checksum/payload-corruption
+         * vectors are caught (verification needs both the file flag and
+         * this opt; see zxc_decompress_block in zxc_dispatch.c). */
+        const zxc_decompress_opts_t io = {.checksum_enabled = 1};
+        int64_t result = zxc_decompress(comp, comp_sz, output, out_cap, &io);
+        if (result >= 0) {
+            fprintf(stderr, "FAIL: %s  should be rejected but decoded %lld bytes\n",
+                    zxc_path, (long long)result);
+            ok = 0;
         }
+        free(output);
     }
 
     free(comp);

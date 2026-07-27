@@ -568,6 +568,36 @@ static ZXC_NOINLINE ZXC_COLD int zxc_ensure_entropy_scratch(const zxc_cctx_t* RE
     return zxc_cctx_alloc_entropy_scratch((zxc_cctx_t*)(uintptr_t)ctx);
 }
 
+/**
+ * @brief Stages a RAW literal stream into the padded @c lit_buffer.
+ *
+ * @ref zxc_decode_copy_literals wild-copies in @ref ZXC_PAD_SIZE chunks and
+ * reads that far past the literals it consumes. Decoded streams land in
+ * @c lit_buffer, which is allocated with the padding; a RAW stream instead
+ * points into the caller's buffer, where the overshoot is only covered by the
+ * block's remaining sections. Callers stage the stream here when those are
+ * shorter than @ref ZXC_PAD_SIZE.
+ *
+ * @param[in]     ctx   Decompression context (owns @c lit_buffer).
+ * @param[in,out] l_ptr Literal cursor; re-pointed at the staged copy.
+ * @param[in,out] l_end Literal end; re-pointed at the staged copy.
+ * @return @ref ZXC_OK, or @ref ZXC_ERROR_CORRUPT_DATA if the stream cannot fit
+ *         (a valid block's literals never exceed the chunk size).
+ */
+static ZXC_NOINLINE ZXC_COLD int zxc_stage_raw_literals(const zxc_cctx_t* RESTRICT ctx,
+                                                        const uint8_t** RESTRICT l_ptr,
+                                                        const uint8_t** RESTRICT l_end) {
+    const size_t lit_size = (size_t)(*l_end - *l_ptr);
+    uint8_t* const stage = ctx->lit_buffer;
+    if (UNLIKELY(!stage || ctx->lit_buffer_cap < lit_size + ZXC_PAD_SIZE))
+        return ZXC_ERROR_CORRUPT_DATA;
+
+    ZXC_MEMCPY(stage, *l_ptr, lit_size);
+    *l_ptr = stage;
+    *l_end = stage + lit_size;
+    return ZXC_OK;
+}
+
 static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco(const zxc_cctx_t* RESTRICT ctx,
                                                       const uint8_t* RESTRICT payload,
                                                       const size_t psize,
@@ -804,6 +834,12 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     // Validate streams don't overflow source buffer + match sequence count.
     if (UNLIKELY((e_end != src + src_size) || (uint64_t)sz_offsets < expected_off_size))
         return ZXC_ERROR_CORRUPT_DATA;
+
+    if (UNLIKELY(gh.enc_lit == ZXC_SECTION_ENCODING_RAW &&
+                 (size_t)(src + src_size - l_end) < ZXC_PAD_SIZE)) {
+        const int rc = zxc_stage_raw_literals(ctx, &l_ptr, &l_end);
+        if (UNLIKELY(rc != ZXC_OK)) return rc;
+    }
 
     const uint8_t* RESTRICT t_ptr;
     if (!tok_entropy) {
@@ -1062,6 +1098,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     if (UNLIKELY((extras_end != src + src_size) ||
                  ((uint64_t)sz_seqs < (uint64_t)gh.n_sequences * 4)))
         return ZXC_ERROR_CORRUPT_DATA;
+
+    if (UNLIKELY((size_t)(src + src_size - l_end) < ZXC_PAD_SIZE)) {
+        const int rc = zxc_stage_raw_literals(ctx, &l_ptr, &l_end);
+        if (UNLIKELY(rc != ZXC_OK)) return rc;
+    }
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
