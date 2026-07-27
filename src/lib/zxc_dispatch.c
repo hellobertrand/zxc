@@ -38,7 +38,7 @@
 #endif
 
 #if (defined(__x86_64__) || defined(_M_X64)) && !defined(_MSC_VER) && !defined(ZXC_ONLY_DEFAULT)
-#include <cpuid.h>  // __get_cpuid: LZCNT probe in zxc_detect_cpu_features
+#include <cpuid.h>  // __cpuid_count: CPUID probes in zxc_detect_cpu_features
 #endif
 
 #if defined(__linux__) && (defined(__arm__) || defined(_M_ARM))
@@ -151,6 +151,36 @@ int zxc_compress_chunk_wrapper_neon32(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
  * ============================================================================
  */
 
+#if (defined(__x86_64__) || defined(_M_X64)) && !defined(ZXC_ONLY_DEFAULT)
+
+/** @brief Reads CPUID leaf @p leaf, subleaf @p sub into @p regs (EAX,EBX,ECX,EDX). */
+static inline void zxc_cpuid(const uint32_t leaf, const uint32_t sub, uint32_t regs[4]) {
+#if defined(_MSC_VER)
+    int r[4];
+    __cpuidex(r, (int)leaf, (int)sub);
+    regs[0] = (uint32_t)r[0];
+    regs[1] = (uint32_t)r[1];
+    regs[2] = (uint32_t)r[2];
+    regs[3] = (uint32_t)r[3];
+#else
+    __cpuid_count(leaf, sub, regs[0], regs[1], regs[2], regs[3]);
+#endif
+}
+
+/** @brief Reads XCR0 (@c XGETBV with ECX=0). Callers must check OSXSAVE first. */
+static inline uint64_t zxc_xgetbv0(void) {
+#if defined(_MSC_VER)
+    return _xgetbv(0);
+#else
+    /* Raw encoding: the xgetbv intrinsic needs -mxsave, which the baseline
+     * translation unit is not compiled with. */
+    uint32_t lo, hi;
+    __asm__ volatile(".byte 0x0f, 0x01, 0xd0" : "=a"(lo), "=d"(hi) : "c"(0));
+    return ((uint64_t)hi << 32) | lo;
+#endif
+}
+#endif /* x86-64 && !ZXC_ONLY_DEFAULT */
+
 /**
  * @enum zxc_cpu_feature_t
  * @brief Detected CPU SIMD capability level.
@@ -181,32 +211,34 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
     zxc_cpu_feature_t features = ZXC_CPU_GENERIC;
 
 #if defined(__x86_64__) || defined(_M_X64)
-#if defined(_MSC_VER)
     // AVX2/AVX512 need OS-enabled YMM/ZMM state: gate on OSXSAVE + XGETBV/XCR0,
     // not CPUID alone (else a VEX/EVEX op faults #UD when the OS hasn't enabled it).
-    int regs[4];
+    uint32_t regs[4];
     int sse2 = 0;
     int avx2 = 0;
     int avx512 = 0;
     int bmi_lzcnt = 0;
 
-    __cpuid(regs, 1);
-    if (regs[3] & (1 << 26)) sse2 = 1;  // SSE2
-    if (regs[2] & (1 << 27)) {          // OSXSAVE
-        const unsigned long long xcr0 = _xgetbv(0);
+    zxc_cpuid(0, 0, regs);
+    const uint32_t max_leaf = regs[0];
+
+    zxc_cpuid(1, 0, regs);
+    if (regs[3] & (1U << 26)) sse2 = 1;             // CPUID.1:EDX[26]
+    if ((regs[2] & (1U << 27)) && max_leaf >= 7) {  // OSXSAVE, and leaf 7 is real
+        const uint64_t xcr0 = zxc_xgetbv0();
         if ((xcr0 & 0x6) == 0x6) {  // SSE+YMM enabled
-            __cpuidex(regs, 7, 0);
+            zxc_cpuid(7, 0, regs);
             const int bmi1 = (regs[1] >> 3) & 1;  // CPUID.7.0:EBX[3]
             const int bmi2 = (regs[1] >> 8) & 1;  // CPUID.7.0:EBX[8]
-            if (regs[1] & (1 << 5)) avx2 = 1;
+            if (regs[1] & (1U << 5)) avx2 = 1;
             // AVX512 also needs XCR0[5..7] (opmask/ZMM)
-            if ((regs[1] & (1 << 16)) && (regs[1] & (1 << 30)) && (regs[2] & (1 << 6)) &&
+            if ((regs[1] & (1U << 16)) && (regs[1] & (1U << 30)) && (regs[2] & (1U << 6)) &&
                 (xcr0 & 0xE0) == 0xE0)
                 avx512 = 1; /* AVX512 tier = F+BW+VBMI2 (variant built with -mavx512vbmi2) */
             // The AVX2/AVX512 variants are compiled with BMI1/BMI2/LZCNT enabled,
             // so both gates must prove those bits too. LZCNT (ABM) lives in
             // CPUID.80000001H:ECX[5]; that leaf is architectural on x86-64.
-            __cpuid(regs, (int)0x80000001);
+            zxc_cpuid(0x80000001U, 0, regs);
             bmi_lzcnt = bmi1 && bmi2 && ((regs[2] >> 5) & 1);
         }
     }
@@ -218,25 +250,6 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
     } else if (sse2) {
         features = ZXC_CPU_SSE2;
     }
-#else
-    // GCC/Clang built-in detection
-    __builtin_cpu_init();
-
-    // The AVX2/AVX512 variants are compiled with -mbmi -mbmi2 -mlzcnt, so both
-    // gates must prove BMI1/BMI2/LZCNT too (mirrors the F+BW+VBMI2 rule below).
-    unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
-    const int lzcnt = __get_cpuid(0x80000001U, &eax, &ebx, &ecx, &edx) && ((ecx >> 5) & 1U);
-    const int bmi_lzcnt = lzcnt && __builtin_cpu_supports("bmi") && __builtin_cpu_supports("bmi2");
-
-    if (bmi_lzcnt && __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
-        __builtin_cpu_supports("avx512vbmi2")) {
-        features = ZXC_CPU_AVX512;
-    } else if (bmi_lzcnt && __builtin_cpu_supports("avx2")) {
-        features = ZXC_CPU_AVX2;
-    } else if (__builtin_cpu_supports("sse2")) {
-        features = ZXC_CPU_SSE2;
-    }
-#endif
 
 #elif defined(__aarch64__) || defined(_M_ARM64)
     // ARM64 usually guarantees NEON
