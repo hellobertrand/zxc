@@ -101,6 +101,11 @@ typedef struct {
     size_t off_lit_cctx;
     /* meaningful only when sz_opt > 0 (level >= ZXC_LEVEL_DENSITY). */
     size_t off_opt;
+    /* mode == 1, level <= ZXC_LEVEL_DEFAULT (GUL): 32-bit position-indexed
+     * chain table + the three recorded-match arrays. 0-sized otherwise. */
+    size_t off_gul_chain;
+    size_t sz_gul_chain;
+    size_t off_gul_matches;
     /* both modes: [dict | data] concat scratch, present only when dict_size > 0. */
     size_t off_dict;
     /* both modes: dict Huffman tree-at-attach state, present only when dict_size > 0. */
@@ -245,6 +250,20 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
             layout.off_opt = layout.total;
             layout.total += ZXC_ALIGN_CL(layout.sz_opt);
         }
+
+        /* GUL encoder buffers (levels 1-3 only): the 256 KiB window outgrows
+         * the 16-bit ring chain_table, so GUL uses a position-indexed 32-bit
+         * chain over [dict | block], plus seven uint32_t match arrays
+         * (pos/len/off + the >= 16 / >= 32 walk runner-ups) recording the
+         * class-agnostic parse for min_off_class pricing. Levels >= 4 (GLO)
+         * pay nothing for them. */
+        if (level <= ZXC_LEVEL_DEFAULT) {
+            layout.sz_gul_chain = (dict_size + chunk_size) * sizeof(uint32_t);
+            layout.off_gul_chain = layout.total;
+            layout.total += ZXC_ALIGN_CL(layout.sz_gul_chain);
+            layout.off_gul_matches = layout.total;
+            layout.total += ZXC_ALIGN_CL(7 * layout.max_seq * sizeof(uint32_t));
+        }
     }
 
     /* [dict | data] concat scratch (dict only). Compress chunk_size already
@@ -356,6 +375,17 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
         ctx->opt_scratch = mem + layout.off_opt;
         ctx->opt_scratch_cap = layout.sz_opt;
     }
+    if (layout.sz_gul_chain) {
+        ctx->gul_chain = (uint32_t*)(void*)(mem + layout.off_gul_chain);
+        uint32_t* const m = (uint32_t*)(void*)(mem + layout.off_gul_matches);
+        ctx->gul_m_pos = m;
+        ctx->gul_m_len = m + layout.max_seq;
+        ctx->gul_m_off = m + 2 * layout.max_seq;
+        ctx->gul_m_a16l = m + 3 * layout.max_seq;
+        ctx->gul_m_a16o = m + 4 * layout.max_seq;
+        ctx->gul_m_a32l = m + 5 * layout.max_seq;
+        ctx->gul_m_a32o = m + 6 * layout.max_seq;
+    }
 
     ctx->compression_level = level;
     ctx->epoch = 1;
@@ -464,6 +494,14 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->buf_tokens = NULL;
     ctx->buf_offsets = NULL;
     ctx->buf_extras = NULL;
+    ctx->gul_chain = NULL;
+    ctx->gul_m_pos = NULL;
+    ctx->gul_m_len = NULL;
+    ctx->gul_m_off = NULL;
+    ctx->gul_m_a16l = NULL;
+    ctx->gul_m_a16o = NULL;
+    ctx->gul_m_a32l = NULL;
+    ctx->gul_m_a32o = NULL;
     ctx->literals = NULL;
     ctx->work_buf = NULL;
     ctx->tok_buffer = NULL;
@@ -630,8 +668,8 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     if (UNLIKELY(dst_capacity < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
 
     dst[0] = bh->block_type;
-    dst[1] = 0;  // Flags not used currently
-    dst[2] = 0;  // Reserved
+    dst[1] = bh->block_flags;  // GUL: min_off_class in bits 0-1; 0 elsewhere
+    dst[2] = 0;                // Reserved
     zxc_store_le32(dst + 3, bh->comp_size);
     dst[7] = 0;               // Zero before hashing
     dst[7] = zxc_hash8(dst);  // Checksum at the end
@@ -659,7 +697,7 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
     if (UNLIKELY(src[7] != zxc_hash8(temp))) return ZXC_ERROR_BAD_HEADER;
 
     bh->block_type = src[0];
-    bh->block_flags = 0;  // Flags not used currently
+    bh->block_flags = src[1];  // GUL: min_off_class in bits 0-1; 0 elsewhere
     bh->reserved = src[2];
     bh->comp_size = zxc_le32(src + 3);
     bh->header_crc = src[7];
@@ -825,6 +863,74 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
     const uint8_t* p = src + ZXC_GHI_HEADER_BINARY_SIZE;
 
     for (int i = 0; i < ZXC_GHI_SECTIONS; i++) {
+        desc[i].sizes = zxc_le64(p);
+        p += ZXC_SECTION_DESC_BINARY_SIZE;
+    }
+    return ZXC_OK;
+}
+
+/**
+ * @brief Serialises a GUL block header followed by its section descriptors.
+ *
+ * Wire layout (FORMAT.md 5.4): n_sequences (u32) | n_literals (u32) |
+ * 4 reserved bytes (mirroring the GLO/GHI enc_* fields, must be 0: GUL
+ * sections are always stored raw) | tail_len (u32), then 2 descriptors.
+ *
+ * @param[out] dst  Destination buffer.
+ * @param[in]  rem  Remaining capacity of @p dst.
+ * @param[in]  gh   Populated GUL header descriptor.
+ * @param[in]  desc Array of @ref ZXC_GUL_SECTIONS section descriptors.
+ * @return Total bytes written on success, or a negative @ref zxc_error_t code.
+ */
+int zxc_write_gul_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
+                                  const zxc_gul_header_t* RESTRICT gh,
+                                  const zxc_section_desc_t desc[ZXC_GUL_SECTIONS]) {
+    const size_t needed =
+        ZXC_GUL_HEADER_BINARY_SIZE + ZXC_GUL_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+
+    if (UNLIKELY(rem < needed)) return ZXC_ERROR_DST_TOO_SMALL;
+
+    zxc_store_le32(dst, gh->n_sequences);
+    zxc_store_le32(dst + 4, gh->n_literals);
+    zxc_store_le32(dst + 8, 0); /* reserved (GLO/GHI enc_* slots), must be 0 */
+    zxc_store_le32(dst + 12, gh->tail_len);
+
+    uint8_t* p = dst + ZXC_GUL_HEADER_BINARY_SIZE;
+    for (int i = 0; i < ZXC_GUL_SECTIONS; i++) {
+        zxc_store_le64(p, desc[i].sizes);
+        p += ZXC_SECTION_DESC_BINARY_SIZE;
+    }
+
+    return (int)needed;
+}
+
+/**
+ * @brief Parses a GUL block header and its section descriptors from @p src.
+ *
+ * Rejects non-zero reserved bytes: GUL is new in v8, there is no legacy to
+ * tolerate, so this is stricter than the FORMAT.md 10.3 reserved-field rule.
+ *
+ * @param[in]  src  Source buffer.
+ * @param[in]  len  Size of @p src.
+ * @param[out] gh   Receives the decoded GUL header.
+ * @param[out] desc Receives @ref ZXC_GUL_SECTIONS decoded section descriptors.
+ * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
+ */
+int zxc_read_gul_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
+                                 zxc_gul_header_t* RESTRICT gh,
+                                 zxc_section_desc_t desc[ZXC_GUL_SECTIONS]) {
+    const size_t needed =
+        ZXC_GUL_HEADER_BINARY_SIZE + ZXC_GUL_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+
+    if (UNLIKELY(len < needed)) return ZXC_ERROR_SRC_TOO_SMALL;
+
+    gh->n_sequences = zxc_le32(src);
+    gh->n_literals = zxc_le32(src + 4);
+    if (UNLIKELY(zxc_le32(src + 8) != 0)) return ZXC_ERROR_CORRUPT_DATA;
+    gh->tail_len = zxc_le32(src + 12);
+
+    const uint8_t* p = src + ZXC_GUL_HEADER_BINARY_SIZE;
+    for (int i = 0; i < ZXC_GUL_SECTIONS; i++) {
         desc[i].sizes = zxc_le64(p);
         p += ZXC_SECTION_DESC_BINARY_SIZE;
     }

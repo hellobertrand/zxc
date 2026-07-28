@@ -1,10 +1,12 @@
 # ZXC Compressed File Format (Technical Specification)
 
 **Date**: July 2026
-**Format Version**: 7
+**Format Version**: 8
 
 This document describes the on-disk binary format of a ZXC compressed file.
-It formalizes the current reference implementation of format version **7**.
+It formalizes the current reference implementation of format version **8**.
+v8 adds the **GUL** block (`type=3`, §5.4); all other structures are unchanged
+from v7.
 
 ## 1. Conventions
 
@@ -54,7 +56,7 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): `7`. Any other value is rejected (`ZXC_ERROR_BAD_VERSION`);
+- **Format Version** (`u8`): `8`. Any other value is rejected (`ZXC_ERROR_BAD_VERSION`);
 - **Chunk Size Code** (`u8`):
   - The value is an **exponent** in the range `[12, 21]`: `block_size = 2^code`.
     - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
@@ -91,9 +93,11 @@ Offset  Size  Field
   - `0` = RAW
   - `1` = GLO
   - `2` = GHI
+  - `3` = GUL
   - `254` = SEK
   - `255` = EOF
-- **Block Flags**: currently not used by implementation (written as `0`).
+- **Block Flags**: `0` for every block type except GUL, where bits 0-1 carry
+  the normative `min_off_class` (§5.4) and bits 2-7 are reserved (must be 0).
 - **Reserved**: must be 0.
 - **comp_size**: payload size in bytes (does **not** include the optional trailing 4-byte block checksum).
 - **Header CRC8**: `zxc_hash8` over the 8-byte header with byte `0x07` forced to zero before hashing.
@@ -301,6 +305,9 @@ inline lengths header) over the token byte alphabet.
 
 High-throughput LZ format with packed 32-bit sequences.
 
+*Since v8 the reference encoder no longer emits GHI blocks (levels 1-3 use
+GUL, §5.4); decode support for type 2 is retained and remains mandatory.*
+
 ### GHI payload layout
 
 ```text
@@ -359,7 +366,212 @@ Overflow rules:
 
 ---
 
-## 5.4 EOF block (`type=255`)
+## 5.4 GUL block (`type=3`)
+
+*New in format v8.* `GUL` (*General, ULtra-throughput*) serves the speed
+levels (1-3). It keeps GHI's 4-byte sequence word but widens the offset to 18
+bits (256 KiB window), replaces escape codes with an exact 8-bit literal
+length and a 63-entry match-length codebook (no Extras stream, no second
+variable-length cursor in the hot loop), and ends every block with a
+mandatory raw tail that provides the read/write margin letting the fast
+decode loop drop its per-sequence bounds tests.
+
+### GUL block flags
+
+The generic block header's Flags byte (§4) is normative for GUL:
+
+```text
+bit 0..1  min_off_class : 0 -> min_off = 1
+                          1 -> min_off = 16
+                          2 -> min_off = 32
+                          3 -> reserved (reject)
+bit 2..7  reserved, must be 0 (reject non-zero: GUL is new in v8,
+          stricter than the §10.3 tolerate-reserved rule)
+```
+
+Every offset in the block is `>= min_off`, offsets are stored biased by it,
+and the decoder selects its match-copy path once per block:
+
+| class | `min_off` | match copy |
+|---|---|---|
+| 0 | 1 | tiered overlap path (GHI-style) |
+| 1 | 16 | 16-byte wild copy, no overlap handling |
+| 2 | 32 | 32-byte wild copy, no overlap handling |
+
+A decoder trusting a *false* `min_off_class` produces wrong output but no
+out-of-bounds access: offsets stay bounded by the output position and the
+destination carries `ZXC_DECOMPRESS_TAIL_PAD`. The block checksum detects
+this when enabled.
+
+### GUL payload layout
+
+```text
++-------------------------------+
+| GUL Header       (16 bytes)   |
++-------------------------------+
+| 2 Section Descriptors (16 B)  |
++-------------------------------+
+| Literals stream   (n_literals)|
++-------------------------------+
+| Sequences stream  (4 * n_seq) |
++-------------------------------+
+| Tail              (tail_len)  |
++-------------------------------+
+```
+
+Ordering is normative. Sequences sit between literals and tail so that the
+4-byte word load at the last sequence and wild over-reads of the literals
+stream both land inside the payload.
+
+### GUL header (16 bytes)
+
+Field offsets mirror GLO/GHI so header parsing stays shared:
+
+```text
+Offset  Size  Field
+0x00    4     n_sequences  (u32, LE)
+0x04    4     n_literals   (u32, LE)
+0x08    1     reserved (GLO/GHI enc_lit)    must be 0
+0x09    1     reserved (GLO/GHI enc_litlen) must be 0
+0x0A    1     reserved (GLO/GHI enc_mlen)   must be 0
+0x0B    1     reserved (GLO/GHI enc_off)    must be 0
+0x0C    4     tail_len     (u32, LE)
+```
+
+Entropy coding is deliberately excluded from this block type: a serial bit
+reader reintroduces the dependency GUL exists to remove. Blocks that profit
+from entropy coding belong to GLO. `n_sequences` MAY be 0 (a block that is
+entirely tail).
+
+### GUL section descriptors (2 × 8 bytes)
+
+Same packed `u64` as GLO/GHI (low 32 = compressed size, high 32 = raw size;
+`comp == raw` here, both sections are stored raw):
+
+| # | section | size |
+|---|---|---|
+| 0 | Literals | `n_literals` |
+| 1 | Sequences | `4 * n_sequences` |
+
+The tail has no descriptor; it is the last `tail_len` bytes of the payload:
+
+```text
+comp_size = 16 + 16 + n_literals + 4 * n_sequences + tail_len
+```
+
+### GUL sequence word format (32 bits, little-endian)
+
+```text
+ 31          24 23     18 17                    0
++--------------+---------+-----------------------+
+|      LL      |   MC    |         OFF'          |
++--------------+---------+-----------------------+
+     8 bits      6 bits          18 bits
+```
+
+- **LL** — literal length, exact, `[0, 255]`, **no escape**. A longer run is
+  split across consecutive sequences; every split sequence except the last
+  carries `MC = 0` and `OFF' = 0`.
+- **MC** — match code. `MC = 0` means no match; `OFF'` MUST then be 0 and is
+  ignored. Otherwise the decoded length is `LEN[MC]`:
+
+```c
+/* c in [1, 63] */
+static inline uint32_t zxc_gul_len_of(unsigned c)
+{
+    if (c <= 28) return c + 4;              /*   5 ..  32, step 1 (exact) */
+    if (c <= 44) return 34 + 2 * (c - 29);  /*  34 ..  64, step 2 */
+    if (c <= 60) return 68 + 4 * (c - 45);  /*  68 .. 128, step 4 */
+    return 160 + 32 * (c - 61);             /* 160, 192, 224 */
+}
+```
+
+  Strictly increasing over `[1, 63]`; minimum match 5, maximum 224. Every
+  6-bit value is valid, so no bounds check on the lookup. A match longer than
+  224, or falling between entries, is rounded **down** and continued by a
+  following sequence with `LL = 0` at the advanced position.
+- **OFF'** — biased offset: `actual_offset = OFF' + min_off`. The bias makes
+  sub-minimum offsets unrepresentable by construction. Reachable window:
+  `min_off + 2^18 - 1` (≈ 256 KiB), capped by the block size when smaller.
+  Offsets never cross a block boundary (a dictionary prefix counts as
+  already-produced history, §12). `actual_offset` MUST NOT exceed the output
+  position where the match decodes.
+
+### Literals stream and tail
+
+The **Literals stream** holds `n_literals` raw bytes in consumption order;
+`n_literals` equals the sum of all `LL` fields.
+
+The **Tail** holds the last `tail_len` bytes of the block's uncompressed
+data, verbatim, covered by no sequence. After the sequence loop the decoder
+appends it with one `memcpy`. Constraints:
+
+- `tail_len >= 64`
+- `tail_len <= uncompressed_size`
+- Encoders MUST emit `RAW` (or another block type) rather than `GUL` below
+  128 uncompressed bytes.
+
+The tail is the margin that lets the hot loop run with no end-of-buffer
+test: wild over-reads of up to 64 bytes past the literals stream stay inside
+the payload (source side), and the last sequence writes at most to
+`uncompressed_size - tail_len` so unconditional copies stay inside the
+block's output (destination side).
+
+### Decoding
+
+Let `L` be the literals cursor, `O` the output cursor. For each sequence in
+order:
+
+1. Copy `LL` bytes from `L` to `O`; advance both by `LL`.
+2. If `MC != 0`: copy `LEN[MC]` bytes from `O - (OFF' + min_off)` to `O`
+   with LZ semantics (byte by byte, low to high; overlap possible only when
+   `min_off_class = 0`); advance `O` by `LEN[MC]`.
+
+After the loop, `O - dst` MUST equal `uncompressed_size - tail_len`; then
+append the tail.
+
+### Decoder validation
+
+A safe decoder MUST reject with `ZXC_ERROR_CORRUPT_DATA`:
+
+- `min_off_class == 3`, any reserved flag bit set, any reserved header byte
+  non-zero;
+- `16 + 16 + n_literals + 4 * n_sequences + tail_len != comp_size`, or
+  descriptor sizes inconsistent with the header;
+- `tail_len < 64` or `tail_len > uncompressed_size`;
+- `MC == 0` with `OFF' != 0`;
+- a decoded offset greater than the current output position
+  (`ZXC_ERROR_BAD_OFFSET`);
+- the literals cursor overrunning (or not exactly exhausting) the literals
+  stream;
+- a final output position other than `uncompressed_size - tail_len`.
+
+`ZXC_ERROR_BAD_BLOCK_SIZE` when `dst_capacity` is insufficient.
+
+When per-block checksums are enabled, verifying the checksum over the
+compressed payload *before* decoding licenses the unchecked fast loop; with
+checksums disabled, the strict-tail decoder validates per sequence.
+
+### Encoder requirements (normative)
+
+1. `LL <= 255`; longer runs split as above.
+2. Match lengths codebook-representable; otherwise round down and continue.
+3. `min_off <= actual_offset <= min(output position, min_off + 2^18 - 1)`.
+4. `min_off_class` truthful for **every** offset in the block.
+5. `tail_len >= 64`, tail bytes equal to the block's last `tail_len` bytes.
+6. `n_literals` equals the sum of `LL`; the sum of `LL + LEN[MC]` equals
+   `uncompressed_size - tail_len`.
+
+*(non-normative)* The reference encoder emits only GUL (or RAW) data blocks
+at levels 1-3. The three `min_off_class` candidates are priced from a single
+parse (short offsets are promoted to a periodic multiple `k*off >= min_off`
+or to a runner-up match recorded during the chain walk) and the highest
+class within 2% of the best payload wins. Blocks that would expand, and
+blocks under 128 bytes, fall back to RAW.
+
+---
+
+## 5.5 EOF block (`type=255`)
 
 EOF marks end of block stream.
 
@@ -373,7 +585,7 @@ Immediately after EOF block header comes the Optional SEK block, followed by the
 
 ---
 
-## 5.5 SEK block (`type=254`)
+## 5.6 SEK block (`type=254`)
 
 The **Seek Table** block is an optional block appended between the EOF block and the File Footer. It provides `O(1)` random-access capabilities by recording the compressed size of every block in the archive. Decompressed sizes and block indices are derived from the file header's `block_size` (all blocks are `block_size` except the last, which may be smaller).
 
@@ -526,12 +738,14 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 
 ### 10.4 Minimum conforming decoder
 
-A minimal conforming decoder for version 7 **MUST** support:
+A minimal conforming decoder for version 8 **MUST** support:
 - File header parsing and CRC16 validation
 - **RAW** blocks (type 0) - passthrough copy.
 - **GLO** blocks (type 1) - full LZ decode with extras varint, including Huffman
   entropy sections (§5.2.1, PivCo layout) with code lengths up to 11 bits.
 - **GHI** blocks (type 2) - full LZ decode with extras varint.
+- **GUL** blocks (type 3) - fixed-width sequence decode with the min_off_class
+  copy contract and mandatory tail (§5.4).
 - **EOF** block (type 255) - stream termination.
 - File footer validation (source size check).
 
@@ -692,9 +906,11 @@ as follows:
 - Block checksum (optional): **4** bytes
 - GLO header: **16** bytes
 - GHI header: **16** bytes
+- GUL header: **16** bytes
 - Section descriptor: **8** bytes
 - GLO descriptors total: **32** bytes
 - GHI descriptors total: **24** bytes
+- GUL descriptors total: **16** bytes
 - File footer: **12** bytes
 - Dictionary file header (`.zxd`): **16** bytes
 
@@ -720,7 +936,7 @@ Generated archive size: **58 bytes**.
 ### 14.1 Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 07 13 80 00 00 00 00 00 00 00 3E 5D
+00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
@@ -731,15 +947,15 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 07 | 13 | 80 | 00 00 00 00 00 00 00 | 3E 5D
+F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 6E 5B
 ```
 
 - `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
-- `07` -> format version 7.
+- `08` -> format version 8.
 - `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
 - `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `3E 5D` -> header CRC16 (LE value `0x5D3E`).
+- `6E 5B` -> header CRC16 (LE value `0x5B6E`).
 
 #### B) Data Block #0 (RAW)
 
@@ -820,7 +1036,7 @@ Generated archive size: **70 bytes** (12 bytes larger than the non-seekable vari
 #### Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 07 13 80 00 00 00 00 00 00 00 3E 5D
+00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
 00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00

@@ -1863,42 +1863,525 @@ parse_done:;
     return ZXC_OK;
 }
 
+/* ==========================================================================
+ * GUL (General ULtra-throughput) encoder -- FORMAT.md 5.4, format v8.
+ *
+ * Serves levels 1-3. 4-byte sequence words `LL8|MC6|OFF18` over a 256 KiB
+ * window, no escapes, no Extras stream, mandatory raw tail. The parse runs
+ * ONCE at min_off = 1 recording (pos, len, off) triples; the three
+ * min_off_class candidates are then priced from that single record (short
+ * offsets are promoted to a periodic multiple k*off >= min_off when the
+ * bytes verify), and the highest class within 0.3% of the best payload is
+ * selected (a lower min_off never finds fewer matches, so a size-only rule
+ * would degenerate to the slow class almost always).
+ * ========================================================================== */
+
+/** @name GUL match-acceptance thresholds (encoder policy, FORMAT.md 5.4)
+ *  Refusing short matches trades ratio for fewer decode iterations; the
+ *  codebook still covers lengths 5+, so the format stays level-agnostic.
+ *  The draft spec's 18/11/6 came from a greedy depth-48 prototype parse;
+ *  zxc's fast levels walk 3-deep chains, where those cuts cost far more
+ *  ratio than they buy decode speed. Values below were recalibrated on the
+ *  production parse (`#ifndef`-guarded for A/B sweeps from CFLAGS).
+ *  @{ */
+#ifndef ZXC_GUL_ACCEPT_L1
+#define ZXC_GUL_ACCEPT_L1 18
+#endif
+#ifndef ZXC_GUL_ACCEPT_L2
+#define ZXC_GUL_ACCEPT_L2 11
+#endif
+#ifndef ZXC_GUL_ACCEPT_L3
+#define ZXC_GUL_ACCEPT_L3 8
+#endif
+/** @} */
+
+/** @brief min_off_class selection premium, in permil of the best payload: the
+ *         highest (fastest) class within this margin wins. The draft spec's
+ *         0.3% starting point was swept on silesia (spec A.8 open question 6);
+ *         `#ifndef`-guarded for A/B sweeps from CFLAGS. */
+#ifndef ZXC_GUL_CLASS_EPS_PERMIL
+#define ZXC_GUL_CLASS_EPS_PERMIL 20
+#endif
+
+/** @brief GUL match-acceptance threshold for a compression level. */
+static ZXC_ALWAYS_INLINE uint32_t zxc_gul_accept_len(const int level) {
+    if (level <= ZXC_LEVEL_FASTEST) return ZXC_GUL_ACCEPT_L1;
+    if (level == ZXC_LEVEL_FAST) return ZXC_GUL_ACCEPT_L2;
+    return ZXC_GUL_ACCEPT_L3;
+}
+
+/** @name GUL chain-walk depth per level (`#ifndef`-guarded for A/B sweeps)
+ *  Unlike GLO/GHI, GUL's decode speed IMPROVES with encoder effort: a deeper
+ *  walk finds longer matches, which means fewer sequences to decode. Level 3
+ *  therefore walks deep (the draft spec's reference numbers came from a
+ *  greedy depth-48 parse); levels 1-2 keep shallow walks for encode speed.
+ *  @{ */
+#ifndef ZXC_GUL_DEPTH_L1
+#define ZXC_GUL_DEPTH_L1 16
+#endif
+#ifndef ZXC_GUL_DEPTH_L2
+#define ZXC_GUL_DEPTH_L2 16
+#endif
+#ifndef ZXC_GUL_DEPTH_L3
+#define ZXC_GUL_DEPTH_L3 48
+#endif
+/** @brief Early-out match length per level (walk stops on a match this long). */
+#ifndef ZXC_GUL_SUFF_L1
+#define ZXC_GUL_SUFF_L1 96
+#endif
+#ifndef ZXC_GUL_SUFF_L2
+#define ZXC_GUL_SUFF_L2 192
+#endif
+#ifndef ZXC_GUL_SUFF_L3
+#define ZXC_GUL_SUFF_L3 512
+#endif
+/** @brief Bytes hashed by the GUL match finder (4, 5 or 8). Every GUL level
+ *         accepts only matches >= 8 bytes, so hashing a full 8-byte gram is
+ *         lossless for the parse while making buckets far more selective:
+ *         chain entries then share 8 leading bytes instead of 4-5, so a
+ *         shallow walk reaches genuinely promising candidates instead of
+ *         wading through short-gram collisions. */
+#ifndef ZXC_GUL_HASH_BYTES
+#define ZXC_GUL_HASH_BYTES 8
+#endif
+/** @brief Literal-scan step base per level (1 = probe every byte). With the
+ *         high acceptance thresholds above, skipped probes miss match STARTS
+ *         and cost far more ratio than they save encode time. */
+#ifndef ZXC_GUL_STEP_L1
+#define ZXC_GUL_STEP_L1 4
+#endif
+#ifndef ZXC_GUL_STEP_L2
+#define ZXC_GUL_STEP_L2 2
+#endif
+#ifndef ZXC_GUL_STEP_L3
+#define ZXC_GUL_STEP_L3 1
+#endif
+/** @brief Stride for inserting match-interior positions into the hash/chain
+ *         (1 = every byte). The finder only reaches inserted positions, so
+ *         these entries let later matches start inside covered spans. */
+#ifndef ZXC_GUL_INSERT_STEP
+#define ZXC_GUL_INSERT_STEP 1
+#endif
+/** @brief Track per-tier runner-up matches during the walk (spec 9.3).
+ *         They improve min_off_class selection but force length extensions
+ *         for candidates that cannot beat the best match; 0 relies on the
+ *         periodic k*off promotion alone. */
+#ifndef ZXC_GUL_TRACK_ALTS
+#define ZXC_GUL_TRACK_ALTS 1
+#endif
+/** @brief Use the 1-byte tag table in the GUL finder. The tag is a fast
+ *         reject for 4/5-byte hash collisions; with the 8-byte hash the
+ *         head is almost always a true 8-byte-gram match, so the tag's
+ *         extra load+store per probed position can be pure overhead. */
+#ifndef ZXC_GUL_USE_TAGS
+#define ZXC_GUL_USE_TAGS 0
+#endif
+
+/** @brief Cap on the accelerating literal-scan step. Uncapped, a matchless
+ *         prefix inflates the step without bound (probes hundreds of bytes
+ *         apart), and with the 8-byte hash a match narrower than the probe
+ *         stride is never seen again -- a death spiral that turns blocks
+ *         with sparse short matches into RAW. The cap bounds worst-case
+ *         probe sparsity at a negligible encode cost (matchless regions
+ *         end up RAW anyway). */
+#ifndef ZXC_GUL_STEP_MAX_L1
+#define ZXC_GUL_STEP_MAX_L1 128
+#endif
+#ifndef ZXC_GUL_STEP_MAX_L2
+#define ZXC_GUL_STEP_MAX_L2 64
+#endif
+#ifndef ZXC_GUL_STEP_MAX_L3
+#define ZXC_GUL_STEP_MAX_L3 16
+#endif
+
+/** @brief Step cap for a compression level (see above). */
+static ZXC_ALWAYS_INLINE size_t zxc_gul_step_max(const int level) {
+    if (level <= ZXC_LEVEL_FASTEST) return ZXC_GUL_STEP_MAX_L1;
+    if (level == ZXC_LEVEL_FAST) return ZXC_GUL_STEP_MAX_L2;
+    return ZXC_GUL_STEP_MAX_L3;
+}
+/** @} */
+
+/** @brief GUL position hash over ::ZXC_GUL_HASH_BYTES leading bytes. */
+static ZXC_ALWAYS_INLINE uint32_t zxc_gul_hash(const uint64_t val8) {
+#if ZXC_GUL_HASH_BYTES >= 8
+    return (uint32_t)((val8 * ZXC_LZ_HASH_PRIME2) >> (64 - ZXC_LZ_HASH_BITS));
+#else
+    return zxc_hash_func(val8, ZXC_GUL_HASH_BYTES >= 5);
+#endif
+}
+
+/** @brief GUL search parameters per level: greedy (no lazy), the chain depth
+ *         is the ratio/encode-speed dial (see ::ZXC_GUL_DEPTH_L3). The
+ *         sufficient_len early-out scales with depth: cutting a deep walk on
+ *         a short match would waste the depth budget the level pays for. */
+static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_gul_get_params(const int level) {
+    // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold,
+    // step_base, step_shift
+    if (level <= ZXC_LEVEL_FASTEST)
+        return (zxc_lz77_params_t){ZXC_GUL_DEPTH_L1, ZXC_GUL_SUFF_L1, 0, 0, 0, ZXC_GUL_STEP_L1, 4};
+    if (level == ZXC_LEVEL_FAST)
+        return (zxc_lz77_params_t){ZXC_GUL_DEPTH_L2, ZXC_GUL_SUFF_L2, 0, 0, 0, ZXC_GUL_STEP_L2, 5};
+    return (zxc_lz77_params_t){ZXC_GUL_DEPTH_L3, ZXC_GUL_SUFF_L3, 0, 0, 0, ZXC_GUL_STEP_L3, 6};
+}
+
 /**
- * @brief Encodes a data block using the General High Velocity (GHI) compression format.
+ * @brief Byte-compare match length between @p a and @p b, capped at @p max_len.
  *
- * 1. Compression Strategy
- * It uses an LZ77-based algorithm with a sliding window (64KB) and a hash table/chain table
- * mechanism.
- *
- * 2. Token Format (Fixed-Width)
- * Unlike the standard GLO block which uses 1-byte tokens (4-bit literal length / 4-bit match
- * length), GHI uses 4-byte (32-bit) sequence records for better performance on long runs:
- * Literal Length (LL): 8 bits (stores 0-254; 255 indicates overflow).
- * Match Length (ML): 8 bits (stores 0-254; 255 indicates overflow).
- * Offset: 16 bits (supports the full 64KB window).
- * This format minimizes the number of expensive VByte reads during decompression for common
- * sequences where lengths are between 16 and 255.
- *
- * @param[in,out] ctx   Pointer to the compression context containing hash tables
- * and configuration.
- * @param[in] src       Pointer to the input source data.
- * @param[in] src_sz    Size of the input data in bytes.
- * @param[out] dst      Pointer to the destination buffer where compressed data will
- * be written.
- * @param[in] dst_cap   Maximum capacity of the destination buffer.
- * @param[out] out_sz   Pointer to a variable that will receive the total size
- * of the compressed output.
- *
- * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if an
- * error occurs (e.g., buffer overflow).
+ * Used to verify a periodic offset promotion (both pointers sit inside the
+ * [dict | block] concat, @p b below @p a, so every read is in bounds).
  */
-static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+static ZXC_ALWAYS_INLINE uint32_t zxc_gul_match_len_at(const uint8_t* RESTRICT a,
+                                                       const uint8_t* RESTRICT b,
+                                                       const uint32_t max_len) {
+    uint32_t n = 0;
+    while (n + sizeof(uint64_t) <= max_len) {
+        const uint64_t diff = zxc_le64(a + n) ^ zxc_le64(b + n);
+        if (diff != 0) {
+            n += (uint32_t)(zxc_ctz64(diff) >> 3);
+            return (n > max_len) ? max_len : n;
+        }
+        n += sizeof(uint64_t);
+    }
+    while (n < max_len && a[n] == b[n]) n++;
+    return n;
+}
+
+/**
+ * @brief Runner-up matches at the class-1/2 offset tiers, tracked during the
+ *        chain walk (spec 9.3): the FIRST candidate with offset >= 16 (resp.
+ *        >= 32) that matches at least 5 bytes. Chains are recency-ordered,
+ *        so the first qualifying candidate has the shortest offset of its
+ *        tier. Lengths are 0 when the tier found nothing.
+ */
+typedef struct {
+    uint32_t a16_len, a16_off; /**< Best-effort alternative with off >= 16. */
+    uint32_t a32_len, a32_off; /**< Best-effort alternative with off >= 32. */
+} zxc_gul_alts_t;
+
+/**
+ * @brief GUL match finder: greedy hash-chain walk over the 256 KiB window.
+ *
+ * Twin of ::zxc_lz77_find_best_match, adapted to the GUL geometry: the
+ * 16-bit ring chain cannot span 256 KiB, so links live in @p gul_chain, a
+ * position-indexed table of absolute previous positions (0 = none). No
+ * per-block reset is needed: every visited entry was rewritten this block
+ * (a walk only reaches positions inserted through an epoch-validated hash
+ * head), and a defensive `next >= current` guard breaks on anything stale.
+ * No lazy evaluation: GUL levels use a greedy parse.
+ *
+ * While walking, the finder also records one runner-up per class-promotion
+ * tier into @p alts (first candidate with off >= 16 / >= 32): min_off_class
+ * pricing later uses these to keep a match representable when its primary
+ * offset falls below a class's minimum.
+ *
+ * @param[in]     src         Base of the [dict | block] concat buffer.
+ * @param[in]     ip          Current input position.
+ * @param[in]     iend        End of the input buffer.
+ * @param[in]     anchor      Start of the pending literal run (backtrack limit).
+ * @param[in,out] hash_table  Epoch-tagged hash heads (shared with GLO/GHI).
+ * @param[in,out] hash_tags   8-bit fast-rejection tags.
+ * @param[in,out] gul_chain   Position-indexed 32-bit chain table.
+ * @param[in]     epoch_mark  Current epoch shifted into the high bits.
+ * @param[in]     offset_mask Mask isolating position bits in hash entries.
+ * @param[in]     p           LZ77 search parameters for this level.
+ * @param[out]    alts        Receives the per-tier runner-up matches.
+ * @return Best match found (ref == NULL when none reaches 5 bytes).
+ */
+static ZXC_ALWAYS_INLINE zxc_match_t zxc_gul_find_best_match(
+    const uint8_t* src, const uint8_t* ip, const uint8_t* iend, const uint8_t* anchor,
+    uint32_t* RESTRICT hash_table, uint8_t* RESTRICT hash_tags, uint32_t* RESTRICT gul_chain,
+    const uint32_t epoch_mark, const uint32_t offset_mask, const zxc_lz77_params_t p,
+    zxc_gul_alts_t* RESTRICT alts) {
+    zxc_match_t best = (zxc_match_t){NULL, ZXC_LZ_MIN_MATCH_LEN - 1, 0};
+
+    *alts = (zxc_gul_alts_t){0, 0, 0, 0};
+
+    const uint64_t cur_val8 = zxc_le64(ip);
+    const uint32_t cur_val = (uint32_t)cur_val8;
+    const uint32_t h = zxc_gul_hash(cur_val8);
+    const uint8_t cur_tag = (uint8_t)(cur_val ^ (cur_val >> 16));
+    const uint32_t cur_pos = (uint32_t)(ip - src);
+
+    const uint32_t raw_head = hash_table[h];
+    uint32_t match_idx = ((raw_head & ~offset_mask) == epoch_mark) ? (raw_head & offset_mask) : 0;
+
+    hash_table[h] = epoch_mark | cur_pos;
+    gul_chain[cur_pos] = match_idx; /* absolute previous position, 0 = none */
+
+    if (match_idx == 0) goto _finalize_gul;
+
+    int attempts = p.search_depth;
+#if ZXC_GUL_USE_TAGS
+    {
+        const uint8_t stored_tag = hash_tags[h];
+        hash_tags[h] = cur_tag;
+        if ((match_idx != 0) & (stored_tag != cur_tag)) {
+            const uint32_t nx = gul_chain[match_idx];
+            match_idx = (nx < match_idx) ? nx : 0;
+            attempts--;
+        }
+    }
+#else
+    (void)cur_tag;
+    (void)hash_tags;
+#endif
+
+    while (match_idx > 0) {
+        if (UNLIKELY(attempts-- < 0 || cur_pos - match_idx > ZXC_GUL_WINDOW_SIZE)) break;
+        const uint8_t* ref = src + match_idx;
+
+        const uint32_t nx = gul_chain[match_idx];
+        const uint32_t next_idx = (nx < match_idx) ? nx : 0;
+        ZXC_PREFETCH_READ(src + next_idx);
+
+        if (zxc_le32(ref) == cur_val) {
+            const uint32_t off_c = cur_pos - match_idx;
+            /* Compute the length when this candidate can beat the best, OR
+             * when an empty alt tier wants its first (= shortest-offset)
+             * qualifying candidate. */
+#if ZXC_GUL_TRACK_ALTS
+            const int fills_alt =
+                (off_c >= 16 && alts->a16_len == 0) || (off_c >= 32 && alts->a32_len == 0);
+#else
+            const int fills_alt = 0;
+#endif
+            if (ref[best.len] == ip[best.len] || fills_alt) {
+                uint32_t mlen = sizeof(uint32_t);
+                const uint8_t* const limit_8 = iend - sizeof(uint64_t);
+                while (ip + mlen < limit_8) {
+                    const uint64_t diff = zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen);
+                    if (diff != 0) {
+                        mlen += (uint32_t)(zxc_ctz64(diff) >> 3);
+                        goto _gul_len_done;
+                    }
+                    mlen += sizeof(uint64_t);
+                }
+                while (ip + mlen < iend && ref[mlen] == ip[mlen]) mlen++;
+            _gul_len_done:;
+#if ZXC_GUL_TRACK_ALTS
+                if (mlen >= ZXC_GUL_MIN_MATCH) {
+                    if (off_c >= 32 && alts->a32_len == 0) {
+                        alts->a32_len = mlen;
+                        alts->a32_off = off_c;
+                    }
+                    if (off_c >= 16 && alts->a16_len == 0) {
+                        alts->a16_len = mlen;
+                        alts->a16_off = off_c;
+                    }
+                }
+#endif
+                if (mlen > best.len) {
+                    best.len = mlen;
+                    best.ref = ref;
+                }
+                if (UNLIKELY(best.len >= (uint32_t)p.sufficient_len || ip + best.len >= iend))
+                    break;
+            }
+        }
+        match_idx = next_idx;
+    }
+
+_finalize_gul:
+    if (best.ref) {
+        const uint8_t* b_ip = ip;
+        const uint8_t* b_ref = best.ref;
+        while (b_ip > anchor && b_ref > src && b_ip[-1] == b_ref[-1]) {
+            b_ip--;
+            b_ref--;
+            best.len++;
+            best.backtrack++;
+        }
+        best.ref = b_ref;
+    }
+    return best;
+}
+
+/**
+ * @brief Seeds the hash table and GUL chain from a dictionary prefix.
+ *
+ * GUL twin of ::zxc_lz_seed_dict: identical sparse-then-dense policy, but
+ * links go into the position-indexed 32-bit chain instead of the 16-bit ring.
+ */
+static void zxc_gul_seed_dict(const uint8_t* RESTRICT src, const size_t dict_size,
+                              uint32_t* RESTRICT hash_table, uint8_t* RESTRICT hash_tags,
+                              uint32_t* RESTRICT gul_chain, const uint32_t epoch_mark,
+                              const uint32_t offset_mask) {
+    if (UNLIKELY(dict_size < ZXC_LZ_MIN_MATCH_LEN)) return;
+    (void)hash_tags;
+
+    const size_t limit = dict_size - (ZXC_LZ_MIN_MATCH_LEN - 1);
+
+    const size_t half = limit / 2;
+    for (size_t i = 0; i < half; i += 4) {
+        const uint64_t val8 = zxc_le64(src + i);
+        const uint32_t h = zxc_gul_hash(val8);
+        const uint32_t cur_pos = (uint32_t)i;
+
+        hash_table[h] = epoch_mark | cur_pos;
+#if ZXC_GUL_USE_TAGS
+        hash_tags[h] = (uint8_t)((uint32_t)val8 ^ ((uint32_t)val8 >> 16));
+#endif
+        gul_chain[cur_pos] = 0;
+    }
+    for (size_t i = half; i < limit; i++) {
+        const uint64_t val8 = zxc_le64(src + i);
+        const uint32_t h = zxc_gul_hash(val8);
+        const uint32_t cur_pos = (uint32_t)i;
+
+        const uint32_t raw_head = hash_table[h];
+        const uint32_t prev_idx =
+            ((raw_head & ~offset_mask) == epoch_mark) ? (raw_head & offset_mask) : 0;
+
+        hash_table[h] = epoch_mark | cur_pos;
+#if ZXC_GUL_USE_TAGS
+        hash_tags[h] = (uint8_t)((uint32_t)val8 ^ ((uint32_t)val8 >> 16));
+#endif
+        gul_chain[cur_pos] = (prev_idx < cur_pos) ? prev_idx : 0;
+    }
+}
+
+/** @brief Sequence/literal/tail totals of one GUL emission plan. */
+typedef struct {
+    uint32_t n_seq;    /**< Number of 4-byte sequence words. */
+    uint32_t n_lit;    /**< Literal bytes consumed through LL fields. */
+    uint32_t tail_len; /**< Trailing raw-tail bytes (>= ZXC_GUL_TAIL_MIN). */
+} zxc_gul_plan_t;
+
+/**
+ * @brief Shared plan/emit walk over the recorded matches for one min_off class.
+ *
+ * Deterministically maps the class-agnostic match record onto the GUL wire
+ * form: offsets below @p min_off are promoted to the periodic multiple
+ * `k*off >= min_off` when the bytes verify (dropped to literals otherwise),
+ * lengths are chunked through the codebook (round-down; residuals under 5
+ * bytes join the following literal run), literal runs over 255 split into
+ * MC = 0 sequences, and no chunk ends inside the last ::ZXC_GUL_TAIL_MIN
+ * bytes so the mandatory tail always exists. Called once per class in count
+ * mode for pricing, then once in write mode for the selected class -- the
+ * two passes are the same code, so priced and emitted sizes cannot diverge.
+ *
+ * @param[in]  block    First block byte (past any dict prefix).
+ * @param[in]  block_sz Uncompressed block size (>= ZXC_GUL_MIN_BLOCK).
+ * @param[in]  dict_sz  Dict prefix size (promotion reach below block start).
+ * @param[in]  m_pos    Recorded match positions (block-relative).
+ * @param[in]  m_len    Recorded match lengths.
+ * @param[in]  m_off    Recorded match offsets (actual distances).
+ * @param[in]  m_altl   Walk runner-up lengths for this class's tier (NULL for
+ *                      class 0; a 0 entry means "no runner-up").
+ * @param[in]  m_alto   Walk runner-up offsets paired with @p m_altl.
+ * @param[in]  n_matches Number of recorded matches.
+ * @param[in]  min_off  Minimum offset of the candidate class (1, 16 or 32).
+ * @param[out] lit_out  Literal stream destination, or NULL to only count.
+ * @param[out] seq_out  Sequence stream destination, or NULL to only count.
+ * @param[out] plan     Receives the emission totals.
+ */
+static void zxc_gul_walk(const uint8_t* RESTRICT block, const size_t block_sz, const size_t dict_sz,
+                         const uint32_t* RESTRICT m_pos, const uint32_t* RESTRICT m_len,
+                         const uint32_t* RESTRICT m_off, const uint32_t* RESTRICT m_altl,
+                         const uint32_t* RESTRICT m_alto, const uint32_t n_matches,
+                         const uint32_t min_off, uint8_t* RESTRICT lit_out,
+                         uint8_t* RESTRICT seq_out, zxc_gul_plan_t* RESTRICT plan) {
+    const size_t cutoff = block_sz - ZXC_GUL_TAIL_MIN;
+    size_t cov = 0; /* end of the last emitted chunk (coverage cursor) */
+    size_t n_lit = 0;
+    uint32_t n_seq = 0;
+
+    for (uint32_t i = 0; i < n_matches; i++) {
+        const size_t pos = m_pos[i];
+        uint32_t len = m_len[i];
+        uint32_t off = m_off[i];
+
+        if (off < min_off) {
+            /* Two promotion candidates, keep the longer:
+             *  - the walk runner-up recorded for this tier (off >= min_off
+             *    by construction, length pre-verified at record time);
+             *  - the periodic multiple k*off >= min_off (for a period-off
+             *    repeat it is usually valid; verify the bytes).
+             * When neither reaches 5 bytes the match falls back to literals. */
+            uint32_t best_len = (m_altl != NULL) ? m_altl[i] : 0;
+            uint32_t best_off = (m_altl != NULL) ? m_alto[i] : 0;
+
+            const uint32_t k = (min_off + off - 1) / off;
+            const uint32_t p2 = off * k;
+            if ((size_t)p2 <= pos + dict_sz) {
+                const uint32_t l2 = zxc_gul_match_len_at(block + pos, block + pos - p2, len);
+                if (l2 > best_len) {
+                    best_len = l2;
+                    best_off = p2;
+                }
+            }
+            if (best_len < ZXC_GUL_MIN_MATCH) continue;
+            off = best_off;
+            len = best_len;
+        }
+
+        size_t cpos = pos;
+        uint32_t rem = len;
+        while (rem >= ZXC_GUL_MIN_MATCH) {
+            const uint32_t take = (rem > ZXC_GUL_MAX_MATCH) ? ZXC_GUL_MAX_MATCH : rem;
+            const unsigned c = zxc_gul_code_of(take);
+            const uint32_t clen = zxc_gul_len_of(c);
+            if (UNLIKELY(cpos + clen > cutoff)) break; /* tail absorbs the rest */
+
+            size_t run = cpos - cov;
+            if (run > 0) {
+                if (lit_out) ZXC_MEMCPY(lit_out + n_lit, block + cov, run);
+                n_lit += run;
+            }
+            while (UNLIKELY(run > ZXC_GUL_LL_MAX)) {
+                /* Literal-run split: LL = 255, MC = 0, OFF' = 0. */
+                if (seq_out) zxc_store_le32(seq_out + 4 * (size_t)n_seq, ZXC_GUL_LL_MAX << 24);
+                n_seq++;
+                run -= ZXC_GUL_LL_MAX;
+            }
+            if (seq_out) {
+                const uint32_t w = ((uint32_t)run << (ZXC_GUL_MC_BITS + ZXC_GUL_OFF_BITS)) |
+                                   ((uint32_t)c << ZXC_GUL_OFF_BITS) | (off - min_off);
+                zxc_store_le32(seq_out + 4 * (size_t)n_seq, w);
+            }
+            n_seq++;
+            cov = cpos + clen;
+            cpos += clen;
+            rem -= clen;
+            /* Continuation chunks re-enter with cpos == cov, so run == 0. */
+        }
+        /* Residual rem < 5 (or a cutoff-clipped remainder) stays uncovered
+         * and joins the next literal run / the tail. */
+    }
+
+    plan->n_seq = n_seq;
+    plan->n_lit = (uint32_t)n_lit;
+    plan->tail_len = (uint32_t)(block_sz - cov);
+}
+
+/**
+ * @brief Encodes a data block using the GUL (General ULtra-throughput) format.
+ *
+ * Declines (returns an error, letting the chunk wrapper fall back to RAW)
+ * when the block is under ::ZXC_GUL_MIN_BLOCK bytes or when the best
+ * candidate payload would not shrink the block.
+ *
+ * @param[in,out] ctx     Compression context (GUL buffers must be carved).
+ * @param[in]     src     Source bytes ([dict | block] when a dict is active).
+ * @param[in]     src_sz  Length of @p src in bytes (includes any dict prefix).
+ * @param[out]    dst     Destination block buffer.
+ * @param[in]     dst_cap Capacity of @p dst in bytes.
+ * @param[out]    out_sz  Receives the total written size (header + payload).
+ * @return ZXC_OK on success, or a negative zxc_error_t code.
+ */
+static int zxc_encode_block_gul(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
                                 size_t* RESTRICT const out_sz) {
     const int level = ctx->compression_level;
     const size_t dict_sz = ctx->dict_size;
+    const size_t block_sz = src_sz - dict_sz;
 
-    const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
+    /* FORMAT.md 5.4: below 128 uncompressed bytes GUL must not be used. */
+    if (UNLIKELY(block_sz < ZXC_GUL_MIN_BLOCK)) return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(ctx->gul_chain == NULL)) return ZXC_ERROR_NULL_INPUT;
+
+    const zxc_lz77_params_t lzp = zxc_gul_get_params(level);
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {
@@ -1910,157 +2393,174 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const uint32_t offset_mask = ctx->offset_mask;
     const uint32_t epoch_mark = ctx->epoch << offset_bits;
 
-    if (dict_sz > 0)
-        zxc_lz_seed_dict(src, dict_sz, ctx->hash_table, ctx->hash_tags, ctx->chain_table,
-                         epoch_mark, offset_mask, level);
-
-    const uint8_t* ip = src + dict_sz;
-    const uint8_t* iend = src + src_sz;
-    const uint8_t* anchor = ip;
-    const uint8_t* search_limit = iend - ZXC_LZ_SEARCH_MARGIN;
-
     uint32_t* const hash_table = ctx->hash_table;
     uint8_t* const hash_tags = ctx->hash_tags;
-    uint8_t* const buf_extras = ctx->buf_extras;
-    uint16_t* const chain_table = ctx->chain_table;
-    uint8_t* const literals = ctx->literals;
-    uint32_t* const buf_sequences = ctx->buf_sequences;
+    uint32_t* const gul_chain = ctx->gul_chain;
+    uint32_t* const m_pos = ctx->gul_m_pos;
+    uint32_t* const m_len = ctx->gul_m_len;
+    uint32_t* const m_off = ctx->gul_m_off;
+    uint32_t* const m_a16l = ctx->gul_m_a16l;
+    uint32_t* const m_a16o = ctx->gul_m_a16o;
+    uint32_t* const m_a32l = ctx->gul_m_a32l;
+    uint32_t* const m_a32o = ctx->gul_m_a32o;
 
-    uint32_t seq_c = 0;
-    size_t extras_c = 0;
-    size_t lit_c = 0;
-    uint16_t max_offset = 0;
+    if (dict_sz > 0)
+        zxc_gul_seed_dict(src, dict_sz, hash_table, hash_tags, gul_chain, epoch_mark, offset_mask);
 
+    const uint8_t* const block = src + dict_sz;
+    const uint8_t* ip = block;
+    const uint8_t* const iend = src + src_sz;
+    const uint8_t* anchor = ip;
+    const uint8_t* const search_limit = iend - ZXC_LZ_SEARCH_MARGIN;
+    const uint32_t accept_len = zxc_gul_accept_len(level);
+    const size_t step_max = zxc_gul_step_max(level);
+
+    uint32_t n_matches = 0;
+
+    /* --- Single class-agnostic greedy parse (min_off = 1) --- */
     while (LIKELY(ip < search_limit)) {
-        size_t dist = (size_t)(ip - anchor);
+        const size_t dist = (size_t)(ip - anchor);
         size_t step = lzp.step_base + (dist >> lzp.step_shift);
+        if (UNLIKELY(step > step_max)) step = step_max;
         if (UNLIKELY(ip + step >= search_limit)) step = 1;
-
-        ZXC_PREFETCH_READ(ip + step * 4 + ZXC_CACHE_LINE_SIZE);
 
         if (LIKELY(ip + step + sizeof(uint64_t) <= iend)) {
             const uint64_t v_next = zxc_le64(ip + step);
             // cppcheck-suppress unreadVariable
-            const uint32_t h_next = zxc_hash_func(v_next, 0);
+            const uint32_t h_next = zxc_gul_hash(v_next);
             ZXC_PREFETCH_READ(&hash_tags[h_next]);
             ZXC_PREFETCH_READ(&hash_table[h_next]);
         }
 
+        zxc_gul_alts_t alts;
         const zxc_match_t m =
-            zxc_lz77_find_best_match(src, ip, iend, search_limit, anchor, hash_table, hash_tags,
-                                     chain_table, epoch_mark, offset_mask, level, lzp,
-                                     /*last_off=*/0U);
+            zxc_gul_find_best_match(src, ip, iend, anchor, hash_table, hash_tags, gul_chain,
+                                    epoch_mark, offset_mask, lzp, &alts);
 
         if (m.ref) {
             ip -= m.backtrack;
-            const uint32_t ll = (uint32_t)(ip - anchor);
-            const uint32_t ml = m.len - ZXC_LZ_MIN_MATCH_LEN;
-            const uint32_t off = (uint32_t)(ip - m.ref);
-
-            if (ll > 0) {
-                if (LIKELY(anchor + ZXC_PAD_SIZE <= iend)) {
-                    zxc_copy32(literals + lit_c, anchor);
-                    if (UNLIKELY(ll > ZXC_PAD_SIZE)) {
-                        ZXC_MEMCPY(literals + lit_c + ZXC_PAD_SIZE, anchor + ZXC_PAD_SIZE,
-                                   ll - ZXC_PAD_SIZE);
+            if (LIKELY(m.len >= accept_len)) {
+                const size_t pos = (size_t)(ip - block);
+                m_pos[n_matches] = (uint32_t)pos;
+                m_len[n_matches] = m.len;
+                m_off[n_matches] = (uint32_t)(ip - m.ref);
+                /* Re-verify the tier runner-ups at the backtracked position
+                 * and cap them at m.len so a promoted match can never bleed
+                 * into the next match's coverage. */
+                m_a16l[n_matches] = (alts.a16_len != 0 && (size_t)alts.a16_off <= pos + dict_sz)
+                                        ? zxc_gul_match_len_at(ip, ip - alts.a16_off, m.len)
+                                        : 0;
+                m_a16o[n_matches] = alts.a16_off;
+                m_a32l[n_matches] = (alts.a32_len != 0 && (size_t)alts.a32_off <= pos + dict_sz)
+                                        ? zxc_gul_match_len_at(ip, ip - alts.a32_off, m.len)
+                                        : 0;
+                m_a32o[n_matches] = alts.a32_off;
+                n_matches++;
+                /* Insert the match interior into the hash/chain: the finder
+                 * only reaches inserted positions, so without this no later
+                 * match can START inside a covered span -- at the GUL
+                 * acceptance thresholds (long matches, wide skips) that
+                 * starves the parse and costs several ratio points. */
+                {
+                    const uint8_t* p_ins = ip + ZXC_GUL_INSERT_STEP;
+                    const uint8_t* const ins_end =
+                        (ip + m.len < search_limit) ? ip + m.len : search_limit;
+                    for (; p_ins < ins_end; p_ins += ZXC_GUL_INSERT_STEP) {
+                        const uint64_t v_ins = zxc_le64(p_ins);
+                        const uint32_t h_ins = zxc_gul_hash(v_ins);
+                        const uint32_t pos_ins = (uint32_t)(p_ins - src);
+                        const uint32_t head_ins = hash_table[h_ins];
+                        const uint32_t prev_ins = ((head_ins & ~offset_mask) == epoch_mark)
+                                                      ? (head_ins & offset_mask)
+                                                      : 0;
+                        hash_table[h_ins] = epoch_mark | pos_ins;
+#if ZXC_GUL_USE_TAGS
+                        hash_tags[h_ins] = (uint8_t)((uint32_t)v_ins ^ ((uint32_t)v_ins >> 16));
+#endif
+                        gul_chain[pos_ins] = (prev_ins < pos_ins) ? prev_ins : 0;
                     }
-                } else {
-                    ZXC_MEMCPY(literals + lit_c, anchor, ll);
                 }
-                lit_c += ll;
+                ip += m.len;
+                anchor = ip;
+                continue;
             }
+            /* Match too short for this level's decode-cost pricing: keep the
+             * bytes as literals and resume scanning. */
+            ip += m.backtrack;
+        }
+        ip += step;
+    }
 
-            const uint32_t ll_write = (ll >= ZXC_SEQ_LL_MASK) ? 255U : ll;
-            const uint32_t ml_write = (ml >= ZXC_SEQ_ML_MASK) ? 255U : ml;
-            const uint32_t seq_val = (ll_write << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
-                                     (ml_write << ZXC_SEQ_OFF_BITS) |
-                                     ((off - ZXC_LZ_OFFSET_BIAS) & ZXC_SEQ_OFF_MASK);
-            if ((off - ZXC_LZ_OFFSET_BIAS) > max_offset)
-                max_offset = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
-            buf_sequences[seq_c] = seq_val;
-            seq_c++;
+    /* --- Price the three min_off classes from the single parse --- */
+    const size_t fixed =
+        ZXC_GUL_HEADER_BINARY_SIZE + ZXC_GUL_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+    zxc_gul_plan_t plans[ZXC_GUL_NUM_CLASSES];
+    uint64_t payload[ZXC_GUL_NUM_CLASSES];
+    /* Per-class walk runner-up columns (class 0 needs no promotion). */
+    const uint32_t* const cls_altl[ZXC_GUL_NUM_CLASSES] = {NULL, m_a16l, m_a32l};
+    const uint32_t* const cls_alto[ZXC_GUL_NUM_CLASSES] = {NULL, m_a16o, m_a32o};
+    for (int c = 0; c < ZXC_GUL_NUM_CLASSES; c++) {
+        zxc_gul_walk(block, block_sz, dict_sz, m_pos, m_len, m_off, cls_altl[c], cls_alto[c],
+                     n_matches, zxc_gul_min_off_of[c], NULL, NULL, &plans[c]);
+        payload[c] = (uint64_t)fixed + plans[c].n_lit + 4ULL * plans[c].n_seq + plans[c].tail_len;
+    }
 
-            if (ll >= ZXC_SEQ_LL_MASK) {
-                const size_t n = zxc_write_varint(buf_extras + extras_c, ll - ZXC_SEQ_LL_MASK);
-                if (UNLIKELY(n == 0)) return ZXC_ERROR_OVERFLOW;
-                extras_c += n;
-            }
-            if (ml >= ZXC_SEQ_ML_MASK) {
-                const size_t n = zxc_write_varint(buf_extras + extras_c, ml - ZXC_SEQ_ML_MASK);
-                if (UNLIKELY(n == 0)) return ZXC_ERROR_OVERFLOW;
-                extras_c += n;
-            }
+    uint64_t best = payload[0];
+    for (int c = 1; c < ZXC_GUL_NUM_CLASSES; c++)
+        if (payload[c] < best) best = payload[c];
 
-            ip += m.len;
-            anchor = ip;
-        } else {
-            ip += step;
+    /* Premium rule: the highest (fastest) class whose payload stays within
+     * ZXC_GUL_CLASS_EPS_PERMIL permil of the best. Size-only selection would
+     * pick class 0 almost always (a lower min_off never finds fewer matches). */
+    int cls = 0;
+    for (int c = ZXC_GUL_NUM_CLASSES - 1; c >= 0; c--) {
+        if (payload[c] * 1000 <= best * (1000 + ZXC_GUL_CLASS_EPS_PERMIL)) {
+            cls = c;
+            break;
         }
     }
 
-    const size_t last_lits = iend - anchor;
-    if (last_lits > 0) {
-        ZXC_MEMCPY(literals + lit_c, anchor, last_lits);
-        lit_c += last_lits;
-    }
+    /* Expansion check against the block data size: decline so the wrapper
+     * can try GHI, then RAW. */
+    if (UNLIKELY(ZXC_BLOCK_HEADER_SIZE + payload[cls] >= block_sz)) return ZXC_ERROR_DST_TOO_SMALL;
 
-    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GHI};
+    /* --- Serialize --- */
+    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GUL,
+                             .block_flags = (uint8_t)cls & ZXC_GUL_FLAG_CLASS_MASK};
+    if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE + payload[cls])) return ZXC_ERROR_DST_TOO_SMALL;
+
     uint8_t* const p = dst + ZXC_BLOCK_HEADER_SIZE;
-    size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
+    const size_t rem = dst_cap - ZXC_BLOCK_HEADER_SIZE;
+    const zxc_gul_plan_t plan = plans[cls];
 
-    // Decide offset encoding mode
-    const zxc_gnr_header_t gh = {.n_sequences = seq_c,
-                                 .n_literals = (uint32_t)lit_c,
-                                 .enc_lit = ZXC_SECTION_ENCODING_RAW,
-                                 .enc_litlen = 0,
-                                 .enc_mlen = 0,
-                                 .enc_off = (uint8_t)(max_offset <= 255) ? 1 : 0};
+    const zxc_gul_header_t gh = {
+        .n_sequences = plan.n_seq, .n_literals = plan.n_lit, .tail_len = plan.tail_len};
+    zxc_section_desc_t desc[ZXC_GUL_SECTIONS];
+    desc[0].sizes = (uint64_t)plan.n_lit | ((uint64_t)plan.n_lit << 32);
+    const uint64_t sz_seq = 4ULL * plan.n_seq;
+    desc[1].sizes = sz_seq | (sz_seq << 32);
 
-    zxc_section_desc_t desc[ZXC_GHI_SECTIONS] = {0};
-    desc[0].sizes = (uint64_t)lit_c | ((uint64_t)lit_c << 32);
-    size_t sz_seqs = seq_c * sizeof(uint32_t);
-    desc[1].sizes = (uint64_t)sz_seqs | ((uint64_t)sz_seqs << 32);
-    desc[2].sizes = (uint64_t)extras_c | ((uint64_t)extras_c << 32);
-
-    const int ghs = zxc_write_ghi_header_and_desc(p, rem, &gh, desc);
+    const int ghs = zxc_write_gul_header_and_desc(p, rem, &gh, desc);
     if (UNLIKELY(ghs < 0)) return ghs;
 
-    uint8_t* p_curr = p + ghs;
-    rem -= ghs;
+    uint8_t* const lit_out = p + ghs;
+    uint8_t* const seq_out = lit_out + plan.n_lit;
 
-    // Extract stream sizes once
-    const size_t sz_lit = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
-    const size_t sz_seq = (size_t)(desc[1].sizes & ZXC_SECTION_SIZE_MASK);
-    const size_t sz_ext = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
+    zxc_gul_plan_t wplan;
+    zxc_gul_walk(block, block_sz, dict_sz, m_pos, m_len, m_off, cls_altl[cls], cls_alto[cls],
+                 n_matches, zxc_gul_min_off_of[cls], lit_out, seq_out, &wplan);
+    if (UNLIKELY(wplan.n_seq != plan.n_seq || wplan.n_lit != plan.n_lit ||
+                 wplan.tail_len != plan.tail_len))
+        return ZXC_ERROR_OVERFLOW; /* count/write divergence: never expected */
 
-    if (UNLIKELY(rem < sz_lit + sz_seq + sz_ext)) return ZXC_ERROR_DST_TOO_SMALL;
+    ZXC_MEMCPY(seq_out + sz_seq, block + block_sz - plan.tail_len, plan.tail_len);
 
-    ZXC_MEMCPY(p_curr, literals, lit_c);
-    p_curr += lit_c;
-    rem -= sz_lit;
-
-    if (UNLIKELY(rem < sz_seq)) return ZXC_ERROR_DST_TOO_SMALL;
-    // Write sequences in little-endian order
-#ifdef ZXC_BIG_ENDIAN
-    for (uint32_t i = 0; i < seq_c; i++) {
-        zxc_store_le32(p_curr, buf_sequences[i]);
-        p_curr += sizeof(uint32_t);
-    }
-#else
-    ZXC_MEMCPY(p_curr, buf_sequences, sz_seq);
-    p_curr += sz_seq;
-#endif
-
-    // --- WRITE EXTRAS ---
-    ZXC_MEMCPY(p_curr, buf_extras, sz_ext);
-    p_curr += sz_ext;
-
-    bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
+    bh.comp_size = (uint32_t)payload[cls];
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
     if (UNLIKELY(hw < 0)) return hw;
 
-    // Checksum will be appended by the wrapper
-    *out_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
+    /* Checksum will be appended by the wrapper. */
+    *out_sz = ZXC_BLOCK_HEADER_SIZE + (size_t)payload[cls];
     return ZXC_OK;
 }
 
@@ -2106,8 +2606,8 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
 /**
  * @brief Compresses one chunk into a single ZXC block (the compression hot path).
  *
- * Selects the GHI encoder at level <= 2, otherwise GLO; falls back to a RAW
- * block when the coded form would not shrink the data. When @c ctx->dict_size
+ * Selects the GUL encoder at levels 1-3 and GLO at levels 4+; falls back to
+ * a RAW block when the coded form would not shrink the data. When @c ctx->dict_size
  * is > 0, @p chunk is the [dict | block] concat and only the block tail counts
  * toward the expansion check. Appends the per-block checksum when enabled.
  *
@@ -2127,10 +2627,14 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     size_t w = 0;
     int res = ZXC_OK;
 
-    if (ctx->compression_level <= 2)
-        res = zxc_encode_block_ghi(ctx, chunk, src_sz, dst, dst_cap, &w);
-    else
+    if (ctx->compression_level <= ZXC_LEVEL_DEFAULT) {
+        /* Levels 1-3: GUL and RAW only. GUL declines blocks under 128 bytes
+         * and blocks its best candidate cannot shrink; those fall through to
+         * the RAW check below. */
+        res = zxc_encode_block_gul(ctx, chunk, src_sz, dst, dst_cap, &w);
+    } else {
         res = zxc_encode_block_glo(ctx, chunk, src_sz, dst, dst_cap, &w);
+    }
 
     // Check expansion against block data size (excluding dict prefix).
     if (UNLIKELY(res != ZXC_OK || w >= block_sz)) {

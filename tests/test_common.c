@@ -50,6 +50,27 @@ void gen_lz_data(uint8_t* const buf, const size_t size) {
     for (size_t i = 0; i < size; i++) buf[i] = pattern[i % pat_len];
 }
 
+// Generates a stream of 48-byte records picked from a small pseudo-random
+// pool: short matches (~48 B, under the GUL 224-byte codebook cap) at
+// offsets >= 48. Levels 1-3 encode this as a GUL block (min_off_class 2)
+// without tripping the pathological-repetition GHI fallback.
+void gen_gul_data(uint8_t* const buf, const size_t size) {
+    enum { REC = 48, POOL = 64 };
+    static uint8_t pool[POOL][REC];
+    for (int i = 0; i < POOL; i++)
+        for (int j = 0; j < REC; j++) pool[i][j] = (uint8_t)(zxc_test_rand() & 0xFF);
+    size_t n = 0;
+    uint32_t prev = POOL;
+    while (n < size) {
+        uint32_t pick = zxc_test_rand() % POOL;
+        if (pick == prev) pick = (pick + 1) % POOL; /* no adjacent repeat: off >= 48 */
+        const size_t take = (size - n < REC) ? (size - n) : REC;
+        memcpy(buf + n, pool[pick], take);
+        n += take;
+        prev = pick;
+    }
+}
+
 // Generates a regular numeric sequence (integer-pattern round-trip input)
 void gen_num_data(uint8_t* const buf, const size_t size) {
     // Fill with 32-bit integers

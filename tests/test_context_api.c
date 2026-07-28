@@ -247,19 +247,24 @@ int test_estimate_cctx_size() {
     printf("  [PASS] scaling: 8x src_size -> %.2fx memory\n",
            (double)e8m / (double)e1m);
 
-    /* 7. Level 6 includes the optimal-parser scratch peak (~18 x chunk_size)
-     *    on top of the persistent cctx, so it must exceed the level-3 figure
-     *    by at least one chunk_size worth of bytes. */
+    /* 7. Per-level workspace tiers: level 3 (GUL) adds the 32-bit chain and
+     *    match-record arrays over the lean level-5 tier, and level 6 adds the
+     *    optimal-parser scratch peak (~18 x chunk_size) over level 5 too. */
     const uint64_t e1m_l3 = zxc_estimate_cctx_size(1024 * 1024, 3);
+    const uint64_t e1m_l5 = zxc_estimate_cctx_size(1024 * 1024, 5);
     const uint64_t e1m_l6 = zxc_estimate_cctx_size(1024 * 1024, 6);
-    if (e1m_l6 <= e1m_l3 + (1024 * 1024)) {
-        printf("  [FAIL] level 6 must add optimal-parser scratch: l3=%llu l6=%llu\n",
-               (unsigned long long)e1m_l3, (unsigned long long)e1m_l6);
+    if (e1m_l3 <= e1m_l5 + (1024 * 1024)) {
+        printf("  [FAIL] level 3 must add the GUL buffers: l3=%llu l5=%llu\n",
+               (unsigned long long)e1m_l3, (unsigned long long)e1m_l5);
         return 0;
     }
-    printf("  [PASS] level 6 vs level 3 at 1 MiB: l3=%llu l6=%llu (delta=%llu)\n",
-           (unsigned long long)e1m_l3, (unsigned long long)e1m_l6,
-           (unsigned long long)(e1m_l6 - e1m_l3));
+    if (e1m_l6 <= e1m_l5 + (1024 * 1024)) {
+        printf("  [FAIL] level 6 must add optimal-parser scratch: l5=%llu l6=%llu\n",
+               (unsigned long long)e1m_l5, (unsigned long long)e1m_l6);
+        return 0;
+    }
+    printf("  [PASS] tiers at 1 MiB: l3=%llu l5=%llu l6=%llu\n", (unsigned long long)e1m_l3,
+           (unsigned long long)e1m_l5, (unsigned long long)e1m_l6);
 
     printf("PASS\n\n");
     return 1;

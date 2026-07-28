@@ -43,6 +43,7 @@
 #define GC_BLOCK_RAW 0U
 #define GC_BLOCK_GLO 1U
 #define GC_BLOCK_GHI 2U
+#define GC_BLOCK_GUL 3U
 #define GC_BLOCK_SEK 254U
 #define GC_BLOCK_EOF 255U
 
@@ -223,6 +224,79 @@ static size_t gc_make_huffman_dict_payload(uint8_t **out) {
     return n;
 }
 
+/* Immediately-doubled 12-byte tokens (60% of picks) between unique fillers:
+ * every match sits at offset 12 with the token never recurring elsewhere, so
+ * neither a periodic multiple nor a walk runner-up can lift it to >= 16 --
+ * the class 1/2 candidates bleed every match into literals and
+ * min_off_class 0 (tiered overlap copies) is frozen. The doubling density
+ * keeps the greedy scanner's accelerating step anchored so the off-12
+ * matches stay findable. */
+static size_t gc_make_gul_text(uint8_t **out) {
+    enum { TOK = 12 };
+    const size_t cap = 192 * 1024;
+    uint8_t *b = (uint8_t *)malloc(cap);
+    uint32_t s = 0x600D5EEDu;
+    size_t n = 0;
+    while (n + 2 * TOK < cap) {
+        uint8_t tok[TOK];
+        for (int j = 0; j < TOK; j++) tok[j] = (uint8_t)(gc_lcg_next(&s) >> 24);
+        if (((gc_lcg_next(&s) >> 16) % 10u) < 6u) { /* 60%: doubled -> match at off 12 */
+            memcpy(b + n, tok, TOK);
+            memcpy(b + n + TOK, tok, TOK);
+            n += 2 * TOK;
+        } else {
+            memcpy(b + n, tok, TOK);
+            n += TOK;
+        }
+    }
+    *out = b;
+    return n;
+}
+
+/* Immediately-doubled 24-byte pseudo-random records, each unique: every match
+ * sits at offset 24 (in [16, 32)) with no occurrence further back, so the
+ * class-2 candidate must drop every match to literals while class 1 keeps
+ * them: min_off_class 1 (16-byte wild copies) is frozen here. */
+static size_t gc_make_gul_records24(uint8_t **out) {
+    enum { REC = 24 };
+    const size_t cap = 512 * 1024;
+    uint8_t *b = (uint8_t *)malloc(cap);
+    uint32_t s = 0x0024C0DEu;
+    size_t n = 0;
+    while (n + 2 * REC < cap) {
+        uint8_t rec[REC];
+        for (int j = 0; j < REC; j++) rec[j] = (uint8_t)(gc_lcg_next(&s) >> 24);
+        memcpy(b + n, rec, REC);
+        memcpy(b + n + REC, rec, REC);
+        n += 2 * REC;
+    }
+    *out = b;
+    return n;
+}
+
+/* Pool of 48-byte pseudo-random records, no adjacent repeats: every offset is
+ * >= 48, freezing GUL min_off_class 2 (32-byte wild copies). */
+static size_t gc_make_gul_records48(uint8_t **out) {
+    enum { REC = 48, POOL = 64 };
+    static uint8_t pool[POOL][REC];
+    uint32_t s = 0x0048C0DEu;
+    for (int i = 0; i < POOL; i++)
+        for (int j = 0; j < REC; j++) pool[i][j] = (uint8_t)(gc_lcg_next(&s) >> 24);
+    const size_t cap = 512 * 1024;
+    uint8_t *b = (uint8_t *)malloc(cap);
+    size_t n = 0;
+    uint32_t prev = 0xFFFFFFFFu;
+    while (n + REC < cap) {
+        uint32_t pick = (gc_lcg_next(&s) >> 16) % POOL;
+        if (pick == prev) pick = (pick + 1) % POOL;
+        memcpy(b + n, pool[pick], REC);
+        n += REC;
+        prev = pick;
+    }
+    *out = b;
+    return n;
+}
+
 /* Shared dictionary Huffman table for the enc_lit == 3 golden case */
 static const uint8_t *gc_dict_huf_table(void) {
     static uint8_t huf[128];
@@ -258,25 +332,35 @@ typedef struct {
     int min_data_blocks;            /* lower bound on data-block count */
     int expect_seek;                /* a SEK block must be present */
     int use_dict_huf;               /* attach gc_dict_huf_table() to the opts */
+    int expect_gul_class;           /* GUL min_off_class (-1 = no constraint) */
 } golden_case_t;
 
-/* The corpus. Each entry maps onto one or more sections of docs/FORMAT.md Sec 5. */
+/* The corpus. Each entry maps onto one or more sections of docs/FORMAT.md Sec 5.
+ *
+ * v8 note: levels 1-3 emit GUL (or RAW) blocks only, so the GLO-specific
+ * cases sit at level 4 (the lowest GLO level) and the GUL cases (03, 14-16)
+ * pin the min_off classes and the continuation-chunk path. GHI decode
+ * coverage lives in the frozen conformance vector ghi_block_v8.zxc (the
+ * v8 encoder no longer emits GHI). */
 static const golden_case_t GOLDEN_CASES[] = {
-    /* name                 input              {level, blk,   csum, seek}                       data type    enc_lit min seek dhuf */
-    { "01_empty_eof_only",     gc_make_empty,     { .level = 1 },                                  GC_ANY_TYPE,  -1,  0, 0, 0 },
-    { "02_block_raw",          gc_make_raw,       { .level = 1 },                                  GC_BLOCK_RAW, -1,  1, 0, 0 },
-    { "03_block_ghi",          gc_make_text,      { .level = 1 },                                  GC_BLOCK_GHI, -1,  1, 0, 0 },
-    { "04_block_glo",          gc_make_text,      { .level = 3 },                                  GC_BLOCK_GLO, -1,  1, 0, 0 },
-    { "05_block_glo_huffman",  gc_make_huffman,   { .level = 6 },                                  GC_BLOCK_GLO,  2,  1, 0, 0 },
-    { "06_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GLO, -1,  1, 0, 0 },
-    { "07_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GLO, -1, 5, 0, 0 },
-    { "08_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GLO, -1, 5, 1, 0 },
-    { "09_block_dict",         gc_make_dict_payload, { .level = 3, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE }, GC_BLOCK_GLO, -1, 1, 0, 0 },
-    { "10_glo_offset16",       gc_make_offset16,  { .level = 3 },                                  GC_BLOCK_GLO, -1,  1, 0, 0 },
-    { "11_glo_rle",            gc_make_rle_literals, { .level = 3 },                                GC_BLOCK_GLO,  1,  1, 0, 0 },
+    /* name                 input              {level, blk,   csum, seek}                       data type    enc_lit min seek dhuf gclass */
+    { "01_empty_eof_only",     gc_make_empty,     { .level = 1 },                                  GC_ANY_TYPE,  -1,  0, 0, 0, -1 },
+    { "02_block_raw",          gc_make_raw,       { .level = 1 },                                  GC_BLOCK_RAW, -1,  1, 0, 0, -1 },
+    { "03_gul_repetitive",     gc_make_text,      { .level = 1 },                                  GC_BLOCK_GUL, -1,  1, 0, 0,  2 },
+    { "04_block_glo",          gc_make_text,      { .level = 4 },                                  GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
+    { "05_block_glo_huffman",  gc_make_huffman,   { .level = 6 },                                  GC_BLOCK_GLO,  2,  1, 0, 0, -1 },
+    { "06_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
+    { "07_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GUL, -1, 5, 0, 0, -1 },
+    { "08_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GUL, -1, 5, 1, 0, -1 },
+    { "09_block_dict",         gc_make_dict_payload, { .level = 3, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE }, GC_BLOCK_GUL, -1, 1, 0, 0, -1 },
+    { "10_glo_offset16",       gc_make_offset16,  { .level = 4 },                                  GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
+    { "11_glo_rle",            gc_make_rle_literals, { .level = 4 },                                GC_BLOCK_GLO,  1,  1, 0, 0, -1 },
     { "12_glo_huffman_dict",   gc_make_huffman_dict_payload,
-      { .level = 6, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE },                          GC_BLOCK_GLO,  3,  1, 0, 1 },
-    { "13_glo_huffman_wide",   gc_make_huffman_wide, { .level = 7 /* ULTRA */ },                    GC_BLOCK_GLO,  2,  1, 0, 0 },
+      { .level = 6, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE },                          GC_BLOCK_GLO,  3,  1, 0, 1, -1 },
+    { "13_glo_huffman_wide",   gc_make_huffman_wide, { .level = 7 /* ULTRA */ },                    GC_BLOCK_GLO,  2,  1, 0, 0, -1 },
+    { "14_block_gul",          gc_make_gul_text,     { .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0,  0 },
+    { "15_gul_minoff16",       gc_make_gul_records24,{ .level = 2 },                               GC_BLOCK_GUL, -1,  1, 0, 0,  1 },
+    { "16_gul_minoff32",       gc_make_gul_records48,{ .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0,  2 },
 };
 
 #define GOLDEN_CASE_COUNT (sizeof(GOLDEN_CASES) / sizeof(GOLDEN_CASES[0]))

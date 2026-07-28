@@ -45,6 +45,7 @@ uint32_t zxc_test_rand(void);
 
 void gen_random_data(uint8_t* buf, size_t size);
 void gen_lz_data(uint8_t* buf, size_t size);
+void gen_gul_data(uint8_t* buf, size_t size);
 void gen_num_data(uint8_t* buf, size_t size);
 void gen_num_data_zero(uint8_t* buf, size_t size);
 void gen_num_data_small(uint8_t* buf, size_t size);
@@ -120,8 +121,11 @@ int test_pstream_compress_drain_block_resume(void);
 
 /* Stream round-trip coverage (patterns x sizes x levels x checksum) */
 int test_roundtrip_raw_random(void);
-int test_roundtrip_ghi_text(void);
+int test_roundtrip_gul_rep(void);
 int test_roundtrip_glo_text(void);
+int test_roundtrip_gul_l1(void);
+int test_roundtrip_gul_l2(void);
+int test_roundtrip_gul_l3(void);
 int test_roundtrip_num_seq(void);
 int test_roundtrip_num_zero(void);
 int test_roundtrip_num_small(void);

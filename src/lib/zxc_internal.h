@@ -330,8 +330,9 @@ extern "C" {
 /** @brief Magic word identifying ZXC files (little-endian 0x9CB02EF5). */
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
 /** @brief Current on-disk file format version. The decoder accepts only this
- *  version; Older versions are rejected with ZXC_ERROR_BAD_VERSION. */
-#define ZXC_FILE_FORMAT_VERSION 7
+ *  version; Older versions are rejected with ZXC_ERROR_BAD_VERSION.
+ *  v8: GUL block (type 3) added, GHI block (type 2) retired. */
+#define ZXC_FILE_FORMAT_VERSION 8
 
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
@@ -401,6 +402,8 @@ extern "C" {
 #define ZXC_GLO_HEADER_BINARY_SIZE 16
 /** @brief Binary size of a GHI block sub-header. */
 #define ZXC_GHI_HEADER_BINARY_SIZE 16
+/** @brief Binary size of a GUL block sub-header. */
+#define ZXC_GUL_HEADER_BINARY_SIZE 16
 
 /** @brief Worst-case format overhead inside a single block beyond the outer
  *  8-byte block header and the optional 4-byte checksum.
@@ -419,6 +422,8 @@ extern "C" {
 #define ZXC_GLO_SECTIONS 4
 /** @brief Number of sections in a GHI block. */
 #define ZXC_GHI_SECTIONS 3
+/** @brief Number of sections in a GUL block (Literals, Sequences). */
+#define ZXC_GUL_SECTIONS 2
 
 /** @brief Checksum algorithm id for RapidHash (default, sole implementation). */
 #define ZXC_CHECKSUM_RAPIDHASH 0
@@ -471,6 +476,83 @@ extern "C" {
 #define ZXC_SEQ_ML_MASK ((1U << ZXC_SEQ_ML_BITS) - 1)
 /** @brief Mask to extract Offset from a GHI sequence. */
 #define ZXC_SEQ_OFF_MASK ((1U << ZXC_SEQ_OFF_BITS) - 1)
+/** @} */
+
+/** @name GUL Sequence Constants (FORMAT.md 5.4)
+ *  @brief 8-bit exact literal length | 6-bit match code | 18-bit biased offset.
+ *
+ *  No escapes and no Extras stream: `LL` is exact, match lengths come from a
+ *  63-entry codebook (`MC`), and `OFF'` is biased by the block's `min_off`
+ *  (from the block-header `min_off_class` flag). A mandatory raw tail
+ *  (>= ZXC_GUL_TAIL_MIN bytes) terminates the payload and provides the
+ *  read/write margin that lets the fast decode loop drop per-sequence
+ *  bounds tests.
+ *  @{ */
+/** @brief Bits for Literal Length in a GUL sequence (exact, no escape). */
+#define ZXC_GUL_LL_BITS 8
+/** @brief Bits for the Match Code in a GUL sequence. */
+#define ZXC_GUL_MC_BITS 6
+/** @brief Bits for the biased Offset in a GUL sequence. */
+#define ZXC_GUL_OFF_BITS 18
+/** @brief Maximum Literal Length carried by one GUL sequence. */
+#define ZXC_GUL_LL_MAX ((1U << ZXC_GUL_LL_BITS) - 1)
+/** @brief Mask to extract the Match Code from a GUL sequence. */
+#define ZXC_GUL_MC_MASK ((1U << ZXC_GUL_MC_BITS) - 1)
+/** @brief Mask to extract the biased Offset from a GUL sequence. */
+#define ZXC_GUL_OFF_MASK ((1U << ZXC_GUL_OFF_BITS) - 1)
+/** @brief Parse window: largest encodable distance at min_off_class 0
+ *         (OFF' max + bias 1 = 2^18 = 256 KiB). Class 1/2 reach slightly
+ *         further, but the encoder only ever emits offsets found within
+ *         this window (a promoted offset stays below min_off + 32). */
+#define ZXC_GUL_WINDOW_SIZE (1U << ZXC_GUL_OFF_BITS)
+/** @brief Minimum match length representable by the GUL codebook. */
+#define ZXC_GUL_MIN_MATCH 5
+/** @brief Maximum match length representable by the GUL codebook (code 63). */
+#define ZXC_GUL_MAX_MATCH 224
+/** @brief Mandatory minimum raw-tail size of a GUL block. */
+#define ZXC_GUL_TAIL_MIN 64
+/** @brief Below this uncompressed size the encoder must emit RAW, not GUL. */
+#define ZXC_GUL_MIN_BLOCK 128
+/** @brief Mask of the min_off_class field in the block-header flags byte. */
+#define ZXC_GUL_FLAG_CLASS_MASK 0x03U
+/** @brief Number of valid min_off classes (class 3 is reserved / rejected). */
+#define ZXC_GUL_NUM_CLASSES 3
+/** @brief Worst-case decoded bytes of one GUL sequence (LL max + LEN max). */
+#define ZXC_GUL_MAX_OUT_PER_SEQ (ZXC_GUL_LL_MAX + ZXC_GUL_MAX_MATCH) /* 479 */
+
+/** @brief min_off value of each min_off_class (index by class 0..2). */
+static const uint32_t zxc_gul_min_off_of[ZXC_GUL_NUM_CLASSES] = {1, 16, 32};
+
+/**
+ * @brief Decoded match length of GUL match code @p c (normative codebook).
+ *
+ * Strictly increasing over [1, 63]: 5..32 step 1 (exact), 34..64 step 2,
+ * 68..128 step 4, then 160/192/224. Every 6-bit value is valid, so the
+ * decoder needs no bounds check on the lookup. @p c must be in [1, 63].
+ */
+static ZXC_ALWAYS_INLINE uint32_t zxc_gul_len_of(const unsigned c) {
+    if (c <= 28) return c + 4;             /*   5 ..  32, step 1 (exact) */
+    if (c <= 44) return 34 + 2 * (c - 29); /*  34 ..  64, step 2 */
+    if (c <= 60) return 68 + 4 * (c - 45); /*  68 .. 128, step 4 */
+    return 160 + 32 * (c - 61);            /* 160, 192, 224 */
+}
+
+/**
+ * @brief Largest GUL match code whose decoded length does not exceed @p len
+ *        (the round-down inverse of ::zxc_gul_len_of). @p len must be >= 5;
+ *        lengths above 224 return code 63.
+ */
+static ZXC_ALWAYS_INLINE unsigned zxc_gul_code_of(const uint32_t len) {
+    if (len <= 32) return len - 4;
+    if (len < 34) return 28; /* len == 33 */
+    if (len <= 64) return 29 + (len - 34) / 2;
+    if (len < 68) return 44; /* 65 .. 67 */
+    if (len <= 128) return 45 + (len - 68) / 4;
+    if (len < 160) return 60; /* 129 .. 159 */
+    if (len < 192) return 61;
+    if (len < 224) return 62;
+    return 63;
+}
 /** @} */
 
 /** @name Literal Stream Encoding
@@ -977,6 +1059,10 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
  * is the default for most data (text, binaries, JSON, etc.). Includes 4 sections descriptors.
  * - `ZXC_BLOCK_GHI` (2): General-purpose high-velocity mode using LZ77 with advanced
  * techniques (lazy matching, step skipping) for maximum ratio. Includes 3 sections descriptors.
+ * - `ZXC_BLOCK_GUL` (3): General ULtra-throughput mode (v8): 4-byte sequences
+ *   `LL8|MC6|OFF18` (256 KiB window), per-block minimum-offset class, no escapes,
+ *   no Extras stream, mandatory raw tail. Serves levels 1-3. Includes 2 section
+ *   descriptors.
  * - `ZXC_BLOCK_SEK` (254): Seek table block. Contains per-block compressed/decompressed sizes
  *   for random-access decompression. Placed between EOF block and file footer.
  * - `ZXC_BLOCK_EOF` (255): End of file marker.
@@ -985,6 +1071,7 @@ typedef enum {
     ZXC_BLOCK_RAW = 0,
     ZXC_BLOCK_GLO = 1,
     ZXC_BLOCK_GHI = 2,
+    ZXC_BLOCK_GUL = 3,
     ZXC_BLOCK_SEK = 254,
     ZXC_BLOCK_EOF = 255
 } zxc_block_type_t;
@@ -1497,6 +1584,50 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
                                  zxc_gnr_header_t* RESTRICT gh,
                                  zxc_section_desc_t desc[ZXC_GHI_SECTIONS]);
 
+/**
+ * @struct zxc_gul_header_t
+ * @brief Header specific to GUL (General ULtra-throughput) blocks.
+ *
+ * Field offsets mirror GLO/GHI (n_sequences / n_literals first) so header
+ * parsing stays shared; the four one-byte encoding fields of GLO/GHI are
+ * reserved (must be 0 on the wire: GUL sections are always stored raw) and
+ * @c tail_len occupies the trailing 4 bytes.
+ */
+typedef struct {
+    uint32_t n_sequences; /**< Number of 4-byte sequence words. */
+    uint32_t n_literals;  /**< Size of the raw literals stream in bytes. */
+    uint32_t tail_len;    /**< Size of the mandatory raw tail (>= ZXC_GUL_TAIL_MIN). */
+} zxc_gul_header_t;
+
+/**
+ * @brief Serialises a GUL block header followed by its 2 section descriptors.
+ *
+ * @param[out] dst  Destination buffer.
+ * @param[in]  rem  Remaining capacity of @p dst.
+ * @param[in]  gh   Populated GUL header descriptor.
+ * @param[in]  desc Array of @ref ZXC_GUL_SECTIONS section descriptors.
+ * @return Total bytes written on success, or a negative @ref zxc_error_t code.
+ */
+int zxc_write_gul_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
+                                  const zxc_gul_header_t* RESTRICT gh,
+                                  const zxc_section_desc_t desc[ZXC_GUL_SECTIONS]);
+
+/**
+ * @brief Parses a GUL block header and its 2 section descriptors from @p src.
+ *
+ * Rejects non-zero reserved header bytes (GUL is new in v8, so this is
+ * stricter than the FORMAT.md 10.3 tolerate-reserved rule).
+ *
+ * @param[in]  src  Source buffer.
+ * @param[in]  len  Size of @p src.
+ * @param[out] gh   Receives the decoded GUL header.
+ * @param[out] desc Receives @ref ZXC_GUL_SECTIONS decoded section descriptors.
+ * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
+ */
+int zxc_read_gul_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
+                                 zxc_gul_header_t* RESTRICT gh,
+                                 zxc_section_desc_t desc[ZXC_GUL_SECTIONS]);
+
 /* ============================================================================
  * Huffman codec for the GLO literal stream (level >= 6).
  *
@@ -1679,6 +1810,23 @@ typedef struct {
     uint16_t* buf_offsets;   /**< Buffer for offsets. */
     uint8_t* buf_extras;     /**< Buffer for extra lengths (vbytes for LL/ML). */
     uint8_t* literals;       /**< Buffer for literal bytes. */
+
+    /* GUL encoder state (compress mode, level <= 3 only; NULL otherwise).
+     * The 256 KiB window outgrows the 16-bit ring chain_table, so GUL uses a
+     * position-indexed 32-bit chain (dict_size + chunk_size entries, no
+     * per-block reset needed: an entry is only reachable through an
+     * epoch-validated hash head, and every insertion rewrites its slot).
+     * The three match arrays record the class-agnostic parse (block-relative
+     * position, length, offset) so min_off_class selection prices all three
+     * classes from a single parse. */
+    uint32_t* gul_chain;  /**< Position-indexed chain table (32-bit entries). */
+    uint32_t* gul_m_pos;  /**< Recorded match positions (block-relative). */
+    uint32_t* gul_m_len;  /**< Recorded match lengths. */
+    uint32_t* gul_m_off;  /**< Recorded match offsets (actual distance). */
+    uint32_t* gul_m_a16l; /**< Walk runner-up with off >= 16: length (0 = none). */
+    uint32_t* gul_m_a16o; /**< Walk runner-up with off >= 16: offset. */
+    uint32_t* gul_m_a32l; /**< Walk runner-up with off >= 32: length (0 = none). */
+    uint32_t* gul_m_a32o; /**< Walk runner-up with off >= 32: offset. */
 
     /* Cold zone: configuration / scratch / resizeable. */
     uint8_t* lit_buffer;            /**< Scratch buffer for literals (RLE / Huffman). */

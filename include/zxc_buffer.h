@@ -388,7 +388,7 @@ ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t 
  * Output is bit-identical to zxc_decompress_block().
  *
  * RAW blocks transparently forward to zxc_decompress_block(); only
- * GLO/GHI use the strict-tail decoder path.
+ * GLO/GHI/GUL use the strict-tail decoder path.
  *
  * Strict-tail variant: @p dst_capacity is the exact uncompressed size with
  * no tail-pad margin, so the upper limit is @ref ZXC_BLOCK_SIZE_MAX (not
