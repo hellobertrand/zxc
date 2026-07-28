@@ -305,8 +305,8 @@ inline lengths header) over the token byte alphabet.
 
 High-throughput LZ format with packed 32-bit sequences.
 
-*Since v8 the reference encoder no longer emits GHI blocks (levels 1-3 use
-GUL, §5.4); decode support for type 2 is retained and remains mandatory.*
+*In v8 the reference encoder emits GHI at levels 1-2 (unchanged from v7);
+level 3 uses GUL (§5.4). Decode support for type 2 remains mandatory.*
 
 ### GHI payload layout
 
@@ -562,12 +562,15 @@ checksums disabled, the strict-tail decoder validates per sequence.
 6. `n_literals` equals the sum of `LL`; the sum of `LL + LEN[MC]` equals
    `uncompressed_size - tail_len`.
 
-*(non-normative)* The reference encoder emits only GUL (or RAW) data blocks
-at levels 1-3. The three `min_off_class` candidates are priced from a single
-parse (short offsets are promoted to a periodic multiple `k*off >= min_off`
-or to a runner-up match recorded during the chain walk) and the highest
-class within 2% of the best payload wins. Blocks that would expand, and
-blocks under 128 bytes, fall back to RAW.
+*(non-normative)* The reference encoder emits GUL at level 3 (the classic
+GLO encoder remains selectable through `fast_encode`, ~3x faster
+compression at the same ratio). The three `min_off_class` candidates are
+priced from a single parse (short offsets are promoted to a periodic
+multiple `k*off >= min_off` or to a runner-up match recorded during the
+chain walk) and the highest class within 2% of the best payload wins.
+Highly repetitive blocks whose long matches would shatter on the 224-byte
+codebook cap are routed to GLO; blocks that would expand, and blocks under
+128 bytes, fall back to RAW.
 
 ---
 

@@ -154,36 +154,33 @@ int test_static_ctx_size_query(void) {
         return 0;
     }
 
-    /* Per-level workspace tiers: levels 1-3 add the GUL buffers (32-bit chain
-     * + match record), levels 4-5 are the lean GLO tier, level 6 adds
-     * opt_scratch on top of it. */
+    /* Per-level workspace tiers: levels 1-2 (GHI) and 4-5 (GLO) share the
+     * lean layout, level 3 adds the GUL buffers (32-bit chain + match
+     * record), level 6 adds opt_scratch. */
     const size_t s1 = zxc_static_cctx_workspace_size(64 * 1024, 1);
+    const size_t s2 = zxc_static_cctx_workspace_size(64 * 1024, 2);
     const size_t s3 = zxc_static_cctx_workspace_size(64 * 1024, 3);
     const size_t s4 = zxc_static_cctx_workspace_size(64 * 1024, 4);
     const size_t s5 = zxc_static_cctx_workspace_size(64 * 1024, 5);
     const size_t s6 = zxc_static_cctx_workspace_size(64 * 1024, 6);
-    if (s1 == 0 || s3 == 0 || s4 == 0 || s5 == 0 || s6 == 0) {
-        printf("  [FAIL] one of s1/s3/s4/s5/s6 is 0\n");
+    if (s1 == 0 || s2 == 0 || s3 == 0 || s4 == 0 || s5 == 0 || s6 == 0) {
+        printf("  [FAIL] one of s1..s6 is 0\n");
         return 0;
     }
-    if (s1 != s3) {
-        printf("  [FAIL] s1 (%zu) should equal s3 (%zu); levels 1-3 share the GUL tier\n", s1, s3);
-        return 0;
-    }
-    if (s4 != s5) {
-        printf("  [FAIL] s4 (%zu) should equal s5 (%zu); levels 4-5 share the GLO tier\n", s4, s5);
+    if (s1 != s2 || s2 != s4 || s4 != s5) {
+        printf("  [FAIL] s1/s2/s4/s5 should be equal (lean tier): %zu/%zu/%zu/%zu\n", s1, s2, s4,
+               s5);
         return 0;
     }
     if (s3 <= s5) {
-        printf("  [FAIL] s3 (%zu) should exceed s5 (%zu); levels 1-3 add the GUL buffers\n", s3,
-               s5);
+        printf("  [FAIL] s3 (%zu) should exceed s5 (%zu); level 3 adds the GUL buffers\n", s3, s5);
         return 0;
     }
     if (s6 <= s5) {
         printf("  [FAIL] s6 (%zu) should exceed s5 (%zu)\n", s6, s5);
         return 0;
     }
-    printf("  [PASS] levels 1-3 add GUL buffers; 4-5 lean; level 6 adds opt_scratch\n");
+    printf("  [PASS] level 3 adds GUL buffers; level 6 adds opt_scratch; others lean\n");
     return 1;
 }
 

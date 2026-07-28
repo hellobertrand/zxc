@@ -251,13 +251,15 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
             layout.total += ZXC_ALIGN_CL(layout.sz_opt);
         }
 
-        /* GUL encoder buffers (levels 1-3 only): the 256 KiB window outgrows
+        /* GUL encoder buffers (level 3 only): the 256 KiB window outgrows
          * the 16-bit ring chain_table, so GUL uses a position-indexed 32-bit
          * chain over [dict | block], plus seven uint32_t match arrays
          * (pos/len/off + the >= 16 / >= 32 walk runner-ups) recording the
-         * class-agnostic parse for min_off_class pricing. Levels >= 4 (GLO)
-         * pay nothing for them. */
-        if (level <= ZXC_LEVEL_DEFAULT) {
+         * class-agnostic parse for min_off_class pricing. Levels 1-2 (GHI)
+         * and 4+ (GLO) pay nothing for them. Carved even when the level-3
+         * caller later opts into fast_encode (GLO): the choice arrives after
+         * init and the waste is acceptable. */
+        if (level == ZXC_LEVEL_DEFAULT) {
             layout.sz_gul_chain = (dict_size + chunk_size) * sizeof(uint32_t);
             layout.off_gul_chain = layout.total;
             layout.total += ZXC_ALIGN_CL(layout.sz_gul_chain);

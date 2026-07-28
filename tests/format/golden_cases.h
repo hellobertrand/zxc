@@ -337,30 +337,31 @@ typedef struct {
 
 /* The corpus. Each entry maps onto one or more sections of docs/FORMAT.md Sec 5.
  *
- * v8 note: levels 1-3 emit GUL (or RAW) blocks only, so the GLO-specific
- * cases sit at level 4 (the lowest GLO level) and the GUL cases (03, 14-16)
- * pin the min_off classes and the continuation-chunk path. GHI decode
- * coverage lives in the frozen conformance vector ghi_block_v8.zxc (the
- * v8 encoder no longer emits GHI). */
+ * v8 note: levels 1-2 emit GHI (unchanged from v7); level 3 emits GUL by
+ * default (falling back to GLO on pathologically repetitive blocks and on
+ * opts.fast_encode, case 17). The GUL cases (14-16) pin the min_off classes;
+ * the GLO-specific stream features stay at levels 4+ where GLO is
+ * unconditional. */
 static const golden_case_t GOLDEN_CASES[] = {
     /* name                 input              {level, blk,   csum, seek}                       data type    enc_lit min seek dhuf gclass */
     { "01_empty_eof_only",     gc_make_empty,     { .level = 1 },                                  GC_ANY_TYPE,  -1,  0, 0, 0, -1 },
     { "02_block_raw",          gc_make_raw,       { .level = 1 },                                  GC_BLOCK_RAW, -1,  1, 0, 0, -1 },
-    { "03_gul_repetitive",     gc_make_text,      { .level = 1 },                                  GC_BLOCK_GUL, -1,  1, 0, 0,  2 },
+    { "03_block_ghi",          gc_make_text,      { .level = 1 },                                  GC_BLOCK_GHI, -1,  1, 0, 0, -1 },
     { "04_block_glo",          gc_make_text,      { .level = 4 },                                  GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
     { "05_block_glo_huffman",  gc_make_huffman,   { .level = 6 },                                  GC_BLOCK_GLO,  2,  1, 0, 0, -1 },
-    { "06_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
-    { "07_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GUL, -1, 5, 0, 0, -1 },
-    { "08_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GUL, -1, 5, 1, 0, -1 },
-    { "09_block_dict",         gc_make_dict_payload, { .level = 3, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE }, GC_BLOCK_GUL, -1, 1, 0, 0, -1 },
+    { "06_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
+    { "07_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GLO, -1, 5, 0, 0, -1 },
+    { "08_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GLO, -1, 5, 1, 0, -1 },
+    { "09_block_dict",         gc_make_dict_payload, { .level = 3, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE }, GC_BLOCK_GLO, -1, 1, 0, 0, -1 },
     { "10_glo_offset16",       gc_make_offset16,  { .level = 4 },                                  GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
     { "11_glo_rle",            gc_make_rle_literals, { .level = 4 },                                GC_BLOCK_GLO,  1,  1, 0, 0, -1 },
     { "12_glo_huffman_dict",   gc_make_huffman_dict_payload,
       { .level = 6, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE },                          GC_BLOCK_GLO,  3,  1, 0, 1, -1 },
     { "13_glo_huffman_wide",   gc_make_huffman_wide, { .level = 7 /* ULTRA */ },                    GC_BLOCK_GLO,  2,  1, 0, 0, -1 },
     { "14_block_gul",          gc_make_gul_text,     { .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0,  0 },
-    { "15_gul_minoff16",       gc_make_gul_records24,{ .level = 2 },                               GC_BLOCK_GUL, -1,  1, 0, 0,  1 },
+    { "15_gul_minoff16",       gc_make_gul_records24,{ .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0,  1 },
     { "16_gul_minoff32",       gc_make_gul_records48,{ .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0,  2 },
+    { "17_glo_fast_l3",        gc_make_gul_records48,{ .level = 3, .fast_encode = 1 },             GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
 };
 
 #define GOLDEN_CASE_COUNT (sizeof(GOLDEN_CASES) / sizeof(GOLDEN_CASES[0]))

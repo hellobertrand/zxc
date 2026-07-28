@@ -1851,6 +1851,10 @@ typedef struct {
     size_t opt_scratch_cap;         /**< Current capacity of opt_scratch in bytes. */
     int checksum_enabled;           /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;          /**< Compression level. */
+    int fast_encode;                /**< Level 3 encoder choice: 1 = classic GLO (faster
+                                         compression), 0 = GUL (faster decompression).
+                                         Set by callers after init from the public opts;
+                                         ignored at other levels. */
     size_t dict_size;               /**< Dictionary prefill size (0 = no dictionary). */
     uint8_t* dict_buffer;           /**< [dict | data] concat scratch carved from memory_block
                                          when dict_size > 0 (NULL otherwise). */
