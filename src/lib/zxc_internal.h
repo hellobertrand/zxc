@@ -509,8 +509,15 @@ extern "C" {
 /** @brief Hash-window lag: matches never start closer than LAG + 1 bytes.
  *         16 is the floor of the sequential 16-byte-chunk match copy
  *         (zxc_gul_copy_match32): each chunk re-reads bytes the previous
- *         one finalized, so LZ semantics hold for any dis >= 16. */
+ *         one finalized, so LZ semantics hold for any dis >= 16. This is a
+ *         WIRE constant (offset bias); the `#ifndef` exists solely for
+ *         cross-architecture A/B diagnostics, not as a tuning knob. */
+#ifndef ZXC_GUL_LAG
 #define ZXC_GUL_LAG 16
+#endif
+#if ZXC_GUL_LAG < 16
+#error "GUL: LAG below 16 breaks the sequential 16-byte-chunk match copy"
+#endif
 /** @brief Minimum (and bias of the stored) match distance. */
 #define ZXC_GUL_MIN_DIS (ZXC_GUL_LAG + 1)
 /** @brief Offset field width: 16-bit distances, like GLO/GHI. */
@@ -529,22 +536,41 @@ extern "C" {
 #ifndef ZXC_GUL_RING
 #define ZXC_GUL_RING 16
 #endif
-/** @name GUL per-level search effort (encoder policy, `#ifndef` for sweeps)
+/** @name GUL per-level parse profile (encoder policy, `#ifndef` for sweeps)
  *
- *  Levels 3-5 share the GUL wire and differ in search effort (ring depth,
- *  lookahead -- see ZXC_GUL_RING_L* and ZXC_GUL_LA_L*): deeper
- *  probing finds longer matches, which improves ratio AND decode speed
- *  (decode cost is per sequence, so throughput is bytes covered per token)
- *  at the price of compression speed. Must be powers of two <= ZXC_GUL_RING.
+ *  Levels 3-5 share the GUL wire and differ in parse profile. Decode cost
+ *  is per sequence, so throughput is bytes covered per token: levels 3-4
+ *  use a SPARSE acceptance policy (only long matches, pending literals
+ *  flushed in bulk) that emits few sequences and decodes fastest; level 5
+ *  parses densely for the best ratio. Ring depths must be powers of two
+ *  <= ZXC_GUL_RING. The values feed ::zxc_get_gul_params.
  *  @{ */
 #ifndef ZXC_GUL_RING_L3
-#define ZXC_GUL_RING_L3 2
+#define ZXC_GUL_RING_L3 8
 #endif
 #ifndef ZXC_GUL_RING_L4
-#define ZXC_GUL_RING_L4 4
+#define ZXC_GUL_RING_L4 16
 #endif
 #ifndef ZXC_GUL_RING_L5
 #define ZXC_GUL_RING_L5 ZXC_GUL_RING
+#endif
+#ifndef ZXC_GUL_LA_L3
+#define ZXC_GUL_LA_L3 0
+#endif
+#ifndef ZXC_GUL_LA_L4
+#define ZXC_GUL_LA_L4 0
+#endif
+#ifndef ZXC_GUL_LA_L5
+#define ZXC_GUL_LA_L5 2
+#endif
+#ifndef ZXC_GUL_ACCEPT_L3
+#define ZXC_GUL_ACCEPT_L3 9
+#endif
+#ifndef ZXC_GUL_ACCEPT_L4
+#define ZXC_GUL_ACCEPT_L4 7
+#endif
+#ifndef ZXC_GUL_ACCEPT_L5
+#define ZXC_GUL_ACCEPT_L5 0
 #endif
 #if (ZXC_GUL_RING_L3 & (ZXC_GUL_RING_L3 - 1)) || (ZXC_GUL_RING_L4 & (ZXC_GUL_RING_L4 - 1)) || \
     (ZXC_GUL_RING_L5 & (ZXC_GUL_RING_L5 - 1)) || (ZXC_GUL_RING & (ZXC_GUL_RING - 1))
@@ -556,6 +582,54 @@ extern "C" {
 #endif
 /** @brief Levels whose default encoder is GUL. */
 #define ZXC_LEVEL_USES_GUL(l) ((l) >= ZXC_LEVEL_DEFAULT && (l) <= ZXC_LEVEL_COMPACT)
+
+/**
+ * @struct zxc_gul_params_t
+ * @brief Per-level GUL encoder parameters (mirrors ::zxc_lz77_params_t).
+ *
+ * One row per GUL level (3-5). Every field is a compile-time constant so
+ * the per-level encoder specializations fully unroll the ring probe and
+ * fold the dead policy branches away.
+ */
+typedef struct {
+    /** Candidates probed per bucket (power of two <= ZXC_GUL_RING).
+     *  Deeper probing finds longer matches at linear compression cost. */
+    int ring;
+
+    /** Positions probed ahead of an accepted match for a longer one.
+     *  The sparse tiers skip it: the acceptance bar already selects
+     *  long matches. */
+    int lookahead;
+
+    /** Stop the lookahead once a match reaches this length. */
+    int la_gate;
+
+    /** Sparse acceptance bar: only matches >= this length are taken,
+     *  except to flush a pending literal run (ZXC_GUL_FIRE_AT). 0 = dense
+     *  tier, accept from ZXC_GUL_MIN_EMIT. Fewer sequences and bulk
+     *  literal runs decode faster. */
+    int accept;
+
+    /** Route GUL declines and pathologically repetitive blocks to GLO
+     *  (level 3 stays pure GUL-or-RAW). */
+    int glo_fallback;
+} zxc_gul_params_t;
+
+/**
+ * @brief Returns the GUL encoder parameters for a level in [3, 5].
+ *
+ * Called with a compile-time-constant level from the per-level encoder
+ * wrappers, so the row folds to constants.
+ */
+static ZXC_ALWAYS_INLINE zxc_gul_params_t zxc_get_gul_params(const int level) {
+    // ring, lookahead, la_gate, accept, glo_fallback
+    static const zxc_gul_params_t table[3] = {
+        {ZXC_GUL_RING_L3, ZXC_GUL_LA_L3, 16, ZXC_GUL_ACCEPT_L3, 0},  // level 3
+        {ZXC_GUL_RING_L4, ZXC_GUL_LA_L4, 16, ZXC_GUL_ACCEPT_L4, 1},  // level 4
+        {ZXC_GUL_RING_L5, ZXC_GUL_LA_L5, 16, ZXC_GUL_ACCEPT_L5, 1},  // level 5
+    };
+    return table[level - ZXC_LEVEL_DEFAULT];
+}
 /** @} */
 /** @brief Worst-case decoded bytes of one escape-free sequence: 6 inline
  *         literals + a 32-byte match copy, +2 dirty-norm slack (= 40). */

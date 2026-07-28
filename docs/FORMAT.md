@@ -510,10 +510,12 @@ compressed payload *before* decoding licenses the unchecked fast loop; with
 checksums disabled, the strict-tail decoder validates per sequence.
 
 *(non-normative)* The reference encoder emits GUL at levels 3-5. The
-three levels share the wire and differ only in search effort (ring probe
-depth, lookahead) -- so a deeper level yields both a better ratio and
-faster decoding (decode cost is per sequence; deeper probing finds longer
-matches, covering more bytes per token) at the price of compression
+three levels share the wire and differ in parse profile. Decode cost is
+per sequence, so throughput is bytes covered per token: levels 3-4 use a
+sparse acceptance policy (only long matches are taken, pending literal
+runs are flushed in bulk) that emits few sequences and decodes fastest,
+while level 5 parses densely for the best ratio -- so decode speed
+decreases as the ratio improves, and higher levels also pay compression
 speed. The match finder is a 16-bit hash over 4-byte grams whose buckets
 are rings of truncated positions probed with 32-byte vector compares,
 lagged 16 bytes behind the scan cursor so every candidate satisfies the

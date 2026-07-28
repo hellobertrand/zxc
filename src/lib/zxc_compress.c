@@ -2084,14 +2084,6 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
 /** @name GUL encoder tuning (encoder policy, `#ifndef`-guarded for sweeps)
  *  @{ */
-/** @brief Positions probed ahead of an accepted match for a longer one. */
-#ifndef ZXC_GUL_LOOKAHEAD
-#define ZXC_GUL_LOOKAHEAD 2
-#endif
-/** @brief Stop the lookahead once a match reaches this length. */
-#ifndef ZXC_GUL_LA_GATE
-#define ZXC_GUL_LA_GATE 16
-#endif
 /** @brief Past this length, keep looking only while it improves. */
 #ifndef ZXC_GUL_LA_PATE
 #define ZXC_GUL_LA_PATE 8
@@ -2105,21 +2097,14 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 #ifndef ZXC_GUL_MIN_EMIT
 #define ZXC_GUL_MIN_EMIT ZXC_GUL_MIN_MATCH
 #endif
-/** @brief Per-level lookahead depth and gate. Level 3 runs the full
- *         two-step lookahead but gates it early: with its shallow ring
- *         that lands at ~43.9% on silesia at the best decode of the
- *         shallow-ring configs. */
-#ifndef ZXC_GUL_LA_L3
-#define ZXC_GUL_LA_L3 2
+/** @brief Pending-literal flush threshold of the sparse tiers (see
+ *         zxc_gul_params_t.accept). */
+#ifndef ZXC_GUL_FIRE_AT
+#define ZXC_GUL_FIRE_AT 6
 #endif
-#ifndef ZXC_GUL_GATE_L3
-#define ZXC_GUL_GATE_L3 8
-#endif
-#ifndef ZXC_GUL_LA_L4
-#define ZXC_GUL_LA_L4 ZXC_GUL_LOOKAHEAD
-#endif
-#ifndef ZXC_GUL_LA_L5
-#define ZXC_GUL_LA_L5 ZXC_GUL_LOOKAHEAD
+/** @brief Extend accepted matches backwards over pending literals. */
+#ifndef ZXC_GUL_BACKEXT
+#define ZXC_GUL_BACKEXT 1
 #endif
 /** @} */
 
@@ -2211,7 +2196,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_gul_probe(const uint8_t* RESTRICT base, co
 static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
     zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src, const size_t src_sz,
     uint8_t* RESTRICT dst, const size_t dst_cap, size_t* RESTRICT const out_sz, const int ring_n,
-    const int la, const int gate, const int glo_fallback) {
+    const int la, const int gate, const int glo_fallback, const int accept_len) {
     const size_t dict_sz = ctx->dict_size;
     const size_t block_sz = src_sz - dict_sz;
 
@@ -2241,6 +2226,10 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
     uint32_t n_seq = 0;
     uint32_t n_max = 0; /* max-length tokens (pathological-repetition gauge) */
     size_t miss_run = 0;
+    /* Sparse-tier flush-candidate memory (dead code when accept_len == 0). */
+    size_t cand_pos = 0;
+    size_t cand_lst = 0;
+    uint32_t cand_len = 0;
 
     while (pos + ZXC_GUL_MAX_MATCH <= limit) {
         /* Pump lagged hash insertions in unrolled batches. */
@@ -2260,7 +2249,37 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
             best_len = zxc_gul_probe(base, pos, &htab[h * (size_t)ring_n], ring_n, &best_cand);
         }
 
-        if (best_len >= ZXC_GUL_MIN_EMIT) {
+        /* Captured BEFORE any flush regression: the post-emission clamp
+         * must restore the scan cursor to the probe position, or the scan
+         * could move net-backwards past already-inserted hash entries. */
+        const size_t probe_pos = pos;
+        int accept;
+        if (accept_len > 0) {
+            /* Sparse profile: take only matches clearing the bar, except to
+             * flush a pending literal run (misa77-loose-style policy: keeps
+             * the inline LL field small and the sequence count low). */
+            accept = best_len >= (uint32_t)accept_len;
+            if (!accept) {
+                if (pos - lit >= (size_t)ZXC_GUL_FIRE_AT) {
+                    if (cand_len != 0 &&
+                        (best_len < ZXC_GUL_MIN_MATCH || cand_pos + cand_len >= pos + best_len)) {
+                        pos = cand_pos;
+                        best_cand = cand_lst;
+                        best_len = cand_len;
+                    }
+                    accept = best_len >= ZXC_GUL_MIN_MATCH;
+                } else if (best_len >= ZXC_GUL_MIN_MATCH &&
+                           (cand_len == 0 || pos + best_len >= cand_pos + cand_len)) {
+                    cand_pos = pos;
+                    cand_len = best_len;
+                    cand_lst = best_cand;
+                }
+            }
+        } else {
+            accept = best_len >= ZXC_GUL_MIN_EMIT;
+        }
+
+        if (accept) {
             /* Short lookahead for a longer match at the next positions
              * (compile-time dead when the tier's la is 0). */
             for (size_t np = pos + 1; np <= pos + (size_t)la && np + ZXC_GUL_MAX_MATCH <= limit &&
@@ -2278,6 +2297,18 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
                     break;
                 }
             }
+
+#if ZXC_GUL_BACKEXT
+            /* Extend the match backwards over pending literals: the distance
+             * is unchanged and net scan progress stays positive, so the
+             * insertion-lag invariant holds. */
+            while (pos > lit && best_cand > 0 && best_len < ZXC_GUL_MAX_MATCH &&
+                   base[pos - 1] == base[best_cand - 1]) {
+                pos--;
+                best_cand--;
+                best_len++;
+            }
+#endif
 
             /* Token byte + 2 offset bytes (+ literal-length escape bytes).
              * Stream bound: 4n + lo/255 <= block (every match covers >= 4
@@ -2304,6 +2335,12 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
             n_max += (best_len == ZXC_GUL_MAX_MATCH);
             pos += best_len;
             lit = pos;
+            if (accept_len > 0) {
+                /* A candidate flush may have regressed the scan cursor; the
+                 * skipped bytes become the next pending literals. */
+                if (pos < probe_pos) pos = probe_pos;
+                cand_len = 0;
+            }
             miss_run = 0;
         } else {
             pos += 1 + (miss_run >> ZXC_GUL_SKIP_SHIFT);
@@ -2362,30 +2399,22 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
     return ZXC_OK;
 }
 
-/** @name GUL encoder tiers: one specialization per level so the ring probe
- *        and cursor rotation fold to compile-time constants (full unroll).
+/** @name GUL encoder tiers: one specialization per level, each fed a
+ *        compile-time-constant row of ::zxc_get_gul_params so the ring
+ *        probe fully unrolls and the dead policy branches fold away.
  *  @{ */
-static ZXC_NOINLINE int zxc_encode_block_gul_l3(zxc_cctx_t* RESTRICT ctx,
-                                                const uint8_t* RESTRICT src, const size_t src_sz,
-                                                uint8_t* RESTRICT dst, const size_t dst_cap,
-                                                size_t* RESTRICT const out_sz) {
-    return zxc_encode_block_gul_impl(ctx, src, src_sz, dst, dst_cap, out_sz, ZXC_GUL_RING_L3,
-                                     ZXC_GUL_LA_L3, ZXC_GUL_GATE_L3, /*glo_fallback=*/0);
-}
-static ZXC_NOINLINE int zxc_encode_block_gul_l4(zxc_cctx_t* RESTRICT ctx,
-                                                const uint8_t* RESTRICT src, const size_t src_sz,
-                                                uint8_t* RESTRICT dst, const size_t dst_cap,
-                                                size_t* RESTRICT const out_sz) {
-    return zxc_encode_block_gul_impl(ctx, src, src_sz, dst, dst_cap, out_sz, ZXC_GUL_RING_L4,
-                                     ZXC_GUL_LA_L4, ZXC_GUL_LA_GATE, /*glo_fallback=*/1);
-}
-static ZXC_NOINLINE int zxc_encode_block_gul_l5(zxc_cctx_t* RESTRICT ctx,
-                                                const uint8_t* RESTRICT src, const size_t src_sz,
-                                                uint8_t* RESTRICT dst, const size_t dst_cap,
-                                                size_t* RESTRICT const out_sz) {
-    return zxc_encode_block_gul_impl(ctx, src, src_sz, dst, dst_cap, out_sz, ZXC_GUL_RING_L5,
-                                     ZXC_GUL_LA_L5, ZXC_GUL_LA_GATE, /*glo_fallback=*/1);
-}
+#define ZXC_GUL_TIER(name, lvl)                                                                    \
+    static ZXC_NOINLINE int name(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,            \
+                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap, \
+                                 size_t* RESTRICT const out_sz) {                                  \
+        const zxc_gul_params_t p = zxc_get_gul_params(lvl);                                        \
+        return zxc_encode_block_gul_impl(ctx, src, src_sz, dst, dst_cap, out_sz, p.ring,           \
+                                         p.lookahead, p.la_gate, p.glo_fallback, p.accept);        \
+    }
+ZXC_GUL_TIER(zxc_encode_block_gul_l3, ZXC_LEVEL_DEFAULT)
+ZXC_GUL_TIER(zxc_encode_block_gul_l4, ZXC_LEVEL_BALANCED)
+ZXC_GUL_TIER(zxc_encode_block_gul_l5, ZXC_LEVEL_COMPACT)
+#undef ZXC_GUL_TIER
 /** @} */
 
 /**
