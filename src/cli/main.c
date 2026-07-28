@@ -309,7 +309,6 @@ static int zxc_validate_output_path(const char* path, char* resolved_buffer, siz
 // CLI Logging Helpers
 static int g_quiet = 0;
 static int g_verbose = 0;
-static int g_fast_encode = 0; /* level 3: classic GLO encoder (faster compression) */
 /* Progress display policy (--progress): auto = tty-only heuristic, always =
  * force (one line per update off-tty), never = disable. -q suppresses all. */
 enum { ZXC_PROGRESS_AUTO = 0, ZXC_PROGRESS_ALWAYS, ZXC_PROGRESS_NEVER };
@@ -376,7 +375,7 @@ typedef enum {
     MODE_TRAIN_DICT
 } zxc_mode_t;
 
-enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS, OPT_FAST };
+enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS };
 
 // Forward declaration for recursive mode
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
@@ -513,8 +512,6 @@ void print_help(const char* app) {
         "  -D, --dict FILE   Use pre-trained dictionary (.zxd). Required to decompress\n"
         "                    an archive that was compressed with a dictionary\n"
         "  -S, --seekable    Append seek table for random-access decompression\n"
-        "  --fast            Level 3: classic encoder, ~3x faster compression at the\n"
-        "                    same ratio (decompression speed of levels 4+)\n"
         "  -o, --output FILE Write output to FILE (else derived from input;\n"
         "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
         "  -k, --keep        Keep input file\n"
@@ -1095,7 +1092,6 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .dict_huf = g_dict_huf,
             .progress_cb = show_progress ? &cli_progress_callback : NULL,
             .user_data = &pctx,
-            .fast_encode = g_fast_encode,
         };
         bytes = zxc_stream_compress(f_in, f_out, &copts);
     } else {
@@ -1257,7 +1253,6 @@ int main(int argc, char** argv) {
                                                  {"recursive", no_argument, 0, 'r'},
                                                  {"block-size", required_argument, 0, 'B'},
                                                  {"seekable", no_argument, 0, 'S'},
-                                                 {"fast", no_argument, 0, OPT_FAST},
                                                  {0, 0, 0, 0}};
 
     int opt;
@@ -1361,9 +1356,6 @@ int main(int argc, char** argv) {
                 break;
             case 'S':
                 seekable = 1;
-                break;
-            case OPT_FAST:
-                g_fast_encode = 1;
                 break;
             case 'D':
                 dict_path = optarg;
@@ -1740,8 +1732,7 @@ int main(int argc, char** argv) {
                                                  .checksum_enabled = checksum,
                                                  .dict = dict,
                                                  .dict_size = dict_size,
-                                                 .dict_huf = g_dict_huf,
-                                                 .fast_encode = g_fast_encode};
+                                                 .dict_huf = g_dict_huf};
         const zxc_decompress_opts_t bench_dopts = {.n_threads = num_threads,
                                                    .checksum_enabled = checksum,
                                                    .dict = dict,

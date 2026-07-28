@@ -333,7 +333,6 @@ typedef struct {
     zxc_chunk_processor_t processor;
     int write_idx;
     int compression_level;
-    int fast_encode; /**< Level-3 encoder choice propagated to worker cctxs. */
     size_t chunk_size;
     int checksum_enabled;
     int file_has_checksum;
@@ -444,7 +443,6 @@ static void* zxc_stream_worker(void* arg) {
     }
 
     cctx.compression_level = ctx->compression_level;
-    cctx.fast_encode = ctx->fast_encode;
 
     /* Per-worker dict buffer for assembling [dict | block_data] */
     const size_t dsz = ctx->dict_size;
@@ -639,9 +637,9 @@ static void* zxc_async_writer(void* arg) {
  *         @ref zxc_error_t code.
  */
 static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_threads, const int mode,
-                                     const int level, const int fast_encode,
-                                     const size_t block_size, const int checksum_enabled,
-                                     const int seekable, zxc_chunk_processor_t func,
+                                     const int level, const size_t block_size,
+                                     const int checksum_enabled, const int seekable,
+                                     zxc_chunk_processor_t func,
                                      zxc_progress_callback_t progress_cb, void* user_data,
                                      const uint8_t* dict, const size_t dict_size,
                                      const uint8_t* dict_huf) {
@@ -690,7 +688,6 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ctx.processor = func;
     ctx.io_error = 0;
     ctx.compression_level = level;
-    ctx.fast_encode = fast_encode;
     ctx.ring_size = (size_t)num_workers * 4U;
     ctx.chunk_size = runtime_chunk_sz;
     ctx.checksum_enabled = checksum_enabled;
@@ -1055,10 +1052,9 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
     const uint8_t* dict_huf = (opts && opts->dict) ? (const uint8_t*)opts->dict_huf : NULL;
-    const int fast_encode = opts ? (opts->fast_encode != 0) : 0;
-    return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, fast_encode, block_size,
-                                 checksum_enabled, seekable, zxc_compress_chunk_wrapper, cb, ud,
-                                 dict, dict_size, dict_huf);
+    return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, block_size, checksum_enabled,
+                                 seekable, zxc_compress_chunk_wrapper, cb, ud, dict, dict_size,
+                                 dict_huf);
 }
 
 /**
@@ -1085,7 +1081,7 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
     void* ud = opts ? opts->user_data : NULL;
 
     const uint8_t* dict_huf = (opts && opts->dict) ? (const uint8_t*)opts->dict_huf : NULL;
-    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, 0, checksum_enabled, 0,
+    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled, 0,
                                  (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, cb, ud, dict,
                                  dict_size, dict_huf);
 }

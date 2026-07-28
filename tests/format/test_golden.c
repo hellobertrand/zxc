@@ -121,7 +121,8 @@ static int validate_lz_payload(const char *ctx, const uint8_t *p, uint32_t comp,
 
 /* GUL (Sec 5.4) payload validator: 16-byte header (n_sequences, n_literals,
  * reserved u32 = 0, tail_len), 2 raw section descriptors (comp == raw), and
- * the mandatory tail; the streams must tile the payload exactly. */
+ * the mandatory tail; the streams must tile the payload exactly and every
+ * sequence costs at least 3 token-stream bytes. */
 static int validate_gul_payload(const char *ctx, const uint8_t *p, uint32_t comp) {
     const uint32_t fixed = 16 + 2 * 8;
     CHECK(comp >= fixed, "GUL payload too small for header+descriptors (%u < %u)", comp, fixed);
@@ -130,16 +131,18 @@ static int validate_gul_payload(const char *ctx, const uint8_t *p, uint32_t comp
     uint32_t n_lit = zxc_le32(p + 4);
     uint32_t tail_len = zxc_le32(p + 12);
     CHECK(zxc_le32(p + 8) == 0, "GUL header reserved u32 nonzero");
-    CHECK(tail_len >= 64, "GUL tail_len %u below the 64-byte minimum", tail_len);
+    CHECK(tail_len >= 32, "GUL tail_len %u below the 32-byte minimum", tail_len);
 
     uint64_t d0 = zxc_le64(p + 16);
     uint64_t d1 = zxc_le64(p + 24);
+    uint32_t sz_seq = (uint32_t)(d1 & 0xFFFFFFFFu);
     CHECK(d0 == ((uint64_t)n_lit | ((uint64_t)n_lit << 32)),
           "GUL literals descriptor disagrees with header");
-    CHECK(d1 == ((4ull * n_seq) | ((4ull * n_seq) << 32)),
-          "GUL sequences descriptor disagrees with header");
+    CHECK(d1 == ((uint64_t)sz_seq | ((uint64_t)sz_seq << 32)),
+          "GUL sequences descriptor not raw");
+    CHECK((uint64_t)n_seq * 3u <= sz_seq, "GUL token stream too small for %u sequences", n_seq);
 
-    uint64_t total = (uint64_t)fixed + n_lit + 4ull * n_seq + tail_len;
+    uint64_t total = (uint64_t)fixed + n_lit + sz_seq + tail_len;
     CHECK(total == comp, "GUL streams do not tile payload (%llu != %u)",
           (unsigned long long)total, comp);
     return 1;
@@ -214,19 +217,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
             CHECK(bh[7] == want, "block CRC8 mismatch at %zu: got 0x%02X want 0x%02X", off, bh[7],
                   want);
         }
-        /* Sec 4.1: flags are 0 everywhere except GUL blocks, whose bits 0-1
-         * carry the min_off_class (0..2; class 3 reserved). */
-        if (bh[0] == GC_BLOCK_GUL) {
-            CHECK((bflags & ~0x03u) == 0, "GUL reserved flag bits set (0x%02X) at %zu", bflags,
-                  off);
-            CHECK((bflags & 0x03u) != 3, "GUL min_off_class 3 (reserved) at %zu", off);
-            if (gc->expect_gul_class >= 0)
-                CHECK((int)(bflags & 0x03u) == gc->expect_gul_class,
-                      "GUL min_off_class %u, expected %d at %zu", bflags & 0x03u,
-                      gc->expect_gul_class, off);
-        } else {
-            CHECK(bflags == 0, "block flags nonzero (0x%02X) at %zu", bflags, off);
-        }
+        CHECK(bflags == 0, "block flags nonzero (0x%02X) at %zu", bflags, off);
         CHECK(resv == 0, "block reserved nonzero (0x%02X) at %zu", resv, off);
 
         if (type == GC_BLOCK_EOF) {

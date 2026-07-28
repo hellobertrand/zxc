@@ -224,59 +224,10 @@ static size_t gc_make_huffman_dict_payload(uint8_t **out) {
     return n;
 }
 
-/* Immediately-doubled 12-byte tokens (60% of picks) between unique fillers:
- * every match sits at offset 12 with the token never recurring elsewhere, so
- * neither a periodic multiple nor a walk runner-up can lift it to >= 16 --
- * the class 1/2 candidates bleed every match into literals and
- * min_off_class 0 (tiered overlap copies) is frozen. The doubling density
- * keeps the greedy scanner's accelerating step anchored so the off-12
- * matches stay findable. */
-static size_t gc_make_gul_text(uint8_t **out) {
-    enum { TOK = 12 };
-    const size_t cap = 192 * 1024;
-    uint8_t *b = (uint8_t *)malloc(cap);
-    uint32_t s = 0x600D5EEDu;
-    size_t n = 0;
-    while (n + 2 * TOK < cap) {
-        uint8_t tok[TOK];
-        for (int j = 0; j < TOK; j++) tok[j] = (uint8_t)(gc_lcg_next(&s) >> 24);
-        if (((gc_lcg_next(&s) >> 16) % 10u) < 6u) { /* 60%: doubled -> match at off 12 */
-            memcpy(b + n, tok, TOK);
-            memcpy(b + n + TOK, tok, TOK);
-            n += 2 * TOK;
-        } else {
-            memcpy(b + n, tok, TOK);
-            n += TOK;
-        }
-    }
-    *out = b;
-    return n;
-}
-
-/* Immediately-doubled 24-byte pseudo-random records, each unique: every match
- * sits at offset 24 (in [16, 32)) with no occurrence further back, so the
- * class-2 candidate must drop every match to literals while class 1 keeps
- * them: min_off_class 1 (16-byte wild copies) is frozen here. */
-static size_t gc_make_gul_records24(uint8_t **out) {
-    enum { REC = 24 };
-    const size_t cap = 512 * 1024;
-    uint8_t *b = (uint8_t *)malloc(cap);
-    uint32_t s = 0x0024C0DEu;
-    size_t n = 0;
-    while (n + 2 * REC < cap) {
-        uint8_t rec[REC];
-        for (int j = 0; j < REC; j++) rec[j] = (uint8_t)(gc_lcg_next(&s) >> 24);
-        memcpy(b + n, rec, REC);
-        memcpy(b + n + REC, rec, REC);
-        n += 2 * REC;
-    }
-    *out = b;
-    return n;
-}
-
-/* Pool of 48-byte pseudo-random records, no adjacent repeats: every offset is
- * >= 48, freezing GUL min_off_class 2 (32-byte wild copies). */
-static size_t gc_make_gul_records48(uint8_t **out) {
+/* Stream of 48-byte records picked from a small pseudo-random pool: dense
+ * short matches (well under the 32-byte cap) at distances >= ZXC_GUL_MIN_DIS,
+ * the GUL light format's bread and butter. */
+static size_t gc_make_gul_records(uint8_t **out) {
     enum { REC = 48, POOL = 64 };
     static uint8_t pool[POOL][REC];
     uint32_t s = 0x0048C0DEu;
@@ -292,6 +243,28 @@ static size_t gc_make_gul_records48(uint8_t **out) {
         memcpy(b + n, pool[pick], REC);
         n += REC;
         prev = pick;
+    }
+    *out = b;
+    return n;
+}
+
+/* Sparse matches separated by long pseudo-random literal runs (150-600
+ * bytes): every GUL token needs the literal-length ESCAPE bytes, freezing
+ * that wire path. */
+static size_t gc_make_gul_escapes(uint8_t **out) {
+    enum { REC = 24 };
+    static uint8_t rec[REC];
+    uint32_t s = 0x0E5CA9E5u;
+    for (int j = 0; j < REC; j++) rec[j] = (uint8_t)(gc_lcg_next(&s) >> 24);
+    const size_t cap = 256 * 1024;
+    uint8_t *b = (uint8_t *)malloc(cap);
+    size_t n = 0;
+    while (n + 2 * REC + 600 < cap) {
+        const uint32_t run = 150 + ((gc_lcg_next(&s) >> 16) % 450u);
+        for (uint32_t k = 0; k < run; k++) b[n + k] = (uint8_t)(gc_lcg_next(&s) >> 24);
+        n += run;
+        memcpy(b + n, rec, REC);
+        n += REC;
     }
     *out = b;
     return n;
@@ -337,11 +310,13 @@ typedef struct {
 
 /* The corpus. Each entry maps onto one or more sections of docs/FORMAT.md Sec 5.
  *
- * v8 note: levels 1-2 emit GHI (unchanged from v7); level 3 emits GUL by
- * default (falling back to GLO on pathologically repetitive blocks and on
- * opts.fast_encode, case 17). The GUL cases (14-16) pin the min_off classes;
- * the GLO-specific stream features stay at levels 4+ where GLO is
- * unconditional. */
+ * v8 note: levels 1-2 emit GHI (unchanged from v7); levels 3-5 emit GUL
+ * with increasing search effort. Level 3 is pure GUL-or-RAW; levels 4-5
+ * fall back to GLO on pathologically repetitive blocks (the guard is what
+ * keeps 04/10 emitting GLO at level 4; 11 pins the RLE literal path at
+ * level 6). The GUL cases pin the light wire format: 14 = token stream
+ * with inline literal lengths, 15 = the escape path, 17 = the deep-ring
+ * level-5 tier; 06-09 exercise checksums/multiblock/seek/dict over GUL. */
 static const golden_case_t GOLDEN_CASES[] = {
     /* name                 input              {level, blk,   csum, seek}                       data type    enc_lit min seek dhuf gclass */
     { "01_empty_eof_only",     gc_make_empty,     { .level = 1 },                                  GC_ANY_TYPE,  -1,  0, 0, 0, -1 },
@@ -349,19 +324,18 @@ static const golden_case_t GOLDEN_CASES[] = {
     { "03_block_ghi",          gc_make_text,      { .level = 1 },                                  GC_BLOCK_GHI, -1,  1, 0, 0, -1 },
     { "04_block_glo",          gc_make_text,      { .level = 4 },                                  GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
     { "05_block_glo_huffman",  gc_make_huffman,   { .level = 6 },                                  GC_BLOCK_GLO,  2,  1, 0, 0, -1 },
-    { "06_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
-    { "07_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GLO, -1, 5, 0, 0, -1 },
-    { "08_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GLO, -1, 5, 1, 0, -1 },
-    { "09_block_dict",         gc_make_dict_payload, { .level = 3, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE }, GC_BLOCK_GLO, -1, 1, 0, 0, -1 },
+    { "06_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
+    { "07_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GUL, -1, 5, 0, 0, -1 },
+    { "08_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GUL, -1, 5, 1, 0, -1 },
+    { "09_block_dict",         gc_make_dict_payload, { .level = 3, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE }, GC_BLOCK_GUL, -1, 1, 0, 0, -1 },
     { "10_glo_offset16",       gc_make_offset16,  { .level = 4 },                                  GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
-    { "11_glo_rle",            gc_make_rle_literals, { .level = 4 },                                GC_BLOCK_GLO,  1,  1, 0, 0, -1 },
+    { "11_glo_rle",            gc_make_rle_literals, { .level = 6 },                                GC_BLOCK_GLO,  1,  1, 0, 0, -1 },
     { "12_glo_huffman_dict",   gc_make_huffman_dict_payload,
       { .level = 6, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE },                          GC_BLOCK_GLO,  3,  1, 0, 1, -1 },
     { "13_glo_huffman_wide",   gc_make_huffman_wide, { .level = 7 /* ULTRA */ },                    GC_BLOCK_GLO,  2,  1, 0, 0, -1 },
-    { "14_block_gul",          gc_make_gul_text,     { .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0,  0 },
-    { "15_gul_minoff16",       gc_make_gul_records24,{ .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0,  1 },
-    { "16_gul_minoff32",       gc_make_gul_records48,{ .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0,  2 },
-    { "17_glo_fast_l3",        gc_make_gul_records48,{ .level = 3, .fast_encode = 1 },             GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
+    { "14_block_gul",          gc_make_gul_records,  { .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
+    { "15_gul_escapes",        gc_make_gul_escapes,  { .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
+    { "17_block_gul_l5",       gc_make_gul_records,  { .level = 5 },                               GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
 };
 
 #define GOLDEN_CASE_COUNT (sizeof(GOLDEN_CASES) / sizeof(GOLDEN_CASES[0]))

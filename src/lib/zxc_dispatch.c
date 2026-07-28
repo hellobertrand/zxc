@@ -699,7 +699,6 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (UNLIKELY(zxc_cctx_init(&ctx, eff_chunk, 1, level, checksum_enabled, dict_size) != ZXC_OK))
         return ZXC_ERROR_MEMORY;
     // LCOV_EXCL_STOP
-    ctx.fast_encode = (opts && opts->fast_encode) ? 1 : 0;
     if (UNLIKELY(zxc_cctx_attach_dict_huf(&ctx, dict_huf) != ZXC_OK)) {
         // LCOV_EXCL_START
         zxc_cctx_free(&ctx);
@@ -1239,7 +1238,6 @@ struct zxc_cctx_s {
     size_t last_block_size; /* block size used for last init */
     /* Sticky options (remembered from create or last compress call). */
     int stored_level;
-    int stored_fast; /**< Sticky level-3 encoder choice (opts.fast_encode). */
     int stored_checksum;
     size_t stored_block_size;
 };
@@ -1266,7 +1264,6 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
     cctx->stored_block_size =
         (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
     cctx->stored_checksum = opts ? opts->checksum_enabled : 0;
-    cctx->stored_fast = (opts && opts->fast_encode) ? 1 : 0;
 
     if (opts) {
         // LCOV_EXCL_START
@@ -1276,7 +1273,6 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
             ZXC_FREE(cctx);
             return NULL;
         }
-        cctx->inner.fast_encode = cctx->stored_fast;
         // LCOV_EXCL_STOP
         cctx->last_block_size = cctx->stored_block_size;
         cctx->initialized = 1;
@@ -1342,25 +1338,22 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         return ZXC_ERROR_BAD_BLOCK_SIZE;
     if (UNLIKELY(cctx->owns_workspace && level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))
         return ZXC_ERROR_BAD_LEVEL;
-    const int fast_encode = opts ? (opts->fast_encode != 0) : cctx->stored_fast;
-    /* Static cctx carved below level 3 has no GUL region; the GUL encoder
-     * (level 3, fast_encode off) cannot run there. */
-    if (UNLIKELY(cctx->owns_workspace && level == ZXC_LEVEL_DEFAULT && !fast_encode &&
-                 !cctx->inner.gul_chain))
+    /* Static cctx carved outside levels 3-5 has no GUL region; the GUL
+     * encoder (levels 3-5) cannot run there. */
+    if (UNLIKELY(cctx->owns_workspace && ZXC_LEVEL_USES_GUL(level) && !cctx->inner.gul_htab))
         return ZXC_ERROR_BAD_LEVEL;
 
     cctx->stored_level = level;
     cctx->stored_block_size = block_size;
     cctx->stored_checksum = checksum_enabled;
-    cctx->stored_fast = fast_encode;
 
     /* Re-init when block_size changed (it drives buffer sizes), or when a
      * per-call level raise requires a region the current partition lacks:
-     * opt_scratch for the optimal-parser tier, the GUL buffers for level 3
+     * opt_scratch for the optimal-parser tier, the GUL buffers for levels 3-5
      * (using either NULL would crash / silently degrade). */
     if (UNLIKELY(!cctx->initialized || cctx->last_block_size != block_size ||
                  (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
-                 (level == ZXC_LEVEL_DEFAULT && !fast_encode && !cctx->inner.gul_chain))) {
+                 (ZXC_LEVEL_USES_GUL(level) && !cctx->inner.gul_htab))) {
         if (cctx->initialized) {
             // LCOV_EXCL_START
             zxc_cctx_free(&cctx->inner);
@@ -1379,7 +1372,6 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         cctx->inner.compression_level = level;
         cctx->inner.checksum_enabled = checksum_enabled;
     }
-    cctx->inner.fast_encode = fast_encode;
 
     /* Shared context: zxc_compress_block leaves its dictionary here. */
     cctx->inner.dict_size = 0;
@@ -1669,23 +1661,20 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
         return ZXC_ERROR_BAD_BLOCK_SIZE;
     if (UNLIKELY(cctx->owns_workspace && level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))
         return ZXC_ERROR_BAD_LEVEL;
-    const int fast_encode = opts ? (opts->fast_encode != 0) : cctx->stored_fast;
-    /* Static cctx carved below level 3 has no GUL region (see zxc_compress_ctx). */
-    if (UNLIKELY(cctx->owns_workspace && level == ZXC_LEVEL_DEFAULT && !fast_encode &&
-                 !cctx->inner.gul_chain))
+    /* Static cctx carved outside levels 3-5 has no GUL region (see zxc_compress_ctx). */
+    if (UNLIKELY(cctx->owns_workspace && ZXC_LEVEL_USES_GUL(level) && !cctx->inner.gul_htab))
         return ZXC_ERROR_BAD_LEVEL;
 
     cctx->stored_level = level;
     cctx->stored_block_size = effective_block_size;
     cctx->stored_checksum = checksum_enabled;
-    cctx->stored_fast = fast_encode;
 
     /* Re-init when block_size changed, or when a per-call level raise
      * requires a region the current partition lacks (opt_scratch for the
-     * optimal-parser tier, the GUL buffers for level 3). */
+     * optimal-parser tier, the GUL buffers for levels 3-5). */
     if (UNLIKELY(!cctx->initialized || cctx->last_block_size != effective_block_size ||
                  (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
-                 (level == ZXC_LEVEL_DEFAULT && !fast_encode && !cctx->inner.gul_chain))) {
+                 (ZXC_LEVEL_USES_GUL(level) && !cctx->inner.gul_htab))) {
         if (cctx->initialized) {
             // LCOV_EXCL_START
             zxc_cctx_free(&cctx->inner);
@@ -1703,7 +1692,6 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
         cctx->inner.compression_level = level;
         cctx->inner.checksum_enabled = checksum_enabled;
     }
-    cctx->inner.fast_encode = fast_encode;
 
     cctx->inner.dict_size = b_dict_size;
 
@@ -1949,8 +1937,6 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
                                             checksum_enabled, 0, 0) != ZXC_OK))
         return NULL;
 
-    cctx->inner.fast_encode = (opts->fast_encode != 0);
-    cctx->stored_fast = cctx->inner.fast_encode;
     cctx->owns_workspace = 1;
     cctx->initialized = 1;
     cctx->last_block_size = block_size;

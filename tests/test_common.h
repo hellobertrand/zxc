@@ -122,7 +122,6 @@ int test_pstream_compress_drain_block_resume(void);
 /* Stream round-trip coverage (patterns x sizes x levels x checksum) */
 int test_roundtrip_raw_random(void);
 int test_roundtrip_ghi_text(void);
-int test_roundtrip_l3_fast_encode(void);
 int test_roundtrip_glo_text(void);
 int test_roundtrip_gul_l1(void);
 int test_roundtrip_gul_l2(void);

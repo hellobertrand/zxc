@@ -73,10 +73,6 @@ typedef struct {
                                Becomes part of the archive's dict_id binding. */
     zxc_progress_callback_t progress_cb; /**< Optional progress callback (NULL to disable). */
     void* user_data;                     /**< User context pointer passed to progress_cb. */
-    int fast_encode; /**< Level 3 only: 1 selects the classic GLO encoder (about 3x
-                          faster compression at the same ratio) instead of the GUL
-                          encoder (default 0, decode-optimized: +35-65% decompression
-                          throughput). Ignored at other levels. */
 } zxc_compress_opts_t;
 
 /**

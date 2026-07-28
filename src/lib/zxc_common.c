@@ -101,8 +101,8 @@ typedef struct {
     size_t off_lit_cctx;
     /* meaningful only when sz_opt > 0 (level >= ZXC_LEVEL_DENSITY). */
     size_t off_opt;
-    /* mode == 1, level <= ZXC_LEVEL_DEFAULT (GUL): 32-bit position-indexed
-     * chain table + the three recorded-match arrays. 0-sized otherwise. */
+    /* mode == 1, ZXC_LEVEL_USES_GUL(level): hash rings + per-bucket
+     * cursors + token-stream staging. 0-sized otherwise. */
     size_t off_gul_chain;
     size_t sz_gul_chain;
     size_t off_gul_matches;
@@ -251,20 +251,20 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
             layout.total += ZXC_ALIGN_CL(layout.sz_opt);
         }
 
-        /* GUL encoder buffers (level 3 only): the 256 KiB window outgrows
-         * the 16-bit ring chain_table, so GUL uses a position-indexed 32-bit
-         * chain over [dict | block], plus seven uint32_t match arrays
-         * (pos/len/off + the >= 16 / >= 32 walk runner-ups) recording the
-         * class-agnostic parse for min_off_class pricing. Levels 1-2 (GHI)
-         * and 4+ (GLO) pay nothing for them. Carved even when the level-3
-         * caller later opts into fast_encode (GLO): the choice arrives after
-         * init and the waste is acceptable. */
-        if (level == ZXC_LEVEL_DEFAULT) {
-            layout.sz_gul_chain = (dict_size + chunk_size) * sizeof(uint32_t);
+        /* GUL encoder buffers (level 3 only): the 16-bit hash table of
+         * ZXC_GUL_RING-entry position rings + per-bucket cursors, and a
+         * chunk-sized staging buffer for the variable-length token stream.
+         * Levels 1-2 (GHI) and 6+ (GLO) pay nothing for them. Levels 3-5
+         * share one ring-16-wide carve (the shallow tiers use a prefix), so
+         * a context survives level changes within the GUL range. */
+        if (ZXC_LEVEL_USES_GUL(level)) {
+            layout.sz_gul_chain =
+                ((size_t)1 << ZXC_GUL_HASH_BITS) * ZXC_GUL_RING * sizeof(uint16_t);
             layout.off_gul_chain = layout.total;
             layout.total += ZXC_ALIGN_CL(layout.sz_gul_chain);
-            layout.off_gul_matches = layout.total;
-            layout.total += ZXC_ALIGN_CL(7 * layout.max_seq * sizeof(uint32_t));
+            layout.off_gul_matches = layout.total; /* hidx + token staging */
+            layout.total += ZXC_ALIGN_CL(((size_t)1 << ZXC_GUL_HASH_BITS) * sizeof(uint8_t)) +
+                            ZXC_ALIGN_CL(chunk_size + ZXC_PAD_SIZE);
         }
     }
 
@@ -378,15 +378,10 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
         ctx->opt_scratch_cap = layout.sz_opt;
     }
     if (layout.sz_gul_chain) {
-        ctx->gul_chain = (uint32_t*)(void*)(mem + layout.off_gul_chain);
-        uint32_t* const m = (uint32_t*)(void*)(mem + layout.off_gul_matches);
-        ctx->gul_m_pos = m;
-        ctx->gul_m_len = m + layout.max_seq;
-        ctx->gul_m_off = m + 2 * layout.max_seq;
-        ctx->gul_m_a16l = m + 3 * layout.max_seq;
-        ctx->gul_m_a16o = m + 4 * layout.max_seq;
-        ctx->gul_m_a32l = m + 5 * layout.max_seq;
-        ctx->gul_m_a32o = m + 6 * layout.max_seq;
+        ctx->gul_htab = (uint16_t*)(void*)(mem + layout.off_gul_chain);
+        ctx->gul_hidx = mem + layout.off_gul_matches;
+        ctx->gul_seq = mem + layout.off_gul_matches +
+                       ZXC_ALIGN_CL(((size_t)1 << ZXC_GUL_HASH_BITS) * sizeof(uint8_t));
     }
 
     ctx->compression_level = level;
@@ -496,14 +491,9 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->buf_tokens = NULL;
     ctx->buf_offsets = NULL;
     ctx->buf_extras = NULL;
-    ctx->gul_chain = NULL;
-    ctx->gul_m_pos = NULL;
-    ctx->gul_m_len = NULL;
-    ctx->gul_m_off = NULL;
-    ctx->gul_m_a16l = NULL;
-    ctx->gul_m_a16o = NULL;
-    ctx->gul_m_a32l = NULL;
-    ctx->gul_m_a32o = NULL;
+    ctx->gul_htab = NULL;
+    ctx->gul_hidx = NULL;
+    ctx->gul_seq = NULL;
     ctx->literals = NULL;
     ctx->work_buf = NULL;
     ctx->tok_buffer = NULL;

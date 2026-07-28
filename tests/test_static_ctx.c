@@ -167,20 +167,26 @@ int test_static_ctx_size_query(void) {
         printf("  [FAIL] one of s1..s6 is 0\n");
         return 0;
     }
-    if (s1 != s2 || s2 != s4 || s4 != s5) {
-        printf("  [FAIL] s1/s2/s4/s5 should be equal (lean tier): %zu/%zu/%zu/%zu\n", s1, s2, s4,
-               s5);
+    if (s1 != s2) {
+        printf("  [FAIL] s1/s2 should be equal (lean tier): %zu/%zu\n", s1, s2);
         return 0;
     }
-    if (s3 <= s5) {
-        printf("  [FAIL] s3 (%zu) should exceed s5 (%zu); level 3 adds the GUL buffers\n", s3, s5);
+    if (s3 != s4 || s4 != s5) {
+        printf("  [FAIL] s3/s4/s5 should be equal (GUL tier): %zu/%zu/%zu\n", s3, s4, s5);
         return 0;
     }
-    if (s6 <= s5) {
-        printf("  [FAIL] s6 (%zu) should exceed s5 (%zu)\n", s6, s5);
+    if (s3 <= s2) {
+        printf("  [FAIL] s3 (%zu) should exceed s2 (%zu); levels 3-5 add the GUL buffers\n", s3,
+               s2);
         return 0;
     }
-    printf("  [PASS] level 3 adds GUL buffers; level 6 adds opt_scratch; others lean\n");
+    /* At small block sizes the fixed-size GUL ring table can outweigh the
+     * chunk-scaled opt_scratch, so compare level 6 against the lean tier. */
+    if (s6 <= s2) {
+        printf("  [FAIL] s6 (%zu) should exceed s2 (%zu); level 6 adds opt_scratch\n", s6, s2);
+        return 0;
+    }
+    printf("  [PASS] levels 3-5 add GUL buffers; level 6 adds opt_scratch; 1-2 lean\n");
     return 1;
 }
 

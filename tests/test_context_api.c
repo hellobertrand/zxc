@@ -247,15 +247,21 @@ int test_estimate_cctx_size() {
     printf("  [PASS] scaling: 8x src_size -> %.2fx memory\n",
            (double)e8m / (double)e1m);
 
-    /* 7. Per-level workspace tiers: level 3 (GUL) adds the 32-bit chain and
-     *    match-record arrays over the lean level-5 tier, and level 6 adds the
-     *    optimal-parser scratch peak (~18 x chunk_size) over level 5 too. */
+    /* 7. Per-level workspace tiers: levels 3-5 share one GUL carve (ring
+     *    table + token staging) over the lean level-2 tier, and level 6 adds
+     *    the optimal-parser scratch peak (~18 x chunk_size) over level 5. */
+    const uint64_t e1m_l2 = zxc_estimate_cctx_size(1024 * 1024, 2);
     const uint64_t e1m_l3 = zxc_estimate_cctx_size(1024 * 1024, 3);
     const uint64_t e1m_l5 = zxc_estimate_cctx_size(1024 * 1024, 5);
     const uint64_t e1m_l6 = zxc_estimate_cctx_size(1024 * 1024, 6);
-    if (e1m_l3 <= e1m_l5 + (1024 * 1024)) {
-        printf("  [FAIL] level 3 must add the GUL buffers: l3=%llu l5=%llu\n",
+    if (e1m_l3 != e1m_l5) {
+        printf("  [FAIL] levels 3-5 must share the GUL carve: l3=%llu l5=%llu\n",
                (unsigned long long)e1m_l3, (unsigned long long)e1m_l5);
+        return 0;
+    }
+    if (e1m_l3 <= e1m_l2 + (1024 * 1024)) {
+        printf("  [FAIL] level 3 must add the GUL buffers: l2=%llu l3=%llu\n",
+               (unsigned long long)e1m_l2, (unsigned long long)e1m_l3);
         return 0;
     }
     if (e1m_l6 <= e1m_l5 + (1024 * 1024)) {
