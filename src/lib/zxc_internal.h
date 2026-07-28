@@ -480,16 +480,16 @@ extern "C" {
 
 /** @name GUL Sequence Constants (FORMAT.md 5.4)
  *  @brief Byte-oriented light format: 1 token byte `LL3|ML5` + 2 offset
- *         bytes per sequence, 64 KiB window lagged by 16.
+ *         bytes per sequence, 64 KiB window lagged by 32.
  *
  *  Every sequence costs 3 bytes: a token packing an inline literal length
  *  (0-6; 7 escapes to extra bytes) with a match length code (1..29 mapping
  *  to lengths 4..32), then a 16-bit offset stored biased by
- *  ::ZXC_GUL_MIN_DIS. The minimum distance of 17 (>= the 16-byte copy
- *  chunk) lets the decoder run ONE unconditional 32-byte wild copy per
- *  match, as two sequential 16-byte halves -- no overlap tiers, no length
- *  loop. A mandatory raw tail (>= ZXC_GUL_TAIL_MIN bytes) provides the
- *  read/write margin that removes per-sequence bounds tests.
+ *  ::ZXC_GUL_MIN_DIS. The minimum distance of 33 (> the 32-byte copy
+ *  width) makes every match copy alias-free: the decoder runs ONE
+ *  unconditional 32-byte wild copy per match -- no overlap tiers, no
+ *  length loop. A mandatory raw tail (>= ZXC_GUL_TAIL_MIN bytes) provides
+ *  the read/write margin that removes per-sequence bounds tests.
  *  @{ */
 /** @brief Bits for the inline literal length in a GUL token. */
 #define ZXC_GUL_LL_BITS 3
@@ -507,17 +507,11 @@ extern "C" {
  *         codes 30 and 31 are reserved. */
 #define ZXC_GUL_MAX_MATCH 32
 /** @brief Hash-window lag: matches never start closer than LAG + 1 bytes.
- *         16 is the floor of the sequential 16-byte-chunk match copy
- *         (zxc_gul_copy_match32): each chunk re-reads bytes the previous
- *         one finalized, so LZ semantics hold for any dis >= 16. This is a
- *         WIRE constant (offset bias); the `#ifndef` exists solely for
- *         cross-architecture A/B diagnostics, not as a tuning knob. */
-#ifndef ZXC_GUL_LAG
-#define ZXC_GUL_LAG 16
-#endif
-#if ZXC_GUL_LAG < 16
-#error "GUL: LAG below 16 breaks the sequential 16-byte-chunk match copy"
-#endif
+ *         Equal to the maximum match length so the single 32-byte wild
+ *         copy can never read bytes it wrote (alias-free). WIRE constant
+ *         (offset bias); measured on both wires, dis17 only bought
+ *         0.15-0.2 pt at the sparse ladder for real x86 copy constraints. */
+#define ZXC_GUL_LAG ZXC_GUL_MAX_MATCH
 /** @brief Minimum (and bias of the stored) match distance. */
 #define ZXC_GUL_MIN_DIS (ZXC_GUL_LAG + 1)
 /** @brief Offset field width: 16-bit distances, like GLO/GHI. */
@@ -1413,19 +1407,6 @@ static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
 #else
     ZXC_MEMCPY(dst, src, 16);
 #endif
-}
-
-/**
- * @brief GUL match copy: 32 wild bytes as two SEQUENTIAL 16-byte halves.
- *
- * The order is load-bearing: the second half may re-read bytes the first
- * one just wrote (overlapping LZ copy), which is correct for any distance
- * >= 16 because those bytes are already final. Do NOT fuse into a single
- * 32-byte load/store (it would break distances 17..31).
- */
-static ZXC_ALWAYS_INLINE void zxc_gul_copy_match32(uint8_t* dst, const uint8_t* src) {
-    zxc_copy16(dst, src);
-    zxc_copy16(dst + 16, src + 16);
 }
 
 /**

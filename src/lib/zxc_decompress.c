@@ -1477,10 +1477,10 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
  * GUL (General ULtra-throughput) decoder -- FORMAT.md 5.4, format v8.
  *
  * Light byte-oriented format: 1 token byte `LL3|ML5` + 2 offset bytes per
- * sequence. Distances are stored biased by ZXC_GUL_MIN_DIS (= 17), so every
- * match lies at least one 16-byte copy chunk back: ONE unconditional
- * 32-byte wild copy in two sequential halves resolves any match -- no
- * overlap tiers, no length loop, no per-block copy classes. Inline literal length 7 escapes
+ * sequence. Distances are stored biased by ZXC_GUL_MIN_DIS (= 33), so every
+ * match lies at least 33 back while lengths cap at 32: ONE unconditional
+ * 32-byte wild copy resolves any match, alias-free -- no overlap tiers, no
+ * length loop, no per-block copy classes. Inline literal length 7 escapes
  * to extra bytes (blocks of 255 terminated by a byte < 255). The mandatory
  * raw tail (>= ZXC_GUL_TAIL_MIN) supplies the in-payload read margin for
  * wild literal copies and is appended with one memcpy after the loop.
@@ -1594,9 +1594,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
             written += ll;                                                             \
             if (UNLIKELY(dis > written)) return ZXC_ERROR_BAD_OFFSET;                  \
         }                                                                              \
-        /* One 32-byte wild copy as two sequential halves: safe for any                \
-         * dis >= 17 >= 16 (the second half re-reads finalized bytes). */              \
-        zxc_gul_copy_match32(d_ptr, d_ptr - dis);                                      \
+        /* dis >= 33 > 32 >= ml: a single 32-byte copy, alias-free. */                 \
+        zxc_copy32(d_ptr, d_ptr - dis);                                                \
         d_ptr += ml;                                                                   \
         if (VALIDATE) written += ml;                                                   \
         n_seq--;                                                                       \

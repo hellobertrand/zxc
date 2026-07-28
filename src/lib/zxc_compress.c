@@ -2070,9 +2070,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
  * Light byte-oriented format: every sequence is 1 token byte (inline
  * literal length in the top 3 bits, match-length code in the low 5) plus a
  * 16-bit offset stored biased by ZXC_GUL_MIN_DIS. Matches are 4..32 bytes
- * and never closer than 17 (the hash window lags the scan cursor by 16), so
- * the decoder resolves every match with ONE unconditional 32-byte copy in
- * two sequential 16-byte halves -- no overlap handling, no length loop. Inline literal length 7
+ * and never closer than 33 (the hash window lags the scan cursor by 32), so
+ * the decoder resolves every match with ONE unconditional 32-byte copy --
+ * no overlap handling, no length loop. Inline literal length 7
  * escapes to extra bytes (blocks of 255 terminated by a byte < 255).
  *
  * The match finder is a 16-bit hash over 4-byte grams whose buckets are

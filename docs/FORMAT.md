@@ -371,16 +371,13 @@ Overflow rules:
 *New in format v8.* `GUL` (*General, ULtra-throughput*) serves levels 3-5
 with a light, byte-oriented sequence format built for branch-free decoding:
 every sequence is **1 token byte + 2 offset bytes**, matches are 4..32
-bytes at distances of at least 17, and a mandatory raw tail provides the
+bytes at distances of at least 33, and a mandatory raw tail provides the
 read/write margin that removes per-sequence bounds tests from the hot loop.
 
-Because every distance is at least 17, a 32-byte wild copy performed as
-**sequential 16-byte chunks** resolves any match: each chunk only re-reads
-bytes the previous chunk has already finalized (the overlapping-copy LZ
-semantics hold for any distance >= 16). The decoder therefore runs one
-unconditional two-chunk copy per match -- no overlap tiers, no length
-loop, no per-block copy modes. A decoder MUST NOT fuse the copy into a
-single 32-byte load/store: that would break distances 17..31. The block-header Flags byte (§4) is
+Because every distance exceeds the 32-byte maximum match length, a match
+copy can never overlap its destination: the decoder resolves **any** match
+with a single unconditional 32-byte wild copy -- no overlap tiers, no
+length loop, no per-block copy modes. The block-header Flags byte (§4) is
 reserved and MUST be 0.
 
 ### GUL payload layout
@@ -455,7 +452,7 @@ Each sequence is a token byte followed by a 16-bit offset:
   are 1..29 (lengths 4..32); 0, 30 and 31 are reserved and MUST be
   rejected by a safe decoder.
 - **OFF** -- match distance stored biased:
-  `distance = OFF + 17`. Reachable window: `[17, 65552]`, never crossing a
+  `distance = OFF + 33`. Reachable window: `[33, 65568]`, never crossing a
   block boundary (a dictionary prefix counts as already-produced history,
   §12). `distance` MUST NOT exceed the output position where the match
   decodes.
@@ -481,9 +478,8 @@ Let `L` be the literals cursor, `O` the output cursor. For each of the
 
 1. Decode `LL` (with escape bytes if needed); copy `LL` bytes from `L` to
    `O`; advance both.
-2. Copy `MLC + 3` bytes from `O - (OFF + 17)` to `O` (front-to-back, in
-   chunks of at most 16 bytes: the copy may overlap its destination for
-   distances below 32); advance `O`.
+2. Copy `MLC + 3` bytes from `O - (OFF + 33)` to `O` (never overlapping,
+   since the distance exceeds the maximum length); advance `O`.
 
 Then append the tail.
 
@@ -518,7 +514,7 @@ while level 5 parses densely for the best ratio -- so decode speed
 decreases as the ratio improves, and higher levels also pay compression
 speed. The match finder is a 16-bit hash over 4-byte grams whose buckets
 are rings of truncated positions probed with 32-byte vector compares,
-lagged 16 bytes behind the scan cursor so every candidate satisfies the
+lagged 32 bytes behind the scan cursor so every candidate satisfies the
 minimum distance by construction. Level 3 emits GUL or RAW exclusively.
 At levels 4-5, highly repetitive blocks whose long matches would shatter
 on the 32-byte cap are routed to GLO; at every level, blocks that would
