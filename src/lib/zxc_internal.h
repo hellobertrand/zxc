@@ -523,6 +523,19 @@ extern "C" {
 #define ZXC_GUL_TAIL_MIN 32
 /** @brief Below this uncompressed size the encoder must not use GUL. */
 #define ZXC_GUL_MIN_BLOCK 128
+/** @brief GLO-guard trigger: price a GLO alternative when max-length
+ *         tokens exceed this percentage of the stream (`#ifndef` for
+ *         sweeps). Pricing only costs compression time on such blocks. */
+#ifndef ZXC_GUL_GUARD_PCT
+#define ZXC_GUL_GUARD_PCT 25
+#endif
+/** @brief Space-speed margin of the GLO swap: GLO replaces the serialized
+ *         GUL block only when it is at least this many percent smaller, so
+ *         near-ties keep GUL's faster decode and only decisive wins (the
+ *         shattered-match pathologies) pay GLO's slower decode. */
+#ifndef ZXC_GUL_SWAP_MARGIN_PCT
+#define ZXC_GUL_SWAP_MARGIN_PCT 20
+#endif
 /** @brief Encoder hash-table address bits (16-bit buckets, 16-bit entries). */
 #define ZXC_GUL_HASH_BITS 16
 /** @brief Encoder candidates per bucket (ring buffer, probed fully
@@ -560,7 +573,7 @@ typedef struct {
     int accept;
 
     /** Route GUL declines and pathologically repetitive blocks to GLO
-     *  (level 3 stays pure GUL-or-RAW). */
+     *  (see ZXC_GUL_GUARD_PCT / ZXC_GUL_SWAP_MARGIN_PCT). */
     int glo_fallback;
 } zxc_gul_params_t;
 
@@ -1064,7 +1077,7 @@ static ZXC_ALWAYS_INLINE zxc_level_params_t zxc_get_level_params(int level) {
     static const zxc_level_params_t table[7] = {
         /* L1 GHI       */ {{3, 16, 0, 0, 0, 4, 4},      {0, 0, 0, 0, 0}},
         /* L2 GHI       */ {{3, 18, 0, 0, 0, 3, 6},      {0, 0, 0, 0, 0}},
-        /* L3 GUL/spars */ {{3, 16, 1, 4, 128, 1, 4},    {8, 0, 16, 9, 0}},
+        /* L3 GUL/spars */ {{3, 16, 1, 4, 128, 1, 4},    {8, 0, 16, 9, 1}},
         /* L4 GUL/spars */ {{3, 18, 1, 4, 128, 1, 5},    {16, 0, 16, 7, 1}},
         /* L5 GUL/dense */ {{64, 256, 1, 16, 128, 1, 8}, {16, 2, 16, 0, 1}},
         /* L6 GLO+Huff  */ {{64, 256, 0, 0, 0, 1, 8},    {0, 0, 0, 0, 0}},

@@ -248,6 +248,30 @@ static size_t gc_make_gul_records(uint8_t **out) {
     return n;
 }
 
+/* 24-byte records from a pseudo-random pool: every match stays under the
+ * 32-byte cap, so no token ever reaches the maximum length and the GLO
+ * guard can never fire -- a guard-proof pin of the deep (level 5) tier. */
+static size_t gc_make_gul_records24(uint8_t **out) {
+    enum { REC = 24, POOL = 64 };
+    static uint8_t pool[POOL][REC];
+    uint32_t s = 0x0024C0DEu;
+    for (int i = 0; i < POOL; i++)
+        for (int j = 0; j < REC; j++) pool[i][j] = (uint8_t)(gc_lcg_next(&s) >> 24);
+    const size_t cap = 512 * 1024;
+    uint8_t *b = (uint8_t *)malloc(cap);
+    size_t n = 0;
+    uint32_t prev = 0xFFFFFFFFu;
+    while (n + REC < cap) {
+        uint32_t pick = (gc_lcg_next(&s) >> 16) % POOL;
+        if (pick == prev) pick = (pick + 1) % POOL;
+        memcpy(b + n, pool[pick], REC);
+        n += REC;
+        prev = pick;
+    }
+    *out = b;
+    return n;
+}
+
 /* Sparse matches separated by long pseudo-random literal runs (150-600
  * bytes): every GUL token needs the literal-length ESCAPE bytes, freezing
  * that wire path. */
@@ -311,12 +335,12 @@ typedef struct {
 /* The corpus. Each entry maps onto one or more sections of docs/FORMAT.md Sec 5.
  *
  * v8 note: levels 1-2 emit GHI (unchanged from v7); levels 3-5 emit GUL
- * with increasing search effort. Level 3 is pure GUL-or-RAW; levels 4-5
- * fall back to GLO on pathologically repetitive blocks (the guard is what
- * keeps 04/10 emitting GLO at level 4; 11 pins the RLE literal path at
- * level 6). The GUL cases pin the light wire format: 14 = token stream
- * with inline literal lengths, 15 = the escape path, 17 = the deep-ring
- * level-5 tier; 06-09 exercise checksums/multiblock/seek/dict over GUL. */
+ * with increasing search effort, and route pathologically repetitive
+ * blocks to GLO through the space-speed-guarded swap (which is what keeps
+ * 04/06-10 emitting GLO; 11 pins the RLE literal path at level 6). The
+ * GUL cases pin the light wire format: 14 = token stream with inline
+ * literal lengths, 15 = the escape path, 17 = the deep (level 5) tier on
+ * guard-proof sub-32-byte records. */
 static const golden_case_t GOLDEN_CASES[] = {
     /* name                 input              {level, blk,   csum, seek}                       data type    enc_lit min seek dhuf gclass */
     { "01_empty_eof_only",     gc_make_empty,     { .level = 1 },                                  GC_ANY_TYPE,  -1,  0, 0, 0, -1 },
@@ -324,10 +348,10 @@ static const golden_case_t GOLDEN_CASES[] = {
     { "03_block_ghi",          gc_make_text,      { .level = 1 },                                  GC_BLOCK_GHI, -1,  1, 0, 0, -1 },
     { "04_block_glo",          gc_make_text,      { .level = 4 },                                  GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
     { "05_block_glo_huffman",  gc_make_huffman,   { .level = 6 },                                  GC_BLOCK_GLO,  2,  1, 0, 0, -1 },
-    { "06_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
-    { "07_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GUL, -1, 5, 0, 0, -1 },
-    { "08_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GUL, -1, 5, 1, 0, -1 },
-    { "09_block_dict",         gc_make_dict_payload, { .level = 3, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE }, GC_BLOCK_GUL, -1, 1, 0, 0, -1 },
+    { "06_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
+    { "07_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GLO, -1, 5, 0, 0, -1 },
+    { "08_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GLO, -1, 5, 1, 0, -1 },
+    { "09_block_dict",         gc_make_dict_payload, { .level = 3, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE }, GC_BLOCK_GLO, -1, 1, 0, 0, -1 },
     { "10_glo_offset16",       gc_make_offset16,  { .level = 4 },                                  GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
     { "11_glo_rle",            gc_make_rle_literals, { .level = 6 },                                GC_BLOCK_GLO,  1,  1, 0, 0, -1 },
     { "12_glo_huffman_dict",   gc_make_huffman_dict_payload,
@@ -335,7 +359,7 @@ static const golden_case_t GOLDEN_CASES[] = {
     { "13_glo_huffman_wide",   gc_make_huffman_wide, { .level = 7 /* ULTRA */ },                    GC_BLOCK_GLO,  2,  1, 0, 0, -1 },
     { "14_block_gul",          gc_make_gul_records,  { .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
     { "15_gul_escapes",        gc_make_gul_escapes,  { .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
-    { "17_block_gul_l5",       gc_make_gul_records,  { .level = 5 },                               GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
+    { "17_block_gul_l5",       gc_make_gul_records24, { .level = 5 },                              GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
 };
 
 #define GOLDEN_CASE_COUNT (sizeof(GOLDEN_CASES) / sizeof(GOLDEN_CASES[0]))

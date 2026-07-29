@@ -2353,20 +2353,6 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
     /* Expansion check: decline so the wrapper can fall back to RAW. */
     if (UNLIKELY(ZXC_BLOCK_HEADER_SIZE + payload >= block_sz)) return ZXC_ERROR_DST_TOO_SMALL;
 
-    /* Pathological-repetition guard: long matches shatter on the 32-byte
-     * cap (3 bytes per 32 covered = a ~9.4% floor), where GLO's varint
-     * match lengths stay tiny. When max-length tokens dominate the stream,
-     * price a GLO encoding of the same block and keep the smaller one. */
-    if (glo_fallback && UNLIKELY(n_max * 4 > n_seq * 3)) {
-        size_t w_glo = 0;
-        if (zxc_encode_block_glo(ctx, src, src_sz, dst, dst_cap, &w_glo) == ZXC_OK &&
-            w_glo <= ZXC_BLOCK_HEADER_SIZE + payload) {
-            *out_sz = w_glo;
-            return ZXC_OK;
-        }
-        /* GLO lost (or failed): fall through and serialize GUL over dst. */
-    }
-
     /* --- Serialize --- */
     if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE + payload)) return ZXC_ERROR_DST_TOO_SMALL;
 
@@ -2390,6 +2376,27 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
     const zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GUL, .comp_size = (uint32_t)payload};
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
     if (UNLIKELY(hw < 0)) return hw;
+
+    /* Pathological-repetition guard: long matches shatter on the 32-byte
+     * cap (3 bytes per 32 covered = a ~9.4% floor), where GLO's varint
+     * match lengths stay tiny. When max-length tokens exceed the threshold,
+     * price a GLO encoding of the same block and keep the smaller result.
+     * GUL is already serialized into dst, so GLO prices into the now-free
+     * token staging (it may clobber the literal staging freely) and only a
+     * winning GLO is copied over -- pricing can never corrupt the GUL
+     * fallback, and a lower threshold only costs compression time. */
+    if (glo_fallback && UNLIKELY((uint64_t)n_max * 100u > (uint64_t)n_seq * ZXC_GUL_GUARD_PCT)) {
+        size_t w_glo = 0;
+        if (zxc_encode_block_glo(ctx, src, src_sz, seq_buf, block_sz + ZXC_PAD_SIZE, &w_glo) ==
+                ZXC_OK &&
+            (uint64_t)w_glo * 100u <=
+                (ZXC_BLOCK_HEADER_SIZE + payload) * (100u - ZXC_GUL_SWAP_MARGIN_PCT)) {
+            ZXC_MEMCPY(dst, seq_buf, w_glo);
+            *out_sz = w_glo;
+            return ZXC_OK;
+        }
+        /* GLO lost (or did not fit): dst already holds the GUL block. */
+    }
 
     /* Checksum will be appended by the wrapper. */
     *out_sz = ZXC_BLOCK_HEADER_SIZE + (size_t)payload;
@@ -2482,21 +2489,17 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
         /* Levels 1-2: GHI (fast fixed-width encoder, v7 behavior). */
         res = zxc_encode_block_ghi(ctx, chunk, src_sz, dst, dst_cap, &w);
     } else if (ZXC_LEVEL_USES_GUL(ctx->compression_level)) {
-        /* Levels 3-5: GUL with increasing search effort. Level 3 emits
-         * GUL or RAW only; levels 4-5 route GUL's declines (blocks under
-         * 128 bytes, no shrink) and pathologically repetitive blocks to
-         * GLO before the final RAW fallback below. */
-        if (ctx->compression_level == ZXC_LEVEL_DEFAULT) {
-            /* Level 3 is pure GUL: no GLO anywhere (declined or expanding
-             * blocks become RAW below). */
-            res = zxc_encode_block_gul_l3(ctx, chunk, src_sz, dst, dst_cap, &w);
-        } else {
-            res = (ctx->compression_level == ZXC_LEVEL_BALANCED)
-                      ? zxc_encode_block_gul_l4(ctx, chunk, src_sz, dst, dst_cap, &w)
-                      : zxc_encode_block_gul_l5(ctx, chunk, src_sz, dst, dst_cap, &w);
-            if (UNLIKELY(res != ZXC_OK))
-                res = zxc_encode_block_glo(ctx, chunk, src_sz, dst, dst_cap, &w);
-        }
+        /* Levels 3-5: GUL with increasing search effort. Declines (blocks
+         * under 128 bytes, no shrink) and pathologically repetitive blocks
+         * (space-speed-guarded swap, see ZXC_GUL_GUARD_PCT) go to GLO
+         * before the final RAW fallback below. */
+        res = (ctx->compression_level == ZXC_LEVEL_DEFAULT)
+                  ? zxc_encode_block_gul_l3(ctx, chunk, src_sz, dst, dst_cap, &w)
+              : (ctx->compression_level == ZXC_LEVEL_BALANCED)
+                  ? zxc_encode_block_gul_l4(ctx, chunk, src_sz, dst, dst_cap, &w)
+                  : zxc_encode_block_gul_l5(ctx, chunk, src_sz, dst, dst_cap, &w);
+        if (UNLIKELY(res != ZXC_OK))
+            res = zxc_encode_block_glo(ctx, chunk, src_sz, dst, dst_cap, &w);
     } else {
         res = zxc_encode_block_glo(ctx, chunk, src_sz, dst, dst_cap, &w);
     }

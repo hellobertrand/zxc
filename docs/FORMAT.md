@@ -515,10 +515,10 @@ decreases as the ratio improves, and higher levels also pay compression
 speed. The match finder is a 16-bit hash over 4-byte grams whose buckets
 are rings of truncated positions probed with 32-byte vector compares,
 lagged 32 bytes behind the scan cursor so every candidate satisfies the
-minimum distance by construction. Level 3 emits GUL or RAW exclusively.
-At levels 4-5, highly repetitive blocks whose long matches would shatter
-on the 32-byte cap are routed to GLO; at every level, blocks that would
-expand, and blocks under 128 bytes, fall back to RAW.
+minimum distance by construction. Highly repetitive blocks whose long
+matches would shatter on the 32-byte cap are re-priced against a GLO
+encoding and swapped only when GLO wins by a clear space-speed margin;
+blocks that would expand, and blocks under 128 bytes, fall back to RAW.
 
 ---
 
