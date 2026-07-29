@@ -1620,9 +1620,8 @@ parse_done:;
 
         if (zxc_huf_build_code_lengths(freq, huf_code_len, ctx->opt_scratch,
                                        zxc_huf_enc_max_code_len(level)) == ZXC_OK) {
-            if (level >= ZXC_LEVEL_ULTRA)
-                (void)zxc_huf_nudge_code_lengths(freq, huf_code_len, ctx->opt_scratch,
-                                                 zxc_huf_enc_max_code_len(level));
+            (void)zxc_huf_nudge_code_lengths(freq, huf_code_len, ctx->opt_scratch,
+                                             zxc_huf_enc_max_code_len(level));
             huf_total_size = zxc_huf_calc_size(freq, huf_code_len, 1);
             /* Space-speed: the entropy candidate must beat the current winner's
              * J, paying its own decode tax over the copy path. */

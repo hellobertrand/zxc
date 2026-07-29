@@ -260,7 +260,12 @@ Selection is an encoder policy, not a format rule: the reference encoder
 requires level ≥ 6 and at least 1024 literals, prices every candidate
 (RAW / RLE / Huffman / shared-table Huffman) as
 `J = size + premium(level) * n_decoded_bytes`, and picks the minimum — a
-space-speed Lagrangian with a per-level decode-time premium.
+space-speed Lagrangian with a per-level decode-time premium. Before that
+pricing, the reference encoder also applies a joint flat/length *nudge* to
+the fitted code lengths at levels 6-7 (literals; level 7 also nudges the
+token table): it trades a few bytes of code-length optimality for a
+flatter tree whose PivCo runs decode faster. The nudged lengths remain an
+ordinary canonical, Kraft-exact code — decoders see nothing special.
 
 Decoder validation requirements:
 - Every code length must satisfy `code_len[i] ≤ 11`.
