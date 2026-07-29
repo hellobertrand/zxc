@@ -1068,6 +1068,10 @@ typedef struct {
  *
  * Levels outside [1, 7] are clamped. Called with a compile-time-constant
  * level from the GUL tier wrappers, so the row folds to constants there.
+ *
+ * @param[in] level Compression level (clamped to [ZXC_LEVEL_FASTEST,
+ *                  ZXC_LEVEL_ULTRA]).
+ * @return The level's parameter row (by value).
  */
 static ZXC_ALWAYS_INLINE zxc_level_params_t zxc_get_level_params(int level) {
     // clang-format off
@@ -1089,12 +1093,22 @@ static ZXC_ALWAYS_INLINE zxc_level_params_t zxc_get_level_params(int level) {
     return table[level - ZXC_LEVEL_FASTEST];
 }
 
-/** @brief Chain-search half of the level row (GHI/GLO consumers). */
+/**
+ * @brief Chain-search half of the level row (GHI/GLO consumers).
+ *
+ * @param[in] level Compression level (clamped as in ::zxc_get_level_params).
+ * @return The level's LZ77 search parameters.
+ */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
     return zxc_get_level_params(level).lz77;
 }
 
-/** @brief GUL half of the level row (levels 3-5 tier wrappers). */
+/**
+ * @brief GUL half of the level row (levels 3-5 tier wrappers).
+ *
+ * @param[in] level Compression level (clamped as in ::zxc_get_level_params).
+ * @return The level's GUL parse profile.
+ */
 static ZXC_ALWAYS_INLINE zxc_gul_params_t zxc_get_gul_params(const int level) {
     return zxc_get_level_params(level).gul;
 }

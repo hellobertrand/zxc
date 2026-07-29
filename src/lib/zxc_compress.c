@@ -2109,7 +2109,12 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 #endif
 /** @} */
 
-/** @brief 16-bit hash of a 4-byte gram for the GUL ring table. */
+/**
+ * @brief 16-bit hash of a 4-byte gram for the GUL ring table.
+ *
+ * @param[in] v Four source bytes, loaded little-endian.
+ * @return Bucket index in [0, 2^ZXC_GUL_HASH_BITS).
+ */
 static ZXC_ALWAYS_INLINE uint32_t zxc_gul_hash4(const uint32_t v) {
     return (v * ZXC_LZ_HASH_PRIME1) >> (32 - ZXC_GUL_HASH_BITS);
 }
@@ -2119,6 +2124,11 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_gul_hash4(const uint32_t v) {
  *
  * Both pointers must have 32 readable bytes; call sites guarantee it via
  * the match-end limit (current side) and the insertion lag (candidate side).
+ *
+ * @param[in] a First region (the scan cursor).
+ * @param[in] b Second region (the candidate); disjoint from @p a since
+ *              candidates sit at least ::ZXC_GUL_MIN_DIS back.
+ * @return Number of leading equal bytes, in [0, 32].
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_gul_lcp32(const uint8_t* RESTRICT a,
                                                 const uint8_t* RESTRICT b) {
@@ -2154,9 +2164,19 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_gul_lcp32(const uint8_t* RESTRICT a,
 #endif
 }
 
-/** @brief Probe one bucket ring: best candidate/length at @p at.
- *         @p ring_n is a compile-time constant at every call site, so the
- *         loop fully unrolls per specialization. */
+/**
+ * @brief Probe one bucket ring for the best match candidate at @p at.
+ *
+ * @p ring_n is a compile-time constant at every call site, so the loop
+ * fully unrolls per specialization.
+ *
+ * @param[in]  base      Concat base pointer ([dict | block]).
+ * @param[in]  at        Probe position (concat coordinates).
+ * @param[in]  ring      The bucket's ring of truncated 16-bit positions.
+ * @param[in]  ring_n    Ring entries to probe (power of two).
+ * @param[out] best_cand Receives the best candidate's position.
+ * @return Best common-prefix length found, in [0, 32].
+ */
 static ZXC_ALWAYS_INLINE uint32_t zxc_gul_probe(const uint8_t* RESTRICT base, const size_t at,
                                                 const uint16_t* RESTRICT ring, const int ring_n,
                                                 size_t* RESTRICT best_cand) {
@@ -2186,12 +2206,20 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_gul_probe(const uint8_t* RESTRICT base, co
  * when the block is under ::ZXC_GUL_MIN_BLOCK bytes or when the best
  * candidate payload would not shrink the block.
  *
- * @param[in,out] ctx     Compression context (GUL buffers must be carved).
- * @param[in]     src     Source bytes ([dict | block] when a dict is active).
- * @param[in]     src_sz  Length of @p src in bytes (includes any dict prefix).
- * @param[out]    dst     Destination block buffer.
- * @param[in]     dst_cap Capacity of @p dst in bytes.
- * @param[out]    out_sz  Receives the total written size (header + payload).
+ * @param[in,out] ctx          Compression context (GUL buffers must be carved).
+ * @param[in]     src          Source bytes ([dict | block] when a dict is active).
+ * @param[in]     src_sz       Length of @p src in bytes (includes any dict prefix).
+ * @param[out]    dst          Destination block buffer.
+ * @param[in]     dst_cap      Capacity of @p dst in bytes.
+ * @param[out]    out_sz       Receives the total written size (header + payload).
+ * @param[in]     ring_n       Candidates probed per bucket (compile-time constant,
+ *                             power of two <= ZXC_GUL_RING).
+ * @param[in]     la           Lookahead depth past an accepted match (0 disables).
+ * @param[in]     gate         Stop the lookahead once a match reaches this length.
+ * @param[in]     glo_fallback Non-zero: re-price pathologically repetitive blocks
+ *                             against GLO (see ZXC_GUL_GUARD_PCT).
+ * @param[in]     accept_len   Sparse acceptance bar; 0 = dense tier (accept from
+ *                             ZXC_GUL_MIN_EMIT). See zxc_gul_params_t.accept.
  * @return ZXC_OK on success, or a negative zxc_error_t code.
  */
 static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
@@ -2324,6 +2352,7 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
                 }
                 seq_buf[so++] = (uint8_t)n;
             }
+            // cppcheck-suppress knownConditionTrueFalse
             if (ll > 0) {
                 ZXC_MEMCPY(lit_buf + lo, base + lit, ll);
                 lo += ll;

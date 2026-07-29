@@ -434,6 +434,13 @@ Entropy coding is deliberately excluded from this block type: a serial bit
 reader reintroduces the dependency GUL exists to remove. Blocks that profit
 from entropy coding belong to GLO. `n_sequences` MAY be 0.
 
+`tail_len` is a full 32-bit field because the tail is *everything after
+the last emitted match*: with `n_sequences = 0` it spans the whole block,
+and blocks go up to 2 MiB (§3) -- far past a 16-bit range. The u32 also
+keeps the four header fields at the same offsets as the GLO/GHI headers,
+so header parsing stays shared; a narrower field would not shrink the
+16-byte header anyway.
+
 ### GUL section descriptors (2 × 8 bytes)
 
 Same packed `u64` as GLO/GHI (low 32 = compressed size, high 32 = raw size;
