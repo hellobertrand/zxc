@@ -1,12 +1,10 @@
 # ZXC Compressed File Format (Technical Specification)
 
 **Date**: July 2026
-**Format Version**: 8
+**Format Version**: 7
 
 This document describes the on-disk binary format of a ZXC compressed file.
-It formalizes the current reference implementation of format version **8**.
-v8 adds the **GUL** block (`type=3`, §5.4); all other structures are unchanged
-from v7.
+It formalizes the current reference implementation of format version **7**.
 
 ## 1. Conventions
 
@@ -26,7 +24,7 @@ from v7.
 | Block #0             |
 |  - 8B Block Header   |
 |  - Block Payload     |
-|  - Optional 4B CRC32 |
+|  - Opt. 4B Checksum  |
 +----------------------+
 | Block #1             |
 |  ...                 |
@@ -56,7 +54,7 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): `8`. Any other value is rejected (`ZXC_ERROR_BAD_VERSION`);
+- **Format Version** (`u8`): `7`. Any other value is rejected (`ZXC_ERROR_BAD_VERSION`);
 - **Chunk Size Code** (`u8`):
   - The value is an **exponent** in the range `[12, 21]`: `block_size = 2^code`.
     - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
@@ -96,8 +94,7 @@ Offset  Size  Field
   - `3` = GUL
   - `254` = SEK
   - `255` = EOF
-- **Block Flags**: reserved, written as `0` (GUL decoders reject non-zero
-  flags, §5.4).
+- **Block Flags**: currently not used by implementation (written as `0`).
 - **Reserved**: must be 0.
 - **comp_size**: payload size in bytes (does **not** include the optional trailing 4-byte block checksum).
 - **Header CRC8**: `zxc_hash8` over the 8-byte header with byte `0x07` forced to zero before hashing.
@@ -173,6 +170,21 @@ Section order:
 2. Tokens
 3. Offsets
 4. Extras
+
+### GLO sequence encoding
+
+Unlike GUL (§5.4), the fields of a GLO sequence are split across streams:
+the token byte lives in the Tokens stream, its offset in the Offsets
+stream, and saturated lengths overflow into the Extras stream:
+
+```text
+ 7      4 3          0
++--------+------------+   +--------------------+   +------------------+
+|   LL   |     ML     |   |  OFF (u8/u16, LE)  |   |  varint overflow |
++--------+------------+   +--------------------+   +------------------+
+  4 bits     4 bits          Offsets stream           Extras stream
+   (Tokens stream)          (biased: stored + 1)     (if LL or ML = 15)
+```
 
 ### GLO stream content
 
@@ -305,8 +317,8 @@ inline lengths header) over the token byte alphabet.
 
 High-throughput LZ format with packed 32-bit sequences.
 
-*In v8 the reference encoder emits GHI at levels 1-2 (unchanged from v7);
-levels 3-5 use GUL (§5.4). Decode support for type 2 remains mandatory.*
+*The reference encoder emits GHI at levels 1-2; levels 3-5 use GUL
+(§5.4). Decode support for type 2 remains mandatory.*
 
 ### GHI payload layout
 
@@ -345,10 +357,17 @@ Each descriptor uses the same packed size encoding as GLO (`u64`: comp32|raw32).
 ### GHI sequence word format (32 bits)
 
 ```text
-Bits 31..24 : LL (literal length, 8 bits)
-Bits 23..16 : ML (match length minus 5, 8 bits)
-Bits 15..0  : Offset - 1 (16 bits, biased; decode: stored + 1)
+ 31    24 23    16 15               0
++--------+--------+------------------+   +-------------------+
+|   LL   |   ML   |  OFF (u16, LE)   |   |  varint overflow  |
++--------+--------+------------------+   +-------------------+
+  8 bits   8 bits       16 bits              Extras stream
+       (Sequences stream)                (if LL or ML = 255)
 ```
+
+- **LL** -- literal length (8 bits); `255` escapes to an Extras varint.
+- **ML** -- match length minus 5 (8 bits); `255` escapes to an Extras varint.
+- **OFF** -- offset biased by 1 (decode: `stored + 1`).
 
 Memory order (little-endian word):
 
@@ -368,7 +387,7 @@ Overflow rules:
 
 ## 5.4 GUL block (`type=3`)
 
-*New in format v8.* `GUL` (*General, ULtra-throughput*) serves levels 3-5
+`GUL` (*General, ULtra-throughput*) serves levels 3-5
 with a light, byte-oriented sequence format built for branch-free decoding:
 every sequence is **1 token byte + 2 offset bytes**, matches are 4..32
 bytes at distances of at least 33, and a mandatory raw tail provides the
@@ -377,8 +396,7 @@ read/write margin that removes per-sequence bounds tests from the hot loop.
 Because every distance exceeds the 32-byte maximum match length, a match
 copy can never overlap its destination: the decoder resolves **any** match
 with a single unconditional 32-byte wild copy -- no overlap tiers, no
-length loop, no per-block copy modes. The block-header Flags byte (§4) is
-reserved and MUST be 0.
+length loop, no per-block copy modes.
 
 ### GUL payload layout
 
@@ -439,7 +457,7 @@ Each sequence is a token byte followed by a 16-bit offset:
 ```text
  7      5 4          0
 +--------+------------+   +------------------+
-|   LL   |    MLC     |   |  OFF (u16, LE)   |
+|   LL   |     ML     |   |  OFF (u16, LE)   |
 +--------+------------+   +------------------+
   3 bits     5 bits            2 bytes
 ```
@@ -448,7 +466,7 @@ Each sequence is a token byte followed by a 16-bit offset:
   escapes to extra bytes appended after the offset: blocks of 255
   terminated by a byte < 255, summed into the literal length
   (`LL = 7 + sum`).
-- **MLC** -- match-length code, decoded as `length = MLC + 3`. Valid codes
+- **ML** -- match-length code, decoded as `length = ML + 3`. Valid codes
   are 1..29 (lengths 4..32); 0, 30 and 31 are reserved and MUST be
   rejected by a safe decoder.
 - **OFF** -- match distance stored biased:
@@ -478,7 +496,7 @@ Let `L` be the literals cursor, `O` the output cursor. For each of the
 
 1. Decode `LL` (with escape bytes if needed); copy `LL` bytes from `L` to
    `O`; advance both.
-2. Copy `MLC + 3` bytes from `O - (OFF + 33)` to `O` (never overlapping,
+2. Copy `ML + 3` bytes from `O - (OFF + 33)` to `O` (never overlapping,
    since the distance exceeds the maximum length); advance `O`.
 
 Then append the tail.
@@ -487,7 +505,7 @@ Then append the tail.
 
 A safe decoder MUST reject with `ZXC_ERROR_CORRUPT_DATA`:
 
-- any non-zero block-header flag bit or reserved header byte;
+- a non-zero reserved field in the GUL header;
 - descriptor sizes inconsistent with the header, or streams that do not
   tile `comp_size` exactly;
 - `tail_len < 32` or `tail_len > uncompressed_size`;
@@ -683,20 +701,20 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 ### 10.3 Compatibility rules
 
 - **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version with `ZXC_ERROR_BAD_VERSION`. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
-- **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version (`ZXC_ERROR_BAD_BLOCK_TYPE`). The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
+- **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version (`ZXC_ERROR_BAD_BLOCK_TYPE`); decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe. Because rejection is guaranteed, a new block type **may** be introduced within a version as a purely additive extension (readers that predate it fail cleanly at the first such block — this is how GUL, type 3, was added to version 7, see §1). Changing the meaning of an **existing** type or structure remains a version bump.
 - **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header CRC, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension.
 - **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values (`ZXC_ERROR_BAD_HEADER`).
 
 ### 10.4 Minimum conforming decoder
 
-A minimal conforming decoder for version 8 **MUST** support:
+A minimal conforming decoder for version 7 **MUST** support:
 - File header parsing and CRC16 validation
 - **RAW** blocks (type 0) - passthrough copy.
 - **GLO** blocks (type 1) - full LZ decode with extras varint, including Huffman
   entropy sections (§5.2.1, PivCo layout) with code lengths up to 11 bits.
 - **GHI** blocks (type 2) - full LZ decode with extras varint.
-- **GUL** blocks (type 3) - fixed-width sequence decode with the min_off_class
-  copy contract and mandatory tail (§5.4).
+- **GUL** blocks (type 3) - byte-oriented sequence decode with the
+  alias-free single-copy contract and mandatory tail (§5.4).
 - **EOF** block (type 255) - stream termination.
 - File footer validation (source size check).
 
@@ -887,7 +905,7 @@ Generated archive size: **58 bytes**.
 ### 14.1 Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
+00000000: F5 2E B0 9C 07 13 80 00 00 00 00 00 00 00 3E 5D
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
@@ -898,15 +916,15 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 6E 5B
+F5 2E B0 9C | 07 | 13 | 80 | 00 00 00 00 00 00 00 | 3E 5D
 ```
 
 - `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
-- `08` -> format version 8.
+- `07` -> format version 7.
 - `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
 - `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `6E 5B` -> header CRC16 (LE value `0x5B6E`).
+- `3E 5D` -> header CRC16 (LE value `0x5D3E`).
 
 #### B) Data Block #0 (RAW)
 
@@ -987,7 +1005,7 @@ Generated archive size: **70 bytes** (12 bytes larger than the non-seekable vari
 #### Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
+00000000: F5 2E B0 9C 07 13 80 00 00 00 00 00 00 00 3E 5D
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
 00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00

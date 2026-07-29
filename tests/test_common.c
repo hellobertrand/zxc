@@ -51,9 +51,8 @@ void gen_lz_data(uint8_t* const buf, const size_t size) {
 }
 
 // Generates a stream of 48-byte records picked from a small pseudo-random
-// pool: short matches (~48 B, under the GUL 224-byte codebook cap) at
-// offsets >= 48. Levels 1-3 encode this as a GUL block (min_off_class 2)
-// without tripping the pathological-repetition GHI fallback.
+// pool: dense short matches at offsets >= ZXC_GUL_MIN_DIS -- the GUL light
+// format's bread and butter (levels 3-5).
 void gen_gul_data(uint8_t* const buf, const size_t size) {
     enum { REC = 48, POOL = 64 };
     static uint8_t pool[POOL][REC];

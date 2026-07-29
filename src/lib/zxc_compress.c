@@ -2065,7 +2065,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 }
 
 /* ==========================================================================
- * GUL (General ULtra-throughput) encoder -- FORMAT.md 5.4, format v8.
+ * GUL (General ULtra-throughput) encoder -- FORMAT.md 5.4.
  *
  * Light byte-oriented format: every sequence is 1 token byte (inline
  * literal length in the top 3 bits, match-length code in the low 5) plus a
@@ -2092,8 +2092,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 #ifndef ZXC_GUL_SKIP_SHIFT
 #define ZXC_GUL_SKIP_SHIFT 6
 #endif
-/** @brief Smallest match the encoder emits (>= ZXC_GUL_MIN_MATCH). Raising
- *         it trades a little ratio for fewer tokens, i.e. faster decode. */
+/** @brief Smallest match the encoder emits (>= ZXC_GUL_MIN_MATCH).
+ *         Measured: raising it degrades ratio AND decode (the freed bytes
+ *         densify the literal-escape path); keep at the wire minimum. */
 #ifndef ZXC_GUL_MIN_EMIT
 #define ZXC_GUL_MIN_EMIT ZXC_GUL_MIN_MATCH
 #endif
@@ -2125,17 +2126,17 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_gul_lcp32(const uint8_t* RESTRICT a,
     const __m256i va = _mm256_loadu_si256((const __m256i*)a);
     const __m256i vb = _mm256_loadu_si256((const __m256i*)b);
     const uint32_t m = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(va, vb));
-    return (m == 0xFFFFFFFFu) ? 32u : (uint32_t)zxc_ctz32(~m);
+    return (m == 0xFFFFFFFFU) ? 32U : (uint32_t)zxc_ctz32(~m);
 #elif defined(ZXC_USE_SSE2)
     const __m128i a0 = _mm_loadu_si128((const __m128i*)a);
     const __m128i b0 = _mm_loadu_si128((const __m128i*)b);
     const uint32_t m0 = (uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(a0, b0));
-    if (m0 != 0xFFFFu) return (uint32_t)zxc_ctz32(~m0 & 0xFFFFu);
+    if (m0 != 0xFFFFU) return (uint32_t)zxc_ctz32(~m0 & 0xFFFFU);
     const __m128i a1 = _mm_loadu_si128((const __m128i*)(a + 16));
     const __m128i b1 = _mm_loadu_si128((const __m128i*)(b + 16));
     const uint32_t m1 = (uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(a1, b1));
-    return (m1 == 0xFFFFu) ? 32u : 16u + (uint32_t)zxc_ctz32(~m1 & 0xFFFFu);
-#elif defined(ZXC_USE_NEON64)
+    return (m1 == 0xFFFFU) ? 32U : 16U + (uint32_t)zxc_ctz32(~m1 & 0xFFFFU);
+#elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     const uint8x16_t c0 = vceqq_u8(vld1q_u8(a), vld1q_u8(b));
     const uint64_t m0 =
         vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(c0), 4)), 0);
@@ -2143,13 +2144,13 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_gul_lcp32(const uint8_t* RESTRICT a,
     const uint8x16_t c1 = vceqq_u8(vld1q_u8(a + 16), vld1q_u8(b + 16));
     const uint64_t m1 =
         vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(c1), 4)), 0);
-    return (m1 == ~(uint64_t)0) ? 32u : 16u + (uint32_t)(zxc_ctz64(~m1) >> 2);
+    return (m1 == ~(uint64_t)0) ? 32U : 16U + (uint32_t)(zxc_ctz64(~m1) >> 2);
 #else
     for (uint32_t k = 0; k < 32; k += 8) {
         const uint64_t diff = zxc_le64(a + k) ^ zxc_le64(b + k);
         if (diff != 0) return k + (uint32_t)(zxc_ctz64(diff) >> 3);
     }
-    return 32u;
+    return 32U;
 #endif
 }
 
@@ -2233,7 +2234,7 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
 
     while (pos + ZXC_GUL_MAX_MATCH <= limit) {
         /* Pump lagged hash insertions in unrolled batches. */
-        while (UNLIKELY(pos >= hpos + ZXC_GUL_LAG + 8)) {
+        while (UNLIKELY(pos >= hpos + ZXC_GUL_MAX_MATCH + 8)) {
             for (int i = 0; i < 8; i++) {
                 const uint32_t h = zxc_gul_hash4(zxc_le32(base + hpos + (size_t)i));
                 htab[h * (size_t)ring_n + hidx[h]] = (uint16_t)(hpos + (size_t)i);
@@ -2244,7 +2245,7 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
 
         size_t best_cand = 0;
         uint32_t best_len = 0;
-        if (LIKELY(pos > ZXC_GUL_LAG)) {
+        if (LIKELY(pos > ZXC_GUL_MAX_MATCH)) {
             const uint32_t h = zxc_gul_hash4(zxc_le32(base + pos));
             best_len = zxc_gul_probe(base, pos, &htab[h * (size_t)ring_n], ring_n, &best_cand);
         }
@@ -2385,12 +2386,12 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
      * token staging (it may clobber the literal staging freely) and only a
      * winning GLO is copied over -- pricing can never corrupt the GUL
      * fallback, and a lower threshold only costs compression time. */
-    if (glo_fallback && UNLIKELY((uint64_t)n_max * 100u > (uint64_t)n_seq * ZXC_GUL_GUARD_PCT)) {
+    if (glo_fallback && UNLIKELY((uint64_t)n_max * 100U > (uint64_t)n_seq * ZXC_GUL_GUARD_PCT)) {
         size_t w_glo = 0;
         if (zxc_encode_block_glo(ctx, src, src_sz, seq_buf, block_sz + ZXC_PAD_SIZE, &w_glo) ==
                 ZXC_OK &&
-            (uint64_t)w_glo * 100u <=
-                (ZXC_BLOCK_HEADER_SIZE + payload) * (100u - ZXC_GUL_SWAP_MARGIN_PCT)) {
+            (uint64_t)w_glo * 100U <=
+                (ZXC_BLOCK_HEADER_SIZE + payload) * (100U - ZXC_GUL_SWAP_MARGIN_PCT)) {
             ZXC_MEMCPY(dst, seq_buf, w_glo);
             *out_sz = w_glo;
             return ZXC_OK;
@@ -2444,11 +2445,7 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
     if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE + src_sz)) return ZXC_ERROR_DST_TOO_SMALL;
 
     // Compute block RAW
-    zxc_block_header_t bh;
-    bh.block_type = ZXC_BLOCK_RAW;
-    bh.block_flags = 0;  // Checksum flag moved to file header
-    bh.reserved = 0;
-    bh.comp_size = (uint32_t)src_sz;
+    const zxc_block_header_t bh = {.block_type = ZXC_BLOCK_RAW, .comp_size = (uint32_t)src_sz};
 
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
     if (UNLIKELY(hw < 0)) return hw;
@@ -2463,9 +2460,9 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
 /**
  * @brief Compresses one chunk into a single ZXC block (the compression hot path).
  *
- * Selects the GHI encoder at levels 1-2, GUL at levels 3-5 (pure
- * GUL-or-RAW at level 3, GLO fallback at 4-5) and GLO at levels 6+; falls
- * back to a RAW block when the coded form would not shrink the data. When @c ctx->dict_size
+ * Selects the GHI encoder at levels 1-2, GUL at levels 3-5 (with the
+ * space-speed-guarded GLO fallback) and GLO at levels 6+; falls back to a
+ * RAW block when the coded form would not shrink the data. When @c ctx->dict_size
  * is > 0, @p chunk is the [dict | block] concat and only the block tail counts
  * toward the expansion check. Appends the per-block checksum when enabled.
  *

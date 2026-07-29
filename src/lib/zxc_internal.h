@@ -330,9 +330,8 @@ extern "C" {
 /** @brief Magic word identifying ZXC files (little-endian 0x9CB02EF5). */
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
 /** @brief Current on-disk file format version. The decoder accepts only this
- *  version; Older versions are rejected with ZXC_ERROR_BAD_VERSION.
- *  v8: GUL block (type 3) added, GHI block (type 2) retired. */
-#define ZXC_FILE_FORMAT_VERSION 8
+ *  version; older versions are rejected with ZXC_ERROR_BAD_VERSION. */
+#define ZXC_FILE_FORMAT_VERSION 7
 
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
@@ -408,10 +407,11 @@ extern "C" {
 /** @brief Worst-case format overhead inside a single block beyond the outer
  *  8-byte block header and the optional 4-byte checksum.
  *
- *  Covers the inner GLO/GHI sub-header (16 B) plus four section descriptors
- *  (4 x 8 = 32 B) = 48 B, with a 16 B safety margin for future format
- *  evolution. Used by zxc_compress_block_bound() and zxc_compress_bound()
- *  to size the destination buffer in the worst (incompressible) case. */
+ *  Covers the largest inner sub-header + descriptors of any block type:
+ *  GLO 16 B + 4 x 8 B = 48 B (GHI 16 + 24 = 40 B, GUL 16 + 16 = 32 B),
+ *  with a 16 B safety margin for future format evolution. Used by
+ *  zxc_compress_block_bound() and zxc_compress_bound() to size the
+ *  destination buffer in the worst (incompressible) case. */
 #define ZXC_BLOCK_FORMAT_OVERHEAD 64
 
 /** @brief Binary size of a section descriptor (comp_size + raw_size). */
@@ -506,14 +506,14 @@ extern "C" {
 /** @brief Maximum match length (code 29): one 32-byte copy always suffices;
  *         codes 30 and 31 are reserved. */
 #define ZXC_GUL_MAX_MATCH 32
-/** @brief Hash-window lag: matches never start closer than LAG + 1 bytes.
- *         Equal to the maximum match length so the single 32-byte wild
- *         copy can never read bytes it wrote (alias-free). WIRE constant
- *         (offset bias); measured on both wires, dis17 only bought
- *         0.15-0.2 pt at the sparse ladder for real x86 copy constraints. */
-#define ZXC_GUL_LAG ZXC_GUL_MAX_MATCH
-/** @brief Minimum (and bias of the stored) match distance. */
-#define ZXC_GUL_MIN_DIS (ZXC_GUL_LAG + 1)
+/** @brief Minimum (and bias of the stored) match distance: one past the
+ *         maximum match length, so the single 32-byte wild copy can never
+ *         read bytes it wrote (alias-free). The encoder's hash insertion
+ *         lags the scan cursor by MAX_MATCH bytes to enforce it by
+ *         construction. WIRE constant (offset bias); a 17-byte minimum was
+ *         measured to buy only 0.15-0.2 pt at the sparse ladder, for real
+ *         x86 copy constraints. */
+#define ZXC_GUL_MIN_DIS (ZXC_GUL_MAX_MATCH + 1)
 /** @brief Offset field width: 16-bit distances, like GLO/GHI. */
 #define ZXC_GUL_OFF_BITS 16
 /** @brief Largest encodable distance: 65535 + ZXC_GUL_MIN_DIS. */
@@ -1112,7 +1112,7 @@ static ZXC_ALWAYS_INLINE zxc_gul_params_t zxc_get_gul_params(const int level) {
  * is the default for most data (text, binaries, JSON, etc.). Includes 4 sections descriptors.
  * - `ZXC_BLOCK_GHI` (2): General-purpose high-velocity mode using LZ77 with advanced
  * techniques (lazy matching, step skipping) for maximum ratio. Includes 3 sections descriptors.
- * - `ZXC_BLOCK_GUL` (3): General ULtra-throughput mode (v8): 4-byte sequences
+ * - `ZXC_BLOCK_GUL` (3): General ULtra-throughput mode: 3-byte sequences
  *   `LL8|MC6|OFF18` (256 KiB window), per-block minimum-offset class, no escapes,
  *   no Extras stream, mandatory raw tail. Serves levels 1-3. Includes 2 section
  *   descriptors.
@@ -1668,7 +1668,7 @@ int zxc_write_gul_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
 /**
  * @brief Parses a GUL block header and its 2 section descriptors from @p src.
  *
- * Rejects non-zero reserved header bytes (GUL is new in v8, so this is
+ * Rejects non-zero reserved header bytes (GUL is a new block type, so this is
  * stricter than the FORMAT.md 10.3 tolerate-reserved rule).
  *
  * @param[in]  src  Source buffer.

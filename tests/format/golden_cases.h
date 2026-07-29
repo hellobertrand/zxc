@@ -329,12 +329,11 @@ typedef struct {
     int min_data_blocks;            /* lower bound on data-block count */
     int expect_seek;                /* a SEK block must be present */
     int use_dict_huf;               /* attach gc_dict_huf_table() to the opts */
-    int expect_gul_class;           /* GUL min_off_class (-1 = no constraint) */
 } golden_case_t;
 
 /* The corpus. Each entry maps onto one or more sections of docs/FORMAT.md Sec 5.
  *
- * v8 note: levels 1-2 emit GHI (unchanged from v7); levels 3-5 emit GUL
+ * Level map: levels 1-2 emit GHI; levels 3-5 emit GUL
  * with increasing search effort, and route pathologically repetitive
  * blocks to GLO through the space-speed-guarded swap (which is what keeps
  * 04/06-10 emitting GLO; 11 pins the RLE literal path at level 6). The
@@ -342,24 +341,24 @@ typedef struct {
  * literal lengths, 15 = the escape path, 17 = the deep (level 5) tier on
  * guard-proof sub-32-byte records. */
 static const golden_case_t GOLDEN_CASES[] = {
-    /* name                 input              {level, blk,   csum, seek}                       data type    enc_lit min seek dhuf gclass */
-    { "01_empty_eof_only",     gc_make_empty,     { .level = 1 },                                  GC_ANY_TYPE,  -1,  0, 0, 0, -1 },
-    { "02_block_raw",          gc_make_raw,       { .level = 1 },                                  GC_BLOCK_RAW, -1,  1, 0, 0, -1 },
-    { "03_block_ghi",          gc_make_text,      { .level = 1 },                                  GC_BLOCK_GHI, -1,  1, 0, 0, -1 },
-    { "04_block_glo",          gc_make_text,      { .level = 4 },                                  GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
-    { "05_block_glo_huffman",  gc_make_huffman,   { .level = 6 },                                  GC_BLOCK_GLO,  2,  1, 0, 0, -1 },
-    { "06_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
-    { "07_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GLO, -1, 5, 0, 0, -1 },
-    { "08_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GLO, -1, 5, 1, 0, -1 },
-    { "09_block_dict",         gc_make_dict_payload, { .level = 3, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE }, GC_BLOCK_GLO, -1, 1, 0, 0, -1 },
-    { "10_glo_offset16",       gc_make_offset16,  { .level = 4 },                                  GC_BLOCK_GLO, -1,  1, 0, 0, -1 },
-    { "11_glo_rle",            gc_make_rle_literals, { .level = 6 },                                GC_BLOCK_GLO,  1,  1, 0, 0, -1 },
+    /* name                 input              {level, blk,   csum, seek}                       data type    enc_lit min seek dhuf */
+    { "01_empty_eof_only",     gc_make_empty,     { .level = 1 },                                  GC_ANY_TYPE,  -1,  0, 0, 0 },
+    { "02_block_raw",          gc_make_raw,       { .level = 1 },                                  GC_BLOCK_RAW, -1,  1, 0, 0 },
+    { "03_block_ghi",          gc_make_text,      { .level = 1 },                                  GC_BLOCK_GHI, -1,  1, 0, 0 },
+    { "04_block_glo",          gc_make_text,      { .level = 4 },                                  GC_BLOCK_GLO, -1,  1, 0, 0 },
+    { "05_block_glo_huffman",  gc_make_huffman,   { .level = 6 },                                  GC_BLOCK_GLO,  2,  1, 0, 0 },
+    { "06_checksum_per_block", gc_make_text,      { .level = 3, .checksum_enabled = 1 },           GC_BLOCK_GLO, -1,  1, 0, 0 },
+    { "07_multiple_blocks",    gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1 }, GC_BLOCK_GLO, -1, 5, 0, 0 },
+    { "08_seekable_table",     gc_make_multiblock,{ .level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1 }, GC_BLOCK_GLO, -1, 5, 1, 0 },
+    { "09_block_dict",         gc_make_dict_payload, { .level = 3, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE }, GC_BLOCK_GLO, -1, 1, 0, 0 },
+    { "10_glo_offset16",       gc_make_offset16,  { .level = 4 },                                  GC_BLOCK_GLO, -1,  1, 0, 0 },
+    { "11_glo_rle",            gc_make_rle_literals, { .level = 6 },                                GC_BLOCK_GLO,  1,  1, 0, 0 },
     { "12_glo_huffman_dict",   gc_make_huffman_dict_payload,
-      { .level = 6, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE },                          GC_BLOCK_GLO,  3,  1, 0, 1, -1 },
-    { "13_glo_huffman_wide",   gc_make_huffman_wide, { .level = 7 /* ULTRA */ },                    GC_BLOCK_GLO,  2,  1, 0, 0, -1 },
-    { "14_block_gul",          gc_make_gul_records,  { .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
-    { "15_gul_escapes",        gc_make_gul_escapes,  { .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
-    { "17_block_gul_l5",       gc_make_gul_records24, { .level = 5 },                              GC_BLOCK_GUL, -1,  1, 0, 0, -1 },
+      { .level = 6, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE },                          GC_BLOCK_GLO,  3,  1, 0, 1 },
+    { "13_glo_huffman_wide",   gc_make_huffman_wide, { .level = 7 /* ULTRA */ },                    GC_BLOCK_GLO,  2,  1, 0, 0 },
+    { "14_block_gul",          gc_make_gul_records,  { .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0 },
+    { "15_gul_escapes",        gc_make_gul_escapes,  { .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0 },
+    { "17_block_gul_l5",       gc_make_gul_records24, { .level = 5 },                              GC_BLOCK_GUL, -1,  1, 0, 0 },
 };
 
 #define GOLDEN_CASE_COUNT (sizeof(GOLDEN_CASES) / sizeof(GOLDEN_CASES[0]))

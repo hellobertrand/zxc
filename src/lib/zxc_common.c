@@ -251,7 +251,7 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
             layout.total += ZXC_ALIGN_CL(layout.sz_opt);
         }
 
-        /* GUL encoder buffers (level 3 only): the 16-bit hash table of
+        /* GUL encoder buffers (levels 3-5): the 16-bit hash table of
          * ZXC_GUL_RING-entry position rings + per-bucket cursors, and a
          * chunk-sized staging buffer for the variable-length token stream.
          * Levels 1-2 (GHI) and 6+ (GLO) pay nothing for them. Levels 3-5
@@ -660,8 +660,8 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
     if (UNLIKELY(dst_capacity < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
 
     dst[0] = bh->block_type;
-    dst[1] = bh->block_flags;  // GUL: min_off_class in bits 0-1; 0 elsewhere
-    dst[2] = 0;                // Reserved
+    dst[1] = 0;  // Flags not used currently
+    dst[2] = 0;  // Reserved
     zxc_store_le32(dst + 3, bh->comp_size);
     dst[7] = 0;               // Zero before hashing
     dst[7] = zxc_hash8(dst);  // Checksum at the end
@@ -689,7 +689,7 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
     if (UNLIKELY(src[7] != zxc_hash8(temp))) return ZXC_ERROR_BAD_HEADER;
 
     bh->block_type = src[0];
-    bh->block_flags = src[1];  // GUL: min_off_class in bits 0-1; 0 elsewhere
+    bh->block_flags = 0;  // Flags not used currently
     bh->reserved = src[2];
     bh->comp_size = zxc_le32(src + 3);
     bh->header_crc = src[7];
@@ -899,7 +899,7 @@ int zxc_write_gul_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
 /**
  * @brief Parses a GUL block header and its section descriptors from @p src.
  *
- * Rejects non-zero reserved bytes: GUL is new in v8, there is no legacy to
+ * Rejects non-zero reserved bytes: GUL is a new block type, there is no legacy to
  * tolerate, so this is stricter than the FORMAT.md 10.3 reserved-field rule.
  *
  * @param[in]  src  Source buffer.

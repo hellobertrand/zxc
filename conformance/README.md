@@ -64,7 +64,7 @@ echo "Passed: $pass  Failed: $fail"
 | Checksum             | 3     | Per-block and global checksum enabled             |
 | Multi-block          | 2     | 16 blocks per file (4 KB block size)             |
 | Seekable             | 3     | Seekable archives with seek table                |
-| Invalid              | 19    | Bad magic, bad version, bad CRC, truncated, corrupt payload, garbage, out-of-bounds section layouts |
+| Invalid              | 23    | Bad magic, bad version, bad CRC, truncated, corrupt payload, garbage, out-of-bounds section layouts |
 
 ## License
 

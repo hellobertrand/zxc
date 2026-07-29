@@ -1474,7 +1474,7 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
 #undef DECODE_SEQ_SAFE
 
 /* ==========================================================================
- * GUL (General ULtra-throughput) decoder -- FORMAT.md 5.4, format v8.
+ * GUL (General ULtra-throughput) decoder -- FORMAT.md 5.4.
  *
  * Light byte-oriented format: 1 token byte `LL3|ML5` + 2 offset bytes per
  * sequence. Distances are stored biased by ZXC_GUL_MIN_DIS (= 33), so every
@@ -1533,7 +1533,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
                  tail_len < ZXC_GUL_TAIL_MIN))
         return ZXC_ERROR_CORRUPT_DATA;
     if (UNLIKELY(tail_len > dst_capacity)) return ZXC_ERROR_BAD_BLOCK_SIZE;
-    if (UNLIKELY((uint64_t)gh.n_sequences * 3u > (uint64_t)sz_seq)) return ZXC_ERROR_CORRUPT_DATA;
+    if (UNLIKELY((uint64_t)gh.n_sequences * 3U > (uint64_t)sz_seq)) return ZXC_ERROR_CORRUPT_DATA;
 
     const uint8_t* l_ptr = src + fixed;
     const uint8_t* const l_end = l_ptr + n_lit;
@@ -1564,10 +1564,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
     do {                                                                               \
         const uint8_t* const s_save = seq_ptr;                                         \
         const uint32_t w = zxc_le32(seq_ptr); /* token + 2 offset bytes + lookahead */ \
-        uint32_t ll = (w & 0xFFu) >> ZXC_GUL_ML_BITS;                                  \
+        uint32_t ll = (w & 0xFFU) >> ZXC_GUL_ML_BITS;                                  \
         const uint32_t norm = w & ZXC_GUL_ML_MASK;                                     \
         const uint32_t ml = norm + ZXC_GUL_ML_BIAS;                                    \
-        const uint32_t dis = ((w >> 8) & 0xFFFFu) + ZXC_GUL_MIN_DIS;                   \
+        const uint32_t dis = ((w >> 8) & 0xFFFFU) + ZXC_GUL_MIN_DIS;                   \
         seq_ptr += 3;                                                                  \
         if (UNLIKELY(ll == ZXC_GUL_LL_ESCAPE)) {                                       \
             uint32_t b;                                                                \
@@ -1739,15 +1739,11 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
                          : has_dict ? zxc_decode_block_ghi_dict(ctx, data, comp_sz, dst, dst_cap)
                                     : zxc_decode_block_ghi(ctx, data, comp_sz, dst, dst_cap);
             break;
-        case ZXC_BLOCK_GUL: {
-            /* GUL block flags are reserved and must be 0 (GUL is new in v8,
-             * no legacy to tolerate). */
-            if (UNLIKELY(src[1] != 0)) return ZXC_ERROR_CORRUPT_DATA;
+        case ZXC_BLOCK_GUL:
             decoded_sz = safe       ? zxc_decode_block_gul_safe(ctx, data, comp_sz, dst, dst_cap)
                          : has_dict ? zxc_decode_block_gul_dict(ctx, data, comp_sz, dst, dst_cap)
                                     : zxc_decode_block_gul(ctx, data, comp_sz, dst, dst_cap);
             break;
-        }
         case ZXC_BLOCK_RAW:
             // For RAW blocks, comp_sz == raw_sz (uncompressed data stored as-is)
             if (UNLIKELY(comp_sz > dst_cap)) return ZXC_ERROR_DST_TOO_SMALL;
