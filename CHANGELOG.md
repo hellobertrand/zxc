@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.13.2] - 2026-07-30
+fix: fix typos
+fix: Fix MSVC /arch + /wd4244 flags (wrapdb CI warnings) (#326)
+perf: Extend code length nudging to level 6 (#343)
+perf: Optimizes Huffman code lengths for faster PivCo decode (#336)
+cli: Make project embeddable as a subproject (#338)
+cli: Resolve compiler warnings (#342)
+build: Format wrapper sources and guard it in CI (#330)
+portability: Remove compiler-rt dependency for x86 CPUID (#339)
+misc: Stage short RAW literal sections to prevent overread (#341)
+misc: Reserve the trailing framing in the in-place bound (#337)
+misc: Deduplicate the GLO/GHI decode loops (#328)
+misc: Update npm dev dependencies to address alerts (#218) (#335)
+misc: Remove duplicate SSE2/NEON FMV variants, drop -mfma, harden x86 dispatch gates (#331)
+misc: Compile ISA-independent dict tree setup once, not per-variant (#327)
+misc: Test the AVX-512 tier under Intel SDE instead of QEMU (#325)
+
 ## [0.13.1] - 2026-07-15
 api: Define zxc_lib_EXPORTS in Meson so the Windows DLL exports its API
 misc: Require Meson >= 0.63.0 so c_std applies in subproject builds
