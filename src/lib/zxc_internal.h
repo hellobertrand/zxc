@@ -525,55 +525,10 @@ extern "C" {
 #define ZXC_GUL_MIN_BLOCK 128
 /** @brief Encoder hash-table address bits (16-bit buckets, 16-bit entries). */
 #define ZXC_GUL_HASH_BITS 16
-/** @brief Encoder candidates per bucket (ring buffer, probed fully unrolled).
- *         This is the deepest tier; the workspace is carved for this depth. */
-#ifndef ZXC_GUL_RING
+/** @brief Encoder candidates per bucket (ring buffer, probed fully
+ *         unrolled). The workspace is carved for this depth; the level
+ *         table (::zxc_get_level_params) picks the depth actually probed. */
 #define ZXC_GUL_RING 16
-#endif
-/** @name GUL per-level parse profile (encoder policy, `#ifndef` for sweeps)
- *
- *  Levels 3-5 share the GUL wire and differ in parse profile. Decode cost
- *  is per sequence, so throughput is bytes covered per token: levels 3-4
- *  use a SPARSE acceptance policy (only long matches, pending literals
- *  flushed in bulk) that emits few sequences and decodes fastest; level 5
- *  parses densely for the best ratio. Ring depths must be powers of two
- *  <= ZXC_GUL_RING. The values feed ::zxc_get_gul_params.
- *  @{ */
-#ifndef ZXC_GUL_RING_L3
-#define ZXC_GUL_RING_L3 8
-#endif
-#ifndef ZXC_GUL_RING_L4
-#define ZXC_GUL_RING_L4 16
-#endif
-#ifndef ZXC_GUL_RING_L5
-#define ZXC_GUL_RING_L5 ZXC_GUL_RING
-#endif
-#ifndef ZXC_GUL_LA_L3
-#define ZXC_GUL_LA_L3 0
-#endif
-#ifndef ZXC_GUL_LA_L4
-#define ZXC_GUL_LA_L4 0
-#endif
-#ifndef ZXC_GUL_LA_L5
-#define ZXC_GUL_LA_L5 2
-#endif
-#ifndef ZXC_GUL_ACCEPT_L3
-#define ZXC_GUL_ACCEPT_L3 9
-#endif
-#ifndef ZXC_GUL_ACCEPT_L4
-#define ZXC_GUL_ACCEPT_L4 7
-#endif
-#ifndef ZXC_GUL_ACCEPT_L5
-#define ZXC_GUL_ACCEPT_L5 0
-#endif
-#if (ZXC_GUL_RING_L3 & (ZXC_GUL_RING_L3 - 1)) || (ZXC_GUL_RING_L4 & (ZXC_GUL_RING_L4 - 1)) || \
-    (ZXC_GUL_RING_L5 & (ZXC_GUL_RING_L5 - 1)) || (ZXC_GUL_RING & (ZXC_GUL_RING - 1))
-#error "GUL: ring depths must be powers of two (bucket cursors rotate with a mask)"
-#endif
-#if ZXC_GUL_RING_L3 > ZXC_GUL_RING || ZXC_GUL_RING_L4 > ZXC_GUL_RING || \
-    ZXC_GUL_RING_L5 > ZXC_GUL_RING
-#error "GUL: per-level ring depths cannot exceed the carved ZXC_GUL_RING"
-#endif
 /** @brief Levels whose default encoder is GUL. */
 #define ZXC_LEVEL_USES_GUL(l) ((l) >= ZXC_LEVEL_DEFAULT && (l) <= ZXC_LEVEL_COMPACT)
 
@@ -609,21 +564,6 @@ typedef struct {
     int glo_fallback;
 } zxc_gul_params_t;
 
-/**
- * @brief Returns the GUL encoder parameters for a level in [3, 5].
- *
- * Called with a compile-time-constant level from the per-level encoder
- * wrappers, so the row folds to constants.
- */
-static ZXC_ALWAYS_INLINE zxc_gul_params_t zxc_get_gul_params(const int level) {
-    // ring, lookahead, la_gate, accept, glo_fallback
-    static const zxc_gul_params_t table[3] = {
-        {ZXC_GUL_RING_L3, ZXC_GUL_LA_L3, 16, ZXC_GUL_ACCEPT_L3, 0},  // level 3
-        {ZXC_GUL_RING_L4, ZXC_GUL_LA_L4, 16, ZXC_GUL_ACCEPT_L4, 1},  // level 4
-        {ZXC_GUL_RING_L5, ZXC_GUL_LA_L5, 16, ZXC_GUL_ACCEPT_L5, 1},  // level 5
-    };
-    return table[level - ZXC_LEVEL_DEFAULT];
-}
 /** @} */
 /** @brief Worst-case decoded bytes of one escape-free sequence: 6 inline
  *         literals + a 32-byte match copy, +2 dirty-norm slack (= 40). */
@@ -1097,28 +1037,53 @@ typedef struct {
 } zxc_lz77_params_t;
 
 /**
- * @brief Retrieves LZ77 compression parameters based on the specified compression level.
+ * @struct zxc_level_params_t
+ * @brief THE per-level tuning table: one row per compression level (1-7).
  *
- * This inline function returns the appropriate LZ77 parameters configuration
- * for the given compression level.
- *
- * @param[in] level The compression level to use for determining LZ77 parameters.
- * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
+ * Single place to parameterize the whole ladder. Each row combines:
+ * - `lz77`: the chain-search parameters, consumed by GHI (levels 1-2),
+ *   GLO (levels 6-7) and the GLO fallback of the GUL levels (3-5);
+ * - `gul`: the GUL parse profile (levels 3-5 only, zeroed elsewhere).
  */
-static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
-    if (level >= ZXC_LEVEL_ULTRA) return (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8};
-    // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
-    // step_shift
-    static const zxc_lz77_params_t table[7] = {
-        {3, 16, 0, 0, 0, 4, 4},       // fallback
-        {3, 16, 0, 0, 0, 4, 4},       // level 1
-        {3, 18, 0, 0, 0, 3, 6},       // level 2
-        {3, 16, 1, 4, 128, 1, 4},     // level 3
-        {3, 18, 1, 4, 128, 1, 5},     // level 4
-        {64, 256, 1, 16, 128, 1, 8},  // level 5
-        {64, 256, 0, 0, 0, 1, 8}      // level 6
+typedef struct {
+    zxc_lz77_params_t lz77;
+    zxc_gul_params_t gul;
+} zxc_level_params_t;
+
+/**
+ * @brief Returns the full parameter row for a compression level.
+ *
+ * Levels outside [1, 7] are clamped. Called with a compile-time-constant
+ * level from the GUL tier wrappers, so the row folds to constants there.
+ */
+static ZXC_ALWAYS_INLINE zxc_level_params_t zxc_get_level_params(int level) {
+    // clang-format off
+    //   lz77: search_depth, sufficient_len, use_lazy, lazy_attempts,
+    //         lazy_len_threshold, step_base, step_shift
+    //   gul:  ring, lookahead, la_gate, accept, glo_fallback
+    static const zxc_level_params_t table[7] = {
+        /* L1 GHI       */ {{3, 16, 0, 0, 0, 4, 4},      {0, 0, 0, 0, 0}},
+        /* L2 GHI       */ {{3, 18, 0, 0, 0, 3, 6},      {0, 0, 0, 0, 0}},
+        /* L3 GUL/spars */ {{3, 16, 1, 4, 128, 1, 4},    {8, 0, 16, 9, 0}},
+        /* L4 GUL/spars */ {{3, 18, 1, 4, 128, 1, 5},    {16, 0, 16, 7, 1}},
+        /* L5 GUL/dense */ {{64, 256, 1, 16, 128, 1, 8}, {16, 2, 16, 0, 1}},
+        /* L6 GLO+Huff  */ {{64, 256, 0, 0, 0, 1, 8},    {0, 0, 0, 0, 0}},
+        /* L7 GLO ULTRA */ {{128, 256, 0, 0, 0, 1, 8},   {0, 0, 0, 0, 0}},
     };
-    return table[level < ZXC_LEVEL_FASTEST ? ZXC_LEVEL_FASTEST : level];
+    // clang-format on
+    if (level < ZXC_LEVEL_FASTEST) level = ZXC_LEVEL_FASTEST;
+    if (level > ZXC_LEVEL_ULTRA) level = ZXC_LEVEL_ULTRA;
+    return table[level - ZXC_LEVEL_FASTEST];
+}
+
+/** @brief Chain-search half of the level row (GHI/GLO consumers). */
+static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
+    return zxc_get_level_params(level).lz77;
+}
+
+/** @brief GUL half of the level row (levels 3-5 tier wrappers). */
+static ZXC_ALWAYS_INLINE zxc_gul_params_t zxc_get_gul_params(const int level) {
+    return zxc_get_level_params(level).gul;
 }
 
 /**

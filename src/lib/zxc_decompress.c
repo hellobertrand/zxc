@@ -1524,15 +1524,15 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
         ZXC_GUL_HEADER_BINARY_SIZE + ZXC_GUL_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
     /* Structural validation: raw sections (comp == raw), streams tiling
-     * comp_size exactly, mandatory tail present and fitting the output. */
+     * comp_size exactly, mandatory tail present and fitting the output,
+     * every sequence at least 3 stream bytes. Error precedence preserved:
+     * the capacity check sits between the structural groups. */
     if (UNLIKELY(desc[0].sizes != ((uint64_t)n_lit | ((uint64_t)n_lit << 32)) ||
-                 desc[1].sizes != ((uint64_t)sz_seq | ((uint64_t)sz_seq << 32))))
+                 desc[1].sizes != ((uint64_t)sz_seq | ((uint64_t)sz_seq << 32)) ||
+                 (uint64_t)fixed + n_lit + sz_seq + tail_len != (uint64_t)src_size ||
+                 tail_len < ZXC_GUL_TAIL_MIN))
         return ZXC_ERROR_CORRUPT_DATA;
-    if (UNLIKELY((uint64_t)fixed + n_lit + sz_seq + tail_len != (uint64_t)src_size))
-        return ZXC_ERROR_CORRUPT_DATA;
-    if (UNLIKELY(tail_len < ZXC_GUL_TAIL_MIN)) return ZXC_ERROR_CORRUPT_DATA;
     if (UNLIKELY(tail_len > dst_capacity)) return ZXC_ERROR_BAD_BLOCK_SIZE;
-    /* Every sequence is at least 3 stream bytes. */
     if (UNLIKELY((uint64_t)gh.n_sequences * 3u > (uint64_t)sz_seq)) return ZXC_ERROR_CORRUPT_DATA;
 
     const uint8_t* l_ptr = src + fixed;

@@ -2253,30 +2253,27 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
          * must restore the scan cursor to the probe position, or the scan
          * could move net-backwards past already-inserted hash entries. */
         const size_t probe_pos = pos;
-        int accept;
-        if (accept_len > 0) {
-            /* Sparse profile: take only matches clearing the bar, except to
-             * flush a pending literal run (misa77-loose-style policy: keeps
-             * the inline LL field small and the sequence count low). */
-            accept = best_len >= (uint32_t)accept_len;
-            if (!accept) {
-                if (pos - lit >= (size_t)ZXC_GUL_FIRE_AT) {
-                    if (cand_len != 0 &&
-                        (best_len < ZXC_GUL_MIN_MATCH || cand_pos + cand_len >= pos + best_len)) {
-                        pos = cand_pos;
-                        best_cand = cand_lst;
-                        best_len = cand_len;
-                    }
-                    accept = best_len >= ZXC_GUL_MIN_MATCH;
-                } else if (best_len >= ZXC_GUL_MIN_MATCH &&
-                           (cand_len == 0 || pos + best_len >= cand_pos + cand_len)) {
-                    cand_pos = pos;
-                    cand_len = best_len;
-                    cand_lst = best_cand;
+        int accept =
+            accept_len > 0 ? best_len >= (uint32_t)accept_len : best_len >= ZXC_GUL_MIN_EMIT;
+        if (accept_len > 0 && !accept) {
+            /* Sparse profile: sub-bar matches are only taken to flush a
+             * pending literal run (misa77-loose-style policy: keeps the
+             * inline LL field small and the sequence count low); otherwise
+             * the best of them is remembered as the flush candidate. */
+            if (pos - lit >= (size_t)ZXC_GUL_FIRE_AT) {
+                if (cand_len != 0 &&
+                    (best_len < ZXC_GUL_MIN_MATCH || cand_pos + cand_len >= pos + best_len)) {
+                    pos = cand_pos;
+                    best_cand = cand_lst;
+                    best_len = cand_len;
                 }
+                accept = best_len >= ZXC_GUL_MIN_MATCH;
+            } else if (best_len >= ZXC_GUL_MIN_MATCH &&
+                       (cand_len == 0 || pos + best_len >= cand_pos + cand_len)) {
+                cand_pos = pos;
+                cand_len = best_len;
+                cand_lst = best_cand;
             }
-        } else {
-            accept = best_len >= ZXC_GUL_MIN_EMIT;
         }
 
         if (accept) {
@@ -2313,7 +2310,7 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
             /* Token byte + 2 offset bytes (+ literal-length escape bytes).
              * Stream bound: 4n + lo/255 <= block (every match covers >= 4
              * bytes), so seq_buf never outgrows its chunk-sized staging. */
-            size_t ll = pos - lit;
+            const size_t ll = pos - lit;
             const uint32_t lrem = (ll < ZXC_GUL_LL_ESCAPE) ? (uint32_t)ll : ZXC_GUL_LL_ESCAPE;
             seq_buf[so] = (uint8_t)((lrem << ZXC_GUL_ML_BITS) | (best_len - ZXC_GUL_MIN_MATCH + 1));
             zxc_store_le16(seq_buf + so + 1, (uint16_t)(pos - best_cand - ZXC_GUL_MIN_DIS));
@@ -2371,7 +2368,6 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
     }
 
     /* --- Serialize --- */
-    zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GUL};
     if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE + payload)) return ZXC_ERROR_DST_TOO_SMALL;
 
     uint8_t* const p = dst + ZXC_BLOCK_HEADER_SIZE;
@@ -2379,9 +2375,10 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
 
     const zxc_gul_header_t gh = {
         .n_sequences = n_seq, .n_literals = (uint32_t)lo, .tail_len = (uint32_t)tail_len};
-    zxc_section_desc_t desc[ZXC_GUL_SECTIONS];
-    desc[0].sizes = (uint64_t)lo | ((uint64_t)lo << 32);
-    desc[1].sizes = (uint64_t)so | ((uint64_t)so << 32);
+    const zxc_section_desc_t desc[ZXC_GUL_SECTIONS] = {
+        {.sizes = (uint64_t)lo | ((uint64_t)lo << 32)},
+        {.sizes = (uint64_t)so | ((uint64_t)so << 32)},
+    };
 
     const int ghs = zxc_write_gul_header_and_desc(p, rem, &gh, desc);
     if (UNLIKELY(ghs < 0)) return ghs;
@@ -2390,7 +2387,7 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
     ZXC_MEMCPY(p + ghs + lo, seq_buf, so);
     ZXC_MEMCPY(p + ghs + lo + so, base + end - tail_len, tail_len);
 
-    bh.comp_size = (uint32_t)payload;
+    const zxc_block_header_t bh = {.block_type = ZXC_BLOCK_GUL, .comp_size = (uint32_t)payload};
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
     if (UNLIKELY(hw < 0)) return hw;
 
