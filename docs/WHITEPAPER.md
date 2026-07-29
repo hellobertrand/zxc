@@ -97,6 +97,12 @@ the historical conservative margin (~3 %); at level 7 it is lowered (~1.6 %
 for entropy, ~0.4 % for RLE) so the encoder buys more ratio with decode
 cycles, which is exactly the level-7 contract.
 
+**Joint flat/length nudge (levels 6-7).** Before pricing, the fitted code
+lengths are themselves optimized for the *pair* (size, decode time): a DP
+pass relaxes the canonical lengths toward flatter trees whenever the
+modeled PivCo decode saving outweighs the size cost, using the same
+per-level premium. The result is still a canonical, Kraft-exact code.
+
 #### Prefix Varint Format
 
 ZXC uses a **Prefix Varint** encoding for overflow values. Unlike standard VByte (which uses a continuation bit in every byte), Prefix Varint encodes the total length of the integer in the **unary prefix of the first byte**. This allows the decoder to determine the sequence length immediately, enabling branchless or highly predictable decoding without serial dependencies.
@@ -444,7 +450,7 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Extras Buffer*: Overflow values for lengths >= 15 (Prefix Varint encoded).
     *   *Offset Mode Selection*: The encoder tracks the maximum offset across all sequences. If all offsets are ≤ 255, the 8-bit mode (`enc_off=1`) is selected, saving 1 byte per sequence compared to 16-bit mode.
 4.  **RLE Pass**: The literals buffer is scanned for run-length encoding opportunities (runs of identical bytes). If beneficial (>10% gain), it is compressed in place.
-5.  **Entropy Pass** (level ≥ 6, ≥ 1024 literals): A length-limited canonical Huffman code (`L = 8` at level 6, `L = 11` at level 7) is fitted to the literal byte distribution and emitted in the PivCo level-ordered layout (§4.3, FORMAT.md §5.2.1). At level 7 the same treatment is applied to the sequence-token stream (`enc_litlen = 2`). Candidates are selected by the space-speed Lagrangian `J = size + premium(level) × decoded_bytes`.
+5.  **Entropy Pass** (level ≥ 6, ≥ 1024 literals): A length-limited canonical Huffman code (`L = 8` at level 6, `L = 11` at level 7) is fitted to the literal byte distribution, joint-nudged toward a flatter (faster-decoding) tree, and emitted in the PivCo level-ordered layout (§4.3, FORMAT.md §5.2.1). At level 7 the same treatment is applied to the sequence-token stream (`enc_litlen = 2`). Candidates are selected by the space-speed Lagrangian `J = size + premium(level) × decoded_bytes`.
     *   **Shared-Table Candidate** (dictionary archives only): when the dictionary carries a shared literal table (§5.10), a second entropy candidate is sized with the dictionary's code lengths and **no inline 128-byte lengths header**. The Lagrangian picks the minimum-J of {RAW, RLE, per-block Huffman, shared-table Huffman} (`enc_lit = 3` for the latter), so the choice is never a regression. Because the shared table only covers symbols seen in training, a block containing an uncovered literal byte automatically falls back to its per-block table. The 128-byte header amortization makes `enc_lit = 3` viable on literal sections far below the 1024-literal threshold of the per-block table — precisely the small-block regime dictionaries target.
 6.  **Final Serialization**: All buffers are concatenated into the payload, preceded by section descriptors.
 
