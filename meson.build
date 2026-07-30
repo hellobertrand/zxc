@@ -175,11 +175,25 @@ install_headers(
 if not meson.is_subproject() and get_option('build_cli')
   math_dep = cc.find_library('m', required : false)
 
+  cli_c_args = msvc_narrowing_args + (is_cl ? ['-D_CRT_SECURE_NO_WARNINGS'] : [])
+  cli_link_args = msvc_syntax ? ['setargv.obj'] : []
+
   executable('zxc',
     'src/cli/main.c',
+    c_args : cli_c_args,
+    link_args : cli_link_args,
     dependencies : [libzxc_dep, math_dep],
     install : true,
   )
+
+  # "unzxc" alias: a symlink to zxc that defaults to decompression. Mirrors the
+  # CMake install rule. Symbolic links are POSIX-only; skipped on Windows.
+  if host_machine.system() != 'windows'
+    install_symlink('unzxc',
+      pointing_to : 'zxc',
+      install_dir : get_option('bindir'),
+    )
+  endif
 endif
 
 # =============================================================================
