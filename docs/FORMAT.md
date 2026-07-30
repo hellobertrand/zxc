@@ -487,6 +487,13 @@ J = size + premium(level) * n_decoded_bytes, and selects the minimum
 block where the heuristic does not select a Huffman encoding keeps
 enc_lit in {0, 1}.
 
+Before that pricing, the reference encoder also applies a joint
+flat/length nudge to the fitted code lengths at levels 6-7
+(literals; level 7 also nudges the token table): it trades a few
+bytes of code-length optimality for a flatter tree whose PivCo runs
+decode faster. The nudged lengths remain an ordinary canonical,
+Kraft-exact code — decoders see nothing special.
+
 ## Shared-Table Huffman Literal Section {#shared-huffman-literal-section}
 
 enc_lit = 3 is valid only in archives compressed with a dictionary
