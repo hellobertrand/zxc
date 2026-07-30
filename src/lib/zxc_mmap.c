@@ -9,7 +9,7 @@
  * @file zxc_mmap.c
  * @brief Memory-mapped, zero-copy in-place decompression of files.
  *
- * The whole subsystem is a thin OS layer over @ref zxc_decompress_inplace: the
+ * The whole subsystem is a thin OS layer over @ref zxc_decompress_inplace. That
  * buffer-level decoder already tolerates a flush-right archive overlapping its
  * own output, so all that is missing to decode a file without copying it is a
  * way to *place* the archive at the right end of a single region.
@@ -53,16 +53,6 @@
 #define _DEFAULT_SOURCE 1
 #endif
 
-#include "../../include/zxc_mmap.h"
-
-#include <stddef.h>
-#include <stdint.h>
-
-#include "../../include/zxc_buffer.h"
-#include "../../include/zxc_constants.h"
-#include "../../include/zxc_error.h"
-#include "zxc_internal.h"
-
 /*
  * ============================================================================
  * PLATFORM SELECTION
@@ -80,6 +70,33 @@
 #define ZXC_MMAP_ENABLED 1
 #endif
 
+#include "../../include/zxc_mmap.h"
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_constants.h"
+#include "../../include/zxc_error.h"
+#include "zxc_internal.h"
+
+#if defined(ZXC_MMAP_POSIX)
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#if !defined(MAP_ANONYMOUS) && defined(MAP_ANON)
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+#if !defined(O_CLOEXEC)
+#define O_CLOEXEC 0
+#endif
+#elif defined(ZXC_MMAP_WIN32)
+#include <io.h> /* _get_osfhandle */
+#include <windows.h>
+#endif
+
 #if defined(ZXC_MMAP_ENABLED)
 
 /** @brief Release path a @ref zxc_map_t base address needs. */
@@ -93,6 +110,12 @@ enum {
 /**
  * @brief Zeroes a caller's @ref zxc_map_t so a failed call still leaves a map
  *        that is safe to pass to @ref zxc_mmap_close.
+ *
+ * Every public entry point calls this before anything can fail, which is what
+ * makes "close it even if the call errored" a valid contract.
+ *
+ * @param[out] m  Map to clear; must be non-NULL, and is left in the same state
+ *                a zero-initialised @ref zxc_map_t would be in.
  */
 static void zxc_map_reset(zxc_map_t* const m) {
     m->data = NULL;
@@ -103,7 +126,15 @@ static void zxc_map_reset(zxc_map_t* const m) {
     m->map_kind = ZXC_MAP_KIND_NONE;
 }
 
-/** @brief Rounds @p v up to the next multiple of the power-of-two @p pow2. */
+/**
+ * @brief Rounds @p v up to the next multiple of the power-of-two @p pow2.
+ *
+ * @param[in] v     Value to round. Callers check beforehand that @p v is at
+ *                  most `SIZE_MAX - (pow2 - 1)`, so the sum cannot wrap.
+ * @param[in] pow2  Alignment; must be a power of two (a page size or an
+ *                  allocation granularity, both of which always are).
+ * @return @p v rounded up to a multiple of @p pow2.
+ */
 static size_t zxc_round_up_pow2(const size_t v, const size_t pow2) {
     return (v + (pow2 - 1)) & ~(pow2 - 1);
 }
@@ -162,31 +193,45 @@ static int zxc_map_geometry(const size_t comp_size, const size_t need, const siz
  */
 #if defined(ZXC_MMAP_POSIX)
 
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-#if !defined(MAP_ANONYMOUS) && defined(MAP_ANON)
-#define MAP_ANONYMOUS MAP_ANON
-#endif
-#if !defined(O_CLOEXEC)
-#define O_CLOEXEC 0
-#endif
-
 /** @brief Descriptor the backend works on (a file descriptor here). */
 typedef int zxc_desc_t;
 
-/** @brief Opens @p path for the duration of a mapping call. */
+/**
+ * @brief Opens @p path for the duration of a mapping call.
+ *
+ * @c O_CLOEXEC keeps the descriptor from leaking into a child forked while the
+ * call runs; it degrades to 0 on systems that lack it (see the fallback above).
+ *
+ * @param[in] path  Path to open read-only.
+ * @return An open descriptor, or -1 (see @ref zxc_desc_valid). Every successful
+ *         open is closed by @ref zxc_desc_close before the entry point returns.
+ */
 static zxc_desc_t zxc_desc_open(const char* const path) { return open(path, O_RDONLY | O_CLOEXEC); }
 
-/** @brief Adopts a caller-owned descriptor (no ownership transfer). */
+/**
+ * @brief Adopts a caller-owned descriptor (no ownership transfer).
+ *
+ * @param[in] fd  Descriptor supplied by the caller of an @c _fd entry point.
+ * @return @p fd unchanged: on POSIX the backend descriptor *is* the file
+ *         descriptor, so nothing is opened and nothing must be closed.
+ */
 static zxc_desc_t zxc_desc_from_fd(const int fd) { return fd; }
 
-/** @brief True when @p d can be mapped. */
+/**
+ * @brief Reports whether @p d is a descriptor the backend can map.
+ *
+ * @param[in] d  Descriptor from @ref zxc_desc_open or @ref zxc_desc_from_fd.
+ * @return Non-zero when @p d is usable, 0 when the open failed or the caller
+ *         passed a negative descriptor (nothing to close in that case).
+ */
 static int zxc_desc_valid(const zxc_desc_t d) { return d >= 0; }
 
-/** @brief Closes a descriptor this TU opened; mappings outlive it. */
+/**
+ * @brief Closes a descriptor this TU opened; mappings outlive it.
+ *
+ * @param[in] d  Descriptor from a successful @ref zxc_desc_open. Never called on
+ *               a caller-owned descriptor, which stays the caller's to close.
+ */
 static void zxc_desc_close(const zxc_desc_t d) { (void)close(d); }
 
 /**
@@ -223,7 +268,18 @@ static int zxc_desc_size(const zxc_desc_t d, size_t* const size) {
     return ZXC_OK;
 }
 
-/** @brief Backend of @ref zxc_mmap_open: whole-file read-only private view. */
+/**
+ * @brief Backend of @ref zxc_mmap_open -- whole-file read-only private view.
+ *
+ * The mapping holds its own reference to the file, so the caller's descriptor
+ * can be closed as soon as this returns.
+ *
+ * @param[in]  d    Descriptor to map.
+ * @param[out] out  Receives the view; untouched unless the call succeeds (the
+ *                  entry point has already reset it).
+ * @return @ref ZXC_OK, the @ref zxc_desc_size error codes, or
+ *         @ref ZXC_ERROR_IO if the file cannot be mapped.
+ */
 static int zxc_map_readonly(const zxc_desc_t d, zxc_map_t* const out) {
     size_t size = 0;
     const int rc = zxc_desc_size(d, &size);
@@ -241,8 +297,25 @@ static int zxc_map_readonly(const zxc_desc_t d, zxc_map_t* const out) {
 }
 
 /**
- * @brief Backend of @ref zxc_decompress_mmap: reserve, map flush-right, decode,
- *        trim.
+ * @brief Backend of @ref zxc_decompress_mmap -- reserve, map flush-right,
+ *        decode, trim.
+ *
+ * Four steps: measure the archive and probe its in-place bound through a
+ * throw-away view, reserve one anonymous region and drop the file over its tail
+ * pages with @c MAP_FIXED, decode into the head, then unmap everything the
+ * payload does not occupy. Every failure path unmaps what it had taken, so the
+ * caller never has to release a partial region.
+ *
+ * @param[in]  d     Descriptor of the archive to decode.
+ * @param[out] out   Receives the decoded region; filled only on success.
+ * @param[in]  opts  Decompression options, or NULL for defaults.
+ * @return Decompressed size in bytes (> 0), 0 for an empty frame (nothing is
+ *         mapped, @p out stays cleared), or a negative @c zxc_error_t:
+ *         @ref ZXC_ERROR_SRC_TOO_SMALL if the file is shorter than a frame,
+ *         @ref ZXC_ERROR_BAD_HEADER if it is not a ZXC archive,
+ *         @ref ZXC_ERROR_IO on a mapping failure, @ref ZXC_ERROR_MEMORY if the
+ *         region cannot be reserved, or whatever @ref zxc_decompress_inplace
+ *         reports for a corrupt archive.
  */
 static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
                                   const zxc_decompress_opts_t* const opts) {
@@ -305,10 +378,23 @@ static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
     return decoded;
 }
 
-/** @brief Backend of @ref zxc_mmap_close (one call covers both map kinds). */
+/**
+ * @brief Backend of @ref zxc_mmap_close (one call covers both map kinds).
+ *
+ * A read-only view and a decode region both release with a single @c munmap;
+ * the kind only matters on Windows.
+ *
+ * @param[in] m  Live map; @c map_base / @c map_size describe exactly what is
+ *               still mapped, the decode path having already trimmed the rest.
+ */
 static void zxc_map_release(zxc_map_t* const m) { (void)munmap(m->map_base, m->map_size); }
 
-/** @brief Backend of @ref zxc_mmap_is_zerocopy: here every region is mapped. */
+/**
+ * @brief Backend of @ref zxc_mmap_is_zerocopy -- here every region is mapped.
+ *
+ * @param[in] m  Live map (unused: POSIX has no copying route).
+ * @return Always 1.
+ */
 static int zxc_map_zerocopy(const zxc_map_t* const m) {
     (void)m;
     return 1;
@@ -321,29 +407,59 @@ static int zxc_map_zerocopy(const zxc_map_t* const m) {
  */
 #elif defined(ZXC_MMAP_WIN32)
 
-#include <io.h> /* _get_osfhandle */
-#include <windows.h>
-
 /** @brief Descriptor the backend works on (an OS file handle here). */
 typedef HANDLE zxc_desc_t;
 
 // LCOV_EXCL_START - Win32 paths, not reachable on POSIX CI
-/** @brief Opens @p path for the duration of a mapping call. */
+/**
+ * @brief Opens @p path for the duration of a mapping call.
+ *
+ * @c FILE_SHARE_READ lets other readers (and other mappings of the same
+ * archive) proceed while this one runs; write sharing is deliberately withheld,
+ * since a file truncated underneath a live view is fatal to touch.
+ *
+ * @param[in] path  Path to open read-only.
+ * @return An open handle, or @c INVALID_HANDLE_VALUE (see @ref zxc_desc_valid).
+ *         Every successful open is closed by @ref zxc_desc_close before the
+ *         entry point returns.
+ */
 static zxc_desc_t zxc_desc_open(const char* const path) {
     return CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
                        FILE_ATTRIBUTE_NORMAL, NULL);
 }
 
-/** @brief Adopts a caller-owned CRT descriptor (no ownership transfer). */
+/**
+ * @brief Adopts a caller-owned CRT descriptor (no ownership transfer).
+ *
+ * The public API takes a CRT file descriptor on every platform, so the Windows
+ * backend translates it to the OS handle the mapping calls need.
+ * @c _get_osfhandle already returns an @c intptr_t, hence the single cast.
+ *
+ * @param[in] fd  CRT descriptor supplied by the caller of an @c _fd entry point.
+ * @return The underlying OS handle, or @c INVALID_HANDLE_VALUE for a negative
+ *         @p fd or one the CRT does not know. The handle belongs to the CRT
+ *         descriptor and is never closed here.
+ */
 static zxc_desc_t zxc_desc_from_fd(const int fd) {
     if (fd < 0) return INVALID_HANDLE_VALUE;
-    return (HANDLE)(intptr_t)_get_osfhandle(fd);
+    return (HANDLE)_get_osfhandle(fd);
 }
 
-/** @brief True when @p d can be mapped. */
+/**
+ * @brief Reports whether @p d is a handle the backend can map.
+ *
+ * @param[in] d  Handle from @ref zxc_desc_open or @ref zxc_desc_from_fd.
+ * @return Non-zero when @p d is usable, 0 for @c INVALID_HANDLE_VALUE or NULL
+ *         (nothing to close in either case).
+ */
 static int zxc_desc_valid(const zxc_desc_t d) { return d != INVALID_HANDLE_VALUE && d != NULL; }
 
-/** @brief Closes a handle this TU opened; mappings outlive it. */
+/**
+ * @brief Closes a handle this TU opened; mappings outlive it.
+ *
+ * @param[in] d  Handle from a successful @ref zxc_desc_open. Never called on a
+ *               handle borrowed from a caller's CRT descriptor.
+ */
 static void zxc_desc_close(const zxc_desc_t d) { (void)CloseHandle(d); }
 
 /**
@@ -365,7 +481,14 @@ static void zxc_map_grains(size_t* const off_gran, size_t* const page) {
 
 /**
  * @brief Measures a mappable file.
- * @see the POSIX twin above for the return-code contract.
+ *
+ * @param[in]  d     Handle to measure.
+ * @param[out] size  Receives the file size in bytes.
+ * @return @ref ZXC_OK, @ref ZXC_ERROR_IO if the size cannot be queried,
+ *         @ref ZXC_ERROR_SRC_TOO_SMALL for an empty file, or
+ *         @ref ZXC_ERROR_MEMORY if it exceeds the address space. No regular-file
+ *         check is needed here: @c CreateFileMappingA rejects what cannot back a
+ *         section, unlike @c mmap.
  */
 static int zxc_desc_size(const zxc_desc_t d, size_t* const size) {
     LARGE_INTEGER li;
@@ -381,6 +504,12 @@ static int zxc_desc_size(const zxc_desc_t d, size_t* const size) {
  *
  * The section handle is closed immediately: the returned view keeps it (and the
  * file) alive, which is what lets the descriptor be closed straight after.
+ *
+ * @param[in]  d     Handle to map.
+ * @param[out] view  Receives the view address; set only on success, and released
+ *                   with @c UnmapViewOfFile.
+ * @return @ref ZXC_OK, or @ref ZXC_ERROR_IO if the section or the view cannot be
+ *         created.
  */
 static int zxc_win_view(const zxc_desc_t d, void** const view) {
     HANDLE section = CreateFileMappingA(d, NULL, PAGE_READONLY, 0, 0, NULL);
@@ -417,7 +546,10 @@ static int zxc_win_view(const zxc_desc_t d, void** const view) {
 
 /* The MEM_EXTENDED_PARAMETER argument is always NULL here, so it is typed
  * void* rather than pulling the struct in from a newer SDK. */
+
+/** @brief Signature of @c VirtualAlloc2 (process, base, size, type, prot, ext, count). */
 typedef PVOID(WINAPI* zxc_virtual_alloc2_fn)(HANDLE, PVOID, SIZE_T, ULONG, ULONG, void*, ULONG);
+/** @brief Signature of @c MapViewOfFile3 (section, process, base, offset, size, ...). */
 typedef PVOID(WINAPI* zxc_map_view_of_file3_fn)(HANDLE, HANDLE, PVOID, ULONG64, SIZE_T, ULONG,
                                                 ULONG, void*, ULONG);
 
@@ -435,6 +567,8 @@ typedef struct {
  * @c FARPROC values are copied instead of cast so no toolchain objects to the
  * function-pointer conversion.
  *
+ * @param[out] fns  Receives both entry points; cleared first, so the struct is
+ *                  never left holding one resolved pointer and one stale value.
  * @return @ref ZXC_OK, or @ref ZXC_ERROR_UNSUPPORTED when this Windows lacks
  *         the placeholder APIs.
  */
@@ -462,6 +596,13 @@ static int zxc_win_ext_resolve(zxc_win_ext_t* const fns) {
  * decoder's writes over consumed compressed bytes private, so the archive on
  * disk is never modified. The size arguments are 0 on purpose: an explicit size
  * beyond the file, with a write-capable protection, would *grow* the file.
+ *
+ * @param[in]  d        Handle of the archive.
+ * @param[out] section  Receives the section handle; set only on success, and
+ *                      closed by the caller once a view exists (a live view
+ *                      keeps the section alive on its own).
+ * @return @ref ZXC_OK, or @ref ZXC_ERROR_IO when the file cannot back a
+ *         copy-on-write section, which sends the caller to the copying route.
  */
 static int zxc_win_section_cow(const zxc_desc_t d, HANDLE* const section) {
     HANDLE s = CreateFileMappingA(d, NULL, PAGE_WRITECOPY, 0, 0, NULL);
@@ -536,7 +677,14 @@ static int zxc_win_place(const HANDLE section, const size_t comp_size, const siz
     return ZXC_OK;
 }
 
-/** @brief Backend of @ref zxc_mmap_open: whole-file read-only view. */
+/**
+ * @brief Backend of @ref zxc_mmap_open -- whole-file read-only view.
+ *
+ * @param[in]  d    Handle to map.
+ * @param[out] out  Receives the view; untouched unless the call succeeds.
+ * @return @ref ZXC_OK, the @ref zxc_desc_size error codes, or
+ *         @ref ZXC_ERROR_IO if the file cannot be mapped.
+ */
 static int zxc_map_readonly(const zxc_desc_t d, zxc_map_t* const out) {
     size_t size = 0;
     int rc = zxc_desc_size(d, &size);
@@ -555,13 +703,21 @@ static int zxc_map_readonly(const zxc_desc_t d, zxc_map_t* const out) {
 }
 
 /**
- * @brief Backend of @ref zxc_decompress_mmap: place (or copy) the archive
+ * @brief Backend of @ref zxc_decompress_mmap -- place (or copy) the archive
  *        flush-right in a single region, decode, trim.
  *
  * Prefers the placeholder placement (@ref zxc_win_place, zero-copy). Older
  * Windows, or a file that cannot back a copy-on-write section, fall back to one
  * reservation plus a single copy of the archive: still one region, still no
  * output allocation. @ref zxc_mmap_is_zerocopy reports which route ran.
+ *
+ * @param[in]  d     Handle of the archive to decode.
+ * @param[out] out   Receives the decoded region; filled only on success, with
+ *                   @c map_kind recording which of the two routes produced it.
+ * @param[in]  opts  Decompression options, or NULL for defaults.
+ * @return Decompressed size in bytes (> 0), 0 for an empty frame (nothing is
+ *         mapped, @p out stays cleared), or a negative @c zxc_error_t -- see the
+ *         POSIX twin above, whose error contract this shares.
  */
 static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
                                   const zxc_decompress_opts_t* const opts) {
@@ -580,9 +736,12 @@ static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
     (void)UnmapViewOfFile(probe);
     if (UNLIKELY(need == 0)) return ZXC_ERROR_BAD_HEADER;
 
-    size_t off_gran = 0, page = 0;
+    size_t off_gran = 0;
+    size_t page = 0;
     zxc_map_grains(&off_gran, &page);
-    size_t off = 0, capacity = 0, region = 0;
+    size_t off = 0;
+    size_t capacity = 0;
+    size_t region = 0;
     rc = zxc_map_geometry(comp_size, need, off_gran, page, &off, &capacity, &region);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
 
@@ -647,7 +806,13 @@ static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
     return decoded;
 }
 
-/** @brief Backend of @ref zxc_mmap_close: views unmap, reservations release. */
+/**
+ * @brief Backend of @ref zxc_mmap_close -- views unmap, reservations release.
+ *
+ * @param[in] m  Live map. @c map_kind selects the release path and @c map_handle
+ *               carries the archive view still to unmap, if the trim could not
+ *               already give it back.
+ */
 static void zxc_map_release(zxc_map_t* const m) {
     if (m->map_kind == ZXC_MAP_KIND_VIEW) {
         (void)UnmapViewOfFile(m->map_base);
@@ -660,7 +825,13 @@ static void zxc_map_release(zxc_map_t* const m) {
     (void)VirtualFree(m->map_base, 0, MEM_RELEASE);
 }
 
-/** @brief Backend of @ref zxc_mmap_is_zerocopy: only the copy route copies. */
+/**
+ * @brief Backend of @ref zxc_mmap_is_zerocopy -- only the copy route copies.
+ *
+ * @param[in] m  Live map.
+ * @return 1 for a read-only view and for a placeholder-placed decode region,
+ *         0 for @ref ZXC_MAP_KIND_REGION, the route that copied the archive.
+ */
 static int zxc_map_zerocopy(const zxc_map_t* const m) { return m->map_kind != ZXC_MAP_KIND_REGION; }
 // LCOV_EXCL_STOP
 
@@ -690,7 +861,7 @@ int zxc_mmap_supported(void) { return 1; }
  */
 // cppcheck-suppress unusedFunction
 int zxc_mmap_is_zerocopy(const zxc_map_t* const map) {
-    if (!map || !map->data) return 0;
+    if (UNLIKELY(!map || !map->data)) return 0;
     return zxc_map_zerocopy(map);
 }
 
