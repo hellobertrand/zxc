@@ -387,16 +387,15 @@ Overflow rules:
 
 ## 5.4 GUL block (`type=3`)
 
-`GUL` (*General, ULtra-throughput*) serves levels 3-5
-with a light, byte-oriented sequence format built for branch-free decoding:
-every sequence is **1 token byte + 2 offset bytes**, matches are 4..32
-bytes at distances of at least 33, and a mandatory raw tail provides the
-read/write margin that removes per-sequence bounds tests from the hot loop.
+`GUL` (*General, ULtra-throughput*) serves levels 3-5 with a light,
+byte-oriented format built for branch-free decoding: every sequence is
+**1 token byte + 2 offset bytes**, matches are 4..32 bytes at distances of at
+least 33, and a mandatory raw tail supplies the read/write margin that removes
+per-sequence bounds tests from the hot loop.
 
-Because every distance exceeds the 32-byte maximum match length, a match
-copy can never overlap its destination: the decoder resolves **any** match
-with a single unconditional 32-byte wild copy -- no overlap tiers, no
-length loop, no per-block copy modes.
+Every distance exceeds the 32-byte maximum length, so a match copy can never
+overlap its destination: the decoder resolves **any** match with one
+unconditional 32-byte wild copy -- no overlap tiers, no length loop.
 
 ### GUL payload layout
 
@@ -414,9 +413,9 @@ length loop, no per-block copy modes.
 +-------------------------------+
 ```
 
-Ordering is normative: the token stream and tail sit after the literals so
-that wild over-reads of the literals stream, and the trailing 32-bit load
-at the last token, land inside the payload.
+Ordering is normative: tokens and tail sit after the literals so that
+over-reads of the literals stream, and the 32-bit load at the last token,
+land inside the payload.
 
 ### GUL header (16 bytes)
 
@@ -430,21 +429,18 @@ Offset  Size  Field
 0x0C    4     tail_len     (u32, LE)
 ```
 
-Entropy coding is deliberately excluded from this block type: a serial bit
-reader reintroduces the dependency GUL exists to remove. Blocks that profit
-from entropy coding belong to GLO. `n_sequences` MAY be 0.
+Entropy coding is deliberately excluded: a serial bit reader reintroduces the
+dependency GUL exists to remove. Blocks that profit from it belong to GLO.
+`n_sequences` MAY be 0.
 
-`tail_len` is a full 32-bit field because the tail is *everything after
-the last emitted match*: with `n_sequences = 0` it spans the whole block,
-and blocks go up to 2 MiB (§3) -- far past a 16-bit range. The u32 also
-keeps the four header fields at the same offsets as the GLO/GHI headers,
-so header parsing stays shared; a narrower field would not shrink the
-16-byte header anyway.
+`tail_len` is 32-bit because the tail is *everything after the last emitted
+match*: with `n_sequences = 0` it spans the whole block, and blocks reach 2 MiB
+(§3). It also keeps the header fields at the GLO/GHI offsets.
 
 ### GUL section descriptors (2 × 8 bytes)
 
-Same packed `u64` as GLO/GHI (low 32 = compressed size, high 32 = raw size;
-`comp == raw` here, both sections are stored raw):
+Same packed `u64` as GLO/GHI (low 32 = compressed, high 32 = raw), with
+`comp == raw`: both sections are stored raw.
 
 | # | section | size |
 |---|---|---|
@@ -469,31 +465,27 @@ Each sequence is a token byte followed by a 16-bit offset:
   3 bits     5 bits            2 bytes
 ```
 
-- **LL** -- inline literal length. Values 0..6 are exact; the value 7
-  escapes to extra bytes appended after the offset: blocks of 255
-  terminated by a byte < 255, summed into the literal length
-  (`LL = 7 + sum`).
-- **ML** -- match-length code, decoded as `length = ML + 1`. The bias of 1
-  maps the 32 code points exactly onto lengths 1..32, so **every** value of
-  the field is valid and no decoder needs to test it. Encoders emit codes
-  3..31 (lengths 4..32); codes 0..2 are never produced but decode normally.
-  Because no length can exceed 32 — the copy width the minimum distance is
-  built around — a bounds-checking decoder and a wild-copy decoder produce
-  the same output for every input, valid or not.
-- **OFF** -- match distance stored biased:
-  `distance = OFF + 33`. Reachable window: `[33, 65568]`, never crossing a
-  block boundary (a dictionary prefix counts as already-produced history,
-  §12). `distance` MUST NOT exceed the output position where the match
-  decodes.
+- **LL** -- inline literal length. Values 0..6 are exact; 7 escapes to extra
+  bytes appended after the offset (blocks of 255 terminated by a byte < 255,
+  `LL = 7 + sum`).
+- **ML** -- match-length code, decoded as `length = ML + 1`. The bias of 1 maps
+  the 32 code points exactly onto lengths 1..32, so **every** value of the
+  field is valid and no decoder needs to test it. Encoders emit codes 3..31
+  (lengths 4..32); codes 0..2 are never produced but decode normally. No length
+  can exceed 32, the copy width the minimum distance is built around.
+- **OFF** -- match distance, stored biased: `distance = OFF + 33`. Window
+  `[33, 65568]`, never crossing a block boundary (a dictionary prefix counts as
+  already-produced history, §12). `distance` MUST NOT exceed the output
+  position where the match decodes.
 
 ### Literals stream and tail
 
 The **Literals stream** holds `n_literals` raw bytes in consumption order;
 `n_literals` equals the sum of all decoded literal lengths.
 
-The **Tail** holds the last `tail_len` bytes of the block's uncompressed
-data, verbatim, covered by no sequence. After the token loop the decoder
-appends it with one `memcpy`. Constraints:
+The **Tail** holds the last `tail_len` bytes of the block's uncompressed data
+verbatim, covered by no sequence; the decoder appends it after the token loop.
+Constraints:
 
 - `tail_len >= 32`
 - `tail_len <= uncompressed_size`
@@ -529,26 +521,22 @@ A decoder MUST reject with `ZXC_ERROR_CORRUPT_DATA`:
 
 `ZXC_ERROR_BAD_BLOCK_SIZE` when `dst_capacity` is insufficient.
 
-Every check above is either per-block or already implied by the stream
-bounds, and no token field has an invalid value to test for (§ GUL sequence
-encoding). A GUL decoder therefore needs no strict-tail variant: one loop is
-both the fast path and the validating path, and no input can make two
-conforming decoders disagree.
+Every check above is per-block or implied by the stream bounds, and no token
+field has an invalid value to test for (§ GUL sequence encoding). A GUL decoder
+therefore needs no strict-tail variant: one loop is both the fast path and the
+validating path, and no input can make two conforming decoders disagree.
 
-*(non-normative)* The reference encoder emits GUL at levels 3-5. The
-three levels share the wire and differ in parse profile. Decode cost is
-per sequence, so throughput is bytes covered per token: levels 3-4 use a
-sparse acceptance policy (only long matches are taken, pending literal
-runs are flushed in bulk) that emits few sequences and decodes fastest,
-while level 5 parses densely for the best ratio -- so decode speed
-decreases as the ratio improves, and higher levels also pay compression
-speed. The match finder is a 16-bit hash over 4-byte grams whose buckets
-are rings of truncated positions probed with 32-byte vector compares,
-lagged 32 bytes behind the scan cursor so every candidate satisfies the
-minimum distance by construction. Highly repetitive blocks whose long
-matches would shatter on the 32-byte cap are re-priced against a GLO
-encoding and swapped only when GLO wins by a clear space-speed margin;
-blocks that would expand, and blocks under 128 bytes, fall back to RAW.
+*(non-normative)* The three levels share the wire and differ only in parse
+profile. Decode cost is per sequence, so throughput is bytes covered per token:
+levels 3-4 accept only long matches and flush pending literal runs in bulk,
+emitting few sequences and decoding fastest, while level 5 parses densely for
+the best ratio -- decode speed therefore decreases as the ratio improves. The
+match finder is a 16-bit hash over 4-byte grams whose buckets are rings of
+truncated positions probed with 32-byte vector compares, lagged 32 bytes behind
+the scan cursor so every candidate meets the minimum distance by construction.
+Repetitive blocks whose long matches would shatter on the 32-byte cap are
+re-priced against GLO and swapped only on a clear space-speed win; blocks that
+would expand, and blocks under 128 bytes, fall back to RAW.
 
 ---
 
@@ -713,7 +701,7 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 ### 10.3 Compatibility rules
 
 - **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version with `ZXC_ERROR_BAD_VERSION`. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
-- **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version (`ZXC_ERROR_BAD_BLOCK_TYPE`); decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe. Because rejection is guaranteed, a new block type **may** be introduced within a version as a purely additive extension (readers that predate it fail cleanly at the first such block — this is how GUL, type 3, was added to version 7, see §1). Changing the meaning of an **existing** type or structure remains a version bump.
+- **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version (`ZXC_ERROR_BAD_BLOCK_TYPE`); decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe. Because rejection is guaranteed, a new type **may** be added within a version as a purely additive extension: older readers fail cleanly at the first such block (this is how GUL, type 3, entered version 7). Changing an **existing** type or structure remains a version bump.
 - **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header CRC, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension.
 - **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values (`ZXC_ERROR_BAD_HEADER`).
 
@@ -725,8 +713,8 @@ A minimal conforming decoder for version 7 **MUST** support:
 - **GLO** blocks (type 1) - full LZ decode with extras varint, including Huffman
   entropy sections (§5.2.1, PivCo layout) with code lengths up to 11 bits.
 - **GHI** blocks (type 2) - full LZ decode with extras varint.
-- **GUL** blocks (type 3) - byte-oriented sequence decode with the
-  alias-free single-copy contract and mandatory tail (§5.4).
+- **GUL** blocks (type 3) - byte-oriented sequence decode, alias-free single
+  copy, mandatory tail (§5.4).
 - **EOF** block (type 255) - stream termination.
 - File footer validation (source size check).
 

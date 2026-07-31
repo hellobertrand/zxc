@@ -230,9 +230,8 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
                   type == GC_BLOCK_GUL,
               "unexpected block type %u at %zu", type, off);
         if (gc->expect_data_type != GC_ANY_TYPE)
-            /* A GUL block where GLO was pinned means the space-speed swap no
-             * longer fires for this input, not that the file is corrupt: the
-             * levels 3-5 cases only emit GLO through that heuristic. */
+            /* GUL where GLO was pinned = the swap stopped firing, not a
+             * corrupt file (levels 3-5 reach GLO only through it). */
             CHECK(type == gc->expect_data_type, "block type %u, expected %u at %zu%s", type,
                   gc->expect_data_type, off,
                   (type == GC_BLOCK_GUL && gc->expect_data_type == GC_BLOCK_GLO)

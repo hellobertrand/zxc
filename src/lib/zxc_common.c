@@ -251,12 +251,11 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
             layout.total += ZXC_ALIGN_CL(layout.sz_opt);
         }
 
-        /* GUL encoder buffers (levels 3-5): the 16-bit hash table of
-         * ZXC_GUL_RING-entry position rings + per-bucket cursors, and a
-         * chunk-sized staging buffer for the variable-length token stream.
-         * Levels 1-2 (GHI) and 6+ (GLO) pay nothing for them. Levels 3-5
-         * share one ring-16-wide carve (the shallow tiers use a prefix), so
-         * a context survives level changes within the GUL range. */
+        /* GUL encoder buffers (levels 3-5): hash table of ZXC_GUL_RING-entry
+         * position rings + per-bucket cursors + chunk-sized token staging.
+         * Levels 1-2 and 6+ pay nothing. Levels 3-5 share one ring-16-wide
+         * carve (shallow tiers use a prefix), so a context survives level
+         * changes within the GUL range. */
         if (ZXC_LEVEL_USES_GUL(level)) {
             layout.sz_gul_chain =
                 ((size_t)1 << ZXC_GUL_HASH_BITS) * ZXC_GUL_RING * sizeof(uint16_t);
@@ -383,8 +382,8 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
         ctx->gul_seq = mem + layout.off_gul_matches +
                        ZXC_ALIGN_CL(((size_t)1 << ZXC_GUL_HASH_BITS) * sizeof(uint8_t));
         /* Only the cursors are cleared, once: every htab read is guarded by a
-         * live epoch, and a bucket's ring is zeroed when this block first
-         * inserts into it. gul_htab itself is never memset. */
+         * live epoch, and a ring is zeroed on this block's first insertion.
+         * gul_htab itself is never memset. */
         ZXC_MEMSET(ctx->gul_hidx, 0, (size_t)1 << ZXC_GUL_HASH_BITS);
         ctx->gul_epoch = 0;
     }
@@ -870,9 +869,9 @@ int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
 /**
  * @brief Serialises a GUL block header followed by its section descriptors.
  *
- * Wire layout (FORMAT.md 5.4): n_sequences (u32) | n_literals (u32) |
- * 4 reserved bytes (mirroring the GLO/GHI enc_* fields, must be 0: GUL
- * sections are always stored raw) | tail_len (u32), then 2 descriptors.
+ * Wire layout (FORMAT.md 5.4): n_sequences (u32) | n_literals (u32) | 4
+ * reserved bytes (the GLO/GHI enc_* fields, always 0 here) | tail_len (u32),
+ * then 2 descriptors.
  *
  * @param[out] dst  Destination buffer.
  * @param[in]  rem  Remaining capacity of @p dst.
@@ -905,8 +904,8 @@ int zxc_write_gul_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
 /**
  * @brief Parses a GUL block header and its section descriptors from @p src.
  *
- * Rejects non-zero reserved bytes: GUL is a new block type, there is no legacy to
- * tolerate, so this is stricter than the FORMAT.md 10.3 reserved-field rule.
+ * Rejects non-zero reserved bytes: GUL is a new block type with no legacy to
+ * tolerate, so this is stricter than the FORMAT.md 10.3 rule.
  *
  * @param[in]  src  Source buffer.
  * @param[in]  len  Size of @p src.

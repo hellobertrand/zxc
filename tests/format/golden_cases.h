@@ -225,10 +225,9 @@ static size_t gc_make_huffman_dict_payload(uint8_t** out) {
 }
 
 /* Stream of fixed-size records picked from a small pseudo-random pool: dense
- * short matches (well under the 32-byte cap) at distances >= ZXC_GUL_MIN_DIS,
- * the GUL light format's bread and butter. @p rec (<= GC_GUL_REC_MAX) bytes
- * are drawn per pool entry and the picks come from the same generator right
- * after: the frozen goldens depend on that exact draw order. */
+ * short matches at distances >= ZXC_GUL_MIN_DIS, GUL's bread and butter.
+ * @p rec (<= GC_GUL_REC_MAX) bytes are drawn per pool entry, then the picks
+ * come from the same generator: the frozen goldens depend on that order. */
 #define GC_GUL_REC_MAX 48
 static size_t gc_make_gul_records_n(uint8_t** out, int rec, uint32_t seed) {
     enum { POOL = 64 };
@@ -332,15 +331,12 @@ typedef struct {
  * literal lengths, 15 = the escape path, 17 = the deep (level 5) tier on
  * guard-proof sub-32-byte records.
  *
- * Maintenance note: the six GC_BLOCK_GLO rows at levels 3-5 (04, 06, 07, 08,
- * 09, 10) are the only entries whose block type is an *encoder policy*
- * outcome rather than a format property -- they hold only as long as the
- * GUL->GLO swap keeps firing (ZXC_GUL_GUARD_PCT / ZXC_GUL_SWAP_MARGIN_PCT).
- * Retuning either knob does not invalidate the frozen files (CI never
- * re-compresses them), but the next regeneration will flip those six to GUL.
- * When that happens, decide per case: re-pin expect_data_type to GC_BLOCK_GUL
- * if the case is about blocks/checksums/seek tables, or move it to level 6,
- * where GLO is unconditional, if it is really about the GLO payload. */
+ * Maintenance note: the six GC_BLOCK_GLO rows at levels 3-5 (04, 06-10) hold
+ * their type by encoder policy, not by format -- only while the GUL->GLO swap
+ * keeps firing (ZXC_GUL_GUARD_PCT / ZXC_GUL_SWAP_MARGIN_PCT). Retuning either
+ * knob leaves the frozen files valid (CI never re-compresses) but flips those
+ * six at the next regeneration: re-pin expect_data_type, or move the case to
+ * level 6 where GLO is unconditional. */
 /* The column alignment below is the documentation; keep it hand-aligned. */
 /* clang-format off */
 static const golden_case_t GOLDEN_CASES[] = {

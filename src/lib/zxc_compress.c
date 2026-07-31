@@ -2067,29 +2067,27 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 /* ==========================================================================
  * GUL (General ULtra-throughput) encoder -- FORMAT.md 5.4.
  *
- * Light byte-oriented format: every sequence is 1 token byte (inline
- * literal length in the top 3 bits, match-length code in the low 5) plus a
- * 16-bit offset stored biased by ZXC_GUL_MIN_DIS. Matches are 4..32 bytes
- * and never closer than 33 (the hash window lags the scan cursor by 32), so
- * the decoder resolves every match with ONE unconditional 32-byte copy --
- * no overlap handling, no length loop. Inline literal length 7
- * escapes to extra bytes (blocks of 255 terminated by a byte < 255).
+ * Every sequence is 1 token byte (inline literal length in the top 3 bits,
+ * match-length code in the low 5) plus a 16-bit offset biased by
+ * ZXC_GUL_MIN_DIS. Matches are 4..32 bytes and never closer than 33 (the hash
+ * window lags the scan cursor by 32), so the decoder resolves every match with
+ * ONE unconditional 32-byte copy. Inline literal length 7 escapes to extra
+ * bytes (blocks of 255 terminated by a byte < 255).
  *
- * The match finder is a 16-bit hash over 4-byte grams whose buckets are
- * rings of ZXC_GUL_RING truncated positions, probed fully unrolled with
- * 32-byte vector LCPs (memory-level parallelism), plus a short lookahead.
- * The tables start every block logically empty, but small blocks are not
- * memset: an epoch tag in the per-bucket cursor invalidates stale buckets
- * lazily (see the table-clearing comment in the encoder). Either way, thanks
- * to the insertion lag, every probe resolves to an in-range candidate and
- * bogus ones lose the compare.
+ * The match finder is a 16-bit hash over 4-byte grams whose buckets are rings
+ * of ZXC_GUL_RING truncated positions, probed fully unrolled with 32-byte
+ * vector LCPs, plus a short lookahead. Tables start every block logically
+ * empty; small blocks skip the memset via an epoch tag in the per-bucket
+ * cursor (see the table-clearing comment in the encoder). Either way the
+ * insertion lag keeps every probe on an in-range candidate, and bogus ones
+ * lose the compare.
  * ========================================================================== */
 
 /** @name GUL encoder tuning (encoder policy, `#ifndef`-guarded for sweeps)
  *  @{ */
 /** @brief Lookahead give-up bar: past this length a probe that fails to
- *         improve ends the lookahead. Distinct from zxc_gul_params_t.la_gate,
- *         which is the per-tier length that ends it outright. */
+ *         improve ends it. Distinct from zxc_gul_params_t.la_gate, the
+ *         per-tier length that ends it outright. */
 #ifndef ZXC_GUL_LA_IMPROVE
 #define ZXC_GUL_LA_IMPROVE 8
 #endif
@@ -2097,11 +2095,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 #ifndef ZXC_GUL_SKIP_SHIFT
 #define ZXC_GUL_SKIP_SHIFT 6
 #endif
-/** @brief Smallest match the encoder emits, on every tier: the dense
- *         acceptance bar and the sparse tiers' flush bar both read it, so a
- *         sweep moves all three levels at once.
- *         Measured: raising it degrades ratio AND decode (the freed bytes
- *         densify the literal-escape path); keep at the wire minimum. */
+/** @brief Smallest match emitted, on every tier (dense acceptance bar and
+ *         sparse flush bar alike). Measured: raising it degrades ratio AND
+ *         decode (freed bytes densify the literal-escape path). */
 #ifndef ZXC_GUL_MIN_EMIT
 #define ZXC_GUL_MIN_EMIT ZXC_GUL_MIN_MATCH
 #endif
@@ -2199,10 +2195,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_gul_probe(const uint8_t* RESTRICT base, co
     size_t cand_out = 0;
     if (LIKELY(live)) {
         for (int i = 0; i < ring_n; i++) {
-            /* Truncated-position trick: the lag guarantees real entries sit at
-             * least MIN_DIS back, so d reconstructs an in-window candidate; a
-             * wrapped (stale/zero) entry yields a valid position whose content
-             * simply fails the compare. */
+            /* Truncated-position trick: the lag puts real entries at least
+             * MIN_DIS back, so d reconstructs an in-window candidate; a
+             * wrapped entry yields a valid position that fails the compare. */
             const uint16_t d = (uint16_t)(at - ring[i] - ZXC_GUL_MIN_DIS);
             const size_t cand = at - ZXC_GUL_MIN_DIS - (size_t)d;
             const uint32_t l = zxc_gul_lcp32(base + at, base + cand);
@@ -2212,9 +2207,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_gul_probe(const uint8_t* RESTRICT base, co
             }
         }
     } else {
-        /* Stale bucket: identical to the all-zero ring the per-block memset
-         * used to leave behind. All ring_n zero entries reconstruct the same
-         * candidate, so one probe gives the same answer for 1/ring_n the work. */
+        /* Stale bucket: same as the all-zero ring the memset used to leave.
+         * All ring_n zero entries reconstruct the SAME candidate, so one probe
+         * gives the identical answer for 1/ring_n of the work. */
         const uint16_t d = (uint16_t)(at - ZXC_GUL_MIN_DIS);
         const size_t cand = at - ZXC_GUL_MIN_DIS - (size_t)d;
         const uint32_t l = zxc_gul_lcp32(base + at, base + cand);
@@ -2269,16 +2264,15 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
     /* Two ways to start from a logically empty table, picked by block size.
      *
      * A block smaller than the bucket count touches only a fraction of the
-     * table, so epoch tagging pays: a bucket belongs to this block only while
-     * its stored epoch matches, its ring is cleared when the block first
-     * inserts into it (the line is being written anyway), and the 1-2 MiB
-     * memset disappears. That matters most at 4-16 KiB blocks, where the
-     * memset used to cost more than the compression itself.
+     * table, so epoch tagging pays: a bucket is this block's only while its
+     * stored epoch matches, its ring is cleared on first insertion, and the
+     * 1-2 MiB memset disappears. At 4-16 KiB blocks that memset used to cost
+     * more than the compression itself.
      *
-     * Past that size nearly every bucket is touched, the lazy clears stop
-     * saving work and their first-touch branch turns unpredictable, so the
-     * sequential memset wins. It leaves every cursor zeroed, which epoch 0
-     * reads as live: the same insert/probe code then runs branch-free. */
+     * Past that size nearly every bucket is touched, so the lazy clears stop
+     * saving work and their first-touch branch turns unpredictable: the
+     * sequential memset wins. It zeroes every cursor, which epoch 0 reads as
+     * live, so the same insert/probe code runs branch-free. */
     uint32_t epoch_mark = 0;
     if (block_sz < ((size_t)1 << ZXC_GUL_HASH_BITS)) {
         ctx->gul_epoch++;
@@ -2320,10 +2314,9 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
                 const uint32_t slot = hidx[h];
                 uint32_t c = slot & ZXC_GUL_CURSOR_MASK;
                 if (!ZXC_GUL_LIVE(slot, epoch_mark)) {
-                    /* First insertion of this block into the bucket: zero the
-                     * ring so its unused slots probe exactly as the per-block
-                     * memset used to leave them. The line is being written
-                     * anyway, and ring_n is a compile-time constant. */
+                    /* First insertion of this block: zero the ring so its
+                     * unused slots probe exactly as the memset left them. The
+                     * line is being written anyway. */
                     ZXC_MEMSET(&htab[h * (size_t)ring_n], 0, (size_t)ring_n * sizeof(uint16_t));
                     c = 0;
                 }
@@ -2341,18 +2334,16 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
                                      ZXC_GUL_LIVE(hidx[h], epoch_mark), &best_cand);
         }
 
-        /* Captured BEFORE any flush regression: the post-emission clamp
-         * must restore the scan cursor to the probe position, or the scan
-         * could move net-backwards past already-inserted hash entries. */
+        /* Captured BEFORE any flush regression: the post-emission clamp must
+         * restore it, or the scan moves net-backwards past inserted entries. */
         const size_t probe_pos = pos;
         int accept =
             accept_len > 0 ? best_len >= (uint32_t)accept_len : best_len >= ZXC_GUL_MIN_EMIT;
         if (accept_len > 0 && !accept) {
-            /* Sparse profile: sub-bar matches are only taken to flush a
-             * pending literal run (misa77-loose-style policy: keeps the
-             * inline LL field small and the sequence count low); otherwise
-             * the best of them is remembered as the flush candidate. The
-             * flush bar is ZXC_GUL_MIN_EMIT, same as the dense tier's. */
+            /* Sparse profile: a sub-bar match is taken only to flush a pending
+             * literal run (keeps the inline LL field small and the sequence
+             * count low); otherwise the best one is remembered as the flush
+             * candidate. Flush bar = ZXC_GUL_MIN_EMIT, as on the dense tier. */
             if (pos - lit >= (size_t)ZXC_GUL_FIRE_AT) {
                 if (cand_len != 0 &&
                     (best_len < ZXC_GUL_MIN_EMIT || cand_pos + cand_len >= pos + best_len)) {
@@ -2389,9 +2380,8 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
             }
 
 #if ZXC_GUL_BACKEXT
-            /* Extend the match backwards over pending literals: the distance
-             * is unchanged and net scan progress stays positive, so the
-             * insertion-lag invariant holds. */
+            /* Extend backwards over pending literals: same distance, net scan
+             * progress still positive, so the insertion lag holds. */
             while (pos > lit && best_cand > 0 && best_len < ZXC_GUL_MAX_MATCH &&
                    base[pos - 1] == base[best_cand - 1]) {
                 pos--;
@@ -2400,9 +2390,8 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
             }
 #endif
 
-            /* Token byte + 2 offset bytes (+ literal-length escape bytes).
-             * Stream bound: 4n + lo/255 <= block (every match covers >= 4
-             * bytes), so seq_buf never outgrows its chunk-sized staging. */
+            /* Token + 2 offset bytes (+ LL escape bytes). Stream bound:
+             * 4n + lo/255 <= block, so seq_buf never outgrows its staging. */
             const size_t ll = pos - lit;
             const uint32_t lrem = (ll < ZXC_GUL_LL_ESCAPE) ? (uint32_t)ll : ZXC_GUL_LL_ESCAPE;
             seq_buf[so] = (uint8_t)((lrem << ZXC_GUL_ML_BITS) | (best_len - ZXC_GUL_ML_BIAS));
@@ -2471,14 +2460,12 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
     if (UNLIKELY(hw < 0)) return hw;
 
-    /* Pathological-repetition guard: long matches shatter on the 32-byte
-     * cap (3 bytes per 32 covered = a ~9.4% floor), where GLO's varint
-     * match lengths stay tiny. When max-length tokens exceed the threshold,
-     * price a GLO encoding of the same block and keep the smaller result.
+    /* Pathological-repetition guard: long matches shatter on the 32-byte cap
+     * (3 bytes per 32 covered = a ~9.4% floor) where GLO's varint lengths stay
+     * tiny. Past the threshold, price a GLO encoding and keep the smaller.
      * GUL is already serialized into dst, so GLO prices into the now-free
-     * token staging (it may clobber the literal staging freely) and only a
-     * winning GLO is copied over -- pricing can never corrupt the GUL
-     * fallback, and a lower threshold only costs compression time. */
+     * token staging and only a winner is copied over: pricing can never
+     * corrupt the GUL fallback. */
     if (glo_fallback && UNLIKELY((uint64_t)n_max * 100U > (uint64_t)n_seq * ZXC_GUL_GUARD_PCT)) {
         size_t w_glo = 0;
         if (zxc_encode_block_glo(ctx, src, src_sz, seq_buf, block_sz + ZXC_PAD_SIZE, &w_glo) ==
@@ -2579,10 +2566,8 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
         /* Levels 1-2: GHI (fast fixed-width encoder, v7 behavior). */
         res = zxc_encode_block_ghi(ctx, chunk, src_sz, dst, dst_cap, &w);
     } else if (ZXC_LEVEL_USES_GUL(ctx->compression_level)) {
-        /* Levels 3-5: GUL with increasing search effort. Declines (blocks
-         * under 128 bytes, no shrink) and pathologically repetitive blocks
-         * (space-speed-guarded swap, see ZXC_GUL_GUARD_PCT) go to GLO
-         * before the final RAW fallback below. */
+        /* Levels 3-5: GUL with increasing search effort. Declines (under 128
+         * bytes, no shrink) fall through to GLO, then RAW below. */
         res = (ctx->compression_level == ZXC_LEVEL_DEFAULT)
                   ? zxc_encode_block_gul_l3(ctx, chunk, src_sz, dst, dst_cap, &w)
               : (ctx->compression_level == ZXC_LEVEL_BALANCED)

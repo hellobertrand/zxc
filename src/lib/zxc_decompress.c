@@ -1476,26 +1476,24 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
 /* ==========================================================================
  * GUL (General ULtra-throughput) decoder -- FORMAT.md 5.4.
  *
- * Light byte-oriented format: 1 token byte `LL3|ML5` + 2 offset bytes per
- * sequence. Distances are stored biased by ZXC_GUL_MIN_DIS (= 33), so every
- * match lies at least 33 back while lengths cap at 32: ONE unconditional
+ * 1 token byte `LL3|ML5` + 2 offset bytes per sequence. Distances are biased
+ * by ZXC_GUL_MIN_DIS (= 33) and lengths cap at 32, so ONE unconditional
  * 32-byte wild copy resolves any match, alias-free -- no overlap tiers, no
- * length loop, no per-block copy classes. Inline literal length 7 escapes
- * to extra bytes (blocks of 255 terminated by a byte < 255). The mandatory
- * raw tail (>= ZXC_GUL_TAIL_MIN) supplies the in-payload read margin for
- * wild literal copies and is appended with one memcpy after the loop.
+ * length loop. Inline literal length 7 escapes to extra bytes (blocks of 255
+ * terminated by a byte < 255). The mandatory raw tail (>= ZXC_GUL_TAIL_MIN)
+ * supplies the read margin for wild literal copies and is appended with one
+ * memcpy after the loop.
  * ========================================================================== */
 
 /**
  * @brief Unified GUL block decoder body, shared by the plain, strict-tail and
  *        dictionary variants (@p has_dict is a compile-time flag).
  *
- * There is no separate strict-tail loop: the fast loop's per-iteration margin
- * (::ZXC_GUL_MAX_OUT_PER_SEQ + ::ZXC_PAD_SIZE) already keeps every wild copy
- * inside @p dst_capacity, and every match-length code is valid by construction
- * (bias 1 maps the field exactly onto lengths 1..::ZXC_GUL_MAX_MATCH), so one
- * body serves both entry points and cannot diverge from itself on corrupt
- * input.
+ * No separate strict-tail loop is needed: the fast loops' per-iteration margin
+ * (::ZXC_GUL_MAX_OUT_PER_SEQ + ::ZXC_PAD_SIZE) keeps every wild copy inside
+ * @p dst_capacity, and every match-length code is valid by construction (bias
+ * 1 maps the field onto lengths 1..::ZXC_GUL_MAX_MATCH), so one body serves
+ * both entry points and cannot diverge from itself on corrupt input.
  *
  * The serial loop is intentional: at ~3 bytes of stream per sequence the
  * copies dominate and the out-of-order core overlaps iterations by itself.
@@ -1530,9 +1528,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
         ZXC_GUL_HEADER_BINARY_SIZE + ZXC_GUL_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
 
     /* Structural validation: raw sections (comp == raw), streams tiling
-     * comp_size exactly, mandatory tail present and fitting the output,
-     * every sequence at least 3 stream bytes. Error precedence preserved:
-     * the capacity check sits between the structural groups. */
+     * comp_size exactly, tail present and fitting, >= 3 stream bytes per
+     * sequence. The capacity check stays between the two structural groups:
+     * conformance vectors depend on that error precedence. */
     if (UNLIKELY(desc[0].sizes != ((uint64_t)n_lit | ((uint64_t)n_lit << 32)) ||
                  desc[1].sizes != ((uint64_t)sz_seq | ((uint64_t)sz_seq << 32)) ||
                  (uint64_t)fixed + n_lit + sz_seq + tail_len != (uint64_t)src_size ||
@@ -1549,8 +1547,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;
-    /* Escape-free worst case per sequence: ESCAPE-1 inline literals + a
-     * match copy, with ZXC_PAD_SIZE of wild-copy overshoot. */
+    /* Escape-free worst case per sequence: ESCAPE-1 inline literals + a match
+     * copy, plus ZXC_PAD_SIZE of overshoot. The ternary is load-bearing: below
+     * that margin an unguarded subtraction would form a pointer under `dst`
+     * and the fast loops would wild-copy past the end. */
     const uint8_t* const d_end_1x = (dst_capacity > ZXC_GUL_MAX_OUT_PER_SEQ + ZXC_PAD_SIZE)
                                         ? d_end - (ZXC_GUL_MAX_OUT_PER_SEQ + ZXC_PAD_SIZE)
                                         : dst;
@@ -1566,12 +1566,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
 
 /* One fast-loop iteration: 32-bit load covering token + offset, 16-byte-first
  * literal copy, single 32-byte match copy. VALIDATE gates the offset check
- * (needed only until `written` reaches ZXC_GUL_MAX_DIS). LIT_CHECK gates the
- * inline-literal bounds test, needed only once the literal stream no longer
- * holds ESCAPE-1 bytes of slack. The match-length code needs no check at all:
- * every 5-bit value decodes to at most ZXC_GUL_MAX_MATCH, so this loop cannot
- * diverge from the strict one however corrupt the input is. References the
- * call site's locals; #undef-ed after the loops. */
+ * (needed only until `written` reaches ZXC_GUL_MAX_DIS), LIT_CHECK the
+ * inline-literal bounds test (needed only once the literal stream runs out of
+ * slack). The match length needs no check: every 5-bit value decodes to at
+ * most ZXC_GUL_MAX_MATCH. References the call site's locals; #undef-ed after
+ * the loops. */
 #define ZXC_GUL_DECODE_STEP(VALIDATE, LIT_CHECK)                                       \
     do {                                                                               \
         const uint8_t* const s_save = seq_ptr;                                         \
@@ -1627,14 +1626,12 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
     }
 
     /* --- Literal-poor fast loop: same copies, explicit literal check ---
-     * The loops above need ESCAPE-1 spare literal bytes so an inline LL can
-     * never run past l_end. That slack is gone in the last few sequences of
-     * every block -- and from the first one in a match-dense block (a dict
-     * block can open on a match, so n_lit <= ESCAPE-1 is reachable), which
-     * would otherwise decode entirely in the strict loop. Paying one bounds
-     * test per sequence keeps the wild copies for that stretch. Offsets are
-     * validated here: `written` may be stale from the free-running loop, but
-     * only once it passed ZXC_GUL_MAX_DIS, so no valid distance is rejected. */
+     * The loops above need ESCAPE-1 spare literal bytes; that slack is gone in
+     * the last sequences of every block, and from the first one in a
+     * match-dense block (a dict block can open on a match). One bounds test
+     * per sequence keeps the wild copies there instead of the strict loop.
+     * Offsets are validated: `written` may be stale from the free-running
+     * loop, but only past ZXC_GUL_MAX_DIS, so no valid distance is rejected. */
     while (n_seq > 0 && d_ptr < d_end_1x && seq_ptr + 4 <= seq_end) {
         ZXC_GUL_DECODE_STEP(1, 1);
     }
@@ -1674,8 +1671,7 @@ _gul_fast_done:;
         n_seq--;
     }
 
-    /* Every literal byte must have been consumed through LL fields, and the
-     * token stream must be fully consumed. */
+    /* Both streams must be exactly consumed. */
     if (UNLIKELY(l_ptr != l_end || seq_ptr != seq_end)) return ZXC_ERROR_CORRUPT_DATA;
 
     /* --- Append the mandatory raw tail --- */
@@ -1757,8 +1753,8 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
                                     : zxc_decode_block_ghi(ctx, data, comp_sz, dst, dst_cap);
             break;
         case ZXC_BLOCK_GUL:
-            /* No _safe variant: the GUL loop's own margin already respects a
-             * strict-tail buffer, so both entry points share one decoder. */
+            /* No _safe variant: the GUL margin already fits a strict-tail
+             * buffer, so both entry points share one decoder. */
             decoded_sz = (has_dict && !safe)
                              ? zxc_decode_block_gul_dict(ctx, data, comp_sz, dst, dst_cap)
                              : zxc_decode_block_gul(ctx, data, comp_sz, dst, dst_cap);
