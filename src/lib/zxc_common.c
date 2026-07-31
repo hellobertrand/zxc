@@ -382,6 +382,11 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
         ctx->gul_hidx = mem + layout.off_gul_matches;
         ctx->gul_seq = mem + layout.off_gul_matches +
                        ZXC_ALIGN_CL(((size_t)1 << ZXC_GUL_HASH_BITS) * sizeof(uint8_t));
+        /* Only the cursors are cleared, once: every htab read is guarded by a
+         * live epoch, and a bucket's ring is zeroed when this block first
+         * inserts into it. gul_htab itself is never memset. */
+        ZXC_MEMSET(ctx->gul_hidx, 0, (size_t)1 << ZXC_GUL_HASH_BITS);
+        ctx->gul_epoch = 0;
     }
 
     ctx->compression_level = level;
@@ -494,6 +499,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->gul_htab = NULL;
     ctx->gul_hidx = NULL;
     ctx->gul_seq = NULL;
+    ctx->gul_epoch = 0;
     ctx->literals = NULL;
     ctx->work_buf = NULL;
     ctx->tok_buffer = NULL;

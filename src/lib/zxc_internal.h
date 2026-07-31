@@ -483,13 +483,18 @@ extern "C" {
  *         bytes per sequence, 64 KiB window lagged by 32.
  *
  *  Every sequence costs 3 bytes: a token packing an inline literal length
- *  (0-6; 7 escapes to extra bytes) with a match length code (1..29 mapping
- *  to lengths 4..32), then a 16-bit offset stored biased by
- *  ::ZXC_GUL_MIN_DIS. The minimum distance of 33 (> the 32-byte copy
- *  width) makes every match copy alias-free: the decoder runs ONE
- *  unconditional 32-byte wild copy per match -- no overlap tiers, no
- *  length loop. A mandatory raw tail (>= ZXC_GUL_TAIL_MIN bytes) provides
- *  the read/write margin that removes per-sequence bounds tests.
+ *  (0-6; 7 escapes to extra bytes) with a match length code (c decodes to
+ *  c + ::ZXC_GUL_ML_BIAS, so the encoder's 4..32 lengths use codes 3..31),
+ *  then a 16-bit offset stored biased by ::ZXC_GUL_MIN_DIS. The minimum
+ *  distance of 33 (> the 32-byte copy width) makes every match copy
+ *  alias-free: the decoder runs ONE unconditional 32-byte wild copy per
+ *  match -- no overlap tiers, no length loop. A mandatory raw tail
+ *  (>= ZXC_GUL_TAIL_MIN bytes) provides the read/write margin that removes
+ *  per-sequence bounds tests.
+ *
+ *  The bias of 1 is deliberate: it makes all 32 code points decode to a
+ *  length <= ::ZXC_GUL_MAX_MATCH, so no token value is invalid and the
+ *  decoder needs no match-length validation at all.
  *  @{ */
 /** @brief Bits for the inline literal length in a GUL token. */
 #define ZXC_GUL_LL_BITS 3
@@ -499,13 +504,22 @@ extern "C" {
 #define ZXC_GUL_LL_ESCAPE ((1U << ZXC_GUL_LL_BITS) - 1)
 /** @brief Mask to extract the match-length code from a token. */
 #define ZXC_GUL_ML_MASK ((1U << ZXC_GUL_ML_BITS) - 1)
-/** @brief Minimum match length (code 1). */
+/** @brief Minimum match length the encoder emits (code 3). */
 #define ZXC_GUL_MIN_MATCH 4
-/** @brief Decoded match length of token code c (in [1, 29]): c + 3. */
-#define ZXC_GUL_ML_BIAS 3
-/** @brief Maximum match length (code 29): one 32-byte copy always suffices;
- *         codes 30 and 31 are reserved. */
+/** @brief Decoded match length of token code c: c + 1. Codes below
+ *         ::ZXC_GUL_MIN_MATCH - 1 are never emitted but decode normally. */
+#define ZXC_GUL_ML_BIAS 1
+/** @brief Maximum match length (code 31, the widest the field holds): one
+ *         32-byte copy always suffices. */
 #define ZXC_GUL_MAX_MATCH 32
+/** @brief Largest match-length code, and the whole field width: with a bias
+ *         of 1 the code space maps exactly onto lengths 1..MAX_MATCH, which
+ *         is what makes every token value decodable (FORMAT.md 5.4). */
+#define ZXC_GUL_ML_MAX_CODE (ZXC_GUL_MAX_MATCH - ZXC_GUL_ML_BIAS)
+/* Load-bearing: if the code space stopped covering the field exactly, some
+ * token value would decode past MAX_MATCH and overrun the single 32-byte
+ * match copy. Retuning MAX_MATCH means retuning MIN_DIS and the bias too. */
+_Static_assert(ZXC_GUL_ML_MAX_CODE == ZXC_GUL_ML_MASK, "GUL match-length codes must fill ML_BITS");
 /** @brief Minimum (and bias of the stored) match distance: one past the
  *         maximum match length, so the single 32-byte wild copy can never
  *         read bytes it wrote (alias-free). The encoder's hash insertion
@@ -542,6 +556,15 @@ extern "C" {
  *         unrolled). The workspace is carved for this depth; the level
  *         table (::zxc_get_level_params) picks the depth actually probed. */
 #define ZXC_GUL_RING 16
+/** @brief Low bits of a ::zxc_cctx_t::gul_hidx byte holding the ring cursor;
+ *         the high bits hold the epoch. ::ZXC_GUL_RING fits in 4 bits, which
+ *         leaves 4 for the epoch and keeps the cursor array one byte wide. */
+#define ZXC_GUL_CURSOR_BITS 4
+/** @brief Mask of the ring cursor inside a `gul_hidx` byte. */
+#define ZXC_GUL_CURSOR_MASK ((1U << ZXC_GUL_CURSOR_BITS) - 1)
+/** @brief Epochs available before `gul_hidx` must be cleared again. Clearing
+ *         64 KiB once every 15 blocks amortizes to a few KiB per block. */
+#define ZXC_GUL_MAX_EPOCH (1U << (8 - ZXC_GUL_CURSOR_BITS))
 /** @brief Levels whose default encoder is GUL. */
 #define ZXC_LEVEL_USES_GUL(l) ((l) >= ZXC_LEVEL_DEFAULT && (l) <= ZXC_LEVEL_COMPACT)
 
@@ -579,8 +602,9 @@ typedef struct {
 
 /** @} */
 /** @brief Worst-case decoded bytes of one escape-free sequence: 6 inline
- *         literals + a 32-byte match copy, +2 dirty-norm slack (= 40). */
-#define ZXC_GUL_MAX_OUT_PER_SEQ (6 + ZXC_GUL_MAX_MATCH + 2)
+ *         literals + a 32-byte match copy (= 38). Saturating the match-length
+ *         code (::ZXC_GUL_ML_MAX_CODE) makes this an exact bound. */
+#define ZXC_GUL_MAX_OUT_PER_SEQ (6 + ZXC_GUL_MAX_MATCH)
 /** @} */
 
 /** @name Literal Stream Encoding
@@ -1127,9 +1151,10 @@ static ZXC_ALWAYS_INLINE zxc_gul_params_t zxc_get_gul_params(const int level) {
  * - `ZXC_BLOCK_GHI` (2): General-purpose high-velocity mode using LZ77 with advanced
  * techniques (lazy matching, step skipping) for maximum ratio. Includes 3 sections descriptors.
  * - `ZXC_BLOCK_GUL` (3): General ULtra-throughput mode: 3-byte sequences
- *   `LL8|MC6|OFF18` (256 KiB window), per-block minimum-offset class, no escapes,
- *   no Extras stream, mandatory raw tail. Serves levels 1-3. Includes 2 section
- *   descriptors.
+ *   (token `LL3|ML5` + a 16-bit offset biased by ::ZXC_GUL_MIN_DIS, 64 KiB
+ *   window), literal lengths escaping past 6, no Extras stream, mandatory raw
+ *   tail. Every match decodes with ONE 32-byte copy. Serves levels 3-5.
+ *   Includes 2 section descriptors.
  * - `ZXC_BLOCK_SEK` (254): Seek table block. Contains per-block compressed/decompressed sizes
  *   for random-access decompression. Placed between EOF block and file footer.
  * - `ZXC_BLOCK_EOF` (255): End of file marker.
@@ -1881,12 +1906,17 @@ typedef struct {
     /* GUL encoder state (compress mode, levels 3-5 only; NULL otherwise).
      * 16-bit hash -> ring of ZXC_GUL_RING truncated 16-bit positions, probed
      * fully unrolled with 32-byte vector LCPs (memory-level parallelism).
-     * Zeroed per block: with the insertion lag, a zero entry resolves to a
-     * valid in-range candidate that the content compare simply rejects.
+     * Logically empty at the start of every block, but never memset there:
+     * gul_hidx carries `epoch | cursor` and a bucket whose epoch is stale is
+     * empty, its ring cleared on first insertion (same lazy invalidation as
+     * hash_table, and the ring line is being written anyway). An empty bucket
+     * behaves as an all-zero ring: with the insertion lag, a zero entry
+     * resolves to a valid in-range candidate the content compare rejects.
      * gul_seq buffers the variable-length token stream before assembly. */
     uint16_t* gul_htab; /**< Hash table: ring buffers of truncated positions. */
-    uint8_t* gul_hidx;  /**< Per-bucket ring cursor. */
+    uint8_t* gul_hidx;  /**< Per-bucket `epoch << ZXC_GUL_CURSOR_BITS | cursor`. */
     uint8_t* gul_seq;   /**< Token-stream staging buffer (chunk-sized). */
+    uint32_t gul_epoch; /**< Current GUL epoch (1..ZXC_GUL_MAX_EPOCH-1). */
 
     /* Cold zone: configuration / scratch / resizeable. */
     uint8_t* lit_buffer;            /**< Scratch buffer for literals (RLE / Huffman). */

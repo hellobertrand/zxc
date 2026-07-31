@@ -2109,6 +2109,10 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 #endif
 /** @} */
 
+/** @brief Non-zero when a `gul_hidx` slot carries the current epoch, i.e. the
+ *         bucket holds entries inserted by this block. */
+#define ZXC_GUL_LIVE(slot, mark) (((uint32_t)(slot) & ~(uint32_t)ZXC_GUL_CURSOR_MASK) == (mark))
+
 /**
  * @brief 16-bit hash of a 4-byte gram for the GUL ring table.
  *
@@ -2174,23 +2178,38 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_gul_lcp32(const uint8_t* RESTRICT a,
  * @param[in]  at        Probe position (concat coordinates).
  * @param[in]  ring      The bucket's ring of truncated 16-bit positions.
  * @param[in]  ring_n    Ring entries to probe (power of two).
+ * @param[in]  live      Non-zero when the bucket holds entries from this
+ *                       block; zero when its epoch is stale (see @p ring).
  * @param[out] best_cand Receives the best candidate's position.
  * @return Best common-prefix length found, in [0, 32].
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_gul_probe(const uint8_t* RESTRICT base, const size_t at,
                                                 const uint16_t* RESTRICT ring, const int ring_n,
-                                                size_t* RESTRICT best_cand) {
+                                                const int live, size_t* RESTRICT best_cand) {
     uint32_t best_len = 0;
     size_t cand_out = 0;
-    for (int i = 0; i < ring_n; i++) {
-        /* Truncated-position trick: the lag guarantees real entries sit at
-         * least MIN_DIS back, so d reconstructs an in-window candidate; a
-         * wrapped (stale/zero) entry yields a valid position whose content
-         * simply fails the compare. */
-        const uint16_t d = (uint16_t)(at - ring[i] - ZXC_GUL_MIN_DIS);
+    if (LIKELY(live)) {
+        for (int i = 0; i < ring_n; i++) {
+            /* Truncated-position trick: the lag guarantees real entries sit at
+             * least MIN_DIS back, so d reconstructs an in-window candidate; a
+             * wrapped (stale/zero) entry yields a valid position whose content
+             * simply fails the compare. */
+            const uint16_t d = (uint16_t)(at - ring[i] - ZXC_GUL_MIN_DIS);
+            const size_t cand = at - ZXC_GUL_MIN_DIS - (size_t)d;
+            const uint32_t l = zxc_gul_lcp32(base + at, base + cand);
+            if (l > best_len) {
+                best_len = l;
+                cand_out = cand;
+            }
+        }
+    } else {
+        /* Stale bucket: identical to the all-zero ring the per-block memset
+         * used to leave behind. All ring_n zero entries reconstruct the same
+         * candidate, so one probe gives the same answer for 1/ring_n the work. */
+        const uint16_t d = (uint16_t)(at - ZXC_GUL_MIN_DIS);
         const size_t cand = at - ZXC_GUL_MIN_DIS - (size_t)d;
         const uint32_t l = zxc_gul_lcp32(base + at, base + cand);
-        if (l > best_len) {
+        if (l > 0) {
             best_len = l;
             cand_out = cand;
         }
@@ -2238,10 +2257,34 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
     uint8_t* const seq_buf = ctx->gul_seq;
     uint8_t* const lit_buf = ctx->literals;
 
-    /* The workspace is carved ring-16 wide; shallow tiers pack their rings
-     * at stride ring_n and only ever touch (and clear) that prefix. */
-    ZXC_MEMSET(htab, 0, ((size_t)1 << ZXC_GUL_HASH_BITS) * (size_t)ring_n * sizeof(uint16_t));
-    ZXC_MEMSET(hidx, 0, (size_t)1 << ZXC_GUL_HASH_BITS);
+    /* Two ways to start from a logically empty table, picked by block size.
+     *
+     * A block smaller than the bucket count touches only a fraction of the
+     * table, so epoch tagging pays: a bucket belongs to this block only while
+     * its stored epoch matches, its ring is cleared when the block first
+     * inserts into it (the line is being written anyway), and the 1-2 MiB
+     * memset disappears. That matters most at 4-16 KiB blocks, where the
+     * memset used to cost more than the compression itself.
+     *
+     * Past that size nearly every bucket is touched, the lazy clears stop
+     * saving work and their first-touch branch turns unpredictable, so the
+     * sequential memset wins. It leaves every cursor zeroed, which epoch 0
+     * reads as live: the same insert/probe code then runs branch-free. */
+    uint32_t epoch_mark = 0;
+    if (block_sz < ((size_t)1 << ZXC_GUL_HASH_BITS)) {
+        ctx->gul_epoch++;
+        if (UNLIKELY(ctx->gul_epoch >= ZXC_GUL_MAX_EPOCH)) {
+            ZXC_MEMSET(hidx, 0, (size_t)1 << ZXC_GUL_HASH_BITS);
+            ctx->gul_epoch = 1;
+        }
+        epoch_mark = ctx->gul_epoch << ZXC_GUL_CURSOR_BITS;
+    } else {
+        /* The workspace is carved ring-16 wide; shallow tiers pack their rings
+         * at stride ring_n and only ever touch (and clear) that prefix. */
+        ZXC_MEMSET(htab, 0, ((size_t)1 << ZXC_GUL_HASH_BITS) * (size_t)ring_n * sizeof(uint16_t));
+        ZXC_MEMSET(hidx, 0, (size_t)1 << ZXC_GUL_HASH_BITS);
+        ctx->gul_epoch = 0;
+    }
 
     const uint8_t* const base = src;
     const size_t end = src_sz;
@@ -2265,8 +2308,18 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
         while (UNLIKELY(pos >= hpos + ZXC_GUL_MAX_MATCH + 8)) {
             for (int i = 0; i < 8; i++) {
                 const uint32_t h = zxc_gul_hash4(zxc_le32(base + hpos + (size_t)i));
-                htab[h * (size_t)ring_n + hidx[h]] = (uint16_t)(hpos + (size_t)i);
-                hidx[h] = (uint8_t)((hidx[h] + 1) & (uint8_t)(ring_n - 1));
+                const uint32_t slot = hidx[h];
+                uint32_t c = slot & ZXC_GUL_CURSOR_MASK;
+                if (!ZXC_GUL_LIVE(slot, epoch_mark)) {
+                    /* First insertion of this block into the bucket: zero the
+                     * ring so its unused slots probe exactly as the per-block
+                     * memset used to leave them. The line is being written
+                     * anyway, and ring_n is a compile-time constant. */
+                    ZXC_MEMSET(&htab[h * (size_t)ring_n], 0, (size_t)ring_n * sizeof(uint16_t));
+                    c = 0;
+                }
+                htab[h * (size_t)ring_n + c] = (uint16_t)(hpos + (size_t)i);
+                hidx[h] = (uint8_t)(epoch_mark | ((c + 1) & (uint32_t)(ring_n - 1)));
             }
             hpos += 8;
         }
@@ -2275,7 +2328,8 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
         uint32_t best_len = 0;
         if (LIKELY(pos > ZXC_GUL_MAX_MATCH)) {
             const uint32_t h = zxc_gul_hash4(zxc_le32(base + pos));
-            best_len = zxc_gul_probe(base, pos, &htab[h * (size_t)ring_n], ring_n, &best_cand);
+            best_len = zxc_gul_probe(base, pos, &htab[h * (size_t)ring_n], ring_n,
+                                     ZXC_GUL_LIVE(hidx[h], epoch_mark), &best_cand);
         }
 
         /* Captured BEFORE any flush regression: the post-emission clamp
@@ -2313,8 +2367,8 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
                  np++) {
                 const uint32_t h2 = zxc_gul_hash4(zxc_le32(base + np));
                 size_t nc = 0;
-                const uint32_t nl =
-                    zxc_gul_probe(base, np, &htab[h2 * (size_t)ring_n], ring_n, &nc);
+                const uint32_t nl = zxc_gul_probe(base, np, &htab[h2 * (size_t)ring_n], ring_n,
+                                                  ZXC_GUL_LIVE(hidx[h2], epoch_mark), &nc);
                 if (nl > best_len) {
                     pos = np;
                     best_cand = nc;
@@ -2341,7 +2395,7 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
              * bytes), so seq_buf never outgrows its chunk-sized staging. */
             const size_t ll = pos - lit;
             const uint32_t lrem = (ll < ZXC_GUL_LL_ESCAPE) ? (uint32_t)ll : ZXC_GUL_LL_ESCAPE;
-            seq_buf[so] = (uint8_t)((lrem << ZXC_GUL_ML_BITS) | (best_len - ZXC_GUL_MIN_MATCH + 1));
+            seq_buf[so] = (uint8_t)((lrem << ZXC_GUL_ML_BITS) | (best_len - ZXC_GUL_ML_BIAS));
             zxc_store_le16(seq_buf + so + 1, (uint16_t)(pos - best_cand - ZXC_GUL_MIN_DIS));
             so += 3;
             if (UNLIKELY(lrem == ZXC_GUL_LL_ESCAPE)) {

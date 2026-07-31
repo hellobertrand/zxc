@@ -473,9 +473,13 @@ Each sequence is a token byte followed by a 16-bit offset:
   escapes to extra bytes appended after the offset: blocks of 255
   terminated by a byte < 255, summed into the literal length
   (`LL = 7 + sum`).
-- **ML** -- match-length code, decoded as `length = ML + 3`. Valid codes
-  are 1..29 (lengths 4..32); 0, 30 and 31 are reserved and MUST be
-  rejected by a safe decoder.
+- **ML** -- match-length code, decoded as `length = ML + 1`. The bias of 1
+  maps the 32 code points exactly onto lengths 1..32, so **every** value of
+  the field is valid and no decoder needs to test it. Encoders emit codes
+  3..31 (lengths 4..32); codes 0..2 are never produced but decode normally.
+  Because no length can exceed 32 — the copy width the minimum distance is
+  built around — a bounds-checking decoder and a wild-copy decoder produce
+  the same output for every input, valid or not.
 - **OFF** -- match distance stored biased:
   `distance = OFF + 33`. Reachable window: `[33, 65568]`, never crossing a
   block boundary (a dictionary prefix counts as already-produced history,
@@ -503,14 +507,14 @@ Let `L` be the literals cursor, `O` the output cursor. For each of the
 
 1. Decode `LL` (with escape bytes if needed); copy `LL` bytes from `L` to
    `O`; advance both.
-2. Copy `ML + 3` bytes from `O - (OFF + 33)` to `O` (never overlapping,
+2. Copy `ML + 1` bytes from `O - (OFF + 33)` to `O` (never overlapping,
    since the distance exceeds the maximum length); advance `O`.
 
 Then append the tail.
 
 ### Decoder validation
 
-A safe decoder MUST reject with `ZXC_ERROR_CORRUPT_DATA`:
+A decoder MUST reject with `ZXC_ERROR_CORRUPT_DATA`:
 
 - a non-zero reserved field in the GUL header;
 - descriptor sizes inconsistent with the header, or streams that do not
@@ -518,7 +522,6 @@ A safe decoder MUST reject with `ZXC_ERROR_CORRUPT_DATA`:
 - `tail_len < 32` or `tail_len > uncompressed_size`;
 - `3 * n_sequences > sz_tokens`, a token stream not fully consumed by
   `n_sequences` tokens, or escape bytes overrunning it;
-- a match-length code of 0, 30 or 31;
 - a decoded distance greater than the current output position
   (`ZXC_ERROR_BAD_OFFSET`);
 - the literals cursor overrunning (or not exactly exhausting) the literals
@@ -526,9 +529,11 @@ A safe decoder MUST reject with `ZXC_ERROR_CORRUPT_DATA`:
 
 `ZXC_ERROR_BAD_BLOCK_SIZE` when `dst_capacity` is insufficient.
 
-When per-block checksums are enabled, verifying the checksum over the
-compressed payload *before* decoding licenses the unchecked fast loop; with
-checksums disabled, the strict-tail decoder validates per sequence.
+Every check above is either per-block or already implied by the stream
+bounds, and no token field has an invalid value to test for (§ GUL sequence
+encoding). A GUL decoder therefore needs no strict-tail variant: one loop is
+both the fast path and the validating path, and no input can make two
+conforming decoders disagree.
 
 *(non-normative)* The reference encoder emits GUL at levels 3-5. The
 three levels share the wire and differ in parse profile. Decode cost is

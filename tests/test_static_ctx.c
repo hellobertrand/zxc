@@ -154,9 +154,9 @@ int test_static_ctx_size_query(void) {
         return 0;
     }
 
-    /* Per-level workspace tiers: levels 1-2 (GHI) and 4-5 (GLO) share the
-     * lean layout, level 3 adds the GUL buffers (32-bit chain + match
-     * record), level 6 adds opt_scratch. */
+    /* Per-level workspace tiers: levels 1-2 (GHI) share the lean layout,
+     * levels 3-5 (GUL) add the ring table, the per-bucket cursors and the
+     * token staging buffer, level 6 adds opt_scratch. */
     const size_t s1 = zxc_static_cctx_workspace_size(64 * 1024, 1);
     const size_t s2 = zxc_static_cctx_workspace_size(64 * 1024, 2);
     const size_t s3 = zxc_static_cctx_workspace_size(64 * 1024, 3);

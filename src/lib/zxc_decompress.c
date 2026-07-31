@@ -1487,8 +1487,14 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
  * ========================================================================== */
 
 /**
- * @brief Unified GUL block decoder body, shared by the fast, safe and
- *        dictionary variants (@p safe / @p has_dict are compile-time flags).
+ * @brief Unified GUL block decoder body, shared by the plain, strict-tail and
+ *        dictionary variants (@p has_dict is a compile-time flag).
+ *
+ * There is no separate strict-tail loop: the fast loop's per-iteration margin
+ * (::ZXC_GUL_MAX_OUT_PER_SEQ + ::ZXC_PAD_SIZE) already keeps every wild copy
+ * inside @p dst_capacity, and the match-length code is saturated rather than
+ * validated, so one body serves both entry points and cannot diverge from
+ * itself on corrupt input.
  *
  * The serial loop is intentional: at ~3 bytes of stream per sequence the
  * copies dominate and the out-of-order core overlaps iterations by itself.
@@ -1498,14 +1504,13 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
  * @param[in]     src_size     Size of @p src in bytes.
  * @param[out]    dst          Destination buffer for decoded bytes.
  * @param[in]     dst_capacity Capacity of @p dst in bytes.
- * @param[in]     safe         Compile-time flag: strict per-sequence checks.
  * @param[in]     has_dict     Compile-time flag: matches may reach the dict prefix.
  * @return Bytes written to @p dst on success, or a negative @ref zxc_error_t.
  */
 static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRICT ctx,
                                                        const uint8_t* RESTRICT src,
                                                        const size_t src_size, uint8_t* RESTRICT dst,
-                                                       const size_t dst_capacity, const int safe,
+                                                       const size_t dst_capacity,
                                                        const int has_dict) {
     zxc_gul_header_t gh;
     zxc_section_desc_t desc[ZXC_GUL_SECTIONS];
@@ -1545,7 +1550,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
     const uint8_t* const d_end = dst + dst_capacity;
     /* Escape-free worst case per sequence: ESCAPE-1 inline literals + a
      * match copy, with ZXC_PAD_SIZE of wild-copy overshoot. */
-    const uint8_t* const d_end_1x = d_end - (ZXC_GUL_MAX_OUT_PER_SEQ + ZXC_PAD_SIZE);
+    const uint8_t* const d_end_1x = (dst_capacity > ZXC_GUL_MAX_OUT_PER_SEQ + ZXC_PAD_SIZE)
+                                        ? d_end - (ZXC_GUL_MAX_OUT_PER_SEQ + ZXC_PAD_SIZE)
+                                        : dst;
     const uint8_t* const l_end_1x =
         (n_lit > ZXC_GUL_LL_ESCAPE - 1) ? l_end - (ZXC_GUL_LL_ESCAPE - 1) : l_ptr;
 
@@ -1558,8 +1565,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
 
 /* One fast-loop iteration: 32-bit load covering token + offset, 16-byte-first
  * literal copy, single 32-byte match copy. VALIDATE gates the offset check
- * (needed only until `written` reaches ZXC_GUL_MAX_DIS). References the call
- * site's locals; #undef-ed after the loops. */
+ * (needed only until `written` reaches ZXC_GUL_MAX_DIS). The match-length code
+ * needs no check at all: every 5-bit value decodes to at most
+ * ZXC_GUL_MAX_MATCH, so this loop cannot diverge from the strict one however
+ * corrupt the input is. References the call site's locals; #undef-ed after the
+ * loops. */
 #define ZXC_GUL_DECODE_STEP(VALIDATE)                                                  \
     do {                                                                               \
         const uint8_t* const s_save = seq_ptr;                                         \
@@ -1586,8 +1596,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
         } else {                                                                       \
             zxc_copy16(d_ptr, l_ptr); /* inline ll <= 6: one 16-byte copy */           \
         }                                                                              \
-        if (safe && UNLIKELY(norm == 0 || norm > ZXC_GUL_MAX_MATCH - ZXC_GUL_ML_BIAS)) \
-            return ZXC_ERROR_CORRUPT_DATA;                                             \
         l_ptr += ll;                                                                   \
         d_ptr += ll;                                                                   \
         if (VALIDATE) {                                                                \
@@ -1632,8 +1640,6 @@ _gul_fast_done:;
                 ll += b;
             } while (b == 255);
         }
-        if (safe && UNLIKELY(norm == 0 || norm > ZXC_GUL_MAX_MATCH - ZXC_GUL_ML_BIAS))
-            return ZXC_ERROR_CORRUPT_DATA;
 
         if (UNLIKELY(ll > (size_t)(l_end - l_ptr) || (size_t)ll + ml > (size_t)(d_end - d_ptr)))
             return ZXC_ERROR_OVERFLOW;
@@ -1651,8 +1657,7 @@ _gul_fast_done:;
 
     /* Every literal byte must have been consumed through LL fields, and the
      * token stream must be fully consumed. */
-    if (UNLIKELY(l_ptr != l_end)) return ZXC_ERROR_CORRUPT_DATA;
-    if (safe && UNLIKELY(seq_ptr != seq_end)) return ZXC_ERROR_CORRUPT_DATA;
+    if (UNLIKELY(l_ptr != l_end || seq_ptr != seq_end)) return ZXC_ERROR_CORRUPT_DATA;
 
     /* --- Append the mandatory raw tail --- */
     if (UNLIKELY(tail_len > (size_t)(d_end - d_ptr))) return ZXC_ERROR_OVERFLOW;
@@ -1662,11 +1667,12 @@ _gul_fast_done:;
     return (int)(d_ptr - dst);
 }
 
-/** @brief Decode a no-dict GUL block (plain, inlinable path). */
+/** @brief Decode a no-dict GUL block (plain, inlinable path; also serves the
+ *         strict-tail safe entry point, which needs no separate loop). */
 static int zxc_decode_block_gul(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_size, uint8_t* RESTRICT dst,
                                 const size_t dst_capacity) {
-    return zxc_decode_block_gul_impl(ctx, src, src_size, dst, dst_capacity, 0, 0);
+    return zxc_decode_block_gul_impl(ctx, src, src_size, dst, dst_capacity, 0);
 }
 
 /** @brief Decode a GUL block against a dictionary prefix (cold path). */
@@ -1674,15 +1680,7 @@ static ZXC_NOINLINE int zxc_decode_block_gul_dict(const zxc_cctx_t* RESTRICT ctx
                                                   const uint8_t* RESTRICT src,
                                                   const size_t src_size, uint8_t* RESTRICT dst,
                                                   const size_t dst_capacity) {
-    return zxc_decode_block_gul_impl(ctx, src, src_size, dst, dst_capacity, 0, 1);
-}
-
-/** @brief Decode a GUL block with the strict-tail safe loop. */
-static ZXC_NOINLINE int zxc_decode_block_gul_safe(const zxc_cctx_t* RESTRICT ctx,
-                                                  const uint8_t* RESTRICT src,
-                                                  const size_t src_size, uint8_t* RESTRICT dst,
-                                                  const size_t dst_capacity) {
-    return zxc_decode_block_gul_impl(ctx, src, src_size, dst, dst_capacity, 1, 0);
+    return zxc_decode_block_gul_impl(ctx, src, src_size, dst, dst_capacity, 1);
 }
 
 /**
@@ -1740,9 +1738,11 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
                                     : zxc_decode_block_ghi(ctx, data, comp_sz, dst, dst_cap);
             break;
         case ZXC_BLOCK_GUL:
-            decoded_sz = safe       ? zxc_decode_block_gul_safe(ctx, data, comp_sz, dst, dst_cap)
-                         : has_dict ? zxc_decode_block_gul_dict(ctx, data, comp_sz, dst, dst_cap)
-                                    : zxc_decode_block_gul(ctx, data, comp_sz, dst, dst_cap);
+            /* No _safe variant: the GUL loop's own margin already respects a
+             * strict-tail buffer, so both entry points share one decoder. */
+            decoded_sz = (has_dict && !safe)
+                             ? zxc_decode_block_gul_dict(ctx, data, comp_sz, dst, dst_cap)
+                             : zxc_decode_block_gul(ctx, data, comp_sz, dst, dst_cap);
             break;
         case ZXC_BLOCK_RAW:
             // For RAW blocks, comp_sz == raw_sz (uncompressed data stored as-is)
