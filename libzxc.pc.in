@@ -9,5 +9,5 @@ URL: https://github.com/hellobertrand/zxc
 License: BSD 3-Clause
 Version: @PROJECT_VERSION@
 Libs: -L${libdir} -lzxc
-Libs.private: -pthread
-Cflags: -I${includedir}
+Libs.private: @ZXC_PC_LIBS_PRIVATE@
+Cflags: -I${includedir} @ZXC_PC_CFLAGS@

@@ -16,8 +16,13 @@
  *   library to disable import/export annotations.
  * - When building the shared library the CMake target defines
  *   @c zxc_lib_EXPORTS automatically, selecting `dllexport` / `visibility("default")`.
- * - When consuming the shared library neither macro is defined, so the header
- *   selects `dllimport` / `visibility("default")`.
+ * - When consuming the library neither macro is defined, so the header selects
+ *   `visibility("default")` on ELF and **no annotation** on Windows.
+ *
+ * On Windows `dllimport` is opt-in via @c ZXC_DLL_IMPORT: unannotated
+ * declarations still link against a DLL (call thunk), while `dllimport`
+ * against a static library fails with unresolved `__imp_zxc_*`. CMake, Meson
+ * and pkg-config set the right macro for you.
  */
 
 #ifndef ZXC_EXPORT_H
@@ -36,7 +41,8 @@
  * @brief Marks a symbol as part of the public shared-library API.
  *
  * Expands to nothing when building a static library (@c ZXC_STATIC_DEFINE),
- * to `__declspec(dllexport)` or `__declspec(dllimport)` on Windows, or
+ * to `__declspec(dllexport)` when building the Windows DLL, to
+ * `__declspec(dllimport)` when consuming it with @c ZXC_DLL_IMPORT defined, or
  * to `__attribute__((visibility("default")))` on GCC/Clang.
  */
 #define ZXC_EXPORT
@@ -62,8 +68,12 @@
 #endif
 #else
 /* Consuming the library */
-#ifdef _WIN32
+#if defined(_WIN32) && defined(ZXC_DLL_IMPORT)
 #define ZXC_EXPORT __declspec(dllimport)
+#elif defined(_WIN32)
+/* Static library, vendored sources, or a DLL consumed without ZXC_DLL_IMPORT:
+   no annotation links in every case. */
+#define ZXC_EXPORT
 #else
 #define ZXC_EXPORT __attribute__((visibility("default")))
 #endif
