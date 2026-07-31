@@ -600,11 +600,11 @@ typedef struct {
     int glo_fallback;
 } zxc_gul_params_t;
 
-/** @} */
 /** @brief Worst-case decoded bytes of one escape-free sequence: 6 inline
- *         literals + a 32-byte match copy (= 38). Saturating the match-length
- *         code (::ZXC_GUL_ML_MAX_CODE) makes this an exact bound. */
-#define ZXC_GUL_MAX_OUT_PER_SEQ (6 + ZXC_GUL_MAX_MATCH)
+ *         literals + a 32-byte match copy (= 38). The bound is exact, not
+ *         conservative: no match-length code decodes past
+ *         ::ZXC_GUL_MAX_MATCH. */
+#define ZXC_GUL_MAX_OUT_PER_SEQ (ZXC_GUL_LL_ESCAPE - 1 + ZXC_GUL_MAX_MATCH)
 /** @} */
 
 /** @name Literal Stream Encoding

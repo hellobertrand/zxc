@@ -8,6 +8,8 @@ Reference test vectors for validating any ZXC decoder implementation.
 valid/
   *.zxc         Compressed files (frozen wire format)
   *.expected    Expected decompressed output (plaintext reference)
+  *.zxd         Dictionaries needed by the vectors that carry a dict_id;
+                match them by dict_id, not by filename
 invalid/
   *.zxc         Malformed files that must be rejected
 ```
@@ -64,6 +66,8 @@ echo "Passed: $pass  Failed: $fail"
 | Checksum             | 3     | Per-block and global checksum enabled             |
 | Multi-block          | 2     | 16 blocks per file (4 KB block size)             |
 | Seekable             | 3     | Seekable archives with seek table                |
+| GUL blocks           | 2     | Literal-rich (level 3) and match-dense (level 5)  |
+| Dictionary           | 3     | GLO, seekable L7 and GUL blocks against a `.zxd`  |
 | Invalid              | 23    | Bad magic, bad version, bad CRC, truncated, corrupt payload, garbage, out-of-bounds section layouts |
 
 ## License

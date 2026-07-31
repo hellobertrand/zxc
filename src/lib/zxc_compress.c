@@ -2078,26 +2078,35 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
  * The match finder is a 16-bit hash over 4-byte grams whose buckets are
  * rings of ZXC_GUL_RING truncated positions, probed fully unrolled with
  * 32-byte vector LCPs (memory-level parallelism), plus a short lookahead.
- * Tables are zeroed per block: thanks to the insertion lag, every probe
- * resolves to an in-range candidate and bogus ones lose the compare.
+ * The tables start every block logically empty, but small blocks are not
+ * memset: an epoch tag in the per-bucket cursor invalidates stale buckets
+ * lazily (see the table-clearing comment in the encoder). Either way, thanks
+ * to the insertion lag, every probe resolves to an in-range candidate and
+ * bogus ones lose the compare.
  * ========================================================================== */
 
 /** @name GUL encoder tuning (encoder policy, `#ifndef`-guarded for sweeps)
  *  @{ */
-/** @brief Past this length, keep looking only while it improves. */
-#ifndef ZXC_GUL_LA_PATE
-#define ZXC_GUL_LA_PATE 8
+/** @brief Lookahead give-up bar: past this length a probe that fails to
+ *         improve ends the lookahead. Distinct from zxc_gul_params_t.la_gate,
+ *         which is the per-tier length that ends it outright. */
+#ifndef ZXC_GUL_LA_IMPROVE
+#define ZXC_GUL_LA_IMPROVE 8
 #endif
 /** @brief After p probes without a match, advance by 1 + (p >> shift). */
 #ifndef ZXC_GUL_SKIP_SHIFT
 #define ZXC_GUL_SKIP_SHIFT 6
 #endif
-/** @brief Smallest match the encoder emits (>= ZXC_GUL_MIN_MATCH).
+/** @brief Smallest match the encoder emits, on every tier: the dense
+ *         acceptance bar and the sparse tiers' flush bar both read it, so a
+ *         sweep moves all three levels at once.
  *         Measured: raising it degrades ratio AND decode (the freed bytes
  *         densify the literal-escape path); keep at the wire minimum. */
 #ifndef ZXC_GUL_MIN_EMIT
 #define ZXC_GUL_MIN_EMIT ZXC_GUL_MIN_MATCH
 #endif
+_Static_assert(ZXC_GUL_MIN_EMIT >= ZXC_GUL_MIN_MATCH && ZXC_GUL_MIN_EMIT <= ZXC_GUL_MAX_MATCH,
+               "ZXC_GUL_MIN_EMIT must stay within the wire-representable match lengths");
 /** @brief Pending-literal flush threshold of the sparse tiers (see
  *         zxc_gul_params_t.accept). */
 #ifndef ZXC_GUL_FIRE_AT
@@ -2342,16 +2351,17 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
             /* Sparse profile: sub-bar matches are only taken to flush a
              * pending literal run (misa77-loose-style policy: keeps the
              * inline LL field small and the sequence count low); otherwise
-             * the best of them is remembered as the flush candidate. */
+             * the best of them is remembered as the flush candidate. The
+             * flush bar is ZXC_GUL_MIN_EMIT, same as the dense tier's. */
             if (pos - lit >= (size_t)ZXC_GUL_FIRE_AT) {
                 if (cand_len != 0 &&
-                    (best_len < ZXC_GUL_MIN_MATCH || cand_pos + cand_len >= pos + best_len)) {
+                    (best_len < ZXC_GUL_MIN_EMIT || cand_pos + cand_len >= pos + best_len)) {
                     pos = cand_pos;
                     best_cand = cand_lst;
                     best_len = cand_len;
                 }
-                accept = best_len >= ZXC_GUL_MIN_MATCH;
-            } else if (best_len >= ZXC_GUL_MIN_MATCH &&
+                accept = best_len >= ZXC_GUL_MIN_EMIT;
+            } else if (best_len >= ZXC_GUL_MIN_EMIT &&
                        (cand_len == 0 || pos + best_len >= cand_pos + cand_len)) {
                 cand_pos = pos;
                 cand_len = best_len;
@@ -2373,7 +2383,7 @@ static ZXC_ALWAYS_INLINE int zxc_encode_block_gul_impl(
                     pos = np;
                     best_cand = nc;
                     best_len = nl;
-                } else if (best_len >= ZXC_GUL_LA_PATE) {
+                } else if (best_len >= ZXC_GUL_LA_IMPROVE) {
                     break;
                 }
             }

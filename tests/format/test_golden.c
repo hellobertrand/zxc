@@ -231,8 +231,15 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
                   type == GC_BLOCK_GUL,
               "unexpected block type %u at %zu", type, off);
         if (gc->expect_data_type != GC_ANY_TYPE)
-            CHECK(type == gc->expect_data_type, "block type %u, expected %u at %zu", type,
-                  gc->expect_data_type, off);
+            /* A GUL block where GLO was pinned means the space-speed swap no
+             * longer fires for this input, not that the file is corrupt: the
+             * levels 3-5 cases only emit GLO through that heuristic. */
+            CHECK(type == gc->expect_data_type, "block type %u, expected %u at %zu%s", type,
+                  gc->expect_data_type, off,
+                  (type == GC_BLOCK_GUL && gc->expect_data_type == GC_BLOCK_GLO)
+                      ? " -- the GUL->GLO swap no longer fires here"
+                        " (ZXC_GUL_GUARD_PCT / ZXC_GUL_SWAP_MARGIN_PCT)"
+                      : "");
         CHECK(data_blocks < MAX_BLOCKS, "too many blocks");
 
         const uint8_t *payload = bh + ZXC_BLOCK_HEADER_SIZE;

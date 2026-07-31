@@ -224,52 +224,43 @@ static size_t gc_make_huffman_dict_payload(uint8_t **out) {
     return n;
 }
 
-/* Stream of 48-byte records picked from a small pseudo-random pool: dense
+/* Stream of fixed-size records picked from a small pseudo-random pool: dense
  * short matches (well under the 32-byte cap) at distances >= ZXC_GUL_MIN_DIS,
- * the GUL light format's bread and butter. */
-static size_t gc_make_gul_records(uint8_t **out) {
-    enum { REC = 48, POOL = 64 };
-    static uint8_t pool[POOL][REC];
-    uint32_t s = 0x0048C0DEu;
+ * the GUL light format's bread and butter. @p rec (<= GC_GUL_REC_MAX) bytes
+ * are drawn per pool entry and the picks come from the same generator right
+ * after: the frozen goldens depend on that exact draw order. */
+#define GC_GUL_REC_MAX 48
+static size_t gc_make_gul_records_n(uint8_t **out, int rec, uint32_t seed) {
+    enum { POOL = 64 };
+    static uint8_t pool[POOL][GC_GUL_REC_MAX];
+    uint32_t s = seed;
     for (int i = 0; i < POOL; i++)
-        for (int j = 0; j < REC; j++) pool[i][j] = (uint8_t)(gc_lcg_next(&s) >> 24);
+        for (int j = 0; j < rec; j++) pool[i][j] = (uint8_t)(gc_lcg_next(&s) >> 24);
     const size_t cap = 512 * 1024;
     uint8_t *b = (uint8_t *)malloc(cap);
     size_t n = 0;
     uint32_t prev = 0xFFFFFFFFu;
-    while (n + REC < cap) {
+    while (n + (size_t)rec < cap) {
         uint32_t pick = (gc_lcg_next(&s) >> 16) % POOL;
         if (pick == prev) pick = (pick + 1) % POOL;
-        memcpy(b + n, pool[pick], REC);
-        n += REC;
+        memcpy(b + n, pool[pick], (size_t)rec);
+        n += (size_t)rec;
         prev = pick;
     }
     *out = b;
     return n;
 }
 
-/* 24-byte records from a pseudo-random pool: every match stays under the
- * 32-byte cap, so no token ever reaches the maximum length and the GLO
- * guard can never fire -- a guard-proof pin of the deep (level 5) tier. */
+/* 48-byte records: matches long enough to reach the 32-byte cap. */
+static size_t gc_make_gul_records(uint8_t **out) {
+    return gc_make_gul_records_n(out, GC_GUL_REC_MAX, 0x0048C0DEu);
+}
+
+/* 24-byte records: every match stays under the 32-byte cap, so no token ever
+ * reaches the maximum length and the GLO guard can never fire -- a guard-proof
+ * pin of the deep (level 5) tier. */
 static size_t gc_make_gul_records24(uint8_t **out) {
-    enum { REC = 24, POOL = 64 };
-    static uint8_t pool[POOL][REC];
-    uint32_t s = 0x0024C0DEu;
-    for (int i = 0; i < POOL; i++)
-        for (int j = 0; j < REC; j++) pool[i][j] = (uint8_t)(gc_lcg_next(&s) >> 24);
-    const size_t cap = 512 * 1024;
-    uint8_t *b = (uint8_t *)malloc(cap);
-    size_t n = 0;
-    uint32_t prev = 0xFFFFFFFFu;
-    while (n + REC < cap) {
-        uint32_t pick = (gc_lcg_next(&s) >> 16) % POOL;
-        if (pick == prev) pick = (pick + 1) % POOL;
-        memcpy(b + n, pool[pick], REC);
-        n += REC;
-        prev = pick;
-    }
-    *out = b;
-    return n;
+    return gc_make_gul_records_n(out, 24, 0x0024C0DEu);
 }
 
 /* Sparse matches separated by long pseudo-random literal runs (150-600
@@ -339,7 +330,17 @@ typedef struct {
  * 04/06-10 emitting GLO; 11 pins the RLE literal path at level 6). The
  * GUL cases pin the light wire format: 14 = token stream with inline
  * literal lengths, 15 = the escape path, 17 = the deep (level 5) tier on
- * guard-proof sub-32-byte records. */
+ * guard-proof sub-32-byte records.
+ *
+ * Maintenance note: the six GC_BLOCK_GLO rows at levels 3-5 (04, 06, 07, 08,
+ * 09, 10) are the only entries whose block type is an *encoder policy*
+ * outcome rather than a format property -- they hold only as long as the
+ * GUL->GLO swap keeps firing (ZXC_GUL_GUARD_PCT / ZXC_GUL_SWAP_MARGIN_PCT).
+ * Retuning either knob does not invalidate the frozen files (CI never
+ * re-compresses them), but the next regeneration will flip those six to GUL.
+ * When that happens, decide per case: re-pin expect_data_type to GC_BLOCK_GUL
+ * if the case is about blocks/checksums/seek tables, or move it to level 6,
+ * where GLO is unconditional, if it is really about the GLO payload. */
 static const golden_case_t GOLDEN_CASES[] = {
     /* name                 input              {level, blk,   csum, seek}                       data type    enc_lit min seek dhuf */
     { "01_empty_eof_only",     gc_make_empty,     { .level = 1 },                                  GC_ANY_TYPE,  -1,  0, 0, 0 },

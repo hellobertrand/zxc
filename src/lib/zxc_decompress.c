@@ -1492,9 +1492,10 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
  *
  * There is no separate strict-tail loop: the fast loop's per-iteration margin
  * (::ZXC_GUL_MAX_OUT_PER_SEQ + ::ZXC_PAD_SIZE) already keeps every wild copy
- * inside @p dst_capacity, and the match-length code is saturated rather than
- * validated, so one body serves both entry points and cannot diverge from
- * itself on corrupt input.
+ * inside @p dst_capacity, and every match-length code is valid by construction
+ * (bias 1 maps the field exactly onto lengths 1..::ZXC_GUL_MAX_MATCH), so one
+ * body serves both entry points and cannot diverge from itself on corrupt
+ * input.
  *
  * The serial loop is intentional: at ~3 bytes of stream per sequence the
  * copies dominate and the out-of-order core overlaps iterations by itself.
@@ -1565,12 +1566,13 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
 
 /* One fast-loop iteration: 32-bit load covering token + offset, 16-byte-first
  * literal copy, single 32-byte match copy. VALIDATE gates the offset check
- * (needed only until `written` reaches ZXC_GUL_MAX_DIS). The match-length code
- * needs no check at all: every 5-bit value decodes to at most
- * ZXC_GUL_MAX_MATCH, so this loop cannot diverge from the strict one however
- * corrupt the input is. References the call site's locals; #undef-ed after the
- * loops. */
-#define ZXC_GUL_DECODE_STEP(VALIDATE)                                                  \
+ * (needed only until `written` reaches ZXC_GUL_MAX_DIS). LIT_CHECK gates the
+ * inline-literal bounds test, needed only once the literal stream no longer
+ * holds ESCAPE-1 bytes of slack. The match-length code needs no check at all:
+ * every 5-bit value decodes to at most ZXC_GUL_MAX_MATCH, so this loop cannot
+ * diverge from the strict one however corrupt the input is. References the
+ * call site's locals; #undef-ed after the loops. */
+#define ZXC_GUL_DECODE_STEP(VALIDATE, LIT_CHECK)                                       \
     do {                                                                               \
         const uint8_t* const s_save = seq_ptr;                                         \
         const uint32_t w = zxc_le32(seq_ptr); /* token + 2 offset bytes + lookahead */ \
@@ -1594,6 +1596,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
             }                                                                          \
             zxc_decode_copy_literals(d_ptr, l_ptr, ll);                                \
         } else {                                                                       \
+            if ((LIT_CHECK) && UNLIKELY(ll > (size_t)(l_end - l_ptr))) {               \
+                seq_ptr = s_save; /* strict loop replays this sequence */              \
+                goto _gul_fast_done;                                                   \
+            }                                                                          \
             zxc_copy16(d_ptr, l_ptr); /* inline ll <= 6: one 16-byte copy */           \
         }                                                                              \
         l_ptr += ll;                                                                   \
@@ -1612,12 +1618,25 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_gul_impl(const zxc_cctx_t* RESTRIC
     /* --- Validated prologue: offset checks until the window threshold --- */
     while (n_seq > 0 && written < ZXC_GUL_MAX_DIS && d_ptr < d_end_1x && l_ptr < l_end_1x &&
            seq_ptr + 4 <= seq_end) {
-        ZXC_GUL_DECODE_STEP(1);
+        ZXC_GUL_DECODE_STEP(1, 0);
     }
 
     /* --- Free-running fast loop: no offset tracking needed past the window --- */
     while (n_seq > 0 && d_ptr < d_end_1x && l_ptr < l_end_1x && seq_ptr + 4 <= seq_end) {
-        ZXC_GUL_DECODE_STEP(0);
+        ZXC_GUL_DECODE_STEP(0, 0);
+    }
+
+    /* --- Literal-poor fast loop: same copies, explicit literal check ---
+     * The loops above need ESCAPE-1 spare literal bytes so an inline LL can
+     * never run past l_end. That slack is gone in the last few sequences of
+     * every block -- and from the first one in a match-dense block (a dict
+     * block can open on a match, so n_lit <= ESCAPE-1 is reachable), which
+     * would otherwise decode entirely in the strict loop. Paying one bounds
+     * test per sequence keeps the wild copies for that stretch. Offsets are
+     * validated here: `written` may be stale from the free-running loop, but
+     * only once it passed ZXC_GUL_MAX_DIS, so no valid distance is rejected. */
+    while (n_seq > 0 && d_ptr < d_end_1x && seq_ptr + 4 <= seq_end) {
+        ZXC_GUL_DECODE_STEP(1, 1);
     }
 _gul_fast_done:;
 #undef ZXC_GUL_DECODE_STEP
