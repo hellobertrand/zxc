@@ -31,6 +31,16 @@ zxc_soversion = '4'
 building_static = get_option('default_library') == 'static'
 lib_export_args = building_static ? ['-DZXC_STATIC_DEFINE'] : ['-Dzxc_lib_EXPORTS']
 
+if building_static
+  lib_consumer_args = ['-DZXC_STATIC_DEFINE']
+elif get_option('default_library') == 'shared'
+  lib_consumer_args = ['-DZXC_DLL_IMPORT']
+else
+  # default_library=both: the consumer picks static or shared per dependency, so
+  # neither define is knowably right. Staying silent links against either.
+  lib_consumer_args = []
+endif
+
 # =============================================================================
 # Platform defines
 # =============================================================================
@@ -123,7 +133,7 @@ libzxc = library('zxc',
 libzxc_dep = declare_dependency(
   link_with : libzxc,
   include_directories : inc_public,
-  compile_args : building_static ? ['-DZXC_STATIC_DEFINE'] : [],
+  compile_args : lib_consumer_args,
 )
 meson.override_dependency('libzxc', libzxc_dep)
 
@@ -153,6 +163,7 @@ pkgconfig.generate(libzxc,
   description : 'High-performance asymmetric lossless compression',
   version : meson.project_version(),
   url : 'https://github.com/hellobertrand/zxc',
+  extra_cflags : lib_consumer_args,
 )
 
 install_headers(

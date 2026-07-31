@@ -8,6 +8,20 @@
 if(ZXC_INSTALL)
     include(GNUInstallDirs)
 
+    # A pkg-config consumer gets no CMake usage requirements, so the .pc must
+    # carry them: the export macro matching the build, and -pthread only when
+    # FindThreads actually picked pthreads (MSVC ignores it with LNK4044).
+    if(BUILD_SHARED_LIBS)
+        set(ZXC_PC_CFLAGS "-DZXC_DLL_IMPORT")
+    else()
+        set(ZXC_PC_CFLAGS "-DZXC_STATIC_DEFINE")
+    endif()
+    if(CMAKE_USE_PTHREADS_INIT)
+        set(ZXC_PC_LIBS_PRIVATE "-pthread")
+    else()
+        set(ZXC_PC_LIBS_PRIVATE "")
+    endif()
+
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/libzxc.pc.in
         ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc

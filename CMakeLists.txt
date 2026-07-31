@@ -90,6 +90,7 @@ if(BUILD_SHARED_LIBS)
             VISIBILITY_INLINES_HIDDEN YES
         )
     endif()
+    target_compile_definitions(zxc_lib INTERFACE ZXC_DLL_IMPORT)
 else()
     # For static libraries, define ZXC_STATIC_DEFINE to avoid dllimport/dllexport
     target_compile_definitions(zxc_lib PUBLIC ZXC_STATIC_DEFINE)

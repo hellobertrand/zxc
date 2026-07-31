@@ -1,0 +1,142 @@
+name: Packaging (Consumer Integration)
+
+# Validates what an *installed* ZXC hands to a downstream project -- the gap
+# that let the Windows static packaging break ship (libzxc.pc did not propagate
+# ZXC_STATIC_DEFINE, so consumers got unresolved __imp_zxc_*).
+#
+# Three consumption paths, static and shared: find_package(zxc), pkg-config,
+# and direct integration (-I + raw library, no defines at all).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+
+jobs:
+  consume:
+    name: "Consume installed ZXC (${{ matrix.name }})"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux GCC
+            runner: ubuntu-latest
+          - name: Windows MSVC
+            runner: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build & install ZXC (static and shared)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for LIB_TYPE in static shared; do
+            SHARED_FLAG=OFF
+            if [ "$LIB_TYPE" = shared ]; then SHARED_FLAG=ON; fi
+            cmake -S . -B "build_$LIB_TYPE" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="$PWD/inst_$LIB_TYPE" \
+              -DZXC_NATIVE_ARCH=OFF \
+              -DZXC_BUILD_TESTS=OFF \
+              -DZXC_BUILD_CLI=OFF \
+              -DBUILD_SHARED_LIBS="$SHARED_FLAG"
+            cmake --build "build_$LIB_TYPE" --config Release -j
+            cmake --install "build_$LIB_TYPE" --config Release
+          done
+
+      # The flags themselves, before any consumer sees them. Cheap, and pins the
+      # exact two regressions this workflow exists for.
+      - name: Check generated libzxc.pc
+        shell: bash
+        run: |
+          set -euo pipefail
+          find inst_static inst_shared -name libzxc.pc | while read -r pc; do cat "$pc"; done
+
+          static_pc=$(find inst_static -name libzxc.pc)
+          shared_pc=$(find inst_shared -name libzxc.pc)
+
+          grep -q -- '-DZXC_STATIC_DEFINE' "$static_pc" \
+            || { echo "::error::static libzxc.pc is missing -DZXC_STATIC_DEFINE"; exit 1; }
+          grep -q -- '-DZXC_DLL_IMPORT' "$shared_pc" \
+            || { echo "::error::shared libzxc.pc is missing -DZXC_DLL_IMPORT"; exit 1; }
+
+          # -pthread is a POSIX toolchain flag; MSVC ignores it with LNK4044.
+          if [ "$RUNNER_OS" = Windows ]; then
+            if grep -q -- '-pthread' "$static_pc" "$shared_pc"; then
+              echo "::error::libzxc.pc emits -pthread on a non-pthread toolchain"; exit 1
+            fi
+          else
+            grep -q 'Libs.private:.*-pthread' "$static_pc" \
+              || { echo "::error::static libzxc.pc lost -pthread on a pthread toolchain"; exit 1; }
+          fi
+
+      - name: Consume via find_package(zxc)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for LIB_TYPE in static shared; do
+            cmake -S tests/packaging -B "cm_$LIB_TYPE" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DZXC_CONSUME_MODE=find_package \
+              -DCMAKE_PREFIX_PATH="$PWD/inst_$LIB_TYPE"
+            cmake --build "cm_$LIB_TYPE" --config Release
+          done
+
+      # No defines, no usage requirements: only zxc_export.h's own default keeps
+      # this linking. The case that produced unresolved __imp_zxc_* on Windows.
+      - name: Consume by direct integration (no defines)
+        shell: bash
+        run: |
+          set -euo pipefail
+          lib=$(find inst_static -name 'libzxc.a' -o -name 'zxc.lib' -o -name 'libzxc.lib' | head -1)
+          test -n "$lib" || { echo "::error::no static library found in inst_static"; exit 1; }
+          cmake -S tests/packaging -B cm_direct \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DZXC_CONSUME_MODE=direct \
+            -DZXC_INCLUDE_DIR="$PWD/inst_static/include" \
+            -DZXC_LIBRARY="$PWD/$lib"
+          cmake --build cm_direct --config Release
+
+      # The path that was broken: the .pc file is the whole contract. POSIX only;
+      # the .pc content check above covers Windows.
+      - name: Consume via pkg-config
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v pkg-config >/dev/null \
+            || { echo "::error::pkg-config is not installed on this runner"; exit 1; }
+
+          for LIB_TYPE in static shared; do
+            # CMAKE_INSTALL_LIBDIR is not always "lib" (lib64, multiarch), so
+            # locate the .pc instead of assuming its path.
+            pc=$(find "inst_$LIB_TYPE" -name libzxc.pc | head -1)
+            test -n "$pc" || { echo "::error::no libzxc.pc in inst_$LIB_TYPE"; exit 1; }
+            PKG_CONFIG_PATH="$PWD/$(dirname "$pc")"
+            export PKG_CONFIG_PATH
+            libdir="$PWD/$(dirname "$(dirname "$pc")")"
+
+            STATIC_ARG=""
+            if [ "$LIB_TYPE" = static ]; then STATIC_ARG="--static"; fi
+
+            # Via a variable, not inline: a bare $(pkg-config ...) that fails is
+            # swallowed by errexit and cc would run with no flags at all.
+            flags=$(pkg-config $STATIC_ARG --cflags --libs libzxc)
+            echo "pkg-config ($LIB_TYPE): $flags"
+
+            # shellcheck disable=SC2086
+            cc tests/packaging/consumer.c $flags -o "consumer_$LIB_TYPE"
+            LD_LIBRARY_PATH="$libdir" "./consumer_$LIB_TYPE"
+          done

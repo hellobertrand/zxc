@@ -92,17 +92,38 @@ libzxc uses an **opt-in** export strategy:
 | Build type | How symbols are exposed |
 |-----------|------------------------|
 | **Shared library** | Default visibility is `hidden`.  Only functions annotated with `ZXC_EXPORT` are exported.  Internal FMV variants (`_default`, `_neon32`, `_avx2`, `_avx512`) are hidden. |
-| **Static library** | Define `ZXC_STATIC_DEFINE` (set automatically by CMake) to disable import/export annotations. |
+| **Static library** | Define `ZXC_STATIC_DEFINE` (set automatically by CMake, Meson and pkg-config) to disable import/export annotations. |
 
 ### Macros
 
 | Macro | Purpose |
 |-------|---------|
-| `ZXC_EXPORT` | Marks a symbol as part of the public API (`__declspec(dllexport/dllimport)` on Windows, `visibility("default")` on GCC/Clang). |
+| `ZXC_EXPORT` | Marks a symbol as part of the public API (`__declspec(dllexport)` when building the Windows DLL, `visibility("default")` on GCC/Clang). |
 | `ZXC_NO_EXPORT` | Forces a symbol to be hidden (`visibility("hidden")`). |
 | `ZXC_DEPRECATED` | Emits a compiler warning when a deprecated symbol is used. |
 | `ZXC_STATIC_DEFINE` | Define when building or consuming as a static library. |
+| `ZXC_DLL_IMPORT` | Windows only, optional: define when consuming `zxc.dll` to declare the API `__declspec(dllimport)`. |
 | `zxc_lib_EXPORTS` | Set automatically by CMake when building the shared library. Do not define manually. |
+
+### Windows: `dllimport` is opt-in
+
+On Windows the header leaves the declarations **unannotated** unless you ask
+for `dllimport` via `ZXC_DLL_IMPORT`. The public API is functions only, so an
+unannotated declaration links against a DLL import library perfectly well — the
+linker just inserts a call thunk. The reverse is not true: `dllimport` against a
+**static** library is a hard link failure (`unresolved external symbol
+__imp_zxc_*`). Defaulting to "no annotation" means a consumer who forgets a
+define pays one indirect jump per call instead of failing to build.
+
+You rarely need to set either macro by hand. Each integration path propagates
+the right one:
+
+| Path | Static build | Shared build |
+|------|--------------|--------------|
+| `find_package(zxc)` | `ZXC_STATIC_DEFINE` | `ZXC_DLL_IMPORT` |
+| Meson subproject / `dependency('libzxc')` | `ZXC_STATIC_DEFINE` | `ZXC_DLL_IMPORT` |
+| `pkg-config --cflags libzxc` | `ZXC_STATIC_DEFINE` | `ZXC_DLL_IMPORT` |
+| Vendored sources / hand-rolled build | *(nothing needed)* | set `zxc_lib_EXPORTS` when building the DLL |
 
 ---
 
