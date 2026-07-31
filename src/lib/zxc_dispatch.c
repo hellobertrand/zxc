@@ -1368,6 +1368,9 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         cctx->inner.checksum_enabled = checksum_enabled;
     }
 
+    /* Shared context: zxc_compress_block leaves its dictionary here. */
+    cctx->inner.dict_size = 0;
+
     zxc_cctx_t* const ctx = &cctx->inner;
 
     uint8_t* op = (uint8_t*)dst;
