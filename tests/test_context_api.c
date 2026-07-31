@@ -208,8 +208,7 @@ int test_estimate_cctx_size() {
     printf("  [PASS] estimate(1 KiB) = %llu bytes\n", (unsigned long long)e1k);
 
     /* 3. Sizes below ZXC_BLOCK_SIZE_MIN collapse to the same estimate. */
-    if (zxc_estimate_cctx_size(512, LVL) != e1k ||
-        zxc_estimate_cctx_size(4096, LVL) != e1k) {
+    if (zxc_estimate_cctx_size(512, LVL) != e1k || zxc_estimate_cctx_size(4096, LVL) != e1k) {
         printf("  [FAIL] estimates below MIN must round to ZXC_BLOCK_SIZE_MIN\n");
         return 0;
     }
@@ -221,18 +220,16 @@ int test_estimate_cctx_size() {
     const uint64_t e8m = zxc_estimate_cctx_size(8 * 1024 * 1024, LVL);
     if (!(e1k <= e64k && e64k <= e1m && e1m <= e8m)) {
         printf("  [FAIL] estimates must be monotonic: %llu, %llu, %llu, %llu\n",
-               (unsigned long long)e1k, (unsigned long long)e64k,
-               (unsigned long long)e1m, (unsigned long long)e8m);
+               (unsigned long long)e1k, (unsigned long long)e64k, (unsigned long long)e1m,
+               (unsigned long long)e8m);
         return 0;
     }
-    printf("  [PASS] monotonic: 1K=%llu, 64K=%llu, 1M=%llu, 8M=%llu\n",
-           (unsigned long long)e1k, (unsigned long long)e64k,
-           (unsigned long long)e1m, (unsigned long long)e8m);
+    printf("  [PASS] monotonic: 1K=%llu, 64K=%llu, 1M=%llu, 8M=%llu\n", (unsigned long long)e1k,
+           (unsigned long long)e64k, (unsigned long long)e1m, (unsigned long long)e8m);
 
     /* 5. Sanity: estimate for a large block must exceed the block itself. */
     if (e1m < 1024 * 1024) {
-        printf("  [FAIL] estimate(1 MiB)=%llu should exceed 1 MiB\n",
-               (unsigned long long)e1m);
+        printf("  [FAIL] estimate(1 MiB)=%llu should exceed 1 MiB\n", (unsigned long long)e1m);
         return 0;
     }
     printf("  [PASS] estimate exceeds raw block size (context overhead present)\n");
@@ -244,8 +241,7 @@ int test_estimate_cctx_size() {
                (double)e8m / (double)e1m);
         return 0;
     }
-    printf("  [PASS] scaling: 8x src_size -> %.2fx memory\n",
-           (double)e8m / (double)e1m);
+    printf("  [PASS] scaling: 8x src_size -> %.2fx memory\n", (double)e8m / (double)e1m);
 
     /* 7. Per-level workspace tiers: levels 3-5 share one GUL carve (ring
      *    table + token staging) over the lean level-2 tier, and level 6 adds

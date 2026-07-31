@@ -180,8 +180,8 @@ int test_truncated_input() {
     // 1. Cut off the Footer (last ZXC_FILE_FOOTER_SIZE bytes)
     if (comp_sz > ZXC_FILE_FOOTER_SIZE) {
         zxc_decompress_opts_t _do15 = {.checksum_enabled = 1};
-        if (zxc_decompress(compressed, (size_t)(comp_sz - ZXC_FILE_FOOTER_SIZE), decomp_buf, SRC_SIZE,
-                           &_do15) >= 0) {
+        if (zxc_decompress(compressed, (size_t)(comp_sz - ZXC_FILE_FOOTER_SIZE), decomp_buf,
+                           SRC_SIZE, &_do15) >= 0) {
             printf("Failed: Should fail when footer is missing\n");
             free(compressed);
             free(decomp_buf);
@@ -826,63 +826,71 @@ int test_stream_engine_errors() {
 /* ======================================================================== */
 
 /* Thin wrapper around test_round_trip: malloc, generate, run, free. */
-#define RT_WRAPPER(fn_name, label, gen, size_expr, level_val, crc_val)         \
-    int fn_name(void) {                                                         \
-        const size_t _sz = (size_expr);                                         \
-        uint8_t* _buf = malloc(_sz > 0 ? _sz : 1);                              \
-        if (!_buf) return 0;                                                    \
-        gen(_buf, _sz);                                                         \
-        const int _ok = test_round_trip((label), _buf, _sz, (level_val),       \
-                                        (crc_val));                             \
-        free(_buf);                                                             \
-        return _ok;                                                             \
+#define RT_WRAPPER(fn_name, label, gen, size_expr, level_val, crc_val)               \
+    int fn_name(void) {                                                              \
+        const size_t _sz = (size_expr);                                              \
+        uint8_t* _buf = malloc(_sz > 0 ? _sz : 1);                                   \
+        if (!_buf) return 0;                                                         \
+        gen(_buf, _sz);                                                              \
+        const int _ok = test_round_trip((label), _buf, _sz, (level_val), (crc_val)); \
+        free(_buf);                                                                  \
+        return _ok;                                                                  \
     }
 
 #define RT_BUF (256 * 1024)
 #define RT_LARGE (15 * 1024 * 1024)
 
 /* Encoder path coverage */
-RT_WRAPPER(test_roundtrip_raw_random,   "RAW Block (Random Data)",        gen_random_data,    RT_BUF, 3, 0)
-RT_WRAPPER(test_roundtrip_ghi_text,     "GHI Block (Text Pattern)",       gen_lz_data,        RT_BUF, 2, 0)
-RT_WRAPPER(test_roundtrip_glo_text,     "GLO Block (Text Pattern)",       gen_lz_data,        RT_BUF, 4, 0)
-RT_WRAPPER(test_roundtrip_gul_l1,       "GUL Block (Records, level 1)",   gen_gul_data,       RT_BUF, 1, 0)
-RT_WRAPPER(test_roundtrip_gul_l2,       "GUL Block (Records, level 2)",   gen_gul_data,       RT_BUF, 2, 1)
-RT_WRAPPER(test_roundtrip_gul_l3,       "GUL Block (Records, level 3)",   gen_gul_data,       RT_BUF, 3, 0)
-RT_WRAPPER(test_roundtrip_num_seq,      "Numeric data (integer sequence)", gen_num_data,       RT_BUF, 3, 0)
-RT_WRAPPER(test_roundtrip_num_zero,     "Numeric data (zero deltas)",      gen_num_data_zero,  RT_BUF, 3, 0)
-RT_WRAPPER(test_roundtrip_num_small,    "Numeric data (small deltas)",     gen_num_data_small, RT_BUF, 3, 0)
-RT_WRAPPER(test_roundtrip_num_large,    "Numeric data (large deltas)",     gen_num_data_large, RT_BUF, 3, 0)
+RT_WRAPPER(test_roundtrip_raw_random, "RAW Block (Random Data)", gen_random_data, RT_BUF, 3, 0)
+RT_WRAPPER(test_roundtrip_ghi_text, "GHI Block (Text Pattern)", gen_lz_data, RT_BUF, 2, 0)
+RT_WRAPPER(test_roundtrip_glo_text, "GLO Block (Text Pattern)", gen_lz_data, RT_BUF, 4, 0)
+RT_WRAPPER(test_roundtrip_gul_l1, "GUL Block (Records, level 1)", gen_gul_data, RT_BUF, 1, 0)
+RT_WRAPPER(test_roundtrip_gul_l2, "GUL Block (Records, level 2)", gen_gul_data, RT_BUF, 2, 1)
+RT_WRAPPER(test_roundtrip_gul_l3, "GUL Block (Records, level 3)", gen_gul_data, RT_BUF, 3, 0)
+RT_WRAPPER(test_roundtrip_num_seq, "Numeric data (integer sequence)", gen_num_data, RT_BUF, 3, 0)
+RT_WRAPPER(test_roundtrip_num_zero, "Numeric data (zero deltas)", gen_num_data_zero, RT_BUF, 3, 0)
+RT_WRAPPER(test_roundtrip_num_small, "Numeric data (small deltas)", gen_num_data_small, RT_BUF, 3,
+           0)
+RT_WRAPPER(test_roundtrip_num_large, "Numeric data (large deltas)", gen_num_data_large, RT_BUF, 3,
+           0)
 
 /* Size edge cases */
-RT_WRAPPER(test_roundtrip_small_50,     "Small Input (50 bytes)",         gen_random_data, 50,  3, 0)
-RT_WRAPPER(test_roundtrip_empty,        "Empty Input (0 bytes)",          gen_random_data, 0,   3, 0)
-RT_WRAPPER(test_roundtrip_1byte,        "1-byte Input",                   gen_random_data, 1,   3, 0)
-RT_WRAPPER(test_roundtrip_1byte_crc,    "1-byte Input (with checksum)",   gen_random_data, 1,   3, 1)
-RT_WRAPPER(test_roundtrip_large_15mb_lz,  "Large File (15MB Multi-Block)",     gen_lz_data,  RT_LARGE, 3, 1)
-RT_WRAPPER(test_roundtrip_large_15mb_num, "Large numeric file (15MB Multi-Block)", gen_num_data, RT_LARGE, 3, 1)
+RT_WRAPPER(test_roundtrip_small_50, "Small Input (50 bytes)", gen_random_data, 50, 3, 0)
+RT_WRAPPER(test_roundtrip_empty, "Empty Input (0 bytes)", gen_random_data, 0, 3, 0)
+RT_WRAPPER(test_roundtrip_1byte, "1-byte Input", gen_random_data, 1, 3, 0)
+RT_WRAPPER(test_roundtrip_1byte_crc, "1-byte Input (with checksum)", gen_random_data, 1, 3, 1)
+RT_WRAPPER(test_roundtrip_large_15mb_lz, "Large File (15MB Multi-Block)", gen_lz_data, RT_LARGE, 3,
+           1)
+RT_WRAPPER(test_roundtrip_large_15mb_num, "Large numeric file (15MB Multi-Block)", gen_num_data,
+           RT_LARGE, 3, 1)
 
 /* Checksum coverage */
-RT_WRAPPER(test_roundtrip_checksum_off, "Checksum Disabled",              gen_lz_data, RT_BUF, 3,  0)
-RT_WRAPPER(test_roundtrip_checksum_on,  "Checksum Enabled",               gen_lz_data, RT_BUF, 31, 1)
+RT_WRAPPER(test_roundtrip_checksum_off, "Checksum Disabled", gen_lz_data, RT_BUF, 3, 0)
+RT_WRAPPER(test_roundtrip_checksum_on, "Checksum Enabled", gen_lz_data, RT_BUF, 31, 1)
 
 /* Per-level coverage */
-RT_WRAPPER(test_roundtrip_level1,       "Level 1",                        gen_lz_data, RT_BUF, 1, 1)
-RT_WRAPPER(test_roundtrip_level2,       "Level 2",                        gen_lz_data, RT_BUF, 2, 1)
-RT_WRAPPER(test_roundtrip_level3,       "Level 3",                        gen_lz_data, RT_BUF, 3, 1)
-RT_WRAPPER(test_roundtrip_level4,       "Level 4",                        gen_lz_data, RT_BUF, 4, 1)
-RT_WRAPPER(test_roundtrip_level5,       "Level 5",                        gen_lz_data, RT_BUF, 5, 1)
-RT_WRAPPER(test_roundtrip_level6,       "Level 6 (Huffman literals)",     gen_lz_data, RT_BUF, 6, 1)
+RT_WRAPPER(test_roundtrip_level1, "Level 1", gen_lz_data, RT_BUF, 1, 1)
+RT_WRAPPER(test_roundtrip_level2, "Level 2", gen_lz_data, RT_BUF, 2, 1)
+RT_WRAPPER(test_roundtrip_level3, "Level 3", gen_lz_data, RT_BUF, 3, 1)
+RT_WRAPPER(test_roundtrip_level4, "Level 4", gen_lz_data, RT_BUF, 4, 1)
+RT_WRAPPER(test_roundtrip_level5, "Level 5", gen_lz_data, RT_BUF, 5, 1)
+RT_WRAPPER(test_roundtrip_level6, "Level 6 (Huffman literals)", gen_lz_data, RT_BUF, 6, 1)
 
 /* Binary data preservation */
-RT_WRAPPER(test_roundtrip_binary,       "Binary Data (0x00, 0x0A, 0x0D, 0xFF)", gen_binary_data, RT_BUF, 3, 0)
-RT_WRAPPER(test_roundtrip_binary_crc,   "Binary Data with Checksum",      gen_binary_data, RT_BUF, 3, 1)
-RT_WRAPPER(test_roundtrip_binary_small, "Small Binary Data (128 bytes)",  gen_binary_data, 128,    3, 0)
+RT_WRAPPER(test_roundtrip_binary, "Binary Data (0x00, 0x0A, 0x0D, 0xFF)", gen_binary_data, RT_BUF,
+           3, 0)
+RT_WRAPPER(test_roundtrip_binary_crc, "Binary Data with Checksum", gen_binary_data, RT_BUF, 3, 1)
+RT_WRAPPER(test_roundtrip_binary_small, "Small Binary Data (128 bytes)", gen_binary_data, 128, 3, 0)
 
 /* Repetitive pattern / offset encoding */
-RT_WRAPPER(test_roundtrip_offset8_small,  "8-bit Offsets (Small Pattern)",  gen_small_offset_data, RT_BUF, 3, 1)
-RT_WRAPPER(test_roundtrip_offset8_lvl5,   "8-bit Offsets (Level 5)",        gen_small_offset_data, RT_BUF, 5, 1)
-RT_WRAPPER(test_roundtrip_offset16_large, "16-bit Offsets (Large Distance)", gen_large_offset_data, RT_BUF, 3, 1)
-RT_WRAPPER(test_roundtrip_offset16_lvl5,  "16-bit Offsets (Level 5)",       gen_large_offset_data, RT_BUF, 5, 1)
+RT_WRAPPER(test_roundtrip_offset8_small, "8-bit Offsets (Small Pattern)", gen_small_offset_data,
+           RT_BUF, 3, 1)
+RT_WRAPPER(test_roundtrip_offset8_lvl5, "8-bit Offsets (Level 5)", gen_small_offset_data, RT_BUF, 5,
+           1)
+RT_WRAPPER(test_roundtrip_offset16_large, "16-bit Offsets (Large Distance)", gen_large_offset_data,
+           RT_BUF, 3, 1)
+RT_WRAPPER(test_roundtrip_offset16_lvl5, "16-bit Offsets (Level 5)", gen_large_offset_data, RT_BUF,
+           5, 1)
 
 /* Mixed offsets: two generators populate two halves of the buffer. */
 int test_roundtrip_offset_mixed(void) {

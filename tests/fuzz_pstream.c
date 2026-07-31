@@ -48,9 +48,9 @@ static size_t derive_chunk_size(uint8_t b) {
     /* Map [0..255] -> [1..512] with a non-linear distribution biased toward
      * small values (small chunks stress the state machine the most). */
     if (b == 0) return 1;
-    if (b < 64) return (size_t)b;            /* 1..63 */
-    if (b < 192) return (size_t)b * 2;       /* 128..382 */
-    return (size_t)b + 256;                  /* 448..511 */
+    if (b < 64) return (size_t)b;      /* 1..63 */
+    if (b < 192) return (size_t)b * 2; /* 128..382 */
+    return (size_t)b + 256;            /* 448..511 */
 }
 
 /* ---------------------------------------------------------------- *

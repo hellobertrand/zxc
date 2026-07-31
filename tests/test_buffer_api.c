@@ -937,4 +937,3 @@ int test_decompress_inplace(void) {
     printf("PASS\n\n");
     return 1;
 }
-

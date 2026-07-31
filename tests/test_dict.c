@@ -5,14 +5,12 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-#include "test_common.h"
-
 #include "../include/zxc_dict.h"
+#include "test_common.h"
 
 /* Build a valid 128-byte packed lengths table from arbitrary content bytes
  * (the .zxd format requires one). */
-static void build_test_huf_lengths(const void* data, size_t n,
-                                   uint8_t out[ZXC_HUF_TABLE_SIZE]) {
+static void build_test_huf_lengths(const void* data, size_t n, uint8_t out[ZXC_HUF_TABLE_SIZE]) {
     uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
     const uint8_t* p = (const uint8_t*)data;
     for (size_t i = 0; i < n; i++) freq[p[i]]++;
@@ -55,8 +53,8 @@ int test_dict_zxd_roundtrip(void) {
     size_t loaded_size = 0;
     const void* loaded_huf = NULL;
     uint32_t loaded_id = 0;
-    int rc = zxc_dict_load(zxd, (size_t)written, &loaded_content, &loaded_size, &loaded_huf,
-                           &loaded_id);
+    int rc =
+        zxc_dict_load(zxd, (size_t)written, &loaded_content, &loaded_size, &loaded_huf, &loaded_id);
     if (rc != ZXC_OK) {
         printf("  [FAIL] zxc_dict_load returned %d (%s)\n", rc, zxc_error_name(rc));
         free(zxd);
@@ -81,8 +79,7 @@ int test_dict_zxd_roundtrip(void) {
     /* The folded load and the standalone accessor must both return the exact
      * table bytes we stored, and agree with each other. */
     const void* huf_acc = zxc_dict_huf(zxd, (size_t)written);
-    if (!loaded_huf || loaded_huf != huf_acc ||
-        memcmp(loaded_huf, huf, ZXC_HUF_TABLE_SIZE) != 0) {
+    if (!loaded_huf || loaded_huf != huf_acc || memcmp(loaded_huf, huf, ZXC_HUF_TABLE_SIZE) != 0) {
         printf("  [FAIL] dict_load table out-param / zxc_dict_huf mismatch\n");
         free(zxd);
         return 0;
@@ -234,8 +231,8 @@ int test_dict_buffer_roundtrip(void) {
             .dict = dict_content,
             .dict_size = dict_size,
         };
-        int64_t dec_size = zxc_decompress(compressed, (size_t)comp_size, decompressed, src_size,
-                                          &dopts);
+        int64_t dec_size =
+            zxc_decompress(compressed, (size_t)comp_size, decompressed, src_size, &dopts);
         if (dec_size != (int64_t)src_size) {
             printf("  [FAIL] level %d: decompress returned %lld, expected %zu\n", level,
                    (long long)dec_size, src_size);
@@ -294,8 +291,7 @@ int test_dict_block_roundtrip(void) {
             .dict = dict_content,
             .dict_size = dict_size,
         };
-        int64_t comp_size =
-            zxc_compress_block(cctx, src, src_size, compressed, comp_bound, &copts);
+        int64_t comp_size = zxc_compress_block(cctx, src, src_size, compressed, comp_bound, &copts);
         if (comp_size <= 0) {
             printf("  [FAIL] level %d: compress_block returned %lld\n", level,
                    (long long)comp_size);
@@ -428,8 +424,8 @@ int test_dict_mismatch_error(void) {
 
     uint8_t decompressed[256];
     zxc_decompress_opts_t dopts = {.dict = wrong_dict, .dict_size = sizeof(wrong_dict) - 1};
-    int64_t rc = zxc_decompress(compressed, (size_t)comp_size, decompressed, sizeof(decompressed),
-                                &dopts);
+    int64_t rc =
+        zxc_decompress(compressed, (size_t)comp_size, decompressed, sizeof(decompressed), &dopts);
     if (rc != ZXC_ERROR_DICT_MISMATCH) {
         printf("  [FAIL] expected DICT_MISMATCH, got %lld (%s)\n", (long long)rc,
                zxc_error_name((int)rc));
@@ -464,8 +460,8 @@ int test_dict_required_error(void) {
 
     uint8_t decompressed[256];
     zxc_decompress_opts_t dopts = {0};
-    int64_t rc = zxc_decompress(compressed, (size_t)comp_size, decompressed, sizeof(decompressed),
-                                &dopts);
+    int64_t rc =
+        zxc_decompress(compressed, (size_t)comp_size, decompressed, sizeof(decompressed), &dopts);
     if (rc != ZXC_ERROR_DICT_REQUIRED) {
         printf("  [FAIL] expected DICT_REQUIRED, got %lld (%s)\n", (long long)rc,
                zxc_error_name((int)rc));
@@ -497,8 +493,8 @@ int test_dict_no_dict_compat(void) {
 
     uint8_t decompressed[256];
     zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
-    int64_t dec_size = zxc_decompress(compressed, (size_t)comp_size, decompressed,
-                                      sizeof(decompressed), &dopts);
+    int64_t dec_size =
+        zxc_decompress(compressed, (size_t)comp_size, decompressed, sizeof(decompressed), &dopts);
     if (dec_size != (int64_t)src_size || memcmp(src, decompressed, src_size) != 0) {
         printf("  [FAIL] roundtrip without dict failed\n");
         free(compressed);
@@ -604,28 +600,40 @@ int test_dict_large_dict_roundtrip(void) {
 
     for (int level = 1; level <= 6; level++) {
         zxc_compress_opts_t copts = {
-            .level = level, .checksum_enabled = 1, .dict = dict, .dict_size = dict_size,
+            .level = level,
+            .checksum_enabled = 1,
+            .dict = dict,
+            .dict_size = dict_size,
         };
         int64_t comp_size = zxc_compress(src, src_size, compressed, comp_bound, &copts);
         if (comp_size <= 0) {
             printf("  [FAIL] level %d: compress returned %lld (%s)\n", level, (long long)comp_size,
                    zxc_error_name((int)comp_size));
-            free(src); free(compressed); free(decompressed); free(dict);
+            free(src);
+            free(compressed);
+            free(decompressed);
+            free(dict);
             return 0;
         }
         zxc_decompress_opts_t dopts = {.checksum_enabled = 1, .dict = dict, .dict_size = dict_size};
-        int64_t dec_size = zxc_decompress(compressed, (size_t)comp_size, decompressed, src_size,
-                                          &dopts);
+        int64_t dec_size =
+            zxc_decompress(compressed, (size_t)comp_size, decompressed, src_size, &dopts);
         if (dec_size != (int64_t)src_size || memcmp(src, decompressed, src_size) != 0) {
             printf("  [FAIL] level %d: dec_size=%lld err=%s\n", level, (long long)dec_size,
                    dec_size < 0 ? zxc_error_name((int)dec_size) : "content mismatch");
-            free(src); free(compressed); free(decompressed); free(dict);
+            free(src);
+            free(compressed);
+            free(decompressed);
+            free(dict);
             return 0;
         }
         printf("  [PASS] level %d\n", level);
     }
 
-    free(src); free(compressed); free(decompressed); free(dict);
+    free(src);
+    free(compressed);
+    free(decompressed);
+    free(dict);
     printf("PASS\n\n");
     return 1;
 }
@@ -773,8 +781,8 @@ int test_dict_train_roundtrip(void) {
         .dict = dict_buf,
         .dict_size = (size_t)dict_sz,
     };
-    int64_t dec_size = zxc_decompress(compressed, (size_t)comp_size, decompressed,
-                                      sizeof(decompressed), &dopts);
+    int64_t dec_size =
+        zxc_decompress(compressed, (size_t)comp_size, decompressed, sizeof(decompressed), &dopts);
     free(compressed);
 
     if (dec_size != (int64_t)src_size || memcmp(test_input, decompressed, src_size) != 0) {
@@ -1027,8 +1035,8 @@ static int stream_dict_error_case(const char* label, const uint8_t* dec_dict, si
             .checksum_enabled = 1, .dict = dec_dict, .dict_size = dec_dict_size};
         int64_t rc = zxc_stream_decompress(f_comp, f_dec, &dopts);
         if (rc != want_err) {
-            printf("  [FAIL] %s: expected %s, got %lld (%s)\n", label, zxc_error_name((int)want_err),
-                   (long long)rc, zxc_error_name((int)rc));
+            printf("  [FAIL] %s: expected %s, got %lld (%s)\n", label,
+                   zxc_error_name((int)want_err), (long long)rc, zxc_error_name((int)rc));
             ok = 0;
         }
     }
@@ -1311,8 +1319,7 @@ int test_dict_huf_table_roundtrip(void) {
             break;
         }
 
-        zxc_decompress_opts_t d2 = {
-            .dict = dict_buf, .dict_size = (size_t)dsz, .dict_huf = huf};
+        zxc_decompress_opts_t d2 = {.dict = dict_buf, .dict_size = (size_t)dsz, .dict_huf = huf};
         const int64_t r2 = zxc_decompress(c2, (size_t)s2, out, hsz + 64, &d2);
         if (r2 != (int64_t)hsz || memcmp(out, heldout, hsz) != 0) {
             printf("  [FAIL] roundtrip with table: %lld\n", (long long)r2);
@@ -1402,8 +1409,8 @@ int test_dict_huf_degenerate_corpus(void) {
             size_t csz = 0;
             const void* table = NULL;
             uint32_t id = 0;
-            const int lrc = (zsz > 0) ? zxc_dict_load(zxd, (size_t)zsz, &content, &csz, &table, &id)
-                                      : (int)zsz;
+            const int lrc =
+                (zsz > 0) ? zxc_dict_load(zxd, (size_t)zsz, &content, &csz, &table, &id) : (int)zsz;
             free(zxd);
             if (zsz <= 0 || lrc != ZXC_OK) {
                 printf("  [FAIL] fill 0x%02X: empty-table .zxd save=%lld load=%d\n", fills[f],

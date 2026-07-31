@@ -56,21 +56,21 @@
 
 /* Portable LCG (glibc rand() constants), kept local so output never depends on
  * the platform libc PRNG. */
-static uint32_t gc_lcg_next(uint32_t *s) {
+static uint32_t gc_lcg_next(uint32_t* s) {
     *s = (*s * 1103515245U) + 12345U;
     return *s;
 }
 
 /* Empty input: exercises an archive with only an EOF block + footer. */
-static size_t gc_make_empty(uint8_t **out) {
+static size_t gc_make_empty(uint8_t** out) {
     *out = NULL;
     return 0;
 }
 
 /* Incompressible high-entropy bytes -> forces a RAW block (GHI/GLO expand). */
-static size_t gc_make_raw(uint8_t **out) {
+static size_t gc_make_raw(uint8_t** out) {
     const size_t n = 4096;
-    uint8_t *b = (uint8_t *)malloc(n);
+    uint8_t* b = (uint8_t*)malloc(n);
     uint32_t s = 0x1234567u;
     for (size_t i = 0; i < n; i++) b[i] = (uint8_t)(gc_lcg_next(&s) >> 24);
     *out = b;
@@ -78,7 +78,7 @@ static size_t gc_make_raw(uint8_t **out) {
 }
 
 /* Compressible English-like text with plenty of repeated substrings. */
-static size_t gc_fill_text(uint8_t *b, size_t n) {
+static size_t gc_fill_text(uint8_t* b, size_t n) {
     static const char phrase[] =
         "the quick brown fox jumps over the lazy dog. ZXC compresses repeated "
         "patterns efficiently and decompresses them very fast. ";
@@ -87,9 +87,9 @@ static size_t gc_fill_text(uint8_t *b, size_t n) {
     return n;
 }
 
-static size_t gc_make_text(uint8_t **out) {
+static size_t gc_make_text(uint8_t** out) {
     const size_t n = 8192;
-    uint8_t *b = (uint8_t *)malloc(n);
+    uint8_t* b = (uint8_t*)malloc(n);
     gc_fill_text(b, n);
     *out = b;
     return n;
@@ -100,12 +100,12 @@ static size_t gc_make_text(uint8_t **out) {
  * triggers the Huffman literal section (enc_lit == 2) at level 6. The values
  * are shuffled by the LCG so the LZ matcher cannot collapse them into long
  * matches, yet only a small skewed alphabet is used. */
-static size_t gc_make_huffman(uint8_t **out) {
+static size_t gc_make_huffman(uint8_t** out) {
     const size_t n = 16384;
-    uint8_t *b = (uint8_t *)malloc(n);
+    uint8_t* b = (uint8_t*)malloc(n);
     /* Heavily skewed 8-symbol alphabet (entropy ~2 bits/symbol). */
     static const uint8_t alpha[16] = {'a', 'a', 'a', 'a', 'a', 'a', 'b', 'b',
-                                       'b', 'b', 'c', 'c', 'd', 'e', 'f', 'g'};
+                                      'b', 'b', 'c', 'c', 'd', 'e', 'f', 'g'};
     uint32_t s = 0x0BADF00Du;
     for (size_t i = 0; i < n; i++) b[i] = alpha[(gc_lcg_next(&s) >> 16) & 0x0F];
     *out = b;
@@ -115,9 +115,9 @@ static size_t gc_make_huffman(uint8_t **out) {
 /* Wide, heavily-skewed literal alphabet (~220 symbols, long thin tail) via an
  * integer-only fourth-power curve. At level 7 the rarest symbols get 9-11-bit
  * Huffman codes, exercising the 11-bit path the DENSITY cap (<= 8 bits) can't. */
-static size_t gc_make_huffman_wide(uint8_t **out) {
+static size_t gc_make_huffman_wide(uint8_t** out) {
     const size_t n = 16384;
-    uint8_t *b = (uint8_t *)malloc(n);
+    uint8_t* b = (uint8_t*)malloc(n);
     uint32_t s = 0x0C0FFEE1u;
     for (size_t i = 0; i < n; i++) {
         const uint64_t u = (gc_lcg_next(&s) >> 16) & 0xFFFFu; /* uniform 0..65535 */
@@ -130,9 +130,9 @@ static size_t gc_make_huffman_wide(uint8_t **out) {
 }
 
 /* Several block_size-worth of text -> multiple data blocks in one archive. */
-static size_t gc_make_multiblock(uint8_t **out) {
+static size_t gc_make_multiblock(uint8_t** out) {
     const size_t n = 5 * 4096 + 777; /* 5 full 4 KB blocks + a short tail */
-    uint8_t *b = (uint8_t *)malloc(n);
+    uint8_t* b = (uint8_t*)malloc(n);
     gc_fill_text(b, n);
     *out = b;
     return n;
@@ -141,10 +141,10 @@ static size_t gc_make_multiblock(uint8_t **out) {
 /* A pseudo-random 1 KB block repeated -> matches at distance 1024 (> 256),
  * forcing 16-bit offsets (enc_off == 0). The other GLO/GHI cases use small
  * offsets (enc_off == 1), so this freezes the 16-bit offset path. */
-static size_t gc_make_offset16(uint8_t **out) {
+static size_t gc_make_offset16(uint8_t** out) {
     const size_t period = 1024;
     const size_t n = 8 * period;
-    uint8_t *b = (uint8_t *)malloc(n);
+    uint8_t* b = (uint8_t*)malloc(n);
     uint32_t s = 0x5EED1234u;
     for (size_t i = 0; i < period; i++) b[i] = (uint8_t)(gc_lcg_next(&s) >> 24);
     for (size_t i = period; i < n; i++) b[i] = b[i % period];
@@ -156,9 +156,9 @@ static size_t gc_make_offset16(uint8_t **out) {
  * shorter than the LZ minimum match, so they survive LZ as literals; RLE then
  * beats raw literals and the GLO block uses RLE literal encoding (enc_lit == 1).
  * The other GLO cases use raw (0) or Huffman (2) literals. */
-static size_t gc_make_rle_literals(uint8_t **out) {
+static size_t gc_make_rle_literals(uint8_t** out) {
     const size_t n = 16384;
-    uint8_t *b = (uint8_t *)malloc(n);
+    uint8_t* b = (uint8_t*)malloc(n);
     uint32_t s = 0x1357BD13u;
     for (size_t i = 0; i < n; i += 5) {
         b[i] = (uint8_t)(gc_lcg_next(&s) >> 24);
@@ -186,9 +186,9 @@ static const uint8_t gc_dict_content[] =
 
 /* Payload that reuses the dictionary's phrases, so the block is encoded against
  * the dictionary (the file header then carries HAS_DICTIONARY + dict_id). */
-static size_t gc_make_dict_payload(uint8_t **out) {
+static size_t gc_make_dict_payload(uint8_t** out) {
     const size_t n = 4096;
-    uint8_t *b = (uint8_t *)malloc(n);
+    uint8_t* b = (uint8_t*)malloc(n);
     static const char req[] =
         "GET /api/v1/users/4242/profile HTTP/1.1\r\nHost: api.example.com\r\n"
         "Accept: application/json\r\nUser-Agent: zxc-client\r\n\r\n";
@@ -202,9 +202,9 @@ static size_t gc_make_dict_payload(uint8_t **out) {
  * to engage the dict, enough skewed literals (digits, lowercase ids) for the
  * shared dictionary Huffman table (enc_lit == 3, FORMAT.md Sec 5.2.2) to beat
  * both the per-block table (no 128-byte header) and RAW/RLE. */
-static size_t gc_make_huffman_dict_payload(uint8_t **out) {
+static size_t gc_make_huffman_dict_payload(uint8_t** out) {
     const size_t cap = 4096;
-    uint8_t *b = (uint8_t *)malloc(cap);
+    uint8_t* b = (uint8_t*)malloc(cap);
     uint32_t st = 0x5EEDCAFEu;
     size_t n = 0;
     while (n + 160 < cap) {
@@ -230,14 +230,14 @@ static size_t gc_make_huffman_dict_payload(uint8_t **out) {
  * are drawn per pool entry and the picks come from the same generator right
  * after: the frozen goldens depend on that exact draw order. */
 #define GC_GUL_REC_MAX 48
-static size_t gc_make_gul_records_n(uint8_t **out, int rec, uint32_t seed) {
+static size_t gc_make_gul_records_n(uint8_t** out, int rec, uint32_t seed) {
     enum { POOL = 64 };
     static uint8_t pool[POOL][GC_GUL_REC_MAX];
     uint32_t s = seed;
     for (int i = 0; i < POOL; i++)
         for (int j = 0; j < rec; j++) pool[i][j] = (uint8_t)(gc_lcg_next(&s) >> 24);
     const size_t cap = 512 * 1024;
-    uint8_t *b = (uint8_t *)malloc(cap);
+    uint8_t* b = (uint8_t*)malloc(cap);
     size_t n = 0;
     uint32_t prev = 0xFFFFFFFFu;
     while (n + (size_t)rec < cap) {
@@ -252,27 +252,27 @@ static size_t gc_make_gul_records_n(uint8_t **out, int rec, uint32_t seed) {
 }
 
 /* 48-byte records: matches long enough to reach the 32-byte cap. */
-static size_t gc_make_gul_records(uint8_t **out) {
+static size_t gc_make_gul_records(uint8_t** out) {
     return gc_make_gul_records_n(out, GC_GUL_REC_MAX, 0x0048C0DEu);
 }
 
 /* 24-byte records: every match stays under the 32-byte cap, so no token ever
  * reaches the maximum length and the GLO guard can never fire -- a guard-proof
  * pin of the deep (level 5) tier. */
-static size_t gc_make_gul_records24(uint8_t **out) {
+static size_t gc_make_gul_records24(uint8_t** out) {
     return gc_make_gul_records_n(out, 24, 0x0024C0DEu);
 }
 
 /* Sparse matches separated by long pseudo-random literal runs (150-600
  * bytes): every GUL token needs the literal-length ESCAPE bytes, freezing
  * that wire path. */
-static size_t gc_make_gul_escapes(uint8_t **out) {
+static size_t gc_make_gul_escapes(uint8_t** out) {
     enum { REC = 24 };
     static uint8_t rec[REC];
     uint32_t s = 0x0E5CA9E5u;
     for (int j = 0; j < REC; j++) rec[j] = (uint8_t)(gc_lcg_next(&s) >> 24);
     const size_t cap = 256 * 1024;
-    uint8_t *b = (uint8_t *)malloc(cap);
+    uint8_t* b = (uint8_t*)malloc(cap);
     size_t n = 0;
     while (n + 2 * REC + 600 < cap) {
         const uint32_t run = 150 + ((gc_lcg_next(&s) >> 16) % 450u);
@@ -286,13 +286,13 @@ static size_t gc_make_gul_escapes(uint8_t **out) {
 }
 
 /* Shared dictionary Huffman table for the enc_lit == 3 golden case */
-static const uint8_t *gc_dict_huf_table(void) {
+static const uint8_t* gc_dict_huf_table(void) {
     static uint8_t huf[128];
     static int init = 0;
     if (!init) {
-        uint8_t *payload = NULL;
+        uint8_t* payload = NULL;
         size_t n = gc_make_huffman_dict_payload(&payload);
-        const void *samples[1];
+        const void* samples[1];
         size_t sizes[1];
         samples[0] = payload;
         sizes[0] = n;
@@ -311,15 +311,15 @@ static const uint8_t *gc_dict_huf_table(void) {
 /* ------------------------------------------------------------------------- */
 
 typedef struct {
-    const char *name;               /* basename, no extension */
-    size_t (*make_input)(uint8_t **out);
-    zxc_compress_opts_t opts;       /* level / block_size / checksum / seekable */
-    uint8_t expect_data_type;       /* every data block must equal this, or GC_ANY_TYPE */
-    int expect_enc_lit;             /* GLO literal encoding (-1 = no constraint;
-                                       2 = HUFFMAN, 3 = HUFFMAN_DICT) */
-    int min_data_blocks;            /* lower bound on data-block count */
-    int expect_seek;                /* a SEK block must be present */
-    int use_dict_huf;               /* attach gc_dict_huf_table() to the opts */
+    const char* name; /* basename, no extension */
+    size_t (*make_input)(uint8_t** out);
+    zxc_compress_opts_t opts; /* level / block_size / checksum / seekable */
+    uint8_t expect_data_type; /* every data block must equal this, or GC_ANY_TYPE */
+    int expect_enc_lit;       /* GLO literal encoding (-1 = no constraint;
+                                 2 = HUFFMAN, 3 = HUFFMAN_DICT) */
+    int min_data_blocks;      /* lower bound on data-block count */
+    int expect_seek;          /* a SEK block must be present */
+    int use_dict_huf;         /* attach gc_dict_huf_table() to the opts */
 } golden_case_t;
 
 /* The corpus. Each entry maps onto one or more sections of docs/FORMAT.md Sec 5.
@@ -341,6 +341,8 @@ typedef struct {
  * When that happens, decide per case: re-pin expect_data_type to GC_BLOCK_GUL
  * if the case is about blocks/checksums/seek tables, or move it to level 6,
  * where GLO is unconditional, if it is really about the GLO payload. */
+/* The column alignment below is the documentation; keep it hand-aligned. */
+/* clang-format off */
 static const golden_case_t GOLDEN_CASES[] = {
     /* name                 input              {level, blk,   csum, seek}                       data type    enc_lit min seek dhuf */
     { "01_empty_eof_only",     gc_make_empty,     { .level = 1 },                                  GC_ANY_TYPE,  -1,  0, 0, 0 },
@@ -361,6 +363,7 @@ static const golden_case_t GOLDEN_CASES[] = {
     { "15_gul_escapes",        gc_make_gul_escapes,  { .level = 3 },                               GC_BLOCK_GUL, -1,  1, 0, 0 },
     { "17_block_gul_l5",       gc_make_gul_records24, { .level = 5 },                              GC_BLOCK_GUL, -1,  1, 0, 0 },
 };
+/* clang-format on */
 
 #define GOLDEN_CASE_COUNT (sizeof(GOLDEN_CASES) / sizeof(GOLDEN_CASES[0]))
 

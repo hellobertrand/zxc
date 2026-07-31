@@ -41,32 +41,31 @@
  * and the little-endian load helpers used to recompute the on-disk integrity
  * fields. Header-only (static inline), so no extra linkage is required. */
 #include "../../src/lib/zxc_internal.h"
-
 #include "golden_cases.h"
 
 /* ------------------------------------------------------------------------- */
 /* Reporting helpers                                                         */
 /* ------------------------------------------------------------------------- */
 
-static int g_checks;  /* assertions performed in the current file */
+static int g_checks; /* assertions performed in the current file */
 
-#define CHECK(cond, ...)                                  \
-    do {                                                  \
-        g_checks++;                                       \
-        if (!(cond)) {                                    \
-            fprintf(stderr, "    FAIL [%s]: ", ctx);      \
-            fprintf(stderr, __VA_ARGS__);                 \
-            fprintf(stderr, "\n");                        \
-            return 0;                                     \
-        }                                                 \
+#define CHECK(cond, ...)                             \
+    do {                                             \
+        g_checks++;                                  \
+        if (!(cond)) {                               \
+            fprintf(stderr, "    FAIL [%s]: ", ctx); \
+            fprintf(stderr, __VA_ARGS__);            \
+            fprintf(stderr, "\n");                   \
+            return 0;                                \
+        }                                            \
     } while (0)
 
 /* ------------------------------------------------------------------------- */
 /* File IO                                                                   */
 /* ------------------------------------------------------------------------- */
 
-static uint8_t *read_file(const char *path, size_t *out_size) {
-    FILE *f = fopen(path, "rb");
+static uint8_t* read_file(const char* path, size_t* out_size) {
+    FILE* f = fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
@@ -75,7 +74,7 @@ static uint8_t *read_file(const char *path, size_t *out_size) {
         fclose(f);
         return NULL;
     }
-    uint8_t *buf = (uint8_t *)malloc((size_t)len ? (size_t)len : 1);
+    uint8_t* buf = (uint8_t*)malloc((size_t)len ? (size_t)len : 1);
     if (buf && len > 0 && fread(buf, 1, (size_t)len, f) != (size_t)len) {
         free(buf);
         fclose(f);
@@ -94,7 +93,7 @@ static uint8_t *read_file(const char *path, size_t *out_size) {
  * header, then `n_sections` packed u64 descriptors (low32 = comp, high32 = raw),
  * then each section's bytes. The section sizes plus the headers must tile the
  * payload exactly. */
-static int validate_lz_payload(const char *ctx, const uint8_t *p, uint32_t comp, int n_sections,
+static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp, int n_sections,
                                int expect_enc_lit) {
     uint32_t fixed = 16 + (uint32_t)n_sections * 8;
     CHECK(comp >= fixed, "LZ payload too small for header+descriptors (%u < %u)", comp, fixed);
@@ -123,7 +122,7 @@ static int validate_lz_payload(const char *ctx, const uint8_t *p, uint32_t comp,
  * reserved u32 = 0, tail_len), 2 raw section descriptors (comp == raw), and
  * the mandatory tail; the streams must tile the payload exactly and every
  * sequence costs at least 3 token-stream bytes. */
-static int validate_gul_payload(const char *ctx, const uint8_t *p, uint32_t comp) {
+static int validate_gul_payload(const char* ctx, const uint8_t* p, uint32_t comp) {
     const uint32_t fixed = 16 + 2 * 8;
     CHECK(comp >= fixed, "GUL payload too small for header+descriptors (%u < %u)", comp, fixed);
 
@@ -138,13 +137,12 @@ static int validate_gul_payload(const char *ctx, const uint8_t *p, uint32_t comp
     uint32_t sz_seq = (uint32_t)(d1 & 0xFFFFFFFFu);
     CHECK(d0 == ((uint64_t)n_lit | ((uint64_t)n_lit << 32)),
           "GUL literals descriptor disagrees with header");
-    CHECK(d1 == ((uint64_t)sz_seq | ((uint64_t)sz_seq << 32)),
-          "GUL sequences descriptor not raw");
+    CHECK(d1 == ((uint64_t)sz_seq | ((uint64_t)sz_seq << 32)), "GUL sequences descriptor not raw");
     CHECK((uint64_t)n_seq * 3u <= sz_seq, "GUL token stream too small for %u sequences", n_seq);
 
     uint64_t total = (uint64_t)fixed + n_lit + sz_seq + tail_len;
-    CHECK(total == comp, "GUL streams do not tile payload (%llu != %u)",
-          (unsigned long long)total, comp);
+    CHECK(total == comp, "GUL streams do not tile payload (%llu != %u)", (unsigned long long)total,
+          comp);
     return 1;
 }
 
@@ -154,7 +152,7 @@ static int validate_gul_payload(const char *ctx, const uint8_t *p, uint32_t comp
 
 #define MAX_BLOCKS 256
 
-static int validate_structure(const char *ctx, const golden_case_t *gc, const uint8_t *buf,
+static int validate_structure(const char* ctx, const golden_case_t* gc, const uint8_t* buf,
                               size_t size) {
     /* ---- File header (Sec 3) ---- */
     CHECK(size >= ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE, "file too small (%zu)", size);
@@ -171,7 +169,8 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
     int has_dict = (flags & ZXC_FILE_FLAG_HAS_DICTIONARY) ? 1 : 0;
     const int want_dict = (gc->opts.dict != NULL && gc->opts.dict_size > 0);
     CHECK((flags & 0x0Fu) == 0, "checksum algo id %u, expected 0", flags & 0x0Fu);
-    CHECK((flags & 0x30u) == 0, "reserved flag bits set (0x%02X)", flags);  /* bit 6 = HAS_DICTIONARY */
+    CHECK((flags & 0x30u) == 0, "reserved flag bits set (0x%02X)",
+          flags); /* bit 6 = HAS_DICTIONARY */
     CHECK(has_checksum == gc->opts.checksum_enabled, "HAS_CHECKSUM=%d, expected %d", has_checksum,
           gc->opts.checksum_enabled);
     CHECK(has_dict == want_dict, "HAS_DICTIONARY=%d, expected %d", has_dict, want_dict);
@@ -196,13 +195,13 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
 
     /* ---- Block stream (Sec 4, Sec 5) ---- */
     size_t off = ZXC_FILE_HEADER_SIZE;
-    uint32_t rolling = 0;            /* Sec 7.3 rolling global hash */
+    uint32_t rolling = 0; /* Sec 7.3 rolling global hash */
     int data_blocks = 0;
     uint32_t block_phys[MAX_BLOCKS]; /* physical size of each data block incl. checksum */
 
     for (;;) {
         CHECK(off + ZXC_BLOCK_HEADER_SIZE <= size, "block header overruns file at %zu", off);
-        const uint8_t *bh = buf + off;
+        const uint8_t* bh = buf + off;
         uint8_t type = bh[0];
         uint8_t bflags = bh[1];
         uint8_t resv = bh[2];
@@ -242,7 +241,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
                       : "");
         CHECK(data_blocks < MAX_BLOCKS, "too many blocks");
 
-        const uint8_t *payload = bh + ZXC_BLOCK_HEADER_SIZE;
+        const uint8_t* payload = bh + ZXC_BLOCK_HEADER_SIZE;
         CHECK(off + ZXC_BLOCK_HEADER_SIZE + comp <= size, "payload overruns file at %zu", off);
 
         if (type == GC_BLOCK_GLO) {
@@ -278,7 +277,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
     /* ---- Optional SEK block (Sec 5.5), located after EOF, before footer ---- */
     int seek_present = 0;
     if (off + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE <= size && buf[off] == GC_BLOCK_SEK) {
-        const uint8_t *sh = buf + off;
+        const uint8_t* sh = buf + off;
         uint32_t comp = zxc_le32(sh + 3);
         uint8_t tmp[ZXC_BLOCK_HEADER_SIZE];
         memcpy(tmp, sh, ZXC_BLOCK_HEADER_SIZE);
@@ -286,7 +285,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
         CHECK(sh[7] == zxc_hash8(tmp), "SEK header CRC8 mismatch at %zu", off);
         CHECK(comp == (uint32_t)data_blocks * 4u, "SEK comp_size %u != n_blocks*4 (%d)", comp,
               data_blocks * 4);
-        const uint8_t *entries = sh + ZXC_BLOCK_HEADER_SIZE;
+        const uint8_t* entries = sh + ZXC_BLOCK_HEADER_SIZE;
         CHECK(off + ZXC_BLOCK_HEADER_SIZE + comp + ZXC_FILE_FOOTER_SIZE <= size,
               "SEK entries overrun file");
         for (int i = 0; i < data_blocks; i++) {
@@ -302,7 +301,7 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
 
     /* ---- File footer (Sec 8): the trailing 12 bytes, with nothing after it ---- */
     CHECK(off + ZXC_FILE_FOOTER_SIZE == size, "footer not at end (off %zu, size %zu)", off, size);
-    const uint8_t *footer = buf + size - ZXC_FILE_FOOTER_SIZE;
+    const uint8_t* footer = buf + size - ZXC_FILE_FOOTER_SIZE;
     uint64_t src_size = zxc_le64(footer);
     uint32_t global_hash = zxc_le32(footer + 8);
 
@@ -321,18 +320,18 @@ static int validate_structure(const char *ctx, const golden_case_t *gc, const ui
 }
 
 /* Decompress and compare against the freshly regenerated deterministic input. */
-static int validate_roundtrip(const char *ctx, const golden_case_t *gc, const uint8_t *buf,
+static int validate_roundtrip(const char* ctx, const golden_case_t* gc, const uint8_t* buf,
                               size_t size) {
-    uint8_t *input = NULL;
+    uint8_t* input = NULL;
     size_t in_size = gc->make_input(&input);
 
     uint64_t dec_sz = zxc_get_decompressed_size(buf, size);
-    CHECK(dec_sz == in_size, "decoded size %llu != original %zu",
-          (unsigned long long)dec_sz, in_size);
+    CHECK(dec_sz == in_size, "decoded size %llu != original %zu", (unsigned long long)dec_sz,
+          in_size);
 
     int ok = 1;
     if (in_size > 0) {
-        uint8_t *out = (uint8_t *)malloc(in_size);
+        uint8_t* out = (uint8_t*)malloc(in_size);
         /* Dictionary cases must be decoded with their dictionary (and, for the
          * shared-table case, its Huffman table -- dict_id binds the pair). */
         zxc_decompress_opts_t dopts = {0};
@@ -354,21 +353,21 @@ static int validate_roundtrip(const char *ctx, const golden_case_t *gc, const ui
     return ok;
 }
 
-int main(int argc, char **argv) {
-    const char *dir = (argc > 1) ? argv[1] : "tests/format/golden";
+int main(int argc, char** argv) {
+    const char* dir = (argc > 1) ? argv[1] : "tests/format/golden";
 
     int failed = 0;
     printf("=== Golden format conformance (%s) ===\n", dir);
 
     for (size_t i = 0; i < GOLDEN_CASE_COUNT; i++) {
-        const golden_case_t *gc = &GOLDEN_CASES[i];
-        const char *ctx = gc->name;
+        const golden_case_t* gc = &GOLDEN_CASES[i];
+        const char* ctx = gc->name;
 
         char path[1024];
         snprintf(path, sizeof path, "%s/%s.zxc", dir, gc->name);
 
         size_t size = 0;
-        uint8_t *buf = read_file(path, &size);
+        uint8_t* buf = read_file(path, &size);
         if (!buf) {
             fprintf(stderr, "  FAIL: cannot read %s\n", path);
             failed++;

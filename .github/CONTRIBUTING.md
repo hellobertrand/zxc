@@ -41,7 +41,8 @@ ctest --output-on-failure
 ### Format Code
 
 ```bash
-clang-format -i src/lib/*.c include/*.h
+make format        # include/, src/lib/, src/cli/ and tests/
+make format-check  # what CI runs
 ```
 
 ## Requirements

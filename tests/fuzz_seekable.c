@@ -165,6 +165,5 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         zxc_seekable_free(s2);
     }
 
-
     return 0;
 }
