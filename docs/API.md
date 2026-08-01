@@ -429,7 +429,14 @@ flush-right archive left, into the write cursor's path; no header flag announces
 a seek table, so its worst case (4 bytes per block) is always reserved. Always
 size the buffer with this function rather than re-deriving the formula.
 
-**Returns**: required buffer size, or `0` if `src` is not a valid archive.
+The footer is untrusted input, so the decompressed size it carries is checked
+for plausibility against the archive itself — an archive of `src_size` bytes
+cannot hold more than `src_size / block header` blocks, and each block decodes
+to at most one block size. A forged footer therefore returns `0` instead of an
+arbitrary allocation size, the same check `zxc_get_decompressed_size` applies.
+
+**Returns**: required buffer size, or `0` if `src` is not a valid archive
+(bad magic, bad header, or an implausible footer).
 
 ### `zxc_decompress_inplace`
 
@@ -514,6 +521,15 @@ bound while what the caller keeps is just the decompressed data.
 `zxc_mmap_is_zerocopy()` reports which route a given result took, so a
 deployment can log whether it gets the mapped or the copying path. The
 decompressed bytes are identical either way.
+
+**Truncation.** The archive is a live file mapping *for the duration of the
+call*, so the usual rule applies: if another process truncates or overwrites the
+file while `zxc_decompress_mmap` runs, touching a vanished page raises `SIGBUS`
+inside the library. The realistic cases are network shares, removable volumes,
+and files a writer is still appending to; decode from a private copy when that
+is possible. The region handed back does **not** carry the hazard — by the time
+the call returns, every byte in it was written by the decoder and none of it is
+still backed by the file.
 
 ### Seekable archives
 

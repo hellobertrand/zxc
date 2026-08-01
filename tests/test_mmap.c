@@ -38,6 +38,23 @@ static int write_whole_file(const char* const path, const void* const data, cons
     return (fclose(f) == 0) && w == n;
 }
 
+/* Whether losing the zero-copy placement is a failure or merely a note.
+ *
+ * The placement IS the feature, so a lost one has to fail the suite rather than
+ * print something nobody reads: the decode still returns the right bytes either
+ * way, so no other assertion here would catch it. POSIX has no copying route at
+ * all, hence the unconditional 1. On Windows the fallback is legitimate before
+ * Win10 1803, so a run that knows better (CI on windows-latest) opts in with
+ * ZXC_TEST_REQUIRE_ZEROCOPY=1. */
+static int zerocopy_required(void) {
+#if defined(_WIN32)
+    const char* const env = getenv("ZXC_TEST_REQUIRE_ZEROCOPY");
+    return env != NULL && env[0] != '\0' && env[0] != '0';
+#else
+    return 1;
+#endif
+}
+
 /* A closed map must be inert: cleared fields, and a second close is a no-op. */
 static int check_closed(const char* const label, zxc_map_t* const m) {
     zxc_mmap_close(m);
@@ -73,6 +90,7 @@ static int mmap_case(const char* const label, const uint8_t* const orig, const s
 
     if (!write_whole_file(MMAP_RT_PATH, comp, csz)) {
         printf("Failed [%s]: cannot write " MMAP_RT_PATH "\n", label);
+        remove(MMAP_RT_PATH);
         free(comp);
         return 0;
     }
@@ -83,11 +101,15 @@ static int mmap_case(const char* const label, const uint8_t* const orig, const s
     /* 1. Path API: one call, one mapping, no output allocation. */
     zxc_map_t m;
     const int64_t d = zxc_decompress_mmap(MMAP_RT_PATH, &m, &dop);
-    /* 1 everywhere but pre-1803 Windows, which copies the archive in. A loud
-     * marker: on a modern OS the copy route means the placement failed. */
+    /* 1 everywhere but pre-1803 Windows, which copies the archive in. */
     const int zero_copy = zxc_mmap_is_zerocopy(&m);
-    if (d > 0 && !zero_copy)
+    if (d > 0 && !zero_copy) {
         printf("  [INFO] no zero-copy placement here: the archive was copied into the region\n");
+        if (zerocopy_required()) {
+            printf("Failed [%s]: zero-copy placement lost\n", label);
+            ok = 0;
+        }
+    }
     if (d < 0 || (size_t)d != n || m.size != n || !m.data || memcmp(m.data, orig, n) != 0) {
         printf("Failed [%s]: decompress_mmap ret=%lld want=%zu%s\n", label, (long long)d, n,
                (d == (int64_t)n) ? " (MISMATCH)" : "");
@@ -103,6 +125,7 @@ static int mmap_case(const char* const label, const uint8_t* const orig, const s
     FILE* const f = fopen(MMAP_RT_PATH, "rb");
     if (!f) {
         printf("Failed [%s]: reopen\n", label);
+        remove(MMAP_RT_PATH);
         free(comp);
         return 0;
     }
@@ -318,6 +341,7 @@ int test_mmap_errors(void) {
     static const uint8_t stub[8] = {0};
     if (!write_whole_file(MMAP_ERR_PATH, stub, sizeof(stub))) {
         printf("Failed: cannot write stub\n");
+        remove(MMAP_ERR_PATH);
         return 0;
     }
     if (zxc_decompress_mmap(MMAP_ERR_PATH, &m, NULL) != ZXC_ERROR_SRC_TOO_SMALL) {
@@ -330,6 +354,7 @@ int test_mmap_errors(void) {
     memset(junk, 0x5A, sizeof(junk));
     if (!write_whole_file(MMAP_ERR_PATH, junk, sizeof(junk))) {
         printf("Failed: cannot write junk\n");
+        remove(MMAP_ERR_PATH);
         return 0;
     }
     if (zxc_decompress_mmap(MMAP_ERR_PATH, &m, NULL) != ZXC_ERROR_BAD_HEADER) {

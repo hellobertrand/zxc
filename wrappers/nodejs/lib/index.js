@@ -38,6 +38,7 @@ const ERROR_DICT_REQUIRED = native.ERROR_DICT_REQUIRED;
 const ERROR_DICT_MISMATCH = native.ERROR_DICT_MISMATCH;
 const ERROR_DICT_TOO_LARGE = native.ERROR_DICT_TOO_LARGE;
 const ERROR_BAD_LEVEL = native.ERROR_BAD_LEVEL;
+const ERROR_UNSUPPORTED = native.ERROR_UNSUPPORTED;
 
 /**
  * Returns the minimum supported compression level (currently 1).
@@ -681,4 +682,5 @@ module.exports = {
   ERROR_DICT_MISMATCH,
   ERROR_DICT_TOO_LARGE,
   ERROR_BAD_LEVEL,
+  ERROR_UNSUPPORTED,
 };

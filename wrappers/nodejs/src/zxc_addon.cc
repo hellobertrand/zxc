@@ -1135,6 +1135,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("ERROR_DICT_MISMATCH", Napi::Number::New(env, ZXC_ERROR_DICT_MISMATCH));
     exports.Set("ERROR_DICT_TOO_LARGE", Napi::Number::New(env, ZXC_ERROR_DICT_TOO_LARGE));
     exports.Set("ERROR_BAD_LEVEL", Napi::Number::New(env, ZXC_ERROR_BAD_LEVEL));
+    exports.Set("ERROR_UNSUPPORTED", Napi::Number::New(env, ZXC_ERROR_UNSUPPORTED));
 
     return exports;
 }

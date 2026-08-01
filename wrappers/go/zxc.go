@@ -166,6 +166,7 @@ var (
 	ErrDictMismatch = &Error{Code: int(C.ZXC_ERROR_DICT_MISMATCH), Name: "dictionary ID mismatch"}
 	ErrDictTooLarge = &Error{Code: int(C.ZXC_ERROR_DICT_TOO_LARGE), Name: "dictionary exceeds maximum size"}
 	ErrBadLevel     = &Error{Code: int(C.ZXC_ERROR_BAD_LEVEL), Name: "compression level out of range"}
+	ErrUnsupported  = &Error{Code: int(C.ZXC_ERROR_UNSUPPORTED), Name: "operation not supported on this platform"}
 	ErrInvalidData  = errors.New("zxc: invalid compressed data")
 
 	// ErrBadHufTable is returned when a shared literal Huffman table does not
@@ -217,6 +218,8 @@ func errorFromCode(code C.int64_t) error {
 		return ErrDictTooLarge
 	case int(C.ZXC_ERROR_BAD_LEVEL):
 		return ErrBadLevel
+	case int(C.ZXC_ERROR_UNSUPPORTED):
+		return ErrUnsupported
 	default:
 		return fmt.Errorf("zxc: unknown error (code %d)", int(code))
 	}

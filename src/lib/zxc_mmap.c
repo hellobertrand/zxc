@@ -93,18 +93,26 @@
 #define O_CLOEXEC 0
 #endif
 #elif defined(ZXC_MMAP_WIN32)
-#include <io.h> /* _get_osfhandle */
+#include <io.h>     /* _get_osfhandle */
+#include <stdlib.h> /* _set_thread_local_invalid_parameter_handler */
 #include <windows.h>
 #endif
 
-#if defined(ZXC_MMAP_ENABLED)
-
-/** @brief Release path a @ref zxc_map_t base address needs. */
+/**
+ * @brief Release path a @ref zxc_map_t base address needs, and whether the
+ *        archive got there without a copy.
+ *
+ * The two decode kinds are what @ref zxc_mmap_is_zerocopy reads: every backend
+ * that places the archive by mapping reports @ref ZXC_MAP_KIND_MAPPED, and only
+ * the Win32 pre-1803 route, which copies the archive into its region, reports
+ * @ref ZXC_MAP_KIND_COPIED. Defined outside @c ZXC_MMAP_ENABLED so the
+ * unsupported-platform stubs can share @ref zxc_map_reset.
+ */
 enum {
-    ZXC_MAP_KIND_NONE = 0,       /**< Nothing mapped. */
-    ZXC_MAP_KIND_VIEW = 1,       /**< Read-only file view (@ref zxc_mmap_open). */
-    ZXC_MAP_KIND_REGION = 2,     /**< Decode region, archive copied in (Win32 fallback). */
-    ZXC_MAP_KIND_PLACEHOLDER = 3 /**< Decode region with the archive mapped into it. */
+    ZXC_MAP_KIND_NONE = 0,   /**< Nothing mapped. */
+    ZXC_MAP_KIND_VIEW = 1,   /**< Read-only file view (@ref zxc_mmap_open). */
+    ZXC_MAP_KIND_COPIED = 2, /**< Decode region, archive copied in (Win32 fallback). */
+    ZXC_MAP_KIND_MAPPED = 3  /**< Decode region, archive mapped into it (zero-copy). */
 };
 
 /**
@@ -125,6 +133,8 @@ static void zxc_map_reset(zxc_map_t* const m) {
     m->map_handle = NULL;
     m->map_kind = ZXC_MAP_KIND_NONE;
 }
+
+#if defined(ZXC_MMAP_ENABLED)
 
 /**
  * @brief Rounds @p v up to the next multiple of the power-of-two @p pow2.
@@ -297,85 +307,106 @@ static int zxc_map_readonly(const zxc_desc_t d, zxc_map_t* const out) {
 }
 
 /**
- * @brief Backend of @ref zxc_decompress_mmap -- reserve, map flush-right,
- *        decode, trim.
+ * @brief Reads exactly @p len bytes at @p offset, short reads included.
  *
- * Four steps: measure the archive and probe its in-place bound through a
- * throw-away view, reserve one anonymous region and drop the file over its tail
- * pages with @c MAP_FIXED, decode into the head, then unmap everything the
- * payload does not occupy. Every failure path unmaps what it had taken, so the
- * caller never has to release a partial region.
+ * @c pread leaves the descriptor's file position alone, which is what lets the
+ * @c _fd entry points promise they do not disturb it.
  *
- * @param[in]  d     Descriptor of the archive to decode.
- * @param[out] out   Receives the decoded region; filled only on success.
- * @param[in]  opts  Decompression options, or NULL for defaults.
- * @return Decompressed size in bytes (> 0), 0 for an empty frame (nothing is
- *         mapped, @p out stays cleared), or a negative @c zxc_error_t:
- *         @ref ZXC_ERROR_SRC_TOO_SMALL if the file is shorter than a frame,
- *         @ref ZXC_ERROR_BAD_HEADER if it is not a ZXC archive,
- *         @ref ZXC_ERROR_IO on a mapping failure, @ref ZXC_ERROR_MEMORY if the
- *         region cannot be reserved, or whatever @ref zxc_decompress_inplace
- *         reports for a corrupt archive.
+ * @param[in]  d       Descriptor to read from.
+ * @param[out] buf     Destination for @p len bytes.
+ * @param[in]  len     Number of bytes to read.
+ * @param[in]  offset  Absolute offset to read at.
+ * @return @ref ZXC_OK, or @ref ZXC_ERROR_IO on a read error or end of file.
  */
-static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
-                                  const zxc_decompress_opts_t* const opts) {
-    size_t comp_size = 0;
-    int rc = zxc_desc_size(d, &comp_size);
-    if (UNLIKELY(rc != ZXC_OK)) return rc;
-    if (UNLIKELY(comp_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
-        return ZXC_ERROR_SRC_TOO_SMALL;
+static int zxc_desc_read_at(const zxc_desc_t d, void* const buf, const size_t len,
+                            const uint64_t offset) {
+    uint8_t* p = (uint8_t*)buf;
+    size_t left = len;
+    uint64_t at = offset;
+    while (left > 0) {
+        const ssize_t n = pread(d, p, left, (off_t)at);
+        if (UNLIKELY(n <= 0)) return ZXC_ERROR_IO;  // LCOV_EXCL_LINE
+        p += (size_t)n;
+        at += (uint64_t)n;
+        left -= (size_t)n;
+    }
+    return ZXC_OK;
+}
 
-    /* Probe pass: the bound only reads the file header and footer, so a
-     * throw-away read-only view answers it without copying anything. */
-    void* const probe = mmap(NULL, comp_size, PROT_READ, MAP_PRIVATE, d, 0);
-    if (UNLIKELY(probe == MAP_FAILED)) return ZXC_ERROR_IO;  // LCOV_EXCL_LINE
-    const size_t need = zxc_decompress_inplace_bound(probe, comp_size);
-    (void)munmap(probe, comp_size);
-    if (UNLIKELY(need == 0)) return ZXC_ERROR_BAD_HEADER;
-
-    size_t off_gran = 0, page = 0;
-    zxc_map_grains(&off_gran, &page);
-    size_t off = 0, capacity = 0, region = 0;
-    rc = zxc_map_geometry(comp_size, need, off_gran, page, &off, &capacity, &region);
-    if (UNLIKELY(rc != ZXC_OK)) return rc;  // LCOV_EXCL_LINE
-
-    uint8_t* const base =
+/**
+ * @brief Places the archive flush-right in a fresh single region.
+ *
+ * One anonymous reservation, then the file dropped over its tail pages with
+ * @c MAP_FIXED: that replaces exactly the tail of our own reservation, and
+ * @c MAP_PRIVATE makes the decoder's writes over consumed compressed bytes
+ * copy-on-write, so the archive on disk is never modified.
+ *
+ * @param[in]  d          Descriptor of the archive.
+ * @param[in]  comp_size  Archive size in bytes.
+ * @param[in]  off        Flush-right offset from @ref zxc_map_geometry.
+ * @param[in]  region     Total bytes to reserve.
+ * @param[out] base       Receives the region base on success.
+ * @param[out] handle     Receives the backend release token; always NULL here,
+ *                        a POSIX region needing nothing beyond @c munmap.
+ * @param[out] zerocopy   Receives 1: POSIX has no copying route.
+ * @return @ref ZXC_OK, @ref ZXC_ERROR_MEMORY if the region cannot be reserved,
+ *         or @ref ZXC_ERROR_IO if the file cannot be mapped over its tail.
+ *         Nothing is left mapped on failure.
+ */
+static int zxc_map_place(const zxc_desc_t d, const size_t comp_size, const size_t off,
+                         const size_t region, uint8_t** const base, void** const handle,
+                         int* const zerocopy) {
+    uint8_t* const p =
         (uint8_t*)mmap(NULL, region, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (UNLIKELY(base == MAP_FAILED)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
+    if (UNLIKELY(p == MAP_FAILED)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
 
-    /* Land the archive flush-right: MAP_FIXED replaces exactly the tail pages
-     * of our own reservation, and MAP_PRIVATE makes the decoder's writes over
-     * consumed compressed bytes copy-on-write. */
-    if (UNLIKELY(mmap(base + off, comp_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, d,
-                      0) == MAP_FAILED)) {
+    if (UNLIKELY(mmap(p + off, comp_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, d, 0) ==
+                 MAP_FAILED)) {
         // LCOV_EXCL_START
-        (void)munmap(base, region);
+        (void)munmap(p, region);
         return ZXC_ERROR_IO;
         // LCOV_EXCL_STOP
     }
 #if defined(MADV_SEQUENTIAL)
     /* The decoder walks the archive front to back exactly once. */
-    (void)madvise(base + off, comp_size, MADV_SEQUENTIAL);
+    (void)madvise(p + off, comp_size, MADV_SEQUENTIAL);
 #endif
 
-    const int64_t decoded = zxc_decompress_inplace(base, capacity, comp_size, opts);
-    if (UNLIKELY(decoded <= 0)) {
-        /* Errors and the empty frame both leave nothing worth handing back. */
-        (void)munmap(base, region);
-        return decoded;
-    }
+    *base = p;
+    *handle = NULL;
+    *zerocopy = 1;
+    return ZXC_OK;
+}
 
-    /* Trim: give back the margin and the file-backed tail, so what the caller
-     * keeps resident is the payload rather than the in-place bound. */
-    const size_t keep = zxc_round_up_pow2((size_t)decoded, page);
+/**
+ * @brief Releases a placement whose decode did not produce a region to keep.
+ *
+ * @param[in] base    Region base from @ref zxc_map_place.
+ * @param[in] region  Its full size in bytes.
+ * @param[in] handle  Backend token from @ref zxc_map_place (always NULL here).
+ */
+static void zxc_map_unplace(uint8_t* const base, const size_t region, void* const handle) {
+    (void)handle;
+    (void)munmap(base, region);
+}
+
+/**
+ * @brief Gives back everything the decoded payload does not occupy.
+ *
+ * @param[in]     base    Region base from @ref zxc_map_place.
+ * @param[in]     off     Flush-right offset (unused here: @c munmap can carve
+ *                        the archive's own pages out of the region).
+ * @param[in]     region  Full region size in bytes.
+ * @param[in]     keep    Page-rounded payload size to keep.
+ * @param[in,out] handle  Backend token; untouched here.
+ * @return Bytes still mapped at @p base, i.e. @p keep.
+ */
+static size_t zxc_map_trim(uint8_t* const base, const size_t off, const size_t region,
+                           const size_t keep, void** const handle) {
+    (void)off;
+    (void)handle;
     if (keep < region) (void)munmap(base + keep, region - keep);
-
-    out->data = base;
-    out->size = (size_t)decoded;
-    out->map_base = base;
-    out->map_size = keep;
-    out->map_kind = ZXC_MAP_KIND_REGION;
-    return decoded;
+    return keep;
 }
 
 /**
@@ -388,17 +419,6 @@ static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
  *               still mapped, the decode path having already trimmed the rest.
  */
 static void zxc_map_release(zxc_map_t* const m) { (void)munmap(m->map_base, m->map_size); }
-
-/**
- * @brief Backend of @ref zxc_mmap_is_zerocopy -- here every region is mapped.
- *
- * @param[in] m  Live map (unused: POSIX has no copying route).
- * @return Always 1.
- */
-static int zxc_map_zerocopy(const zxc_map_t* const m) {
-    (void)m;
-    return 1;
-}
 
 /*
  * ============================================================================
@@ -428,6 +448,27 @@ static zxc_desc_t zxc_desc_open(const char* const path) {
                        FILE_ATTRIBUTE_NORMAL, NULL);
 }
 
+#if defined(_MSC_VER)
+/**
+ * @brief Swallows one CRT invalid-parameter report.
+ *
+ * @c _get_osfhandle does not merely fail on a descriptor the CRT does not know:
+ * it reports an invalid parameter, and the *default* handler terminates the
+ * process (the debug CRT asserts, the release CRT calls @c _invoke_watson). A
+ * caller passing a stale-but-non-negative descriptor must get
+ * @ref ZXC_ERROR_IO, exactly as on POSIX, not a dead process -- so the call is
+ * made under this no-op handler.
+ */
+static void zxc_win_swallow_invalid_param(const wchar_t* expr, const wchar_t* func,
+                                          const wchar_t* file, unsigned int line, uintptr_t res) {
+    (void)expr;
+    (void)func;
+    (void)file;
+    (void)line;
+    (void)res;
+}
+#endif
+
 /**
  * @brief Adopts a caller-owned CRT descriptor (no ownership transfer).
  *
@@ -442,7 +483,19 @@ static zxc_desc_t zxc_desc_open(const char* const path) {
  */
 static zxc_desc_t zxc_desc_from_fd(const int fd) {
     if (fd < 0) return INVALID_HANDLE_VALUE;
-    return (HANDLE)_get_osfhandle(fd);
+#if defined(_MSC_VER)
+    /* Thread-local, so a concurrent thread's diagnostics are left alone; the
+     * previous handler is put back before returning. MinGW's CRT has no such
+     * hook and simply returns -1 for an unknown descriptor. */
+    const _invalid_parameter_handler prev =
+        _set_thread_local_invalid_parameter_handler(zxc_win_swallow_invalid_param);
+    const intptr_t h = _get_osfhandle(fd);
+    (void)_set_thread_local_invalid_parameter_handler(prev);
+#else
+    const intptr_t h = _get_osfhandle(fd);
+#endif
+    if (h == -1 || h == -2) return INVALID_HANDLE_VALUE;
+    return (HANDLE)h;
 }
 
 /**
@@ -560,12 +613,17 @@ typedef struct {
 } zxc_win_ext_t;
 
 /**
- * @brief Resolves @c VirtualAlloc2 / @c MapViewOfFile3 dynamically.
+ * @brief Resolves @c VirtualAlloc2 / @c MapViewOfFile3 dynamically, once.
  *
  * Dynamic resolution (rather than linking @c onecore.lib) keeps a single binary
  * running on Windows older than 1803, where the copy fallback takes over. The
  * @c FARPROC values are copied instead of cast so no toolchain objects to the
  * function-pointer conversion.
+ *
+ * The answer cannot change while the process lives, so it is cached: a caller
+ * decompressing many small archives would otherwise take the loader lock three
+ * times per file. The cache is written idempotently -- two threads racing here
+ * resolve the same pointers and store the same bytes -- so no lock is needed.
  *
  * @param[out] fns  Receives both entry points; cleared first, so the struct is
  *                  never left holding one resolved pointer and one stale value.
@@ -573,19 +631,36 @@ typedef struct {
  *         the placeholder APIs.
  */
 static int zxc_win_ext_resolve(zxc_win_ext_t* const fns) {
+    static zxc_win_ext_t g_cache;
+    static int g_resolved; /* 0 = not tried, 1 = available, -1 = unavailable */
+
+    const int state = g_resolved;
+    if (state != 0) {
+        *fns = g_cache;
+        return (state > 0) ? ZXC_OK : ZXC_ERROR_UNSUPPORTED;
+    }
+
     fns->alloc2 = NULL;
     fns->map3 = NULL;
 
     HMODULE mod = GetModuleHandleW(L"kernelbase.dll");
     if (!mod) mod = GetModuleHandleW(L"kernel32.dll");
-    if (!mod) return ZXC_ERROR_UNSUPPORTED;
+    if (!mod) {
+        g_resolved = -1;
+        return ZXC_ERROR_UNSUPPORTED;
+    }
 
     const FARPROC p_alloc2 = GetProcAddress(mod, "VirtualAlloc2");
     const FARPROC p_map3 = GetProcAddress(mod, "MapViewOfFile3");
-    if (!p_alloc2 || !p_map3) return ZXC_ERROR_UNSUPPORTED;
+    if (!p_alloc2 || !p_map3) {
+        g_resolved = -1;
+        return ZXC_ERROR_UNSUPPORTED;
+    }
 
     ZXC_MEMCPY(&fns->alloc2, &p_alloc2, sizeof(fns->alloc2));
     ZXC_MEMCPY(&fns->map3, &p_map3, sizeof(fns->map3));
+    g_cache = *fns;
+    g_resolved = 1;
     return ZXC_OK;
 }
 
@@ -663,9 +738,24 @@ static int zxc_win_place(const HANDLE section, const size_t comp_size, const siz
         return ZXC_ERROR_MEMORY;
     }
 
-    /* [off, region): the archive itself, faulted in from the page cache. */
-    void* const view = fns.map3(section, NULL, base + off, 0, comp_size, MEM_REPLACE_PLACEHOLDER,
-                                PAGE_WRITECOPY, NULL, 0);
+    /* [off, region): the archive itself, faulted in from the page cache.
+     *
+     * Two view sizes are tried because the documented rule ("the mapped view
+     * must be exactly the size of the placeholder it replaces") and the section
+     * rule ("a view may not extend beyond the section") pull in opposite
+     * directions whenever comp_size is not a whole number of pages, which is
+     * the common case: the placeholder spans roundup(comp_size, page) while the
+     * section is comp_size long. Whether the kernel rounds the requested size
+     * up before comparing it against the placeholder is not something the
+     * documentation settles, so ask for the file's own length first and, if
+     * that is refused, for the placeholder's exact span. A failed map3 consumes
+     * nothing, which is what makes the second attempt safe. */
+    void* view = fns.map3(section, NULL, base + off, 0, comp_size, MEM_REPLACE_PLACEHOLDER,
+                          PAGE_WRITECOPY, NULL, 0);
+    if (!view && (region - off) != comp_size) {
+        view = fns.map3(section, NULL, base + off, 0, region - off, MEM_REPLACE_PLACEHOLDER,
+                        PAGE_WRITECOPY, NULL, 0);
+    }
     if (!view) {
         (void)VirtualFree(base, 0, MEM_RELEASE);
         (void)VirtualFree(base + off, 0, MEM_RELEASE);
@@ -703,57 +793,69 @@ static int zxc_map_readonly(const zxc_desc_t d, zxc_map_t* const out) {
 }
 
 /**
- * @brief Backend of @ref zxc_decompress_mmap -- place (or copy) the archive
- *        flush-right in a single region, decode, trim.
+ * @brief Reads exactly @p len bytes at @p offset, short reads included.
+ *
+ * The offset travels in the @c OVERLAPPED block rather than through a seek, so
+ * the caller's CRT descriptor keeps its file position -- the same promise the
+ * POSIX backend gets from @c pread.
+ *
+ * @param[in]  d       Handle to read from.
+ * @param[out] buf     Destination for @p len bytes.
+ * @param[in]  len     Number of bytes to read.
+ * @param[in]  offset  Absolute offset to read at.
+ * @return @ref ZXC_OK, or @ref ZXC_ERROR_IO on a read error or end of file.
+ */
+static int zxc_desc_read_at(const zxc_desc_t d, void* const buf, const size_t len,
+                            const uint64_t offset) {
+    uint8_t* p = (uint8_t*)buf;
+    size_t left = len;
+    uint64_t at = offset;
+    while (left > 0) {
+        OVERLAPPED ov;
+        ZXC_MEMSET(&ov, 0, sizeof(ov));
+        ov.Offset = (DWORD)(at & 0xFFFFFFFFU);
+        ov.OffsetHigh = (DWORD)(at >> 32);
+        DWORD got = 0;
+        if (UNLIKELY(!ReadFile(d, p, (DWORD)left, &got, &ov) || got == 0)) return ZXC_ERROR_IO;
+        p += got;
+        at += got;
+        left -= got;
+    }
+    return ZXC_OK;
+}
+
+/**
+ * @brief Places the archive flush-right in a fresh single region.
  *
  * Prefers the placeholder placement (@ref zxc_win_place, zero-copy). Older
  * Windows, or a file that cannot back a copy-on-write section, fall back to one
  * reservation plus a single copy of the archive: still one region, still no
  * output allocation. @ref zxc_mmap_is_zerocopy reports which route ran.
  *
- * @param[in]  d     Handle of the archive to decode.
- * @param[out] out   Receives the decoded region; filled only on success, with
- *                   @c map_kind recording which of the two routes produced it.
- * @param[in]  opts  Decompression options, or NULL for defaults.
- * @return Decompressed size in bytes (> 0), 0 for an empty frame (nothing is
- *         mapped, @p out stays cleared), or a negative @c zxc_error_t -- see the
- *         POSIX twin above, whose error contract this shares.
+ * @param[in]  d          Handle of the archive.
+ * @param[in]  comp_size  Archive size in bytes.
+ * @param[in]  off        Flush-right offset from @ref zxc_map_geometry.
+ * @param[in]  region     Total bytes to reserve.
+ * @param[out] base       Receives the region base on success.
+ * @param[out] handle     Receives the archive view to unmap later, or NULL when
+ *                        the copying route ran.
+ * @param[out] zerocopy   Receives 1 for the placeholder route, 0 for the copy.
+ * @return @ref ZXC_OK, @ref ZXC_ERROR_MEMORY if the region cannot be reserved,
+ *         or @ref ZXC_ERROR_IO if the archive cannot be read into it. Nothing
+ *         is left allocated on failure.
  */
-static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
-                                  const zxc_decompress_opts_t* const opts) {
-    size_t comp_size = 0;
-    int rc = zxc_desc_size(d, &comp_size);
-    if (UNLIKELY(rc != ZXC_OK)) return rc;
-    if (UNLIKELY(comp_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
-        return ZXC_ERROR_SRC_TOO_SMALL;
-
-    /* Probe pass: the bound only reads the file header and footer, so a
-     * throw-away read-only view answers it without copying anything. */
-    void* probe = NULL;
-    rc = zxc_win_view(d, &probe);
-    if (UNLIKELY(rc != ZXC_OK)) return rc;
-    const size_t need = zxc_decompress_inplace_bound(probe, comp_size);
-    (void)UnmapViewOfFile(probe);
-    if (UNLIKELY(need == 0)) return ZXC_ERROR_BAD_HEADER;
-
-    size_t off_gran = 0;
-    size_t page = 0;
-    zxc_map_grains(&off_gran, &page);
-    size_t off = 0;
-    size_t capacity = 0;
-    size_t region = 0;
-    rc = zxc_map_geometry(comp_size, need, off_gran, page, &off, &capacity, &region);
-    if (UNLIKELY(rc != ZXC_OK)) return rc;
-
-    uint8_t* base = NULL;
+static int zxc_map_place(const zxc_desc_t d, const size_t comp_size, const size_t off,
+                         const size_t region, uint8_t** const base, void** const handle,
+                         int* const zerocopy) {
+    uint8_t* p = NULL;
     void* view = NULL;
 
     /* 1. Zero-copy: a copy-on-write view of the archive, placed flush-right in
      *    a split placeholder reservation. */
     HANDLE section = NULL;
     if (zxc_win_section_cow(d, &section) == ZXC_OK) {
-        if (zxc_win_place(section, comp_size, off, region, &base, &view) != ZXC_OK) {
-            base = NULL;
+        if (zxc_win_place(section, comp_size, off, region, &p, &view) != ZXC_OK) {
+            p = NULL;
             view = NULL;
         }
         /* A mapped view keeps the section alive on its own. */
@@ -761,49 +863,62 @@ static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
     }
 
     /* 2. Fallback: one reservation and a single copy of the archive into it. */
-    if (!base) {
-        base = (uint8_t*)VirtualAlloc(NULL, region, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-        if (UNLIKELY(!base)) return ZXC_ERROR_MEMORY;
-        void* src = NULL;
-        rc = zxc_win_view(d, &src);
+    if (!p) {
+        p = (uint8_t*)VirtualAlloc(NULL, region, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (UNLIKELY(!p)) return ZXC_ERROR_MEMORY;
+        const int rc = zxc_desc_read_at(d, p + off, comp_size, 0);
         if (UNLIKELY(rc != ZXC_OK)) {
-            (void)VirtualFree(base, 0, MEM_RELEASE);
+            (void)VirtualFree(p, 0, MEM_RELEASE);
             return rc;
         }
-        ZXC_MEMCPY(base + off, src, comp_size);
-        (void)UnmapViewOfFile(src);
-    }
-    const int placed = (view != NULL);
-
-    const int64_t decoded = zxc_decompress_inplace(base, capacity, comp_size, opts);
-    if (UNLIKELY(decoded <= 0)) {
-        /* Errors and the empty frame both leave nothing worth handing back. */
-        if (view) (void)UnmapViewOfFile(view);
-        (void)VirtualFree(base, 0, MEM_RELEASE);
-        return decoded;
     }
 
-    /* Trim: give back what the payload does not occupy. A view is released as a
-     * whole, so the archive slot can only go back when the payload ends before
-     * that slot begins; the private part is decommitted either way. */
-    const size_t keep = zxc_round_up_pow2((size_t)decoded, page);
-    if (view) {
+    *base = p;
+    *handle = view;
+    *zerocopy = (view != NULL);
+    return ZXC_OK;
+}
+
+/**
+ * @brief Releases a placement whose decode did not produce a region to keep.
+ *
+ * @param[in] base    Region base from @ref zxc_map_place.
+ * @param[in] region  Its full size in bytes (unused: @c MEM_RELEASE takes the
+ *                    whole reservation and insists on a zero size).
+ * @param[in] handle  Archive view from @ref zxc_map_place, or NULL.
+ */
+static void zxc_map_unplace(uint8_t* const base, const size_t region, void* const handle) {
+    (void)region;
+    if (handle) (void)UnmapViewOfFile(handle);
+    (void)VirtualFree(base, 0, MEM_RELEASE);
+}
+
+/**
+ * @brief Gives back everything the decoded payload does not occupy.
+ *
+ * A view is released as a whole, so the archive slot can only go back when the
+ * payload ends before that slot begins; the private part is decommitted either
+ * way. Whatever survives is released by @ref zxc_map_release at close.
+ *
+ * @param[in]     base    Region base from @ref zxc_map_place.
+ * @param[in]     off     Flush-right offset: where the archive slot begins.
+ * @param[in]     region  Full region size in bytes.
+ * @param[in]     keep    Page-rounded payload size to keep.
+ * @param[in,out] handle  Archive view; cleared if this call unmapped it.
+ * @return Bytes still mapped at @p base, i.e. @p keep.
+ */
+static size_t zxc_map_trim(uint8_t* const base, const size_t off, const size_t region,
+                           const size_t keep, void** const handle) {
+    if (*handle) {
         if (keep <= off) {
-            (void)UnmapViewOfFile(view);
-            view = NULL;
+            (void)UnmapViewOfFile(*handle);
+            *handle = NULL;
             if (keep < off) (void)VirtualFree(base + keep, off - keep, MEM_DECOMMIT);
         }
     } else if (keep < region) {
         (void)VirtualFree(base + keep, region - keep, MEM_DECOMMIT);
     }
-
-    out->data = base;
-    out->size = (size_t)decoded;
-    out->map_base = base;
-    out->map_size = keep;
-    out->map_handle = view; /* non-NULL: a view still to unmap on close */
-    out->map_kind = placed ? ZXC_MAP_KIND_PLACEHOLDER : ZXC_MAP_KIND_REGION;
-    return decoded;
+    return keep;
 }
 
 /**
@@ -825,25 +940,113 @@ static void zxc_map_release(zxc_map_t* const m) {
     (void)VirtualFree(m->map_base, 0, MEM_RELEASE);
 }
 
-/**
- * @brief Backend of @ref zxc_mmap_is_zerocopy -- only the copy route copies.
- *
- * @param[in] m  Live map.
- * @return 1 for a read-only view and for a placeholder-placed decode region,
- *         0 for @ref ZXC_MAP_KIND_REGION, the route that copied the archive.
- */
-static int zxc_map_zerocopy(const zxc_map_t* const m) { return m->map_kind != ZXC_MAP_KIND_REGION; }
 // LCOV_EXCL_STOP
 
 #endif /* backend selection */
+
+#if defined(ZXC_MMAP_ENABLED)
+
+/**
+ * @brief Answers @ref zxc_decompress_inplace_bound for an on-disk archive.
+ *
+ * The bound looks at the file header and the file footer and at nothing else,
+ * so the two ends are read directly rather than mapping the whole archive just
+ * to consult 28 bytes of it -- which also keeps the copying route on Windows
+ * from building a second mapping of a file it is about to read anyway.
+ *
+ * @param[in]  d          Descriptor of the archive.
+ * @param[in]  comp_size  Archive size in bytes; the caller has already checked
+ *                        it covers a file header and a footer.
+ * @param[out] need       Receives the in-place bound in bytes.
+ * @return @ref ZXC_OK, @ref ZXC_ERROR_IO if the two ends cannot be read, or
+ *         @ref ZXC_ERROR_BAD_HEADER if they do not describe a ZXC archive.
+ */
+static int zxc_map_bound(const zxc_desc_t d, const size_t comp_size, size_t* const need) {
+    uint8_t head[ZXC_FILE_HEADER_SIZE];
+    uint8_t foot[ZXC_FILE_FOOTER_SIZE];
+
+    int rc = zxc_desc_read_at(d, head, sizeof(head), 0);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    rc = zxc_desc_read_at(d, foot, sizeof(foot), (uint64_t)comp_size - ZXC_FILE_FOOTER_SIZE);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;  // LCOV_EXCL_LINE
+
+    const size_t n = zxc_inplace_bound_parts(head, foot, comp_size);
+    if (UNLIKELY(n == 0)) return ZXC_ERROR_BAD_HEADER;
+    *need = n;
+    return ZXC_OK;
+}
+
+/**
+ * @brief Backend-independent body of @ref zxc_decompress_mmap.
+ *
+ * Measure the archive, size its region from the two ends of the file, let the
+ * backend place it flush-right, decode into the head of that region, then trim
+ * back to the payload. Only the placement, the trim and the unwind differ
+ * between POSIX and Windows, and each is one backend hook; the sequence itself
+ * -- and every check in it -- exists once.
+ *
+ * @param[in]  d     Descriptor of the archive to decode.
+ * @param[out] out   Receives the decoded region; filled only on success, with
+ *                   @c map_kind recording whether the archive was mapped or
+ *                   copied into place.
+ * @param[in]  opts  Decompression options, or NULL for defaults.
+ * @return Decompressed size in bytes (> 0), 0 for an empty frame (nothing is
+ *         mapped, @p out stays cleared), or a negative @c zxc_error_t:
+ *         @ref ZXC_ERROR_SRC_TOO_SMALL if the file is shorter than a frame,
+ *         @ref ZXC_ERROR_BAD_HEADER if it is not a ZXC archive,
+ *         @ref ZXC_ERROR_IO on a read or mapping failure,
+ *         @ref ZXC_ERROR_MEMORY if the region cannot be reserved, or whatever
+ *         @ref zxc_decompress_inplace reports for a corrupt archive.
+ */
+static int64_t zxc_map_decompress(const zxc_desc_t d, zxc_map_t* const out,
+                                  const zxc_decompress_opts_t* const opts) {
+    size_t comp_size = 0;
+    int rc = zxc_desc_size(d, &comp_size);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    if (UNLIKELY(comp_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
+        return ZXC_ERROR_SRC_TOO_SMALL;
+
+    size_t need = 0;
+    rc = zxc_map_bound(d, comp_size, &need);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+
+    size_t off_gran = 0;
+    size_t page = 0;
+    zxc_map_grains(&off_gran, &page);
+    size_t off = 0;
+    size_t capacity = 0;
+    size_t region = 0;
+    rc = zxc_map_geometry(comp_size, need, off_gran, page, &off, &capacity, &region);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;  // LCOV_EXCL_LINE
+
+    uint8_t* base = NULL;
+    void* handle = NULL;
+    int zerocopy = 0;
+    rc = zxc_map_place(d, comp_size, off, region, &base, &handle, &zerocopy);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+
+    const int64_t decoded = zxc_decompress_inplace(base, capacity, comp_size, opts);
+    if (UNLIKELY(decoded <= 0)) {
+        /* Errors and the empty frame both leave nothing worth handing back. */
+        zxc_map_unplace(base, region, handle);
+        return decoded;
+    }
+
+    const size_t keep = zxc_round_up_pow2((size_t)decoded, page);
+    out->data = base;
+    out->size = (size_t)decoded;
+    out->map_base = base;
+    out->map_size = zxc_map_trim(base, off, region, keep, &handle);
+    out->map_handle = handle; /* non-NULL: a mapping still to release on close */
+    out->map_kind = zerocopy ? ZXC_MAP_KIND_MAPPED : ZXC_MAP_KIND_COPIED;
+    return decoded;
+}
 
 /*
  * ============================================================================
  * PUBLIC API
  * ============================================================================
  */
-
-#if defined(ZXC_MMAP_ENABLED)
 
 /**
  * @brief Reports whether this build can map files.
@@ -856,13 +1059,14 @@ int zxc_mmap_supported(void) { return 1; }
 /**
  * @brief Reports whether @p map holds the archive without having copied it.
  *
- * Public API; full contract in @c zxc_mmap.h. Delegates to the backend, which
- * knows which placement route produced the region.
+ * Public API; full contract in @c zxc_mmap.h. Every route but one places the
+ * archive by mapping it; @ref ZXC_MAP_KIND_COPIED marks the single exception,
+ * the pre-1803 Windows fallback.
  */
 // cppcheck-suppress unusedFunction
 int zxc_mmap_is_zerocopy(const zxc_map_t* const map) {
     if (UNLIKELY(!map || !map->data)) return 0;
-    return zxc_map_zerocopy(map);
+    return map->map_kind != ZXC_MAP_KIND_COPIED;
 }
 
 /**
@@ -964,7 +1168,7 @@ int zxc_mmap_is_zerocopy(const zxc_map_t* map) {
 // cppcheck-suppress unusedFunction
 int zxc_mmap_open(const char* path, zxc_map_t* out) {
     (void)path;
-    if (out) ZXC_MEMSET(out, 0, sizeof(*out));
+    if (out) zxc_map_reset(out);
     return ZXC_ERROR_UNSUPPORTED;
 }
 
@@ -972,7 +1176,7 @@ int zxc_mmap_open(const char* path, zxc_map_t* out) {
 // cppcheck-suppress unusedFunction
 int zxc_mmap_open_fd(int fd, zxc_map_t* out) {
     (void)fd;
-    if (out) ZXC_MEMSET(out, 0, sizeof(*out));
+    if (out) zxc_map_reset(out);
     return ZXC_ERROR_UNSUPPORTED;
 }
 
@@ -981,7 +1185,7 @@ int zxc_mmap_open_fd(int fd, zxc_map_t* out) {
 int64_t zxc_decompress_mmap(const char* path, zxc_map_t* out, const zxc_decompress_opts_t* opts) {
     (void)path;
     (void)opts;
-    if (out) ZXC_MEMSET(out, 0, sizeof(*out));
+    if (out) zxc_map_reset(out);
     return ZXC_ERROR_UNSUPPORTED;
 }
 
@@ -990,14 +1194,14 @@ int64_t zxc_decompress_mmap(const char* path, zxc_map_t* out, const zxc_decompre
 int64_t zxc_decompress_mmap_fd(int fd, zxc_map_t* out, const zxc_decompress_opts_t* opts) {
     (void)fd;
     (void)opts;
-    if (out) ZXC_MEMSET(out, 0, sizeof(*out));
+    if (out) zxc_map_reset(out);
     return ZXC_ERROR_UNSUPPORTED;
 }
 
 /** @brief Nothing can be mapped on this target, so nothing can be released. */
 // cppcheck-suppress unusedFunction
 void zxc_mmap_close(zxc_map_t* map) {
-    if (map) ZXC_MEMSET(map, 0, sizeof(*map));
+    if (map) zxc_map_reset(map);
 }
 
 #endif /* ZXC_MMAP_ENABLED */

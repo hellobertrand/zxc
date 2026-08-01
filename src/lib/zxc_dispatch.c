@@ -1062,26 +1062,69 @@ static uint64_t zxc_inplace_margin(const uint64_t dsize, const size_t chunk_size
  *
  * Keeping this parse in one place guarantees @ref zxc_decompress_inplace_bound
  * and @ref zxc_decompress_inplace always agree on what a buffer of at least
- * the bound must satisfy.
+ * the bound must satisfy. The header and footer are taken separately so a
+ * caller holding neither in one buffer -- the mapped decoder reads the two ends
+ * of the file with two small reads -- shares this exact parse.
  *
- * @param[in]  comp      Compressed archive; only the header and footer are read.
- * @param[in]  comp_size Size of the archive in bytes. The caller guarantees it
- *                       covers at least the file header and footer.
+ * The footer is untrusted input, so its size is checked for plausibility the
+ * same way @ref zxc_get_decompressed_size checks it: an archive of @p comp_size
+ * bytes cannot carry more blocks than `comp_size / ZXC_BLOCK_HEADER_SIZE`, and
+ * each block decodes to at most one block size. Without that check a forged
+ * footer turns straight into an arbitrary allocation (or, for the mapped
+ * decoder, an arbitrary reservation) before decoding ever fails. It also keeps
+ * the block count in @ref zxc_inplace_margin from overflowing.
+ *
+ * @param[in]  head      File header, @ref ZXC_FILE_HEADER_SIZE readable bytes.
+ * @param[in]  foot      File footer, @ref ZXC_FILE_FOOTER_SIZE readable bytes.
+ * @param[in]  comp_size Size of the whole archive in bytes; at least
+ *                       `ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE`.
  * @param[out] dsize     Decompressed size read from the footer.
  * @param[out] margin    In-place margin for @p dsize, from @ref zxc_inplace_margin.
  * @return ZXC_OK, or a negative @ref zxc_error_t on an invalid archive.
  */
-static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64_t* dsize,
-                             uint64_t* margin) {
-    if (UNLIKELY(zxc_le32(comp) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
+static int zxc_inplace_parse(const uint8_t* head, const uint8_t* foot, const size_t comp_size,
+                             uint64_t* dsize, uint64_t* margin) {
+    if (UNLIKELY(zxc_le32(head) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
     size_t chunk_size = 0;
     int has_cs = 0;
     uint32_t did = 0;
-    if (UNLIKELY(zxc_read_file_header(comp, comp_size, &chunk_size, &has_cs, &did) != ZXC_OK))
+    if (UNLIKELY(zxc_read_file_header(head, comp_size, &chunk_size, &has_cs, &did) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
-    *dsize = zxc_le64(comp + comp_size - ZXC_FILE_FOOTER_SIZE);
-    *margin = zxc_inplace_margin(*dsize, chunk_size, has_cs);
+
+    const uint64_t d = zxc_le64(foot);
+    /* Division form keeps the compare overflow-free for a forged size near
+     * UINT64_MAX, where the usual `(d + chunk - 1) / chunk` ceil would wrap. */
+    const uint64_t blocks_needed =
+        chunk_size ? d / (uint64_t)chunk_size + (d % (uint64_t)chunk_size != 0) : 0;
+    if (UNLIKELY(blocks_needed > (uint64_t)(comp_size / ZXC_BLOCK_HEADER_SIZE)))
+        return ZXC_ERROR_CORRUPT_DATA;
+
+    *dsize = d;
+    *margin = zxc_inplace_margin(d, chunk_size, has_cs);
     return ZXC_OK;
+}
+
+/**
+ * @brief @ref zxc_decompress_inplace_bound from the archive's two ends alone.
+ *
+ * Internal entry point for callers that can cheaply read the header and the
+ * footer but would rather not have the whole archive in one buffer -- the
+ * mapped decoder answers the bound with two small reads instead of mapping the
+ * file just to look at 28 bytes of it.
+ *
+ * @param[in] head      File header, @ref ZXC_FILE_HEADER_SIZE readable bytes.
+ * @param[in] foot      File footer, @ref ZXC_FILE_FOOTER_SIZE readable bytes.
+ * @param[in] comp_size Size of the whole archive in bytes.
+ * @return Required buffer size in bytes, or 0 if the archive is not valid.
+ */
+size_t zxc_inplace_bound_parts(const uint8_t* head, const uint8_t* foot, const size_t comp_size) {
+    if (UNLIKELY(!head || !foot || comp_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
+        return 0;
+    uint64_t dsize = 0;
+    uint64_t margin = 0;
+    if (UNLIKELY(zxc_inplace_parse(head, foot, comp_size, &dsize, &margin) != ZXC_OK)) return 0;
+    if (UNLIKELY(margin > (uint64_t)SIZE_MAX || dsize > (uint64_t)SIZE_MAX - margin)) return 0;
+    return (size_t)(dsize + margin);
 }
 
 /**
@@ -1101,12 +1144,8 @@ static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64
 // cppcheck-suppress unusedFunction
 size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
     if (UNLIKELY(!src || src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE)) return 0;
-    uint64_t dsize = 0;
-    uint64_t margin = 0;
-    if (UNLIKELY(zxc_inplace_probe((const uint8_t*)src, src_size, &dsize, &margin) != ZXC_OK))
-        return 0;
-    if (UNLIKELY(margin > (uint64_t)SIZE_MAX || dsize > (uint64_t)SIZE_MAX - margin)) return 0;
-    return (size_t)(dsize + margin);
+    const uint8_t* const p = (const uint8_t*)src;
+    return zxc_inplace_bound_parts(p, p + src_size - ZXC_FILE_FOOTER_SIZE, src_size);
 }
 
 /**
@@ -1139,7 +1178,8 @@ int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const
     const uint8_t* const comp = buf + (buffer_capacity - comp_size); /* flush-right */
     uint64_t dsize = 0;
     uint64_t margin = 0;
-    if (UNLIKELY(zxc_inplace_probe(comp, comp_size, &dsize, &margin) != ZXC_OK))
+    if (UNLIKELY(zxc_inplace_parse(comp, comp + comp_size - ZXC_FILE_FOOTER_SIZE, comp_size, &dsize,
+                                   &margin) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
     if (UNLIKELY(dsize > (uint64_t)buffer_capacity || (uint64_t)buffer_capacity - dsize < margin))
         return ZXC_ERROR_DST_TOO_SMALL;

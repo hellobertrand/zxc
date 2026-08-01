@@ -161,7 +161,15 @@ ZXC_EXPORT int zxc_mmap_open_fd(int fd, zxc_map_t* out);
  *
  * @note @c out->data is writable and page-aligned, and it is *not* the file's
  *       memory: the mapping is private, so decoding never modifies the archive
- *       on disk.
+ *       on disk. Once the call has returned, nothing in the region is still
+ *       backed by the file -- every byte handed back has been written by the
+ *       decoder -- so the truncation hazard below does not outlive the call.
+ * @note *During* the call the archive is mapped, so the usual file-mapping rule
+ *       applies: truncating or overwriting the file from another process while
+ *       this runs makes the vanished pages fatal to touch (@c SIGBUS), inside
+ *       the library. Archives on a network share or a removable volume, and
+ *       files another writer is still appending to, are the realistic cases;
+ *       decode from a private copy if that is a possibility.
  * @note An empty frame (stored size 0) succeeds with @c out->data == NULL and
  *       @c out->size == 0; @ref zxc_mmap_close on it is a no-op.
  *

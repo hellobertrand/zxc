@@ -13,6 +13,7 @@ use zxc_sys::{
     ZXC_ERROR_BAD_VERSION, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_DICT_MISMATCH,
     ZXC_ERROR_DICT_REQUIRED, ZXC_ERROR_DICT_TOO_LARGE, ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_IO,
     ZXC_ERROR_MEMORY, ZXC_ERROR_NULL_INPUT, ZXC_ERROR_OVERFLOW, ZXC_ERROR_SRC_TOO_SMALL,
+    ZXC_ERROR_UNSUPPORTED,
 };
 
 /// Errors that can occur during ZXC operations.
@@ -94,6 +95,15 @@ pub enum Error {
     #[error("unsupported option: {0}")]
     Unsupported(&'static str),
 
+    /// The operation is not supported by this build or this platform
+    ///
+    /// Distinct from [`Error::Unsupported`], which reports a Rust-side option
+    /// this wrapper declined: this one is the C library's `ZXC_ERROR_UNSUPPORTED`,
+    /// returned when a whole entry point is compiled out (the memory-mapped API
+    /// on a target with no file mapping, for instance).
+    #[error("operation not supported on this platform")]
+    PlatformUnsupported,
+
     /// The compressed data appears to be invalid or truncated
     #[error("invalid compressed data")]
     InvalidData,
@@ -124,6 +134,7 @@ pub(crate) fn error_from_code(code: i64) -> Error {
         ZXC_ERROR_DICT_MISMATCH => Error::DictMismatch,
         ZXC_ERROR_DICT_TOO_LARGE => Error::DictTooLarge,
         ZXC_ERROR_BAD_LEVEL => Error::BadLevel,
+        ZXC_ERROR_UNSUPPORTED => Error::PlatformUnsupported,
         _ => Error::Unknown(code as i32),
     }
 }

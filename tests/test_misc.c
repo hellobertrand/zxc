@@ -32,6 +32,8 @@ int test_error_name() {
         {ZXC_ERROR_DICT_REQUIRED, "ZXC_ERROR_DICT_REQUIRED"},
         {ZXC_ERROR_DICT_MISMATCH, "ZXC_ERROR_DICT_MISMATCH"},
         {ZXC_ERROR_DICT_TOO_LARGE, "ZXC_ERROR_DICT_TOO_LARGE"},
+        {ZXC_ERROR_BAD_LEVEL, "ZXC_ERROR_BAD_LEVEL"},
+        {ZXC_ERROR_UNSUPPORTED, "ZXC_ERROR_UNSUPPORTED"},
     };
     const int n = sizeof(cases) / sizeof(cases[0]);
 
@@ -44,6 +46,18 @@ int test_error_name() {
         }
     }
     printf("  [PASS] All %d known error codes\n", n);
+
+    /* The table above is hand-maintained, so it drifts every time an error code
+     * is added. Codes are contiguous, so sweep the whole range instead: any gap
+     * means zxc_error_name fell through to its default for a real code, or that
+     * this test stopped covering the tail of the enum. */
+    for (int code = ZXC_ERROR_UNSUPPORTED; code <= 0; code++) {
+        if (strcmp(zxc_error_name(code), "ZXC_UNKNOWN_ERROR") == 0) {
+            printf("  [FAIL] zxc_error_name(%d) is unnamed (new code without a case?)\n", code);
+            return 0;
+        }
+    }
+    printf("  [PASS] Every code in [%d, 0] is named\n", ZXC_ERROR_UNSUPPORTED);
 
     // Unknown codes should return "ZXC_UNKNOWN_ERROR"
     const char* unk = zxc_error_name(-999);

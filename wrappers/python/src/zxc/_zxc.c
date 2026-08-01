@@ -237,6 +237,7 @@ PyMODINIT_FUNC PyInit__zxc(void) {
     PyModule_AddIntConstant(m, "ERROR_DICT_MISMATCH", ZXC_ERROR_DICT_MISMATCH);
     PyModule_AddIntConstant(m, "ERROR_DICT_TOO_LARGE", ZXC_ERROR_DICT_TOO_LARGE);
     PyModule_AddIntConstant(m, "ERROR_BAD_LEVEL", ZXC_ERROR_BAD_LEVEL);
+    PyModule_AddIntConstant(m, "ERROR_UNSUPPORTED", ZXC_ERROR_UNSUPPORTED);
 
     return m;
 }

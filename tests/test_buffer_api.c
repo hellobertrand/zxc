@@ -932,6 +932,47 @@ int test_decompress_inplace(void) {
         ok = 0;
     }
 
+    /* The footer is untrusted: the bound is what sizes an allocation (and, for
+     * the mapped decoder, a reservation), so a forged decompressed size must be
+     * rejected rather than turned into an arbitrary amount of memory. An archive
+     * cannot carry more blocks than comp_size / ZXC_BLOCK_HEADER_SIZE. */
+    {
+        const size_t small = 4096;
+        gen_lz_data(a, small);
+        uint8_t tiny[8192];
+        const int64_t c = zxc_compress(a, small, tiny, sizeof(tiny), NULL);
+        if (c <= 0) {
+            printf("Failed: forged-footer setup compress -> %lld\n", (long long)c);
+            ok = 0;
+        } else {
+            const size_t csz = (size_t)c;
+            if (zxc_decompress_inplace_bound(tiny, csz) == 0) {
+                printf("Failed: bound on the intact archive is 0\n");
+                ok = 0;
+            }
+            /* Footer = last ZXC_FILE_FOOTER_SIZE bytes, decompressed size first. */
+            uint8_t* const footer = tiny + csz - ZXC_FILE_FOOTER_SIZE;
+            uint8_t saved[ZXC_FILE_FOOTER_SIZE];
+            memcpy(saved, footer, sizeof(saved));
+
+            static const uint64_t forged[] = {(uint64_t)1 << 46, UINT64_MAX, UINT64_MAX - 1};
+            for (size_t i = 0; i < sizeof(forged) / sizeof(forged[0]); i++) {
+                for (int b = 0; b < 8; b++) footer[b] = (uint8_t)(forged[i] >> (8 * b));
+                const size_t need = zxc_decompress_inplace_bound(tiny, csz);
+                if (need != 0) {
+                    printf("Failed: forged footer 0x%llx -> bound %zu (want 0)\n",
+                           (unsigned long long)forged[i], need);
+                    ok = 0;
+                }
+            }
+            memcpy(footer, saved, sizeof(saved));
+            if (zxc_decompress_inplace_bound(tiny, csz) == 0) {
+                printf("Failed: restored footer still rejected\n");
+                ok = 0;
+            }
+        }
+    }
+
     free(a);
     if (!ok) return 0;
     printf("PASS\n\n");

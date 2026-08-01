@@ -76,6 +76,7 @@ from ._zxc import (
     ERROR_DICT_MISMATCH,
     ERROR_DICT_TOO_LARGE,
     ERROR_BAD_LEVEL,
+    ERROR_UNSUPPORTED,
 )
 
 try:
@@ -143,6 +144,7 @@ __all__ = [
     "ERROR_DICT_MISMATCH",
     "ERROR_DICT_TOO_LARGE",
     "ERROR_BAD_LEVEL",
+    "ERROR_UNSUPPORTED",
 ]
 
 
