@@ -17,6 +17,7 @@ if(ZXC_BUILD_TESTS)
         tests/test_block_api.c
         tests/test_context_api.c
         tests/test_static_ctx.c
+        tests/test_mmap.c
         tests/test_pstream_api.c
         tests/test_stream_api.c
         tests/test_seekable.c
@@ -38,6 +39,7 @@ if(ZXC_BUILD_TESTS)
             src/lib/zxc_dict.c
             src/lib/zxc_driver.c
             src/lib/zxc_dispatch.c
+            src/lib/zxc_mmap.c
             src/lib/zxc_pstream.c
             src/lib/zxc_seekable.c
             ${ZXC_VARIANT_OBJECTS}

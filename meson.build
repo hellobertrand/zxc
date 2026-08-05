@@ -112,6 +112,7 @@ libzxc_sources = files(
   'src/lib/zxc_dict.c',
   'src/lib/zxc_driver.c',
   'src/lib/zxc_dispatch.c',
+  'src/lib/zxc_mmap.c',
   'src/lib/zxc_pstream.c',
   'src/lib/zxc_seekable.c',
 )
@@ -173,6 +174,7 @@ install_headers(
   'include/zxc_dict.h',
   'include/zxc_error.h',
   'include/zxc_export.h',
+  'include/zxc_mmap.h',
   'include/zxc_opts.h',
   'include/zxc_pstream.h',
   'include/zxc_seekable.h',
@@ -220,6 +222,7 @@ if not meson.is_subproject()
       'tests/test_block_api.c',
       'tests/test_context_api.c',
       'tests/test_static_ctx.c',
+      'tests/test_mmap.c',
       'tests/test_pstream_api.c',
       'tests/test_stream_api.c',
       'tests/test_seekable.c',
