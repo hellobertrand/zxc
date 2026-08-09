@@ -21,9 +21,9 @@ setuptools==83.0.0 \
     # via
     #   -r requirements/build-deps.in
     #   setuptools-scm
-setuptools-scm==10.2.0 \
-    --hash=sha256:6cc5ac7da8e54d74e43503be2fa023eb7a1ca820d5c318e6ae20efc48110d6c7 \
-    --hash=sha256:ec8ea1738b92e42146a46e29a0e9de9ad462744c63cf9778677b95dfd605adde
+setuptools-scm==10.2.1 \
+    --hash=sha256:4fa7dd82cf8c800df59c9a288c90299b1657ff1ecfc3f5cc00287c5dbf5e27a9 \
+    --hash=sha256:b7c82f4102d389ee57dc66ccdb4f9b4bca3c40ba83b43f1f63d68ccd72db2580
     # via -r requirements/build-deps.in
 vcs-versioning==2.2.2 \
     --hash=sha256:4ac4ded78720cdb4d0291ae58ace87e1e9201912e1023f3029c6cce5c9152cfb \
