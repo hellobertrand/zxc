@@ -16,10 +16,9 @@
 
 /*
  * Function Multi-Versioning Support
- * If ZXC_FUNCTION_SUFFIX is defined (e.g. _avx2, _neon32), rename the public
- * entry point AND the Huffman decoder consumed by this TU. The defines sit
- * before zxc_internal.h so that the prototypes the header declares are also
- * rewritten with the suffix, keeping callers and callees consistent.
+ * With ZXC_FUNCTION_SUFFIX defined (e.g. _avx2), rename the entry point AND the
+ * Huffman decoder this TU consumes. The defines precede zxc_internal.h so the
+ * header's prototypes get the suffix too, keeping callers and callees matched.
  */
 #ifdef ZXC_FUNCTION_SUFFIX
 #define ZXC_CAT_IMPL(x, y) x##y
@@ -54,7 +53,6 @@
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uint8_t* end) {
     const uint8_t* p = *ptr;
-    // Bounds check: need at least 1 byte
     if (UNLIKELY(p >= end)) return 0;
 
     const uint32_t b0 = p[0];
@@ -75,10 +73,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
         return (b0 & 0x3F) | ((uint32_t)p[1] << 6);
     }
 
-    // 3 Bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2097152 (2^21).
-    // This is the largest length a legitimate varint can take: block_size_max
-    // is 2^21 and varint values represent (ll - MASK) or (ml - MASK), which is
-    // always strictly less than block_size_max.
+    // 3 Bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2^21. The longest
+    // a legitimate varint can be: values are (ll - MASK) or (ml - MASK), always
+    // strictly below block_size_max = 2^21.
     if (LIKELY(b0 < 0xE0)) {
         if (UNLIKELY(p + 2 >= end)) {
             *ptr = end;
@@ -545,10 +542,6 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
         n_seq -= 4;                                                                    \
     } while (0)
 
-/* The section decoders below are outlined COLD on purpose: they run once per
- * section (a call is noise), and keeping them out of the hot sequence-decode
- * loop protects its i-cache footprint - inlining them was measured at
- * ~3-5% slower on levels 3-5, which never take these branches. */
 /**
  * @brief Ensures the entropy decode scratch (tok_buffer + pivco_scratch) is
  *        available before decoding an entropy section.
@@ -693,10 +686,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
         return ZXC_ERROR_BAD_HEADER;
 
     /* Entropy-coded tokens (level 7): tail-call the dedicated instantiation
-     * BEFORE any section work (it restarts from the header, so only the
-     * header parse above is duplicated). Constant flags per instantiation:
-     * exactly one call survives; the RAW-token fast path below keeps t_ptr on
-     * a single provenance (a joined pointer cost ~4% at levels 3-5). */
+     * before any section work - it restarts from the header, so only the parse
+     * above is duplicated. Flags are constant per instantiation, so exactly one
+     * call survives and t_ptr keeps a single provenance below (a joined pointer
+     * cost ~4% at levels 3-5). */
     if (!tok_entropy && UNLIKELY(gh.enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN)) {
         if (safe) return zxc_decode_block_glo_entropy_safe(ctx, src, src_size, dst, dst_capacity);
         if (has_dict)
@@ -860,10 +853,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     // Add ZXC_PAD_SIZE (32) for the wild zxc_copy32 overshoot + 4 safety = 168.
     const uint8_t* const d_end_safe = d_end - (132 + ZXC_PAD_SIZE + 4);
 
-    // Literal stream safe threshold for 4x-unrolled loops.
-    // Without varint extension, max ll per sequence = ZXC_TOKEN_LL_MASK - 1 = 14.
-    // For 4 sequences: 4 * 14 = 56. With this margin, l_ptr checks are only needed
-    // on the cold varint path, keeping the hot path free of l_ptr overhead.
+    // Literal margin for the 4x loops: without a varint, ll <= 14 per sequence,
+    // so 4 * 14 = 56. Past that margin only the cold varint path checks l_ptr.
     const size_t glo_sz_lit = (size_t)(l_end - l_ptr);
     const size_t glo_margin_4x = 4 * (ZXC_TOKEN_LL_MASK - 1);  // 56
     const size_t glo_margin_1x = ZXC_TOKEN_LL_MASK - 1;        // 14
@@ -874,12 +865,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
 
     uint32_t n_seq = gh.n_sequences;
 
-    // Track bytes written for offset validation
-    // For 1-byte offsets (enc_off==1): validate until 256 bytes written (max 8-bit offset)
-    // For 2-byte offsets (enc_off==0): validate until 65536 bytes written (max 16-bit offset)
-    // After threshold, all offsets are guaranteed valid (can't exceed written bytes)
-    // When a dictionary is active, dict_size bytes are logically "already written"
-    // (prepended by the caller), so the SAFE loop may be skipped entirely.
+    // Offsets need validating only until `written` reaches the widest they can
+    // encode: 256 for 1-byte offsets, 65536 for 2-byte. Past that no offset can
+    // exceed what is written. A dictionary counts as already written (the caller
+    // prepended it), so the SAFE loop may be skipped outright.
     size_t written = dict_size;
 
     // --- SAFE Loop: offset validation until threshold (4x unroll) ---
@@ -976,7 +965,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
 
         // Check bounds before wild copies - if too close to end, fall back to Safe Path
         if (UNLIKELY(ll + ml + ZXC_PAD_SIZE > (size_t)(d_end - d_ptr))) {
-            // Restore pointers and let Safe Path handle this sequence
             t_ptr = t_save;
             o_ptr = o_save;
             e_ptr = e_save;
@@ -989,7 +977,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
         written += ll;
 
         {
-            // Skip check if written >= bounds_threshold (256 for 8-bit, 65536 for 16-bit)
             if (UNLIKELY(written < bounds_threshold && offset > written))
                 return ZXC_ERROR_BAD_OFFSET;
 
@@ -1111,10 +1098,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     // ZXC_SEQ_ML_MASK+ZXC_LZ_MIN_MATCH_LEN ML) + ZXC_PAD_SIZE Pad = 4 x (255 + 255 + 5) + 32 = 2092
     const uint8_t* const d_end_fast = d_end - ZXC_DECOMPRESS_TAIL_PAD;  // 2112
 
-    // Literal stream safe thresholds for GHI loops.
-    // Without varint extension, max ll per sequence = ZXC_SEQ_LL_MASK - 1 = 254.
-    // For 4 sequences: 4 * 254 = 1016. With this margin, l_ptr checks are only needed
-    // on the cold varint path, keeping the hot path free of l_ptr overhead.
+    // Literal margin for the GHI loops: without a varint, ll <= 254 per sequence,
+    // so 4 * 254 = 1016. Past that only the cold varint path checks l_ptr.
     const size_t ghi_margin_4x = 4 * (ZXC_SEQ_LL_MASK - 1);  // 1016
     const size_t ghi_margin_1x = ZXC_SEQ_LL_MASK - 1;        // 254
     const uint8_t* const l_end_safe_4x = (sz_lit > ghi_margin_4x) ? l_end - ghi_margin_4x : l_ptr;
@@ -1122,18 +1107,13 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
 
     uint32_t n_seq = gh.n_sequences;
 
-    // Track bytes written for offset validation
-    // For 1-byte offsets (enc_off==1): validate until 256 bytes written (max 8-bit offset)
-    // For 2-byte offsets (enc_off==0): validate until 65536 bytes written (max 16-bit offset)
-    // After threshold, all offsets are guaranteed valid (can't exceed written bytes)
-    // When a dictionary is active, dict_size bytes are logically "already written"
-    // (prepended by the caller), so the SAFE loop may be skipped entirely.
+    // Offsets need validating only until `written` reaches the widest they can
+    // encode: 256 for 1-byte offsets, 65536 for 2-byte. Past that no offset can
+    // exceed what is written. A dictionary counts as already written (the caller
+    // prepended it), so the SAFE loop may be skipped outright.
     size_t written = dict_size;
 
-    // --- SAFE Loop: offset validation until threshold (4x unroll) ---
-    // Since offset is 16-bit, threshold is 65536.
-    // For 1-byte offsets (enc_off==1): validate until 256 bytes written
-    // For 2-byte offsets (enc_off==0): validate until 65536 bytes written
+    // --- SAFE loop: validate offsets until the threshold above (4x unroll) ---
     const size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
 
     if (safe) {
@@ -1197,7 +1177,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
             d_ptr += ml;
             written += ml;
         } else {
-            // Safe to process with wild copies
             DECODE_SEQ_SAFE(ll, ml, offset);
         }
         n_seq--;
@@ -1254,7 +1233,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
         // Strict bounds checks (including wild copy overrun safety)
         if (UNLIKELY(ll + ml + ZXC_PAD_SIZE > (size_t)(d_end - d_ptr) ||
                      ll + ZXC_PAD_SIZE > (size_t)(l_end - l_ptr))) {
-            // Restore state and break to Safe Path
             seq_ptr = seq_save;
             extras_ptr = ext_save;
             break;
@@ -1267,7 +1245,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
         written += ll;
 
         {
-            // Skip check if written >= bounds_threshold (256 for 8-bit, 65536 for 16-bit)
             if (UNLIKELY(written < bounds_threshold && offset > written))
                 return ZXC_ERROR_BAD_OFFSET;
 

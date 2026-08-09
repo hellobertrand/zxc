@@ -612,12 +612,11 @@ typedef struct {
     int n_nodes;
     int max_depth;
     /* Flat-subtree fast path: flat_d[nid] = D (>= 2) when nid roots a MAXIMAL
-     * complete subtree whose leaves all sit exactly D levels below it; such a
-     * node's wire run is its symbols' packed D-bit residual codes instead of
-     * D levels of partition bitmaps (same bit count, decode = unpack+lookup).
-     * covered[nid] = 1 for every strict descendant of a flat root: those nodes
-     * do not exist on the wire nor in the level buffers. Both sides derive
-     * this from the code lengths alone, so nothing is signalled. */
+     * complete subtree with all leaves exactly D levels down. Its wire run is
+     * the symbols' packed D-bit residuals instead of D partition bitmaps (same
+     * bits, decode = unpack+lookup), and covered[nid] marks its strict
+     * descendants, absent from the wire. Both sides derive this from the code
+     * lengths, so nothing is signalled. */
     uint8_t flat_d[ZXC_PIVCO_MAX_NODES];
     uint8_t covered[ZXC_PIVCO_MAX_NODES];
 } zxc_pivco_tree_t;
@@ -1583,12 +1582,11 @@ int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_le
 /* --------------------------------------------------------------------------
  * PivCo-Huffman section codec (enc 2/3)
  *
- * Same code bits as canonical Huffman for the same lengths, reordered by tree
- * LEVEL: the payload is, for each internal node in BFS order, that node's
- * branch bits (one bit per symbol routed through it, LSB-first, each node
- * byte-aligned). No size fields anywhere: the decoder derives every node's
- * run length from the root count and popcounts. Decoding is bottom-up level
- * merges (shuffle-parallel, no gather).
+ * Same code bits as canonical Huffman, reordered by tree LEVEL: for each
+ * internal node in BFS order, its branch bits (one per symbol routed through
+ * it, LSB-first, byte-aligned). No size fields - the decoder derives every run
+ * length from the root count and popcounts. Decoding is bottom-up level merges,
+ * shuffle-parallel and gather-free.
  * -------------------------------------------------------------------------- */
 
 /** @brief Extra scratch slack required past `n` by the PivCo decoder. */
@@ -1639,13 +1637,10 @@ int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, size_t payload_
 /* ---------------------------------------------------------------------------
  * Compression / decompression context.
  *
- * The context owns the working buffers (hash table, sequence buffers, scratch
- * memory) that the encoder and decoder reuse across blocks. It used to be
- * exposed via zxc_sans_io.h, but no consumer outside of the library itself
- * needs to drive it directly - the public buffer / streaming / seekable APIs
- * already provide opaque wrappers (`zxc_create_cctx` / `zxc_create_dctx`).
- * Keeping the layout private lets us evolve the buffer layout (cache-line
- * placement, additional scratch arenas) without breaking the ABI.
+ * The context owns the working buffers (hash table, sequence buffers, scratch)
+ * that encoder and decoder reuse across blocks. It stays private - the public
+ * APIs already wrap it opaquely - so the layout can evolve (cache-line
+ * placement, extra scratch arenas) without breaking the ABI.
  * --------------------------------------------------------------------------- */
 
 /**
@@ -1886,11 +1881,9 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 /* ---------------------------------------------------------------------------
  * Internal frame primitives.
  *
- * Read/write the ZXC file header, block header, and file footer. These were
- * previously exposed via zxc_sans_io.h but no in-tree consumer outside of the
- * library implementation needs them, and exposing them freezes on-disk layout
- * details (block_flags layout, footer composition) that we want to keep free
- * to evolve until the format is declared stable.
+ * Read/write the ZXC file header, block header and footer. Kept internal:
+ * exposing them would freeze on-disk details (block_flags layout, footer
+ * composition) that stay free to evolve until the format is declared stable.
  * --------------------------------------------------------------------------- */
 
 /**
