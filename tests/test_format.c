@@ -7,8 +7,6 @@
 
 #include "test_common.h"
 
-
-
 /* Round-trip the Huffman codec over a few representative literal distributions. */
 static int huf_roundtrip_case(const char* label, const uint8_t* literals, size_t n) {
     uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
@@ -82,7 +80,8 @@ int test_huffman_codec() {
     if (!buf) return 0;
 
     /* Case 1: heavily skewed (90% one byte, 10% noise). */
-    for (size_t i = 0; i < N; i++) buf[i] = (zxc_test_rand() % 10 == 0) ? (uint8_t)(zxc_test_rand() & 0xFF) : 'A';
+    for (size_t i = 0; i < N; i++)
+        buf[i] = (zxc_test_rand() % 10 == 0) ? (uint8_t)(zxc_test_rand() & 0xFF) : 'A';
     if (!huf_roundtrip_case("Skewed (90% 'A')", buf, N)) {
         free(buf);
         return 0;
@@ -172,7 +171,8 @@ static int nudge_cost_matches_tree(const char* label, const uint8_t* code_len,
             if (!aux.skip[nid]) rtouches += count[nid];
         } else if (tree.flat_d[nid]) {
             uint64_t t = 1;
-            if (tree.flat_d[nid] > ZXC_HUF_NUDGE_FLAT_SIMD_MAX) t += ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY;
+            if (tree.flat_d[nid] > ZXC_HUF_NUDGE_FLAT_SIMD_MAX)
+                t += ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY;
             rtouches += (uint64_t)count[nid] * t;
         } else {
             rtouches += count[nid]; /* merge node (leaf-pair parents included) */
@@ -239,10 +239,11 @@ static int huf_nudge_case(const char* label, const uint8_t* literals, size_t n_l
         zxc_huf_nudge_cost(base_len, freq, &b0, &t0);
         zxc_huf_nudge_cost(nudged, freq, &b1, &t1);
         if (b1 * 1000 > b0 * ZXC_HUF_NUDGE_BITS_PERMIL || t1 * 256 > t0 * ZXC_HUF_NUDGE_MERGE_Q8) {
-            printf("Failed [%s]: adopted candidate violates the guard "
-                   "(bits %llu->%llu, touches %llu->%llu)\n",
-                   label, (unsigned long long)b0, (unsigned long long)b1, (unsigned long long)t0,
-                   (unsigned long long)t1);
+            printf(
+                "Failed [%s]: adopted candidate violates the guard "
+                "(bits %llu->%llu, touches %llu->%llu)\n",
+                label, (unsigned long long)b0, (unsigned long long)b1, (unsigned long long)t0,
+                (unsigned long long)t1);
             return 0;
         }
         if (!nudge_cost_matches_tree(label, nudged, freq)) return 0;
@@ -517,7 +518,8 @@ int test_huffman_codec_dict() {
     if (!buf) return 0;
 
     /* Skewed text-like distribution: the shared-table sweet spot. */
-    for (size_t i = 0; i < N; i++) buf[i] = (zxc_test_rand() % 10 == 0) ? (uint8_t)(zxc_test_rand() & 0x7F) : 'A';
+    for (size_t i = 0; i < N; i++)
+        buf[i] = (zxc_test_rand() % 10 == 0) ? (uint8_t)(zxc_test_rand() & 0x7F) : 'A';
     if (!huf_dict_roundtrip_case("Skewed (90% 'A')", buf, N)) {
         free(buf);
         return 0;
@@ -545,7 +547,8 @@ int test_huffman_codec_dict() {
         for (size_t i = 0; i < 256; i++) buf[i] = (zxc_test_rand() & 1) ? 'X' : 'Y';
         for (size_t i = 0; i < 256; i++) freq[buf[i]]++;
         uint8_t code_len[ZXC_HUF_NUM_SYMBOLS];
-        if (zxc_huf_build_code_lengths(freq, code_len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) != ZXC_OK) {
+        if (zxc_huf_build_code_lengths(freq, code_len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) !=
+            ZXC_OK) {
             free(buf);
             return 0;
         }
@@ -563,8 +566,8 @@ int test_huffman_codec_dict() {
             free(buf);
             return 0;
         }
-        if (zxc_huf_encode_section_dict(buf, 256, freq, code_len, &tree, codes, enc,
-                                        sizeof(enc)) != ZXC_ERROR_CORRUPT_DATA) {
+        if (zxc_huf_encode_section_dict(buf, 256, freq, code_len, &tree, codes, enc, sizeof(enc)) !=
+            ZXC_ERROR_CORRUPT_DATA) {
             printf("Failed: code-less literal not rejected by encode_section_dict\n");
             free(buf);
             return 0;
@@ -846,14 +849,17 @@ int test_global_checksum_order() {
 
 /* Builds a header with the given chunk-size code, fixes the CRC16, and returns
  * zxc_read_file_header's verdict (block_size out via *bs). */
-static int chunk_code_verdict(uint8_t code, size_t *bs) {
+static int chunk_code_verdict(uint8_t code, size_t* bs) {
     uint8_t hdr[ZXC_FILE_HEADER_SIZE];
     memset(hdr, 0, sizeof(hdr));
-    hdr[0] = 0xF5; hdr[1] = 0x2E; hdr[2] = 0xB0; hdr[3] = 0x9C;  // magic (LE)
-    hdr[4] = ZXC_FILE_FORMAT_VERSION;                            // version
-    hdr[5] = code;                                              // chunk-size code
-    hdr[6] = 0;                                                 // flags: no checksum
-    uint16_t crc = zxc_hash16(hdr);                            // bytes 14-15 already 0
+    hdr[0] = 0xF5;
+    hdr[1] = 0x2E;
+    hdr[2] = 0xB0;
+    hdr[3] = 0x9C;                     // magic (LE)
+    hdr[4] = ZXC_FILE_FORMAT_VERSION;  // version
+    hdr[5] = code;                     // chunk-size code
+    hdr[6] = 0;                        // flags: no checksum
+    uint16_t crc = zxc_hash16(hdr);    // bytes 14-15 already 0
     hdr[14] = (uint8_t)(crc & 0xFF);
     hdr[15] = (uint8_t)(crc >> 8);
     int has_checksum = -1;

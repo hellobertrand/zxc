@@ -41,8 +41,8 @@
 #define FUZZ_DICT_MAX_SAMPLES 8
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    static uint8_t* dict_buf = NULL;  /* trained dict content (<= ZXC_DICT_SIZE_MAX) */
-    static uint8_t* zxd_buf = NULL;   /* serialized .zxd (header + content)          */
+    static uint8_t* dict_buf = NULL; /* trained dict content (<= ZXC_DICT_SIZE_MAX) */
+    static uint8_t* zxd_buf = NULL;  /* serialized .zxd (header + content)          */
     static void* comp_buf = NULL;
     static size_t comp_cap = 0;
     static void* decomp_buf = NULL;

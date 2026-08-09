@@ -8,10 +8,10 @@
 #ifndef ZXC_TEST_COMMON_H
 #define ZXC_TEST_COMMON_H
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
 #include <sys/stat.h>
 #ifdef _MSC_VER
 #include <io.h>
@@ -26,7 +26,7 @@
 #include "../src/lib/zxc_internal.h"
 
 /* Declarative test-table entry: TEST_CASE(test_foo) -> { "test_foo", test_foo } */
-#define TEST_CASE(fn) { #fn, fn }
+#define TEST_CASE(fn) {#fn, fn}
 
 /* --- IO helper ---------------------------------------------------------- */
 
@@ -56,8 +56,8 @@ void fill_seek_data(uint8_t* buf, size_t size, uint8_t seed);
 
 /* Generic streaming round-trip check (compress, decompress, compare).
  * Returns 1 on success, 0 on failure. */
-int test_round_trip(const char* test_name, const uint8_t* input, size_t size,
-                    int level, int checksum_enabled);
+int test_round_trip(const char* test_name, const uint8_t* input, size_t size, int level,
+                    int checksum_enabled);
 
 /* --- Test function prototypes ------------------------------------------ */
 

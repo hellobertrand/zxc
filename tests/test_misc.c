@@ -63,7 +63,8 @@ int test_error_name() {
 }
 
 int test_library_info_api() {
-    printf("=== TEST: Unit - Library Info API (zxc_min/max/default_level, zxc_version_string) ===\n");
+    printf(
+        "=== TEST: Unit - Library Info API (zxc_min/max/default_level, zxc_version_string) ===\n");
 
     // 1. Min level must match compile-time constant
     int min = zxc_min_level();
