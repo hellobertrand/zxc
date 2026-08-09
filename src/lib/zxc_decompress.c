@@ -688,8 +688,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     /* Entropy-coded tokens (level 7): tail-call the dedicated instantiation
      * before any section work - it restarts from the header, so only the parse
      * above is duplicated. Flags are constant per instantiation, so exactly one
-     * call survives and t_ptr keeps a single provenance below (a joined pointer
-     * cost ~4% at levels 3-5). */
+     * call survives and t_ptr keeps a single provenance below. */
     if (!tok_entropy && UNLIKELY(gh.enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN)) {
         if (safe) return zxc_decode_block_glo_entropy_safe(ctx, src, src_size, dst, dst_capacity);
         if (has_dict)
