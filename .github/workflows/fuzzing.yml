@@ -22,8 +22,6 @@ on:
       - 'include/**'
       - 'tests/fuzz_*.c'
       - '.clusterfuzzlite/**'
-  schedule:
-    - cron: '0 1 * * 1'
 
 permissions:
   contents: read
