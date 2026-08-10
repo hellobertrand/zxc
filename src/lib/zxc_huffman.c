@@ -1532,19 +1532,19 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
 #else /* x86 tiers */
 #if defined(ZXC_USE_AVX512) && defined(__AVX512VBMI2__)
     /* 64 outputs per step: the merge IS a pair of byte expands - L's bytes fill
-     * the control word's 0-bit lanes, R's the 1-bit lanes. Masked loads keep the
-     * speculative reads fault-safe without extra buffer slack. */
+     * the control word's 0-bit lanes, R's the 1-bit lanes. The masked expand
+     * loads only touch the bytes they consume, so the speculative reads stay
+     * fault-safe without extra buffer slack. */
+    const __m512i zero = _mm512_setzero_si512();
     while (i + 64 <= n) {
         uint64_t ctrl;
         ZXC_MEMCPY(&ctrl, bits + (i >> 3), 8);
-        const int pc = zxc_pivco_popcnt64(ctrl);
-        const __mmask64 lmask = (pc == 0) ? ~(__mmask64)0 : (((__mmask64)1 << (64 - pc)) - 1U);
-        const __mmask64 rmask = (pc == 64) ? ~(__mmask64)0 : (((__mmask64)1 << pc) - 1U);
-        const __m512i vl = _mm512_maskz_loadu_epi8(lmask, (const void*)(L + lp));
-        const __m512i vr = _mm512_maskz_loadu_epi8(rmask, (const void*)(R + rp));
-        const __m512i outl = _mm512_maskz_expand_epi8((__mmask64)~ctrl, vl);
-        const __m512i outv = _mm512_mask_expand_epi8(outl, (__mmask64)ctrl, vr);
+        const __m512i vl =
+            _mm512_mask_expandloadu_epi8(zero, (__mmask64)~ctrl, (const void*)(L + lp));
+        const __m512i outv =
+            _mm512_mask_expandloadu_epi8(vl, (__mmask64)ctrl, (const void*)(R + rp));
         _mm512_storeu_si512((void*)(out + i), outv);
+        const int pc = zxc_pivco_popcnt64(ctrl);
         rp += (size_t)pc;
         lp += (size_t)(64 - pc);
         i += 64;
