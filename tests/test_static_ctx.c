@@ -65,8 +65,7 @@ int test_static_ctx_roundtrip_all_levels(void) {
             goto fail;
         }
 
-        zxc_compress_opts_t copts = {
-            .level = lvl, .block_size = block_size, .checksum_enabled = 1};
+        zxc_compress_opts_t copts = {.level = lvl, .block_size = block_size, .checksum_enabled = 1};
         zxc_cctx* const cctx = zxc_init_static_cctx(cctx_ws, cctx_ws_sz, &copts);
         if (!cctx) {
             printf("  [FAIL] level %d: zxc_init_static_cctx returned NULL\n", lvl);
@@ -231,8 +230,7 @@ int test_static_ctx_block_size_locked(void) {
     uint8_t src[256] = {0};
     uint8_t dst[1024];
     zxc_compress_opts_t opts2 = {.level = ZXC_LEVEL_DEFAULT, .block_size = pinned_bs * 2};
-    const int64_t rc =
-        zxc_compress_cctx(cctx, src, sizeof(src), dst, sizeof(dst), &opts2);
+    const int64_t rc = zxc_compress_cctx(cctx, src, sizeof(src), dst, sizeof(dst), &opts2);
     if (rc != ZXC_ERROR_BAD_BLOCK_SIZE) {
         printf("  [FAIL] expected ZXC_ERROR_BAD_BLOCK_SIZE, got %lld\n", (long long)rc);
         zxc_free_cctx(cctx);
@@ -315,8 +313,7 @@ int test_static_ctx_level_raise_rejected(void) {
         }
         zxc_compress_opts_t opts7 = {.level = ZXC_LEVEL_ULTRA, .block_size = pinned_bs};
         zxc_cctx* const cctx7 = zxc_init_static_cctx(ws7, ws7_sz, &opts7);
-        if (!cctx7 ||
-            zxc_compress_cctx(cctx7, src, sizeof(src), dst, sizeof(dst), &opts7) <= 0) {
+        if (!cctx7 || zxc_compress_cctx(cctx7, src, sizeof(src), dst, sizeof(dst), &opts7) <= 0) {
             printf("  [FAIL] level-7 static cctx should compress at level 7\n");
             test_aligned_free(ws7);
             goto fail;
