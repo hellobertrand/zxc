@@ -1648,31 +1648,15 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
  * @brief Decode a flat subtree's packed D-bit code run into symbols.
  *
  * codes are packed LSB-first, D in [2, ZXC_HUF_MAX_CODE_LEN_ULTRA]; c2s maps
- * a packed path to its leaf symbol. SIMD paths cover the frequent D = 2 / 4
- * (in-register unpack + single 16-byte table lookup); the scalar bit-reader
- * handles every D.
+ * a packed path to its leaf symbol. SIMD paths cover D = 2..6 (in-register
+ * unpack, then one table lookup over the subtree's 2^D entries); the scalar
+ * bit-reader handles every D.
  */
 static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const int D,
                                   const uint8_t* RESTRICT bits, const uint8_t* RESTRICT c2s) {
     size_t i = 0;
 #if defined(ZXC_USE_NEON64)
-    if (D == 4) {
-        const uint8x16_t vc2s = vld1q_u8(c2s); /* 16 entries */
-        static const uint8_t rep2[16] = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7};
-        static const int8_t sh4[16] = {0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4};
-        const uint8x16_t vrep = vld1q_u8(rep2);
-        const int8x16_t vsh = vld1q_s8(sh4);
-        const uint8x16_t vmask = vdupq_n_u8(0x0F);
-        while (i + 16 <= n) {
-            uint8x16_t raw = vdupq_n_u8(0);
-            raw = vreinterpretq_u8_u64(
-                vsetq_lane_u64(zxc_le64(bits + ((i * 4) >> 3)), vreinterpretq_u64_u8(raw), 0));
-            const uint8x16_t rep = vqtbl1q_u8(raw, vrep);
-            const uint8x16_t codes = vandq_u8(vshlq_u8(rep, vsh), vmask);
-            vst1q_u8(out + i, vqtbl1q_u8(vc2s, codes));
-            i += 16;
-        }
-    } else if (D == 2) {
+    if (D == 2) {
         uint8_t c2s16[16];
         for (int k = 0; k < 16; k++) c2s16[k] = c2s[k & 3];
         const uint8x16_t vc2s = vld1q_u8(c2s16);
@@ -1720,11 +1704,25 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             vst1q_u8(out + i, vqtbl1q_u8(vc2s, vcombine_u8(cA, cB)));
             i += 16;
         }
+    } else if (D == 4) {
+        const uint8x16_t vc2s = vld1q_u8(c2s); /* 16 entries */
+        static const uint8_t rep2[16] = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7};
+        static const int8_t sh4[16] = {0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4};
+        const uint8x16_t vrep = vld1q_u8(rep2);
+        const int8x16_t vsh = vld1q_s8(sh4);
+        const uint8x16_t vmask = vdupq_n_u8(0x0F);
+        while (i + 16 <= n) {
+            uint8x16_t raw = vdupq_n_u8(0);
+            raw = vreinterpretq_u8_u64(
+                vsetq_lane_u64(zxc_le64(bits + ((i * 4) >> 3)), vreinterpretq_u64_u8(raw), 0));
+            const uint8x16_t rep = vqtbl1q_u8(raw, vrep);
+            const uint8x16_t codes = vandq_u8(vshlq_u8(rep, vsh), vmask);
+            vst1q_u8(out + i, vqtbl1q_u8(vc2s, codes));
+            i += 16;
+        }
     } else if (D == 5) {
         /* Same window scheme as D=3; c2s has 32 entries (vqtbl2q). 10 bytes. */
-        uint8x16x2_t vc2s;
-        vc2s.val[0] = vld1q_u8(c2s);
-        vc2s.val[1] = vld1q_u8(c2s + 16);
+        const uint8x16x2_t vc2s = vld1q_u8_x2(c2s);
         static const uint8_t idxA[16] = {0, 1, 0, 1, 1, 2, 1, 2, 2, 3, 3, 4, 3, 4, 4, 5};
         static const uint8_t idxB[16] = {5, 6, 5, 6, 6, 7, 6, 7, 7, 8, 8, 9, 8, 9, 9, 10};
         static const int16_t sh8[8] = {0, -5, -2, -7, -4, -1, -6, -3};
@@ -1750,11 +1748,7 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
         }
     } else if (D == 6) {
         /* Same window scheme as D=3; c2s has 64 entries (vqtbl4q). 12 bytes. */
-        uint8x16x4_t vc2s;
-        vc2s.val[0] = vld1q_u8(c2s);
-        vc2s.val[1] = vld1q_u8(c2s + 16);
-        vc2s.val[2] = vld1q_u8(c2s + 32);
-        vc2s.val[3] = vld1q_u8(c2s + 48);
+        const uint8x16x4_t vc2s = vld1q_u8_x4(c2s);
         static const uint8_t idxA[16] = {0, 1, 0, 1, 1, 2, 2, 3, 3, 4, 3, 4, 4, 5, 5, 6};
         static const uint8_t idxB[16] = {6, 7, 6, 7, 7, 8, 8, 9, 9, 10, 9, 10, 10, 11, 11, 12};
         static const int16_t sh8[8] = {0, -6, -4, -2, 0, -6, -4, -2};
@@ -1782,25 +1776,7 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
 #elif defined(ZXC_USE_NEON32)
     /* d-register mirrors of the AArch64 kernels: 8 codes per step, c2s lookup
      * via VTBL (16-entry table = two d-registers). */
-    if (D == 4) {
-        uint8x8x2_t vc2s;
-        vc2s.val[0] = vld1_u8(c2s);
-        vc2s.val[1] = vld1_u8(c2s + 8);
-        static const uint8_t rep2[8] = {0, 0, 1, 1, 2, 2, 3, 3};
-        static const int8_t sh4[8] = {0, -4, 0, -4, 0, -4, 0, -4};
-        const uint8x8_t vrep = vld1_u8(rep2);
-        const int8x8_t vsh = vld1_s8(sh4);
-        const uint8x8_t vmask = vdup_n_u8(0x0F);
-        while (i + 8 <= n) {
-            uint32_t w;
-            ZXC_MEMCPY(&w, bits + ((i * 4) >> 3), 4);
-            const uint8x8_t raw = vreinterpret_u8_u32(vdup_n_u32(w));
-            const uint8x8_t rep = vtbl1_u8(raw, vrep);
-            const uint8x8_t codes = vand_u8(vshl_u8(rep, vsh), vmask);
-            vst1_u8(out + i, vtbl2_u8(vc2s, codes));
-            i += 8;
-        }
-    } else if (D == 2) {
+    if (D == 2) {
         uint8_t c2s8[8];
         for (int k = 0; k < 8; k++) c2s8[k] = c2s[k & 3];
         const uint8x8_t vc2s = vld1_u8(c2s8);
@@ -1843,13 +1819,25 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             vst1_u8(out + i, vtbl1_u8(vc2s, vmovn_u16(codes16)));
             i += 8;
         }
+    } else if (D == 4) {
+        const uint8x8x2_t vc2s = vld1_u8_x2(c2s);
+        static const uint8_t rep2[8] = {0, 0, 1, 1, 2, 2, 3, 3};
+        static const int8_t sh4[8] = {0, -4, 0, -4, 0, -4, 0, -4};
+        const uint8x8_t vrep = vld1_u8(rep2);
+        const int8x8_t vsh = vld1_s8(sh4);
+        const uint8x8_t vmask = vdup_n_u8(0x0F);
+        while (i + 8 <= n) {
+            uint32_t w;
+            ZXC_MEMCPY(&w, bits + ((i * 4) >> 3), 4);
+            const uint8x8_t raw = vreinterpret_u8_u32(vdup_n_u32(w));
+            const uint8x8_t rep = vtbl1_u8(raw, vrep);
+            const uint8x8_t codes = vand_u8(vshl_u8(rep, vsh), vmask);
+            vst1_u8(out + i, vtbl2_u8(vc2s, codes));
+            i += 8;
+        }
     } else if (D == 5) {
         /* Same window scheme as D=3; c2s has 32 entries (VTBL4). 5 source bytes. */
-        uint8x8x4_t vc2s;
-        vc2s.val[0] = vld1_u8(c2s);
-        vc2s.val[1] = vld1_u8(c2s + 8);
-        vc2s.val[2] = vld1_u8(c2s + 16);
-        vc2s.val[3] = vld1_u8(c2s + 24);
+        const uint8x8x4_t vc2s = vld1_u8_x4(c2s);
         static const uint8_t idxlo[8] = {0, 1, 0, 1, 1, 2, 1, 2};
         static const uint8_t idxhi[8] = {2, 3, 3, 4, 3, 4, 4, 5};
         static const uint16_t mul8[8] = {2048, 64, 512, 16, 128, 1024, 32, 256};
@@ -1871,15 +1859,8 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
     } else if (D == 6) {
         /* Same window scheme; c2s has 64 entries: two VTBL4 halves, select by
          * code bit 5. 6 source bytes. */
-        uint8x8x4_t lo, hi;
-        lo.val[0] = vld1_u8(c2s);
-        lo.val[1] = vld1_u8(c2s + 8);
-        lo.val[2] = vld1_u8(c2s + 16);
-        lo.val[3] = vld1_u8(c2s + 24);
-        hi.val[0] = vld1_u8(c2s + 32);
-        hi.val[1] = vld1_u8(c2s + 40);
-        hi.val[2] = vld1_u8(c2s + 48);
-        hi.val[3] = vld1_u8(c2s + 56);
+        const uint8x8x4_t lo = vld1_u8_x4(c2s);
+        const uint8x8x4_t hi = vld1_u8_x4(c2s + 32);
         static const uint8_t idxlo[8] = {0, 1, 0, 1, 1, 2, 2, 3};
         static const uint8_t idxhi[8] = {3, 4, 3, 4, 4, 5, 5, 6};
         static const uint16_t mul8[8] = {1024, 16, 64, 256, 1024, 16, 64, 256};
