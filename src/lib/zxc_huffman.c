@@ -1331,6 +1331,25 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
     uint8_t* const out = dst + hdr;
     ZXC_MEMSET(out, 0, payload + 2);
 
+    /* Residual = low fd bits of the canonical code, bit-reversed so that packed
+     * bit j is the branch taken at level j. It depends on the symbol alone, so
+     * reverse it once per symbol rather than once per literal. Keyed on the
+     * histogram: sections start at ZXC_HUF_MIN_LITERALS, where walking all 256
+     * would cost more than it saves. */
+    uint16_t resid[ZXC_HUF_NUM_SYMBOLS];
+    for (int s = 0; s < ZXC_HUF_NUM_SYMBOLS; s++) {
+        resid[s] = 0;
+        if (freq[s] == 0) continue;
+        const uint32_t c = codes[s];
+        int cur = 0;
+        for (int d = code_len[s] - 1; d >= 0 && !t->flat_d[cur]; d--)
+            cur = t->nd[cur].child[(c >> d) & 1U];
+        const int fd = t->flat_d[cur];
+        uint32_t r = 0;
+        for (int j = 0; j < fd; j++) r |= ((c >> (fd - 1 - j)) & 1U) << j;
+        resid[s] = (uint16_t)r;
+    }
+
     /* Per-node bit cursors, emitting MSB-first while descending. At a flat root,
      * emit the symbol's packed D-bit residual in one shot and stop. Batching the
      * per-bit read-modify-write buys nothing: accumulators would still touch
@@ -1344,16 +1363,12 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
         for (int d = code_len[s] - 1; d >= 0; d--) {
             const int fd = t->flat_d[cur];
             if (fd) {
-                /* residual = low fd bits of the canonical code, bit-reversed
-                 * so that packed bit j is the branch taken at level j. */
-                uint32_t r = 0;
-                for (int j = 0; j < fd; j++) r |= ((c >> (fd - 1 - j)) & 1U) << j;
                 const uint32_t p = wpos[cur];
                 wpos[cur] += (uint32_t)fd;
                 uint8_t* q = out + bit_off[cur] + (p >> 3);
                 const uint32_t sh = p & 7U;
                 uint32_t w = (uint32_t)q[0] | ((uint32_t)q[1] << 8) | ((uint32_t)q[2] << 16);
-                w |= r << sh; /* fd <= 11, sh <= 7 -> fits 24 bits */
+                w |= (uint32_t)resid[s] << sh; /* fd <= 11, sh <= 7 -> fits 24 bits */
                 q[0] = (uint8_t)w;
                 q[1] = (uint8_t)(w >> 8);
                 q[2] = (uint8_t)(w >> 16);
