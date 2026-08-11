@@ -869,10 +869,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     // none can reach below d_floor. A dictionary counts as already written, so a
     // large one puts d_bounds at dst and skips the SAFE loop entirely.
     const size_t off_span = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
-    const uint8_t* const d_bounds = (dict_size >= off_span) ? dst
-                                    : (off_span - dict_size >= dst_capacity)
-                                        ? d_end
-                                        : dst + (off_span - dict_size);
+    const size_t span = (dict_size >= off_span) ? 0 : off_span - dict_size;
+    const uint8_t* const d_bounds = (span >= dst_capacity) ? d_end : dst + span;
 
     // --- SAFE Loop: offset validation until d_bounds (4x unroll) ---
     if (safe) {
@@ -1102,10 +1100,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     // Same handover as GLO, but the GHI offset is inline in the sequence word and
     // always 16 bits -- enc_off is not a width here, so the span is fixed.
     const size_t off_span = 1U << 16;
-    const uint8_t* const d_bounds = (dict_size >= off_span) ? dst
-                                    : (off_span - dict_size >= dst_capacity)
-                                        ? d_end
-                                        : dst + (off_span - dict_size);
+    const size_t span = (dict_size >= off_span) ? 0 : off_span - dict_size;
+    const uint8_t* const d_bounds = (span >= dst_capacity) ? d_end : dst + span;
 
     // --- SAFE loop: validate offsets until d_bounds (4x unroll) ---
     if (safe) {

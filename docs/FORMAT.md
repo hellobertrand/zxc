@@ -324,7 +324,14 @@ Same binary layout as GLO header:
 
 In practice for GHI:
 - `enc_lit = 0` (raw literals)
-- `enc_off` is metadata (sequence words always store 16-bit offsets)
+- `enc_off` is written as `0` and carries no meaning: GHI has no offset stream,
+  sequence words always store 16-bit offsets.
+
+> **Decoders MUST ignore `enc_off` in a GHI block.** Its value is not constrained
+> on the wire, so it cannot bound the offsets a block may contain: a crafted block
+> can pair any `enc_off` with a full 16-bit offset. Deriving an offset limit from
+> it is a memory-safety bug, not a compatibility shortcut. Archives written before
+> this was pinned down may carry `enc_off = 1`; they remain valid and must decode.
 
 ### GHI section descriptors (3 × 8 bytes)
 

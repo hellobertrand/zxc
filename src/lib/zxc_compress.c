@@ -1892,7 +1892,6 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     uint32_t seq_c = 0;
     size_t extras_c = 0;
     size_t lit_c = 0;
-    uint16_t max_offset = 0;
 
     while (LIKELY(ip < search_limit)) {
         size_t dist = (size_t)(ip - anchor);
@@ -1938,8 +1937,6 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             const uint32_t seq_val = (ll_write << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
                                      (ml_write << ZXC_SEQ_OFF_BITS) |
                                      ((off - ZXC_LZ_OFFSET_BIAS) & ZXC_SEQ_OFF_MASK);
-            if ((off - ZXC_LZ_OFFSET_BIAS) > max_offset)
-                max_offset = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
             buf_sequences[seq_c] = seq_val;
             seq_c++;
 
@@ -1976,7 +1973,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                  .enc_lit = ZXC_SECTION_ENCODING_RAW,
                                  .enc_litlen = 0,
                                  .enc_mlen = 0,
-                                 .enc_off = (uint8_t)(max_offset <= 255) ? 1 : 0};
+                                 .enc_off = 0};
 
     zxc_section_desc_t desc[ZXC_GHI_SECTIONS] = {0};
     desc[0].sizes = (uint64_t)lit_c | ((uint64_t)lit_c << 32);
