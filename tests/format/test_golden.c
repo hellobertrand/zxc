@@ -101,7 +101,12 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
     uint8_t enc_lit = p[8];
     uint8_t enc_off = p[11];
     CHECK(enc_lit <= 3, "enc_lit = %u out of range", enc_lit);
-    CHECK(enc_off <= 1, "enc_off = %u out of range", enc_off);
+    /* GLO: offset stream width, 0 or 1. GHI has no offset stream and the encoder
+     * pins the field to 0 -- decoders must ignore it there (FORMAT.md 5.3). */
+    if (n_sections == ZXC_GHI_SECTIONS)
+        CHECK(enc_off == 0, "GHI enc_off = %u, expected 0", enc_off);
+    else
+        CHECK(enc_off <= 1, "enc_off = %u out of range", enc_off);
     CHECK(zxc_le32(p + 12) == 0, "LZ header reserved u32 nonzero");
     if (expect_enc_lit >= 0)
         CHECK(enc_lit == (uint8_t)expect_enc_lit, "expected enc_lit == %d, got %u", expect_enc_lit,

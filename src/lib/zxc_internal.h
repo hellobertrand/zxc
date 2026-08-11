@@ -1040,7 +1040,7 @@ typedef struct {
     uint8_t enc_lit;       // Literal encoding
     uint8_t enc_litlen;    // Literal lengths encoding
     uint8_t enc_mlen;      // Match lengths encoding
-    uint8_t enc_off;       // Offset stream width (GLO only; always 0 and ignored in GHI)
+    uint8_t enc_off;       // Offset stream width (GLO only; ignored on decode in GHI)
 } zxc_gnr_header_t;
 
 /**

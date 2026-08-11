@@ -646,10 +646,10 @@ int test_dict_large_dict_roundtrip(void) {
  * dictionary back-reference. This test forges many small *matches* into the dict
  * (distinct 40-byte patterns in shuffled order, each separated by a literal so
  * they don't merge). Dict (10KB) + payload (10KB) stay under 64KB, so every
- * sequence is validated by the SAFE 4x loop's `off > written` check -- which is
- * only correct because `written` is seeded with dict_size. If that seeding were
- * dropped (written = 0), these dict back-refs would be wrongly rejected
- * (BAD_OFFSET). See project_dict_written_floor.
+ * sequence is validated by the SAFE 4x loop -- which accepts these back-refs only
+ * because the floor is `dst - dict_size`, not `dst`. If the dictionary term were
+ * dropped from d_floor, they would be wrongly rejected (BAD_OFFSET).
+ * See project_dict_written_floor.
  */
 int test_dict_safe_loop_backref(void) {
     printf("=== TEST: Dict - many small back-refs in the SAFE 4x loop ===\n");
