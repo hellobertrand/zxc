@@ -1107,13 +1107,15 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     uint32_t n_seq = gh.n_sequences;
 
     // Offsets need validating only until `written` reaches the widest they can
-    // encode: 256 for 1-byte offsets, 65536 for 2-byte. Past that no offset can
-    // exceed what is written. A dictionary counts as already written (the caller
-    // prepended it), so the SAFE loop may be skipped outright.
+    // encode. Past that no offset can exceed what is written. A dictionary counts
+    // as already written (the caller prepended it), so the SAFE loop may be
+    // skipped outright.
     size_t written = dict_size;
 
     // --- SAFE loop: validate offsets until the threshold above (4x unroll) ---
-    const size_t bounds_threshold = (gh.enc_off == 1) ? (1U << 8) : (1U << 16);
+    // GHI offsets sit inline in the sequence word, always 16 bits wide: enc_off
+    // is a hint here, not a width, so it cannot lower the bound.
+    const size_t bounds_threshold = 1U << 16;
 
     if (safe) {
         /* SAFE variant: save per-batch state so an OVERFLOW can rollback and
