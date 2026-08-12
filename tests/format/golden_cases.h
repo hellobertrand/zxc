@@ -138,8 +138,9 @@ static size_t gc_make_multiblock(uint8_t** out) {
 }
 
 /* A pseudo-random 1 KB block repeated -> matches at distance 1024 (> 256),
- * forcing 16-bit offsets (enc_off == 0). The other GLO/GHI cases use small
- * offsets (enc_off == 1), so this freezes the 16-bit offset path. */
+ * forcing 16-bit offsets (enc_off == 0). The other GLO cases use small offsets
+ * (enc_off == 1), so this freezes the 16-bit offset path. GHI always writes 0.
+ */
 static size_t gc_make_offset16(uint8_t** out) {
     const size_t period = 1024;
     const size_t n = 8 * period;

@@ -1031,7 +1031,8 @@ typedef enum {
  * @var zxc_gnr_header_t::enc_mlen
  * Encoding method used for the match lengths stream.
  * @var zxc_gnr_header_t::enc_off
- * Encoding method used for the offset stream.
+ * GLO only: width of the offset stream (1 = 1-byte, 0 = 2-byte). GHI has no
+ * offset stream, so it writes 0 and ignores the field on decode.
  */
 typedef struct {
     uint32_t n_sequences;  // Number of sequences
@@ -1039,7 +1040,7 @@ typedef struct {
     uint8_t enc_lit;       // Literal encoding
     uint8_t enc_litlen;    // Literal lengths encoding
     uint8_t enc_mlen;      // Match lengths encoding
-    uint8_t enc_off;       // Offset encoding (Unused in Token format, kept for alignment)
+    uint8_t enc_off;       // Offset stream width (GLO only; ignored on decode in GHI)
 } zxc_gnr_header_t;
 
 /**

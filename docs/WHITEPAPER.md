@@ -319,9 +319,7 @@ The **GHI** (Generic High-Velocity) block format is optimized for maximum decomp
   - `Lit Enc`: Literal stream encoding (0=RAW).
   - `LL Enc`: Reserved for future use.
   - `ML Enc`: Reserved for future use.
-  - `Off Enc`: Offset encoding mode:
-    - `0` = 16-bit offsets (max distance 65535)
-    - `1` = 8-bit offsets (max distance 255, enables smaller sequence packing)
+  - `Off Enc`: Unused. Written as `0` and ignored on decode (see FORMAT.md §5.3).
 * **Reserved**: Padding for alignment.
 
 **Section Descriptors (3 × 8 bytes = 24 bytes total):**
@@ -489,7 +487,7 @@ This format prioritizes decompression throughput over compression ratio. It uses
     *   Pre-reads 4 sequences into registers
     *   Copies literals and matches with 32-byte SIMD operations
     *   Minimal branching for maximum instruction-level parallelism
-3.  **Offset Validation Threshold**: For the first 256 (8-bit mode) or 65536 (16-bit mode) bytes, offsets are validated against written bytes. After this threshold, all offsets are guaranteed valid.
+3.  **Offset Validation Threshold**: offsets are validated until the output *plus any dictionary prefix* exceeds 65536 bytes — with a dictionary the validated window shrinks by its size, since it counts as already written. Past that point no encodable offset can reach below the buffer, a GHI offset being a 16-bit field, so validation is dropped.
 4.  **Wild Copy**: Same 32-byte SIMD copies as GLO, with special handling for overlapping matches (offset < 32).
 
 ### 5.8 Data Integrity

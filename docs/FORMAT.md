@@ -324,7 +324,8 @@ Same binary layout as GLO header:
 
 In practice for GHI:
 - `enc_lit = 0` (raw literals)
-- `enc_off` is metadata (sequence words always store 16-bit offsets)
+- `enc_off` is written as `0` and **must be ignored on decode**: GHI has no offset
+  stream, sequence words always store 16-bit offsets, so the field bounds nothing.
 
 ### GHI section descriptors (3 × 8 bytes)
 
