@@ -203,7 +203,7 @@ Section order:
 `enc_lit=2` carries a length-limited **canonical Huffman code** over the
 literal bytes. The bits are placed on the wire with the **PivCo layout**
 (level-ordered Huffman, after
-[Giesen 2026](https://fgiesen.wordpress.com/2026/06/21/pivco-huffman-merge-operations/)):
+[Żukowski 2026](https://marcinzukowski.github.io/pivco-huffman/paper-1.0/ph.html)):
 the encoding is ordinary Huffman — same code lengths, same code bits, same
 size — and PivCo only reorders those bits, grouping them by TREE LEVEL rather
 than by symbol so decoding runs data-parallel list merges instead of a serial

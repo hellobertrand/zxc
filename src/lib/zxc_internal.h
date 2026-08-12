@@ -1583,6 +1583,10 @@ int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_le
 /* --------------------------------------------------------------------------
  * PivCo-Huffman section codec (enc 2/3)
  *
+ * Layout from PivCo-Huffman by Marcin Zukowski
+ * (https://github.com/MarcinZukowski/pivco-huffman); implemented
+ * independently here. See zxc_huffman.c for the codec.
+ *
  * Same code bits as canonical Huffman, reordered by tree LEVEL: for each
  * internal node in BFS order, its branch bits (one per symbol routed through
  * it, LSB-first, byte-aligned). No size fields - the decoder derives every run

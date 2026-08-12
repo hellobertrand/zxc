@@ -1021,6 +1021,10 @@ int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_le
  * PivCo-Huffman section codec (enc 2/3)
  * ===========================================================================
  *
+ * Level-ordered layout and the merge-based decode are from PivCo-Huffman
+ * by Marcin Zukowski (https://github.com/MarcinZukowski/pivco-huffman).
+ * Implemented independently here.
+ *
  * Layout: [128-byte packed code lengths (literal sections only)] then, for
  * every EMITTING node of the canonical code tree in BFS order, that node's
  * run: one branch bit per symbol routed through the node (0 = left child,
