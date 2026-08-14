@@ -745,7 +745,7 @@ static ZXC_ALWAYS_INLINE size_t zxc_glo_table_size(const uint8_t enc_lit,
  * | literals comp size  | stored, or `gh->n_literals` when `enc_lit==RAW` |
  * | tokens comp size    | stored, or `gh->n_sequences` when not Huffman   |
  * | offsets comp size   | `gh->n_sequences * (enc_off ? 1 : 2)`           |
- * | extras comp size    | payload end minus the tail minus the sections   |
+ * | extras comp size    | the payload residue after the other sections    |
  *
  * @param[out] dst      Destination buffer.
  * @param[in]  rem      Remaining capacity of @p dst.
@@ -816,7 +816,7 @@ int zxc_read_glo_header_and_table(const uint8_t* RESTRICT src, const size_t len,
  * GHI carries no section table at all: its literals are always RAW
  * (`lit_comp == gh->n_literals`), its sequence stream is
  * `gh->n_sequences * 4` bytes wide, and its extras run from there to the
- * payload's tail.
+ * payload end.
  *
  * @param[out] dst Destination buffer.
  * @param[in]  rem Remaining capacity of @p dst.

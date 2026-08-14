@@ -859,28 +859,34 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     // --- Stream Pointers & Validation ---
     /* Only the literal and token section sizes are on the wire; offsets follow
      * from the sequence count and the offset width, and the extras section is
-     * whatever the payload has left once the mandatory tail is accounted for.
-     * Derived sizes cannot be forged into an inconsistent tiling, so one
-     * inequality replaces v7's exact-tiling equality plus its offset check. */
+     * whatever the payload has left. Derived sizes cannot be forged into an
+     * inconsistent tiling, so one inequality replaces v7's exact-tiling
+     * equality plus its offset check. */
     const size_t sz_tokens = tok_comp;
     const uint64_t sz_offsets =
         GLO_OFF8 ? (uint64_t)gh.n_sequences : (uint64_t)gh.n_sequences * 2;
 
     const size_t payload_avail = (size_t)(src + src_size - p_data);
-    const uint64_t consumed = (uint64_t)lit_stream_size + (uint64_t)sz_tokens + sz_offsets +
-                              (uint64_t)ZXC_BLOCK_TAIL_PAD;
+    const uint64_t consumed = (uint64_t)lit_stream_size + (uint64_t)sz_tokens + sz_offsets;
     if (UNLIKELY(consumed > (uint64_t)payload_avail)) return ZXC_ERROR_CORRUPT_DATA;
+    /* Extras absorb the encoder's slack padding, if any: they are read on
+     * demand, so an end pointer beyond the last real varint costs nothing. */
     const size_t sz_extras = payload_avail - (size_t)consumed;
+
+    /* The literal wild-copy overshoots, so a RAW literal stream pointing into
+     * the caller's buffer needs ZXC_BLOCK_LIT_SLACK readable bytes behind it.
+     * No underflow: lit_stream_size <= consumed <= payload_avail. On untrusted
+     * input this is a rejection, where v7 fell back to a padded scratch. */
+    if (UNLIKELY(payload_avail - lit_stream_size < ZXC_BLOCK_LIT_SLACK))
+        return ZXC_ERROR_CORRUPT_DATA;
 
     /* Offsets/extras follow the on-disk token SECTION; sz_tokens is its size
      * (== n_sequences when RAW, the Huffman payload size when enc_litlen set). */
     const uint8_t* o_ptr = p_curr + sz_tokens;
     const uint8_t* e_ptr = o_ptr + (size_t)sz_offsets;
-    const uint8_t* const e_end = e_ptr + sz_extras;  // Tail begins here.
+    /* Runs to the payload end, so it also covers the encoder's slack padding. */
+    const uint8_t* const e_end = e_ptr + sz_extras;
 
-    /* The tail guarantees ZXC_BLOCK_TAIL_PAD readable bytes past e_end, which
-     * is what lets both the literal wild-copy and the extras reader overshoot.
-     * v7 had to stage short RAW literal streams into a padded scratch here. */
 
     const uint8_t* RESTRICT t_ptr;
     if (!tok_entropy) {
@@ -1116,14 +1122,19 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
 
     // --- Stream Pointers & Validation ---
     /* GHI carries no section table: literals are always RAW, the sequence
-     * stream is four bytes per sequence, and extras run to the payload tail. */
+     * stream is four bytes per sequence, and extras run to the payload end. */
     const size_t sz_lit = gh.n_literals;
     const uint64_t sz_seqs = (uint64_t)gh.n_sequences * sizeof(uint32_t);
 
     const size_t payload_avail = (size_t)(src + src_size - p_data);
-    const uint64_t consumed = (uint64_t)sz_lit + sz_seqs + (uint64_t)ZXC_BLOCK_TAIL_PAD;
+    const uint64_t consumed = (uint64_t)sz_lit + sz_seqs;
     if (UNLIKELY(consumed > (uint64_t)payload_avail)) return ZXC_ERROR_CORRUPT_DATA;
+    /* Extras absorb the encoder's slack padding, if any - see the GLO twin. */
     const size_t sz_exts = payload_avail - (size_t)consumed;
+
+    /* GHI literals are always RAW, so the wild-copy slack is always
+     * load-bearing. No underflow: sz_lit <= consumed <= payload_avail. */
+    if (UNLIKELY(payload_avail - sz_lit < ZXC_BLOCK_LIT_SLACK)) return ZXC_ERROR_CORRUPT_DATA;
 
     const uint8_t* l_ptr = p_curr;
     const uint8_t* l_end = l_ptr + sz_lit;
@@ -1132,10 +1143,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     const uint8_t* seq_ptr = p_curr;
     const uint8_t* extras_ptr = p_curr + (size_t)sz_seqs;
     const uint8_t* const extras_end = extras_ptr + sz_exts;
-
-    /* The mandatory tail leaves ZXC_BLOCK_TAIL_PAD readable bytes past
-     * extras_end, covering the literal wild-copy overshoot. GHI keeps the v7
-     * varint extras, which bound themselves against extras_end. */
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;

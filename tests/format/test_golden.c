@@ -91,12 +91,13 @@ static uint8_t* read_file(const char* path, size_t* out_size) {
 
 /* Shared validator for the GLO (Sec 5.2) and GHI (Sec 5.3) section model: a
  * 16-byte header, then GLO's variable section table (0/4/8 bytes, driven by
- * enc_lit and enc_litlen; GHI has none), then each section's bytes, then the
- * mandatory 32-byte zero tail. Sizes the table does not carry are derived from
- * the header, and the whole must tile the payload exactly. */
+ * enc_lit and enc_litlen; GHI has none), then each section's bytes. Sizes the
+ * table does not carry are derived from the header; extras take the payload
+ * residue and absorb the encoder's slack padding, so the tiling check is an
+ * inequality plus the ZXC_BLOCK_LIT_SLACK guarantee behind the literals. */
 static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp, int is_glo,
                                int expect_enc_lit) {
-    CHECK(comp >= 16 + ZXC_BLOCK_TAIL_PAD, "LZ payload too small for header+tail (%u)", comp);
+    CHECK(comp >= 16 + ZXC_BLOCK_LIT_SLACK, "LZ payload too small for header+slack (%u)", comp);
 
     uint32_t n_sequences = zxc_le32(p);
     uint32_t n_literals = zxc_le32(p + 4);
@@ -117,9 +118,9 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
 
     uint32_t table = 0;
     uint64_t sect_total = 0;
+    uint32_t lit_comp = n_literals;
     if (is_glo) {
         /* Only the sizes the header cannot imply are on the wire. */
-        uint32_t lit_comp = n_literals;
         uint32_t tok_comp = n_sequences;
         if (enc_lit != 0) {
             CHECK(comp >= 16 + table + 4, "GLO table truncated");
@@ -139,15 +140,17 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
         sect_total = (uint64_t)n_literals + (uint64_t)n_sequences * 4u;
     }
 
-    /* Extras take whatever is left, so the tiling check is an inequality: the
-     * fixed parts plus the tail must fit, and the remainder is the extras. */
-    uint64_t fixed = 16u + table + sect_total + ZXC_BLOCK_TAIL_PAD;
-    CHECK(fixed <= comp, "LZ sections overrun payload (%llu > %u)",
-          (unsigned long long)fixed, comp);
+    uint64_t fixed = 16u + table + sect_total;
+    CHECK(fixed <= comp, "LZ sections overrun payload (%llu > %u)", (unsigned long long)fixed,
+          comp);
 
-    /* Sec 5.2/5.3: the tail is present and zero-filled. */
-    for (uint32_t i = 0; i < ZXC_BLOCK_TAIL_PAD; i++)
-        CHECK(p[comp - ZXC_BLOCK_TAIL_PAD + i] == 0, "block tail byte %u nonzero", i);
+    /* Sec 5.2/5.3: whatever follows the literal section - the other sections
+     * plus the encoder's padding - must cover the literal wild-copy overshoot.
+     * The padding's contents are unconstrained, so there is nothing else to
+     * assert here. */
+    uint64_t behind_lit = (uint64_t)comp - 16u - table - lit_comp;
+    CHECK(behind_lit >= ZXC_BLOCK_LIT_SLACK, "only %llu bytes behind the literal section",
+          (unsigned long long)behind_lit);
     return 1;
 }
 

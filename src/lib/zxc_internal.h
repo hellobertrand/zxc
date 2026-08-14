@@ -336,19 +336,28 @@ extern "C" {
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
 /**
- * @brief Zero-filled tail every GLO/GHI payload ends with, on the wire.
+ * @brief Readable bytes every GLO/GHI payload guarantees after its literal
+ *        section, on the wire.
  *
  * Distinct from @ref ZXC_PAD_SIZE on purpose even though the values match:
  * this one is a *format* guarantee, not a buffer allowance, and the two roles
  * must be free to diverge.
  *
- * @c zxc_decode_copy_literals reads 32 B unconditionally, so a RAW literal
- * stream pointing into the caller's buffer needs 32 B of readable slack past
- * its end. v7 required the sections to tile the payload exactly and so had to
- * synthesise that slack, staging short streams into a padded scratch on a cold
- * path; v8 has it by construction and drops the staging entirely.
+ * @c zxc_decode_copy_literals reads 32 B unconditionally, and its escape-path
+ * ladder starts its last chunk up to 31 B before @c l_end, so a RAW literal
+ * stream pointing into the caller's buffer needs that much readable slack
+ * behind it. v7 required the sections to tile the payload exactly and had to
+ * synthesise the slack, staging short streams into a padded scratch on a cold
+ * path.
+ *
+ * The sections that follow the literals supply it for free on any real block -
+ * tokens plus offsets alone clear 32 B from 16 sequences on (11 with 2-byte
+ * offsets). The encoder only pads the shortfall, and hides those bytes in the
+ * extras section, whose size the decoder derives as the payload residue:
+ * extras are read on demand, so an over-long end pointer costs nothing. Hence
+ * no wire field, and nothing to validate about the padding's contents.
  */
-#define ZXC_BLOCK_TAIL_PAD 32
+#define ZXC_BLOCK_LIT_SLACK 32
 /**
  * @brief Tail padding required on the decompression destination buffer.
  *
@@ -420,10 +429,11 @@ extern "C" {
  *  8-byte block header and the optional 4-byte checksum.
  *
  *  Covers the inner GLO/GHI sub-header (16 B), the widest GLO section table
- *  (8 B) and the mandatory payload tail (32 B) = 56 B, with a 24 B safety
- *  margin for future format evolution. Used by zxc_compress_block_bound() and
- *  zxc_compress_bound() to size the destination buffer in the worst
- *  (incompressible) case. */
+ *  (8 B) and the widest slack padding the encoder can emit
+ *  (@ref ZXC_BLOCK_LIT_SLACK, on a block whose sections behind the literals
+ *  are empty) = 56 B, with a 24 B safety margin for future format evolution.
+ *  Used by zxc_compress_block_bound() and zxc_compress_bound() to size the
+ *  destination buffer in the worst (incompressible) case. */
 #define ZXC_BLOCK_FORMAT_OVERHEAD 80
 
 /** @brief Widest GLO section table: literal and token compressed sizes. */

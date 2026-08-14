@@ -1803,16 +1803,22 @@ parse_done:;
     }
     rem -= sz_off;
 
-    if (UNLIKELY(rem < sz_ext + ZXC_BLOCK_TAIL_PAD)) return ZXC_ERROR_DST_TOO_SMALL;
+    /* Sections behind the literals must total ZXC_BLOCK_LIT_SLACK bytes so the
+     * literal wild-copy can overshoot; tokens and offsets alone already clear
+     * it from 16 sequences on, so `pad` is 0 on any real block. The padding is
+     * counted as part of the extras section, whose size the decoder derives as
+     * the payload residue - extras are read on demand, so a longer end pointer
+     * is harmless and no wire field is needed. */
+    const size_t behind_lit = sz_tok + sz_off + sz_ext;
+    const size_t pad = (behind_lit < ZXC_BLOCK_LIT_SLACK) ? ZXC_BLOCK_LIT_SLACK - behind_lit : 0;
+
+    if (UNLIKELY(rem < sz_ext + pad)) return ZXC_ERROR_DST_TOO_SMALL;
 
     ZXC_MEMCPY(p_curr, buf_extras, extras_sz);
     p_curr += extras_sz;
 
-    /* Mandatory zero tail: gives the decoder the 32 B of readable slack the
-     * literal wild-copy and the extras reader both assume. See
-     * ZXC_BLOCK_TAIL_PAD. */
-    ZXC_MEMSET(p_curr, 0, ZXC_BLOCK_TAIL_PAD);
-    p_curr += ZXC_BLOCK_TAIL_PAD;
+    ZXC_MEMSET(p_curr, 0, pad);
+    p_curr += pad;
 
     bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
@@ -1982,8 +1988,13 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const size_t sz_seq = seq_c * sizeof(uint32_t);
     const size_t sz_ext = extras_c;
 
-    if (UNLIKELY(rem < sz_lit + sz_seq + sz_ext + ZXC_BLOCK_TAIL_PAD))
-        return ZXC_ERROR_DST_TOO_SMALL;
+    /* See the GLO twin: only the shortfall behind the literals is padded, and
+     * it rides inside the extras section. GHI literals are always RAW, so the
+     * slack is always load-bearing here. */
+    const size_t behind_lit = sz_seq + sz_ext;
+    const size_t pad = (behind_lit < ZXC_BLOCK_LIT_SLACK) ? ZXC_BLOCK_LIT_SLACK - behind_lit : 0;
+
+    if (UNLIKELY(rem < sz_lit + sz_seq + sz_ext + pad)) return ZXC_ERROR_DST_TOO_SMALL;
 
     ZXC_MEMCPY(p_curr, literals, lit_c);
     p_curr += lit_c;
@@ -2005,10 +2016,8 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     ZXC_MEMCPY(p_curr, buf_extras, sz_ext);
     p_curr += sz_ext;
 
-    /* Mandatory zero tail - see ZXC_BLOCK_TAIL_PAD. GHI keeps the v7 varint
-     * extras, so here the tail only covers the literal wild-copy overshoot. */
-    ZXC_MEMSET(p_curr, 0, ZXC_BLOCK_TAIL_PAD);
-    p_curr += ZXC_BLOCK_TAIL_PAD;
+    ZXC_MEMSET(p_curr, 0, pad);
+    p_curr += pad;
 
     bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
