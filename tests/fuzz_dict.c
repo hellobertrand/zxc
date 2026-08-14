@@ -161,7 +161,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     {
         const size_t pos = corrupt_pos % (size_t)zxd_sz;
         const uint8_t saved = zxd_buf[pos];
-        zxd_buf[pos] ^= (uint8_t)(corrupt_mask | 1u); /* guaranteed to differ */
+        zxd_buf[pos] ^= (uint8_t)(corrupt_mask | 1U); /* guaranteed to differ */
 
         const void* cc = NULL;
         size_t ccs = 0;

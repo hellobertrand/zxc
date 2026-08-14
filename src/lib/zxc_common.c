@@ -719,12 +719,9 @@ static ZXC_ALWAYS_INLINE void zxc_read_gnr_header(const uint8_t* RESTRICT src,
 }
 
 /**
- * @brief Size of the GLO section table implied by the header's encoding fields.
+ * @brief Size of the GLO section table, implied by the header's encoding fields.
  *
- * The table carries only what the header cannot already imply: the literal
- * section's compressed size when it is entropy- or RLE-coded, and the token
- * section's when level 7 Huffman-codes it. Everything else is derived - see
- * @ref zxc_write_glo_header_and_table.
+ * 0, 4 or 8 bytes - see @ref zxc_write_glo_header_and_table for what it holds.
  */
 static ZXC_ALWAYS_INLINE size_t zxc_glo_table_size(const uint8_t enc_lit,
                                                    const uint8_t enc_litlen) {
@@ -735,17 +732,11 @@ static ZXC_ALWAYS_INLINE size_t zxc_glo_table_size(const uint8_t enc_lit,
 /**
  * @brief Serialises a GLO block header followed by its section table.
  *
- * Only the two sizes the header cannot imply are stored. The rest is derived
- * by the decoder, which both shrinks the block and removes them as forgeable
- * fields:
- *
- * | Quantity            | Source                                          |
- * |---------------------|-------------------------------------------------|
- * | literals raw size   | `gh->n_literals`                                |
- * | literals comp size  | stored, or `gh->n_literals` when `enc_lit==RAW` |
- * | tokens comp size    | stored, or `gh->n_sequences` when not Huffman   |
- * | offsets comp size   | `gh->n_sequences * (enc_off ? 1 : 2)`           |
- * | extras comp size    | the payload residue after the other sections    |
+ * Only the two sizes the header cannot imply are stored: the literal section's
+ * compressed size when it is RLE- or entropy-coded, and the token section's
+ * when level 7 Huffman-codes it. The decoder derives the rest - literals raw
+ * size from @c n_literals, offsets from @c n_sequences and @c enc_off, extras
+ * from the payload residue - so those cannot be forged inconsistently.
  *
  * @param[out] dst      Destination buffer.
  * @param[in]  rem      Remaining capacity of @p dst.

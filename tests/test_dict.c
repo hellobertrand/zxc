@@ -334,17 +334,17 @@ int test_dict_block_safe_roundtrip(void) {
     const size_t dict_size = (size_t)NPAT * PLEN;
     uint8_t* dict = (uint8_t*)malloc(dict_size);
     for (int i = 0; i < NPAT; i++) {
-        uint32_t x = (uint32_t)i * 2654435761u;
+        uint32_t x = (uint32_t)i * 2654435761U;
         for (int j = 0; j < PLEN; j++) {
-            x = x * 1103515245u + 12345u;
+            x = x * 1103515245U + 12345U;
             dict[(size_t)i * PLEN + j] = (uint8_t)(x >> 16);
         }
     }
     int order[NPAT];
     for (int i = 0; i < NPAT; i++) order[i] = i;
-    uint32_t s = 777u;
+    uint32_t s = 777U;
     for (int i = NPAT - 1; i > 0; i--) {
-        s = s * 1103515245u + 12345u;
+        s = s * 1103515245U + 12345U;
         int j = (int)(s % (uint32_t)(i + 1));
         int tmp = order[i];
         order[i] = order[j];
@@ -658,18 +658,18 @@ int test_dict_safe_loop_backref(void) {
     const size_t dict_size = (size_t)NPAT * PLEN;
     uint8_t* dict = (uint8_t*)malloc(dict_size);
     for (int i = 0; i < NPAT; i++) {
-        uint32_t x = (uint32_t)i * 2654435761u;
+        uint32_t x = (uint32_t)i * 2654435761U;
         for (int j = 0; j < PLEN; j++) {
-            x = x * 1103515245u + 12345u;
+            x = x * 1103515245U + 12345U;
             dict[(size_t)i * PLEN + j] = (uint8_t)(x >> 16);
         }
     }
 
     int order[NPAT];
     for (int i = 0; i < NPAT; i++) order[i] = i;
-    uint32_t s = 12345u;
+    uint32_t s = 12345U;
     for (int i = NPAT - 1; i > 0; i--) {
-        s = s * 1103515245u + 12345u;
+        s = s * 1103515245U + 12345U;
         int j = (int)(s % (uint32_t)(i + 1));
         int tmp = order[i];
         order[i] = order[j];
@@ -1147,7 +1147,7 @@ int test_dict_seekable_dict_id_checks(void) {
 /* Deterministic structured-text generator (LCG): dict-trainable patterns with
  * a skewed literal distribution so the shared table has something to win on. */
 static uint32_t huf_lcg(uint32_t* s) {
-    *s = *s * 1664525u + 1013904223u;
+    *s = *s * 1664525U + 1013904223U;
     return *s >> 16;
 }
 
@@ -1162,7 +1162,7 @@ static size_t gen_structured_sample(uint8_t* buf, size_t cap, uint32_t seed) {
                               "latency_ms=%u status=%u\n",
                               huf_lcg(&s) % 60, huf_lcg(&s) % 60, services[huf_lcg(&s) % 3],
                               actions[huf_lcg(&s) % 4], huf_lcg(&s) % 100000, huf_lcg(&s) % 2000,
-                              (huf_lcg(&s) % 5) ? 200u : 500u);
+                              (huf_lcg(&s) % 5) ? 200U : 500U);
     }
     return n;
 }
@@ -1176,7 +1176,7 @@ int test_dict_huf_zxd_roundtrip(void) {
     size_t sizes[NS];
     for (int i = 0; i < NS; i++) {
         bufs[i] = (uint8_t*)malloc(SCAP);
-        sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x1000u + (uint32_t)i);
+        sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x1000U + (uint32_t)i);
         samples[i] = bufs[i];
     }
 
@@ -1275,11 +1275,11 @@ int test_dict_huf_table_roundtrip(void) {
     size_t sizes[NS];
     for (int i = 0; i < NS; i++) {
         bufs[i] = (uint8_t*)malloc(SCAP);
-        sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x2000u + (uint32_t)i);
+        sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x2000U + (uint32_t)i);
         samples[i] = bufs[i];
     }
     uint8_t* heldout = (uint8_t*)malloc(HCAP);
-    const size_t hsz = gen_structured_sample(heldout, HCAP, 0xBEEFu);
+    const size_t hsz = gen_structured_sample(heldout, HCAP, 0xBEEFU);
 
     int ok = 0;
     uint8_t dict_buf[8192];

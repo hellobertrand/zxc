@@ -24,7 +24,7 @@ static void test_aligned_free(void* p) { free(p); }
 
 /* Helper: produce a deterministic compressible payload. */
 static void fill_payload(uint8_t* dst, size_t n) {
-    for (size_t i = 0; i < n; ++i) dst[i] = (uint8_t)((i * 31u) ^ (i >> 8));
+    for (size_t i = 0; i < n; ++i) dst[i] = (uint8_t)((i * 31U) ^ (i >> 8));
 }
 
 /* Roundtrip through a caller-allocated cctx + dctx workspace, at every level. */

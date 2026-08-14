@@ -1004,7 +1004,7 @@ static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
 
     /* Normal data block: read comp_size [+ ZXC_BLOCK_CHECKSUM_SIZE if file-level checksums]. */
     const uint64_t need = (uint64_t)ds->cur_bh.comp_size +
-                          (ds->file_has_checksum ? (uint64_t)ZXC_BLOCK_CHECKSUM_SIZE : 0u);
+                          (ds->file_has_checksum ? (uint64_t)ZXC_BLOCK_CHECKSUM_SIZE : 0U);
     if (UNLIKELY(need > ds->payload_cap)) return ds_set_error(ds, ZXC_ERROR_BAD_BLOCK_SIZE);
 
     /* Feed the full block (header + payload + opt csum) to zxc_decompress_block,

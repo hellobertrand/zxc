@@ -1803,12 +1803,11 @@ parse_done:;
     }
     rem -= sz_off;
 
-    /* Sections behind the literals must total ZXC_BLOCK_LIT_SLACK bytes so the
-     * literal wild-copy can overshoot; tokens and offsets alone already clear
-     * it from 16 sequences on, so `pad` is 0 on any real block. The padding is
-     * counted as part of the extras section, whose size the decoder derives as
-     * the payload residue - extras are read on demand, so a longer end pointer
-     * is harmless and no wire field is needed. */
+    /* The sections behind the literals must total ZXC_BLOCK_LIT_SLACK bytes so
+     * the decoder's literal wild-copy can overshoot. Tokens and offsets alone
+     * clear it from 16 sequences on, so pad is 0 on any real block. It rides
+     * inside the extras section, which the decoder sizes from the payload
+     * residue - hence no wire field. */
     const size_t behind_lit = sz_tok + sz_off + sz_ext;
     const size_t pad = (behind_lit < ZXC_BLOCK_LIT_SLACK) ? ZXC_BLOCK_LIT_SLACK - behind_lit : 0;
 
@@ -1988,9 +1987,8 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const size_t sz_seq = seq_c * sizeof(uint32_t);
     const size_t sz_ext = extras_c;
 
-    /* See the GLO twin: only the shortfall behind the literals is padded, and
-     * it rides inside the extras section. GHI literals are always RAW, so the
-     * slack is always load-bearing here. */
+    /* See the GLO twin. GHI literals are always RAW, so the slack always
+     * matters here. */
     const size_t behind_lit = sz_seq + sz_ext;
     const size_t pad = (behind_lit < ZXC_BLOCK_LIT_SLACK) ? ZXC_BLOCK_LIT_SLACK - behind_lit : 0;
 

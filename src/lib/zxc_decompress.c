@@ -370,13 +370,10 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
 /**
  * @brief Match copy for a length that cannot exceed @ref ZXC_PAD_SIZE.
  *
- * Same ladder as @ref zxc_decode_copy_match minus the one branch that a bounded
- * @p ml makes unreachable: with @p off >= @ref ZXC_PAD_SIZE the single 32-byte
- * store already covers the whole match, so the `ml > ZXC_PAD_SIZE` test and its
- * loop are dead. The other three arms are untouched - their inner tests still
- * fire for @p ml in 17..32, and a 32-byte copy would be *wrong* below
- * @p off == 32 anyway, since the load would read destination bytes that have
- * not been written yet.
+ * @ref zxc_decode_copy_match without the `ml > ZXC_PAD_SIZE` ladder, which a
+ * bounded @p ml makes unreachable in the `off >= ZXC_PAD_SIZE` arm. The other
+ * arms keep their inner tests: they still fire for @p ml in 17..32, and below
+ * @p off == 32 a 32-byte copy would read destination bytes not yet written.
  *
  * @param[in,out] d_ptr Output cursor; match source is @c d_ptr-off. Needs
  *                      @ref ZXC_PAD_SIZE bytes of overshoot headroom.
@@ -400,11 +397,10 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_short(uint8_t* RESTRICT d_pt
 }
 
 /**
- * @brief GLO match copy: picks the bounded form when the token was inline.
+ * @brief GLO match copy: bounded form when the ml nibble did not saturate.
  *
- * `ml <= ZXC_GLO_MAX_INLINE_ML` holds exactly when the ml nibble did not
- * saturate (the escape adds at least one more), and both predecessors decide it
- * statically, so the test costs nothing once the compiler threads it. GHI calls
+ * The test is exact (the escape always yields more) and statically decidable
+ * from either predecessor, so jump threading folds it away. GHI uses
  * @ref zxc_decode_copy_match directly - its inline ml reaches 259.
  */
 static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_glo(uint8_t* RESTRICT d_ptr,
@@ -449,11 +445,10 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
     }
 }
 
-/* Match emission only: the literal half is left to the per-format sequence
- * macros, because the two formats can afford different copy strategies. GLO's
- * inline ll is at most 14, so it emits a single zxc_copy16 on the ~96-98% of
- * sequences that do not extend ll (measured on silesia L3-L7); GHI's inline ll
- * reaches 254 and keeps the 32-byte ladder. */
+/* Match emission only. The literal copy lives in the per-format sequence macros
+ * because the two formats want different strategies: GLO's inline ll is at most
+ * 14, so one zxc_copy16 covers it, while GHI's reaches 254 and needs the
+ * 32-byte ladder. */
 
 // SAFE version: rejects a match reaching below d_floor. COPY is the format's
 // match-copy helper, so GLO can pass the length-bounded one.
@@ -497,7 +492,6 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
  * (0 for the last sequence - the compiler folds the dead terms). @p ON_FAIL
  * is `goto rollback_*` in the state-saving safe variants and
  * `return ZXC_ERROR_OVERFLOW` otherwise.
- *
  */
 #define DECODE_GLO_SEQ(LL, ML, OFF, RESERVE, N_REM, DECODE, ON_FAIL)                   \
     do {                                                                               \
@@ -516,8 +510,7 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
                 ON_FAIL;                                                               \
             zxc_decode_copy_literals(d_ptr, l_ptr, ll);                                \
         } else {                                                                       \
-            /* ll <= 14 here, so one 16-byte store covers it. No branch is added:      \
-             * this is the same test the varint already needed. */                     \
+            /* ll <= 14 here, so one 16-byte store covers it. */                       \
             zxc_copy16(d_ptr, l_ptr);                                                  \
         }                                                                              \
         l_ptr += ll;                                                                   \
@@ -583,6 +576,7 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) {                                               \
             ll += zxc_read_varint(&extras_ptr, extras_end);                                  \
             const uint64_t reserve = (RESERVE);                                              \
+            /* Same reservation as the GLO twin; GHI's inline ml reaches 259. */             \
             if (UNLIKELY(ll + reserve > (size_t)(l_end - l_ptr) ||                           \
                          ll + ml + (N_REM) * ZXC_GHI_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE > \
                              (size_t)(d_end - d_ptr)))                                       \
@@ -857,11 +851,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     p_curr += lit_stream_size;
 
     // --- Stream Pointers & Validation ---
-    /* Only the literal and token section sizes are on the wire; offsets follow
-     * from the sequence count and the offset width, and the extras section is
-     * whatever the payload has left. Derived sizes cannot be forged into an
-     * inconsistent tiling, so one inequality replaces v7's exact-tiling
-     * equality plus its offset check. */
+    /* Only the literal and token sizes are on the wire; offsets follow from the
+     * sequence count and width, and extras take the payload residue. */
     const size_t sz_tokens = tok_comp;
     const uint64_t sz_offsets =
         GLO_OFF8 ? (uint64_t)gh.n_sequences : (uint64_t)gh.n_sequences * 2;
@@ -869,14 +860,12 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     const size_t payload_avail = (size_t)(src + src_size - p_data);
     const uint64_t consumed = (uint64_t)lit_stream_size + (uint64_t)sz_tokens + sz_offsets;
     if (UNLIKELY(consumed > (uint64_t)payload_avail)) return ZXC_ERROR_CORRUPT_DATA;
-    /* Extras absorb the encoder's slack padding, if any: they are read on
-     * demand, so an end pointer beyond the last real varint costs nothing. */
-    const size_t sz_extras = payload_avail - (size_t)consumed;
+    const size_t sz_extras = payload_avail - (size_t)consumed; /* slack padding included */
 
-    /* The literal wild-copy overshoots, so a RAW literal stream pointing into
-     * the caller's buffer needs ZXC_BLOCK_LIT_SLACK readable bytes behind it.
-     * No underflow: lit_stream_size <= consumed <= payload_avail. On untrusted
-     * input this is a rejection, where v7 fell back to a padded scratch. */
+    /* RAW literals point into the caller's buffer and the wild copy overshoots,
+     * so it needs ZXC_BLOCK_LIT_SLACK readable bytes behind it. v7 staged short
+     * streams into a padded scratch here; v8 rejects instead. No underflow:
+     * lit_stream_size <= consumed <= payload_avail. */
     if (UNLIKELY(payload_avail - lit_stream_size < ZXC_BLOCK_LIT_SLACK))
         return ZXC_ERROR_CORRUPT_DATA;
 
@@ -884,7 +873,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
      * (== n_sequences when RAW, the Huffman payload size when enc_litlen set). */
     const uint8_t* o_ptr = p_curr + sz_tokens;
     const uint8_t* e_ptr = o_ptr + (size_t)sz_offsets;
-    /* Runs to the payload end, so it also covers the encoder's slack padding. */
     const uint8_t* const e_end = e_ptr + sz_extras;
 
 
@@ -1022,6 +1010,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             break;
         }
 
+        /* Unlike the 4x batch the copy cannot sit in the varint branch's else -
+         * the rollback above must run first - so re-test ll instead. Exact:
+         * the escape leaves ll >= ZXC_TOKEN_LL_MASK. */
         if (LIKELY(ll < ZXC_TOKEN_LL_MASK)) {
             zxc_copy16(d_ptr, l_ptr);
         } else {
@@ -1129,11 +1120,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     const size_t payload_avail = (size_t)(src + src_size - p_data);
     const uint64_t consumed = (uint64_t)sz_lit + sz_seqs;
     if (UNLIKELY(consumed > (uint64_t)payload_avail)) return ZXC_ERROR_CORRUPT_DATA;
-    /* Extras absorb the encoder's slack padding, if any - see the GLO twin. */
-    const size_t sz_exts = payload_avail - (size_t)consumed;
+    const size_t sz_exts = payload_avail - (size_t)consumed; /* slack padding included */
 
-    /* GHI literals are always RAW, so the wild-copy slack is always
-     * load-bearing. No underflow: sz_lit <= consumed <= payload_avail. */
+    /* GHI literals are always RAW, so the slack is always load-bearing here.
+     * No underflow: sz_lit <= consumed <= payload_avail. */
     if (UNLIKELY(payload_avail - sz_lit < ZXC_BLOCK_LIT_SLACK)) return ZXC_ERROR_CORRUPT_DATA;
 
     const uint8_t* l_ptr = p_curr;

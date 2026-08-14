@@ -336,26 +336,17 @@ extern "C" {
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
 /**
- * @brief Readable bytes every GLO/GHI payload guarantees after its literal
- *        section, on the wire.
+ * @brief Readable bytes a GLO/GHI payload guarantees after its literal section.
  *
- * Distinct from @ref ZXC_PAD_SIZE on purpose even though the values match:
- * this one is a *format* guarantee, not a buffer allowance, and the two roles
- * must be free to diverge.
+ * A wire guarantee, not a buffer allowance - hence separate from
+ * @ref ZXC_PAD_SIZE even though the values match. RAW literals point into the
+ * caller's buffer and @ref zxc_decode_copy_literals overshoots by up to 31 B,
+ * so it needs readable bytes behind it.
  *
- * @c zxc_decode_copy_literals reads 32 B unconditionally, and its escape-path
- * ladder starts its last chunk up to 31 B before @c l_end, so a RAW literal
- * stream pointing into the caller's buffer needs that much readable slack
- * behind it. v7 required the sections to tile the payload exactly and had to
- * synthesise the slack, staging short streams into a padded scratch on a cold
- * path.
- *
- * The sections that follow the literals supply it for free on any real block -
- * tokens plus offsets alone clear 32 B from 16 sequences on (11 with 2-byte
- * offsets). The encoder only pads the shortfall, and hides those bytes in the
- * extras section, whose size the decoder derives as the payload residue:
- * extras are read on demand, so an over-long end pointer costs nothing. Hence
- * no wire field, and nothing to validate about the padding's contents.
+ * The following sections usually supply them for free (tokens + offsets clear
+ * 32 B from 16 sequences on); the encoder pads only the shortfall, inside the
+ * extras section. Extras are read on demand, so an over-long end pointer is
+ * harmless - no wire field, nothing to validate about the padding.
  */
 #define ZXC_BLOCK_LIT_SLACK 32
 /**
@@ -428,12 +419,9 @@ extern "C" {
 /** @brief Worst-case format overhead inside a single block beyond the outer
  *  8-byte block header and the optional 4-byte checksum.
  *
- *  Covers the inner GLO/GHI sub-header (16 B), the widest GLO section table
- *  (8 B) and the widest slack padding the encoder can emit
- *  (@ref ZXC_BLOCK_LIT_SLACK, on a block whose sections behind the literals
- *  are empty) = 56 B, with a 24 B safety margin for future format evolution.
- *  Used by zxc_compress_block_bound() and zxc_compress_bound() to size the
- *  destination buffer in the worst (incompressible) case. */
+ *  Sub-header (16 B) + widest GLO section table (8 B) + widest slack padding
+ *  (@ref ZXC_BLOCK_LIT_SLACK) = 56 B, plus 24 B of margin. Used by
+ *  zxc_compress_block_bound() and zxc_compress_bound(). */
 #define ZXC_BLOCK_FORMAT_OVERHEAD 80
 
 /** @brief Widest GLO section table: literal and token compressed sizes. */
@@ -534,23 +522,17 @@ extern "C" {
  * the encoder refuses to emit values above this bound. Together they bound the
  * varint surface to exactly the format-defined block size limit. */
 #define ZXC_MAX_VARINT_VALUE ((uint32_t)(ZXC_BLOCK_SIZE_MAX - 1U))
-/** @brief Maximum decoded output of a single sequence with INLINE ll/ml
- *         (non-varint). Used by 4x decoder bounds checks to reserve space for
- *         subsequent inline sequences in the same batch when the current
- *         sequence has a varint-extended ml.
+/** @brief Maximum decoded output of one sequence with inline ll/ml, used by the
+ *         4x bounds checks to reserve the rest of a batch.
  *
- *         Keeping this small is what keeps the 4x loops reachable: a v8 trial
- *         that widened the extras to a bounded single byte pushed it to 543
- *         and cost 2% of decode on silesia, because the loop margins scale
- *         with it. */
-#define ZXC_GLO_MAX_INLINE_OUT_PER_SEQ \
-    ((ZXC_TOKEN_LL_MASK - 1U) + ZXC_GLO_MAX_INLINE_ML) /* 33 */
-/** @brief Longest match a GLO sequence can carry without a varint extension.
+ *         Keep it small - the loop margins scale with it. Widening it to 543
+ *         once cost 2 percent of decode on silesia. */
+#define ZXC_GLO_MAX_INLINE_OUT_PER_SEQ ((ZXC_TOKEN_LL_MASK - 1U) + ZXC_GLO_MAX_INLINE_ML) /* 33 */
+/** @brief Longest match a GLO sequence carries without a varint extension.
  *
- * Sits below @ref ZXC_PAD_SIZE, which is what lets the inline path use a match
- * copy with no length ladder at all: one 32-byte store already covers it. The
- * escape path yields at least this + 1, so testing against it recovers "was
- * this token inline" exactly. */
+ * Below @ref ZXC_PAD_SIZE, so the inline path needs no length ladder: one
+ * 32-byte store covers it. The escape path always yields more, so comparing
+ * against this recovers "was the ml nibble inline". */
 #define ZXC_GLO_MAX_INLINE_ML ((ZXC_TOKEN_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 19 */
 #define ZXC_GHI_MAX_INLINE_OUT_PER_SEQ \
     ((ZXC_SEQ_LL_MASK - 1U) + (ZXC_SEQ_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 513 */

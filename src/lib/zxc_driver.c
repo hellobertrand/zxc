@@ -1166,7 +1166,7 @@ static int64_t zxc_stdio_read_at(void* vctx, void* dst, size_t len, uint64_t off
     zxc_stdio_ctx_t* const ctx = (zxc_stdio_ctx_t*)vctx;
     OVERLAPPED ov;
     ZXC_MEMSET(&ov, 0, sizeof(ov));
-    ov.Offset = (DWORD)(offset & 0xFFFFFFFFu);
+    ov.Offset = (DWORD)(offset & 0xFFFFFFFFU);
     ov.OffsetHigh = (DWORD)(offset >> 32);
     DWORD bytes_read = 0;
     if (!ReadFile(ctx->handle, dst, (DWORD)len, &bytes_read, &ov)) return ZXC_ERROR_IO;

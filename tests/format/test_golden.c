@@ -90,11 +90,10 @@ static uint8_t* read_file(const char* path, size_t* out_size) {
 /* ------------------------------------------------------------------------- */
 
 /* Shared validator for the GLO (Sec 5.2) and GHI (Sec 5.3) section model: a
- * 16-byte header, then GLO's variable section table (0/4/8 bytes, driven by
- * enc_lit and enc_litlen; GHI has none), then each section's bytes. Sizes the
- * table does not carry are derived from the header; extras take the payload
- * residue and absorb the encoder's slack padding, so the tiling check is an
- * inequality plus the ZXC_BLOCK_LIT_SLACK guarantee behind the literals. */
+ * 16-byte header, GLO's 0/4/8-byte section table (GHI has none), then the
+ * sections. Sizes absent from the table come from the header, and extras take
+ * the residue - so the tiling check is an inequality, plus the
+ * ZXC_BLOCK_LIT_SLACK guarantee behind the literals. */
 static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp, int is_glo,
                                int expect_enc_lit) {
     CHECK(comp >= 16 + ZXC_BLOCK_LIT_SLACK, "LZ payload too small for header+slack (%u)", comp);
@@ -134,21 +133,19 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
         } else {
             CHECK(enc_litlen == 0, "GLO enc_litlen = %u out of range", enc_litlen);
         }
-        sect_total = (uint64_t)lit_comp + tok_comp + (uint64_t)n_sequences * (enc_off ? 1u : 2u);
+        sect_total = (uint64_t)lit_comp + tok_comp + (uint64_t)n_sequences * (enc_off ? 1U : 2U);
     } else {
         CHECK(enc_lit == 0, "GHI enc_lit = %u, expected RAW", enc_lit);
-        sect_total = (uint64_t)n_literals + (uint64_t)n_sequences * 4u;
+        sect_total = (uint64_t)n_literals + (uint64_t)n_sequences * 4U;
     }
 
-    uint64_t fixed = 16u + table + sect_total;
+    uint64_t fixed = 16U + table + sect_total;
     CHECK(fixed <= comp, "LZ sections overrun payload (%llu > %u)", (unsigned long long)fixed,
           comp);
 
-    /* Sec 5.2/5.3: whatever follows the literal section - the other sections
-     * plus the encoder's padding - must cover the literal wild-copy overshoot.
-     * The padding's contents are unconstrained, so there is nothing else to
-     * assert here. */
-    uint64_t behind_lit = (uint64_t)comp - 16u - table - lit_comp;
+    /* Sec 5.2/5.3: what follows the literal section must cover the decoder's
+     * wild-copy overshoot. The padding's contents are unconstrained. */
+    uint64_t behind_lit = (uint64_t)comp - 16U - table - lit_comp;
     CHECK(behind_lit >= ZXC_BLOCK_LIT_SLACK, "only %llu bytes behind the literal section",
           (unsigned long long)behind_lit);
     return 1;
@@ -176,8 +173,8 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     int has_checksum = (flags & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
     int has_dict = (flags & ZXC_FILE_FLAG_HAS_DICTIONARY) ? 1 : 0;
     const int want_dict = (gc->opts.dict != NULL && gc->opts.dict_size > 0);
-    CHECK((flags & 0x0Fu) == 0, "checksum algo id %u, expected 0", flags & 0x0Fu);
-    CHECK((flags & 0x30u) == 0, "reserved flag bits set (0x%02X)",
+    CHECK((flags & 0x0FU) == 0, "checksum algo id %u, expected 0", flags & 0x0FU);
+    CHECK((flags & 0x30U) == 0, "reserved flag bits set (0x%02X)",
           flags); /* bit 6 = HAS_DICTIONARY */
     CHECK(has_checksum == gc->opts.checksum_enabled, "HAS_CHECKSUM=%d, expected %d", has_checksum,
           gc->opts.checksum_enabled);
@@ -281,7 +278,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         memcpy(tmp, sh, ZXC_BLOCK_HEADER_SIZE);
         tmp[7] = 0;
         CHECK(sh[7] == zxc_hash8(tmp), "SEK header CRC8 mismatch at %zu", off);
-        CHECK(comp == (uint32_t)data_blocks * 4u, "SEK comp_size %u != n_blocks*4 (%d)", comp,
+        CHECK(comp == (uint32_t)data_blocks * 4U, "SEK comp_size %u != n_blocks*4 (%d)", comp,
               data_blocks * 4);
         const uint8_t* entries = sh + ZXC_BLOCK_HEADER_SIZE;
         CHECK(off + ZXC_BLOCK_HEADER_SIZE + comp + ZXC_FILE_FOOTER_SIZE <= size,
