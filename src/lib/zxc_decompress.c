@@ -449,26 +449,28 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
  * `return ZXC_ERROR_OVERFLOW` otherwise.
  *
  */
-#define DECODE_GLO_SEQ(LL, ML, OFF, RESERVE, N_REM, DECODE, ON_FAIL)                   \
-    do {                                                                               \
-        uint64_t ll = (LL);                                                            \
-        uint64_t ml = (ML);                                                            \
-        if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {                                       \
-            ll += zxc_read_varint(&e_ptr, e_end);                                      \
-            const uint64_t reserve = (RESERVE);                                        \
-            if (UNLIKELY(ll + reserve > (size_t)(l_end - l_ptr) ||                     \
-                         ll + ZXC_PAD_SIZE > (size_t)(d_end - d_ptr)))                 \
-                ON_FAIL;                                                               \
-        }                                                                              \
-        if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) {                                       \
-            ml += zxc_read_varint(&e_ptr, e_end);                                      \
-            if (UNLIKELY(ll + ml + ZXC_LZ_MIN_MATCH_LEN +                              \
-                             (N_REM) * ZXC_GLO_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE > \
-                         (size_t)(d_end - d_ptr)))                                     \
-                ON_FAIL;                                                               \
-        }                                                                              \
-        ml += ZXC_LZ_MIN_MATCH_LEN;                                                    \
-        DECODE(ll, ml, OFF);                                                           \
+#define DECODE_GLO_SEQ(LL, ML, OFF, RESERVE, N_REM, DECODE, ON_FAIL)                       \
+    do {                                                                                   \
+        uint64_t ll = (LL);                                                                \
+        uint64_t ml = (ML);                                                                \
+        if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {                                           \
+            ll += zxc_read_varint(&e_ptr, e_end);                                          \
+            const uint64_t reserve = (RESERVE);                                            \
+            if (UNLIKELY(ll + reserve > (size_t)(l_end - l_ptr) ||                         \
+                         ll + ml + ZXC_LZ_MIN_MATCH_LEN +                                  \
+                                 (N_REM) * ZXC_GLO_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE > \
+                             (size_t)(d_end - d_ptr)))                                     \
+                ON_FAIL;                                                                   \
+        }                                                                                  \
+        if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) {                                           \
+            ml += zxc_read_varint(&e_ptr, e_end);                                          \
+            if (UNLIKELY(ll + ml + ZXC_LZ_MIN_MATCH_LEN +                                  \
+                             (N_REM) * ZXC_GLO_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE >     \
+                         (size_t)(d_end - d_ptr)))                                         \
+                ON_FAIL;                                                                   \
+        }                                                                                  \
+        ml += ZXC_LZ_MIN_MATCH_LEN;                                                        \
+        DECODE(ll, ml, OFF);                                                               \
     } while (0)
 
 /**
@@ -515,15 +517,16 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
 #define DECODE_GHI_SEQ(S, RESERVE, N_REM, DECODE, ON_FAIL)                                   \
     do {                                                                                     \
         uint64_t ll = (S) >> 24;                                                             \
+        const uint32_t mb = ((S) >> 16) & 0xFF;                                              \
+        uint64_t ml = mb + ZXC_LZ_MIN_MATCH_LEN;                                             \
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) {                                               \
             ll += zxc_read_varint(&extras_ptr, extras_end);                                  \
             const uint64_t reserve = (RESERVE);                                              \
             if (UNLIKELY(ll + reserve > (size_t)(l_end - l_ptr) ||                           \
-                         ll + ZXC_PAD_SIZE > (size_t)(d_end - d_ptr)))                       \
+                         ll + ml + (N_REM) * ZXC_GHI_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE > \
+                             (size_t)(d_end - d_ptr)))                                       \
                 ON_FAIL;                                                                     \
         }                                                                                    \
-        const uint32_t mb = ((S) >> 16) & 0xFF;                                              \
-        uint64_t ml = mb + ZXC_LZ_MIN_MATCH_LEN;                                             \
         if (UNLIKELY(mb == ZXC_SEQ_ML_MASK)) {                                               \
             ml += zxc_read_varint(&extras_ptr, extras_end);                                  \
             if (UNLIKELY(ll + ml + (N_REM) * ZXC_GHI_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE > \
@@ -1025,6 +1028,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     // --- Trailing Literals ---
     // Copy remaining literals from source stream (literal exhaustion)
     if (UNLIKELY(l_ptr > l_end)) return ZXC_ERROR_CORRUPT_DATA;
+    if (UNLIKELY(d_ptr > d_end)) return ZXC_ERROR_OVERFLOW;
+
     const size_t remaining_literals = (size_t)(l_end - l_ptr);
     if (UNLIKELY(remaining_literals > (size_t)(d_end - d_ptr))) return ZXC_ERROR_OVERFLOW;
     ZXC_MEMCPY(d_ptr, l_ptr, remaining_literals);
@@ -1280,6 +1285,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     // --- Trailing Literals ---
     // Copy remaining literals from source stream (literal exhaustion)
     if (UNLIKELY(l_ptr > l_end)) return ZXC_ERROR_CORRUPT_DATA;
+    if (UNLIKELY(d_ptr > d_end)) return ZXC_ERROR_OVERFLOW;
+
     const size_t remaining_literals = (size_t)(l_end - l_ptr);
     if (UNLIKELY(remaining_literals > (size_t)(d_end - d_ptr))) return ZXC_ERROR_OVERFLOW;
     ZXC_MEMCPY(d_ptr, l_ptr, remaining_literals);
