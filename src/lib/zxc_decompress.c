@@ -966,7 +966,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             break;
         }
 
-        zxc_decode_copy_literals(d_ptr, l_ptr, ll);
+        if (LIKELY(ll < ZXC_TOKEN_LL_MASK)) {
+            zxc_copy16(d_ptr, l_ptr);
+        } else {
+            zxc_decode_copy_literals(d_ptr, l_ptr, ll);
+        }
         l_ptr += ll;
         d_ptr += ll;
 
