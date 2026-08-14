@@ -331,10 +331,24 @@ extern "C" {
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
 /** @brief Current on-disk file format version. The decoder accepts only this
  *  version; Older versions are rejected with ZXC_ERROR_BAD_VERSION. */
-#define ZXC_FILE_FORMAT_VERSION 7
+#define ZXC_FILE_FORMAT_VERSION 8
 
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
+/**
+ * @brief Zero-filled tail every GLO/GHI payload ends with, on the wire.
+ *
+ * Distinct from @ref ZXC_PAD_SIZE on purpose even though the values match:
+ * this one is a *format* guarantee, not a buffer allowance, and the two roles
+ * must be free to diverge.
+ *
+ * @c zxc_decode_copy_literals reads 32 B unconditionally, so a RAW literal
+ * stream pointing into the caller's buffer needs 32 B of readable slack past
+ * its end. v7 required the sections to tile the payload exactly and so had to
+ * synthesise that slack, staging short streams into a padded scratch on a cold
+ * path; v8 has it by construction and drops the staging entirely.
+ */
+#define ZXC_BLOCK_TAIL_PAD 32
 /**
  * @brief Tail padding required on the decompression destination buffer.
  *
@@ -405,20 +419,15 @@ extern "C" {
 /** @brief Worst-case format overhead inside a single block beyond the outer
  *  8-byte block header and the optional 4-byte checksum.
  *
- *  Covers the inner GLO/GHI sub-header (16 B) plus four section descriptors
- *  (4 x 8 = 32 B) = 48 B, with a 16 B safety margin for future format
- *  evolution. Used by zxc_compress_block_bound() and zxc_compress_bound()
- *  to size the destination buffer in the worst (incompressible) case. */
-#define ZXC_BLOCK_FORMAT_OVERHEAD 64
+ *  Covers the inner GLO/GHI sub-header (16 B), the widest GLO section table
+ *  (8 B) and the mandatory payload tail (32 B) = 56 B, with a 24 B safety
+ *  margin for future format evolution. Used by zxc_compress_block_bound() and
+ *  zxc_compress_bound() to size the destination buffer in the worst
+ *  (incompressible) case. */
+#define ZXC_BLOCK_FORMAT_OVERHEAD 80
 
-/** @brief Binary size of a section descriptor (comp_size + raw_size). */
-#define ZXC_SECTION_DESC_BINARY_SIZE 8
-/** @brief 32-bit mask for extracting sizes from a section descriptor. */
-#define ZXC_SECTION_SIZE_MASK 0xFFFFFFFFU
-/** @brief Number of sections in a GLO block. */
-#define ZXC_GLO_SECTIONS 4
-/** @brief Number of sections in a GHI block. */
-#define ZXC_GHI_SECTIONS 3
+/** @brief Widest GLO section table: literal and token compressed sizes. */
+#define ZXC_GLO_MAX_TABLE_SIZE (2 * sizeof(uint32_t))
 
 /** @brief Checksum algorithm id for RapidHash (default, sole implementation). */
 #define ZXC_CHECKSUM_RAPIDHASH 0
@@ -518,7 +527,12 @@ extern "C" {
 /** @brief Maximum decoded output of a single sequence with INLINE ll/ml
  *         (non-varint). Used by 4x decoder bounds checks to reserve space for
  *         subsequent inline sequences in the same batch when the current
- *         sequence has a varint-extended ml. */
+ *         sequence has a varint-extended ml.
+ *
+ *         Keeping this small is what keeps the 4x loops reachable: a v8 trial
+ *         that widened the extras to a bounded single byte pushed it to 543
+ *         and cost 2% of decode on silesia, because the loop margins scale
+ *         with it. */
 #define ZXC_GLO_MAX_INLINE_OUT_PER_SEQ \
     ((ZXC_TOKEN_LL_MASK - 1U) + (ZXC_TOKEN_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 33 */
 #define ZXC_GHI_MAX_INLINE_OUT_PER_SEQ \
@@ -1044,17 +1058,6 @@ typedef struct {
 } zxc_gnr_header_t;
 
 /**
- * @struct zxc_section_desc_t
- * @brief Describes the size attributes of a specific data section.
- *
- * Used to track the compressed and uncompressed sizes of sub-components
- * (e.g., a literal stream or offset stream) within a block.
- */
-typedef struct {
-    uint64_t sizes; /**< Packed sizes: compressed size (low 32 bits) | raw size (high 32 bits). */
-} zxc_section_desc_t;
-
-/**
  * ============================================================================
  * MEMORY & ENDIANNESS HELPERS
  * ============================================================================
@@ -1432,70 +1435,61 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
 }
 
 /**
- * @brief Writes a generic header and section descriptors to a destination
- * buffer.
+ * @brief Writes a GLO sub-header followed by its section table.
  *
- * Serializes the `zxc_gnr_header_t` and an array of 4 section descriptors.
+ * The table holds only the two sizes the header cannot imply, and is 0, 4 or
+ * 8 bytes wide accordingly (@ref ZXC_GLO_MAX_TABLE_SIZE).
+ *
+ * @param[out] dst      Pointer to the destination buffer.
+ * @param[in]  rem      The remaining space in the destination buffer.
+ * @param[in]  gh       Pointer to the generic header structure to write.
+ * @param[in]  lit_comp Compressed size of the literal section.
+ * @param[in]  tok_comp Compressed size of the token section.
+ * @return The number of bytes written, or a negative error code if the buffer
+ *         is too small.
+ */
+int zxc_write_glo_header_and_table(uint8_t* RESTRICT dst, const size_t rem,
+                                   const zxc_gnr_header_t* RESTRICT gh, const uint32_t lit_comp,
+                                   const uint32_t tok_comp);
+
+/**
+ * @brief Reads a GLO sub-header and its section table from a source buffer.
+ *
+ * Sizes absent from the table are reconstructed from the header, so both
+ * outputs are always populated.
+ *
+ * @param[in]  src      Pointer to the source buffer.
+ * @param[in]  len      The length of the source buffer available for reading.
+ * @param[out] gh       Pointer to the generic header structure to populate.
+ * @param[out] lit_comp Receives the literal section's compressed size.
+ * @param[out] tok_comp Receives the token section's compressed size.
+ * @return Bytes consumed (header + table), or a negative zxc_error_t code.
+ */
+int zxc_read_glo_header_and_table(const uint8_t* RESTRICT src, const size_t len,
+                                  zxc_gnr_header_t* RESTRICT gh, uint32_t* RESTRICT lit_comp,
+                                  uint32_t* RESTRICT tok_comp);
+
+/**
+ * @brief Writes a GHI sub-header. GHI carries no section table.
  *
  * @param[out] dst Pointer to the destination buffer.
- * @param[in] rem The remaining space in the destination buffer.
- * @param[in] gh Pointer to the generic header structure to write.
- * @param[in] desc Array of 4 section descriptors to write.
- * @return int The number of bytes written, or a negative error code if the buffer
- * is too small.
+ * @param[in]  rem Remaining size available in the destination buffer.
+ * @param[in]  gh  Pointer to the GNR header structure containing header information.
+ * @return The number of bytes written, or a negative error code on failure.
  */
-int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
-                                  const zxc_gnr_header_t* RESTRICT gh,
-                                  const zxc_section_desc_t desc[ZXC_GLO_SECTIONS]);
+int zxc_write_ghi_header(uint8_t* RESTRICT dst, const size_t rem,
+                         const zxc_gnr_header_t* RESTRICT gh);
 
 /**
- * @brief Reads a generic header and section descriptors from a source buffer.
+ * @brief Reads a GHI sub-header from a buffer.
  *
- * Deserializes data into a `zxc_gnr_header_t` and an array of 4 section
- * descriptors.
- *
- * @param[in] src Pointer to the source buffer.
- * @param[in] len The length of the source buffer available for reading.
- * @param[out] gh Pointer to the generic header structure to populate.
- * @param[out] desc Array of 4 section descriptors to populate.
- *
- * @return int Returns ZXC_OK on success, or a negative zxc_error_t code on failure.
+ * @param[in]  src Pointer to the source buffer containing the record data.
+ * @param[in]  len Length of the source buffer in bytes.
+ * @param[out] gh  Pointer to a zxc_gnr_header_t structure to store the parsed header.
+ * @return ZXC_OK on success, or a negative zxc_error_t code on failure.
  */
-int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
-                                 zxc_gnr_header_t* RESTRICT gh,
-                                 zxc_section_desc_t desc[ZXC_GLO_SECTIONS]);
-
-/**
- * @brief Writes a record header and description to the destination buffer.
- *
- * @param dst Pointer to the destination buffer where the header and description will be written.
- * @param rem Remaining size available in the destination buffer.
- * @param gh Pointer to the GNR header structure containing header information.
- * @param desc Array of 3 section descriptors to be written along with the header.
- *
- * @return int Returns the number of bytes written on success, or a negative error code on failure.
- */
-int zxc_write_ghi_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
-                                  const zxc_gnr_header_t* RESTRICT gh,
-                                  const zxc_section_desc_t desc[ZXC_GHI_SECTIONS]);
-
-/**
- * @brief Reads a record header and section descriptors from a buffer.
- *
- * This function parses the source buffer to extract a general header and
- * up to three section descriptors from a ZXC record.
- *
- * @param[in] src Pointer to the source buffer containing the record data.
- * @param[in] len Length of the source buffer in bytes.
- * @param[out] gh Pointer to a zxc_gnr_header_t structure to store the parsed header.
- * @param[out] desc Array of 3 zxc_section_desc_t structures to store the parsed section
- * descriptors.
- *
- * @return int Returns ZXC_OK on success, or a negative zxc_error_t code on failure.
- */
-int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
-                                 zxc_gnr_header_t* RESTRICT gh,
-                                 zxc_section_desc_t desc[ZXC_GHI_SECTIONS]);
+int zxc_read_ghi_header(const uint8_t* RESTRICT src, const size_t len,
+                        zxc_gnr_header_t* RESTRICT gh);
 
 /* ============================================================================
  * Huffman codec for the GLO literal stream (level >= 6).

@@ -576,36 +576,6 @@ static ZXC_NOINLINE ZXC_COLD int zxc_ensure_entropy_scratch(const zxc_cctx_t* RE
     return zxc_cctx_alloc_entropy_scratch((zxc_cctx_t*)(uintptr_t)ctx);
 }
 
-/**
- * @brief Stages a RAW literal stream into the padded @c lit_buffer.
- *
- * @ref zxc_decode_copy_literals wild-copies in @ref ZXC_PAD_SIZE chunks and
- * reads that far past the literals it consumes. Decoded streams land in
- * @c lit_buffer, which is allocated with the padding; a RAW stream instead
- * points into the caller's buffer, where the overshoot is only covered by the
- * block's remaining sections. Callers stage the stream here when those are
- * shorter than @ref ZXC_PAD_SIZE.
- *
- * @param[in]     ctx   Decompression context (owns @c lit_buffer).
- * @param[in,out] l_ptr Literal cursor; re-pointed at the staged copy.
- * @param[in,out] l_end Literal end; re-pointed at the staged copy.
- * @return @ref ZXC_OK, or @ref ZXC_ERROR_CORRUPT_DATA if the stream cannot fit
- *         (a valid block's literals never exceed the chunk size).
- */
-static ZXC_NOINLINE ZXC_COLD int zxc_stage_raw_literals(const zxc_cctx_t* RESTRICT ctx,
-                                                        const uint8_t** RESTRICT l_ptr,
-                                                        const uint8_t** RESTRICT l_end) {
-    const size_t lit_size = (size_t)(*l_end - *l_ptr);
-    uint8_t* const stage = ctx->lit_buffer;
-    if (UNLIKELY(!stage || ctx->lit_buffer_cap < lit_size + ZXC_PAD_SIZE))
-        return ZXC_ERROR_CORRUPT_DATA;
-
-    ZXC_MEMCPY(stage, *l_ptr, lit_size);
-    *l_ptr = stage;
-    *l_end = stage + lit_size;
-    return ZXC_OK;
-}
-
 static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco(const zxc_cctx_t* RESTRICT ctx,
                                                       const uint8_t* RESTRICT payload,
                                                       const size_t psize,
@@ -694,10 +664,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
 
     /* Constant 0 when !has_dict, so `d_floor` folds to `dst`. */
     const size_t dict_size = has_dict ? ctx->dict_size : 0;
-    zxc_section_desc_t desc[ZXC_GLO_SECTIONS];
+    uint32_t lit_comp, tok_comp;
 
-    if (UNLIKELY(zxc_read_glo_header_and_desc(src, src_size, &gh, desc) != ZXC_OK))
-        return ZXC_ERROR_BAD_HEADER;
+    const int hdr_sz = zxc_read_glo_header_and_table(src, src_size, &gh, &lit_comp, &tok_comp);
+    if (UNLIKELY(hdr_sz < 0)) return ZXC_ERROR_BAD_HEADER;
 
     /* Entropy-coded tokens (level 7): tail-call the dedicated instantiation
      * before any section work - it restarts from the header, so only the parse
@@ -710,8 +680,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
         return zxc_decode_block_glo_entropy(ctx, src, src_size, dst, dst_capacity);
     }
 
-    const uint8_t* p_data =
-        src + ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+    const uint8_t* p_data = src + (size_t)hdr_sz;
     const uint8_t* p_curr = p_data;
 
     // --- Literal Stream Setup ---
@@ -719,9 +688,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     const uint8_t* l_end;
     uint8_t* rle_buf = NULL;
 
-    size_t lit_stream_size = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
+    size_t lit_stream_size = lit_comp;
     /* Decoded size of an encoded literal section (RAW ignores it). */
-    const size_t required_size = (size_t)(desc[0].sizes >> 32);
+    const size_t required_size = gh.n_literals;
 
     if (gh.enc_lit == ZXC_SECTION_ENCODING_HUFFMAN ||
         gh.enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT) {
@@ -823,34 +792,36 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     p_curr += lit_stream_size;
 
     // --- Stream Pointers & Validation ---
-    const size_t sz_tokens = (size_t)(desc[1].sizes & ZXC_SECTION_SIZE_MASK);
-    const size_t sz_offsets = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
-    const size_t sz_extras = (size_t)(desc[3].sizes & ZXC_SECTION_SIZE_MASK);
-
-    // Validate stream sizes match sequence count (early rejection of malformed data)
-    const uint64_t expected_off_size =
+    /* Only the literal and token section sizes are on the wire; offsets follow
+     * from the sequence count and the offset width, and the extras section is
+     * whatever the payload has left once the mandatory tail is accounted for.
+     * Derived sizes cannot be forged into an inconsistent tiling, so one
+     * inequality replaces v7's exact-tiling equality plus its offset check. */
+    const size_t sz_tokens = tok_comp;
+    const uint64_t sz_offsets =
         GLO_OFF8 ? (uint64_t)gh.n_sequences : (uint64_t)gh.n_sequences * 2;
+
+    const size_t payload_avail = (size_t)(src + src_size - p_data);
+    const uint64_t consumed = (uint64_t)lit_stream_size + (uint64_t)sz_tokens + sz_offsets +
+                              (uint64_t)ZXC_BLOCK_TAIL_PAD;
+    if (UNLIKELY(consumed > (uint64_t)payload_avail)) return ZXC_ERROR_CORRUPT_DATA;
+    const size_t sz_extras = payload_avail - (size_t)consumed;
 
     /* Offsets/extras follow the on-disk token SECTION; sz_tokens is its size
      * (== n_sequences when RAW, the Huffman payload size when enc_litlen set). */
     const uint8_t* o_ptr = p_curr + sz_tokens;
-    const uint8_t* e_ptr = o_ptr + sz_offsets;
-    const uint8_t* const e_end = e_ptr + sz_extras;  // For vbyte overflow detection
+    const uint8_t* e_ptr = o_ptr + (size_t)sz_offsets;
+    const uint8_t* const e_end = e_ptr + sz_extras;  // Tail begins here.
 
-    // Validate streams don't overflow source buffer + match sequence count.
-    if (UNLIKELY((e_end != src + src_size) || (uint64_t)sz_offsets < expected_off_size))
-        return ZXC_ERROR_CORRUPT_DATA;
-
-    if (UNLIKELY(gh.enc_lit == ZXC_SECTION_ENCODING_RAW &&
-                 (size_t)(src + src_size - l_end) < ZXC_PAD_SIZE)) {
-        const int rc = zxc_stage_raw_literals(ctx, &l_ptr, &l_end);
-        if (UNLIKELY(rc != ZXC_OK)) return rc;
-    }
+    /* The tail guarantees ZXC_BLOCK_TAIL_PAD readable bytes past e_end, which
+     * is what lets both the literal wild-copy and the extras reader overshoot.
+     * v7 had to stage short RAW literal streams into a padded scratch here. */
 
     const uint8_t* RESTRICT t_ptr;
     if (!tok_entropy) {
-        /* enc_litlen == 2 was re-routed right after the header parse. */
-        if (UNLIKELY(sz_tokens < gh.n_sequences)) return ZXC_ERROR_CORRUPT_DATA;
+        /* enc_litlen == 2 was re-routed right after the header parse; any other
+         * value would have mis-sized the section table above. */
+        if (UNLIKELY(gh.enc_litlen != 0)) return ZXC_ERROR_CORRUPT_DATA;
         t_ptr = p_curr;
     } else {
         if (UNLIKELY(gh.enc_litlen != ZXC_SECTION_ENCODING_HUFFMAN)) return ZXC_ERROR_CORRUPT_DATA;
@@ -1067,36 +1038,35 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
 
     /* 0 when !has_dict (safe path) -> folds `d_floor` to `dst`. */
     const size_t dict_size = has_dict ? ctx->dict_size : 0;
-    zxc_section_desc_t desc[ZXC_GHI_SECTIONS];
 
-    if (UNLIKELY(zxc_read_ghi_header_and_desc(src, src_size, &gh, desc) != ZXC_OK))
+    if (UNLIKELY(zxc_read_ghi_header(src, src_size, &gh) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
 
-    const uint8_t* p_curr =
-        src + ZXC_GHI_HEADER_BINARY_SIZE + ZXC_GHI_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+    const uint8_t* const p_data = src + ZXC_GHI_HEADER_BINARY_SIZE;
+    const uint8_t* p_curr = p_data;
 
     // --- Stream Pointers & Validation ---
-    const size_t sz_lit = (uint32_t)desc[0].sizes;
-    const size_t sz_seqs = (uint32_t)desc[1].sizes;
-    const size_t sz_exts = (uint32_t)desc[2].sizes;
+    /* GHI carries no section table: literals are always RAW, the sequence
+     * stream is four bytes per sequence, and extras run to the payload tail. */
+    const size_t sz_lit = gh.n_literals;
+    const uint64_t sz_seqs = (uint64_t)gh.n_sequences * sizeof(uint32_t);
+
+    const size_t payload_avail = (size_t)(src + src_size - p_data);
+    const uint64_t consumed = (uint64_t)sz_lit + sz_seqs + (uint64_t)ZXC_BLOCK_TAIL_PAD;
+    if (UNLIKELY(consumed > (uint64_t)payload_avail)) return ZXC_ERROR_CORRUPT_DATA;
+    const size_t sz_exts = payload_avail - (size_t)consumed;
+
     const uint8_t* l_ptr = p_curr;
     const uint8_t* l_end = l_ptr + sz_lit;
     p_curr += sz_lit;
 
     const uint8_t* seq_ptr = p_curr;
-    const uint8_t* extras_ptr = p_curr + sz_seqs;
+    const uint8_t* extras_ptr = p_curr + (size_t)sz_seqs;
     const uint8_t* const extras_end = extras_ptr + sz_exts;
 
-    // Validate streams don't overflow source buffer +
-    // Validate sequence stream size matches sequence count
-    if (UNLIKELY((extras_end != src + src_size) ||
-                 ((uint64_t)sz_seqs < (uint64_t)gh.n_sequences * 4)))
-        return ZXC_ERROR_CORRUPT_DATA;
-
-    if (UNLIKELY((size_t)(src + src_size - l_end) < ZXC_PAD_SIZE)) {
-        const int rc = zxc_stage_raw_literals(ctx, &l_ptr, &l_end);
-        if (UNLIKELY(rc != ZXC_OK)) return rc;
-    }
+    /* The mandatory tail leaves ZXC_BLOCK_TAIL_PAD readable bytes past
+     * extras_end, covering the literal wild-copy overshoot. GHI keeps the v7
+     * varint extras, which bound themselves against extras_end. */
 
     uint8_t* d_ptr = dst;
     const uint8_t* const d_end = dst + dst_capacity;

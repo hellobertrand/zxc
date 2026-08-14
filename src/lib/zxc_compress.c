@@ -1668,29 +1668,20 @@ parse_done:;
                                  .enc_mlen = 0,
                                  .enc_off = (uint8_t)use_8bit_off};
 
-    zxc_section_desc_t desc[ZXC_GLO_SECTIONS] = {0};
-    const size_t lit_section_size = (enc_lit == ZXC_SECTION_ENCODING_RLE)       ? rle_size
-                                    : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) ? huf_total_size
-                                    : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT)
-                                        ? huf_dict_total_size
-                                        : lit_c;
-    desc[0].sizes = (uint64_t)lit_section_size | ((uint64_t)lit_c << 32);
-    const size_t tok_section_size =
-        (enc_tok == ZXC_SECTION_ENCODING_HUFFMAN) ? tok_huf_size : seq_c;
-    desc[1].sizes = (uint64_t)tok_section_size | ((uint64_t)seq_c << 32);
-    desc[2].sizes = (uint64_t)off_stream_size | ((uint64_t)off_stream_size << 32);
-    desc[3].sizes = (uint64_t)extras_sz | ((uint64_t)extras_sz << 32);
+    const size_t sz_lit = (enc_lit == ZXC_SECTION_ENCODING_RLE)       ? rle_size
+                          : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) ? huf_total_size
+                          : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT)
+                              ? huf_dict_total_size
+                              : lit_c;
+    const size_t sz_tok = (enc_tok == ZXC_SECTION_ENCODING_HUFFMAN) ? tok_huf_size : seq_c;
+    const size_t sz_off = off_stream_size;
+    const size_t sz_ext = extras_sz;
 
-    const int ghs = zxc_write_glo_header_and_desc(p, rem, &gh, desc);
+    const int ghs = zxc_write_glo_header_and_table(p, rem, &gh, (uint32_t)sz_lit, (uint32_t)sz_tok);
     if (UNLIKELY(ghs < 0)) return ghs;
 
     uint8_t* p_curr = p + ghs;
     rem -= ghs;
-
-    const size_t sz_lit = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
-    const size_t sz_tok = (size_t)(desc[1].sizes & ZXC_SECTION_SIZE_MASK);
-    const size_t sz_off = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
-    const size_t sz_ext = (size_t)(desc[3].sizes & ZXC_SECTION_SIZE_MASK);
 
     if (UNLIKELY(rem < sz_lit)) return ZXC_ERROR_DST_TOO_SMALL;
 
@@ -1812,10 +1803,16 @@ parse_done:;
     }
     rem -= sz_off;
 
-    if (UNLIKELY(rem < sz_ext)) return ZXC_ERROR_DST_TOO_SMALL;
+    if (UNLIKELY(rem < sz_ext + ZXC_BLOCK_TAIL_PAD)) return ZXC_ERROR_DST_TOO_SMALL;
 
     ZXC_MEMCPY(p_curr, buf_extras, extras_sz);
     p_curr += extras_sz;
+
+    /* Mandatory zero tail: gives the decoder the 32 B of readable slack the
+     * literal wild-copy and the extras reader both assume. See
+     * ZXC_BLOCK_TAIL_PAD. */
+    ZXC_MEMSET(p_curr, 0, ZXC_BLOCK_TAIL_PAD);
+    p_curr += ZXC_BLOCK_TAIL_PAD;
 
     bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);
@@ -1975,23 +1972,18 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
                                  .enc_mlen = 0,
                                  .enc_off = 0};
 
-    zxc_section_desc_t desc[ZXC_GHI_SECTIONS] = {0};
-    desc[0].sizes = (uint64_t)lit_c | ((uint64_t)lit_c << 32);
-    size_t sz_seqs = seq_c * sizeof(uint32_t);
-    desc[1].sizes = (uint64_t)sz_seqs | ((uint64_t)sz_seqs << 32);
-    desc[2].sizes = (uint64_t)extras_c | ((uint64_t)extras_c << 32);
-
-    const int ghs = zxc_write_ghi_header_and_desc(p, rem, &gh, desc);
+    const int ghs = zxc_write_ghi_header(p, rem, &gh);
     if (UNLIKELY(ghs < 0)) return ghs;
 
     uint8_t* p_curr = p + ghs;
     rem -= ghs;
 
-    const size_t sz_lit = (size_t)(desc[0].sizes & ZXC_SECTION_SIZE_MASK);
-    const size_t sz_seq = (size_t)(desc[1].sizes & ZXC_SECTION_SIZE_MASK);
-    const size_t sz_ext = (size_t)(desc[2].sizes & ZXC_SECTION_SIZE_MASK);
+    const size_t sz_lit = lit_c;
+    const size_t sz_seq = seq_c * sizeof(uint32_t);
+    const size_t sz_ext = extras_c;
 
-    if (UNLIKELY(rem < sz_lit + sz_seq + sz_ext)) return ZXC_ERROR_DST_TOO_SMALL;
+    if (UNLIKELY(rem < sz_lit + sz_seq + sz_ext + ZXC_BLOCK_TAIL_PAD))
+        return ZXC_ERROR_DST_TOO_SMALL;
 
     ZXC_MEMCPY(p_curr, literals, lit_c);
     p_curr += lit_c;
@@ -2012,6 +2004,11 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     // --- WRITE EXTRAS ---
     ZXC_MEMCPY(p_curr, buf_extras, sz_ext);
     p_curr += sz_ext;
+
+    /* Mandatory zero tail - see ZXC_BLOCK_TAIL_PAD. GHI keeps the v7 varint
+     * extras, so here the tail only covers the literal wild-copy overshoot. */
+    ZXC_MEMSET(p_curr, 0, ZXC_BLOCK_TAIL_PAD);
+    p_curr += ZXC_BLOCK_TAIL_PAD;
 
     bh.comp_size = (uint32_t)(p_curr - (dst + ZXC_BLOCK_HEADER_SIZE));
     const int hw = zxc_write_block_header(dst, dst_cap, &bh);

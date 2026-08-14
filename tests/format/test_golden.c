@@ -89,21 +89,24 @@ static uint8_t* read_file(const char* path, size_t* out_size) {
 /* Per-payload sub-header validation (FORMAT.md Sec 5)                          */
 /* ------------------------------------------------------------------------- */
 
-/* Shared validator for the GLO (Sec 5.2) and GHI (Sec 5.3) section model: a 16-byte
- * header, then `n_sections` packed u64 descriptors (low32 = comp, high32 = raw),
- * then each section's bytes. The section sizes plus the headers must tile the
- * payload exactly. */
-static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp, int n_sections,
+/* Shared validator for the GLO (Sec 5.2) and GHI (Sec 5.3) section model: a
+ * 16-byte header, then GLO's variable section table (0/4/8 bytes, driven by
+ * enc_lit and enc_litlen; GHI has none), then each section's bytes, then the
+ * mandatory 32-byte zero tail. Sizes the table does not carry are derived from
+ * the header, and the whole must tile the payload exactly. */
+static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp, int is_glo,
                                int expect_enc_lit) {
-    uint32_t fixed = 16 + (uint32_t)n_sections * 8;
-    CHECK(comp >= fixed, "LZ payload too small for header+descriptors (%u < %u)", comp, fixed);
+    CHECK(comp >= 16 + ZXC_BLOCK_TAIL_PAD, "LZ payload too small for header+tail (%u)", comp);
 
+    uint32_t n_sequences = zxc_le32(p);
+    uint32_t n_literals = zxc_le32(p + 4);
     uint8_t enc_lit = p[8];
+    uint8_t enc_litlen = p[9];
     uint8_t enc_off = p[11];
     CHECK(enc_lit <= 3, "enc_lit = %u out of range", enc_lit);
     /* GLO: offset stream width, 0 or 1. GHI has no offset stream and the encoder
      * pins the field to 0 -- decoders must ignore it there (FORMAT.md 5.3). */
-    if (n_sections == ZXC_GHI_SECTIONS)
+    if (!is_glo)
         CHECK(enc_off == 0, "GHI enc_off = %u, expected 0", enc_off);
     else
         CHECK(enc_off <= 1, "enc_off = %u out of range", enc_off);
@@ -112,14 +115,39 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
         CHECK(enc_lit == (uint8_t)expect_enc_lit, "expected enc_lit == %d, got %u", expect_enc_lit,
               enc_lit);
 
+    uint32_t table = 0;
     uint64_t sect_total = 0;
-    for (int i = 0; i < n_sections; i++) {
-        uint64_t desc = zxc_le64(p + 16 + (size_t)i * 8);
-        uint32_t csz = (uint32_t)(desc & 0xFFFFFFFFu);
-        sect_total += csz;
+    if (is_glo) {
+        /* Only the sizes the header cannot imply are on the wire. */
+        uint32_t lit_comp = n_literals;
+        uint32_t tok_comp = n_sequences;
+        if (enc_lit != 0) {
+            CHECK(comp >= 16 + table + 4, "GLO table truncated");
+            lit_comp = zxc_le32(p + 16 + table);
+            table += 4;
+        }
+        if (enc_litlen == 2) {
+            CHECK(comp >= 16 + table + 4, "GLO table truncated");
+            tok_comp = zxc_le32(p + 16 + table);
+            table += 4;
+        } else {
+            CHECK(enc_litlen == 0, "GLO enc_litlen = %u out of range", enc_litlen);
+        }
+        sect_total = (uint64_t)lit_comp + tok_comp + (uint64_t)n_sequences * (enc_off ? 1u : 2u);
+    } else {
+        CHECK(enc_lit == 0, "GHI enc_lit = %u, expected RAW", enc_lit);
+        sect_total = (uint64_t)n_literals + (uint64_t)n_sequences * 4u;
     }
-    CHECK(fixed + sect_total == comp, "LZ sections do not tile payload (%u + %llu != %u)", fixed,
-          (unsigned long long)sect_total, comp);
+
+    /* Extras take whatever is left, so the tiling check is an inequality: the
+     * fixed parts plus the tail must fit, and the remainder is the extras. */
+    uint64_t fixed = 16u + table + sect_total + ZXC_BLOCK_TAIL_PAD;
+    CHECK(fixed <= comp, "LZ sections overrun payload (%llu > %u)",
+          (unsigned long long)fixed, comp);
+
+    /* Sec 5.2/5.3: the tail is present and zero-filled. */
+    for (uint32_t i = 0; i < ZXC_BLOCK_TAIL_PAD; i++)
+        CHECK(p[comp - ZXC_BLOCK_TAIL_PAD + i] == 0, "block tail byte %u nonzero", i);
     return 1;
 }
 
@@ -214,9 +242,9 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         CHECK(off + ZXC_BLOCK_HEADER_SIZE + comp <= size, "payload overruns file at %zu", off);
 
         if (type == GC_BLOCK_GLO) {
-            if (!validate_lz_payload(ctx, payload, comp, 4, gc->expect_enc_lit)) return 0;
+            if (!validate_lz_payload(ctx, payload, comp, 1, gc->expect_enc_lit)) return 0;
         } else if (type == GC_BLOCK_GHI) {
-            if (!validate_lz_payload(ctx, payload, comp, 3, -1)) return 0;
+            if (!validate_lz_payload(ctx, payload, comp, 0, -1)) return 0;
         }
 
         size_t phys = ZXC_BLOCK_HEADER_SIZE + comp;

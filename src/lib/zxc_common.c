@@ -684,22 +684,13 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
 }
 
 /**
- * @brief Serialises a GLO block header followed by its section descriptors.
+ * @brief Writes the 16-byte GLO/GHI sub-header shared by both block types.
  *
- * @param[out] dst  Destination buffer.
- * @param[in]  rem  Remaining capacity of @p dst.
- * @param[in]  gh   Populated GLO header descriptor.
- * @param[in]  desc Array of @ref ZXC_GLO_SECTIONS section descriptors.
- * @return Total bytes written on success, or a negative @ref zxc_error_t code.
+ * @param[out] dst Destination buffer, at least 16 bytes.
+ * @param[in]  gh  Populated header descriptor.
  */
-int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
-                                  const zxc_gnr_header_t* RESTRICT gh,
-                                  const zxc_section_desc_t desc[ZXC_GLO_SECTIONS]) {
-    const size_t needed =
-        ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
-
-    if (UNLIKELY(rem < needed)) return ZXC_ERROR_DST_TOO_SMALL;
-
+static ZXC_ALWAYS_INLINE void zxc_write_gnr_header(uint8_t* RESTRICT dst,
+                                                   const zxc_gnr_header_t* RESTRICT gh) {
     zxc_store_le32(dst, gh->n_sequences);
     zxc_store_le32(dst + 4, gh->n_literals);
 
@@ -709,115 +700,150 @@ int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
     dst[11] = gh->enc_off;
 
     zxc_store_le32(dst + 12, 0);
-    uint8_t* p = dst + ZXC_GLO_HEADER_BINARY_SIZE;
-
-    for (int i = 0; i < ZXC_GLO_SECTIONS; i++) {
-        zxc_store_le64(p, desc[i].sizes);
-        p += ZXC_SECTION_DESC_BINARY_SIZE;
-    }
-
-    return (int)needed;
 }
 
 /**
- * @brief Parses a GLO block header and its section descriptors from @p src.
+ * @brief Reads the 16-byte GLO/GHI sub-header shared by both block types.
  *
- * @param[in]  src  Source buffer.
- * @param[in]  len  Size of @p src.
- * @param[out] gh   Receives the decoded GLO header.
- * @param[out] desc Receives @ref ZXC_GLO_SECTIONS decoded section descriptors.
- * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
+ * @param[in]  src Source buffer, at least 16 bytes.
+ * @param[out] gh  Receives the decoded header.
  */
-int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
-                                 zxc_gnr_header_t* RESTRICT gh,
-                                 zxc_section_desc_t desc[ZXC_GLO_SECTIONS]) {
-    const size_t needed =
-        ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
-
-    if (UNLIKELY(len < needed)) return ZXC_ERROR_SRC_TOO_SMALL;
-
+static ZXC_ALWAYS_INLINE void zxc_read_gnr_header(const uint8_t* RESTRICT src,
+                                                  zxc_gnr_header_t* RESTRICT gh) {
     gh->n_sequences = zxc_le32(src);
     gh->n_literals = zxc_le32(src + 4);
     gh->enc_lit = src[8];
     gh->enc_litlen = src[9];
     gh->enc_mlen = src[10];
     gh->enc_off = src[11];
+}
+
+/**
+ * @brief Size of the GLO section table implied by the header's encoding fields.
+ *
+ * The table carries only what the header cannot already imply: the literal
+ * section's compressed size when it is entropy- or RLE-coded, and the token
+ * section's when level 7 Huffman-codes it. Everything else is derived - see
+ * @ref zxc_write_glo_header_and_table.
+ */
+static ZXC_ALWAYS_INLINE size_t zxc_glo_table_size(const uint8_t enc_lit,
+                                                   const uint8_t enc_litlen) {
+    return ((enc_lit != ZXC_SECTION_ENCODING_RAW) ? sizeof(uint32_t) : 0) +
+           ((enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN) ? sizeof(uint32_t) : 0);
+}
+
+/**
+ * @brief Serialises a GLO block header followed by its section table.
+ *
+ * Only the two sizes the header cannot imply are stored. The rest is derived
+ * by the decoder, which both shrinks the block and removes them as forgeable
+ * fields:
+ *
+ * | Quantity            | Source                                          |
+ * |---------------------|-------------------------------------------------|
+ * | literals raw size   | `gh->n_literals`                                |
+ * | literals comp size  | stored, or `gh->n_literals` when `enc_lit==RAW` |
+ * | tokens comp size    | stored, or `gh->n_sequences` when not Huffman   |
+ * | offsets comp size   | `gh->n_sequences * (enc_off ? 1 : 2)`           |
+ * | extras comp size    | payload end minus the tail minus the sections   |
+ *
+ * @param[out] dst      Destination buffer.
+ * @param[in]  rem      Remaining capacity of @p dst.
+ * @param[in]  gh       Populated GLO header descriptor.
+ * @param[in]  lit_comp Compressed size of the literal section.
+ * @param[in]  tok_comp Compressed size of the token section.
+ * @return Total bytes written on success, or a negative @ref zxc_error_t code.
+ */
+int zxc_write_glo_header_and_table(uint8_t* RESTRICT dst, const size_t rem,
+                                   const zxc_gnr_header_t* RESTRICT gh, const uint32_t lit_comp,
+                                   const uint32_t tok_comp) {
+    const size_t tbl = zxc_glo_table_size(gh->enc_lit, gh->enc_litlen);
+    const size_t needed = ZXC_GLO_HEADER_BINARY_SIZE + tbl;
+
+    if (UNLIKELY(rem < needed)) return ZXC_ERROR_DST_TOO_SMALL;
+
+    zxc_write_gnr_header(dst, gh);
+    uint8_t* p = dst + ZXC_GLO_HEADER_BINARY_SIZE;
+
+    if (gh->enc_lit != ZXC_SECTION_ENCODING_RAW) {
+        zxc_store_le32(p, lit_comp);
+        p += sizeof(uint32_t);
+    }
+    if (gh->enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN) {
+        zxc_store_le32(p, tok_comp);
+    }
+
+    return (int)needed;
+}
+
+/**
+ * @brief Parses a GLO block header and its section table from @p src.
+ *
+ * @param[in]  src      Source buffer.
+ * @param[in]  len      Size of @p src.
+ * @param[out] gh       Receives the decoded GLO header.
+ * @param[out] lit_comp Receives the literal section's compressed size.
+ * @param[out] tok_comp Receives the token section's compressed size.
+ * @return Bytes consumed (header + table), or a negative @ref zxc_error_t code.
+ */
+int zxc_read_glo_header_and_table(const uint8_t* RESTRICT src, const size_t len,
+                                  zxc_gnr_header_t* RESTRICT gh, uint32_t* RESTRICT lit_comp,
+                                  uint32_t* RESTRICT tok_comp) {
+    if (UNLIKELY(len < ZXC_GLO_HEADER_BINARY_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
+
+    zxc_read_gnr_header(src, gh);
+
+    const size_t tbl = zxc_glo_table_size(gh->enc_lit, gh->enc_litlen);
+    const size_t needed = ZXC_GLO_HEADER_BINARY_SIZE + tbl;
+    if (UNLIKELY(len < needed)) return ZXC_ERROR_SRC_TOO_SMALL;
 
     const uint8_t* p = src + ZXC_GLO_HEADER_BINARY_SIZE;
 
-    for (int i = 0; i < ZXC_GLO_SECTIONS; i++) {
-        desc[i].sizes = zxc_le64(p);
-        p += ZXC_SECTION_DESC_BINARY_SIZE;
+    if (gh->enc_lit != ZXC_SECTION_ENCODING_RAW) {
+        *lit_comp = zxc_le32(p);
+        p += sizeof(uint32_t);
+    } else {
+        *lit_comp = gh->n_literals;
     }
-    return ZXC_OK;
-}
-
-/**
- * @brief Serialises a GHI block header followed by its section descriptors.
- *
- * @param[out] dst  Destination buffer.
- * @param[in]  rem  Remaining capacity of @p dst.
- * @param[in]  gh   Populated GHI header descriptor.
- * @param[in]  desc Array of @ref ZXC_GHI_SECTIONS section descriptors.
- * @return Total bytes written on success, or a negative @ref zxc_error_t code.
- */
-int zxc_write_ghi_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
-                                  const zxc_gnr_header_t* RESTRICT gh,
-                                  const zxc_section_desc_t desc[ZXC_GHI_SECTIONS]) {
-    const size_t needed =
-        ZXC_GHI_HEADER_BINARY_SIZE + ZXC_GHI_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
-
-    if (UNLIKELY(rem < needed)) return ZXC_ERROR_DST_TOO_SMALL;
-
-    zxc_store_le32(dst, gh->n_sequences);
-    zxc_store_le32(dst + 4, gh->n_literals);
-
-    dst[8] = gh->enc_lit;
-    dst[9] = gh->enc_litlen;
-    dst[10] = gh->enc_mlen;
-    dst[11] = gh->enc_off;
-
-    zxc_store_le32(dst + 12, 0);
-    uint8_t* p = dst + ZXC_GHI_HEADER_BINARY_SIZE;
-
-    for (int i = 0; i < ZXC_GHI_SECTIONS; i++) {
-        zxc_store_le64(p, desc[i].sizes);
-        p += ZXC_SECTION_DESC_BINARY_SIZE;
-    }
+    *tok_comp = (gh->enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN) ? zxc_le32(p) : gh->n_sequences;
 
     return (int)needed;
 }
 
 /**
- * @brief Parses a GHI block header and its section descriptors from @p src.
+ * @brief Serialises a GHI block header.
  *
- * @param[in]  src  Source buffer.
- * @param[in]  len  Size of @p src.
- * @param[out] gh   Receives the decoded GHI header.
- * @param[out] desc Receives @ref ZXC_GHI_SECTIONS decoded section descriptors.
+ * GHI carries no section table at all: its literals are always RAW
+ * (`lit_comp == gh->n_literals`), its sequence stream is
+ * `gh->n_sequences * 4` bytes wide, and its extras run from there to the
+ * payload's tail.
+ *
+ * @param[out] dst Destination buffer.
+ * @param[in]  rem Remaining capacity of @p dst.
+ * @param[in]  gh  Populated GHI header descriptor.
+ * @return Total bytes written on success, or a negative @ref zxc_error_t code.
+ */
+int zxc_write_ghi_header(uint8_t* RESTRICT dst, const size_t rem,
+                         const zxc_gnr_header_t* RESTRICT gh) {
+    if (UNLIKELY(rem < ZXC_GHI_HEADER_BINARY_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
+
+    zxc_write_gnr_header(dst, gh);
+    return ZXC_GHI_HEADER_BINARY_SIZE;
+}
+
+/**
+ * @brief Parses a GHI block header from @p src.
+ *
+ * @param[in]  src Source buffer.
+ * @param[in]  len Size of @p src.
+ * @param[out] gh  Receives the decoded GHI header.
  * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
  */
-int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
-                                 zxc_gnr_header_t* RESTRICT gh,
-                                 zxc_section_desc_t desc[ZXC_GHI_SECTIONS]) {
-    const size_t needed =
-        ZXC_GHI_HEADER_BINARY_SIZE + ZXC_GHI_SECTIONS * ZXC_SECTION_DESC_BINARY_SIZE;
+int zxc_read_ghi_header(const uint8_t* RESTRICT src, const size_t len,
+                        zxc_gnr_header_t* RESTRICT gh) {
+    if (UNLIKELY(len < ZXC_GHI_HEADER_BINARY_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
 
-    if (UNLIKELY(len < needed)) return ZXC_ERROR_SRC_TOO_SMALL;
-
-    gh->n_sequences = zxc_le32(src);
-    gh->n_literals = zxc_le32(src + 4);
-    gh->enc_lit = src[8];
-    gh->enc_litlen = src[9];
-    gh->enc_mlen = src[10];
-    gh->enc_off = src[11];
-
-    const uint8_t* p = src + ZXC_GHI_HEADER_BINARY_SIZE;
-
-    for (int i = 0; i < ZXC_GHI_SECTIONS; i++) {
-        desc[i].sizes = zxc_le64(p);
-        p += ZXC_SECTION_DESC_BINARY_SIZE;
-    }
+    zxc_read_gnr_header(src, gh);
     return ZXC_OK;
 }
 
