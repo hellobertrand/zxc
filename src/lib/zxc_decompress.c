@@ -368,6 +368,55 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
 }
 
 /**
+ * @brief Match copy for a length that cannot exceed @ref ZXC_PAD_SIZE.
+ *
+ * Same ladder as @ref zxc_decode_copy_match minus the one branch that a bounded
+ * @p ml makes unreachable: with @p off >= @ref ZXC_PAD_SIZE the single 32-byte
+ * store already covers the whole match, so the `ml > ZXC_PAD_SIZE` test and its
+ * loop are dead. The other three arms are untouched - their inner tests still
+ * fire for @p ml in 17..32, and a 32-byte copy would be *wrong* below
+ * @p off == 32 anyway, since the load would read destination bytes that have
+ * not been written yet.
+ *
+ * @param[in,out] d_ptr Output cursor; match source is @c d_ptr-off. Needs
+ *                      @ref ZXC_PAD_SIZE bytes of overshoot headroom.
+ * @param[in]     off   Resolved back-reference distance, @c >= 1.
+ * @param[in]     ml    Match length, @c <= ZXC_PAD_SIZE (caller's obligation).
+ */
+static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_short(uint8_t* RESTRICT d_ptr,
+                                                          const uint32_t off, const uint64_t ml) {
+    const uint8_t* match_src = d_ptr - off;
+    if (LIKELY(off >= ZXC_PAD_SIZE)) {
+        zxc_copy32(d_ptr, match_src);
+    } else if (off >= (ZXC_PAD_SIZE / 2)) {
+        zxc_copy16(d_ptr, match_src);
+        if (UNLIKELY(ml > (ZXC_PAD_SIZE / 2)))
+            zxc_copy16(d_ptr + (ZXC_PAD_SIZE / 2), match_src + (ZXC_PAD_SIZE / 2));
+    } else if (off == 1) {
+        zxc_decode_fill_run(d_ptr, match_src[0], ml);
+    } else {
+        zxc_decode_copy_overlap_run(d_ptr, off, ml);
+    }
+}
+
+/**
+ * @brief GLO match copy: picks the bounded form when the token was inline.
+ *
+ * `ml <= ZXC_GLO_MAX_INLINE_ML` holds exactly when the ml nibble did not
+ * saturate (the escape adds at least one more), and both predecessors decide it
+ * statically, so the test costs nothing once the compiler threads it. GHI calls
+ * @ref zxc_decode_copy_match directly - its inline ml reaches 259.
+ */
+static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_glo(uint8_t* RESTRICT d_ptr,
+                                                        const uint32_t off, const uint64_t ml) {
+    if (LIKELY(ml <= ZXC_GLO_MAX_INLINE_ML)) {
+        zxc_decode_copy_match_short(d_ptr, off, ml);
+    } else {
+        zxc_decode_copy_match(d_ptr, off, ml);
+    }
+}
+
+/**
  * @brief Exact-size match copy for the tail loops (no overshoot headroom).
  *
  * The tail/remaining-sequence loops validate against @c d_end exactly, so the
@@ -406,20 +455,21 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
  * sequences that do not extend ll (measured on silesia L3-L7); GHI's inline ll
  * reaches 254 and keeps the 32-byte ladder. */
 
-// SAFE version: rejects a match reaching below d_floor.
-#define DECODE_MATCH_SAFE(ml, off)                                                    \
+// SAFE version: rejects a match reaching below d_floor. COPY is the format's
+// match-copy helper, so GLO can pass the length-bounded one.
+#define DECODE_MATCH_SAFE(ml, off, COPY)                                              \
     do {                                                                              \
         if (UNLIKELY((size_t)(d_ptr - d_floor) < (off))) return ZXC_ERROR_BAD_OFFSET; \
-        zxc_decode_copy_match(d_ptr, off, ml);                                        \
+        COPY(d_ptr, off, ml);                                                         \
         d_ptr += ml;                                                                  \
     } while (0)
 
 // FAST version: no offset check. Only reached past d_bounds, where no encodable
 // offset can reach below d_floor, so the check above would always pass.
-#define DECODE_MATCH_FAST(ml, off)             \
-    do {                                       \
-        zxc_decode_copy_match(d_ptr, off, ml); \
-        d_ptr += ml;                           \
+#define DECODE_MATCH_FAST(ml, off, COPY) \
+    do {                                 \
+        COPY(d_ptr, off, ml);            \
+        d_ptr += ml;                     \
     } while (0)
 
 /**
@@ -481,7 +531,7 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
                 ON_FAIL;                                                               \
         }                                                                              \
         ml += ZXC_LZ_MIN_MATCH_LEN;                                                    \
-        DECODE(ml, OFF);                                                               \
+        DECODE(ml, OFF, zxc_decode_copy_match_glo);                                    \
     } while (0)
 
 /**
@@ -549,7 +599,7 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
         zxc_decode_copy_literals(d_ptr, l_ptr, ll);                                          \
         l_ptr += ll;                                                                         \
         d_ptr += ll;                                                                         \
-        DECODE(ml, off);                                                                     \
+        DECODE(ml, off, zxc_decode_copy_match);                                              \
     } while (0)
 
 /**
@@ -979,7 +1029,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
 
         /* The loop entry check guarantees ll + ml + ZXC_PAD_SIZE bytes of
          * headroom, so the wild-copy ladder (incl. overlap/fill runs) is safe. */
-        zxc_decode_copy_match(d_ptr, offset, ml);
+        zxc_decode_copy_match_glo(d_ptr, offset, ml);
         d_ptr += ml;
         n_seq--;
     }
@@ -1171,7 +1221,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
             zxc_decode_copy_literals(d_ptr, l_ptr, ll);
             l_ptr += ll;
             d_ptr += ll;
-            DECODE_MATCH_SAFE(ml, offset);
+            DECODE_MATCH_SAFE(ml, offset, zxc_decode_copy_match);
         }
         n_seq--;
     }

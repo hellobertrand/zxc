@@ -534,7 +534,14 @@ extern "C" {
  *         and cost 2% of decode on silesia, because the loop margins scale
  *         with it. */
 #define ZXC_GLO_MAX_INLINE_OUT_PER_SEQ \
-    ((ZXC_TOKEN_LL_MASK - 1U) + (ZXC_TOKEN_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 33 */
+    ((ZXC_TOKEN_LL_MASK - 1U) + ZXC_GLO_MAX_INLINE_ML) /* 33 */
+/** @brief Longest match a GLO sequence can carry without a varint extension.
+ *
+ * Sits below @ref ZXC_PAD_SIZE, which is what lets the inline path use a match
+ * copy with no length ladder at all: one 32-byte store already covers it. The
+ * escape path yields at least this + 1, so testing against it recovers "was
+ * this token inline" exactly. */
+#define ZXC_GLO_MAX_INLINE_ML ((ZXC_TOKEN_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 19 */
 #define ZXC_GHI_MAX_INLINE_OUT_PER_SEQ \
     ((ZXC_SEQ_LL_MASK - 1U) + (ZXC_SEQ_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 513 */
 /** @brief Base bias added to encoded offsets (stored = actual - bias). */
