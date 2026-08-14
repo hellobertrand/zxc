@@ -1668,16 +1668,15 @@ parse_done:;
                                  .enc_mlen = 0,
                                  .enc_off = (uint8_t)use_8bit_off};
 
-    const size_t sz_lit = (enc_lit == ZXC_SECTION_ENCODING_RLE)       ? rle_size
-                          : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN) ? huf_total_size
-                          : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT)
-                              ? huf_dict_total_size
-                              : lit_c;
+    const size_t sz_lit = (enc_lit == ZXC_SECTION_ENCODING_RLE)            ? rle_size
+                          : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN)      ? huf_total_size
+                          : (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT) ? huf_dict_total_size
+                                                                           : lit_c;
     const size_t sz_tok = (enc_tok == ZXC_SECTION_ENCODING_HUFFMAN) ? tok_huf_size : seq_c;
     const size_t sz_off = off_stream_size;
     const size_t sz_ext = extras_sz;
 
-    const int ghs = zxc_write_glo_header_and_table(p, rem, &gh, (uint32_t)sz_lit, (uint32_t)sz_tok);
+    const int ghs = zxc_write_glo_header_and_desc(p, rem, &gh, (uint32_t)sz_lit, (uint32_t)sz_tok);
     if (UNLIKELY(ghs < 0)) return ghs;
 
     uint8_t* p_curr = p + ghs;

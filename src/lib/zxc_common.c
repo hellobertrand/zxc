@@ -719,18 +719,17 @@ static ZXC_ALWAYS_INLINE void zxc_read_gnr_header(const uint8_t* RESTRICT src,
 }
 
 /**
- * @brief Size of the GLO section table, implied by the header's encoding fields.
+ * @brief Size of the GLO section descriptors, implied by the encoding fields.
  *
- * 0, 4 or 8 bytes - see @ref zxc_write_glo_header_and_table for what it holds.
+ * 0, 4 or 8 bytes - see @ref zxc_write_glo_header_and_desc for what they hold.
  */
-static ZXC_ALWAYS_INLINE size_t zxc_glo_table_size(const uint8_t enc_lit,
-                                                   const uint8_t enc_litlen) {
+static ZXC_ALWAYS_INLINE size_t zxc_glo_desc_size(const uint8_t enc_lit, const uint8_t enc_litlen) {
     return ((enc_lit != ZXC_SECTION_ENCODING_RAW) ? sizeof(uint32_t) : 0) +
            ((enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN) ? sizeof(uint32_t) : 0);
 }
 
 /**
- * @brief Serialises a GLO block header followed by its section table.
+ * @brief Serialises a GLO block header followed by its section descriptors.
  *
  * Only the two sizes the header cannot imply are stored: the literal section's
  * compressed size when it is RLE- or entropy-coded, and the token section's
@@ -745,11 +744,11 @@ static ZXC_ALWAYS_INLINE size_t zxc_glo_table_size(const uint8_t enc_lit,
  * @param[in]  tok_comp Compressed size of the token section.
  * @return Total bytes written on success, or a negative @ref zxc_error_t code.
  */
-int zxc_write_glo_header_and_table(uint8_t* RESTRICT dst, const size_t rem,
-                                   const zxc_gnr_header_t* RESTRICT gh, const uint32_t lit_comp,
-                                   const uint32_t tok_comp) {
-    const size_t tbl = zxc_glo_table_size(gh->enc_lit, gh->enc_litlen);
-    const size_t needed = ZXC_GLO_HEADER_BINARY_SIZE + tbl;
+int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
+                                  const zxc_gnr_header_t* RESTRICT gh, const uint32_t lit_comp,
+                                  const uint32_t tok_comp) {
+    const size_t desc_sz = zxc_glo_desc_size(gh->enc_lit, gh->enc_litlen);
+    const size_t needed = ZXC_GLO_HEADER_BINARY_SIZE + desc_sz;
 
     if (UNLIKELY(rem < needed)) return ZXC_ERROR_DST_TOO_SMALL;
 
@@ -768,7 +767,7 @@ int zxc_write_glo_header_and_table(uint8_t* RESTRICT dst, const size_t rem,
 }
 
 /**
- * @brief Parses a GLO block header and its section table from @p src.
+ * @brief Parses a GLO block header and its section descriptors from @p src.
  *
  * @param[in]  src      Source buffer.
  * @param[in]  len      Size of @p src.
@@ -777,15 +776,15 @@ int zxc_write_glo_header_and_table(uint8_t* RESTRICT dst, const size_t rem,
  * @param[out] tok_comp Receives the token section's compressed size.
  * @return Bytes consumed (header + table), or a negative @ref zxc_error_t code.
  */
-int zxc_read_glo_header_and_table(const uint8_t* RESTRICT src, const size_t len,
-                                  zxc_gnr_header_t* RESTRICT gh, uint32_t* RESTRICT lit_comp,
-                                  uint32_t* RESTRICT tok_comp) {
+int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
+                                 zxc_gnr_header_t* RESTRICT gh, uint32_t* RESTRICT lit_comp,
+                                 uint32_t* RESTRICT tok_comp) {
     if (UNLIKELY(len < ZXC_GLO_HEADER_BINARY_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
 
     zxc_read_gnr_header(src, gh);
 
-    const size_t tbl = zxc_glo_table_size(gh->enc_lit, gh->enc_litlen);
-    const size_t needed = ZXC_GLO_HEADER_BINARY_SIZE + tbl;
+    const size_t desc_sz = zxc_glo_desc_size(gh->enc_lit, gh->enc_litlen);
+    const size_t needed = ZXC_GLO_HEADER_BINARY_SIZE + desc_sz;
     if (UNLIKELY(len < needed)) return ZXC_ERROR_SRC_TOO_SMALL;
 
     const uint8_t* p = src + ZXC_GLO_HEADER_BINARY_SIZE;
@@ -804,7 +803,7 @@ int zxc_read_glo_header_and_table(const uint8_t* RESTRICT src, const size_t len,
 /**
  * @brief Serialises a GHI block header.
  *
- * GHI carries no section table at all: its literals are always RAW
+ * GHI carries no section descriptors at all: its literals are always RAW
  * (`lit_comp == gh->n_literals`), its sequence stream is
  * `gh->n_sequences * 4` bytes wide, and its extras run from there to the
  * payload end.

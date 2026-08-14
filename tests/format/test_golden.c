@@ -90,7 +90,7 @@ static uint8_t* read_file(const char* path, size_t* out_size) {
 /* ------------------------------------------------------------------------- */
 
 /* Shared validator for the GLO (Sec 5.2) and GHI (Sec 5.3) section model: a
- * 16-byte header, GLO's 0/4/8-byte section table (GHI has none), then the
+ * 16-byte header, GLO's 0/4/8-byte section descriptors (GHI has none), then the
  * sections. Sizes absent from the table come from the header, and extras take
  * the residue - so the tiling check is an inequality, plus the
  * ZXC_BLOCK_LIT_SLACK guarantee behind the literals. */

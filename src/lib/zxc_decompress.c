@@ -403,8 +403,8 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_short(uint8_t* RESTRICT d_pt
  * from either predecessor, so jump threading folds it away. GHI uses
  * @ref zxc_decode_copy_match directly - its inline ml reaches 259.
  */
-static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_glo(uint8_t* RESTRICT d_ptr,
-                                                        const uint32_t off, const uint64_t ml) {
+static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_glo(uint8_t* RESTRICT d_ptr, const uint32_t off,
+                                                        const uint64_t ml) {
     if (LIKELY(ml <= ZXC_GLO_MAX_INLINE_ML)) {
         zxc_decode_copy_match_short(d_ptr, off, ml);
     } else {
@@ -493,38 +493,38 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
  * is `goto rollback_*` in the state-saving safe variants and
  * `return ZXC_ERROR_OVERFLOW` otherwise.
  */
-#define DECODE_GLO_SEQ(LL, ML, OFF, RESERVE, N_REM, DECODE, ON_FAIL)                   \
-    do {                                                                               \
-        uint64_t ll = (LL);                                                            \
-        uint64_t ml = (ML);                                                            \
-        if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {                                       \
-            ll += zxc_read_varint(&e_ptr, e_end);                                      \
-            const uint64_t reserve = (RESERVE);                                        \
-            /* An extended ll eats the batch's destination budget, so reserve       \
-             * this sequence's match and the remaining ones too. ml is still        \
-             * the raw nibble here; an escaped one re-checks itself below. */       \
-            if (UNLIKELY(ll + reserve > (size_t)(l_end - l_ptr) ||                     \
-                         ll + ml + ZXC_LZ_MIN_MATCH_LEN +                              \
-                                 (N_REM) * ZXC_GLO_MAX_INLINE_OUT_PER_SEQ +            \
-                                 ZXC_PAD_SIZE > (size_t)(d_end - d_ptr)))              \
-                ON_FAIL;                                                               \
-            zxc_decode_copy_literals(d_ptr, l_ptr, ll);                                \
-        } else {                                                                       \
-            /* ll <= 14 here, so one 16-byte store covers it. */                       \
-            zxc_copy16(d_ptr, l_ptr);                                                  \
-        }                                                                              \
-        l_ptr += ll;                                                                   \
-        d_ptr += ll;                                                                   \
-        if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) {                                       \
-            ml += zxc_read_varint(&e_ptr, e_end);                                      \
-            /* d_ptr already carries the literals, hence no `ll +` term here. */       \
-            if (UNLIKELY(ml + ZXC_LZ_MIN_MATCH_LEN +                                   \
-                             (N_REM) * ZXC_GLO_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE > \
-                         (size_t)(d_end - d_ptr)))                                     \
-                ON_FAIL;                                                               \
-        }                                                                              \
-        ml += ZXC_LZ_MIN_MATCH_LEN;                                                    \
-        DECODE(ml, OFF, zxc_decode_copy_match_glo);                                    \
+#define DECODE_GLO_SEQ(LL, ML, OFF, RESERVE, N_REM, DECODE, ON_FAIL)                            \
+    do {                                                                                        \
+        uint64_t ll = (LL);                                                                     \
+        uint64_t ml = (ML);                                                                     \
+        if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {                                                \
+            ll += zxc_read_varint(&e_ptr, e_end);                                               \
+            const uint64_t reserve = (RESERVE);                                                 \
+            /* An extended ll eats the batch's destination budget, so reserve                   \
+             * this sequence's match and the remaining ones too. ml is still                    \
+             * the raw nibble here; an escaped one re-checks itself below. */                   \
+            if (UNLIKELY(ll + reserve > (size_t)(l_end - l_ptr) ||                              \
+                         ll + ml + ZXC_LZ_MIN_MATCH_LEN +                                       \
+                                 (N_REM) * ZXC_GLO_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE >      \
+                             (size_t)(d_end - d_ptr)))                                          \
+                ON_FAIL;                                                                        \
+            zxc_decode_copy_literals(d_ptr, l_ptr, ll);                                         \
+        } else {                                                                                \
+            /* ll <= 14 here, so one 16-byte store covers it. */                                \
+            zxc_copy16(d_ptr, l_ptr);                                                           \
+        }                                                                                       \
+        l_ptr += ll;                                                                            \
+        d_ptr += ll;                                                                            \
+        if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) {                                                \
+            ml += zxc_read_varint(&e_ptr, e_end);                                               \
+            /* d_ptr already carries the literals, hence no `ll +` term here. */                \
+            if (UNLIKELY(ml + ZXC_LZ_MIN_MATCH_LEN + (N_REM) * ZXC_GLO_MAX_INLINE_OUT_PER_SEQ + \
+                             ZXC_PAD_SIZE >                                                     \
+                         (size_t)(d_end - d_ptr)))                                              \
+                ON_FAIL;                                                                        \
+        }                                                                                       \
+        ml += ZXC_LZ_MIN_MATCH_LEN;                                                             \
+        DECODE(ml, OFF, zxc_decode_copy_match_glo);                                             \
     } while (0)
 
 /**
@@ -725,7 +725,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     const size_t dict_size = has_dict ? ctx->dict_size : 0;
     uint32_t lit_comp, tok_comp;
 
-    const int hdr_sz = zxc_read_glo_header_and_table(src, src_size, &gh, &lit_comp, &tok_comp);
+    const int hdr_sz = zxc_read_glo_header_and_desc(src, src_size, &gh, &lit_comp, &tok_comp);
     if (UNLIKELY(hdr_sz < 0)) return ZXC_ERROR_BAD_HEADER;
 
     /* Entropy-coded tokens (level 7): tail-call the dedicated instantiation
@@ -854,8 +854,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     /* Only the literal and token sizes are on the wire; offsets follow from the
      * sequence count and width, and extras take the payload residue. */
     const size_t sz_tokens = tok_comp;
-    const uint64_t sz_offsets =
-        GLO_OFF8 ? (uint64_t)gh.n_sequences : (uint64_t)gh.n_sequences * 2;
+    const uint64_t sz_offsets = GLO_OFF8 ? (uint64_t)gh.n_sequences : (uint64_t)gh.n_sequences * 2;
 
     const size_t payload_avail = (size_t)(src + src_size - p_data);
     const uint64_t consumed = (uint64_t)lit_stream_size + (uint64_t)sz_tokens + sz_offsets;
@@ -875,11 +874,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     const uint8_t* e_ptr = o_ptr + (size_t)sz_offsets;
     const uint8_t* const e_end = e_ptr + sz_extras;
 
-
     const uint8_t* RESTRICT t_ptr;
     if (!tok_entropy) {
         /* enc_litlen == 2 was re-routed right after the header parse; any other
-         * value would have mis-sized the section table above. */
+         * value would have mis-sized the section descriptors above. */
         if (UNLIKELY(gh.enc_litlen != 0)) return ZXC_ERROR_CORRUPT_DATA;
         t_ptr = p_curr;
     } else {
@@ -1105,14 +1103,13 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     /* 0 when !has_dict (safe path) -> folds `d_floor` to `dst`. */
     const size_t dict_size = has_dict ? ctx->dict_size : 0;
 
-    if (UNLIKELY(zxc_read_ghi_header(src, src_size, &gh) != ZXC_OK))
-        return ZXC_ERROR_BAD_HEADER;
+    if (UNLIKELY(zxc_read_ghi_header(src, src_size, &gh) != ZXC_OK)) return ZXC_ERROR_BAD_HEADER;
 
     const uint8_t* const p_data = src + ZXC_GHI_HEADER_BINARY_SIZE;
     const uint8_t* p_curr = p_data;
 
     // --- Stream Pointers & Validation ---
-    /* GHI carries no section table: literals are always RAW, the sequence
+    /* GHI carries no section descriptors: literals are always RAW, the sequence
      * stream is four bytes per sequence, and extras run to the payload end. */
     const size_t sz_lit = gh.n_literals;
     const uint64_t sz_seqs = (uint64_t)gh.n_sequences * sizeof(uint32_t);

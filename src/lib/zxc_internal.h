@@ -419,13 +419,13 @@ extern "C" {
 /** @brief Worst-case format overhead inside a single block beyond the outer
  *  8-byte block header and the optional 4-byte checksum.
  *
- *  Sub-header (16 B) + widest GLO section table (8 B) + widest slack padding
+ *  Sub-header (16 B) + widest GLO section descriptors (8 B) + widest slack padding
  *  (@ref ZXC_BLOCK_LIT_SLACK) = 56 B, plus 24 B of margin. Used by
  *  zxc_compress_block_bound() and zxc_compress_bound(). */
 #define ZXC_BLOCK_FORMAT_OVERHEAD 80
 
-/** @brief Widest GLO section table: literal and token compressed sizes. */
-#define ZXC_GLO_MAX_TABLE_SIZE (2 * sizeof(uint32_t))
+/** @brief Widest GLO section descriptors: literal and token compressed sizes. */
+#define ZXC_GLO_MAX_DESC_SIZE (2 * sizeof(uint32_t))
 
 /** @brief Checksum algorithm id for RapidHash (default, sole implementation). */
 #define ZXC_CHECKSUM_RAPIDHASH 0
@@ -1434,10 +1434,10 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
 }
 
 /**
- * @brief Writes a GLO sub-header followed by its section table.
+ * @brief Writes a GLO sub-header followed by its section descriptors.
  *
- * The table holds only the two sizes the header cannot imply, and is 0, 4 or
- * 8 bytes wide accordingly (@ref ZXC_GLO_MAX_TABLE_SIZE).
+ * They hold only the two sizes the header cannot imply, and are 0, 4 or 8 bytes
+ * wide accordingly (@ref ZXC_GLO_MAX_DESC_SIZE).
  *
  * @param[out] dst      Pointer to the destination buffer.
  * @param[in]  rem      The remaining space in the destination buffer.
@@ -1447,14 +1447,14 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
  * @return The number of bytes written, or a negative error code if the buffer
  *         is too small.
  */
-int zxc_write_glo_header_and_table(uint8_t* RESTRICT dst, const size_t rem,
-                                   const zxc_gnr_header_t* RESTRICT gh, const uint32_t lit_comp,
-                                   const uint32_t tok_comp);
+int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
+                                  const zxc_gnr_header_t* RESTRICT gh, const uint32_t lit_comp,
+                                  const uint32_t tok_comp);
 
 /**
- * @brief Reads a GLO sub-header and its section table from a source buffer.
+ * @brief Reads a GLO sub-header and its section descriptors from a source buffer.
  *
- * Sizes absent from the table are reconstructed from the header, so both
+ * Sizes absent from the descriptors are reconstructed from the header, so both
  * outputs are always populated.
  *
  * @param[in]  src      Pointer to the source buffer.
@@ -1464,12 +1464,12 @@ int zxc_write_glo_header_and_table(uint8_t* RESTRICT dst, const size_t rem,
  * @param[out] tok_comp Receives the token section's compressed size.
  * @return Bytes consumed (header + table), or a negative zxc_error_t code.
  */
-int zxc_read_glo_header_and_table(const uint8_t* RESTRICT src, const size_t len,
-                                  zxc_gnr_header_t* RESTRICT gh, uint32_t* RESTRICT lit_comp,
-                                  uint32_t* RESTRICT tok_comp);
+int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
+                                 zxc_gnr_header_t* RESTRICT gh, uint32_t* RESTRICT lit_comp,
+                                 uint32_t* RESTRICT tok_comp);
 
 /**
- * @brief Writes a GHI sub-header. GHI carries no section table.
+ * @brief Writes a GHI sub-header. GHI carries no section descriptors.
  *
  * @param[out] dst Pointer to the destination buffer.
  * @param[in]  rem Remaining size available in the destination buffer.
