@@ -139,6 +139,95 @@ static const ZXC_ALIGN(16) uint8_t zxc_overlap_masks[16][16] = {
 static const uint8_t zxc_overlap_strides[16] = {16, 16, 16, 15, 16, 15, 12, 14,
                                                 16, 9,  10, 11, 12, 13, 14, 15};
 
+#if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(ZXC_USE_AVX2) || \
+    defined(ZXC_USE_AVX512)
+/**
+ * @brief 32-byte periodic pattern masks, `mask[off][i] = i % off`, off in [2,31].
+ *
+ * Twin of @ref zxc_overlap_masks one register wider, and reaching offsets up to
+ * 31 instead of 15. Used by the long-match path only: doubling the pattern
+ * doubles the store width, which pays when the run is long enough for the loop
+ * to dominate its own setup. Rows 0 and 1 are unused (offset 1 has its splat).
+ */
+static const ZXC_ALIGN(32) uint8_t zxc_overlap_masks32[32][32] = {
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // off=0 (unused)
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // off=1 (RLE handled separately)
+    {0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
+     0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1},  // off=2
+    {0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0,
+     1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1},  // off=3
+    {0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3,
+     0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3},  // off=4
+    {0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0,
+     1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1},  // off=5
+    {0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3,
+     4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1},  // off=6
+    {0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 0, 1,
+     2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3},  // off=7
+    {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7,
+     0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},  // off=8
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1, 2, 3, 4, 5, 6,
+     7, 8, 0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1, 2, 3, 4},  // off=9
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5,
+     6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1},  // off=10
+    {0, 1, 2, 3, 4, 5,  6, 7, 8, 9, 10, 0, 1, 2, 3, 4,
+     5, 6, 7, 8, 9, 10, 0, 1, 2, 3, 4,  5, 6, 7, 8, 9},  // off=11
+    {0, 1, 2, 3, 4, 5, 6,  7,  8, 9, 10, 11, 0, 1, 2, 3,
+     4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2,  3,  4, 5, 6, 7},  // off=12
+    {0, 1, 2, 3, 4, 5, 6, 7,  8,  9,  10, 11, 12, 0, 1, 2,
+     3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0,  1,  2,  3, 4, 5},  // off=13
+    {0, 1, 2, 3, 4, 5, 6, 7, 8,  9,  10, 11, 12, 13, 0, 1,
+     2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0,  1,  2, 3},  // off=14
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9,  10, 11, 12, 13, 14, 0,
+     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 0,  1},  // off=15
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},  // off=16
+    {0,  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+     16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,  10, 11, 12, 13, 14},  // off=17
+    {0,  1,  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+     16, 17, 0, 1, 2, 3, 4, 5, 6, 7, 8,  9,  10, 11, 12, 13},  // off=18
+    {0,  1,  2,  3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+     16, 17, 18, 0, 1, 2, 3, 4, 5, 6, 7,  8,  9,  10, 11, 12},  // off=19
+    {0,  1,  2,  3,  4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 0, 1, 2, 3, 4, 5, 6,  7,  8,  9,  10, 11},  // off=20
+    {0,  1,  2,  3,  4,  5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20, 0, 1, 2, 3, 4, 5,  6,  7,  8,  9,  10},  // off=21
+    {0,  1,  2,  3,  4,  5,  6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20, 21, 0, 1, 2, 3, 4,  5,  6,  7,  8,  9},  // off=22
+    {0,  1,  2,  3,  4,  5,  6,  7, 8, 9, 10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20, 21, 22, 0, 1, 2, 3,  4,  5,  6,  7,  8},  // off=23
+    {0,  1,  2,  3,  4,  5,  6,  7,  8, 9, 10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2,  3,  4,  5,  6,  7},  // off=24
+    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20, 21, 22, 23, 24, 0, 1,  2,  3,  4,  5,  6},  // off=25
+    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 0,  1,  2,  3,  4,  5},  // off=26
+    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 0,  1,  2,  3,  4},  // off=27
+    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 0,  1,  2,  3},  // off=28
+    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 0,  1,  2},  // off=29
+    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 0,  1},  // off=30
+    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 0}  // off=31
+};
+#endif
+
+/**
+ * @brief Per-offset store stride for the 32-byte pattern: `(32 / off) * off`.
+ *
+ * For off >= 17 no second period fits, so the stride is the offset itself and
+ * the tail of each 32-byte store is simply rewritten by the next one. Still
+ * beats the 16-byte form for every offset in [2,31].
+ */
+static const uint8_t zxc_overlap_strides32[32] = {32, 32, 32, 30, 32, 30, 30, 28, 32, 27, 30,
+                                                  22, 24, 26, 28, 30, 32, 17, 18, 19, 20, 21,
+                                                  22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
+
 /**
  * @brief Copies an @p ml-byte LZ run whose pattern repeats with period @p off (2..15).
  *
@@ -204,14 +293,109 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run(uint8_t* dst, const ui
 }
 
 /**
+ * @brief Copies an @p ml-byte run of period @p off (2..31) with 32-byte stores.
+ *
+ * Same idea as @ref zxc_decode_copy_overlap_run with the pattern register pair
+ * widened to 32 bytes, which both doubles the store width and lifts the offset
+ * ceiling from 15 to 31 - so the long-match path needs one arm where it used to
+ * need two. Reserved for long runs: building the pattern costs two table lookups
+ * and it only pays back once the loop runs more than a couple of times.
+ *
+ * The 32-byte source load reads up to @c dst+29 on the smallest offsets, i.e.
+ * destination bytes not written yet. They are never selected - every mask index
+ * is `< off` and therefore addresses `dst-off .. dst-1` - and they stay inside
+ * the @ref ZXC_PAD_SIZE headroom the caller guarantees.
+ *
+ * May overshoot up to 31 bytes past @p ml, like the 32-byte copy ladder.
+ *
+ * @param[out] dst Output cursor; the run source is `dst - off`.
+ * @param[in]  off Back-reference distance, in [2, 31].
+ * @param[in]  ml  Run length in bytes (>= 1).
+ */
+// codeql[cpp/unused-static-function] : False positive
+static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run32(uint8_t* dst, const uint32_t off,
+                                                            const uint64_t ml) {
+    const size_t stride = zxc_overlap_strides32[off];
+    size_t copied = 0;
+#if defined(ZXC_USE_NEON64)
+    uint8x16x2_t tbl;
+    tbl.val[0] = vld1q_u8(dst - off);
+    tbl.val[1] = vld1q_u8(dst - off + 16);
+    const uint8x16_t pat_lo = vqtbl2q_u8(tbl, vld1q_u8(zxc_overlap_masks32[off]));
+    const uint8x16_t pat_hi = vqtbl2q_u8(tbl, vld1q_u8(zxc_overlap_masks32[off] + 16));
+    do {
+        vst1q_u8(dst + copied, pat_lo);
+        vst1q_u8(dst + copied + 16, pat_hi);
+        copied += stride;
+    } while (copied < ml);
+
+#elif defined(ZXC_USE_NEON32)
+    /* VTBL reaches 8 bytes per lookup from a 4-register (32-byte) table, so the
+     * pattern takes four lookups instead of NEON64's two. */
+    uint8x8x4_t tbl;
+    tbl.val[0] = vld1_u8(dst - off);
+    tbl.val[1] = vld1_u8(dst - off + 8);
+    tbl.val[2] = vld1_u8(dst - off + 16);
+    tbl.val[3] = vld1_u8(dst - off + 24);
+    const uint8_t* const m = zxc_overlap_masks32[off];
+    const uint8x8_t p0 = vtbl4_u8(tbl, vld1_u8(m));
+    const uint8x8_t p1 = vtbl4_u8(tbl, vld1_u8(m + 8));
+    const uint8x8_t p2 = vtbl4_u8(tbl, vld1_u8(m + 16));
+    const uint8x8_t p3 = vtbl4_u8(tbl, vld1_u8(m + 24));
+    do {
+        vst1_u8(dst + copied, p0);
+        vst1_u8(dst + copied + 8, p1);
+        vst1_u8(dst + copied + 16, p2);
+        vst1_u8(dst + copied + 24, p3);
+        copied += stride;
+    } while (copied < ml);
+
+#elif defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
+    /* pshufb only reaches 16 bytes per lane, so the 32-byte table is emulated:
+     * shuffle both halves, then pick per byte on bit 4 of the index. */
+    const __m128i t0 = _mm_loadu_si128((const __m128i*)(dst - off));
+    const __m128i t1 = _mm_loadu_si128((const __m128i*)(dst - off + 16));
+    const __m128i sixteen = _mm_set1_epi8(16);
+    const __m128i m_lo = _mm_load_si128((const __m128i*)zxc_overlap_masks32[off]);
+    const __m128i m_hi = _mm_load_si128((const __m128i*)(zxc_overlap_masks32[off] + 16));
+    const __m128i pat_lo =
+        _mm_blendv_epi8(_mm_shuffle_epi8(t0, m_lo),
+                        _mm_shuffle_epi8(t1, _mm_sub_epi8(m_lo, sixteen)), _mm_slli_epi16(m_lo, 3));
+    const __m128i pat_hi =
+        _mm_blendv_epi8(_mm_shuffle_epi8(t0, m_hi),
+                        _mm_shuffle_epi8(t1, _mm_sub_epi8(m_hi, sixteen)), _mm_slli_epi16(m_hi, 3));
+    do {
+        _mm_storeu_si128((__m128i*)(dst + copied), pat_lo);
+        _mm_storeu_si128((__m128i*)(dst + copied + 16), pat_hi);
+        copied += stride;
+    } while (copied < ml);
+
+#else
+    /* SSE2 (no PSHUFB) and non-SIMD tiers: build the 32-byte pattern with a
+     * wrap counter (no per-byte modulo), then store it as two 16-byte halves. */
+    const uint8_t* src = dst - off;
+    uint8_t pat[32];
+    uint32_t k = 0;
+    for (size_t i = 0; i < 32; i++) {
+        pat[i] = src[k];
+        if (++k == off) k = 0;
+    }
+    do {
+        zxc_copy16(dst + copied, pat);
+        zxc_copy16(dst + copied + 16, pat + 16);
+        copied += stride;
+    } while (copied < ml);
+#endif
+}
+
+/**
  * @brief Fills an @p ml-byte single-byte run (LZ offset == 1) with wild stores.
  *
- * Splats @p byte into a vector register and emits @ref ZXC_PAD_SIZE-byte
- * chunks, avoiding a libc memset call on the typically short runs of the hot
- * path. Like the other run copiers it may **overshoot** up to
- * @ref ZXC_PAD_SIZE - 1 bytes past @p ml; the caller must guarantee
- * @ref ZXC_PAD_SIZE bytes of headroom. Falls back to @ref ZXC_MEMSET on
- * non-SIMD builds.
+ * Splats @p byte into a vector register and emits 32-byte chunks, avoiding a
+ * libc memset call on the typically short runs of the hot path. Like the other
+ * run copiers it may **overshoot** up to 31 bytes past @p ml; the caller must
+ * guarantee @ref ZXC_PAD_SIZE bytes of headroom. Falls back to
+ * @ref ZXC_MEMSET on non-SIMD builds.
  *
  * @param[out] dst  Output cursor.
  * @param[in]  byte Byte value to replicate.
@@ -223,13 +407,13 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
     const __m256i v = _mm256_set1_epi8((char)byte);
     _mm256_storeu_si256((__m256i*)dst, v);
-    if (UNLIKELY(ml > ZXC_PAD_SIZE)) {
-        uint8_t* out = dst + ZXC_PAD_SIZE;
-        size_t rem = ml - ZXC_PAD_SIZE;
-        while (rem > ZXC_PAD_SIZE) {
+    if (UNLIKELY(ml > 32)) {
+        uint8_t* out = dst + 32;
+        size_t rem = ml - 32;
+        while (rem > 32) {
             _mm256_storeu_si256((__m256i*)out, v);
-            out += ZXC_PAD_SIZE;
-            rem -= ZXC_PAD_SIZE;
+            out += 32;
+            rem -= 32;
         }
         _mm256_storeu_si256((__m256i*)out, v);
     }
@@ -237,14 +421,14 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
     const __m128i v = _mm_set1_epi8((char)byte);
     _mm_storeu_si128((__m128i*)dst, v);
     _mm_storeu_si128((__m128i*)(dst + 16), v);
-    if (UNLIKELY(ml > ZXC_PAD_SIZE)) {
-        uint8_t* out = dst + ZXC_PAD_SIZE;
-        size_t rem = ml - ZXC_PAD_SIZE;
-        while (rem > ZXC_PAD_SIZE) {
+    if (UNLIKELY(ml > 32)) {
+        uint8_t* out = dst + 32;
+        size_t rem = ml - 32;
+        while (rem > 32) {
             _mm_storeu_si128((__m128i*)out, v);
             _mm_storeu_si128((__m128i*)(out + 16), v);
-            out += ZXC_PAD_SIZE;
-            rem -= ZXC_PAD_SIZE;
+            out += 32;
+            rem -= 32;
         }
         _mm_storeu_si128((__m128i*)out, v);
         _mm_storeu_si128((__m128i*)(out + 16), v);
@@ -253,14 +437,14 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
     const uint8x16_t v = vdupq_n_u8(byte);
     vst1q_u8(dst, v);
     vst1q_u8(dst + 16, v);
-    if (UNLIKELY(ml > ZXC_PAD_SIZE)) {
-        uint8_t* out = dst + ZXC_PAD_SIZE;
-        size_t rem = ml - ZXC_PAD_SIZE;
-        while (rem > ZXC_PAD_SIZE) {
+    if (UNLIKELY(ml > 32)) {
+        uint8_t* out = dst + 32;
+        size_t rem = ml - 32;
+        while (rem > 32) {
             vst1q_u8(out, v);
             vst1q_u8(out + 16, v);
-            out += ZXC_PAD_SIZE;
-            rem -= ZXC_PAD_SIZE;
+            out += 32;
+            rem -= 32;
         }
         vst1q_u8(out, v);
         vst1q_u8(out + 16, v);
@@ -280,12 +464,12 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
 /**
  * @brief Copies @p ll literal bytes from @p src to @p dst using 32-byte wild copies.
  *
- * Writes in @ref ZXC_PAD_SIZE-byte chunks and may **overshoot** by up to
- * @ref ZXC_PAD_SIZE - 1 bytes past @p ll; the caller must guarantee @p dst has at
- * least @ref ZXC_PAD_SIZE bytes of writable headroom (the unrolled loops and the
- * trailing-literal margins ensure this). Pointers are taken by value and the
- * caller advances its own cursors by @p ll, keeping them in registers on the hot
- * path.
+ * Writes in 32-byte chunks -- the width of @ref zxc_copy32 -- and may
+ * **overshoot** by up to 31 bytes past @p ll; the caller must guarantee @p dst
+ * has at least @ref ZXC_PAD_SIZE bytes of writable headroom (the unrolled loops
+ * and the trailing-literal margins ensure this). Pointers are taken by value and
+ * the caller advances its own cursors by @p ll, keeping them in registers on the
+ * hot path.
  *
  * @param[out] dst Output cursor. Must not overlap @p src and must have
  *                 @ref ZXC_PAD_SIZE bytes of overshoot headroom.
@@ -296,15 +480,15 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_literals(uint8_t* RESTRICT dst,
                                                        const uint8_t* RESTRICT src,
                                                        const uint64_t ll) {
     zxc_copy32(dst, src);
-    if (UNLIKELY(ll > ZXC_PAD_SIZE)) {
-        dst += ZXC_PAD_SIZE;
-        src += ZXC_PAD_SIZE;
-        size_t rem = ll - ZXC_PAD_SIZE;
-        while (rem > ZXC_PAD_SIZE) {
+    if (UNLIKELY(ll > 32)) {
+        dst += 32;
+        src += 32;
+        size_t rem = ll - 32;
+        while (rem > 32) {
             zxc_copy32(dst, src);
-            dst += ZXC_PAD_SIZE;
-            src += ZXC_PAD_SIZE;
-            rem -= ZXC_PAD_SIZE;
+            dst += 32;
+            src += 32;
+            rem -= 32;
         }
         zxc_copy32(dst, src);
     }
@@ -315,13 +499,17 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_literals(uint8_t* RESTRICT dst,
  *
  * The source @c d_ptr-off may overlap the destination (the LZ repeat case), so the
  * copy strategy is chosen by back-reference distance:
- *  - @p off >= @ref ZXC_PAD_SIZE      : 32-byte wild copies (no overlap within a chunk);
- *  - @p off >= @ref ZXC_PAD_SIZE / 2  : 16-byte wild copies;
- *  - @p off == 1                      : single-byte run via @ref zxc_decode_fill_run;
- *  - otherwise (2..15)                : pattern-replicating overlap copy.
+ *  - @p off >= 32   : 32-byte wild copies (no overlap within a chunk);
+ *  - @p off == 1    : single-byte run via @ref zxc_decode_fill_run;
+ *  - otherwise 2-31 : pattern-replicating overlap copy.
  *
- * Like @ref zxc_decode_copy_literals it may **overshoot** up to @ref ZXC_PAD_SIZE - 1
- * bytes past @p ml, so @p d_ptr must have @ref ZXC_PAD_SIZE bytes of headroom. @p d_ptr
+ * The 32 and 16 below are the widths of @ref zxc_copy32 and @ref zxc_copy16 --
+ * a copy may never be wider than the distance it reads back, or it would read
+ * bytes it is still writing. They are not @ref ZXC_PAD_SIZE, which measures the
+ * overshoot the caller leaves writable and merely happens to equal 32.
+ *
+ * Like @ref zxc_decode_copy_literals it may **overshoot** up to 31 bytes past
+ * @p ml, so @p d_ptr must have @ref ZXC_PAD_SIZE bytes of headroom. @p d_ptr
  * is taken by value; the caller advances its cursor by @p ml.
  *
  * @param[in,out] d_ptr Output cursor; the match source is @c d_ptr-off. Must have
@@ -332,63 +520,51 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_literals(uint8_t* RESTRICT dst,
 static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, const uint32_t off,
                                                     const uint64_t ml) {
     const uint8_t* match_src = d_ptr - off;
-    if (LIKELY(off >= ZXC_PAD_SIZE)) {
+    if (LIKELY(off >= 32)) {
         zxc_copy32(d_ptr, match_src);
-        if (UNLIKELY(ml > ZXC_PAD_SIZE)) {
-            uint8_t* out = d_ptr + ZXC_PAD_SIZE;
-            const uint8_t* ref = match_src + ZXC_PAD_SIZE;
-            size_t rem = ml - ZXC_PAD_SIZE;
-            while (rem > ZXC_PAD_SIZE) {
+        if (UNLIKELY(ml > 32)) {
+            uint8_t* out = d_ptr + 32;
+            const uint8_t* ref = match_src + 32;
+            size_t rem = ml - 32;
+            while (rem > 32) {
                 zxc_copy32(out, ref);
-                out += ZXC_PAD_SIZE;
-                ref += ZXC_PAD_SIZE;
-                rem -= ZXC_PAD_SIZE;
+                out += 32;
+                ref += 32;
+                rem -= 32;
             }
             zxc_copy32(out, ref);
-        }
-    } else if (off >= (ZXC_PAD_SIZE / 2)) {
-        zxc_copy16(d_ptr, match_src);
-        if (UNLIKELY(ml > (ZXC_PAD_SIZE / 2))) {
-            uint8_t* out = d_ptr + (ZXC_PAD_SIZE / 2);
-            const uint8_t* ref = match_src + (ZXC_PAD_SIZE / 2);
-            size_t rem = ml - (ZXC_PAD_SIZE / 2);
-            while (rem > (ZXC_PAD_SIZE / 2)) {
-                zxc_copy16(out, ref);
-                out += (ZXC_PAD_SIZE / 2);
-                ref += (ZXC_PAD_SIZE / 2);
-                rem -= (ZXC_PAD_SIZE / 2);
-            }
-            zxc_copy16(out, ref);
         }
     } else if (off == 1) {
         zxc_decode_fill_run(d_ptr, match_src[0], ml);
     } else {
-        zxc_decode_copy_overlap_run(d_ptr, off, ml);
+        zxc_decode_copy_overlap_run32(d_ptr, off, ml);
     }
 }
 
 /**
- * @brief Match copy for a length that cannot exceed @ref ZXC_PAD_SIZE.
+ * @brief Match copy for a length that cannot exceed 32 bytes.
  *
- * @ref zxc_decode_copy_match without the `ml > ZXC_PAD_SIZE` ladder, which a
- * bounded @p ml makes unreachable in the `off >= ZXC_PAD_SIZE` arm. The other
- * arms keep their inner tests: they still fire for @p ml in 17..32, and below
- * @p off == 32 a 32-byte copy would read destination bytes not yet written.
+ * @ref zxc_decode_copy_match without the `ml > 32` ladder, which a bounded
+ * @p ml makes unreachable in the `off >= 32` arm. The other arms keep their
+ * inner tests: they still fire for @p ml in 17..32, and below @p off == 32 a
+ * 32-byte copy would read destination bytes not yet written.
+ *
+ * As above, 32 and 16 are the widths of @ref zxc_copy32 and @ref zxc_copy16,
+ * not @ref ZXC_PAD_SIZE.
  *
  * @param[in,out] d_ptr Output cursor; match source is @c d_ptr-off. Needs
  *                      @ref ZXC_PAD_SIZE bytes of overshoot headroom.
  * @param[in]     off   Resolved back-reference distance, @c >= 1.
- * @param[in]     ml    Match length, @c <= ZXC_PAD_SIZE (caller's obligation).
+ * @param[in]     ml    Match length, @c <= 32 (caller's obligation).
  */
 static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_short(uint8_t* RESTRICT d_ptr,
                                                           const uint32_t off, const uint64_t ml) {
     const uint8_t* match_src = d_ptr - off;
-    if (LIKELY(off >= ZXC_PAD_SIZE)) {
+    if (LIKELY(off >= 32)) {
         zxc_copy32(d_ptr, match_src);
-    } else if (off >= (ZXC_PAD_SIZE / 2)) {
+    } else if (off >= 16) {
         zxc_copy16(d_ptr, match_src);
-        if (UNLIKELY(ml > (ZXC_PAD_SIZE / 2)))
-            zxc_copy16(d_ptr + (ZXC_PAD_SIZE / 2), match_src + (ZXC_PAD_SIZE / 2));
+        if (UNLIKELY(ml > 16)) zxc_copy16(d_ptr + 16, match_src + 16);
     } else if (off == 1) {
         zxc_decode_fill_run(d_ptr, match_src[0], ml);
     } else {
@@ -794,7 +970,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             while (r_ptr < r_end && w_ptr < w_end) {
                 uint8_t token = *r_ptr++;
                 if (LIKELY(!(token & ZXC_LIT_RLE_FLAG))) {
-                    // Raw copy (most common path): use ZXC_PAD_SIZE-byte wild copies
+                    // Raw copy (most common path): 32-byte wild copies (zxc_copy32 width)
                     // token is 7-bit (0-127), so len is 1-128 bytes
                     const uint32_t len = (uint32_t)token + 1;
                     if (UNLIKELY(w_ptr + len > w_end || r_ptr + len > r_end))
@@ -802,23 +978,24 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
 
                     // Destination has ZXC_PAD_SIZE bytes of safe overrun space.
                     // Source may not - check before wild copy.
-                    // Fast path: source has ZXC_PAD_SIZE-byte read headroom (most common)
-                    if (LIKELY(r_ptr + ZXC_PAD_SIZE <= r_end)) {
-                        // Single 32-byte copy covers len <= ZXC_PAD_SIZE (most tokens)
+                    // Fast path: source holds a full zxc_copy32 read (most common)
+                    if (LIKELY(r_ptr + 32 <= r_end)) {
+                        // Single copy covers len <= 32 (most tokens)
                         zxc_copy32(w_ptr, r_ptr);
 
-                        if (UNLIKELY(len > ZXC_PAD_SIZE)) {
-                            // Unroll: max len=128, so max 4 copies total
-                            // Use unconditional stores with overlap - faster than branches
-                            if (len <= 2 * ZXC_PAD_SIZE) {
-                                zxc_copy32(w_ptr + len - ZXC_PAD_SIZE, r_ptr + len - ZXC_PAD_SIZE);
-                            } else if (len <= 3 * ZXC_PAD_SIZE) {
-                                zxc_copy32(w_ptr + ZXC_PAD_SIZE, r_ptr + ZXC_PAD_SIZE);
-                                zxc_copy32(w_ptr + len - ZXC_PAD_SIZE, r_ptr + len - ZXC_PAD_SIZE);
+                        if (UNLIKELY(len > 32)) {
+                            // Unroll: max len=128, so max 4 copies total. The last
+                            // copy is placed to end exactly on len, overlapping the
+                            // previous one - unconditional stores beat branches here.
+                            if (len <= 64) {
+                                zxc_copy32(w_ptr + len - 32, r_ptr + len - 32);
+                            } else if (len <= 96) {
+                                zxc_copy32(w_ptr + 32, r_ptr + 32);
+                                zxc_copy32(w_ptr + len - 32, r_ptr + len - 32);
                             } else {
-                                zxc_copy32(w_ptr + ZXC_PAD_SIZE, r_ptr + ZXC_PAD_SIZE);
-                                zxc_copy32(w_ptr + 2 * ZXC_PAD_SIZE, r_ptr + 2 * ZXC_PAD_SIZE);
-                                zxc_copy32(w_ptr + len - ZXC_PAD_SIZE, r_ptr + len - ZXC_PAD_SIZE);
+                                zxc_copy32(w_ptr + 32, r_ptr + 32);
+                                zxc_copy32(w_ptr + 64, r_ptr + 64);
+                                zxc_copy32(w_ptr + len - 32, r_ptr + len - 32);
                             }
                         }
                     } else {
@@ -896,7 +1073,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     const uint8_t* const d_floor = dst - dict_size;
     // Destination safe margin for 4x loop: max output without varint extension.
     // ll_max = 14, ml_max = 14 + 5 = 19, per-seq = 33, 4x = 132.
-    // Add ZXC_PAD_SIZE (32) for the wild zxc_copy32 overshoot + 4 safety = 168.
+    // Plus the overshoot the wild copies are allowed (ZXC_PAD_SIZE) + 4 safety = 168.
     const uint8_t* const d_end_safe = d_end - (132 + ZXC_PAD_SIZE + 4);
 
     // Literal margin for the 4x loops: without a varint, ll <= 14 per sequence,
