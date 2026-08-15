@@ -1,7 +1,7 @@
 # Golden-File Format Conformance Suite
 
 Byte-frozen reference archives that pin the **ZXC on-disk wire format**
-(`docs/FORMAT.md`, format version 6). Unlike `conformance/`, which checks that a
+(`docs/FORMAT.md`, format version 8). Unlike `conformance/`, which checks that a
 decoder produces the right *output*, this suite asserts the exact *bytes* and
 *structure* of compressed files, field by field.
 
