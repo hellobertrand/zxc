@@ -728,6 +728,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     const int hdr_sz = zxc_read_glo_header_and_desc(src, src_size, &gh, &lit_comp, &tok_comp);
     if (UNLIKELY(hdr_sz < 0)) return ZXC_ERROR_BAD_HEADER;
 
+    /* Only 0 and 1 are defined widths. */
+    if (UNLIKELY(gh.enc_off > 1)) return ZXC_ERROR_CORRUPT_DATA;
+
     /* Entropy-coded tokens (level 7): tail-call the dedicated instantiation
      * before any section work - it restarts from the header, so only the parse
      * above is duplicated. Flags are constant per instantiation, so exactly one

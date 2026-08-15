@@ -157,6 +157,16 @@ Offset  Size  Field
 0x0B    1     enc_off    (0=16-bit offsets, 1=8-bit offsets)
 ```
 
+`enc_lit`, `enc_tok` and `enc_off` are closed value sets: a GLO decoder **MUST**
+reject any value outside the ones listed above rather than fall back to a
+default. This is not a memory-safety requirement — a GLO block sizes its offset
+section and reads it from the same width, so the two cannot disagree — but it
+keeps the undefined byte values genuinely free for a later format version
+instead of aliasing them onto an existing meaning.
+
+`enc_mlen` is the exception: it is reserved, so it follows the § 10.3 rule for
+reserved fields — encoders **MUST** write `0`, decoders ignore it.
+
 ### GLO section descriptors (0, 4 or 8 bytes)
 
 Only the two sizes the header cannot imply are stored, each a `u32` and only
@@ -522,7 +532,10 @@ Offset  Size  Field
    - validate block header CRC8,
    - check block bounds using `comp_size`,
    - if enabled, verify trailing block checksum.
-3. Decode payload according to block type.
+3. Decode payload according to block type. For GLO/GHI:
+   - reject `enc_lit`, `enc_tok` and (GLO) `enc_off` values outside § 5.2,
+   - reject a block leaving fewer than 32 bytes behind its literal section,
+   - check the derived section sizes still fit the payload.
 4. On EOF:
    - require `comp_size == 0`,
    - read footer,
