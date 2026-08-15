@@ -4,7 +4,7 @@
 **Format Version**: 7
 
 This document describes the on-disk binary format of a ZXC compressed file.
-It formalizes the current reference implementation of format version **7**.
+It formalizes the current reference implementation of format version **8**.
 
 ## 1. Conventions
 
@@ -54,7 +54,7 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): `7`. Any other value is rejected (`ZXC_ERROR_BAD_VERSION`);
+- **Format Version** (`u8`): `8`. Any other value is rejected (`ZXC_ERROR_BAD_VERSION`);
 - **Chunk Size Code** (`u8`):
   - The value is an **exponent** in the range `[12, 21]`: `block_size = 2^code`.
     - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
@@ -575,7 +575,7 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 
 ### 10.4 Minimum conforming decoder
 
-A minimal conforming decoder for version 7 **MUST** support:
+A minimal conforming decoder for version 8 **MUST** support:
 - File header parsing and CRC16 validation
 - **RAW** blocks (type 0) - passthrough copy.
 - **GLO** blocks (type 1) - full LZ decode with extras varint, including Huffman
@@ -583,6 +583,9 @@ A minimal conforming decoder for version 7 **MUST** support:
 - **GHI** blocks (type 2) - full LZ decode with extras varint.
 - **EOF** block (type 255) - stream termination.
 - File footer validation (source size check).
+- Deriving section sizes from the header and the two optional descriptors
+  (§5.2), and rejecting a block that leaves fewer than 32 bytes behind its
+  literal section.
 
 Support for checksum verification is **RECOMMENDED** but not strictly required for a minimal implementation.
 
