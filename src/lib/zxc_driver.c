@@ -672,10 +672,12 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         // Decompression Mode: Read and validate file header
         uint8_t h[ZXC_FILE_HEADER_SIZE];
         uint32_t header_dict_id = 0;
-        if (UNLIKELY(fread(h, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE ||
-                     zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz, &file_has_chk,
-                                          &header_dict_id) != ZXC_OK))
-            return ZXC_ERROR_BAD_HEADER;
+        if (UNLIKELY(fread(h, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE))
+            return ZXC_ERROR_SRC_TOO_SMALL;
+
+        const int hrc = zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz,
+                                             &file_has_chk, &header_dict_id);
+        if (UNLIKELY(hrc != ZXC_OK)) return hrc;
 
         if (header_dict_id != 0) {
             if (UNLIKELY(!dict || dict_size == 0)) return ZXC_ERROR_DICT_REQUIRED;
