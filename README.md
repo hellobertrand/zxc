@@ -378,7 +378,7 @@ zxc can be vendored directly into a CMake build, either as a git submodule with
 include(FetchContent)
 FetchContent_Declare(zxc
     GIT_REPOSITORY https://github.com/hellobertrand/zxc.git
-    GIT_TAG        v0.13.1
+    GIT_TAG        v0.14.0
 )
 FetchContent_MakeAvailable(zxc)
 
@@ -531,8 +531,8 @@ The default block size is **512 KB**, tuned for bulk/archival workloads where ra
 
 | Block Size | cctx memory | dctx memory | Ratio (level -3) | Decompression gain vs 256 KB |
 |:----------:|:-----------:|:-----------:|:----------------:|:----------------------------:|
-| 256 KB | ~1.03 MB | ~256 KB | 46.36% | — |
-| 512 KB *(default)* | ~1.78 MB | ~512 KB | 45.81% *(−0.55 pp)* | +1% to +8% depending on CPU |
+| 256 KB | ~1.03 MB | ~256 KB | 46.68% | — |
+| 512 KB *(default)* | ~1.78 MB | ~512 KB | 46.09% *(−0.57 pp)* | +1% to +8% depending on CPU |
 
 ```bash
 # CLI — fall back to 256 KB blocks (e.g. embedded / streaming)
