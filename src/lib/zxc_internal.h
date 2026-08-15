@@ -412,15 +412,15 @@ extern "C" {
 /** @brief Size of the per-block checksum field in bytes. */
 #define ZXC_BLOCK_CHECKSUM_SIZE 4
 /** @brief Binary size of a GLO block sub-header. */
-#define ZXC_GLO_HEADER_BINARY_SIZE 16
+#define ZXC_GLO_HEADER_BINARY_SIZE 12
 /** @brief Binary size of a GHI block sub-header. */
-#define ZXC_GHI_HEADER_BINARY_SIZE 16
+#define ZXC_GHI_HEADER_BINARY_SIZE 12
 
 /** @brief Worst-case format overhead inside a single block beyond the outer
  *  8-byte block header and the optional 4-byte checksum.
  *
- *  Sub-header (16 B) + widest GLO section descriptors (8 B) + widest slack padding
- *  (@ref ZXC_BLOCK_LIT_SLACK) = 56 B, plus 24 B of margin. Used by
+ *  Sub-header (12 B) + widest GLO section descriptors (8 B) + widest slack padding
+ *  (@ref ZXC_BLOCK_LIT_SLACK) = 52 B, plus 28 B of margin. Used by
  *  zxc_compress_block_bound() and zxc_compress_bound(). */
 #define ZXC_BLOCK_FORMAT_OVERHEAD 80
 
@@ -1012,7 +1012,7 @@ typedef enum {
  * - `ZXC_SECTION_ENCODING_HUFFMAN`: canonical Huffman in the PivCo layout
  *   (level-ordered branch runs, max 11-bit codes -- FORMAT.md section 5.2.1).
  *   Valid for the literal stream (`enc_lit`, level >= 6) and the token
- *   stream (`enc_litlen`, level 7) of GLO blocks.
+ *   stream (`enc_tok`, level 7) of GLO blocks.
  * - `ZXC_SECTION_ENCODING_HUFFMAN_DICT`: same payload as HUFFMAN but the
  *   128-byte code-lengths header is omitted: codes come from the shared
  *   table carried by the dictionary (.zxd). Only valid for `enc_lit` of GLO
@@ -1039,10 +1039,12 @@ typedef enum {
  * The total count of literal bytes.
  * @var zxc_gnr_header_t::enc_lit
  * Encoding method used for the literal stream.
- * @var zxc_gnr_header_t::enc_litlen
- * Encoding method used for the literal lengths stream.
+ * @var zxc_gnr_header_t::enc_tok
+ * GLO only: encoding of the token section, whose bytes each pack a literal
+ * length and a match length nibble. Only RAW and HUFFMAN (level 7) occur.
  * @var zxc_gnr_header_t::enc_mlen
- * Encoding method used for the match lengths stream.
+ * Reserved, written 0 and ignored on decode. Match lengths have no stream of
+ * their own: they share the token byte and spill into the extras.
  * @var zxc_gnr_header_t::enc_off
  * GLO only: width of the offset stream (1 = 1-byte, 0 = 2-byte). GHI has no
  * offset stream, so it writes 0 and ignores the field on decode.
@@ -1050,9 +1052,9 @@ typedef enum {
 typedef struct {
     uint32_t n_sequences;  // Number of sequences
     uint32_t n_literals;   // Number of literals
-    uint8_t enc_lit;       // Literal encoding
-    uint8_t enc_litlen;    // Literal lengths encoding
-    uint8_t enc_mlen;      // Match lengths encoding
+    uint8_t enc_lit;       // Literal stream encoding
+    uint8_t enc_tok;       // Token section encoding (GLO only)
+    uint8_t enc_mlen;      // Reserved (see above)
     uint8_t enc_off;       // Offset stream width (GLO only; ignored on decode in GHI)
 } zxc_gnr_header_t;
 
@@ -1679,7 +1681,7 @@ typedef struct {
     uint8_t* work_buf;              /**< Padded scratch buffer for buffer-API decompression. */
     size_t work_buf_cap;            /**< Capacity of the work buffer. */
     uint8_t* tok_buffer;            /**< Decode scratch for a Huffman-coded GLO token
-                                         section (enc_litlen == HUFFMAN); NULL on compress.
+                                         section (enc_tok == HUFFMAN); NULL on compress.
                                          Heap decode contexts defer it (with pivco_scratch)
                                          to the first entropy section, see entropy_block. */
     size_t tok_buffer_cap;          /**< Capacity of tok_buffer in bytes. */

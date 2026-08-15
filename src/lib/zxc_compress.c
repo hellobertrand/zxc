@@ -1633,7 +1633,7 @@ parse_done:;
 
     /* Level-7 (ULTRA): Huffman-code the token stream with the literal codec -
      * tokens are a <= 256-symbol alphabet. Same J rule; the decoder picks the
-     * path from gh.enc_litlen. opt_scratch is free by now. */
+     * path from gh.enc_tok. opt_scratch is free by now. */
     uint8_t tok_code_len[ZXC_HUF_NUM_SYMBOLS];
     uint8_t enc_tok = ZXC_SECTION_ENCODING_RAW;
     size_t tok_huf_size = 0;
@@ -1664,7 +1664,7 @@ parse_done:;
     const zxc_gnr_header_t gh = {.n_sequences = seq_c,
                                  .n_literals = (uint32_t)lit_c,
                                  .enc_lit = enc_lit,
-                                 .enc_litlen = enc_tok,
+                                 .enc_tok = enc_tok,
                                  .enc_mlen = 0,
                                  .enc_off = (uint8_t)use_8bit_off};
 
@@ -1972,7 +1972,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const zxc_gnr_header_t gh = {.n_sequences = seq_c,
                                  .n_literals = (uint32_t)lit_c,
                                  .enc_lit = ZXC_SECTION_ENCODING_RAW,
-                                 .enc_litlen = 0,
+                                 .enc_tok = 0,
                                  .enc_mlen = 0,
                                  .enc_off = 0};
 

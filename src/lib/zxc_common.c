@@ -83,7 +83,7 @@ typedef struct {
     /* mode == 0 (decompress) */
     size_t off_work;
     size_t off_lit_dctx;
-    /* mode == 0: scratch for a Huffman-coded GLO token section (enc_litlen == HUFFMAN). */
+    /* mode == 0: scratch for a Huffman-coded GLO token section (enc_tok == HUFFMAN). */
     size_t off_tok_dctx;
     size_t sz_tok_dctx;
     /* mode == 0: PivCo decode level scratch (one chunk-sized ping-pong buffer). */
@@ -177,7 +177,7 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         layout.off_lit_dctx = layout.total;
         layout.total += ZXC_ALIGN_CL(sz_lit);
         /* Token-section decode scratch (level-7 GLO Huffman-codes the tokens) +
-         * PivCo ping-pong scratch. enc_lit/enc_litlen are unpredictable, so static
+         * PivCo ping-pong scratch. enc_lit/enc_tok are unpredictable, so static
          * workspaces provision both up front (no-alloc contract); heap contexts
          * defer them to the first entropy section, sparing L1-5 archives ~1.2x
          * chunk_size. See zxc_cctx_alloc_entropy_scratch. */
@@ -684,9 +684,9 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
 }
 
 /**
- * @brief Writes the 16-byte GLO/GHI sub-header shared by both block types.
+ * @brief Writes the 12-byte GLO/GHI sub-header shared by both block types.
  *
- * @param[out] dst Destination buffer, at least 16 bytes.
+ * @param[out] dst Destination buffer, at least 12 bytes.
  * @param[in]  gh  Populated header descriptor.
  */
 static ZXC_ALWAYS_INLINE void zxc_write_gnr_header(uint8_t* RESTRICT dst,
@@ -695,17 +695,15 @@ static ZXC_ALWAYS_INLINE void zxc_write_gnr_header(uint8_t* RESTRICT dst,
     zxc_store_le32(dst + 4, gh->n_literals);
 
     dst[8] = gh->enc_lit;
-    dst[9] = gh->enc_litlen;
+    dst[9] = gh->enc_tok;
     dst[10] = gh->enc_mlen;
     dst[11] = gh->enc_off;
-
-    zxc_store_le32(dst + 12, 0);
 }
 
 /**
- * @brief Reads the 16-byte GLO/GHI sub-header shared by both block types.
+ * @brief Reads the 12-byte GLO/GHI sub-header shared by both block types.
  *
- * @param[in]  src Source buffer, at least 16 bytes.
+ * @param[in]  src Source buffer, at least 12 bytes.
  * @param[out] gh  Receives the decoded header.
  */
 static ZXC_ALWAYS_INLINE void zxc_read_gnr_header(const uint8_t* RESTRICT src,
@@ -713,7 +711,7 @@ static ZXC_ALWAYS_INLINE void zxc_read_gnr_header(const uint8_t* RESTRICT src,
     gh->n_sequences = zxc_le32(src);
     gh->n_literals = zxc_le32(src + 4);
     gh->enc_lit = src[8];
-    gh->enc_litlen = src[9];
+    gh->enc_tok = src[9];
     gh->enc_mlen = src[10];
     gh->enc_off = src[11];
 }
@@ -723,9 +721,9 @@ static ZXC_ALWAYS_INLINE void zxc_read_gnr_header(const uint8_t* RESTRICT src,
  *
  * 0, 4 or 8 bytes - see @ref zxc_write_glo_header_and_desc for what they hold.
  */
-static ZXC_ALWAYS_INLINE size_t zxc_glo_desc_size(const uint8_t enc_lit, const uint8_t enc_litlen) {
+static ZXC_ALWAYS_INLINE size_t zxc_glo_desc_size(const uint8_t enc_lit, const uint8_t enc_tok) {
     return ((enc_lit != ZXC_SECTION_ENCODING_RAW) ? sizeof(uint32_t) : 0) +
-           ((enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN) ? sizeof(uint32_t) : 0);
+           ((enc_tok == ZXC_SECTION_ENCODING_HUFFMAN) ? sizeof(uint32_t) : 0);
 }
 
 /**
@@ -747,7 +745,7 @@ static ZXC_ALWAYS_INLINE size_t zxc_glo_desc_size(const uint8_t enc_lit, const u
 int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
                                   const zxc_gnr_header_t* RESTRICT gh, const uint32_t lit_comp,
                                   const uint32_t tok_comp) {
-    const size_t desc_sz = zxc_glo_desc_size(gh->enc_lit, gh->enc_litlen);
+    const size_t desc_sz = zxc_glo_desc_size(gh->enc_lit, gh->enc_tok);
     const size_t needed = ZXC_GLO_HEADER_BINARY_SIZE + desc_sz;
 
     if (UNLIKELY(rem < needed)) return ZXC_ERROR_DST_TOO_SMALL;
@@ -759,7 +757,7 @@ int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
         zxc_store_le32(p, lit_comp);
         p += sizeof(uint32_t);
     }
-    if (gh->enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN) {
+    if (gh->enc_tok == ZXC_SECTION_ENCODING_HUFFMAN) {
         zxc_store_le32(p, tok_comp);
     }
 
@@ -783,7 +781,7 @@ int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
 
     zxc_read_gnr_header(src, gh);
 
-    const size_t desc_sz = zxc_glo_desc_size(gh->enc_lit, gh->enc_litlen);
+    const size_t desc_sz = zxc_glo_desc_size(gh->enc_lit, gh->enc_tok);
     const size_t needed = ZXC_GLO_HEADER_BINARY_SIZE + desc_sz;
     if (UNLIKELY(len < needed)) return ZXC_ERROR_SRC_TOO_SMALL;
 
@@ -795,7 +793,7 @@ int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
     } else {
         *lit_comp = gh->n_literals;
     }
-    *tok_comp = (gh->enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN) ? zxc_le32(p) : gh->n_sequences;
+    *tok_comp = (gh->enc_tok == ZXC_SECTION_ENCODING_HUFFMAN) ? zxc_le32(p) : gh->n_sequences;
 
     return (int)needed;
 }

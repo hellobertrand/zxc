@@ -90,18 +90,19 @@ static uint8_t* read_file(const char* path, size_t* out_size) {
 /* ------------------------------------------------------------------------- */
 
 /* Shared validator for the GLO (Sec 5.2) and GHI (Sec 5.3) section model: a
- * 16-byte header, GLO's 0/4/8-byte section descriptors (GHI has none), then the
+ * 12-byte header, GLO's 0/4/8-byte section descriptors (GHI has none), then the
  * sections. Sizes absent from the table come from the header, and extras take
  * the residue - so the tiling check is an inequality, plus the
  * ZXC_BLOCK_LIT_SLACK guarantee behind the literals. */
 static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp, int is_glo,
                                int expect_enc_lit) {
-    CHECK(comp >= 16 + ZXC_BLOCK_LIT_SLACK, "LZ payload too small for header+slack (%u)", comp);
+    const uint32_t hdr = ZXC_GLO_HEADER_BINARY_SIZE;
+    CHECK(comp >= hdr + ZXC_BLOCK_LIT_SLACK, "LZ payload too small for header+slack (%u)", comp);
 
     uint32_t n_sequences = zxc_le32(p);
     uint32_t n_literals = zxc_le32(p + 4);
     uint8_t enc_lit = p[8];
-    uint8_t enc_litlen = p[9];
+    uint8_t enc_tok = p[9];
     uint8_t enc_off = p[11];
     CHECK(enc_lit <= 3, "enc_lit = %u out of range", enc_lit);
     /* GLO: offset stream width, 0 or 1. GHI has no offset stream and the encoder
@@ -110,7 +111,9 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
         CHECK(enc_off == 0, "GHI enc_off = %u, expected 0", enc_off);
     else
         CHECK(enc_off <= 1, "enc_off = %u out of range", enc_off);
-    CHECK(zxc_le32(p + 12) == 0, "LZ header reserved u32 nonzero");
+    /* enc_mlen is reserved: match lengths ride the token byte. Frozen at 0 so a
+     * future use can tell old encoders apart. */
+    CHECK(p[10] == 0, "enc_mlen = %u, expected 0 (reserved)", p[10]);
     if (expect_enc_lit >= 0)
         CHECK(enc_lit == (uint8_t)expect_enc_lit, "expected enc_lit == %d, got %u", expect_enc_lit,
               enc_lit);
@@ -122,16 +125,16 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
         /* Only the sizes the header cannot imply are on the wire. */
         uint32_t tok_comp = n_sequences;
         if (enc_lit != 0) {
-            CHECK(comp >= 16 + table + 4, "GLO table truncated");
-            lit_comp = zxc_le32(p + 16 + table);
+            CHECK(comp >= hdr + table + 4, "GLO table truncated");
+            lit_comp = zxc_le32(p + hdr + table);
             table += 4;
         }
-        if (enc_litlen == 2) {
-            CHECK(comp >= 16 + table + 4, "GLO table truncated");
-            tok_comp = zxc_le32(p + 16 + table);
+        if (enc_tok == 2) {
+            CHECK(comp >= hdr + table + 4, "GLO table truncated");
+            tok_comp = zxc_le32(p + hdr + table);
             table += 4;
         } else {
-            CHECK(enc_litlen == 0, "GLO enc_litlen = %u out of range", enc_litlen);
+            CHECK(enc_tok == 0, "GLO enc_tok = %u out of range", enc_tok);
         }
         sect_total = (uint64_t)lit_comp + tok_comp + (uint64_t)n_sequences * (enc_off ? 1U : 2U);
     } else {
@@ -139,13 +142,13 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
         sect_total = (uint64_t)n_literals + (uint64_t)n_sequences * 4U;
     }
 
-    uint64_t fixed = 16U + table + sect_total;
+    uint64_t fixed = (uint64_t)hdr + table + sect_total;
     CHECK(fixed <= comp, "LZ sections overrun payload (%llu > %u)", (unsigned long long)fixed,
           comp);
 
     /* Sec 5.2/5.3: what follows the literal section must cover the decoder's
      * wild-copy overshoot. The padding's contents are unconstrained. */
-    uint64_t behind_lit = (uint64_t)comp - 16U - table - lit_comp;
+    uint64_t behind_lit = (uint64_t)comp - hdr - table - lit_comp;
     CHECK(behind_lit >= ZXC_BLOCK_LIT_SLACK, "only %llu bytes behind the literal section",
           (unsigned long long)behind_lit);
     return 1;

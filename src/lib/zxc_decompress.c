@@ -701,7 +701,7 @@ static ZXC_NOINLINE int zxc_decode_block_glo_entropy_safe(const zxc_cctx_t* REST
  * The @p tok_entropy dimension keeps the token pointer on a SINGLE provenance
  * per instantiation (in-place @c src tokens vs @c ctx->tok_buffer): the
  * tok_entropy=0 instantiations tail-call their entropy twin right after the
- * header parse when they meet enc_litlen == 2.
+ * header parse when they meet enc_tok == 2.
  *
  * @param[in,out] ctx          Decompression context (dict buffer, scratch).
  * @param[in]     src          Compressed block payload.
@@ -732,7 +732,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
      * before any section work - it restarts from the header, so only the parse
      * above is duplicated. Flags are constant per instantiation, so exactly one
      * call survives and t_ptr keeps a single provenance below. */
-    if (!tok_entropy && UNLIKELY(gh.enc_litlen == ZXC_SECTION_ENCODING_HUFFMAN)) {
+    if (!tok_entropy && UNLIKELY(gh.enc_tok == ZXC_SECTION_ENCODING_HUFFMAN)) {
         if (safe) return zxc_decode_block_glo_entropy_safe(ctx, src, src_size, dst, dst_capacity);
         if (has_dict)
             return zxc_decode_block_glo_entropy_dict(ctx, src, src_size, dst, dst_capacity);
@@ -869,19 +869,19 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
         return ZXC_ERROR_CORRUPT_DATA;
 
     /* Offsets/extras follow the on-disk token SECTION; sz_tokens is its size
-     * (== n_sequences when RAW, the Huffman payload size when enc_litlen set). */
+     * (== n_sequences when RAW, the Huffman payload size when enc_tok set). */
     const uint8_t* o_ptr = p_curr + sz_tokens;
     const uint8_t* e_ptr = o_ptr + (size_t)sz_offsets;
     const uint8_t* const e_end = e_ptr + sz_extras;
 
     const uint8_t* RESTRICT t_ptr;
     if (!tok_entropy) {
-        /* enc_litlen == 2 was re-routed right after the header parse; any other
+        /* enc_tok == 2 was re-routed right after the header parse; any other
          * value would have mis-sized the section descriptors above. */
-        if (UNLIKELY(gh.enc_litlen != 0)) return ZXC_ERROR_CORRUPT_DATA;
+        if (UNLIKELY(gh.enc_tok != 0)) return ZXC_ERROR_CORRUPT_DATA;
         t_ptr = p_curr;
     } else {
-        if (UNLIKELY(gh.enc_litlen != ZXC_SECTION_ENCODING_HUFFMAN)) return ZXC_ERROR_CORRUPT_DATA;
+        if (UNLIKELY(gh.enc_tok != ZXC_SECTION_ENCODING_HUFFMAN)) return ZXC_ERROR_CORRUPT_DATA;
         const int rc = zxc_decode_tok_pivco(ctx, p_curr, sz_tokens, gh.n_sequences);
         if (UNLIKELY(rc != ZXC_OK)) return rc;
         t_ptr = ctx->tok_buffer;

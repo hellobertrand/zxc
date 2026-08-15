@@ -131,9 +131,9 @@ General LZ-style format with separated streams.
 
 ```text
 +-------------------------------+
-| GLO Header (16 bytes)         |
+| GLO Header (12 bytes)         |
 +-------------------------------+
-| 4 Section Descriptors (32B)   |
+| Section descriptors (0/4/8B)  |
 +-------------------------------+
 | Literals stream               |
 +-------------------------------+
@@ -141,34 +141,69 @@ General LZ-style format with separated streams.
 +-------------------------------+
 | Offsets stream                |
 +-------------------------------+
-| Extras stream                 |
+| Extras stream (+ slack pad)   |
 +-------------------------------+
 ```
 
-### GLO Header (16 bytes)
+### GLO Header (12 bytes)
 
 ```text
 Offset  Size  Field
 0x00    4     n_sequences (u32)
 0x04    4     n_literals (u32)
 0x08    1     enc_lit    (0=RAW, 1=RLE, 2=HUFFMAN, 3=HUFFMAN_DICT)
-0x09    1     enc_litlen (0=RAW tokens, 2=HUFFMAN tokens; level 7 only)
+0x09    1     enc_tok    (0=RAW tokens, 2=HUFFMAN tokens; level 7 only)
 0x0A    1     enc_mlen   (reserved; match lengths share the token byte)
 0x0B    1     enc_off    (0=16-bit offsets, 1=8-bit offsets)
-0x0C    4     reserved
 ```
 
-### GLO section descriptors (4 × 8 bytes)
+### GLO section descriptors (0, 4 or 8 bytes)
 
-Descriptor format (packed `u64`):
-- low 32 bits: compressed size
-- high 32 bits: raw size
+Only the two sizes the header cannot imply are stored, each a `u32` and only
+when present, in this order:
 
-Section order:
-1. Literals
-2. Tokens
-3. Offsets
-4. Extras
+| Descriptor | Present when | Meaning |
+|---|---|---|
+| `lit_comp` | `enc_lit != 0` | compressed size of the literal section |
+| `tok_comp` | `enc_tok == 2` | compressed size of the token section |
+
+Everything else is derived, so it cannot be forged inconsistently:
+
+- literals raw size = `n_literals`; when `enc_lit = 0` the section size is
+  `n_literals` too, which is why no descriptor is written.
+- tokens size = `n_sequences` when `enc_tok = 0`.
+- offsets size = `n_sequences × (enc_off ? 1 : 2)`.
+- **extras size = whatever payload remains** after the three sections above.
+
+Levels 3 to 5 therefore carry **no descriptor at all** (RAW literals, RAW
+tokens), level 6 carries 4 bytes and level 7 carries 8.
+
+Because the extras section is sized as the residue and its values are read on
+demand, an end pointer sitting past the last real extra is harmless. That is
+what lets the slack padding below hide there at no cost in the header.
+
+### Literal section slack (normative)
+
+At least **32 bytes** of payload **MUST** follow the literal section:
+
+```text
+comp_size - header - descriptors - lit_comp >= 32
+```
+
+Decoders copy literals with an over-reading wild copy, and a RAW literal
+section points straight into the caller's buffer, so those bytes are what keeps
+the last copy of a block inside the payload. A decoder **MUST** reject a block
+that does not satisfy the inequality rather than read past the literals.
+
+The tokens, offsets and extras sections already cover it on any real block --
+32 bytes is reached from 16 sequences with 1-byte offsets, 11 with 2-byte ones.
+When they do not (a block of very few sequences), the encoder appends zero
+padding until they do. The padding falls inside the extras residue, so it needs
+no field of its own; its contents are unconstrained and **MUST NOT** be
+validated.
+
+The same rule and the same reasoning apply to GHI (§ 5.3), where the sequences
+and extras sections play the role of tokens/offsets/extras.
 
 ### GLO stream content
 
@@ -182,9 +217,9 @@ Section order:
     no inline lengths header).
 - **Tokens stream**:
   - one byte per sequence: `(LL << 4) | ML`, `LL` and `ML` being 4-bit fields.
-  - if `enc_litlen=0` (all levels ≤ 6), these `n_sequences` bytes are stored
+  - if `enc_tok=0` (all levels ≤ 6), these `n_sequences` bytes are stored
     verbatim and the Tokens section's compressed size equals `n_sequences`.
-  - if `enc_litlen=2` (level 7 only), the token bytes are Huffman-coded
+  - if `enc_tok=2` (level 7 only), the token bytes are Huffman-coded
     over the token alphabet using the exact § 5.2.1 layout (inline 128-byte
     lengths header included); the section's compressed size is the encoded
     payload size and the decoder expands it back to `n_sequences` bytes.
@@ -294,7 +329,7 @@ covers only the symbols seen in training; the encoder falls back to a
 per-block table (`enc_lit=2`) or RAW/RLE for any block containing a literal
 byte without a code.
 
-The level-7 token section reuses the § 5.2.1 layout (`enc_litlen=2`, with the
+The level-7 token section reuses the § 5.2.1 layout (`enc_tok=2`, with the
 inline lengths header) over the token byte alphabet.
 
 ## 5.3 GHI block (`type=2`)
@@ -305,36 +340,36 @@ High-throughput LZ format with packed 32-bit sequences.
 
 ```text
 +-------------------------------+
-| GHI Header (16 bytes)         |
-+-------------------------------+
-| 3 Section Descriptors (24B)   |
+| GHI Header (12 bytes)         |
 +-------------------------------+
 | Literals stream               |
 +-------------------------------+
 | Sequences stream (N * 4B)     |
 +-------------------------------+
-| Extras stream                 |
+| Extras stream (+ slack pad)   |
 +-------------------------------+
 ```
 
-### GHI Header (16 bytes)
+### GHI Header (12 bytes)
 
-Same binary layout as GLO header:
-- `n_sequences`, `n_literals`, `enc_lit`, `enc_litlen`, `enc_mlen`, `enc_off`, reserved.
+Same binary layout as the GLO header:
+- `n_sequences`, `n_literals`, `enc_lit`, `enc_tok`, `enc_mlen`, `enc_off`.
 
 In practice for GHI:
-- `enc_lit = 0` (raw literals)
+- `enc_lit = 0` (raw literals), so the literal section size is `n_literals`.
+- `enc_tok` and `enc_mlen` are written as `0`.
 - `enc_off` is written as `0` and **must be ignored on decode**: GHI has no offset
   stream, sequence words always store 16-bit offsets, so the field bounds nothing.
 
-### GHI section descriptors (3 × 8 bytes)
+### GHI section descriptors: none
 
-Section order:
-1. Literals
-2. Sequences
-3. Extras
+Every size follows from the header, so GHI writes no descriptor at all:
 
-Each descriptor uses the same packed size encoding as GLO (`u64`: comp32|raw32).
+- literals = `n_literals` (always RAW)
+- sequences = `n_sequences × 4`
+- extras = the remaining payload, slack padding included
+
+The § 5.2 literal-section slack rule applies here too.
 
 ### GHI sequence word format (32 bits)
 
@@ -691,11 +726,12 @@ as follows:
 - File header: **16** bytes
 - Block header: **8** bytes
 - Block checksum (optional): **4** bytes
-- GLO header: **16** bytes
-- GHI header: **16** bytes
-- Section descriptor: **8** bytes
-- GLO descriptors total: **32** bytes
-- GHI descriptors total: **24** bytes
+- GLO header: **12** bytes
+- GHI header: **12** bytes
+- Section descriptor: **4** bytes (`u32`, written only when needed)
+- GLO descriptors total: **0**, **4** or **8** bytes (levels 3-5 / 6 / 7)
+- GHI descriptors total: **0** bytes
+- Minimum slack behind the literal section: **32** bytes
 - File footer: **12** bytes
 - Dictionary file header (`.zxd`): **16** bytes
 
