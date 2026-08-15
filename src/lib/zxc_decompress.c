@@ -90,64 +90,12 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
     return 0;
 }
 
-/**
- * @brief Shuffle masks for overlapping copies with small offsets (0-15).
- *
- * Shared between ARM NEON and x86 SSSE3. Each row defines how to replicate
- * source bytes to fill 16 bytes when offset < 16.
- */
 #if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(ZXC_USE_AVX2) || \
     defined(ZXC_USE_AVX512)
 /**
- * @brief Precomputed masks for handling overlapping data during decompression.
+ * @brief Periodic pattern masks, `mask[off][i] = i % off`, for off in [2, 31].
  *
- * This 16x16 lookup table contains 128-bit aligned masks used to efficiently
- * mask off or combine bytes when processing overlapping copy operations or
- * boundary conditions in the ZXC decompression algorithm.
- *
- * The alignment to 16 bytes ensures compatibility with SIMD instructions
- * (like SSE/AVX) for optimized memory operations.
- */
-static const ZXC_ALIGN(16) uint8_t zxc_overlap_masks[16][16] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},      // off=0 (unused)
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},      // off=1 (RLE handled separately)
-    {0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1},      // off=2
-    {0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0},      // off=3
-    {0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3},      // off=4
-    {0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0},      // off=5
-    {0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3},      // off=6
-    {0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 0, 1},      // off=7
-    {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},      // off=8
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1, 2, 3, 4, 5, 6},      // off=9
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5},      // off=10
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 1, 2, 3, 4},     // off=11
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3},    // off=12
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 1, 2},   // off=13
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0, 1},  // off=14
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 0}  // off=15
-};
-#endif
-
-/**
- * @brief Per-offset store stride for periodic overlap runs: the largest
- *        multiple of @c off that fits in 16 bytes, i.e. `16 - (16 % off)`.
- *
- * Advancing the output cursor by a multiple of @c off keeps the 16-byte
- * pattern vector phase-aligned, so the run is emitted with pure stores of a
- * single register. Entries 0 and 1 are unused (RLE handled separately).
- */
-static const uint8_t zxc_overlap_strides[16] = {16, 16, 16, 15, 16, 15, 12, 14,
-                                                16, 9,  10, 11, 12, 13, 14, 15};
-
-#if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(ZXC_USE_AVX2) || \
-    defined(ZXC_USE_AVX512)
-/**
- * @brief 32-byte periodic pattern masks, `mask[off][i] = i % off`, off in [2,31].
- *
- * Twin of @ref zxc_overlap_masks one register wider, and reaching offsets up to
- * 31 instead of 15. Used by the long-match path only: doubling the pattern
- * doubles the store width, which pays when the run is long enough for the loop
- * to dominate its own setup. Rows 0 and 1 are unused (offset 1 has its splat).
+ * Rows 0 and 1 stay zero and unused: offset 1 is a byte splat, not a pattern.
  */
 static const ZXC_ALIGN(32) uint8_t zxc_overlap_masks32[32][32] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -218,93 +166,29 @@ static const ZXC_ALIGN(32) uint8_t zxc_overlap_masks32[32][32] = {
 #endif
 
 /**
- * @brief Per-offset store stride for the 32-byte pattern: `(32 / off) * off`.
+ * @brief Store stride for the 32-byte pattern: `(32 / off) * off`.
  *
- * For off >= 17 no second period fits, so the stride is the offset itself and
- * the tail of each 32-byte store is simply rewritten by the next one. Still
- * beats the 16-byte form for every offset in [2,31].
+ * Past 16 no second period fits, so the stride is the offset itself and each
+ * store's tail gets rewritten by the next one.
  */
 static const uint8_t zxc_overlap_strides32[32] = {32, 32, 32, 30, 32, 30, 30, 28, 32, 27, 30,
                                                   22, 24, 26, 28, 30, 32, 17, 18, 19, 20, 21,
                                                   22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
 
 /**
- * @brief Copies an @p ml-byte LZ run whose pattern repeats with period @p off (2..15).
- *
- * Builds the 16-byte periodic pattern `out[i] = dst[-off + (i % off)]` once
- * (one shuffle on NEON/SSSE3, a wrap-counter byte loop on the SSE2/scalar
- * tier), then emits 16-byte stores advancing by @ref zxc_overlap_strides so
- * the pattern never needs re-shuffling. May overshoot up to 15 bytes past
- * @p ml; the caller must guarantee @ref ZXC_PAD_SIZE bytes of headroom.
- *
- * @param[out] dst Output cursor; the run source is `dst - off`.
- * @param[in]  off Back-reference distance, in [2, 15].
- * @param[in]  ml  Run length in bytes (>= 1).
- */
-// codeql[cpp/unused-static-function] : False positive
-static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run(uint8_t* dst, const uint32_t off,
-                                                          const uint64_t ml) {
-    const size_t stride = zxc_overlap_strides[off];
-    size_t copied = 0;
-#if defined(ZXC_USE_NEON64)
-    const uint8x16_t mask = vld1q_u8(zxc_overlap_masks[off]);
-    const uint8x16_t pat = vqtbl1q_u8(vld1q_u8(dst - off), mask);
-    do {
-        vst1q_u8(dst + copied, pat);
-        copied += stride;
-    } while (copied < ml);
-
-#elif defined(ZXC_USE_NEON32)
-    uint8x8x2_t src_tbl;
-    src_tbl.val[0] = vld1_u8(dst - off);
-    src_tbl.val[1] = vld1_u8(dst - off + 8);
-    const uint8x8_t pat_lo = vtbl2_u8(src_tbl, vld1_u8(zxc_overlap_masks[off]));
-    const uint8x8_t pat_hi = vtbl2_u8(src_tbl, vld1_u8(zxc_overlap_masks[off] + 8));
-    do {
-        vst1_u8(dst + copied, pat_lo);
-        vst1_u8(dst + copied + 8, pat_hi);
-        copied += stride;
-    } while (copied < ml);
-
-#elif defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
-    const __m128i mask = _mm_load_si128((const __m128i*)zxc_overlap_masks[off]);
-    const __m128i src_data = _mm_loadu_si128((const __m128i*)(dst - off));
-    const __m128i pat = _mm_shuffle_epi8(src_data, mask);
-    do {
-        _mm_storeu_si128((__m128i*)(dst + copied), pat);
-        copied += stride;
-    } while (copied < ml);
-
-#else
-    // SSE2-only tier and non-SIMD builds: no PSHUFB, build the pattern with a
-    // wrap counter (no per-byte modulo), then store it via zxc_copy16.
-    const uint8_t* src = dst - off;
-    uint8_t pat[16];
-    uint32_t k = 0;
-    for (size_t i = 0; i < 16; i++) {
-        pat[i] = src[k];
-        if (++k == off) k = 0;
-    }
-    do {
-        zxc_copy16(dst + copied, pat);
-        copied += stride;
-    } while (copied < ml);
-#endif
-}
-
-/**
  * @brief Copies an @p ml-byte run of period @p off (2..31) with 32-byte stores.
  *
- * Same idea as @ref zxc_decode_copy_overlap_run with the pattern register pair
- * widened to 32 bytes, which both doubles the store width and lifts the offset
- * ceiling from 15 to 31 - so the long-match path needs one arm where it used to
- * need two. Reserved for long runs: building the pattern costs two table lookups
- * and it only pays back once the loop runs more than a couple of times.
+ * Builds the run's first 32 bytes in a register pair, then stores them
+ * repeatedly. Nothing is re-shuffled: advancing by a multiple of @p off keeps
+ * the pattern in phase.
  *
- * The 32-byte source load reads up to @c dst+29 on the smallest offsets, i.e.
- * destination bytes not written yet. They are never selected - every mask index
- * is `< off` and therefore addresses `dst-off .. dst-1` - and they stay inside
- * the @ref ZXC_PAD_SIZE headroom the caller guarantees.
+ * Replaced a 16-byte form that reloaded the source every iteration, which for
+ * offsets of 17 and up straddled two of its own recent stores and stalled on
+ * store forwarding - worth up to 7x on periodic data.
+ *
+ * Reading 32 source bytes touches destination bytes not written yet on the
+ * smallest offsets. They are never selected (every mask index is `< off`) and
+ * sit inside the @ref ZXC_PAD_SIZE headroom the caller owes.
  *
  * May overshoot up to 31 bytes past @p ml, like the 32-byte copy ladder.
  *
@@ -385,6 +269,83 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run32(uint8_t* dst, const 
         zxc_copy16(dst + copied + 16, pat + 16);
         copied += stride;
     } while (copied < ml);
+#endif
+}
+
+/**
+ * @brief Overlap copy for a run of period @p off (2..31) bounded by @c ml <= 32.
+ *
+ * Bounded length buys two things over @ref zxc_decode_copy_overlap_run32: the
+ * loop disappears, and the upper 16 bytes are skipped whenever @p ml allows -
+ * which is most of the time, GLO matches averaging 7 to 11 bytes here.
+ *
+ * The lower half never needs the second source register: its mask indices are
+ * `i % off` for `i < 16`, hence always below 16. Only the upper half can reach
+ * past 15, and only when `off > 16`.
+ *
+ * Overshoots to 16 or 32 bytes, so the caller owes @ref ZXC_PAD_SIZE of
+ * headroom. Reading 32 source bytes is safe because no mask index reaches
+ * `dst` (all are `< off`).
+ *
+ * @param[out] dst Output cursor; the run source is `dst - off`.
+ * @param[in]  off Back-reference distance, in [2, 31].
+ * @param[in]  ml  Match length, `<= 32`.
+ */
+// codeql[cpp/unused-static-function] : False positive
+static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_short(uint8_t* dst, const uint32_t off,
+                                                            const uint64_t ml) {
+#if defined(ZXC_USE_NEON64)
+    const uint8x16_t s0 = vld1q_u8(dst - off);
+    vst1q_u8(dst, vqtbl1q_u8(s0, vld1q_u8(zxc_overlap_masks32[off])));
+    if (UNLIKELY(ml > 16)) {
+        uint8x16x2_t tbl;
+        tbl.val[0] = s0;
+        tbl.val[1] = vld1q_u8(dst - off + 16);
+        vst1q_u8(dst + 16, vqtbl2q_u8(tbl, vld1q_u8(zxc_overlap_masks32[off] + 16)));
+    }
+
+#elif defined(ZXC_USE_NEON32)
+    uint8x8x2_t lo_tbl;
+    lo_tbl.val[0] = vld1_u8(dst - off);
+    lo_tbl.val[1] = vld1_u8(dst - off + 8);
+    const uint8_t* const m = zxc_overlap_masks32[off];
+    vst1_u8(dst, vtbl2_u8(lo_tbl, vld1_u8(m)));
+    vst1_u8(dst + 8, vtbl2_u8(lo_tbl, vld1_u8(m + 8)));
+    if (UNLIKELY(ml > 16)) {
+        uint8x8x4_t tbl;
+        tbl.val[0] = lo_tbl.val[0];
+        tbl.val[1] = lo_tbl.val[1];
+        tbl.val[2] = vld1_u8(dst - off + 16);
+        tbl.val[3] = vld1_u8(dst - off + 24);
+        vst1_u8(dst + 16, vtbl4_u8(tbl, vld1_u8(m + 16)));
+        vst1_u8(dst + 24, vtbl4_u8(tbl, vld1_u8(m + 24)));
+    }
+
+#elif defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
+    /* pshufb reaches 16 bytes, so only the upper half needs two tables: shuffle
+     * both and pick per byte on bit 4 of the index. */
+    const __m128i t0 = _mm_loadu_si128((const __m128i*)(dst - off));
+    _mm_storeu_si128(
+        (__m128i*)dst,
+        _mm_shuffle_epi8(t0, _mm_load_si128((const __m128i*)zxc_overlap_masks32[off])));
+    if (UNLIKELY(ml > 16)) {
+        const __m128i t1 = _mm_loadu_si128((const __m128i*)(dst - off + 16));
+        const __m128i m_hi = _mm_load_si128((const __m128i*)(zxc_overlap_masks32[off] + 16));
+        _mm_storeu_si128(
+            (__m128i*)(dst + 16),
+            _mm_blendv_epi8(_mm_shuffle_epi8(t0, m_hi),
+                            _mm_shuffle_epi8(t1, _mm_sub_epi8(m_hi, _mm_set1_epi8(16))),
+                            _mm_slli_epi16(m_hi, 3)));
+    }
+
+#else
+    const uint8_t* src = dst - off;
+    const size_t n = (ml > 16) ? 32 : 16;
+    uint32_t k = 0;
+    for (size_t i = 0; i < n; i++) {
+        dst[i] = src[k];
+        if (++k == off) k = 0;
+    }
 #endif
 }
 
@@ -544,13 +505,12 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
 /**
  * @brief Match copy for a length that cannot exceed 32 bytes.
  *
- * @ref zxc_decode_copy_match without the `ml > 32` ladder, which a bounded
- * @p ml makes unreachable in the `off >= 32` arm. The other arms keep their
- * inner tests: they still fire for @p ml in 17..32, and below @p off == 32 a
- * 32-byte copy would read destination bytes not yet written.
+ * @ref zxc_decode_copy_match without its length ladder, which a bounded @p ml
+ * makes unreachable. Below 32 a full-width copy would read destination bytes
+ * not written yet, hence the overlap form.
  *
- * As above, 32 and 16 are the widths of @ref zxc_copy32 and @ref zxc_copy16,
- * not @ref ZXC_PAD_SIZE.
+ * The 32 is the width of @ref zxc_copy32, not @ref ZXC_PAD_SIZE - they only
+ * happen to share a value.
  *
  * @param[in,out] d_ptr Output cursor; match source is @c d_ptr-off. Needs
  *                      @ref ZXC_PAD_SIZE bytes of overshoot headroom.
@@ -562,13 +522,10 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_short(uint8_t* RESTRICT d_pt
     const uint8_t* match_src = d_ptr - off;
     if (LIKELY(off >= 32)) {
         zxc_copy32(d_ptr, match_src);
-    } else if (off >= 16) {
-        zxc_copy16(d_ptr, match_src);
-        if (UNLIKELY(ml > 16)) zxc_copy16(d_ptr + 16, match_src + 16);
     } else if (off == 1) {
         zxc_decode_fill_run(d_ptr, match_src[0], ml);
     } else {
-        zxc_decode_copy_overlap_run(d_ptr, off, ml);
+        zxc_decode_copy_overlap_short(d_ptr, off, ml);
     }
 }
 
