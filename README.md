@@ -536,7 +536,7 @@ The default block size is **512 KB**, tuned for bulk/archival workloads where ra
 | Block Size | cctx memory | dctx memory | Ratio (level -3) | Decompression gain vs 256 KB |
 |:----------:|:-----------:|:-----------:|:----------------:|:----------------------------:|
 | 256 KB | ~1.03 MB | ~256 KB | 46.36% | — |
-| 512 KB *(default)* | ~1.78 MB | ~512 KB | 45.81% *(−0.55 pp)* | +1% to +8% depending on CPU |
+| 512 KB *(default)* | ~1.78 MB | ~512 KB | 45.79% *(−0.57 pp)* | +1% to +8% depending on CPU |
 
 ```bash
 # CLI — fall back to 256 KB blocks (e.g. embedded / streaming)
