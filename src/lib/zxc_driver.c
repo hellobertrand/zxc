@@ -286,7 +286,11 @@ typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
  * @var zxc_stream_ctx_t::compression_mode
  *      Indicates the operation mode (e.g., compression or decompression).
  * @var zxc_stream_ctx_t::io_error
- *      Atomic flag to signal if an I/O error occurred during processing.
+ *      Atomic flag telling every thread to stop. Set for any failure, not just
+ *      I/O, because the wait loops poll it without holding the lock.
+ * @var zxc_stream_ctx_t::fail_code
+ *      The first failure's actual error code, kept so a corrupt archive is not
+ *      reported as an I/O problem. Written under @c lock, first writer wins.
  * @var zxc_stream_ctx_t::processor
  *      Function pointer or object responsible for the actual chunk processing
  * logic.
@@ -329,6 +333,7 @@ typedef struct {
     int shutdown_workers;
     int compression_mode;
     ZXC_ATOMIC int io_error;
+    int fail_code;
     zxc_chunk_processor_t processor;
     int write_idx;
     int compression_level;
@@ -480,6 +485,8 @@ static void* zxc_stream_worker(void* arg) {
         job->result_sz = UNLIKELY(res < 0) ? 0 : (size_t)res;
         job->status = JOB_STATUS_PROCESSED;
         if (UNLIKELY(res < 0)) {
+            /* Keep the codec's own diagnosis; io_error only stops the others. */
+            if (!ctx->fail_code) ctx->fail_code = res;
             ctx->io_error = 1;
             pthread_cond_broadcast(&ctx->cond_writer);
             pthread_cond_broadcast(&ctx->cond_reader);
@@ -685,6 +692,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ctx.compression_mode = mode;
     ctx.processor = func;
     ctx.io_error = 0;
+    ctx.fail_code = 0;
     ctx.compression_level = level;
     ctx.ring_size = (size_t)num_workers * 4U;
     ctx.chunk_size = runtime_chunk_sz;
@@ -1003,10 +1011,17 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
         /* Verify Footer Content: Source Size and Global Checksum */
         if (!ctx.io_error) {
-            int valid = (zxc_le64(footer) == (uint64_t)w_args.total_bytes);
+            const int size_ok = (zxc_le64(footer) == (uint64_t)w_args.total_bytes);
+            int valid = size_ok;
             if (valid && checksum_enabled && ctx.file_has_checksum)
                 valid = (zxc_le32(footer + sizeof(uint64_t)) == d_global_hash);
-            if (UNLIKELY(!valid)) ctx.io_error = 1;
+            if (UNLIKELY(!valid)) {
+                /* A footer that disagrees with what we produced is corruption,
+                 * not an I/O fault; tell the two apart for the caller. */
+                if (!ctx.fail_code)
+                    ctx.fail_code = size_ok ? ZXC_ERROR_BAD_CHECKSUM : ZXC_ERROR_CORRUPT_DATA;
+                ctx.io_error = 1;
+            }
         }
     }
 
@@ -1014,7 +1029,9 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ZXC_FREE(workers);
     ZXC_ALIGNED_FREE(mem_block);
 
-    if (UNLIKELY(ctx.io_error)) return ZXC_ERROR_IO;
+    /* fail_code carries the real cause when there is one; a bare io_error flag
+     * means the failure really was a read/write. */
+    if (UNLIKELY(ctx.io_error)) return ctx.fail_code ? ctx.fail_code : ZXC_ERROR_IO;
 
     return w_args.total_bytes;
 }
