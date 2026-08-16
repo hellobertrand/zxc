@@ -73,10 +73,13 @@ jobs:
 
       - name: Generate current ABI XML
         run: |
-          abidw --headers-dir include "${{ steps.lib.outputs.path }}" \
+          abidw --headers-dir include --drop-private-types \
+                "${{ steps.lib.outputs.path }}" \
                 --out-file build/current.abi.xml
           echo "=== Symbols summary ==="
           grep -c '<elf-symbol' build/current.abi.xml || true
+          echo "=== Public types retained ==="
+          grep -c '<class-decl' build/current.abi.xml || true
 
       # ---- regenerate mode: publish artifact, do not diff ----
       - name: Upload regenerated baseline
