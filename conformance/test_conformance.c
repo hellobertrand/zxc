@@ -209,6 +209,72 @@ static int test_valid_vector(const char *zxc_path, const char *expected_path)
 
 /* ---------- invalid vector test ------------------------------------------ */
 
+/* Expected rejection reason, per vector.
+ *
+ * Asserting only "was rejected" is not enough, and the suite has been burned by
+ * it: across the v6 and v7 bumps every vector started failing on the version
+ * byte instead of on its own defect, and the suite kept printing PASS while
+ * testing nothing. Pinning the code is what makes that visible - if a vector
+ * degrades to BAD_VERSION, this table stops matching and CI says so.
+ *
+ * Regenerate the vectors with zxc_invalid_gen after a format bump, then update
+ * any code that legitimately changed. A vector missing from the table is a
+ * failure, so new ones cannot be added without declaring their reason. */
+typedef struct {
+    const char *name; /* file stem, without the .zxc */
+    int expected;     /* zxc_error_t the decoder must return */
+} invalid_expect_t;
+
+static const invalid_expect_t INVALID_EXPECT[] = {
+    {"all_0xff_garbage", ZXC_ERROR_BAD_MAGIC},
+    {"bad_block_checksum", ZXC_ERROR_BAD_CHECKSUM},
+    {"bad_block_size_field", ZXC_ERROR_BAD_BLOCK_SIZE},
+    {"bad_block_type", ZXC_ERROR_BAD_BLOCK_TYPE},
+    {"bad_checksum_algo", ZXC_ERROR_BAD_HEADER},
+    {"bad_enc_lit", ZXC_ERROR_CORRUPT_DATA},
+    {"bad_eof_compsize", ZXC_ERROR_BAD_HEADER},
+    {"bad_header_crc", ZXC_ERROR_BAD_HEADER},
+    {"bad_magic", ZXC_ERROR_BAD_MAGIC},
+    {"bad_version", ZXC_ERROR_BAD_VERSION},
+    {"corrupt_payload", ZXC_ERROR_BAD_CHECKSUM},
+    {"dict_required", ZXC_ERROR_DICT_REQUIRED},
+    {"ghi_forged_offset", ZXC_ERROR_BAD_OFFSET},
+    {"glo_forged_enc_off", ZXC_ERROR_CORRUPT_DATA},
+    {"glo_insufficient_slack", ZXC_ERROR_CORRUPT_DATA},
+    {"magic_then_zeros", ZXC_ERROR_BAD_VERSION},
+    {"too_short_4bytes", ZXC_ERROR_SRC_TOO_SMALL},
+    {"truncated_header_only", ZXC_ERROR_SRC_TOO_SMALL},
+    {"truncated_mid_block", ZXC_ERROR_SRC_TOO_SMALL},
+    {"v6_archive_glo_huffman", ZXC_ERROR_BAD_VERSION},
+    {"v7_archive_glo", ZXC_ERROR_BAD_VERSION},
+    {"zero_length", ZXC_ERROR_SRC_TOO_SMALL},
+};
+#define INVALID_EXPECT_COUNT (sizeof INVALID_EXPECT / sizeof INVALID_EXPECT[0])
+
+/* Matches a vector path against the table by file stem. Returns 1 on hit. */
+static int expected_error_for(const char *zxc_path, int *out)
+{
+    const char *base = strrchr(zxc_path, '/');
+#ifdef _WIN32
+    const char *bs = strrchr(zxc_path, '\\');
+    if (bs && (!base || bs > base)) base = bs;
+#endif
+    base = base ? base + 1 : zxc_path;
+
+    const size_t len = strlen(base);
+    if (len < 4 || strcmp(base + len - 4, ".zxc") != 0) return 0;
+    const size_t stem = len - 4;
+
+    for (size_t i = 0; i < INVALID_EXPECT_COUNT; i++) {
+        if (strlen(INVALID_EXPECT[i].name) == stem &&
+            strncmp(INVALID_EXPECT[i].name, base, stem) == 0) {
+            *out = INVALID_EXPECT[i].expected;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int test_invalid_vector(const char *zxc_path)
 {
     size_t comp_sz = 0;
@@ -236,6 +302,16 @@ static int test_invalid_vector(const char *zxc_path)
             fprintf(stderr, "FAIL: %s  should be rejected but decoded %lld bytes\n",
                     zxc_path, (long long)result);
             ok = 0;
+        } else {
+            int want = 0;
+            if (!expected_error_for(zxc_path, &want)) {
+                fprintf(stderr, "FAIL: %s  has no entry in INVALID_EXPECT\n", zxc_path);
+                ok = 0;
+            } else if ((int)result != want) {
+                fprintf(stderr, "FAIL: %s  rejected as %s, expected %s\n", zxc_path,
+                        zxc_error_name((int)result), zxc_error_name(want));
+                ok = 0;
+            }
         }
         free(output);
     }

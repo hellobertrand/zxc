@@ -821,8 +821,8 @@ static ZXC_NOINLINE int zxc_decode_block_glo_entropy_safe(const zxc_cctx_t* REST
  * @brief Unified GLO (General Low) block decoder body, shared by the fast,
  *        safe, dictionary and entropy-token variants.
  *
- * Decodes a block in the internal GLO format; the decompressed size is derived
- * from the Section Descriptors in the payload. @p safe, @p has_dict and
+ * Decodes a block in the internal GLO format. The decompressed size is not on
+ * the wire: it falls out of walking the sequences. @p safe, @p has_dict and
  * @p tok_entropy must be compile-time constants (0 or 1): the 4x-unrolled
  * loops are duplicated inside @c if(safe)/else branches so each variant keeps
  * single-assignment @c const save pointers, and after constant propagation
@@ -1212,8 +1212,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
  * @brief Unified GHI (General High) block decoder body, shared by the fast, safe
  *        and dictionary variants.
  *
- * Decodes a block in the internal GHI format; the decompressed size is derived
- * from the Section Descriptors in the payload. @p safe and @p has_dict must be
+ * Decodes a block in the internal GHI format. The decompressed size is not on
+ * the wire: it falls out of walking the sequences. @p safe and @p has_dict must be
  * compile-time constants (0 or 1): the 4x-unrolled loops are duplicated inside
  * @c if(safe)/else branches so each variant keeps single-assignment @c const
  * save pointers, and after constant propagation only one branch survives per
@@ -1239,6 +1239,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     const size_t dict_size = has_dict ? ctx->dict_size : 0;
 
     if (UNLIKELY(zxc_read_ghi_header(src, src_size, &gh) != ZXC_OK)) return ZXC_ERROR_BAD_HEADER;
+    if (UNLIKELY(gh.enc_lit != ZXC_SECTION_ENCODING_RAW || gh.enc_tok != 0))
+        return ZXC_ERROR_CORRUPT_DATA;
 
     const uint8_t* const p_data = src + ZXC_GHI_HEADER_BINARY_SIZE;
     const uint8_t* p_curr = p_data;

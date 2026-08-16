@@ -103,6 +103,10 @@ static size_t make_text(uint8_t** out) {
     static const char unit[] = "the quick brown fox jumps over the lazy dog. ";
     const size_t ulen = sizeof(unit) - 1, reps = 40, n = ulen * reps;
     uint8_t* p = (uint8_t*)malloc(n);
+    if (!p) {
+        *out = NULL;
+        return 0;
+    }
     for (size_t i = 0; i < reps; i++) memcpy(p + i * ulen, unit, ulen);
     *out = p;
     return n;
@@ -163,9 +167,22 @@ int main(int argc, char** argv) {
     const size_t n_ghi = build_base(text, text_n, &ghi, &baseg);
     if (!n_plain || !n_chk || !n_ghi) return 1;
 
+    /* Every GLO patch below addresses a fixed offset inside block 0's sub-header.
+     * If a heuristic change ever made that block RAW, the patches would land on
+     * literal bytes and the vectors would quietly stop testing anything. */
+    if (base[BLK0] != ZXC_BLOCK_GLO || basec[BLK0] != ZXC_BLOCK_GLO) {
+        fprintf(stderr, "  block 0 is type %u/%u, expected GLO - vectors would test nothing\n",
+                base[BLK0], basec[BLK0]);
+        return 1;
+    }
+
     printf("Generating invalid vectors into %s/\n", dir);
 
     uint8_t* d = (uint8_t*)malloc(n_chk > n_plain ? n_chk : n_plain);
+    if (!d) {
+        fprintf(stderr, "  OOM\n");
+        return 1;
+    }
 
 /* Each vector starts from a pristine copy of one base, patches one field, and
  * re-signs whatever CRC covers that field. */
@@ -244,13 +261,22 @@ int main(int argc, char** argv) {
         /* GHI sequence word: force the 16-bit offset field to reach far behind
          * the start of the output, which no decoder may follow. */
         uint8_t* g = (uint8_t*)malloc(n_ghi);
+        if (!g) {
+            fprintf(stderr, "  OOM\n");
+            return 1;
+        }
         memcpy(g, baseg, n_ghi);
-        if (g[BLK0] != ZXC_BLOCK_GHI) {
-            fprintf(stderr, "  base is not a GHI block (type %u)\n", g[BLK0]);
+        /* seq0 is derived from the wire, so check the block really is GHI, that
+         * it has a sequence to forge, and that the word is inside the buffer -
+         * otherwise the patch lands in the extras padding and the vector ships
+         * decoding cleanly, i.e. testing nothing. */
+        const size_t seq0 =
+            PAY0 + ZXC_GHI_HEADER_BINARY_SIZE + zxc_le32(g + PAY0 + 4) /* n_literals, RAW */;
+        if (g[BLK0] != ZXC_BLOCK_GHI || zxc_le32(g + PAY0) == 0 || seq0 + 4 > n_ghi) {
+            fprintf(stderr, "  cannot forge a GHI offset (type %u, n_seq %u, seq0 %zu of %zu)\n",
+                    g[BLK0], zxc_le32(g + PAY0), seq0, n_ghi);
             failures++;
         } else {
-            const size_t seq0 = PAY0 + ZXC_GHI_HEADER_BINARY_SIZE +
-                                zxc_le32(g + PAY0 + 4) /* n_literals, RAW */;
             uint32_t w = zxc_le32(g + seq0);
             w = (w & 0xFFFF0000U) | 0xFFFFU; /* max encodable distance */
             zxc_store_le32(g + seq0, w);

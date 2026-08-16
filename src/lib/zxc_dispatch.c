@@ -841,13 +841,13 @@ static int64_t zxc_decompress_frame(const uint8_t* src, size_t src_size, uint8_t
 // cppcheck-suppress unusedFunction
 int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RESTRICT dst,
                        const size_t dst_capacity, const zxc_decompress_opts_t* opts) {
-    if (UNLIKELY(!src || src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE ||
-                 (!dst && dst_capacity != 0)))
-        return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!src || (!dst && dst_capacity != 0))) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
+        return ZXC_ERROR_SRC_TOO_SMALL;
 
     if (UNLIKELY(!dst || dst_capacity == 0)) {
         // Empty-frame case (stored size == 0).
-        if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD)) return ZXC_ERROR_NULL_INPUT;
+        if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
         const uint8_t* footer = (const uint8_t*)src + src_size - ZXC_FILE_FOOTER_SIZE;
         return (zxc_le64(footer) == 0) ? 0 : (int64_t)ZXC_ERROR_DST_TOO_SMALL;
     }
@@ -872,12 +872,12 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
 
     int file_has_checksums = 0;
     uint32_t header_dict_id = 0;
-    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
-                                      &header_dict_id) != ZXC_OK ||
-                 zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0,
-                               file_has_checksums && checksum_enabled, dict_size) != ZXC_OK)) {
-        return ZXC_ERROR_BAD_HEADER;
-    }
+    const int hrc = zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
+                                         &header_dict_id);
+    if (UNLIKELY(hrc != ZXC_OK)) return hrc;
+    if (UNLIKELY(zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0,
+                               file_has_checksums && checksum_enabled, dict_size) != ZXC_OK))
+        return ZXC_ERROR_MEMORY;
 
     // Dictionary validation
     if (header_dict_id != 0) {

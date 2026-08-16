@@ -1,7 +1,7 @@
 # ZXC Compressed File Format (Technical Specification)
 
-**Date**: July 2026
-**Format Version**: 7
+**Date**: August 2026
+**Format Version**: 8
 
 This document describes the on-disk binary format of a ZXC compressed file.
 It formalizes the current reference implementation of format version **8**.
@@ -773,7 +773,7 @@ Generated archive size: **58 bytes**.
 ### 14.1 Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 07 13 80 00 00 00 00 00 00 00 3E 5D
+00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
@@ -784,15 +784,15 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 07 | 13 | 80 | 00 00 00 00 00 00 00 | 3E 5D
+F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 6E 5B
 ```
 
 - `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
-- `07` -> format version 7.
+- `08` -> format version 8.
 - `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
 - `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `3E 5D` -> header CRC16 (LE value `0x5D3E`).
+- `6E 5B` -> header CRC16 (LE value `0x5B6E`).
 
 #### B) Data Block #0 (RAW)
 
