@@ -273,9 +273,9 @@ extern "C" {
 #endif
 /** @} */ /* end of Compiler Abstractions */
 
-/* Heap allocator and cache-line-aligned allocator macros are now defined
- * in @c zxc_deps.h (included at the top of this header), so non-libc
- * targets can override them by vendoring that single file. */
+// Heap allocator and cache-line-aligned allocator macros are now defined
+// in @c zxc_deps.h (included at the top of this header), so non-libc
+// targets can override them by vendoring that single file.
 
 /**
  * @name Endianness Detection
@@ -624,12 +624,12 @@ typedef struct {
     int16_t lvl_start[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2];
     int n_nodes;
     int max_depth;
-    /* Flat-subtree fast path: flat_d[nid] = D (>= 2) when nid roots a MAXIMAL
-     * complete subtree with all leaves exactly D levels down. Its wire run is
-     * the symbols' packed D-bit residuals instead of D partition bitmaps (same
-     * bits, decode = unpack+lookup), and covered[nid] marks its strict
-     * descendants, absent from the wire. Both sides derive this from the code
-     * lengths, so nothing is signalled. */
+    // Flat-subtree fast path: flat_d[nid] = D (>= 2) when nid roots a MAXIMAL
+    // complete subtree with all leaves exactly D levels down. Its wire run is
+    // the symbols' packed D-bit residuals instead of D partition bitmaps (same
+    // bits, decode = unpack+lookup), and covered[nid] marks its strict
+    // descendants, absent from the wire. Both sides derive this from the code
+    // lengths, so nothing is signalled.
     uint8_t flat_d[ZXC_PIVCO_MAX_NODES];
     uint8_t covered[ZXC_PIVCO_MAX_NODES];
 } zxc_pivco_tree_t;
@@ -1372,16 +1372,12 @@ void* zxc_aligned_malloc(const size_t size, const size_t alignment);
  */
 void zxc_aligned_free(void* ptr);
 
-/*
- * ============================================================================
- * COMPRESSION CONTEXT & STRUCTS
- * ============================================================================
- */
+// ============================================================================
+// COMPRESSION CONTEXT & STRUCTS
+// ============================================================================
 
-/*
- * INTERNAL API
- * ------------
- */
+// INTERNAL API
+// ------------
 
 /**
  * @brief Calculates a 32-bit hash for a given input buffer.
@@ -1492,14 +1488,13 @@ int zxc_write_ghi_header(uint8_t* RESTRICT dst, const size_t rem,
 int zxc_read_ghi_header(const uint8_t* RESTRICT src, const size_t len,
                         zxc_gnr_header_t* RESTRICT gh);
 
-/* ============================================================================
- * Huffman codec for the GLO literal stream (level >= 6).
- *
- * On-disk layout, decoder geometry and tunables: see
- * @ref ZXC_HUF_MAX_CODE_LEN_ULTRA and the surrounding "Huffman Codec Constants"
- * group above.
- * ============================================================================
- */
+// ============================================================================
+// Huffman codec for the GLO literal stream (level >= 6).
+//
+// On-disk layout, decoder geometry and tunables: see
+// @ref ZXC_HUF_MAX_CODE_LEN_ULTRA and the surrounding "Huffman Codec Constants"
+// group above.
+// ============================================================================
 
 /**
  * @brief Build length-limited canonical Huffman code lengths from a frequency table.
@@ -1575,19 +1570,19 @@ void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT ou
  */
 int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len);
 
-/* --------------------------------------------------------------------------
- * PivCo-Huffman section codec (enc 2/3)
- *
- * Layout from PivCo-Huffman by Marcin Zukowski
- * (https://github.com/MarcinZukowski/pivco-huffman); implemented
- * independently here. See zxc_huffman.c for the codec.
- *
- * Same code bits as canonical Huffman, reordered by tree LEVEL: for each
- * internal node in BFS order, its branch bits (one per symbol routed through
- * it, LSB-first, byte-aligned). No size fields - the decoder derives every run
- * length from the root count and popcounts. Decoding is bottom-up level merges,
- * shuffle-parallel and gather-free.
- * -------------------------------------------------------------------------- */
+// --------------------------------------------------------------------------
+// PivCo-Huffman section codec (enc 2/3)
+//
+// Layout from PivCo-Huffman by Marcin Zukowski
+// (https://github.com/MarcinZukowski/pivco-huffman); implemented
+// independently here. See zxc_huffman.c for the codec.
+//
+// Same code bits as canonical Huffman, reordered by tree LEVEL: for each
+// internal node in BFS order, its branch bits (one per symbol routed through
+// it, LSB-first, byte-aligned). No size fields - the decoder derives every run
+// length from the root count and popcounts. Decoding is bottom-up level merges,
+// shuffle-parallel and gather-free.
+// --------------------------------------------------------------------------
 
 /** @brief Extra scratch slack required past `n` by the PivCo decoder. */
 #define ZXC_PIVCO_SCRATCH_PAD 32
@@ -1634,14 +1629,14 @@ int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, size_t payload_
                                 const zxc_pivco_decode_aux_t* RESTRICT aux,
                                 uint8_t* RESTRICT scratch);
 
-/* ---------------------------------------------------------------------------
- * Compression / decompression context.
- *
- * The context owns the working buffers (hash table, sequence buffers, scratch)
- * that encoder and decoder reuse across blocks. It stays private - the public
- * APIs already wrap it opaquely - so the layout can evolve (cache-line
- * placement, extra scratch arenas) without breaking the ABI.
- * --------------------------------------------------------------------------- */
+// ---------------------------------------------------------------------------
+// Compression / decompression context.
+//
+// The context owns the working buffers (hash table, sequence buffers, scratch)
+// that encoder and decoder reuse across blocks. It stays private - the public
+// APIs already wrap it opaquely - so the layout can evolve (cache-line
+// placement, extra scratch arenas) without breaking the ABI.
+// ---------------------------------------------------------------------------
 
 /**
  * @struct zxc_cctx_t
@@ -1660,22 +1655,22 @@ int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, size_t payload_
  *   entry whose stored epoch differs from `ctx->epoch` is treated as empty.
  */
 typedef struct {
-    /* Hot zone: random access / high frequency.
-     * Kept at the start to ensure they reside in the first cache line (64 bytes). */
+    // Hot zone: random access / high frequency.
+    // Kept at the start to ensure they reside in the first cache line (64 bytes).
     uint32_t* hash_table;  /**< Hash table for LZ77 match positions (epoch|pos). */
     uint8_t* hash_tags;    /**< Split tag table for fast match rejection (8-bit tags). */
     uint16_t* chain_table; /**< Chain table for collision resolution. */
     void* memory_block;    /**< Single allocation block owner. */
     uint32_t epoch;        /**< Current epoch for lazy hash table invalidation. */
 
-    /* Warm zone: sequential access per sequence. */
+    // Warm zone: sequential access per sequence.
     uint32_t* buf_sequences; /**< Buffer for sequence records (packed: LL(8)|ML(8)|Offset(16)). */
     uint8_t* buf_tokens;     /**< Buffer for token sequences. */
     uint16_t* buf_offsets;   /**< Buffer for offsets. */
     uint8_t* buf_extras;     /**< Buffer for extra lengths (vbytes for LL/ML). */
     uint8_t* literals;       /**< Buffer for literal bytes. */
 
-    /* Cold zone: configuration / scratch / resizeable. */
+    // Cold zone: configuration / scratch / resizeable.
     uint8_t* lit_buffer;            /**< Scratch buffer for literals (RLE / Huffman). */
     size_t lit_buffer_cap;          /**< Current capacity of the scratch buffer. */
     uint8_t* work_buf;              /**< Padded scratch buffer for buffer-API decompression. */
@@ -1711,7 +1706,7 @@ typedef struct {
                                          accumulates post-LZ literal byte frequencies here
                                          (256 entries). NULL outside dictionary training. */
 
-    /* Block-size derived parameters (computed once at init). */
+    // Block-size derived parameters (computed once at init).
     size_t chunk_size;    /**< Effective block size in bytes. */
     uint32_t offset_bits; /**< log2(chunk_size) - governs epoch_mark shift. */
     uint32_t offset_mask; /**< (1U << offset_bits) - 1 */
@@ -1878,13 +1873,13 @@ int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
 
-/* ---------------------------------------------------------------------------
- * Internal frame primitives.
- *
- * Read/write the ZXC file header, block header and footer. Kept internal:
- * exposing them would freeze on-disk details (block_flags layout, footer
- * composition) that stay free to evolve until the format is declared stable.
- * --------------------------------------------------------------------------- */
+// ---------------------------------------------------------------------------
+// Internal frame primitives.
+//
+// Read/write the ZXC file header, block header and footer. Kept internal:
+// exposing them would freeze on-disk details (block_flags layout, footer
+// composition) that stay free to evolve until the format is declared stable.
+// ---------------------------------------------------------------------------
 
 /**
  * @brief On-disk header structure for a ZXC block (8 bytes, little-endian).
@@ -1993,10 +1988,10 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
                           const uint32_t global_hash, const int checksum_enabled);
 
-/* ---------------------------------------------------------------------------
- * Seekable cross-TU hooks (defined in zxc_seekable.c, consumed by the
- * FILE*-flavored open helper in zxc_driver.c).
- * ------------------------------------------------------------------------- */
+// ---------------------------------------------------------------------------
+// Seekable cross-TU hooks (defined in zxc_seekable.c, consumed by the
+// FILE*-flavored open helper in zxc_driver.c).
+// -------------------------------------------------------------------------
 
 /**
  * @brief Hands ownership of a heap-allocated reader context to a seekable

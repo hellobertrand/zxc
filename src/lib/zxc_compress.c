@@ -15,12 +15,10 @@
  * by @ref zxc_dispatch.c.
  */
 
-/*
- * Function Multi-Versioning Support
- * With ZXC_FUNCTION_SUFFIX defined (e.g. _avx2), rename the entry point AND the
- * Huffman entry points this TU consumes. The defines precede zxc_internal.h so
- * the header's prototypes get the suffix too, keeping callers and callees matched.
- */
+// Function Multi-Versioning Support
+// With ZXC_FUNCTION_SUFFIX defined (e.g. _avx2), rename the entry point AND the
+// Huffman entry points this TU consumes. The defines precede zxc_internal.h so
+// the header's prototypes get the suffix too, keeping callers and callees matched.
 #ifdef ZXC_FUNCTION_SUFFIX
 #define ZXC_CAT_IMPL(x, y) x##y
 #define ZXC_CAT(x, y) ZXC_CAT_IMPL(x, y)
@@ -54,7 +52,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int us
     }
 }
 
-/* SSE2 selected, not merely available: guards the two helpers below. */
+// SSE2 selected, not merely available: guards the two helpers below.
 #if defined(ZXC_USE_SSE2) && !(defined(ZXC_USE_AVX512) && defined(__AVX512VL__)) && \
     !defined(ZXC_USE_AVX2) && !defined(ZXC_USE_NEON64) && !defined(ZXC_USE_NEON32)
 #define ZXC_OPT_SSE2
@@ -230,10 +228,10 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
 
     int attempts = p.search_depth;
 
-    /* Repeat-offset seed (level-6 parser passes last_off; others pass 0).
-     * Probing the previous offset first often finds the longest match right
-     * away, speeding up the chain walk. It only raises best.len, never lowers
-     * it, so the result is unchanged - this is purely a speed optimization. */
+    // Repeat-offset seed (level-6 parser passes last_off; others pass 0).
+    // Probing the previous offset first often finds the longest match right
+    // away, speeding up the chain walk. It only raises best.len, never lowers
+    // it, so the result is unchanged - this is purely a speed optimization.
     if (last_off != 0U && last_off <= (uint32_t)ZXC_LZ_MAX_DIST && last_off <= cur_pos) {
         const uint8_t* const rep_ref = src + (cur_pos - last_off);
         if (zxc_le32(rep_ref) == cur_val) {
@@ -619,16 +617,16 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
         for (; L + 8 <= L_end; L += 8) {
             const __m256i v_L_lanes = _mm256_add_epi32(v_inc, _mm256_set1_epi32((int)L));
             const __m256i v_dp = _mm256_loadu_si256((const __m256i*)&dp[p + L]);
-            /* Unsigned-compare-via-bias trick:
-             *   (dp ^ 0x80000000) > (nxt ^ 0x80000000)  iff  dp > nxt
-             * because XOR with the sign bit maps unsigned ordering to
-             * signed ordering. AVX2 only has signed cmpgt for 32-bit. */
+            // Unsigned-compare-via-bias trick:
+            //   (dp ^ 0x80000000) > (nxt ^ 0x80000000)  iff  dp > nxt
+            // because XOR with the sign bit maps unsigned ordering to
+            // signed ordering. AVX2 only has signed cmpgt for 32-bit.
             const __m256i v_dp_b = _mm256_xor_si256(v_dp, v_bias);
             const __m256i v_mask = _mm256_cmpgt_epi32(v_dp_b, v_nxt_b);
             const __m256i v_dp_new = _mm256_blendv_epi8(v_dp, v_nxt, v_mask);
             _mm256_storeu_si256((__m256i*)&dp[p + L], v_dp_new);
-            /* Pack 8x int32 mask -> 8x int16 mask with signed saturation:
-             * 0xFFFFFFFF -> 0xFFFF, 0x00000000 -> 0x0000. */
+            // Pack 8x int32 mask -> 8x int16 mask with signed saturation:
+            // 0xFFFFFFFF -> 0xFFFF, 0x00000000 -> 0x0000.
             const __m128i v_mask16 = _mm_packs_epi32(_mm256_castsi256_si128(v_mask),
                                                      _mm256_extracti128_si256(v_mask, 1));
             const __m128i v_L_u16 = _mm_packus_epi32(_mm256_castsi256_si128(v_L_lanes),
@@ -670,14 +668,14 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
         for (; L + 4 <= L_end; L += 4) {
             const __m128i v_L_lanes = _mm_add_epi32(v_inc, _mm_set1_epi32((int)L));
             const __m128i v_dp = _mm_loadu_si128((const __m128i*)&dp[p + L]);
-            /* Unsigned compare via sign-bit bias (SSE2 cmpgt is signed only):
-             *   (dp ^ 0x80000000) > (nxt ^ 0x80000000)  iff  dp > nxt. */
+            // Unsigned compare via sign-bit bias (SSE2 cmpgt is signed only):
+            //   (dp ^ 0x80000000) > (nxt ^ 0x80000000)  iff  dp > nxt.
             const __m128i v_dp_b = _mm_xor_si128(v_dp, v_bias);
             const __m128i v_mask = _mm_cmpgt_epi32(v_dp_b, v_nxt_b);
             const __m128i v_dp_new = zxc_mm_blendv_epi8_sse2(v_dp, v_nxt, v_mask);
             _mm_storeu_si128((__m128i*)&dp[p + L], v_dp_new);
-            /* Narrow the 4x int32 mask / length lanes to 4x int16 (low 64 bits).
-             * packs: 0xFFFFFFFF -> 0xFFFF, 0 -> 0; packus (SSE2-emulated): u32->u16. */
+            // Narrow the 4x int32 mask / length lanes to 4x int16 (low 64 bits).
+            // packs: 0xFFFFFFFF -> 0xFFFF, 0 -> 0; packus (SSE2-emulated): u32->u16.
             const __m128i v_mask16 = _mm_packs_epi32(v_mask, v_mask);
             const __m128i v_L_u16 = zxc_mm_packus_epi32_sse2(v_L_lanes, v_L_lanes);
             __m128i v_pl = _mm_loadl_epi64((const __m128i*)&parent_len[p + L]);
@@ -689,8 +687,8 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
         }
     }
 #endif
-    /* Scalar tail (and full path on archs without SIMD).
-     * L < L_end <= UINT16_MAX (caller precondition), so the cast is lossless. */
+    // Scalar tail (and full path on archs without SIMD).
+    // L < L_end <= UINT16_MAX (caller precondition), so the cast is lossless.
     for (; L < L_end; L++) {
         if (nxt < dp[p + L]) {
             dp[p + L] = nxt;
@@ -738,17 +736,17 @@ static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const siz
                                             ZXC_HUF_MAX_CODE_LEN_DENSITY) != ZXC_OK))
         return CHAR_BIT;
 
-    /* Sample-weighted sum of code lengths = predicted Huffman bits; divide by
-     * the sample count for bits/byte, rounded up. The DP is integer, and
-     * rounding up favours matches over fractional-cost literals. */
+    // Sample-weighted sum of code lengths = predicted Huffman bits; divide by
+    // the sample count for bits/byte, rounded up. The DP is integer, and
+    // rounding up favours matches over fractional-cost literals.
     uint64_t total_bits = 0;
     for (int k = 0; k < ZXC_HUF_NUM_SYMBOLS; k++) {
         total_bits += (uint64_t)hist[k] * (uint64_t)code_len[k];
     }
     const uint32_t avg = (uint32_t)((total_bits + sampled - 1) / sampled);
 
-    /* Cap at RAW cost: if Huffman can't beat 8 bits/byte on the sample,
-     * the encoder will pick RAW anyway and 8 is the actual literal cost. */
+    // Cap at RAW cost: if Huffman can't beat 8 bits/byte on the sample,
+    // the encoder will pick RAW anyway and 8 is the actual literal cost.
     return (avg < CHAR_BIT) ? avg : CHAR_BIT;
 }
 
@@ -808,15 +806,15 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level);
     lzp_opt.use_lazy = 0;  // guard
 
-    /* With a dictionary, src = [dict | block]. The DP arrays index from the block
-     * start, so src_base points at the first block byte for literal copies while
-     * src stays the match finder's base. */
+    // With a dictionary, src = [dict | block]. The DP arrays index from the block
+    // start, so src_base points at the first block byte for literal copies while
+    // src stays the match finder's base.
     const size_t dict_sz = ctx->dict_size;
     const size_t block_sz = src_sz - dict_sz;
     const uint8_t* const src_base = src + dict_sz;
     const uint8_t* const iend = src + src_sz;
 
-    /* Block too small for any match: emit all as literals. */
+    // Block too small for any match: emit all as literals.
     if (UNLIKELY(block_sz < ZXC_LZ_SEARCH_MARGIN + 1)) {
         if (block_sz > 0) ZXC_MEMCPY(literals, src_base, block_sz);
         *lit_c_out = block_sz;
@@ -829,20 +827,20 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     const size_t search_limit_pos = block_sz - ZXC_LZ_SEARCH_MARGIN;
     const uint8_t* const search_limit = src + search_limit_pos;
 
-    /* DP arrays carved from ctx->opt_scratch, one allocation reused across
-     * blocks, each sub-buffer cache-line padded. Keep `needed` in sync with
-     * zxc_estimate_cctx_size().
-     *
-     *   dp             : (chunk+1) x u32: min cost to reach position p.
-     *   parent_len     : (chunk+1) x u16: 0 = literal, >= MIN_MATCH = match.
-     *   parent_off     : (chunk+1) x u16: biased match offset (distance-1).
-     *   match_end_bits : one bit per position, set when a match on the chosen
-     *                    path ends there - a forward actions[] stack at 1/64
-     *                    the cost.
-     *
-     * The same buffer doubles as package-merge scratch for the code-length
-     * builder: that scratch is live before the DP and after the parse is read
-     * out, never during, so capacity is just the larger of the two. */
+    // DP arrays carved from ctx->opt_scratch, one allocation reused across
+    // blocks, each sub-buffer cache-line padded. Keep `needed` in sync with
+    // zxc_estimate_cctx_size().
+    //
+    //   dp             : (chunk+1) x u32: min cost to reach position p.
+    //   parent_len     : (chunk+1) x u16: 0 = literal, >= MIN_MATCH = match.
+    //   parent_off     : (chunk+1) x u16: biased match offset (distance-1).
+    //   match_end_bits : one bit per position, set when a match on the chosen
+    //                    path ends there - a forward actions[] stack at 1/64
+    //                    the cost.
+    //
+    // The same buffer doubles as package-merge scratch for the code-length
+    // builder: that scratch is live before the DP and after the parse is read
+    // out, never during, so capacity is just the larger of the two.
     const size_t chunk = ctx->chunk_size;
     const size_t sz_dp = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint32_t));
     const size_t sz_pl = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint16_t));
@@ -853,12 +851,12 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     const size_t needed =
         (dp_needed > ZXC_HUF_BUILD_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_BUILD_SCRATCH_SIZE;
 
-    /* zxc_cctx_init pre-allocates opt_scratch inside ctx->memory_block at
-     * level >= ZXC_LEVEL_DENSITY. The formula above must stay byte-for-byte in
-     * sync with it and with zxc_estimate_cctx_size(). */
+    // zxc_cctx_init pre-allocates opt_scratch inside ctx->memory_block at
+    // level >= ZXC_LEVEL_DENSITY. The formula above must stay byte-for-byte in
+    // sync with it and with zxc_estimate_cctx_size().
     (void)needed;
 
-    /* Per-block literal cost (sample only block data, not dict prefix): */
+    // Per-block literal cost (sample only block data, not dict prefix):
     const uint32_t lit_cost = zxc_opt_estimate_lit_bits(src_base, block_sz, ctx->opt_scratch);
 
     uint32_t* const dp = (uint32_t*)ctx->opt_scratch;
@@ -870,17 +868,17 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     ZXC_MEMSET(dp + 1, 0xFF, block_sz * sizeof(uint32_t));
     ZXC_MEMSET(match_end_bits, 0, sz_bm);
 
-    /* Forward DP: visit every position, update reachable successors.
-     * `skip_until` suppresses find_best_match strictly inside the last long
-     * match - the transition from its start already covers dp[p+1..p+L], and
-     * re-searching there is what makes the parser quadratic on repetitive data. */
+    // Forward DP: visit every position, update reachable successors.
+    // `skip_until` suppresses find_best_match strictly inside the last long
+    // match - the transition from its start already covers dp[p+1..p+L], and
+    // re-searching there is what makes the parser quadratic on repetitive data.
     size_t skip_until = 0;
-    /* Rolling repeat-offset seed for find_best_match */
+    // Rolling repeat-offset seed for find_best_match
     uint32_t last_off = 0;
     for (size_t p = 0; p < search_limit_pos; p++) {
         if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
 
-        /* Literal transition. */
+        // Literal transition.
         const uint32_t lit_next = dp[p] + lit_cost;
         if (lit_next < dp[p + 1]) {
             dp[p + 1] = lit_next;
@@ -889,10 +887,10 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
         if (p < skip_until) continue;
 
-        /* Match transition: no lazy, no backtrack (anchor=ip). Sub-lengths are
-         * iterated because any L <= max_L matches at the same offset and may end
-         * at a more useful DP position. ip is absolute so dict references
-         * resolve against src. */
+        // Match transition: no lazy, no backtrack (anchor=ip). Sub-lengths are
+        // iterated because any L <= max_L matches at the same offset and may end
+        // at a more useful DP position. ip is absolute so dict references
+        // resolve against src.
         const uint8_t* ip = src_base + p;
         const zxc_match_t m = zxc_lz77_find_best_match(
             src, ip, iend, search_limit, /*anchor=*/ip, hash_table, hash_tags, chain_table,
@@ -905,18 +903,18 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                 const size_t L_max_raw = (m.len > block_sz - p) ? (block_sz - p) : (size_t)m.len;
                 const size_t L_max = (L_max_raw > UINT16_MAX) ? UINT16_MAX : L_max_raw;
 
-                /* Cost is piecewise constant in varint segments, so split
-                 * [MIN_MATCH, L_max] into:
-                 *   1. cheap   : v < ML_MASK                   -> base
-                 *   2. varint1 : v in [ML_MASK, ML_MASK + 128) -> base + 8
-                 *   3. varint2+: v >= ML_MASK + 128            -> base + 16, ...
-                 * The first two have a constant nxt and vectorize; the third is
-                 * rare enough to stay scalar. */
+                // Cost is piecewise constant in varint segments, so split
+                // [MIN_MATCH, L_max] into:
+                //   1. cheap   : v < ML_MASK                   -> base
+                //   2. varint1 : v in [ML_MASK, ML_MASK + 128) -> base + 8
+                //   3. varint2+: v >= ML_MASK + 128            -> base + 16, ...
+                // The first two have a constant nxt and vectorize; the third is
+                // rare enough to stay scalar.
                 const uint16_t off_biased = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
                 const size_t L_max_plus = L_max + 1;
                 size_t L = ZXC_LZ_MIN_MATCH_LEN;
 
-                /* 1. Cheap range. */
+                // 1. Cheap range.
                 {
                     const size_t L_cheap_end = ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK;
                     const size_t L_end = (L_max_plus < L_cheap_end) ? L_max_plus : L_cheap_end;
@@ -925,7 +923,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                                                      off_biased);
                 }
 
-                /* 2. First varint level (1-byte extension). */
+                // 2. First varint level (1-byte extension).
                 if (L < L_max_plus) {
                     const size_t L_v1_end = ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK + 128;
                     const size_t L_end = (L_max_plus < L_v1_end) ? L_max_plus : L_v1_end;
@@ -934,9 +932,9 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                                                      off_biased);
                 }
 
-                /* 3. Higher varint levels: variable cost, kept scalar.
-                 * Reached only by L >= ML_MASK + 128 + MIN_MATCH, so the
-                 * v >= ML_MASK guard from the original loop is implied. */
+                // 3. Higher varint levels: variable cost, kept scalar.
+                // Reached only by L >= ML_MASK + 128 + MIN_MATCH, so the
+                // v >= ML_MASK guard from the original loop is implied.
                 for (; L < L_max_plus; L++) {
                     uint32_t cost = ZXC_OPT_MATCH_COST_BASE;
                     uint32_t v = (uint32_t)(L - ZXC_LZ_MIN_MATCH_LEN) - ZXC_TOKEN_ML_MASK;
@@ -957,8 +955,8 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         }
     }
 
-    /* Tail (last ZXC_LZ_SEARCH_MARGIN bytes) can only be literals: the match finder
-     * stops at search_limit so its 8-byte probe reads stay in bounds. */
+    // Tail (last ZXC_LZ_SEARCH_MARGIN bytes) can only be literals: the match finder
+    // stops at search_limit so its 8-byte probe reads stay in bounds.
     for (size_t p = search_limit_pos; p < block_sz; p++) {
         if (UNLIKELY(dp[p] == UINT32_MAX)) continue;
         const uint32_t lit_next = dp[p] + lit_cost;
@@ -968,9 +966,9 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         }
     }
 
-    /* Backtrack from src_sz to 0. Only match endpoints are recorded; literals
-     * are the unmarked runs between them, rebuilt at emission from lit_start,
-     * so they need no backtrack storage. */
+    // Backtrack from src_sz to 0. Only match endpoints are recorded; literals
+    // are the unmarked runs between them, rebuilt at emission from lit_start,
+    // so they need no backtrack storage.
     {
         size_t pos = block_sz;
         while (pos > 0) {
@@ -984,9 +982,9 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         }
     }
 
-    /* Forward emission: walk match_end_bits word-by-word, peeling set bits
-     * with ctzll. Each set bit gives a match endpoint; parent_len/parent_off
-     * at that position recover (length, offset). */
+    // Forward emission: walk match_end_bits word-by-word, peeling set bits
+    // with ctzll. Each set bit gives a match endpoint; parent_len/parent_off
+    // at that position recover (length, offset).
     uint32_t seq_c = 0;
     size_t lit_c = 0;
     size_t extras_sz = 0;
@@ -1031,7 +1029,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
         }
     }
 
-    /* Tail literals after the last match (or all literals if no match). */
+    // Tail literals after the last match (or all literals if no match).
     if (lit_start < block_sz) {
         const size_t tail = block_sz - lit_start;
         ZXC_MEMCPY(literals + lit_c, src_base + lit_start, tail);
@@ -1070,9 +1068,9 @@ static void zxc_lz_seed_dict(const uint8_t* RESTRICT src, const size_t dict_size
     const int use_hash5 = (level >= 3);
     const size_t limit = dict_size - (ZXC_LZ_MIN_MATCH_LEN - 1);
 
-    /* Sparse seeding for the first half, dense for the second half.
-     * Positions near the end of the dict produce shorter offsets and are
-     * more likely to yield matches, so they deserve full coverage. */
+    // Sparse seeding for the first half, dense for the second half.
+    // Positions near the end of the dict produce shorter offsets and are
+    // more likely to yield matches, so they deserve full coverage.
     const size_t half = limit / 2;
     for (size_t i = 0; i < half; i += 4) {
         const uint64_t val8 = zxc_le64(src + i);
@@ -1190,8 +1188,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     size_t extras_sz = 0;
     uint16_t max_offset = 0;  // Track max offset for 1-byte/2-byte mode decision
 
-    /* Level 6+: price-based optimal parser (fills outputs and skips the
-     * lazy loop + last_lits handling below via `goto parse_done`). */
+    // Level 6+: price-based optimal parser (fills outputs and skips the
+    // lazy loop + last_lits handling below via `goto parse_done`).
     if (level >= ZXC_LEVEL_DENSITY) {
         const int rc = zxc_lz77_optimal_parse_glo(
             ctx, src, src_sz, hash_table, hash_tags, chain_table, epoch_mark, offset_mask, level,
@@ -1290,8 +1288,8 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     }
 
 parse_done:;
-    /* Dictionary-table trainer hook: accumulate the REAL post-LZ literal
-     * frequencies (see zxc_train_dict_huf). Cold path, NULL outside training. */
+    // Dictionary-table trainer hook: accumulate the REAL post-LZ literal
+    // frequencies (see zxc_train_dict_huf). Cold path, NULL outside training.
     if (UNLIKELY(ctx->lit_freq_acc != NULL)) {
         for (size_t i = 0; i < lit_c; i++) ctx->lit_freq_acc[literals[i]]++;
     }
@@ -1349,7 +1347,7 @@ parse_done:;
             while (p <= p_end - 16) {
                 const uint8x16_t v = vld1q_u8(p);
                 const uint8x16_t eq = vceqq_u8(v, vb);
-                /* SHRN nibble-mask: see find_best_match above for rationale. */
+                // SHRN nibble-mask: see find_best_match above for rationale.
                 const uint64_t mask =
                     vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
                 if (LIKELY(mask == ~(uint64_t)0)) {
@@ -1553,8 +1551,8 @@ parse_done:;
             }
         }
 
-        /* RLE over RAW: space-speed J comparison. The per-level premium
-         * reproduces the historical margin exactly below ULTRA. */
+        // RLE over RAW: space-speed J comparison. The per-level premium
+        // reproduces the historical margin exactly below ULTRA.
         const size_t rle_j = rle_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_rle_q8(level));
         if (rle_j < best_j) {
             enc_lit = ZXC_SECTION_ENCODING_RLE;
@@ -1562,9 +1560,9 @@ parse_done:;
         }
     }
 
-    /* Level >= 6: Huffman as a third literal-encoding candidate. Histogram,
-     * length-limited code lengths, exact PivCo section size, and switch if its
-     * J (size + decode tax) beats the current winner's. */
+    // Level >= 6: Huffman as a third literal-encoding candidate. Histogram,
+    // length-limited code lengths, exact PivCo section size, and switch if its
+    // J (size + decode tax) beats the current winner's.
     uint8_t huf_code_len[ZXC_HUF_NUM_SYMBOLS];
     size_t huf_total_size = SIZE_MAX;
     uint32_t lit_freq[ZXC_HUF_NUM_SYMBOLS]; /* valid iff huf_total_size != SIZE_MAX */
@@ -1593,8 +1591,8 @@ parse_done:;
             (void)zxc_huf_nudge_code_lengths(freq, huf_code_len, ctx->opt_scratch,
                                              zxc_huf_enc_max_code_len(level));
             huf_total_size = zxc_huf_calc_size(freq, huf_code_len, 1);
-            /* Space-speed: the entropy candidate must beat the current winner's
-             * J, paying its own decode tax over the copy path. */
+            // Space-speed: the entropy candidate must beat the current winner's
+            // J, paying its own decode tax over the copy path.
             if (huf_total_size != SIZE_MAX) {
                 const size_t huf_j = huf_total_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_huf_q8(level));
                 if (huf_j < best_j) {
@@ -1605,35 +1603,35 @@ parse_done:;
         }
     }
 
-    /* Shared dictionary table (level >= 6, dict with a table): the HUFFMAN
-     * bitstream minus the 128-byte header, so it stays viable far below
-     * ZXC_HUF_MIN_LITERALS. A literal without a code drops the candidate. */
+    // Shared dictionary table (level >= 6, dict with a table): the HUFFMAN
+    // bitstream minus the 128-byte header, so it stays viable far below
+    // ZXC_HUF_MIN_LITERALS. A literal without a code drops the candidate.
     size_t huf_dict_total_size = SIZE_MAX;
     if (level >= ZXC_LEVEL_DENSITY && ctx->dict_huf_tree_ok && lit_c > 0) {
-        /* The dict candidate runs on sections too small for the per-block
-         * table, so the histogram may not have been built above. */
+        // The dict candidate runs on sections too small for the per-block
+        // table, so the histogram may not have been built above.
         if (huf_total_size == SIZE_MAX) {
             ZXC_MEMSET(lit_freq, 0, sizeof(uint32_t) * ZXC_HUF_NUM_SYMBOLS);
             for (size_t i = 0; i < lit_c; i++) lit_freq[literals[i]]++;
         }
-        /* zxc_huf_calc_size returns SIZE_MAX for unencodable candidates
-         * (a literal byte without a code in the shared table). */
+        // zxc_huf_calc_size returns SIZE_MAX for unencodable candidates
+        // (a literal byte without a code in the shared table).
         huf_dict_total_size =
             zxc_huf_calc_size_dict(lit_freq, ctx->dict_huf->code_len, &ctx->dict_huf->tree);
         if (huf_dict_total_size != SIZE_MAX) {
-            /* Same J rule against the running winner: vs the per-block Huffman
-             * candidate the equal entropy taxes cancel (pure size comparison),
-             * while RAW/RLE baselines keep their decode-tax edge. */
+            // Same J rule against the running winner: vs the per-block Huffman
+            // candidate the equal entropy taxes cancel (pure size comparison),
+            // while RAW/RLE baselines keep their decode-tax edge.
             const size_t huf_dict_j =
                 huf_dict_total_size + ZXC_SS_TAX(lit_c, zxc_ss_prem_huf_q8(level));
-            /* Last candidate: no need to keep best_j updated past this point. */
+            // Last candidate: no need to keep best_j updated past this point.
             if (huf_dict_j < best_j) enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
         }
     }
 
-    /* Level-7 (ULTRA): Huffman-code the token stream with the literal codec -
-     * tokens are a <= 256-symbol alphabet. Same J rule; the decoder picks the
-     * path from gh.enc_tok. opt_scratch is free by now. */
+    // Level-7 (ULTRA): Huffman-code the token stream with the literal codec -
+    // tokens are a <= 256-symbol alphabet. Same J rule; the decoder picks the
+    // path from gh.enc_tok. opt_scratch is free by now.
     uint8_t tok_code_len[ZXC_HUF_NUM_SYMBOLS];
     uint8_t enc_tok = ZXC_SECTION_ENCODING_RAW;
     size_t tok_huf_size = 0;
@@ -1646,8 +1644,8 @@ parse_done:;
             (void)zxc_huf_nudge_code_lengths(tfreq, tok_code_len, ctx->opt_scratch,
                                              zxc_huf_enc_max_code_len(level));
             tok_huf_size = zxc_huf_calc_size(tfreq, tok_code_len, 1);
-            /* Space-speed J comparison (this path is ULTRA-only): the PivCo
-             * token section pays the same decode tax as PivCo literals. */
+            // Space-speed J comparison (this path is ULTRA-only): the PivCo
+            // token section pays the same decode tax as PivCo literals.
             if (tok_huf_size != SIZE_MAX &&
                 tok_huf_size + ZXC_SS_TAX((size_t)seq_c, zxc_ss_prem_huf_q8(level)) < (size_t)seq_c)
                 enc_tok = ZXC_SECTION_ENCODING_HUFFMAN;
@@ -1802,11 +1800,11 @@ parse_done:;
     }
     rem -= sz_off;
 
-    /* The sections behind the literals must total ZXC_BLOCK_LIT_SLACK bytes so
-     * the decoder's literal wild-copy can overshoot. Tokens and offsets alone
-     * clear it from 16 sequences on, so pad is 0 on any real block. It rides
-     * inside the extras section, which the decoder sizes from the payload
-     * residue - hence no wire field. */
+    // The sections behind the literals must total ZXC_BLOCK_LIT_SLACK bytes so
+    // the decoder's literal wild-copy can overshoot. Tokens and offsets alone
+    // clear it from 16 sequences on, so pad is 0 on any real block. It rides
+    // inside the extras section, which the decoder sizes from the payload
+    // residue - hence no wire field.
     const size_t behind_lit = sz_tok + sz_off + sz_ext;
     const size_t pad = (behind_lit < ZXC_BLOCK_LIT_SLACK) ? ZXC_BLOCK_LIT_SLACK - behind_lit : 0;
 
@@ -1986,8 +1984,8 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const size_t sz_seq = seq_c * sizeof(uint32_t);
     const size_t sz_ext = extras_c;
 
-    /* See the GLO twin. GHI literals are always RAW, so the slack always
-     * matters here. */
+    // See the GLO twin. GHI literals are always RAW, so the slack always
+    // matters here.
     const size_t behind_lit = sz_seq + sz_ext;
     const size_t pad = (behind_lit < ZXC_BLOCK_LIT_SLACK) ? ZXC_BLOCK_LIT_SLACK - behind_lit : 0;
 
