@@ -18,11 +18,6 @@
  * them - coverage silently went to zero across the v6 and v7 bumps. Regenerating
  * from here after a bump keeps each vector testing what its name claims.
  *
- * Deliberately NOT regenerated (they must stay pinned to an old version):
- *   v6_archive_glo_huffman, v7_archive_glo   - old-version rejection
- *   bad_magic, all_0xff_garbage, magic_then_zeros, too_short_4bytes,
- *   zero_length                              - never reach version checking
- *
  * Usage:
  *   zxc_invalid_gen <output-dir>    # defaults to "conformance/invalid"
  *

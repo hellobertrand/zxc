@@ -245,8 +245,6 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"too_short_4bytes", ZXC_ERROR_SRC_TOO_SMALL},
     {"truncated_header_only", ZXC_ERROR_SRC_TOO_SMALL},
     {"truncated_mid_block", ZXC_ERROR_SRC_TOO_SMALL},
-    {"v6_archive_glo_huffman", ZXC_ERROR_BAD_VERSION},
-    {"v7_archive_glo", ZXC_ERROR_BAD_VERSION},
     {"zero_length", ZXC_ERROR_SRC_TOO_SMALL},
 };
 #define INVALID_EXPECT_COUNT (sizeof INVALID_EXPECT / sizeof INVALID_EXPECT[0])
@@ -459,6 +457,20 @@ int main(int argc, char **argv)
         }
 
         name_list_free(&zxc_files);
+    }
+
+    /* Every declared vector must exist */
+    for (size_t i = 0; i < INVALID_EXPECT_COUNT; i++) {
+        char p[1024];
+        snprintf(p, sizeof p, "%s/%s.zxc", invalid_dir, INVALID_EXPECT[i].name);
+        total++;
+        if (file_exists(p)) {
+            passed++;
+        } else {
+            fprintf(stderr, "FAIL: %s declared in INVALID_EXPECT but the vector is missing\n",
+                    INVALID_EXPECT[i].name);
+            failed++;
+        }
     }
 
     /* --- Summary --- */

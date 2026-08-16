@@ -64,12 +64,11 @@ echo "Passed: $pass  Failed: $fail"
 | Checksum             | 3     | Per-block and global checksum enabled             |
 | Multi-block          | 2     | 16 blocks per file (4 KB block size)             |
 | Seekable             | 3     | Seekable archives with seek table                |
-| Invalid              | 22    | Bad magic, bad version (v6 and v7 archives), bad CRC, bad block size/type, bad checksum algorithm, truncated, corrupt payload, garbage, forged `enc_lit`/`enc_off`, forged GHI offset, insufficient literal slack, missing dictionary |
+| Invalid              | 20    | Bad magic, bad version, bad CRC, bad block size/type, bad checksum algorithm, truncated, corrupt payload, garbage, forged `enc_lit`/`enc_off`, forged GHI offset, insufficient literal slack, missing dictionary |
 
 Every invalid vector is a well-formed archive of the **current** format version
-with exactly one field corrupted, except the two that pin old-version rejection
-(`v6_archive_glo_huffman`, `v7_archive_glo`) and the malformed-preamble cases,
-which never reach version checking. Regenerate them after a format bump with:
+with exactly one field corrupted, except the malformed-preamble cases, which
+never reach version checking. Regenerate them after a format bump with:
 
 ```sh
 cmake --build build --target zxc_invalid_gen
