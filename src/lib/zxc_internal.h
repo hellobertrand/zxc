@@ -420,9 +420,11 @@ extern "C" {
  *  8-byte block header and the optional 4-byte checksum.
  *
  *  Sub-header (12 B) + widest GLO section descriptors (8 B) + widest slack padding
- *  (@ref ZXC_BLOCK_LIT_SLACK) = 52 B, plus 28 B of margin. Used by
- *  zxc_compress_block_bound() and zxc_compress_bound(). */
-#define ZXC_BLOCK_FORMAT_OVERHEAD 80
+ *  (@ref ZXC_BLOCK_LIT_SLACK) = 52 B, plus the customary 16 B of margin for
+ *  future format evolution. Used by zxc_compress_block_bound() and
+ *  zxc_compress_bound().
+ */
+#define ZXC_BLOCK_FORMAT_OVERHEAD 68
 
 /** @brief Widest GLO section descriptors: literal and token compressed sizes. */
 #define ZXC_GLO_MAX_DESC_SIZE (2 * sizeof(uint32_t))
