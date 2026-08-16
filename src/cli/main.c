@@ -316,6 +316,9 @@ static int g_progress_mode = ZXC_PROGRESS_AUTO;
 /* Shared literal Huffman table from the -D .zxd file (malloc'd copy), passed
  * through the compress/decompress opts. NULL when the dict carries none. */
 static void* g_dict_huf = NULL;
+// Compression-only, like g_dict_huf: read straight into the opts structs at
+// the two build sites rather than threaded through every process_* signature.
+static int g_priority = ZXC_PRIORITY_RATIO;
 
 /* Enables printf-style format/argument checking by the compiler on GCC/Clang
  * (catches format-vs-argument mismatches at every call site); no-op on MSVC. */
@@ -375,7 +378,7 @@ typedef enum {
     MODE_TRAIN_DICT
 } zxc_mode_t;
 
-enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS };
+enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS, OPT_PRIORITY };
 
 // Forward declaration for recursive mode
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
@@ -512,6 +515,7 @@ void print_help(const char* app) {
         "  -D, --dict FILE   Use pre-trained dictionary (.zxd). Required to decompress\n"
         "                    an archive that was compressed with a dictionary\n"
         "  -S, --seekable    Append seek table for random-access decompression\n"
+        "      --priority P  Optimise for 'ratio' (default) or 'decode'\n"
         "  -o, --output FILE Write output to FILE (else derived from input;\n"
         "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
         "  -k, --keep        Keep input file\n"
@@ -1087,6 +1091,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .block_size = block_size,
             .checksum_enabled = checksum_enabled,
             .seekable = seekable,
+            .priority = g_priority,
             .dict = dict,
             .dict_size = dict_size,
             .dict_huf = g_dict_huf,
@@ -1229,7 +1234,8 @@ int main(int argc, char** argv) {
     const char* dict_path = NULL;
     const char* output_path = NULL;
 
-    static const struct option long_options[] = {{"train", no_argument, 0, OPT_TRAIN_DICT},
+    static const struct option long_options[] = {{"priority", required_argument, 0, OPT_PRIORITY},
+                                                 {"train", no_argument, 0, OPT_TRAIN_DICT},
                                                  {"progress", required_argument, 0, OPT_PROGRESS},
                                                  {"output", required_argument, 0, 'o'},
                                                  {"dict", required_argument, 0, 'D'},
@@ -1356,6 +1362,17 @@ int main(int argc, char** argv) {
                 break;
             case 'S':
                 seekable = 1;
+                break;
+            case OPT_PRIORITY:
+                if (strcmp(optarg, "ratio") == 0) {
+                    g_priority = ZXC_PRIORITY_RATIO;
+                } else if (strcmp(optarg, "decode") == 0) {
+                    g_priority = ZXC_PRIORITY_DECODE;
+                } else {
+                    fprintf(stderr, "Error: invalid priority '%s' (expected 'ratio' or 'decode')\n",
+                            optarg);
+                    return EXIT_FAILURE;
+                }
                 break;
             case 'D':
                 dict_path = optarg;
@@ -1730,6 +1747,7 @@ int main(int argc, char** argv) {
                                                  .level = level,
                                                  .block_size = block_size,
                                                  .checksum_enabled = checksum,
+                                                 .priority = g_priority,
                                                  .dict = dict,
                                                  .dict_size = dict_size,
                                                  .dict_huf = g_dict_huf};

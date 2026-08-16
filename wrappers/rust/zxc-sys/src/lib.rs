@@ -193,6 +193,8 @@ pub struct zxc_compress_opts_t {
     pub checksum_enabled: c_int,
     /// 1 to append a seek table for random-access decompression, 0 to disable.
     pub seekable: c_int,
+    /// What to optimise for: 0 = ratio (default), 1 = decode speed.
+    pub priority: c_int,
     /// Pre-trained dictionary content (NULL = none).
     pub dict: *const c_void,
     /// Dictionary size in bytes (0 = none, max [`ZXC_DICT_SIZE_MAX`]).
@@ -214,6 +216,7 @@ impl Default for zxc_compress_opts_t {
             block_size: 0,
             checksum_enabled: 0,
             seekable: 0,
+            priority: 0,
             dict: std::ptr::null(),
             dict_size: 0,
             dict_huf: std::ptr::null(),

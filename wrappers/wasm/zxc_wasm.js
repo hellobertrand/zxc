@@ -275,11 +275,11 @@ export default async function createZXC(moduleOverrides, factory) {
   // --- Options struct layout -----------------------------------------------
   // zxc_compress_opts_t (WASM32 layout, all fields 4-byte aligned):
   //   int n_threads (off 0)  | int level (4)  | size_t block_size (8)
-  //   int checksum_enabled (12) | int seekable (16)
-  //   const void* dict (20) | size_t dict_size (24) | const void* dict_huf (28)
-  //   ptr progress_cb (32) | ptr user_data (36)
-  // Total: 40 bytes in WASM32
-  const COMPRESS_OPTS_SIZE = 40;
+  //   int checksum_enabled (12) | int seekable (16) | int priority (20)
+  //   const void* dict (24) | size_t dict_size (28) | const void* dict_huf (32)
+  //   ptr progress_cb (36) | ptr user_data (40)
+  // Total: 44 bytes in WASM32
+  const COMPRESS_OPTS_SIZE = 44;
 
   // zxc_decompress_opts_t:
   //   int n_threads (0) | int checksum_enabled (4)
@@ -323,10 +323,11 @@ export default async function createZXC(moduleOverrides, factory) {
     dictPtr,
     dictSize,
     dictHufPtr,
+    priority,
   ) {
     const ptr = _malloc(COMPRESS_OPTS_SIZE);
     // Zero-fill covers n_threads (0), block_size (8, default),
-    // progress_cb (32) and user_data (36).
+    // progress_cb (36) and user_data (40).
     Module.HEAPU8.fill(0, ptr, ptr + COMPRESS_OPTS_SIZE);
     // level (offset 4)
     Module.HEAP32[(ptr >> 2) + 1] = level;
@@ -334,10 +335,12 @@ export default async function createZXC(moduleOverrides, factory) {
     Module.HEAP32[(ptr >> 2) + 3] = checksum ? 1 : 0;
     // seekable (offset 16)
     Module.HEAP32[(ptr >> 2) + 4] = seekable ? 1 : 0;
-    // dict (offset 20), dict_size (offset 24), dict_huf (offset 28)
-    Module.HEAPU32[(ptr >> 2) + 5] = dictPtr || 0;
-    Module.HEAPU32[(ptr >> 2) + 6] = dictSize || 0;
-    Module.HEAPU32[(ptr >> 2) + 7] = dictHufPtr || 0;
+    // priority (offset 20)
+    Module.HEAP32[(ptr >> 2) + 5] = priority | 0;
+    // dict (offset 24), dict_size (offset 28), dict_huf (offset 32)
+    Module.HEAPU32[(ptr >> 2) + 6] = dictPtr || 0;
+    Module.HEAPU32[(ptr >> 2) + 7] = dictSize || 0;
+    Module.HEAPU32[(ptr >> 2) + 8] = dictHufPtr || 0;
     return ptr;
   }
 
@@ -384,6 +387,8 @@ export default async function createZXC(moduleOverrides, factory) {
    * @param {number} [opts.level=3] - Compression level (1-7).
    * @param {boolean} [opts.checksum=false] - Enable checksums.
    * @param {boolean} [opts.seekable=false] - Append seek table for random-access.
+   * @param {number} [opts.priority=0] - What to optimise for: 0 = ratio
+   *   (default), 1 = decode speed (under 1% of size for a faster decode).
    * @param {Dictionary|Uint8Array} [opts.dict] - A {@link Dictionary}, or raw
    *   pre-trained dictionary content.
    * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table
@@ -396,6 +401,7 @@ export default async function createZXC(moduleOverrides, factory) {
     const level = (opts && opts.level) || _default_level();
     const checksum = (opts && opts.checksum) || false;
     const seekable = (opts && opts.seekable) || false;
+    const priority = (opts && opts.priority) || 0;
     const { dict, dictHuf } = _splitDictOption(opts);
 
     const bound = _compress_bound(data.length);
@@ -414,6 +420,7 @@ export default async function createZXC(moduleOverrides, factory) {
       dictPtr,
       dict ? dict.length : 0,
       dictHufPtr,
+      priority,
     );
 
     try {

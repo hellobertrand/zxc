@@ -257,6 +257,7 @@ typedef struct {
     size_t block_size;        // Block size in bytes (0 = 512 KB default).
     int    checksum_enabled;  // 1 = enable checksums, 0 = disable.
     int    seekable;          // 1 = append seek table for random access.
+    int    priority;          // 0 = ratio (default), 1 = decode speed.
     const void* dict;         // Pre-trained dictionary content (NULL = none).
     size_t dict_size;         // Dictionary size in bytes (0 = none, max 64 KB).
     const void* dict_huf;     // Shared literal Huffman table, 128 bytes
@@ -377,8 +378,33 @@ ZXC_EXPORT int64_t zxc_compress(
 );
 ```
 
-Compresses `src` into `dst`. Only `level`, `block_size`, `checksum_enabled`, and
-`seekable` fields of `opts` are used. `n_threads` is ignored (always single-threaded).
+Compresses `src` into `dst`. Only `level`, `block_size`, `checksum_enabled`,
+`seekable` and `priority` fields of `opts` are used. `n_threads` is ignored
+(always single-threaded).
+
+### priority
+
+`priority` picks what the encoder optimises for, independently of `level`.
+The level says how much time to spend; the priority says what to spend it on.
+
+| value | meaning |
+|---|---|
+| `ZXC_PRIORITY_RATIO` (0, default) | smallest output |
+| `ZXC_PRIORITY_DECODE` (1) | faster decoding, paid for in size |
+
+Under `ZXC_PRIORITY_DECODE` the encoder stops emitting short match distances.
+The decoder then always takes the same copy path, with no branch left to
+mispredict, so it decodes faster for a small increase in size. Compression
+speed is unchanged.
+
+Ratio is the default because the library's own space-speed pricing does not
+rate the trade highly enough to take it unasked; whether it is worth it
+depends on how many times you read what you write once. The gain and the cost
+both depend on the data — highly repetitive input relies on short distances
+and loses on both axes — so measure your own before choosing.
+
+Encoder policy only: no format bit changes, and the archives decode with any
+ZXC build.
 
 **Returns**: compressed size (> 0) on success, or negative `zxc_error_t`.
 

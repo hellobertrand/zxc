@@ -661,6 +661,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int seekable = opts ? opts->seekable : 0;
+    const int priority = opts ? opts->priority : 0;
     const int level = zxc_level_clamp((opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT);
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
@@ -686,6 +687,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (UNLIKELY(zxc_cctx_init(&ctx, eff_chunk, 1, level, checksum_enabled, dict_size) != ZXC_OK))
         return ZXC_ERROR_MEMORY;
     // LCOV_EXCL_STOP
+    ctx.priority = priority;
     if (UNLIKELY(zxc_cctx_attach_dict_huf(&ctx, dict_huf) != ZXC_OK)) {
         // LCOV_EXCL_START
         zxc_cctx_free(&ctx);
@@ -1267,6 +1269,7 @@ struct zxc_cctx_s {
     // Sticky options (remembered from create or last compress call).
     int stored_level;
     int stored_checksum;
+    int stored_priority;
     size_t stored_block_size;
 };
 
@@ -1280,6 +1283,7 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
     cctx->stored_block_size =
         (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
     cctx->stored_checksum = opts ? opts->checksum_enabled : 0;
+    cctx->stored_priority = opts ? opts->priority : 0;
 
     if (opts) {
         // LCOV_EXCL_START
@@ -1290,6 +1294,7 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
             return NULL;
         }
         // LCOV_EXCL_STOP
+        cctx->inner.priority = cctx->stored_priority;
         cctx->last_block_size = cctx->stored_block_size;
         cctx->initialized = 1;
     }
@@ -1339,6 +1344,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : cctx->stored_checksum;
+    const int priority = opts ? opts->priority : cctx->stored_priority;
     const int level = zxc_level_clamp((opts && opts->level > 0) ? opts->level : cctx->stored_level);
     const size_t block_size =
         (opts && opts->block_size > 0) ? opts->block_size : cctx->stored_block_size;
@@ -1357,6 +1363,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     cctx->stored_level = level;
     cctx->stored_block_size = block_size;
     cctx->stored_checksum = checksum_enabled;
+    cctx->stored_priority = priority;
 
     // Re-init when block_size changed (it drives the buffer sizes), or when a
     // level raise into the optimal-parser tier needs an opt_scratch that inits
@@ -1381,6 +1388,8 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         cctx->inner.compression_level = level;
         cctx->inner.checksum_enabled = checksum_enabled;
     }
+    // Past the branch, so neither re-init nor the in-place path can skip it.
+    cctx->inner.priority = priority;
 
     // Shared context: zxc_compress_block leaves its dictionary here.
     cctx->inner.dict_size = 0;
@@ -1636,6 +1645,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     if (UNLIKELY(src_size > ZXC_BLOCK_SIZE_MAX)) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : cctx->stored_checksum;
+    const int priority = opts ? opts->priority : cctx->stored_priority;
     const int level = zxc_level_clamp((opts && opts->level > 0) ? opts->level : cctx->stored_level);
     // For block API, block_size == src_size (the caller compresses one block at a time).
     const size_t block_size =
@@ -1663,6 +1673,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     cctx->stored_level = level;
     cctx->stored_block_size = effective_block_size;
     cctx->stored_checksum = checksum_enabled;
+    cctx->stored_priority = priority;
 
     // Re-init when block_size changed, or when a per-call level raise into
     // the optimal-parser tier requires the opt_scratch region that inits at
@@ -1686,6 +1697,8 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
         cctx->inner.compression_level = level;
         cctx->inner.checksum_enabled = checksum_enabled;
     }
+    // Past the branch, so neither re-init nor the in-place path can skip it.
+    cctx->inner.priority = priority;
 
     cctx->inner.dict_size = b_dict_size;
 
@@ -1919,6 +1932,8 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
     cctx->stored_level = level;
     cctx->stored_block_size = block_size;
     cctx->stored_checksum = checksum_enabled;
+    cctx->stored_priority = opts->priority;
+    cctx->inner.priority = opts->priority;
     return cctx;
 }
 

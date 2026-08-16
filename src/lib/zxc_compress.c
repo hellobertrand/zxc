@@ -807,7 +807,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                                       uint8_t* RESTRICT buf_extras, uint32_t* RESTRICT seq_c_out,
                                       size_t* RESTRICT lit_c_out, size_t* RESTRICT extras_sz_out,
                                       uint16_t* RESTRICT max_offset_out) {
-    zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level);
+    zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level, ctx->priority);
     lzp_opt.use_lazy = 0;  // guard
 
     // With a dictionary, src = [dict | block]. The DP arrays index from the block
