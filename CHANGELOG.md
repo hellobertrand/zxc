@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.13.3] - 2026-08-17
+api: Refine comments for improved clarity (#366)
+perf: Optimizes decode offset validation and clarifies GHI format (#368)
+cli: Add MSVC CLI build configuration and unzxc alias (#348)
+build: Tag the Go submodule on release (#371)
+build: Publish the WebAssembly build to npm (#372)
+build: Update node.js wrapper dependencies
+build: bump scikit-build-core from 0.12.2 to 1.0.3 in /wrappers/python (#362)
+build: bump cibuildwheel from 4.1.0 to 4.1.1 in /wrappers/python (#360)
+build: bump setuptools-scm from 10.2.0 to 10.2.1 in /wrappers/python (#361)
+build: Remove scheduled workflow trigger
+build: bump cc from 1.2.65 to 1.4.0 in /wrappers/rust (#355)
+build: bump thiserror from 2.0.18 to 2.0.19 in /wrappers/rust (#354)
+build: bump libc from 0.2.186 to 0.2.189 in /wrappers/rust (#357)
+build: bump vitest from 4.1.9 to 4.1.10 in /wrappers/nodejs (#358)
+build: Reset dict_size in compression context (#351)
+build: Prevent Windows static library linking failures (#350)
+build: Modularize CMakeLists.txt into dedicated modules (#347)
+doc: Update fuzzing status and details in README
+fix: Ensure correct offset validation bounds for GHI decompression (ossfuzz #544800535) (#367)
+fix: Enhance output buffer overflow checks during decompression (ossfuzz #546426939) (#369)
+misc: Add PivCo-Huffman attribution for algorithm elements
+misc: bump meson from 1.11.1 to 1.11.2 in /.github/requirements (#363)
+misc: bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#359)
+misc: bump cross-platform-actions/action (#365)
+misc: bump github/codeql-action/upload-sarif (#364)
+misc: bump actions/checkout from 6.0.2 to 7.0.1 (#356)
+misc: bump softprops/action-gh-release from 3.0.1 to 3.0.2 (#353)
+misc: bump actions/setup-python from 6.3.0 to 7.0.0 (#352)
+
 ## [0.13.2] - 2026-07-30
 fix: fix typos
 fix: Fix MSVC /arch + /wd4244 flags (wrapdb CI warnings) (#326)
