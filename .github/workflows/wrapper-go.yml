@@ -93,3 +93,38 @@ jobs:
           CGO_ENABLED: "1"
           CGO_LDFLAGS: "-L../../build -lzxc"
         run: go test -bench=. -benchmem -count=1 ./...
+
+  tag-module:
+    name: Tag Go Module
+    needs: test
+    if: github.event_name == 'release'
+    runs-on: ubuntu-slim
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Tag the Go submodule
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          # Go resolves versions of a submodule from tags prefixed with the
+          # module directory. Without this tag, `go get ...@v0.13.3` fails and
+          # consumers are stuck on pseudo-versions of the default branch.
+          MODULE_TAG="wrappers/go/${RELEASE_TAG}"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${MODULE_TAG}" > /dev/null 2>&1; then
+            echo "${MODULE_TAG} already exists, nothing to do"
+            exit 0
+          fi
+
+          # Lightweight tag on the release commit: no tagger identity needed,
+          # and the prefix keeps it clear of the 'v*' trigger in build.yml.
+          git tag "${MODULE_TAG}" HEAD
+          git push origin "${MODULE_TAG}"
+
+          echo "Tagged ${MODULE_TAG} -> $(git rev-parse --short HEAD)"
