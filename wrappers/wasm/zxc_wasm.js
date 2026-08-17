@@ -1543,7 +1543,7 @@ export default async function createZXC(moduleOverrides, factory) {
     dictLoad,
     dictHuf,
 
-    /** Library version string (e.g. "0.13.2"). */
+    /** Library version string (e.g. "0.13.3"). */
     version: _version_string(),
     /** Minimum compression level. */
     minLevel: _min_level(),
