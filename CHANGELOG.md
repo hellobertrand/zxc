@@ -4,6 +4,8 @@
 api: Refine comments for improved clarity (#366)
 perf: Optimizes decode offset validation and clarifies GHI format (#368)
 cli: Add MSVC CLI build configuration and unzxc alias (#348)
+build: Tag the Go submodule on release (#371)
+build: Publish the WebAssembly build to npm (#372)
 build: Update node.js wrapper dependencies
 build: bump scikit-build-core from 0.12.2 to 1.0.3 in /wrappers/python (#362)
 build: bump cibuildwheel from 4.1.0 to 4.1.1 in /wrappers/python (#360)
@@ -19,7 +21,6 @@ build: Modularize CMakeLists.txt into dedicated modules (#347)
 doc: Update fuzzing status and details in README
 fix: Ensure correct offset validation bounds for GHI decompression (ossfuzz #544800535) (#367)
 fix: Enhance output buffer overflow checks during decompression (ossfuzz #546426939) (#369)
-misc: Bump project version to 0.13.3
 misc: Add PivCo-Huffman attribution for algorithm elements
 misc: bump meson from 1.11.1 to 1.11.2 in /.github/requirements (#363)
 misc: bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#359)

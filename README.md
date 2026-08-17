@@ -788,3 +788,7 @@ Licensed under the **BSD 3-Clause License**. See LICENSE for details.
 
 **Third-Party Components:**
 - **rapidhash** by Nicolas De Carli (MIT) - Used for high-speed, platform-independent checksums.
+
+**Acknowledgements:**
+- **[PivCo-Huffman](https://github.com/MarcinZukowski/pivco-huffman)** (PIVoted COding) by Marcin Żukowski - the level-ordered layout and merge-based decode of ZXC's Huffman sections follow its design; implemented independently here.
+- **Dougall Johnson** - the joint flat/length nudge of Huffman code lengths (pivco-huffman issue #20), behind the level 6 / 7 decode speedups.

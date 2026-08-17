@@ -58,7 +58,10 @@ Entropy decoding is the hot path of the high-compression levels, and classical
 Huffman decoding is a *serial bit chain*: each codeword's length must be known
 before the next codeword's position is. Interleaving N independent streams caps the parallelism at N and
 still executes a load-shift-mask dependency chain per symbol. Format v7
-replaces the layout with **Pivoted Coding Huffman** (level-ordered Huffman):
+replaces the layout with **PivCo-Huffman** (PIVoted COding, level-ordered
+Huffman). The layout and its merge-based decode are from
+[Żukowski 2026](https://marcinzukowski.github.io/pivco-huffman/paper-1.0/ph.html);
+the implementation here is independent:
 
 *   **Same code, transposed layout**: The canonical code, the 128-byte packed
     code-length header and the compressed size (to within per-node byte
@@ -101,7 +104,8 @@ cycles, which is exactly the level-7 contract.
 lengths are themselves optimized for the *pair* (size, decode time): a DP
 pass relaxes the canonical lengths toward flatter trees whenever the
 modeled PivCo decode saving outweighs the size cost, using the same
-per-level premium. The result is still a canonical, Kraft-exact code.
+per-level premium. The result is still a canonical, Kraft-exact code. Idea by
+Dougall Johnson (pivco-huffman issue #20).
 
 #### Prefix Varint Format
 
