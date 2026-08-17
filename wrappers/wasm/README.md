@@ -12,10 +12,21 @@ High-performance lossless compression for the browser and Node.js via WebAssembl
 
 ## Quick Start
 
+### Install
+
+```bash
+npm install zxc-wasm
+```
+
+The package ships the Emscripten build (`zxc.js` + `zxc.wasm`) next to the ES
+module wrapper, so no toolchain is required to consume it. To build it yourself
+instead, see [Building from Source](#building-from-source) and import
+`./zxc_wasm.js` by path.
+
 ### Browser (ES Module)
 
 ```js
-import createZXC from './zxc_wasm.js';
+import createZXC from 'zxc-wasm';
 
 const zxc = await createZXC();
 

@@ -82,6 +82,11 @@ searchdata.xml
 # Coverage
 build-cov/
 
+# WASM build outputs staged into the npm package
+build-wasm/
+wrappers/wasm/zxc.js
+wrappers/wasm/zxc.wasm
+
 # Meson
 builddir*/
 subprojects/
