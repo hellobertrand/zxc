@@ -1835,7 +1835,11 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             i += 8;
         }
     } else if (D == 4) {
-        const uint8x8x2_t vc2s = vld1_u8_x2(c2s);
+        /* Register by register: GCC has no AArch32 vld1_u8_x2/_x4 before 14.
+         * Loaded once per call, so the tuple form bought nothing anyway. */
+        uint8x8x2_t vc2s;
+        vc2s.val[0] = vld1_u8(c2s);
+        vc2s.val[1] = vld1_u8(c2s + 8);
         static const uint8_t rep2[8] = {0, 0, 1, 1, 2, 2, 3, 3};
         static const int8_t sh4[8] = {0, -4, 0, -4, 0, -4, 0, -4};
         const uint8x8_t vrep = vld1_u8(rep2);
@@ -1851,8 +1855,13 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             i += 8;
         }
     } else if (D == 5) {
-        /* Same window scheme as D=3; c2s has 32 entries (VTBL4). 5 source bytes. */
-        const uint8x8x4_t vc2s = vld1_u8_x4(c2s);
+        /* Same window scheme as D=3; c2s has 32 entries (VTBL4). 5 source bytes.
+         * Register by register: see D == 4. */
+        uint8x8x4_t vc2s;
+        vc2s.val[0] = vld1_u8(c2s);
+        vc2s.val[1] = vld1_u8(c2s + 8);
+        vc2s.val[2] = vld1_u8(c2s + 16);
+        vc2s.val[3] = vld1_u8(c2s + 24);
         static const uint8_t idxlo[8] = {0, 1, 0, 1, 1, 2, 1, 2};
         static const uint8_t idxhi[8] = {2, 3, 3, 4, 3, 4, 4, 5};
         static const uint16_t mul8[8] = {2048, 64, 512, 16, 128, 1024, 32, 256};
@@ -1874,8 +1883,15 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
     } else if (D == 6) {
         /* Same window scheme; c2s has 64 entries: two VTBL4 halves, select by
          * code bit 5. 6 source bytes. */
-        const uint8x8x4_t lo = vld1_u8_x4(c2s);
-        const uint8x8x4_t hi = vld1_u8_x4(c2s + 32);
+        uint8x8x4_t lo, hi; /* register by register: see D == 4 */
+        lo.val[0] = vld1_u8(c2s);
+        lo.val[1] = vld1_u8(c2s + 8);
+        lo.val[2] = vld1_u8(c2s + 16);
+        lo.val[3] = vld1_u8(c2s + 24);
+        hi.val[0] = vld1_u8(c2s + 32);
+        hi.val[1] = vld1_u8(c2s + 40);
+        hi.val[2] = vld1_u8(c2s + 48);
+        hi.val[3] = vld1_u8(c2s + 56);
         static const uint8_t idxlo[8] = {0, 1, 0, 1, 1, 2, 2, 3};
         static const uint8_t idxhi[8] = {3, 4, 3, 4, 4, 5, 5, 6};
         static const uint16_t mul8[8] = {1024, 16, 64, 256, 1024, 16, 64, 256};
