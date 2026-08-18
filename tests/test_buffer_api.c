@@ -890,6 +890,60 @@ static int inplace_case(const char* label, const uint8_t* orig, size_t n, int le
     return 1;
 }
 
+/* The footer is untrusted: a size it cannot possibly hold must not become the
+ * caller's allocation. One flipped byte in a 354-byte archive used to answer a
+ * 68 GB bound, and the decoder blamed the header for a bad footer. */
+static int inplace_forged_footer(void) {
+    uint8_t in[4096];
+    for (size_t i = 0; i < sizeof(in); i++) in[i] = (uint8_t)(i * 7);
+    uint8_t comp[8192];
+    const int64_t c = zxc_compress(in, sizeof(in), comp, sizeof(comp), NULL);
+    if (c <= 0) {
+        printf("Failed [forged footer]: compress -> %lld\n", (long long)c);
+        return 0;
+    }
+    const size_t csz = (size_t)c;
+    const size_t need = zxc_decompress_inplace_bound(comp, csz);
+    uint8_t* const buf = (uint8_t*)malloc(need);
+    if (!buf) return 0;
+    uint8_t bad[8192];
+    int ok = 1;
+
+    /* A size no archive of this length can reach. */
+    memcpy(bad, comp, csz);
+    bad[csz - ZXC_FILE_FOOTER_SIZE + 4] = 0x10; /* ~68 GB */
+    const size_t inflated = zxc_decompress_inplace_bound(bad, csz);
+    if (inflated != 0) {
+        printf("Failed [forged footer]: bound %zu, want 0\n", inflated);
+        ok = 0;
+    }
+
+    /* The verdict must name the footer, not the header, which is intact. */
+    memcpy(bad, comp, csz);
+    memset(bad + csz - ZXC_FILE_FOOTER_SIZE, 0xFF, 8);
+    memcpy(buf + need - csz, bad, csz);
+    int64_t d = zxc_decompress_inplace(buf, need, csz, NULL);
+    if (d != ZXC_ERROR_CORRUPT_DATA) {
+        printf("Failed [forged footer]: inplace %lld, want %d\n", (long long)d,
+               ZXC_ERROR_CORRUPT_DATA);
+        ok = 0;
+    }
+
+    memcpy(bad, comp, csz);
+    bad[0] ^= 0xFF;
+    memcpy(buf + need - csz, bad, csz);
+    d = zxc_decompress_inplace(buf, need, csz, NULL);
+    if (d != ZXC_ERROR_BAD_MAGIC) {
+        printf("Failed [forged footer]: bad magic %lld, want %d\n", (long long)d,
+               ZXC_ERROR_BAD_MAGIC);
+        ok = 0;
+    }
+
+    free(buf);
+    if (ok) printf("  [PASS] forged footer refused, verdict names the footer\n");
+    return ok;
+}
+
 int test_decompress_inplace(void) {
     printf("=== TEST: Unit - In-place decompression (single buffer) ===\n");
     const size_t N = 2 * 1024 * 1024;
@@ -931,6 +985,8 @@ int test_decompress_inplace(void) {
         printf("Failed: bound on garbage != 0\n");
         ok = 0;
     }
+
+    ok &= inplace_forged_footer();
 
     free(a);
     if (!ok) return 0;
