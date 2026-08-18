@@ -77,8 +77,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_static_ctx_roundtrip_all_levels),
 
     /* --- Memory-Mapped API --- */
-    TEST_CASE(test_mmap_roundtrip),
-    TEST_CASE(test_mmap_dict),
+    TEST_CASE(test_mmap_open),
     TEST_CASE(test_mmap_errors),
 
     /* --- Stream API --- */

@@ -1946,25 +1946,6 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size, siz
                          int* out_has_checksum, uint32_t* out_dict_id);
 
 /**
- * @brief @c zxc_decompress_inplace_bound from the archive's two ends alone.
- *
- * Same parse, same validation and same result as the public bound, for callers
- * that hold the file header and the file footer separately instead of having
- * the whole archive in one buffer. The mapped decoder (@c zxc_mmap.c) uses it
- * to size its region from two small reads rather than mapping the file twice.
- *
- * @param[in]  head      File header, @c ZXC_FILE_HEADER_SIZE readable bytes.
- * @param[in]  foot      File footer, @c ZXC_FILE_FOOTER_SIZE readable bytes.
- * @param[in]  comp_size Size of the whole archive in bytes.
- * @param[out] out_bound Receives the required buffer size; written only on
- *                       @c ZXC_OK.
- * @return @c ZXC_OK, or the negative @c zxc_error_t saying why the archive was
- *         refused; the mapped decoder passes it straight to its caller.
- */
-int zxc_inplace_bound_parts(const uint8_t* head, const uint8_t* foot, const size_t comp_size,
-                            size_t* out_bound);
-
-/**
  * @brief Encodes a block header into @p dst.
  *
  * Serialises the contents of a @ref zxc_block_header_t structure into a byte

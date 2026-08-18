@@ -551,20 +551,26 @@ int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);   // decode i
 
 The required margin is one block, the accumulated per-block framing overhead, the trailing framing the encoder writes after the last block (EOF block, seek table, footer), and the wild-copy tail (`block_size + nblocks x (12-16 B) + ~2 KB`) — about **1 %** overhead on a large archive; always size the buffer via `zxc_decompress_inplace_bound` rather than the formula. An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`, never silent corruption. This is a library/API capability: it targets embedded/firmware integrators.
 
-### Zero-copy from a file (`zxc_mmap.h`)
+### Mapping an archive from a file (`zxc_mmap.h`)
 
-When the archive is a file, the opt-in mapped API does the placement for you and skips the `memcpy` above entirely: the archive is **mapped** flush-right into a single region and decoded left-to-right into the head of that same region. No staging input buffer, no output allocation, and on POSIX not a single copy of the compressed bytes.
+The opt-in mapped API hands the buffer API an on-disk archive without reading it
+into a buffer first: the file is mapped read-only and its bytes are faulted in
+on demand.
 
 ```c
-zxc_map_t out;
-int64_t n = zxc_decompress_mmap("payload.zxc", &out, NULL);   // one call, one mapping
-consume(out.data, out.size);                                  // writable, page-aligned
-zxc_mmap_close(&out);
+zxc_map_t archive;
+if (zxc_mmap_open("payload.zxc", &archive) == ZXC_OK) {
+    const uint64_t n = zxc_get_decompressed_size(archive.data, archive.size);
+    // archive.data / archive.size feed zxc_decompress directly - no input copy
+    zxc_mmap_close(&archive);   // the mapping outlives the descriptor
+}
 ```
 
-Measured on a 56 MiB payload (Apple M2, warm page cache): decode throughput is on par with `read()` + `zxc_decompress`, while peak RSS drops **24 %** on compressible data and **49 %** on incompressible data (where the archive copy is as large as the payload). `zxc_mmap_open` additionally maps an archive read-only, so the ordinary buffer API can consume an on-disk archive with no input copy.
-
-The placement is zero-copy on POSIX (`MAP_FIXED` over an anonymous reservation) and on Windows 10 1803 / Server 2019+ (placeholder mappings via `VirtualAlloc2` + `MapViewOfFile3`, resolved at run time); older Windows falls back to a single copy of the archive into the same one region, and `zxc_mmap_is_zerocopy()` reports which route ran. On targets without mapping every entry point returns `ZXC_ERROR_UNSUPPORTED`.
+It also composes with the seekable API: a `zxc_reader_t` whose `read_at` is a
+`memcpy` out of the mapping needs no `read()` syscall per block and is
+reentrant, so it is legal on `zxc_seekable_decompress_range_mt` too (see
+`docs/API.md` section 7b). On targets without mapping every entry point returns
+`ZXC_ERROR_UNSUPPORTED`.
 
 ---
 

@@ -92,8 +92,7 @@ int test_static_ctx_level_raise_rejected(void);
 int test_static_ctx_null_inputs(void);
 
 /* Memory-Mapped API (zxc_mmap.h) */
-int test_mmap_roundtrip(void);
-int test_mmap_dict(void);
+int test_mmap_open(void);
 int test_mmap_errors(void);
 
 /* Stream API */

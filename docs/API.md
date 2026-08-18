@@ -58,7 +58,7 @@ opt-in, freestanding-safe (no <stdio.h>):
         └── zxc_export.h
 
 opt-in, userspace only (need OS file mapping; not freestanding-safe):
-    zxc_mmap.h         <- Memory-mapped zero-copy in-place decode of files
+    zxc_mmap.h         <- Read-only, zero-copy mappings of archive files
         └── zxc_export.h
         └── zxc_opts.h
 
@@ -470,9 +470,9 @@ int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);
 **Returns**: decompressed size (> 0), `0` for an empty frame, or negative
 `zxc_error_t`.
 
-For an archive that lives in a file, `zxc_decompress_mmap`
-([7b. Memory-Mapped API](#7b-memory-mapped-api)) does the placement for you and
-skips the `memcpy` above entirely.
+To get the archive into that buffer without reading it first, map it read-only
+with `zxc_mmap_open` ([7b. Memory-Mapped API](#7b-memory-mapped-api)) and
+`memcpy` from the mapping.
 
 ### `zxc_get_decompressed_size`
 
@@ -491,59 +491,48 @@ Reads the original size from the file footer without decompressing.
 
 ## 7b. Memory-Mapped API
 
-`zxc_mmap.h` — opt-in, userspace only. This is `zxc_decompress_inplace` turned
-into a one-call file API: the archive is **mapped** flush-right into a single
-region and decoded left-to-right into the head of that same region. There is no
-staging input buffer, no output allocation, and on POSIX not a single copy of
-the compressed bytes.
+`zxc_mmap.h` — opt-in, userspace only. Maps an archive file read-only and hands
+back its bytes as they are on disk, faulted in on demand. The point is to feed
+the buffer API (`zxc_decompress`, `zxc_get_decompressed_size`) or a
+`zxc_reader_t` without reading the file into a buffer first.
 
-```text
-  base                                     base+off              base+region
-    |<---------- decoded output ----------->|<--- archive ------->|
-    [ anonymous, private, zero-filled       | MAP_FIXED file view ]
+```c
+zxc_map_t archive;
+if (zxc_mmap_open("payload.zxc", &archive) != ZXC_OK) return 1;
+
+const uint64_t n = zxc_get_decompressed_size(archive.data, archive.size);
+void* dst = n ? malloc((size_t)n) : NULL;
+if (dst) {
+    const int64_t d = zxc_decompress(archive.data, archive.size, dst, (size_t)n, NULL);
+    if (d < 0) fprintf(stderr, "%s\n", zxc_error_name((int)d));
+    free(dst);
+}
+zxc_mmap_close(&archive);   // the mapping outlived the descriptor
 ```
-
-One anonymous reservation of `zxc_decompress_inplace_bound` bytes is taken, then
-the file is mapped over its tail pages (`MAP_FIXED`, `MAP_PRIVATE`). Compressed
-pages fault in straight from the page cache into the buffer the decoder reads
-from; the decoder's writes over already-consumed compressed bytes are
-copy-on-write, so the archive on disk is never modified. When decoding is done
-the region is trimmed back to the payload, so the peak footprint is the in-place
-bound while what the caller keeps is just the decompressed data — except on
-Windows, where a view is released whole or not at all: a payload reaching into
-the archive slot keeps the region at its peak until `zxc_mmap_close()`.
 
 | Platform | Behaviour |
 |----------|-----------|
-| Linux, macOS, *BSD, illumos | Zero-copy as described above (`MAP_FIXED` over an anonymous reservation). |
-| Windows 10 1803 / Server 2019+ | Zero-copy: the same geometry via **placeholder mappings** — reserve `[0, region)` with `MEM_RESERVE_PLACEHOLDER`, split it at `off`, then replace the halves with committed private memory and a `PAGE_WRITECOPY` view of the archive. `VirtualAlloc2` / `MapViewOfFile3` are resolved at run time (no `onecore.lib` dependency, no minimum-version bump). |
-| Older Windows | Fallback: one reservation plus a single copy of the archive into the flush-right slot. Still one region, still no output allocation. |
+| Linux, macOS, *BSD, illumos | `mmap(PROT_READ, MAP_PRIVATE)` over the whole file. |
+| Windows | `CreateFileMapping(PAGE_READONLY)` + `MapViewOfFile`; the section handle is closed straight away, the view keeps it alive. |
 | Emscripten / freestanding | Every entry point returns `ZXC_ERROR_UNSUPPORTED`; `zxc_mmap_supported()` returns 0. |
 
-`zxc_mmap_is_zerocopy()` reports which route a given result took, so a
-deployment can log whether it gets the mapped or the copying path. The
-decompressed bytes are identical either way.
+**Truncation.** The archive is a live file mapping for as long as the map is
+open, so the usual rule applies: if another process truncates or overwrites the
+file, touching a vanished page raises `SIGBUS`. The realistic cases are network
+shares, removable volumes, and files a writer is still appending to; copy the
+file first when that is possible.
 
-**Truncation.** The archive is a live file mapping *for the duration of the
-call*, so the usual rule applies: if another process truncates or overwrites the
-file while `zxc_decompress_mmap` runs, touching a vanished page raises `SIGBUS`
-inside the library. The realistic cases are network shares, removable volumes,
-and files a writer is still appending to; decode from a private copy when that
-is possible. The `size` bytes handed back do **not** carry the hazard — all of
-them were written by the decoder. What lies *past* them can: the rest of the
-last page, and the untrimmed tail in the Windows case above. Nothing there is
-the caller's to touch.
+**Decompressing a file with a minimal footprint** is a separate tool: the
+buffer-level `zxc_decompress_inplace`
+([7. Buffer API](#7-buffer-api)) decodes into a single buffer holding the
+archive flush-right, with no second allocation. It is not built on this header
+and carries no truncation hazard.
 
 ### Seekable archives
 
-`zxc_decompress_mmap` decodes a seekable archive like any other — the seek table
-sits behind the EOF block and is skipped, and `zxc_decompress_inplace_bound`
-reserves room for it.
-
-For *random access* you want the [Seekable API](#11-seekable-api) instead, and
-`zxc_mmap_open` is a natural backend for it: a `read_at` that `memcpy`s out of
-the mapping needs no `read()` syscall per block and is reentrant, so it is legal
-on `zxc_seekable_decompress_range_mt` too.
+`zxc_mmap_open` is a natural backend for the [Seekable API](#11-seekable-api): a
+`read_at` that `memcpy`s out of the mapping needs no `read()` syscall per block
+and is reentrant, so it is legal on `zxc_seekable_decompress_range_mt` too.
 
 ```c
 static int64_t map_read_at(void* ctx, void* dst, size_t len, uint64_t offset) {
@@ -563,13 +552,11 @@ zxc_seekable* s = zxc_seekable_open_reader(&reader);   // free before zxc_mmap_c
 
 ```c
 typedef struct {
-    void*  data;        // first byte of the region (page-aligned), NULL if empty
-    size_t size;        // valid bytes at data
+    const void* data;   // first byte of the mapping (page-aligned), NULL if none
+    size_t      size;   // valid bytes at data
     /* private: owned by the library */
-    void*  map_base;
-    size_t map_size;
-    void*  map_handle;
-    int    map_kind;
+    void*       map_base;
+    size_t      map_size;
 } zxc_map_t;
 ```
 
@@ -586,70 +573,22 @@ ZXC_EXPORT int zxc_mmap_supported(void);
 **Returns**: `1` when the mapping entry points are functional, `0` when they all
 return `ZXC_ERROR_UNSUPPORTED`.
 
-### `zxc_mmap_is_zerocopy`
-
-```c
-ZXC_EXPORT int zxc_mmap_is_zerocopy(const zxc_map_t* map);
-```
-
-**Returns**: `1` when `map` is a live mapping that involved no copy of the file's
-bytes (always the case on POSIX and Windows 10 1803+), `0` otherwise — including
-for `NULL`, a closed or empty map, and the older-Windows fallback where
-`zxc_decompress_mmap` copies the archive once into its single region.
-
-### `zxc_decompress_mmap` / `zxc_decompress_mmap_fd`
-
-```c
-ZXC_EXPORT int64_t zxc_decompress_mmap(
-    const char*                  path,
-    zxc_map_t*                   out,
-    const zxc_decompress_opts_t* opts     // NULL = defaults
-);
-
-ZXC_EXPORT int64_t zxc_decompress_mmap_fd(
-    int                          fd,      // CRT descriptor on Windows
-    zxc_map_t*                   out,
-    const zxc_decompress_opts_t* opts
-);
-```
-
-Decompresses a whole file into one mapped region, in place. `out->data` is
-writable, page-aligned, and independent of the file (the mapping is private).
-Dictionary archives are supported: pass the dictionary in `opts` exactly as for
-`zxc_decompress`. The `_fd` variant only uses the descriptor during the call —
-it may be closed as soon as it returns — and ignores its file position.
-
-`out` is zeroed before anything else happens, so it is safe to `zxc_mmap_close`
-a map whose producing call failed. An empty frame succeeds with
-`out->data == NULL` and `out->size == 0`.
-
-```c
-zxc_map_t out;
-int64_t n = zxc_decompress_mmap("payload.zxc", &out, NULL);
-if (n < 0) { fprintf(stderr, "%s\n", zxc_error_name((int)n)); return 1; }
-consume(out.data, out.size);
-zxc_mmap_close(&out);
-```
-
-**Returns**: decompressed size (>= 0), or negative `zxc_error_t`
-(`ZXC_ERROR_IO` if the file cannot be opened / stat'ed / mapped or is not a
-regular file, `ZXC_ERROR_SRC_TOO_SMALL` if it is shorter than a frame,
-`ZXC_ERROR_BAD_HEADER` if it is not a ZXC archive).
-
 ### `zxc_mmap_open` / `zxc_mmap_open_fd`
 
 ```c
 ZXC_EXPORT int zxc_mmap_open(const char* path, zxc_map_t* out);
-ZXC_EXPORT int zxc_mmap_open_fd(int fd, zxc_map_t* out);
+ZXC_EXPORT int zxc_mmap_open_fd(int fd, zxc_map_t* out);   // CRT descriptor on Windows
 ```
 
-Maps a file read-only without decoding it: a zero-copy way to hand an on-disk
-archive to `zxc_decompress`, `zxc_get_decompressed_size`, or a `zxc_reader_t`.
-The mapping outlives the descriptor used to create it. The region is read-only
-(writing to it traps), and — as with any file mapping — truncating the file
-underneath it makes the vanished pages fatal to touch (`SIGBUS`).
+Maps a regular file read-only. The mapping outlives the descriptor used to
+create it, and the `_fd` variant leaves that descriptor's file position
+untouched. The region is read-only — writing to it traps. `out` is zeroed before
+anything else happens, so it is safe to `zxc_mmap_close` a map whose producing
+call failed.
 
-**Returns**: `ZXC_OK`, or negative `zxc_error_t`.
+**Returns**: `ZXC_OK`, or negative `zxc_error_t` (`ZXC_ERROR_IO` if the file
+cannot be opened / stat'ed / mapped or is not a regular file,
+`ZXC_ERROR_SRC_TOO_SMALL` for an empty file).
 
 ### `zxc_mmap_close`
 
@@ -657,7 +596,7 @@ underneath it makes the vanished pages fatal to touch (`SIGBUS`).
 ZXC_EXPORT void zxc_mmap_close(zxc_map_t* map);
 ```
 
-Releases the region and zeroes `map`. Safe on `NULL` and on a zeroed map.
+Releases the mapping and zeroes `map`. Safe on `NULL` and on a zeroed map.
 
 ---
 
@@ -1732,7 +1671,7 @@ if (result < 0) {
 
 ## 14. Exported Symbols Summary
 
-The shared library exports **74 symbols** (verified with `nm -gU`):
+The shared library exports **71 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -1806,10 +1745,7 @@ The shared library exports **74 symbols** (verified with `nm -gU`):
 | 68 | `zxc_mmap_supported` | Memory-Mapped | `zxc_mmap.h` |
 | 69 | `zxc_mmap_open` | Memory-Mapped | `zxc_mmap.h` |
 | 70 | `zxc_mmap_open_fd` | Memory-Mapped | `zxc_mmap.h` |
-| 71 | `zxc_decompress_mmap` | Memory-Mapped | `zxc_mmap.h` |
-| 72 | `zxc_decompress_mmap_fd` | Memory-Mapped | `zxc_mmap.h` |
-| 73 | `zxc_mmap_close` | Memory-Mapped | `zxc_mmap.h` |
-| 74 | `zxc_mmap_is_zerocopy` | Memory-Mapped | `zxc_mmap.h` |
+| 71 | `zxc_mmap_close` | Memory-Mapped | `zxc_mmap.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon32`, `_avx2`, `_avx512`) are compiled with

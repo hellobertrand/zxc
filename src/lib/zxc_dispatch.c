@@ -1123,39 +1123,6 @@ static int zxc_inplace_parse(const uint8_t* head, const uint8_t* foot, const siz
 }
 
 /**
- * @brief @ref zxc_decompress_inplace_bound from the archive's two ends alone.
- *
- * Internal entry point for callers that can cheaply read the header and the
- * footer but would rather not have the whole archive in one buffer -- the
- * mapped decoder answers the bound with two small reads instead of mapping the
- * file just to look at 28 bytes of it.
- *
- * @param[in]  head      File header, @ref ZXC_FILE_HEADER_SIZE readable bytes.
- * @param[in]  foot      File footer, @ref ZXC_FILE_FOOTER_SIZE readable bytes.
- * @param[in]  comp_size Size of the whole archive in bytes.
- * @param[out] out_bound Receives the required buffer size; written only on
- *                       @ref ZXC_OK.
- * @return @ref ZXC_OK, or the @ref zxc_inplace_parse verdict for an invalid
- *         archive -- @ref ZXC_ERROR_NULL_INPUT / @ref ZXC_ERROR_SRC_TOO_SMALL
- *         for the arguments themselves, and @ref ZXC_ERROR_MEMORY for a bound
- *         the address space cannot hold.
- */
-int zxc_inplace_bound_parts(const uint8_t* head, const uint8_t* foot, const size_t comp_size,
-                            size_t* const out_bound) {
-    if (UNLIKELY(!head || !foot || !out_bound)) return ZXC_ERROR_NULL_INPUT;
-    if (UNLIKELY(comp_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
-        return ZXC_ERROR_SRC_TOO_SMALL;
-    uint64_t dsize = 0;
-    uint64_t margin = 0;
-    const int rc = zxc_inplace_parse(head, foot, comp_size, &dsize, &margin);
-    if (UNLIKELY(rc != ZXC_OK)) return rc;
-    if (UNLIKELY(margin > (uint64_t)SIZE_MAX || dsize > (uint64_t)SIZE_MAX - margin))
-        return ZXC_ERROR_MEMORY;
-    *out_bound = (size_t)(dsize + margin);
-    return ZXC_OK;
-}
-
-/**
  * @brief Minimum single-buffer size for a safe in-place decode of @p src.
  *
  * Reads the archive header (block size) and footer (decompressed size) without
@@ -1171,15 +1138,15 @@ int zxc_inplace_bound_parts(const uint8_t* head, const uint8_t* foot, const size
  */
 // cppcheck-suppress unusedFunction
 size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
-    /* Not the duplicate it looks like: the footer pointer below is undefined for
-     * a NULL src or a src_size under ZXC_FILE_FOOTER_SIZE, so it has to be ruled
-     * out here, before zxc_inplace_bound_parts gets a chance to. */
     if (UNLIKELY(!src || src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE)) return 0;
     const uint8_t* const p = (const uint8_t*)src;
-    size_t bound = 0;
-    const int rc =
-        zxc_inplace_bound_parts(p, p + src_size - ZXC_FILE_FOOTER_SIZE, src_size, &bound);
-    return (rc == ZXC_OK) ? bound : 0;
+    uint64_t dsize = 0;
+    uint64_t margin = 0;
+    if (UNLIKELY(zxc_inplace_parse(p, p + src_size - ZXC_FILE_FOOTER_SIZE, src_size, &dsize,
+                                   &margin) != ZXC_OK))
+        return 0;
+    if (UNLIKELY(margin > (uint64_t)SIZE_MAX || dsize > (uint64_t)SIZE_MAX - margin)) return 0;
+    return (size_t)(dsize + margin);
 }
 
 /**

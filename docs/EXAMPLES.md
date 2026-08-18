@@ -4,7 +4,7 @@ This document provides complete, working examples for using the ZXC compression 
 
 ## Table of Contents
 - [Buffer API (In-Memory)](#buffer-api-in-memory)
-- [Memory-Mapped Zero-Copy Decode](#memory-mapped-zero-copy-decode)
+- [Memory-Mapped Archive (zero-copy input)](#memory-mapped-archive-zero-copy-input)
 - [Stream API (Multi-Threaded)](#stream-api-multi-threaded)
 - [Reusable Context API](#reusable-context-api)
 - [Seekable Reader (Custom Storage Backend)](#seekable-reader-custom-storage-backend)
@@ -110,18 +110,18 @@ gcc -o buffer_example buffer_example.c -I include -L build -lzxc_lib
 
 ---
 
-## Memory-Mapped Zero-Copy Decode
+## Memory-Mapped Archive (zero-copy input)
 
-When the archive is a file, `zxc_mmap.h` decodes it with **one mapping and zero
-copies of the compressed bytes**: the archive is mapped flush-right into a
-single region and decoded left-to-right into the head of that same region (the
-in-place decoder guarantees the write cursor never overtakes the read cursor).
-No input staging buffer, no output allocation.
+`zxc_mmap.h` maps an archive file read-only so the buffer API can read it
+without an input copy: the compressed pages are faulted in straight from the
+page cache.
 
 ```c
 #include "zxc_mmap.h"   // opt-in: not pulled by <zxc.h>
+#include "zxc_buffer.h"
 #include "zxc_error.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 int main(int argc, char** argv) {
     if (argc < 2) return 1;
@@ -131,55 +131,39 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    zxc_map_t out;
-    const zxc_decompress_opts_t opts = { .checksum_enabled = 1 };
-    const int64_t n = zxc_decompress_mmap(argv[1], &out, &opts);
-    if (n < 0) {
-        fprintf(stderr, "decode failed: %s\n", zxc_error_name((int)n));
+    zxc_map_t archive;
+    int rc = zxc_mmap_open(argv[1], &archive);
+    if (rc != ZXC_OK) {
+        fprintf(stderr, "map failed: %s\n", zxc_error_name(rc));
         return 1;
     }
 
-    // out.data holds n writable, page-aligned bytes. The file on disk is
-    // untouched (the mapping is private / copy-on-write).
-    printf("%lld bytes decompressed, first byte 0x%02X\n",
-           (long long)n, n ? ((const unsigned char*)out.data)[0] : 0);
-
-    zxc_mmap_close(&out);   // also clears `out`; a second close is a no-op
-    return 0;
-}
-```
-
-Peak memory is `zxc_decompress_inplace_bound()` (payload + one block + framing
-margin); the region is trimmed back to the payload before the call returns, so
-what you keep resident is just the decompressed data — except on Windows, where
-a view is released whole or not at all, so a payload reaching into the archive
-slot keeps the region at its peak until `zxc_mmap_close()`.
-
-To feed an on-disk archive to the ordinary buffer API without copying it —
-useful when you already own the output buffer, or only want the header — map it
-read-only instead:
-
-```c
-zxc_map_t archive;
-if (zxc_mmap_open("payload.zxc", &archive) == ZXC_OK) {
     // 0 means corrupt or forged footer: the size is untrusted input.
     const uint64_t orig = zxc_get_decompressed_size(archive.data, archive.size);
     void* dst = orig ? malloc((size_t)orig) : NULL;
     if (dst) {
-        const int64_t n = zxc_decompress(archive.data, archive.size, dst, (size_t)orig, NULL);
+        const zxc_decompress_opts_t opts = { .checksum_enabled = 1 };
+        const int64_t n = zxc_decompress(archive.data, archive.size, dst, (size_t)orig, &opts);
         if (n < 0) fprintf(stderr, "decode failed: %s\n", zxc_error_name((int)n));
+        else       printf("%lld bytes decompressed\n", (long long)n);
         free(dst);
     }
-    zxc_mmap_close(&archive);   // the mapping outlived the descriptor
+
+    zxc_mmap_close(&archive);   // also clears it; a second close is a no-op
+    return 0;
 }
 ```
 
-Windows 10 1803 / Server 2019 and later get the very same zero-copy placement
-through placeholder mappings (`VirtualAlloc2` + `MapViewOfFile3`, resolved at
-run time); older Windows falls back to a single copy of the archive into the
-same one region. `zxc_mmap_is_zerocopy(&out)` tells you which route ran. On
-targets without mapping at all every entry point returns
+The mapping outlives the descriptor used to create it, so `zxc_mmap_open_fd`
+lets you hand over a `FILE*`'s descriptor and close it right away. It is
+read-only — writing to the region traps — and, as with any file mapping,
+truncating the file underneath it makes the vanished pages fatal to touch
+(`SIGBUS`). On targets without mapping every entry point returns
 `ZXC_ERROR_UNSUPPORTED`.
+
+To decompress a file with a minimal footprint, use `zxc_decompress_inplace`
+instead: one buffer holds the flush-right archive and receives the output, so
+there is no second allocation. See the in-place section of `docs/API.md`.
 
 **Compilation:**
 ```bash
@@ -406,7 +390,7 @@ typedef struct {
 to use `zxc_seekable_decompress_range_mt()`. The single-threaded path makes no
 concurrent calls.
 
-`zxc_mmap_open()` ([Memory-Mapped API](#memory-mapped-zero-copy-decode)) gives
+`zxc_mmap_open()` ([Memory-Mapped Archive](#memory-mapped-archive-zero-copy-input)) gives
 you the same mapping portably (it also covers Windows), if you would rather not
 call `mmap()` yourself.
 
