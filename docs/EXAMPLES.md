@@ -151,7 +151,9 @@ int main(int argc, char** argv) {
 
 Peak memory is `zxc_decompress_inplace_bound()` (payload + one block + framing
 margin); the region is trimmed back to the payload before the call returns, so
-what you keep resident is just the decompressed data.
+what you keep resident is just the decompressed data — except on Windows, where
+a view is released whole or not at all, so a payload reaching into the archive
+slot keeps the region at its peak until `zxc_mmap_close()`.
 
 To feed an on-disk archive to the ordinary buffer API without copying it —
 useful when you already own the output buffer, or only want the header — map it
@@ -160,11 +162,15 @@ read-only instead:
 ```c
 zxc_map_t archive;
 if (zxc_mmap_open("payload.zxc", &archive) == ZXC_OK) {
+    // 0 means corrupt or forged footer: the size is untrusted input.
     const uint64_t orig = zxc_get_decompressed_size(archive.data, archive.size);
-    void* dst = malloc((size_t)orig);
-    zxc_decompress(archive.data, archive.size, dst, (size_t)orig, NULL);
+    void* dst = orig ? malloc((size_t)orig) : NULL;
+    if (dst) {
+        const int64_t n = zxc_decompress(archive.data, archive.size, dst, (size_t)orig, NULL);
+        if (n < 0) fprintf(stderr, "decode failed: %s\n", zxc_error_name((int)n));
+        free(dst);
+    }
     zxc_mmap_close(&archive);   // the mapping outlived the descriptor
-    free(dst);
 }
 ```
 

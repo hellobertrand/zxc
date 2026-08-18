@@ -81,6 +81,7 @@
 #include "zxc_internal.h"
 
 #if defined(ZXC_MMAP_POSIX)
+#include <errno.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -325,7 +326,10 @@ static int zxc_desc_read_at(const zxc_desc_t d, void* const buf, const size_t le
     uint64_t at = offset;
     while (left > 0) {
         const ssize_t n = pread(d, p, left, (off_t)at);
-        if (UNLIKELY(n <= 0)) return ZXC_ERROR_IO;  // LCOV_EXCL_LINE
+        /* A handler without SA_RESTART interrupts pread on slow storage
+         * (NFS, FUSE); that is not a failed archive. */
+        if (UNLIKELY(n < 0 && errno == EINTR)) continue;  // LCOV_EXCL_LINE
+        if (UNLIKELY(n <= 0)) return ZXC_ERROR_IO;        // LCOV_EXCL_LINE
         p += (size_t)n;
         at += (uint64_t)n;
         left -= (size_t)n;
@@ -622,8 +626,10 @@ typedef struct {
  *
  * The answer cannot change while the process lives, so it is cached: a caller
  * decompressing many small archives would otherwise take the loader lock three
- * times per file. The cache is written idempotently -- two threads racing here
- * resolve the same pointers and store the same bytes -- so no lock is needed.
+ * times per file. Publishing it needs ordering, not just idempotency -- with
+ * plain stores a reader can see the flag over a still-empty cache -- hence the
+ * Interlocked pair, a full barrier at any @c _WIN32_WINNT and on every
+ * toolchain. Two threads may both resolve and write identical bytes; harmless.
  *
  * @param[out] fns  Receives both entry points; cleared first, so the struct is
  *                  never left holding one resolved pointer and one stale value.
@@ -632,9 +638,10 @@ typedef struct {
  */
 static int zxc_win_ext_resolve(zxc_win_ext_t* const fns) {
     static zxc_win_ext_t g_cache;
-    static int g_resolved; /* 0 = not tried, 1 = available, -1 = unavailable */
+    static volatile LONG g_state; /* 0 = not tried, 1 = available, -1 = unavailable */
 
-    const int state = g_resolved;
+    /* Acquire: a published state implies g_cache is written. */
+    const LONG state = InterlockedCompareExchange(&g_state, 0, 0);
     if (state != 0) {
         *fns = g_cache;
         return (state > 0) ? ZXC_OK : ZXC_ERROR_UNSUPPORTED;
@@ -646,21 +653,22 @@ static int zxc_win_ext_resolve(zxc_win_ext_t* const fns) {
     HMODULE mod = GetModuleHandleW(L"kernelbase.dll");
     if (!mod) mod = GetModuleHandleW(L"kernel32.dll");
     if (!mod) {
-        g_resolved = -1;
+        (void)InterlockedExchange(&g_state, -1);
         return ZXC_ERROR_UNSUPPORTED;
     }
 
     const FARPROC p_alloc2 = GetProcAddress(mod, "VirtualAlloc2");
     const FARPROC p_map3 = GetProcAddress(mod, "MapViewOfFile3");
     if (!p_alloc2 || !p_map3) {
-        g_resolved = -1;
+        (void)InterlockedExchange(&g_state, -1);
         return ZXC_ERROR_UNSUPPORTED;
     }
 
     ZXC_MEMCPY(&fns->alloc2, &p_alloc2, sizeof(fns->alloc2));
     ZXC_MEMCPY(&fns->map3, &p_map3, sizeof(fns->map3));
     g_cache = *fns;
-    g_resolved = 1;
+    /* Release: publish only once g_cache is whole. */
+    (void)InterlockedExchange(&g_state, 1);
     return ZXC_OK;
 }
 
@@ -795,9 +803,11 @@ static int zxc_map_readonly(const zxc_desc_t d, zxc_map_t* const out) {
 /**
  * @brief Reads exactly @p len bytes at @p offset, short reads included.
  *
- * The offset travels in the @c OVERLAPPED block rather than through a seek, so
- * the caller's CRT descriptor keeps its file position -- the same promise the
- * POSIX backend gets from @c pread.
+ * An @c OVERLAPPED offset is not the Windows @c pread: on a synchronous handle
+ * -- what @ref zxc_desc_open and a CRT descriptor both give -- the file pointer
+ * still moves to the end of every transfer, which would reposition the caller's
+ * descriptor. It is saved and restored instead. @c SetFilePointerEx fails on a
+ * handle that has no position (a pipe), which is the guard.
  *
  * @param[in]  d       Handle to read from.
  * @param[out] buf     Destination for @p len bytes.
@@ -807,21 +817,36 @@ static int zxc_map_readonly(const zxc_desc_t d, zxc_map_t* const out) {
  */
 static int zxc_desc_read_at(const zxc_desc_t d, void* const buf, const size_t len,
                             const uint64_t offset) {
+    LARGE_INTEGER saved;
+    LARGE_INTEGER zero;
+    saved.QuadPart = 0;
+    zero.QuadPart = 0;
+    const BOOL restore = SetFilePointerEx(d, zero, &saved, FILE_CURRENT);
+
     uint8_t* p = (uint8_t*)buf;
     size_t left = len;
     uint64_t at = offset;
+    int rc = ZXC_OK;
     while (left > 0) {
         OVERLAPPED ov;
         ZXC_MEMSET(&ov, 0, sizeof(ov));
         ov.Offset = (DWORD)(at & 0xFFFFFFFFU);
         ov.OffsetHigh = (DWORD)(at >> 32);
+        /* Clamped, not cast: a remaining length that is a multiple of 4 GiB
+         * truncates to a 0-byte request, i.e. a spurious ZXC_ERROR_IO. */
+        const DWORD want = (left > 0x40000000U) ? 0x40000000U : (DWORD)left;
         DWORD got = 0;
-        if (UNLIKELY(!ReadFile(d, p, (DWORD)left, &got, &ov) || got == 0)) return ZXC_ERROR_IO;
+        if (UNLIKELY(!ReadFile(d, p, want, &got, &ov) || got == 0)) {
+            rc = ZXC_ERROR_IO;
+            break;
+        }
         p += got;
         at += got;
         left -= got;
     }
-    return ZXC_OK;
+
+    if (restore) (void)SetFilePointerEx(d, saved, NULL, FILE_BEGIN);
+    return rc;
 }
 
 /**
@@ -896,28 +921,31 @@ static void zxc_map_unplace(uint8_t* const base, const size_t region, void* cons
 /**
  * @brief Gives back everything the decoded payload does not occupy.
  *
- * A view is released as a whole, so the archive slot can only go back when the
- * payload ends before that slot begins; the private part is decommitted either
- * way. Whatever survives is released by @ref zxc_map_release at close.
+ * Windows has no partial @c UnmapViewOfFile, so the archive slot only goes back
+ * when the payload ends before it begins: a payload reaching into the slot keeps
+ * the whole region, since `[keep, region)` cannot go back while `[off, keep)`
+ * holds decoded bytes. The copying route has no view and always decommits its
+ * tail. What survives is released by @ref zxc_map_release.
  *
  * @param[in]     base    Region base from @ref zxc_map_place.
  * @param[in]     off     Flush-right offset: where the archive slot begins.
  * @param[in]     region  Full region size in bytes.
  * @param[in]     keep    Page-rounded payload size to keep.
  * @param[in,out] handle  Archive view; cleared if this call unmapped it.
- * @return Bytes still mapped at @p base, i.e. @p keep.
+ * @return Bytes still mapped at @p base: @p keep once the tail is back,
+ *         @p region when the view could not be given up.
  */
 static size_t zxc_map_trim(uint8_t* const base, const size_t off, const size_t region,
                            const size_t keep, void** const handle) {
-    if (*handle) {
-        if (keep <= off) {
-            (void)UnmapViewOfFile(*handle);
-            *handle = NULL;
-            if (keep < off) (void)VirtualFree(base + keep, off - keep, MEM_DECOMMIT);
-        }
-    } else if (keep < region) {
-        (void)VirtualFree(base + keep, region - keep, MEM_DECOMMIT);
+    if (!*handle) {
+        if (keep < region) (void)VirtualFree(base + keep, region - keep, MEM_DECOMMIT);
+        return keep;
     }
+    if (keep > off) return region;
+
+    (void)UnmapViewOfFile(*handle);
+    *handle = NULL;
+    if (keep < off) (void)VirtualFree(base + keep, off - keep, MEM_DECOMMIT);
     return keep;
 }
 
@@ -959,7 +987,9 @@ static void zxc_map_release(zxc_map_t* const m) {
  *                        it covers a file header and a footer.
  * @param[out] need       Receives the in-place bound in bytes.
  * @return @ref ZXC_OK, @ref ZXC_ERROR_IO if the two ends cannot be read, or
- *         @ref ZXC_ERROR_BAD_HEADER if they do not describe a ZXC archive.
+ *         the verdict @ref zxc_inplace_bound_parts reached on an archive it
+ *         refused (@ref ZXC_ERROR_BAD_MAGIC, @ref ZXC_ERROR_BAD_HEADER,
+ *         @ref ZXC_ERROR_CORRUPT_DATA for a forged footer).
  */
 static int zxc_map_bound(const zxc_desc_t d, const size_t comp_size, size_t* const need) {
     uint8_t head[ZXC_FILE_HEADER_SIZE];
@@ -970,10 +1000,7 @@ static int zxc_map_bound(const zxc_desc_t d, const size_t comp_size, size_t* con
     rc = zxc_desc_read_at(d, foot, sizeof(foot), (uint64_t)comp_size - ZXC_FILE_FOOTER_SIZE);
     if (UNLIKELY(rc != ZXC_OK)) return rc;  // LCOV_EXCL_LINE
 
-    const size_t n = zxc_inplace_bound_parts(head, foot, comp_size);
-    if (UNLIKELY(n == 0)) return ZXC_ERROR_BAD_HEADER;
-    *need = n;
-    return ZXC_OK;
+    return zxc_inplace_bound_parts(head, foot, comp_size, need);
 }
 
 /**

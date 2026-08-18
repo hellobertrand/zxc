@@ -509,7 +509,9 @@ pages fault in straight from the page cache into the buffer the decoder reads
 from; the decoder's writes over already-consumed compressed bytes are
 copy-on-write, so the archive on disk is never modified. When decoding is done
 the region is trimmed back to the payload, so the peak footprint is the in-place
-bound while what the caller keeps is just the decompressed data.
+bound while what the caller keeps is just the decompressed data — except on
+Windows, where a view is released whole or not at all: a payload reaching into
+the archive slot keeps the region at its peak until `zxc_mmap_close()`.
 
 | Platform | Behaviour |
 |----------|-----------|
@@ -527,9 +529,10 @@ call*, so the usual rule applies: if another process truncates or overwrites the
 file while `zxc_decompress_mmap` runs, touching a vanished page raises `SIGBUS`
 inside the library. The realistic cases are network shares, removable volumes,
 and files a writer is still appending to; decode from a private copy when that
-is possible. The region handed back does **not** carry the hazard — by the time
-the call returns, every byte in it was written by the decoder and none of it is
-still backed by the file.
+is possible. The `size` bytes handed back do **not** carry the hazard — all of
+them were written by the decoder. What lies *past* them can: the rest of the
+last page, and the untrimmed tail in the Windows case above. Nothing there is
+the caller's to touch.
 
 ### Seekable archives
 

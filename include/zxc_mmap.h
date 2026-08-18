@@ -33,7 +33,8 @@
  * - No output buffer: the decompressed bytes land in the same region, in front
  *   of the compressed bytes still to be consumed.
  * - Peak footprint is @ref zxc_decompress_inplace_bound, and the region is
- *   trimmed back to the payload before the call returns.
+ *   trimmed back to the payload before the call returns (with one Windows
+ *   exception, see @ref zxc_decompress_mmap).
  *
  * @par Platform support
  * POSIX (Linux, macOS, *BSD, illumos) is zero-copy as described, and so is
@@ -153,7 +154,9 @@ ZXC_EXPORT int zxc_mmap_open_fd(int fd, zxc_map_t* out);
  * @ref zxc_decompress_inplace_bound and decodes left-to-right into its head:
  * the compressed bytes are never copied into a staging buffer, and no separate
  * output buffer is allocated. Once decoding is done the region is trimmed back
- * to the payload, so the caller is left holding exactly the decompressed data.
+ * to the payload, so the caller is left holding exactly the decompressed data
+ * -- except on Windows, where a view is released whole or not at all: a payload
+ * reaching into the archive slot keeps the region until @ref zxc_mmap_close.
  *
  * Dictionary archives are supported: pass the dictionary in @p opts exactly as
  * for @ref zxc_decompress (they decode through the context's own bounce
@@ -161,9 +164,10 @@ ZXC_EXPORT int zxc_mmap_open_fd(int fd, zxc_map_t* out);
  *
  * @note @c out->data is writable and page-aligned, and it is *not* the file's
  *       memory: the mapping is private, so decoding never modifies the archive
- *       on disk. Once the call has returned, nothing in the region is still
- *       backed by the file -- every byte handed back has been written by the
- *       decoder -- so the truncation hazard below does not outlive the call.
+ *       on disk. All @c out->size bytes were written by the decoder, so the
+ *       truncation hazard below does not reach them. It can reach past them --
+ *       the rest of the last page, and the untrimmed tail on Windows -- but
+ *       nothing there is yours to touch.
  * @note *During* the call the archive is mapped, so the usual file-mapping rule
  *       applies: truncating or overwriting the file from another process while
  *       this runs makes the vanished pages fatal to touch (@c SIGBUS), inside
@@ -181,7 +185,8 @@ ZXC_EXPORT int zxc_mmap_open_fd(int fd, zxc_map_t* out);
  * @return Decompressed size in bytes (>= 0), or a negative @ref zxc_error_t
  *         (@ref ZXC_ERROR_IO on open / map failure,
  *         @ref ZXC_ERROR_SRC_TOO_SMALL if the file is shorter than a frame,
- *         @ref ZXC_ERROR_BAD_HEADER if it is not a ZXC archive).
+ *         @ref ZXC_ERROR_BAD_MAGIC or @ref ZXC_ERROR_BAD_HEADER if it is not a
+ *         ZXC archive, @ref ZXC_ERROR_CORRUPT_DATA for a forged footer).
  */
 ZXC_EXPORT int64_t zxc_decompress_mmap(const char* path, zxc_map_t* out,
                                        const zxc_decompress_opts_t* opts);
@@ -191,7 +196,7 @@ ZXC_EXPORT int64_t zxc_decompress_mmap(const char* path, zxc_map_t* out,
  *
  * Same contract as @ref zxc_decompress_mmap, for callers that already hold a
  * descriptor. The whole file is taken to be the archive; the descriptor's file
- * position is irrelevant and left untouched.
+ * position is irrelevant on entry and restored before returning.
  *
  * @param[in]  fd    Readable descriptor on a regular file. On Windows this is a
  *                   CRT file descriptor.

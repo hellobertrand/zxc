@@ -19,6 +19,10 @@
 #include "../include/zxc_mmap.h"
 #include "test_common.h"
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 #ifdef _MSC_VER
 #define zxc_test_fileno _fileno
 #else
@@ -40,19 +44,37 @@ static int write_whole_file(const char* const path, const void* const data, cons
 
 /* Whether losing the zero-copy placement is a failure or merely a note.
  *
- * The placement IS the feature, so a lost one has to fail the suite rather than
- * print something nobody reads: the decode still returns the right bytes either
- * way, so no other assertion here would catch it. POSIX has no copying route at
- * all, hence the unconditional 1. On Windows the fallback is legitimate before
- * Win10 1803, so a run that knows better (CI on windows-latest) opts in with
- * ZXC_TEST_REQUIRE_ZEROCOPY=1. */
+ * The placement IS the feature and the decode returns the right bytes either
+ * way, so nothing else here would catch its loss. POSIX has no copying route,
+ * hence the unconditional 1. On Windows the fallback is legitimate before
+ * Win10 1803, so the answer comes from the OS -- the placement is available
+ * exactly when the two placeholder entry points resolve. An opt-in env var
+ * would have to be set by every job to assert anything at all. */
 static int zerocopy_required(void) {
 #if defined(_WIN32)
+    /* An explicit answer still wins: a file that cannot back a copy-on-write
+     * section is a legitimate fallback. */
     const char* const env = getenv("ZXC_TEST_REQUIRE_ZEROCOPY");
-    return env != NULL && env[0] != '\0' && env[0] != '0';
+    if (env != NULL && env[0] != '\0') return env[0] != '0';
+
+    HMODULE mod = GetModuleHandleW(L"kernelbase.dll");
+    if (!mod) mod = GetModuleHandleW(L"kernel32.dll");
+    if (!mod) return 0;
+    return GetProcAddress(mod, "VirtualAlloc2") != NULL &&
+           GetProcAddress(mod, "MapViewOfFile3") != NULL;
 #else
     return 1;
 #endif
+}
+
+/* One I/O-failure assertion. Chained with ||, the first failure would hide the
+ * rest and skip the calls whose map still needs closing -- an unexpected
+ * SUCCESS hands back a live region, hence the close on mismatch. */
+static int expect_io(const char* const label, const int64_t got, zxc_map_t* const m) {
+    if (got == ZXC_ERROR_IO) return 1;
+    printf("Failed [%s]: expected ZXC_ERROR_IO, got %lld\n", label, (long long)got);
+    zxc_mmap_close(m);
+    return 0;
 }
 
 /* A closed map must be inert: cleared fields, and a second close is a no-op. */
@@ -329,13 +351,12 @@ int test_mmap_errors(void) {
     zxc_mmap_close(&m);
 
     /* Missing file, and a bad descriptor. */
-    if (zxc_decompress_mmap("zxc_no_such_archive.bin", &m, NULL) != ZXC_ERROR_IO ||
-        zxc_mmap_open("zxc_no_such_archive.bin", &m) != ZXC_ERROR_IO ||
-        zxc_decompress_mmap_fd(-1, &m, NULL) != ZXC_ERROR_IO ||
-        zxc_mmap_open_fd(-1, &m) != ZXC_ERROR_IO) {
-        printf("Failed: missing file / bad fd not reported as ZXC_ERROR_IO\n");
+    if (!expect_io("missing file, decompress",
+                   zxc_decompress_mmap("zxc_no_such_archive.bin", &m, NULL), &m))
         ok = 0;
-    }
+    if (!expect_io("missing file, open", zxc_mmap_open("zxc_no_such_archive.bin", &m), &m)) ok = 0;
+    if (!expect_io("bad fd, decompress", zxc_decompress_mmap_fd(-1, &m, NULL), &m)) ok = 0;
+    if (!expect_io("bad fd, open", zxc_mmap_open_fd(-1, &m), &m)) ok = 0;
 
     /* Too short to hold a frame. */
     static const uint8_t stub[8] = {0};
@@ -357,9 +378,32 @@ int test_mmap_errors(void) {
         remove(MMAP_ERR_PATH);
         return 0;
     }
-    if (zxc_decompress_mmap(MMAP_ERR_PATH, &m, NULL) != ZXC_ERROR_BAD_HEADER) {
-        printf("Failed: junk archive not rejected\n");
+    const int64_t junk_rc = zxc_decompress_mmap(MMAP_ERR_PATH, &m, NULL);
+    if (junk_rc != ZXC_ERROR_BAD_MAGIC) {
+        printf("Failed: junk archive -> %lld, expected ZXC_ERROR_BAD_MAGIC\n", (long long)junk_rc);
         ok = 0;
+    }
+
+    /* Forged footer: the header is intact, so the verdict must blame the data. */
+    uint8_t forged[256];
+    const int64_t fc = zxc_compress(junk, sizeof(junk), forged, sizeof(forged), NULL);
+    if (fc <= 0) {
+        printf("Failed: cannot build archive to forge\n");
+        ok = 0;
+    } else {
+        memset(forged + fc - ZXC_FILE_FOOTER_SIZE, 0xFF, 8); /* dsize = UINT64_MAX */
+        if (!write_whole_file(MMAP_ERR_PATH, forged, (size_t)fc)) {
+            printf("Failed: cannot write forged archive\n");
+            ok = 0;
+        } else {
+            const int64_t d = zxc_decompress_mmap(MMAP_ERR_PATH, &m, NULL);
+            if (d != ZXC_ERROR_CORRUPT_DATA) {
+                printf("Failed: forged footer -> %lld, expected ZXC_ERROR_CORRUPT_DATA\n",
+                       (long long)d);
+                ok = 0;
+            }
+            zxc_mmap_close(&m);
+        }
     }
 
     /* Empty frame: succeeds with nothing to hand back. */

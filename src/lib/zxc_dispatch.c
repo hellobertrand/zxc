@@ -1017,6 +1017,33 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
 }
 
 /**
+ * @brief Whether a footer's decompressed size is reachable for this archive.
+ *
+ * The footer is untrusted, and a forged size becomes an arbitrary allocation --
+ * or, for the mapped decoder, an arbitrary reservation -- before decoding ever
+ * fails. Every block costs at least @ref ZXC_BLOCK_HEADER_SIZE compressed bytes
+ * and decodes to at most one block size, which bounds the ratio an authentic
+ * archive can reach. It also keeps the block count in @ref zxc_inplace_margin
+ * from overflowing. Shared by @ref zxc_inplace_parse and
+ * @ref zxc_get_decompressed_size so the two cannot drift apart.
+ *
+ * The division form keeps the compare overflow-free: the usual ceil wraps on a
+ * forged @p dsize near @c UINT64_MAX.
+ *
+ * @param[in] dsize      Decompressed size read from the footer.
+ * @param[in] chunk_size Block size from the file header; never 0 after a
+ *                       @ref ZXC_OK from @ref zxc_read_file_header.
+ * @param[in] comp_size  Size of the whole archive in bytes.
+ * @return 1 when @p dsize is reachable, 0 for a forged footer.
+ */
+static int zxc_footer_dsize_plausible(const uint64_t dsize, const size_t chunk_size,
+                                      const size_t comp_size) {
+    const uint64_t blocks_needed =
+        dsize / (uint64_t)chunk_size + (dsize % (uint64_t)chunk_size != 0);
+    return blocks_needed <= (uint64_t)(comp_size / ZXC_BLOCK_HEADER_SIZE);
+}
+
+/**
  * @brief Bytes an in-place decode needs on top of the decompressed size.
  *
  * Flush-right placement puts block 0 at `capacity - comp_size`, so the read
@@ -1066,13 +1093,8 @@ static uint64_t zxc_inplace_margin(const uint64_t dsize, const size_t chunk_size
  * caller holding neither in one buffer -- the mapped decoder reads the two ends
  * of the file with two small reads -- shares this exact parse.
  *
- * The footer is untrusted input, so its size is checked for plausibility the
- * same way @ref zxc_get_decompressed_size checks it: an archive of @p comp_size
- * bytes cannot carry more blocks than `comp_size / ZXC_BLOCK_HEADER_SIZE`, and
- * each block decodes to at most one block size. Without that check a forged
- * footer turns straight into an arbitrary allocation (or, for the mapped
- * decoder, an arbitrary reservation) before decoding ever fails. It also keeps
- * the block count in @ref zxc_inplace_margin from overflowing.
+ * The footer is untrusted input, so its size goes through the same
+ * @ref zxc_footer_dsize_plausible check @ref zxc_get_decompressed_size applies.
  *
  * @param[in]  head      File header, @ref ZXC_FILE_HEADER_SIZE readable bytes.
  * @param[in]  foot      File footer, @ref ZXC_FILE_FOOTER_SIZE readable bytes.
@@ -1092,11 +1114,7 @@ static int zxc_inplace_parse(const uint8_t* head, const uint8_t* foot, const siz
         return ZXC_ERROR_BAD_HEADER;
 
     const uint64_t d = zxc_le64(foot);
-    /* Division form keeps the compare overflow-free for a forged size near
-     * UINT64_MAX, where the usual `(d + chunk - 1) / chunk` ceil would wrap. */
-    const uint64_t blocks_needed =
-        chunk_size ? d / (uint64_t)chunk_size + (d % (uint64_t)chunk_size != 0) : 0;
-    if (UNLIKELY(blocks_needed > (uint64_t)(comp_size / ZXC_BLOCK_HEADER_SIZE)))
+    if (UNLIKELY(!zxc_footer_dsize_plausible(d, chunk_size, comp_size)))
         return ZXC_ERROR_CORRUPT_DATA;
 
     *dsize = d;
@@ -1112,19 +1130,29 @@ static int zxc_inplace_parse(const uint8_t* head, const uint8_t* foot, const siz
  * mapped decoder answers the bound with two small reads instead of mapping the
  * file just to look at 28 bytes of it.
  *
- * @param[in] head      File header, @ref ZXC_FILE_HEADER_SIZE readable bytes.
- * @param[in] foot      File footer, @ref ZXC_FILE_FOOTER_SIZE readable bytes.
- * @param[in] comp_size Size of the whole archive in bytes.
- * @return Required buffer size in bytes, or 0 if the archive is not valid.
+ * @param[in]  head      File header, @ref ZXC_FILE_HEADER_SIZE readable bytes.
+ * @param[in]  foot      File footer, @ref ZXC_FILE_FOOTER_SIZE readable bytes.
+ * @param[in]  comp_size Size of the whole archive in bytes.
+ * @param[out] out_bound Receives the required buffer size; written only on
+ *                       @ref ZXC_OK.
+ * @return @ref ZXC_OK, or the @ref zxc_inplace_parse verdict for an invalid
+ *         archive -- @ref ZXC_ERROR_NULL_INPUT / @ref ZXC_ERROR_SRC_TOO_SMALL
+ *         for the arguments themselves, and @ref ZXC_ERROR_MEMORY for a bound
+ *         the address space cannot hold.
  */
-size_t zxc_inplace_bound_parts(const uint8_t* head, const uint8_t* foot, const size_t comp_size) {
-    if (UNLIKELY(!head || !foot || comp_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
-        return 0;
+int zxc_inplace_bound_parts(const uint8_t* head, const uint8_t* foot, const size_t comp_size,
+                            size_t* const out_bound) {
+    if (UNLIKELY(!head || !foot || !out_bound)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(comp_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
+        return ZXC_ERROR_SRC_TOO_SMALL;
     uint64_t dsize = 0;
     uint64_t margin = 0;
-    if (UNLIKELY(zxc_inplace_parse(head, foot, comp_size, &dsize, &margin) != ZXC_OK)) return 0;
-    if (UNLIKELY(margin > (uint64_t)SIZE_MAX || dsize > (uint64_t)SIZE_MAX - margin)) return 0;
-    return (size_t)(dsize + margin);
+    const int rc = zxc_inplace_parse(head, foot, comp_size, &dsize, &margin);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    if (UNLIKELY(margin > (uint64_t)SIZE_MAX || dsize > (uint64_t)SIZE_MAX - margin))
+        return ZXC_ERROR_MEMORY;
+    *out_bound = (size_t)(dsize + margin);
+    return ZXC_OK;
 }
 
 /**
@@ -1143,9 +1171,15 @@ size_t zxc_inplace_bound_parts(const uint8_t* head, const uint8_t* foot, const s
  */
 // cppcheck-suppress unusedFunction
 size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
+    /* Not the duplicate it looks like: the footer pointer below is undefined for
+     * a NULL src or a src_size under ZXC_FILE_FOOTER_SIZE, so it has to be ruled
+     * out here, before zxc_inplace_bound_parts gets a chance to. */
     if (UNLIKELY(!src || src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE)) return 0;
     const uint8_t* const p = (const uint8_t*)src;
-    return zxc_inplace_bound_parts(p, p + src_size - ZXC_FILE_FOOTER_SIZE, src_size);
+    size_t bound = 0;
+    const int rc =
+        zxc_inplace_bound_parts(p, p + src_size - ZXC_FILE_FOOTER_SIZE, src_size, &bound);
+    return (rc == ZXC_OK) ? bound : 0;
 }
 
 /**
@@ -1165,8 +1199,11 @@ size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
  * @param[in]     buffer_capacity  Total size of @p buffer in bytes.
  * @param[in]     comp_size        Size of the compressed archive in bytes.
  * @param[in]     opts             Decompression options, or NULL for defaults.
- * @return Decompressed size in bytes, or a negative @ref zxc_error_t code
- *         (`ZXC_ERROR_DST_TOO_SMALL` if the buffer lacks the safety margin).
+ * @return Decompressed size in bytes, or a negative @ref zxc_error_t code:
+ *         @ref ZXC_ERROR_DST_TOO_SMALL if the buffer lacks the safety margin,
+ *         otherwise the @ref zxc_inplace_parse verdict -- @ref ZXC_ERROR_BAD_MAGIC,
+ *         @ref ZXC_ERROR_BAD_HEADER, or @ref ZXC_ERROR_CORRUPT_DATA for a
+ *         forged footer.
  */
 // cppcheck-suppress unusedFunction
 int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const size_t comp_size,
@@ -1178,9 +1215,9 @@ int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const
     const uint8_t* const comp = buf + (buffer_capacity - comp_size); /* flush-right */
     uint64_t dsize = 0;
     uint64_t margin = 0;
-    if (UNLIKELY(zxc_inplace_parse(comp, comp + comp_size - ZXC_FILE_FOOTER_SIZE, comp_size, &dsize,
-                                   &margin) != ZXC_OK))
-        return ZXC_ERROR_BAD_HEADER;
+    const int rc = zxc_inplace_parse(comp, comp + comp_size - ZXC_FILE_FOOTER_SIZE, comp_size,
+                                     &dsize, &margin);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
     if (UNLIKELY(dsize > (uint64_t)buffer_capacity || (uint64_t)buffer_capacity - dsize < margin))
         return ZXC_ERROR_DST_TOO_SMALL;
     return zxc_decompress_frame(comp, comp_size, buf, buffer_capacity, opts);
@@ -1189,13 +1226,10 @@ int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const
 /**
  * @brief Reads the decompressed size from a ZXC-compressed buffer.
  *
- * The size is stored in the file footer (last @ref ZXC_FILE_FOOTER_SIZE bytes).
- * The footer is untrusted input, so the value is checked for plausibility
- * against the archive itself: every decoded block costs at least
- * @ref ZXC_BLOCK_HEADER_SIZE compressed bytes and expands to at most one
- * block size, which bounds the ratio an authentic archive can reach. A size
- * beyond that bound (a forged footer) returns 0, so callers sizing an output
- * allocation from this value inherit the check.
+ * The size is stored in the file footer (last @ref ZXC_FILE_FOOTER_SIZE bytes)
+ * and is untrusted, so it goes through @ref zxc_footer_dsize_plausible: a
+ * forged size returns 0, and callers sizing an output allocation from this
+ * value inherit the check.
  *
  * @param[in] src      Compressed data.
  * @param[in] src_size Size of @p src in bytes.
@@ -1215,12 +1249,7 @@ uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
     const uint8_t* const footer = p + src_size - ZXC_FILE_FOOTER_SIZE;
     const uint64_t dsize = zxc_le64(footer);
 
-    /* Plausibility: at most src_size / ZXC_BLOCK_HEADER_SIZE blocks, each
-     * decoding to at most chunk_size. The division form keeps the compare
-     * overflow-free - a ceil would wrap on a forged dsize near UINT64_MAX. */
-    const uint64_t blocks_needed =
-        chunk_size ? dsize / (uint64_t)chunk_size + (dsize % (uint64_t)chunk_size != 0) : 0;
-    if (UNLIKELY(blocks_needed > (uint64_t)(src_size / ZXC_BLOCK_HEADER_SIZE))) return 0;
+    if (UNLIKELY(!zxc_footer_dsize_plausible(dsize, chunk_size, src_size))) return 0;
 
     return dsize;
 }
