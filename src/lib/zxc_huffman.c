@@ -1331,6 +1331,25 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
     uint8_t* const out = dst + hdr;
     ZXC_MEMSET(out, 0, payload + 2);
 
+    /* Residual = low fd bits of the canonical code, bit-reversed so that packed
+     * bit j is the branch taken at level j. It depends on the symbol alone, so
+     * reverse it once per symbol rather than once per literal. Keyed on the
+     * histogram: sections start at ZXC_HUF_MIN_LITERALS, where walking all 256
+     * would cost more than it saves. */
+    uint16_t resid[ZXC_HUF_NUM_SYMBOLS];
+    for (int s = 0; s < ZXC_HUF_NUM_SYMBOLS; s++) {
+        resid[s] = 0;
+        if (freq[s] == 0) continue;
+        const uint32_t c = codes[s];
+        int cur = 0;
+        for (int d = code_len[s] - 1; d >= 0 && !t->flat_d[cur]; d--)
+            cur = t->nd[cur].child[(c >> d) & 1U];
+        const int fd = t->flat_d[cur];
+        uint32_t r = 0;
+        for (int j = 0; j < fd; j++) r |= ((c >> (fd - 1 - j)) & 1U) << j;
+        resid[s] = (uint16_t)r;
+    }
+
     /* Per-node bit cursors, emitting MSB-first while descending. At a flat root,
      * emit the symbol's packed D-bit residual in one shot and stop. Batching the
      * per-bit read-modify-write buys nothing: accumulators would still touch
@@ -1344,16 +1363,12 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
         for (int d = code_len[s] - 1; d >= 0; d--) {
             const int fd = t->flat_d[cur];
             if (fd) {
-                /* residual = low fd bits of the canonical code, bit-reversed
-                 * so that packed bit j is the branch taken at level j. */
-                uint32_t r = 0;
-                for (int j = 0; j < fd; j++) r |= ((c >> (fd - 1 - j)) & 1U) << j;
                 const uint32_t p = wpos[cur];
                 wpos[cur] += (uint32_t)fd;
                 uint8_t* q = out + bit_off[cur] + (p >> 3);
                 const uint32_t sh = p & 7U;
                 uint32_t w = (uint32_t)q[0] | ((uint32_t)q[1] << 8) | ((uint32_t)q[2] << 16);
-                w |= r << sh; /* fd <= 11, sh <= 7 -> fits 24 bits */
+                w |= (uint32_t)resid[s] << sh; /* fd <= 11, sh <= 7 -> fits 24 bits */
                 q[0] = (uint8_t)w;
                 q[1] = (uint8_t)(w >> 8);
                 q[2] = (uint8_t)(w >> 16);
@@ -1532,19 +1547,19 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
 #else /* x86 tiers */
 #if defined(ZXC_USE_AVX512) && defined(__AVX512VBMI2__)
     /* 64 outputs per step: the merge IS a pair of byte expands - L's bytes fill
-     * the control word's 0-bit lanes, R's the 1-bit lanes. Masked loads keep the
-     * speculative reads fault-safe without extra buffer slack. */
+     * the control word's 0-bit lanes, R's the 1-bit lanes. The masked expand
+     * loads only touch the bytes they consume, so the speculative reads stay
+     * fault-safe without extra buffer slack. */
+    const __m512i zero = _mm512_setzero_si512();
     while (i + 64 <= n) {
         uint64_t ctrl;
         ZXC_MEMCPY(&ctrl, bits + (i >> 3), 8);
-        const int pc = zxc_pivco_popcnt64(ctrl);
-        const __mmask64 lmask = (pc == 0) ? ~(__mmask64)0 : (((__mmask64)1 << (64 - pc)) - 1U);
-        const __mmask64 rmask = (pc == 64) ? ~(__mmask64)0 : (((__mmask64)1 << pc) - 1U);
-        const __m512i vl = _mm512_maskz_loadu_epi8(lmask, (const void*)(L + lp));
-        const __m512i vr = _mm512_maskz_loadu_epi8(rmask, (const void*)(R + rp));
-        const __m512i outl = _mm512_maskz_expand_epi8((__mmask64)~ctrl, vl);
-        const __m512i outv = _mm512_mask_expand_epi8(outl, (__mmask64)ctrl, vr);
+        const __m512i vl =
+            _mm512_mask_expandloadu_epi8(zero, (__mmask64)~ctrl, (const void*)(L + lp));
+        const __m512i outv =
+            _mm512_mask_expandloadu_epi8(vl, (__mmask64)ctrl, (const void*)(R + rp));
         _mm512_storeu_si512((void*)(out + i), outv);
+        const int pc = zxc_pivco_popcnt64(ctrl);
         rp += (size_t)pc;
         lp += (size_t)(64 - pc);
         i += 64;
@@ -1648,31 +1663,15 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
  * @brief Decode a flat subtree's packed D-bit code run into symbols.
  *
  * codes are packed LSB-first, D in [2, ZXC_HUF_MAX_CODE_LEN_ULTRA]; c2s maps
- * a packed path to its leaf symbol. SIMD paths cover the frequent D = 2 / 4
- * (in-register unpack + single 16-byte table lookup); the scalar bit-reader
- * handles every D.
+ * a packed path to its leaf symbol. SIMD paths cover D = 2..6 (in-register
+ * unpack, then one table lookup over the subtree's 2^D entries); the scalar
+ * bit-reader handles every D.
  */
 static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const int D,
                                   const uint8_t* RESTRICT bits, const uint8_t* RESTRICT c2s) {
     size_t i = 0;
 #if defined(ZXC_USE_NEON64)
-    if (D == 4) {
-        const uint8x16_t vc2s = vld1q_u8(c2s); /* 16 entries */
-        static const uint8_t rep2[16] = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7};
-        static const int8_t sh4[16] = {0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4};
-        const uint8x16_t vrep = vld1q_u8(rep2);
-        const int8x16_t vsh = vld1q_s8(sh4);
-        const uint8x16_t vmask = vdupq_n_u8(0x0F);
-        while (i + 16 <= n) {
-            uint8x16_t raw = vdupq_n_u8(0);
-            raw = vreinterpretq_u8_u64(
-                vsetq_lane_u64(zxc_le64(bits + ((i * 4) >> 3)), vreinterpretq_u64_u8(raw), 0));
-            const uint8x16_t rep = vqtbl1q_u8(raw, vrep);
-            const uint8x16_t codes = vandq_u8(vshlq_u8(rep, vsh), vmask);
-            vst1q_u8(out + i, vqtbl1q_u8(vc2s, codes));
-            i += 16;
-        }
-    } else if (D == 2) {
+    if (D == 2) {
         uint8_t c2s16[16];
         for (int k = 0; k < 16; k++) c2s16[k] = c2s[k & 3];
         const uint8x16_t vc2s = vld1q_u8(c2s16);
@@ -1720,11 +1719,25 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             vst1q_u8(out + i, vqtbl1q_u8(vc2s, vcombine_u8(cA, cB)));
             i += 16;
         }
+    } else if (D == 4) {
+        const uint8x16_t vc2s = vld1q_u8(c2s); /* 16 entries */
+        static const uint8_t rep2[16] = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7};
+        static const int8_t sh4[16] = {0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4, 0, -4};
+        const uint8x16_t vrep = vld1q_u8(rep2);
+        const int8x16_t vsh = vld1q_s8(sh4);
+        const uint8x16_t vmask = vdupq_n_u8(0x0F);
+        while (i + 16 <= n) {
+            uint8x16_t raw = vdupq_n_u8(0);
+            raw = vreinterpretq_u8_u64(
+                vsetq_lane_u64(zxc_le64(bits + ((i * 4) >> 3)), vreinterpretq_u64_u8(raw), 0));
+            const uint8x16_t rep = vqtbl1q_u8(raw, vrep);
+            const uint8x16_t codes = vandq_u8(vshlq_u8(rep, vsh), vmask);
+            vst1q_u8(out + i, vqtbl1q_u8(vc2s, codes));
+            i += 16;
+        }
     } else if (D == 5) {
         /* Same window scheme as D=3; c2s has 32 entries (vqtbl2q). 10 bytes. */
-        uint8x16x2_t vc2s;
-        vc2s.val[0] = vld1q_u8(c2s);
-        vc2s.val[1] = vld1q_u8(c2s + 16);
+        const uint8x16x2_t vc2s = vld1q_u8_x2(c2s);
         static const uint8_t idxA[16] = {0, 1, 0, 1, 1, 2, 1, 2, 2, 3, 3, 4, 3, 4, 4, 5};
         static const uint8_t idxB[16] = {5, 6, 5, 6, 6, 7, 6, 7, 7, 8, 8, 9, 8, 9, 9, 10};
         static const int16_t sh8[8] = {0, -5, -2, -7, -4, -1, -6, -3};
@@ -1750,11 +1763,7 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
         }
     } else if (D == 6) {
         /* Same window scheme as D=3; c2s has 64 entries (vqtbl4q). 12 bytes. */
-        uint8x16x4_t vc2s;
-        vc2s.val[0] = vld1q_u8(c2s);
-        vc2s.val[1] = vld1q_u8(c2s + 16);
-        vc2s.val[2] = vld1q_u8(c2s + 32);
-        vc2s.val[3] = vld1q_u8(c2s + 48);
+        const uint8x16x4_t vc2s = vld1q_u8_x4(c2s);
         static const uint8_t idxA[16] = {0, 1, 0, 1, 1, 2, 2, 3, 3, 4, 3, 4, 4, 5, 5, 6};
         static const uint8_t idxB[16] = {6, 7, 6, 7, 7, 8, 8, 9, 9, 10, 9, 10, 10, 11, 11, 12};
         static const int16_t sh8[8] = {0, -6, -4, -2, 0, -6, -4, -2};
@@ -1782,25 +1791,7 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
 #elif defined(ZXC_USE_NEON32)
     /* d-register mirrors of the AArch64 kernels: 8 codes per step, c2s lookup
      * via VTBL (16-entry table = two d-registers). */
-    if (D == 4) {
-        uint8x8x2_t vc2s;
-        vc2s.val[0] = vld1_u8(c2s);
-        vc2s.val[1] = vld1_u8(c2s + 8);
-        static const uint8_t rep2[8] = {0, 0, 1, 1, 2, 2, 3, 3};
-        static const int8_t sh4[8] = {0, -4, 0, -4, 0, -4, 0, -4};
-        const uint8x8_t vrep = vld1_u8(rep2);
-        const int8x8_t vsh = vld1_s8(sh4);
-        const uint8x8_t vmask = vdup_n_u8(0x0F);
-        while (i + 8 <= n) {
-            uint32_t w;
-            ZXC_MEMCPY(&w, bits + ((i * 4) >> 3), 4);
-            const uint8x8_t raw = vreinterpret_u8_u32(vdup_n_u32(w));
-            const uint8x8_t rep = vtbl1_u8(raw, vrep);
-            const uint8x8_t codes = vand_u8(vshl_u8(rep, vsh), vmask);
-            vst1_u8(out + i, vtbl2_u8(vc2s, codes));
-            i += 8;
-        }
-    } else if (D == 2) {
+    if (D == 2) {
         uint8_t c2s8[8];
         for (int k = 0; k < 8; k++) c2s8[k] = c2s[k & 3];
         const uint8x8_t vc2s = vld1_u8(c2s8);
@@ -1843,8 +1834,29 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             vst1_u8(out + i, vtbl1_u8(vc2s, vmovn_u16(codes16)));
             i += 8;
         }
+    } else if (D == 4) {
+        /* Register by register: GCC has no AArch32 vld1_u8_x2/_x4 before 14.
+         * Loaded once per call, so the tuple form bought nothing anyway. */
+        uint8x8x2_t vc2s;
+        vc2s.val[0] = vld1_u8(c2s);
+        vc2s.val[1] = vld1_u8(c2s + 8);
+        static const uint8_t rep2[8] = {0, 0, 1, 1, 2, 2, 3, 3};
+        static const int8_t sh4[8] = {0, -4, 0, -4, 0, -4, 0, -4};
+        const uint8x8_t vrep = vld1_u8(rep2);
+        const int8x8_t vsh = vld1_s8(sh4);
+        const uint8x8_t vmask = vdup_n_u8(0x0F);
+        while (i + 8 <= n) {
+            uint32_t w;
+            ZXC_MEMCPY(&w, bits + ((i * 4) >> 3), 4);
+            const uint8x8_t raw = vreinterpret_u8_u32(vdup_n_u32(w));
+            const uint8x8_t rep = vtbl1_u8(raw, vrep);
+            const uint8x8_t codes = vand_u8(vshl_u8(rep, vsh), vmask);
+            vst1_u8(out + i, vtbl2_u8(vc2s, codes));
+            i += 8;
+        }
     } else if (D == 5) {
-        /* Same window scheme as D=3; c2s has 32 entries (VTBL4). 5 source bytes. */
+        /* Same window scheme as D=3; c2s has 32 entries (VTBL4). 5 source bytes.
+         * Register by register: see D == 4. */
         uint8x8x4_t vc2s;
         vc2s.val[0] = vld1_u8(c2s);
         vc2s.val[1] = vld1_u8(c2s + 8);
@@ -1871,7 +1883,7 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
     } else if (D == 6) {
         /* Same window scheme; c2s has 64 entries: two VTBL4 halves, select by
          * code bit 5. 6 source bytes. */
-        uint8x8x4_t lo, hi;
+        uint8x8x4_t lo, hi; /* register by register: see D == 4 */
         lo.val[0] = vld1_u8(c2s);
         lo.val[1] = vld1_u8(c2s + 8);
         lo.val[2] = vld1_u8(c2s + 16);
@@ -1904,6 +1916,106 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
     }
 #elif defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
     (defined(ZXC_USE_SSE2) && defined(__SSE4_1__))
+#if defined(ZXC_USE_AVX512) && defined(__AVX512VBMI__)
+    /* vpmultishiftqb reads an 8-bit field at an arbitrary bit offset: the
+     * unaligned D-bit read, in one instruction. Two facts carry the rest -
+     * 64 codes are exactly 8*D bytes and byte-aligned, so the tables are the
+     * same every step; and only the low D bits of a field survive, so bytes
+     * past 8*D are irrelevant and both accesses can be clamped to the run.
+     * Clamping the store also ends the run, hence nothing narrower below. */
+    if (D >= 2 && D <= 6) {
+        uint8_t arr[64];
+        uint8_t shf[64];
+        for (int k = 0; k < 8; k++) {
+            for (int j = 0; j < 8; j++) {
+                arr[k * 8 + j] = (uint8_t)(k * D + j);
+                shf[k * 8 + j] = (uint8_t)(j * D);
+            }
+        }
+        const __m512i varr = _mm512_loadu_si512((const void*)arr);
+        const __m512i vshf = _mm512_loadu_si512((const void*)shf);
+        const __m512i vand = _mm512_set1_epi8((char)((1 << D) - 1));
+        /* c2s holds 2^D entries and nothing is guaranteed past them. */
+        const __mmask64 tm = (D == 6) ? ~(__mmask64)0 : (((__mmask64)1 << (1 << D)) - 1);
+        const __m512i vc2s = _mm512_maskz_loadu_epi8(tm, (const void*)c2s);
+        const size_t nbytes = zxc_pivco_run_bytes((uint32_t)n, (uint8_t)D);
+        while (i < n) {
+            const size_t off = ((size_t)i * (size_t)D) >> 3;
+            const size_t avail = nbytes - off;
+            const size_t left = n - i;
+            const __mmask64 lm = (avail >= 64) ? ~(__mmask64)0 : (((__mmask64)1 << avail) - 1);
+            const __mmask64 sm = (left >= 64) ? ~(__mmask64)0 : (((__mmask64)1 << left) - 1);
+            const __m512i raw = _mm512_maskz_loadu_epi8(lm, (const void*)(bits + off));
+            const __m512i q = _mm512_permutexvar_epi8(varr, raw);
+            const __m512i codes = _mm512_and_si512(_mm512_multishift_epi64_epi8(vshf, q), vand);
+            _mm512_mask_storeu_epi8((void*)(out + i), sm, _mm512_permutexvar_epi8(codes, vc2s));
+            i += 64;
+        }
+        if (i > n) i = n;
+    }
+#else
+#if defined(ZXC_USE_AVX2)
+    /* Codes 16..31 start exactly 2*D bytes in, so the upper half runs the same
+     * pattern over a shifted source: one shuffle vector serves both, and packus
+     * leaves each half's codes in order in its own lane - no cross-lane fixup.
+     * The bound keeps both 16-byte reads inside the run; the exact-length
+     * 16-wide loops below take the tail. */
+    if (D >= 2 && D <= 6) {
+        uint8_t sa[16];
+        uint8_t sb[16];
+        uint16_t mu[8];
+        for (int q = 0; q < 8; q++) {
+            const int ba = (q * D) >> 3;
+            sa[2 * q] = (uint8_t)ba;
+            sa[2 * q + 1] = (uint8_t)(ba + 1);
+            sb[2 * q] = (uint8_t)(ba + D); /* code q+8 sits D bytes further */
+            sb[2 * q + 1] = (uint8_t)(ba + D + 1);
+            mu[q] = (uint16_t)(1U << (16 - D - ((q * D) & 7)));
+        }
+        const __m256i vsa = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i*)(void*)sa));
+        const __m256i vsb = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i*)(void*)sb));
+        const __m256i vmu = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i*)(void*)mu));
+        const __m256i vand = _mm256_set1_epi8((char)((1 << D) - 1));
+        uint8_t tab[64];
+        for (int e = 0; e < 64; e++) tab[e] = c2s[e & ((1 << D) - 1)];
+        const __m256i t0 = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i*)(void*)tab));
+        const __m256i t1 =
+            _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i*)(void*)(tab + 16)));
+        const __m256i t2 =
+            _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i*)(void*)(tab + 32)));
+        const __m256i t3 =
+            _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i*)(void*)(tab + 48)));
+        const size_t nbytes = zxc_pivco_run_bytes((uint32_t)n, (uint8_t)D);
+        while (i + 32 <= n && ((size_t)i * (size_t)D >> 3) + (size_t)(2 * D) + 16 <= nbytes) {
+            const uint8_t* src = bits + ((size_t)i * (size_t)D >> 3);
+            const __m256i raw = _mm256_inserti128_si256(
+                _mm256_castsi128_si256(_mm_loadu_si128((const __m128i*)(const void*)src)),
+                _mm_loadu_si128((const __m128i*)(const void*)(src + 2 * D)), 1);
+            const __m256i ca =
+                _mm256_srli_epi16(_mm256_mullo_epi16(_mm256_shuffle_epi8(raw, vsa), vmu), 16 - D);
+            const __m256i cb =
+                _mm256_srli_epi16(_mm256_mullo_epi16(_mm256_shuffle_epi8(raw, vsb), vmu), 16 - D);
+            const __m256i codes = _mm256_and_si256(_mm256_packus_epi16(ca, cb), vand);
+            __m256i sym;
+            if (D <= 4) {
+                sym = _mm256_shuffle_epi8(t0, codes);
+            } else {
+                const __m256i b4 = _mm256_slli_epi16(codes, 3); /* code bit 4 -> sign */
+                const __m256i lo = _mm256_blendv_epi8(_mm256_shuffle_epi8(t0, codes),
+                                                      _mm256_shuffle_epi8(t1, codes), b4);
+                if (D == 5) {
+                    sym = lo;
+                } else {
+                    const __m256i hi = _mm256_blendv_epi8(_mm256_shuffle_epi8(t2, codes),
+                                                          _mm256_shuffle_epi8(t3, codes), b4);
+                    sym = _mm256_blendv_epi8(lo, hi, _mm256_slli_epi16(codes, 2));
+                }
+            }
+            _mm256_storeu_si256((__m256i*)(void*)(out + i), sym);
+            i += 32;
+        }
+    }
+#endif
     if (D == 4) {
         const __m128i vc2s = _mm_loadu_si128((const __m128i*)(const void*)c2s);
         const __m128i vrep = _mm_setr_epi8(0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7);
@@ -2027,6 +2139,7 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
             i += 16;
         }
     }
+#endif /* AVX-512 VBMI, else AVX2 + SSE */
 #endif
     /* Generic scalar bit-reader (any D). */
     {
@@ -2084,6 +2197,47 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_emit_leaf_pair(uint8_t* RESTRICT out, co
     }
 #elif defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
     (defined(ZXC_USE_SSE2) && defined(__SSSE3__))
+#if defined(ZXC_USE_AVX512)
+    /* The control word is already the blend mask; the masked store takes the
+     * tail, hence nothing narrower below. */
+    {
+        const __m512i z0 = _mm512_set1_epi8((char)sym0);
+        const __m512i z1 = _mm512_set1_epi8((char)sym1);
+        while (i < n) {
+            const size_t left = n - i;
+            const size_t cb = (left + 7) >> 3;
+            uint64_t ctrl = 0;
+            ZXC_MEMCPY(&ctrl, bits + (i >> 3), cb < 8 ? cb : 8); /* not past the run */
+            const __mmask64 sm = (left >= 64) ? ~(__mmask64)0 : (((__mmask64)1 << left) - 1);
+            _mm512_mask_storeu_epi8((void*)(out + i), sm,
+                                    _mm512_mask_blend_epi8((__mmask64)ctrl, z0, z1));
+            i += 64;
+        }
+        if (i > n) i = n;
+    }
+#else
+#if defined(ZXC_USE_AVX2)
+    /* Broadcasting the control dword lets each 128-bit half pick its own two
+     * bytes out of it. */
+    {
+        const __m256i y0 = _mm256_set1_epi8((char)sym0);
+        const __m256i ydelta = _mm256_set1_epi8((char)(uint8_t)(sym0 ^ sym1));
+        const __m256i yrep = _mm256_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2,
+                                              2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3);
+        const __m256i ysel =
+            _mm256_setr_epi8(1, 2, 4, 8, 16, 32, 64, (char)128, 1, 2, 4, 8, 16, 32, 64, (char)128,
+                             1, 2, 4, 8, 16, 32, 64, (char)128, 1, 2, 4, 8, 16, 32, 64, (char)128);
+        while (i + 32 <= n) {
+            uint32_t c4;
+            ZXC_MEMCPY(&c4, bits + (i >> 3), 4);
+            const __m256i rep = _mm256_shuffle_epi8(_mm256_set1_epi32((int)c4), yrep);
+            const __m256i mask = _mm256_cmpeq_epi8(_mm256_and_si256(rep, ysel), ysel);
+            _mm256_storeu_si256((__m256i*)(void*)(out + i),
+                                _mm256_xor_si256(y0, _mm256_and_si256(ydelta, mask)));
+            i += 32;
+        }
+    }
+#endif
     const __m128i vsym0 = _mm_set1_epi8((char)sym0);
     const __m128i vdelta = _mm_set1_epi8((char)(uint8_t)(sym0 ^ sym1));
     const __m128i vrep = _mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1);
@@ -2098,6 +2252,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_emit_leaf_pair(uint8_t* RESTRICT out, co
                          _mm_xor_si128(vsym0, _mm_and_si128(vdelta, mask)));
         i += 16;
     }
+#endif /* AVX-512, else AVX2 + SSE */
 #endif
     while (i < n) {
         const int bit = (bits[i >> 3] >> (i & 7)) & 1;

@@ -231,9 +231,9 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
             const int bmi2 = (regs[1] >> 8) & 1;  // CPUID.7.0:EBX[8]
             if (regs[1] & (1U << 5)) avx2 = 1;
             // AVX512 also needs XCR0[5..7] (opmask/ZMM)
-            if ((regs[1] & (1U << 16)) && (regs[1] & (1U << 30)) && (regs[2] & (1U << 6)) &&
-                (xcr0 & 0xE0) == 0xE0)
-                avx512 = 1; /* AVX512 tier = F+BW+VBMI2 (variant built with -mavx512vbmi2) */
+            if ((regs[1] & (1U << 16)) && (regs[1] & (1U << 30)) && (regs[2] & (1U << 1)) &&
+                (regs[2] & (1U << 6)) && (xcr0 & 0xE0) == 0xE0)
+                avx512 = 1; /* AVX512 tier = F+BW+VBMI+VBMI2, as the variant is built */
             // The AVX2/AVX512 variants are compiled with BMI1/BMI2/LZCNT enabled,
             // so both gates must prove those bits too. LZCNT (ABM) lives in
             // CPUID.80000001H:ECX[5]; that leaf is architectural on x86-64.
