@@ -854,7 +854,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
 
     // Constant 0 when !has_dict, so `d_floor` folds to `dst`.
     const size_t dict_size = has_dict ? ctx->dict_size : 0;
-    uint32_t lit_comp, tok_comp;
+    uint32_t lit_comp;
+    uint32_t tok_comp;
 
     const int hdr_sz = zxc_read_glo_header_and_desc(src, src_size, &gh, &lit_comp, &tok_comp);
     if (UNLIKELY(hdr_sz < 0)) return ZXC_ERROR_BAD_HEADER;
