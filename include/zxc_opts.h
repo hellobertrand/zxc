@@ -62,8 +62,6 @@ typedef struct {
                           of 2, [4KB - 2MB]. */
     int checksum_enabled; /**< 1 to enable per-block and global checksums, 0 to disable. */
     int seekable;         /**< 1 to append a seek table for random-access decompression. */
-    int priority;         /**< What to optimise for: a @ref zxc_priority_t value.
-                               0 (@ref ZXC_PRIORITY_RATIO) is the default. */
     const void* dict;     /**< Pre-trained dictionary content (NULL = none). */
     size_t dict_size;     /**< Dictionary size in bytes (0 = none, max ZXC_DICT_SIZE_MAX). */
     const void* dict_huf; /**< Optional shared literal Huffman table: the 128-byte packed

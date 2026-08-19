@@ -807,7 +807,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                                       uint8_t* RESTRICT buf_extras, uint32_t* RESTRICT seq_c_out,
                                       size_t* RESTRICT lit_c_out, size_t* RESTRICT extras_sz_out,
                                       uint16_t* RESTRICT max_offset_out) {
-    zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level, ctx->priority);
+    zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level);
     lzp_opt.use_lazy = 0;  // guard
 
     // With a dictionary, src = [dict | block]. The DP arrays index from the block
@@ -1127,46 +1127,6 @@ static void zxc_lz_seed_dict(const uint8_t* RESTRICT src, const size_t dict_size
  * @return ZXC_OK, or a negative @ref zxc_error_t, typically
  *         @ref ZXC_ERROR_DST_TOO_SMALL.
  */
-/**
- * @brief Reports whether a block leans on back-references shorter than
- *        @ref ZXC_PRIORITY_DECODE_MIN_DIST.
- *
- * Samples @ref ZXC_PRIORITY_DECODE_PROBE_SAMPLES positions and asks the one
- * question that matters at each: is there a 4-byte repeat inside the distance
- * the policy is about to forbid? Data that answers yes often -- periodic runs,
- * JSON keys, XML tags -- loses size *and* decode time when those distances go,
- * because the parser falls back on longer, worse matches and emits more of
- * them. Data that answers rarely gives them up for nothing.
- *
- * Costs a few thousand comparisons against a parse that visits every byte, and
- * runs only when the policy is armed.
- *
- * @param[in] blk  Block payload, past any dictionary prefix.
- * @param[in] size Payload size in bytes.
- * @return 1 when the block must keep its short distances, 0 when the floor is safe.
- */
-static int zxc_block_is_short_dist_bound(const uint8_t* const blk, const size_t size) {
-    const size_t d_max = ZXC_PRIORITY_DECODE_MIN_DIST;
-    // Too small to sample, and too small to gain: keep every distance.
-    if (size < d_max + sizeof(uint32_t)) return 1;
-
-    size_t stride = size / ZXC_PRIORITY_DECODE_PROBE_SAMPLES;
-    if (stride < d_max) stride = d_max;
-
-    size_t samples = 0, hits = 0;
-    for (size_t i = d_max; i + sizeof(uint32_t) <= size; i += stride) {
-        const uint32_t cur = zxc_le32(blk + i);
-        samples++;
-        for (size_t d = 1; d < d_max; d++) {
-            if (zxc_le32(blk + i - d) == cur) {
-                hits++;
-                break;
-            }
-        }
-    }
-    return hits * 100U > ZXC_PRIORITY_DECODE_MAX_SHORT_PCT * samples;
-}
-
 static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
                                 size_t* RESTRICT out_sz) {

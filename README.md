@@ -747,7 +747,6 @@ zxc_free_dctx(dctx);
 - Optional checksum validation
 - Reusable contexts for high-frequency call sites
 - Seekable archives: optional seek table for O(1) random-access decompression (`.seekable = 1`)
-- Encoder priority: `--priority=decode` / `.priority = ZXC_PRIORITY_DECODE` trades a little ratio for a faster decode, at no cost to compression speed
 
 **[👉 See complete examples and advanced usage](docs/EXAMPLES.md)**
 

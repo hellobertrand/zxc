@@ -131,28 +131,4 @@ typedef enum {
 
 /** @} */ /* end of levels */
 
-/**
- * @defgroup priority Encoder Priority
- * @brief What the encoder optimises for, independently of the level.
- *
- * The level says how much time to spend compressing. The priority says what
- * to spend it on. The two are independent axes.
- * @{
- */
-
-/**
- * @brief What a compression call optimises for.
- *
- * Pass one as the @p priority of @ref zxc_compress_opts_t.
- */
-typedef enum {
-    /** Smallest output (default). */
-    ZXC_PRIORITY_RATIO = 0,
-    /** Faster decoding, paid for in size. The encoder stops emitting short
-     *  match distances. */
-    ZXC_PRIORITY_DECODE = 1
-} zxc_priority_t;
-
-/** @} */ /* end of priority */
-
 #endif  // ZXC_CONSTANTS_H

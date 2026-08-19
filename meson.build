@@ -22,7 +22,7 @@ is_cl = cc.get_id() == 'msvc'
 msvc_narrowing_args = msvc_syntax ? ['/wd4244'] : []
 
 # Keep in sync with ZXC_SOVERSION in CMakeLists.txt (bumps only on an ABI break).
-zxc_soversion = '5'
+zxc_soversion = '4'
 
 # =============================================================================
 # Windows DLL export control

@@ -257,7 +257,6 @@ typedef struct {
     size_t block_size;        // Block size in bytes (0 = 512 KB default).
     int    checksum_enabled;  // 1 = enable checksums, 0 = disable.
     int    seekable;          // 1 = append seek table for random access.
-    int    priority;          // 0 = ratio (default), 1 = decode speed.
     const void* dict;         // Pre-trained dictionary content (NULL = none).
     size_t dict_size;         // Dictionary size in bytes (0 = none, max 64 KB).
     const void* dict_huf;     // Shared literal Huffman table, 128 bytes
@@ -378,42 +377,8 @@ ZXC_EXPORT int64_t zxc_compress(
 );
 ```
 
-Compresses `src` into `dst`. Only `level`, `block_size`, `checksum_enabled`,
-`seekable` and `priority` fields of `opts` are used. `n_threads` is ignored
-(always single-threaded).
-
-### priority
-
-`priority` picks what the encoder optimises for, independently of `level`.
-The level says how much time to spend; the priority says what to spend it on.
-
-| value | meaning |
-|---|---|
-| `ZXC_PRIORITY_RATIO` (0, default) | smallest output |
-| `ZXC_PRIORITY_DECODE` (1) | faster decoding, paid for in size |
-
-Under `ZXC_PRIORITY_DECODE` the encoder stops emitting short match distances,
-so the decoder always takes the same copy path, with no branch left to
-mispredict. It decodes faster for a small increase in size, and compression
-speed is unchanged.
-
-The trade only pays on data that does not lean on short repeats, so the
-encoder decides **per block**: it scans a sample of the block first, and where
-short repeats are common it keeps them. Data that would lose on both size and
-speed — periodic runs, tightly structured records — is therefore left exactly
-as `ZXC_PRIORITY_RATIO` would leave it, byte for byte, without you having to
-know in advance.
-
-The policy applies to levels 1 through 5. Levels 6 and 7 are the density tiers:
-their parse is priced by the optimal parser and their decode time is dominated
-by Huffman, so the option is a no-op there and the output is unchanged.
-
-Ratio stays the default because the library's own space-speed pricing does not
-rate the trade highly enough to take it unasked; whether it is worth it depends
-on how many times you read what you write once.
-
-Encoder policy only: no format bit changes, and the archives decode with any
-ZXC build.
+Compresses `src` into `dst`. Only `level`, `block_size`, `checksum_enabled`, and
+`seekable` fields of `opts` are used. `n_threads` is ignored (always single-threaded).
 
 **Returns**: compressed size (> 0) on success, or negative `zxc_error_t`.
 
