@@ -154,13 +154,18 @@ int main(int argc, char** argv) {
     zxc_compress_opts_t ghi = plain;
     ghi.level = 1; /* levels 1-2 emit GHI blocks */
 
+    /* Declared up front so the bails below can reach the single cleanup at
+     * `done` without jumping over an initialisation. */
     uint8_t* base = NULL;
     uint8_t* basec = NULL;
     uint8_t* baseg = NULL;
+    uint8_t* d = NULL;
+    int reached_end = 0;
+
     const size_t n_plain = build_base(text, text_n, &plain, &base);
     const size_t n_chk = build_base(text, text_n, &chk, &basec);
     const size_t n_ghi = build_base(text, text_n, &ghi, &baseg);
-    if (!n_plain || !n_chk || !n_ghi) return 1;
+    if (!n_plain || !n_chk || !n_ghi) goto done;
 
     /* Every GLO patch below addresses a fixed offset inside block 0's sub-header.
      * If a heuristic change ever made that block RAW, the patches would land on
@@ -168,15 +173,15 @@ int main(int argc, char** argv) {
     if (base[BLK0] != ZXC_BLOCK_GLO || basec[BLK0] != ZXC_BLOCK_GLO) {
         fprintf(stderr, "  block 0 is type %u/%u, expected GLO - vectors would test nothing\n",
                 base[BLK0], basec[BLK0]);
-        return 1;
+        goto done;
     }
 
     printf("Generating invalid vectors into %s/\n", dir);
 
-    uint8_t* d = (uint8_t*)malloc(n_chk > n_plain ? n_chk : n_plain);
+    d = (uint8_t*)malloc(n_chk > n_plain ? n_chk : n_plain);
     if (!d) {
         fprintf(stderr, "  OOM\n");
-        return 1;
+        goto done;
     }
 
 /* Each vector starts from a pristine copy of one base, patches one field, and
@@ -258,26 +263,28 @@ int main(int argc, char** argv) {
         uint8_t* g = (uint8_t*)malloc(n_ghi);
         if (!g) {
             fprintf(stderr, "  OOM\n");
-            return 1;
-        }
-        memcpy(g, baseg, n_ghi);
-        /* seq0 is derived from the wire, so check the block really is GHI, that
-         * it has a sequence to forge, and that the word is inside the buffer -
-         * otherwise the patch lands in the extras padding and the vector ships
-         * decoding cleanly, i.e. testing nothing. */
-        const size_t seq0 =
-            PAY0 + ZXC_GHI_HEADER_BINARY_SIZE + zxc_le32(g + PAY0 + 4) /* n_literals, RAW */;
-        if (g[BLK0] != ZXC_BLOCK_GHI || zxc_le32(g + PAY0) == 0 || seq0 + 4 > n_ghi) {
-            fprintf(stderr, "  cannot forge a GHI offset (type %u, n_seq %u, seq0 %zu of %zu)\n",
-                    g[BLK0], zxc_le32(g + PAY0), seq0, n_ghi);
             failures++;
         } else {
-            uint32_t w = zxc_le32(g + seq0);
-            w = (w & 0xFFFF0000U) | 0xFFFFU; /* max encodable distance */
-            zxc_store_le32(g + seq0, w);
-            failures += write_file(dir, "ghi_forged_offset", g, n_ghi) < 0;
+            memcpy(g, baseg, n_ghi);
+            /* seq0 is derived from the wire, so check the block really is GHI,
+             * that it has a sequence to forge, and that the word is inside the
+             * buffer - otherwise the patch lands in the extras padding and the
+             * vector ships decoding cleanly, i.e. testing nothing. */
+            const size_t seq0 =
+                PAY0 + ZXC_GHI_HEADER_BINARY_SIZE + zxc_le32(g + PAY0 + 4) /* n_literals, RAW */;
+            if (g[BLK0] != ZXC_BLOCK_GHI || zxc_le32(g + PAY0) == 0 || seq0 + 4 > n_ghi) {
+                fprintf(stderr,
+                        "  cannot forge a GHI offset (type %u, n_seq %u, seq0 %zu of %zu)\n",
+                        g[BLK0], zxc_le32(g + PAY0), seq0, n_ghi);
+                failures++;
+            } else {
+                uint32_t w = zxc_le32(g + seq0);
+                w = (w & 0xFFFF0000U) | 0xFFFFU; /* max encodable distance */
+                zxc_store_le32(g + seq0, w);
+                failures += write_file(dir, "ghi_forged_offset", g, n_ghi) < 0;
+            }
+            free(g);
         }
-        free(g);
     }
 
     /* --- Checksum defects (need a checksummed base) ----------------------- */
@@ -305,14 +312,19 @@ int main(int argc, char** argv) {
 
 #undef FROM
 
+    reached_end = 1;
+
+done:
     free(d);
     free(base);
     free(basec);
     free(baseg);
     free(text);
 
-    if (failures) {
-        fprintf(stderr, "Generation FAILED (%d error(s)).\n", failures);
+    /* A bail jumps here with failures == 0, so the flag is what separates
+     * "generated everything, some vectors failed" from "gave up early". */
+    if (!reached_end || failures) {
+        fprintf(stderr, "Generation FAILED (%d error(s)).\n", failures ? failures : 1);
         return 1;
     }
     printf("Done. Re-run the conformance suite and check each vector's error code.\n");
