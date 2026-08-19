@@ -890,6 +890,139 @@ static int inplace_case(const char* label, const uint8_t* orig, size_t n, int le
     return 1;
 }
 
+/* A footer size the archive cannot possibly hold must not become the caller's
+ * allocation: one flipped byte in a 354-byte archive used to answer a 68 GB
+ * bound, and the decoder blamed the header for it. */
+static int inplace_forged_footer(void) {
+    uint8_t in[4096];
+    for (size_t i = 0; i < sizeof(in); i++) in[i] = (uint8_t)(i * 7);
+    uint8_t comp[8192];
+    const int64_t c = zxc_compress(in, sizeof(in), comp, sizeof(comp), NULL);
+    if (c <= 0) {
+        printf("Failed [forged footer]: compress -> %lld\n", (long long)c);
+        return 0;
+    }
+    const size_t csz = (size_t)c;
+    const size_t need = zxc_decompress_inplace_bound(comp, csz);
+    uint8_t* const buf = (uint8_t*)malloc(need);
+    if (!buf) return 0;
+    uint8_t bad[8192];
+    int ok = 1;
+
+    /* A size no archive of this length can reach. */
+    memcpy(bad, comp, csz);
+    bad[csz - ZXC_FILE_FOOTER_SIZE + 4] = 0x10; /* ~68 GB */
+    const size_t inflated = zxc_decompress_inplace_bound(bad, csz);
+    if (inflated != 0) {
+        printf("Failed [forged footer]: bound %zu, want 0\n", inflated);
+        ok = 0;
+    }
+
+    /* The verdict must name the footer, not the header, which is intact. */
+    memcpy(bad, comp, csz);
+    memset(bad + csz - ZXC_FILE_FOOTER_SIZE, 0xFF, 8);
+    memcpy(buf + need - csz, bad, csz);
+    int64_t d = zxc_decompress_inplace(buf, need, csz, NULL);
+    if (d != ZXC_ERROR_CORRUPT_DATA) {
+        printf("Failed [forged footer]: inplace %lld, want %d\n", (long long)d,
+               ZXC_ERROR_CORRUPT_DATA);
+        ok = 0;
+    }
+
+    memcpy(bad, comp, csz);
+    bad[0] ^= 0xFF;
+    memcpy(buf + need - csz, bad, csz);
+    d = zxc_decompress_inplace(buf, need, csz, NULL);
+    if (d != ZXC_ERROR_BAD_MAGIC) {
+        printf("Failed [forged footer]: bad magic %lld, want %d\n", (long long)d,
+               ZXC_ERROR_BAD_MAGIC);
+        ok = 0;
+    }
+
+    free(buf);
+    if (ok) printf("  [PASS] forged footer refused, verdict names the footer\n");
+    return ok;
+}
+
+/* The read/write separation is a difference between the bound and the archive
+ * size, and the archive size is attacker-controlled: bytes between the EOF block
+ * and the footer are skipped by the frame loop, so a padded archive still
+ * decodes while each padding byte slides it closer to the output. */
+static int inplace_padded_archive(void) {
+    const size_t N = 64 * 1024;
+    uint8_t* const orig = (uint8_t*)malloc(N);
+    if (!orig) return 0;
+    gen_random_data(orig, N); /* all-RAW: the worst case for the separation */
+
+    const size_t cbound = (size_t)zxc_compress_bound(N);
+    uint8_t* const comp = (uint8_t*)malloc(cbound);
+    if (!comp) {
+        free(orig);
+        return 0;
+    }
+    const zxc_compress_opts_t co = {.level = 1, .block_size = ZXC_BLOCK_SIZE_MIN};
+    const int64_t c = zxc_compress(orig, N, comp, cbound, &co);
+    if (c <= 0) {
+        printf("Failed [padded archive]: compress -> %lld\n", (long long)c);
+        free(comp);
+        free(orig);
+        return 0;
+    }
+    const size_t csz = (size_t)c;
+
+    int ok = 1;
+    const size_t pads[] = {1, 4096, 20000, 100000};
+    for (size_t i = 0; i < sizeof(pads) / sizeof(pads[0]); i++) {
+        const size_t pad = pads[i];
+        const size_t c2 = csz + pad;
+        uint8_t* const a = (uint8_t*)malloc(c2);
+        if (!a) {
+            ok = 0;
+            break;
+        }
+        memcpy(a, comp, csz - ZXC_FILE_FOOTER_SIZE);
+        memset(a + csz - ZXC_FILE_FOOTER_SIZE, 0xAA, pad);
+        memcpy(a + csz - ZXC_FILE_FOOTER_SIZE + pad, comp + csz - ZXC_FILE_FOOTER_SIZE,
+               ZXC_FILE_FOOTER_SIZE);
+
+        const size_t need = zxc_decompress_inplace_bound(a, c2);
+        if (need < c2) {
+            printf("Failed [padded archive]: pad=%zu bound %zu < archive %zu\n", pad, need, c2);
+            ok = 0;
+        } else {
+            uint8_t* const buf = (uint8_t*)malloc(need);
+            if (buf) {
+                memcpy(buf + need - c2, a, c2);
+                const int64_t d = zxc_decompress_inplace(buf, need, c2, NULL);
+                if (d != (int64_t)N || memcmp(buf, orig, N) != 0) {
+                    printf("Failed [padded archive]: pad=%zu inplace %lld want %zu\n", pad,
+                           (long long)d, N);
+                    ok = 0;
+                }
+                free(buf);
+            }
+        }
+        free(a);
+    }
+
+    /* The bound an authentic archive gets must not have moved. */
+    const size_t plain = zxc_decompress_inplace_bound(comp, csz);
+    uint8_t* const buf = (uint8_t*)malloc(plain);
+    if (buf) {
+        memcpy(buf + plain - csz, comp, csz);
+        if (zxc_decompress_inplace(buf, plain, csz, NULL) != (int64_t)N) {
+            printf("Failed [padded archive]: unpadded archive regressed\n");
+            ok = 0;
+        }
+        free(buf);
+    }
+
+    free(comp);
+    free(orig);
+    if (ok) printf("  [PASS] padded archive keeps its read/write separation\n");
+    return ok;
+}
+
 int test_decompress_inplace(void) {
     printf("=== TEST: Unit - In-place decompression (single buffer) ===\n");
     const size_t N = 2 * 1024 * 1024;
@@ -931,6 +1064,9 @@ int test_decompress_inplace(void) {
         printf("Failed: bound on garbage != 0\n");
         ok = 0;
     }
+
+    ok &= inplace_forged_footer();
+    ok &= inplace_padded_archive();
 
     free(a);
     if (!ok) return 0;
