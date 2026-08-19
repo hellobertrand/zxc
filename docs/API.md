@@ -392,16 +392,25 @@ The level says how much time to spend; the priority says what to spend it on.
 | `ZXC_PRIORITY_RATIO` (0, default) | smallest output |
 | `ZXC_PRIORITY_DECODE` (1) | faster decoding, paid for in size |
 
-Under `ZXC_PRIORITY_DECODE` the encoder stops emitting short match distances.
-The decoder then always takes the same copy path, with no branch left to
-mispredict, so it decodes faster for a small increase in size. Compression
+Under `ZXC_PRIORITY_DECODE` the encoder stops emitting short match distances,
+so the decoder always takes the same copy path, with no branch left to
+mispredict. It decodes faster for a small increase in size, and compression
 speed is unchanged.
 
-Ratio is the default because the library's own space-speed pricing does not
-rate the trade highly enough to take it unasked; whether it is worth it
-depends on how many times you read what you write once. The gain and the cost
-both depend on the data — highly repetitive input relies on short distances
-and loses on both axes — so measure your own before choosing.
+The trade only pays on data that does not lean on short repeats, so the
+encoder decides **per block**: it scans a sample of the block first, and where
+short repeats are common it keeps them. Data that would lose on both size and
+speed — periodic runs, tightly structured records — is therefore left exactly
+as `ZXC_PRIORITY_RATIO` would leave it, byte for byte, without you having to
+know in advance.
+
+The policy applies to levels 1 through 5. Levels 6 and 7 are the density tiers:
+their parse is priced by the optimal parser and their decode time is dominated
+by Huffman, so the option is a no-op there and the output is unchanged.
+
+Ratio stays the default because the library's own space-speed pricing does not
+rate the trade highly enough to take it unasked; whether it is worth it depends
+on how many times you read what you write once.
 
 Encoder policy only: no format bit changes, and the archives decode with any
 ZXC build.
