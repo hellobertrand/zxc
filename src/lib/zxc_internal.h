@@ -273,9 +273,9 @@ extern "C" {
 #endif
 /** @} */ /* end of Compiler Abstractions */
 
-/* Heap allocator and cache-line-aligned allocator macros are now defined
- * in @c zxc_deps.h (included at the top of this header), so non-libc
- * targets can override them by vendoring that single file. */
+// Heap allocator and cache-line-aligned allocator macros are now defined
+// in @c zxc_deps.h (included at the top of this header), so non-libc
+// targets can override them by vendoring that single file.
 
 /**
  * @name Endianness Detection
@@ -331,10 +331,24 @@ extern "C" {
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
 /** @brief Current on-disk file format version. The decoder accepts only this
  *  version; Older versions are rejected with ZXC_ERROR_BAD_VERSION. */
-#define ZXC_FILE_FORMAT_VERSION 7
+#define ZXC_FILE_FORMAT_VERSION 8
 
 /** @brief Safety padding appended to buffers to tolerate overruns. */
 #define ZXC_PAD_SIZE 32
+/**
+ * @brief Readable bytes a GLO/GHI payload guarantees after its literal section.
+ *
+ * A wire guarantee, not a buffer allowance - hence separate from
+ * @ref ZXC_PAD_SIZE even though the values match. RAW literals point into the
+ * caller's buffer and @ref zxc_decode_copy_literals overshoots by up to 31 B,
+ * so it needs readable bytes behind it.
+ *
+ * The following sections usually supply them for free (tokens + offsets clear
+ * 32 B from 16 sequences on); the encoder pads only the shortfall, inside the
+ * extras section. Extras are read on demand, so an over-long end pointer is
+ * harmless - no wire field, nothing to validate about the padding.
+ */
+#define ZXC_BLOCK_LIT_SLACK 32
 /**
  * @brief Tail padding required on the decompression destination buffer.
  *
@@ -398,27 +412,22 @@ extern "C" {
 /** @brief Size of the per-block checksum field in bytes. */
 #define ZXC_BLOCK_CHECKSUM_SIZE 4
 /** @brief Binary size of a GLO block sub-header. */
-#define ZXC_GLO_HEADER_BINARY_SIZE 16
+#define ZXC_GLO_HEADER_BINARY_SIZE 12
 /** @brief Binary size of a GHI block sub-header. */
-#define ZXC_GHI_HEADER_BINARY_SIZE 16
+#define ZXC_GHI_HEADER_BINARY_SIZE 12
 
 /** @brief Worst-case format overhead inside a single block beyond the outer
  *  8-byte block header and the optional 4-byte checksum.
  *
- *  Covers the inner GLO/GHI sub-header (16 B) plus four section descriptors
- *  (4 x 8 = 32 B) = 48 B, with a 16 B safety margin for future format
- *  evolution. Used by zxc_compress_block_bound() and zxc_compress_bound()
- *  to size the destination buffer in the worst (incompressible) case. */
-#define ZXC_BLOCK_FORMAT_OVERHEAD 64
+ *  Sub-header (12 B) + widest GLO section descriptors (8 B) + widest slack padding
+ *  (@ref ZXC_BLOCK_LIT_SLACK) = 52 B, plus the customary 16 B of margin for
+ *  future format evolution. Used by zxc_compress_block_bound() and
+ *  zxc_compress_bound().
+ */
+#define ZXC_BLOCK_FORMAT_OVERHEAD 68
 
-/** @brief Binary size of a section descriptor (comp_size + raw_size). */
-#define ZXC_SECTION_DESC_BINARY_SIZE 8
-/** @brief 32-bit mask for extracting sizes from a section descriptor. */
-#define ZXC_SECTION_SIZE_MASK 0xFFFFFFFFU
-/** @brief Number of sections in a GLO block. */
-#define ZXC_GLO_SECTIONS 4
-/** @brief Number of sections in a GHI block. */
-#define ZXC_GHI_SECTIONS 3
+/** @brief Widest GLO section descriptors: literal and token compressed sizes. */
+#define ZXC_GLO_MAX_DESC_SIZE (2 * sizeof(uint32_t))
 
 /** @brief Checksum algorithm id for RapidHash (default, sole implementation). */
 #define ZXC_CHECKSUM_RAPIDHASH 0
@@ -515,12 +524,18 @@ extern "C" {
  * the encoder refuses to emit values above this bound. Together they bound the
  * varint surface to exactly the format-defined block size limit. */
 #define ZXC_MAX_VARINT_VALUE ((uint32_t)(ZXC_BLOCK_SIZE_MAX - 1U))
-/** @brief Maximum decoded output of a single sequence with INLINE ll/ml
- *         (non-varint). Used by 4x decoder bounds checks to reserve space for
- *         subsequent inline sequences in the same batch when the current
- *         sequence has a varint-extended ml. */
-#define ZXC_GLO_MAX_INLINE_OUT_PER_SEQ \
-    ((ZXC_TOKEN_LL_MASK - 1U) + (ZXC_TOKEN_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 33 */
+/** @brief Maximum decoded output of one sequence with inline ll/ml, used by the
+ *         4x bounds checks to reserve the rest of a batch.
+ *
+ *         Keep it small - the loop margins scale with it. Widening it to 543
+ *         once cost 2 percent of decode on silesia. */
+#define ZXC_GLO_MAX_INLINE_OUT_PER_SEQ ((ZXC_TOKEN_LL_MASK - 1U) + ZXC_GLO_MAX_INLINE_ML) /* 33 */
+/** @brief Longest match a GLO sequence carries without a varint extension.
+ *
+ * Below @ref ZXC_PAD_SIZE, so the inline path needs no length ladder: one
+ * 32-byte store covers it. The escape path always yields more, so comparing
+ * against this recovers "was the ml nibble inline". */
+#define ZXC_GLO_MAX_INLINE_ML ((ZXC_TOKEN_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 19 */
 #define ZXC_GHI_MAX_INLINE_OUT_PER_SEQ \
     ((ZXC_SEQ_LL_MASK - 1U) + (ZXC_SEQ_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 513 */
 /** @brief Base bias added to encoded offsets (stored = actual - bias). */
@@ -611,12 +626,12 @@ typedef struct {
     int16_t lvl_start[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2];
     int n_nodes;
     int max_depth;
-    /* Flat-subtree fast path: flat_d[nid] = D (>= 2) when nid roots a MAXIMAL
-     * complete subtree with all leaves exactly D levels down. Its wire run is
-     * the symbols' packed D-bit residuals instead of D partition bitmaps (same
-     * bits, decode = unpack+lookup), and covered[nid] marks its strict
-     * descendants, absent from the wire. Both sides derive this from the code
-     * lengths, so nothing is signalled. */
+    // Flat-subtree fast path: flat_d[nid] = D (>= 2) when nid roots a MAXIMAL
+    // complete subtree with all leaves exactly D levels down. Its wire run is
+    // the symbols' packed D-bit residuals instead of D partition bitmaps (same
+    // bits, decode = unpack+lookup), and covered[nid] marks its strict
+    // descendants, absent from the wire. Both sides derive this from the code
+    // lengths, so nothing is signalled.
     uint8_t flat_d[ZXC_PIVCO_MAX_NODES];
     uint8_t covered[ZXC_PIVCO_MAX_NODES];
 } zxc_pivco_tree_t;
@@ -999,7 +1014,7 @@ typedef enum {
  * - `ZXC_SECTION_ENCODING_HUFFMAN`: canonical Huffman in the PivCo layout
  *   (level-ordered branch runs, max 11-bit codes -- FORMAT.md section 5.2.1).
  *   Valid for the literal stream (`enc_lit`, level >= 6) and the token
- *   stream (`enc_litlen`, level 7) of GLO blocks.
+ *   stream (`enc_tok`, level 7) of GLO blocks.
  * - `ZXC_SECTION_ENCODING_HUFFMAN_DICT`: same payload as HUFFMAN but the
  *   128-byte code-lengths header is omitted: codes come from the shared
  *   table carried by the dictionary (.zxd). Only valid for `enc_lit` of GLO
@@ -1026,10 +1041,12 @@ typedef enum {
  * The total count of literal bytes.
  * @var zxc_gnr_header_t::enc_lit
  * Encoding method used for the literal stream.
- * @var zxc_gnr_header_t::enc_litlen
- * Encoding method used for the literal lengths stream.
+ * @var zxc_gnr_header_t::enc_tok
+ * GLO only: encoding of the token section, whose bytes each pack a literal
+ * length and a match length nibble. Only RAW and HUFFMAN (level 7) occur.
  * @var zxc_gnr_header_t::enc_mlen
- * Encoding method used for the match lengths stream.
+ * Reserved, written 0 and ignored on decode. Match lengths have no stream of
+ * their own: they share the token byte and spill into the extras.
  * @var zxc_gnr_header_t::enc_off
  * GLO only: width of the offset stream (1 = 1-byte, 0 = 2-byte). GHI has no
  * offset stream, so it writes 0 and ignores the field on decode.
@@ -1037,22 +1054,11 @@ typedef enum {
 typedef struct {
     uint32_t n_sequences;  // Number of sequences
     uint32_t n_literals;   // Number of literals
-    uint8_t enc_lit;       // Literal encoding
-    uint8_t enc_litlen;    // Literal lengths encoding
-    uint8_t enc_mlen;      // Match lengths encoding
+    uint8_t enc_lit;       // Literal stream encoding
+    uint8_t enc_tok;       // Token section encoding (GLO only)
+    uint8_t enc_mlen;      // Reserved (see above)
     uint8_t enc_off;       // Offset stream width (GLO only; ignored on decode in GHI)
 } zxc_gnr_header_t;
-
-/**
- * @struct zxc_section_desc_t
- * @brief Describes the size attributes of a specific data section.
- *
- * Used to track the compressed and uncompressed sizes of sub-components
- * (e.g., a literal stream or offset stream) within a block.
- */
-typedef struct {
-    uint64_t sizes; /**< Packed sizes: compressed size (low 32 bits) | raw size (high 32 bits). */
-} zxc_section_desc_t;
 
 /**
  * ============================================================================
@@ -1368,16 +1374,12 @@ void* zxc_aligned_malloc(const size_t size, const size_t alignment);
  */
 void zxc_aligned_free(void* ptr);
 
-/*
- * ============================================================================
- * COMPRESSION CONTEXT & STRUCTS
- * ============================================================================
- */
+// ============================================================================
+// COMPRESSION CONTEXT & STRUCTS
+// ============================================================================
 
-/*
- * INTERNAL API
- * ------------
- */
+// INTERNAL API
+// ------------
 
 /**
  * @brief Calculates a 32-bit hash for a given input buffer.
@@ -1432,79 +1434,69 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
 }
 
 /**
- * @brief Writes a generic header and section descriptors to a destination
- * buffer.
+ * @brief Writes a GLO sub-header followed by its section descriptors.
  *
- * Serializes the `zxc_gnr_header_t` and an array of 4 section descriptors.
+ * They hold only the two sizes the header cannot imply, and are 0, 4 or 8 bytes
+ * wide accordingly (@ref ZXC_GLO_MAX_DESC_SIZE).
  *
- * @param[out] dst Pointer to the destination buffer.
- * @param[in] rem The remaining space in the destination buffer.
- * @param[in] gh Pointer to the generic header structure to write.
- * @param[in] desc Array of 4 section descriptors to write.
- * @return int The number of bytes written, or a negative error code if the buffer
- * is too small.
+ * @param[out] dst      Pointer to the destination buffer.
+ * @param[in]  rem      The remaining space in the destination buffer.
+ * @param[in]  gh       Pointer to the generic header structure to write.
+ * @param[in]  lit_comp Compressed size of the literal section.
+ * @param[in]  tok_comp Compressed size of the token section.
+ * @return The number of bytes written, or a negative error code if the buffer
+ *         is too small.
  */
 int zxc_write_glo_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
-                                  const zxc_gnr_header_t* RESTRICT gh,
-                                  const zxc_section_desc_t desc[ZXC_GLO_SECTIONS]);
+                                  const zxc_gnr_header_t* RESTRICT gh, const uint32_t lit_comp,
+                                  const uint32_t tok_comp);
 
 /**
- * @brief Reads a generic header and section descriptors from a source buffer.
+ * @brief Reads a GLO sub-header and its section descriptors from a source buffer.
  *
- * Deserializes data into a `zxc_gnr_header_t` and an array of 4 section
- * descriptors.
+ * Sizes absent from the descriptors are reconstructed from the header, so both
+ * outputs are always populated.
  *
- * @param[in] src Pointer to the source buffer.
- * @param[in] len The length of the source buffer available for reading.
- * @param[out] gh Pointer to the generic header structure to populate.
- * @param[out] desc Array of 4 section descriptors to populate.
- *
- * @return int Returns ZXC_OK on success, or a negative zxc_error_t code on failure.
+ * @param[in]  src      Pointer to the source buffer.
+ * @param[in]  len      The length of the source buffer available for reading.
+ * @param[out] gh       Pointer to the generic header structure to populate.
+ * @param[out] lit_comp Receives the literal section's compressed size.
+ * @param[out] tok_comp Receives the token section's compressed size.
+ * @return Bytes consumed (header + table), or a negative zxc_error_t code.
  */
 int zxc_read_glo_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
-                                 zxc_gnr_header_t* RESTRICT gh,
-                                 zxc_section_desc_t desc[ZXC_GLO_SECTIONS]);
+                                 zxc_gnr_header_t* RESTRICT gh, uint32_t* RESTRICT lit_comp,
+                                 uint32_t* RESTRICT tok_comp);
 
 /**
- * @brief Writes a record header and description to the destination buffer.
+ * @brief Writes a GHI sub-header. GHI carries no section descriptors.
  *
- * @param dst Pointer to the destination buffer where the header and description will be written.
- * @param rem Remaining size available in the destination buffer.
- * @param gh Pointer to the GNR header structure containing header information.
- * @param desc Array of 3 section descriptors to be written along with the header.
- *
- * @return int Returns the number of bytes written on success, or a negative error code on failure.
+ * @param[out] dst Pointer to the destination buffer.
+ * @param[in]  rem Remaining size available in the destination buffer.
+ * @param[in]  gh  Pointer to the GNR header structure containing header information.
+ * @return The number of bytes written, or a negative error code on failure.
  */
-int zxc_write_ghi_header_and_desc(uint8_t* RESTRICT dst, const size_t rem,
-                                  const zxc_gnr_header_t* RESTRICT gh,
-                                  const zxc_section_desc_t desc[ZXC_GHI_SECTIONS]);
+int zxc_write_ghi_header(uint8_t* RESTRICT dst, const size_t rem,
+                         const zxc_gnr_header_t* RESTRICT gh);
 
 /**
- * @brief Reads a record header and section descriptors from a buffer.
+ * @brief Reads a GHI sub-header from a buffer.
  *
- * This function parses the source buffer to extract a general header and
- * up to three section descriptors from a ZXC record.
- *
- * @param[in] src Pointer to the source buffer containing the record data.
- * @param[in] len Length of the source buffer in bytes.
- * @param[out] gh Pointer to a zxc_gnr_header_t structure to store the parsed header.
- * @param[out] desc Array of 3 zxc_section_desc_t structures to store the parsed section
- * descriptors.
- *
- * @return int Returns ZXC_OK on success, or a negative zxc_error_t code on failure.
+ * @param[in]  src Pointer to the source buffer containing the record data.
+ * @param[in]  len Length of the source buffer in bytes.
+ * @param[out] gh  Pointer to a zxc_gnr_header_t structure to store the parsed header.
+ * @return ZXC_OK on success, or a negative zxc_error_t code on failure.
  */
-int zxc_read_ghi_header_and_desc(const uint8_t* RESTRICT src, const size_t len,
-                                 zxc_gnr_header_t* RESTRICT gh,
-                                 zxc_section_desc_t desc[ZXC_GHI_SECTIONS]);
+int zxc_read_ghi_header(const uint8_t* RESTRICT src, const size_t len,
+                        zxc_gnr_header_t* RESTRICT gh);
 
-/* ============================================================================
- * Huffman codec for the GLO literal stream (level >= 6).
- *
- * On-disk layout, decoder geometry and tunables: see
- * @ref ZXC_HUF_MAX_CODE_LEN_ULTRA and the surrounding "Huffman Codec Constants"
- * group above.
- * ============================================================================
- */
+// ============================================================================
+// Huffman codec for the GLO literal stream (level >= 6).
+//
+// On-disk layout, decoder geometry and tunables: see
+// @ref ZXC_HUF_MAX_CODE_LEN_ULTRA and the surrounding "Huffman Codec Constants"
+// group above.
+// ============================================================================
 
 /**
  * @brief Build length-limited canonical Huffman code lengths from a frequency table.
@@ -1580,19 +1572,19 @@ void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT ou
  */
 int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len);
 
-/* --------------------------------------------------------------------------
- * PivCo-Huffman section codec (enc 2/3)
- *
- * Layout from PivCo-Huffman by Marcin Zukowski
- * (https://github.com/MarcinZukowski/pivco-huffman); implemented
- * independently here. See zxc_huffman.c for the codec.
- *
- * Same code bits as canonical Huffman, reordered by tree LEVEL: for each
- * internal node in BFS order, its branch bits (one per symbol routed through
- * it, LSB-first, byte-aligned). No size fields - the decoder derives every run
- * length from the root count and popcounts. Decoding is bottom-up level merges,
- * shuffle-parallel and gather-free.
- * -------------------------------------------------------------------------- */
+// --------------------------------------------------------------------------
+// PivCo-Huffman section codec (enc 2/3)
+//
+// Layout from PivCo-Huffman by Marcin Zukowski
+// (https://github.com/MarcinZukowski/pivco-huffman); implemented
+// independently here. See zxc_huffman.c for the codec.
+//
+// Same code bits as canonical Huffman, reordered by tree LEVEL: for each
+// internal node in BFS order, its branch bits (one per symbol routed through
+// it, LSB-first, byte-aligned). No size fields - the decoder derives every run
+// length from the root count and popcounts. Decoding is bottom-up level merges,
+// shuffle-parallel and gather-free.
+// --------------------------------------------------------------------------
 
 /** @brief Extra scratch slack required past `n` by the PivCo decoder. */
 #define ZXC_PIVCO_SCRATCH_PAD 32
@@ -1639,14 +1631,14 @@ int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, size_t payload_
                                 const zxc_pivco_decode_aux_t* RESTRICT aux,
                                 uint8_t* RESTRICT scratch);
 
-/* ---------------------------------------------------------------------------
- * Compression / decompression context.
- *
- * The context owns the working buffers (hash table, sequence buffers, scratch)
- * that encoder and decoder reuse across blocks. It stays private - the public
- * APIs already wrap it opaquely - so the layout can evolve (cache-line
- * placement, extra scratch arenas) without breaking the ABI.
- * --------------------------------------------------------------------------- */
+// ---------------------------------------------------------------------------
+// Compression / decompression context.
+//
+// The context owns the working buffers (hash table, sequence buffers, scratch)
+// that encoder and decoder reuse across blocks. It stays private - the public
+// APIs already wrap it opaquely - so the layout can evolve (cache-line
+// placement, extra scratch arenas) without breaking the ABI.
+// ---------------------------------------------------------------------------
 
 /**
  * @struct zxc_cctx_t
@@ -1665,28 +1657,28 @@ int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, size_t payload_
  *   entry whose stored epoch differs from `ctx->epoch` is treated as empty.
  */
 typedef struct {
-    /* Hot zone: random access / high frequency.
-     * Kept at the start to ensure they reside in the first cache line (64 bytes). */
+    // Hot zone: random access / high frequency.
+    // Kept at the start to ensure they reside in the first cache line (64 bytes).
     uint32_t* hash_table;  /**< Hash table for LZ77 match positions (epoch|pos). */
     uint8_t* hash_tags;    /**< Split tag table for fast match rejection (8-bit tags). */
     uint16_t* chain_table; /**< Chain table for collision resolution. */
     void* memory_block;    /**< Single allocation block owner. */
     uint32_t epoch;        /**< Current epoch for lazy hash table invalidation. */
 
-    /* Warm zone: sequential access per sequence. */
+    // Warm zone: sequential access per sequence.
     uint32_t* buf_sequences; /**< Buffer for sequence records (packed: LL(8)|ML(8)|Offset(16)). */
     uint8_t* buf_tokens;     /**< Buffer for token sequences. */
     uint16_t* buf_offsets;   /**< Buffer for offsets. */
     uint8_t* buf_extras;     /**< Buffer for extra lengths (vbytes for LL/ML). */
     uint8_t* literals;       /**< Buffer for literal bytes. */
 
-    /* Cold zone: configuration / scratch / resizeable. */
+    // Cold zone: configuration / scratch / resizeable.
     uint8_t* lit_buffer;            /**< Scratch buffer for literals (RLE / Huffman). */
     size_t lit_buffer_cap;          /**< Current capacity of the scratch buffer. */
     uint8_t* work_buf;              /**< Padded scratch buffer for buffer-API decompression. */
     size_t work_buf_cap;            /**< Capacity of the work buffer. */
     uint8_t* tok_buffer;            /**< Decode scratch for a Huffman-coded GLO token
-                                         section (enc_litlen == HUFFMAN); NULL on compress.
+                                         section (enc_tok == HUFFMAN); NULL on compress.
                                          Heap decode contexts defer it (with pivco_scratch)
                                          to the first entropy section, see entropy_block. */
     size_t tok_buffer_cap;          /**< Capacity of tok_buffer in bytes. */
@@ -1716,7 +1708,7 @@ typedef struct {
                                          accumulates post-LZ literal byte frequencies here
                                          (256 entries). NULL outside dictionary training. */
 
-    /* Block-size derived parameters (computed once at init). */
+    // Block-size derived parameters (computed once at init).
     size_t chunk_size;    /**< Effective block size in bytes. */
     uint32_t offset_bits; /**< log2(chunk_size) - governs epoch_mark shift. */
     uint32_t offset_mask; /**< (1U << offset_bits) - 1 */
@@ -1883,13 +1875,13 @@ int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
 
-/* ---------------------------------------------------------------------------
- * Internal frame primitives.
- *
- * Read/write the ZXC file header, block header and footer. Kept internal:
- * exposing them would freeze on-disk details (block_flags layout, footer
- * composition) that stay free to evolve until the format is declared stable.
- * --------------------------------------------------------------------------- */
+// ---------------------------------------------------------------------------
+// Internal frame primitives.
+//
+// Read/write the ZXC file header, block header and footer. Kept internal:
+// exposing them would freeze on-disk details (block_flags layout, footer
+// composition) that stay free to evolve until the format is declared stable.
+// ---------------------------------------------------------------------------
 
 /**
  * @brief On-disk header structure for a ZXC block (8 bytes, little-endian).
@@ -1998,10 +1990,10 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
                           const uint32_t global_hash, const int checksum_enabled);
 
-/* ---------------------------------------------------------------------------
- * Seekable cross-TU hooks (defined in zxc_seekable.c, consumed by the
- * FILE*-flavored open helper in zxc_driver.c).
- * ------------------------------------------------------------------------- */
+// ---------------------------------------------------------------------------
+// Seekable cross-TU hooks (defined in zxc_seekable.c, consumed by the
+// FILE*-flavored open helper in zxc_driver.c).
+// -------------------------------------------------------------------------
 
 /**
  * @brief Hands ownership of a heap-allocated reader context to a seekable

@@ -89,37 +89,68 @@ static uint8_t* read_file(const char* path, size_t* out_size) {
 /* Per-payload sub-header validation (FORMAT.md Sec 5)                          */
 /* ------------------------------------------------------------------------- */
 
-/* Shared validator for the GLO (Sec 5.2) and GHI (Sec 5.3) section model: a 16-byte
- * header, then `n_sections` packed u64 descriptors (low32 = comp, high32 = raw),
- * then each section's bytes. The section sizes plus the headers must tile the
- * payload exactly. */
-static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp, int n_sections,
+/* Shared validator for the GLO (Sec 5.2) and GHI (Sec 5.3) section model: a
+ * 12-byte header, GLO's 0/4/8-byte section descriptors (GHI has none), then the
+ * sections. Sizes absent from the table come from the header, and extras take
+ * the residue - so the tiling check is an inequality, plus the
+ * ZXC_BLOCK_LIT_SLACK guarantee behind the literals. */
+static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp, int is_glo,
                                int expect_enc_lit) {
-    uint32_t fixed = 16 + (uint32_t)n_sections * 8;
-    CHECK(comp >= fixed, "LZ payload too small for header+descriptors (%u < %u)", comp, fixed);
+    const uint32_t hdr = ZXC_GLO_HEADER_BINARY_SIZE;
+    CHECK(comp >= hdr + ZXC_BLOCK_LIT_SLACK, "LZ payload too small for header+slack (%u)", comp);
 
+    uint32_t n_sequences = zxc_le32(p);
+    uint32_t n_literals = zxc_le32(p + 4);
     uint8_t enc_lit = p[8];
+    uint8_t enc_tok = p[9];
     uint8_t enc_off = p[11];
     CHECK(enc_lit <= 3, "enc_lit = %u out of range", enc_lit);
     /* GLO: offset stream width, 0 or 1. GHI has no offset stream and the encoder
      * pins the field to 0 -- decoders must ignore it there (FORMAT.md 5.3). */
-    if (n_sections == ZXC_GHI_SECTIONS)
+    if (!is_glo)
         CHECK(enc_off == 0, "GHI enc_off = %u, expected 0", enc_off);
     else
         CHECK(enc_off <= 1, "enc_off = %u out of range", enc_off);
-    CHECK(zxc_le32(p + 12) == 0, "LZ header reserved u32 nonzero");
+    /* enc_mlen is reserved: match lengths ride the token byte. Frozen at 0 so a
+     * future use can tell old encoders apart. */
+    CHECK(p[10] == 0, "enc_mlen = %u, expected 0 (reserved)", p[10]);
     if (expect_enc_lit >= 0)
         CHECK(enc_lit == (uint8_t)expect_enc_lit, "expected enc_lit == %d, got %u", expect_enc_lit,
               enc_lit);
 
+    uint32_t table = 0;
     uint64_t sect_total = 0;
-    for (int i = 0; i < n_sections; i++) {
-        uint64_t desc = zxc_le64(p + 16 + (size_t)i * 8);
-        uint32_t csz = (uint32_t)(desc & 0xFFFFFFFFu);
-        sect_total += csz;
+    uint32_t lit_comp = n_literals;
+    if (is_glo) {
+        /* Only the sizes the header cannot imply are on the wire. */
+        uint32_t tok_comp = n_sequences;
+        if (enc_lit != 0) {
+            CHECK(comp >= hdr + table + 4, "GLO table truncated");
+            lit_comp = zxc_le32(p + hdr + table);
+            table += 4;
+        }
+        if (enc_tok == 2) {
+            CHECK(comp >= hdr + table + 4, "GLO table truncated");
+            tok_comp = zxc_le32(p + hdr + table);
+            table += 4;
+        } else {
+            CHECK(enc_tok == 0, "GLO enc_tok = %u out of range", enc_tok);
+        }
+        sect_total = (uint64_t)lit_comp + tok_comp + (uint64_t)n_sequences * (enc_off ? 1U : 2U);
+    } else {
+        CHECK(enc_lit == 0, "GHI enc_lit = %u, expected RAW", enc_lit);
+        sect_total = (uint64_t)n_literals + (uint64_t)n_sequences * 4U;
     }
-    CHECK(fixed + sect_total == comp, "LZ sections do not tile payload (%u + %llu != %u)", fixed,
-          (unsigned long long)sect_total, comp);
+
+    uint64_t fixed = (uint64_t)hdr + table + sect_total;
+    CHECK(fixed <= comp, "LZ sections overrun payload (%llu > %u)", (unsigned long long)fixed,
+          comp);
+
+    /* Sec 5.2/5.3: what follows the literal section must cover the decoder's
+     * wild-copy overshoot. The padding's contents are unconstrained. */
+    uint64_t behind_lit = (uint64_t)comp - hdr - table - lit_comp;
+    CHECK(behind_lit >= ZXC_BLOCK_LIT_SLACK, "only %llu bytes behind the literal section",
+          (unsigned long long)behind_lit);
     return 1;
 }
 
@@ -145,8 +176,8 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     int has_checksum = (flags & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
     int has_dict = (flags & ZXC_FILE_FLAG_HAS_DICTIONARY) ? 1 : 0;
     const int want_dict = (gc->opts.dict != NULL && gc->opts.dict_size > 0);
-    CHECK((flags & 0x0Fu) == 0, "checksum algo id %u, expected 0", flags & 0x0Fu);
-    CHECK((flags & 0x30u) == 0, "reserved flag bits set (0x%02X)",
+    CHECK((flags & 0x0FU) == 0, "checksum algo id %u, expected 0", flags & 0x0FU);
+    CHECK((flags & 0x30U) == 0, "reserved flag bits set (0x%02X)",
           flags); /* bit 6 = HAS_DICTIONARY */
     CHECK(has_checksum == gc->opts.checksum_enabled, "HAS_CHECKSUM=%d, expected %d", has_checksum,
           gc->opts.checksum_enabled);
@@ -214,9 +245,9 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         CHECK(off + ZXC_BLOCK_HEADER_SIZE + comp <= size, "payload overruns file at %zu", off);
 
         if (type == GC_BLOCK_GLO) {
-            if (!validate_lz_payload(ctx, payload, comp, 4, gc->expect_enc_lit)) return 0;
+            if (!validate_lz_payload(ctx, payload, comp, 1, gc->expect_enc_lit)) return 0;
         } else if (type == GC_BLOCK_GHI) {
-            if (!validate_lz_payload(ctx, payload, comp, 3, -1)) return 0;
+            if (!validate_lz_payload(ctx, payload, comp, 0, -1)) return 0;
         }
 
         size_t phys = ZXC_BLOCK_HEADER_SIZE + comp;
@@ -250,7 +281,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         memcpy(tmp, sh, ZXC_BLOCK_HEADER_SIZE);
         tmp[7] = 0;
         CHECK(sh[7] == zxc_hash8(tmp), "SEK header CRC8 mismatch at %zu", off);
-        CHECK(comp == (uint32_t)data_blocks * 4u, "SEK comp_size %u != n_blocks*4 (%d)", comp,
+        CHECK(comp == (uint32_t)data_blocks * 4U, "SEK comp_size %u != n_blocks*4 (%d)", comp,
               data_blocks * 4);
         const uint8_t* entries = sh + ZXC_BLOCK_HEADER_SIZE;
         CHECK(off + ZXC_BLOCK_HEADER_SIZE + comp + ZXC_FILE_FOOTER_SIZE <= size,

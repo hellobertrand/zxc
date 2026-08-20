@@ -53,6 +53,8 @@ Runs CodeQL security analysis to detect potential security vulnerabilities and c
 
 Builds `libzxc.so` with debug info, generates an ABI XML via [`abidw`](https://sourceware.org/libabigail/), and compares it against the committed baseline at [`docs/abi/libzxc-linux-x86_64.abi.xml`](../../docs/abi/libzxc-linux-x86_64.abi.xml) using `abidiff --no-added-syms`. Adding new symbols passes (MINOR bump); removing or changing existing symbols fails (MAJOR bump required + regenerate baseline). Run with `mode=regenerate` to produce a fresh baseline as a downloadable artifact.
 
+The dump is taken with `--headers-dir include --drop-private-types`, so it records only what a consumer can reach. `src/lib`-only types never enter the baseline, and renaming or reshaping them is not an ABI event. The exported symbol set is already public-only by construction (`-fvisibility=hidden` plus `ZXC_EXPORT`); the flags keep the *documented* surface in step with the *binary* one.
+
 ### golden.yml - Golden Format Stability
 **Triggers:** Push to main, pull requests, manual dispatch
 

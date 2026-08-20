@@ -321,34 +321,35 @@ int test_buffer_error_codes() {
     }
     printf("  [PASS] zxc_decompress NULL dst -> ZXC_ERROR_NULL_INPUT\n");
 
-    // 10. src too small for file header
+    // 10. src too small for file header. Truncation, not a NULL pointer.
     {
         uint8_t tiny[4] = {0};
         uint8_t out[64];
         zxc_decompress_opts_t _do40 = {.checksum_enabled = 0};
         r = zxc_decompress(tiny, sizeof(tiny), out, sizeof(out), &_do40);
-        if (r != ZXC_ERROR_NULL_INPUT) {
-            printf("  [FAIL] src too small: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
+        if (r != ZXC_ERROR_SRC_TOO_SMALL) {
+            printf("  [FAIL] src too small: expected %d, got %lld\n", ZXC_ERROR_SRC_TOO_SMALL,
                    (long long)r);
             return 0;
         }
     }
-    printf("  [PASS] zxc_decompress src too small -> ZXC_ERROR_NULL_INPUT\n");
+    printf("  [PASS] zxc_decompress src too small -> ZXC_ERROR_SRC_TOO_SMALL\n");
 
-    // 11. Bad file header (invalid magic)
+    // 11. Bad file header (invalid magic). The header reader's verdict is
+    //     forwarded, so this reports the magic, not a catch-all.
     {
         uint8_t bad_src[64];
         memset(bad_src, 0, sizeof(bad_src));
         uint8_t out[64];
         zxc_decompress_opts_t _do41 = {.checksum_enabled = 0};
         r = zxc_decompress(bad_src, sizeof(bad_src), out, sizeof(out), &_do41);
-        if (r != ZXC_ERROR_BAD_HEADER) {
-            printf("  [FAIL] bad magic: expected %d, got %lld\n", ZXC_ERROR_BAD_HEADER,
+        if (r != ZXC_ERROR_BAD_MAGIC) {
+            printf("  [FAIL] bad magic: expected %d, got %lld\n", ZXC_ERROR_BAD_MAGIC,
                    (long long)r);
             return 0;
         }
     }
-    printf("  [PASS] zxc_decompress bad magic -> ZXC_ERROR_BAD_HEADER\n");
+    printf("  [PASS] zxc_decompress bad magic -> ZXC_ERROR_BAD_MAGIC\n");
 
     // Prepare a valid compressed buffer for subsequent decompress error tests
     const size_t test_src_sz = 1024;
@@ -522,17 +523,18 @@ int test_decompress_empty_frame_null_dst() {
     }
     printf("  [PASS] NULL dst + 0 cap on non-empty frame -> DST_TOO_SMALL\n");
 
-    /* 5. dst=NULL, dst_capacity=0 on bad magic -> ZXC_ERROR_NULL_INPUT */
+    /* 5. dst=NULL, dst_capacity=0 on bad magic. The pointers are fine here; what
+     *    is wrong is the archive, so the magic check is what must be reported. */
     uint8_t bad_magic[64];
     memcpy(bad_magic, empty_frame, (size_t)comp_sz);
     bad_magic[0] ^= 0xFF;
     r = zxc_decompress(bad_magic, (size_t)comp_sz, NULL, 0, NULL);
-    if (r != ZXC_ERROR_NULL_INPUT) {
+    if (r != ZXC_ERROR_BAD_MAGIC) {
         printf("  [FAIL] NULL dst + 0 cap + bad magic: expected %d, got %lld\n",
-               ZXC_ERROR_NULL_INPUT, (long long)r);
+               ZXC_ERROR_BAD_MAGIC, (long long)r);
         return 0;
     }
-    printf("  [PASS] NULL dst + 0 cap + bad magic -> NULL_INPUT\n");
+    printf("  [PASS] NULL dst + 0 cap + bad magic -> BAD_MAGIC\n");
 
     /* 6. Caller bug: dst=NULL with non-zero capacity -> ZXC_ERROR_NULL_INPUT */
     r = zxc_decompress(empty_frame, (size_t)comp_sz, NULL, 100, NULL);

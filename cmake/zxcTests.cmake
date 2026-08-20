@@ -146,4 +146,18 @@ if(ZXC_BUILD_TESTS)
         # Links the coverage-instrumented zxc_lib, so it needs the gcov runtime.
         target_link_options(zxc_golden_gen PRIVATE --coverage)
     endif()
+
+    # Maintainer-only tool that rebuilds conformance/invalid/*.zxc at the current
+    # format version, like zxc_format_golden_test above.
+    add_executable(zxc_invalid_gen conformance/gen_invalid.c)
+    target_link_libraries(zxc_invalid_gen PRIVATE zxc_lib)
+    target_include_directories(zxc_invalid_gen PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src/lib
+        ${RAPIDHASH_INCLUDE_DIR})
+    target_compile_definitions(zxc_invalid_gen PRIVATE
+        $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>)
+    if(ZXC_ENABLE_COVERAGE)
+        target_link_options(zxc_invalid_gen PRIVATE --coverage)
+    endif()
 endif()

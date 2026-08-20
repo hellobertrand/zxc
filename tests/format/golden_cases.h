@@ -70,7 +70,7 @@ static size_t gc_make_empty(uint8_t** out) {
 static size_t gc_make_raw(uint8_t** out) {
     const size_t n = 4096;
     uint8_t* b = (uint8_t*)malloc(n);
-    uint32_t s = 0x1234567u;
+    uint32_t s = 0x1234567U;
     for (size_t i = 0; i < n; i++) b[i] = (uint8_t)(gc_lcg_next(&s) >> 24);
     *out = b;
     return n;
@@ -105,7 +105,7 @@ static size_t gc_make_huffman(uint8_t** out) {
     /* Heavily skewed 8-symbol alphabet (entropy ~2 bits/symbol). */
     static const uint8_t alpha[16] = {'a', 'a', 'a', 'a', 'a', 'a', 'b', 'b',
                                       'b', 'b', 'c', 'c', 'd', 'e', 'f', 'g'};
-    uint32_t s = 0x0BADF00Du;
+    uint32_t s = 0x0BADF00DU;
     for (size_t i = 0; i < n; i++) b[i] = alpha[(gc_lcg_next(&s) >> 16) & 0x0F];
     *out = b;
     return n;
@@ -117,12 +117,12 @@ static size_t gc_make_huffman(uint8_t** out) {
 static size_t gc_make_huffman_wide(uint8_t** out) {
     const size_t n = 16384;
     uint8_t* b = (uint8_t*)malloc(n);
-    uint32_t s = 0x0C0FFEE1u;
+    uint32_t s = 0x0C0FFEE1U;
     for (size_t i = 0; i < n; i++) {
-        const uint64_t u = (gc_lcg_next(&s) >> 16) & 0xFFFFu; /* uniform 0..65535 */
+        const uint64_t u = (gc_lcg_next(&s) >> 16) & 0xFFFFU; /* uniform 0..65535 */
         const uint64_t u2 = (u * u) >> 16;                    /* skewed toward 0 */
         const uint64_t u4 = (u2 * u2) >> 16;                  /* skewed harder */
-        b[i] = (uint8_t)((u4 * 220u) >> 16);                  /* 0..219, heavy head */
+        b[i] = (uint8_t)((u4 * 220U) >> 16);                  /* 0..219, heavy head */
     }
     *out = b;
     return n;
@@ -145,7 +145,7 @@ static size_t gc_make_offset16(uint8_t** out) {
     const size_t period = 1024;
     const size_t n = 8 * period;
     uint8_t* b = (uint8_t*)malloc(n);
-    uint32_t s = 0x5EED1234u;
+    uint32_t s = 0x5EED1234U;
     for (size_t i = 0; i < period; i++) b[i] = (uint8_t)(gc_lcg_next(&s) >> 24);
     for (size_t i = period; i < n; i++) b[i] = b[i % period];
     *out = b;
@@ -159,7 +159,7 @@ static size_t gc_make_offset16(uint8_t** out) {
 static size_t gc_make_rle_literals(uint8_t** out) {
     const size_t n = 16384;
     uint8_t* b = (uint8_t*)malloc(n);
-    uint32_t s = 0x1357BD13u;
+    uint32_t s = 0x1357BD13U;
     for (size_t i = 0; i < n; i += 5) {
         b[i] = (uint8_t)(gc_lcg_next(&s) >> 24);
         for (size_t k = 1; k < 5 && i + k < n; k++) b[i + k] = 0xAA;
@@ -205,7 +205,7 @@ static size_t gc_make_dict_payload(uint8_t** out) {
 static size_t gc_make_huffman_dict_payload(uint8_t** out) {
     const size_t cap = 4096;
     uint8_t* b = (uint8_t*)malloc(cap);
-    uint32_t st = 0x5EEDCAFEu;
+    uint32_t st = 0x5EEDCAFEU;
     size_t n = 0;
     while (n + 160 < cap) {
         char line[192];

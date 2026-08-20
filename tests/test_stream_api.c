@@ -482,7 +482,7 @@ int test_stream_engine_errors() {
     }
     printf("  [PASS] zxc_stream_decompress NULL f_in -> ZXC_ERROR_NULL_INPUT\n");
 
-    // 3. zxc_stream_decompress with bad header (invalid file)
+    // 3. zxc_stream_decompress with a bad magic word (invalid file)
     {
         FILE* f_in = tmpfile();
         FILE* f_out = tmpfile();
@@ -500,8 +500,8 @@ int test_stream_engine_errors() {
 
         zxc_decompress_opts_t _sdo51 = {.n_threads = 1, .checksum_enabled = 0};
         int64_t r = zxc_stream_decompress(f_in, f_out, &_sdo51);
-        if (r != ZXC_ERROR_BAD_HEADER) {
-            printf("  [FAIL] bad header: expected %d, got %lld\n", ZXC_ERROR_BAD_HEADER,
+        if (r != ZXC_ERROR_BAD_MAGIC) {
+            printf("  [FAIL] bad magic: expected %d, got %lld\n", ZXC_ERROR_BAD_MAGIC,
                    (long long)r);
             fclose(f_in);
             fclose(f_out);
@@ -510,7 +510,7 @@ int test_stream_engine_errors() {
         fclose(f_in);
         fclose(f_out);
     }
-    printf("  [PASS] zxc_stream_decompress bad header -> ZXC_ERROR_BAD_HEADER\n");
+    printf("  [PASS] zxc_stream_decompress bad magic -> ZXC_ERROR_BAD_MAGIC\n");
 
     // 4. Stream decompress with corrupted footer (stored size mismatch)
     {

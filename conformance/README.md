@@ -59,12 +59,26 @@ echo "Passed: $pass  Failed: $fail"
 | Match patterns       | 3     | Long matches, short matches, max offset distance  |
 | Compression levels   | 6     | Same input compressed at levels 1 through 6       |
 | Level 7              | 1     | Level-7 literals with 9-11-bit Huffman codes      |
-| PivCo (L7)           | 1     | Level-7 PivCo sections (v7 enc 2, level-ordered bits) |
+| PivCo (L7)           | 1     | Level-7 PivCo literal section (`enc_lit=2`, level-ordered bits) |
 | Block size variants  | 2     | 4 KB and 2 MB block sizes                        |
 | Checksum             | 3     | Per-block and global checksum enabled             |
 | Multi-block          | 2     | 16 blocks per file (4 KB block size)             |
 | Seekable             | 3     | Seekable archives with seek table                |
-| Invalid              | 20    | Bad magic, bad version, bad CRC, truncated, corrupt payload, garbage, out-of-bounds section layouts, forged GHI offset |
+| Invalid              | 20    | Bad magic, bad version, bad CRC, bad block size/type, bad checksum algorithm, truncated, corrupt payload, garbage, forged `enc_lit`/`enc_off`, forged GHI offset, insufficient literal slack, missing dictionary |
+
+Every invalid vector is a well-formed archive of the **current** format version
+with exactly one field corrupted, except the malformed-preamble cases, which
+never reach version checking. Regenerate them after a format bump with:
+
+```sh
+cmake --build build --target zxc_invalid_gen
+./build/zxc_invalid_gen conformance/invalid
+```
+
+Without this, a bump makes every vector fail on the version byte instead of on
+its own defect — the suite still reports "correctly rejected" while testing
+nothing. Check each vector's error code after regenerating, not just that it was
+rejected.
 
 ## License
 

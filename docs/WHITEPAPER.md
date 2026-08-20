@@ -215,21 +215,21 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
 * **CRC**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with CRC byte set to 0) using `zxc_hash8`.
 
-> **Note**: The decompressed size is not stored in the block header. It is derived from internal Section Descriptors within the compressed payload (for GLO/GHI blocks), or equals `Comp Size` (for RAW blocks).
+> **Note**: The decompressed size is not stored in the block header. For GLO/GHI blocks it falls out of decoding the sequences themselves; for RAW blocks it equals `Comp Size`.
 
 > **Note**: While the format is designed for threaded execution, a single-threaded API is also available for constrained environments or simple integration cases.
 
 ### 5.3 Specific Header: GLO (Generic Low)
 (Present immediately after the Block Header)
 
-**GLO Header (16 bytes):**
+**GLO Header (12 bytes):**
 
 ```
-  Offset:  0               4               8   9  10  11  12              16
-          +---------------+---------------+---+---+---+---+---------------+
-          | N Sequences   | N Literals    |Lit|LL |ML |Off| Reserved      |
-          | (4 bytes)     | (4 bytes)     |Enc|Enc|Enc|Enc| (4 bytes)     |
-          +---------------+---------------+---+---+---+---+---------------+
+  Offset:  0               4               8   9  10  11  12
+          +---------------+---------------+---+---+---+---+
+          | N Sequences   | N Literals    |Lit|Tok|MLn|Off|
+          | (4 bytes)     | (4 bytes)     |Enc|Enc|rsv|Enc|
+          +---------------+---------------+---+---+---+---+
 ```
 
 * **N Sequences**: Total count of LZ sequences in the block.
@@ -239,67 +239,72 @@ Each data block consists of an **8-byte** generic header that precedes the speci
     `HUFFMAN_DICT` uses the same bitstream as `HUFFMAN` but omits the 128-byte
     code-lengths header: the codes come from the shared literal table carried
     by the dictionary (see §5.10). Only valid in dictionary-compressed archives.
-  - `LL Enc`: Literal lengths encoding. **Reserved for future use** (lengths are packed in tokens).
-  - `ML Enc`: Match lengths encoding. **Reserved for future use** (lengths are packed in tokens).
+  - `Tok Enc`: Token section encoding (0=RAW, 2=HUFFMAN at level 7). **Currently used.**
+    A token byte packs both a literal length and a match length nibble, which is
+    why one field covers them together.
+  - `ML Enc`: **Reserved**, written 0. Match lengths have no stream of their own.
   - `Off Enc`: Offset encoding mode. **Currently used**
     - `0` = 16-bit offsets (2 bytes each, max distance 65535)
     - `1` = 8-bit offsets (1 byte each, max distance 255)
-* **Reserved**: Padding for alignment.
 
-**Section Descriptors (4 × 8 bytes = 32 bytes total):**
+**Section Descriptors (0, 4 or 8 bytes):**
 
-Each descriptor stores sizes as a packed 64-bit value:
+Only the two sizes the header cannot imply are written, each a `u32`:
 
 ```
-  Single Descriptor (8 bytes):
-  +-----------------------------------+-----------------------------------+
-  | Compressed Size (4 bytes)         | Raw Size (4 bytes)                |
-  | (low 32 bits)                     | (high 32 bits)                    |
-  +-----------------------------------+-----------------------------------+
-
-  Full Layout (32 bytes):
-  Offset:  0               8               16              24              32
-          +---------------+---------------+---------------+---------------+
-          | Literals Desc | Tokens Desc   | Offsets Desc  | Extras Desc   |
-          | (8 bytes)     | (8 bytes)     | (8 bytes)     | (8 bytes)     |
-          +---------------+---------------+---------------+---------------+
+  +---------------+---------------+
+  | lit_comp      | tok_comp      |   lit_comp iff enc_lit != 0
+  | (4 bytes)     | (4 bytes)     |   tok_comp iff enc_tok == 2
+  +---------------+---------------+
 ```
+
+Everything else is derived — literals raw size from `N Literals`, tokens from
+`N Sequences`, offsets from `N Sequences × (1 or 2)`, and the extras section
+takes whatever payload remains. Levels 3-5 therefore write **no descriptor at
+all**, level 6 writes 4 bytes, level 7 writes 8.
+
+Sizing the extras as the residue has a second use: a block with too few
+sequences to naturally leave 32 readable bytes behind its literal section gets
+zero padding appended there, covering the decoder's over-reading literal copy
+without any header field to describe it.
 
 **Section Contents:**
 
-| # | Section     | Description                                           |
-|---|-------------|-------------------------------------------------------|
-| 0 | **Literals**| Raw bytes to copy, or RLE-compressed if `enc_lit=1`  |
-| 1 | **Tokens**  | Packed bytes: `(LiteralLen << 4) \| MatchLen`        |
-| 2 | **Offsets** | Match distances: 8-bit if `enc_off=1`, else 16-bit LE |
-| 3 | **Extras**  | Prefix Varint overflow values when LitLen or MatchLen ≥ 15   |
+| # | Section     | Size comes from                | Description                                           |
+|---|-------------|--------------------------------|-------------------------------------------------------|
+| 0 | **Literals**| `lit_comp`, else `N Literals`  | Raw bytes to copy, or RLE/Huffman-coded per `enc_lit` |
+| 1 | **Tokens**  | `tok_comp`, else `N Sequences` | Packed bytes: `(LiteralLen << 4) \| MatchLen`        |
+| 2 | **Offsets** | `N Sequences × (1 or 2)`       | Match distances: 8-bit if `enc_off=1`, else 16-bit LE |
+| 3 | **Extras**  | payload residue                | Prefix Varint overflow values when LitLen or MatchLen ≥ 15 |
 
 **Data Flow Example:**
 
 ```
 GLO Block Data Layout:
 +------------------------------------------------------------------------+
-| Literals Stream | Tokens Stream | Offsets Stream | Extras Stream      |
-| (desc[0] bytes) | (desc[1] bytes)| (desc[2] bytes)| (desc[3] bytes)   |
+| Literals Stream | Tokens Stream | Offsets Stream | Extras Stream       |
+|                 |                |                | (+ slack padding)  |
 +------------------------------------------------------------------------+
        ↓                 ↓                 ↓                 ↓
    Raw bytes      Token parsing      Match lookup      Length overflow
 ```
 
-**Why Comp Size and Raw Size?**
+**Why so few descriptors?**
 
-Each descriptor stores both a compressed and raw size to support secondary encoding of streams:
+A size is written only when the header cannot already imply it. `N Literals`
+and `N Sequences` are on the wire anyway, so a RAW literal section and a RAW
+token section need no descriptor, and the offset stream never needs one — its
+width is a header field. That leaves the two entropy-coded sizes, and the
+extras, which are recoverable as the residue precisely because they are the
+last section.
 
-| Section     | Comp Size            | Raw Size            | Different?           |
-|-------------|----------------------|---------------------|----------------------|
-| **Literals**| RLE size (if used)   | Original byte count | Yes, if RLE enabled |
-| **Tokens**  | Stream size          | Stream size         | No                   |
-| **Offsets** | N×1 or N×2 bytes     | N×1 or N×2 bytes    | No (size depends on `enc_off`) |
-| **Extras**  | Prefix Varint stream size | Prefix Varint stream size | No                   |
+The gain is per block and matters most where blocks are small: 24 to 32 bytes
+saved against the earlier fixed table, worth about 2 % of a 4 KB block.
 
-Currently, the **Literals** section uses different sizes when RLE compression is applied (`enc_lit=1`). The **Offsets** section size depends on `enc_off`: N sequences × 1 byte (if `enc_off=1`) or N sequences × 2 bytes (if `enc_off=0`).
-
-> **Design Note**: This format is designed for future extensibility. The dual-size architecture allows adding entropy coding (FSE/ANS) or bitpacking to any stream without breaking backward compatibility.
+> **Design Note**: extending a stream with a new encoding stays cheap — a new
+> `enc_*` value plus, if its size becomes unimplied, one more `u32` descriptor
+> gated on that value. What it costs is a format version bump, which is the
+> intended mechanism rather than a pool of reserved bytes.
 
 
 ### 5.4 Specific Header: GHI (Generic High)
@@ -307,43 +312,36 @@ Currently, the **Literals** section uses different sizes when RLE compression is
 
 The **GHI** (Generic High-Velocity) block format is optimized for maximum decompression speed. It uses a **packed 32-bit sequence** format that allows 4-byte aligned reads, reducing memory access latency and enabling efficient SIMD processing.
 
-**GHI Header (16 bytes):**
+**GHI Header (12 bytes):**
 
 ```
-  Offset:  0               4               8   9  10  11  12              16
-          +---------------+---------------+---+---+---+---+---------------+
-          | N Sequences   | N Literals    |Lit|LL |ML |Off| Reserved      |
-          | (4 bytes)     | (4 bytes)     |Enc|Enc|Enc|Enc| (4 bytes)     |
-          +---------------+---------------+---+---+---+---+---------------+
+  Offset:  0               4               8   9  10  11  12
+          +---------------+---------------+---+---+---+---+
+          | N Sequences   | N Literals    |Lit|Tok|MLn|Off|
+          | (4 bytes)     | (4 bytes)     |Enc|rsv|rsv|rsv|
+          +---------------+---------------+---+---+---+---+
 ```
 
 * **N Sequences**: Total count of LZ sequences in the block.
 * **N Literals**: Total count of literal bytes.
 * **Encoding Types**
   - `Lit Enc`: Literal stream encoding (0=RAW).
-  - `LL Enc`: Reserved for future use.
-  - `ML Enc`: Reserved for future use.
+  - `Tok Enc`, `ML Enc`: Reserved, written 0. GHI has no token section.
   - `Off Enc`: Unused. Written as `0` and ignored on decode (see FORMAT.md §5.3).
-* **Reserved**: Padding for alignment.
 
-**Section Descriptors (3 × 8 bytes = 24 bytes total):**
+**Section Descriptors: none.**
 
-```
-  Full Layout (24 bytes):
-  Offset:  0               8               16              24
-          +---------------+---------------+---------------+
-          | Literals Desc | Sequences Desc| Extras Desc   |
-          | (8 bytes)     | (8 bytes)     | (8 bytes)     |
-          +---------------+---------------+---------------+
-```
+Every GHI size follows from the header, so the block writes no descriptor at
+all: literals are `N Literals` (always RAW), sequences are `N Sequences × 4`,
+and the extras take the payload residue — slack padding included, as in GLO.
 
 **Section Contents:**
 
-| # | Section       | Description                                           |
-|---|---------------|-------------------------------------------------------|
-| 0 | **Literals**  | Raw bytes to copy                                    |
-| 1 | **Sequences** | Packed 32-bit sequences (see format below)           |
-| 2 | **Extras**    | Prefix Varint overflow values when LitLen or MatchLen ≥ 255  |
+| # | Section       | Size comes from      | Description                                          |
+|---|---------------|----------------------|------------------------------------------------------|
+| 0 | **Literals**  | `N Literals`         | Raw bytes to copy                                    |
+| 1 | **Sequences** | `N Sequences × 4`    | Packed 32-bit sequences (see format below)           |
+| 2 | **Extras**    | payload residue      | Prefix Varint overflow values when LitLen or MatchLen ≥ 255 |
 
 **Packed Sequence Format (32 bits):**
 
@@ -374,7 +372,7 @@ Unlike GLO which uses separate token and offset streams, GHI packs all sequence 
 GHI Block Data Layout:
 +------------------------------------------------------------+
 | Literals Stream | Sequences Stream       | Extras Stream   |
-| (desc[0] bytes) | (desc[1] bytes = N×4)  | (desc[2] bytes) |
+| (N Literals)    | (N Sequences × 4)      | (residue + pad) |
 +------------------------------------------------------------+
        ↓                    ↓                      ↓
    Raw bytes        32-bit seq read         Length overflow
@@ -452,18 +450,18 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Extras Buffer*: Overflow values for lengths >= 15 (Prefix Varint encoded).
     *   *Offset Mode Selection*: The encoder tracks the maximum offset across all sequences. If all offsets are ≤ 255, the 8-bit mode (`enc_off=1`) is selected, saving 1 byte per sequence compared to 16-bit mode.
 4.  **RLE Pass**: The literals buffer is scanned for run-length encoding opportunities (runs of identical bytes). If beneficial (>10% gain), it is compressed in place.
-5.  **Entropy Pass** (level ≥ 6, ≥ 1024 literals): A length-limited canonical Huffman code (`L = 8` at level 6, `L = 11` at level 7) is fitted to the literal byte distribution, joint-nudged toward a flatter (faster-decoding) tree, and emitted in the PivCo level-ordered layout (§4.3, FORMAT.md §5.2.1). At level 7 the same treatment is applied to the sequence-token stream (`enc_litlen = 2`). Candidates are selected by the space-speed Lagrangian `J = size + premium(level) × decoded_bytes`.
+5.  **Entropy Pass** (level ≥ 6, ≥ 1024 literals): A length-limited canonical Huffman code (`L = 8` at level 6, `L = 11` at level 7) is fitted to the literal byte distribution, joint-nudged toward a flatter (faster-decoding) tree, and emitted in the PivCo level-ordered layout (§4.3, FORMAT.md §5.2.1). At level 7 the same treatment is applied to the sequence-token stream (`enc_tok = 2`). Candidates are selected by the space-speed Lagrangian `J = size + premium(level) × decoded_bytes`.
     *   **Shared-Table Candidate** (dictionary archives only): when the dictionary carries a shared literal table (§5.10), a second entropy candidate is sized with the dictionary's code lengths and **no inline 128-byte lengths header**. The Lagrangian picks the minimum-J of {RAW, RLE, per-block Huffman, shared-table Huffman} (`enc_lit = 3` for the latter), so the choice is never a regression. Because the shared table only covers symbols seen in training, a block containing an uncovered literal byte automatically falls back to its per-block table. The 128-byte header amortization makes `enc_lit = 3` viable on literal sections far below the 1024-literal threshold of the per-block table — precisely the small-block regime dictionaries target.
-6.  **Final Serialization**: All buffers are concatenated into the payload, preceded by section descriptors.
+6.  **Final Serialization**: All buffers are concatenated into the payload, preceded by the two section descriptors that are actually needed, and followed by slack padding if the sections behind the literals fall short of 32 bytes.
 
 **Decoding Process**:
-1.  **Deserizalization**: The decoder reads the section descriptors to obtain pointers to the start of each stream (Literals, Tokens, Offsets).
+1.  **Deserizalization**: The decoder walks the sections in order, deriving each size from the header and reading a descriptor only for the entropy-coded ones; the extras take the residue. It rejects the block if fewer than 32 bytes follow the literal section.
 2.  **Literal Decompression**:
     *   `enc_lit = 0` (RAW): zero-copy view into the source buffer.
     *   `enc_lit = 1` (RLE): single pass that expands runs and copies literal chunks.
     *   `enc_lit = 2` (PIVCO): the section's per-node branch bitmaps are decoded bottom-up by SIMD list merges (shuffle-based, no gather — §4.3), with direct unpacking of flat subtrees and an XOR/blend kernel for leaf pairs. ~1.3 cycles/symbol on Apple Silicon.
     *   `enc_lit = 3` (PIVCO_DICT): same decode, but the code lengths come from the dictionary's shared literal table (validated once at attach time) instead of an inline 128-byte header. The header amortization makes entropy coding viable on literal sections far below the per-block threshold — precisely the small-block regime dictionaries target.
-3.  **Token Decompression** (level 7 only): when `enc_litlen = 2`, the token stream is Huffman-decoded (PivCo layout) into a scratch buffer through a dedicated specialization of the block decoder, so the common RAW-token path keeps its exact code shape (a hot pointer with a single provenance).
+3.  **Token Decompression** (level 7 only): when `enc_tok = 2`, the token stream is Huffman-decoded (PivCo layout) into a scratch buffer through a dedicated specialization of the block decoder, so the common RAW-token path keeps its exact code shape (a hot pointer with a single provenance).
 4.  **Vertical Execution**: The main loop reads from all three streams simultaneously.
 5.  **Wild Copy**:
     *   *Literals*: Copied using unaligned 16-byte SIMD loads/stores (`vld1/vst1` on ARM).
