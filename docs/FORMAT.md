@@ -873,7 +873,7 @@ Generated archive size: **70 bytes** (12 bytes larger than the non-seekable vari
 #### Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 07 13 80 00 00 00 00 00 00 00 3E 5D
+00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
 00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
 00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00
@@ -960,7 +960,7 @@ A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size
 #### A) Dictionary Header (offset `0x00`, 16 bytes)
 
 ```text
-C7 D1 B0 9C | 01 | 00 | 05 00 | 17 0F 72 9A | 00 00 | 4A D9
+C7 D1 B0 9C | 01 | 00 | 05 00 | 23 58 DF 6F | 00 00 | 63 65
 ```
 
 - `C7 D1 B0 9C` -> magic word (LE) = `0x9CB0D1C7` (`.zxd` dictionary).
