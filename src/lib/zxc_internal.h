@@ -1163,7 +1163,11 @@ static ZXC_ALWAYS_INLINE int zxc_block_is_short_dist_bound(const uint8_t* const 
     size_t stride = size / want;
     if (stride < d_max) stride = d_max;
 
-    size_t samples = 0, hits = 0;
+    const size_t planned = (size - sizeof(uint32_t) - d_max) / stride + 1;
+    const size_t bar = (size_t)ZXC_LZ_MINDIST_MAX_SHORT_PCT * planned;
+
+    size_t samples = 0;
+    size_t hits = 0;
     for (size_t i = d_max; i + sizeof(uint32_t) <= size; i += stride) {
         const uint32_t cur = zxc_le32(blk + i);
         samples++;
@@ -1173,8 +1177,10 @@ static ZXC_ALWAYS_INLINE int zxc_block_is_short_dist_bound(const uint8_t* const 
                 break;
             }
         }
+        if (hits * 100U > bar) return 1;                           // can only rise
+        if ((hits + (planned - samples)) * 100U <= bar) return 0;  // out of reach
     }
-    return hits * 100U > ZXC_LZ_MINDIST_MAX_SHORT_PCT * samples;
+    return hits * 100U > bar;
 }
 
 /**

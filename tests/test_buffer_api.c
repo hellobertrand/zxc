@@ -1083,19 +1083,19 @@ int test_decompress_inplace(void) {
 // A small vocabulary in pseudo-random order: matches the fast tiers can index,
 // at the 8-9 % short-distance hit rate of ordinary prose.
 static void fill_text_like(uint8_t* b, size_t n) {
-    uint32_t st = 12345u;
+    uint32_t st = 12345U;
     uint8_t vocab[MINDIST_VOCAB][9];
     size_t vlen[MINDIST_VOCAB];
     for (size_t v = 0; v < MINDIST_VOCAB; v++) {
-        st = st * 1103515245u + 12345u;
-        vlen[v] = 3u + ((st >> 16) % 6u);
+        st = st * 1103515245U + 12345U;
+        vlen[v] = 3U + ((st >> 16) % 6U);
         for (size_t k = 0; k < vlen[v]; k++) {
-            st = st * 1103515245u + 12345u;
-            vocab[v][k] = (uint8_t)('a' + ((st >> 16) % 26u));
+            st = st * 1103515245U + 12345U;
+            vocab[v][k] = (uint8_t)('a' + ((st >> 16) % 26U));
         }
     }
     for (size_t i = 0; i < n;) {
-        st = st * 1103515245u + 12345u;
+        st = st * 1103515245U + 12345U;
         const size_t v = (size_t)(st >> 8) % MINDIST_VOCAB;
         for (size_t k = 0; k < vlen[v] && i < n; k++) b[i++] = vocab[v][k];
         if (i < n) b[i++] = ' ';
@@ -1115,13 +1115,21 @@ int test_min_dist_policy(void) {
     // Every position repeats 20 bytes back: the shape the floor would ruin.
     for (size_t i = 0; i < n; i++) per[i] = (uint8_t)((i % 20) + (i / 4096));
 
-    if (zxc_block_is_short_dist_bound(text, n)) {
-        printf("Failed: probe vetoed text-like data\n");
-        goto done;
-    }
-    if (!zxc_block_is_short_dist_bound(per, n)) {
-        printf("Failed: probe did not veto periodic data\n");
-        goto done;
+    // Sizes straddling the probe's clamp boundaries, where the planned sample
+    // count switches between its floor, the proportional band, and its cap.
+    // These pin the verdict across all three regimes; they are far enough from
+    // the threshold that they would not catch an off-by-one in that count.
+    static const size_t sizes[] = {4096, 16384, 40960, 65536, 256 * 1024};
+    for (size_t k = 0; k < sizeof(sizes) / sizeof(sizes[0]); k++) {
+        const unsigned long sz = (unsigned long)sizes[k];
+        if (zxc_block_is_short_dist_bound(text, sizes[k])) {
+            printf("Failed: probe vetoed text-like data at %lu bytes\n", sz);
+            goto done;
+        }
+        if (!zxc_block_is_short_dist_bound(per, sizes[k])) {
+            printf("Failed: probe did not veto periodic data at %lu bytes\n", sz);
+            goto done;
+        }
     }
     // A block too small to sample is also too small to gain: keep every distance.
     if (!zxc_block_is_short_dist_bound(text, ZXC_LZ_MINDIST)) {
