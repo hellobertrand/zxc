@@ -67,8 +67,16 @@ static int write_file(const char* path, const uint8_t* data, size_t size) {
     return 0;
 }
 
+static int output_dir_is_safe(const char* dir) {
+    return dir[0] != '\0' && strstr(dir, "..") == NULL;
+}
+
 int main(int argc, char** argv) {
     const char* dir = (argc > 1) ? argv[1] : "tests/format/golden";
+    if (!output_dir_is_safe(dir)) {
+        fprintf(stderr, "refusing output directory '%s': must not be empty or contain '..'\n", dir);
+        return EXIT_FAILURE;
+    }
 
     int failures = 0;
     printf("Generating %zu golden files into %s/\n", (size_t)GOLDEN_CASE_COUNT, dir);

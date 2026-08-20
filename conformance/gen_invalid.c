@@ -135,8 +135,16 @@ static size_t find_eof_block(const uint8_t* d, size_t n, int has_crc) {
     return 0;
 }
 
+static int output_dir_is_safe(const char* dir) {
+    return dir[0] != '\0' && strstr(dir, "..") == NULL;
+}
+
 int main(int argc, char** argv) {
     const char* dir = (argc > 1) ? argv[1] : "conformance/invalid";
+    if (!output_dir_is_safe(dir)) {
+        fprintf(stderr, "refusing output directory '%s': must not be empty or contain '..'\n", dir);
+        return EXIT_FAILURE;
+    }
     int failures = 0;
 
     uint8_t* text = NULL;
