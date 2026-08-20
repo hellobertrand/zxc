@@ -993,24 +993,21 @@ typedef struct {
  * @return The tuning tuple for that level.
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
+    // The distance floor stops at level 5: the slow levels keep every distance.
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
     // step_shift, min_offset
     static const zxc_lz77_params_t table[7] = {
-        {3, 16, 0, 0, 0, 4, 4, 1},       // fallback
-        {3, 16, 0, 0, 0, 4, 4, 1},       // level 1
-        {3, 18, 0, 0, 0, 3, 6, 1},       // level 2
-        {3, 16, 1, 4, 128, 1, 4, 1},     // level 3
-        {3, 18, 1, 4, 128, 1, 5, 1},     // level 4
-        {64, 256, 1, 16, 128, 1, 8, 1},  // level 5
-        {64, 256, 0, 0, 0, 1, 8, 1}      // level 6
+        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST},       // fallback
+        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST},       // level 1
+        {3, 18, 0, 0, 0, 3, 6, ZXC_LZ_MINDIST},       // level 2
+        {3, 16, 1, 4, 128, 1, 4, ZXC_LZ_MINDIST},     // level 3
+        {3, 18, 1, 4, 128, 1, 5, ZXC_LZ_MINDIST},     // level 4
+        {64, 256, 1, 16, 128, 1, 8, ZXC_LZ_MINDIST},  // level 5
+        {64, 256, 0, 0, 0, 1, 8, 1}                   // level 6
     };
-    zxc_lz77_params_t p = (level >= ZXC_LEVEL_ULTRA)
-                              ? (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8, 1}
-                              : table[level < ZXC_LEVEL_FASTEST ? ZXC_LEVEL_FASTEST : level];
-    // A candidate only: each block still has to clear
-    // zxc_block_is_short_dist_bound() before the floor actually applies.
-    if (level <= ZXC_LEVEL_COMPACT) p.min_offset = ZXC_LZ_MINDIST;
-    return p;
+    return (level >= ZXC_LEVEL_ULTRA)
+               ? (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8, 1}
+               : table[level < ZXC_LEVEL_FASTEST ? ZXC_LEVEL_FASTEST : level];
 }
 
 /**
@@ -1163,7 +1160,11 @@ static ZXC_ALWAYS_INLINE int zxc_block_is_short_dist_bound(const uint8_t* const 
     size_t stride = size / want;
     if (stride < d_max) stride = d_max;
 
-    size_t samples = 0, hits = 0;
+    const size_t planned = (size - sizeof(uint32_t) - d_max) / stride + 1;
+    const size_t bar = (size_t)ZXC_LZ_MINDIST_MAX_SHORT_PCT * planned;
+
+    size_t samples = 0;
+    size_t hits = 0;
     for (size_t i = d_max; i + sizeof(uint32_t) <= size; i += stride) {
         const uint32_t cur = zxc_le32(blk + i);
         samples++;
@@ -1173,8 +1174,10 @@ static ZXC_ALWAYS_INLINE int zxc_block_is_short_dist_bound(const uint8_t* const 
                 break;
             }
         }
+        if (hits * 100U > bar) return 1;                           // can only rise
+        if ((hits + (planned - samples)) * 100U <= bar) return 0;  // out of reach
     }
-    return hits * 100U > ZXC_LZ_MINDIST_MAX_SHORT_PCT * samples;
+    return hits * 100U > bar;
 }
 
 /**
