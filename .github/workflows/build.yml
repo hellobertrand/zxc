@@ -185,12 +185,15 @@ jobs:
 
       - name: Sanitize ref name
         id: ref
-        run: echo "slug=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+        run: |
+          slug="${GITHUB_REF_NAME//\//-}"
+          echo "slug=${slug}" >> "$GITHUB_OUTPUT"
+          echo "version=${slug#v}" >> "$GITHUB_OUTPUT"
 
       - name: Render SBOM from template
         shell: bash
         env:
-          SBOM_FILE: zxc-${{ steps.ref.outputs.slug }}-sbom.spdx.json
+          SBOM_FILE: zxc-${{ steps.ref.outputs.version }}-sbom.spdx.json
           VERSION: ${{ steps.ref.outputs.slug }}
           COMMIT: ${{ github.sha }}
         run: |
@@ -206,13 +209,13 @@ jobs:
       - name: Attest SBOM provenance (SLSA)
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: zxc-${{ steps.ref.outputs.slug }}-sbom.spdx.json
+          subject-path: zxc-${{ steps.ref.outputs.version }}-sbom.spdx.json
 
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom
-          path: zxc-${{ steps.ref.outputs.slug }}-sbom.spdx.json
+          path: zxc-${{ steps.ref.outputs.version }}-sbom.spdx.json
 
   release:
     name: Create GitHub Release
