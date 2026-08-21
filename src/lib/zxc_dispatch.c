@@ -1270,18 +1270,6 @@ struct zxc_cctx_s {
     size_t stored_block_size;
 };
 
-/**
- * @brief Creates a reusable compression context.
- *
- * Public API; full contract in @c zxc_buffer.h. With non-NULL @p opts the
- * internal buffers are pre-allocated for the given level / block size /
- * checksum; with NULL @p opts allocation is deferred to the first
- * @ref zxc_compress_cctx call. The resolved settings become sticky defaults.
- *
- * @param[in] opts  Initial compression options, or NULL to defer allocation.
- * @return A context to release with @ref zxc_free_cctx, or NULL on allocation
- *         failure or invalid @p opts.
- */
 zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
     zxc_cctx* const cctx = (zxc_cctx*)ZXC_CALLOC(1, sizeof(zxc_cctx));
     if (UNLIKELY(!cctx)) return NULL;  // LCOV_EXCL_LINE
@@ -1466,16 +1454,6 @@ struct zxc_dctx_s {
                                block_size pinned at init) */
 };
 
-/**
- * @brief Creates a reusable decompression context.
- *
- * Public API; see @c zxc_buffer.h. The inner buffers are allocated lazily on
- * the first decode (sized from the archive header), so this only allocates the
- * handle itself.
- *
- * @return A context to release with @ref zxc_free_dctx, or NULL on allocation
- *         failure.
- */
 zxc_dctx* zxc_create_dctx(void) {
     zxc_dctx* const dctx = (zxc_dctx*)ZXC_CALLOC(1, sizeof(zxc_dctx));
     return dctx;
@@ -1912,21 +1890,6 @@ size_t zxc_static_cctx_workspace_size(const size_t block_size, const int level) 
     return ZXC_STATIC_CCTX_HDR_SIZE + inner_sz;
 }
 
-/**
- * @brief Initialises a compression context inside a caller-supplied workspace.
- *
- * Public API; full contract in @c zxc_buffer.h. Places the opaque handle at the
- * start of @p workspace and carves the persistent buffer in the aligned tail -
- * no heap allocation. The block size is pinned for the context's lifetime, and
- * @ref zxc_free_cctx becomes a no-op (the caller owns @p workspace).
- *
- * @param[in] workspace       Caller buffer (>= @ref zxc_static_cctx_workspace_size).
- * @param[in] workspace_size  Capacity of @p workspace in bytes.
- * @param[in] opts            Compression options (non-NULL: level, block_size,
- *                            checksum).
- * @return A ready context owned by @p workspace, or NULL on invalid input or an
- *         undersized workspace.
- */
 zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_size,
                                const zxc_compress_opts_t* RESTRICT opts) {
     if (UNLIKELY(!workspace || !opts)) return NULL;
@@ -1976,20 +1939,6 @@ size_t zxc_static_dctx_workspace_size(const size_t block_size) {
     return ZXC_STATIC_DCTX_HDR_SIZE + inner_sz;
 }
 
-/**
- * @brief Initialises a decompression context inside a caller-supplied workspace.
- *
- * Public API; full contract in @c zxc_buffer.h. Places the opaque handle at the
- * start of @p workspace and carves the persistent buffer in the aligned tail -
- * no heap allocation. The block size is pinned, so decoded archives must match
- * it; @ref zxc_free_dctx becomes a no-op (the caller owns @p workspace).
- *
- * @param[in] workspace       Caller buffer (>= @ref zxc_static_dctx_workspace_size).
- * @param[in] workspace_size  Capacity of @p workspace in bytes.
- * @param[in] block_size      Block size to pin the context to.
- * @return A ready context owned by @p workspace, or NULL on invalid input or an
- *         undersized workspace.
- */
 zxc_dctx* zxc_init_static_dctx(void* RESTRICT workspace, const size_t workspace_size,
                                const size_t block_size) {
     if (UNLIKELY(!workspace)) return NULL;

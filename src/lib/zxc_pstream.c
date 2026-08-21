@@ -391,13 +391,6 @@ static int cs_stage_footer(zxc_cstream* cs) {
     return ZXC_OK;
 }
 
-/**
- * @brief Releases a compression stream and all internal buffers.
- *
- * Safe to call with @c NULL.
- *
- * @param[in,out] cs Stream returned by @ref zxc_cstream_create.
- */
 void zxc_cstream_free(zxc_cstream* cs) {
     if (!cs) return;
     ZXC_FREE(cs->pending);

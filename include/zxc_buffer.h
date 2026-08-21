@@ -453,6 +453,9 @@ ZXC_EXPORT int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* src, size_t src
 /**
  * @brief Creates a reusable decompression context.
  *
+ * Only the handle is allocated here: the working buffers are sized from the
+ * archive header, so they come on the first decode. Free with zxc_free_dctx().
+ *
  * @return New context, or @c NULL on allocation failure.
  */
 ZXC_EXPORT zxc_dctx* zxc_create_dctx(void);

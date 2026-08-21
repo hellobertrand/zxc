@@ -788,13 +788,6 @@ static void zxc_huf_nudge_assign(const uint32_t* RESTRICT blc, const int16_t* RE
         for (uint32_t k = 0; k < blc[l]; k++) cand_len[sym_order[r++]] = (uint8_t)l;
 }
 
-/**
- * @brief Modeled (bits, level-touches) decode cost of one code-length vector.
- *
- * Introspection hook over the exact evaluator (canonical-order weighting);
- * full contract in zxc_internal.h. The unit tests cross-check it against the
- * real tree built by the decoder.
- */
 void zxc_huf_nudge_cost(const uint8_t* RESTRICT code_len, const uint32_t* RESTRICT freq,
                         uint64_t* RESTRICT bits, uint64_t* RESTRICT touches) {
     uint32_t blc[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
@@ -807,13 +800,6 @@ void zxc_huf_nudge_cost(const uint8_t* RESTRICT code_len, const uint32_t* RESTRI
     *touches = c.touches;
 }
 
-/**
- * @brief Optionally reshape freshly built code lengths for faster PivCo decode.
- *
- * Candidate generation (walk, reduced-cap rebuilds, slot-ledger DP), exact
- * pricing and the adoption guard; full contract in zxc_internal.h. On
- * rejection @p code_len is left byte-for-byte untouched.
- */
 int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
                                void* RESTRICT scratch, const int max_code_len) {
     enum { LU = ZXC_HUF_MAX_CODE_LEN_ULTRA };
@@ -963,17 +949,6 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
 // 128-byte length header: 256 x 4-bit lengths, low nibble first.
 // =========================================================================
 
-/**
- * @brief Pack per-symbol code lengths into the 128-byte (4-bit nibble) header.
- *
- * The packing is little-endian within each byte: low nibble holds
- * `code_len[2*i]`, high nibble holds `code_len[2*i + 1]`. The function
- * silently truncates any length > 15; callers must enforce the cap of
- * `ZXC_HUF_MAX_CODE_LEN_ULTRA` (<= 15) before calling.
- *
- * @param[in]  code_len Per-symbol code lengths (length `ZXC_HUF_NUM_SYMBOLS`).
- * @param[out] out      Output header buffer of `ZXC_HUF_TABLE_SIZE` bytes.
- */
 void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out) {
     for (int i = 0; i < ZXC_HUF_NUM_SYMBOLS; i += 2) {
         const uint8_t lo = code_len[i] & 0x0F;
@@ -982,18 +957,6 @@ void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT ou
     }
 }
 
-/**
- * @brief Unpack and structurally validate a 128-byte packed lengths header.
- *
- * Inverts ::zxc_huf_pack_lengths and validates the two structural invariants:
- * no length exceeds `ZXC_HUF_MAX_CODE_LEN_ULTRA`, and at least one symbol is
- * present. (Kraft consistency is checked later by the tree build.)
- *
- * @param[in]  in       128-byte packed lengths header.
- * @param[out] code_len Output code-length array of length `ZXC_HUF_NUM_SYMBOLS`.
- * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` if a length is too
- *         large or the table is empty.
- */
 int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len) {
     int max_len = 0;
     int n_present = 0;

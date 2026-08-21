@@ -1522,12 +1522,27 @@ void zxc_huf_nudge_cost(const uint8_t* RESTRICT code_len, const uint32_t* RESTRI
 
 /**
  * @brief Pack per-symbol code lengths into the 128-byte (4-bit nibble) header.
+ *
+ * Nibble order follows the byte: `code_len[2*i]` low, `code_len[2*i + 1]` high.
+ * Lengths above 15 are silently truncated, so the caller must have capped at
+ * `ZXC_HUF_MAX_CODE_LEN_ULTRA` (<= 15) first.
+ *
+ * @param[in]  code_len Per-symbol lengths, `ZXC_HUF_NUM_SYMBOLS` entries.
+ * @param[out] out      `ZXC_HUF_TABLE_SIZE` bytes of packed header.
  */
 void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT out);
 
 /**
  * @brief Unpack and structurally validate a 128-byte packed lengths header.
- * @return `ZXC_OK` on success, `ZXC_ERROR_CORRUPT_DATA` on invalid lengths.
+ *
+ * Inverts ::zxc_huf_pack_lengths and checks the two structural invariants: no
+ * length above `ZXC_HUF_MAX_CODE_LEN_ULTRA`, and at least one symbol present.
+ * Kraft consistency is not checked here; the tree build does that later.
+ *
+ * @param[in]  in       128-byte packed header.
+ * @param[out] code_len Per-symbol lengths, `ZXC_HUF_NUM_SYMBOLS` entries.
+ * @return `ZXC_OK`, or `ZXC_ERROR_CORRUPT_DATA` if a length is too large or the
+ *         table is empty.
  */
 int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len);
 
