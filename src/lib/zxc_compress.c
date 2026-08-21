@@ -97,12 +97,10 @@ static ZXC_ALWAYS_INLINE __m128i zxc_mm_packus_epi32_sse2(__m128i a, __m128i b) 
 #endif
 
 /**
- * @brief Writes a Prefix Varint encoded value to a buffer.
+ * @brief Writes a value in Prefix Varint form.
  *
- * This function encodes a 32-bit unsigned integer using Prefix Varint encoding
- * and writes it to the destination buffer. Unary prefix bits in the first
- * byte determine the total length (1-5 bytes), allowing for branchless or
- * predictable decoding.
+ * Unary prefix bits in the first byte give the total length (1 to 5 bytes), so
+ * the reader learns the size before it reads the payload:
  *
  * Format:
  * - 0xxxxxxx (1 byte)
@@ -1102,51 +1100,26 @@ static void zxc_lz_seed_dict(const uint8_t* RESTRICT src, const size_t dict_size
 }
 
 /**
- * @brief Encodes a data block using the General (GLO) compression format.
+ * @brief Encodes one block in the GLO format (levels 3 and up).
  *
- * This function implements the core LZ77 compression logic. It dynamically
- * adjusts compression parameters (search depth, lazy matching strategy, and
- * step skipping) based on the compression level configured in the context.
+ * Two parsers feed the same serialiser. Levels 6 and 7 hand the whole parse to
+ * zxc_lz77_optimal_parse_glo() and rejoin at @c parse_done; levels 3 to 5 run
+ * the lazy loop here, with the search depth, lazy attempts and hash step taken
+ * from zxc_get_lz77_params(). Either way the parse yields a literal run plus
+ * token, offset and extras streams.
  *
- * **LZ77 Implementation Details:**
- * 1. **Hash Chain:** Uses a hash table (`ctx->hash_table`) to find potential
- * match positions. Collisions are handled via a `chain_table`, allowing us to
- * search deeper into the history for a better match.
- * 2. **Lazy Matching:** If a match is found, we check the *next* byte to see if
- *    it produces a longer match. If so, we output a literal and take the better
- * match. This is enabled for levels >= 3.
- * 3. **Step Skipping:** For lower levels (1-3), we skip bytes when updating the
- *    hash table to increase speed (`step > 1`). For levels 4+, we process every
- * byte to maximize compression ratio.
- * 4. **SIMD Match Finding:** Uses AVX2/AVX512/NEON to compare 32/64 bytes at a
- * time during match length calculation, significantly speeding up long match
- * verification.
- * 5. **RLE Detection:** Analyzes literals to see if Run-Length Encoding would
- * be beneficial (saving > 10% space).
+ * The tail then picks an encoding per section - RAW against RLE for the
+ * literals, plus a Huffman candidate from level 6 - sizes the sequence streams,
+ * and writes the header, its descriptors and the payload.
  *
- * The encoding process consists of:
- * 1. **LZ77 Parsing**: The function iterates through the source data,
- * maintaining a hash chain to find repeated patterns (matches). It supports
- * "Lazy Matching" for higher compression levels to optimize match selection.
- * 2. **Sequence Storage**: Matches are converted into sequences consisting of
- *    literal lengths, match lengths, and offsets.
- * 3. **Bitpacking & Serialization**: The sequences are analyzed to determine
- * optimal bit-widths. The function then writes the block header, encodes
- * literals (using Raw or RLE encoding), and bit-packs the sequence streams into
- * the destination buffer.
- *
- * @param[in,out] ctx       Pointer to the compression context containing hash tables
- * and configuration.
- * @param[in] src       Pointer to the input source data.
- * @param[in] src_sz  Size of the input data in bytes.
- * @param[out] dst       Pointer to the destination buffer where compressed data will
- * be written.
- * @param[in] dst_cap   Maximum capacity of the destination buffer.
- * @param[out] out_sz    [Out] Pointer to a variable that will receive the total size
- * of the compressed output.
- *
- * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if an
- * error occurs (e.g., buffer overflow).
+ * @param[in,out] ctx     Compression context: hash and chain tables, buffers, level.
+ * @param[in]     src     Input, prefixed by the dictionary content when one is active.
+ * @param[in]     src_sz  Size of @p src, that prefix included.
+ * @param[out]    dst     Destination buffer.
+ * @param[in]     dst_cap Capacity of @p dst.
+ * @param[out]    out_sz  Receives the number of bytes written.
+ * @return ZXC_OK, or a negative @ref zxc_error_t, typically
+ *         @ref ZXC_ERROR_DST_TOO_SMALL.
  */
 static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
@@ -1826,33 +1799,23 @@ parse_done:;
 }
 
 /**
- * @brief Encodes a data block using the General High Velocity (GHI) compression format.
+ * @brief Encodes one block in the GHI format (levels 1 and 2, the speed path).
  *
- * 1. Compression Strategy
- * It uses an LZ77-based algorithm with a sliding window (64KB) and a hash table/chain table
- * mechanism.
+ * What sets GHI apart is the sequence record. GLO packs a 1-byte token (4-bit
+ * literal length, 4-bit match length) and escapes anything longer through a
+ * varint; GHI spends a fixed 4 bytes instead - 8-bit LL, 8-bit ML (both
+ * escaping at 255) and a 16-bit offset covering the whole 64 KB window. Lengths
+ * between 16 and 255 are common, and this keeps them out of the varint reader,
+ * which is what the decoder actually pays for.
  *
- * 2. Token Format (Fixed-Width)
- * Unlike the standard GLO block which uses 1-byte tokens (4-bit literal length / 4-bit match
- * length), GHI uses 4-byte (32-bit) sequence records for better performance on long runs:
- * Literal Length (LL): 8 bits (stores 0-254; 255 indicates overflow).
- * Match Length (ML): 8 bits (stores 0-254; 255 indicates overflow).
- * Offset: 16 bits (supports the full 64KB window).
- * This format minimizes the number of expensive VByte reads during decompression for common
- * sequences where lengths are between 16 and 255.
- *
- * @param[in,out] ctx   Pointer to the compression context containing hash tables
- * and configuration.
- * @param[in] src       Pointer to the input source data.
- * @param[in] src_sz    Size of the input data in bytes.
- * @param[out] dst      Pointer to the destination buffer where compressed data will
- * be written.
- * @param[in] dst_cap   Maximum capacity of the destination buffer.
- * @param[out] out_sz   Pointer to a variable that will receive the total size
- * of the compressed output.
- *
- * @return ZXC_OK on success, or a negative zxc_error_t code (e.g., ZXC_ERROR_DST_TOO_SMALL) if an
- * error occurs (e.g., buffer overflow).
+ * @param[in,out] ctx     Compression context: hash and chain tables, buffers, level.
+ * @param[in]     src     Input, prefixed by the dictionary content when one is active.
+ * @param[in]     src_sz  Size of @p src, that prefix included.
+ * @param[out]    dst     Destination buffer.
+ * @param[in]     dst_cap Capacity of @p dst.
+ * @param[out]    out_sz  Receives the number of bytes written.
+ * @return ZXC_OK, or a negative @ref zxc_error_t, typically
+ *         @ref ZXC_ERROR_DST_TOO_SMALL.
  */
 static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
@@ -2024,11 +1987,9 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 }
 
 /**
- * @brief Encodes a raw data block (uncompressed).
+ * @brief Encodes a RAW (stored) block: header plus a verbatim copy.
  *
- * This function prepares and writes a "RAW" type block into the destination
- * buffer. It handles the block header and copying of source data; any checksum
- * is appended separately by the wrapper.
+ * Any block checksum is appended by the caller, not here.
  *
  * @param[in] src Pointer to the source data to encode.
  * @param[in] src_sz Size of the source data in bytes.

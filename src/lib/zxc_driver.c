@@ -390,32 +390,19 @@ typedef struct {
 } writer_args_t;
 
 /**
- * @brief Worker thread function for parallel stream processing.
+ * @brief Worker thread: pull a job, process it, hand it to the writer.
  *
- * This function serves as the entry point for worker threads in the ZXC
- * streaming compression/decompression context. It continuously retrieves jobs
- * from a shared work queue, processes them using a thread-local compression
- * context (`zxc_cctx_t`), and signals the writer thread upon completion.
+ * Sleeps on @c cond_worker until @c worker_queue has a job, then runs
+ * @c ctx->processor over it and marks it @c JOB_STATUS_PROCESSED. Each worker
+ * owns a thread-local @c zxc_cctx_t so the parallel part never touches a shared
+ * context.
  *
- * **Worker Lifecycle & Synchronization:**
- * 1. **Initialization:** Allocates a thread-local `zxc_cctx_t` to avoid lock
- * contention during compression/decompression.
- * 2. **Wait Loop:** Uses `pthread_cond_wait` on `cond_worker` to sleep until a
- * job is available in the `worker_queue`.
- * 3. **Job Retrieval:** Dequeues a job ID from the ring buffer. The
- * `worker_queue` acts as a load balancer.
- * 4. **Processing:** Calls `ctx->processor` (the compression/decompression
- * function) on the job's data. This is the CPU-intensive part and runs in
- * parallel.
- * 5. **Completion:** Updates `job->status` to `JOB_STATUS_PROCESSED`.
- * 6. **Signaling:** If the processed job is the *next* one expected by the
- * writer
- *    (`jid == ctx->write_idx`), it signals `cond_writer`. This optimization
- * prevents unnecessary wake-ups of the writer thread for out-of-order
- * completions.
+ * The writer is signalled only when the finished job is the one it is waiting
+ * for (@c jid == @c ctx->write_idx). Jobs completing out of order stay silent,
+ * which keeps the writer from waking up on work it cannot yet emit.
  *
- * @param[in] arg A pointer to the shared stream context (`zxc_stream_ctx_t`).
- * @return Always returns NULL.
+ * @param[in] arg The shared @c zxc_stream_ctx_t.
+ * @return Always NULL.
  */
 static void* zxc_stream_worker(void* arg) {
     zxc_stream_ctx_t* const ctx = (zxc_stream_ctx_t*)arg;

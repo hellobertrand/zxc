@@ -34,11 +34,10 @@
 #include "zxc_internal.h"
 
 /**
- * @brief Reads a Prefix Varint encoded integer from a stream.
+ * @brief Reads a Prefix Varint encoded integer.
  *
- * This function decodes a 32-bit unsigned integer encoded in Prefix Varint format
- * from the provided byte stream. Unary prefix bits in the first byte determine
- * the total length (1-3 bytes).
+ * Unary prefix bits in the first byte give the total length, at most 3 bytes
+ * here since that covers every length this decoder can meet:
  *
  * Format:
  * - 1 byte  (0xxxxxxx):  7-bit payload (val < 2^7  = 128)
