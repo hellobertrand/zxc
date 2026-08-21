@@ -1564,6 +1564,42 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
     (defined(ZXC_USE_SSE2) && defined(__SSSE3__))
     // 16 outputs/step: pshufb(L, ix+0x70) | pshufb(R, ix-16) selects L[ix] or
     // R[ix-16] (out-of-range lanes zero out); 32/step unrolls it twice.
+#if defined(ZXC_USE_AVX2)
+    // Same thing at 256 bits, 32 outputs/step. Both selects take the index
+    // unbiased: table lanes all sit in [0, 31], so pshufb masks to 4 bits and
+    // bit 4 is the L/R selector - shifted into the sign it drives the blend,
+    // and both bias vectors go away. L and R stay two 128-bit loads: the
+    // second cursor is lp + (16 - pcA), never lp + 16.
+    while (i + 32 <= n) {
+        const uint8_t* cb = bits + (i >> 3);
+        const int pcA0 = zxc_pivco_popcnt32(cb[0]);
+        const int pcA = pcA0 + zxc_pivco_popcnt32(cb[1]);
+        const int pcB0 = zxc_pivco_popcnt32(cb[2]);
+        const int pcB = pcB0 + zxc_pivco_popcnt32(cb[3]);
+        const size_t lpB = lp + (size_t)(16 - pcA);
+        const size_t rpB = rp + (size_t)pcA;
+        const __m256i vl = _mm256_inserti128_si256(
+            _mm256_castsi128_si256(_mm_loadu_si128((const __m128i*)(const void*)(L + lp))),
+            _mm_loadu_si128((const __m128i*)(const void*)(L + lpB)), 1);
+        const __m256i vr = _mm256_inserti128_si256(
+            _mm256_castsi128_si256(_mm_loadu_si128((const __m128i*)(const void*)(R + rp))),
+            _mm_loadu_si128((const __m128i*)(const void*)(R + rpB)), 1);
+        const __m128i ixA = _mm_unpacklo_epi64(
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[cb[0]]),
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pcA0][cb[1]]));
+        const __m128i ixB = _mm_unpacklo_epi64(
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[cb[2]]),
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pcB0][cb[3]]));
+        const __m256i ix = _mm256_inserti128_si256(_mm256_castsi128_si256(ixA), ixB, 1);
+        _mm256_storeu_si256(
+            (__m256i*)(void*)(out + i),
+            _mm256_blendv_epi8(_mm256_shuffle_epi8(vl, ix), _mm256_shuffle_epi8(vr, ix),
+                               _mm256_slli_epi16(ix, 3)));
+        lp = lpB + (size_t)(16 - pcB);
+        rp = rpB + (size_t)pcB;
+        i += 32;
+    }
+#else
     while (i + 32 <= n) {
         const uint8_t* cb = bits + (i >> 3);
         const int pcA0 = zxc_pivco_popcnt32(cb[0]);
@@ -1596,6 +1632,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         rp = rpB + (size_t)pcB;
         i += 32;
     }
+#endif
     while (i + 16 <= n) {
         const uint8_t b0 = bits[i >> 3];
         const uint8_t b1 = bits[(i >> 3) + 1];
