@@ -25,7 +25,6 @@ extern "C" {
 
 /**
  * @defgroup error Error Handling
- * @brief Error codes returned by ZXC library functions.
  * @{
  */
 

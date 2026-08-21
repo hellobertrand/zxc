@@ -959,8 +959,8 @@ typedef struct {
  * This inline function returns the appropriate LZ77 parameters configuration
  * for the given compression level.
  *
- * @param[in] level The compression level to use for determining LZ77 parameters.
- * @return zxc_lz77_params_t The LZ77 parameters structure corresponding to the specified level.
+ * @param[in] level Compression level; out-of-range values clamp to level 1.
+ * @return The tuning tuple for that level.
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
     if (level >= ZXC_LEVEL_ULTRA) return (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8};
@@ -980,20 +980,19 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
 
 /**
  * @enum zxc_block_type_t
- * @brief Defines the different types of data blocks supported by the ZXC
- * format.
+ * @brief Block types, i.e. which encoder produced a block's payload.
  *
- * This enumeration categorizes blocks based on the compression strategy
- * applied:
- * - `ZXC_BLOCK_RAW` (0): No compression. Used when data is incompressible (high
- * entropy) or when compression would expand the data size.
- * - `ZXC_BLOCK_GLO` (1): General-purpose compression (LZ77 + Bitpacking). This
- * is the default for most data (text, binaries, JSON, etc.). Includes 4 sections descriptors.
- * - `ZXC_BLOCK_GHI` (2): General-purpose high-velocity mode using LZ77 with advanced
- * techniques (lazy matching, step skipping) for maximum ratio. Includes 3 sections descriptors.
- * - `ZXC_BLOCK_SEK` (254): Seek table block. Contains per-block compressed/decompressed sizes
- *   for random-access decompression. Placed between EOF block and file footer.
- * - `ZXC_BLOCK_EOF` (255): End of file marker.
+ * - `ZXC_BLOCK_RAW` (0): stored as-is. Used when the data is incompressible or
+ *   when compressing it would make the block bigger.
+ * - `ZXC_BLOCK_GLO` (1): the general path, LZ77 plus bitpacked sequences,
+ *   levels 3 and up. Carries 0, 4 or 8 bytes of section descriptors depending
+ *   on which streams need an explicit compressed size.
+ * - `ZXC_BLOCK_GHI` (2): the speed path, levels 1 and 2. Fixed 4-byte sequence
+ *   records and always-RAW literals make every section size derivable from the
+ *   header, so it carries no descriptor at all.
+ * - `ZXC_BLOCK_SEK` (254): seek table, holding per-block compressed and
+ *   decompressed sizes. Sits between the EOF block and the file footer.
+ * - `ZXC_BLOCK_EOF` (255): end-of-file marker.
  */
 typedef enum {
     ZXC_BLOCK_RAW = 0,
@@ -1068,14 +1067,13 @@ typedef struct {
  */
 
 /**
- * @brief Reads a 16-bit unsigned integer from memory in little-endian format.
+ * @brief Reads a little-endian 16-bit value from a possibly unaligned address.
  *
- * This function interprets the bytes at the given memory address as a
- * little-endian 16-bit integer, regardless of the host system's endianness.
- * It is marked as always inline for performance critical paths.
+ * The memcpy is what makes the unaligned read defined; compilers fold it into
+ * a single load. Byte-swapped on big-endian hosts, so the wire stays LE.
  *
- * @param[in] p Pointer to the memory location to read from.
- * @return The 16-bit unsigned integer value read from memory.
+ * @param[in] p Address to read from.
+ * @return The value, in host order.
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_le16(const void* p) {
     uint16_t v;
@@ -1088,14 +1086,13 @@ static ZXC_ALWAYS_INLINE uint16_t zxc_le16(const void* p) {
 }
 
 /**
- * @brief Reads a 32-bit unsigned integer from memory in little-endian format.
+ * @brief Reads a little-endian 32-bit value from a possibly unaligned address.
  *
- * This function interprets the bytes at the given pointer address as a
- * little-endian 32-bit integer, regardless of the host system's endianness.
- * It is marked as always inline for performance critical paths.
+ * The memcpy is what makes the unaligned read defined; compilers fold it into
+ * a single load. Byte-swapped on big-endian hosts, so the wire stays LE.
  *
- * @param[in] p Pointer to the memory location to read from.
- * @return The 32-bit unsigned integer value read from memory.
+ * @param[in] p Address to read from.
+ * @return The value, in host order.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_le32(const void* p) {
     uint32_t v;
@@ -1108,14 +1105,13 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_le32(const void* p) {
 }
 
 /**
- * @brief Reads a 64-bit unsigned integer from memory in little-endian format.
+ * @brief Reads a little-endian 64-bit value from a possibly unaligned address.
  *
- * This function interprets the bytes at the given memory address as a
- * little-endian 64-bit integer, regardless of the host system's endianness.
- * It is marked as always inline for performance critical paths.
+ * The memcpy is what makes the unaligned read defined; compilers fold it into
+ * a single load. Byte-swapped on big-endian hosts, so the wire stays LE.
  *
- * @param[in] p Pointer to the memory location to read from.
- * @return The 64-bit unsigned integer value read from memory.
+ * @param[in] p Address to read from.
+ * @return The value, in host order.
  */
 static ZXC_ALWAYS_INLINE uint64_t zxc_le64(const void* p) {
     uint64_t v;
@@ -1128,19 +1124,13 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_le64(const void* p) {
 }
 
 /**
- * @brief Stores a 16-bit integer in memory using little-endian byte order.
+ * @brief Writes a 16-bit value little-endian to a possibly unaligned address.
  *
- * This function copies the value of a 16-bit unsigned integer to the specified
- * memory location. It uses memcpy to avoid strict aliasing violations and
- * potential unaligned access issues.
+ * Mirror of zxc_le16(): the memcpy makes the unaligned store defined, and the
+ * value is byte-swapped on big-endian hosts so the wire stays LE.
  *
- * @note This function assumes the system is little-endian or that the compiler
- * optimizes the memcpy to a store instruction that handles endianness if necessary
- * (though the implementation shown is a direct copy).
- *
- * @param[out] p Pointer to the destination memory where the value will be stored.
- *          Must point to a valid memory region of at least 2 bytes.
- * @param[in] v The 16-bit unsigned integer value to store.
+ * @param[out] p Address to write to, at least 2 bytes.
+ * @param[in]  v Value, in host order.
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le16(void* p, const uint16_t v) {
 #ifdef ZXC_BIG_ENDIAN
@@ -1152,16 +1142,13 @@ static ZXC_ALWAYS_INLINE void zxc_store_le16(void* p, const uint16_t v) {
 }
 
 /**
- * @brief Stores a 32-bit unsigned integer in little-endian format at the specified memory location.
+ * @brief Writes a 32-bit value little-endian to a possibly unaligned address.
  *
- * This function writes the 32-bit value `v` to the memory pointed to by `p`.
- * It uses `ZXC_MEMCPY` to ensure safe memory access, avoiding potential alignment issues
- * that could occur with direct pointer casting on some architectures.
+ * Mirror of zxc_le32(); see zxc_store_le16() for the memcpy and endianness
+ * rationale.
  *
- * @note This function is marked as `ZXC_ALWAYS_INLINE` to minimize function call overhead.
- *
- * @param[out] p Pointer to the destination memory where the value will be stored.
- * @param[in] v The 32-bit unsigned integer value to store.
+ * @param[out] p Address to write to, at least 4 bytes.
+ * @param[in]  v Value, in host order.
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le32(void* p, const uint32_t v) {
 #ifdef ZXC_BIG_ENDIAN
@@ -1173,18 +1160,13 @@ static ZXC_ALWAYS_INLINE void zxc_store_le32(void* p, const uint32_t v) {
 }
 
 /**
- * @brief Stores a 64-bit unsigned integer in little-endian format at the specified memory location.
+ * @brief Writes a 64-bit value little-endian to a possibly unaligned address.
  *
- * This function copies the 64-bit value `v` to the memory pointed to by `p`.
- * It uses `ZXC_MEMCPY` to ensure safe memory access, avoiding potential alignment issues
- * that might occur with direct pointer dereferencing on some architectures.
+ * Mirror of zxc_le64(); see zxc_store_le16() for the memcpy and endianness
+ * rationale.
  *
- * @note This function assumes the system is little-endian or that the compiler optimizes
- * the memcpy to a store instruction that handles endianness correctly if `ZXC_MEMCPY`
- * is defined appropriately.
- *
- * @param[out] p Pointer to the destination memory where the value will be stored.
- * @param[in] v The 64-bit unsigned integer value to store.
+ * @param[out] p Address to write to, at least 8 bytes.
+ * @param[in]  v Value, in host order.
  */
 static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
 #ifdef ZXC_BIG_ENDIAN
@@ -1200,8 +1182,8 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
  *
  * Implementation based on Marsaglia's Xorshift (PRNG) principles.
  *
- * @param[in] p Pointer to the input data to be hashed (8 bytes)
- * @return uint8_t The computed hash value.
+ * @param[in] p The 8 header bytes to hash.
+ * @return The checksum byte.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
     const uint64_t v = zxc_le64(p);
@@ -1215,12 +1197,10 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
 /**
  * @brief Computes the 2-byte checksum for file headers.
  *
- * This function generates a hash value by reading data from the given pointer.
- * The result is a 16-bit hash.
  * Implementation based on Marsaglia's Xorshift (PRNG) principles.
  *
- * @param[in] p Pointer to the input data to be hashed (16 bytes)
- * @return uint16_t The computed hash value.
+ * @param[in] p The 16 header bytes to hash.
+ * @return The checksum halfword.
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
     const uint64_t v1 = zxc_le64(p);
@@ -1234,10 +1214,10 @@ static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
 }
 
 /**
- * @brief Copies 16 bytes from the source memory location to the destination memory location.
+ * @brief Copies exactly 16 bytes as one vector move where the ISA has one.
  *
- * This function is forced to be inlined and uses SIMD intrinsics when available.
- * SSE2 on x86/x64, NEON on ARM, or memcpy as fallback.
+ * SSE2 on x86, NEON on ARM, memcpy elsewhere. Fixed width: the caller must
+ * have 16 readable and 16 writable bytes.
  *
  * @param[out] dst Pointer to the destination memory block.
  * @param[in] src Pointer to the source memory block.
@@ -1280,17 +1260,13 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
 }
 
 /**
- * @brief Counts trailing zeros in a 32-bit unsigned integer.
+ * @brief Counts trailing zeros, returning 32 for a zero input.
  *
- * This function returns the number of contiguous zero bits starting from the
- * least significant bit (LSB). If the input is 0, it returns 32.
+ * The zero case is the reason for the guard: both `__builtin_ctz` and
+ * `_BitScanForward` leave the result undefined there.
  *
- * It utilizes compiler-specific built-ins for GCC/Clang (`__builtin_ctz`) and
- * MSVC (`_BitScanForward`) for optimal performance. If no supported compiler
- * is detected, it falls back to a portable De Bruijn sequence implementation.
- *
- * @param[in] x The 32-bit unsigned integer to scan.
- * @return The number of trailing zeros (0-32).
+ * @param[in] x Value to scan.
+ * @return Trailing zero count, in [0, 32].
  */
 static ZXC_ALWAYS_INLINE int zxc_ctz32(const uint32_t x) {
     if (x == 0) return 32;
@@ -1310,17 +1286,13 @@ static ZXC_ALWAYS_INLINE int zxc_ctz32(const uint32_t x) {
 }
 
 /**
- * @brief Counts the number of trailing zeros in a 64-bit unsigned integer.
+ * @brief Counts trailing zeros, returning 64 for a zero input.
  *
- * This function determines the number of zero bits following the least significant
- * one bit in the binary representation of `x`.
+ * The zero case is the reason for the guard: both `__builtin_ctzll` and
+ * `_BitScanForward64` leave the result undefined there.
  *
- * @param[in] x The 64-bit unsigned integer to scan.
- * @return The number of trailing zeros. Returns 64 if `x` is 0.
- *
- * @note This implementation uses compiler built-ins for GCC/Clang (`__builtin_ctzll`)
- *       and MSVC (`_BitScanForward64`) when available for optimal performance.
- *       It falls back to a De Bruijn sequence multiplication method for other compilers.
+ * @param[in] x Value to scan.
+ * @return Trailing zero count, in [0, 64].
  */
 static ZXC_ALWAYS_INLINE int zxc_ctz64(const uint64_t x) {
     if (x == 0) return 64;
@@ -1348,29 +1320,19 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(const uint64_t x) {
 }
 
 /**
- * @brief Allocates aligned memory in a cross-platform manner.
+ * @brief Allocates aligned memory (`_aligned_malloc` on Windows, else `posix_memalign`).
  *
- * This function provides a unified interface for allocating memory with a specific
- * alignment requirement. It wraps `_aligned_malloc` for Windows
- * environments and `posix_memalign` for POSIX-compliant systems.
- *
- * @param[in] size The size of the memory block to allocate, in bytes.
- * @param[in] alignment The alignment value, which must be a power of two and a multiple
- *                  of `sizeof(void *)`.
- * @return A pointer to the allocated memory block, or NULL if the allocation fails.
- *         The returned pointer must be freed using the corresponding aligned free function.
+ * @param[in] size      Bytes to allocate.
+ * @param[in] alignment Power of two, and a multiple of `sizeof(void*)`.
+ * @return The block, or NULL on failure. Free it with zxc_aligned_free(), not
+ *         `free()`: the Windows allocator is a separate one.
  */
 void* zxc_aligned_malloc(const size_t size, const size_t alignment);
 
 /**
- * @brief Frees memory previously allocated with an aligned allocation function.
+ * @brief Frees a zxc_aligned_malloc() block (`_aligned_free` on Windows, else `free`).
  *
- * This function provides a cross-platform wrapper for freeing aligned memory.
- * On Windows, it calls `_aligned_free`.
- * On other platforms, it falls back to the standard `free` function.
- *
- * @param[in] ptr A pointer to the memory block to be freed. If ptr is NULL, no operation is
- * performed.
+ * @param[in] ptr Block to free; NULL is a no-op.
  */
 void zxc_aligned_free(void* ptr);
 
@@ -1416,13 +1378,10 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum_seed(const void* RESTRICT input, 
 }
 
 /**
- * @brief Combines a running hash with a new block hash using rotate-left and XOR.
+ * @brief Folds a block hash into the running global checksum.
  *
- * This function updates a global checksum by rotating the current hash left by 1 bit
- * (with wraparound) and XORing with the new block hash. This provides a simple but
- * effective rolling hash that depends on the order of blocks.
- *
- * Formula: result = ((hash << 1) | (hash >> 31)) ^ block_hash
+ * `result = rotl32(hash, 1) ^ block_hash`. The rotate is what makes the result
+ * depend on block order, so a reordered archive fails the global check.
  *
  * @param[in] hash The current running hash value.
  * @param[in] block_hash The hash of the new block to combine.
@@ -1828,24 +1787,18 @@ int zxc_cctx_alloc_entropy_scratch(zxc_cctx_t* ctx);
 void zxc_cctx_free(zxc_cctx_t* ctx);
 
 /**
- * @brief Internal wrapper function to decompress a single chunk of data.
+ * @brief Decompresses one chunk through the runtime ISA dispatch.
  *
- * This function handles the decompression of a specific chunk from the source
- * buffer into the destination buffer using the provided compression context. It
- * serves as an abstraction layer over the core decompression logic.
+ * Un-suffixed entry point: it loads the resolved variant pointer (`_default`,
+ * `_avx2`, `_avx512`, ...), running the one-time CPU detection on the first
+ * call, and routes to the dict variant when the context carries a dictionary.
  *
- * @param[in,out] ctx     Pointer to the ZXC compression context structure containing
- *                internal state and configuration.
- * @param[in] src     Pointer to the source buffer containing compressed data.
- * @param[in] src_sz  Size of the compressed data in the source buffer (in bytes).
- * @param[out] dst     Pointer to the destination buffer where decompressed data will
- * be written.
- * @param[in] dst_cap Capacity of the destination buffer (maximum bytes that can be
- * written).
- *
- * @return int    Returns ZXC_OK on success, or a negative zxc_error_t code on failure.
- *                Specific error codes depend on the underlying ZXC
- * implementation.
+ * @param[in]  ctx     Context holding the decode state and dictionary, if any.
+ * @param[in]  src     Compressed chunk.
+ * @param[in]  src_sz  Size of @p src in bytes.
+ * @param[out] dst     Destination buffer.
+ * @param[in]  dst_cap Capacity of @p dst.
+ * @return Bytes decoded (> 0), or a negative @ref zxc_error_t.
  */
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                  const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
@@ -1854,23 +1807,17 @@ int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint
                                       const size_t dst_cap);
 
 /**
- * @brief Wraps the internal chunk compression logic.
+ * @brief Compresses one chunk through the runtime ISA dispatch.
  *
- * This function acts as a wrapper to compress a single chunk of data using the
- * provided compression context. It handles the interaction with the underlying
- * compression algorithm for a specific block of memory.
+ * Counterpart of zxc_decompress_chunk_wrapper(): same lazily-resolved variant
+ * pointer, same one-time CPU detection on the first call.
  *
- * @param[in,out] ctx   Pointer to the ZXC compression context containing configuration
- *              and state.
- * @param[in] chunk Pointer to the source buffer containing the raw data to
- * compress.
- * @param[in] src_sz    The size of the source chunk in bytes.
- * @param[out] dst   Pointer to the destination buffer where compressed data will be
- * written.
- * @param[in] dst_cap   The capacity of the destination buffer (maximum bytes to write).
- *
- * @return int      The number of bytes written to the destination buffer on success,
- *                  or a negative error code on failure.
+ * @param[in,out] ctx     Compression context: configuration and working buffers.
+ * @param[in]     chunk   Raw data to compress.
+ * @param[in]     src_sz  Size of @p chunk in bytes.
+ * @param[out]    dst     Destination buffer.
+ * @param[in]     dst_cap Capacity of @p dst.
+ * @return Bytes written (> 0), or a negative @ref zxc_error_t.
  */
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
