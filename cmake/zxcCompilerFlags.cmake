@@ -12,11 +12,17 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-# Enable _GNU_SOURCE for ftello/fseeko on Linux
-# Enable 64-bit off_t on 32-bit Linux to prevent fseeko/ftello/pread truncation
-if(UNIX AND NOT APPLE)
+# The code needs POSIX.1-2008 plus realpath, which musl gates behind
+# _XOPEN_SOURCE. Linux stops short of _GNU_SOURCE: it makes glibc >= 2.38
+# redirect strtol/strtoll to __isoc23_*, raising the ABI floor from 2.34 to
+# 2.38. The BSDs keep it: _POSIX_C_SOURCE would clear __BSD_VISIBLE.
+# _FILE_OFFSET_BITS=64 keeps off_t 64-bit on 32-bit Linux.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_compile_definitions(_POSIX_C_SOURCE=200809L _XOPEN_SOURCE=700
+                            _FILE_OFFSET_BITS=64 _LARGEFILE_SOURCE)
+elseif(UNIX AND NOT APPLE)
     add_compile_definitions(_GNU_SOURCE _FILE_OFFSET_BITS=64 _LARGEFILE_SOURCE)
-elseif(APPLE)
+elseif(APPLE OR NOT MSVC)
     add_compile_definitions(_GNU_SOURCE)
 endif()
 

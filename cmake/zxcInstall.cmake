@@ -22,6 +22,19 @@ if(ZXC_INSTALL)
         set(ZXC_PC_LIBS_PRIVATE "")
     endif()
 
+    # ${pcfiledir} keeps the file relocatable: `cmake --install --prefix` does not
+    # rewrite an already-configured file, and archives get extracted anywhere. The
+    # depth follows CMAKE_INSTALL_LIBDIR (lib, lib64, lib/<multiarch>).
+    set(ZXC_PKGCONFIG_DIR "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+    if(IS_ABSOLUTE "${ZXC_PKGCONFIG_DIR}")
+        set(ZXC_PKGCONFIG_PREFIX "${CMAKE_INSTALL_PREFIX}")
+    else()
+        file(RELATIVE_PATH ZXC_PKGCONFIG_PREFIX
+             "${CMAKE_INSTALL_PREFIX}/${ZXC_PKGCONFIG_DIR}" "${CMAKE_INSTALL_PREFIX}")
+        string(REGEX REPLACE "/+$" "" ZXC_PKGCONFIG_PREFIX "${ZXC_PKGCONFIG_PREFIX}")
+        set(ZXC_PKGCONFIG_PREFIX "\${pcfiledir}/${ZXC_PKGCONFIG_PREFIX}")
+    endif()
+
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/libzxc.pc.in
         ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
@@ -64,7 +77,7 @@ if(ZXC_INSTALL)
     endif()
 
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+        DESTINATION ${ZXC_PKGCONFIG_DIR}
     )
 
     # CMake package config files for find_package(zxc)

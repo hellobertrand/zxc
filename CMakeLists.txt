@@ -141,10 +141,6 @@ else()
     target_compile_definitions(zxc_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
-target_compile_definitions(zxc_lib PRIVATE
-    $<$<NOT:$<C_COMPILER_ID:MSVC>>:_GNU_SOURCE>
-)
-
 # Coverage flags
 if(ZXC_ENABLE_COVERAGE)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
