@@ -6,8 +6,6 @@ on:
     branches: [ main ]
     tags:
       - 'v*'
-  release:
-    types: [ published ]
   pull_request:
     branches: [ main ]
 
@@ -19,8 +17,49 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
+  # SLSA attests that Actions built a commit; nothing else attests that a human
+  # meant to release it. Runs on every ref so the jobs below can just depend on it.
+  verify-tag:
+    name: Verify tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0     # the annotated tag object itself, not just the commit
+          fetch-tags: true
+
+      - name: Verify the tag is signed by the release key
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          key=.github/release-key.asc
+          if grep -q 'PLACEHOLDER' "$key"; then
+            echo "::error::$key is still the placeholder. Export the release public"
+            echo "::error::key over it (gpg --armor --export <fingerprint>) before tagging."
+            exit 1
+          fi
+          gpg --batch --quiet --import "$key"
+          git verify-tag "$GITHUB_REF_NAME" \
+            || { echo "::error::$GITHUB_REF_NAME is not signed by the release key"; exit 1; }
+
+      - name: Check the tag matches the version header
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          # Same source of truth as cmake/zxcVersion.cmake.
+          h=include/zxc_constants.h
+          v=$(sed -n 's/^#define ZXC_VERSION_MAJOR \([0-9]*\).*/\1/p' "$h").$(
+              sed -n 's/^#define ZXC_VERSION_MINOR \([0-9]*\).*/\1/p' "$h").$(
+              sed -n 's/^#define ZXC_VERSION_PATCH \([0-9]*\).*/\1/p' "$h")
+          if [ "$v" != "${GITHUB_REF_NAME#v}" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match $h ($v):"
+            echo "::error::the archives would be named after a version the binary denies."
+            exit 1
+          fi
+          echo "tag $GITHUB_REF_NAME matches $h"
+
   build-and-test:
     name: Build ${{ matrix.name }}
+    needs: verify-tag
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -171,8 +210,66 @@ jobs:
           name: zxc-${{ matrix.platform }}
           path: ${{ env.ARCHIVE }}
 
+  source-tarball:
+    name: Canonical source tarball
+    needs: verify-tag
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      # One tar feeds both artifacts, so "same content" is a fact. gzip -n drops the
+      # timestamp that would otherwise make two runs of the same tag differ.
+      - name: Build the source tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          git archive --format=tar --prefix="zxc-${VERSION}/" "$GITHUB_REF_NAME" \
+            > "zxc-${VERSION}.tar"
+          gzip -n -9 -c "zxc-${VERSION}.tar" > "zxc-${VERSION}.tar.gz"
+          git --version          # git archive is byte-stable per git version, so log it
+          sha256sum "zxc-${VERSION}.tar.gz"
+
+      - name: Compress the same tar with zxc
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DZXC_NATIVE_ARCH=OFF \
+                -DZXC_BUILD_TESTS=OFF
+          cmake --build build --parallel
+          ZXC=$(find build -maxdepth 2 -type f -name zxc | head -1)
+          "$ZXC" -7 "zxc-${VERSION}.tar" -o "zxc-${VERSION}.tar.zxc"   # 7 = ULTRA, the densest level
+
+          # Dogfood is only worth shipping if it round-trips.
+          "$ZXC" -d "zxc-${VERSION}.tar.zxc" -o roundtrip.tar
+          cmp "zxc-${VERSION}.tar" roundtrip.tar \
+            || { echo "::error::zxc-${VERSION}.tar.zxc does not decompress to the source tar"; exit 1; }
+          ls -l "zxc-${VERSION}.tar" "zxc-${VERSION}.tar.gz" "zxc-${VERSION}.tar.zxc"
+
+      - name: Attest source tarball provenance (SLSA)
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            zxc-${{ env.VERSION }}.tar.gz
+            zxc-${{ env.VERSION }}.tar.zxc
+
+      - name: Upload source artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: source
+          path: |
+            zxc-${{ env.VERSION }}.tar.gz
+            zxc-${{ env.VERSION }}.tar.zxc
+
   sbom:
     name: Generate SBOM
+    needs: verify-tag
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-slim
     permissions:
@@ -219,7 +316,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: [build-and-test, sbom]
+    needs: [build-and-test, source-tarball, sbom]
     runs-on: ubuntu-slim
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -233,22 +330,31 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release
-          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.spdx.json' \) -exec mv {} release/ \;
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.tar.zxc' -o -name '*.zip' \
+            -o -name '*.spdx.json' \) -exec mv {} release/ \;
           ls -la release
 
+      # Written from the directory being published, so it cannot drift from what
+      # is attached.
+      - name: Generate SHA256SUMS.txt
+        working-directory: release
+        run: |
+          sha256sum -- * | sort -k2 > "$RUNNER_TEMP/SHA256SUMS.txt"
+          mv "$RUNNER_TEMP/SHA256SUMS.txt" .
+          cat SHA256SUMS.txt
+
+      # Draft until the maintainer signs SHA256SUMS.txt offline. See docs/RELEASE.md.
       - name: Create Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          files: |
-            release/*.tar.gz
-            release/*.zip
-            release/*.spdx.json
+          draft: true
+          files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   hashes:
     name: Compute release artifact hashes
-    needs: [build-and-test, sbom]
+    needs: [build-and-test, source-tarball, sbom]
     runs-on: ubuntu-slim
     if: startsWith(github.ref, 'refs/tags/')
     outputs:
@@ -265,7 +371,7 @@ jobs:
         working-directory: artifacts
         run: |
           ls -la
-          echo "digests=$(sha256sum *.tar.gz *.zip *.spdx.json | base64 -w0)" >> "$GITHUB_OUTPUT"
+          echo "digests=$(sha256sum *.tar.gz *.tar.zxc *.zip *.spdx.json | base64 -w0)" >> "$GITHUB_OUTPUT"
 
   provenance:
     name: SLSA provenance
