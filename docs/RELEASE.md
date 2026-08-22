@@ -35,8 +35,11 @@ so nothing is public before the checksums are signed.
    Only then sign and publish — the private key never reaches CI:
 
    ```sh
-   gpg --detach-sign --armor SHA256SUMS
-   gh release upload v0.14.0 SHA256SUMS.asc
+   gpg --detach-sign --armor SHA256SUMS          # covers every asset
+   gpg --detach-sign --armor zxc-0.14.0.tar.gz   # what distro tooling looks for
+   gpg --detach-sign --armor zxc-0.14.0.tar.zxc
+   gh release upload v0.14.0 SHA256SUMS.asc \
+     zxc-0.14.0.tar.gz.asc zxc-0.14.0.tar.zxc.asc
    gh release edit v0.14.0 --draft=false
    ```
 

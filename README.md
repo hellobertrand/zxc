@@ -252,6 +252,8 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
         `git archive --format=tar --prefix=zxc-<version>/ v<version> | gzip -n -9`.
     *   `zxc-<version>.tar.zxc` — the same tar compressed with `zxc -7`. Readable only by a
         `zxc` whose format version matches, so keep the `.tar.gz` for archival.
+    *   `.asc` beside each of the two — detached PGP signatures, for packaging tools that
+        expect one next to the tarball.
 
 3.  Verify, then extract:
     ```bash

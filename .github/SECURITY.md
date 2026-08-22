@@ -31,6 +31,13 @@ gpg --verify SHA256SUMS.asc SHA256SUMS   # signed offline, key never in CI
 sha256sum -c SHA256SUMS                  # run where the assets are
 ```
 
+The source tarballs also carry their own detached signature, for packaging tools that
+expect one beside the file:
+
+```sh
+gpg --verify zxc-0.14.0.tar.gz.asc zxc-0.14.0.tar.gz
+```
+
 ### Build provenance
 
 ```sh
