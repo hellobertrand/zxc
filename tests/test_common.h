@@ -64,6 +64,7 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
 /* Buffer API */
 int test_buffer_api(void);
 int test_buffer_api_scratch_buf(void);
+int test_min_dist_policy(void);
 int test_buffer_error_codes(void);
 int test_get_decompressed_size(void);
 int test_decompress_inplace(void);

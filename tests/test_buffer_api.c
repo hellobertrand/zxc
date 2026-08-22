@@ -1075,3 +1075,77 @@ int test_decompress_inplace(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+// No public switch exposes the floor, so the test goes at the decision itself,
+// then round-trips both shapes to confirm it stays invisible to the decoder.
+#define MINDIST_VOCAB 40
+
+// A small vocabulary in pseudo-random order: matches the fast tiers can index,
+// at the 8-9 % short-distance hit rate of ordinary prose.
+static void fill_text_like(uint8_t* b, size_t n) {
+    uint32_t st = 12345U;
+    uint8_t vocab[MINDIST_VOCAB][9];
+    size_t vlen[MINDIST_VOCAB];
+    for (size_t v = 0; v < MINDIST_VOCAB; v++) {
+        st = st * 1103515245U + 12345U;
+        vlen[v] = 3U + ((st >> 16) % 6U);
+        for (size_t k = 0; k < vlen[v]; k++) {
+            st = st * 1103515245U + 12345U;
+            vocab[v][k] = (uint8_t)('a' + ((st >> 16) % 26U));
+        }
+    }
+    for (size_t i = 0; i < n;) {
+        st = st * 1103515245U + 12345U;
+        const size_t v = (size_t)(st >> 8) % MINDIST_VOCAB;
+        for (size_t k = 0; k < vlen[v] && i < n; k++) b[i++] = vocab[v][k];
+        if (i < n) b[i++] = ' ';
+    }
+}
+
+int test_min_dist_policy(void) {
+    printf("=== TEST: Unit - short match distance floor ===\n");
+
+    const size_t n = 256 * 1024;
+    uint8_t* text = malloc(n);
+    uint8_t* per = malloc(n);
+    int ok = 0;
+    if (!text || !per) goto done;
+
+    fill_text_like(text, n);
+    // Every position repeats 20 bytes back: the shape the floor would ruin.
+    for (size_t i = 0; i < n; i++) per[i] = (uint8_t)((i % 20) + (i / 4096));
+
+    // Sizes straddling the probe's clamp boundaries, where the planned sample
+    // count switches between its floor, the proportional band, and its cap.
+    // These pin the verdict across all three regimes; they are far enough from
+    // the threshold that they would not catch an off-by-one in that count.
+    static const size_t sizes[] = {4096, 16384, 40960, 65536, 256 * 1024};
+    for (size_t k = 0; k < sizeof(sizes) / sizeof(sizes[0]); k++) {
+        const unsigned long sz = (unsigned long)sizes[k];
+        if (zxc_block_is_short_dist_bound(text, sizes[k])) {
+            printf("Failed: probe vetoed text-like data at %lu bytes\n", sz);
+            goto done;
+        }
+        if (!zxc_block_is_short_dist_bound(per, sizes[k])) {
+            printf("Failed: probe did not veto periodic data at %lu bytes\n", sz);
+            goto done;
+        }
+    }
+    // A block too small to sample is also too small to gain: keep every distance.
+    if (!zxc_block_is_short_dist_bound(text, ZXC_LZ_MINDIST)) {
+        printf("Failed: probe judged a block too small to sample\n");
+        goto done;
+    }
+    // Whichever way it goes, the archive stays ordinary at every level.
+    for (int lvl = ZXC_LEVEL_FASTEST; lvl <= ZXC_LEVEL_ULTRA; lvl++) {
+        if (!test_round_trip("mindist text", text, n, lvl, 0)) goto done;
+        if (!test_round_trip("mindist periodic", per, n, lvl, 0)) goto done;
+    }
+
+    printf("PASS\n\n");
+    ok = 1;
+done:
+    free(text);
+    free(per);
+    return ok;
+}
