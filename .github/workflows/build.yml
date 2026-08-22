@@ -115,17 +115,18 @@ jobs:
           fi
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
-          # Install to staging directory using CMake (Standard way for all OS)
-          cmake --install build --prefix "release_staging/${ARCHIVE_BASE}" --config Release
+          STAGE="release_staging/${ARCHIVE_BASE}"
 
-          # Strip binary on Unix-like systems only (installed to bin/)
+          cmake --install build --prefix "$STAGE" --config Release
+
           if [[ "${{ runner.os }}" != "Windows" ]]; then
-            strip "release_staging/${ARCHIVE_BASE}/bin/${{ matrix.artifact_name }}"
+            strip "$STAGE/bin/${{ matrix.artifact_name }}"
           fi
 
-          cp LICENSE "release_staging/${ARCHIVE_BASE}/LICENSE.txt"
-          cp docs/man/zxc.1.md "release_staging/${ARCHIVE_BASE}/MANUAL.md"
-          cat > "release_staging/${ARCHIVE_BASE}/README.md" <<EOF
+          cp LICENSE "$STAGE/LICENSE.txt"
+          cp docs/man/zxc.1.md "$STAGE/MANUAL.md"
+
+          cat > "$STAGE/README.md" <<EOF
           # ZXC ${VERSION}
 
           Asymmetric Lossless Compression Built for Ultra-Fast Decode

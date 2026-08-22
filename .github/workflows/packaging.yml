@@ -140,3 +140,25 @@ jobs:
             cc tests/packaging/consumer.c $flags -o "consumer_$LIB_TYPE"
             LD_LIBRARY_PATH="$libdir" "./consumer_$LIB_TYPE"
           done
+
+      # Release archives are staged with --prefix, then extracted elsewhere: a .pc
+      # that baked its prefix at configure time would point at the runner.
+      - name: Consume via pkg-config after relocation
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --install build_shared --config Release --prefix "$PWD/staged"
+          mv staged relocated
+
+          pc=$(find relocated -name libzxc.pc | head -1)
+          test -n "$pc" || { echo "::error::no libzxc.pc in the staged prefix"; exit 1; }
+
+          PKG_CONFIG_PATH="$PWD/$(dirname "$pc")"
+          export PKG_CONFIG_PATH
+          flags=$(pkg-config --cflags --libs libzxc)
+          echo "pkg-config (relocated): $flags"
+
+          # shellcheck disable=SC2086
+          cc tests/packaging/consumer.c $flags -o consumer_relocated
+          LD_LIBRARY_PATH="$PWD/$(dirname "$(dirname "$pc")")" ./consumer_relocated

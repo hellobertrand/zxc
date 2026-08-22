@@ -46,7 +46,8 @@ endif
 # =============================================================================
 
 if host_machine.system() == 'linux'
-  add_project_arguments('-D_GNU_SOURCE', '-D_FILE_OFFSET_BITS=64',
+  add_project_arguments('-D_POSIX_C_SOURCE=200809L', '-D_XOPEN_SOURCE=700',
+                        '-D_FILE_OFFSET_BITS=64',
                         '-D_LARGEFILE_SOURCE', language : 'c')
 elif host_machine.system() == 'darwin'
   add_project_arguments('-D_GNU_SOURCE', language : 'c')
