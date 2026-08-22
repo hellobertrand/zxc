@@ -247,15 +247,28 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
     *   `zxc-<version>-windows-x86_64.zip` (Runtime dispatch for AVX2/AVX512).
     *   `zxc-<version>-windows-arm64.zip` (NEON optimizations included).
 
-3.  Verify, then extract. Every archive is signed via SLSA build provenance; the SHA-256 of each asset is also shown directly on the GitHub release page:
+    **Source:**
+    *   `zxc-<version>.tar.gz` — canonical source, reproducible with
+        `git archive --format=tar --prefix=zxc-<version>/ v<version> | gzip -n -9`.
+    *   `zxc-<version>.tar.zxc` — the same tar compressed with `zxc -7`. Readable only by a
+        `zxc` whose format version matches, so keep the `.tar.gz` for archival.
+    *   `.sigstore.json` beside every asset — the Sigstore bundle for that file.
+
+3.  Verify, then extract:
     ```bash
-    # Authenticity + integrity in one shot (SLSA — recommended)
-    gh attestation verify zxc-<version>-linux-x86_64.tar.gz --repo hellobertrand/zxc
+    # Sigstore signature — keyless, no key to fetch
+    cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+      --certificate-identity-regexp '^https://github.com/hellobertrand/zxc/' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+    sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c
 
     # Extract
     tar -xzf zxc-<version>-linux-x86_64.tar.gz
     sudo cp -r zxc-<version>-linux-x86_64/* /usr/local/
     ```
+
+    See [SECURITY.md](.github/SECURITY.md#verifying-a-release) for every verification path
+    and [docs/RELEASE.md](docs/RELEASE.md) for how releases are cut.
 
     Each archive contains a versioned top-level directory with:
     ```
