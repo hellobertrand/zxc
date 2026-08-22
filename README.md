@@ -248,14 +248,16 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
     *   `zxc-<version>-windows-arm64.zip` (NEON optimizations included).
 
     **Source:**
-    *   `zxc-<version>.tar.gz` — canonical source, reproducible with `git archive | gzip -n`.
-    *   `zxc-<version>.tar.zxc` — the same tar compressed with `zxc` itself.
+    *   `zxc-<version>.tar.gz` — canonical source, reproducible with
+        `git archive --format=tar --prefix=zxc-<version>/ v<version> | gzip -n -9`.
+    *   `zxc-<version>.tar.zxc` — the same tar compressed with `zxc -7`. Readable only by a
+        `zxc` whose format version matches, so keep the `.tar.gz` for archival.
 
 3.  Verify, then extract:
     ```bash
     # The maintainer's signature over every checksum (strongest: attests a human)
-    gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt
-    sha256sum -c SHA256SUMS.txt --ignore-missing
+    gpg --verify SHA256SUMS.asc SHA256SUMS
+    sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c
 
     # Or the build provenance alone, if you only need "GitHub built this"
     gh attestation verify zxc-<version>-linux-x86_64.tar.gz --repo hellobertrand/zxc

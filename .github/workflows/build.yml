@@ -17,8 +17,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
-  # SLSA attests that Actions built a commit; nothing else attests that a human
-  # meant to release it. Runs on every ref so the jobs below can just depend on it.
+  # SLSA attests that Actions built a commit; this attests that the release key signed
+  # it. The fingerprint lives in a repo variable because the key file and this workflow
+  # both come from the tag being verified. Runs on every ref so `needs:` stays simple.
   verify-tag:
     name: Verify tag
     runs-on: ubuntu-latest
@@ -26,30 +27,47 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0     # the annotated tag object itself, not just the commit
-          fetch-tags: true
+          # Full history only when there is a tag: the tag object and the ancestry
+          # check need it, nothing else does.
+          fetch-depth: ${{ startsWith(github.ref, 'refs/tags/') && 0 || 1 }}
+          fetch-tags: ${{ startsWith(github.ref, 'refs/tags/') }}
 
       - name: Verify the tag is signed by the release key
         if: startsWith(github.ref, 'refs/tags/')
+        env:
+          EXPECTED_FPR: ${{ vars.RELEASE_KEY_FPR }}
         run: |
           key=.github/release-key.asc
-          if grep -q 'PLACEHOLDER' "$key"; then
-            echo "::error::$key is still the placeholder. Export the release public"
-            echo "::error::key over it (gpg --armor --export <fingerprint>) before tagging."
+          [ -s "$key" ] || { echo "::error::$key is missing or empty"; exit 1; }
+          [ -n "$EXPECTED_FPR" ] \
+            || { echo "::error::repo variable RELEASE_KEY_FPR is not set"; exit 1; }
+
+          gpg --batch --quiet --import "$key"
+
+          # VALIDSIG carries the signing *and* primary fingerprint, so this still
+          # holds if a subkey is added later.
+          if ! git verify-tag --raw "$GITHUB_REF_NAME" 2>&1 | tee /tmp/tagsig \
+               | grep -q "VALIDSIG .*$EXPECTED_FPR"; then
+            echo "::error::$GITHUB_REF_NAME is not signed by $EXPECTED_FPR"
+            sed -n 's/^\[GNUPG:\] //p' /tmp/tagsig | head -5
             exit 1
           fi
-          gpg --batch --quiet --import "$key"
-          git verify-tag "$GITHUB_REF_NAME" \
-            || { echo "::error::$GITHUB_REF_NAME is not signed by the release key"; exit 1; }
+
+          # A signature on a commit nobody reviewed is still a valid signature.
+          # checkout fetched the tag, not the branches.
+          git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_REF_NAME^{commit}" origin/main \
+            || { echo "::error::$GITHUB_REF_NAME is not on main"; exit 1; }
 
       - name: Check the tag matches the version header
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           # Same source of truth as cmake/zxcVersion.cmake.
           h=include/zxc_constants.h
-          v=$(sed -n 's/^#define ZXC_VERSION_MAJOR \([0-9]*\).*/\1/p' "$h").$(
-              sed -n 's/^#define ZXC_VERSION_MINOR \([0-9]*\).*/\1/p' "$h").$(
-              sed -n 's/^#define ZXC_VERSION_PATCH \([0-9]*\).*/\1/p' "$h")
+          v=$(sed -n 's/^#define ZXC_VERSION_MAJOR *\([0-9][0-9]*\).*/\1/p' "$h").$(
+              sed -n 's/^#define ZXC_VERSION_MINOR *\([0-9][0-9]*\).*/\1/p' "$h").$(
+              sed -n 's/^#define ZXC_VERSION_PATCH *\([0-9][0-9]*\).*/\1/p' "$h")
+          case "$v" in *..*|.*|*.) echo "::error::could not read a version from $h"; exit 1 ;; esac
           if [ "$v" != "${GITHUB_REF_NAME#v}" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match $h ($v):"
             echo "::error::the archives would be named after a version the binary denies."
@@ -59,7 +77,6 @@ jobs:
 
   build-and-test:
     name: Build ${{ matrix.name }}
-    needs: verify-tag
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -243,7 +260,8 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DZXC_NATIVE_ARCH=OFF \
                 -DZXC_BUILD_TESTS=OFF
           cmake --build build --parallel
-          ZXC=$(find build -maxdepth 2 -type f -name zxc | head -1)
+          ZXC=$(find build -type f -name zxc -perm -u+x | head -1)
+          test -n "$ZXC" || { echo "::error::no zxc binary under build/"; find build -name 'zxc*'; exit 1; }
           "$ZXC" -7 "zxc-${VERSION}.tar" -o "zxc-${VERSION}.tar.zxc"   # 7 = ULTRA, the densest level
 
           # Dogfood is only worth shipping if it round-trips.
@@ -334,16 +352,16 @@ jobs:
             -o -name '*.spdx.json' \) -exec mv {} release/ \;
           ls -la release
 
-      # Written from the directory being published, so it cannot drift from what
-      # is attached.
-      - name: Generate SHA256SUMS.txt
+      # Written from the directory being published. `hashes` re-globs independently,
+      # so a new asset type has to be added to both.
+      - name: Generate SHA256SUMS
         working-directory: release
         run: |
-          sha256sum -- * | sort -k2 > "$RUNNER_TEMP/SHA256SUMS.txt"
-          mv "$RUNNER_TEMP/SHA256SUMS.txt" .
-          cat SHA256SUMS.txt
+          sha256sum -- * | sort -k2 > "$RUNNER_TEMP/SHA256SUMS"
+          mv "$RUNNER_TEMP/SHA256SUMS" .
+          cat SHA256SUMS
 
-      # Draft until the maintainer signs SHA256SUMS.txt offline. See docs/RELEASE.md.
+      # Draft until the maintainer signs SHA256SUMS offline. See docs/RELEASE.md.
       - name: Create Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
@@ -371,18 +389,42 @@ jobs:
         working-directory: artifacts
         run: |
           ls -la
-          echo "digests=$(sha256sum *.tar.gz *.tar.zxc *.zip *.spdx.json | base64 -w0)" >> "$GITHUB_OUTPUT"
+          echo "digests=$(sha256sum -- *.tar.gz *.tar.zxc *.zip *.spdx.json | base64 -w0)" >> "$GITHUB_OUTPUT"
 
+  # upload-assets off: the generator attaches by tag, and a draft is not addressable
+  # that way. attach-provenance does it with gh, which resolves drafts.
   provenance:
     name: SLSA provenance
     needs: [hashes, release]
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
-      actions: read     # read the workflow run to assemble provenance
+      actions: read
+      contents: write
       id-token: write   # keyless signing via Sigstore / OIDC
-      contents: write   # attach multiple.intoto.jsonl to the release
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: ${{ needs.hashes.outputs.digests }}
-      upload-assets: true
-      upload-tag-name: ${{ github.ref_name }}
+      upload-assets: false
+
+  attach-provenance:
+    name: Attach SLSA provenance
+    needs: provenance
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download run artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+
+      - name: Attach it to the draft release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          prov=$(find artifacts -type f -name '*.intoto.jsonl' | head -1)
+          test -n "$prov" \
+            || { echo "::error::no *.intoto.jsonl among the run artifacts"; find artifacts -type f; exit 1; }
+          echo "attaching $(basename "$prov")"
+          gh release upload "$GITHUB_REF_NAME" "$prov" --clobber

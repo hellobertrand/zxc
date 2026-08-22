@@ -27,8 +27,8 @@ release key.
 ### The files match the signed checksums
 
 ```sh
-gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt   # signed offline, key never in CI
-sha256sum -c SHA256SUMS.txt                      # run where the assets are
+gpg --verify SHA256SUMS.asc SHA256SUMS   # signed offline, key never in CI
+sha256sum -c SHA256SUMS                  # run where the assets are
 ```
 
 ### Build provenance
@@ -43,7 +43,9 @@ and the SBOM are attested the same way.
 
 ### SLSA provenance
 
-`multiple.intoto.jsonl` is a SLSA Build Level 3 attestation covering every asset at once:
+`multiple.intoto.jsonl` is a SLSA Build Level 3 attestation covering the archives, the
+source tarballs and the SBOM. `SHA256SUMS` is not among them — it is covered by the PGP
+signature above instead:
 
 ```sh
 slsa-verifier verify-artifact zxc-0.14.0-linux-x86_64.tar.gz \
