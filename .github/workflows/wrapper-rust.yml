@@ -2,8 +2,6 @@ name: Wrapper Rust
 
 on:
   workflow_dispatch:
-  release:
-    types: [ published ]
 
 permissions:
   contents: read
@@ -60,7 +58,7 @@ jobs:
     name: Publish to crates.io
     needs: [test]
     runs-on: ubuntu-slim
-    if: github.event_name == 'release'
+    if: startsWith(github.ref, 'refs/tags/')
     defaults:
       run:
         working-directory: ./wrappers/rust
@@ -77,7 +75,7 @@ jobs:
 
       - name: Verify Version Matches Release Tag
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           # Remove 'v' prefix if present
           RELEASE_VERSION="${RELEASE_TAG#v}"

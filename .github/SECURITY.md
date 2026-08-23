@@ -17,31 +17,31 @@ only one that attests a **human** decision; the others attest the build machiner
 
 ```sh
 git fetch --tags
-git verify-tag v0.14.0
+git verify-tag v<version>
 ```
 
-The release key is in [`.github/release-key.asc`](release-key.asc); import it with
-`gpg --import`. Fingerprint: `E943 9DC2 5979 8AB2 984C 9B87 F756 101E B877 1268`. This is a dedicated
-release key.
+The key is in [`.github/release-key.asc`](release-key.asc); import it with `gpg --import`.
+Fingerprint: `CFC1 8791 C7DB A33B A5B8  5506 C6A2 4372 A165 64D6` — the same key signs the
+tags and, through a subkey held by CI, the release artifacts.
 
 ### The files match the signed checksums
 
 ```sh
-gpg --verify SHA256SUMS.asc SHA256SUMS   # signed offline, key never in CI
-sha256sum -c SHA256SUMS                  # run where the assets are
+gpg --verify SHA256SUMS.asc SHA256SUMS   # signed by the release subkey held by CI
+sha256sum -c SHA256SUMS --ignore-missing   # only the assets you downloaded
 ```
 
 The source tarballs also carry their own detached signature, for packaging tools that
 expect one beside the file:
 
 ```sh
-gpg --verify zxc-0.14.0.tar.gz.asc zxc-0.14.0.tar.gz
+gpg --verify zxc-<version>.tar.gz.asc zxc-<version>.tar.gz
 ```
 
 ### Build provenance
 
 ```sh
-gh attestation verify zxc-0.14.0-linux-x86_64.tar.gz --repo hellobertrand/zxc
+gh attestation verify zxc-<version>-linux-x86_64.tar.gz --repo hellobertrand/zxc
 ```
 
 Confirms the archive was produced by this repository's `Build & Release` workflow from the
@@ -55,10 +55,10 @@ source tarballs and the SBOM. `SHA256SUMS` is not among them — it is covered b
 signature above instead:
 
 ```sh
-slsa-verifier verify-artifact zxc-0.14.0-linux-x86_64.tar.gz \
+slsa-verifier verify-artifact zxc-<version>-linux-x86_64.tar.gz \
   --provenance-path multiple.intoto.jsonl \
   --source-uri github.com/hellobertrand/zxc \
-  --source-tag v0.14.0
+  --source-tag v<version>
 ```
 
 ### Source tarball
@@ -67,11 +67,11 @@ slsa-verifier verify-artifact zxc-0.14.0-linux-x86_64.tar.gz \
 compare rather than trust it:
 
 ```sh
-git archive --format=tar --prefix="zxc-0.14.0/" v0.14.0 | gzip -n -9 | sha256sum
+git archive --format=tar --prefix="zxc-<version>/" v<version> | gzip -n -9 | sha256sum
 ```
 
 The bytes are stable for a given git version; the version used is recorded in the release
-run log. See [docs/RELEASE.md](../docs/RELEASE.md).
+run log.
 
 If any of these checks fails, the file did not come from this release pipeline: please do
 not use it, and report it to the address above.

@@ -271,8 +271,7 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
 
     Release tags are PGP-signed (`git verify-tag v<version>`). The public key lives in
     [`.github/release-key.asc`](.github/release-key.asc); see
-    [SECURITY.md](.github/SECURITY.md#verifying-a-release) for every verification path and
-    [docs/RELEASE.md](docs/RELEASE.md) for how releases are cut.
+    [SECURITY.md](.github/SECURITY.md#verifying-a-release) for every verification path.
 
     Each archive contains a versioned top-level directory with:
     ```
