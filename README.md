@@ -258,7 +258,7 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
     ```bash
     # Sigstore signature — keyless, no key to fetch
     cosign verify-blob --bundle SHA256SUMS.sigstore.json \
-      --certificate-identity-regexp '^https://github.com/hellobertrand/zxc/' \
+      --certificate-identity-regexp '^https://github\.com/hellobertrand/zxc/\.github/workflows/build\.yml@refs/tags/' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
     sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c
 

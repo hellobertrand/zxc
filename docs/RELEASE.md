@@ -25,7 +25,7 @@ PyPI, npm or crates.io before you have looked at it.
    sha256sum -c SHA256SUMS         # macOS: shasum -a 256 -c
 
    cosign verify-blob --bundle zxc-0.14.0.tar.gz.sigstore.json \
-     --certificate-identity-regexp '^https://github.com/hellobertrand/zxc/' \
+     --certificate-identity-regexp '^https://github\.com/hellobertrand/zxc/\.github/workflows/build\.yml@refs/tags/' \
      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
      zxc-0.14.0.tar.gz
 
@@ -49,9 +49,13 @@ number can never be reused:
 | `wrapper-rust.yml` | publishes to crates.io |
 | `wrapper-go.yml` | tags `wrappers/go/v0.14.0`, which the Go proxy caches permanently |
 
-So publishing is the point of no return. Before it,
-`gh release delete v0.14.0 --cleanup-tag --yes` undoes everything and the release was never
-public — which makes a real tag a safe rehearsal of the whole pipeline.
+So publishing is the point of no return for the registries. Before it,
+`gh release delete v0.14.0 --cleanup-tag --yes` removes the release and the tag, and nothing
+was ever public.
+
+What deletion does *not* undo: the Sigstore entries in the public transparency log and the
+GitHub attestations already produced. Re-cutting the same version therefore leaves two
+signed sets of bytes claiming to be v0.14.0. For a rehearsal, tag `v0.14.0-rc1` instead.
 
 Check the Go module landed:
 

@@ -18,35 +18,36 @@ recorded in a public transparency log.
 
 ```sh
 cosign verify-blob --bundle zxc-0.14.0.tar.gz.sigstore.json \
-  --certificate-identity-regexp '^https://github.com/hellobertrand/zxc/' \
+  --certificate-identity-regexp '^https://github\.com/hellobertrand/zxc/\.github/workflows/build\.yml@refs/tags/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   zxc-0.14.0.tar.gz
 ```
 
-Each asset has a `.sigstore.json` bundle beside it, `SHA256SUMS` included. The bundle is
-self-contained, so this works without querying GitHub.
+Every asset built by the release job has a `.sigstore.json` bundle beside it, `SHA256SUMS`
+included; the bundle is self-contained, so this works without querying GitHub.
+`multiple.intoto.jsonl` is the exception — it is attached afterwards and carries its own
+proof, see below.
 
 ### The files match the checksums
 
 ```sh
-sha256sum -c SHA256SUMS         # run where the assets are;
+sha256sum -c SHA256SUMS         # macOS: shasum -a 256 -c
 ```
 
-Verify `SHA256SUMS` itself with the command above before trusting it.
+`SHA256SUMS` is only worth as much as its own signature: verify it with the cosign command
+in the previous section before trusting anything it lists.
 
 ### Build provenance
+
+The signature above says the file came from this workflow; provenance additionally binds it
+to the commit it was built from. The quick way, if you have `gh` 2.49 or newer:
 
 ```sh
 gh attestation verify zxc-0.14.0-linux-x86_64.tar.gz --repo hellobertrand/zxc
 ```
 
-Confirms the archive was produced by this repository's `Build & Release` workflow from the
-commit the release points at. Requires `gh` 2.49 or newer.
-
-### SLSA provenance
-
-`multiple.intoto.jsonl` is a SLSA Build Level 3 attestation covering the archives, the
-source tarballs and the SBOM:
+Or from `multiple.intoto.jsonl`, the SLSA Build Level 3 attestation shipped with the
+release, which covers the archives, the source tarballs and the SBOM:
 
 ```sh
 slsa-verifier verify-artifact zxc-0.14.0-linux-x86_64.tar.gz \

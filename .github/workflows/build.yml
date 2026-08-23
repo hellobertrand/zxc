@@ -17,29 +17,25 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
-  # Runs on every ref so `needs:` stays simple; the checks themselves only apply to tags.
   check-tag:
     name: Check tag
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full history only when there is a tag: the tag object and the ancestry
-          # check need it, nothing else does.
-          fetch-depth: ${{ startsWith(github.ref, 'refs/tags/') && 0 || 1 }}
-          fetch-tags: ${{ startsWith(github.ref, 'refs/tags/') }}
+          fetch-depth: 0     # the ancestry check needs real history
+          fetch-tags: true
 
       - name: Check the tag is on main
-        if: startsWith(github.ref, 'refs/tags/')
         run: |
           # checkout fetched the tag, not the branches.
           git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
           git merge-base --is-ancestor "$GITHUB_REF_NAME^{commit}" origin/main \
             || { echo "::error::$GITHUB_REF_NAME is not on main"; exit 1; }
 
-      - name: Check the tag matches the version header
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Check the tag matches every version it appears in
         run: |
           # Same source of truth as cmake/zxcVersion.cmake.
           h=include/zxc_constants.h
@@ -47,12 +43,23 @@ jobs:
               sed -n 's/^#define ZXC_VERSION_MINOR *\([0-9][0-9]*\).*/\1/p' "$h").$(
               sed -n 's/^#define ZXC_VERSION_PATCH *\([0-9][0-9]*\).*/\1/p' "$h")
           case "$v" in *..*|.*|*.) echo "::error::could not read a version from $h"; exit 1 ;; esac
-          if [ "$v" != "${GITHUB_REF_NAME#v}" ]; then
+          want="${GITHUB_REF_NAME#v}"
+          if [ "$v" != "$want" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match $h ($v):"
             echo "::error::the archives would be named after a version the binary denies."
             exit 1
           fi
-          echo "tag $GITHUB_REF_NAME matches $h"
+
+          # The wrapper workflows abort on a mismatch, but only once publishing has
+          # already fired — by then PyPI has the version and the others do not.
+          status=0
+          for m in wrappers/nodejs/package.json wrappers/wasm/package.json \
+                   wrappers/rust/Cargo.toml; do
+            got=$(grep -m1 -oE '[0-9]+\.[0-9]+\.[0-9]+' "$m")
+            [ "$got" = "$want" ] || { echo "::error::$m says $got, tag says $want"; status=1; }
+          done
+          [ $status -eq 0 ] || exit 1
+          echo "tag $GITHUB_REF_NAME matches $h and the wrapper manifests"
 
   build-and-test:
     name: Build ${{ matrix.name }}
@@ -356,11 +363,24 @@ jobs:
           done
           ls -la
 
-      # Draft so nothing reaches PyPI, npm or crates.io before you have looked.
+      # Draft so nothing reaches PyPI, npm or crates.io before you have looked — but a
+      # re-run after publication must not un-publish what is already out.
+      - name: Decide draft state
+        id: draft
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null)" = "false" ]; then
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "draft=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          draft: true
+          draft: ${{ steps.draft.outputs.draft }}
           files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -409,14 +429,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download run artifacts
+      # Pattern, not name: the generator's output names have moved between versions.
+      - name: Download the attestation
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
+          pattern: '*.intoto.jsonl*'
 
       - name: Attach it to the draft release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}   # no checkout here, so gh has no remote
         run: |
           prov=$(find artifacts -type f -name '*.intoto.jsonl' | head -1)
           test -n "$prov" \
