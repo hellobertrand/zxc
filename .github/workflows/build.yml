@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]      # pre-flight: build and test before the release goes public
   pull_request:
     branches: [ main ]
   release:
@@ -13,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ github.event_name != 'release' }}
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
@@ -102,7 +103,7 @@ jobs:
           ./tests/test_cli.sh "$ZXC_BIN"
 
       - name: Package Release (Archive)
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'release'
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -131,7 +132,7 @@ jobs:
 
           **Contents:**
           - \`bin/\` — \`zxc\` CLI compressor/decompressor
-          - \`lib/\` — shared and static libraries
+          - \`lib/\` — \`libzxc.a\` static library, pkg-config and CMake files
           - \`include/\` — C headers
 
           **CLI usage:** See [MANUAL.md](MANUAL.md) for the full reference (synopsis, options, examples).
@@ -157,13 +158,13 @@ jobs:
           fi
 
       - name: Attest build provenance (SLSA)
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'release'
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: ${{ env.ARCHIVE }}
 
       - name: Upload Artifacts
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'release'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zxc-${{ matrix.platform }}
@@ -171,7 +172,7 @@ jobs:
 
   source-tarball:
     name: Canonical source tarball
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -180,9 +181,6 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          fetch-tags: true
 
       - name: Build the source tarball
         run: |
@@ -191,7 +189,6 @@ jobs:
           git archive --format=tar --prefix="zxc-${VERSION}/" "$GITHUB_SHA" \
             > "zxc-${VERSION}.tar"
           gzip -n -9 -c "zxc-${VERSION}.tar" > "zxc-${VERSION}.tar.gz"
-          git --version          # git archive is byte-stable per git version, so log it
           sha256sum "zxc-${VERSION}.tar.gz"
 
       - name: Compress the same tar with zxc
@@ -202,7 +199,6 @@ jobs:
           ZXC=$(find build -type f -name zxc -perm -u+x | head -1)
           test -n "$ZXC" || { echo "::error::no zxc binary under build/"; find build -name 'zxc*'; exit 1; }
           "$ZXC" -7 "zxc-${VERSION}.tar" -o "zxc-${VERSION}.tar.zxc"   # 7 = ULTRA, the densest level
-          ls -l "zxc-${VERSION}.tar" "zxc-${VERSION}.tar.gz" "zxc-${VERSION}.tar.zxc"
 
       - name: Attest source tarball provenance (SLSA)
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
@@ -221,7 +217,7 @@ jobs:
 
   sbom:
     name: Generate SBOM
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'release'
     runs-on: ubuntu-slim
     permissions:
       contents: read
@@ -270,11 +266,11 @@ jobs:
     needs: [build-and-test, source-tarball, sbom]
     outputs:
       digests: ${{ steps.sums.outputs.digests }}
-    runs-on: ubuntu-slim
-    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    environment: release-signing
     permissions:
       contents: write
-      actions: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -292,6 +288,7 @@ jobs:
         id: sums
         working-directory: release
         run: |
+          set -euo pipefail
           sha256sum -- * | LC_ALL=C sort -k2 > "$RUNNER_TEMP/sha256sums"
           mv "$RUNNER_TEMP/sha256sums" .
           cat sha256sums
@@ -299,27 +296,31 @@ jobs:
           # two can no longer describe different sets of files.
           echo "digests=$(base64 -w0 < sha256sums)" >> "$GITHUB_OUTPUT"
 
+      - name: Sign sha256sums with minisign
+        working-directory: release
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends minisign
+          # Never inside release/: the next step uploads that whole directory.
+          key="$RUNNER_TEMP/ms.key"
+          trap 'rm -f "$key"' EXIT
+          umask 077 && printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          # The password goes on stdin, never on the command line.
+          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" -m sha256sums
+
       - name: Attach them to the release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: gh release upload "$GITHUB_REF_NAME" release/* --clobber
 
-      # Only once every asset is on the release: the wrappers publish to registries
-      # where a version number can never be reused.
-      - name: Release the wrappers
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          for w in wrapper-python wrapper-nodejs wrapper-wasm wrapper-rust wrapper-go; do
-            gh workflow run "$w.yml" --ref "$GITHUB_REF_NAME"
-          done
-
   provenance:
     name: SLSA provenance
     needs: release
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'release'
     permissions:
       actions: read
       contents: write
@@ -332,7 +333,7 @@ jobs:
   attach-provenance:
     name: Attach SLSA provenance
     needs: provenance
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -340,16 +341,39 @@ jobs:
       - name: Download the attestation
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          path: artifacts
-          pattern: '*.intoto.jsonl*'
+          name: ${{ needs.provenance.outputs.provenance-name }}
 
-      - name: Attach it to the draft release
+      - name: Attach it to the release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          PROV: ${{ needs.provenance.outputs.provenance-name }}
+        run: gh release upload "$GITHUB_REF_NAME" "$PROV" --clobber
+
+  # Last: a registry version can never be reused, so nothing is published until the
+  # release itself is complete and its provenance is attached.
+  release-wrappers:
+    name: Release the wrappers
+    needs: attach-provenance
+    if: github.event_name == 'release'
+    runs-on: ubuntu-slim
+    permissions:
+      actions: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Dispatch every wrapper
         run: |
-          prov=$(find artifacts -type f -name '*.intoto.jsonl' | head -1)
-          test -n "$prov" \
-            || { echo "::error::no *.intoto.jsonl among the run artifacts"; find artifacts -type f; exit 1; }
-          echo "attaching $(basename "$prov")"
-          gh release upload "$GITHUB_REF_NAME" "$prov" --clobber
+          # No `set -e` short-circuit: one failed dispatch must not strand the others.
+          rc=0
+          for w in wrapper-python wrapper-nodejs wrapper-wasm wrapper-rust wrapper-go; do
+            gh workflow run "$w.yml" --ref "$GITHUB_REF_NAME" || { echo "::error::$w not dispatched"; rc=1; }
+          done
+          # A dispatch only means accepted. Green here does not mean the packages shipped.
+          sleep 10
+          for w in wrapper-python wrapper-nodejs wrapper-wasm wrapper-rust wrapper-go; do
+            gh run list --workflow "$w.yml" --branch "$GITHUB_REF_NAME" --limit 1 \
+              --json url,status --jq '"  \(.[0].status)  \(.[0].url)"' || true
+          done
+          exit $rc

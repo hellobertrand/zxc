@@ -150,6 +150,20 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Verify Version Matches Release Tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          want="${RELEASE_TAG#v}"
+          got=$(ls dist/*.tar.gz | head -1 | sed 's|.*/zxc-\(.*\)\.tar\.gz|\1|')
+          if [ "$got" != "$want" ]; then
+            echo "::error::Version mismatch: release tag is $want but the sdist is $got"
+            ls dist/
+            exit 1
+          fi
+          echo "sdist version $got matches $RELEASE_TAG"
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:

@@ -255,8 +255,9 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
 
 3.  Verify, then extract:
     ```bash
-    # Integrity of what you downloaded
-    sha256sum -c sha256sums --ignore-missing      # macOS: shasum -a 256 -c
+    # Integrity: the manifest is signed, so verify it before trusting it
+    minisign -Vm sha256sums -P 'RWQV0cpiyJYPkxF5iIysJzKNtzcGphqeyyFkiFErLMo5UZkWisGBxkNB'
+    sha256sum -c sha256sums --ignore-missing      # macOS: grep <file> sha256sums | shasum -a 256 -c
 
     # Authenticity: this workflow, from the commit the release points at
     gh attestation verify zxc-<version>-linux-x86_64.tar.gz --repo hellobertrand/zxc
@@ -267,8 +268,7 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
     ```
 
     Release tags are PGP-signed: `curl -sS https://github.com/hellobertrand.gpg | gpg --import`
-    then `git verify-tag v<version>`. See
-    [SECURITY.md](.github/SECURITY.md#verifying-a-release) for every verification path.
+    then `git verify-tag v<version>`.
 
     Each archive contains a versioned top-level directory with:
     ```
