@@ -22,6 +22,24 @@ if(ZXC_INSTALL)
         set(ZXC_PC_LIBS_PRIVATE "")
     endif()
 
+    set(ZXC_PKGCONFIG_DIR "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+    if(IS_ABSOLUTE "${ZXC_PKGCONFIG_DIR}")
+        set(ZXC_PKGCONFIG_PREFIX "${CMAKE_INSTALL_PREFIX}")
+    else()
+        file(RELATIVE_PATH ZXC_PKGCONFIG_PREFIX
+             "${CMAKE_INSTALL_PREFIX}/${ZXC_PKGCONFIG_DIR}" "${CMAKE_INSTALL_PREFIX}")
+        string(REGEX REPLACE "/+$" "" ZXC_PKGCONFIG_PREFIX "${ZXC_PKGCONFIG_PREFIX}")
+        set(ZXC_PKGCONFIG_PREFIX "\${pcfiledir}/${ZXC_PKGCONFIG_PREFIX}")
+    endif()
+
+    foreach(d LIBDIR INCLUDEDIR)
+        if(IS_ABSOLUTE "${CMAKE_INSTALL_${d}}")
+            set(ZXC_PKGCONFIG_${d} "${CMAKE_INSTALL_${d}}")
+        else()
+            set(ZXC_PKGCONFIG_${d} "\${prefix}/${CMAKE_INSTALL_${d}}")
+        endif()
+    endforeach()
+
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/libzxc.pc.in
         ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
@@ -47,9 +65,6 @@ if(ZXC_INSTALL)
         )
         # "unzxc" alias: a symlink to zxc that defaults to decompression.
         # Symbolic links are POSIX-only; skipped on Windows.
-        # \${CMAKE_INSTALL_PREFIX} is escaped so it expands at install time:
-        # CMAKE_INSTALL_FULL_BINDIR bakes the configure-time prefix and would
-        # ignore `cmake --install --prefix`.
         if(NOT WIN32)
             if(IS_ABSOLUTE "${CMAKE_INSTALL_BINDIR}")
                 set(ZXC_SYMLINK_BINDIR "${CMAKE_INSTALL_BINDIR}")
@@ -64,7 +79,7 @@ if(ZXC_INSTALL)
     endif()
 
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libzxc.pc
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+        DESTINATION ${ZXC_PKGCONFIG_DIR}
     )
 
     # CMake package config files for find_package(zxc)

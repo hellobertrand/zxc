@@ -22,11 +22,9 @@ if(ZXC_BUILD_CLI)
 
     zxc_apply_common_flags(zxc)
     target_compile_options(zxc PRIVATE
-        $<$<AND:$<NOT:$<C_COMPILER_ID:MSVC>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>)
+        $<$<AND:$<NOT:$<BOOL:${MSVC}>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>)
     target_compile_definitions(zxc PRIVATE
-        $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
-        $<$<NOT:$<C_COMPILER_ID:MSVC>>:_GNU_SOURCE>
-    )
+        $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>)
 
     # Coverage flags for CLI
     if(ZXC_ENABLE_COVERAGE)

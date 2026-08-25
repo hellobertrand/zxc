@@ -6,7 +6,8 @@
 project('zxc', 'c',
   version : '0.13.3',
   license : 'BSD-3-Clause',
-  default_options : ['c_std=c17', 'buildtype=release', 'warning_level=2'],
+  default_options : ['c_std=c17', 'buildtype=release', 'warning_level=2',
+                     'pkgconfig.relocatable=true'],
   meson_version : '>= 0.63.0',
 )
 
@@ -46,7 +47,8 @@ endif
 # =============================================================================
 
 if host_machine.system() == 'linux'
-  add_project_arguments('-D_GNU_SOURCE', '-D_FILE_OFFSET_BITS=64',
+  add_project_arguments('-D_POSIX_C_SOURCE=200809L', '-D_XOPEN_SOURCE=700',
+                        '-D_FILE_OFFSET_BITS=64',
                         '-D_LARGEFILE_SOURCE', language : 'c')
 elif host_machine.system() == 'darwin'
   add_project_arguments('-D_GNU_SOURCE', language : 'c')

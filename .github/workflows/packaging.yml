@@ -4,8 +4,9 @@ name: Packaging (Consumer Integration)
 # that let the Windows static packaging break ship (libzxc.pc did not propagate
 # ZXC_STATIC_DEFINE, so consumers got unresolved __imp_zxc_*).
 #
-# Three consumption paths, static and shared: find_package(zxc), pkg-config,
-# and direct integration (-I + raw library, no defines at all).
+# Four consumption paths, static and shared: find_package(zxc), pkg-config,
+# direct integration (-I + raw library, no defines at all), and pkg-config from
+# a relocated install prefix.
 
 on:
   workflow_dispatch:
@@ -139,4 +140,40 @@ jobs:
             # shellcheck disable=SC2086
             cc tests/packaging/consumer.c $flags -o "consumer_$LIB_TYPE"
             LD_LIBRARY_PATH="$libdir" "./consumer_$LIB_TYPE"
+          done
+
+      # Release archives are staged with --prefix, then extracted elsewhere: a .pc
+      # that baked its prefix at configure time would point at the runner.
+      - name: Consume via pkg-config after relocation
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for LIB_TYPE in static shared; do
+            rm -rf staged relocated
+            cmake --install "build_$LIB_TYPE" --config Release --prefix "$PWD/staged"
+            mv staged relocated
+
+            pc=$(find relocated -name libzxc.pc | head -1)
+            test -n "$pc" || { echo "::error::no libzxc.pc in the staged $LIB_TYPE prefix"; exit 1; }
+            PKG_CONFIG_PATH="$PWD/$(dirname "$pc")"
+            export PKG_CONFIG_PATH
+
+            # Ask the file under test rather than re-deriving from its path.
+            prefix=$(pkg-config --variable=prefix libzxc)
+            case "$prefix/" in
+              "$PWD/relocated/"*) ;;
+              *) echo "::error::$LIB_TYPE libzxc.pc resolves to $prefix, outside the relocated tree"
+                 cat "$pc"; exit 1 ;;
+            esac
+
+            STATIC_ARG=""
+            if [ "$LIB_TYPE" = static ]; then STATIC_ARG="--static"; fi
+            flags=$(pkg-config $STATIC_ARG --cflags --libs libzxc)
+            echo "pkg-config ($LIB_TYPE, relocated): $flags"
+
+            # shellcheck disable=SC2086
+            cc tests/packaging/consumer.c $flags -o "consumer_relocated_$LIB_TYPE"
+            LD_LIBRARY_PATH="$(pkg-config --variable=libdir libzxc)" \
+              "./consumer_relocated_$LIB_TYPE"
           done
