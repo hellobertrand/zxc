@@ -1,7 +1,7 @@
 prefix=@ZXC_PKGCONFIG_PREFIX@
 exec_prefix=${prefix}
-libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
-includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+libdir=@ZXC_PKGCONFIG_LIBDIR@
+includedir=@ZXC_PKGCONFIG_INCLUDEDIR@
 
 Name: libzxc
 Description: High-performance asymmetric lossless compression

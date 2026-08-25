@@ -104,6 +104,33 @@ fn extract_compression_levels(include_dir: &Path) -> (i32, i32, i32, i32, i32, i
     )
 }
 
+/// Feature-test macros, mirroring `cmake/zxcCompilerFlags.cmake`. Without them
+/// the sources see ISO C alone: on 32-bit Linux targets `off_t` stays 32-bit and
+// in zxc_driver.c truncate past 2 GB.
+fn apply_feature_macros(build: &mut cc::Build) {
+    let target = env::var("TARGET").unwrap_or_default();
+    if target.contains("msvc") {
+        // The MSVC CRT needs none of these; _fseeki64 is already 64-bit.
+    } else if target.contains("android") {
+        // Bionic exposes these regardless, and _FILE_OFFSET_BITS=64 is only
+        // partially honoured below API 24.
+    } else if target.contains("linux") {
+        build
+            .define("_POSIX_C_SOURCE", "200809L")
+            .define("_XOPEN_SOURCE", "700")
+            .define("_FILE_OFFSET_BITS", "64")
+            .define("_LARGEFILE_SOURCE", None);
+    } else if target.contains("apple") || target.contains("windows") {
+        build.define("_GNU_SOURCE", None);
+    } else {
+        // The BSDs keep _GNU_SOURCE: _POSIX_C_SOURCE would clear __BSD_VISIBLE.
+        build
+            .define("_GNU_SOURCE", None)
+            .define("_FILE_OFFSET_BITS", "64")
+            .define("_LARGEFILE_SOURCE", None);
+    }
+}
+
 /// Compiles one FMV variant of the three per-ISA translation units
 /// (zxc_compress.c, zxc_decompress.c, zxc_huffman.c) with the given function
 /// suffix and ISA flags.
@@ -119,6 +146,7 @@ fn compile_variant(include_dir: &Path, src_lib: &Path, suffix: &str, flags: &[&s
             .define("ZXC_FUNCTION_SUFFIX", suffix)
             .opt_level(3)
             .warnings(false);
+        apply_feature_macros(&mut build);
         for flag in flags {
             build.flag_if_supported(flag);
         }
@@ -212,6 +240,7 @@ fn main() {
         .opt_level(3)
         .warnings(false)
         .flag_if_supported("-pthread");
+    apply_feature_macros(&mut core_build);
 
     core_build.compile("zxc_core");
 
@@ -282,6 +311,7 @@ fn main() {
         .file(src_lib.join("zxc_pivco_tables.c"))
         .opt_level(3)
         .warnings(false);
+    apply_feature_macros(&mut pivco_tables);
     pivco_tables.compile("zxc_pivco_tables");
 
     // Threading support (not needed on Windows, which uses kernel32)

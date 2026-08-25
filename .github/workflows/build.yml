@@ -119,10 +119,6 @@ jobs:
 
           cmake --install build --prefix "$STAGE" --config Release
 
-          if [[ "${{ runner.os }}" != "Windows" ]]; then
-            strip "$STAGE/bin/${{ matrix.artifact_name }}"
-          fi
-
           cp LICENSE "$STAGE/LICENSE.txt"
           cp docs/man/zxc.1.md "$STAGE/MANUAL.md"
 
