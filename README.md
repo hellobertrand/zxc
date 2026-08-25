@@ -247,15 +247,28 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
     *   `zxc-<version>-windows-x86_64.zip` (Runtime dispatch for AVX2/AVX512).
     *   `zxc-<version>-windows-arm64.zip` (NEON optimizations included).
 
-3.  Verify, then extract. Every archive is signed via SLSA build provenance; the SHA-256 of each asset is also shown directly on the GitHub release page:
+    **Source:**
+    *   `zxc-<version>.tar.gz` — canonical source, reproducible with
+        `git archive --format=tar --prefix=zxc-<version>/ v<version> | gzip -n -9`.
+    *   `zxc-<version>.tar.zxc` — the same tar compressed with `zxc -7`. Readable only by a
+        `zxc` whose format version matches, so keep the `.tar.gz` for archival.
+
+3.  Verify, then extract:
     ```bash
-    # Authenticity + integrity in one shot (SLSA — recommended)
+    # Integrity: the manifest is signed, so verify it before trusting it
+    minisign -Vm sha256sums -P 'RWQV0cpiyJYPkxF5iIysJzKNtzcGphqeyyFkiFErLMo5UZkWisGBxkNB'
+    sha256sum -c sha256sums --ignore-missing      # macOS: grep <file> sha256sums | shasum -a 256 -c
+
+    # Authenticity: this workflow, from the commit the release points at
     gh attestation verify zxc-<version>-linux-x86_64.tar.gz --repo hellobertrand/zxc
 
     # Extract
     tar -xzf zxc-<version>-linux-x86_64.tar.gz
     sudo cp -r zxc-<version>-linux-x86_64/* /usr/local/
     ```
+
+    Release tags are PGP-signed: `curl -sS https://github.com/hellobertrand.gpg | gpg --import`
+    then `git verify-tag v<version>`.
 
     Each archive contains a versioned top-level directory with:
     ```
