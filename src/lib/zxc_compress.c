@@ -230,7 +230,8 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     // Probing the previous offset first often finds the longest match right
     // away, speeding up the chain walk. It only raises best.len, never lowers
     // it, so the result is unchanged - this is purely a speed optimization.
-    if (last_off != 0U && last_off <= (uint32_t)ZXC_LZ_MAX_DIST && last_off <= cur_pos) {
+    if (last_off != 0U && last_off >= p.min_offset && last_off <= (uint32_t)ZXC_LZ_MAX_DIST &&
+        last_off <= cur_pos) {
         const uint8_t* const rep_ref = src + (cur_pos - last_off);
         if (zxc_le32(rep_ref) == cur_val) {
             uint32_t mlen = sizeof(uint32_t);
@@ -278,7 +279,8 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         const int tag_match = (ref_val == cur_val);
         // Cheap gate: 4-byte tag match, then check the byte past the current
         // best (the && skips that load unless the tag already matched).
-        const int should_compare = tag_match && (ref[best.len] == ip[best.len]);
+        const int should_compare =
+            (cur_pos - match_idx) >= p.min_offset && tag_match && (ref[best.len] == ip[best.len]);
 
         if (should_compare) {
             uint32_t mlen = sizeof(uint32_t);  // We already know the first 4 bytes match
@@ -471,7 +473,10 @@ _finalize_match:
                 break;
             const uint8_t* ref2 = src + next_idx;
 
-            if ((!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
+            // Filtered here too: a lazy hit only cancels best.ref, so a match
+            // we could never emit would drop a legal one for nothing.
+            if (((uint32_t)(ip + 1 - src) - next_idx) >= p.min_offset &&
+                (!is_lazy_first || !skip_lazy_head) && zxc_le32(ref2) == next_val) {
                 uint32_t l2 = sizeof(uint32_t);
                 const uint8_t* limit = iend - sizeof(uint64_t);
 
@@ -514,7 +519,8 @@ _finalize_match:
                     break;
 
                 const uint8_t* ref3 = src + idx3;
-                if ((!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
+                if (((uint32_t)(ip + 2 - src) - idx3) >= p.min_offset &&
+                    (!is_first3 || !skip_head3) && zxc_le32(ref3) == val3) {
                     uint32_t l3 = sizeof(uint32_t);
                     const uint8_t* limit = iend - sizeof(uint64_t);
 
@@ -1127,7 +1133,10 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const int level = ctx->compression_level;
     const size_t dict_sz = ctx->dict_size;
 
-    const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
+    zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
+    // The floor is a candidate until the block itself clears it.
+    if (lzp.min_offset > 1 && zxc_block_is_short_dist_bound(src + dict_sz, src_sz - dict_sz))
+        lzp.min_offset = 1;
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {
@@ -1823,7 +1832,10 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     const int level = ctx->compression_level;
     const size_t dict_sz = ctx->dict_size;
 
-    const zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
+    zxc_lz77_params_t lzp = zxc_get_lz77_params(level);
+    // The floor is a candidate until the block itself clears it.
+    if (lzp.min_offset > 1 && zxc_block_is_short_dist_bound(src + dict_sz, src_sz - dict_sz))
+        lzp.min_offset = 1;
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {

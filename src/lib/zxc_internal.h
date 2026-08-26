@@ -542,6 +542,31 @@ extern "C" {
 #define ZXC_LZ_OFFSET_BIAS 1
 /** @brief Maximum allowed offset distance. */
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
+
+/** @brief Match distance floor the encoder holds to at levels 1 to 5, sized to
+ *         the decoder's widest match-copy arm.
+ *
+ *  Applied per block, and only where @ref ZXC_LZ_MINDIST_MAX_SHORT_PCT clears
+ *  it; levels 6 and 7 keep every distance. Encoder policy: no format bit moves,
+ *  so any decoder of the same format version still reads the result. */
+#define ZXC_LZ_MINDIST 32
+
+/** @brief Probe sampling: one position per KB, clamped.
+ *
+ *  Proportional on purpose: a fixed count costs the same on a 4 KB block as on
+ *  a 512 KB one, which measured as a third of the compression time on small,
+ *  highly compressible inputs. */
+#define ZXC_LZ_MINDIST_PROBE_PER_KB 1024
+#define ZXC_LZ_MINDIST_PROBE_MIN 16
+#define ZXC_LZ_MINDIST_PROBE_MAX 64
+
+/** @brief Short-distance hit rate, in percent, above which a block keeps its
+ *         short match distances.
+ *
+ *  Measured: natural text 2-5 %, XML around 25 %, JSON 50-60 %, periodic data
+ *  100 %. Decode gains follow the same order, so the cut sits just above text
+ *  and below everything that measured neutral or worse. */
+#define ZXC_LZ_MINDIST_MAX_SHORT_PCT 20
 /** @brief Bytes at the block end where match search stops (left as literals).
  *  Equals the 8-byte word the finder reads at each probe, so @c ip+8<=iend. */
 #define ZXC_LZ_SEARCH_MARGIN (sizeof(uint64_t))
@@ -951,6 +976,11 @@ typedef struct {
      *  A larger value keeps the step conservative (grows slowly with distance);
      *  a smaller value ramps up quickly, skipping more in long literal runs. */
     uint32_t step_shift;
+
+    /** Shortest match distance the parser may emit; 1 = unconstrained. Skipped
+     *  candidates do not end the chain walk, which continues to a legal one
+     *  further back. See @ref ZXC_LZ_MINDIST. */
+    uint32_t min_offset;
 } zxc_lz77_params_t;
 
 /**
@@ -963,19 +993,21 @@ typedef struct {
  * @return The tuning tuple for that level.
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
-    if (level >= ZXC_LEVEL_ULTRA) return (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8};
+    // The distance floor stops at level 5: the slow levels keep every distance.
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
-    // step_shift
+    // step_shift, min_offset
     static const zxc_lz77_params_t table[7] = {
-        {3, 16, 0, 0, 0, 4, 4},       // fallback
-        {3, 16, 0, 0, 0, 4, 4},       // level 1
-        {3, 18, 0, 0, 0, 3, 6},       // level 2
-        {3, 16, 1, 4, 128, 1, 4},     // level 3
-        {3, 18, 1, 4, 128, 1, 5},     // level 4
-        {64, 256, 1, 16, 128, 1, 8},  // level 5
-        {64, 256, 0, 0, 0, 1, 8}      // level 6
+        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST},       // fallback
+        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST},       // level 1
+        {3, 18, 0, 0, 0, 3, 6, ZXC_LZ_MINDIST},       // level 2
+        {3, 16, 1, 4, 128, 1, 4, ZXC_LZ_MINDIST},     // level 3
+        {3, 18, 1, 4, 128, 1, 5, ZXC_LZ_MINDIST},     // level 4
+        {64, 256, 1, 16, 128, 1, 8, ZXC_LZ_MINDIST},  // level 5
+        {64, 256, 0, 0, 0, 1, 8, 1}                   // level 6
     };
-    return table[level < ZXC_LEVEL_FASTEST ? ZXC_LEVEL_FASTEST : level];
+    return (level >= ZXC_LEVEL_ULTRA)
+               ? (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8, 1}
+               : table[level < ZXC_LEVEL_FASTEST ? ZXC_LEVEL_FASTEST : level];
 }
 
 /**
@@ -1102,6 +1134,50 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_le32(const void* p) {
 #else
     return v;
 #endif
+}
+
+/**
+ * @brief Reports whether a block leans on back-references shorter than
+ *        @ref ZXC_LZ_MINDIST.
+ *
+ * Asks one question per sampled position: is there a 4-byte repeat inside the
+ * distance the floor would forbid? Blocks that answer yes often -- periodic
+ * runs, JSON keys, XML tags -- lose size and decode time under it.
+ *
+ * @param[in] blk  Block payload, past any dictionary prefix.
+ * @param[in] size Payload size in bytes.
+ * @return 1 when the block must keep its short distances, 0 when the floor is safe.
+ */
+static ZXC_ALWAYS_INLINE int zxc_block_is_short_dist_bound(const uint8_t* const blk,
+                                                           const size_t size) {
+    const size_t d_max = ZXC_LZ_MINDIST;
+    // Too small to sample, and too small to gain: keep every distance.
+    if (size < d_max + sizeof(uint32_t)) return 1;
+
+    size_t want = size / ZXC_LZ_MINDIST_PROBE_PER_KB;
+    if (want < ZXC_LZ_MINDIST_PROBE_MIN) want = ZXC_LZ_MINDIST_PROBE_MIN;
+    if (want > ZXC_LZ_MINDIST_PROBE_MAX) want = ZXC_LZ_MINDIST_PROBE_MAX;
+    size_t stride = size / want;
+    if (stride < d_max) stride = d_max;
+
+    const size_t planned = (size - sizeof(uint32_t) - d_max) / stride + 1;
+    const size_t bar = (size_t)ZXC_LZ_MINDIST_MAX_SHORT_PCT * planned;
+
+    size_t samples = 0;
+    size_t hits = 0;
+    for (size_t i = d_max; i + sizeof(uint32_t) <= size; i += stride) {
+        const uint32_t cur = zxc_le32(blk + i);
+        samples++;
+        for (size_t d = 1; d < d_max; d++) {
+            if (zxc_le32(blk + i - d) == cur) {
+                hits++;
+                break;
+            }
+        }
+        if (hits * 100U > bar) return 1;                           // can only rise
+        if ((hits + (planned - samples)) * 100U <= bar) return 0;  // out of reach
+    }
+    return hits * 100U > bar;
 }
 
 /**

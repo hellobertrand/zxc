@@ -312,6 +312,16 @@ token table): it trades a few bytes of code-length optimality for a
 flatter tree whose PivCo runs decode faster. The nudged lengths remain an
 ordinary canonical, Kraft-exact code — decoders see nothing special.
 
+A second encoder-side policy governs match distances. At levels 1 to 5 the
+reference encoder refuses to emit a match closer than 32 bytes, so the
+decoder's match copy keeps to its single widest arm. It applies per block and
+only where a sampled scan of the block finds few repeats inside that distance:
+data built on short repeats — periodic runs, tightly structured records —
+keeps them, because banning them there costs size *and* decode time. Levels 6
+and 7 keep every distance. Like the nudge, this changes which sequences an
+encoder emits, never how they are encoded, so the archive stays an ordinary
+GLO/GHI block and any conforming decoder reads it.
+
 Decoder validation requirements:
 - Every code length must satisfy `code_len[i] ≤ 11`.
 - At least one symbol must be present (`code_len[i] != 0` for some `i`).
