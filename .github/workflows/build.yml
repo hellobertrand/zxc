@@ -281,19 +281,18 @@ jobs:
             -o -name '*.spdx.json' \) -exec mv {} release/ \;
           ls -la release
 
-      - name: Generate sha256sums
+      - name: Generate checksums.sha256
         id: sums
         working-directory: release
         run: |
           set -euo pipefail
-          sha256sum -- * | LC_ALL=C sort -k2 > "$RUNNER_TEMP/sha256sums"
-          mv "$RUNNER_TEMP/sha256sums" .
-          cat sha256sums
+          sha256sum -- * | LC_ALL=C sort -k2 > "$RUNNER_TEMP/checksums.sha256"
+          mv "$RUNNER_TEMP/checksums.sha256" .
           # The same inventory feeds the signed manifest and the SLSA subjects, so the
           # two can no longer describe different sets of files.
-          echo "digests=$(base64 -w0 < sha256sums)" >> "$GITHUB_OUTPUT"
+          echo "digests=$(base64 -w0 < checksums.sha256)" >> "$GITHUB_OUTPUT"
 
-      - name: Sign sha256sums with minisign
+      - name: Sign checksums.sha256 with minisign
         working-directory: release
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
@@ -306,7 +305,7 @@ jobs:
           trap 'rm -f "$key"' EXIT
           umask 077 && printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
           # The password goes on stdin, never on the command line.
-          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" -m sha256sums
+          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" -m checksums.sha256
 
       - name: Attach them to the release
         env:

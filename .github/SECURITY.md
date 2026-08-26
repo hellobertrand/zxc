@@ -10,7 +10,7 @@ We will respond within 48 hours.
 
 ## Verifying a release
 
-Every release ships a `sha256sums` manifest signed with minisign, and each archive carries a
+Every release ships a `checksums.sha256` manifest signed with minisign, and each archive carries a
 GitHub build attestation. See [the README](../README.md#installation) for the two commands.
 
 Release tags are signed with the maintainer's PGP key

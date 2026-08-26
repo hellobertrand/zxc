@@ -256,8 +256,8 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
 3.  Verify, then extract:
     ```bash
     # Integrity: the manifest is signed, so verify it before trusting it
-    minisign -Vm sha256sums -P 'RWQV0cpiyJYPkxF5iIysJzKNtzcGphqeyyFkiFErLMo5UZkWisGBxkNB'
-    sha256sum -c sha256sums --ignore-missing      # macOS: grep <file> sha256sums | shasum -a 256 -c
+    minisign -Vm checksums.sha256 -P 'RWQV0cpiyJYPkxF5iIysJzKNtzcGphqeyyFkiFErLMo5UZkWisGBxkNB'
+    sha256sum -c checksums.sha256 --ignore-missing      # macOS: grep <file> checksums.sha256 | shasum -a 256 -c
 
     # Authenticity: this workflow, from the commit the release points at
     gh attestation verify zxc-<version>-linux-x86_64.tar.gz --repo hellobertrand/zxc
