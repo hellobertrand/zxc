@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0] - 2026-09-01
+api: Pin the glibc floor at 2.34, make libzxc.pc relocatable (#385)
+api: Wire format v8, faster overlap copies, stricter block validation (#374)
+fix: Fix hexdump examples
+perf: Optimizes PivCo Huffman with advanced SIMD (#373)
+build: Rename release checksum manifest to checksums.sha256
+build: Improve release verifiability and automation (#383)
+misc: Make the short match distance floor a default policy (#376)
+misc: Update doxygen (#378)
+misc: Widen the PivCo merge to 256 bits on AVX2 (#377)
+misc: Drop the tag's "v" from the SBOM file name
+misc: Validates in-place footer size and buffer separation (#375)
+
 ## [0.13.3] - 2026-08-17
 api: Refine comments for improved clarity (#366)
 perf: Optimizes decode offset validation and clarifies GHI format (#368)
