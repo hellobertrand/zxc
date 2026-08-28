@@ -66,40 +66,40 @@ We monitor metrics on both **x86_64** (Linux) and **ARM64** (Apple Silicon M2) r
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **13,524 MB/s** vs 5,166 MB/s **2.62x Faster** | **61.8** vs 62.2 **Smaller** (-0.4%) | **ZXC** leads in raw throughput. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **8,356 MB/s** vs 4,770 MB/s **1.75x Faster** | **46.1** vs 47.6 **Smaller** (-1.5%) | **ZXC** outperforms LZ4 in read speed and ratio. |
-| **3. Density** | **ZXC -6** vs *LZ4HC -9* | **6,740 MB/s** vs 4,503 MB/s **1.50x Faster** | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** beats LZ4HC on both decode speed and ratio. |
-| **4. Ultra** | **ZXC -7** vs *zstd -1* | **4,628 MB/s** vs 1,777 MB/s **2.60x Faster** | **33.1** vs 34.5 **Smaller** (-1.4%) | **ZXC -7** bridges the gap between LZ4HC and `zstd -1` — smaller output, ~2.6x faster decode. |
+| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **13,524 MB/s** vs 5,166 MB/s **2.62x Faster** | **61.8** vs 62.2 **Smaller** (−0.4 pp) | **ZXC** leads in raw throughput. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **8,356 MB/s** vs 4,770 MB/s **1.75x Faster** | **46.1** vs 47.6 **Smaller** (−1.5 pp) | **ZXC** outperforms LZ4 in read speed and ratio. |
+| **3. Density** | **ZXC -6** vs *LZ4HC -9* | **6,740 MB/s** vs 4,503 MB/s **1.50x Faster** | **36.3** vs 36.8 **Smaller** (−0.5 pp) | **ZXC** beats LZ4HC on both decode speed and ratio. |
+| **4. Ultra** | **ZXC -7** vs *zstd -1* | **4,628 MB/s** vs 1,777 MB/s **2.60x Faster** | **33.1** vs 34.5 **Smaller** (−1.4 pp) | **ZXC -7** bridges the gap between LZ4HC and `zstd -1` — smaller output, ~2.6x faster decode. |
 
 ### 2. Cloud Server: Google Axion (ARM Neoverse V2)
 *Scenario: High-throughput Microservices, ARM Cloud Instances.*
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **9,487 MB/s** vs 4,940 MB/s **1.92x Faster** | **61.8** vs 62.2 **Smaller** (-0.4%) | **ZXC** leads in raw throughput. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **5,980 MB/s** vs 4,256 MB/s **1.41x Faster** | **46.1** vs 47.6 **Smaller** (-1.5%) | **ZXC** outperforms LZ4 in read speed and ratio. |
-| **3. Density** | **ZXC -6** vs *LZ4HC -9* | **4,787 MB/s** vs 3,843 MB/s **1.25x Faster** | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** beats LZ4HC on both decode speed and ratio. |
-| **4. Ultra** | **ZXC -7** vs *zstd -1* | **3,186 MB/s** vs 1,643 MB/s **1.94x Faster** | **33.1** vs 34.5 **Smaller** (-1.4%) | **ZXC -7** bridges the gap between LZ4HC and `zstd -1` — smaller output, ~1.9x faster decode. |
+| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **9,487 MB/s** vs 4,940 MB/s **1.92x Faster** | **61.8** vs 62.2 **Smaller** (−0.4 pp) | **ZXC** leads in raw throughput. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **5,980 MB/s** vs 4,256 MB/s **1.41x Faster** | **46.1** vs 47.6 **Smaller** (−1.5 pp) | **ZXC** outperforms LZ4 in read speed and ratio. |
+| **3. Density** | **ZXC -6** vs *LZ4HC -9* | **4,787 MB/s** vs 3,843 MB/s **1.25x Faster** | **36.3** vs 36.8 **Smaller** (−0.5 pp) | **ZXC** beats LZ4HC on both decode speed and ratio. |
+| **4. Ultra** | **ZXC -7** vs *zstd -1* | **3,186 MB/s** vs 1,643 MB/s **1.94x Faster** | **33.1** vs 34.5 **Smaller** (−1.4 pp) | **ZXC -7** bridges the gap between LZ4HC and `zstd -1` — smaller output, ~1.9x faster decode. |
 
 ### 3. Build Server: x86_64 (AMD EPYC 9B45 / Zen 5)
 *Scenario: CI/CD Pipelines compatibility.*
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **11,377 MB/s** vs 5,179 MB/s **2.20x Faster** | **61.8** vs 62.2 **Smaller** (-0.4%) | **ZXC** achieves higher throughput. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **6,730 MB/s** vs 4,938 MB/s **1.36x Faster** | **46.1** vs 47.6 **Smaller** (-1.5%) | **ZXC** offers improved speed and ratio. |
-| **3. Density** | **ZXC -6** vs *LZ4HC -9* | **5,675 MB/s** vs 4,766 MB/s **1.19x Faster** | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** beats LZ4HC on both decode speed and ratio. |
-| **4. Ultra** | **ZXC -7** vs *zstd -1* | **4,149 MB/s** vs 1,877 MB/s **2.21x Faster** | **33.1** vs 34.5 **Smaller** (-1.4%) | **ZXC -7** bridges the gap between LZ4HC and `zstd -1` — smaller output, ~2.2x faster decode. |
+| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **11,377 MB/s** vs 5,179 MB/s **2.20x Faster** | **61.8** vs 62.2 **Smaller** (−0.4 pp) | **ZXC** achieves higher throughput. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **6,730 MB/s** vs 4,938 MB/s **1.36x Faster** | **46.1** vs 47.6 **Smaller** (−1.5 pp) | **ZXC** offers improved speed and ratio. |
+| **3. Density** | **ZXC -6** vs *LZ4HC -9* | **5,675 MB/s** vs 4,766 MB/s **1.19x Faster** | **36.3** vs 36.8 **Smaller** (−0.5 pp) | **ZXC** beats LZ4HC on both decode speed and ratio. |
+| **4. Ultra** | **ZXC -7** vs *zstd -1* | **4,149 MB/s** vs 1,877 MB/s **2.21x Faster** | **33.1** vs 34.5 **Smaller** (−1.4 pp) | **ZXC -7** bridges the gap between LZ4HC and `zstd -1` — smaller output, ~2.2x faster decode. |
 
 ### 4. Production Server: x86_64 (AMD EPYC 7B13 / Zen 3)
 *Scenario: Mainstream cloud workloads (AWS c6a, Azure HBv3, GCP n2d).*
 
 | Target | ZXC vs Competitor | Decompression Speed | Ratio | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **8,106 MB/s** vs 4,486 MB/s **1.81x Faster** | **61.8** vs 62.2 **Smaller** (-0.4%) | **ZXC** holds a strong lead on the legacy x86 pipeline. |
-| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **4,752 MB/s** vs 3,882 MB/s **1.22x Faster** | **46.1** vs 47.6 **Smaller** (-1.5%) | **ZXC** delivers faster decode and smaller output. |
-| **3. Density** | **ZXC -6** vs *LZ4HC -9* | **4,101 MB/s** vs 3,725 MB/s **1.10x Faster** | **36.3** vs 36.8 **Smaller** (-0.5%) | **ZXC** now clears `LZ4HC -9` by 10% on decode and wins on ratio. |
-| **4. Ultra** | **ZXC -7** vs *zstd -1* | **2,840 MB/s** vs 1,332 MB/s **2.13x Faster** | **33.1** vs 34.5 **Smaller** (-1.4%) | **ZXC -7** bridges the gap between LZ4HC and `zstd -1` — smaller output, ~2.1x faster decode. |
+| **1. Max Speed** | **ZXC -1** vs *LZ4 --fast* | **8,106 MB/s** vs 4,486 MB/s **1.81x Faster** | **61.8** vs 62.2 **Smaller** (−0.4 pp) | **ZXC** holds a strong lead on the legacy x86 pipeline. |
+| **2. Standard** | **ZXC -3** vs *LZ4 Default* | **4,752 MB/s** vs 3,882 MB/s **1.22x Faster** | **46.1** vs 47.6 **Smaller** (−1.5 pp) | **ZXC** delivers faster decode and smaller output. |
+| **3. Density** | **ZXC -6** vs *LZ4HC -9* | **4,101 MB/s** vs 3,725 MB/s **1.10x Faster** | **36.3** vs 36.8 **Smaller** (−0.5 pp) | **ZXC** now clears `LZ4HC -9` by 10% on decode and wins on ratio. |
+| **4. Ultra** | **ZXC -7** vs *zstd -1* | **2,840 MB/s** vs 1,332 MB/s **2.13x Faster** | **33.1** vs 34.5 **Smaller** (−1.4 pp) | **ZXC -7** bridges the gap between LZ4HC and `zstd -1` — smaller output, ~2.1x faster decode. |
 
 *Decompression Speed: ZXC vs LZ4 family at equivalent ratio tiers, across 4 CPUs (Fast ≈ 62%, Default ≈ 47%, High ≈ 37%)*
 
@@ -532,7 +532,7 @@ The default block size is **512 KB**, tuned for bulk/archival workloads where ra
 | Block Size | cctx memory | dctx memory | Ratio (level -3) | Decompression gain vs 256 KB |
 |:----------:|:-----------:|:-----------:|:----------------:|:----------------------------:|
 | 256 KB | ~1.03 MB | ~256 KB | 46.68% | — |
-| 512 KB *(default)* | ~1.78 MB | ~512 KB | 46.09% *(−0.57 pp)* | +1% to +8% depending on CPU |
+| 512 KB *(default)* | ~1.78 MB | ~512 KB | 46.09% *(−0.59 pp)* | +1% to +8% depending on CPU |
 
 ```bash
 # CLI — fall back to 256 KB blocks (e.g. embedded / streaming)

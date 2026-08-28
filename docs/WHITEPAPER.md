@@ -1001,7 +1001,7 @@ Peak decode memory therefore drops from *compressed + decompressed* to *decompre
 ZXC is designed to adapt to various deployment scenarios by selecting the appropriate compression level:
 
 *   **Interactive Media & Gaming (Levels 1-2-3)**:
-    Optimized for hard real-time constraints. Ideal for texture streaming and asset loading, offering **22-75 % faster** load times to minimize latency and frame drops.
+    Optimized for hard real-time constraints. Ideal for texture streaming and asset loading, offering **22-75 % faster** decode to minimize latency and frame drops.
 
 *   **Embedded Systems & Firmware (Levels 3-4-5)**:
     The sweet spot for maximizing storage density on limited flash memory (e.g., Kernel, Initramfs) while ensuring rapid "instant-on" (XIP-like) boot performance.

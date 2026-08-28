@@ -174,9 +174,9 @@ Defined in `zxc_constants.h`:
 
 ```c
 #define ZXC_VERSION_MAJOR     0
-#define ZXC_VERSION_MINOR     13
-#define ZXC_VERSION_PATCH     3
-#define ZXC_LIB_VERSION_STR   "0.13.3"
+#define ZXC_VERSION_MINOR     14
+#define ZXC_VERSION_PATCH     0
+#define ZXC_LIB_VERSION_STR   "0.14.0"
 ```
 
 ### 5.2 Block Size Constraints
