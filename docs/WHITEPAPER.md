@@ -924,7 +924,7 @@ Benchmarks were conducted using lzbench 2.3.1 (from @inikep), compiled with GCC 
 
 #### 7.5.3 x86_64 Architecture (AMD EPYC 9B45)
 
-Benchmarks were conducted using lzbench 2.3.1 (from @inikep), compiled with GCC 14.4.0 using *MOREFLAGS="-march=native"* on 64-bit Linux. The reference hardware is an AMD EPYC 9B45 processor on a **Google Cloud C4D** instance (x86_64, Zen 5, 2.1 GHz, SMT disabled — 1 thread per core).
+Benchmarks were conducted using lzbench 2.3.1 (from @inikep), compiled with GCC 14.3.0 using *MOREFLAGS="-march=native"* on 64-bit Linux. The reference hardware is an AMD EPYC 9B45 processor on a **Google Cloud C4D** instance (x86_64, Zen 5, 2.1 GHz, SMT disabled — 1 thread per core).
 
 **All performance metrics reflect single-threaded execution on the standard Silesia Corpus and the benchmark made use of [silesia.tar](https://github.com/DataCompression/corpus-collection/tree/main/Silesia-Corpus), which contains tarred files from the Silesia compression corpus.**
 

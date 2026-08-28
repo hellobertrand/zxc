@@ -7,6 +7,7 @@ fix: Fix hexdump examples
 perf: Optimizes PivCo Huffman with advanced SIMD (#373)
 build: Rename release checksum manifest to checksums.sha256
 build: Improve release verifiability and automation (#383)
+misc: Enforce 10-minute timeout for CI jobs (#387)
 misc: Make the short match distance floor a default policy (#376)
 misc: Update doxygen (#378)
 misc: Widen the PivCo merge to 256 bits on AVX2 (#377)
