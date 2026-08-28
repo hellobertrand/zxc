@@ -21,6 +21,7 @@ jobs:
   build-tier1:
     name: "Tier 1: ${{ matrix.name }}"
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -157,6 +158,7 @@ jobs:
   build-tier2:
     name: "Tier 2: ${{ matrix.name }}"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     container: debian:trixie
     strategy:
       fail-fast: false
@@ -296,6 +298,7 @@ jobs:
   build-tier2-amd64-sde:
     name: "Tier 2: Linux amd64 (${{ matrix.tier }})"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -369,6 +372,7 @@ jobs:
   build-tier3:
     name: "Tier 3: ${{ matrix.name }}"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     container: debian:trixie
     strategy:
       fail-fast: false

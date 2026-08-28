@@ -21,6 +21,7 @@ jobs:
   clang:
     name: "Clang ${{ matrix.version }} (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -88,6 +89,7 @@ jobs:
   clang-macos:
     name: "Apple Clang (macOS 14)"
     runs-on: macos-14
+    timeout-minutes: 10
     strategy:
       fail-fast: false
 
@@ -126,6 +128,7 @@ jobs:
   gcc:
     name: "GCC ${{ matrix.version }} (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -191,6 +194,7 @@ jobs:
   mingw:
     name: "MinGW ${{ matrix.name }}"
     runs-on: windows-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -251,6 +255,7 @@ jobs:
   gcc-arm:
     name: "GCC ARM ${{ matrix.name }}"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -316,6 +321,7 @@ jobs:
   meson:
     name: "Meson ${{ matrix.name }}"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
