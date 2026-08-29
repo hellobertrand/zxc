@@ -53,7 +53,7 @@ uint32_t zxc_dict_id(const void* RESTRICT dict, const size_t dict_size,
 //    0x06  2  Content size (u16 LE)
 //    0x08  4  dict_id (u32 LE; covers content AND the Huffman table)
 //    0x0C  2  Reserved (0)
-//    0x0E  2  Header CRC16 (zxc_hash16, computed with bytes 0x0C-0x0F zeroed)
+//    0x0E  2  Header Checksum (zxc_hash16, computed with 0x0C-0x0F zeroed)
 //    0x10  N  Content bytes
 //    +N    128 Packed Huffman code lengths (always present)
 // -------------------------------------------------------------------------
@@ -117,7 +117,7 @@ int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size,
     dst[5] = 0; /* flags: reserved */
     zxc_store_le16(dst + 6, (uint16_t)content_size);
     zxc_store_le32(dst + 8, zxc_dict_id(content, content_size, (const uint8_t*)huf_lengths));
-    zxc_store_le32(dst + 12, 0); /* reserved (0x0C) + CRC16 (0x0E), zeroed before CRC */
+    zxc_store_le32(dst + 12, 0); /* reserved (0x0C) + checksum (0x0E), zeroed before hashing */
     const uint16_t crc = zxc_hash16(dst);
     zxc_store_le16(dst + 14, crc);
 
@@ -131,7 +131,7 @@ int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size,
  * @brief Parses a .zxd buffer, returning in-buffer views of content and table.
  *
  * Public API; full contract in @c zxc_dict.h. Validates magic, version, header
- * CRC and dict_id, then points the out-params into @p buf - no copy, so they
+ * checksum and dict_id, then points the out-params into @p buf - no copy, so they
  * stay valid only while @p buf does.
  *
  * @param[in]  buf               Serialized .zxd bytes.
@@ -162,7 +162,7 @@ int zxc_dict_load(const void* RESTRICT buf, const size_t buf_size,
 
     uint8_t temp[ZXC_DICT_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, sizeof(temp));
-    zxc_store_le32(temp + 12, 0); /* reserved (0x0C) + CRC16 (0x0E), zeroed before CRC */
+    zxc_store_le32(temp + 12, 0); /* reserved (0x0C) + checksum (0x0E), zeroed before hashing */
     const uint16_t expected_crc = zxc_hash16(temp);
     if (UNLIKELY(zxc_le16(src + 14) != expected_crc)) return ZXC_ERROR_BAD_HEADER;
 

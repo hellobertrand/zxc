@@ -24,7 +24,7 @@ It formalizes the current reference implementation of format version **8**.
 | Block #0             |
 |  - 8B Block Header   |
 |  - Block Payload     |
-|  - Optional 4B CRC32 |
+|  - Optional 4B Cksum |
 +----------------------+
 | Block #1             |
 |  ...                 |
@@ -48,7 +48,7 @@ Offset  Size  Field
 0x05    1     Chunk Size Code
 0x06    1     Flags
 0x07    7     Reserved (must be 0)
-0x0E    2     Header CRC16
+0x0E    2     Header Checksum
 ```
 
 ### 3.1 Field definitions
@@ -68,7 +68,7 @@ Offset  Size  Field
 - **Reserved / Dictionary ID**: 7 bytes.
   - When `HAS_DICTIONARY` is set: bytes `0x07..0x0A` contain a `dict_id` (`u32` LE), a 32-bit hash of the dictionary content. Bytes `0x0B..0x0D` remain zero.
   - When `HAS_DICTIONARY` is clear: all 7 bytes are zero.
-- **Header CRC16** (`u16`): computed with `zxc_hash16` on the 16-byte header where bytes `0x0E..0x0F` are zeroed.
+- **Header Checksum** (`u16`): computed with `zxc_hash16` on the 16-byte header where bytes `0x0E..0x0F` are zeroed.
 
 ---
 
@@ -82,7 +82,7 @@ Offset  Size  Field
 0x01    1     Block Flags
 0x02    1     Reserved
 0x03    4     Compressed Payload Size (comp_size)
-0x07    1     Header CRC8
+0x07    1     Header Checksum
 ```
 
 ### 4.1 Header semantics
@@ -96,7 +96,7 @@ Offset  Size  Field
 - **Block Flags**: currently not used by implementation (written as `0`).
 - **Reserved**: must be 0.
 - **comp_size**: payload size in bytes (does **not** include the optional trailing 4-byte block checksum).
-- **Header CRC8**: `zxc_hash8` over the 8-byte header with byte `0x07` forced to zero before hashing.
+- **Header Checksum**: `zxc_hash8` over the 8-byte header with byte `0x07` forced to zero before hashing.
 
 ### 4.2 Block physical layout
 
@@ -537,9 +537,9 @@ Offset  Size  Field
 
 ## 9. Decoder Validation Checklist (Practical)
 
-1. Validate file header magic/version/CRC16.
+1. Validate file header magic/version/checksum.
 2. Parse blocks sequentially:
-   - validate block header CRC8,
+   - validate block header checksum,
    - check block bounds using `comp_size`,
    - if enabled, verify trailing block checksum.
 3. Decode payload according to block type. For GLO/GHI:
@@ -580,13 +580,13 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 
 - **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version with `ZXC_ERROR_BAD_VERSION`. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
 - **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version (`ZXC_ERROR_BAD_BLOCK_TYPE`). The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
-- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header CRC, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension.
+- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header checksum, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension.
 - **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values (`ZXC_ERROR_BAD_HEADER`).
 
 ### 10.4 Minimum conforming decoder
 
 A minimal conforming decoder for version 8 **MUST** support:
-- File header parsing and CRC16 validation
+- File header parsing and checksum validation
 - **RAW** blocks (type 0) - passthrough copy.
 - **GLO** blocks (type 1) - full LZ decode with extras varint, including Huffman
   entropy sections (§5.2.1, PivCo layout) with code lengths up to 11 bits.
@@ -612,9 +612,9 @@ The recommended behavior for each class is specified below.
 |---|---|---|
 | **Bad magic** | File header, offset 0x00 | Reject immediately. Not a ZXC file. |
 | **Unsupported version** | File header, offset 0x04 | Reject immediately. Version not supported. |
-| **Header CRC16 mismatch** | File header, offset 0x0E | Reject. Header is corrupt or truncated. |
+| **File header checksum mismatch** | File header, offset 0x0E | Reject. Header is corrupt or truncated. |
 | **Invalid chunk size code** | File header, offset 0x05 | Reject. Code outside the valid range `[12..21]`. |
-| **Block header CRC8 mismatch** | Block header, offset 0x07 | Reject block. Stream is corrupt. |
+| **Block header checksum mismatch** | Block header, offset 0x07 | Reject block. Stream is corrupt. |
 | **Unknown block type** | Block header, offset 0x00 | Skip block using `comp_size` (see §10.3), or reject. |
 | **Block payload truncated** | During `fread` of `comp_size` bytes | Reject. Unexpected end of stream. |
 | **Block checksum mismatch** | Trailing 4-byte checksum | Reject block. Payload is corrupt. |
@@ -700,7 +700,7 @@ Offset  Size  Field
 0x06    2     Content size (u16 LE, max 65535)
 0x08    4     dict_id (u32 LE, binds content AND shared table, see below)
 0x0C    2     Reserved (0)
-0x0E    2     Header CRC16 (zxc_hash16, computed with bytes 0x0C-0x0F zeroed)
+0x0E    2     Header Checksum (zxc_hash16, computed with 0x0C-0x0F zeroed)
 0x10    N     Dictionary content (raw bytes)
 0x10+N  128   Shared literal Huffman table (256 × 4-bit packed code lengths,
               same layout as the § 5.2.1 code-length header; always present)
@@ -715,7 +715,7 @@ Offset  Size  Field
 - **dict_id**: `fold32(hash(table_128_bytes, seed = hash(content)))` —
   binds the exact (content, table) pair. Must match the `dict_id` stored in
   any ZXC file header that references this dictionary.
-- **Header CRC16**: `zxc_hash16` checksum of the 16-byte header with bytes `0x0C..0x0F` zeroed before hashing — same method as the ZXC file header.
+- **Header Checksum**: `zxc_hash16` checksum of the 16-byte header with bytes `0x0C..0x0F` zeroed before hashing — same method as the ZXC file header.
 - **Content**: raw bytes that prefill the LZ77 window. Not compressed.
 
 ### 12.5 Dictionary training
@@ -802,7 +802,7 @@ F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 6E 5B
 - `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
 - `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `6E 5B` -> header CRC16 (LE value `0x5B6E`).
+- `6E 5B` -> header checksum (LE value `0x5B6E`).
 
 #### B) Data Block #0 (RAW)
 
@@ -815,7 +815,7 @@ Block header at offset `0x10`:
 - type `00` = RAW.
 - flags `00`, reserved `00`.
 - `comp_size = 0x0000000A = 10` bytes.
-- header CRC8 = `0x69`.
+- header checksum = `0x69`.
 
 Payload at `0x18..0x21` (10 bytes):
 
@@ -841,7 +841,7 @@ FF | 00 | 00 | 00 00 00 00 | 02
 
 - type `FF` = EOF.
 - `comp_size = 0` (mandatory).
-- header CRC8 = `0x02`.
+- header checksum = `0x02`.
 
 #### D) File Footer (offset `0x2E`, 12 bytes)
 
@@ -909,7 +909,7 @@ FE | 00 | 00 | 04 00 00 00 | D2
 - `FE` -> type 254 = SEK (Seek Table).
 - flags `00`, reserved `00`.
 - `comp_size = 0x00000004 = 4` bytes (one entry x 4 bytes/entry).
-- header CRC8 = `0xD2`.
+- header checksum = `0xD2`.
 
 Seek table entry at `0x36`:
 
@@ -979,7 +979,7 @@ C7 D1 B0 9C | 01 | 00 | 05 00 | 23 58 DF 6F | 00 00 | 63 65
 - `05 00` -> content size (LE) = `5` bytes.
 - `23 58 DF 6F` -> `dict_id` (LE) = `0x6FDF5823`. Binds the **(content, table)** pair (see §12.4) and must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
 - `00 00` -> reserved.
-- `63 65` -> header CRC16 (LE) = `0x6563`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the CRC is the last 2 bytes of the header).
+- `63 65` -> header checksum (LE) = `0x6563`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the checksum is the last 2 bytes of the header).
 
 #### B) Dictionary Content (offset `0x10`, 5 bytes)
 

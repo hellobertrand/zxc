@@ -222,7 +222,7 @@ typedef enum {
     ZXC_ERROR_SRC_TOO_SMALL =  -3,  // input truncated
     ZXC_ERROR_BAD_MAGIC     =  -4,  // invalid magic word
     ZXC_ERROR_BAD_VERSION   =  -5,  // unsupported format version
-    ZXC_ERROR_BAD_HEADER    =  -6,  // corrupted header (CRC mismatch)
+    ZXC_ERROR_BAD_HEADER    =  -6,  // corrupted header (checksum mismatch)
     ZXC_ERROR_BAD_CHECKSUM  =  -7,  // checksum verification failed
     ZXC_ERROR_CORRUPT_DATA  =  -8,  // corrupted compressed data
     ZXC_ERROR_BAD_OFFSET    =  -9,  // invalid match offset

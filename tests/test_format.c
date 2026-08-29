@@ -720,7 +720,7 @@ int test_header_checksum() {
     uint8_t original_crc = header_buf[7];
     header_buf[7] = ~original_crc;  // Flip bits
     if (zxc_read_block_header(header_buf, ZXC_BLOCK_HEADER_SIZE, &bh_out) == 0) {
-        printf("  [FAIL] zxc_read_block_header should have failed on corrupted CRC\n");
+        printf("  [FAIL] zxc_read_block_header should have failed on corrupted checksum\n");
         return 0;
     }
     header_buf[7] = original_crc;  // Restore
@@ -847,7 +847,7 @@ int test_global_checksum_order() {
     return 1;
 }
 
-/* Builds a header with the given chunk-size code, fixes the CRC16, and returns
+/* Builds a header with the given chunk-size code, fixes the header checksum, and returns
  * zxc_read_file_header's verdict (block_size out via *bs). */
 static int chunk_code_verdict(uint8_t code, size_t* bs) {
     uint8_t hdr[ZXC_FILE_HEADER_SIZE];

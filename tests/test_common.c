@@ -143,7 +143,7 @@ void fill_seek_data(uint8_t* buf, size_t size, uint8_t seed) {
 // Generic Round-Trip test function (Compress -> Decompress -> Compare)
 int test_round_trip(const char* test_name, const uint8_t* input, size_t size, int level,
                     int checksum_enabled) {
-    printf("=== TEST: %s (Sz: %zu, Lvl: %d, CRC: %s) ===\n", test_name, size, level,
+    printf("=== TEST: %s (Sz: %zu, Lvl: %d, Checksum: %s) ===\n", test_name, size, level,
            checksum_enabled ? "Enabled" : "Disabled");
 
     FILE* const f_in = tmpfile();
