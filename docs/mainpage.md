@@ -10,6 +10,9 @@ installation instructions see the
 [README](https://github.com/hellobertrand/zxc#readme); for the wire format see
 the [format specification](https://github.com/hellobertrand/zxc/blob/main/docs/FORMAT.md).
 
+Complete, runnable workflows for each of these APIs are collected in the
+[API Examples](EXAMPLES.md) page.
+
 ## Choosing an API
 
 - \ref buffer_api — one-call compression of a whole buffer. Start here.

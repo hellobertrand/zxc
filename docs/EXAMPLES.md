@@ -701,10 +701,10 @@ For non-C languages, see the official bindings:
 
 | Language | Package | Install Command | Documentation |
 |----------|---------|-----------------|---------------|
-| **Rust** | [`crates.io`](https://crates.io/crates/zxc-compress) | `cargo add zxc-compress` | [README](../wrappers/rust/zxc/README.md) |
-| **Python**| [`PyPI`](https://pypi.org/project/zxc-compress) | `pip install zxc-compress` | [README](../wrappers/python/README.md) |
-| **Node.js**| [`npm`](https://www.npmjs.com/package/zxc-compress) | `npm install zxc-compress` | [README](../wrappers/nodejs/README.md) |
-| **Go** | `go get` | `go get github.com/hellobertrand/zxc/wrappers/go` | [README](../wrappers/go/README.md) |
+| **Rust** | [`crates.io`](https://crates.io/crates/zxc-compress) | `cargo add zxc-compress` | [README](https://github.com/hellobertrand/zxc/blob/main/wrappers/rust/zxc/README.md) |
+| **Python**| [`PyPI`](https://pypi.org/project/zxc-compress) | `pip install zxc-compress` | [README](https://github.com/hellobertrand/zxc/blob/main/wrappers/python/README.md) |
+| **Node.js**| [`npm`](https://www.npmjs.com/package/zxc-compress) | `npm install zxc-compress` | [README](https://github.com/hellobertrand/zxc/blob/main/wrappers/nodejs/README.md) |
+| **Go** | `go get` | `go get github.com/hellobertrand/zxc/wrappers/go` | [README](https://github.com/hellobertrand/zxc/blob/main/wrappers/go/README.md) |
 
 Community-maintained:
 - **Go**: https://github.com/meysam81/go-zxc

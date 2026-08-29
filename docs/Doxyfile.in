@@ -35,6 +35,7 @@ OPTIMIZE_OUTPUT_VHDL   = NO
 OPTIMIZE_OUTPUT_SLICE  = NO
 EXTENSION_MAPPING      = 
 MARKDOWN_SUPPORT       = YES
+MARKDOWN_ID_STYLE      = GITHUB
 TOC_INCLUDE_HEADINGS   = 5
 AUTOLINK_SUPPORT       = YES
 BUILTIN_STL_SUPPORT    = NO
@@ -112,6 +113,7 @@ WARN_LOGFILE           =
 # Configuration options related to the input files
 #---------------------------------------------------------------------------
 INPUT                  = docs/mainpage.md \
+                         docs/EXAMPLES.md \
                          include \
                          src/lib
 INPUT_ENCODING         = UTF-8
