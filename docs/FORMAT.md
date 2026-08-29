@@ -51,6 +51,14 @@ informative:
         ins: Y. Collet
         name: Yann Collet
     date: false
+  XORSHIFT:
+    title: "Xorshift RNGs"
+    target: https://www.jstatsoft.org/article/view/v008i14
+    author:
+      -
+        ins: G. Marsaglia
+        name: George Marsaglia
+    date: 2003
   PIVCO:
     title: "PivCo-Huffman"
     target: https://marcinzukowski.github.io/pivco-huffman/paper-1.0/ph.html
@@ -105,9 +113,9 @@ a distinguished end-of-stream block and followed by a small footer
 carrying the original source size and a global integrity hash.
 
 Three payload encodings are defined: RAW (uncompressed), GLO
-(general-purpose LZ with separated streams and optional Huffman
-coding of literals), and GHI (high-throughput LZ with packed 32-bit
-sequence words).
+(general LZ at higher ratio, with separated streams and optional
+Huffman coding of literals), and GHI (general LZ at higher
+throughput, with packed 32-bit sequence words).
 
 This document specifies the on-disk binary format only. It does not
 mandate any particular encoder strategy. Any byte sequence that
@@ -307,7 +315,8 @@ support RAW blocks.
 
 # GLO Block (Type 1) {#glo-block}
 
-The GLO block ("general LZ") is the primary compressed encoding.
+The GLO block ("General LZ, LOw throughput") is the primary
+compressed encoding.
 It uses an LZ77-style sequence stream with literal, token, offset,
 and extras streams stored contiguously, and OPTIONAL Huffman coding
 of the literal stream.
@@ -424,11 +433,19 @@ Offsets:
   construction; the minimum decoded offset is 1.
 
 Extras:
-: A sequence of prefix-varints ({{varint}}) carrying overflow
-  values. When LL == 15 is read from a token, a varint MUST be read
-  from Extras and added to LL. When ML == 15 is read from a token, a
-  varint MUST be read from Extras and added to ML. The actual match
-  length is ML + 5 (the minimum match).
+: A sequence of prefix-varints ({{varint}}) carrying the overflow
+  values of {{glo-overflow-rules}}.
+
+## Overflow Rules {#glo-overflow-rules}
+
+When LL == 15 is read from a token, the decoder MUST read a varint
+from the Extras stream and add it to LL.
+
+When ML == 15 is read from a token, the decoder MUST read a varint
+from the Extras stream and add it to ML. The actual match length is
+then ML + 5.
+
+Otherwise, the actual match length is ML + 5.
 
 ## Huffman Literal Section {#huffman-literal-section}
 
@@ -555,9 +572,9 @@ header) over the token byte alphabet.
 
 # GHI Block (Type 2) {#ghi-block}
 
-The GHI block ("high-throughput LZ") is an alternate compressed
-encoding optimised for raw decompression speed. It uses packed
-32-bit sequence words rather than separated streams.
+The GHI block ("General LZ, HIgh throughput") is an alternate
+compressed encoding optimised for raw decompression speed. It uses
+packed 32-bit sequence words rather than separated streams.
 
 ## GHI Payload Layout
 
@@ -695,26 +712,26 @@ table below.
 Payload bits from following bytes are concatenated little-endian
 style (low-order bits first).
 
-## ZXC v1 Length Cap {#varint-cap-v1}
+## Length Cap {#varint-cap}
 
 A decoder MUST be parameterised by a maximum varint length L_MAX
 (in bytes) and reject any encoding whose first byte signals a
 total length greater than L_MAX.
 
-For ZXC Format Version 1, L_MAX is **3** (21-bit payload). The
-maximum legitimate decoded value is therefore (2^21 - 1) =
-2,097,151, which equals ZXC_BLOCK_SIZE_MAX - 1, the largest
-overflow value that can appear given the per-block size limit
-defined in {{file-header}}.
+For Format Version 8, L_MAX is **3** (21-bit payload). The maximum
+legitimate decoded value is therefore (2^21 - 1) = 2,097,151: one
+less than the largest block size a Chunk Size Code can select
+(2 MiB at code 21, {{file-header}}), and so the largest overflow
+value that can appear.
 
-A conforming v1 decoder:
+A conforming decoder:
 
 - MUST reject a first byte whose prefix signals 4 or 5 bytes
   (high nibble 0xE.. or 0xF..).
 - MUST treat such an encoding as a fatal format error
   (see {{error-handling}}).
 
-A conforming v1 encoder:
+A conforming encoder:
 
 - MUST NOT emit a varint encoding longer than 3 bytes.
 - MUST NOT emit a value greater than (2^21 - 1).
@@ -730,8 +747,10 @@ per-block size limit) without breaking the encoding scheme; the
 The File Header carries a 16-bit checksum at offset 0x0E..0x0F
 ({{file-header}}); every block header carries an 8-bit checksum at
 offset 0x07 ({{block-container}}). Both are xorshift hashes, not
-cyclic redundancy checks. All arithmetic below is on unsigned 64-bit
-integers modulo 2^64, and all shifts are logical.
+cyclic redundancy checks. The shift triple (13, 7, 17) is that of
+Marsaglia's xorshift64 {{XORSHIFT}}, used here to mix a seeded input
+rather than to generate a sequence. All arithmetic below is on
+unsigned 64-bit integers modulo 2^64, and all shifts are logical.
 
 The 8-bit block header checksum takes the 8 header bytes as a single
 little-endian 64-bit integer v, with the checksum byte at offset 0x07
@@ -1092,7 +1111,7 @@ all errors in the table are fatal by default.
 | Footer global hash mismatch            | File footer offset 0x08     | Reject (if checksum mode active).               |
 | Decompressed output exceeds chunk size | During LZ decode            | Reject. Corrupt or malicious payload.           |
 | Match offset out of bounds             | During LZ copy              | Reject. Offset references data before output.   |
-| Varint exceeds L_MAX (3 bytes in v1)   | Extras stream               | Reject. See {{varint-cap-v1}}. Overflow or corrupt extras data.|
+| Varint exceeds L_MAX (3 bytes)         | Extras stream               | Reject. See {{varint-cap}}. Overflow or corrupt extras data.   |
 | Dictionary required but not supplied   | File header offset 0x06     | Reject. HAS_DICTIONARY set; see {{dictionary-header-encoding}}. |
 | Dictionary ID mismatch                 | File header offset 0x07     | Reject. Supplied dictionary does not match the header dict_id.  |
 
