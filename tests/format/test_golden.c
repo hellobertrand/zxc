@@ -12,9 +12,9 @@
  * docs/FORMAT.md Sec 3-Sec 8:
  *
  *   - File header: magic, version, chunk-size code, flags, reserved bytes,
- *     and the 16-bit header CRC (zxc_hash16, Sec 3 / Sec 7.1).
+ *     and the 16-bit header checksum (zxc_hash16, Sec 3 / Sec 7.1).
  *   - Generic block container: type, flags, reserved, comp_size bounds and the
- *     8-bit header CRC (zxc_hash8, Sec 4 / Sec 7.1).
+ *     8-bit header checksum (zxc_hash8, Sec 4 / Sec 7.1).
  *   - Every block type in Sec 5: RAW, GLO and GHI (header + section descriptors,
  *     incl. the Huffman literal section), EOF (zero comp_size) and the optional
  *     SEK seek table. (Type 2 is reserved/removed.)
@@ -191,14 +191,14 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         for (int i = 7; i <= 13; i++) CHECK(buf[i] == 0, "header reserved byte 0x%02X nonzero", i);
     }
 
-    /* Sec 7.1 header CRC16: zxc_hash16 over the 16 header bytes with 0x0E..0x0F zeroed. */
+    /* Sec 7.1 file header checksum: zxc_hash16 over the 16 header bytes with 0x0E..0x0F zeroed. */
     {
         uint8_t tmp[ZXC_FILE_HEADER_SIZE];
         memcpy(tmp, buf, ZXC_FILE_HEADER_SIZE);
         tmp[14] = tmp[15] = 0;
         uint16_t want = zxc_hash16(tmp);
         uint16_t got = zxc_le16(buf + 14);
-        CHECK(got == want, "header CRC16 mismatch: got 0x%04X want 0x%04X", got, want);
+        CHECK(got == want, "file header checksum mismatch: got 0x%04X want 0x%04X", got, want);
     }
 
     /* ---- Block stream (Sec 4, Sec 5) ---- */
@@ -215,14 +215,14 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         uint8_t resv = bh[2];
         uint32_t comp = zxc_le32(bh + 3);
 
-        /* Sec 7.1 block header CRC8: zxc_hash8 over the 8 header bytes with 0x07 zeroed. */
+        /* Sec 7.1 block header checksum: zxc_hash8 over the 8 header bytes with 0x07 zeroed. */
         {
             uint8_t tmp[ZXC_BLOCK_HEADER_SIZE];
             memcpy(tmp, bh, ZXC_BLOCK_HEADER_SIZE);
             tmp[7] = 0;
             uint8_t want = zxc_hash8(tmp);
-            CHECK(bh[7] == want, "block CRC8 mismatch at %zu: got 0x%02X want 0x%02X", off, bh[7],
-                  want);
+            CHECK(bh[7] == want, "block header checksum mismatch at %zu: got 0x%02X want 0x%02X",
+                  off, bh[7], want);
         }
         CHECK(bflags == 0, "block flags nonzero (0x%02X) at %zu", bflags, off);
         CHECK(resv == 0, "block reserved nonzero (0x%02X) at %zu", resv, off);
@@ -280,7 +280,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         uint8_t tmp[ZXC_BLOCK_HEADER_SIZE];
         memcpy(tmp, sh, ZXC_BLOCK_HEADER_SIZE);
         tmp[7] = 0;
-        CHECK(sh[7] == zxc_hash8(tmp), "SEK header CRC8 mismatch at %zu", off);
+        CHECK(sh[7] == zxc_hash8(tmp), "SEK header checksum mismatch at %zu", off);
         CHECK(comp == (uint32_t)data_blocks * 4U, "SEK comp_size %u != n_blocks*4 (%d)", comp,
               data_blocks * 4);
         const uint8_t* entries = sh + ZXC_BLOCK_HEADER_SIZE;

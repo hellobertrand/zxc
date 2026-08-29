@@ -520,7 +520,7 @@ int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT l
  * @brief Serialises a ZXC file header into @p dst.
  *
  * Layout (16 bytes): Magic (4) | Version (1) | Chunk (1) | Flags (1) |
- * Reserved (7) | CRC-16 (2).
+ * Reserved (7) | Checksum-16 (2).
  *
  * @param[out] dst          Destination buffer (>= @ref ZXC_FILE_HEADER_SIZE bytes).
  * @param[in]  dst_capacity Capacity of @p dst.
@@ -549,7 +549,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     ZXC_MEMSET(dst + 7, 0, 7);
     if (dict_id != 0) zxc_store_le32(dst + 7, dict_id);
 
-    // Bytes 14-15: CRC (16-bit)
+    // Bytes 14-15: checksum (16-bit)
     zxc_store_le16(dst + 14, 0);  // Zero out before hashing
     const uint16_t crc = zxc_hash16(dst);
     zxc_store_le16(dst + 14, crc);
@@ -560,7 +560,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
 /**
  * @brief Parses and validates a ZXC file header from @p src.
  *
- * Checks the magic word, format version, and CRC-16.
+ * Checks the magic word, format version, and 16-bit checksum.
  *
  * @param[in]  src              Source buffer (>= @ref ZXC_FILE_HEADER_SIZE bytes).
  * @param[in]  src_size         Size of @p src.
@@ -580,11 +580,11 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
 
     uint8_t temp[ZXC_FILE_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, ZXC_FILE_HEADER_SIZE);
-    // Zero out CRC bytes (14-15) before hash check
+    // Zero out checksum bytes (14-15) before hash check
     temp[14] = 0;
     temp[15] = 0;
-    // Header CRC16 (integrity), then the checksum-algorithm id in flags bits 0-3
-    // (only 0 = RapidHash is defined). CRC is checked first via short-circuit.
+    // Header checksum (integrity), then the checksum-algorithm id in flags bits 0-3
+    // (only 0 = RapidHash is defined). It is checked first via short-circuit.
     if (UNLIKELY(zxc_le16(src + 14) != zxc_hash16(temp) ||
                  (src[6] & 0x0FU) != ZXC_CHECKSUM_RAPIDHASH))
         return ZXC_ERROR_BAD_HEADER;
@@ -628,7 +628,7 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
 /**
  * @brief Parses and validates a block header from @p src.
  *
- * Validates the 8-bit CRC embedded in the header.
+ * Validates the 8-bit checksum embedded in the header.
  *
  * @param[in]  src      Source buffer (>= @ref ZXC_BLOCK_HEADER_SIZE bytes).
  * @param[in]  src_size Size of @p src.

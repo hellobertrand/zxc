@@ -99,7 +99,8 @@
  *
  * @{
  */
-/** @brief File header size: Magic(4) + Version(1) + Chunk(1) + Flags(1) + Reserved(7) + CRC(2). */
+/** @brief File header size: Magic(4) + Version(1) + Chunk(1) + Flags(1) + Reserved(7) +
+ * Checksum(2). */
 #define ZXC_FILE_HEADER_SIZE 16
 /** @brief File footer size: original_size(8) + global_checksum(4). */
 #define ZXC_FILE_FOOTER_SIZE 12

@@ -156,7 +156,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     assert(zxc_dict_save(dict_buf, (size_t)dict_sz, huf, zxd_buf, zxd_bound) == (int64_t)zxd_sz);
 
     /* Flip one byte and re-load: must not crash. A surviving ZXC_OK can only
-     * come from a reserved-byte flip (offsets 12-13, zeroed before the CRC),
+     * come from a reserved-byte flip (offsets 12-13, zeroed before the checksum),
      * which cannot change the recovered content. */
     {
         const size_t pos = corrupt_pos % (size_t)zxd_sz;

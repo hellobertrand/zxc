@@ -171,7 +171,7 @@ The file begins with a **16-byte** header that identifies the format and specifi
 ```
   Offset:  0               4       5       6       7                       14      16
            +---------------+-------+-------+-------+-----------------------+-------+
-           | Magic Word    | Ver   | Chunk | Flags | Reserved / Dict ID    | CRC   |
+           | Magic Word    | Ver   | Chunk | Flags | Reserved / Dict ID    | Cksum |
            | (4 bytes)     | (1B)  | (1B)  | (1B)  | (7 bytes)             | (2B)  |
            +---------------+-------+-------+-------+-----------------------+-------+
 ```
@@ -188,7 +188,7 @@ The file begins with a **16-byte** header that identifies the format and specifi
   - **Bits 4-5**: Reserved.
   - **Bits 0-3**: Checksum Algorithm ID (e.g., `0` = RapidHash).
 * **Reserved / Dictionary ID (7 bytes)**: Zero when `HAS_DICTIONARY` is clear. When `HAS_DICTIONARY` is set, bytes `0x07..0x0A` hold the `dict_id` (`u32` LE, a 32-bit hash of the dictionary content); the remaining bytes `0x0B..0x0D` stay zero.
-* **CRC (2 bytes)**: 16-bit Header Checksum. Calculated on the 16-byte header (with CRC bytes set to 0) using `zxc_hash16`.
+* **Checksum (2 bytes)**: 16-bit Header Checksum. Calculated on the 16-byte header (with the checksum bytes set to 0) using `zxc_hash16`.
 
 ### 5.2 Block Header Structure
 Each data block consists of an **8-byte** generic header that precedes the specific payload. This header allows the decoder to navigate the stream and identify the processing method required for the next chunk of data.
@@ -198,7 +198,7 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 ```
   Offset:  0       1       2       3                       7       8
           +-------+-------+-------+-----------------------+-------+
-          | Type  | Flags | Rsrvd | Comp Size             | CRC   |
+          | Type  | Flags | Rsrvd | Comp Size             | Cksum |
           | (1B)  | (1B)  | (1B)  | (4 bytes)             | (1B)  |
           +-------+-------+-------+-----------------------+-------+
 
@@ -213,7 +213,7 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 * **Flags**: Not used for now.
 * **Rsrvd**: Reserved for future use (must be 0).
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
-* **CRC**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with CRC byte set to 0) using `zxc_hash8`.
+* **Checksum**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with the checksum byte set to 0) using `zxc_hash8`.
 
 > **Note**: The decompressed size is not stored in the block header. For GLO/GHI blocks it falls out of decoding the sequences themselves; for RAW blocks it equals `Comp Size`.
 
@@ -404,7 +404,7 @@ The **EOF** block marks the end of the ZXC stream. It ensures that the decompres
 *   **Flags**:
     *   **Bit 7 (0x80)**: `has_checksum`. If set, implies the **Global Stream Checksum** in the footer is valid and should be verified.
 *   **Comp Size**: Unlike other blocks, these **MUST be set to 0**. The decoder enforces strict validation (`Type == EOF` AND `Comp Size == 0`) to prevent processing of malformed termination blocks.
-*   **CRC**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with CRC byte set to 0) using `zxc_hash8`.
+*   **Checksum**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with the checksum byte set to 0) using `zxc_hash8`.
 
 
 ### 5.6 File Footer
@@ -530,7 +530,7 @@ For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dict
 
 *   **Two binding flavours**: the `dict_id` binds exactly what the encoder used. A **raw in-memory dictionary** (library API, content bytes only, no table) yields `dict_id = checksum(content)`; such archives never contain `enc_lit = 3` blocks. A **table-carrying dictionary** (the `.zxd` path) yields `dict_id = checksum(LE32(checksum(content)) || table)`, binding the exact (content, table) pair. There is no flag on the wire: the decoder simply computes the id for the pair it was given and matches it against the header.
 
-*   **`.zxd` file format**: A standalone dictionary file has a 16-byte header (magic `0x9CB0D1C7`, version, content size, `dict_id`, header CRC16) followed by the raw content bytes and the **128-byte shared Huffman table (always present)**. The `.zxd` extension is cosmetic — files are identified by their magic word, not their name.
+*   **`.zxd` file format**: A standalone dictionary file has a 16-byte header (magic `0x9CB0D1C7`, version, content size, `dict_id`, header checksum) followed by the raw content bytes and the **128-byte shared Huffman table (always present)**. The `.zxd` extension is cosmetic — files are identified by their magic word, not their name.
 
 *   **Training**: `zxc_train_dict()` analyzes a corpus of representative samples and selects the byte segments that maximize LZ77 match coverage, placing the most frequently matched segments at the **end** of the dictionary so they produce the shortest (most efficient) offsets in the virtual window. `zxc_train_dict_huf()` then compresses the same samples *with* the trained dictionary to histogram the **real post-LZ literals** (raw sample bytes are a poor proxy: LZ matches against the dictionary remove most repeated content first) and derives the shared table from that distribution. Training cost is bounded: past an 8 MiB budget, 4 KB sample slices are strided evenly across the corpus — a 256-symbol histogram converges long before, so even multi-hundred-MB corpora train in well under a second. Symbols unseen in training stay code-less by design: with `L = 8`, a code covering all 256 symbols would be forced by Kraft equality to the degenerate uniform 8-bit code; the encoder's per-block fallback handles uncovered bytes instead.
 

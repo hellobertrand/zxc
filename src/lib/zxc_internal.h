@@ -407,7 +407,7 @@ extern "C" {
  *         histogram converges early, so past it slices are strided evenly instead. */
 #define ZXC_DICT_HUF_SAMPLE_BUDGET (8U << 20)
 
-/** @brief Block header size: Type(1)+Flags(1)+Reserved(1)+CRC(1)+CompSize(4). */
+/** @brief Block header size: Type(1)+Flags(1)+Reserved(1)+Checksum(1)+CompSize(4). */
 #define ZXC_BLOCK_HEADER_SIZE 8
 /** @brief Size of the per-block checksum field in bytes. */
 #define ZXC_BLOCK_CHECKSUM_SIZE 4

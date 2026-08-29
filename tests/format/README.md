@@ -41,13 +41,13 @@ For every file, `test_golden.c` walks the bytes and verifies, against
 
 - **File header (§3):** magic, version, chunk-size code, flags (incl.
   `HAS_CHECKSUM` / `HAS_DICTIONARY`), the reserved bytes — or the `dict_id` when
-  a dictionary is used — and the 16-bit header CRC (`zxc_hash16`).
+  a dictionary is used — and the 16-bit header checksum (`zxc_hash16`).
 - **Each block header (§4):** type, flags, reserved byte, `comp_size` bounds,
-  and the 8-bit header CRC (`zxc_hash8`).
+  and the 8-bit header checksum (`zxc_hash8`).
 - **Every payload type (§5):** RAW; GLO/GHI header + section descriptors
   (sizes must tile the payload); the Huffman literal section flag.
 - **EOF block (§5.4):** `comp_size == 0`.
-- **Optional SEK block (§5.5):** type, CRC8, `comp_size == n_blocks * 4`, and
+- **Optional SEK block (§5.5):** type, header checksum, `comp_size == n_blocks * 4`, and
   each entry equal to the physical size of its data block.
 - **Per-block checksum (§7.2):** recomputed (`zxc_checksum`) over the compressed
   payload and matched against the trailing 4 bytes.
