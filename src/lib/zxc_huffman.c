@@ -159,15 +159,6 @@ static void pm_leaves_sort(pm_leaf_t* RESTRICT leaves, const int n) {
  * Symbols with `freq[i] == 0` get `code_len[i] == 0`; every other symbol
  * receives a length in `[1, ZXC_HUF_MAX_CODE_LEN_ULTRA]`. The single-present-symbol
  * case is handled as a degenerate code of length 1.
- *
- * @param[in]  freq     Frequency table indexed by symbol (0..255).
- * @param[out] code_len Output code-length array, written in full.
- * @param[in]  scratch  Optional scratch of `ZXC_HUF_BUILD_SCRATCH_SIZE` bytes
- *                      (carved into items / counts / stack regions). If
- *                      `NULL`, the function allocates its own working memory
- *                      for the duration of the call.
- * @return `ZXC_OK` on success, `ZXC_ERROR_MEMORY` or `ZXC_ERROR_CORRUPT_DATA`
- *         on failure.
  */
 int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
                                void* RESTRICT scratch, const int max_code_len) {

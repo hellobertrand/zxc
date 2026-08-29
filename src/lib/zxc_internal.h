@@ -1904,13 +1904,13 @@ int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint
  * pointer, same one-time CPU detection on the first call.
  *
  * @param[in,out] ctx     Compression context: configuration and working buffers.
- * @param[in]     chunk   Raw data to compress.
- * @param[in]     src_sz  Size of @p chunk in bytes.
+ * @param[in]     src     Raw data to compress.
+ * @param[in]     src_sz  Size of @p src in bytes.
  * @param[out]    dst     Destination buffer.
  * @param[in]     dst_cap Capacity of @p dst.
  * @return Bytes written (> 0), or a negative @ref zxc_error_t.
  */
-int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
+int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
 
 // ---------------------------------------------------------------------------

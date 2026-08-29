@@ -1026,11 +1026,6 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
  * level, block size, checksums, seekable, dictionary) with their defaults, then
  * drives @ref zxc_stream_engine_run in compression mode with the
  * compress chunk processor.
- *
- * @param[in]  f_in   Input stream (must be non-NULL).
- * @param[out] f_out  Output stream (NULL performs a dry run / size estimate).
- * @param[in]  opts   Compression options, or NULL for all defaults.
- * @return Total bytes written on success, or a negative @ref zxc_error_t.
  */
 int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* opts) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
@@ -1062,11 +1057,6 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
  * checksums, dictionary), then drives @ref zxc_stream_engine_run in
  * decompression mode with the decompress chunk processor. The block size and
  * level are recovered from the archive header, not from @p opts.
- *
- * @param[in]  f_in   Input (compressed) stream (must be non-NULL).
- * @param[out] f_out  Output (decompressed) stream.
- * @param[in]  opts   Decompression options, or NULL for all defaults.
- * @return Total bytes written on success, or a negative @ref zxc_error_t.
  */
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
@@ -1090,11 +1080,6 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
  * Public API; see @c zxc_stream.h. Validates the file magic, reads the 64-bit
  * decompressed-size field from the footer, and restores the caller's original
  * stream position before returning. Does not decompress any data.
- *
- * @param[in] f_in  Compressed stream (must be non-NULL and seekable).
- * @return Decompressed size in bytes, or a negative @ref zxc_error_t
- *         (@ref ZXC_ERROR_BAD_MAGIC, @ref ZXC_ERROR_SRC_TOO_SMALL,
- *         @ref ZXC_ERROR_IO).
  */
 int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
@@ -1153,7 +1138,7 @@ typedef struct {
  * Win32 implementation: a positioned @c ReadFile via @c OVERLAPPED, so
  * concurrent worker threads never race on a shared file cursor.
  *
- * @param[in]  vctx    @ref zxc_stdio_ctx_t carrying the file handle.
+ * @param[in]  vctx    `zxc_stdio_ctx_t` carrying the file handle.
  * @param[out] dst     Destination buffer (at least @p len bytes).
  * @param[in]  len     Number of bytes to read.
  * @param[in]  offset  Absolute byte offset to read from.
@@ -1185,7 +1170,7 @@ typedef struct {
  * POSIX implementation: a single @c pread, which carries its own offset and so
  * is safe to call concurrently from multiple worker threads on one descriptor.
  *
- * @param[in]  vctx    @ref zxc_stdio_ctx_t carrying the file descriptor.
+ * @param[in]  vctx    `zxc_stdio_ctx_t` carrying the file descriptor.
  * @param[out] dst     Destination buffer (at least @p len bytes).
  * @param[in]  len     Number of bytes to read.
  * @param[in]  offset  Absolute byte offset to read from.
@@ -1207,10 +1192,6 @@ static int64_t zxc_stdio_read_at(void* vctx, void* dst, size_t len, uint64_t off
  * delegates to @ref zxc_seekable_open_reader. The reader context is heap-owned
  * and handed to the returned handle via @ref zxc_seekable_attach_owned_ctx, so
  * @ref zxc_seekable_free releases it.
- *
- * @param[in] f  Open, seekable file handle.
- * @return A handle to release with @ref zxc_seekable_free, or NULL on bad input,
- *         an I/O error, or a missing / malformed seek table.
  */
 zxc_seekable* zxc_seekable_open_file(FILE* f) {
     if (UNLIKELY(!f)) return NULL;

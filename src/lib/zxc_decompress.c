@@ -272,7 +272,7 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run32(uint8_t* dst, const 
 /**
  * @brief Overlap copy for a run of period @p off (2..31) bounded by @c ml <= 32.
  *
- * Bounded length buys two things over @ref zxc_decode_copy_overlap_run32: the
+ * Bounded length buys two things over zxc_decode_copy_overlap_run32(): the
  * loop disappears, and the upper 16 bytes are skipped whenever @p ml allows -
  * which is most of the time, GLO matches averaging 7 to 11 bytes here.
  *
@@ -353,7 +353,7 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_short(uint8_t* dst, const 
  * libc memset call on the typically short runs of the hot path. Like the other
  * run copiers it may **overshoot** up to 31 bytes past @p ml; the caller must
  * guarantee @ref ZXC_PAD_SIZE bytes of headroom. Falls back to
- * @ref ZXC_MEMSET on non-SIMD builds.
+ * `ZXC_MEMSET` on non-SIMD builds.
  *
  * @param[out] dst  Output cursor.
  * @param[in]  byte Byte value to replicate.
@@ -614,7 +614,7 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
  * @brief Decodes one GLO sequence of a 4x batch: extracts ll/ml, applies the
  *        varint extensions with their bounds checks, then emits via @p DECODE.
  *
- * Like @ref DECODE_MATCH_SAFE, references the call site's local names (e_ptr,
+ * Like `DECODE_MATCH_SAFE`, references the call site's local names (e_ptr,
  * e_end, l_ptr, l_end, d_ptr, d_end). @p RESERVE is the sum of the inline
  * (pre-varint) literal lengths of the batch's remaining sequences, so one
  * l_ptr bound covers the whole batch; @p N_REM counts the remaining
@@ -1699,13 +1699,6 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
  *
  * Inlines the plain GLO/GHI decoders via @ref zxc_decompress_chunk_wrapper_body
  * with @c has_dict=0, so it carries no dict code and matches the dict-free build.
- *
- * @param[in,out] ctx     Decompression context.
- * @param[in]     src     Compressed block bytes.
- * @param[in]     src_sz  Size of @p src in bytes.
- * @param[out]    dst     Destination buffer for the decoded block.
- * @param[in]     dst_cap Capacity of @p dst in bytes.
- * @return Bytes written on success, or a negative @ref zxc_error_t.
  */
 // cppcheck-suppress unusedFunction
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
