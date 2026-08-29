@@ -51,8 +51,8 @@ runtime.
 
 `stream_compress()` and `stream_decompress()` work on objects exposing a real
 file descriptor via `fileno()`, so in-memory streams such as `io.BytesIO` are
-not accepted. Both return the number of bytes written and take `n_threads=0` to
-mean "one per available core".
+not accepted. Both return the number of bytes written and take `n_threads=0`
+to mean the default, auto-detected thread count.
 
 ```python
 with open("input.bin", "rb") as src, open("output.zxc", "wb") as dst:
@@ -82,7 +82,10 @@ with open("output.zxc", "rb") as f, zxc.ZxcReader(f) as r:
     restored = r.read()
 ```
 
-`detect_zxc(data)` reports whether a buffer starts with a ZXC file header.
+`detect_zxc(data)` checks only the 4-byte magic word at the start of the
+buffer. It does not validate the rest of the header, the footer, or the
+archive contents, so a truncated or corrupt archive still passes - treat it as
+content-type sniffing, not as a validity check.
 
 ## Random Access
 
@@ -107,8 +110,11 @@ d = zxc.Dictionary.train(samples)          # samples: list[bytes]
 blob = zxc.compress(data, dict=d.content, dict_huf=d.huf)
 back = zxc.decompress(blob, dict=d.content, dict_huf=d.huf)
 
-open("corpus.zxd", "wb").write(d.save())   # persist
-d2 = zxc.Dictionary.load(open("corpus.zxd", "rb").read())
+with open("corpus.zxd", "wb") as f:        # persist
+    f.write(d.save())
+
+with open("corpus.zxd", "rb") as f:
+    d2 = zxc.Dictionary.load(f.read())
 ```
 
 `get_dict_id(archive)` returns the dictionary id an archive was built with, so
