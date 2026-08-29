@@ -21,6 +21,7 @@ ZXC is a lossless compression **C library** (with official Rust, Python, Node.js
 - **Built for "Write Once, Read Many."** Compress once at build time, decompress millions of times at run time.
 - **Production-grade.** Continuously fuzzed by Google [OSS-Fuzz](https://github.com/google/oss-fuzz), ASan/UBSan/Valgrind-clean, SLSA-signed releases, thread-safe API, BSD-3-Clause.
 - **Seekable.** Built-in seek table for O(1) random-access decompression.
+- **Dictionary mode for small data.** A corpus-trained dictionary (`zxc --train`) prefills the LZ77 window at every block start, recovering ratio on payloads too small to build their own history. See [dictionary compression](#dictionary-compression).
 - **Broadly packaged.** Conan, vcpkg, Homebrew, Winget and Rust/Python/Node packages.
 
 ## Quick start
@@ -570,6 +571,8 @@ The required margin is one block, the accumulated per-block framing overhead, th
 
 For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dictionary dramatically improves compression ratio. Because the dictionary prefills the LZ77 sliding window at the *start of each block*, the benefit is per-block: a block only has its own preceding bytes as history, so the smaller the block, the more it leans on the dictionary for representative patterns. This applies whether the input is a single small payload or a large payload split into many small blocks — any time the block size is small enough that early bytes would otherwise lack history to match against.
 
+A `.zxd` also carries a **shared literal Huffman table**, trained on the post-LZ literal distribution of the corpus: blocks it encodes well drop their own 128-byte table header, a fixed cost small blocks cannot amortize. It applies at levels 6-7 only (the levels with Huffman-coded literals), and the CLI handles it end to end — `--train` always writes one, `-D` always loads it. Attaching it from the C API is [API.md §11b](docs/API.md#11b-dictionary-api).
+
 **Typical use cases:** JSON API responses, small game assets, structured logs, key-value store records, RPC messages, and any large but homogeneous corpus compressed in small blocks for random access (e.g. seekable archives).
 
 ### Training a dictionary
@@ -620,7 +623,7 @@ zxc_decompress_opts_t dopts = {
 int64_t original_size = zxc_decompress(compressed, comp_size, out, out_cap, &dopts);
 ```
 
-The dictionary is stored as an external `.zxd` file and referenced by a 32-bit ID (`dict_id`) in the ZXC file header. The **same dictionary is required to decompress** and must be supplied explicitly with `-D` — there is no auto-lookup. Decompressing an archive that needs a dictionary without supplying one returns `ZXC_ERROR_DICT_REQUIRED`; supplying the wrong one returns `ZXC_ERROR_DICT_MISMATCH`. Training to a directory names the file `dictionary_<dict_id>.zxd`. See [FORMAT.md](docs/FORMAT.md) §12 for the full specification.
+The dictionary is stored as an external `.zxd` file — content plus shared literal table — and referenced by a 32-bit ID (`dict_id`) in the ZXC file header, covering both parts. The **same dictionary is required to decompress** and must be supplied explicitly with `-D` — there is no auto-lookup. Decompressing an archive that needs a dictionary without supplying one returns `ZXC_ERROR_DICT_REQUIRED`; supplying the wrong one returns `ZXC_ERROR_DICT_MISMATCH`. Training to a directory names the file `dictionary_<dict_id>.zxd`. See [FORMAT.md](docs/FORMAT.md) §12 for the full specification.
 
 ---
 

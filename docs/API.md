@@ -260,7 +260,8 @@ typedef struct {
     const void* dict;         // Pre-trained dictionary content (NULL = none).
     size_t dict_size;         // Dictionary size in bytes (0 = none, max 64 KB).
     const void* dict_huf;     // Shared literal Huffman table, 128 bytes
-                              // (NULL = none; ignored without dict).
+                              // (NULL = none; ignored without dict, and
+                              // ignored below level 6).
     zxc_progress_callback_t progress_cb;  // Optional callback (NULL to disable).
     void*  user_data;                     // Passed through to progress_cb.
 } zxc_compress_opts_t;
@@ -275,8 +276,10 @@ typedef struct {
     const void* dict;         // Pre-trained dictionary content (NULL = none).
     size_t dict_size;         // Dictionary size in bytes (0 = none).
     const void* dict_huf;     // Shared literal Huffman table, 128 bytes,
-                              // matching the one used at compression time
-                              // (NULL = none; ignored without dict).
+                              // matching the one used at compression time.
+                              // Required if the archive used one: dict_id
+                              // covers the pair, so omitting it gives
+                              // ZXC_ERROR_DICT_MISMATCH.
     zxc_progress_callback_t progress_cb;  // Optional callback.
     void*  user_data;                     // Passed through to progress_cb.
 } zxc_decompress_opts_t;
@@ -1388,6 +1391,16 @@ Declared in `<zxc_dict.h>`. Provides dictionary training, serialization (`.zxd` 
 > two are built from, exposed for advanced use (raw content-only dictionaries,
 > retraining only the table, supplying externally-sourced content).
 
+**When the shared table applies.** Huffman-coded literals exist only at levels 6
+(`ZXC_LEVEL_DENSITY`) and 7 (`ZXC_LEVEL_ULTRA`), so the shared table is consulted
+only there; at levels 1-5 `dict_huf` is accepted and ignored. The two directions
+are **not symmetric**: at compression time omitting it silently costs ratio,
+whereas at decompression time it is mandatory. `dict_id` is computed over the
+(content, table) pair, so an archive built with a `.zxd` and opened with its
+content alone is rejected up front with `ZXC_ERROR_DICT_MISMATCH`.
+`zxc_dict_load()` returns both parts in one call, so the safe habit is to always
+pass both.
+
 ### `zxc_dict_train`
 
 ```c
@@ -1429,7 +1442,7 @@ ZXC_EXPORT int zxc_train_dict_huf(
 );
 ```
 
-Trains the **shared literal Huffman table** for an already-trained dictionary. It compresses the samples with `dict` and derives canonical code lengths from the real post-LZ literal distribution. The 128-byte table is required by `zxc_dict_save()` and can be attached at (de)compression time via the `dict_huf` option field. Returns `ZXC_OK` or a negative error code.
+Trains the **shared literal Huffman table** for an already-trained dictionary. It compresses the samples with `dict` and derives canonical code lengths from the real post-LZ literal distribution. The 128-byte table is required by `zxc_dict_save()` and can be attached at (de)compression time via the `dict_huf` option field. It only takes effect at levels 6-7 (see the note at the top of this section). Returns `ZXC_OK` or a negative error code.
 
 ### `zxc_dict_id`
 
