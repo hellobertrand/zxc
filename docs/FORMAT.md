@@ -1,5 +1,5 @@
 ---
-title: "The ZXC Compressed Data Format Specification"
+title: "ZXC: A Seekable, Block-Oriented Compressed File Format"
 abbrev: ZXC Format
 docname: draft-lebonnois-zxc-format-00
 category: info
@@ -31,6 +31,14 @@ author:
     email: zxc.codec@gmail.com
 
 normative:
+  RAPIDHASH:
+    title: "RapidHash: a fast, high-quality non-cryptographic hash function"
+    target: https://github.com/Nicoshev/rapidhash
+    author:
+      -
+        ins: N. De Carli
+        name: Nicolas De Carli
+    date: false
 
 informative:
   RFC5116:
@@ -42,14 +50,6 @@ informative:
       -
         ins: Y. Collet
         name: Yann Collet
-    date: false
-  RAPIDHASH:
-    title: "RapidHash: a fast, high-quality non-cryptographic hash function"
-    target: https://github.com/Nicoshev/rapidhash
-    author:
-      -
-        ins: N. De Carli
-        name: Nicolas De Carli
     date: false
   PIVCO:
     title: "PivCo-Huffman"
@@ -73,17 +73,14 @@ informative:
 
 --- abstract
 
-This document describes the ZXC compressed data format. ZXC is a
-block-oriented, seekable, integrity-checked compression container
-targeting high decompression throughput and kernel-space integration.
-It defines a fixed-size file header, an extensible block container,
-three payload encodings (RAW, GLO, GHI), an optional seek table,
-and a fixed-size file footer. It also defines an OPTIONAL pre-trained
-dictionary mechanism together with its companion file format.
+ZXC is a lossless data compression format designed for high
+decompression throughput and random access. A ZXC file is a sequence
+of independently decodable blocks, optionally indexed by a seek table,
+so any block can be decompressed without reading the blocks before it.
 
-The format described in this document corresponds to wire-format
-version 8 of the reference implementation and is intended to be
-published as Version 1.0 of the ZXC specification.
+This document describes the format, registers the "application/zxc"
+media type, and specifies wire-format version 8, intended for
+publication as version 1.0 of the ZXC specification.
 
 --- middle
 
@@ -191,7 +188,7 @@ The File Header is 16 bytes long and is laid out as follows:
  0x05    1     Chunk Size Code
  0x06    1     Flags
  0x07    7     Reserved / Dictionary ID
- 0x0E    2     Header CRC16
+ 0x0E    2     Header Checksum
 ~~~
 
 ## Field Definitions
@@ -203,7 +200,7 @@ Magic (u32):
 Format Version (u8):
 : The wire-format version. This document specifies version 8. A
   conforming decoder MUST reject any file whose Format Version it
-  does not support, with the ZXC_ERROR_BAD_VERSION condition.
+  does not support, as an unsupported version ({{error-handling}}).
 
 Chunk Size Code (u8):
 : Values in the range \[12, 21\] are interpreted as exponents, where
@@ -231,9 +228,10 @@ Reserved / Dictionary ID:
   order ({{dictionary-header-encoding}}) and the three bytes at
   offsets 0x0B..0x0D MUST be zero.
 
-Header CRC16 (u16):
-: A 16-bit hash computed by zxc_hash16 over the 16-byte header with
-  the two bytes at offset 0x0E..0x0F treated as zero during hashing.
+Header Checksum (u16):
+: The 16-bit header checksum of {{header-checksums}}, computed over
+  the 16-byte header with the two bytes at 0x0E..0x0F treated as
+  zero.
 
 # Block Container {#block-container}
 
@@ -245,7 +243,7 @@ Every block in a ZXC file begins with an 8-byte block header:
  0x01    1     Block Flags
  0x02    1     Reserved
  0x03    4     Compressed Payload Size (comp_size)
- 0x07    1     Header CRC8
+ 0x07    1     Header Checksum
 ~~~
 
 ## Block Types
@@ -260,10 +258,9 @@ The following Block Type values are assigned by this document:
 |  254  | SEK      | {{sek-block}}      |
 |  255  | EOF      | {{eof-block}}      |
 
-All other values are unassigned. The block-type set is fixed for a
-given Format Version: a decoder MUST reject any block whose type is
-not defined for the version it implements, rather than skipping it.
-Introducing a new block type is a version bump. See {{versioning}}.
+All other values are unassigned. A decoder MUST reject any block
+whose type is not defined for the version it implements, rather
+than skipping it ({{compatibility-rules}}).
 
 ## Block Header Semantics
 
@@ -279,9 +276,9 @@ comp_size (u32):
   include the 8-byte block header nor the OPTIONAL trailing 4-byte
   checksum.
 
-Header CRC8 (u8):
-: An 8-bit hash computed by zxc_hash8 over the 8-byte block header
-  with byte 0x07 treated as zero during hashing.
+Header Checksum (u8):
+: The 8-bit header checksum of {{header-checksums}}, computed over
+  the 8-byte block header with byte 0x07 treated as zero.
 
 ## Physical Block Layout
 
@@ -342,15 +339,11 @@ of the literal stream.
 
 enc_lit, enc_tok, and enc_off are closed value sets: a GLO decoder
 MUST reject any value outside those listed above rather than fall
-back to a default. This is not a memory-safety requirement -- a GLO
-block sizes its Offsets section and reads it at the same width, so
-the two cannot disagree -- but it keeps the unused byte values
-genuinely available to a later format version instead of quietly
-aliasing them onto an existing meaning.
+back to a default, so that unused values stay available to a later
+format version.
 
-enc_mlen is the exception. It is RESERVED and therefore follows the
-rule for reserved fields in {{compatibility-rules}}: encoders MUST
-write 0, and decoders MUST ignore it.
+enc_mlen is RESERVED: encoders MUST write 0, and decoders MUST
+ignore it ({{compatibility-rules}}).
 
 ## Section Descriptors {#glo-section-descriptors}
 
@@ -379,12 +372,6 @@ be forged inconsistently with it:
 - The Extras section occupies whatever payload remains after the
   three sections above.
 
-Because the Extras section is sized as the residue, and its values
-are read on demand rather than scanned, an end pointer sitting past
-the last real extra is harmless. That property is what lets the
-padding of {{literal-slack}} be carried there with no wire field of
-its own.
-
 ## Literal Section Slack {#literal-slack}
 
 At least 32 bytes of payload MUST follow the Literals section:
@@ -393,24 +380,19 @@ At least 32 bytes of payload MUST follow the Literals section:
  comp_size - header - descriptors - lit_comp >= 32
 ~~~
 
-Decoders copy literals with an over-reading wild copy, and a RAW
-literal section is copied straight from the payload, so those
-trailing bytes are what keeps a block's last copy inside its own
-payload. A decoder MUST reject a block that does not satisfy the
-inequality above rather than read past the Literals section.
+Decoders copy literals with an over-reading wild copy, so these
+trailing bytes keep a block's last copy inside its own payload. A
+decoder MUST reject a block that does not satisfy the inequality
+above.
 
-On any block with a realistic number of sequences the Tokens,
-Offsets, and Extras sections already cover the requirement: 32
-bytes is reached from 16 sequences with 1-byte offsets, and from 11
-sequences with 2-byte offsets. When they do not -- a block of very
-few sequences -- the encoder appends zero padding until they do.
-The padding falls inside the Extras residue, so it needs no field
-of its own; its contents are unconstrained and MUST NOT be
-validated.
+The Tokens, Offsets, and Extras sections normally cover the
+requirement on their own. When they do not, the encoder appends
+zero padding, which falls inside the Extras residue and so needs no
+wire field of its own; its contents are unconstrained and MUST NOT
+be validated.
 
-The same rule, for the same reason, applies to GHI ({{ghi-block}}),
-where the Sequences and Extras sections play the role of the
-Tokens, Offsets, and Extras sections.
+The same rule applies to GHI ({{ghi-block}}), where the Sequences
+and Extras sections play the role of Tokens, Offsets, and Extras.
 
 ## Stream Content
 
@@ -453,11 +435,9 @@ Extras:
 When enc_lit = 2, the Literals stream carries a length-limited
 canonical Huffman code over the literal bytes. The code bits are
 placed on the wire with the PivCo layout (a level-ordered Huffman
-arrangement, after {{PIVCO}}): the encoding is ordinary Huffman —
-identical code lengths, identical code bits, and identical size — and
-PivCo only reorders those bits, grouping them by tree level rather
-than by symbol, so that a decoder can reconstruct the output with
-data-parallel list merges instead of a serial per-symbol bit chain.
+arrangement, after {{PIVCO}}): the code lengths, code bits, and
+total size are those of ordinary Huffman, but the bits are grouped
+by tree level rather than by symbol.
 
 ~~~
  Offset  Size  Field
@@ -495,10 +475,7 @@ of flat roots. An internal node is a flat root if and only if:
 
 Completeness of the trie means condition 2 implies a perfect binary
 subtree of 2^D leaves. Every maximal complete subtree of depth D >= 2
-is a flat root: this is a fixed rule of the format. The reference
-decoder unpacks the packed codes directly, using SIMD kernels for D
-in the range 2 to 6 and a scalar table lookup for D >= 7, instead of
-running the level-merge cascade.
+is a flat root: this is a fixed rule of the format.
 
 Every internal node that is neither a flat root nor a descendant of
 one is a bitmap node. Its run holds one branch bit per symbol routed
@@ -538,36 +515,19 @@ error.
 
 ### Encoder Selection Policy
 
-Selection of enc_lit = 2 is an encoder policy, not a format rule. The
-reference encoder requires compression level >= 6 and at least 1024
-literals, prices every candidate encoding (RAW, RLE, per-block
-Huffman, and shared-table Huffman) as
-J = size + premium(level) * n_decoded_bytes, and selects the minimum
-— a space-speed Lagrangian with a per-level decode-time premium. Any
-block where the heuristic does not select a Huffman encoding keeps
-enc_lit in {0, 1}.
+Choosing among the literal encodings is an encoder policy, not a
+format rule: the reference encoder prices each candidate (RAW, RLE,
+per-block Huffman, shared-table Huffman) against a per-level
+decode-time premium and takes the minimum.
 
-Before that pricing, the reference encoder also applies a joint
-flat/length nudge to the fitted code lengths at levels 6-7
-(literals; level 7 also nudges the token table): it trades a few
-bytes of code-length optimality for a flatter tree whose PivCo runs
-decode faster. The nudged lengths remain an ordinary canonical,
-Kraft-exact code — decoders see nothing special.
-
-A second encoder-side policy governs match distances. At levels 1
-to 5 the reference encoder refuses to emit a match closer than 32
-bytes, so that the decoder's match copy keeps to its single widest
-arm. The policy is applied per block, and only where a sampled scan
-of the block finds few repeats inside that distance: data built on
-short repeats, such as periodic runs or tightly structured records,
-keeps them, because forbidding them there costs both size and
-decode time. Levels 6 and 7 keep every distance.
-
-Like the nudge, this policy changes which sequences an encoder
-emits and never how they are encoded. Both are encoder-side
-choices: the resulting archive is an ordinary GLO or GHI block that
-any conforming decoder reads, and neither is observable on the
-wire.
+Two further encoder-side choices are named here only because they
+are easily mistaken for wire requirements: the reference encoder
+nudges fitted code lengths toward a flatter tree at levels 6-7, and
+at levels 1-5 it may refuse matches closer than 32 bytes. Both
+change which sequences an encoder emits, never how they are
+encoded. The nudged lengths remain an ordinary canonical,
+Kraft-exact code, the result is an ordinary GLO or GHI block, and
+neither choice is observable on the wire.
 
 ## Shared-Table Huffman Literal Section {#shared-huffman-literal-section}
 
@@ -584,10 +544,10 @@ The shared table is trained on the corpus' post-LZ literal
 distribution and covers only the symbols seen during training. An
 encoder MUST fall back to a per-block table (enc_lit = 2) or to
 RAW/RLE for any block containing a literal byte that has no code in
-the shared table. A decoder MUST reject an enc_lit = 3 section with
-ZXC_ERROR_DICT_REQUIRED when no dictionary table is attached. The
-archive's dict_id binds the (content, table) pair, so a matching
-table is guaranteed present whenever the dictionary check has passed.
+the shared table. A decoder MUST reject an enc_lit = 3 section when
+no dictionary table is attached ({{error-handling}}); the archive's
+dict_id guarantees a matching table whenever the dictionary check
+has passed.
 
 The level-7 token section reuses the {{huffman-literal-section}}
 layout (enc_tok = 2, including the inline 128-byte code-length
@@ -612,12 +572,11 @@ encoding optimised for raw decompression speed. It uses packed
 
 ## GHI Header
 
-The GHI header is binary-identical to the GLO header. In practice
-for GHI, enc_lit is always 0 (raw literals), so the Literals
-section occupies n_literals bytes. enc_tok and enc_mlen are written
-as 0. enc_off is written as 0 and MUST be ignored by decoders: GHI
-has no offset stream, and sequence words always store 16-bit
-offsets, so the field does not bound them.
+The GHI header is binary-identical to the GLO header. In a GHI
+block enc_lit is always 0 (raw literals), so the Literals section
+occupies n_literals bytes; enc_tok and enc_mlen are 0. enc_off is
+written as 0 and MUST be ignored by decoders: GHI has no offset
+stream, and sequence words always store 16-bit offsets.
 
 ## Section Descriptors {#ghi-section-descriptors}
 
@@ -766,11 +725,38 @@ per-block size limit) without breaking the encoding scheme; the
 
 # Checksums and Integrity {#checksums}
 
-## Header Checksums
+## Header Checksums {#header-checksums}
 
-The File Header carries a 16-bit checksum (zxc_hash16) at offset
-0x0E..0x0F ({{file-header}}). Every block header carries an 8-bit
-checksum (zxc_hash8) at offset 0x07 ({{block-container}}).
+The File Header carries a 16-bit checksum at offset 0x0E..0x0F
+({{file-header}}); every block header carries an 8-bit checksum at
+offset 0x07 ({{block-container}}). Both are xorshift hashes, not
+cyclic redundancy checks. All arithmetic below is on unsigned 64-bit
+integers modulo 2^64, and all shifts are logical.
+
+The 8-bit block header checksum takes the 8 header bytes as a single
+little-endian 64-bit integer v, with the checksum byte at offset 0x07
+treated as zero:
+
+~~~
+h = v XOR 0x9E3779B97F4A7C15
+h = h XOR (h << 13)
+h = h XOR (h >> 7)
+h = h XOR (h << 17)
+checksum8 = ((h >> 32) XOR h) AND 0xFF
+~~~
+
+The 16-bit File Header checksum takes the 16 header bytes as two
+little-endian 64-bit integers, v1 at offset 0x00 and v2 at offset
+0x08, with the two checksum bytes at 0x0E..0x0F treated as zero:
+
+~~~
+h = v1 XOR v2 XOR 0xD2D84A61D2D84A61
+h = h XOR (h << 13)
+h = h XOR (h >> 7)
+h = h XOR (h << 17)
+r  = ((h >> 32) XOR h) AND 0xFFFFFFFF
+checksum16 = ((r >> 16) XOR r) AND 0xFFFF
+~~~
 
 These checksums protect metadata and navigation fields. A
 conforming decoder MUST validate both before relying on any other
@@ -783,7 +769,15 @@ When the File Header has HAS_CHECKSUM = 1:
 - Every non-EOF block MUST carry a 4-byte trailing checksum.
 - The checksum input is the compressed payload bytes only, NOT the
   block header.
-- The algorithm identifier 0 denotes a 32-bit folding of RapidHash.
+- The algorithm identifier 0 denotes RapidHash {{RAPIDHASH}} folded
+  to 32 bits ({{fold32}}).
+
+The 32-bit fold of a 64-bit hash h is defined as:
+
+~~~
+fold32(h) = (h XOR (h >> 32)) AND 0xFFFFFFFF
+~~~
+{: #fold32}
 
 ## Global Stream Hash
 
@@ -897,7 +891,7 @@ literal Huffman table:
  0x06    2     Content Size
  0x08    4     dict_id
  0x0C    2     Reserved
- 0x0E    2     Header CRC16
+ 0x0E    2     Header Checksum
  0x10    N     Dictionary Content
  0x10+N  128   Shared Literal Huffman Table
 ~~~
@@ -910,8 +904,7 @@ Magic (u32):
 
 Dictionary Format Version (u8):
 : The dictionary file format version. This document specifies
-  version 1. A decoder MUST reject any other version with
-  ZXC_ERROR_BAD_VERSION.
+  version 1. A decoder MUST reject any other version.
 
 Flags (u8):
 : Bits 0..3 encode the checksum algorithm identifier, matching the
@@ -925,19 +918,20 @@ Content Size (u16):
 
 dict_id (u32):
 : A deterministic 32-bit identifier that binds the (content, table)
-  pair. It is a folding of the RapidHash function {{RAPIDHASH}}
-  computed by seeding the hash of the Dictionary Content into the
-  hash of the 128-byte Shared Literal Huffman Table, so that each
-  byte is hashed exactly once. It MUST equal the dict_id stored in
-  the File Header of any ZXC archive compressed with this dictionary.
+  pair. It is computed as fold32 ({{fold32}}) of the seeded RapidHash
+  {{RAPIDHASH}} of the 128-byte Shared Literal Huffman Table, seeded
+  with fold32 of the RapidHash of the Dictionary Content, so that
+  each byte is hashed exactly once. It MUST equal the dict_id stored
+  in the File Header of any ZXC archive compressed with this
+  dictionary.
 
 Reserved:
 : 2 bytes. Encoders MUST set these to zero.
 
-Header CRC16 (u16):
-: A 16-bit hash computed by zxc_hash16 over the 16-byte header with
-  the four bytes at offsets 0x0C..0x0F treated as zero during
-  hashing, mirroring the File Header checksum of {{file-header}}.
+Header Checksum (u16):
+: The 16-bit header checksum of {{header-checksums}}, computed over
+  the 16-byte header with the four bytes at 0x0C..0x0F treated as
+  zero.
 
 Dictionary Content:
 : Content Size raw bytes that prefill the LZ77 window. The content
@@ -994,12 +988,12 @@ A conforming decoder SHOULD process a ZXC stream according to the
 following procedure:
 
 1. Read the 16-byte File Header. Validate the Magic, Format
-   Version, Chunk Size Code, and Header CRC16. If the HAS_DICTIONARY
+   Version, Chunk Size Code, and Header Checksum. If the HAS_DICTIONARY
    flag is set, validate the supplied dictionary against the dict_id
    ({{dictionary-header-encoding}}).
 2. Loop over blocks:
 
-   a. Read the 8-byte block header. Validate the Header CRC8.
+   a. Read the 8-byte block header. Validate the Header Checksum.
    b. If the block is the EOF block, exit the loop.
    c. Read comp_size bytes of payload.
    d. If HAS_CHECKSUM = 1, read the 4-byte trailing checksum and
@@ -1023,10 +1017,10 @@ steps above fail.
 
 The Format Version is a single byte at offset 0x04 of the File
 Header. A conforming decoder accepts only the version it implements
-and MUST reject any other version with the ZXC_ERROR_BAD_VERSION
-condition. Because block-type numbering and payload layouts may
-change between versions, a decoder MUST NOT attempt to interpret an
-archive whose version byte it does not recognise.
+and MUST reject any other version. Because block-type numbering and
+payload layouts may change between versions, a decoder MUST NOT
+attempt to interpret an archive whose version byte it does not
+recognise.
 
 ## Version Bump Criteria
 
@@ -1043,24 +1037,17 @@ correctly requires a version bump:
 
 ## Compatibility Rules {#compatibility-rules}
 
-Version compatibility:
-: A decoder accepts only the Format Version it implements and MUST
-  reject any other version with ZXC_ERROR_BAD_VERSION. Because
-  block-type numbering and payload formats may change between
-  versions, a decoder MUST NOT attempt to interpret an archive whose
-  version byte it does not recognise.
-
 Unknown block types:
 : A decoder MUST reject any block whose type is not defined for its
-  Format Version, with the ZXC_ERROR_BAD_BLOCK_TYPE condition. The
-  block-type set is fixed per version; introducing a new type is a
-  version bump. Decoders MUST NOT skip unknown blocks: silently
-  advancing past unrecognised data is unsafe.
+  Format Version. The block-type set is fixed per version;
+  introducing a new type is a version bump. Decoders MUST NOT skip
+  unknown blocks: silently advancing past unrecognised data is
+  unsafe.
 
 Reserved fields:
 : All reserved bytes and flag bits MUST be written as zero by
   encoders. The decoder tolerates (ignores) non-zero reserved
-  values, which are covered by the header CRC; assigning a reserved
+  values, which are covered by the header checksum; assigning a reserved
   field any meaning is a version bump, never a same-version
   extension.
 
@@ -1068,7 +1055,7 @@ Reserved fields:
 
 A minimum conforming decoder for Format Version 8 MUST support:
 
-- File header parsing and CRC16 validation.
+- File header parsing and checksum validation.
 - RAW blocks (type 0): passthrough copy.
 - GLO blocks (type 1): full LZ decoding with extras varints,
   including the Huffman entropy sections ({{huffman-literal-section}},
@@ -1094,10 +1081,10 @@ all errors in the table are fatal by default.
 |----------------------------------------|-----------------------------|-------------------------------------------------|
 | Bad magic                              | File header offset 0x00     | Reject immediately. Not a ZXC file.             |
 | Unsupported version                    | File header offset 0x04     | Reject immediately.                             |
-| Header CRC16 mismatch                  | File header offset 0x0E     | Reject. Header is corrupt or truncated.         |
+| File header checksum mismatch          | File header offset 0x0E     | Reject. Header is corrupt or truncated.         |
 | Invalid chunk size code                | File header offset 0x05     | Reject. Code outside the valid range \[12..21\].  |
-| Block header CRC8 mismatch             | Block header offset 0x07    | Reject block. Stream is corrupt.                |
-| Unknown block type                     | Block header offset 0x00    | Reject (ZXC_ERROR_BAD_BLOCK_TYPE). Type not defined for this version.|
+| Block header checksum mismatch         | Block header offset 0x07    | Reject block. Stream is corrupt.                |
+| Unknown block type                     | Block header offset 0x00    | Reject. Type not defined for this version.      |
 | Block payload truncated                | During payload read         | Reject. Unexpected end of stream.               |
 | Block checksum mismatch                | Trailing 4-byte checksum    | Reject block. Payload is corrupt.               |
 | EOF block with non-zero comp_size      | EOF block header            | Reject. Malformed EOF marker.                   |
@@ -1145,174 +1132,6 @@ user uploads) SHOULD additionally:
 - Use bounded memory copies. Decoded lengths MUST NOT be trusted
   without cross-checking against the output buffer capacity.
 
-# Worked Example
-
-This section is non-normative.
-
-The following example was produced by the reference encoder from a
-10-byte input ("Hello ZXC\\n") using the equivalent of:
-
-~~~
-zxc -z -C -1 sample.txt
-~~~
-
-The resulting archive is 58 bytes.
-
-## Hexdump
-
-~~~
-00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
-00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
-00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
-00000030: 00 00 00 00 00 00 90 BB A1 75
-~~~
-
-## File Header (offset 0x00, 16 bytes)
-
-~~~
-F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 6E 5B
-~~~
-
-- F5 2E B0 9C decodes to Magic = 0x9CB02EF5.
-- 08 means Format Version 8.
-- 13 means Chunk Size Code 19 (2^19 = 524288 bytes = 512 KiB).
-- 80 means HAS_CHECKSUM = 1, algorithm id 0.
-- Seven RESERVED zero bytes.
-- 6E 5B is the Header CRC16 (LE value 0x5B6E).
-
-## Data Block 0 (RAW, offset 0x10)
-
-Block header:
-
-~~~
-00 | 00 | 00 | 0A 00 00 00 | 69
-~~~
-
-- Type 00 (RAW), flags 00, reserved 00.
-- comp_size = 10.
-- Header CRC8 = 0x69.
-
-Payload at offset 0x18..0x21:
-
-~~~
-48 65 6C 6C 6F 20 5A 58 43 0A   (ASCII "Hello ZXC\n")
-~~~
-
-Trailing checksum at 0x22..0x25:
-
-~~~
-90 BB A1 75   (LE = 0x75A1BB90)
-~~~
-
-## EOF Block (offset 0x26, 8 bytes)
-
-~~~
-FF | 00 | 00 | 00 00 00 00 | 02
-~~~
-
-## File Footer (offset 0x2E, 12 bytes)
-
-~~~
-0A 00 00 00 00 00 00 00 | 90 BB A1 75
-~~~
-
-- original_source_size = 10.
-- global_hash = 0x75A1BB90.
-
-With a single data block, the global hash equals that block's
-checksum, since rotl1(0) XOR b = b.
-
-## Structural View
-
-~~~
-0x00..0x0F  File Header                (16 B)
-0x10..0x17  RAW Block Header           ( 8 B)
-0x18..0x21  RAW Payload                (10 B)
-0x22..0x25  RAW Block Checksum         ( 4 B)
-0x26..0x2D  EOF Block Header           ( 8 B)
-0x2E..0x39  File Footer                (12 B)
-~~~
-
-## Seekable Variant
-
-The same input compressed with the seek table enabled (zxc -z -C -1
--S sample.txt) yields a 70-byte archive:
-
-~~~
-00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
-00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
-00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
-00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00
-00000040: 00 00 90 BB A1 75
-~~~
-
-A SEK block of 12 bytes is inserted between the EOF block and the
-File Footer. The SEK block header is FE 00 00 04 00 00 00 D2, with
-comp_size = 4 (one 4-byte entry) and CRC8 = 0xD2. The single entry
-16 00 00 00 (= 22) is the total on-disk size of data block 0: 8
-(header) + 10 (payload) + 4 (checksum).
-
-The File Footer remains the last 12 bytes of the file, so a decoder
-locating the footer from the end of the file requires no
-modification to support seekable archives.
-
-## Dictionary File
-
-This subsection illustrates a minimal dictionary file
-({{zxd-format}}) whose content is the five ASCII bytes "hello". The
-total file size is 149 bytes: a 16-byte header, 5 bytes of content,
-and the mandatory 128-byte shared literal Huffman table.
-
-~~~
-00000000: C7 D1 B0 9C 01 00 05 00 23 58 DF 6F 00 00 63 65
-00000010: 68 65 6C 6C 6F 00 00 00 00 00 00 00 00 00 00 00
-00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00000030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00000040: 00 00 00 00 00 00 00 20 00 02 00 02 20 00 00 00
-00000050: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00000060: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00000070: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00000080: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00000090: 00 00 00 00 00
-~~~
-
-Dictionary header (offset 0x00, 16 bytes):
-
-~~~
-C7 D1 B0 9C | 01 | 00 | 05 00 | 23 58 DF 6F | 00 00 | 63 65
-~~~
-
-- C7 D1 B0 9C decodes to Magic = 0x9CB0D1C7.
-- 01 means Dictionary Format Version 1.
-- 00 means Flags = 0 (checksum algorithm id 0, no reserved bits set).
-- 05 00 is Content Size = 5.
-- 23 58 DF 6F is dict_id = 0x6FDF5823. It binds the (content, table)
-  pair and matches the dict_id stored in the File Header of any
-  archive compressed with this dictionary.
-- 00 00 are the two RESERVED bytes.
-- 63 65 is the Header CRC16, computed over the 16-byte header with
-  bytes 0x0C..0x0F treated as zero.
-
-Dictionary content (offset 0x10, 5 bytes):
-
-~~~
-68 65 6C 6C 6F   (ASCII "hello")
-~~~
-
-These raw bytes prefill the LZ77 window; they are not compressed.
-
-Shared literal Huffman table (offset 0x15, 128 bytes):
-
-~~~
-... 20 00 02 00 02 20 ...   (all other bytes 0x00)
-~~~
-
-256 4-bit code lengths packed two-per-byte (low nibble first;
-{{shared-huffman-literal-section}}). Symbols absent from the training
-distribution carry length 0; here only the bytes of "hello" have
-codes (for example the nibble at table index 'e' = 0x65 gives length
-2), so every other entry is zero.
-
 # Security Considerations
 
 ZXC is a lossless compression format. Like any binary format that
@@ -1345,7 +1164,7 @@ arithmetic overflow as a fatal error.
 
 ## Checksum Strength
 
-The CRC8 and CRC16 header checksums and the 32-bit per-block
+The 8-bit and 16-bit header checksums and the 32-bit per-block
 checksum defined in this document are designed for the detection of
 accidental corruption only. They are NOT cryptographic. A ZXC
 archive MUST NOT be used as the sole integrity mechanism against an
@@ -1405,16 +1224,38 @@ Published specification:
 : This document.
 
 Applications which use this media type:
-: File compression, archival, on-the-wire compression.
+: File compression and archival.
 
 Fragment identifier considerations:
 : N/A
 
+^
+
+Additional information:
+: Deprecated alias names for this type:
+  : N/A
+
+  Magic number(s):
+  : The first four bytes of a ZXC stream are F5 2E B0 9C
+    (little-endian encoding of 0x9CB02EF5).
+
+  File extension(s):
+  : .zxc
+
+  Macintosh file type code(s):
+  : N/A
+{: newline="true"}
+
+^
+
+Person & email address to contact for further information:
+: Bertrand Lebonnois \<zxc.codec@gmail.com\>
+
+Intended usage:
+: COMMON
+
 Restrictions on usage:
 : N/A
-
-Provisional registration:
-: Yes
 
 Author:
 : Bertrand Lebonnois
@@ -1422,12 +1263,8 @@ Author:
 Change controller:
 : Bertrand Lebonnois
 
-Magic number(s):
-: The first four bytes of a ZXC stream are F5 2E B0 9C
-  (little-endian encoding of 0x9CB02EF5).
-
-File extension(s):
-: .zxc
+Provisional registration:
+: Yes
 
 ## File Extension
 
@@ -1451,6 +1288,174 @@ The registration policy for new Block Type values is Specification
 Required {{!RFC8126}}.
 
 --- back
+
+# Worked Example {#worked-example}
+
+This section is non-normative.
+
+The following example was produced by the reference encoder from a
+10-byte input ("Hello ZXC\\n") using the equivalent of:
+
+~~~
+zxc -z -C -1 sample.txt
+~~~
+
+The resulting archive is 58 bytes.
+
+## Hexdump
+
+~~~
+00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
+00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
+00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
+00000030: 00 00 00 00 00 00 90 BB A1 75
+~~~
+
+## File Header (offset 0x00, 16 bytes)
+
+~~~
+F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 6E 5B
+~~~
+
+- F5 2E B0 9C decodes to Magic = 0x9CB02EF5.
+- 08 means Format Version 8.
+- 13 means Chunk Size Code 19 (2^19 = 524288 bytes = 512 KiB).
+- 80 means HAS_CHECKSUM = 1, algorithm id 0.
+- Seven RESERVED zero bytes.
+- 6E 5B is the Header Checksum (LE value 0x5B6E).
+
+## Data Block 0 (RAW, offset 0x10)
+
+Block header:
+
+~~~
+00 | 00 | 00 | 0A 00 00 00 | 69
+~~~
+
+- Type 00 (RAW), flags 00, reserved 00.
+- comp_size = 10.
+- Header Checksum = 0x69.
+
+Payload at offset 0x18..0x21:
+
+~~~
+48 65 6C 6C 6F 20 5A 58 43 0A   (ASCII "Hello ZXC\n")
+~~~
+
+Trailing checksum at 0x22..0x25:
+
+~~~
+90 BB A1 75   (LE = 0x75A1BB90)
+~~~
+
+## EOF Block (offset 0x26, 8 bytes)
+
+~~~
+FF | 00 | 00 | 00 00 00 00 | 02
+~~~
+
+## File Footer (offset 0x2E, 12 bytes)
+
+~~~
+0A 00 00 00 00 00 00 00 | 90 BB A1 75
+~~~
+
+- original_source_size = 10.
+- global_hash = 0x75A1BB90.
+
+With a single data block, the global hash equals that block's
+checksum, since rotl1(0) XOR b = b.
+
+## Structural View
+
+~~~
+0x00..0x0F  File Header                (16 B)
+0x10..0x17  RAW Block Header           ( 8 B)
+0x18..0x21  RAW Payload                (10 B)
+0x22..0x25  RAW Block Checksum         ( 4 B)
+0x26..0x2D  EOF Block Header           ( 8 B)
+0x2E..0x39  File Footer                (12 B)
+~~~
+
+## Seekable Variant
+
+The same input compressed with the seek table enabled (zxc -z -C -1
+-S sample.txt) yields a 70-byte archive:
+
+~~~
+00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
+00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
+00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
+00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00
+00000040: 00 00 90 BB A1 75
+~~~
+
+A SEK block of 12 bytes is inserted between the EOF block and the
+File Footer. The SEK block header is FE 00 00 04 00 00 00 D2, with
+comp_size = 4 (one 4-byte entry) and Header Checksum = 0xD2. The single entry
+16 00 00 00 (= 22) is the total on-disk size of data block 0: 8
+(header) + 10 (payload) + 4 (checksum).
+
+The File Footer remains the last 12 bytes of the file, so a decoder
+locating the footer from the end of the file requires no
+modification to support seekable archives.
+
+## Dictionary File
+
+This subsection illustrates a minimal dictionary file
+({{zxd-format}}) whose content is the five ASCII bytes "hello". The
+total file size is 149 bytes: a 16-byte header, 5 bytes of content,
+and the mandatory 128-byte shared literal Huffman table.
+
+~~~
+00000000: C7 D1 B0 9C 01 00 05 00 23 58 DF 6F 00 00 63 65
+00000010: 68 65 6C 6C 6F 00 00 00 00 00 00 00 00 00 00 00
+00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000040: 00 00 00 00 00 00 00 20 00 02 00 02 20 00 00 00
+00000050: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000060: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000070: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000080: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000090: 00 00 00 00 00
+~~~
+
+Dictionary header (offset 0x00, 16 bytes):
+
+~~~
+C7 D1 B0 9C | 01 | 00 | 05 00 | 23 58 DF 6F | 00 00 | 63 65
+~~~
+
+- C7 D1 B0 9C decodes to Magic = 0x9CB0D1C7.
+- 01 means Dictionary Format Version 1.
+- 00 means Flags = 0 (checksum algorithm id 0, no reserved bits set).
+- 05 00 is Content Size = 5.
+- 23 58 DF 6F is dict_id = 0x6FDF5823. It binds the (content, table)
+  pair and matches the dict_id stored in the File Header of any
+  archive compressed with this dictionary.
+- 00 00 are the two RESERVED bytes.
+- 63 65 is the Header Checksum, computed over the 16-byte header with
+  bytes 0x0C..0x0F treated as zero.
+
+Dictionary content (offset 0x10, 5 bytes):
+
+~~~
+68 65 6C 6C 6F   (ASCII "hello")
+~~~
+
+These raw bytes prefill the LZ77 window; they are not compressed.
+
+Shared literal Huffman table (offset 0x15, 128 bytes):
+
+~~~
+... 20 00 02 00 02 20 ...   (all other bytes 0x00)
+~~~
+
+256 4-bit code lengths packed two-per-byte (low nibble first;
+{{shared-huffman-literal-section}}). Symbols absent from the training
+distribution carry length 0; here only the bytes of "hello" have
+codes (for example the nibble at table index 'e' = 0x65 gives length
+2), so every other entry is zero.
 
 # Acknowledgements
 {:numbered="false"}
