@@ -6,8 +6,13 @@
 # Documentation (Doxygen).
 
 # Maintainer tooling: a generic target name an embedding project may own too.
+set(ZXC_DOXYGEN_MIN_VERSION 1.9.7)
 if(PROJECT_IS_TOP_LEVEL)
-    find_package(Doxygen)
+    find_package(Doxygen ${ZXC_DOXYGEN_MIN_VERSION})
+    if(NOT DOXYGEN_FOUND)
+        message(STATUS
+            "Doxygen >= ${ZXC_DOXYGEN_MIN_VERSION} not found - the 'doc' target is unavailable")
+    endif()
 endif()
 if(DOXYGEN_FOUND AND PROJECT_IS_TOP_LEVEL)
     # Generate the Doxyfile with the current project version
