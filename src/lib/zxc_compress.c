@@ -2039,6 +2039,8 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
 // cppcheck-suppress unusedFunction
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
+    if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
+
     const size_t dict_sz = ctx->dict_size;
     const size_t block_sz = src_sz - dict_sz;
     const uint8_t* block_data = chunk + dict_sz;

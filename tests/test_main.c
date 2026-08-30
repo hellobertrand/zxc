@@ -60,6 +60,7 @@ static const test_entry_t g_tests[] = {
     /* --- Block API --- */
     TEST_CASE(test_block_api),
     TEST_CASE(test_block_api_boundary_sizes),
+    TEST_CASE(test_block_api_tiny_capacity),
     TEST_CASE(test_block_api_large_block_varint),
     TEST_CASE(test_decompress_block_bound),
     TEST_CASE(test_decompress_block_safe),
