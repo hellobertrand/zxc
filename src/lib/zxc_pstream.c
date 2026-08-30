@@ -261,10 +261,6 @@ static int cs_drain_pending(zxc_cstream* cs, zxc_outbuf_t* out) {
  * returns @c NULL rather than silently dropping them.  Pre-sizes the
  * @c pending buffer so that the file header / footer paths never need a
  * realloc.
- *
- * @param[in] opts Compression options, or @c NULL for full defaults.
- * @return New stream owned by the caller, or @c NULL on allocation
- *         failure / invalid option values (including dictionary options).
  */
 zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
     zxc_cstream* cs = (zxc_cstream*)ZXC_CALLOC(1, sizeof(*cs));
@@ -337,7 +333,7 @@ static int cs_stage_file_header(zxc_cstream* cs) {
  * @brief Stages the 8-byte EOF block into the @c pending buffer.
  *
  * The EOF block is a regular block header with @c block_type set to
- * @ref ZXC_BLOCK_EOF and @c comp_size = 0; it carries no payload.
+ * `ZXC_BLOCK_EOF` and @c comp_size = 0; it carries no payload.
  *
  * @param[in,out] cs Compression stream.
  * @return @ref ZXC_OK on success, negative @ref zxc_error_t on failure.
@@ -401,9 +397,6 @@ void zxc_cstream_free(zxc_cstream* cs) {
 
 /**
  * @brief Returns the suggested input chunk size (configured block size).
- *
- * @param[in] cs Compression stream.
- * @return Block size in bytes, or 0 if @p cs is @c NULL.
  */
 size_t zxc_cstream_in_size(const zxc_cstream* cs) { return cs ? cs->block_size : 0; }
 
@@ -413,9 +406,6 @@ size_t zxc_cstream_in_size(const zxc_cstream* cs) { return cs ? cs->block_size :
  * Sized to hold one full compressed block plus framing overhead, i.e.
  * @ref zxc_compress_block_bound applied to the configured block size.
  * Falls back to @c block_size when the bound overflows @c size_t.
- *
- * @param[in] cs Compression stream.
- * @return Suggested output buffer capacity in bytes, or 0 if @p cs is @c NULL.
  */
 size_t zxc_cstream_out_size(const zxc_cstream* cs) {
     if (UNLIKELY(!cs)) return 0;  // LCOV_EXCL_LINE
@@ -435,13 +425,6 @@ size_t zxc_cstream_out_size(const zxc_cstream* cs) {
  * The terminal states (@c CS_DRAIN_LAST, @c CS_DRAIN_EOF, @c CS_DRAIN_FOOTER,
  * @c CS_DONE, @c CS_ERRORED) are owned by @ref zxc_cstream_end; reaching
  * them here yields @ref ZXC_ERROR_NULL_INPUT.
- *
- * @param[in,out] cs  Compression stream.
- * @param[in,out] out Caller output buffer.
- * @param[in,out] in  Caller input buffer.
- * @return @c 0 if @p in fully consumed and nothing pending,
- *         @c >0 number of bytes still pending (drain @p out then call again),
- *         @c <0 a @ref zxc_error_t code.
  */
 int64_t zxc_cstream_compress(zxc_cstream* cs, zxc_outbuf_t* out, zxc_inbuf_t* in) {
     if (UNLIKELY(!cs || !out || !in || in->pos > in->size || out->pos > out->size ||
@@ -515,12 +498,6 @@ int64_t zxc_cstream_compress(zxc_cstream* cs, zxc_outbuf_t* out, zxc_inbuf_t* in
  * -> @c CS_DONE).  Reentrant: when @p out fills mid-drain, returns the
  * number of bytes still pending and resumes from where it left off on the
  * next call.  See the public contract in @ref zxc_cstream_end.
- *
- * @param[in,out] cs  Compression stream.
- * @param[in,out] out Caller output buffer.
- * @return @c 0 once finalisation is complete (stream is now in DONE state),
- *         @c >0 number of bytes still pending (drain and call again),
- *         @c <0 a @ref zxc_error_t code.
  */
 int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out) {
     if (UNLIKELY(!cs || !out || cs->state == CS_DONE)) return ZXC_ERROR_NULL_INPUT;
@@ -812,9 +789,6 @@ static int ds_pull_payload(zxc_dstream* ds, zxc_inbuf_t* in) {
  * to the @c FILE*-based pipeline).  @c block_size, @c file_has_checksum,
  * and the @c payload / @c decoded buffers are filled in lazily once the
  * file header is parsed.
- *
- * @param[in] opts Decompression options, or @c NULL for full defaults.
- * @return New stream owned by the caller, or @c NULL on allocation failure.
  */
 zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts) {
     zxc_dstream* ds = (zxc_dstream*)ZXC_CALLOC(1, sizeof(*ds));
@@ -836,8 +810,6 @@ zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts) {
  * @brief Releases a decompression stream and all internal buffers.
  *
  * Safe to call with @c NULL.
- *
- * @param[in,out] ds Stream returned by @ref zxc_dstream_create.
  */
 void zxc_dstream_free(zxc_dstream* ds) {
     if (UNLIKELY(!ds)) return;  // LCOV_EXCL_LINE
@@ -849,9 +821,6 @@ void zxc_dstream_free(zxc_dstream* ds) {
 
 /**
  * @brief Returns 1 iff the stream has reached @c DS_DONE.
- *
- * @param[in] ds Decompression stream.
- * @return @c 1 if DONE, @c 0 otherwise (including errored).
  */
 int zxc_dstream_finished(const zxc_dstream* ds) { return (ds && ds->state == DS_DONE) ? 1 : 0; }
 
@@ -861,9 +830,6 @@ int zxc_dstream_finished(const zxc_dstream* ds) { return (ds && ds->state == DS_
  * Before the file header is parsed the call returns
  * @ref ZXC_BLOCK_SIZE_DEFAULT; afterwards it returns the maximal compressed
  * block size derived from the negotiated @c block_size.
- *
- * @param[in] ds Decompression stream.
- * @return Suggested input buffer capacity in bytes, or 0 if @p ds is @c NULL.
  */
 size_t zxc_dstream_in_size(const zxc_dstream* ds) {
     if (UNLIKELY(!ds)) return 0;  // LCOV_EXCL_LINE
@@ -877,9 +843,6 @@ size_t zxc_dstream_in_size(const zxc_dstream* ds) {
  *
  * Equals the negotiated @c block_size; before the file header is parsed,
  * returns @ref ZXC_BLOCK_SIZE_DEFAULT.
- *
- * @param[in] ds Decompression stream.
- * @return Suggested output buffer capacity in bytes, or 0 if @p ds is @c NULL.
  */
 size_t zxc_dstream_out_size(const zxc_dstream* ds) {
     if (UNLIKELY(!ds)) return 0;  // LCOV_EXCL_LINE
@@ -1035,13 +998,6 @@ static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
  * @par Errors
  * On any negative return the stream becomes errored (sticky); subsequent
  * calls keep returning the same code until @ref zxc_dstream_free.
- *
- * @param[in,out] ds  Decompression stream.
- * @param[in,out] out Caller output buffer.
- * @param[in,out] in  Caller input buffer.
- * @return @c >0 number of decompressed bytes written into @p out this call,
- *         @c 0 stream complete (DONE) or no progress possible,
- *         @c <0 a @ref zxc_error_t code.
  */
 int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* in) {
     if (UNLIKELY(!ds || !out || !in || in->pos > in->size || out->pos > out->size ||

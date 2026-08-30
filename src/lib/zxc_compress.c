@@ -2041,13 +2041,6 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
  * block when the coded form would not shrink the data. When @c ctx->dict_size
  * is > 0, @p chunk is the [dict | block] concat and only the block tail counts
  * toward the expansion check. Appends the per-block checksum when enabled.
- *
- * @param[in,out] ctx     Compression context (level, dict_size, checksum, buffers).
- * @param[in]     chunk   Source bytes ([dict | block] when a dictionary is active).
- * @param[in]     src_sz  Length of @p chunk in bytes (includes any dict prefix).
- * @param[out]    dst     Destination block buffer.
- * @param[in]     dst_cap Capacity of @p dst in bytes.
- * @return Compressed block size in bytes on success, or a negative @ref zxc_error_t.
  */
 // cppcheck-suppress unusedFunction
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,

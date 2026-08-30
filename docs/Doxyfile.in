@@ -1,4 +1,4 @@
-# Doxyfile 1.9.1
+# Doxyfile 1.9.7
 
 #---------------------------------------------------------------------------
 # Project related configuration options
@@ -35,6 +35,7 @@ OPTIMIZE_OUTPUT_VHDL   = NO
 OPTIMIZE_OUTPUT_SLICE  = NO
 EXTENSION_MAPPING      = 
 MARKDOWN_SUPPORT       = YES
+MARKDOWN_ID_STYLE      = GITHUB
 TOC_INCLUDE_HEADINGS   = 5
 AUTOLINK_SUPPORT       = YES
 BUILTIN_STL_SUPPORT    = NO
@@ -111,7 +112,8 @@ WARN_LOGFILE           =
 #---------------------------------------------------------------------------
 # Configuration options related to the input files
 #---------------------------------------------------------------------------
-INPUT                  = README.md \
+INPUT                  = docs/mainpage.md \
+                         docs/EXAMPLES.md \
                          include \
                          src/lib
 INPUT_ENCODING         = UTF-8
@@ -124,8 +126,7 @@ EXCLUDE_SYMLINKS       = NO
 EXCLUDE_PATTERNS       = */test/* \
                          */tests/* \
                          */build/* \
-                         */target/* \
-                         */src/lib/*.c
+                         */target/*
 EXCLUDE_SYMBOLS        = 
 EXAMPLE_PATH           = 
 EXAMPLE_PATTERNS       = *
@@ -135,7 +136,7 @@ INPUT_FILTER           =
 FILTER_PATTERNS        = 
 FILTER_SOURCE_FILES    = NO
 FILTER_SOURCE_PATTERNS = 
-USE_MDFILE_AS_MAINPAGE = README.md
+USE_MDFILE_AS_MAINPAGE = docs/mainpage.md
 
 #---------------------------------------------------------------------------
 # Configuration options related to source browsing
@@ -149,10 +150,6 @@ REFERENCES_LINK_SOURCE = YES
 SOURCE_TOOLTIPS        = YES
 USE_HTAGS              = NO
 VERBATIM_HEADERS       = YES
-CLANG_ASSISTED_PARSING = NO
-CLANG_ADD_INC_PATHS    = YES
-CLANG_OPTIONS          = 
-CLANG_DATABASE_PATH    = 
 
 #---------------------------------------------------------------------------
 # Configuration options related to the alphabetical class index
@@ -175,7 +172,6 @@ HTML_COLORSTYLE        = AUTO_LIGHT
 HTML_COLORSTYLE_HUE    = 220
 HTML_COLORSTYLE_SAT    = 100
 HTML_COLORSTYLE_GAMMA  = 80
-HTML_TIMESTAMP         = NO
 HTML_DYNAMIC_MENUS     = YES
 HTML_DYNAMIC_SECTIONS  = NO
 HTML_INDEX_NUM_ENTRIES = 100
