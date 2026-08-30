@@ -101,6 +101,7 @@ struct zxc_seekable_s {
     uint32_t* comp_sizes;   /* array[num_blocks] */
     uint64_t* comp_offsets; /* prefix-sum: byte offset in compressed file per block */
     uint64_t total_decomp;  /* total decompressed size (from footer) */
+    uint32_t max_comp_size; /* largest entry of comp_sizes, from the same walk */
 
     // File header info - block_size is always a power of 2 in [4KB, 2MB],
     // fits in 21 bits.
@@ -108,9 +109,13 @@ struct zxc_seekable_s {
     int file_has_checksums;
     uint32_t expected_dict_id; /* dict_id from the file header; 0 = no dictionary */
 
-    // Reusable decompression context (single-threaded path only)
+    // Reusable decompression context and compressed-block scratch. Both belong
+    // to the single-threaded path, which is already not reentrant per handle;
+    // the multi-threaded path gives each worker its own.
     zxc_cctx_t dctx;
     int dctx_initialized;
+    uint8_t* read_buf;
+    size_t read_buf_cap;
 
     // Dictionary (owned copy, freed in zxc_seekable_free).
     uint8_t* dict;
@@ -259,6 +264,7 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
             // Reject entries below minimum (block header) or larger than the file
             if (UNLIKELY(s->comp_sizes[i] < ZXC_BLOCK_HEADER_SIZE || s->comp_sizes[i] > src->size))
                 goto fail;
+            if (s->comp_sizes[i] > s->max_comp_size) s->max_comp_size = s->comp_sizes[i];
             s->comp_offsets[i] = comp_acc;
             comp_acc += s->comp_sizes[i];
             // Reject if cumulative offset exceeds file size (inconsistent table)
@@ -473,23 +479,21 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     uint8_t* out = (uint8_t*)dst;
     size_t remaining = len;
 
-    // Allocate read buffer for compressed blocks
-    size_t max_comp = 0;
-    for (uint32_t bi = blk_start; bi <= blk_end; bi++) {
-        if (s->comp_sizes[bi] > max_comp) max_comp = s->comp_sizes[bi];
+    // Compressed-block scratch, sized once for the largest block of the archive
+    // and kept on the handle: a range read is often one of many.
+    const size_t read_cap = (size_t)s->max_comp_size + ZXC_PAD_SIZE;
+    if (s->read_buf_cap < read_cap) {
+        uint8_t* const nb = (uint8_t*)ZXC_REALLOC(s->read_buf, read_cap);
+        if (UNLIKELY(!nb)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
+        s->read_buf = nb;
+        s->read_buf_cap = read_cap;
     }
-    uint8_t* const read_buf = (uint8_t*)ZXC_MALLOC(max_comp + ZXC_PAD_SIZE);
-    if (UNLIKELY(!read_buf)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
+    uint8_t* const read_buf = s->read_buf;
 
     for (uint32_t bi = blk_start; bi <= blk_end; bi++) {
         // Read compressed block data
-        const int read_res = zxc_seek_read_block(s, bi, read_buf, max_comp + ZXC_PAD_SIZE);
-        if (UNLIKELY(read_res < 0)) {
-            // LCOV_EXCL_START
-            ZXC_FREE(read_buf);
-            return read_res;
-            // LCOV_EXCL_STOP
-        }
+        const int read_res = zxc_seek_read_block(s, bi, read_buf, read_cap);
+        if (UNLIKELY(read_res < 0)) return read_res;  // LCOV_EXCL_LINE
 
         // Decompress the block: when a dictionary is active, decode into the
         // cctx-owned dict_buffer (which has dict content prepended) so that
@@ -498,22 +502,12 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
             s->dctx.dict_buffer ? s->dctx.dict_buffer + s->dict_size : s->dctx.work_buf;
         const int dec_res =
             zxc_decompress_chunk_wrapper(&s->dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
-        if (UNLIKELY(dec_res < 0)) {
-            // LCOV_EXCL_START
-            ZXC_FREE(read_buf);
-            return dec_res;
-            // LCOV_EXCL_STOP
-        }
+        if (UNLIKELY(dec_res < 0)) return dec_res;  // LCOV_EXCL_LINE
 
         // Calculate which portion of this block's decompressed data we need
         const uint64_t blk_decomp_start = zxc_seek_decomp_offset(s->block_size, bi);
         const size_t skip = (offset > blk_decomp_start) ? (size_t)(offset - blk_decomp_start) : 0;
-        if (UNLIKELY((size_t)dec_res < skip)) {
-            // LCOV_EXCL_START
-            ZXC_FREE(read_buf);
-            return ZXC_ERROR_CORRUPT_DATA;
-            // LCOV_EXCL_STOP
-        }
+        if (UNLIKELY((size_t)dec_res < skip)) return ZXC_ERROR_CORRUPT_DATA;  // LCOV_EXCL_LINE
         const size_t avail = (size_t)dec_res - skip;
         const size_t copy = (avail < remaining) ? avail : remaining;
 
@@ -522,7 +516,6 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         remaining -= copy;
     }
 
-    ZXC_FREE(read_buf);
     return (int64_t)len;
 }
 
@@ -631,12 +624,9 @@ static void* zxc_seek_mt_worker(void* arg) {
     uint8_t* const dict_work = dctx.dict_buffer;
     if (dict_work) ZXC_MEMCPY(dict_work, s->dict, s->dict_size);
 
-    // Read buffer sized for the largest compressed block of the stripe.
-    size_t max_csz = 0;
-    for (uint32_t i = st->first; i < st->num_jobs; i += st->stride) {
-        const uint32_t csz = s->comp_sizes[jobs[i].block_idx];
-        if (csz > max_csz) max_csz = csz;
-    }
+    // One read buffer per worker (they cannot share), sized from the archive-wide
+    // maximum recorded at parse time rather than by rescanning the stripe.
+    const size_t max_csz = (size_t)s->max_comp_size;
     uint8_t* const read_buf = (uint8_t*)ZXC_MALLOC(max_csz + ZXC_PAD_SIZE);
     if (UNLIKELY(!read_buf)) {
         // LCOV_EXCL_START
@@ -815,6 +805,7 @@ void zxc_seekable_free(zxc_seekable* s) {
     if (UNLIKELY(!s)) return;
     if (s->dctx_initialized) zxc_cctx_free(&s->dctx);
     ZXC_FREE(s->dict);
+    ZXC_FREE(s->read_buf);
     ZXC_FREE(s->comp_sizes);
     ZXC_FREE(s->comp_offsets);
     ZXC_FREE(s->owned_reader_ctx);
