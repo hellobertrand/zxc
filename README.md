@@ -777,7 +777,7 @@ Community-maintained bindings:
 
 The ZXC on-disk wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format version 8), so any third party can build an independent, interoperable decoder.
 
-> **Upgrading?** The current format is **v7** — Huffman entropy sections in the new PivCo layout (faster SIMD-merge decode), Huffman-coded tokens and 11-bit codes at level 7. Like the v5→v6 change, this is a deliberate clean break: v7 tools reject v6 archives (see [`docs/MIGRATION.md`](docs/MIGRATION.md) to convert).
+> **Upgrading?** The current format is **v8** — block sub-headers cut from 16 to 12 bytes, section descriptors reduced to the sizes the header cannot imply (GHI carries none at all), and a mandatory 32-byte payload tail that gives the literal decoder its read-ahead slack. Like the v6->v7 change, this is a deliberate clean break: v8 tools reject v7 archives (see [`docs/MIGRATION.md`](docs/MIGRATION.md) to convert).
 
 Two complementary, byte-frozen suites guard that format:
 
