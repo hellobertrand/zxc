@@ -696,21 +696,40 @@ File Footer alone.
 # Prefix Varint Encoding {#varint}
 
 ZXC Extras streams use a prefix-length variable-length integer
-encoding. The length of the encoded value is signalled in unary
-form in the high bits of the first byte. The encoding is
-generalisable to any number of bytes by extending the prefix-length
-table below.
+encoding. The total length is signalled in unary form in the high
+bits of the first byte, so it is known from that byte alone and
+every following byte carries eight payload bits. This differs from
+LEB128, which spends a continuation bit in each byte and reveals the
+length only as the value is scanned. The scheme is generalisable to
+any number of bytes by extending the prefix-length table below.
 
-| First-byte prefix | Total bytes | Payload bits |
-|-------------------|------------:|-------------:|
-| 0xxxxxxx          |      1      |      7       |
-| 10xxxxxx          |      2      |     14       |
-| 110xxxxx          |      3      |     21       |
-| 1110xxxx          |      4      |     28       |
-| 11110xxx          |      5      |     35       |
+| First-byte prefix | Total bytes | Payload bits | Version 8 |
+|-------------------|------------:|-------------:|-----------|
+| 0xxxxxxx          |      1      |      7       | accepted  |
+| 10xxxxxx          |      2      |     14       | accepted  |
+| 110xxxxx          |      3      |     21       | accepted  |
+| 1110xxxx          |      4      |     28       | rejected  |
+| 11110xxx          |      5      |     35       | rejected  |
 
-Payload bits from following bytes are concatenated little-endian
-style (low-order bits first).
+The 4- and 5-byte forms are listed to define the scheme; Format
+Version 8 caps encodings at three bytes and a decoder MUST reject
+the other two ({{varint-cap}}).
+
+The first byte's payload bits — those below its unary prefix — are
+the least significant bits of the value, and each following byte
+contributes the next eight bits up. Writing b0, b1, b2 for the
+bytes in stream order, the accepted forms decode as:
+
+~~~
+1 byte:   value = b0
+2 bytes:  value = (b0 AND 0x3F) OR (b1 << 6)
+3 bytes:  value = (b0 AND 0x1F) OR (b1 << 5) OR (b2 << 13)
+~~~
+
+For example, the two bytes AC 04 decode as the 2-byte form:
+(0xAC AND 0x3F) OR (0x04 << 6) = 44 + 256 = 300. The three bytes
+C3 35 0C decode as the 3-byte form: (0xC3 AND 0x1F) OR (0x35 << 5)
+OR (0x0C << 13) = 3 + 1696 + 98304 = 100003.
 
 ## Length Cap {#varint-cap}
 
@@ -983,7 +1002,7 @@ compressing the corpus against the trained content. Both procedures
 are encoder concerns and do not affect the on-disk format; any file
 that satisfies {{zxd-format}} is a conforming dictionary.
 
-## Naming and Lookup Conventions
+## Naming and Lookup Conventions {#dictionary-naming}
 
 The .zxd extension is a tooling convention only. A dictionary file
 is identified by its magic word at offset 0x00, never by its
@@ -1287,7 +1306,10 @@ Provisional registration:
 
 ## File Extension
 
-The conventional file extension for a ZXC archive is .zxc.
+The conventional file extension for a ZXC archive is .zxc. A companion
+pre-trained dictionary file ({{zxd-format}}) uses .zxd. Both are tooling
+conventions: a file of either kind is identified by its magic word rather
+than by its name ({{dictionary-naming}}).
 
 ## Block Type Registry
 
@@ -1427,7 +1449,7 @@ total file size is 149 bytes: a 16-byte header, 5 bytes of content,
 and the mandatory 128-byte shared literal Huffman table.
 
 ~~~
-00000000: C7 D1 B0 9C 01 00 05 00 23 58 DF 6F 00 00 63 65
+00000000: C7 D1 B0 9C 01 00 05 00 34 07 FC 0C 00 00 2D 74
 00000010: 68 65 6C 6C 6F 00 00 00 00 00 00 00 00 00 00 00
 00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 00000030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
@@ -1442,18 +1464,18 @@ and the mandatory 128-byte shared literal Huffman table.
 Dictionary header (offset 0x00, 16 bytes):
 
 ~~~
-C7 D1 B0 9C | 01 | 00 | 05 00 | 23 58 DF 6F | 00 00 | 63 65
+C7 D1 B0 9C | 01 | 00 | 05 00 | 34 07 FC 0C | 00 00 | 2D 74
 ~~~
 
 - C7 D1 B0 9C decodes to Magic = 0x9CB0D1C7.
 - 01 means Dictionary Format Version 1.
 - 00 means Flags = 0 (checksum algorithm id 0, no reserved bits set).
 - 05 00 is Content Size = 5.
-- 23 58 DF 6F is dict_id = 0x6FDF5823. It binds the (content, table)
+- 34 07 FC 0C is dict_id = 0x0CFC0734. It binds the (content, table)
   pair and matches the dict_id stored in the File Header of any
   archive compressed with this dictionary.
 - 00 00 are the two RESERVED bytes.
-- 63 65 is the Header Checksum, computed over the 16-byte header with
+- 2D 74 is the Header Checksum, computed over the 16-byte header with
   bytes 0x0C..0x0F treated as zero.
 
 Dictionary content (offset 0x10, 5 bytes):
