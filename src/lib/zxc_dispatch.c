@@ -1049,12 +1049,11 @@ static uint64_t zxc_inplace_margin(const uint64_t dsize, const size_t chunk_size
  */
 static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64_t* dsize,
                              uint64_t* margin, uint64_t* floor) {
-    if (UNLIKELY(zxc_le32(comp) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
     size_t chunk_size = 0;
     int has_cs = 0;
-    uint32_t did = 0;
-    if (UNLIKELY(zxc_read_file_header(comp, comp_size, &chunk_size, &has_cs, &did) != ZXC_OK))
-        return ZXC_ERROR_BAD_HEADER;
+
+    const int hr = zxc_read_file_header(comp, comp_size, &chunk_size, &has_cs, NULL);
+    if (UNLIKELY(hr != ZXC_OK)) return (hr == ZXC_ERROR_BAD_MAGIC) ? hr : ZXC_ERROR_BAD_HEADER;
 
     const uint64_t d = zxc_le64(comp + comp_size - ZXC_FILE_FOOTER_SIZE);
     if (UNLIKELY(!zxc_footer_dsize_plausible(d, chunk_size, comp_size)))
@@ -1143,12 +1142,10 @@ uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE)) return 0;
 
     const uint8_t* const p = (const uint8_t*)src;
-    if (UNLIKELY(zxc_le32(p) != ZXC_MAGIC_WORD)) return 0;
-
     size_t chunk_size = 0;
     int has_cs = 0;
-    uint32_t did = 0;
-    if (UNLIKELY(zxc_read_file_header(p, src_size, &chunk_size, &has_cs, &did) != ZXC_OK)) return 0;
+
+    if (UNLIKELY(zxc_read_file_header(p, src_size, &chunk_size, &has_cs, NULL) != ZXC_OK)) return 0;
 
     const uint8_t* const footer = p + src_size - ZXC_FILE_FOOTER_SIZE;
     const uint64_t dsize = zxc_le64(footer);

@@ -286,14 +286,13 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
     }
 
     // Step 2: count k-gram frequencies
-    uint16_t* freq = (uint16_t*)ZXC_MALLOC(ZXC_DICT_HASH_SIZE * sizeof(uint16_t));
+    uint16_t* freq = (uint16_t*)ZXC_CALLOC(ZXC_DICT_HASH_SIZE, sizeof(uint16_t));
     if (UNLIKELY(!freq)) {
         // LCOV_EXCL_START
         ZXC_FREE(corpus);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
-    ZXC_MEMSET(freq, 0, ZXC_DICT_HASH_SIZE * sizeof(uint16_t));
 
     // Sample positions rather than count them all: a full count saturates the
     // 16-bit counters, the extension test then never stops and segments balloon

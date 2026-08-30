@@ -539,7 +539,7 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     // Header checksum (integrity), then the checksum-algorithm id in flags bits 0-3
     // (only 0 = RapidHash is defined). It is checked first via short-circuit.
     if (UNLIKELY(zxc_le16(src + 14) != zxc_hash16(temp) ||
-                 (src[6] & 0x0FU) != ZXC_CHECKSUM_RAPIDHASH))
+                 (src[6] & ZXC_FILE_CHECKSUM_ALGO_MASK) != ZXC_CHECKSUM_RAPIDHASH))
         return ZXC_ERROR_BAD_HEADER;
 
     if (out_block_size) {

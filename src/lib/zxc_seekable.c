@@ -611,8 +611,8 @@ static uint32_t zxc_seek_decomp_size(const uint32_t block_size, const uint64_t t
 /**
  * @brief Reads a compressed block into @p buf from the memory buffer or reader.
  *
- * Single-threaded path: copies from @c s->src in buffer mode, otherwise calls
- * @c s->reader.read_at (which also backs the FILE* variant).
+ * Copies from @c s->src in buffer mode, otherwise calls @c s->reader.read_at
+ * (which also backs the FILE* variant).
  *
  * @param[in]  s          Seekable handle.
  * @param[in]  block_idx  Zero-based block index to read.
@@ -765,42 +765,6 @@ typedef struct {
 } zxc_seek_mt_job_t;
 
 /**
- * @brief Thread-safe block read backing the multi-threaded path.
- *
- * Like @ref zxc_seek_read_block but safe to call concurrently: buffer mode uses
- * @c memcpy on const data, reader mode relies on a positioned (pread-style)
- * callback that carries its own offset.
- *
- * @param[in]  s          Seekable handle (read-only).
- * @param[in]  block_idx  Zero-based block index to read.
- * @param[out] buf        Destination buffer.
- * @param[in]  buf_cap    Capacity of @p buf in bytes.
- * @return The block's compressed byte count on success, or a negative
- *         @ref zxc_error_t.
- */
-static int zxc_seek_read_block_mt(const zxc_seekable* s, const uint32_t block_idx, uint8_t* buf,
-                                  const size_t buf_cap) {
-    const uint64_t off = s->comp_offsets[block_idx];
-    const uint32_t csz = s->comp_sizes[block_idx];
-    if (UNLIKELY(csz > buf_cap)) return ZXC_ERROR_DST_TOO_SMALL;
-
-    if (s->src) {
-        // Buffer mode - memcpy is inherently thread-safe on const data
-        if (UNLIKELY(off + csz > s->src_size)) return ZXC_ERROR_SRC_TOO_SMALL;
-        ZXC_MEMCPY(buf, s->src + off, csz);
-    } else if (s->reader.read_at) {
-        // Reader callback - caller-supplied read_at must be thread-safe.
-        // The FILE* variant (zxc_seekable_file.c) installs a pread-backed
-        // callback that is naturally thread-safe.
-        const int64_t r = s->reader.read_at(s->reader.ctx, buf, csz, off);
-        if (UNLIKELY(r != (int64_t)csz)) return (r < 0) ? (int)r : ZXC_ERROR_IO;
-    } else {
-        return ZXC_ERROR_NULL_INPUT;  // LCOV_EXCL_LINE
-    }
-    return (int)csz;
-}
-
-/**
  * @struct zxc_seek_mt_stripe_t
  * @brief Per-thread stripe descriptor for multi-threaded decompression.
  *
@@ -904,7 +868,7 @@ static void* zxc_seek_mt_worker(void* arg) {
         zxc_seek_mt_job_t* const job = &jobs[i];
 
         const int read_res =
-            zxc_seek_read_block_mt(s, job->block_idx, read_buf, max_csz + ZXC_PAD_SIZE);
+            zxc_seek_read_block(s, job->block_idx, read_buf, max_csz + ZXC_PAD_SIZE);
         if (UNLIKELY(read_res < 0)) {
             // LCOV_EXCL_START
             job->result = read_res;

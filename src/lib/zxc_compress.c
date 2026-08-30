@@ -1516,11 +1516,7 @@ parse_done:;
                     if (UNLIKELY(p[0] == p[1] && p[1] == p[2] && p[2] == p[3])) break;
                     p++;
                 }
-                while (p < p_end) {
-                    if (UNLIKELY(p + 3 < p_end && p[0] == p[1] && p[1] == p[2] && p[2] == p[3]))
-                        break;
-                    p++;
-                }
+                if (p >= p_end_4) p = p_end;
 
 #if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || \
     defined(ZXC_USE_NEON32) || defined(ZXC_USE_SSE2)
@@ -1968,9 +1964,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
     ZXC_MEMCPY(p_curr, literals, lit_c);
     p_curr += lit_c;
-    rem -= sz_lit;
 
-    if (UNLIKELY(rem < sz_seq)) return ZXC_ERROR_DST_TOO_SMALL;
     // Write sequences in little-endian order
 #ifdef ZXC_BIG_ENDIAN
     for (uint32_t i = 0; i < seq_c; i++) {

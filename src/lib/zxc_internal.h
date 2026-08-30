@@ -161,12 +161,6 @@ extern "C" {
  */
 #define ZXC_PREFETCH_READ(ptr) __builtin_prefetch((const void*)(ptr), 0, 3)
 
-/** @def ZXC_PREFETCH_WRITE
- * @brief Prefetch data for writing.
- * @param ptr Pointer to data to prefetch.
- */
-#define ZXC_PREFETCH_WRITE(ptr) __builtin_prefetch((const void*)(ptr), 1, 3)
-
 /** @def ZXC_MEMCPY
  * @brief Optimized memory copy using compiler built-in.
  */
@@ -206,10 +200,8 @@ extern "C" {
 #if defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64)
 #include <xmmintrin.h>
 #define ZXC_PREFETCH_READ(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
-#define ZXC_PREFETCH_WRITE(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
 #else
 #define ZXC_PREFETCH_READ(ptr) __prefetch((const void*)(ptr))
-#define ZXC_PREFETCH_WRITE(ptr) __prefetch((const void*)(ptr))
 #endif
 #define LIKELY(x) (x)
 #define UNLIKELY(x) (x)
@@ -241,7 +233,6 @@ extern "C" {
 #define UNLIKELY(x) (x)
 #define RESTRICT
 #define ZXC_PREFETCH_READ(ptr)
-#define ZXC_PREFETCH_WRITE(ptr)
 #define ZXC_MEMCPY(dst, src, n) memcpy(dst, src, n)
 #define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
 
@@ -425,9 +416,6 @@ extern "C" {
  *  zxc_compress_bound().
  */
 #define ZXC_BLOCK_FORMAT_OVERHEAD 68
-
-/** @brief Widest GLO section descriptors: literal and token compressed sizes. */
-#define ZXC_GLO_MAX_DESC_SIZE (2 * sizeof(uint32_t))
 
 /** @brief Checksum algorithm id for RapidHash (default, sole implementation). */
 #define ZXC_CHECKSUM_RAPIDHASH 0
@@ -1472,7 +1460,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
  * @brief Writes a GLO sub-header followed by its section descriptors.
  *
  * They hold only the two sizes the header cannot imply, and are 0, 4 or 8 bytes
- * wide accordingly (@ref ZXC_GLO_MAX_DESC_SIZE).
+ * wide accordingly.
  *
  * @param[out] dst      Pointer to the destination buffer.
  * @param[in]  rem      The remaining space in the destination buffer.
