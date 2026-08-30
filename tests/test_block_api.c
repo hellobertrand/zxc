@@ -678,12 +678,10 @@ int test_block_api_large_block_varint() {
 /**
  * @brief Every destination capacity must be rejected cleanly, never overrun.
  *
- * Regression guard: the encoders open with `dst_cap - ZXC_BLOCK_HEADER_SIZE`,
- * which wraps for a destination smaller than one block header. Capacities of
- * 1..7 bytes (block API) and 16..23 (frame API, after its 16-byte file header)
- * then passed every later capacity check and wrote a 12-byte sub-header out of
- * bounds. Sweeps both APIs across the small capacities with an exactly-sized
- * heap buffer, so a sanitizer build turns any overrun into a hard failure.
+ * Regression guard: `dst_cap - ZXC_BLOCK_HEADER_SIZE` used to wrap for a
+ * destination smaller than one block header, so a 12-byte sub-header was
+ * written out of bounds. The exactly-sized heap buffer makes a sanitizer build
+ * fail hard on any overrun.
  */
 int test_block_api_tiny_capacity(void) {
     printf("=== TEST: Block API - Tiny Destination Capacities ===\n");
@@ -713,17 +711,18 @@ int test_block_api_tiny_capacity(void) {
             uint8_t* dst = (uint8_t*)malloc(cap);
             if (!dst) continue;
 
+            // SRC_SIZE far exceeds MAX_CAP: every capacity here must be refused.
             const int64_t b = zxc_compress_block(cctx, src, SRC_SIZE, dst, cap, &opts);
-            if (b > 0 && (size_t)b > cap) {
-                printf("  [FAIL] compress_block level %d cap %zu returned %lld\n", level, cap,
-                       (long long)b);
+            if (b != ZXC_ERROR_DST_TOO_SMALL) {
+                printf("  [FAIL] compress_block level %d cap %zu: expected %d, got %lld\n", level,
+                       cap, ZXC_ERROR_DST_TOO_SMALL, (long long)b);
                 failures++;
             }
 
             const int64_t f = zxc_compress(src, SRC_SIZE, dst, cap, &opts);
-            if (f > 0 && (size_t)f > cap) {
-                printf("  [FAIL] compress level %d cap %zu returned %lld\n", level, cap,
-                       (long long)f);
+            if (f >= 0) {
+                printf("  [FAIL] compress level %d cap %zu: expected a rejection, got %lld\n",
+                       level, cap, (long long)f);
                 failures++;
             }
             free(dst);
@@ -736,7 +735,7 @@ int test_block_api_tiny_capacity(void) {
         printf("FAILED: %d sub-tests failed\n", failures);
         return 0;
     }
-    printf("  [PASS] capacities 1..%d rejected without overrun (levels 1-7)\n", MAX_CAP);
+    printf("  [PASS] capacities 1..%d rejected, no overrun (levels 1-7, both APIs)\n", MAX_CAP);
     printf("PASS\n\n");
     return 1;
 }

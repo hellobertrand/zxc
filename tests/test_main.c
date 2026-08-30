@@ -80,6 +80,7 @@ static const test_entry_t g_tests[] = {
 
     /* --- Stream API --- */
     TEST_CASE(test_null_output_decompression),
+    TEST_CASE(test_stream_level_clamp),
     TEST_CASE(test_invalid_arguments),
     TEST_CASE(test_truncated_input),
     TEST_CASE(test_io_failures),

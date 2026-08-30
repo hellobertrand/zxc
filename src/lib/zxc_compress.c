@@ -1177,6 +1177,8 @@ static void zxc_lz_seed_dict(const uint8_t* RESTRICT src, const size_t dict_size
 static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, size_t dst_cap,
                                 size_t* RESTRICT out_sz) {
+    if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
+
     const int level = ctx->compression_level;
     const size_t dict_sz = ctx->dict_size;
 
@@ -1850,6 +1852,8 @@ parse_done:;
 static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
                                 size_t* RESTRICT const out_sz) {
+    if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
+
     const int level = ctx->compression_level;
     const size_t dict_sz = ctx->dict_size;
 

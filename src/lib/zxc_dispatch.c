@@ -434,6 +434,9 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     return func(ctx, src, src_sz, dst, dst_cap);
 }
 
+#undef ZXC_DISPATCH_STORE
+#undef ZXC_DISPATCH_LOAD
+
 // ============================================================================
 // HUFFMAN TRAMPOLINES
 // ============================================================================

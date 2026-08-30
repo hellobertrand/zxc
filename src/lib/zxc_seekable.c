@@ -206,12 +206,14 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     if (UNLIKELY(num_blocks_64 > UINT32_MAX)) return NULL;
     const uint32_t num_blocks = (uint32_t)num_blocks_64;
 
-    // Step 4: locate the seek block, then read and validate it. Guard the
-    // size_t multiplication before it is used as an allocation size.
+    // Step 4: locate and validate the seek block. Two headers of margin, not one:
+    // the tail read below spans the EOF block, so tail_total could wrap on 32 bits.
     const uint64_t entries_total_64 = (uint64_t)num_blocks * ZXC_SEEK_ENTRY_SIZE;
-    if (UNLIKELY(entries_total_64 > SIZE_MAX - ZXC_BLOCK_HEADER_SIZE)) return NULL;
+    if (UNLIKELY(entries_total_64 > SIZE_MAX - 2 * ZXC_BLOCK_HEADER_SIZE)) return NULL;
+
     const size_t seek_block_total = ZXC_BLOCK_HEADER_SIZE + (size_t)entries_total_64;
     if (UNLIKELY((uint64_t)seek_block_total + ZXC_FILE_FOOTER_SIZE > src->size)) return NULL;
+
     const uint64_t seek_off = src->size - ZXC_FILE_FOOTER_SIZE - (uint64_t)seek_block_total;
     if (UNLIKELY(seek_off < ZXC_BLOCK_HEADER_SIZE)) return NULL;
 
@@ -220,14 +222,22 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     // reads (header, footer, tail) while validating the same layout the
     // in-memory path does.
     const size_t tail_total = ZXC_BLOCK_HEADER_SIZE + seek_block_total;
-    uint8_t* tail = (uint8_t*)ZXC_MALLOC(tail_total);
-    if (UNLIKELY(!tail)) return NULL;  // LCOV_EXCL_LINE
-    zxc_seekable* s = NULL;
-    if (UNLIKELY(!zxc_seek_source_read(src, tail, tail_total, seek_off - ZXC_BLOCK_HEADER_SIZE)))
-        goto fail;
+    const uint64_t tail_off = seek_off - ZXC_BLOCK_HEADER_SIZE;
 
-    const uint8_t* const eof_hdr = tail;
-    const uint8_t* const seek_blk = tail + ZXC_BLOCK_HEADER_SIZE;
+    uint8_t* tail = NULL;
+    const uint8_t* tail_view = src->data ? src->data + tail_off : NULL;
+    zxc_seekable* s = NULL;
+    if (!tail_view) {
+        tail = (uint8_t*)ZXC_MALLOC(tail_total);
+        if (UNLIKELY(!tail)) return NULL;  // LCOV_EXCL_LINE
+        if (UNLIKELY(!zxc_seek_source_read(src, tail, tail_total, tail_off))) goto fail;
+        tail_view = tail;
+    } else if (UNLIKELY(tail_off + tail_total > src->size)) {
+        return NULL;  // LCOV_EXCL_LINE
+    }
+
+    const uint8_t* const eof_hdr = tail_view;
+    const uint8_t* const seek_blk = tail_view + ZXC_BLOCK_HEADER_SIZE;
 
     zxc_block_header_t bh;
     if (UNLIKELY(zxc_read_block_header(seek_blk, seek_block_total, &bh) != ZXC_OK ||
@@ -624,9 +634,12 @@ static void* zxc_seek_mt_worker(void* arg) {
     uint8_t* const dict_work = dctx.dict_buffer;
     if (dict_work) ZXC_MEMCPY(dict_work, s->dict, s->dict_size);
 
-    // One read buffer per worker (they cannot share), sized from the archive-wide
-    // maximum recorded at parse time rather than by rescanning the stripe.
-    const size_t max_csz = (size_t)s->max_comp_size;
+    // Read buffer sized for the largest compressed block of the stripe.
+    size_t max_csz = 0;
+    for (uint32_t i = st->first; i < st->num_jobs; i += st->stride) {
+        const uint32_t csz = s->comp_sizes[jobs[i].block_idx];
+        if (csz > max_csz) max_csz = csz;
+    }
     uint8_t* const read_buf = (uint8_t*)ZXC_MALLOC(max_csz + ZXC_PAD_SIZE);
     if (UNLIKELY(!read_buf)) {
         // LCOV_EXCL_START

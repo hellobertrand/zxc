@@ -512,6 +512,199 @@ static int64_t zxc_stream_engine_fail(zxc_stream_ctx_t* ctx, pthread_t* workers,
 // LCOV_EXCL_STOP
 
 /**
+ * @brief Reads the input and feeds the ring until the stream ends.
+ *
+ * Returns the ring index the terminator job goes to.
+ */
+static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mode,
+                                const size_t chunk_sz, uint64_t* total_src_bytes,
+                                uint32_t* d_global_hash) {
+    int read_idx = 0;
+    int read_eof = 0;
+
+    while (!read_eof && !ctx->io_error) {
+        zxc_stream_job_t* const job = &ctx->jobs[read_idx];
+        pthread_mutex_lock(&ctx->lock);
+        while (job->status != JOB_STATUS_FREE && !ctx->io_error)
+            pthread_cond_wait(&ctx->cond_reader, &ctx->lock);
+        pthread_mutex_unlock(&ctx->lock);
+
+        if (UNLIKELY(ctx->io_error)) break;
+
+        size_t read_sz = 0;
+        if (mode == 1) {
+            read_sz = fread(job->in_buf, 1, chunk_sz, f_in);
+            *total_src_bytes += read_sz;
+            if (UNLIKELY(read_sz == 0)) read_eof = 1;
+        } else {
+            uint8_t bh_buf[ZXC_BLOCK_HEADER_SIZE];
+            size_t h_read = fread(bh_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in);
+            if (UNLIKELY(h_read < ZXC_BLOCK_HEADER_SIZE)) {
+                read_eof = 1;
+            } else {
+                zxc_block_header_t bh;
+                if (UNLIKELY(zxc_read_block_header(bh_buf, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK)) {
+                    read_eof = 1;
+                    goto _job_prepared;
+                }
+
+                if (bh.block_type == ZXC_BLOCK_EOF) {
+                    if (UNLIKELY(bh.comp_size != 0)) {
+                        ctx->io_error = 1;
+                        goto _job_prepared;
+                    }
+                    read_eof = 1;
+                    read_sz = 0;
+                    goto _job_prepared;
+                }
+
+                const int has_crc = ctx->file_has_checksum;
+                const size_t checksum_sz = (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+                const size_t body_total = bh.comp_size + checksum_sz;
+                const size_t total_len = ZXC_BLOCK_HEADER_SIZE + body_total;
+
+                if (UNLIKELY(total_len > job->in_cap)) {
+                    ctx->io_error = 1;
+                    break;
+                }
+
+                ZXC_MEMCPY(job->in_buf, bh_buf, ZXC_BLOCK_HEADER_SIZE);
+
+                // Single fread for body + checksum (reduces syscalls)
+                const size_t body_read =
+                    fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE, 1, body_total, f_in);
+
+                if (UNLIKELY(body_read != body_total)) {
+                    ctx->io_error = 1;
+                    break;
+                } else if (has_crc) {
+                    // Update Global Hash for Decompression
+                    const uint32_t b_crc =
+                        zxc_le32(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
+                    *d_global_hash = zxc_hash_combine_rotate(*d_global_hash, b_crc);
+                }
+                read_sz = ZXC_BLOCK_HEADER_SIZE + body_read;
+            }
+        }
+    _job_prepared:
+        if (UNLIKELY(read_eof && read_sz == 0)) break;
+
+        job->in_sz = read_sz;
+        pthread_mutex_lock(&ctx->lock);
+        job->status = JOB_STATUS_FILLED;
+        ctx->worker_queue[ctx->wq_head] = read_idx;
+        ctx->wq_head = (ctx->wq_head + 1) % ctx->ring_size;
+        ctx->wq_count++;
+        read_idx = (read_idx + 1) % ctx->ring_size;
+        pthread_cond_signal(&ctx->cond_worker);
+        pthread_mutex_unlock(&ctx->lock);
+
+        if (UNLIKELY(read_sz < chunk_sz && mode == 1)) read_eof = 1;
+    }
+    return read_idx;
+}
+
+/**
+ * @brief Closes a compressed stream: EOF block, optional seek table, footer.
+ *
+ * Runs once the writer thread has drained, so it appends straight to the file.
+ */
+static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, FILE* f_out,
+                                       const uint64_t total_src_bytes, const int checksum_enabled) {
+    // EOF block
+    uint8_t eof_buf[ZXC_BLOCK_HEADER_SIZE];
+    const zxc_block_header_t eof_bh = {
+        .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
+    zxc_write_block_header(eof_buf, ZXC_BLOCK_HEADER_SIZE, &eof_bh);
+    if (UNLIKELY(f_out &&
+                 fwrite(eof_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_out) != ZXC_BLOCK_HEADER_SIZE))
+        ctx->io_error = 1;
+    else
+        w->total_bytes += ZXC_BLOCK_HEADER_SIZE;
+
+    // Seekable: write SEK block between EOF and footer
+    if (!ctx->io_error && w->seek_comp && w->seek_count > 0) {
+        const size_t st_size = zxc_seek_table_size(w->seek_count);
+        uint8_t* const st_buf = (uint8_t*)ZXC_MALLOC(st_size);
+        if (st_buf) {
+            const int64_t st_val =
+                zxc_write_seek_table(st_buf, st_size, w->seek_comp, w->seek_count);
+            if (st_val > 0 && f_out && fwrite(st_buf, 1, (size_t)st_val, f_out) == (size_t)st_val)
+                w->total_bytes += st_val;
+            ZXC_FREE(st_buf);
+        }
+    }
+
+    // Footer
+    uint8_t footer_buf[ZXC_FILE_FOOTER_SIZE];
+    zxc_write_file_footer(footer_buf, ZXC_FILE_FOOTER_SIZE, total_src_bytes, w->global_hash,
+                          checksum_enabled);
+    if (UNLIKELY(f_out &&
+                 fwrite(footer_buf, 1, ZXC_FILE_FOOTER_SIZE, f_out) != ZXC_FILE_FOOTER_SIZE))
+        ctx->io_error = 1;
+    else
+        w->total_bytes += ZXC_FILE_FOOTER_SIZE;
+}
+
+/**
+ * @brief Consumes and validates the trailer of a decompressed stream.
+ */
+static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, writer_args_t* w, FILE* f_in,
+                                         const uint32_t d_global_hash, const int checksum_enabled) {
+    // After the EOF block, the stream may contain:
+    //   (a) [FOOTER 12B]                  - no seekable table
+    //   (b) [SEK header 8B] [payload] [FOOTER 12B] - seekable archive
+    uint8_t peek_buf[ZXC_BLOCK_HEADER_SIZE];
+    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
+
+    if (UNLIKELY(fread(peek_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in) != ZXC_BLOCK_HEADER_SIZE)) {
+        ctx->io_error = 1;
+    } else {
+        zxc_block_header_t peek_bh;
+        const int is_sek =
+            (zxc_read_block_header(peek_buf, ZXC_BLOCK_HEADER_SIZE, &peek_bh) == ZXC_OK &&
+             peek_bh.block_type == ZXC_BLOCK_SEK);
+
+        if (is_sek) {
+            // Drain the SEK payload (read + discard)
+            size_t remaining = (size_t)peek_bh.comp_size;
+            uint8_t discard[512];
+            while (remaining > 0 && !ctx->io_error) {
+                const size_t chunk = remaining < sizeof(discard) ? remaining : sizeof(discard);
+                if (UNLIKELY(fread(discard, 1, chunk, f_in) != chunk)) ctx->io_error = 1;
+                remaining -= chunk;
+            }
+            // Read full 12-byte footer
+            if (!ctx->io_error &&
+                UNLIKELY(fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE))
+                ctx->io_error = 1;
+        } else {
+            // peek_buf contains the first 8 bytes of the 12-byte footer.
+            // Read the remaining 4 bytes and assemble.
+            ZXC_MEMCPY(footer, peek_buf, ZXC_BLOCK_HEADER_SIZE);
+            const size_t tail = ZXC_FILE_FOOTER_SIZE - ZXC_BLOCK_HEADER_SIZE; /* 4 */
+            if (UNLIKELY(fread(footer + ZXC_BLOCK_HEADER_SIZE, 1, tail, f_in) != tail))
+                ctx->io_error = 1;
+        }
+    }
+
+    // Verify Footer Content: Source Size and Global Checksum
+    if (!ctx->io_error) {
+        const int size_ok = (zxc_le64(footer) == (uint64_t)w->total_bytes);
+        int valid = size_ok;
+        if (valid && checksum_enabled && ctx->file_has_checksum)
+            valid = (zxc_le32(footer + sizeof(uint64_t)) == d_global_hash);
+        if (UNLIKELY(!valid)) {
+            // A footer that disagrees with what we produced is corruption,
+            // not an I/O fault; tell the two apart for the caller.
+            if (!ctx->fail_code)
+                ctx->fail_code = size_ok ? ZXC_ERROR_BAD_CHECKSUM : ZXC_ERROR_CORRUPT_DATA;
+            ctx->io_error = 1;
+        }
+    }
+}
+
+/**
  * @brief Orchestrates the multithreaded streaming compression or decompression
  * engine.
  *
@@ -698,90 +891,9 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         return zxc_stream_engine_fail(&ctx, workers, started_workers, mem_block, w_args.seek_comp,
                                       ZXC_ERROR_MEMORY);  // LCOV_EXCL_LINE
 
-    int read_idx = 0;
-    int read_eof = 0;
     uint64_t total_src_bytes = 0;
-
-    // Reader Loop: Reads from file, prepares jobs, pushes to worker queue.
-    while (!read_eof && !ctx.io_error) {
-        zxc_stream_job_t* const job = &ctx.jobs[read_idx];
-        pthread_mutex_lock(&ctx.lock);
-        while (job->status != JOB_STATUS_FREE && !ctx.io_error)
-            pthread_cond_wait(&ctx.cond_reader, &ctx.lock);
-        pthread_mutex_unlock(&ctx.lock);
-
-        if (UNLIKELY(ctx.io_error)) break;
-
-        size_t read_sz = 0;
-        if (mode == 1) {
-            read_sz = fread(job->in_buf, 1, runtime_chunk_sz, f_in);
-            total_src_bytes += read_sz;
-            if (UNLIKELY(read_sz == 0)) read_eof = 1;
-        } else {
-            uint8_t bh_buf[ZXC_BLOCK_HEADER_SIZE];
-            size_t h_read = fread(bh_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in);
-            if (UNLIKELY(h_read < ZXC_BLOCK_HEADER_SIZE)) {
-                read_eof = 1;
-            } else {
-                zxc_block_header_t bh;
-                if (UNLIKELY(zxc_read_block_header(bh_buf, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK)) {
-                    read_eof = 1;
-                    goto _job_prepared;
-                }
-
-                if (bh.block_type == ZXC_BLOCK_EOF) {
-                    if (UNLIKELY(bh.comp_size != 0)) {
-                        ctx.io_error = 1;
-                        goto _job_prepared;
-                    }
-                    read_eof = 1;
-                    read_sz = 0;
-                    goto _job_prepared;
-                }
-
-                const int has_crc = ctx.file_has_checksum;
-                const size_t checksum_sz = (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-                const size_t body_total = bh.comp_size + checksum_sz;
-                const size_t total_len = ZXC_BLOCK_HEADER_SIZE + body_total;
-
-                if (UNLIKELY(total_len > job->in_cap)) {
-                    ctx.io_error = 1;
-                    break;
-                }
-
-                ZXC_MEMCPY(job->in_buf, bh_buf, ZXC_BLOCK_HEADER_SIZE);
-
-                // Single fread for body + checksum (reduces syscalls)
-                const size_t body_read =
-                    fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE, 1, body_total, f_in);
-
-                if (UNLIKELY(body_read != body_total)) {
-                    ctx.io_error = 1;
-                    break;
-                } else if (has_crc) {
-                    // Update Global Hash for Decompression
-                    const uint32_t b_crc =
-                        zxc_le32(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
-                    d_global_hash = zxc_hash_combine_rotate(d_global_hash, b_crc);
-                }
-                read_sz = ZXC_BLOCK_HEADER_SIZE + body_read;
-            }
-        }
-    _job_prepared:
-        if (UNLIKELY(read_eof && read_sz == 0)) break;
-
-        job->in_sz = read_sz;
-        pthread_mutex_lock(&ctx.lock);
-        job->status = JOB_STATUS_FILLED;
-        ctx.worker_queue[ctx.wq_head] = read_idx;
-        ctx.wq_head = (ctx.wq_head + 1) % ctx.ring_size;
-        ctx.wq_count++;
-        read_idx = (read_idx + 1) % ctx.ring_size;
-        pthread_cond_signal(&ctx.cond_worker);
-        pthread_mutex_unlock(&ctx.lock);
-
-        if (UNLIKELY(read_sz < runtime_chunk_sz && mode == 1)) read_eof = 1;
-    }
+    const int read_idx =
+        zxc_stream_read_loop(&ctx, f_in, mode, runtime_chunk_sz, &total_src_bytes, &d_global_hash);
 
     zxc_stream_job_t* const end_job = &ctx.jobs[read_idx];
     pthread_mutex_lock(&ctx.lock);
@@ -804,95 +916,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     pthread_cond_destroy(&ctx.cond_reader);
     pthread_mutex_destroy(&ctx.lock);
 
-    // Write EOF Block + optional Seek Table + Footer if compression and no error
-    if (mode == 1 && !ctx.io_error && w_args.total_bytes >= 0) {
-        // EOF block
-        uint8_t eof_buf[ZXC_BLOCK_HEADER_SIZE];
-        const zxc_block_header_t eof_bh = {
-            .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
-        zxc_write_block_header(eof_buf, ZXC_BLOCK_HEADER_SIZE, &eof_bh);
-        if (UNLIKELY(f_out &&
-                     fwrite(eof_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_out) != ZXC_BLOCK_HEADER_SIZE))
-            ctx.io_error = 1;
-        else
-            w_args.total_bytes += ZXC_BLOCK_HEADER_SIZE;
-
-        // Seekable: write SEK block between EOF and footer
-        if (!ctx.io_error && w_args.seek_comp && w_args.seek_count > 0) {
-            const size_t st_size = zxc_seek_table_size(w_args.seek_count);
-            uint8_t* const st_buf = (uint8_t*)ZXC_MALLOC(st_size);
-            if (st_buf) {
-                const int64_t st_val =
-                    zxc_write_seek_table(st_buf, st_size, w_args.seek_comp, w_args.seek_count);
-                if (st_val > 0 && f_out &&
-                    fwrite(st_buf, 1, (size_t)st_val, f_out) == (size_t)st_val)
-                    w_args.total_bytes += st_val;
-                ZXC_FREE(st_buf);
-            }
-        }
-
-        // Footer
-        uint8_t footer_buf[ZXC_FILE_FOOTER_SIZE];
-        zxc_write_file_footer(footer_buf, ZXC_FILE_FOOTER_SIZE, total_src_bytes, w_args.global_hash,
-                              checksum_enabled);
-        if (UNLIKELY(f_out &&
-                     fwrite(footer_buf, 1, ZXC_FILE_FOOTER_SIZE, f_out) != ZXC_FILE_FOOTER_SIZE))
-            ctx.io_error = 1;
-        else
-            w_args.total_bytes += ZXC_FILE_FOOTER_SIZE;
-    } else if (mode == 0 && !ctx.io_error) {
-        // After the EOF block, the stream may contain:
-        //   (a) [FOOTER 12B]                  - no seekable table
-        //   (b) [SEK header 8B] [payload] [FOOTER 12B] - seekable archive
-        uint8_t peek_buf[ZXC_BLOCK_HEADER_SIZE];
-        uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-
-        if (UNLIKELY(fread(peek_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in) != ZXC_BLOCK_HEADER_SIZE)) {
-            ctx.io_error = 1;
-        } else {
-            zxc_block_header_t peek_bh;
-            const int is_sek =
-                (zxc_read_block_header(peek_buf, ZXC_BLOCK_HEADER_SIZE, &peek_bh) == ZXC_OK &&
-                 peek_bh.block_type == ZXC_BLOCK_SEK);
-
-            if (is_sek) {
-                // Drain the SEK payload (read + discard)
-                size_t remaining = (size_t)peek_bh.comp_size;
-                uint8_t discard[512];
-                while (remaining > 0 && !ctx.io_error) {
-                    const size_t chunk = remaining < sizeof(discard) ? remaining : sizeof(discard);
-                    if (UNLIKELY(fread(discard, 1, chunk, f_in) != chunk)) ctx.io_error = 1;
-                    remaining -= chunk;
-                }
-                // Read full 12-byte footer
-                if (!ctx.io_error &&
-                    UNLIKELY(fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE))
-                    ctx.io_error = 1;
-            } else {
-                // peek_buf contains the first 8 bytes of the 12-byte footer.
-                // Read the remaining 4 bytes and assemble.
-                ZXC_MEMCPY(footer, peek_buf, ZXC_BLOCK_HEADER_SIZE);
-                const size_t tail = ZXC_FILE_FOOTER_SIZE - ZXC_BLOCK_HEADER_SIZE; /* 4 */
-                if (UNLIKELY(fread(footer + ZXC_BLOCK_HEADER_SIZE, 1, tail, f_in) != tail))
-                    ctx.io_error = 1;
-            }
-        }
-
-        // Verify Footer Content: Source Size and Global Checksum
-        if (!ctx.io_error) {
-            const int size_ok = (zxc_le64(footer) == (uint64_t)w_args.total_bytes);
-            int valid = size_ok;
-            if (valid && checksum_enabled && ctx.file_has_checksum)
-                valid = (zxc_le32(footer + sizeof(uint64_t)) == d_global_hash);
-            if (UNLIKELY(!valid)) {
-                // A footer that disagrees with what we produced is corruption,
-                // not an I/O fault; tell the two apart for the caller.
-                if (!ctx.fail_code)
-                    ctx.fail_code = size_ok ? ZXC_ERROR_BAD_CHECKSUM : ZXC_ERROR_CORRUPT_DATA;
-                ctx.io_error = 1;
-            }
-        }
-    }
+    if (mode == 1 && !ctx.io_error && w_args.total_bytes >= 0)
+        zxc_stream_finish_compress(&ctx, &w_args, f_out, total_src_bytes, checksum_enabled);
+    else if (mode == 0 && !ctx.io_error)
+        zxc_stream_finish_decompress(&ctx, &w_args, f_in, d_global_hash, checksum_enabled);
 
     ZXC_FREE(w_args.seek_comp);
     ZXC_FREE(workers);

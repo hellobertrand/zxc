@@ -1481,9 +1481,9 @@ int zxc_huf_dict_tree_build(const uint8_t* RESTRICT packed_lengths, zxc_pivco_tr
 /**
  * @brief Advances the merge cursors past one fixed-width step.
  *
- * Every fixed-width arm below closes the same way: the step took @c pc bytes
- * from the right child and the rest from the left. Operates on the enclosing
- * loop's @c lp, @c rp and @c i.
+ * Every fixed-width arm closes the same way: the step took @c pc bytes from the
+ * right child and the rest from the left. Operates on the enclosing loop's
+ * @c lp, @c rp and @c i, and expands @c pc twice, so pass a named value.
  */
 #define ZXC_PIVCO_MERGE_STEP(w, pc) \
     do {                            \
@@ -1523,7 +1523,8 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         const uint8x8_t ia = vld1_u8(zxc_pivco_idxa_u8[b0]);
         const uint8x8_t ib = vld1_u8(zxc_pivco_idxb_pre[pc0][b1]);
         vst1q_u8(out + i, vqtbl2q_u8(tb, vcombine_u8(ia, ib)));
-        ZXC_PIVCO_MERGE_STEP(16, pc0 + zxc_pivco_popcnt32(b1));
+        const int pc = pc0 + zxc_pivco_popcnt32(b1);
+        ZXC_PIVCO_MERGE_STEP(16, pc);
     }
 #else /* x86 tiers */
 #if defined(ZXC_USE_AVX512) && defined(__AVX512VBMI2__)
@@ -1540,7 +1541,8 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         const __m512i outv =
             _mm512_mask_expandloadu_epi8(vl, (__mmask64)ctrl, (const void*)(R + rp));
         _mm512_storeu_si512((void*)(out + i), outv);
-        ZXC_PIVCO_MERGE_STEP(64, zxc_pivco_popcnt64(ctrl));
+        const int pc = zxc_pivco_popcnt64(ctrl);
+        ZXC_PIVCO_MERGE_STEP(64, pc);
     }
 #endif
 #if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
@@ -1629,7 +1631,8 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         const __m128i sell = _mm_shuffle_epi8(vl, _mm_add_epi8(ix, _mm_set1_epi8(0x70)));
         const __m128i selr = _mm_shuffle_epi8(vr, _mm_sub_epi8(ix, _mm_set1_epi8(16)));
         _mm_storeu_si128((__m128i*)(void*)(out + i), _mm_or_si128(sell, selr));
-        ZXC_PIVCO_MERGE_STEP(16, pc0 + zxc_pivco_popcnt32(b1));
+        const int pc = pc0 + zxc_pivco_popcnt32(b1);
+        ZXC_PIVCO_MERGE_STEP(16, pc);
     }
 #elif defined(ZXC_USE_NEON32)
     // 8 outputs per step: four-register VTBL over {L[0..7], -, R[0..7], -}. The
@@ -1643,7 +1646,8 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         tb.val[2] = vld1_u8(R + rp);
         tb.val[3] = vdup_n_u8(0);
         vst1_u8(out + i, vtbl4_u8(tb, vld1_u8(zxc_pivco_idxa_u8[b])));
-        ZXC_PIVCO_MERGE_STEP(8, zxc_pivco_popcnt32(b));
+        const int pc = zxc_pivco_popcnt32(b);
+        ZXC_PIVCO_MERGE_STEP(8, pc);
     }
 #endif
 #endif /* x86 tiers */
@@ -1658,9 +1662,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         const uint8_t* ix = zxc_pivco_idxa_u8[b];
         for (int j = 0; j < 8; j++) out[i + (size_t)j] = comb[ix[j]];
         const int pc = zxc_pivco_popcnt32(b);
-        rp += (size_t)pc;
-        lp += (size_t)(8 - pc);
-        i += 8;
+        ZXC_PIVCO_MERGE_STEP(8, pc);
     }
     while (i < n) {
         const int bit = (bits[i >> 3] >> (i & 7)) & 1;

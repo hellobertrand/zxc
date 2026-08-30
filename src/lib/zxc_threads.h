@@ -62,7 +62,7 @@ typedef struct {
  *               ownership transfers to this function.
  * @return Always 0 (the worker's @c void* result is discarded, as on POSIX).
  */
-static unsigned __stdcall zxc_win_thread_entry(void* p) {
+static inline unsigned __stdcall zxc_win_thread_entry(void* p) {
     zxc_win_thread_arg_t* a = (zxc_win_thread_arg_t*)p;
     void* (*f)(void*) = a->func;
     void* arg = a->arg;
@@ -81,8 +81,8 @@ static unsigned __stdcall zxc_win_thread_entry(void* p) {
  * @param[in]  arg           Opaque argument forwarded to @p start_routine.
  * @return 0 on success, @ref ZXC_ERROR_MEMORY on allocation or spawn failure.
  */
-static int pthread_create(pthread_t* thread, const void* attr, void* (*start_routine)(void*),
-                          void* arg) {
+static inline int pthread_create(pthread_t* thread, const void* attr, void* (*start_routine)(void*),
+                                 void* arg) {
     (void)attr;
     zxc_win_thread_arg_t* wrapper = ZXC_MALLOC(sizeof(zxc_win_thread_arg_t));
     if (UNLIKELY(!wrapper)) return ZXC_ERROR_MEMORY;
@@ -105,7 +105,7 @@ static int pthread_create(pthread_t* thread, const void* attr, void* (*start_rou
  * @param[in] retval  Unused (POSIX exit-value out-param); ignored.
  * @return Always 0.
  */
-static int pthread_join(pthread_t thread, void** retval) {
+static inline int pthread_join(pthread_t thread, void** retval) {
     (void)retval;
     WaitForSingleObject(thread, INFINITE);
     CloseHandle(thread);

@@ -899,3 +899,63 @@ int test_roundtrip_offset_mixed(void) {
     free(buf);
     return ok;
 }
+
+/**
+ * @brief An out-of-range level on the streaming path behaves as the maximum one.
+ *
+ * Level 99 must produce byte-for-byte what ZXC_LEVEL_ULTRA produces.
+ */
+int test_stream_level_clamp(void) {
+    printf("=== TEST: Stream - Out-of-range level clamps to ULTRA ===\n");
+
+    const size_t size = 96 * 1024;
+    uint8_t* input = malloc(size);
+    if (!input) return 0;
+    gen_lz_data(input, size);
+
+    uint8_t* out[2] = {NULL, NULL};
+    long sz[2] = {0, 0};
+    const int levels[2] = {ZXC_LEVEL_ULTRA, 99};
+    int ok = 1;
+
+    for (int i = 0; i < 2 && ok; i++) {
+        FILE* f_in = tmpfile();
+        FILE* f_comp = tmpfile();
+        if (!f_in || !f_comp) {
+            printf("  [SKIP] tmpfile failed\n");
+            if (f_in) fclose(f_in);
+            if (f_comp) fclose(f_comp);
+            free(input);
+            return 1;
+        }
+        fwrite(input, 1, size, f_in);
+        fseek(f_in, 0, SEEK_SET);
+
+        zxc_compress_opts_t o = {.n_threads = 1, .level = levels[i]};
+        const int64_t c = zxc_stream_compress(f_in, f_comp, &o);
+        if (c <= 0) {
+            printf("Failed: level %d compress returned %lld\n", levels[i], (long long)c);
+            ok = 0;
+        } else {
+            fseek(f_comp, 0, SEEK_END);
+            sz[i] = ftell(f_comp);
+            fseek(f_comp, 0, SEEK_SET);
+            out[i] = malloc((size_t)sz[i]);
+            if (!out[i] || fread(out[i], 1, (size_t)sz[i], f_comp) != (size_t)sz[i]) ok = 0;
+        }
+        fclose(f_in);
+        fclose(f_comp);
+    }
+
+    if (ok && (sz[0] != sz[1] || memcmp(out[0], out[1], (size_t)sz[0]) != 0)) {
+        printf("Failed: level 99 produced a different stream than level %d (%ld vs %ld bytes)\n",
+               ZXC_LEVEL_ULTRA, sz[0], sz[1]);
+        ok = 0;
+    }
+
+    free(out[0]);
+    free(out[1]);
+    free(input);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
