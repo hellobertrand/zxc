@@ -1,4 +1,4 @@
-# ZXC - Asymmetric Lossless Compression Built for Ultra-Fast Decode
+# ZXC - Seekable Lossless Compression Built for Ultra-Fast Decode
 
 [![Build & Release](https://github.com/hellobertrand/zxc/actions/workflows/build.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/build.yml)
 [![Code Quality](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml)
