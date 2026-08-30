@@ -275,6 +275,9 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
     for (size_t i = 0; i < n_samples; i++) corpus_size += sample_sizes[i];
     if (UNLIKELY(corpus_size < ZXC_DICT_KGRAM_LEN)) return ZXC_ERROR_SRC_TOO_SMALL;
 
+    int64_t rc;
+    uint16_t* freq = NULL;
+    zxc_dict_seg_t* segs = NULL;
     uint8_t* corpus = (uint8_t*)ZXC_MALLOC(corpus_size);
     if (UNLIKELY(!corpus)) return ZXC_ERROR_MEMORY;
     {
@@ -286,12 +289,10 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
     }
 
     // Step 2: count k-gram frequencies
-    uint16_t* freq = (uint16_t*)ZXC_CALLOC(ZXC_DICT_HASH_SIZE, sizeof(uint16_t));
+    freq = (uint16_t*)ZXC_CALLOC(ZXC_DICT_HASH_SIZE, sizeof(uint16_t));
     if (UNLIKELY(!freq)) {
-        // LCOV_EXCL_START
-        ZXC_FREE(corpus);
-        return ZXC_ERROR_MEMORY;
-        // LCOV_EXCL_STOP
+        rc = ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
+        goto done;              // LCOV_EXCL_LINE
     }
 
     // Sample positions rather than count them all: a full count saturates the
@@ -313,13 +314,10 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
     size_t stride = ZXC_DICT_KGRAM_LEN;
     if (seg_alloc > 0 && corpus_size / seg_alloc > stride) stride = corpus_size / seg_alloc;
 
-    zxc_dict_seg_t* segs = (zxc_dict_seg_t*)ZXC_MALLOC(seg_alloc * sizeof(zxc_dict_seg_t));
+    segs = (zxc_dict_seg_t*)ZXC_MALLOC(seg_alloc * sizeof(zxc_dict_seg_t));
     if (UNLIKELY(!segs)) {
-        // LCOV_EXCL_START
-        ZXC_FREE(freq);
-        ZXC_FREE(corpus);
-        return ZXC_ERROR_MEMORY;
-        // LCOV_EXCL_STOP
+        rc = ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
+        goto done;              // LCOV_EXCL_LINE
     }
 
     size_t n_segs = 0;
@@ -349,10 +347,8 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
         // No frequent patterns. Use tail of corpus as dict.
         const size_t copy = (corpus_size < dict_capacity) ? corpus_size : dict_capacity;
         ZXC_MEMCPY(dict_buf, corpus + corpus_size - copy, copy);
-        ZXC_FREE(freq);
-        ZXC_FREE(segs);
-        ZXC_FREE(corpus);
-        return (int64_t)copy;
+        rc = (int64_t)copy;
+        goto done;
     }
 
     // Step 4: pick greedily in descending coverage, zeroing each pick's k-grams
@@ -390,7 +386,9 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
         total += copy;
     }
 
+    // Released early: the emit loop below only needs the picks.
     ZXC_FREE(freq);
+    freq = NULL;
 
     // Step 5: emit in reverse so the highest-coverage segment lands at the END
     // of the dict. The dict sits just before the data, so bytes near its end
@@ -411,9 +409,13 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
         filled = tail;
     }
 
+    rc = (int64_t)filled;
+
+done:
     ZXC_FREE(segs);
+    ZXC_FREE(freq);
     ZXC_FREE(corpus);
-    return (int64_t)filled;
+    return rc;
 }
 
 // -------------------------------------------------------------------------
