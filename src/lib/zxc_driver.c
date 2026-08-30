@@ -37,124 +37,22 @@
 #include "../../include/zxc_seekable.h"
 #include "../../include/zxc_stream.h"
 #include "zxc_internal.h"
+#include "zxc_threads.h"
 
 // ============================================================================
-// WINDOWS THREADING EMULATION
+// PLATFORM SHIMS
 // ============================================================================
-// Maps POSIX pthread calls to the Windows Native API, so one threading logic
-// compiles on Linux/macOS and Windows.
+// Threading comes from zxc_threads.h (POSIX names everywhere, Win32 underneath);
+// only the file-positioning names are remapped here, next to their users.
 #if defined(_WIN32)
 #include <io.h> /* _get_osfhandle, _fileno (used by zxc_seekable_open_file) */
 #include <malloc.h>
-#include <process.h>
 #include <sys/types.h>
 #include <windows.h>
 
 // Map POSIX file positioning functions to Windows equivalents
 #define fseeko _fseeki64
 #define ftello _ftelli64
-
-/**
- * @brief Returns the logical-processor count (backs the @c sysconf shim below).
- * @return Number of processors reported by @c GetSystemInfo.
- */
-static int zxc_get_num_procs(void) {
-    SYSTEM_INFO sysinfo;
-    GetSystemInfo(&sysinfo);
-    return sysinfo.dwNumberOfProcessors;
-}
-
-typedef CRITICAL_SECTION pthread_mutex_t;
-typedef CONDITION_VARIABLE pthread_cond_t;
-typedef HANDLE pthread_t;
-
-#define pthread_mutex_init(m, a) InitializeCriticalSection(m)
-#define pthread_mutex_destroy(m) DeleteCriticalSection(m)
-#define pthread_mutex_lock(m) EnterCriticalSection(m)
-#define pthread_mutex_unlock(m) LeaveCriticalSection(m)
-
-#define pthread_cond_init(c, a) InitializeConditionVariable(c)
-#define pthread_cond_destroy(c) (void)(0)
-#define pthread_cond_wait(c, m) SleepConditionVariableCS(c, m, INFINITE)
-#define pthread_cond_signal(c) WakeConditionVariable(c)
-#define pthread_cond_broadcast(c) WakeAllConditionVariable(c)
-
-/**
- * @brief Trampoline payload bridging the POSIX @c void*(*)(void*) worker
- *        signature to the @c _beginthreadex entry point.
- *
- * Heap-allocated by the @c pthread_create shim and freed by
- * @ref zxc_win_thread_entry once the captured worker has started.
- */
-typedef struct {
-    void* (*func)(void*); /* worker to invoke */
-    void* arg;            /* argument forwarded to @c func */
-} zxc_win_thread_arg_t;
-
-/**
- * @brief @c _beginthreadex entry point: unpacks the trampoline payload, frees
- *        it, then runs the captured POSIX-style worker.
- *
- * @param[in] p  Heap @ref zxc_win_thread_arg_t handed over by the creator;
- *               ownership transfers to this function.
- * @return Always 0 (the worker's @c void* result is discarded, as on POSIX).
- */
-static unsigned __stdcall zxc_win_thread_entry(void* p) {
-    zxc_win_thread_arg_t* a = (zxc_win_thread_arg_t*)p;
-    void* (*f)(void*) = a->func;
-    void* arg = a->arg;
-    ZXC_FREE(a);
-    f(arg);
-    return 0;
-}
-
-/**
- * @brief @c pthread_create shim: spawns @p start_routine(@p arg) via
- *        @c _beginthreadex, matching the POSIX prototype.
- *
- * @param[out] thread        Receives the thread handle on success.
- * @param[in]  attr          Unused (POSIX attribute object); ignored.
- * @param[in]  start_routine Worker to run on the new thread.
- * @param[in]  arg           Opaque argument forwarded to @p start_routine.
- * @return 0 on success, @ref ZXC_ERROR_MEMORY on allocation or spawn failure.
- */
-static int pthread_create(pthread_t* thread, const void* attr, void* (*start_routine)(void*),
-                          void* arg) {
-    (void)attr;
-    zxc_win_thread_arg_t* wrapper = ZXC_MALLOC(sizeof(zxc_win_thread_arg_t));
-    if (UNLIKELY(!wrapper)) return ZXC_ERROR_MEMORY;
-    wrapper->func = start_routine;
-    wrapper->arg = arg;
-    uintptr_t handle = _beginthreadex(NULL, 0, zxc_win_thread_entry, wrapper, 0, NULL);
-    if (UNLIKELY(handle == 0)) {
-        ZXC_FREE(wrapper);
-        return ZXC_ERROR_MEMORY;
-    }
-    *thread = (HANDLE)handle;
-    return 0;
-}
-
-/**
- * @brief @c pthread_join shim: blocks until @p thread finishes, then closes its
- *        handle.
- *
- * @param[in] thread  Handle from a successful @c pthread_create.
- * @param[in] retval  Unused (POSIX exit-value out-param); ignored.
- * @return Always 0.
- */
-static int pthread_join(pthread_t thread, void** retval) {
-    (void)retval;
-    WaitForSingleObject(thread, INFINITE);
-    CloseHandle(thread);
-    return 0;
-}
-
-#define sysconf(x) zxc_get_num_procs()
-#define _SC_NPROCESSORS_ONLN 0
-
-#else
-#include <pthread.h>
-#include <unistd.h>
 #endif
 
 // ============================================================================
@@ -585,6 +483,43 @@ static void* zxc_async_writer(void* arg) {
 }
 
 /**
+ * @brief Tears the engine down after a setup failure, then reports @p code.
+ *
+ * Stops and joins the @p started workers (if any), destroys the ring's
+ * synchronisation objects and releases every allocation made so far. Every
+ * failure point in the setup sequence returns through here, so the destruction
+ * order lives in one place instead of being pasted per exit.
+ *
+ * @param[in,out] ctx        Engine context whose primitives were initialised.
+ * @param[in]     workers    Worker handle array (may be NULL).
+ * @param[in]     started    Number of workers actually spawned.
+ * @param[in]     mem_block  Ring-buffer allocation (may be NULL).
+ * @param[in]     seek_comp  Seek-table accumulator (may be NULL).
+ * @param[in]     code       Negative @ref zxc_error_t to return.
+ * @return @p code.
+ */
+// LCOV_EXCL_START
+static int64_t zxc_stream_engine_fail(zxc_stream_ctx_t* ctx, pthread_t* workers, const int started,
+                                      uint8_t* mem_block, uint32_t* seek_comp, const int64_t code) {
+    if (started > 0) {
+        pthread_mutex_lock(&ctx->lock);
+        ctx->shutdown_workers = 1;
+        pthread_cond_broadcast(&ctx->cond_worker);
+        pthread_mutex_unlock(&ctx->lock);
+        for (int i = 0; i < started; i++) pthread_join(workers[i], NULL);
+    }
+    pthread_cond_destroy(&ctx->cond_writer);
+    pthread_cond_destroy(&ctx->cond_worker);
+    pthread_cond_destroy(&ctx->cond_reader);
+    pthread_mutex_destroy(&ctx->lock);
+    ZXC_FREE(workers);
+    ZXC_FREE(seek_comp);
+    ZXC_ALIGNED_FREE(mem_block);
+    return code;
+}
+// LCOV_EXCL_STOP
+
+/**
  * @brief Orchestrates the multithreaded streaming compression or decompression
  * engine.
  *
@@ -669,7 +604,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         }
     }
 
-    int num_threads = (n_threads > 0) ? n_threads : (int)sysconf(_SC_NPROCESSORS_ONLN);
+    int num_threads = (n_threads > 0) ? n_threads : zxc_num_procs();
     if (num_threads > ZXC_MAX_THREADS) num_threads = ZXC_MAX_THREADS;
     // Reserve 1 thread for Writer/Reader overhead if possible
     const int num_workers = (num_threads > 1) ? num_threads - 1 : 1;
@@ -734,28 +669,17 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     pthread_cond_init(&ctx.cond_writer, NULL);
 
     pthread_t* const workers = ZXC_MALLOC((size_t)num_workers * sizeof(pthread_t));
-    if (UNLIKELY(!workers)) {
-        // LCOV_EXCL_START
-        ZXC_ALIGNED_FREE(mem_block);
-        return ZXC_ERROR_MEMORY;
-        // LCOV_EXCL_STOP
-    }
+    if (UNLIKELY(!workers))
+        return zxc_stream_engine_fail(&ctx, NULL, 0, mem_block, NULL,
+                                      ZXC_ERROR_MEMORY);  // LCOV_EXCL_LINE
     int started_workers = 0;
     for (int i = 0; i < num_workers; i++) {
         if (UNLIKELY(pthread_create(&workers[i], NULL, zxc_stream_worker, &ctx) != 0)) break;
         started_workers++;
     }
-    if (UNLIKELY(started_workers == 0)) {
-        // LCOV_EXCL_START
-        pthread_cond_destroy(&ctx.cond_writer);
-        pthread_cond_destroy(&ctx.cond_worker);
-        pthread_cond_destroy(&ctx.cond_reader);
-        pthread_mutex_destroy(&ctx.lock);
-        ZXC_FREE(workers);
-        ZXC_ALIGNED_FREE(mem_block);
-        return ZXC_ERROR_MEMORY;
-        // LCOV_EXCL_STOP
-    }
+    if (UNLIKELY(started_workers == 0))
+        return zxc_stream_engine_fail(&ctx, workers, 0, mem_block, NULL,
+                                      ZXC_ERROR_MEMORY);  // LCOV_EXCL_LINE
 
     writer_args_t w_args = {&ctx, f_out, 0, 0, 0, NULL, 0, 0};
 
@@ -763,22 +687,9 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 1 && seekable) {
         w_args.seek_cap = 64;
         w_args.seek_comp = (uint32_t*)ZXC_MALLOC(w_args.seek_cap * sizeof(uint32_t));
-        // LCOV_EXCL_START
-        if (UNLIKELY(!w_args.seek_comp)) {
-            pthread_mutex_lock(&ctx.lock);
-            ctx.shutdown_workers = 1;
-            pthread_cond_broadcast(&ctx.cond_worker);
-            pthread_mutex_unlock(&ctx.lock);
-            for (int i = 0; i < started_workers; i++) pthread_join(workers[i], NULL);
-            pthread_cond_destroy(&ctx.cond_writer);
-            pthread_cond_destroy(&ctx.cond_worker);
-            pthread_cond_destroy(&ctx.cond_reader);
-            pthread_mutex_destroy(&ctx.lock);
-            ZXC_FREE(workers);
-            ZXC_ALIGNED_FREE(mem_block);
-            return ZXC_ERROR_MEMORY;
-        }
-        // LCOV_EXCL_STOP
+        if (UNLIKELY(!w_args.seek_comp))
+            return zxc_stream_engine_fail(&ctx, workers, started_workers, mem_block, NULL,
+                                          ZXC_ERROR_MEMORY);  // LCOV_EXCL_LINE
     }
 
     if (mode == 1 && f_out) {
@@ -791,22 +702,9 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         w_args.total_bytes = ZXC_FILE_HEADER_SIZE;
     }
     pthread_t writer_th;
-    if (UNLIKELY(pthread_create(&writer_th, NULL, zxc_async_writer, &w_args) != 0)) {
-        // LCOV_EXCL_START
-        pthread_mutex_lock(&ctx.lock);
-        ctx.shutdown_workers = 1;
-        pthread_cond_broadcast(&ctx.cond_worker);
-        pthread_mutex_unlock(&ctx.lock);
-        for (int i = 0; i < started_workers; i++) pthread_join(workers[i], NULL);
-        pthread_cond_destroy(&ctx.cond_writer);
-        pthread_cond_destroy(&ctx.cond_worker);
-        pthread_cond_destroy(&ctx.cond_reader);
-        pthread_mutex_destroy(&ctx.lock);
-        ZXC_FREE(workers);
-        ZXC_ALIGNED_FREE(mem_block);
-        return ZXC_ERROR_MEMORY;
-        // LCOV_EXCL_STOP
-    }
+    if (UNLIKELY(pthread_create(&writer_th, NULL, zxc_async_writer, &w_args) != 0))
+        return zxc_stream_engine_fail(&ctx, workers, started_workers, mem_block, w_args.seek_comp,
+                                      ZXC_ERROR_MEMORY);  // LCOV_EXCL_LINE
 
     int read_idx = 0;
     int read_eof = 0;
@@ -1029,18 +927,17 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     const int n_threads = opts ? opts->n_threads : 0;
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int seekable = opts ? opts->seekable : 0;
-    const int level = (opts && opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
-    const size_t block_size =
-        (opts && opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
+    const int level = ZXC_OPTS_LEVEL(opts, ZXC_LEVEL_DEFAULT);
+    const size_t block_size = ZXC_OPTS_BLOCK_SIZE(opts, ZXC_BLOCK_SIZE_DEFAULT);
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
-    const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
+    const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     zxc_progress_callback_t cb = opts ? opts->progress_cb : NULL;
     void* ud = opts ? opts->user_data : NULL;
 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
-    const uint8_t* dict_huf = (opts && opts->dict) ? (const uint8_t*)opts->dict_huf : NULL;
+    const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
     return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, block_size, checksum_enabled,
                                  seekable, zxc_compress_chunk_wrapper, cb, ud, dict, dict_size,
                                  dict_huf);
@@ -1060,11 +957,11 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
     const int n_threads = opts ? opts->n_threads : 0;
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
-    const size_t dict_size = (opts && opts->dict) ? opts->dict_size : 0;
+    const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     zxc_progress_callback_t cb = opts ? opts->progress_cb : NULL;
     void* ud = opts ? opts->user_data : NULL;
 
-    const uint8_t* dict_huf = (opts && opts->dict) ? (const uint8_t*)opts->dict_huf : NULL;
+    const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
     return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled, 0,
                                  (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, cb, ud, dict,
                                  dict_size, dict_huf);
