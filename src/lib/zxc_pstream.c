@@ -224,26 +224,40 @@ static int cs_compress_one_block(zxc_cstream* cs) {
 }
 
 /**
- * @brief Drains staged output bytes into the caller's output buffer.
+ * @brief Copies [@p pos, @p len) of @p src into @p out, as far as it fits.
  *
- * Copies as many bytes as possible from
- * @c cs->pending[pending_pos..pending_len) into
- * @c out->dst[pos..size), advancing both cursors.
+ * The single output pump: both the compressor's pending staging buffer and the
+ * decompressor's decoded block drain through it, so the cursor bookkeeping is
+ * written once.
  *
- * @param[in,out] cs  Compression stream.
- * @param[in,out] out Caller output buffer.
- * @return Non-zero once the @c pending buffer has been fully drained
- *         (@c pending_pos == @c pending_len), zero otherwise.
+ * @param[in,out] out  Caller output buffer; @c pos is advanced.
+ * @param[in]     src  Source buffer.
+ * @param[in,out] pos  Read cursor into @p src; advanced by the copied count.
+ * @param[in]     len  Total valid bytes in @p src.
+ * @return Number of bytes copied.
+ */
+static size_t zxc_outbuf_push(zxc_outbuf_t* out, const uint8_t* RESTRICT src, size_t* RESTRICT pos,
+                              const size_t len) {
+    const size_t avail_out = out->size - out->pos;
+    const size_t avail_src = len - *pos;
+    const size_t n = avail_out < avail_src ? avail_out : avail_src;
+    if (n) {
+        ZXC_MEMCPY((uint8_t*)out->dst + out->pos, src + *pos, n);
+        out->pos += n;
+        *pos += n;
+    }
+    return n;
+}
+
+/**
+ * @brief Flushes as much of the pending staging buffer as @p out can take.
+ *
+ * @param[in,out] cs   Compression stream.
+ * @param[in,out] out  Caller output buffer; @c pos is advanced.
+ * @return 1 once @c pending is fully drained, 0 if bytes remain.
  */
 static int cs_drain_pending(zxc_cstream* cs, zxc_outbuf_t* out) {
-    const size_t avail_out = out->size - out->pos;
-    const size_t avail_pen = cs->pending_len - cs->pending_pos;
-    const size_t n = avail_out < avail_pen ? avail_out : avail_pen;
-    if (n) {
-        ZXC_MEMCPY((uint8_t*)out->dst + out->pos, cs->pending + cs->pending_pos, n);
-        out->pos += n;
-        cs->pending_pos += n;
-    }
+    zxc_outbuf_push(out, cs->pending, &cs->pending_pos, cs->pending_len);
     return cs->pending_pos == cs->pending_len;
 }
 
@@ -736,49 +750,29 @@ static int ds_set_error(zxc_dstream* ds, const int code) {
 }
 
 /**
- * @brief Pulls up to @c (scratch_need - scratch_used) bytes from @p in.
+ * @brief Copies from @p in into @p dst until it holds @p need bytes.
  *
- * Used to accumulate fixed-size frames (file header, block header, footer,
- * EOF tail peek) into the inline @c scratch buffer.
+ * The single input pump: the fixed-size frame accumulator (file header, block
+ * header, footer, EOF tail peek) and the variable-size block payload differ
+ * only in which buffer they fill.
  *
- * @param[in,out] ds Decompression stream.
- * @param[in,out] in Caller input buffer; @c pos is advanced.
- * @return @c 1 once @c scratch holds exactly @c scratch_need bytes,
- *         @c 0 otherwise (need more input).
+ * @param[out]    dst   Destination buffer, at least @p need bytes.
+ * @param[in,out] used  Bytes already accumulated; advanced by the copied count.
+ * @param[in]     need  Target byte count.
+ * @param[in,out] in    Caller input buffer; @c pos is advanced.
+ * @return 1 once @p dst holds exactly @p need bytes, 0 if more input is needed.
  */
-static int ds_pull_scratch(zxc_dstream* ds, zxc_inbuf_t* in) {
-    const size_t want = ds->scratch_need - ds->scratch_used;
+static int ds_pull(uint8_t* RESTRICT dst, size_t* RESTRICT used, const size_t need,
+                   zxc_inbuf_t* in) {
+    const size_t want = need - *used;
     const size_t avail = in->size - in->pos;
     const size_t n = want < avail ? want : avail;
     if (n) {
-        ZXC_MEMCPY(ds->scratch + ds->scratch_used, (const uint8_t*)in->src + in->pos, n);
+        ZXC_MEMCPY(dst + *used, (const uint8_t*)in->src + in->pos, n);
         in->pos += n;
-        ds->scratch_used += n;
+        *used += n;
     }
-    return ds->scratch_used == ds->scratch_need;
-}
-
-/**
- * @brief Same as @ref ds_pull_scratch but pulls into the heap @c payload buffer.
- *
- * Used to accumulate the variable-size compressed block payload
- * (header + comp_size [+ checksum]).
- *
- * @param[in,out] ds Decompression stream.
- * @param[in,out] in Caller input buffer; @c pos is advanced.
- * @return @c 1 once @c payload holds exactly @c payload_need bytes,
- *         @c 0 otherwise (need more input).
- */
-static int ds_pull_payload(zxc_dstream* ds, zxc_inbuf_t* in) {
-    const size_t want = ds->payload_need - ds->payload_used;
-    const size_t avail = in->size - in->pos;
-    const size_t n = want < avail ? want : avail;
-    if (n) {
-        ZXC_MEMCPY(ds->payload + ds->payload_used, (const uint8_t*)in->src + in->pos, n);
-        in->pos += n;
-        ds->payload_used += n;
-    }
-    return ds->payload_used == ds->payload_need;
+    return *used == need;
 }
 
 /**
@@ -850,28 +844,17 @@ size_t zxc_dstream_out_size(const zxc_dstream* ds) {
 }
 
 /**
- * @brief Drains @c ds->decoded[decoded_pos..decoded_size) into @p out.
+ * @brief Flushes as much of the decoded block as @p out can take.
  *
- * Updates @c ds->total_out by the number of bytes copied and, when
- * @p produced is non-NULL, accumulates the same count into @c *produced
- * (used by the outer state machine to compute the per-call return value).
- *
- * @param[in,out] ds       Decompression stream.
- * @param[in,out] out      Caller output buffer.
- * @param[in,out] produced Optional running count of bytes produced this call.
- * @return @c 1 once @c decoded is fully drained, @c 0 otherwise.
+ * @param[in,out] ds        Decompression stream; @c total_out is advanced.
+ * @param[in,out] out       Caller output buffer; @c pos is advanced.
+ * @param[in,out] produced  Optional running total to add the copied count to.
+ * @return 1 once the decoded block is fully drained, 0 if bytes remain.
  */
 static int ds_drain_decoded(zxc_dstream* ds, zxc_outbuf_t* out, size_t* produced) {
-    const size_t avail_out = out->size - out->pos;
-    const size_t avail_dec = ds->decoded_size - ds->decoded_pos;
-    const size_t n = avail_out < avail_dec ? avail_out : avail_dec;
-    if (n) {
-        ZXC_MEMCPY((uint8_t*)out->dst + out->pos, ds->decoded + ds->decoded_pos, n);
-        out->pos += n;
-        ds->decoded_pos += n;
-        ds->total_out += n;
-        if (produced) *produced += n;
-    }
+    const size_t n = zxc_outbuf_push(out, ds->decoded, &ds->decoded_pos, ds->decoded_size);
+    ds->total_out += n;
+    if (produced) *produced += n;
     return ds->decoded_pos == ds->decoded_size;
 }
 
@@ -892,7 +875,7 @@ static int ds_drain_decoded(zxc_dstream* ds, zxc_outbuf_t* out, size_t* produced
  *         negative @ref zxc_error_t on validation/allocation failure.
  */
 static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
-    if (!ds_pull_scratch(ds, in)) return 1;
+    if (!ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in)) return 1;
 
     size_t bs = 0;
     int has_csum = 0;
@@ -944,7 +927,7 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
  *         negative @ref zxc_error_t on validation/allocation failure.
  */
 static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
-    if (!ds_pull_scratch(ds, in)) return 1;
+    if (!ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in)) return 1;
 
     const int rc = zxc_read_block_header(ds->scratch, ds->scratch_used, &ds->cur_bh);
     if (UNLIKELY(rc != ZXC_OK)) return ds_set_error(ds, rc);  // LCOV_EXCL_LINE
@@ -1026,7 +1009,8 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             }
 
             case DS_NEED_BLOCK_PAYLOAD: {
-                if (!ds_pull_payload(ds, in)) return (int64_t)produced;
+                if (!ds_pull(ds->payload, &ds->payload_used, ds->payload_need, in))
+                    return (int64_t)produced;
                 ds->state = DS_DECODE_BLOCK;
                 break;
             }
@@ -1076,7 +1060,8 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             }
 
             case DS_PEEK_TAIL: {
-                if (!ds_pull_scratch(ds, in)) return (int64_t)produced;
+                if (!ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in))
+                    return (int64_t)produced;
                 // Try to interpret as a block header (SEK).
                 zxc_block_header_t peek;
                 const int sek_rc = zxc_read_block_header(ds->scratch, ds->scratch_used, &peek);
@@ -1106,7 +1091,8 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
 
             case DS_NEED_FOOTER_REST:
             case DS_NEED_FOOTER_FULL: {
-                if (!ds_pull_scratch(ds, in)) return (int64_t)produced;
+                if (!ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in))
+                    return (int64_t)produced;
                 ds->state = DS_VALIDATE_FOOTER;
                 break;
             }
