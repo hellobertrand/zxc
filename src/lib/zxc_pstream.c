@@ -224,17 +224,10 @@ static int cs_compress_one_block(zxc_cstream* cs) {
 }
 
 /**
- * @brief Copies [@p pos, @p len) of @p src into @p out, as far as it fits.
+ * @brief Copies what fits of a staged buffer into the caller's output.
  *
- * The single output pump: both the compressor's pending staging buffer and the
- * decompressor's decoded block drain through it, so the cursor bookkeeping is
- * written once.
- *
- * @param[in,out] out  Caller output buffer; @c pos is advanced.
- * @param[in]     src  Source buffer.
- * @param[in,out] pos  Read cursor into @p src; advanced by the copied count.
- * @param[in]     len  Total valid bytes in @p src.
- * @return Number of bytes copied.
+ * The single output pump: the compressor's pending buffer and the
+ * decompressor's decoded block both drain through it. Returns the byte count.
  */
 static size_t zxc_outbuf_push(zxc_outbuf_t* out, const uint8_t* RESTRICT src, size_t* RESTRICT pos,
                               const size_t len) {
@@ -249,13 +242,7 @@ static size_t zxc_outbuf_push(zxc_outbuf_t* out, const uint8_t* RESTRICT src, si
     return n;
 }
 
-/**
- * @brief Flushes as much of the pending staging buffer as @p out can take.
- *
- * @param[in,out] cs   Compression stream.
- * @param[in,out] out  Caller output buffer; @c pos is advanced.
- * @return 1 once @c pending is fully drained, 0 if bytes remain.
- */
+/** @brief Flushes the pending staging buffer; 1 once fully drained. */
 static int cs_drain_pending(zxc_cstream* cs, zxc_outbuf_t* out) {
     zxc_outbuf_push(out, cs->pending, &cs->pending_pos, cs->pending_len);
     return cs->pending_pos == cs->pending_len;
@@ -750,17 +737,11 @@ static int ds_set_error(zxc_dstream* ds, const int code) {
 }
 
 /**
- * @brief Copies from @p in into @p dst until it holds @p need bytes.
+ * @brief Accumulates caller input into a buffer until it holds the wanted size.
  *
- * The single input pump: the fixed-size frame accumulator (file header, block
- * header, footer, EOF tail peek) and the variable-size block payload differ
- * only in which buffer they fill.
- *
- * @param[out]    dst   Destination buffer, at least @p need bytes.
- * @param[in,out] used  Bytes already accumulated; advanced by the copied count.
- * @param[in]     need  Target byte count.
- * @param[in,out] in    Caller input buffer; @c pos is advanced.
- * @return 1 once @p dst holds exactly @p need bytes, 0 if more input is needed.
+ * The single input pump: the fixed-size frame accumulator (headers, footer, EOF
+ * peek) and the variable-size block payload differ only in the buffer they
+ * fill. Returns 1 once the target size is reached, 0 if more input is needed.
  */
 static int ds_pull(uint8_t* RESTRICT dst, size_t* RESTRICT used, const size_t need,
                    zxc_inbuf_t* in) {
@@ -843,14 +824,7 @@ size_t zxc_dstream_out_size(const zxc_dstream* ds) {
     return ds->block_size == 0 ? ZXC_BLOCK_SIZE_DEFAULT : ds->block_size;
 }
 
-/**
- * @brief Flushes as much of the decoded block as @p out can take.
- *
- * @param[in,out] ds        Decompression stream; @c total_out is advanced.
- * @param[in,out] out       Caller output buffer; @c pos is advanced.
- * @param[in,out] produced  Optional running total to add the copied count to.
- * @return 1 once the decoded block is fully drained, 0 if bytes remain.
- */
+/** @brief Flushes the decoded block; 1 once fully drained. `produced` is optional. */
 static int ds_drain_decoded(zxc_dstream* ds, zxc_outbuf_t* out, size_t* produced) {
     const size_t n = zxc_outbuf_push(out, ds->decoded, &ds->decoded_pos, ds->decoded_size);
     ds->total_out += n;

@@ -52,21 +52,33 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int us
     }
 }
 
-// One tag per hash slot: rejects a mismatching head without touching the
-// referenced data.
+/**
+ * @brief 8-bit rejection tag: XOR fold of the first four bytes at a position.
+ *
+ * One tag per hash slot, so a mismatching head is rejected without touching the
+ * referenced data.
+ */
 static ZXC_ALWAYS_INLINE uint8_t zxc_hash_tag(const uint32_t val4) {
     return (uint8_t)(val4 ^ (val4 >> 16));
 }
 
-// Slots carry the epoch above offset_mask, so an entry left from an earlier
-// block reads as 0 (no match) and the table never needs clearing.
+/**
+ * @brief Decodes a hash-table slot into a block position, 0 if it is stale.
+ *
+ * Slots carry the epoch above @c offset_mask, so an entry left from an earlier
+ * block reads as "no match" and the table never needs clearing.
+ */
 static ZXC_ALWAYS_INLINE uint32_t zxc_epoch_pos(const uint32_t head, const uint32_t offset_mask,
                                                 const uint32_t epoch_mark) {
     return ((head & ~offset_mask) == epoch_mark) ? (head & offset_mask) : 0;
 }
 
-// Chain link cur_pos -> prev_idx. Branchless: a missing predecessor, or one
-// beyond the window, gives 0, which the walk reads as end of chain.
+/**
+ * @brief Chain link from a position back to the one the hash slot held.
+ *
+ * Branchless: a missing predecessor, or one beyond the window, gives 0, which
+ * the chain walk reads as end of chain.
+ */
 static ZXC_ALWAYS_INLINE uint16_t zxc_chain_delta(const uint32_t cur_pos, const uint32_t prev_idx) {
     const uint32_t dist = cur_pos - prev_idx;
     const uint32_t valid = -((int32_t)((prev_idx != 0) & (dist < ZXC_LZ_WINDOW_SIZE)));
@@ -162,8 +174,12 @@ static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, const ui
     return 3;
 }
 
-// A token field saturates at `mask`; the excess goes to the extras stream as a
-// varint. Returns 0 if it does not fit one.
+/**
+ * @brief Appends a saturated token field's excess to the extras stream.
+ *
+ * A field holds values below its mask; a larger one stores the mask in the
+ * token and the excess here as a varint. Returns 0 if it does not fit one.
+ */
 static ZXC_ALWAYS_INLINE int zxc_emit_extra(uint8_t* RESTRICT extras, size_t* RESTRICT used,
                                             const uint32_t val, const uint32_t mask) {
     if (LIKELY(val < mask)) return 1;
@@ -173,8 +189,12 @@ static ZXC_ALWAYS_INLINE int zxc_emit_extra(uint8_t* RESTRICT extras, size_t* RE
     return 1;
 }
 
-// One 32-byte wild copy covers the common short run. Within 32 bytes of iend it
-// would read past the block, so the tail takes an exact copy.
+/**
+ * @brief Stages a run of literals into the literal stream.
+ *
+ * One 32-byte wild copy covers the common short run. Within 32 bytes of the
+ * block end that copy would read past it, so the tail takes an exact copy.
+ */
 static ZXC_ALWAYS_INLINE void zxc_flush_literals(uint8_t* literals, size_t* lit_c,
                                                  const uint8_t* anchor, const uint32_t ll,
                                                  const uint8_t* iend) {

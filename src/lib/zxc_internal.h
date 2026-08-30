@@ -829,23 +829,19 @@ static inline int zxc_level_clamp(const int level) {
     return (level > ZXC_LEVEL_ULTRA) ? ZXC_LEVEL_ULTRA : level;
 }
 
-/** @name Option-block accessors
- *  @brief Read one field of a (possibly NULL) public options struct, applying
- *         that field's convention. Macros rather than functions because the
- *         compression and decompression option structs share these fields
- *         without sharing a type.
+/** @brief Dictionary length from a (possibly NULL) options struct.
  *
- *  @c dict_size and @c dict_huf are gated on @c dict itself: a caller that
- *  leaves @c dict NULL has no dictionary, whatever the sibling fields hold.
- *  @c level and @c block_size follow the documented "0 means default"
- *  convention, and a level is clamped to the highest one the encoder implements.
- *  @{
- */
+ *  Gated on @c dict itself: no dictionary pointer means no dictionary, whatever
+ *  the sibling fields hold. Macros rather than functions because the compression
+ *  and decompression option structs carry these fields without sharing a type. */
 #define ZXC_OPTS_DICT_SIZE(o) (((o) && (o)->dict) ? (o)->dict_size : (size_t)0)
+/** @brief Shared literal Huffman table, gated on @c dict the same way. */
 #define ZXC_OPTS_DICT_HUF(o) (((o) && (o)->dict) ? (const uint8_t*)(o)->dict_huf : NULL)
+/** @brief Compression level, 0 meaning the default, clamped to the highest level
+ *         the encoder implements. */
 #define ZXC_OPTS_LEVEL(o, dflt) zxc_level_clamp(((o) && (o)->level > 0) ? (o)->level : (dflt))
+/** @brief Block size, 0 meaning the default. */
 #define ZXC_OPTS_BLOCK_SIZE(o, dflt) (((o) && (o)->block_size > 0) ? (o)->block_size : (dflt))
-/** @} */
 
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below
  *         ::ZXC_LEVEL_ULTRA use ::ZXC_HUF_MAX_CODE_LEN_DENSITY, ::ZXC_LEVEL_ULTRA uses

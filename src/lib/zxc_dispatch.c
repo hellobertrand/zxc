@@ -328,8 +328,8 @@ typedef struct {
 /**
  * @brief Detects the CPU tier and returns the matching variant set.
  *
- * @return The best available variants, or the `_default` (baseline) set when no
- *         ISA extension applies or the build is single-variant.
+ * Falls back to the `_default` (baseline) set when no ISA extension applies or
+ * the build is single-variant.
  */
 // LCOV_EXCL_START
 static zxc_variant_set_t zxc_select_variants(void) {
@@ -355,16 +355,8 @@ static zxc_variant_set_t zxc_select_variants(void) {
 /**
  * @brief First-call initialiser for the decompression dispatcher.
  *
- * Publishes both decompression pointers (plain and dict), then tail-calls the
- * one this context needs.
- *
- * @param[in]  ctx      Decompression context (its @c dict_size picks the dict variant).
- * @param[in]  src      Compressed input chunk.
- * @param[in]  src_sz   Size of @p src in bytes.
- * @param[out] dst      Destination buffer for decompressed data.
- * @param[in]  dst_cap  Capacity of @p dst in bytes.
- * @return Result of the selected variant: decompressed size, or negative
- *         @ref zxc_error_t.
+ * Publishes both decompression pointers, then tail-calls the one this context
+ * needs (its @c dict_size picks the dict variant).
  */
 // LCOV_EXCL_START
 static int zxc_decompress_dispatch_init(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
@@ -377,18 +369,7 @@ static int zxc_decompress_dispatch_init(const zxc_cctx_t* RESTRICT ctx, const ui
 }
 
 /**
- * @brief First-call initialiser for the safe-decompression dispatcher.
- *
- * Mirrors @ref zxc_decompress_dispatch_init but publishes the `_safe_*` decoder
- * used by @ref zxc_decompress_block_safe.
- *
- * @param[in]  ctx      Decompression context.
- * @param[in]  src      Compressed input chunk.
- * @param[in]  src_sz   Size of @p src in bytes.
- * @param[out] dst      Destination buffer (strict: exact uncompressed size).
- * @param[in]  dst_cap  Capacity of @p dst in bytes.
- * @return Result of the selected variant: decompressed size, or negative
- *         @ref zxc_error_t.
+ * @brief Same, for the `_safe_*` decoder used by @ref zxc_decompress_block_safe.
  */
 static int zxc_decompress_safe_dispatch_init(const zxc_cctx_t* RESTRICT ctx,
                                              const uint8_t* RESTRICT src, const size_t src_sz,
@@ -398,17 +379,7 @@ static int zxc_decompress_safe_dispatch_init(const zxc_cctx_t* RESTRICT ctx,
     return v.decompress_safe(ctx, src, src_sz, dst, dst_cap);
 }
 
-/**
- * @brief First-call initialiser for the compression dispatcher.
- *
- * @param[in,out] ctx      Compression context.
- * @param[in]     src      Uncompressed input chunk.
- * @param[in]     src_sz   Size of @p src in bytes.
- * @param[out]    dst      Destination buffer for the compressed chunk.
- * @param[in]     dst_cap  Capacity of @p dst in bytes.
- * @return Result of the selected variant: compressed size, or negative
- *         @ref zxc_error_t.
- */
+/** @brief Same, for the compressor. */
 static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap) {

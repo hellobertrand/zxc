@@ -1378,8 +1378,12 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n
 // ISA-independent cold dict setup: emit once in the primary variant, not in
 // every per-ISA copy (dead weight). zxc_pivco_tree_build stays per-variant.
 #if defined(ZXC_VARIANT_PRIMARY)
-// A parent whose two children are both leaves emits their runs from its own
-// bits (XOR-blend), so the children are never reconstructed: flag them.
+/**
+ * @brief Flags the children of every leaf-pair parent.
+ *
+ * A parent whose two children are both leaves emits their runs from its own
+ * bits (XOR-blend), so those children are never reconstructed.
+ */
 static ZXC_ALWAYS_INLINE void zxc_pivco_mark_leaf_pairs(const zxc_pivco_tree_t* RESTRICT t,
                                                         uint8_t* RESTRICT skip) {
     ZXC_MEMSET(skip, 0, ZXC_PIVCO_MAX_NODES);
@@ -1395,8 +1399,12 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_mark_leaf_pairs(const zxc_pivco_tree_t* 
     }
 }
 
-// Code -> symbol table of the flat subtree at nid: complete of depth D, so its
-// 2^D codes index c2s directly. Built at attach for a dict tree, per block else.
+/**
+ * @brief Builds the code-to-symbol table of a flat subtree.
+ *
+ * The subtree is complete of depth D, so its 2^D codes index the table
+ * directly. Built once at attach for a dictionary tree, per block otherwise.
+ */
 static ZXC_ALWAYS_INLINE void zxc_pivco_build_c2s(const zxc_pivco_tree_t* RESTRICT t, const int nid,
                                                   uint8_t* RESTRICT c2s) {
     int16_t stk_n[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
@@ -1470,8 +1478,13 @@ int zxc_huf_dict_tree_build(const uint8_t* RESTRICT packed_lengths, zxc_pivco_tr
 }
 #endif /* ZXC_VARIANT_PRIMARY */
 
-// Cursor advance closing every fixed-width arm below: the step took pc bytes
-// from the right child, w - pc from the left. Uses the caller's lp, rp and i.
+/**
+ * @brief Advances the merge cursors past one fixed-width step.
+ *
+ * Every fixed-width arm below closes the same way: the step took @c pc bytes
+ * from the right child and the rest from the left. Operates on the enclosing
+ * loop's @c lp, @c rp and @c i.
+ */
 #define ZXC_PIVCO_MERGE_STEP(w, pc) \
     do {                            \
         rp += (size_t)(pc);         \

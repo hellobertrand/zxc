@@ -136,14 +136,11 @@ typedef struct {
 } zxc_seek_source_t;
 
 /**
- * @brief Reads @p len bytes at @p off from the archive, whatever backs it.
+ * @brief Reads a byte range from the archive, whatever backs it.
  *
- * @param[in]  src  Archive source.
- * @param[out] dst  Destination buffer of at least @p len bytes.
- * @param[in]  len  Byte count to read.
- * @param[in]  off  Absolute offset in the archive.
- * @return 1 on success, 0 if the range falls outside the archive or the
- *         caller-supplied reader came up short.
+ * Returns 1 on success, 0 if the range falls outside the archive or the
+ * caller's reader came up short: every bounds check on a parsed offset goes
+ * through here.
  */
 static int zxc_seek_source_read(const zxc_seek_source_t* src, void* dst, const size_t len,
                                 const uint64_t off) {
@@ -166,9 +163,8 @@ static int zxc_seek_source_read(const zxc_seek_source_t* src, void* dst, const s
  *   5. Read comp_sizes, build the compressed-offset prefix sums, and check the
  *      layout lands exactly on the EOF block
  *
- * @param[in] src  Archive source (buffer or reader; see @ref zxc_seek_source_t).
- * @return A newly allocated handle (free via @ref zxc_seekable_free), or NULL
- *         if the archive is too small or the seek table is missing / malformed.
+ * Returns a handle to free via @ref zxc_seekable_free, or NULL if the archive
+ * is too small or the seek table is missing / malformed.
  */
 static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     // Minimum: file_header(16) + eof_block(8) + seek_block_header(8)

@@ -483,20 +483,12 @@ static void* zxc_async_writer(void* arg) {
 }
 
 /**
- * @brief Tears the engine down after a setup failure, then reports @p code.
+ * @brief Tears the engine down after a setup failure and reports the error.
  *
- * Stops and joins the @p started workers (if any), destroys the ring's
- * synchronisation objects and releases every allocation made so far. Every
- * failure point in the setup sequence returns through here, so the destruction
- * order lives in one place instead of being pasted per exit.
- *
- * @param[in,out] ctx        Engine context whose primitives were initialised.
- * @param[in]     workers    Worker handle array (may be NULL).
- * @param[in]     started    Number of workers actually spawned.
- * @param[in]     mem_block  Ring-buffer allocation (may be NULL).
- * @param[in]     seek_comp  Seek-table accumulator (may be NULL).
- * @param[in]     code       Negative @ref zxc_error_t to return.
- * @return @p code.
+ * Stops and joins whatever workers were started, destroys the ring's
+ * synchronisation objects and releases every allocation made so far. Each
+ * failure point returns through here, so the destruction order lives in one
+ * place; all pointers may be NULL.
  */
 // LCOV_EXCL_START
 static int64_t zxc_stream_engine_fail(zxc_stream_ctx_t* ctx, pthread_t* workers, const int started,
