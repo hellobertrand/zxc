@@ -206,11 +206,11 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         // so sized to the larger demand. Keep in sync with zxc_estimate_cctx_size()
         // and its consumer in zxc_compress.c.
         if (level >= ZXC_LEVEL_DENSITY) {
-            const size_t sz_dp = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t));
-            const size_t sz_pl = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
-            const size_t sz_po = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
-            const size_t n_bm_words = ZXC_BITMAP_WORDS(chunk_size + 1);
-            const size_t sz_bm = ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));
+            size_t sz_dp;
+            size_t sz_pl;
+            size_t sz_po;
+            size_t sz_bm;
+            zxc_opt_dp_sizes(chunk_size, &sz_dp, &sz_pl, &sz_po, &sz_bm);
             const size_t dp_needed = sz_dp + sz_pl + sz_po + sz_bm;
             layout.sz_opt =
                 (dp_needed > ZXC_HUF_BUILD_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_BUILD_SCRATCH_SIZE;

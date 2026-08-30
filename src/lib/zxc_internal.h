@@ -886,6 +886,21 @@ typedef struct {
      (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * (size_t)ZXC_HUF_PM_LEVEL_BOUND * \
          sizeof(zxc_huf_pm_frame_t))
 
+/**
+ * @brief The four DP partitions the optimal parser carves out of opt_scratch.
+ *
+ * One definition shared by compute_cctx_layout(), which reserves the region,
+ * and zxc_lz77_optimal_parse_glo(), which carves it: the two cannot drift.
+ */
+static ZXC_ALWAYS_INLINE void zxc_opt_dp_sizes(const size_t chunk_size, size_t* RESTRICT sz_dp,
+                                               size_t* RESTRICT sz_pl, size_t* RESTRICT sz_po,
+                                               size_t* RESTRICT sz_bm) {
+    *sz_dp = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t));
+    *sz_pl = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
+    *sz_po = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
+    *sz_bm = ZXC_ALIGN_CL(ZXC_BITMAP_WORDS(chunk_size + 1) * sizeof(uint64_t));
+}
+
 /** @name Block Size Helpers
  *  @brief Runtime helpers for variable block sizes.
  *  @{ */

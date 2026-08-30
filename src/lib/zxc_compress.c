@@ -894,8 +894,7 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     const uint8_t* const search_limit = src + search_limit_pos;
 
     // DP arrays carved from ctx->opt_scratch, one allocation reused across
-    // blocks, each sub-buffer cache-line padded. Keep `needed` in sync with
-    // zxc_estimate_cctx_size().
+    // blocks, each sub-buffer cache-line padded.
     //
     //   dp             : (chunk+1) x u32: min cost to reach position p.
     //   parent_len     : (chunk+1) x u16: 0 = literal, >= MIN_MATCH = match.
@@ -907,20 +906,12 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     // The same buffer doubles as package-merge scratch for the code-length
     // builder: that scratch is live before the DP and after the parse is read
     // out, never during, so capacity is just the larger of the two.
-    const size_t chunk = ctx->chunk_size;
-    const size_t sz_dp = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint32_t));
-    const size_t sz_pl = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint16_t));
-    const size_t sz_po = ZXC_ALIGN_CL((chunk + 1) * sizeof(uint16_t));
-    const size_t n_bm_words = ZXC_BITMAP_WORDS(chunk + 1);
-    const size_t sz_bm = ZXC_ALIGN_CL(n_bm_words * sizeof(uint64_t));
-    const size_t dp_needed = sz_dp + sz_pl + sz_po + sz_bm;
-    const size_t needed =
-        (dp_needed > ZXC_HUF_BUILD_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_BUILD_SCRATCH_SIZE;
-
-    // zxc_cctx_init pre-allocates opt_scratch inside ctx->memory_block at
-    // level >= ZXC_LEVEL_DENSITY. The formula above must stay byte-for-byte in
-    // sync with it and with zxc_estimate_cctx_size().
-    (void)needed;
+    size_t sz_dp;
+    size_t sz_pl;
+    size_t sz_po;
+    size_t sz_bm;
+    zxc_opt_dp_sizes(ctx->chunk_size, &sz_dp, &sz_pl, &sz_po, &sz_bm);
+    const size_t n_bm_words = ZXC_BITMAP_WORDS(ctx->chunk_size + 1);
 
     // Per-block literal cost (sample only block data, not dict prefix):
     const uint32_t lit_cost = zxc_opt_estimate_lit_bits(src_base, block_sz, ctx->opt_scratch);
