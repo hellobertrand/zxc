@@ -1378,6 +1378,54 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n
 // ISA-independent cold dict setup: emit once in the primary variant, not in
 // every per-ISA copy (dead weight). zxc_pivco_tree_build stays per-variant.
 #if defined(ZXC_VARIANT_PRIMARY)
+// A parent whose two children are both leaves emits their runs from its own
+// bits (XOR-blend), so the children are never reconstructed: flag them.
+static ZXC_ALWAYS_INLINE void zxc_pivco_mark_leaf_pairs(const zxc_pivco_tree_t* RESTRICT t,
+                                                        uint8_t* RESTRICT skip) {
+    ZXC_MEMSET(skip, 0, ZXC_PIVCO_MAX_NODES);
+    for (int i = 0; i < t->n_nodes; i++) {
+        const zxc_pivco_node_t* nd = &t->nd[t->bfs[i]];
+        if (nd->sym >= 0) continue;
+        const int ch0 = nd->child[0];
+        const int ch1 = nd->child[1];
+        if (ch0 >= 0 && ch1 >= 0 && t->nd[ch0].sym >= 0 && t->nd[ch1].sym >= 0) {
+            skip[ch0] = 1;
+            skip[ch1] = 1;
+        }
+    }
+}
+
+// Code -> symbol table of the flat subtree at nid: complete of depth D, so its
+// 2^D codes index c2s directly. Built at attach for a dict tree, per block else.
+static ZXC_ALWAYS_INLINE void zxc_pivco_build_c2s(const zxc_pivco_tree_t* RESTRICT t, const int nid,
+                                                  uint8_t* RESTRICT c2s) {
+    int16_t stk_n[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
+    uint16_t stk_p[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
+    uint8_t stk_l[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
+    int sp = 0;
+    stk_n[0] = (int16_t)nid;
+    stk_p[0] = 0;
+    stk_l[0] = 0;
+    while (sp >= 0) {
+        const int cn = stk_n[sp];
+        const uint32_t cp = stk_p[sp];
+        const int cl = stk_l[sp];
+        sp--;
+        if (t->nd[cn].sym >= 0) {
+            c2s[cp] = (uint8_t)t->nd[cn].sym;
+            continue;
+        }
+        sp++;
+        stk_n[sp] = t->nd[cn].child[0];
+        stk_p[sp] = (uint16_t)cp;
+        stk_l[sp] = (uint8_t)(cl + 1);
+        sp++;
+        stk_n[sp] = t->nd[cn].child[1];
+        stk_p[sp] = (uint16_t)(cp | (1U << cl));
+        stk_l[sp] = (uint8_t)(cl + 1);
+    }
+}
+
 /**
  * @brief Precompute the topology-derived decoder tables for @p t.
  *
@@ -1389,17 +1437,7 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n
  */
 static void zxc_pivco_decode_aux_build(const zxc_pivco_tree_t* RESTRICT t,
                                        zxc_pivco_decode_aux_t* RESTRICT aux) {
-    ZXC_MEMSET(aux->skip, 0, sizeof(aux->skip));
-    for (int i = 0; i < t->n_nodes; i++) {
-        const zxc_pivco_node_t* nd = &t->nd[t->bfs[i]];
-        if (nd->sym >= 0) continue;
-        const int ch0 = nd->child[0];
-        const int ch1 = nd->child[1];
-        if (ch0 >= 0 && ch1 >= 0 && t->nd[ch0].sym >= 0 && t->nd[ch1].sym >= 0) {
-            aux->skip[ch0] = 1;
-            aux->skip[ch1] = 1;
-        }
-    }
+    zxc_pivco_mark_leaf_pairs(t, aux->skip);
 
     // Flat subtrees have disjoint leaves, so the concatenated tables fit in
     // ZXC_HUF_NUM_SYMBOLS pool entries (see zxc_pivco_decode_aux_t).
@@ -1408,33 +1446,8 @@ static void zxc_pivco_decode_aux_build(const zxc_pivco_tree_t* RESTRICT t,
         const int nid = t->bfs[i];
         if (t->covered[nid] || !t->flat_d[nid]) continue;
         aux->c2s_off[nid] = (uint16_t)pool_off;
-        uint8_t* const c2s = aux->c2s_pool + pool_off;
+        zxc_pivco_build_c2s(t, nid, aux->c2s_pool + pool_off);
         pool_off += 1U << t->flat_d[nid];
-        int16_t stk_n[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
-        uint16_t stk_p[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
-        uint8_t stk_l[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
-        int sp = 0;
-        stk_n[0] = (int16_t)nid;
-        stk_p[0] = 0;
-        stk_l[0] = 0;
-        while (sp >= 0) {
-            const int cn = stk_n[sp];
-            const uint32_t cp = stk_p[sp];
-            const int cl = stk_l[sp];
-            sp--;
-            if (t->nd[cn].sym >= 0) {
-                c2s[cp] = (uint8_t)t->nd[cn].sym;
-                continue;
-            }
-            sp++;
-            stk_n[sp] = t->nd[cn].child[0];
-            stk_p[sp] = (uint16_t)cp;
-            stk_l[sp] = (uint8_t)(cl + 1);
-            sp++;
-            stk_n[sp] = t->nd[cn].child[1];
-            stk_p[sp] = (uint16_t)(cp | (1U << cl));
-            stk_l[sp] = (uint8_t)(cl + 1);
-        }
     }
 }
 
@@ -1456,6 +1469,15 @@ int zxc_huf_dict_tree_build(const uint8_t* RESTRICT packed_lengths, zxc_pivco_tr
     return ZXC_OK;
 }
 #endif /* ZXC_VARIANT_PRIMARY */
+
+// Cursor advance closing every fixed-width arm below: the step took pc bytes
+// from the right child, w - pc from the left. Uses the caller's lp, rp and i.
+#define ZXC_PIVCO_MERGE_STEP(w, pc) \
+    do {                            \
+        rp += (size_t)(pc);         \
+        lp += (size_t)((w) - (pc)); \
+        i += (w);                   \
+    } while (0)
 
 /**
  * @brief Merge two adjacent child sequences under control bits.
@@ -1488,10 +1510,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         const uint8x8_t ia = vld1_u8(zxc_pivco_idxa_u8[b0]);
         const uint8x8_t ib = vld1_u8(zxc_pivco_idxb_pre[pc0][b1]);
         vst1q_u8(out + i, vqtbl2q_u8(tb, vcombine_u8(ia, ib)));
-        const int pc = pc0 + zxc_pivco_popcnt32(b1);
-        rp += (size_t)pc;
-        lp += (size_t)(16 - pc);
-        i += 16;
+        ZXC_PIVCO_MERGE_STEP(16, pc0 + zxc_pivco_popcnt32(b1));
     }
 #else /* x86 tiers */
 #if defined(ZXC_USE_AVX512) && defined(__AVX512VBMI2__)
@@ -1508,10 +1527,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         const __m512i outv =
             _mm512_mask_expandloadu_epi8(vl, (__mmask64)ctrl, (const void*)(R + rp));
         _mm512_storeu_si512((void*)(out + i), outv);
-        const int pc = zxc_pivco_popcnt64(ctrl);
-        rp += (size_t)pc;
-        lp += (size_t)(64 - pc);
-        i += 64;
+        ZXC_PIVCO_MERGE_STEP(64, zxc_pivco_popcnt64(ctrl));
     }
 #endif
 #if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || \
@@ -1600,10 +1616,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         const __m128i sell = _mm_shuffle_epi8(vl, _mm_add_epi8(ix, _mm_set1_epi8(0x70)));
         const __m128i selr = _mm_shuffle_epi8(vr, _mm_sub_epi8(ix, _mm_set1_epi8(16)));
         _mm_storeu_si128((__m128i*)(void*)(out + i), _mm_or_si128(sell, selr));
-        const int pc = pc0 + zxc_pivco_popcnt32(b1);
-        rp += (size_t)pc;
-        lp += (size_t)(16 - pc);
-        i += 16;
+        ZXC_PIVCO_MERGE_STEP(16, pc0 + zxc_pivco_popcnt32(b1));
     }
 #elif defined(ZXC_USE_NEON32)
     // 8 outputs per step: four-register VTBL over {L[0..7], -, R[0..7], -}. The
@@ -1617,10 +1630,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         tb.val[2] = vld1_u8(R + rp);
         tb.val[3] = vdup_n_u8(0);
         vst1_u8(out + i, vtbl4_u8(tb, vld1_u8(zxc_pivco_idxa_u8[b])));
-        const int pc = zxc_pivco_popcnt32(b);
-        rp += (size_t)pc;
-        lp += (size_t)(8 - pc);
-        i += 8;
+        ZXC_PIVCO_MERGE_STEP(8, zxc_pivco_popcnt32(b));
     }
 #endif
 #endif /* x86 tiers */
@@ -1644,6 +1654,8 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         out[i++] = bit ? R[rp++] : L[lp++];
     }
 }
+
+#undef ZXC_PIVCO_MERGE_STEP
 
 /**
  * @brief Decode a flat subtree's packed D-bit code run into symbols.
@@ -2339,17 +2351,7 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
     if (aux) {
         skip = aux->skip;
     } else {
-        ZXC_MEMSET(skip_local, 0, sizeof(skip_local));
-        for (int i = 0; i < t->n_nodes; i++) {
-            const zxc_pivco_node_t* nd = &t->nd[t->bfs[i]];
-            if (nd->sym >= 0) continue;
-            const int ch0 = nd->child[0];
-            const int ch1 = nd->child[1];
-            if (ch0 >= 0 && ch1 >= 0 && t->nd[ch0].sym >= 0 && t->nd[ch1].sym >= 0) {
-                skip_local[ch0] = 1;
-                skip_local[ch1] = 1;
-            }
-        }
+        zxc_pivco_mark_leaf_pairs(t, skip_local);
         skip = skip_local;
     }
 
@@ -2375,31 +2377,7 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
                 if (aux) {
                     c2s = aux->c2s_pool + aux->c2s_off[nid];
                 } else {
-                    int16_t stk_n[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
-                    uint16_t stk_p[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
-                    uint8_t stk_l[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];
-                    int sp = 0;
-                    stk_n[0] = (int16_t)nid;
-                    stk_p[0] = 0;
-                    stk_l[0] = 0;
-                    while (sp >= 0) {
-                        const int cn = stk_n[sp];
-                        const uint32_t cp = stk_p[sp];
-                        const int cl = stk_l[sp];
-                        sp--;
-                        if (t->nd[cn].sym >= 0) {
-                            c2s_local[cp] = (uint8_t)t->nd[cn].sym;
-                            continue;
-                        }
-                        sp++;
-                        stk_n[sp] = t->nd[cn].child[0];
-                        stk_p[sp] = (uint16_t)cp;
-                        stk_l[sp] = (uint8_t)(cl + 1);
-                        sp++;
-                        stk_n[sp] = t->nd[cn].child[1];
-                        stk_p[sp] = (uint16_t)(cp | (1U << cl));
-                        stk_l[sp] = (uint8_t)(cl + 1);
-                    }
+                    zxc_pivco_build_c2s(t, nid, c2s_local);
                     c2s = c2s_local;
                 }
                 zxc_pivco_unpack_flat(buf_d + seq_off[nid], c, D, bit_ptr[nid], c2s);
