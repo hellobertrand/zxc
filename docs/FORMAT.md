@@ -54,11 +54,11 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): `8`. Any other value is rejected (`ZXC_ERROR_BAD_VERSION`);
+- **Format Version** (`u8`): `8`. Any other value is rejected as an unsupported version;
 - **Chunk Size Code** (`u8`):
   - The value is an **exponent** in the range `[12, 21]`: `block_size = 2^code`.
     - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
-  - All other values are rejected (`ZXC_ERROR_BAD_BLOCK_SIZE`).
+  - All other values are rejected as an invalid chunk size code.
   - Valid block sizes are powers of 2 in the range **4 KB – 2 MB**.
 - **Flags** (`u8`):
   - Bit 7 (`0x80`): `HAS_CHECKSUM`.
@@ -68,7 +68,7 @@ Offset  Size  Field
 - **Reserved / Dictionary ID**: 7 bytes.
   - When `HAS_DICTIONARY` is set: bytes `0x07..0x0A` contain a `dict_id` (`u32` LE), a 32-bit hash of the dictionary content. Bytes `0x0B..0x0D` remain zero.
   - When `HAS_DICTIONARY` is clear: all 7 bytes are zero.
-- **Header Checksum** (`u16`): computed with `zxc_hash16` on the 16-byte header where bytes `0x0E..0x0F` are zeroed.
+- **Header Checksum** (`u16`): the 16-bit header checksum of [7.1](#71-header-checksums), computed over the 16-byte header with bytes `0x0E..0x0F` zeroed.
 
 ---
 
@@ -96,7 +96,7 @@ Offset  Size  Field
 - **Block Flags**: currently not used by implementation (written as `0`).
 - **Reserved**: must be 0.
 - **comp_size**: payload size in bytes (does **not** include the optional trailing 4-byte block checksum).
-- **Header Checksum**: `zxc_hash8` over the 8-byte header with byte `0x07` forced to zero before hashing.
+- **Header Checksum**: the 8-bit header checksum of [7.1](#71-header-checksums), computed over the 8-byte header with byte `0x07` zeroed.
 
 ### 4.2 Block physical layout
 
@@ -125,7 +125,8 @@ No internal sub-header.
 
 ## 5.2 GLO block (`type=1`)
 
-General LZ-style format with separated streams.
+"General LZ, LOw throughput": LZ-style format with separated streams, trading
+decode throughput for ratio.
 
 ### GLO payload layout
 
@@ -237,11 +238,13 @@ and extras sections play the role of tokens/offsets/extras.
   - `n_sequences × 1` byte if `enc_off=1`, else `n_sequences × 2` bytes LE.
   - Values are **biased**: stored value = `actual_offset - 1`. Decoder adds `+ 1`.
   - This makes `offset == 0` impossible by construction (minimum decoded offset = 1).
-- **Extras stream**:
-  - Prefix-varint overflow values for token saturations:
-    - if `LL == 15`, read varint and add to LL
-    - if `ML == 15`, read varint and add to ML
-  - actual match length is `ML + 5` (minimum match = 5).
+- **Extras stream**: prefix-varint overflow values for token saturations, per
+  the rules below.
+
+Overflow rules:
+- if `LL == 15`, read varint from Extras and add it to LL.
+- if `ML == 15`, read varint from Extras and add it to ML.
+- otherwise decoded match length is `ML + 5` (minimum match = 5).
 
 ### 5.2.1 Huffman literal section
 
@@ -330,7 +333,7 @@ Decoder validation requirements:
   one symbol has `code_len = 1` and the Kraft sum is `2^10`.
 - Every node's run (bitmap or flat) must lie within the section payload.
 - A popcount that routes symbols to an absent child is a corruption error.
-- A failure on any of the above results in `ZXC_ERROR_CORRUPT_DATA`.
+- A failure on any of the above **MUST** be reported as a corrupt-data error.
 
 ### 5.2.2 Shared-table Huffman literal section
 
@@ -340,7 +343,7 @@ Decoder validation requirements:
 from the shared literal
 table carried by the `.zxd` dictionary (see § 12.4), validated once when the
 dictionary is attached (same rules as § 5.2.1). Decoders **MUST** reject
-`enc_lit=3` sections with `ZXC_ERROR_DICT_REQUIRED` when no dictionary table
+`enc_lit=3` sections when no dictionary table
 is attached. The archive's `dict_id` binds the (content, table) pair, so a
 matching table is guaranteed present whenever the dictionary check passed.
 
@@ -354,7 +357,8 @@ inline lengths header) over the token byte alphabet.
 
 ## 5.3 GHI block (`type=2`)
 
-High-throughput LZ format with packed 32-bit sequences.
+"General LZ, HIgh throughput": LZ format with packed 32-bit sequences, trading
+ratio for decode throughput.
 
 ### GHI payload layout
 
@@ -459,7 +463,12 @@ ZXC extras use a prefix-length varint.
 
 The length is encoded in unary form in the high bits of the first byte: the
 number of leading `1` bits, followed by a terminating `0`, indicates how
-many additional payload bytes follow. The scheme generalizes to N bytes
+many additional payload bytes follow. The total length is therefore known
+from the first byte alone, and every following byte carries eight payload
+bits. This differs from LEB128, which spends a continuation bit in each byte
+and reveals the length only as the value is scanned.
+
+The scheme generalizes to N bytes
 (`11110xxx` = 5, `111110xx` = 6, ...), but the current ZXC spec caps the
 encoding at 3 bytes because no legitimate value exceeds 21 bits (see below).
 
@@ -469,21 +478,38 @@ Encodings used:
 - `10xxxxxx` -> 2 bytes total (14 bits, value < 16384)
 - `110xxxxx` -> 3 bytes total (21 bits, value < 2 MiB)
 
-Payload bits from the following bytes are concatenated little-endian style
-(low bits first). Used by GLO/GHI to carry LL/ML overflows beyond
-token/sequence inline limits.
+The first byte's payload bits — those below its unary prefix — are the least
+significant bits of the value, and each following byte contributes the next
+eight bits up. Writing `b0`, `b1`, `b2` for the bytes in stream order, the
+accepted forms decode as:
+
+```
+1 byte:   value = b0
+2 bytes:  value = (b0 AND 0x3F) OR (b1 << 6)
+3 bytes:  value = (b0 AND 0x1F) OR (b1 << 5) OR (b2 << 13)
+```
+
+For example, the two bytes `AC 04` decode as the 2-byte form:
+`(0xAC AND 0x3F) OR (0x04 << 6)` = 44 + 256 = **300**. The three bytes
+`C3 35 0C` decode as the 3-byte form:
+`(0xC3 AND 0x1F) OR (0x35 << 5) OR (0x0C << 13)` = 3 + 1696 + 98304 =
+**100003**.
+
+Used by GLO/GHI to carry LL/ML overflows beyond token/sequence inline
+limits.
 
 **Value bound**: a varint encodes `(LL - MASK)` or `(ML - MASK)`.
-Since LL/ML are bounded by `ZXC_BLOCK_SIZE_MAX = 2 MiB` (2^21), every
-legitimate varint value is strictly less than 2^21 and therefore fits in
-**at most 3 bytes**.
+Since LL/ML are bounded by the largest block size a Chunk Size Code can
+select (2 MiB at code 21, see [3](#3-file-header-16-bytes)), every legitimate
+varint value is strictly less than 2^21 and therefore fits in **at most 3
+bytes**.
 
 Any prefix indicating a length >= 4 bytes (first byte `>= 0xE0`) is out of
 spec for this format version: encoders must never emit such a varint, and
 conforming decoders reject it as corrupt input. This caps the varint
 surface to the format-defined block size limit and neutralizes
 integer-overflow attacks in downstream bounds arithmetic. A future version
-of the format that raises `ZXC_BLOCK_SIZE_MAX` would also extend the
+of the format that raises the per-block size limit would also extend the
 accepted prefix lengths.
 
 ---
@@ -492,8 +518,39 @@ accepted prefix lengths.
 
 ## 7.1 Header checksums
 
-- File header: 16-bit (`zxc_hash16`).
-- Block header: 8-bit (`zxc_hash8`).
+The file header carries a 16-bit checksum at `0x0E..0x0F`; every block header
+carries an 8-bit checksum at `0x07`. Despite their historical name, both are
+xorshift hashes, not cyclic redundancy checks: the shift triple `(13, 7, 17)`
+is that of Marsaglia's `xorshift64`, used here to mix a seeded input rather
+than to generate a sequence.
+
+All arithmetic below is on unsigned 64-bit integers modulo 2^64, and all
+shifts are logical.
+
+The **8-bit block header checksum** takes the 8 header bytes as a single
+little-endian 64-bit integer `v`, with the checksum byte at `0x07` treated as
+zero:
+
+```
+h = v XOR 0x9E3779B97F4A7C15
+h = h XOR (h << 13)
+h = h XOR (h >> 7)
+h = h XOR (h << 17)
+checksum8 = ((h >> 32) XOR h) AND 0xFF
+```
+
+The **16-bit file header checksum** takes the 16 header bytes as two
+little-endian 64-bit integers, `v1` at `0x00` and `v2` at `0x08`, with the two
+checksum bytes at `0x0E..0x0F` treated as zero:
+
+```
+h = v1 XOR v2 XOR 0xD2D84A61D2D84A61
+h = h XOR (h << 13)
+h = h XOR (h >> 7)
+h = h XOR (h << 17)
+r  = ((h >> 32) XOR h) AND 0xFFFFFFFF
+checksum16 = ((r >> 16) XOR r) AND 0xFFFF
+```
 
 These protect metadata/navigation fields.
 
@@ -578,10 +635,10 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 
 ### 10.3 Compatibility rules
 
-- **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version with `ZXC_ERROR_BAD_VERSION`. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
-- **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version (`ZXC_ERROR_BAD_BLOCK_TYPE`). The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
+- **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
+- **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version. The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
 - **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header checksum, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension.
-- **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values (`ZXC_ERROR_BAD_HEADER`).
+- **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values as a corrupt header.
 
 ### 10.4 Minimum conforming decoder
 
@@ -675,9 +732,9 @@ decompress any block independently.
 
 When `HAS_DICTIONARY` (flag bit 6) is set, the reserved bytes at offsets
 `0x07..0x0A` contain the `dict_id` (`u32` LE). A decoder **MUST**:
-1. Verify that a dictionary is provided (`ZXC_ERROR_DICT_REQUIRED` if not).
+1. Verify that a dictionary is provided; reject the archive if not.
 2. Verify that the dictionary id matches `header.dict_id`
-   (`ZXC_ERROR_DICT_MISMATCH` if not). For a raw in-memory dictionary without
+   ; reject on mismatch. For a raw in-memory dictionary without
    a shared table, the id is `zxc_dict_id(dict, dict_size, NULL)`. When a shared
    literal table is attached, the id also binds the table:
    `id = fold32(hash(table_128_bytes, seed = hash(content)))` (i.e. `zxc_dict_id(content, size, table)`).
@@ -700,7 +757,7 @@ Offset  Size  Field
 0x06    2     Content size (u16 LE, max 65535)
 0x08    4     dict_id (u32 LE, binds content AND shared table, see below)
 0x0C    2     Reserved (0)
-0x0E    2     Header Checksum (zxc_hash16, computed with 0x0C-0x0F zeroed)
+0x0E    2     Header Checksum (see 7.1, computed with 0x0C-0x0F zeroed)
 0x10    N     Dictionary content (raw bytes)
 0x10+N  128   Shared literal Huffman table (256 × 4-bit packed code lengths,
               same layout as the § 5.2.1 code-length header; always present)
@@ -708,14 +765,14 @@ Offset  Size  Field
 
 - **Magic Word**: `0x9CB0D1C7`. Allows immediate rejection of non-dictionary files.
 - **Version**: `1`. Decoders reject any other version with
-  `ZXC_ERROR_BAD_VERSION`.
+  an unsupported dictionary version.
 - **Flags**: bits `0..3` carry the checksum algorithm id (`0` = RapidHash-based folding), matching the ZXC file header flags; bits `4..7` are reserved (must be 0).
 - **Shared literal Huffman table**: code lengths for the `enc_lit=3` literal
   sections (§ 5.2.2), trained on the corpus' post-LZ literal distribution.
 - **dict_id**: `fold32(hash(table_128_bytes, seed = hash(content)))` —
   binds the exact (content, table) pair. Must match the `dict_id` stored in
   any ZXC file header that references this dictionary.
-- **Header Checksum**: `zxc_hash16` checksum of the 16-byte header with bytes `0x0C..0x0F` zeroed before hashing — same method as the ZXC file header.
+- **Header Checksum**: the 16-bit header checksum of [7.1](#71-header-checksums), computed over the 16-byte header with bytes `0x0C..0x0F` zeroed.
 - **Content**: raw bytes that prefill the LZ77 window. Not compressed.
 
 ### 12.5 Dictionary training
@@ -741,8 +798,8 @@ as follows:
 - On **decompression**, a dictionary is **not** auto-located: an archive that
   was compressed with a dictionary must be decompressed by passing that
   dictionary explicitly with `-D`. Without it, decompression fails with
-  `ZXC_ERROR_DICT_REQUIRED` (the `dict_id` in the header is still verified
-  against the supplied dictionary, yielding `ZXC_ERROR_DICT_MISMATCH` on a
+  a dictionary-required error (the `dict_id` in the header is still verified
+  against the supplied dictionary, yielding a dictionary-mismatch error on a
   mismatch).
 
 ---
@@ -953,7 +1010,7 @@ A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size
 ### 15.1 Full hexdump
 
 ```text
-00000000: C7 D1 B0 9C 01 00 05 00 23 58 DF 6F 00 00 63 65
+00000000: C7 D1 B0 9C 01 00 05 00 34 07 FC 0C 00 00 2D 74
 00000010: 68 65 6C 6C 6F 00 00 00 00 00 00 00 00 00 00 00
 00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 00000030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
@@ -970,16 +1027,16 @@ A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size
 #### A) Dictionary Header (offset `0x00`, 16 bytes)
 
 ```text
-C7 D1 B0 9C | 01 | 00 | 05 00 | 23 58 DF 6F | 00 00 | 63 65
+C7 D1 B0 9C | 01 | 00 | 05 00 | 34 07 FC 0C | 00 00 | 2D 74
 ```
 
 - `C7 D1 B0 9C` -> magic word (LE) = `0x9CB0D1C7` (`.zxd` dictionary).
 - `01` -> dictionary format version 1.
 - `00` -> flags (bits 0..3 = checksum algorithm id `0` = RapidHash; bits 4..7 reserved).
 - `05 00` -> content size (LE) = `5` bytes.
-- `23 58 DF 6F` -> `dict_id` (LE) = `0x6FDF5823`. Binds the **(content, table)** pair (see §12.4) and must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
+- `34 07 FC 0C` -> `dict_id` (LE) = `0x0CFC0734`. Binds the **(content, table)** pair (see §12.4) and must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
 - `00 00` -> reserved.
-- `63 65` -> header checksum (LE) = `0x6563`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the checksum is the last 2 bytes of the header).
+- `2D 74` -> header checksum (LE) = `0x742D`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the checksum is the last 2 bytes of the header).
 
 #### B) Dictionary Content (offset `0x10`, 5 bytes)
 
