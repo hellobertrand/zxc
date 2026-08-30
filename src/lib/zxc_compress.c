@@ -85,6 +85,55 @@ static ZXC_ALWAYS_INLINE uint16_t zxc_chain_delta(const uint32_t cur_pos, const 
     return (uint16_t)(dist & valid);
 }
 
+/**
+ * @brief Pair-equality mask for the RLE lookahead: element i is set when
+ *        p[i] == p[i+1].
+ *
+ * The only thing that differs between vector widths; the scan that consumes it
+ * is written once. @c ZXC_RLE_WIN is the bytes examined per step and
+ * @c ZXC_RLE_BPB the mask bits each byte occupies (4 on NEON, which has no
+ * byte-movemask). 32-bit NEON has no cheap equivalent and keeps its own scan.
+ */
+#if defined(ZXC_USE_AVX512)
+#define ZXC_RLE_WIN 64
+#define ZXC_RLE_BPB 1
+#define ZXC_RLE_CTZ(x) zxc_ctz64(x)
+typedef uint64_t zxc_rle_mask_t;
+static ZXC_ALWAYS_INLINE zxc_rle_mask_t zxc_rle_pair_mask(const uint8_t* p) {
+    return (uint64_t)_mm512_cmpeq_epi8_mask(_mm512_loadu_si512((const void*)p),
+                                            _mm512_loadu_si512((const void*)(p + 1)));
+}
+#elif defined(ZXC_USE_AVX2)
+#define ZXC_RLE_WIN 32
+#define ZXC_RLE_BPB 1
+#define ZXC_RLE_CTZ(x) zxc_ctz32(x)
+typedef uint32_t zxc_rle_mask_t;
+static ZXC_ALWAYS_INLINE zxc_rle_mask_t zxc_rle_pair_mask(const uint8_t* p) {
+    const __m256i v0 = _mm256_loadu_si256((const __m256i*)p);
+    const __m256i v1 = _mm256_loadu_si256((const __m256i*)(p + 1));
+    return (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v0, v1));
+}
+#elif defined(ZXC_USE_SSE2)
+#define ZXC_RLE_WIN 16
+#define ZXC_RLE_BPB 1
+#define ZXC_RLE_CTZ(x) zxc_ctz32(x)
+typedef uint32_t zxc_rle_mask_t;
+static ZXC_ALWAYS_INLINE zxc_rle_mask_t zxc_rle_pair_mask(const uint8_t* p) {
+    const __m128i v0 = _mm_loadu_si128((const __m128i*)p);
+    const __m128i v1 = _mm_loadu_si128((const __m128i*)(p + 1));
+    return (uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(v0, v1));
+}
+#elif defined(ZXC_USE_NEON64)
+#define ZXC_RLE_WIN 16
+#define ZXC_RLE_BPB 4
+#define ZXC_RLE_CTZ(x) zxc_ctz64(x)
+typedef uint64_t zxc_rle_mask_t;
+static ZXC_ALWAYS_INLINE zxc_rle_mask_t zxc_rle_pair_mask(const uint8_t* p) {
+    const uint8x16_t eq = vceqq_u8(vld1q_u8(p), vld1q_u8(p + 1));
+    return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
+}
+#endif
+
 // SSE2 selected, not merely available: guards the two helpers below.
 #if defined(ZXC_USE_SSE2) && !(defined(ZXC_USE_AVX512) && defined(__AVX512VL__)) && \
     !defined(ZXC_USE_AVX2) && !defined(ZXC_USE_NEON64) && !defined(ZXC_USE_NEON32)
@@ -1410,93 +1459,24 @@ parse_done:;
                 // Literal run: scan ahead with fast SIMD lookahead
                 const uint8_t* lit_start = run_start;
 
-#if defined(ZXC_USE_AVX512)
-                while (p <= p_end_4 - 64) {
-                    const __m512i v0 = _mm512_loadu_si512((const void*)p);
-                    const __m512i v1 = _mm512_loadu_si512((const void*)(p + 1));
-                    const uint64_t m = (uint64_t)_mm512_cmpeq_epi8_mask(v0, v1);
-                    const uint64_t mask = m & (m >> 1) & (m >> 2);
+#if defined(ZXC_RLE_WIN)
+                while (p <= p_end_4 - ZXC_RLE_WIN) {
+                    const zxc_rle_mask_t m = zxc_rle_pair_mask(p);
+                    const zxc_rle_mask_t mask = m & (m >> ZXC_RLE_BPB) & (m >> (2 * ZXC_RLE_BPB));
                     if (LIKELY(mask == 0)) {
-                        p += 62;
+                        p += ZXC_RLE_WIN - 2;
                         continue;
                     }
-                    const unsigned rpos = (unsigned)zxc_ctz64(mask);
-                    const unsigned rpairs = (unsigned)zxc_ctz64(~(m >> rpos));
-                    if (UNLIKELY(rpos + rpairs >= 64)) {
+                    const unsigned rpos = (unsigned)(ZXC_RLE_CTZ(mask) / ZXC_RLE_BPB);
+                    const unsigned rpairs =
+                        (unsigned)(ZXC_RLE_CTZ(~(m >> (rpos * ZXC_RLE_BPB))) / ZXC_RLE_BPB);
+                    if (UNLIKELY(rpos + rpairs >= ZXC_RLE_WIN)) {
                         p += rpos;
                         goto _lit_done; /* run may extend past the window */
                     }
                     const size_t seg = (size_t)(p + rpos - lit_start);
                     rle_size += seg + ((seg + 127) >> 7);
-                    rle_size += 2; /* run in [4,63]: full_chunks=0, rem>=4 */
-                    p += rpos + rpairs + 1;
-                    lit_start = p;
-                }
-#elif defined(ZXC_USE_AVX2)
-                while (p <= p_end_4 - 32) {
-                    __m256i v0 = _mm256_loadu_si256((const __m256i*)p);
-                    __m256i v1 = _mm256_loadu_si256((const __m256i*)(p + 1));
-                    const uint32_t m = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v0, v1));
-                    const uint32_t mask = m & (m >> 1) & (m >> 2);
-                    if (LIKELY(mask == 0)) {
-                        p += 30;
-                        continue;
-                    }
-                    const unsigned rpos = zxc_ctz32(mask);
-                    const unsigned rpairs = zxc_ctz32(~(m >> rpos));
-                    if (UNLIKELY(rpos + rpairs >= 32)) {
-                        p += rpos;
-                        goto _lit_done; /* run may extend past the window */
-                    }
-                    const size_t seg = (size_t)(p + rpos - lit_start);
-                    rle_size += seg + ((seg + 127) >> 7);
-                    rle_size += 2; /* run in [4,31]: full_chunks=0, rem>=4 */
-                    p += rpos + rpairs + 1;
-                    lit_start = p;
-                }
-#elif defined(ZXC_USE_SSE2)
-                while (p <= p_end_4 - 16) {
-                    __m128i v0 = _mm_loadu_si128((const __m128i*)p);
-                    __m128i v1 = _mm_loadu_si128((const __m128i*)(p + 1));
-                    const uint32_t m = (uint32_t)_mm_movemask_epi8(_mm_cmpeq_epi8(v0, v1));
-                    const uint32_t mask = m & (m >> 1) & (m >> 2);
-                    if (LIKELY(mask == 0)) {
-                        p += 14;
-                        continue;
-                    }
-                    const unsigned rpos = zxc_ctz32(mask);
-                    const unsigned rpairs = zxc_ctz32(~(m >> rpos));
-                    if (UNLIKELY(rpos + rpairs >= 16)) {
-                        p += rpos;
-                        goto _lit_done; /* run may extend past the window */
-                    }
-                    const size_t seg = (size_t)(p + rpos - lit_start);
-                    rle_size += seg + ((seg + 127) >> 7);
-                    rle_size += 2; /* run in [4,16]: full_chunks=0, rem>=4 */
-                    p += rpos + rpairs + 1;
-                    lit_start = p;
-                }
-#elif defined(ZXC_USE_NEON64)
-                while (p <= p_end_4 - 16) {
-                    uint8x16_t v0 = vld1q_u8(p);
-                    uint8x16_t v1 = vld1q_u8(p + 1);
-                    const uint8x16_t eq = vceqq_u8(v0, v1);
-                    const uint64_t m = vget_lane_u64(
-                        vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
-                    const uint64_t mask = m & (m >> 4) & (m >> 8);
-                    if (LIKELY(mask == 0)) {
-                        p += 14;
-                        continue;
-                    }
-                    const unsigned rpos = (unsigned)(zxc_ctz64(mask) >> 2);
-                    const unsigned rpairs = (unsigned)(zxc_ctz64(~(m >> (rpos * 4))) >> 2);
-                    if (UNLIKELY(rpos + rpairs >= 16)) {
-                        p += rpos;
-                        goto _lit_done; /* run may extend past the window */
-                    }
-                    const size_t seg = (size_t)(p + rpos - lit_start);
-                    rle_size += seg + ((seg + 127) >> 7);
-                    rle_size += 2; /* run in [4,16]: full_chunks=0, rem>=4 */
+                    rle_size += 2; /* run fits one chunk: full_chunks=0, rem>=4 */
                     p += rpos + rpairs + 1;
                     lit_start = p;
                 }
