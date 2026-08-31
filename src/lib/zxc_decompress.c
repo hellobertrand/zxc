@@ -553,13 +553,13 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_glo(uint8_t* RESTRICT d_ptr,
  * multiple of @p off, the result is byte-identical to the naive per-byte
  * copy, in O(log(ml/off)) calls instead of O(ml) iterations.
  *
- * @param[in,out] d_ptr     Output cursor (match source is @c d_ptr-off).
- * @param[in]     match_src Match source, equal to @c d_ptr-off.
- * @param[in]     off       Back-reference distance, @c >= 1.
- * @param[in]     ml        Match length in bytes.
+ * @param[in,out] d_ptr Output cursor; the match source is @c d_ptr-off.
+ * @param[in]     off   Back-reference distance, @c >= 1.
+ * @param[in]     ml    Match length in bytes.
  */
-static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8_t* match_src,
-                                                     const size_t off, const size_t ml) {
+static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const size_t off,
+                                                     const size_t ml) {
+    const uint8_t* const match_src = d_ptr - off;
     if (off >= ml) {
         ZXC_MEMCPY(d_ptr, match_src, ml);
     } else if (ml < 16) {
@@ -1188,9 +1188,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
         d_ptr += ll;
 
         if (UNLIKELY((size_t)(d_ptr - d_floor) < offset)) return ZXC_ERROR_BAD_OFFSET;
-        const uint8_t* match_src = d_ptr - offset;
-
-        zxc_decode_copy_match_exact(d_ptr, match_src, offset, ml);
+        zxc_decode_copy_match_exact(d_ptr, offset, ml);
         d_ptr += ml;
         n_seq--;
     }
@@ -1344,9 +1342,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
 
             if (UNLIKELY(d_ptr + ml > d_end)) return ZXC_ERROR_OVERFLOW;
             if (UNLIKELY((size_t)(d_ptr - d_floor) < offset)) return ZXC_ERROR_BAD_OFFSET;
-            const uint8_t* match_src = d_ptr - offset;
-
-            zxc_decode_copy_match_exact(d_ptr, match_src, offset, ml);
+            zxc_decode_copy_match_exact(d_ptr, offset, ml);
             d_ptr += ml;
         } else {
             zxc_decode_copy_literals(d_ptr, l_ptr, ll);
@@ -1448,9 +1444,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
         d_ptr += ll;
 
         if (UNLIKELY((size_t)(d_ptr - d_floor) < offset)) return ZXC_ERROR_BAD_OFFSET;
-        const uint8_t* match_src = d_ptr - offset;
-
-        zxc_decode_copy_match_exact(d_ptr, match_src, offset, ml);
+        zxc_decode_copy_match_exact(d_ptr, offset, ml);
         d_ptr += ml;
         n_seq--;
     }
