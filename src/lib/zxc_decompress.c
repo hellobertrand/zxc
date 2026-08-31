@@ -933,7 +933,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
             if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) return ZXC_ERROR_CORRUPT_DATA;
 
             uint8_t* const rle_buf = ctx->lit_buffer;
-            if (UNLIKELY(lit_stream_size > (size_t)(src + src_size - p_curr)))
+            if (UNLIKELY(!rle_buf || lit_stream_size > (size_t)(src + src_size - p_curr)))
                 return ZXC_ERROR_CORRUPT_DATA;
 
             const uint8_t* r_ptr = p_curr;

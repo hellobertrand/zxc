@@ -2397,6 +2397,8 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
                 }
                 zxc_pivco_unpack_flat(buf_d + seq_off[nid], c, D, bit_ptr[nid], c2s);
             } else {
+                if (UNLIKELY(nd->child[0] < 0)) return ZXC_ERROR_CORRUPT_DATA;
+
                 const zxc_pivco_node_t* const l = &t->nd[nd->child[0]];
                 if (nd->child[1] >= 0 && l->sym >= 0 && t->nd[nd->child[1]].sym >= 0) {
                     zxc_pivco_emit_leaf_pair(buf_d + seq_off[nid], c, (uint8_t)l->sym,
