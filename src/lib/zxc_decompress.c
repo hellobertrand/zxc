@@ -347,6 +347,32 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_short(uint8_t* dst, const 
 }
 
 /**
+ * @brief Writes a run in 32-byte wild stores, for the fill, literal and match copiers.
+ *
+ * Emits one 32-byte unit, then one more per remaining 32 bytes of @p len. The
+ * last unit goes out whole, so the run may **overshoot** up to 31 bytes past
+ * @p len: every caller owes @ref ZXC_PAD_SIZE bytes of writable headroom.
+ *
+ * @param len     Run length in bytes (>= 1).
+ * @param emit    Statement writing the 32-byte unit at the current cursors.
+ * @param advance Statement moving those cursors on by 32 bytes.
+ */
+#define ZXC_WILD_RUN32(len, emit, advance) \
+    do {                                   \
+        emit;                              \
+        if (UNLIKELY((len) > 32)) {        \
+            advance;                       \
+            size_t _rem = (len) - 32;      \
+            while (_rem > 32) {            \
+                emit;                      \
+                advance;                   \
+                _rem -= 32;                \
+            }                              \
+            emit;                          \
+        }                                  \
+    } while (0)
+
+/**
  * @brief Fills an @p ml-byte single-byte run (LZ offset == 1) with wild stores.
  *
  * Splats @p byte into a vector register and emits 32-byte chunks, avoiding a
@@ -364,49 +390,18 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
                                                   const uint64_t ml) {
 #if defined(ZXC_USE_AVX2) || defined(ZXC_USE_AVX512)
     const __m256i v = _mm256_set1_epi8((char)byte);
-    _mm256_storeu_si256((__m256i*)dst, v);
-    if (UNLIKELY(ml > 32)) {
-        uint8_t* out = dst + 32;
-        size_t rem = ml - 32;
-        while (rem > 32) {
-            _mm256_storeu_si256((__m256i*)out, v);
-            out += 32;
-            rem -= 32;
-        }
-        _mm256_storeu_si256((__m256i*)out, v);
-    }
+    uint8_t* out = dst;
+    ZXC_WILD_RUN32(ml, _mm256_storeu_si256((__m256i*)out, v), out += 32);
 #elif defined(ZXC_USE_SSE2)
     const __m128i v = _mm_set1_epi8((char)byte);
-    _mm_storeu_si128((__m128i*)dst, v);
-    _mm_storeu_si128((__m128i*)(dst + 16), v);
-    if (UNLIKELY(ml > 32)) {
-        uint8_t* out = dst + 32;
-        size_t rem = ml - 32;
-        while (rem > 32) {
-            _mm_storeu_si128((__m128i*)out, v);
-            _mm_storeu_si128((__m128i*)(out + 16), v);
-            out += 32;
-            rem -= 32;
-        }
-        _mm_storeu_si128((__m128i*)out, v);
-        _mm_storeu_si128((__m128i*)(out + 16), v);
-    }
+    uint8_t* out = dst;
+    ZXC_WILD_RUN32(ml,
+                   (_mm_storeu_si128((__m128i*)out, v), _mm_storeu_si128((__m128i*)(out + 16), v)),
+                   out += 32);
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     const uint8x16_t v = vdupq_n_u8(byte);
-    vst1q_u8(dst, v);
-    vst1q_u8(dst + 16, v);
-    if (UNLIKELY(ml > 32)) {
-        uint8_t* out = dst + 32;
-        size_t rem = ml - 32;
-        while (rem > 32) {
-            vst1q_u8(out, v);
-            vst1q_u8(out + 16, v);
-            out += 32;
-            rem -= 32;
-        }
-        vst1q_u8(out, v);
-        vst1q_u8(out + 16, v);
-    }
+    uint8_t* out = dst;
+    ZXC_WILD_RUN32(ml, (vst1q_u8(out, v), vst1q_u8(out + 16, v)), out += 32);
 #else
     ZXC_MEMSET(dst, byte, ml);
 #endif
@@ -437,19 +432,7 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
 static ZXC_ALWAYS_INLINE void zxc_decode_copy_literals(uint8_t* RESTRICT dst,
                                                        const uint8_t* RESTRICT src,
                                                        const uint64_t ll) {
-    zxc_copy32(dst, src);
-    if (UNLIKELY(ll > 32)) {
-        dst += 32;
-        src += 32;
-        size_t rem = ll - 32;
-        while (rem > 32) {
-            zxc_copy32(dst, src);
-            dst += 32;
-            src += 32;
-            rem -= 32;
-        }
-        zxc_copy32(dst, src);
-    }
+    ZXC_WILD_RUN32(ll, zxc_copy32(dst, src), (dst += 32, src += 32));
 }
 
 /**
@@ -479,25 +462,17 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
                                                     const uint64_t ml) {
     const uint8_t* match_src = d_ptr - off;
     if (LIKELY(off >= 32)) {
-        zxc_copy32(d_ptr, match_src);
-        if (UNLIKELY(ml > 32)) {
-            uint8_t* out = d_ptr + 32;
-            const uint8_t* ref = match_src + 32;
-            size_t rem = ml - 32;
-            while (rem > 32) {
-                zxc_copy32(out, ref);
-                out += 32;
-                ref += 32;
-                rem -= 32;
-            }
-            zxc_copy32(out, ref);
-        }
+        uint8_t* out = d_ptr;
+        const uint8_t* ref = match_src;
+        ZXC_WILD_RUN32(ml, zxc_copy32(out, ref), (out += 32, ref += 32));
     } else if (off == 1) {
         zxc_decode_fill_run(d_ptr, match_src[0], ml);
     } else {
         zxc_decode_copy_overlap_run32(d_ptr, off, ml);
     }
 }
+
+#undef ZXC_WILD_RUN32
 
 /**
  * @brief Match copy for a length that cannot exceed 32 bytes.
