@@ -202,7 +202,7 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     if (UNLIKELY(total_decomp == 0)) return NULL;
 
     // Step 3: derive num_blocks = ceil(total_decomp / block_size)
-    const uint64_t num_blocks_64 = (total_decomp + block_size - 1) / block_size;
+    const uint64_t num_blocks_64 = total_decomp / block_size + (total_decomp % block_size != 0);
     if (UNLIKELY(num_blocks_64 > UINT32_MAX)) return NULL;
     const uint32_t num_blocks = (uint32_t)num_blocks_64;
 
