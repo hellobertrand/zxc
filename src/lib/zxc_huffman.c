@@ -1375,9 +1375,6 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n
                                  0);
 }
 
-// ISA-independent cold dict setup: emit once in the primary variant, not in
-// every per-ISA copy (dead weight). zxc_pivco_tree_build stays per-variant.
-#if defined(ZXC_VARIANT_PRIMARY)
 /**
  * @brief Flags the children of every leaf-pair parent.
  *
@@ -1433,6 +1430,9 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_build_c2s(const zxc_pivco_tree_t* RESTRI
         stk_l[sp] = (uint8_t)(cl + 1);
     }
 }
+
+// ISA-independent cold dict setup
+#if defined(ZXC_VARIANT_PRIMARY)
 
 /**
  * @brief Precompute the topology-derived decoder tables for @p t.

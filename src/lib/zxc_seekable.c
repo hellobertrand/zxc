@@ -225,15 +225,15 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     const uint64_t tail_off = seek_off - ZXC_BLOCK_HEADER_SIZE;
 
     uint8_t* tail = NULL;
-    const uint8_t* tail_view = src->data ? src->data + tail_off : NULL;
+    const uint8_t* tail_view;
     zxc_seekable* s = NULL;
-    if (!tail_view) {
+    if (src->data) {
+        tail_view = src->data + tail_off;
+    } else {
         tail = (uint8_t*)ZXC_MALLOC(tail_total);
         if (UNLIKELY(!tail)) return NULL;  // LCOV_EXCL_LINE
         if (UNLIKELY(!zxc_seek_source_read(src, tail, tail_total, tail_off))) goto fail;
         tail_view = tail;
-    } else if (UNLIKELY(tail_off + tail_total > src->size)) {
-        return NULL;  // LCOV_EXCL_LINE
     }
 
     const uint8_t* const eof_hdr = tail_view;

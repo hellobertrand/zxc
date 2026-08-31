@@ -276,9 +276,8 @@ zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
         return NULL;
     }
 
-    if (cs->opts.level == 0) cs->opts.level = ZXC_LEVEL_DEFAULT;
-    cs->opts.level = zxc_level_clamp(cs->opts.level);
-    if (cs->opts.block_size == 0) cs->opts.block_size = ZXC_BLOCK_SIZE_DEFAULT;
+    cs->opts.level = ZXC_OPTS_LEVEL(&cs->opts, ZXC_LEVEL_DEFAULT);
+    cs->opts.block_size = ZXC_OPTS_BLOCK_SIZE(&cs->opts, ZXC_BLOCK_SIZE_DEFAULT);
     // n_threads is ignored on this single-threaded path.
     cs->opts.n_threads = 0;
     cs->opts.progress_cb = NULL;

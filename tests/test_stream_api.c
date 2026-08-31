@@ -925,6 +925,8 @@ int test_stream_level_clamp(void) {
             printf("  [SKIP] tmpfile failed\n");
             if (f_in) fclose(f_in);
             if (f_comp) fclose(f_comp);
+            free(out[0]);
+            free(out[1]);
             free(input);
             return 1;
         }

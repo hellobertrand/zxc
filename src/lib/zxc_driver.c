@@ -550,8 +550,11 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
 
                 if (bh.block_type == ZXC_BLOCK_EOF) {
                     if (UNLIKELY(bh.comp_size != 0)) {
+                        // LCOV_EXCL_START
                         ctx->io_error = 1;
+                        read_eof = 1;
                         goto _job_prepared;
+                        // LCOV_EXCL_STOP
                     }
                     read_eof = 1;
                     read_sz = 0;
@@ -618,7 +621,7 @@ static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, 
     zxc_write_block_header(eof_buf, ZXC_BLOCK_HEADER_SIZE, &eof_bh);
     if (UNLIKELY(f_out &&
                  fwrite(eof_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_out) != ZXC_BLOCK_HEADER_SIZE))
-        ctx->io_error = 1;
+        ctx->io_error = 1;  // LCOV_EXCL_LINE
     else
         w->total_bytes += ZXC_BLOCK_HEADER_SIZE;
 
@@ -677,14 +680,14 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, writer_args_t* w
             // Read full 12-byte footer
             if (!ctx->io_error &&
                 UNLIKELY(fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE))
-                ctx->io_error = 1;
+                ctx->io_error = 1;  // LCOV_EXCL_LINE
         } else {
             // peek_buf contains the first 8 bytes of the 12-byte footer.
             // Read the remaining 4 bytes and assemble.
             ZXC_MEMCPY(footer, peek_buf, ZXC_BLOCK_HEADER_SIZE);
             const size_t tail = ZXC_FILE_FOOTER_SIZE - ZXC_BLOCK_HEADER_SIZE; /* 4 */
             if (UNLIKELY(fread(footer + ZXC_BLOCK_HEADER_SIZE, 1, tail, f_in) != tail))
-                ctx->io_error = 1;
+                ctx->io_error = 1;  // LCOV_EXCL_LINE
         }
     }
 
@@ -855,16 +858,16 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     pthread_t* const workers = ZXC_MALLOC((size_t)num_workers * sizeof(pthread_t));
     if (UNLIKELY(!workers))
-        return zxc_stream_engine_fail(&ctx, NULL, 0, mem_block, NULL,
-                                      ZXC_ERROR_MEMORY);  // LCOV_EXCL_LINE
+        return zxc_stream_engine_fail(&ctx, NULL, 0, mem_block, NULL,  // LCOV_EXCL_LINE
+                                      ZXC_ERROR_MEMORY);               // LCOV_EXCL_LINE
     int started_workers = 0;
     for (int i = 0; i < num_workers; i++) {
         if (UNLIKELY(pthread_create(&workers[i], NULL, zxc_stream_worker, &ctx) != 0)) break;
         started_workers++;
     }
     if (UNLIKELY(started_workers == 0))
-        return zxc_stream_engine_fail(&ctx, workers, 0, mem_block, NULL,
-                                      ZXC_ERROR_MEMORY);  // LCOV_EXCL_LINE
+        return zxc_stream_engine_fail(&ctx, workers, 0, mem_block, NULL,  // LCOV_EXCL_LINE
+                                      ZXC_ERROR_MEMORY);                  // LCOV_EXCL_LINE
 
     writer_args_t w_args = {&ctx, f_out, 0, 0, 0, NULL, 0, 0};
 
@@ -873,8 +876,10 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         w_args.seek_cap = 64;
         w_args.seek_comp = (uint32_t*)ZXC_MALLOC(w_args.seek_cap * sizeof(uint32_t));
         if (UNLIKELY(!w_args.seek_comp))
-            return zxc_stream_engine_fail(&ctx, workers, started_workers, mem_block, NULL,
-                                          ZXC_ERROR_MEMORY);  // LCOV_EXCL_LINE
+            return zxc_stream_engine_fail(&ctx, workers, started_workers,  // LCOV_EXCL_LINE
+                                          mem_block,                       // LCOV_EXCL_LINE
+                                          NULL,                            // LCOV_EXCL_LINE
+                                          ZXC_ERROR_MEMORY);               // LCOV_EXCL_LINE
     }
 
     if (mode == 1 && f_out) {
@@ -888,8 +893,9 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     }
     pthread_t writer_th;
     if (UNLIKELY(pthread_create(&writer_th, NULL, zxc_async_writer, &w_args) != 0))
-        return zxc_stream_engine_fail(&ctx, workers, started_workers, mem_block, w_args.seek_comp,
-                                      ZXC_ERROR_MEMORY);  // LCOV_EXCL_LINE
+        return zxc_stream_engine_fail(&ctx, workers, started_workers, mem_block,  // LCOV_EXCL_LINE
+                                      w_args.seek_comp,                           // LCOV_EXCL_LINE
+                                      ZXC_ERROR_MEMORY);                          // LCOV_EXCL_LINE
 
     uint64_t total_src_bytes = 0;
     const int read_idx =
