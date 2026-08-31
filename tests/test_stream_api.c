@@ -961,3 +961,177 @@ int test_stream_level_clamp(void) {
     if (ok) printf("PASS\n\n");
     return ok;
 }
+
+/**
+ * @brief A block header the parser cannot read must be reported as corruption.
+ *
+ * Truncating a stream after its first block and appending a footer that agrees
+ * with what was kept used to decompress as a clean, successful short read.
+ */
+int test_stream_corrupt_block_header(void) {
+    printf("=== TEST: Stream - Unreadable block header is corruption ===\n");
+
+    const size_t bs = 64 * 1024;
+    const size_t size = 3 * bs;
+    uint8_t* input = malloc(size);
+    if (!input) return 0;
+    gen_lz_data(input, size);
+
+    FILE* f_in = tmpfile();
+    FILE* f_comp = tmpfile();
+    if (!f_in || !f_comp) {
+        printf("  [SKIP] tmpfile failed\n");
+        if (f_in) fclose(f_in);
+        if (f_comp) fclose(f_comp);
+        free(input);
+        return 1;
+    }
+    fwrite(input, 1, size, f_in);
+    fseek(f_in, 0, SEEK_SET);
+
+    // No block checksum: the forged footer then only has to carry the size.
+    zxc_compress_opts_t o = {.n_threads = 1, .level = 3, .block_size = bs};
+    const int64_t csz = zxc_stream_compress(f_in, f_comp, &o);
+    fclose(f_in);
+
+    if (csz <= 0) {
+        printf("Failed: compress returned %lld\n", (long long)csz);
+        fclose(f_comp);
+        free(input);
+        return 0;
+    }
+
+    uint8_t* const arc = malloc((size_t)csz);
+    if (!arc) {
+        fclose(f_comp);
+        free(input);
+        return 0;
+    }
+    fseek(f_comp, 0, SEEK_SET);
+    const size_t got = fread(arc, 1, (size_t)csz, f_comp);
+    fclose(f_comp);
+    if (got != (size_t)csz) {
+        printf("Failed: read back %zu of %lld bytes\n", got, (long long)csz);
+        free(arc);
+        free(input);
+        return 0;
+    }
+
+    int ok = 1;
+    zxc_block_header_t bh;
+    if (zxc_read_block_header(arc + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK) {
+        printf("Failed: unreadable first block header\n");
+        ok = 0;
+    }
+
+    if (ok) {
+        // [file header][block 1][8 bytes no header parser accepts][footer for 1 block]
+        const size_t keep = ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
+        const size_t flen = keep + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
+        uint8_t* forged = malloc(flen);
+        FILE* f_bad = tmpfile();
+        if (!forged || !f_bad) {
+            printf("  [SKIP] allocation failed\n");
+            free(forged);
+            if (f_bad) fclose(f_bad);
+            free(arc);
+            free(input);
+            return 1;
+        }
+        memcpy(forged, arc, keep);
+        memset(forged + keep, 0xFF, ZXC_BLOCK_HEADER_SIZE);
+        zxc_write_file_footer(forged + keep + ZXC_BLOCK_HEADER_SIZE, ZXC_FILE_FOOTER_SIZE, bs, 0,
+                              0);
+        fwrite(forged, 1, flen, f_bad);
+        fseek(f_bad, 0, SEEK_SET);
+
+        FILE* f_out = tmpfile();
+        const int64_t d = zxc_stream_decompress(f_bad, f_out, NULL);
+        if (d != ZXC_ERROR_CORRUPT_DATA) {
+            printf("Failed: expected ZXC_ERROR_CORRUPT_DATA, got %lld\n", (long long)d);
+            ok = 0;
+        }
+        if (f_out) fclose(f_out);
+        fclose(f_bad);
+        free(forged);
+    }
+
+    free(arc);
+    free(input);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/**
+ * @brief Compressing with a NULL output reports the size the archive would take.
+ *
+ * The file header and the seek table used to be written but not counted, so the
+ * measuring run under-reported by 16 bytes, 52 with a seek table.
+ */
+int test_stream_dry_run_size(void) {
+    printf("=== TEST: Stream - NULL output measures the exact archive size ===\n");
+
+    const size_t size = 256 * 1024;
+    uint8_t* input = malloc(size);
+    if (!input) return 0;
+    gen_lz_data(input, size);
+
+    const struct {
+        const char* name;
+        int seekable;
+        int checksum;
+    } cases[] = {{"plain", 0, 0}, {"seekable", 1, 0}, {"seekable+checksum", 1, 1}};
+    int ok = 1;
+
+    for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]) && ok; i++) {
+        zxc_compress_opts_t o = {.n_threads = 1,
+                                 .level = 3,
+                                 .block_size = 64 * 1024,
+                                 .seekable = cases[i].seekable,
+                                 .checksum_enabled = cases[i].checksum};
+        int64_t written = 0;
+        int64_t measured = 0;
+
+        for (int pass = 0; pass < 2 && ok; pass++) {
+            FILE* f_in = tmpfile();
+            FILE* f_out = pass == 0 ? tmpfile() : NULL;
+            if (!f_in || (pass == 0 && !f_out)) {
+                printf("  [SKIP] tmpfile failed\n");
+                if (f_in) fclose(f_in);
+                if (f_out) fclose(f_out);
+                free(input);
+                return 1;
+            }
+            fwrite(input, 1, size, f_in);
+            fseek(f_in, 0, SEEK_SET);
+
+            const int64_t rc = zxc_stream_compress(f_in, f_out, &o);
+            if (rc <= 0) {
+                printf("Failed: %s compress returned %lld\n", cases[i].name, (long long)rc);
+                ok = 0;
+            } else if (pass == 0) {
+                fseek(f_out, 0, SEEK_END);
+                written = ftell(f_out);
+                if (rc != written) {
+                    printf("Failed: %s returned %lld for a %lld-byte file\n", cases[i].name,
+                           (long long)rc, (long long)written);
+                    ok = 0;
+                }
+            } else {
+                measured = rc;
+            }
+            fclose(f_in);
+            if (f_out) fclose(f_out);
+        }
+
+        if (ok && measured != written) {
+            printf("Failed: %s measured %lld, wrote %lld\n", cases[i].name, (long long)measured,
+                   (long long)written);
+            ok = 0;
+        }
+    }
+
+    free(input);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}

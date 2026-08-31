@@ -544,6 +544,8 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
             } else {
                 zxc_block_header_t bh;
                 if (UNLIKELY(zxc_read_block_header(bh_buf, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK)) {
+                    ctx->io_error = 1;
+                    if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_CORRUPT_DATA;
                     read_eof = 1;
                     goto _job_prepared;
                 }
@@ -629,10 +631,16 @@ static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, 
     if (!ctx->io_error && w->seek_comp && w->seek_count > 0) {
         const size_t st_size = zxc_seek_table_size(w->seek_count);
         uint8_t* const st_buf = (uint8_t*)ZXC_MALLOC(st_size);
-        if (st_buf) {
+        if (UNLIKELY(!st_buf)) {
+            ctx->io_error = 1;                                       // LCOV_EXCL_LINE
+            if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
+        } else {
             const int64_t st_val =
                 zxc_write_seek_table(st_buf, st_size, w->seek_comp, w->seek_count);
-            if (st_val > 0 && f_out && fwrite(st_buf, 1, (size_t)st_val, f_out) == (size_t)st_val)
+            if (UNLIKELY(st_val <= 0 ||
+                         (f_out && fwrite(st_buf, 1, (size_t)st_val, f_out) != (size_t)st_val)))
+                ctx->io_error = 1;  // LCOV_EXCL_LINE
+            else
                 w->total_bytes += st_val;
             ZXC_FREE(st_buf);
         }
@@ -882,13 +890,14 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                                           ZXC_ERROR_MEMORY);               // LCOV_EXCL_LINE
     }
 
-    if (mode == 1 && f_out) {
-        uint8_t h[ZXC_FILE_HEADER_SIZE];
-        zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE, runtime_chunk_sz, checksum_enabled,
-                              (dict && dict_size) ? zxc_dict_id(dict, dict_size, dict_huf) : 0);
-        if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
-            ctx.io_error = 1;
-
+    if (mode == 1) {
+        if (f_out) {
+            uint8_t h[ZXC_FILE_HEADER_SIZE];
+            zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE, runtime_chunk_sz, checksum_enabled,
+                                  (dict && dict_size) ? zxc_dict_id(dict, dict_size, dict_huf) : 0);
+            if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
+                ctx.io_error = 1;
+        }
         w_args.total_bytes = ZXC_FILE_HEADER_SIZE;
     }
     pthread_t writer_th;

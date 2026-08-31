@@ -96,6 +96,8 @@ int test_static_ctx_null_inputs(void);
 /* Stream API */
 int test_null_output_decompression(void);
 int test_stream_level_clamp(void);
+int test_stream_corrupt_block_header(void);
+int test_stream_dry_run_size(void);
 int test_invalid_arguments(void);
 int test_truncated_input(void);
 int test_io_failures(void);
