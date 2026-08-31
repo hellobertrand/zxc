@@ -240,8 +240,11 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     const uint8_t* const seek_blk = tail_view + ZXC_BLOCK_HEADER_SIZE;
 
     zxc_block_header_t bh;
+    // The SEK header stores the table size in a 32-bit field, so reject any larger value before
+    // reading it.
+    if (UNLIKELY(entries_total > UINT32_MAX)) goto fail;
     if (UNLIKELY(zxc_read_block_header(seek_blk, seek_block_total, &bh) != ZXC_OK ||
-                 bh.block_type != ZXC_BLOCK_SEK || bh.comp_size != (uint32_t)entries_total))
+                 bh.block_type != ZXC_BLOCK_SEK || bh.comp_size != entries_total))
         goto fail;
 
     // Step 5: allocate the handle and parse the entries
