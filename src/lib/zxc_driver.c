@@ -563,13 +563,13 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
 
                 const int has_crc = ctx->file_has_checksum;
                 const size_t checksum_sz = (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-                const size_t body_total = bh.comp_size + checksum_sz;
-                const size_t total_len = ZXC_BLOCK_HEADER_SIZE + body_total;
-
-                if (UNLIKELY(total_len > job->in_cap)) {
+                const uint64_t total_len =
+                    (uint64_t)bh.comp_size + checksum_sz + ZXC_BLOCK_HEADER_SIZE;
+                if (UNLIKELY(total_len > (uint64_t)job->in_cap)) {
                     ctx->io_error = 1;
                     break;
                 }
+                const size_t body_total = (size_t)bh.comp_size + checksum_sz;
 
                 ZXC_MEMCPY(job->in_buf, bh_buf, ZXC_BLOCK_HEADER_SIZE);
 
@@ -652,7 +652,7 @@ static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, 
 /**
  * @brief Consumes and validates the trailer of a decompressed stream.
  */
-static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, writer_args_t* w, FILE* f_in,
+static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_args_t* w, FILE* f_in,
                                          const uint32_t d_global_hash, const int checksum_enabled) {
     // After the EOF block, the stream may contain:
     //   (a) [FOOTER 12B]                  - no seekable table
