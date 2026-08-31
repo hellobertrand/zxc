@@ -208,10 +208,10 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
 
     // Step 4: locate and validate the seek block. Two headers of margin, not one:
     // the tail read below spans the EOF block, so tail_total could wrap on 32 bits.
-    const uint64_t entries_total_64 = (uint64_t)num_blocks * ZXC_SEEK_ENTRY_SIZE;
-    if (UNLIKELY(entries_total_64 > SIZE_MAX - 2 * ZXC_BLOCK_HEADER_SIZE)) return NULL;
+    const uint64_t entries_total = num_blocks_64 * ZXC_SEEK_ENTRY_SIZE;
+    if (UNLIKELY(entries_total > SIZE_MAX - 2 * ZXC_BLOCK_HEADER_SIZE)) return NULL;
 
-    const size_t seek_block_total = ZXC_BLOCK_HEADER_SIZE + (size_t)entries_total_64;
+    const size_t seek_block_total = ZXC_BLOCK_HEADER_SIZE + (size_t)entries_total;
     if (UNLIKELY((uint64_t)seek_block_total + ZXC_FILE_FOOTER_SIZE > src->size)) return NULL;
 
     const uint64_t seek_off = src->size - ZXC_FILE_FOOTER_SIZE - (uint64_t)seek_block_total;
@@ -241,7 +241,7 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
 
     zxc_block_header_t bh;
     if (UNLIKELY(zxc_read_block_header(seek_blk, seek_block_total, &bh) != ZXC_OK ||
-                 bh.block_type != ZXC_BLOCK_SEK || bh.comp_size != (uint32_t)entries_total_64))
+                 bh.block_type != ZXC_BLOCK_SEK || bh.comp_size != (uint32_t)entries_total))
         goto fail;
 
     // Step 5: allocate the handle and parse the entries

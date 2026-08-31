@@ -2397,16 +2397,15 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
                 }
                 zxc_pivco_unpack_flat(buf_d + seq_off[nid], c, D, bit_ptr[nid], c2s);
             } else {
-                const int ch0 = nd->child[0];
-                const int ch1 = nd->child[1];
-                if (ch0 >= 0 && ch1 >= 0 && t->nd[ch0].sym >= 0 && t->nd[ch1].sym >= 0) {
-                    zxc_pivco_emit_leaf_pair(buf_d + seq_off[nid], c, (uint8_t)t->nd[ch0].sym,
-                                             (uint8_t)t->nd[ch1].sym, bit_ptr[nid]);
+                const zxc_pivco_node_t* const l = &t->nd[nd->child[0]];
+                if (nd->child[1] >= 0 && l->sym >= 0 && t->nd[nd->child[1]].sym >= 0) {
+                    zxc_pivco_emit_leaf_pair(buf_d + seq_off[nid], c, (uint8_t)l->sym,
+                                             (uint8_t)t->nd[nd->child[1]].sym, bit_ptr[nid]);
                     continue;
                 }
-                const uint32_t nl = ch0 >= 0 ? count[ch0] : 0;
-                const uint32_t src_off = ch0 >= 0 ? seq_off[ch0] : seq_off[nd->child[1]];
-                zxc_pivco_merge(buf_d + seq_off[nid], buf_c + src_off, nl, c - nl, bit_ptr[nid]);
+                const uint32_t nl = count[nd->child[0]];
+                zxc_pivco_merge(buf_d + seq_off[nid], buf_c + seq_off[nd->child[0]], nl, c - nl,
+                                bit_ptr[nid]);
             }
         }
     }
