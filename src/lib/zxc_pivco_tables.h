@@ -22,7 +22,7 @@
  *    16-output merge step. Also serves the portable 8-output merge routine (a
  *    24-byte scratch with R copied at offset 16).
  *
- *  - zxc_pivco_idxb_pre[pc0][b][j]: FINAL lane for output 8+j, pre-offset for
+ *  - zxc_pivco_idxb_pre[b][pc0][j]: FINAL lane for output 8+j, pre-offset for
  *    pc0 = popcount(first control byte): L entries already skip the
  *    (8 - pc0) left elements consumed by the first half, R entries the pc0
  *    right ones. Indexing the row by pc0 folds this fixup into a single
@@ -44,6 +44,6 @@
 #endif
 
 extern ZXC_HIDDEN const uint8_t zxc_pivco_idxa_u8[256][8];
-extern ZXC_HIDDEN const uint8_t zxc_pivco_idxb_pre[9][256][8];
+extern ZXC_HIDDEN const uint8_t zxc_pivco_idxb_pre[256][9][8];
 
 #endif /* ZXC_PIVCO_TABLES_H */

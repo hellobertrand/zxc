@@ -1521,7 +1521,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         tb.val[1] = vld1q_u8(R + rp);
         const int pc0 = zxc_pivco_popcnt32(b0);
         const uint8x8_t ia = vld1_u8(zxc_pivco_idxa_u8[b0]);
-        const uint8x8_t ib = vld1_u8(zxc_pivco_idxb_pre[pc0][b1]);
+        const uint8x8_t ib = vld1_u8(zxc_pivco_idxb_pre[b1][pc0]);
         vst1q_u8(out + i, vqtbl2q_u8(tb, vcombine_u8(ia, ib)));
         const int pc = pc0 + zxc_pivco_popcnt32(b1);
         ZXC_PIVCO_MERGE_STEP(16, pc);
@@ -1571,10 +1571,10 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
             _mm_loadu_si128((const __m128i*)(const void*)(R + rpB)), 1);
         const __m128i ixA = _mm_unpacklo_epi64(
             _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[cb[0]]),
-            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pcA0][cb[1]]));
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[cb[1]][pcA0]));
         const __m128i ixB = _mm_unpacklo_epi64(
             _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[cb[2]]),
-            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pcB0][cb[3]]));
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[cb[3]][pcB0]));
         const __m256i ix = _mm256_inserti128_si256(_mm256_castsi128_si256(ixA), ixB, 1);
         _mm256_storeu_si256(
             (__m256i*)(void*)(out + i),
@@ -1599,10 +1599,10 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         const __m128i vrB = _mm_loadu_si128((const __m128i*)(const void*)(R + rpB));
         const __m128i iaA = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[cb[0]]);
         const __m128i ibA =
-            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pcA0][cb[1]]);
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[cb[1]][pcA0]);
         const __m128i iaB = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[cb[2]]);
         const __m128i ibB =
-            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pcB0][cb[3]]);
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[cb[3]][pcB0]);
         const __m128i ixA = _mm_unpacklo_epi64(iaA, ibA);
         const __m128i ixB = _mm_unpacklo_epi64(iaB, ibB);
         const __m128i selA =
@@ -1626,7 +1626,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         const int pc0 = zxc_pivco_popcnt32(b0);
         const __m128i ia = _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxa_u8[b0]);
         const __m128i ib =
-            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[pc0][b1]);
+            _mm_loadl_epi64((const __m128i*)(const void*)zxc_pivco_idxb_pre[b1][pc0]);
         const __m128i ix = _mm_unpacklo_epi64(ia, ib);
         const __m128i sell = _mm_shuffle_epi8(vl, _mm_add_epi8(ix, _mm_set1_epi8(0x70)));
         const __m128i selr = _mm_shuffle_epi8(vr, _mm_sub_epi8(ix, _mm_set1_epi8(16)));
