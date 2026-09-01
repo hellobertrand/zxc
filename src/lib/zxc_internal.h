@@ -161,12 +161,6 @@ extern "C" {
  */
 #define ZXC_PREFETCH_READ(ptr) __builtin_prefetch((const void*)(ptr), 0, 3)
 
-/** @def ZXC_PREFETCH_WRITE
- * @brief Prefetch data for writing.
- * @param ptr Pointer to data to prefetch.
- */
-#define ZXC_PREFETCH_WRITE(ptr) __builtin_prefetch((const void*)(ptr), 1, 3)
-
 /** @def ZXC_MEMCPY
  * @brief Optimized memory copy using compiler built-in.
  */
@@ -206,10 +200,8 @@ extern "C" {
 #if defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64)
 #include <xmmintrin.h>
 #define ZXC_PREFETCH_READ(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
-#define ZXC_PREFETCH_WRITE(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
 #else
 #define ZXC_PREFETCH_READ(ptr) __prefetch((const void*)(ptr))
-#define ZXC_PREFETCH_WRITE(ptr) __prefetch((const void*)(ptr))
 #endif
 #define LIKELY(x) (x)
 #define UNLIKELY(x) (x)
@@ -241,7 +233,6 @@ extern "C" {
 #define UNLIKELY(x) (x)
 #define RESTRICT
 #define ZXC_PREFETCH_READ(ptr)
-#define ZXC_PREFETCH_WRITE(ptr)
 #define ZXC_MEMCPY(dst, src, n) memcpy(dst, src, n)
 #define ZXC_MEMSET(dst, val, n) memset(dst, val, n)
 
@@ -425,9 +416,6 @@ extern "C" {
  *  zxc_compress_bound().
  */
 #define ZXC_BLOCK_FORMAT_OVERHEAD 68
-
-/** @brief Widest GLO section descriptors: literal and token compressed sizes. */
-#define ZXC_GLO_MAX_DESC_SIZE (2 * sizeof(uint32_t))
 
 /** @brief Checksum algorithm id for RapidHash (default, sole implementation). */
 #define ZXC_CHECKSUM_RAPIDHASH 0
@@ -841,6 +829,20 @@ static inline int zxc_level_clamp(const int level) {
     return (level > ZXC_LEVEL_ULTRA) ? ZXC_LEVEL_ULTRA : level;
 }
 
+/** @brief Dictionary length from a (possibly NULL) options struct.
+ *
+ *  Gated on @c dict itself: no dictionary pointer means no dictionary, whatever
+ *  the sibling fields hold. Macros rather than functions because the compression
+ *  and decompression option structs carry these fields without sharing a type. */
+#define ZXC_OPTS_DICT_SIZE(o) (((o) && (o)->dict) ? (o)->dict_size : (size_t)0)
+/** @brief Shared literal Huffman table, gated on @c dict the same way. */
+#define ZXC_OPTS_DICT_HUF(o) (((o) && (o)->dict) ? (const uint8_t*)(o)->dict_huf : NULL)
+/** @brief Compression level, 0 meaning the default, clamped to the highest level
+ *         the encoder implements. */
+#define ZXC_OPTS_LEVEL(o, dflt) zxc_level_clamp(((o) && (o)->level > 0) ? (o)->level : (dflt))
+/** @brief Block size, 0 meaning the default. */
+#define ZXC_OPTS_BLOCK_SIZE(o, dflt) (((o) && (o)->block_size > 0) ? (o)->block_size : (dflt))
+
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below
  *         ::ZXC_LEVEL_ULTRA use ::ZXC_HUF_MAX_CODE_LEN_DENSITY, ::ZXC_LEVEL_ULTRA uses
  *         the full ::ZXC_HUF_MAX_CODE_LEN_ULTRA ceiling (denser codes, slower decode).
@@ -883,6 +885,21 @@ typedef struct {
      8U + (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * sizeof(int) + 8U +          \
      (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * (size_t)ZXC_HUF_PM_LEVEL_BOUND * \
          sizeof(zxc_huf_pm_frame_t))
+
+/**
+ * @brief The four DP partitions the optimal parser carves out of opt_scratch.
+ *
+ * One definition shared by compute_cctx_layout(), which reserves the region,
+ * and zxc_lz77_optimal_parse_glo(), which carves it: the two cannot drift.
+ */
+static ZXC_ALWAYS_INLINE void zxc_opt_dp_sizes(const size_t chunk_size, size_t* RESTRICT sz_dp,
+                                               size_t* RESTRICT sz_pl, size_t* RESTRICT sz_po,
+                                               size_t* RESTRICT sz_bm) {
+    *sz_dp = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint32_t));
+    *sz_pl = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
+    *sz_po = ZXC_ALIGN_CL((chunk_size + 1) * sizeof(uint16_t));
+    *sz_bm = ZXC_ALIGN_CL(ZXC_BITMAP_WORDS(chunk_size + 1) * sizeof(uint64_t));
+}
 
 /** @name Block Size Helpers
  *  @brief Runtime helpers for variable block sizes.
@@ -1472,7 +1489,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
  * @brief Writes a GLO sub-header followed by its section descriptors.
  *
  * They hold only the two sizes the header cannot imply, and are 0, 4 or 8 bytes
- * wide accordingly (@ref ZXC_GLO_MAX_DESC_SIZE).
+ * wide accordingly.
  *
  * @param[out] dst      Pointer to the destination buffer.
  * @param[in]  rem      The remaining space in the destination buffer.

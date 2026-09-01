@@ -60,6 +60,7 @@ static const test_entry_t g_tests[] = {
     /* --- Block API --- */
     TEST_CASE(test_block_api),
     TEST_CASE(test_block_api_boundary_sizes),
+    TEST_CASE(test_block_api_tiny_capacity),
     TEST_CASE(test_block_api_large_block_varint),
     TEST_CASE(test_decompress_block_bound),
     TEST_CASE(test_decompress_block_safe),
@@ -79,6 +80,9 @@ static const test_entry_t g_tests[] = {
 
     /* --- Stream API --- */
     TEST_CASE(test_null_output_decompression),
+    TEST_CASE(test_stream_level_clamp),
+    TEST_CASE(test_stream_corrupt_block_header),
+    TEST_CASE(test_stream_dry_run_size),
     TEST_CASE(test_invalid_arguments),
     TEST_CASE(test_truncated_input),
     TEST_CASE(test_io_failures),

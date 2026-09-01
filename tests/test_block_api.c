@@ -674,3 +674,68 @@ int test_block_api_large_block_varint() {
     printf("PASS\n\n");
     return 1;
 }
+
+/**
+ * @brief Every destination capacity must be rejected cleanly, never overrun.
+ *
+ * Regression guard: `dst_cap - ZXC_BLOCK_HEADER_SIZE` used to wrap for a
+ * destination smaller than one block header, so a 12-byte sub-header was
+ * written out of bounds. The exactly-sized heap buffer makes a sanitizer build
+ * fail hard on any overrun.
+ */
+int test_block_api_tiny_capacity(void) {
+    printf("=== TEST: Block API - Tiny Destination Capacities ===\n");
+
+    enum { SRC_SIZE = 4096, MAX_CAP = 40 };
+    uint8_t* src = (uint8_t*)malloc(SRC_SIZE);
+    if (!src) {
+        printf("FAILED: allocation\n");
+        return 0;
+    }
+    for (size_t i = 0; i < SRC_SIZE; i++) src[i] = (uint8_t)('a' + (i * 7 + (i >> 5)) % 26);
+
+    int failures = 0;
+    for (int level = 1; level <= 7; level++) {
+        zxc_compress_opts_t opts;
+        memset(&opts, 0, sizeof(opts));
+        opts.level = level;
+        zxc_cctx* cctx = zxc_create_cctx(&opts);
+        if (!cctx) {
+            printf("FAILED: cctx (level %d)\n", level);
+            free(src);
+            return 0;
+        }
+
+        for (size_t cap = 1; cap <= MAX_CAP; cap++) {
+            /* Exact-size buffer: a sanitizer flags any byte written past it. */
+            uint8_t* dst = (uint8_t*)malloc(cap);
+            if (!dst) continue;
+
+            // SRC_SIZE far exceeds MAX_CAP: every capacity here must be refused.
+            const int64_t b = zxc_compress_block(cctx, src, SRC_SIZE, dst, cap, &opts);
+            if (b != ZXC_ERROR_DST_TOO_SMALL) {
+                printf("  [FAIL] compress_block level %d cap %zu: expected %d, got %lld\n", level,
+                       cap, ZXC_ERROR_DST_TOO_SMALL, (long long)b);
+                failures++;
+            }
+
+            const int64_t f = zxc_compress(src, SRC_SIZE, dst, cap, &opts);
+            if (f >= 0) {
+                printf("  [FAIL] compress level %d cap %zu: expected a rejection, got %lld\n",
+                       level, cap, (long long)f);
+                failures++;
+            }
+            free(dst);
+        }
+        zxc_free_cctx(cctx);
+    }
+    free(src);
+
+    if (failures > 0) {
+        printf("FAILED: %d sub-tests failed\n", failures);
+        return 0;
+    }
+    printf("  [PASS] capacities 1..%d rejected, no overrun (levels 1-7, both APIs)\n", MAX_CAP);
+    printf("PASS\n\n");
+    return 1;
+}

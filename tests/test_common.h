@@ -75,6 +75,7 @@ int test_decompress_empty_frame_null_dst(void);
 /* Block API */
 int test_block_api(void);
 int test_block_api_boundary_sizes(void);
+int test_block_api_tiny_capacity(void);
 int test_block_api_large_block_varint(void);
 int test_decompress_block_safe(void);
 int test_decompress_block_bound(void);
@@ -94,6 +95,9 @@ int test_static_ctx_null_inputs(void);
 
 /* Stream API */
 int test_null_output_decompression(void);
+int test_stream_level_clamp(void);
+int test_stream_corrupt_block_header(void);
+int test_stream_dry_run_size(void);
 int test_invalid_arguments(void);
 int test_truncated_input(void);
 int test_io_failures(void);
