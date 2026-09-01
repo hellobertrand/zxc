@@ -30,6 +30,7 @@
  * the committed bytes; it never re-compresses, so it is fully deterministic.
  */
 
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +49,54 @@
 /* ------------------------------------------------------------------------- */
 
 static int g_checks; /* assertions performed in the current file */
+
+/* Annotated field dump of the file being validated, accumulated in memory.
+ *
+ * The dump is emitted BY the validation walk itself, so there is exactly one
+ * parser of the wire format here: each EMIT sits next to the CHECK that reads
+ * the same field, and the two cannot drift apart. The committed dumps under
+ * tests/format/golden/ are what makes a golden change reviewable - a binary
+ * diff only ever says "Binary files differ" - and this test compares them
+ * against the walk, so a golden edited without refreshing its dump fails the
+ * suite locally, not just in CI.
+ *
+ * Built in memory rather than streamed to a file so the same bytes can be
+ * either written (--dump) or compared, with no temporary file and no
+ * platform-dependent newline translation. */
+static char* g_dump;
+static size_t g_dump_len, g_dump_cap;
+
+static void dump_reset(void) { g_dump_len = 0; }
+
+static void dump_printf(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int need = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    if (need < 0) return;
+    if (g_dump_len + (size_t)need + 1 > g_dump_cap) {
+        size_t cap = g_dump_cap ? g_dump_cap * 2 : 4096;
+        while (cap < g_dump_len + (size_t)need + 1) cap *= 2;
+        char* grown = (char*)realloc(g_dump, cap);
+        if (!grown) return;
+        g_dump = grown;
+        g_dump_cap = cap;
+    }
+    va_start(ap, fmt);
+    vsnprintf(g_dump + g_dump_len, g_dump_cap - g_dump_len, fmt, ap);
+    va_end(ap);
+    g_dump_len += (size_t)need;
+}
+
+#define EMIT(...) dump_printf(__VA_ARGS__)
+
+/* Raw bytes of a structural header, so the literal wire bytes stay under the
+ * reviewer's eyes alongside their decoded meaning. */
+static void emit_hex(const char* label, const uint8_t* p, size_t n) {
+    dump_printf("%-16s", label);
+    for (size_t i = 0; i < n; i++) dump_printf("%s%02X", i ? " " : "", p[i]);
+    dump_printf("\n");
+}
 
 #define CHECK(cond, ...)                             \
     do {                                             \
@@ -118,6 +167,14 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
         CHECK(enc_lit == (uint8_t)expect_enc_lit, "expected enc_lit == %d, got %u", expect_enc_lit,
               enc_lit);
 
+    emit_hex("  raw:", p, hdr);
+    EMIT("  n_sequences:  %u\n", n_sequences);
+    EMIT("  n_literals:   %u\n", n_literals);
+    EMIT("  enc_lit:      %u\n", enc_lit);
+    EMIT("  enc_tok:      %u\n", enc_tok);
+    EMIT("  enc_mlen:     %u  (reserved)\n", p[10]);
+    EMIT("  enc_off:      %u\n", enc_off);
+
     uint32_t table = 0;
     uint64_t sect_total = 0;
     uint32_t lit_comp = n_literals;
@@ -141,6 +198,9 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
         CHECK(enc_lit == 0, "GHI enc_lit = %u, expected RAW", enc_lit);
         sect_total = (uint64_t)n_literals + (uint64_t)n_sequences * 4U;
     }
+
+    EMIT("  lit_comp:     %u\n", lit_comp);
+    EMIT("  sect_total:   %llu\n", (unsigned long long)sect_total);
 
     uint64_t fixed = (uint64_t)hdr + table + sect_total;
     CHECK(fixed <= comp, "LZ sections overrun payload (%llu > %u)", (unsigned long long)fixed,
@@ -172,6 +232,12 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     uint8_t code = buf[5];
     CHECK(code >= 12 && code <= 21, "invalid chunk-size code %u", code);
 
+    EMIT("size:           %zu bytes\n\n[file header]\n", size);
+    emit_hex("raw:", buf, ZXC_FILE_HEADER_SIZE);
+    EMIT("magic:          0x%08X\n", zxc_le32(buf));
+    EMIT("version:        %u\n", buf[4]);
+    EMIT("chunk_code:     %u  (%u bytes)\n", code, 1U << code);
+
     uint8_t flags = buf[6];
     int has_checksum = (flags & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
     int has_dict = (flags & ZXC_FILE_FLAG_HAS_DICTIONARY) ? 1 : 0;
@@ -199,6 +265,9 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         uint16_t want = zxc_hash16(tmp);
         uint16_t got = zxc_le16(buf + 14);
         CHECK(got == want, "file header checksum mismatch: got 0x%04X want 0x%04X", got, want);
+        EMIT("flags:          0x%02X  (checksum=%d dict=%d)\n", flags, has_checksum, has_dict);
+        if (has_dict) EMIT("dict_id:        0x%08X\n", zxc_le32(buf + 7));
+        EMIT("header_crc:     0x%04X\n", got);
     }
 
     /* ---- Block stream (Sec 4, Sec 5) ---- */
@@ -224,6 +293,17 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
             CHECK(bh[7] == want, "block header checksum mismatch at %zu: got 0x%02X want 0x%02X",
                   off, bh[7], want);
         }
+        EMIT("\n[block %d @%zu]\n", data_blocks, off);
+        emit_hex("raw:", bh, ZXC_BLOCK_HEADER_SIZE);
+        EMIT("type:           %s (%u)\n",
+             type == GC_BLOCK_EOF   ? "EOF"
+             : type == GC_BLOCK_RAW ? "RAW"
+             : type == GC_BLOCK_GLO ? "GLO"
+             : type == GC_BLOCK_GHI ? "GHI"
+                                    : "?",
+             type);
+        if (type != GC_BLOCK_EOF) EMIT("comp_size:      %u\n", comp);
+        EMIT("header_crc:     0x%02X\n", bh[7]);
         CHECK(bflags == 0, "block flags nonzero (0x%02X) at %zu", bflags, off);
         CHECK(resv == 0, "block reserved nonzero (0x%02X) at %zu", resv, off);
 
@@ -260,6 +340,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
             uint32_t calc = zxc_checksum(payload, comp, ZXC_CHECKSUM_RAPIDHASH);
             CHECK(stored == calc, "block checksum mismatch at %zu: got 0x%08X calc 0x%08X", off,
                   stored, calc);
+            EMIT("block_crc:      0x%08X\n", stored);
             rolling = zxc_hash_combine_rotate(rolling, stored);
             off += ZXC_BLOCK_CHECKSUM_SIZE;
             phys += ZXC_BLOCK_CHECKSUM_SIZE;
@@ -291,6 +372,9 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
             CHECK(entry == block_phys[i], "SEK entry %d = %u, expected %u", i, entry,
                   block_phys[i]);
         }
+        EMIT("\n[seek table @%zu]\n", off);
+        EMIT("entries:        %d\n", data_blocks);
+        for (int i = 0; i < data_blocks; i++) EMIT("  block[%d]:     %u bytes\n", i, block_phys[i]);
         off += ZXC_BLOCK_HEADER_SIZE + comp;
         seek_present = 1;
     }
@@ -302,6 +386,11 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     const uint8_t* footer = buf + size - ZXC_FILE_FOOTER_SIZE;
     uint64_t src_size = zxc_le64(footer);
     uint32_t global_hash = zxc_le32(footer + 8);
+
+    EMIT("\n[footer]\n");
+    emit_hex("raw:", footer, ZXC_FILE_FOOTER_SIZE);
+    EMIT("src_size:       %llu\n", (unsigned long long)src_size);
+    EMIT("global_hash:    0x%08X\n", global_hash);
 
     uint64_t reported = zxc_get_decompressed_size(buf, size);
     CHECK(reported == src_size, "decoded-size query %llu != footer source size %llu",
@@ -351,8 +440,61 @@ static int validate_roundtrip(const char* ctx, const golden_case_t* gc, const ui
     return ok;
 }
 
+/* --dump: (re)write the committed annotated dump for one case. */
+static int write_dump(const char* ctx, const char* path) {
+    /* "wb": the dumps are compared byte for byte, so no newline translation. */
+    FILE* f = fopen(path, "wb");
+    if (!f) {
+        fprintf(stderr, "    FAIL [%s]: cannot write %s\n", ctx, path);
+        return 0;
+    }
+    const int ok = fwrite(g_dump, 1, g_dump_len, f) == g_dump_len;
+    fclose(f);
+    if (!ok) fprintf(stderr, "    FAIL [%s]: short write on %s\n", ctx, path);
+    return ok;
+}
+
+/* Default mode: the committed dump must match what the walk just produced. */
+static int check_dump(const char* ctx, const char* path) {
+    g_checks++;
+    size_t n = 0;
+    uint8_t* have = read_file(path, &n);
+    if (!have) {
+        fprintf(stderr, "    FAIL [%s]: missing %s\n", ctx, path);
+        fprintf(stderr, "      regenerate: zxc_format_golden_test --dump tests/format/golden\n");
+        return 0;
+    }
+    if (n == g_dump_len && memcmp(have, g_dump, n) == 0) {
+        free(have);
+        return 1;
+    }
+    /* Name the first differing line so the failure points at the field. */
+    size_t i = 0, line = 1, sol = 0;
+    while (i < n && i < g_dump_len && have[i] == (uint8_t)g_dump[i]) {
+        if (g_dump[i] == '\n') {
+            line++;
+            sol = i + 1;
+        }
+        i++;
+    }
+    size_t eol = sol;
+    while (eol < g_dump_len && g_dump[eol] != '\n') eol++;
+    fprintf(stderr, "    FAIL [%s]: %s is stale (first difference at line %zu)\n", ctx, path, line);
+    fprintf(stderr, "      walk says: %.*s\n", (int)(eol - sol), g_dump + sol);
+    fprintf(stderr, "      regenerate: zxc_format_golden_test --dump tests/format/golden\n");
+    free(have);
+    return 0;
+}
+
 int main(int argc, char** argv) {
-    const char* dir = (argc > 1) ? argv[1] : "tests/format/golden";
+    const char* dir = "tests/format/golden";
+    const char* dump_dir = NULL; /* --dump <outdir>: also write <name>.zxc.txt */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--dump") == 0 && i + 1 < argc)
+            dump_dir = argv[++i];
+        else
+            dir = argv[i];
+    }
 
     int failed = 0;
     printf("=== Golden format conformance (%s) ===\n", dir);
@@ -372,8 +514,18 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        dump_reset();
+        EMIT("file:           %s\n", gc->name);
+
         g_checks = 0;
         int ok = validate_structure(ctx, gc, buf, size) && validate_roundtrip(ctx, gc, buf, size);
+
+        if (ok) {
+            char dump_path[1024];
+            snprintf(dump_path, sizeof dump_path, "%s/%s.zxc.txt", dump_dir ? dump_dir : dir,
+                     gc->name);
+            ok = dump_dir ? write_dump(ctx, dump_path) : check_dump(ctx, dump_path);
+        }
         if (ok)
             printf("  PASS: %-14s (%zu bytes, %d checks)\n", gc->name, size, g_checks);
         else

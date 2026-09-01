@@ -1,0 +1,35 @@
+file:           03_block_ghi
+size:           211 bytes
+
+[file header]
+raw:            F5 2E B0 9C 08 13 00 00 00 00 00 00 00 00 EF 5B
+magic:          0x9CB02EF5
+version:        8
+chunk_code:     19  (524288 bytes)
+flags:          0x00  (checksum=0 dict=0)
+header_crc:     0x5BEF
+
+[block 0 @16]
+raw:            02 00 00 A7 00 00 00 D4
+type:           GHI (2)
+comp_size:      167
+header_crc:     0xD4
+  raw:          01 00 00 00 7B 00 00 00 00 00 00 00
+  n_sequences:  1
+  n_literals:   123
+  enc_lit:      0
+  enc_tok:      0
+  enc_mlen:     0  (reserved)
+  enc_off:      0
+  lit_comp:     123
+  sect_total:   127
+
+[block 1 @191]
+raw:            FF 00 00 00 00 00 00 02
+type:           EOF (255)
+header_crc:     0x02
+
+[footer]
+raw:            00 20 00 00 00 00 00 00 00 00 00 00
+src_size:       8192
+global_hash:    0x00000000

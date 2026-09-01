@@ -1,0 +1,35 @@
+file:           05_block_glo_huffman
+size:           5772 bytes
+
+[file header]
+raw:            F5 2E B0 9C 08 13 00 00 00 00 00 00 00 00 EF 5B
+magic:          0x9CB02EF5
+version:        8
+chunk_code:     19  (524288 bytes)
+flags:          0x00  (checksum=0 dict=0)
+header_crc:     0x5BEF
+
+[block 0 @16]
+raw:            01 00 00 60 16 00 00 4C
+type:           GLO (1)
+comp_size:      5728
+header_crc:     0x4C
+  raw:          67 01 00 00 0F 34 00 00 02 00 00 00
+  n_sequences:  359
+  n_literals:   13327
+  enc_lit:      2
+  enc_tok:      0
+  enc_mlen:     0  (reserved)
+  enc_off:      0
+  lit_comp:     4404
+  sect_total:   5481
+
+[block 1 @5752]
+raw:            FF 00 00 00 00 00 00 02
+type:           EOF (255)
+header_crc:     0x02
+
+[footer]
+raw:            00 40 00 00 00 00 00 00 00 00 00 00
+src_size:       16384
+global_hash:    0x00000000

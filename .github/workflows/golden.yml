@@ -41,6 +41,20 @@ jobs:
             exit 1
           fi
 
+      - name: Verify every golden has an annotated dump
+        run: |
+          # golden/<name>.zxc <-> golden/<name>.zxc.txt must be a bijection.
+          # The dumps are what makes a format change reviewable (a binary diff
+          # only ever says "Binary files differ"), so an archive without one --
+          # or a dump left behind by a removed case -- fails here.
+          expected=$(find tests/format/golden -maxdepth 1 -name '*.zxc' | sed 's/$/.txt/' | sort)
+          present=$(find tests/format/golden -maxdepth 1 -name '*.zxc.txt' | sort)
+          if ! diff <(printf '%s\n' "$expected") <(printf '%s\n' "$present"); then
+            echo "::error::Golden archives and annotated dumps are not in bijection."
+            echo "Refresh with: zxc_format_golden_test --dump tests/format/golden (see tests/format/README.md)."
+            exit 1
+          fi
+
       - name: Verify golden bytes are unchanged
         run: |
           # sha256sum -c fails on any content mismatch, so a single changed byte in any golden file fails the job.

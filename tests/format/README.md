@@ -12,6 +12,7 @@ golden_cases.h     Single source of truth: input generators + per-file expectati
 gen_golden.c       Maintainer tool that (re)produces golden/*.zxc deterministically
 test_golden.c      Structural validator (ctest target: `format_golden`)
 golden/*.zxc       The frozen archives — never edit by hand
+golden/*.zxc.txt   Annotated field dumps — generated, never edit by hand
 golden.sha256      Byte-stability manifest (sha256sum format)
 ```
 
@@ -66,6 +67,29 @@ cmake --build build --target zxc_format_golden_test
 ctest --test-dir build -R format_golden --output-on-failure
 ```
 
+## Annotated dumps (`golden/*.zxc.txt`)
+
+Each golden file has a committed, human-readable dump of every field the
+validator parses — raw header bytes next to their decoded meaning:
+
+```
+[block 0 @16]
+raw:            01 00 00 A7 00 00 00 17
+type:           GLO (1)
+comp_size:      167
+header_crc:     0x17
+  n_sequences:  1
+  enc_lit:      0
+```
+
+They exist so a format change is **reviewable**: a binary diff only ever says
+`Binary files differ`, whereas the dump shows the PR exactly which field moved.
+
+The dump is emitted by the validation walk itself, so there is a single parser
+of the wire format and the two cannot drift apart — and `test_golden` compares
+the committed dumps against that walk on every run. A golden edited without
+refreshing its dump therefore fails the suite locally, not only in CI.
+
 ## Byte stability
 
 `golden.sha256` is the frozen reference. The
@@ -82,13 +106,16 @@ only when the wire format changes on purpose:
 cmake --build build --target zxc_golden_gen
 ./build/zxc_golden_gen tests/format/golden
 sha256sum tests/format/golden/*.zxc | sort -k2 > tests/format/golden.sha256
+./build/zxc_format_golden_test --dump tests/format/golden   # refresh the dumps
 ```
 
-Then review the binary diff carefully and commit the `.zxc` files together with
-the refreshed `golden.sha256` in the same change.
+Commit the `.zxc` files, the refreshed `golden.sha256` **and** the refreshed
+`.zxc.txt` dumps in the same change: the dumps are what makes that change
+reviewable, so read their diff — it is the one that shows what actually moved.
 
 To add a new case, append an entry to `GOLDEN_CASES[]` in `golden_cases.h`
-(input generator + options + expectations), regenerate, and refresh the manifest.
+(input generator + options + expectations), regenerate, and refresh both the
+manifest and the dumps.
 
 ## License
 
