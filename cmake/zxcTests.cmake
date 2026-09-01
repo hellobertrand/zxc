@@ -147,6 +147,17 @@ if(ZXC_BUILD_TESTS)
         target_link_options(zxc_golden_gen PRIVATE --coverage)
     endif()
 
+    # Maintainer-only tool that rebuilds conformance/valid/*.zxc by recompressing
+    # the committed .expected plaintexts with the recipe in valid_cases.h.
+    add_executable(zxc_valid_gen conformance/gen_valid.c)
+    target_link_libraries(zxc_valid_gen PRIVATE zxc_lib)
+    target_include_directories(zxc_valid_gen PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    target_compile_definitions(zxc_valid_gen PRIVATE
+        $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>)
+    if(ZXC_ENABLE_COVERAGE)
+        target_link_options(zxc_valid_gen PRIVATE --coverage)
+    endif()
+
     # Maintainer-only tool that rebuilds conformance/invalid/*.zxc at the current
     # format version, like zxc_format_golden_test above.
     add_executable(zxc_invalid_gen conformance/gen_invalid.c)

@@ -8,8 +8,12 @@ Reference test vectors for validating any ZXC decoder implementation.
 valid/
   *.zxc         Compressed files (frozen wire format)
   *.expected    Expected decompressed output (plaintext reference)
+  *.zxd         Dictionaries used by the dictionary vectors
 invalid/
   *.zxc         Malformed files that must be rejected
+valid_cases.h   Recipe for every valid vector (options it was produced with)
+gen_valid.c     Maintainer tool: rebuilds valid/*.zxc from that recipe
+gen_invalid.c   Maintainer tool: rebuilds invalid/*.zxc at the current version
 ```
 
 ## Validating a decoder
@@ -54,17 +58,39 @@ echo "Passed: $pass  Failed: $fail"
 | Category             | Count | Description                                      |
 |----------------------|-------|--------------------------------------------------|
 | Basic                | 5     | Empty, 1 byte, all 256 values, all-zeros         |
-| Text                 | 3     | Compressible text with and without checksum       |
-| Random               | 3     | Incompressible data (stored as raw blocks)        |
-| Match patterns       | 3     | Long matches, short matches, max offset distance  |
+| Text                 | 3     | Compressible text, with and without checksum      |
+| Random               | 4     | Incompressible data (stored as raw blocks)        |
+| Match patterns       | 4     | Long matches, short matches, max offset distance  |
 | Compression levels   | 6     | Same input compressed at levels 1 through 6       |
-| Level 7              | 1     | Level-7 literals with 9-11-bit Huffman codes      |
-| PivCo (L7)           | 1     | Level-7 PivCo literal section (`enc_lit=2`, level-ordered bits) |
+| Level 7 (PivCo)      | 1     | Level-7 PivCo literal section (`enc_lit=2`)       |
 | Block size variants  | 2     | 4 KB and 2 MB block sizes                        |
-| Checksum             | 3     | Per-block and global checksum enabled             |
-| Multi-block          | 2     | 16 blocks per file (4 KB block size)             |
+| Checksum             | 1     | Compressible payload with checksums enabled       |
+| Multi-block          | 2     | 4 KB blocks over a 64 KB input                   |
 | Seekable             | 3     | Seekable archives with seek table                |
+| Dictionary           | 2     | Dictionary archives, incl. a seekable level-7 one |
+| **Valid total**      | **33**|                                                  |
 | Invalid              | 20    | Bad magic, bad version, bad CRC, bad block size/type, bad checksum algorithm, truncated, corrupt payload, garbage, forged `enc_lit`/`enc_off`, forged GHI offset, insufficient literal slack, missing dictionary |
+
+The categories above mirror the grouping in `valid_cases.h`, which is the source
+of truth: keep the two in step when adding a vector.
+
+## Regenerating the valid vectors
+
+Their recipe — level, block size, checksum, seekable, dictionary — is declared
+in `valid_cases.h`. The input of each vector is its own committed `.expected`
+file (and, for dictionary vectors, the committed `.zxd`), so regeneration only
+recompresses; it never rewrites the plaintext third-party decoders check
+against.
+
+```sh
+cmake --build build --target zxc_valid_gen
+./build/zxc_valid_gen conformance/valid
+```
+
+Every field in the recipe is stated explicitly, including those that match the
+library defaults today, so that a change of default shows up as a corpus diff
+instead of silently re-cutting the vectors. Run this after a format bump, then
+re-run the conformance suite and review the diff.
 
 Every invalid vector is a well-formed archive of the **current** format version
 with exactly one field corrupted, except the malformed-preamble cases, which
