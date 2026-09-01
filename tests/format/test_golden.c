@@ -50,19 +50,14 @@
 
 static int g_checks; /* assertions performed in the current file */
 
-/* Annotated field dump of the file being validated, accumulated in memory.
+/* Annotated field dump of the file being validated, built in memory.
  *
- * The dump is emitted BY the validation walk itself, so there is exactly one
- * parser of the wire format here: each EMIT sits next to the CHECK that reads
- * the same field, and the two cannot drift apart. The committed dumps under
- * tests/format/golden/ are what makes a golden change reviewable - a binary
- * diff only ever says "Binary files differ" - and this test compares them
- * against the walk, so a golden edited without refreshing its dump fails the
- * suite locally, not just in CI.
- *
- * Built in memory rather than streamed to a file so the same bytes can be
- * either written (--dump) or compared, with no temporary file and no
- * platform-dependent newline translation. */
+ * Emitted by the validation walk itself: each EMIT sits beside the CHECK that
+ * reads the same field, so there is one parser of the wire format, not two.
+ * The committed dumps make a golden change reviewable, since a binary diff only
+ * says "Binary files differ"; this test rebuilds and compares them, so a golden
+ * edited without refreshing its dump fails here. In memory, not streamed, so
+ * the same bytes serve both --dump and the comparison. */
 static char* g_dump;
 static size_t g_dump_len, g_dump_cap;
 
@@ -90,8 +85,7 @@ static void dump_printf(const char* fmt, ...) {
 
 #define EMIT(...) dump_printf(__VA_ARGS__)
 
-/* Raw bytes of a structural header, so the literal wire bytes stay under the
- * reviewer's eyes alongside their decoded meaning. */
+/* Raw header bytes, so the wire bytes sit next to their decoded meaning. */
 static void emit_hex(const char* label, const uint8_t* p, size_t n) {
     dump_printf("%-16s", label);
     for (size_t i = 0; i < n; i++) dump_printf("%s%02X", i ? " " : "", p[i]);
@@ -468,7 +462,7 @@ static int check_dump(const char* ctx, const char* path) {
         free(have);
         return 1;
     }
-    /* Name the first differing line so the failure points at the field. */
+    /* Name the first differing line, so the failure points at the field. */
     size_t i = 0, line = 1, sol = 0;
     while (i < n && i < g_dump_len && have[i] == (uint8_t)g_dump[i]) {
         if (g_dump[i] == '\n') {

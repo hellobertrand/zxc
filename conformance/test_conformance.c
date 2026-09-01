@@ -20,6 +20,7 @@
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_dict.h"
 #include "../include/zxc_error.h"
+#include "valid_cases.h"
 
 /* ---------- helpers ------------------------------------------------------ */
 
@@ -381,6 +382,87 @@ static int list_zxc_files(const char *dir, name_list_t *out)
     return 0;
 }
 
+/* ---------- recipe reproduction ------------------------------------------ */
+
+/* Recompress <name>.expected with the options valid_cases.h declares, and
+ * compare against the committed <name>.zxc.
+ *
+ * Neither other guard sees a corpus recut with the wrong options: the manifest
+ * only says the bytes have not moved (a wrong regeneration diffs like a right
+ * one), and the test above only says the archive decodes to its .expected,
+ * which stays true at any level. The vector named "level5" would then silently
+ * stop testing level 5.
+ *
+ * Also asserts that compression is bit-identical across ISAs, which the library
+ * guarantees; a failure on one platform only is that, not a corpus problem. */
+static int test_recipe(const char *valid_dir, const valid_case_t *vc)
+{
+    char path[2048];
+    int ok = 0;
+
+    snprintf(path, sizeof path, "%s/%s.expected", valid_dir, vc->name);
+    size_t in_size = 0;
+    uint8_t *input = read_file(path, &in_size);
+    if (!input) {
+        fprintf(stderr, "FAIL: %s  cannot read %s\n", vc->name, path);
+        return 0;
+    }
+
+    snprintf(path, sizeof path, "%s/%s.zxc", valid_dir, vc->name);
+    size_t ref_size = 0;
+    uint8_t *ref = read_file(path, &ref_size);
+    if (!ref) {
+        fprintf(stderr, "FAIL: %s  declared in VALID_CASES but the archive is missing\n",
+                vc->name);
+        free(input);
+        return 0;
+    }
+
+    /* The .zxd carries the content and its Huffman table; both feed the dict_id. */
+    zxc_compress_opts_t opts = vc->opts;
+    uint8_t *dict_buf = NULL;
+    int dict_ok = 1;
+    if (vc->dict) {
+        snprintf(path, sizeof path, "%s/%s", valid_dir, vc->dict);
+        size_t dict_file_size = 0;
+        dict_buf = read_file(path, &dict_file_size);
+        dict_ok = dict_buf && zxc_dict_load(dict_buf, dict_file_size, &opts.dict, &opts.dict_size,
+                                            &opts.dict_huf, NULL) == 0;
+        if (!dict_ok)
+            fprintf(stderr, "FAIL: %s  cannot load dictionary %s\n", vc->name, vc->dict);
+    }
+
+    if (dict_ok) {
+        size_t cap = (size_t)zxc_compress_bound(in_size) + 4096;
+        uint8_t *out = (uint8_t *)malloc(cap);
+        if (!out) {
+            fprintf(stderr, "FAIL: %s  OOM\n", vc->name);
+        } else {
+            int64_t csize = zxc_compress(input, in_size, out, cap, &opts);
+            if (csize <= 0) {
+                fprintf(stderr, "FAIL: %s  compress -> %s\n", vc->name,
+                        zxc_error_name((int)csize));
+            } else if ((size_t)csize != ref_size || memcmp(out, ref, ref_size) != 0) {
+                fprintf(stderr,
+                        "FAIL: %s  does not match its recipe (level %d, block %zu KB%s%s):\n"
+                        "        committed %zu bytes, recipe produces %lld\n"
+                        "        regenerate with zxc_valid_gen, or fix valid_cases.h\n",
+                        vc->name, vc->opts.level, vc->opts.block_size / 1024u,
+                        vc->opts.checksum_enabled ? ", checksum" : "",
+                        vc->opts.seekable ? ", seekable" : "", ref_size, (long long)csize);
+            } else {
+                ok = 1;
+            }
+            free(out);
+        }
+    }
+
+    free(dict_buf);
+    free(ref);
+    free(input);
+    return ok;
+}
+
 /* ---------- main --------------------------------------------------------- */
 
 int main(int argc, char **argv)
@@ -457,6 +539,18 @@ int main(int argc, char **argv)
         }
 
         name_list_free(&zxc_files);
+    }
+
+    /* --- Valid vector recipes --- */
+    printf("\n=== Valid vector recipes (%s) ===\n", valid_dir);
+    for (size_t i = 0; i < VALID_CASE_COUNT; i++) {
+        total++;
+        if (test_recipe(valid_dir, &VALID_CASES[i])) {
+            printf("  PASS: %s\n", VALID_CASES[i].name);
+            passed++;
+        } else {
+            failed++;
+        }
     }
 
     /* Every declared vector must exist */

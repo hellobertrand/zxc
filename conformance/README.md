@@ -11,6 +11,7 @@ valid/
   *.zxd         Dictionaries used by the dictionary vectors
 invalid/
   *.zxc         Malformed files that must be rejected
+vectors.sha256  Byte-stability manifest for the whole corpus (sha256sum format)
 valid_cases.h   Recipe for every valid vector (options it was produced with)
 gen_valid.c     Maintainer tool: rebuilds valid/*.zxc from that recipe
 gen_invalid.c   Maintainer tool: rebuilds invalid/*.zxc at the current version
@@ -74,6 +75,27 @@ echo "Passed: $pass  Failed: $fail"
 The categories above mirror the grouping in `valid_cases.h`, which is the source
 of truth: keep the two in step when adding a vector.
 
+## Byte stability
+
+`vectors.sha256` freezes the whole corpus — the archives, the `.expected`
+plaintexts they decode to, and the `.zxd` dictionaries. The
+[`Conformance Vector Stability`](../.github/workflows/conformance-vectors.yml)
+CI job runs `sha256sum -c` against it, so **any single changed byte fails CI**.
+It also checks that the file set and the manifest stay in sync, and that every
+`valid/<name>.zxc` still has its `<name>.expected`.
+
+The `.expected` files are covered deliberately: they are the reference every
+external decoder is measured against, so moving one silently would be at least
+as damaging as changing an archive.
+
+Refresh the manifest whenever the corpus changes on purpose:
+
+```sh
+sha256sum conformance/valid/*.zxc conformance/valid/*.expected \
+          conformance/valid/*.zxd conformance/invalid/*.zxc \
+  | sort -k2 > conformance/vectors.sha256
+```
+
 ## Regenerating the valid vectors
 
 Their recipe — level, block size, checksum, seekable, dictionary — is declared
@@ -100,6 +122,9 @@ never reach version checking. Regenerate them after a format bump with:
 cmake --build build --target zxc_invalid_gen
 ./build/zxc_invalid_gen conformance/invalid
 ```
+
+Both generators change committed bytes, so refresh `vectors.sha256` in the same
+commit.
 
 Without this, a bump makes every vector fail on the version byte instead of on
 its own defect — the suite still reports "correctly rejected" while testing
