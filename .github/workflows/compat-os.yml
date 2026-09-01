@@ -87,7 +87,7 @@ jobs:
       # FreeBSD: boot the VM, then build & test inside it via the cpa.sh shell
       - name: Start FreeBSD VM
         if: matrix.kind == 'bsd'
-        uses: cross-platform-actions/action@be3d7e9ff5c8770b9c51b1a8c8c5446e1cad7cf9 # v1.2.0
+        uses: cross-platform-actions/action@faa0c6197e94aacf1c5956460152c8380d3560a5 # v1.5.0
         with:
           operating_system: ${{ matrix.os }}
           architecture: ${{ matrix.arch }}
