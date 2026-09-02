@@ -1,10 +1,16 @@
 name: Golden Format Stability
 
-# Fails if a single byte of any golden conformance file changes relative to the
-# committed manifest (tests/format/golden.sha256). The golden files freeze the
-# zxc wire format; any drift here is, by design, a deliberate format change that
-# must be made by regenerating the corpus and refreshing the manifest in the
-# same commit (see tests/format/README.md).
+# Fails if a single byte of any golden file changes relative to
+# tests/format/golden.sha256.
+#
+# A failure means the ENCODER'S OUTPUT changed, not necessarily the format: an
+# encoder improvement moves these bytes while still emitting a valid archive of
+# the same version. That is legitimate, it only has to be deliberate --
+# regenerate, refresh the manifest in the same commit, and read the annotated
+# dumps in the diff (see tests/format/README.md).
+#
+# The decoder's contract is pinned by conformance-vectors.yml; a failure there
+# is the grave one.
 
 on:
   workflow_dispatch:

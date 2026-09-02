@@ -8,15 +8,16 @@
 /*
  * Valid-vector generator (maintainer tool).
  *
- * Rebuilds conformance/valid/<name>.zxc by recompressing each committed
+ * Rebuilds conformance/<version>/valid/<name>.zxc by recompressing each committed
  * <name>.expected with the options valid_cases.h declares for it. The
  * .expected plaintexts and the .zxd dictionaries are inputs, never written.
  *
  * Usage:
- *   zxc_valid_gen [<vectors-dir>]    # defaults to "conformance/valid"
+ *   zxc_valid_gen [<vectors-dir>]    # defaults to "conformance/v8/valid"
  *
- * Run after a format bump, then refresh conformance/vectors.sha256 and review
- * the diff: any change here is a wire-format change and must be intentional.
+ * After a format bump the corpus moves to a new conformance/v<N>/: create it,
+ * generate into it, then write its FORMAT_VERSION and vectors.sha256. The old
+ * directory stays frozen -- it records what archives of that version look like.
  */
 
 #include <fcntl.h>
@@ -150,7 +151,7 @@ static int generate(const char* dir, const valid_case_t* vc) {
 }
 
 int main(int argc, char** argv) {
-    const char* dir = (argc > 1) ? argv[1] : "conformance/valid";
+    const char* dir = (argc > 1) ? argv[1] : "conformance/v8/valid";
     if (!output_dir_is_safe(dir)) {
         fprintf(stderr, "refusing output directory '%s': must not be empty or contain '..'\n", dir);
         return EXIT_FAILURE;

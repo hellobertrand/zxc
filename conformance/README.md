@@ -5,56 +5,57 @@ Reference test vectors for validating any ZXC decoder implementation.
 ## Contents
 
 ```
-valid/
-  *.zxc         Compressed files (frozen wire format)
-  *.expected    Expected decompressed output (plaintext reference)
-  *.zxd         Dictionaries used by the dictionary vectors
-invalid/
-  *.zxc         Malformed files that must be rejected
-vectors.sha256  Byte-stability manifest for the whole corpus (sha256sum format)
-valid_cases.h   Recipe for every valid vector (options it was produced with)
-gen_valid.c     Maintainer tool: rebuilds valid/*.zxc from that recipe
-gen_invalid.c   Maintainer tool: rebuilds invalid/*.zxc at the current version
+v8/                 Corpus for format version 8 (FORMAT_VERSION declares it)
+  valid/            *.zxc archives, *.expected outputs, *.zxd dictionaries
+  invalid/          *.zxc archives that must be rejected
+  vectors.sha256    Byte-stability manifest
+valid_cases.h       Recipe for each valid vector; gen_valid.c rebuilds them
+invalid_cases.h     Recipe for the 16 generated invalid ones; gen_invalid.c likewise
 ```
+
+Vectors are frozen **per format version**. ZXC has no forward compatibility — a
+decoder accepts only the version it implements (`FORMAT.md` §12) — so use the
+`v<N>/` matching yours. Older directories are kept, never regenerated.
 
 ## Validating a decoder
 
-For each `valid/*.zxc`:
+For each `valid/*.zxc`: decompress it and compare byte-for-byte against the
+matching `.expected`. Any mismatch is a decoder bug. The three `dict_*` vectors
+need their dictionary supplied — the `.zxd` in the same directory whose
+`dict_id` matches the archive header.
 
-1. Decompress the file with your decoder
-2. Compare the output byte-for-byte against the matching `.expected` file
-3. Any mismatch is a decoder bug
+For each `invalid/*.zxc`: your decoder **must** reject it. Accepting a malformed
+file is a decoder bug. Two need more than a sequential decode and can be skipped
+if you do not implement the feature:
 
-For each `invalid/*.zxc`:
-
-1. Attempt to decompress the file with your decoder
-2. The decoder **must** reject it (return an error, not produce output)
-3. Accepting a malformed file is a decoder bug
-
-## Quick check (shell)
+- `sek_forged_entry` — the seek table is advisory metadata a sequential decode
+  never reads, so only a seekable reader rejects this one.
+- `dict_id_mismatch` — offer `valid/dict_http.zxd` to reach the binding check;
+  with no dictionary a decoder stops earlier, which is `dict_required`'s case.
 
 ```sh
 pass=0; fail=0
-for f in valid/*.zxc; do
+for f in v8/valid/*.zxc; do
+    # dict_* need their .zxd passed; drop this line once yours can.
+    case "$f" in *dict_*) continue;; esac
     expected="${f%.zxc}.expected"
     your-decoder "$f" /tmp/out
-    if cmp -s /tmp/out "$expected"; then
-        pass=$((pass + 1))
-    else
-        echo "FAIL: $f"; fail=$((fail + 1))
-    fi
+    if cmp -s /tmp/out "$expected"; then pass=$((pass + 1))
+    else echo "FAIL: $f"; fail=$((fail + 1)); fi
 done
-for f in invalid/*.zxc; do
+for f in v8/invalid/*.zxc; do
+    case "$f" in *sek_forged_entry*|*dict_id_mismatch*) continue;; esac
     if your-decoder "$f" /dev/null 2>/dev/null; then
         echo "FAIL (should reject): $f"; fail=$((fail + 1))
-    else
-        pass=$((pass + 1))
-    fi
+    else pass=$((pass + 1)); fi
 done
 echo "Passed: $pass  Failed: $fail"
 ```
 
-## Vector coverage
+## Coverage
+
+14 valid vectors, one per decoder-visible trait — a decoder never sees the
+compression level, only the block type and the encodings it selects:
 
 | Vector               | What it alone covers                                    |
 |----------------------|---------------------------------------------------------|
@@ -73,82 +74,41 @@ echo "Passed: $pass  Failed: $fail"
 | `dict_no_checksum`   | Same input and dictionary, checksums off                |
 | `dict_seekable_l7`   | Dictionary **with** one (`enc_lit=3`), plus seek + checksum |
 
-14 valid vectors, one per decoder-visible trait, plus 20 invalid ones. A decoder
-never sees the compression level, only the block type and the encodings it
-selects, so levels 3 to 6 all emit the same `GLO enc_lit=0 enc_off=1` block and
-one vector stands for them. All four literal encodings the format defines
-(`enc_lit` 0 to 3) are exercised.
+28 invalid vectors, one per row of the error table in `FORMAT.md` §12, each a
+well-formed archive with exactly one field corrupted (except the six
+malformed-preamble cases, which never reach version-dependent parsing).
 
-Counting header traits alone would suggest fewer vectors suffice. It would be
-wrong: `all_zeros_4k` and `max_offset_128k` earn their place on payload shape,
-which no header field shows, and `dict_http` on a combination (dictionary
-without the shared Huffman table) rather than on any trait taken alone.
-
-`dict_no_checksum` differs from `dict_http` in exactly one flag, so a decoder
-that passes one and fails the other has already named its own bug.
-
-| Invalid | 20 | Bad magic, bad version, bad CRC, bad block size/type, bad checksum algorithm, truncated, corrupt payload, garbage, forged `enc_lit`/`enc_off`, forged GHI offset, insufficient literal slack, missing dictionary |
-|---------|----|--------------------------------------------------------|
-
-The categories above mirror the grouping in `valid_cases.h`, which is the source
-of truth: keep the two in step when adding a vector.
+`valid_cases.h` is the source of truth for what each vector is and why; keep it
+in step when adding one.
 
 ## Byte stability
 
-`vectors.sha256` freezes the whole corpus — the archives, the `.expected`
-plaintexts they decode to, and the `.zxd` dictionaries. The
+`v<N>/vectors.sha256` freezes a corpus: the archives, the `.expected` outputs
+and the `.zxd` dictionaries — an `.expected` moved silently would move the
+reference every external decoder is measured against. The
 [`Conformance Vector Stability`](../.github/workflows/conformance-vectors.yml)
-CI job runs `sha256sum -c` against it, so **any single changed byte fails CI**.
-It also checks that the file set and the manifest stay in sync, and that every
-`valid/<name>.zxc` still has its `<name>.expected`.
+CI job fails on any changed byte, and checks the file set matches the manifest.
 
-The `.expected` files are covered deliberately: they are the reference every
-external decoder is measured against, so moving one silently would be at least
-as damaging as changing an archive.
-
-Refresh the manifest whenever the corpus changes on purpose:
+Refresh it whenever the corpus changes on purpose:
 
 ```sh
-sha256sum conformance/valid/*.zxc conformance/valid/*.expected \
-          conformance/valid/*.zxd conformance/invalid/*.zxc \
-  | sort -k2 > conformance/vectors.sha256
+sha256sum conformance/v8/valid/*.zxc conformance/v8/valid/*.expected \
+          conformance/v8/valid/*.zxd conformance/v8/invalid/*.zxc \
+  | sort -k2 > conformance/v8/vectors.sha256
 ```
 
-## Regenerating the valid vectors
+## Regenerating
 
-Their recipe — level, block size, checksum, seekable, dictionary — is declared
-in `valid_cases.h`. The input of each vector is its own committed `.expected`
-file (and, for dictionary vectors, the committed `.zxd`), so regeneration only
-recompresses; it never rewrites the plaintext third-party decoders check
-against.
+`test_conformance` rebuilds every vector from its recipe on each run and
+compares with the committed bytes, so a hand-edited vector — or one left behind
+by an encoder change — fails the suite rather than drifting unnoticed.
 
 ```sh
-cmake --build build --target zxc_valid_gen
-./build/zxc_valid_gen conformance/valid
+cmake --build build --target zxc_valid_gen zxc_invalid_gen
+./build/zxc_valid_gen   conformance/v8/valid
+./build/zxc_invalid_gen conformance/v8/invalid
 ```
 
-Every field in the recipe is stated explicitly, including those that match the
-library defaults today, so that a change of default shows up as a corpus diff
-instead of silently re-cutting the vectors. Run this after a format bump, then
-re-run the conformance suite and review the diff.
-
-Every invalid vector is a well-formed archive of the **current** format version
-with exactly one field corrupted, except the malformed-preamble cases, which
-never reach version checking. Regenerate them after a format bump with:
-
-```sh
-cmake --build build --target zxc_invalid_gen
-./build/zxc_invalid_gen conformance/invalid
-```
-
-Both generators change committed bytes, so refresh `vectors.sha256` in the same
-commit.
-
-Without this, a bump makes every vector fail on the version byte instead of on
-its own defect — the suite still reports "correctly rejected" while testing
-nothing. Check each vector's error code after regenerating, not just that it was
-rejected.
-
-## License
-
-BSD-3-Clause. Same as the ZXC library.
+The `.expected` plaintexts and the `.zxd` dictionaries are inputs, never
+rewritten. After a format bump the corpus moves to a new `conformance/v<N>/`:
+create it, generate into it, then write its `FORMAT_VERSION` and manifest.

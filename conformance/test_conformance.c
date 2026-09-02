@@ -20,6 +20,8 @@
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_dict.h"
 #include "../include/zxc_error.h"
+#include "../include/zxc_seekable.h"
+#include "invalid_cases.h"
 #include "valid_cases.h"
 
 /* ---------- helpers ------------------------------------------------------ */
@@ -222,8 +224,10 @@ static int test_valid_vector(const char *zxc_path, const char *expected_path)
  * any code that legitimately changed. A vector missing from the table is a
  * failure, so new ones cannot be added without declaring their reason. */
 typedef struct {
-    const char *name; /* file stem, without the .zxc */
-    int expected;     /* zxc_error_t the decoder must return */
+    const char *name;  /* file stem, without the .zxc */
+    int expected;      /* zxc_error_t the decoder must return */
+    const char *dict;  /* .zxd to offer, relative to the corpus root, or NULL */
+    int via_seekable;  /* defect only visible to the seekable reader: open must refuse */
 } invalid_expect_t;
 
 static const invalid_expect_t INVALID_EXPECT[] = {
@@ -247,11 +251,25 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"truncated_header_only", ZXC_ERROR_SRC_TOO_SMALL},
     {"truncated_mid_block", ZXC_ERROR_SRC_TOO_SMALL},
     {"zero_length", ZXC_ERROR_SRC_TOO_SMALL},
+    /* A forged seek-table entry is invisible to a sequential decode - the table
+     * is advisory metadata - so this one is exercised through the seekable
+     * reader, which refuses to open the archive. */
+    {"sek_forged_entry", 0, NULL, 1},
+    /* The remaining rows of the error table (FORMAT.md Sec 12). */
+    {"bad_block_header_crc", ZXC_ERROR_BAD_HEADER},
+    {"bad_footer_size", ZXC_ERROR_CORRUPT_DATA},
+    {"bad_footer_hash", ZXC_ERROR_BAD_CHECKSUM},
+    {"glo_forged_offset", ZXC_ERROR_BAD_OFFSET},
+    {"glo_output_overflow", ZXC_ERROR_OVERFLOW},
+    {"varint_too_long", ZXC_ERROR_CORRUPT_DATA},
+    /* Needs a dictionary in hand to reach the binding check: with none, the
+     * decoder stops earlier at DICT_REQUIRED, which is dict_required's job. */
+    {"dict_id_mismatch", ZXC_ERROR_DICT_MISMATCH, "valid/dict_http.zxd", 0},
 };
 #define INVALID_EXPECT_COUNT (sizeof INVALID_EXPECT / sizeof INVALID_EXPECT[0])
 
 /* Matches a vector path against the table by file stem. Returns 1 on hit. */
-static int expected_error_for(const char *zxc_path, int *out)
+static const invalid_expect_t *expect_for(const char *zxc_path)
 {
     const char *base = strrchr(zxc_path, '/');
 #ifdef _WIN32
@@ -261,26 +279,45 @@ static int expected_error_for(const char *zxc_path, int *out)
     base = base ? base + 1 : zxc_path;
 
     const size_t len = strlen(base);
-    if (len < 4 || strcmp(base + len - 4, ".zxc") != 0) return 0;
+    if (len < 4 || strcmp(base + len - 4, ".zxc") != 0) return NULL;
     const size_t stem = len - 4;
 
     for (size_t i = 0; i < INVALID_EXPECT_COUNT; i++) {
         if (strlen(INVALID_EXPECT[i].name) == stem &&
-            strncmp(INVALID_EXPECT[i].name, base, stem) == 0) {
-            *out = INVALID_EXPECT[i].expected;
-            return 1;
-        }
+            strncmp(INVALID_EXPECT[i].name, base, stem) == 0)
+            return &INVALID_EXPECT[i];
     }
-    return 0;
+    return NULL;
 }
 
-static int test_invalid_vector(const char *zxc_path)
+static int test_invalid_vector(const char *zxc_path, const char *base_dir)
 {
     size_t comp_sz = 0;
     uint8_t *comp = read_file(zxc_path, &comp_sz);
     if (!comp) {
         fprintf(stderr, "FAIL: cannot read %s\n", zxc_path);
         return 0;
+    }
+
+    const invalid_expect_t *exp = expect_for(zxc_path);
+    if (!exp) {
+        fprintf(stderr, "FAIL: %s  has no entry in INVALID_EXPECT\n", zxc_path);
+        free(comp);
+        return 0;
+    }
+
+    /* The seek table is advisory metadata that a sequential decode ignores, so
+     * a forged entry can only be caught where the entries are consumed. */
+    if (exp->via_seekable) {
+        zxc_seekable *s = zxc_seekable_open(comp, comp_sz);
+        if (s) {
+            fprintf(stderr, "FAIL: %s  seekable open accepted a forged seek table\n", zxc_path);
+            zxc_seekable_free(s);
+            free(comp);
+            return 0;
+        }
+        free(comp);
+        return 1;
     }
 
     int ok = 1;
@@ -295,18 +332,35 @@ static int test_invalid_vector(const char *zxc_path)
         /* Verify with checksum enabled so checksum/payload-corruption
          * vectors are caught (verification needs both the file flag and
          * this opt; see zxc_decompress_block in zxc_dispatch.c). */
-        const zxc_decompress_opts_t io = {.checksum_enabled = 1};
+        zxc_decompress_opts_t io = {.checksum_enabled = 1};
+
+        /* Some defects sit past an earlier gate: a forged dict_id is only
+         * reachable once a dictionary is actually offered. */
+        uint8_t *dict_buf = NULL;
+        if (exp->dict) {
+            char dpath[2048];
+            snprintf(dpath, sizeof dpath, "%s/%s", base_dir, exp->dict);
+            size_t dsz = 0;
+            dict_buf = read_file(dpath, &dsz);
+            if (!dict_buf ||
+                zxc_dict_load(dict_buf, dsz, &io.dict, &io.dict_size, &io.dict_huf, NULL) != 0) {
+                fprintf(stderr, "FAIL: %s  cannot load %s\n", zxc_path, dpath);
+                free(dict_buf);
+                free(output);
+                free(comp);
+                return 0;
+            }
+        }
+
         int64_t result = zxc_decompress(comp, comp_sz, output, out_cap, &io);
+        free(dict_buf);
         if (result >= 0) {
             fprintf(stderr, "FAIL: %s  should be rejected but decoded %lld bytes\n",
                     zxc_path, (long long)result);
             ok = 0;
         } else {
-            int want = 0;
-            if (!expected_error_for(zxc_path, &want)) {
-                fprintf(stderr, "FAIL: %s  has no entry in INVALID_EXPECT\n", zxc_path);
-                ok = 0;
-            } else if ((int)result != want) {
+            const int want = exp->expected;
+            if ((int)result != want) {
                 fprintf(stderr, "FAIL: %s  rejected as %s, expected %s\n", zxc_path,
                         zxc_error_name((int)result), zxc_error_name(want));
                 ok = 0;
@@ -463,14 +517,54 @@ static int test_recipe(const char *valid_dir, const valid_case_t *vc)
     return ok;
 }
 
+/* Rebuild <name>.zxc from invalid_cases.h and compare with the committed file.
+ *
+ * The error-code table above says each vector still fails for its own reason;
+ * this says each is still the archive its recipe describes. Without it the two
+ * drifted silently: the committed vectors were an older encoder's output, and
+ * a regeneration would have rewritten all of them at once, burying whatever
+ * change was actually intended. */
+static int test_invalid_recipe(const char *invalid_dir, invalid_bases_t *bases, const char *name)
+{
+    uint8_t *want = NULL;
+    size_t want_n = 0;
+    if (!build_invalid(bases, name, &want, &want_n)) {
+        fprintf(stderr, "FAIL: %s  cannot be rebuilt from invalid_cases.h\n", name);
+        return 0;
+    }
+
+    char path[2048];
+    snprintf(path, sizeof path, "%s/%s.zxc", invalid_dir, name);
+    size_t have_n = 0;
+    uint8_t *have = read_file(path, &have_n);
+    int ok = 0;
+    if (!have) {
+        fprintf(stderr, "FAIL: %s  declared in INVALID_GENERATED but missing\n", name);
+    } else if (have_n != want_n || memcmp(have, want, want_n) != 0) {
+        fprintf(stderr,
+                "FAIL: %s  does not match its recipe (committed %zu bytes, recipe %zu)\n"
+                "        regenerate with zxc_invalid_gen, or fix invalid_cases.h\n",
+                name, have_n, want_n);
+    } else {
+        ok = 1;
+    }
+    free(have);
+    free(want);
+    return ok;
+}
+
 /* ---------- main --------------------------------------------------------- */
 
 int main(int argc, char **argv)
 {
-    const char *base = "conformance";
-    if (argc > 1) base = argv[1];
+    /* One frozen corpus per format version, <root>/v<N>/. Composing it from the
+     * constant means a bump looks for a corpus that does not exist yet, rather
+     * than testing vectors this decoder could not decode anyway (Sec 12). */
+    const char *root = "conformance";
+    if (argc > 1) root = argv[1];
 
-    char valid_dir[512], invalid_dir[512];
+    char base[1024], valid_dir[1280], invalid_dir[1280];
+    snprintf(base, sizeof base, "%s/v%u", root, (unsigned)ZXC_FILE_FORMAT_VERSION);
     snprintf(valid_dir, sizeof valid_dir, "%s/valid", base);
     snprintf(invalid_dir, sizeof invalid_dir, "%s/invalid", base);
 
@@ -530,7 +624,7 @@ int main(int argc, char **argv)
             stem[strlen(stem) - 4] = '\0';
 
             total++;
-            if (test_invalid_vector(zxc_path)) {
+            if (test_invalid_vector(zxc_path, base)) {
                 printf("  PASS: %s  (correctly rejected)\n", stem);
                 passed++;
             } else {
@@ -551,6 +645,22 @@ int main(int argc, char **argv)
         } else {
             failed++;
         }
+    }
+
+    /* --- Invalid vector recipes --- */
+    printf("\n=== Invalid vector recipes (%s) ===\n", invalid_dir);
+    {
+        invalid_bases_t bases = {0};
+        for (size_t i = 0; i < INVALID_GENERATED_COUNT; i++) {
+            total++;
+            if (test_invalid_recipe(invalid_dir, &bases, INVALID_GENERATED[i])) {
+                printf("  PASS: %s\n", INVALID_GENERATED[i]);
+                passed++;
+            } else {
+                failed++;
+            }
+        }
+        invalid_bases_free(&bases);
     }
 
     /* Every declared vector must exist */

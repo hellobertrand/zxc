@@ -97,6 +97,12 @@ refreshing its dump therefore fails the suite locally, not only in CI.
 `sha256sum -c` against it, so **any single changed byte in any golden file fails
 CI**. The job also checks that the file set and the manifest stay in sync.
 
+A failure here means **the encoder's output changed**, which is not the same as
+a format change: an encoder improvement moves these bytes while still emitting a
+valid archive of the same format version. That is legitimate — it only has to be
+deliberate. The decoder's contract is pinned separately, by the conformance
+suite; a failure there is the grave one.
+
 ## Regenerating (intentional format changes only)
 
 The golden files are static artifacts; CI never re-compresses them. Regenerate
@@ -116,7 +122,3 @@ reviewable, so read their diff — it is the one that shows what actually moved.
 To add a new case, append an entry to `GOLDEN_CASES[]` in `golden_cases.h`
 (input generator + options + expectations), regenerate, and refresh both the
 manifest and the dumps.
-
-## License
-
-BSD-3-Clause. Same as the ZXC library.
