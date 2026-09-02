@@ -385,16 +385,12 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_literals(uint8_t* RESTRICT dst,
                                                        const uint64_t ll) {
     zxc_copy32(dst, src);
     if (UNLIKELY(ll > 32)) {
-        dst += 32;
-        src += 32;
-        size_t rem = ll - 32;
-        while (rem > 32) {
-            zxc_copy32(dst, src);
+        const uint8_t* const last = dst + ll - 32;
+        do {
             dst += 32;
             src += 32;
-            rem -= 32;
-        }
-        zxc_copy32(dst, src);
+            zxc_copy32(dst, src);
+        } while (dst < last);
     }
 }
 
@@ -427,16 +423,13 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
     if (LIKELY(off >= 32)) {
         zxc_copy32(d_ptr, match_src);
         if (UNLIKELY(ml > 32)) {
-            uint8_t* out = d_ptr + 32;
-            const uint8_t* ref = match_src + 32;
-            size_t rem = ml - 32;
-            while (rem > 32) {
-                zxc_copy32(out, ref);
+            uint8_t* out = d_ptr;
+            const uint8_t* const last = d_ptr + ml - 32;
+            do {
                 out += 32;
-                ref += 32;
-                rem -= 32;
-            }
-            zxc_copy32(out, ref);
+                match_src += 32;
+                zxc_copy32(out, match_src);
+            } while (out < last);
         }
     } else if (off == 1) {
         zxc_decode_fill_run(d_ptr, match_src[0], ml);
