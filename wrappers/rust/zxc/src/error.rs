@@ -38,7 +38,7 @@ pub enum Error {
     #[error("unsupported file format version")]
     BadVersion,
 
-    /// Corrupted or invalid header (CRC mismatch)
+    /// Corrupted or invalid header (checksum mismatch)
     #[error("corrupted or invalid header")]
     BadHeader,
 

@@ -826,15 +826,15 @@ int test_stream_engine_errors() {
 /* ======================================================================== */
 
 /* Thin wrapper around test_round_trip: malloc, generate, run, free. */
-#define RT_WRAPPER(fn_name, label, gen, size_expr, level_val, crc_val)               \
-    int fn_name(void) {                                                              \
-        const size_t _sz = (size_expr);                                              \
-        uint8_t* _buf = malloc(_sz > 0 ? _sz : 1);                                   \
-        if (!_buf) return 0;                                                         \
-        gen(_buf, _sz);                                                              \
-        const int _ok = test_round_trip((label), _buf, _sz, (level_val), (crc_val)); \
-        free(_buf);                                                                  \
-        return _ok;                                                                  \
+#define RT_WRAPPER(fn_name, label, gen, size_expr, level_val, checksum_val)               \
+    int fn_name(void) {                                                                   \
+        const size_t _sz = (size_expr);                                                   \
+        uint8_t* _buf = malloc(_sz > 0 ? _sz : 1);                                        \
+        if (!_buf) return 0;                                                              \
+        gen(_buf, _sz);                                                                   \
+        const int _ok = test_round_trip((label), _buf, _sz, (level_val), (checksum_val)); \
+        free(_buf);                                                                       \
+        return _ok;                                                                       \
     }
 
 #define RT_BUF (256 * 1024)
@@ -855,7 +855,7 @@ RT_WRAPPER(test_roundtrip_num_large, "Numeric data (large deltas)", gen_num_data
 RT_WRAPPER(test_roundtrip_small_50, "Small Input (50 bytes)", gen_random_data, 50, 3, 0)
 RT_WRAPPER(test_roundtrip_empty, "Empty Input (0 bytes)", gen_random_data, 0, 3, 0)
 RT_WRAPPER(test_roundtrip_1byte, "1-byte Input", gen_random_data, 1, 3, 0)
-RT_WRAPPER(test_roundtrip_1byte_crc, "1-byte Input (with checksum)", gen_random_data, 1, 3, 1)
+RT_WRAPPER(test_roundtrip_1byte_checksum, "1-byte Input (with checksum)", gen_random_data, 1, 3, 1)
 RT_WRAPPER(test_roundtrip_large_15mb_lz, "Large File (15MB Multi-Block)", gen_lz_data, RT_LARGE, 3,
            1)
 RT_WRAPPER(test_roundtrip_large_15mb_num, "Large numeric file (15MB Multi-Block)", gen_num_data,
@@ -876,7 +876,8 @@ RT_WRAPPER(test_roundtrip_level6, "Level 6 (Huffman literals)", gen_lz_data, RT_
 /* Binary data preservation */
 RT_WRAPPER(test_roundtrip_binary, "Binary Data (0x00, 0x0A, 0x0D, 0xFF)", gen_binary_data, RT_BUF,
            3, 0)
-RT_WRAPPER(test_roundtrip_binary_crc, "Binary Data with Checksum", gen_binary_data, RT_BUF, 3, 1)
+RT_WRAPPER(test_roundtrip_binary_checksum, "Binary Data with Checksum", gen_binary_data, RT_BUF, 3,
+           1)
 RT_WRAPPER(test_roundtrip_binary_small, "Small Binary Data (128 bytes)", gen_binary_data, 128, 3, 0)
 
 /* Repetitive pattern / offset encoding */

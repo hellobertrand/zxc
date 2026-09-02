@@ -563,8 +563,8 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
                     goto _job_prepared;
                 }
 
-                const int has_crc = ctx->file_has_checksum;
-                const size_t checksum_sz = (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+                const int has_checksum = ctx->file_has_checksum;
+                const size_t checksum_sz = (has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
                 const uint64_t total_len =
                     (uint64_t)bh.comp_size + checksum_sz + ZXC_BLOCK_HEADER_SIZE;
                 if (UNLIKELY(total_len > (uint64_t)job->in_cap)) {
@@ -582,11 +582,11 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
                 if (UNLIKELY(body_read != body_total)) {
                     ctx->io_error = 1;
                     break;
-                } else if (has_crc) {
+                } else if (has_checksum) {
                     // Update Global Hash for Decompression
-                    const uint32_t b_crc =
+                    const uint32_t b_checksum =
                         zxc_le32(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
-                    *d_global_hash = zxc_hash_combine_rotate(*d_global_hash, b_crc);
+                    *d_global_hash = zxc_hash_combine_rotate(*d_global_hash, b_checksum);
                 }
                 read_sz = ZXC_BLOCK_HEADER_SIZE + body_read;
             }

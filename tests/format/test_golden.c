@@ -87,7 +87,7 @@ static void dump_printf(const char* fmt, ...) {
 
 /* Raw header bytes, so the wire bytes sit next to their decoded meaning. */
 static void emit_hex(const char* label, const uint8_t* p, size_t n) {
-    dump_printf("%-16s", label);
+    dump_printf("%-18s", label);
     for (size_t i = 0; i < n; i++) dump_printf("%s%02X", i ? " " : "", p[i]);
     dump_printf("\n");
 }
@@ -162,12 +162,12 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
               enc_lit);
 
     emit_hex("  raw:", p, hdr);
-    EMIT("  n_sequences:  %u\n", n_sequences);
-    EMIT("  n_literals:   %u\n", n_literals);
-    EMIT("  enc_lit:      %u\n", enc_lit);
-    EMIT("  enc_tok:      %u\n", enc_tok);
-    EMIT("  enc_mlen:     %u  (reserved)\n", p[10]);
-    EMIT("  enc_off:      %u\n", enc_off);
+    EMIT("  n_sequences:    %u\n", n_sequences);
+    EMIT("  n_literals:     %u\n", n_literals);
+    EMIT("  enc_lit:        %u\n", enc_lit);
+    EMIT("  enc_tok:        %u\n", enc_tok);
+    EMIT("  enc_mlen:       %u  (reserved)\n", p[10]);
+    EMIT("  enc_off:        %u\n", enc_off);
 
     uint32_t table = 0;
     uint64_t sect_total = 0;
@@ -193,8 +193,8 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
         sect_total = (uint64_t)n_literals + (uint64_t)n_sequences * 4U;
     }
 
-    EMIT("  lit_comp:     %u\n", lit_comp);
-    EMIT("  sect_total:   %llu\n", (unsigned long long)sect_total);
+    EMIT("  lit_comp:       %u\n", lit_comp);
+    EMIT("  sect_total:     %llu\n", (unsigned long long)sect_total);
 
     uint64_t fixed = (uint64_t)hdr + table + sect_total;
     CHECK(fixed <= comp, "LZ sections overrun payload (%llu > %u)", (unsigned long long)fixed,
@@ -226,11 +226,11 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     uint8_t code = buf[5];
     CHECK(code >= 12 && code <= 21, "invalid chunk-size code %u", code);
 
-    EMIT("size:           %zu bytes\n\n[file header]\n", size);
+    EMIT("size:             %zu bytes\n\n[file header]\n", size);
     emit_hex("raw:", buf, ZXC_FILE_HEADER_SIZE);
-    EMIT("magic:          0x%08X\n", zxc_le32(buf));
-    EMIT("version:        %u\n", buf[4]);
-    EMIT("chunk_code:     %u  (%u bytes)\n", code, 1U << code);
+    EMIT("magic:            0x%08X\n", zxc_le32(buf));
+    EMIT("version:          %u\n", buf[4]);
+    EMIT("chunk_code:       %u  (%u bytes)\n", code, 1U << code);
 
     uint8_t flags = buf[6];
     int has_checksum = (flags & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
@@ -259,9 +259,9 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         uint16_t want = zxc_hash16(tmp);
         uint16_t got = zxc_le16(buf + 14);
         CHECK(got == want, "file header checksum mismatch: got 0x%04X want 0x%04X", got, want);
-        EMIT("flags:          0x%02X  (checksum=%d dict=%d)\n", flags, has_checksum, has_dict);
-        if (has_dict) EMIT("dict_id:        0x%08X\n", zxc_le32(buf + 7));
-        EMIT("header_crc:     0x%04X\n", got);
+        EMIT("flags:            0x%02X  (checksum=%d dict=%d)\n", flags, has_checksum, has_dict);
+        if (has_dict) EMIT("dict_id:          0x%08X\n", zxc_le32(buf + 7));
+        EMIT("header_checksum:  0x%04X\n", got);
     }
 
     /* ---- Block stream (Sec 4, Sec 5) ---- */
@@ -289,15 +289,15 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         }
         EMIT("\n[block %d @%zu]\n", data_blocks, off);
         emit_hex("raw:", bh, ZXC_BLOCK_HEADER_SIZE);
-        EMIT("type:           %s (%u)\n",
+        EMIT("type:             %s (%u)\n",
              type == GC_BLOCK_EOF   ? "EOF"
              : type == GC_BLOCK_RAW ? "RAW"
              : type == GC_BLOCK_GLO ? "GLO"
              : type == GC_BLOCK_GHI ? "GHI"
                                     : "?",
              type);
-        if (type != GC_BLOCK_EOF) EMIT("comp_size:      %u\n", comp);
-        EMIT("header_crc:     0x%02X\n", bh[7]);
+        if (type != GC_BLOCK_EOF) EMIT("comp_size:        %u\n", comp);
+        EMIT("header_checksum:  0x%02X\n", bh[7]);
         CHECK(bflags == 0, "block flags nonzero (0x%02X) at %zu", bflags, off);
         CHECK(resv == 0, "block reserved nonzero (0x%02X) at %zu", resv, off);
 
@@ -334,7 +334,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
             uint32_t calc = zxc_checksum(payload, comp, ZXC_CHECKSUM_RAPIDHASH);
             CHECK(stored == calc, "block checksum mismatch at %zu: got 0x%08X calc 0x%08X", off,
                   stored, calc);
-            EMIT("block_crc:      0x%08X\n", stored);
+            EMIT("block_checksum:   0x%08X\n", stored);
             rolling = zxc_hash_combine_rotate(rolling, stored);
             off += ZXC_BLOCK_CHECKSUM_SIZE;
             phys += ZXC_BLOCK_CHECKSUM_SIZE;
@@ -367,7 +367,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
                   block_phys[i]);
         }
         EMIT("\n[seek table @%zu]\n", off);
-        EMIT("entries:        %d\n", data_blocks);
+        EMIT("entries:          %d\n", data_blocks);
         for (int i = 0; i < data_blocks; i++) EMIT("  block[%d]:     %u bytes\n", i, block_phys[i]);
         off += ZXC_BLOCK_HEADER_SIZE + comp;
         seek_present = 1;
@@ -383,8 +383,8 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
 
     EMIT("\n[footer]\n");
     emit_hex("raw:", footer, ZXC_FILE_FOOTER_SIZE);
-    EMIT("src_size:       %llu\n", (unsigned long long)src_size);
-    EMIT("global_hash:    0x%08X\n", global_hash);
+    EMIT("src_size:         %llu\n", (unsigned long long)src_size);
+    EMIT("global_hash:      0x%08X\n", global_hash);
 
     uint64_t reported = zxc_get_decompressed_size(buf, size);
     CHECK(reported == src_size, "decoded-size query %llu != footer source size %llu",
@@ -509,7 +509,7 @@ int main(int argc, char** argv) {
         }
 
         dump_reset();
-        EMIT("file:           %s\n", gc->name);
+        EMIT("file:             %s\n", gc->name);
 
         g_checks = 0;
         int ok = validate_structure(ctx, gc, buf, size) && validate_roundtrip(ctx, gc, buf, size);

@@ -1,35 +1,35 @@
-file:           11_glo_rle
-size:           7566 bytes
+file:             11_glo_rle
+size:             7573 bytes
 
 [file header]
-raw:            F5 2E B0 9C 08 13 00 00 00 00 00 00 00 00 EF 5B
-magic:          0x9CB02EF5
-version:        8
-chunk_code:     19  (524288 bytes)
-flags:          0x00  (checksum=0 dict=0)
-header_crc:     0x5BEF
+raw:              F5 2E B0 9C 08 13 00 00 00 00 00 00 00 00 EF 5B
+magic:            0x9CB02EF5
+version:          8
+chunk_code:       19  (524288 bytes)
+flags:            0x00  (checksum=0 dict=0)
+header_checksum:  0x5BEF
 
 [block 0 @16]
-raw:            01 00 00 62 1D 00 00 CF
-type:           GLO (1)
-comp_size:      7522
-header_crc:     0xCF
-  raw:          75 07 00 00 62 07 00 00 01 00 00 00
-  n_sequences:  1909
-  n_literals:   1890
-  enc_lit:      1
-  enc_tok:      0
-  enc_mlen:     0  (reserved)
-  enc_off:      0
-  lit_comp:     1761
-  sect_total:   7488
+raw:              01 00 00 69 1D 00 00 81
+type:             GLO (1)
+comp_size:        7529
+header_checksum:  0x81
+  raw:            70 07 00 00 7E 07 00 00 01 00 00 00
+  n_sequences:    1904
+  n_literals:     1918
+  enc_lit:        1
+  enc_tok:        0
+  enc_mlen:       0  (reserved)
+  enc_off:        0
+  lit_comp:       1784
+  sect_total:     7496
 
-[block 1 @7546]
-raw:            FF 00 00 00 00 00 00 02
-type:           EOF (255)
-header_crc:     0x02
+[block 1 @7553]
+raw:              FF 00 00 00 00 00 00 02
+type:             EOF (255)
+header_checksum:  0x02
 
 [footer]
-raw:            00 40 00 00 00 00 00 00 00 00 00 00
-src_size:       16384
-global_hash:    0x00000000
+raw:              00 40 00 00 00 00 00 00 00 00 00 00
+src_size:         16384
+global_hash:      0x00000000

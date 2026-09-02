@@ -1,36 +1,36 @@
-file:           09_block_dict
-size:           100 bytes
+file:             09_block_dict
+size:             100 bytes
 
 [file header]
-raw:            F5 2E B0 9C 08 13 40 AD FB 05 F0 00 00 00 57 3E
-magic:          0x9CB02EF5
-version:        8
-chunk_code:     19  (524288 bytes)
-flags:          0x40  (checksum=0 dict=1)
-dict_id:        0xF005FBAD
-header_crc:     0x3E57
+raw:              F5 2E B0 9C 08 13 40 AD FB 05 F0 00 00 00 57 3E
+magic:            0x9CB02EF5
+version:          8
+chunk_code:       19  (524288 bytes)
+flags:            0x40  (checksum=0 dict=1)
+dict_id:          0xF005FBAD
+header_checksum:  0x3E57
 
 [block 0 @16]
-raw:            01 00 00 38 00 00 00 AC
-type:           GLO (1)
-comp_size:      56
-header_crc:     0xAC
-  raw:          03 00 00 00 0C 00 00 00 00 00 00 01
-  n_sequences:  3
-  n_literals:   12
-  enc_lit:      0
-  enc_tok:      0
-  enc_mlen:     0  (reserved)
-  enc_off:      1
-  lit_comp:     12
-  sect_total:   18
+raw:              01 00 00 38 00 00 00 AC
+type:             GLO (1)
+comp_size:        56
+header_checksum:  0xAC
+  raw:            03 00 00 00 0C 00 00 00 00 00 00 01
+  n_sequences:    3
+  n_literals:     12
+  enc_lit:        0
+  enc_tok:        0
+  enc_mlen:       0  (reserved)
+  enc_off:        1
+  lit_comp:       12
+  sect_total:     18
 
 [block 1 @80]
-raw:            FF 00 00 00 00 00 00 02
-type:           EOF (255)
-header_crc:     0x02
+raw:              FF 00 00 00 00 00 00 02
+type:             EOF (255)
+header_checksum:  0x02
 
 [footer]
-raw:            00 10 00 00 00 00 00 00 00 00 00 00
-src_size:       4096
-global_hash:    0x00000000
+raw:              00 10 00 00 00 00 00 00 00 00 00 00
+src_size:         4096
+global_hash:      0x00000000

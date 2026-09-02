@@ -1,36 +1,36 @@
-file:           06_checksum_per_block
-size:           215 bytes
+file:             06_checksum_per_block
+size:             215 bytes
 
 [file header]
-raw:            F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
-magic:          0x9CB02EF5
-version:        8
-chunk_code:     19  (524288 bytes)
-flags:          0x80  (checksum=1 dict=0)
-header_crc:     0x5B6E
+raw:              F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
+magic:            0x9CB02EF5
+version:          8
+chunk_code:       19  (524288 bytes)
+flags:            0x80  (checksum=1 dict=0)
+header_checksum:  0x5B6E
 
 [block 0 @16]
-raw:            01 00 00 A7 00 00 00 17
-type:           GLO (1)
-comp_size:      167
-header_crc:     0x17
-  raw:          01 00 00 00 7B 00 00 00 00 00 00 01
-  n_sequences:  1
-  n_literals:   123
-  enc_lit:      0
-  enc_tok:      0
-  enc_mlen:     0  (reserved)
-  enc_off:      1
-  lit_comp:     123
-  sect_total:   125
-block_crc:      0x9B5CCFC1
+raw:              01 00 00 A7 00 00 00 17
+type:             GLO (1)
+comp_size:        167
+header_checksum:  0x17
+  raw:            01 00 00 00 7B 00 00 00 00 00 00 01
+  n_sequences:    1
+  n_literals:     123
+  enc_lit:        0
+  enc_tok:        0
+  enc_mlen:       0  (reserved)
+  enc_off:        1
+  lit_comp:       123
+  sect_total:     125
+block_checksum:   0x9B5CCFC1
 
 [block 1 @195]
-raw:            FF 00 00 00 00 00 00 02
-type:           EOF (255)
-header_crc:     0x02
+raw:              FF 00 00 00 00 00 00 02
+type:             EOF (255)
+header_checksum:  0x02
 
 [footer]
-raw:            00 20 00 00 00 00 00 00 C1 CF 5C 9B
-src_size:       8192
-global_hash:    0x9B5CCFC1
+raw:              00 20 00 00 00 00 00 00 C1 CF 5C 9B
+src_size:         8192
+global_hash:      0x9B5CCFC1

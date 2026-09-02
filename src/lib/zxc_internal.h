@@ -1945,11 +1945,11 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
  * Descriptors within the compressed payload.
  */
 typedef struct {
-    uint8_t block_type;  /**< Block type (see @ref zxc_block_type_t). */
-    uint8_t block_flags; /**< Flags (e.g., checksum presence). */
-    uint8_t reserved;    /**< Reserved for future protocol extensions. */
-    uint8_t header_crc;  /**< Header integrity checksum (1 byte). */
-    uint32_t comp_size;  /**< Compressed size excluding this header. */
+    uint8_t block_type;      /**< Block type (see @ref zxc_block_type_t). */
+    uint8_t block_flags;     /**< Flags (e.g., checksum presence). */
+    uint8_t reserved;        /**< Reserved for future protocol extensions. */
+    uint8_t header_checksum; /**< Header integrity checksum (1 byte). */
+    uint32_t comp_size;      /**< Compressed size excluding this header. */
 } zxc_block_header_t;
 
 /**

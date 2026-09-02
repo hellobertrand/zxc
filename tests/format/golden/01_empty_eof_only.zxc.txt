@@ -1,20 +1,20 @@
-file:           01_empty_eof_only
-size:           36 bytes
+file:             01_empty_eof_only
+size:             36 bytes
 
 [file header]
-raw:            F5 2E B0 9C 08 13 00 00 00 00 00 00 00 00 EF 5B
-magic:          0x9CB02EF5
-version:        8
-chunk_code:     19  (524288 bytes)
-flags:          0x00  (checksum=0 dict=0)
-header_crc:     0x5BEF
+raw:              F5 2E B0 9C 08 13 00 00 00 00 00 00 00 00 EF 5B
+magic:            0x9CB02EF5
+version:          8
+chunk_code:       19  (524288 bytes)
+flags:            0x00  (checksum=0 dict=0)
+header_checksum:  0x5BEF
 
 [block 0 @16]
-raw:            FF 00 00 00 00 00 00 02
-type:           EOF (255)
-header_crc:     0x02
+raw:              FF 00 00 00 00 00 00 02
+type:             EOF (255)
+header_checksum:  0x02
 
 [footer]
-raw:            00 00 00 00 00 00 00 00 00 00 00 00
-src_size:       0
-global_hash:    0x00000000
+raw:              00 00 00 00 00 00 00 00 00 00 00 00
+src_size:         0
+global_hash:      0x00000000

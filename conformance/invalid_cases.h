@@ -29,12 +29,12 @@
 
 /* Every generated vector, in the order gen_invalid.c reports them. */
 static const char* const INVALID_GENERATED[] = {
-    "bad_block_size_field", "bad_checksum_algo",      "bad_header_crc",
+    "bad_block_size_field", "bad_checksum_algo",      "bad_header_checksum",
     "dict_required",        "dict_id_mismatch",       "bad_block_type",
     "bad_eof_compsize",     "bad_enc_lit",            "glo_forged_enc_off",
     "glo_insufficient_slack", "ghi_forged_offset",    "sek_forged_entry",
     "bad_block_checksum",   "corrupt_payload",        "truncated_header_only",
-    "truncated_mid_block",   "bad_block_header_crc",   "bad_footer_size",
+    "truncated_mid_block",   "bad_block_header_checksum",   "bad_footer_size",
     "bad_footer_hash",       "glo_forged_offset",      "glo_output_overflow",
     "varint_too_long",
 };
@@ -44,9 +44,9 @@ static const char* const INVALID_GENERATED[] = {
 static void resign_file_header(uint8_t* d) {
     d[14] = 0;
     d[15] = 0;
-    const uint16_t crc = zxc_hash16(d);
-    d[14] = (uint8_t)(crc & 0xFFU);
-    d[15] = (uint8_t)(crc >> 8);
+    const uint16_t sum = zxc_hash16(d);
+    d[14] = (uint8_t)(sum & 0xFFU);
+    d[15] = (uint8_t)(sum >> 8);
 }
 
 /* Re-sign an 8-byte block header at @p b after patching type or comp_size. */
@@ -57,13 +57,13 @@ static void resign_block_header(uint8_t* b) {
     b[7] = zxc_hash8(tmp);
 }
 
-static size_t find_eof_block(const uint8_t* d, size_t n, int has_crc) {
+static size_t find_eof_block(const uint8_t* d, size_t n, int has_checksum) {
     size_t p = BLK0;
     while (p + ZXC_BLOCK_HEADER_SIZE <= n) {
         const uint8_t t = d[p];
         if (t == ZXC_BLOCK_EOF) return p;
         const uint32_t comp = zxc_le32(d + p + 3);
-        p += ZXC_BLOCK_HEADER_SIZE + comp + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+        p += ZXC_BLOCK_HEADER_SIZE + comp + (has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
     }
     return 0;
 }
@@ -179,7 +179,7 @@ static int invalid_bases(invalid_bases_t* b) {
 /* Build one named vector into a fresh buffer. Returns 0 on failure.
  *
  * Each vector starts from a pristine copy of one base, patches one field, and
- * re-signs whatever CRC covers that field. */
+ * re-signs whatever checksum covers that field. */
 static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, size_t* out_n) {
     if (!invalid_bases(b)) return 0;
 
@@ -203,16 +203,16 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
     size_t len = n;
     int ok = 1;
 
-    /* --- File-header defects (CRC16 re-signed, except where the CRC IS it) -- */
+    /* --- File-header defects (checksum re-signed, except where it IS the defect) */
     if (!strcmp(name, "bad_block_size_field")) {
         d[5] = 31; /* block-size code outside [12,21] */
         resign_file_header(d);
     } else if (!strcmp(name, "bad_checksum_algo")) {
         d[6] = (uint8_t)((d[6] & 0xF0U) | 0x0FU); /* checksum algorithm id != 0 */
         resign_file_header(d);
-    } else if (!strcmp(name, "bad_header_crc")) {
+    } else if (!strcmp(name, "bad_header_checksum")) {
         resign_file_header(d);
-        d[14] ^= 0xFFU; /* the CRC itself is the defect: corrupt it last */
+        d[14] ^= 0xFFU; /* the checksum itself is the defect: corrupt it last */
     } else if (!strcmp(name, "dict_required")) {
         d[6] |= 0x40U; /* HAS_DICTIONARY with a non-zero id, but none supplied */
         d[7] = 0xEF;
@@ -231,7 +231,7 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         d[10] = 0x12;
         resign_file_header(d);
 
-        /* --- Block-header defects (CRC8 re-signed) -------------------------- */
+        /* --- Block-header defects (checksum re-signed) ---------------------- */
     } else if (!strcmp(name, "bad_block_type")) {
         d[BLK0] = 3; /* no such block type */
         resign_block_header(d + BLK0);
@@ -245,7 +245,7 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
             resign_block_header(d + eof);
         }
 
-        /* --- Payload defects (no CRC over the sub-header without checksums) -- */
+        /* --- Payload defects (nothing covers the sub-header without checksums) */
     } else if (!strcmp(name, "bad_enc_lit")) {
         d[PAY0 + 8] = 9; /* enc_lit outside {0,1,2,3} */
     } else if (!strcmp(name, "glo_forged_enc_off")) {
@@ -302,8 +302,8 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         len = PAY0 + 20;
 
         /* --- Remaining rows of the error table (FORMAT.md Sec 12) ---------- */
-    } else if (!strcmp(name, "bad_block_header_crc")) {
-        d[BLK0 + 7] ^= 0xFFU; /* left wrong: the block-header CRC is the defect */
+    } else if (!strcmp(name, "bad_block_header_checksum")) {
+        d[BLK0 + 7] ^= 0xFFU; /* left wrong: the header checksum is the defect */
     } else if (!strcmp(name, "bad_footer_size")) {
         d[len - ZXC_FILE_FOOTER_SIZE] ^= 0xFFU; /* declared source size */
     } else if (!strcmp(name, "bad_footer_hash")) {

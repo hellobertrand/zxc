@@ -913,7 +913,7 @@ Since there is exactly one data block, the global hash equals that block checksu
 
 ```text
 global0 = 0
-global1 = rotl1(global0) XOR block_crc = block_crc
+global1 = rotl1(global0) XOR block_checksum = block_checksum
 ```
 
 ### 14.3 Structural view with absolute offsets

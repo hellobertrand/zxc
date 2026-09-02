@@ -238,7 +238,7 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"bad_checksum_algo", ZXC_ERROR_BAD_HEADER},
     {"bad_enc_lit", ZXC_ERROR_CORRUPT_DATA},
     {"bad_eof_compsize", ZXC_ERROR_BAD_HEADER},
-    {"bad_header_crc", ZXC_ERROR_BAD_HEADER},
+    {"bad_header_checksum", ZXC_ERROR_BAD_HEADER},
     {"bad_magic", ZXC_ERROR_BAD_MAGIC},
     {"bad_version", ZXC_ERROR_BAD_VERSION},
     {"corrupt_payload", ZXC_ERROR_BAD_CHECKSUM},
@@ -256,7 +256,7 @@ static const invalid_expect_t INVALID_EXPECT[] = {
      * reader, which refuses to open the archive. */
     {"sek_forged_entry", 0, NULL, 1},
     /* The remaining rows of the error table (FORMAT.md Sec 12). */
-    {"bad_block_header_crc", ZXC_ERROR_BAD_HEADER},
+    {"bad_block_header_checksum", ZXC_ERROR_BAD_HEADER},
     {"bad_footer_size", ZXC_ERROR_CORRUPT_DATA},
     {"bad_footer_hash", ZXC_ERROR_BAD_CHECKSUM},
     {"glo_forged_offset", ZXC_ERROR_BAD_OFFSET},
