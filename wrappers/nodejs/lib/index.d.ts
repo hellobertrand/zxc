@@ -30,7 +30,7 @@ export const ERROR_SRC_TOO_SMALL: number;
 export const ERROR_BAD_MAGIC: number;
 /** Unsupported file format version. */
 export const ERROR_BAD_VERSION: number;
-/** Corrupted or invalid header (CRC mismatch). */
+/** Corrupted or invalid header (checksum mismatch). */
 export const ERROR_BAD_HEADER: number;
 /** Block or global checksum verification failed. */
 export const ERROR_BAD_CHECKSUM: number;

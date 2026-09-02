@@ -96,8 +96,8 @@ int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size,
     zxc_store_le16(dst + 6, (uint16_t)content_size);
     zxc_store_le32(dst + 8, zxc_dict_id(content, content_size, (const uint8_t*)huf_lengths));
     zxc_store_le32(dst + 12, 0); /* reserved (0x0C) + checksum (0x0E), zeroed before hashing */
-    const uint16_t crc = zxc_hash16(dst);
-    zxc_store_le16(dst + 14, crc);
+    const uint16_t sum = zxc_hash16(dst);
+    zxc_store_le16(dst + 14, sum);
 
     ZXC_MEMCPY(dst + ZXC_DICT_HEADER_SIZE, content, content_size);
     ZXC_MEMCPY(dst + ZXC_DICT_HEADER_SIZE + content_size, huf_lengths, ZXC_HUF_TABLE_SIZE);
@@ -132,8 +132,8 @@ int zxc_dict_load(const void* RESTRICT buf, const size_t buf_size,
     uint8_t temp[ZXC_DICT_HEADER_SIZE];
     ZXC_MEMCPY(temp, src, sizeof(temp));
     zxc_store_le32(temp + 12, 0); /* reserved (0x0C) + checksum (0x0E), zeroed before hashing */
-    const uint16_t expected_crc = zxc_hash16(temp);
-    if (UNLIKELY(zxc_le16(src + 14) != expected_crc)) return ZXC_ERROR_BAD_HEADER;
+    const uint16_t expected_sum = zxc_hash16(temp);
+    if (UNLIKELY(zxc_le16(src + 14) != expected_sum)) return ZXC_ERROR_BAD_HEADER;
 
     const uint8_t* content = src + ZXC_DICT_HEADER_SIZE;
     const uint8_t* huf = content + content_size;

@@ -23,7 +23,7 @@ CMAKE       ?= cmake
 CMAKE_EXTRA ?=
 JOBS        ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
-.PHONY: all test conformance format format-check lint doc clean
+.PHONY: all test conformance golden vectors format format-check lint doc clean
 
 # ── Build ────────────────────────────────────────────────────
 all:
@@ -37,13 +37,40 @@ test:
 	@cd $(BUILD) && ctest --output-on-failure -j$(JOBS)
 
 # ── Conformance ──────────────────────────────────────────────
-# Runs only the decoder conformance suite: the reference test
-# vectors under conformance/ (valid/ must decode byte-for-byte,
-# invalid/ must be rejected). Same test as `make test`, filtered.
+# Decoder behaviour: the published vectors under conformance/v<N>/
+# (valid/ must decode byte-for-byte, invalid/ must be rejected with
+# the declared error).
 conformance:
 	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Release -DZXC_BUILD_TESTS=ON $(CMAKE_EXTRA)
 	@$(CMAKE) --build $(BUILD) -j$(JOBS) --target zxc_conformance_test
 	@cd $(BUILD) && ctest --output-on-failure -R '^conformance$$'
+
+# ── Golden ───────────────────────────────────────────────────
+# Encoder output: every field of the frozen archives under
+# tests/format/golden/, their annotated dumps, and the recipes.
+golden:
+	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Release -DZXC_BUILD_TESTS=ON $(CMAKE_EXTRA)
+	@$(CMAKE) --build $(BUILD) -j$(JOBS) --target zxc_format_golden_test
+	@cd $(BUILD) && ctest --output-on-failure -R '^format_golden$$'
+
+# ── Vectors (maintainer) ─────────────────────────────────────
+# Rewrites committed test data. Only after a deliberate format or
+# encoder change; read the dump diff before committing.
+SHA256 := $(shell command -v sha256sum 2>/dev/null || echo "shasum -a 256")
+vectors:
+	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Release -DZXC_BUILD_TESTS=ON $(CMAKE_EXTRA)
+	@$(CMAKE) --build $(BUILD) -j$(JOBS) --target zxc_golden_gen zxc_valid_gen \
+	    zxc_invalid_gen zxc_format_golden_test
+	@./$(BUILD)/zxc_golden_gen tests/format/golden
+	@./$(BUILD)/zxc_valid_gen
+	@./$(BUILD)/zxc_invalid_gen
+	@$(SHA256) tests/format/golden/*.zxc | sort -k2 > tests/format/golden.sha256
+	@for d in conformance/v*/; do d=$${d%/}; \
+	    $(SHA256) $$d/valid/*.zxc $$d/valid/*.expected $$d/valid/*.zxd $$d/invalid/*.zxc \
+	      | sort -k2 > $$d/vectors.sha256; \
+	done
+	@./$(BUILD)/zxc_format_golden_test --dump tests/format/golden
+	@echo "Vectors regenerated. Review the .zxc.txt dump diff before committing."
 
 # ── Formatting ───────────────────────────────────────────────
 format:
@@ -55,11 +82,12 @@ format-check:
 	@$(CMAKE) --build $(BUILD) --target format-check
 
 # ── Lint (mirrors .github/workflows/quality.yml) ─────────────
-# Scans .c and .h files under src/, include/, tests/ for non-ASCII bytes.
-# Uses Perl for portability.
+# Scans every .c/.h in the repository, as quality.yml does.
 lint:
 	@echo "Scanning for non-ASCII characters in .c and .h files..."
-	@files=$$(find src include tests -type f \( -name '*.c' -o -name '*.h' \) 2>/dev/null); \
+	@files=$$(find . -type f \( -name '*.c' -o -name '*.h' \) \
+	    -not -path './$(BUILD)/*' -not -path './.git/*' -not -path '*/node_modules/*' \
+	    -not -path '*/target/*' -not -path '*/.venv/*' 2>/dev/null); \
 	if [ -z "$$files" ]; then echo "No source files found."; exit 0; fi; \
 	LC_ALL=C perl -ne \
 	  'if (/[^[:ascii:]]/) { print "$$ARGV:$$.:$$_"; $$bad=1 } \

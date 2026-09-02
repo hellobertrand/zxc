@@ -513,8 +513,8 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
 
     // Bytes 14-15: checksum (16-bit)
     zxc_store_le16(dst + 14, 0);  // Zero out before hashing
-    const uint16_t crc = zxc_hash16(dst);
-    zxc_store_le16(dst + 14, crc);
+    const uint16_t sum = zxc_hash16(dst);
+    zxc_store_le16(dst + 14, sum);
 
     return ZXC_FILE_HEADER_SIZE;
 }
@@ -590,7 +590,7 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
     bh->block_flags = 0;  // Flags not used currently
     bh->reserved = src[2];
     bh->comp_size = zxc_le32(src + 3);
-    bh->header_crc = src[7];
+    bh->header_checksum = src[7];
 
     return ZXC_OK;
 }

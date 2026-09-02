@@ -687,7 +687,7 @@ int test_header_checksum() {
     zxc_block_header_t bh_in = {.block_type = ZXC_BLOCK_GLO,
                                 .block_flags = 0,
                                 .reserved = 0,
-                                .header_crc = 0,
+                                .header_checksum = 0,
                                 .comp_size = 1024};
 
     // 1. Write Header
@@ -711,19 +711,19 @@ int test_header_checksum() {
     }
 
     if (bh_out.block_type != bh_in.block_type || bh_out.comp_size != bh_in.comp_size ||
-        bh_out.header_crc != header_buf[7]) {
+        bh_out.header_checksum != header_buf[7]) {
         printf("  [FAIL] Read data mismatch\n");
         return 0;
     }
 
     // 3. Corrupt Header Checksum
-    uint8_t original_crc = header_buf[7];
-    header_buf[7] = ~original_crc;  // Flip bits
+    uint8_t original_checksum = header_buf[7];
+    header_buf[7] = ~original_checksum;  // Flip bits
     if (zxc_read_block_header(header_buf, ZXC_BLOCK_HEADER_SIZE, &bh_out) == 0) {
         printf("  [FAIL] zxc_read_block_header should have failed on corrupted checksum\n");
         return 0;
     }
-    header_buf[7] = original_crc;  // Restore
+    header_buf[7] = original_checksum;  // Restore
 
     // 4. Corrupt Header Content
     header_buf[0] = ZXC_BLOCK_RAW;  // Change type
@@ -859,9 +859,9 @@ static int chunk_code_verdict(uint8_t code, size_t* bs) {
     hdr[4] = ZXC_FILE_FORMAT_VERSION;  // version
     hdr[5] = code;                     // chunk-size code
     hdr[6] = 0;                        // flags: no checksum
-    uint16_t crc = zxc_hash16(hdr);    // bytes 14-15 already 0
-    hdr[14] = (uint8_t)(crc & 0xFF);
-    hdr[15] = (uint8_t)(crc >> 8);
+    uint16_t sum = zxc_hash16(hdr);    // bytes 14-15 already 0
+    hdr[14] = (uint8_t)(sum & 0xFF);
+    hdr[15] = (uint8_t)(sum >> 8);
     int has_checksum = -1;
     *bs = 0;
     return zxc_read_file_header(hdr, sizeof(hdr), bs, &has_checksum, NULL);

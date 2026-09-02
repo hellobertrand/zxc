@@ -104,7 +104,9 @@ if(ZXC_BUILD_TESTS)
     # --- Conformance suite ---------------------------------------------------
     add_executable(zxc_conformance_test conformance/test_conformance.c)
     target_link_libraries(zxc_conformance_test PRIVATE zxc_lib)
-    target_include_directories(zxc_conformance_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    target_include_directories(zxc_conformance_test PRIVATE ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src/lib
+        ${RAPIDHASH_INCLUDE_DIR})
     target_compile_definitions(zxc_conformance_test PRIVATE
         $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>)
     if(ZXC_ENABLE_COVERAGE)
@@ -147,8 +149,20 @@ if(ZXC_BUILD_TESTS)
         target_link_options(zxc_golden_gen PRIVATE --coverage)
     endif()
 
-    # Maintainer-only tool that rebuilds conformance/invalid/*.zxc at the current
-    # format version, like zxc_format_golden_test above.
+    # Maintainer-only tool that rebuilds the current version's valid vectors.
+    add_executable(zxc_valid_gen conformance/gen_valid.c)
+    target_link_libraries(zxc_valid_gen PRIVATE zxc_lib)
+    target_include_directories(zxc_valid_gen PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src/lib
+        ${RAPIDHASH_INCLUDE_DIR})
+    target_compile_definitions(zxc_valid_gen PRIVATE
+        $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>)
+    if(ZXC_ENABLE_COVERAGE)
+        target_link_options(zxc_valid_gen PRIVATE --coverage)
+    endif()
+
+    # Maintainer-only tool that rebuilds the current version's invalid vectors.
     add_executable(zxc_invalid_gen conformance/gen_invalid.c)
     target_link_libraries(zxc_invalid_gen PRIVATE zxc_lib)
     target_include_directories(zxc_invalid_gen PRIVATE

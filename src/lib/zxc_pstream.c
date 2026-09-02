@@ -351,7 +351,7 @@ static int cs_stage_eof(zxc_cstream* cs) {
         .block_type = (uint8_t)ZXC_BLOCK_EOF,
         .block_flags = 0,
         .reserved = 0,
-        .header_crc = 0,
+        .header_checksum = 0,
         .comp_size = 0,
     };
     const int w = zxc_write_block_header(cs->pending, cs->pending_cap, &eof);

@@ -55,10 +55,17 @@ Builds `libzxc.so` with debug info, generates an ABI XML via [`abidw`](https://s
 
 The dump is taken with `--headers-dir include --drop-private-types`, so it records only what a consumer can reach. `src/lib`-only types never enter the baseline, and renaming or reshaping them is not an ABI event. The exported symbol set is already public-only by construction (`-fvisibility=hidden` plus `ZXC_EXPORT`); the flags keep the *documented* surface in step with the *binary* one.
 
-### golden.yml - Golden Format Stability
+### vector-stability.yml - Test Vector Stability
 **Triggers:** Push to main, pull requests, manual dispatch
 
-Freezes the ZXC on-disk wire format. Runs `sha256sum -c` against the committed manifest [`tests/format/golden.sha256`](../../tests/format/golden.sha256), so the job fails if a single byte of any golden conformance file under [`tests/format/golden/`](../../tests/format/golden/) changes. Also verifies the golden file set and the manifest stay in sync (no file added or removed without updating the manifest). Any intentional format change requires regenerating the corpus with `zxc_golden_gen` and refreshing the manifest in the same commit (see [`tests/format/README.md`](../../tests/format/README.md)). The field-level structural validation runs separately as the `format_golden` ctest in `build.yml`.
+Two jobs, one per committed corpus, kept separate so a red check names which
+contract broke.
+
+**Golden files** runs `sha256sum -c` against [`tests/format/golden.sha256`](../../tests/format/golden.sha256), so a single changed byte under [`tests/format/golden/`](../../tests/format/golden/) fails it, and checks that the file set, the manifest and the annotated `.zxc.txt` dumps stay in sync. A failure means the *encoder's output* changed — not necessarily the format: an encoder improvement moves these bytes while still emitting a valid archive of the same version. Regenerate with `zxc_golden_gen`, refresh the manifest and the dumps in the same commit (see [`tests/format/README.md`](../../tests/format/README.md)).
+
+**Conformance vectors** loops over every frozen corpus in `conformance/v<N>/` and does the same against its `vectors.sha256`, which covers the archives, the `.expected` plaintexts and the `.zxd` dictionaries. These are what third-party decoders validate against, so a failure here is the grave one (see [`conformance/README.md`](../../conformance/README.md)).
+
+The field-level structural validation runs separately, as the `format_golden` and `conformance` ctests in `build.yml`.
 
 ### scorecard.yml - OSSF Scorecard
 **Triggers:** Push to main, scheduled (weekly), manual dispatch

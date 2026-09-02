@@ -122,7 +122,7 @@ pub const ZXC_ERROR_BAD_MAGIC: i32 = -4;
 /// Unsupported file format version
 pub const ZXC_ERROR_BAD_VERSION: i32 = -5;
 
-/// Corrupted or invalid header (CRC mismatch)
+/// Corrupted or invalid header (checksum mismatch)
 pub const ZXC_ERROR_BAD_HEADER: i32 = -6;
 
 /// Block or global checksum verification failed

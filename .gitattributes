@@ -1,0 +1,11 @@
+# Corpora: opaque bytes. Marking them binary also stops git from trying to diff
+# them as text, which it would only ever do misleadingly.
+*.zxc      binary
+*.expected binary
+*.zxd      binary
+
+# Annotated golden dumps: LF everywhere.
+*.zxc.txt  text eol=lf
+
+# Manifests: consumed by `sha256sum -c`.
+*.sha256   text eol=lf

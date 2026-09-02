@@ -1650,16 +1650,16 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
 
     const uint8_t type = src[0];
     const uint32_t comp_sz = zxc_le32(src + 3);
-    const int has_crc = ctx->checksum_enabled;
+    const int has_checksum = ctx->checksum_enabled;
 
     // Check bounds: Header + Body + Checksum(if any)
     const size_t expected_sz =
-        (size_t)ZXC_BLOCK_HEADER_SIZE + comp_sz + (has_crc ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+        (size_t)ZXC_BLOCK_HEADER_SIZE + comp_sz + (has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
     if (UNLIKELY(src_sz < expected_sz)) return ZXC_ERROR_SRC_TOO_SMALL;
 
     const uint8_t* data = src + ZXC_BLOCK_HEADER_SIZE;
 
-    if (has_crc) {
+    if (has_checksum) {
         const uint32_t stored = zxc_le32(data + comp_sz);
         const uint32_t calc = zxc_checksum(data, comp_sz, ZXC_CHECKSUM_RAPIDHASH);
         if (UNLIKELY(stored != calc)) return ZXC_ERROR_BAD_CHECKSUM;
