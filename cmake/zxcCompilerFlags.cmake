@@ -79,9 +79,18 @@ macro(zxc_apply_pgo target)
     endif()
 endmacro()
 
-# Warnings and PGO, for every zxc target. Defined once because each target used
-# to repeat its own list, and the variant objects ended up with no warnings at
-# all. Warning level is top-level only: an embedder sets its own.
+set(ZXC_NO_OUTLINE_FLAG "")
+if(ZXC_TARGET_AARCH64 AND CMAKE_C_COMPILER_ID MATCHES "Clang")
+    include(CheckCCompilerFlag)
+    check_c_compiler_flag(-mno-outline ZXC_HAS_MNO_OUTLINE)
+    if(ZXC_HAS_MNO_OUTLINE)
+        set(ZXC_NO_OUTLINE_FLAG -mno-outline)
+    endif()
+endif()
+
+# Warnings, outliner and PGO, for every zxc target. Defined once because each
+# target used to repeat its own list, and the variant objects ended up with no
+# warnings at all. Warning level is top-level only: an embedder sets its own.
 macro(zxc_apply_common_flags target)
     if(MSVC)
         # /wd4244: block-bounded uint64->size_t narrowing, lossless.
@@ -92,5 +101,6 @@ macro(zxc_apply_common_flags target)
     elseif(PROJECT_IS_TOP_LEVEL)
         target_compile_options(${target} PRIVATE -Wall -Wextra)
     endif()
+    target_compile_options(${target} PRIVATE ${ZXC_NO_OUTLINE_FLAG})
     zxc_apply_pgo(${target})
 endmacro()

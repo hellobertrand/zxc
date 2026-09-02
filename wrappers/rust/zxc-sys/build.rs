@@ -131,6 +131,14 @@ fn apply_feature_macros(build: &mut cc::Build) {
     }
 }
 
+/// Mirroring `cmake/zxcCompilerFlags.cmake`
+fn apply_codegen_flags(build: &mut cc::Build) {
+    let target = env::var("TARGET").unwrap_or_default();
+    if target.contains("aarch64") && !target.contains("msvc") {
+        build.flag_if_supported("-mno-outline");
+    }
+}
+
 /// Compiles one FMV variant of the three per-ISA translation units
 /// (zxc_compress.c, zxc_decompress.c, zxc_huffman.c) with the given function
 /// suffix and ISA flags.
@@ -147,6 +155,7 @@ fn compile_variant(include_dir: &Path, src_lib: &Path, suffix: &str, flags: &[&s
             .opt_level(3)
             .warnings(false);
         apply_feature_macros(&mut build);
+        apply_codegen_flags(&mut build);
         for flag in flags {
             build.flag_if_supported(flag);
         }
@@ -241,6 +250,7 @@ fn main() {
         .warnings(false)
         .flag_if_supported("-pthread");
     apply_feature_macros(&mut core_build);
+    apply_codegen_flags(&mut core_build);
 
     core_build.compile("zxc_core");
 

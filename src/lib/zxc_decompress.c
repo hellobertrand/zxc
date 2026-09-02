@@ -55,13 +55,13 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
     const uint32_t b0 = p[0];
 
     // 1 Byte: 0xxxxxxx (7 bits) -> val < 128 (2^7)
-    if (LIKELY(b0 < 0x80)) {
+    if (LIKELY(!(b0 & 0x80))) {
         *ptr = p + 1;
         return b0;
     }
 
     // 2 Bytes: 10xxxxxx xxxxxxxx (14 bits) -> val < 16384 (2^14)
-    if (LIKELY(b0 < 0xC0)) {
+    if (LIKELY(!(b0 & 0x40))) {
         if (UNLIKELY(p + 1 >= end)) {
             *ptr = end;
             return 0;
@@ -73,7 +73,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
     // 3 Bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2^21. The longest
     // a legitimate varint can be: values are (ll - MASK) or (ml - MASK), always
     // strictly below block_size_max = 2^21.
-    if (LIKELY(b0 < 0xE0)) {
+    if (LIKELY(!(b0 & 0x20))) {
         if (UNLIKELY(p + 2 >= end)) {
             *ptr = end;
             return 0;
@@ -87,90 +87,115 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
     return 0;
 }
 
-#if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(ZXC_USE_AVX2) || \
-    defined(ZXC_USE_AVX512)
 /**
- * @brief Periodic pattern masks, `mask[off][i] = i % off`, for off in [2, 31].
- *
- * Rows 0 and 1 stay zero and unused: offset 1 is a byte splat, not a pattern.
+ * @brief Per-offset overlap row, one cache line each, for off in [2, 31]:
+ *        the 32-byte periodic pattern mask (`mask[i] = i % off`) and the
+ *        store stride `(32 / off) * off`.
  */
-static const ZXC_ALIGN(32) uint8_t zxc_overlap_masks32[32][32] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // off=0 (unused)
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // off=1 (RLE handled separately)
-    {0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
-     0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1},  // off=2
-    {0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0,
-     1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1},  // off=3
-    {0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3,
-     0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3},  // off=4
-    {0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0,
-     1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1},  // off=5
-    {0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3,
-     4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1},  // off=6
-    {0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 0, 1,
-     2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3},  // off=7
-    {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7,
-     0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},  // off=8
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1, 2, 3, 4, 5, 6,
-     7, 8, 0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1, 2, 3, 4},  // off=9
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5,
-     6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1},  // off=10
-    {0, 1, 2, 3, 4, 5,  6, 7, 8, 9, 10, 0, 1, 2, 3, 4,
-     5, 6, 7, 8, 9, 10, 0, 1, 2, 3, 4,  5, 6, 7, 8, 9},  // off=11
-    {0, 1, 2, 3, 4, 5, 6,  7,  8, 9, 10, 11, 0, 1, 2, 3,
-     4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2,  3,  4, 5, 6, 7},  // off=12
-    {0, 1, 2, 3, 4, 5, 6, 7,  8,  9,  10, 11, 12, 0, 1, 2,
-     3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0,  1,  2,  3, 4, 5},  // off=13
-    {0, 1, 2, 3, 4, 5, 6, 7, 8,  9,  10, 11, 12, 13, 0, 1,
-     2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0,  1,  2, 3},  // off=14
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9,  10, 11, 12, 13, 14, 0,
-     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 0,  1},  // off=15
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},  // off=16
-    {0,  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-     16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,  10, 11, 12, 13, 14},  // off=17
-    {0,  1,  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-     16, 17, 0, 1, 2, 3, 4, 5, 6, 7, 8,  9,  10, 11, 12, 13},  // off=18
-    {0,  1,  2,  3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-     16, 17, 18, 0, 1, 2, 3, 4, 5, 6, 7,  8,  9,  10, 11, 12},  // off=19
-    {0,  1,  2,  3,  4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 0, 1, 2, 3, 4, 5, 6,  7,  8,  9,  10, 11},  // off=20
-    {0,  1,  2,  3,  4,  5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 20, 0, 1, 2, 3, 4, 5,  6,  7,  8,  9,  10},  // off=21
-    {0,  1,  2,  3,  4,  5,  6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 20, 21, 0, 1, 2, 3, 4,  5,  6,  7,  8,  9},  // off=22
-    {0,  1,  2,  3,  4,  5,  6,  7, 8, 9, 10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 20, 21, 22, 0, 1, 2, 3,  4,  5,  6,  7,  8},  // off=23
-    {0,  1,  2,  3,  4,  5,  6,  7,  8, 9, 10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2,  3,  4,  5,  6,  7},  // off=24
-    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 20, 21, 22, 23, 24, 0, 1,  2,  3,  4,  5,  6},  // off=25
-    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 0,  1,  2,  3,  4,  5},  // off=26
-    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 0,  1,  2,  3,  4},  // off=27
-    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 0,  1,  2,  3},  // off=28
-    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 0,  1,  2},  // off=29
-    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 0,  1},  // off=30
-    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 0}  // off=31
-};
-#endif
+typedef struct {
+    uint8_t mask[32];
+    uint8_t stride;
+    uint8_t pad[31];
+} zxc_overlap_row_t;
 
-/**
- * @brief Store stride for the 32-byte pattern: `(32 / off) * off`.
- *
- * Past 16 no second period fits, so the stride is the offset itself and each
- * store's tail gets rewritten by the next one.
- */
-static const uint8_t zxc_overlap_strides32[32] = {32, 32, 32, 30, 32, 30, 30, 28, 32, 27, 30,
-                                                  22, 24, 26, 28, 30, 32, 17, 18, 19, 20, 21,
-                                                  22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
+static const ZXC_ALIGN(64) zxc_overlap_row_t zxc_overlap_rows[32] = {
+    {.mask = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+     .stride = 32},  // off=0 (unused)
+    {.mask = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+     .stride = 32},  // off=1 (unused)
+    {.mask = {0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
+              0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1},
+     .stride = 32},  // off=2
+    {.mask = {0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0,
+              1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1},
+     .stride = 30},  // off=3
+    {.mask = {0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3,
+              0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3},
+     .stride = 32},  // off=4
+    {.mask = {0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0,
+              1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1},
+     .stride = 30},  // off=5
+    {.mask = {0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3,
+              4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1},
+     .stride = 30},  // off=6
+    {.mask = {0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 0, 1,
+              2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3},
+     .stride = 28},  // off=7
+    {.mask = {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7,
+              0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+     .stride = 32},  // off=8
+    {.mask = {0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1, 2, 3, 4, 5, 6,
+              7, 8, 0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1, 2, 3, 4},
+     .stride = 27},  // off=9
+    {.mask = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5,
+              6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1},
+     .stride = 30},  // off=10
+    {.mask = {0, 1, 2, 3, 4, 5,  6, 7, 8, 9, 10, 0, 1, 2, 3, 4,
+              5, 6, 7, 8, 9, 10, 0, 1, 2, 3, 4,  5, 6, 7, 8, 9},
+     .stride = 22},  // off=11
+    {.mask = {0, 1, 2, 3, 4, 5, 6,  7,  8, 9, 10, 11, 0, 1, 2, 3,
+              4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2,  3,  4, 5, 6, 7},
+     .stride = 24},  // off=12
+    {.mask = {0, 1, 2, 3, 4, 5, 6, 7,  8,  9,  10, 11, 12, 0, 1, 2,
+              3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0,  1,  2,  3, 4, 5},
+     .stride = 26},  // off=13
+    {.mask = {0, 1, 2, 3, 4, 5, 6, 7, 8,  9,  10, 11, 12, 13, 0, 1,
+              2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0,  1,  2, 3},
+     .stride = 28},  // off=14
+    {.mask = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9,  10, 11, 12, 13, 14, 0,
+              1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 0,  1},
+     .stride = 30},  // off=15
+    {.mask = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+              0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+     .stride = 32},  // off=16
+    {.mask = {0,  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+              16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,  10, 11, 12, 13, 14},
+     .stride = 17},  // off=17
+    {.mask = {0,  1,  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+              16, 17, 0, 1, 2, 3, 4, 5, 6, 7, 8,  9,  10, 11, 12, 13},
+     .stride = 18},  // off=18
+    {.mask = {0,  1,  2,  3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+              16, 17, 18, 0, 1, 2, 3, 4, 5, 6, 7,  8,  9,  10, 11, 12},
+     .stride = 19},  // off=19
+    {.mask = {0,  1,  2,  3,  4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+              16, 17, 18, 19, 0, 1, 2, 3, 4, 5, 6,  7,  8,  9,  10, 11},
+     .stride = 20},  // off=20
+    {.mask = {0,  1,  2,  3,  4,  5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+              16, 17, 18, 19, 20, 0, 1, 2, 3, 4, 5,  6,  7,  8,  9,  10},
+     .stride = 21},  // off=21
+    {.mask = {0,  1,  2,  3,  4,  5,  6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+              16, 17, 18, 19, 20, 21, 0, 1, 2, 3, 4,  5,  6,  7,  8,  9},
+     .stride = 22},  // off=22
+    {.mask = {0,  1,  2,  3,  4,  5,  6,  7, 8, 9, 10, 11, 12, 13, 14, 15,
+              16, 17, 18, 19, 20, 21, 22, 0, 1, 2, 3,  4,  5,  6,  7,  8},
+     .stride = 23},  // off=23
+    {.mask = {0,  1,  2,  3,  4,  5,  6,  7,  8, 9, 10, 11, 12, 13, 14, 15,
+              16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2,  3,  4,  5,  6,  7},
+     .stride = 24},  // off=24
+    {.mask = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
+              16, 17, 18, 19, 20, 21, 22, 23, 24, 0, 1,  2,  3,  4,  5,  6},
+     .stride = 25},  // off=25
+    {.mask = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+              16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 0,  1,  2,  3,  4,  5},
+     .stride = 26},  // off=26
+    {.mask = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+              16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 0,  1,  2,  3,  4},
+     .stride = 27},  // off=27
+    {.mask = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+              16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 0,  1,  2,  3},
+     .stride = 28},  // off=28
+    {.mask = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+              16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 0,  1,  2},
+     .stride = 29},  // off=29
+    {.mask = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+              16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 0,  1},
+     .stride = 30},  // off=30
+    {.mask = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+              16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 0},
+     .stride = 31},  // off=31
+};
 
 /**
  * @brief Copies an @p ml-byte run of period @p off (2..31) with 32-byte stores.
@@ -196,14 +221,15 @@ static const uint8_t zxc_overlap_strides32[32] = {32, 32, 32, 30, 32, 30, 30, 28
 // codeql[cpp/unused-static-function] : False positive
 static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run32(uint8_t* dst, const uint32_t off,
                                                             const uint64_t ml) {
-    const size_t stride = zxc_overlap_strides32[off];
+    const zxc_overlap_row_t* const row = &zxc_overlap_rows[off];
+    const size_t stride = row->stride;
     size_t copied = 0;
 #if defined(ZXC_USE_NEON64)
     uint8x16x2_t tbl;
     tbl.val[0] = vld1q_u8(dst - off);
     tbl.val[1] = vld1q_u8(dst - off + 16);
-    const uint8x16_t pat_lo = vqtbl2q_u8(tbl, vld1q_u8(zxc_overlap_masks32[off]));
-    const uint8x16_t pat_hi = vqtbl2q_u8(tbl, vld1q_u8(zxc_overlap_masks32[off] + 16));
+    const uint8x16_t pat_lo = vqtbl2q_u8(tbl, vld1q_u8(row->mask));
+    const uint8x16_t pat_hi = vqtbl2q_u8(tbl, vld1q_u8(row->mask + 16));
     do {
         vst1q_u8(dst + copied, pat_lo);
         vst1q_u8(dst + copied + 16, pat_hi);
@@ -218,7 +244,7 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run32(uint8_t* dst, const 
     tbl.val[1] = vld1_u8(dst - off + 8);
     tbl.val[2] = vld1_u8(dst - off + 16);
     tbl.val[3] = vld1_u8(dst - off + 24);
-    const uint8_t* const m = zxc_overlap_masks32[off];
+    const uint8_t* const m = row->mask;
     const uint8x8_t p0 = vtbl4_u8(tbl, vld1_u8(m));
     const uint8x8_t p1 = vtbl4_u8(tbl, vld1_u8(m + 8));
     const uint8x8_t p2 = vtbl4_u8(tbl, vld1_u8(m + 16));
@@ -237,8 +263,8 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run32(uint8_t* dst, const 
     const __m128i t0 = _mm_loadu_si128((const __m128i*)(dst - off));
     const __m128i t1 = _mm_loadu_si128((const __m128i*)(dst - off + 16));
     const __m128i sixteen = _mm_set1_epi8(16);
-    const __m128i m_lo = _mm_load_si128((const __m128i*)zxc_overlap_masks32[off]);
-    const __m128i m_hi = _mm_load_si128((const __m128i*)(zxc_overlap_masks32[off] + 16));
+    const __m128i m_lo = _mm_load_si128((const __m128i*)row->mask);
+    const __m128i m_hi = _mm_load_si128((const __m128i*)(row->mask + 16));
     const __m128i pat_lo =
         _mm_blendv_epi8(_mm_shuffle_epi8(t0, m_lo),
                         _mm_shuffle_epi8(t1, _mm_sub_epi8(m_lo, sixteen)), _mm_slli_epi16(m_lo, 3));
@@ -293,19 +319,19 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_short(uint8_t* dst, const 
                                                             const uint64_t ml) {
 #if defined(ZXC_USE_NEON64)
     const uint8x16_t s0 = vld1q_u8(dst - off);
-    vst1q_u8(dst, vqtbl1q_u8(s0, vld1q_u8(zxc_overlap_masks32[off])));
+    vst1q_u8(dst, vqtbl1q_u8(s0, vld1q_u8(zxc_overlap_rows[off].mask)));
     if (UNLIKELY(ml > 16)) {
         uint8x16x2_t tbl;
         tbl.val[0] = s0;
         tbl.val[1] = vld1q_u8(dst - off + 16);
-        vst1q_u8(dst + 16, vqtbl2q_u8(tbl, vld1q_u8(zxc_overlap_masks32[off] + 16)));
+        vst1q_u8(dst + 16, vqtbl2q_u8(tbl, vld1q_u8(zxc_overlap_rows[off].mask + 16)));
     }
 
 #elif defined(ZXC_USE_NEON32)
     uint8x8x2_t lo_tbl;
     lo_tbl.val[0] = vld1_u8(dst - off);
     lo_tbl.val[1] = vld1_u8(dst - off + 8);
-    const uint8_t* const m = zxc_overlap_masks32[off];
+    const uint8_t* const m = zxc_overlap_rows[off].mask;
     vst1_u8(dst, vtbl2_u8(lo_tbl, vld1_u8(m)));
     vst1_u8(dst + 8, vtbl2_u8(lo_tbl, vld1_u8(m + 8)));
     if (UNLIKELY(ml > 16)) {
@@ -324,10 +350,10 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_short(uint8_t* dst, const 
     const __m128i t0 = _mm_loadu_si128((const __m128i*)(dst - off));
     _mm_storeu_si128(
         (__m128i*)dst,
-        _mm_shuffle_epi8(t0, _mm_load_si128((const __m128i*)zxc_overlap_masks32[off])));
+        _mm_shuffle_epi8(t0, _mm_load_si128((const __m128i*)zxc_overlap_rows[off].mask)));
     if (UNLIKELY(ml > 16)) {
         const __m128i t1 = _mm_loadu_si128((const __m128i*)(dst - off + 16));
-        const __m128i m_hi = _mm_load_si128((const __m128i*)(zxc_overlap_masks32[off] + 16));
+        const __m128i m_hi = _mm_load_si128((const __m128i*)(zxc_overlap_rows[off].mask + 16));
         _mm_storeu_si128(
             (__m128i*)(dst + 16),
             _mm_blendv_epi8(_mm_shuffle_epi8(t0, m_hi),

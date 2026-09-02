@@ -23,6 +23,12 @@ is_cl = cc.get_id() == 'msvc'
 # CMake build's per-target /wd4244.
 msvc_narrowing_args = msvc_syntax ? ['/wd4244'] : []
 
+# Mirrors cmake/zxcCompilerFlags.cmake
+outline_args = []
+if host_cpu == 'aarch64' and cc.get_id() == 'clang'
+  outline_args = cc.get_supported_arguments('-mno-outline')
+endif
+
 # Keep in sync with ZXC_SOVERSION in CMakeLists.txt (bumps only on an ABI break).
 zxc_soversion = '4'
 
@@ -114,7 +120,7 @@ foreach info : variant_sets
     obj = static_library(
       'zxc' + info[0] + '_' + src.underscorify(),
       src,
-      c_args : info[1] + msvc_narrowing_args + ['-DZXC_FUNCTION_SUFFIX=' + info[0]] + lib_export_args,
+      c_args : info[1] + msvc_narrowing_args + outline_args + ['-DZXC_FUNCTION_SUFFIX=' + info[0]] + lib_export_args,
       include_directories : libzxc_includes,
       pic : true,
     )
@@ -141,7 +147,7 @@ thread_dep = dependency('threads')
 libzxc = library('zxc',
   libzxc_sources,
   objects : variant_objects,
-  c_args : lib_export_args + msvc_narrowing_args,
+  c_args : lib_export_args + msvc_narrowing_args + outline_args,
   gnu_symbol_visibility : 'hidden',
   include_directories : libzxc_includes,
   dependencies : [thread_dep],
@@ -165,7 +171,7 @@ else
   libzxc_static = static_library('zxc_static',
     libzxc_sources,
     objects : variant_objects,
-    c_args : ['-DZXC_STATIC_DEFINE'] + msvc_narrowing_args,
+    c_args : ['-DZXC_STATIC_DEFINE'] + msvc_narrowing_args + outline_args,
     include_directories : libzxc_includes,
     dependencies : [thread_dep],
     build_by_default : false,
