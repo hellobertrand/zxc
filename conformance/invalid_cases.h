@@ -197,7 +197,12 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         src = b->seek;
     }
 
-    uint8_t* d = (uint8_t*)malloc(n ? n : 1);
+    if (n < ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE) {
+        fprintf(stderr, "  base archive for '%s' is only %zu bytes\n", name, n);
+        return 0;
+    }
+
+    uint8_t* d = (uint8_t*)malloc(n);
     if (!d) return 0;
     memcpy(d, src, n);
     size_t len = n;

@@ -226,7 +226,7 @@ static int test_valid_vector(const char *zxc_path, const char *expected_path)
 typedef struct {
     const char *name;  /* file stem, without the .zxc */
     int expected;      /* zxc_error_t the decoder must return */
-    const char *dict;  /* .zxd to offer, relative to the corpus root, or NULL */
+    const char *dict;  /* .zxd to offer, a basename in valid/, or NULL */
     int via_seekable;  /* defect only visible to the seekable reader: open must refuse */
 } invalid_expect_t;
 
@@ -264,7 +264,7 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"varint_too_long", ZXC_ERROR_CORRUPT_DATA},
     /* Needs a dictionary in hand to reach the binding check: with none, the
      * decoder stops earlier at DICT_REQUIRED, which is dict_required's job. */
-    {"dict_id_mismatch", ZXC_ERROR_DICT_MISMATCH, "valid/dict_http.zxd", 0},
+    {"dict_id_mismatch", ZXC_ERROR_DICT_MISMATCH, "dict_http.zxd", 0},
 };
 #define INVALID_EXPECT_COUNT (sizeof INVALID_EXPECT / sizeof INVALID_EXPECT[0])
 
@@ -290,7 +290,7 @@ static const invalid_expect_t *expect_for(const char *zxc_path)
     return NULL;
 }
 
-static int test_invalid_vector(const char *zxc_path, const char *base_dir)
+static int test_invalid_vector(const char *zxc_path, const char *valid_dir)
 {
     size_t comp_sz = 0;
     uint8_t *comp = read_file(zxc_path, &comp_sz);
@@ -339,7 +339,7 @@ static int test_invalid_vector(const char *zxc_path, const char *base_dir)
         uint8_t *dict_buf = NULL;
         if (exp->dict) {
             char dpath[2048];
-            snprintf(dpath, sizeof dpath, "%s/%s", base_dir, exp->dict);
+            snprintf(dpath, sizeof dpath, "%s/%s", valid_dir, exp->dict);
             size_t dsz = 0;
             dict_buf = read_file(dpath, &dsz);
             if (!dict_buf ||
@@ -563,10 +563,11 @@ int main(int argc, char **argv)
     const char *root = "conformance";
     if (argc > 1) root = argv[1];
 
-    char base[1024], valid_dir[1280], invalid_dir[1280];
-    snprintf(base, sizeof base, "%s/v%u", root, (unsigned)ZXC_FILE_FORMAT_VERSION);
-    snprintf(valid_dir, sizeof valid_dir, "%s/valid", base);
-    snprintf(invalid_dir, sizeof invalid_dir, "%s/invalid", base);
+    char valid_dir[512], invalid_dir[512];
+    snprintf(valid_dir, sizeof valid_dir, "%s/v%u/valid", root,
+             (unsigned)ZXC_FILE_FORMAT_VERSION);
+    snprintf(invalid_dir, sizeof invalid_dir, "%s/v%u/invalid", root,
+             (unsigned)ZXC_FILE_FORMAT_VERSION);
 
     int passed = 0, failed = 0, total = 0;
 
@@ -580,10 +581,10 @@ int main(int argc, char **argv)
         }
 
         for (size_t i = 0; i < zxc_files.count; i++) {
-            char zxc_path[2048], exp_path[2048];
+            char zxc_path[1024], exp_path[1024];
             snprintf(zxc_path, sizeof zxc_path, "%s/%s", valid_dir, zxc_files.names[i]);
 
-            char stem[1024];
+            char stem[256];
             snprintf(stem, sizeof stem, "%s", zxc_files.names[i]);
             stem[strlen(stem) - 4] = '\0';
 
@@ -619,12 +620,12 @@ int main(int argc, char **argv)
             char zxc_path[1024];
             snprintf(zxc_path, sizeof zxc_path, "%s/%s", invalid_dir, zxc_files.names[i]);
 
-            char stem[1024];
+            char stem[256];
             snprintf(stem, sizeof stem, "%s", zxc_files.names[i]);
             stem[strlen(stem) - 4] = '\0';
 
             total++;
-            if (test_invalid_vector(zxc_path, base)) {
+            if (test_invalid_vector(zxc_path, valid_dir)) {
                 printf("  PASS: %s  (correctly rejected)\n", stem);
                 passed++;
             } else {

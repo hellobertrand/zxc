@@ -10,7 +10,7 @@ v8/                 Corpus for format version 8 (FORMAT_VERSION declares it)
   invalid/          *.zxc archives that must be rejected
   vectors.sha256    Byte-stability manifest
 valid_cases.h       Recipe for each valid vector; gen_valid.c rebuilds them
-invalid_cases.h     Recipe for the 16 generated invalid ones; gen_invalid.c likewise
+invalid_cases.h     Recipe for the 22 generated invalid ones; gen_invalid.c likewise
 ```
 
 Vectors are frozen **per format version**. ZXC has no forward compatibility — a
