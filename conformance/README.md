@@ -13,9 +13,7 @@ valid_cases.h       Recipe for each valid vector; gen_valid.c rebuilds them
 invalid_cases.h     Recipe for the 22 generated invalid ones; gen_invalid.c likewise
 ```
 
-Vectors are frozen **per format version**. ZXC has no forward compatibility — a
-decoder accepts only the version it implements (`FORMAT.md` §12) — so use the
-`v<N>/` matching yours. Older directories are kept, never regenerated.
+Vectors are frozen **per format version**. Older directories are kept, never regenerated.
 
 ## Validating a decoder
 
@@ -34,16 +32,21 @@ if you do not implement the feature:
   with no dictionary a decoder stops earlier, which is `dict_required`'s case.
 
 ```sh
+cd conformance/v8            # from the repository root, or wherever you
+                             # unpacked the corpus; pick the version you decode
+[ -d valid ] || { echo "no corpus here"; exit 1; }
+
+out=$(mktemp); trap 'rm -f "$out"' EXIT
 pass=0; fail=0
-for f in v8/valid/*.zxc; do
+for f in valid/*.zxc; do
     # dict_* need their .zxd passed; drop this line once yours can.
     case "$f" in *dict_*) continue;; esac
-    expected="${f%.zxc}.expected"
-    your-decoder "$f" /tmp/out
-    if cmp -s /tmp/out "$expected"; then pass=$((pass + 1))
+    : > "$out"   # a stale output from the previous file would compare equal
+    if your-decoder "$f" "$out" && cmp -s "$out" "${f%.zxc}.expected"
+    then pass=$((pass + 1))
     else echo "FAIL: $f"; fail=$((fail + 1)); fi
 done
-for f in v8/invalid/*.zxc; do
+for f in invalid/*.zxc; do
     case "$f" in *sek_forged_entry*|*dict_id_mismatch*) continue;; esac
     if your-decoder "$f" /dev/null 2>/dev/null; then
         echo "FAIL (should reject): $f"; fail=$((fail + 1))
@@ -54,7 +57,7 @@ echo "Passed: $pass  Failed: $fail"
 
 ## Coverage
 
-14 valid vectors, one per decoder-visible trait — a decoder never sees the
+15 valid vectors, one per decoder-visible trait — a decoder never sees the
 compression level, only the block type and the encodings it selects:
 
 | Vector               | What it alone covers                                    |
@@ -66,6 +69,7 @@ compression level, only the block type and the encodings it selects:
 | `text_64k_level1`    | The GHI block type                                      |
 | `glo_rle_4k`         | RLE literals, `enc_lit=1`                               |
 | `glo_pivco_wide_l7`  | PivCo literals, `enc_lit=2`                             |
+| `glo_tok_huffman_l7` | Huffman-coded token section, `enc_tok=2`                |
 | `random_4k_checksum` | Checksums on their own, clear of the dictionary path    |
 | `multiblock_mixed`   | 16 data blocks; the 4 KB minimum chunk size             |
 | `text_64k_bs2m`      | The 2 MB maximum chunk size                             |
@@ -74,8 +78,11 @@ compression level, only the block type and the encodings it selects:
 | `dict_no_checksum`   | Same input and dictionary, checksums off                |
 | `dict_seekable_l7`   | Dictionary **with** one (`enc_lit=3`), plus seek + checksum |
 
-28 invalid vectors, one per row of the error table in `FORMAT.md` §12, each a
-well-formed archive with exactly one field corrupted (except the six
+All four literal encodings (`enc_lit` 0 to 3) and both token encodings
+(`enc_tok` 0 and 2) are exercised.
+
+28 invalid vectors, covering every row of the error table in `FORMAT.md` §11.1,
+each a well-formed archive with exactly one field corrupted (except the six
 malformed-preamble cases, which never reach version-dependent parsing).
 
 `valid_cases.h` is the source of truth for what each vector is and why; keep it
@@ -99,9 +106,11 @@ sha256sum conformance/v8/valid/*.zxc conformance/v8/valid/*.expected \
 
 ## Regenerating
 
-`test_conformance` rebuilds every vector from its recipe on each run and
-compares with the committed bytes, so a hand-edited vector — or one left behind
-by an encoder change — fails the suite rather than drifting unnoticed.
+`test_conformance` rebuilds the generated vectors from their recipes on each run
+and compares with the committed bytes, so a hand-edited vector — or one left
+behind by an encoder change — fails the suite rather than drifting unnoticed.
+The six malformed-preamble cases are static files with no recipe; only the
+manifest guards them.
 
 ```sh
 cmake --build build --target zxc_valid_gen zxc_invalid_gen

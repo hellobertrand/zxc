@@ -6,16 +6,14 @@
  */
 
 /*
- * Recipe for the archives under conformance/valid: the options each vector was
- * produced with. Rebuild with zxc_valid_gen; test_conformance.c checks that
- * every committed archive still matches its entry here.
+ * Recipe for conformance/v<N>/valid: the options each vector was produced with.
+ * Rebuild with zxc_valid_gen; test_conformance.c checks every committed archive
+ * still matches its entry.
  *
- * The input is the committed <name>.expected, not a generator: this corpus is
- * published for third-party decoders, which need that plaintext as their
- * reference, so using it as the input too leaves exactly one copy of it.
- *
- * Fields are explicit even where they match today's defaults, so a changed
- * default shows up as a corpus diff instead of silently re-cutting vectors.
+ * The input is the committed <name>.expected, not a generator: third-party
+ * decoders need that plaintext as their reference, so it stays the only copy.
+ * Fields are explicit even at their defaults, so a changed default shows up as
+ * a corpus diff instead of silently re-cutting vectors.
  */
 
 #ifndef ZXC_VALID_CASES_H
@@ -36,11 +34,9 @@ typedef struct {
 
 /* Grouped as in README.md "Vector coverage"; keep the two in step. */
 static const valid_case_t VALID_CASES[] = {
-    /* One vector per decoder-visible trait. Two of them earn their place on
-     * payload shape rather than on any header field, so a coverage count over
-     * header traits alone would wrongly call them redundant: all_zeros_4k is
-     * the offset-1 overlap run, max_offset_128k the maximum back-reference
-     * distance. Both are paths this decoder has had real bugs in. */
+    /* One vector per decoder-visible trait. all_zeros_4k (offset-1 overlap run)
+     * and max_offset_128k earn theirs on payload shape, not on any header field:
+     * counting header traits alone would wrongly call them redundant. */
     {"empty", NULL, {.level = 3, .block_size = VC_KB(512)}},
     {"all_256_values", NULL, {.level = 3, .block_size = VC_KB(512)}},
     {"all_zeros_4k", NULL, {.level = 3, .block_size = VC_KB(512)}},
@@ -51,6 +47,9 @@ static const valid_case_t VALID_CASES[] = {
     {"text_64k_level1", NULL, {.level = 1, .block_size = VC_KB(512)}},
     {"glo_rle_4k", NULL, {.level = 3, .block_size = VC_KB(512)}},
     {"glo_pivco_wide_l7", NULL, {.level = 7, .block_size = VC_KB(512)}},
+
+    /* Token section: the only enc_tok = 2. */
+    {"glo_tok_huffman_l7", NULL, {.level = 7, .block_size = VC_KB(512)}},
 
     /* Checksums on their own, so a failure here is not confounded with the
      * dictionary vectors below (the only other place they are exercised). */

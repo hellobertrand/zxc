@@ -27,18 +27,51 @@
 /* Offset of the first block's payload (its GLO/GHI sub-header). */
 #define PAY0 (BLK0 + ZXC_BLOCK_HEADER_SIZE)
 
-/* Every generated vector, in the order gen_invalid.c reports them. */
-static const char* const INVALID_GENERATED[] = {
-    "bad_block_size_field", "bad_checksum_algo",      "bad_header_checksum",
-    "dict_required",        "dict_id_mismatch",       "bad_block_type",
-    "bad_eof_compsize",     "bad_enc_lit",            "glo_forged_enc_off",
-    "glo_insufficient_slack", "ghi_forged_offset",    "sek_forged_entry",
-    "bad_block_checksum",   "corrupt_payload",        "truncated_header_only",
-    "truncated_mid_block",   "bad_block_header_checksum",   "bad_footer_size",
-    "bad_footer_hash",       "glo_forged_offset",      "glo_output_overflow",
-    "varint_too_long",
+/* Expected rejection reason, per vector.
+ *
+ * Asserting only "was rejected" is not enough: across the v6 and v7 bumps every
+ * vector started failing on the version byte instead of its own defect, and the
+ * suite kept printing PASS. Pinning the code is what makes that visible. A
+ * vector missing from this table is a failure. */
+typedef struct {
+    const char* name; /* file stem, without the .zxc */
+    int expected;     /* zxc_error_t the decoder must return */
+    const char* dict; /* .zxd to offer, a basename in valid/, or NULL */
+    int via_seekable; /* defect only visible to the seekable reader: open must refuse */
+    int generated;    /* built by build_invalid(); the rest are static files */
+} invalid_expect_t;
+
+static const invalid_expect_t INVALID_EXPECT[] = {
+    {"all_0xff_garbage", ZXC_ERROR_BAD_MAGIC},
+    {"bad_block_checksum", ZXC_ERROR_BAD_CHECKSUM, .generated = 1},
+    {"bad_block_size_field", ZXC_ERROR_BAD_BLOCK_SIZE, .generated = 1},
+    {"bad_block_type", ZXC_ERROR_BAD_BLOCK_TYPE, .generated = 1},
+    {"bad_checksum_algo", ZXC_ERROR_BAD_HEADER, .generated = 1},
+    {"bad_enc_lit", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"bad_eof_compsize", ZXC_ERROR_BAD_HEADER, .generated = 1},
+    {"bad_header_checksum", ZXC_ERROR_BAD_HEADER, .generated = 1},
+    {"bad_magic", ZXC_ERROR_BAD_MAGIC},
+    {"bad_version", ZXC_ERROR_BAD_VERSION},
+    {"corrupt_payload", ZXC_ERROR_BAD_CHECKSUM, .generated = 1},
+    {"dict_required", ZXC_ERROR_DICT_REQUIRED, .generated = 1},
+    {"ghi_forged_offset", ZXC_ERROR_BAD_OFFSET, .generated = 1},
+    {"glo_forged_enc_off", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"glo_insufficient_slack", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"magic_then_zeros", ZXC_ERROR_BAD_VERSION},
+    {"too_short_4bytes", ZXC_ERROR_SRC_TOO_SMALL},
+    {"truncated_header_only", ZXC_ERROR_SRC_TOO_SMALL, .generated = 1},
+    {"truncated_mid_block", ZXC_ERROR_SRC_TOO_SMALL, .generated = 1},
+    {"zero_length", ZXC_ERROR_SRC_TOO_SMALL},
+    {"sek_forged_entry", 0, NULL, 1, .generated = 1},
+    {"bad_block_header_checksum", ZXC_ERROR_BAD_HEADER, .generated = 1},
+    {"bad_footer_size", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"bad_footer_hash", ZXC_ERROR_BAD_CHECKSUM, .generated = 1},
+    {"glo_forged_offset", ZXC_ERROR_BAD_OFFSET, .generated = 1},
+    {"glo_output_overflow", ZXC_ERROR_OVERFLOW, .generated = 1},
+    {"varint_too_long", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"dict_id_mismatch", ZXC_ERROR_DICT_MISMATCH, "dict_http.zxd", 0, .generated = 1},
 };
-#define INVALID_GENERATED_COUNT (sizeof(INVALID_GENERATED) / sizeof(INVALID_GENERATED[0]))
+#define INVALID_EXPECT_COUNT (sizeof INVALID_EXPECT / sizeof INVALID_EXPECT[0])
 
 /* Re-sign the 16-byte file header after patching any of its fields. */
 static void resign_file_header(uint8_t* d) {
@@ -131,11 +164,13 @@ static int glo_layout(const uint8_t* d, size_t n, glo_layout_t* L) {
 typedef struct {
     uint8_t *plain, *chk, *ghi, *seek;
     size_t n_plain, n_chk, n_ghi, n_seek;
-    int ready;
+    int state; /* 0 unbuilt, 1 ready, -1 failed (do not retry, do not leak) */
 } invalid_bases_t;
 
+static void invalid_bases_free(invalid_bases_t* b);
+
 static int invalid_bases(invalid_bases_t* b) {
-    if (b->ready) return 1;
+    if (b->state) return b->state > 0;
 
     uint8_t* text = NULL;
     const size_t text_n = make_text(&text);
@@ -162,7 +197,11 @@ static int invalid_bases(invalid_bases_t* b) {
     b->n_seek = build_base(text, text_n, &seek, &b->seek);
     free(text);
 
-    if (!b->n_plain || !b->n_chk || !b->n_ghi || !b->n_seek) return 0;
+    if (!b->n_plain || !b->n_chk || !b->n_ghi || !b->n_seek) {
+        invalid_bases_free(b);
+        b->state = -1;
+        return 0;
+    }
 
     /* Every GLO patch below addresses a fixed offset inside block 0's sub-header.
      * If a heuristic change ever made that block RAW, the patches would land on
@@ -170,9 +209,11 @@ static int invalid_bases(invalid_bases_t* b) {
     if (b->plain[BLK0] != ZXC_BLOCK_GLO || b->chk[BLK0] != ZXC_BLOCK_GLO) {
         fprintf(stderr, "  block 0 is type %u/%u, expected GLO - vectors would test nothing\n",
                 b->plain[BLK0], b->chk[BLK0]);
+        invalid_bases_free(b);
+        b->state = -1;
         return 0;
     }
-    b->ready = 1;
+    b->state = 1;
     return 1;
 }
 
@@ -262,12 +303,9 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         const uint32_t want = comp - ZXC_GLO_HEADER_BINARY_SIZE - (ZXC_BLOCK_LIT_SLACK - 1);
         zxc_store_le32(d + PAY0 + 4, want);
     } else if (!strcmp(name, "ghi_forged_offset")) {
-        /* GHI sequence word: force the 16-bit offset field to reach far behind
-         * the start of the output, which no decoder may follow. seq0 is derived
-         * from the wire, so check the block really is GHI, that it has a
-         * sequence to forge, and that the word is inside the buffer - otherwise
-         * the patch lands in the extras padding and the vector ships decoding
-         * cleanly, i.e. testing nothing. */
+        /* Force the 16-bit offset far behind the output start. seq0 is derived
+         * from the wire, so guard the shape: a patch landing in the extras
+         * padding would ship a vector that decodes cleanly. */
         const size_t seq0 = PAY0 + ZXC_GHI_HEADER_BINARY_SIZE + zxc_le32(d + PAY0 + 4);
         if (d[BLK0] != ZXC_BLOCK_GHI || zxc_le32(d + PAY0) == 0 || seq0 + 4 > len) {
             fprintf(stderr, "  cannot forge a GHI offset (type %u, n_seq %u, seq0 %zu of %zu)\n",
@@ -312,7 +350,7 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
     } else if (!strcmp(name, "truncated_mid_block")) {
         len = PAY0 + 20;
 
-        /* --- Remaining rows of the error table (FORMAT.md Sec 12) ---------- */
+        /* --- Remaining rows of the error table (FORMAT.md Sec 11.1) -------- */
     } else if (!strcmp(name, "bad_block_header_checksum")) {
         d[BLK0 + 7] ^= 0xFFU; /* left wrong: the header checksum is the defect */
     } else if (!strcmp(name, "bad_footer_size")) {

@@ -14,6 +14,7 @@ raw:              00 00 00 00 10 00 00 13
 type:             RAW (0)
 comp_size:        4096
 header_checksum:  0x13
+payload_hash:     0xD0CEA854
 
 [block 1 @4120]
 raw:              FF 00 00 00 00 00 00 02

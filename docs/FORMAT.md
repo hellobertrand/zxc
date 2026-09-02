@@ -672,7 +672,7 @@ The recommended behavior for each class is specified below.
 | **File header checksum mismatch** | File header, offset 0x0E | Reject. Header is corrupt or truncated. |
 | **Invalid chunk size code** | File header, offset 0x05 | Reject. Code outside the valid range `[12..21]`. |
 | **Block header checksum mismatch** | Block header, offset 0x07 | Reject block. Stream is corrupt. |
-| **Unknown block type** | Block header, offset 0x00 | Skip block using `comp_size` (see §10.3), or reject. |
+| **Unknown block type** | Block header, offset 0x00 | Reject. The block-type set is fixed per format version (see §10.3); a decoder must not skip past unrecognised data. |
 | **Block payload truncated** | During `fread` of `comp_size` bytes | Reject. Unexpected end of stream. |
 | **Block checksum mismatch** | Trailing 4-byte checksum | Reject block. Payload is corrupt. |
 | **EOF block with non-zero comp_size** | EOF block header | Reject. Malformed EOF marker. |

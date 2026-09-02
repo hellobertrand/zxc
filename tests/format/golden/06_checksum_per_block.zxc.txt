@@ -23,6 +23,7 @@ header_checksum:  0x17
   enc_off:        1
   lit_comp:       123
   sect_total:     125
+payload_hash:     0x9B5CCFC1
 block_checksum:   0x9B5CCFC1
 
 [block 1 @195]

@@ -5,10 +5,10 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -21,41 +21,13 @@
 #include "../include/zxc_dict.h"
 #include "../include/zxc_error.h"
 #include "../include/zxc_seekable.h"
+#include "../tests/vector_io.h"
 #include "invalid_cases.h"
 #include "valid_cases.h"
 
 /* ---------- helpers ------------------------------------------------------ */
 
-static uint8_t *read_file(const char *path, size_t *out_size)
-{
-    FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
-
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    if (len < 0) { fclose(f); return NULL; }
-    if (len == 0) {
-        fclose(f);
-        *out_size = 0;
-        return calloc(1, 1);
-    }
-
-    uint8_t *buf = malloc((size_t)len);
-    if (!buf) { fclose(f); return NULL; }
-
-    if (fread(buf, 1, (size_t)len, f) != (size_t)len) {
-        free(buf); fclose(f); return NULL;
-    }
-
-    fclose(f);
-    *out_size = (size_t)len;
-    return buf;
-}
-
-static int file_exists(const char *path)
-{
+static int file_exists(const char* path) {
 #ifdef _WIN32
     DWORD attr = GetFileAttributesA(path);
     return attr != INVALID_FILE_ATTRIBUTES;
@@ -65,8 +37,7 @@ static int file_exists(const char *path)
 #endif
 }
 
-static int has_suffix(const char *s, const char *suffix)
-{
+static int has_suffix(const char* s, const char* suffix) {
     size_t slen = strlen(s), xlen = strlen(suffix);
     if (slen < xlen) return 0;
     return memcmp(s + slen - xlen, suffix, xlen) == 0;
@@ -79,18 +50,19 @@ static int has_suffix(const char *s, const char *suffix)
  *        whose dict_id matches @p target_id. Returns the loaded content (caller frees)
  *        and, via @p huf_out, the shared literal Huffman table carried by the .zxd.
  */
-static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
-                                 const void **content_out, size_t *content_size_out,
-                                 const void **huf_out)
-{
+static uint8_t* find_dict_for_id(const char* zxc_path, uint32_t target_id, const void** content_out,
+                                 size_t* content_size_out, const void** huf_out) {
     /* Derive directory from zxc_path */
     char dir[512];
     size_t plen = strlen(zxc_path);
     if (plen >= sizeof(dir)) plen = sizeof(dir) - 1;
     memcpy(dir, zxc_path, plen);
     dir[plen] = '\0';
-    char *sep = strrchr(dir, '/');
-    if (sep) *(sep + 1) = '\0'; else snprintf(dir, sizeof(dir), "./");
+    char* sep = strrchr(dir, '/');
+    if (sep)
+        *(sep + 1) = '\0';
+    else
+        snprintf(dir, sizeof(dir), "./");
 
 #ifdef _WIN32
     char pattern[512];
@@ -102,7 +74,7 @@ static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
         char path[1024];
         snprintf(path, sizeof(path), "%s%s", dir, fd.cFileName);
         size_t sz = 0;
-        uint8_t *buf = read_file(path, &sz);
+        uint8_t* buf = vio_read_file(path, &sz);
         if (buf && zxc_dict_get_id(buf, sz) == target_id) {
             if (zxc_dict_load(buf, sz, content_out, content_size_out, huf_out, NULL) == 0) {
                 FindClose(hf);
@@ -113,15 +85,15 @@ static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
     } while (FindNextFileA(hf, &fd));
     FindClose(hf);
 #else
-    DIR *dp = opendir(dir);
+    DIR* dp = opendir(dir);
     if (!dp) return NULL;
-    const struct dirent *ent;
+    const struct dirent* ent;
     while ((ent = readdir(dp)) != NULL) {
         if (!has_suffix(ent->d_name, ".zxd")) continue;
         char path[1024];
         snprintf(path, sizeof(path), "%s%s", dir, ent->d_name);
         size_t sz = 0;
-        uint8_t *buf = read_file(path, &sz);
+        uint8_t* buf = vio_read_file(path, &sz);
         if (buf && zxc_dict_get_id(buf, sz) == target_id) {
             if (zxc_dict_load(buf, sz, content_out, content_size_out, huf_out, NULL) == 0) {
                 closedir(dp);
@@ -135,11 +107,10 @@ static uint8_t *find_dict_for_id(const char *zxc_path, uint32_t target_id,
     return NULL;
 }
 
-static int test_valid_vector(const char *zxc_path, const char *expected_path)
-{
+static int test_valid_vector(const char* zxc_path, const char* expected_path) {
     size_t comp_sz = 0, expected_sz = 0;
-    uint8_t *comp = read_file(zxc_path, &comp_sz);
-    uint8_t *expected = read_file(expected_path, &expected_sz);
+    uint8_t* comp = vio_read_file(zxc_path, &comp_sz);
+    uint8_t* expected = vio_read_file(expected_path, &expected_sz);
 
     if (!comp) {
         fprintf(stderr, "FAIL: cannot read %s\n", zxc_path);
@@ -153,17 +124,18 @@ static int test_valid_vector(const char *zxc_path, const char *expected_path)
     }
 
     /* Auto-detect dictionary: if the archive has a dict_id, find the .zxd */
-    const void *dict = NULL;
+    const void* dict = NULL;
     size_t dict_size = 0;
-    const void *dict_huf = NULL;
-    uint8_t *dict_buf = NULL;
+    const void* dict_huf = NULL;
+    uint8_t* dict_buf = NULL;
     uint32_t did = zxc_get_dict_id(comp, comp_sz);
     if (did != 0) {
         dict_buf = find_dict_for_id(zxc_path, did, &dict, &dict_size, &dict_huf);
         if (!dict_buf) {
-            fprintf(stderr, "FAIL: %s  requires dict 0x%08X but no matching .zxd found\n",
-                    zxc_path, did);
-            free(comp); free(expected);
+            fprintf(stderr, "FAIL: %s  requires dict 0x%08X but no matching .zxd found\n", zxc_path,
+                    did);
+            free(comp);
+            free(expected);
             return 0;
         }
     }
@@ -173,28 +145,31 @@ static int test_valid_vector(const char *zxc_path, const char *expected_path)
     uint64_t dec_sz = zxc_get_decompressed_size(comp, comp_sz);
 
     if (dec_sz != expected_sz) {
-        fprintf(stderr, "FAIL: %s  size mismatch: got %llu, expected %zu\n",
-                zxc_path, (unsigned long long)dec_sz, expected_sz);
+        fprintf(stderr, "FAIL: %s  size mismatch: got %llu, expected %zu\n", zxc_path,
+                (unsigned long long)dec_sz, expected_sz);
         ok = 0;
     } else if (expected_sz == 0) {
         /* Nothing to decompress: size match is sufficient. */
     } else {
-        uint8_t *output = malloc((size_t)dec_sz);
+        uint8_t* output = malloc((size_t)dec_sz);
         if (!output) {
             fprintf(stderr, "FAIL: %s  OOM\n", zxc_path);
             ok = 0;
         } else {
             zxc_decompress_opts_t dopts = {0};
-            if (dict) { dopts.dict = dict; dopts.dict_size = dict_size; dopts.dict_huf = dict_huf; }
-            int64_t result = zxc_decompress(comp, comp_sz,
-                                            output, (size_t)dec_sz, &dopts);
+            if (dict) {
+                dopts.dict = dict;
+                dopts.dict_size = dict_size;
+                dopts.dict_huf = dict_huf;
+            }
+            int64_t result = zxc_decompress(comp, comp_sz, output, (size_t)dec_sz, &dopts);
             if (result < 0) {
-                fprintf(stderr, "FAIL: %s  decompress failed: %s\n",
-                        zxc_path, zxc_error_name((int)result));
+                fprintf(stderr, "FAIL: %s  decompress failed: %s\n", zxc_path,
+                        zxc_error_name((int)result));
                 ok = 0;
             } else if ((size_t)result != expected_sz) {
-                fprintf(stderr, "FAIL: %s  output size %lld != expected %zu\n",
-                        zxc_path, (long long)result, expected_sz);
+                fprintf(stderr, "FAIL: %s  output size %lld != expected %zu\n", zxc_path,
+                        (long long)result, expected_sz);
                 ok = 0;
             } else if (memcmp(output, expected, expected_sz) != 0) {
                 fprintf(stderr, "FAIL: %s  output content mismatch\n", zxc_path);
@@ -212,68 +187,11 @@ static int test_valid_vector(const char *zxc_path, const char *expected_path)
 
 /* ---------- invalid vector test ------------------------------------------ */
 
-/* Expected rejection reason, per vector.
- *
- * Asserting only "was rejected" is not enough, and the suite has been burned by
- * it: across the v6 and v7 bumps every vector started failing on the version
- * byte instead of on its own defect, and the suite kept printing PASS while
- * testing nothing. Pinning the code is what makes that visible - if a vector
- * degrades to BAD_VERSION, this table stops matching and CI says so.
- *
- * Regenerate the vectors with zxc_invalid_gen after a format bump, then update
- * any code that legitimately changed. A vector missing from the table is a
- * failure, so new ones cannot be added without declaring their reason. */
-typedef struct {
-    const char *name;  /* file stem, without the .zxc */
-    int expected;      /* zxc_error_t the decoder must return */
-    const char *dict;  /* .zxd to offer, a basename in valid/, or NULL */
-    int via_seekable;  /* defect only visible to the seekable reader: open must refuse */
-} invalid_expect_t;
-
-static const invalid_expect_t INVALID_EXPECT[] = {
-    {"all_0xff_garbage", ZXC_ERROR_BAD_MAGIC},
-    {"bad_block_checksum", ZXC_ERROR_BAD_CHECKSUM},
-    {"bad_block_size_field", ZXC_ERROR_BAD_BLOCK_SIZE},
-    {"bad_block_type", ZXC_ERROR_BAD_BLOCK_TYPE},
-    {"bad_checksum_algo", ZXC_ERROR_BAD_HEADER},
-    {"bad_enc_lit", ZXC_ERROR_CORRUPT_DATA},
-    {"bad_eof_compsize", ZXC_ERROR_BAD_HEADER},
-    {"bad_header_checksum", ZXC_ERROR_BAD_HEADER},
-    {"bad_magic", ZXC_ERROR_BAD_MAGIC},
-    {"bad_version", ZXC_ERROR_BAD_VERSION},
-    {"corrupt_payload", ZXC_ERROR_BAD_CHECKSUM},
-    {"dict_required", ZXC_ERROR_DICT_REQUIRED},
-    {"ghi_forged_offset", ZXC_ERROR_BAD_OFFSET},
-    {"glo_forged_enc_off", ZXC_ERROR_CORRUPT_DATA},
-    {"glo_insufficient_slack", ZXC_ERROR_CORRUPT_DATA},
-    {"magic_then_zeros", ZXC_ERROR_BAD_VERSION},
-    {"too_short_4bytes", ZXC_ERROR_SRC_TOO_SMALL},
-    {"truncated_header_only", ZXC_ERROR_SRC_TOO_SMALL},
-    {"truncated_mid_block", ZXC_ERROR_SRC_TOO_SMALL},
-    {"zero_length", ZXC_ERROR_SRC_TOO_SMALL},
-    /* A forged seek-table entry is invisible to a sequential decode - the table
-     * is advisory metadata - so this one is exercised through the seekable
-     * reader, which refuses to open the archive. */
-    {"sek_forged_entry", 0, NULL, 1},
-    /* The remaining rows of the error table (FORMAT.md Sec 12). */
-    {"bad_block_header_checksum", ZXC_ERROR_BAD_HEADER},
-    {"bad_footer_size", ZXC_ERROR_CORRUPT_DATA},
-    {"bad_footer_hash", ZXC_ERROR_BAD_CHECKSUM},
-    {"glo_forged_offset", ZXC_ERROR_BAD_OFFSET},
-    {"glo_output_overflow", ZXC_ERROR_OVERFLOW},
-    {"varint_too_long", ZXC_ERROR_CORRUPT_DATA},
-    /* Needs a dictionary in hand to reach the binding check: with none, the
-     * decoder stops earlier at DICT_REQUIRED, which is dict_required's job. */
-    {"dict_id_mismatch", ZXC_ERROR_DICT_MISMATCH, "dict_http.zxd", 0},
-};
-#define INVALID_EXPECT_COUNT (sizeof INVALID_EXPECT / sizeof INVALID_EXPECT[0])
-
 /* Matches a vector path against the table by file stem. Returns 1 on hit. */
-static const invalid_expect_t *expect_for(const char *zxc_path)
-{
-    const char *base = strrchr(zxc_path, '/');
+static const invalid_expect_t* expect_for(const char* zxc_path) {
+    const char* base = strrchr(zxc_path, '/');
 #ifdef _WIN32
-    const char *bs = strrchr(zxc_path, '\\');
+    const char* bs = strrchr(zxc_path, '\\');
     if (bs && (!base || bs > base)) base = bs;
 #endif
     base = base ? base + 1 : zxc_path;
@@ -290,16 +208,15 @@ static const invalid_expect_t *expect_for(const char *zxc_path)
     return NULL;
 }
 
-static int test_invalid_vector(const char *zxc_path, const char *valid_dir)
-{
+static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
     size_t comp_sz = 0;
-    uint8_t *comp = read_file(zxc_path, &comp_sz);
+    uint8_t* comp = vio_read_file(zxc_path, &comp_sz);
     if (!comp) {
         fprintf(stderr, "FAIL: cannot read %s\n", zxc_path);
         return 0;
     }
 
-    const invalid_expect_t *exp = expect_for(zxc_path);
+    const invalid_expect_t* exp = expect_for(zxc_path);
     if (!exp) {
         fprintf(stderr, "FAIL: %s  has no entry in INVALID_EXPECT\n", zxc_path);
         free(comp);
@@ -309,7 +226,7 @@ static int test_invalid_vector(const char *zxc_path, const char *valid_dir)
     /* The seek table is advisory metadata that a sequential decode ignores, so
      * a forged entry can only be caught where the entries are consumed. */
     if (exp->via_seekable) {
-        zxc_seekable *s = zxc_seekable_open(comp, comp_sz);
+        zxc_seekable* s = zxc_seekable_open(comp, comp_sz);
         if (s) {
             fprintf(stderr, "FAIL: %s  seekable open accepted a forged seek table\n", zxc_path);
             zxc_seekable_free(s);
@@ -324,10 +241,9 @@ static int test_invalid_vector(const char *zxc_path, const char *valid_dir)
 
     uint64_t dec_sz = zxc_get_decompressed_size(comp, comp_sz);
     const size_t scratch_cap = 1U << 20;
-    const size_t out_cap = (dec_sz > 0 && dec_sz <= scratch_cap)
-                               ? (size_t)dec_sz : scratch_cap;
+    const size_t out_cap = (dec_sz > 0 && dec_sz <= scratch_cap) ? (size_t)dec_sz : scratch_cap;
 
-    uint8_t *output = malloc(out_cap);
+    uint8_t* output = malloc(out_cap);
     if (output) {
         /* Verify with checksum enabled so checksum/payload-corruption
          * vectors are caught (verification needs both the file flag and
@@ -336,12 +252,12 @@ static int test_invalid_vector(const char *zxc_path, const char *valid_dir)
 
         /* Some defects sit past an earlier gate: a forged dict_id is only
          * reachable once a dictionary is actually offered. */
-        uint8_t *dict_buf = NULL;
+        uint8_t* dict_buf = NULL;
         if (exp->dict) {
             char dpath[2048];
             snprintf(dpath, sizeof dpath, "%s/%s", valid_dir, exp->dict);
             size_t dsz = 0;
-            dict_buf = read_file(dpath, &dsz);
+            dict_buf = vio_read_file(dpath, &dsz);
             if (!dict_buf ||
                 zxc_dict_load(dict_buf, dsz, &io.dict, &io.dict_size, &io.dict_huf, NULL) != 0) {
                 fprintf(stderr, "FAIL: %s  cannot load %s\n", zxc_path, dpath);
@@ -355,8 +271,8 @@ static int test_invalid_vector(const char *zxc_path, const char *valid_dir)
         int64_t result = zxc_decompress(comp, comp_sz, output, out_cap, &io);
         free(dict_buf);
         if (result >= 0) {
-            fprintf(stderr, "FAIL: %s  should be rejected but decoded %lld bytes\n",
-                    zxc_path, (long long)result);
+            fprintf(stderr, "FAIL: %s  should be rejected but decoded %lld bytes\n", zxc_path,
+                    (long long)result);
             ok = 0;
         } else {
             const int want = exp->expected;
@@ -376,13 +292,12 @@ static int test_invalid_vector(const char *zxc_path, const char *valid_dir)
 /* ---------- portable directory scanner ----------------------------------- */
 
 typedef struct {
-    char **names;
+    char** names;
     size_t count;
     size_t capacity;
 } name_list_t;
 
-static void name_list_add(name_list_t *l, const char *name)
-{
+static void name_list_add(name_list_t* l, const char* name) {
     if (l->count >= l->capacity) {
         l->capacity = l->capacity ? l->capacity * 2 : 64;
         l->names = realloc(l->names, l->capacity * sizeof(char*));
@@ -394,23 +309,22 @@ static void name_list_add(name_list_t *l, const char *name)
 #endif
 }
 
-static int name_cmp(const void *a, const void *b) {
-    return strcmp(*(const char * const *)a, *(const char * const *)b);
+static int name_cmp(const void* a, const void* b) {
+    return strcmp(*(const char* const*)a, *(const char* const*)b);
 }
 
-static void name_list_sort(name_list_t *l) {
+static void name_list_sort(name_list_t* l) {
     if (l->count > 1) qsort(l->names, l->count, sizeof(char*), name_cmp);
 }
 
-static void name_list_free(name_list_t *l) {
+static void name_list_free(name_list_t* l) {
     for (size_t i = 0; i < l->count; i++) free(l->names[i]);
     free(l->names);
     l->names = NULL;
     l->count = l->capacity = 0;
 }
 
-static int list_zxc_files(const char *dir, name_list_t *out)
-{
+static int list_zxc_files(const char* dir, name_list_t* out) {
 #ifdef _WIN32
     char pattern[512];
     snprintf(pattern, sizeof pattern, "%s\\*.zxc", dir);
@@ -418,17 +332,15 @@ static int list_zxc_files(const char *dir, name_list_t *out)
     HANDLE h = FindFirstFileA(pattern, &fd);
     if (h == INVALID_HANDLE_VALUE) return -1;
     do {
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
-            name_list_add(out, fd.cFileName);
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) name_list_add(out, fd.cFileName);
     } while (FindNextFileA(h, &fd));
     FindClose(h);
 #else
-    DIR *d = opendir(dir);
+    DIR* d = opendir(dir);
     if (!d) return -1;
-    const struct dirent *ent;
+    const struct dirent* ent;
     while ((ent = readdir(d)) != NULL) {
-        if (has_suffix(ent->d_name, ".zxc"))
-            name_list_add(out, ent->d_name);
+        if (has_suffix(ent->d_name, ".zxc")) name_list_add(out, ent->d_name);
     }
     closedir(d);
 #endif
@@ -436,27 +348,26 @@ static int list_zxc_files(const char *dir, name_list_t *out)
     return 0;
 }
 
+/* Look up a valid vector's recipe by file stem, or NULL. */
+static const valid_case_t* valid_case_for(const char* stem) {
+    for (size_t i = 0; i < VALID_CASE_COUNT; i++)
+        if (strcmp(VALID_CASES[i].name, stem) == 0) return &VALID_CASES[i];
+    return NULL;
+}
+
 /* ---------- recipe reproduction ------------------------------------------ */
 
-/* Recompress <name>.expected with the options valid_cases.h declares, and
- * compare against the committed <name>.zxc.
- *
- * Neither other guard sees a corpus recut with the wrong options: the manifest
- * only says the bytes have not moved (a wrong regeneration diffs like a right
- * one), and the test above only says the archive decodes to its .expected,
- * which stays true at any level. The vector named "level5" would then silently
- * stop testing level 5.
- *
- * Also asserts that compression is bit-identical across ISAs, which the library
- * guarantees; a failure on one platform only is that, not a corpus problem. */
-static int test_recipe(const char *valid_dir, const valid_case_t *vc)
-{
+/* Neither other guard sees a corpus recut with the wrong options: the manifest
+ * only says the bytes have not moved, and the test above only says the archive
+ * decodes to its .expected, which stays true at any level. The vector named
+ * "level5" would then silently stop testing level 5. */
+static int test_recipe(const char* valid_dir, const valid_case_t* vc) {
     char path[2048];
     int ok = 0;
 
     snprintf(path, sizeof path, "%s/%s.expected", valid_dir, vc->name);
     size_t in_size = 0;
-    uint8_t *input = read_file(path, &in_size);
+    uint8_t* input = vio_read_file(path, &in_size);
     if (!input) {
         fprintf(stderr, "FAIL: %s  cannot read %s\n", vc->name, path);
         return 0;
@@ -464,38 +375,35 @@ static int test_recipe(const char *valid_dir, const valid_case_t *vc)
 
     snprintf(path, sizeof path, "%s/%s.zxc", valid_dir, vc->name);
     size_t ref_size = 0;
-    uint8_t *ref = read_file(path, &ref_size);
+    uint8_t* ref = vio_read_file(path, &ref_size);
     if (!ref) {
-        fprintf(stderr, "FAIL: %s  declared in VALID_CASES but the archive is missing\n",
-                vc->name);
+        fprintf(stderr, "FAIL: %s  declared in VALID_CASES but the archive is missing\n", vc->name);
         free(input);
         return 0;
     }
 
     /* The .zxd carries the content and its Huffman table; both feed the dict_id. */
     zxc_compress_opts_t opts = vc->opts;
-    uint8_t *dict_buf = NULL;
+    uint8_t* dict_buf = NULL;
     int dict_ok = 1;
     if (vc->dict) {
         snprintf(path, sizeof path, "%s/%s", valid_dir, vc->dict);
         size_t dict_file_size = 0;
-        dict_buf = read_file(path, &dict_file_size);
+        dict_buf = vio_read_file(path, &dict_file_size);
         dict_ok = dict_buf && zxc_dict_load(dict_buf, dict_file_size, &opts.dict, &opts.dict_size,
                                             &opts.dict_huf, NULL) == 0;
-        if (!dict_ok)
-            fprintf(stderr, "FAIL: %s  cannot load dictionary %s\n", vc->name, vc->dict);
+        if (!dict_ok) fprintf(stderr, "FAIL: %s  cannot load dictionary %s\n", vc->name, vc->dict);
     }
 
     if (dict_ok) {
         size_t cap = (size_t)zxc_compress_bound(in_size) + 4096;
-        uint8_t *out = (uint8_t *)malloc(cap);
+        uint8_t* out = (uint8_t*)malloc(cap);
         if (!out) {
             fprintf(stderr, "FAIL: %s  OOM\n", vc->name);
         } else {
             int64_t csize = zxc_compress(input, in_size, out, cap, &opts);
             if (csize <= 0) {
-                fprintf(stderr, "FAIL: %s  compress -> %s\n", vc->name,
-                        zxc_error_name((int)csize));
+                fprintf(stderr, "FAIL: %s  compress -> %s\n", vc->name, zxc_error_name((int)csize));
             } else if ((size_t)csize != ref_size || memcmp(out, ref, ref_size) != 0) {
                 fprintf(stderr,
                         "FAIL: %s  does not match its recipe (level %d, block %zu KB%s%s):\n"
@@ -517,16 +425,11 @@ static int test_recipe(const char *valid_dir, const valid_case_t *vc)
     return ok;
 }
 
-/* Rebuild <name>.zxc from invalid_cases.h and compare with the committed file.
- *
- * The error-code table above says each vector still fails for its own reason;
- * this says each is still the archive its recipe describes. Without it the two
- * drifted silently: the committed vectors were an older encoder's output, and
- * a regeneration would have rewritten all of them at once, burying whatever
- * change was actually intended. */
-static int test_invalid_recipe(const char *invalid_dir, invalid_bases_t *bases, const char *name)
-{
-    uint8_t *want = NULL;
+/* The error-code table says each vector still fails for its own reason; this
+ * says each is still the archive its recipe describes. Without it they drifted:
+ * the committed vectors were an older encoder's output. */
+static int test_invalid_recipe(const char* invalid_dir, invalid_bases_t* bases, const char* name) {
+    uint8_t* want = NULL;
     size_t want_n = 0;
     if (!build_invalid(bases, name, &want, &want_n)) {
         fprintf(stderr, "FAIL: %s  cannot be rebuilt from invalid_cases.h\n", name);
@@ -536,10 +439,10 @@ static int test_invalid_recipe(const char *invalid_dir, invalid_bases_t *bases, 
     char path[2048];
     snprintf(path, sizeof path, "%s/%s.zxc", invalid_dir, name);
     size_t have_n = 0;
-    uint8_t *have = read_file(path, &have_n);
+    uint8_t* have = vio_read_file(path, &have_n);
     int ok = 0;
     if (!have) {
-        fprintf(stderr, "FAIL: %s  declared in INVALID_GENERATED but missing\n", name);
+        fprintf(stderr, "FAIL: %s  declared generated but missing\n", name);
     } else if (have_n != want_n || memcmp(have, want, want_n) != 0) {
         fprintf(stderr,
                 "FAIL: %s  does not match its recipe (committed %zu bytes, recipe %zu)\n"
@@ -555,17 +458,15 @@ static int test_invalid_recipe(const char *invalid_dir, invalid_bases_t *bases, 
 
 /* ---------- main --------------------------------------------------------- */
 
-int main(int argc, char **argv)
-{
+int main(int argc, char** argv) {
     /* One frozen corpus per format version, <root>/v<N>/. Composing it from the
      * constant means a bump looks for a corpus that does not exist yet, rather
-     * than testing vectors this decoder could not decode anyway (Sec 12). */
-    const char *root = "conformance";
+     * than testing vectors this decoder could not decode anyway (Sec 10.3). */
+    const char* root = "conformance";
     if (argc > 1) root = argv[1];
 
     char valid_dir[512], invalid_dir[512];
-    snprintf(valid_dir, sizeof valid_dir, "%s/v%u/valid", root,
-             (unsigned)ZXC_FILE_FORMAT_VERSION);
+    snprintf(valid_dir, sizeof valid_dir, "%s/v%u/valid", root, (unsigned)ZXC_FILE_FORMAT_VERSION);
     snprintf(invalid_dir, sizeof invalid_dir, "%s/v%u/invalid", root,
              (unsigned)ZXC_FILE_FORMAT_VERSION);
 
@@ -596,7 +497,10 @@ int main(int argc, char **argv)
             }
 
             total++;
-            if (test_valid_vector(zxc_path, exp_path)) {
+            if (!valid_case_for(stem)) {
+                fprintf(stderr, "FAIL: %s  has no entry in VALID_CASES\n", stem);
+                failed++;
+            } else if (test_valid_vector(zxc_path, exp_path)) {
                 printf("  PASS: %s\n", stem);
                 passed++;
             } else {
@@ -652,10 +556,11 @@ int main(int argc, char **argv)
     printf("\n=== Invalid vector recipes (%s) ===\n", invalid_dir);
     {
         invalid_bases_t bases = {0};
-        for (size_t i = 0; i < INVALID_GENERATED_COUNT; i++) {
+        for (size_t i = 0; i < INVALID_EXPECT_COUNT; i++) {
+            if (!INVALID_EXPECT[i].generated) continue;
             total++;
-            if (test_invalid_recipe(invalid_dir, &bases, INVALID_GENERATED[i])) {
-                printf("  PASS: %s\n", INVALID_GENERATED[i]);
+            if (test_invalid_recipe(invalid_dir, &bases, INVALID_EXPECT[i].name)) {
+                printf("  PASS: %s\n", INVALID_EXPECT[i].name);
                 passed++;
             } else {
                 failed++;

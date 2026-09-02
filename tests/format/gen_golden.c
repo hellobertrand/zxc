@@ -11,13 +11,14 @@
  * Regenerates every tests/format/golden/<name>.zxc from the deterministic
  * specifications in golden_cases.h. This is a MAINTAINER tool, not part of the
  * normal test run: CI never re-compresses the golden files, it only validates
- * and hashes the frozen bytes (see test_golden.c and .github/workflows/golden.yml).
+ * and hashes the frozen bytes (see test_golden.c and the vector-stability workflow).
  *
  * Usage:
  *   zxc_golden_gen <output-dir>     # defaults to "tests/format/golden"
  *
- * After regenerating, refresh the byte-stability manifest from the repo root:
- *   sha256sum tests/format/golden/[asterisk].zxc > tests/format/golden.sha256
+ * After regenerating, refresh the manifest and the annotated dumps:
+ *   sha256sum tests/format/golden/[asterisk].zxc | sort -k2 > tests/format/golden.sha256
+ *   zxc_format_golden_test --dump tests/format/golden
  *
  * Review the resulting binary diff carefully: any change here is, by design, a
  * wire-format change that must be intentional.
@@ -35,45 +36,12 @@
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_error.h"
+#include "../vector_io.h"
 #include "golden_cases.h"
-
-/* Open a file for binary writing with owner-only permissions (0600), mirroring
- * tests/test_common.c::create_restricted_file. Avoids fopen()'s world-writable
- * 0666 default flagged by CodeQL. */
-static FILE* open_restricted_wb(const char* path) {
-#ifdef _MSC_VER
-    int fd = -1;
-    _sopen_s(&fd, path, _O_CREAT | _O_WRONLY | _O_TRUNC | _O_BINARY, _SH_DENYNO,
-             _S_IREAD | _S_IWRITE);
-    return fd >= 0 ? _fdopen(fd, "wb") : NULL;
-#else
-    const int fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR);
-    return fd >= 0 ? fdopen(fd, "wb") : NULL;
-#endif
-}
-
-static int write_file(const char* path, const uint8_t* data, size_t size) {
-    FILE* f = open_restricted_wb(path);
-    if (!f) {
-        fprintf(stderr, "  cannot open %s for writing\n", path);
-        return -1;
-    }
-    if (size && fwrite(data, 1, size, f) != size) {
-        fprintf(stderr, "  short write to %s\n", path);
-        fclose(f);
-        return -1;
-    }
-    fclose(f);
-    return 0;
-}
-
-static int output_dir_is_safe(const char* dir) {
-    return dir[0] != '\0' && strstr(dir, "..") == NULL;
-}
 
 int main(int argc, char** argv) {
     const char* dir = (argc > 1) ? argv[1] : "tests/format/golden";
-    if (!output_dir_is_safe(dir)) {
+    if (!vio_dir_is_safe(dir)) {
         fprintf(stderr, "refusing output directory '%s': must not be empty or contain '..'\n", dir);
         return EXIT_FAILURE;
     }
@@ -105,7 +73,7 @@ int main(int argc, char** argv) {
         } else {
             char path[1024];
             snprintf(path, sizeof path, "%s/%s.zxc", dir, gc->name);
-            if (write_file(path, out, (size_t)csize) == 0)
+            if (vio_write_file(path, out, (size_t)csize) == 0)
                 printf("  wrote %-14s %8lld bytes\n", gc->name, (long long)csize);
             else
                 failures++;

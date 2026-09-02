@@ -26,8 +26,6 @@
  * Each file is also round-tripped: decompressed and compared byte-for-byte
  * against its deterministically regenerated input (see golden_cases.h).
  *
- * Unlike the generator, this runs in CI on every platform. It only ever reads
- * the committed bytes; it never re-compresses, so it is fully deterministic.
  */
 
 #include <fcntl.h>
@@ -48,6 +46,7 @@
  * and the little-endian load helpers used to recompute the on-disk integrity
  * fields. Header-only (static inline), so no extra linkage is required. */
 #include "../../src/lib/zxc_internal.h"
+#include "../vector_io.h"
 #include "golden_cases.h"
 
 /* ------------------------------------------------------------------------- */
@@ -56,30 +55,37 @@
 
 static int g_checks; /* assertions performed in the current file */
 
-/* Annotated field dump of the file being validated, built in memory.
- *
- * Emitted by the validation walk itself: each EMIT sits beside the CHECK that
- * reads the same field, so there is one parser of the wire format, not two.
- * The committed dumps make a golden change reviewable, since a binary diff only
- * says "Binary files differ"; this test rebuilds and compares them, so a golden
- * edited without refreshing its dump fails here. In memory, not streamed, so
- * the same bytes serve both --dump and the comparison. */
+/* Annotated field dump, built in memory so the same bytes serve --dump and the
+ * comparison. Each EMIT sits beside the CHECK reading that field, so there is
+ * one parser of the wire format, not two. */
 static char* g_dump;
 static size_t g_dump_len, g_dump_cap;
+/* Sticky: a dropped line would make a correct dump look stale, and the advice
+ * to regenerate would then overwrite it with the truncated text. */
+static int g_dump_failed;
 
-static void dump_reset(void) { g_dump_len = 0; }
+static void dump_reset(void) {
+    g_dump_len = 0;
+    g_dump_failed = 0;
+}
 
 static void dump_printf(const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     int need = vsnprintf(NULL, 0, fmt, ap);
     va_end(ap);
-    if (need < 0) return;
+    if (need < 0) {
+        g_dump_failed = 1;
+        return;
+    }
     if (g_dump_len + (size_t)need + 1 > g_dump_cap) {
         size_t cap = g_dump_cap ? g_dump_cap * 2 : 4096;
         while (cap < g_dump_len + (size_t)need + 1) cap *= 2;
         char* grown = (char*)realloc(g_dump, cap);
-        if (!grown) return;
+        if (!grown) {
+            g_dump_failed = 1;
+            return;
+        }
         g_dump = grown;
         g_dump_cap = cap;
     }
@@ -112,27 +118,6 @@ static void emit_hex(const char* label, const uint8_t* p, size_t n) {
 /* ------------------------------------------------------------------------- */
 /* File IO                                                                   */
 /* ------------------------------------------------------------------------- */
-
-static uint8_t* read_file(const char* path, size_t* out_size) {
-    FILE* f = fopen(path, "rb");
-    if (!f) return NULL;
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (len < 0) {
-        fclose(f);
-        return NULL;
-    }
-    uint8_t* buf = (uint8_t*)malloc((size_t)len ? (size_t)len : 1);
-    if (buf && len > 0 && fread(buf, 1, (size_t)len, f) != (size_t)len) {
-        free(buf);
-        fclose(f);
-        return NULL;
-    }
-    fclose(f);
-    *out_size = (size_t)len;
-    return buf;
-}
 
 /* ------------------------------------------------------------------------- */
 /* Per-payload sub-header validation (FORMAT.md Sec 5)                          */
@@ -330,6 +315,10 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
             if (!validate_lz_payload(ctx, payload, comp, 0, -1)) return 0;
         }
 
+        /* The fields above describe the payload; this covers its bytes, so a
+         * rewrite leaving comp_size and the counts alone still shows up. */
+        EMIT("payload_hash:     0x%08X\n", zxc_checksum(payload, comp, ZXC_CHECKSUM_RAPIDHASH));
+
         size_t phys = ZXC_BLOCK_HEADER_SIZE + comp;
         off += phys;
 
@@ -373,8 +362,13 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
                   block_phys[i]);
         }
         EMIT("\n[seek table @%zu]\n", off);
+        emit_hex("raw:", sh, ZXC_BLOCK_HEADER_SIZE);
+        EMIT("type:             SEK (%u)\n", sh[0]);
+        EMIT("comp_size:        %u\n", comp);
+        EMIT("header_checksum:  0x%02X\n", sh[7]);
         EMIT("entries:          %d\n", data_blocks);
-        for (int i = 0; i < data_blocks; i++) EMIT("  block[%d]:     %u bytes\n", i, block_phys[i]);
+        for (int i = 0; i < data_blocks; i++)
+            EMIT("  block[%d]:       %u bytes\n", i, zxc_le32(entries + (size_t)i * 4));
         off += ZXC_BLOCK_HEADER_SIZE + comp;
         seek_present = 1;
     }
@@ -440,23 +434,49 @@ static int validate_roundtrip(const char* ctx, const golden_case_t* gc, const ui
     return ok;
 }
 
-/* Owner-only (0600) write, as in gen_golden.c: fopen()'s 0666 default trips CodeQL. */
-static FILE* open_restricted_wb(const char* path) {
-#ifdef _MSC_VER
-    int fd = -1;
-    _sopen_s(&fd, path, _O_CREAT | _O_WRONLY | _O_TRUNC | _O_BINARY, _SH_DENYNO,
-             _S_IREAD | _S_IWRITE);
-    return fd >= 0 ? _fdopen(fd, "wb") : NULL;
-#else
-    const int fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR);
-    return fd >= 0 ? fdopen(fd, "wb") : NULL;
-#endif
+/* golden.sha256 proves the bytes have not moved; only this proves the encoder
+ * still produces them. 11_glo_rle drifted four commits unnoticed without it. */
+static int validate_recipe(const char* ctx, const golden_case_t* gc, const uint8_t* have,
+                           size_t have_size) {
+    g_checks++;
+    uint8_t* input = NULL;
+    const size_t in_size = gc->make_input(&input);
+    const size_t cap = (size_t)zxc_compress_bound(in_size) + 4096;
+    uint8_t* out = (uint8_t*)malloc(cap);
+    if (!out) {
+        fprintf(stderr, "    FAIL [%s]: out of memory\n", ctx);
+        free(input);
+        return 0;
+    }
+
+    zxc_compress_opts_t opts = gc->opts;
+    if (gc->use_dict_huf) opts.dict_huf = gc_dict_huf_table();
+    const int64_t csize = zxc_compress(input, in_size, out, cap, &opts);
+
+    int ok = 0;
+    if (csize <= 0) {
+        fprintf(stderr, "    FAIL [%s]: compress -> %s\n", ctx, zxc_error_name((int)csize));
+    } else if ((size_t)csize != have_size || memcmp(out, have, have_size) != 0) {
+        fprintf(stderr,
+                "    FAIL [%s]: does not match its recipe (committed %zu bytes, recipe %lld)\n"
+                "      regenerate: zxc_golden_gen, then refresh golden.sha256 and the dumps\n",
+                ctx, have_size, (long long)csize);
+    } else {
+        ok = 1;
+    }
+    free(out);
+    free(input);
+    return ok;
 }
 
 /* --dump: (re)write the committed annotated dump for one case. */
 static int write_dump(const char* ctx, const char* path) {
+    if (g_dump_failed) {
+        fprintf(stderr, "    FAIL [%s]: dump incomplete, refusing to write %s\n", ctx, path);
+        return 0;
+    }
     /* "wb": the dumps are compared byte for byte, so no newline translation. */
-    FILE* f = open_restricted_wb(path);
+    FILE* f = vio_open_write(path);
     if (!f) {
         fprintf(stderr, "    FAIL [%s]: cannot write %s\n", ctx, path);
         return 0;
@@ -470,8 +490,12 @@ static int write_dump(const char* ctx, const char* path) {
 /* Default mode: the committed dump must match what the walk just produced. */
 static int check_dump(const char* ctx, const char* path) {
     g_checks++;
+    if (g_dump_failed) {
+        fprintf(stderr, "    FAIL [%s]: dump could not be built (out of memory)\n", ctx);
+        return 0;
+    }
     size_t n = 0;
-    uint8_t* have = read_file(path, &n);
+    uint8_t* have = vio_read_file(path, &n);
     if (!have) {
         fprintf(stderr, "    FAIL [%s]: missing %s\n", ctx, path);
         fprintf(stderr, "      regenerate: zxc_format_golden_test --dump tests/format/golden\n");
@@ -503,9 +527,16 @@ int main(int argc, char** argv) {
     const char* dir = "tests/format/golden";
     const char* dump_dir = NULL; /* --dump <outdir>: also write <name>.zxc.txt */
     for (int i = 1; i < argc;) {
-        if (strcmp(argv[i], "--dump") == 0 && i + 1 < argc) {
+        if (strcmp(argv[i], "--dump") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "--dump needs a directory\n");
+                return EXIT_FAILURE;
+            }
             dump_dir = argv[i + 1];
             i += 2;
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "unknown option '%s'\n", argv[i]);
+            return EXIT_FAILURE;
         } else {
             dir = argv[i];
             i++;
@@ -523,7 +554,7 @@ int main(int argc, char** argv) {
         snprintf(path, sizeof path, "%s/%s.zxc", dir, gc->name);
 
         size_t size = 0;
-        uint8_t* buf = read_file(path, &size);
+        uint8_t* buf = vio_read_file(path, &size);
         if (!buf) {
             fprintf(stderr, "  FAIL: cannot read %s\n", path);
             failed++;
@@ -534,7 +565,8 @@ int main(int argc, char** argv) {
         EMIT("file:             %s\n", gc->name);
 
         g_checks = 0;
-        int ok = validate_structure(ctx, gc, buf, size) && validate_roundtrip(ctx, gc, buf, size);
+        int ok = validate_structure(ctx, gc, buf, size) && validate_roundtrip(ctx, gc, buf, size) &&
+                 validate_recipe(ctx, gc, buf, size);
 
         if (ok) {
             char dump_path[1024];

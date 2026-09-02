@@ -23,6 +23,7 @@ header_checksum:  0x17
   enc_off:        1
   lit_comp:       123
   sect_total:     125
+payload_hash:     0xE0347B89
 block_checksum:   0xE0347B89
 
 [block 1 @195]
@@ -39,6 +40,7 @@ header_checksum:  0x95
   enc_off:        1
   lit_comp:       112
   sect_total:     116
+payload_hash:     0x9DBA393A
 block_checksum:   0x9DBA393A
 
 [block 2 @363]
@@ -55,6 +57,7 @@ header_checksum:  0x17
   enc_off:        1
   lit_comp:       123
   sect_total:     125
+payload_hash:     0x922BA02D
 block_checksum:   0x922BA02D
 
 [block 3 @542]
@@ -71,6 +74,7 @@ header_checksum:  0x95
   enc_off:        1
   lit_comp:       112
   sect_total:     116
+payload_hash:     0x14B60CCC
 block_checksum:   0x14B60CCC
 
 [block 4 @710]
@@ -87,6 +91,7 @@ header_checksum:  0xDB
   enc_off:        1
   lit_comp:       107
   sect_total:     113
+payload_hash:     0x08BD5E0E
 block_checksum:   0x08BD5E0E
 
 [block 5 @873]
@@ -103,6 +108,7 @@ header_checksum:  0x17
   enc_off:        1
   lit_comp:       123
   sect_total:     125
+payload_hash:     0x2C372D44
 block_checksum:   0x2C372D44
 
 [block 6 @1052]
@@ -111,13 +117,17 @@ type:             EOF (255)
 header_checksum:  0x02
 
 [seek table @1060]
+raw:              FE 00 00 18 00 00 00 25
+type:             SEK (254)
+comp_size:        24
+header_checksum:  0x25
 entries:          6
-  block[0]:     179 bytes
-  block[1]:     168 bytes
-  block[2]:     179 bytes
-  block[3]:     168 bytes
-  block[4]:     163 bytes
-  block[5]:     179 bytes
+  block[0]:       179 bytes
+  block[1]:       168 bytes
+  block[2]:       179 bytes
+  block[3]:       168 bytes
+  block[4]:       163 bytes
+  block[5]:       179 bytes
 
 [footer]
 raw:              09 53 00 00 00 00 00 00 91 41 E4 23

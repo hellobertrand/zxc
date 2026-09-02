@@ -6,18 +6,14 @@
  */
 
 /*
- * Valid-vector generator (maintainer tool).
+ * Valid-vector generator (maintainer tool). Recompresses each committed
+ * <name>.expected with the options valid_cases.h declares. The .expected
+ * plaintexts and the .zxd dictionaries are inputs, never written.
  *
- * Rebuilds conformance/<version>/valid/<name>.zxc by recompressing each committed
- * <name>.expected with the options valid_cases.h declares for it. The
- * .expected plaintexts and the .zxd dictionaries are inputs, never written.
- *
- * Usage:
  *   zxc_valid_gen [<vectors-dir>]    # defaults to "conformance/v8/valid"
  *
  * After a format bump the corpus moves to a new conformance/v<N>/: create it,
- * generate into it, then write its FORMAT_VERSION and vectors.sha256. The old
- * directory stays frozen -- it records what archives of that version look like.
+ * generate into it, then write its FORMAT_VERSION and vectors.sha256.
  */
 
 #include <fcntl.h>
@@ -33,62 +29,8 @@
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_dict.h"
 #include "../include/zxc_error.h"
+#include "../tests/vector_io.h"
 #include "valid_cases.h"
-
-/* Owner-only (0600) write, as in gen_golden.c: fopen()'s 0666 default trips CodeQL. */
-static FILE* open_restricted_wb(const char* path) {
-#ifdef _MSC_VER
-    int fd = -1;
-    _sopen_s(&fd, path, _O_CREAT | _O_WRONLY | _O_TRUNC | _O_BINARY, _SH_DENYNO,
-             _S_IREAD | _S_IWRITE);
-    return fd >= 0 ? _fdopen(fd, "wb") : NULL;
-#else
-    const int fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR);
-    return fd >= 0 ? fdopen(fd, "wb") : NULL;
-#endif
-}
-
-static uint8_t* read_file(const char* path, size_t* out_size) {
-    FILE* f = fopen(path, "rb");
-    if (!f) return NULL;
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return NULL;
-    }
-    const long len = ftell(f);
-    if (len < 0 || fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        return NULL;
-    }
-    /* +1 so a zero-length vector still yields a non-NULL pointer. */
-    uint8_t* buf = (uint8_t*)malloc((size_t)len + 1);
-    if (buf && len > 0 && fread(buf, 1, (size_t)len, f) != (size_t)len) {
-        free(buf);
-        buf = NULL;
-    }
-    fclose(f);
-    if (buf) *out_size = (size_t)len;
-    return buf;
-}
-
-static int write_file(const char* path, const uint8_t* data, size_t size) {
-    FILE* f = open_restricted_wb(path);
-    if (!f) {
-        fprintf(stderr, "  cannot open %s for writing\n", path);
-        return -1;
-    }
-    if (size && fwrite(data, 1, size, f) != size) {
-        fprintf(stderr, "  short write to %s\n", path);
-        fclose(f);
-        return -1;
-    }
-    fclose(f);
-    return 0;
-}
-
-static int output_dir_is_safe(const char* dir) {
-    return dir[0] != '\0' && strstr(dir, "..") == NULL;
-}
 
 /* Regenerate one vector. Returns 0 on success. */
 static int generate(const char* dir, const valid_case_t* vc) {
@@ -97,7 +39,7 @@ static int generate(const char* dir, const valid_case_t* vc) {
 
     snprintf(path, sizeof path, "%s/%s.expected", dir, vc->name);
     size_t in_size = 0;
-    uint8_t* input = read_file(path, &in_size);
+    uint8_t* input = vio_read_file(path, &in_size);
     if (!input) {
         fprintf(stderr, "  FAIL %s: cannot read %s\n", vc->name, path);
         return -1;
@@ -109,7 +51,7 @@ static int generate(const char* dir, const valid_case_t* vc) {
     if (vc->dict) {
         snprintf(path, sizeof path, "%s/%s", dir, vc->dict);
         size_t dict_file_size = 0;
-        dict_buf = read_file(path, &dict_file_size);
+        dict_buf = vio_read_file(path, &dict_file_size);
         if (!dict_buf) {
             fprintf(stderr, "  FAIL %s: cannot read %s\n", vc->name, path);
             free(input);
@@ -134,7 +76,7 @@ static int generate(const char* dir, const valid_case_t* vc) {
             fprintf(stderr, "  FAIL %s: compress -> %s\n", vc->name, zxc_error_name((int)csize));
         } else {
             snprintf(path, sizeof path, "%s/%s.zxc", dir, vc->name);
-            if (write_file(path, out, (size_t)csize) == 0) {
+            if (vio_write_file(path, out, (size_t)csize) == 0) {
                 printf("  wrote %-20s %8lld bytes  (level %d, block %zu KB%s%s)\n", vc->name,
                        (long long)csize, vc->opts.level, vc->opts.block_size / 1024U,
                        vc->opts.checksum_enabled ? ", checksum" : "",
@@ -152,7 +94,7 @@ static int generate(const char* dir, const valid_case_t* vc) {
 
 int main(int argc, char** argv) {
     const char* dir = (argc > 1) ? argv[1] : "conformance/v8/valid";
-    if (!output_dir_is_safe(dir)) {
+    if (!vio_dir_is_safe(dir)) {
         fprintf(stderr, "refusing output directory '%s': must not be empty or contain '..'\n", dir);
         return EXIT_FAILURE;
     }

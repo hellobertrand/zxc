@@ -23,6 +23,7 @@ header_checksum:  0x81
   enc_off:        0
   lit_comp:       1784
   sect_total:     7496
+payload_hash:     0x97F546E2
 
 [block 1 @7553]
 raw:              FF 00 00 00 00 00 00 02
