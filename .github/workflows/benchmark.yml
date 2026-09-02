@@ -77,9 +77,12 @@ jobs:
           # Use latest available compiler per platform
           if [ "$RUNNER_OS" = "Linux" ]; then
             export CC=gcc-14 CXX=g++-14
+            MOREFLAGS="-march=native"
+          else
+            MOREFLAGS="-mcpu=native -mno-outline"
           fi
 
-          make -j $SKIP_CODECS CC="${CC:-cc}" MOREFLAGS="-march=native"
+          make -j $SKIP_CODECS CC="${CC:-cc}" MOREFLAGS="$MOREFLAGS"
 
       - name: Cache Silesia Corpus
         id: cache-silesia
