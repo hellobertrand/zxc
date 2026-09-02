@@ -30,11 +30,17 @@
  * the committed bytes; it never re-compresses, so it is fully deterministic.
  */
 
+#include <fcntl.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#ifdef _MSC_VER
+#include <io.h>
+#include <share.h>
+#endif
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_error.h"
@@ -434,10 +440,23 @@ static int validate_roundtrip(const char* ctx, const golden_case_t* gc, const ui
     return ok;
 }
 
+/* Owner-only (0600) write, as in gen_golden.c: fopen()'s 0666 default trips CodeQL. */
+static FILE* open_restricted_wb(const char* path) {
+#ifdef _MSC_VER
+    int fd = -1;
+    _sopen_s(&fd, path, _O_CREAT | _O_WRONLY | _O_TRUNC | _O_BINARY, _SH_DENYNO,
+             _S_IREAD | _S_IWRITE);
+    return fd >= 0 ? _fdopen(fd, "wb") : NULL;
+#else
+    const int fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR);
+    return fd >= 0 ? fdopen(fd, "wb") : NULL;
+#endif
+}
+
 /* --dump: (re)write the committed annotated dump for one case. */
 static int write_dump(const char* ctx, const char* path) {
     /* "wb": the dumps are compared byte for byte, so no newline translation. */
-    FILE* f = fopen(path, "wb");
+    FILE* f = open_restricted_wb(path);
     if (!f) {
         fprintf(stderr, "    FAIL [%s]: cannot write %s\n", ctx, path);
         return 0;
@@ -483,11 +502,14 @@ static int check_dump(const char* ctx, const char* path) {
 int main(int argc, char** argv) {
     const char* dir = "tests/format/golden";
     const char* dump_dir = NULL; /* --dump <outdir>: also write <name>.zxc.txt */
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--dump") == 0 && i + 1 < argc)
-            dump_dir = argv[++i];
-        else
+    for (int i = 1; i < argc;) {
+        if (strcmp(argv[i], "--dump") == 0 && i + 1 < argc) {
+            dump_dir = argv[i + 1];
+            i += 2;
+        } else {
             dir = argv[i];
+            i++;
+        }
     }
 
     int failed = 0;

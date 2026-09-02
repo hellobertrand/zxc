@@ -286,7 +286,7 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
          * validates each entry against the block it claims to describe. */
         const size_t eof = find_eof_block(d, len, 0);
         const size_t sek = eof ? eof + ZXC_BLOCK_HEADER_SIZE : 0;
-        if (!sek || sek + ZXC_BLOCK_HEADER_SIZE > len || d[sek] != ZXC_BLOCK_SEK) {
+        if (!sek || sek + ZXC_BLOCK_HEADER_SIZE + 4 > len || d[sek] != ZXC_BLOCK_SEK) {
             fprintf(stderr, "  no SEK block found - the seekable base changed shape\n");
             ok = 0;
         } else {
@@ -295,8 +295,14 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
 
         /* --- Checksum defects (checksummed base) ---------------------------- */
     } else if (!strcmp(name, "bad_block_checksum")) {
-        const uint32_t comp = zxc_le32(d + BLK0 + 3);
-        d[BLK0 + ZXC_BLOCK_HEADER_SIZE + comp] ^= 0xFFU; /* trailing block checksum */
+        const size_t comp = zxc_le32(d + BLK0 + 3);
+        const size_t at = BLK0 + ZXC_BLOCK_HEADER_SIZE + comp;
+        if (at >= len) {
+            fprintf(stderr, "  block 0 claims %zu bytes, past the archive\n", comp);
+            ok = 0;
+        } else {
+            d[at] ^= 0xFFU; /* trailing block checksum */
+        }
     } else if (!strcmp(name, "corrupt_payload")) {
         d[PAY0 + ZXC_GLO_HEADER_BINARY_SIZE + 4] ^= 0xFFU; /* a literal byte */
 
