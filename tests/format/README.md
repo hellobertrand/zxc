@@ -71,7 +71,7 @@ golden edited without refreshing its dump fails locally, not just in CI.
 ## Byte stability
 
 `golden.sha256` is the frozen reference; the
-[`Golden Format Stability`](../../.github/workflows/golden.yml) CI job runs
+[`Test Vector Stability`](../../.github/workflows/vector-stability.yml) CI job runs
 `sha256sum -c` against it and checks the file set still matches.
 
 A failure means **the encoder's output changed**, which is not the same as a

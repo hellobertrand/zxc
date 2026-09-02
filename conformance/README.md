@@ -86,7 +86,7 @@ in step when adding one.
 `v<N>/vectors.sha256` freezes a corpus: the archives, the `.expected` outputs
 and the `.zxd` dictionaries — an `.expected` moved silently would move the
 reference every external decoder is measured against. The
-[`Conformance Vector Stability`](../.github/workflows/conformance-vectors.yml)
+[`Test Vector Stability`](../.github/workflows/vector-stability.yml)
 CI job fails on any changed byte, and checks the file set matches the manifest.
 
 Refresh it whenever the corpus changes on purpose:

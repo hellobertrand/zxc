@@ -1,0 +1,105 @@
+name: Test Vector Stability
+
+# Byte-stability of the two committed corpora. One job each, because they pin
+# different contracts and a failure means different things:
+#
+#   golden       the ENCODER'S OUTPUT changed -- not necessarily the format. An
+#                encoder improvement moves these bytes while still emitting a
+#                valid archive of the same version. Legitimate, it only has to
+#                be deliberate: regenerate, refresh the manifest in the same
+#                commit, and read the annotated dumps in the diff.
+#
+#   conformance  the published DECODER contract moved. These vectors are what
+#                third-party decoders validate against, so this is the grave
+#                one. The manifest covers the .expected plaintexts too: moving
+#                one silently would move the reference they are measured by.
+#
+# Separate jobs so the check that goes red names which contract broke.
+# See tests/format/README.md and conformance/README.md.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+
+jobs:
+  golden:
+    name: Golden files - byte stability
+    runs-on: ubuntu-slim
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify golden manifest is complete
+        run: |
+          comm_in_dir=$(find tests/format/golden -maxdepth 1 -name '*.zxc' | sort)
+          comm_in_manifest=$(awk '{print $2}' tests/format/golden.sha256 | sort)
+          if ! diff <(printf '%s\n' "$comm_in_dir") <(printf '%s\n' "$comm_in_manifest"); then
+            echo "::error::Golden file set does not match tests/format/golden.sha256."
+            echo "Regenerate with zxc_golden_gen and refresh the manifest (see tests/format/README.md)."
+            exit 1
+          fi
+
+      - name: Verify every golden has an annotated dump
+        run: |
+          expected=$(find tests/format/golden -maxdepth 1 -name '*.zxc' | sed 's/$/.txt/' | sort)
+          present=$(find tests/format/golden -maxdepth 1 -name '*.zxc.txt' | sort)
+          if ! diff <(printf '%s\n' "$expected") <(printf '%s\n' "$present"); then
+            echo "::error::Golden archives and annotated dumps are not in bijection."
+            echo "Refresh with: zxc_format_golden_test --dump tests/format/golden (see tests/format/README.md)."
+            exit 1
+          fi
+
+      - name: Verify golden bytes are unchanged
+        run: |
+          # A single changed byte in any golden file fails the job.
+          sha256sum -c tests/format/golden.sha256
+
+  conformance:
+    name: Conformance vectors - byte stability
+    runs-on: ubuntu-slim
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify every frozen corpus
+        run: |
+          shopt -s nullglob
+          dirs=(conformance/v*/)
+          if [ ${#dirs[@]} -eq 0 ]; then
+            echo "::error::No conformance/v<N>/ corpus found."
+            exit 1
+          fi
+          for d in "${dirs[@]}"; do
+            d="${d%/}"
+            echo "== $d (format version $(cat "$d/FORMAT_VERSION"))"
+
+            # Every corpus file must be listed in the manifest, and vice versa.
+            in_dir=$(find "$d/valid" "$d/invalid" -maxdepth 1 \
+                       \( -name '*.zxc' -o -name '*.expected' -o -name '*.zxd' \) | sort)
+            in_manifest=$(awk '{print $2}' "$d/vectors.sha256" | sort)
+            if ! diff <(printf '%s\n' "$in_dir") <(printf '%s\n' "$in_manifest"); then
+              echo "::error::$d vector set does not match $d/vectors.sha256."
+              exit 1
+            fi
+
+            archives=$(find "$d/valid" -maxdepth 1 -name '*.zxc' | sed 's/\.zxc$/.expected/' | sort)
+            outputs=$(find "$d/valid" -maxdepth 1 -name '*.expected' | sort)
+            if ! diff <(printf '%s\n' "$archives") <(printf '%s\n' "$outputs"); then
+              echo "::error::$d archives and .expected outputs are not in bijection."
+              exit 1
+            fi
+
+            sha256sum -c "$d/vectors.sha256"
+          done
