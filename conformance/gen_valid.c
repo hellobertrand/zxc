@@ -135,7 +135,7 @@ static int generate(const char* dir, const valid_case_t* vc) {
             snprintf(path, sizeof path, "%s/%s.zxc", dir, vc->name);
             if (write_file(path, out, (size_t)csize) == 0) {
                 printf("  wrote %-20s %8lld bytes  (level %d, block %zu KB%s%s)\n", vc->name,
-                       (long long)csize, vc->opts.level, vc->opts.block_size / 1024u,
+                       (long long)csize, vc->opts.level, vc->opts.block_size / 1024U,
                        vc->opts.checksum_enabled ? ", checksum" : "",
                        vc->opts.seekable ? ", seekable" : "");
                 rc = 0;

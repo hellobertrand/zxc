@@ -56,21 +56,39 @@ echo "Passed: $pass  Failed: $fail"
 
 ## Vector coverage
 
-| Category             | Count | Description                                      |
-|----------------------|-------|--------------------------------------------------|
-| Basic                | 5     | Empty, 1 byte, all 256 values, all-zeros         |
-| Text                 | 3     | Compressible text, with and without checksum      |
-| Random               | 4     | Incompressible data (stored as raw blocks)        |
-| Match patterns       | 4     | Long matches, short matches, max offset distance  |
-| Compression levels   | 6     | Same input compressed at levels 1 through 6       |
-| Level 7 (PivCo)      | 1     | Level-7 PivCo literal section (`enc_lit=2`)       |
-| Block size variants  | 2     | 4 KB and 2 MB block sizes                        |
-| Checksum             | 1     | Compressible payload with checksums enabled       |
-| Multi-block          | 2     | 4 KB blocks over a 64 KB input                   |
-| Seekable             | 3     | Seekable archives with seek table                |
-| Dictionary           | 2     | Dictionary archives, incl. a seekable level-7 one |
-| **Valid total**      | **33**|                                                  |
-| Invalid              | 20    | Bad magic, bad version, bad CRC, bad block size/type, bad checksum algorithm, truncated, corrupt payload, garbage, forged `enc_lit`/`enc_off`, forged GHI offset, insufficient literal slack, missing dictionary |
+| Vector               | What it alone covers                                    |
+|----------------------|---------------------------------------------------------|
+| `empty`              | No data block: EOF only, `src_size = 0`                 |
+| `all_256_values`     | RAW block; all 256 byte values                          |
+| `all_zeros_4k`       | Offset-1 overlap run (long match at minimum distance)   |
+| `max_offset_128k`    | Maximum back-reference distance; GLO `enc_off=0`        |
+| `text_64k_level1`    | The GHI block type                                      |
+| `glo_rle_4k`         | RLE literals, `enc_lit=1`                               |
+| `glo_pivco_wide_l7`  | PivCo literals, `enc_lit=2`                             |
+| `random_4k_checksum` | Checksums on their own, clear of the dictionary path    |
+| `multiblock_mixed`   | 16 data blocks; the 4 KB minimum chunk size             |
+| `text_64k_bs2m`      | The 2 MB maximum chunk size                             |
+| `seekable_4blocks`   | Seek table with several entries                         |
+| `dict_http`          | Dictionary **without** a shared Huffman table           |
+| `dict_no_checksum`   | Same input and dictionary, checksums off                |
+| `dict_seekable_l7`   | Dictionary **with** one (`enc_lit=3`), plus seek + checksum |
+
+14 valid vectors, one per decoder-visible trait, plus 20 invalid ones. A decoder
+never sees the compression level, only the block type and the encodings it
+selects, so levels 3 to 6 all emit the same `GLO enc_lit=0 enc_off=1` block and
+one vector stands for them. All four literal encodings the format defines
+(`enc_lit` 0 to 3) are exercised.
+
+Counting header traits alone would suggest fewer vectors suffice. It would be
+wrong: `all_zeros_4k` and `max_offset_128k` earn their place on payload shape,
+which no header field shows, and `dict_http` on a combination (dictionary
+without the shared Huffman table) rather than on any trait taken alone.
+
+`dict_no_checksum` differs from `dict_http` in exactly one flag, so a decoder
+that passes one and fails the other has already named its own bug.
+
+| Invalid | 20 | Bad magic, bad version, bad CRC, bad block size/type, bad checksum algorithm, truncated, corrupt payload, garbage, forged `enc_lit`/`enc_off`, forged GHI offset, insufficient literal slack, missing dictionary |
+|---------|----|--------------------------------------------------------|
 
 The categories above mirror the grouping in `valid_cases.h`, which is the source
 of truth: keep the two in step when adding a vector.

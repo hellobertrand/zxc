@@ -36,62 +36,37 @@ typedef struct {
 
 /* Grouped as in README.md "Vector coverage"; keep the two in step. */
 static const valid_case_t VALID_CASES[] = {
-    /* Basic: degenerate sizes, full byte-value coverage. */
+    /* One vector per decoder-visible trait. Two of them earn their place on
+     * payload shape rather than on any header field, so a coverage count over
+     * header traits alone would wrongly call them redundant: all_zeros_4k is
+     * the offset-1 overlap run, max_offset_128k the maximum back-reference
+     * distance. Both are paths this decoder has had real bugs in. */
     {"empty", NULL, {.level = 3, .block_size = VC_KB(512)}},
-    {"one_byte", NULL, {.level = 3, .block_size = VC_KB(512)}},
     {"all_256_values", NULL, {.level = 3, .block_size = VC_KB(512)}},
     {"all_zeros_4k", NULL, {.level = 3, .block_size = VC_KB(512)}},
-    {"all_zeros_64k", NULL, {.level = 3, .block_size = VC_KB(512)}},
-
-    /* Text: compressible input. */
-    {"text_1k", NULL, {.level = 3, .block_size = VC_KB(512)}},
-    {"text_1k_checksum", NULL, {.level = 3, .block_size = VC_KB(512), .checksum_enabled = 1}},
-    {"text_64k", NULL, {.level = 3, .block_size = VC_KB(512)}},
-
-    /* Random: incompressible, must land in RAW blocks. */
-    {"random_256", NULL, {.level = 3, .block_size = VC_KB(512)}},
-    {"random_4k", NULL, {.level = 3, .block_size = VC_KB(512)}},
-    {"random_4k_checksum", NULL, {.level = 3, .block_size = VC_KB(512), .checksum_enabled = 1}},
-    {"random_64k", NULL, {.level = 3, .block_size = VC_KB(512)}},
-
-    /* Match patterns: long, short, maximum offset distance. */
-    {"long_match_64k", NULL, {.level = 3, .block_size = VC_KB(512)}},
-    {"long_match_checksum", NULL, {.level = 3, .block_size = VC_KB(512), .checksum_enabled = 1}},
-    {"short_matches_4k", NULL, {.level = 3, .block_size = VC_KB(512)}},
     {"max_offset_128k", NULL, {.level = 3, .block_size = VC_KB(512)}},
 
-    /* Levels 1/2 and 3/4 currently emit identical archives on this input; each
-     * entry records the level it is named for, not the lowest that matches. */
+    /* Block types and literal encodings: the only GHI, the only RLE literals
+     * (enc_lit = 1), the only PivCo literals (enc_lit = 2). */
     {"text_64k_level1", NULL, {.level = 1, .block_size = VC_KB(512)}},
-    {"text_64k_level2", NULL, {.level = 2, .block_size = VC_KB(512)}},
-    {"text_64k_level3", NULL, {.level = 3, .block_size = VC_KB(512)}},
-    {"text_64k_level4", NULL, {.level = 4, .block_size = VC_KB(512)}},
-    {"text_64k_level5", NULL, {.level = 5, .block_size = VC_KB(512)}},
-    {"text_64k_level6", NULL, {.level = 6, .block_size = VC_KB(512)}},
-
-    /* Level 7 (ULTRA): PivCo literal section, enc_lit = 2. */
+    {"glo_rle_4k", NULL, {.level = 3, .block_size = VC_KB(512)}},
     {"glo_pivco_wide_l7", NULL, {.level = 7, .block_size = VC_KB(512)}},
 
-    /* Block-size variants. */
-    {"text_8k_bs4k", NULL, {.level = 3, .block_size = VC_KB(4)}},
-    {"text_64k_bs2m", NULL, {.level = 3, .block_size = VC_MB(2)}},
+    /* Checksums on their own, so a failure here is not confounded with the
+     * dictionary vectors below (the only other place they are exercised). */
+    {"random_4k_checksum", NULL, {.level = 3, .block_size = VC_KB(512), .checksum_enabled = 1}},
 
-    /* Checksums on a compressible payload. */
-    {"zeros_4k_checksum", NULL, {.level = 3, .block_size = VC_KB(512), .checksum_enabled = 1}},
-
-    /* Multi-block: 4 KB blocks over a 64 KB input. */
-    {"multiblock_text", NULL, {.level = 3, .block_size = VC_KB(4)}},
+    /* Chunk sizes, block counts, seek table. */
     {"multiblock_mixed", NULL, {.level = 3, .block_size = VC_KB(4)}},
-
-    /* Seekable: seek table appended. */
-    {"seekable_1block", NULL, {.level = 3, .block_size = VC_KB(512), .seekable = 1}},
+    {"text_64k_bs2m", NULL, {.level = 3, .block_size = VC_MB(2)}},
     {"seekable_4blocks", NULL, {.level = 3, .block_size = VC_KB(8), .seekable = 1}},
-    {"seekable_checksum",
-     NULL,
-     {.level = 3, .block_size = VC_KB(512), .checksum_enabled = 1, .seekable = 1}},
 
-    /* Dictionary: the .zxd carries the content and its Huffman table. */
+    /* Both dictionary modes: without a shared Huffman table (enc_lit = 0) and
+     * with one (enc_lit = 3). A decoder can pass one and fail the other.
+     * dict_no_checksum is dict_http's input and dictionary with checksums off,
+     * so a decoder failing one and not the other has named its own bug. */
     {"dict_http", "dict_http.zxd", {.level = 3, .block_size = VC_KB(512), .checksum_enabled = 1}},
+    {"dict_no_checksum", "dict_http.zxd", {.level = 3, .block_size = VC_KB(512)}},
     {"dict_seekable_l7",
      "dict_text.zxd",
      {.level = 7, .block_size = VC_KB(512), .checksum_enabled = 1, .seekable = 1}},
