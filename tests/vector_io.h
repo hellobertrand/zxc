@@ -89,7 +89,6 @@ static inline int vio_write_file(const char* path, const uint8_t* data, size_t s
     return 0;
 }
 
-/* Refuse an output directory that could climb out of the tree. */
 static inline int vio_dir_is_safe(const char* dir) {
     return dir[0] != '\0' && strstr(dir, "..") == NULL;
 }

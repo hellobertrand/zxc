@@ -20,19 +20,13 @@
  *   sha256sum tests/format/golden/[asterisk].zxc | sort -k2 > tests/format/golden.sha256
  *   zxc_format_golden_test --dump tests/format/golden
  *
- * Review the resulting binary diff carefully: any change here is, by design, a
- * wire-format change that must be intentional.
+ * A change here means the encoder's output moved, not necessarily the format;
+ * it only has to be intentional. Read the dump diff to see what moved.
  */
 
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#ifdef _MSC_VER
-#include <io.h>
-#include <share.h>
-#endif
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_error.h"

@@ -28,17 +28,11 @@
  *
  */
 
-#include <fcntl.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#ifdef _MSC_VER
-#include <io.h>
-#include <share.h>
-#endif
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_error.h"
@@ -317,7 +311,8 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
 
         /* The fields above describe the payload; this covers its bytes, so a
          * rewrite leaving comp_size and the counts alone still shows up. */
-        EMIT("payload_hash:     0x%08X\n", zxc_checksum(payload, comp, ZXC_CHECKSUM_RAPIDHASH));
+        const uint32_t payload_hash = zxc_checksum(payload, comp, ZXC_CHECKSUM_RAPIDHASH);
+        EMIT("payload_hash:     0x%08X\n", payload_hash);
 
         size_t phys = ZXC_BLOCK_HEADER_SIZE + comp;
         off += phys;
@@ -326,9 +321,8 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
             /* Sec 7.2 per-block checksum over the compressed payload only. */
             CHECK(off + ZXC_BLOCK_CHECKSUM_SIZE <= size, "missing block checksum at %zu", off);
             uint32_t stored = zxc_le32(buf + off);
-            uint32_t calc = zxc_checksum(payload, comp, ZXC_CHECKSUM_RAPIDHASH);
-            CHECK(stored == calc, "block checksum mismatch at %zu: got 0x%08X calc 0x%08X", off,
-                  stored, calc);
+            CHECK(stored == payload_hash, "block checksum mismatch at %zu: got 0x%08X calc 0x%08X",
+                  off, stored, payload_hash);
             EMIT("block_checksum:   0x%08X\n", stored);
             rolling = zxc_hash_combine_rotate(rolling, stored);
             off += ZXC_BLOCK_CHECKSUM_SIZE;
@@ -475,16 +469,11 @@ static int write_dump(const char* ctx, const char* path) {
         fprintf(stderr, "    FAIL [%s]: dump incomplete, refusing to write %s\n", ctx, path);
         return 0;
     }
-    /* "wb": the dumps are compared byte for byte, so no newline translation. */
-    FILE* f = vio_open_write(path);
-    if (!f) {
+    if (vio_write_file(path, (const uint8_t*)g_dump, g_dump_len) != 0) {
         fprintf(stderr, "    FAIL [%s]: cannot write %s\n", ctx, path);
         return 0;
     }
-    const int ok = fwrite(g_dump, 1, g_dump_len, f) == g_dump_len;
-    fclose(f);
-    if (!ok) fprintf(stderr, "    FAIL [%s]: short write on %s\n", ctx, path);
-    return ok;
+    return 1;
 }
 
 /* Default mode: the committed dump must match what the walk just produced. */
@@ -533,6 +522,10 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
             dump_dir = argv[i + 1];
+            if (!vio_dir_is_safe(dump_dir)) {
+                fprintf(stderr, "refusing --dump directory '%s'\n", dump_dir);
+                return EXIT_FAILURE;
+            }
             i += 2;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "unknown option '%s'\n", argv[i]);

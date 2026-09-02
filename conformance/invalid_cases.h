@@ -156,8 +156,12 @@ static int glo_layout(const uint8_t* d, size_t n, glo_layout_t* L) {
     L->tok = PAY0 + ZXC_GLO_HEADER_BINARY_SIZE + n_lit;
     L->off = L->tok + n_seq;
     L->extras = L->off + (size_t)n_seq * (enc_off ? 1u : 2u);
-    /* Both extras varints must be inside the payload for the patches to land. */
-    return L->extras + 8 <= PAY0 + comp && L->extras + 8 <= n;
+    if (L->extras + 8 > PAY0 + comp || L->extras + 8 > n) return 0;
+    for (uint32_t i = 0; i < n_seq; i++) {
+        const uint8_t tok = d[L->tok + i];
+        if ((tok >> 4) == 15u || (tok & 15u) == 15u) return 1;
+    }
+    return 0;
 }
 
 /* The four well-formed archives every vector is patched from. Built once. */
@@ -174,7 +178,10 @@ static int invalid_bases(invalid_bases_t* b) {
 
     uint8_t* text = NULL;
     const size_t text_n = make_text(&text);
-    if (!text_n) return 0;
+    if (!text_n) {
+        b->state = -1;
+        return 0;
+    }
 
     /* Zero-initialised is the documented "safe defaults" form. */
     zxc_compress_opts_t plain = {0};

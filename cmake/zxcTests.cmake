@@ -152,7 +152,10 @@ if(ZXC_BUILD_TESTS)
     # Maintainer-only tool that rebuilds the current version's valid vectors.
     add_executable(zxc_valid_gen conformance/gen_valid.c)
     target_link_libraries(zxc_valid_gen PRIVATE zxc_lib)
-    target_include_directories(zxc_valid_gen PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    target_include_directories(zxc_valid_gen PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src/lib
+        ${RAPIDHASH_INCLUDE_DIR})
     target_compile_definitions(zxc_valid_gen PRIVATE
         $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>)
     if(ZXC_ENABLE_COVERAGE)

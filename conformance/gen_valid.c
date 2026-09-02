@@ -10,27 +10,22 @@
  * <name>.expected with the options valid_cases.h declares. The .expected
  * plaintexts and the .zxd dictionaries are inputs, never written.
  *
- *   zxc_valid_gen [<vectors-dir>]    # defaults to "conformance/v8/valid"
+ *   zxc_valid_gen [<vectors-dir>]    # defaults to conformance/v<current>/valid
  *
  * After a format bump the corpus moves to a new conformance/v<N>/: create it,
  * generate into it, then write its FORMAT_VERSION and vectors.sha256.
  */
 
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#ifdef _MSC_VER
-#include <io.h>
-#include <share.h>
-#endif
 
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_dict.h"
 #include "../include/zxc_error.h"
 #include "../tests/vector_io.h"
 #include "valid_cases.h"
+#include "zxc_internal.h"
 
 /* Regenerate one vector. Returns 0 on success. */
 static int generate(const char* dir, const valid_case_t* vc) {
@@ -93,7 +88,9 @@ static int generate(const char* dir, const valid_case_t* vc) {
 }
 
 int main(int argc, char** argv) {
-    const char* dir = (argc > 1) ? argv[1] : "conformance/v8/valid";
+    char fallback[64];
+    snprintf(fallback, sizeof fallback, "conformance/v%u/valid", (unsigned)ZXC_FILE_FORMAT_VERSION);
+    const char* dir = (argc > 1) ? argv[1] : fallback;
     if (!vio_dir_is_safe(dir)) {
         fprintf(stderr, "refusing output directory '%s': must not be empty or contain '..'\n", dir);
         return EXIT_FAILURE;

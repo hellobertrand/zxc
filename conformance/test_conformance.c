@@ -226,6 +226,20 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
     /* The seek table is advisory metadata that a sequential decode ignores, so
      * a forged entry can only be caught where the entries are consumed. */
     if (exp->via_seekable) {
+        char good[2048];
+        snprintf(good, sizeof good, "%s/seekable_4blocks.zxc", valid_dir);
+        size_t good_n = 0;
+        uint8_t* good_buf = vio_read_file(good, &good_n);
+        zxc_seekable* control = good_buf ? zxc_seekable_open(good_buf, good_n) : NULL;
+        free(good_buf);
+        if (!control) {
+            fprintf(stderr, "FAIL: %s  seekable open rejects a well-formed archive too\n",
+                    zxc_path);
+            free(comp);
+            return 0;
+        }
+        zxc_seekable_free(control);
+
         zxc_seekable* s = zxc_seekable_open(comp, comp_sz);
         if (s) {
             fprintf(stderr, "FAIL: %s  seekable open accepted a forged seek table\n", zxc_path);
@@ -283,6 +297,9 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
             }
         }
         free(output);
+    } else {
+        fprintf(stderr, "FAIL: %s  out of memory\n", zxc_path);
+        ok = 0;
     }
 
     free(comp);
@@ -472,6 +489,24 @@ int main(int argc, char** argv) {
 
     int passed = 0, failed = 0, total = 0;
 
+    {
+        char vpath[1024];
+        snprintf(vpath, sizeof vpath, "%s/v%u/FORMAT_VERSION", root,
+                 (unsigned)ZXC_FILE_FORMAT_VERSION);
+        size_t vn = 0;
+        uint8_t* vbuf = vio_read_file(vpath, &vn);
+        const long declared = vbuf ? strtol((const char*)vbuf, NULL, 10) : -1;
+        free(vbuf);
+        total++;
+        if (declared != (long)ZXC_FILE_FORMAT_VERSION) {
+            fprintf(stderr, "FAIL: %s declares version %ld, expected %u\n", vpath, declared,
+                    (unsigned)ZXC_FILE_FORMAT_VERSION);
+            failed++;
+        } else {
+            passed++;
+        }
+    }
+
     /* --- Valid vectors --- */
     printf("=== Valid vectors (%s) ===\n", valid_dir);
     {
@@ -491,14 +526,14 @@ int main(int argc, char** argv) {
 
             snprintf(exp_path, sizeof exp_path, "%s/%s.expected", valid_dir, stem);
 
-            if (!file_exists(exp_path)) {
-                fprintf(stderr, "SKIP: %s  (no .expected file)\n", zxc_files.names[i]);
-                continue;
-            }
-
             total++;
+            /* Checked before the .expected lookup, so a stray archive cannot
+             * slip past by simply not having one. */
             if (!valid_case_for(stem)) {
                 fprintf(stderr, "FAIL: %s  has no entry in VALID_CASES\n", stem);
+                failed++;
+            } else if (!file_exists(exp_path)) {
+                fprintf(stderr, "FAIL: %s  has no .expected file\n", stem);
                 failed++;
             } else if (test_valid_vector(zxc_path, exp_path)) {
                 printf("  PASS: %s\n", stem);
