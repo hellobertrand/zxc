@@ -90,7 +90,7 @@ typedef struct {
     size_t dict_size;     /**< Dictionary size in bytes (0 = none). */
     const void* dict_huf; /**< Shared literal Huffman table: the same 128-byte header
                                used at compression time. Required if the archive has
-                               one, else ZXC_ERROR_DICT_MISMATCH. */
+                               one, else ZXC_ERROR_DICT_MISMATCH. Ignored without dict. */
     zxc_progress_callback_t progress_cb; /**< Optional progress callback (NULL to disable). */
     void* user_data;                     /**< User context pointer passed to progress_cb. */
 } zxc_decompress_opts_t;

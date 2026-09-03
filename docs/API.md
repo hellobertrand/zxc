@@ -1,6 +1,6 @@
 # ZXC API & ABI Reference
 
-**Library version**: 0.13.3
+**Library version**: 0.14.0
 **SOVERSION**: 4  
 **License**: BSD-3-Clause
 
@@ -138,7 +138,7 @@ libzxc.so.{SOVERSION}.{MAJOR}.{MINOR}.{PATCH}
 | Field | Description | Current |
 |-------|-------------|---------|
 | `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **4** |
-| `VERSION` | Tracks the library release. | **0.13.3** |
+| `VERSION` | Tracks the library release. | **0.14.0** |
 
 **Compatibility rule**: any binary compiled against SOVERSION N will load against
 any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
@@ -147,8 +147,8 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` -> `libzxc.so.4` -> `libzxc.so.0.13.3` |
-| macOS | `libzxc.dylib` -> `libzxc.4.dylib` -> `libzxc.0.13.3.dylib` |
+| Linux | `libzxc.so` -> `libzxc.so.4` -> `libzxc.so.0.14.0` |
+| macOS | `libzxc.dylib` -> `libzxc.4.dylib` -> `libzxc.0.14.0.dylib` |
 | Windows | `zxc.dll` + `zxc.lib` (import) |
 
 ---
@@ -260,8 +260,9 @@ typedef struct {
     const void* dict;         // Pre-trained dictionary content (NULL = none).
     size_t dict_size;         // Dictionary size in bytes (0 = none, max 64 KB).
     const void* dict_huf;     // Shared literal Huffman table, 128 bytes
-                              // (NULL = none; ignored without dict, and
-                              // ignored below level 6).
+                              // (NULL = none; ignored without dict). Codes
+                              // literals at levels 6-7 only, but is bound
+                              // into dict_id at every level.
     zxc_progress_callback_t progress_cb;  // Optional callback (NULL to disable).
     void*  user_data;                     // Passed through to progress_cb.
 } zxc_compress_opts_t;
@@ -356,7 +357,7 @@ equivalent to `ZXC_LEVEL_DEFAULT`).
 ZXC_EXPORT const char* zxc_version_string(void);
 ```
 
-Returns the library version as a null-terminated string (e.g. `"0.13.3"`).
+Returns the library version as a null-terminated string (e.g. `"0.14.0"`).
 The returned pointer is a compile-time constant and must not be freed.
 
 ### `zxc_compress_bound`
@@ -1392,14 +1393,14 @@ Declared in `<zxc_dict.h>`. Provides dictionary training, serialization (`.zxd` 
 > retraining only the table, supplying externally-sourced content).
 
 **When the shared table applies.** Huffman-coded literals exist only at levels 6
-(`ZXC_LEVEL_DENSITY`) and 7 (`ZXC_LEVEL_ULTRA`), so the shared table is consulted
-only there; at levels 1-5 `dict_huf` is accepted and ignored. The two directions
-are **not symmetric**: at compression time omitting it silently costs ratio,
-whereas at decompression time it is mandatory. `dict_id` is computed over the
-(content, table) pair, so an archive built with a `.zxd` and opened with its
-content alone is rejected up front with `ZXC_ERROR_DICT_MISMATCH`.
-`zxc_dict_load()` returns both parts in one call, so the safe habit is to always
-pass both.
+(`ZXC_LEVEL_DENSITY`) and 7 (`ZXC_LEVEL_ULTRA`), so the table only ever codes
+literals there. It is not ignored below that: `dict_id` is computed over the
+(content, table) pair at every level, so passing it changes the id written into
+the archive. The two directions are **not symmetric**: at compression time
+omitting it silently costs ratio; at decompression time it is mandatory, and an
+archive built with a `.zxd` and opened with its content alone is rejected up
+front with `ZXC_ERROR_DICT_MISMATCH` — at any level. `zxc_dict_load()` returns
+both parts in one call, so the safe habit is to always pass both.
 
 ### `zxc_dict_train`
 
@@ -1442,7 +1443,7 @@ ZXC_EXPORT int zxc_train_dict_huf(
 );
 ```
 
-Trains the **shared literal Huffman table** for an already-trained dictionary. It compresses the samples with `dict` and derives canonical code lengths from the real post-LZ literal distribution. The 128-byte table is required by `zxc_dict_save()` and can be attached at (de)compression time via the `dict_huf` option field. It only takes effect at levels 6-7 (see the note at the top of this section). Returns `ZXC_OK` or a negative error code.
+Trains the **shared literal Huffman table** for an already-trained dictionary. It compresses the samples with `dict` and derives canonical code lengths from the real post-LZ literal distribution. The 128-byte table is required by `zxc_dict_save()` and can be attached at (de)compression time via the `dict_huf` option field. It only codes literals at levels 6-7, but binds into `dict_id` at every level (see the note at the top of this section). Returns `ZXC_OK` or a negative error code.
 
 ### `zxc_dict_id`
 
