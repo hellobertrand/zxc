@@ -89,7 +89,7 @@ cmake -B build -DZXC_ENABLE_COVERAGE=ON
 cmake -B build -DZXC_DISABLE_SIMD=ON
 ```
 
-### Profile-Guided Optimization (PGO — Clang and GCC only)
+### Profile-Guided Optimization (PGO — Clang and GCC, single-config generators)
 
 PGO uses runtime profiling data to optimize branch layout, inlining decisions, and code placement.
 
@@ -97,6 +97,12 @@ PGO uses runtime profiling data to optimize branch layout, inlining decisions, a
 > profile-use flags: `cmake/zxcCompilerFlags.cmake` gates the whole PGO block on `NOT MSVC`, and so
 > does the missing-profile check. `GENERATE` and `USE` therefore produce an ordinary build, without
 > a warning. The steps below assume Clang or GCC.
+
+> **Written for a single-config generator** (Ninja, Unix Makefiles). Clang and GCC also drive Xcode
+> and Ninja Multi-Config, which ignore `CMAKE_BUILD_TYPE`: there, add `--config Release` to every
+> `cmake --build`, and run the workload from the per-configuration directory —
+> `build/Release/zxc_test` and `build/Release/zxc`. The profile directory is `build/pgo/` either
+> way, so step 3 is unchanged.
 
 **Step 1 - Build with instrumentation:**
 ```bash

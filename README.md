@@ -17,6 +17,7 @@ ZXC is a lossless compression **C library** (with official Rust, Python, Node.js
 
 - **Faster decode than LZ4, at a smaller size.** 22–75% faster decode at the default level (best on ARM64), rising to up to 2.6× in the speed-optimized tier, always at an equal-or-better compression ratio. See the [benchmarks](#benchmarks).
 - **Independently verified.** Merged into [lzbench](https://github.com/inikep/lzbench) (@inikep) and [TurboBench](https://github.com/powturbo/TurboBench) (@powturbo); every benchmark below is reproducible against 70+ codecs.
+- **Vendored in ClickHouse.** Available there as a column codec — behind `SET enable_zxc_codec = 1`. See the [ClickHouse codec reference](https://clickhouse.com/docs/reference/statements/create/table/codec).
 - **Cross-platform.** x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER (ppc64el), s390x, i386, with hand-tuned SIMD (SSE2/AVX2/AVX-512 on x86, NEON on ARMv8+).
 - **Built for "Write Once, Read Many."** Compress once at build time, decompress millions of times at run time.
 - **Production-grade.** Continuously fuzzed by Google [OSS-Fuzz](https://github.com/google/oss-fuzz), ASan/UBSan/Valgrind-clean, SLSA-signed releases, thread-safe API, BSD-3-Clause.
