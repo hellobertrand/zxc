@@ -106,283 +106,56 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
 [![PyPi](https://img.shields.io/pypi/v/zxc-compress)](https://pypi.org/project/zxc-compress)
 [![npm](https://img.shields.io/npm/v/zxc-compress)](https://www.npmjs.com/package/zxc-compress)
 
-### Option 1: Download Release (GitHub)
+| Ecosystem | Install |
+| :--- | :--- |
+| [vcpkg](https://vcpkg.io/) | `vcpkg install zxc`, or `"dependencies": ["zxc"]` in `vcpkg.json` |
+| [Conan](https://conan.io/) | `conan install -r conancenter --requires="zxc/[*]" --build=missing`, or `zxc/[*]` under `[requires]` in `conanfile.txt` |
+| [Homebrew](https://formulae.brew.sh/formula/zxc) | `brew install zxc` |
+| winget (Windows 10 1709+) | `winget install hellobertrand.zxc` |
+| Rust / Python / Node.js | `cargo add zxc-compress` &middot; `pip install zxc-compress` &middot; `npm install zxc-compress` |
 
-1.  Go to the [Releases page](https://github.com/hellobertrand/zxc/releases).
-2.  Download the archive matching your architecture (replace `<version>` with the release, e.g. `0.14.0`):
+The vcpkg and Conan Center recipes are maintained by their respective communities; if a version
+lags behind, open an issue on that registry's index repository.
 
-    **macOS:**
-    *   `zxc-<version>-macos-arm64.tar.gz` (NEON optimizations included).
+### From a release archive
 
-    **Linux:**
-    *   `zxc-<version>-linux-arm64.tar.gz` (NEON optimizations included).
-    *   `zxc-<version>-linux-x86_64.tar.gz` (Runtime dispatch for AVX2/AVX512).
+Pick the archive for your platform on the [Releases page](https://github.com/hellobertrand/zxc/releases)
+— `zxc-<version>-{linux,macos}-{x86_64,arm64}.tar.gz` or `zxc-<version>-windows-{x86_64,arm64}.zip`.
+x86_64 builds dispatch AVX2/AVX-512 at runtime; ARM64 builds carry NEON. `zxc-<version>.tar.gz` is
+the canonical source, reproducible with
+`git archive --format=tar --prefix=zxc-<version>/ v<version> | gzip -n -9`; `zxc-<version>.tar.zxc`
+is that same tar compressed with `zxc -7`, readable only by a `zxc` whose format version matches, so
+keep the `.tar.gz` for archival.
 
-    **Windows:**
-    *   `zxc-<version>-windows-x86_64.zip` (Runtime dispatch for AVX2/AVX512).
-    *   `zxc-<version>-windows-arm64.zip` (NEON optimizations included).
+Verify before extracting — the manifest is signed, so check it first:
 
-    **Source:**
-    *   `zxc-<version>.tar.gz` — canonical source, reproducible with
-        `git archive --format=tar --prefix=zxc-<version>/ v<version> | gzip -n -9`.
-    *   `zxc-<version>.tar.zxc` — the same tar compressed with `zxc -7`. Readable only by a
-        `zxc` whose format version matches, so keep the `.tar.gz` for archival.
-
-3.  Verify, then extract:
-    ```bash
-    # Integrity: the manifest is signed, so verify it before trusting it
-    minisign -Vm checksums.sha256 -P 'RWQV0cpiyJYPkxF5iIysJzKNtzcGphqeyyFkiFErLMo5UZkWisGBxkNB'
-    sha256sum -c checksums.sha256 --ignore-missing      # macOS: grep <file> checksums.sha256 | shasum -a 256 -c
-
-    # Authenticity: this workflow, from the commit the release points at
-    gh attestation verify zxc-<version>-linux-x86_64.tar.gz --repo hellobertrand/zxc
-
-    # Extract
-    tar -xzf zxc-<version>-linux-x86_64.tar.gz
-    sudo cp -r zxc-<version>-linux-x86_64/* /usr/local/
-    ```
-
-    Release tags are PGP-signed: `curl -sS https://github.com/hellobertrand.gpg | gpg --import`
-    then `git verify-tag v<version>`.
-
-    Each archive contains a versioned top-level directory with:
-    ```
-    bin/zxc                          # CLI binary
-    include/                         # C headers (zxc.h, zxc_buffer.h, ...)
-    lib/libzxc.a                     # Static library
-    lib/pkgconfig/libzxc.pc          # pkg-config support
-    lib/cmake/zxc/zxcConfig.cmake    # CMake find_package(zxc) support
-    ```
-
-4.  Use in your project:
-
-    **CMake:**
-    ```cmake
-    find_package(zxc REQUIRED)
-    target_link_libraries(myapp PRIVATE zxc::zxc_lib)
-    ```
-
-    **pkg-config:**
-    ```bash
-    cc myapp.c $(pkg-config --cflags --libs libzxc) -o myapp
-    ```
-
-### Option 2: vcpkg
-
-**Classic mode:**
 ```bash
-vcpkg install zxc
+minisign -Vm checksums.sha256 -P 'RWQV0cpiyJYPkxF5iIysJzKNtzcGphqeyyFkiFErLMo5UZkWisGBxkNB'
+sha256sum -c checksums.sha256 --ignore-missing      # macOS: grep <file> checksums.sha256 | shasum -a 256 -c
+gh attestation verify zxc-<version>-linux-x86_64.tar.gz --repo hellobertrand/zxc
+
+tar -xzf zxc-<version>-linux-x86_64.tar.gz
+sudo cp -r zxc-<version>-linux-x86_64/* /usr/local/
 ```
 
-**Manifest mode** (add to `vcpkg.json`):
-```json
-{
-  "dependencies": ["zxc"]
-}
-```
+Each archive holds `bin/zxc`, `include/`, `lib/libzxc.a`, `lib/pkgconfig/libzxc.pc` and
+`lib/cmake/zxc/zxcConfig.cmake`. Release tags are PGP-signed: `curl -sS https://github.com/hellobertrand.gpg | gpg --import`
+then `git verify-tag v<version>`. Full verification path: [SECURITY.md](.github/SECURITY.md).
 
-Then in your CMake project:
+### In your project
+
 ```cmake
-find_package(zxc CONFIG REQUIRED)
+find_package(zxc REQUIRED)          # find_package(zxc CONFIG REQUIRED) via vcpkg or Conan
 target_link_libraries(myapp PRIVATE zxc::zxc_lib)
 ```
 
-### Option 3: Conan
-
-You also can download and install zxc using the [Conan](https://conan.io/) package manager:
-
 ```bash
-    conan install -r conancenter --requires="zxc/[*]" --build=missing
+cc myapp.c $(pkg-config --cflags --libs libzxc) -o myapp
 ```
 
-Or add to your `conanfile.txt`:
-```ini
-[requires]
-zxc/[*]
-```
-
-The zxc package in Conan Center is kept up to date by
-[ConanCenterIndex](https://github.com/conan-io/conan-center-index) contributors.
-If the version is out of date, please create an issue or pull request on the Conan Center Index repository.
-
-### Option 4: Homebrew
-
-```bash
-brew install zxc
-```
-
-The formula is maintained in [homebrew-core](https://formulae.brew.sh/formula/zxc).
-
-### Option 5: Meson Subproject
-
-zxc ships a native `meson.build`, so any Meson project can pull it in as a
-subproject or via [WrapDB](https://mesonbuild.com/Wrapdb-projects.html).
-
-**1. Create `subprojects/zxc.wrap`:**
-```ini
-[wrap-git]
-url = https://github.com/hellobertrand/zxc.git
-revision = head
-depth = 1
-
-[provide]
-libzxc = libzxc_dep
-```
-
-**2. Use the dependency in your `meson.build`:**
-```meson
-zxc_dep = dependency('libzxc', fallback : ['zxc', 'libzxc_dep'])
-executable('myapp', 'main.c', dependencies : zxc_dep)
-```
-
-**3. Build:**
-```bash
-meson setup build
-meson compile -C build
-```
-
-When consumed as a subproject, only the library is built (CLI and tests are
-skipped automatically).
-
-### Option 6: CMake Subproject (vendored)
-
-zxc can be vendored directly into a CMake build, either as a git submodule with
-`add_subdirectory()` or through `FetchContent`:
-
-```cmake
-include(FetchContent)
-FetchContent_Declare(zxc
-    GIT_REPOSITORY https://github.com/hellobertrand/zxc.git
-    GIT_TAG        v0.14.0
-)
-FetchContent_MakeAvailable(zxc)
-
-target_link_libraries(myapp PRIVATE zxc::zxc_lib)
-```
-
-`zxc::zxc_lib` is the same target name the installed package exports, so
-switching between a vendored copy and `find_package(zxc)` needs no other
-change.
-
-When zxc is not the top-level project it builds the library only: the CLI, the
-tests, `-march=native`, LTO and the install rules all default to off, so the
-embedding project keeps full control of its own CTest registration and install
-set. Any of them can still be turned back on explicitly (`-DZXC_BUILD_CLI=ON`,
-`-DZXC_NATIVE_ARCH=ON`, `-DZXC_INSTALL=ON`, ...). `-march=native` is also
-ignored whenever CMake is cross-compiling, since it would encode the build
-host's ISA.
-
-Compiler flags follow the same rule. Vendored, zxc adds nothing to what it
-inherits from the parent: the optimisation level comes from the build type, and
-the warning level (`-Wall -Wextra`, `/W3`) and code generation policy
-(`-fomit-frame-pointer`, `-fstrict-aliasing`, `-ffunction-sections`,
-`-fdata-sections` and the matching dead-strip link options) are the embedding
-project's to set. An embedder that builds with frame pointers for its profiler,
-its own aliasing rules or a quiet build log keeps them. A configure-time warning
-fires if neither a build type nor an optimisation flag is set, since zxc would
-then be built unoptimised.
-
-Third-party code is vendored, never probed: `rapidhash.h` comes from the copy in
-the tree unless `-DZXC_USE_SYSTEM_RAPIDHASH=ON` asks for a system one, so a
-build cannot silently pick up a header from the host.
-
-### Option 7: Winget
-
-**Requirements:** Windows 10 1709 (or later)
-
-Use winget to install the zxc CLI: 
-
-```ps1
-winget install hellobertrand.zxc
-```
-
-### Option 8: Building from Source (CMake)
-
-**Requirements:** CMake (3.14+), C17 Compiler (Clang/GCC/MSVC).
-
-```bash
-git clone https://github.com/hellobertrand/zxc.git
-cd zxc
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-
-# Run tests
-ctest --test-dir build -C Release --output-on-failure
-
-# CLI usage
-./build/zxc --help
-
-# Install library, headers, and CMake/pkg-config files
-sudo cmake --install build
-```
-
-#### CMake Options
-
-| Option | Default (standalone) | Default (vendored) | Description |
-|--------|----------------------|--------------------|-------------|
-| `BUILD_SHARED_LIBS` | OFF | OFF | Build shared libraries instead of static (`libzxc.so`, `libzxc.dylib`, `zxc.dll`) |
-| `ZXC_NATIVE_ARCH` | ON | OFF | Enable `-march=native` for maximum performance |
-| `ZXC_ENABLE_LTO` | ON | OFF | Enable Link-Time Optimization (LTO) |
-| `ZXC_PGO_MODE` | OFF | OFF | Profile-Guided Optimization mode (`OFF`, `GENERATE`, `USE`) |
-| `ZXC_BUILD_CLI` | ON | OFF | Build command-line interface |
-| `ZXC_BUILD_TESTS` | ON | OFF | Build unit tests |
-| `ZXC_INSTALL` | ON | OFF | Generate install rules (headers, pkg-config, CMake package) |
-| `ZXC_ENABLE_COVERAGE` | OFF | OFF | Enable code coverage generation (disables LTO/PGO) |
-| `ZXC_DISABLE_SIMD` | OFF | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON) |
-| `ZXC_USE_SYSTEM_RAPIDHASH` | OFF | OFF | Use a system-installed `rapidhash.h` instead of the vendored copy |
-
-"Vendored" is a build where zxc is not the top-level project (`add_subdirectory()`,
-`FetchContent`): the embedding project then keeps control of its own compiler flags,
-test registration and install set.
-
-```bash
-# Build shared library
-cmake -B build -DBUILD_SHARED_LIBS=ON
-
-# Portable build (without -march=native)
-cmake -B build -DZXC_NATIVE_ARCH=OFF
-
-# Library only (no CLI, no tests)
-cmake -B build -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
-
-# Code coverage build
-cmake -B build -DZXC_ENABLE_COVERAGE=ON
-
-# Disable explicit SIMD code paths (compiler auto-vectorisation is unaffected)
-cmake -B build -DZXC_DISABLE_SIMD=ON
-```
-
-#### Profile-Guided Optimization (PGO)
-
-PGO uses runtime profiling data to optimize branch layout, inlining decisions, and code placement.
-
-**Step 1 - Build with instrumentation:**
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DZXC_PGO_MODE=GENERATE
-cmake --build build --parallel
-```
-
-**Step 2 - Run a representative workload to collect profile data:**
-```bash
-# Run the test suite (exercises all block types and compression levels)
-./build/zxc_test
-
-# Or compress/decompress representative data
-./build/zxc -b your_data_file
-```
-
-**Step 3 - (Clang only) Merge raw profiles:**
-```bash
-# Clang generates .profraw files that must be merged before use
-llvm-profdata merge -output=build/pgo/default.profdata build/pgo/*.profraw
-```
-> GCC uses a directory-based format and does not require this step.
-
-**Step 4 - Rebuild with profile data:**
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DZXC_PGO_MODE=USE
-cmake --build build --parallel
-```
+Vendoring zxc instead — CMake `FetchContent` or `add_subdirectory()`, a Meson subproject or WrapDB —
+and building from source, with the full option table and the PGO workflow:
+**[docs/INSTALL.md](docs/INSTALL.md)**.
 
 ### Packaging Status
 
@@ -508,30 +281,20 @@ The dictionary is stored as an external `.zxd` file — content plus shared lite
 The CLI is perfect for benchmarking or manually compressing assets.
 
 ```bash
-# Basic Compression (Level 3 is default)
-zxc -z input_file output_file
+# Compress. -z is implied, and the output name defaults to <input>.zxc
+zxc assets.tar                        # level 3 (default) -> assets.tar.zxc
+zxc -z -5 assets.tar assets.tar.zxc   # level 5
+zxc -z -S assets.tar assets.tar.zxc   # seekable: O(1) random-access decompression
 
-# High Compression (Level 5)
-zxc -z -5 input_file output_file
+# Decompress. "unzxc" is installed as an alias for "zxc -d"
+zxc -d assets.tar.zxc assets.tar
+unzxc assets.tar.zxc assets.tar
 
-# Seekable Archive (enables O(1) random-access decompression)
-zxc -z -S input_file output_file
-
-# -z for compression can be omitted
-zxc input_file output_file
-
-# as well as output file; it will be automatically assigned to input_file.zxc
-zxc input_file
-
-# Decompression
-zxc -d compressed_file output_file
-
-# When installed, "unzxc" is an alias for "zxc -d"
-unzxc compressed_file output_file
-
-# Benchmark Mode (Testing speed on your machine)
-zxc -b input_file
+# Benchmark mode (testing speed on your machine)
+zxc -b assets.tar
 ```
+
+Every option is in `zxc --help` and the [man page](docs/man/zxc.1.md).
 
 #### Using with `tar`
 
@@ -553,9 +316,12 @@ zxc -d < archive.tar.zxc | tar xf -
 
 ### 2. API
 
-ZXC provides a **thread-safe API** with two usage patterns. Parameters are passed through dedicated options structs, making call sites self-documenting and forward-compatible.
+ZXC provides a **thread-safe API** with two usage patterns. Parameters are passed through dedicated
+options structs, making call sites self-documenting and forward-compatible. Buffers are
+caller-allocated with explicit bounds, calls are stateless, checksum validation is optional, block
+sizes run from 4 KB to 2 MB (powers of two), and streaming is multi-threaded with auto-detection of
+the CPU core count.
 
-#### Buffer API (In-Memory)
 ```c
 #include "zxc.h"
 
@@ -573,55 +339,14 @@ zxc_decompress_opts_t d_opts = { .checksum_enabled = 1 };
 int64_t decompressed_size = zxc_decompress(src, src_size, dst, dst_capacity, &d_opts);
 ```
 
-#### Stream API (Files, Multi-Threaded)
-```c
-#include "zxc.h"
+The same options structs drive the other entry points: `zxc_stream_compress()` /
+`zxc_stream_decompress()` for multi-threaded file streaming, reusable `zxc_cctx` / `zxc_dctx`
+contexts for tight loops where per-call `malloc`/`free` overhead matters (settings are **sticky**,
+so passing `NULL` reuses those given at creation), and `.seekable = 1` to append a seek table for
+O(1) random-access decompression.
 
-// Compression (auto-detect threads, level 3, checksum on)
-zxc_compress_opts_t c_opts = {
-    .n_threads        = 0,               // 0 = auto
-    .level            = ZXC_LEVEL_DEFAULT,
-    .checksum_enabled = 1,
-    /* .block_size = 0 -> 512 KB default */
-};
-int64_t bytes_written = zxc_stream_compress(f_in, f_out, &c_opts);
-
-// Decompression
-zxc_decompress_opts_t d_opts = { .n_threads = 0, .checksum_enabled = 1 };
-int64_t bytes_out = zxc_stream_decompress(f_in, f_out, &d_opts);
-```
-
-#### Reusable Context API (Low-Latency / Embedded)
-
-For tight loops (e.g. filesystem plug-ins) where per-call `malloc`/`free`
-overhead matters, use opaque reusable contexts.
-Options are **sticky** - settings from `zxc_create_cctx()` are reused when
-passing `NULL`:
-```c
-#include "zxc.h"
-
-zxc_compress_opts_t opts = { .level = 3, .checksum_enabled = 0 };
-zxc_cctx* cctx = zxc_create_cctx(&opts);   // allocate once, settings remembered
-zxc_dctx* dctx = zxc_create_dctx();        // allocate once
-
-// reuse across many blocks - NULL reuses sticky settings:
-int64_t csz = zxc_compress_cctx(cctx, src, src_sz, dst, dst_cap, NULL);
-int64_t dsz = zxc_decompress_dctx(dctx, dst, csz, out, src_sz, NULL);
-
-zxc_free_cctx(cctx);
-zxc_free_dctx(dctx);
-```
-
-**Features:**
-- Caller-allocated buffers with explicit bounds
-- Thread-safe (stateless)
-- Configurable block sizes (4 KB – 2 MB, powers of 2)
-- Multi-threaded streaming (auto-detects CPU cores)
-- Optional checksum validation
-- Reusable contexts for high-frequency call sites
-- Seekable archives: optional seek table for O(1) random-access decompression (`.seekable = 1`)
-
-**[👉 See complete examples and advanced usage](docs/EXAMPLES.md)**
+**[👉 See complete examples and advanced usage](docs/EXAMPLES.md)** — stream API, reusable contexts,
+seekable readers, dictionaries and numeric pre-filters, as full compilable programs.
 
 ## Language Bindings
 
