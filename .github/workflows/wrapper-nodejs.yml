@@ -2,6 +2,17 @@ name: Wrapper Node.js
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to npm. Implied on a tag; set it to publish from a branch'
+        required: false
+        default: false
+        type: boolean
+      version:
+        description: 'Version to publish, without the leading v. Required when publishing from a branch'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -114,7 +125,7 @@ jobs:
     name: Publish to npm
     needs: [build, test]
     runs-on: ubuntu-slim
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || inputs.publish
     permissions:
       id-token: write
     defaults:
@@ -131,17 +142,27 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Verify Version Matches Release Tag
+      - name: Verify Version Matches Release
         env:
           RELEASE_TAG: ${{ github.ref_name }}
+          WANT_VERSION: ${{ inputs.version }}
         run: |
-          # Remove 'v' prefix if present
-          RELEASE_VERSION="${RELEASE_TAG#v}"
+          set -euo pipefail
+          # A branch dispatch has no tag to read the version from, so it must be
+          # stated. github.ref_name would be the branch name and never match.
+          if [ -n "$WANT_VERSION" ]; then
+            RELEASE_VERSION="${WANT_VERSION#v}"
+          elif [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
+            RELEASE_VERSION="${RELEASE_TAG#v}"
+          else
+            echo "Publishing from a branch requires the 'version' input"
+            exit 1
+          fi
 
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
 
           if [ "$RELEASE_VERSION" != "$PACKAGE_VERSION" ]; then
-            echo "Version mismatch: Release tag is $RELEASE_VERSION but package.json has $PACKAGE_VERSION"
+            echo "Version mismatch: expected $RELEASE_VERSION but package.json has $PACKAGE_VERSION"
             exit 1
           fi
 

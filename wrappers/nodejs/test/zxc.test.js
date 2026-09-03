@@ -173,8 +173,8 @@ describe("error handling", () => {
       zxc.decompress(Buffer.from([0x01, 0x02, 0x03]), { size: 100 });
       throw new Error("Should have thrown");
     } catch (err) {
-      expect(err.code).toBe(zxc.ERROR_NULL_INPUT);
-      expect(err.message).toBe("ZXC_ERROR_NULL_INPUT");
+      expect(err.code).toBe(zxc.ERROR_SRC_TOO_SMALL);
+      expect(err.message).toBe("ZXC_ERROR_SRC_TOO_SMALL");
     }
   });
 
@@ -186,7 +186,7 @@ describe("error handling", () => {
       zxc.decompress(fakeHeader, { size: 100 });
       throw new Error("Should have thrown");
     } catch (err) {
-      expect(err.code).toBe(zxc.ERROR_BAD_HEADER);
+      expect(err.code).toBe(zxc.ERROR_BAD_MAGIC);
     }
   });
 });
