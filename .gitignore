@@ -90,3 +90,4 @@ wrappers/wasm/zxc.wasm
 # Meson
 builddir*/
 subprojects/
+wrappers/nodejs/zxc-core/

@@ -7,13 +7,16 @@
   "files": [
     "lib/",
     "src/",
+    "zxc-core/",
     "CMakeLists.txt"
   ],
   "scripts": {
     "install": "cmake-js compile",
     "build": "cmake-js compile",
     "rebuild": "cmake-js rebuild",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "node scripts/vendor-core.mjs",
+    "postpack": "node scripts/vendor-core.mjs --clean"
   },
   "keywords": [
     "compression",

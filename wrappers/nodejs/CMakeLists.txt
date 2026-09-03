@@ -5,8 +5,17 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---- Core ZXC library ----
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../
-                 ${CMAKE_CURRENT_BINARY_DIR}/zxc_core_build)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../../src/lib/zxc_common.c)
+    set(ZXC_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/zxc-core/src/lib/zxc_common.c)
+    set(ZXC_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/zxc-core)
+else()
+    message(FATAL_ERROR
+            "ZXC core sources not found: expected them in ../../ (repo) or "
+            "zxc-core/ (published package).")
+endif()
+
+add_subdirectory(${ZXC_CORE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/zxc_core_build)
 
 # ---- Node.js addon ----
 include_directories(${CMAKE_JS_INC})
@@ -21,7 +30,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${ZXC_CORE_DIR}/include
     ${CMAKE_JS_INC}
 )
 
