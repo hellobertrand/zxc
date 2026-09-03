@@ -2,17 +2,6 @@ name: Wrapper Python
 
 on:
   workflow_dispatch:
-    inputs:
-      publish:
-        description: 'Publish to PyPI. Implied on a tag; set it to re-publish from a branch'
-        required: false
-        default: false
-        type: boolean
-      version:
-        description: 'Version the sdist must carry, without the leading v. Required when publishing from a branch'
-        required: false
-        default: ''
-        type: string
 
 permissions:
   contents: read
@@ -150,7 +139,7 @@ jobs:
     name: Publish to PyPI
     needs: [build_wheels, build_sdist, test_wheels]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || inputs.publish
+    if: startsWith(github.ref, 'refs/tags/')
     permissions:
       id-token: write
 
@@ -161,20 +150,12 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Verify Version Matches Release
+      - name: Verify Version Matches Release Tag
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-          WANT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          if [ -n "$WANT_VERSION" ]; then
-            want="${WANT_VERSION#v}"
-          elif [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
-            want="${RELEASE_TAG#v}"
-          else
-            echo "::error::Publishing from a branch requires the 'version' input"
-            exit 1
-          fi
+          want="${RELEASE_TAG#v}"
           shopt -s nullglob
           sdists=(dist/*.tar.gz)
           if [ "${#sdists[@]}" -ne 1 ]; then
@@ -185,11 +166,11 @@ jobs:
           got=$(basename "${sdists[0]}" .tar.gz)
           got="${got##*-}"
           if [ "$got" != "$want" ]; then
-            echo "::error::Version mismatch: expected $want but the sdist is $got"
+            echo "::error::Version mismatch: release tag is $want but the sdist is $got"
             ls dist/
             exit 1
           fi
-          echo "sdist version $got matches the requested $want"
+          echo "sdist version $got matches $RELEASE_TAG"
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
