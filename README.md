@@ -1,4 +1,4 @@
-# ZXC - Seekable Lossless Compression Built for Ultra-Fast Decode
+# ZXC - Lossless Compression Built for Ultra-Fast Decode
 
 [![Build & Release](https://github.com/hellobertrand/zxc/actions/workflows/build.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/build.yml)
 [![Code Quality](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml)
@@ -139,8 +139,21 @@ sudo cp -r zxc-<version>-linux-x86_64/* /usr/local/
 ```
 
 Each archive holds `bin/zxc`, `include/`, `lib/libzxc.a`, `lib/pkgconfig/libzxc.pc` and
-`lib/cmake/zxc/zxcConfig.cmake`. Release tags are PGP-signed: `curl -sS https://github.com/hellobertrand.gpg | gpg --import`
-then `git verify-tag v<version>`. Full verification path: [SECURITY.md](.github/SECURITY.md).
+`lib/cmake/zxc/zxcConfig.cmake`.
+
+Release tags are PGP-signed. Check the key's fingerprint against the one published in
+[SECURITY.md](.github/SECURITY.md) *before* importing it — otherwise the import is circular, and
+`git verify-tag` would validate a signature made by whatever key the download happened to supply
+(it also exits 0 for a key you have never certified):
+
+```bash
+curl -sS https://github.com/hellobertrand.gpg -o zxc-maintainer.gpg
+gpg --show-keys --with-fingerprint zxc-maintainer.gpg   # compare with .github/SECURITY.md
+gpg --import zxc-maintainer.gpg                         # only once it matches
+git verify-tag v<version>
+```
+
+Full verification path: [SECURITY.md](.github/SECURITY.md).
 
 ### In your project
 

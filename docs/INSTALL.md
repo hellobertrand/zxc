@@ -7,23 +7,51 @@ source**.
 
 ## Building from source (CMake)
 
-**Requirements:** CMake (3.14+), C17 Compiler (Clang/GCC/MSVC).
+**Requirements:** CMake 3.14+, a C17 compiler (Clang, GCC or MSVC).
 
 ```bash
 git clone https://github.com/hellobertrand/zxc.git
 cd zxc
+```
+
+### Single-config generators (Unix Makefiles, Ninja)
+
+The default on Linux and macOS. The build type is fixed at configure time.
+
+```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 
-# Run tests
-ctest --test-dir build -C Release --output-on-failure
+# Run tests. CMake 3.20+ can use: ctest --test-dir build --output-on-failure
+cd build && ctest --output-on-failure && cd ..
 
 # CLI usage
 ./build/zxc --help
 
-# Install library, headers, and CMake/pkg-config files
-sudo cmake --install build
+# Install library, headers, pkg-config and CMake package files.
+# CMake 3.15+ can use: sudo cmake --install build
+sudo cmake --build build --target install
 ```
+
+### Multi-config generators (Visual Studio, Xcode, Ninja Multi-Config)
+
+Here the build type is chosen at *build* time, so `CMAKE_BUILD_TYPE` is ignored at configure time
+and `--config` is required at build, test and install time. Artifacts land in a per-configuration
+subdirectory: the CLI is `build/Release/zxc`, not `build/zxc`.
+
+```bash
+cmake -B build
+cmake --build build --config Release --parallel
+
+cd build
+ctest -C Release --output-on-failure
+cd ..
+
+cmake --build build --config Release --target install
+```
+
+Installing into a system prefix needs `sudo` on Unix or an elevated shell on Windows. Pass
+`-DCMAKE_INSTALL_PREFIX=<dir>` at configure time to install somewhere writable instead.
 
 ### CMake options
 
@@ -61,9 +89,14 @@ cmake -B build -DZXC_ENABLE_COVERAGE=ON
 cmake -B build -DZXC_DISABLE_SIMD=ON
 ```
 
-### Profile-Guided Optimization (PGO)
+### Profile-Guided Optimization (PGO — Clang and GCC only)
 
 PGO uses runtime profiling data to optimize branch layout, inlining decisions, and code placement.
+
+> **Not available with MSVC.** `ZXC_PGO_MODE` is accepted there but emits no instrumentation and no
+> profile-use flags: `cmake/zxcCompilerFlags.cmake` gates the whole PGO block on `NOT MSVC`, and so
+> does the missing-profile check. `GENERATE` and `USE` therefore produce an ordinary build, without
+> a warning. The steps below assume Clang or GCC.
 
 **Step 1 - Build with instrumentation:**
 ```bash
