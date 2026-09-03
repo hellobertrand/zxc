@@ -35,7 +35,7 @@ CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go build ./...
 Releases are tagged `wrappers/go/vX.Y.Z`, so the module can be pinned to one:
 
 ```bash
-go get github.com/hellobertrand/zxc/wrappers/go@v0.13.3
+go get github.com/hellobertrand/zxc/wrappers/go@v0.14.0
 ```
 
 Without a version, `go get` resolves to a pseudo-version of the default branch,

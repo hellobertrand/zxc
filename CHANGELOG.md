@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.14.0] - 2026-09-03
+api: Pin the glibc floor at 2.34, make libzxc.pc relocatable (#385)
+api: Wire format v8, faster overlap copies, stricter block validation (#374)
+perf: Optimizes PivCo Huffman with advanced SIMD (#373)
+perf: Make the short match distance floor a default policy (#376)
+perf: Widen the PivCo merge to 256 bits on AVX2 (#377)
+perf: Improve code and enhances robustness (#391)
+fix: Validates in-place footer size and buffer separation (#375)
+build: bump setuptools from 83.0.0 to 84.0.0 in /wrappers/python (#397)
+build: bump build from 1.5.0 to 1.6.0 in /wrappers/python (#394)
+build: bump cibuildwheel from 4.1.1 to 4.2.0 in /wrappers/python (#398)
+build: bump vitest from 4.1.10 to 4.1.11 in /wrappers/nodejs (#395)
+build: bump thiserror from 2.0.19 to 2.0.20 in /wrappers/rust (#393)
+build: bump cc from 1.4.0 to 1.4.4 in /wrappers/rust (#392)
+build: bump node-addon-api from 8.9.1 to 8.9.2 in /wrappers/nodejs (#396)
+build: bump github/codeql-action/analyze from 4.36.0 to 4.37.9 (#400)
+build: bump pypa/gh-action-pypi-publish from 1.14.0 to 1.14.2 (#402)
+build: bump cross-platform-actions/action from 1.2.0 to 1.5.0 (#401)
+build: bump meson from 1.11.2 to 1.12.0 in /.github/requirements (#399)
+build: bump actions/setup-go from 6.4.0 to 7.0.0 (#404)
+build: Rename release checksum manifest to checksums.sha256
+build: Improve release verifiability and automation (#383)
+doc: Fix hexdump examples
+doc: clean up Doxygen warnings and improve API documentation structure (#390) (#378)
+doc: rename CRC to checksum in documentation and code comments (#389)
+misc: Enhances format testing and maintainability (#407)
+misc: formalize Developer Certificate of Origin requirements (#388)
+misc: Enforce 10-minute timeout for CI jobs (#387)
+misc: Drop the tag's "v" from the SBOM file name
+
 ## [0.13.3] - 2026-08-17
 api: Refine comments for improved clarity (#366)
 perf: Optimizes decode offset validation and clarifies GHI format (#368)
