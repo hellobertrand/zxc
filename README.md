@@ -216,61 +216,38 @@ The required margin is one block, the accumulated per-block framing overhead, th
 
 ## Dictionary Compression
 
-For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dictionary dramatically improves compression ratio. Because the dictionary prefills the LZ77 sliding window at the *start of each block*, the benefit is per-block: a block only has its own preceding bytes as history, so the smaller the block, the more it leans on the dictionary for representative patterns. This applies whether the input is a single small payload or a large payload split into many small blocks — any time the block size is small enough that early bytes would otherwise lack history to match against.
+For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dictionary dramatically
+improves compression ratio. It prefills the LZ77 sliding window at the *start of each block*, so the
+benefit is per-block: the smaller the block, the less history of its own it has and the more it
+leans on the dictionary. That holds for a single small payload as much as for a large one split into
+many small blocks — anywhere early bytes would otherwise have nothing to match against.
 
-A `.zxd` also carries a **shared literal Huffman table**, trained on the post-LZ literal distribution of the corpus: blocks it encodes well drop their own 128-byte table header, a fixed cost small blocks cannot amortize. It applies at levels 6-7 only (the levels with Huffman-coded literals), and the CLI handles it end to end — `--train` always writes one, `-D` always loads it. Attaching it from the C API is [API.md §11b](docs/API.md#11b-dictionary-api).
+A `.zxd` also carries a **shared literal Huffman table**, trained on the post-LZ literal
+distribution of the corpus: blocks it encodes well drop their own 128-byte table header, a fixed
+cost small blocks cannot amortize. It codes literals at levels 6-7 only, and the CLI handles it end
+to end — `--train` always writes one, `-D` always loads it.
 
-**Typical use cases:** JSON API responses, small game assets, structured logs, key-value store records, RPC messages, and any large but homogeneous corpus compressed in small blocks for random access (e.g. seekable archives).
-
-### Training a dictionary
+**Typical use cases:** JSON API responses, small game assets, structured logs, key-value store
+records, RPC messages, and any large but homogeneous corpus compressed in small blocks for random
+access (e.g. seekable archives).
 
 ```bash
-# Train a dictionary from a corpus of similar files.
-# Without -o the dictionary is written as ./dictionary_<dict_id>.zxd.
+# Train from a corpus of similar files. Without -o: ./dictionary_<dict_id>.zxd
 zxc --train samples/*.json
+zxc --train -o corpus.zxd samples/*.json     # -o also accepts a directory
 
-# Choose the output file explicitly with -o:
-zxc --train -o corpus.zxd samples/*.json
-
-# Or point -o at a directory: the dictionary is saved as dictionary_<dict_id>.zxd
-# inside it (the dict_id embeds in the name), e.g. dicts/dictionary_bc46eec1.zxd
-zxc --train -o dicts/ samples/*.json
-```
-
-```c
-// C API
-const void* samples[] = { buf1, buf2, buf3 };
-size_t sizes[] = { len1, len2, len3 };
-uint8_t dict[32768];
-int64_t dict_sz = zxc_train_dict(samples, sizes, 3, dict, sizeof(dict));
-```
-
-### Compressing with a dictionary
-
-```bash
-# CLI — the same dictionary is required to decompress (pass it with -D)
+# The same dictionary is required to decompress: pass it with -D, there is no auto-lookup
 zxc -z -D corpus.zxd input.json
 zxc -d -D corpus.zxd input.json.zxc
 ```
 
-```c
-// C API — compression
-zxc_compress_opts_t copts = {
-    .level = ZXC_LEVEL_DEFAULT,
-    .dict = dict_content,
-    .dict_size = dict_sz,
-};
-int64_t compressed_size = zxc_compress(src, src_size, dst, dst_cap, &copts);
-
-// C API — decompression (same dictionary required)
-zxc_decompress_opts_t dopts = {
-    .dict = dict_content,
-    .dict_size = dict_sz,
-};
-int64_t original_size = zxc_decompress(compressed, comp_size, out, out_cap, &dopts);
-```
-
-The dictionary is stored as an external `.zxd` file — content plus shared literal table — and referenced by a 32-bit ID (`dict_id`) in the ZXC file header, covering both parts. The **same dictionary is required to decompress** and must be supplied explicitly with `-D` — there is no auto-lookup. Decompressing an archive that needs a dictionary without supplying one returns `ZXC_ERROR_DICT_REQUIRED`; supplying the wrong one returns `ZXC_ERROR_DICT_MISMATCH`. Training to a directory names the file `dictionary_<dict_id>.zxd`. See [FORMAT.md](docs/FORMAT.md) §12 for the full specification.
+The dictionary is an external `.zxd` file — content plus shared literal table — referenced by a
+32-bit `dict_id` in the archive header that covers both parts. Decompressing an archive that needs
+one without supplying it returns `ZXC_ERROR_DICT_REQUIRED`; supplying the wrong one returns
+`ZXC_ERROR_DICT_MISMATCH`. Training and attaching a dictionary from C:
+[EXAMPLES.md](docs/EXAMPLES.md#using-a-pre-trained-dictionary) and
+[API.md §11b](docs/API.md#11b-dictionary-api). Wire format:
+[FORMAT.md §12](docs/FORMAT.md#12-pre-trained-dictionary-support).
 
 ---
 
