@@ -657,41 +657,9 @@ dictionary format and §3.1 for the header fields.
 
 ## Meson Integration
 
-zxc can be consumed as a Meson subproject. This is the recommended approach for
-Meson-based projects that want to vendor or pin a specific zxc version.
-
-**Step 1 — Create `subprojects/zxc.wrap`:**
-
-```ini
-[wrap-git]
-url = https://github.com/hellobertrand/zxc.git
-revision = head
-depth = 1
-
-[provide]
-libzxc = libzxc_dep
-```
-
-**Step 2 — Declare the dependency in your `meson.build`:**
-
-```meson
-project('my_project', 'c', default_options : ['c_std=c17'])
-
-zxc_dep = dependency('libzxc', fallback : ['zxc', 'libzxc_dep'])
-
-executable('my_app', 'main.c', dependencies : zxc_dep)
-```
-
-When `zxc` is used as a subproject, the CLI and test suite are automatically
-skipped. Only the library is built.
-
-**Step 3 — Build and run:**
-
-```bash
-meson setup build
-meson compile -C build
-./build/my_app
-```
+Consuming zxc as a Meson subproject or through WrapDB — the `.wrap` file, the
+`meson.build` dependency and the build commands — is documented in
+[INSTALL.md](INSTALL.md#meson-subproject-or-wrapdb).
 
 ---
 
