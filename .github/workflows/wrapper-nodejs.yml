@@ -110,9 +110,43 @@ jobs:
       - name: Run tests
         run: npx vitest run --globals
 
+  package:
+    name: Install the packed tarball
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./wrappers/nodejs
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+
+      - name: Pack the tarball
+        run: npm pack --pack-destination "$RUNNER_TEMP"
+
+      - name: Install it into an empty project and use it
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          mkdir consumer && cd consumer
+          npm init -y > /dev/null
+          npm install ../zxc-compress-*.tgz
+          node -e '
+            const zxc = require("zxc-compress");
+            const data = Buffer.from("zxc packed-tarball roundtrip ".repeat(2000));
+            const back = zxc.decompress(zxc.compress(data, { level: 6 }));
+            if (!back.equals(data)) throw new Error("roundtrip mismatch");
+            console.log("packed tarball installs, compiles and round-trips");
+          '
+
   publish:
     name: Publish to npm
-    needs: [build, test]
+    needs: [build, test, package]
     runs-on: ubuntu-slim
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -135,6 +169,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
           # Remove 'v' prefix if present
           RELEASE_VERSION="${RELEASE_TAG#v}"
 

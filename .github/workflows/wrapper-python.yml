@@ -156,7 +156,15 @@ jobs:
         run: |
           set -euo pipefail
           want="${RELEASE_TAG#v}"
-          got=$(ls dist/*.tar.gz | head -1 | sed 's|.*/zxc-\(.*\)\.tar\.gz|\1|')
+          shopt -s nullglob
+          sdists=(dist/*.tar.gz)
+          if [ "${#sdists[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one sdist in dist/, found ${#sdists[@]}"
+            ls dist/
+            exit 1
+          fi
+          got=$(basename "${sdists[0]}" .tar.gz)
+          got="${got##*-}"
           if [ "$got" != "$want" ]; then
             echo "::error::Version mismatch: release tag is $want but the sdist is $got"
             ls dist/
