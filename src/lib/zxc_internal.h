@@ -524,6 +524,18 @@ extern "C" {
  * 32-byte store covers it. The escape path always yields more, so comparing
  * against this recovers "was the ml nibble inline". */
 #define ZXC_GLO_MAX_INLINE_ML ((ZXC_TOKEN_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 19 */
+/** @brief The same reach in the token's units (length minus ZXC_LZ_MIN_MATCH_LEN). */
+#define ZXC_GLO_INLINE_ML_CODE (ZXC_TOKEN_ML_MASK - 1U) /* 14 */
+
+/**
+ * @brief Worst-case sequence count for one block. Shared by the compressor's
+ *        buffer sizing and the decoder's token scratch: the decode side must
+ *        accept exactly what the compress side can emit, so both derive from
+ *        this single expression.
+ */
+static ZXC_ALWAYS_INLINE size_t zxc_cctx_max_seq(const size_t chunk_size) {
+    return chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
+}
 #define ZXC_GHI_MAX_INLINE_OUT_PER_SEQ \
     ((ZXC_SEQ_LL_MASK - 1U) + (ZXC_SEQ_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 513 */
 /** @brief Base bias added to encoded offsets (stored = actual - bias). */
@@ -531,15 +543,13 @@ extern "C" {
 /** @brief Maximum allowed offset distance. */
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
 
-/** @brief Match distance floor the encoder holds to at levels 1 to 5.
+/** @brief Match distance floor the encoder holds to at levels 1 to 5, sized to
+ *         the decoder's widest match-copy arm.
  *
- *  1 = off (default): every distance is emitted. 32, the decoder's widest
- *  match-copy arm, keeps the overlap kernel off the decode path: measured
- *  +9 % decode for +1.1 % size on silesia (2026-08), with the per-block guard
- *  @ref ZXC_LZ_MINDIST_MAX_SHORT_PCT. Levels 6 and 7 keep every distance.
- *  Encoder policy: no format bit moves, so any decoder of the same format
- *  version reads the result. Overridable on the compiler command line
- *  (-DZXC_LZ_MINDIST=32) for A/B runs. */
+ *  Keeps the overlap kernel off the decode path. Applied per block, and only where
+ *  @ref ZXC_LZ_MINDIST_MAX_SHORT_PCT clears it; levels 6 and 7 keep every
+ *  distance. Encoder policy: no format bit moves, so any decoder of the same
+ *  format version reads the result. 1 disables */
 #ifndef ZXC_LZ_MINDIST
 #define ZXC_LZ_MINDIST 32
 #endif
@@ -847,27 +857,25 @@ static inline int zxc_level_clamp(const int level) {
 #define ZXC_OPTS_LEVEL(o, dflt) zxc_level_clamp(((o) && (o)->level > 0) ? (o)->level : (dflt))
 /** @brief Block size, 0 meaning the default. */
 #define ZXC_OPTS_BLOCK_SIZE(o, dflt) (((o) && (o)->block_size > 0) ? (o)->block_size : (dflt))
-/**
- * @brief Per-level match-splitting caps (internal policy, no public knob yet):
- *        a match longer than the token's inline reach and up to the cap is
- *        emitted as inline pieces (see zxc_glo_put_seq). Both derive from that reach,
- *        @ref ZXC_GLO_MAX_INLINE_ML, so they follow the token layout:
- *        levels 3-5 split whatever fits in two pieces (38 bytes today);
- *        levels 6-7 only one full piece plus a minimum match (24), the
- *        cheapest split in size. Measured on silesia (2026-09): the two-piece
- *        cap is +22 % decode for +2 % size at levels 3-5. Overridable on the
- *        compiler command line (-DZXC_GLO_SPLIT_MAX_FAST=..) for A/B runs.
- */
-#ifndef ZXC_GLO_SPLIT_MAX_FAST
-#define ZXC_GLO_SPLIT_MAX_FAST (2U * ZXC_GLO_MAX_INLINE_ML)
+/** @name Per-block match splitting (zxc_glo_split_block), a level-table policy
+ *
+ *  Escaped matches up to split_max - in the token's units, length minus
+ *  ZXC_LZ_MIN_MATCH_LEN, so 14 is the inline reach - go out as inline pieces
+ *  at the same offset and the decoder skips its ML escape branch. The caps
+ *  sit in the level table (33 at level 3 = two inline pieces, 24 and 23 at
+ *  levels 4 and 5); the dense levels keep every escape. A block is split only
+ *  when its escape branch looks mispredicted: a per-context predictor over the
+ *  last CTX_BITS escapes must err on at least MIN_MISPREDICT_PCT of them, else
+ *  the decoder already predicts them and the split would only add sequences.
+ *  Overridable for A/B builds; MIN_MISPREDICT_PCT above 100 turns splitting off.
+ *  @{ */
+#ifndef ZXC_GLO_SPLIT_CTX_BITS
+#define ZXC_GLO_SPLIT_CTX_BITS 8
 #endif
-#ifndef ZXC_GLO_SPLIT_MAX_DENSE
-#define ZXC_GLO_SPLIT_MAX_DENSE (ZXC_GLO_MAX_INLINE_ML + ZXC_LZ_MIN_MATCH_LEN)
+#ifndef ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT
+#define ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT 80
 #endif
-/** @brief Split cap for a level (a cap <= ZXC_GLO_MAX_INLINE_ML disables). */
-static ZXC_ALWAYS_INLINE uint32_t zxc_glo_split_max(const int level) {
-    return (level >= ZXC_LEVEL_DENSITY) ? ZXC_GLO_SPLIT_MAX_DENSE : ZXC_GLO_SPLIT_MAX_FAST;
-}
+/** @} */
 
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below
  *         ::ZXC_LEVEL_ULTRA use ::ZXC_HUF_MAX_CODE_LEN_DENSITY, ::ZXC_LEVEL_ULTRA uses
@@ -1024,6 +1032,11 @@ typedef struct {
      *  candidates do not end the chain walk, which continues to a legal one
      *  further back. See @ref ZXC_LZ_MINDIST. */
     uint32_t min_offset;
+
+    /** Longest match re-emitted as inline pieces (zxc_glo_split_block), in the
+     *  token's units (length - ZXC_LZ_MIN_MATCH_LEN); <= ZXC_GLO_INLINE_ML_CODE
+     *  disables. GLO levels only. */
+    uint32_t split_max;
 } zxc_lz77_params_t;
 
 /**
@@ -1037,19 +1050,21 @@ typedef struct {
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
     // The distance floor stops at level 5: the slow levels keep every distance.
+    // Match splitting at the GLO speed levels only: levels 1-2 are GHI, and the
+    // dense levels keep every escape.
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
-    // step_shift, min_offset
+    // step_shift, min_offset, split_max
     static const zxc_lz77_params_t table[7] = {
-        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST},       // fallback
-        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST},       // level 1
-        {3, 18, 0, 0, 0, 3, 6, ZXC_LZ_MINDIST},       // level 2
-        {3, 16, 1, 4, 128, 1, 4, ZXC_LZ_MINDIST},     // level 3
-        {3, 18, 1, 4, 128, 1, 5, ZXC_LZ_MINDIST},     // level 4
-        {64, 256, 1, 16, 128, 1, 8, ZXC_LZ_MINDIST},  // level 5
-        {64, 256, 0, 0, 0, 1, 8, 1}                   // level 6
+        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST, 0},        // fallback
+        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST, 0},        // level 1
+        {3, 18, 0, 0, 0, 3, 6, ZXC_LZ_MINDIST, 0},        // level 2
+        {3, 16, 1, 4, 128, 1, 4, ZXC_LZ_MINDIST, 33},     // level 3
+        {3, 18, 1, 4, 128, 1, 5, ZXC_LZ_MINDIST, 24},     // level 4
+        {64, 256, 1, 16, 128, 1, 8, ZXC_LZ_MINDIST, 23},  // level 5
+        {64, 256, 0, 0, 0, 1, 8, 1, 0}                    // level 6
     };
     return (level >= ZXC_LEVEL_ULTRA)
-               ? (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8, 1}
+               ? (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8, 1, 0}
                : table[level < ZXC_LEVEL_FASTEST ? ZXC_LEVEL_FASTEST : level];
 }
 
