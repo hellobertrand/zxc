@@ -257,10 +257,9 @@ static ZXC_ALWAYS_INLINE int zxc_emit_extra(uint8_t* RESTRICT extras, size_t* RE
  */
 static ZXC_ALWAYS_INLINE int zxc_glo_put_seq(uint8_t* RESTRICT buf_tokens,
                                              uint16_t* RESTRICT buf_offsets,
-                                             uint8_t* RESTRICT buf_extras,
-                                             uint32_t* RESTRICT seq_c, size_t* RESTRICT extras_sz,
-                                             uint32_t ll, uint32_t ml, const uint16_t off_biased,
-                                             const uint32_t split_max) {
+                                             uint8_t* RESTRICT buf_extras, uint32_t* RESTRICT seq_c,
+                                             size_t* RESTRICT extras_sz, uint32_t ll, uint32_t ml,
+                                             const uint16_t off_biased, const uint32_t split_max) {
     if (split_max > ZXC_GLO_MAX_INLINE_ML && ml + ZXC_LZ_MIN_MATCH_LEN <= split_max) {
         while (ml > ZXC_TOKEN_ML_MASK - 1U) {
             // A 19-byte piece while the rest stays a match, else leave exactly 5.
