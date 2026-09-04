@@ -1119,6 +1119,7 @@ int test_min_dist_policy(void) {
     // count switches between its floor, the proportional band, and its cap.
     // These pin the verdict across all three regimes; they are far enough from
     // the threshold that they would not catch an off-by-one in that count.
+#if ZXC_LZ_MINDIST > 1
     static const size_t sizes[] = {4096, 16384, 40960, 65536, 256 * 1024};
     for (size_t k = 0; k < sizeof(sizes) / sizeof(sizes[0]); k++) {
         const unsigned long sz = (unsigned long)sizes[k];
@@ -1136,6 +1137,11 @@ int test_min_dist_policy(void) {
         printf("Failed: probe judged a block too small to sample\n");
         goto done;
     }
+#else
+    // Floor off (ZXC_LZ_MINDIST == 1): nothing is "short", so the probe has no
+    // verdict to give; only the round trips below apply.
+    printf("(distance floor off: probe checks skipped)\n");
+#endif
     // Whichever way it goes, the archive stays ordinary at every level.
     for (int lvl = ZXC_LEVEL_FASTEST; lvl <= ZXC_LEVEL_ULTRA; lvl++) {
         if (!test_round_trip("mindist text", text, n, lvl, 0)) goto done;
