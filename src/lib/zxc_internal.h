@@ -541,7 +541,7 @@ extern "C" {
  *  version reads the result. Overridable on the compiler command line
  *  (-DZXC_LZ_MINDIST=32) for A/B runs. */
 #ifndef ZXC_LZ_MINDIST
-#define ZXC_LZ_MINDIST 1
+#define ZXC_LZ_MINDIST 32
 #endif
 
 /** @brief Probe sampling: one position per KB, clamped.
