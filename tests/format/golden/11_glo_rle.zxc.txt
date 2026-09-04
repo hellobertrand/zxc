@@ -1,5 +1,5 @@
 file:             11_glo_rle
-size:             7566 bytes
+size:             7573 bytes
 
 [file header]
 raw:              F5 2E B0 9C 08 13 00 00 00 00 00 00 00 00 EF 5B
@@ -10,22 +10,22 @@ flags:            0x00  (checksum=0 dict=0)
 header_checksum:  0x5BEF
 
 [block 0 @16]
-raw:              01 00 00 62 1D 00 00 CF
+raw:              01 00 00 69 1D 00 00 81
 type:             GLO (1)
-comp_size:        7522
-header_checksum:  0xCF
-  raw:            75 07 00 00 62 07 00 00 01 00 00 00
-  n_sequences:    1909
-  n_literals:     1890
+comp_size:        7529
+header_checksum:  0x81
+  raw:            70 07 00 00 7E 07 00 00 01 00 00 00
+  n_sequences:    1904
+  n_literals:     1918
   enc_lit:        1
   enc_tok:        0
   enc_mlen:       0  (reserved)
   enc_off:        0
-  lit_comp:       1761
-  sect_total:     7488
-payload_hash:     0x5C29217D
+  lit_comp:       1784
+  sect_total:     7496
+payload_hash:     0x97F546E2
 
-[block 1 @7546]
+[block 1 @7553]
 raw:              FF 00 00 00 00 00 00 02
 type:             EOF (255)
 header_checksum:  0x02

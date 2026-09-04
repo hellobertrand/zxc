@@ -103,16 +103,6 @@ typedef struct {
 } zxc_cctx_layout_t;
 
 /**
- * @brief Worst-case sequence count for one block. Shared by the compressor's
- *        buffer sizing and the decoder's token scratch: the decode side must
- *        accept exactly what the compress side can emit, so both derive from
- *        this single expression.
- */
-static ZXC_ALWAYS_INLINE size_t zxc_cctx_max_seq(const size_t chunk_size) {
-    return chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
-}
-
-/**
  * @brief Decode-side entropy scratch sizes for one block: token scratch
  *        (worst-case sequence count + wild-read pad) and PivCo ping-pong
  *        scratch. Single definition shared by the layout (full provisioning:
