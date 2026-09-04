@@ -531,13 +531,18 @@ extern "C" {
 /** @brief Maximum allowed offset distance. */
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
 
-/** @brief Match distance floor the encoder holds to at levels 1 to 5, sized to
- *         the decoder's widest match-copy arm.
+/** @brief Match distance floor the encoder holds to at levels 1 to 5.
  *
- *  Applied per block, and only where @ref ZXC_LZ_MINDIST_MAX_SHORT_PCT clears
- *  it; levels 6 and 7 keep every distance. Encoder policy: no format bit moves,
- *  so any decoder of the same format version still reads the result. */
-#define ZXC_LZ_MINDIST 32
+ *  1 = off (default): every distance is emitted. 32, the decoder's widest
+ *  match-copy arm, keeps the overlap kernel off the decode path: measured
+ *  +9 % decode for +1.1 % size on silesia (2026-08), with the per-block guard
+ *  @ref ZXC_LZ_MINDIST_MAX_SHORT_PCT. Levels 6 and 7 keep every distance.
+ *  Encoder policy: no format bit moves, so any decoder of the same format
+ *  version reads the result. Overridable on the compiler command line
+ *  (-DZXC_LZ_MINDIST=32) for A/B runs. */
+#ifndef ZXC_LZ_MINDIST
+#define ZXC_LZ_MINDIST 1
+#endif
 
 /** @brief Probe sampling: one position per KB, clamped.
  *
@@ -842,6 +847,27 @@ static inline int zxc_level_clamp(const int level) {
 #define ZXC_OPTS_LEVEL(o, dflt) zxc_level_clamp(((o) && (o)->level > 0) ? (o)->level : (dflt))
 /** @brief Block size, 0 meaning the default. */
 #define ZXC_OPTS_BLOCK_SIZE(o, dflt) (((o) && (o)->block_size > 0) ? (o)->block_size : (dflt))
+/**
+ * @brief Per-level match-splitting caps (internal policy, no public knob yet):
+ *        a match longer than the token's inline reach and up to the cap is
+ *        emitted as inline pieces (see zxc_glo_put_seq). Both derive from that reach,
+ *        @ref ZXC_GLO_MAX_INLINE_ML, so they follow the token layout:
+ *        levels 3-5 split whatever fits in two pieces (38 bytes today);
+ *        levels 6-7 only one full piece plus a minimum match (24), the
+ *        cheapest split in size. Measured on silesia (2026-09): the two-piece
+ *        cap is +22 % decode for +2 % size at levels 3-5. Overridable on the
+ *        compiler command line (-DZXC_GLO_SPLIT_MAX_FAST=..) for A/B runs.
+ */
+#ifndef ZXC_GLO_SPLIT_MAX_FAST
+#define ZXC_GLO_SPLIT_MAX_FAST (2U * ZXC_GLO_MAX_INLINE_ML)
+#endif
+#ifndef ZXC_GLO_SPLIT_MAX_DENSE
+#define ZXC_GLO_SPLIT_MAX_DENSE (ZXC_GLO_MAX_INLINE_ML + ZXC_LZ_MIN_MATCH_LEN)
+#endif
+/** @brief Split cap for a level (a cap <= ZXC_GLO_MAX_INLINE_ML disables). */
+static ZXC_ALWAYS_INLINE uint32_t zxc_glo_split_max(const int level) {
+    return (level >= ZXC_LEVEL_DENSITY) ? ZXC_GLO_SPLIT_MAX_DENSE : ZXC_GLO_SPLIT_MAX_FAST;
+}
 
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below
  *         ::ZXC_LEVEL_ULTRA use ::ZXC_HUF_MAX_CODE_LEN_DENSITY, ::ZXC_LEVEL_ULTRA uses
