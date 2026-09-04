@@ -5,44 +5,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-//! Safe Rust bindings to the ZXC compression library.
-//!
-//! ZXC is a fast compression library optimized for high decompression speed.
-//! This crate provides a safe, idiomatic Rust API.
-//!
-//! # Quick Start
-//!
-//! ```rust
-//! use zxc::{compress, decompress, Level};
-//!
-//! // Compress some data
-//! let data = b"Hello, ZXC! This is some data to compress.";
-//! let compressed = compress(data, Level::Default, None).expect("compression failed");
-//!
-//! // Decompress it back
-//! let decompressed = decompress(&compressed).expect("decompression failed");
-//! assert_eq!(&decompressed[..], &data[..]);
-//! ```
-//!
-//! # Compression Levels
-//!
-//! ZXC provides 7 compression levels trading off speed vs ratio:
-//!
-//! | Level | Speed | Ratio | Use Case |
-//! |-------|-------|-------|----------|
-//! | `Fastest` | ★★★★★ | ★★☆☆☆ | Real-time, gaming |
-//! | `Fast` | ★★★★☆ | ★★★☆☆ | Network, streaming |
-//! | `Default` | ★★★☆☆ | ★★★★☆ | General purpose |
-//! | `Balanced` | ★★☆☆☆ | ★★★★☆ | Archives |
-//! | `Compact` | ★☆☆☆☆ | ★★★★★ | Storage, firmware |
-//! | `Density` | ★☆☆☆☆ | ★★★★★ | High density (Huffman literals + optimal parser) |
-//! | `Ultra` | ★☆☆☆☆ | ★★★★★ | Maximum density (Huffman literals + tokens, deep parse) |
-//!
-//! # Features
-//!
-//! - **Checksum verification**: Optional, disabled by default for maximum performance
-//! - **Zero-copy decompression bound**: Query the output size before decompressing
-
+#![doc = include_str!("../README.md")]
 #![warn(missing_docs)]
 #![warn(rust_2018_idioms)]
 

@@ -50,6 +50,12 @@ jobs:
         working-directory: wrappers/rust
         run: cargo fmt --all --check
 
+      - name: Check Docs
+        working-directory: wrappers/rust
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
   go-format:
     name: Code Quality - Gofmt
     runs-on: ubuntu-latest

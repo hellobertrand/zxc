@@ -6,8 +6,11 @@ authors.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/zxc-compress-sys"
 keywords.workspace = true
 categories.workspace = true
+readme = "README.md"
 links = "zxc"
 build = "build.rs"
 
