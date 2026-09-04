@@ -239,6 +239,55 @@ static ZXC_ALWAYS_INLINE int zxc_emit_extra(uint8_t* RESTRICT extras, size_t* RE
 }
 
 /**
+ * @brief Emits one GLO sequence: token, offset and the LL/ML escapes.
+ *
+ * With @p split_max above the token's inline reach (@ref ZXC_GLO_MAX_INLINE_ML),
+ * a match of 20..split_max bytes goes out as a chain of inline matches at the
+ * same offset - 19 + rest while the rest keeps ZXC_LZ_MIN_MATCH_LEN bytes,
+ * else (len - 5) + 5 - so the decoder never takes the ML escape branch for it.
+ * Each extra piece costs a token and an offset minus the escape byte, and
+ * consumes at least ZXC_LZ_MIN_MATCH_LEN input bytes, which keeps the sequence
+ * count within zxc_cctx_max_seq().
+ *
+ * @param[in] ll         Literal length (raw).
+ * @param[in] ml         Match length minus ZXC_LZ_MIN_MATCH_LEN.
+ * @param[in] off_biased Offset minus ZXC_LZ_OFFSET_BIAS.
+ * @param[in] split_max  zxc_glo_split_max(level) (<= ZXC_GLO_MAX_INLINE_ML disables).
+ * @return 1, or 0 when the extras buffer overflows.
+ */
+static ZXC_ALWAYS_INLINE int zxc_glo_put_seq(uint8_t* RESTRICT buf_tokens,
+                                             uint16_t* RESTRICT buf_offsets,
+                                             uint8_t* RESTRICT buf_extras,
+                                             uint32_t* RESTRICT seq_c, size_t* RESTRICT extras_sz,
+                                             uint32_t ll, uint32_t ml, const uint16_t off_biased,
+                                             const uint32_t split_max) {
+    if (split_max > ZXC_GLO_MAX_INLINE_ML && ml + ZXC_LZ_MIN_MATCH_LEN <= split_max) {
+        while (ml > ZXC_TOKEN_ML_MASK - 1U) {
+            // A 19-byte piece while the rest stays a match, else leave exactly 5.
+            const uint32_t piece = (ml >= ZXC_TOKEN_ML_MASK - 1U + ZXC_LZ_MIN_MATCH_LEN)
+                                       ? ZXC_TOKEN_ML_MASK - 1U
+                                       : ml - ZXC_LZ_MIN_MATCH_LEN;
+            const uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
+            buf_tokens[*seq_c] = (uint8_t)((ll_code << ZXC_TOKEN_LIT_BITS) | piece);
+            buf_offsets[*seq_c] = off_biased;
+            if (UNLIKELY(!zxc_emit_extra(buf_extras, extras_sz, ll, ZXC_TOKEN_LL_MASK))) return 0;
+            (*seq_c)++;
+            ll = 0;
+            ml -= piece + ZXC_LZ_MIN_MATCH_LEN;
+        }
+    }
+    const uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
+    const uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
+    buf_tokens[*seq_c] = (uint8_t)((ll_code << ZXC_TOKEN_LIT_BITS) | ml_code);
+    buf_offsets[*seq_c] = off_biased;
+    if (UNLIKELY(!zxc_emit_extra(buf_extras, extras_sz, ll, ZXC_TOKEN_LL_MASK) ||
+                 !zxc_emit_extra(buf_extras, extras_sz, ml, ZXC_TOKEN_ML_MASK)))
+        return 0;
+    (*seq_c)++;
+    return 1;
+}
+
+/**
  * @brief Stages a run of literals into the literal stream.
  *
  * One 32-byte wild copy covers the common short run. Within 32 bytes of the
@@ -918,6 +967,8 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                                       uint8_t* RESTRICT buf_extras, uint32_t* RESTRICT seq_c_out,
                                       size_t* RESTRICT lit_c_out, size_t* RESTRICT extras_sz_out,
                                       uint16_t* RESTRICT max_offset_out) {
+    // Split cap: the DP prices lengths in (19, split_max] as inline pieces.
+    const uint32_t split_max = zxc_glo_split_max(level);
     zxc_lz77_params_t lzp_opt = zxc_get_lz77_params(level);
     lzp_opt.use_lazy = 0;  // guard
 
@@ -1029,6 +1080,21 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                                                      off_biased);
                 }
 
+                // 1b. Split range: with a cap above the inline reach, a match of
+                // 20..split_max bytes goes out as inline pieces (zxc_glo_put_seq),
+                // one token and offset each: 2 x base up to 38, 3 x base up to
+                // 57, and so on by 19-byte bands. Without it the parser would
+                // price those lengths as one escape byte and pick them freely.
+                while (L < L_max_plus && L <= split_max) {
+                    const size_t pieces = (L + ZXC_GLO_MAX_INLINE_ML - 1) / ZXC_GLO_MAX_INLINE_ML;
+                    size_t L_end = pieces * ZXC_GLO_MAX_INLINE_ML + 1;
+                    if (L_end > L_max_plus) L_end = L_max_plus;
+                    if (L_end > (size_t)split_max + 1) L_end = (size_t)split_max + 1;
+                    const uint32_t nxt = dp[p] + (uint32_t)pieces * ZXC_OPT_MATCH_COST_BASE;
+                    L = zxc_opt_dp_update_const_cost(dp, parent_len, parent_off, p, L, L_end, nxt,
+                                                     off_biased);
+                }
+
                 // 2. First varint level (1-byte extension).
                 if (L < L_max_plus) {
                     const size_t L_v1_end = ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK + 128;
@@ -1113,17 +1179,10 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
             }
             const uint32_t ll = (uint32_t)LL;
             const uint32_t ml = L - ZXC_LZ_MIN_MATCH_LEN;
-            const uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
-            const uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
-            buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
-            buf_offsets[seq_c] = off_biased;
             if (off_biased > max_offset) max_offset = off_biased;
-
-            if (UNLIKELY(!zxc_emit_extra(buf_extras, &extras_sz, ll, ZXC_TOKEN_LL_MASK) ||
-                         !zxc_emit_extra(buf_extras, &extras_sz, ml, ZXC_TOKEN_ML_MASK)))
+            if (UNLIKELY(!zxc_glo_put_seq(buf_tokens, buf_offsets, buf_extras, &seq_c, &extras_sz,
+                                          ll, ml, off_biased, split_max)))
                 return ZXC_ERROR_OVERFLOW;
-
-            seq_c++;
             lit_start = pos;
         }
     }
@@ -1255,6 +1314,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     uint8_t* const buf_extras = ctx->buf_extras;
 
     uint32_t seq_c = 0;
+    const uint32_t split_max = zxc_glo_split_max(level);
     size_t lit_c = 0;
     size_t extras_sz = 0;
     uint16_t max_offset = 0;  // Track max offset for 1-byte/2-byte mode decision
@@ -1292,21 +1352,14 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
             const uint32_t ll = (uint32_t)(ip - anchor);
             const uint32_t ml = m.len - ZXC_LZ_MIN_MATCH_LEN;
             const uint32_t off = (uint32_t)(ip - m.ref);
+            const uint16_t off_b = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
 
             if (ll > 0) zxc_flush_literals(literals, &lit_c, anchor, ll, iend);
 
-            const uint8_t ll_code = (ll >= ZXC_TOKEN_LL_MASK) ? ZXC_TOKEN_LL_MASK : (uint8_t)ll;
-            const uint8_t ml_code = (ml >= ZXC_TOKEN_ML_MASK) ? ZXC_TOKEN_ML_MASK : (uint8_t)ml;
-            buf_tokens[seq_c] = (ll_code << ZXC_TOKEN_LIT_BITS) | ml_code;
-            buf_offsets[seq_c] = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
-            if ((off - ZXC_LZ_OFFSET_BIAS) > max_offset)
-                max_offset = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
-
-            if (UNLIKELY(!zxc_emit_extra(buf_extras, &extras_sz, ll, ZXC_TOKEN_LL_MASK) ||
-                         !zxc_emit_extra(buf_extras, &extras_sz, ml, ZXC_TOKEN_ML_MASK)))
+            if (off_b > max_offset) max_offset = off_b;
+            if (UNLIKELY(!zxc_glo_put_seq(buf_tokens, buf_offsets, buf_extras, &seq_c, &extras_sz,
+                                          ll, ml, off_b, split_max)))
                 return ZXC_ERROR_OVERFLOW;
-
-            seq_c++;
 
             if (m.len > 2 && level > ZXC_LEVEL_BALANCED) {
                 const uint8_t* match_end = ip + m.len;
