@@ -308,19 +308,19 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_glo_split_piece(const uint32_t code) {
  * @param[in] cap  zxc_lz77_params_t::split_max.
  * @return The new sequence count (unchanged when the block is not split).
  */
-static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT offsets,
-                                    uint8_t* RESTRICT extras, size_t* RESTRICT extras_sz,
-                                    uint8_t* RESTRICT side, const uint32_t n_seq,
-                                    const uint8_t cap) {
-    if (cap <= ZXC_GLO_INLINE_ML_CODE || n_seq == 0) return n_seq;
-
-    // 1. A per-context predictor over the last `order` escapes, scored in
-    // hindsight (sum of the minority counts), approximates the decoder's
-    // mispredict rate; the order shrinks with the block to keep 16 samples per
-    // context, or the score turns optimistic. Four histogram lanes in rotation
-    // keep the counters off one store-forwarding chain: an inline run hits the
-    // same context back to back. Predictable escapes cost the decoder nothing:
-    // keep them.
+/**
+ * @brief Whether the block's ML-escape branch looks mispredicted enough to be
+ *        worth splitting; a predictable branch costs the decoder nothing.
+ *
+ * A per-context predictor over the last `order` escape bits, scored in
+ * hindsight (the summed minority counts approximate the decoder's mispredict
+ * rate), must err on at least ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT of the escapes.
+ * The order shrinks with the block to keep 16 samples per context, else the
+ * score turns optimistic. Four histogram lanes in rotation keep the counters
+ * off one store-forwarding chain when an inline run hits the same context back
+ * to back.
+ */
+static int zxc_glo_escapes_mispredicted(const uint8_t* RESTRICT tokens, const uint32_t n_seq) {
     uint32_t order = ZXC_GLO_SPLIT_CTX_BITS;
     while (order > 2 && (n_seq >> order) < 16) order--;
     const uint32_t hmask = (1U << order) - 1U;
@@ -329,17 +329,14 @@ static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT
         ZXC_MEMSET(ctx_hist[l][0], 0, (hmask + 1) * sizeof(uint32_t));
         ZXC_MEMSET(ctx_hist[l][1], 0, (hmask + 1) * sizeof(uint32_t));
     }
-    uint32_t* const list = (uint32_t*)(extras + ((*extras_sz + 3) & ~(size_t)3));
-    uint32_t hist = 0, n_esc = 0, n_list = 0;
+    uint32_t hist = 0, n_esc = 0;
     for (uint32_t i = 0; i < n_seq; i++) {
-        const uint8_t tok = tokens[i];
-        const uint32_t esc = (tok & ZXC_TOKEN_ML_MASK) == ZXC_TOKEN_ML_MASK;
+        const uint32_t esc = (tokens[i] & ZXC_TOKEN_ML_MASK) == ZXC_TOKEN_ML_MASK;
         ctx_hist[i & 3][esc][hist]++;
         hist = ((hist << 1) | esc) & hmask;
         n_esc += esc;
-        list[n_list] = i;
-        n_list += esc | ((tok >> ZXC_TOKEN_LIT_BITS) == ZXC_TOKEN_LL_MASK);
     }
+    if (n_esc == 0) return 0;
     uint32_t errors = 0;
     for (uint32_t c = 0; c <= hmask; c++) {
         uint32_t n0 = 0, n1 = 0;
@@ -349,10 +346,49 @@ static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT
         }
         errors += (n0 < n1) ? n0 : n1;
     }
-    const uint64_t min_pct = ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT;
-    if (n_esc == 0 || (uint64_t)errors * 100 < min_pct * n_esc) return n_seq;
+    return (uint64_t)errors * 100 >= (uint64_t)ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT * n_esc;
+}
 
-    // 2. Mark the splits and drop their varints; the other extras move forward.
+/**
+ * @brief Per-block match splitting: escaped matches re-emitted as inline pieces.
+ *
+ * A match whose length code (length - ZXC_LZ_MIN_MATCH_LEN) exceeds the inline
+ * reach but not @p cap becomes a chain of inline matches at the same offset, so
+ * the decoder never takes its ML escape branch. Each extra piece costs a token
+ * and an offset minus the escape varint it replaces. All or nothing per block,
+ * gated on zxc_glo_escapes_mispredicted.
+ *
+ * The rewrite is in place. Escaped sequences are listed behind the extras so
+ * the two rewrite passes revisit only them: the first marks the matches to
+ * split in @p side (their length code, 0 to keep) while the kept extras compact
+ * forward; the second expands tokens and offsets backward, every write landing
+ * at or past its read. A piece consumes at least ZXC_LZ_MIN_MATCH_LEN input
+ * bytes, so the count stays within the block's sequence buffers.
+ *
+ * @param[in] side zxc_cctx_t::buf_split, one byte per sequence.
+ * @param[in] cap  zxc_lz77_params_t::split_max.
+ * @return The new sequence count (unchanged when the block is not split).
+ */
+static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT offsets,
+                                    uint8_t* RESTRICT extras, size_t* RESTRICT extras_sz,
+                                    uint8_t* RESTRICT side, const uint32_t n_seq,
+                                    const uint8_t cap) {
+    if (cap <= ZXC_GLO_INLINE_ML_CODE || n_seq == 0) return n_seq;
+    if (!zxc_glo_escapes_mispredicted(tokens, n_seq)) return n_seq;
+
+    // List the escaped sequences (LL or ML escape) behind the extras; the passes
+    // below revisit only these, not every sequence.
+    uint32_t* const list = (uint32_t*)(extras + ((*extras_sz + 3) & ~(size_t)3));
+    uint32_t n_list = 0;
+    for (uint32_t i = 0; i < n_seq; i++) {
+        const uint8_t tok = tokens[i];
+        const uint32_t any = ((tok & ZXC_TOKEN_ML_MASK) == ZXC_TOKEN_ML_MASK) |
+                             ((tok >> ZXC_TOKEN_LIT_BITS) == ZXC_TOKEN_LL_MASK);
+        list[n_list] = i;
+        n_list += any;
+    }
+
+    // Mark the matches to split and drop their varints; the other extras move forward.
     ZXC_MEMSET(side, 0, n_seq);
     const uint8_t* const extras_end = extras + *extras_sz;
     size_t r = 0, w = 0;
@@ -377,7 +413,7 @@ static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT
     *extras_sz = w;
     if (extra == 0) return n_seq;
 
-    // 3. Expand backward. A marked sequence takes the span of its pieces, written
+    // Expand backward. A marked sequence takes the span of its pieces, written
     // forward: the first keeps the literal nibble (and its escape), the remainder
     // below the inline reach is the last.
     uint32_t out = n_seq + extra;
