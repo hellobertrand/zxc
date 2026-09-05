@@ -761,18 +761,28 @@ typedef struct {
  *  lengths toward power-of-two class counts and shallower caps, adopting a
  *  candidate only when its modeled decode win clears the guard below at a
  *  bounded ratio cost. Wire-compatible by construction: adjusted lengths stay
- *  canonical, Kraft-exact and within the level cap.
- *  Idea from pivco-huffman issue #20 (dougallj).
+ *  canonical, Kraft-exact and within the level cap, so any v7 decoder reads
+ *  the section unchanged (selection is encoder policy, FORMAT.md 5.2.1).
+ *  Idea from pivco-huffman issue #20 (dougallj). All knobs are
+ *  `#ifndef`-guarded so an A/B build can override them from CFLAGS; in
+ *  particular `-DZXC_HUF_NUDGE_MERGE_Q8=0` makes the guard reject every
+ *  candidate, restoring archives byte-identical to the unadjusted encoder.
  *  @{ */
 /** @brief Exchange rate (Q8 bits per modeled level-touch) in the candidate
  *         cost `J = 256*bits + lambda*touches`; 26 ~= 0.10 bit per touch. */
+#ifndef ZXC_HUF_NUDGE_LAMBDA_Q8
 #define ZXC_HUF_NUDGE_LAMBDA_Q8 26
+#endif
 /** @brief Adoption guard, ratio side (permil): adopt only while
  *         `bits' * 1000 <= bits0 * ZXC_HUF_NUDGE_BITS_PERMIL` (<= +1.5%). */
+#ifndef ZXC_HUF_NUDGE_BITS_PERMIL
 #define ZXC_HUF_NUDGE_BITS_PERMIL 1015
+#endif
 /** @brief Adoption guard, speed side (Q8): adopt only while
  *         `touches' * 256 <= touches0 * ZXC_HUF_NUDGE_MERGE_Q8` (<= ~0.90x). */
+#ifndef ZXC_HUF_NUDGE_MERGE_Q8
 #define ZXC_HUF_NUDGE_MERGE_Q8 230
+#endif
 /** @brief Deepest flat-subtree depth with a SIMD unpacker (see
  *         zxc_pivco_unpack_flat); deeper flat roots fall back to the scalar
  *         bit-reader and must NOT be priced as free. */
@@ -785,11 +795,15 @@ typedef struct {
  *         one all-8-bit flat root: modeled -30% touches, real -54% decode).
  *         24 keeps low-mass deep-flat tails adoptable while making
  *         all-the-mass deep flats impossible to justify. */
+#ifndef ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY
 #define ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY 24
+#endif
 /** @brief Fixed per-pass overhead (occurrence-equivalents) charged per merge
  *         level, modeling the pass-loop and node-dispatch cost so shallower
  *         trees also win on small sections. */
+#ifndef ZXC_HUF_NUDGE_LEVEL_COST
 #define ZXC_HUF_NUDGE_LEVEL_COST 64
+#endif
 /** @} */
 
 /** @name Space-speed section selection

@@ -328,9 +328,9 @@ GLO/GHI block and any conforming decoder reads it.
 A third encoder-side policy re-emits long matches inline. A GLO token holds
 the match length in its 4-bit ML field and escapes any match longer than 19
 bytes (`ML == 15`) to a varint. At levels 3 to 5 the reference encoder instead
-re-emits such a match, up to a per-level cap, as a chain of inline matches at
-the same offset — a full 19-byte piece while the remainder keeps the 5-byte
-minimum match — so the decoder never takes its ML escape. It does this per
+re-emits such a match, up to a per-level cap, as a chain of inline matches of
+at most 19 bytes at the same offset (a 24-byte match as 19 + 5, a 38-byte match
+as 19 + 19), so the decoder never takes its ML escape. It does this per
 block and only when that escape looks poorly predicted: on regular data the
 branch is already predictable and splitting would only add sequences for no
 decode gain. Levels 1 and 2 (GHI) and levels 6 and 7 keep every escape. Like

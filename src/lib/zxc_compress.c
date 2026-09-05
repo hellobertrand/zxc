@@ -321,7 +321,7 @@ static uint32_t zxc_glo_split_analyze(const uint8_t* RESTRICT tokens, const uint
             n0 += ctx_hist[l][0][c];
             n1 += ctx_hist[l][1][c];
         }
-        ctx_bad[c] = (n1 <= n0);  // escape not the majority in this context
+        ctx_bad[c] = (n1 < n0);  // escape a strict minority in its context
         errors += (n0 < n1) ? n0 : n1;
     }
     *block_bad =
@@ -382,8 +382,8 @@ static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT
                 side[i] = (uint8_t)code;
                 extra += zxc_glo_split_pieces(code) - 1;
                 r = (size_t)(p - extras);
-            } else {
-                zxc_varint_keep(extras, &w, &r, extras_end);
+            } else {  // keep: move the varint we already read down, no second decode
+                while (extras + r < p) extras[w++] = extras[r++];
             }
         }
         hist = ((hist << 1) | esc) & hmask;
