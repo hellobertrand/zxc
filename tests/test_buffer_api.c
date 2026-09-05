@@ -1155,3 +1155,52 @@ done:
     free(per);
     return ok;
 }
+
+// Exercises zxc_glo_split_block: data with escaped match-length matches (20-38
+// bytes, ML code >= 15) mixed irregularly with inline ones (6-19 bytes), so the
+// escapes are a mispredicted minority and levels 3-5 split them. Pins the
+// in-place compact/expand rewrite - a pointer-math regression corrupts the
+// round trip.
+int test_glo_match_split(void) {
+    printf("=== TEST: Unit - GLO match splitting round trip ===\n");
+    const size_t cap = 512 * 1024;
+    uint8_t* buf = malloc(cap);
+    int ok = 0;
+    if (!buf) goto done;
+
+    uint32_t st = 0x9E3779B9U;
+    uint8_t src[96];  // shared match source; back-references clear the distance floor
+    for (size_t k = 0; k < sizeof(src); k++) {
+        st = st * 1103515245U + 12345U;
+        src[k] = (uint8_t)(st >> 16);
+    }
+    size_t n = 0;
+    for (size_t k = 0; k < sizeof(src) && n < cap; k++) buf[n++] = src[k];
+    while (n + sizeof(src) + 64 < cap) {
+        st = st * 1103515245U + 12345U;
+        const size_t lit = (st >> 16) % 8U;  // 0-7 literals, LL mostly inline
+        for (size_t k = 0; k < lit && n < cap; k++) {
+            st = st * 1103515245U + 12345U;
+            buf[n++] = (uint8_t)(st >> 16);
+        }
+        st = st * 1103515245U + 12345U;
+        // ~1 in 4 matches escapes the ML field (20-38 bytes); the rest stay inline.
+        const size_t m =
+            ((st >> 16) % 4U == 0U) ? 20U + ((st >> 18) % 19U) : 6U + ((st >> 18) % 14U);
+        for (size_t k = 0; k < m && n < cap; k++) buf[n++] = src[k % sizeof(src)];
+    }
+
+    // Levels 3-5 run the split; 1-2 (GHI) and 6-7 must round-trip cleanly too.
+    for (int lvl = ZXC_LEVEL_FASTEST; lvl <= ZXC_LEVEL_ULTRA; lvl++)
+        if (!test_round_trip("glo split", buf, n, lvl, 0)) goto done;
+    // Text-like data reaches the split by a different route (irregular escapes).
+    fill_text_like(buf, cap);
+    for (int lvl = ZXC_LEVEL_DEFAULT; lvl <= ZXC_LEVEL_DENSITY; lvl++)
+        if (!test_round_trip("glo split text", buf, cap, lvl, 0)) goto done;
+
+    printf("PASS\n\n");
+    ok = 1;
+done:
+    free(buf);
+    return ok;
+}
