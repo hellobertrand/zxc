@@ -50,6 +50,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_buffer_api),
     TEST_CASE(test_buffer_api_scratch_buf),
     TEST_CASE(test_min_dist_policy),
+    TEST_CASE(test_glo_match_split),
     TEST_CASE(test_buffer_error_codes),
     TEST_CASE(test_decompress_inplace),
     TEST_CASE(test_get_decompressed_size),
