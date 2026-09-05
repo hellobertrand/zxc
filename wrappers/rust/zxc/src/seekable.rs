@@ -12,7 +12,7 @@
 //! decoder fetch only the blocks overlapping a requested byte range,
 //! which is much cheaper than decompressing the whole archive.
 //!
-//! Build a seekable archive by setting [`CompressOptions::seekable`]
+//! Build a seekable archive by setting [`CompressOptions::seekable`](crate::CompressOptions::seekable)
 //! to `true` before passing the options to the streaming or file APIs.
 //!
 //! # Example
@@ -344,7 +344,7 @@ pub fn seek_table_size(num_blocks: u32) -> usize {
 /// `comp_sizes` is the slice of per-block on-disk compressed sizes, in
 /// order. Most callers do not need this directly - the streaming and
 /// file APIs already emit a seek table when
-/// [`CompressOptions::seekable`] is set.
+/// [`CompressOptions::seekable`](crate::CompressOptions::seekable) is set.
 pub fn write_seek_table(dst: &mut [u8], comp_sizes: &[u32]) -> Result<usize> {
     let res = unsafe {
         zxc_sys::zxc_write_seek_table(

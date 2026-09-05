@@ -124,8 +124,8 @@ impl Dctx {
 
     /// Decompresses a single block produced by [`Cctx::compress_block`].
     ///
-    /// `dst` should be at least [`decompress_block_bound(uncompressed_size)`]
-    /// (`decompress_block_bound`) to enable the fast path. For strictly-sized
+    /// `dst` should be at least [`decompress_block_bound`]`(uncompressed_size)`
+    /// to enable the fast path. For strictly-sized
     /// destinations, use [`Dctx::decompress_block_safe`].
     pub fn decompress_block(
         &mut self,
