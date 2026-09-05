@@ -103,6 +103,16 @@ typedef struct {
 } zxc_cctx_layout_t;
 
 /**
+ * @brief Worst-case sequence count for one block. Shared by the compressor's
+ *        buffer sizing and the decoder's token scratch: the decode side must
+ *        accept exactly what the compress side can emit, so both derive from
+ *        this single expression.
+ */
+static ZXC_ALWAYS_INLINE size_t zxc_cctx_max_seq(const size_t chunk_size) {
+    return chunk_size / ZXC_LZ_MIN_MATCH_LEN + 16;
+}
+
+/**
  * @brief Decode-side entropy scratch sizes for one block: token scratch
  *        (worst-case sequence count + wild-read pad) and PivCo ping-pong
  *        scratch. Single definition shared by the layout (full provisioning:
@@ -185,7 +195,8 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         layout.sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint8_t);
         const size_t sz_chain = ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t);
         // buf_sequences (GHI, level <= ZXC_LEVEL_FAST) aliases buf_offsets + buf_tokens (GLO,
-        // level >= ZXC_LEVEL_DEFAULT). Mutually exclusive per block; sized for the larger.
+        // level >= ZXC_LEVEL_DEFAULT). Mutually exclusive per block; sized for the larger,
+        // whose fourth quarter GLO lends to its match-splitting side array (buf_split).
         const size_t sz_seq_union = layout.max_seq * sizeof(uint32_t);
         const size_t vbyte_len = (offset_bits + 6) / 7;
         const size_t sz_extras = layout.max_seq * 2 * vbyte_len;
@@ -313,6 +324,7 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
     ctx->buf_sequences = (uint32_t*)(mem + layout.off_seq_union);
     ctx->buf_offsets = (uint16_t*)(mem + layout.off_seq_union);
     ctx->buf_tokens = mem + layout.off_seq_union + layout.max_seq * sizeof(uint16_t);
+    ctx->buf_split = ctx->buf_tokens + layout.max_seq;
     ctx->buf_extras = mem + layout.off_extras;
     ctx->literals = mem + layout.off_lit_cctx;
     if (layout.sz_opt) {
@@ -415,6 +427,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->buf_tokens = NULL;
     ctx->buf_offsets = NULL;
     ctx->buf_extras = NULL;
+    ctx->buf_split = NULL;
     ctx->literals = NULL;
     ctx->work_buf = NULL;
     ctx->tok_buffer = NULL;
