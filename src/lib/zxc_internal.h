@@ -618,6 +618,10 @@ extern "C" {
 
 /** @brief Upper bound on PivCo tree nodes (full binary tree over the alphabet). */
 #define ZXC_PIVCO_MAX_NODES (2 * ZXC_HUF_NUM_SYMBOLS - 1)
+/** @brief Deepest flat subtree ::zxc_pivco_unpack_flat unpacks with a SIMD
+ *         kernel (its D == 2..6 cases); deeper flat roots take the scalar
+ *         bit-reader. A structural fact of that unpacker, not tunable. */
+#define ZXC_PIVCO_UNPACK_FLAT_SIMD_MAX 6
 
 /** @brief One PivCo Huffman tree node. */
 typedef struct {
@@ -702,49 +706,27 @@ typedef struct {
  *  lengths toward power-of-two class counts and shallower caps, adopting a
  *  candidate only when its modeled decode win clears the guard below at a
  *  bounded ratio cost. Wire-compatible by construction: adjusted lengths stay
- *  canonical, Kraft-exact and within the level cap, so any v7 decoder reads
- *  the section unchanged (selection is encoder policy, FORMAT.md 5.2.1).
- *  Idea from pivco-huffman issue #20 (dougallj). All knobs are
- *  `#ifndef`-guarded so an A/B build can override them from CFLAGS; in
- *  particular `-DZXC_HUF_NUDGE_MERGE_Q8=0` makes the guard reject every
- *  candidate, restoring archives byte-identical to the unadjusted encoder.
+ *  canonical, Kraft-exact and within the level cap.
+ *  Idea from pivco-huffman issue #20 (dougallj).
  *  @{ */
 /** @brief Exchange rate (Q8 bits per modeled level-touch) in the candidate
  *         cost `J = 256*bits + lambda*touches`; 26 ~= 0.10 bit per touch. */
-#ifndef ZXC_HUF_NUDGE_LAMBDA_Q8
 #define ZXC_HUF_NUDGE_LAMBDA_Q8 26
-#endif
 /** @brief Adoption guard, ratio side (permil): adopt only while
  *         `bits' * 1000 <= bits0 * ZXC_HUF_NUDGE_BITS_PERMIL` (<= +1.5%). */
-#ifndef ZXC_HUF_NUDGE_BITS_PERMIL
 #define ZXC_HUF_NUDGE_BITS_PERMIL 1015
-#endif
 /** @brief Adoption guard, speed side (Q8): adopt only while
  *         `touches' * 256 <= touches0 * ZXC_HUF_NUDGE_MERGE_Q8` (<= ~0.90x). */
-#ifndef ZXC_HUF_NUDGE_MERGE_Q8
 #define ZXC_HUF_NUDGE_MERGE_Q8 230
-#endif
-/** @brief Deepest flat-subtree depth with a SIMD unpacker (see
- *         zxc_pivco_unpack_flat); deeper flat roots fall back to the scalar
- *         bit-reader and must NOT be priced as free. */
-#define ZXC_HUF_NUDGE_FLAT_SIMD_MAX 6
 /** @brief Extra level-touches charged per occurrence under a flat root deeper
- *         than ::ZXC_HUF_NUDGE_FLAT_SIMD_MAX (scalar bit-reader unpack path).
- *         Measured on M2 silesia sections: the scalar unpack costs ~18 SIMD
- *         touch-equivalents per occurrence even in its byte-aligned D = 8 best
- *         case (a mispriced 2 let the walk collapse a 256-symbol section into
- *         one all-8-bit flat root: modeled -30% touches, real -54% decode).
+ *         than ::ZXC_PIVCO_UNPACK_FLAT_SIMD_MAX (scalar bit-reader unpack path).
  *         24 keeps low-mass deep-flat tails adoptable while making
  *         all-the-mass deep flats impossible to justify. */
-#ifndef ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY
 #define ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY 24
-#endif
 /** @brief Fixed per-pass overhead (occurrence-equivalents) charged per merge
  *         level, modeling the pass-loop and node-dispatch cost so shallower
  *         trees also win on small sections. */
-#ifndef ZXC_HUF_NUDGE_LEVEL_COST
 #define ZXC_HUF_NUDGE_LEVEL_COST 64
-#endif
 /** @} */
 
 /** @name Space-speed section selection
