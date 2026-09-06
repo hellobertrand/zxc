@@ -171,7 +171,7 @@ static int nudge_cost_matches_tree(const char* label, const uint8_t* code_len,
             if (!aux.skip[nid]) rtouches += count[nid];
         } else if (tree.flat_d[nid]) {
             uint64_t t = 1;
-            if (tree.flat_d[nid] > ZXC_HUF_NUDGE_FLAT_SIMD_MAX)
+            if (tree.flat_d[nid] > ZXC_PIVCO_UNPACK_FLAT_SIMD_MAX)
                 t += ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY;
             rtouches += (uint64_t)count[nid] * t;
         } else {
