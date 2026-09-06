@@ -155,21 +155,24 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* Re-save (the DST_TOO_SMALL attempt left zxd_buf untouched, but be safe). */
     assert(zxc_dict_save(dict_buf, (size_t)dict_sz, huf, zxd_buf, zxd_bound) == (int64_t)zxd_sz);
 
-    /* Flip one byte and re-load: must not crash. A surviving ZXC_OK can only
-     * come from a reserved-byte flip (offsets 12-13, zeroed before the checksum),
-     * which cannot change the recovered content. */
+    /* Flip one byte and re-load: must not crash. A header flip that survives
+     * (reserved or flags byte) leaves the content intact; a payload flip that
+     * survives is a dict_id collision, which a fuzzer can forge, so there the
+     * only invariant is load's contract: OK means the id binds (content, table). */
     {
         const size_t pos = corrupt_pos % (size_t)zxd_sz;
         const uint8_t saved = zxd_buf[pos];
         zxd_buf[pos] ^= (uint8_t)(corrupt_mask | 1U); /* guaranteed to differ */
 
         const void* cc = NULL;
+        const void* ch = NULL;
         size_t ccs = 0;
         uint32_t cid = 0;
-        const int rc = zxc_dict_load(zxd_buf, (size_t)zxd_sz, &cc, &ccs, NULL, &cid);
+        const int rc = zxc_dict_load(zxd_buf, (size_t)zxd_sz, &cc, &ccs, &ch, &cid);
         if (rc == ZXC_OK) {
             assert(ccs == (size_t)dict_sz);
-            assert(memcmp(cc, dict_buf, (size_t)dict_sz) == 0);
+            assert(zxc_dict_id(cc, ccs, ch) == cid);
+            if (pos < ZXC_DICT_HEADER_SIZE) assert(memcmp(cc, dict_buf, (size_t)dict_sz) == 0);
         }
         zxd_buf[pos] = saved;
     }
