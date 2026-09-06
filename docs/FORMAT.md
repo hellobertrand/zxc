@@ -559,7 +559,9 @@ These protect metadata/navigation fields.
 When file header has `HAS_CHECKSUM=1`:
 - each data block appends a 4-byte checksum after payload.
 - checksum input is **compressed payload bytes only** (not block header).
-- algorithm id currently `0` (RapidHash folded to 32-bit).
+- algorithm id currently `0`: `fold32(rapidhash(payload))`, where `rapidhash`
+  is rapidhash v3 (default secret, seed 0) and
+  `fold32(h) = (h XOR (h >> 32)) AND 0xFFFFFFFF`.
 
 ## 7.3 Global stream hash
 
@@ -735,9 +737,13 @@ When `HAS_DICTIONARY` (flag bit 6) is set, the reserved bytes at offsets
 1. Verify that a dictionary is provided; reject the archive if not.
 2. Verify that the dictionary id matches `header.dict_id`
    ; reject on mismatch. For a raw in-memory dictionary without
-   a shared table, the id is `zxc_dict_id(dict, dict_size, NULL)`. When a shared
-   literal table is attached, the id also binds the table:
-   `id = fold32(hash(table_128_bytes, seed = hash(content)))` (i.e. `zxc_dict_id(content, size, table)`).
+   a shared table, the id is `fold32(rapidhash(content))`
+   (`zxc_dict_id(dict, dict_size, NULL)`). When a shared literal table is
+   attached, the id also binds the table:
+   `id = fold32(rapidhash(table_128_bytes, seed = fold32(rapidhash(content))))`
+   (`zxc_dict_id(content, size, table)`). The seed is the **folded 32-bit**
+   content hash, zero-extended to rapidhash's 64-bit seed. `rapidhash` and
+   `fold32` are defined in [7.2](#72-per-block-checksum-optional).
 
 Older decoders that do not recognize the `HAS_DICTIONARY` flag will ignore it
 (per §10.3: reserved flag bits are ignored). However, blocks compressed with a
@@ -769,9 +775,10 @@ Offset  Size  Field
 - **Flags**: bits `0..3` carry the checksum algorithm id (`0` = RapidHash-based folding), matching the ZXC file header flags; bits `4..7` are reserved (must be 0).
 - **Shared literal Huffman table**: code lengths for the `enc_lit=3` literal
   sections (§ 5.2.2), trained on the corpus' post-LZ literal distribution.
-- **dict_id**: `fold32(hash(table_128_bytes, seed = hash(content)))` —
-  binds the exact (content, table) pair. Must match the `dict_id` stored in
-  any ZXC file header that references this dictionary.
+- **dict_id**: `fold32(rapidhash(table_128_bytes, seed = fold32(rapidhash(content))))`
+  (see [12.3](#123-file-header-encoding)) — binds the exact (content, table)
+  pair. Must match the `dict_id` stored in any ZXC file header that references
+  this dictionary.
 - **Header Checksum**: the 16-bit header checksum of [7.1](#71-header-checksums), computed over the 16-byte header with bytes `0x0C..0x0F` zeroed.
 - **Content**: raw bytes that prefill the LZ77 window. Not compressed.
 
