@@ -470,7 +470,12 @@ ZXC_EXPORT void zxc_free_dctx(zxc_dctx* dctx);
 /**
  * @brief Decompresses data using a reusable context.
  *
- * Like zxc_decompress(), but reuses @p dctx's buffers.
+ * Like zxc_decompress(), but reuses @p dctx's buffers. Dictionary options are
+ * honoured exactly as in zxc_decompress(); the shared literal table is rebuilt
+ * only when it changes between calls, so a context reused across many small
+ * archives pays that once. A static context (@ref zxc_init_static_dctx) has
+ * no room for a dictionary prefix: a dictionary archive, or a supplied
+ * dictionary, returns @ref ZXC_ERROR_DICT_UNSUPPORTED.
  *
  * @param[in,out] dctx         Reusable decompression context.
  * @param[in]     src          Compressed data.
@@ -591,6 +596,10 @@ ZXC_EXPORT size_t zxc_static_dctx_workspace_size(const size_t block_size);
  * @par Locked block size
  * @p block_size is pinned at init time: an archive whose header declares a
  * different @c block_size is rejected with @ref ZXC_ERROR_BAD_BLOCK_SIZE.
+ *
+ * @par No dictionary
+ * The workspace carries no dictionary prefix: a dictionary archive, or a
+ * supplied dictionary, is rejected with @ref ZXC_ERROR_DICT_UNSUPPORTED.
  *
  * @param[in,out] workspace       Caller-allocated buffer, cache-line aligned.
  * @param[in]     workspace_size  Capacity of @p workspace in bytes.

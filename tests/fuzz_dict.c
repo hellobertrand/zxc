@@ -219,5 +219,15 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         assert(memcmp(data, decomp_buf, size) == 0);
     }
 
+    /* Same archive through a reusable context: must agree with the one-shot path. */
+    static zxc_dctx* dctx = NULL;
+    if (!dctx) dctx = zxc_create_dctx();
+    if (dctx) {
+        const int64_t d2 =
+            zxc_decompress_dctx(dctx, comp_buf, (size_t)csize, decomp_buf, size, &dopts);
+        assert(d2 == dsize);
+        if (d2 >= 0) assert(memcmp(data, decomp_buf, size) == 0);
+    }
+
     return 0;
 }
