@@ -237,8 +237,7 @@ typedef enum {
     ZXC_ERROR_BAD_LEVEL      = -18, // level unsupported by this context's workspace
                                     // (static context dense-tier raise; out-of-range
                                     // levels are otherwise silently clamped)
-    ZXC_ERROR_DICT_UNSUPPORTED = -19 // dictionary not supported by this context's
-                                     // workspace (static decompression contexts)
+    ZXC_ERROR_DICT_UNSUPPORTED = -19 // dictionary unsupported by this context's workspace
 } zxc_error_t;
 ```
 
@@ -691,11 +690,9 @@ ZXC_EXPORT int64_t zxc_decompress_dctx(
 );
 ```
 
-Same as `zxc_decompress()` but reuses buffers from `dctx`. Dictionary options
-are honoured exactly as in `zxc_decompress()`; the shared literal table is
-rebuilt only when it changes between calls. A static context
-(`zxc_init_static_dctx`) returns `ZXC_ERROR_DICT_UNSUPPORTED` for a dictionary
-archive or a supplied dictionary.
+Same as `zxc_decompress()`, dictionary options included, but reuses buffers
+from `dctx`; the shared literal table is rebuilt only when it changes between
+calls. A static context returns `ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
 
 ---
 
@@ -803,8 +800,7 @@ ZXC_EXPORT zxc_dctx* zxc_init_static_dctx(
 Initialises a decompression context inside a caller-supplied workspace.
 `block_size` is **pinned** at init time: feeding the returned handle an
 archive whose file header declares a different `block_size` returns
-`ZXC_ERROR_BAD_BLOCK_SIZE`. The workspace carries no dictionary prefix: a
-dictionary archive, or a supplied dictionary, returns
+`ZXC_ERROR_BAD_BLOCK_SIZE`. Dictionaries are not supported:
 `ZXC_ERROR_DICT_UNSUPPORTED`.
 
 The returned handle points inside `workspace`; the workspace must remain

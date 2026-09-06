@@ -174,9 +174,8 @@ var (
 
 	// ErrDictUnsupported is returned by the push streaming API when dictionary
 	// options are supplied: the push-stream format carries no dictionary ID, so
-	// dictionary compression would produce undecodable archives. The C library
-	// reports the same condition (ZXC_ERROR_DICT_UNSUPPORTED) for a static
-	// decompression context, whose workspace carries no dictionary prefix.
+	// dictionary compression would produce undecodable archives. Static C
+	// contexts report the same condition (ZXC_ERROR_DICT_UNSUPPORTED).
 	ErrDictUnsupported = errors.New("zxc: dictionaries are not supported by the push streaming API")
 )
 
