@@ -41,7 +41,7 @@ Executes fuzz testing using ClusterFuzzLite with multiple sanitizers (address, u
 
 Performs static analysis using Cppcheck and Clang Static Analyzer. Runs memory leak detection with Valgrind to ensure code quality and identify potential bugs.
 
-Also enforces formatting, one job per language, each running that ecosystem's canonical tool: `c-format` (clang-format, via `make format-check`), `rust-format` (`cargo fmt`), `go-format` (`gofmt`), `python-format` (`black`) and `nodejs-format` (`prettier`, covering both the Node.js and WASM wrappers). Formatter versions are pinned so a new release of one cannot turn CI red on a commit that touched nothing.
+Also enforces formatting, one job per language, each running that ecosystem's canonical tool: `c-format` (clang-format, via `make format-check`), `rust-format` (`cargo fmt`, plus a warning-free `cargo doc`), `go-format` (`gofmt`), `python-format` (`black`) and `nodejs-format` (`prettier`, covering both the Node.js and WASM wrappers). Formatter versions are pinned so a new release of one cannot turn CI red on a commit that touched nothing.
 
 ### security.yml - Code Security
 **Triggers:** Push to main, pull requests

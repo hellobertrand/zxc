@@ -5,22 +5,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-//! Low-level FFI bindings to the ZXC compression library.
-//!
-//! This crate provides raw, unsafe bindings to the ZXC C library.
-//! For a safe, idiomatic Rust API, use the `zxc` crate instead.
-//!
-//! # Example
-//!
-//! ```rust,ignore
-//! use zxc_sys::*;
-//!
-//! unsafe {
-//!     let bound = zxc_compress_bound(1024);
-//!     // ... allocate buffer and compress
-//! }
-//! ```
-
+#![doc = include_str!("../README.md")]
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 

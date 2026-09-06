@@ -9,6 +9,7 @@ edition = "2024"
 rust-version = "1.85"
 license = "BSD-3-Clause"
 repository = "https://github.com/hellobertrand/zxc"
+homepage = "https://github.com/hellobertrand/zxc"
 keywords = [
   "zxc",
   "compression",
