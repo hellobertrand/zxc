@@ -1864,8 +1864,9 @@ int test_dict_ctx_table_without_dict(void) {
             zxc_decompress(comp, (size_t)n, out, PSZ + 64, NULL) != (int64_t)PSZ ||
             memcmp(out, bufs[0], PSZ) != 0) {
             printf("  [FAIL] cctx %lld vs one-shot %lld, enc_lit=%u, dict_id %08X\n", (long long)n,
-                   (long long)r, n > 0 ? comp[ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + 8] : 0,
-                   n > 0 ? zxc_get_dict_id(comp, (size_t)n) : 0);
+                   (long long)r,
+                   n > 0 ? (unsigned)comp[ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + 8] : 0U,
+                   n > 0 ? zxc_get_dict_id(comp, (size_t)n) : 0U);
             break;
         }
         printf("  [PASS] dict_size 0 after a dict call: plain archive, identical to one-shot\n");
@@ -1883,7 +1884,7 @@ int test_dict_ctx_table_without_dict(void) {
 /* Every dictionary entry point rejects an oversized dictionary before touching it. */
 int test_dict_oversized_rejected_everywhere(void) {
     printf("=== TEST: Dict - oversized dictionary rejected on every entry point ===\n");
-    uint8_t src[256], comp[1024], out[512];
+    uint8_t src[256], comp[1024];
     for (size_t i = 0; i < sizeof(src); i++) src[i] = (uint8_t)i;
     const zxc_compress_opts_t plain = {.level = 3};
     const int64_t cs = zxc_compress(src, sizeof(src), comp, sizeof(comp), &plain);
@@ -1894,6 +1895,7 @@ int test_dict_oversized_rejected_everywhere(void) {
     zxc_dctx* dctx = zxc_create_dctx();
     int ok = 0;
     if (cs > 0 && cctx && dctx) {
+        uint8_t out[512];
         const int64_t e[] = {
             zxc_compress(src, sizeof(src), comp, sizeof(comp), &co),
             zxc_compress_cctx(cctx, src, sizeof(src), comp, sizeof(comp), &co),
