@@ -731,6 +731,8 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
 
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+
     const uint8_t* ip = src;
     const uint8_t* ip_end = ip + src_size;
     uint8_t* op = dst;
@@ -1125,6 +1127,7 @@ static int zxc_ctx_sync_dict_huf(zxc_cctx_t* RESTRICT inner, uint8_t* RESTRICT c
                                  int* RESTRICT cached, const uint8_t* RESTRICT dict_huf) {
     if (dict_huf) {
         if (!*cached || memcmp(cache, dict_huf, ZXC_HUF_TABLE_SIZE) != 0) {
+            *cached = 0; /* a failed attach leaves inner without a tree */
             if (UNLIKELY(zxc_cctx_attach_dict_huf(inner, dict_huf) != ZXC_OK))
                 return ZXC_ERROR_CORRUPT_DATA;
             ZXC_MEMCPY(cache, dict_huf, ZXC_HUF_TABLE_SIZE);
@@ -1365,6 +1368,8 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
 
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+
     const uint8_t* ip = (const uint8_t*)src;
     const uint8_t* const ip_end = ip + src_size;
     uint8_t* op = (uint8_t*)dst;
@@ -1528,6 +1533,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     // When a dictionary is active, offset_bits must accommodate dict + block.
     const uint8_t* b_dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t b_dict_size = ZXC_OPTS_DICT_SIZE(opts);
+    if (UNLIKELY(b_dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     const size_t base_block_size = (block_size > min_bs) ? block_size : min_bs;
     const size_t effective_block_size =
         b_dict_size > 0 ? zxc_block_size_ceil(b_dict_size + base_block_size) : base_block_size;
@@ -1615,6 +1621,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
     // Derive the block_size from dst_capacity (callers know the original size)
     const size_t block_size = zxc_block_size_ceil(dst_capacity);
