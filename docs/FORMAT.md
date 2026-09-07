@@ -137,9 +137,9 @@ the start of each enclosing structure unless otherwise stated.
 ## Definitions
 
 Block:
-: A self-contained unit produced by the encoder, consisting of an
-  8-byte block header, a payload of comp_size bytes, and an OPTIONAL
-  4-byte trailing checksum.
+: A self-contained unit produced by the encoder, consisting of an 8-byte
+  block header, a payload of Compressed Payload Size bytes, and an
+  OPTIONAL 4-byte trailing checksum.
 
 Block size:
 : The maximum decompressed size of a single block, derived from the
@@ -178,8 +178,8 @@ A ZXC file is the concatenation, in this order, of:
 ~~~
 
 The File Footer is always the last 12 bytes of the file. Decoders
-MAY rely on this invariant to locate the footer by seeking to
-file_size - 12.
+MAY rely on this invariant to locate the footer by seeking to 12
+bytes before the end of the file.
 
 A conforming encoder MUST emit exactly one EOF block per stream,
 and MUST write the footer immediately after the EOF block or, when
@@ -212,7 +212,7 @@ Format Version (u8):
 
 Chunk Size Code (u8):
 : Values in the range \[12, 21\] are interpreted as exponents, where
-  block_size = 2^code. This yields valid block sizes from 4 KiB
+  block size = 2^code. This yields valid block sizes from 4 KiB
   (code 12) to 2 MiB (code 21). The default block size in the
   reference implementation is 512 KiB (code 19). All other values
   MUST be rejected.
@@ -232,9 +232,9 @@ Reserved / Dictionary ID:
 : 7 bytes. When HAS_DICTIONARY is clear, all seven bytes are
   RESERVED: encoders MUST set them to zero and decoders MUST ignore
   their content. When HAS_DICTIONARY is set, the four bytes at
-  offsets 0x07..0x0A carry the dict_id as a u32 in little-endian
-  order ({{dictionary-header-encoding}}) and the three bytes at
-  offsets 0x0B..0x0D MUST be zero.
+  offsets 0x07..0x0A carry the Dictionary ID as a u32 in
+  little-endian order ({{dictionary-header-encoding}}) and the three
+  bytes at offsets 0x0B..0x0D MUST be zero.
 
 Header Checksum (u16):
 : The 16-bit header checksum of {{header-checksums}}, computed over
@@ -250,7 +250,7 @@ Every block in a ZXC file begins with an 8-byte block header:
  0x00    1     Block Type
  0x01    1     Block Flags
  0x02    1     Reserved
- 0x03    4     Compressed Payload Size (comp_size)
+ 0x03    4     Compressed Payload Size
  0x07    1     Header Checksum
 ~~~
 
@@ -279,7 +279,7 @@ Block Flags (u8):
 Reserved (u8):
 : MUST be set to 0 by encoders. MUST be ignored by decoders.
 
-comp_size (u32):
+Compressed Payload Size:
 : The size in bytes of the block payload. This size does NOT
   include the 8-byte block header nor the OPTIONAL trailing 4-byte
   checksum.
@@ -292,7 +292,7 @@ Header Checksum (u8):
 
 ~~~
 [ 8-byte Block Header ]
-[ comp_size bytes Payload ]
+[ Payload (Compressed Payload Size bytes) ]
 [ 4-byte Trailing Checksum (only if HAS_CHECKSUM=1 and type != EOF) ]
 ~~~
 
@@ -302,11 +302,11 @@ when HAS_CHECKSUM=1 is set in the file header.
 # RAW Block (Type 0) {#raw-block}
 
 A RAW block carries uncompressed data. The payload of a RAW block
-is comp_size bytes of literal input data, with no internal
+is Compressed Payload Size bytes of literal input data, with no internal
 sub-header.
 
 ~~~
-raw_size = comp_size
+decoded size = Compressed Payload Size
 ~~~
 
 Encoders MAY emit a RAW block whenever a compressed encoding would
@@ -338,21 +338,40 @@ of the literal stream.
 
 ~~~
  Offset  Size  Field
- 0x00    4     n_sequences (u32)
- 0x04    4     n_literals  (u32)
- 0x08    1     enc_lit  (0=RAW, 1=RLE, 2=HUFFMAN, 3=HUFFMAN_DICT)
- 0x09    1     enc_tok  (0=RAW tokens, 2=HUFFMAN tokens; level 7)
- 0x0A    1     enc_mlen (RESERVED; match lengths share the token)
- 0x0B    1     enc_off  (0=16-bit offsets, 1=8-bit offsets)
+ 0x00    4     Sequence Count
+ 0x04    4     Literal Count
+ 0x08    1     Literal Encoding
+ 0x09    1     Token Encoding
+ 0x0A    1     Match-Length Encoding
+ 0x0B    1     Offset Encoding
 ~~~
 
-enc_lit, enc_tok, and enc_off are closed value sets: a GLO decoder
-MUST reject any value outside those listed above rather than fall
-back to a default, so that unused values stay available to a later
-format version.
+Sequence Count:
+: The number of LZ77 sequences encoded in the block.
 
-enc_mlen is RESERVED: encoders MUST write 0, and decoders MUST
-ignore it ({{compatibility-rules}}).
+Literal Count:
+: The total number of literal bytes the Literals section decodes to.
+
+Literal Encoding:
+: 0 = RAW, 1 = RLE, 2 = Huffman ({{huffman-literal-section}}),
+  3 = shared-table Huffman ({{shared-huffman-literal-section}}).
+
+Token Encoding:
+: 0 = RAW tokens, 2 = Huffman tokens (level 7 only).
+
+Match-Length Encoding:
+: RESERVED; match lengths share the token byte.
+
+Offset Encoding:
+: 0 = 16-bit offsets, 1 = 8-bit offsets.
+
+Literal Encoding, Token Encoding, and Offset Encoding are closed value
+sets: a GLO decoder MUST reject any value outside those listed above
+rather than fall back to a default, so that unused values stay available
+to a later format version.
+
+Match-Length Encoding is RESERVED: encoders MUST write 0, and decoders
+MUST ignore it ({{compatibility-rules}}).
 
 ## Section Descriptors {#glo-section-descriptors}
 
@@ -360,33 +379,35 @@ Only the two section sizes that the header cannot imply are stored.
 Each present descriptor is a little-endian u32, and they appear in
 this order:
 
-lit_comp:
-: Present when enc_lit != 0. The compressed size, in bytes, of the
-  Literals section.
+Literals Section Size:
+: Present when Literal Encoding != 0. The compressed size, in bytes, of
+  the Literals section.
 
-tok_comp:
-: Present when enc_tok = 2. The compressed size, in bytes, of the
+Tokens Section Size:
+: Present when Token Encoding = 2. The compressed size, in bytes, of the
   Tokens section.
 
 A GLO block therefore carries 0, 4, or 8 bytes of descriptors.
 Every other section size is derived from the header, and so cannot
 be forged inconsistently with it:
 
-- The Literals section decodes to n_literals bytes. When
-  enc_lit = 0 it also occupies n_literals bytes on the wire, which
+- The Literals section decodes to Literal Count bytes. When Literal
+  Encoding = 0 it also occupies Literal Count bytes on the wire, which
   is why no descriptor is written for it.
-- The Tokens section occupies n_sequences bytes when enc_tok = 0.
-- The Offsets section occupies n_sequences bytes when enc_off = 1,
-  and twice that otherwise.
-- The Extras section occupies whatever payload remains after the
-  three sections above.
+- The Tokens section occupies Sequence Count bytes when Token
+  Encoding = 0.
+- The Offsets section occupies Sequence Count bytes when Offset
+  Encoding = 1, and twice that otherwise.
+- The Extras section occupies whatever payload remains after the three
+  sections above.
 
 ## Literal Section Slack {#literal-slack}
 
 At least 32 bytes of payload MUST follow the Literals section:
 
 ~~~
- comp_size - header - descriptors - lit_comp >= 32
+ Compressed Payload Size - header - descriptors
+   - Literals Section Size >= 32
 ~~~
 
 Decoders copy literals with an over-reading wild copy, so these
@@ -406,28 +427,28 @@ and Extras sections play the role of Tokens, Offsets, and Extras.
 ## Stream Content
 
 Literals:
-: If enc_lit = 0, raw literal bytes. If enc_lit = 1, RLE-tokenised
-  literals. If enc_lit = 2, Huffman-coded literals
-  ({{huffman-literal-section}}). If enc_lit = 3, Huffman-coded using
-  the dictionary's shared literal table
+: If Literal Encoding = 0, raw literal bytes. If Literal Encoding = 1,
+  RLE-tokenised literals. If Literal Encoding = 2, Huffman-coded
+  literals ({{huffman-literal-section}}). If Literal Encoding = 3,
+  Huffman-coded using the dictionary's shared literal table
   ({{shared-huffman-literal-section}}); valid only in
   dictionary-compressed archives.
 
 Tokens:
-: One byte per sequence, formed as (LL << 4) | ML. The high nibble is
-  LL (literal length) and the low nibble is ML (match length minus
-  the minimum match of 5). When enc_tok = 0 (all levels <= 6), the
-  n_sequences token bytes are stored verbatim and the Tokens
-  section's compressed size equals n_sequences. When enc_tok = 2
-  (level 7 only), the token bytes are Huffman-coded over the token
-  alphabet using the {{huffman-literal-section}} layout, including the
-  inline 128-byte code-length header; the section's compressed size is
-  the encoded payload size, and the decoder expands it back to
-  n_sequences bytes.
+: One byte per sequence, formed as (LL << 4) | ML. The high nibble is LL
+  (literal length) and the low nibble is ML (match length minus the
+  minimum match of 5). When Token Encoding = 0 (all levels <= 6), the
+  Sequence Count token bytes are stored verbatim and the Tokens
+  section's compressed size equals Sequence Count. When Token
+  Encoding = 2 (level 7 only), the token bytes are Huffman-coded over
+  the token alphabet using the {{huffman-literal-section}} layout,
+  including the inline 128-byte code-length header; the section's
+  compressed size is the encoded payload size, and the decoder expands
+  it back to Sequence Count bytes.
 
 Offsets:
-: n_sequences entries, each 1 byte if enc_off = 1 or 2 bytes
-  (little-endian) if enc_off = 0. Stored values are biased: the
+: Sequence Count entries, each 1 byte if Offset Encoding = 1 or 2 bytes
+  (little-endian) if Offset Encoding = 0. Stored values are biased: the
   decoder MUST add +1 to the stored value to obtain the actual match
   offset. This makes a stored offset of zero impossible by
   construction; the minimum decoded offset is 1.
@@ -449,7 +470,7 @@ Otherwise, the actual match length is ML + 5.
 
 ## Huffman Literal Section {#huffman-literal-section}
 
-When enc_lit = 2, the Literals stream carries a length-limited
+When Literal Encoding = 2, the Literals stream carries a length-limited
 canonical Huffman code over the literal bytes. The code bits are
 placed on the wire with the PivCo layout (a level-ordered Huffman
 arrangement, after {{PIVCO}}): the code lengths, code bits, and
@@ -506,7 +527,7 @@ the breadth-first enumeration.
 ### Derived Sizes
 
 The section carries no explicit size field for any run. The root
-handles n_literals symbols; the population count of a bitmap node's
+handles Literal Count symbols; the population count of a bitmap node's
 bits equals its right child's symbol count; and a flat root consuming
 c symbols occupies exactly ceil(c * D / 8) bytes. Every run length is
 therefore derived while walking the breadth-first order once.
@@ -548,26 +569,25 @@ neither choice is observable on the wire.
 
 ## Shared-Table Huffman Literal Section {#shared-huffman-literal-section}
 
-enc_lit = 3 is valid only in archives compressed with a dictionary
-(HAS_DICTIONARY set). The payload is the same Huffman section as
-{{huffman-literal-section}} with the 128-byte code-length header
+Literal Encoding = 3 is valid only in archives compressed with a
+dictionary (HAS_DICTIONARY set). The payload is the same Huffman section
+as {{huffman-literal-section}} with the 128-byte code-length header
 OMITTED: the code lengths are taken instead from the shared literal
 table carried by the .zxd dictionary ({{zxd-format}}), which is
 validated once — under the same rules as {{huffman-decoder-validation}}
-— when the dictionary is attached. The section payload therefore
-begins directly with the first emitting-node run.
+— when the dictionary is attached. The section payload therefore begins
+directly with the first emitting-node run.
 
-The shared table is trained on the corpus' post-LZ literal
-distribution and covers only the symbols seen during training. An
-encoder MUST fall back to a per-block table (enc_lit = 2) or to
-RAW/RLE for any block containing a literal byte that has no code in
-the shared table. A decoder MUST reject an enc_lit = 3 section when
-no dictionary table is attached ({{error-handling}}); the archive's
-dict_id guarantees a matching table whenever the dictionary check
-has passed.
+The shared table is trained on the corpus' post-LZ literal distribution
+and covers only the symbols seen during training. An encoder MUST fall
+back to a per-block table (Literal Encoding = 2) or to RAW/RLE for any
+block containing a literal byte that has no code in the shared table. A
+decoder MUST reject a Literal Encoding = 3 section when no dictionary
+table is attached ({{error-handling}}); the archive's Dictionary ID
+guarantees a matching table whenever the dictionary check has passed.
 
 The level-7 token section reuses the {{huffman-literal-section}}
-layout (enc_tok = 2, including the inline 128-byte code-length
+layout (Token Encoding = 2, including the inline 128-byte code-length
 header) over the token byte alphabet.
 
 # GHI Block (Type 2) {#ghi-block}
@@ -589,20 +609,21 @@ packed 32-bit sequence words rather than separated streams.
 
 ## GHI Header
 
-The GHI header is binary-identical to the GLO header. In a GHI
-block enc_lit is always 0 (raw literals), so the Literals section
-occupies n_literals bytes; enc_tok and enc_mlen are 0. enc_off is
-written as 0 and MUST be ignored by decoders: GHI has no offset
-stream, and sequence words always store 16-bit offsets.
+The GHI header is binary-identical to the GLO header. In a GHI block
+Literal Encoding is always 0 (raw literals), so the Literals section
+occupies Literal Count bytes; Token Encoding and Match-Length Encoding
+are 0. Offset Encoding is written as 0 and MUST be ignored by decoders:
+GHI has no offset stream, and sequence words always store 16-bit
+offsets.
 
 ## Section Descriptors {#ghi-section-descriptors}
 
 A GHI block carries no section descriptors at all. Every size
 follows from the header:
 
-- The Literals section occupies n_literals bytes, literals being
+- The Literals section occupies Literal Count bytes, literals being
   always RAW in a GHI block.
-- The Sequences section occupies 4 * n_sequences bytes.
+- The Sequences section occupies 4 * Sequence Count bytes.
 - The Extras section occupies whatever payload remains, including
   any slack padding.
 
@@ -649,7 +670,7 @@ recording the compressed size of every data block in the archive.
 
 ~~~
  Offset           Size    Field
- 0x00             8       Block Header (type=254, comp_size = N x 4)
+ 0x00             8       Block Header (type=254, payload N x 4)
  0x08             4       Block 0 Compressed Size (u32 LE)
  0x0C             4       Block 1 Compressed Size (u32 LE)
  ...              ...     ...
@@ -657,24 +678,24 @@ recording the compressed size of every data block in the archive.
 ~~~
 
 The decompressed size of each block and the total number of blocks
-N are derived from the File Header's block_size field and the
-footer's original_source_size: all blocks have decompressed size
-block_size except the last, which MAY be shorter.
+N are derived from the block size encoded in the File Header's Chunk
+Size Code and from the footer's Source Size: every block decompresses
+to the block size except the last, which MAY be shorter.
 
 ## Backward Detection Strategy
 
 A decoder that wishes to access the SEK block without scanning the
 archive linearly MAY use the following procedure:
 
-1. Read the File Header (first 16 bytes) and extract block_size.
-2. Read the File Footer (last 12 bytes) and extract
-   original_source_size.
-3. Compute N = ceil(original_source_size / block_size).
-4. Compute seek_block_size = 8 + (N x 4).
-5. Seek backward seek_block_size bytes from the start of the footer
-   to locate the SEK block header.
-6. Validate that the located block has Block Type == 254 and
-   comp_size == N x 4. If validation fails, the SEK block is absent
+1. Read the File Header (first 16 bytes) and derive the block size
+   from the Chunk Size Code.
+2. Read the File Footer (last 12 bytes) and extract Source Size.
+3. Compute N = ceil(Source Size / block size).
+4. Compute the size of the SEK block as 8 + (N x 4).
+5. Seek backward by that many bytes from the start of the footer to
+   locate the SEK block header.
+6. Validate that the located block has Block Type == 254 and Compressed
+   Payload Size == N x 4. If validation fails, the SEK block is absent
    or corrupt and the decoder MUST fall back to linear scanning.
 
 # EOF Block (Type 255) {#eof-block}
@@ -684,7 +705,7 @@ The EOF block marks the end of the data block stream.
 A conforming EOF block:
 
 - MUST have an 8-byte block header.
-- MUST have comp_size == 0.
+- MUST have Compressed Payload Size == 0.
 - MUST NOT carry a payload.
 - MUST NOT be followed by a trailing 4-byte checksum, regardless of
   the HAS_CHECKSUM flag.
@@ -846,16 +867,16 @@ file.
 
 ~~~
  Offset  Size  Field
- 0x00    8     original_source_size (u64)
- 0x08    4     global_hash          (u32)
+ 0x00    8     Source Size
+ 0x08    4     Global Hash
 ~~~
 
-original_source_size:
+Source Size:
 : The total uncompressed size of the source data, in bytes. After
   decoding, a conforming decoder MUST verify that its produced
   output size matches this value.
 
-global_hash:
+Global Hash:
 : The rolling global hash defined in {{checksums}}, or zero when
   HAS_CHECKSUM = 0.
 
@@ -895,7 +916,7 @@ dictionary once and then decodes any block in isolation.
 
 When the HAS_DICTIONARY flag (Flags bit 6, 0x40; see
 {{file-header}}) is set, the four reserved bytes at offsets
-0x07..0x0A of the File Header carry the dict_id as a u32 in
+0x07..0x0A of the File Header carry the Dictionary ID as a u32 in
 little-endian order, and the remaining reserved bytes at offsets
 0x0B..0x0D are zero.
 
@@ -906,11 +927,11 @@ set MUST:
    it MUST reject the archive (dictionary required; see
    {{error-handling}}).
 2. Verify that the identifier of the supplied dictionary equals the
-   dict_id in the File Header. If not, it MUST reject the archive
-   (dictionary mismatch). The identifier binds both the dictionary
-   content and its shared literal table ({{zxd-format}}), so a
-   matching dict_id guarantees the exact (content, table) pair
-   required to decode enc_lit = 3 literal sections
+   Dictionary ID in the File Header. If not, it MUST reject the
+   archive (dictionary mismatch). The identifier binds both the
+   dictionary content and its shared literal table ({{zxd-format}}),
+   so a matching Dictionary ID guarantees the exact (content, table)
+   pair required to decode Literal Encoding = 3 literal sections
    ({{shared-huffman-literal-section}}).
 
 The identifier of a dictionary that carries a shared literal table
@@ -920,7 +941,7 @@ decoder only through an in-memory interface, is identified by its
 content alone:
 
 ~~~
-dict_id = fold32(rapidhash(content))
+Dictionary ID = fold32(rapidhash(content))
 ~~~
 
 A decoder that does not recognise the HAS_DICTIONARY flag ignores it
@@ -943,7 +964,7 @@ literal Huffman table:
  0x04    1     Dictionary Format Version
  0x05    1     Flags
  0x06    2     Content Size
- 0x08    4     dict_id
+ 0x08    4     Dictionary ID
  0x0C    2     Reserved
  0x0E    2     Header Checksum
  0x10    N     Dictionary Content
@@ -970,13 +991,13 @@ Content Size (u16):
 : The length in bytes of the dictionary content that follows the
   header. MUST be in the range \[1, 65535\].
 
-dict_id (u32):
+Dictionary ID (u32):
 : A deterministic 32-bit identifier that binds the (content, table)
   pair. It is computed as fold32 ({{fold32}}) of the seeded RapidHash
   {{RAPIDHASH}} of the 128-byte Shared Literal Huffman Table, seeded
   with fold32 of the RapidHash of the Dictionary Content, so that
-  each byte is hashed exactly once. It MUST equal the dict_id stored
-  in the File Header of any ZXC archive compressed with this
+  each byte is hashed exactly once. It MUST equal the Dictionary ID
+  stored in the File Header of any ZXC archive compressed with this
   dictionary.
 
 Reserved:
@@ -997,7 +1018,7 @@ Shared Literal Huffman Table:
   code-length header of {{huffman-literal-section}}. It is ALWAYS
   present, immediately following the Dictionary Content. The code
   lengths are trained on the corpus' post-LZ literal distribution
-  and drive the enc_lit = 3 literal sections
+  and drive the Literal Encoding = 3 literal sections
   ({{shared-huffman-literal-section}}); symbols absent from the
   training distribution carry length 0.
 
@@ -1027,14 +1048,14 @@ The reference CLI applies the following conventions:
 
 - Training writes the dictionary as `dictionary_<dict_id>.zxd`, where
   `<dict_id>` is the lowercase eight-digit hexadecimal form of the
-  identifier. Embedding the identifier in the file name keeps it
+  Dictionary ID. Embedding it in the file name keeps the name
   unique per dictionary and easy to match against the value reported
   by archive-inspection tooling.
 - A dictionary is never located automatically at decompression time.
   An archive compressed with a dictionary MUST be decompressed by
   supplying that dictionary explicitly. Absent it, decompression
   fails because a dictionary is required; supplied with the wrong
-  dictionary, it fails because the dict_id does not match.
+  dictionary, it fails because the Dictionary ID does not match.
 
 # Decoder Operation
 
@@ -1043,13 +1064,13 @@ following procedure:
 
 1. Read the 16-byte File Header. Validate the Magic, Format
    Version, Chunk Size Code, and Header Checksum. If the HAS_DICTIONARY
-   flag is set, validate the supplied dictionary against the dict_id
-   ({{dictionary-header-encoding}}).
+   flag is set, validate the supplied dictionary against the
+   Dictionary ID ({{dictionary-header-encoding}}).
 2. Loop over blocks:
 
    a. Read the 8-byte block header. Validate the Header Checksum.
    b. If the block is the EOF block, exit the loop.
-   c. Read comp_size bytes of payload.
+   c. Read Compressed Payload Size bytes of payload.
    d. If HAS_CHECKSUM = 1, read the 4-byte trailing checksum and
       verify it against the payload; update the rolling global
       hash.
@@ -1058,9 +1079,9 @@ following procedure:
 
 3. If a SEK block is present, the decoder MAY validate or skip it.
 4. Read the 12-byte File Footer. Verify that the produced output
-   size matches original_source_size. If HAS_CHECKSUM = 1, verify
+   size matches Source Size. If HAS_CHECKSUM = 1, verify
    that the recomputed rolling global hash matches the footer's
-   global_hash.
+   Global Hash.
 
 A decoder MUST NOT return successfully if any of the validation
 steps above fail.
@@ -1141,14 +1162,14 @@ all errors in the table are fatal by default.
 | Unknown block type                     | Block header offset 0x00    | Reject. Type not defined for this version.      |
 | Block payload truncated                | During payload read         | Reject. Unexpected end of stream.               |
 | Block checksum mismatch                | Trailing 4-byte checksum    | Reject block. Payload is corrupt.               |
-| EOF block with non-zero comp_size      | EOF block header            | Reject. Malformed EOF marker.                   |
+| EOF block with non-zero Compressed Payload Size      | EOF block header            | Reject. Malformed EOF marker.                   |
 | Footer source-size mismatch            | File footer offset 0x00     | Reject. Output size does not match.             |
 | Footer global hash mismatch            | File footer offset 0x08     | Reject (if checksum mode active).               |
 | Decompressed output exceeds chunk size | During LZ decode            | Reject. Corrupt or malicious payload.           |
 | Match offset out of bounds             | During LZ copy              | Reject. Offset references data before output.   |
 | Varint exceeds L_MAX (3 bytes)         | Extras stream               | Reject. See {{varint-cap}}. Overflow or corrupt extras data.   |
 | Dictionary required but not supplied   | File header offset 0x06     | Reject. HAS_DICTIONARY set; see {{dictionary-header-encoding}}. |
-| Dictionary ID mismatch                 | File header offset 0x07     | Reject. Supplied dictionary does not match the header dict_id.  |
+| Dictionary ID mismatch                 | File header offset 0x07     | Reject. Supplied dictionary does not match the Dictionary ID.  |
 
 ## Severity Levels
 
@@ -1179,12 +1200,12 @@ Decoders that process untrusted input (for example, network data or
 user uploads) SHOULD additionally:
 
 - Validate all header checksums before processing any payload.
-- Enforce a maximum allocation limit derived from comp_size and the
-  chunk size code.
-- Reject files where comp_size exceeds the compression upper bound
-  for the configured chunk size.
-- Use bounded memory copies. Decoded lengths MUST NOT be trusted
-  without cross-checking against the output buffer capacity.
+- Enforce a maximum allocation limit derived from Compressed Payload
+  Size and the chunk size code.
+- Reject files where Compressed Payload Size exceeds the compression
+  upper bound for the configured chunk size.
+- Use bounded memory copies. Decoded lengths MUST NOT be trusted without
+  cross-checking against the output buffer capacity.
 
 # Security Considerations
 
@@ -1200,7 +1221,7 @@ in the File Header, which is constrained to the range
 \[4 KiB, 2 MiB\]. A decoder MUST enforce this bound while decoding.
 A decoder SHOULD additionally enforce an external bound on the
 total decompressed size (for example, derived from
-original_source_size) before allocating large output buffers.
+Source Size) before allocating large output buffers.
 
 ## Memory Safety in LZ Decoding
 
@@ -1324,8 +1345,8 @@ Provisional registration:
 
 The conventional file extension for a ZXC archive is .zxc. A companion
 pre-trained dictionary file ({{zxd-format}}) uses .zxd. Both are tooling
-conventions: a file of either kind is identified by its magic word rather
-than by its name ({{dictionary-naming}}).
+conventions: a file of either kind is identified by its magic word
+rather than by its name ({{dictionary-naming}}).
 
 ## Block Type Registry
 
@@ -1390,7 +1411,7 @@ Block header:
 ~~~
 
 - Type 00 (RAW), flags 00, reserved 00.
-- comp_size = 10.
+- Compressed Payload Size = 10.
 - Header Checksum = 0x69.
 
 Payload at offset 0x18..0x21:
@@ -1417,8 +1438,8 @@ FF | 00 | 00 | 00 00 00 00 | 02
 0A 00 00 00 00 00 00 00 | 90 BB A1 75
 ~~~
 
-- original_source_size = 10.
-- global_hash = 0x75A1BB90.
+- Source Size = 10.
+- Global Hash = 0x75A1BB90.
 
 With a single data block, the global hash equals that block's
 checksum, since rotl1(0) XOR b = b.
@@ -1447,11 +1468,11 @@ The same input compressed with the seek table enabled (zxc -z -C -1
 00000040: 00 00 90 BB A1 75
 ~~~
 
-A SEK block of 12 bytes is inserted between the EOF block and the
-File Footer. The SEK block header is FE 00 00 04 00 00 00 D2, with
-comp_size = 4 (one 4-byte entry) and Header Checksum = 0xD2. The single entry
-16 00 00 00 (= 22) is the total on-disk size of data block 0: 8
-(header) + 10 (payload) + 4 (checksum).
+A SEK block of 12 bytes is inserted between the EOF block and the File
+Footer. The SEK block header is FE 00 00 04 00 00 00 D2, with Compressed
+Payload Size = 4 (one 4-byte entry) and Header Checksum = 0xD2. The
+single entry 16 00 00 00 (= 22) is the total on-disk size of data block
+0: 8 (header) + 10 (payload) + 4 (checksum).
 
 The File Footer remains the last 12 bytes of the file, so a decoder
 locating the footer from the end of the file requires no
@@ -1487,9 +1508,9 @@ C7 D1 B0 9C | 01 | 00 | 05 00 | 34 07 FC 0C | 00 00 | 2D 74
 - 01 means Dictionary Format Version 1.
 - 00 means Flags = 0 (checksum algorithm id 0, no reserved bits set).
 - 05 00 is Content Size = 5.
-- 34 07 FC 0C is dict_id = 0x0CFC0734. It binds the (content, table)
-  pair and matches the dict_id stored in the File Header of any
-  archive compressed with this dictionary.
+- 34 07 FC 0C is the Dictionary ID = 0x0CFC0734. It binds the
+  (content, table) pair and matches the Dictionary ID stored in the
+  File Header of any archive compressed with this dictionary.
 - 00 00 are the two RESERVED bytes.
 - 2D 74 is the Header Checksum, computed over the 16-byte header with
   bytes 0x0C..0x0F treated as zero.
