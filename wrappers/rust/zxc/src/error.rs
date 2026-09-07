@@ -17,7 +17,11 @@ use zxc_sys::{
 };
 
 /// Errors that can occur during ZXC operations.
+///
+/// Marked `#[non_exhaustive]`: new variants may be added in minor releases,
+/// so keep a wildcard arm when matching.
 #[derive(Debug, Clone, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// Memory allocation failure
     #[error("memory allocation failed")]

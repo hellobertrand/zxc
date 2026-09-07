@@ -544,7 +544,7 @@ export default async function createZXC(moduleOverrides, factory) {
   function createCompressContext(opts) {
     const level = (opts && opts.level) || _default_level();
     const checksum = (opts && opts.checksum) || false;
-    const seekable = (opts && opts.seekable) || false;
+    const seekable = false; // zxc_compress_cctx writes no seek table
     const { dict, dictHuf } = _splitDictOption(opts);
 
     // Kept for the context's lifetime: dictionary options are never sticky.

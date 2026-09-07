@@ -82,8 +82,9 @@ Read the original size from a compressed buffer without decompressing.
 ### `zxc.createCompressContext(opts?) -> CompressContext`
 
 Create a reusable compression context (avoids per-call allocation). `opts`
-takes the same `level`, `checksum`, `seekable`, `dict` and `dictHuf` as
-`compress`; a dictionary given here is used by every `compress()` call.
+takes the same `level`, `checksum`, `dict` and `dictHuf` as `compress`
+(`seekable` is not supported here); a dictionary given here is used by every
+`compress()` call.
 
 ```js
 const ctx = zxc.createCompressContext({ level: 3, dict });

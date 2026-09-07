@@ -163,12 +163,12 @@ pub fn train_dict_huf(samples: &[&[u8]], dict: &[u8]) -> Result<[u8; ZXC_HUF_TAB
 ///
 /// # Errors
 ///
-/// Returns an [`Error`] if `huf_lengths` is not exactly
-/// [`ZXC_HUF_TABLE_SIZE`] bytes, if the content exceeds
-/// [`ZXC_DICT_SIZE_MAX`], or if serialization otherwise fails.
+/// Returns [`Error::BadHufTable`] if `huf_lengths` is not exactly
+/// [`ZXC_HUF_TABLE_SIZE`] bytes, or an [`Error`] if the content exceeds
+/// [`ZXC_DICT_SIZE_MAX`] or serialization otherwise fails.
 pub fn dict_save(content: &[u8], huf_lengths: &[u8]) -> Result<Vec<u8>> {
     if huf_lengths.len() != ZXC_HUF_TABLE_SIZE {
-        return Err(Error::InvalidData);
+        return Err(Error::BadHufTable);
     }
     let bound = unsafe { zxc_sys::zxc_dict_save_bound(content.len()) };
     let mut buf = vec![0u8; bound];
