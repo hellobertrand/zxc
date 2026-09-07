@@ -657,12 +657,18 @@ unsafe extern "C" {
     ) -> i64;
 
     /// Returns the exact byte count required by a static compression
-    /// workspace for the given `block_size` and `level`.
+    /// workspace for the given `block_size`, `level` and dictionary capacity
+    /// (0 = no dictionary; pass the same value as `dict_size` in the options
+    /// given to `zxc_init_static_cctx`).
     ///
     /// # Returns
     ///
-    /// Workspace size in bytes, or 0 if either argument is invalid.
-    pub fn zxc_static_cctx_workspace_size(block_size: usize, level: c_int) -> usize;
+    /// Workspace size in bytes, or 0 if an argument is invalid.
+    pub fn zxc_static_cctx_workspace_size(
+        block_size: usize,
+        level: c_int,
+        dict_capacity: usize,
+    ) -> usize;
 
     /// Initialises a compression context inside a caller-supplied workspace
     /// (no heap allocation).
@@ -679,12 +685,13 @@ unsafe extern "C" {
     ) -> *mut zxc_cctx;
 
     /// Returns the exact byte count required by a static decompression
-    /// workspace for the given `block_size`.
+    /// workspace for the given `block_size` and dictionary capacity
+    /// (0 = no dictionary).
     ///
     /// # Returns
     ///
-    /// Workspace size in bytes, or 0 if `block_size` is invalid.
-    pub fn zxc_static_dctx_workspace_size(block_size: usize) -> usize;
+    /// Workspace size in bytes, or 0 if an argument is invalid.
+    pub fn zxc_static_dctx_workspace_size(block_size: usize, dict_capacity: usize) -> usize;
 
     /// Initialises a decompression context inside a caller-supplied
     /// workspace (no heap allocation).
@@ -697,6 +704,7 @@ unsafe extern "C" {
         workspace: *mut c_void,
         workspace_size: usize,
         block_size: usize,
+        dict_capacity: usize,
     ) -> *mut zxc_dctx;
 }
 

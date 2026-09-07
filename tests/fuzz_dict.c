@@ -217,6 +217,28 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         assert(memcmp(comp_buf, comp2_buf, (size_t)csize) == 0);
     }
 
+    /* Static contexts carved for the largest dictionary must round-trip too. */
+    static zxc_cctx* scctx = NULL;
+    static zxc_dctx* sdctx = NULL;
+    static int static_tried = 0;
+    if (!static_tried) {
+        static_tried = 1;
+        const zxc_compress_opts_t init = {.level = zxc_max_level(),
+                                          .block_size = ZXC_BLOCK_SIZE_DEFAULT,
+                                          .dict_size = ZXC_DICT_SIZE_MAX};
+        const size_t cws = zxc_static_cctx_workspace_size(ZXC_BLOCK_SIZE_DEFAULT, zxc_max_level(),
+                                                          ZXC_DICT_SIZE_MAX);
+        const size_t dws =
+            zxc_static_dctx_workspace_size(ZXC_BLOCK_SIZE_DEFAULT, ZXC_DICT_SIZE_MAX);
+        void* cws_mem = NULL;
+        void* dws_mem = NULL;
+        if (cws && dws && posix_memalign(&cws_mem, 64, cws) == 0 &&
+            posix_memalign(&dws_mem, 64, dws) == 0) {
+            scctx = zxc_init_static_cctx(cws_mem, cws, &init);
+            sdctx = zxc_init_static_dctx(dws_mem, dws, ZXC_BLOCK_SIZE_DEFAULT, ZXC_DICT_SIZE_MAX);
+        }
+    }
+
     if (size > decomp_cap) {
         void* nb = realloc(decomp_buf, size);
         if (!nb) return 0;
@@ -234,6 +256,16 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (dsize >= 0) {
         assert((size_t)dsize == size);
         assert(memcmp(data, decomp_buf, size) == 0);
+    }
+
+    if (scctx && sdctx) {
+        const int64_t c3 = zxc_compress_cctx(scctx, data, size, comp2_buf, bound, &copts);
+        assert(c3 > 0);
+        const int64_t d3 =
+            zxc_decompress_dctx(sdctx, comp2_buf, (size_t)c3, decomp_buf, size, &dopts);
+        assert(d3 == (int64_t)size && memcmp(data, decomp_buf, size) == 0);
+        /* A static-context archive is an ordinary archive. */
+        assert(zxc_decompress(comp2_buf, (size_t)c3, decomp_buf, size, &dopts) == (int64_t)size);
     }
 
     /* Same archive through a reusable context: must agree with the one-shot path. */

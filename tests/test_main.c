@@ -151,6 +151,8 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_dict_oversized_rejected_everywhere),
     TEST_CASE(test_dict_block_huf_roundtrip),
     TEST_CASE(test_dict_block_stored_block_size),
+    TEST_CASE(test_dict_static_ctx_roundtrip),
+    TEST_CASE(test_dict_static_ctx_capacity),
     TEST_CASE(test_dict_huf_zxd_roundtrip),
     TEST_CASE(test_dict_huf_table_roundtrip),
     TEST_CASE(test_dict_huf_degenerate_corpus),

@@ -669,7 +669,7 @@ Same as `zxc_compress()` but reuses internal buffers from `cctx`.
 Automatically re-initializes when `block_size` or `level` changes. Dictionary
 options are honoured as in `zxc_compress()` but are not sticky; the shared
 literal table is rebuilt only when it changes. A static context returns
-`ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
+`ZXC_ERROR_DICT_UNSUPPORTED` for a dictionary beyond its carved capacity.
 
 ### `zxc_create_dctx`
 
@@ -702,7 +702,8 @@ ZXC_EXPORT int64_t zxc_decompress_dctx(
 
 Same as `zxc_decompress()`, dictionary options included, but reuses buffers
 from `dctx`; the shared literal table is rebuilt only when it changes between
-calls. A static context returns `ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
+calls. A static context returns `ZXC_ERROR_DICT_UNSUPPORTED` for a dictionary
+beyond its carved capacity.
 
 ---
 
@@ -745,19 +746,18 @@ maximum block size up front.
 ```c
 ZXC_EXPORT size_t zxc_static_cctx_workspace_size(
     const size_t block_size,
-    const int    level
+    const int    level,
+    const size_t dict_capacity
 );
 ```
 
-Returns the exact byte count required by a static compression workspace
-for the given `block_size` and `level`. Sum of the opaque `zxc_cctx`
-wrapper plus every persistent sub-buffer the library would partition.
+Exact workspace size for `zxc_init_static_cctx` at the given `block_size` and
+`level`. A non-zero `dict_capacity` (at most `ZXC_DICT_SIZE_MAX`) also carves
+the `[dict | block]` input and the shared-table state; the carved block grows
+to the power of two above `dict_capacity + block_size`. Pass the same capacity
+as `dict_size` in the `opts` given to `zxc_init_static_cctx`.
 
-**Returns**: workspace size in bytes, or `0` if either argument is invalid
-(non-power-of-two `block_size`, out-of-range level, ...).
-
-**Note**: level 6 (`ZXC_LEVEL_DENSITY`) adds the optimal-parser scratch
-(~8.125 × `block_size`); levels 1–5 share the same workspace size.
+**Returns**: bytes required, or 0 on an invalid parameter.
 
 ### `zxc_init_static_cctx`
 
@@ -773,7 +773,9 @@ Initialises a compression context inside a caller-supplied workspace.
 `workspace_size` must be at least `zxc_static_cctx_workspace_size` for the
 same `block_size` / `level`. `opts` is **required**: `block_size` and
 `level` are pinned at init time and must be set explicitly.
-Dictionaries are rejected: `ZXC_ERROR_DICT_UNSUPPORTED`.
+`dict_size` in `opts` is the dictionary capacity to carve (size the workspace
+with `zxc_static_cctx_workspace_size`); a larger dictionary later returns
+`ZXC_ERROR_DICT_UNSUPPORTED`.
 
 The returned handle points **inside** `workspace`; the workspace must
 remain valid for the lifetime of the handle. `zxc_free_cctx` is a no-op.
@@ -786,17 +788,16 @@ is `NULL`.
 
 ```c
 ZXC_EXPORT size_t zxc_static_dctx_workspace_size(
-    const size_t block_size
+    const size_t block_size,
+    const size_t dict_capacity
 );
 ```
 
-Returns the exact byte count required by a static decompression workspace
-for the given `block_size`. Unlike the compression variant, this size is
-**independent of the source archive's level**: `lit_buffer` is always
-provisioned worst-case because the decoder cannot predict the per-block
-literal encoding (RAW / RLE / HUFFMAN) until it sees each block header.
+Exact workspace size for `zxc_init_static_dctx`. A non-zero `dict_capacity`
+(at most `ZXC_DICT_SIZE_MAX`) also carves the dictionary prefix and the
+shared-table state.
 
-**Returns**: workspace size in bytes, or `0` if `block_size` is invalid.
+**Returns**: bytes required, or 0 on an invalid parameter.
 
 ### `zxc_init_static_dctx`
 
@@ -804,22 +805,23 @@ literal encoding (RAW / RLE / HUFFMAN) until it sees each block header.
 ZXC_EXPORT zxc_dctx* zxc_init_static_dctx(
     void*         workspace,
     const size_t  workspace_size,
-    const size_t  block_size
+    const size_t  block_size,
+    const size_t  dict_capacity
 );
 ```
 
 Initialises a decompression context inside a caller-supplied workspace.
 `block_size` is **pinned** at init time: feeding the returned handle an
 archive whose file header declares a different `block_size` returns
-`ZXC_ERROR_BAD_BLOCK_SIZE`. Dictionaries are not supported:
+`ZXC_ERROR_BAD_BLOCK_SIZE`. Dictionaries up to `dict_capacity` are honoured; a
+larger one, or any dictionary when the capacity is 0, returns
 `ZXC_ERROR_DICT_UNSUPPORTED`.
 
 The returned handle points inside `workspace`; the workspace must remain
 valid for the lifetime of the handle. `zxc_free_dctx` is a no-op.
 
 **Returns**: handle pointing inside `workspace`, or `NULL` if the
-workspace is too small, `block_size` is invalid, or `workspace` is
-`NULL`.
+workspace is too small or a parameter is invalid.
 
 ### Typical usage
 
@@ -830,7 +832,7 @@ workspace is too small, `block_size` is invalid, or `workspace` is
 #define LEVEL      ZXC_LEVEL_DEFAULT
 
 /* --- Compression side --- */
-size_t cws_sz = zxc_static_cctx_workspace_size(BLOCK_SZ, LEVEL);
+size_t cws_sz = zxc_static_cctx_workspace_size(BLOCK_SZ, LEVEL, 0);
 void  *cws    = NULL;
 posix_memalign(&cws, 64, cws_sz);                  /* or kmalloc / vmalloc / .bss */
 
@@ -844,11 +846,11 @@ zxc_free_cctx(cctx);  /* no-op for static */
 free(cws);            /* caller owns the workspace */
 
 /* --- Decompression side --- */
-size_t dws_sz = zxc_static_dctx_workspace_size(BLOCK_SZ);
+size_t dws_sz = zxc_static_dctx_workspace_size(BLOCK_SZ, 0);
 void  *dws    = NULL;
 posix_memalign(&dws, 64, dws_sz);
 
-zxc_dctx *dctx = zxc_init_static_dctx(dws, dws_sz, BLOCK_SZ);
+zxc_dctx *dctx = zxc_init_static_dctx(dws, dws_sz, BLOCK_SZ, 0);
 zxc_decompress_dctx(dctx, in, in_sz, out, out_cap, NULL);
 zxc_free_dctx(dctx);  /* no-op */
 free(dws);
@@ -919,7 +921,7 @@ must know it *before* calling `init`. Four patterns cover every use case:
    archive at the cost of over-allocation (~4 MB dctx).
 
    ```c
-   size_t dws_sz = zxc_static_dctx_workspace_size(ZXC_BLOCK_SIZE_MAX);
+   size_t dws_sz = zxc_static_dctx_workspace_size(ZXC_BLOCK_SIZE_MAX, 0);
    ```
 
    If the workspace pool must stay tight and worst-case sizing is too

@@ -1579,9 +1579,9 @@ int test_dict_static_dctx_rejected(void) {
         dctx_make_archive(3, block_size, src, src_size, k_dctx_dict, dict_size, NULL, a3, cap);
     const int64_t n0 = dctx_make_archive(3, block_size, src, src_size, NULL, 0, NULL, a0, cap);
 
-    const size_t ws_sz = zxc_static_dctx_workspace_size(block_size);
+    const size_t ws_sz = zxc_static_dctx_workspace_size(block_size, 0);
     void* ws = malloc(ws_sz);
-    zxc_dctx* dctx = ws ? zxc_init_static_dctx(ws, ws_sz, block_size) : NULL;
+    zxc_dctx* dctx = ws ? zxc_init_static_dctx(ws, ws_sz, block_size, 0) : NULL;
     int ok = n3 > 0 && n0 > 0 && dctx != NULL;
     if (!ok) printf("  [FAIL] setup: %lld %lld ws=%zu\n", (long long)n3, (long long)n0, ws_sz);
 
@@ -1674,7 +1674,7 @@ int test_dict_cctx_roundtrip(void) {
         printf("  [PASS] cctx dict archive -> DICT_REQUIRED without the dictionary\n");
 
         /* Static cctx rejects dictionaries explicitly. */
-        const size_t ws_sz = zxc_static_cctx_workspace_size(ZXC_BLOCK_SIZE_MIN, 3);
+        const size_t ws_sz = zxc_static_cctx_workspace_size(ZXC_BLOCK_SIZE_MIN, 3, 0);
         void* ws = malloc(ws_sz);
         const zxc_compress_opts_t so = {.level = 3, .block_size = ZXC_BLOCK_SIZE_MIN};
         zxc_cctx* sc = ws ? zxc_init_static_cctx(ws, ws_sz, &so) : NULL;
@@ -2001,7 +2001,7 @@ int test_dict_block_huf_roundtrip(void) {
 
         /* Static cctx: no dictionary prefix in the workspace, explicit error. */
         {
-            const size_t ws_sz = zxc_static_cctx_workspace_size(BLK, 6);
+            const size_t ws_sz = zxc_static_cctx_workspace_size(BLK, 6, 0);
             void* ws = malloc(ws_sz);
             const zxc_compress_opts_t so = {.level = 6, .block_size = BLK};
             zxc_cctx* sc = ws ? zxc_init_static_cctx(ws, ws_sz, &so) : NULL;
@@ -2018,9 +2018,9 @@ int test_dict_block_huf_roundtrip(void) {
          * routing dictionary calls through the fast one. */
         {
             const int64_t n = zxc_compress_block(cctx, heldout, BLK, comp, cap, &co);
-            const size_t ws_sz = zxc_static_dctx_workspace_size(BLK);
+            const size_t ws_sz = zxc_static_dctx_workspace_size(BLK, 0);
             void* ws = malloc(ws_sz);
-            zxc_dctx* sd = ws ? zxc_init_static_dctx(ws, ws_sz, BLK) : NULL;
+            zxc_dctx* sd = ws ? zxc_init_static_dctx(ws, ws_sz, BLK, 0) : NULL;
             const int64_t r1 = sd && n > 0
                                    ? zxc_decompress_block(sd, comp, (size_t)n, out,
                                                           BLK + ZXC_DECOMPRESS_TAIL_PAD, &d_tab)
@@ -2091,6 +2091,220 @@ int test_dict_block_stored_block_size(void) {
         ok = 1;
     } while (0);
     zxc_free_cctx(cctx);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* Cache-line aligned workspace for the static contexts. */
+#if defined(_WIN32)
+#include <malloc.h>
+static void* static_ws_alloc(size_t size) { return size ? _aligned_malloc(size, 64) : NULL; }
+static void static_ws_free(void* p) { _aligned_free(p); }
+#else
+static void* static_ws_alloc(size_t size) {
+    void* p = NULL;
+    if (size == 0 || posix_memalign(&p, 64, (size + 63) & ~(size_t)63) != 0) return NULL;
+    return p;
+}
+static void static_ws_free(void* p) { free(p); }
+#endif
+
+int test_dict_static_ctx_roundtrip(void) {
+    printf("=== TEST: Dict - static contexts carved with a dictionary capacity ===\n");
+    const size_t dict_size = sizeof(k_dctx_dict) - 1;
+    const size_t block = ZXC_BLOCK_SIZE_MIN;
+    const size_t src_size = block;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    gen_dict_friendly_data(src, src_size, k_dctx_dict, dict_size);
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
+    build_test_huf_lengths(k_dctx_dict, dict_size, huf);
+    const size_t cap = (size_t)zxc_compress_bound(src_size);
+    uint8_t* comp = (uint8_t*)malloc(cap);
+    uint8_t* dec = (uint8_t*)malloc(src_size + ZXC_DECOMPRESS_TAIL_PAD);
+
+    const zxc_compress_opts_t init = {.level = 7, .block_size = block, .dict_size = dict_size};
+    const size_t cws = zxc_static_cctx_workspace_size(block, 7, dict_size);
+    const size_t dws = zxc_static_dctx_workspace_size(block, dict_size);
+    void* cw = static_ws_alloc(cws);
+    void* dw = static_ws_alloc(dws);
+    zxc_cctx* sc = cw ? zxc_init_static_cctx(cw, cws, &init) : NULL;
+    zxc_dctx* sd = dw ? zxc_init_static_dctx(dw, dws, block, dict_size) : NULL;
+
+    const zxc_compress_opts_t c7 = {.level = 7,
+                                    .block_size = block,
+                                    .dict = k_dctx_dict,
+                                    .dict_size = dict_size,
+                                    .dict_huf = huf};
+    const zxc_compress_opts_t c_plain = {.level = 7, .block_size = block};
+    const zxc_compress_opts_t c_half = {
+        .level = 3, .block_size = block, .dict = k_dctx_dict, .dict_size = dict_size / 2};
+    const zxc_decompress_opts_t d7 = {.dict = k_dctx_dict, .dict_size = dict_size, .dict_huf = huf};
+    const zxc_decompress_opts_t d3 = {.dict = k_dctx_dict, .dict_size = dict_size};
+    const zxc_decompress_opts_t d_half = {.dict = k_dctx_dict, .dict_size = dict_size / 2};
+    int ok = 0;
+    do {
+        if (!sc || !sd) {
+            printf("  [FAIL] static init: cctx %p (ws %zu) dctx %p (ws %zu)\n", (void*)sc, cws,
+                   (void*)sd, dws);
+            break;
+        }
+        /* Frame API with dictionary + table, cross-checked against the one-shot decoder. */
+        int64_t cs = zxc_compress_cctx(sc, src, src_size, comp, cap, &c7);
+        int64_t r = cs > 0 ? zxc_decompress(comp, (size_t)cs, dec, src_size, &d7) : -1;
+        if (cs <= 0 ||
+            zxc_get_dict_id(comp, (size_t)cs) != zxc_dict_id(k_dctx_dict, dict_size, huf) ||
+            r != (int64_t)src_size || memcmp(dec, src, src_size) != 0) {
+            printf("  [FAIL] static cctx L7 + table: cs=%lld r=%lld\n", (long long)cs,
+                   (long long)r);
+            break;
+        }
+        memset(dec, 0, src_size);
+        r = zxc_decompress_dctx(sd, comp, (size_t)cs, dec, src_size, &d7);
+        if (r != (int64_t)src_size || memcmp(dec, src, src_size) != 0) {
+            printf("  [FAIL] static dctx L7 + table: %lld\n", (long long)r);
+            break;
+        }
+        printf("  [PASS] frame API, dictionary + table, both static contexts\n");
+
+        /* A dictionary-less archive still goes through the same contexts. */
+        cs = zxc_compress_cctx(sc, src, src_size, comp, cap, &c_plain);
+        memset(dec, 0, src_size);
+        r = cs > 0 ? zxc_decompress_dctx(sd, comp, (size_t)cs, dec, src_size, NULL) : -1;
+        if (cs <= 0 || zxc_get_dict_id(comp, (size_t)cs) != 0 || r != (int64_t)src_size ||
+            memcmp(dec, src, src_size) != 0) {
+            printf("  [FAIL] plain archive through dict-capable contexts: %lld %lld\n",
+                   (long long)cs, (long long)r);
+            break;
+        }
+        printf("  [PASS] plain archive through the same contexts\n");
+
+        /* The capacity is an upper bound: a smaller dictionary fits. */
+        cs = zxc_compress_cctx(sc, src, src_size, comp, cap, &c_half);
+        memset(dec, 0, src_size);
+        r = cs > 0 ? zxc_decompress_dctx(sd, comp, (size_t)cs, dec, src_size, &d_half) : -1;
+        if (cs <= 0 || r != (int64_t)src_size || memcmp(dec, src, src_size) != 0) {
+            printf("  [FAIL] half-size dictionary: %lld %lld\n", (long long)cs, (long long)r);
+            break;
+        }
+        printf("  [PASS] smaller dictionary than the capacity\n");
+
+        /* Block API through the same static contexts. */
+        const size_t bcap = (size_t)zxc_compress_block_bound(src_size);
+        const zxc_compress_opts_t cb = {
+            .level = 3, .block_size = block, .dict = k_dctx_dict, .dict_size = dict_size};
+        cs = zxc_compress_block(sc, src, src_size, comp, bcap, &cb);
+        memset(dec, 0, src_size);
+        r = cs > 0 ? zxc_decompress_block(sd, comp, (size_t)cs, dec,
+                                          src_size + ZXC_DECOMPRESS_TAIL_PAD, &d3)
+                   : -1;
+        const int64_t rs =
+            cs > 0 ? zxc_decompress_block_safe(sd, comp, (size_t)cs, dec, src_size, &d3) : -1;
+        if (cs <= 0 || r != (int64_t)src_size || rs != (int64_t)src_size ||
+            memcmp(dec, src, src_size) != 0) {
+            printf("  [FAIL] block API: cs=%lld r=%lld rs=%lld\n", (long long)cs, (long long)r,
+                   (long long)rs);
+            break;
+        }
+        printf("  [PASS] block API, dictionary, both static contexts\n");
+        ok = 1;
+    } while (0);
+    static_ws_free(cw);
+    static_ws_free(dw);
+    free(src);
+    free(comp);
+    free(dec);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+int test_dict_static_ctx_capacity(void) {
+    printf("=== TEST: Dict - static contexts enforce the dictionary capacity ===\n");
+    const size_t dict_size = sizeof(k_dctx_dict) - 1;
+    const size_t small = dict_size / 2;
+    const size_t block = ZXC_BLOCK_SIZE_MIN;
+    const size_t src_size = block;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    gen_dict_friendly_data(src, src_size, k_dctx_dict, dict_size);
+    const size_t cap = (size_t)zxc_compress_bound(src_size);
+    uint8_t* comp = (uint8_t*)malloc(cap);
+    uint8_t* dec = (uint8_t*)malloc(src_size + ZXC_DECOMPRESS_TAIL_PAD);
+    void* cw = NULL;
+    void* dw = NULL;
+    int ok = 0;
+    do {
+        /* Sizing: a capacity costs room, none costs nothing, too much is refused. */
+        const size_t c0 = zxc_static_cctx_workspace_size(block, 3, 0);
+        const size_t cd = zxc_static_cctx_workspace_size(block, 3, dict_size);
+        const size_t d0 = zxc_static_dctx_workspace_size(block, 0);
+        const size_t dd = zxc_static_dctx_workspace_size(block, dict_size);
+        if (zxc_static_cctx_workspace_size(block, 3, 0) != c0 || cd <= c0 ||
+            zxc_static_dctx_workspace_size(block, 0) != d0 || dd <= d0 ||
+            zxc_static_cctx_workspace_size(block, 3, ZXC_DICT_SIZE_MAX + 1) != 0 ||
+            zxc_static_dctx_workspace_size(block, ZXC_DICT_SIZE_MAX + 1) != 0) {
+            printf("  [FAIL] sizing: %zu/%zu %zu/%zu\n", c0, cd, d0, dd);
+            break;
+        }
+        printf("  [PASS] workspace sizing with and without a capacity\n");
+
+        /* A workspace sized without the capacity cannot carve it. */
+        cw = static_ws_alloc(cd);
+        dw = static_ws_alloc(dd);
+        const zxc_compress_opts_t init_full = {
+            .level = 3, .block_size = block, .dict_size = dict_size};
+        if (!cw || !dw || zxc_init_static_cctx(cw, c0, &init_full) != NULL ||
+            zxc_init_static_dctx(dw, d0, block, dict_size) != NULL) {
+            printf("  [FAIL] undersized workspace accepted\n");
+            break;
+        }
+        printf("  [PASS] undersized workspace refused\n");
+
+        /* Contexts carved for half the dictionary reject the full one everywhere. */
+        const zxc_compress_opts_t init_small = {
+            .level = 3, .block_size = block, .dict_size = small};
+        zxc_cctx* sc = zxc_init_static_cctx(cw, cd, &init_small);
+        zxc_dctx* sd = zxc_init_static_dctx(dw, dd, block, small);
+        const zxc_compress_opts_t c_full = {
+            .level = 3, .block_size = block, .dict = k_dctx_dict, .dict_size = dict_size};
+        const zxc_decompress_opts_t d_full = {.dict = k_dctx_dict, .dict_size = dict_size};
+        const int64_t arch = zxc_compress(src, src_size, comp, cap, &c_full);
+        if (!sc || !sd || arch <= 0) {
+            printf("  [FAIL] setup for capacity checks\n");
+            break;
+        }
+        const int64_t e1 = zxc_compress_cctx(sc, src, src_size, comp + 0, cap, &c_full);
+        const int64_t e2 = zxc_compress_block(sc, src, src_size, dec, src_size + 64, &c_full);
+        const int64_t e3 = zxc_decompress_dctx(sd, comp, (size_t)arch, dec, src_size, &d_full);
+        const int64_t e4 = zxc_decompress_dctx(sd, comp, (size_t)arch, dec, src_size, NULL);
+        const int64_t e5 = zxc_decompress_block(sd, comp + ZXC_FILE_HEADER_SIZE,
+                                                (size_t)arch - ZXC_FILE_HEADER_SIZE, dec,
+                                                src_size + ZXC_DECOMPRESS_TAIL_PAD, &d_full);
+        if (e1 != ZXC_ERROR_DICT_UNSUPPORTED || e2 != ZXC_ERROR_DICT_UNSUPPORTED ||
+            e3 != ZXC_ERROR_DICT_UNSUPPORTED || e4 != ZXC_ERROR_DICT_REQUIRED ||
+            e5 != ZXC_ERROR_DICT_UNSUPPORTED) {
+            printf("  [FAIL] capacity: %lld %lld %lld %lld %lld\n", (long long)e1, (long long)e2,
+                   (long long)e3, (long long)e4, (long long)e5);
+            break;
+        }
+        printf(
+            "  [PASS] dictionary beyond the capacity -> DICT_UNSUPPORTED, none -> DICT_REQUIRED\n");
+
+        /* Block decoders on a static dctx are bounded by the carved block. */
+        const int64_t b1 = zxc_decompress_block(sd, comp, (size_t)arch, dec,
+                                                block + ZXC_DECOMPRESS_TAIL_PAD + 1, NULL);
+        const int64_t b2 = zxc_decompress_block_safe(sd, comp, (size_t)arch, dec, block + 1, NULL);
+        if (b1 != ZXC_ERROR_BAD_BLOCK_SIZE || b2 != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf("  [FAIL] block bound on static dctx: %lld %lld\n", (long long)b1,
+                   (long long)b2);
+            break;
+        }
+        printf("  [PASS] block decoders bounded by the carved block\n");
+        ok = 1;
+    } while (0);
+    static_ws_free(cw);
+    static_ws_free(dw);
+    free(src);
+    free(comp);
+    free(dec);
     if (ok) printf("PASS\n\n");
     return ok;
 }

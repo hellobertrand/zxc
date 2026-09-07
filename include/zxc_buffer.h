@@ -442,7 +442,8 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  * Dictionary options are the exception: honoured as in zxc_compress() but
  * never remembered, so pass them on every call; the shared table is rebuilt
  * only when it changes. A static context returns
- * @ref ZXC_ERROR_DICT_UNSUPPORTED for any dictionary.
+ * @ref ZXC_ERROR_DICT_UNSUPPORTED for a dictionary beyond the capacity carved
+ * at init (none by default).
  *
  * @param[in,out] cctx         Reusable compression context.
  * @param[in]     src          Source data.
@@ -482,8 +483,8 @@ ZXC_EXPORT void zxc_free_dctx(zxc_dctx* dctx);
  *
  * Like zxc_decompress(), dictionary options included, but reuses @p dctx's
  * buffers; the shared literal table is rebuilt only when it changes between
- * calls. A static context returns @ref ZXC_ERROR_DICT_UNSUPPORTED for any
- * dictionary.
+ * calls. A static context returns @ref ZXC_ERROR_DICT_UNSUPPORTED for a
+ * dictionary beyond the capacity carved at init (none by default).
  *
  * @param[in,out] dctx         Reusable decompression context.
  * @param[in]     src          Compressed data.
@@ -535,22 +536,21 @@ ZXC_EXPORT int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* src, size_t s
  */
 
 /**
- * @brief Exact size of a static compression workspace.
+ * @brief Workspace size for a static compression context.
  *
- * Sums the opaque @ref zxc_cctx wrapper and every persistent sub-buffer the
- * library partitions out of it (hash tables, chain table, sequence buffers,
- * literal scratch, plus the optimal-parser scratch at
- * @ref ZXC_LEVEL_DENSITY). The workspace must be at least cache-line aligned,
- * so round up for @c posix_memalign / @c aligned_alloc.
+ * With a non-zero @p dict_capacity the workspace also carves the [dict | block]
+ * input and the shared-table state, and the carved block grows to the power of
+ * two above @c dict_capacity + @c block_size. Pass the same capacity as
+ * @c dict_size to zxc_init_static_cctx().
  *
- * @param[in] block_size  Block size in bytes (power of two in
- *                        [@ref ZXC_BLOCK_SIZE_MIN, @ref ZXC_BLOCK_SIZE_MAX]).
- * @param[in] level       Compression level (1..7); levels at or above
- *                        @ref ZXC_LEVEL_DENSITY add the optimal-parser
- *                        scratch (~8.125 x block_size).
- * @return Workspace size in bytes, or 0 if either argument is invalid.
+ * @param[in] block_size     Block size (power of two).
+ * @param[in] level          Compression level the workspace must support.
+ * @param[in] dict_capacity  Largest dictionary to accept, at most
+ *                           @ref ZXC_DICT_SIZE_MAX; 0 means none.
+ * @return Bytes required, or 0 on an invalid parameter.
  */
-ZXC_EXPORT size_t zxc_static_cctx_workspace_size(const size_t block_size, const int level);
+ZXC_EXPORT size_t zxc_static_cctx_workspace_size(const size_t block_size, const int level,
+                                                 const size_t dict_capacity);
 
 /**
  * @brief Initialises a compression context inside a caller-supplied workspace.
@@ -567,7 +567,8 @@ ZXC_EXPORT size_t zxc_static_cctx_workspace_size(const size_t block_size, const 
  * @c level / @c checksum_enabled is honoured per call without re-partitioning,
  * except a raise into @ref ZXC_LEVEL_DENSITY on a workspace carved below it:
  * the optimal-parser scratch is absent, so the call returns
- * @ref ZXC_ERROR_BAD_LEVEL. Dictionaries are rejected too:
+ * @ref ZXC_ERROR_BAD_LEVEL. @c dict_size in @p opts is the dictionary
+ * capacity to carve (pointer not kept); larger dictionaries later return
  * @ref ZXC_ERROR_DICT_UNSUPPORTED.
  *
  * @param[in,out] workspace       Caller-allocated buffer, cache-line aligned.
@@ -582,42 +583,43 @@ ZXC_EXPORT zxc_cctx* zxc_init_static_cctx(void* workspace, const size_t workspac
                                           const zxc_compress_opts_t* opts);
 
 /**
- * @brief Exact size of a static decompression workspace.
+ * @brief Workspace size for a static decompression context.
  *
- * Unlike the compression variant this is independent of the archive's level:
- * @c lit_buffer is always provisioned worst-case, because the decoder cannot
- * know a block's literal encoding until it reads that block's header.
+ * With a non-zero @p dict_capacity the workspace also carves the dictionary
+ * prefix and the shared-table state.
  *
- * @param[in] block_size  Largest block size the decoder will meet (same
- *                        constraints as everywhere else).
- * @return Workspace size in bytes, or 0 if @p block_size is invalid.
+ * @param[in] block_size     Block size the decoder will accept (power of two).
+ * @param[in] dict_capacity  Largest dictionary to accept, at most
+ *                           @ref ZXC_DICT_SIZE_MAX; 0 means none.
+ * @return Bytes required, or 0 on an invalid parameter.
  */
-ZXC_EXPORT size_t zxc_static_dctx_workspace_size(const size_t block_size);
+ZXC_EXPORT size_t zxc_static_dctx_workspace_size(const size_t block_size,
+                                                 const size_t dict_capacity);
 
 /**
  * @brief Initialises a decompression context inside a caller-supplied workspace.
  *
  * @p workspace_size must be at least @ref zxc_static_dctx_workspace_size for
- * the same @p block_size. The workspace must be cache-line aligned and must
- * outlive the returned handle. The caller owns it; @ref zxc_free_dctx is a
- * no-op on this handle.
+ * the same @p block_size and @p dict_capacity. The workspace must be cache-line
+ * aligned and must outlive the returned handle. The caller owns it;
+ * @ref zxc_free_dctx is a no-op on this handle.
  *
- * @par Locked block size
+ * @par Locked parameters
  * @p block_size is pinned at init time: an archive whose header declares a
  * different @c block_size is rejected with @ref ZXC_ERROR_BAD_BLOCK_SIZE.
- *
- * @par No dictionary
- * Any dictionary is rejected with @ref ZXC_ERROR_DICT_UNSUPPORTED: the
- * workspace has no room for the prefix.
+ * Dictionaries up to @p dict_capacity are honoured; a larger one, or any
+ * dictionary when the capacity is 0, is rejected with
+ * @ref ZXC_ERROR_DICT_UNSUPPORTED.
  *
  * @param[in,out] workspace       Caller-allocated buffer, cache-line aligned.
  * @param[in]     workspace_size  Capacity of @p workspace in bytes.
  * @param[in]     block_size      Block size the decoder will accept.
+ * @param[in]     dict_capacity   Largest dictionary to accept; 0 means none.
  * @return Handle pointing inside @p workspace, or @c NULL if the workspace is
- *         too small or @p block_size is invalid.
+ *         too small or a parameter is invalid.
  */
 ZXC_EXPORT zxc_dctx* zxc_init_static_dctx(void* workspace, const size_t workspace_size,
-                                          const size_t block_size);
+                                          const size_t block_size, const size_t dict_capacity);
 
 /** @} */ /* end of static_context_api */
 /** @} */ /* end of context_api */

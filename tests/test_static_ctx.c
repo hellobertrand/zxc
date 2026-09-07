@@ -54,7 +54,7 @@ int test_static_ctx_roundtrip_all_levels(void) {
 
     for (int lvl = zxc_min_level(); lvl <= zxc_max_level(); ++lvl) {
         /* Size the cctx workspace exactly. */
-        const size_t cctx_ws_sz = zxc_static_cctx_workspace_size(block_size, lvl);
+        const size_t cctx_ws_sz = zxc_static_cctx_workspace_size(block_size, lvl, 0);
         if (cctx_ws_sz == 0) {
             printf("  [FAIL] level %d: cctx_ws_sz == 0\n", lvl);
             goto fail;
@@ -82,7 +82,7 @@ int test_static_ctx_roundtrip_all_levels(void) {
         }
 
         /* Size + init the dctx workspace. */
-        const size_t dctx_ws_sz = zxc_static_dctx_workspace_size(block_size);
+        const size_t dctx_ws_sz = zxc_static_dctx_workspace_size(block_size, 0);
         if (dctx_ws_sz == 0) {
             printf("  [FAIL] level %d: dctx_ws_sz == 0\n", lvl);
             goto fail;
@@ -92,7 +92,7 @@ int test_static_ctx_roundtrip_all_levels(void) {
             printf("  [FAIL] level %d: aligned_alloc(dctx_ws)\n", lvl);
             goto fail;
         }
-        zxc_dctx* const dctx = zxc_init_static_dctx(dctx_ws, dctx_ws_sz, block_size);
+        zxc_dctx* const dctx = zxc_init_static_dctx(dctx_ws, dctx_ws_sz, block_size, 0);
         if (!dctx) {
             printf("  [FAIL] level %d: zxc_init_static_dctx returned NULL\n", lvl);
             test_aligned_free(dctx_ws);
@@ -130,33 +130,33 @@ int test_static_ctx_size_query(void) {
     printf("=== TEST: Static Context API - workspace_size queries ===\n");
 
     /* Invalid: zero block_size. */
-    if (zxc_static_cctx_workspace_size(0, ZXC_LEVEL_DEFAULT) != 0) {
+    if (zxc_static_cctx_workspace_size(0, ZXC_LEVEL_DEFAULT, 0) != 0) {
         printf("  [FAIL] cctx_size(0) should be 0\n");
         return 0;
     }
-    if (zxc_static_dctx_workspace_size(0) != 0) {
+    if (zxc_static_dctx_workspace_size(0, 0) != 0) {
         printf("  [FAIL] dctx_size(0) should be 0\n");
         return 0;
     }
     /* Invalid: non-power-of-two block_size. */
-    if (zxc_static_cctx_workspace_size(63 * 1024, ZXC_LEVEL_DEFAULT) != 0) {
+    if (zxc_static_cctx_workspace_size(63 * 1024, ZXC_LEVEL_DEFAULT, 0) != 0) {
         printf("  [FAIL] cctx_size(non-pow2) should be 0\n");
         return 0;
     }
     /* Invalid: out-of-range level. */
-    if (zxc_static_cctx_workspace_size(64 * 1024, 0) != 0) {
+    if (zxc_static_cctx_workspace_size(64 * 1024, 0, 0) != 0) {
         printf("  [FAIL] cctx_size(level=0) should be 0\n");
         return 0;
     }
-    if (zxc_static_cctx_workspace_size(64 * 1024, 99) != 0) {
+    if (zxc_static_cctx_workspace_size(64 * 1024, 99, 0) != 0) {
         printf("  [FAIL] cctx_size(level=99) should be 0\n");
         return 0;
     }
 
     /* Valid sizes are strictly increasing across levels (level 6 adds opt_scratch). */
-    const size_t s3 = zxc_static_cctx_workspace_size(64 * 1024, 3);
-    const size_t s5 = zxc_static_cctx_workspace_size(64 * 1024, 5);
-    const size_t s6 = zxc_static_cctx_workspace_size(64 * 1024, 6);
+    const size_t s3 = zxc_static_cctx_workspace_size(64 * 1024, 3, 0);
+    const size_t s5 = zxc_static_cctx_workspace_size(64 * 1024, 5, 0);
+    const size_t s6 = zxc_static_cctx_workspace_size(64 * 1024, 6, 0);
     if (s3 == 0 || s5 == 0 || s6 == 0) {
         printf("  [FAIL] one of s3/s5/s6 is 0\n");
         return 0;
@@ -178,7 +178,7 @@ int test_static_ctx_workspace_too_small(void) {
     printf("=== TEST: Static Context API - workspace too small ===\n");
 
     const size_t block_size = 64 * 1024;
-    const size_t needed = zxc_static_cctx_workspace_size(block_size, ZXC_LEVEL_DEFAULT);
+    const size_t needed = zxc_static_cctx_workspace_size(block_size, ZXC_LEVEL_DEFAULT, 0);
     /* Provide exactly one byte less than needed. */
     void* const ws = test_aligned_alloc(64, needed);
     if (!ws) {
@@ -211,7 +211,7 @@ int test_static_ctx_block_size_locked(void) {
     printf("=== TEST: Static Context API - block_size lock ===\n");
 
     const size_t pinned_bs = 64 * 1024;
-    const size_t ws_sz = zxc_static_cctx_workspace_size(pinned_bs, ZXC_LEVEL_DEFAULT);
+    const size_t ws_sz = zxc_static_cctx_workspace_size(pinned_bs, ZXC_LEVEL_DEFAULT, 0);
     void* const ws = test_aligned_alloc(64, ws_sz);
     if (!ws) {
         printf("  [FAIL] aligned_alloc\n");
@@ -262,7 +262,7 @@ int test_static_ctx_level_raise_rejected(void) {
     printf("=== TEST: Static Context API - level raise rejected ===\n");
 
     const size_t pinned_bs = 64 * 1024;
-    const size_t ws_sz = zxc_static_cctx_workspace_size(pinned_bs, ZXC_LEVEL_DEFAULT);
+    const size_t ws_sz = zxc_static_cctx_workspace_size(pinned_bs, ZXC_LEVEL_DEFAULT, 0);
     void* const ws = test_aligned_alloc(64, ws_sz);
     if (!ws) {
         printf("  [FAIL] aligned_alloc\n");
@@ -305,7 +305,7 @@ int test_static_ctx_level_raise_rejected(void) {
 
     /* A static workspace carved AT the dense tier accepts its own level. */
     {
-        const size_t ws7_sz = zxc_static_cctx_workspace_size(pinned_bs, ZXC_LEVEL_ULTRA);
+        const size_t ws7_sz = zxc_static_cctx_workspace_size(pinned_bs, ZXC_LEVEL_ULTRA, 0);
         void* const ws7 = test_aligned_alloc(64, ws7_sz);
         if (!ws7) {
             printf("  [FAIL] aligned_alloc (level 7 ws)\n");
@@ -346,7 +346,7 @@ int test_static_ctx_null_inputs(void) {
         printf("  [FAIL] init_static_cctx(NULL opts) should fail\n");
         return 0;
     }
-    if (zxc_init_static_dctx(NULL, 65536, 4096) != NULL) {
+    if (zxc_init_static_dctx(NULL, 65536, 4096, 0) != NULL) {
         printf("  [FAIL] init_static_dctx(NULL workspace) should fail\n");
         return 0;
     }

@@ -1112,6 +1112,7 @@ struct zxc_cctx_s {
     int stored_level;
     int stored_checksum;
     size_t stored_block_size;
+    size_t dict_cap;                       /* static: dictionary capacity carved at init */
     int huf_cached;                        /* inner carries the table below */
     uint8_t huf_cache[ZXC_HUF_TABLE_SIZE]; /* last table attached */
 };
@@ -1205,10 +1206,10 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
-    // Static cctx: no room for a dictionary prefix, and the workspace cannot
-    // grow, so reject a block_size change or a level raise into the
-    // optimal-parser tier it was carved without.
-    if (UNLIKELY(cctx->owns_workspace && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
+    // Static cctx: never re-carved, so reject a dictionary beyond the carved
+    // capacity, a block_size change, or a level raise it was carved without.
+    if (UNLIKELY(cctx->owns_workspace && dict_size > cctx->dict_cap))
+        return ZXC_ERROR_DICT_UNSUPPORTED;
     if (UNLIKELY(cctx->owns_workspace && block_size != cctx->last_block_size))
         return ZXC_ERROR_BAD_BLOCK_SIZE;
     if (UNLIKELY(cctx->owns_workspace && level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))
@@ -1225,9 +1226,11 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
 
     // Re-init when the chunk changed, a level raise needs the optimal-parser
     // scratch, or a dictionary arrives on a context carved without its prefix.
-    if (UNLIKELY(!cctx->initialized || cctx->last_block_size != eff_chunk ||
-                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
-                 (dict_size > 0 && !cctx->inner.dict_buffer))) {
+    // Static contexts are never re-carved.
+    if (UNLIKELY(!cctx->owns_workspace &&
+                 (!cctx->initialized || cctx->last_block_size != eff_chunk ||
+                  (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
+                  (dict_size > 0 && !cctx->inner.dict_buffer)))) {
         if (cctx->initialized) {
             zxc_cctx_free(&cctx->inner);
             cctx->initialized = 0;
@@ -1326,6 +1329,7 @@ struct zxc_dctx_s {
     int owns_workspace;     /* 0 = library-allocated (free in zxc_free_dctx),
                                1 = caller-supplied static workspace (no-op free,
                                block_size pinned at init) */
+    size_t dict_cap;        /* static: dictionary capacity carved at init */
     int huf_cached;         /* inner carries the table below */
     uint8_t huf_cache[ZXC_HUF_TABLE_SIZE]; /* last table attached */
 };
@@ -1384,12 +1388,11 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
                                       &header_dict_id) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
 
-    // Static dctx: block_size is locked at workspace init; reject any
-    // archive whose declared block_size would require a re-partition.
+    // Static dctx: block_size and dictionary capacity are locked at init.
     if (UNLIKELY(dctx->owns_workspace && runtime_chunk_size != dctx->last_block_size))
         return ZXC_ERROR_BAD_BLOCK_SIZE;
-    // Static dctx: no room for a dictionary prefix.
-    if (UNLIKELY(dctx->owns_workspace && (header_dict_id != 0 || dict_size != 0)))
+    if (UNLIKELY(dctx->owns_workspace &&
+                 (dict_size > dctx->dict_cap || (header_dict_id != 0 && dctx->dict_cap == 0))))
         return ZXC_ERROR_DICT_UNSUPPORTED;
 
     // Dictionary binding: same contract as zxc_decompress().
@@ -1400,9 +1403,10 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     }
 
     // Re-init when the block or dictionary size changed (the block API shares
-    // this context).
-    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != runtime_chunk_size ||
-                 dctx->last_dict_size != dict_size)) {
+    // this context); static contexts are never re-carved.
+    if (UNLIKELY(!dctx->owns_workspace &&
+                 (!dctx->initialized || dctx->last_block_size != runtime_chunk_size ||
+                  dctx->last_dict_size != dict_size))) {
         if (dctx->initialized) {
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
@@ -1421,7 +1425,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     }
 
     zxc_cctx_t* const ctx = &dctx->inner;
-
+    ctx->dict_size = dict_size; /* static: carved for its capacity */
     if (UNLIKELY(zxc_ctx_sync_dict_huf(ctx, dctx->huf_cache, &dctx->huf_cached, dict_huf) !=
                  ZXC_OK))
         return ZXC_ERROR_CORRUPT_DATA;
@@ -1434,7 +1438,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
 
     // [dict | decode + PAD] scratch, NULL without a dictionary.
-    uint8_t* const dict_dec = ctx->dict_buffer;
+    uint8_t* const dict_dec = dict_size > 0 ? ctx->dict_buffer : NULL;
     if (dict_dec) ZXC_MEMCPY(dict_dec, dict, dict_size);
 
     while (ip < ip_end) {
@@ -1543,9 +1547,10 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     // optimal-parser tier it carries no opt_scratch for. Re-initing on the heap
     // would break the no-allocation contract and leak: zxc_free_cctx is a no-op
     // for static contexts.
-    if (UNLIKELY(cctx->owns_workspace && b_dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
-    if (UNLIKELY(cctx->owns_workspace && effective_block_size != cctx->last_block_size))
-        return ZXC_ERROR_BAD_BLOCK_SIZE;  // LCOV_EXCL_LINE
+    if (UNLIKELY(cctx->owns_workspace && b_dict_size > cctx->dict_cap))
+        return ZXC_ERROR_DICT_UNSUPPORTED;
+    if (UNLIKELY(cctx->owns_workspace && base_block_size != cctx->last_block_size))
+        return ZXC_ERROR_BAD_BLOCK_SIZE;
     if (UNLIKELY(cctx->owns_workspace && level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))
         return ZXC_ERROR_BAD_LEVEL;
 
@@ -1556,9 +1561,11 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     // Re-init when block_size changed, a level raise needs the optimal-parser
     // scratch, or a dictionary arrives on a context carved without its prefix
     // (a block_size switch can round [dict | block] back to the same size).
-    if (UNLIKELY(!cctx->initialized || cctx->last_block_size != effective_block_size ||
-                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
-                 (b_dict_size > 0 && !cctx->inner.dict_buffer))) {
+    // Static contexts are never re-carved.
+    if (UNLIKELY(!cctx->owns_workspace &&
+                 (!cctx->initialized || cctx->last_block_size != effective_block_size ||
+                  (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
+                  (b_dict_size > 0 && !cctx->inner.dict_buffer)))) {
         if (cctx->initialized) {
             // LCOV_EXCL_START
             zxc_cctx_free(&cctx->inner);
@@ -1626,12 +1633,20 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    if (UNLIKELY(dctx->owns_workspace && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
+
+    // Static dctx: the carved block and dictionary capacity are locked.
+    if (UNLIKELY(dctx->owns_workspace &&
+                 dst_capacity > dctx->last_block_size + ZXC_DECOMPRESS_TAIL_PAD))
+        return ZXC_ERROR_BAD_BLOCK_SIZE;
+    if (UNLIKELY(dctx->owns_workspace && dict_size > dctx->dict_cap))
+        return ZXC_ERROR_DICT_UNSUPPORTED;
 
     // Derive the block_size from dst_capacity (callers know the original size)
-    const size_t block_size = zxc_block_size_ceil(dst_capacity);
-    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != block_size ||
-                 dctx->last_dict_size != dict_size)) {
+    const size_t block_size =
+        dctx->owns_workspace ? dctx->last_block_size : zxc_block_size_ceil(dst_capacity);
+    if (UNLIKELY(!dctx->owns_workspace &&
+                 (!dctx->initialized || dctx->last_block_size != block_size ||
+                  dctx->last_dict_size != dict_size))) {
         if (dctx->initialized) {
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
@@ -1716,9 +1731,14 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
 
     // GLO/GHI: use the strict-tail decoder (no bounce buffer required).
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
-    const size_t block_size = zxc_block_size_ceil(dst_capacity);
-    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != block_size ||
-                 dctx->last_dict_size != 0)) {
+    // Static dctx: the carved block is locked.
+    if (UNLIKELY(dctx->owns_workspace && dst_capacity > dctx->last_block_size))
+        return ZXC_ERROR_BAD_BLOCK_SIZE;
+    const size_t block_size =
+        dctx->owns_workspace ? dctx->last_block_size : zxc_block_size_ceil(dst_capacity);
+    if (UNLIKELY(!dctx->owns_workspace &&
+                 (!dctx->initialized || dctx->last_block_size != block_size ||
+                  dctx->last_dict_size != 0))) {
         if (dctx->initialized) {
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
@@ -1763,10 +1783,18 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
  * and the persistent buffer that @ref zxc_init_static_cctx carves for the given
  * @p block_size / @p level. Performs no allocation.
  */
-size_t zxc_static_cctx_workspace_size(const size_t block_size, const int level) {
+/* Compression carves [dict | block]. */
+static size_t static_cctx_chunk(const size_t block_size, const size_t dict_cap) {
+    return dict_cap > 0 ? zxc_block_size_ceil(dict_cap + block_size) : block_size;
+}
+
+size_t zxc_static_cctx_workspace_size(const size_t block_size, const int level,
+                                      const size_t dict_capacity) {
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return 0;
     if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_ULTRA)) return 0;
-    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level, 0);
+    if (UNLIKELY(dict_capacity > ZXC_DICT_SIZE_MAX)) return 0;
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(
+        static_cctx_chunk(block_size, dict_capacity), 1, level, dict_capacity);
     if (UNLIKELY(inner_sz == 0)) return 0;
     return ZXC_STATIC_CCTX_HDR_SIZE + inner_sz;
 }
@@ -1778,11 +1806,14 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
     const int level = (opts->level > 0) ? opts->level : ZXC_LEVEL_DEFAULT;
     const size_t block_size = (opts->block_size > 0) ? opts->block_size : ZXC_BLOCK_SIZE_DEFAULT;
     const int checksum_enabled = opts->checksum_enabled;
+    const size_t dict_cap = opts->dict_size; /* capacity to carve, pointer not kept */
 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return NULL;
     if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_ULTRA)) return NULL;
+    if (UNLIKELY(dict_cap > ZXC_DICT_SIZE_MAX)) return NULL;
 
-    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level, 0);
+    const size_t chunk = static_cctx_chunk(block_size, dict_cap);
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(chunk, 1, level, dict_cap);
     if (UNLIKELY(inner_sz == 0)) return NULL;
     if (UNLIKELY(workspace_size < ZXC_STATIC_CCTX_HDR_SIZE + inner_sz)) return NULL;
 
@@ -1790,13 +1821,14 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
     ZXC_MEMSET(cctx, 0, sizeof(*cctx));
 
     uint8_t* const inner_ws = (uint8_t*)workspace + ZXC_STATIC_CCTX_HDR_SIZE;
-    if (UNLIKELY(zxc_cctx_init_in_workspace(&cctx->inner, inner_ws, inner_sz, block_size, 1, level,
-                                            checksum_enabled, 0, 0) != ZXC_OK))
+    if (UNLIKELY(zxc_cctx_init_in_workspace(&cctx->inner, inner_ws, inner_sz, chunk, 1, level,
+                                            checksum_enabled, dict_cap, 0) != ZXC_OK))
         return NULL;
 
     cctx->owns_workspace = 1;
     cctx->initialized = 1;
     cctx->last_block_size = block_size;
+    cctx->dict_cap = dict_cap;
     cctx->stored_level = level;
     cctx->stored_block_size = block_size;
     cctx->stored_checksum = checksum_enabled;
@@ -1810,19 +1842,21 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
  * and the persistent buffer that @ref zxc_init_static_dctx carves for the given
  * @p block_size. Performs no allocation.
  */
-size_t zxc_static_dctx_workspace_size(const size_t block_size) {
+size_t zxc_static_dctx_workspace_size(const size_t block_size, const size_t dict_capacity) {
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return 0;
-    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 0, 0, 0);
+    if (UNLIKELY(dict_capacity > ZXC_DICT_SIZE_MAX)) return 0;
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 0, 0, dict_capacity);
     if (UNLIKELY(inner_sz == 0)) return 0;
     return ZXC_STATIC_DCTX_HDR_SIZE + inner_sz;
 }
 
 zxc_dctx* zxc_init_static_dctx(void* RESTRICT workspace, const size_t workspace_size,
-                               const size_t block_size) {
+                               const size_t block_size, const size_t dict_capacity) {
     if (UNLIKELY(!workspace)) return NULL;
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return NULL;
+    if (UNLIKELY(dict_capacity > ZXC_DICT_SIZE_MAX)) return NULL;
 
-    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 0, 0, 0);
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 0, 0, dict_capacity);
     if (UNLIKELY(inner_sz == 0)) return NULL;
     if (UNLIKELY(workspace_size < ZXC_STATIC_DCTX_HDR_SIZE + inner_sz)) return NULL;
 
@@ -1833,11 +1867,12 @@ zxc_dctx* zxc_init_static_dctx(void* RESTRICT workspace, const size_t workspace_
     // mode == 0 init: checksum_enabled is updated per-call from the file
     // header flags, so it does not need to be locked at workspace init.
     if (UNLIKELY(zxc_cctx_init_in_workspace(&dctx->inner, inner_ws, inner_sz, block_size, 0, 0, 0,
-                                            0, 0) != ZXC_OK))
+                                            dict_capacity, 0) != ZXC_OK))
         return NULL;
 
     dctx->owns_workspace = 1;
     dctx->initialized = 1;
     dctx->last_block_size = block_size;
+    dctx->dict_cap = dict_capacity;
     return dctx;
 }
