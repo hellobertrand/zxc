@@ -721,6 +721,32 @@ async function main() {
     }
     assert(rejected, "decompress without dictHuf is rejected (id binding)");
 
+    // Reusable contexts honour the dictionary too.
+    {
+      const cc = zxc.createCompressContext({ dict: d });
+      const dc = zxc.createDecompressContext({ dict: d });
+      const dcNo = zxc.createDecompressContext();
+      const cCtx = cc.compress(payload);
+      assert(
+        arraysEqual(dc.decompress(cCtx), payload),
+        "context compress/decompress with {dict} roundtrip",
+      );
+      assert(
+        arraysEqual(zxc.decompress(cCtx, { dict: d }), payload),
+        "context archive decodes with the one-shot API",
+      );
+      let ctxRejected = false;
+      try {
+        dcNo.decompress(cCtx);
+      } catch (e) {
+        ctxRejected = true;
+      }
+      assert(ctxRejected, "context decompress without dict is rejected");
+      cc.free();
+      dc.free();
+      dcNo.free();
+    }
+
     // Seekable + setDict + range roundtrip on a dict-compressed archive.
     const bigPayload = new Uint8Array(48 * 1024);
     {

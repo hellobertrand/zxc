@@ -65,17 +65,23 @@ impl Cctx {
     /// Compresses a single block (no file framing).
     ///
     /// Output format: 8-byte block header + payload (+ optional 4-byte checksum).
-    /// Use [`compress_block_bound`] to size `dst`.
+    /// Use [`compress_block_bound`] to size `dst`. A block carries no dictionary
+    /// id: give the decoder the same dictionary options.
     pub fn compress_block(
         &mut self,
         src: &[u8],
         dst: &mut [u8],
         opts: &CompressOptions,
     ) -> Result<usize> {
+        let (dict, dict_size, dict_huf) =
+            crate::dict_ptrs(opts.dict.as_ref(), opts.dict_huf.as_ref())?;
         let copts = zxc_sys::zxc_compress_opts_t {
             level: opts.level as i32,
             checksum_enabled: opts.checksum as i32,
             seekable: opts.seekable as i32,
+            dict,
+            dict_size,
+            dict_huf,
             ..Default::default()
         };
         let res = unsafe {
@@ -126,15 +132,21 @@ impl Dctx {
     ///
     /// `dst` should be at least [`decompress_block_bound`]`(uncompressed_size)`
     /// to enable the fast path. For strictly-sized
-    /// destinations, use [`Dctx::decompress_block_safe`].
+    /// destinations, use [`Dctx::decompress_block_safe`]. A block carries no
+    /// dictionary id: pass the same dictionary options as at compression.
     pub fn decompress_block(
         &mut self,
         src: &[u8],
         dst: &mut [u8],
         opts: &DecompressOptions,
     ) -> Result<usize> {
+        let (dict, dict_size, dict_huf) =
+            crate::dict_ptrs(opts.dict.as_ref(), opts.dict_huf.as_ref())?;
         let dopts = zxc_sys::zxc_decompress_opts_t {
             checksum_enabled: opts.verify_checksum as i32,
+            dict,
+            dict_size,
+            dict_huf,
             ..Default::default()
         };
         let res = unsafe {
@@ -163,8 +175,13 @@ impl Dctx {
         dst: &mut [u8],
         opts: &DecompressOptions,
     ) -> Result<usize> {
+        let (dict, dict_size, dict_huf) =
+            crate::dict_ptrs(opts.dict.as_ref(), opts.dict_huf.as_ref())?;
         let dopts = zxc_sys::zxc_decompress_opts_t {
             checksum_enabled: opts.verify_checksum as i32,
+            dict,
+            dict_size,
+            dict_huf,
             ..Default::default()
         };
         let res = unsafe {
@@ -205,4 +222,87 @@ pub fn compress_block_bound(input_size: usize) -> u64 {
 /// and size the buffer to exactly the uncompressed length.
 pub fn decompress_block_bound(uncompressed_size: usize) -> u64 {
     unsafe { zxc_sys::zxc_decompress_block_bound(uncompressed_size) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dict::{train_dict, train_dict_huf};
+    use crate::{Error, Level};
+
+    fn corpus() -> Vec<Vec<u8>> {
+        (0..48)
+            .map(|i| {
+                format!(
+                    "{{\"id\":{i},\"user\":\"alice_{i}\",\"mail\":\"alice{i}@example.com\",\"role\":\"member\",\"active\":true}}"
+                )
+                .into_bytes()
+            })
+            .collect()
+    }
+
+    fn trained() -> (Vec<Vec<u8>>, Vec<u8>, Vec<u8>) {
+        let corpus = corpus();
+        let samples: Vec<&[u8]> = corpus.iter().map(|s| s.as_slice()).collect();
+        let dict = train_dict(&samples, 4096).expect("train_dict");
+        let huf = train_dict_huf(&samples, &dict)
+            .expect("train_dict_huf")
+            .to_vec();
+        (corpus, dict, huf)
+    }
+
+    #[test]
+    fn block_roundtrip_with_dict_and_table() {
+        let (corpus, dict, huf) = trained();
+        let block = &corpus[7];
+        let mut cctx = Cctx::new(None).unwrap();
+        let mut dctx = Dctx::new().unwrap();
+        let mut comp = vec![0u8; compress_block_bound(block.len()) as usize];
+        let mut out = vec![0u8; decompress_block_bound(block.len()) as usize];
+        let mut exact = vec![0u8; block.len()];
+
+        for (level, table) in [(Level::Default, false), (Level::Ultra, true)] {
+            let mut copts = CompressOptions::with_level(level).with_dict(dict.clone());
+            let mut dopts = DecompressOptions::default().with_dict(dict.clone());
+            if table {
+                copts = copts.with_dict_huf(huf.clone());
+                dopts = dopts.with_dict_huf(huf.clone());
+            }
+            let n = cctx
+                .compress_block(block, &mut comp, &copts)
+                .expect("compress_block");
+            let m = dctx
+                .decompress_block(&comp[..n], &mut out, &dopts)
+                .expect("decompress_block");
+            assert_eq!(&out[..m], block.as_slice());
+            let k = dctx
+                .decompress_block_safe(&comp[..n], &mut exact, &dopts)
+                .expect("decompress_block_safe");
+            assert_eq!(&exact[..k], block.as_slice());
+            // Undecodable without the dictionary.
+            assert!(
+                dctx.decompress_block(&comp[..n], &mut out, &DecompressOptions::default())
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn wrong_table_length_is_rejected_before_reaching_c() {
+        let (corpus, dict, _huf) = trained();
+        let block = &corpus[3];
+        let mut cctx = Cctx::new(None).unwrap();
+        let mut comp = vec![0u8; compress_block_bound(block.len()) as usize];
+        let copts = CompressOptions::default()
+            .with_dict(dict.clone())
+            .with_dict_huf(vec![0u8; 7]);
+        assert!(matches!(
+            cctx.compress_block(block, &mut comp, &copts),
+            Err(Error::BadHufTable)
+        ));
+        assert!(matches!(
+            crate::compress_with_options(block, &copts),
+            Err(Error::BadHufTable)
+        ));
+    }
 }

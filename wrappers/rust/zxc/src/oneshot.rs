@@ -102,14 +102,8 @@ unsafe fn impl_compress(
     options: &CompressOptions,
 ) -> Result<usize> {
     let written = unsafe {
-        let (dict_ptr, dict_size) = match &options.dict {
-            Some(d) if !d.is_empty() => (d.as_ptr() as *const c_void, d.len()),
-            _ => (std::ptr::null(), 0),
-        };
-        let dict_huf_ptr = match &options.dict_huf {
-            Some(h) if !h.is_empty() => h.as_ptr() as *const c_void,
-            _ => std::ptr::null(),
-        };
+        let (dict_ptr, dict_size, dict_huf_ptr) =
+            crate::dict_ptrs(options.dict.as_ref(), options.dict_huf.as_ref())?;
         let copts = zxc_sys::zxc_compress_opts_t {
             level: options.level as i32,
             checksum_enabled: options.checksum as i32,
@@ -245,14 +239,8 @@ unsafe fn impl_decompress(
     options: &DecompressOptions,
 ) -> Result<usize> {
     let written = unsafe {
-        let (dict_ptr, dict_size) = match &options.dict {
-            Some(d) if !d.is_empty() => (d.as_ptr() as *const c_void, d.len()),
-            _ => (std::ptr::null(), 0),
-        };
-        let dict_huf_ptr = match &options.dict_huf {
-            Some(h) if !h.is_empty() => h.as_ptr() as *const c_void,
-            _ => std::ptr::null(),
-        };
+        let (dict_ptr, dict_size, dict_huf_ptr) =
+            crate::dict_ptrs(options.dict.as_ref(), options.dict_huf.as_ref())?;
         let dopts = zxc_sys::zxc_decompress_opts_t {
             checksum_enabled: if options.verify_checksum { 1 } else { 0 },
             dict: dict_ptr,

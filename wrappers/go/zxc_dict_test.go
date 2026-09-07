@@ -243,3 +243,55 @@ func TestDictionaryObjectRoundtrip(t *testing.T) {
 		t.Fatalf("content-only decode of a pair-bound archive should fail")
 	}
 }
+
+// The block API takes the dictionary and table per call; a block carries no
+// dictionary id, so it cannot decode without them.
+func TestBlockAPIWithDict(t *testing.T) {
+	dict := trainTestDict(t)
+	huf, err := TrainDictHuf(dictSamples(), dict)
+	if err != nil {
+		t.Fatalf("TrainDictHuf: %v", err)
+	}
+	payload := dictSamples()[9]
+	c, err := NewCctx()
+	if err != nil {
+		t.Fatalf("NewCctx: %v", err)
+	}
+	defer c.Close()
+	d, err := NewDctx()
+	if err != nil {
+		t.Fatalf("NewDctx: %v", err)
+	}
+	defer d.Close()
+
+	comp := make([]byte, CompressBlockBound(len(payload)))
+	out := make([]byte, DecompressBlockBound(len(payload)))
+	exact := make([]byte, len(payload))
+	for _, tc := range []struct {
+		name string
+		opts []Option
+	}{
+		{"dict", []Option{WithDict(dict)}},
+		{"dict+table", []Option{WithLevel(LevelUltra), WithDict(dict), WithDictHuf(huf)}},
+	} {
+		n, err := c.CompressBlock(payload, comp, tc.opts...)
+		if err != nil {
+			t.Fatalf("%s: CompressBlock: %v", tc.name, err)
+		}
+		dopts := []Option{WithDict(dict), WithDictHuf(huf)}
+		m, err := d.DecompressBlock(comp[:n], out, dopts...)
+		if err != nil || !bytes.Equal(out[:m], payload) {
+			t.Fatalf("%s: DecompressBlock: %v", tc.name, err)
+		}
+		k, err := d.DecompressBlockSafe(comp[:n], exact, dopts...)
+		if err != nil || !bytes.Equal(exact[:k], payload) {
+			t.Fatalf("%s: DecompressBlockSafe: %v", tc.name, err)
+		}
+		if _, err := d.DecompressBlock(comp[:n], out); err == nil {
+			t.Fatalf("%s: DecompressBlock without the dictionary should fail", tc.name)
+		}
+	}
+	if _, err := c.CompressBlock(payload, comp, WithDict(dict), WithDictHuf([]byte{1, 2, 3})); err != ErrBadHufTable {
+		t.Fatalf("bad table length: got %v, want ErrBadHufTable", err)
+	}
+}

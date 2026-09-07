@@ -35,6 +35,7 @@ use std::ffi::{CString, c_void};
 use std::path::Path;
 use std::ptr::NonNull;
 
+use crate::ZXC_HUF_TABLE_SIZE;
 use crate::error::error_from_code;
 use crate::{Error, Result};
 
@@ -213,7 +214,12 @@ impl Seekable {
     /// match the one the archive requires.
     pub fn set_dict(&mut self, dict: &[u8], dict_huf: Option<&[u8]>) -> Result<()> {
         let huf_ptr = match dict_huf {
-            Some(h) if !h.is_empty() => h.as_ptr() as *const c_void,
+            Some(h) if !h.is_empty() => {
+                if h.len() != ZXC_HUF_TABLE_SIZE {
+                    return Err(Error::BadHufTable);
+                }
+                h.as_ptr() as *const c_void
+            }
             _ => std::ptr::null(),
         };
         let rc = unsafe {

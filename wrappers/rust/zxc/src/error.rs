@@ -95,6 +95,10 @@ pub enum Error {
     #[error("dictionary not supported by this context's workspace")]
     DictUnsupported,
 
+    /// Shared literal Huffman table is not `ZXC_HUF_TABLE_SIZE` bytes
+    #[error("shared literal Huffman table must be ZXC_HUF_TABLE_SIZE bytes")]
+    BadHufTable,
+
     /// The requested options are not supported by this API
     #[error("unsupported option: {0}")]
     Unsupported(&'static str),

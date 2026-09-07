@@ -262,6 +262,28 @@ pub use dict::{
 };
 pub use zxc_sys::{ZXC_DICT_SIZE_MAX, ZXC_HUF_TABLE_SIZE};
 
+/// Dictionary pointers for a C options struct; the shared table must be
+/// `ZXC_HUF_TABLE_SIZE` bytes when it accompanies a dictionary.
+pub(crate) fn dict_ptrs(
+    dict: Option<&Vec<u8>>,
+    dict_huf: Option<&Vec<u8>>,
+) -> Result<(*const std::ffi::c_void, usize, *const std::ffi::c_void)> {
+    let (dict_ptr, dict_size) = match dict {
+        Some(d) if !d.is_empty() => (d.as_ptr() as *const std::ffi::c_void, d.len()),
+        _ => (std::ptr::null(), 0),
+    };
+    let huf_ptr = match dict_huf {
+        Some(h) if dict_size > 0 && !h.is_empty() => {
+            if h.len() != ZXC_HUF_TABLE_SIZE {
+                return Err(Error::BadHufTable);
+            }
+            h.as_ptr() as *const std::ffi::c_void
+        }
+        _ => std::ptr::null(),
+    };
+    Ok((dict_ptr, dict_size, huf_ptr))
+}
+
 pub use ctx::{Cctx, Dctx, compress_block_bound, decompress_block_bound};
 pub use error::{Error, Result};
 pub use file::{

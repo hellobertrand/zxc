@@ -12,6 +12,7 @@ package zxc
 */
 import "C"
 import (
+	"runtime"
 	"unsafe"
 )
 
@@ -110,8 +111,8 @@ func (c *Cctx) Close() error {
 //
 // Per-call [WithLevel] / [WithChecksum] override the values given to
 // [NewCctx]; when omitted, the creation-time settings apply.
-// [WithDict]/[WithDictHuf] are not wired to the block API and are ignored;
-// use the buffer API ([Compress]/[Decompress]) for dictionary compression.
+// [WithDict]/[WithDictHuf] apply per call: a block carries no dictionary id,
+// so pass the same (dict, table) pair to [Dctx.DecompressBlock].
 func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	if c == nil || c.ptr == nil {
 		return 0, ErrNullInput
@@ -137,6 +138,11 @@ func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	copts.level = C.int(o.level)
 	if o.checksum {
 		copts.checksum_enabled = 1
+	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	if err := setCompressDict(&copts, o, &pinner); err != nil {
+		return 0, err
 	}
 
 	n := C.zxc_compress_block(
@@ -182,7 +188,8 @@ func (d *Dctx) Close() error {
 //
 // dst should be at least [DecompressBlockBound](uncompressedSize) to enable
 // the fast decode path. For a strictly-sized destination buffer use
-// [Dctx.DecompressBlockSafe] instead.
+// [Dctx.DecompressBlockSafe] instead. Pass the same [WithDict]/[WithDictHuf]
+// as at compression: a block carries no dictionary id.
 func (d *Dctx) DecompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	if d == nil || d.ptr == nil {
 		return 0, ErrNullInput
@@ -198,6 +205,11 @@ func (d *Dctx) DecompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	var dopts C.zxc_decompress_opts_t
 	if o.checksum {
 		dopts.checksum_enabled = 1
+	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
+		return 0, err
 	}
 
 	n := C.zxc_decompress_block(
@@ -233,6 +245,11 @@ func (d *Dctx) DecompressBlockSafe(src, dst []byte, opts ...Option) (int, error)
 	var dopts C.zxc_decompress_opts_t
 	if o.checksum {
 		dopts.checksum_enabled = 1
+	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
+		return 0, err
 	}
 
 	n := C.zxc_decompress_block_safe(

@@ -536,19 +536,41 @@ export default async function createZXC(moduleOverrides, factory) {
    * @param {object} [opts] - Default options.
    * @param {number} [opts.level=3] - Default compression level.
    * @param {boolean} [opts.checksum=false] - Default checksum setting.
+   * @param {Dictionary|Uint8Array} [opts.dict] - Dictionary used by every
+   *   compress() call; the decoder must be given the same one.
+   * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table.
    * @returns {{ compress: Function, free: Function }}
    */
   function createCompressContext(opts) {
     const level = (opts && opts.level) || _default_level();
     const checksum = (opts && opts.checksum) || false;
     const seekable = (opts && opts.seekable) || false;
+    const { dict, dictHuf } = _splitDictOption(opts);
 
-    const optsPtr = _writeCompressOpts(level, checksum, seekable);
+    // Kept for the context's lifetime: dictionary options are never sticky.
+    const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
+    if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
+    const dictHufPtr = dictPtr && dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
+    if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
+    const optsPtr = _writeCompressOpts(
+      level,
+      checksum,
+      seekable,
+      dictPtr,
+      dictPtr ? dict.length : 0,
+      dictHufPtr,
+    );
+    const release = () => {
+      _free(optsPtr);
+      if (dictPtr) _free(dictPtr);
+      if (dictHufPtr) _free(dictHufPtr);
+    };
     let cctx = _create_cctx(optsPtr);
-    _free(optsPtr);
 
-    if (cctx === 0)
+    if (cctx === 0) {
+      release();
       throw new Error("ZXC: failed to create compression context");
+    }
 
     return {
       /**
@@ -568,7 +590,7 @@ export default async function createZXC(moduleOverrides, factory) {
             data.length,
             dstPtr,
             bound,
-            0,
+            optsPtr,
           );
           if (result < 0) {
             throw new Error(
@@ -586,6 +608,7 @@ export default async function createZXC(moduleOverrides, factory) {
         if (!cctx) return;
         _free_cctx(cctx);
         cctx = 0;
+        release();
       },
     };
   }
@@ -594,12 +617,36 @@ export default async function createZXC(moduleOverrides, factory) {
    * Create a reusable decompression context for high-frequency usage.
    * Call .free() when done to release WASM memory.
    *
+   * @param {object} [opts] - Options applied to every decompress() call.
+   * @param {boolean} [opts.checksum=false] - Verify checksums when present.
+   * @param {Dictionary|Uint8Array} [opts.dict] - Dictionary the archives
+   *   were compressed with.
+   * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table.
    * @returns {{ decompress: Function, free: Function }}
    */
-  function createDecompressContext() {
+  function createDecompressContext(opts) {
+    const checksum = (opts && opts.checksum) || false;
+    const { dict, dictHuf } = _splitDictOption(opts);
+    const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
+    if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
+    const dictHufPtr = dictPtr && dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
+    if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
+    const optsPtr = _writeDecompressOpts(
+      checksum,
+      dictPtr,
+      dictPtr ? dict.length : 0,
+      dictHufPtr,
+    );
+    const release = () => {
+      _free(optsPtr);
+      if (dictPtr) _free(dictPtr);
+      if (dictHufPtr) _free(dictHufPtr);
+    };
     let dctx = _create_dctx();
-    if (dctx === 0)
+    if (dctx === 0) {
+      release();
       throw new Error("ZXC: failed to create decompression context");
+    }
 
     return {
       /**
@@ -625,7 +672,7 @@ export default async function createZXC(moduleOverrides, factory) {
             data.length,
             dstPtr,
             origSize,
-            0,
+            optsPtr,
           );
           if (result < 0) {
             throw new Error(
@@ -643,6 +690,7 @@ export default async function createZXC(moduleOverrides, factory) {
         if (!dctx) return;
         _free_dctx(dctx);
         dctx = 0;
+        release();
       },
     };
   }
