@@ -817,6 +817,12 @@ fold32(h) = (h XOR (h >> 32)) AND 0xFFFFFFFF
 ~~~
 {: #fold32}
 
+Wherever this document refers to RapidHash, implementations MUST use
+RapidHash version 3 {{RAPIDHASH}} with the function's default
+secret; the seed is 0 unless a seed is stated explicitly. Other
+versions of the function produce different digests and are not
+interoperable.
+
 ## Global Stream Hash
 
 When HAS_CHECKSUM = 1, a rolling global hash is maintained from
@@ -906,6 +912,16 @@ set MUST:
    matching dict_id guarantees the exact (content, table) pair
    required to decode enc_lit = 3 literal sections
    ({{shared-huffman-literal-section}}).
+
+The identifier of a dictionary that carries a shared literal table
+is defined in {{zxd-format}}. A dictionary supplied without one,
+which a .zxd file cannot express and which therefore reaches the
+decoder only through an in-memory interface, is identified by its
+content alone:
+
+~~~
+dict_id = fold32(rapidhash(content))
+~~~
 
 A decoder that does not recognise the HAS_DICTIONARY flag ignores it
 per {{compatibility-rules}}. However, blocks compressed against a
