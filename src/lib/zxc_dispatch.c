@@ -1543,6 +1543,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     // optimal-parser tier it carries no opt_scratch for. Re-initing on the heap
     // would break the no-allocation contract and leak: zxc_free_cctx is a no-op
     // for static contexts.
+    if (UNLIKELY(cctx->owns_workspace && b_dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
     if (UNLIKELY(cctx->owns_workspace && effective_block_size != cctx->last_block_size))
         return ZXC_ERROR_BAD_BLOCK_SIZE;
     if (UNLIKELY(cctx->owns_workspace && level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))
@@ -1578,6 +1579,9 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     }
 
     cctx->inner.dict_size = b_dict_size;
+    if (UNLIKELY(zxc_ctx_sync_dict_huf(&cctx->inner, cctx->huf_cache, &cctx->huf_cached,
+                                       ZXC_OPTS_DICT_HUF(opts)) != ZXC_OK))
+        return ZXC_ERROR_CORRUPT_DATA;
 
     int res;
     if (b_dict && b_dict_size > 0) {
@@ -1646,6 +1650,9 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 
     zxc_cctx_t* const ctx = &dctx->inner;
     ctx->dict_size = dict_size;
+    if (UNLIKELY(zxc_ctx_sync_dict_huf(ctx, dctx->huf_cache, &dctx->huf_cached,
+                                       ZXC_OPTS_DICT_HUF(opts)) != ZXC_OK))
+        return ZXC_ERROR_CORRUPT_DATA;
 
     // work_buf was pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD inside
     // the matching zxc_cctx_init call above.

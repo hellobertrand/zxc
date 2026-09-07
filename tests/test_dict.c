@@ -1920,3 +1920,109 @@ int test_dict_oversized_rejected_everywhere(void) {
     if (ok) printf("  [PASS] six entry points -> DICT_TOO_LARGE\nPASS\n\n");
     return ok;
 }
+
+int test_dict_block_huf_roundtrip(void) {
+    printf("=== TEST: Dict - block API honours the shared literal table ===\n");
+    enum { NS = 6, SCAP = 16384, HCAP = 32768, BLK = 4096 };
+    uint8_t* bufs[NS];
+    const void* samples[NS];
+    size_t sizes[NS];
+    for (int i = 0; i < NS; i++) {
+        bufs[i] = (uint8_t*)malloc(SCAP);
+        sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x3000U + (uint32_t)i);
+        samples[i] = bufs[i];
+    }
+    uint8_t* heldout = (uint8_t*)malloc(HCAP);
+    const size_t hsz = gen_structured_sample(heldout, HCAP, 0xC0DEU);
+    uint8_t dict_buf[8192];
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
+    const size_t cap = (size_t)zxc_compress_block_bound(BLK);
+    uint8_t* comp = (uint8_t*)malloc(cap);
+    uint8_t* out = (uint8_t*)malloc(BLK + ZXC_DECOMPRESS_TAIL_PAD);
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_dctx* dctx = zxc_create_dctx();
+    int ok = 0;
+    do {
+        const int64_t dsz = zxc_train_dict(samples, sizes, NS, dict_buf, sizeof(dict_buf));
+        if (dsz <= 0 || !cctx || !dctx ||
+            zxc_train_dict_huf(samples, sizes, NS, dict_buf, (size_t)dsz, huf) != ZXC_OK) {
+            printf("  [FAIL] setup\n");
+            break;
+        }
+        const zxc_compress_opts_t co = {
+            .level = 6, .dict = dict_buf, .dict_size = (size_t)dsz, .dict_huf = huf};
+        const zxc_decompress_opts_t d_tab = {
+            .dict = dict_buf, .dict_size = (size_t)dsz, .dict_huf = huf};
+        const zxc_decompress_opts_t d_no = {.dict = dict_buf, .dict_size = (size_t)dsz};
+
+        int n_table = 0, n_blocks = 0, bad = 0;
+        for (size_t off = 0; off + BLK <= hsz && !bad; off += BLK, n_blocks++) {
+            const int64_t cs = zxc_compress_block(cctx, heldout + off, BLK, comp, cap, &co);
+            if (cs <= 0) {
+                printf("  [FAIL] compress_block @%zu: %lld\n", off, (long long)cs);
+                bad = 1;
+                break;
+            }
+            /* enc_lit sits at sub-header offset 8, right after the block header. */
+            const int table_used = comp[0] == ZXC_BLOCK_GLO && comp[ZXC_BLOCK_HEADER_SIZE + 8] == 3;
+            n_table += table_used;
+            int64_t r = zxc_decompress_block(dctx, comp, (size_t)cs, out,
+                                             BLK + ZXC_DECOMPRESS_TAIL_PAD, &d_tab);
+            if (r != BLK || memcmp(out, heldout + off, BLK) != 0) {
+                printf("  [FAIL] decompress_block @%zu: %lld\n", off, (long long)r);
+                bad = 1;
+                break;
+            }
+            r = zxc_decompress_block_safe(dctx, comp, (size_t)cs, out, BLK, &d_tab);
+            if (r != BLK || memcmp(out, heldout + off, BLK) != 0) {
+                printf("  [FAIL] decompress_block_safe @%zu: %lld\n", off, (long long)r);
+                bad = 1;
+                break;
+            }
+            /* enc_lit=3 cannot decode without the table. */
+            r = zxc_decompress_block(dctx, comp, (size_t)cs, out, BLK + ZXC_DECOMPRESS_TAIL_PAD,
+                                     &d_no);
+            if (table_used ? (r >= 0) : (r != BLK)) {
+                printf("  [FAIL] table-less decode @%zu: %lld (table_used=%d)\n", off, (long long)r,
+                       table_used);
+                bad = 1;
+                break;
+            }
+        }
+        if (bad) break;
+        if (n_table == 0) {
+            printf(
+                "  [FAIL] no block selected enc_lit=3: the table was never "
+                "exercised\n");
+            break;
+        }
+        printf("  [PASS] %d/%d blocks coded with the shared table, all roundtrip\n", n_table,
+               n_blocks);
+
+        /* Static cctx: no dictionary prefix in the workspace, explicit error. */
+        {
+            const size_t ws_sz = zxc_static_cctx_workspace_size(BLK, 6);
+            void* ws = malloc(ws_sz);
+            const zxc_compress_opts_t so = {.level = 6, .block_size = BLK};
+            zxc_cctx* sc = ws ? zxc_init_static_cctx(ws, ws_sz, &so) : NULL;
+            const int64_t r = sc ? zxc_compress_block(sc, heldout, BLK, comp, cap, &co) : -1;
+            free(ws);
+            if (r != ZXC_ERROR_DICT_UNSUPPORTED) {
+                printf("  [FAIL] static cctx + dict: %lld\n", (long long)r);
+                break;
+            }
+            printf("  [PASS] static cctx + dict -> DICT_UNSUPPORTED\n");
+        }
+
+        ok = 1;
+    } while (0);
+
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    free(comp);
+    free(out);
+    free(heldout);
+    for (int i = 0; i < NS; i++) free(bufs[i]);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
