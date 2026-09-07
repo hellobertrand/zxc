@@ -659,7 +659,10 @@ ZXC_EXPORT int64_t zxc_compress_cctx(
 ```
 
 Same as `zxc_compress()` but reuses internal buffers from `cctx`.
-Automatically re-initializes when `block_size` or `level` changes.
+Automatically re-initializes when `block_size` or `level` changes. Dictionary
+options are honoured as in `zxc_compress()` but are not sticky; the shared
+literal table is rebuilt only when it changes. A static context returns
+`ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
 
 ### `zxc_create_dctx`
 
@@ -763,6 +766,7 @@ Initialises a compression context inside a caller-supplied workspace.
 `workspace_size` must be at least `zxc_static_cctx_workspace_size` for the
 same `block_size` / `level`. `opts` is **required**: `block_size` and
 `level` are pinned at init time and must be set explicitly.
+Dictionaries are rejected: `ZXC_ERROR_DICT_UNSUPPORTED`.
 
 The returned handle points **inside** `workspace`; the workspace must
 remain valid for the lifetime of the handle. `zxc_free_cctx` is a no-op.
@@ -1089,7 +1093,9 @@ ZXC_EXPORT zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts);
 
 Creates a push decompression context.  Only `checksum_enabled` from `opts`
 is honoured (controls whether the global file-level checksum is verified
-when the file carries one).
+when the file carries one). Dictionary options fail creation, and an archive
+whose header requires a dictionary fails with `ZXC_ERROR_DICT_REQUIRED` at the
+first decompress call.
 
 **Returns**: context, or `NULL` on allocation failure.
 

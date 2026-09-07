@@ -693,3 +693,35 @@ int test_pstream_compress_drain_block_resume(void) {
     if (ok) printf("PASS\n\n");
     return ok;
 }
+
+/* A dictionary archive must fail at the header with DICT_REQUIRED, not decode
+ * into BAD_OFFSET. */
+int test_pstream_dict_archive_rejected(void) {
+    printf("=== TEST: pstream - dictionary archive rejected with DICT_REQUIRED ===\n");
+    static const uint8_t dict[] = "the shared prefix used by every tiny message in this corpus";
+    uint8_t src[2048];
+    for (size_t i = 0; i < sizeof(src); i++) src[i] = (uint8_t)(i * 31 + (i >> 5));
+    uint8_t comp[4096];
+    const zxc_compress_opts_t co = {.level = 3, .dict = dict, .dict_size = sizeof(dict) - 1};
+    const int64_t cs = zxc_compress(src, sizeof(src), comp, sizeof(comp), &co);
+    if (cs <= 0 || zxc_get_dict_id(comp, (size_t)cs) == 0) {
+        printf("  [FAIL] setup: %lld\n", (long long)cs);
+        return 0;
+    }
+    zxc_dstream* ds = zxc_dstream_create(NULL);
+    if (!ds) {
+        printf("  [FAIL] zxc_dstream_create\n");
+        return 0;
+    }
+    uint8_t obuf[4096];
+    zxc_outbuf_t out = {obuf, sizeof(obuf), 0};
+    zxc_inbuf_t in = {comp, (size_t)cs, 0};
+    const int64_t r = zxc_dstream_decompress(ds, &out, &in);
+    zxc_dstream_free(ds);
+    if (r != ZXC_ERROR_DICT_REQUIRED) {
+        printf("  [FAIL] expected ZXC_ERROR_DICT_REQUIRED, got %lld\n", (long long)r);
+        return 0;
+    }
+    printf("  [PASS] DICT_REQUIRED at the file header\nPASS\n\n");
+    return 1;
+}

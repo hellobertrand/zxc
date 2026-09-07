@@ -433,6 +433,10 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  * Options are **sticky**: values passed in @p opts are remembered and reused
  * on later calls that pass NULL, starting from those given to
  * zxc_create_cctx(). Levels above @ref ZXC_LEVEL_ULTRA are silently clamped.
+ * Dictionary options are the exception: honoured as in zxc_compress() but
+ * never remembered, so pass them on every call; the shared table is rebuilt
+ * only when it changes. A static context returns
+ * @ref ZXC_ERROR_DICT_UNSUPPORTED for any dictionary.
  *
  * @param[in,out] cctx         Reusable compression context.
  * @param[in]     src          Source data.
@@ -557,7 +561,8 @@ ZXC_EXPORT size_t zxc_static_cctx_workspace_size(const size_t block_size, const 
  * @c level / @c checksum_enabled is honoured per call without re-partitioning,
  * except a raise into @ref ZXC_LEVEL_DENSITY on a workspace carved below it:
  * the optimal-parser scratch is absent, so the call returns
- * @ref ZXC_ERROR_BAD_LEVEL.
+ * @ref ZXC_ERROR_BAD_LEVEL. Dictionaries are rejected too:
+ * @ref ZXC_ERROR_DICT_UNSUPPORTED.
  *
  * @param[in,out] workspace       Caller-allocated buffer, cache-line aligned.
  * @param[in]     workspace_size  Capacity of @p workspace in bytes.

@@ -122,6 +122,7 @@ int test_pstream_corrupted_magic(void);
 int test_pstream_decode_seekable_archive(void);
 int test_pstream_compress_after_end_rejected(void);
 int test_pstream_compress_drain_block_resume(void);
+int test_pstream_dict_archive_rejected(void);
 
 /* Stream round-trip coverage (patterns x sizes x levels x checksum) */
 int test_roundtrip_raw_random(void);
@@ -218,6 +219,8 @@ int test_dict_stream_dict_id_checks(void);
 int test_dict_seekable_dict_id_checks(void);
 int test_dict_dctx_roundtrip(void);
 int test_dict_static_dctx_rejected(void);
+int test_dict_cctx_roundtrip(void);
+int test_dict_block_cctx_dict_reinit(void);
 int test_dict_huf_zxd_roundtrip(void);
 int test_dict_huf_table_roundtrip(void);
 int test_dict_huf_degenerate_corpus(void);

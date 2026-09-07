@@ -200,6 +200,23 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     const int64_t csize = zxc_compress(data, size, comp_buf, bound, &copts);
     if (csize < 0) return 0;
 
+    /* The reusable context must produce the very same archive. */
+    static zxc_cctx* cctx = NULL;
+    static void* comp2_buf = NULL;
+    static size_t comp2_cap = 0;
+    if (!cctx) cctx = zxc_create_cctx(NULL);
+    if (bound > comp2_cap) {
+        void* nb = realloc(comp2_buf, bound);
+        if (!nb) return 0;
+        comp2_buf = nb;
+        comp2_cap = bound;
+    }
+    if (cctx) {
+        const int64_t c2 = zxc_compress_cctx(cctx, data, size, comp2_buf, bound, &copts);
+        assert(c2 == csize);
+        assert(memcmp(comp_buf, comp2_buf, (size_t)csize) == 0);
+    }
+
     if (size > decomp_cap) {
         void* nb = realloc(decomp_buf, size);
         if (!nb) return 0;
