@@ -297,7 +297,8 @@ ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
  *         @ref ZXC_BLOCK_SIZE_MAX; @ref ZXC_ERROR_BAD_LEVEL on a static
  *         context for a level raise its workspace cannot accommodate (levels
  *         above @ref ZXC_LEVEL_ULTRA are otherwise silently clamped);
- *         @ref ZXC_ERROR_DICT_UNSUPPORTED on a static context with a dictionary.
+ *         @ref ZXC_ERROR_DICT_UNSUPPORTED on a static context for a dictionary
+ *         beyond its carved capacity.
  */
 ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t src_size, void* dst,
                                       size_t dst_capacity, const zxc_compress_opts_t* opts);
@@ -322,7 +323,8 @@ ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t sr
  *                             @c checksum_enabled and the dictionary fields are
  *                             used; a block carries no dictionary id, so pass
  *                             the same (content, table) pair as at compression.
- *                             Static context: @ref ZXC_ERROR_DICT_UNSUPPORTED.
+ *                             Static context: @ref ZXC_ERROR_DICT_UNSUPPORTED
+ *                             beyond its carved capacity.
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
@@ -522,7 +524,7 @@ ZXC_EXPORT int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* src, size_t s
  *
  * @par Typical usage
  * @code
- * size_t ws_sz = zxc_static_cctx_workspace_size(64 * 1024, ZXC_LEVEL_DEFAULT);
+ * size_t ws_sz = zxc_static_cctx_workspace_size(64 * 1024, ZXC_LEVEL_DEFAULT, 0);
  * void *ws = aligned_alloc(64, ws_sz);                   // or kmalloc, vmalloc, .bss
  * zxc_compress_opts_t opts = { .level = ZXC_LEVEL_DEFAULT, .block_size = 64 * 1024 };
  * zxc_cctx *cctx = zxc_init_static_cctx(ws, ws_sz, &opts);

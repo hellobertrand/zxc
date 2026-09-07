@@ -228,6 +228,7 @@ int test_dict_block_huf_roundtrip(void);
 int test_dict_block_stored_block_size(void);
 int test_dict_static_ctx_roundtrip(void);
 int test_dict_static_ctx_capacity(void);
+int test_dict_static_ctx_block_guards(void);
 int test_dict_huf_zxd_roundtrip(void);
 int test_dict_huf_table_roundtrip(void);
 int test_dict_huf_degenerate_corpus(void);

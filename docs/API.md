@@ -1,7 +1,7 @@
 # ZXC API & ABI Reference
 
 **Library version**: 0.14.0
-**SOVERSION**: 4  
+**SOVERSION**: 5  
 **License**: BSD-3-Clause
 
 This document is the authoritative reference for the public API surface and ABI
@@ -137,7 +137,7 @@ libzxc.so.{SOVERSION}.{MAJOR}.{MINOR}.{PATCH}
 
 | Field | Description | Current |
 |-------|-------------|---------|
-| `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **4** |
+| `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **5** |
 | `VERSION` | Tracks the library release. | **0.14.0** |
 
 **Compatibility rule**: any binary compiled against SOVERSION N will load against
@@ -538,7 +538,7 @@ Compresses a single block using a reusable context.
 `level`, `block_size`, `checksum_enabled` and the dictionary fields (`dict`,
 `dict_size`, `dict_huf`) of `opts` are used; the shared literal table is
 rebuilt only when it changes. A static context returns
-`ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
+`ZXC_ERROR_DICT_UNSUPPORTED` for a dictionary beyond its carved capacity.
 
 `src_size` must be in `[1, ZXC_BLOCK_SIZE_MAX]` (2 MiB). For larger payloads,
 use the frame API (`zxc_compress`) or streaming API (`zxc_cstream_*`), which
@@ -567,7 +567,8 @@ Decompresses a single block produced by `zxc_compress_block()`.
 produced by the frame or streaming APIs, use `zxc_decompress` instead.
 `checksum_enabled` and the dictionary fields are used; a block carries no
 dictionary id, so pass the same (content, table) pair as at compression. A
-static context returns `ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
+static context returns `ZXC_ERROR_DICT_UNSUPPORTED` for a dictionary beyond its
+carved capacity.
 
 **Returns**: decompressed size (> 0) on success, or negative `zxc_error_t`.
 Returns `ZXC_ERROR_BAD_BLOCK_SIZE` if `dst_capacity` exceeds the per-block
