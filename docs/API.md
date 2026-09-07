@@ -399,7 +399,8 @@ ZXC_EXPORT int64_t zxc_decompress(
 );
 ```
 
-Decompresses `src` into `dst`. Only `checksum_enabled` is used.
+Decompresses `src` into `dst`. `checksum_enabled` and the dictionary fields
+(`dict`, `dict_size`, `dict_huf`) are used.
 `src` and `dst` must not overlap (same contract as `memcpy`); for overlapping
 single-buffer decode, use `zxc_decompress_inplace` below.
 
@@ -600,7 +601,8 @@ tail-pad margin, so the upper limit is `ZXC_BLOCK_SIZE_MAX` (not
 `MAX+TAIL_PAD` as for `zxc_decompress_block`). Returns
 `ZXC_ERROR_BAD_BLOCK_SIZE` if `dst_capacity > ZXC_BLOCK_SIZE_MAX`.
 
-Only `checksum_enabled` is used.
+Same options as `zxc_decompress_block`: `checksum_enabled` and the dictionary
+fields; a dictionary routes through its bounce path.
 
 **Returns**: decompressed size (> 0) on success, or negative `zxc_error_t`.
 
