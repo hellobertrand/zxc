@@ -357,129 +357,195 @@ int test_static_ctx_null_inputs(void) {
     return 1;
 }
 
-/* Both decoders refuse a block beyond a static dctx's carved block; a larger
- * caller buffer is fine. */
+/* Decodes the n-byte block; a failed compression (n <= 0) propagates. */
+static int64_t dec(zxc_dctx* d, const uint8_t* blk, int64_t n, uint8_t* out, size_t cap,
+                   int strict) {
+    if (n <= 0) return n;
+    return strict ? zxc_decompress_block_safe(d, blk, (size_t)n, out, cap, NULL)
+                  : zxc_decompress_block(d, blk, (size_t)n, out, cap, NULL);
+}
+
+/* Static dctx block API: the carved block is the effective capacity. Fitting
+ * blocks decode whatever the buffer; larger ones are BAD_BLOCK_SIZE when the
+ * sub-header or decoded size tells, else a too-small-destination code;
+ * corruption keeps the dynamic codes. */
 int test_static_dctx_block_bounds(void) {
     printf("=== TEST: Static dctx - blocks bounded by the carved block ===\n");
-    enum { PIN = 4096, BIG = 6000, HUGE = 8000 };
-    uint8_t* text = (uint8_t*)malloc(HUGE);
-    uint8_t* noise = (uint8_t*)malloc(HUGE);
-    const size_t cap = (size_t)zxc_compress_block_bound(HUGE);
+    enum { PIN = 4096, MID = 5000, XL = 8000, LIT = 4500, PAD = ZXC_DECOMPRESS_TAIL_PAD };
+    const size_t cap = (size_t)zxc_compress_block_bound(XL);
+    uint8_t* lz = (uint8_t*)malloc(XL);          /* compressible: GLO */
+    uint8_t* rnd = (uint8_t*)malloc(XL);         /* incompressible: RAW */
+    uint8_t* lit = (uint8_t*)malloc(LIT + 1000); /* Huffman literals, then a repeat */
     uint8_t* comp = (uint8_t*)malloc(cap);
-    uint8_t* out = (uint8_t*)malloc(2 * PIN + ZXC_DECOMPRESS_TAIL_PAD);
+    uint8_t* mut = (uint8_t*)malloc(cap);
+    uint8_t* out = (uint8_t*)malloc(2 * PIN + PAD);
+    uint8_t* out2 = (uint8_t*)malloc(2 * PIN + PAD);
     const size_t ws_sz = zxc_static_dctx_workspace_size(PIN);
     void* ws = test_aligned_alloc(64, ws_sz);
     zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_dctx* hd = zxc_create_dctx();
     zxc_dctx* sd = ws ? zxc_init_static_dctx(ws, ws_sz, PIN) : NULL;
     int ok = 0;
     do {
-        if (!text || !noise || !comp || !out || !cctx || !sd) {
+        if (!lz || !rnd || !lit || !comp || !mut || !out || !out2 || !cctx || !hd || !sd) {
             printf("  [FAIL] setup\n");
             break;
         }
-        for (size_t i = 0; i < HUGE; i++) text[i] = (uint8_t)("static block "[i % 13]);
-        uint64_t x = 0x9E3779B97F4A7C15ull; /* incompressible: stored RAW */
-        for (size_t i = 0; i < HUGE; i++) {
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            noise[i] = (uint8_t)(x >> 24);
-        }
-        const zxc_compress_opts_t co = {.level = 3};
-        /* Oversized GLO and RAW blocks, both decoders. */
-        const int64_t g = zxc_compress_block(cctx, text, BIG, comp, cap, &co);
-        const uint8_t g_type = g > 0 ? comp[0] : 0; /* comp is reused for RAW below */
-        const int64_t e1 =
-            g > 0 ? zxc_decompress_block(sd, comp, (size_t)g, out, BIG + 200, NULL) : 0;
-        const int64_t e2 =
-            g > 0 ? zxc_decompress_block_safe(sd, comp, (size_t)g, out, BIG, NULL) : 0;
-        const int64_t r = zxc_compress_block(cctx, noise, BIG, comp, cap, &co);
-        const int64_t e3 =
-            r > 0 ? zxc_decompress_block(sd, comp, (size_t)r, out, BIG + 200, NULL) : 0;
-        const int64_t e4 =
-            r > 0 ? zxc_decompress_block_safe(sd, comp, (size_t)r, out, BIG, NULL) : 0;
-        if (g <= 0 || r <= 0 || g_type != ZXC_BLOCK_GLO || comp[0] != ZXC_BLOCK_RAW ||
-            e1 != ZXC_ERROR_BAD_BLOCK_SIZE || e2 != ZXC_ERROR_BAD_BLOCK_SIZE ||
-            e3 != ZXC_ERROR_BAD_BLOCK_SIZE || e4 != ZXC_ERROR_BAD_BLOCK_SIZE) {
-            printf("  [FAIL] oversized blocks: type %u %lld/%lld, type %u %lld/%lld\n", g_type,
-                   (long long)e1, (long long)e2, r > 0 ? (unsigned)comp[0] : 0U, (long long)e3,
-                   (long long)e4);
+        zxc_test_srand(0x5747u);
+        gen_lz_data(lz, XL);
+        gen_random_data(rnd, XL);
+        for (size_t i = 0; i < LIT; i++)
+            lit[i] = (uint8_t)("0123456789abcdef"[zxc_test_rand() & 15]);
+        memcpy(lit + LIT, lit, 1000);
+        const zxc_compress_opts_t l3 = {.level = 3};
+        const zxc_compress_opts_t l6 = {.level = 6};
+
+        /* A fitting block: both decoders, exact and larger buffers. */
+        const int64_t f = zxc_compress_block(cctx, lz, PIN, comp, cap, &l3);
+        const int64_t f1 = dec(sd, comp, f, out, PIN + PAD, 0);
+        const int64_t f2 = dec(sd, comp, f, out2, 2 * PIN + PAD, 0);
+        const int64_t f3 = dec(sd, comp, f, out, PIN, 1);
+        const int64_t f4 = dec(sd, comp, f, out2, 2 * PIN, 1);
+        if (f1 != PIN || f2 != PIN || f3 != PIN || f4 != PIN || memcmp(out, lz, PIN) != 0 ||
+            memcmp(out2, lz, PIN) != 0) {
+            printf("  [FAIL] fitting block: %lld %lld %lld %lld\n", (long long)f1, (long long)f2,
+                   (long long)f3, (long long)f4);
             break;
         }
-        printf("  [PASS] blocks larger than the carved block -> BAD_BLOCK_SIZE on both decoders\n");
-        /* Overflowing the capped destination: 8000 bytes RAW then GLO, and a
-         * GLO block with more Huffman-coded literals than the carved block
-         * (7000 bytes over a 16-symbol alphabet, a 1000-byte repeat, level 6). */
-        const int64_t h1 = zxc_compress_block(cctx, noise, HUGE, comp, cap, &co);
-        const int64_t e5 =
-            h1 > 0 ? zxc_decompress_block(sd, comp, (size_t)h1, out, HUGE + 200, NULL) : 0;
-        const int64_t h2 = zxc_compress_block(cctx, text, HUGE, comp, cap, &co);
-        const int64_t e6 =
-            h2 > 0 ? zxc_decompress_block(sd, comp, (size_t)h2, out, HUGE + 200, NULL) : 0;
-        for (size_t i = 0; i < 7000; i++) {
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            noise[i] = (uint8_t)("0123456789abcdef"[x >> 60]);
-        }
-        memcpy(noise + 7000, noise, 1000);
-        const zxc_compress_opts_t co6 = {.level = 6};
-        const int64_t l = zxc_compress_block(cctx, noise, HUGE, comp, cap, &co6);
-        const uint8_t l_type = l > 0 ? comp[0] : 0;
-        const uint8_t l_enc = l > 0 ? comp[ZXC_BLOCK_HEADER_SIZE + 8] : 0; /* enc_lit */
-        const int64_t e7 =
-            l > 0 ? zxc_decompress_block(sd, comp, (size_t)l, out, HUGE + 200, NULL) : 0;
-        if (h1 <= 0 || h2 <= 0 || l <= 0 || l_type != ZXC_BLOCK_GLO || l_enc != 2 ||
-            e5 != ZXC_ERROR_BAD_BLOCK_SIZE || e6 != ZXC_ERROR_BAD_BLOCK_SIZE ||
-            e7 != ZXC_ERROR_BAD_BLOCK_SIZE) {
-            printf(
-                "  [FAIL] early exits: RAW %lld, GLO %lld, literal-heavy (type %u, enc_lit %u) "
-                "%lld\n",
-                (long long)e5, (long long)e6, l_type, l_enc, (long long)e7);
+        printf("  [PASS] a fitting block decodes on both decoders, larger buffers included\n");
+
+        /* Within the margin: the decoded size tells, whatever the buffer; the
+         * strict decoder at exactly the carved size says "does not fit", as a
+         * dynamic dctx would. */
+        const int64_t m = zxc_compress_block(cctx, lz, MID, comp, cap, &l3);
+        const int64_t m1 = dec(sd, comp, m, out, MID + PAD, 0);
+        const int64_t m2 = dec(sd, comp, m, out, PIN, 0);
+        const int64_t m3 = dec(sd, comp, m, out, MID, 1);
+        const int64_t m4 = dec(sd, comp, m, out, PIN, 1);
+        const int64_t mr = zxc_compress_block(cctx, rnd, MID, comp, cap, &l3);
+        const uint8_t mr_type = mr > 0 ? comp[0] : 0;
+        const int64_t m5 = dec(sd, comp, mr, out, MID + PAD, 0);
+        const int64_t m6 = dec(sd, comp, mr, out, MID, 1);
+        const int64_t m7 = dec(sd, comp, mr, out, PIN, 1);
+        if (m1 != ZXC_ERROR_BAD_BLOCK_SIZE || m2 != ZXC_ERROR_BAD_BLOCK_SIZE ||
+            m3 != ZXC_ERROR_BAD_BLOCK_SIZE || m4 != ZXC_ERROR_OVERFLOW ||
+            mr_type != ZXC_BLOCK_RAW || m5 != ZXC_ERROR_BAD_BLOCK_SIZE ||
+            m6 != ZXC_ERROR_BAD_BLOCK_SIZE || m7 != ZXC_ERROR_DST_TOO_SMALL) {
+            printf("  [FAIL] within margin: GLO %lld %lld %lld %lld, RAW(type %u) %lld %lld %lld\n",
+                   (long long)m1, (long long)m2, (long long)m3, (long long)m4, mr_type,
+                   (long long)m5, (long long)m6, (long long)m7);
             break;
         }
-        printf("  [PASS] destination overflow, literal-heavy block included -> BAD_BLOCK_SIZE\n");
-        /* The caller's buffer never changes the verdict: oversized blocks into
-         * a buffer of exactly the carved size (overflowing the workspace, then
-         * fitting it but not the block) stay BAD_BLOCK_SIZE, while a buffer too
-         * small for a block that fits is DST_TOO_SMALL. */
-        const int64_t h3 = zxc_compress_block(cctx, text, HUGE, comp, cap, &co);
-        const int64_t e8 = h3 > 0 ? zxc_decompress_block(sd, comp, (size_t)h3, out, PIN, NULL) : 0;
-        const int64_t m = zxc_compress_block(cctx, text, 5000, comp, cap, &co);
-        const int64_t e9 = m > 0 ? zxc_decompress_block(sd, comp, (size_t)m, out, PIN, NULL) : 0;
-        const int64_t f = zxc_compress_block(cctx, text, PIN, comp, cap, &co);
-        const int64_t e10 = f > 0 ? zxc_decompress_block(sd, comp, (size_t)f, out, 2000, NULL) : 0;
-        if (h3 <= 0 || m <= 0 || f <= 0 || e8 != ZXC_ERROR_BAD_BLOCK_SIZE ||
-            e9 != ZXC_ERROR_BAD_BLOCK_SIZE || e10 != ZXC_ERROR_DST_TOO_SMALL) {
-            printf("  [FAIL] exact-size buffer: %lld / %lld, small buffer: %lld\n", (long long)e8,
-                   (long long)e9, (long long)e10);
+        printf(
+            "  [PASS] within the margin -> BAD_BLOCK_SIZE, strict at exact size -> not fitting\n");
+
+        /* Beyond the margin: workspace overflow, the codes a dynamic dctx
+         * gives for a too-small destination, buffer-independent. */
+        const int64_t x = zxc_compress_block(cctx, lz, XL, comp, cap, &l3);
+        const int64_t x1 = dec(sd, comp, x, out, XL + 200, 0);
+        const int64_t x2 = dec(sd, comp, x, out, PIN, 0);
+        const int64_t x3 = dec(sd, comp, x, out, XL, 1);
+        const int64_t xr = zxc_compress_block(cctx, rnd, XL, comp, cap, &l3);
+        const int64_t x4 = dec(sd, comp, xr, out, XL + 200, 0);
+        const int64_t x5 = dec(sd, comp, xr, out, PIN, 0);
+        const int64_t x6 = dec(sd, comp, xr, out, XL, 1);
+        if (x1 != ZXC_ERROR_OVERFLOW || x2 != ZXC_ERROR_OVERFLOW ||
+            x3 != ZXC_ERROR_BAD_BLOCK_SIZE || x4 != ZXC_ERROR_DST_TOO_SMALL ||
+            x5 != ZXC_ERROR_DST_TOO_SMALL || x6 != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf("  [FAIL] beyond margin: GLO %lld %lld %lld, RAW %lld %lld %lld\n",
+                   (long long)x1, (long long)x2, (long long)x3, (long long)x4, (long long)x5,
+                   (long long)x6);
             break;
         }
-        printf("  [PASS] verdict independent of the caller's buffer\n");
-        /* A fitting block, both decoders, larger buffer included. */
-        const int64_t n = zxc_compress_block(cctx, text, PIN, comp, cap, &co);
-        const int64_t f1 = n > 0 ? zxc_decompress_block(sd, comp, (size_t)n, out,
-                                                        2 * PIN + ZXC_DECOMPRESS_TAIL_PAD, NULL)
-                                 : 0;
-        const int bad1 = f1 != PIN || memcmp(out, text, PIN) != 0;
-        memset(out, 0, PIN);
-        const int64_t f2 =
-            n > 0 ? zxc_decompress_block_safe(sd, comp, (size_t)n, out, PIN, NULL) : 0;
-        if (n <= 0 || bad1 || f2 != PIN || memcmp(out, text, PIN) != 0) {
-            printf("  [FAIL] fitting block: fast %lld, strict %lld\n", (long long)f1,
-                   (long long)f2);
+        printf("  [PASS] beyond the margin -> workspace overflow codes, buffer-independent\n");
+
+        /* More Huffman literals than the carved block: told by the sub-header,
+         * both decoders. */
+        const int64_t h = zxc_compress_block(cctx, lit, LIT + 1000, comp, cap, &l6);
+        zxc_gnr_header_t gh = {0};
+        uint32_t lc = 0, tc = 0;
+        const int hdr =
+            h > 0 ? zxc_read_glo_header_and_desc(comp + ZXC_BLOCK_HEADER_SIZE,
+                                                 (size_t)h - ZXC_BLOCK_HEADER_SIZE, &gh, &lc, &tc)
+                  : -1;
+        const int64_t h1 = dec(sd, comp, h, out, LIT + 1000 + PAD, 0);
+        const int64_t h2 = dec(sd, comp, h, out, LIT + 1000, 1);
+        if (h <= 0 || comp[0] != ZXC_BLOCK_GLO || hdr <= 0 ||
+            gh.enc_lit != ZXC_SECTION_ENCODING_HUFFMAN || gh.n_literals <= PIN ||
+            h1 != ZXC_ERROR_BAD_BLOCK_SIZE || h2 != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf("  [FAIL] literal-heavy: type %u enc_lit %u n_literals %u -> %lld %lld\n",
+                   h > 0 ? comp[0] : 0U, gh.enc_lit, gh.n_literals, (long long)h1, (long long)h2);
             break;
         }
-        printf("  [PASS] a fitting block decodes on both decoders, larger buffer included\n");
+        const zxc_compress_opts_t l1 = {.level = 1};
+        const int64_t k = zxc_compress_block(cctx, lit, LIT + 1000, comp, cap, &l1);
+        const int64_t k1 = dec(sd, comp, k, out, LIT + 1000 + PAD, 0);
+        const int64_t k2 = dec(sd, comp, k, out, LIT + 1000, 1);
+        if (k <= 0 || comp[0] != ZXC_BLOCK_GHI || k1 != ZXC_ERROR_BAD_BLOCK_SIZE ||
+            k2 != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf("  [FAIL] literal-heavy GHI: type %u -> %lld %lld\n", k > 0 ? comp[0] : 0U,
+                   (long long)k1, (long long)k2);
+            break;
+        }
+        printf(
+            "  [PASS] %u Huffman literals (GLO) and the GHI form -> BAD_BLOCK_SIZE before "
+            "decoding\n",
+            gh.n_literals);
+
+        /* A dictionary is refused first, on both decoders, whatever the buffer. */
+        const zxc_decompress_opts_t with_dict = {.dict = lz, .dict_size = 16};
+        const int64_t d1 =
+            zxc_decompress_block(sd, comp, (size_t)h, out, 2 * PIN + PAD, &with_dict);
+        const int64_t d2 = zxc_decompress_block_safe(sd, comp, (size_t)h, out, 2 * PIN, &with_dict);
+        if (d1 != ZXC_ERROR_DICT_UNSUPPORTED || d2 != ZXC_ERROR_DICT_UNSUPPORTED) {
+            printf("  [FAIL] dictionary on a static dctx: %lld %lld\n", (long long)d1,
+                   (long long)d2);
+            break;
+        }
+        printf("  [PASS] dictionary -> DICT_UNSUPPORTED on both decoders\n");
+
+        /* Corruption keeps its codes: each single-bit flip gives the same
+         * verdict on the static and on a dynamic dctx, bar two by design: a
+         * block grown past the carved block (static names it, dynamic says
+         * too-small destination) and a sub-header announcing more literals
+         * than the carved block (a size violation before decoding). */
+        const int64_t g = zxc_compress_block(cctx, lz, PIN, comp, cap, &l3);
+        int mismatches = 0;
+        for (size_t bit = 0; g > 0 && bit < (size_t)g * 8; bit++) {
+            memcpy(mut, comp, (size_t)g);
+            mut[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            const int64_t rs = zxc_decompress_block(sd, mut, (size_t)g, out, PIN, NULL);
+            const int64_t rd = zxc_decompress_block(hd, mut, (size_t)g, out2, PIN, NULL);
+            const int same = rs == rd && (rs <= 0 || memcmp(out, out2, (size_t)rs) == 0);
+            const int grown = rs == ZXC_ERROR_BAD_BLOCK_SIZE && rd == ZXC_ERROR_DST_TOO_SMALL;
+            zxc_gnr_header_t mh;
+            uint32_t mlc, mtc;
+            const int announced = rs == ZXC_ERROR_BAD_BLOCK_SIZE &&
+                                  zxc_read_glo_header_and_desc(mut + ZXC_BLOCK_HEADER_SIZE,
+                                                               (size_t)g - ZXC_BLOCK_HEADER_SIZE,
+                                                               &mh, &mlc, &mtc) > 0 &&
+                                  mh.n_literals > PIN;
+            if (!same && !grown && !announced) {
+                if (mismatches++ < 3)
+                    printf("  [FAIL] bit %zu: static %lld, dynamic %lld\n", bit, (long long)rs,
+                           (long long)rd);
+            }
+        }
+        if (g <= 0 || mismatches) break;
+        printf("  [PASS] %lld bit flips: same verdict as a dynamic dctx\n", (long long)g * 8);
         ok = 1;
     } while (0);
     zxc_free_cctx(cctx);
+    zxc_free_dctx(hd);
     zxc_free_dctx(sd); /* no-op for a static context */
     test_aligned_free(ws);
-    free(text);
-    free(noise);
+    free(lz);
+    free(rnd);
+    free(lit);
     free(comp);
+    free(mut);
     free(out);
+    free(out2);
     if (ok) printf("PASS\n\n");
     return ok;
 }
