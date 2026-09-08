@@ -1627,11 +1627,19 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     if (UNLIKELY(dctx->owns_workspace && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
+    // Static dctx: never re-carved. A GLO block announcing more literals than
+    // the carved block is refused here, any other oversize after decoding.
+    if (dctx->owns_workspace && ((const uint8_t*)src)[0] == ZXC_BLOCK_GLO &&
+        src_size >= ZXC_BLOCK_HEADER_SIZE + 8 &&
+        zxc_le32((const uint8_t*)src + ZXC_BLOCK_HEADER_SIZE + 4) > dctx->last_block_size)
+        return ZXC_ERROR_BAD_BLOCK_SIZE;
 
     // Derive the block_size from dst_capacity (callers know the original size)
-    const size_t block_size = zxc_block_size_ceil(dst_capacity);
-    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != block_size ||
-                 dctx->last_dict_size != dict_size)) {
+    const size_t block_size =
+        dctx->owns_workspace ? dctx->last_block_size : zxc_block_size_ceil(dst_capacity);
+    if (UNLIKELY(!dctx->owns_workspace &&
+                 (!dctx->initialized || dctx->last_block_size != block_size ||
+                  dctx->last_dict_size != dict_size))) {
         if (dctx->initialized) {
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
@@ -1671,8 +1679,9 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
             ZXC_MEMCPY(dst, dec_buf + dict_size, (size_t)res);
         }
     } else if (LIKELY(dst_capacity >= work_sz)) {
-        res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
-                                           dst_capacity);
+        // A static context never decodes past its carved block.
+        const size_t cap = dctx->owns_workspace && dst_capacity > work_sz ? work_sz : dst_capacity;
+        res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, (uint8_t*)dst, cap);
     } else {
         // Bounce through work_buf when output can't absorb wild copies.
         res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, ctx->work_buf,
@@ -1681,6 +1690,13 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
             if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
             ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
         }
+    }
+    if (dctx->owns_workspace) {
+        // Static dctx: a block beyond the carved block is a size violation.
+        if (UNLIKELY(res == ZXC_ERROR_DST_TOO_SMALL && dst_capacity > dctx->last_block_size))
+            return ZXC_ERROR_BAD_BLOCK_SIZE;
+        if (UNLIKELY(res > 0 && (size_t)res > dctx->last_block_size))
+            return ZXC_ERROR_BAD_BLOCK_SIZE;
     }
     if (UNLIKELY(res < 0)) return res;
     return (int64_t)res;
@@ -1702,6 +1718,9 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
 
     // Strict-tail variant: dst_capacity matches the exact uncompressed size
     if (UNLIKELY(dst_capacity > ZXC_BLOCK_SIZE_MAX)) return ZXC_ERROR_BAD_BLOCK_SIZE;
+    // Static dctx: the carved block is locked, whichever path decodes it.
+    if (UNLIKELY(dctx->owns_workspace && dst_capacity > dctx->last_block_size))
+        return ZXC_ERROR_BAD_BLOCK_SIZE;
 
     // A dict needs the [dict|payload] bounce; route to the bounce-capable path.
     if (opts && opts->dict && opts->dict_size > 0) {
@@ -1716,9 +1735,11 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
 
     // GLO/GHI: use the strict-tail decoder (no bounce buffer required).
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
-    const size_t block_size = zxc_block_size_ceil(dst_capacity);
-    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != block_size ||
-                 dctx->last_dict_size != 0)) {
+    const size_t block_size =
+        dctx->owns_workspace ? dctx->last_block_size : zxc_block_size_ceil(dst_capacity);
+    if (UNLIKELY(!dctx->owns_workspace &&
+                 (!dctx->initialized || dctx->last_block_size != block_size ||
+                  dctx->last_dict_size != 0))) {
         if (dctx->initialized) {
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
