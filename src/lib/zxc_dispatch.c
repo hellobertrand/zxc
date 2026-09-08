@@ -1600,6 +1600,43 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
 }
 
 /**
+ * @brief Block decode on a static dctx: the carved block is the effective capacity.
+ *
+ * Fast decoder: carved block plus wild-copy margin; strict: at most that. A
+ * larger block still within the margin is @ref ZXC_ERROR_BAD_BLOCK_SIZE, beyond
+ * it the decoder's own too-small-destination code, never reinterpreted.
+ */
+static int64_t zxc_static_decompress_block(zxc_dctx* RESTRICT dctx, const uint8_t* RESTRICT src,
+                                           const size_t src_size, uint8_t* RESTRICT dst,
+                                           const size_t dst_capacity, const size_t dict_size,
+                                           const int checksum_enabled, const int strict) {
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+    if (UNLIKELY(dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
+    const size_t carved = dctx->last_block_size;
+    const size_t work_sz = carved + ZXC_DECOMPRESS_TAIL_PAD;
+    zxc_cctx_t* const ctx = &dctx->inner;
+    ctx->checksum_enabled = checksum_enabled;
+    ctx->dict_size = 0;
+    int res;
+    if (strict) {
+        const size_t cap = dst_capacity < work_sz ? dst_capacity : work_sz;
+        res = zxc_decompress_chunk_wrapper_safe_public(ctx, src, src_size, dst, cap);
+    } else if (dst_capacity >= work_sz) {
+        res = zxc_decompress_chunk_wrapper(ctx, src, src_size, dst, work_sz);
+    } else {
+        // Bounce through work_buf when dst cannot absorb wild copies.
+        res = zxc_decompress_chunk_wrapper(ctx, src, src_size, ctx->work_buf, ctx->work_buf_cap);
+        if (UNLIKELY(res > 0 && (size_t)res > carved)) return ZXC_ERROR_BAD_BLOCK_SIZE;
+        if (LIKELY(res > 0)) {
+            if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
+            ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
+        }
+    }
+    if (UNLIKELY(res > 0 && (size_t)res > carved)) return ZXC_ERROR_BAD_BLOCK_SIZE;
+    return res;
+}
+
+/**
  * @brief Decompresses a single block (no file framing), reusing @p dctx.
  *
  * Public API; full contract in @c zxc_buffer.h. Decodes one format-conformant
@@ -1626,7 +1663,9 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    if (UNLIKELY(dctx->owns_workspace && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
+    if (UNLIKELY(dctx->owns_workspace))
+        return zxc_static_decompress_block(dctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
+                                           dst_capacity, dict_size, checksum_enabled, 0);
 
     // Derive the block_size from dst_capacity (callers know the original size)
     const size_t block_size = zxc_block_size_ceil(dst_capacity);
@@ -1689,8 +1728,9 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 /**
  * @brief Safe-variant block decompressor: accepts dst_capacity == uncompressed_size.
  *
- * Dict inputs and RAW blocks route to @ref zxc_decompress_block; plain GLO/GHI
- * use the strict safe decoder (no bounce buffer, no +ZXC_DECOMPRESS_TAIL_PAD).
+ * Static dctx: shared static path. Heap dctx: dict inputs and RAW route to
+ * @ref zxc_decompress_block, plain GLO/GHI use the strict decoder (no bounce
+ * buffer, no +ZXC_DECOMPRESS_TAIL_PAD).
  *
  * Public API; full contract in @c zxc_buffer.h.
  */
@@ -1702,6 +1742,10 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
 
     // Strict-tail variant: dst_capacity matches the exact uncompressed size
     if (UNLIKELY(dst_capacity > ZXC_BLOCK_SIZE_MAX)) return ZXC_ERROR_BAD_BLOCK_SIZE;
+    if (UNLIKELY(dctx->owns_workspace))
+        return zxc_static_decompress_block(dctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
+                                           dst_capacity, ZXC_OPTS_DICT_SIZE(opts),
+                                           opts ? opts->checksum_enabled : 0, 1);
 
     // A dict needs the [dict|payload] bounce; route to the bounce-capable path.
     if (opts && opts->dict && opts->dict_size > 0) {
