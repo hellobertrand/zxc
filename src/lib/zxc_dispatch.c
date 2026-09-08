@@ -1663,6 +1663,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
     const size_t work_sz = block_size + ZXC_DECOMPRESS_TAIL_PAD;
 
     int res;
+    int bounced = 0;
     if (dict && dict_size > 0) {
         // [dict | decode] assembled in the cctx-owned dict_buffer
         uint8_t* const dec_buf = ctx->dict_buffer;
@@ -1681,20 +1682,21 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
         // Bounce through work_buf when output can't absorb wild copies.
         res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, ctx->work_buf,
                                            ctx->work_buf_cap);
-        if (LIKELY(res > 0)) {
-            if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
-            ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
-        }
+        bounced = 1;
     }
     if (dctx->owns_workspace) {
-        // Static dctx: a block beyond the carved block is a size violation.
-        if (UNLIKELY((res == ZXC_ERROR_DST_TOO_SMALL || res == ZXC_ERROR_OVERFLOW) &&
-                     dst_capacity > dctx->last_block_size))
-            return ZXC_ERROR_BAD_BLOCK_SIZE;
-        if (UNLIKELY(res > 0 && (size_t)res > dctx->last_block_size))
+        // Static dctx: a block beyond the carved block is a size violation,
+        // whatever the caller's buffer (the decoder only ever sees the carved
+        // capacity here, so its overflow codes mean exactly that).
+        if (UNLIKELY(res == ZXC_ERROR_DST_TOO_SMALL || res == ZXC_ERROR_OVERFLOW ||
+                     (res > 0 && (size_t)res > dctx->last_block_size)))
             return ZXC_ERROR_BAD_BLOCK_SIZE;
     }
     if (UNLIKELY(res < 0)) return res;
+    if (bounced) {
+        if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
+        ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
+    }
     return (int64_t)res;
 }
 

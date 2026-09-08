@@ -439,6 +439,23 @@ int test_static_dctx_block_bounds(void) {
             break;
         }
         printf("  [PASS] destination overflow, literal-heavy block included -> BAD_BLOCK_SIZE\n");
+        /* The caller's buffer never changes the verdict: oversized blocks into
+         * a buffer of exactly the carved size (overflowing the workspace, then
+         * fitting it but not the block) stay BAD_BLOCK_SIZE, while a buffer too
+         * small for a block that fits is DST_TOO_SMALL. */
+        const int64_t h3 = zxc_compress_block(cctx, text, HUGE, comp, cap, &co);
+        const int64_t e8 = h3 > 0 ? zxc_decompress_block(sd, comp, (size_t)h3, out, PIN, NULL) : 0;
+        const int64_t m = zxc_compress_block(cctx, text, 5000, comp, cap, &co);
+        const int64_t e9 = m > 0 ? zxc_decompress_block(sd, comp, (size_t)m, out, PIN, NULL) : 0;
+        const int64_t f = zxc_compress_block(cctx, text, PIN, comp, cap, &co);
+        const int64_t e10 = f > 0 ? zxc_decompress_block(sd, comp, (size_t)f, out, 2000, NULL) : 0;
+        if (h3 <= 0 || m <= 0 || f <= 0 || e8 != ZXC_ERROR_BAD_BLOCK_SIZE ||
+            e9 != ZXC_ERROR_BAD_BLOCK_SIZE || e10 != ZXC_ERROR_DST_TOO_SMALL) {
+            printf("  [FAIL] exact-size buffer: %lld / %lld, small buffer: %lld\n", (long long)e8,
+                   (long long)e9, (long long)e10);
+            break;
+        }
+        printf("  [PASS] verdict independent of the caller's buffer\n");
         /* A fitting block, both decoders, larger buffer included. */
         const int64_t n = zxc_compress_block(cctx, text, PIN, comp, cap, &co);
         const int64_t f1 = n > 0 ? zxc_decompress_block(sd, comp, (size_t)n, out,
