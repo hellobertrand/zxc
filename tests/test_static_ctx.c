@@ -361,10 +361,10 @@ int test_static_ctx_null_inputs(void) {
  * caller buffer is fine. */
 int test_static_dctx_block_bounds(void) {
     printf("=== TEST: Static dctx - blocks bounded by the carved block ===\n");
-    enum { PIN = 4096, BIG = 6000 };
-    uint8_t* text = (uint8_t*)malloc(BIG);
-    uint8_t* noise = (uint8_t*)malloc(BIG);
-    const size_t cap = (size_t)zxc_compress_block_bound(BIG);
+    enum { PIN = 4096, BIG = 6000, HUGE = 8000 };
+    uint8_t* text = (uint8_t*)malloc(HUGE);
+    uint8_t* noise = (uint8_t*)malloc(HUGE);
+    const size_t cap = (size_t)zxc_compress_block_bound(HUGE);
     uint8_t* comp = (uint8_t*)malloc(cap);
     uint8_t* out = (uint8_t*)malloc(2 * PIN + ZXC_DECOMPRESS_TAIL_PAD);
     const size_t ws_sz = zxc_static_dctx_workspace_size(PIN);
@@ -377,9 +377,9 @@ int test_static_dctx_block_bounds(void) {
             printf("  [FAIL] setup\n");
             break;
         }
-        for (size_t i = 0; i < BIG; i++) text[i] = (uint8_t)("static block "[i % 13]);
+        for (size_t i = 0; i < HUGE; i++) text[i] = (uint8_t)("static block "[i % 13]);
         uint64_t x = 0x9E3779B97F4A7C15ull; /* incompressible: stored RAW */
-        for (size_t i = 0; i < BIG; i++) {
+        for (size_t i = 0; i < HUGE; i++) {
             x ^= x << 13;
             x ^= x >> 7;
             x ^= x << 17;
@@ -388,6 +388,7 @@ int test_static_dctx_block_bounds(void) {
         const zxc_compress_opts_t co = {.level = 3};
         /* Oversized GLO and RAW blocks, both decoders. */
         const int64_t g = zxc_compress_block(cctx, text, BIG, comp, cap, &co);
+        const uint8_t g_type = g > 0 ? comp[0] : 0; /* comp is reused for RAW below */
         const int64_t e1 =
             g > 0 ? zxc_decompress_block(sd, comp, (size_t)g, out, BIG + 200, NULL) : 0;
         const int64_t e2 =
@@ -397,15 +398,47 @@ int test_static_dctx_block_bounds(void) {
             r > 0 ? zxc_decompress_block(sd, comp, (size_t)r, out, BIG + 200, NULL) : 0;
         const int64_t e4 =
             r > 0 ? zxc_decompress_block_safe(sd, comp, (size_t)r, out, BIG, NULL) : 0;
-        if (g <= 0 || r <= 0 || comp[0] != ZXC_BLOCK_RAW || e1 != ZXC_ERROR_BAD_BLOCK_SIZE ||
-            e2 != ZXC_ERROR_BAD_BLOCK_SIZE || e3 != ZXC_ERROR_BAD_BLOCK_SIZE ||
-            e4 != ZXC_ERROR_BAD_BLOCK_SIZE) {
-            printf("  [FAIL] oversized blocks: GLO %lld/%lld, RAW(type %u) %lld/%lld\n",
+        if (g <= 0 || r <= 0 || g_type != ZXC_BLOCK_GLO || comp[0] != ZXC_BLOCK_RAW ||
+            e1 != ZXC_ERROR_BAD_BLOCK_SIZE || e2 != ZXC_ERROR_BAD_BLOCK_SIZE ||
+            e3 != ZXC_ERROR_BAD_BLOCK_SIZE || e4 != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf("  [FAIL] oversized blocks: type %u %lld/%lld, type %u %lld/%lld\n", g_type,
                    (long long)e1, (long long)e2, r > 0 ? (unsigned)comp[0] : 0U, (long long)e3,
                    (long long)e4);
             break;
         }
         printf("  [PASS] blocks larger than the carved block -> BAD_BLOCK_SIZE on both decoders\n");
+        /* Overflowing the capped destination: 8000 bytes RAW then GLO, and a
+         * GLO block with more Huffman-coded literals than the carved block
+         * (7000 bytes over a 16-symbol alphabet, a 1000-byte repeat, level 6). */
+        const int64_t h1 = zxc_compress_block(cctx, noise, HUGE, comp, cap, &co);
+        const int64_t e5 =
+            h1 > 0 ? zxc_decompress_block(sd, comp, (size_t)h1, out, HUGE + 200, NULL) : 0;
+        const int64_t h2 = zxc_compress_block(cctx, text, HUGE, comp, cap, &co);
+        const int64_t e6 =
+            h2 > 0 ? zxc_decompress_block(sd, comp, (size_t)h2, out, HUGE + 200, NULL) : 0;
+        for (size_t i = 0; i < 7000; i++) {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            noise[i] = (uint8_t)("0123456789abcdef"[x >> 60]);
+        }
+        memcpy(noise + 7000, noise, 1000);
+        const zxc_compress_opts_t co6 = {.level = 6};
+        const int64_t l = zxc_compress_block(cctx, noise, HUGE, comp, cap, &co6);
+        const uint8_t l_type = l > 0 ? comp[0] : 0;
+        const uint8_t l_enc = l > 0 ? comp[ZXC_BLOCK_HEADER_SIZE + 8] : 0; /* enc_lit */
+        const int64_t e7 =
+            l > 0 ? zxc_decompress_block(sd, comp, (size_t)l, out, HUGE + 200, NULL) : 0;
+        if (h1 <= 0 || h2 <= 0 || l <= 0 || l_type != ZXC_BLOCK_GLO || l_enc != 2 ||
+            e5 != ZXC_ERROR_BAD_BLOCK_SIZE || e6 != ZXC_ERROR_BAD_BLOCK_SIZE ||
+            e7 != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf(
+                "  [FAIL] early exits: RAW %lld, GLO %lld, literal-heavy (type %u, enc_lit %u) "
+                "%lld\n",
+                (long long)e5, (long long)e6, l_type, l_enc, (long long)e7);
+            break;
+        }
+        printf("  [PASS] destination overflow, literal-heavy block included -> BAD_BLOCK_SIZE\n");
         /* A fitting block, both decoders, larger buffer included. */
         const int64_t n = zxc_compress_block(cctx, text, PIN, comp, cap, &co);
         const int64_t f1 = n > 0 ? zxc_decompress_block(sd, comp, (size_t)n, out,

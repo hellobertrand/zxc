@@ -1627,12 +1627,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     if (UNLIKELY(dctx->owns_workspace && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
-    // Static dctx: never re-carved. A GLO block announcing more literals than
-    // the carved block is refused here, any other oversize after decoding.
-    if (dctx->owns_workspace && ((const uint8_t*)src)[0] == ZXC_BLOCK_GLO &&
-        src_size >= ZXC_BLOCK_HEADER_SIZE + 8 &&
-        zxc_le32((const uint8_t*)src + ZXC_BLOCK_HEADER_SIZE + 4) > dctx->last_block_size)
-        return ZXC_ERROR_BAD_BLOCK_SIZE;
+    // Static dctx: never re-carved; an oversized block is caught after decoding.
 
     // Derive the block_size from dst_capacity (callers know the original size)
     const size_t block_size =
@@ -1693,7 +1688,8 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
     }
     if (dctx->owns_workspace) {
         // Static dctx: a block beyond the carved block is a size violation.
-        if (UNLIKELY(res == ZXC_ERROR_DST_TOO_SMALL && dst_capacity > dctx->last_block_size))
+        if (UNLIKELY((res == ZXC_ERROR_DST_TOO_SMALL || res == ZXC_ERROR_OVERFLOW) &&
+                     dst_capacity > dctx->last_block_size))
             return ZXC_ERROR_BAD_BLOCK_SIZE;
         if (UNLIKELY(res > 0 && (size_t)res > dctx->last_block_size))
             return ZXC_ERROR_BAD_BLOCK_SIZE;
