@@ -1545,7 +1545,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     // for static contexts.
     if (UNLIKELY(cctx->owns_workspace && b_dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
     if (UNLIKELY(cctx->owns_workspace && effective_block_size != cctx->last_block_size))
-        return ZXC_ERROR_BAD_BLOCK_SIZE;
+        return ZXC_ERROR_BAD_BLOCK_SIZE;  // LCOV_EXCL_LINE
     if (UNLIKELY(cctx->owns_workspace && level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))
         return ZXC_ERROR_BAD_LEVEL;
 
@@ -1581,7 +1581,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     cctx->inner.dict_size = b_dict_size;
     if (UNLIKELY(zxc_ctx_sync_dict_huf(&cctx->inner, cctx->huf_cache, &cctx->huf_cached,
                                        ZXC_OPTS_DICT_HUF(opts)) != ZXC_OK))
-        return ZXC_ERROR_CORRUPT_DATA;
+        return ZXC_ERROR_CORRUPT_DATA;  // LCOV_EXCL_LINE
 
     int res;
     if (b_dict && b_dict_size > 0) {
@@ -1652,7 +1652,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
     ctx->dict_size = dict_size;
     if (UNLIKELY(zxc_ctx_sync_dict_huf(ctx, dctx->huf_cache, &dctx->huf_cached,
                                        ZXC_OPTS_DICT_HUF(opts)) != ZXC_OK))
-        return ZXC_ERROR_CORRUPT_DATA;
+        return ZXC_ERROR_CORRUPT_DATA;  // LCOV_EXCL_LINE
 
     // work_buf was pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD inside
     // the matching zxc_cctx_init call above.
