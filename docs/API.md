@@ -572,9 +572,9 @@ static context returns `ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
 **Returns**: decompressed size (> 0) on success, or negative `zxc_error_t`.
 Returns `ZXC_ERROR_BAD_BLOCK_SIZE` if `dst_capacity` exceeds the per-block
 limit. On a static context the carved block is the effective capacity: a
-larger block returns `ZXC_ERROR_BAD_BLOCK_SIZE` when its sub-header or decoded
-size tells (`dst` may then hold the decoded bytes), and fails like a too-small
-destination otherwise.
+larger block returns `ZXC_ERROR_BAD_BLOCK_SIZE` while it fits the workspace
+margin and fails like a too-small destination beyond it. `dst` contents are
+unspecified on error.
 
 ### `zxc_decompress_block_safe`
 
@@ -603,8 +603,8 @@ Strict-tail variant: `dst_capacity` is the exact uncompressed size with no
 tail-pad margin, so the upper limit is `ZXC_BLOCK_SIZE_MAX` (not
 `MAX+TAIL_PAD` as for `zxc_decompress_block`). Returns
 `ZXC_ERROR_BAD_BLOCK_SIZE` if `dst_capacity > ZXC_BLOCK_SIZE_MAX`. A static
-context applies the same block bound as `zxc_decompress_block` and accepts a
-larger `dst_capacity` alike.
+context applies the same bound and codes as `zxc_decompress_block` and accepts
+a larger `dst_capacity` alike.
 
 Same options as `zxc_decompress_block`: `checksum_enabled` and the dictionary
 fields; a dictionary routes through its bounce path.
@@ -815,8 +815,9 @@ ZXC_EXPORT zxc_dctx* zxc_init_static_dctx(
 
 Initialises a decompression context inside a caller-supplied workspace.
 `block_size` is **pinned** at init time: feeding the returned handle an
-archive whose file header declares a different `block_size`, or a block larger
-than it through the block API, returns `ZXC_ERROR_BAD_BLOCK_SIZE`.
+archive whose file header declares a different `block_size` returns
+`ZXC_ERROR_BAD_BLOCK_SIZE`; a block larger than it never decodes through the
+block API (see `zxc_decompress_block` for the codes).
 Dictionaries are not supported:
 `ZXC_ERROR_DICT_UNSUPPORTED`.
 

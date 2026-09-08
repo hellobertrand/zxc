@@ -1602,48 +1602,32 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
 /**
  * @brief Block decode on a static dctx: the carved block is the effective capacity.
  *
- * A larger block is @ref ZXC_ERROR_BAD_BLOCK_SIZE when the sub-header or the
- * decoded size tells, and fails like a too-small destination otherwise; decoder
- * codes are never reinterpreted. @p strict selects the strict-tail decoder for
- * GLO/GHI; RAW is a bounded copy either way.
+ * Fast decoder: carved block plus wild-copy margin; strict: at most that. A
+ * larger block still within the margin is @ref ZXC_ERROR_BAD_BLOCK_SIZE, beyond
+ * it the decoder's own too-small-destination code, never reinterpreted.
  */
 static int64_t zxc_static_decompress_block(zxc_dctx* RESTRICT dctx, const uint8_t* RESTRICT src,
                                            const size_t src_size, uint8_t* RESTRICT dst,
                                            const size_t dst_capacity, const size_t dict_size,
                                            const int checksum_enabled, const int strict) {
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     if (UNLIKELY(dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
     const size_t carved = dctx->last_block_size;
-    const uint8_t type = src[0];
-    // More literals than the carved block cannot fit it; a malformed
-    // sub-header is left to the decoder.
-    if (type == ZXC_BLOCK_GLO || type == ZXC_BLOCK_GHI) {
-        zxc_gnr_header_t gh;
-        uint32_t lit_comp, tok_comp;
-        const uint8_t* const body = src + ZXC_BLOCK_HEADER_SIZE;
-        const size_t body_size = src_size - ZXC_BLOCK_HEADER_SIZE;
-        const int rc = type == ZXC_BLOCK_GLO ? zxc_read_glo_header_and_desc(body, body_size, &gh,
-                                                                            &lit_comp, &tok_comp)
-                                             : zxc_read_ghi_header(body, body_size, &gh);
-        if (rc >= 0 && gh.n_literals > carved) return ZXC_ERROR_BAD_BLOCK_SIZE;
-    }
-
+    const size_t work_sz = carved + ZXC_DECOMPRESS_TAIL_PAD;
     zxc_cctx_t* const ctx = &dctx->inner;
     ctx->checksum_enabled = checksum_enabled;
     ctx->dict_size = 0;
-    const size_t work_sz = carved + ZXC_DECOMPRESS_TAIL_PAD;
     int res;
-    if (strict || dst_capacity >= work_sz) {
-        // Strict decoder and RAW copy are bounded by dst_capacity; the fast
-        // decoder gets the carved block plus its wild-copy margin.
-        const int direct_strict = strict && type != ZXC_BLOCK_RAW;
-        res = direct_strict
-                  ? zxc_decompress_chunk_wrapper_safe_public(ctx, src, src_size, dst, dst_capacity)
-                  : zxc_decompress_chunk_wrapper(ctx, src, src_size, dst,
-                                                 strict ? dst_capacity : work_sz);
+    if (strict) {
+        const size_t cap = dst_capacity < work_sz ? dst_capacity : work_sz;
+        res = zxc_decompress_chunk_wrapper_safe_public(ctx, src, src_size, dst, cap);
+    } else if (dst_capacity >= work_sz) {
+        res = zxc_decompress_chunk_wrapper(ctx, src, src_size, dst, work_sz);
     } else {
         // Bounce through work_buf when dst cannot absorb wild copies.
         res = zxc_decompress_chunk_wrapper(ctx, src, src_size, ctx->work_buf, ctx->work_buf_cap);
-        if (res > 0 && (size_t)res <= carved) {
+        if (UNLIKELY(res > 0 && (size_t)res > carved)) return ZXC_ERROR_BAD_BLOCK_SIZE;
+        if (LIKELY(res > 0)) {
             if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
             ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
         }
@@ -1744,8 +1728,9 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 /**
  * @brief Safe-variant block decompressor: accepts dst_capacity == uncompressed_size.
  *
- * Dict inputs and RAW blocks route to @ref zxc_decompress_block; plain GLO/GHI
- * use the strict safe decoder (no bounce buffer, no +ZXC_DECOMPRESS_TAIL_PAD).
+ * Static dctx: shared static path. Heap dctx: dict inputs and RAW route to
+ * @ref zxc_decompress_block, plain GLO/GHI use the strict decoder (no bounce
+ * buffer, no +ZXC_DECOMPRESS_TAIL_PAD).
  *
  * Public API; full contract in @c zxc_buffer.h.
  */

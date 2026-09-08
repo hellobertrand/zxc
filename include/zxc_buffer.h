@@ -329,9 +329,9 @@ ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t sr
  * @return Decompressed size (> 0), or a negative @ref zxc_error_t;
  *         @ref ZXC_ERROR_BAD_BLOCK_SIZE if @p dst_capacity exceeds the
  *         per-block limit. Static context: the carved block is the effective
- *         capacity; a larger block is @ref ZXC_ERROR_BAD_BLOCK_SIZE when its
- *         sub-header or decoded size tells (@p dst may then hold the decoded
- *         bytes), otherwise it fails like a too-small destination.
+ *         capacity; a larger block is @ref ZXC_ERROR_BAD_BLOCK_SIZE while it
+ *         fits the workspace margin and fails like a too-small destination
+ *         beyond it. @p dst contents are unspecified on error.
  */
 ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t src_size, void* dst,
                                         size_t dst_capacity, const zxc_decompress_opts_t* opts);
@@ -366,7 +366,7 @@ ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t 
  *
  * @return Decompressed size (> 0), or a negative @ref zxc_error_t;
  *         @ref ZXC_ERROR_BAD_BLOCK_SIZE if @p dst_capacity >
- *         @ref ZXC_BLOCK_SIZE_MAX. Static context: same block bound as
+ *         @ref ZXC_BLOCK_SIZE_MAX. Static context: same bound and codes as
  *         zxc_decompress_block(), a larger @p dst_capacity accepted alike.
  */
 ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, const size_t src_size,
@@ -608,8 +608,9 @@ ZXC_EXPORT size_t zxc_static_dctx_workspace_size(const size_t block_size);
  *
  * @par Locked block size
  * @p block_size is pinned at init time: an archive whose header declares a
- * different @c block_size is rejected with @ref ZXC_ERROR_BAD_BLOCK_SIZE, and
- * so is a block larger than it through the block API.
+ * different @c block_size is rejected with @ref ZXC_ERROR_BAD_BLOCK_SIZE; a
+ * block larger than it never decodes through the block API (see
+ * zxc_decompress_block() for the codes).
  *
  * @par No dictionary
  * Any dictionary is rejected with @ref ZXC_ERROR_DICT_UNSUPPORTED: the

@@ -773,7 +773,7 @@ static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco(const zxc_cctx_t* RESTRICT
     if (UNLIKELY(arc != ZXC_OK)) return arc;
     if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE ||
                  ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
-        return ZXC_ERROR_CORRUPT_DATA;
+        return ZXC_ERROR_DST_TOO_SMALL;
     return zxc_huf_decode_section(payload, psize, ctx->lit_buffer, required_size,
                                   ctx->pivco_scratch);
 }
@@ -787,7 +787,7 @@ static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco_dict(const zxc_cctx_t* RES
     if (UNLIKELY(arc != ZXC_OK)) return arc;
     if (UNLIKELY(ctx->lit_buffer_cap < required_size + ZXC_PAD_SIZE ||
                  ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
-        return ZXC_ERROR_CORRUPT_DATA;
+        return ZXC_ERROR_DST_TOO_SMALL;
     return zxc_huf_decode_section_dict(payload, psize, ctx->lit_buffer, required_size,
                                        &ctx->dict_huf->tree, &ctx->dict_huf->dec,
                                        ctx->pivco_scratch);
@@ -800,7 +800,7 @@ static ZXC_NOINLINE ZXC_COLD int zxc_decode_tok_pivco(const zxc_cctx_t* RESTRICT
     if (UNLIKELY(arc != ZXC_OK)) return arc;
     if (UNLIKELY(n_tok + ZXC_PAD_SIZE > ctx->tok_buffer_cap ||
                  n_tok + ZXC_PIVCO_SCRATCH_PAD > ctx->pivco_scratch_cap))
-        return ZXC_ERROR_CORRUPT_DATA;
+        return ZXC_ERROR_DST_TOO_SMALL;
     return zxc_huf_decode_section(payload, psize, ctx->tok_buffer, n_tok, ctx->pivco_scratch);
 }
 
@@ -911,7 +911,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
 
             // lit_buffer is pre-allocated to chunk_size + ZXC_PAD_SIZE by
             // zxc_cctx_init (mode == 0).
-            if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) return ZXC_ERROR_CORRUPT_DATA;
+            if (UNLIKELY(ctx->lit_buffer_cap < alloc_size)) return ZXC_ERROR_DST_TOO_SMALL;
 
             rle_buf = ctx->lit_buffer;
             if (UNLIKELY(!rle_buf || lit_stream_size > (size_t)(src + src_size - p_curr)))
