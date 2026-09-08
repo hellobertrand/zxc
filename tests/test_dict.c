@@ -2014,6 +2014,27 @@ int test_dict_block_huf_roundtrip(void) {
             printf("  [PASS] static cctx + dict -> DICT_UNSUPPORTED\n");
         }
 
+        /* Static dctx: same contract on both block decoders, the strict one
+         * routing dictionary calls through the fast one. */
+        {
+            const int64_t n = zxc_compress_block(cctx, heldout, BLK, comp, cap, &co);
+            const size_t ws_sz = zxc_static_dctx_workspace_size(BLK);
+            void* ws = malloc(ws_sz);
+            zxc_dctx* sd = ws ? zxc_init_static_dctx(ws, ws_sz, BLK) : NULL;
+            const int64_t r1 = sd && n > 0
+                                   ? zxc_decompress_block(sd, comp, (size_t)n, out,
+                                                          BLK + ZXC_DECOMPRESS_TAIL_PAD, &d_tab)
+                                   : -1;
+            const int64_t r2 =
+                sd && n > 0 ? zxc_decompress_block_safe(sd, comp, (size_t)n, out, BLK, &d_tab) : -1;
+            free(ws);
+            if (r1 != ZXC_ERROR_DICT_UNSUPPORTED || r2 != ZXC_ERROR_DICT_UNSUPPORTED) {
+                printf("  [FAIL] static dctx + dict: %lld / %lld\n", (long long)r1, (long long)r2);
+                break;
+            }
+            printf("  [PASS] static dctx + dict -> DICT_UNSUPPORTED on both decoders\n");
+        }
+
         ok = 1;
     } while (0);
 
