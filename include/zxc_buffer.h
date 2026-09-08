@@ -285,9 +285,10 @@ ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
  * @param[in]     src_size     Source size in bytes, in [1, @ref ZXC_BLOCK_SIZE_MAX].
  * @param[out]    dst          Destination buffer.
  * @param[in]     dst_capacity Capacity of @p dst (see zxc_compress_block_bound()).
- * @param[in]     opts         Compression options, or NULL for defaults. Only
- *                             @c level, @c block_size and @c checksum_enabled
- *                             are used.
+ * @param[in]     opts         Compression options, or NULL for defaults.
+ *                             @c level, @c block_size, @c checksum_enabled and
+ *                             the dictionary fields are used; the shared table
+ *                             is rebuilt only when it changes.
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
@@ -295,7 +296,8 @@ ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
  *         @ref ZXC_ERROR_BAD_BLOCK_SIZE if @p src_size exceeds
  *         @ref ZXC_BLOCK_SIZE_MAX; @ref ZXC_ERROR_BAD_LEVEL on a static
  *         context for a level raise its workspace cannot accommodate (levels
- *         above @ref ZXC_LEVEL_ULTRA are otherwise silently clamped).
+ *         above @ref ZXC_LEVEL_ULTRA are otherwise silently clamped);
+ *         @ref ZXC_ERROR_DICT_UNSUPPORTED on a static context with a dictionary.
  */
 ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t src_size, void* dst,
                                       size_t dst_capacity, const zxc_compress_opts_t* opts);
@@ -317,7 +319,10 @@ ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t sr
  *                             @ref ZXC_BLOCK_SIZE_MAX +
  *                             @ref ZXC_DECOMPRESS_TAIL_PAD.
  * @param[in]     opts         Decompression options, or NULL for defaults.
- *                             Only @c checksum_enabled is used.
+ *                             @c checksum_enabled and the dictionary fields are
+ *                             used; a block carries no dictionary id, so pass
+ *                             the same (content, table) pair as at compression.
+ *                             Static context: @ref ZXC_ERROR_DICT_UNSUPPORTED.
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
@@ -351,7 +356,8 @@ ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t 
  *                             @ref ZXC_BLOCK_SIZE_MAX (no tail-pad margin
  *                             needed, unlike zxc_decompress_block).
  * @param[in]     opts         Decompression options, or NULL for defaults.
- *                             Only @c checksum_enabled is used.
+ *                             Same fields as zxc_decompress_block(); a
+ *                             dictionary routes through its bounce path.
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *

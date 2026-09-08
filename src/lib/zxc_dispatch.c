@@ -1543,13 +1543,14 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     // optimal-parser tier it carries no opt_scratch for. Re-initing on the heap
     // would break the no-allocation contract and leak: zxc_free_cctx is a no-op
     // for static contexts.
+    if (UNLIKELY(cctx->owns_workspace && b_dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
     if (UNLIKELY(cctx->owns_workspace && effective_block_size != cctx->last_block_size))
-        return ZXC_ERROR_BAD_BLOCK_SIZE;
+        return ZXC_ERROR_BAD_BLOCK_SIZE;  // LCOV_EXCL_LINE
     if (UNLIKELY(cctx->owns_workspace && level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))
         return ZXC_ERROR_BAD_LEVEL;
 
     cctx->stored_level = level;
-    cctx->stored_block_size = effective_block_size;
+    cctx->stored_block_size = base_block_size;
     cctx->stored_checksum = checksum_enabled;
 
     // Re-init when block_size changed, a level raise needs the optimal-parser
@@ -1578,6 +1579,9 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     }
 
     cctx->inner.dict_size = b_dict_size;
+    if (UNLIKELY(zxc_ctx_sync_dict_huf(&cctx->inner, cctx->huf_cache, &cctx->huf_cached,
+                                       ZXC_OPTS_DICT_HUF(opts)) != ZXC_OK))
+        return ZXC_ERROR_CORRUPT_DATA;  // LCOV_EXCL_LINE
 
     int res;
     if (b_dict && b_dict_size > 0) {
@@ -1622,6 +1626,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+    if (UNLIKELY(dctx->owns_workspace && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
 
     // Derive the block_size from dst_capacity (callers know the original size)
     const size_t block_size = zxc_block_size_ceil(dst_capacity);
@@ -1646,6 +1651,9 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 
     zxc_cctx_t* const ctx = &dctx->inner;
     ctx->dict_size = dict_size;
+    if (UNLIKELY(zxc_ctx_sync_dict_huf(ctx, dctx->huf_cache, &dctx->huf_cached,
+                                       ZXC_OPTS_DICT_HUF(opts)) != ZXC_OK))
+        return ZXC_ERROR_CORRUPT_DATA;  // LCOV_EXCL_LINE
 
     // work_buf was pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD inside
     // the matching zxc_cctx_init call above.

@@ -224,6 +224,8 @@ int test_dict_block_cctx_dict_reinit(void);
 int test_dict_ctx_table_cache_recovers(void);
 int test_dict_ctx_table_without_dict(void);
 int test_dict_oversized_rejected_everywhere(void);
+int test_dict_block_huf_roundtrip(void);
+int test_dict_block_stored_block_size(void);
 int test_dict_huf_zxd_roundtrip(void);
 int test_dict_huf_table_roundtrip(void);
 int test_dict_huf_degenerate_corpus(void);
