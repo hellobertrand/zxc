@@ -76,6 +76,7 @@ int test_decompress_empty_frame_null_dst(void);
 int test_block_api(void);
 int test_block_api_boundary_sizes(void);
 int test_block_api_tiny_capacity(void);
+int test_block_api_direct_decode(void);
 int test_block_api_large_block_varint(void);
 int test_decompress_block_safe(void);
 int test_decompress_block_bound(void);

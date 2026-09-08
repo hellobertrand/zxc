@@ -739,3 +739,69 @@ int test_block_api_tiny_capacity(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+/* dst_capacity = data + pad decodes in place; without the pad, or below it,
+ * the bounce decodes; a buffer too short is refused as before. */
+int test_block_api_direct_decode(void) {
+    printf("=== TEST: Block API - in-place decode with the tail pad ===\n");
+    static const size_t sizes[] = {100, 4096, 5000, 100000, ZXC_BLOCK_SIZE_MAX};
+    const size_t max = ZXC_BLOCK_SIZE_MAX;
+    const size_t cap = (size_t)zxc_compress_block_bound(max);
+    uint8_t* src = (uint8_t*)malloc(max);
+    uint8_t* comp = (uint8_t*)malloc(cap);
+    uint8_t* out = (uint8_t*)malloc(2 * (size_t)zxc_decompress_block_bound(max));
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_dctx* dctx = zxc_create_dctx();
+    int ok = 0;
+    do {
+        if (!src || !comp || !out || !cctx || !dctx) {
+            printf("  [FAIL] setup\n");
+            break;
+        }
+        zxc_test_srand(0xD1EC7u);
+        gen_lz_data(src, max);
+        const zxc_compress_opts_t co = {.level = 3};
+        int failed = 0;
+        for (size_t s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++) {
+            const size_t n = sizes[s];
+            const int64_t c = zxc_compress_block(cctx, src, n, comp, cap, &co);
+            if (c <= 0) {
+                printf("  [FAIL] compress %zu: %lld\n", n, (long long)c);
+                failed++;
+                continue;
+            }
+            /* padded (in place), exact, one byte of pad, twice the bound */
+            const size_t caps[] = {(size_t)zxc_decompress_block_bound(n), n, n + 1,
+                                   2 * (size_t)zxc_decompress_block_bound(n)};
+            for (size_t k = 0; k < sizeof(caps) / sizeof(caps[0]); k++) {
+                if (caps[k] > max + ZXC_DECOMPRESS_TAIL_PAD) continue;
+                memset(out, 0xA5, caps[k]);
+                const int64_t r = zxc_decompress_block(dctx, comp, (size_t)c, out, caps[k], NULL);
+                if (r != (int64_t)n || memcmp(out, src, n) != 0) {
+                    printf("  [FAIL] block %zu, dst %zu: %lld\n", n, caps[k], (long long)r);
+                    failed++;
+                }
+            }
+            /* a buffer that cannot hold the block */
+            if (n > 1000) {
+                const int64_t r = zxc_decompress_block(dctx, comp, (size_t)c, out, n - 1000, NULL);
+                if (r != ZXC_ERROR_DST_TOO_SMALL) {
+                    printf("  [FAIL] block %zu, dst %zu: %lld (want DST_TOO_SMALL)\n", n, n - 1000,
+                           (long long)r);
+                    failed++;
+                }
+            }
+        }
+        if (failed) break;
+        printf("  [PASS] %zu sizes x {bound, exact, +1, 2x bound} decode; short buffers refused\n",
+               sizeof(sizes) / sizeof(sizes[0]));
+        ok = 1;
+    } while (0);
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    free(src);
+    free(comp);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}

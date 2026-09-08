@@ -561,9 +561,11 @@ ZXC_EXPORT int64_t zxc_decompress_block(
 ```
 
 Decompresses a single block produced by `zxc_compress_block()`.
-`dst_capacity` should be at least
-`zxc_decompress_block_bound(uncompressed_size)` to enable the fast path, and
-**must not exceed** `ZXC_BLOCK_SIZE_MAX + ZXC_DECOMPRESS_TAIL_PAD`. For payloads
+`dst_capacity` is the uncompressed size plus `ZXC_DECOMPRESS_TAIL_PAD`, as
+returned by `zxc_decompress_block_bound(uncompressed_size)`: the block then
+decodes in place. A buffer without the pad still decodes, through an internal
+bounce buffer and a copy. `dst_capacity` **must not exceed**
+`ZXC_BLOCK_SIZE_MAX + ZXC_DECOMPRESS_TAIL_PAD`. For payloads
 produced by the frame or streaming APIs, use `zxc_decompress` instead.
 `checksum_enabled` and the dictionary fields are used; a block carries no
 dictionary id, so pass the same (content, table) pair as at compression. A
