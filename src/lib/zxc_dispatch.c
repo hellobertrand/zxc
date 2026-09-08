@@ -731,6 +731,8 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
 
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+
     const uint8_t* ip = src;
     const uint8_t* ip_end = ip + src_size;
     uint8_t* op = dst;
@@ -1110,7 +1112,33 @@ struct zxc_cctx_s {
     int stored_level;
     int stored_checksum;
     size_t stored_block_size;
+    int huf_cached;                        /* inner carries the table below */
+    uint8_t huf_cache[ZXC_HUF_TABLE_SIZE]; /* last table attached */
 };
+
+/**
+ * @brief Attaches the shared literal table to @p inner; NULL detaches.
+ *
+ * The tree is rebuilt only when the 128 bytes differ from @p cache, as a build
+ * costs about as much as decoding a small block. Clear @p cached whenever
+ * @p inner is re-initialised: the attached state dies with it.
+ */
+static int zxc_ctx_sync_dict_huf(zxc_cctx_t* RESTRICT inner, uint8_t* RESTRICT cache,
+                                 int* RESTRICT cached, const uint8_t* RESTRICT dict_huf) {
+    if (dict_huf) {
+        if (!*cached || memcmp(cache, dict_huf, ZXC_HUF_TABLE_SIZE) != 0) {
+            *cached = 0; /* a failed attach leaves inner without a tree */
+            if (UNLIKELY(zxc_cctx_attach_dict_huf(inner, dict_huf) != ZXC_OK))
+                return ZXC_ERROR_CORRUPT_DATA;
+            ZXC_MEMCPY(cache, dict_huf, ZXC_HUF_TABLE_SIZE);
+            *cached = 1;
+        }
+    } else if (*cached) {
+        (void)zxc_cctx_attach_dict_huf(inner, NULL);
+        *cached = 0;
+    }
+    return ZXC_OK;
+}
 
 zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
     zxc_cctx* const cctx = (zxc_cctx*)ZXC_CALLOC(1, sizeof(zxc_cctx));
@@ -1154,12 +1182,11 @@ void zxc_free_cctx(zxc_cctx* cctx) {
 }
 
 /**
- * @brief Compresses a whole buffer into a framed archive, reusing @p cctx.
+ * @brief Compresses data using a reusable context.
  *
- * Public API; full contract in @c zxc_buffer.h. Resolves per-call options over
- * the context's sticky defaults, re-initialises the inner buffers only when the
- * block size changes (level / checksum update in place), then writes the file
- * header, the compressed blocks, the EOF block and the footer.
+ * Public API; full contract in @c zxc_buffer.h. Same frame walk and dictionary
+ * binding as zxc_compress(); buffers re-carved only when [dict | block] or the
+ * parser tier changes, shared table rebuilt only when it changes.
  */
 int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t src_size,
                           void* RESTRICT dst, const size_t dst_capacity,
@@ -1170,13 +1197,18 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     const int checksum_enabled = opts ? opts->checksum_enabled : cctx->stored_checksum;
     const int level = ZXC_OPTS_LEVEL(opts, cctx->stored_level);
     const size_t block_size = ZXC_OPTS_BLOCK_SIZE(opts, cctx->stored_block_size);
+    // Dictionary options are never sticky: a remembered pointer would dangle.
+    const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
+    const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
+    const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
 
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
-    // Static cctx: block_size is locked at init and the workspace cannot grow,
-    // so reject any opts forcing a re-partition. level and checksum_enabled may
-    // still vary - except a raise into the optimal-parser tier, whose
-    // opt_scratch a workspace carved below ZXC_LEVEL_DENSITY does not carry.
+    // Static cctx: no room for a dictionary prefix, and the workspace cannot
+    // grow, so reject a block_size change or a level raise into the
+    // optimal-parser tier it was carved without.
+    if (UNLIKELY(cctx->owns_workspace && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
     if (UNLIKELY(cctx->owns_workspace && block_size != cctx->last_block_size))
         return ZXC_ERROR_BAD_BLOCK_SIZE;
     if (UNLIKELY(cctx->owns_workspace && level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))
@@ -1186,34 +1218,43 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     cctx->stored_block_size = block_size;
     cctx->stored_checksum = checksum_enabled;
 
-    // Re-init when block_size changed (it drives the buffer sizes), or when a
-    // level raise into the optimal-parser tier needs an opt_scratch that inits
-    // below ZXC_LEVEL_DENSITY never allocated.
-    if (UNLIKELY(!cctx->initialized || cctx->last_block_size != block_size ||
-                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))) {
+    // The encoder sees [dict | block], so the carved chunk covers both.
+    const size_t eff_chunk =
+        dict_size > 0 ? zxc_block_size_ceil(dict_size + block_size) : block_size;
+    const uint32_t did = (dict && dict_size > 0) ? zxc_dict_id(dict, dict_size, dict_huf) : 0;
+
+    // Re-init when the chunk changed, a level raise needs the optimal-parser
+    // scratch, or a dictionary arrives on a context carved without its prefix.
+    if (UNLIKELY(!cctx->initialized || cctx->last_block_size != eff_chunk ||
+                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
+                 (dict_size > 0 && !cctx->inner.dict_buffer))) {
         if (cctx->initialized) {
-            // LCOV_EXCL_START
             zxc_cctx_free(&cctx->inner);
             cctx->initialized = 0;
-            // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
-        if (UNLIKELY(zxc_cctx_init(&cctx->inner, block_size, 1, level, checksum_enabled, 0) !=
-                     ZXC_OK))
+        if (UNLIKELY(zxc_cctx_init(&cctx->inner, eff_chunk, 1, level, checksum_enabled,
+                                   dict_size) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
-        cctx->last_block_size = block_size;
+        cctx->last_block_size = eff_chunk;
         cctx->initialized = 1;
+        cctx->huf_cached = 0; /* attach state died with inner */
     } else {
-        // Same block_size: update level + checksum without realloc.
+        // Same chunk: update level + checksum without realloc.
         cctx->inner.compression_level = level;
         cctx->inner.checksum_enabled = checksum_enabled;
     }
 
-    // Shared context: zxc_compress_block leaves its dictionary here.
-    cctx->inner.dict_size = 0;
-
     zxc_cctx_t* const ctx = &cctx->inner;
+    ctx->dict_size = dict_size;
+    if (UNLIKELY(zxc_ctx_sync_dict_huf(ctx, cctx->huf_cache, &cctx->huf_cached, dict_huf) !=
+                 ZXC_OK))
+        return ZXC_ERROR_CORRUPT_DATA;
+
+    // [dict | block] input for the encoder, NULL without a dictionary.
+    uint8_t* const dict_input = dict_size > 0 ? ctx->dict_buffer : NULL;
+    if (dict_input) ZXC_MEMCPY(dict_input, dict, dict_size);
 
     uint8_t* op = (uint8_t*)dst;
     const uint8_t* const op_start = op;
@@ -1222,7 +1263,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     uint32_t global_hash = 0;
 
     const int h_val =
-        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled, 0);
+        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled, did);
     if (UNLIKELY(h_val < 0)) return h_val;  // LCOV_EXCL_LINE
     op += h_val;
 
@@ -1231,7 +1272,13 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         const size_t chunk_len = (src_size - pos > block_size) ? block_size : (src_size - pos);
         const size_t rem_cap = (size_t)(op_end - op);
 
-        const int res = zxc_compress_chunk_wrapper(ctx, ip + pos, chunk_len, op, rem_cap);
+        int res;
+        if (dict_input) {
+            ZXC_MEMCPY(dict_input + dict_size, ip + pos, chunk_len);
+            res = zxc_compress_chunk_wrapper(ctx, dict_input, dict_size + chunk_len, op, rem_cap);
+        } else {
+            res = zxc_compress_chunk_wrapper(ctx, ip + pos, chunk_len, op, rem_cap);
+        }
         if (UNLIKELY(res < 0)) return res;
 
         if (checksum_enabled) {
@@ -1244,7 +1291,6 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         op += res;
         pos += chunk_len;
     }
-
     // EOF block
     const size_t rem_cap = (size_t)(op_end - op);
     const zxc_block_header_t eof_bh = {
@@ -1280,6 +1326,8 @@ struct zxc_dctx_s {
     int owns_workspace;     /* 0 = library-allocated (free in zxc_free_dctx),
                                1 = caller-supplied static workspace (no-op free,
                                block_size pinned at init) */
+    int huf_cached;         /* inner carries the table below */
+    uint8_t huf_cache[ZXC_HUF_TABLE_SIZE]; /* last table attached */
 };
 
 zxc_dctx* zxc_create_dctx(void) {
@@ -1305,11 +1353,9 @@ void zxc_free_dctx(zxc_dctx* dctx) {
 /**
  * @brief Decompresses a framed archive into @p dst, reusing @p dctx.
  *
- * Public API; full contract in @c zxc_buffer.h. Parses the file header,
- * re-initialises the inner buffers only when the block size changes (or a prior
- * dict call left a prefix), then decodes each block - straight into @p dst when
- * the tail padding fits, otherwise through a bounce buffer - and verifies the
- * footer size and optional checksum.
+ * Public API; full contract in @c zxc_buffer.h. Same frame walk and dictionary
+ * binding as zxc_decompress(); the inner buffers are re-carved only when the
+ * block or dictionary size changes, the shared table only when it changes.
  */
 int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
                             void* RESTRICT dst, const size_t dst_capacity,
@@ -1318,6 +1364,11 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
         return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
+    const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
+    const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
+    const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
+
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
     const uint8_t* ip = (const uint8_t*)src;
     const uint8_t* const ip_end = ip + src_size;
@@ -1326,46 +1377,65 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     const uint8_t* const op_end = op + dst_capacity;
     size_t runtime_chunk_size = 0;
     int file_has_checksums = 0;
+    uint32_t header_dict_id = 0;
     uint32_t global_hash = 0;
 
     if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
-                                      NULL) != ZXC_OK))
+                                      &header_dict_id) != ZXC_OK))
         return ZXC_ERROR_BAD_HEADER;
 
     // Static dctx: block_size is locked at workspace init; reject any
     // archive whose declared block_size would require a re-partition.
     if (UNLIKELY(dctx->owns_workspace && runtime_chunk_size != dctx->last_block_size))
         return ZXC_ERROR_BAD_BLOCK_SIZE;
+    // Static dctx: no room for a dictionary prefix.
+    if (UNLIKELY(dctx->owns_workspace && (header_dict_id != 0 || dict_size != 0)))
+        return ZXC_ERROR_DICT_UNSUPPORTED;
 
-    // Re-init when block size changed, or when a prior dict-using call (block
-    // API) left the inner context carrying a dict prefix.
+    // Dictionary binding: same contract as zxc_decompress().
+    if (header_dict_id != 0) {
+        if (UNLIKELY(!dict || dict_size == 0)) return ZXC_ERROR_DICT_REQUIRED;
+        if (UNLIKELY(zxc_dict_id(dict, dict_size, dict_huf) != header_dict_id))
+            return ZXC_ERROR_DICT_MISMATCH;
+    }
+
+    // Re-init when the block or dictionary size changed (the block API shares
+    // this context).
     if (UNLIKELY(!dctx->initialized || dctx->last_block_size != runtime_chunk_size ||
-                 dctx->last_dict_size != 0)) {
+                 dctx->last_dict_size != dict_size)) {
         if (dctx->initialized) {
-            // LCOV_EXCL_START
             zxc_cctx_free(&dctx->inner);
             dctx->initialized = 0;
-            // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
         if (UNLIKELY(zxc_cctx_init(&dctx->inner, runtime_chunk_size, 0, 0,
-                                   file_has_checksums && checksum_enabled, 0) != ZXC_OK))
+                                   file_has_checksums && checksum_enabled, dict_size) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
         dctx->last_block_size = runtime_chunk_size;
-        dctx->last_dict_size = 0;
+        dctx->last_dict_size = dict_size;
         dctx->initialized = 1;
+        dctx->huf_cached = 0; /* attach state died with inner */
     } else {
         dctx->inner.checksum_enabled = file_has_checksums && checksum_enabled;
     }
 
     zxc_cctx_t* const ctx = &dctx->inner;
+
+    if (UNLIKELY(zxc_ctx_sync_dict_huf(ctx, dctx->huf_cache, &dctx->huf_cached, dict_huf) !=
+                 ZXC_OK))
+        return ZXC_ERROR_CORRUPT_DATA;
+
     ip += ZXC_FILE_HEADER_SIZE;
 
     // work_buf was pre-sized to runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD
     // inside the matching zxc_cctx_init call above; the re-init guard ensures
     // it stays in sync when chunk_size changes between calls.
     const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
+
+    // [dict | decode + PAD] scratch, NULL without a dictionary.
+    uint8_t* const dict_dec = ctx->dict_buffer;
+    if (dict_dec) ZXC_MEMCPY(dict_dec, dict, dict_size);
 
     while (ip < ip_end) {
         const size_t rem_src = (size_t)(ip_end - ip);
@@ -1391,7 +1461,15 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 
         const size_t rem_cap = (size_t)(op_end - op);
         int res;
-        if (LIKELY(rem_cap >= work_sz)) {
+        if (dict_dec) {
+            // Decode behind the prefix so back-references into it resolve.
+            res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, dict_dec + dict_size, work_sz);
+            if (LIKELY(res > 0)) {
+                if (UNLIKELY((size_t)res > rem_cap))
+                    return ZXC_ERROR_DST_TOO_SMALL;  // LCOV_EXCL_LINE
+                ZXC_MEMCPY(op, dict_dec + dict_size, (size_t)res);
+            }
+        } else if (LIKELY(rem_cap >= work_sz)) {
             // Fast path: decode directly into dst (enough padding for wild copies).
             res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, op, rem_cap);
         } else {
@@ -1455,6 +1533,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     // When a dictionary is active, offset_bits must accommodate dict + block.
     const uint8_t* b_dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t b_dict_size = ZXC_OPTS_DICT_SIZE(opts);
+    if (UNLIKELY(b_dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     const size_t base_block_size = (block_size > min_bs) ? block_size : min_bs;
     const size_t effective_block_size =
         b_dict_size > 0 ? zxc_block_size_ceil(b_dict_size + base_block_size) : base_block_size;
@@ -1473,11 +1552,12 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     cctx->stored_block_size = effective_block_size;
     cctx->stored_checksum = checksum_enabled;
 
-    // Re-init when block_size changed, or when a per-call level raise into
-    // the optimal-parser tier requires the opt_scratch region that inits at
-    // level < ZXC_LEVEL_DENSITY do not allocate (using it NULL would crash).
+    // Re-init when block_size changed, a level raise needs the optimal-parser
+    // scratch, or a dictionary arrives on a context carved without its prefix
+    // (a block_size switch can round [dict | block] back to the same size).
     if (UNLIKELY(!cctx->initialized || cctx->last_block_size != effective_block_size ||
-                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))) {
+                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
+                 (b_dict_size > 0 && !cctx->inner.dict_buffer))) {
         if (cctx->initialized) {
             // LCOV_EXCL_START
             zxc_cctx_free(&cctx->inner);
@@ -1491,6 +1571,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
         // LCOV_EXCL_STOP
         cctx->last_block_size = effective_block_size;
         cctx->initialized = 1;
+        cctx->huf_cached = 0; /* attach state died with inner */
     } else {
         cctx->inner.compression_level = level;
         cctx->inner.checksum_enabled = checksum_enabled;
@@ -1540,6 +1621,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
 
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
     // Derive the block_size from dst_capacity (callers know the original size)
     const size_t block_size = zxc_block_size_ceil(dst_capacity);
@@ -1557,6 +1639,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
         dctx->last_block_size = block_size;
         dctx->last_dict_size = dict_size;
         dctx->initialized = 1;
+        dctx->huf_cached = 0;
     } else {
         dctx->inner.checksum_enabled = checksum_enabled;
     }
@@ -1639,6 +1722,7 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
         dctx->last_block_size = block_size;
         dctx->last_dict_size = 0;
         dctx->initialized = 1;
+        dctx->huf_cached = 0;
     } else {
         dctx->inner.checksum_enabled = checksum_enabled;
     }

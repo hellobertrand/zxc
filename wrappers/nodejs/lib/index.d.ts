@@ -55,6 +55,8 @@ export const ERROR_DICT_MISMATCH: number;
 /** Dictionary exceeds maximum allowed size. */
 export const ERROR_DICT_TOO_LARGE: number;
 export const ERROR_BAD_LEVEL: number;
+/** Dictionary not supported by this context's workspace (static contexts). */
+export const ERROR_DICT_UNSUPPORTED: number;
 
 export interface CompressOptions {
     /** Compression level (1-7). Defaults to LEVEL_DEFAULT. */

@@ -174,7 +174,8 @@ var (
 
 	// ErrDictUnsupported is returned by the push streaming API when dictionary
 	// options are supplied: the push-stream format carries no dictionary ID, so
-	// dictionary compression would produce undecodable archives.
+	// dictionary compression would produce undecodable archives. Static C
+	// contexts report the same condition (ZXC_ERROR_DICT_UNSUPPORTED).
 	ErrDictUnsupported = errors.New("zxc: dictionaries are not supported by the push streaming API")
 )
 
@@ -217,6 +218,8 @@ func errorFromCode(code C.int64_t) error {
 		return ErrDictTooLarge
 	case int(C.ZXC_ERROR_BAD_LEVEL):
 		return ErrBadLevel
+	case int(C.ZXC_ERROR_DICT_UNSUPPORTED):
+		return ErrDictUnsupported
 	default:
 		return fmt.Errorf("zxc: unknown error (code %d)", int(code))
 	}

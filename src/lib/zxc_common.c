@@ -865,6 +865,8 @@ const char* zxc_error_name(const int code) {
             return "ZXC_ERROR_DICT_TOO_LARGE";
         case ZXC_ERROR_BAD_LEVEL:
             return "ZXC_ERROR_BAD_LEVEL";
+        case ZXC_ERROR_DICT_UNSUPPORTED:
+            return "ZXC_ERROR_DICT_UNSUPPORTED";
         default:
             return "ZXC_UNKNOWN_ERROR";
     }

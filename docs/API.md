@@ -234,9 +234,10 @@ typedef enum {
     ZXC_ERROR_DICT_REQUIRED  = -15, // file requires a dictionary but none provided
     ZXC_ERROR_DICT_MISMATCH  = -16, // provided dictionary ID does not match header
     ZXC_ERROR_DICT_TOO_LARGE = -17, // dictionary exceeds ZXC_DICT_SIZE_MAX
-    ZXC_ERROR_BAD_LEVEL      = -18  // level unsupported by this context's workspace
+    ZXC_ERROR_BAD_LEVEL      = -18, // level unsupported by this context's workspace
                                     // (static context dense-tier raise; out-of-range
                                     // levels are otherwise silently clamped)
+    ZXC_ERROR_DICT_UNSUPPORTED = -19 // dictionary unsupported by this context's workspace
 } zxc_error_t;
 ```
 
@@ -658,7 +659,10 @@ ZXC_EXPORT int64_t zxc_compress_cctx(
 ```
 
 Same as `zxc_compress()` but reuses internal buffers from `cctx`.
-Automatically re-initializes when `block_size` or `level` changes.
+Automatically re-initializes when `block_size` or `level` changes. Dictionary
+options are honoured as in `zxc_compress()` but are not sticky; the shared
+literal table is rebuilt only when it changes. A static context returns
+`ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
 
 ### `zxc_create_dctx`
 
@@ -689,7 +693,9 @@ ZXC_EXPORT int64_t zxc_decompress_dctx(
 );
 ```
 
-Same as `zxc_decompress()` but reuses buffers from `dctx`.
+Same as `zxc_decompress()`, dictionary options included, but reuses buffers
+from `dctx`; the shared literal table is rebuilt only when it changes between
+calls. A static context returns `ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
 
 ---
 
@@ -760,6 +766,7 @@ Initialises a compression context inside a caller-supplied workspace.
 `workspace_size` must be at least `zxc_static_cctx_workspace_size` for the
 same `block_size` / `level`. `opts` is **required**: `block_size` and
 `level` are pinned at init time and must be set explicitly.
+Dictionaries are rejected: `ZXC_ERROR_DICT_UNSUPPORTED`.
 
 The returned handle points **inside** `workspace`; the workspace must
 remain valid for the lifetime of the handle. `zxc_free_cctx` is a no-op.
@@ -797,7 +804,8 @@ ZXC_EXPORT zxc_dctx* zxc_init_static_dctx(
 Initialises a decompression context inside a caller-supplied workspace.
 `block_size` is **pinned** at init time: feeding the returned handle an
 archive whose file header declares a different `block_size` returns
-`ZXC_ERROR_BAD_BLOCK_SIZE`.
+`ZXC_ERROR_BAD_BLOCK_SIZE`. Dictionaries are not supported:
+`ZXC_ERROR_DICT_UNSUPPORTED`.
 
 The returned handle points inside `workspace`; the workspace must remain
 valid for the lifetime of the handle. `zxc_free_dctx` is a no-op.
@@ -1085,7 +1093,9 @@ ZXC_EXPORT zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts);
 
 Creates a push decompression context.  Only `checksum_enabled` from `opts`
 is honoured (controls whether the global file-level checksum is verified
-when the file carries one).
+when the file carries one). Dictionary options fail creation, and an archive
+whose header requires a dictionary fails with `ZXC_ERROR_DICT_REQUIRED` at the
+first decompress call.
 
 **Returns**: context, or `NULL` on allocation failure.
 

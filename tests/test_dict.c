@@ -1455,3 +1455,468 @@ int test_dict_huf_degenerate_corpus(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Reusable / static decompression contexts with a dictionary                 */
+/* ------------------------------------------------------------------------- */
+
+static const uint8_t k_dctx_dict[] =
+    "The quick brown fox jumps over the lazy dog. "
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
+    "Pack my box with five dozen liquor jugs. "
+    "How vexingly quick daft zebras jump!";
+
+/* Compresses @p src at @p level with an optional (dict, table); <= 0 on failure. */
+static int64_t dctx_make_archive(int level, size_t block_size, const uint8_t* src, size_t n,
+                                 const uint8_t* dict, size_t dict_size, const uint8_t* huf,
+                                 uint8_t* out, size_t cap) {
+    zxc_compress_opts_t co = {
+        .level = level,
+        .block_size = block_size,
+        .checksum_enabled = 1,
+        .dict = dict,
+        .dict_size = dict_size,
+        .dict_huf = huf,
+    };
+    return zxc_compress(src, n, out, cap, &co);
+}
+
+typedef struct {
+    const char* label;
+    const uint8_t* arc;
+    int64_t n;
+    const zxc_decompress_opts_t* opts;
+    int64_t want; /* decompressed size, or the expected error */
+} dctx_step_t;
+
+static int dctx_run_steps(zxc_dctx* dctx, const dctx_step_t* steps, size_t n_steps,
+                          const uint8_t* src, size_t src_size, uint8_t* dec) {
+    for (size_t i = 0; i < n_steps; i++) {
+        memset(dec, 0, src_size);
+        const int64_t got = zxc_decompress_dctx(dctx, steps[i].arc, (size_t)steps[i].n, dec,
+                                                src_size, steps[i].opts);
+        if (got != steps[i].want || (got > 0 && memcmp(dec, src, src_size) != 0)) {
+            printf("  [FAIL] %s: got %lld, expected %lld\n", steps[i].label, (long long)got,
+                   (long long)steps[i].want);
+            return 0;
+        }
+        printf("  [PASS] %s\n", steps[i].label);
+    }
+    return 1;
+}
+
+int test_dict_dctx_roundtrip(void) {
+    printf("=== TEST: Dict - reusable dctx honours the dictionary ===\n");
+    const size_t dict_size = sizeof(k_dctx_dict) - 1;
+    const size_t src_size = 4096;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    gen_dict_friendly_data(src, src_size, k_dctx_dict, dict_size);
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
+    build_test_huf_lengths(k_dctx_dict, dict_size, huf);
+
+    const size_t cap = (size_t)zxc_compress_bound(src_size);
+    uint8_t* a3 = (uint8_t*)malloc(cap);
+    uint8_t* a7 = (uint8_t*)malloc(cap);
+    uint8_t* a0 = (uint8_t*)malloc(cap);
+    uint8_t* dec = (uint8_t*)malloc(src_size);
+    const int64_t n3 =
+        dctx_make_archive(3, 0, src, src_size, k_dctx_dict, dict_size, NULL, a3, cap);
+    const int64_t n7 = dctx_make_archive(7, 0, src, src_size, k_dctx_dict, dict_size, huf, a7, cap);
+    const int64_t n0 = dctx_make_archive(3, 0, src, src_size, NULL, 0, NULL, a0, cap);
+    zxc_dctx* dctx = zxc_create_dctx();
+    int ok = n3 > 0 && n7 > 0 && n0 > 0 && dctx != NULL;
+    if (!ok)
+        printf("  [FAIL] setup: %lld %lld %lld\n", (long long)n3, (long long)n7, (long long)n0);
+
+    uint8_t wrong[sizeof(k_dctx_dict)];
+    memcpy(wrong, k_dctx_dict, sizeof(wrong));
+    wrong[10] ^= 0x55;
+
+    const zxc_decompress_opts_t none = {.checksum_enabled = 1};
+    const zxc_decompress_opts_t right = {
+        .checksum_enabled = 1, .dict = k_dctx_dict, .dict_size = dict_size};
+    const zxc_decompress_opts_t right_huf = {
+        .checksum_enabled = 1, .dict = k_dctx_dict, .dict_size = dict_size, .dict_huf = huf};
+    const zxc_decompress_opts_t bad = {
+        .checksum_enabled = 1, .dict = wrong, .dict_size = dict_size};
+    const int64_t full = (int64_t)src_size;
+
+    const dctx_step_t steps[] = {
+        {"L3, no dict -> DICT_REQUIRED", a3, n3, &none, ZXC_ERROR_DICT_REQUIRED},
+        {"L3, wrong dict -> DICT_MISMATCH", a3, n3, &bad, ZXC_ERROR_DICT_MISMATCH},
+        {"L3, right dict", a3, n3, &right, full},
+        {"L7 + table, right dict (tree attach)", a7, n7, &right_huf, full},
+        {"L7 + table again (cached tree)", a7, n7, &right_huf, full},
+        {"L7 + table, table omitted -> DICT_MISMATCH", a7, n7, &right, ZXC_ERROR_DICT_MISMATCH},
+        {"plain archive, NULL opts (dict -> none re-init)", a0, n0, NULL, full},
+        {"L3, right dict again (none -> dict re-init)", a3, n3, &right, full},
+    };
+    if (ok) ok = dctx_run_steps(dctx, steps, sizeof(steps) / sizeof(steps[0]), src, src_size, dec);
+
+    zxc_free_dctx(dctx);
+    free(src);
+    free(a3);
+    free(a7);
+    free(a0);
+    free(dec);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+int test_dict_static_dctx_rejected(void) {
+    printf("=== TEST: Dict - static dctx rejects dictionaries explicitly ===\n");
+    const size_t dict_size = sizeof(k_dctx_dict) - 1;
+    const size_t block_size = ZXC_BLOCK_SIZE_MIN;
+    const size_t src_size = block_size;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    gen_dict_friendly_data(src, src_size, k_dctx_dict, dict_size);
+
+    const size_t cap = (size_t)zxc_compress_bound(src_size);
+    uint8_t* a3 = (uint8_t*)malloc(cap);
+    uint8_t* a0 = (uint8_t*)malloc(cap);
+    uint8_t* dec = (uint8_t*)malloc(src_size);
+    const int64_t n3 =
+        dctx_make_archive(3, block_size, src, src_size, k_dctx_dict, dict_size, NULL, a3, cap);
+    const int64_t n0 = dctx_make_archive(3, block_size, src, src_size, NULL, 0, NULL, a0, cap);
+
+    const size_t ws_sz = zxc_static_dctx_workspace_size(block_size);
+    void* ws = malloc(ws_sz);
+    zxc_dctx* dctx = ws ? zxc_init_static_dctx(ws, ws_sz, block_size) : NULL;
+    int ok = n3 > 0 && n0 > 0 && dctx != NULL;
+    if (!ok) printf("  [FAIL] setup: %lld %lld ws=%zu\n", (long long)n3, (long long)n0, ws_sz);
+
+    const zxc_decompress_opts_t right = {
+        .checksum_enabled = 1, .dict = k_dctx_dict, .dict_size = dict_size};
+    const dctx_step_t steps[] = {
+        {"dict archive, right dict -> DICT_UNSUPPORTED", a3, n3, &right,
+         ZXC_ERROR_DICT_UNSUPPORTED},
+        {"dict archive, no dict -> DICT_UNSUPPORTED", a3, n3, NULL, ZXC_ERROR_DICT_UNSUPPORTED},
+        {"plain archive, dict supplied -> DICT_UNSUPPORTED", a0, n0, &right,
+         ZXC_ERROR_DICT_UNSUPPORTED},
+        {"plain archive, no dict -> OK", a0, n0, NULL, (int64_t)src_size},
+    };
+    if (ok) ok = dctx_run_steps(dctx, steps, sizeof(steps) / sizeof(steps[0]), src, src_size, dec);
+
+    zxc_free_dctx(dctx); /* no-op for a static context */
+    free(ws);
+    free(src);
+    free(a3);
+    free(a0);
+    free(dec);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+int test_dict_cctx_roundtrip(void) {
+    printf("=== TEST: Dict - reusable cctx honours the dictionary ===\n");
+    const size_t dict_size = sizeof(k_dctx_dict) - 1;
+    const size_t src_size = 4096;
+    uint8_t* src = (uint8_t*)malloc(src_size);
+    gen_dict_friendly_data(src, src_size, k_dctx_dict, dict_size);
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
+    build_test_huf_lengths(k_dctx_dict, dict_size, huf);
+    const size_t cap = (size_t)zxc_compress_bound(src_size);
+    uint8_t* comp = (uint8_t*)malloc(cap);
+    uint8_t* dec = (uint8_t*)malloc(src_size);
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    int ok = 0;
+
+    const zxc_compress_opts_t c3 = {.level = 3, .dict = k_dctx_dict, .dict_size = dict_size};
+    const zxc_compress_opts_t c7 = {
+        .level = 7, .dict = k_dctx_dict, .dict_size = dict_size, .dict_huf = huf};
+    const zxc_decompress_opts_t d_plain = {.checksum_enabled = 0};
+    const zxc_decompress_opts_t d3 = {.dict = k_dctx_dict, .dict_size = dict_size};
+    const zxc_decompress_opts_t d7 = {.dict = k_dctx_dict, .dict_size = dict_size, .dict_huf = huf};
+    /* Each step: compress through the cctx, check the header id, then decode
+     * one-shot with the matching options and expect the source back. */
+    const struct {
+        const char* label;
+        const zxc_compress_opts_t* co;
+        uint32_t want_id;
+        const zxc_decompress_opts_t* dop;
+    } steps[] = {
+        {"L3 + dict", &c3, zxc_dict_id(k_dctx_dict, dict_size, NULL), &d3},
+        {"L7 + dict + table (tree attach)", &c7, zxc_dict_id(k_dctx_dict, dict_size, huf), &d7},
+        {"L7 + dict + table again (cached tree)", &c7, zxc_dict_id(k_dctx_dict, dict_size, huf),
+         &d7},
+        {"NULL opts: dictionary is not sticky", NULL, 0, &d_plain},
+        {"L3 + dict again (re-carve)", &c3, zxc_dict_id(k_dctx_dict, dict_size, NULL), &d3},
+    };
+    do {
+        if (!cctx) {
+            printf("  [FAIL] zxc_create_cctx\n");
+            break;
+        }
+        int bad = 0;
+        for (size_t i = 0; i < sizeof(steps) / sizeof(steps[0]) && !bad; i++) {
+            const int64_t cs = zxc_compress_cctx(cctx, src, src_size, comp, cap, steps[i].co);
+            const uint32_t id = cs > 0 ? zxc_get_dict_id(comp, (size_t)cs) : 0;
+            memset(dec, 0, src_size);
+            const int64_t r =
+                cs > 0 ? zxc_decompress(comp, (size_t)cs, dec, src_size, steps[i].dop) : -1;
+            if (cs <= 0 || id != steps[i].want_id || r != (int64_t)src_size ||
+                memcmp(dec, src, src_size) != 0) {
+                printf("  [FAIL] %s: cs=%lld id=%08X want=%08X r=%lld\n", steps[i].label,
+                       (long long)cs, id, steps[i].want_id, (long long)r);
+                bad = 1;
+                break;
+            }
+            printf("  [PASS] %s\n", steps[i].label);
+        }
+        if (bad) break;
+        /* Dictionary archives refuse a dictionary-less decode: the id is real. */
+        const int64_t cs = zxc_compress_cctx(cctx, src, src_size, comp, cap, &c3);
+        if (cs <= 0 ||
+            zxc_decompress(comp, (size_t)cs, dec, src_size, &d_plain) != ZXC_ERROR_DICT_REQUIRED) {
+            printf("  [FAIL] cctx dict archive decoded without a dictionary\n");
+            break;
+        }
+        printf("  [PASS] cctx dict archive -> DICT_REQUIRED without the dictionary\n");
+
+        /* Static cctx rejects dictionaries explicitly. */
+        const size_t ws_sz = zxc_static_cctx_workspace_size(ZXC_BLOCK_SIZE_MIN, 3);
+        void* ws = malloc(ws_sz);
+        const zxc_compress_opts_t so = {.level = 3, .block_size = ZXC_BLOCK_SIZE_MIN};
+        zxc_cctx* sc = ws ? zxc_init_static_cctx(ws, ws_sz, &so) : NULL;
+        const zxc_compress_opts_t sdict = {.level = 3,
+                                           .block_size = ZXC_BLOCK_SIZE_MIN,
+                                           .dict = k_dctx_dict,
+                                           .dict_size = dict_size};
+        const int64_t r1 = sc ? zxc_compress_cctx(sc, src, src_size, comp, cap, &sdict) : -1;
+        const int64_t r2 = sc ? zxc_compress_cctx(sc, src, src_size, comp, cap, NULL) : -1;
+        free(ws);
+        if (r1 != ZXC_ERROR_DICT_UNSUPPORTED || r2 <= 0) {
+            printf("  [FAIL] static cctx: dict -> %lld, plain -> %lld\n", (long long)r1,
+                   (long long)r2);
+            break;
+        }
+        printf("  [PASS] static cctx: dict -> DICT_UNSUPPORTED, plain -> OK\n");
+        ok = 1;
+    } while (0);
+
+    zxc_free_cctx(cctx);
+    free(src);
+    free(comp);
+    free(dec);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* A block_size switch can round [dict | block] back to the size a context was
+ * carved for without a prefix: the block API must re-carve, not copy into NULL. */
+int test_dict_block_cctx_dict_reinit(void) {
+    printf("=== TEST: Dict - block cctx re-carves when a dictionary arrives ===\n");
+    const size_t dict_size = sizeof(k_dctx_dict) - 1;
+    const size_t n = 3000;
+    uint8_t* src = (uint8_t*)malloc(n);
+    gen_dict_friendly_data(src, n, k_dctx_dict, dict_size);
+    const size_t cap = (size_t)zxc_compress_block_bound(n);
+    uint8_t* comp = (uint8_t*)malloc(cap);
+    uint8_t* out = (uint8_t*)malloc(n + ZXC_DECOMPRESS_TAIL_PAD);
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_dctx* dctx = zxc_create_dctx();
+    /* 8192 without a dictionary, then ceil(dict + 4096) == 8192 with one. */
+    const zxc_compress_opts_t plain = {.level = 3, .block_size = 2 * ZXC_BLOCK_SIZE_MIN};
+    const zxc_compress_opts_t with = {
+        .level = 3, .block_size = ZXC_BLOCK_SIZE_MIN, .dict = k_dctx_dict, .dict_size = dict_size};
+    const zxc_decompress_opts_t dd = {.dict = k_dctx_dict, .dict_size = dict_size};
+    int ok = 0;
+    do {
+        if (!cctx || !dctx) {
+            printf("  [FAIL] context allocation\n");
+            break;
+        }
+        const int64_t c1 = zxc_compress_block(cctx, src, n, comp, cap, &plain);
+        const int64_t c2 = zxc_compress_block(cctx, src, n, comp, cap, &with);
+        const int64_t r = c2 > 0 ? zxc_decompress_block(dctx, comp, (size_t)c2, out,
+                                                        n + ZXC_DECOMPRESS_TAIL_PAD, &dd)
+                                 : -1;
+        if (c1 <= 0 || c2 <= 0 || r != (int64_t)n || memcmp(out, src, n) != 0) {
+            printf("  [FAIL] %lld, %lld, roundtrip %lld\n", (long long)c1, (long long)c2,
+                   (long long)r);
+            break;
+        }
+        printf("  [PASS] no-dict at 8K then dict at 4K: %lld -> %lld bytes\n", (long long)c1,
+               (long long)c2);
+        ok = 1;
+    } while (0);
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    free(src);
+    free(comp);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* A failed table attach must not leave the context believing it still holds
+ * the previous table: the next call with that table has to rebuild its tree. */
+int test_dict_ctx_table_cache_recovers(void) {
+    printf("=== TEST: Dict - context table cache recovers after a bad table ===\n");
+    enum { NS = 6, SCAP = 16384, HCAP = 16384 };
+    uint8_t* bufs[NS];
+    const void* samples[NS];
+    size_t sizes[NS];
+    for (int i = 0; i < NS; i++) {
+        bufs[i] = (uint8_t*)malloc(SCAP);
+        sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x4000U + (uint32_t)i);
+        samples[i] = bufs[i];
+    }
+    uint8_t* heldout = (uint8_t*)malloc(HCAP);
+    const size_t hsz = gen_structured_sample(heldout, HCAP, 0xBADCU);
+    uint8_t dict_buf[8192];
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
+    uint8_t bad[ZXC_HUF_TABLE_SIZE];
+    memset(bad, 0x11, sizeof(bad)); /* every code one bit long: over-subscribed */
+    const size_t cap = (size_t)zxc_compress_bound(hsz);
+    uint8_t* c1 = (uint8_t*)malloc(cap);
+    uint8_t* c3 = (uint8_t*)malloc(cap);
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    int ok = 0;
+    do {
+        const int64_t dsz = zxc_train_dict(samples, sizes, NS, dict_buf, sizeof(dict_buf));
+        if (dsz <= 0 || !cctx ||
+            zxc_train_dict_huf(samples, sizes, NS, dict_buf, (size_t)dsz, huf) != ZXC_OK) {
+            printf("  [FAIL] setup\n");
+            break;
+        }
+        const zxc_compress_opts_t good = {.level = 6,
+                                          .block_size = 4096,
+                                          .dict = dict_buf,
+                                          .dict_size = (size_t)dsz,
+                                          .dict_huf = huf};
+        const zxc_compress_opts_t broken = {.level = 6,
+                                            .block_size = 4096,
+                                            .dict = dict_buf,
+                                            .dict_size = (size_t)dsz,
+                                            .dict_huf = bad};
+        const int64_t n1 = zxc_compress_cctx(cctx, heldout, hsz, c1, cap, &good);
+        const int64_t n2 = zxc_compress_cctx(cctx, heldout, hsz, c3, cap, &broken);
+        const int64_t n3 = zxc_compress_cctx(cctx, heldout, hsz, c3, cap, &good);
+        if (n1 <= 0 || n2 != ZXC_ERROR_CORRUPT_DATA || n3 != n1 ||
+            memcmp(c1, c3, (size_t)n1) != 0) {
+            printf("  [FAIL] %lld, %lld, %lld (archives %s)\n", (long long)n1, (long long)n2,
+                   (long long)n3, n3 == n1 && memcmp(c1, c3, (size_t)n1) == 0 ? "equal" : "differ");
+            break;
+        }
+        printf("  [PASS] bad table -> CORRUPT_DATA, then the good table yields the same archive\n");
+        ok = 1;
+    } while (0);
+    zxc_free_cctx(cctx);
+    free(c1);
+    free(c3);
+    free(heldout);
+    for (int i = 0; i < NS; i++) free(bufs[i]);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* A table only accompanies a dictionary: with dict_size == 0 a reused context
+ * must drop a previously attached table instead of emitting enc_lit=3 into a
+ * dictionary-less archive. A table trained against a tiny dictionary codes raw
+ * literals well, so the shared table wins on a short block either way. */
+int test_dict_ctx_table_without_dict(void) {
+    printf("=== TEST: Dict - context drops the table when the dictionary is absent ===\n");
+    enum { NS = 6, SCAP = 16384, PSZ = 3000 };
+    uint8_t* bufs[NS];
+    const void* samples[NS];
+    size_t sizes[NS];
+    for (int i = 0; i < NS; i++) {
+        bufs[i] = (uint8_t*)malloc(SCAP);
+        sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x5000U + (uint32_t)i);
+        samples[i] = bufs[i];
+    }
+    uint8_t dict_buf[64];
+    memset(dict_buf, 'x', sizeof(dict_buf));
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
+    const size_t cap = (size_t)zxc_compress_bound(PSZ);
+    uint8_t* comp = (uint8_t*)malloc(cap);
+    uint8_t* ref = (uint8_t*)malloc(cap);
+    uint8_t* out = (uint8_t*)malloc(PSZ + 64);
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    int ok = 0;
+    do {
+        if (!cctx || sizes[0] < PSZ ||
+            zxc_train_dict_huf(samples, sizes, NS, dict_buf, sizeof(dict_buf), huf) != ZXC_OK) {
+            printf("  [FAIL] setup\n");
+            break;
+        }
+        /* Same carved chunk ([dict | 4096] rounded up) so the context, table
+         * state included, is reused without a dictionary. */
+        const size_t carved = zxc_block_size_ceil(sizeof(dict_buf) + 4096);
+        const zxc_compress_opts_t with = {.level = 6,
+                                          .block_size = 4096,
+                                          .dict = dict_buf,
+                                          .dict_size = sizeof(dict_buf),
+                                          .dict_huf = huf};
+        const zxc_compress_opts_t none = {
+            .level = 6, .block_size = carved, .dict = dict_buf, .dict_size = 0, .dict_huf = huf};
+        const int64_t n1 = zxc_compress_cctx(cctx, bufs[0], PSZ, comp, cap, &with);
+        if (n1 <= 0 || comp[ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + 8] != 3) {
+            printf("  [FAIL] the shared table was not selected with the dictionary (%lld)\n",
+                   (long long)n1);
+            break;
+        }
+        const int64_t n = zxc_compress_cctx(cctx, bufs[0], PSZ, comp, cap, &none);
+        const int64_t r = zxc_compress(bufs[0], PSZ, ref, cap, &none);
+        if (n <= 0 || r != n || memcmp(comp, ref, (size_t)n) != 0 ||
+            zxc_get_dict_id(comp, (size_t)n) != 0 ||
+            zxc_decompress(comp, (size_t)n, out, PSZ + 64, NULL) != (int64_t)PSZ ||
+            memcmp(out, bufs[0], PSZ) != 0) {
+            printf("  [FAIL] cctx %lld vs one-shot %lld, enc_lit=%u, dict_id %08X\n", (long long)n,
+                   (long long)r,
+                   n > 0 ? (unsigned)comp[ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + 8] : 0U,
+                   n > 0 ? zxc_get_dict_id(comp, (size_t)n) : 0U);
+            break;
+        }
+        printf("  [PASS] dict_size 0 after a dict call: plain archive, identical to one-shot\n");
+        ok = 1;
+    } while (0);
+    zxc_free_cctx(cctx);
+    free(comp);
+    free(ref);
+    free(out);
+    for (int i = 0; i < NS; i++) free(bufs[i]);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* Every dictionary entry point rejects an oversized dictionary before touching it. */
+int test_dict_oversized_rejected_everywhere(void) {
+    printf("=== TEST: Dict - oversized dictionary rejected on every entry point ===\n");
+    uint8_t src[256], comp[1024];
+    for (size_t i = 0; i < sizeof(src); i++) src[i] = (uint8_t)i;
+    const zxc_compress_opts_t plain = {.level = 3};
+    const int64_t cs = zxc_compress(src, sizeof(src), comp, sizeof(comp), &plain);
+    const size_t too_big = (size_t)ZXC_DICT_SIZE_MAX + 1;
+    const zxc_compress_opts_t co = {.level = 3, .dict = src, .dict_size = too_big};
+    const zxc_decompress_opts_t dop = {.dict = src, .dict_size = too_big};
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_dctx* dctx = zxc_create_dctx();
+    int ok = 0;
+    if (cs > 0 && cctx && dctx) {
+        uint8_t out[512];
+        const int64_t e[] = {
+            zxc_compress(src, sizeof(src), comp, sizeof(comp), &co),
+            zxc_compress_cctx(cctx, src, sizeof(src), comp, sizeof(comp), &co),
+            zxc_compress_block(cctx, src, sizeof(src), comp, sizeof(comp), &co),
+            zxc_decompress(comp, (size_t)cs, out, sizeof(out), &dop),
+            zxc_decompress_dctx(dctx, comp, (size_t)cs, out, sizeof(out), &dop),
+            zxc_decompress_block(dctx, comp + ZXC_FILE_HEADER_SIZE,
+                                 (size_t)cs - ZXC_FILE_HEADER_SIZE, out, sizeof(out), &dop),
+        };
+        ok = 1;
+        for (size_t i = 0; i < sizeof(e) / sizeof(e[0]); i++) {
+            if (e[i] != ZXC_ERROR_DICT_TOO_LARGE) {
+                printf("  [FAIL] entry %zu: %lld\n", i, (long long)e[i]);
+                ok = 0;
+            }
+        }
+    } else {
+        printf("  [FAIL] setup\n");
+    }
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    if (ok) printf("  [PASS] six entry points -> DICT_TOO_LARGE\nPASS\n\n");
+    return ok;
+}

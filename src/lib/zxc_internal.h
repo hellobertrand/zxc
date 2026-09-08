@@ -818,7 +818,8 @@ static inline int zxc_level_clamp(const int level) {
  *  and decompression option structs carry these fields without sharing a type. */
 #define ZXC_OPTS_DICT_SIZE(o) (((o) && (o)->dict) ? (o)->dict_size : (size_t)0)
 /** @brief Shared literal Huffman table, gated on @c dict the same way. */
-#define ZXC_OPTS_DICT_HUF(o) (((o) && (o)->dict) ? (const uint8_t*)(o)->dict_huf : NULL)
+#define ZXC_OPTS_DICT_HUF(o) \
+    (((o) && (o)->dict && (o)->dict_size > 0) ? (const uint8_t*)(o)->dict_huf : NULL)
 /** @brief Compression level, 0 meaning the default, clamped to the highest level
  *         the encoder implements. */
 #define ZXC_OPTS_LEVEL(o, dflt) zxc_level_clamp(((o) && (o)->level > 0) ? (o)->level : (dflt))

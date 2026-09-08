@@ -107,6 +107,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_pstream_decode_seekable_archive),
     TEST_CASE(test_pstream_compress_after_end_rejected),
     TEST_CASE(test_pstream_compress_drain_block_resume),
+    TEST_CASE(test_pstream_dict_archive_rejected),
 
     /* --- Format (on-disk) --- */
     TEST_CASE(test_huffman_codec),
@@ -141,6 +142,13 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_dict_seekable_mt_roundtrip),
     TEST_CASE(test_dict_stream_dict_id_checks),
     TEST_CASE(test_dict_seekable_dict_id_checks),
+    TEST_CASE(test_dict_dctx_roundtrip),
+    TEST_CASE(test_dict_static_dctx_rejected),
+    TEST_CASE(test_dict_cctx_roundtrip),
+    TEST_CASE(test_dict_block_cctx_dict_reinit),
+    TEST_CASE(test_dict_ctx_table_cache_recovers),
+    TEST_CASE(test_dict_ctx_table_without_dict),
+    TEST_CASE(test_dict_oversized_rejected_everywhere),
     TEST_CASE(test_dict_huf_zxd_roundtrip),
     TEST_CASE(test_dict_huf_table_roundtrip),
     TEST_CASE(test_dict_huf_degenerate_corpus),

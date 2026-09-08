@@ -32,6 +32,8 @@ int test_error_name() {
         {ZXC_ERROR_DICT_REQUIRED, "ZXC_ERROR_DICT_REQUIRED"},
         {ZXC_ERROR_DICT_MISMATCH, "ZXC_ERROR_DICT_MISMATCH"},
         {ZXC_ERROR_DICT_TOO_LARGE, "ZXC_ERROR_DICT_TOO_LARGE"},
+        {ZXC_ERROR_BAD_LEVEL, "ZXC_ERROR_BAD_LEVEL"},
+        {ZXC_ERROR_DICT_UNSUPPORTED, "ZXC_ERROR_DICT_UNSUPPORTED"},
     };
     const int n = sizeof(cases) / sizeof(cases[0]);
 
