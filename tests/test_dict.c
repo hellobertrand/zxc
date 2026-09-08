@@ -2026,3 +2026,50 @@ int test_dict_block_huf_roundtrip(void) {
     if (ok) printf("PASS\n\n");
     return ok;
 }
+
+/* The block API must remember the caller's block size, not the [dict | block]
+ * chunk it carves: fed back as the next base, the chunk doubled on every call
+ * until the context could not be allocated. The stored size is observable in
+ * the Chunk Size Code that a later frame compression writes with NULL opts. */
+int test_dict_block_stored_block_size(void) {
+    printf("=== TEST: Dict - block API keeps the caller's block size ===\n");
+    enum { BLK = 4096, CALLS = 4 };
+    uint8_t src[BLK], dict_buf[1024], huf[ZXC_HUF_TABLE_SIZE], comp[BLK + 512];
+    for (size_t i = 0; i < sizeof(src); i++) src[i] = (uint8_t)('a' + (i * 7) % 26);
+    for (size_t i = 0; i < sizeof(dict_buf); i++) dict_buf[i] = (uint8_t)('a' + i % 26);
+    const void* samples[1] = {src};
+    const size_t sizes[1] = {sizeof(src)};
+    uint8_t expected_code = 0;
+    for (size_t bs = ZXC_BLOCK_SIZE_DEFAULT; bs > 1; bs >>= 1) expected_code++;
+    zxc_cctx* cctx = zxc_create_cctx(NULL); /* default block size */
+    int ok = 0;
+    do {
+        if (!cctx ||
+            zxc_train_dict_huf(samples, sizes, 1, dict_buf, sizeof(dict_buf), huf) != ZXC_OK) {
+            printf("  [FAIL] setup\n");
+            break;
+        }
+        const zxc_compress_opts_t co = {
+            .level = 6, .dict = dict_buf, .dict_size = sizeof(dict_buf), .dict_huf = huf};
+        int64_t r = 0;
+        for (int i = 0; i < CALLS && r >= 0; i++)
+            r = zxc_compress_block(cctx, src, sizeof(src), comp, sizeof(comp), &co);
+        if (r <= 0) {
+            printf("  [FAIL] compress_block: %lld\n", (long long)r);
+            break;
+        }
+        /* NULL opts: the frame path uses the stored block size for its header. */
+        const int64_t f = zxc_compress_cctx(cctx, src, sizeof(src), comp, sizeof(comp), NULL);
+        if (f <= 0 || comp[5] != expected_code) {
+            printf("  [FAIL] frame after %d block calls: %lld, chunk code %u (want %u)\n", CALLS,
+                   (long long)f, f > 0 ? comp[5] : 0U, expected_code);
+            break;
+        }
+        printf("  [PASS] %d dict block calls, then a frame still carries chunk code %u\n", CALLS,
+               expected_code);
+        ok = 1;
+    } while (0);
+    zxc_free_cctx(cctx);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}

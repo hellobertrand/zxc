@@ -1550,7 +1550,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
         return ZXC_ERROR_BAD_LEVEL;
 
     cctx->stored_level = level;
-    cctx->stored_block_size = effective_block_size;
+    cctx->stored_block_size = base_block_size;
     cctx->stored_checksum = checksum_enabled;
 
     // Re-init when block_size changed, a level raise needs the optimal-parser
