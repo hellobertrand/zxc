@@ -260,9 +260,9 @@ ZXC_EXPORT uint64_t zxc_compress_block_bound(size_t input_size);
  *
  * The decoder uses speculative (wild-copy) writes on its fast path, so it
  * needs a tail pad beyond the declared size: with this value a dictionary-free
- * block always decodes straight into @c dst; without it, through a bounce and a
- * copy when the tail is too tight. A dictionary block always bounces: the
- * decoder needs the dictionary and the payload contiguous.
+ * block decodes straight into @c dst on a heap context; without it, through a
+ * bounce and a copy. A dictionary block always bounces, needing the dictionary
+ * and the payload contiguous, and so does an over-sized static context.
  *
  * @param[in] uncompressed_size Original block size in bytes
  *                              (must be <= @ref ZXC_BLOCK_SIZE_MAX).
@@ -314,12 +314,12 @@ ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t sr
  * @param[in]     src          Compressed block.
  * @param[in]     src_size     Compressed size in bytes.
  * @param[out]    dst          Destination buffer.
- * @param[in]     dst_capacity Uncompressed size plus @ref ZXC_DECOMPRESS_TAIL_PAD
- *                             (zxc_decompress_block_bound()): a dictionary-free
- *                             block decodes straight into @p dst; without the
- *                             pad, possibly through a bounce, and always so with
- *                             a dictionary. At most @ref ZXC_BLOCK_SIZE_MAX +
- *                             @ref ZXC_DECOMPRESS_TAIL_PAD.
+ * @param[in]     dst_capacity At least the uncompressed size, at most
+ *                             @ref ZXC_BLOCK_SIZE_MAX +
+ *                             @ref ZXC_DECOMPRESS_TAIL_PAD. At
+ *                             zxc_decompress_block_bound() a dictionary-free
+ *                             block on a heap context decodes straight into
+ *                             @p dst, else possibly through a bounce.
  * @param[in]     opts         Decompression options, or NULL for defaults.
  *                             @c checksum_enabled and the dictionary fields are
  *                             used; a block carries no dictionary id, so pass
@@ -333,7 +333,8 @@ ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t sr
  *         per-block limit. Static context: the carved block is the effective
  *         capacity; a larger block is @ref ZXC_ERROR_BAD_BLOCK_SIZE while it
  *         fits the workspace margin and fails like a too-small destination
- *         beyond it. @p dst contents are unspecified on error.
+ *         beyond it. On error @p dst holds whatever the aborted decode wrote;
+ *         its previous contents do not survive.
  */
 ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t src_size, void* dst,
                                         size_t dst_capacity, const zxc_decompress_opts_t* opts);
@@ -369,7 +370,8 @@ ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t 
  * @return Decompressed size (> 0), or a negative @ref zxc_error_t;
  *         @ref ZXC_ERROR_BAD_BLOCK_SIZE if @p dst_capacity >
  *         @ref ZXC_BLOCK_SIZE_MAX. Static context: same bound and codes as
- *         zxc_decompress_block(), a larger @p dst_capacity accepted alike.
+ *         zxc_decompress_block(), a larger @p dst_capacity accepted alike. On
+ *         error @p dst holds whatever the aborted decode wrote.
  */
 ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, const size_t src_size,
                                              void* dst, const size_t dst_capacity,

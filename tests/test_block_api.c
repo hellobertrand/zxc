@@ -743,7 +743,7 @@ int test_block_api_tiny_capacity(void) {
 /* Direct decode and bounce must return the same bytes, literal-heavy blocks
  * sized just above a power of two included: there the carve and the decoder's
  * scratch are tightest. Small exact destinations cover the decoder's clamped
- * destination margins. */
+ * destination margins, and the last step drives the tight-tail fallback. */
 int test_block_api_direct_decode(void) {
     printf("=== TEST: Block API - direct decode and its fallback ===\n");
     /* straddling the powers of two and their tail-pad window */
@@ -791,7 +791,7 @@ int test_block_api_direct_decode(void) {
                         }
                         const size_t caps[] = {(size_t)zxc_decompress_block_bound(n), n, n + 1};
                         for (size_t k = 0; k < sizeof(caps) / sizeof(caps[0]); k++) {
-                            if (caps[k] > dbound_max) continue;
+                            /* n <= max, so every cap fits dbound_max */
                             memset(out, 0xA5, n);
                             const int64_t r = zxc_decompress_block(
                                 dctx, comp, (size_t)c, out, caps[k], with_dict ? &dopts : NULL);
@@ -817,6 +817,12 @@ int test_block_api_direct_decode(void) {
             }
         }
         if (failed) break;
+        const int expected_cells = 2 * (int)(sizeof(sizes) / sizeof(sizes[0])) *
+                                   (int)(sizeof(levels) / sizeof(levels[0])) * 2 * 4;
+        if (cells != expected_cells) {
+            printf("  [FAIL] %d decodes ran, expected %d\n", cells, expected_cells);
+            break;
+        }
         /* a destination that cannot hold the block is still refused */
         const zxc_compress_opts_t co = {.level = 3};
         const int64_t c = zxc_compress_block(cctx, lit, 100000, comp, cap, &co);
@@ -827,6 +833,43 @@ int test_block_api_direct_decode(void) {
         }
         printf("  [PASS] %d decodes across sizes, levels, dictionary and both decoders\n", cells);
         printf("  [PASS] a destination too short for the block is refused\n");
+
+        /* Tight-tail fallback: skewed letters leave a long escaped length the
+         * direct decode cannot fit in an exactly-sized dst, so the bounce redoes
+         * it; both paths must yield the same bytes. */
+        static const char skewed[] = "aaaaaaaabbbbccdeffgghijklmnop";
+        static const struct {
+            uint64_t seed;
+            size_t n;
+            int level;
+        } tail_cases[] = {{2, 6209, 5}, {2, 6209, 6}, {3, 4097, 5}, {3, 8193, 7}, {4, 5000, 5}};
+        uint8_t* padded = (uint8_t*)malloc(dbound_max);
+        int tail_failed = !padded;
+        for (size_t t = 0; t < sizeof(tail_cases) / sizeof(tail_cases[0]) && !tail_failed; t++) {
+            const size_t n = tail_cases[t].n;
+            zxc_test_srand(tail_cases[t].seed);
+            for (size_t i = 0; i < n; i++)
+                lit[i] = (uint8_t)skewed[zxc_test_rand() % (sizeof(skewed) - 1)];
+            const zxc_compress_opts_t tc = {.level = tail_cases[t].level};
+            const int64_t c2 = zxc_compress_block(cctx, lit, n, comp, cap, &tc);
+            const int64_t exact =
+                c2 > 0 ? zxc_decompress_block(dctx, comp, (size_t)c2, out, n, NULL) : c2;
+            const int64_t direct =
+                c2 > 0 ? zxc_decompress_block(dctx, comp, (size_t)c2, padded,
+                                              (size_t)zxc_decompress_block_bound(n), NULL)
+                       : c2;
+            if (exact != (int64_t)n || direct != (int64_t)n || memcmp(out, lit, n) != 0 ||
+                memcmp(padded, lit, n) != 0) {
+                printf("  [FAIL] tight tail seed %llu n=%zu L%d: exact %lld, direct %lld\n",
+                       (unsigned long long)tail_cases[t].seed, n, tail_cases[t].level,
+                       (long long)exact, (long long)direct);
+                tail_failed = 1;
+            }
+        }
+        free(padded);
+        if (tail_failed) break;
+        printf("  [PASS] %zu tight-tail blocks: fallback and direct decode agree\n",
+               sizeof(tail_cases) / sizeof(tail_cases[0]));
         ok = 1;
     } while (0);
     zxc_free_cctx(cctx);

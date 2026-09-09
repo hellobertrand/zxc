@@ -1600,6 +1600,23 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
 }
 
 /**
+ * @brief Block decode through work_buf, for a @p dst too tight for the
+ *        speculative writes, then copied out. @p carved bounds the decoded size
+ *        on a static context; 0 leaves it unbounded.
+ */
+static int64_t zxc_decode_bounce(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                 const size_t src_size, uint8_t* RESTRICT dst,
+                                 const size_t dst_capacity, const size_t carved) {
+    const int res =
+        zxc_decompress_chunk_wrapper(ctx, src, src_size, ctx->work_buf, ctx->work_buf_cap);
+    if (UNLIKELY(res < 0)) return res;
+    if (UNLIKELY(carved != 0 && (size_t)res > carved)) return ZXC_ERROR_BAD_BLOCK_SIZE;
+    if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
+    ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
+    return res;
+}
+
+/**
  * @brief Block decode on a static dctx: the carved block is the effective capacity.
  *
  * Fast decoder: carved block plus wild-copy margin; strict: at most that. A
@@ -1625,12 +1642,7 @@ static int64_t zxc_static_decompress_block(zxc_dctx* RESTRICT dctx, const uint8_
         res = zxc_decompress_chunk_wrapper(ctx, src, src_size, dst, work_sz);
     } else {
         // Bounce through work_buf when dst cannot absorb wild copies.
-        res = zxc_decompress_chunk_wrapper(ctx, src, src_size, ctx->work_buf, ctx->work_buf_cap);
-        if (UNLIKELY(res > 0 && (size_t)res > carved)) return ZXC_ERROR_BAD_BLOCK_SIZE;
-        if (LIKELY(res > 0)) {
-            if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
-            ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
-        }
+        return zxc_decode_bounce(ctx, src, src_size, dst, dst_capacity, carved);
     }
     if (UNLIKELY(res > 0 && (size_t)res > carved)) return ZXC_ERROR_BAD_BLOCK_SIZE;
     return res;
@@ -1664,25 +1676,6 @@ static int zxc_dctx_prepare(zxc_dctx* RESTRICT dctx, const size_t block_size,
 }
 
 /**
- * @brief Block decode through work_buf when @p dst is too tight for the
- *        speculative writes; the carve already matches @p dst_capacity.
- */
-static int64_t zxc_dctx_decode_bounce(zxc_dctx* RESTRICT dctx, const uint8_t* RESTRICT src,
-                                      const size_t src_size, uint8_t* RESTRICT dst,
-                                      const size_t dst_capacity, const int checksum_enabled) {
-    const int rc = zxc_dctx_prepare(dctx, zxc_block_size_ceil(dst_capacity), 0, checksum_enabled);
-    if (UNLIKELY(rc != ZXC_OK)) return rc;  // LCOV_EXCL_LINE
-    zxc_cctx_t* const ctx = &dctx->inner;
-    ctx->dict_size = 0;
-    const int res =
-        zxc_decompress_chunk_wrapper(ctx, src, src_size, ctx->work_buf, ctx->work_buf_cap);
-    if (UNLIKELY(res < 0)) return res;
-    if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
-    ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
-    return res;
-}
-
-/**
  * @brief Decompresses a single block (no file framing), reusing @p dctx.
  *
  * Public API; full contract in @c zxc_buffer.h. Decodes one format-conformant
@@ -1690,7 +1683,7 @@ static int64_t zxc_dctx_decode_bounce(zxc_dctx* RESTRICT dctx, const uint8_t* RE
  * @p dst_capacity is bounded by @c ZXC_BLOCK_SIZE_MAX + @c ZXC_DECOMPRESS_TAIL_PAD.
  * With a dictionary in @p opts the decode runs through the [dict | decode]
  * bounce buffer; otherwise it goes straight into @p dst, and is redone through
- * @c work_buf if a tight tail aborted it.
+ * @c work_buf if a tight tail aborted it, leaving @p dst partly written.
  */
 int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
                              void* RESTRICT dst, const size_t dst_capacity,
@@ -1742,9 +1735,10 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
         res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
                                            dst_capacity);
         // A tight tail aborts a block that fits: work_buf has the margin.
+        // Corrupt blocks report OVERFLOW too, and pay the second decode.
         if (UNLIKELY(res == ZXC_ERROR_OVERFLOW))
-            return zxc_dctx_decode_bounce(dctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
-                                          dst_capacity, checksum_enabled);
+            return zxc_decode_bounce(ctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
+                                     dst_capacity, 0);
     }
     if (UNLIKELY(res < 0)) return res;
     return (int64_t)res;
