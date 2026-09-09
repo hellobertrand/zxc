@@ -1689,8 +1689,8 @@ static int64_t zxc_dctx_decode_bounce(zxc_dctx* RESTRICT dctx, const uint8_t* RE
  * block; the decoded payload cannot exceed @c ZXC_BLOCK_SIZE_MAX, so
  * @p dst_capacity is bounded by @c ZXC_BLOCK_SIZE_MAX + @c ZXC_DECOMPRESS_TAIL_PAD.
  * With a dictionary in @p opts the decode runs through the [dict | decode]
- * bounce buffer; otherwise it goes straight into @p dst when the tail padding
- * fits, or via @c work_buf when it doesn't.
+ * bounce buffer; otherwise it goes straight into @p dst, and is redone through
+ * @c work_buf if a tight tail aborted it.
  */
 int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
                              void* RESTRICT dst, const size_t dst_capacity,
