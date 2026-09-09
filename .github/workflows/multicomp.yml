@@ -375,7 +375,8 @@ jobs:
           fi
 
           set +e
-          out=$(CFLAGS="-I$PWD/sysinc" meson setup build-guard -Duse_system_rapidhash=true 2>&1)
+          out=$(meson setup build-guard -Duse_system_rapidhash=true \
+                  -Dc_args=-I"$PWD/sysinc" 2>&1)
           rc=$?; set -e
           if [ "$rc" -ne 0 ]; then
             echo "::error::setup against a system rapidhash should have succeeded"

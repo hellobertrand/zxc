@@ -65,7 +65,7 @@ inc_private   = include_directories('src/lib')
 # Rapidhash: system or vendored, mirroring ZXC_USE_SYSTEM_RAPIDHASH in CMake.
 # Resolved at setup time so a missing header names the option to set.
 if get_option('use_system_rapidhash')
-  if not cc.has_header('rapidhash.h')
+  if not cc.has_header('rapidhash.h', args : get_option('c_args'))
     error('use_system_rapidhash is enabled but rapidhash.h was not found. ' +
           'Install rapidhash or add its include directory to c_args.')
   endif
