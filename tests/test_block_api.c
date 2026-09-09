@@ -739,3 +739,146 @@ int test_block_api_tiny_capacity(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+/* Direct decode and bounce must return the same bytes, literal-heavy blocks
+ * sized just above a power of two included: there the carve and the decoder's
+ * scratch are tightest. Small exact destinations cover the decoder's clamped
+ * destination margins, and the last step drives the tight-tail fallback. */
+int test_block_api_direct_decode(void) {
+    printf("=== TEST: Block API - direct decode and its fallback ===\n");
+    /* straddling the powers of two and their tail-pad window */
+    static const size_t sizes[] = {
+        100, 4096, 4097, 5000, 6208, 6209, 10304, 100000, ZXC_BLOCK_SIZE_MAX};
+    static const int levels[] = {1, 3, 7}; /* 1 emits GHI, 3 and 7 emit GLO */
+    const size_t max = ZXC_BLOCK_SIZE_MAX;
+    const size_t cap = (size_t)zxc_compress_block_bound(max);
+    const size_t dbound_max = (size_t)zxc_decompress_block_bound(max);
+    uint8_t* lz = (uint8_t*)malloc(max);  /* matches: few literals */
+    uint8_t* lit = (uint8_t*)malloc(max); /* letters: nearly all literals */
+    uint8_t* dict = (uint8_t*)malloc(4096);
+    uint8_t* comp = (uint8_t*)malloc(cap);
+    uint8_t* out = (uint8_t*)malloc(dbound_max);
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_dctx* dctx = zxc_create_dctx();
+    int ok = 0;
+    do {
+        if (!lz || !lit || !dict || !comp || !out || !cctx || !dctx) {
+            printf("  [FAIL] setup\n");
+            break;
+        }
+        zxc_test_srand(0xD1EC7u);
+        gen_lz_data(lz, max);
+        for (size_t i = 0; i < max; i++) lit[i] = (uint8_t)('a' + zxc_test_rand() % 26);
+        for (size_t i = 0; i < 4096; i++) dict[i] = (uint8_t)('a' + zxc_test_rand() % 26);
+        const zxc_decompress_opts_t dopts = {.dict = dict, .dict_size = 4096};
+        int failed = 0, cells = 0;
+        for (size_t g = 0; g < 2; g++) {
+            const uint8_t* src = g ? lit : lz;
+            for (size_t s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++) {
+                const size_t n = sizes[s];
+                for (size_t l = 0; l < sizeof(levels) / sizeof(levels[0]); l++) {
+                    /* the same block without and with a dictionary */
+                    for (int with_dict = 0; with_dict < 2; with_dict++) {
+                        const zxc_compress_opts_t co = {.level = levels[l],
+                                                        .dict = with_dict ? dict : NULL,
+                                                        .dict_size = with_dict ? 4096 : 0};
+                        const int64_t c = zxc_compress_block(cctx, src, n, comp, cap, &co);
+                        if (c <= 0) {
+                            printf("  [FAIL] compress g%zu n=%zu L%d dict=%d: %lld\n", g, n,
+                                   levels[l], with_dict, (long long)c);
+                            failed++;
+                            continue;
+                        }
+                        const size_t caps[] = {(size_t)zxc_decompress_block_bound(n), n, n + 1};
+                        for (size_t k = 0; k < sizeof(caps) / sizeof(caps[0]); k++) {
+                            /* n <= max, so every cap fits dbound_max */
+                            memset(out, 0xA5, n);
+                            const int64_t r = zxc_decompress_block(
+                                dctx, comp, (size_t)c, out, caps[k], with_dict ? &dopts : NULL);
+                            cells++;
+                            if (r != (int64_t)n || memcmp(out, src, n) != 0) {
+                                printf("  [FAIL] g%zu n=%zu L%d dict=%d dst=%zu: %lld\n", g, n,
+                                       levels[l], with_dict, caps[k], (long long)r);
+                                failed++;
+                            }
+                        }
+                        /* strict decoder at the exact size, same contract */
+                        memset(out, 0xA5, n);
+                        const int64_t rs = zxc_decompress_block_safe(dctx, comp, (size_t)c, out, n,
+                                                                     with_dict ? &dopts : NULL);
+                        cells++;
+                        if (rs != (int64_t)n || memcmp(out, src, n) != 0) {
+                            printf("  [FAIL] strict g%zu n=%zu L%d dict=%d: %lld\n", g, n,
+                                   levels[l], with_dict, (long long)rs);
+                            failed++;
+                        }
+                    }
+                }
+            }
+        }
+        if (failed) break;
+        const int expected_cells = 2 * (int)(sizeof(sizes) / sizeof(sizes[0])) *
+                                   (int)(sizeof(levels) / sizeof(levels[0])) * 2 * 4;
+        if (cells != expected_cells) {
+            printf("  [FAIL] %d decodes ran, expected %d\n", cells, expected_cells);
+            break;
+        }
+        /* a destination that cannot hold the block is still refused */
+        const zxc_compress_opts_t co = {.level = 3};
+        const int64_t c = zxc_compress_block(cctx, lit, 100000, comp, cap, &co);
+        const int64_t r = c > 0 ? zxc_decompress_block(dctx, comp, (size_t)c, out, 99000, NULL) : 0;
+        if (c <= 0 || r != ZXC_ERROR_DST_TOO_SMALL) {
+            printf("  [FAIL] short destination: %lld (want DST_TOO_SMALL)\n", (long long)r);
+            break;
+        }
+        printf("  [PASS] %d decodes across sizes, levels, dictionary and both decoders\n", cells);
+        printf("  [PASS] a destination too short for the block is refused\n");
+
+        /* Tight-tail fallback: skewed letters leave a long escaped length the
+         * direct decode cannot fit in an exactly-sized dst, so the bounce redoes
+         * it; both paths must yield the same bytes. */
+        static const char skewed[] = "aaaaaaaabbbbccdeffgghijklmnop";
+        static const struct {
+            uint64_t seed;
+            size_t n;
+            int level;
+        } tail_cases[] = {{2, 6209, 5}, {2, 6209, 6}, {3, 4097, 5}, {3, 8193, 7}, {4, 5000, 5}};
+        uint8_t* padded = (uint8_t*)malloc(dbound_max);
+        int tail_failed = !padded;
+        for (size_t t = 0; t < sizeof(tail_cases) / sizeof(tail_cases[0]) && !tail_failed; t++) {
+            const size_t n = tail_cases[t].n;
+            zxc_test_srand(tail_cases[t].seed);
+            for (size_t i = 0; i < n; i++)
+                lit[i] = (uint8_t)skewed[zxc_test_rand() % (sizeof(skewed) - 1)];
+            const zxc_compress_opts_t tc = {.level = tail_cases[t].level};
+            const int64_t c2 = zxc_compress_block(cctx, lit, n, comp, cap, &tc);
+            const int64_t exact =
+                c2 > 0 ? zxc_decompress_block(dctx, comp, (size_t)c2, out, n, NULL) : c2;
+            const int64_t direct =
+                c2 > 0 ? zxc_decompress_block(dctx, comp, (size_t)c2, padded,
+                                              (size_t)zxc_decompress_block_bound(n), NULL)
+                       : c2;
+            if (exact != (int64_t)n || direct != (int64_t)n || memcmp(out, lit, n) != 0 ||
+                memcmp(padded, lit, n) != 0) {
+                printf("  [FAIL] tight tail seed %llu n=%zu L%d: exact %lld, direct %lld\n",
+                       (unsigned long long)tail_cases[t].seed, n, tail_cases[t].level,
+                       (long long)exact, (long long)direct);
+                tail_failed = 1;
+            }
+        }
+        free(padded);
+        if (tail_failed) break;
+        printf("  [PASS] %zu tight-tail blocks: fallback and direct decode agree\n",
+               sizeof(tail_cases) / sizeof(tail_cases[0]));
+        ok = 1;
+    } while (0);
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    free(lz);
+    free(lit);
+    free(dict);
+    free(comp);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}

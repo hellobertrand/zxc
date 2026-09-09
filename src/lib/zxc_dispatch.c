@@ -1600,6 +1600,23 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
 }
 
 /**
+ * @brief Block decode through work_buf, for a @p dst too tight for the
+ *        speculative writes, then copied out. @p carved bounds the decoded size
+ *        on a static context; 0 leaves it unbounded.
+ */
+static int64_t zxc_decode_bounce(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                 const size_t src_size, uint8_t* RESTRICT dst,
+                                 const size_t dst_capacity, const size_t carved) {
+    const int res =
+        zxc_decompress_chunk_wrapper(ctx, src, src_size, ctx->work_buf, ctx->work_buf_cap);
+    if (UNLIKELY(res < 0)) return res;
+    if (UNLIKELY(carved != 0 && (size_t)res > carved)) return ZXC_ERROR_BAD_BLOCK_SIZE;
+    if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
+    ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
+    return res;
+}
+
+/**
  * @brief Block decode on a static dctx: the carved block is the effective capacity.
  *
  * Fast decoder: carved block plus wild-copy margin; strict: at most that. A
@@ -1625,15 +1642,37 @@ static int64_t zxc_static_decompress_block(zxc_dctx* RESTRICT dctx, const uint8_
         res = zxc_decompress_chunk_wrapper(ctx, src, src_size, dst, work_sz);
     } else {
         // Bounce through work_buf when dst cannot absorb wild copies.
-        res = zxc_decompress_chunk_wrapper(ctx, src, src_size, ctx->work_buf, ctx->work_buf_cap);
-        if (UNLIKELY(res > 0 && (size_t)res > carved)) return ZXC_ERROR_BAD_BLOCK_SIZE;
-        if (LIKELY(res > 0)) {
-            if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
-            ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
-        }
+        return zxc_decode_bounce(ctx, src, src_size, dst, dst_capacity, carved);
     }
     if (UNLIKELY(res > 0 && (size_t)res > carved)) return ZXC_ERROR_BAD_BLOCK_SIZE;
     return res;
+}
+
+/**
+ * @brief Recarves a heap dctx when @p block_size or @p dict_size changed;
+ *        otherwise only refreshes the checksum flag.
+ */
+static int zxc_dctx_prepare(zxc_dctx* RESTRICT dctx, const size_t block_size,
+                            const size_t dict_size, const int checksum_enabled) {
+    if (LIKELY(dctx->initialized && dctx->last_block_size == block_size &&
+               dctx->last_dict_size == dict_size)) {
+        dctx->inner.checksum_enabled = checksum_enabled;
+        return ZXC_OK;
+    }
+    if (dctx->initialized) {
+        zxc_cctx_free(&dctx->inner);
+        dctx->initialized = 0;
+    }
+    // LCOV_EXCL_START
+    if (UNLIKELY(zxc_cctx_init(&dctx->inner, block_size, 0, 0, checksum_enabled, dict_size) !=
+                 ZXC_OK))
+        return ZXC_ERROR_MEMORY;
+    // LCOV_EXCL_STOP
+    dctx->last_block_size = block_size;
+    dctx->last_dict_size = dict_size;
+    dctx->initialized = 1;
+    dctx->huf_cached = 0;
+    return ZXC_OK;
 }
 
 /**
@@ -1643,8 +1682,8 @@ static int64_t zxc_static_decompress_block(zxc_dctx* RESTRICT dctx, const uint8_
  * block; the decoded payload cannot exceed @c ZXC_BLOCK_SIZE_MAX, so
  * @p dst_capacity is bounded by @c ZXC_BLOCK_SIZE_MAX + @c ZXC_DECOMPRESS_TAIL_PAD.
  * With a dictionary in @p opts the decode runs through the [dict | decode]
- * bounce buffer; otherwise it goes straight into @p dst when the tail padding
- * fits, or via @c work_buf when it doesn't.
+ * bounce buffer; otherwise it goes straight into @p dst, and is redone through
+ * @c work_buf if a tight tail aborted it, leaving @p dst partly written.
  */
 int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
                              void* RESTRICT dst, const size_t dst_capacity,
@@ -1667,26 +1706,10 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
         return zxc_static_decompress_block(dctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
                                            dst_capacity, dict_size, checksum_enabled, 0);
 
-    // Derive the block_size from dst_capacity (callers know the original size)
+    // Carved for dst_capacity: the context holds any block dst can hold.
     const size_t block_size = zxc_block_size_ceil(dst_capacity);
-    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != block_size ||
-                 dctx->last_dict_size != dict_size)) {
-        if (dctx->initialized) {
-            zxc_cctx_free(&dctx->inner);
-            dctx->initialized = 0;
-        }
-        // LCOV_EXCL_START
-        if (UNLIKELY(zxc_cctx_init(&dctx->inner, block_size, 0, 0, checksum_enabled, dict_size) !=
-                     ZXC_OK))
-            return ZXC_ERROR_MEMORY;
-        // LCOV_EXCL_STOP
-        dctx->last_block_size = block_size;
-        dctx->last_dict_size = dict_size;
-        dctx->initialized = 1;
-        dctx->huf_cached = 0;
-    } else {
-        dctx->inner.checksum_enabled = checksum_enabled;
-    }
+    const int rc = zxc_dctx_prepare(dctx, block_size, dict_size, checksum_enabled);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;  // LCOV_EXCL_LINE
 
     zxc_cctx_t* const ctx = &dctx->inner;
     ctx->dict_size = dict_size;
@@ -1694,8 +1717,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
                                        ZXC_OPTS_DICT_HUF(opts)) != ZXC_OK))
         return ZXC_ERROR_CORRUPT_DATA;  // LCOV_EXCL_LINE
 
-    // work_buf was pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD inside
-    // the matching zxc_cctx_init call above.
+    // The [dict | decode] buffer carries block_size + ZXC_DECOMPRESS_TAIL_PAD.
     const size_t work_sz = block_size + ZXC_DECOMPRESS_TAIL_PAD;
 
     int res;
@@ -1709,17 +1731,14 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
             if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
             ZXC_MEMCPY(dst, dec_buf + dict_size, (size_t)res);
         }
-    } else if (LIKELY(dst_capacity >= work_sz)) {
+    } else {
         res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
                                            dst_capacity);
-    } else {
-        // Bounce through work_buf when output can't absorb wild copies.
-        res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, ctx->work_buf,
-                                           ctx->work_buf_cap);
-        if (LIKELY(res > 0)) {
-            if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
-            ZXC_MEMCPY(dst, ctx->work_buf, (size_t)res);
-        }
+        // A tight tail aborts a block that fits: work_buf has the margin.
+        // Corrupt blocks report OVERFLOW too, and pay the second decode.
+        if (UNLIKELY(res == ZXC_ERROR_OVERFLOW))
+            return zxc_decode_bounce(ctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
+                                     dst_capacity, 0);
     }
     if (UNLIKELY(res < 0)) return res;
     return (int64_t)res;
@@ -1760,24 +1779,8 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
 
     // GLO/GHI: use the strict-tail decoder (no bounce buffer required).
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
-    const size_t block_size = zxc_block_size_ceil(dst_capacity);
-    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != block_size ||
-                 dctx->last_dict_size != 0)) {
-        if (dctx->initialized) {
-            zxc_cctx_free(&dctx->inner);
-            dctx->initialized = 0;
-        }
-        // LCOV_EXCL_START
-        if (UNLIKELY(zxc_cctx_init(&dctx->inner, block_size, 0, 0, checksum_enabled, 0) != ZXC_OK))
-            return ZXC_ERROR_MEMORY;
-        // LCOV_EXCL_STOP
-        dctx->last_block_size = block_size;
-        dctx->last_dict_size = 0;
-        dctx->initialized = 1;
-        dctx->huf_cached = 0;
-    } else {
-        dctx->inner.checksum_enabled = checksum_enabled;
-    }
+    const int rc = zxc_dctx_prepare(dctx, zxc_block_size_ceil(dst_capacity), 0, checksum_enabled);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;  // LCOV_EXCL_LINE
     dctx->inner.dict_size = 0;
 
     const int res = zxc_decompress_chunk_wrapper_safe_public(&dctx->inner, (const uint8_t*)src,
