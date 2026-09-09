@@ -49,7 +49,7 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
 
     Napi::Buffer<uint8_t> src_buf = info[0].As<Napi::Buffer<uint8_t>>();
     size_t src_size = src_buf.Length();
-    
+
     static const uint8_t kEmptySrc = 0;
     const void* src = src_size > 0 ? static_cast<const void*>(src_buf.Data()) : &kEmptySrc;
 
@@ -170,7 +170,8 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
     Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, decompress_size);
 
     static uint8_t kEmptyDst = 0;
-    void* dst = decompress_size > 0 ? static_cast<void*>(dst_buf.Data()) : static_cast<void*>(&kEmptyDst);
+    void* dst =
+        decompress_size > 0 ? static_cast<void*>(dst_buf.Data()) : static_cast<void*>(&kEmptyDst);
 
     zxc_decompress_opts_t dopts = {0};
     dopts.checksum_enabled = checksum;
@@ -231,8 +232,7 @@ static Napi::Value TrainDict(const Napi::CallbackInfo& info) {
     Napi::Array arr = info[0].As<Napi::Array>();
     uint32_t n = arr.Length();
     if (n == 0) {
-        Napi::TypeError::New(env, "samples must be a non-empty array")
-            .ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "samples must be a non-empty array").ThrowAsJavaScriptException();
         return env.Undefined();
     }
 
@@ -337,8 +337,7 @@ static Napi::Value TrainDictHuf(const Napi::CallbackInfo& info) {
     Napi::Array arr = info[0].As<Napi::Array>();
     uint32_t n = arr.Length();
     if (n == 0) {
-        Napi::TypeError::New(env, "samples must be a non-empty array")
-            .ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "samples must be a non-empty array").ThrowAsJavaScriptException();
         return env.Undefined();
     }
 
@@ -358,8 +357,8 @@ static Napi::Value TrainDictHuf(const Napi::CallbackInfo& info) {
 
     Napi::Buffer<uint8_t> dict = info[1].As<Napi::Buffer<uint8_t>>();
     std::array<uint8_t, ZXC_HUF_TABLE_SIZE> huf;
-    int r = zxc_train_dict_huf(samples.data(), sizes.data(), n, dict.Data(), dict.Length(),
-                               huf.data());
+    int r =
+        zxc_train_dict_huf(samples.data(), sizes.data(), n, dict.Data(), dict.Length(), huf.data());
     if (r < 0) {
         return ThrowZxcError(env, r);
     }
@@ -376,8 +375,7 @@ static Napi::Value DictHuf(const Napi::CallbackInfo& info) {
     Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
     const void* huf = zxc_dict_huf(b.Data(), b.Length());
     if (!huf) return env.Null();
-    return Napi::Buffer<uint8_t>::Copy(env, static_cast<const uint8_t*>(huf),
-                                       ZXC_HUF_TABLE_SIZE);
+    return Napi::Buffer<uint8_t>::Copy(env, static_cast<const uint8_t*>(huf), ZXC_HUF_TABLE_SIZE);
 }
 
 // dictLoad(zxd: Buffer): { content: Buffer, huf: Buffer, id: number }
@@ -398,8 +396,8 @@ static Napi::Value DictLoad(const Napi::CallbackInfo& info) {
     }
     // content/huf point INTO b's data (zero-copy); copy into new Buffers.
     Napi::Object result = Napi::Object::New(env);
-    result.Set("content", Napi::Buffer<uint8_t>::Copy(
-                              env, static_cast<const uint8_t*>(content), content_size));
+    result.Set("content", Napi::Buffer<uint8_t>::Copy(env, static_cast<const uint8_t*>(content),
+                                                      content_size));
     result.Set("huf", Napi::Buffer<uint8_t>::Copy(env, static_cast<const uint8_t*>(huf),
                                                   ZXC_HUF_TABLE_SIZE));
     result.Set("id", Napi::Number::New(env, static_cast<double>(dict_id)));
@@ -417,8 +415,7 @@ static Napi::Value DictTrain(const Napi::CallbackInfo& info) {
     Napi::Array arr = info[0].As<Napi::Array>();
     uint32_t n = arr.Length();
     if (n == 0) {
-        Napi::TypeError::New(env, "samples must be a non-empty array")
-            .ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "samples must be a non-empty array").ThrowAsJavaScriptException();
         return env.Undefined();
     }
 
@@ -487,12 +484,10 @@ static Napi::Value ThrowZxcError(Napi::Env env, int code) {
 
 /* Grow `out` so at least `out_len + want` bytes are addressable. Doubles when
  * possible, caps at vector::max_size(), and throws if the request can't fit. */
-static bool GrowOutput(Napi::Env env, std::vector<uint8_t>& out,
-                       size_t out_len, size_t want) {
+static bool GrowOutput(Napi::Env env, std::vector<uint8_t>& out, size_t out_len, size_t want) {
     const size_t cap = out.max_size();
     if (want > cap - out_len) {
-        Napi::Error::New(env, "output buffer size overflow")
-            .ThrowAsJavaScriptException();
+        Napi::Error::New(env, "output buffer size overflow").ThrowAsJavaScriptException();
         return false;
     }
     const size_t needed = out_len + want;
@@ -501,6 +496,183 @@ static bool GrowOutput(Napi::Env env, std::vector<uint8_t>& out,
     out.resize(new_size);
     return true;
 }
+
+// =============================================================================
+// Reusable Context API (one archive per call, buffers carved once)
+// =============================================================================
+
+// Reads {level, checksum, dict, dictHuf}, copying the dictionary and table so
+// they outlive the caller's Buffers.
+static bool ReadCtxOptions(Napi::Env env, const Napi::CallbackInfo& info, int* level, int* checksum,
+                           std::vector<uint8_t>* dict, std::vector<uint8_t>* huf) {
+    if (info.Length() < 1 || !info[0].IsObject()) return true;
+    Napi::Object o = info[0].As<Napi::Object>();
+    if (level && o.Has("level") && o.Get("level").IsNumber()) {
+        *level = o.Get("level").As<Napi::Number>().Int32Value();
+    }
+    if (o.Has("checksum") && o.Get("checksum").IsBoolean()) {
+        *checksum = o.Get("checksum").As<Napi::Boolean>().Value() ? 1 : 0;
+    }
+    if (o.Has("dict") && o.Get("dict").IsBuffer()) {
+        Napi::Buffer<uint8_t> b = o.Get("dict").As<Napi::Buffer<uint8_t>>();
+        dict->assign(b.Data(), b.Data() + b.Length());
+    }
+    if (o.Has("dictHuf") && o.Get("dictHuf").IsBuffer()) {
+        Napi::Buffer<uint8_t> b = o.Get("dictHuf").As<Napi::Buffer<uint8_t>>();
+        if (b.Length() != ZXC_HUF_TABLE_SIZE) {
+            Napi::TypeError::New(env, "dictHuf must be exactly 128 bytes")
+                .ThrowAsJavaScriptException();
+            return false;
+        }
+        huf->assign(b.Data(), b.Data() + b.Length());
+    }
+    return true;
+}
+
+class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
+   public:
+    static Napi::Function GetClass(Napi::Env env) {
+        return DefineClass(env, "Cctx",
+                           {
+                               InstanceMethod("compress", &CctxWrap::Compress),
+                               InstanceMethod("close", &CctxWrap::Close),
+                           });
+    }
+
+    explicit CctxWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<CctxWrap>(info) {
+        Napi::Env env = info.Env();
+        if (!ReadCtxOptions(env, info, &level_, &checksum_, &dict_, &huf_)) return;
+
+        zxc_compress_opts_t opts = {0};
+        opts.level = level_;
+        opts.checksum_enabled = checksum_;
+        cctx_ = zxc_create_cctx(&opts);
+        if (!cctx_) {
+            Napi::Error::New(env, "zxc_create_cctx failed").ThrowAsJavaScriptException();
+        }
+    }
+
+    ~CctxWrap() {
+        if (cctx_) zxc_free_cctx(cctx_);
+    }
+
+   private:
+    zxc_cctx* cctx_ = nullptr;
+    std::vector<uint8_t> dict_;
+    std::vector<uint8_t> huf_;
+    int level_ = ZXC_LEVEL_DEFAULT;
+    int checksum_ = 0;
+
+    Napi::Value Compress(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+        if (!cctx_) {
+            Napi::Error::New(env, "Cctx is closed").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        if (info.Length() < 1 || !info[0].IsBuffer()) {
+            Napi::TypeError::New(env, "Expected a Buffer").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        Napi::Buffer<uint8_t> src = info[0].As<Napi::Buffer<uint8_t>>();
+        const uint64_t bound = zxc_compress_bound(src.Length());
+        std::unique_ptr<uint8_t[]> dst(new (std::nothrow) uint8_t[static_cast<size_t>(bound)]);
+        if (!dst) {
+            Napi::Error::New(env, "zxc: allocation failed for compression scratch")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        zxc_compress_opts_t opts = {0};
+        opts.level = level_;
+        opts.checksum_enabled = checksum_;
+        opts.dict = dict_.empty() ? nullptr : dict_.data();
+        opts.dict_size = dict_.size();
+        opts.dict_huf = huf_.empty() ? nullptr : huf_.data();
+
+        int64_t n = zxc_compress_cctx(cctx_, src.Data(), src.Length(), dst.get(), bound, &opts);
+        if (n < 0) return ThrowZxcError(env, static_cast<int>(n));
+        return Napi::Buffer<uint8_t>::Copy(env, dst.get(), static_cast<size_t>(n));
+    }
+
+    Napi::Value Close(const Napi::CallbackInfo& info) {
+        if (cctx_) {
+            zxc_free_cctx(cctx_);
+            cctx_ = nullptr;
+        }
+        return info.Env().Undefined();
+    }
+};
+
+class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
+   public:
+    static Napi::Function GetClass(Napi::Env env) {
+        return DefineClass(env, "Dctx",
+                           {
+                               InstanceMethod("decompress", &DctxWrap::Decompress),
+                               InstanceMethod("close", &DctxWrap::Close),
+                           });
+    }
+
+    explicit DctxWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<DctxWrap>(info) {
+        Napi::Env env = info.Env();
+        if (!ReadCtxOptions(env, info, nullptr, &checksum_, &dict_, &huf_)) return;
+
+        dctx_ = zxc_create_dctx();
+        if (!dctx_) {
+            Napi::Error::New(env, "zxc_create_dctx failed").ThrowAsJavaScriptException();
+        }
+    }
+
+    ~DctxWrap() {
+        if (dctx_) zxc_free_dctx(dctx_);
+    }
+
+   private:
+    zxc_dctx* dctx_ = nullptr;
+    std::vector<uint8_t> dict_;
+    std::vector<uint8_t> huf_;
+    int checksum_ = 0;
+
+    Napi::Value Decompress(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+        if (!dctx_) {
+            Napi::Error::New(env, "Dctx is closed").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        if (info.Length() < 1 || !info[0].IsBuffer()) {
+            Napi::TypeError::New(env, "Expected a Buffer").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        Napi::Buffer<uint8_t> src = info[0].As<Napi::Buffer<uint8_t>>();
+        const uint64_t orig = zxc_get_decompressed_size(src.Data(), src.Length());
+        std::unique_ptr<uint8_t[]> dst(new (std::nothrow)
+                                           uint8_t[static_cast<size_t>(orig ? orig : 1)]);
+        if (!dst) {
+            Napi::Error::New(env, "zxc: allocation failed for decompression scratch")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        zxc_decompress_opts_t opts = {0};
+        opts.checksum_enabled = checksum_;
+        opts.dict = dict_.empty() ? nullptr : dict_.data();
+        opts.dict_size = dict_.size();
+        opts.dict_huf = huf_.empty() ? nullptr : huf_.data();
+
+        int64_t n = zxc_decompress_dctx(dctx_, src.Data(), src.Length(), dst.get(),
+                                        static_cast<size_t>(orig), &opts);
+        if (n < 0) return ThrowZxcError(env, static_cast<int>(n));
+        return Napi::Buffer<uint8_t>::Copy(env, dst.get(), static_cast<size_t>(n));
+    }
+
+    Napi::Value Close(const Napi::CallbackInfo& info) {
+        if (dctx_) {
+            zxc_free_dctx(dctx_);
+            dctx_ = nullptr;
+        }
+        return info.Env().Undefined();
+    }
+};
 
 class CStreamWrap : public Napi::ObjectWrap<CStreamWrap> {
    public:
@@ -797,8 +969,8 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         // the calling thread.
         if (info[0].IsObject() && !info[0].IsBuffer()) {
             Napi::Object opts = info[0].As<Napi::Object>();
-            if (!opts.Has("size") || !opts.Has("readAt") ||
-                !opts.Get("size").IsNumber() || !opts.Get("readAt").IsFunction()) {
+            if (!opts.Has("size") || !opts.Has("readAt") || !opts.Get("size").IsNumber() ||
+                !opts.Get("readAt").IsFunction()) {
                 Napi::TypeError::New(env,
                                      "Reader object must have { size: number, readAt: function }")
                     .ThrowAsJavaScriptException();
@@ -806,16 +978,15 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
             }
             int64_t sz = opts.Get("size").As<Napi::Number>().Int64Value();
             if (sz <= 0) {
-                Napi::TypeError::New(env, "size must be > 0")
-                    .ThrowAsJavaScriptException();
+                Napi::TypeError::New(env, "size must be > 0").ThrowAsJavaScriptException();
                 return;
             }
             env_ = env;
             read_at_ref_ = Napi::Persistent(opts.Get("readAt").As<Napi::Function>());
             zxc_reader_t r;
             r.read_at = &SeekableWrap::ReadAtTrampoline;
-            r.ctx     = this;
-            r.size    = static_cast<uint64_t>(sz);
+            r.ctx = this;
+            r.size = static_cast<uint64_t>(sz);
             s_ = zxc_seekable_open_reader(&r);
             if (!s_) {
                 read_at_ref_.Reset();
@@ -916,8 +1087,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         Napi::Env env = info.Env();
         if (!requireOpen(env)) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
-            Napi::TypeError::New(env, "Expected a block index")
-                .ThrowAsJavaScriptException();
+            Napi::TypeError::New(env, "Expected a block index").ThrowAsJavaScriptException();
             return env.Undefined();
         }
         uint32_t idx = info[0].As<Napi::Number>().Uint32Value();
@@ -929,8 +1099,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         Napi::Env env = info.Env();
         if (!requireOpen(env)) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
-            Napi::TypeError::New(env, "Expected a block index")
-                .ThrowAsJavaScriptException();
+            Napi::TypeError::New(env, "Expected a block index").ThrowAsJavaScriptException();
             return env.Undefined();
         }
         uint32_t idx = info[0].As<Napi::Number>().Uint32Value();
@@ -949,8 +1118,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         uint64_t offset = static_cast<uint64_t>(info[0].As<Napi::Number>().Int64Value());
         int64_t length = info[1].As<Napi::Number>().Int64Value();
         if (length < 0) {
-            Napi::TypeError::New(env, "length must be non-negative")
-                .ThrowAsJavaScriptException();
+            Napi::TypeError::New(env, "length must be non-negative").ThrowAsJavaScriptException();
             return env.Undefined();
         }
         if (in_native_call_) {
@@ -958,8 +1126,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
                 .ThrowAsJavaScriptException();
             return env.Undefined();
         }
-        Napi::Buffer<uint8_t> out =
-            Napi::Buffer<uint8_t>::New(env, static_cast<size_t>(length));
+        Napi::Buffer<uint8_t> out = Napi::Buffer<uint8_t>::New(env, static_cast<size_t>(length));
         if (length == 0) return out;
 
         in_native_call_ = true;
@@ -1034,8 +1201,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
 static Napi::Value SeekTableSize(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
     if (info.Length() < 1 || !info[0].IsNumber()) {
-        Napi::TypeError::New(env, "Expected a number (numBlocks)")
-            .ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "Expected a number (numBlocks)").ThrowAsJavaScriptException();
         return env.Undefined();
     }
     uint32_t n = info[0].As<Napi::Number>().Uint32Value();
@@ -1055,8 +1221,7 @@ static Napi::Value WriteSeekTable(const Napi::CallbackInfo& info) {
     Napi::Array arr = info[0].As<Napi::Array>();
     uint32_t n = arr.Length();
     if (n == 0) {
-        Napi::TypeError::New(env, "compSizes must be non-empty")
-            .ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "compSizes must be non-empty").ThrowAsJavaScriptException();
         return env.Undefined();
     }
 
@@ -1114,6 +1279,8 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("libraryVersion", Napi::Function::New(env, LibraryVersion, "libraryVersion"));
 
     // Push streaming classes
+    exports.Set("Cctx", CctxWrap::GetClass(env));
+    exports.Set("Dctx", DctxWrap::GetClass(env));
     exports.Set("CStream", CStreamWrap::GetClass(env));
     exports.Set("DStream", DStreamWrap::GetClass(env));
 

@@ -100,6 +100,33 @@ with zxc.Seekable(blob) as s:
     middle = s.decompress_range(offset=1 << 20, length=4096)
 ```
 
+## Reusable Contexts
+
+`Cctx` and `Dctx` carve their working buffers once instead of once per call,
+which pays off when compressing many payloads with the same settings. A
+dictionary given at construction applies to every call.
+
+```python
+import zxc
+
+with zxc.Cctx(level=zxc.LEVEL_DEFAULT) as cctx:
+    archives = [cctx.compress(p) for p in payloads]
+
+with zxc.Dctx() as dctx:
+    payloads = [dctx.decompress(a) for a in archives]
+```
+
+With a dictionary, the decoder must be given the same one:
+
+```python
+with zxc.Cctx(dict=dictionary, dict_huf=table) as cctx:
+    archive = cctx.compress(payload)
+with zxc.Dctx(dict=dictionary, dict_huf=table) as dctx:
+    assert dctx.decompress(archive) == payload
+```
+
+A context is not thread-safe: use one per thread.
+
 ## Pre-Trained Dictionaries
 
 Dictionaries lift the ratio on many small, similar payloads. The same
