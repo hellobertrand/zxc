@@ -272,11 +272,12 @@ pub(crate) fn dict_parts<'a>(
 ) -> Result<(&'a [u8], &'a [u8])> {
     let content: &[u8] = dict.unwrap_or(&[]);
     let table: &[u8] = match dict_huf {
-        Some(h) if !content.is_empty() && !h.is_empty() => {
+        // A wrong length is a programming error, dictionary or not.
+        Some(h) if !h.is_empty() => {
             if h.len() != ZXC_HUF_TABLE_SIZE {
                 return Err(Error::BadHufTable);
             }
-            h
+            if content.is_empty() { &[] } else { h }
         }
         _ => &[],
     };

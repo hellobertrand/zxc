@@ -238,11 +238,13 @@ type options struct {
 	dict     []byte
 	dictHuf  []byte
 
-	// levelSet / checksumSet record whether the caller supplied the option
-	// explicitly, so per-call options can fall back to context-creation values
-	// instead of silently overriding them with defaults (see Cctx).
+	// *Set records whether the caller supplied the option explicitly, so a
+	// per-call option can fall back to the context's value, and an empty one
+	// can clear it (see Cctx).
 	levelSet    bool
 	checksumSet bool
+	dictSet     bool
+	dictHufSet  bool
 }
 
 func defaultOptions() options {
@@ -291,14 +293,14 @@ func WithSeekable(enabled bool) Option {
 // Train a dictionary with [TrainDict] or load one from a .zxd file with
 // [DictLoad]. The content size must not exceed [DictSizeMax].
 func WithDict(dict []byte) Option {
-	return func(o *options) { o.dict = dict }
+	return func(o *options) { o.dict, o.dictSet = dict, true }
 }
 
 // WithDictionary attaches a [Dictionary] (content + shared table) in one call.
 func WithDictionary(d *Dictionary) Option {
 	return func(o *options) {
-		o.dict = d.Content()
-		o.dictHuf = d.Huf()
+		o.dict, o.dictSet = d.Content(), true
+		o.dictHuf, o.dictHufSet = d.Huf(), true
 	}
 }
 
@@ -307,7 +309,7 @@ func WithDictionary(d *Dictionary) Option {
 // without [WithDict]. The archive's dictionary ID binds the (dict, table)
 // pair, so the same table must be supplied at decompression time.
 func WithDictHuf(huf []byte) Option {
-	return func(o *options) { o.dictHuf = huf }
+	return func(o *options) { o.dictHuf, o.dictHufSet = huf, true }
 }
 
 func applyOptions(opts []Option) options {

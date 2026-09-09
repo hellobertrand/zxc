@@ -754,12 +754,14 @@ async function main() {
         arraysEqual(dcRaw.decompress(cRaw), payload),
         "context roundtrip with raw {dict, dictHuf}",
       );
+      const dcNoTable = zxc.createDecompressContext({ dict });
       let rawRejected = false;
       try {
-        zxc.createDecompressContext({ dict }).decompress(cRaw);
+        dcNoTable.decompress(cRaw);
       } catch (e) {
         rawRejected = true;
       }
+      dcNoTable.free();
       assert(rawRejected, "context decompress without the table is rejected");
       ccRaw.free();
       dcRaw.free();
@@ -771,6 +773,17 @@ async function main() {
         shortTable = true;
       }
       assert(shortTable, "context factory rejects a 3-byte dictHuf");
+
+      // A tampered Dictionary table is refused before any copy.
+      const tampered = zxc.Dictionary.train(samples);
+      tampered.huf = new Uint8Array(300);
+      let tamperedRejected = false;
+      try {
+        zxc.createCompressContext({ dict: tampered });
+      } catch (e) {
+        tamperedRejected = true;
+      }
+      assert(tamperedRejected, "an over-long Dictionary.huf is refused");
 
       let seekableRejected = false;
       try {

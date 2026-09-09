@@ -38,25 +38,18 @@ unsafe impl Send for Cctx {}
 impl Cctx {
     /// Creates a new compression context.
     ///
-    /// When `opts` is `Some`, internal buffers are pre-allocated with those
-    /// parameters, dictionary included, sparing the first
-    /// [`Cctx::compress_block`] a re-carve. `None` defers allocation.
+    /// When `opts` is `Some`, internal buffers are pre-allocated for its level
+    /// and block size; `None` defers allocation. A dictionary is only validated
+    /// here, the context carving for it on first use.
     pub fn new(opts: Option<&CompressOptions>) -> Result<Self> {
-        let parts = match opts {
-            Some(o) => Some(crate::dict_parts(o.dict.as_deref(), o.dict_huf.as_deref())?),
-            None => None,
-        };
-        let c_opts = opts.map(|o| {
-            let (dict, dict_huf) = parts.unwrap_or((&[], &[]));
-            zxc_sys::zxc_compress_opts_t {
-                level: o.level as i32,
-                checksum_enabled: o.checksum as i32,
-                seekable: o.seekable as i32,
-                dict: crate::dict_ptr(dict),
-                dict_size: dict.len(),
-                dict_huf: crate::dict_ptr(dict_huf),
-                ..Default::default()
-            }
+        if let Some(o) = opts {
+            crate::dict_parts(o.dict.as_deref(), o.dict_huf.as_deref())?;
+        }
+        let c_opts = opts.map(|o| zxc_sys::zxc_compress_opts_t {
+            level: o.level as i32,
+            checksum_enabled: o.checksum as i32,
+            seekable: o.seekable as i32,
+            ..Default::default()
         });
         let ptr = unsafe {
             zxc_sys::zxc_create_cctx(
@@ -299,7 +292,9 @@ mod tests {
 
     #[test]
     fn wrong_table_length_is_rejected_before_reaching_c() {
-        let (corpus, dict, _huf) = trained();
+        let corpus = corpus();
+        let samples: Vec<&[u8]> = corpus.iter().map(|s| s.as_slice()).collect();
+        let dict = train_dict(&samples, 4096).expect("train_dict");
         let block = &corpus[3];
         let mut cctx = Cctx::new(None).unwrap();
         let mut comp = vec![0u8; compress_block_bound(block.len()) as usize];
@@ -314,5 +309,12 @@ mod tests {
             crate::compress_with_options(block, &copts),
             Err(Error::BadHufTable)
         ));
+        // A wrong length is an error even with no dictionary to attach it to.
+        let no_dict = CompressOptions::default().with_dict_huf(vec![0u8; 7]);
+        assert!(matches!(
+            crate::compress_with_options(block, &no_dict),
+            Err(Error::BadHufTable)
+        ));
+        assert!(matches!(Cctx::new(Some(&no_dict)), Err(Error::BadHufTable)));
     }
 }

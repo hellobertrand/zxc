@@ -271,8 +271,9 @@ func TestBlockAPIWithDict(t *testing.T) {
 		name string
 		opts []Option
 	}{
-		{"dict", []Option{WithDict(dict)}},
-		{"dict+table", []Option{WithLevel(LevelUltra), WithDict(dict), WithDictHuf(huf)}},
+		{"dict", []Option{WithChecksum(true), WithDict(dict)}},
+		{"dict+table", []Option{WithChecksum(true), WithLevel(LevelUltra), WithDict(dict),
+			WithDictHuf(huf)}},
 	} {
 		n, err := c.CompressBlock(payload, comp, tc.opts...)
 		if err != nil {
@@ -299,5 +300,82 @@ func TestBlockAPIWithDict(t *testing.T) {
 	}
 	if _, err := c.CompressBlock(payload, comp, WithDict(dict), WithDictHuf([]byte{1, 2, 3})); err != ErrBadHufTable {
 		t.Fatalf("bad table length: got %v, want ErrBadHufTable", err)
+	}
+}
+
+// A context's dictionary is the default for its calls, each option falling
+// back on its own: a per-call dictionary keeps the table, an empty one clears.
+func TestContextDictDefaults(t *testing.T) {
+	dict := trainTestDict(t)
+	huf, err := TrainDictHuf(dictSamples(), dict)
+	if err != nil {
+		t.Fatalf("TrainDictHuf: %v", err)
+	}
+	payload := dictSamples()[9]
+	comp := make([]byte, CompressBlockBound(len(payload)))
+	out := make([]byte, DecompressBlockBound(len(payload)))
+
+	plain, err := NewCctx()
+	if err != nil {
+		t.Fatalf("NewCctx: %v", err)
+	}
+	defer plain.Close()
+	nPlain, err := plain.CompressBlock(payload, comp)
+	if err != nil {
+		t.Fatalf("CompressBlock: %v", err)
+	}
+	nPerCall, err := plain.CompressBlock(payload, comp, WithDict(dict))
+	if err != nil {
+		t.Fatalf("CompressBlock(dict): %v", err)
+	}
+
+	sticky, err := NewCctx(WithDictionary(&Dictionary{content: dict, huf: huf}))
+	if err != nil {
+		t.Fatalf("NewCctx(dictionary): %v", err)
+	}
+	defer sticky.Close()
+	// inherited, dict re-passed per call, then cleared
+	nInherit, err1 := sticky.CompressBlock(payload, comp)
+	nRepassed, err2 := sticky.CompressBlock(payload, comp, WithDict(dict))
+	nCleared, err3 := sticky.CompressBlock(payload, comp, WithDict(nil))
+	if err1 != nil || err2 != nil || err3 != nil {
+		t.Fatalf("sticky compress: %v %v %v", err1, err2, err3)
+	}
+	if nInherit >= nPlain {
+		t.Fatalf("creation-time dictionary ignored: %d vs %d without", nInherit, nPlain)
+	}
+	if nRepassed != nInherit {
+		t.Fatalf("per-call dict dropped the context table: %d vs %d", nRepassed, nInherit)
+	}
+	if nCleared != nPlain {
+		t.Fatalf("WithDict(nil) did not clear the dictionary: %d vs %d", nCleared, nPlain)
+	}
+	if nPerCall >= nPlain {
+		t.Fatalf("per-call dictionary on a plain context: %d, no better than %d", nPerCall, nPlain)
+	}
+
+	// The decode context mirrors it.
+	d, err := NewDctx(WithDict(dict), WithDictHuf(huf))
+	if err != nil {
+		t.Fatalf("NewDctx: %v", err)
+	}
+	defer d.Close()
+	nSticky, err := sticky.CompressBlock(payload, comp)
+	if err != nil {
+		t.Fatalf("CompressBlock: %v", err)
+	}
+	m, err := d.DecompressBlock(comp[:nSticky], out)
+	if err != nil {
+		t.Fatalf("DecompressBlock with the context dictionary: %v", err)
+	}
+	if !bytes.Equal(out[:m], payload) {
+		t.Fatalf("DecompressBlock returned %d bytes, content differs", m)
+	}
+	// A wrong table length is an error even with no dictionary to attach it to.
+	if _, err := NewDctx(WithDictHuf([]byte{1, 2, 3})); err != ErrBadHufTable {
+		t.Fatalf("NewDctx with a short table: got %v, want ErrBadHufTable", err)
+	}
+	if _, err := Compress(payload, WithDictHuf([]byte{1, 2, 3})); err != ErrBadHufTable {
+		t.Fatalf("Compress with a short table and no dict: got %v, want ErrBadHufTable", err)
 	}
 }

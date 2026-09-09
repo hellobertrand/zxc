@@ -371,14 +371,14 @@ export default async function createZXC(moduleOverrides, factory) {
    */
   function _splitDictOption(opts) {
     const d = (opts && opts.dict) || null;
-    if (d instanceof Dictionary) {
-      return { dict: d.content, dictHuf: d.huf };
-    }
-    const dictHuf = (opts && opts.dictHuf) || null;
+    const fromObject = d instanceof Dictionary;
+    const dictHuf = fromObject ? d.huf : (opts && opts.dictHuf) || null;
+    // Both branches: a Dictionary's huf is public and mutable, and the copy
+    // writes its length into a 128-byte allocation.
     if (dictHuf && dictHuf.length !== ZXC_HUF_TABLE_SIZE) {
       throw new Error("ZXC: dictHuf must be exactly 128 bytes");
     }
-    return { dict: d, dictHuf };
+    return { dict: fromObject ? d.content : d, dictHuf };
   }
 
   /**
@@ -431,13 +431,15 @@ export default async function createZXC(moduleOverrides, factory) {
     const bound = _compress_bound(data.length);
     if (bound === 0) throw new Error("ZXC: compress_bound returned 0");
 
-    const srcPtr = _malloc(data.length);
-    const dstPtr = _malloc(bound);
     const { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
       _writeCompressOpts(level, checksum, seekable, d, n, h),
     );
+    let srcPtr = 0;
+    let dstPtr = 0;
 
     try {
+      srcPtr = _malloc(data.length);
+      dstPtr = _malloc(bound);
       Module.HEAPU8.set(data, srcPtr);
       const result = _compress(srcPtr, data.length, dstPtr, bound, optsPtr);
       if (result < 0) {
@@ -447,8 +449,8 @@ export default async function createZXC(moduleOverrides, factory) {
       }
       return new Uint8Array(Module.HEAPU8.buffer, dstPtr, result).slice();
     } finally {
-      _free(srcPtr);
-      _free(dstPtr);
+      if (srcPtr) _free(srcPtr);
+      if (dstPtr) _free(dstPtr);
       release();
     }
   }
@@ -469,6 +471,10 @@ export default async function createZXC(moduleOverrides, factory) {
    */
   function decompress(data, opts) {
     const checksum = (opts && opts.checksum) || false;
+    // Validated and allocated first, so a rejected table leaks nothing.
+    const { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
+      _writeDecompressOpts(checksum, d, n, h),
+    );
 
     // Read decompressed size from footer
     const srcPtr = _malloc(data.length);
@@ -479,14 +485,12 @@ export default async function createZXC(moduleOverrides, factory) {
       // A wasm32 heap cannot address it; fail clearly instead of
       // aborting inside malloc.
       _free(srcPtr);
+      release();
       throw new Error(
         `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
       );
     }
     const dstPtr = _malloc(origSize || 1);
-    const { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
-      _writeDecompressOpts(checksum, d, n, h),
-    );
 
     try {
       const result = _decompress(
@@ -503,8 +507,8 @@ export default async function createZXC(moduleOverrides, factory) {
       }
       return new Uint8Array(Module.HEAPU8.buffer, dstPtr, result).slice();
     } finally {
-      _free(srcPtr);
-      _free(dstPtr);
+      if (srcPtr) _free(srcPtr);
+      if (dstPtr) _free(dstPtr);
       release();
     }
   }
