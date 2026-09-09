@@ -1664,8 +1664,8 @@ static int zxc_dctx_prepare(zxc_dctx* RESTRICT dctx, const size_t block_size,
 }
 
 /**
- * @brief Block decode through work_buf for a destination without the pad:
- *        carved for the whole @p dst_capacity, then copied out.
+ * @brief Block decode through work_buf when @p dst is too tight for the
+ *        speculative writes; the carve already matches @p dst_capacity.
  */
 static int64_t zxc_dctx_decode_bounce(zxc_dctx* RESTRICT dctx, const uint8_t* RESTRICT src,
                                       const size_t src_size, uint8_t* RESTRICT dst,
@@ -1713,11 +1713,8 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
         return zxc_static_decompress_block(dctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
                                            dst_capacity, dict_size, checksum_enabled, 0);
 
-    // dst_capacity = data + ZXC_DECOMPRESS_TAIL_PAD (zxc_decompress_block_bound):
-    // carve for the data and decode in place; without the pad, bounce.
-    const int padded = dst_capacity > ZXC_DECOMPRESS_TAIL_PAD;
-    const size_t block_size =
-        zxc_block_size_ceil(padded ? dst_capacity - ZXC_DECOMPRESS_TAIL_PAD : dst_capacity);
+    // Carved for dst_capacity: the context holds any block dst can hold.
+    const size_t block_size = zxc_block_size_ceil(dst_capacity);
     const int rc = zxc_dctx_prepare(dctx, block_size, dict_size, checksum_enabled);
     if (UNLIKELY(rc != ZXC_OK)) return rc;  // LCOV_EXCL_LINE
 
@@ -1727,8 +1724,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
                                        ZXC_OPTS_DICT_HUF(opts)) != ZXC_OK))
         return ZXC_ERROR_CORRUPT_DATA;  // LCOV_EXCL_LINE
 
-    // work_buf was pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD inside
-    // the matching zxc_cctx_init call above.
+    // The [dict | decode] buffer carries block_size + ZXC_DECOMPRESS_TAIL_PAD.
     const size_t work_sz = block_size + ZXC_DECOMPRESS_TAIL_PAD;
 
     int res;
@@ -1742,16 +1738,13 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
             if (UNLIKELY((size_t)res > dst_capacity)) return ZXC_ERROR_DST_TOO_SMALL;
             ZXC_MEMCPY(dst, dec_buf + dict_size, (size_t)res);
         }
-    } else if (LIKELY(padded)) {
+    } else {
         res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
                                            dst_capacity);
-        // No pad left, or a block too big for the data part: the bounce settles it.
-        if (UNLIKELY(res == ZXC_ERROR_OVERFLOW || res == ZXC_ERROR_DST_TOO_SMALL))
+        // A tight tail aborts a block that fits: work_buf has the margin.
+        if (UNLIKELY(res == ZXC_ERROR_OVERFLOW))
             return zxc_dctx_decode_bounce(dctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
                                           dst_capacity, checksum_enabled);
-    } else {
-        return zxc_dctx_decode_bounce(dctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
-                                      dst_capacity, checksum_enabled);
     }
     if (UNLIKELY(res < 0)) return res;
     return (int64_t)res;

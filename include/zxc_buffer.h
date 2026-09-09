@@ -259,8 +259,9 @@ ZXC_EXPORT uint64_t zxc_compress_block_bound(size_t input_size);
  *        @p uncompressed_size bytes.
  *
  * The decoder uses speculative (wild-copy) writes on its fast path, so it
- * needs a tail pad beyond the declared size: with this value the block decodes
- * in place; without the pad, through an internal bounce buffer and a copy.
+ * needs a tail pad beyond the declared size: with this value the block always
+ * decodes straight into @c dst; without it, through a bounce and a copy when the
+ * tail is too tight.
  *
  * @param[in] uncompressed_size Original block size in bytes
  *                              (must be <= @ref ZXC_BLOCK_SIZE_MAX).
@@ -314,8 +315,8 @@ ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t sr
  * @param[out]    dst          Destination buffer.
  * @param[in]     dst_capacity Uncompressed size plus @ref ZXC_DECOMPRESS_TAIL_PAD
  *                             (zxc_decompress_block_bound()): the block decodes
- *                             in place; without the pad, through a bounce and a
- *                             copy. At most @ref ZXC_BLOCK_SIZE_MAX +
+ *                             straight into @p dst; without the pad, possibly
+ *                             through a bounce. At most @ref ZXC_BLOCK_SIZE_MAX +
  *                             @ref ZXC_DECOMPRESS_TAIL_PAD.
  * @param[in]     opts         Decompression options, or NULL for defaults.
  *                             @c checksum_enabled and the dictionary fields are
