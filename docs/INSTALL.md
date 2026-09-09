@@ -67,6 +67,7 @@ Installing into a system prefix needs `sudo` on Unix or an elevated shell on Win
 | `ZXC_ENABLE_COVERAGE` | OFF | OFF | Enable code coverage generation (disables LTO/PGO) |
 | `ZXC_DISABLE_SIMD` | OFF | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON) |
 | `ZXC_USE_SYSTEM_RAPIDHASH` | OFF | OFF | Use a system-installed `rapidhash.h` instead of the vendored copy |
+| `RAPIDHASH_INCLUDE_DIR` | *(found)* | *(found)* | Directory holding a system `rapidhash.h`, when `find_path` cannot locate it |
 
 "Vendored" is a build where zxc is not the top-level project (`add_subdirectory()`,
 `FetchContent`): the embedding project then keeps control of its own compiler flags,
@@ -172,7 +173,9 @@ then be built unoptimised.
 
 Third-party code is vendored, never probed: `rapidhash.h` comes from the copy in
 the tree unless `-DZXC_USE_SYSTEM_RAPIDHASH=ON` asks for a system one, so a
-build cannot silently pick up a header from the host.
+build cannot silently pick up a header from the host. Packagers who strip the
+vendored copy must pass that option: either header is resolved at configure
+time, so a missing one fails there rather than once per translation unit.
 
 ## Meson subproject (or WrapDB)
 
@@ -207,3 +210,15 @@ meson compile -C build
 
 When consumed as a subproject, only the library is built (CLI and tests are
 skipped automatically).
+
+### Meson options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `build_cli` | `false` | Build the command-line interface |
+| `use_system_rapidhash` | `false` | Use a system-installed `rapidhash.h` instead of the vendored copy |
+
+`use_system_rapidhash` mirrors `ZXC_USE_SYSTEM_RAPIDHASH` in the CMake build,
+with the same setup-time check. It has no equivalent of `RAPIDHASH_INCLUDE_DIR`:
+Meson probes the compiler's default search path, so a header installed elsewhere
+is reached with `-Dc_args=-I<dir>`.

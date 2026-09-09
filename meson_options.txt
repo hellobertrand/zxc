@@ -1,2 +1,4 @@
 option('build_cli', type : 'boolean', value : false,
        description : 'Build the command-line interface')
+option('use_system_rapidhash', type : 'boolean', value : false,
+       description : 'Use a system-installed rapidhash.h instead of the vendored copy')
