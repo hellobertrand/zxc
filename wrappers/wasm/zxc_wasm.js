@@ -382,6 +382,32 @@ export default async function createZXC(moduleOverrides, factory) {
   }
 
   /**
+   * Copy the dictionary options of `opts` into WASM memory and write the C
+   * options struct.
+   *
+   * @param {object} [opts] - Caller options ({dict, dictHuf, ...}).
+   * @param {Function} writeOpts - (dictPtr, dictSize, dictHufPtr) -> optsPtr.
+   * @returns {{optsPtr: number, release: Function}} `release()` frees both.
+   */
+  function _allocDictOpts(opts, writeOpts) {
+    const { dict, dictHuf } = _splitDictOption(opts);
+    const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
+    if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
+    // A table only travels with a dictionary, as the C side reads it.
+    const dictHufPtr = dictPtr && dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
+    if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
+    const optsPtr = writeOpts(dictPtr, dictPtr ? dict.length : 0, dictHufPtr);
+    return {
+      optsPtr,
+      release() {
+        _free(optsPtr);
+        if (dictPtr) _free(dictPtr);
+        if (dictHufPtr) _free(dictHufPtr);
+      },
+    };
+  }
+
+  /**
    * Compress a Uint8Array.
    *
    * @param {Uint8Array} data - Input data to compress.
@@ -401,24 +427,14 @@ export default async function createZXC(moduleOverrides, factory) {
     const level = (opts && opts.level) || _default_level();
     const checksum = (opts && opts.checksum) || false;
     const seekable = (opts && opts.seekable) || false;
-    const { dict, dictHuf } = _splitDictOption(opts);
 
     const bound = _compress_bound(data.length);
     if (bound === 0) throw new Error("ZXC: compress_bound returned 0");
 
     const srcPtr = _malloc(data.length);
     const dstPtr = _malloc(bound);
-    const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
-    if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
-    const dictHufPtr = dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
-    if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
-    const optsPtr = _writeCompressOpts(
-      level,
-      checksum,
-      seekable,
-      dictPtr,
-      dict ? dict.length : 0,
-      dictHufPtr,
+    const { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
+      _writeCompressOpts(level, checksum, seekable, d, n, h),
     );
 
     try {
@@ -433,9 +449,7 @@ export default async function createZXC(moduleOverrides, factory) {
     } finally {
       _free(srcPtr);
       _free(dstPtr);
-      _free(optsPtr);
-      if (dictPtr) _free(dictPtr);
-      if (dictHufPtr) _free(dictHufPtr);
+      release();
     }
   }
 
@@ -455,7 +469,6 @@ export default async function createZXC(moduleOverrides, factory) {
    */
   function decompress(data, opts) {
     const checksum = (opts && opts.checksum) || false;
-    const { dict, dictHuf } = _splitDictOption(opts);
 
     // Read decompressed size from footer
     const srcPtr = _malloc(data.length);
@@ -471,15 +484,8 @@ export default async function createZXC(moduleOverrides, factory) {
       );
     }
     const dstPtr = _malloc(origSize || 1);
-    const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
-    if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
-    const dictHufPtr = dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
-    if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
-    const optsPtr = _writeDecompressOpts(
-      checksum,
-      dictPtr,
-      dict ? dict.length : 0,
-      dictHufPtr,
+    const { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
+      _writeDecompressOpts(checksum, d, n, h),
     );
 
     try {
@@ -499,9 +505,7 @@ export default async function createZXC(moduleOverrides, factory) {
     } finally {
       _free(srcPtr);
       _free(dstPtr);
-      _free(optsPtr);
-      if (dictPtr) _free(dictPtr);
-      if (dictHufPtr) _free(dictHufPtr);
+      release();
     }
   }
 
@@ -539,36 +543,25 @@ export default async function createZXC(moduleOverrides, factory) {
    * @param {Dictionary|Uint8Array} [opts.dict] - Dictionary used by every
    *   compress() call; the decoder must be given the same one.
    * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table.
+   * @throws If `opts.seekable` is set: this API writes no seek table.
    * @returns {{ compress: Function, free: Function }}
    */
   function createCompressContext(opts) {
     const level = (opts && opts.level) || _default_level();
     const checksum = (opts && opts.checksum) || false;
-    const seekable = false; // zxc_compress_cctx writes no seek table
-    const { dict, dictHuf } = _splitDictOption(opts);
+    // zxc_compress_cctx writes no seek table: refuse rather than drop it.
+    if (opts && opts.seekable)
+      throw new Error("ZXC: seekable is not supported on a compression context");
 
-    // Kept for the context's lifetime: dictionary options are never sticky.
-    const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
-    if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
-    const dictHufPtr = dictPtr && dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
-    if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
-    const optsPtr = _writeCompressOpts(
-      level,
-      checksum,
-      seekable,
-      dictPtr,
-      dictPtr ? dict.length : 0,
-      dictHufPtr,
+    // The options struct and the dictionary copies live as long as the context.
+    let { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
+      _writeCompressOpts(level, checksum, false, d, n, h),
     );
-    const release = () => {
-      _free(optsPtr);
-      if (dictPtr) _free(dictPtr);
-      if (dictHufPtr) _free(dictHufPtr);
-    };
     let cctx = _create_cctx(optsPtr);
 
     if (cctx === 0) {
       release();
+      optsPtr = 0;
       throw new Error("ZXC: failed to create compression context");
     }
 
@@ -579,6 +572,7 @@ export default async function createZXC(moduleOverrides, factory) {
        * @returns {Uint8Array}
        */
       compress(data) {
+        if (!cctx) throw new Error("ZXC: compression context already freed");
         const bound = _compress_bound(data.length);
         const srcPtr = _malloc(data.length);
         const dstPtr = _malloc(bound);
@@ -609,6 +603,7 @@ export default async function createZXC(moduleOverrides, factory) {
         _free_cctx(cctx);
         cctx = 0;
         release();
+        optsPtr = 0;
       },
     };
   }
@@ -626,25 +621,14 @@ export default async function createZXC(moduleOverrides, factory) {
    */
   function createDecompressContext(opts) {
     const checksum = (opts && opts.checksum) || false;
-    const { dict, dictHuf } = _splitDictOption(opts);
-    const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
-    if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
-    const dictHufPtr = dictPtr && dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
-    if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
-    const optsPtr = _writeDecompressOpts(
-      checksum,
-      dictPtr,
-      dictPtr ? dict.length : 0,
-      dictHufPtr,
+    // The options struct and the dictionary copies live as long as the context.
+    let { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
+      _writeDecompressOpts(checksum, d, n, h),
     );
-    const release = () => {
-      _free(optsPtr);
-      if (dictPtr) _free(dictPtr);
-      if (dictHufPtr) _free(dictHufPtr);
-    };
     let dctx = _create_dctx();
     if (dctx === 0) {
       release();
+      optsPtr = 0;
       throw new Error("ZXC: failed to create decompression context");
     }
 
@@ -655,6 +639,7 @@ export default async function createZXC(moduleOverrides, factory) {
        * @returns {Uint8Array}
        */
       decompress(data) {
+        if (!dctx) throw new Error("ZXC: decompression context already freed");
         const srcPtr = _malloc(data.length);
         Module.HEAPU8.set(data, srcPtr);
         const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
@@ -691,6 +676,7 @@ export default async function createZXC(moduleOverrides, factory) {
         _free_dctx(dctx);
         dctx = 0;
         release();
+        optsPtr = 0;
       },
     };
   }

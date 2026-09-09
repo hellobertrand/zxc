@@ -745,6 +745,50 @@ async function main() {
       cc.free();
       dc.free();
       dcNo.free();
+
+      // Raw {dict, dictHuf} on the factories, plus their table check.
+      const ccRaw = zxc.createCompressContext({ dict, dictHuf: huf });
+      const dcRaw = zxc.createDecompressContext({ dict, dictHuf: huf });
+      const cRaw = ccRaw.compress(payload);
+      assert(
+        arraysEqual(dcRaw.decompress(cRaw), payload),
+        "context roundtrip with raw {dict, dictHuf}",
+      );
+      let rawRejected = false;
+      try {
+        zxc.createDecompressContext({ dict }).decompress(cRaw);
+      } catch (e) {
+        rawRejected = true;
+      }
+      assert(rawRejected, "context decompress without the table is rejected");
+      ccRaw.free();
+      dcRaw.free();
+
+      let shortTable = false;
+      try {
+        zxc.createCompressContext({ dict, dictHuf: new Uint8Array(3) });
+      } catch (e) {
+        shortTable = true;
+      }
+      assert(shortTable, "context factory rejects a 3-byte dictHuf");
+
+      let seekableRejected = false;
+      try {
+        zxc.createCompressContext({ seekable: true });
+      } catch (e) {
+        seekableRejected = true;
+      }
+      assert(seekableRejected, "compression context refuses seekable");
+
+      const ccFreed = zxc.createCompressContext({ dict });
+      ccFreed.free();
+      let afterFree = false;
+      try {
+        ccFreed.compress(payload);
+      } catch (e) {
+        afterFree = true;
+      }
+      assert(afterFree, "a freed context refuses further calls");
     }
 
     // Seekable + setDict + range roundtrip on a dict-compressed archive.

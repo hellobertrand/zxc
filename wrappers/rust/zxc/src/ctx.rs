@@ -39,13 +39,24 @@ impl Cctx {
     /// Creates a new compression context.
     ///
     /// When `opts` is `Some`, internal buffers are pre-allocated with those
-    /// parameters. When `None`, allocation is deferred to first use.
+    /// parameters, dictionary included, sparing the first
+    /// [`Cctx::compress_block`] a re-carve. `None` defers allocation.
     pub fn new(opts: Option<&CompressOptions>) -> Result<Self> {
-        let c_opts = opts.map(|o| zxc_sys::zxc_compress_opts_t {
-            level: o.level as i32,
-            checksum_enabled: o.checksum as i32,
-            seekable: o.seekable as i32,
-            ..Default::default()
+        let parts = match opts {
+            Some(o) => Some(crate::dict_parts(o.dict.as_deref(), o.dict_huf.as_deref())?),
+            None => None,
+        };
+        let c_opts = opts.map(|o| {
+            let (dict, dict_huf) = parts.unwrap_or((&[], &[]));
+            zxc_sys::zxc_compress_opts_t {
+                level: o.level as i32,
+                checksum_enabled: o.checksum as i32,
+                seekable: o.seekable as i32,
+                dict: crate::dict_ptr(dict),
+                dict_size: dict.len(),
+                dict_huf: crate::dict_ptr(dict_huf),
+                ..Default::default()
+            }
         });
         let ptr = unsafe {
             zxc_sys::zxc_create_cctx(
@@ -73,15 +84,14 @@ impl Cctx {
         dst: &mut [u8],
         opts: &CompressOptions,
     ) -> Result<usize> {
-        let (dict, dict_size, dict_huf) =
-            crate::dict_ptrs(opts.dict.as_ref(), opts.dict_huf.as_ref())?;
+        let (dict, dict_huf) = crate::dict_parts(opts.dict.as_deref(), opts.dict_huf.as_deref())?;
         let copts = zxc_sys::zxc_compress_opts_t {
             level: opts.level as i32,
             checksum_enabled: opts.checksum as i32,
             seekable: opts.seekable as i32,
-            dict,
-            dict_size,
-            dict_huf,
+            dict: crate::dict_ptr(dict),
+            dict_size: dict.len(),
+            dict_huf: crate::dict_ptr(dict_huf),
             ..Default::default()
         };
         let res = unsafe {
@@ -140,13 +150,12 @@ impl Dctx {
         dst: &mut [u8],
         opts: &DecompressOptions,
     ) -> Result<usize> {
-        let (dict, dict_size, dict_huf) =
-            crate::dict_ptrs(opts.dict.as_ref(), opts.dict_huf.as_ref())?;
+        let (dict, dict_huf) = crate::dict_parts(opts.dict.as_deref(), opts.dict_huf.as_deref())?;
         let dopts = zxc_sys::zxc_decompress_opts_t {
             checksum_enabled: opts.verify_checksum as i32,
-            dict,
-            dict_size,
-            dict_huf,
+            dict: crate::dict_ptr(dict),
+            dict_size: dict.len(),
+            dict_huf: crate::dict_ptr(dict_huf),
             ..Default::default()
         };
         let res = unsafe {
@@ -168,20 +177,21 @@ impl Dctx {
 
     /// Strict-sized variant of [`Dctx::decompress_block`]: accepts
     /// `dst.len() == uncompressed_size` exactly (no tail pad required).
-    /// Slightly slower than the fast path; output is bit-identical.
+    /// Slightly slower than the fast path; output is bit-identical. Same
+    /// dictionary options as [`Dctx::decompress_block`]; a dictionary decodes
+    /// through the bounce path, so `dst` may hold more than the strict tail.
     pub fn decompress_block_safe(
         &mut self,
         src: &[u8],
         dst: &mut [u8],
         opts: &DecompressOptions,
     ) -> Result<usize> {
-        let (dict, dict_size, dict_huf) =
-            crate::dict_ptrs(opts.dict.as_ref(), opts.dict_huf.as_ref())?;
+        let (dict, dict_huf) = crate::dict_parts(opts.dict.as_deref(), opts.dict_huf.as_deref())?;
         let dopts = zxc_sys::zxc_decompress_opts_t {
             checksum_enabled: opts.verify_checksum as i32,
-            dict,
-            dict_size,
-            dict_huf,
+            dict: crate::dict_ptr(dict),
+            dict_size: dict.len(),
+            dict_huf: crate::dict_ptr(dict_huf),
             ..Default::default()
         };
         let res = unsafe {

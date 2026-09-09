@@ -262,26 +262,34 @@ pub use dict::{
 };
 pub use zxc_sys::{ZXC_DICT_SIZE_MAX, ZXC_HUF_TABLE_SIZE};
 
-/// Dictionary pointers for a C options struct; the shared table must be
-/// `ZXC_HUF_TABLE_SIZE` bytes when it accompanies a dictionary.
-pub(crate) fn dict_ptrs(
-    dict: Option<&Vec<u8>>,
-    dict_huf: Option<&Vec<u8>>,
-) -> Result<(*const std::ffi::c_void, usize, *const std::ffi::c_void)> {
-    let (dict_ptr, dict_size) = match dict {
-        Some(d) if !d.is_empty() => (d.as_ptr() as *const std::ffi::c_void, d.len()),
-        _ => (std::ptr::null(), 0),
-    };
-    let huf_ptr = match dict_huf {
-        Some(h) if dict_size > 0 && !h.is_empty() => {
+/// The dictionary content and shared table for a C options struct, as slices
+/// borrowed from the caller's options: empty means absent, and a table only
+/// accompanies a dictionary, then in `ZXC_HUF_TABLE_SIZE` bytes. Slices rather
+/// than pointers keep the borrow checker in charge of the FFI call's lifetime.
+pub(crate) fn dict_parts<'a>(
+    dict: Option<&'a [u8]>,
+    dict_huf: Option<&'a [u8]>,
+) -> Result<(&'a [u8], &'a [u8])> {
+    let content: &[u8] = dict.unwrap_or(&[]);
+    let table: &[u8] = match dict_huf {
+        Some(h) if !content.is_empty() && !h.is_empty() => {
             if h.len() != ZXC_HUF_TABLE_SIZE {
                 return Err(Error::BadHufTable);
             }
-            h.as_ptr() as *const std::ffi::c_void
+            h
         }
-        _ => std::ptr::null(),
+        _ => &[],
     };
-    Ok((dict_ptr, dict_size, huf_ptr))
+    Ok((content, table))
+}
+
+/// The C pointer for a dictionary slice: NULL when the slice is empty.
+pub(crate) fn dict_ptr(slice: &[u8]) -> *const std::ffi::c_void {
+    if slice.is_empty() {
+        std::ptr::null()
+    } else {
+        slice.as_ptr() as *const std::ffi::c_void
+    }
 }
 
 pub use ctx::{Cctx, Dctx, compress_block_bound, decompress_block_bound};

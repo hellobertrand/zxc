@@ -278,14 +278,20 @@ func TestBlockAPIWithDict(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: CompressBlock: %v", tc.name, err)
 		}
-		dopts := []Option{WithDict(dict), WithDictHuf(huf)}
-		m, err := d.DecompressBlock(comp[:n], out, dopts...)
-		if err != nil || !bytes.Equal(out[:m], payload) {
+		// Decode with the options it was compressed with: no table means none.
+		m, err := d.DecompressBlock(comp[:n], out, tc.opts...)
+		if err != nil {
 			t.Fatalf("%s: DecompressBlock: %v", tc.name, err)
 		}
-		k, err := d.DecompressBlockSafe(comp[:n], exact, dopts...)
-		if err != nil || !bytes.Equal(exact[:k], payload) {
+		if !bytes.Equal(out[:m], payload) {
+			t.Fatalf("%s: DecompressBlock returned %d bytes, content differs", tc.name, m)
+		}
+		k, err := d.DecompressBlockSafe(comp[:n], exact, tc.opts...)
+		if err != nil {
 			t.Fatalf("%s: DecompressBlockSafe: %v", tc.name, err)
+		}
+		if !bytes.Equal(exact[:k], payload) {
+			t.Fatalf("%s: DecompressBlockSafe returned %d bytes, content differs", tc.name, k)
 		}
 		if _, err := d.DecompressBlock(comp[:n], out); err == nil {
 			t.Fatalf("%s: DecompressBlock without the dictionary should fail", tc.name)
