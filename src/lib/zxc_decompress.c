@@ -1029,7 +1029,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
     // Destination safe margin for 4x loop: max output without varint extension.
     // ll_max = 14, ml_max = 14 + 5 = 19, per-seq = 33, 4x = 132.
     // Plus the overshoot the wild copies are allowed (ZXC_PAD_SIZE) + 4 safety = 168.
-    const uint8_t* const d_end_safe = d_end - (132 + ZXC_PAD_SIZE + 4);
+    const uint8_t* const d_end_safe =
+        (dst_capacity > 132 + ZXC_PAD_SIZE + 4) ? d_end - (132 + ZXC_PAD_SIZE + 4) : dst;
 
     // Literal margin for the 4x loops: without a varint, ll <= 14 per sequence,
     // so 4 * 14 = 56. Past that margin only the cold varint path checks l_ptr.
@@ -1272,10 +1273,12 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_ghi_impl(const zxc_cctx_t* RESTRIC
     const uint8_t* const d_end = dst + dst_capacity;
     // Lowest address a match may reach: the dictionary prefix if any, else dst.
     const uint8_t* const d_floor = dst - dict_size;
-    const uint8_t* const d_end_safe = d_end - (ZXC_PAD_SIZE * 4);  // 128
+    const uint8_t* const d_end_safe =
+        (dst_capacity > ZXC_PAD_SIZE * 4) ? d_end - (ZXC_PAD_SIZE * 4) : dst;  // 128
     // Safety margin for 4x unrolled loop: 4 * (ZXC_SEQ_LL_MASK LL +
     // ZXC_SEQ_ML_MASK+ZXC_LZ_MIN_MATCH_LEN ML) + ZXC_PAD_SIZE Pad = 4 x (255 + 255 + 5) + 32 = 2092
-    const uint8_t* const d_end_fast = d_end - ZXC_DECOMPRESS_TAIL_PAD;  // 2112
+    const uint8_t* const d_end_fast =
+        (dst_capacity > ZXC_DECOMPRESS_TAIL_PAD) ? d_end - ZXC_DECOMPRESS_TAIL_PAD : dst;  // 2112
 
     // Literal margin for the GHI loops: without a varint, ll <= 254 per sequence,
     // so 4 * 254 = 1016. Past that only the cold varint path checks l_ptr.

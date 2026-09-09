@@ -742,13 +742,14 @@ int test_block_api_tiny_capacity(void) {
 
 /* Direct decode and bounce must return the same bytes, literal-heavy blocks
  * sized just above a power of two included: there the carve and the decoder's
- * scratch are tightest. */
+ * scratch are tightest. Small exact destinations cover the decoder's clamped
+ * destination margins. */
 int test_block_api_direct_decode(void) {
     printf("=== TEST: Block API - direct decode and its fallback ===\n");
     /* straddling the powers of two and their tail-pad window */
     static const size_t sizes[] = {
         100, 4096, 4097, 5000, 6208, 6209, 10304, 100000, ZXC_BLOCK_SIZE_MAX};
-    static const int levels[] = {3, 7};
+    static const int levels[] = {1, 3, 7}; /* 1 emits GHI, 3 and 7 emit GLO */
     const size_t max = ZXC_BLOCK_SIZE_MAX;
     const size_t cap = (size_t)zxc_compress_block_bound(max);
     const size_t dbound_max = (size_t)zxc_decompress_block_bound(max);
