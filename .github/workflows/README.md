@@ -87,7 +87,7 @@ Regenerates [`CHANGELOG.md`](../../CHANGELOG.md) with [`git-cliff`](https://git-
 ### wrapper-rust.yml - Wrapper Rust
 **Triggers:** Release published, manual dispatch
 
-Tests and publishes Rust crates to crates.io. Verifies the version matches the release tag, runs tests across platforms, and publishes `zxc-compress-sys` (FFI bindings) followed by `zxc-compress` (safe wrapper).
+Tests and publishes Rust crates to crates.io via trusted publishing. Verifies the version matches the release tag, runs tests across platforms, and publishes `zxc-compress-sys` (FFI bindings) followed by `zxc-compress` (safe wrapper).
 
 ### wrapper-python.yml - Wrapper Python
 **Triggers:** Release published, manual dispatch
@@ -97,12 +97,12 @@ Builds platform-specific wheels using `cibuildwheel` for Linux (x86_64, ARM64), 
 ### wrapper-wasm.yml - Wrapper WASM
 **Triggers:** Release published, publish on main, manual dispatch
 
-Builds the WebAssembly target using Emscripten SDK. Compiles the library with SIMD disabled (scalar codepath) and no threading, then runs a Node.js roundtrip test suite covering all compression levels, reusable contexts, and error handling. Uploads `zxc.js` + `zxc.wasm` as build artifacts.
+Builds the WebAssembly target using Emscripten SDK. Compiles the library with SIMD disabled (scalar codepath) and no threading, then runs a Node.js roundtrip test suite covering all compression levels, reusable contexts, and error handling. Uploads `zxc.js` + `zxc.wasm` as build artifacts. On tags, publishes the `zxc-wasm` package to npm via trusted publishing.
 
 ### wrapper-nodejs.yml - Wrapper Node.js
 **Triggers:** Release published, manual dispatch
 
-Builds and publishes the Node.js package to npm. Handles the compilation of native bindings and ensures the package is correctly versioned and distributed.
+Builds and publishes the Node.js package to npm via trusted publishing. Handles the compilation of native bindings and ensures the package is correctly versioned and distributed.
 
 ### wrapper-go.yml - Wrapper Go
 **Triggers:** Release published, manual dispatch
