@@ -185,6 +185,31 @@ jobs:
                    --error-exitcode=1 \
                    ./zxc_test
 
+      - name: Rapidhash resolution is enforced at configure time
+        shell: bash
+        run: |
+          # A missing or bogus rapidhash path must fail configure, naming the option (#419).
+          trap 'mv -f rapidhash.h.stash src/lib/vendors/rapidhash.h 2>/dev/null || true
+                rm -rf sysinc build_guard' EXIT
+          mkdir -p sysinc && cp src/lib/vendors/rapidhash.h sysinc/
+          mv src/lib/vendors/rapidhash.h rapidhash.h.stash
+
+          # expect <want-rc> <token> [cmake args...]
+          expect() {
+            want=$1 token=$2; shift 2
+            set +e; out=$(cmake -S . -B build_guard "$@" 2>&1); rc=$?; set -e
+            rm -rf build_guard
+            if [ "$rc" -ne "$want" ] || ! grep -q "$token" <<< "$out"; then
+              echo "::error::expected rc=$want and '$token', got rc=$rc"
+              echo "$out"
+              exit 1
+            fi
+          }
+
+          expect 1 ZXC_USE_SYSTEM_RAPIDHASH
+          expect 1 ZXC_USE_SYSTEM_RAPIDHASH -DZXC_USE_SYSTEM_RAPIDHASH=ON -DRAPIDHASH_INCLUDE_DIR=/nonexistent
+          expect 0 "Using system rapidhash" -DZXC_USE_SYSTEM_RAPIDHASH=ON -DRAPIDHASH_INCLUDE_DIR="$PWD/sysinc"
+
       - name: Unicode Linting
         shell: bash
         run: |

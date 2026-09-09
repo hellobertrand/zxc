@@ -12,6 +12,7 @@ project('zxc', 'c',
 )
 
 cc = meson.get_compiler('c')
+fs = import('fs')
 host_cpu = host_machine.cpu_family()
 
 msvc_syntax = cc.get_argument_syntax() == 'msvc'
@@ -60,8 +61,25 @@ endif
 
 inc_public    = include_directories('include')
 inc_private   = include_directories('src/lib')
-rapidhash_inc = include_directories('src/lib/vendors')
-libzxc_includes = [inc_public, inc_private, rapidhash_inc]
+
+# Rapidhash: system or vendored, mirroring ZXC_USE_SYSTEM_RAPIDHASH in CMake.
+# Resolved at setup time so a missing header names the option to set.
+if get_option('use_system_rapidhash')
+  if not cc.has_header('rapidhash.h')
+    error('use_system_rapidhash is enabled but rapidhash.h was not found. ' +
+          'Install rapidhash or add its include directory to c_args.')
+  endif
+  rapidhash_inc = []
+else
+  if not fs.exists('src/lib/vendors/rapidhash.h')
+    error('Vendored rapidhash.h not found in src/lib/vendors. If the vendored ' +
+          'copy was removed on purpose (packaging against a system rapidhash), ' +
+          'configure with -Duse_system_rapidhash=true.')
+  endif
+  rapidhash_inc = [include_directories('src/lib/vendors')]
+endif
+
+libzxc_includes = [inc_public, inc_private] + rapidhash_inc
 
 # =============================================================================
 # SIMD runtime dispatch

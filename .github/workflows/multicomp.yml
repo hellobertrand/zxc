@@ -355,3 +355,30 @@ jobs:
 
       - name: Test (shared)
         run: meson test -C build-shared --print-errorlogs
+
+      - name: Rapidhash resolution is enforced at setup time
+        if: matrix.name == 'Linux x86_64'
+        shell: bash
+        run: |
+          # Meson mirror of the CMake guard in quality.yml (#419).
+          trap 'mv -f rapidhash.h.stash src/lib/vendors/rapidhash.h 2>/dev/null || true
+                rm -rf sysinc build-guard' EXIT
+          mkdir -p sysinc && cp src/lib/vendors/rapidhash.h sysinc/
+          mv src/lib/vendors/rapidhash.h rapidhash.h.stash
+
+          set +e; out=$(meson setup build-guard 2>&1); rc=$?; set -e
+          rm -rf build-guard
+          if [ "$rc" -eq 0 ] || ! grep -q use_system_rapidhash <<< "$out"; then
+            echo "::error::setup should have failed naming use_system_rapidhash, got rc=$rc"
+            echo "$out"
+            exit 1
+          fi
+
+          set +e
+          out=$(CFLAGS="-I$PWD/sysinc" meson setup build-guard -Duse_system_rapidhash=true 2>&1)
+          rc=$?; set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::setup against a system rapidhash should have succeeded"
+            echo "$out"
+            exit 1
+          fi
