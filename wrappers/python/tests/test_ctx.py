@@ -78,3 +78,36 @@ def test_use_after_close():
     dctx.close()
     with pytest.raises(ValueError):
         dctx.decompress(archive)
+
+
+def test_accepts_a_dictionary_object():
+    samples = _samples()
+    d = zxc.Dictionary.train(samples)
+    payload = samples[7]
+    with zxc.Cctx(dict=d) as cctx:
+        archive = cctx.compress(payload)
+    assert archive == zxc.compress(payload, dict=d)
+    assert zxc.get_dict_id(archive) == d.id
+    with zxc.Dctx(dict=d) as dctx:
+        assert dctx.decompress(archive) == payload
+
+
+def test_empty_payload_matches_the_one_shot():
+    with zxc.Cctx() as cctx, zxc.Dctx() as dctx:
+        archive = cctx.compress(b"")
+        assert archive == zxc.compress(b"")
+        assert dctx.decompress(archive) == b""
+
+
+def test_rejects_a_multi_byte_buffer():
+    import array
+
+    with zxc.Cctx() as cctx, pytest.raises(TypeError):
+        cctx.compress(array.array("i", [1, 2, 3]))
+
+
+def test_table_without_dictionary_is_still_checked():
+    with pytest.raises(ValueError):
+        zxc.Cctx(dict_huf=b"short")
+    with pytest.raises(ValueError):
+        zxc.Dctx(dict_huf=b"short")

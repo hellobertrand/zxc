@@ -1180,6 +1180,12 @@ static PyObject* pyzxc_cctx_compress(PyObject* self, PyObject* args) {
     Py_buffer view;
     if (!PyArg_ParseTuple(args, "Oy*", &capsule, &view)) return NULL;
 
+    if (view.itemsize != 1) {
+        PyBuffer_Release(&view);
+        PyErr_SetString(PyExc_TypeError, "expected a byte buffer (itemsize==1)");
+        return NULL;
+    }
+
     pyzxc_cctx_holder_t* h = (pyzxc_cctx_holder_t*)PyCapsule_GetPointer(capsule, ZXC_CCTX_CAPSULE);
     if (!h || !h->cctx) {
         PyBuffer_Release(&view);
@@ -1202,13 +1208,15 @@ static PyObject* pyzxc_cctx_compress(PyObject* self, PyObject* args) {
     copts.dict_size = h->dict_size;
     copts.dict_huf = h->has_huf ? h->huf : NULL;
 
+    // zxc_compress_cctx rejects an empty input; the one-shot accepts it.
     char* dst = PyBytes_AsString(out);
     int64_t nwritten;
-    Py_BEGIN_ALLOW_THREADS nwritten =
-        zxc_compress_cctx(h->cctx, view.buf, src_size, dst, bound, &copts);
-    Py_END_ALLOW_THREADS
+    Py_BEGIN_ALLOW_THREADS;
+    nwritten = src_size == 0 ? zxc_compress(view.buf, 0, dst, bound, &copts)
+                             : zxc_compress_cctx(h->cctx, view.buf, src_size, dst, bound, &copts);
+    Py_END_ALLOW_THREADS;
 
-        PyBuffer_Release(&view);
+    PyBuffer_Release(&view);
 
     if (nwritten < 0) {
         Py_DECREF(out);
@@ -1224,6 +1232,12 @@ static PyObject* pyzxc_dctx_decompress(PyObject* self, PyObject* args) {
     Py_buffer view;
     Py_ssize_t decompress_size;
     if (!PyArg_ParseTuple(args, "Oy*n", &capsule, &view, &decompress_size)) return NULL;
+
+    if (view.itemsize != 1) {
+        PyBuffer_Release(&view);
+        PyErr_SetString(PyExc_TypeError, "expected a byte buffer (itemsize==1)");
+        return NULL;
+    }
 
     pyzxc_dctx_holder_t* h = (pyzxc_dctx_holder_t*)PyCapsule_GetPointer(capsule, ZXC_DCTX_CAPSULE);
     if (!h || !h->dctx) {
@@ -1251,11 +1265,12 @@ static PyObject* pyzxc_dctx_decompress(PyObject* self, PyObject* args) {
 
     char* dst = PyBytes_AsString(out);
     int64_t nwritten;
-    Py_BEGIN_ALLOW_THREADS nwritten = zxc_decompress_dctx(h->dctx, view.buf, (size_t)view.len, dst,
-                                                          (size_t)decompress_size, &dopts);
-    Py_END_ALLOW_THREADS
+    Py_BEGIN_ALLOW_THREADS;
+    nwritten = zxc_decompress_dctx(h->dctx, view.buf, (size_t)view.len, dst,
+                                   (size_t)decompress_size, &dopts);
+    Py_END_ALLOW_THREADS;
 
-        PyBuffer_Release(&view);
+    PyBuffer_Release(&view);
 
     if (nwritten < 0) {
         Py_DECREF(out);
@@ -1267,6 +1282,7 @@ static PyObject* pyzxc_dctx_decompress(PyObject* self, PyObject* args) {
 
 static PyObject* pyzxc_cctx_free(PyObject* self, PyObject* capsule) {
     (void)self;
+    if (!PyCapsule_IsValid(capsule, ZXC_CCTX_CAPSULE)) Py_RETURN_NONE;
     pyzxc_cctx_holder_t* h = (pyzxc_cctx_holder_t*)PyCapsule_GetPointer(capsule, ZXC_CCTX_CAPSULE);
     if (h && h->cctx) {
         zxc_free_cctx(h->cctx);
@@ -1277,6 +1293,7 @@ static PyObject* pyzxc_cctx_free(PyObject* self, PyObject* capsule) {
 
 static PyObject* pyzxc_dctx_free(PyObject* self, PyObject* capsule) {
     (void)self;
+    if (!PyCapsule_IsValid(capsule, ZXC_DCTX_CAPSULE)) Py_RETURN_NONE;
     pyzxc_dctx_holder_t* h = (pyzxc_dctx_holder_t*)PyCapsule_GetPointer(capsule, ZXC_DCTX_CAPSULE);
     if (h && h->dctx) {
         zxc_free_dctx(h->dctx);

@@ -602,6 +602,7 @@ class Cctx:
         dict=None,
         dict_huf=None,
     ):
+        dict, dict_huf = _split_dict_arg(dict, dict_huf)
         self._handle = pyzxc_cctx_create(level, checksum, dict, dict_huf)
 
     def compress(self, data) -> bytes:
@@ -640,9 +641,10 @@ class Dctx:
     __slots__ = ("_handle",)
 
     def __init__(self, checksum: bool = False, dict=None, dict_huf=None):
+        dict, dict_huf = _split_dict_arg(dict, dict_huf)
         self._handle = pyzxc_dctx_create(checksum, dict, dict_huf)
 
-    def decompress(self, data, decompress_size: int = None) -> bytes:
+    def decompress(self, data, decompress_size=None) -> bytes:
         """Decompress one archive produced by :meth:`Cctx.compress`.
 
         *decompress_size* defaults to the size stored in the archive footer.

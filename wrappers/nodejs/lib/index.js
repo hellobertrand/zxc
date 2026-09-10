@@ -392,7 +392,12 @@ function decompress(data, options = {}) {
  *   const archives = payloads.map((p) => cctx.compress(p));
  *   cctx.close();
  */
-const Cctx = native.Cctx;
+class Cctx extends native.Cctx {
+  constructor(options = {}) {
+    const { dict, dictHuf } = _splitDictOption(options);
+    super({ ...options, dict, dictHuf });
+  }
+}
 
 /**
  * Reusable decompression context, mirroring {@link Cctx}. Options:
@@ -403,7 +408,12 @@ const Cctx = native.Cctx;
  *   const payloads = archives.map((a) => dctx.decompress(a));
  *   dctx.close();
  */
-const Dctx = native.Dctx;
+class Dctx extends native.Dctx {
+  constructor(options = {}) {
+    const { dict, dictHuf } = _splitDictOption(options);
+    super({ ...options, dict, dictHuf });
+  }
+}
 
 /**
  * Push-based, single-threaded compression stream.

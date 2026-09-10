@@ -574,7 +574,8 @@ class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
             return env.Undefined();
         }
         Napi::Buffer<uint8_t> src = info[0].As<Napi::Buffer<uint8_t>>();
-        const uint64_t bound = zxc_compress_bound(src.Length());
+        const size_t src_size = src.Length();
+        const uint64_t bound = zxc_compress_bound(src_size);
         std::unique_ptr<uint8_t[]> dst(new (std::nothrow) uint8_t[static_cast<size_t>(bound)]);
         if (!dst) {
             Napi::Error::New(env, "zxc: allocation failed for compression scratch")
@@ -589,7 +590,12 @@ class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
         opts.dict_size = dict_.size();
         opts.dict_huf = huf_.empty() ? nullptr : huf_.data();
 
-        int64_t n = zxc_compress_cctx(cctx_, src.Data(), src.Length(), dst.get(), bound, &opts);
+        // zxc_compress_cctx rejects an empty input; the one-shot accepts it.
+        static const uint8_t kEmptySrc = 0;
+        const void* src_ptr = src_size > 0 ? static_cast<const void*>(src.Data()) : &kEmptySrc;
+        int64_t n = src_size == 0
+                        ? zxc_compress(src_ptr, 0, dst.get(), bound, &opts)
+                        : zxc_compress_cctx(cctx_, src_ptr, src_size, dst.get(), bound, &opts);
         if (n < 0) return ThrowZxcError(env, static_cast<int>(n));
         return Napi::Buffer<uint8_t>::Copy(env, dst.get(), static_cast<size_t>(n));
     }
@@ -644,14 +650,12 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
             return env.Undefined();
         }
         Napi::Buffer<uint8_t> src = info[0].As<Napi::Buffer<uint8_t>>();
-        const uint64_t orig = zxc_get_decompressed_size(src.Data(), src.Length());
-        std::unique_ptr<uint8_t[]> dst(new (std::nothrow)
-                                           uint8_t[static_cast<size_t>(orig ? orig : 1)]);
-        if (!dst) {
-            Napi::Error::New(env, "zxc: allocation failed for decompression scratch")
-                .ThrowAsJavaScriptException();
-            return env.Undefined();
-        }
+        const size_t orig =
+            static_cast<size_t>(zxc_get_decompressed_size(src.Data(), src.Length()));
+        Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, orig);
+
+        static uint8_t kEmptyDst = 0;
+        void* dst = orig > 0 ? static_cast<void*>(dst_buf.Data()) : static_cast<void*>(&kEmptyDst);
 
         zxc_decompress_opts_t opts = {0};
         opts.checksum_enabled = checksum_;
@@ -659,10 +663,12 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
         opts.dict_size = dict_.size();
         opts.dict_huf = huf_.empty() ? nullptr : huf_.data();
 
-        int64_t n = zxc_decompress_dctx(dctx_, src.Data(), src.Length(), dst.get(),
-                                        static_cast<size_t>(orig), &opts);
+        int64_t n = zxc_decompress_dctx(dctx_, src.Data(), src.Length(), dst, orig, &opts);
         if (n < 0) return ThrowZxcError(env, static_cast<int>(n));
-        return Napi::Buffer<uint8_t>::Copy(env, dst.get(), static_cast<size_t>(n));
+        // napi buffers come uninitialised: slice a short write, never expose
+        // the stale tail.
+        if (static_cast<size_t>(n) == orig) return dst_buf;
+        return Napi::Buffer<uint8_t>::Copy(env, dst_buf.Data(), static_cast<size_t>(n));
     }
 
     Napi::Value Close(const Napi::CallbackInfo& info) {

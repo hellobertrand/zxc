@@ -84,6 +84,35 @@ describe("Cctx / Dctx", () => {
     plain.close();
   });
 
+  test("accept a Dictionary instance like the one-shot API", () => {
+    const set = samples();
+    const d = zxc.Dictionary.train(set);
+    const payload = set[7];
+    const cctx = new zxc.Cctx({ dict: d });
+    const archive = cctx.compress(payload);
+    expect(archive.equals(zxc.compress(payload, { dict: d }))).toBe(true);
+    expect(zxc.getDictId(archive)).toBe(d.id);
+    const dctx = new zxc.Dctx({ dict: d });
+    expect(dctx.decompress(archive).equals(payload)).toBe(true);
+    cctx.close();
+    dctx.close();
+  });
+
+  test("compress an empty payload like the one-shot API", () => {
+    const cctx = new zxc.Cctx();
+    const dctx = new zxc.Dctx();
+    const archive = cctx.compress(Buffer.alloc(0));
+    expect(archive.equals(zxc.compress(Buffer.alloc(0)))).toBe(true);
+    expect(dctx.decompress(archive).length).toBe(0);
+    cctx.close();
+    dctx.close();
+  });
+
+  test("check the table length even without a dictionary", () => {
+    expect(() => new zxc.Cctx({ dictHuf: Buffer.alloc(3) })).toThrow();
+    expect(() => new zxc.Dctx({ dictHuf: Buffer.alloc(3) })).toThrow();
+  });
+
   test("reject a table that is not 128 bytes", () => {
     const dict = zxc.trainDict(samples());
     expect(() => new zxc.Cctx({ dict, dictHuf: Buffer.alloc(3) })).toThrow();

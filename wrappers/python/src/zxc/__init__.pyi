@@ -137,7 +137,7 @@ class Cctx:
         self,
         level: int = LEVEL_DEFAULT,
         checksum: bool = False,
-        dict: bytes | None = None,
+        dict: "Dictionary | bytes | None" = None,
         dict_huf: bytes | None = None,
     ) -> None: ...
     def compress(self, data: bytes) -> bytes: ...
@@ -151,7 +151,7 @@ class Dctx:
     def __init__(
         self,
         checksum: bool = False,
-        dict: bytes | None = None,
+        dict: "Dictionary | bytes | None" = None,
         dict_huf: bytes | None = None,
     ) -> None: ...
     def decompress(self, data: bytes, decompress_size: int | None = None) -> bytes: ...

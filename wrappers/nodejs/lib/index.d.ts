@@ -226,25 +226,21 @@ export interface CStreamOptions {
   blockSize?: number;
 }
 
-/**
- * Push-based, single-threaded compression stream.
- *
- * The Node.js counterpart of the C `zxc_cstream`. Each call to
- * `compress(buf)` returns the compressed bytes produced from that input
- * (may be empty if the bytes fit in the internal block accumulator).
- * Always call `end()` to flush the residual block, EOF marker and footer.
- */
 export interface CctxOptions {
   level?: number;
   checksum?: boolean;
-  dict?: Buffer;
-  dictHuf?: Buffer;
+  /** A {@link Dictionary}, or raw dictionary content. */
+  dict?: Dictionary | Buffer | Uint8Array;
+  /** Shared literal table (128 bytes); a {@link Dictionary} carries its own. */
+  dictHuf?: Buffer | Uint8Array;
 }
 
 export interface DctxOptions {
   checksum?: boolean;
-  dict?: Buffer;
-  dictHuf?: Buffer;
+  /** A {@link Dictionary}, or raw dictionary content. */
+  dict?: Dictionary | Buffer | Uint8Array;
+  /** Shared literal table (128 bytes); a {@link Dictionary} carries its own. */
+  dictHuf?: Buffer | Uint8Array;
 }
 
 /** Reusable compression context: one archive per `compress()` call. */
@@ -261,6 +257,14 @@ export class Dctx {
   close(): void;
 }
 
+/**
+ * Push-based, single-threaded compression stream.
+ *
+ * The Node.js counterpart of the C `zxc_cstream`. Each call to
+ * `compress(buf)` returns the compressed bytes produced from that input
+ * (may be empty if the bytes fit in the internal block accumulator).
+ * Always call `end()` to flush the residual block, EOF marker and footer.
+ */
 export class CStream {
   constructor(options?: CStreamOptions);
   /** Push input and return any compressed bytes produced this call. */
