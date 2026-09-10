@@ -555,7 +555,9 @@ export default async function createZXC(moduleOverrides, factory) {
     const checksum = (opts && opts.checksum) || false;
     // zxc_compress_cctx writes no seek table: refuse rather than drop it.
     if (opts && opts.seekable)
-      throw new Error("ZXC: seekable is not supported on a compression context");
+      throw new Error(
+        "ZXC: seekable is not supported on a compression context",
+      );
 
     // The options struct and the dictionary copies live as long as the context.
     let { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>

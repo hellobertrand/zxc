@@ -1208,12 +1208,10 @@ static PyObject* pyzxc_cctx_compress(PyObject* self, PyObject* args) {
     copts.dict_size = h->dict_size;
     copts.dict_huf = h->has_huf ? h->huf : NULL;
 
-    // zxc_compress_cctx rejects an empty input; the one-shot accepts it.
     char* dst = PyBytes_AsString(out);
     int64_t nwritten;
     Py_BEGIN_ALLOW_THREADS;
-    nwritten = src_size == 0 ? zxc_compress(view.buf, 0, dst, bound, &copts)
-                             : zxc_compress_cctx(h->cctx, view.buf, src_size, dst, bound, &copts);
+    nwritten = zxc_compress_cctx(h->cctx, view.buf, src_size, dst, bound, &copts);
     Py_END_ALLOW_THREADS;
 
     PyBuffer_Release(&view);

@@ -590,12 +590,7 @@ class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
         opts.dict_size = dict_.size();
         opts.dict_huf = huf_.empty() ? nullptr : huf_.data();
 
-        // zxc_compress_cctx rejects an empty input; the one-shot accepts it.
-        static const uint8_t kEmptySrc = 0;
-        const void* src_ptr = src_size > 0 ? static_cast<const void*>(src.Data()) : &kEmptySrc;
-        int64_t n = src_size == 0
-                        ? zxc_compress(src_ptr, 0, dst.get(), bound, &opts)
-                        : zxc_compress_cctx(cctx_, src_ptr, src_size, dst.get(), bound, &opts);
+        int64_t n = zxc_compress_cctx(cctx_, src.Data(), src_size, dst.get(), bound, &opts);
         if (n < 0) return ThrowZxcError(env, static_cast<int>(n));
         return Napi::Buffer<uint8_t>::Copy(env, dst.get(), static_cast<size_t>(n));
     }

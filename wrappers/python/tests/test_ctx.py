@@ -7,7 +7,8 @@ import zxc
 
 def _samples(n=64):
     return [
-        b'{"id":%d,"user":"alice_%d","mail":"a%d@example.com","role":"member"}' % (i, i, i)
+        b'{"id":%d,"user":"alice_%d","mail":"a%d@example.com","role":"member"}'
+        % (i, i, i)
         for i in range(n)
     ]
 
