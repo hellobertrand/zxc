@@ -1256,37 +1256,37 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
 /**
  * @brief Computes the 1-byte checksum for block headers.
  *
- * Implementation based on Marsaglia's Xorshift (PRNG) principles.
+ * Multiply, then fold from the top. Flipping bit @c i moves the product by exactly
+ * `+/- (ZXC_HASH_PRIME1 << i)`, and no shift of that constant leaves 0x00 or 0xFF
+ * in the top byte, so the carry cannot absorb it: every single-bit error is caught,
+ * not merely likely to be. Folding from the top is required - a product's low bits
+ * depend only on the input's low bits.
  *
  * @param[in] p The 8 header bytes to hash.
  * @return The checksum byte.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
-    const uint64_t v = zxc_le64(p);
-    uint64_t h = v ^ ZXC_HASH_PRIME1;
-    h ^= h << 13;
-    h ^= h >> 7;
-    h ^= h << 17;
-    return (uint8_t)((h >> 32) ^ h);
+    const uint64_t h = (zxc_le64(p) ^ ZXC_HASH_PRIME1) * ZXC_HASH_PRIME1;
+
+    return (uint8_t)(h >> 56);
 }
 
 /**
  * @brief Computes the 2-byte checksum for file headers.
  *
- * Implementation based on Marsaglia's Xorshift (PRNG) principles.
+ * One product per half, summed; same argument as @ref zxc_hash8 on the top halfword.
+ * The halves must take different constants and must not be XOR-folded first: that
+ * gave bit @c k of byte @c n and of byte @c n+8 the same weight, so both flipping
+ * cancelled - 48 two-bit patterns no header content could reveal.
  *
  * @param[in] p The 16 header bytes to hash.
  * @return The checksum halfword.
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
-    const uint64_t v1 = zxc_le64(p);
-    const uint64_t v2 = zxc_le64(p + 8);
-    uint64_t h = v1 ^ v2 ^ ZXC_HASH_PRIME2;
-    h ^= h << 13;
-    h ^= h >> 7;
-    h ^= h << 17;
-    const uint32_t res = (uint32_t)((h >> 32) ^ h);
-    return (uint16_t)((res >> 16) ^ res);
+    const uint64_t v1 = (zxc_le64(p) ^ ZXC_HASH_PRIME2) * ZXC_HASH_PRIME2;
+    const uint64_t v2 = (zxc_le64(p + 8) ^ ZXC_HASH_PRIME1) * ZXC_HASH_PRIME1;
+
+    return (uint16_t)((v1 + v2) >> 48);
 }
 
 /**
