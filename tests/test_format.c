@@ -1084,3 +1084,62 @@ int test_forged_block_comp_size() {
     printf("PASS\n\n");
     return 1;
 }
+
+/* Every protected bit must move its checksum - what zxc_hash8/zxc_hash16 are built
+ * for, and what an XOR/shift mix cannot give: linear over GF(2), it lets any bit
+ * whose signature is zero stay invisible. Exhaustive over positions, sampled over
+ * header contents. */
+int test_header_checksum_single_bit() {
+    printf("=== TEST: every header bit moves its checksum ===\n");
+
+    const int rounds = 4000;
+    uint32_t seed = 0x5EED1234u;
+
+    // Block header: bytes 0-6 are covered, byte 7 holds the checksum.
+    for (int r = 0; r < rounds; r++) {
+        uint8_t h[ZXC_BLOCK_HEADER_SIZE];
+        for (size_t i = 0; i < sizeof(h); i++) {
+            seed = seed * 1664525u + 1013904223u;
+            h[i] = (uint8_t)(seed >> 24);
+        }
+        h[7] = 0;
+        const uint8_t ref = zxc_hash8(h);
+        for (int bit = 0; bit < 56; bit++) {
+            h[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            const uint8_t got = zxc_hash8(h);
+            h[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            if (got == ref) {
+                printf("  [FAIL] hash8: flipping byte %d bit %d leaves 0x%02X\n", bit >> 3, bit & 7,
+                       ref);
+                return 0;
+            }
+        }
+    }
+    printf("  [PASS] hash8: all 56 bits, %d headers\n", rounds);
+
+    // File header: bytes 0-13 are covered, bytes 14-15 hold the checksum.
+    for (int r = 0; r < rounds; r++) {
+        uint8_t h[ZXC_FILE_HEADER_SIZE];
+        for (size_t i = 0; i < sizeof(h); i++) {
+            seed = seed * 1664525u + 1013904223u;
+            h[i] = (uint8_t)(seed >> 24);
+        }
+        h[14] = 0;
+        h[15] = 0;
+        const uint16_t ref = zxc_hash16(h);
+        for (int bit = 0; bit < 112; bit++) {
+            h[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            const uint16_t got = zxc_hash16(h);
+            h[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            if (got == ref) {
+                printf("  [FAIL] hash16: flipping byte %d bit %d leaves 0x%04X\n", bit >> 3,
+                       bit & 7, ref);
+                return 0;
+            }
+        }
+    }
+    printf("  [PASS] hash16: all 112 bits, %d headers\n", rounds);
+
+    printf("PASS\n\n");
+    return 1;
+}

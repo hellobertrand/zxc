@@ -202,6 +202,7 @@ int test_header_checksum(void);
 int test_global_checksum_order(void);
 int test_forged_block_comp_size(void);
 int test_chunk_size_code(void);
+int test_header_checksum_single_bit(void);
 
 /* Misc */
 int test_error_name(void);
