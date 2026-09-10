@@ -1339,7 +1339,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 parse_done:;
     // Dictionary-table trainer hook: accumulate the REAL post-LZ literal
     // frequencies (see zxc_train_dict_huf). Cold path, NULL outside training.
-    if (UNLIKELY(ctx->lit_freq_acc != NULL)) {
+    if (UNLIKELY(ctx->lit_freq_acc)) {
         for (size_t i = 0; i < lit_c; i++) ctx->lit_freq_acc[literals[i]]++;
     }
 

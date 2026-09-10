@@ -400,12 +400,12 @@ int test_pstream_invalid_args(void) {
     {
         static const uint8_t d[4] = {1, 2, 3, 4};
         zxc_compress_opts_t copts = {.level = 3, .dict = d, .dict_size = sizeof(d)};
-        if (zxc_cstream_create(&copts) != NULL) {
+        if (zxc_cstream_create(&copts)) {
             printf("  [FAIL] cstream_create must reject dict opts\n");
             return 0;
         }
         zxc_decompress_opts_t dopts_dict = {.dict = d, .dict_size = sizeof(d)};
-        if (zxc_dstream_create(&dopts_dict) != NULL) {
+        if (zxc_dstream_create(&dopts_dict)) {
             printf("  [FAIL] dstream_create must reject dict opts\n");
             return 0;
         }
@@ -475,7 +475,7 @@ int test_pstream_truncated_input(void) {
     uint8_t* dec = pstream_decompress_in_chunks(comp, trunc_size, 1024, 1024, 1, &dec_size);
     /* Either the helper returns NULL (error during decode), or it returns a
      * partial buffer that doesn't match, in both cases, NOT a clean success. */
-    const int ok = (dec == NULL) || (dec_size != size);
+    const int ok = !dec || (dec_size != size);
     free(src);
     free(comp);
     free(dec);

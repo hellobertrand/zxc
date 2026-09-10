@@ -383,7 +383,7 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
  * released by @ref zxc_cctx_free.
  */
 int zxc_cctx_alloc_entropy_scratch(zxc_cctx_t* ctx) {
-    if (LIKELY(ctx->pivco_scratch != NULL)) return ZXC_OK;
+    if (LIKELY(ctx->pivco_scratch)) return ZXC_OK;
 
     size_t sz_tok = 0;
     size_t sz_pivco = 0;

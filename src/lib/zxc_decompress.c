@@ -761,7 +761,7 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
  * @return @ref ZXC_OK, or @ref ZXC_ERROR_MEMORY on allocation failure.
  */
 static ZXC_NOINLINE ZXC_COLD int zxc_ensure_entropy_scratch(const zxc_cctx_t* RESTRICT ctx) {
-    if (LIKELY(ctx->pivco_scratch != NULL)) return ZXC_OK;
+    if (LIKELY(ctx->pivco_scratch)) return ZXC_OK;
     return zxc_cctx_alloc_entropy_scratch((zxc_cctx_t*)(uintptr_t)ctx);
 }
 

@@ -22,16 +22,13 @@
 /**
  * @brief Computes the dictionary identifier for @p dict (and optional table).
  *
- * Public API; see @c zxc_dict.h. One checksum over the content, chained with
- * the packed Huffman lengths so a single id covers both. Stored in the archive
- * header and re-checked on decode.
+ * Public API; see @c zxc_dict.h. A checksum over the content, then a second one
+ * over the packed Huffman lengths seeded by the first, so a single id covers
+ * both. Stored in the archive header and re-checked on decode.
  */
 uint32_t zxc_dict_id(const void* RESTRICT dict, const size_t dict_size,
                      const void* RESTRICT huf_lengths) {
     if (UNLIKELY(!dict || dict_size == 0)) return 0;
-    // One logical hash over the real bytes only: the content checksum seeds
-    // the table checksum (content and table are not contiguous at the API
-    // level, so chaining avoids both a concat copy and a synthetic buffer).
     const uint32_t base = zxc_checksum(dict, dict_size, 0, ZXC_CHECKSUM_RAPIDHASH);
     if (!huf_lengths) return base;
     return zxc_checksum(huf_lengths, ZXC_HUF_TABLE_SIZE, base, ZXC_CHECKSUM_RAPIDHASH);

@@ -1422,13 +1422,16 @@ void zxc_aligned_free(void* ptr);
 /**
  * @brief Calculates a 32-bit hash for a given input buffer.
  *
- * Pass @p seed 0 for a standalone checksum. A non-zero @p seed chains the hash
- * over non-contiguous buffers - `zxc_checksum(b, bn, zxc_checksum(a, an, 0, m), m)`
- * hashes each byte once without a concat copy.
+ * Pass @p seed 0 for a standalone checksum. A non-zero @p seed derives one
+ * checksum from another: the first 64-bit hash is folded to 32 bits, and that
+ * fold is all the seed carries. So
+ * `zxc_checksum(b, bn, zxc_checksum(a, an, 0, m), m)` is a two-stage value over
+ * the pair (a, b), not the checksum of `a || b`; the two differ. Use it to bind
+ * two buffers under one id, never to hash a split buffer incrementally.
  *
  * @param[in] input Pointer to the data buffer.
  * @param[in] len Length of the data in bytes.
- * @param[in] seed Previous 32-bit checksum to chain from, or 0 to start fresh.
+ * @param[in] seed Previous 32-bit checksum to derive from, or 0 to start fresh.
  * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_RAPIDHASH).
  * @return The calculated 32-bit hash value.
  */

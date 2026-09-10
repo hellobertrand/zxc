@@ -220,7 +220,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     uint8_t flags = buf[6];
     int has_checksum = (flags & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
     int has_dict = (flags & ZXC_FILE_FLAG_HAS_DICTIONARY) ? 1 : 0;
-    const int want_dict = (gc->opts.dict != NULL && gc->opts.dict_size > 0);
+    const int want_dict = (gc->opts.dict && gc->opts.dict_size > 0);
     CHECK((flags & 0x0FU) == 0, "checksum algo id %u, expected 0", flags & 0x0FU);
     CHECK((flags & 0x30U) == 0, "reserved flag bits set (0x%02X)",
           flags); /* bit 6 = HAS_DICTIONARY */

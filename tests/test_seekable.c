@@ -456,7 +456,7 @@ int test_seekable_non_seekable_reject() {
     }
 
     zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
-    if (s != NULL) {
+    if (s) {
         printf("Failed: expected NULL for non-seekable\n");
         zxc_seekable_free(s);
         free(src);
@@ -793,7 +793,7 @@ int test_seekable_open_file() {
     fclose(tf);
 
     /* NULL input rejection */
-    if (zxc_seekable_open_file(NULL) != NULL) {
+    if (zxc_seekable_open_file(NULL)) {
         printf("Failed: NULL not rejected\n");
         free(src);
         free(dst);
@@ -920,7 +920,7 @@ int test_seekable_truncated_input() {
 
     /* Truncate to half */
     zxc_seekable* s = zxc_seekable_open(dst, (size_t)(csize / 2));
-    if (s != NULL) {
+    if (s) {
         printf("Failed: should reject truncated data\n");
         zxc_seekable_free(s);
         free(src);
@@ -930,7 +930,7 @@ int test_seekable_truncated_input() {
 
     /* Truncate to just header */
     s = zxc_seekable_open(dst, 16);
-    if (s != NULL) {
+    if (s) {
         printf("Failed: should reject header-only data\n");
         zxc_seekable_free(s);
         free(src);
@@ -940,7 +940,7 @@ int test_seekable_truncated_input() {
 
     /* Zero bytes */
     s = zxc_seekable_open(dst, 0);
-    if (s != NULL) {
+    if (s) {
         printf("Failed: should reject zero-length data\n");
         zxc_seekable_free(s);
         free(src);
@@ -1421,7 +1421,7 @@ int test_seekable_open_reader() {
     zxc_seekable_free(s);
 
     /* NULL reader rejection */
-    if (zxc_seekable_open_reader(NULL) != NULL) {
+    if (zxc_seekable_open_reader(NULL)) {
         printf("Failed: NULL reader not rejected\n");
         free(src);
         free(dst);
@@ -1431,7 +1431,7 @@ int test_seekable_open_reader() {
 
     /* Missing read_at rejection */
     zxc_reader_t bad = {.read_at = NULL, .ctx = NULL, .size = 100};
-    if (zxc_seekable_open_reader(&bad) != NULL) {
+    if (zxc_seekable_open_reader(&bad)) {
         printf("Failed: NULL read_at not rejected\n");
         free(src);
         free(dst);
@@ -1441,7 +1441,7 @@ int test_seekable_open_reader() {
 
     /* Zero size rejection */
     zxc_reader_t empty = {.read_at = reader_test_read_at, .ctx = &mctx, .size = 0};
-    if (zxc_seekable_open_reader(&empty) != NULL) {
+    if (zxc_seekable_open_reader(&empty)) {
         printf("Failed: zero size not rejected\n");
         free(src);
         free(dst);
@@ -1451,7 +1451,7 @@ int test_seekable_open_reader() {
 
     /* Short read at open: must reject */
     zxc_reader_t short_r = {.read_at = reader_short_read_at, .ctx = NULL, .size = (uint64_t)csize};
-    if (zxc_seekable_open_reader(&short_r) != NULL) {
+    if (zxc_seekable_open_reader(&short_r)) {
         printf("Failed: short-read reader not rejected\n");
         free(src);
         free(dst);
@@ -1461,7 +1461,7 @@ int test_seekable_open_reader() {
 
     /* Negative return at open: must reject */
     zxc_reader_t err_r = {.read_at = reader_error_read_at, .ctx = NULL, .size = (uint64_t)csize};
-    if (zxc_seekable_open_reader(&err_r) != NULL) {
+    if (zxc_seekable_open_reader(&err_r)) {
         printf("Failed: error-returning reader not rejected\n");
         free(src);
         free(dst);

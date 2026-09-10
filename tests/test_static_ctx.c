@@ -187,7 +187,7 @@ int test_static_ctx_workspace_too_small(void) {
     }
 
     zxc_compress_opts_t opts = {.level = ZXC_LEVEL_DEFAULT, .block_size = block_size};
-    if (zxc_init_static_cctx(ws, needed - 1, &opts) != NULL) {
+    if (zxc_init_static_cctx(ws, needed - 1, &opts)) {
         printf("  [FAIL] init should reject undersized workspace\n");
         test_aligned_free(ws);
         return 0;
@@ -453,16 +453,16 @@ int test_static_ctx_null_inputs(void) {
     printf("=== TEST: Static Context API - NULL inputs ===\n");
 
     zxc_compress_opts_t opts = {.level = 3, .block_size = 4096};
-    if (zxc_init_static_cctx(NULL, 65536, &opts) != NULL) {
+    if (zxc_init_static_cctx(NULL, 65536, &opts)) {
         printf("  [FAIL] init_static_cctx(NULL workspace) should fail\n");
         return 0;
     }
     uint8_t ws[16384];
-    if (zxc_init_static_cctx(ws, sizeof(ws), NULL) != NULL) {
+    if (zxc_init_static_cctx(ws, sizeof(ws), NULL)) {
         printf("  [FAIL] init_static_cctx(NULL opts) should fail\n");
         return 0;
     }
-    if (zxc_init_static_dctx(NULL, 65536, 4096) != NULL) {
+    if (zxc_init_static_dctx(NULL, 65536, 4096)) {
         printf("  [FAIL] init_static_dctx(NULL workspace) should fail\n");
         return 0;
     }
