@@ -408,11 +408,17 @@ single-buffer decode, use `zxc_decompress_inplace` below.
 **Asking without a destination**: a NULL `dst`, or a `dst_capacity` of 0,
 decodes nothing and reports whether the archive holds anything: `0` for a
 well-formed empty archive, `ZXC_ERROR_DST_TOO_SMALL` when it stores a payload,
-and the archive's own error otherwise. The verdict is the one a call with a
-destination would have returned, checksum and dictionary binding included, so
-a probe never waves through an archive the decode would refuse. A NULL `dst`
-with a non-zero `dst_capacity` is a caller error (`ZXC_ERROR_NULL_INPUT`), not
-a probe.
+and the archive's own error otherwise.
+
+A probe never waves through an archive the decode would refuse: a `0` here
+means a call with a destination would have returned `0` too, checksum and
+dictionary binding included. Not the reverse, since nothing is decoded: an
+archive that stores a payload reports `ZXC_ERROR_DST_TOO_SMALL` even where a
+decode would name the actual fault (a footer contradicting the blocks, say).
+Callers that need that fault must decode into a buffer.
+
+A NULL `dst` with a non-zero `dst_capacity` is a caller error
+(`ZXC_ERROR_NULL_INPUT`), not a probe.
 
 **Returns**: decompressed size, `0` for an empty archive, or negative
 `zxc_error_t`.

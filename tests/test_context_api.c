@@ -261,11 +261,53 @@ int test_estimate_cctx_size() {
     return 1;
 }
 
-/* The invariant a size probe has to hold: asking without a destination must
- * answer exactly what asking with one would, through both entry points. */
-static int probe_agrees(const char* what, const uint8_t* arc, const size_t n,
-                        const zxc_decompress_opts_t* opts, const int64_t want) {
-    uint8_t out[256];
+/* A seek table sits between the EOF block and the footer. The one-shot reads
+ * the footer from the end of the archive; the context path used to read it
+ * straight after the EOF block and parse the seek table as the footer, so it
+ * refused archives zxc_decompress() accepts. */
+int test_context_api_seekable_frame(void) {
+    printf("=== TEST: Context API - seekable archives decode through a context ===\n");
+    static uint8_t body[16384], arc[24576], out[16384];
+    for (size_t i = 0; i < sizeof(body); i++) body[i] = (uint8_t)('a' + (i % 23));
+
+    zxc_compress_opts_t co = {.level = 3, .block_size = 4096, .seekable = 1};
+    const int64_t n = zxc_compress(body, sizeof(body), arc, sizeof(arc), &co);
+    if (n <= 0) {
+        printf("  [FAIL] seekable compress returned %lld\n", (long long)n);
+        return 0;
+    }
+    zxc_dctx* dctx = zxc_create_dctx();
+    if (!dctx) {
+        printf("  [FAIL] zxc_create_dctx\n");
+        return 0;
+    }
+    const int64_t d1 = zxc_decompress(arc, (size_t)n, out, sizeof(out), NULL);
+    memset(out, 0, sizeof(out));
+    const int64_t d2 = zxc_decompress_dctx(dctx, arc, (size_t)n, out, sizeof(out), NULL);
+    const int same = (d2 == (int64_t)sizeof(body)) && memcmp(out, body, sizeof(body)) == 0;
+    const int64_t p1 = zxc_decompress(arc, (size_t)n, NULL, 0, NULL);
+    const int64_t p2 = zxc_decompress_dctx(dctx, arc, (size_t)n, NULL, 0, NULL);
+    zxc_free_dctx(dctx);
+
+    if (d1 != (int64_t)sizeof(body) || !same || p1 != ZXC_ERROR_DST_TOO_SMALL || p1 != p2) {
+        printf("  [FAIL] one-shot %lld, context %lld (bytes %s), probes %lld %lld\n", (long long)d1,
+               (long long)d2, same ? "ok" : "differ", (long long)p1, (long long)p2);
+        return 0;
+    }
+    printf("  [PASS] seek table between EOF and footer: both entry points agree\n");
+    printf("PASS\n\n");
+    return 1;
+}
+
+/* Pins both halves of the no-destination contract, through both entry points:
+ * what the probe answers, and what a real decode of the same bytes answers.
+ * They agree on every archive that reports an empty payload. On one that stores
+ * data the probe decodes nothing and can only say "give me a buffer", so the
+ * two verdicts are pinned separately rather than assumed equal. */
+static int probe_and_decode(const char* what, const uint8_t* arc, const size_t n,
+                            const zxc_decompress_opts_t* opts, const int64_t want_probe,
+                            const int64_t want_decode) {
+    static uint8_t out[8192];
     zxc_dctx* dctx = zxc_create_dctx();
     if (!dctx) {
         printf("  [FAIL] %s: zxc_create_dctx\n", what);
@@ -276,9 +318,10 @@ static int probe_agrees(const char* what, const uint8_t* arc, const size_t n,
     const int64_t d1 = zxc_decompress(arc, n, out, sizeof(out), opts);
     const int64_t d2 = zxc_decompress_dctx(dctx, arc, n, out, sizeof(out), opts);
     zxc_free_dctx(dctx);
-    if (p1 == want && p2 == want && d1 == want && d2 == want) return 1;
-    printf("  [FAIL] %s: probe %lld %lld, decode %lld %lld, want %lld\n", what, (long long)p1,
-           (long long)p2, (long long)d1, (long long)d2, (long long)want);
+    if (p1 == want_probe && p2 == want_probe && d1 == want_decode && d2 == want_decode) return 1;
+    printf("  [FAIL] %s: probe %lld %lld (want %lld), decode %lld %lld (want %lld)\n", what,
+           (long long)p1, (long long)p2, (long long)want_probe, (long long)d1, (long long)d2,
+           (long long)want_decode);
     return 0;
 }
 
@@ -315,10 +358,11 @@ int test_context_api_empty_input(void) {
          * than tested one by one, so a regression shows every shape it broke. */
         const uint8_t junk[36] = {0};
         int disagreed = 0;
-        disagreed += !probe_agrees("empty archive", from_ctx, (size_t)n2, NULL, 0);
-        disagreed += !probe_agrees("zeroed junk", junk, sizeof(junk), NULL, ZXC_ERROR_BAD_MAGIC);
-        disagreed += !probe_agrees("header without footer", from_ctx, ZXC_FILE_HEADER_SIZE, NULL,
-                                   ZXC_ERROR_SRC_TOO_SMALL);
+        disagreed += !probe_and_decode("empty archive", from_ctx, (size_t)n2, NULL, 0, 0);
+        disagreed += !probe_and_decode("zeroed junk", junk, sizeof(junk), NULL, ZXC_ERROR_BAD_MAGIC,
+                                       ZXC_ERROR_BAD_MAGIC);
+        disagreed += !probe_and_decode("header without footer", from_ctx, ZXC_FILE_HEADER_SIZE,
+                                       NULL, ZXC_ERROR_SRC_TOO_SMALL, ZXC_ERROR_SRC_TOO_SMALL);
 
         /* Crafted block headers, each rewritten through zxc_write_block_header
          * so its hash8 stays valid: a broken hash masks the shape check behind
@@ -335,14 +379,14 @@ int test_context_api_empty_input(void) {
 
         bh.comp_size = 7; /* EOF carries no payload */
         zxc_write_block_header(bad + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &bh);
-        disagreed +=
-            !probe_agrees("EOF with a payload size", bad, (size_t)n2, NULL, ZXC_ERROR_BAD_HEADER);
+        disagreed += !probe_and_decode("EOF with a payload size", bad, (size_t)n2, NULL,
+                                       ZXC_ERROR_BAD_HEADER, ZXC_ERROR_BAD_HEADER);
 
         bh = eof;
         bh.block_type = ZXC_BLOCK_RAW; /* an empty archive stores no data block */
         zxc_write_block_header(bad + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &bh);
-        disagreed += !probe_agrees("data block where EOF belongs", bad, (size_t)n2, NULL,
-                                   ZXC_ERROR_BAD_HEADER);
+        disagreed += !probe_and_decode("data block where EOF belongs", bad, (size_t)n2, NULL,
+                                       ZXC_ERROR_BAD_HEADER, ZXC_ERROR_BAD_HEADER);
 
         /* A corrupted global checksum and an unsupplied dictionary are only
          * caught by the frame walk, so the probe has to reach it. */
@@ -354,21 +398,24 @@ int test_context_api_empty_input(void) {
             break;
         }
         bad[cn - 1] ^= 0xFF;
-        disagreed += !probe_agrees("corrupted global checksum", bad, (size_t)cn, &cs_do,
-                                   ZXC_ERROR_BAD_CHECKSUM);
+        disagreed += !probe_and_decode("corrupted global checksum", bad, (size_t)cn, &cs_do,
+                                       ZXC_ERROR_BAD_CHECKSUM, ZXC_ERROR_BAD_CHECKSUM);
 
         static uint8_t dict[8192];
         memset(dict, 'x', sizeof(dict));
         zxc_compress_opts_t dict_co = {.level = 3};
         dict_co.dict = dict;
         dict_co.dict_size = sizeof(dict);
+        zxc_decompress_opts_t dict_do = {0};
+        dict_do.dict = dict;
+        dict_do.dict_size = sizeof(dict);
         const int64_t dn = zxc_compress(NULL, 0, bad, sizeof(bad), &dict_co);
         if (dn <= (int64_t)ZXC_FILE_FOOTER_SIZE) {
             printf("  [FAIL] empty+dict setup: %lld\n", (long long)dn);
             break;
         }
-        disagreed += !probe_agrees("dictionary not supplied", bad, (size_t)dn, NULL,
-                                   ZXC_ERROR_DICT_REQUIRED);
+        disagreed += !probe_and_decode("dictionary not supplied", bad, (size_t)dn, NULL,
+                                       ZXC_ERROR_DICT_REQUIRED, ZXC_ERROR_DICT_REQUIRED);
 
         /* A forged stored size is corrupt data, not "destination too small". */
         static const char payload[] = "a forged footer must read as corrupt data, not as size";
@@ -379,14 +426,46 @@ int test_context_api_empty_input(void) {
             break;
         }
         memset(bad + fn - ZXC_FILE_FOOTER_SIZE, 0xFF, 4);
-        disagreed +=
-            !probe_agrees("forged stored size", bad, (size_t)fn, NULL, ZXC_ERROR_CORRUPT_DATA);
+        disagreed += !probe_and_decode("forged stored size", bad, (size_t)fn, NULL,
+                                       ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA);
+
+        /* Archives that store data: the probe has no buffer to decode into, so
+         * it reports DST_TOO_SMALL where the decode names the real fault. Both
+         * sides are pinned: neither half follows from the other. */
+        const int64_t pn =
+            zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, bad, sizeof(bad), &co);
+        if (pn <= (int64_t)ZXC_FILE_FOOTER_SIZE) {
+            printf("  [FAIL] payload archive setup: %lld\n", (long long)pn);
+            break;
+        }
+        disagreed += !probe_and_decode("intact payload", bad, (size_t)pn, NULL,
+                                       ZXC_ERROR_DST_TOO_SMALL, (int64_t)(sizeof(payload) - 1));
+        /* A footer claiming an empty payload the blocks contradict. */
+        uint8_t zeroed[256];
+        memcpy(zeroed, bad, (size_t)pn);
+        memset(zeroed + pn - ZXC_FILE_FOOTER_SIZE, 0, 8);
+        disagreed += !probe_and_decode("payload behind a zeroed size", zeroed, (size_t)pn, NULL,
+                                       ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_CORRUPT_DATA);
+        /* Same, with the dictionary the archive needs: the probe still refuses
+         * on capacity, through the dictionary bounce path this time. */
+        const int64_t pdn =
+            zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, bad, sizeof(bad), &dict_co);
+        if (pdn <= (int64_t)ZXC_FILE_FOOTER_SIZE) {
+            printf("  [FAIL] dict payload archive setup: %lld\n", (long long)pdn);
+            break;
+        }
+        disagreed += !probe_and_decode("payload behind a dictionary", bad, (size_t)pdn, &dict_do,
+                                       ZXC_ERROR_DST_TOO_SMALL, (int64_t)(sizeof(payload) - 1));
 
         /* A NULL destination with a non-zero capacity is a caller mistake, not
          * a probe, and both entry points have to say so. */
         zxc_dctx* nd = zxc_create_dctx();
+        if (!nd) {
+            printf("  [FAIL] zxc_create_dctx\n");
+            break;
+        }
         const int64_t z1 = zxc_decompress(from_ctx, (size_t)n2, NULL, 64, NULL);
-        const int64_t z2 = nd ? zxc_decompress_dctx(nd, from_ctx, (size_t)n2, NULL, 64, NULL) : 0;
+        const int64_t z2 = zxc_decompress_dctx(nd, from_ctx, (size_t)n2, NULL, 64, NULL);
         zxc_free_dctx(nd);
         if (z1 != ZXC_ERROR_NULL_INPUT || z2 != ZXC_ERROR_NULL_INPUT) {
             printf("  [FAIL] NULL destination with capacity 64: %lld %lld\n", (long long)z1,
@@ -435,9 +514,6 @@ int test_context_api_empty_input(void) {
                    (long long)e4);
             break;
         }
-        zxc_decompress_opts_t dict_do = {0};
-        dict_do.dict = dict;
-        dict_do.dict_size = sizeof(dict);
         const int64_t dc = zxc_compress_cctx(cctx, text, len, comp, sizeof(comp), &dict_co);
         const int64_t dr =
             dc > 0 ? zxc_decompress(comp, (size_t)dc, back, sizeof(back), &dict_do) : dc;

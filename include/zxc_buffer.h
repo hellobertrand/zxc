@@ -130,9 +130,12 @@ ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* ds
  * @par Asking without a destination
  * A NULL @p dst, or a @p dst_capacity of 0, decodes nothing and reports what
  * the archive holds: 0 for a well-formed empty one, @ref ZXC_ERROR_DST_TOO_SMALL
- * when it stores a payload, its own error otherwise. That verdict is the one a
- * call with a destination would have got, checksum and dictionary binding
- * included. A NULL @p dst with a non-zero @p dst_capacity is a caller error
+ * when it stores a payload, its own error otherwise. Success is never handed
+ * out early: a 0 here means a call with a destination would have returned 0
+ * too, checksum and dictionary binding included. Not the reverse, since nothing
+ * is decoded: an archive that stores a payload reports
+ * @ref ZXC_ERROR_DST_TOO_SMALL even where a decode would name the actual fault.
+ * A NULL @p dst with a non-zero @p dst_capacity is a caller error
  * (@ref ZXC_ERROR_NULL_INPUT), not a probe.
  *
  * @param[in]  src          Compressed buffer.

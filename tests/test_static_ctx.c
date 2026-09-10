@@ -275,7 +275,7 @@ int test_static_dctx_probe_honours_guards(void) {
     }
 
     int ok = 0;
-    uint8_t arc[256], out[256];
+    uint8_t arc[8192], out[256];
     static uint8_t dict[8192];
     memset(dict, 'x', sizeof(dict));
     do {
@@ -308,6 +308,34 @@ int test_static_dctx_probe_honours_guards(void) {
         if (dp != ZXC_ERROR_DICT_UNSUPPORTED || dd != ZXC_ERROR_DICT_UNSUPPORTED) {
             printf("  [FAIL] dict-bound archive: probe %lld, decode %lld\n", (long long)dp,
                    (long long)dd);
+            break;
+        }
+
+        /* Same guards on an archive that stores data: the payload rejection
+         * must not answer first, or the caller is told "give me a buffer" for
+         * an archive this context could never decode. */
+        uint8_t body[4096];
+        memset(body, 'z', sizeof(body));
+        const int64_t pn = zxc_compress(body, sizeof(body), arc, sizeof(arc), &wrong_bs);
+        if (pn <= 0) {
+            printf("  [FAIL] setup: payload archive at %zu -> %lld\n", pinned_bs * 2,
+                   (long long)pn);
+            break;
+        }
+        if (zxc_decompress_dctx(dctx, arc, (size_t)pn, NULL, 0, NULL) != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf("  [FAIL] payload archive, foreign block size: probe %lld\n",
+                   (long long)zxc_decompress_dctx(dctx, arc, (size_t)pn, NULL, 0, NULL));
+            break;
+        }
+        const int64_t pdn = zxc_compress(body, sizeof(body), arc, sizeof(arc), &with_dict);
+        if (pdn <= 0) {
+            printf("  [FAIL] setup: dict payload archive -> %lld\n", (long long)pdn);
+            break;
+        }
+        if (zxc_decompress_dctx(dctx, arc, (size_t)pdn, NULL, 0, NULL) !=
+            ZXC_ERROR_DICT_UNSUPPORTED) {
+            printf("  [FAIL] payload archive, dictionary: probe %lld\n",
+                   (long long)zxc_decompress_dctx(dctx, arc, (size_t)pdn, NULL, 0, NULL));
             break;
         }
 
