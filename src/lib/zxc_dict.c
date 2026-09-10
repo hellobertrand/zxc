@@ -33,7 +33,7 @@ uint32_t zxc_dict_id(const void* RESTRICT dict, const size_t dict_size,
     // the table checksum (content and table are not contiguous at the API
     // level, so chaining avoids both a concat copy and a synthetic buffer).
     const uint32_t base = zxc_checksum(dict, dict_size, 0, ZXC_CHECKSUM_RAPIDHASH);
-    if (huf_lengths == NULL) return base;
+    if (!huf_lengths) return base;
     return zxc_checksum(huf_lengths, ZXC_HUF_TABLE_SIZE, base, ZXC_CHECKSUM_RAPIDHASH);
 }
 
@@ -45,7 +45,7 @@ uint32_t zxc_dict_id(const void* RESTRICT dict, const size_t dict_size,
 //    0x04  1  Version (1)
 //    0x05  1  Flags   (bits 0-3: checksum algo id, 0=RapidHash; bits 4-7 reserved)
 //    0x06  2  Content size (u16 LE)
-//    0x08  4  dict_id (u32 LE; covers content AND the Huffman table)
+//    0x08  4  Dictionary ID (u32 LE; covers content AND the Huffman table)
 //    0x0C  2  Reserved (0)
 //    0x0E  2  Header Checksum (zxc_hash16, computed with 0x0C-0x0F zeroed)
 //    0x10  N  Content bytes
