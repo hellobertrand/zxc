@@ -298,6 +298,23 @@ int test_context_api_empty_input(void) {
         const int64_t d3 = zxc_decompress(from_ctx, (size_t)n2, NULL, 0, NULL);
         const int64_t d4 =
             dctx ? zxc_decompress_dctx(dctx, from_ctx, (size_t)n2, NULL, 0, NULL) : -1;
+        /* Junk whose tail happens to be zero is not an empty archive, and the
+         * verdict must not depend on whether a destination was supplied. */
+        uint8_t junk[36] = {0};
+        zxc_dctx* junk_dctx = zxc_create_dctx();
+        const int64_t j1 = zxc_decompress(junk, sizeof(junk), NULL, 0, NULL);
+        const int64_t j2 =
+            junk_dctx ? zxc_decompress_dctx(junk_dctx, junk, sizeof(junk), NULL, 0, NULL) : 0;
+        const int64_t j3 =
+            junk_dctx ? zxc_decompress_dctx(junk_dctx, junk, sizeof(junk), out, sizeof(out), NULL)
+                      : 0;
+        zxc_free_dctx(junk_dctx);
+        if (j1 != ZXC_ERROR_BAD_MAGIC || j2 != ZXC_ERROR_BAD_MAGIC || j3 != ZXC_ERROR_BAD_MAGIC) {
+            printf("  [FAIL] zeroed junk: one-shot %lld, dctx probe %lld, dctx decode %lld\n",
+                   (long long)j1, (long long)j2, (long long)j3);
+            break;
+        }
+
         /* A header without its footer is truncated, not an empty archive. */
         const int64_t t1 = zxc_decompress(from_ctx, ZXC_FILE_HEADER_SIZE, out, sizeof(out), NULL);
         const int64_t t2 =

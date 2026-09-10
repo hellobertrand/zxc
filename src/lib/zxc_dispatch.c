@@ -1371,9 +1371,11 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     if (UNLIKELY(!dctx || !src)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
         return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
 
+    // No destination: only an archive that stores nothing can be reported as
+    // decoded, as zxc_decompress() does.
     if (UNLIKELY(!dst || dst_capacity == 0)) {
-        if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
         const uint8_t* footer = (const uint8_t*)src + src_size - ZXC_FILE_FOOTER_SIZE;
         return (zxc_le64(footer) == 0) ? 0 : (int64_t)ZXC_ERROR_DST_TOO_SMALL;
     }
@@ -1395,9 +1397,9 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     uint32_t header_dict_id = 0;
     uint32_t global_hash = 0;
 
-    if (UNLIKELY(zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
-                                      &header_dict_id) != ZXC_OK))
-        return ZXC_ERROR_BAD_HEADER;
+    const int hrc = zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
+                                         &header_dict_id);
+    if (UNLIKELY(hrc != ZXC_OK)) return hrc;
 
     // Static dctx: block_size is locked at workspace init; reject any
     // archive whose declared block_size would require a re-partition.
