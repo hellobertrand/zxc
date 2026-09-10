@@ -315,6 +315,49 @@ int test_context_api_empty_input(void) {
             break;
         }
 
+        /* A well-formed header and a zero stored size are not enough: an
+         * archive that stores nothing still carries its EOF block. */
+        uint8_t stub[ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE] = {0};
+        memcpy(stub, from_ctx, ZXC_FILE_HEADER_SIZE);
+        uint8_t no_eof[64] = {0};
+        memcpy(no_eof, from_ctx, (size_t)n2);
+        no_eof[ZXC_FILE_HEADER_SIZE] = ZXC_BLOCK_RAW; /* no longer the EOF block */
+        zxc_dctx* shape = zxc_create_dctx();
+        const int64_t s1 = zxc_decompress(stub, sizeof(stub), NULL, 0, NULL);
+        const int64_t s2 =
+            shape ? zxc_decompress_dctx(shape, stub, sizeof(stub), NULL, 0, NULL) : 0;
+        const int64_t s3 = zxc_decompress(no_eof, (size_t)n2, NULL, 0, NULL);
+        const int64_t s4 =
+            shape ? zxc_decompress_dctx(shape, no_eof, (size_t)n2, NULL, 0, NULL) : 0;
+        zxc_free_dctx(shape);
+        if (s1 >= 0 || s2 >= 0 || s3 >= 0 || s4 >= 0) {
+            printf("  [FAIL] header+footer only: %lld %lld, EOF corrupted: %lld %lld\n",
+                   (long long)s1, (long long)s2, (long long)s3, (long long)s4);
+            break;
+        }
+
+        /* A forged stored size is corrupt data: the probe must say so with the
+         * code the real decode gives, not "destination too small". */
+        static const char payload[] = "a forged footer must read as corrupt data, not as size";
+        uint8_t forged[256] = {0};
+        const int64_t fn =
+            zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, forged, sizeof(forged), &co);
+        if (fn <= (int64_t)ZXC_FILE_FOOTER_SIZE) {
+            printf("  [FAIL] forged footer setup: compress returned %lld\n", (long long)fn);
+            break;
+        }
+        memset(forged + fn - ZXC_FILE_FOOTER_SIZE, 0xFF, 4);
+        zxc_dctx* fd = zxc_create_dctx();
+        const int64_t f1 = zxc_decompress(forged, (size_t)fn, NULL, 0, NULL);
+        const int64_t f2 = fd ? zxc_decompress_dctx(fd, forged, (size_t)fn, NULL, 0, NULL) : 0;
+        const int64_t f3 = zxc_decompress(forged, (size_t)fn, out, sizeof(out), NULL);
+        zxc_free_dctx(fd);
+        if (f1 != ZXC_ERROR_CORRUPT_DATA || f2 != ZXC_ERROR_CORRUPT_DATA || f1 != f3) {
+            printf("  [FAIL] forged footer: probe %lld %lld, decode %lld\n", (long long)f1,
+                   (long long)f2, (long long)f3);
+            break;
+        }
+
         /* A header without its footer is truncated, not an empty archive. */
         const int64_t t1 = zxc_decompress(from_ctx, ZXC_FILE_HEADER_SIZE, out, sizeof(out), NULL);
         const int64_t t2 =

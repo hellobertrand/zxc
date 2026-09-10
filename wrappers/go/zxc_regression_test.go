@@ -64,8 +64,8 @@ func TestFixDecompressCraftedFooter(t *testing.T) {
 			t.Fatalf("Decompress panicked on crafted footer: %v", r)
 		}
 	}()
-	if _, err := Decompress(comp); !errors.Is(err, ErrInvalidData) {
-		t.Fatalf("want ErrInvalidData, got %v", err)
+	if _, err := Decompress(comp); !errors.Is(err, ErrCorruptData) {
+		t.Fatalf("want ErrCorruptData, got %v", err)
 	}
 }
 
