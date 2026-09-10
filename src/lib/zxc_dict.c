@@ -32,9 +32,9 @@ uint32_t zxc_dict_id(const void* RESTRICT dict, const size_t dict_size,
     // One logical hash over the real bytes only: the content checksum seeds
     // the table checksum (content and table are not contiguous at the API
     // level, so chaining avoids both a concat copy and a synthetic buffer).
-    const uint32_t base = zxc_checksum(dict, dict_size, 0);
+    const uint32_t base = zxc_checksum(dict, dict_size, 0, ZXC_CHECKSUM_RAPIDHASH);
     if (huf_lengths == NULL) return base;
-    return zxc_checksum_seed(huf_lengths, ZXC_HUF_TABLE_SIZE, base, 0);
+    return zxc_checksum(huf_lengths, ZXC_HUF_TABLE_SIZE, base, ZXC_CHECKSUM_RAPIDHASH);
 }
 
 // -------------------------------------------------------------------------

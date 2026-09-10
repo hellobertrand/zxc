@@ -311,7 +311,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
 
         /* The fields above describe the payload; this covers its bytes, so a
          * rewrite leaving comp_size and the counts alone still shows up. */
-        const uint32_t payload_hash = zxc_checksum(payload, comp, ZXC_CHECKSUM_RAPIDHASH);
+        const uint32_t payload_hash = zxc_checksum(payload, comp, 0, ZXC_CHECKSUM_RAPIDHASH);
         EMIT("payload_hash:     0x%08X\n", payload_hash);
 
         size_t phys = ZXC_BLOCK_HEADER_SIZE + comp;

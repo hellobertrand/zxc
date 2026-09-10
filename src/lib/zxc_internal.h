@@ -1421,32 +1421,19 @@ void zxc_aligned_free(void* ptr);
 
 /**
  * @brief Calculates a 32-bit hash for a given input buffer.
+ *
+ * Pass @p seed 0 for a standalone checksum. A non-zero @p seed chains the hash
+ * over non-contiguous buffers - `zxc_checksum(b, bn, zxc_checksum(a, an, 0, m), m)`
+ * hashes each byte once without a concat copy.
+ *
  * @param[in] input Pointer to the data buffer.
  * @param[in] len Length of the data in bytes.
+ * @param[in] seed Previous 32-bit checksum to chain from, or 0 to start fresh.
  * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_RAPIDHASH).
  * @return The calculated 32-bit hash value.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const size_t len,
-                                               const uint8_t hash_method) {
-    (void)hash_method; /* single algorithm for now; extend when adding more */
-    const uint64_t hash = rapidhash(input, len);
-
-    return (uint32_t)(hash ^ (hash >> (sizeof(uint32_t) * CHAR_BIT)));
-}
-
-/**
- * @brief Seeded variant of @ref zxc_checksum, for chaining a hash over
- *        non-contiguous buffers: `zxc_checksum_seed(b, bn, zxc_checksum(a, an, m), m)`
- *        hashes each byte once without a concat copy.
- * @param[in] input Pointer to the data buffer.
- * @param[in] len Length of the data in bytes.
- * @param[in] seed Previous 32-bit checksum to chain from.
- * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_RAPIDHASH).
- * @return The calculated 32-bit hash value.
- */
-static ZXC_ALWAYS_INLINE uint32_t zxc_checksum_seed(const void* RESTRICT input, const size_t len,
-                                                    const uint32_t seed,
-                                                    const uint8_t hash_method) {
+                                               const uint32_t seed, const uint8_t hash_method) {
     (void)hash_method; /* single algorithm for now; extend when adding more */
     const uint64_t hash = rapidhash_withSeed(input, len, seed);
 

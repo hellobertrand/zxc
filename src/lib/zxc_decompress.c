@@ -1664,7 +1664,7 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
 
     if (has_checksum) {
         const uint32_t stored = zxc_le32(data + comp_sz);
-        const uint32_t calc = zxc_checksum(data, comp_sz, ZXC_CHECKSUM_RAPIDHASH);
+        const uint32_t calc = zxc_checksum(data, comp_sz, 0, ZXC_CHECKSUM_RAPIDHASH);
         if (UNLIKELY(stored != calc)) return ZXC_ERROR_BAD_CHECKSUM;
     }
 
