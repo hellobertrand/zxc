@@ -261,11 +261,32 @@ int test_estimate_cctx_size() {
     return 1;
 }
 
+/* The invariant a size probe has to hold: asking without a destination must
+ * answer exactly what asking with one would, through both entry points. */
+static int probe_agrees(const char* what, const uint8_t* arc, const size_t n,
+                        const zxc_decompress_opts_t* opts, const int64_t want) {
+    uint8_t out[256];
+    zxc_dctx* dctx = zxc_create_dctx();
+    if (!dctx) {
+        printf("  [FAIL] %s: zxc_create_dctx\n", what);
+        return 0;
+    }
+    const int64_t p1 = zxc_decompress(arc, n, NULL, 0, opts);
+    const int64_t p2 = zxc_decompress_dctx(dctx, arc, n, NULL, 0, opts);
+    const int64_t d1 = zxc_decompress(arc, n, out, sizeof(out), opts);
+    const int64_t d2 = zxc_decompress_dctx(dctx, arc, n, out, sizeof(out), opts);
+    zxc_free_dctx(dctx);
+    if (p1 == want && p2 == want && d1 == want && d2 == want) return 1;
+    printf("  [FAIL] %s: probe %lld %lld, decode %lld %lld, want %lld\n", what, (long long)p1,
+           (long long)p2, (long long)d1, (long long)d2, (long long)want);
+    return 0;
+}
+
 /* An empty source is a valid frame: the reusable context must write the same
  * archive as the one-shot entry point, and stay usable afterwards. */
 int test_context_api_empty_input(void) {
     printf("=== TEST: Context API - empty input matches the one-shot ===\n");
-    uint8_t one_shot[64], from_ctx[64], out[64];
+    uint8_t one_shot[64], from_ctx[64];
     const zxc_compress_opts_t co = {.level = 3};
     zxc_cctx* cctx = zxc_create_cctx(NULL);
     int ok = 0;
@@ -290,87 +311,89 @@ int test_context_api_empty_input(void) {
             printf("  [FAIL] non-NULL source with a zero size: %lld\n", (long long)n2b);
             break;
         }
-        /* Both decoders, and the size probe both of them support. */
-        zxc_dctx* dctx = zxc_create_dctx();
-        const int64_t d1 = zxc_decompress(from_ctx, (size_t)n2, out, sizeof(out), NULL);
-        const int64_t d2 =
-            dctx ? zxc_decompress_dctx(dctx, from_ctx, (size_t)n2, out, sizeof(out), NULL) : -1;
-        const int64_t d3 = zxc_decompress(from_ctx, (size_t)n2, NULL, 0, NULL);
-        const int64_t d4 =
-            dctx ? zxc_decompress_dctx(dctx, from_ctx, (size_t)n2, NULL, 0, NULL) : -1;
-        /* Junk whose tail happens to be zero is not an empty archive, and the
-         * verdict must not depend on whether a destination was supplied. */
-        uint8_t junk[36] = {0};
-        zxc_dctx* junk_dctx = zxc_create_dctx();
-        const int64_t j1 = zxc_decompress(junk, sizeof(junk), NULL, 0, NULL);
-        const int64_t j2 =
-            junk_dctx ? zxc_decompress_dctx(junk_dctx, junk, sizeof(junk), NULL, 0, NULL) : 0;
-        const int64_t j3 =
-            junk_dctx ? zxc_decompress_dctx(junk_dctx, junk, sizeof(junk), out, sizeof(out), NULL)
-                      : 0;
-        zxc_free_dctx(junk_dctx);
-        if (j1 != ZXC_ERROR_BAD_MAGIC || j2 != ZXC_ERROR_BAD_MAGIC || j3 != ZXC_ERROR_BAD_MAGIC) {
-            printf("  [FAIL] zeroed junk: one-shot %lld, dctx probe %lld, dctx decode %lld\n",
-                   (long long)j1, (long long)j2, (long long)j3);
+        /* Every shape below is checked both ways. Verdicts are tallied rather
+         * than tested one by one, so a regression shows every shape it broke. */
+        const uint8_t junk[36] = {0};
+        int disagreed = 0;
+        disagreed += !probe_agrees("empty archive", from_ctx, (size_t)n2, NULL, 0);
+        disagreed += !probe_agrees("zeroed junk", junk, sizeof(junk), NULL, ZXC_ERROR_BAD_MAGIC);
+        disagreed += !probe_agrees("header without footer", from_ctx, ZXC_FILE_HEADER_SIZE, NULL,
+                                   ZXC_ERROR_SRC_TOO_SMALL);
+
+        /* Crafted block headers, each rewritten through zxc_write_block_header
+         * so its hash8 stays valid: a broken hash masks the shape check behind
+         * it. */
+        uint8_t bad[256];
+        zxc_block_header_t bh;
+        memcpy(bad, from_ctx, (size_t)n2);
+        if (zxc_read_block_header(bad + ZXC_FILE_HEADER_SIZE, (size_t)n2 - ZXC_FILE_HEADER_SIZE,
+                                  &bh) != ZXC_OK) {
+            printf("  [FAIL] could not read the empty archive's EOF block\n");
             break;
         }
+        const zxc_block_header_t eof = bh;
 
-        /* A well-formed header and a zero stored size are not enough: an
-         * archive that stores nothing still carries its EOF block. */
-        uint8_t stub[ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE] = {0};
-        memcpy(stub, from_ctx, ZXC_FILE_HEADER_SIZE);
-        uint8_t no_eof[64] = {0};
-        memcpy(no_eof, from_ctx, (size_t)n2);
-        no_eof[ZXC_FILE_HEADER_SIZE] = ZXC_BLOCK_RAW; /* no longer the EOF block */
-        zxc_dctx* shape = zxc_create_dctx();
-        const int64_t s1 = zxc_decompress(stub, sizeof(stub), NULL, 0, NULL);
-        const int64_t s2 =
-            shape ? zxc_decompress_dctx(shape, stub, sizeof(stub), NULL, 0, NULL) : 0;
-        const int64_t s3 = zxc_decompress(no_eof, (size_t)n2, NULL, 0, NULL);
-        const int64_t s4 =
-            shape ? zxc_decompress_dctx(shape, no_eof, (size_t)n2, NULL, 0, NULL) : 0;
-        zxc_free_dctx(shape);
-        if (s1 >= 0 || s2 >= 0 || s3 >= 0 || s4 >= 0) {
-            printf("  [FAIL] header+footer only: %lld %lld, EOF corrupted: %lld %lld\n",
-                   (long long)s1, (long long)s2, (long long)s3, (long long)s4);
+        bh.comp_size = 7; /* EOF carries no payload */
+        zxc_write_block_header(bad + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &bh);
+        disagreed +=
+            !probe_agrees("EOF with a payload size", bad, (size_t)n2, NULL, ZXC_ERROR_BAD_HEADER);
+
+        bh = eof;
+        bh.block_type = ZXC_BLOCK_RAW; /* an empty archive stores no data block */
+        zxc_write_block_header(bad + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &bh);
+        disagreed += !probe_agrees("data block where EOF belongs", bad, (size_t)n2, NULL,
+                                   ZXC_ERROR_BAD_HEADER);
+
+        /* A corrupted global checksum and an unsupplied dictionary are only
+         * caught by the frame walk, so the probe has to reach it. */
+        const zxc_compress_opts_t cs_co = {.level = 3, .checksum_enabled = 1};
+        const zxc_decompress_opts_t cs_do = {.checksum_enabled = 1};
+        const int64_t cn = zxc_compress(NULL, 0, bad, sizeof(bad), &cs_co);
+        if (cn <= (int64_t)ZXC_FILE_FOOTER_SIZE) {
+            printf("  [FAIL] empty+checksum setup: %lld\n", (long long)cn);
             break;
         }
+        bad[cn - 1] ^= 0xFF;
+        disagreed += !probe_agrees("corrupted global checksum", bad, (size_t)cn, &cs_do,
+                                   ZXC_ERROR_BAD_CHECKSUM);
 
-        /* A forged stored size is corrupt data: the probe must say so with the
-         * code the real decode gives, not "destination too small". */
+        static uint8_t dict[8192];
+        memset(dict, 'x', sizeof(dict));
+        zxc_compress_opts_t dict_co = {.level = 3};
+        dict_co.dict = dict;
+        dict_co.dict_size = sizeof(dict);
+        const int64_t dn = zxc_compress(NULL, 0, bad, sizeof(bad), &dict_co);
+        if (dn <= (int64_t)ZXC_FILE_FOOTER_SIZE) {
+            printf("  [FAIL] empty+dict setup: %lld\n", (long long)dn);
+            break;
+        }
+        disagreed += !probe_agrees("dictionary not supplied", bad, (size_t)dn, NULL,
+                                   ZXC_ERROR_DICT_REQUIRED);
+
+        /* A forged stored size is corrupt data, not "destination too small". */
         static const char payload[] = "a forged footer must read as corrupt data, not as size";
-        uint8_t forged[256] = {0};
         const int64_t fn =
-            zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, forged, sizeof(forged), &co);
+            zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, bad, sizeof(bad), &co);
         if (fn <= (int64_t)ZXC_FILE_FOOTER_SIZE) {
             printf("  [FAIL] forged footer setup: compress returned %lld\n", (long long)fn);
             break;
         }
-        memset(forged + fn - ZXC_FILE_FOOTER_SIZE, 0xFF, 4);
-        zxc_dctx* fd = zxc_create_dctx();
-        const int64_t f1 = zxc_decompress(forged, (size_t)fn, NULL, 0, NULL);
-        const int64_t f2 = fd ? zxc_decompress_dctx(fd, forged, (size_t)fn, NULL, 0, NULL) : 0;
-        const int64_t f3 = zxc_decompress(forged, (size_t)fn, out, sizeof(out), NULL);
-        zxc_free_dctx(fd);
-        if (f1 != ZXC_ERROR_CORRUPT_DATA || f2 != ZXC_ERROR_CORRUPT_DATA || f1 != f3) {
-            printf("  [FAIL] forged footer: probe %lld %lld, decode %lld\n", (long long)f1,
-                   (long long)f2, (long long)f3);
-            break;
-        }
+        memset(bad + fn - ZXC_FILE_FOOTER_SIZE, 0xFF, 4);
+        disagreed +=
+            !probe_agrees("forged stored size", bad, (size_t)fn, NULL, ZXC_ERROR_CORRUPT_DATA);
 
-        /* A header without its footer is truncated, not an empty archive. */
-        const int64_t t1 = zxc_decompress(from_ctx, ZXC_FILE_HEADER_SIZE, out, sizeof(out), NULL);
-        const int64_t t2 =
-            dctx ? zxc_decompress_dctx(dctx, from_ctx, ZXC_FILE_HEADER_SIZE, out, sizeof(out), NULL)
-                 : 0;
-        zxc_free_dctx(dctx);
-        if (d1 != 0 || d2 != 0 || d3 != 0 || d4 != 0 || t1 != ZXC_ERROR_SRC_TOO_SMALL ||
-            t2 != ZXC_ERROR_SRC_TOO_SMALL) {
-            printf("  [FAIL] decode %lld %lld, probe %lld %lld, truncated %lld %lld\n",
-                   (long long)d1, (long long)d2, (long long)d3, (long long)d4, (long long)t1,
-                   (long long)t2);
+        /* A NULL destination with a non-zero capacity is a caller mistake, not
+         * a probe, and both entry points have to say so. */
+        zxc_dctx* nd = zxc_create_dctx();
+        const int64_t z1 = zxc_decompress(from_ctx, (size_t)n2, NULL, 64, NULL);
+        const int64_t z2 = nd ? zxc_decompress_dctx(nd, from_ctx, (size_t)n2, NULL, 64, NULL) : 0;
+        zxc_free_dctx(nd);
+        if (z1 != ZXC_ERROR_NULL_INPUT || z2 != ZXC_ERROR_NULL_INPUT) {
+            printf("  [FAIL] NULL destination with capacity 64: %lld %lld\n", (long long)z1,
+                   (long long)z2);
             break;
         }
+        if (disagreed) break;
         printf("  [PASS] %lld-byte empty archive: same bytes and same codes as the one-shot\n",
                (long long)n2);
 
@@ -386,6 +409,44 @@ int test_context_api_empty_input(void) {
             break;
         }
         printf("  [PASS] the context still compresses after an empty call\n");
+
+        /* An archive with a payload is the one case where the two answers must
+         * differ: nothing is wrong with it, there is just nowhere to put it. */
+        if (zxc_decompress(comp, (size_t)n3, NULL, 0, NULL) != ZXC_ERROR_DST_TOO_SMALL) {
+            printf("  [FAIL] probing a non-empty archive should be DST_TOO_SMALL\n");
+            break;
+        }
+
+        /* The empty-source fast path skips the option plumbing a normal call
+         * runs. Pin what it must still produce: the one-shot's bytes for the
+         * same options, and a dictionary left intact for the next call. */
+        const zxc_compress_opts_t cs_only = {.level = 3, .checksum_enabled = 1};
+        const int64_t e1 = zxc_compress(NULL, 0, one_shot, sizeof(one_shot), &cs_only);
+        const int64_t e2 = zxc_compress_cctx(cctx, NULL, 0, bad, sizeof(bad), &cs_only);
+        if (e1 <= 0 || e2 != e1 || memcmp(one_shot, bad, (size_t)e1) != 0) {
+            printf("  [FAIL] empty + checksum: one-shot %lld, context %lld\n", (long long)e1,
+                   (long long)e2);
+            break;
+        }
+        const int64_t e3 = zxc_compress(NULL, 0, one_shot, sizeof(one_shot), &dict_co);
+        const int64_t e4 = zxc_compress_cctx(cctx, NULL, 0, bad, sizeof(bad), &dict_co);
+        if (e3 <= 0 || e4 != e3 || memcmp(one_shot, bad, (size_t)e3) != 0) {
+            printf("  [FAIL] empty + dictionary: one-shot %lld, context %lld\n", (long long)e3,
+                   (long long)e4);
+            break;
+        }
+        zxc_decompress_opts_t dict_do = {0};
+        dict_do.dict = dict;
+        dict_do.dict_size = sizeof(dict);
+        const int64_t dc = zxc_compress_cctx(cctx, text, len, comp, sizeof(comp), &dict_co);
+        const int64_t dr =
+            dc > 0 ? zxc_decompress(comp, (size_t)dc, back, sizeof(back), &dict_do) : dc;
+        if (dr != (int64_t)len || memcmp(back, text, len) != 0) {
+            printf("  [FAIL] dictionary lost across the empty call: %lld -> %lld\n", (long long)dc,
+                   (long long)dr);
+            break;
+        }
+        printf("  [PASS] the empty fast path keeps checksum and dictionary options\n");
 
         /* The block API keeps its documented [1, MAX] contract: a real pointer
          * with a zero size must be refused on the size alone. */

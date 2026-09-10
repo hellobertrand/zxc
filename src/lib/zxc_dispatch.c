@@ -743,6 +743,7 @@ static int zxc_footer_dsize_plausible(const uint64_t dsize, const size_t chunk_s
 static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src_size,
                                    uint64_t* RESTRICT dsize, size_t* RESTRICT chunk_size,
                                    int* RESTRICT has_cs) {
+    if (UNLIKELY(!src)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
         return ZXC_ERROR_SRC_TOO_SMALL;
 
@@ -762,26 +763,35 @@ static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src
 }
 
 /**
- * @brief Answers a decode request that carries no destination.
+ * @brief Turns away a no-destination decode that cannot possibly succeed.
  *
- * Only an archive that stores nothing can succeed without a buffer, so the frame
- * is checked as far as reading allows: file header, stored size, and the EOF
- * block that has to sit right behind the header.
+ * Only an archive that stores nothing can succeed without a buffer. Refusing
+ * the rest here spares the frame walk a workspace carved only to refuse; what
+ * survives goes on to that walk, the sole place the EOF payload size, the
+ * dictionary binding and the global checksum are checked.
+ *
+ * @return @ref ZXC_OK to keep walking, or the code to hand back.
  */
-static int64_t zxc_probe_without_dst(const uint8_t* RESTRICT src, const size_t src_size) {
+static int zxc_probe_reject_payload(const uint8_t* RESTRICT src, const size_t src_size) {
     uint64_t dsize = 0;
     const int rc = zxc_read_frame_envelope(src, src_size, &dsize, NULL, NULL);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
-    if (UNLIKELY(dsize != 0)) return ZXC_ERROR_DST_TOO_SMALL;
+    return (dsize != 0) ? ZXC_ERROR_DST_TOO_SMALL : ZXC_OK;
+}
 
-    if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
-        return ZXC_ERROR_SRC_TOO_SMALL;
-    zxc_block_header_t bh;
-    if (UNLIKELY(zxc_read_block_header(src + ZXC_FILE_HEADER_SIZE, src_size - ZXC_FILE_HEADER_SIZE,
-                                       &bh) != ZXC_OK ||
-                 bh.block_type != ZXC_BLOCK_EOF))
-        return ZXC_ERROR_CORRUPT_DATA;
-    return 0;
+/**
+ * @brief Answers a decode request that carries no destination.
+ *
+ * Walks the surviving frame for real on a stand-in buffer, so the verdict is
+ * the one a caller with a destination would have got, by construction rather
+ * than by keeping a second copy of the checks in step.
+ */
+static int64_t zxc_probe_without_dst(const uint8_t* RESTRICT src, const size_t src_size,
+                                     const zxc_decompress_opts_t* opts) {
+    const int rc = zxc_probe_reject_payload(src, src_size);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    uint8_t probe_dst[1];
+    return zxc_decompress_frame(src, src_size, probe_dst, 0, opts);
 }
 
 /**
@@ -797,7 +807,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
         return ZXC_ERROR_SRC_TOO_SMALL;
 
-    if (UNLIKELY(!dst || dst_capacity == 0)) return zxc_probe_without_dst(src, src_size);
+    if (UNLIKELY(!dst || dst_capacity == 0)) return zxc_probe_without_dst(src, src_size, opts);
 
     return zxc_decompress_frame((const uint8_t*)src, src_size, (uint8_t*)dst, dst_capacity, opts);
 }
@@ -1413,10 +1423,22 @@ void zxc_free_dctx(zxc_dctx* dctx) {
 int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
                             void* RESTRICT dst, const size_t dst_capacity,
                             const zxc_decompress_opts_t* opts) {
-    if (UNLIKELY(!dctx || !src)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!dctx || !src || (!dst && dst_capacity != 0))) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
         return ZXC_ERROR_SRC_TOO_SMALL;
-    if (UNLIKELY(!dst || dst_capacity == 0)) return zxc_probe_without_dst(src, src_size);
+
+    // No destination: turn away anything with a payload, then walk the rest on
+    // a stand-in buffer rather than short-circuit, so a probe answers under
+    // this context's own rules (pinned block size, no dictionary).
+    uint8_t probe_dst[1];
+    uint8_t* out_buf = (uint8_t*)dst;
+    size_t out_cap = dst_capacity;
+    if (UNLIKELY(!dst || dst_capacity == 0)) {
+        const int prc = zxc_probe_reject_payload(src, src_size);
+        if (UNLIKELY(prc != ZXC_OK)) return prc;
+        out_buf = probe_dst;
+        out_cap = 0;
+    }
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
@@ -1427,9 +1449,9 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 
     const uint8_t* ip = (const uint8_t*)src;
     const uint8_t* const ip_end = ip + src_size;
-    uint8_t* op = (uint8_t*)dst;
+    uint8_t* op = out_buf;
     const uint8_t* const op_start = op;
-    const uint8_t* const op_end = op + dst_capacity;
+    const uint8_t* const op_end = op + out_cap;
     size_t runtime_chunk_size = 0;
     int file_has_checksums = 0;
     uint32_t header_dict_id = 0;

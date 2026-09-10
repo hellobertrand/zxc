@@ -405,7 +405,17 @@ Decompresses `src` into `dst`. `checksum_enabled` and the dictionary fields
 `src` and `dst` must not overlap (same contract as `memcpy`); for overlapping
 single-buffer decode, use `zxc_decompress_inplace` below.
 
-**Returns**: decompressed size (> 0) on success, or negative `zxc_error_t`.
+**Asking without a destination**: a NULL `dst`, or a `dst_capacity` of 0,
+decodes nothing and reports whether the archive holds anything: `0` for a
+well-formed empty archive, `ZXC_ERROR_DST_TOO_SMALL` when it stores a payload,
+and the archive's own error otherwise. The verdict is the one a call with a
+destination would have returned, checksum and dictionary binding included, so
+a probe never waves through an archive the decode would refuse. A NULL `dst`
+with a non-zero `dst_capacity` is a caller error (`ZXC_ERROR_NULL_INPUT`), not
+a probe.
+
+**Returns**: decompressed size, `0` for an empty archive, or negative
+`zxc_error_t`.
 
 ### `zxc_decompress_inplace_bound`
 
@@ -718,6 +728,16 @@ ZXC_EXPORT int64_t zxc_decompress_dctx(
 Same as `zxc_decompress()`, dictionary options included, but reuses buffers
 from `dctx`; the shared literal table is rebuilt only when it changes between
 calls. A static context returns `ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
+
+The no-destination probe works here too, answered under this context's rules:
+a static context still rejects a foreign block size and a dictionary-bound
+archive.
+
+**Error codes changed after v0.14.0**: they now match `zxc_decompress()`
+exactly. A truncated input reports `ZXC_ERROR_SRC_TOO_SMALL` and a malformed
+header reports what the header parse found (`ZXC_ERROR_BAD_MAGIC`,
+`ZXC_ERROR_BAD_VERSION`, `ZXC_ERROR_BAD_BLOCK_SIZE`), where both used to
+flatten to `ZXC_ERROR_NULL_INPUT` or `ZXC_ERROR_BAD_HEADER`.
 
 ---
 

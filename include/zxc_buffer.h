@@ -127,16 +127,24 @@ ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* ds
  * and blocking, so @c n_threads and the progress callback in @p opts are
  * ignored.
  *
+ * @par Asking without a destination
+ * A NULL @p dst, or a @p dst_capacity of 0, decodes nothing and reports what
+ * the archive holds: 0 for a well-formed empty one, @ref ZXC_ERROR_DST_TOO_SMALL
+ * when it stores a payload, its own error otherwise. That verdict is the one a
+ * call with a destination would have got, checksum and dictionary binding
+ * included. A NULL @p dst with a non-zero @p dst_capacity is a caller error
+ * (@ref ZXC_ERROR_NULL_INPUT), not a probe.
+ *
  * @param[in]  src          Compressed buffer.
  * @param[in]  src_size     Compressed size in bytes.
- * @param[out] dst          Destination buffer.
+ * @param[out] dst          Destination buffer, or NULL to probe (see above).
  * @param[in]  dst_capacity Capacity of @p dst.
  * @param[in]  opts         Decompression options, or NULL for defaults.
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
- * @return Bytes written to @p dst (> 0), or a negative @ref zxc_error_t
- *         (e.g. @ref ZXC_ERROR_CORRUPT_DATA).
+ * @return Bytes written to @p dst, 0 for an empty archive, or a negative
+ *         @ref zxc_error_t (e.g. @ref ZXC_ERROR_CORRUPT_DATA).
  */
 ZXC_EXPORT int64_t zxc_decompress(const void* src, const size_t src_size, void* dst,
                                   const size_t dst_capacity, const zxc_decompress_opts_t* opts);
@@ -497,10 +505,21 @@ ZXC_EXPORT void zxc_free_dctx(zxc_dctx* dctx);
  * calls. A static context returns @ref ZXC_ERROR_DICT_UNSUPPORTED for any
  * dictionary.
  *
+ * @par Asking without a destination
+ * Same probe as zxc_decompress(), answered under this context's rules: a static
+ * context still rejects a foreign block size and a dictionary-bound archive.
+ *
+ * @par Error codes changed after v0.14.0
+ * They now match zxc_decompress() exactly. A truncated input reports
+ * @ref ZXC_ERROR_SRC_TOO_SMALL and a malformed header reports what the header
+ * parse found (@ref ZXC_ERROR_BAD_MAGIC, @ref ZXC_ERROR_BAD_VERSION,
+ * @ref ZXC_ERROR_BAD_BLOCK_SIZE), where both used to flatten to
+ * @ref ZXC_ERROR_NULL_INPUT or @ref ZXC_ERROR_BAD_HEADER.
+ *
  * @param[in,out] dctx         Reusable decompression context.
  * @param[in]     src          Compressed data.
  * @param[in]     src_size     Compressed size in bytes.
- * @param[out]    dst          Destination buffer.
+ * @param[out]    dst          Destination buffer, or NULL to probe (see above).
  * @param[in]     dst_capacity Capacity of @p dst.
  * @param[in]     opts         Decompression options, or NULL for defaults.
  *
