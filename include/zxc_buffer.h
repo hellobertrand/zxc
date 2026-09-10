@@ -103,8 +103,9 @@ ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
  * Writes the file header followed by compressed blocks. Single-threaded and
  * blocking, so @c n_threads and the progress callback in @p opts are ignored.
  *
- * @param[in]  src          Source buffer.
- * @param[in]  src_size     Source size in bytes.
+ * @param[in]  src          Source buffer; may be NULL when @p src_size is 0.
+ * @param[in]  src_size     Source size in bytes; 0 writes the empty archive
+ *                          (file header + EOF block + footer).
  * @param[out] dst          Destination buffer.
  * @param[in]  dst_capacity Capacity of @p dst.
  * @param[in]  opts         Compression options, or NULL for defaults.
@@ -450,13 +451,14 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  * Dictionary options are the exception: honoured as in zxc_compress() but
  * never remembered, so pass them on every call; the shared table is rebuilt
  * only when it changes. A static context returns
- * @ref ZXC_ERROR_DICT_UNSUPPORTED for any dictionary.
+ * @ref ZXC_ERROR_DICT_UNSUPPORTED for any dictionary. @c seekable is ignored
+ * here: use zxc_compress() when the archive needs a seek table.
  *
  * @param[in,out] cctx         Reusable compression context.
  * @param[in]     src          Source data; may be NULL when @p src_size is 0.
- * @param[in]     src_size     Source size in bytes; 0 writes the empty archive
- *                             (header + EOF block + footer), as zxc_compress()
- *                             does.
+ * @param[in]     src_size     Source size in bytes; 0 writes the empty archive,
+ *                             as zxc_compress() does, without carving the
+ *                             encoder workspace.
  * @param[out]    dst          Destination buffer.
  * @param[in]     dst_capacity Capacity of @p dst.
  * @param[in]     opts         Options, or NULL to reuse the sticky settings.
@@ -504,7 +506,8 @@ ZXC_EXPORT void zxc_free_dctx(zxc_dctx* dctx);
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
- * @return Decompressed size (> 0), or a negative @ref zxc_error_t.
+ * @return Decompressed size, 0 for an empty archive, or a negative
+ *         @ref zxc_error_t.
  */
 ZXC_EXPORT int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* src, size_t src_size, void* dst,
                                        size_t dst_capacity, const zxc_decompress_opts_t* opts);

@@ -385,7 +385,8 @@ ZXC_EXPORT int64_t zxc_compress(
 Compresses `src` into `dst`. Only `level`, `block_size`, `checksum_enabled`, and
 `seekable` fields of `opts` are used. `n_threads` is ignored (always single-threaded).
 
-**Returns**: compressed size (> 0) on success, or negative `zxc_error_t`.
+**Returns**: compressed size (> 0) on success, or negative `zxc_error_t`. A
+zero `src_size` (with `src` NULL or not) writes the 36-byte empty archive.
 
 ### `zxc_decompress`
 
@@ -678,10 +679,12 @@ ZXC_EXPORT int64_t zxc_compress_cctx(
 ```
 
 Same as `zxc_compress()` but reuses internal buffers from `cctx`.
-Automatically re-initializes when `block_size` or `level` changes. Dictionary
-options are honoured as in `zxc_compress()` but are not sticky; the shared
-literal table is rebuilt only when it changes. A static context returns
-`ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
+Automatically re-initializes when `block_size` or `level` changes. A zero
+`src_size` writes the empty archive, as `zxc_compress()` does, without carving
+the workspace. Dictionary options are honoured as in `zxc_compress()` but are
+not sticky; the shared literal table is rebuilt only when it changes. A static
+context returns `ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary. `seekable` is
+ignored here: use `zxc_compress()` when the archive needs a seek table.
 
 ### `zxc_create_dctx`
 

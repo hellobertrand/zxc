@@ -274,33 +274,62 @@ int test_context_api_empty_input(void) {
             printf("  [FAIL] zxc_create_cctx\n");
             break;
         }
+        const int64_t expected =
+            ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
         const int64_t n1 = zxc_compress(NULL, 0, one_shot, sizeof(one_shot), &co);
         const int64_t n2 = zxc_compress_cctx(cctx, NULL, 0, from_ctx, sizeof(from_ctx), &co);
-        if (n1 <= 0 || n2 != n1 || memcmp(one_shot, from_ctx, (size_t)n1) != 0) {
-            printf("  [FAIL] one-shot %lld, context %lld\n", (long long)n1, (long long)n2);
+        if (n1 != expected || n2 != n1 || memcmp(one_shot, from_ctx, (size_t)n1) != 0) {
+            printf("  [FAIL] one-shot %lld, context %lld (expected %lld)\n", (long long)n1,
+                   (long long)n2, (long long)expected);
             break;
         }
-        const int64_t d = zxc_decompress(from_ctx, (size_t)n2, out, sizeof(out), NULL);
-        if (d != 0) {
-            printf("  [FAIL] decoding the empty archive: %lld\n", (long long)d);
+        /* The other accepted shape: a real pointer with a zero size. */
+        uint8_t probe = 0;
+        const int64_t n2b = zxc_compress_cctx(cctx, &probe, 0, from_ctx, sizeof(from_ctx), &co);
+        if (n2b != n1 || memcmp(one_shot, from_ctx, (size_t)n1) != 0) {
+            printf("  [FAIL] non-NULL source with a zero size: %lld\n", (long long)n2b);
             break;
         }
-        printf("  [PASS] %lld-byte empty archive, identical to the one-shot\n", (long long)n2);
+        /* Both decoders, and the size probe both of them support. */
+        zxc_dctx* dctx = zxc_create_dctx();
+        const int64_t d1 = zxc_decompress(from_ctx, (size_t)n2, out, sizeof(out), NULL);
+        const int64_t d2 =
+            dctx ? zxc_decompress_dctx(dctx, from_ctx, (size_t)n2, out, sizeof(out), NULL) : -1;
+        const int64_t d3 = zxc_decompress(from_ctx, (size_t)n2, NULL, 0, NULL);
+        const int64_t d4 =
+            dctx ? zxc_decompress_dctx(dctx, from_ctx, (size_t)n2, NULL, 0, NULL) : -1;
+        /* A header without its footer is truncated, not an empty archive. */
+        const int64_t t1 = zxc_decompress(from_ctx, ZXC_FILE_HEADER_SIZE, out, sizeof(out), NULL);
+        const int64_t t2 =
+            dctx ? zxc_decompress_dctx(dctx, from_ctx, ZXC_FILE_HEADER_SIZE, out, sizeof(out), NULL)
+                 : 0;
+        zxc_free_dctx(dctx);
+        if (d1 != 0 || d2 != 0 || d3 != 0 || d4 != 0 || t1 != ZXC_ERROR_SRC_TOO_SMALL ||
+            t2 != ZXC_ERROR_SRC_TOO_SMALL) {
+            printf("  [FAIL] decode %lld %lld, probe %lld %lld, truncated %lld %lld\n",
+                   (long long)d1, (long long)d2, (long long)d3, (long long)d4, (long long)t1,
+                   (long long)t2);
+            break;
+        }
+        printf("  [PASS] %lld-byte empty archive: same bytes and same codes as the one-shot\n",
+               (long long)n2);
 
         /* The context keeps working for a normal payload. */
         static const char text[] = "the quick brown fox jumps over the lazy dog, twice over";
         const size_t len = sizeof(text) - 1;
         uint8_t comp[256], back[256];
         const int64_t n3 = zxc_compress_cctx(cctx, text, len, comp, sizeof(comp), &co);
-        const int64_t d3 = n3 > 0 ? zxc_decompress(comp, (size_t)n3, back, sizeof(back), NULL) : n3;
-        if (d3 != (int64_t)len || memcmp(back, text, len) != 0) {
-            printf("  [FAIL] next call: %lld -> %lld\n", (long long)n3, (long long)d3);
+        const int64_t back_len =
+            n3 > 0 ? zxc_decompress(comp, (size_t)n3, back, sizeof(back), NULL) : n3;
+        if (back_len != (int64_t)len || memcmp(back, text, len) != 0) {
+            printf("  [FAIL] next call: %lld -> %lld\n", (long long)n3, (long long)back_len);
             break;
         }
         printf("  [PASS] the context still compresses after an empty call\n");
 
-        /* The block API keeps its documented [1, MAX] contract. */
-        if (zxc_compress_block(cctx, NULL, 0, comp, sizeof(comp), &co) != ZXC_ERROR_NULL_INPUT) {
+        /* The block API keeps its documented [1, MAX] contract: a real pointer
+         * with a zero size must be refused on the size alone. */
+        if (zxc_compress_block(cctx, text, 0, comp, sizeof(comp), &co) != ZXC_ERROR_NULL_INPUT) {
             printf("  [FAIL] the block API should refuse an empty block\n");
             break;
         }

@@ -1224,11 +1224,15 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         dict_size > 0 ? zxc_block_size_ceil(dict_size + block_size) : block_size;
     const uint32_t did = (dict && dict_size > 0) ? zxc_dict_id(dict, dict_size, dict_huf) : 0;
 
+    // An empty source encodes no block: leave the workspace alone rather than
+    // carve megabytes for a 36-byte frame. The sticky settings above still hold.
+    const int empty_frame = (src_size == 0);
+
     // Re-init when the chunk changed, a level raise needs the optimal-parser
     // scratch, or a dictionary arrives on a context carved without its prefix.
-    if (UNLIKELY(!cctx->initialized || cctx->last_block_size != eff_chunk ||
-                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
-                 (dict_size > 0 && !cctx->inner.dict_buffer))) {
+    if (!empty_frame && UNLIKELY(!cctx->initialized || cctx->last_block_size != eff_chunk ||
+                                 (level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
+                                 (dict_size > 0 && !cctx->inner.dict_buffer))) {
         if (cctx->initialized) {
             zxc_cctx_free(&cctx->inner);
             cctx->initialized = 0;
@@ -1240,7 +1244,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         // LCOV_EXCL_STOP
         cctx->last_block_size = eff_chunk;
         cctx->initialized = 1;
-        cctx->huf_cached = 0; /* attach state died with inner */
+        cctx->huf_cached = 0;
     } else {
         // Same chunk: update level + checksum without realloc.
         cctx->inner.compression_level = level;
@@ -1248,14 +1252,17 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     }
 
     zxc_cctx_t* const ctx = &cctx->inner;
-    ctx->dict_size = dict_size;
-    if (UNLIKELY(zxc_ctx_sync_dict_huf(ctx, cctx->huf_cache, &cctx->huf_cached, dict_huf) !=
-                 ZXC_OK))
-        return ZXC_ERROR_CORRUPT_DATA;
+    uint8_t* dict_input = NULL;
+    if (!empty_frame) {
+        ctx->dict_size = dict_size;
+        if (UNLIKELY(zxc_ctx_sync_dict_huf(ctx, cctx->huf_cache, &cctx->huf_cached, dict_huf) !=
+                     ZXC_OK))
+            return ZXC_ERROR_CORRUPT_DATA;
 
-    // [dict | block] input for the encoder, NULL without a dictionary.
-    uint8_t* const dict_input = dict_size > 0 ? ctx->dict_buffer : NULL;
-    if (dict_input) ZXC_MEMCPY(dict_input, dict, dict_size);
+        // [dict | block] input for the encoder, NULL without a dictionary.
+        dict_input = dict_size > 0 ? ctx->dict_buffer : NULL;
+        if (dict_input) ZXC_MEMCPY(dict_input, dict, dict_size);
+    }
 
     uint8_t* op = (uint8_t*)dst;
     const uint8_t* const op_start = op;
@@ -1361,8 +1368,15 @@ void zxc_free_dctx(zxc_dctx* dctx) {
 int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size_t src_size,
                             void* RESTRICT dst, const size_t dst_capacity,
                             const zxc_decompress_opts_t* opts) {
-    if (UNLIKELY(!dctx || !src || !dst || src_size < ZXC_FILE_HEADER_SIZE))
-        return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!dctx || !src)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
+        return ZXC_ERROR_SRC_TOO_SMALL;
+
+    if (UNLIKELY(!dst || dst_capacity == 0)) {
+        if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
+        const uint8_t* footer = (const uint8_t*)src + src_size - ZXC_FILE_FOOTER_SIZE;
+        return (zxc_le64(footer) == 0) ? 0 : (int64_t)ZXC_ERROR_DST_TOO_SMALL;
+    }
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
@@ -1416,7 +1430,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
         dctx->last_block_size = runtime_chunk_size;
         dctx->last_dict_size = dict_size;
         dctx->initialized = 1;
-        dctx->huf_cached = 0; /* attach state died with inner */
+        dctx->huf_cached = 0;
     } else {
         dctx->inner.checksum_enabled = file_has_checksums && checksum_enabled;
     }
@@ -1573,7 +1587,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
         // LCOV_EXCL_STOP
         cctx->last_block_size = effective_block_size;
         cctx->initialized = 1;
-        cctx->huf_cached = 0; /* attach state died with inner */
+        cctx->huf_cached = 0;
     } else {
         cctx->inner.compression_level = level;
         cctx->inner.checksum_enabled = checksum_enabled;
