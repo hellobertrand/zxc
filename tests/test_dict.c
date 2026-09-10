@@ -1524,7 +1524,7 @@ int test_dict_dctx_roundtrip(void) {
     const int64_t n7 = dctx_make_archive(7, 0, src, src_size, k_dctx_dict, dict_size, huf, a7, cap);
     const int64_t n0 = dctx_make_archive(3, 0, src, src_size, NULL, 0, NULL, a0, cap);
     zxc_dctx* dctx = zxc_create_dctx();
-    int ok = n3 > 0 && n7 > 0 && n0 > 0 && dctx != NULL;
+    int ok = n3 > 0 && n7 > 0 && n0 > 0 && dctx;
     if (!ok)
         printf("  [FAIL] setup: %lld %lld %lld\n", (long long)n3, (long long)n7, (long long)n0);
 
@@ -1582,7 +1582,7 @@ int test_dict_static_dctx_rejected(void) {
     const size_t ws_sz = zxc_static_dctx_workspace_size(block_size);
     void* ws = malloc(ws_sz);
     zxc_dctx* dctx = ws ? zxc_init_static_dctx(ws, ws_sz, block_size) : NULL;
-    int ok = n3 > 0 && n0 > 0 && dctx != NULL;
+    int ok = n3 > 0 && n0 > 0 && dctx;
     if (!ok) printf("  [FAIL] setup: %lld %lld ws=%zu\n", (long long)n3, (long long)n0, ws_sz);
 
     const zxc_decompress_opts_t right = {
