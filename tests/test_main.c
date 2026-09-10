@@ -68,6 +68,7 @@ static const test_entry_t g_tests[] = {
 
     /* --- Context API --- */
     TEST_CASE(test_opaque_context_api),
+    TEST_CASE(test_context_api_empty_input),
     TEST_CASE(test_cctx_level_raise_reinit),
     TEST_CASE(test_estimate_cctx_size),
 

@@ -1185,14 +1185,15 @@ void zxc_free_cctx(zxc_cctx* cctx) {
  * @brief Compresses data using a reusable context.
  *
  * Public API; full contract in @c zxc_buffer.h. Same frame walk and dictionary
- * binding as zxc_compress(); buffers re-carved only when [dict | block] or the
- * parser tier changes, shared table rebuilt only when it changes.
+ * binding as zxc_compress(), empty source included; buffers re-carved only when
+ * [dict | block] or the parser tier changes, shared table rebuilt only when it
+ * changes.
  */
 int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t src_size,
                           void* RESTRICT dst, const size_t dst_capacity,
                           const zxc_compress_opts_t* opts) {
     if (UNLIKELY(!cctx)) return ZXC_ERROR_NULL_INPUT;
-    if (UNLIKELY(!src || !dst || src_size == 0 || dst_capacity == 0)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!dst || dst_capacity == 0 || (src_size > 0 && !src))) return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : cctx->stored_checksum;
     const int level = ZXC_OPTS_LEVEL(opts, cctx->stored_level);

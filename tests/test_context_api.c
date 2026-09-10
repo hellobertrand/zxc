@@ -260,3 +260,54 @@ int test_estimate_cctx_size() {
     printf("PASS\n\n");
     return 1;
 }
+
+/* An empty source is a valid frame: the reusable context must write the same
+ * archive as the one-shot entry point, and stay usable afterwards. */
+int test_context_api_empty_input(void) {
+    printf("=== TEST: Context API - empty input matches the one-shot ===\n");
+    uint8_t one_shot[64], from_ctx[64], out[64];
+    const zxc_compress_opts_t co = {.level = 3};
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    int ok = 0;
+    do {
+        if (!cctx) {
+            printf("  [FAIL] zxc_create_cctx\n");
+            break;
+        }
+        const int64_t n1 = zxc_compress(NULL, 0, one_shot, sizeof(one_shot), &co);
+        const int64_t n2 = zxc_compress_cctx(cctx, NULL, 0, from_ctx, sizeof(from_ctx), &co);
+        if (n1 <= 0 || n2 != n1 || memcmp(one_shot, from_ctx, (size_t)n1) != 0) {
+            printf("  [FAIL] one-shot %lld, context %lld\n", (long long)n1, (long long)n2);
+            break;
+        }
+        const int64_t d = zxc_decompress(from_ctx, (size_t)n2, out, sizeof(out), NULL);
+        if (d != 0) {
+            printf("  [FAIL] decoding the empty archive: %lld\n", (long long)d);
+            break;
+        }
+        printf("  [PASS] %lld-byte empty archive, identical to the one-shot\n", (long long)n2);
+
+        /* The context keeps working for a normal payload. */
+        static const char text[] = "the quick brown fox jumps over the lazy dog, twice over";
+        const size_t len = sizeof(text) - 1;
+        uint8_t comp[256], back[256];
+        const int64_t n3 = zxc_compress_cctx(cctx, text, len, comp, sizeof(comp), &co);
+        const int64_t d3 = n3 > 0 ? zxc_decompress(comp, (size_t)n3, back, sizeof(back), NULL) : n3;
+        if (d3 != (int64_t)len || memcmp(back, text, len) != 0) {
+            printf("  [FAIL] next call: %lld -> %lld\n", (long long)n3, (long long)d3);
+            break;
+        }
+        printf("  [PASS] the context still compresses after an empty call\n");
+
+        /* The block API keeps its documented [1, MAX] contract. */
+        if (zxc_compress_block(cctx, NULL, 0, comp, sizeof(comp), &co) != ZXC_ERROR_NULL_INPUT) {
+            printf("  [FAIL] the block API should refuse an empty block\n");
+            break;
+        }
+        printf("  [PASS] the block API still refuses an empty block\n");
+        ok = 1;
+    } while (0);
+    zxc_free_cctx(cctx);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}

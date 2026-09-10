@@ -453,8 +453,10 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  * @ref ZXC_ERROR_DICT_UNSUPPORTED for any dictionary.
  *
  * @param[in,out] cctx         Reusable compression context.
- * @param[in]     src          Source data.
- * @param[in]     src_size     Source size in bytes.
+ * @param[in]     src          Source data; may be NULL when @p src_size is 0.
+ * @param[in]     src_size     Source size in bytes; 0 writes the empty archive
+ *                             (header + EOF block + footer), as zxc_compress()
+ *                             does.
  * @param[out]    dst          Destination buffer.
  * @param[in]     dst_capacity Capacity of @p dst.
  * @param[in]     opts         Options, or NULL to reuse the sticky settings.
