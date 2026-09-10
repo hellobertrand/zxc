@@ -469,6 +469,11 @@ int test_context_api_empty_input(void) {
         disagreed +=
             !probe_and_decode("oversized dictionary, payload archive", bad, (size_t)pdn, &huge_do,
                               ZXC_ERROR_DICT_TOO_LARGE, ZXC_ERROR_DICT_TOO_LARGE);
+        /* Including over a source too short to hold a frame: the caller's fault
+         * is settled before anything is read from it. */
+        disagreed += !probe_and_decode("oversized dictionary, truncated source", from_ctx,
+                                       ZXC_FILE_HEADER_SIZE, &huge_do, ZXC_ERROR_DICT_TOO_LARGE,
+                                       ZXC_ERROR_DICT_TOO_LARGE);
 
         /* A NULL destination with a non-zero capacity is a caller mistake, not
          * a probe, and both entry points have to say so. */
