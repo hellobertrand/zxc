@@ -457,6 +457,19 @@ int test_context_api_empty_input(void) {
         disagreed += !probe_and_decode("payload behind a dictionary", bad, (size_t)pdn, &dict_do,
                                        ZXC_ERROR_DST_TOO_SMALL, (int64_t)(sizeof(payload) - 1));
 
+        /* A dictionary size the library cannot honour is a caller error, not an
+         * archive fault, so it outranks both the payload refusal and anything
+         * the header could be rejected for. */
+        zxc_decompress_opts_t huge_do = {0};
+        huge_do.dict = dict;
+        huge_do.dict_size = (size_t)ZXC_DICT_SIZE_MAX + 1;
+        disagreed +=
+            !probe_and_decode("oversized dictionary, empty archive", from_ctx, (size_t)n2, &huge_do,
+                              ZXC_ERROR_DICT_TOO_LARGE, ZXC_ERROR_DICT_TOO_LARGE);
+        disagreed +=
+            !probe_and_decode("oversized dictionary, payload archive", bad, (size_t)pdn, &huge_do,
+                              ZXC_ERROR_DICT_TOO_LARGE, ZXC_ERROR_DICT_TOO_LARGE);
+
         /* A NULL destination with a non-zero capacity is a caller mistake, not
          * a probe, and both entry points have to say so. */
         zxc_dctx* nd = zxc_create_dctx();

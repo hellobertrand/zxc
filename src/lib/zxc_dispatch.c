@@ -820,6 +820,8 @@ static int zxc_probe_reject_payload(const uint8_t* RESTRICT src, const size_t sr
  */
 static int64_t zxc_probe_without_dst(const uint8_t* RESTRICT src, const size_t src_size,
                                      const zxc_decompress_opts_t* opts) {
+    if (UNLIKELY(ZXC_OPTS_DICT_SIZE(opts) > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+
     const int rc = zxc_probe_reject_payload(src, src_size);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     uint8_t probe_dst[1];
@@ -1458,13 +1460,16 @@ void zxc_free_dctx(zxc_dctx* dctx) {
  */
 static int64_t zxc_dctx_probe(const zxc_dctx* dctx, const uint8_t* RESTRICT src,
                               const size_t src_size, const zxc_decompress_opts_t* opts) {
+    const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+
     size_t chunk_size = 0;
     uint32_t header_dict_id = 0;
     const int hrc = zxc_read_file_header(src, src_size, &chunk_size, NULL, &header_dict_id);
     if (UNLIKELY(hrc != ZXC_OK)) return hrc;
     if (UNLIKELY(dctx->owns_workspace && chunk_size != dctx->last_block_size))
         return ZXC_ERROR_BAD_BLOCK_SIZE;
-    if (UNLIKELY(dctx->owns_workspace && (header_dict_id != 0 || ZXC_OPTS_DICT_SIZE(opts) != 0)))
+    if (UNLIKELY(dctx->owns_workspace && (header_dict_id != 0 || dict_size != 0)))
         return ZXC_ERROR_DICT_UNSUPPORTED;
     return zxc_probe_without_dst(src, src_size, opts);
 }

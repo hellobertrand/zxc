@@ -339,6 +339,19 @@ int test_static_dctx_probe_honours_guards(void) {
             break;
         }
 
+        /* A dictionary size the library cannot honour is a caller error: it
+         * outranks this context's own no-dictionary rule, on both paths. */
+        zxc_decompress_opts_t huge = {0};
+        huge.dict = dict;
+        huge.dict_size = (size_t)ZXC_DICT_SIZE_MAX + 1;
+        const int64_t hp = zxc_decompress_dctx(dctx, arc, (size_t)pn, NULL, 0, &huge);
+        const int64_t hd = zxc_decompress_dctx(dctx, arc, (size_t)pn, out, sizeof(out), &huge);
+        if (hp != ZXC_ERROR_DICT_TOO_LARGE || hd != ZXC_ERROR_DICT_TOO_LARGE) {
+            printf("  [FAIL] oversized dictionary: probe %lld, decode %lld\n", (long long)hp,
+                   (long long)hd);
+            break;
+        }
+
         /* An archive the context can decode still probes as empty. */
         zxc_compress_opts_t good = {.level = 3, .block_size = pinned_bs};
         const int64_t gn = zxc_compress(NULL, 0, arc, sizeof(arc), &good);

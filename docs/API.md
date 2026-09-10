@@ -417,8 +417,9 @@ archive that stores a payload reports `ZXC_ERROR_DST_TOO_SMALL` even where a
 decode would name the actual fault (a footer contradicting the blocks, say).
 Callers that need that fault must decode into a buffer.
 
-A NULL `dst` with a non-zero `dst_capacity` is a caller error
-(`ZXC_ERROR_NULL_INPUT`), not a probe.
+Caller errors outrank all of it, before the archive is read at all: a NULL
+`dst` with a non-zero `dst_capacity` is `ZXC_ERROR_NULL_INPUT`, and a
+`dict_size` the library cannot honour is `ZXC_ERROR_DICT_TOO_LARGE`.
 
 **Returns**: decompressed size, `0` for an empty archive, or negative
 `zxc_error_t`.

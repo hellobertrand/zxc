@@ -135,8 +135,9 @@ ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* ds
  * too, checksum and dictionary binding included. Not the reverse, since nothing
  * is decoded: an archive that stores a payload reports
  * @ref ZXC_ERROR_DST_TOO_SMALL even where a decode would name the actual fault.
- * A NULL @p dst with a non-zero @p dst_capacity is a caller error
- * (@ref ZXC_ERROR_NULL_INPUT), not a probe.
+ * Caller errors outrank all of it, before the archive is read at all: a NULL
+ * @p dst with a non-zero @p dst_capacity is @ref ZXC_ERROR_NULL_INPUT, and a
+ * @c dict_size the library cannot honour is @ref ZXC_ERROR_DICT_TOO_LARGE.
  *
  * @param[in]  src          Compressed buffer.
  * @param[in]  src_size     Compressed size in bytes.
