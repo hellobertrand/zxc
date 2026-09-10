@@ -68,6 +68,8 @@ static const test_entry_t g_tests[] = {
 
     /* --- Context API --- */
     TEST_CASE(test_opaque_context_api),
+    TEST_CASE(test_context_api_empty_input),
+    TEST_CASE(test_context_api_seekable_frame),
     TEST_CASE(test_cctx_level_raise_reinit),
     TEST_CASE(test_estimate_cctx_size),
 
@@ -75,6 +77,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_static_ctx_size_query),
     TEST_CASE(test_static_ctx_workspace_too_small),
     TEST_CASE(test_static_ctx_block_size_locked),
+    TEST_CASE(test_static_dctx_probe_honours_guards),
     TEST_CASE(test_static_ctx_level_raise_rejected),
     TEST_CASE(test_static_ctx_null_inputs),
     TEST_CASE(test_static_ctx_roundtrip_all_levels),

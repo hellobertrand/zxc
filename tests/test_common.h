@@ -83,6 +83,8 @@ int test_decompress_block_bound(void);
 
 /* Context API */
 int test_opaque_context_api(void);
+int test_context_api_empty_input(void);
+int test_context_api_seekable_frame(void);
 int test_cctx_level_raise_reinit(void);
 int test_estimate_cctx_size(void);
 
@@ -91,6 +93,7 @@ int test_static_ctx_roundtrip_all_levels(void);
 int test_static_ctx_size_query(void);
 int test_static_ctx_workspace_too_small(void);
 int test_static_ctx_block_size_locked(void);
+int test_static_dctx_probe_honours_guards(void);
 int test_static_ctx_level_raise_rejected(void);
 int test_static_ctx_null_inputs(void);
 int test_static_dctx_block_bounds(void);

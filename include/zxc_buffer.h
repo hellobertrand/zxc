@@ -103,8 +103,9 @@ ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
  * Writes the file header followed by compressed blocks. Single-threaded and
  * blocking, so @c n_threads and the progress callback in @p opts are ignored.
  *
- * @param[in]  src          Source buffer.
- * @param[in]  src_size     Source size in bytes.
+ * @param[in]  src          Source buffer; may be NULL when @p src_size is 0.
+ * @param[in]  src_size     Source size in bytes; 0 writes the empty archive
+ *                          (file header + EOF block + footer).
  * @param[out] dst          Destination buffer.
  * @param[in]  dst_capacity Capacity of @p dst.
  * @param[in]  opts         Compression options, or NULL for defaults.
@@ -126,16 +127,29 @@ ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* ds
  * and blocking, so @c n_threads and the progress callback in @p opts are
  * ignored.
  *
+ * @par Asking without a destination
+ * A NULL @p dst, or a @p dst_capacity of 0, decodes nothing and reports what
+ * the archive holds: 0 for a well-formed empty one, @ref ZXC_ERROR_DST_TOO_SMALL
+ * when it stores a payload, its own error otherwise. Success is never handed
+ * out early: a 0 here means a call with a destination would have returned 0
+ * too, checksum and dictionary binding included. Not the reverse, since nothing
+ * is decoded: an archive that stores a payload reports
+ * @ref ZXC_ERROR_DST_TOO_SMALL even where a decode would name the actual fault.
+ * Caller errors outrank all of it, before anything is read from @p src, a
+ * source too short to hold a frame included: a NULL @p dst with a non-zero
+ * @p dst_capacity is @ref ZXC_ERROR_NULL_INPUT, and a @c dict_size the library
+ * cannot honour is @ref ZXC_ERROR_DICT_TOO_LARGE.
+ *
  * @param[in]  src          Compressed buffer.
  * @param[in]  src_size     Compressed size in bytes.
- * @param[out] dst          Destination buffer.
+ * @param[out] dst          Destination buffer, or NULL to probe (see above).
  * @param[in]  dst_capacity Capacity of @p dst.
  * @param[in]  opts         Decompression options, or NULL for defaults.
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
- * @return Bytes written to @p dst (> 0), or a negative @ref zxc_error_t
- *         (e.g. @ref ZXC_ERROR_CORRUPT_DATA).
+ * @return Bytes written to @p dst, 0 for an empty archive, or a negative
+ *         @ref zxc_error_t (e.g. @ref ZXC_ERROR_CORRUPT_DATA).
  */
 ZXC_EXPORT int64_t zxc_decompress(const void* src, const size_t src_size, void* dst,
                                   const size_t dst_capacity, const zxc_decompress_opts_t* opts);
@@ -450,11 +464,14 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  * Dictionary options are the exception: honoured as in zxc_compress() but
  * never remembered, so pass them on every call; the shared table is rebuilt
  * only when it changes. A static context returns
- * @ref ZXC_ERROR_DICT_UNSUPPORTED for any dictionary.
+ * @ref ZXC_ERROR_DICT_UNSUPPORTED for any dictionary. @c seekable is ignored
+ * here: use zxc_compress() when the archive needs a seek table.
  *
  * @param[in,out] cctx         Reusable compression context.
- * @param[in]     src          Source data.
- * @param[in]     src_size     Source size in bytes.
+ * @param[in]     src          Source data; may be NULL when @p src_size is 0.
+ * @param[in]     src_size     Source size in bytes; 0 writes the empty archive,
+ *                             as zxc_compress() does, without carving the
+ *                             encoder workspace.
  * @param[out]    dst          Destination buffer.
  * @param[in]     dst_capacity Capacity of @p dst.
  * @param[in]     opts         Options, or NULL to reuse the sticky settings.
@@ -493,16 +510,28 @@ ZXC_EXPORT void zxc_free_dctx(zxc_dctx* dctx);
  * calls. A static context returns @ref ZXC_ERROR_DICT_UNSUPPORTED for any
  * dictionary.
  *
+ * @par Asking without a destination
+ * Same probe as zxc_decompress(), answered under this context's rules: a static
+ * context still rejects a foreign block size and a dictionary-bound archive.
+ *
+ * @par Error codes changed after v0.14.0
+ * They now match zxc_decompress() exactly. A truncated input reports
+ * @ref ZXC_ERROR_SRC_TOO_SMALL and a malformed header reports what the header
+ * parse found (@ref ZXC_ERROR_BAD_MAGIC, @ref ZXC_ERROR_BAD_VERSION,
+ * @ref ZXC_ERROR_BAD_BLOCK_SIZE), where both used to flatten to
+ * @ref ZXC_ERROR_NULL_INPUT or @ref ZXC_ERROR_BAD_HEADER.
+ *
  * @param[in,out] dctx         Reusable decompression context.
  * @param[in]     src          Compressed data.
  * @param[in]     src_size     Compressed size in bytes.
- * @param[out]    dst          Destination buffer.
+ * @param[out]    dst          Destination buffer, or NULL to probe (see above).
  * @param[in]     dst_capacity Capacity of @p dst.
  * @param[in]     opts         Decompression options, or NULL for defaults.
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
- * @return Decompressed size (> 0), or a negative @ref zxc_error_t.
+ * @return Decompressed size, 0 for an empty archive, or a negative
+ *         @ref zxc_error_t.
  */
 ZXC_EXPORT int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* src, size_t src_size, void* dst,
                                        size_t dst_capacity, const zxc_decompress_opts_t* opts);

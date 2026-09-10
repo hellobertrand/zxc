@@ -253,6 +253,122 @@ int test_static_ctx_block_size_locked(void) {
     return 1;
 }
 
+/* A size probe on a static dctx must answer under that context's own rules.
+ * Short-circuiting the no-destination case ahead of the block-size lock and the
+ * no-dictionary rule handed callers a green light for archives the context
+ * cannot decode. */
+int test_static_dctx_probe_honours_guards(void) {
+    printf("=== TEST: Static Context API - size probe honours the dctx guards ===\n");
+
+    const size_t pinned_bs = 64 * 1024;
+    const size_t ws_sz = zxc_static_dctx_workspace_size(pinned_bs);
+    void* const ws = test_aligned_alloc(64, ws_sz);
+    if (!ws) {
+        printf("  [FAIL] aligned_alloc\n");
+        return 0;
+    }
+    zxc_dctx* const dctx = zxc_init_static_dctx(ws, ws_sz, pinned_bs);
+    if (!dctx) {
+        printf("  [FAIL] init_static_dctx\n");
+        test_aligned_free(ws);
+        return 0;
+    }
+
+    int ok = 0;
+    uint8_t arc[8192], out[256];
+    static uint8_t dict[8192];
+    memset(dict, 'x', sizeof(dict));
+    do {
+        /* An archive whose header declares another block size. */
+        zxc_compress_opts_t wrong_bs = {.level = 3, .block_size = pinned_bs * 2};
+        const int64_t bn = zxc_compress(NULL, 0, arc, sizeof(arc), &wrong_bs);
+        if (bn <= 0) {
+            printf("  [FAIL] setup: empty archive at %zu -> %lld\n", pinned_bs * 2, (long long)bn);
+            break;
+        }
+        const int64_t bp = zxc_decompress_dctx(dctx, arc, (size_t)bn, NULL, 0, NULL);
+        const int64_t bd = zxc_decompress_dctx(dctx, arc, (size_t)bn, out, sizeof(out), NULL);
+        if (bp != ZXC_ERROR_BAD_BLOCK_SIZE || bd != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf("  [FAIL] foreign block size: probe %lld, decode %lld\n", (long long)bp,
+                   (long long)bd);
+            break;
+        }
+
+        /* A dictionary-bound archive, which a static dctx has no room for. */
+        zxc_compress_opts_t with_dict = {.level = 3, .block_size = pinned_bs};
+        with_dict.dict = dict;
+        with_dict.dict_size = sizeof(dict);
+        const int64_t dn = zxc_compress(NULL, 0, arc, sizeof(arc), &with_dict);
+        if (dn <= 0) {
+            printf("  [FAIL] setup: dict-bound empty archive -> %lld\n", (long long)dn);
+            break;
+        }
+        const int64_t dp = zxc_decompress_dctx(dctx, arc, (size_t)dn, NULL, 0, NULL);
+        const int64_t dd = zxc_decompress_dctx(dctx, arc, (size_t)dn, out, sizeof(out), NULL);
+        if (dp != ZXC_ERROR_DICT_UNSUPPORTED || dd != ZXC_ERROR_DICT_UNSUPPORTED) {
+            printf("  [FAIL] dict-bound archive: probe %lld, decode %lld\n", (long long)dp,
+                   (long long)dd);
+            break;
+        }
+
+        /* Same guards on an archive that stores data: the payload rejection
+         * must not answer first, or the caller is told "give me a buffer" for
+         * an archive this context could never decode. */
+        uint8_t body[4096];
+        memset(body, 'z', sizeof(body));
+        const int64_t pn = zxc_compress(body, sizeof(body), arc, sizeof(arc), &wrong_bs);
+        if (pn <= 0) {
+            printf("  [FAIL] setup: payload archive at %zu -> %lld\n", pinned_bs * 2,
+                   (long long)pn);
+            break;
+        }
+        if (zxc_decompress_dctx(dctx, arc, (size_t)pn, NULL, 0, NULL) != ZXC_ERROR_BAD_BLOCK_SIZE) {
+            printf("  [FAIL] payload archive, foreign block size: probe %lld\n",
+                   (long long)zxc_decompress_dctx(dctx, arc, (size_t)pn, NULL, 0, NULL));
+            break;
+        }
+        const int64_t pdn = zxc_compress(body, sizeof(body), arc, sizeof(arc), &with_dict);
+        if (pdn <= 0) {
+            printf("  [FAIL] setup: dict payload archive -> %lld\n", (long long)pdn);
+            break;
+        }
+        if (zxc_decompress_dctx(dctx, arc, (size_t)pdn, NULL, 0, NULL) !=
+            ZXC_ERROR_DICT_UNSUPPORTED) {
+            printf("  [FAIL] payload archive, dictionary: probe %lld\n",
+                   (long long)zxc_decompress_dctx(dctx, arc, (size_t)pdn, NULL, 0, NULL));
+            break;
+        }
+
+        /* A dictionary size the library cannot honour is a caller error: it
+         * outranks this context's own no-dictionary rule, on both paths. */
+        zxc_decompress_opts_t huge = {0};
+        huge.dict = dict;
+        huge.dict_size = (size_t)ZXC_DICT_SIZE_MAX + 1;
+        const int64_t hp = zxc_decompress_dctx(dctx, arc, (size_t)pn, NULL, 0, &huge);
+        const int64_t hd = zxc_decompress_dctx(dctx, arc, (size_t)pn, out, sizeof(out), &huge);
+        if (hp != ZXC_ERROR_DICT_TOO_LARGE || hd != ZXC_ERROR_DICT_TOO_LARGE) {
+            printf("  [FAIL] oversized dictionary: probe %lld, decode %lld\n", (long long)hp,
+                   (long long)hd);
+            break;
+        }
+
+        /* An archive the context can decode still probes as empty. */
+        zxc_compress_opts_t good = {.level = 3, .block_size = pinned_bs};
+        const int64_t gn = zxc_compress(NULL, 0, arc, sizeof(arc), &good);
+        if (gn <= 0 || zxc_decompress_dctx(dctx, arc, (size_t)gn, NULL, 0, NULL) != 0) {
+            printf("  [FAIL] matching empty archive did not probe as empty (%lld)\n",
+                   (long long)gn);
+            break;
+        }
+        ok = 1;
+    } while (0);
+
+    zxc_free_dctx(dctx);
+    test_aligned_free(ws);
+    if (ok) printf("  [PASS] the probe is refused exactly where the decode is\n");
+    return ok;
+}
+
 /* Regression: a static cctx carved below ZXC_LEVEL_DENSITY has no opt_scratch
  * and its workspace cannot grow. A per-call raise into the optimal-parser tier
  * must be rejected with ZXC_ERROR_BAD_LEVEL - before the fix it silently

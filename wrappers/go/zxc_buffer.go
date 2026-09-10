@@ -168,12 +168,11 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 	}
 
 	if size == 0 {
-		// Either a valid empty-payload archive, or invalid input (bad header,
-		// or a footer whose size failed the C-side plausibility check). Let
-		// the C decoder decide: it returns 0 for a valid empty archive, or a
-		// negative error code otherwise. Decode into a zero-length buffer;
-		// DST_TOO_SMALL here can only mean the footer contradicts the payload
-		// (the caller supplied no buffer), so report it as invalid data.
+		// Ambiguous: a valid empty-payload archive, or input the C envelope
+		// rejected. Decoding into a zero-length buffer settles it. No
+		// destination was supplied, so DST_TOO_SMALL cannot be about the
+		// caller's buffer: blocks contradict the empty size the footer claims,
+		// which reads as invalid data.
 		var dummy [1]byte
 		written := C.zxc_decompress(
 			unsafe.Pointer(&data[0]),
