@@ -219,3 +219,50 @@ class TestSeekTableHelpers:
     def test_rejects_empty(self):
         with pytest.raises(ValueError):
             zxc.write_seek_table([])
+
+# =========================================================================
+# Checksum switch
+# =========================================================================
+
+
+class TestSeekableChecksum:
+    def test_switch_round_trip(self, tmp_path):
+        """The switch toggles cleanly at any time on an intact archive."""
+        payload = build_payload(256 * 1024)
+        compressed = build_seekable_archive_stream(payload, tmp_path)
+        with zxc.Seekable(compressed) as s:
+            assert s.decompress_range(0, 512) == payload[:512]
+            s.set_checksum(False)
+            assert s.decompress_range(0, 512) == payload[:512]
+            s.set_checksum(True)
+            assert s.decompress_range(0, 512) == payload[:512]
+
+    def test_corrupted_block_names_the_checksum(self, tmp_path):
+        """Which fault is reported proves the switch reaches C.
+
+        On, BAD_CHECKSUM; off, the decoder trips later on CORRUPT_DATA.
+        Asserting both is what makes this test non-vacuous.
+        """
+        payload = build_payload(256 * 1024)
+        compressed = bytearray(build_seekable_archive_stream(payload, tmp_path))
+        # 16-byte file header, then block 0's header (8 bytes), then payload.
+        compressed[16 + 8 + 4] ^= 0xFF
+
+        with zxc.Seekable(bytes(compressed)) as s:
+            s.set_checksum(True)
+            with pytest.raises(RuntimeError, match="BAD_CHECKSUM"):
+                s.decompress_range(0, 512)
+
+        # Default is off, so this one is not verified.
+        with zxc.Seekable(bytes(compressed)) as s:
+            with pytest.raises(RuntimeError, match="CORRUPT_DATA"):
+                s.decompress_range(0, 512)
+
+    def test_set_checksum_after_close_raises(self, tmp_path):
+        payload = build_payload(64 * 1024)
+        compressed = build_seekable_archive_stream(payload, tmp_path)
+        s = zxc.Seekable(compressed)
+        s.close()
+        with pytest.raises(Exception):
+            s.set_checksum(True)
+

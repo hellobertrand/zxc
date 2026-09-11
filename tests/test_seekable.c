@@ -1539,6 +1539,146 @@ int test_seekable_open_reader_mt() {
 }
 
 /* Seekable with checksum (seekable=1, checksum_enabled=1) */
+/* Random access never verified per-block checksums: both paths carved their
+ * context with checksum_enabled = 0 and file_has_checksums was never read, so
+ * zxc_seekable_set_checksum had nothing to switch. Data is incompressible on
+ * purpose: a RAW block memcpys a flipped byte straight through, so only the
+ * checksum catches it. */
+int test_seekable_corrupted_block_checksum(void) {
+    printf("=== TEST: Seekable - opting into checksums catches a corrupted block ===\n");
+
+    const size_t SRC_SIZE = 256 * 1024;
+    const size_t BLK = 64 * 1024;
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    uint32_t rng = 0x2E5B9A17u;
+    for (size_t i = 0; i < SRC_SIZE; i++) {
+        rng = rng * 1103515245u + 12345u;
+        src[i] = (uint8_t)(rng >> 16);
+    }
+
+    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    uint8_t* dst = malloc(dst_cap);
+    if (!dst) {
+        free(src);
+        return 0;
+    }
+    zxc_compress_opts_t opts = {
+        .level = 3, .block_size = BLK, .seekable = 1, .checksum_enabled = 1};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    int ok = 0;
+    uint8_t out[512], out_bad[512];
+    do {
+        if (csize <= 0) {
+            printf("Failed: compress -> %lld\n", (long long)csize);
+            break;
+        }
+        /* Block 1 via the seek table; flip a byte past its 8-byte header. */
+        zxc_seekable* probe = zxc_seekable_open(dst, (size_t)csize);
+        if (!probe || zxc_seekable_get_num_blocks(probe) < 2) {
+            printf("Failed: need at least 2 blocks\n");
+            zxc_seekable_free(probe);
+            break;
+        }
+        const size_t off1 = ZXC_FILE_HEADER_SIZE + zxc_seekable_get_block_comp_size(probe, 0);
+        zxc_seekable_free(probe);
+        if (dst[off1] != ZXC_BLOCK_RAW) {
+            printf("Failed: block 1 is type %u, expected RAW for this test\n", dst[off1]);
+            break;
+        }
+        dst[off1 + ZXC_BLOCK_HEADER_SIZE + 4] ^= 0xFF;
+
+        zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
+        if (!s) {
+            printf("Failed: open\n");
+            break;
+        }
+        /* Default is off: the corrupted RAW block is handed back as-is. */
+        const int64_t unchecked =
+            zxc_seekable_decompress_range(s, out_bad, sizeof(out_bad), BLK, sizeof(out_bad));
+        /* Opting in refuses it, on a context already carved. */
+        const int64_t enabled_rc = zxc_seekable_set_checksum(s, 1);
+        const int64_t checked =
+            zxc_seekable_decompress_range(s, out_bad, sizeof(out_bad), BLK, sizeof(out_bad));
+        /* Intact block, still verifying, must decode byte-exact. */
+        const int64_t good = zxc_seekable_decompress_range(s, out, sizeof(out), 0, sizeof(out));
+        /* And opting back out accepts it again. */
+        const int64_t off_again = zxc_seekable_set_checksum(s, 0);
+        const int64_t unchecked2 =
+            zxc_seekable_decompress_range(s, out_bad, sizeof(out_bad), BLK, sizeof(out_bad));
+        zxc_seekable_free(s);
+
+        if (unchecked != (int64_t)sizeof(out_bad) || unchecked2 != (int64_t)sizeof(out_bad)) {
+            printf("Failed: verification off should accept the block, got %lld then %lld\n",
+                   (long long)unchecked, (long long)unchecked2);
+            break;
+        }
+        if (enabled_rc != ZXC_OK || off_again != ZXC_OK) {
+            printf("Failed: set_checksum -> %lld, %lld\n", (long long)enabled_rc,
+                   (long long)off_again);
+            break;
+        }
+        if (checked != ZXC_ERROR_BAD_CHECKSUM) {
+            printf("Failed: verifying -> %lld, want ZXC_ERROR_BAD_CHECKSUM\n", (long long)checked);
+            break;
+        }
+        if (good != (int64_t)sizeof(out) || memcmp(out, src, sizeof(out)) != 0) {
+            printf("Failed: intact block 0 -> %lld\n", (long long)good);
+            break;
+        }
+        if (zxc_seekable_set_checksum(NULL, 0) != ZXC_ERROR_NULL_INPUT) {
+            printf("Failed: set_checksum(NULL) should be NULL_INPUT\n");
+            break;
+        }
+
+        /* Opting in before the first call goes through the carve instead of the
+         * live update, so it needs its own handle to be covered. */
+        zxc_seekable* early = zxc_seekable_open(dst, (size_t)csize);
+        if (!early) {
+            printf("Failed: open (early)\n");
+            break;
+        }
+        zxc_seekable_set_checksum(early, 1);
+        const int64_t at_carve =
+            zxc_seekable_decompress_range(early, out_bad, sizeof(out_bad), BLK, sizeof(out_bad));
+        zxc_seekable_free(early);
+        if (at_carve != ZXC_ERROR_BAD_CHECKSUM) {
+            printf("Failed: opted in before first use -> %lld, want BAD_CHECKSUM\n",
+                   (long long)at_carve);
+            break;
+        }
+
+        /* The MT path carves its own context, and falls back to ST inside one
+         * block: hence a range over blocks 0 to 2. */
+        zxc_seekable* smt = zxc_seekable_open(dst, (size_t)csize);
+        if (!smt) {
+            printf("Failed: open (mt)\n");
+            break;
+        }
+        const size_t span = 3 * BLK;
+        uint8_t* wide = malloc(span);
+        if (!wide) {
+            zxc_seekable_free(smt);
+            break;
+        }
+        zxc_seekable_set_checksum(smt, 1);
+        const int64_t bad_mt = zxc_seekable_decompress_range_mt(smt, wide, span, 0, span, 4);
+        free(wide);
+        zxc_seekable_free(smt);
+        if (bad_mt != ZXC_ERROR_BAD_CHECKSUM) {
+            printf("Failed: mt range over the corrupted block -> %lld, want BAD_CHECKSUM\n",
+                   (long long)bad_mt);
+            break;
+        }
+        ok = 1;
+    } while (0);
+
+    free(src);
+    free(dst);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
 int test_seekable_with_checksum() {
     printf("=== TEST: Seekable - With Checksum ===\n");
 

@@ -244,6 +244,24 @@ func (s *Seekable) DecompressRange(dst []byte, offset uint64, length int) (int, 
 	return int(res), nil
 }
 
+// SetChecksum turns per-block checksum verification on or off.
+//
+// Off by default, as in the one-shot API. No effect on an archive without
+// checksums; Applies from the next call.
+func (s *Seekable) SetChecksum(enabled bool) error {
+	if s == nil || s.ptr == nil {
+		return ErrNullInput
+	}
+	var on C.int
+	if enabled {
+		on = 1
+	}
+	if rc := C.zxc_seekable_set_checksum(s.ptr, on); rc != C.ZXC_OK {
+		return errorFromCode(C.int64_t(rc))
+	}
+	return nil
+}
+
 // SetDictionary attaches a [Dictionary] (content + shared table) in one call.
 func (s *Seekable) SetDictionary(d *Dictionary) error {
 	return s.SetDict(d.Content(), d.Huf())

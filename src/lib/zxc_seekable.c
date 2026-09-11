@@ -107,6 +107,7 @@ struct zxc_seekable_s {
     // fits in 21 bits.
     uint32_t block_size;
     int file_has_checksums;
+    int verify_checksums;      /* caller's switch; needs file_has_checksums too */
     uint32_t expected_dict_id; /* dict_id from the file header; 0 = no dictionary */
 
     // Reusable decompression context and compressed-block scratch. Both belong
@@ -257,6 +258,7 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     s->num_blocks = num_blocks;
     s->block_size = block_size;
     s->file_has_checksums = file_has_chk;
+    s->verify_checksums = 0; /* opt-in, see zxc_seekable_set_checksum */
     s->expected_dict_id = header_dict_id;
     s->total_decomp = total_decomp;
 
@@ -462,11 +464,12 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     if (UNLIKELY(s->expected_dict_id != 0 && (!s->dict || s->dict_size == 0)))
         return ZXC_ERROR_DICT_REQUIRED;
 
-    // Initialize decompression context on first use
+    // Initialize decompression context on first use.
     if (!s->dctx_initialized) {
         // LCOV_EXCL_START
-        if (UNLIKELY(zxc_cctx_init(&s->dctx, (size_t)s->block_size, 0, 0, 0, s->dict_size) !=
-                     ZXC_OK))
+        if (UNLIKELY(zxc_cctx_init(&s->dctx, (size_t)s->block_size, 0, 0,
+                                   s->file_has_checksums && s->verify_checksums,
+                                   s->dict_size) != ZXC_OK))
             return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
         if (UNLIKELY(zxc_cctx_attach_dict_huf(&s->dctx, s->has_dict_huf ? s->dict_huf : NULL) !=
@@ -618,7 +621,9 @@ static void* zxc_seek_mt_worker(void* arg) {
 
     // Thread-local decompression context (mode=0 for decompress-only)
     zxc_cctx_t dctx;
-    if (UNLIKELY(zxc_cctx_init(&dctx, (size_t)s->block_size, 0, 0, 0, s->dict_size) != ZXC_OK)) {
+    if (UNLIKELY(zxc_cctx_init(&dctx, (size_t)s->block_size, 0, 0,
+                               s->file_has_checksums && s->verify_checksums,
+                               s->dict_size) != ZXC_OK)) {
         // LCOV_EXCL_START
         zxc_seek_mt_fail_stripe(st, ZXC_ERROR_MEMORY);
         return NULL;
@@ -826,6 +831,20 @@ void zxc_seekable_free(zxc_seekable* s) {
     ZXC_FREE(s->comp_offsets);
     ZXC_FREE(s->owned_reader_ctx);
     ZXC_FREE(s);
+}
+
+/**
+ * @brief Turns per-block checksum verification on or off.
+ *
+ * Public API; see @c zxc_seekable.h. Reaches a context already carved: the flag
+ * drives no allocation.
+ */
+int zxc_seekable_set_checksum(zxc_seekable* s, const int enabled) {
+    if (UNLIKELY(!s)) return ZXC_ERROR_NULL_INPUT;
+    s->verify_checksums = enabled ? 1 : 0;
+    if (s->dctx_initialized)
+        s->dctx.checksum_enabled = s->file_has_checksums && s->verify_checksums;
+    return ZXC_OK;
 }
 
 /**

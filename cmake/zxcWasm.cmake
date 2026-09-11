@@ -41,6 +41,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_seekable_get_block_comp_size"
         "_zxc_seekable_get_block_decomp_size"
         "_zxc_seekable_set_dict"
+        "_zxc_seekable_set_checksum"
         # Dictionary API
         "_zxc_train_dict"
         "_zxc_train_dict_huf"

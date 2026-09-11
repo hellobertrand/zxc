@@ -781,6 +781,68 @@ async function main() {
     }
   }
 
+  // --- Seekable checksum switch ---
+  {
+    console.log("\n-- Seekable: checksum switch --");
+    const { default: createZXC } = await import("./zxc_wasm.js");
+    const zxc = await createZXC({}, ZXCModule);
+    const payload = new Uint8Array(128 * 1024);
+    for (let i = 0; i < payload.length; i++) payload[i] = (i * 37 + 11) & 0xff;
+    const arc = zxc.compress(payload, { seekable: true, checksum: true });
+
+    const s = zxc.createSeekable(arc);
+    try {
+      assert(
+        arraysEqual(s.decompressRange(0, 512), payload.subarray(0, 512)),
+        "intact block decodes with the default (off)",
+      );
+      s.setChecksum(false);
+      assert(
+        arraysEqual(s.decompressRange(0, 512), payload.subarray(0, 512)),
+        "setChecksum(false) still decodes an intact block",
+      );
+      s.setChecksum(true);
+      assert(
+        arraysEqual(s.decompressRange(0, 512), payload.subarray(0, 512)),
+        "setChecksum(true) again still decodes an intact block",
+      );
+    } finally {
+      s.free();
+    }
+
+    // The switch decides which fault is reported, which proves it reaches C.
+    const bad = Uint8Array.from(arc);
+    bad[16 + 8 + 4] ^= 0xff; // file header, block header, then payload
+    let onErr = "",
+      offErr = "";
+    const sOn = zxc.createSeekable(bad);
+    try {
+      sOn.setChecksum(true);
+      sOn.decompressRange(0, 512);
+    } catch (e) {
+      onErr = String(e.message);
+    } finally {
+      sOn.free();
+    }
+    // Default is off, so this one is not verified.
+    const sOff = zxc.createSeekable(bad);
+    try {
+      sOff.decompressRange(0, 512);
+    } catch (e) {
+      offErr = String(e.message);
+    } finally {
+      sOff.free();
+    }
+    assert(
+      onErr.includes("BAD_CHECKSUM"),
+      `verifying names the checksum (got "${onErr}")`,
+    );
+    assert(
+      offErr.includes("CORRUPT_DATA"),
+      `not verifying names corrupt data instead (got "${offErr}")`,
+    );
+  }
+
   // --- Summary ---
   console.log(`\n${"=".repeat(40)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);

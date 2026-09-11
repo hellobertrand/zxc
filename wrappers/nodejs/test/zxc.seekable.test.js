@@ -192,3 +192,52 @@ describe("Seekable: low-level seek table helpers", () => {
     expect(() => zxc.writeSeekTable([])).toThrow();
   });
 });
+
+describe("Seekable: checksum switch", () => {
+  const payload = buildPayload(256 * 1024);
+
+  test("the switch toggles cleanly at any time on an intact archive", () => {
+    const s = new zxc.Seekable(buildSeekableArchive(payload));
+    try {
+      expect(s.decompressRange(0, 512)).toEqual(payload.subarray(0, 512));
+      s.setChecksum(false);
+      expect(s.decompressRange(0, 512)).toEqual(payload.subarray(0, 512));
+      s.setChecksum(true);
+      expect(s.decompressRange(0, 512)).toEqual(payload.subarray(0, 512));
+    } finally {
+      s.close();
+    }
+  });
+
+  // Which fault is reported proves the switch reaches C: on, BAD_CHECKSUM;
+  // off, the decoder trips later on CORRUPT_DATA.
+  test("a corrupted block names the checksum only when verifying", () => {
+    const bad = Buffer.from(buildSeekableArchive(payload));
+    bad[16 + 8 + 4] ^= 0xff; // file header, block header, then payload
+
+    const on = new zxc.Seekable(bad);
+    try {
+      on.setChecksum(true);
+      expect(() => on.decompressRange(0, 512)).toThrow(/BAD_CHECKSUM/);
+    } finally {
+      on.close();
+    }
+
+    // Default is off, so this one is not verified.
+    const off = new zxc.Seekable(bad);
+    try {
+      expect(() => off.decompressRange(0, 512)).toThrow(/CORRUPT_DATA/);
+    } finally {
+      off.close();
+    }
+  });
+
+  test("setChecksum rejects a non-boolean", () => {
+    const s = new zxc.Seekable(buildSeekableArchive(payload));
+    try {
+      expect(() => s.setChecksum("yes")).toThrow(TypeError);
+    } finally {
+      s.close();
+    }
+  });
+});
