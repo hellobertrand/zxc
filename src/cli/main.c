@@ -804,10 +804,10 @@ static int zxc_list_archive(const char* path, int json_output) {
     }
     fclose(f);
 
-    // Parse checksum (if non-zero, checksum was enabled)
     const uint32_t stored_checksum = footer[8] | ((uint32_t)footer[9] << 8) |
                                      ((uint32_t)footer[10] << 16) | ((uint32_t)footer[11] << 24);
-    const char* checksum_method = (stored_checksum != 0) ? "RapidHash" : "-";
+    const int has_checksum = (header[6] & 0x80U) != 0;
+    const char* checksum_method = has_checksum ? "RapidHash" : "-";
 
     // Dictionary ID (from header flag bit 6 + bytes 7-10)
     const uint32_t dict_id = zxc_get_dict_id(header, ZXC_FILE_HEADER_SIZE);
@@ -842,7 +842,7 @@ static int zxc_list_archive(const char* path, int json_output) {
             "  \"dict_id\": %s%s%s\n"
             "}\n",
             path, file_size, (long long)uncompressed_size, ratio, format_version, block_size_kb,
-            (stored_checksum != 0) ? "RapidHash" : "none", stored_checksum, dict_id ? "\"" : "",
+            has_checksum ? "RapidHash" : "none", stored_checksum, dict_id ? "\"" : "",
             dict_id ? dict_id_str : "null", dict_id ? "\"" : "");
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
@@ -852,9 +852,9 @@ static int zxc_list_archive(const char* path, int json_output) {
             "Block Format: %u\n"
             "Block Size:   %zu KB\n"
             "Checksum Method: %s\n",
-            path, format_version, block_size_kb, (stored_checksum != 0) ? "RapidHash" : "None");
+            path, format_version, block_size_kb, has_checksum ? "RapidHash" : "None");
 
-        if (stored_checksum != 0) printf("Checksum Value:  0x%08X\n", stored_checksum);
+        if (has_checksum) printf("Checksum Value:  0x%08X\n", stored_checksum);
         if (dict_id) printf("Dictionary ID:   %s\n", dict_id_str);
 
         printf(
