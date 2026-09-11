@@ -810,11 +810,21 @@ async function main() {
       s.free();
     }
 
-    // The switch decides which fault is reported, which proves it reaches C.
-    const bad = Uint8Array.from(arc);
+    // Incompressible on purpose: a RAW block memcpys a flipped byte straight
+    // through, so the decode succeeds and only the checksum objects.
+    let rng = 0x2e5b9a17;
+    const rawPayload = new Uint8Array(128 * 1024);
+    for (let i = 0; i < rawPayload.length; i++) {
+      rng = (Math.imul(rng, 1103515245) + 12345) >>> 0;
+      rawPayload[i] = (rng >>> 16) & 0xff;
+    }
+    const bad = Uint8Array.from(
+      zxc.compress(rawPayload, { seekable: true, checksum: true }),
+    );
+    assert(bad[16] === 0, "block 0 is RAW (incompressible payload)");
     bad[16 + 8 + 4] ^= 0xff; // file header, block header, then payload
-    let onErr = "",
-      offErr = "";
+
+    let onErr = "";
     const sOn = zxc.createSeekable(bad);
     try {
       sOn.setChecksum(true);
@@ -824,22 +834,21 @@ async function main() {
     } finally {
       sOn.free();
     }
-    // Default is off, so this one is not verified.
+    // Default is off: bytes come back, wrong, with no error.
+    let silent = null;
     const sOff = zxc.createSeekable(bad);
     try {
-      sOff.decompressRange(0, 512);
-    } catch (e) {
-      offErr = String(e.message);
+      silent = sOff.decompressRange(0, 512);
     } finally {
       sOff.free();
     }
     assert(
-      onErr.includes("BAD_CHECKSUM"),
-      `verifying names the checksum (got "${onErr}")`,
+      silent !== null && !arraysEqual(silent, rawPayload.subarray(0, 512)),
+      "not verifying returns wrong bytes with no error",
     );
     assert(
-      offErr.includes("CORRUPT_DATA"),
-      `not verifying names corrupt data instead (got "${offErr}")`,
+      onErr.includes("BAD_CHECKSUM"),
+      `verifying names the checksum (got "${onErr}")`,
     );
   }
 

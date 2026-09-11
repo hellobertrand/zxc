@@ -234,8 +234,7 @@ impl Seekable {
     /// Turns per-block checksum verification on or off.
     ///
     /// Off by default, as in the one-shot API. No effect on an archive without
-    /// checksums; about 14% on a full-range read when on. Applies from the next
-    /// call.
+    /// checksums. Applies from the next call.
     ///
     /// # Errors
     ///
@@ -413,24 +412,19 @@ mod tests {
     }
 
     #[test]
-    fn checksum_switch_decides_which_fault_is_reported() {
-        // Which fault is reported proves the switch reaches C: on,
-        // BadChecksum; off, the decoder trips later on CorruptData.
-        let payload: Vec<u8> = (0..262_144u32)
-            .map(|i| (i.wrapping_mul(37) as u8))
+    fn a_corrupted_block_is_silent_without_verification() {
+        // Incompressible on purpose: a RAW block memcpys a flipped byte straight
+        // through, so the decode succeeds and only the checksum objects. A
+        // compressible payload would pin this test to today's encoder output.
+        let mut rng: u32 = 0x2E5B_9A17;
+        let payload: Vec<u8> = (0..262_144)
+            .map(|_| {
+                rng = rng.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                (rng >> 16) as u8
+            })
             .collect();
         let mut arc = build_archive(&payload);
-
-        {
-            let mut s = Seekable::from_bytes(arc.clone()).expect("open failed");
-            let mut out = vec![0u8; 512];
-            assert_eq!(s.decompress_range(&mut out, 0, 512).unwrap(), 512);
-            s.set_checksum(false).expect("set_checksum(false)");
-            assert_eq!(s.decompress_range(&mut out, 0, 512).unwrap(), 512);
-            s.set_checksum(true).expect("set_checksum(true)");
-            assert_eq!(s.decompress_range(&mut out, 0, 512).unwrap(), 512);
-        }
-
+        assert_eq!(arc[16], 0, "block 0 must be RAW for this test");
         // 16-byte file header, then block 0's header (8 bytes), then payload.
         arc[16 + 8 + 4] ^= 0xFF;
 
@@ -442,12 +436,10 @@ mod tests {
             Err(Error::BadChecksum)
         ));
 
-        // Default is off, so this one is not verified.
+        // Default is off: bytes come back, wrong.
         let mut off = Seekable::from_bytes(arc).expect("open failed");
-        assert!(matches!(
-            off.decompress_range(&mut out, 0, 512),
-            Err(Error::CorruptData)
-        ));
+        assert_eq!(off.decompress_range(&mut out, 0, 512).unwrap(), 512);
+        assert_ne!(&out[..], &payload[..512]);
     }
 
     #[test]

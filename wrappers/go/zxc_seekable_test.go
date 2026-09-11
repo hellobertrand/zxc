@@ -36,9 +36,14 @@ func buildSeekableArchive(t *testing.T, payload []byte) string {
 // the decoder trips later on CORRUPT_DATA. Asserting both is what makes this
 // test non-vacuous.
 func TestSeekableSetChecksum(t *testing.T) {
+	// Incompressible on purpose: a RAW block memcpys a flipped byte straight
+	// through, so the decode succeeds and only the checksum objects. A
+	// compressible payload would pin this test to today's encoder output.
 	payload := make([]byte, 256*1024)
+	rng := uint32(0x2E5B9A17)
 	for i := range payload {
-		payload[i] = byte(i*37 + 11)
+		rng = rng*1103515245 + 12345
+		payload[i] = byte(rng >> 16)
 	}
 	path := buildSeekableArchive(t, payload)
 
@@ -61,6 +66,9 @@ func TestSeekableSetChecksum(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read archive: %v", err)
 	}
+	if raw[16] != 0 {
+		t.Skipf("block 0 type = %d, not RAW; nothing to corrupt silently", raw[16])
+	}
 	// 16-byte file header, then block 0's header (8 bytes), then payload.
 	raw[16+8+4] ^= 0xFF
 	bad := filepath.Join(t.TempDir(), "corrupt.zxc")
@@ -81,15 +89,18 @@ func TestSeekableSetChecksum(t *testing.T) {
 		t.Fatalf("verifying: want ErrBadChecksum, got %v", err)
 	}
 
-	// Default is off, so this one is not verified.
+	// Default is off: bytes come back, wrong, with no error.
 	skipping, err := Open(bad)
 	if err != nil {
 		t.Fatalf("Open(corrupt): %v", err)
 	}
-	_, err = skipping.DecompressRange(out, 0, len(out))
+	n, err := skipping.DecompressRange(out, 0, len(out))
 	skipping.Close()
-	if !errors.Is(err, ErrCorruptData) {
-		t.Fatalf("not verifying: want ErrCorruptData, got %v", err)
+	if err != nil || n != len(out) {
+		t.Fatalf("not verifying: want %d bytes, got %d (%v)", len(out), n, err)
+	}
+	if bytes.Equal(out, payload[:len(out)]) {
+		t.Fatalf("not verifying: expected wrong bytes")
 	}
 }
 

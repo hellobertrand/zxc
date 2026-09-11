@@ -247,7 +247,7 @@ func (s *Seekable) DecompressRange(dst []byte, offset uint64, length int) (int, 
 // SetChecksum turns per-block checksum verification on or off.
 //
 // Off by default, as in the one-shot API. No effect on an archive without
-// checksums; Applies from the next call.
+// checksums. Applies from the next call.
 func (s *Seekable) SetChecksum(enabled bool) error {
 	if s == nil || s.ptr == nil {
 		return ErrNullInput

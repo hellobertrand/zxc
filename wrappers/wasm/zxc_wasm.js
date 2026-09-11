@@ -970,6 +970,11 @@ export default async function createZXC(moduleOverrides, factory) {
        * @param {boolean} enabled - `false` to skip verification.
        */
       setChecksum(enabled) {
+        // The Node addon throws on a non-boolean; match it so code ported
+        // between the two builds behaves the same.
+        if (typeof enabled !== "boolean") {
+          throw new TypeError("ZXC: setChecksum expects a boolean");
+        }
         const r = _seekable_set_checksum(handle, enabled ? 1 : 0);
         if (r < 0) {
           throw new Error(

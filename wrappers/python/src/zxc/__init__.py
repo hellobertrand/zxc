@@ -526,8 +526,7 @@ class Seekable:
         """Turn per-block checksum verification on or off.
 
         Off by default, as in the one-shot API. No effect without checksums in
-        the archive; about 14% on a full-range read when on. Applies from the
-        next call.
+        the archive. Applies from the next call.
         """
         self._ensure_open()
         pyzxc_seekable_set_checksum(self._handle, bool(enabled))

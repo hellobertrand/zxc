@@ -369,7 +369,7 @@ export class Seekable {
      * Turns per-block checksum verification on or off.
      *
      * Off by default, as in the one-shot API. No effect without checksums in
-     * the archive; Applies from the next call.
+     * the archive. Applies from the next call.
      */
     setChecksum(enabled: boolean): void;
     /** Release native resources. Idempotent. */

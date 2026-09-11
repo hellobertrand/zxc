@@ -209,11 +209,21 @@ describe("Seekable: checksum switch", () => {
     }
   });
 
-  // Which fault is reported proves the switch reaches C: on, BAD_CHECKSUM;
-  // off, the decoder trips later on CORRUPT_DATA.
-  test("a corrupted block names the checksum only when verifying", () => {
-    const bad = Buffer.from(buildSeekableArchive(payload));
-    bad[16 + 8 + 4] ^= 0xff; // file header, block header, then payload
+  // Incompressible on purpose: a RAW block memcpys a flipped byte straight
+  // through, so the decode succeeds and only the checksum objects. A
+  // compressible payload would pin this test to today's encoder output.
+  test("a corrupted block is silent without verification", () => {
+    let rng = 0x2e5b9a17;
+    const raw = Buffer.alloc(256 * 1024);
+    for (let i = 0; i < raw.length; i++) {
+      rng = (Math.imul(rng, 1103515245) + 12345) >>> 0;
+      raw[i] = (rng >>> 16) & 0xff;
+    }
+    const bad = Buffer.from(
+      zxc.compress(raw, { seekable: true, checksum: true }),
+    );
+    expect(bad[16]).toBe(0); // block 0 must be RAW
+    bad[16 + 8 + 4] ^= 0xff;
 
     const on = new zxc.Seekable(bad);
     try {
@@ -223,10 +233,10 @@ describe("Seekable: checksum switch", () => {
       on.close();
     }
 
-    // Default is off, so this one is not verified.
+    // Default is off: bytes come back, wrong, with no error.
     const off = new zxc.Seekable(bad);
     try {
-      expect(() => off.decompressRange(0, 512)).toThrow(/CORRUPT_DATA/);
+      expect(off.decompressRange(0, 512)).not.toEqual(raw.subarray(0, 512));
     } finally {
       off.close();
     }
