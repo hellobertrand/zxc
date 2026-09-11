@@ -67,7 +67,7 @@ func TestSeekableSetChecksum(t *testing.T) {
 		t.Fatalf("read archive: %v", err)
 	}
 	if raw[16] != 0 {
-		t.Skipf("block 0 type = %d, not RAW; nothing to corrupt silently", raw[16])
+		t.Fatalf("block 0 type = %d, want RAW; the LCG payload is no longer incompressible", raw[16])
 	}
 	// 16-byte file header, then block 0's header (8 bytes), then payload.
 	raw[16+8+4] ^= 0xFF

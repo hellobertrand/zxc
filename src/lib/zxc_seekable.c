@@ -683,10 +683,8 @@ static void* zxc_seek_mt_worker(void* arg) {
             // LCOV_EXCL_STOP
         }
         if (UNLIKELY((size_t)dec_res < job->skip + job->copy_len)) {
-            // LCOV_EXCL_START
             job->result = ZXC_ERROR_CORRUPT_DATA;
             break;
-            // LCOV_EXCL_STOP
         }
 
         // Copy the requested portion directly into the caller's output buffer

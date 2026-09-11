@@ -248,8 +248,9 @@ class TestSeekableChecksum:
             buf[i] = (rng >> 16) & 0xFF
         payload = bytes(buf)
         compressed = bytearray(build_seekable_archive_stream(payload, tmp_path))
-        if compressed[16] != 0:
-            pytest.skip("block 0 is not RAW; nothing to corrupt silently")
+        assert (
+            compressed[16] == 0
+        ), "block 0 must be RAW; the LCG payload is no longer incompressible"
         # 16-byte file header, then block 0's header (8 bytes), then payload.
         compressed[16 + 8 + 4] ^= 0xFF
 

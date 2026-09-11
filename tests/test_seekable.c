@@ -1616,10 +1616,15 @@ int test_seekable_range_reports_short_reads(void) {
         }
         memset(out, 0xAB, sizeof(out));
         const int64_t shortr = zxc_seekable_decompress_range(sh, out, 2000, 0, 2000);
+        uint8_t* wide = malloc(BLK + 2000);
+        const int64_t shortr_mt =
+            wide ? zxc_seekable_decompress_range_mt(sh, wide, BLK + 2000, 0, BLK + 2000, 4) : 0;
+        free(wide);
         zxc_seekable_free(sh);
-        if (shortr >= 0) {
-            printf("  [FAIL] short block: returned %lld with %d bytes left unwritten\n",
-                   (long long)shortr, (int)(2000 - 1000));
+        if (!wide) break;
+        if (shortr != ZXC_ERROR_CORRUPT_DATA || shortr_mt != ZXC_ERROR_CORRUPT_DATA) {
+            printf("  [FAIL] short block: st %lld, mt %lld, want CORRUPT_DATA\n", (long long)shortr,
+                   (long long)shortr_mt);
             break;
         }
         ok = 1;
@@ -1674,13 +1679,14 @@ int test_seekable_corrupted_block_checksum(void) {
         }
         const size_t off1 = ZXC_FILE_HEADER_SIZE + zxc_seekable_get_block_comp_size(probe, 0);
         zxc_seekable_free(probe);
+        /* A fixture failure, not a checksum failure: the payload is an LCG, so
+         * the encoder should always store it RAW. Skipping here would remove
+         * the only coverage of silent corruption, so fail loudly instead. */
         if (dst[off1] != ZXC_BLOCK_RAW) {
-            /* The premise is an encoder heuristic, not an invariant: if level 3
-             * ever compresses this LCG stream, skip rather than report a
-             * checksum bug that is not there. */
-            printf("  [SKIP] block 1 is type %u, not RAW; nothing to corrupt silently\n",
-                   dst[off1]);
-            ok = 1;
+            printf(
+                "  [FAIL] fixture: block 1 is type %u, expected RAW; the LCG payload is no "
+                "longer incompressible, pick another\n",
+                dst[off1]);
             break;
         }
         dst[off1 + ZXC_BLOCK_HEADER_SIZE + 4] ^= 0xFF;
