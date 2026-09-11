@@ -201,6 +201,7 @@ int test_eof_block_structure(void);
 int test_header_checksum(void);
 int test_global_checksum_order(void);
 int test_forged_block_comp_size(void);
+int test_global_checksum_order_distance_32(void);
 int test_chunk_size_code(void);
 
 /* Misc */
@@ -235,6 +236,7 @@ int test_dict_ctx_table_without_dict(void);
 int test_dict_oversized_rejected_everywhere(void);
 int test_dict_block_huf_roundtrip(void);
 int test_dict_block_stored_block_size(void);
+int test_dict_id_collision_caught_by_checksum(void);
 int test_dict_huf_zxd_roundtrip(void);
 int test_dict_huf_table_roundtrip(void);
 int test_dict_huf_degenerate_corpus(void);

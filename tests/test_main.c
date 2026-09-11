@@ -123,6 +123,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_header_checksum),
     TEST_CASE(test_global_checksum_order),
     TEST_CASE(test_forged_block_comp_size),
+    TEST_CASE(test_global_checksum_order_distance_32),
     TEST_CASE(test_chunk_size_code),
 
     /* --- Misc --- */
@@ -157,6 +158,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_dict_oversized_rejected_everywhere),
     TEST_CASE(test_dict_block_huf_roundtrip),
     TEST_CASE(test_dict_block_stored_block_size),
+    TEST_CASE(test_dict_id_collision_caught_by_checksum),
     TEST_CASE(test_dict_huf_zxd_roundtrip),
     TEST_CASE(test_dict_huf_table_roundtrip),
     TEST_CASE(test_dict_huf_degenerate_corpus),

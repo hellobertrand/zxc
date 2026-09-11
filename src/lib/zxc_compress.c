@@ -2041,15 +2041,10 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     }
 
     if (ctx->checksum_enabled) {
-        // Calculate checksum on the compressed payload (w currently excludes checksum)
-        // Header is at dst, data starts at dst + ZXC_BLOCK_HEADER_SIZE
         if (UNLIKELY(w < ZXC_BLOCK_HEADER_SIZE || w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap))
             return ZXC_ERROR_OVERFLOW;
 
-        uint32_t payload_sz = (uint32_t)(w - ZXC_BLOCK_HEADER_SIZE);
-        uint32_t sum =
-            zxc_checksum(dst + ZXC_BLOCK_HEADER_SIZE, payload_sz, 0, ZXC_CHECKSUM_RAPIDHASH);
-        zxc_store_le32(dst + w, sum);
+        zxc_store_le32(dst + w, zxc_checksum(block_data, block_sz, 0, ZXC_CHECKSUM_RAPIDHASH));
         w += ZXC_BLOCK_CHECKSUM_SIZE;
     }
 

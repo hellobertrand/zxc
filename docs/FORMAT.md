@@ -566,10 +566,18 @@ These protect metadata/navigation fields.
 
 When file header has `HAS_CHECKSUM=1`:
 - each data block appends a 4-byte checksum after payload.
-- checksum input is **compressed payload bytes only** (not block header).
-- algorithm id currently `0`: `fold32(rapidhash(payload))`, where `rapidhash`
-  is rapidhash v3 (default secret, seed 0) and
+- checksum input is the block's **decompressed bytes**, dictionary prefix
+  excluded. For a RAW block the payload is those bytes, so the value is the
+  same either way.
+- algorithm id currently `0`: `fold32(rapidhash(decompressed_block))`, where
+  `rapidhash` is rapidhash v3 (default secret, seed 0) and
   `fold32(h) = (h XOR (h >> 32)) AND 0xFFFFFFFF`.
+
+A decoder therefore verifies a block **after** decoding it, and a corrupted
+block reports whatever the decoder tripped on first. In exchange the checksum
+covers the whole pipeline: it catches a wrong dictionary accepted through a
+`dict_id` collision, an encoder or decoder defect, and a divergence between
+SIMD variants -- none of which touch the compressed bytes.
 
 ## 7.3 Global stream hash
 
@@ -578,8 +586,13 @@ A rolling global hash is maintained from per-block checksums in stream order:
 ```text
 global = 0
 for each data block checksum b:
-    global = ((global << 1) | (global >> 31)) XOR b
+    global = (global * 0x7F4A7C15) + b        ; mod 2^32
 ```
+
+The multiplier is the low half of the mixing prime `0x9E3779B97F4A7C15`. It
+makes the result depend on block order, so a reordered archive fails the global
+check. The previous `rotl32(global, 1) XOR b` had a period of 32: blocks whose
+indices differed by a multiple of 32 could be swapped undetected.
 
 This value is stored in the file footer (or zeroed when checksum mode is disabled).
 
@@ -759,8 +772,10 @@ When `HAS_DICTIONARY` (flag bit 6) is set, the reserved bytes at offsets
 Older decoders that do not recognize the `HAS_DICTIONARY` flag will ignore it
 (per §10.3: reserved flag bits are ignored). However, blocks compressed with a
 dictionary contain match offsets that reference dictionary content; decoding
-without the dictionary produces corrupt output. Per-block and global checksums
-(when enabled) will detect this corruption.
+without the dictionary produces corrupt output. Per-block checksums (when
+enabled) detect it, because they cover the decompressed bytes (§7.2). This also
+covers the residual risk of a 32-bit `dict_id` collision, where the header check
+passes on the wrong dictionary.
 
 ### 12.4 Dictionary file format (`.zxd`)
 
@@ -906,7 +921,8 @@ Trailing block checksum at `0x22..0x25`:
 90 BB A1 75
 ```
 
-LE value: `0x75A1BB90`.
+LE value: `0x75A1BB90`. This is a RAW block, so its payload already is the
+decompressed data and §7.2's input is those same ten bytes.
 
 #### C) EOF Block (offset `0x26`, 8 bytes)
 
@@ -931,7 +947,7 @@ Since there is exactly one data block, the global hash equals that block checksu
 
 ```text
 global0 = 0
-global1 = rotl1(global0) XOR block_checksum = block_checksum
+global1 = global0 * 0x7F4A7C15 + block_checksum = block_checksum
 ```
 
 ### 14.3 Structural view with absolute offsets
