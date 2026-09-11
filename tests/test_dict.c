@@ -2094,3 +2094,74 @@ int test_dict_block_stored_block_size(void) {
     if (ok) printf("PASS\n\n");
     return ok;
 }
+
+/* A 32-bit dict_id can collide, and a fuzz harness found real pairs. The
+ * decoder accepts the wrong dictionary, and before this lot the checksum
+ * covered the compressed payload -- intact -- so the archive decoded to wrong
+ * bytes with nothing to notice. Now the checksum covers the decompressed bytes
+ * and the first block fails.
+ *
+ * The two seeds below produce a genuine collision under rapidhash. If that ever
+ * changes, this test says so rather than silently losing its point: re-run a
+ * birthday search over zxc_dict_id and replace them. */
+int test_dict_id_collision_caught_by_checksum(void) {
+    printf("=== TEST: Dictionary - a dict_id collision fails the block checksum ===\n");
+
+    enum { DSZ = 1024, SRC = 8192 };
+    static uint8_t a[DSZ], b[DSZ], src[SRC], arc[SRC * 2], out[SRC * 2];
+    for (int k = 0; k < 2; k++) {
+        uint8_t* d = k ? b : a;
+        uint32_t s = (k ? 73013u : 58488u) * 2654435761u + 1u;
+        for (int i = 0; i < DSZ; i++) {
+            s = s * 1103515245u + 12345u;
+            d[i] = (uint8_t)(s >> 16);
+        }
+    }
+
+    int ok = 0;
+    do {
+        if (zxc_dict_id(a, DSZ, NULL) != zxc_dict_id(b, DSZ, NULL) || memcmp(a, b, DSZ) == 0) {
+            printf("  [FAIL] the seeds no longer collide (0x%08X vs 0x%08X); pick new ones\n",
+                   zxc_dict_id(a, DSZ, NULL), zxc_dict_id(b, DSZ, NULL));
+            break;
+        }
+        /* Built from slices of a, so the encoder really emits matches into it. */
+        for (size_t i = 0; i < SRC; i += 128)
+            memcpy(src + i, a + ((i / 128 * 57) % (DSZ - 128)), 128);
+
+        zxc_compress_opts_t co = {.level = 3, .checksum_enabled = 1};
+        co.dict = a;
+        co.dict_size = DSZ;
+        const int64_t n = zxc_compress(src, SRC, arc, sizeof(arc), &co);
+        if (n <= 0 || (size_t)n > SRC / 4) {
+            printf("  [FAIL] compress -> %lld (must reference the dictionary)\n", (long long)n);
+            break;
+        }
+
+        zxc_decompress_opts_t verify = {.checksum_enabled = 1};
+        verify.dict = b;
+        verify.dict_size = DSZ;
+        const int64_t caught = zxc_decompress(arc, (size_t)n, out, sizeof(out), &verify);
+        if (caught != ZXC_ERROR_BAD_CHECKSUM) {
+            printf("  [FAIL] wrong dictionary -> %lld, want ZXC_ERROR_BAD_CHECKSUM\n",
+                   (long long)caught);
+            break;
+        }
+
+        /* Without verification it is silent corruption: bytes come back, wrong. */
+        zxc_decompress_opts_t quiet = {0};
+        quiet.dict = b;
+        quiet.dict_size = DSZ;
+        memset(out, 0, sizeof(out));
+        const int64_t silent = zxc_decompress(arc, (size_t)n, out, sizeof(out), &quiet);
+        if (silent != (int64_t)SRC || memcmp(out, src, SRC) == 0) {
+            printf("  [FAIL] unverified decode -> %lld, expected SRC bytes that differ\n",
+                   (long long)silent);
+            break;
+        }
+        ok = 1;
+    } while (0);
+
+    if (ok) printf("PASS\n\n");
+    return ok;
+}

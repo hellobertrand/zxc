@@ -32,9 +32,8 @@ func buildSeekableArchive(t *testing.T, payload []byte) string {
 	return out
 }
 
-// Which fault is reported proves the switch reaches C: on, BAD_CHECKSUM; off,
-// the decoder trips later on CORRUPT_DATA. Asserting both is what makes this
-// test non-vacuous.
+// Incompressible data means RAW blocks, which memcpy a flipped byte straight
+// through: the decode succeeds and only the checksum objects.
 func TestSeekableSetChecksum(t *testing.T) {
 	// Incompressible on purpose: a RAW block memcpys a flipped byte straight
 	// through, so the decode succeeds and only the checksum objects. A

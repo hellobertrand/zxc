@@ -656,18 +656,20 @@ int test_static_dctx_block_bounds(void) {
         printf("  [PASS] %zu (block, decoder, buffer) verdicts\n",
                sizeof(cases) / sizeof(cases[0]));
 
-        /* The stale checksum wins over the forged count, static as dynamic. */
+        /* A forged count with a stale checksum is refused by all three shapes.
+         * The checksum covers the decompressed bytes, so it no longer wins the
+         * race: the decoder's own bounds check fires first. */
         const zxc_decompress_opts_t ck = {.checksum_enabled = 1};
         const int64_t c1 = bound_decode(sd, &blocks[B_HDR_LIT_CK], 0, out, PIN + PAD, &ck);
         const int64_t c2 = bound_decode(sd, &blocks[B_HDR_LIT_CK], 1, out, PIN, &ck);
         const int64_t c3 = bound_decode(hd, &blocks[B_HDR_LIT_CK], 0, out, PIN + PAD, &ck);
-        if (c1 != ZXC_ERROR_BAD_CHECKSUM || c2 != ZXC_ERROR_BAD_CHECKSUM ||
-            c3 != ZXC_ERROR_BAD_CHECKSUM) {
-            printf("  [FAIL] stale checksum: static %lld %lld, dynamic %lld\n", (long long)c1,
+        if (c1 != ZXC_ERROR_CORRUPT_DATA || c2 != ZXC_ERROR_CORRUPT_DATA ||
+            c3 != ZXC_ERROR_CORRUPT_DATA) {
+            printf("  [FAIL] forged count: static %lld %lld, dynamic %lld\n", (long long)c1,
                    (long long)c2, (long long)c3);
             break;
         }
-        printf("  [PASS] stale checksum -> BAD_CHECKSUM before any size verdict\n");
+        printf("  [PASS] forged count refused by the decoder, static as dynamic\n");
 
         /* Dictionaries: the same two answers as the dynamic path, in order. */
         const zxc_decompress_opts_t small_dict = {.dict = lz, .dict_size = 16};

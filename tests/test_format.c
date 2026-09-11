@@ -847,6 +847,81 @@ int test_global_checksum_order() {
     return 1;
 }
 
+/* The old combiner was rotl32(h,1) ^ b, whose period is 32: swapping two blocks
+ * whose indices differ by a multiple of 32 left the global hash untouched. The
+ * neighbouring test only swaps blocks 1 and 2, so it never saw this. */
+int test_global_checksum_order_distance_32(void) {
+    printf("TEST: Global Checksum Order, distance 32... ");
+
+    const size_t BLK = 4 * 1024;
+    const size_t NBLK = 40; /* > 33 so blocks 1 and 33 both exist */
+    const size_t in_sz = BLK * NBLK;
+    uint8_t* src = malloc(in_sz);
+    if (!src) return 0;
+    /* Each block distinct, and incompressible so every block is RAW and its
+     * physical size is predictable. */
+    uint32_t rng = 0x51ED270Bu;
+    for (size_t i = 0; i < in_sz; i++) {
+        rng = rng * 1103515245u + 12345u;
+        src[i] = (uint8_t)(rng >> 16);
+    }
+
+    const size_t cap = (size_t)zxc_compress_bound(in_sz) + 4096;
+    uint8_t* comp = malloc(cap);
+    uint8_t* swapped = malloc(cap);
+    uint8_t* out = malloc(in_sz);
+    int ok = 0;
+    do {
+        if (!comp || !swapped || !out) break;
+        zxc_compress_opts_t co = {.level = 3, .block_size = BLK, .checksum_enabled = 1};
+        const int64_t n = zxc_compress(src, in_sz, comp, cap, &co);
+        if (n <= 0) {
+            printf("[FAIL] compress -> %lld\n", (long long)n);
+            break;
+        }
+        /* Offsets of every data block, walking the frame once. */
+        size_t off[64], len[64], nb = 0;
+        size_t p = ZXC_FILE_HEADER_SIZE;
+        while (p + ZXC_BLOCK_HEADER_SIZE <= (size_t)n && nb < 64) {
+            zxc_block_header_t bh;
+            if (zxc_read_block_header(comp + p, (size_t)n - p, &bh) != ZXC_OK) break;
+            if (bh.block_type == ZXC_BLOCK_EOF) break;
+            off[nb] = p;
+            len[nb] = ZXC_BLOCK_HEADER_SIZE + bh.comp_size + ZXC_BLOCK_CHECKSUM_SIZE;
+            p += len[nb];
+            nb++;
+        }
+        if (nb < 34) {
+            printf("[FAIL] got %zu blocks, need >= 34\n", nb);
+            break;
+        }
+        /* Swap blocks 1 and 33: same length (both full), so the frame layout
+         * is untouched and only the order changes. */
+        if (len[1] != len[33]) {
+            printf("[FAIL] blocks 1 and 33 differ in size (%zu vs %zu)\n", len[1], len[33]);
+            break;
+        }
+        memcpy(swapped, comp, (size_t)n);
+        memcpy(swapped + off[1], comp + off[33], len[33]);
+        memcpy(swapped + off[33], comp + off[1], len[1]);
+
+        zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
+        const int64_t r = zxc_decompress(swapped, (size_t)n, out, in_sz, &dopts);
+        if (r >= 0) {
+            printf("[FAIL] a 32-apart swap decoded cleanly (%lld bytes)\n", (long long)r);
+            break;
+        }
+        ok = 1;
+    } while (0);
+
+    free(src);
+    free(comp);
+    free(swapped);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
 /* Builds a header with the given chunk-size code, fixes the header checksum, and returns
  * zxc_read_file_header's verdict (block_size out via *bs). */
 static int chunk_code_verdict(uint8_t code, size_t* bs) {
