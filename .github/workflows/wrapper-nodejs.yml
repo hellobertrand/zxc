@@ -164,9 +164,6 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          # Exact patch pin: this release bundles npm 11.19.0, new enough for
-          # OIDC trusted publishing (npm >= 11.5.1). Installing npm globally
-          # instead would be an unpinned download (Scorecard pinned-dependencies).
           node-version: "24.21.0"
           registry-url: "https://registry.npmjs.org"
 

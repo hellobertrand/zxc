@@ -884,6 +884,8 @@ export default async function createZXC(moduleOverrides, factory) {
    *   decompressedSize(): number,
    *   blockCompressedSize(idx: number): (number | null),
    *   blockDecompressedSize(idx: number): (number | null),
+   *   setDict(dict: (Dictionary | Uint8Array), dictHuf?: Uint8Array): void,
+   *   setChecksum(enabled: boolean): void,
    *   decompressRange(offset: number, length: number): Uint8Array,
    *   free(): void
    * }}

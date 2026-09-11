@@ -1633,7 +1633,7 @@ if (result < 0) {
 
 ## 14. Exported Symbols Summary
 
-The shared library exports **47 symbols** (verified with `nm -gU`):
+The shared library exports **68 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -1699,6 +1699,12 @@ The shared library exports **47 symbols** (verified with `nm -gU`):
 | 60 | `zxc_dict_save_bound` | Dictionary | `zxc_dict.h` |
 | 61 | `zxc_seekable_set_dict` | Seekable | `zxc_seekable.h` |
 | 62 | `zxc_seekable_set_checksum` | Seekable | `zxc_seekable.h` |
+| 63 | `zxc_seekable_open_reader` | Seekable | `zxc_seekable.h` |
+| 64 | `zxc_decompress_inplace` | Buffer | `zxc_buffer.h` |
+| 65 | `zxc_decompress_inplace_bound` | Buffer | `zxc_buffer.h` |
+| 66 | `zxc_get_dict_id` | Dictionary | `zxc_buffer.h` |
+| 67 | `zxc_compress_opts_size` | Info | `zxc_opts.h` |
+| 68 | `zxc_decompress_opts_size` | Info | `zxc_opts.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon32`, `_avx2`, `_avx512`) are compiled with
