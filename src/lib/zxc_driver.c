@@ -428,10 +428,10 @@ static void* zxc_async_writer(void* arg) {
                 pthread_mutex_unlock(&ctx->lock);
             } else if (ctx->checksum_enabled && ctx->compression_mode == 1) {
                 // Update Global Hash (Rotation + XOR)
-                if (LIKELY(result_sz >= ZXC_GLOBAL_CHECKSUM_SIZE)) {
+                if (LIKELY(result_sz >= ZXC_BLOCK_CHECKSUM_SIZE)) {
                     uint32_t block_hash =
-                        zxc_le32(job->out_buf + result_sz - ZXC_GLOBAL_CHECKSUM_SIZE);
-                    args->global_hash = zxc_hash_combine_rotate(args->global_hash, block_hash);
+                        zxc_le32(job->out_buf + result_sz - ZXC_BLOCK_CHECKSUM_SIZE);
+                    args->global_hash = zxc_hash_combine(args->global_hash, block_hash);
                 }
             }
         }
@@ -597,7 +597,7 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
                     // Update Global Hash for Decompression
                     const uint32_t b_checksum =
                         zxc_le32(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
-                    *d_global_hash = zxc_hash_combine_rotate(*d_global_hash, b_checksum);
+                    *d_global_hash = zxc_hash_combine(*d_global_hash, b_checksum);
                 }
                 read_sz = ZXC_BLOCK_HEADER_SIZE + body_read;
             }

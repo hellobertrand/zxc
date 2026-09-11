@@ -660,9 +660,9 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         if (checksum_enabled) {
             // Update Global Hash (Rotation + XOR)
             // Block checksum is at the end of the written block data
-            if (LIKELY(res >= ZXC_GLOBAL_CHECKSUM_SIZE)) {
-                const uint32_t block_hash = zxc_le32(op + res - ZXC_GLOBAL_CHECKSUM_SIZE);
-                global_hash = zxc_hash_combine_rotate(global_hash, block_hash);
+            if (LIKELY(res >= ZXC_BLOCK_CHECKSUM_SIZE)) {
+                const uint32_t block_hash = zxc_le32(op + res - ZXC_BLOCK_CHECKSUM_SIZE);
+                global_hash = zxc_hash_combine(global_hash, block_hash);
             }
         }
 
@@ -1001,7 +1001,7 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
         // Update global hash from block checksum
         if (checksum_enabled && file_has_checksums) {
             const uint32_t block_hash = zxc_le32(ip + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
-            global_hash = zxc_hash_combine_rotate(global_hash, block_hash);
+            global_hash = zxc_hash_combine(global_hash, block_hash);
         }
 
         ip += advance;
@@ -1393,9 +1393,9 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         if (UNLIKELY(res < 0)) return res;
 
         if (checksum_enabled) {
-            if (LIKELY(res >= ZXC_GLOBAL_CHECKSUM_SIZE)) {
-                const uint32_t block_hash = zxc_le32(op + res - ZXC_GLOBAL_CHECKSUM_SIZE);
-                global_hash = zxc_hash_combine_rotate(global_hash, block_hash);
+            if (LIKELY(res >= ZXC_BLOCK_CHECKSUM_SIZE)) {
+                const uint32_t block_hash = zxc_le32(op + res - ZXC_BLOCK_CHECKSUM_SIZE);
+                global_hash = zxc_hash_combine(global_hash, block_hash);
             }
         }
 
@@ -1622,7 +1622,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 
         if (checksum_enabled && file_has_checksums) {
             const uint32_t block_hash = zxc_le32(ip + ZXC_BLOCK_HEADER_SIZE + bh.comp_size);
-            global_hash = zxc_hash_combine_rotate(global_hash, block_hash);
+            global_hash = zxc_hash_combine(global_hash, block_hash);
         }
 
         ip += advance;

@@ -420,9 +420,6 @@ extern "C" {
 /** @brief Checksum algorithm id for RapidHash (default, sole implementation). */
 #define ZXC_CHECKSUM_RAPIDHASH 0
 
-/** @brief Size of the global checksum appended after EOF block (4 bytes). */
-#define ZXC_GLOBAL_CHECKSUM_SIZE 4
-
 /** @name Seekable Format Constants
  *  @brief Seek table block appended between EOF block and footer.
  *
@@ -1446,16 +1443,18 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const
 /**
  * @brief Folds a block hash into the running global checksum.
  *
- * `result = rotl32(hash, 1) ^ block_hash`. The rotate is what makes the result
- * depend on block order, so a reordered archive fails the global check.
+ * `result = hash * PRIME + block_hash`, PRIME being the low half of
+ * @ref ZXC_HASH_PRIME1, which makes the result depend on block order so a
+ * reordered archive fails the global check. The previous
+ * `rotl32(hash, 1) ^ block_hash` had a period of 32: blocks whose indices
+ * differ by a multiple of 32 could be swapped undetected.
  *
  * @param[in] hash The current running hash value.
  * @param[in] block_hash The hash of the new block to combine.
  * @return The updated combined hash value.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
-                                                          const uint32_t block_hash) {
-    return ((hash << 1) | (hash >> 31)) ^ block_hash;
+static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine(const uint32_t hash, const uint32_t block_hash) {
+    return hash * (uint32_t)ZXC_HASH_PRIME1 + block_hash;
 }
 
 /**
