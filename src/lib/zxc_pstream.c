@@ -199,7 +199,7 @@ static int cs_compress_block_from(zxc_cstream* cs, const uint8_t* RESTRICT src, 
     // bytes of pending; fold it into the rolling global hash.
     if (cs->opts.checksum_enabled && cs->pending_len >= ZXC_BLOCK_CHECKSUM_SIZE) {
         const uint32_t bh = zxc_le32(cs->pending + cs->pending_len - ZXC_BLOCK_CHECKSUM_SIZE);
-        cs->global_hash = zxc_hash_combine_rotate(cs->global_hash, bh);
+        cs->global_hash = zxc_hash_combine(cs->global_hash, bh);
     }
     return ZXC_OK;
 }
@@ -1010,7 +1010,7 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                     ds->payload_used >= ZXC_BLOCK_CHECKSUM_SIZE) {
                     const uint32_t bh =
                         zxc_le32(ds->payload + ds->payload_used - ZXC_BLOCK_CHECKSUM_SIZE);
-                    ds->global_hash = zxc_hash_combine_rotate(ds->global_hash, bh);
+                    ds->global_hash = zxc_hash_combine(ds->global_hash, bh);
                 }
 
                 if (direct) {
