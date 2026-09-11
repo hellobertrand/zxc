@@ -182,6 +182,7 @@ int test_seekable_empty_file(void);
 int test_seekable_no_checksum(void);
 int test_seekable_with_checksum(void);
 int test_seekable_corrupted_block_checksum(void);
+int test_seekable_range_reports_short_reads(void);
 int test_seekable_work_buf_tail_pad(void);
 
 /* Seekable (multi-threaded) */

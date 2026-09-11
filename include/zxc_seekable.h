@@ -182,8 +182,8 @@ ZXC_EXPORT uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s,
  *
  * @par Checksums
  * Per-block checksums are **not** verified unless
- * @ref zxc_seekable_set_checksum was called; a mismatch then returns
- * @ref ZXC_ERROR_BAD_CHECKSUM.
+ * @ref zxc_seekable_set_checksum was called with a non-zero argument; a
+ * mismatch then returns @ref ZXC_ERROR_BAD_CHECKSUM.
  *
  * @param[in,out] s            Seekable handle.
  * @param[out]    dst          Destination buffer.
@@ -235,7 +235,7 @@ ZXC_EXPORT void zxc_seekable_free(zxc_seekable* s);
  * @brief Turns per-block checksum verification on or off.
  *
  * Off by default, as in the frame API. No effect without checksums in the
- * archive; Applies from the next call, on both paths.
+ * archive. Applies from the next call, on both paths.
  *
  * @param[in,out] s       Seekable handle.
  * @param[in]     enabled Non-zero to verify, 0 to skip.

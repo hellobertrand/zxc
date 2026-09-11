@@ -1223,6 +1223,20 @@ int test_seekable_no_checksum() {
         return 0;
     }
 
+    /* Asking to verify an archive that carries no checksums must stay a no-op.
+     * Without the file_has_checksums half of the guard the decoder would read
+     * the next block's header as a stored checksum and reject every block. */
+    zxc_seekable_set_checksum(s, 1);
+    r = zxc_seekable_decompress_range(s, out, sizeof(out), off, 512);
+    if (r != 512 || memcmp(out, src + off, 512) != 0) {
+        printf("Failed: set_checksum(1) on a checksum-less archive -> %lld\n", (long long)r);
+        zxc_seekable_free(s);
+        free(src);
+        free(dst);
+        return 0;
+    }
+    zxc_seekable_set_checksum(s, 0);
+
     /* Full decompress also works */
     uint8_t* full = malloc(SRC_SIZE);
     if (!full) {
@@ -1538,7 +1552,85 @@ int test_seekable_open_reader_mt() {
     return 1;
 }
 
-/* Seekable with checksum (seekable=1, checksum_enabled=1) */
+/* Two ways zxc_seekable_decompress_range used to report success without filling
+ * dst, handing the caller whatever its buffer already held. */
+int test_seekable_range_reports_short_reads(void) {
+    printf("=== TEST: Seekable - a range that cannot be filled is refused ===\n");
+
+    const size_t SRC_SIZE = 256 * 1024;
+    const size_t BLK = 64 * 1024;
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    uint32_t rng = 0x2E5B9A17u;
+    for (size_t i = 0; i < SRC_SIZE; i++) {
+        rng = rng * 1103515245u + 12345u;
+        src[i] = (uint8_t)(rng >> 16);
+    }
+    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    uint8_t* dst = malloc(dst_cap);
+    uint8_t out[2048];
+    int ok = 0;
+    do {
+        if (!dst) break;
+        zxc_compress_opts_t opts = {.level = 3, .block_size = BLK, .seekable = 1};
+        const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+        if (csize <= 0) {
+            printf("  [FAIL] compress -> %lld\n", (long long)csize);
+            break;
+        }
+
+        /* An offset so large that offset + len wraps: the range guard used to
+         * pass and the call returned len with dst untouched. */
+        zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
+        if (!s) {
+            printf("  [FAIL] open\n");
+            break;
+        }
+        memset(out, 0xAB, sizeof(out));
+        const int64_t wrapped =
+            zxc_seekable_decompress_range(s, out, 512, 0xFFFFFFFFFFFFFF00ULL, 512);
+        const int64_t wrapped_mt =
+            zxc_seekable_decompress_range_mt(s, out, 512, 0xFFFFFFFFFFFFFF00ULL, 512, 4);
+        zxc_seekable_free(s);
+        if (wrapped != ZXC_ERROR_SRC_TOO_SMALL || wrapped_mt != ZXC_ERROR_SRC_TOO_SMALL) {
+            printf("  [FAIL] wrapping offset: st %lld, mt %lld, want SRC_TOO_SMALL\n",
+                   (long long)wrapped, (long long)wrapped_mt);
+            break;
+        }
+
+        /* A block whose header claims fewer bytes than the seek table budgets:
+         * the loop copies short and the call used to return len anyway. */
+        zxc_block_header_t bh;
+        if (zxc_read_block_header(dst + ZXC_FILE_HEADER_SIZE, (size_t)csize - ZXC_FILE_HEADER_SIZE,
+                                  &bh) != ZXC_OK) {
+            printf("  [FAIL] could not read block 0\n");
+            break;
+        }
+        bh.comp_size = 1000;
+        zxc_write_block_header(dst + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &bh);
+
+        zxc_seekable* sh = zxc_seekable_open(dst, (size_t)csize);
+        if (!sh) {
+            printf("  [FAIL] open (short)\n");
+            break;
+        }
+        memset(out, 0xAB, sizeof(out));
+        const int64_t shortr = zxc_seekable_decompress_range(sh, out, 2000, 0, 2000);
+        zxc_seekable_free(sh);
+        if (shortr >= 0) {
+            printf("  [FAIL] short block: returned %lld with %d bytes left unwritten\n",
+                   (long long)shortr, (int)(2000 - 1000));
+            break;
+        }
+        ok = 1;
+    } while (0);
+
+    free(src);
+    free(dst);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
 /* Random access never verified per-block checksums: both paths carved their
  * context with checksum_enabled = 0 and file_has_checksums was never read, so
  * zxc_seekable_set_checksum had nothing to switch. Data is incompressible on
@@ -1583,7 +1675,12 @@ int test_seekable_corrupted_block_checksum(void) {
         const size_t off1 = ZXC_FILE_HEADER_SIZE + zxc_seekable_get_block_comp_size(probe, 0);
         zxc_seekable_free(probe);
         if (dst[off1] != ZXC_BLOCK_RAW) {
-            printf("Failed: block 1 is type %u, expected RAW for this test\n", dst[off1]);
+            /* The premise is an encoder heuristic, not an invariant: if level 3
+             * ever compresses this LCG stream, skip rather than report a
+             * checksum bug that is not there. */
+            printf("  [SKIP] block 1 is type %u, not RAW; nothing to corrupt silently\n",
+                   dst[off1]);
+            ok = 1;
             break;
         }
         dst[off1 + ZXC_BLOCK_HEADER_SIZE + 4] ^= 0xFF;
@@ -1679,6 +1776,7 @@ int test_seekable_corrupted_block_checksum(void) {
     return ok;
 }
 
+/* Seekable with checksum (seekable=1, checksum_enabled=1) */
 int test_seekable_with_checksum() {
     printf("=== TEST: Seekable - With Checksum ===\n");
 
