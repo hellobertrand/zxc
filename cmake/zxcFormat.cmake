@@ -20,21 +20,29 @@ if(CLANG_FORMAT AND PROJECT_IS_TOP_LEVEL)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/cli/*.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/nodejs/src/*.cc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/nodejs/src/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/python/src/zxc/*.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/python/src/zxc/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/wasm/*.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/wasm/*.h"
     )
     # Exclude vendored third-party code
     list(FILTER ZXC_FORMAT_SOURCES EXCLUDE REGEX ".*/vendors/.*")
+    list(FILTER ZXC_FORMAT_SOURCES EXCLUDE REGEX
+        ".*/(node_modules|\\.venv|target|build|__pycache__)/.*")
 
     add_custom_target(format
         COMMAND ${CLANG_FORMAT} --style=file -i ${ZXC_FORMAT_SOURCES}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Formatting include/, src/lib/, src/cli/ and tests/ with clang-format"
+        COMMENT "Formatting include/, src/, tests/ and wrappers/ with clang-format"
         VERBATIM
     )
 
     add_custom_target(format-check
         COMMAND ${CLANG_FORMAT} --style=file --dry-run --Werror ${ZXC_FORMAT_SOURCES}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Checking formatting of include/, src/lib/, src/cli/ and tests/"
+        COMMENT "Checking formatting of include/, src/, tests/ and wrappers/"
         VERBATIM
     )
 elseif(PROJECT_IS_TOP_LEVEL)
