@@ -628,7 +628,7 @@ class Cctx:
         try:
             self.close()
         except Exception:
-            pass
+            return
 
 
 class Dctx:
@@ -672,7 +672,7 @@ class Dctx:
         try:
             self.close()
         except Exception:
-            pass
+            return
 
 
 class CStream:
@@ -762,7 +762,7 @@ class CStream:
         try:
             self.close()
         except Exception:
-            pass
+            return
 
 
 class DStream:
@@ -836,7 +836,7 @@ class DStream:
         try:
             self.close()
         except Exception:
-            pass
+            return
 
 
 # ============================================================================
