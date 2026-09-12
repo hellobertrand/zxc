@@ -967,10 +967,6 @@ static int64_t forge_decode_via(const uint8_t* arc, size_t arc_sz, size_t plain_
     return r;
 }
 
-static int64_t forge_decode(const uint8_t* arc, size_t arc_sz, size_t plain_sz, int checksum) {
-    return forge_decode_via(arc, arc_sz, plain_sz, checksum, 0);
-}
-
 /*
  * A block header carries comp_size as a plain u32, and the header checksum
  * covers it, so a forged size is structurally valid. Two things must stop it:
@@ -1013,18 +1009,24 @@ int test_forged_block_comp_size() {
                    b0.block_type, b0.comp_size);
             ok = 0;
         }
-        if (ok && forge_decode(arc, arc_sz, plain_sz, checksum) != (int64_t)plain_sz) {
-            printf("  [FAIL] intact archive rejected\n");
-            ok = 0;
+        for (int via = 0; ok && via <= 1; via++) {
+            if (forge_decode_via(arc, arc_sz, plain_sz, checksum, via) != (int64_t)plain_sz) {
+                printf("  [FAIL] intact archive rejected via %s\n",
+                       via ? "dctx" : "zxc_decompress");
+                ok = 0;
+            }
         }
 
         if (ok) { /* One byte over the bound. */
             memcpy(forged, arc, arc_sz);
             ok = forge_comp_size(forged, arc_sz, (uint32_t)block_sz + 1u);
-            const int64_t r = ok ? forge_decode(forged, arc_sz, plain_sz, checksum) : 0;
-            if (ok && r != ZXC_ERROR_BAD_BLOCK_SIZE) {
-                printf("  [FAIL] comp_size = block_size + 1 gave %lld\n", (long long)r);
-                ok = 0;
+            for (int via = 0; ok && via <= 1; via++) {
+                const int64_t r = forge_decode_via(forged, arc_sz, plain_sz, checksum, via);
+                if (r != ZXC_ERROR_BAD_BLOCK_SIZE) {
+                    printf("  [FAIL] comp_size = block_size + 1 via %s gave %lld\n",
+                           via ? "dctx" : "zxc_decompress", (long long)r);
+                    ok = 0;
+                }
             }
         }
 
@@ -1033,10 +1035,13 @@ int test_forged_block_comp_size() {
             ok = forge_comp_size(
                 forged, arc_sz,
                 (uint32_t)(arc_sz - ZXC_FILE_HEADER_SIZE - ZXC_BLOCK_HEADER_SIZE - trailer));
-            const int64_t r = ok ? forge_decode(forged, arc_sz, plain_sz, checksum) : 0;
-            if (ok && r != ZXC_ERROR_BAD_BLOCK_SIZE) {
-                printf("  [FAIL] swallowing comp_size gave %lld\n", (long long)r);
-                ok = 0;
+            for (int via = 0; ok && via <= 1; via++) {
+                const int64_t r = forge_decode_via(forged, arc_sz, plain_sz, checksum, via);
+                if (r != ZXC_ERROR_BAD_BLOCK_SIZE) {
+                    printf("  [FAIL] swallowing comp_size via %s gave %lld\n",
+                           via ? "dctx" : "zxc_decompress", (long long)r);
+                    ok = 0;
+                }
             }
         }
         free(forged);
