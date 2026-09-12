@@ -266,9 +266,9 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     s->comp_offsets = (uint64_t*)ZXC_CALLOC((size_t)num_blocks + 1, sizeof(uint64_t));
     if (UNLIKELY(!s->comp_sizes || !s->comp_offsets)) goto fail;  // LCOV_EXCL_LINE
 
-    // Parse comp_sizes and build compressed prefix sums. Every entry is checked
-    // against the archive size, so the prefix sum can neither overflow nor
-    // point a later read out of bounds.
+    // Parse comp_sizes and build compressed prefix sums. Entries are capped at
+    // one block and the running sum at the archive size, so no later read can
+    // land out of bounds.
     {
         const uint8_t* ep = seek_blk + ZXC_BLOCK_HEADER_SIZE;
         uint64_t comp_acc = ZXC_FILE_HEADER_SIZE; /* blocks start after file header */
@@ -284,8 +284,7 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
             if (s->comp_sizes[i] > s->max_comp_size) s->max_comp_size = s->comp_sizes[i];
             s->comp_offsets[i] = comp_acc;
             comp_acc += s->comp_sizes[i];
-            // Reject if cumulative offset exceeds file size (inconsistent table)
-            if (UNLIKELY(comp_acc > src->size)) goto fail;  // LCOV_EXCL_LINE
+            if (UNLIKELY(comp_acc > src->size)) goto fail;
         }
         s->comp_offsets[num_blocks] = comp_acc;
 

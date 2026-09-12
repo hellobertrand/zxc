@@ -2005,17 +2005,24 @@ int test_seekable_forged_table_entry() {
     const uint32_t entry_max = (uint32_t)(ZXC_BLOCK_HEADER_SIZE + BLOCK_SIZE);
 
     int ok = 1;
-    if (e0 != entry_max) {
-        printf("Failed: expected a RAW entry on the bound, got %u (bound %u)\n", e0, entry_max);
+    const uint32_t shift = 4000u;
+    if (e0 != entry_max || e1 != entry_max) {
+        /* Both on the bound: an e1 under `shift` would wrap, and the prefix
+           sum would reject instead of the per-entry bound this test covers. */
+        printf("Failed: expected RAW entries on the bound, got %u and %u (bound %u)\n", e0, e1,
+               entry_max);
         ok = 0;
     }
-    if (ok && !zxc_seekable_open(dst, (size_t)csize)) {
-        printf("Failed: intact archive rejected\n");
-        ok = 0;
+    if (ok) {
+        zxc_seekable* intact = zxc_seekable_open(dst, (size_t)csize);
+        if (!intact) {
+            printf("Failed: intact archive rejected\n");
+            ok = 0;
+        }
+        zxc_seekable_free(intact);
     }
 
     if (ok) {
-        const uint32_t shift = 4000u;
         zxc_store_le32(entries, e0 + shift);
         zxc_store_le32(entries + sizeof(uint32_t), e1 - shift);
         zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
