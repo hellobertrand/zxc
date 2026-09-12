@@ -1,7 +1,7 @@
 # ZXC Node.js Bindings
 
 High-performance Node.js bindings for the **ZXC** asymmetric compressor, optimized for **fast decompression**.  
-Designed for *Write Once, Read Many* workloads like ML datasets, game assets, and caches.
+Designed for _Write Once, Read Many_ workloads like ML datasets, game assets, and caches.
 
 ## Features
 
@@ -27,10 +27,10 @@ npm install
 ## Usage
 
 ```javascript
-const zxc = require('zxc-compress');
+const zxc = require("zxc-compress");
 
 // Compress
-const data = Buffer.from('Hello, World!'.repeat(1_000));
+const data = Buffer.from("Hello, World!".repeat(1_000));
 const compressed = zxc.compress(data, { level: zxc.LEVEL_DEFAULT });
 
 // Decompress (auto-detects size)
@@ -38,7 +38,7 @@ const decompressed = zxc.decompress(compressed);
 
 console.log(`Original: ${data.length} bytes`);
 console.log(`Compressed: ${compressed.length} bytes`);
-console.log(`Ratio: ${(compressed.length / data.length * 100).toFixed(1)}%`);
+console.log(`Ratio: ${((compressed.length / data.length) * 100).toFixed(1)}%`);
 ```
 
 ## API
@@ -47,11 +47,11 @@ console.log(`Ratio: ${(compressed.length / data.length * 100).toFixed(1)}%`);
 
 Compress a Buffer.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `data` | `Buffer` | - | Input data |
-| `options.level` | `number` | `LEVEL_DEFAULT` | Compression level (1–7) |
-| `options.checksum` | `boolean` | `false` | Enable checksum |
+| Parameter          | Type      | Default         | Description             |
+| ------------------ | --------- | --------------- | ----------------------- |
+| `data`             | `Buffer`  | -               | Input data              |
+| `options.level`    | `number`  | `LEVEL_DEFAULT` | Compression level (1–7) |
+| `options.checksum` | `boolean` | `false`         | Enable checksum         |
 
 Returns: `Buffer` - compressed data.
 
@@ -59,13 +59,36 @@ Returns: `Buffer` - compressed data.
 
 Decompress a ZXC compressed Buffer.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `data` | `Buffer` | - | Compressed data |
-| `options.size` | `number` | auto | Expected decompressed size |
-| `options.checksum` | `boolean` | `false` | Verify checksum |
+| Parameter          | Type      | Default | Description                |
+| ------------------ | --------- | ------- | -------------------------- |
+| `data`             | `Buffer`  | -       | Compressed data            |
+| `options.size`     | `number`  | auto    | Expected decompressed size |
+| `options.checksum` | `boolean` | `false` | Verify checksum            |
 
 Returns: `Buffer` - decompressed data.
+
+### `new Cctx(options?)` / `new Dctx(options?)`
+
+Reusable contexts: the working buffers are carved once instead of once per
+call, which pays off when compressing many payloads with the same settings.
+
+| Parameter          | Type      | Default         | Description                      |
+| ------------------ | --------- | --------------- | -------------------------------- |
+| `options.level`    | `number`  | `LEVEL_DEFAULT` | Compression level (`Cctx` only)  |
+| `options.checksum` | `boolean` | `false`         | Enable or verify checksums       |
+| `options.dict`     | `Buffer`  | -               | Dictionary used by every call    |
+| `options.dictHuf`  | `Buffer`  | -               | Shared literal table (128 bytes) |
+
+```js
+const cctx = new zxc.Cctx({ level: zxc.LEVEL_DEFAULT, dict });
+const dctx = new zxc.Dctx({ dict });
+const archives = payloads.map((p) => cctx.compress(p));
+const restored = archives.map((a) => dctx.decompress(a));
+cctx.close();
+dctx.close();
+```
+
+A context is not thread-safe, and `close()` is idempotent.
 
 ### `compressBound(inputSize)`
 
@@ -77,13 +100,13 @@ Returns the original size from a ZXC compressed buffer (reads footer only).
 
 ### Constants
 
-| Constant | Value | Description |
-|----------|-------|-------------|
-| `LEVEL_FASTEST` | 1 | Fastest compression |
-| `LEVEL_FAST` | 2 | Fast compression |
-| `LEVEL_DEFAULT` | 3 | Recommended balance |
-| `LEVEL_BALANCED` | 4 | Good ratio, good speed |
-| `LEVEL_COMPACT` | 5 | Highest density |
+| Constant         | Value | Description            |
+| ---------------- | ----- | ---------------------- |
+| `LEVEL_FASTEST`  | 1     | Fastest compression    |
+| `LEVEL_FAST`     | 2     | Fast compression       |
+| `LEVEL_DEFAULT`  | 3     | Recommended balance    |
+| `LEVEL_BALANCED` | 4     | Good ratio, good speed |
+| `LEVEL_COMPACT`  | 5     | Highest density        |
 
 ## Testing
 

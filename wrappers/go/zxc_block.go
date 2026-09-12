@@ -12,6 +12,7 @@ package zxc
 */
 import "C"
 import (
+	"runtime"
 	"unsafe"
 )
 
@@ -70,15 +71,20 @@ type Cctx struct {
 	// that do not override them explicitly.
 	level    Level
 	checksum bool
+	dict     []byte
+	dictHuf  []byte
 }
 
 // NewCctx creates a new compression context.
 //
-// Options [WithLevel] and [WithChecksum] are supported at creation time and
-// become the defaults for every [Cctx.CompressBlock] call that does not
-// override them per call.
+// [WithLevel], [WithChecksum], [WithDict] and [WithDictHuf] become the defaults
+// for every [Cctx.CompressBlock] call that does not override them. The context
+// carves for a dictionary on first use, so only the table length is checked here.
 func NewCctx(opts ...Option) (*Cctx, error) {
 	o := applyOptions(opts)
+	if len(o.dictHuf) > 0 && len(o.dictHuf) != HufTableSize {
+		return nil, ErrBadHufTable
+	}
 	var copts C.zxc_compress_opts_t
 	copts.level = C.int(o.level)
 	if o.checksum {
@@ -90,7 +96,7 @@ func NewCctx(opts ...Option) (*Cctx, error) {
 	if ptr == nil {
 		return nil, ErrMemory
 	}
-	return &Cctx{ptr: ptr, level: o.level, checksum: o.checksum}, nil
+	return &Cctx{ptr: ptr, level: o.level, checksum: o.checksum, dict: o.dict, dictHuf: o.dictHuf}, nil
 }
 
 // Close releases the native resources held by the context. Safe to call
@@ -110,8 +116,8 @@ func (c *Cctx) Close() error {
 //
 // Per-call [WithLevel] / [WithChecksum] override the values given to
 // [NewCctx]; when omitted, the creation-time settings apply.
-// [WithDict]/[WithDictHuf] are not wired to the block API and are ignored;
-// use the buffer API ([Compress]/[Decompress]) for dictionary compression.
+// [WithDict]/[WithDictHuf] fall back to [NewCctx]'s. A block carries no
+// dictionary id, so pass the same pair to [Dctx.DecompressBlock].
 func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	if c == nil || c.ptr == nil {
 		return 0, ErrNullInput
@@ -133,10 +139,21 @@ func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	if !o.checksumSet {
 		o.checksum = c.checksum
 	}
+	if !o.dictSet {
+		o.dict = c.dict
+	}
+	if !o.dictHufSet {
+		o.dictHuf = c.dictHuf
+	}
 	var copts C.zxc_compress_opts_t
 	copts.level = C.int(o.level)
 	if o.checksum {
 		copts.checksum_enabled = 1
+	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	if err := setCompressDict(&copts, o, &pinner); err != nil {
+		return 0, err
 	}
 
 	n := C.zxc_compress_block(
@@ -156,15 +173,36 @@ func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 // Dctx is a reusable decompression context for the Block API.
 type Dctx struct {
 	ptr *C.zxc_dctx
+
+	// Creation-time dictionary, used by decode calls that do not carry one.
+	dict    []byte
+	dictHuf []byte
 }
 
 // NewDctx creates a new decompression context.
-func NewDctx() (*Dctx, error) {
+//
+// [WithDict] and [WithDictHuf] become the defaults for every decode call that
+// does not override them, mirroring [NewCctx].
+func NewDctx(opts ...Option) (*Dctx, error) {
+	o := applyOptions(opts)
+	if len(o.dictHuf) > 0 && len(o.dictHuf) != HufTableSize {
+		return nil, ErrBadHufTable
+	}
 	ptr := C.zxc_create_dctx()
 	if ptr == nil {
 		return nil, ErrMemory
 	}
-	return &Dctx{ptr: ptr}, nil
+	return &Dctx{ptr: ptr, dict: o.dict, dictHuf: o.dictHuf}, nil
+}
+
+// mergeDict fills in the creation-time dictionary where a call omits it.
+func (d *Dctx) mergeDict(o *options) {
+	if !o.dictSet {
+		o.dict = d.dict
+	}
+	if !o.dictHufSet {
+		o.dictHuf = d.dictHuf
+	}
 }
 
 // Close releases the native resources held by the context.
@@ -182,7 +220,9 @@ func (d *Dctx) Close() error {
 //
 // dst should be at least [DecompressBlockBound](uncompressedSize) to enable
 // the fast decode path. For a strictly-sized destination buffer use
-// [Dctx.DecompressBlockSafe] instead.
+// [Dctx.DecompressBlockSafe] instead. [WithDict]/[WithDictHuf] fall back to
+// [NewDctx]'s and must match those used at compression: a block carries no
+// dictionary id.
 func (d *Dctx) DecompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	if d == nil || d.ptr == nil {
 		return 0, ErrNullInput
@@ -195,9 +235,15 @@ func (d *Dctx) DecompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	}
 
 	o := applyOptions(opts)
+	d.mergeDict(&o)
 	var dopts C.zxc_decompress_opts_t
 	if o.checksum {
 		dopts.checksum_enabled = 1
+	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
+		return 0, err
 	}
 
 	n := C.zxc_decompress_block(
@@ -217,7 +263,8 @@ func (d *Dctx) DecompressBlock(src, dst []byte, opts ...Option) (int, error) {
 // DecompressBlockSafe is a strict-sized variant of [Dctx.DecompressBlock]:
 // it accepts a destination buffer sized exactly to the uncompressed length,
 // with no tail-pad required. Slightly slower than the fast path; output is
-// bit-identical.
+// bit-identical. Takes the same [WithDict]/[WithDictHuf]; a dictionary decodes
+// through the bounce path, so dst may hold more than the strict tail.
 func (d *Dctx) DecompressBlockSafe(src, dst []byte, opts ...Option) (int, error) {
 	if d == nil || d.ptr == nil {
 		return 0, ErrNullInput
@@ -230,9 +277,15 @@ func (d *Dctx) DecompressBlockSafe(src, dst []byte, opts ...Option) (int, error)
 	}
 
 	o := applyOptions(opts)
+	d.mergeDict(&o)
 	var dopts C.zxc_decompress_opts_t
 	if o.checksum {
 		dopts.checksum_enabled = 1
+	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
+		return 0, err
 	}
 
 	n := C.zxc_decompress_block_safe(

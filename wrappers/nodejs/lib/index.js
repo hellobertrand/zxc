@@ -383,6 +383,39 @@ function decompress(data, options = {}) {
 }
 
 /**
+ * Reusable compression context: one archive per `compress()` call, buffers
+ * carved once. Options: `level`, `checksum`, `dict`, `dictHuf`; a dictionary
+ * applies to every call. Not thread-safe; `close()` when done.
+ *
+ * @example
+ *   const cctx = new zxc.Cctx({ level: zxc.LEVEL_DEFAULT, dict });
+ *   const archives = payloads.map((p) => cctx.compress(p));
+ *   cctx.close();
+ */
+class Cctx extends native.Cctx {
+  constructor(options = {}) {
+    const { dict, dictHuf } = _splitDictOption(options);
+    super({ ...options, dict, dictHuf });
+  }
+}
+
+/**
+ * Reusable decompression context, mirroring {@link Cctx}. Options:
+ * `checksum`, `dict`, `dictHuf`.
+ *
+ * @example
+ *   const dctx = new zxc.Dctx({ dict });
+ *   const payloads = archives.map((a) => dctx.decompress(a));
+ *   dctx.close();
+ */
+class Dctx extends native.Dctx {
+  constructor(options = {}) {
+    const { dict, dictHuf } = _splitDictOption(options);
+    super({ ...options, dict, dictHuf });
+  }
+}
+
+/**
  * Push-based, single-threaded compression stream.
  *
  * The Node.js counterpart of the C `zxc_cstream`. Use it when you cannot
@@ -630,6 +663,10 @@ module.exports = {
   trainDictHuf,
   dictHuf,
   Dictionary,
+
+  // Reusable contexts
+  Cctx,
+  Dctx,
 
   // Push streaming classes
   CStream,

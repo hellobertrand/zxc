@@ -17,7 +17,11 @@ use zxc_sys::{
 };
 
 /// Errors that can occur during ZXC operations.
+///
+/// Marked `#[non_exhaustive]`: new variants may be added in minor releases,
+/// so keep a wildcard arm when matching.
 #[derive(Debug, Clone, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// Memory allocation failure
     #[error("memory allocation failed")]
@@ -94,6 +98,10 @@ pub enum Error {
     /// Dictionary not supported by this context's workspace (static contexts)
     #[error("dictionary not supported by this context's workspace")]
     DictUnsupported,
+
+    /// Shared literal Huffman table is not `ZXC_HUF_TABLE_SIZE` bytes
+    #[error("shared literal Huffman table must be ZXC_HUF_TABLE_SIZE bytes")]
+    BadHufTable,
 
     /// The requested options are not supported by this API
     #[error("unsupported option: {0}")]

@@ -30,6 +30,12 @@ from ._zxc import (
     pyzxc_dict_train,
     pyzxc_seekable_set_checksum,
     pyzxc_seekable_set_dict,
+    pyzxc_cctx_create,
+    pyzxc_cctx_compress,
+    pyzxc_cctx_free,
+    pyzxc_dctx_create,
+    pyzxc_dctx_decompress,
+    pyzxc_dctx_free,
     pyzxc_cstream_create,
     pyzxc_cstream_compress,
     pyzxc_cstream_end,
@@ -92,6 +98,9 @@ __all__ = [
     "stream_compress",
     "stream_decompress",
     "get_decompressed_size",
+    # Reusable contexts
+    "Cctx",
+    "Dctx",
     # Dictionary
     "train_dict",
     "dict_id",
@@ -571,6 +580,101 @@ def write_seek_table(comp_sizes: list) -> bytes:
     return pyzxc_write_seek_table(comp_sizes)
 
 
+class Cctx:
+    """Reusable compression context.
+
+    The Python counterpart of the C ``zxc_cctx``: one archive per
+    :meth:`compress` call, with the working buffers carved once. A dictionary
+    given here applies to every call. Not thread-safe.
+
+    Example::
+
+        with zxc.Cctx(level=zxc.LEVEL_DEFAULT, dict=d) as cctx:
+            archives = [cctx.compress(p) for p in payloads]
+    """
+
+    __slots__ = ("_handle",)
+
+    def __init__(
+        self,
+        level: int = LEVEL_DEFAULT,
+        checksum: bool = False,
+        dict=None,
+        dict_huf=None,
+    ):
+        dict, dict_huf = _split_dict_arg(dict, dict_huf)
+        self._handle = pyzxc_cctx_create(level, checksum, dict, dict_huf)
+
+    def compress(self, data) -> bytes:
+        """Compress *data* into a complete archive."""
+        if self._handle is None:
+            raise ValueError("Cctx is closed")
+        return pyzxc_cctx_compress(self._handle, data)
+
+    def close(self) -> None:
+        """Release native resources. Idempotent."""
+        if self._handle is not None:
+            pyzxc_cctx_free(self._handle)
+            self._handle = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            return
+
+
+class Dctx:
+    """Reusable decompression context.
+
+    The Python counterpart of the C ``zxc_dctx``, mirroring :class:`Cctx`.
+    Pass the dictionary the archives were compressed with. Not thread-safe.
+    """
+
+    __slots__ = ("_handle",)
+
+    def __init__(self, checksum: bool = False, dict=None, dict_huf=None):
+        dict, dict_huf = _split_dict_arg(dict, dict_huf)
+        self._handle = pyzxc_dctx_create(checksum, dict, dict_huf)
+
+    def decompress(self, data, decompress_size=None) -> bytes:
+        """Decompress one archive produced by :meth:`Cctx.compress`.
+
+        *decompress_size* defaults to the size stored in the archive footer.
+        """
+        if self._handle is None:
+            raise ValueError("Dctx is closed")
+        if decompress_size is None:
+            decompress_size = get_decompressed_size(data)
+        return pyzxc_dctx_decompress(self._handle, data, decompress_size)
+
+    def close(self) -> None:
+        """Release native resources. Idempotent."""
+        if self._handle is not None:
+            pyzxc_dctx_free(self._handle)
+            self._handle = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            return
+
+
 class CStream:
     """Push-based, single-threaded compression stream.
 
@@ -658,7 +762,7 @@ class CStream:
         try:
             self.close()
         except Exception:
-            pass
+            return
 
 
 class DStream:
@@ -732,7 +836,7 @@ class DStream:
         try:
             self.close()
         except Exception:
-            pass
+            return
 
 
 # ============================================================================

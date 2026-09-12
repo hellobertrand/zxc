@@ -721,6 +721,89 @@ async function main() {
     }
     assert(rejected, "decompress without dictHuf is rejected (id binding)");
 
+    // Reusable contexts honour the dictionary too.
+    {
+      const cc = zxc.createCompressContext({ dict: d });
+      const dc = zxc.createDecompressContext({ dict: d });
+      const dcNo = zxc.createDecompressContext();
+      const cCtx = cc.compress(payload);
+      assert(
+        arraysEqual(dc.decompress(cCtx), payload),
+        "context compress/decompress with {dict} roundtrip",
+      );
+      assert(
+        arraysEqual(zxc.decompress(cCtx, { dict: d }), payload),
+        "context archive decodes with the one-shot API",
+      );
+      let ctxRejected = false;
+      try {
+        dcNo.decompress(cCtx);
+      } catch (e) {
+        ctxRejected = true;
+      }
+      assert(ctxRejected, "context decompress without dict is rejected");
+      cc.free();
+      dc.free();
+      dcNo.free();
+
+      // Raw {dict, dictHuf} on the factories, plus their table check.
+      const ccRaw = zxc.createCompressContext({ dict, dictHuf: huf });
+      const dcRaw = zxc.createDecompressContext({ dict, dictHuf: huf });
+      const cRaw = ccRaw.compress(payload);
+      assert(
+        arraysEqual(dcRaw.decompress(cRaw), payload),
+        "context roundtrip with raw {dict, dictHuf}",
+      );
+      const dcNoTable = zxc.createDecompressContext({ dict });
+      let rawRejected = false;
+      try {
+        dcNoTable.decompress(cRaw);
+      } catch (e) {
+        rawRejected = true;
+      }
+      dcNoTable.free();
+      assert(rawRejected, "context decompress without the table is rejected");
+      ccRaw.free();
+      dcRaw.free();
+
+      let shortTable = false;
+      try {
+        zxc.createCompressContext({ dict, dictHuf: new Uint8Array(3) });
+      } catch (e) {
+        shortTable = true;
+      }
+      assert(shortTable, "context factory rejects a 3-byte dictHuf");
+
+      // A tampered Dictionary table is refused before any copy.
+      const tampered = zxc.Dictionary.train(samples);
+      tampered.huf = new Uint8Array(300);
+      let tamperedRejected = false;
+      try {
+        zxc.createCompressContext({ dict: tampered });
+      } catch (e) {
+        tamperedRejected = true;
+      }
+      assert(tamperedRejected, "an over-long Dictionary.huf is refused");
+
+      let seekableRejected = false;
+      try {
+        zxc.createCompressContext({ seekable: true });
+      } catch (e) {
+        seekableRejected = true;
+      }
+      assert(seekableRejected, "compression context refuses seekable");
+
+      const ccFreed = zxc.createCompressContext({ dict });
+      ccFreed.free();
+      let afterFree = false;
+      try {
+        ccFreed.compress(payload);
+      } catch (e) {
+        afterFree = true;
+      }
+      assert(afterFree, "a freed context refuses further calls");
+    }
+
     // Seekable + setDict + range roundtrip on a dict-compressed archive.
     const bigPayload = new Uint8Array(48 * 1024);
     {

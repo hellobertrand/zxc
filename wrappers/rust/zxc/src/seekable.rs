@@ -212,16 +212,13 @@ impl Seekable {
     /// Returns an [`Error`] if the dictionary is invalid or its ID does not
     /// match the one the archive requires.
     pub fn set_dict(&mut self, dict: &[u8], dict_huf: Option<&[u8]>) -> Result<()> {
-        let huf_ptr = match dict_huf {
-            Some(h) if !h.is_empty() => h.as_ptr() as *const c_void,
-            _ => std::ptr::null(),
-        };
+        let (dict, huf) = crate::dict_parts(Some(dict), dict_huf)?;
         let rc = unsafe {
             zxc_sys::zxc_seekable_set_dict(
                 self.inner.as_ptr(),
-                dict.as_ptr() as *const c_void,
+                crate::dict_ptr(dict),
                 dict.len(),
-                huf_ptr,
+                crate::dict_ptr(huf),
             )
         };
         if rc < 0 {

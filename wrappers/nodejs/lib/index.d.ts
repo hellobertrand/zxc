@@ -59,33 +59,33 @@ export const ERROR_BAD_LEVEL: number;
 export const ERROR_DICT_UNSUPPORTED: number;
 
 export interface CompressOptions {
-    /** Compression level (1-7). Defaults to LEVEL_DEFAULT. */
-    level?: number;
-    /** Enable checksum verification. Defaults to false. */
-    checksum?: boolean;
-    /** Enable seek table for random-access decompression. Defaults to false. */
-    seekable?: boolean;
-    /** Pre-trained dictionary: a {@link Dictionary} instance, or raw content
-     *  bytes. Defaults to none. */
-    dict?: Dictionary | Buffer | Uint8Array;
-    /** Shared literal Huffman table (128 bytes, from {@link trainDictHuf} or
-     *  {@link dictHuf}). Ignored without `dict`, and ignored when `dict` is a
-     *  {@link Dictionary} (which carries its own table). */
-    dictHuf?: Buffer | Uint8Array;
+  /** Compression level (1-7). Defaults to LEVEL_DEFAULT. */
+  level?: number;
+  /** Enable checksum verification. Defaults to false. */
+  checksum?: boolean;
+  /** Enable seek table for random-access decompression. Defaults to false. */
+  seekable?: boolean;
+  /** Pre-trained dictionary: a {@link Dictionary} instance, or raw content
+   *  bytes. Defaults to none. */
+  dict?: Dictionary | Buffer | Uint8Array;
+  /** Shared literal Huffman table (128 bytes, from {@link trainDictHuf} or
+   *  {@link dictHuf}). Ignored without `dict`, and ignored when `dict` is a
+   *  {@link Dictionary} (which carries its own table). */
+  dictHuf?: Buffer | Uint8Array;
 }
 
 export interface DecompressOptions {
-    /** Expected decompressed size. If omitted, read from header. */
-    size?: number;
-    /** Enable checksum verification. Defaults to false. */
-    checksum?: boolean;
-    /** Pre-trained dictionary: a {@link Dictionary} instance, or raw content
-     *  bytes. Required when the archive references a dictionary. */
-    dict?: Dictionary | Buffer | Uint8Array;
-    /** Shared literal Huffman table (128 bytes) when the archive was compressed
-     *  with one (the dictionary ID binds the pair). Ignored when `dict` is a
-     *  {@link Dictionary}. */
-    dictHuf?: Buffer | Uint8Array;
+  /** Expected decompressed size. If omitted, read from header. */
+  size?: number;
+  /** Enable checksum verification. Defaults to false. */
+  checksum?: boolean;
+  /** Pre-trained dictionary: a {@link Dictionary} instance, or raw content
+   *  bytes. Required when the archive references a dictionary. */
+  dict?: Dictionary | Buffer | Uint8Array;
+  /** Shared literal Huffman table (128 bytes) when the archive was compressed
+   *  with one (the dictionary ID binds the pair). Ignored when `dict` is a
+   *  {@link Dictionary}. */
+  dictHuf?: Buffer | Uint8Array;
 }
 
 /**
@@ -119,12 +119,12 @@ export function errorName(code: number): string;
 
 /** Result of {@link dictLoad}. */
 export interface LoadedDict {
-    /** Raw dictionary content bytes. */
-    content: Buffer;
-    /** 128-byte shared literal Huffman table. */
-    huf: Buffer;
-    /** 32-bit dictionary ID (binds the (content, table) pair). */
-    id: number;
+  /** Raw dictionary content bytes. */
+  content: Buffer;
+  /** 128-byte shared literal Huffman table. */
+  huf: Buffer;
+  /** 32-bit dictionary ID (binds the (content, table) pair). */
+  id: number;
 }
 
 /**
@@ -133,19 +133,19 @@ export interface LoadedDict {
  * {@link compress} / {@link decompress}, or to `Seekable#setDict`.
  */
 export class Dictionary {
-    constructor(content: Buffer, huf: Buffer, id: number);
-    /** Train a complete dictionary (content + shared table) from samples. */
-    static train(samples: Array<Buffer | Uint8Array>): Dictionary;
-    /** Parse `.zxd` bytes into a Dictionary (owned copies). */
-    static load(zxd: Buffer): Dictionary;
-    /** Serialize back to `.zxd` file bytes. */
-    save(): Buffer;
-    /** Raw LZ-window content bytes. */
-    content: Buffer;
-    /** 128-byte shared literal Huffman table. */
-    huf: Buffer;
-    /** Dictionary ID binding the (content, table) pair. */
-    id: number;
+  constructor(content: Buffer, huf: Buffer, id: number);
+  /** Train a complete dictionary (content + shared table) from samples. */
+  static train(samples: Array<Buffer | Uint8Array>): Dictionary;
+  /** Parse `.zxd` bytes into a Dictionary (owned copies). */
+  static load(zxd: Buffer): Dictionary;
+  /** Serialize back to `.zxd` file bytes. */
+  save(): Buffer;
+  /** Raw LZ-window content bytes. */
+  content: Buffer;
+  /** 128-byte shared literal Huffman table. */
+  huf: Buffer;
+  /** Dictionary ID binding the (content, table) pair. */
+  id: number;
 }
 
 /**
@@ -156,7 +156,10 @@ export class Dictionary {
  * @param maxSize - Maximum dictionary content size in bytes (defaults to 65535).
  * @returns Raw dictionary content suitable for `CompressOptions.dict`.
  */
-export function trainDict(samples: Array<Buffer | Uint8Array>, maxSize?: number): Buffer;
+export function trainDict(
+  samples: Array<Buffer | Uint8Array>,
+  maxSize?: number,
+): Buffer;
 
 /** Compute the deterministic 32-bit dictionary ID for raw dictionary content. */
 export function dictId(content: Buffer): number;
@@ -185,7 +188,10 @@ export function dictSave(content: Buffer, hufLengths: Buffer): Buffer;
  * Returns the 128-byte packed table required by {@link dictSave} and usable
  * as `CompressOptions.dictHuf` / `DecompressOptions.dictHuf`.
  */
-export function trainDictHuf(samples: Array<Buffer | Uint8Array>, dict: Buffer): Buffer;
+export function trainDictHuf(
+  samples: Array<Buffer | Uint8Array>,
+  dict: Buffer,
+): Buffer;
 
 /**
  * Return the 128-byte shared Huffman table stored in a `.zxd` file, or `null`
@@ -212,12 +218,43 @@ export function defaultLevel(): number;
 export function libraryVersion(): string;
 
 export interface CStreamOptions {
-    /** Compression level (1-7). Defaults to LEVEL_DEFAULT. */
-    level?: number;
-    /** Enable per-block and global checksums. Defaults to false. */
-    checksum?: boolean;
-    /** Block size in bytes (0 = default 512 KB). Power of 2, 4 KB – 2 MB. */
-    blockSize?: number;
+  /** Compression level (1-7). Defaults to LEVEL_DEFAULT. */
+  level?: number;
+  /** Enable per-block and global checksums. Defaults to false. */
+  checksum?: boolean;
+  /** Block size in bytes (0 = default 512 KB). Power of 2, 4 KB – 2 MB. */
+  blockSize?: number;
+}
+
+export interface CctxOptions {
+  level?: number;
+  checksum?: boolean;
+  /** A {@link Dictionary}, or raw dictionary content. */
+  dict?: Dictionary | Buffer | Uint8Array;
+  /** Shared literal table (128 bytes); a {@link Dictionary} carries its own. */
+  dictHuf?: Buffer | Uint8Array;
+}
+
+export interface DctxOptions {
+  checksum?: boolean;
+  /** A {@link Dictionary}, or raw dictionary content. */
+  dict?: Dictionary | Buffer | Uint8Array;
+  /** Shared literal table (128 bytes); a {@link Dictionary} carries its own. */
+  dictHuf?: Buffer | Uint8Array;
+}
+
+/** Reusable compression context: one archive per `compress()` call. */
+export class Cctx {
+  constructor(options?: CctxOptions);
+  compress(data: Buffer): Buffer;
+  close(): void;
+}
+
+/** Reusable decompression context, mirroring {@link Cctx}. */
+export class Dctx {
+  constructor(options?: DctxOptions);
+  decompress(data: Buffer): Buffer;
+  close(): void;
 }
 
 /**
@@ -229,50 +266,52 @@ export interface CStreamOptions {
  * Always call `end()` to flush the residual block, EOF marker and footer.
  */
 export class CStream {
-    constructor(options?: CStreamOptions);
-    /** Push input and return any compressed bytes produced this call. */
-    compress(data: Buffer): Buffer;
-    /** Finalise the stream: residual block + EOF + file footer. */
-    end(): Buffer;
-    /** Release native resources. Idempotent. */
-    close(): void;
-    /** Suggested input chunk size in bytes. */
-    inSize(): number;
-    /** Suggested output chunk size in bytes. */
-    outSize(): number;
+  constructor(options?: CStreamOptions);
+  /** Push input and return any compressed bytes produced this call. */
+  compress(data: Buffer): Buffer;
+  /** Finalise the stream: residual block + EOF + file footer. */
+  end(): Buffer;
+  /** Release native resources. Idempotent. */
+  close(): void;
+  /** Suggested input chunk size in bytes. */
+  inSize(): number;
+  /** Suggested output chunk size in bytes. */
+  outSize(): number;
 }
 
 export interface DStreamOptions {
-    /** Verify per-block and global checksums when present. Defaults to false. */
-    checksum?: boolean;
+  /** Verify per-block and global checksums when present. Defaults to false. */
+  checksum?: boolean;
 }
 
 /**
  * Push-based, single-threaded decompression stream.
  */
 export class DStream {
-    constructor(options?: DStreamOptions);
-    /** Push compressed bytes and return any decompressed bytes produced. */
-    decompress(data: Buffer): Buffer;
-    /** True once the decoder has reached and validated the file footer. */
-    finished(): boolean;
-    /** Release native resources. Idempotent. */
-    close(): void;
-    /** Suggested input chunk size in bytes. */
-    inSize(): number;
-    /** Suggested output chunk size in bytes. */
-    outSize(): number;
+  constructor(options?: DStreamOptions);
+  /** Push compressed bytes and return any decompressed bytes produced. */
+  decompress(data: Buffer): Buffer;
+  /** True once the decoder has reached and validated the file footer. */
+  finished(): boolean;
+  /** Release native resources. Idempotent. */
+  close(): void;
+  /** Suggested input chunk size in bytes. */
+  inSize(): number;
+  /** Suggested output chunk size in bytes. */
+  outSize(): number;
 }
 
 // ---------- stream.Transform adapters ----------
 
-import { Transform, TransformOptions } from 'node:stream';
+import { Transform, TransformOptions } from "node:stream";
 
 /** Returns true if `buf` starts with the ZXC file magic word. */
 export function detectZxc(buf: Buffer | Uint8Array): boolean;
 
-export interface CompressStreamOptions extends TransformOptions, CStreamOptions {}
-export interface DecompressStreamOptions extends TransformOptions, DStreamOptions {}
+export interface CompressStreamOptions
+  extends TransformOptions, CStreamOptions {}
+export interface DecompressStreamOptions
+  extends TransformOptions, DStreamOptions {}
 
 /**
  * `stream.Transform` that compresses bytes through a ZXC frame. Designed to
@@ -280,7 +319,7 @@ export interface DecompressStreamOptions extends TransformOptions, DStreamOption
  * registry clients, etc.). Mirrors `zlib.createGzip()` ergonomics.
  */
 export class CompressStream extends Transform {
-    constructor(options?: CompressStreamOptions);
+  constructor(options?: CompressStreamOptions);
 }
 
 /**
@@ -288,11 +327,15 @@ export class CompressStream extends Transform {
  * `code === 'ZXC_TRUNCATED'` if the input ends before the footer.
  */
 export class DecompressStream extends Transform {
-    constructor(options?: DecompressStreamOptions);
+  constructor(options?: DecompressStreamOptions);
 }
 
-export function createCompressStream(options?: CompressStreamOptions): CompressStream;
-export function createDecompressStream(options?: DecompressStreamOptions): DecompressStream;
+export function createCompressStream(
+  options?: CompressStreamOptions,
+): CompressStream;
+export function createDecompressStream(
+  options?: DecompressStreamOptions,
+): DecompressStream;
 
 // ---------- Seekable random-access decompression ----------
 
@@ -306,14 +349,14 @@ export function createDecompressStream(options?: DecompressStreamOptions): Decom
  * similar.
  */
 export interface SeekableReader {
-    /** Total size of the compressed archive in bytes. */
-    size: number;
-    /**
-     * Fill `buf` with `buf.length` bytes starting at `offset` in the
-     * archive. Throwing causes the surrounding Seekable operation to
-     * fail with an I/O error.
-     */
-    readAt(buf: Buffer, offset: number): void;
+  /** Total size of the compressed archive in bytes. */
+  size: number;
+  /**
+   * Fill `buf` with `buf.length` bytes starting at `offset` in the
+   * archive. Throwing causes the surrounding Seekable operation to
+   * fail with an I/O error.
+   */
+  readAt(buf: Buffer, offset: number): void;
 }
 
 /**
@@ -335,45 +378,44 @@ export interface SeekableReader {
  * threads.
  */
 export class Seekable {
-    constructor(compressed: Buffer);
-    constructor(reader: SeekableReader);
-    /** Total number of data blocks (excluding the EOF marker block). */
-    numBlocks(): number;
-    /** Total decompressed size of the archive in bytes. */
-    decompressedSize(): number;
-    /**
-     * On-disk compressed size of a specific block (block header +
-     * payload + optional per-block checksum). Returns `null` if
-     * `blockIdx` is out of range.
-     */
-    blockCompressedSize(blockIdx: number): number | null;
-    /**
-     * Decompressed size of a specific block, or `null` if `blockIdx` is
-     * out of range.
-     */
-    blockDecompressedSize(blockIdx: number): number | null;
-    /**
-     * Decompress `length` bytes starting at `offset` (in the original
-     * uncompressed byte stream). Only the blocks overlapping the
-     * requested range are read.
-     */
-    decompressRange(offset: number, length: number): Buffer;
-    /**
-     * Attach a pre-trained dictionary to this handle. Must be called before
-     * any `decompressRange` call when the archive was compressed with a
-     * dictionary. The content is copied internally.
-     */
-    setDict(dict: Buffer | Uint8Array, dictHuf?: Buffer | Uint8Array): void;
-
-    /**
-     * Turns per-block checksum verification on or off.
-     *
-     * Off by default, as in the one-shot API. No effect without checksums in
-     * the archive. Applies from the next call.
-     */
-    setChecksum(enabled: boolean): void;
-    /** Release native resources. Idempotent. */
-    close(): void;
+  constructor(compressed: Buffer);
+  constructor(reader: SeekableReader);
+  /** Total number of data blocks (excluding the EOF marker block). */
+  numBlocks(): number;
+  /** Total decompressed size of the archive in bytes. */
+  decompressedSize(): number;
+  /**
+   * On-disk compressed size of a specific block (block header +
+   * payload + optional per-block checksum). Returns `null` if
+   * `blockIdx` is out of range.
+   */
+  blockCompressedSize(blockIdx: number): number | null;
+  /**
+   * Decompressed size of a specific block, or `null` if `blockIdx` is
+   * out of range.
+   */
+  blockDecompressedSize(blockIdx: number): number | null;
+  /**
+   * Decompress `length` bytes starting at `offset` (in the original
+   * uncompressed byte stream). Only the blocks overlapping the
+   * requested range are read.
+   */
+  decompressRange(offset: number, length: number): Buffer;
+  /**
+   * Attach a pre-trained dictionary to this handle. Must be called before
+   * any `decompressRange` call when the archive was compressed with a
+   * dictionary. The content is copied internally.
+   */
+  setDict(dict: Buffer | Uint8Array, dictHuf?: Buffer | Uint8Array): void;
+  /**
+   * Turns per-block checksum verification on or off.
+   *
+   * Off by default, as in the one-shot API. No effect without checksums in
+   * the archive. Applies from the next call.
+   */
+  setChecksum(enabled: boolean): void;
+  /** Release native resources. Idempotent. */
+  close(): void;
 }
 
 /**

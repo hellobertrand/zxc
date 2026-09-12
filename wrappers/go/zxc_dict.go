@@ -38,6 +38,10 @@ const HufTableSize = int(C.ZXC_HUF_TABLE_SIZE)
 // fixed ZXC_HUF_TABLE_SIZE bytes from dict_huf, so a shorter slice would be
 // read out of bounds.
 func setCompressDict(copts *C.zxc_compress_opts_t, o options, pinner *runtime.Pinner) error {
+	// A wrong length is a programming error, dictionary or not.
+	if len(o.dictHuf) > 0 && len(o.dictHuf) != HufTableSize {
+		return ErrBadHufTable
+	}
 	if len(o.dict) == 0 {
 		return nil
 	}
@@ -45,9 +49,6 @@ func setCompressDict(copts *C.zxc_compress_opts_t, o options, pinner *runtime.Pi
 	copts.dict = unsafe.Pointer(&o.dict[0])
 	copts.dict_size = C.size_t(len(o.dict))
 	if len(o.dictHuf) > 0 {
-		if len(o.dictHuf) != HufTableSize {
-			return ErrBadHufTable
-		}
 		pinner.Pin(&o.dictHuf[0])
 		copts.dict_huf = unsafe.Pointer(&o.dictHuf[0])
 	}
@@ -56,6 +57,9 @@ func setCompressDict(copts *C.zxc_compress_opts_t, o options, pinner *runtime.Pi
 
 // setDecompressDict mirrors setCompressDict for decompression options.
 func setDecompressDict(dopts *C.zxc_decompress_opts_t, o options, pinner *runtime.Pinner) error {
+	if len(o.dictHuf) > 0 && len(o.dictHuf) != HufTableSize {
+		return ErrBadHufTable
+	}
 	if len(o.dict) == 0 {
 		return nil
 	}
@@ -63,9 +67,6 @@ func setDecompressDict(dopts *C.zxc_decompress_opts_t, o options, pinner *runtim
 	dopts.dict = unsafe.Pointer(&o.dict[0])
 	dopts.dict_size = C.size_t(len(o.dict))
 	if len(o.dictHuf) > 0 {
-		if len(o.dictHuf) != HufTableSize {
-			return ErrBadHufTable
-		}
 		pinner.Pin(&o.dictHuf[0])
 		dopts.dict_huf = unsafe.Pointer(&o.dictHuf[0])
 	}

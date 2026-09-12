@@ -81,21 +81,25 @@ Read the original size from a compressed buffer without decompressing.
 
 ### `zxc.createCompressContext(opts?) -> CompressContext`
 
-Create a reusable compression context (avoids per-call allocation).
+Create a reusable compression context (avoids per-call allocation). `opts`
+takes the same `level`, `checksum`, `dict` and `dictHuf` as `compress`, and a
+dictionary given here is used by every `compress()` call. `seekable` throws:
+the context API writes no seek table.
 
 ```js
-const ctx = zxc.createCompressContext({ level: 3 });
+const ctx = zxc.createCompressContext({ level: 3, dict });
 const c1 = ctx.compress(data1);
 const c2 = ctx.compress(data2);
 ctx.free(); // Release WASM memory
 ```
 
-### `zxc.createDecompressContext() -> DecompressContext`
+### `zxc.createDecompressContext(opts?) -> DecompressContext`
 
-Create a reusable decompression context.
+Create a reusable decompression context. `opts` takes the same `checksum`,
+`dict` and `dictHuf` as `decompress`.
 
 ```js
-const ctx = zxc.createDecompressContext();
+const ctx = zxc.createDecompressContext({ dict });
 const d1 = ctx.decompress(compressed1);
 const d2 = ctx.decompress(compressed2);
 ctx.free();

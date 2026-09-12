@@ -262,6 +262,37 @@ pub use dict::{
 };
 pub use zxc_sys::{ZXC_DICT_SIZE_MAX, ZXC_HUF_TABLE_SIZE};
 
+/// The dictionary content and shared table for a C options struct, as slices
+/// borrowed from the caller's options: empty means absent, and a table only
+/// accompanies a dictionary, then in `ZXC_HUF_TABLE_SIZE` bytes. Slices rather
+/// than pointers keep the borrow checker in charge of the FFI call's lifetime.
+pub(crate) fn dict_parts<'a>(
+    dict: Option<&'a [u8]>,
+    dict_huf: Option<&'a [u8]>,
+) -> Result<(&'a [u8], &'a [u8])> {
+    let content: &[u8] = dict.unwrap_or(&[]);
+    let table: &[u8] = match dict_huf {
+        // A wrong length is a programming error, dictionary or not.
+        Some(h) if !h.is_empty() => {
+            if h.len() != ZXC_HUF_TABLE_SIZE {
+                return Err(Error::BadHufTable);
+            }
+            if content.is_empty() { &[] } else { h }
+        }
+        _ => &[],
+    };
+    Ok((content, table))
+}
+
+/// The C pointer for a dictionary slice: NULL when the slice is empty.
+pub(crate) fn dict_ptr(slice: &[u8]) -> *const std::ffi::c_void {
+    if slice.is_empty() {
+        std::ptr::null()
+    } else {
+        slice.as_ptr() as *const std::ffi::c_void
+    }
+}
+
 pub use ctx::{Cctx, Dctx, compress_block_bound, decompress_block_bound};
 pub use error::{Error, Result};
 pub use file::{
