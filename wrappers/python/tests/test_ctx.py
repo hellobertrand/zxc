@@ -36,6 +36,19 @@ def test_checksum_is_honoured():
     with zxc.Dctx(checksum=True) as dctx:
         assert dctx.decompress(archive) == payload
 
+    comp_size = int.from_bytes(archive[19:23], "little")
+    at = 16 + 8 + comp_size
+    assert at + 4 < len(archive), "expected a single-block archive"
+    corrupt = bytearray(archive)
+    corrupt[at] ^= 0xFF
+    corrupt = bytes(corrupt)
+
+    with zxc.Dctx(checksum=True) as dctx:
+        with pytest.raises(RuntimeError, match="ZXC_ERROR_BAD_CHECKSUM"):
+            dctx.decompress(corrupt)
+    with zxc.Dctx(checksum=False) as dctx:
+        assert dctx.decompress(corrupt) == payload
+
 
 def test_dictionary_applies_to_every_call():
     samples = _samples()
@@ -112,3 +125,10 @@ def test_table_without_dictionary_is_still_checked():
         zxc.Cctx(dict_huf=b"short")
     with pytest.raises(ValueError):
         zxc.Dctx(dict_huf=b"short")
+
+
+def test_oversized_dictionary_is_rejected_at_creation():
+    for ctx in (zxc.Cctx, zxc.Dctx):
+        with pytest.raises(RuntimeError, match="ZXC_ERROR_DICT_TOO_LARGE"):
+            ctx(dict=b"x" * 65536)
+        ctx(dict=b"x" * 65535).close()

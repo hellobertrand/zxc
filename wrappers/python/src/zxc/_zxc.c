@@ -211,8 +211,7 @@ static PyMethodDef zxc_methods[] = {
      METH_VARARGS | METH_KEYWORDS, NULL},
     {"pyzxc_seekable_free", (PyCFunction)pyzxc_seekable_free, METH_O, NULL},
     {"pyzxc_seekable_set_dict", (PyCFunction)pyzxc_seekable_set_dict, METH_VARARGS, NULL},
-    {"pyzxc_seekable_set_checksum", (PyCFunction)pyzxc_seekable_set_checksum, METH_VARARGS,
-     NULL},
+    {"pyzxc_seekable_set_checksum", (PyCFunction)pyzxc_seekable_set_checksum, METH_VARARGS, NULL},
     {"pyzxc_seek_table_size", (PyCFunction)pyzxc_seek_table_size, METH_O, NULL},
     {"pyzxc_write_seek_table", (PyCFunction)pyzxc_write_seek_table, METH_O, NULL},
 
@@ -1077,6 +1076,11 @@ static int pyzxc_ctx_take_dict(PyObject* dict_obj, PyObject* huf_obj, uint8_t** 
     if (dict_obj && dict_obj != Py_None) {
         Py_buffer dv;
         if (PyObject_GetBuffer(dict_obj, &dv, PyBUF_SIMPLE) < 0) return -1;
+        if ((size_t)dv.len > ZXC_DICT_SIZE_MAX) {
+            PyBuffer_Release(&dv);
+            PyErr_SetString(PyExc_RuntimeError, zxc_error_name(ZXC_ERROR_DICT_TOO_LARGE));
+            return -1;
+        }
         if (dv.len > 0) {
             uint8_t* copy = (uint8_t*)PyMem_Malloc((size_t)dv.len);
             if (!copy) {
