@@ -1960,3 +1960,74 @@ int test_seekable_work_buf_tail_pad(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+/*
+ * A seek-table entry spans exactly one block, so it cannot exceed a block
+ * header plus a full block plus its checksum. Inflating one entry and
+ * deflating the next by the same amount keeps the prefix sum landing on the
+ * EOF block, so only the per-entry bound can reject the table.
+ */
+int test_seekable_forged_table_entry() {
+    printf("=== TEST: Seekable - Forged Table Entry ===\n");
+
+    const size_t SRC_SIZE = 64 * 1024;
+    const size_t BLOCK_SIZE = 4096;
+    uint8_t* src = malloc(SRC_SIZE);
+    if (!src) return 0;
+    /* Incompressible: every block falls back to RAW and sits on the bound. */
+    unsigned rng = 4242u;
+    for (size_t i = 0; i < SRC_SIZE; i++) {
+        rng = rng * 1103515245u + 12345u;
+        src[i] = (uint8_t)(rng >> 24);
+    }
+
+    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 256;
+    uint8_t* dst = malloc(dst_cap);
+    if (!dst) {
+        free(src);
+        return 0;
+    }
+    zxc_compress_opts_t opts = {.level = 1, .seekable = 1, .block_size = BLOCK_SIZE};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    free(src);
+    if (csize <= 0) {
+        printf("Failed: compress\n");
+        free(dst);
+        return 0;
+    }
+
+    const uint32_t num_blocks = (uint32_t)(SRC_SIZE / BLOCK_SIZE);
+    /* [file header][blocks][EOF][SEK header + N*4][footer] */
+    uint8_t* const entries =
+        dst + csize - ZXC_FILE_FOOTER_SIZE - (size_t)num_blocks * sizeof(uint32_t);
+    const uint32_t e0 = zxc_le32(entries);
+    const uint32_t e1 = zxc_le32(entries + sizeof(uint32_t));
+    const uint32_t entry_max = (uint32_t)(ZXC_BLOCK_HEADER_SIZE + BLOCK_SIZE);
+
+    int ok = 1;
+    if (e0 != entry_max) {
+        printf("Failed: expected a RAW entry on the bound, got %u (bound %u)\n", e0, entry_max);
+        ok = 0;
+    }
+    if (ok && !zxc_seekable_open(dst, (size_t)csize)) {
+        printf("Failed: intact archive rejected\n");
+        ok = 0;
+    }
+
+    if (ok) {
+        const uint32_t shift = 4000u;
+        zxc_store_le32(entries, e0 + shift);
+        zxc_store_le32(entries + sizeof(uint32_t), e1 - shift);
+        zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
+        if (s) {
+            printf("Failed: entry of %u accepted, bound is %u\n", e0 + shift, entry_max);
+            zxc_seekable_free(s);
+            ok = 0;
+        }
+    }
+
+    free(dst);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}

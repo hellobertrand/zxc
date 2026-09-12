@@ -176,6 +176,7 @@ int test_seekable_open_reader_mt(void);
 int test_seekable_cross_boundary(void);
 int test_seekable_truncated_input(void);
 int test_seekable_corrupted_sek(void);
+int test_seekable_forged_table_entry(void);
 int test_seekable_range_out_of_bounds(void);
 int test_seekable_dst_too_small(void);
 int test_seekable_empty_file(void);
@@ -199,6 +200,7 @@ int test_huffman_single_symbol_validation(void);
 int test_eof_block_structure(void);
 int test_header_checksum(void);
 int test_global_checksum_order(void);
+int test_forged_block_comp_size(void);
 int test_chunk_size_code(void);
 
 /* Misc */

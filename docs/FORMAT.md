@@ -95,7 +95,12 @@ Offset  Size  Field
   - `255` = EOF
 - **Block Flags**: currently not used by implementation (written as `0`).
 - **Reserved**: must be 0.
-- **comp_size**: payload size in bytes (does **not** include the optional trailing 4-byte block checksum).
+- **comp_size**: payload size in bytes (does **not** include the optional trailing 4-byte block
+  checksum). For a data block (RAW, GLO, GHI) it never exceeds the `block_size` declared in the
+  file header: a block that would grow falls back to RAW, whose payload equals its content, so
+  `block_size` is reached exactly and never passed. A decoder **MUST** reject a larger value.
+  This does not apply to SEK, which is not a data block: its payload is one 4-byte entry per
+  block and routinely exceeds `block_size`.
 - **Header Checksum**: the 8-bit header checksum of [7.1](#71-header-checksums), computed over the 8-byte header with byte `0x07` zeroed.
 
 ### 4.2 Block physical layout
@@ -454,6 +459,9 @@ The **Seek Table** block is an optional block appended between the EOF block and
 4. Calculate `seek_block_size = 8 + (N × 4)`.
 5. Seek backward by `seek_block_size` bytes from the start of the footer to read the Block Header.
 6. Validate `block_type == 254 (SEK)` and `comp_size == N × 4`.
+7. Validate every entry: one entry spans one whole block, so it lies in
+   `[8, 8 + block_size + checksum_size]`, and the running sum must land exactly on the EOF
+   block.
 
 ---
 
@@ -678,6 +686,9 @@ The recommended behavior for each class is specified below.
 | **Block payload truncated** | During `fread` of `comp_size` bytes | Reject. Unexpected end of stream. |
 | **Block checksum mismatch** | Trailing 4-byte checksum | Reject block. Payload is corrupt. |
 | **EOF block with non-zero comp_size** | EOF block header | Reject. Malformed EOF marker. |
+| **Data block comp_size above block size** | Block header, offset 0x03 | Reject. A data block never compresses past its own content (§4.1). |
+| **Block walk ends without an EOF block** | End of the block walk | Reject. A forged `comp_size` can span the EOF marker; the resulting short decode must not be reported as success. |
+| **Seek table entry above one block** | SEK payload | Reject. One entry spans one block (§5). |
 | **Footer source size mismatch** | File footer, offset 0x00 | Reject. Output size does not match declared original size. |
 | **Footer global hash mismatch** | File footer, offset 0x08 | Reject (if checksum mode active). Integrity failure. |
 | **Decompressed output exceeds chunk size** | During LZ decode | Reject. Corrupt or malicious payload. |

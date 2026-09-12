@@ -759,6 +759,21 @@ static int zxc_footer_dsize_plausible(const uint64_t dsize, const size_t chunk_s
 }
 
 /**
+ * @brief Caps a data block's payload at one block size.
+ *
+ * A block that would grow falls back to RAW, so @p comp_size reaches
+ * @p chunk_size exactly and never passes it. Data blocks only: SEK holds one
+ * entry per block and is routinely larger.
+ *
+ * @param[in] comp_size  Payload size from the block header.
+ * @param[in] chunk_size Block size declared by the file header.
+ * @return 1 when the payload fits one block, 0 for a forged size.
+ */
+static int zxc_block_comp_size_plausible(const uint32_t comp_size, const size_t chunk_size) {
+    return (uint64_t)comp_size <= (uint64_t)chunk_size;
+}
+
+/**
  * @brief Validates a frame envelope without decoding it: file header, then the
  *        decompressed size stored in the footer.
  *
@@ -886,6 +901,7 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
     // Dict decode buffer: [dict_content | decode_space + PAD], carved into the
     // cctx workspace (NULL when no dictionary is active).
     int ctx_ready = 0;
+    int saw_eof = 0;
     uint8_t* dict_dec = NULL;
 
     // Block decompression loop
@@ -902,6 +918,7 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
 
         // Handle EOF block separately (not a real chunk to decompress)
         if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
+            saw_eof = 1;
             // EOF carries no payload; a non-zero comp_size is a malformed header.
             if (UNLIKELY(bh.comp_size != 0)) {
                 if (ctx_ready) zxc_cctx_free(&ctx);
@@ -933,6 +950,11 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
                 }
             }
             break;  // EOF reached, exit loop
+        }
+
+        if (UNLIKELY(!zxc_block_comp_size_plausible(bh.comp_size, runtime_chunk_size))) {
+            if (ctx_ready) zxc_cctx_free(&ctx);
+            return ZXC_ERROR_BAD_BLOCK_SIZE;
         }
 
         if (!ctx_ready) {
@@ -997,6 +1019,8 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
     }
 
     if (ctx_ready) zxc_cctx_free(&ctx);
+    if (UNLIKELY(!saw_eof)) return ZXC_ERROR_CORRUPT_DATA;
+
     return (int64_t)(op - op_start);
 }
 
@@ -1559,6 +1583,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     uint8_t* const dict_dec = ctx->dict_buffer;
     if (dict_dec) ZXC_MEMCPY(dict_dec, dict, dict_size);
 
+    int saw_eof = 0;
     while (ip < ip_end) {
         const size_t rem_src = (size_t)(ip_end - ip);
         zxc_block_header_t bh;
@@ -1566,6 +1591,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
             return ZXC_ERROR_BAD_HEADER;
 
         if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
+            saw_eof = 1;
             if (UNLIKELY(bh.comp_size != 0)) return ZXC_ERROR_BAD_HEADER;
             // Same rule as zxc_decompress(): the footer is the archive's last
             // bytes, even when a seek table sits between the EOF block and it.
@@ -1579,6 +1605,9 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
             }
             break;
         }
+
+        if (UNLIKELY(!zxc_block_comp_size_plausible(bh.comp_size, runtime_chunk_size)))
+            return ZXC_ERROR_BAD_BLOCK_SIZE;
 
         const size_t rem_cap = (size_t)(op_end - op);
         int res;
@@ -1613,6 +1642,8 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
               (file_has_checksums ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
         op += res;
     }
+
+    if (UNLIKELY(!saw_eof)) return ZXC_ERROR_CORRUPT_DATA;
 
     return (int64_t)(op - op_start);
 }
