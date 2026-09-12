@@ -499,9 +499,9 @@ static int64_t bound_decode(zxc_dctx* d, const bound_block_t* b, int strict, uin
 }
 
 /* Static dctx block API: the carved block is the effective capacity. Fitting
- * blocks decode whatever the buffer; larger ones are BAD_BLOCK_SIZE within
- * the margin, the decoder's too-small codes beyond; corruption keeps the
- * dynamic codes. */
+ * blocks decode whatever the buffer. A payload larger than the carved block is
+ * BAD_BLOCK_SIZE, checked before decoding; one that fits but decodes past the
+ * block keeps the decoder's own codes. Corruption keeps the dynamic codes. */
 int test_static_dctx_block_bounds(void) {
     printf("=== TEST: Static dctx - blocks bounded by the carved block ===\n");
     enum {
@@ -621,20 +621,21 @@ int test_static_dctx_block_bounds(void) {
             {B_LZ_MID, 1, PIN, ZXC_ERROR_OVERFLOW},
             {B_RAW_MID, 0, MID + PAD, ZXC_ERROR_BAD_BLOCK_SIZE},
             {B_RAW_MID, 1, MID, ZXC_ERROR_BAD_BLOCK_SIZE},
-            {B_RAW_MID, 1, PIN, ZXC_ERROR_DST_TOO_SMALL},
-            /* beyond the margin: the decoder's own codes, buffer-independent */
+            {B_RAW_MID, 1, PIN, ZXC_ERROR_BAD_BLOCK_SIZE},
+            /* beyond the margin: BAD_BLOCK_SIZE when the payload is too big,
+               the decoder's own codes when only its output is */
             {B_LZ_XL, 0, XL + 200, ZXC_ERROR_OVERFLOW},
             {B_LZ_XL, 0, PIN, ZXC_ERROR_OVERFLOW},
             {B_LZ_XL, 1, XL, ZXC_ERROR_OVERFLOW},
-            {B_RAW_XL, 0, XL + 200, ZXC_ERROR_DST_TOO_SMALL},
-            {B_RAW_XL, 1, XL, ZXC_ERROR_DST_TOO_SMALL},
+            {B_RAW_XL, 0, XL + 200, ZXC_ERROR_BAD_BLOCK_SIZE},
+            {B_RAW_XL, 1, XL, ZXC_ERROR_BAD_BLOCK_SIZE},
             /* more literals or sequences than the carved block's scratch */
             {B_LIT6, 0, LIT + PAD, ZXC_ERROR_DST_TOO_SMALL},
             {B_LIT6, 1, LIT, ZXC_ERROR_DST_TOO_SMALL},
             {B_LIT1, 0, LIT + PAD, ZXC_ERROR_BAD_BLOCK_SIZE},
             {B_LIT1, 1, LIT, ZXC_ERROR_BAD_BLOCK_SIZE},
-            {B_SEQ7, 0, SEQ + PAD, ZXC_ERROR_DST_TOO_SMALL},
-            {B_SEQ7, 1, SEQ, ZXC_ERROR_DST_TOO_SMALL},
+            {B_SEQ7, 0, SEQ + PAD, ZXC_ERROR_BAD_BLOCK_SIZE},
+            {B_SEQ7, 1, SEQ, ZXC_ERROR_BAD_BLOCK_SIZE},
             {B_HDR_LIT, 0, LIT + PAD, ZXC_ERROR_DST_TOO_SMALL},
             {B_HDR_LIT, 1, LIT, ZXC_ERROR_DST_TOO_SMALL},
         };

@@ -1655,6 +1655,9 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
     const uint32_t comp_sz = zxc_le32(src + 3);
     const int has_checksum = ctx->checksum_enabled;
 
+    // A block never compresses past its own content size
+    if (UNLIKELY((uint64_t)comp_sz > (uint64_t)ctx->chunk_size)) return ZXC_ERROR_BAD_BLOCK_SIZE;
+
     // Check bounds: Header + Body + Checksum(if any)
     const size_t expected_sz =
         (size_t)ZXC_BLOCK_HEADER_SIZE + comp_sz + (has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0);

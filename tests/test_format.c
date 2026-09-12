@@ -899,3 +899,188 @@ int test_chunk_size_code() {
     printf("PASS\n\n");
     return 1;
 }
+
+/* Compresses a deterministic payload into a fresh buffer; caller frees both. */
+static uint8_t* forge_build(size_t plain_sz, int compressible, size_t block_sz, int checksum,
+                            uint8_t** out_plain, size_t* out_sz) {
+    uint8_t* plain = (uint8_t*)malloc(plain_sz);
+    if (!plain) return NULL;
+    unsigned s = 99u;
+    for (size_t i = 0; i < plain_sz; i++) {
+        s = s * 1103515245u + 12345u;
+        plain[i] = compressible ? (uint8_t)('a' + (i % 26)) : (uint8_t)(s >> 24);
+    }
+    const uint64_t bound = zxc_compress_bound(plain_sz);
+    uint8_t* arc = (uint8_t*)malloc((size_t)bound);
+    if (!arc) {
+        free(plain);
+        return NULL;
+    }
+    zxc_compress_opts_t o = {0};
+    o.level = 3;
+    o.block_size = block_sz;
+    o.checksum_enabled = checksum;
+    const int64_t n = zxc_compress(plain, plain_sz, arc, (size_t)bound, &o);
+    if (n < 0) {
+        free(plain);
+        free(arc);
+        return NULL;
+    }
+    *out_plain = plain;
+    *out_sz = (size_t)n;
+    return arc;
+}
+
+/* Rewrites block 0's comp_size, keeping the 8-bit header checksum valid. */
+static int forge_comp_size(uint8_t* arc, size_t arc_sz, uint32_t comp_size) {
+    const size_t rem = arc_sz - ZXC_FILE_HEADER_SIZE;
+    zxc_block_header_t bh;
+    if (zxc_read_block_header(arc + ZXC_FILE_HEADER_SIZE, rem, &bh) != ZXC_OK) {
+        printf("  [FAIL] block 0 header unreadable\n");
+        return 0;
+    }
+    bh.comp_size = comp_size;
+    if (zxc_write_block_header(arc + ZXC_FILE_HEADER_SIZE, rem, &bh) != ZXC_BLOCK_HEADER_SIZE) {
+        printf("  [FAIL] block 0 header not rewritten\n");
+        return 0;
+    }
+    return 1;
+}
+
+/* Decodes through zxc_decompress (use_dctx == 0) or a reusable zxc_dctx: the
+   two frame walks are separate code and must reject the same forgeries. */
+static int64_t forge_decode_via(const uint8_t* arc, size_t arc_sz, size_t plain_sz, int checksum,
+                                int use_dctx) {
+    uint8_t* out = (uint8_t*)malloc(plain_sz);
+    if (!out) return ZXC_ERROR_MEMORY;
+    zxc_decompress_opts_t o = {0};
+    o.checksum_enabled = checksum;
+    int64_t r;
+    if (use_dctx) {
+        zxc_dctx* d = zxc_create_dctx();
+        r = d ? zxc_decompress_dctx(d, arc, arc_sz, out, plain_sz, &o) : ZXC_ERROR_MEMORY;
+        zxc_free_dctx(d);
+    } else {
+        r = zxc_decompress(arc, arc_sz, out, plain_sz, &o);
+    }
+    free(out);
+    return r;
+}
+
+/*
+ * A block header carries comp_size as a plain u32, and the header checksum
+ * covers it, so a forged size is structurally valid. Two things must stop it:
+ * comp_size may not exceed the file's block size, and the walk may not report
+ * success without having reached the EOF block - a forged size can span it.
+ */
+int test_forged_block_comp_size() {
+    printf("TEST: Forged block comp_size... ");
+    const size_t block_sz = 4096;
+    int ok = 1;
+
+    for (int checksum = 0; checksum <= 1 && ok; checksum++) {
+        const size_t trailer = checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0;
+        uint8_t* plain = NULL;
+        size_t arc_sz = 0;
+        /* Incompressible: block 0 falls back to RAW with comp_size == block_sz,
+           so the legal case sits exactly on the bound. */
+        uint8_t* arc = forge_build(64 * 1024, 0, block_sz, checksum, &plain, &arc_sz);
+        if (!arc) {
+            printf("  [FAIL] setup\n");
+            return 0;
+        }
+        const size_t plain_sz = 64 * 1024;
+        uint8_t* forged = (uint8_t*)malloc(arc_sz);
+        if (!forged) {
+            free(arc);
+            free(plain);
+            printf("  [FAIL] setup\n");
+            return 0;
+        }
+
+        zxc_block_header_t b0;
+        if (zxc_read_block_header(arc + ZXC_FILE_HEADER_SIZE, arc_sz - ZXC_FILE_HEADER_SIZE, &b0) !=
+            ZXC_OK) {
+            printf("  [FAIL] block 0 header unreadable\n");
+            ok = 0;
+        }
+        if (ok && (b0.block_type != ZXC_BLOCK_RAW || b0.comp_size != block_sz)) {
+            printf("  [FAIL] expected a RAW block at the bound, got type=%u comp_size=%u\n",
+                   b0.block_type, b0.comp_size);
+            ok = 0;
+        }
+        for (int via = 0; ok && via <= 1; via++) {
+            if (forge_decode_via(arc, arc_sz, plain_sz, checksum, via) != (int64_t)plain_sz) {
+                printf("  [FAIL] intact archive rejected via %s\n",
+                       via ? "dctx" : "zxc_decompress");
+                ok = 0;
+            }
+        }
+
+        if (ok) { /* One byte over the bound. */
+            memcpy(forged, arc, arc_sz);
+            ok = forge_comp_size(forged, arc_sz, (uint32_t)block_sz + 1u);
+            for (int via = 0; ok && via <= 1; via++) {
+                const int64_t r = forge_decode_via(forged, arc_sz, plain_sz, checksum, via);
+                if (r != ZXC_ERROR_BAD_BLOCK_SIZE) {
+                    printf("  [FAIL] comp_size = block_size + 1 via %s gave %lld\n",
+                           via ? "dctx" : "zxc_decompress", (long long)r);
+                    ok = 0;
+                }
+            }
+        }
+
+        if (ok) { /* Spans every remaining byte, EOF and footer included. */
+            memcpy(forged, arc, arc_sz);
+            ok = forge_comp_size(
+                forged, arc_sz,
+                (uint32_t)(arc_sz - ZXC_FILE_HEADER_SIZE - ZXC_BLOCK_HEADER_SIZE - trailer));
+            for (int via = 0; ok && via <= 1; via++) {
+                const int64_t r = forge_decode_via(forged, arc_sz, plain_sz, checksum, via);
+                if (r != ZXC_ERROR_BAD_BLOCK_SIZE) {
+                    printf("  [FAIL] swallowing comp_size via %s gave %lld\n",
+                           via ? "dctx" : "zxc_decompress", (long long)r);
+                    ok = 0;
+                }
+            }
+        }
+        free(forged);
+        free(arc);
+        free(plain);
+
+        if (!ok) break;
+
+        /* Compressible: the swallowing size stays under block_size, so only the
+           EOF requirement can catch it. */
+        const size_t small_sz = 40 * 1024;
+        arc = forge_build(small_sz, 1, block_sz, checksum, &plain, &arc_sz);
+        if (!arc) {
+            printf("  [FAIL] setup\n");
+            return 0;
+        }
+        const uint32_t swallow =
+            (uint32_t)(arc_sz - ZXC_FILE_HEADER_SIZE - ZXC_BLOCK_HEADER_SIZE - trailer);
+        if (swallow > block_sz) {
+            printf("  [FAIL] archive too large to test the EOF path (%u)\n", swallow);
+            ok = 0;
+        }
+        if (ok) {
+            ok = forge_comp_size(arc, arc_sz, swallow);
+            const int64_t want = checksum ? ZXC_ERROR_BAD_CHECKSUM : ZXC_ERROR_CORRUPT_DATA;
+            for (int via = 0; ok && via <= 1; via++) {
+                const int64_t r = forge_decode_via(arc, arc_sz, small_sz, checksum, via);
+                if (r != want) {
+                    printf("  [FAIL] skipped EOF via %s gave %lld, expected %lld\n",
+                           via ? "dctx" : "zxc_decompress", (long long)r, (long long)want);
+                    ok = 0;
+                }
+            }
+        }
+        free(arc);
+        free(plain);
+    }
+
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}

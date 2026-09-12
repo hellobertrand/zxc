@@ -891,7 +891,11 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
     // Block decompression loop
     uint32_t global_hash = 0;
 
-    while (ip < ip_end) {
+    for (;;) {
+        if (UNLIKELY(ip >= ip_end)) {
+            if (ctx_ready) zxc_cctx_free(&ctx);
+            return ZXC_ERROR_CORRUPT_DATA;
+        }
         const size_t rem_src = (size_t)(ip_end - ip);
         zxc_block_header_t bh;
         // Read the block header to determine the compressed size
@@ -932,7 +936,16 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
                     return ZXC_ERROR_BAD_CHECKSUM;
                 }
             }
-            break;  // EOF reached, exit loop
+            break;  // EOF reached, exit the block loop
+        }
+
+        // The decoder only requires the payload, the step also covers the
+        // checksum.
+        const size_t advance = ZXC_BLOCK_HEADER_SIZE + bh.comp_size +
+                               (file_has_checksums ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+        if (UNLIKELY(advance > rem_src)) {
+            if (ctx_ready) zxc_cctx_free(&ctx);
+            return ZXC_ERROR_SRC_TOO_SMALL;
         }
 
         if (!ctx_ready) {
@@ -991,8 +1004,7 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
             global_hash = zxc_hash_combine_rotate(global_hash, block_hash);
         }
 
-        ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size +
-              (file_has_checksums ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+        ip += advance;
         op += res;
     }
 
@@ -1559,7 +1571,9 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     uint8_t* const dict_dec = ctx->dict_buffer;
     if (dict_dec) ZXC_MEMCPY(dict_dec, dict, dict_size);
 
-    while (ip < ip_end) {
+    for (;;) {
+        // See zxc_decompress_frame: only the EOF block may end the walk.
+        if (UNLIKELY(ip >= ip_end)) return ZXC_ERROR_CORRUPT_DATA;
         const size_t rem_src = (size_t)(ip_end - ip);
         zxc_block_header_t bh;
         if (UNLIKELY(zxc_read_block_header(ip, rem_src, &bh) != ZXC_OK))
@@ -1567,8 +1581,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 
         if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
             if (UNLIKELY(bh.comp_size != 0)) return ZXC_ERROR_BAD_HEADER;
-            // Same rule as zxc_decompress(): the footer is the archive's last
-            // bytes, even when a seek table sits between the EOF block and it.
+
             const uint8_t* const footer = (const uint8_t*)src + src_size - ZXC_FILE_FOOTER_SIZE;
             const uint64_t stored_size = zxc_le64(footer);
             if (UNLIKELY(stored_size != (uint64_t)(op - op_start))) return ZXC_ERROR_CORRUPT_DATA;
@@ -1577,8 +1590,12 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
                 const uint32_t stored_hash = zxc_le32(footer + sizeof(uint64_t));
                 if (UNLIKELY(stored_hash != global_hash)) return ZXC_ERROR_BAD_CHECKSUM;
             }
-            break;
+            break;  // EOF reached, stop decoding
         }
+
+        const size_t advance = ZXC_BLOCK_HEADER_SIZE + bh.comp_size +
+                               (file_has_checksums ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+        if (UNLIKELY(advance > rem_src)) return ZXC_ERROR_SRC_TOO_SMALL;
 
         const size_t rem_cap = (size_t)(op_end - op);
         int res;
@@ -1591,8 +1608,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
                 ZXC_MEMCPY(op, dict_dec + dict_size, (size_t)res);
             }
         } else if (LIKELY(rem_cap >= work_sz)) {
-            // Fast path: decode directly into dst (enough padding for wild copies).
-            res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, op, rem_cap);
+            res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, op, work_sz);
         } else {
             // Safe path: decode into bounce buffer, then copy exact result.
             res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, ctx->work_buf, ctx->work_buf_cap);
@@ -1609,8 +1625,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
             global_hash = zxc_hash_combine_rotate(global_hash, block_hash);
         }
 
-        ip += ZXC_BLOCK_HEADER_SIZE + bh.comp_size +
-              (file_has_checksums ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+        ip += advance;
         op += res;
     }
 
