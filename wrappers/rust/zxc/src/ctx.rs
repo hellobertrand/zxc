@@ -29,6 +29,8 @@ use crate::{CompressOptions, DecompressOptions, Error, Result};
 /// ```
 pub struct Cctx {
     inner: *mut zxc_sys::zxc_cctx,
+    dict: Option<Vec<u8>>,
+    dict_huf: Option<Vec<u8>>,
 }
 
 // SAFETY: the underlying handle is opaque and the library states contexts
@@ -39,8 +41,9 @@ impl Cctx {
     /// Creates a new compression context.
     ///
     /// When `opts` is `Some`, internal buffers are pre-allocated for its level
-    /// and block size; `None` defers allocation. A dictionary is only validated
-    /// here, the context carving for it on first use.
+    /// and block size; `None` defers allocation. A dictionary given here is
+    /// validated and then applies to every call that omits one, as in the Go,
+    /// Python and Node bindings.
     pub fn new(opts: Option<&CompressOptions>) -> Result<Self> {
         if let Some(o) = opts {
             crate::dict_parts(o.dict.as_deref(), o.dict_huf.as_deref())?;
@@ -62,7 +65,11 @@ impl Cctx {
         if ptr.is_null() {
             Err(Error::Memory)
         } else {
-            Ok(Self { inner: ptr })
+            Ok(Self {
+                inner: ptr,
+                dict: opts.and_then(|o| o.dict.clone()),
+                dict_huf: opts.and_then(|o| o.dict_huf.clone()),
+            })
         }
     }
 
@@ -77,7 +84,10 @@ impl Cctx {
         dst: &mut [u8],
         opts: &CompressOptions,
     ) -> Result<usize> {
-        let (dict, dict_huf) = crate::dict_parts(opts.dict.as_deref(), opts.dict_huf.as_deref())?;
+        let (dict, dict_huf) = crate::dict_parts(
+            opts.dict.as_deref().or(self.dict.as_deref()),
+            opts.dict_huf.as_deref().or(self.dict_huf.as_deref()),
+        )?;
         let copts = zxc_sys::zxc_compress_opts_t {
             level: opts.level as i32,
             checksum_enabled: opts.checksum as i32,
@@ -252,6 +262,46 @@ mod tests {
             .expect("train_dict_huf")
             .to_vec();
         (corpus, dict, huf)
+    }
+
+    #[test]
+    fn creation_time_dictionary_applies_to_later_calls() {
+        let (corpus, dict, huf) = trained();
+        let block = &corpus[7];
+
+        let create = CompressOptions::with_level(Level::Default)
+            .with_dict(dict.clone())
+            .with_dict_huf(huf.clone());
+        let mut cctx = Cctx::new(Some(&create)).expect("Cctx::new");
+
+        let mut inherited = vec![0u8; compress_block_bound(block.len()) as usize];
+        let n_inherited = cctx
+            .compress_block(block, &mut inherited, &CompressOptions::default())
+            .expect("compress_block with inherited dict");
+
+        // The same block through a dictionary-less context, for contrast.
+        let mut plain_ctx = Cctx::new(None).expect("Cctx::new");
+        let mut plain = vec![0u8; compress_block_bound(block.len()) as usize];
+        let n_plain = plain_ctx
+            .compress_block(block, &mut plain, &CompressOptions::default())
+            .expect("compress_block without dict");
+
+        assert_ne!(
+            inherited[..n_inherited],
+            plain[..n_plain],
+            "the creation-time dictionary was dropped"
+        );
+
+        // And it must decode with that dictionary.
+        let dopts = DecompressOptions::default()
+            .with_dict(dict.clone())
+            .with_dict_huf(huf.clone());
+        let mut dctx = Dctx::new().expect("Dctx::new");
+        let mut out = vec![0u8; block.len() + 64];
+        let n = dctx
+            .decompress_block(&inherited[..n_inherited], &mut out, &dopts)
+            .expect("decompress_block");
+        assert_eq!(&out[..n], &block[..]);
     }
 
     #[test]

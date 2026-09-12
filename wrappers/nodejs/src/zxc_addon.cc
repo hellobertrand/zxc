@@ -600,6 +600,8 @@ class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
             zxc_free_cctx(cctx_);
             cctx_ = nullptr;
         }
+        std::vector<uint8_t>().swap(dict_);
+        std::vector<uint8_t>().swap(huf_);
         return info.Env().Undefined();
     }
 };
@@ -671,6 +673,8 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
             zxc_free_dctx(dctx_);
             dctx_ = nullptr;
         }
+        std::vector<uint8_t>().swap(dict_);
+        std::vector<uint8_t>().swap(huf_);
         return info.Env().Undefined();
     }
 };
