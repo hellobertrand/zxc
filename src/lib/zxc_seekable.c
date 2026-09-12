@@ -550,57 +550,55 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
  * The main thread inspects @c result after join.
  */
 typedef struct {
-    const zxc_seekable* s; /* shared handle (read-only) */
-    uint32_t block_idx;    /* block to decompress */
-    uint8_t* dst;          /* output pointer within caller's buffer */
-    size_t skip;           /* bytes to skip at start of decompressed block */
-    size_t copy_len;       /* bytes to copy into dst */
-    int result;            /* 0 = OK, < 0 = error */
+    uint32_t block_idx; /* block to decompress */
+    size_t dst_off;     /* output offset from the caller's buffer start */
+    size_t skip;        /* bytes to skip at start of decompressed block */
+    size_t copy_len;    /* bytes to copy out */
+    int result;         /* 0 = OK, < 0 = error; starts negative, see the launch loop */
 } zxc_seek_mt_job_t;
 
 /**
- * @struct zxc_seek_mt_stripe_t
- * @brief Per-thread stripe descriptor for multi-threaded decompression.
+ * @struct zxc_seek_mt_shared_t
+ * @brief State shared by every worker of one multi-threaded range read.
  *
- * Each worker owns the job subset {first, first+stride, first+2*stride, ...}
- * of the shared @c jobs array and reuses one decompression context, one
- * dictionary copy and one read buffer across all of them, amortising what
- * would otherwise be per-block costs (context init, dict memcpy, malloc and
- * a thread spawn per block).  Stripes are pairwise disjoint, so workers
- * touch distinct jobs and distinct output ranges and need no
- * synchronisation beyond the final join.
+ * Worker @c k owns the job subset {k, k+stride, k+2*stride, ...} and reuses one
+ * decompression context, one dictionary copy and one read buffer across all of
+ * them. Stripes are pairwise disjoint, so workers touch distinct jobs and
+ * distinct output ranges and need no synchronisation beyond claiming their
+ * index at start-up and the final join.
  *
- * Written by @ref zxc_seekable_decompress_range_mt before the fork phase and
- * read-only for the worker (@ref zxc_seek_mt_worker); results travel through
- * the jobs themselves (@c zxc_seek_mt_job_t::result).
+ * Lives on the caller's stack: the caller's output pointer therefore never
+ * reaches heap memory (jobs carry offsets into it), and there is no per-thread
+ * array to size for @c ZXC_MAX_THREADS.
  *
- * @var zxc_seek_mt_stripe_t::jobs
- *      Job array shared by all workers; this worker only reads/writes the
- *      entries of its own stripe.
- * @var zxc_seek_mt_stripe_t::num_jobs
- *      Total number of jobs in @c jobs (stripe iteration bound).
- * @var zxc_seek_mt_stripe_t::first
- *      Index of this worker's first job (equals its worker index, in
- *      [0, @c stride)).
- * @var zxc_seek_mt_stripe_t::stride
- *      Stripe step between consecutive jobs of this worker; equals the
- *      worker-thread count.
+ * @var zxc_seek_mt_shared_t::s          Handle being read (read-only).
+ * @var zxc_seek_mt_shared_t::jobs       Job array; each worker touches only its stripe.
+ * @var zxc_seek_mt_shared_t::dst_base   Start of the caller's output buffer.
+ * @var zxc_seek_mt_shared_t::num_jobs   Job count (stripe iteration bound).
+ * @var zxc_seek_mt_shared_t::stride     Worker count attempted; stripes partition by it.
+ * @var zxc_seek_mt_shared_t::next       Next stripe index to hand out, under @c lock.
+ * @var zxc_seek_mt_shared_t::lock       Guards @c next.
  */
 typedef struct {
+    const zxc_seekable* s;
     zxc_seek_mt_job_t* jobs;
+    uint8_t* dst_base;
     uint32_t num_jobs;
-    uint32_t first;
     uint32_t stride;
-} zxc_seek_mt_stripe_t;
+    uint32_t next;
+    pthread_mutex_t lock;
+} zxc_seek_mt_shared_t;
 
 /**
- * @brief Marks every job of a stripe with @p code (setup-failure path).
+ * @brief Marks every job of stripe @p first with @p code (setup-failure path).
  *
- * @param[in,out] st   Stripe whose jobs to mark.
- * @param[in]     code Negative @ref zxc_error_t value.
+ * @param[in,out] sh    Shared state.
+ * @param[in]     first Stripe index.
+ * @param[in]     code  Negative @ref zxc_error_t value.
  */
-static void zxc_seek_mt_fail_stripe(zxc_seek_mt_stripe_t* st, const int code) {
-    for (uint32_t i = st->first; i < st->num_jobs; i += st->stride) st->jobs[i].result = code;
+static void zxc_seek_mt_fail_stripe(const zxc_seek_mt_shared_t* sh, const uint32_t first,
+                                    const int code) {
+    for (uint32_t i = first; i < sh->num_jobs; i += sh->stride) sh->jobs[i].result = code;
 }
 
 /**
@@ -614,13 +612,18 @@ static void zxc_seek_mt_fail_stripe(zxc_seek_mt_stripe_t* st, const int code) {
  * Each job's outcome goes into its @c result (read by the main thread after
  * join); on error the worker abandons the rest of its stripe.
  *
- * @param[in,out] arg  Pointer to this worker's `zxc_seek_mt_stripe_t`.
+ * @param[in,out] arg  Pointer to the read's `zxc_seek_mt_shared_t`.
  * @return Always NULL (result codes are reported via the jobs).
  */
 static void* zxc_seek_mt_worker(void* arg) {
-    zxc_seek_mt_stripe_t* const st = (zxc_seek_mt_stripe_t*)arg;
-    zxc_seek_mt_job_t* const jobs = st->jobs;
-    const zxc_seekable* const s = jobs[st->first].s;
+    zxc_seek_mt_shared_t* const sh = (zxc_seek_mt_shared_t*)arg;
+    zxc_seek_mt_job_t* const jobs = sh->jobs;
+    const zxc_seekable* const s = sh->s;
+
+    // Claim a stripe: the main thread hands every worker the same argument.
+    pthread_mutex_lock(&sh->lock);
+    const uint32_t first = sh->next++;
+    pthread_mutex_unlock(&sh->lock);
 
     // Thread-local decompression context (mode=0 for decompress-only)
     zxc_cctx_t dctx;
@@ -628,7 +631,7 @@ static void* zxc_seek_mt_worker(void* arg) {
                                s->file_has_checksums && s->verify_checksums,
                                s->dict_size) != ZXC_OK)) {
         // LCOV_EXCL_START
-        zxc_seek_mt_fail_stripe(st, ZXC_ERROR_MEMORY);
+        zxc_seek_mt_fail_stripe(sh, first, ZXC_ERROR_MEMORY);
         return NULL;
         // LCOV_EXCL_STOP
     }
@@ -636,7 +639,7 @@ static void* zxc_seek_mt_worker(void* arg) {
     if (UNLIKELY(zxc_cctx_attach_dict_huf(&dctx, s->has_dict_huf ? s->dict_huf : NULL) != ZXC_OK)) {
         // LCOV_EXCL_START
         zxc_cctx_free(&dctx);
-        zxc_seek_mt_fail_stripe(st, ZXC_ERROR_CORRUPT_DATA);
+        zxc_seek_mt_fail_stripe(sh, first, ZXC_ERROR_CORRUPT_DATA);
         return NULL;
         // LCOV_EXCL_STOP
     }
@@ -647,7 +650,7 @@ static void* zxc_seek_mt_worker(void* arg) {
 
     // Read buffer sized for the largest compressed block of the stripe.
     size_t max_csz = 0;
-    for (uint32_t i = st->first; i < st->num_jobs; i += st->stride) {
+    for (uint32_t i = first; i < sh->num_jobs; i += sh->stride) {
         const uint32_t csz = s->comp_sizes[jobs[i].block_idx];
         if (csz > max_csz) max_csz = csz;
     }
@@ -655,12 +658,12 @@ static void* zxc_seek_mt_worker(void* arg) {
     if (UNLIKELY(!read_buf)) {
         // LCOV_EXCL_START
         zxc_cctx_free(&dctx);
-        zxc_seek_mt_fail_stripe(st, ZXC_ERROR_MEMORY);
+        zxc_seek_mt_fail_stripe(sh, first, ZXC_ERROR_MEMORY);
         return NULL;
         // LCOV_EXCL_STOP
     }
 
-    for (uint32_t i = st->first; i < st->num_jobs; i += st->stride) {
+    for (uint32_t i = first; i < sh->num_jobs; i += sh->stride) {
         zxc_seek_mt_job_t* const job = &jobs[i];
 
         const int read_res =
@@ -689,7 +692,7 @@ static void* zxc_seek_mt_worker(void* arg) {
         }
 
         // Copy the requested portion directly into the caller's output buffer
-        ZXC_MEMCPY(job->dst, dec_dst + job->skip, job->copy_len);
+        ZXC_MEMCPY(sh->dst_base + job->dst_off, dec_dst + job->skip, job->copy_len);
         job->result = 0;
     }
 
@@ -738,8 +741,8 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
         (zxc_seek_mt_job_t*)ZXC_CALLOC(num_jobs, sizeof(zxc_seek_mt_job_t));
     if (UNLIKELY(!jobs)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
 
-    // Plan jobs: compute skip, copy_len, and dst pointer for each block
-    uint8_t* out = (uint8_t*)dst;
+    // Plan jobs: compute skip, copy_len and output offset for each block
+    size_t out_off = 0;
     size_t remaining = len;
     for (uint32_t i = 0; i < num_jobs; i++) {
         const uint32_t bi = blk_start + i;
@@ -755,54 +758,50 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
         const size_t avail = blk_decomp_sz - skip;
         const size_t copy = (avail < remaining) ? avail : remaining;
 
-        jobs[i].s = s;
         jobs[i].block_idx = bi;
-        jobs[i].dst = out;
+        jobs[i].dst_off = out_off;
         jobs[i].skip = skip;
         jobs[i].copy_len = copy;
-        jobs[i].result = 0;
+        // Negative until a worker completes it: a stripe whose thread failed to
+        // start is then reported without anyone having to know which one.
+        jobs[i].result = ZXC_ERROR_MEMORY;
 
-        out += copy;
+        out_off += copy;
         remaining -= copy;
     }
 
     // Launch one persistent worker per thread
     pthread_t* const threads = (pthread_t*)ZXC_MALLOC((size_t)n_threads * sizeof(pthread_t));
-    zxc_seek_mt_stripe_t* const stripes =
-        (zxc_seek_mt_stripe_t*)ZXC_MALLOC((size_t)n_threads * sizeof(zxc_seek_mt_stripe_t));
-    if (UNLIKELY(!threads || !stripes)) {
+    if (UNLIKELY(!threads)) {
         // LCOV_EXCL_START
-        ZXC_FREE(threads);
-        ZXC_FREE(stripes);
         ZXC_FREE(jobs);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
 
+    zxc_seek_mt_shared_t sh;
+    sh.s = s;
+    sh.jobs = jobs;
+    sh.dst_base = (uint8_t*)dst;
+    sh.num_jobs = num_jobs;
+    sh.stride = (uint32_t)n_threads;
+    sh.next = 0;
+    pthread_mutex_init(&sh.lock, NULL);
+
     int launched = 0;
     for (int t = 0; t < n_threads; t++) {
-        stripes[t].jobs = jobs;
-        stripes[t].num_jobs = num_jobs;
-        stripes[t].first = (uint32_t)t;
-        stripes[t].stride = (uint32_t)n_threads;
-        if (UNLIKELY(pthread_create(&threads[t], NULL, zxc_seek_mt_worker, &stripes[t]) != 0)) {
-            // LCOV_EXCL_START
-            // Failed to create thread - mark its stripe as errored; already
-            // launched workers keep running and are joined below.
-            zxc_seek_mt_fail_stripe(&stripes[t], ZXC_ERROR_MEMORY);
-            continue;
-            // LCOV_EXCL_STOP
-        }
-
+        // A failed start leaves one stripe unclaimed; its jobs keep their
+        // negative result and the read reports it after the join.
+        if (UNLIKELY(pthread_create(&threads[launched], NULL, zxc_seek_mt_worker, &sh) != 0))
+            continue;  // LCOV_EXCL_LINE
         launched++;
-        threads[launched - 1] = threads[t];
     }
 
     // Join phase
     for (int t = 0; t < launched; t++) pthread_join(threads[t], NULL);
 
+    pthread_mutex_destroy(&sh.lock);
     ZXC_FREE(threads);
-    ZXC_FREE(stripes);
 
     // Report the first error in job order, if any.
     int64_t result = (int64_t)len;
