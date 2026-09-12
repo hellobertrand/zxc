@@ -189,6 +189,11 @@ export default async function createZXC(moduleOverrides, factory) {
     "number",
     "number",
   ]);
+  const _seekable_set_checksum = Module.cwrap(
+    "zxc_seekable_set_checksum",
+    "number",
+    ["number", "number"],
+  );
 
   // Dictionary API. zxc_train_dict / zxc_dict_save / zxc_dict_load return
   // int64_t; on wasm32 cwrap('number') reads the low 32 bits, which is
@@ -879,6 +884,8 @@ export default async function createZXC(moduleOverrides, factory) {
    *   decompressedSize(): number,
    *   blockCompressedSize(idx: number): (number | null),
    *   blockDecompressedSize(idx: number): (number | null),
+   *   setDict(dict: (Dictionary | Uint8Array), dictHuf?: Uint8Array): void,
+   *   setChecksum(enabled: boolean): void,
    *   decompressRange(offset: number, length: number): Uint8Array,
    *   free(): void
    * }}
@@ -954,6 +961,27 @@ export default async function createZXC(moduleOverrides, factory) {
         } finally {
           _free(dictPtr);
           if (hufPtr) _free(hufPtr);
+        }
+      },
+      /**
+       * Turns per-block checksum verification on or off.
+       *
+       * Off by default, as in the one-shot API. No effect without checksums
+       * in the archive. Applies from the next call.
+       *
+       * @param {boolean} enabled - `false` to skip verification.
+       */
+      setChecksum(enabled) {
+        // The Node addon throws on a non-boolean; match it so code ported
+        // between the two builds behaves the same.
+        if (typeof enabled !== "boolean") {
+          throw new TypeError("ZXC: setChecksum expects a boolean");
+        }
+        const r = _seekable_set_checksum(handle, enabled ? 1 : 0);
+        if (r < 0) {
+          throw new Error(
+            `ZXC seekable set_checksum error: ${_error_name(r)} (${r})`,
+          );
         }
       },
       decompressRange(offset, length) {

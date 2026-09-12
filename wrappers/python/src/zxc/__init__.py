@@ -28,6 +28,7 @@ from ._zxc import (
     pyzxc_train_dict_huf,
     pyzxc_dict_huf,
     pyzxc_dict_train,
+    pyzxc_seekable_set_checksum,
     pyzxc_seekable_set_dict,
     pyzxc_cstream_create,
     pyzxc_cstream_compress,
@@ -520,6 +521,15 @@ class Seekable:
         self._ensure_open()
         dict, dict_huf = _split_dict_arg(dict, dict_huf)
         pyzxc_seekable_set_dict(self._handle, dict, dict_huf)
+
+    def set_checksum(self, enabled: bool) -> None:
+        """Turn per-block checksum verification on or off.
+
+        Off by default, as in the one-shot API. No effect without checksums in
+        the archive. Applies from the next call.
+        """
+        self._ensure_open()
+        pyzxc_seekable_set_checksum(self._handle, bool(enabled))
 
     def decompress_range(
         self, offset: int, length: int, *, n_threads: int = 0

@@ -107,6 +107,7 @@ struct zxc_seekable_s {
     // fits in 21 bits.
     uint32_t block_size;
     int file_has_checksums;
+    int verify_checksums;      /* caller's switch; needs file_has_checksums too */
     uint32_t expected_dict_id; /* dict_id from the file header; 0 = no dictionary */
 
     // Reusable decompression context and compressed-block scratch. Both belong
@@ -257,6 +258,7 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     s->num_blocks = num_blocks;
     s->block_size = block_size;
     s->file_has_checksums = file_has_chk;
+    s->verify_checksums = 0; /* opt-in, see zxc_seekable_set_checksum */
     s->expected_dict_id = header_dict_id;
     s->total_decomp = total_decomp;
 
@@ -458,11 +460,12 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     if (UNLIKELY(len == 0)) return 0;
     if (UNLIKELY(!s || !dst)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(dst_capacity < len)) return ZXC_ERROR_DST_TOO_SMALL;
-    if (UNLIKELY(offset + len > s->total_decomp)) return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(offset > s->total_decomp || len > s->total_decomp - offset))
+        return ZXC_ERROR_SRC_TOO_SMALL;
     if (UNLIKELY(s->expected_dict_id != 0 && (!s->dict || s->dict_size == 0)))
         return ZXC_ERROR_DICT_REQUIRED;
 
-    // Initialize decompression context on first use
+    // Initialize decompression context on first use.
     if (!s->dctx_initialized) {
         // LCOV_EXCL_START
         if (UNLIKELY(zxc_cctx_init(&s->dctx, (size_t)s->block_size, 0, 0, 0, s->dict_size) !=
@@ -480,6 +483,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         if (s->dict_size > 0) ZXC_MEMCPY(s->dctx.dict_buffer, s->dict, s->dict_size);
     }
     s->dctx.dict_size = s->dict_size;
+    s->dctx.checksum_enabled = s->file_has_checksums && s->verify_checksums;
 
     // work_buf is pre-sized to block_size + ZXC_DECOMPRESS_TAIL_PAD by the
     // matching zxc_cctx_init above.
@@ -529,6 +533,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         remaining -= copy;
     }
 
+    if (UNLIKELY(remaining != 0)) return ZXC_ERROR_CORRUPT_DATA;
     return (int64_t)len;
 }
 
@@ -618,7 +623,9 @@ static void* zxc_seek_mt_worker(void* arg) {
 
     // Thread-local decompression context (mode=0 for decompress-only)
     zxc_cctx_t dctx;
-    if (UNLIKELY(zxc_cctx_init(&dctx, (size_t)s->block_size, 0, 0, 0, s->dict_size) != ZXC_OK)) {
+    if (UNLIKELY(zxc_cctx_init(&dctx, (size_t)s->block_size, 0, 0,
+                               s->file_has_checksums && s->verify_checksums,
+                               s->dict_size) != ZXC_OK)) {
         // LCOV_EXCL_START
         zxc_seek_mt_fail_stripe(st, ZXC_ERROR_MEMORY);
         return NULL;
@@ -676,10 +683,8 @@ static void* zxc_seek_mt_worker(void* arg) {
             // LCOV_EXCL_STOP
         }
         if (UNLIKELY((size_t)dec_res < job->skip + job->copy_len)) {
-            // LCOV_EXCL_START
             job->result = ZXC_ERROR_CORRUPT_DATA;
             break;
-            // LCOV_EXCL_STOP
         }
 
         // Copy the requested portion directly into the caller's output buffer
@@ -705,7 +710,8 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
     if (UNLIKELY(len == 0)) return 0;
     if (UNLIKELY(!s || !dst)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(dst_capacity < len)) return ZXC_ERROR_DST_TOO_SMALL;
-    if (UNLIKELY(offset + len > s->total_decomp)) return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(offset > s->total_decomp || len > s->total_decomp - offset))
+        return ZXC_ERROR_SRC_TOO_SMALL;
     if (UNLIKELY(s->expected_dict_id != 0 && (!s->dict || s->dict_size == 0)))
         return ZXC_ERROR_DICT_REQUIRED;
 
@@ -826,6 +832,18 @@ void zxc_seekable_free(zxc_seekable* s) {
     ZXC_FREE(s->comp_offsets);
     ZXC_FREE(s->owned_reader_ctx);
     ZXC_FREE(s);
+}
+
+/**
+ * @brief Turns per-block checksum verification on or off.
+ *
+ * Public API; see @c zxc_seekable.h. Only records the wish; the decode path
+ * pushes it into the context on every call, like @c dict_size.
+ */
+int zxc_seekable_set_checksum(zxc_seekable* s, const int enabled) {
+    if (UNLIKELY(!s)) return ZXC_ERROR_NULL_INPUT;
+    s->verify_checksums = enabled ? 1 : 0;
+    return ZXC_OK;
 }
 
 /**

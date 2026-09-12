@@ -779,6 +779,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
                 InstanceMethod("blockDecompressedSize", &SeekableWrap::BlockDecompressedSize),
                 InstanceMethod("decompressRange", &SeekableWrap::DecompressRange),
                 InstanceMethod("setDict", &SeekableWrap::SetDict),
+                InstanceMethod("setChecksum", &SeekableWrap::SetChecksum),
                 InstanceMethod("close", &SeekableWrap::Close),
             });
     }
@@ -972,6 +973,20 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         // fewer bytes were produced (napi buffers are uninitialized).
         if (r == length) return out;
         return Napi::Buffer<uint8_t>::Copy(env, out.Data(), static_cast<size_t>(r));
+    }
+
+    Napi::Value SetChecksum(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+        if (!requireOpen(env)) return env.Undefined();
+        if (info.Length() < 1 || !info[0].IsBoolean()) {
+            Napi::TypeError::New(env, "Expected a boolean (enabled)").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        const int r = zxc_seekable_set_checksum(s_, info[0].As<Napi::Boolean>().Value() ? 1 : 0);
+        if (r < 0) {
+            return ThrowZxcError(env, r);
+        }
+        return env.Undefined();
     }
 
     Napi::Value SetDict(const Napi::CallbackInfo& info) {

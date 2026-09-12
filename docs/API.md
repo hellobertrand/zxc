@@ -1574,6 +1574,22 @@ ZXC_EXPORT int zxc_seekable_set_dict(
 
 Attaches a dictionary to a seekable handle for random-access decompression. Pass the shared table as `dict_huf` (the archive's `dict_id` binds the pair); pass NULL for a raw content-only dictionary. Both buffers are copied internally. Must be called before any `zxc_seekable_decompress_range()` call.
 
+### `zxc_seekable_set_checksum`
+
+```c
+ZXC_EXPORT int zxc_seekable_set_checksum(zxc_seekable* s, int enabled);
+```
+
+Turns per-block checksum verification on or off for this handle. **Off by
+default**, as in the one-shot API: random access reads whole blocks and
+verifying them costs a hash over each one, so the caller decides. With it on, a
+block whose checksum does not match returns `ZXC_ERROR_BAD_CHECKSUM`; with it
+off, a corrupted block can decode to wrong bytes with no error.
+
+Does nothing on an archive compressed without checksums. May be called at any
+time and applies from the next call on, on both the single- and multi-threaded
+range functions. Returns `ZXC_OK`, or `ZXC_ERROR_NULL_INPUT` if `s` is NULL.
+
 ---
 
 ## 12. Error Handling
@@ -1617,7 +1633,7 @@ if (result < 0) {
 
 ## 14. Exported Symbols Summary
 
-The shared library exports **47 symbols** (verified with `nm -gU`):
+The shared library exports **68 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -1682,6 +1698,13 @@ The shared library exports **47 symbols** (verified with `nm -gU`):
 | 59 | `zxc_dict_get_id` | Dictionary | `zxc_dict.h` |
 | 60 | `zxc_dict_save_bound` | Dictionary | `zxc_dict.h` |
 | 61 | `zxc_seekable_set_dict` | Seekable | `zxc_seekable.h` |
+| 62 | `zxc_seekable_set_checksum` | Seekable | `zxc_seekable.h` |
+| 63 | `zxc_seekable_open_reader` | Seekable | `zxc_seekable.h` |
+| 64 | `zxc_decompress_inplace` | Buffer | `zxc_buffer.h` |
+| 65 | `zxc_decompress_inplace_bound` | Buffer | `zxc_buffer.h` |
+| 66 | `zxc_get_dict_id` | Dictionary | `zxc_buffer.h` |
+| 67 | `zxc_compress_opts_size` | Info | `zxc_opts.h` |
+| 68 | `zxc_decompress_opts_size` | Info | `zxc_opts.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon32`, `_avx2`, `_avx512`) are compiled with

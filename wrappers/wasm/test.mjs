@@ -781,6 +781,77 @@ async function main() {
     }
   }
 
+  // --- Seekable checksum switch ---
+  {
+    console.log("\n-- Seekable: checksum switch --");
+    const { default: createZXC } = await import("./zxc_wasm.js");
+    const zxc = await createZXC({}, ZXCModule);
+    const payload = new Uint8Array(128 * 1024);
+    for (let i = 0; i < payload.length; i++) payload[i] = (i * 37 + 11) & 0xff;
+    const arc = zxc.compress(payload, { seekable: true, checksum: true });
+
+    const s = zxc.createSeekable(arc);
+    try {
+      assert(
+        arraysEqual(s.decompressRange(0, 512), payload.subarray(0, 512)),
+        "intact block decodes with the default (off)",
+      );
+      s.setChecksum(false);
+      assert(
+        arraysEqual(s.decompressRange(0, 512), payload.subarray(0, 512)),
+        "setChecksum(false) still decodes an intact block",
+      );
+      s.setChecksum(true);
+      assert(
+        arraysEqual(s.decompressRange(0, 512), payload.subarray(0, 512)),
+        "setChecksum(true) again still decodes an intact block",
+      );
+    } finally {
+      s.free();
+    }
+
+    // Incompressible on purpose: a RAW block memcpys a flipped byte straight
+    // through, so the decode succeeds and only the checksum objects.
+    let rng = 0x2e5b9a17;
+    const rawPayload = new Uint8Array(128 * 1024);
+    for (let i = 0; i < rawPayload.length; i++) {
+      rng = (Math.imul(rng, 1103515245) + 12345) >>> 0;
+      rawPayload[i] = (rng >>> 16) & 0xff;
+    }
+    const bad = Uint8Array.from(
+      zxc.compress(rawPayload, { seekable: true, checksum: true }),
+    );
+    assert(bad[16] === 0, "block 0 is RAW (incompressible payload)");
+    bad[16 + 8 + 4] ^= 0xff; // file header, block header, then payload
+
+    let onErr = "";
+    const sOn = zxc.createSeekable(bad);
+    try {
+      sOn.setChecksum(true);
+      sOn.decompressRange(0, 512);
+    } catch (e) {
+      onErr = String(e.message);
+    } finally {
+      sOn.free();
+    }
+    // Default is off: bytes come back, wrong, with no error.
+    let silent = null;
+    const sOff = zxc.createSeekable(bad);
+    try {
+      silent = sOff.decompressRange(0, 512);
+    } finally {
+      sOff.free();
+    }
+    assert(
+      silent !== null && !arraysEqual(silent, rawPayload.subarray(0, 512)),
+      "not verifying returns wrong bytes with no error",
+    );
+    assert(
+      onErr.includes("BAD_CHECKSUM"),
+      `verifying names the checksum (got "${onErr}")`,
+    );
+  }
+
   // --- Summary ---
   console.log(`\n${"=".repeat(40)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);

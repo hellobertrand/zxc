@@ -219,3 +219,54 @@ class TestSeekTableHelpers:
     def test_rejects_empty(self):
         with pytest.raises(ValueError):
             zxc.write_seek_table([])
+
+
+# =========================================================================
+# Checksum switch
+# =========================================================================
+
+
+class TestSeekableChecksum:
+    def test_switch_round_trip(self, tmp_path):
+        """The switch toggles cleanly at any time on an intact archive."""
+        payload = build_payload(256 * 1024)
+        compressed = build_seekable_archive_stream(payload, tmp_path)
+        with zxc.Seekable(compressed) as s:
+            assert s.decompress_range(0, 512) == payload[:512]
+            s.set_checksum(False)
+            assert s.decompress_range(0, 512) == payload[:512]
+            s.set_checksum(True)
+            assert s.decompress_range(0, 512) == payload[:512]
+
+    def test_corrupted_block_is_silent_without_verification(self, tmp_path):
+        """Incompressible data means RAW blocks, which memcpy a flipped byte
+        straight through: the decode succeeds and only the checksum objects.
+        A compressible payload would pin this test to today's encoder output."""
+        rng, buf = 0x2E5B9A17, bytearray(256 * 1024)
+        for i in range(len(buf)):
+            rng = (rng * 1103515245 + 12345) & 0xFFFFFFFF
+            buf[i] = (rng >> 16) & 0xFF
+        payload = bytes(buf)
+        compressed = bytearray(build_seekable_archive_stream(payload, tmp_path))
+        assert (
+            compressed[16] == 0
+        ), "block 0 must be RAW; the LCG payload is no longer incompressible"
+        # 16-byte file header, then block 0's header (8 bytes), then payload.
+        compressed[16 + 8 + 4] ^= 0xFF
+
+        with zxc.Seekable(bytes(compressed)) as s:
+            s.set_checksum(True)
+            with pytest.raises(RuntimeError, match="BAD_CHECKSUM"):
+                s.decompress_range(0, 512)
+
+        # Default is off: bytes come back, wrong, with no error.
+        with zxc.Seekable(bytes(compressed)) as s:
+            assert s.decompress_range(0, 512) != payload[:512]
+
+    def test_set_checksum_after_close_raises(self, tmp_path):
+        payload = build_payload(64 * 1024)
+        compressed = build_seekable_archive_stream(payload, tmp_path)
+        s = zxc.Seekable(compressed)
+        s.close()
+        with pytest.raises(ValueError, match="closed"):
+            s.set_checksum(True)

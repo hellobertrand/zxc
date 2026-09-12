@@ -192,3 +192,62 @@ describe("Seekable: low-level seek table helpers", () => {
     expect(() => zxc.writeSeekTable([])).toThrow();
   });
 });
+
+describe("Seekable: checksum switch", () => {
+  const payload = buildPayload(256 * 1024);
+
+  test("the switch toggles cleanly at any time on an intact archive", () => {
+    const s = new zxc.Seekable(buildSeekableArchive(payload));
+    try {
+      expect(s.decompressRange(0, 512)).toEqual(payload.subarray(0, 512));
+      s.setChecksum(false);
+      expect(s.decompressRange(0, 512)).toEqual(payload.subarray(0, 512));
+      s.setChecksum(true);
+      expect(s.decompressRange(0, 512)).toEqual(payload.subarray(0, 512));
+    } finally {
+      s.close();
+    }
+  });
+
+  // Incompressible on purpose: a RAW block memcpys a flipped byte straight
+  // through, so the decode succeeds and only the checksum objects. A
+  // compressible payload would pin this test to today's encoder output.
+  test("a corrupted block is silent without verification", () => {
+    let rng = 0x2e5b9a17;
+    const raw = Buffer.alloc(256 * 1024);
+    for (let i = 0; i < raw.length; i++) {
+      rng = (Math.imul(rng, 1103515245) + 12345) >>> 0;
+      raw[i] = (rng >>> 16) & 0xff;
+    }
+    const bad = Buffer.from(
+      zxc.compress(raw, { seekable: true, checksum: true }),
+    );
+    expect(bad[16]).toBe(0); // block 0 must be RAW
+    bad[16 + 8 + 4] ^= 0xff;
+
+    const on = new zxc.Seekable(bad);
+    try {
+      on.setChecksum(true);
+      expect(() => on.decompressRange(0, 512)).toThrow(/BAD_CHECKSUM/);
+    } finally {
+      on.close();
+    }
+
+    // Default is off: bytes come back, wrong, with no error.
+    const off = new zxc.Seekable(bad);
+    try {
+      expect(off.decompressRange(0, 512)).not.toEqual(raw.subarray(0, 512));
+    } finally {
+      off.close();
+    }
+  });
+
+  test("setChecksum rejects a non-boolean", () => {
+    const s = new zxc.Seekable(buildSeekableArchive(payload));
+    try {
+      expect(() => s.setChecksum("yes")).toThrow(TypeError);
+    } finally {
+      s.close();
+    }
+  });
+});

@@ -9,6 +9,7 @@ package zxc
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -29,6 +30,78 @@ func buildSeekableArchive(t *testing.T, payload []byte) string {
 		t.Fatalf("CompressFile(seekable): %v", err)
 	}
 	return out
+}
+
+// Which fault is reported proves the switch reaches C: on, BAD_CHECKSUM; off,
+// the decoder trips later on CORRUPT_DATA. Asserting both is what makes this
+// test non-vacuous.
+func TestSeekableSetChecksum(t *testing.T) {
+	// Incompressible on purpose: a RAW block memcpys a flipped byte straight
+	// through, so the decode succeeds and only the checksum objects. A
+	// compressible payload would pin this test to today's encoder output.
+	payload := make([]byte, 256*1024)
+	rng := uint32(0x2E5B9A17)
+	for i := range payload {
+		rng = rng*1103515245 + 12345
+		payload[i] = byte(rng >> 16)
+	}
+	path := buildSeekableArchive(t, payload)
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	out := make([]byte, 512)
+	for _, on := range []bool{true, false, true} {
+		if err := s.SetChecksum(on); err != nil {
+			t.Fatalf("SetChecksum(%v): %v", on, err)
+		}
+		if _, err := s.DecompressRange(out, 0, len(out)); err != nil {
+			t.Fatalf("DecompressRange with checksum=%v: %v", on, err)
+		}
+	}
+	s.Close()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	if raw[16] != 0 {
+		t.Fatalf("block 0 type = %d, want RAW; the LCG payload is no longer incompressible", raw[16])
+	}
+	// 16-byte file header, then block 0's header (8 bytes), then payload.
+	raw[16+8+4] ^= 0xFF
+	bad := filepath.Join(t.TempDir(), "corrupt.zxc")
+	if err := os.WriteFile(bad, raw, 0o644); err != nil {
+		t.Fatalf("write corrupt: %v", err)
+	}
+
+	verifying, err := Open(bad)
+	if err != nil {
+		t.Fatalf("Open(corrupt): %v", err)
+	}
+	if err := verifying.SetChecksum(true); err != nil {
+		t.Fatalf("SetChecksum(true): %v", err)
+	}
+	_, err = verifying.DecompressRange(out, 0, len(out))
+	verifying.Close()
+	if !errors.Is(err, ErrBadChecksum) {
+		t.Fatalf("verifying: want ErrBadChecksum, got %v", err)
+	}
+
+	// Default is off: bytes come back, wrong, with no error.
+	skipping, err := Open(bad)
+	if err != nil {
+		t.Fatalf("Open(corrupt): %v", err)
+	}
+	n, err := skipping.DecompressRange(out, 0, len(out))
+	skipping.Close()
+	if err != nil || n != len(out) {
+		t.Fatalf("not verifying: want %d bytes, got %d (%v)", len(out), n, err)
+	}
+	if bytes.Equal(out, payload[:len(out)]) {
+		t.Fatalf("not verifying: expected wrong bytes")
+	}
 }
 
 func TestSeekableOpenAndQuery(t *testing.T) {

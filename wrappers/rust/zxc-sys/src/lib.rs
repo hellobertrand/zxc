@@ -860,6 +860,8 @@ unsafe extern "C" {
         dict_huf: *const c_void,
     ) -> c_int;
 
+    pub fn zxc_seekable_set_checksum(s: *mut zxc_seekable, enabled: c_int) -> c_int;
+
     /// Returns the total number of data blocks in the archive (excluding EOF).
     pub fn zxc_seekable_get_num_blocks(s: *const zxc_seekable) -> u32;
 

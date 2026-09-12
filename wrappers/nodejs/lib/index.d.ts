@@ -364,6 +364,14 @@ export class Seekable {
      * dictionary. The content is copied internally.
      */
     setDict(dict: Buffer | Uint8Array, dictHuf?: Buffer | Uint8Array): void;
+
+    /**
+     * Turns per-block checksum verification on or off.
+     *
+     * Off by default, as in the one-shot API. No effect without checksums in
+     * the archive. Applies from the next call.
+     */
+    setChecksum(enabled: boolean): void;
     /** Release native resources. Idempotent. */
     close(): void;
 }

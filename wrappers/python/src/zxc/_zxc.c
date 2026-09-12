@@ -91,6 +91,7 @@ static PyObject* pyzxc_dict_huf(PyObject* self, PyObject* arg);
 static PyObject* pyzxc_dict_train(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_dict_load(PyObject* self, PyObject* arg);
 static PyObject* pyzxc_seekable_set_dict(PyObject* self, PyObject* args);
+static PyObject* pyzxc_seekable_set_checksum(PyObject* self, PyObject* args);
 
 static PyObject* pyzxc_cstream_create(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_cstream_compress(PyObject* self, PyObject* args, PyObject* kwargs);
@@ -198,6 +199,8 @@ static PyMethodDef zxc_methods[] = {
      METH_VARARGS | METH_KEYWORDS, NULL},
     {"pyzxc_seekable_free", (PyCFunction)pyzxc_seekable_free, METH_O, NULL},
     {"pyzxc_seekable_set_dict", (PyCFunction)pyzxc_seekable_set_dict, METH_VARARGS, NULL},
+    {"pyzxc_seekable_set_checksum", (PyCFunction)pyzxc_seekable_set_checksum, METH_VARARGS,
+     NULL},
     {"pyzxc_seek_table_size", (PyCFunction)pyzxc_seek_table_size, METH_O, NULL},
     {"pyzxc_write_seek_table", (PyCFunction)pyzxc_write_seek_table, METH_O, NULL},
 
@@ -1715,6 +1718,20 @@ static PyObject* pyzxc_seekable_free(PyObject* self, PyObject* capsule) {
         Py_DECREF(h->reader_obj);
         h->reader_obj = NULL;
     }
+    Py_RETURN_NONE;
+}
+
+static PyObject* pyzxc_seekable_set_checksum(PyObject* self, PyObject* args) {
+    (void)self;
+    PyObject* capsule;
+    int enabled;
+    if (!PyArg_ParseTuple(args, "Op", &capsule, &enabled)) return NULL;
+
+    zxc_seekable* s = seekable_from_capsule(capsule);
+    if (!s) return NULL;
+
+    const int rc = zxc_seekable_set_checksum(s, enabled);
+    if (rc != 0) Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
     Py_RETURN_NONE;
 }
 
