@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.14.1] - 2026-09-XX
+api: Enforces strict block size and EOF validation (#428)
+api: Implements reusable compression contexts (#424)
+api: Enhances seekable API with checksum control and robust range validation (#425)
+api: Fix empty frame compression in contexts (#422)
+api: Enforce strict block size bounds for static decompression contexts (#417)
+api: Adds shared literal table support to block API (#415)
+api: Extends dictionary support for reusable contexts (#414)
+api: Refines README documentation (#408)
+perf: Optimizes block decompression for direct and flexible output (#418)
+build: Migrate release workflows to trusted publishing (#421)
+build: Enforce rapidhash resolution at configure/setup time (#420)
+build: Resolve dependency resolution in wrapper test (#410) (#411)
+build: Enhances wrapper packaging and release integrity (#409)
+doc: Clarify crate branding and improve documentation metadata (#410)
+misc: Enforce dictionary size limits on decompression path (#430)
+misc: Prevent stack memory escape in multi-threaded decompression (#429)
+misc: Drop unpinned global npm install from publish job (#426)
+misc: Drop unpinned global npm install from publish job (#427)
+misc: Consolidates checksums (#423)
+misc: Formalizes dictionary ID calculation and enhances fuzzer (#ossf-557281704) (#413)
+misc: Tidy the nudge tuning macros (#412)
+
 ## [0.14.0] - 2026-09-03
 api: Pin the glibc floor at 2.34, make libzxc.pc relocatable (#385)
 api: Wire format v8, faster overlap copies, stricter block validation (#374)
@@ -8,25 +31,25 @@ perf: Make the short match distance floor a default policy (#376)
 perf: Widen the PivCo merge to 256 bits on AVX2 (#377)
 perf: Improve code and enhances robustness (#391)
 fix: Validates in-place footer size and buffer separation (#375)
-build: bump setuptools from 83.0.0 to 84.0.0 in /wrappers/python (#397)
-build: bump build from 1.5.0 to 1.6.0 in /wrappers/python (#394)
-build: bump cibuildwheel from 4.1.1 to 4.2.0 in /wrappers/python (#398)
-build: bump vitest from 4.1.10 to 4.1.11 in /wrappers/nodejs (#395)
-build: bump thiserror from 2.0.19 to 2.0.20 in /wrappers/rust (#393)
-build: bump cc from 1.4.0 to 1.4.4 in /wrappers/rust (#392)
-build: bump node-addon-api from 8.9.1 to 8.9.2 in /wrappers/nodejs (#396)
-build: bump github/codeql-action/analyze from 4.36.0 to 4.37.9 (#400)
-build: bump pypa/gh-action-pypi-publish from 1.14.0 to 1.14.2 (#402)
-build: bump cross-platform-actions/action from 1.2.0 to 1.5.0 (#401)
-build: bump meson from 1.11.2 to 1.12.0 in /.github/requirements (#399)
-build: bump actions/setup-go from 6.4.0 to 7.0.0 (#404)
+build: Bump setuptools from 83.0.0 to 84.0.0 in /wrappers/python (#397)
+build: Bump build from 1.5.0 to 1.6.0 in /wrappers/python (#394)
+build: Bump cibuildwheel from 4.1.1 to 4.2.0 in /wrappers/python (#398)
+build: Bump vitest from 4.1.10 to 4.1.11 in /wrappers/nodejs (#395)
+build: Bump thiserror from 2.0.19 to 2.0.20 in /wrappers/rust (#393)
+build: Bump cc from 1.4.0 to 1.4.4 in /wrappers/rust (#392)
+build: Bump node-addon-api from 8.9.1 to 8.9.2 in /wrappers/nodejs (#396)
+build: Bump github/codeql-action/analyze from 4.36.0 to 4.37.9 (#400)
+build: Bump pypa/gh-action-pypi-publish from 1.14.0 to 1.14.2 (#402)
+build: Bump cross-platform-actions/action from 1.2.0 to 1.5.0 (#401)
+build: Bump meson from 1.11.2 to 1.12.0 in /.github/requirements (#399)
+build: Bump actions/setup-go from 6.4.0 to 7.0.0 (#404)
 build: Rename release checksum manifest to checksums.sha256
 build: Improve release verifiability and automation (#383)
 doc: Fix hexdump examples
-doc: clean up Doxygen warnings and improve API documentation structure (#390) (#378)
-doc: rename CRC to checksum in documentation and code comments (#389)
+doc: Clean up Doxygen warnings and improve API documentation structure (#390) (#378)
+doc: Rename CRC to checksum in documentation and code comments (#389)
 misc: Enhances format testing and maintainability (#407)
-misc: formalize Developer Certificate of Origin requirements (#388)
+misc: Formalize Developer Certificate of Origin requirements (#388)
 misc: Enforce 10-minute timeout for CI jobs (#387)
 misc: Drop the tag's "v" from the SBOM file name
 
@@ -37,14 +60,14 @@ cli: Add MSVC CLI build configuration and unzxc alias (#348)
 build: Tag the Go submodule on release (#371)
 build: Publish the WebAssembly build to npm (#372)
 build: Update node.js wrapper dependencies
-build: bump scikit-build-core from 0.12.2 to 1.0.3 in /wrappers/python (#362)
-build: bump cibuildwheel from 4.1.0 to 4.1.1 in /wrappers/python (#360)
-build: bump setuptools-scm from 10.2.0 to 10.2.1 in /wrappers/python (#361)
+build: Bump scikit-build-core from 0.12.2 to 1.0.3 in /wrappers/python (#362)
+build: Bump cibuildwheel from 4.1.0 to 4.1.1 in /wrappers/python (#360)
+build: Bump setuptools-scm from 10.2.0 to 10.2.1 in /wrappers/python (#361)
 build: Remove scheduled workflow trigger
-build: bump cc from 1.2.65 to 1.4.0 in /wrappers/rust (#355)
-build: bump thiserror from 2.0.18 to 2.0.19 in /wrappers/rust (#354)
-build: bump libc from 0.2.186 to 0.2.189 in /wrappers/rust (#357)
-build: bump vitest from 4.1.9 to 4.1.10 in /wrappers/nodejs (#358)
+build: Bump cc from 1.2.65 to 1.4.0 in /wrappers/rust (#355)
+build: Bump thiserror from 2.0.18 to 2.0.19 in /wrappers/rust (#354)
+build: Bump libc from 0.2.186 to 0.2.189 in /wrappers/rust (#357)
+build: Bump vitest from 4.1.9 to 4.1.10 in /wrappers/nodejs (#358)
 build: Reset dict_size in compression context (#351)
 build: Prevent Windows static library linking failures (#350)
 build: Modularize CMakeLists.txt into dedicated modules (#347)
@@ -52,16 +75,16 @@ doc: Update fuzzing status and details in README
 fix: Ensure correct offset validation bounds for GHI decompression (ossfuzz #544800535) (#367)
 fix: Enhance output buffer overflow checks during decompression (ossfuzz #546426939) (#369)
 misc: Add PivCo-Huffman attribution for algorithm elements
-misc: bump meson from 1.11.1 to 1.11.2 in /.github/requirements (#363)
-misc: bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#359)
-misc: bump cross-platform-actions/action (#365)
-misc: bump github/codeql-action/upload-sarif (#364)
-misc: bump actions/checkout from 6.0.2 to 7.0.1 (#356)
-misc: bump softprops/action-gh-release from 3.0.1 to 3.0.2 (#353)
-misc: bump actions/setup-python from 6.3.0 to 7.0.0 (#352)
+misc: Bump meson from 1.11.1 to 1.11.2 in /.github/requirements (#363)
+misc: Bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#359)
+misc: Bump cross-platform-actions/action (#365)
+misc: Bump github/codeql-action/upload-sarif (#364)
+misc: Bump actions/checkout from 6.0.2 to 7.0.1 (#356)
+misc: Bump softprops/action-gh-release from 3.0.1 to 3.0.2 (#353)
+misc: Bump actions/setup-python from 6.3.0 to 7.0.0 (#352)
 
 ## [0.13.2] - 2026-07-30
-fix: fix typos
+fix: Fix typos
 fix: Fix MSVC /arch + /wd4244 flags (wrapdb CI warnings) (#326)
 perf: Extend code length nudging to level 6 (#343)
 perf: Optimizes Huffman code lengths for faster PivCo decode (#336)
@@ -86,7 +109,7 @@ doc: Update Option 6 to specify 'Winget' for installation
 api: Refines code coverage reporting (#322)
 api: Adds Level 7 (Ultra) compression to wrappers (#317)
 api: ZXC format v7: PivCo Huffman, level 7 (ULTRA), space-speed selection, in-place decode (#315)
-api: bump node-addon-api from 8.8.0 to 8.9.0 in /wrappers/nodejs (#308)
+api: Bump node-addon-api from 8.8.0 to 8.9.0 in /wrappers/nodejs (#308)
 api: Refines documentation and API option descriptions (#299)
 api: Enhances code quality and analysis setup (#294)
 perf: Optimizes compression and decompression performance (#319)
@@ -96,10 +119,10 @@ cli: Update README with zxc CLI installation option (#316)
 cli: Enhances code quality and robustness across components (#296)
 cli: Enhance README clarity and quick start
 build: Upgrades Python build deps and fixes Rust linker (#323)
-build: bump pytest from 9.0.3 to 9.1.1 in /wrappers/python (#310)
-build: bump setuptools-scm in /wrappers/python (#311)
-build: bump cibuildwheel from 3.4.1 to 4.1.0 in /wrappers/python (#309)
-build: bump vitest from 4.1.7 to 4.1.9 in /wrappers/nodejs (#307)
+build: Bump pytest from 9.0.3 to 9.1.1 in /wrappers/python (#310)
+build: Bump setuptools-scm in /wrappers/python (#311)
+build: Bump cibuildwheel from 3.4.1 to 4.1.0 in /wrappers/python (#309)
+build: Bump vitest from 4.1.7 to 4.1.9 in /wrappers/nodejs (#307)
 build: Refines code style, type safety, and modernizes JS/Go wrappers (#297)
 build: Refines CI/CD workflows and test stability (#292)
 portability: Add OS and libc compatibility CI for musl Linux and FreeBSD (#291)
@@ -109,12 +132,12 @@ misc: Ignore vendors code in coverage reports
 misc: Improves robustness and refines memory management (#321)
 misc: Update lzbench benchmark source to v0.13.0
 misc: Caches dict Huffman tree upon attach (#320)
-misc: bump actions/setup-python from 6.2.0 to 6.3.0 (#305)
-misc: bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#312)
-misc: bump msys2/setup-msys2 from 2.31.1 to 2.32.0 (#304)
-misc: bump actions-rust-lang/setup-rust-toolchain (#306)
-misc: bump actions/attest-build-provenance from 4.1.0 to 4.1.1 (#303)
-misc: bump softprops/action-gh-release from 3.0.0 to 3.0.1 (#302)
+misc: Bump actions/setup-python from 6.2.0 to 6.3.0 (#305)
+misc: Bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#312)
+misc: Bump msys2/setup-msys2 from 2.31.1 to 2.32.0 (#304)
+misc: Bump actions-rust-lang/setup-rust-toolchain (#306)
+misc: Bump actions/attest-build-provenance from 4.1.0 to 4.1.1 (#303)
+misc: Bump softprops/action-gh-release from 3.0.0 to 3.0.1 (#302)
 misc: Refines code quality and addresses warnings (#295)
 misc: Update bash conditional expressions to '[[ ... ]]' (#293)
 misc: Statically define Meson project version and SOVERSION (#290)
@@ -125,31 +148,31 @@ api: Enhances format validation (#271)
 api: Overhauls dictionary fuzzer for robust testing (#270)
 api: Adds comprehensive dictionary API to all wrappers (#269)
 api: Introduces pre-trained dictionary compression (#261)
-api: bump node-addon-api from 8.7.0 to 8.8.0 in /wrappers/nodejs (#253)
+api: Bump node-addon-api from 8.7.0 to 8.8.0 in /wrappers/nodejs (#253)
 api: Adds conformance test suite and improves empty frame handling (#246)
 api: Harden decompressor buffer bounds checks (#229)
 api: Introduces static context API for caller-managed workspaces (#242)
 api: Adds custom reader interface for seekable archives (#240)
-api: wrappers: Adds seekable random-access decompression API (#224)
+api: Adds seekable random-access decompression API (#224)
 api: Internalizes Sans-IO API and frame primitives (#225)
 perf: Optimize LZ run decoding for short offsets (#276)
 perf: Add make target to run decoder conformance suite
 perf: Improve Huffman leaf sorting with bucket sort (#244)
-cli: enable native wildcard expansion for CLI on Windows (#284)
+cli: Enable native wildcard expansion for CLI on Windows (#284)
 cli: Adds `unzxc` alias and renames dictionary training option (#272)
 cli: Remove Snyk policy ignore
 cli: Addresses Snyk scan findings and improves robustness (#273)
 cli: Adds native Meson build system support (#245)
-build: consolidate ClusterFuzzLite fuzzer builds and runs (#287)
-build: bump tar from 7.5.13 to 7.5.16 in /wrappers/nodejs (#286)
-build: bump vite from 8.0.14 to 8.0.16 in /wrappers/nodejs (#285)
+build: Consolidate ClusterFuzzLite fuzzer builds and runs (#287)
+build: Bump tar from 7.5.13 to 7.5.16 in /wrappers/nodejs (#286)
+build: Bump vite from 8.0.14 to 8.0.16 in /wrappers/nodejs (#285)
 build: Add GCC 15 and 16 to CI multi-compiler matrix (#274)
 build: Update LZbench branch for benchmark workflow
 build: Enables empty data compression/decompression (#265)
 build: Update package descriptions
 build: Introduce dedicated SSE2 SIMD optimization path for x86-64 (#259)
-build: tests: Enforces golden file format stability (#256)
-build: bump vitest from 4.1.6 to 4.1.7 in /wrappers/nodejs (#254)
+build: Enforces golden file format stability (#256)
+build: Bump vitest from 4.1.6 to 4.1.7 in /wrappers/nodejs (#254)
 build: Restrict SBOM generation to tag pushes
 build: Add qemu cpu targeting for simd dispatch coverage (#238)
 build: Bump cibuildwheel from 3.3.1 to 3.4.1 in /wrappers/python (#233)
@@ -176,14 +199,14 @@ misc: Update Codecov action to v7 (#267)
 misc: Update Ubuntu version badge to 26.10
 misc: Rename SBOM template to lowercase
 misc: Define LZ77 search limit as symbolic constant (#262)
-misc: bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#260)
+misc: Bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#260)
 misc: Accelerate LZ77 match finding with repeat offset seed @L6 (#257)
-misc: bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#255)
+misc: Bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#255)
 misc: Add seekable random-access decompression to Python (#250)
-misc: bump github/codeql-action from 4.35.5 to 4.36.0 (#252)
+misc: Bump github/codeql-action from 4.35.5 to 4.36.0 (#252)
 misc: Pin Meson and Ninja dependencies with hashes (#204) (#251)
 misc: Adjust decompressor output buffer tail padding (#249)
-misc: exclude conformance directory from Snyk Code scanning
+misc: Exclude conformance directory from Snyk Code scanning
 misc: Move Doxyfile to docs directory (#243)
 misc: Bump actions/attest-build-provenance from 3.0.0 to 4.1.0 (#232)
 misc: Bump codecov/codecov-action from 6.0.0 to 6.0.1 (#231)
@@ -192,7 +215,7 @@ misc: Update ClusterFuzzLite base image and enable Dependabot (#230)
 ## [0.11.0] - 2026-05-13
 api: Increases default block size to 512 KB (#216)
 api: Introduces Level 6 compression with Huffman literals (#208)
-api: Feat: Add WHATWG TransformStream adapters and `detectZxc` utility (#211)
+api: Add WHATWG TransformStream adapters and `detectZxc` utility (#211)
 api: Add Go io.Reader/Writer adapters for zxc streams (#209)
 api: Introduce push-based streaming API for non-blocking integrations (#204)
 api: Harden block API: overflow fix, memory shrink, wrapper coverage (#198)
@@ -206,8 +229,8 @@ perf: Update documentation with zxc v0.11.0 effective throughput benchmark
 perf: Optimize LZ77 match finding for fast levels with tag-first filter (#215)
 cli: Customize release artifacts with tailored README and manual
 build: Adds LEVEL_DENSITY support to wrappers (#214)
-build: Feat: Add `std::io` streaming adapters to Rust wrapper (#213)
-build: Fix: allow direct Emscripten module factory injection in WASM wrapper
+build: Add `std::io` streaming adapters to Rust wrapper (#213)
+build: Allow direct Emscripten module factory injection in WASM wrapper
 build: Reverts LZbench source to upstream repository
 build: Updates CI for Go ARM64 and Node.js 22 (#195)
 doc: Remove Python scripts for benchmark chart generation
@@ -231,11 +254,11 @@ doc: Updates README with architecture support and ARM performance details
 doc: Updates formatting in README performance table
 doc: Updates benchmark decompression cycles image for v0.10.0
 doc: Updates benchmark performance metrics in documentation
-misc: Feat: add Python io.RawIOBase adapters and zxc magic detection (#210)
-misc: Refine: Use named constants for compression level checks
+misc: Add Python io.RawIOBase adapters and zxc magic detection (#210)
+misc: Use named constants for compression level checks
 misc: Bump mymindstorm/setup-emsdk from 14 to 16 (#206)
 misc: Bump softprops/action-gh-release from 2 to 3 (#205)
-misc: Refine: remove PPA requirement for GCC on Ubuntu 22.04 in CI (#207)
+misc: Remove PPA requirement for GCC on Ubuntu 22.04 in CI (#207)
 misc: Harden decompression logic against integer overflows on 32-bits platforms (#202)
 misc: Split monolithic tests (#200)
 
@@ -361,7 +384,7 @@ doc: Adopts dual-scale encoding for chunk size (#118)
 doc: Standardizes block unit and chunk size logic (#114)
 doc: Replaces benchmark PNG images with WebP
 doc: Adds zxc command man page
-doc: Format: Implement LZ offset bias (+1) to eliminate zero-offset attack vectors (#104)
+doc: Implement LZ offset bias (+1) to eliminate zero-offset attack vectors (#104)
 doc: Update README with additional package badges
 doc: Updates README with TL;DR
 doc: Adds vcpkg badge to README
@@ -408,7 +431,7 @@ misc: Add Rust support to CodeQL security analysis and fix config path filtering
 
 ## [0.6.2] - 2026-02-09
 fix: Fixes Rust wrapper build for cargo publish (#69)
-cli: Fixes: addresses vulnerabilities and input validation into CLI (#77)
+cli: Addresses vulnerabilities and input validation into CLI (#77)
 cli: Enables code coverage and configures thresholds
 cli: Adds test for decompressed size function (#73)
 cli: Enables code coverage reporting (#72)
@@ -456,11 +479,11 @@ misc: Removes release template file
 misc: Updates copyright year
 
 ## [0.4.0] - 2026-01-07
-perf: v0.4.0 - Variable offsets, optimized parsing & layout (#23)
+perf: Variable offsets, optimized parsing & layout (#23)
 
 ## [0.3.3] - 2026-01-06
 fix: Fixes buffering issues with stdin and stdout (#37)
-portability: set binary mode for standard streams (#39)
+portability: Set binary mode for standard streams (#39)
 
 ## [0.3.2] - 2026-01-05
 cli: Updates build system and CI configuration (#24)
@@ -478,13 +501,13 @@ misc: Replaces not operator for branchless evaluation. (#29)
 ## [0.3.1] - 2025-12-27
 doc: Add community bindings to readme (#21)
 doc: Update documentation
-misc: Fix: flush stdout buffer before exit when using -c flag (#22)
+misc: Flush stdout buffer before exit when using -c flag (#22)
 
 ## [0.3.0] - 2025-12-26
 perf: Improves compression and decompression (#18)
 build: Configures fuzzing workflows for multiple targets
 misc: Use -1..-5 as compression levels (#16)
-misc: add short options to help, version (#15)
+misc: Add short options to help, version (#15)
 
 ## [0.2.0] - 2025-12-19
 api: Updates include path in fuzz test
