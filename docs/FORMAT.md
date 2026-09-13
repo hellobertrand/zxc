@@ -284,6 +284,16 @@ Compressed Payload Size:
   include the 8-byte block header nor the OPTIONAL trailing 4-byte
   checksum.
 
+  For a data block (RAW, GLO, GHI) this size MUST NOT exceed the block
+  size selected by the File Header's Chunk Size Code ({{file-header}}).
+  A block that would grow under compression falls back to RAW, whose
+  payload equals its content, so the block size is reached exactly and
+  never passed. Decoders MUST reject a larger value.
+
+  This bound does not apply to the SEK block ({{sek-block}}), which is
+  not a data block: its payload holds one 4-byte entry per data block
+  and therefore routinely exceeds the block size.
+
 Header Checksum (u8):
 : The 8-bit header checksum of {{header-checksums}}, computed over
   the 8-byte block header with byte 0x07 treated as zero.
@@ -697,6 +707,11 @@ archive linearly MAY use the following procedure:
 6. Validate that the located block has Block Type == 254 and Compressed
    Payload Size == N x 4. If validation fails, the SEK block is absent
    or corrupt and the decoder MUST fall back to linear scanning.
+7. Validate every entry before relying on it. One entry spans exactly
+   one data block, so its value MUST lie in the range
+   \[8, 8 + block size + checksum size\], and the running sum of the
+   entries MUST land exactly on the EOF block. A decoder MUST reject a
+   table that violates either bound.
 
 # EOF Block (Type 255) {#eof-block}
 
@@ -1070,7 +1085,8 @@ following procedure:
 
    a. Read the 8-byte block header. Validate the Header Checksum.
    b. If the block is the EOF block, exit the loop.
-   c. Read Compressed Payload Size bytes of payload.
+   c. Validate Compressed Payload Size against the block size
+      ({{block-container}}), then read that many bytes of payload.
    d. If HAS_CHECKSUM = 1, read the 4-byte trailing checksum and
       verify it against the payload; update the rolling global
       hash.
@@ -1084,7 +1100,10 @@ following procedure:
    Global Hash.
 
 A decoder MUST NOT return successfully if any of the validation
-steps above fail.
+steps above fail. In particular, exhausting the input before reaching
+an EOF block is a failure: a forged Compressed Payload Size can step
+over the EOF marker, and the resulting short output MUST NOT be
+reported as success.
 
 # Versioning Policy {#versioning}
 
@@ -1163,6 +1182,9 @@ all errors in the table are fatal by default.
 | Block payload truncated                | During payload read         | Reject. Unexpected end of stream.               |
 | Block checksum mismatch                | Trailing 4-byte checksum    | Reject block. Payload is corrupt.               |
 | EOF block with non-zero Compressed Payload Size      | EOF block header            | Reject. Malformed EOF marker.                   |
+| Data block payload above the block size | Block header offset 0x03    | Reject. A data block never compresses past its own content. |
+| Block loop ends without an EOF block   | End of the block loop       | Reject. A forged size can step over the EOF marker.         |
+| SEK entry above one block              | SEK payload                 | Reject. One entry spans one data block ({{sek-block}}).     |
 | Footer source-size mismatch            | File footer offset 0x00     | Reject. Output size does not match.             |
 | Footer global hash mismatch            | File footer offset 0x08     | Reject (if checksum mode active).               |
 | Decompressed output exceeds chunk size | During LZ decode            | Reject. Corrupt or malicious payload.           |
