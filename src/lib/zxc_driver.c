@@ -773,6 +773,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                                      zxc_progress_callback_t progress_cb, void* user_data,
                                      const uint8_t* dict, const size_t dict_size,
                                      const uint8_t* dict_huf) {
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+
     zxc_stream_ctx_t ctx;
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
 
@@ -980,7 +982,6 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     void* ud = opts ? opts->user_data : NULL;
 
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
-    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
     const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
     return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, block_size, checksum_enabled,

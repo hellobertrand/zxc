@@ -1136,3 +1136,112 @@ int test_stream_dry_run_size(void) {
     if (ok) printf("PASS\n\n");
     return ok;
 }
+
+/*
+ * ZXC_DICT_SIZE_MAX is a contract, not a hint: an oversized dictionary must be
+ * refused by every entry point with the same code. The stream engine used to
+ * check it on the compression side only, so zxc_stream_decompress either
+ * reported DICT_MISMATCH (the dict_id check firing first, hiding the real
+ * fault) or accepted the call outright when the archive carried no dict_id.
+ */
+int test_stream_oversized_dict(void) {
+    printf("=== TEST: Stream - oversized dictionary refused both ways ===\n");
+
+    const size_t size = 64 * 1024;
+    uint8_t* input = malloc(size);
+    uint8_t* oversized = malloc(ZXC_DICT_SIZE_MAX + 1);
+    if (!input || !oversized) {
+        free(input);
+        free(oversized);
+        return 0;
+    }
+    gen_lz_data(input, size);
+    memset(oversized, 'x', ZXC_DICT_SIZE_MAX + 1);
+
+    int ok = 1;
+    FILE* f_arc = tmpfile();
+    if (!f_arc) {
+        printf("  [SKIP] tmpfile failed\n");
+        free(input);
+        free(oversized);
+        return 1;
+    }
+
+    /* A plain archive: no dict_id, so no binding check stands in the way. */
+    {
+        FILE* f_in = tmpfile();
+        zxc_compress_opts_t co = {.n_threads = 1, .level = 3, .block_size = 16 * 1024};
+        if (!f_in) {
+            printf("  [SKIP] tmpfile failed\n");
+            fclose(f_arc);
+            free(input);
+            free(oversized);
+            return 1;
+        }
+        fwrite(input, 1, size, f_in);
+        fseek(f_in, 0, SEEK_SET);
+        if (zxc_stream_compress(f_in, f_arc, &co) <= 0) {
+            printf("Failed: compress\n");
+            ok = 0;
+        }
+        fclose(f_in);
+    }
+
+    /* Compression side: the guard moved into the engine, it must still fire. */
+    if (ok) {
+        FILE* f_in = tmpfile();
+        FILE* f_out = tmpfile();
+        zxc_compress_opts_t co = {
+            .n_threads = 1, .level = 3, .dict = oversized, .dict_size = ZXC_DICT_SIZE_MAX + 1};
+        if (f_in && f_out) {
+            fwrite(input, 1, size, f_in);
+            fseek(f_in, 0, SEEK_SET);
+            const int64_t rc = zxc_stream_compress(f_in, f_out, &co);
+            if (rc != ZXC_ERROR_DICT_TOO_LARGE) {
+                printf("Failed: compress gave %lld, want DICT_TOO_LARGE\n", (long long)rc);
+                ok = 0;
+            }
+        }
+        if (f_in) fclose(f_in);
+        if (f_out) fclose(f_out);
+    }
+
+    /* Decompression side, single- and multi-threaded. */
+    for (int threads = 1; ok && threads <= 4; threads += 3) {
+        FILE* f_out = tmpfile();
+        if (!f_out) break;
+        fseek(f_arc, 0, SEEK_SET);
+        zxc_decompress_opts_t opts = {
+            .n_threads = threads, .dict = oversized, .dict_size = ZXC_DICT_SIZE_MAX + 1};
+        const int64_t rc = zxc_stream_decompress(f_arc, f_out, &opts);
+        if (rc != ZXC_ERROR_DICT_TOO_LARGE) {
+            printf("Failed: decompress with %d thread(s) gave %lld, want DICT_TOO_LARGE\n", threads,
+                   (long long)rc);
+            ok = 0;
+        }
+        fclose(f_out);
+    }
+
+    /* A dictionary exactly on the bound stays acceptable. */
+    if (ok) {
+        FILE* f_out = tmpfile();
+        if (f_out) {
+            fseek(f_arc, 0, SEEK_SET);
+            zxc_decompress_opts_t opts = {
+                .n_threads = 1, .dict = oversized, .dict_size = ZXC_DICT_SIZE_MAX};
+            const int64_t rc = zxc_stream_decompress(f_arc, f_out, &opts);
+            if (rc != (int64_t)size) {
+                printf("Failed: dict at the bound gave %lld, want %zu\n", (long long)rc, size);
+                ok = 0;
+            }
+            fclose(f_out);
+        }
+    }
+
+    fclose(f_arc);
+    free(input);
+    free(oversized);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}
