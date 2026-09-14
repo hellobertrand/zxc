@@ -95,7 +95,7 @@ Offset  Size  Field
   - `255` = EOF
 - **Block Flags**: currently not used by implementation (written as `0`).
 - **Reserved**: must be 0.
-- **comp_size**: payload size in bytes (does **not** include the optional trailing 4-byte block
+- **Compressed Payload Size** (`comp_size`): payload size in bytes (does **not** include the optional trailing 4-byte block
   checksum). For a data block (RAW, GLO, GHI) it never exceeds the `block_size` declared in the
   file header: a block that would grow falls back to RAW, whose payload equals its content, so
   `block_size` is reached exactly and never passed. A decoder **MUST** reject a larger value.
@@ -119,12 +119,17 @@ When checksums are enabled at file level, each non-EOF block carries one trailin
 
 Payload is uncompressed data.
 
+### RAW payload layout
+
 ```text
-Payload = raw bytes
-raw_size = comp_size
++-------------------------------+
+| Literal bytes (uncompressed)  |
++-------------------------------+
 ```
 
-No internal sub-header.
+No internal sub-header: unlike GLO and GHI, the payload starts at the first
+byte. The decoded size is therefore the Compressed Payload Size, and a RAW
+block is the only one whose payload reaches that bound exactly.
 
 ---
 
@@ -141,13 +146,13 @@ decode throughput for ratio.
 +-------------------------------+
 | Section descriptors (0/4/8B)  |
 +-------------------------------+
-| Literals stream               |
+| Literals section              |
 +-------------------------------+
-| Tokens stream                 |
+| Tokens section                |
 +-------------------------------+
-| Offsets stream                |
+| Offsets section               |
 +-------------------------------+
-| Extras stream (+ slack pad)   |
+| Extras section (+ slack pad)  |
 +-------------------------------+
 ```
 
@@ -155,23 +160,33 @@ decode throughput for ratio.
 
 ```text
 Offset  Size  Field
-0x00    4     n_sequences (u32)
-0x04    4     n_literals (u32)
-0x08    1     enc_lit    (0=RAW, 1=RLE, 2=HUFFMAN, 3=HUFFMAN_DICT)
-0x09    1     enc_tok    (0=RAW tokens, 2=HUFFMAN tokens; level 7 only)
-0x0A    1     enc_mlen   (reserved; match lengths share the token byte)
-0x0B    1     enc_off    (0=16-bit offsets, 1=8-bit offsets)
+0x00    4     Sequence Count (n_sequences)
+0x04    4     Literal Count (n_literals)
+0x08    1     Literal Encoding (enc_lit)
+0x09    1     Token Encoding (enc_tok)
+0x0A    1     Match Length Encoding (enc_mlen)
+0x0B    1     Offset Encoding (enc_off)
 ```
 
-`enc_lit`, `enc_tok` and `enc_off` are closed value sets: a GLO decoder **MUST**
-reject any value outside the ones listed above rather than fall back to a
-default. This is not a memory-safety requirement — a GLO block sizes its offset
-section and reads it from the same width, so the two cannot disagree — but it
-keeps the undefined byte values genuinely free for a later format version
-instead of aliasing them onto an existing meaning.
+#### GLO header semantics
 
-`enc_mlen` is the exception: it is reserved, so it follows the § 10.3 rule for
-reserved fields — encoders **MUST** write `0`, decoders ignore it.
+- **Sequence Count** (`u32`): number of sequences in the block. It sizes the
+  token and offset sections, so it cannot be forged against them.
+- **Literal Count** (`u32`): number of literal bytes before entropy coding.
+- **Literal Encoding** (`u8`): `0` = RAW, `1` = RLE, `2` = HUFFMAN,
+  `3` = HUFFMAN_DICT.
+- **Token Encoding** (`u8`): `0` = RAW tokens, `2` = HUFFMAN tokens (level 7 only).
+- **Match Length Encoding** (`u8`): reserved — match lengths share the token
+  byte. It follows the § 10.3 rule for reserved fields: encoders **MUST**
+  write `0`, decoders ignore it.
+- **Offset Encoding** (`u8`): `0` = 16-bit offsets, `1` = 8-bit offsets.
+
+**Literal Encoding**, **Token Encoding** and **Offset Encoding** are closed value
+sets: a GLO decoder **MUST** reject any value outside the ones listed above
+rather than fall back to a default. This is not a memory-safety requirement — a
+GLO block sizes its offset section and reads it from the same width, so the two
+cannot disagree — but it keeps the undefined byte values genuinely free for a
+later format version instead of aliasing them onto an existing meaning.
 
 ### GLO section descriptors (0, 4 or 8 bytes)
 
@@ -180,14 +195,14 @@ when present, in this order:
 
 | Descriptor | Present when | Meaning |
 |---|---|---|
-| `lit_comp` | `enc_lit != 0` | compressed size of the literal section |
-| `tok_comp` | `enc_tok == 2` | compressed size of the token section |
+| **Literal Section Size** (`lit_comp`) | Literal Encoding `!= 0` | compressed size of the literal section |
+| **Token Section Size** (`tok_comp`) | Token Encoding `== 2` | compressed size of the token section |
 
 Everything else is derived, so it cannot be forged inconsistently:
 
-- literals raw size = `n_literals`; when `enc_lit = 0` the section size is
-  `n_literals` too, which is why no descriptor is written.
-- tokens size = `n_sequences` when `enc_tok = 0`.
+- literals raw size = `n_literals`; when Literal Encoding is `0` the section
+  size is `n_literals` too, which is why no descriptor is written.
+- tokens size = `n_sequences` when Token Encoding is `0`.
 - offsets size = `n_sequences × (enc_off ? 1 : 2)`.
 - **extras size = whatever payload remains** after the three sections above.
 
@@ -223,27 +238,28 @@ and extras sections play the role of tokens/offsets/extras.
 
 ### GLO stream content
 
-- **Literals stream**:
-  - raw literal bytes if `enc_lit=0`, or
-  - RLE tokenized if `enc_lit=1`, or
-  - Huffman-coded if `enc_lit=2`
+- **Literals section**:
+  - raw literal bytes when Literal Encoding is `0`, or
+  - RLE tokenized when it is `1`, or
+  - Huffman-coded when it is `2`
     (see [§ 5.2.1 Huffman literal section](#521-huffman-literal-section)), or
-  - Huffman-coded with the dictionary's shared code lengths if
-    `enc_lit=3` (dictionary-compressed archives only; same section layout,
-    no inline lengths header).
-- **Tokens stream**:
+  - Huffman-coded with the dictionary's shared code lengths when it is `3`
+    (dictionary-compressed archives only; same section layout, no inline
+    lengths header).
+- **Tokens section**:
   - one byte per sequence: `(LL << 4) | ML`, `LL` and `ML` being 4-bit fields.
-  - if `enc_tok=0` (all levels ≤ 6), these `n_sequences` bytes are stored
-    verbatim and the Tokens section's compressed size equals `n_sequences`.
-  - if `enc_tok=2` (level 7 only), the token bytes are Huffman-coded
+  - when Token Encoding is `0` (all levels ≤ 6), these `n_sequences` bytes are
+    stored verbatim and the Tokens section's compressed size equals `n_sequences`.
+  - when Token Encoding is `2` (level 7 only), the token bytes are Huffman-coded
     over the token alphabet using the exact § 5.2.1 layout (inline 128-byte
     lengths header included); the section's compressed size is the encoded
     payload size and the decoder expands it back to `n_sequences` bytes.
-- **Offsets stream**:
-  - `n_sequences × 1` byte if `enc_off=1`, else `n_sequences × 2` bytes LE.
+- **Offsets section**:
+  - `n_sequences × 1` byte when Offset Encoding is `1`, else `n_sequences × 2`
+    bytes LE.
   - Values are **biased**: stored value = `actual_offset - 1`. Decoder adds `+ 1`.
   - This makes `offset == 0` impossible by construction (minimum decoded offset = 1).
-- **Extras stream**: prefix-varint overflow values for token saturations, per
+- **Extras section**: prefix-varint overflow values for token saturations, per
   the rules below.
 
 Overflow rules:
@@ -253,7 +269,7 @@ Overflow rules:
 
 ### 5.2.1 Huffman literal section
 
-`enc_lit=2` carries a length-limited **canonical Huffman code** over the
+Literal Encoding `2` carries a length-limited **canonical Huffman code** over the
 literal bytes. The bits are placed on the wire with the **PivCo layout**
 (level-ordered Huffman, after
 [Żukowski 2026](https://marcinzukowski.github.io/pivco-huffman/paper-1.0/ph.html)):
@@ -342,22 +358,21 @@ Decoder validation requirements:
 
 ### 5.2.2 Shared-table Huffman literal section
 
-`enc_lit=3` is only valid in archives compressed with a dictionary
+Literal Encoding `3` is only valid in archives compressed with a dictionary
 (`HAS_DICTIONARY` set): the payload is the same Huffman/PivCo section as
 § 5.2.1 with the 128-byte lengths header **omitted** — the code lengths come
 from the shared literal
 table carried by the `.zxd` dictionary (see § 12.4), validated once when the
 dictionary is attached (same rules as § 5.2.1). Decoders **MUST** reject
-`enc_lit=3` sections when no dictionary table
-is attached. The archive's `dict_id` binds the (content, table) pair, so a
+Literal Encoding `3` sections when no dictionary table is attached. The archive's `dict_id` binds the (content, table) pair, so a
 matching table is guaranteed present whenever the dictionary check passed.
 
 The shared table is trained on the corpus' post-LZ literal distribution and
 covers only the symbols seen in training; the encoder falls back to a
-per-block table (`enc_lit=2`) or RAW/RLE for any block containing a literal
+per-block table (Literal Encoding `2`) or RAW/RLE for any block containing a literal
 byte without a code.
 
-The level-7 token section reuses the § 5.2.1 layout (`enc_tok=2`, with the
+The level-7 token section reuses the § 5.2.1 layout (Token Encoding `2`, with the
 inline lengths header) over the token byte alphabet.
 
 ## 5.3 GHI block (`type=2`)
@@ -371,24 +386,26 @@ ratio for decode throughput.
 +-------------------------------+
 | GHI Header (12 bytes)         |
 +-------------------------------+
-| Literals stream               |
+| Literals section              |
 +-------------------------------+
 | Sequences stream (N * 4B)     |
 +-------------------------------+
-| Extras stream (+ slack pad)   |
+| Extras section (+ slack pad)  |
 +-------------------------------+
 ```
 
 ### GHI Header (12 bytes)
 
-Same binary layout as the GLO header:
-- `n_sequences`, `n_literals`, `enc_lit`, `enc_tok`, `enc_mlen`, `enc_off`.
+Same binary layout as the GLO header: Sequence Count, Literal Count, Literal
+Encoding, Token Encoding, Match Length Encoding, Offset Encoding.
 
 In practice for GHI:
-- `enc_lit = 0` (raw literals), so the literal section size is `n_literals`.
-- `enc_tok` and `enc_mlen` are written as `0`.
-- `enc_off` is written as `0` and **must be ignored on decode**: GHI has no offset
-  stream, sequence words always store 16-bit offsets, so the field bounds nothing.
+- **Literal Encoding** is `0` (raw literals), so the literal section size is
+  `n_literals`.
+- **Token Encoding** and **Match Length Encoding** are written as `0`.
+- **Offset Encoding** is written as `0` and **must be ignored on decode**: GHI has
+  no offset section, sequence words always store 16-bit offsets, so the field
+  bounds nothing.
 
 ### GHI section descriptors: none
 
@@ -430,7 +447,7 @@ EOF marks end of block stream.
 
 Constraints:
 - block header is present (8 bytes)
-- `comp_size` **must be 0**
+- Compressed Payload Size **must be 0**
 - no payload
 - no per-block trailing checksum
 
@@ -445,7 +462,7 @@ The **Seek Table** block is an optional block appended between the EOF block and
 **Layout of a SEK Block**:
 ```text
   Offset             Size    Field
-  0x00               8       Block Header (type=254, comp_size=N*4)
+  0x00               8       Block Header (Block Type 254, payload N x 4)
   0x08               4       Block 0 Compressed Size (u32 LE)
   0x0C               4       Block 1 Compressed Size (u32 LE)
   ...                ...     ...
@@ -458,14 +475,14 @@ The **Seek Table** block is an optional block appended between the EOF block and
 3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`.
 4. Calculate `seek_block_size = 8 + (N × 4)`.
 5. Seek backward by `seek_block_size` bytes from the start of the footer to read the Block Header.
-6. Validate `block_type == 254 (SEK)` and `comp_size == N × 4`.
+6. Validate that Block Type is `254` (SEK) and Compressed Payload Size is `N × 4`.
 7. Validate every entry: one entry spans one whole block, so it lies in
    `[8, 8 + block_size + checksum_size]`, and the running sum must land exactly on the EOF
    block.
 
 ---
 
-## 6. Prefix Varint (Extras stream)
+## 6. Prefix Varint (Extras section)
 
 ZXC extras use a prefix-length varint.
 
@@ -607,10 +624,11 @@ Offset  Size  Field
 1. Validate file header magic/version/checksum.
 2. Parse blocks sequentially:
    - validate block header checksum,
-   - check block bounds using `comp_size`,
+   - check block bounds using the Compressed Payload Size,
    - if enabled, verify trailing block checksum.
 3. Decode payload according to block type. For GLO/GHI:
-   - reject `enc_lit`, `enc_tok` and (GLO) `enc_off` values outside § 5.2,
+   - reject Literal Encoding, Token Encoding and (GLO) Offset Encoding values
+     outside § 5.2,
    - reject a block leaving fewer than 32 bytes behind its literal section,
    - check the derived section sizes still fit the payload.
 4. On EOF:
@@ -683,17 +701,17 @@ The recommended behavior for each class is specified below.
 | **Invalid chunk size code** | File header, offset 0x05 | Reject. Code outside the valid range `[12..21]`. |
 | **Block header checksum mismatch** | Block header, offset 0x07 | Reject block. Stream is corrupt. |
 | **Unknown block type** | Block header, offset 0x00 | Reject. The block-type set is fixed per format version (see §10.3); a decoder must not skip past unrecognised data. |
-| **Block payload truncated** | During `fread` of `comp_size` bytes | Reject. Unexpected end of stream. |
+| **Block payload truncated** | While reading the Compressed Payload Size bytes | Reject. Unexpected end of stream. |
 | **Block checksum mismatch** | Trailing 4-byte checksum | Reject block. Payload is corrupt. |
 | **EOF block with non-zero comp_size** | EOF block header | Reject. Malformed EOF marker. |
 | **Data block comp_size above block size** | Block header, offset 0x03 | Reject. A data block never compresses past its own content (§4.1). |
-| **Block walk ends without an EOF block** | End of the block walk | Reject. A forged `comp_size` can span the EOF marker; the resulting short decode must not be reported as success. |
+| **Block walk ends without an EOF block** | End of the block walk | Reject. A forged Compressed Payload Size can span the EOF marker; the resulting short decode must not be reported as success. |
 | **Seek table entry above one block** | SEK payload | Reject. One entry spans one block (§5). |
 | **Footer source size mismatch** | File footer, offset 0x00 | Reject. Output size does not match declared original size. |
 | **Footer global hash mismatch** | File footer, offset 0x08 | Reject (if checksum mode active). Integrity failure. |
 | **Decompressed output exceeds chunk size** | During LZ decode | Reject. Corrupt or malicious payload. |
 | **Match offset out of bounds** | During LZ copy | Reject. Offset references data before output start. |
-| **Varint exceeds maximum length** | Extras stream | Reject. Overflow or corrupt extras data. |
+| **Varint exceeds maximum length** | Extras section | Reject. Overflow or corrupt extras data. |
 
 ### 11.2 Severity levels
 
@@ -713,8 +731,8 @@ Buffer-mode decoders **MUST** return a negative error code. Stream-mode decoders
 
 For decoders processing untrusted input (e.g. network data, user uploads):
 - Validate **all** header checksums before processing payloads.
-- Enforce maximum allocation limits based on `comp_size` and chunk size code.
-- Reject files where `comp_size` exceeds `zxc_compress_bound(chunk_size)`.
+- Enforce maximum allocation limits based on the Compressed Payload Size and Chunk Size Code.
+- Reject files where the Compressed Payload Size exceeds `zxc_compress_bound(chunk_size)`.
 - Use bounded memory copies - never trust decoded lengths without cross-checking against output buffer capacity.
 
 ---
@@ -784,7 +802,7 @@ Offset  Size  Field
 - **Version**: `1`. Decoders reject any other version with
   an unsupported dictionary version.
 - **Flags**: bits `0..3` carry the checksum algorithm id (`0` = RapidHash-based folding), matching the ZXC file header flags; bits `4..7` are reserved (must be 0).
-- **Shared literal Huffman table**: code lengths for the `enc_lit=3` literal
+- **Shared literal Huffman table**: code lengths for the Literal Encoding `3` literal
   sections (§ 5.2.2), trained on the corpus' post-LZ literal distribution.
 - **dict_id**: `fold32(rapidhash(table_128_bytes, seed = fold32(rapidhash(content))))`
   (see [12.3](#123-file-header-encoding)) — binds the exact (content, table)
