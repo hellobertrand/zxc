@@ -629,10 +629,24 @@ int main(void) {
 > table adds nothing.
 
 ```c
-// (the primitives, for reference — zxc_dict_train above wraps the first three)
-// int64_t cs = zxc_train_dict(samples, sizes, n, content_buf, cap);
-// zxc_train_dict_huf(samples, sizes, n, content_buf, cs, huf /*128 bytes*/);
-// int64_t zs = zxc_dict_save(content_buf, cs, huf, zxd_buf, zbnd);
+/* What zxc_dict_train() does internally, split into its three primitives.
+   Returns the .zxd size, or a negative zxc_error_t. */
+static int64_t build_zxd(const void* const* samples, const size_t* sizes, size_t n_samples,
+                         void* zxd_buf, size_t zxd_cap) {
+    uint8_t table[ZXC_HUF_TABLE_SIZE];
+    uint8_t* content = malloc(ZXC_DICT_SIZE_MAX);   /* 64 KB: too big for the stack */
+    if (!content) return ZXC_ERROR_MEMORY;
+
+    const int64_t csize = zxc_train_dict(samples, sizes, n_samples, content, ZXC_DICT_SIZE_MAX);
+    if (csize <= 0) { free(content); return csize; }
+
+    const int rc = zxc_train_dict_huf(samples, sizes, n_samples, content, (size_t)csize, table);
+    if (rc != ZXC_OK) { free(content); return rc; }
+
+    const int64_t zsize = zxc_dict_save(content, (size_t)csize, table, zxd_buf, zxd_cap);
+    free(content);
+    return zsize;
+}
 ```
 
 ### Error contract
