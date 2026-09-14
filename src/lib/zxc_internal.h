@@ -1272,21 +1272,22 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
 }
 
 /**
- * @brief Computes the 2-byte checksum for file headers.
+ * @brief Computes the 2-byte checksum for file and dictionary headers.
  *
- * One product per half, summed; same argument as @ref zxc_hash8 on the top halfword.
- * The halves must take different constants and must not be XOR-folded first: that
- * gave bit @c k of byte @c n and of byte @c n+8 the same weight, so both flipping
- * cancelled - 48 two-bit patterns no header content could reveal.
+ * Two multiplies in a chain: the first half is mixed, the second is added and
+ * mixed again. Every bit flip shifts the result by a fixed amount, and the
+ * constants are such that no 1- or 2-bit error leaves the top halfword
+ * unchanged (proven by the test suite). Summing two products instead let one
+ * bit per half cancel. Order matters: PRIME2 inside, PRIME1 outside; swapped,
+ * 38 bit pairs can cancel.
  *
- * @param[in] p The 16 header bytes to hash.
+ * @param[in] p The 16 header bytes; bytes 14..15 must already be zero.
  * @return The checksum halfword.
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
-    const uint64_t v1 = (zxc_le64(p) ^ ZXC_HASH_PRIME2) * ZXC_HASH_PRIME2;
-    const uint64_t v2 = (zxc_le64(p + 8) ^ ZXC_HASH_PRIME1) * ZXC_HASH_PRIME1;
+    const uint64_t h1 = (zxc_le64(p) ^ ZXC_HASH_PRIME2) * ZXC_HASH_PRIME2;
 
-    return (uint16_t)((v1 + v2) >> 48);
+    return (uint16_t)(((h1 + zxc_le64(p + 8) + ZXC_HASH_PRIME1) * ZXC_HASH_PRIME1) >> 48);
 }
 
 /**

@@ -544,47 +544,66 @@ accepted prefix lengths.
 ## 7.1 Header checksums
 
 The file header carries a 16-bit checksum at `0x0E..0x0F`; every block header
-carries an 8-bit checksum at `0x07`. Both multiply the header by an odd constant and keep
-the top bits of the product.
+carries an 8-bit checksum at `0x07`. They are computed differently, because
+they are checked at different rates: the block checksum runs once per block, on
+the decode path, and must cost almost nothing; the file checksum runs once per
+archive, and can afford a guarantee.
 
 All arithmetic below is on unsigned 64-bit integers modulo 2^64, and all
 shifts are logical.
 
+### Block header (8 bits)
+
 The **8-bit block header checksum** takes the 8 header bytes as a single
 little-endian 64-bit integer `v`, with the checksum byte at `0x07` treated as
-zero:
+zero, multiplies, and keeps the top byte:
 
 ```
 h = (v XOR 0x9E3779B97F4A7C15) * 0x9E3779B97F4A7C15
 checksum8 = h >> 56
 ```
 
-The **16-bit file header checksum** takes the 16 header bytes as two
-little-endian 64-bit integers, `v1` at `0x00` and `v2` at `0x08`, with the two
-checksum bytes at `0x0E..0x0F` treated as zero. Each half takes its own
-constant and they are summed, never XOR-folded together:
-
-```
-p1 = (v1 XOR 0xD2D84A61D2D84A61) * 0xD2D84A61D2D84A61
-p2 = (v2 XOR 0x9E3779B97F4A7C15) * 0x9E3779B97F4A7C15
-checksum16 = (p1 + p2) >> 48
-```
-
-Two properties follow from this shape, and both are normative intent rather
-than implementation detail:
+Two properties are normative intent rather than implementation detail:
 
 - **Folding from the top is required.** A product's low bits depend only on the
   input's low bits, so a checksum taken from the bottom would ignore most of the
-  header. Taking the top byte (or halfword) makes every input bit reach it.
+  header. The top byte is reached by every input bit.
 - **Every single-bit error is detected, not merely likely to be.** Flipping bit
-  `i` moves the product by exactly `±(constant << i)`, and no shift of either
-  constant leaves `0x00` or `0xFF` in the top byte — so the carry cannot absorb
-  the difference.
+  `i` moves the product by exactly `±(constant << i)`, and no shift of the
+  constant over the 56 covered bits leaves `0x00` or `0xFF` in the top byte, so
+  the carry cannot absorb the difference. Errors of two or more bits are caught
+  with better than the 1/256 odds of a random function, but not by construction.
 
-The XOR with the constant before multiplying is what keeps an all-zero header
-from hashing to zero. The two halves of the 16-bit checksum must take different
-constants: with a single constant, bit `k` of byte `n` and of byte `n+8` carry
-the same weight, and flipping both cancels.
+The XOR with the constant before multiplying keeps an all-zero header from
+hashing to zero. The cost is three instructions.
+
+### File header (16 bits)
+
+The **16-bit file header checksum** takes the 16 header bytes as two
+little-endian 64-bit integers, `v1` at `0x00` and `v2` at `0x08`, with the two
+checksum bytes at `0x0E..0x0F` treated as zero. The halves are chained, not
+summed: the first is mixed, the second is added to the result and mixed again.
+
+```
+h = (v1 XOR 0xD2D84A61D2D84A61) * 0xD2D84A61D2D84A61
+h = (h + v2 + 0x9E3779B97F4A7C15) * 0x9E3779B97F4A7C15
+checksum16 = h >> 48
+```
+
+Why a chain and not a sum: with two independent products summed, a bit in each
+half can shift the two products by amounts whose top halfwords cancel, and
+that cancellation does not depend on the header content — a structural blind
+spot for two-bit errors. In the chain every flip still shifts the result by an
+exact amount (`±2^k` times the constants, the sign set by the bit's value), but
+the two halves no longer meet as equals, and the constants are chosen so that
+**no single-bit or two-bit error can leave the top halfword unchanged, whatever
+the header holds**. The order matters: `0xD2D84A61D2D84A61` must be the inner
+constant and `0x9E3779B97F4A7C15` the outer one; swapped, two-bit cancellations
+reappear. The reference decoder's test suite re-derives this from the
+constants. Beyond two bits, misses sit at the 1/65536 of a random function.
+
+The same function checks the dictionary file header
+([§ 12](#12-pre-trained-dictionary-support)), over the same bytes.
 
 These protect metadata/navigation fields.
 
@@ -885,7 +904,7 @@ Generated archive size: **58 bytes**.
 ### 14.1 Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 43 17
+00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 3C 35
 00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
@@ -896,7 +915,7 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 43 17
+F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 3C 35
 ```
 
 - `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
@@ -904,7 +923,7 @@ F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 43 17
 - `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
 - `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `43 17` -> header checksum (LE value `0x1743`).
+- `3C 35` -> header checksum (LE value `0x353C`).
 
 #### B) Data Block #0 (RAW)
 
@@ -985,7 +1004,7 @@ Generated archive size: **70 bytes** (12 bytes larger than the non-seekable vari
 #### Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 43 17
+00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 3C 35
 00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 FE 00
 00000030: 00 04 00 00 00 3B 16 00 00 00 0A 00 00 00 00 00
@@ -1055,7 +1074,7 @@ A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size
 ### 15.1 Full hexdump
 
 ```text
-00000000: C7 D1 B0 9C 01 00 05 00 34 07 FC 0C 00 00 4C CC
+00000000: C7 D1 B0 9C 01 00 05 00 34 07 FC 0C 00 00 58 45
 00000010: 68 65 6C 6C 6F 00 00 00 00 00 00 00 00 00 00 00
 00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 00000030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
@@ -1072,7 +1091,7 @@ A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size
 #### A) Dictionary Header (offset `0x00`, 16 bytes)
 
 ```text
-C7 D1 B0 9C | 01 | 00 | 05 00 | 34 07 FC 0C | 00 00 | 4C CC
+C7 D1 B0 9C | 01 | 00 | 05 00 | 34 07 FC 0C | 00 00 | 58 45
 ```
 
 - `C7 D1 B0 9C` -> magic word (LE) = `0x9CB0D1C7` (`.zxd` dictionary).
@@ -1081,7 +1100,7 @@ C7 D1 B0 9C | 01 | 00 | 05 00 | 34 07 FC 0C | 00 00 | 4C CC
 - `05 00` -> content size (LE) = `5` bytes.
 - `34 07 FC 0C` -> `dict_id` (LE) = `0x0CFC0734`. Binds the **(content, table)** pair (see §12.4) and must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
 - `00 00` -> reserved.
-- `4C CC` -> header checksum (LE) = `0xCC4C`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the checksum is the last 2 bytes of the header).
+- `58 45` -> header checksum (LE) = `0x4558`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the checksum is the last 2 bytes of the header).
 
 #### B) Dictionary Content (offset `0x10`, 5 bytes)
 
