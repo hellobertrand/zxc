@@ -9,7 +9,7 @@ on:
       - 'include/**'
       - 'tests/**'
   pull_request:
-    branches: [ main ]
+    branches: [ main, candidate ]
     paths:
       - 'src/**'
       - 'include/**'
