@@ -630,9 +630,9 @@ int main(void) {
 
 ```c
 // (the primitives, for reference — zxc_dict_train above wraps the first three)
-// int64_t cs = zxc_train_dict(samples, sizes, n, content_buf, cap);
-// zxc_train_dict_huf(samples, sizes, n, content_buf, cs, huf /*128 bytes*/);
-// int64_t zs = zxc_dict_save(content_buf, cs, huf, zxd_buf, zbnd);
+int64_t cs = zxc_train_dict(samples, sizes, n, content_buf, cap);
+zxc_train_dict_huf(samples, sizes, n, content_buf, cs, huf);
+int64_t zs = zxc_dict_save(content_buf, cs, huf, zxd_buf, zbnd);
 ```
 
 ### Error contract
