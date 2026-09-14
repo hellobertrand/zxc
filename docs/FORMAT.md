@@ -544,10 +544,8 @@ accepted prefix lengths.
 ## 7.1 Header checksums
 
 The file header carries a 16-bit checksum at `0x0E..0x0F`; every block header
-carries an 8-bit checksum at `0x07`. Despite their historical name, both are
-xorshift hashes, not cyclic redundancy checks: the shift triple `(13, 7, 17)`
-is that of Marsaglia's `xorshift64`, used here to mix a seeded input rather
-than to generate a sequence.
+carries an 8-bit checksum at `0x07`. Both multiply the header by an odd constant and keep
+the top bits of the product.
 
 All arithmetic below is on unsigned 64-bit integers modulo 2^64, and all
 shifts are logical.
@@ -557,25 +555,36 @@ little-endian 64-bit integer `v`, with the checksum byte at `0x07` treated as
 zero:
 
 ```
-h = v XOR 0x9E3779B97F4A7C15
-h = h XOR (h << 13)
-h = h XOR (h >> 7)
-h = h XOR (h << 17)
-checksum8 = ((h >> 32) XOR h) AND 0xFF
+h = (v XOR 0x9E3779B97F4A7C15) * 0x9E3779B97F4A7C15
+checksum8 = h >> 56
 ```
 
 The **16-bit file header checksum** takes the 16 header bytes as two
 little-endian 64-bit integers, `v1` at `0x00` and `v2` at `0x08`, with the two
-checksum bytes at `0x0E..0x0F` treated as zero:
+checksum bytes at `0x0E..0x0F` treated as zero. Each half takes its own
+constant and they are summed, never XOR-folded together:
 
 ```
-h = v1 XOR v2 XOR 0xD2D84A61D2D84A61
-h = h XOR (h << 13)
-h = h XOR (h >> 7)
-h = h XOR (h << 17)
-r  = ((h >> 32) XOR h) AND 0xFFFFFFFF
-checksum16 = ((r >> 16) XOR r) AND 0xFFFF
+p1 = (v1 XOR 0xD2D84A61D2D84A61) * 0xD2D84A61D2D84A61
+p2 = (v2 XOR 0x9E3779B97F4A7C15) * 0x9E3779B97F4A7C15
+checksum16 = (p1 + p2) >> 48
 ```
+
+Two properties follow from this shape, and both are normative intent rather
+than implementation detail:
+
+- **Folding from the top is required.** A product's low bits depend only on the
+  input's low bits, so a checksum taken from the bottom would ignore most of the
+  header. Taking the top byte (or halfword) makes every input bit reach it.
+- **Every single-bit error is detected, not merely likely to be.** Flipping bit
+  `i` moves the product by exactly `±(constant << i)`, and no shift of either
+  constant leaves `0x00` or `0xFF` in the top byte — so the carry cannot absorb
+  the difference.
+
+The XOR with the constant before multiplying is what keeps an all-zero header
+from hashing to zero. The two halves of the 16-bit checksum must take different
+constants: with a single constant, bit `k` of byte `n` and of byte `n+8` carry
+the same weight, and flipping both cancels.
 
 These protect metadata/navigation fields.
 
@@ -876,9 +885,9 @@ Generated archive size: **58 bytes**.
 ### 14.1 Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
-00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
-00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 0A 00
+00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 43 17
+00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
+00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 0A 00
 00000030: 00 00 00 00 00 00 90 BB A1 75
 ```
 
@@ -887,7 +896,7 @@ Generated archive size: **58 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 6E 5B
+F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 43 17
 ```
 
 - `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
@@ -895,20 +904,20 @@ F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 6E 5B
 - `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
 - `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `6E 5B` -> header checksum (LE value `0x5B6E`).
+- `43 17` -> header checksum (LE value `0x1743`).
 
 #### B) Data Block #0 (RAW)
 
 Block header at offset `0x10`:
 
 ```text
-00 | 00 | 00 | 0A 00 00 00 | 69
+00 | 00 | 00 | 0A 00 00 00 | A0
 ```
 
 - type `00` = RAW.
 - flags `00`, reserved `00`.
 - `comp_size = 0x0000000A = 10` bytes.
-- header checksum = `0x69`.
+- header checksum = `0xA0`.
 
 Payload at `0x18..0x21` (10 bytes):
 
@@ -929,12 +938,12 @@ LE value: `0x75A1BB90`.
 #### C) EOF Block (offset `0x26`, 8 bytes)
 
 ```text
-FF | 00 | 00 | 00 00 00 00 | 02
+FF | 00 | 00 | 00 00 00 00 | 83
 ```
 
 - type `FF` = EOF.
 - `comp_size = 0` (mandatory).
-- header checksum = `0x02`.
+- header checksum = `0x83`.
 
 #### D) File Footer (offset `0x2E`, 12 bytes)
 
@@ -976,10 +985,10 @@ Generated archive size: **70 bytes** (12 bytes larger than the non-seekable vari
 #### Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
-00000010: 00 00 00 0A 00 00 00 69 48 65 6C 6C 6F 20 5A 58
-00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 02 FE 00
-00000030: 00 04 00 00 00 D2 16 00 00 00 0A 00 00 00 00 00
+00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 43 17
+00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
+00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 FE 00
+00000030: 00 04 00 00 00 3B 16 00 00 00 0A 00 00 00 00 00
 00000040: 00 00 90 BB A1 75
 ```
 
@@ -996,13 +1005,13 @@ Generated archive size: **70 bytes** (12 bytes larger than the non-seekable vari
 Block header at `0x2E`:
 
 ```text
-FE | 00 | 00 | 04 00 00 00 | D2
+FE | 00 | 00 | 04 00 00 00 | 3B
 ```
 
 - `FE` -> type 254 = SEK (Seek Table).
 - flags `00`, reserved `00`.
 - `comp_size = 0x00000004 = 4` bytes (one entry x 4 bytes/entry).
-- header checksum = `0xD2`.
+- header checksum = `0x3B`.
 
 Seek table entry at `0x36`:
 
@@ -1046,7 +1055,7 @@ A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size
 ### 15.1 Full hexdump
 
 ```text
-00000000: C7 D1 B0 9C 01 00 05 00 34 07 FC 0C 00 00 2D 74
+00000000: C7 D1 B0 9C 01 00 05 00 34 07 FC 0C 00 00 4C CC
 00000010: 68 65 6C 6C 6F 00 00 00 00 00 00 00 00 00 00 00
 00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 00000030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
@@ -1063,7 +1072,7 @@ A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size
 #### A) Dictionary Header (offset `0x00`, 16 bytes)
 
 ```text
-C7 D1 B0 9C | 01 | 00 | 05 00 | 34 07 FC 0C | 00 00 | 2D 74
+C7 D1 B0 9C | 01 | 00 | 05 00 | 34 07 FC 0C | 00 00 | 4C CC
 ```
 
 - `C7 D1 B0 9C` -> magic word (LE) = `0x9CB0D1C7` (`.zxd` dictionary).
@@ -1072,7 +1081,7 @@ C7 D1 B0 9C | 01 | 00 | 05 00 | 34 07 FC 0C | 00 00 | 2D 74
 - `05 00` -> content size (LE) = `5` bytes.
 - `34 07 FC 0C` -> `dict_id` (LE) = `0x0CFC0734`. Binds the **(content, table)** pair (see §12.4) and must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
 - `00 00` -> reserved.
-- `2D 74` -> header checksum (LE) = `0x742D`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the checksum is the last 2 bytes of the header).
+- `4C CC` -> header checksum (LE) = `0xCC4C`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the checksum is the last 2 bytes of the header).
 
 #### B) Dictionary Content (offset `0x10`, 5 bytes)
 
