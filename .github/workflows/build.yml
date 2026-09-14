@@ -6,7 +6,7 @@ on:
     branches: [ main ]
     tags: [ 'v*' ]      # pre-flight: build and test before the release goes public
   pull_request:
-    branches: [ main ]
+    branches: [ main, candidate ]
   release:
     types: [ published ]
 
