@@ -121,14 +121,40 @@ func TestSeekableOpenAndQuery(t *testing.T) {
 		t.Fatalf("NumBlocks = 0, want >= 1")
 	}
 
-	if cs, ok := s.BlockCompressedSize(0); !ok || cs == 0 {
-		t.Fatalf("BlockCompressedSize(0) = %d ok=%v", cs, ok)
+	if cs, ok, err := s.BlockCompressedSize(0); !ok || err != nil || cs == 0 {
+		t.Fatalf("BlockCompressedSize(0) = %d ok=%v err=%v", cs, ok, err)
 	}
 	if ds, ok := s.BlockDecompressedSize(0); !ok || ds == 0 {
 		t.Fatalf("BlockDecompressedSize(0) = %d ok=%v", ds, ok)
 	}
-	if _, ok := s.BlockCompressedSize(s.NumBlocks()); ok {
-		t.Fatalf("BlockCompressedSize(out-of-range) should fail")
+	if _, ok, err := s.BlockCompressedSize(s.NumBlocks()); ok || err != nil {
+		t.Fatalf("BlockCompressedSize(out-of-range) = ok=%v err=%v, want false, nil", ok, err)
+	}
+}
+
+func TestSeekableForgedGroupIsAnError(t *testing.T) {
+	payload := bytes.Repeat([]byte("ZXCseekable_"), 8192)
+	arc, err := os.ReadFile(buildSeekableArchive(t, payload))
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	probe, err := OpenBytes(arc)
+	if err != nil {
+		t.Fatalf("OpenBytes: %v", err)
+	}
+	n := int(probe.NumBlocks())
+	probe.Close()
+	// Group 0's anchor sits at the start of the table, before the 12-byte footer.
+	table := (n+63)/64*8 + n*4
+	arc[len(arc)-12-table] ^= 0xFF
+
+	s, err := OpenBytes(arc)
+	if err != nil {
+		t.Fatalf("OpenBytes must not scan the table: %v", err)
+	}
+	defer s.Close()
+	if _, ok, err := s.BlockCompressedSize(0); !ok || !errors.Is(err, ErrInvalidData) {
+		t.Fatalf("BlockCompressedSize(0) on a forged group: ok=%v err=%v", ok, err)
 	}
 }
 

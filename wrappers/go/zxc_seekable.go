@@ -119,8 +119,8 @@ func OpenBytes(data []byte) (*Seekable, error) {
 // size must be the total compressed-archive size in bytes (use
 // f.Stat().Size() for an *os.File). The library invokes ReadAt three
 // times during the call (header, footer, EOF/SEK block headers), then during
-// each DecompressRange call once per slice of 64 seek table entries the range
-// covers and once per block; BlockCompressedSize reads one entry per call.
+// each DecompressRange call once per seek table group the range covers and
+// once per block; BlockCompressedSize reads the block's group per call.
 //
 // The caller's reader must remain valid until [Seekable.Close] is called.
 // ReadAt may be invoked from any goroutine but never concurrently in the
@@ -194,16 +194,18 @@ func (s *Seekable) DecompressedSize() uint64 {
 
 // BlockCompressedSize returns the on-disk size of a specific block (block
 // header + payload + optional per-block checksum), read from its seek table
-// entry - through the reader, one ReadAt per call, on a handle from
-// [OpenReader]. The second return value is false if blockIdx is out of range,
-// the handle has been closed, or the entry cannot be read or is invalid.
-func (s *Seekable) BlockCompressedSize(blockIdx uint32) (uint32, bool) {
+// group. ok is false if blockIdx is out of range or the handle is closed; err
+// is [ErrInvalidData] if the group is unreadable or invalid.
+func (s *Seekable) BlockCompressedSize(blockIdx uint32) (size uint32, ok bool, err error) {
 	if s == nil || s.ptr == nil || blockIdx >= s.NumBlocks() {
-		return 0, false
+		return 0, false, nil
 	}
 	sz := uint32(C.zxc_seekable_get_block_comp_size(s.ptr, C.uint32_t(blockIdx)))
-	// 0 is never a real size: the library reports an unreadable or invalid entry that way.
-	return sz, sz != 0
+	// 0 is never a real size: the group is unreadable or invalid.
+	if sz == 0 {
+		return 0, true, ErrInvalidData
+	}
+	return sz, true, nil
 }
 
 // BlockDecompressedSize returns the decompressed size of a specific block.

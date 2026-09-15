@@ -1316,8 +1316,8 @@ negative `zxc_error_t` on failure. Short reads are treated as errors.
 
 **Thread safety**: `read_at` MUST be safe to call concurrently from multiple
 threads when the resulting handle is used with
-`zxc_seekable_decompress_range_mt()`. The single-threaded path makes no
-concurrent calls.
+`zxc_seekable_decompress_range_mt()`, or when calls on one handle overlap: all
+of them read through it, `zxc_seekable_get_block_comp_size()` included.
 
 **Lifetime**: `ctx` and the backing storage must remain valid until
 `zxc_seekable_free()`.
@@ -1330,11 +1330,11 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r);
 
 Opens a seekable archive through a user-supplied reader. The reader is invoked
 to fetch the file header, footer, and the EOF/SEK block headers at open time
-(3 reads, whatever the block count), then one read of seek table groups per
-slice of 64 blocks a range covers and once per block during decompression;
-`zxc_seekable_get_block_comp_size()` reads the block's group per call. No `FILE*` is involved — this is the
-entry point to use for kernel space, networked storage, or any non-POSIX
-backend.
+(3 reads, whatever the block count), then one read per seek table group a
+range covers and once per block during decompression;
+`zxc_seekable_get_block_comp_size()` reads the block's group per call. No
+`FILE*` is involved — this is the entry point to use for kernel space,
+networked storage, or any non-POSIX backend.
 
 **Returns**: handle on success, or `NULL` if `r`/`r->read_at` is `NULL`,
 `r->size` is `0`, the archive is not seekable, or any `read_at` call fails.
@@ -1364,7 +1364,9 @@ ZXC_EXPORT uint32_t zxc_seekable_get_block_comp_size(
 );
 ```
 
-Returns the compressed size (on-disk, including header) of a specific block.
+Returns the compressed size (on-disk, including header) of a specific block,
+read from its seek table group, or `0` if `block_idx` is out of range or the
+group is unreadable or invalid.
 
 ### `zxc_seekable_get_block_decomp_size`
 

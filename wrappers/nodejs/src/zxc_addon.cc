@@ -1097,7 +1097,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         }
         uint32_t idx = info[0].As<Napi::Number>().Uint32Value();
         if (idx >= zxc_seekable_get_num_blocks(s_)) return env.Null();
-        // The entry is read through readAt, so this re-enters JS just as
+        // The group is read through readAt, so this re-enters JS just as
         // decompressRange does and needs the same guard: a close() from the
         // callback must not free the handle the library is still using.
         if (in_native_call_) {
@@ -1109,8 +1109,8 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         const uint32_t sz = zxc_seekable_get_block_comp_size(s_, idx);
         in_native_call_ = false;
         if (sz == 0) {
-            // 0 is never a real size: the entry could not be read or is invalid.
-            Napi::Error::New(env, "seek table entry unreadable or invalid")
+            // 0 is never a real size: the group could not be read or is invalid.
+            Napi::Error::New(env, "seek table group unreadable or invalid")
                 .ThrowAsJavaScriptException();
             return env.Undefined();
         }

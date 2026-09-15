@@ -191,6 +191,37 @@ class TestSeekableReader:
             with pytest.raises(IOError, match="boom"):
                 s.block_compressed_size(0)
 
+    @pytest.mark.parametrize("call", ["block_compressed_size", "decompress_range"])
+    @pytest.mark.parametrize("action", ["close", "set_dict"])
+    def test_handle_change_from_reader_is_refused(self, tmp_path, call, action):
+        # close() or set_dict() from the reader would free what the running call uses.
+        payload = build_payload(128 * 1024)
+        compressed = build_seekable_archive_stream(payload, tmp_path)
+        hostile = [False]
+        handle = []
+
+        class HostileReader:
+            size = len(compressed)
+
+            def read_at(self, length, offset):
+                if hostile[0]:
+                    if action == "close":
+                        handle[0].close()
+                    else:
+                        handle[0].set_dict(b"x" * 64)
+                return compressed[offset : offset + length]
+
+        with zxc.Seekable(HostileReader()) as s:
+            handle.append(s)
+            hostile[0] = True
+            with pytest.raises(RuntimeError, match="in use|while a call"):
+                if call == "block_compressed_size":
+                    s.block_compressed_size(0)
+                else:
+                    s.decompress_range(0, 1024)
+            hostile[0] = False
+            assert s.decompress_range(0, len(payload)) == payload
+
     def test_reader_multithreaded_decode(self, tmp_path):
         # Regression: multi-threaded decode with a Python reader used to
         # invoke the callback from library worker threads without the GIL,

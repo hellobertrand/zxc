@@ -444,7 +444,8 @@ extern "C" {
  *  count, which the SEK header's field (table size modulo 2^32) cannot give. */
 static ZXC_ALWAYS_INLINE uint64_t zxc_seek_block_count(const uint64_t total_decomp,
                                                        const size_t block_size) {
-    return block_size ? (total_decomp + block_size - 1) / block_size : 0;
+    // Not (total + bs - 1) / bs: it wraps near 2^64, turning a forged footer into 0 blocks.
+    return block_size ? total_decomp / block_size + (total_decomp % block_size != 0) : 0;
 }
 
 /** @brief Groups holding @p nblocks blocks; the last one may be partial. */
@@ -1047,8 +1048,8 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
  * - `ZXC_BLOCK_GHI` (2): the speed path, levels 1 and 2. Fixed 4-byte sequence
  *   records and always-RAW literals make every section size derivable from the
  *   header, so it carries no descriptor at all.
- * - `ZXC_BLOCK_SEK` (254): seek table, one 64-bit start offset per block.
- *   Sits between the EOF block and the file footer.
+ * - `ZXC_BLOCK_SEK` (254): seek table, groups of 64 blocks (u64 anchor, u32
+ *   sizes). Sits between the EOF block and the file footer.
  * - `ZXC_BLOCK_EOF` (255): end-of-file marker.
  */
 typedef enum {
@@ -2074,12 +2075,12 @@ void zxc_seekable_attach_owned_ctx(zxc_seekable* s, void* ctx);
 int zxc_seek_table_header(uint8_t* dst, size_t dst_capacity, uint32_t num_blocks);
 
 /**
- * @brief Writes one group (@p anchor, then @p cnt sizes) into @p dst: the one place
- *        the layout is produced. @p dst holds ZXC_SEEK_GROUP_BYTES.
+ * @brief Writes one group (@p *anchor, then @p cnt sizes) into @p dst, which holds
+ *        ZXC_SEEK_GROUP_BYTES, and advances @p *anchor past its blocks.
  * @return Bytes written.
  */
-size_t zxc_seek_write_group(uint8_t* RESTRICT dst, uint64_t anchor, const uint32_t* RESTRICT sizes,
-                            uint32_t cnt);
+size_t zxc_seek_write_group(uint8_t* RESTRICT dst, uint64_t* RESTRICT anchor,
+                            const uint32_t* RESTRICT sizes, uint32_t cnt);
 
 /** @} */ /* end of internal */
 
