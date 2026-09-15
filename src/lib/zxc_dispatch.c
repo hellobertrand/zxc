@@ -670,7 +670,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         if (seekable) {
             // LCOV_EXCL_START
             if (UNLIKELY(seek_count >= seek_cap)) {
-                seek_cap = seek_cap * 2;
+                seek_cap = seek_cap < (UINT32_MAX >> 1) ? seek_cap * 2 : UINT32_MAX;
                 uint32_t* nc = (uint32_t*)ZXC_REALLOC(seek_comp, seek_cap * sizeof(uint32_t));
                 if (UNLIKELY(!nc)) {
                     ZXC_FREE(seek_comp);

@@ -443,7 +443,7 @@ compressed stream run that much longer than the output), everything the encoder
 writes after the last data block, and the wild-copy tail. The trailing bytes
 matter because they sit to the *right* of the read cursor and so push the
 flush-right archive left, into the write cursor's path; no header flag announces
-a seek table, so its worst case (4 bytes per block) is always reserved. Always
+a seek table, so its worst case (8 bytes per block) is always reserved. Always
 size the buffer with this function rather than re-deriving the formula.
 
 **Returns**: required buffer size, or `0` if `src` is not a valid archive.
@@ -1328,8 +1328,9 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r);
 ```
 
 Opens a seekable archive through a user-supplied reader. The reader is invoked
-to fetch the file header, footer, and seek table at open time (3 reads), then
-once per block during decompression. No `FILE*` is involved — this is the
+to fetch the file header, footer, and the EOF/SEK block headers at open time
+(3 reads, whatever the block count), then once per range for the seek table
+entries it covers and once per block during decompression. No `FILE*` is involved — this is the
 entry point to use for kernel space, networked storage, or any non-POSIX
 backend.
 

@@ -37,7 +37,8 @@ typedef struct {
     const char* name; /* file stem, without the .zxc */
     int expected;     /* zxc_error_t the decoder must return */
     const char* dict; /* .zxd to offer, a basename in valid/, or NULL */
-    int via_seekable; /* defect only visible to the seekable reader: open must refuse */
+    int via_seekable; /* defect only visible to the seekable reader: the block's access must refuse
+                       */
     int generated;    /* built by build_invalid(); the rest are static files */
 } invalid_expect_t;
 
@@ -326,12 +327,12 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
 
         /* --- Seek table (Sec 5.5) ------------------------------------------- */
     } else if (!strcmp(name, "sek_forged_entry")) {
-        /* The seek table is advisory: a sequential decode never reads it, so
-         * this defect only surfaces through the seekable reader, which
-         * validates each entry against the block it claims to describe. */
+        /* Advisory: a sequential decode never reads the table, so this only
+         * surfaces in the seekable reader, when the block is accessed. */
         const size_t eof = find_eof_block(d, len, 0);
         const size_t sek = eof ? eof + ZXC_BLOCK_HEADER_SIZE : 0;
-        if (!sek || sek + ZXC_BLOCK_HEADER_SIZE + 4 > len || d[sek] != ZXC_BLOCK_SEK) {
+        if (!sek || sek + ZXC_BLOCK_HEADER_SIZE + ZXC_SEEK_ENTRY_SIZE > len ||
+            d[sek] != ZXC_BLOCK_SEK) {
             fprintf(stderr, "  no SEK block found - the seekable base changed shape\n");
             ok = 0;
         } else {

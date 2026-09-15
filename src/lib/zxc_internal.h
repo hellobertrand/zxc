@@ -426,18 +426,15 @@ extern "C" {
 /** @name Seekable Format Constants
  *  @brief Seek table block appended between EOF block and footer.
  *
- *  The seek table is optional (opt-in at compression time) and allows
- *  random-access decompression by recording per-block compressed and
- *  decompressed sizes.  It uses a standard ZXC block header with
- *  @c block_type = @c ZXC_BLOCK_SEK.
- *
- *  Detection from the end of the file: the reader derives @c num_blocks
- *  from the file footer (total decompressed size) and file header (block size).
- *  It then seeks backward to validate the SEK block header.
+ *  Optional (opt-in at compression time): a standard block of type
+ *  @c ZXC_BLOCK_SEK recording where every block starts. The reader derives the
+ *  block count from footer and file header, validates the SEK header and reads
+ *  entries on demand; the header's 32-bit size field holds the table size
+ *  modulo 2^32.
  *  @{ */
-/** @brief Per-block entry size: comp_size(4) only.  decomp_size is derived
- *  from the file header's block_size (all blocks except the last are full). */
-#define ZXC_SEEK_ENTRY_SIZE 4
+/** @brief Per-block entry: byte offset of the block from the archive start (u64
+ *  LE). Its size runs to the next entry, or to the EOF block for the last one. */
+#define ZXC_SEEK_ENTRY_SIZE 8
 /** @} */ /* end of Seekable Format Constants */
 
 /** @name GLO Token Constants
@@ -2038,6 +2035,15 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  * @param[in]     ctx  Pointer previously returned by @c ZXC_MALLOC / @c ZXC_CALLOC.
  */
 void zxc_seekable_attach_owned_ctx(zxc_seekable* s, void* ctx);
+
+/**
+ * @brief Writes a seek table's block header for @p num_blocks entries.
+ *
+ * Shared with the streaming writer, which emits the entries in slices after it.
+ *
+ * @return @ref ZXC_BLOCK_HEADER_SIZE, or a negative @ref zxc_error_t.
+ */
+int zxc_seek_table_header(uint8_t* dst, size_t dst_capacity, uint32_t num_blocks);
 
 /** @} */ /* end of internal */
 

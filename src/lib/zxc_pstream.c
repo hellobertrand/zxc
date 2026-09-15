@@ -709,7 +709,7 @@ struct zxc_dstream_s {
     size_t decoded_pos;
 
     zxc_block_header_t cur_bh;
-    size_t sek_remaining;
+    uint64_t sek_remaining;
 
     uint64_t total_out;
     uint32_t global_hash;
@@ -1047,8 +1047,13 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                 zxc_block_header_t peek;
                 const int sek_rc = zxc_read_block_header(ds->scratch, ds->scratch_used, &peek);
                 if (sek_rc == ZXC_OK && peek.block_type == (uint8_t)ZXC_BLOCK_SEK) {
-                    // SEK block: skip its payload (peek.comp_size bytes).
-                    ds->sek_remaining = (size_t)peek.comp_size;
+                    // SEK block: one entry per decoded block; the header's field
+                    // only holds the size modulo 2^32.
+                    const uint64_t nblocks = (ds->total_out + ds->block_size - 1) / ds->block_size;
+                    const uint64_t sek_bytes = nblocks * ZXC_SEEK_ENTRY_SIZE;
+                    if (UNLIKELY((uint32_t)sek_bytes != peek.comp_size))
+                        return ds_set_error(ds, ZXC_ERROR_CORRUPT_DATA);
+                    ds->sek_remaining = sek_bytes;
                     ds->state = DS_DRAIN_SEK_PAYLOAD;
                     break;
                 }
@@ -1060,7 +1065,7 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
 
             case DS_DRAIN_SEK_PAYLOAD: {
                 const size_t avail = in->size - in->pos;
-                const size_t n = avail < ds->sek_remaining ? avail : ds->sek_remaining;
+                const size_t n = avail < ds->sek_remaining ? avail : (size_t)ds->sek_remaining;
                 in->pos += n;
                 ds->sek_remaining -= n;
                 if (ds->sek_remaining > 0) return (int64_t)produced;

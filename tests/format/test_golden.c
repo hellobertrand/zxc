@@ -345,15 +345,18 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         memcpy(tmp, sh, ZXC_BLOCK_HEADER_SIZE);
         tmp[7] = 0;
         CHECK(sh[7] == zxc_hash8(tmp), "SEK header checksum mismatch at %zu", off);
-        CHECK(comp == (uint32_t)data_blocks * 4U, "SEK comp_size %u != n_blocks*4 (%d)", comp,
-              data_blocks * 4);
+        /* Size field: n_blocks * 8 modulo 2^32. Entries: where each block starts. */
+        CHECK(comp == (uint32_t)((uint64_t)data_blocks * ZXC_SEEK_ENTRY_SIZE),
+              "SEK comp_size %u != n_blocks*8 (%d)", comp, data_blocks * ZXC_SEEK_ENTRY_SIZE);
         const uint8_t* entries = sh + ZXC_BLOCK_HEADER_SIZE;
         CHECK(off + ZXC_BLOCK_HEADER_SIZE + comp + ZXC_FILE_FOOTER_SIZE <= size,
               "SEK entries overrun file");
+        uint64_t expect = ZXC_FILE_HEADER_SIZE;
         for (int i = 0; i < data_blocks; i++) {
-            uint32_t entry = zxc_le32(entries + (size_t)i * 4);
-            CHECK(entry == block_phys[i], "SEK entry %d = %u, expected %u", i, entry,
-                  block_phys[i]);
+            const uint64_t entry = zxc_le64(entries + (size_t)i * ZXC_SEEK_ENTRY_SIZE);
+            CHECK(entry == expect, "SEK entry %d = %llu, expected %llu", i,
+                  (unsigned long long)entry, (unsigned long long)expect);
+            expect += block_phys[i];
         }
         EMIT("\n[seek table @%zu]\n", off);
         emit_hex("raw:", sh, ZXC_BLOCK_HEADER_SIZE);
@@ -362,7 +365,8 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         EMIT("header_checksum:  0x%02X\n", sh[7]);
         EMIT("entries:          %d\n", data_blocks);
         for (int i = 0; i < data_blocks; i++)
-            EMIT("  block[%d]:       %u bytes\n", i, zxc_le32(entries + (size_t)i * 4));
+            EMIT("  block[%d]:       offset %llu\n", i,
+                 (unsigned long long)zxc_le64(entries + (size_t)i * ZXC_SEEK_ENTRY_SIZE));
         off += ZXC_BLOCK_HEADER_SIZE + comp;
         seek_present = 1;
     }
