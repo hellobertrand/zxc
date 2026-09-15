@@ -305,31 +305,60 @@ int test_decompress_block_safe() {
         printf("  [PASS] literal-heavy tail decodes into tight dst\n");
     }
 
-    /* 5. Corrupted stream returns a negative error and does not crash. */
+    /* 5. A corrupted byte of a RAW block (random data): only the checksum catches it. */
     {
         const size_t n = 16 * 1024;
         uint8_t* src = (uint8_t*)malloc(n);
-        gen_lz_data(src, n);
+        gen_random_data(src, n);
         uint8_t* comp = NULL;
         size_t comp_cap = 0;
         int64_t csz = sbs_compress(src, n, 3, 1, &comp, &comp_cap); /* with checksum */
-        /* Flip a byte in the payload to corrupt. */
-        comp[ZXC_BLOCK_HEADER_SIZE + (csz - ZXC_BLOCK_HEADER_SIZE) / 2] ^= 0xA5;
+        const int raw = csz > 0 && comp[0] == ZXC_BLOCK_RAW;
+        if (raw) comp[ZXC_BLOCK_HEADER_SIZE + n / 2] ^= 0xA5;
         uint8_t* dst = (uint8_t*)malloc(n);
 
         zxc_dctx* dctx = zxc_create_dctx();
         zxc_decompress_opts_t opts = {.checksum_enabled = 1};
         int64_t r = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n, &opts);
-        int ok = (r < 0);
+        int ok = raw && r == ZXC_ERROR_BAD_CHECKSUM;
         zxc_free_dctx(dctx);
         free(dst);
         free(comp);
         free(src);
         if (!ok) {
-            printf("Failed: corrupted stream should fail, got %lld\n", (long long)r);
+            printf("Failed: corrupted RAW block (raw=%d) should fail its checksum, got %lld\n", raw,
+                   (long long)r);
             return 0;
         }
-        printf("  [PASS] corrupted stream -> negative error (no crash)\n");
+        printf("  [PASS] corrupted payload -> BAD_CHECKSUM\n");
+    }
+
+    /* 6. Block API after a multi-block frame on the same contexts: its blocks carry index 0. */
+    {
+        enum { BS = 4096, FRAME = 4 * BS };
+        static uint8_t fsrc[FRAME], farc[2 * FRAME], fout[FRAME], bcomp[2 * BS], bout[BS];
+        gen_lz_data(fsrc, FRAME);
+        const zxc_compress_opts_t co = {.level = 3, .block_size = BS, .checksum_enabled = 1};
+        const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
+        zxc_cctx* cctx = zxc_create_cctx(NULL);
+        zxc_dctx* dctx = zxc_create_dctx();
+        const int64_t fn =
+            cctx ? zxc_compress_cctx(cctx, fsrc, FRAME, farc, sizeof(farc), &co) : -1;
+        const int64_t bn =
+            cctx ? zxc_compress_block(cctx, fsrc, BS, bcomp, sizeof(bcomp), &co) : -1;
+        const int64_t fd =
+            dctx && fn > 0 ? zxc_decompress_dctx(dctx, farc, (size_t)fn, fout, FRAME, &verify) : -1;
+        const int64_t bd =
+            dctx && bn > 0 ? zxc_decompress_block_safe(dctx, bcomp, (size_t)bn, bout, BS, &verify)
+                           : -1;
+        zxc_free_cctx(cctx);
+        zxc_free_dctx(dctx);
+        if (fd != FRAME || bd != BS || memcmp(bout, fsrc, BS) != 0) {
+            printf("Failed: block after frame: frame %lld, block %lld\n", (long long)fd,
+                   (long long)bd);
+            return 0;
+        }
+        printf("  [PASS] block API after a frame on the same contexts\n");
     }
 
     printf("PASS\n\n");

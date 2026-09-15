@@ -518,6 +518,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         // match copies referencing dictionary bytes resolve naturally.
         uint8_t* dec_dst =
             s->dctx.dict_buffer ? s->dctx.dict_buffer + s->dict_size : s->dctx.work_buf;
+        s->dctx.block_index = bi;
         const int dec_res =
             zxc_decompress_chunk_wrapper(&s->dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
         if (UNLIKELY(dec_res < 0)) return dec_res;  // LCOV_EXCL_LINE
@@ -677,6 +678,7 @@ static void* zxc_seek_mt_worker(void* arg) {
 
         // Decompress: use dict bounce buffer when dictionary is active
         uint8_t* dec_dst = dict_work ? dict_work + s->dict_size : dctx.work_buf;
+        dctx.block_index = job->block_idx;
         const int dec_res =
             zxc_decompress_chunk_wrapper(&dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
 

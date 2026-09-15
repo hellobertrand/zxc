@@ -847,9 +847,7 @@ int test_global_checksum_order() {
     return 1;
 }
 
-/* The old combiner was rotl32(h,1) ^ b, whose period is 32: swapping two blocks
- * whose indices differ by a multiple of 32 left the global hash untouched. The
- * neighbouring test only swaps blocks 1 and 2, so it never saw this. */
+/* A swap 32 blocks apart, which an earlier rotl32(h, 1) ^ b combiner missed. */
 int test_global_checksum_order_distance_32(void) {
     printf("TEST: Global Checksum Order, distance 32... ");
 
@@ -906,9 +904,14 @@ int test_global_checksum_order_distance_32(void) {
         memcpy(swapped + off[33], comp + off[1], len[1]);
 
         zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
+        const int64_t intact = zxc_decompress(comp, (size_t)n, out, in_sz, &dopts);
+        if (intact != (int64_t)in_sz || memcmp(out, src, in_sz) != 0) {
+            printf("[FAIL] the intact archive -> %lld\n", (long long)intact);
+            break;
+        }
         const int64_t r = zxc_decompress(swapped, (size_t)n, out, in_sz, &dopts);
-        if (r >= 0) {
-            printf("[FAIL] a 32-apart swap decoded cleanly (%lld bytes)\n", (long long)r);
+        if (r != ZXC_ERROR_BAD_CHECKSUM) {
+            printf("[FAIL] a 32-apart swap -> %lld, want BAD_CHECKSUM\n", (long long)r);
             break;
         }
         ok = 1;
@@ -918,6 +921,45 @@ int test_global_checksum_order_distance_32(void) {
     free(comp);
     free(swapped);
     free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* The global combiner alone, on swaps that defeat h * PRIME + b: checksums 2^k blocks
+ * apart that agree mod 2^(30 - k). */
+int test_global_hash_combiner_swaps(void) {
+    printf("TEST: Global hash combiner, crafted swaps... ");
+    enum { N = (1 << 20) + 2 };
+    uint32_t* const b = (uint32_t*)malloc(N * sizeof(uint32_t));
+    if (!b) return 0;
+    uint32_t rng = 0xBB67AE85u;
+    for (size_t i = 0; i < N; i++) {
+        rng = rng * 1103515245u + 12345u;
+        b[i] = rng ^ (rng >> 15);
+    }
+    int ok = 1;
+    for (int k = 0; ok && k <= 20; k += 5) {
+        const size_t i = 1, j = i + ((size_t)1 << k);
+        b[j] = b[i] + ((uint32_t)1 << (30 - k));
+        uint32_t bare[2] = {0, 0}, rot[2] = {0, 0};
+        for (int pass = 0; pass < 2; pass++) {
+            for (size_t x = 0; x <= j; x++) {
+                bare[pass] = bare[pass] * (uint32_t)ZXC_HASH_PRIME1 + b[x];
+                rot[pass] = zxc_hash_combine(rot[pass], b[x]);
+            }
+            const uint32_t t = b[i];
+            b[i] = b[j];
+            b[j] = t;
+        }
+        if (bare[0] != bare[1]) {
+            printf("[FAIL] k=%d: the fixture no longer defeats h * PRIME + b\n", k);
+            ok = 0;
+        } else if (rot[0] == rot[1]) {
+            printf("[FAIL] k=%d: swap 2^%d apart left the global hash at 0x%08X\n", k, k, rot[0]);
+            ok = 0;
+        }
+    }
+    free(b);
     if (ok) printf("PASS\n\n");
     return ok;
 }

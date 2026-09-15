@@ -109,7 +109,7 @@ Offset  Size  Field
 [8B Block Header] + [comp_size bytes payload] + [optional 4B checksum]
 ```
 
-When checksums are enabled at file level, each non-EOF block carries one trailing 4-byte checksum of its compressed payload.
+When checksums are enabled at file level, each data block carries one trailing 4-byte checksum of its decompressed bytes (§7.2).
 
 ---
 
@@ -612,11 +612,16 @@ These protect metadata/navigation fields.
 When file header has `HAS_CHECKSUM=1`:
 - each data block appends a 4-byte checksum after payload.
 - checksum input is the block's **decompressed bytes**, dictionary prefix
-  excluded. For a RAW block the payload is those bytes, so the value is the
-  same either way.
-- algorithm id currently `0`: `fold32(rapidhash(decompressed_block))`, where
-  `rapidhash` is rapidhash v3 (default secret, seed 0) and
+  excluded. For a RAW block the payload is those bytes.
+- seed is the block's zero-based position among the frame's data blocks, as a
+  64-bit value; a frameless block (block API) uses `0`.
+- algorithm id currently `0`: `fold32(rapidhash(decompressed_block, index))`,
+  where `rapidhash` is rapidhash v3 (default secret) seeded with `index` and
   `fold32(h) = (h XOR (h >> 32)) AND 0xFFFFFFFF`.
+
+The seed binds a block to its position: a block moved elsewhere in the frame
+fails its own check, which matters where the global hash is never computed,
+such as a range read through the seek table.
 
 A decoder therefore verifies a block **after** decoding it, and a corrupted
 block reports whatever the decoder tripped on first. In exchange the checksum
@@ -631,13 +636,13 @@ A rolling global hash is maintained from per-block checksums in stream order:
 ```text
 global = 0
 for each data block checksum b:
-    global = (global * 0x7F4A7C15) + b        ; mod 2^32
+    global = rotl32(global, 15) * 0x7F4A7C15 + b        ; mod 2^32
 ```
 
-The multiplier is the low half of the mixing prime `0x9E3779B97F4A7C15`. It
-makes the result depend on block order, so a reordered archive fails the global
-check. The previous `rotl32(global, 1) XOR b` had a period of 32: blocks whose
-indices differed by a multiple of 32 could be swapped undetected.
+The multiplier is the low half of the mixing prime `0x9E3779B97F4A7C15`. The
+rotation keeps the result order-dependent at every distance: without it,
+`global * 0x7F4A7C15 + b` misses a swap of blocks 2^k apart whose checksums
+agree modulo 2^(30-k), and every swap 2^30 apart.
 
 This value is stored in the file footer (or zeroed when checksum mode is disabled).
 
@@ -665,14 +670,15 @@ Offset  Size  Field
 1. Validate file header magic/version/checksum.
 2. Parse blocks sequentially:
    - validate block header checksum,
-   - check block bounds using the Compressed Payload Size,
-   - if enabled, verify trailing block checksum.
+   - check block bounds using the Compressed Payload Size.
 3. Decode payload according to block type. For GLO/GHI:
    - reject Literal Encoding, Token Encoding and (GLO) Offset Encoding values
      outside § 5.2,
    - reject a block leaving fewer than 32 bytes behind its literal section,
    - check the derived section sizes still fit the payload.
-4. On EOF:
+4. If enabled, verify the trailing block checksum over the decoded bytes,
+   seeded with the block's position (§ 7.2).
+5. On EOF:
    - require `comp_size == 0`,
    - read footer,
    - compare footer `original_source_size` with produced output size,
@@ -743,7 +749,7 @@ The recommended behavior for each class is specified below.
 | **Block header checksum mismatch** | Block header, offset 0x07 | Reject block. Stream is corrupt. |
 | **Unknown block type** | Block header, offset 0x00 | Reject. The block-type set is fixed per format version (see §10.3); a decoder must not skip past unrecognised data. |
 | **Block payload truncated** | While reading the Compressed Payload Size bytes | Reject. Unexpected end of stream. |
-| **Block checksum mismatch** | Trailing 4-byte checksum | Reject block. Payload is corrupt. |
+| **Block checksum mismatch** | Trailing 4-byte checksum, after decoding the block | Reject block. The decoded bytes are wrong: corrupt payload, wrong dictionary, or a block out of place. |
 | **EOF block with non-zero comp_size** | EOF block header | Reject. Malformed EOF marker. |
 | **Data block comp_size above block size** | Block header, offset 0x03 | Reject. A data block never compresses past its own content (§4.1). |
 | **Block walk ends without an EOF block** | End of the block walk | Reject. A forged Compressed Payload Size can span the EOF marker; the resulting short decode must not be reported as success. |
@@ -993,7 +999,7 @@ Since there is exactly one data block, the global hash equals that block checksu
 
 ```text
 global0 = 0
-global1 = global0 * 0x7F4A7C15 + block_checksum = block_checksum
+global1 = rotl32(global0, 15) * 0x7F4A7C15 + block_checksum = block_checksum
 ```
 
 ### 14.3 Structural view with absolute offsets

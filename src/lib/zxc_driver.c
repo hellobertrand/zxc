@@ -98,6 +98,8 @@ typedef enum { JOB_STATUS_FREE, JOB_STATUS_FILLED, JOB_STATUS_PROCESSED } job_st
  *      The total allocated capacity of the output buffer.
  * @var zxc_stream_job_t::result_sz
  *      The actual size of the valid data produced in the output buffer.
+ * @var zxc_stream_job_t::block_index
+ *      Frame position of the block: seeds its checksum.
  * @var zxc_stream_job_t::job_id
  *      A unique identifier for the job, often used for ordering or debugging.
  * @var zxc_stream_job_t::status
@@ -114,6 +116,7 @@ typedef struct {
     uint8_t* out_buf;
     size_t out_cap;
     size_t result_sz;
+    uint64_t block_index;
     int job_id;
     ZXC_ATOMIC job_status_t status;  // Atomic for lock-free status updates
     char pad[ZXC_CACHE_LINE_SIZE];   // Prevent False Sharing
@@ -350,6 +353,7 @@ static void* zxc_stream_worker(void* arg) {
         job = &ctx->jobs[jid];
         pthread_mutex_unlock(&ctx->lock);
 
+        cctx.block_index = job->block_index;
         int res;
         if (dict_work && ctx->compression_mode == 1) {
             ZXC_MEMCPY(dict_work + dsz, job->in_buf, job->in_sz);
@@ -427,7 +431,7 @@ static void* zxc_async_writer(void* arg) {
                 pthread_cond_signal(&ctx->cond_reader);
                 pthread_mutex_unlock(&ctx->lock);
             } else if (ctx->checksum_enabled && ctx->compression_mode == 1) {
-                // Update Global Hash (Rotation + XOR)
+                // Fold the block's trailing checksum into the global hash.
                 if (LIKELY(result_sz >= ZXC_BLOCK_CHECKSUM_SIZE)) {
                     uint32_t block_hash =
                         zxc_le32(job->out_buf + result_sz - ZXC_BLOCK_CHECKSUM_SIZE);
@@ -521,6 +525,7 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
                                 uint32_t* d_global_hash) {
     int read_idx = 0;
     int read_eof = 0;
+    uint64_t block_index = 0;
 
     while (!read_eof && !ctx->io_error) {
         zxc_stream_job_t* const job = &ctx->jobs[read_idx];
@@ -606,6 +611,7 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
         if (UNLIKELY(read_eof && read_sz == 0)) break;
 
         job->in_sz = read_sz;
+        job->block_index = block_index++;
         pthread_mutex_lock(&ctx->lock);
         job->status = JOB_STATUS_FILLED;
         ctx->worker_queue[ctx->wq_head] = read_idx;
