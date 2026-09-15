@@ -281,9 +281,9 @@ int test_pstream_empty_input(void) {
         printf("compress NULL/0 failed\n");
         return 0;
     }
-    /* Should at least be: file header (16) + EOF block (8) + footer (12) = 36 bytes. */
-    if (comp_size < 36) {
-        printf("expected >=36 bytes, got %zu\n", comp_size);
+    /* Should at least be: file header (16) + EOF block (8) + footer (8) = 32 bytes. */
+    if (comp_size < 32) {
+        printf("expected >=32 bytes, got %zu\n", comp_size);
         free(comp);
         return 0;
     }

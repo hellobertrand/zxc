@@ -596,20 +596,12 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 }
 
 /**
- * @brief Writes the 12-byte file footer (source size + global checksum).
+ * @brief Writes the 8-byte file footer (source size).
  */
-int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
-                          const uint32_t global_hash, const int checksum_enabled) {
+int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity,
+                          const uint64_t src_size) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_FOOTER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
-
     zxc_store_le64(dst, src_size);
-
-    if (checksum_enabled) {
-        zxc_store_le32(dst + sizeof(uint64_t), global_hash);
-    } else {
-        ZXC_MEMSET(dst + sizeof(uint64_t), 0, sizeof(uint32_t));
-    }
-
     return ZXC_FILE_FOOTER_SIZE;
 }
 

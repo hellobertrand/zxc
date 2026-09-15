@@ -33,7 +33,7 @@ It formalizes the current reference implementation of format version **8**.
 +----------------------+
 | SEK Block (Optional) | table of contents for random access
 +----------------------+
-| File Footer          | 12 bytes
+| File Footer          | 8 bytes
 +----------------------+
 ```
 
@@ -451,7 +451,7 @@ Constraints:
 - no payload
 - no per-block trailing checksum
 
-Immediately after EOF block header comes the Optional SEK block, followed by the 12-byte file footer.
+Immediately after EOF block header comes the Optional SEK block, followed by the 8-byte file footer.
 
 ---
 
@@ -471,7 +471,7 @@ The **Seek Table** block is an optional block appended between the EOF block and
 
 **Backward Detection Strategy**:
 1. Read the **File Header** (first 16 bytes) -> extract `block_size`.
-2. Read the **File Footer** (last 12 bytes) -> extract `total_decompressed_size`.
+2. Read the **File Footer** (last 8 bytes) -> extract `total_decompressed_size`.
 3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`.
 4. Calculate `seek_block_size = 8 + (N × 4)`.
 5. Seek backward by `seek_block_size` bytes from the start of the footer to read the Block Header.
@@ -620,8 +620,9 @@ When file header has `HAS_CHECKSUM=1`:
   `fold32(h) = (h XOR (h >> 32)) AND 0xFFFFFFFF`.
 
 The seed binds a block to its position: a block moved elsewhere in the frame
-fails its own check, which matters where the global hash is never computed,
-such as a range read through the seek table.
+fails its own check, also under a range read through the seek table, which sees
+only the blocks it touches. No archive-level hash is needed for that, and none
+is stored.
 
 A decoder therefore verifies a block **after** decoding it, and a corrupted
 block reports whatever the decoder tripped on first. In exchange the checksum
@@ -629,39 +630,17 @@ covers the whole pipeline: it catches a wrong dictionary accepted through a
 `dict_id` collision, an encoder or decoder defect, and a divergence between
 SIMD variants -- none of which touch the compressed bytes.
 
-## 7.3 Global stream hash
+## 8. File Footer (8 bytes)
 
-A rolling global hash is maintained from per-block checksums in stream order:
-
-```text
-global = 0
-for each data block checksum b:
-    global = rotl32(global, 15) * 0x7F4A7C15 + b        ; mod 2^32
-```
-
-The multiplier is the low half of the mixing prime `0x9E3779B97F4A7C15`. The
-rotation keeps the result order-dependent at every distance: without it,
-`global * 0x7F4A7C15 + b` misses a swap of blocks 2^k apart whose checksums
-agree modulo 2^(30-k), and every swap 2^30 apart.
-
-This value is stored in the file footer (or zeroed when checksum mode is disabled).
-
----
-
-## 8. File Footer (12 bytes)
-
-Footer is mandatory and placed immediately after EOF block header.
+Footer is mandatory and placed immediately after EOF block header, or after the
+SEK block when there is one.
 
 ```text
 Offset  Size  Field
 0x00    8     original_source_size (u64)
-0x08    4     global_hash (u32)
 ```
 
 - **original_source_size**: full uncompressed size of the file.
-- **global_hash**:
-  - valid when checksum mode is active;
-  - set to zero when checksum mode is disabled.
 
 ---
 
@@ -680,9 +659,8 @@ Offset  Size  Field
    seeded with the block's position (§ 7.2).
 5. On EOF:
    - require `comp_size == 0`,
-   - read footer,
-   - compare footer `original_source_size` with produced output size,
-   - if enabled, compare footer `global_hash` with recomputed rolling hash.
+   - skip the SEK block if present, read the footer,
+   - compare footer `original_source_size` with produced output size.
 
 ---
 
@@ -755,7 +733,6 @@ The recommended behavior for each class is specified below.
 | **Block walk ends without an EOF block** | End of the block walk | Reject. A forged Compressed Payload Size can span the EOF marker; the resulting short decode must not be reported as success. |
 | **Seek table entry above one block** | SEK payload | Reject. One entry spans one block (§5). |
 | **Footer source size mismatch** | File footer, offset 0x00 | Reject. Output size does not match declared original size. |
-| **Footer global hash mismatch** | File footer, offset 0x08 | Reject (if checksum mode active). Integrity failure. |
 | **Decompressed output exceeds chunk size** | During LZ decode | Reject. Corrupt or malicious payload. |
 | **Match offset out of bounds** | During LZ copy | Reject. Offset references data before output start. |
 | **Varint exceeds maximum length** | Extras section | Reject. Overflow or corrupt extras data. |
@@ -900,7 +877,7 @@ as follows:
 - GLO descriptors total: **0**, **4** or **8** bytes (levels 3-5 / 6 / 7)
 - GHI descriptors total: **0** bytes
 - Minimum slack behind the literal section: **32** bytes
-- File footer: **12** bytes
+- File footer: **8** bytes
 - Dictionary file header (`.zxd`): **16** bytes
 
 **Magic words** — both are little-endian `u32` at offset `0x00` and deliberately share the `0x9CB0...` family prefix, so check the full value (or the file extension) to tell them apart:
@@ -920,7 +897,7 @@ This example was produced with the CLI from a 10-byte input (`Hello ZXC\n`) usin
 zxc -z -C -1 sample.txt
 ```
 
-Generated archive size: **58 bytes**.
+Generated archive size: **54 bytes**.
 
 ### 14.1 Full hexdump
 
@@ -928,7 +905,7 @@ Generated archive size: **58 bytes**.
 00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 3C 35
 00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 0A 00
-00000030: 00 00 00 00 00 00 90 BB A1 75
+00000030: 00 00 00 00 00 00
 ```
 
 ### 14.2 Byte-level decoding
@@ -974,7 +951,8 @@ Trailing block checksum at `0x22..0x25`:
 ```
 
 LE value: `0x75A1BB90`. This is a RAW block, so its payload already is the
-decompressed data and §7.2's input is those same ten bytes.
+decompressed data and §7.2's input is those same ten bytes, seeded with the
+block's position, 0.
 
 #### C) EOF Block (offset `0x26`, 8 bytes)
 
@@ -986,21 +964,13 @@ FF | 00 | 00 | 00 00 00 00 | 83
 - `comp_size = 0` (mandatory).
 - header checksum = `0x83`.
 
-#### D) File Footer (offset `0x2E`, 12 bytes)
+#### D) File Footer (offset `0x2E`, 8 bytes)
 
 ```text
-0A 00 00 00 00 00 00 00 | 90 BB A1 75
+0A 00 00 00 00 00 00 00
 ```
 
 - original source size = `10` bytes.
-- global hash = `0x75A1BB90`.
-
-Since there is exactly one data block, the global hash equals that block checksum:
-
-```text
-global0 = 0
-global1 = rotl32(global0, 15) * 0x7F4A7C15 + block_checksum = block_checksum
-```
 
 ### 14.3 Structural view with absolute offsets
 
@@ -1010,7 +980,7 @@ global1 = rotl32(global0, 15) * 0x7F4A7C15 + block_checksum = block_checksum
 0x18..0x21  RAW Payload (10)
 0x22..0x25  RAW Block Checksum (4)
 0x26..0x2D  EOF Block Header (8)
-0x2E..0x39  File Footer (12)
+0x2E..0x35  File Footer (8)
 ```
 
 ### 14.4 Seekable Variant (with Seek Table)
@@ -1021,7 +991,7 @@ Same 10-byte input (`Hello ZXC\n`), compressed with seekable mode enabled:
 zxc -z -C -1 -S sample.txt
 ```
 
-Generated archive size: **70 bytes** (12 bytes larger than the non-seekable variant).
+Generated archive size: **66 bytes** (12 bytes larger than the non-seekable variant).
 
 #### Full hexdump
 
@@ -1030,7 +1000,7 @@ Generated archive size: **70 bytes** (12 bytes larger than the non-seekable vari
 00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 FE 00
 00000030: 00 04 00 00 00 3B 16 00 00 00 0A 00 00 00 00 00
-00000040: 00 00 90 BB A1 75
+00000040: 00 00
 ```
 
 #### Byte-level decoding
@@ -1063,14 +1033,13 @@ Seek table entry at `0x36`:
 - Entry #0: compressed block size = `0x00000016 = 22` bytes.
   This is the total size of data block #0 including its header (8) + payload (10) + checksum (4) = 22. ✓
 
-**E) File Footer** (offset `0x3A`, 12 bytes)
+**E) File Footer** (offset `0x3A`, 8 bytes)
 
 ```text
-0A 00 00 00 00 00 00 00 | 90 BB A1 75
+0A 00 00 00 00 00 00 00
 ```
 
 - original source size = `10` bytes.
-- global hash = `0x75A1BB90`.
 
 #### Structural view with absolute offsets
 
@@ -1082,10 +1051,10 @@ Seek table entry at `0x36`:
 0x26..0x2D  EOF Block Header (8)
 0x2E..0x35  SEK Block Header (8)    <- seek table
 0x36..0x39  SEK Entry #0 (4)        <- comp_size of block #0
-0x3A..0x45  File Footer (12)
+0x3A..0x41  File Footer (8)
 ```
 
-> **Compatibility note**: The SEK block is inserted between the EOF block and the file footer. The footer always remains the **last 12 bytes of the file**, so decoders that locate the footer from the end of the file (e.g. `src + src_size - 12` for buffer APIs, or `fseek(END - 12)` for file APIs) work unchanged with seekable archives. However, **streaming decoders** that read the footer sequentially immediately after the EOF block must be updated to detect and skip the SEK block. In practice, all ZXC decoders since v0.9.0 handle both seekable and non-seekable archives transparently.
+> **Compatibility note**: The SEK block is inserted between the EOF block and the file footer. The footer always remains the **last 8 bytes of the file**, so decoders that locate the footer from the end of the file (e.g. `src + src_size - 8` for buffer APIs, or `fseek(END - 8)` for file APIs) work unchanged with seekable archives. However, **streaming decoders** that read the footer sequentially immediately after the EOF block must be updated to detect and skip the SEK block. In practice, all ZXC decoders since v0.9.0 handle both seekable and non-seekable archives transparently.
 
 ---
 

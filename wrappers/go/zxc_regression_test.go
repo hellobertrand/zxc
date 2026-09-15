@@ -57,8 +57,8 @@ func TestFixDecompressCraftedFooter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Footer = original_size(8) + checksum(4); patch original_size to 2^64-1.
-	binary.LittleEndian.PutUint64(comp[len(comp)-12:], ^uint64(0))
+	// Footer = original_size(8); patch it to 2^64-1.
+	binary.LittleEndian.PutUint64(comp[len(comp)-8:], ^uint64(0))
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("Decompress panicked on crafted footer: %v", r)
@@ -77,7 +77,7 @@ func TestDecompressZeroedFooterSize(t *testing.T) {
 	// A stored size of 0 is plausible, so the C size probe reports the archive
 	// as empty; only the block walk contradicts it. Decompress must not hand
 	// that back as a buffer-sizing error.
-	binary.LittleEndian.PutUint64(comp[len(comp)-12:], 0)
+	binary.LittleEndian.PutUint64(comp[len(comp)-8:], 0)
 	if _, err := Decompress(comp); !errors.Is(err, ErrInvalidData) {
 		t.Fatalf("want ErrInvalidData, got %v", err)
 	}

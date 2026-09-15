@@ -183,7 +183,7 @@ The file begins with a **16-byte** header that identifies the format and specifi
     - `12` = 4 KB, `13` = 8 KB, `14` = 16 KB, `15` = 32 KB, `16` = 64 KB, `17` = 128 KB, `18` = 256 KB, `19` = 512 KB (default), `20` = 1 MB, `21` = 2 MB.
   - All other values are rejected; block sizes are powers of 2.
 * **Flags (1 byte)**: Global configuration flags.
-  - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream. Every block will carry a trailing 4-byte checksum, and the footer will contain a global checksum. If `0`, no checksums are present.
+  - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream: every block carries a trailing 4-byte checksum. If `0`, no checksums are present.
   - **Bit 6**: `HAS_DICTIONARY`. If `1`, the stream was compressed with a pre-trained dictionary and **requires** it for decompression; the reserved field carries the `dict_id` (see below and §5.10).
   - **Bits 4-5**: Reserved.
   - **Bits 0-3**: Checksum Algorithm ID (e.g., `0` = RapidHash).
@@ -401,8 +401,7 @@ GHI Block Data Layout:
 The **EOF** block marks the end of the ZXC stream. It ensures that the decompressor knows exactly when to stop processing, allowing for robust stream termination even when file size metadata is unavailable or when concatenating streams.
 
 *   **Structure**: Standard 8-byte Block Header.
-*   **Flags**:
-    *   **Bit 7 (0x80)**: `has_checksum`. If set, implies the **Global Stream Checksum** in the footer is valid and should be verified.
+*   **Flags**: written as `0`.
 *   **Comp Size**: Unlike other blocks, these **MUST be set to 0**. The decoder enforces strict validation (`Type == EOF` AND `Comp Size == 0`) to prevent processing of malformed termination blocks.
 *   **Checksum**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with the checksum byte set to 0) using `zxc_hash8`.
 
@@ -410,22 +409,23 @@ The **EOF** block marks the end of the ZXC stream. It ensures that the decompres
 ### 5.6 File Footer
 (Present immediately after the EOF Block)
 
-A mandatory **12-byte footer** closes the stream, providing total source size information and the global checksum.
+A mandatory **8-byte footer** closes the stream with the total source size.
 
-**Footer Structure (12 bytes):**
+**Footer Structure (8 bytes):**
 
 ```
-  Offset:  0                               8               12
-          +-------------------------------+---------------+
-          | Original Source Size          | Global Hash   |
-          | (8 bytes)                     | (4 bytes)     |
-          +-------------------------------+---------------+
+  Offset:  0                               8
+          +-------------------------------+
+          | Original Source Size          |
+          | (8 bytes)                     |
+          +-------------------------------+
 ```
 
 *   **Original Source Size** (8 bytes): Total size of the uncompressed data.
-*   **Global Hash** (4 bytes): The **Global Stream Checksum**. Valid only if the EOF block has the `has_checksum` flag set (or the decoder context requires it).
-    *   **Algorithm**: rotate, multiply, add.
-    *   For each block with a checksum: `global_hash = rotl32(global_hash, 15) * 0x7F4A7C15 + block_hash;` (mod 2^32)
+
+There is no archive-level hash: every block's checksum is seeded with its
+position (§5.8), so a block out of place fails on its own, under a range read
+as under a full decode.
 
 ### 5.7 Block Encoding & Processing Algorithms
 
@@ -499,7 +499,7 @@ Every compressed block can optionally be protected by a **32-bit checksum** to e
 ZXC checksums the **decompressed** bytes of each block. The question answered is "are the bytes I hand back the ones that went in", not "are the compressed bytes intact".
 
 *   **Covers the whole pipeline**: An encoder defect, a decoder defect, a divergence between SIMD variants or a miscompilation all leave the compressed bytes intact and the output wrong. Only a checksum over the output sees them. So does a wrong dictionary accepted through a 32-bit `dict_id` collision.
-*   **Per block, not per file**: The checksum stays on each block rather than on the whole stream, which keeps it usable under random access: reading one block through the seek table verifies that block. It is seeded with the block's position in the frame, so a block moved elsewhere fails too, though a range read never computes the global hash. A single whole-file hash cannot be checked without decoding everything.
+*   **Per block, not per file**: The checksum stays on each block rather than on the whole stream, which keeps it usable under random access: reading one block through the seek table verifies that block. It is seeded with the block's position in the frame, so a block moved elsewhere fails too, under a range read as under a full decode. A single whole-file hash cannot be checked without decoding everything.
 *   **What it costs**: verification is opt-in. When on, it hashes the output instead of the compressed payload, so the extra work is proportional to how well the data compresses -- nothing on incompressible data, where the payload already *is* the output. Measured on a mixed corpus at 43.5%: decoding goes from 23.1 to 18.7 GB/s, about 23% more than the previous checksummed decode. zstd's closest equivalent is an XXH64 of the whole frame's content: off by default in libzstd (its CLI turns it on), and unable to vouch for a partial read.
 *   **What it gives up**: a corrupted block is no longer rejected before decoding, so it reports whatever the decoder tripped on first. The decoder is fuzzed to be safe on malformed input regardless, and a checksum is forgeable, so this was never a security boundary.
 

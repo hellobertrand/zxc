@@ -487,7 +487,7 @@ int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRI
                                      : ZXC_DICT_HUF_TRAIN_BLOCK;
             ZXC_MEMCPY(work + dict_size, sample + off, slice);
             const int r =
-                zxc_compress_chunk_wrapper(&cctx, work, dict_size + slice, out_scratch, out_cap);
+                zxc_compress_chunk_wrapper(&cctx, work, dict_size + slice, out_scratch, out_cap, 0);
             if (UNLIKELY(r < 0)) {
                 rc = r;
                 break;

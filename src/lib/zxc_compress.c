@@ -2017,11 +2017,12 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
  * block when the coded form would not shrink the data. When @c ctx->dict_size
  * is > 0, @p chunk is the [dict | block] concat and only the block tail counts
  * toward the expansion check. Appends the checksum when enabled, seeded with
- * @c ctx->block_index.
+ * @p block_index.
  */
 // cppcheck-suppress unusedFunction
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
-                               const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
+                               const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
+                               const uint64_t block_index) {
     if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
 
     const size_t dict_sz = ctx->dict_size;
@@ -2044,8 +2045,8 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     if (ctx->checksum_enabled) {
         if (UNLIKELY(w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap)) return ZXC_ERROR_OVERFLOW;
 
-        zxc_store_le32(
-            dst + w, zxc_checksum(block_data, block_sz, ctx->block_index, ZXC_CHECKSUM_RAPIDHASH));
+        zxc_store_le32(dst + w,
+                       zxc_checksum(block_data, block_sz, block_index, ZXC_CHECKSUM_RAPIDHASH));
         w += ZXC_BLOCK_CHECKSUM_SIZE;
     }
 
