@@ -305,7 +305,35 @@ int test_decompress_block_safe() {
         printf("  [PASS] literal-heavy tail decodes into tight dst\n");
     }
 
-    /* 5. A corrupted byte of a RAW block (random data): only the checksum catches it. */
+    /* 5a. Corrupted LZ block, strict decoder: an error, or exact bytes if padding was hit. */
+    {
+        const size_t n = 16 * 1024;
+        uint8_t* src = (uint8_t*)malloc(n);
+        gen_lz_data(src, n);
+        uint8_t* comp = NULL;
+        size_t comp_cap = 0;
+        int64_t csz = sbs_compress(src, n, 3, 1, &comp, &comp_cap); /* with checksum */
+        const int lz = csz > ZXC_BLOCK_HEADER_SIZE && comp[0] != ZXC_BLOCK_RAW;
+        if (lz) comp[ZXC_BLOCK_HEADER_SIZE + (csz - ZXC_BLOCK_HEADER_SIZE) / 2] ^= 0xA5;
+        uint8_t* dst = (uint8_t*)malloc(n);
+
+        zxc_dctx* dctx = zxc_create_dctx();
+        zxc_decompress_opts_t opts = {.checksum_enabled = 1};
+        int64_t r = lz ? zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n, &opts) : 0;
+        int ok = lz && (r < 0 || (r == (int64_t)n && memcmp(src, dst, n) == 0));
+        zxc_free_dctx(dctx);
+        free(dst);
+        free(comp);
+        free(src);
+        if (!ok) {
+            printf("Failed: corrupted LZ block (lz=%d) should fail, got %lld\n", lz, (long long)r);
+            return 0;
+        }
+        printf("  [PASS] corrupted LZ block -> %s (no crash)\n",
+               r < 0 ? zxc_error_name((int)r) : "exact bytes");
+    }
+
+    /* 5b. Corrupted RAW block: only the checksum catches it. */
     {
         const size_t n = 16 * 1024;
         uint8_t* src = (uint8_t*)malloc(n);

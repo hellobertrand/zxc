@@ -680,8 +680,6 @@ typedef enum {
  * @var zxc_dstream_s::sek_remaining
  *      Bytes left to skip from a SEK block payload (only used in
  *      @c DS_DRAIN_SEK_PAYLOAD).
- * @var zxc_dstream_s::block_index
- *      Frame position of the next data block: seeds its checksum.
  * @var zxc_dstream_s::total_out
  *      Cumulative decompressed output size; cross-checked against the
  *      file footer.
@@ -717,7 +715,6 @@ struct zxc_dstream_s {
     zxc_block_header_t cur_bh;
     size_t sek_remaining;
 
-    uint64_t block_index;
     uint64_t total_out;
     uint32_t global_hash;
 
@@ -1006,11 +1003,10 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             case DS_DECODE_BLOCK: {
                 const int direct = (out->size - out->pos) >= ds->decoded_cap;
                 uint8_t* const ddst = direct ? (uint8_t*)out->dst + out->pos : ds->decoded;
-                ds->inner.block_index = ds->block_index;
                 const int dsz = zxc_decompress_chunk_wrapper(
                     &ds->inner, ds->payload, ds->payload_used, ddst, ds->decoded_cap);
                 if (UNLIKELY(dsz < 0)) return ds_set_error(ds, dsz);
-                ds->block_index++;
+                ds->inner.block_index++;
 
                 // If file-level checksum verification is enabled, fold this
                 // block's trailer into the rolling global hash (last

@@ -521,7 +521,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         s->dctx.block_index = bi;
         const int dec_res =
             zxc_decompress_chunk_wrapper(&s->dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
-        if (UNLIKELY(dec_res < 0)) return dec_res;  // LCOV_EXCL_LINE
+        if (UNLIKELY(dec_res < 0)) return dec_res;
 
         // Calculate which portion of this block's decompressed data we need
         const uint64_t blk_decomp_start = zxc_seek_decomp_offset(s->block_size, bi);
@@ -683,10 +683,8 @@ static void* zxc_seek_mt_worker(void* arg) {
             zxc_decompress_chunk_wrapper(&dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
 
         if (UNLIKELY(dec_res < 0)) {
-            // LCOV_EXCL_START
             job->result = dec_res;
             break;
-            // LCOV_EXCL_STOP
         }
         if (UNLIKELY((size_t)dec_res < job->skip + job->copy_len)) {
             job->result = ZXC_ERROR_CORRUPT_DATA;
