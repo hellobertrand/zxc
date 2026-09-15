@@ -197,6 +197,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_seekable_truncated_input),
     TEST_CASE(test_seekable_corrupted_sek),
     TEST_CASE(test_seekable_forged_table_entry),
+    TEST_CASE(test_seekable_forged_total_size),
     TEST_CASE(test_seekable_beyond_old_cap),
     TEST_CASE(test_seekable_range_out_of_bounds),
     TEST_CASE(test_seekable_dst_too_small),

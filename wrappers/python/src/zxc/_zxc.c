@@ -1729,8 +1729,8 @@ typedef struct {
     PyObject* exc_type;
     PyObject* exc_value;
     PyObject* exc_tb;
-    /* decompress_range calls in progress, under the GIL: close(), set_dict() and
-     * a nested range would free or share what they use. */
+    /* Library calls in progress, under the GIL. Reader callbacks and GIL releases
+     * would otherwise let close() or set_dict() free what they use. */
     int busy;
 } pyzxc_seekable_holder_t;
 
@@ -1780,7 +1780,7 @@ static zxc_seekable* seekable_from_capsule(PyObject* capsule) {
     return h->s;
 }
 
-/* seekable_from_capsule, refusing a handle in use. */
+/* seekable_from_capsule, refusing a handle a library call is still using. */
 static pyzxc_seekable_holder_t* seekable_idle_holder(PyObject* capsule) {
     if (!seekable_from_capsule(capsule)) return NULL;
     pyzxc_seekable_holder_t* h =
@@ -1951,20 +1951,20 @@ static PyObject* pyzxc_seekable_block_comp_size(PyObject* self, PyObject* args) 
     unsigned int idx;
     if (!PyArg_ParseTuple(args, "OI", &capsule, &idx)) return NULL;
 
-    zxc_seekable* s = seekable_from_capsule(capsule);
-    if (!s) return NULL;
+    pyzxc_seekable_holder_t* h = seekable_idle_holder(capsule);
+    if (!h) return NULL;
 
-    if (idx >= zxc_seekable_get_num_blocks(s)) Py_RETURN_NONE;
-    /* Reads the entry through the reader; the trampoline attaches to the
+    if (idx >= zxc_seekable_get_num_blocks(h->s)) Py_RETURN_NONE;
+    /* Reads the block's group through the reader; the trampoline attaches to the
      * interpreter itself, so the GIL can stay held around this short call. */
-    const uint32_t sz = zxc_seekable_get_block_comp_size(s, idx);
+    h->busy++;
+    const uint32_t sz = zxc_seekable_get_block_comp_size(h->s, idx);
+    h->busy--;
     if (sz == 0) {
-        /* 0 is never a real size: the entry could not be read or is invalid.
+        /* 0 is never a real size: the group could not be read or is invalid.
          * Prefer the reader's own exception (with traceback) when it caused it. */
-        pyzxc_seekable_holder_t* h =
-            (pyzxc_seekable_holder_t*)PyCapsule_GetPointer(capsule, ZXC_SEEKABLE_CAPSULE);
-        if (h && seekable_restore_exception(h)) return NULL;
-        Py_Return_Err(PyExc_RuntimeError, "seek table entry unreadable or invalid");
+        if (seekable_restore_exception(h)) return NULL;
+        Py_Return_Err(PyExc_RuntimeError, "seek table group unreadable or invalid");
     }
     return PyLong_FromUnsignedLong(sz);
 }
@@ -2089,6 +2089,7 @@ static PyObject* pyzxc_seekable_set_dict(PyObject* self, PyObject* args) {
     PyObject* dict_huf_obj = NULL;
     if (!PyArg_ParseTuple(args, "Oy*|O", &capsule, &view, &dict_huf_obj)) return NULL;
 
+    /* Frees the dictionary and context a running call may use. */
     const pyzxc_seekable_holder_t* const h = seekable_idle_holder(capsule);
     if (!h) {
         PyBuffer_Release(&view);

@@ -633,10 +633,9 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     // LCOV_EXCL_STOP
     op += h_val;
 
-    // Seekable: dynamic array for per-block compressed sizes
+    // Seekable: one compressed size per block, at most block_count + 1 of them.
     uint32_t* seek_comp = NULL;
     uint32_t seek_count = 0;
-    uint32_t seek_cap = 0;
     if (seekable) {
         const size_t block_count = src_size / block_size;
         if (UNLIKELY(block_count > (size_t)UINT32_MAX - 2)) {
@@ -645,8 +644,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
             return ZXC_ERROR_BAD_BLOCK_SIZE;
             // LCOV_EXCL_STOP
         }
-        seek_cap = (uint32_t)(block_count + 2);
-        seek_comp = (uint32_t*)ZXC_MALLOC(seek_cap * sizeof(uint32_t));
+        seek_comp = (uint32_t*)ZXC_MALLOC((block_count + 2) * sizeof(uint32_t));
         // LCOV_EXCL_START
         if (UNLIKELY(!seek_comp)) {
             zxc_cctx_free(&ctx);
@@ -676,33 +674,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         }
 
         // Seekable: record compressed block size
-        if (seekable) {
-            // LCOV_EXCL_START
-            if (UNLIKELY(seek_count >= seek_cap)) {
-                // Blocks are indexed by uint32_t: past UINT32_MAX entries (or
-                // what size_t can address) there is nowhere to grow.
-                const size_t max_cap = SIZE_MAX / sizeof(uint32_t) < UINT32_MAX
-                                           ? SIZE_MAX / sizeof(uint32_t)
-                                           : UINT32_MAX;
-                if (UNLIKELY(seek_cap >= max_cap)) {
-                    ZXC_FREE(seek_comp);
-                    zxc_cctx_free(&ctx);
-                    return ZXC_ERROR_OVERFLOW;
-                }
-                seek_cap = seek_cap < max_cap / 2 ? seek_cap * 2 : (uint32_t)max_cap;
-                uint32_t* nc =
-                    (uint32_t*)ZXC_REALLOC(seek_comp, (size_t)seek_cap * sizeof(uint32_t));
-                if (UNLIKELY(!nc)) {
-                    ZXC_FREE(seek_comp);
-                    zxc_cctx_free(&ctx);
-                    return ZXC_ERROR_MEMORY;
-                }
-                seek_comp = nc;
-            }
-            // LCOV_EXCL_STOP
-            seek_comp[seek_count] = (uint32_t)res;
-            seek_count++;
-        }
+        if (seekable) seek_comp[seek_count++] = (uint32_t)res;
         if (checksum_enabled && LIKELY(res >= ZXC_BLOCK_CHECKSUM_SIZE))
             digest = zxc_digest_combine(digest, zxc_le32(op + res - ZXC_BLOCK_CHECKSUM_SIZE));
 

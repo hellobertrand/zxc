@@ -94,9 +94,9 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open(const void* src, const size_t src_siz
  * a custom VFS, kernel @c vfs_read. Positional reads only, no seeking state.
  *
  * @par Thread safety
- * @c read_at MUST be safe to call concurrently when the handle is used with
- * zxc_seekable_decompress_range_mt(); zxc_seekable_get_block_comp_size() reads
- * through it too. The single-threaded path never overlaps calls.
+ * @c read_at MUST be safe to call concurrently under
+ * zxc_seekable_decompress_range_mt(), or when calls on one handle overlap: all
+ * of them read through it, zxc_seekable_get_block_comp_size() included.
  *
  * @par Lifetime
  * @c ctx and the backing storage must both outlive the zxc_seekable handle
@@ -156,12 +156,12 @@ ZXC_EXPORT uint64_t zxc_seekable_get_decompressed_size(const zxc_seekable* s);
  * @brief Returns the compressed size of a specific block.
  *
  * The on-disk size: block header + payload + optional per-block checksum, from
- * the block's seek table entry - one read through the reader per call.
+ * the block's seek table group: one read per call.
  *
  * @param[in] s          Seekable handle.
  * @param[in] block_idx  Zero-based block index.
  * @return Compressed block size, or 0 if @p block_idx is out of range or its
- *         entry cannot be read or is invalid.
+ *         group is unreadable or invalid.
  */
 ZXC_EXPORT uint32_t zxc_seekable_get_block_comp_size(const zxc_seekable* s,
                                                      const uint32_t block_idx);

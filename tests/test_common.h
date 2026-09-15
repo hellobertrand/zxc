@@ -181,6 +181,7 @@ int test_seekable_cross_boundary(void);
 int test_seekable_truncated_input(void);
 int test_seekable_corrupted_sek(void);
 int test_seekable_forged_table_entry(void);
+int test_seekable_forged_total_size(void);
 int test_seekable_beyond_old_cap(void);
 int test_seekable_range_out_of_bounds(void);
 int test_seekable_dst_too_small(void);

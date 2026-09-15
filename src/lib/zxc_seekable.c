@@ -14,20 +14,22 @@
  * starts, so a byte range costs one small table read plus the blocks it
  * covers; nothing of the table stays resident and opening is O(1).
  *
- * On-disk layout of a SEK block:
+ * On-disk layout of a SEK block, for N blocks in G = ceil(N / 64) groups:
  *
- *   [Block Header (8B)]   block_type=SEK, block_flags=0, comp_size=(N*8) mod 2^32
- *   [N x Entry (8B)]      byte offset (u64 LE) of block i from the archive start
+ *   [Block Header (8B)]   block_type=SEK, block_flags=0, comp_size=(G*8 + N*4) mod 2^32
+ *   G x group:
+ *     [Anchor (8B)]       byte offset (u64 LE) of the group's first block
+ *     [<= 64 x Size (4B)] on-disk size (u32 LE) of each of its blocks
  *
- * Block i ends where block i+1 starts, the last one at the EOF block. N comes
- * from the footer, so the header's 32-bit field does not bound it.
+ * Anchor + sizes lands on the next anchor (the EOF block for the last group). N
+ * comes from the footer: the header's 32-bit field does not bound it.
  *
  * Detection from end of file:
  *   1. Read file header (first 16 bytes) => block_size
  *   2. Read file footer (last 8 bytes) => total_decompressed_size
  *   3. Derive num_blocks = ceil(total_decomp / block_size)
  *   4. Read the EOF and SEK block headers in one go, validate both
- *   5. Entries are read and checked when a block is accessed
+ *   5. Groups are read and checked on access
  */
 
 #include "../../include/zxc_seekable.h"
@@ -62,11 +64,14 @@ int zxc_seek_table_header(uint8_t* dst, const size_t dst_capacity, const uint32_
     return zxc_write_block_header(dst, dst_capacity, &bh);
 }
 
-size_t zxc_seek_write_group(uint8_t* RESTRICT dst, const uint64_t anchor,
+size_t zxc_seek_write_group(uint8_t* RESTRICT dst, uint64_t* RESTRICT anchor,
                             const uint32_t* RESTRICT sizes, const uint32_t cnt) {
-    zxc_store_le64(dst, anchor);
+    zxc_store_le64(dst, *anchor);
     uint8_t* p = dst + ZXC_SEEK_ANCHOR_SIZE;
-    for (uint32_t k = 0; k < cnt; k++, p += ZXC_SEEK_SIZE_ENTRY) zxc_store_le32(p, sizes[k]);
+    for (uint32_t k = 0; k < cnt; k++, p += ZXC_SEEK_SIZE_ENTRY) {
+        zxc_store_le32(p, sizes[k]);
+        *anchor += sizes[k];
+    }
     return (size_t)(p - dst);
 }
 
@@ -86,12 +91,10 @@ int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity, const uint
     if (UNLIKELY(hdr_res < 0)) return hdr_res;
     uint8_t* p = dst + hdr_res;
 
-    uint64_t off = ZXC_FILE_HEADER_SIZE;
-    for (uint64_t i = 0; i < num_blocks; i += ZXC_SEEK_GROUP) {
-        const uint32_t cnt = zxc_seek_group_len(num_blocks, i / ZXC_SEEK_GROUP);
-        p += zxc_seek_write_group(p, off, comp_sizes + i, cnt);
-        for (uint32_t k = 0; k < cnt; k++) off += comp_sizes[i + k];
-    }
+    uint64_t anchor = ZXC_FILE_HEADER_SIZE;
+    for (uint64_t i = 0; i < num_blocks; i += ZXC_SEEK_GROUP)
+        p += zxc_seek_write_group(p, &anchor, comp_sizes + i,
+                                  zxc_seek_group_len(num_blocks, i / ZXC_SEEK_GROUP));
 
     return (int64_t)(p - dst);
 }
@@ -171,7 +174,8 @@ static int zxc_seek_source_read(const zxc_seek_source_t* src, void* dst, const s
         return ZXC_OK;
     }
     const int64_t r = src->rdr->read_at(src->rdr->ctx, dst, len, off);
-    if (UNLIKELY(r != (int64_t)len)) return (r < 0) ? (int)r : ZXC_ERROR_IO;
+    // A code outside int would truncate, possibly to ZXC_OK.
+    if (UNLIKELY(r != (int64_t)len)) return (r < 0 && r >= INT_MIN) ? (int)r : ZXC_ERROR_IO;
     return ZXC_OK;
 }
 
@@ -525,14 +529,14 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     uint8_t* out = (uint8_t*)dst;
     size_t remaining = len;
 
-    // Table spans in slices of SPAN_CHUNK blocks: one read each, stack scratch.
-    enum { SPAN_CHUNK = ZXC_SEEK_GROUP };
-    uint64_t starts[SPAN_CHUNK + 1];
-    uint8_t raw[2 * ZXC_SEEK_GROUP_BYTES + ZXC_SEEK_ANCHOR_SIZE];
+    // One slice, and one read, per table group.
+    uint64_t starts[ZXC_SEEK_GROUP + 1];
+    uint8_t raw[ZXC_SEEK_GROUP_BYTES + ZXC_SEEK_ANCHOR_SIZE];
     uint32_t bi = blk_start;
     while (bi <= blk_end) {
         const uint32_t left = blk_end - bi + 1;
-        const uint32_t n = left < SPAN_CHUNK ? left : SPAN_CHUNK;
+        const uint32_t to_group_end = ZXC_SEEK_GROUP - bi % ZXC_SEEK_GROUP;
+        const uint32_t n = left < to_group_end ? left : to_group_end;
         const int span_res = zxc_seek_load_spans(s, bi, n, starts, raw);
         if (UNLIKELY(span_res < 0)) return span_res;
 

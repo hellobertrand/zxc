@@ -175,22 +175,21 @@ impl Seekable {
 
     /// On-disk compressed size of a specific block (block header +
     /// payload + optional per-block checksum), read from its seek table
-    /// entry - through the reader, one read per call, on a handle opened
-    /// over one.
+    /// group.
     ///
-    /// Returns `None` if `block_idx` is out of range, or if the entry
-    /// cannot be read or is invalid.
-    pub fn block_compressed_size(&self, block_idx: u32) -> Option<u32> {
+    /// Returns `Ok(None)` if `block_idx` is out of range, and
+    /// [`Error::InvalidData`] if the group is unreadable or invalid.
+    pub fn block_compressed_size(&self, block_idx: u32) -> Result<Option<u32>> {
         if block_idx >= self.num_blocks() {
-            return None;
+            return Ok(None);
         }
         let sz =
             unsafe { zxc_sys::zxc_seekable_get_block_comp_size(self.inner.as_ptr(), block_idx) };
-        // 0 is never a real size: the library reports an unreadable or invalid entry that way.
+        // 0 is never a real size: the group is unreadable or invalid.
         if sz == 0 {
-            None
+            Err(Error::InvalidData)
         } else {
-            Some(sz)
+            Ok(Some(sz))
         }
     }
 
@@ -457,9 +456,9 @@ mod tests {
         assert!(s.num_blocks() >= 1);
 
         // Block accessors must round-trip on the first block.
-        assert!(s.block_compressed_size(0).unwrap() > 0);
+        assert!(s.block_compressed_size(0).unwrap().unwrap() > 0);
         assert!(s.block_decompressed_size(0).unwrap() > 0);
-        assert!(s.block_compressed_size(s.num_blocks()).is_none());
+        assert!(s.block_compressed_size(s.num_blocks()).unwrap().is_none());
 
         // Full-range decompression.
         let mut out = vec![0u8; payload.len()];
@@ -484,6 +483,27 @@ mod tests {
             .expect("decompress_range failed");
         assert_eq!(n, len);
         assert_eq!(out, payload[start..start + len]);
+    }
+
+    #[test]
+    fn forged_group_is_an_error_not_out_of_range() {
+        let payload: Vec<u8> = (0..32_768).map(|i| (i as u8).wrapping_mul(31)).collect();
+        let mut arc = build_archive(&payload);
+        let n = Seekable::from_bytes(arc.clone())
+            .expect("open failed")
+            .num_blocks() as usize;
+        // Group 0's anchor sits at the start of the table, before the 8-byte footer.
+        let table = n.div_ceil(64) * 8 + n * 4;
+        let anchor = arc.len() - 8 - table;
+        arc[anchor] ^= 0xFF;
+
+        // Groups are checked on access, not at open.
+        let s = Seekable::from_bytes(arc).expect("open must not scan the table");
+        assert!(matches!(
+            s.block_compressed_size(0),
+            Err(Error::InvalidData)
+        ));
+        assert!(s.block_compressed_size(s.num_blocks()).unwrap().is_none());
     }
 
     #[test]

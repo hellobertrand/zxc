@@ -454,17 +454,18 @@ static void* zxc_async_writer(void* arg) {
                                            ? SIZE_MAX / sizeof(uint32_t)
                                            : UINT32_MAX;
                 uint32_t* nc = NULL;
+                int cause = ZXC_ERROR_OVERFLOW;
                 if (LIKELY(args->seek_cap < max_cap)) {
                     args->seek_cap =
                         args->seek_cap < max_cap / 2 ? args->seek_cap * 2 : (uint32_t)max_cap;
                     nc = (uint32_t*)ZXC_REALLOC(args->seek_comp,
                                                 (size_t)args->seek_cap * sizeof(uint32_t));
-                } else if (!ctx->fail_code) {
-                    ctx->fail_code = ZXC_ERROR_OVERFLOW;  // LCOV_EXCL_LINE
+                    cause = ZXC_ERROR_MEMORY;
                 }
                 // LCOV_EXCL_START
                 if (UNLIKELY(!nc)) {
                     pthread_mutex_lock(&ctx->lock);
+                    if (!ctx->fail_code) ctx->fail_code = cause;
                     ctx->io_error = 1;
                     job->status = JOB_STATUS_FREE;
                     pthread_cond_signal(&ctx->cond_reader);
@@ -654,7 +655,7 @@ static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, 
 
     // Seekable: write SEK block between EOF and footer
     if (!ctx->io_error && w->seek_comp && w->seek_count > 0) {
-        // Header, then one group at a time: the table is never held whole.
+        // Header, then one group at a time (seek_comp itself stays resident).
         uint8_t st_buf[ZXC_SEEK_GROUP_BYTES];
         const int h = zxc_seek_table_header(st_buf, sizeof(st_buf), w->seek_count);
         if (UNLIKELY(h < 0 || (f_out && fwrite(st_buf, 1, (size_t)h, f_out) != (size_t)h)))
@@ -662,11 +663,11 @@ static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, 
         else
             w->total_bytes += h;
 
-        uint64_t off = ZXC_FILE_HEADER_SIZE;
+        uint64_t anchor = ZXC_FILE_HEADER_SIZE;
         for (uint64_t i = 0; i < w->seek_count && !ctx->io_error; i += ZXC_SEEK_GROUP) {
-            const uint32_t cnt = zxc_seek_group_len(w->seek_count, i / ZXC_SEEK_GROUP);
-            const size_t bytes = zxc_seek_write_group(st_buf, off, w->seek_comp + i, cnt);
-            for (uint32_t k = 0; k < cnt; k++) off += w->seek_comp[i + k];
+            const size_t bytes =
+                zxc_seek_write_group(st_buf, &anchor, w->seek_comp + i,
+                                     zxc_seek_group_len(w->seek_count, i / ZXC_SEEK_GROUP));
             if (UNLIKELY(f_out && fwrite(st_buf, 1, bytes, f_out) != bytes))
                 ctx->io_error = 1;  // LCOV_EXCL_LINE
             else

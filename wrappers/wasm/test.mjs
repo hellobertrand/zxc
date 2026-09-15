@@ -573,6 +573,28 @@ async function main() {
     }
     assert(didThrow, "createSeekable on garbage throws");
 
+    // A forged group still opens (groups are checked on access), then throws.
+    {
+      const probe = zxc.createSeekable(compressed);
+      const n = probe.numBlocks();
+      probe.free();
+      const forged = compressed.slice();
+      const tableBytes = Math.ceil(n / 64) * 8 + n * 4;
+      forged[forged.length - 8 - tableBytes] ^= 0xff; // group 0's anchor, before the 8-byte footer
+      const sf = zxc.createSeekable(forged);
+      try {
+        let threw = false;
+        try {
+          sf.blockCompressedSize(0);
+        } catch (_) {
+          threw = true;
+        }
+        assert(threw, "blockCompressedSize on a forged group throws");
+      } finally {
+        sf.free();
+      }
+    }
+
     // Low-level seek table helpers.
     const compSizes = [128, 256, 200, 4];
     const tableSize = zxc.seekTableSize(compSizes.length);
