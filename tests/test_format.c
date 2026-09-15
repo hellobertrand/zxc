@@ -1084,3 +1084,114 @@ int test_forged_block_comp_size() {
     printf("PASS\n\n");
     return 1;
 }
+
+/* Every protected bit must move its checksum. Both hashes are multiplicative:
+ * a flipped bit shifts the result by an amount fixed by the constants and the
+ * flip's sign, so the guarantee is re-derived here from the constants and a
+ * constant that opens a hole fails the suite. Block header: every bit. File
+ * header: every bit and every pair. */
+int test_header_checksum_single_bit() {
+    printf("=== TEST: every header bit moves its checksum ===\n");
+
+    const int rounds = 4000;
+    uint32_t seed = 0x5EED1234u;
+
+    // Block header: bytes 0-6 are covered, byte 7 holds the checksum.
+    for (int r = 0; r < rounds; r++) {
+        uint8_t h[ZXC_BLOCK_HEADER_SIZE];
+        for (size_t i = 0; i < sizeof(h); i++) {
+            seed = seed * 1664525u + 1013904223u;
+            h[i] = (uint8_t)(seed >> 24);
+        }
+        h[7] = 0;
+        const uint8_t ref = zxc_hash8(h);
+        for (int bit = 0; bit < 56; bit++) {
+            h[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            const uint8_t got = zxc_hash8(h);
+            h[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            if (got == ref) {
+                printf("  [FAIL] hash8: flipping byte %d bit %d leaves 0x%02X\n", bit >> 3, bit & 7,
+                       ref);
+                return 0;
+            }
+        }
+    }
+    printf("  [PASS] hash8: all 56 bits, %d headers\n", rounds);
+
+    // File header: bytes 0-13 are covered, bytes 14-15 hold the checksum.
+    for (int r = 0; r < rounds; r++) {
+        uint8_t h[ZXC_FILE_HEADER_SIZE];
+        for (size_t i = 0; i < sizeof(h); i++) {
+            seed = seed * 1664525u + 1013904223u;
+            h[i] = (uint8_t)(seed >> 24);
+        }
+        h[14] = 0;
+        h[15] = 0;
+        const uint16_t ref = zxc_hash16(h);
+        for (int bit = 0; bit < 112; bit++) {
+            h[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            const uint16_t got = zxc_hash16(h);
+            h[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            if (got == ref) {
+                printf("  [FAIL] hash16: flipping byte %d bit %d leaves 0x%04X\n", bit >> 3,
+                       bit & 7, ref);
+                return 0;
+            }
+        }
+    }
+    printf("  [PASS] hash16: all 112 bits, %d headers\n", rounds);
+
+    // Proof from the constants: bit k of the first half shifts the result by
+    // +/- 2^k * P2 * P1, of the second half by +/- 2^k * P1. A flip can pass
+    // only if the net shift's top halfword is 0x0000 or 0xFFFF.
+    {
+        uint64_t c[112];
+        for (int k = 0; k < 64; k++) c[k] = ((1ULL << k) * ZXC_HASH_PRIME2) * ZXC_HASH_PRIME1;
+        for (int k = 0; k < 48; k++) c[64 + k] = (1ULL << k) * ZXC_HASH_PRIME1;
+        for (int a = 0; a < 112; a++) {
+            for (int b = a; b < 112; b++) { /* b == a: weight 1 */
+                for (unsigned sg = 0; sg < 4u; sg++) {
+                    if (b == a && sg > 1) break;
+                    uint64_t d = (sg & 1u) ? 0 - c[a] : c[a];
+                    if (b != a) d += (sg & 2u) ? 0 - c[b] : c[b];
+                    const unsigned top = (unsigned)(d >> 48);
+                    if (top == 0 || top == 0xFFFFu) {
+                        printf("  [FAIL] hash16: bits %d,%d can cancel in the top halfword\n", a,
+                               b);
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+    printf("  [PASS] hash16: no 1- or 2-bit error can pass, proven from the constants\n");
+
+    // The real function, every bit pair, on 8 random headers.
+    for (int r = 0; r < 8; r++) {
+        uint8_t h[ZXC_FILE_HEADER_SIZE];
+        for (size_t i = 0; i < sizeof(h); i++) {
+            seed = seed * 1664525u + 1013904223u;
+            h[i] = (uint8_t)(seed >> 24);
+        }
+        h[14] = 0;
+        h[15] = 0;
+        const uint16_t ref = zxc_hash16(h);
+        for (int a = 0; a < 112; a++) {
+            h[a >> 3] ^= (uint8_t)(1u << (a & 7));
+            for (int b = a + 1; b < 112; b++) {
+                h[b >> 3] ^= (uint8_t)(1u << (b & 7));
+                const int same = zxc_hash16(h) == ref;
+                h[b >> 3] ^= (uint8_t)(1u << (b & 7));
+                if (same) {
+                    printf("  [FAIL] hash16: bits %d,%d flipped, checksum unchanged\n", a, b);
+                    return 0;
+                }
+            }
+            h[a >> 3] ^= (uint8_t)(1u << (a & 7));
+        }
+    }
+    printf("  [PASS] hash16: weight 2 exhaustive on 8 headers\n");
+
+    printf("PASS\n\n");
+    return 1;
+}
