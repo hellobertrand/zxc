@@ -1329,8 +1329,9 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r);
 
 Opens a seekable archive through a user-supplied reader. The reader is invoked
 to fetch the file header, footer, and the EOF/SEK block headers at open time
-(3 reads, whatever the block count), then once per range for the seek table
-entries it covers and once per block during decompression. No `FILE*` is involved — this is the
+(3 reads, whatever the block count), then once per slice of 64 seek table
+entries a range covers and once per block during decompression;
+`zxc_seekable_get_block_comp_size()` reads one entry per call. No `FILE*` is involved — this is the
 entry point to use for kernel space, networked storage, or any non-POSIX
 backend.
 

@@ -241,12 +241,13 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
         zxc_seekable_free(control);
 
         zxc_seekable* s = zxc_seekable_open(comp, comp_sz);
+        const int opened = s != NULL;
         uint8_t first;
-        const int64_t got = s ? zxc_seekable_decompress_range(s, &first, 1, 0, 1) : 0;
+        const int64_t got = opened ? zxc_seekable_decompress_range(s, &first, 1, 0, 1) : 0;
         zxc_seekable_free(s);
-        if (!s || got != ZXC_ERROR_CORRUPT_DATA) {
+        if (!opened || got != ZXC_ERROR_CORRUPT_DATA) {
             fprintf(stderr, "FAIL: %s  forged seek entry: open %s, block 0 read -> %lld\n",
-                    zxc_path, s ? "ok" : "refused", (long long)got);
+                    zxc_path, opened ? "ok" : "refused", (long long)got);
             free(comp);
             return 0;
         }

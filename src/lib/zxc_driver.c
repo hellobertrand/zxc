@@ -447,10 +447,21 @@ static void* zxc_async_writer(void* arg) {
         // Seekable: record compressed block size
         if (args->seek_comp && ctx->compression_mode == 1) {
             if (UNLIKELY(args->seek_count >= args->seek_cap)) {
-                args->seek_cap =
-                    args->seek_cap < (UINT32_MAX >> 1) ? args->seek_cap * 2 : UINT32_MAX;
-                uint32_t* nc =
-                    (uint32_t*)ZXC_REALLOC(args->seek_comp, args->seek_cap * sizeof(uint32_t));
+                // Blocks are indexed by uint32_t: past UINT32_MAX entries (or
+                // what size_t can address) there is nowhere to grow; fail
+                // rather than wrap the count into a truncated table.
+                const size_t max_cap = SIZE_MAX / sizeof(uint32_t) < UINT32_MAX
+                                           ? SIZE_MAX / sizeof(uint32_t)
+                                           : UINT32_MAX;
+                uint32_t* nc = NULL;
+                if (LIKELY(args->seek_cap < max_cap)) {
+                    args->seek_cap =
+                        args->seek_cap < max_cap / 2 ? args->seek_cap * 2 : (uint32_t)max_cap;
+                    nc = (uint32_t*)ZXC_REALLOC(args->seek_comp,
+                                                (size_t)args->seek_cap * sizeof(uint32_t));
+                } else if (!ctx->fail_code) {
+                    ctx->fail_code = ZXC_ERROR_OVERFLOW;  // LCOV_EXCL_LINE
+                }
                 // LCOV_EXCL_START
                 if (UNLIKELY(!nc)) {
                     pthread_mutex_lock(&ctx->lock);
@@ -690,21 +701,17 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
     if (UNLIKELY(fread(peek_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in) != ZXC_BLOCK_HEADER_SIZE)) {
         ctx->io_error = 1;
     } else {
+        // The SEK header carries the entries' size modulo 2^32. A footer that
+        // happens to parse as a SEK header (one source size in ~65536) fails
+        // this match and is read as the footer it is.
+        uint64_t remaining =
+            zxc_seek_entries_size(zxc_seek_block_count((uint64_t)w->total_bytes, ctx->chunk_size));
         zxc_block_header_t peek_bh;
         const int is_sek =
             (zxc_read_block_header(peek_buf, ZXC_BLOCK_HEADER_SIZE, &peek_bh) == ZXC_OK &&
-             peek_bh.block_type == ZXC_BLOCK_SEK);
+             peek_bh.block_type == ZXC_BLOCK_SEK && (uint32_t)remaining == peek_bh.comp_size);
 
         if (is_sek) {
-            // One entry per decoded block; the header's field only holds the
-            // size modulo 2^32.
-            const uint64_t nblocks =
-                ctx->chunk_size ? (w->total_bytes + ctx->chunk_size - 1) / ctx->chunk_size : 0;
-            uint64_t remaining = nblocks * ZXC_SEEK_ENTRY_SIZE;
-            if (UNLIKELY((uint32_t)remaining != peek_bh.comp_size)) {
-                ctx->io_error = 1;
-                if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_CORRUPT_DATA;
-            }
             // Drain the SEK payload (read + discard)
             uint8_t discard[512];
             while (remaining > 0 && !ctx->io_error) {

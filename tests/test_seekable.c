@@ -2202,3 +2202,99 @@ int test_seekable_forged_table_entry() {
     printf("PASS\n\n");
     return 1;
 }
+
+/* A forged entry must neither redirect a block to another's bytes nor make the
+ * reader touch memory outside the archive. Both slipped through a span check
+ * done with wrapping arithmetic: an entry near 2^64 wrapped `a + header`, and
+ * one aliasing a neighbour passed while the doubled span fitted one block -
+ * which compressible blocks guarantee. A block with genuine neighbours still decodes. */
+int test_seekable_forged_entry_aliasing(void) {
+    printf("=== TEST: Seekable - forged entries cannot alias or escape the archive ===\n");
+
+    enum { BS = 4096, NB = 4 };
+    uint8_t* src = malloc((size_t)BS * NB);
+    if (!src) return 0;
+    /* Four distinct, highly compressible blocks. */
+    for (size_t b = 0; b < NB; b++)
+        for (size_t i = 0; i < BS; i++) src[b * BS + i] = (uint8_t)('A' + b + (i % 7 == 0));
+
+    const size_t cap = (size_t)zxc_compress_bound((size_t)BS * NB) + 256;
+    uint8_t* arc = malloc(cap);
+    uint8_t* out = malloc(2 * BS);
+    int ok = 0;
+    if (!arc || !out) goto done;
+
+    zxc_compress_opts_t opts = {.level = 3, .seekable = 1, .block_size = BS, .checksum_enabled = 1};
+    const int64_t csz = zxc_compress(src, (size_t)BS * NB, arc, cap, &opts);
+    if (csz <= 0) {
+        printf("  [FAIL] compress: %lld\n", (long long)csz);
+        goto done;
+    }
+    uint8_t* const entries = arc + csz - ZXC_FILE_FOOTER_SIZE - (size_t)NB * ZXC_SEEK_ENTRY_SIZE;
+    uint8_t* const entry1 = entries + ZXC_SEEK_ENTRY_SIZE;
+    const uint64_t e1 = zxc_le64(entry1);
+    const uint64_t e2 = zxc_le64(entries + 2 * ZXC_SEEK_ENTRY_SIZE);
+    const uint64_t e3 = zxc_le64(entries + 3 * ZXC_SEEK_ENTRY_SIZE);
+    const uint64_t eof_off =
+        e3 + ZXC_BLOCK_HEADER_SIZE + zxc_le32(arc + e3 + 3) + ZXC_BLOCK_CHECKSUM_SIZE;
+    const uint64_t entry_max = ZXC_BLOCK_HEADER_SIZE + BS + ZXC_BLOCK_CHECKSUM_SIZE;
+    /* Both forgeries below relied on a wrapped or doubled span still fitting. */
+    if (eof_off + 4 > entry_max || e2 - ZXC_FILE_HEADER_SIZE > entry_max) {
+        printf("  [FAIL] fixture: blocks are not small enough to test aliasing\n");
+        goto done;
+    }
+
+    /* Case 1: entry 1 near 2^64. Block 1 starts there, block 0 ends there and
+     * block 2 follows it: all three are refused. Block 3 must still decode. */
+    zxc_store_le64(entry1, UINT64_MAX - 3);
+    zxc_seekable* s = zxc_seekable_open(arc, (size_t)csz);
+    if (!s) {
+        printf("  [FAIL] wrap: open refused (entries are checked on access)\n");
+        goto done;
+    }
+    int64_t r = zxc_seekable_decompress_range(s, out, 2 * BS, BS, 16);
+    int64_t rmt = zxc_seekable_decompress_range_mt(s, out, 2 * BS, BS, BS + 16, 2);
+    uint32_t sz = zxc_seekable_get_block_comp_size(s, 1);
+    int64_t good = zxc_seekable_decompress_range(s, out, 2 * BS, 3 * BS, 16);
+    zxc_seekable_free(s);
+    if (r != ZXC_ERROR_CORRUPT_DATA || rmt != ZXC_ERROR_CORRUPT_DATA || sz != 0 || good != 16 ||
+        memcmp(out, src + 3 * BS, 16) != 0) {
+        printf("  [FAIL] wrap: st %lld, mt %lld, size %u, block 3 %lld\n", (long long)r,
+               (long long)rmt, sz, (long long)good);
+        goto done;
+    }
+    printf("  [PASS] entry near 2^64 is refused, block 3 still decodes\n");
+    zxc_store_le64(entry1, e1);
+
+    /* Case 2: entry 1 aliases entry 0. Block 1 must not come back as block 0;
+     * blocks 2 and 3, genuine on both sides, must decode. */
+    zxc_store_le64(entry1, ZXC_FILE_HEADER_SIZE);
+    s = zxc_seekable_open(arc, (size_t)csz);
+    if (!s) {
+        printf("  [FAIL] alias: open refused\n");
+        goto done;
+    }
+    r = zxc_seekable_decompress_range(s, out, 2 * BS, BS, 16);
+    rmt = zxc_seekable_decompress_range_mt(s, out, 2 * BS, BS, BS + 16, 2);
+    sz = zxc_seekable_get_block_comp_size(s, 1);
+    good = zxc_seekable_decompress_range(s, out, 2 * BS, 2 * BS, 16);
+    const int good2 = good == 16 && memcmp(out, src + 2 * BS, 16) == 0;
+    good = zxc_seekable_decompress_range(s, out, 2 * BS, 3 * BS, 16);
+    const int good3 = good == 16 && memcmp(out, src + 3 * BS, 16) == 0;
+    zxc_seekable_free(s);
+    if (r != ZXC_ERROR_CORRUPT_DATA || rmt != ZXC_ERROR_CORRUPT_DATA || sz != 0 || !good2 ||
+        !good3) {
+        printf("  [FAIL] alias: st %lld, mt %lld, size %u, blocks 2/3 %d/%d\n", (long long)r,
+               (long long)rmt, sz, good2, good3);
+        goto done;
+    }
+    printf("  [PASS] entry aliasing a neighbour is refused, blocks 2 and 3 still decode\n");
+
+    ok = 1;
+    printf("PASS\n\n");
+done:
+    free(src);
+    free(arc);
+    free(out);
+    return ok;
+}

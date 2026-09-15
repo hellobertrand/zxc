@@ -435,6 +435,23 @@ extern "C" {
 /** @brief Per-block entry: byte offset of the block from the archive start (u64
  *  LE). Its size runs to the next entry, or to the EOF block for the last one. */
 #define ZXC_SEEK_ENTRY_SIZE 8
+
+/**
+ * @brief Blocks in @p total_decomp bytes cut into @p block_size chunks: the seek
+ *        table's entry count, derived here everywhere - the SEK header's field
+ *        only holds the entries' size modulo 2^32.
+ */
+static ZXC_ALWAYS_INLINE uint64_t zxc_seek_block_count(const uint64_t total_decomp,
+                                                       const size_t block_size) {
+    return block_size ? (total_decomp + block_size - 1) / block_size : 0;
+}
+
+/**
+ * @brief Byte size of the seek table's entries for @p nblocks blocks, in full.
+ */
+static ZXC_ALWAYS_INLINE uint64_t zxc_seek_entries_size(const uint64_t nblocks) {
+    return nblocks * ZXC_SEEK_ENTRY_SIZE;
+}
 /** @} */ /* end of Seekable Format Constants */
 
 /** @name GLO Token Constants
@@ -1019,8 +1036,8 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
  * - `ZXC_BLOCK_GHI` (2): the speed path, levels 1 and 2. Fixed 4-byte sequence
  *   records and always-RAW literals make every section size derivable from the
  *   header, so it carries no descriptor at all.
- * - `ZXC_BLOCK_SEK` (254): seek table, holding per-block compressed and
- *   decompressed sizes. Sits between the EOF block and the file footer.
+ * - `ZXC_BLOCK_SEK` (254): seek table, one 64-bit start offset per block.
+ *   Sits between the EOF block and the file footer.
  * - `ZXC_BLOCK_EOF` (255): end-of-file marker.
  */
 typedef enum {

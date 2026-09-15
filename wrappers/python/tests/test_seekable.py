@@ -148,7 +148,8 @@ class TestSeekableReader:
             before = calls[0]
             chunk = s.decompress_range(2048, 1024)
             assert chunk == payload[2048 : 2048 + 1024]
-            assert calls[0] - before == 1
+            # Its seek table entries, then the block.
+            assert calls[0] - before == 2
 
     def test_reader_exception_propagates(self, tmp_path):
         # The reader's own exception (with its message) must reach the caller,
@@ -169,6 +170,26 @@ class TestSeekableReader:
         with zxc.Seekable(BadReader()) as s:
             with pytest.raises(IOError, match="boom"):
                 s.decompress_range(0, len(payload))
+
+    def test_block_compressed_size_reader_exception_propagates(self, tmp_path):
+        # block_compressed_size reads the block's entry through the reader too:
+        # its exception must reach the caller, not come back as a size of 0.
+        payload = build_payload(128 * 1024)
+        compressed = build_seekable_archive_stream(payload, tmp_path)
+        attempted = [0]
+
+        class BadReader:
+            size = len(compressed)
+
+            def read_at(self, length, offset):
+                attempted[0] += 1
+                if attempted[0] > 3:  # header, footer, block headers; then the entry
+                    raise IOError("boom")
+                return compressed[offset : offset + length]
+
+        with zxc.Seekable(BadReader()) as s:
+            with pytest.raises(IOError, match="boom"):
+                s.block_compressed_size(0)
 
     def test_reader_multithreaded_decode(self, tmp_path):
         # Regression: multi-threaded decode with a Python reader used to

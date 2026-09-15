@@ -96,8 +96,8 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open(const void* src, const size_t src_siz
  *
  * @par Thread safety
  * @c read_at MUST be safe to call concurrently when the handle is used with
- * zxc_seekable_decompress_range_mt(). The single-threaded path never overlaps
- * calls.
+ * zxc_seekable_decompress_range_mt(); zxc_seekable_get_block_comp_size() reads
+ * through it too. The single-threaded path never overlaps calls.
  *
  * @par Lifetime
  * @c ctx and the backing storage must both outlive the zxc_seekable handle
@@ -127,8 +127,8 @@ typedef struct {
 /**
  * @brief Opens a seekable archive through a user-supplied reader.
  *
- * The reader fetches the file header, footer and seek table at open time, then
- * every block during decompression. This is the entry point for backing the
+ * Three reads at open (file header, footer, EOF/SEK headers), then per range
+ * its seek table entries and every block decoded. This is the entry point for backing the
  * seekable API with any storage that does positional reads (mmap, HTTP, S3, a
  * kernel file descriptor).
  *
@@ -156,8 +156,8 @@ ZXC_EXPORT uint64_t zxc_seekable_get_decompressed_size(const zxc_seekable* s);
 /**
  * @brief Returns the compressed size of a specific block.
  *
- * The on-disk size: block header + payload + optional per-block checksum, read
- * from the block's seek table entry.
+ * The on-disk size: block header + payload + optional per-block checksum, from
+ * the block's seek table entry - one read through the reader per call.
  *
  * @param[in] s          Seekable handle.
  * @param[in] block_idx  Zero-based block index.

@@ -483,7 +483,9 @@ the table is not bounded by that field.
 5. Seek backward by `seek_block_size` bytes from the start of the footer to read the Block Header.
 6. Validate that Block Type is `254` (SEK) and Compressed Payload Size is `(N × 8) mod 2^32`,
    and that an EOF block header sits 8 bytes before it.
-7. Nothing else is read at open: a decoder validates an entry when it accesses the block.
+7. Nothing else is read at open: a decoder validates an entry when it accesses the block,
+   including against the entry before it, and rejects a block whose own header disagrees
+   with the span its entries describe.
    Offsets must increase, stay within `[16, EOF block)`, and each block must span
    `[8, 8 + block_size + checksum_size]` bytes.
 
