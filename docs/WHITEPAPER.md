@@ -514,7 +514,7 @@ The default `rapidhash` algorithm is based on wyhash and was developed by Nicola
 ### 5.9 Seekable Archives (Random Access)
 ZXC supports **O(1)** random-access decompression without decoding the entire stream. This is achieved by appending an optional **Seek Table** (a `SEK` block) at the end of the archive, immediately before the file footer.
 
-*   **Structure**: The seek table contains an array of 4-byte entries (compressed block size, LE uint32) for every block in the archive.
+*   **Structure**: The seek table is a sequence of groups of 64 blocks: a `u64` anchor (the group's first block offset from the archive start) followed by one `u32` on-disk size per block - about 4.1 bytes per block. A block is located from its group's anchor and the sizes before it, one bounded read whatever the archive size; each group's sizes must sum to the next anchor, so a forged entry is caught when its group is loaded, and nothing of the table stays in memory.
 *   **Performance**: Reading backward from the file footer instantly locates the seek table. Since blocks have a fixed power-of-2 size, the target block is found by a single division (`block_index = offset / block_size`), with no binary search required.
 *   **Use Cases**: This feature transforms ZXC from a sequential stream into a random-access volume format.
 

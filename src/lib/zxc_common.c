@@ -764,7 +764,7 @@ uint64_t zxc_compress_bound(const size_t input_size) {
            (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + ZXC_BLOCK_FORMAT_OVERHEAD)) +
            (uint64_t)input_size + ZXC_BLOCK_HEADER_SIZE + /* EOF block */
            ZXC_BLOCK_HEADER_SIZE +                        /* SEK block header (seekable) */
-           (n * ZXC_SEEK_ENTRY_SIZE) +                    /* SEK entries: 4 bytes per block */
+           zxc_seek_table_bytes(n) +                      /* SEK groups (seekable) */
            ZXC_FILE_FOOTER_SIZE;
 }
 

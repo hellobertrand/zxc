@@ -253,7 +253,7 @@ func TestSeekableOpenReader(t *testing.T) {
 		t.Fatalf("payload mismatch after full DecompressRange")
 	}
 
-	// Sub-range within a single block: must trigger exactly one extra read.
+	// Sub-range within a single block: its seek table entries, then the block.
 	before := atomic.LoadInt64(&cr.calls)
 	chunk := make([]byte, 1024)
 	if _, err := s.DecompressRange(chunk, 100, 1024); err != nil {
@@ -262,8 +262,8 @@ func TestSeekableOpenReader(t *testing.T) {
 	if !bytes.Equal(chunk, payload[100:1124]) {
 		t.Fatalf("sub-range mismatch")
 	}
-	if delta := atomic.LoadInt64(&cr.calls) - before; delta != 1 {
-		t.Fatalf("single-block sub-range should trigger 1 read, got %d", delta)
+	if delta := atomic.LoadInt64(&cr.calls) - before; delta != 2 {
+		t.Fatalf("single-block sub-range should trigger 2 reads (entries, block), got %d", delta)
 	}
 }
 
