@@ -423,32 +423,43 @@ extern "C" {
 /** @name Seekable Format Constants
  *  @brief Seek table block appended between EOF block and footer.
  *
- *  The seek table is optional (opt-in at compression time) and allows
- *  random-access decompression by recording per-block compressed and
- *  decompressed sizes.  It uses a standard ZXC block header with
- *  @c block_type = @c ZXC_BLOCK_SEK.
- *
- *  Detection from the end of the file: the reader derives @c num_blocks
- *  from the file footer (total decompressed size) and file header (block size).
- *  It then seeks backward to validate the SEK block header.
+ *  Optional: a @c ZXC_BLOCK_SEK block of groups, each a u64 anchor (its first
+ *  block's offset) then one u32 on-disk size per block. Readers derive the block
+ *  count from the footer and read groups on access; the header's size field
+ *  holds the table size modulo 2^32.
  *  @{ */
-/** @brief Per-block entry size: comp_size(4) only.  decomp_size is derived
- *  from the file header's block_size (all blocks except the last are full). */
-#define ZXC_SEEK_ENTRY_SIZE 4
+/** @brief Blocks per group. A format constant: changing it is a version bump. */
+#define ZXC_SEEK_GROUP 64U
+/** @brief Group anchor: offset of its first block, u64. */
+#define ZXC_SEEK_ANCHOR_SIZE 8U
+/** @brief One block's on-disk size, u32. */
+#define ZXC_SEEK_SIZE_ENTRY 4U
+/** @brief Full group: anchor + ZXC_SEEK_GROUP sizes. */
+#define ZXC_SEEK_GROUP_BYTES (ZXC_SEEK_ANCHOR_SIZE + ZXC_SEEK_GROUP * ZXC_SEEK_SIZE_ENTRY)
 
 /** @brief Blocks in @p total_decomp bytes of @p block_size: the seek table's entry
  *  count, which the SEK header's field (table size modulo 2^32) cannot give. */
 static ZXC_ALWAYS_INLINE uint64_t zxc_seek_block_count(const uint64_t total_decomp,
                                                        const size_t block_size) {
-    // Not (total + bs - 1) / bs: it wraps near 2^64, turning a forged footer into 0 blocks.
-    return block_size ? total_decomp / block_size + (total_decomp % block_size != 0) : 0;
+    return block_size ? (total_decomp + block_size - 1) / block_size : 0;
 }
 
-/** @brief Byte size of the seek table's entries for @p nblocks blocks, before the
- *  header's modulo 2^32. */
-static ZXC_ALWAYS_INLINE uint64_t zxc_seek_table_bytes(const uint64_t nblocks) {
-    return nblocks * ZXC_SEEK_ENTRY_SIZE;
+/** @brief Groups holding @p nblocks blocks; the last one may be partial. */
+static ZXC_ALWAYS_INLINE uint64_t zxc_seek_group_count(const uint64_t nblocks) {
+    return (nblocks + ZXC_SEEK_GROUP - 1) / ZXC_SEEK_GROUP;
 }
+
+/** @brief Blocks in group @p g of @p nblocks: ZXC_SEEK_GROUP, fewer for the last. */
+static ZXC_ALWAYS_INLINE uint32_t zxc_seek_group_len(const uint64_t nblocks, const uint64_t g) {
+    const uint64_t left = nblocks - g * ZXC_SEEK_GROUP;
+    return left < ZXC_SEEK_GROUP ? (uint32_t)left : ZXC_SEEK_GROUP;
+}
+
+/** @brief Byte size of the groups for @p nblocks blocks, before the header's modulo 2^32. */
+static ZXC_ALWAYS_INLINE uint64_t zxc_seek_table_bytes(const uint64_t nblocks) {
+    return zxc_seek_group_count(nblocks) * ZXC_SEEK_ANCHOR_SIZE + nblocks * ZXC_SEEK_SIZE_ENTRY;
+}
+
 /** @} */ /* end of Seekable Format Constants */
 
 /** @name GLO Token Constants
@@ -1035,8 +1046,8 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
  * - `ZXC_BLOCK_GHI` (2): the speed path, levels 1 and 2. Fixed 4-byte sequence
  *   records and always-RAW literals make every section size derivable from the
  *   header, so it carries no descriptor at all.
- * - `ZXC_BLOCK_SEK` (254): seek table, holding per-block compressed and
- *   decompressed sizes. Sits between the EOF block and the file footer.
+ * - `ZXC_BLOCK_SEK` (254): seek table, one 64-bit start offset per block.
+ *   Sits between the EOF block and the file footer.
  * - `ZXC_BLOCK_EOF` (255): end-of-file marker.
  */
 typedef enum {
@@ -2156,6 +2167,23 @@ static ZXC_ALWAYS_INLINE int zxc_tail_gap_ok(const uint8_t* gap, const uint64_t 
  * @param[in]     ctx  Pointer previously returned by @c ZXC_MALLOC / @c ZXC_CALLOC.
  */
 void zxc_seekable_attach_owned_ctx(zxc_seekable* s, void* ctx);
+
+/**
+ * @brief Writes a seek table's block header for @p num_blocks entries.
+ *
+ * Shared with the streaming writer, which emits the entries in slices after it.
+ *
+ * @return @ref ZXC_BLOCK_HEADER_SIZE, or a negative @ref zxc_error_t.
+ */
+int zxc_seek_table_header(uint8_t* dst, size_t dst_capacity, uint32_t num_blocks);
+
+/**
+ * @brief Writes one group (@p anchor, then @p cnt sizes) into @p dst: the one place
+ *        the layout is produced. @p dst holds ZXC_SEEK_GROUP_BYTES.
+ * @return Bytes written.
+ */
+size_t zxc_seek_write_group(uint8_t* RESTRICT dst, uint64_t anchor, const uint32_t* RESTRICT sizes,
+                            uint32_t cnt);
 
 /** @} */ /* end of internal */
 

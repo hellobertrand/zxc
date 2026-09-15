@@ -1955,7 +1955,18 @@ static PyObject* pyzxc_seekable_block_comp_size(PyObject* self, PyObject* args) 
     if (!s) return NULL;
 
     if (idx >= zxc_seekable_get_num_blocks(s)) Py_RETURN_NONE;
-    return PyLong_FromUnsignedLong(zxc_seekable_get_block_comp_size(s, idx));
+    /* Reads the entry through the reader; the trampoline attaches to the
+     * interpreter itself, so the GIL can stay held around this short call. */
+    const uint32_t sz = zxc_seekable_get_block_comp_size(s, idx);
+    if (sz == 0) {
+        /* 0 is never a real size: the entry could not be read or is invalid.
+         * Prefer the reader's own exception (with traceback) when it caused it. */
+        pyzxc_seekable_holder_t* h =
+            (pyzxc_seekable_holder_t*)PyCapsule_GetPointer(capsule, ZXC_SEEKABLE_CAPSULE);
+        if (h && seekable_restore_exception(h)) return NULL;
+        Py_Return_Err(PyExc_RuntimeError, "seek table entry unreadable or invalid");
+    }
+    return PyLong_FromUnsignedLong(sz);
 }
 
 static PyObject* pyzxc_seekable_block_decomp_size(PyObject* self, PyObject* args) {

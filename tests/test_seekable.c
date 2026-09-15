@@ -11,12 +11,12 @@
 int test_seekable_table_sizes() {
     printf("=== TEST: Seekable - Table Sizes ===\n");
 
-    /* block_header(8) + 10*4 = 48 */
-    if (zxc_seek_table_size(10) != 48) {
+    /* block_header(8) + one group: anchor(8) + 10*4 = 56 */
+    if (zxc_seek_table_size(10) != 56) {
         printf("Failed: size for 10 blocks\n");
         return 0;
     }
-    /* block_header(8) + 0 = 8 */
+    /* block_header(8) + no group = 8 */
     if (zxc_seek_table_size(0) != 8) {
         printf("Failed: zero blocks size\n");
         return 0;
@@ -48,9 +48,11 @@ int test_seekable_table_write() {
         return 0;
     }
 
-    /* Validate first comp_size entry (after 8-byte block header) */
-    if (zxc_le32(buf + 8) != 100) {
-        printf("Failed: bad first comp_size\n");
+    /* Size field: one group, anchor(8) + 3 sizes x 4 = 20, low 32 bits. The
+     * group: where block 0 starts, then each block's on-disk size. */
+    if (zxc_le32(buf + 3) != 20 || zxc_le64(buf + 8) != 16 || zxc_le32(buf + 16) != 100 ||
+        zxc_le32(buf + 20) != 200 || zxc_le32(buf + 24) != 150) {
+        printf("Failed: bad size field or group\n");
         free(buf);
         return 0;
     }
@@ -1381,7 +1383,7 @@ int test_seekable_open_reader() {
         return 0;
     }
 
-    /* open() should perform exactly 3 reads: header, footer, seek block. */
+    /* open() should perform exactly 3 reads: header, footer, EOF + SEK headers. */
     if (mctx.call_count != 3) {
         printf("Failed: expected 3 reads at open, got %d\n", mctx.call_count);
         zxc_seekable_free(s);
@@ -1434,17 +1436,17 @@ int test_seekable_open_reader() {
         return 0;
     }
 
-    // Lazy I/O: a sub-range inside block 2 only must trigger exactly 1
-    // extra read. read_at is invoked from inside decompress_range via a
-    // function pointer cppcheck cannot follow, so it folds the before/after
-    // comparison to a constant; suppress the two resulting false positives.
+    // Lazy I/O: a sub-range inside block 2 costs exactly 2 reads, its entries
+    // then the block. read_at is reached through a function pointer cppcheck
+    // cannot follow, so it folds the comparison to a constant; suppress the two
+    // false positives.
     const int before = mctx.call_count;
     n = zxc_seekable_decompress_range(s, cross, len, 128 * 1024 + 10, len);
     // cppcheck-suppress duplicateExpression
     const int delta = mctx.call_count - before;
     // cppcheck-suppress knownConditionTrueFalse
-    if (n != (int64_t)len || delta != 1) {
-        printf("Failed: single-block read should trigger 1 read_at (got %d)\n", delta);
+    if (n != (int64_t)len || delta != 2) {
+        printf("Failed: single-block read should trigger 2 read_at (got %d)\n", delta);
         zxc_seekable_free(s);
         free(src);
         free(dst);
@@ -2037,19 +2039,149 @@ int test_seekable_work_buf_tail_pad(void) {
  * deflating the next by the same amount keeps the prefix sum landing on the
  * EOF block, so only the per-entry bound can reject the table.
  */
+/* 2^30 + 5 RAW blocks of 4 KiB served by a callback, four terabytes that never
+ * exist: the old 2^30 cap is gone, open costs three reads, nothing is loaded. */
+#define SYNTH_BS 4096u
+#define SYNTH_BLK (ZXC_BLOCK_HEADER_SIZE + SYNTH_BS)
+
+typedef struct {
+    uint64_t n;       /* block count */
+    uint64_t eof_off; /* EOF block header: 16 + n * SYNTH_BLK */
+    uint64_t size;    /* whole archive */
+    uint8_t file_hdr[ZXC_FILE_HEADER_SIZE];
+    uint8_t blk_hdr[ZXC_BLOCK_HEADER_SIZE]; /* every block is RAW, full, same header */
+    uint8_t eof_hdr[ZXC_BLOCK_HEADER_SIZE];
+    uint8_t sek_hdr[ZXC_BLOCK_HEADER_SIZE];
+    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
+    int counting; /* cleared before the multi-threaded read: workers only read it */
+    int calls;
+} synth_ctx_t;
+
+static uint8_t synth_payload(const uint64_t blk, const uint32_t pos) {
+    return (uint8_t)(blk * 7u + (blk >> 11) + pos * 13u);
+}
+
+static uint8_t synth_byte(const synth_ctx_t* c, uint64_t off) {
+    if (off < ZXC_FILE_HEADER_SIZE) return c->file_hdr[off];
+    if (off < c->eof_off) {
+        const uint64_t rel = off - ZXC_FILE_HEADER_SIZE;
+        const uint32_t in = (uint32_t)(rel % SYNTH_BLK);
+        return in < ZXC_BLOCK_HEADER_SIZE
+                   ? c->blk_hdr[in]
+                   : synth_payload(rel / SYNTH_BLK, in - ZXC_BLOCK_HEADER_SIZE);
+    }
+    off -= c->eof_off;
+    if (off < ZXC_BLOCK_HEADER_SIZE) return c->eof_hdr[off];
+    off -= ZXC_BLOCK_HEADER_SIZE;
+    if (off < ZXC_BLOCK_HEADER_SIZE) return c->sek_hdr[off];
+    off -= ZXC_BLOCK_HEADER_SIZE;
+    const uint64_t table = zxc_seek_table_bytes(c->n);
+    if (off < table) {
+        /* Group j: anchor 16 + j * GROUP * SYNTH_BLK, then sizes all SYNTH_BLK, LE. */
+        const uint64_t j = off / ZXC_SEEK_GROUP_BYTES;
+        const uint64_t in = off % ZXC_SEEK_GROUP_BYTES;
+        if (in < ZXC_SEEK_ANCHOR_SIZE) {
+            const uint64_t v = ZXC_FILE_HEADER_SIZE + j * ZXC_SEEK_GROUP * SYNTH_BLK;
+            return (uint8_t)(v >> (8 * in));
+        }
+        return (uint8_t)((uint32_t)SYNTH_BLK >>
+                         (8 * ((in - ZXC_SEEK_ANCHOR_SIZE) % ZXC_SEEK_SIZE_ENTRY)));
+    }
+    off -= table;
+    return c->footer[off];
+}
+
+static int64_t synth_read_at(void* ctx, void* dst, size_t len, uint64_t offset) {
+    synth_ctx_t* c = (synth_ctx_t*)ctx;
+    if (c->counting) c->calls++;
+    if (offset > c->size || len > c->size - offset) return -1;
+    uint8_t* d = (uint8_t*)dst;
+    for (size_t i = 0; i < len; i++) d[i] = synth_byte(c, offset + i);
+    return (int64_t)len;
+}
+
+int test_seekable_beyond_old_cap(void) {
+    printf("=== TEST: Seekable - 2^30 + 5 blocks through a callback, nothing materialised ===\n");
+    if (sizeof(size_t) < 8) {
+        printf("  [SKIP] 64-bit hosts only\n\n");
+        return 1;
+    }
+    synth_ctx_t c;
+    memset(&c, 0, sizeof(c));
+    c.n = (1ULL << 30) + 5;
+    c.counting = 1;
+    c.eof_off = ZXC_FILE_HEADER_SIZE + c.n * SYNTH_BLK;
+    c.size =
+        c.eof_off + 2 * ZXC_BLOCK_HEADER_SIZE + zxc_seek_table_bytes(c.n) + ZXC_FILE_FOOTER_SIZE;
+    const uint64_t total = c.n * SYNTH_BS;
+    const zxc_block_header_t raw = {
+        .block_type = ZXC_BLOCK_RAW, .block_flags = 0, .reserved = 0, .comp_size = SYNTH_BS};
+    const zxc_block_header_t eof = {
+        .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
+    if (zxc_write_file_header(c.file_hdr, sizeof(c.file_hdr), SYNTH_BS, 0, 0) < 0 ||
+        zxc_write_block_header(c.blk_hdr, sizeof(c.blk_hdr), &raw) < 0 ||
+        zxc_write_block_header(c.eof_hdr, sizeof(c.eof_hdr), &eof) < 0 ||
+        zxc_seek_table_header(c.sek_hdr, sizeof(c.sek_hdr), (uint32_t)c.n) < 0 ||
+        zxc_write_file_footer(c.footer, sizeof(c.footer), total) < 0) {
+        printf("  [FAIL] fixture headers\n");
+        return 0;
+    }
+
+    const zxc_reader_t r = {.read_at = synth_read_at, .ctx = &c, .size = c.size};
+    zxc_seekable* s = zxc_seekable_open_reader(&r);
+    uint8_t got[32];
+    uint8_t want[32];
+    int ok = 0;
+    do {
+        if (!s || c.calls != 3) {
+            printf("  [FAIL] open: %s, %d reads\n", s ? "ok" : "NULL", c.calls);
+            break;
+        }
+        if (zxc_seekable_get_num_blocks(s) != (uint32_t)c.n ||
+            zxc_seekable_get_decompressed_size(s) != total) {
+            printf("  [FAIL] geometry\n");
+            break;
+        }
+        /* The archive's last 32 bytes: block 2^30 + 4, above the old cap. */
+        for (int i = 0; i < 32; i++) want[i] = synth_payload(c.n - 1, SYNTH_BS - 32 + (uint32_t)i);
+        if (zxc_seekable_decompress_range(s, got, sizeof(got), total - 32, 32) != 32 ||
+            memcmp(got, want, 32) != 0) {
+            printf("  [FAIL] tail read\n");
+            break;
+        }
+        /* Across blocks 2^30 and 2^30 + 1, multi-threaded. */
+        c.counting = 0;
+        const uint64_t hi = 1ULL << 30;
+        for (int i = 0; i < 16; i++) want[i] = synth_payload(hi, SYNTH_BS - 16 + (uint32_t)i);
+        for (int i = 0; i < 16; i++) want[16 + i] = synth_payload(hi + 1, (uint32_t)i);
+        if (zxc_seekable_decompress_range_mt(s, got, sizeof(got), (hi + 1) * SYNTH_BS - 16, 32,
+                                             2) != 32 ||
+            memcmp(got, want, 32) != 0) {
+            printf("  [FAIL] boundary read\n");
+            break;
+        }
+        if (zxc_seekable_get_block_comp_size(s, 0) != SYNTH_BLK ||
+            zxc_seekable_get_block_comp_size(s, (uint32_t)c.n - 1) != SYNTH_BLK) {
+            printf("  [FAIL] block sizes\n");
+            break;
+        }
+        ok = 1;
+    } while (0);
+    zxc_seekable_free(s);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
 int test_seekable_forged_table_entry() {
     printf("=== TEST: Seekable - Forged Table Entry ===\n");
 
-    const size_t SRC_SIZE = 64 * 1024;
-    const size_t BLOCK_SIZE = 4096;
+    /* Three full groups of compressible blocks: a size can grow without crossing the bound. */
+    enum { BS = 4096, NB = 3 * ZXC_SEEK_GROUP };
+    const size_t SRC_SIZE = (size_t)BS * NB;
     uint8_t* src = malloc(SRC_SIZE);
     if (!src) return 0;
-    /* Incompressible: every block falls back to RAW and sits on the bound. */
-    unsigned rng = 4242u;
-    for (size_t i = 0; i < SRC_SIZE; i++) {
-        rng = rng * 1103515245u + 12345u;
-        src[i] = (uint8_t)(rng >> 24);
-    }
+    for (size_t b = 0; b < NB; b++)
+        for (size_t i = 0; i < BS; i++) src[b * BS + i] = (uint8_t)('A' + b % 23 + (i % 7 == 0));
 
     const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 256;
     uint8_t* dst = malloc(dst_cap);
@@ -2057,7 +2189,7 @@ int test_seekable_forged_table_entry() {
         free(src);
         return 0;
     }
-    zxc_compress_opts_t opts = {.level = 1, .seekable = 1, .block_size = BLOCK_SIZE};
+    zxc_compress_opts_t opts = {.level = 1, .seekable = 1, .block_size = BS};
     const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
     free(src);
     if (csize <= 0) {
@@ -2066,43 +2198,109 @@ int test_seekable_forged_table_entry() {
         return 0;
     }
 
-    const uint32_t num_blocks = (uint32_t)(SRC_SIZE / BLOCK_SIZE);
-    /* [file header][blocks][EOF][SEK header + N*4][footer] */
-    uint8_t* const entries =
-        dst + csize - ZXC_FILE_FOOTER_SIZE - (size_t)num_blocks * sizeof(uint32_t);
-    const uint32_t e0 = zxc_le32(entries);
-    const uint32_t e1 = zxc_le32(entries + sizeof(uint32_t));
-    const uint32_t entry_max = (uint32_t)(ZXC_BLOCK_HEADER_SIZE + BLOCK_SIZE);
+    const uint64_t entry_max = ZXC_BLOCK_HEADER_SIZE + BS;
+    /* [file header][blocks][EOF][SEK header][group 0][group 1][group 2][footer] */
+    uint8_t* const g0 = dst + csize - ZXC_FILE_FOOTER_SIZE - (size_t)zxc_seek_table_bytes(NB);
+    uint8_t* const g1 = g0 + ZXC_SEEK_GROUP_BYTES;
+#define SIZE_AT(i)                                                               \
+    (g0 + ((i) / ZXC_SEEK_GROUP) * ZXC_SEEK_GROUP_BYTES + ZXC_SEEK_ANCHOR_SIZE + \
+     ((i) % ZXC_SEEK_GROUP) * ZXC_SEEK_SIZE_ENTRY)
+    uint8_t* const size0 = SIZE_AT(0);
+    uint8_t* const size1 = SIZE_AT(1);
+    uint8_t* const size_last = SIZE_AT(NB - 1);
+    const uint32_t sz0 = zxc_le32(size0);
+    const uint32_t sz1 = zxc_le32(size1);
+    const size_t cap = 3 * BS;
+    uint8_t* const out = malloc(cap);
 
-    int ok = 1;
-    const uint32_t shift = 4000u;
-    if (e0 != entry_max || e1 != entry_max) {
-        /* Both on the bound: an e1 under `shift` would wrap, and the prefix
-           sum would reject instead of the per-entry bound this test covers. */
-        printf("Failed: expected RAW entries on the bound, got %u and %u (bound %u)\n", e0, e1,
-               entry_max);
+    int ok = out != NULL;
+    if (ok && (zxc_le64(g0) != ZXC_FILE_HEADER_SIZE || sz0 + 8 > entry_max || sz1 < 16)) {
+        printf("Failed: expected compressible blocks with slack (%u, %u)\n", sz0, sz1);
         ok = 0;
     }
     if (ok) {
         zxc_seekable* intact = zxc_seekable_open(dst, (size_t)csize);
-        if (!intact) {
+        if (!intact || zxc_seekable_decompress_range(intact, out, cap, BS, 16) != 16) {
             printf("Failed: intact archive rejected\n");
             ok = 0;
         }
         zxc_seekable_free(intact);
     }
 
-    if (ok) {
-        zxc_store_le32(entries, e0 + shift);
-        zxc_store_le32(entries + sizeof(uint32_t), e1 - shift);
+    /* Groups are checked on access: open succeeds, the forged group is refused,
+     * and so is the group before a forged anchor (its sizes must land on it);
+     * other groups decode. A sum-preserving forge passes the table and is caught
+     * by the block header; the size getter, which reads no block, reports the
+     * table's value. */
+    struct {
+        const char* what;
+        uint8_t* at;
+        int width; /* 8 = anchor, 4 = size */
+        uint64_t value;
+        uint8_t* at2; /* optional second size patch */
+        uint32_t value2;
+        uint32_t bad_blk;
+        uint32_t good_blk;
+        int table_says; /* the getter reports the forged size, not 0 */
+    } cases[] = {
+        {"size 0 pushed up: more than one block", size0, 4, entry_max + 1, NULL, 0, 0,
+         ZXC_SEEK_GROUP, 0},
+        {"size 1 pulled below a header", size1, 4, ZXC_BLOCK_HEADER_SIZE - 1, NULL, 0, 1,
+         ZXC_SEEK_GROUP, 0},
+        {"anchor 0 off the file header", g0, 8, ZXC_FILE_HEADER_SIZE + 1, NULL, 0, 0,
+         ZXC_SEEK_GROUP, 0},
+        {"anchor 1 near 2^64: groups 0 and 1 refused", g1, 8, UINT64_MAX - 3, NULL, 0,
+         ZXC_SEEK_GROUP, 2 * ZXC_SEEK_GROUP, 0},
+        {"last size onto the EOF block: the sum overshoots", size_last, 4, 2 * entry_max, NULL, 0,
+         NB - 1, 0, 0},
+        {"sizes 0 and 1 traded: sum intact, headers disagree", size0, 4, sz0 + 8, size1, sz1 - 8, 0,
+         2, 1},
+    };
+    for (size_t k = 0; ok && k < sizeof(cases) / sizeof(cases[0]); k++) {
+        const uint64_t keep = cases[k].width == 8 ? zxc_le64(cases[k].at) : zxc_le32(cases[k].at);
+        const uint32_t keep2 = cases[k].at2 ? zxc_le32(cases[k].at2) : 0;
+        if (cases[k].width == 8)
+            zxc_store_le64(cases[k].at, cases[k].value);
+        else
+            zxc_store_le32(cases[k].at, (uint32_t)cases[k].value);
+        if (cases[k].at2) zxc_store_le32(cases[k].at2, cases[k].value2);
+
         zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
-        if (s) {
-            printf("Failed: entry of %u accepted, bound is %u\n", e0 + shift, entry_max);
-            zxc_seekable_free(s);
+        if (!s) {
+            printf("Failed: %s: open must not scan the table\n", cases[k].what);
             ok = 0;
+        } else {
+            const uint32_t bad = cases[k].bad_blk;
+            const uint32_t bad_size = cases[k].table_says ? (uint32_t)cases[k].value : 0;
+            const uint32_t good_size = zxc_le32(SIZE_AT(cases[k].good_blk));
+            const uint64_t bad_off = (uint64_t)bad * BS;
+            const int64_t st = zxc_seekable_decompress_range(s, out, cap, bad_off, 16);
+            /* Two blocks of the same group, so the multi-threaded planner loads it. */
+            const uint64_t mt_off =
+                (bad % ZXC_SEEK_GROUP == ZXC_SEEK_GROUP - 1) ? bad_off - BS : bad_off;
+            const int64_t mt = zxc_seekable_decompress_range_mt(s, out, cap, mt_off, BS + 16, 2);
+            const int64_t good =
+                zxc_seekable_decompress_range(s, out, cap, (uint64_t)cases[k].good_blk * BS, 16);
+            if (st != ZXC_ERROR_CORRUPT_DATA || mt != ZXC_ERROR_CORRUPT_DATA || good != 16 ||
+                zxc_seekable_get_block_comp_size(s, bad) != bad_size ||
+                zxc_seekable_get_block_comp_size(s, cases[k].good_blk) != good_size) {
+                printf("Failed: %s: st %lld, mt %lld, good %lld, sizes %u/%u\n", cases[k].what,
+                       (long long)st, (long long)mt, (long long)good,
+                       zxc_seekable_get_block_comp_size(s, bad),
+                       zxc_seekable_get_block_comp_size(s, cases[k].good_blk));
+                ok = 0;
+            }
+            zxc_seekable_free(s);
         }
+        if (cases[k].width == 8)
+            zxc_store_le64(cases[k].at, keep);
+        else
+            zxc_store_le32(cases[k].at, (uint32_t)keep);
+        if (cases[k].at2) zxc_store_le32(cases[k].at2, keep2);
     }
 
+#undef SIZE_AT
+    free(out);
     free(dst);
     if (!ok) return 0;
     printf("PASS\n\n");

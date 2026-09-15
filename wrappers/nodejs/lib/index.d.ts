@@ -386,8 +386,10 @@ export class Seekable {
   decompressedSize(): number;
   /**
    * On-disk compressed size of a specific block (block header +
-   * payload + optional per-block checksum). Returns `null` if
-   * `blockIdx` is out of range.
+   * payload + optional per-block checksum), read from its seek table
+   * entry - through `readAt`, one call per block, on a reader-backed
+   * handle. Returns `null` if `blockIdx` is out of range; throws if the
+   * entry cannot be read or is invalid.
    */
   blockCompressedSize(blockIdx: number): number | null;
   /**

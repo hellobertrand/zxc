@@ -13,10 +13,10 @@
  * them without reading the whole file.
  *
  * A seekable archive carries a Seek Table block (block_type = @c ZXC_BLOCK_SEK)
- * after the EOF block, holding the compressed size of every block. Readers find
- * it by deriving @c num_blocks from the footer's total decompressed size and the
- * header's block size, then seeking backward to validate the SEK block header.
- * Plain decompressors ignore it entirely.
+ * after the EOF block: groups of 64 blocks, each its first block's offset then
+ * every block's on-disk size. Readers derive @c num_blocks from the footer and
+ * read a group when one of its blocks is accessed: open costs the same at any
+ * block count and no table stays in memory. Plain decompressors ignore it.
  *
  * This header is freestanding: only @c <stddef.h>, @c <stdint.h> and the rest
  * of the ZXC public API, no @c <stdio.h>, so kernel-space and other
@@ -77,8 +77,8 @@ typedef struct zxc_seekable_s zxc_seekable;
 /**
  * @brief Opens a seekable archive from a memory buffer.
  *
- * Parses the seek table at the end of the buffer and builds the block index.
- * @p src must stay valid for the lifetime of the handle.
+ * Locates and validates the seek table at the end of the buffer; entries are
+ * read from @p src on access. @p src must stay valid for the lifetime of the handle.
  *
  * @param[in] src       Pointer to the compressed data.
  * @param[in] src_size  Size of the compressed data in bytes.
@@ -95,8 +95,8 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open(const void* src, const size_t src_siz
  *
  * @par Thread safety
  * @c read_at MUST be safe to call concurrently when the handle is used with
- * zxc_seekable_decompress_range_mt(). The single-threaded path never overlaps
- * calls.
+ * zxc_seekable_decompress_range_mt(); zxc_seekable_get_block_comp_size() reads
+ * through it too. The single-threaded path never overlaps calls.
  *
  * @par Lifetime
  * @c ctx and the backing storage must both outlive the zxc_seekable handle
@@ -126,8 +126,8 @@ typedef struct {
 /**
  * @brief Opens a seekable archive through a user-supplied reader.
  *
- * The reader fetches the file header, footer and seek table at open time, then
- * every block during decompression. This is the entry point for backing the
+ * Three reads at open (file header, footer, EOF/SEK headers), then per range its
+ * table groups and every block decoded. This is the entry point for backing the
  * seekable API with any storage that does positional reads (mmap, HTTP, S3, a
  * kernel file descriptor).
  *
@@ -155,11 +155,13 @@ ZXC_EXPORT uint64_t zxc_seekable_get_decompressed_size(const zxc_seekable* s);
 /**
  * @brief Returns the compressed size of a specific block.
  *
- * The on-disk size: block header + payload + optional per-block checksum.
+ * The on-disk size: block header + payload + optional per-block checksum, from
+ * the block's seek table entry - one read through the reader per call.
  *
  * @param[in] s          Seekable handle.
  * @param[in] block_idx  Zero-based block index.
- * @return Compressed block size, or 0 if @p block_idx is out of range.
+ * @return Compressed block size, or 0 if @p block_idx is out of range or its
+ *         entry cannot be read or is invalid.
  */
 ZXC_EXPORT uint32_t zxc_seekable_get_block_comp_size(const zxc_seekable* s,
                                                      const uint32_t block_idx);
@@ -270,8 +272,9 @@ ZXC_EXPORT int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, size_t d
  * @brief Writes a seek table to the destination buffer.
  *
  * Low-level helper used by the seekable compression paths. Layout is
- * block_header(8) + N entries(4 each); an entry stores only @c comp_size,
- * decompressed sizes being derived at read time from the header's block_size.
+ * block_header(8) + groups of 64 blocks, each a u64 anchor (its first block's
+ * offset) then one u32 on-disk size per block; the header's size field holds
+ * the groups' byte size modulo 2^32.
  *
  * @param[out] dst             Destination buffer.
  * @param[in]  dst_capacity    Capacity of @p dst in bytes.
@@ -286,7 +289,7 @@ ZXC_EXPORT int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity,
  * @brief Returns the encoded size of a seek table for the given block count.
  *
  * @param[in] num_blocks     Number of blocks.
- * @return Total byte size of the seek table.
+ * @return Total byte size of the seek table, or 0 when it does not fit @c size_t.
  */
 ZXC_EXPORT size_t zxc_seek_table_size(const uint32_t num_blocks);
 

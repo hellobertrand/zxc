@@ -174,16 +174,24 @@ impl Seekable {
     }
 
     /// On-disk compressed size of a specific block (block header +
-    /// payload + optional per-block checksum).
+    /// payload + optional per-block checksum), read from its seek table
+    /// entry - through the reader, one read per call, on a handle opened
+    /// over one.
     ///
-    /// Returns `None` if `block_idx` is out of range.
+    /// Returns `None` if `block_idx` is out of range, or if the entry
+    /// cannot be read or is invalid.
     pub fn block_compressed_size(&self, block_idx: u32) -> Option<u32> {
         if block_idx >= self.num_blocks() {
             return None;
         }
         let sz =
             unsafe { zxc_sys::zxc_seekable_get_block_comp_size(self.inner.as_ptr(), block_idx) };
-        Some(sz)
+        // 0 is never a real size: the library reports an unreadable or invalid entry that way.
+        if sz == 0 {
+            None
+        } else {
+            Some(sz)
+        }
     }
 
     /// Decompressed size of a specific block.
