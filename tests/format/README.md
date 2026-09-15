@@ -25,8 +25,8 @@ golden.sha256      Byte-stability manifest (sha256sum format)
 | `03_block_ghi.zxc`         | GHI block (level <= 2)                                |
 | `04_block_glo.zxc`         | GLO block (level >= 3)                                |
 | `05_block_glo_huffman.zxc` | Huffman literals, `enc_lit == 2` (§5.2.1)             |
-| `06_checksum_per_block.zxc`| Per-block checksum + non-zero global hash             |
-| `07_multiple_blocks.zxc`   | Several blocks → rolling global hash (§7.3)           |
+| `06_checksum_per_block.zxc`| Per-block checksum (§7.2)                             |
+| `07_multiple_blocks.zxc`   | Several blocks → position-seeded checksums (§7.2)     |
 | `08_seekable_table.zxc`    | SEK seek-table block (§5.5)                           |
 | `09_block_dict.zxc`        | Raw in-memory dictionary, content-only `dict_id`      |
 | `10_glo_offset16.zxc`      | 16-bit offsets, `enc_off == 0`                        |
@@ -35,8 +35,9 @@ golden.sha256      Byte-stability manifest (sha256sum format)
 | `13_glo_huffman_wide.zxc`  | Level 7 (ULTRA) Huffman literals                      |
 
 `test_golden.c` walks each file against `docs/FORMAT.md` — headers, block
-structure, section descriptors, the SEK entries, both checksum layers and the
-footer — then decompresses it and compares with its regenerated input. The
+structure, section descriptors, the SEK entries, the block checksums (recomputed
+from the regenerated input, block by block) and the footer — then decompresses
+it and compares with its regenerated input. The
 annotated dumps below list exactly which fields that walk reads.
 
 ## Running

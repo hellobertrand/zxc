@@ -2165,3 +2165,65 @@ int test_dict_id_collision_caught_by_checksum(void) {
     if (ok) printf("PASS\n\n");
     return ok;
 }
+
+/* Checksums seeded by one dictionary path must verify through the others. */
+int test_dict_checksum_cross_paths(void) {
+    printf("=== TEST: Dictionary - block checksums agree across paths ===\n");
+    enum { DSZ = 2048, BS = 4096, N = 4 * BS };
+    static uint8_t dict[DSZ], src[N], arc[2 * N], out[N];
+    uint32_t s = 0x1234567u;
+    for (int i = 0; i < DSZ; i++) {
+        s = s * 1103515245u + 12345u;
+        dict[i] = (uint8_t)(s >> 16);
+    }
+    /* Built from slices of the dictionary, so the encoder emits matches into it. */
+    for (size_t i = 0; i < N; i += 128) memcpy(src + i, dict + ((i / 128 * 57) % (DSZ - 128)), 128);
+
+    zxc_compress_opts_t co = {.level = 3, .block_size = BS, .checksum_enabled = 1};
+    co.dict = dict;
+    co.dict_size = DSZ;
+    zxc_compress_opts_t seek_co = co;
+    seek_co.seekable = 1;
+    zxc_decompress_opts_t verify = {.checksum_enabled = 1};
+    verify.dict = dict;
+    verify.dict_size = DSZ;
+
+    zxc_cctx* const cctx = zxc_create_cctx(NULL);
+    zxc_dctx* const dctx = zxc_create_dctx();
+    int ok = 0;
+    do {
+        if (!cctx || !dctx) break;
+        /* Context writer, one-shot reader. */
+        const int64_t n = zxc_compress_cctx(cctx, src, N, arc, sizeof(arc), &co);
+        const int64_t one = n > 0 ? zxc_decompress(arc, (size_t)n, out, N, &verify) : -1;
+        const int one_ok = one == N && memcmp(out, src, N) == 0;
+
+        /* One-shot writer, context and seekable readers. */
+        const int64_t m = zxc_compress(src, N, arc, sizeof(arc), &seek_co);
+        const int64_t ctxd =
+            m > 0 ? zxc_decompress_dctx(dctx, arc, (size_t)m, out, N, &verify) : -1;
+        const int ctx_ok = ctxd == N && memcmp(out, src, N) == 0;
+        zxc_seekable* const sk = m > 0 ? zxc_seekable_open(arc, (size_t)m) : NULL;
+        int64_t st = -1, mt = -1;
+        int st_ok = 0, mt_ok = 0;
+        if (sk && zxc_seekable_set_dict(sk, dict, DSZ, NULL) == ZXC_OK &&
+            zxc_seekable_set_checksum(sk, 1) == ZXC_OK) {
+            st = zxc_seekable_decompress_range(sk, out, N, 0, N);
+            st_ok = st == N && memcmp(out, src, N) == 0;
+            mt = zxc_seekable_decompress_range_mt(sk, out, N, 0, N, 4);
+            mt_ok = mt == N && memcmp(out, src, N) == 0;
+        }
+        zxc_seekable_free(sk);
+
+        if (!one_ok || !ctx_ok || !st_ok || !mt_ok) {
+            printf("  [FAIL] one-shot %lld, context %lld, seekable st %lld / mt %lld\n",
+                   (long long)one, (long long)ctxd, (long long)st, (long long)mt);
+            break;
+        }
+        ok = 1;
+    } while (0);
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}

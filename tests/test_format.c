@@ -639,29 +639,24 @@ int test_eof_block_structure() {
     }
 
     // Validating Footer and EOF Block
-    // Total Overhead: 12 bytes (Footer) + 8 bytes (EOF Header) = 20 bytes
-    if (comp_size < 20) {
+    // Total Overhead: 8 bytes (Footer) + 8 bytes (EOF Header) = 16 bytes
+    if (comp_size < 16) {
         printf("Failed: Compressed size too small for Footer + EOF (%lld)\n", (long long)comp_size);
         free(compressed);
         return 0;
     }
 
-    // 1. Verify 12-byte Footer
-    // Structure: [SrcSize (8)] + [Hash (4)]
-    const uint8_t* footer_ptr = compressed + comp_size - 12;
-    uint32_t f_src_low = zxc_le32(footer_ptr);       // Should be 4
-    uint32_t f_src_high = zxc_le32(footer_ptr + 4);  // Should be 0
-    uint32_t f_hash = zxc_le32(footer_ptr + 8);      // Should be 0 (checksum disabled)
-
-    if (f_src_low != 4 || f_src_high != 0 || f_hash != 0) {
-        printf("Failed: Footer mismatch. Src: %u, Hash: %u\n", f_src_low, f_hash);
+    // 1. Verify 8-byte Footer: [SrcSize (8)]
+    const uint8_t* footer_ptr = compressed + comp_size - ZXC_FILE_FOOTER_SIZE;
+    if (zxc_le64(footer_ptr) != 4) {
+        printf("Failed: Footer mismatch. Src: %llu\n", (unsigned long long)zxc_le64(footer_ptr));
         free(compressed);
         return 0;
     }
 
     // 2. Verify EOF Block Header (8 bytes)
     // Should be immediately before the footer
-    const uint8_t* eof_ptr = compressed + comp_size - 20;
+    const uint8_t* eof_ptr = compressed + comp_size - ZXC_FILE_FOOTER_SIZE - ZXC_BLOCK_HEADER_SIZE;
     uint8_t expected[8] = {0xFF, 0, 0, 0, 0, 0, 0, 0};
     expected[7] = zxc_hash8(expected);
 
@@ -736,10 +731,9 @@ int test_header_checksum() {
     return 1;
 }
 
-// 5. Test Global Checksum Order Sensitivity
-// Ensures that swapping two blocks (even if valid individually) triggers a global checksum failure.
-int test_global_checksum_order() {
-    printf("TEST: Global Checksum Order Sensitivity... ");
+// 5. Two blocks swapped in a stream-written archive: position-seeded checksums refuse it.
+int test_swapped_blocks_stream() {
+    printf("TEST: Swapped blocks, stream reader... ");
 
     // 1. Create input data withDISTINCT patterns for 2 blocks (so blocks are different)
     // ZXC_BLOCK_SIZE_DEFAULT is 256KB. We need > 256KB. Let's use 600KB.
@@ -788,7 +782,7 @@ int test_global_checksum_order() {
     zxc_read_block_header(comp_buf + off2, ZXC_BLOCK_HEADER_SIZE, &bh2);
     size_t len2 = ZXC_BLOCK_HEADER_SIZE + bh2.comp_size + ZXC_BLOCK_CHECKSUM_SIZE;
 
-    // Ensure we have at least 2 full blocks + EOF + Global Checksum
+    // Ensure we have at least 2 full blocks + EOF + footer
     if (off2 + len2 > (size_t)comp_sz) {
         printf("[FAIL] Compressed size too small for test\n");
         free(val_buf);
@@ -815,7 +809,7 @@ int test_global_checksum_order() {
     memcpy(swapped_buf + w_off, comp_buf + off1, len1);
     w_off += len1;
 
-    // Write remaining data (EOF block + Global Checksum)
+    // Write remaining data (EOF block + footer)
     size_t remaining_off = off2 + len2;
     size_t remaining_len = comp_sz - remaining_off;
     memcpy(swapped_buf + w_off, comp_buf + remaining_off, remaining_len);
@@ -838,8 +832,9 @@ int test_global_checksum_order() {
     free(comp_buf);
     free(swapped_buf);
 
-    if (res >= 0) {
-        printf("  [FAIL] zxc_stream_decompress unexpectedly succeeded on swapped blocks\n");
+    if (res != ZXC_ERROR_BAD_CHECKSUM) {
+        printf("  [FAIL] zxc_stream_decompress on swapped blocks -> %lld, want BAD_CHECKSUM\n",
+               (long long)res);
         return 0;
     }
 
@@ -847,9 +842,9 @@ int test_global_checksum_order() {
     return 1;
 }
 
-/* A swap 32 blocks apart, which an earlier rotl32(h, 1) ^ b combiner missed. */
-int test_global_checksum_order_distance_32(void) {
-    printf("TEST: Global Checksum Order, distance 32... ");
+/* Two blocks 32 apart swapped, through the one-shot reader: position-seeded checksums. */
+int test_swapped_blocks_oneshot(void) {
+    printf("TEST: Swapped blocks, one-shot reader... ");
 
     const size_t BLK = 4 * 1024;
     const size_t NBLK = 40; /* > 33 so blocks 1 and 33 both exist */
@@ -921,45 +916,6 @@ int test_global_checksum_order_distance_32(void) {
     free(comp);
     free(swapped);
     free(out);
-    if (ok) printf("PASS\n\n");
-    return ok;
-}
-
-/* The global combiner alone, on swaps that defeat h * PRIME + b: checksums 2^k blocks
- * apart that agree mod 2^(30 - k). */
-int test_global_hash_combiner_swaps(void) {
-    printf("TEST: Global hash combiner, crafted swaps... ");
-    enum { N = (1 << 20) + 2 };
-    uint32_t* const b = (uint32_t*)malloc(N * sizeof(uint32_t));
-    if (!b) return 0;
-    uint32_t rng = 0xBB67AE85u;
-    for (size_t i = 0; i < N; i++) {
-        rng = rng * 1103515245u + 12345u;
-        b[i] = rng ^ (rng >> 15);
-    }
-    int ok = 1;
-    for (int k = 0; ok && k <= 20; k += 5) {
-        const size_t i = 1, j = i + ((size_t)1 << k);
-        b[j] = b[i] + ((uint32_t)1 << (30 - k));
-        uint32_t bare[2] = {0, 0}, rot[2] = {0, 0};
-        for (int pass = 0; pass < 2; pass++) {
-            for (size_t x = 0; x <= j; x++) {
-                bare[pass] = bare[pass] * (uint32_t)ZXC_HASH_PRIME1 + b[x];
-                rot[pass] = zxc_hash_combine(rot[pass], b[x]);
-            }
-            const uint32_t t = b[i];
-            b[i] = b[j];
-            b[j] = t;
-        }
-        if (bare[0] != bare[1]) {
-            printf("[FAIL] k=%d: the fixture no longer defeats h * PRIME + b\n", k);
-            ok = 0;
-        } else if (rot[0] == rot[1]) {
-            printf("[FAIL] k=%d: swap 2^%d apart left the global hash at 0x%08X\n", k, k, rot[0]);
-            ok = 0;
-        }
-    }
-    free(b);
     if (ok) printf("PASS\n\n");
     return ok;
 }

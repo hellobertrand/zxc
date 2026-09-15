@@ -1636,8 +1636,7 @@ int test_seekable_range_reports_short_reads(void) {
     return ok;
 }
 
-/* A range read never checks the global hash: the position-seeded block checksum must
- * refuse a moved block. */
+/* A range read sees only its blocks: the position-seeded checksum must refuse a moved one. */
 int test_seekable_swapped_blocks_caught(void) {
     printf("=== TEST: Seekable - a swapped block fails its checksum ===\n");
     enum { BLK = 4096, NBLK = 4, SPAN = ZXC_BLOCK_HEADER_SIZE + BLK + ZXC_BLOCK_CHECKSUM_SIZE };

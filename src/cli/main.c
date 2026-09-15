@@ -675,7 +675,7 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
 /**
  * @brief Lists the contents of a ZXC archive.
  *
- * Reads the file header and footer to display:
+ * Reads the file header and the stored size to display:
  * - Compressed size
  * - Uncompressed size
  * - Compression ratio
@@ -794,27 +794,12 @@ static int zxc_list_archive(const char* path, int json_output) {
         block_size_kb = 0;  // unknown / unsupported code
     }
 
-    // Read footer for checksum info
-    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-    if (fseeko(f, file_size - ZXC_FILE_FOOTER_SIZE, SEEK_SET) != 0 ||
-        fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f) != ZXC_FILE_FOOTER_SIZE) {
-        fclose(f);
-        fprintf(stderr, "Error: Cannot read file footer\n");
-        return 1;
-    }
     fclose(f);
 
-    const uint32_t stored_checksum = footer[8] | ((uint32_t)footer[9] << 8) |
-                                     ((uint32_t)footer[10] << 16) | ((uint32_t)footer[11] << 24);
     // Flags byte, bit 7 (FORMAT.md 3); the library keeps layout constants internal.
     enum { ZXC_HEADER_FLAGS = 6, ZXC_FLAG_HAS_CHECKSUM = 0x80 };
     const int has_checksum = (header[ZXC_HEADER_FLAGS] & ZXC_FLAG_HAS_CHECKSUM) != 0;
     const char* checksum_method = has_checksum ? "RapidHash" : "-";
-    char checksum_value[16];
-    if (has_checksum)
-        snprintf(checksum_value, sizeof(checksum_value), "\"0x%08X\"", stored_checksum);
-    else
-        snprintf(checksum_value, sizeof(checksum_value), "null");
 
     // Dictionary ID (from header flag bit 6 + bytes 7-10)
     const uint32_t dict_id = zxc_get_dict_id(header, ZXC_FILE_HEADER_SIZE);
@@ -845,11 +830,10 @@ static int zxc_list_archive(const char* path, int json_output) {
             "  \"format_version\": %u,\n"
             "  \"block_size_kb\": %zu,\n"
             "  \"checksum_method\": \"%s\",\n"
-            "  \"checksum_value\": %s,\n"
             "  \"dict_id\": %s%s%s\n"
             "}\n",
             path, file_size, (long long)uncompressed_size, ratio, format_version, block_size_kb,
-            has_checksum ? "RapidHash" : "none", checksum_value, dict_id ? "\"" : "",
+            has_checksum ? "RapidHash" : "none", dict_id ? "\"" : "",
             dict_id ? dict_id_str : "null", dict_id ? "\"" : "");
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
@@ -861,7 +845,6 @@ static int zxc_list_archive(const char* path, int json_output) {
             "Checksum Method: %s\n",
             path, format_version, block_size_kb, has_checksum ? "RapidHash" : "None");
 
-        if (has_checksum) printf("Checksum Value:  0x%08X\n", stored_checksum);
         if (dict_id) printf("Dictionary ID:   %s\n", dict_id_str);
 
         printf(

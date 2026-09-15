@@ -411,7 +411,7 @@ int test_buffer_error_codes() {
     {
         uint8_t* corrupt = malloc((size_t)comp_sz);
         memcpy(corrupt, comp_buf, (size_t)comp_sz);
-        // Footer is at end: last 12 bytes = [src_size(8)] + [global_hash(4)]
+        // Footer is at end: last 8 bytes = [src_size(8)]
         // Corrupt the source size field (add 1 to the first byte)
         const size_t footer_offset = (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE;
         corrupt[footer_offset] ^= 0x01;  // Flip a bit in the stored source size
@@ -431,17 +431,17 @@ int test_buffer_error_codes() {
     }
     printf("  [PASS] zxc_decompress stored size mismatch -> negative\n");
 
-    // 15. Global checksum failure (corrupt the global hash in footer)
+    // 15. Block checksum failure (corrupt the last block's trailing checksum)
     {
         uint8_t* corrupt = malloc((size_t)comp_sz);
         memcpy(corrupt, comp_buf, (size_t)comp_sz);
-        // Global hash is the last 4 bytes of the file
-        corrupt[comp_sz - 1] ^= 0xFF;
+        // Last byte before the EOF block: the last block's checksum.
+        corrupt[comp_sz - ZXC_FILE_FOOTER_SIZE - ZXC_BLOCK_HEADER_SIZE - 1] ^= 0xFF;
         uint8_t* out = malloc(test_src_sz);
         zxc_decompress_opts_t _do46 = {.checksum_enabled = 1};
         r = zxc_decompress(corrupt, (size_t)comp_sz, out, test_src_sz, &_do46);
         if (r != ZXC_ERROR_BAD_CHECKSUM) {
-            printf("  [FAIL] bad global checksum: expected %d, got %lld\n", ZXC_ERROR_BAD_CHECKSUM,
+            printf("  [FAIL] bad block checksum: expected %d, got %lld\n", ZXC_ERROR_BAD_CHECKSUM,
                    (long long)r);
             free(corrupt);
             free(out);
@@ -452,7 +452,7 @@ int test_buffer_error_codes() {
         free(corrupt);
         free(out);
     }
-    printf("  [PASS] zxc_decompress global checksum -> ZXC_ERROR_BAD_CHECKSUM\n");
+    printf("  [PASS] zxc_decompress block checksum -> ZXC_ERROR_BAD_CHECKSUM\n");
 
     // 16. dst too small for decompression
     {

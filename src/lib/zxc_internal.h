@@ -1442,21 +1442,6 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const
 }
 
 /**
- * @brief Folds a block hash into the running global checksum.
- *
- * `result = rotl32(hash, 15) * PRIME + block_hash`, PRIME being the low half of
- * @ref ZXC_HASH_PRIME1. Without the rotation, swaps 2^k blocks apart whose checksums
- * agree mod 2^(30 - k) go unnoticed.
- *
- * @param[in] hash The current running hash value.
- * @param[in] block_hash The hash of the new block to combine.
- * @return The updated combined hash value.
- */
-static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine(const uint32_t hash, const uint32_t block_hash) {
-    return ((hash << 15) | (hash >> 17)) * (uint32_t)ZXC_HASH_PRIME1 + block_hash;
-}
-
-/**
  * @brief Writes a GLO sub-header followed by its section descriptors.
  *
  * They hold only the two sizes the header cannot imply, and are 0, 4 or 8 bytes
@@ -1733,8 +1718,6 @@ typedef struct {
     size_t opt_scratch_cap;         /**< Current capacity of opt_scratch in bytes. */
     int checksum_enabled;           /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;          /**< Compression level. */
-    uint64_t block_index;           /**< Frame position of the block (0 for the block API):
-                                         seeds its checksum. */
     size_t dict_size;               /**< Dictionary prefill size (0 = no dictionary). */
     uint8_t* dict_buffer;           /**< [dict | data] concat scratch carved from memory_block
                                          when dict_size > 0 (NULL otherwise). */
@@ -1874,18 +1857,20 @@ void zxc_cctx_free(zxc_cctx_t* ctx);
  * `_avx2`, `_avx512`, ...), running the one-time CPU detection on the first
  * call, and routes to the dict variant when the context carries a dictionary.
  *
- * @param[in]  ctx     Context holding the decode state and dictionary, if any.
- * @param[in]  src     Compressed chunk.
- * @param[in]  src_sz  Size of @p src in bytes.
- * @param[out] dst     Destination buffer.
- * @param[in]  dst_cap Capacity of @p dst.
+ * @param[in]  ctx         Context holding the decode state and dictionary, if any.
+ * @param[in]  src         Compressed chunk.
+ * @param[in]  src_sz      Size of @p src in bytes.
+ * @param[out] dst         Destination buffer.
+ * @param[in]  dst_cap     Capacity of @p dst.
+ * @param[in]  block_index Frame position of the block: checksum seed, 0 for the block API.
  * @return Bytes decoded (> 0), or a negative @ref zxc_error_t.
  */
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
+                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
+                                 const uint64_t block_index);
 int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
-                                      const size_t dst_cap);
+                                      const size_t dst_cap, const uint64_t block_index);
 
 /**
  * @brief Compresses one chunk through the runtime ISA dispatch.
@@ -1893,15 +1878,17 @@ int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint
  * Counterpart of zxc_decompress_chunk_wrapper(): same lazily-resolved variant
  * pointer, same one-time CPU detection on the first call.
  *
- * @param[in,out] ctx     Compression context: configuration and working buffers.
- * @param[in]     src     Raw data to compress.
- * @param[in]     src_sz  Size of @p src in bytes.
- * @param[out]    dst     Destination buffer.
- * @param[in]     dst_cap Capacity of @p dst.
+ * @param[in,out] ctx         Compression context: configuration and working buffers.
+ * @param[in]     src         Raw data to compress.
+ * @param[in]     src_sz      Size of @p src in bytes.
+ * @param[out]    dst         Destination buffer.
+ * @param[in]     dst_cap     Capacity of @p dst.
+ * @param[in]     block_index Frame position of the block: checksum seed, 0 for the block API.
  * @return Bytes written (> 0), or a negative @ref zxc_error_t.
  */
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                               const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
+                               const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
+                               const uint64_t block_index);
 
 /** @brief @ref zxc_compress_block, its checksum seeded with @p block_index (public entry: 0). */
 int64_t zxc_compress_block_at(zxc_cctx* cctx, const void* RESTRICT src, size_t src_size,
@@ -2007,21 +1994,17 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 /**
  * @brief Writes the ZXC file footer into @p dst.
  *
- * The footer stores the original uncompressed size and an optional global
- * checksum. It is always @c ZXC_FILE_FOOTER_SIZE (12) bytes long.
+ * The original uncompressed size, @c ZXC_FILE_FOOTER_SIZE (8) bytes.
  *
  * @param[out] dst               Destination buffer.
  * @param[in]  dst_capacity      Total capacity of @p dst in bytes.
  * @param[in]  src_size          Original uncompressed size of the data.
- * @param[in]  global_hash       Global checksum hash (used only when
- *                               @p checksum_enabled is non-zero).
- * @param[in]  checksum_enabled  Non-zero if the checksum should be emitted.
  *
  * @return Number of bytes written (@c ZXC_FILE_FOOTER_SIZE) on success,
  *         or @c ZXC_ERROR_DST_TOO_SMALL on failure.
  */
-int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
-                          const uint32_t global_hash, const int checksum_enabled);
+int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity,
+                          const uint64_t src_size);
 
 // ---------------------------------------------------------------------------
 // Seekable cross-TU hooks (defined in zxc_seekable.c, consumed by the

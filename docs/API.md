@@ -386,7 +386,7 @@ Compresses `src` into `dst`. Only `level`, `block_size`, `checksum_enabled`, and
 `seekable` fields of `opts` are used. `n_threads` is ignored (always single-threaded).
 
 **Returns**: compressed size (> 0) on success, or negative `zxc_error_t`. A
-zero `src_size` (with `src` NULL or not) writes the 36-byte empty archive.
+zero `src_size` (with `src` NULL or not) writes the 32-byte empty archive.
 
 ### `zxc_decompress`
 
@@ -1114,7 +1114,7 @@ ZXC_EXPORT int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out);
 ```
 
 Finalises the stream: compresses any partial last block, emits the EOF
-block (8 B) and the file footer (12 B).  **Must be called** to produce a
+block (8 B) and the file footer (8 B).  **Must be called** to produce a
 valid ZXC file.
 
 Reentrant the same way `_compress` is: loop until it returns `0`.
@@ -1146,8 +1146,8 @@ ZXC_EXPORT zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts);
 ```
 
 Creates a push decompression context.  Only `checksum_enabled` from `opts`
-is honoured (controls whether the global file-level checksum is verified
-when the file carries one). Dictionary options fail creation, and an archive
+is honoured (controls whether block checksums are verified when the file
+carries them). Dictionary options fail creation, and an archive
 whose header requires a dictionary fails with `ZXC_ERROR_DICT_REQUIRED` at the
 first decompress call.
 

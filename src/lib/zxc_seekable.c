@@ -174,7 +174,7 @@ static int zxc_seek_source_read(const zxc_seek_source_t* src, void* dst, const s
  */
 static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     // Minimum: file_header(16) + eof_block(8) + seek_block_header(8)
-    //          + file_footer(12) = 44
+    //          + file_footer(8) = 40
     const uint64_t MIN_SEEKABLE_SIZE =
         ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
     if (UNLIKELY(src->size < MIN_SEEKABLE_SIZE)) return NULL;
@@ -518,9 +518,8 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         // match copies referencing dictionary bytes resolve naturally.
         uint8_t* dec_dst =
             s->dctx.dict_buffer ? s->dctx.dict_buffer + s->dict_size : s->dctx.work_buf;
-        s->dctx.block_index = bi;
-        const int dec_res =
-            zxc_decompress_chunk_wrapper(&s->dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
+        const int dec_res = zxc_decompress_chunk_wrapper(&s->dctx, read_buf, (size_t)read_res,
+                                                         dec_dst, work_sz, bi);
         if (UNLIKELY(dec_res < 0)) return dec_res;
 
         // Calculate which portion of this block's decompressed data we need
@@ -678,9 +677,8 @@ static void* zxc_seek_mt_worker(void* arg) {
 
         // Decompress: use dict bounce buffer when dictionary is active
         uint8_t* dec_dst = dict_work ? dict_work + s->dict_size : dctx.work_buf;
-        dctx.block_index = job->block_idx;
-        const int dec_res =
-            zxc_decompress_chunk_wrapper(&dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
+        const int dec_res = zxc_decompress_chunk_wrapper(&dctx, read_buf, (size_t)read_res, dec_dst,
+                                                         work_sz, job->block_idx);
 
         if (UNLIKELY(dec_res < 0)) {
             job->result = dec_res;
