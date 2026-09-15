@@ -1256,37 +1256,38 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
 /**
  * @brief Computes the 1-byte checksum for block headers.
  *
- * Implementation based on Marsaglia's Xorshift (PRNG) principles.
+ * Multiply, then fold from the top. Flipping bit @c i moves the product by exactly
+ * `+/- (ZXC_HASH_PRIME1 << i)`, and no shift of that constant leaves 0x00 or 0xFF
+ * in the top byte, so the carry cannot absorb it: every single-bit error is caught,
+ * not merely likely to be. Folding from the top is required - a product's low bits
+ * depend only on the input's low bits.
  *
  * @param[in] p The 8 header bytes to hash.
  * @return The checksum byte.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
-    const uint64_t v = zxc_le64(p);
-    uint64_t h = v ^ ZXC_HASH_PRIME1;
-    h ^= h << 13;
-    h ^= h >> 7;
-    h ^= h << 17;
-    return (uint8_t)((h >> 32) ^ h);
+    const uint64_t h = (zxc_le64(p) ^ ZXC_HASH_PRIME1) * ZXC_HASH_PRIME1;
+
+    return (uint8_t)(h >> 56);
 }
 
 /**
- * @brief Computes the 2-byte checksum for file headers.
+ * @brief Computes the 2-byte checksum for file and dictionary headers.
  *
- * Implementation based on Marsaglia's Xorshift (PRNG) principles.
+ * Two multiplies in a chain: the first half is mixed, the second is added and
+ * mixed again. Every bit flip shifts the result by a fixed amount, and the
+ * constants are such that no 1- or 2-bit error leaves the top halfword
+ * unchanged (proven by the test suite). Summing two products instead let one
+ * bit per half cancel. Order matters: PRIME2 inside, PRIME1 outside; swapped,
+ * 38 bit pairs can cancel.
  *
- * @param[in] p The 16 header bytes to hash.
+ * @param[in] p The 16 header bytes; bytes 14..15 must already be zero.
  * @return The checksum halfword.
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
-    const uint64_t v1 = zxc_le64(p);
-    const uint64_t v2 = zxc_le64(p + 8);
-    uint64_t h = v1 ^ v2 ^ ZXC_HASH_PRIME2;
-    h ^= h << 13;
-    h ^= h >> 7;
-    h ^= h << 17;
-    const uint32_t res = (uint32_t)((h >> 32) ^ h);
-    return (uint16_t)((res >> 16) ^ res);
+    const uint64_t h1 = (zxc_le64(p) ^ ZXC_HASH_PRIME2) * ZXC_HASH_PRIME2;
+
+    return (uint16_t)(((h1 + zxc_le64(p + 8) + ZXC_HASH_PRIME1) * ZXC_HASH_PRIME1) >> 48);
 }
 
 /**
