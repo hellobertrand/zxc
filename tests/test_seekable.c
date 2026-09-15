@@ -1636,11 +1636,6 @@ int test_seekable_range_reports_short_reads(void) {
     return ok;
 }
 
-/* Random access never verified per-block checksums: both paths carved their
- * context with checksum_enabled = 0 and file_has_checksums was never read, so
- * zxc_seekable_set_checksum had nothing to switch. Data is incompressible on
- * purpose: a RAW block memcpys a flipped byte straight through, so only the
- * checksum catches it. */
 /* A range read never checks the global hash: the position-seeded block checksum must
  * refuse a moved block. */
 int test_seekable_swapped_blocks_caught(void) {
@@ -1695,6 +1690,8 @@ int test_seekable_swapped_blocks_caught(void) {
     return ok;
 }
 
+/* Incompressible on purpose: a RAW block passes a flipped byte straight through, so
+ * only the checksum catches it. */
 int test_seekable_corrupted_block_checksum(void) {
     printf("=== TEST: Seekable - opting into checksums catches a corrupted block ===\n");
 

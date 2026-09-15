@@ -349,13 +349,15 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
             d[at] ^= 0xFFU; /* trailing block checksum */
         }
     } else if (!strcmp(name, "corrupt_payload")) {
-        /* A raw literal: only the checksum can catch it. */
-        glo_layout_t L;
-        if (!glo_layout(d, len, &L) || L.tok <= PAY0 + ZXC_GLO_HEADER_BINARY_SIZE + 4) {
+        /* A raw literal, past tok_comp when present (Sec 5.2): only the checksum catches it. */
+        const size_t lit = PAY0 + ZXC_GLO_HEADER_BINARY_SIZE +
+                           (d[PAY0 + 9] == ZXC_SECTION_ENCODING_HUFFMAN ? 4U : 0U);
+        if (d[BLK0] != ZXC_BLOCK_GLO || d[PAY0 + 8] != ZXC_SECTION_ENCODING_RAW ||
+            zxc_le32(d + PAY0 + 4) <= 4 || lit + 4 >= len) {
             fprintf(stderr, "  block 0 is not GLO with raw literals\n");
             ok = 0;
         } else {
-            d[PAY0 + ZXC_GLO_HEADER_BINARY_SIZE + 4] ^= 0xFFU; /* a raw literal byte */
+            d[lit + 4] ^= 0xFFU; /* a raw literal byte */
         }
 
         /* --- Truncations ---------------------------------------------------- */
