@@ -503,7 +503,8 @@ for filesystem integrations (DwarFS, EROFS, SquashFS) where the caller
 manages its own block indexing.
 
 Output format: `block_header (8 B)` + compressed payload + optional `checksum (4 B)`.
-The checksum covers the block's decompressed bytes, so it is verified after decoding.
+The checksum covers the block's decompressed bytes, seeded with 0 (frames seed each block with
+its position), so it is verified after decoding.
 
 ### `zxc_compress_block_bound`
 

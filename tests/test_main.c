@@ -94,6 +94,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_io_failures),
     TEST_CASE(test_thread_params),
     TEST_CASE(test_multithread_roundtrip),
+    TEST_CASE(test_stream_checksum_cross_paths),
     TEST_CASE(test_stream_get_decompressed_size_errors),
     TEST_CASE(test_stream_engine_errors),
 
@@ -125,6 +126,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_global_checksum_order),
     TEST_CASE(test_forged_block_comp_size),
     TEST_CASE(test_global_checksum_order_distance_32),
+    TEST_CASE(test_global_hash_combiner_swaps),
     TEST_CASE(test_chunk_size_code),
     TEST_CASE(test_header_checksum_single_bit),
 
@@ -196,6 +198,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_seekable_no_checksum),
     TEST_CASE(test_seekable_with_checksum),
     TEST_CASE(test_seekable_corrupted_block_checksum),
+    TEST_CASE(test_seekable_swapped_blocks_caught),
     TEST_CASE(test_seekable_range_reports_short_reads),
     TEST_CASE(test_seekable_work_buf_tail_pad),
 };

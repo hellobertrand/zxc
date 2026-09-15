@@ -101,10 +101,19 @@ int test_static_ctx_roundtrip_all_levels(void) {
 
         zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
         const int64_t dsz = zxc_decompress_dctx(dctx, enc, (size_t)csz, dec, src_sz, &dopts);
+        /* A block decoded right after the frame carries index 0. */
+        int64_t bsz = (int64_t)block_size;
+        if (lvl == zxc_min_level()) {
+            zxc_cctx* const bc = zxc_create_cctx(NULL);
+            const int64_t bn = bc ? zxc_compress_block(bc, src, block_size, enc, cap, &copts) : -1;
+            zxc_free_cctx(bc);
+            bsz = bn > 0 ? zxc_decompress_block(dctx, enc, (size_t)bn, dec, src_sz, &dopts) : bn;
+        }
         zxc_free_dctx(dctx); /* no-op for static */
         test_aligned_free(dctx_ws);
-        if (dsz != (int64_t)src_sz || memcmp(src, dec, src_sz) != 0) {
-            printf("  [FAIL] level %d: roundtrip mismatch (dsz=%lld)\n", lvl, (long long)dsz);
+        if (dsz != (int64_t)src_sz || bsz != (int64_t)block_size || memcmp(src, dec, src_sz) != 0) {
+            printf("  [FAIL] level %d: roundtrip mismatch (dsz=%lld, block after frame %lld)\n",
+                   lvl, (long long)dsz, (long long)bsz);
             goto fail;
         }
 
@@ -670,6 +679,22 @@ int test_static_dctx_block_bounds(void) {
             break;
         }
         printf("  [PASS] forged count refused by the decoder, static as dynamic\n");
+
+        /* An intact block whose checksum is wrong decodes, then fails the check. */
+        bound_block_t stale = blocks[B_FIT_CK];
+        memcpy(mut, stale.comp, (size_t)stale.n);
+        mut[stale.n - 1] ^= 0xFFU;
+        stale.comp = mut;
+        const int64_t s1 = bound_decode(sd, &stale, 0, out, PIN + PAD, &ck);
+        const int64_t s2 = bound_decode(sd, &stale, 1, out, PIN, &ck);
+        const int64_t s3 = bound_decode(hd, &stale, 0, out, PIN + PAD, &ck);
+        if (s1 != ZXC_ERROR_BAD_CHECKSUM || s2 != ZXC_ERROR_BAD_CHECKSUM ||
+            s3 != ZXC_ERROR_BAD_CHECKSUM) {
+            printf("  [FAIL] stale checksum: static %lld %lld, dynamic %lld\n", (long long)s1,
+                   (long long)s2, (long long)s3);
+            break;
+        }
+        printf("  [PASS] stale checksum -> BAD_CHECKSUM, static as dynamic\n");
 
         /* Dictionaries: the same two answers as the dynamic path, in order. */
         const zxc_decompress_opts_t small_dict = {.dict = lz, .dict_size = 16};

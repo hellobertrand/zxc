@@ -1628,8 +1628,8 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
 #undef DECODE_MATCH_SAFE
 
 /**
- * @brief Shared chunk-decode body: validates the block header, verifies the
- *        optional checksum, then dispatches on block type.
+ * @brief Shared chunk-decode body: validates the header, decodes, then verifies the
+ *        optional checksum.
  *
  * @p has_dict and @p safe are compile-time constants: the no-dict instantiation
  * folds the GLO/GHI selection to the plain (inlinable) decoders, so
@@ -1693,7 +1693,8 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
 
     if (has_checksum && LIKELY(decoded_sz >= 0)) {
         const uint32_t stored = zxc_le32(data + comp_sz);
-        if (UNLIKELY(stored != zxc_checksum(dst, (size_t)decoded_sz, 0, ZXC_CHECKSUM_RAPIDHASH)))
+        if (UNLIKELY(stored != zxc_checksum(dst, (size_t)decoded_sz, ctx->block_index,
+                                            ZXC_CHECKSUM_RAPIDHASH)))
             return ZXC_ERROR_BAD_CHECKSUM;
     }
 

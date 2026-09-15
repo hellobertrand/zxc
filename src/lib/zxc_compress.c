@@ -2016,7 +2016,8 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
  * Selects the GHI encoder at level <= 2, otherwise GLO; falls back to a RAW
  * block when the coded form would not shrink the data. When @c ctx->dict_size
  * is > 0, @p chunk is the [dict | block] concat and only the block tail counts
- * toward the expansion check. Appends the per-block checksum when enabled.
+ * toward the expansion check. Appends the checksum when enabled, seeded with
+ * @c ctx->block_index.
  */
 // cppcheck-suppress unusedFunction
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
@@ -2041,10 +2042,10 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     }
 
     if (ctx->checksum_enabled) {
-        if (UNLIKELY(w < ZXC_BLOCK_HEADER_SIZE || w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap))
-            return ZXC_ERROR_OVERFLOW;
+        if (UNLIKELY(w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap)) return ZXC_ERROR_OVERFLOW;
 
-        zxc_store_le32(dst + w, zxc_checksum(block_data, block_sz, 0, ZXC_CHECKSUM_RAPIDHASH));
+        zxc_store_le32(
+            dst + w, zxc_checksum(block_data, block_sz, ctx->block_index, ZXC_CHECKSUM_RAPIDHASH));
         w += ZXC_BLOCK_CHECKSUM_SIZE;
     }
 

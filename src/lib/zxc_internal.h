@@ -1429,12 +1429,12 @@ void zxc_aligned_free(void* ptr);
  *
  * @param[in] input Pointer to the data buffer.
  * @param[in] len Length of the data in bytes.
- * @param[in] seed Previous 32-bit checksum to derive from, or 0 to start fresh.
+ * @param[in] seed 0, a previous 32-bit checksum (zero-extended), or a block index.
  * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_RAPIDHASH).
  * @return The calculated 32-bit hash value.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const size_t len,
-                                               const uint32_t seed, const uint8_t hash_method) {
+                                               const uint64_t seed, const uint8_t hash_method) {
     (void)hash_method; /* single algorithm for now; extend when adding more */
     const uint64_t hash = rapidhash_withSeed(input, len, seed);
 
@@ -1444,18 +1444,16 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const
 /**
  * @brief Folds a block hash into the running global checksum.
  *
- * `result = hash * PRIME + block_hash`, PRIME being the low half of
- * @ref ZXC_HASH_PRIME1, which makes the result depend on block order so a
- * reordered archive fails the global check. The previous
- * `rotl32(hash, 1) ^ block_hash` had a period of 32: blocks whose indices
- * differ by a multiple of 32 could be swapped undetected.
+ * `result = rotl32(hash, 15) * PRIME + block_hash`, PRIME being the low half of
+ * @ref ZXC_HASH_PRIME1. Without the rotation, swaps 2^k blocks apart whose checksums
+ * agree mod 2^(30 - k) go unnoticed.
  *
  * @param[in] hash The current running hash value.
  * @param[in] block_hash The hash of the new block to combine.
  * @return The updated combined hash value.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine(const uint32_t hash, const uint32_t block_hash) {
-    return hash * (uint32_t)ZXC_HASH_PRIME1 + block_hash;
+    return ((hash << 15) | (hash >> 17)) * (uint32_t)ZXC_HASH_PRIME1 + block_hash;
 }
 
 /**
@@ -1735,6 +1733,8 @@ typedef struct {
     size_t opt_scratch_cap;         /**< Current capacity of opt_scratch in bytes. */
     int checksum_enabled;           /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;          /**< Compression level. */
+    uint64_t block_index;           /**< Frame position of the block (0 for the block API):
+                                         seeds its checksum. */
     size_t dict_size;               /**< Dictionary prefill size (0 = no dictionary). */
     uint8_t* dict_buffer;           /**< [dict | data] concat scratch carved from memory_block
                                          when dict_size > 0 (NULL otherwise). */
@@ -1902,6 +1902,11 @@ int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint
  */
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
+
+/** @brief @ref zxc_compress_block, its checksum seeded with @p block_index (public entry: 0). */
+int64_t zxc_compress_block_at(zxc_cctx* cctx, const void* RESTRICT src, size_t src_size,
+                              void* RESTRICT dst, size_t dst_capacity,
+                              const zxc_compress_opts_t* opts, uint64_t block_index);
 
 // ---------------------------------------------------------------------------
 // Internal frame primitives.

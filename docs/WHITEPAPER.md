@@ -207,7 +207,7 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 
 ```
 
-**Note**: The Checksum (if enabled in File Header) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the block's decompressed bytes** (§5.8).
+**Note**: The Checksum (if enabled in File Header) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the block's decompressed bytes**, seeded with the block's position in the frame (§5.8).
 
 * **Type**: Block encoding type (0=RAW, 1=GLO, 2=GHI, 255=EOF).
 * **Flags**: Not used for now.
@@ -424,8 +424,8 @@ A mandatory **12-byte footer** closes the stream, providing total source size in
 
 *   **Original Source Size** (8 bytes): Total size of the uncompressed data.
 *   **Global Hash** (4 bytes): The **Global Stream Checksum**. Valid only if the EOF block has the `has_checksum` flag set (or the decoder context requires it).
-    *   **Algorithm**: `Rotation + XOR`.
-    *   For each block with a checksum: `global_hash = global_hash * 0x7F4A7C15 + block_hash;` (mod 2^32)
+    *   **Algorithm**: rotate, multiply, add.
+    *   For each block with a checksum: `global_hash = rotl32(global_hash, 15) * 0x7F4A7C15 + block_hash;` (mod 2^32)
 
 ### 5.7 Block Encoding & Processing Algorithms
 
@@ -499,8 +499,8 @@ Every compressed block can optionally be protected by a **32-bit checksum** to e
 ZXC checksums the **decompressed** bytes of each block. The question answered is "are the bytes I hand back the ones that went in", not "are the compressed bytes intact".
 
 *   **Covers the whole pipeline**: An encoder defect, a decoder defect, a divergence between SIMD variants or a miscompilation all leave the compressed bytes intact and the output wrong. Only a checksum over the output sees them. So does a wrong dictionary accepted through a 32-bit `dict_id` collision.
-*   **Per block, not per file**: The checksum stays on each block rather than on the whole stream, which keeps it usable under random access: reading one block through the seek table verifies that block. A single whole-file hash cannot be checked without decoding everything.
-*   **What it costs**: verification is opt-in. When on, it hashes the output instead of the compressed payload, so the extra work is proportional to how well the data compresses -- nothing on incompressible data, where the payload already *is* the output. Measured on a mixed corpus at 43.5%: decoding goes from 23.1 to 18.7 GB/s, about 23% more than the previous checksummed decode. For comparison, zstd pays about 38% for the same guarantee, enabled by default.
+*   **Per block, not per file**: The checksum stays on each block rather than on the whole stream, which keeps it usable under random access: reading one block through the seek table verifies that block. It is seeded with the block's position in the frame, so a block moved elsewhere fails too, though a range read never computes the global hash. A single whole-file hash cannot be checked without decoding everything.
+*   **What it costs**: verification is opt-in. When on, it hashes the output instead of the compressed payload, so the extra work is proportional to how well the data compresses -- nothing on incompressible data, where the payload already *is* the output. Measured on a mixed corpus at 43.5%: decoding goes from 23.1 to 18.7 GB/s, about 23% more than the previous checksummed decode. zstd's closest equivalent is an XXH64 of the whole frame's content: off by default in libzstd (its CLI turns it on), and unable to vouch for a partial read.
 *   **What it gives up**: a corrupted block is no longer rejected before decoding, so it reports whatever the decoder tripped on first. The decoder is fuzzed to be safe on malformed input regardless, and a checksum is forgeable, so this was never a security boundary.
 
 #### Multi-Algorithm Support
@@ -525,7 +525,7 @@ For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dict
 
 *   **Mechanism**: A dictionary is raw byte content (max 64 KB, bounded by the 64 KB LZ window). At compression, it is logically prepended to every block's input, seeding the hash tables so the match finder can reference dictionary content from the first byte. At decompression, it is prepended to the output buffer so match copies that point into dictionary bytes resolve naturally by pointer arithmetic. The prefill is **per-block**, so random access is preserved: load the dictionary once, then decode any block independently.
 
-*   **External, content-addressed model**: Dictionaries are **external** files (`.zxd`), referenced from the file header by a 32-bit `dict_id`. This follows the industry-standard train-once / reuse-many model (the dictionary is amortized across many archives rather than duplicated inside each). The `dict_id` is **self-validating**: it identifies *which* dictionary is required and simultaneously detects an accidentally wrong one. A decoder **MUST** reject decompression when the required dictionary is absent (`ZXC_ERROR_DICT_REQUIRED`) or when the supplied dictionary's id does not match `header.dict_id` (`ZXC_ERROR_DICT_MISMATCH`). The per-block and global checksums of §5.9 are a second line of defense: a wrong dictionary yields wrong output that fails the checksum (when enabled).
+*   **External, content-addressed model**: Dictionaries are **external** files (`.zxd`), referenced from the file header by a 32-bit `dict_id`. This follows the industry-standard train-once / reuse-many model (the dictionary is amortized across many archives rather than duplicated inside each). The `dict_id` is **self-validating**: it identifies *which* dictionary is required and simultaneously detects an accidentally wrong one. A decoder **MUST** reject decompression when the required dictionary is absent (`ZXC_ERROR_DICT_REQUIRED`) or when the supplied dictionary's id does not match `header.dict_id` (`ZXC_ERROR_DICT_MISMATCH`). The per-block and global checksums of §5.8 are a second line of defense: a wrong dictionary yields wrong output that fails the checksum (when enabled).
 
 *   **Shared literal Huffman table**: Beyond LZ priming, a dictionary carries a **shared canonical Huffman table** for the literal stream (128 bytes of packed code lengths, trained on the corpus' *post-LZ* literal distribution). Blocks whose literals compress better with this table use `enc_lit = 3` (§5.7) and skip the 128-byte per-block lengths header entirely — decisive at small block sizes, where the header never amortizes. The code lengths are validated **once per context** when the dictionary is attached, instead of being parsed per block. The result is a simultaneous ratio *and* decode-speed improvement on homogeneous corpora at small block sizes, tapering to neutral as blocks grow and per-block tables win on their own. The selection is by exact byte accounting, so the shared table is never a regression.
 

@@ -1245,3 +1245,65 @@ int test_stream_oversized_dict(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+/* Checksums seeded by one path must verify through the others: a path alone
+ * round-trips its own mistake. */
+int test_stream_checksum_cross_paths(void) {
+    printf("=== TEST: Stream - block checksums agree across writers and readers ===\n");
+    enum { BS = 4096, N = 16 * BS };
+    static uint8_t src[N], arc[2 * N], out[N];
+    gen_lz_data(src, N);
+    const zxc_compress_opts_t co = {
+        .n_threads = 4, .level = 3, .block_size = BS, .checksum_enabled = 1, .seekable = 1};
+    const zxc_decompress_opts_t verify = {.n_threads = 4, .checksum_enabled = 1};
+    FILE* const f_src = tmpfile();
+    FILE* const f_arc = tmpfile();
+    FILE* const f_out = tmpfile();
+    int ok = 0;
+    do {
+        if (!f_src || !f_arc || !f_out || fwrite(src, 1, N, f_src) != N) {
+            printf("  [FAIL] tmpfile\n");
+            break;
+        }
+        rewind(f_src);
+        /* Multi-threaded stream writer, then the one-shot and seekable readers. */
+        if (zxc_stream_compress(f_src, f_arc, &co) <= 0) {
+            printf("  [FAIL] stream compress\n");
+            break;
+        }
+        rewind(f_arc);
+        const size_t n = fread(arc, 1, sizeof(arc), f_arc);
+        const int64_t one = zxc_decompress(arc, n, out, N, &verify);
+        const int one_ok = one == N && memcmp(out, src, N) == 0;
+        zxc_seekable* const s = zxc_seekable_open(arc, n);
+        if (s) zxc_seekable_set_checksum(s, 1);
+        const int64_t st = s ? zxc_seekable_decompress_range(s, out, N, 0, N) : -1;
+        const int st_ok = st == N && memcmp(out, src, N) == 0;
+        const int64_t mt = s ? zxc_seekable_decompress_range_mt(s, out, N, 0, N, 4) : -1;
+        const int mt_ok = mt == N && memcmp(out, src, N) == 0;
+        zxc_seekable_free(s);
+
+        /* One-shot writer, then the multi-threaded stream reader. */
+        const int64_t m = zxc_compress(src, N, arc, sizeof(arc), &co);
+        FILE* const f_one = tmpfile();
+        const int wrote = f_one && m > 0 && fwrite(arc, 1, (size_t)m, f_one) == (size_t)m;
+        if (f_one) rewind(f_one);
+        const int64_t stream = wrote ? zxc_stream_decompress(f_one, f_out, &verify) : -1;
+        if (f_one) fclose(f_one);
+        rewind(f_out);
+        const int stream_ok =
+            stream == N && fread(out, 1, N, f_out) == N && memcmp(out, src, N) == 0;
+
+        if (!one_ok || !st_ok || !mt_ok || !stream_ok) {
+            printf("  [FAIL] one-shot %lld, seekable st %lld / mt %lld, stream %lld\n",
+                   (long long)one, (long long)st, (long long)mt, (long long)stream);
+            break;
+        }
+        ok = 1;
+    } while (0);
+    if (f_src) fclose(f_src);
+    if (f_arc) fclose(f_arc);
+    if (f_out) fclose(f_out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}

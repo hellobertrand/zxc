@@ -640,7 +640,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     }
 
     size_t pos = 0;
-    while (pos < src_size) {
+    for (ctx.block_index = 0; pos < src_size; ctx.block_index++) {
         const size_t chunk_len = (src_size - pos > block_size) ? block_size : (src_size - pos);
         const size_t rem_cap = (size_t)(op_end - op);
 
@@ -658,8 +658,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         }
 
         if (checksum_enabled) {
-            // Update Global Hash (Rotation + XOR)
-            // Block checksum is at the end of the written block data
+            // Fold the block's trailing checksum into the global hash.
             if (LIKELY(res >= ZXC_BLOCK_CHECKSUM_SIZE)) {
                 const uint32_t block_hash = zxc_le32(op + res - ZXC_BLOCK_CHECKSUM_SIZE);
                 global_hash = zxc_hash_combine(global_hash, block_hash);
@@ -1006,6 +1005,7 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
 
         ip += advance;
         op += res;
+        ctx.block_index++;
     }
 
     if (ctx_ready) zxc_cctx_free(&ctx);
@@ -1379,7 +1379,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     op += h_val;
 
     size_t pos = 0;
-    while (pos < src_size) {
+    for (ctx->block_index = 0; pos < src_size; ctx->block_index++) {
         const size_t chunk_len = (src_size - pos > block_size) ? block_size : (src_size - pos);
         const size_t rem_cap = (size_t)(op_end - op);
 
@@ -1555,6 +1555,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     }
 
     zxc_cctx_t* const ctx = &dctx->inner;
+    ctx->block_index = 0;
 
     if (UNLIKELY(zxc_ctx_sync_dict_huf(ctx, dctx->huf_cache, &dctx->huf_cached, dict_huf) !=
                  ZXC_OK))
@@ -1627,6 +1628,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 
         ip += advance;
         op += res;
+        ctx->block_index++;
     }
 
     return (int64_t)(op - op_start);
@@ -1651,6 +1653,12 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_t src_size,
                            void* RESTRICT dst, const size_t dst_capacity,
                            const zxc_compress_opts_t* opts) {
+    return zxc_compress_block_at(cctx, src, src_size, dst, dst_capacity, opts, 0);
+}
+
+int64_t zxc_compress_block_at(zxc_cctx* cctx, const void* RESTRICT src, const size_t src_size,
+                              void* RESTRICT dst, const size_t dst_capacity,
+                              const zxc_compress_opts_t* opts, const uint64_t block_index) {
     if (UNLIKELY(!cctx || !src || !dst || src_size == 0 || dst_capacity == 0))
         return ZXC_ERROR_NULL_INPUT;
 
@@ -1715,6 +1723,7 @@ int64_t zxc_compress_block(zxc_cctx* cctx, const void* RESTRICT src, const size_
     }
 
     cctx->inner.dict_size = b_dict_size;
+    cctx->inner.block_index = block_index;
     if (UNLIKELY(zxc_ctx_sync_dict_huf(&cctx->inner, cctx->huf_cache, &cctx->huf_cached,
                                        ZXC_OPTS_DICT_HUF(opts)) != ZXC_OK))
         return ZXC_ERROR_CORRUPT_DATA;  // LCOV_EXCL_LINE
@@ -1770,6 +1779,7 @@ static int64_t zxc_static_decompress_block(zxc_dctx* RESTRICT dctx, const uint8_
     zxc_cctx_t* const ctx = &dctx->inner;
     ctx->checksum_enabled = checksum_enabled;
     ctx->dict_size = 0;
+    ctx->block_index = 0;
     int res;
     if (strict) {
         const size_t cap = dst_capacity < work_sz ? dst_capacity : work_sz;
@@ -1786,13 +1796,14 @@ static int64_t zxc_static_decompress_block(zxc_dctx* RESTRICT dctx, const uint8_
 
 /**
  * @brief Recarves a heap dctx when @p block_size or @p dict_size changed;
- *        otherwise only refreshes the checksum flag.
+ *        otherwise refreshes the checksum flag. Block API blocks carry index 0.
  */
 static int zxc_dctx_prepare(zxc_dctx* RESTRICT dctx, const size_t block_size,
                             const size_t dict_size, const int checksum_enabled) {
     if (LIKELY(dctx->initialized && dctx->last_block_size == block_size &&
                dctx->last_dict_size == dict_size)) {
         dctx->inner.checksum_enabled = checksum_enabled;
+        dctx->inner.block_index = 0;
         return ZXC_OK;
     }
     if (dctx->initialized) {

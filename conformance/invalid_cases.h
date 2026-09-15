@@ -349,7 +349,14 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
             d[at] ^= 0xFFU; /* trailing block checksum */
         }
     } else if (!strcmp(name, "corrupt_payload")) {
-        d[PAY0 + ZXC_GLO_HEADER_BINARY_SIZE + 4] ^= 0xFFU; /* a literal byte */
+        /* A raw literal: only the checksum can catch it. */
+        glo_layout_t L;
+        if (!glo_layout(d, len, &L) || L.tok <= PAY0 + ZXC_GLO_HEADER_BINARY_SIZE + 4) {
+            fprintf(stderr, "  block 0 is not GLO with raw literals\n");
+            ok = 0;
+        } else {
+            d[PAY0 + ZXC_GLO_HEADER_BINARY_SIZE + 4] ^= 0xFFU; /* a raw literal byte */
+        }
 
         /* --- Truncations ---------------------------------------------------- */
     } else if (!strcmp(name, "truncated_header_only")) {

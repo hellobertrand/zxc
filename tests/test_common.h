@@ -109,6 +109,7 @@ int test_truncated_input(void);
 int test_io_failures(void);
 int test_thread_params(void);
 int test_multithread_roundtrip(void);
+int test_stream_checksum_cross_paths(void);
 int test_stream_get_decompressed_size_errors(void);
 int test_stream_engine_errors(void);
 
@@ -184,6 +185,7 @@ int test_seekable_empty_file(void);
 int test_seekable_no_checksum(void);
 int test_seekable_with_checksum(void);
 int test_seekable_corrupted_block_checksum(void);
+int test_seekable_swapped_blocks_caught(void);
 int test_seekable_range_reports_short_reads(void);
 int test_seekable_work_buf_tail_pad(void);
 
@@ -203,6 +205,7 @@ int test_header_checksum(void);
 int test_global_checksum_order(void);
 int test_forged_block_comp_size(void);
 int test_global_checksum_order_distance_32(void);
+int test_global_hash_combiner_swaps(void);
 int test_chunk_size_code(void);
 int test_header_checksum_single_bit(void);
 
