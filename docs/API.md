@@ -1114,7 +1114,7 @@ ZXC_EXPORT int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out);
 ```
 
 Finalises the stream: compresses any partial last block, emits the EOF
-block (8 B) and the file footer (8 B).  **Must be called** to produce a
+block (8 B) and the file footer (8 B, 16 with a digest).  **Must be called** to produce a
 valid ZXC file.
 
 Reentrant the same way `_compress` is: loop until it returns `0`.

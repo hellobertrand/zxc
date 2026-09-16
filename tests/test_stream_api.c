@@ -1041,7 +1041,8 @@ int test_stream_corrupt_block_header(void) {
         }
         memcpy(forged, arc, keep);
         memset(forged + keep, 0xFF, ZXC_BLOCK_HEADER_SIZE);
-        zxc_write_file_footer(forged + keep + ZXC_BLOCK_HEADER_SIZE, ZXC_FILE_FOOTER_SIZE, bs);
+        zxc_write_file_footer(forged + keep + ZXC_BLOCK_HEADER_SIZE, ZXC_FILE_FOOTER_SIZE, bs, 0,
+                              0);
         fwrite(forged, 1, flen, f_bad);
         fseek(f_bad, 0, SEEK_SET);
 

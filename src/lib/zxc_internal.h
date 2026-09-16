@@ -1456,6 +1456,35 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const
 }
 
 /**
+ * @brief Folds a data block's 32-bit checksum into the running archive digest.
+ *
+ * The digest, stored after the source size in the file footer when checksums are
+ * on, is this fold over every block in stream order: an ordered 64-bit identity
+ * of the archive that a reordered or altered block changes. Verified on a full
+ * decode, never on a range read. Seed 0 for the first block.
+ *
+ * The checksum is spread across 64 bits, XORed into the accumulator, then
+ * mum-folded (64x64 multiply, XOR of the two 128-bit halves). The result is a 64-bit digest that is
+ * sensitive to the order and content of all blocks.
+ */
+static ZXC_ALWAYS_INLINE uint64_t zxc_digest_combine(const uint64_t acc,
+                                                     const uint32_t block_checksum) {
+    const uint64_t a = acc ^ ((uint64_t)block_checksum + 1U) * ZXC_HASH_PRIME1;
+    const uint64_t b = ZXC_LZ_HASH_PRIME2;
+#if defined(__SIZEOF_INT128__)
+    const __uint128_t r = (__uint128_t)a * b;
+    return (uint64_t)r ^ (uint64_t)(r >> 64);
+#else
+    const uint64_t alo = (uint32_t)a, ahi = a >> 32, blo = (uint32_t)b, bhi = b >> 32;
+    const uint64_t lolo = alo * blo, lohi = alo * bhi, hilo = ahi * blo, hihi = ahi * bhi;
+    const uint64_t cross = (lolo >> 32) + (uint32_t)lohi + (uint32_t)hilo;
+    const uint64_t hi = hihi + (lohi >> 32) + (hilo >> 32) + (cross >> 32);
+    const uint64_t lo = (cross << 32) | (uint32_t)lolo;
+    return lo ^ hi;
+#endif
+}
+
+/**
  * @brief Writes a GLO sub-header followed by its section descriptors.
  *
  * They hold only the two sizes the header cannot imply, and are 0, 4 or 8 bytes
@@ -2008,17 +2037,27 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 /**
  * @brief Writes the ZXC file footer into @p dst.
  *
- * The original uncompressed size, @c ZXC_FILE_FOOTER_SIZE (8) bytes.
+ * The original uncompressed size (@c ZXC_FILE_FOOTER_SIZE, 8 bytes, always first),
+ * then the archive digest when checksums are on.
  *
  * @param[out] dst               Destination buffer.
  * @param[in]  dst_capacity      Total capacity of @p dst in bytes.
  * @param[in]  src_size          Original uncompressed size of the data.
+ * @param[in]  digest            Archive digest, written after the size when
+ *                               @p checksum_enabled.
+ * @param[in]  checksum_enabled  Non-zero to emit the digest.
  *
- * @return Number of bytes written (@c ZXC_FILE_FOOTER_SIZE) on success,
+ * @return Number of bytes written (8, or 16 with a digest) on success,
  *         or @c ZXC_ERROR_DST_TOO_SMALL on failure.
  */
-int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity,
-                          const uint64_t src_size);
+int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
+                          const uint64_t digest, const int checksum_enabled);
+
+/** @brief Footer bytes at the end of an archive: base size, plus the digest when
+ *  @p checksum_enabled. */
+static ZXC_ALWAYS_INLINE size_t zxc_footer_bytes(const int checksum_enabled) {
+    return ZXC_FILE_FOOTER_SIZE + (checksum_enabled ? (size_t)ZXC_FILE_DIGEST_SIZE : 0U);
+}
 
 // ---------------------------------------------------------------------------
 // Seekable cross-TU hooks (defined in zxc_seekable.c, consumed by the

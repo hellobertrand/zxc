@@ -436,7 +436,8 @@ int test_buffer_error_codes() {
         uint8_t* corrupt = malloc((size_t)comp_sz);
         memcpy(corrupt, comp_buf, (size_t)comp_sz);
         // Last byte before the EOF block: the last block's checksum.
-        corrupt[comp_sz - ZXC_FILE_FOOTER_SIZE - ZXC_BLOCK_HEADER_SIZE - 1] ^= 0xFF;
+        corrupt[comp_sz - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE - ZXC_BLOCK_HEADER_SIZE -
+                1] ^= 0xFF;
         uint8_t* out = malloc(test_src_sz);
         zxc_decompress_opts_t _do46 = {.checksum_enabled = 1};
         r = zxc_decompress(corrupt, (size_t)comp_sz, out, test_src_sz, &_do46);

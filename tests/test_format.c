@@ -920,6 +920,79 @@ int test_swapped_blocks_oneshot(void) {
     return ok;
 }
 
+/* The footer carries an 8-byte archive digest before the size when checksums are on.
+ * It is a fold of the block checksums, so it is deterministic, identical for identical
+ * content, absent without -C, and a flipped digest byte fails a verified decode. */
+int test_footer_digest(void) {
+    printf("TEST: Footer digest... ");
+    enum { N = 40 * 1024 };
+    uint8_t* src = malloc(N);
+    if (!src) return 0;
+    uint32_t rng = 0x2545F491u;
+    for (size_t i = 0; i < N; i++) {
+        rng = rng * 1103515245u + 12345u;
+        src[i] = (uint8_t)(rng >> 16);
+    }
+    const size_t cap = (size_t)zxc_compress_bound(N);
+    uint8_t* a = malloc(cap);
+    uint8_t* b = malloc(cap);
+    uint8_t* out = malloc(N);
+    int ok = 0;
+    do {
+        if (!a || !b || !out) break;
+        const zxc_compress_opts_t co = {.level = 3, .block_size = 4096, .checksum_enabled = 1};
+        const int64_t ca = zxc_compress(src, N, a, cap, &co);
+        const int64_t cb = zxc_compress(src, N, b, cap, &co);
+        if (ca <= 0 || cb <= 0) {
+            printf("[FAIL] compress\n");
+            break;
+        }
+        /* Deterministic: two -C compressions of the same bytes are identical. */
+        if (ca != cb || memcmp(a, b, (size_t)ca) != 0) {
+            printf("[FAIL] non-deterministic -C output\n");
+            break;
+        }
+        const uint64_t digest = zxc_le64(a + ca - ZXC_FILE_DIGEST_SIZE);
+        if (digest == 0) {
+            printf("[FAIL] digest is zero on a non-empty archive\n");
+            break;
+        }
+        /* A verified decode accepts it; flipping a digest byte fails BAD_CHECKSUM;
+         * an unverified decode ignores it. */
+        const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
+        const zxc_decompress_opts_t quiet = {.checksum_enabled = 0};
+        if (zxc_decompress(a, (size_t)ca, out, N, &verify) != N) {
+            printf("[FAIL] verified decode of intact archive\n");
+            break;
+        }
+        a[ca - ZXC_FILE_DIGEST_SIZE] ^= 0xFF;
+        if (zxc_decompress(a, (size_t)ca, out, N, &verify) != ZXC_ERROR_BAD_CHECKSUM) {
+            printf("[FAIL] flipped digest not caught\n");
+            break;
+        }
+        if (zxc_decompress(a, (size_t)ca, out, N, &quiet) != N) {
+            printf("[FAIL] unverified decode should ignore the digest\n");
+            break;
+        }
+        /* Empty -C archive: digest of zero blocks is 0, footer is 16 bytes. */
+        uint8_t e[64];
+        const int64_t ce = zxc_compress(NULL, 0, e, sizeof(e), &co);
+        if (ce <=
+                (int64_t)(ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE) - 1 ||
+            zxc_le64(e + ce - ZXC_FILE_DIGEST_SIZE) != 0) {
+            printf("[FAIL] empty -C archive digest\n");
+            break;
+        }
+        ok = 1;
+    } while (0);
+    free(src);
+    free(a);
+    free(b);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
 /* Builds a header with the given chunk-size code, fixes the header checksum, and returns
  * zxc_read_file_header's verdict (block_size out via *bs). */
 static int chunk_code_verdict(uint8_t code, size_t* bs) {

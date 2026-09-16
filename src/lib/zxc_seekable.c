@@ -192,10 +192,13 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     const uint32_t block_size = (uint32_t)block_size_sz;
     if (UNLIKELY(block_size == 0)) return NULL;  // LCOV_EXCL_LINE
 
-    // Step 2: read total decompressed size from the file footer
+    // Step 2: read the source size, the first 8 bytes of the footer (8, or 16 with
+    // a digest). The source size is the last 8 bytes when there is no digest, else
+    // the 8 before it.
+    const uint64_t footer_len = zxc_footer_bytes(file_has_chk);
+    if (UNLIKELY(footer_len > src->size)) return NULL;
     uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-    if (UNLIKELY(
-            !zxc_seek_source_read(src, footer, sizeof(footer), src->size - ZXC_FILE_FOOTER_SIZE)))
+    if (UNLIKELY(!zxc_seek_source_read(src, footer, sizeof(footer), src->size - footer_len)))
         return NULL;
     const uint64_t total_decomp = zxc_le64(footer);
 
@@ -213,9 +216,9 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     if (UNLIKELY(entries_total > SIZE_MAX - 2 * ZXC_BLOCK_HEADER_SIZE)) return NULL;
 
     const size_t seek_block_total = ZXC_BLOCK_HEADER_SIZE + (size_t)entries_total;
-    if (UNLIKELY((uint64_t)seek_block_total + ZXC_FILE_FOOTER_SIZE > src->size)) return NULL;
+    if (UNLIKELY((uint64_t)seek_block_total + footer_len > src->size)) return NULL;
 
-    const uint64_t seek_off = src->size - ZXC_FILE_FOOTER_SIZE - (uint64_t)seek_block_total;
+    const uint64_t seek_off = src->size - footer_len - (uint64_t)seek_block_total;
     if (UNLIKELY(seek_off < ZXC_BLOCK_HEADER_SIZE)) return NULL;
 
     // The EOF block sits immediately before the seek block, so one read covers

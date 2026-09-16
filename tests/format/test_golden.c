@@ -20,7 +20,7 @@
  *     SEK seek table. (Type 2 is reserved/removed.)
  *   - Optional per-block checksum over the block's decoded bytes, seeded with
  *     its position, recomputed from the regenerated input (Sec 7.2).
- *   - The 8-byte file footer: original source size (Sec 8).
+ *   - The file footer: the archive digest (when checksummed) then the source size (Sec 8).
  *
  * Each file is also round-tripped: decompressed and compared byte-for-byte
  * against its deterministically regenerated input (see golden_cases.h).
@@ -252,6 +252,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     size_t off = ZXC_FILE_HEADER_SIZE;
     const size_t bs = (size_t)1U << code;
     int data_blocks = 0;
+    uint64_t digest = 0;
     uint32_t block_phys[MAX_BLOCKS]; /* physical size of each data block incl. checksum */
 
     for (;;) {
@@ -333,6 +334,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
             CHECK(stored == want, "block checksum mismatch at %zu: got 0x%08X calc 0x%08X", off,
                   stored, want);
             EMIT("block_checksum:   0x%08X\n", stored);
+            digest = zxc_digest_combine(digest, stored);
             off += ZXC_BLOCK_CHECKSUM_SIZE;
             phys += ZXC_BLOCK_CHECKSUM_SIZE;
         }
@@ -379,13 +381,21 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     CHECK(seek_present == gc->expect_seek, "SEK present=%d, expected %d", seek_present,
           gc->expect_seek);
 
-    /* ---- File footer (Sec 8): the trailing 8 bytes, with nothing after it ---- */
-    CHECK(off + ZXC_FILE_FOOTER_SIZE == size, "footer not at end (off %zu, size %zu)", off, size);
-    const uint8_t* footer = buf + size - ZXC_FILE_FOOTER_SIZE;
+    /* ---- File footer (Sec 8): the digest (when checksummed) then the size, last ---- */
+    const size_t footer_len =
+        (size_t)ZXC_FILE_FOOTER_SIZE + (has_checksum ? (size_t)ZXC_FILE_DIGEST_SIZE : 0);
+    CHECK(off + footer_len == size, "footer not at end (off %zu, size %zu)", off, size);
+    const uint8_t* footer = buf + size - footer_len;
     uint64_t src_size = zxc_le64(footer);
 
     EMIT("\n[footer]\n");
-    emit_hex("raw:", footer, ZXC_FILE_FOOTER_SIZE);
+    emit_hex("raw:", footer, footer_len);
+    if (has_checksum) {
+        const uint64_t stored_digest = zxc_le64(footer + ZXC_FILE_FOOTER_SIZE);
+        CHECK(stored_digest == digest, "footer digest 0x%016llX != recomputed 0x%016llX",
+              (unsigned long long)stored_digest, (unsigned long long)digest);
+        EMIT("digest:           0x%016llX\n", (unsigned long long)stored_digest);
+    }
     EMIT("src_size:         %llu\n", (unsigned long long)src_size);
     CHECK(src_size == in_size, "footer source size %llu != %zu input bytes",
           (unsigned long long)src_size, in_size);

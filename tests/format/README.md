@@ -36,7 +36,7 @@ golden.sha256      Byte-stability manifest (sha256sum format)
 
 `test_golden.c` walks each file against `docs/FORMAT.md` — headers, block
 structure, section descriptors, the SEK entries, the block checksums (recomputed
-from the regenerated input, block by block) and the footer — then decompresses
+from the regenerated input, block by block), the archive digest and the footer — then decompresses
 it and compares with its regenerated input. The
 annotated dumps below list exactly which fields that walk reads.
 

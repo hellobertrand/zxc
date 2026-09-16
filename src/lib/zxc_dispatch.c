@@ -566,7 +566,7 @@ static int64_t zxc_write_empty_frame(uint8_t* RESTRICT dst, const size_t dst_cap
     if (UNLIKELY(e < 0)) return e;
     off += (size_t)e;
 
-    const int f = zxc_write_file_footer(dst + off, dst_capacity - off, 0);
+    const int f = zxc_write_file_footer(dst + off, dst_capacity - off, 0, 0, checksum_enabled);
     if (UNLIKELY(f < 0)) return f;
     return (int64_t)(off + (size_t)f);
 }
@@ -655,6 +655,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         // LCOV_EXCL_STOP
     }
 
+    uint64_t digest = 0;
     size_t pos = 0;
     for (uint64_t bi = 0; pos < src_size; bi++) {
         const size_t chunk_len = (src_size - pos > block_size) ? block_size : (src_size - pos);
@@ -691,6 +692,8 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
             seek_comp[seek_count] = (uint32_t)res;
             seek_count++;
         }
+        if (checksum_enabled && LIKELY(res >= ZXC_BLOCK_CHECKSUM_SIZE))
+            digest = zxc_digest_combine(digest, zxc_le32(op + res - ZXC_BLOCK_CHECKSUM_SIZE));
 
         op += res;
         pos += chunk_len;
@@ -722,10 +725,11 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         ZXC_FREE(seek_comp);
     }
 
-    if (UNLIKELY((size_t)(op_end - op) < ZXC_FILE_FOOTER_SIZE))
+    if (UNLIKELY((size_t)(op_end - op) < zxc_footer_bytes(checksum_enabled)))
         return ZXC_ERROR_DST_TOO_SMALL;  // LCOV_EXCL_LINE
 
-    const int footer_val = zxc_write_file_footer(op, (size_t)(op_end - op), src_size);
+    const int footer_val =
+        zxc_write_file_footer(op, (size_t)(op_end - op), src_size, digest, checksum_enabled);
     if (UNLIKELY(footer_val < 0)) return footer_val;  // LCOV_EXCL_LINE
     op += footer_val;
 
@@ -790,7 +794,7 @@ static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src
     const int hrc = zxc_read_file_header(src, src_size, &chunk, &cs, NULL);
     if (UNLIKELY(hrc != ZXC_OK)) return hrc;
 
-    const uint64_t stored = zxc_le64(src + src_size - ZXC_FILE_FOOTER_SIZE);
+    const uint64_t stored = zxc_le64(src + src_size - zxc_footer_bytes(cs));
     if (UNLIKELY(!zxc_footer_dsize_plausible(stored, chunk, src_size)))
         return ZXC_ERROR_CORRUPT_DATA;
 
@@ -896,6 +900,7 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
 
     // Block decompression loop
     uint64_t block_index = 0;
+    uint64_t digest = 0;
 
     for (;;) {
         if (UNLIKELY(ip >= ip_end)) {
@@ -917,21 +922,24 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
                 if (ctx_ready) zxc_cctx_free(&ctx);
                 return ZXC_ERROR_BAD_HEADER;
             }
-            // Footer is always the last ZXC_FILE_FOOTER_SIZE bytes of the source,
-            // even when a seek table is inserted between EOF block and footer.
+            // The footer is the source size then, when the archive carries
+            // checksums, the digest. Its length follows file_has_checksums.
+            const size_t footer_len = zxc_footer_bytes(file_has_checksums);
             // LCOV_EXCL_START
-            if (UNLIKELY(src_size < ZXC_FILE_FOOTER_SIZE)) {
+            if (UNLIKELY(src_size < footer_len)) {
                 if (ctx_ready) zxc_cctx_free(&ctx);
                 return ZXC_ERROR_SRC_TOO_SMALL;
             }
             // LCOV_EXCL_STOP
-            const uint8_t* const footer = src + src_size - ZXC_FILE_FOOTER_SIZE;
-
-            // Validate source size matches what we decompressed
-            const uint64_t stored_size = zxc_le64(footer);
-            if (UNLIKELY(stored_size != (uint64_t)(op - op_start))) {
+            const uint8_t* const footer = src + src_size - footer_len;
+            if (UNLIKELY(zxc_le64(footer) != (uint64_t)(op - op_start))) {
                 if (ctx_ready) zxc_cctx_free(&ctx);
                 return ZXC_ERROR_CORRUPT_DATA;
+            }
+            if (checksum_enabled && file_has_checksums &&
+                UNLIKELY(zxc_le64(footer + ZXC_FILE_FOOTER_SIZE) != digest)) {
+                if (ctx_ready) zxc_cctx_free(&ctx);
+                return ZXC_ERROR_BAD_CHECKSUM;
             }
             break;  // EOF reached, exit the block loop
         }
@@ -997,6 +1005,10 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
             return res;
         }
 
+        if (checksum_enabled && file_has_checksums)
+            digest =
+                zxc_digest_combine(digest, zxc_le32(ip + ZXC_BLOCK_HEADER_SIZE + bh.comp_size));
+
         ip += advance;
         op += res;
         block_index++;
@@ -1040,7 +1052,7 @@ static uint64_t zxc_inplace_margin(const uint64_t dsize, const size_t chunk_size
         (uint64_t)ZXC_BLOCK_HEADER_SIZE +  // EOF block header
         ((uint64_t)ZXC_BLOCK_HEADER_SIZE +
          nblocks * (uint64_t)ZXC_SEEK_ENTRY_SIZE) +  // Seek table (worst case)
-        (uint64_t)ZXC_FILE_FOOTER_SIZE;
+        (uint64_t)zxc_footer_bytes(has_cs);
     return (uint64_t)chunk_size + nblocks * per_block + trailing +
            (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
 }
@@ -1371,6 +1383,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     if (UNLIKELY(h_val < 0)) return h_val;  // LCOV_EXCL_LINE
     op += h_val;
 
+    uint64_t digest = 0;
     size_t pos = 0;
     for (uint64_t bi = 0; pos < src_size; bi++) {
         const size_t chunk_len = (src_size - pos > block_size) ? block_size : (src_size - pos);
@@ -1386,6 +1399,9 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         }
         if (UNLIKELY(res < 0)) return res;
 
+        if (checksum_enabled && LIKELY(res >= ZXC_BLOCK_CHECKSUM_SIZE))
+            digest = zxc_digest_combine(digest, zxc_le32(op + res - ZXC_BLOCK_CHECKSUM_SIZE));
+
         op += res;
         pos += chunk_len;
     }
@@ -1397,10 +1413,11 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     if (UNLIKELY(eof_val < 0)) return eof_val;  // LCOV_EXCL_LINE
     op += eof_val;
 
-    if (UNLIKELY(rem_cap < (size_t)eof_val + ZXC_FILE_FOOTER_SIZE))
+    if (UNLIKELY(rem_cap < (size_t)eof_val + zxc_footer_bytes(checksum_enabled)))
         return ZXC_ERROR_DST_TOO_SMALL;  // LCOV_EXCL_LINE
 
-    const int footer_val = zxc_write_file_footer(op, (size_t)(op_end - op), src_size);
+    const int footer_val =
+        zxc_write_file_footer(op, (size_t)(op_end - op), src_size, digest, checksum_enabled);
     if (UNLIKELY(footer_val < 0)) return footer_val;  // LCOV_EXCL_LINE
     op += footer_val;
 
@@ -1557,6 +1574,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     if (dict_dec) ZXC_MEMCPY(dict_dec, dict, dict_size);
 
     uint64_t block_index = 0;
+    uint64_t digest = 0;
     for (;;) {
         // See zxc_decompress_frame: only the EOF block may end the walk.
         if (UNLIKELY(ip >= ip_end)) return ZXC_ERROR_CORRUPT_DATA;
@@ -1568,9 +1586,13 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
         if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
             if (UNLIKELY(bh.comp_size != 0)) return ZXC_ERROR_BAD_HEADER;
 
-            const uint8_t* const footer = (const uint8_t*)src + src_size - ZXC_FILE_FOOTER_SIZE;
-            const uint64_t stored_size = zxc_le64(footer);
-            if (UNLIKELY(stored_size != (uint64_t)(op - op_start))) return ZXC_ERROR_CORRUPT_DATA;
+            const size_t footer_len = zxc_footer_bytes(file_has_checksums);
+            const uint8_t* const footer = (const uint8_t*)src + src_size - footer_len;
+            if (UNLIKELY(zxc_le64(footer) != (uint64_t)(op - op_start)))
+                return ZXC_ERROR_CORRUPT_DATA;
+            if (checksum_enabled && file_has_checksums &&
+                UNLIKELY(zxc_le64(footer + ZXC_FILE_FOOTER_SIZE) != digest))
+                return ZXC_ERROR_BAD_CHECKSUM;
             break;  // EOF reached, stop decoding
         }
 
@@ -1602,6 +1624,10 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
             }
         }
         if (UNLIKELY(res < 0)) return res;
+
+        if (checksum_enabled && file_has_checksums)
+            digest =
+                zxc_digest_combine(digest, zxc_le32(ip + ZXC_BLOCK_HEADER_SIZE + bh.comp_size));
 
         ip += advance;
         op += res;

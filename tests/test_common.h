@@ -206,6 +206,7 @@ int test_header_checksum(void);
 int test_swapped_blocks_stream(void);
 int test_forged_block_comp_size(void);
 int test_swapped_blocks_oneshot(void);
+int test_footer_digest(void);
 int test_chunk_size_code(void);
 int test_header_checksum_single_bit(void);
 

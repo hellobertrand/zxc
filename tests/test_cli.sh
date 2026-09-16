@@ -276,9 +276,9 @@ echo "Testing Block Checksum Integrity..."
 "$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
 
 # Flip the last byte of the last block's checksum: it sits right before the
-# 8-byte EOF block and the 8-byte footer. Flipping, not zeroing, always changes it.
+# 8-byte EOF block and the 16-byte footer (digest + size). Flipping always changes it.
 FILE_SZ=$(wc -c < "$TEST_FILE_XC_ARG" | tr -d ' ')
-CK_BYTE_OFFSET=$((FILE_SZ - 8 - 8 - 1))
+CK_BYTE_OFFSET=$((FILE_SZ - 16 - 8 - 1))
 CK_BYTE=$(dd if="$TEST_FILE_XC_ARG" bs=1 skip=$CK_BYTE_OFFSET count=1 2>/dev/null | od -An -tu1 | tr -d ' ')
 printf "$(printf '\\x%02x' $((CK_BYTE ^ 0xFF)))" | dd of="$TEST_FILE_XC_ARG" bs=1 seek=$CK_BYTE_OFFSET count=1 conv=notrunc 2>/dev/null
 

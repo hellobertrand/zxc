@@ -397,7 +397,8 @@ int test_context_api_empty_input(void) {
             printf("  [FAIL] block+checksum setup: %lld\n", (long long)cn);
             break;
         }
-        bad[cn - ZXC_FILE_FOOTER_SIZE - ZXC_BLOCK_HEADER_SIZE - 1] ^= 0xFF; /* its checksum */
+        bad[cn - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE - ZXC_BLOCK_HEADER_SIZE - 1] ^=
+            0xFF; /* its checksum */
         disagreed += !probe_and_decode("corrupted block checksum", bad, (size_t)cn, &cs_do,
                                        ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_BAD_CHECKSUM);
 

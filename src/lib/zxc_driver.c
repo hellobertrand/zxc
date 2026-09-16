@@ -281,6 +281,7 @@ typedef struct {
     zxc_stream_ctx_t* ctx;
     FILE* f;
     int64_t total_bytes;
+    uint64_t digest;           // archive digest (compress side)
     uint64_t bytes_processed;  // For progress callback
     uint32_t* seek_comp;
     uint32_t seek_count;
@@ -438,6 +439,10 @@ static void* zxc_async_writer(void* arg) {
             break;
         }
         args->total_bytes += (int64_t)result_sz;
+        if (ctx->checksum_enabled && ctx->compression_mode == 1 &&
+            LIKELY(result_sz >= ZXC_BLOCK_CHECKSUM_SIZE))
+            args->digest = zxc_digest_combine(
+                args->digest, zxc_le32(job->out_buf + result_sz - ZXC_BLOCK_CHECKSUM_SIZE));
 
         // Seekable: record compressed block size
         if (args->seek_comp && ctx->compression_mode == 1) {
@@ -512,7 +517,8 @@ static int64_t zxc_stream_engine_fail(zxc_stream_ctx_t* ctx, pthread_t* workers,
  * Returns the ring index the terminator job goes to.
  */
 static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mode,
-                                const size_t chunk_sz, uint64_t* total_src_bytes) {
+                                const size_t chunk_sz, uint64_t* total_src_bytes,
+                                uint64_t* d_digest) {
     int read_idx = 0;
     int read_eof = 0;
     uint64_t block_index = 0;
@@ -589,6 +595,9 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
                     ctx->io_error = 1;
                     break;
                 }
+                if (has_checksum)
+                    *d_digest = zxc_digest_combine(
+                        *d_digest, zxc_le32(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size));
                 read_sz = ZXC_BLOCK_HEADER_SIZE + body_read;
             }
         }
@@ -648,41 +657,41 @@ static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, 
         }
     }
 
-    // Footer
-    uint8_t footer_buf[ZXC_FILE_FOOTER_SIZE];
-    zxc_write_file_footer(footer_buf, ZXC_FILE_FOOTER_SIZE, total_src_bytes);
-    if (UNLIKELY(f_out &&
-                 fwrite(footer_buf, 1, ZXC_FILE_FOOTER_SIZE, f_out) != ZXC_FILE_FOOTER_SIZE))
+    // Footer: the digest (when checksums are on) then the source size
+    uint8_t footer_buf[ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE];
+    const size_t footer_len = zxc_footer_bytes(ctx->checksum_enabled);
+    zxc_write_file_footer(footer_buf, sizeof(footer_buf), total_src_bytes, w->digest,
+                          ctx->checksum_enabled);
+    if (UNLIKELY(f_out && fwrite(footer_buf, 1, footer_len, f_out) != footer_len))
         ctx->io_error = 1;
     else
-        w->total_bytes += ZXC_FILE_FOOTER_SIZE;
+        w->total_bytes += (int64_t)footer_len;
 }
 
 /**
  * @brief Consumes and validates the trailer of a decompressed stream.
  */
-static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_args_t* w,
-                                         FILE* f_in) {
-    // After the EOF block: [FOOTER 8B], or [SEK header 8B] [payload] [FOOTER 8B].
-    // Footer and block header are the same size: one read, then the match below.
-    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-    uint8_t* const peek_buf = footer;
+static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_args_t* w, FILE* f_in,
+                                         const uint64_t d_digest) {
+    // After the EOF block: [SEK block]?[footer]. The footer is the 8-byte source size,
+    // 16 when the archive carries checksums (size, then digest). Its first 8 bytes and
+    // a SEK header are the same size; a footer that happens to parse as a SEK header
+    // (one value in ~2^40) fails the table-size match and is read as the footer it is.
+    const size_t footer_len = zxc_footer_bytes(ctx->file_has_checksum);
+    uint8_t footer[ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE];
 
-    if (UNLIKELY(fread(peek_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in) != ZXC_BLOCK_HEADER_SIZE)) {
+    if (UNLIKELY(fread(footer, 1, ZXC_BLOCK_HEADER_SIZE, f_in) != ZXC_BLOCK_HEADER_SIZE)) {
         ctx->io_error = 1;
     } else {
-        // The SEK header carries the entries' size modulo 2^32. A footer that
-        // happens to parse as a SEK header (one source size in ~65536) fails
-        // this match and is read as the footer it is.
-        uint64_t remaining =
+        const uint64_t table =
             zxc_seek_table_bytes(zxc_seek_block_count((uint64_t)w->total_bytes, ctx->chunk_size));
         zxc_block_header_t peek_bh;
         const int is_sek =
-            (zxc_read_block_header(peek_buf, ZXC_BLOCK_HEADER_SIZE, &peek_bh) == ZXC_OK &&
-             peek_bh.block_type == ZXC_BLOCK_SEK && (uint32_t)remaining == peek_bh.comp_size);
+            (zxc_read_block_header(footer, ZXC_BLOCK_HEADER_SIZE, &peek_bh) == ZXC_OK &&
+             peek_bh.block_type == ZXC_BLOCK_SEK && (uint32_t)table == peek_bh.comp_size);
 
         if (is_sek) {
-            // Drain the SEK payload (read + discard)
+            // Drain the SEK payload, then read the whole footer.
             size_t remaining = (size_t)peek_bh.comp_size;
             uint8_t discard[512];
             while (remaining > 0 && !ctx->io_error) {
@@ -690,15 +699,24 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
                 if (UNLIKELY(fread(discard, 1, chunk, f_in) != chunk)) ctx->io_error = 1;
                 remaining -= chunk;
             }
-            if (!ctx->io_error &&
-                UNLIKELY(fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE))
+            if (!ctx->io_error && UNLIKELY(fread(footer, 1, footer_len, f_in) != footer_len))
+                ctx->io_error = 1;  // LCOV_EXCL_LINE
+        } else if (footer_len > ZXC_BLOCK_HEADER_SIZE) {
+            // Not a SEK block: the 8 peeked bytes are the footer's head; read the rest.
+            const size_t rest = footer_len - ZXC_BLOCK_HEADER_SIZE;
+            if (UNLIKELY(fread(footer + ZXC_BLOCK_HEADER_SIZE, 1, rest, f_in) != rest))
                 ctx->io_error = 1;  // LCOV_EXCL_LINE
         }
     }
 
-    // A footer that disagrees with what we produced is corruption, not an I/O fault.
+    // The size is the first 8 footer bytes; the digest, when present, the 8 after it.
     if (!ctx->io_error && UNLIKELY(zxc_le64(footer) != (uint64_t)w->total_bytes)) {
         if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_CORRUPT_DATA;
+        ctx->io_error = 1;
+    }
+    if (!ctx->io_error && ctx->file_has_checksum && ctx->checksum_enabled &&
+        UNLIKELY(zxc_le64(footer + ZXC_FILE_FOOTER_SIZE) != d_digest)) {
+        if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_BAD_CHECKSUM;
         ctx->io_error = 1;
     }
 }
@@ -865,7 +883,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         return zxc_stream_engine_fail(&ctx, workers, 0, mem_block, NULL,  // LCOV_EXCL_LINE
                                       ZXC_ERROR_MEMORY);                  // LCOV_EXCL_LINE
 
-    writer_args_t w_args = {&ctx, f_out, 0, 0, NULL, 0, 0};
+    writer_args_t w_args = {&ctx, f_out, 0, 0, 0, NULL, 0, 0};
 
     // Seekable: allocate initial block-size tracking array
     if (mode == 1 && seekable) {
@@ -895,7 +913,9 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                                       ZXC_ERROR_MEMORY);                          // LCOV_EXCL_LINE
 
     uint64_t total_src_bytes = 0;
-    const int read_idx = zxc_stream_read_loop(&ctx, f_in, mode, runtime_chunk_sz, &total_src_bytes);
+    uint64_t d_digest = 0;
+    const int read_idx =
+        zxc_stream_read_loop(&ctx, f_in, mode, runtime_chunk_sz, &total_src_bytes, &d_digest);
 
     zxc_stream_job_t* const end_job = &ctx.jobs[read_idx];
     pthread_mutex_lock(&ctx.lock);
@@ -921,7 +941,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     if (mode == 1 && !ctx.io_error && w_args.total_bytes >= 0)
         zxc_stream_finish_compress(&ctx, &w_args, f_out, total_src_bytes);
     else if (mode == 0 && !ctx.io_error)
-        zxc_stream_finish_decompress(&ctx, &w_args, f_in);
+        zxc_stream_finish_decompress(&ctx, &w_args, f_in, d_digest);
 
     ZXC_FREE(w_args.seek_comp);
     ZXC_FREE(workers);
@@ -1019,8 +1039,13 @@ int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
         return ZXC_ERROR_BAD_MAGIC;
     }
 
+    enum { ZXC_HDR_FLAGS = 6, ZXC_FLAG_HAS_CHECKSUM = 0x80 };
+    const long long footer_len =
+        ZXC_FILE_FOOTER_SIZE +
+        ((header[ZXC_HDR_FLAGS] & ZXC_FLAG_HAS_CHECKSUM) ? ZXC_FILE_DIGEST_SIZE : 0);
     uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-    if (UNLIKELY(fseeko(f_in, file_size - ZXC_FILE_FOOTER_SIZE, SEEK_SET) != 0 ||
+    if (UNLIKELY(file_size < (long long)ZXC_FILE_HEADER_SIZE + footer_len ||
+                 fseeko(f_in, file_size - footer_len, SEEK_SET) != 0 ||
                  fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f_in) != ZXC_FILE_FOOTER_SIZE)) {
         fseeko(f_in, saved_pos, SEEK_SET);
         return ZXC_ERROR_IO;

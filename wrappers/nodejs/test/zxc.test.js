@@ -83,9 +83,9 @@ describe("corruption detection", () => {
     const compressed = zxc.compress(data, { checksum: true });
 
     // Flip the last byte of the block's checksum: it precedes the 8-byte EOF
-    // block and the 8-byte footer. The last byte would be the footer's size.
+    // block and the 16-byte footer (digest + size).
     const corrupted = Buffer.from(compressed);
-    corrupted[corrupted.length - 8 - 8 - 1] ^= 0x01;
+    corrupted[corrupted.length - 16 - 8 - 1] ^= 0x01;
 
     expect(() => {
       zxc.decompress(corrupted, { size: data.length, checksum: true });

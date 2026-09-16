@@ -102,8 +102,10 @@
 /** @brief File header size: Magic(4) + Version(1) + Chunk(1) + Flags(1) + Reserved(7) +
  * Checksum(2). */
 #define ZXC_FILE_HEADER_SIZE 16
-/** @brief File footer size: original_size(8). */
+/** @brief Base file footer: original_size(8), always the last 8 bytes. */
 #define ZXC_FILE_FOOTER_SIZE 8
+/** @brief Archive digest that precedes the footer when the header sets HAS_CHECKSUM. */
+#define ZXC_FILE_DIGEST_SIZE 8
 /** @} */ /* end of file_format */
 
 /**

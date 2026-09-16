@@ -596,13 +596,16 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 }
 
 /**
- * @brief Writes the 8-byte file footer (source size).
+ * @brief Writes the file footer: the source size, then the archive digest when
+ *        @p checksum_enabled.
  */
-int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity,
-                          const uint64_t src_size) {
-    if (UNLIKELY(dst_capacity < ZXC_FILE_FOOTER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
+int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
+                          const uint64_t digest, const int checksum_enabled) {
+    const size_t need = zxc_footer_bytes(checksum_enabled);
+    if (UNLIKELY(dst_capacity < need)) return ZXC_ERROR_DST_TOO_SMALL;
     zxc_store_le64(dst, src_size);
-    return ZXC_FILE_FOOTER_SIZE;
+    if (checksum_enabled) zxc_store_le64(dst + ZXC_FILE_FOOTER_SIZE, digest);
+    return (int)need;
 }
 
 /**
@@ -757,7 +760,7 @@ uint64_t zxc_compress_bound(const size_t input_size) {
            (uint64_t)input_size + ZXC_BLOCK_HEADER_SIZE + /* EOF block */
            ZXC_BLOCK_HEADER_SIZE +                        /* SEK block header (seekable) */
            (n * ZXC_SEEK_ENTRY_SIZE) +                    /* SEK entries: 4 bytes per block */
-           ZXC_FILE_FOOTER_SIZE;
+           ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE;   /* footer + optional digest */
 }
 
 /**
