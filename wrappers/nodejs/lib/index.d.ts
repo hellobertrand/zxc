@@ -32,7 +32,7 @@ export const ERROR_BAD_MAGIC: number;
 export const ERROR_BAD_VERSION: number;
 /** Corrupted or invalid header (checksum mismatch). */
 export const ERROR_BAD_HEADER: number;
-/** A block's decoded bytes fail its checksum. */
+/** A block's decoded bytes fail its checksum, or the archive digest mismatches. */
 export const ERROR_BAD_CHECKSUM: number;
 /** Corrupted compressed data. */
 export const ERROR_CORRUPT_DATA: number;
@@ -220,7 +220,7 @@ export function libraryVersion(): string;
 export interface CStreamOptions {
   /** Compression level (1-7). Defaults to LEVEL_DEFAULT. */
   level?: number;
-  /** Append a checksum to every block. Defaults to false. */
+  /** Append a per-block checksum and the archive digest. Defaults to false. */
   checksum?: boolean;
   /** Block size in bytes (0 = default 512 KB). Power of 2, 4 KB – 2 MB. */
   blockSize?: number;
@@ -280,7 +280,7 @@ export class CStream {
 }
 
 export interface DStreamOptions {
-  /** Verify the block checksums when present. Defaults to false. */
+  /** Verify the block checksums and archive digest when present. Defaults to false. */
   checksum?: boolean;
 }
 

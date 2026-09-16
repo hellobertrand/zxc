@@ -409,8 +409,8 @@ The **EOF** block marks the end of the ZXC stream. It ensures that the decompres
 ### 5.6 File Footer
 (Present immediately after the EOF Block)
 
-A mandatory footer closes the stream with the total source size (its last
-8 bytes), preceded by an 8-byte **archive digest** when checksums are on.
+A mandatory footer closes the stream with the total source size in its first
+8 bytes, followed by an 8-byte **archive digest** when checksums are on.
 
 **Footer Structure (8 bytes, 16 with a digest):**
 

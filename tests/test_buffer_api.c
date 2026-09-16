@@ -436,9 +436,10 @@ int test_buffer_error_codes() {
     {
         uint8_t* corrupt = malloc((size_t)comp_sz);
         memcpy(corrupt, comp_buf, (size_t)comp_sz);
-        // Footer is at end: last 8 bytes = [src_size(8)]
-        // Corrupt the source size field (add 1 to the first byte)
-        const size_t footer_offset = (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE;
+        // Checksummed, so the footer is [src_size(8)][digest(8)]: the last 8 bytes
+        // are the digest. Aimed there, this passed on BAD_CHECKSUM and never
+        // exercised the size mismatch it is named for.
+        const size_t footer_offset = (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE;
         corrupt[footer_offset] ^= 0x01;  // Flip a bit in the stored source size
         uint8_t* out = malloc(test_src_sz);
         zxc_decompress_opts_t _do45 = {.checksum_enabled = 1};
@@ -972,10 +973,11 @@ static int inplace_forged_footer(void) {
     return ok;
 }
 
-/* The read/write separation is a difference between the bound and the archive
- * size, and the archive size is attacker-controlled: bytes between the EOF block
- * and the footer are skipped by the frame loop, so a padded archive still
- * decodes while each padding byte slides it closer to the output. */
+/* Padding between the EOF block and the footer is refused: only the SEK block
+ * belongs there (Sec 5.5). The frame loop used to skip it, which accepted hidden
+ * bytes and let each one slide the in-place read/write separation closer to the
+ * output, the archive size being attacker-controlled. The bound is still asserted:
+ * it must stay conservative on a padded input, which the decode then refuses. */
 static int inplace_padded_archive(void) {
     const size_t N = 64 * 1024;
     uint8_t* const orig = (uint8_t*)malloc(N);
@@ -1022,9 +1024,9 @@ static int inplace_padded_archive(void) {
             if (buf) {
                 memcpy(buf + need - c2, a, c2);
                 const int64_t d = zxc_decompress_inplace(buf, need, c2, NULL);
-                if (d != (int64_t)N || memcmp(buf, orig, N) != 0) {
-                    printf("Failed [padded archive]: pad=%zu inplace %lld want %zu\n", pad,
-                           (long long)d, N);
+                if (d != ZXC_ERROR_CORRUPT_DATA) {
+                    printf("Failed [padded archive]: pad=%zu inplace %lld want %d\n", pad,
+                           (long long)d, ZXC_ERROR_CORRUPT_DATA);
                     ok = 0;
                 }
                 free(buf);

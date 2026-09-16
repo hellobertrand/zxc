@@ -2115,6 +2115,28 @@ static ZXC_ALWAYS_INLINE int zxc_seek_tail_is_sek(const uint8_t* peek, const uin
     return 1;
 }
 
+/**
+ * @brief Whether the bytes between the EOF block and the footer are a legal tail.
+ *
+ * One thing may sit there: nothing, or the SEK block (Sec 5.5). Skipping the gap
+ * to reach the footer passes inserted bytes as sound, size and digest both being
+ * computed from the decoded bytes and blind to it.
+ *
+ * @param[in] gap        First byte after the EOF block header.
+ * @param[in] gap_len    Bytes between that point and the footer.
+ * @param[in] total_out  Bytes decoded: what the SEK table would describe.
+ * @param[in] block_size Block size from the file header.
+ * @return 1 for an empty gap or exactly one well-formed SEK block, 0 otherwise.
+ */
+static ZXC_ALWAYS_INLINE int zxc_tail_gap_ok(const uint8_t* gap, const uint64_t gap_len,
+                                             const uint64_t total_out, const size_t block_size) {
+    if (gap_len == 0) return 1;
+    if (gap_len < ZXC_BLOCK_HEADER_SIZE) return 0;
+    uint64_t sek_bytes = 0;
+    if (!zxc_seek_tail_is_sek(gap, total_out, block_size, &sek_bytes)) return 0;
+    return gap_len - ZXC_BLOCK_HEADER_SIZE == sek_bytes;
+}
+
 // ---------------------------------------------------------------------------
 // Seekable cross-TU hooks (defined in zxc_seekable.c, consumed by the
 // FILE*-flavored open helper in zxc_driver.c).

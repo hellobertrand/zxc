@@ -960,6 +960,78 @@ int test_seek_tail_rule(void) {
     return 1;
 }
 
+/* Only the SEK block belongs between the EOF block and the footer (Sec 5.5).
+ * Both frame decoders read the footer from the end, so inserted bytes used to
+ * ride along and still report success: size and digest cover the decoded bytes,
+ * not the gap. */
+int test_tail_between_eof_and_footer(void) {
+    printf("=== TEST: Format - only a SEK block may sit before the footer ===\n");
+    const size_t n = 4096;
+    uint8_t* const src = malloc(n);
+    const size_t cap = (size_t)zxc_compress_bound(n) + 128;
+    uint8_t* const arc = malloc(cap);
+    uint8_t* const mod = malloc(cap + 128);
+    uint8_t* const out = malloc(n);
+    if (!src || !arc || !mod || !out) {
+        free(src);
+        free(arc);
+        free(mod);
+        free(out);
+        return 0;
+    }
+    for (size_t i = 0; i < n; i++) src[i] = (uint8_t)(i * 7u);
+
+    int ok = 1;
+    const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
+    /* Checksummed (16-byte footer) and plain (8-byte) both. */
+    for (int cs = 0; cs <= 1 && ok; cs++) {
+        const zxc_compress_opts_t co = {.level = 3, .checksum_enabled = cs};
+        const int64_t alen = zxc_compress(src, n, arc, cap, &co);
+        const size_t footer_len =
+            (size_t)ZXC_FILE_FOOTER_SIZE + (cs ? (size_t)ZXC_FILE_DIGEST_SIZE : 0);
+        if (alen <= (int64_t)footer_len) {
+            printf("  [FAIL] cs=%d: compress returned %lld\n", cs, (long long)alen);
+            ok = 0;
+            break;
+        }
+        if (zxc_decompress(arc, (size_t)alen, out, n, &verify) != (int64_t)n) {
+            printf("  [FAIL] cs=%d: the intact archive must decode\n", cs);
+            ok = 0;
+            break;
+        }
+        const size_t head = (size_t)alen - footer_len;
+        const size_t gaps[] = {1, 8, 64};
+        for (size_t g = 0; g < sizeof(gaps) / sizeof(gaps[0]) && ok; g++) {
+            memcpy(mod, arc, head);
+            memset(mod + head, 0xAB, gaps[g]);
+            memcpy(mod + head + gaps[g], arc + head, footer_len);
+            const int64_t r = zxc_decompress(mod, head + gaps[g] + footer_len, out, n, &verify);
+            if (r != ZXC_ERROR_CORRUPT_DATA) {
+                printf("  [FAIL] cs=%d: %zu inserted bytes gave %lld, want %d\n", cs, gaps[g],
+                       (long long)r, ZXC_ERROR_CORRUPT_DATA);
+                ok = 0;
+            }
+        }
+    }
+
+    /* The legitimate gap: a seekable archive carries its SEK block there. */
+    if (ok) {
+        const zxc_compress_opts_t so = {.level = 3, .checksum_enabled = 1, .seekable = 1};
+        const int64_t slen = zxc_compress(src, n, arc, cap, &so);
+        if (slen <= 0 || zxc_decompress(arc, (size_t)slen, out, n, &verify) != (int64_t)n) {
+            printf("  [FAIL] a seekable archive must still decode (len %lld)\n", (long long)slen);
+            ok = 0;
+        }
+    }
+
+    free(src);
+    free(arc);
+    free(mod);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
 int test_footer_digest(void) {
     printf("TEST: Footer digest... ");
     enum { N = 40 * 1024 };

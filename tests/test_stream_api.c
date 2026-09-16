@@ -1380,64 +1380,86 @@ static int dstream_finishes(const uint8_t* arc, size_t alen, uint8_t* out, size_
 /* One source size in ~65536 reads back, as the footer's u64, like a valid SEK
  * header. The tail readers must tell it from a real table, with or without one. */
 /* The CLI's `-t --progress` path asks for the stored size on the very stream it
- * is about to decode, then hands that stream to the decoder: the lookup seeks to
- * the footer and back, and the decode has to start from a stream that is still
- * in step. Covered here because only the CLI script exercised it, and that
- * script does not run the native suite's platforms. */
+ * then decodes: the lookup seeks to the footer and back, and the decode has to
+ * start from a stream still in step.
+ *
+ * The second round adds a caller buffer, installed before the lookup as the CLI
+ * does it: setvbuf is defined only before a stream's first operation and its
+ * buffer must outlive the stream, hence one FILE per round freed after fclose.
+ * That order the other way round is what made Windows read a truncated frame. */
 int test_stream_size_then_decompress(void) {
     printf("=== TEST: Stream - stored-size lookup then decode, same stream ===\n");
     const size_t n = 600u * 1024u; /* > 1 block at the 512 KB default */
+    const char* const path = "zxc_size_then_decode.tmp";
     uint8_t* const src = malloc(n);
     uint8_t* const out = malloc(n);
-    if (!src || !out) {
+    const size_t cap = (size_t)zxc_compress_bound(n);
+    uint8_t* const arc = malloc(cap);
+    if (!src || !out || !arc) {
         free(src);
         free(out);
+        free(arc);
         return 0;
     }
     gen_lz_data(src, n);
 
-    int ok = 0;
-    FILE* const f_src = tmpfile();
-    FILE* const f_arc = tmpfile();
-    if (f_src && f_arc && fwrite(src, 1, n, f_src) == n) {
-        rewind(f_src);
-        const zxc_compress_opts_t co = {.level = 3, .checksum_enabled = 1};
-        if (zxc_stream_compress(f_src, f_arc, &co) > 0) {
-            ok = 1;
-            /* With and without a caller buffer installed after the lookup, the
-             * order the CLI uses. */
-            for (int buffered = 0; buffered <= 1 && ok; buffered++) {
-                rewind(f_arc);
-                char* buf = NULL;
-                if (buffered) {
-                    buf = malloc(1U << 16);
-                    if (buf) setvbuf(f_arc, buf, _IOFBF, 1U << 16);
-                }
-                const int64_t reported = zxc_stream_get_decompressed_size(f_arc);
-                FILE* const f_out = tmpfile();
-                const zxc_decompress_opts_t various = {.n_threads = 1, .checksum_enabled = 1};
-                const int64_t got = f_out ? zxc_stream_decompress(f_arc, f_out, &various) : -1;
-                if (reported != (int64_t)n || got != (int64_t)n) {
-                    printf("  [FAIL] buffered=%d: size %lld, decode %lld, want %zu\n", buffered,
-                           (long long)reported, (long long)got, n);
-                    ok = 0;
-                } else {
-                    rewind(f_out);
-                    if (fread(out, 1, n, f_out) != n || memcmp(out, src, n) != 0) {
-                        printf("  [FAIL] buffered=%d: decoded bytes differ\n", buffered);
-                        ok = 0;
-                    }
-                }
-                if (f_out) fclose(f_out);
-                if (buffered) setvbuf(f_arc, NULL, _IONBF, 0);
-                free(buf);
-            }
+    const zxc_compress_opts_t co = {.level = 3, .checksum_enabled = 1};
+    const int64_t alen = zxc_compress(src, n, arc, cap, &co);
+    int ok = alen > 0;
+    if (!ok) printf("  [FAIL] compress returned %lld\n", (long long)alen);
+
+    if (ok) {
+        FILE* const f = create_restricted_file(path);
+        ok = f && fwrite(arc, 1, (size_t)alen, f) == (size_t)alen;
+        if (f && fclose(f) != 0) ok = 0;
+        if (!ok) printf("  [FAIL] could not stage %s\n", path);
+    }
+    if (ok) {
+        FILE* const f = fopen(path, "rb");
+        long staged = -1;
+        if (f && fseek(f, 0, SEEK_END) == 0) staged = ftell(f);
+        if (f) fclose(f);
+        if (staged != (long)alen) {
+            printf("  [FAIL] staged %ld bytes, wrote %lld: the file is not binary\n", staged,
+                   (long long)alen);
+            ok = 0;
         }
     }
-    if (f_src) fclose(f_src);
-    if (f_arc) fclose(f_arc);
+
+    for (int buffered = 0; buffered <= 1 && ok; buffered++) {
+        FILE* const f_arc = fopen(path, "rb");
+        char* buf = NULL;
+        if (f_arc && buffered) {
+            buf = malloc(1u << 16);
+            if (buf) setvbuf(f_arc, buf, _IOFBF, 1u << 16);
+        }
+        FILE* const f_out = tmpfile();
+        int64_t reported = -1, got = -1;
+        if (f_arc && f_out) {
+            reported = zxc_stream_get_decompressed_size(f_arc);
+            const zxc_decompress_opts_t verify = {.n_threads = 1, .checksum_enabled = 1};
+            got = zxc_stream_decompress(f_arc, f_out, &verify);
+        }
+        if (reported != (int64_t)n || got != (int64_t)n) {
+            printf("  [FAIL] buffered=%d: size %lld, decode %lld, want %zu\n", buffered,
+                   (long long)reported, (long long)got, n);
+            ok = 0;
+        } else {
+            rewind(f_out);
+            if (fread(out, 1, n, f_out) != n || memcmp(out, src, n) != 0) {
+                printf("  [FAIL] buffered=%d: decoded bytes differ\n", buffered);
+                ok = 0;
+            }
+        }
+        if (f_out) fclose(f_out);
+        if (f_arc) fclose(f_arc); /* the buffer stays alive until here */
+        free(buf);
+    }
+
+    remove(path);
     free(src);
     free(out);
+    free(arc);
     if (ok) printf("PASS\n\n");
     return ok;
 }

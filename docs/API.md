@@ -1150,10 +1150,10 @@ ZXC_EXPORT zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts);
 ```
 
 Creates a push decompression context.  Only `checksum_enabled` from `opts`
-is honoured (controls whether block checksums are verified when the file
-carries them). Dictionary options fail creation, and an archive
-whose header requires a dictionary fails with `ZXC_ERROR_DICT_REQUIRED` at the
-first decompress call.
+is honoured (controls whether the block checksums and archive digest are
+verified when the file carries them). Dictionary options fail creation, and an
+archive whose header requires a dictionary fails with `ZXC_ERROR_DICT_REQUIRED`
+at the first decompress call.
 
 **Returns**: context, or `NULL` on allocation failure.
 

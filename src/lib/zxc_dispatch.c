@@ -917,6 +917,12 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
                 if (ctx_ready) zxc_cctx_free(&ctx);
                 return ZXC_ERROR_CORRUPT_DATA;
             }
+            // Only a SEK block may sit between the EOF block and the footer.
+            if (UNLIKELY(!zxc_tail_gap_ok(src + consumed, src_size - footer_len - consumed,
+                                          (uint64_t)(op - op_start), runtime_chunk_size))) {
+                if (ctx_ready) zxc_cctx_free(&ctx);
+                return ZXC_ERROR_CORRUPT_DATA;
+            }
             if (checksum_enabled && file_has_checksums &&
                 UNLIKELY(zxc_le64(footer + ZXC_FILE_FOOTER_SIZE) != digest)) {
                 if (ctx_ready) zxc_cctx_free(&ctx);
@@ -1574,6 +1580,11 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
                 return ZXC_ERROR_SRC_TOO_SMALL;
             const uint8_t* const footer = (const uint8_t*)src + src_size - footer_len;
             if (UNLIKELY(zxc_le64(footer) != (uint64_t)(op - op_start)))
+                return ZXC_ERROR_CORRUPT_DATA;
+            // Only a SEK block may sit between the EOF block and the footer.
+            if (UNLIKELY(!zxc_tail_gap_ok((const uint8_t*)src + consumed,
+                                          src_size - footer_len - consumed,
+                                          (uint64_t)(op - op_start), runtime_chunk_size)))
                 return ZXC_ERROR_CORRUPT_DATA;
             if (checksum_enabled && file_has_checksums &&
                 UNLIKELY(zxc_le64(footer + ZXC_FILE_FOOTER_SIZE) != digest))

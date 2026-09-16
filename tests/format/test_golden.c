@@ -381,7 +381,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     CHECK(seek_present == gc->expect_seek, "SEK present=%d, expected %d", seek_present,
           gc->expect_seek);
 
-    /* ---- File footer (Sec 8): the digest (when checksummed) then the size, last ---- */
+    /* ---- File footer (Sec 8): the size first, then the digest when checksummed ---- */
     const size_t footer_len =
         (size_t)ZXC_FILE_FOOTER_SIZE + (has_checksum ? (size_t)ZXC_FILE_DIGEST_SIZE : 0);
     CHECK(off + footer_len == size, "footer not at end (off %zu, size %zu)", off, size);
