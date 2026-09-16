@@ -1034,6 +1034,11 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     uint64_t total_size = 0;
     const int stderr_tty = isatty(fileno(stderr)) != 0;
 
+    char* b1 = malloc(ZXC_STDIO_BUFFER_SIZE);
+    char* b2 = malloc(ZXC_STDIO_BUFFER_SIZE);
+    if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
+    if (f_out && b2) setvbuf(f_out, b2, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
+
     if (!g_quiet && g_progress_mode != ZXC_PROGRESS_NEVER &&
         (g_progress_mode == ZXC_PROGRESS_ALWAYS || (!use_stdout && !use_stdin && stderr_tty))) {
         // Get the total size based on mode (only knowable for seekable file input)
@@ -1057,12 +1062,6 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         if (g_progress_mode == ZXC_PROGRESS_ALWAYS || total_size > ZXC_STDIO_BUFFER_SIZE)
             show_progress = 1;
     }
-
-    // Set large buffers for I/O performance (AFTER file size detection)
-    char* b1 = malloc(ZXC_STDIO_BUFFER_SIZE);
-    char* b2 = malloc(ZXC_STDIO_BUFFER_SIZE);
-    if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
-    if (f_out && b2) setvbuf(f_out, b2, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
 
     if (mode == MODE_COMPRESS)
         zxc_log_v("Processing %s... (Compression Level %d)\n", in_path ? in_path : "<stdin>",

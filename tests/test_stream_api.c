@@ -1380,10 +1380,10 @@ static int dstream_finishes(const uint8_t* arc, size_t alen, uint8_t* out, size_
 /* One source size in ~65536 reads back, as the footer's u64, like a valid SEK
  * header. The tail readers must tell it from a real table, with or without one. */
 /* The CLI's `-t --progress` path asks for the stored size on the very stream it
- * is about to decode, then hands that stream to the decoder. Reading the header
- * and footer first leaves the stream mid-file and, in the CLI, setvbuf() lands
- * after those reads; the sequence has to survive both. Exercised here because
- * only the CLI script covered it, and only off Windows. */
+ * is about to decode, then hands that stream to the decoder: the lookup seeks to
+ * the footer and back, and the decode has to start from a stream that is still
+ * in step. Covered here because only the CLI script exercised it, and that
+ * script does not run the native suite's platforms. */
 int test_stream_size_then_decompress(void) {
     printf("=== TEST: Stream - stored-size lookup then decode, same stream ===\n");
     const size_t n = 600u * 1024u; /* > 1 block at the 512 KB default */
@@ -1408,12 +1408,12 @@ int test_stream_size_then_decompress(void) {
              * order the CLI uses. */
             for (int buffered = 0; buffered <= 1 && ok; buffered++) {
                 rewind(f_arc);
-                const int64_t reported = zxc_stream_get_decompressed_size(f_arc);
                 char* buf = NULL;
                 if (buffered) {
-                    buf = malloc(1u << 16);
-                    if (buf) setvbuf(f_arc, buf, _IOFBF, 1u << 16);
+                    buf = malloc(1U << 16);
+                    if (buf) setvbuf(f_arc, buf, _IOFBF, 1U << 16);
                 }
+                const int64_t reported = zxc_stream_get_decompressed_size(f_arc);
                 FILE* const f_out = tmpfile();
                 const zxc_decompress_opts_t various = {.n_threads = 1, .checksum_enabled = 1};
                 const int64_t got = f_out ? zxc_stream_decompress(f_arc, f_out, &various) : -1;
