@@ -1379,6 +1379,69 @@ static int dstream_finishes(const uint8_t* arc, size_t alen, uint8_t* out, size_
 
 /* One source size in ~65536 reads back, as the footer's u64, like a valid SEK
  * header. The tail readers must tell it from a real table, with or without one. */
+/* The CLI's `-t --progress` path asks for the stored size on the very stream it
+ * is about to decode, then hands that stream to the decoder. Reading the header
+ * and footer first leaves the stream mid-file and, in the CLI, setvbuf() lands
+ * after those reads; the sequence has to survive both. Exercised here because
+ * only the CLI script covered it, and only off Windows. */
+int test_stream_size_then_decompress(void) {
+    printf("=== TEST: Stream - stored-size lookup then decode, same stream ===\n");
+    const size_t n = 600u * 1024u; /* > 1 block at the 512 KB default */
+    uint8_t* const src = malloc(n);
+    uint8_t* const out = malloc(n);
+    if (!src || !out) {
+        free(src);
+        free(out);
+        return 0;
+    }
+    gen_lz_data(src, n);
+
+    int ok = 0;
+    FILE* const f_src = tmpfile();
+    FILE* const f_arc = tmpfile();
+    if (f_src && f_arc && fwrite(src, 1, n, f_src) == n) {
+        rewind(f_src);
+        const zxc_compress_opts_t co = {.level = 3, .checksum_enabled = 1};
+        if (zxc_stream_compress(f_src, f_arc, &co) > 0) {
+            ok = 1;
+            /* With and without a caller buffer installed after the lookup, the
+             * order the CLI uses. */
+            for (int buffered = 0; buffered <= 1 && ok; buffered++) {
+                rewind(f_arc);
+                const int64_t reported = zxc_stream_get_decompressed_size(f_arc);
+                char* buf = NULL;
+                if (buffered) {
+                    buf = malloc(1u << 16);
+                    if (buf) setvbuf(f_arc, buf, _IOFBF, 1u << 16);
+                }
+                FILE* const f_out = tmpfile();
+                const zxc_decompress_opts_t various = {.n_threads = 1, .checksum_enabled = 1};
+                const int64_t got = f_out ? zxc_stream_decompress(f_arc, f_out, &various) : -1;
+                if (reported != (int64_t)n || got != (int64_t)n) {
+                    printf("  [FAIL] buffered=%d: size %lld, decode %lld, want %zu\n", buffered,
+                           (long long)reported, (long long)got, n);
+                    ok = 0;
+                } else {
+                    rewind(f_out);
+                    if (fread(out, 1, n, f_out) != n || memcmp(out, src, n) != 0) {
+                        printf("  [FAIL] buffered=%d: decoded bytes differ\n", buffered);
+                        ok = 0;
+                    }
+                }
+                if (f_out) fclose(f_out);
+                if (buffered) setvbuf(f_arc, NULL, _IONBF, 0);
+                free(buf);
+            }
+        }
+    }
+    if (f_src) fclose(f_src);
+    if (f_arc) fclose(f_arc);
+    free(src);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
 int test_stream_footer_looks_like_sek(void) {
     printf("=== TEST: Stream - a footer that parses as a SEK header ===\n");
     uint64_t n = 0;

@@ -1377,12 +1377,27 @@ else
 fi
 
 # 34.5 -t with --progress=always labels the operation "Testing"
-"$ZXC_BIN" -z -k -f "$TEST_FILE_ARG"
-"$ZXC_BIN" -t --progress=always "$TEST_FILE_XC_ARG" > /dev/null 2> "$TEST_DIR/prog5.err"
-if grep -q "Testing" "$TEST_DIR/prog5.err"; then
-    log_pass "-t progress labeled 'Testing'"
+set +e
+"$ZXC_BIN" -z -k -f "$TEST_FILE_ARG" 2> "$TEST_DIR/prog5z.err"
+ZRET=$?
+set -e
+if [[ $ZRET -ne 0 ]]; then
+    echo "  -z exit $ZRET, stderr: $(cat "$TEST_DIR/prog5z.err")"
+    log_fail "-t progress setup: compressing $TEST_FILE_ARG failed"
 else
-    log_fail "-t progress should be labeled 'Testing'"
+    set +e
+    "$ZXC_BIN" -t --progress=always "$TEST_FILE_XC_ARG" > /dev/null 2> "$TEST_DIR/prog5.err"
+    TRET=$?
+    set -e
+    if [[ $TRET -ne 0 ]]; then
+        echo "  -t exit $TRET, stderr: $(cat "$TEST_DIR/prog5.err")"
+        log_fail "-t --progress=always failed on a valid archive"
+    elif grep -q "Testing" "$TEST_DIR/prog5.err"; then
+        log_pass "-t progress labeled 'Testing'"
+    else
+        echo "  -t stderr: $(cat "$TEST_DIR/prog5.err")"
+        log_fail "-t progress should be labeled 'Testing'"
+    fi
 fi
 
 echo "All tests passed!"

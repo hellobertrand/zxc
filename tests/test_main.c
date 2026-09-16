@@ -95,6 +95,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_thread_params),
     TEST_CASE(test_multithread_roundtrip),
     TEST_CASE(test_stream_checksum_cross_paths),
+    TEST_CASE(test_stream_size_then_decompress),
     TEST_CASE(test_stream_footer_looks_like_sek),
     TEST_CASE(test_stream_get_decompressed_size_errors),
     TEST_CASE(test_stream_engine_errors),
