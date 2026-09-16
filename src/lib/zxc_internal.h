@@ -502,10 +502,6 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_seek_table_bytes(const uint64_t nblocks) {
  *  @{ */
 /** @brief Address bits for the LZ77 hash table (2^15 = 32 768 buckets). */
 #define ZXC_LZ_HASH_BITS 15
-/** @brief Marsaglia multiplicative hash constant for 4-byte hashing. */
-#define ZXC_LZ_HASH_PRIME1 0x2D35182DU
-/** @brief Marsaglia/Vigna xorshift* multiplier for 5-byte hashing. */
-#define ZXC_LZ_HASH_PRIME2 0x2545F4914F6CDD1DULL
 /** @brief Maximum number of entries in the hash table. */
 #define ZXC_LZ_HASH_SIZE (1U << ZXC_LZ_HASH_BITS)
 /** @brief Sliding window size (64 KB). */
@@ -589,13 +585,19 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_seek_table_bytes(const uint64_t nblocks) {
 
 /** @} */
 
-/** @name Hash Prime Constants
- *  @brief Mixing primes used by internal hash functions.
+/** @name Hash multipliers
+ *  @brief Odd constants that mix bits in the LZ match hash, the header checksums
+ *  (Sec 7.1) and the archive digest (Sec 7.3). The header-hash and digest values
+ *  are fixed by the on-disk format; changing them is a version bump.
  *  @{ */
-/** @brief Hash prime 1. */
-#define ZXC_HASH_PRIME1 0x9E3779B97F4A7C15ULL
-/** @brief Hash prime 2. */
-#define ZXC_HASH_PRIME2 0xD2D84A61D2D84A61ULL
+/** @brief Golden-ratio prime: header hashes and the digest spread. */
+#define ZXC_HASH_GOLDEN64 0x9E3779B97F4A7C15ULL
+/** @brief Vigna's xorshift* multiplier: the 5-byte LZ hash and the digest fold. */
+#define ZXC_HASH_XORSHIFT64 0x2545F4914F6CDD1DULL
+/** @brief Marsaglia 32-bit multiplier: the 4-byte LZ and dictionary hash. */
+#define ZXC_HASH_MULT32 0x2D35182DU
+/** @brief Second multiplier of the 16-byte header hash (@ref zxc_hash16). */
+#define ZXC_HASH_MULT64 0xD2D84A61D2D84A61ULL
 /** @} */
 
 /** @name Huffman Codec Constants
@@ -1268,7 +1270,7 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
  * @brief Computes the 1-byte checksum for block headers.
  *
  * Multiply, then fold from the top. Flipping bit @c i moves the product by exactly
- * `+/- (ZXC_HASH_PRIME1 << i)`, and no shift of that constant leaves 0x00 or 0xFF
+ * `+/- (ZXC_HASH_GOLDEN64 << i)`, and no shift of that constant leaves 0x00 or 0xFF
  * in the top byte, so the carry cannot absorb it: every single-bit error is caught,
  * not merely likely to be. Folding from the top is required - a product's low bits
  * depend only on the input's low bits.
@@ -1277,7 +1279,7 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
  * @return The checksum byte.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
-    const uint64_t h = (zxc_le64(p) ^ ZXC_HASH_PRIME1) * ZXC_HASH_PRIME1;
+    const uint64_t h = (zxc_le64(p) ^ ZXC_HASH_GOLDEN64) * ZXC_HASH_GOLDEN64;
 
     return (uint8_t)(h >> 56);
 }
@@ -1296,9 +1298,9 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
  * @return The checksum halfword.
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
-    const uint64_t h1 = (zxc_le64(p) ^ ZXC_HASH_PRIME2) * ZXC_HASH_PRIME2;
+    const uint64_t h1 = (zxc_le64(p) ^ ZXC_HASH_MULT64) * ZXC_HASH_MULT64;
 
-    return (uint16_t)(((h1 + zxc_le64(p + 8) + ZXC_HASH_PRIME1) * ZXC_HASH_PRIME1) >> 48);
+    return (uint16_t)(((h1 + zxc_le64(p + 8) + ZXC_HASH_GOLDEN64) * ZXC_HASH_GOLDEN64) >> 48);
 }
 
 /**
@@ -1469,8 +1471,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const
  */
 static ZXC_ALWAYS_INLINE uint64_t zxc_digest_combine(const uint64_t acc,
                                                      const uint32_t block_checksum) {
-    const uint64_t a = acc ^ ((uint64_t)block_checksum + 1U) * ZXC_HASH_PRIME1;
-    const uint64_t b = ZXC_LZ_HASH_PRIME2;
+    const uint64_t a = acc ^ ((uint64_t)block_checksum + 1U) * ZXC_HASH_GOLDEN64;
+    const uint64_t b = ZXC_HASH_XORSHIFT64;
 #if defined(__SIZEOF_INT128__)
     const __uint128_t r = (__uint128_t)a * b;
     return (uint64_t)r ^ (uint64_t)(r >> 64);

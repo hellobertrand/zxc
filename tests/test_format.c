@@ -1292,8 +1292,8 @@ int test_header_checksum_single_bit() {
     // only if the net shift's top halfword is 0x0000 or 0xFFFF.
     {
         uint64_t c[112];
-        for (int k = 0; k < 64; k++) c[k] = ((1ULL << k) * ZXC_HASH_PRIME2) * ZXC_HASH_PRIME1;
-        for (int k = 0; k < 48; k++) c[64 + k] = (1ULL << k) * ZXC_HASH_PRIME1;
+        for (int k = 0; k < 64; k++) c[k] = ((1ULL << k) * ZXC_HASH_MULT64) * ZXC_HASH_GOLDEN64;
+        for (int k = 0; k < 48; k++) c[64 + k] = (1ULL << k) * ZXC_HASH_GOLDEN64;
         for (int a = 0; a < 112; a++) {
             for (int b = a; b < 112; b++) { /* b == a: weight 1 */
                 for (unsigned sg = 0; sg < 4u; sg++) {

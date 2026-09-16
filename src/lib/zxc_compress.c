@@ -45,10 +45,10 @@
 static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int use_hash5) {
     if (use_hash5) {
         const uint64_t v5 = val & 0xFFFFFFFFFFULL;
-        return (uint32_t)((v5 * ZXC_LZ_HASH_PRIME2) >> (64 - ZXC_LZ_HASH_BITS));
+        return (uint32_t)((v5 * ZXC_HASH_XORSHIFT64) >> (64 - ZXC_LZ_HASH_BITS));
     } else {
         const uint64_t v4 = val ^ (val >> 15);
-        return ((uint32_t)v4 * ZXC_LZ_HASH_PRIME1) >> (32 - ZXC_LZ_HASH_BITS);
+        return ((uint32_t)v4 * ZXC_HASH_MULT32) >> (32 - ZXC_LZ_HASH_BITS);
     }
 }
 

@@ -192,7 +192,7 @@ const void* zxc_dict_huf(const void* buf, const size_t buf_size) {
 static uint32_t zxc_dict_hash(const uint8_t* p) {
     uint32_t v = zxc_le32(p);
     v ^= (uint32_t)p[4];
-    return (v * ZXC_LZ_HASH_PRIME1) >> (32 - ZXC_DICT_HASH_BITS);
+    return (v * ZXC_HASH_MULT32) >> (32 - ZXC_DICT_HASH_BITS);
 }
 
 /**
