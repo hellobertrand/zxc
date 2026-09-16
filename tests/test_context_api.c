@@ -393,12 +393,13 @@ int test_context_api_empty_input(void) {
         const zxc_compress_opts_t cs_co = {.level = 3, .checksum_enabled = 1};
         const zxc_decompress_opts_t cs_do = {.checksum_enabled = 1};
         const int64_t cn = zxc_compress(ck_text, sizeof(ck_text) - 1, bad, sizeof(bad), &cs_co);
-        if (cn <= (int64_t)(ZXC_FILE_FOOTER_SIZE + ZXC_BLOCK_HEADER_SIZE)) {
+        const int64_t ck_at =
+            cn - (int64_t)(ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE + ZXC_BLOCK_HEADER_SIZE) - 1;
+        if (ck_at < 0) {
             printf("  [FAIL] block+checksum setup: %lld\n", (long long)cn);
             break;
         }
-        bad[cn - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE - ZXC_BLOCK_HEADER_SIZE - 1] ^=
-            0xFF; /* its checksum */
+        bad[ck_at] ^= 0xFF; /* its checksum */
         disagreed += !probe_and_decode("corrupted block checksum", bad, (size_t)cn, &cs_do,
                                        ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_BAD_CHECKSUM);
 

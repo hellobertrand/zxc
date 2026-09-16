@@ -1410,13 +1410,13 @@ int test_stream_footer_looks_like_sek(void) {
             FILE* const f_src = tmpfile();
             FILE* const f_arc = tmpfile();
             FILE* const f_out = tmpfile();
-            int64_t st = -1, alen = -1;
+            int64_t st = -1;
             int push = 0;
             if (f_src && f_arc && f_out && fwrite(src, 1, (size_t)n, f_src) == n) {
                 rewind(f_src);
                 if (zxc_stream_compress(f_src, f_arc, &co) > 0) {
                     rewind(f_arc);
-                    alen = (int64_t)fread(arc, 1, acap, f_arc);
+                    const int64_t alen = (int64_t)fread(arc, 1, acap, f_arc);
                     rewind(f_arc);
                     st = zxc_stream_decompress(f_arc, f_out, &verify);
                     push = alen > 0 && dstream_finishes(arc, (size_t)alen, out, (size_t)n);
