@@ -480,6 +480,14 @@ The **Seek Table** block is an optional block appended between the EOF block and
    `[8, 8 + block_size + checksum_size]`, and the running sum must land exactly on the EOF
    block.
 
+**Sequential Detection**: after the EOF block, a decoder reads 8 bytes, which are either
+the footer or the SEK block header, and cannot tell them apart from those bytes alone: one
+source size in about 65536 parses as a valid SEK header. The bytes are the SEK header if
+and only if they parse as a block header of type `254` whose Compressed Payload Size
+equals `N × 4`, with `N` derived from the bytes the decoder produced; a source size never
+satisfies that equality below 2^56 bytes, since `N × 4 ≥ size / 2^19`. The decoder then
+skips `N × 4` bytes and reads the footer.
+
 ---
 
 ## 6. Prefix Varint (Extras section)
@@ -659,7 +667,9 @@ Offset  Size  Field
    seeded with the block's position (§ 7.2).
 5. On EOF:
    - require `comp_size == 0`,
-   - skip the SEK block if present, read the footer,
+   - read 8 bytes: the SEK block header if they parse as one with the payload
+     size § 5.5 derives from the output, else the footer; skip the table if so
+     and read the footer,
    - compare footer `original_source_size` with produced output size.
 
 ---

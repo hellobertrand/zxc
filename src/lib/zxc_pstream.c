@@ -13,7 +13,7 @@
  * the public block API (@ref zxc_compress_block / @ref zxc_decompress_block)
  * with the public sans-IO header helpers (@ref zxc_write_file_header /
  * footer, @c zxc_read_*); the only internal dependency is on shared
- * constants and the global-hash combine inline, pulled from zxc_internal.h.
+ * constants pulled from zxc_internal.h.
  *
  * Both compression and decompression are structured as resumable state
  * machines driven by caller-provided input/output buffers
@@ -1023,9 +1023,14 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                 // Try to interpret as a block header (SEK).
                 zxc_block_header_t peek;
                 const int sek_rc = zxc_read_block_header(ds->scratch, ds->scratch_used, &peek);
-                if (sek_rc == ZXC_OK && peek.block_type == (uint8_t)ZXC_BLOCK_SEK) {
-                    // SEK block: skip its payload (peek.comp_size bytes).
-                    ds->sek_remaining = (size_t)peek.comp_size;
+                // The SEK header carries the entries' size modulo 2^32. A footer
+                // that happens to parse as a SEK header (one source size in
+                // ~65536) fails this match and is read as the footer it is.
+                const uint64_t sek_bytes =
+                    zxc_seek_table_bytes(zxc_seek_block_count(ds->total_out, ds->block_size));
+                if (sek_rc == ZXC_OK && peek.block_type == (uint8_t)ZXC_BLOCK_SEK &&
+                    (uint32_t)sek_bytes == peek.comp_size) {
+                    ds->sek_remaining = sek_bytes;
                     ds->state = DS_DRAIN_SEK_PAYLOAD;
                     break;
                 }

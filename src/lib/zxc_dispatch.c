@@ -574,8 +574,8 @@ static int64_t zxc_write_empty_frame(uint8_t* RESTRICT dst, const size_t dst_cap
 /**
  * @brief Compresses an entire buffer in one call.
  *
- * Manages context allocation internally, loops over blocks, writes the
- * file header / EOF block / footer, and accumulates the global checksum.
+ * Manages context allocation internally, loops over blocks and writes the
+ * file header / EOF block / footer.
  */
 // cppcheck-suppress unusedFunction
 int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTRICT dst,
@@ -806,7 +806,7 @@ static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src
  * Only an archive that stores nothing can succeed without a buffer. Refusing
  * the rest here spares the frame walk a workspace carved only to refuse; what
  * survives goes on to that walk, the sole place the EOF payload size, the
- * dictionary binding and the global checksum are checked.
+ * dictionary binding and the footer size are checked.
  *
  * @return @ref ZXC_OK to keep walking, or the code to hand back.
  */
@@ -835,8 +835,8 @@ static int64_t zxc_probe_without_dst(const uint8_t* RESTRICT src, const size_t s
 /**
  * @brief Decompresses an entire buffer in one call.
  *
- * Validates the file header and footer, loops over compressed blocks,
- * and verifies the global checksum when enabled.
+ * Validates the file header, loops over compressed blocks and checks the
+ * footer size.
  */
 // cppcheck-suppress unusedFunction
 int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RESTRICT dst,
@@ -888,7 +888,7 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
 
     // Carved on the first block that needs it: an archive storing nothing, and
     // a no-destination probe of one, never reach that point, and half a
-    // megabyte is a lot to allocate for a 36-byte frame.
+    // megabyte is a lot to allocate for a 32-byte frame.
     // Dict decode buffer: [dict_content | decode_space + PAD], carved into the
     // cctx workspace (NULL when no dictionary is active).
     int ctx_ready = 0;

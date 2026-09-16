@@ -110,7 +110,7 @@ pub const ZXC_ERROR_BAD_VERSION: i32 = -5;
 /// Corrupted or invalid header (checksum mismatch)
 pub const ZXC_ERROR_BAD_HEADER: i32 = -6;
 
-/// Block or global checksum verification failed
+/// A block's decoded bytes fail its checksum
 pub const ZXC_ERROR_BAD_CHECKSUM: i32 = -7;
 
 /// Corrupted compressed data
@@ -177,7 +177,7 @@ pub struct zxc_compress_opts_t {
     pub level: c_int,
     /// Block size in bytes (0 = default 512 KB). Must be power of 2, 4 KB – 2 MB.
     pub block_size: usize,
-    /// 1 to enable per-block and global checksums, 0 to disable.
+    /// 1 to append a checksum to every block, 0 to disable.
     pub checksum_enabled: c_int,
     /// 1 to append a seek table for random-access decompression, 0 to disable.
     pub seekable: c_int,
@@ -217,7 +217,7 @@ impl Default for zxc_compress_opts_t {
 pub struct zxc_decompress_opts_t {
     /// Worker thread count (0 = auto-detect CPU cores).
     pub n_threads: c_int,
-    /// 1 to verify per-block and global checksums, 0 to skip.
+    /// 1 to verify the block checksums when present, 0 to skip.
     pub checksum_enabled: c_int,
     /// Pre-trained dictionary content (NULL = none).
     pub dict: *const c_void,

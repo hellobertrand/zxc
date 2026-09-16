@@ -435,6 +435,20 @@ extern "C" {
 /** @brief Per-block entry size: comp_size(4) only.  decomp_size is derived
  *  from the file header's block_size (all blocks except the last are full). */
 #define ZXC_SEEK_ENTRY_SIZE 4
+
+/** @brief Blocks in @p total_decomp bytes of @p block_size: the seek table's entry
+ *  count, which the SEK header's field (table size modulo 2^32) cannot give. */
+static ZXC_ALWAYS_INLINE uint64_t zxc_seek_block_count(const uint64_t total_decomp,
+                                                       const size_t block_size) {
+    // Not (total + bs - 1) / bs: it wraps near 2^64, turning a forged footer into 0 blocks.
+    return block_size ? total_decomp / block_size + (total_decomp % block_size != 0) : 0;
+}
+
+/** @brief Byte size of the seek table's entries for @p nblocks blocks, before the
+ *  header's modulo 2^32. */
+static ZXC_ALWAYS_INLINE uint64_t zxc_seek_table_bytes(const uint64_t nblocks) {
+    return nblocks * ZXC_SEEK_ENTRY_SIZE;
+}
 /** @} */ /* end of Seekable Format Constants */
 
 /** @name GLO Token Constants

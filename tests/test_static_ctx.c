@@ -101,19 +101,23 @@ int test_static_ctx_roundtrip_all_levels(void) {
 
         zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
         const int64_t dsz = zxc_decompress_dctx(dctx, enc, (size_t)csz, dec, src_sz, &dopts);
-        /* A block decoded right after the frame carries index 0. */
-        int64_t bsz = (int64_t)block_size;
-        if (lvl == zxc_min_level()) {
+        const int frame_ok = dsz == (int64_t)src_sz && memcmp(src, dec, src_sz) == 0;
+        /* A block decoded right after the frame carries index 0. dec is compared
+         * already, so the block may reuse it. */
+        int block_ok = 1;
+        if (frame_ok && lvl == zxc_min_level()) {
             zxc_cctx* const bc = zxc_create_cctx(NULL);
             const int64_t bn = bc ? zxc_compress_block(bc, src, block_size, enc, cap, &copts) : -1;
             zxc_free_cctx(bc);
-            bsz = bn > 0 ? zxc_decompress_block(dctx, enc, (size_t)bn, dec, src_sz, &dopts) : bn;
+            const int64_t bsz =
+                bn > 0 ? zxc_decompress_block(dctx, enc, (size_t)bn, dec, src_sz, &dopts) : bn;
+            block_ok = bsz == (int64_t)block_size && memcmp(src, dec, block_size) == 0;
         }
         zxc_free_dctx(dctx); /* no-op for static */
         test_aligned_free(dctx_ws);
-        if (dsz != (int64_t)src_sz || bsz != (int64_t)block_size || memcmp(src, dec, src_sz) != 0) {
-            printf("  [FAIL] level %d: roundtrip mismatch (dsz=%lld, block after frame %lld)\n",
-                   lvl, (long long)dsz, (long long)bsz);
+        if (!frame_ok || !block_ok) {
+            printf("  [FAIL] level %d: roundtrip mismatch (dsz=%lld, block after frame %s)\n", lvl,
+                   (long long)dsz, block_ok ? "ok" : "wrong");
             goto fail;
         }
 

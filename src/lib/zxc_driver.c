@@ -664,17 +664,22 @@ static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, 
 static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_args_t* w,
                                          FILE* f_in) {
     // After the EOF block: [FOOTER 8B], or [SEK header 8B] [payload] [FOOTER 8B].
-    // Footer and block header are the same size: one read tells them apart.
+    // Footer and block header are the same size: one read, then the match below.
     uint8_t footer[ZXC_FILE_FOOTER_SIZE];
     uint8_t* const peek_buf = footer;
 
     if (UNLIKELY(fread(peek_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in) != ZXC_BLOCK_HEADER_SIZE)) {
         ctx->io_error = 1;
     } else {
+        // The SEK header carries the entries' size modulo 2^32. A footer that
+        // happens to parse as a SEK header (one source size in ~65536) fails
+        // this match and is read as the footer it is.
+        uint64_t remaining =
+            zxc_seek_table_bytes(zxc_seek_block_count((uint64_t)w->total_bytes, ctx->chunk_size));
         zxc_block_header_t peek_bh;
         const int is_sek =
             (zxc_read_block_header(peek_buf, ZXC_BLOCK_HEADER_SIZE, &peek_bh) == ZXC_OK &&
-             peek_bh.block_type == ZXC_BLOCK_SEK);
+             peek_bh.block_type == ZXC_BLOCK_SEK && (uint32_t)remaining == peek_bh.comp_size);
 
         if (is_sek) {
             // Drain the SEK payload (read + discard)

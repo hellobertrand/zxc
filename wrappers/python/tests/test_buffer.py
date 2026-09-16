@@ -27,7 +27,9 @@ def test_compress_invalid_type(data):
 @pytest.mark.parametrize(
     "data,corrupt_func,exc",
     [
-        (b"hello world" * 10, lambda x: x[:-1] + b"\x01", RuntimeError),
+        # Flip the last byte of the block's checksum: it precedes the 8-byte
+        # EOF block and the 8-byte footer.
+        (b"hello world" * 10, lambda x: x[:-17] + bytes([x[-17] ^ 1]) + x[-16:], RuntimeError),
         (b"a" * 10, lambda x: b"", RuntimeError),
     ],
     ids=["corrupted_data", "invalid_header"],

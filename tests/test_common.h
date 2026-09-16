@@ -110,6 +110,7 @@ int test_io_failures(void);
 int test_thread_params(void);
 int test_multithread_roundtrip(void);
 int test_stream_checksum_cross_paths(void);
+int test_stream_footer_looks_like_sek(void);
 int test_stream_get_decompressed_size_errors(void);
 int test_stream_engine_errors(void);
 

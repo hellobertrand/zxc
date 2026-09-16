@@ -21,7 +21,7 @@
  *
  * Detection from end of file:
  *   1. Read file header (first 16 bytes) => block_size
- *   2. Read file footer (last 12 bytes) => total_decompressed_size
+ *   2. Read file footer (last 8 bytes) => total_decompressed_size
  *   3. Derive num_blocks = ceil(total_decomp / block_size)
  *   4. Compute seek block size, read backward to the block header
  *   5. Validate block_type == ZXC_BLOCK_SEK
@@ -290,7 +290,7 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
 
         // Verify the prefix sum lands exactly on the EOF block, and that an EOF
         // block really sits there. Expected layout:
-        // [header 16][data blocks][EOF 8][SEK block][footer 12]
+        // [header 16][data blocks][EOF 8][SEK block][footer 8]
         zxc_block_header_t eof_bh;
         if (UNLIKELY(comp_acc != seek_off - ZXC_BLOCK_HEADER_SIZE ||
                      zxc_read_block_header(eof_hdr, ZXC_BLOCK_HEADER_SIZE, &eof_bh) != ZXC_OK ||

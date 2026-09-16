@@ -271,23 +271,25 @@ else
     log_fail "Integrity check PASSED on corrupt file (False Negative)"
 fi
 
-# 10. Global Checksum Integrity
-echo "Testing Global Checksum Integrity..."
+# 10. Block Checksum Integrity
+echo "Testing Block Checksum Integrity..."
 "$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
 
-# Corrupt the last byte (part of Global Checksum)
+# Flip the last byte of the last block's checksum: it sits right before the
+# 8-byte EOF block and the 8-byte footer. Flipping, not zeroing, always changes it.
 FILE_SZ=$(wc -c < "$TEST_FILE_XC_ARG" | tr -d ' ')
-LAST_BYTE_OFFSET=$((FILE_SZ - 1))
-printf '\x00' | dd of="$TEST_FILE_XC_ARG" bs=1 seek=$LAST_BYTE_OFFSET count=1 conv=notrunc 2>/dev/null
+CK_BYTE_OFFSET=$((FILE_SZ - 8 - 8 - 1))
+CK_BYTE=$(dd if="$TEST_FILE_XC_ARG" bs=1 skip=$CK_BYTE_OFFSET count=1 2>/dev/null | od -An -tu1 | tr -d ' ')
+printf "$(printf '\\x%02x' $((CK_BYTE ^ 0xFF)))" | dd of="$TEST_FILE_XC_ARG" bs=1 seek=$CK_BYTE_OFFSET count=1 conv=notrunc 2>/dev/null
 
 set +e
 OUT=$("$ZXC_BIN" -t "$TEST_FILE_XC_ARG" 2>&1)
 RET=$?
 set -e
 if [[ $RET -ne 0 ]] && [[ "$OUT" == *": FAILED"* ]]; then
-    log_pass "Integrity check correctly failed on corrupt Global Checksum"
+    log_pass "Integrity check correctly failed on corrupt block checksum"
 else
-    log_fail "Integrity check PASSED on corrupt Global Checksum (False Negative)"
+    log_fail "Integrity check PASSED on corrupt block checksum (False Negative)"
 fi
 
 # Ensure no output file is created
