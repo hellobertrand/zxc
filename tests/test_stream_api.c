@@ -411,6 +411,60 @@ int test_stream_get_decompressed_size_errors() {
     }
     printf("  [PASS] bad magic -> ZXC_ERROR_BAD_MAGIC\n");
 
+    // 3b. A header only the magic word of which is intact must not yield a
+    //     size: the flag byte that places the footer is unverified, and the 8
+    //     bytes it points at may be anything. Same verdict as the decoders.
+    //     A forged footer size is capped like the buffer API caps it.
+    {
+        const size_t src_sz = 4096;
+        uint8_t* src = malloc(src_sz);
+        gen_lz_data(src, src_sz);
+        const size_t cap = (size_t)zxc_compress_bound(src_sz);
+        uint8_t* comp = malloc(cap);
+        zxc_compress_opts_t co = {.level = 1, .checksum_enabled = 1};
+        const int64_t comp_sz = zxc_compress(src, src_sz, comp, cap, &co);
+        if (comp_sz <= 0) {
+            printf("  [SKIP] compress failed\n");
+            free(src);
+            free(comp);
+            return 0;
+        }
+        struct {
+            const char* what;
+            size_t at;
+            int expect;
+        } forge[] = {
+            {"header checksum", 14, ZXC_ERROR_BAD_HEADER},
+            {"footer size", (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE + 7,
+             ZXC_ERROR_CORRUPT_DATA},
+        };
+        for (size_t k = 0; k < sizeof(forge) / sizeof(forge[0]); k++) {
+            FILE* f = tmpfile();
+            if (!f) {
+                printf("  [SKIP] tmpfile failed\n");
+                free(src);
+                free(comp);
+                return 0;
+            }
+            comp[forge[k].at] ^= 0x7F; /* the size stays positive as an int64 */
+            fwrite(comp, 1, (size_t)comp_sz, f);
+            comp[forge[k].at] ^= 0x7F;
+            fseek(f, 0, SEEK_SET);
+            r = zxc_stream_get_decompressed_size(f);
+            fclose(f);
+            if (r != forge[k].expect) {
+                printf("  [FAIL] forged %s: expected %s, got %lld\n", forge[k].what,
+                       zxc_error_name(forge[k].expect), (long long)r);
+                free(src);
+                free(comp);
+                return 0;
+            }
+        }
+        free(src);
+        free(comp);
+    }
+    printf("  [PASS] forged header -> BAD_HEADER, forged footer size -> CORRUPT_DATA\n");
+
     // 4. Valid file returns correct size
     {
         // Create a valid compressed file in memory

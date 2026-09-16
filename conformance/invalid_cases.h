@@ -65,6 +65,7 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"sek_forged_entry", 0, NULL, 1, .generated = 1},
     {"bad_block_header_checksum", ZXC_ERROR_BAD_HEADER, .generated = 1},
     {"bad_footer_size", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"bad_footer_digest", ZXC_ERROR_BAD_CHECKSUM, .generated = 1},
     {"glo_forged_offset", ZXC_ERROR_BAD_OFFSET, .generated = 1},
     {"glo_output_overflow", ZXC_ERROR_OVERFLOW, .generated = 1},
     {"varint_too_long", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
@@ -232,7 +233,8 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
 
     size_t n = b->n_plain;
     const uint8_t* src = b->plain;
-    if (!strcmp(name, "bad_block_checksum") || !strcmp(name, "corrupt_payload")) {
+    if (!strcmp(name, "bad_block_checksum") || !strcmp(name, "corrupt_payload") ||
+        !strcmp(name, "bad_footer_digest")) {
         n = b->n_chk;
         src = b->chk;
     } else if (!strcmp(name, "ghi_forged_offset")) {
@@ -369,6 +371,9 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         d[BLK0 + 7] ^= 0xFFU; /* left wrong: the header checksum is the defect */
     } else if (!strcmp(name, "bad_footer_size")) {
         d[len - ZXC_FILE_FOOTER_SIZE] ^= 0xFFU; /* declared source size */
+    } else if (!strcmp(name, "bad_footer_digest")) {
+        /* Checksummed base: the digest is the footer's last 8 bytes (Sec 8). */
+        d[len - ZXC_FILE_DIGEST_SIZE] ^= 0xFFU;
     } else if (!strcmp(name, "glo_forged_offset")) {
         /* GHI has its own vector. The first sequence has only its literal run
          * behind it, so any large offset reaches before the output start. */

@@ -20,7 +20,7 @@
  *     SEK seek table. (Type 2 is reserved/removed.)
  *   - Optional per-block checksum over the block's decoded bytes, seeded with
  *     its position, recomputed from the regenerated input (Sec 7.2).
- *   - The file footer: the archive digest (when checksummed) then the source size (Sec 8).
+ *   - The file footer: the source size then, when checksummed, the archive digest (Sec 8).
  *
  * Each file is also round-tripped: decompressed and compared byte-for-byte
  * against its deterministically regenerated input (see golden_cases.h).

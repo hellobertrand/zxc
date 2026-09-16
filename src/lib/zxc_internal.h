@@ -1291,8 +1291,8 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
  * mixed again. Every bit flip shifts the result by a fixed amount, and the
  * constants are such that no 1- or 2-bit error leaves the top halfword
  * unchanged (proven by the test suite). Summing two products instead let one
- * bit per half cancel. Order matters: PRIME2 inside, PRIME1 outside; swapped,
- * 38 bit pairs can cancel.
+ * bit per half cancel. Order matters: ZXC_HASH_MULT64 inside, ZXC_HASH_GOLDEN64
+ * outside; swapped, 38 bit pairs can cancel.
  *
  * @param[in] p The 16 header bytes; bytes 14..15 must already be zero.
  * @return The checksum halfword.
@@ -2059,6 +2059,60 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  *  @p checksum_enabled. */
 static ZXC_ALWAYS_INLINE size_t zxc_footer_bytes(const int checksum_enabled) {
     return ZXC_FILE_FOOTER_SIZE + (checksum_enabled ? (size_t)ZXC_FILE_DIGEST_SIZE : 0U);
+}
+
+/**
+ * @brief Whether a footer's decompressed size is reachable for this archive.
+ *
+ * The footer is untrusted and its size becomes the caller's allocation, so it is
+ * capped by what the archive could physically hold: every block costs at least
+ * @ref ZXC_BLOCK_HEADER_SIZE compressed bytes and decodes to at most one block
+ * size. The cap also keeps @ref zxc_inplace_margin's block count from
+ * overflowing. Every reader that sizes anything from the footer goes through it.
+ *
+ * Division rather than the usual ceil, which would wrap near @c UINT64_MAX.
+ *
+ * @param[in] dsize      Decompressed size read from the footer.
+ * @param[in] chunk_size Block size from the file header; never 0 after a
+ *                       @ref ZXC_OK from @ref zxc_read_file_header.
+ * @param[in] comp_size  Size of the whole archive in bytes.
+ * @return 1 when @p dsize is reachable, 0 for a forged footer.
+ */
+static ZXC_ALWAYS_INLINE int zxc_footer_dsize_plausible(const uint64_t dsize,
+                                                        const size_t chunk_size,
+                                                        const uint64_t comp_size) {
+    const uint64_t blocks_needed =
+        dsize / (uint64_t)chunk_size + (dsize % (uint64_t)chunk_size != 0);
+    return blocks_needed <= comp_size / ZXC_BLOCK_HEADER_SIZE;
+}
+
+/**
+ * @brief Tells a SEK block header from the footer, in the 8 bytes after the EOF
+ *        block.
+ *
+ * Both are 8 bytes long. They are a SEK header only if they parse as one and
+ * announce the table this archive would carry: @ref zxc_seek_table_bytes of its
+ * block count, modulo 2^32, the width of the header's size field. A source size
+ * that passes all three checks (type, header checksum, size) is one in about
+ * 2^40. The sequential readers share this rule so they drain the same number of
+ * bytes: the full 64-bit count, not the wrapped field.
+ *
+ * @param[in]  peek        The 8 bytes read after the EOF block.
+ * @param[in]  total_out   Bytes decoded so far: the archive's source size.
+ * @param[in]  block_size  Block size from the file header.
+ * @param[out] sek_bytes   The SEK payload length when it is one; untouched otherwise.
+ * @return 1 for a SEK header, 0 for the footer's first 8 bytes.
+ */
+static ZXC_ALWAYS_INLINE int zxc_seek_tail_is_sek(const uint8_t* peek, const uint64_t total_out,
+                                                  const size_t block_size, uint64_t* sek_bytes) {
+    zxc_block_header_t bh;
+    if (zxc_read_block_header(peek, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK ||
+        bh.block_type != ZXC_BLOCK_SEK)
+        return 0;
+    const uint64_t table = zxc_seek_table_bytes(zxc_seek_block_count(total_out, block_size));
+    if ((uint32_t)table != bh.comp_size) return 0;
+    *sek_bytes = table;
+    return 1;
 }
 
 // ---------------------------------------------------------------------------

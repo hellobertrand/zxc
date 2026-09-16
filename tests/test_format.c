@@ -923,6 +923,43 @@ int test_swapped_blocks_oneshot(void) {
 /* The footer carries an 8-byte archive digest before the size when checksums are on.
  * It is a fold of the block checksums, so it is deterministic, identical for identical
  * content, absent without -C, and a flipped digest byte fails a verified decode. */
+/* The 8 bytes after the EOF block are a SEK header or the footer's head. The
+ * rule the sequential readers share must return the table's full 64-bit length,
+ * not the header field: past 2^30 blocks the field has wrapped. */
+int test_seek_tail_rule(void) {
+    printf("=== TEST: Format - SEK-or-footer rule after EOF ===\n");
+    enum { BS = 4096 };
+    const uint64_t nblocks = (1ULL << 30) + 1; /* table = 4 GiB + 4: field = 4 */
+    const uint64_t table = zxc_seek_table_bytes(nblocks);
+    const uint64_t total_out = nblocks * BS;
+    uint8_t peek[ZXC_BLOCK_HEADER_SIZE];
+    const zxc_block_header_t sek = {
+        .block_type = ZXC_BLOCK_SEK, .block_flags = 0, .reserved = 0, .comp_size = (uint32_t)table};
+    if (zxc_write_block_header(peek, sizeof(peek), &sek) < 0) return 0;
+
+    uint64_t got = 0;
+    if (!zxc_seek_tail_is_sek(peek, total_out, BS, &got) || got != table) {
+        printf("Failed: SEK of %llu blocks: matched %d, length %llu, want %llu\n",
+               (unsigned long long)nblocks, got != 0, (unsigned long long)got,
+               (unsigned long long)table);
+        return 0;
+    }
+    /* Off by one block: the header field no longer agrees, so not a SEK. */
+    if (zxc_seek_tail_is_sek(peek, total_out - BS, BS, &got)) {
+        printf("Failed: matched a SEK header for the wrong block count\n");
+        return 0;
+    }
+    /* A footer's head: the source size of an unremarkable archive. */
+    uint8_t footer[ZXC_BLOCK_HEADER_SIZE];
+    zxc_store_le64(footer, 10);
+    if (zxc_seek_tail_is_sek(footer, 10, BS, &got)) {
+        printf("Failed: a source size read as a SEK header\n");
+        return 0;
+    }
+    printf("PASS\n\n");
+    return 1;
+}
+
 int test_footer_digest(void) {
     printf("TEST: Footer digest... ");
     enum { N = 40 * 1024 };

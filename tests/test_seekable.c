@@ -948,6 +948,26 @@ int test_seekable_truncated_input() {
         return 0;
     }
 
+    /* A checksummed archive carries a 16-byte footer, so its floor is 48, not
+     * the 40 of a plain one; cut to 47 it is short of its own footer. */
+    zxc_compress_opts_t chk = {.level = 1, .seekable = 1, .checksum_enabled = 1};
+    const int64_t csize_chk = zxc_compress(src, SRC_SIZE, dst, dst_cap, &chk);
+    if (csize_chk <= 0) {
+        printf("Failed: compress with checksums\n");
+        free(src);
+        free(dst);
+        return 0;
+    }
+    s = zxc_seekable_open(dst, ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE +
+                                   ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE - 1);
+    if (s) {
+        printf("Failed: should reject a checksummed archive short of its footer\n");
+        zxc_seekable_free(s);
+        free(src);
+        free(dst);
+        return 0;
+    }
+
     free(src);
     free(dst);
     printf("PASS\n\n");

@@ -29,7 +29,11 @@ def test_compress_invalid_type(data):
     [
         # Flip the last byte of the block's checksum: it precedes the 8-byte
         # EOF block and the 16-byte footer (digest + size).
-        (b"hello world" * 10, lambda x: x[:-25] + bytes([x[-25] ^ 1]) + x[-24:], RuntimeError),
+        (
+            b"hello world" * 10,
+            lambda x: x[:-25] + bytes([x[-25] ^ 1]) + x[-24:],
+            RuntimeError,
+        ),
         (b"a" * 10, lambda x: b"", RuntimeError),
     ],
     ids=["corrupted_data", "invalid_header"],

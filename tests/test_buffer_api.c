@@ -335,6 +335,31 @@ int test_buffer_error_codes() {
     }
     printf("  [PASS] zxc_decompress src too small -> ZXC_ERROR_SRC_TOO_SMALL\n");
 
+    // 10b. Too small for its own footer: a checksummed header needs a 16-byte
+    //      footer, so [header][EOF] alone is short of it. Read from the end
+    //      regardless, the "footer" would be header bytes, and the verdict a
+    //      size mismatch; the walk and the no-destination probe both say short.
+    {
+        uint8_t arc[ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE];
+        const zxc_block_header_t eof = {
+            .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
+        if (zxc_write_file_header(arc, ZXC_FILE_HEADER_SIZE, 4096, 1, 0) < 0 ||
+            zxc_write_block_header(arc + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &eof) < 0) {
+            printf("  [FAIL] fixture headers\n");
+            return 0;
+        }
+        uint8_t out[64];
+        zxc_decompress_opts_t o = {.checksum_enabled = 0};
+        const int64_t walk = zxc_decompress(arc, sizeof(arc), out, sizeof(out), &o);
+        const int64_t probe = zxc_decompress(arc, sizeof(arc), NULL, 0, &o);
+        if (walk != ZXC_ERROR_SRC_TOO_SMALL || probe != ZXC_ERROR_SRC_TOO_SMALL) {
+            printf("  [FAIL] short of its footer: walk %lld, probe %lld, want %d\n",
+                   (long long)walk, (long long)probe, ZXC_ERROR_SRC_TOO_SMALL);
+            return 0;
+        }
+    }
+    printf("  [PASS] zxc_decompress short of its 16-byte footer -> ZXC_ERROR_SRC_TOO_SMALL\n");
+
     // 11. Bad file header (invalid magic). The header reader's verdict is
     //     forwarded, so this reports the magic, not a catch-all.
     {

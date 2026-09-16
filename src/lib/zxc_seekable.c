@@ -173,12 +173,6 @@ static int zxc_seek_source_read(const zxc_seek_source_t* src, void* dst, const s
  * is too small or the seek table is missing / malformed.
  */
 static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
-    // Minimum: file_header(16) + eof_block(8) + seek_block_header(8)
-    //          + file_footer(8) = 40
-    const uint64_t MIN_SEEKABLE_SIZE =
-        ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
-    if (UNLIKELY(src->size < MIN_SEEKABLE_SIZE)) return NULL;
-
     // Step 1: validate file header => block_size
     uint8_t header[ZXC_FILE_HEADER_SIZE];
     if (UNLIKELY(!zxc_seek_source_read(src, header, sizeof(header), 0))) return NULL;
@@ -192,11 +186,13 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     const uint32_t block_size = (uint32_t)block_size_sz;
     if (UNLIKELY(block_size == 0)) return NULL;  // LCOV_EXCL_LINE
 
-    // Step 2: read the source size, the first 8 bytes of the footer (8, or 16 with
-    // a digest). The source size is the last 8 bytes when there is no digest, else
-    // the 8 before it.
+    // Minimum: file_header(16) + eof_block(8) + seek_block_header(8) + footer,
+    // 8 bytes or 16 with a digest: 40 or 48. Only the header says which.
     const uint64_t footer_len = zxc_footer_bytes(file_has_chk);
-    if (UNLIKELY(footer_len > src->size)) return NULL;
+    if (UNLIKELY(src->size < ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + footer_len))
+        return NULL;
+
+    // Step 2: read the source size, the first 8 bytes of the footer.
     uint8_t footer[ZXC_FILE_FOOTER_SIZE];
     if (UNLIKELY(!zxc_seek_source_read(src, footer, sizeof(footer), src->size - footer_len)))
         return NULL;

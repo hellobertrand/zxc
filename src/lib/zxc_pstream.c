@@ -9,11 +9,11 @@
  * @file zxc_pstream.c
  * @brief Push-based, single-threaded streaming driver implementation.
  *
- * See zxc_pstream.h for the public contract.  The implementation composes
- * the public block API (@ref zxc_compress_block / @ref zxc_decompress_block)
- * with the public sans-IO header helpers (@ref zxc_write_file_header /
- * footer, @c zxc_read_*); the only internal dependency is on shared
- * constants pulled from zxc_internal.h.
+ * See zxc_pstream.h for the public contract.  The implementation drives the
+ * internal block codec (zxc_compress_block_at, zxc_decompress_chunk_wrapper and
+ * their context) with the sans-IO layout helpers of zxc_internal.h: the header,
+ * footer and block-header readers and writers, the seek-table and footer
+ * sizes, the digest fold.
  *
  * Both compression and decompression are structured as resumable state
  * machines driven by caller-provided input/output buffers
@@ -700,7 +700,7 @@ struct zxc_dstream_s {
     size_t decoded_pos;
 
     zxc_block_header_t cur_bh;
-    size_t sek_remaining;
+    uint64_t sek_remaining;
 
     uint64_t block_index;
     uint64_t total_out;
@@ -996,7 +996,8 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                                                  ds->decoded_cap, ds->block_index);
                 if (UNLIKELY(dsz < 0)) return ds_set_error(ds, dsz);
                 ds->block_index++;
-                if (ds->file_has_checksum)
+                // Folded only when DS_VALIDATE_FOOTER will compare it.
+                if (ds->file_has_checksum && ds->opts.checksum_enabled)
                     ds->digest = zxc_digest_combine(
                         ds->digest,
                         zxc_le32(ds->payload + ds->payload_used - ZXC_BLOCK_CHECKSUM_SIZE));
@@ -1031,17 +1032,10 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             case DS_PEEK_TAIL: {
                 if (!ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in))
                     return (int64_t)produced;
-                // Try to interpret as a block header (SEK).
-                zxc_block_header_t peek;
-                const int sek_rc = zxc_read_block_header(ds->scratch, ds->scratch_used, &peek);
-                // The SEK header carries the entries' size modulo 2^32. A footer
-                // that happens to parse as a SEK header (one source size in
-                // ~65536) fails this match and is read as the footer it is.
-                const uint64_t sek_bytes =
-                    zxc_seek_table_bytes(zxc_seek_block_count(ds->total_out, ds->block_size));
-                if (sek_rc == ZXC_OK && peek.block_type == (uint8_t)ZXC_BLOCK_SEK &&
-                    (uint32_t)sek_bytes == peek.comp_size) {
-                    ds->sek_remaining = sek_bytes;
+                // A SEK block header, or the footer's first 8 bytes: see
+                // zxc_seek_tail_is_sek.
+                if (zxc_seek_tail_is_sek(ds->scratch, ds->total_out, ds->block_size,
+                                         &ds->sek_remaining)) {
                     ds->state = DS_DRAIN_SEK_PAYLOAD;
                     break;
                 }
@@ -1058,7 +1052,8 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
 
             case DS_DRAIN_SEK_PAYLOAD: {
                 const size_t avail = in->size - in->pos;
-                const size_t n = avail < ds->sek_remaining ? avail : ds->sek_remaining;
+                const size_t n =
+                    (uint64_t)avail < ds->sek_remaining ? avail : (size_t)ds->sek_remaining;
                 in->pos += n;
                 ds->sek_remaining -= n;
                 if (ds->sek_remaining > 0) return (int64_t)produced;

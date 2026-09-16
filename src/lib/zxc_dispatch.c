@@ -744,31 +744,6 @@ static int64_t zxc_decompress_frame(const uint8_t* src, size_t src_size, uint8_t
                                     size_t dst_capacity, const zxc_decompress_opts_t* opts);
 
 /**
- * @brief Whether a footer's decompressed size is reachable for this archive.
- *
- * The footer is untrusted and its size becomes the caller's allocation, so it is
- * capped by what the archive could physically hold: every block costs at least
- * @ref ZXC_BLOCK_HEADER_SIZE compressed bytes and decodes to at most one block
- * size. The cap also keeps @ref zxc_inplace_margin's block count from
- * overflowing. Reached only through @ref zxc_read_frame_envelope, so no reader
- * can skip it.
- *
- * Division rather than the usual ceil, which would wrap near @c UINT64_MAX.
- *
- * @param[in] dsize      Decompressed size read from the footer.
- * @param[in] chunk_size Block size from the file header; never 0 after a
- *                       @ref ZXC_OK from @ref zxc_read_file_header.
- * @param[in] comp_size  Size of the whole archive in bytes.
- * @return 1 when @p dsize is reachable, 0 for a forged footer.
- */
-static int zxc_footer_dsize_plausible(const uint64_t dsize, const size_t chunk_size,
-                                      const size_t comp_size) {
-    const uint64_t blocks_needed =
-        dsize / (uint64_t)chunk_size + (dsize % (uint64_t)chunk_size != 0);
-    return blocks_needed <= (uint64_t)(comp_size / ZXC_BLOCK_HEADER_SIZE);
-}
-
-/**
  * @brief Validates a frame envelope without decoding it: file header, then the
  *        decompressed size stored in the footer.
  *
@@ -793,6 +768,11 @@ static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src
     int cs = 0;
     const int hrc = zxc_read_file_header(src, src_size, &chunk, &cs, NULL);
     if (UNLIKELY(hrc != ZXC_OK)) return hrc;
+
+    // The smallest archive: header, the mandatory EOF block, then the footer,
+    // 8 bytes or 16 with a digest. Only the header says which.
+    if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + zxc_footer_bytes(cs)))
+        return ZXC_ERROR_SRC_TOO_SMALL;
 
     const uint64_t stored = zxc_le64(src + src_size - zxc_footer_bytes(cs));
     if (UNLIKELY(!zxc_footer_dsize_plausible(stored, chunk, src_size)))
@@ -923,14 +903,15 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
                 return ZXC_ERROR_BAD_HEADER;
             }
             // The footer is the source size then, when the archive carries
-            // checksums, the digest. Its length follows file_has_checksums.
+            // checksums, the digest. Its length follows file_has_checksums, and
+            // it must lie past this EOF header: read from the end regardless, a
+            // short archive would hand back header or block bytes as a size.
             const size_t footer_len = zxc_footer_bytes(file_has_checksums);
-            // LCOV_EXCL_START
-            if (UNLIKELY(src_size < footer_len)) {
+            const size_t consumed = (size_t)(ip - src) + ZXC_BLOCK_HEADER_SIZE;
+            if (UNLIKELY(src_size < footer_len || src_size - footer_len < consumed)) {
                 if (ctx_ready) zxc_cctx_free(&ctx);
                 return ZXC_ERROR_SRC_TOO_SMALL;
             }
-            // LCOV_EXCL_STOP
             const uint8_t* const footer = src + src_size - footer_len;
             if (UNLIKELY(zxc_le64(footer) != (uint64_t)(op - op_start))) {
                 if (ctx_ready) zxc_cctx_free(&ctx);
@@ -1586,7 +1567,11 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
         if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
             if (UNLIKELY(bh.comp_size != 0)) return ZXC_ERROR_BAD_HEADER;
 
+            // See zxc_decompress_frame: the footer must lie past this EOF header.
             const size_t footer_len = zxc_footer_bytes(file_has_checksums);
+            const size_t consumed = (size_t)(ip - (const uint8_t*)src) + ZXC_BLOCK_HEADER_SIZE;
+            if (UNLIKELY(src_size < footer_len || src_size - footer_len < consumed))
+                return ZXC_ERROR_SRC_TOO_SMALL;
             const uint8_t* const footer = (const uint8_t*)src + src_size - footer_len;
             if (UNLIKELY(zxc_le64(footer) != (uint64_t)(op - op_start)))
                 return ZXC_ERROR_CORRUPT_DATA;

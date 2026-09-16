@@ -1018,9 +1018,13 @@ Decompresses `f_in` -> `f_out` using a parallel pipeline.
 ZXC_EXPORT int64_t zxc_stream_get_decompressed_size(FILE* f_in);
 ```
 
-Reads the original size from the file footer. File position is restored.
+Reads the original size from the file footer, after validating the file header
+as a decoder would and capping the size by what the archive could hold. File
+position is restored.
 
-**Returns**: original size, or negative `zxc_error_t`.
+**Returns**: original size, or negative `zxc_error_t` (the header's verdict,
+`ZXC_ERROR_SRC_TOO_SMALL`, `ZXC_ERROR_CORRUPT_DATA` for an implausible size, or
+an I/O error).
 
 ---
 
