@@ -93,12 +93,17 @@ ZXC_EXPORT int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out,
 /**
  * @brief Reads the original size from a ZXC file's footer, without decoding.
  *
- * The file position is restored afterwards.
+ * The file header is validated first, as a decoder would (magic, version,
+ * header checksum, block size), and the size is checked against what the
+ * archive could hold, so a value comes back only from a file a decoder would
+ * accept. The file position is restored afterwards.
  *
  * @param[in] f_in  Input stream, opened in "rb" mode.
  *
- * @return Original uncompressed size in bytes, or a negative @ref zxc_error_t
- *         (e.g. @ref ZXC_ERROR_BAD_MAGIC) on an invalid file or an I/O error.
+ * @return Original uncompressed size in bytes, or a negative @ref zxc_error_t:
+ *         the header's verdict (e.g. @ref ZXC_ERROR_BAD_MAGIC,
+ *         @ref ZXC_ERROR_BAD_HEADER), @ref ZXC_ERROR_SRC_TOO_SMALL,
+ *         @ref ZXC_ERROR_CORRUPT_DATA for an implausible size, or an I/O error.
  */
 ZXC_EXPORT int64_t zxc_stream_get_decompressed_size(FILE* f_in);
 

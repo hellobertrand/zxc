@@ -21,7 +21,7 @@
  *
  * Detection from end of file:
  *   1. Read file header (first 16 bytes) => block_size
- *   2. Read file footer (last 12 bytes) => total_decompressed_size
+ *   2. Read file footer (last 8 bytes) => total_decompressed_size
  *   3. Derive num_blocks = ceil(total_decomp / block_size)
  *   4. Compute seek block size, read backward to the block header
  *   5. Validate block_type == ZXC_BLOCK_SEK
@@ -173,12 +173,6 @@ static int zxc_seek_source_read(const zxc_seek_source_t* src, void* dst, const s
  * is too small or the seek table is missing / malformed.
  */
 static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
-    // Minimum: file_header(16) + eof_block(8) + seek_block_header(8)
-    //          + file_footer(12) = 44
-    const uint64_t MIN_SEEKABLE_SIZE =
-        ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
-    if (UNLIKELY(src->size < MIN_SEEKABLE_SIZE)) return NULL;
-
     // Step 1: validate file header => block_size
     uint8_t header[ZXC_FILE_HEADER_SIZE];
     if (UNLIKELY(!zxc_seek_source_read(src, header, sizeof(header), 0))) return NULL;
@@ -192,10 +186,15 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     const uint32_t block_size = (uint32_t)block_size_sz;
     if (UNLIKELY(block_size == 0)) return NULL;  // LCOV_EXCL_LINE
 
-    // Step 2: read total decompressed size from the file footer
+    // Minimum: file_header(16) + eof_block(8) + seek_block_header(8) + footer,
+    // 8 bytes or 16 with a digest: 40 or 48. Only the header says which.
+    const uint64_t footer_len = zxc_footer_bytes(file_has_chk);
+    if (UNLIKELY(src->size < ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + footer_len))
+        return NULL;
+
+    // Step 2: read the source size, the first 8 bytes of the footer.
     uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-    if (UNLIKELY(
-            !zxc_seek_source_read(src, footer, sizeof(footer), src->size - ZXC_FILE_FOOTER_SIZE)))
+    if (UNLIKELY(!zxc_seek_source_read(src, footer, sizeof(footer), src->size - footer_len)))
         return NULL;
     const uint64_t total_decomp = zxc_le64(footer);
 
@@ -213,9 +212,9 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     if (UNLIKELY(entries_total > SIZE_MAX - 2 * ZXC_BLOCK_HEADER_SIZE)) return NULL;
 
     const size_t seek_block_total = ZXC_BLOCK_HEADER_SIZE + (size_t)entries_total;
-    if (UNLIKELY((uint64_t)seek_block_total + ZXC_FILE_FOOTER_SIZE > src->size)) return NULL;
+    if (UNLIKELY((uint64_t)seek_block_total + footer_len > src->size)) return NULL;
 
-    const uint64_t seek_off = src->size - ZXC_FILE_FOOTER_SIZE - (uint64_t)seek_block_total;
+    const uint64_t seek_off = src->size - footer_len - (uint64_t)seek_block_total;
     if (UNLIKELY(seek_off < ZXC_BLOCK_HEADER_SIZE)) return NULL;
 
     // The EOF block sits immediately before the seek block, so one read covers
@@ -290,7 +289,7 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
 
         // Verify the prefix sum lands exactly on the EOF block, and that an EOF
         // block really sits there. Expected layout:
-        // [header 16][data blocks][EOF 8][SEK block][footer 12]
+        // [header 16][data blocks][EOF 8][SEK block][footer 8]
         zxc_block_header_t eof_bh;
         if (UNLIKELY(comp_acc != seek_off - ZXC_BLOCK_HEADER_SIZE ||
                      zxc_read_block_header(eof_hdr, ZXC_BLOCK_HEADER_SIZE, &eof_bh) != ZXC_OK ||
@@ -518,9 +517,9 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
         // match copies referencing dictionary bytes resolve naturally.
         uint8_t* dec_dst =
             s->dctx.dict_buffer ? s->dctx.dict_buffer + s->dict_size : s->dctx.work_buf;
-        const int dec_res =
-            zxc_decompress_chunk_wrapper(&s->dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
-        if (UNLIKELY(dec_res < 0)) return dec_res;  // LCOV_EXCL_LINE
+        const int dec_res = zxc_decompress_chunk_wrapper(&s->dctx, read_buf, (size_t)read_res,
+                                                         dec_dst, work_sz, bi);
+        if (UNLIKELY(dec_res < 0)) return dec_res;
 
         // Calculate which portion of this block's decompressed data we need
         const uint64_t blk_decomp_start = zxc_seek_decomp_offset(s->block_size, bi);
@@ -677,14 +676,12 @@ static void* zxc_seek_mt_worker(void* arg) {
 
         // Decompress: use dict bounce buffer when dictionary is active
         uint8_t* dec_dst = dict_work ? dict_work + s->dict_size : dctx.work_buf;
-        const int dec_res =
-            zxc_decompress_chunk_wrapper(&dctx, read_buf, (size_t)read_res, dec_dst, work_sz);
+        const int dec_res = zxc_decompress_chunk_wrapper(&dctx, read_buf, (size_t)read_res, dec_dst,
+                                                         work_sz, job->block_idx);
 
         if (UNLIKELY(dec_res < 0)) {
-            // LCOV_EXCL_START
             job->result = dec_res;
             break;
-            // LCOV_EXCL_STOP
         }
         if (UNLIKELY((size_t)dec_res < job->skip + job->copy_len)) {
             job->result = ZXC_ERROR_CORRUPT_DATA;

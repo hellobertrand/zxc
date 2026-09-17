@@ -23,11 +23,16 @@ uint32_t zxc_test_rand(void) {
 FILE* create_restricted_file(const char* path) {
 #ifdef _MSC_VER
     int fd = -1;
-    _sopen_s(&fd, path, _O_CREAT | _O_WRONLY | _O_TRUNC, _SH_DENYNO, _S_IREAD | _S_IWRITE);
-    return fd >= 0 ? _fdopen(fd, "w") : NULL;
+    _sopen_s(&fd, path, _O_CREAT | _O_WRONLY | _O_TRUNC | _O_BINARY, _SH_DENYNO,
+             _S_IREAD | _S_IWRITE);
+    return fd >= 0 ? _fdopen(fd, "wb") : NULL;
 #else
-    const int fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR);
-    return fd >= 0 ? fdopen(fd, "w") : NULL;
+    int flags = O_CREAT | O_WRONLY | O_TRUNC;
+#ifdef O_BINARY
+    flags |= O_BINARY;
+#endif
+    const int fd = open(path, flags, S_IRUSR | S_IWUSR);
+    return fd >= 0 ? fdopen(fd, "wb") : NULL;
 #endif
 }
 

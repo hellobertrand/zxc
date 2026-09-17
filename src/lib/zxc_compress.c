@@ -45,10 +45,10 @@
 static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int use_hash5) {
     if (use_hash5) {
         const uint64_t v5 = val & 0xFFFFFFFFFFULL;
-        return (uint32_t)((v5 * ZXC_LZ_HASH_PRIME2) >> (64 - ZXC_LZ_HASH_BITS));
+        return (uint32_t)((v5 * ZXC_HASH_XORSHIFT64) >> (64 - ZXC_LZ_HASH_BITS));
     } else {
         const uint64_t v4 = val ^ (val >> 15);
-        return ((uint32_t)v4 * ZXC_LZ_HASH_PRIME1) >> (32 - ZXC_LZ_HASH_BITS);
+        return ((uint32_t)v4 * ZXC_HASH_MULT32) >> (32 - ZXC_LZ_HASH_BITS);
     }
 }
 
@@ -2016,11 +2016,13 @@ static int zxc_encode_block_raw(const uint8_t* RESTRICT src, const size_t src_sz
  * Selects the GHI encoder at level <= 2, otherwise GLO; falls back to a RAW
  * block when the coded form would not shrink the data. When @c ctx->dict_size
  * is > 0, @p chunk is the [dict | block] concat and only the block tail counts
- * toward the expansion check. Appends the per-block checksum when enabled.
+ * toward the expansion check. Appends the checksum when enabled, seeded with
+ * @p block_index.
  */
 // cppcheck-suppress unusedFunction
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT chunk,
-                               const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
+                               const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
+                               const uint64_t block_index) {
     if (UNLIKELY(dst_cap < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
 
     const size_t dict_sz = ctx->dict_size;
@@ -2041,15 +2043,10 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
     }
 
     if (ctx->checksum_enabled) {
-        // Calculate checksum on the compressed payload (w currently excludes checksum)
-        // Header is at dst, data starts at dst + ZXC_BLOCK_HEADER_SIZE
-        if (UNLIKELY(w < ZXC_BLOCK_HEADER_SIZE || w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap))
-            return ZXC_ERROR_OVERFLOW;
+        if (UNLIKELY(w + ZXC_BLOCK_CHECKSUM_SIZE > dst_cap)) return ZXC_ERROR_OVERFLOW;
 
-        uint32_t payload_sz = (uint32_t)(w - ZXC_BLOCK_HEADER_SIZE);
-        uint32_t sum =
-            zxc_checksum(dst + ZXC_BLOCK_HEADER_SIZE, payload_sz, 0, ZXC_CHECKSUM_RAPIDHASH);
-        zxc_store_le32(dst + w, sum);
+        zxc_store_le32(dst + w,
+                       zxc_checksum(block_data, block_sz, block_index, ZXC_CHECKSUM_RAPIDHASH));
         w += ZXC_BLOCK_CHECKSUM_SIZE;
     }
 

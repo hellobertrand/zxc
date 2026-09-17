@@ -9,11 +9,11 @@
  * @file zxc_pstream.c
  * @brief Push-based, single-threaded streaming driver implementation.
  *
- * See zxc_pstream.h for the public contract.  The implementation composes
- * the public block API (@ref zxc_compress_block / @ref zxc_decompress_block)
- * with the public sans-IO header helpers (@ref zxc_write_file_header /
- * footer, @c zxc_read_*); the only internal dependency is on shared
- * constants and the global-hash combine inline, pulled from zxc_internal.h.
+ * See zxc_pstream.h for the public contract.  The implementation drives the
+ * internal block codec (zxc_compress_block_at, zxc_decompress_chunk_wrapper and
+ * their context) with the sans-IO layout helpers of zxc_internal.h: the header,
+ * footer and block-header readers and writers, the seek-table and footer
+ * sizes, the digest fold.
  *
  * Both compression and decompression are structured as resumable state
  * machines driven by caller-provided input/output buffers
@@ -109,12 +109,11 @@ typedef enum {
  * @var zxc_cstream_s::pending_pos
  *      Bytes already copied from @c pending to the caller's output buffer.
  *      Drain is complete when @c pending_pos == @c pending_len.
+ * @var zxc_cstream_s::block_index
+ *      Frame position of the next block: seeds its checksum.
  * @var zxc_cstream_s::total_in
  *      Running count of uncompressed bytes consumed; written into the file
  *      footer.
- * @var zxc_cstream_s::global_hash
- *      Rolling per-block-trailer hash; written into the file footer when
- *      checksums are enabled.
  * @var zxc_cstream_s::state
  *      Current state machine position (see @ref cstream_state_t).
  * @var zxc_cstream_s::error_code
@@ -133,8 +132,9 @@ struct zxc_cstream_s {
     size_t pending_len;
     size_t pending_pos;
 
+    uint64_t block_index;
     uint64_t total_in;
-    uint32_t global_hash;
+    uint64_t digest;
 
     cstream_state_t state;
     int error_code;
@@ -162,8 +162,7 @@ static int cs_set_error(zxc_cstream* cs, const int code) {
  * @brief Compresses one block from @p src into @c cs->pending.
  *
  * Grows @c pending to @ref zxc_compress_block_bound if needed and updates
- * bookkeeping (@c total_in, @c global_hash).  When file-level checksums are
- * enabled, folds the block trailer into the rolling @c global_hash.
+ * bookkeeping (@c block_index, @c total_in).
  * @p src is either the @c in_block accumulator (via
  * @ref cs_compress_one_block) or the caller's input buffer directly (the
  * full-block fast path in @ref zxc_cstream_compress, which skips the
@@ -187,20 +186,17 @@ static int cs_compress_block_from(zxc_cstream* cs, const uint8_t* RESTRICT src, 
         cs->pending_cap = (size_t)bound;
     }
     // LCOV_EXCL_STOP
-    const int64_t csize =
-        zxc_compress_block(cs->cctx, src, len, cs->pending, cs->pending_cap, &cs->opts);
+    const int64_t csize = zxc_compress_block_at(cs->cctx, src, len, cs->pending, cs->pending_cap,
+                                                &cs->opts, cs->block_index);
     if (UNLIKELY(csize < 0)) return (int)csize;  // LCOV_EXCL_LINE
+    cs->block_index++;
 
     cs->pending_len = (size_t)csize;
     cs->pending_pos = 0;
     cs->total_in += len;
-
-    // If checksums are on, the block trailer is the last ZXC_BLOCK_CHECKSUM_SIZE
-    // bytes of pending; fold it into the rolling global hash.
-    if (cs->opts.checksum_enabled && cs->pending_len >= ZXC_BLOCK_CHECKSUM_SIZE) {
-        const uint32_t bh = zxc_le32(cs->pending + cs->pending_len - ZXC_BLOCK_CHECKSUM_SIZE);
-        cs->global_hash = zxc_hash_combine_rotate(cs->global_hash, bh);
-    }
+    if (cs->opts.checksum_enabled && cs->pending_len >= ZXC_BLOCK_CHECKSUM_SIZE)
+        cs->digest = zxc_digest_combine(
+            cs->digest, zxc_le32(cs->pending + cs->pending_len - ZXC_BLOCK_CHECKSUM_SIZE));
     return ZXC_OK;
 }
 
@@ -363,24 +359,24 @@ static int cs_stage_eof(zxc_cstream* cs) {
 }
 
 /**
- * @brief Stages the 12-byte file footer into the @c pending buffer.
+ * @brief Stages the file footer into the @c pending buffer.
  *
- * The footer carries the total uncompressed input size and (when checksums
- * are enabled) the global rolling hash accumulated across all data blocks.
+ * The footer carries the total uncompressed input size.
  *
  * @param[in,out] cs Compression stream.
  * @return @ref ZXC_OK on success, negative @ref zxc_error_t on failure.
  */
 static int cs_stage_footer(zxc_cstream* cs) {
+    const size_t footer_len = zxc_footer_bytes(cs->opts.checksum_enabled);
     // LCOV_EXCL_START
-    if (UNLIKELY(ZXC_FILE_FOOTER_SIZE > cs->pending_cap)) {
-        uint8_t* nb = (uint8_t*)ZXC_REALLOC(cs->pending, ZXC_FILE_FOOTER_SIZE);
+    if (UNLIKELY(footer_len > cs->pending_cap)) {
+        uint8_t* nb = (uint8_t*)ZXC_REALLOC(cs->pending, footer_len);
         if (UNLIKELY(!nb)) return ZXC_ERROR_MEMORY;
         cs->pending = nb;
-        cs->pending_cap = ZXC_FILE_FOOTER_SIZE;
+        cs->pending_cap = footer_len;
     }
     // LCOV_EXCL_STOP
-    const int w = zxc_write_file_footer(cs->pending, cs->pending_cap, cs->total_in, cs->global_hash,
+    const int w = zxc_write_file_footer(cs->pending, cs->pending_cap, cs->total_in, cs->digest,
                                         cs->opts.checksum_enabled);
     if (UNLIKELY(w < 0)) return w;  // LCOV_EXCL_LINE
     cs->pending_len = (size_t)w;
@@ -593,17 +589,14 @@ int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out) {
  * @var dstream_state_t::DS_EMIT_DECODED
  *      Draining decoded bytes from @c decoded into @p out.
  * @var dstream_state_t::DS_PEEK_TAIL
- *      Just past the EOF block: read 8 bytes and peek to disambiguate
- *      between an optional SEK index block and the file footer.
+ *      Just past the EOF block: 8 bytes are either a SEK block header or the
+ *      whole footer.
  * @var dstream_state_t::DS_DRAIN_SEK_PAYLOAD
  *      The peeked 8 bytes were a SEK header; skipping its payload bytes.
- * @var dstream_state_t::DS_NEED_FOOTER_FULL
- *      Pulling the full 12-byte file footer (used after a SEK block).
- * @var dstream_state_t::DS_NEED_FOOTER_REST
- *      The 8 peeked bytes were the head of the footer; pulling the
- *      remaining 4 bytes.
+ * @var dstream_state_t::DS_NEED_FOOTER
+ *      Pulling the file footer that follows a SEK block.
  * @var dstream_state_t::DS_VALIDATE_FOOTER
- *      Validating @c total_out and the optional global hash.
+ *      Validating @c total_out.
  * @var dstream_state_t::DS_DONE
  *      Stream fully consumed and validated.
  * @var dstream_state_t::DS_ERRORED
@@ -617,8 +610,7 @@ typedef enum {
     DS_EMIT_DECODED,
     DS_PEEK_TAIL,
     DS_DRAIN_SEK_PAYLOAD,
-    DS_NEED_FOOTER_FULL,
-    DS_NEED_FOOTER_REST,
+    DS_NEED_FOOTER,
     DS_VALIDATE_FOOTER,
     DS_DONE,
     DS_ERRORED
@@ -676,12 +668,11 @@ typedef enum {
  * @var zxc_dstream_s::sek_remaining
  *      Bytes left to skip from a SEK block payload (only used in
  *      @c DS_DRAIN_SEK_PAYLOAD).
+ * @var zxc_dstream_s::block_index
+ *      Frame position of the next data block: seeds its checksum.
  * @var zxc_dstream_s::total_out
  *      Cumulative decompressed output size; cross-checked against the
  *      file footer.
- * @var zxc_dstream_s::global_hash
- *      Rolling per-block-trailer hash; cross-checked against the file
- *      footer when checksums are enabled.
  * @var zxc_dstream_s::state
  *      Current state machine position (see @ref dstream_state_t).
  * @var zxc_dstream_s::error_code
@@ -709,10 +700,11 @@ struct zxc_dstream_s {
     size_t decoded_pos;
 
     zxc_block_header_t cur_bh;
-    size_t sek_remaining;
+    uint64_t sek_remaining;
 
+    uint64_t block_index;
     uint64_t total_out;
-    uint32_t global_hash;
+    uint64_t digest;
 
     dstream_state_t state;
     int error_code;
@@ -999,19 +991,16 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             case DS_DECODE_BLOCK: {
                 const int direct = (out->size - out->pos) >= ds->decoded_cap;
                 uint8_t* const ddst = direct ? (uint8_t*)out->dst + out->pos : ds->decoded;
-                const int dsz = zxc_decompress_chunk_wrapper(
-                    &ds->inner, ds->payload, ds->payload_used, ddst, ds->decoded_cap);
+                const int dsz =
+                    zxc_decompress_chunk_wrapper(&ds->inner, ds->payload, ds->payload_used, ddst,
+                                                 ds->decoded_cap, ds->block_index);
                 if (UNLIKELY(dsz < 0)) return ds_set_error(ds, dsz);
-
-                // If file-level checksum verification is enabled, fold this
-                // block's trailer into the rolling global hash (last
-                // ZXC_BLOCK_CHECKSUM_SIZE bytes of the *raw* block).
-                if (ds->opts.checksum_enabled && ds->file_has_checksum &&
-                    ds->payload_used >= ZXC_BLOCK_CHECKSUM_SIZE) {
-                    const uint32_t bh =
-                        zxc_le32(ds->payload + ds->payload_used - ZXC_BLOCK_CHECKSUM_SIZE);
-                    ds->global_hash = zxc_hash_combine_rotate(ds->global_hash, bh);
-                }
+                ds->block_index++;
+                // Folded only when DS_VALIDATE_FOOTER will compare it.
+                if (ds->file_has_checksum && ds->opts.checksum_enabled)
+                    ds->digest = zxc_digest_combine(
+                        ds->digest,
+                        zxc_le32(ds->payload + ds->payload_used - ZXC_BLOCK_CHECKSUM_SIZE));
 
                 if (direct) {
                     out->pos += (size_t)dsz;
@@ -1043,35 +1032,38 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             case DS_PEEK_TAIL: {
                 if (!ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in))
                     return (int64_t)produced;
-                // Try to interpret as a block header (SEK).
-                zxc_block_header_t peek;
-                const int sek_rc = zxc_read_block_header(ds->scratch, ds->scratch_used, &peek);
-                if (sek_rc == ZXC_OK && peek.block_type == (uint8_t)ZXC_BLOCK_SEK) {
-                    // SEK block: skip its payload (peek.comp_size bytes).
-                    ds->sek_remaining = (size_t)peek.comp_size;
+                // A SEK block header, or the footer's first 8 bytes: see
+                // zxc_seek_tail_is_sek.
+                if (zxc_seek_tail_is_sek(ds->scratch, ds->total_out, ds->block_size,
+                                         &ds->sek_remaining)) {
                     ds->state = DS_DRAIN_SEK_PAYLOAD;
                     break;
                 }
-                // Not SEK -> these 8 bytes are the first 8 of the 12-byte footer.
-                ds->state = DS_NEED_FOOTER_REST;
-                ds->scratch_need = ZXC_FILE_FOOTER_SIZE; /* keep first 8, want 4 more */
+                // Not SEK -> the 8 bytes are the footer's head. Pull the rest if any.
+                const size_t footer_len = zxc_footer_bytes(ds->file_has_checksum);
+                if (footer_len > ZXC_BLOCK_HEADER_SIZE) {
+                    ds->scratch_need = footer_len;
+                    ds->state = DS_NEED_FOOTER;
+                } else {
+                    ds->state = DS_VALIDATE_FOOTER;
+                }
                 break;
             }
 
             case DS_DRAIN_SEK_PAYLOAD: {
                 const size_t avail = in->size - in->pos;
-                const size_t n = avail < ds->sek_remaining ? avail : ds->sek_remaining;
+                const size_t n =
+                    (uint64_t)avail < ds->sek_remaining ? avail : (size_t)ds->sek_remaining;
                 in->pos += n;
                 ds->sek_remaining -= n;
                 if (ds->sek_remaining > 0) return (int64_t)produced;
-                ds->state = DS_NEED_FOOTER_FULL;
+                ds->state = DS_NEED_FOOTER;
                 ds->scratch_used = 0;
-                ds->scratch_need = ZXC_FILE_FOOTER_SIZE;
+                ds->scratch_need = zxc_footer_bytes(ds->file_has_checksum);
                 break;
             }
 
-            case DS_NEED_FOOTER_REST:
-            case DS_NEED_FOOTER_FULL: {
+            case DS_NEED_FOOTER: {
                 if (!ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in))
                     return (int64_t)produced;
                 ds->state = DS_VALIDATE_FOOTER;
@@ -1079,14 +1071,11 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             }
 
             case DS_VALIDATE_FOOTER: {
-                const uint64_t declared = zxc_le64(ds->scratch);
-                if (UNLIKELY(declared != ds->total_out))
+                if (UNLIKELY(zxc_le64(ds->scratch) != ds->total_out))
                     return ds_set_error(ds, ZXC_ERROR_CORRUPT_DATA);
-                if (ds->opts.checksum_enabled && ds->file_has_checksum) {
-                    const uint32_t fh = zxc_le32(ds->scratch + sizeof(uint64_t));
-                    if (UNLIKELY(fh != ds->global_hash))
-                        return ds_set_error(ds, ZXC_ERROR_BAD_CHECKSUM);
-                }
+                if (ds->file_has_checksum && ds->opts.checksum_enabled &&
+                    UNLIKELY(zxc_le64(ds->scratch + ZXC_FILE_FOOTER_SIZE) != ds->digest))
+                    return ds_set_error(ds, ZXC_ERROR_BAD_CHECKSUM);
                 ds->state = DS_DONE;
                 return (int64_t)produced;
             }

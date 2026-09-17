@@ -18,10 +18,9 @@
  *   - Every block type in Sec 5: RAW, GLO and GHI (header + section descriptors,
  *     incl. the Huffman literal section), EOF (zero comp_size) and the optional
  *     SEK seek table. (Type 2 is reserved/removed.)
- *   - Optional per-block checksum over the compressed payload (Sec 7.2).
- *   - The rolling global stream hash (Sec 7.3) reconstructed from per-block
- *     checksums and matched against the footer.
- *   - The 12-byte file footer: original source size and global hash (Sec 8).
+ *   - Optional per-block checksum over the block's decoded bytes, seeded with
+ *     its position, recomputed from the regenerated input (Sec 7.2).
+ *   - The file footer: the source size then, when checksummed, the archive digest (Sec 8).
  *
  * Each file is also round-tripped: decompressed and compared byte-for-byte
  * against its deterministically regenerated input (see golden_cases.h).
@@ -36,9 +35,9 @@
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_error.h"
-/* Private header: provides zxc_hash8/16, zxc_checksum, zxc_hash_combine_rotate
- * and the little-endian load helpers used to recompute the on-disk integrity
- * fields. Header-only (static inline), so no extra linkage is required. */
+/* Private header: provides zxc_hash8/16, zxc_checksum and the little-endian
+ * load helpers used to recompute the on-disk integrity fields. Header-only
+ * (static inline), so no extra linkage is required. */
 #include "../../src/lib/zxc_internal.h"
 #include "../vector_io.h"
 #include "golden_cases.h"
@@ -200,7 +199,7 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
 #define MAX_BLOCKS 256
 
 static int validate_structure(const char* ctx, const golden_case_t* gc, const uint8_t* buf,
-                              size_t size) {
+                              size_t size, const uint8_t* input, size_t in_size) {
     /* ---- File header (Sec 3) ---- */
     CHECK(size >= ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE, "file too small (%zu)", size);
 
@@ -251,8 +250,9 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
 
     /* ---- Block stream (Sec 4, Sec 5) ---- */
     size_t off = ZXC_FILE_HEADER_SIZE;
-    uint32_t rolling = 0; /* Sec 7.3 rolling global hash */
+    const size_t bs = (size_t)1U << code;
     int data_blocks = 0;
+    uint64_t digest = 0;
     uint32_t block_phys[MAX_BLOCKS]; /* physical size of each data block incl. checksum */
 
     for (;;) {
@@ -300,6 +300,15 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
                   gc->expect_data_type, off);
         CHECK(data_blocks < MAX_BLOCKS, "too many blocks");
 
+        /* Sec 4.1: every data block holds block_size input bytes, the last one
+         * the remainder, so the walk alone says which bytes a block decodes to. */
+        const size_t raw_off = (size_t)data_blocks * bs;
+        CHECK(raw_off < in_size, "block %d past the %zu input bytes", data_blocks, in_size);
+        const size_t raw_len = in_size - raw_off < bs ? in_size - raw_off : bs;
+        EMIT("raw_range:        [%zu, %zu)\n", raw_off, raw_off + raw_len);
+        if (type == GC_BLOCK_RAW)
+            CHECK(comp == raw_len, "RAW comp_size %u != %zu input bytes", comp, raw_len);
+
         const uint8_t* payload = bh + ZXC_BLOCK_HEADER_SIZE;
         CHECK(off + ZXC_BLOCK_HEADER_SIZE + comp <= size, "payload overruns file at %zu", off);
 
@@ -309,22 +318,23 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
             if (!validate_lz_payload(ctx, payload, comp, 0, -1)) return 0;
         }
 
-        /* The fields above describe the payload; this covers its bytes, so a
-         * rewrite leaving comp_size and the counts alone still shows up. */
-        const uint32_t payload_hash = zxc_checksum(payload, comp, 0, ZXC_CHECKSUM_RAPIDHASH);
-        EMIT("payload_hash:     0x%08X\n", payload_hash);
+        /* Fingerprint of the payload bytes, for the dump: a rewrite leaving
+         * comp_size and the counts alone still shows up. */
+        EMIT("payload_hash:     0x%08X\n", zxc_checksum(payload, comp, 0, ZXC_CHECKSUM_RAPIDHASH));
 
         size_t phys = ZXC_BLOCK_HEADER_SIZE + comp;
         off += phys;
 
         if (has_checksum) {
-            /* Sec 7.2 per-block checksum over the compressed payload only. */
+            /* Sec 7.2: over the block's decoded bytes, seeded with its position. */
             CHECK(off + ZXC_BLOCK_CHECKSUM_SIZE <= size, "missing block checksum at %zu", off);
-            uint32_t stored = zxc_le32(buf + off);
-            CHECK(stored == payload_hash, "block checksum mismatch at %zu: got 0x%08X calc 0x%08X",
-                  off, stored, payload_hash);
+            const uint32_t stored = zxc_le32(buf + off);
+            const uint32_t want = zxc_checksum(input + raw_off, raw_len, (uint64_t)data_blocks,
+                                               ZXC_CHECKSUM_RAPIDHASH);
+            CHECK(stored == want, "block checksum mismatch at %zu: got 0x%08X calc 0x%08X", off,
+                  stored, want);
             EMIT("block_checksum:   0x%08X\n", stored);
-            rolling = zxc_hash_combine_rotate(rolling, stored);
+            digest = zxc_digest_combine(digest, stored);
             off += ZXC_BLOCK_CHECKSUM_SIZE;
             phys += ZXC_BLOCK_CHECKSUM_SIZE;
         }
@@ -335,6 +345,8 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
 
     CHECK(data_blocks >= gc->min_data_blocks, "got %d data blocks, expected >= %d", data_blocks,
           gc->min_data_blocks);
+    CHECK((size_t)data_blocks == (in_size + bs - 1) / bs, "%d data blocks for %zu input bytes",
+          data_blocks, in_size);
 
     /* ---- Optional SEK block (Sec 5.5), located after EOF, before footer ---- */
     int seek_present = 0;
@@ -369,37 +381,35 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     CHECK(seek_present == gc->expect_seek, "SEK present=%d, expected %d", seek_present,
           gc->expect_seek);
 
-    /* ---- File footer (Sec 8): the trailing 12 bytes, with nothing after it ---- */
-    CHECK(off + ZXC_FILE_FOOTER_SIZE == size, "footer not at end (off %zu, size %zu)", off, size);
-    const uint8_t* footer = buf + size - ZXC_FILE_FOOTER_SIZE;
+    /* ---- File footer (Sec 8): the size first, then the digest when checksummed ---- */
+    const size_t footer_len =
+        (size_t)ZXC_FILE_FOOTER_SIZE + (has_checksum ? (size_t)ZXC_FILE_DIGEST_SIZE : 0);
+    CHECK(off + footer_len == size, "footer not at end (off %zu, size %zu)", off, size);
+    const uint8_t* footer = buf + size - footer_len;
     uint64_t src_size = zxc_le64(footer);
-    uint32_t global_hash = zxc_le32(footer + 8);
 
     EMIT("\n[footer]\n");
-    emit_hex("raw:", footer, ZXC_FILE_FOOTER_SIZE);
+    emit_hex("raw:", footer, footer_len);
+    if (has_checksum) {
+        const uint64_t stored_digest = zxc_le64(footer + ZXC_FILE_FOOTER_SIZE);
+        CHECK(stored_digest == digest, "footer digest 0x%016llX != recomputed 0x%016llX",
+              (unsigned long long)stored_digest, (unsigned long long)digest);
+        EMIT("digest:           0x%016llX\n", (unsigned long long)stored_digest);
+    }
     EMIT("src_size:         %llu\n", (unsigned long long)src_size);
-    EMIT("global_hash:      0x%08X\n", global_hash);
+    CHECK(src_size == in_size, "footer source size %llu != %zu input bytes",
+          (unsigned long long)src_size, in_size);
 
     uint64_t reported = zxc_get_decompressed_size(buf, size);
     CHECK(reported == src_size, "decoded-size query %llu != footer source size %llu",
           (unsigned long long)reported, (unsigned long long)src_size);
-
-    if (has_checksum)
-        CHECK(global_hash == rolling, "footer global hash 0x%08X != rolling 0x%08X", global_hash,
-              rolling);
-    else
-        CHECK(global_hash == 0, "footer global hash must be 0 when checksums disabled (0x%08X)",
-              global_hash);
 
     return 1;
 }
 
 /* Decompress and compare against the freshly regenerated deterministic input. */
 static int validate_roundtrip(const char* ctx, const golden_case_t* gc, const uint8_t* buf,
-                              size_t size) {
-    uint8_t* input = NULL;
-    size_t in_size = gc->make_input(&input);
-
+                              size_t size, const uint8_t* input, size_t in_size) {
     uint64_t dec_sz = zxc_get_decompressed_size(buf, size);
     CHECK(dec_sz == in_size, "decoded size %llu != original %zu", (unsigned long long)dec_sz,
           in_size);
@@ -424,22 +434,18 @@ static int validate_roundtrip(const char* ctx, const golden_case_t* gc, const ui
         free(out);
     }
     g_checks++;
-    free(input);
     return ok;
 }
 
 /* golden.sha256 proves the bytes have not moved; only this proves the encoder
  * still produces them. 11_glo_rle drifted four commits unnoticed without it. */
 static int validate_recipe(const char* ctx, const golden_case_t* gc, const uint8_t* have,
-                           size_t have_size) {
+                           size_t have_size, const uint8_t* input, size_t in_size) {
     g_checks++;
-    uint8_t* input = NULL;
-    const size_t in_size = gc->make_input(&input);
     const size_t cap = (size_t)zxc_compress_bound(in_size) + 4096;
     uint8_t* out = (uint8_t*)malloc(cap);
     if (!out) {
         fprintf(stderr, "    FAIL [%s]: out of memory\n", ctx);
-        free(input);
         return 0;
     }
 
@@ -459,7 +465,6 @@ static int validate_recipe(const char* ctx, const golden_case_t* gc, const uint8
         ok = 1;
     }
     free(out);
-    free(input);
     return ok;
 }
 
@@ -554,12 +559,24 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        /* The regenerated input feeds all three checks: the recipe first, so a
+         * drifted generator is reported as such and not as a checksum mismatch. */
+        uint8_t* input = NULL;
+        const size_t in_size = gc->make_input(&input);
+        if (in_size > 0 && !input) {
+            fprintf(stderr, "  FAIL [%s]: cannot regenerate the input\n", ctx);
+            failed++;
+            free(buf);
+            continue;
+        }
+
         dump_reset();
         EMIT("file:             %s\n", gc->name);
 
         g_checks = 0;
-        int ok = validate_structure(ctx, gc, buf, size) && validate_roundtrip(ctx, gc, buf, size) &&
-                 validate_recipe(ctx, gc, buf, size);
+        int ok = validate_recipe(ctx, gc, buf, size, input, in_size) &&
+                 validate_structure(ctx, gc, buf, size, input, in_size) &&
+                 validate_roundtrip(ctx, gc, buf, size, input, in_size);
 
         if (ok) {
             char dump_path[1024];
@@ -572,6 +589,7 @@ int main(int argc, char** argv) {
         else
             failed++;
 
+        free(input);
         free(buf);
     }
 
